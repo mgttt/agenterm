@@ -13,6 +13,7 @@ focus
 kill-server
 kill-session
 kill-window (killw)
+list-tab-tree
 list-commands (lscm)
 list-panes (lsp)
 list-sessions (ls)
@@ -27,21 +28,26 @@ rename-session (rename)
 rename-window (renamew)
 screenshot
 screenshot-pane (screenshot-tab)
+save-workspace
 select-window (selectw)
 send-keys (send)
 send-composer
 send-mouse
 set-setting
 set-composer
+set-tab-parent
 set-tab-note
 show-composer
+show-tab-parent
 show-tab-note
 show-options (show)
+shutdown
 start-server
 ui-action
 ui-snapshot
 wait-pane (expect-pane)
-wait-ui";
+wait-ui
+workspace-info";
 
 pub(crate) fn option_value<'a>(args: &'a [String], option: &str) -> Option<&'a str> {
     args.iter()
@@ -65,7 +71,7 @@ pub(crate) fn parse_new_command(args: &[String]) -> (Option<String>, bool, Vec<S
                 position += 1;
             }
             "-A" | "-P" | "-E" => position += 1,
-            "-s" | "-t" | "-c" | "-F" => position += 2,
+            "-s" | "-t" | "-c" | "-F" | "--parent" => position += 2,
             "--" => {
                 position += 1;
                 break;
@@ -182,6 +188,8 @@ mod tests {
             "-d",
             "-n",
             "build",
+            "--parent",
+            "@1",
             "--",
             "cmd.exe",
             "/k",

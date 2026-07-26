@@ -25,12 +25,30 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [ ] sustained high-throughput and long-output performance qualification
   - Human workspace
     - [x] vertical tabs on the left with stable ID and numeric index
-    - [x] line 1: program plus terminal-controlled TITLE
-    - [x] line 2: independent user note
+    - [x] tree starts at the top without a redundant logo/header strip
+    - [x] tabs form a visible parent/child tree for agent and program teams
+    - [x] tree order is parent-first with indentation and branch connectors
+    - [x] closing a parent promotes its children without closing their processes
+    - [ ] collapse/expand, drag/drop reparenting, and team-level actions
+    - [x] line 1: user-defined role/name plus the running program
+    - [x] line 2: user note, with terminal-controlled TITLE as fallback
     - [x] explicit confirmation before closing a live process
     - [x] dead tabs close only by explicit human or CLI action
     - [x] per-tab external composer with independent draft and Send action
+    - [x] `Settings` and `New` actions grouped below the tree
     - [x] settings UI for terminal font family and size
+    - Persistent workspace
+      - [x] normal application close preserves the tab tree and active tab
+      - [x] names, notes, composer drafts, and original commands are restored
+      - [x] restored commands start as new processes; no false process continuity
+      - [x] `kill-server` intentionally destroys the saved session
+      - [ ] optional terminal screen-history snapshot
+    - Status bar
+      - [x] full-window bottom status surface, independent of the active terminal
+      - [x] semantic bounds exposed through `ui-snapshot`
+      - [ ] built-in CPU, disk, clock, active-agent, and token segments
+      - [ ] CLI-configurable segment layout and refresh policy
+      - [ ] dynamic script/provider segments with timeout and failure isolation
     - [x] embedded AgenTerm icon
     - [ ] configurable shell, colors, working directory, and startup tabs
   - Agent control plane
@@ -56,7 +74,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - Shared grammar
       - target: `-t @id`, `-t %id`, `-t index`, or `-t exact-name`
       - format: `-F FORMAT`; supports `#S`, `#I`, `#W`, `#P` and
-        `#{session_name}`, `#{window_*}`, `#{pane_*}`, `#{terminal_title}`
+        `#{session_name}`, `#{window_*}`, `#{pane_*}`, `#{terminal_title}`,
+        and `#{tab_parent_id}`; `list-tab-tree` also supports `#{tab_depth}`
+        and `#{tab_has_children}`
       - stable IDs are preferred; numeric indexes may change after closing tabs
     - tmux/RMUX-aligned commands
       - Session/server
@@ -66,7 +86,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
         - `rename-session|rename name`
         - `kill-session`, `kill-server`
       - Windows mapped to AgenTerm tabs
-        - `new-window|neww [-d] [-n name] [command [args...]]`
+        - `new-window|neww [-d] [-n name] [--parent target]
+          [command [args...]]`
         - `list-windows|lsw [-F format]`
         - `select-window|selectw -t target`
         - `next-window|next`, `previous-window|prev`
@@ -80,6 +101,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
         - `show-options|show`, `list-commands|lscm`
         - [ ] `split-window|splitw` returns an explicit unsupported error
     - AgenTerm extensions
+      - Team tree
+        - `list-tab-tree [-F format]`
+        - `set-tab-parent -t child --parent parent|root`
+        - `show-tab-parent [-t target]`
+        - `ui-action new-child [-t parent]`
+        - parent cycles fail explicitly
+        - closing a parent promotes direct children to its parent
       - State and deterministic waits
         - `active-window|active-tab [-F format]`
         - `inspect|pane-snapshot [-t target]`
@@ -88,6 +116,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
         - `wait-pane|expect-pane [-t target] [--contains text|--dead]
           [--timeout-ms ms]`
         - `ui-snapshot`, `protocol-info`
+        - `workspace-info`, `save-workspace`, `shutdown`
         - `wait-ui [--active @id] [--focus surface] [-t target
           --tab-state running|dead] [--timeout-ms ms]`
       - Composer and tab metadata
@@ -97,7 +126,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
         - `set-tab-note [-t target] text`, `show-tab-note [-t target]`
       - Semantic UI control
         - `focus terminal|composer|sidebar [-t target]`
-        - `ui-action new-tab|select-tab|close-tab|confirm|cancel|
+        - `ui-action new-tab|new-child|select-tab|close-tab|confirm|cancel|
           composer-send|open-settings [-t target]`
       - Visual and terminal diagnostics
         - `screenshot [-o path.png]`
@@ -135,6 +164,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 ## Non-negotiable invariants
 
 - Exiting a child process does not remove its tab.
+- Normal application restart preserves workspace structure and metadata while
+  honestly restarting each PTY process.
 - A live tab is not destroyed without an explicit close and confirmation.
 - Tab IDs remain stable for the lifetime of the tab; indexes may change.
 - Agent-facing state is machine-readable and actions can be verified without

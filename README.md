@@ -6,10 +6,15 @@ per-tab external composer, and a tmux/RMUX-style command line.
 
 ## Current highlights
 
-- Native Win32/GDI UI with tabs on the left.
+- Native Win32/GDI UI with hierarchical team tabs on the left.
+- Compact tree-first sidebar with adjacent `Settings` and `New` actions.
+- Full-width bottom status surface ready for metrics and agent context providers.
 - Branded Windows icon and a persistent terminal font/size settings panel.
 - `cmd.exe` is the default shell.
 - Two-line tabs separate program/terminal TITLE from a user-maintained note.
+- Tabs can be nested as agent/program teams without coupling process lifetimes.
+- Normal app restarts restore the tab tree, names, notes, drafts, commands, and
+  active tab; PTY commands restart as new processes.
 - Exited processes leave a `[dead]` tab until the user explicitly closes it.
 - Every tab owns a composer text box and Send button.
 - Local CLI can create, select, rename, inspect, capture, and drive tabs.

@@ -46,6 +46,8 @@ mod commands;
 mod protocol;
 mod rmux_status;
 mod settings;
+mod tab_tree;
+mod workspace;
 
 use commands::{
     SUPPORTED_COMMANDS, last_positional, option_value, parse_new_command, positional_values,
@@ -54,14 +56,18 @@ use commands::{
 use protocol::{IpcRequest, IpcResponse};
 use rmux_status::parse_status_windows;
 use settings::{AppConfig, config_path, load_config, save_config};
+use tab_tree::{TabTreeNode, TabTreeRow, tree_rows, would_create_cycle};
+use workspace::{SavedTab, SavedWorkspace, load_workspace, save_workspace, workspace_path};
 
 const APP_NAME: &str = "AgenTerm";
+const WINDOW_TITLE: &str = concat!("AgenTerm-", env!("CARGO_PKG_VERSION"));
 const INITIAL_ROWS: u16 = 30;
 const INITIAL_COLS: u16 = 100;
 const SCROLLBACK_LINES: usize = 10_000;
 const SIDEBAR_WIDTH: i32 = 210;
 const COMPOSER_HEIGHT: i32 = 78;
-const TAB_TOP: i32 = 62;
+const STATUS_BAR_HEIGHT: i32 = 26;
+const TAB_TOP: i32 = 8;
 const TAB_HEIGHT: i32 = 52;
 const BUTTON_ID: usize = 1001;
 const EDIT_ID: usize = 1002;
@@ -69,6 +75,7 @@ const SETTINGS_BUTTON_ID: usize = 1003;
 const SETTINGS_FONT_ID: usize = 1004;
 const SETTINGS_SIZE_ID: usize = 1005;
 const SETTINGS_APPLY_ID: usize = 1006;
+const NEW_BUTTON_ID: usize = 1007;
 const TIMER_ID: usize = 1;
 const WM_APP_WAKE: u32 = WM_APP + 1;
 const IPC_TIMEOUT: Duration = Duration::from_secs(5);
@@ -85,6 +92,7 @@ const COLOR_ORANGE: COLORREF = rgb(245, 190, 100);
 const COLOR_RED: COLORREF = rgb(240, 100, 95);
 const COLOR_BLUE: COLORREF = rgb(100, 155, 235);
 const COLOR_MODAL: COLORREF = rgb(38, 43, 54);
+const COLOR_STATUS: COLORREF = rgb(19, 22, 28);
 
 const fn rgb(red: u8, green: u8, blue: u8) -> COLORREF {
     red as u32 | ((green as u32) << 8) | ((blue as u32) << 16)
@@ -143,7 +151,7 @@ fn run_gui() -> Result<()> {
     }
 
     let class_name = wide("AgenTermWindowClass");
-    let title = wide(APP_NAME);
+    let title = wide(WINDOW_TITLE);
     let mut window_class: WNDCLASSW = unsafe { mem::zeroed() };
     window_class.style = CS_HREDRAW | CS_VREDRAW;
     window_class.lpfnWndProc = Some(window_proc);
@@ -232,6 +240,22 @@ fn run_gui() -> Result<()> {
             ptr::null(),
         )
     };
+    let new_button = unsafe {
+        CreateWindowExW(
+            0,
+            wide("BUTTON").as_ptr(),
+            wide("New").as_ptr(),
+            WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+            0,
+            0,
+            82,
+            30,
+            window,
+            NEW_BUTTON_ID as *mut c_void,
+            instance,
+            ptr::null(),
+        )
+    };
     let settings_font = create_hidden_edit(window, instance, SETTINGS_FONT_ID);
     let settings_size = create_hidden_edit(window, instance, SETTINGS_SIZE_ID);
     let settings_apply = unsafe {
@@ -253,6 +277,7 @@ fn run_gui() -> Result<()> {
     if edit.is_null()
         || send_button.is_null()
         || settings_button.is_null()
+        || new_button.is_null()
         || settings_font.is_null()
         || settings_size.is_null()
         || settings_apply.is_null()
@@ -263,12 +288,15 @@ fn run_gui() -> Result<()> {
 
     let state = Box::new(AppState::new(
         window,
-        edit,
-        send_button,
-        settings_button,
-        settings_font,
-        settings_size,
-        settings_apply,
+        NativeControls {
+            edit,
+            send_button,
+            settings_button,
+            new_button,
+            settings_font,
+            settings_size,
+            settings_apply,
+        },
     )?);
     unsafe {
         SetWindowLongPtrW(window, GWLP_USERDATA, Box::into_raw(state) as isize);
@@ -388,6 +416,14 @@ unsafe extern "system" fn window_proc(
                     state.open_settings();
                 }
                 0
+            } else if (wparam & 0xffff) == NEW_BUTTON_ID {
+                if let Some(state) = state_mut(window) {
+                    if let Err(error) = state.create_tab(None, Vec::new(), true) {
+                        state.last_error = Some(format!("{error:#}"));
+                    }
+                    unsafe { InvalidateRect(window, ptr::null(), 0) };
+                }
+                0
             } else if (wparam & 0xffff) == SETTINGS_APPLY_ID {
                 if let Some(state) = state_mut(window) {
                     state.apply_settings_from_controls();
@@ -412,6 +448,11 @@ unsafe extern "system" fn window_proc(
         WM_SETFOCUS => 0,
         WM_ERASEBKGND => 1,
         WM_CLOSE => {
+            if let Some(state) = state_mut(window)
+                && let Err(error) = state.persist_workspace()
+            {
+                state.last_error = Some(format!("workspace save failed: {error:#}"));
+            }
             unsafe { DestroyWindow(window) };
             0
         }
@@ -458,9 +499,11 @@ impl vt100::Callbacks for TerminalCallbacks {
 struct TerminalTab {
     id: u64,
     index: u32,
+    parent_id: Option<u64>,
     title: String,
     note: String,
     command_name: String,
+    command_line: Vec<String>,
     process_id: Option<u32>,
     composer: String,
     parser: vt100::Parser<TerminalCallbacks>,
@@ -479,6 +522,7 @@ impl TerminalTab {
     fn spawn(
         id: u64,
         index: u32,
+        parent_id: Option<u64>,
         title: Option<String>,
         command_line: Vec<String>,
         window: HWND,
@@ -487,6 +531,11 @@ impl TerminalTab {
         let program = command_line.first().cloned().unwrap_or_else(|| {
             env::var("COMSPEC").unwrap_or_else(|_| r"C:\Windows\System32\cmd.exe".to_owned())
         });
+        let persisted_command_line = if command_line.is_empty() {
+            vec![program.clone()]
+        } else {
+            command_line.clone()
+        };
         let mut command = ChildCommand::new(&program)
             .size(initial_size)
             .env("TERM", "xterm-256color")
@@ -563,8 +612,10 @@ impl TerminalTab {
         Ok(Self {
             id,
             index,
+            parent_id,
             title: title.unwrap_or_else(|| command_name.clone()),
             command_name,
+            command_line: persisted_command_line,
             process_id,
             composer: String::new(),
             note: String::new(),
@@ -722,11 +773,22 @@ impl Drop for TerminalTab {
     }
 }
 
+struct NativeControls {
+    edit: HWND,
+    send_button: HWND,
+    settings_button: HWND,
+    new_button: HWND,
+    settings_font: HWND,
+    settings_size: HWND,
+    settings_apply: HWND,
+}
+
 struct AppState {
     window: HWND,
     edit: HWND,
     send_button: HWND,
     settings_button: HWND,
+    new_button: HWND,
     settings_font: HWND,
     settings_size: HWND,
     settings_apply: HWND,
@@ -738,6 +800,7 @@ struct AppState {
     ipc_receiver: Receiver<IpcEnvelope>,
     startup_tab_receiver: Receiver<std::result::Result<TerminalTab, String>>,
     startup_tab_pending: bool,
+    startup_tabs_remaining: usize,
     last_error: Option<String>,
     close_requested: bool,
     pending_close: Option<u64>,
@@ -751,36 +814,54 @@ struct AppState {
 }
 
 impl AppState {
-    fn new(
-        window: HWND,
-        edit: HWND,
-        send_button: HWND,
-        settings_button: HWND,
-        settings_font: HWND,
-        settings_size: HWND,
-        settings_apply: HWND,
-    ) -> Result<Self> {
+    fn new(window: HWND, controls: NativeControls) -> Result<Self> {
         let ipc_receiver = start_ipc_server(window)?;
         let (startup_tab_sender, startup_tab_receiver) = mpsc::channel();
         let config = load_config();
+        let restored = load_workspace();
+        let (session_name, active_id, saved_tabs) = if let Some(workspace) = restored {
+            (
+                if workspace.session_name.is_empty() {
+                    "agenterm".to_owned()
+                } else {
+                    workspace.session_name
+                },
+                workspace.active_id,
+                workspace.tabs,
+            )
+        } else {
+            (
+                "agenterm".to_owned(),
+                Some(1),
+                vec![SavedTab {
+                    id: 1,
+                    index: 0,
+                    ..SavedTab::default()
+                }],
+            )
+        };
+        let next_id = saved_tabs.iter().map(|tab| tab.id).max().unwrap_or(0) + 1;
+        let startup_tabs_remaining = saved_tabs.len();
         let (terminal_font, terminal_font_owned, resolved_font_family) =
             create_terminal_font(window, &config);
         let state = Self {
             window,
-            edit,
-            send_button,
-            settings_button,
-            settings_font,
-            settings_size,
-            settings_apply,
+            edit: controls.edit,
+            send_button: controls.send_button,
+            settings_button: controls.settings_button,
+            new_button: controls.new_button,
+            settings_font: controls.settings_font,
+            settings_size: controls.settings_size,
+            settings_apply: controls.settings_apply,
             tabs: Vec::new(),
-            active: None,
-            next_id: 2,
-            session_name: "agenterm".to_owned(),
+            active: active_id,
+            next_id,
+            session_name,
             started_at: SystemTime::now(),
             ipc_receiver,
             startup_tab_receiver,
-            startup_tab_pending: true,
+            startup_tab_pending: startup_tabs_remaining > 0,
+            startup_tabs_remaining,
             last_error: None,
             close_requested: false,
             pending_close: None,
@@ -795,19 +876,29 @@ impl AppState {
 
         let wake_window = window as isize;
         thread::spawn(move || {
-            let tab = TerminalTab::spawn(
-                1,
-                0,
-                None,
-                Vec::new(),
-                wake_window as HWND,
-                TerminalSize {
-                    rows: INITIAL_ROWS,
-                    cols: INITIAL_COLS,
-                },
-            )
-            .map_err(|error| format!("{error:#}"));
-            if startup_tab_sender.send(tab).is_ok() {
+            for saved in saved_tabs {
+                let title = (!saved.title.is_empty()).then(|| saved.title.clone());
+                let tab = TerminalTab::spawn(
+                    saved.id,
+                    saved.index,
+                    saved.parent_id,
+                    title,
+                    saved.command_line,
+                    wake_window as HWND,
+                    TerminalSize {
+                        rows: INITIAL_ROWS,
+                        cols: INITIAL_COLS,
+                    },
+                )
+                .map(|mut tab| {
+                    tab.note = saved.note;
+                    tab.composer = saved.composer;
+                    tab
+                })
+                .map_err(|error| format!("@{}: {error:#}", saved.id));
+                if startup_tab_sender.send(tab).is_err() {
+                    break;
+                }
                 unsafe {
                     PostMessageW(wake_window as HWND, WM_APP_WAKE, 0, 0);
                 }
@@ -822,6 +913,47 @@ impl AppState {
         command: Vec<String>,
         select: bool,
     ) -> Result<u32> {
+        self.create_tab_with_parent(title, command, select, None)
+    }
+
+    fn saved_workspace(&self) -> SavedWorkspace {
+        SavedWorkspace {
+            version: 1,
+            session_name: self.session_name.clone(),
+            active_id: self.active,
+            tabs: self
+                .tabs
+                .iter()
+                .map(|tab| SavedTab {
+                    id: tab.id,
+                    index: tab.index,
+                    parent_id: tab.parent_id,
+                    title: tab.title.clone(),
+                    note: tab.note.clone(),
+                    composer: tab.composer.clone(),
+                    command_line: tab.command_line.clone(),
+                })
+                .collect(),
+        }
+    }
+
+    fn persist_workspace(&mut self) -> Result<()> {
+        self.save_active_composer();
+        save_workspace(&self.saved_workspace())
+    }
+
+    fn create_tab_with_parent(
+        &mut self,
+        title: Option<String>,
+        command: Vec<String>,
+        select: bool,
+        parent_id: Option<u64>,
+    ) -> Result<u32> {
+        if let Some(parent_id) = parent_id
+            && !self.tabs.iter().any(|tab| tab.id == parent_id)
+        {
+            anyhow::bail!("can't find parent tab: @{parent_id}");
+        }
         self.save_active_composer();
         let id = self.next_id;
         self.next_id += 1;
@@ -840,6 +972,7 @@ impl AppState {
         let tab = TerminalTab::spawn(
             id,
             index,
+            parent_id,
             title,
             command,
             self.window,
@@ -852,6 +985,50 @@ impl AppState {
             self.load_active_composer();
         }
         Ok(index)
+    }
+
+    fn tree_nodes(&self) -> Vec<TabTreeNode> {
+        self.tabs
+            .iter()
+            .map(|tab| TabTreeNode {
+                id: tab.id,
+                parent_id: tab.parent_id,
+                sort_key: tab.index,
+            })
+            .collect()
+    }
+
+    fn tree_rows(&self) -> Vec<TabTreeRow> {
+        tree_rows(&self.tree_nodes())
+    }
+
+    fn tree_row_position(&self, row: usize) -> Option<usize> {
+        let id = self.tree_rows().get(row)?.id;
+        self.tabs.iter().position(|tab| tab.id == id)
+    }
+
+    fn tab_depth(&self, id: u64) -> usize {
+        self.tree_rows()
+            .iter()
+            .find(|row| row.id == id)
+            .map(|row| row.depth)
+            .unwrap_or(0)
+    }
+
+    fn set_tab_parent(&mut self, child_id: u64, parent_id: Option<u64>) -> Result<()> {
+        let Some(child_position) = self.tabs.iter().position(|tab| tab.id == child_id) else {
+            anyhow::bail!("can't find child tab: @{child_id}");
+        };
+        if let Some(parent_id) = parent_id {
+            if !self.tabs.iter().any(|tab| tab.id == parent_id) {
+                anyhow::bail!("can't find parent tab: @{parent_id}");
+            }
+            if would_create_cycle(&self.tree_nodes(), child_id, parent_id) {
+                anyhow::bail!("moving @{child_id} under @{parent_id} would create a cycle");
+            }
+        }
+        self.tabs[child_position].parent_id = parent_id;
+        Ok(())
     }
 
     fn active_position(&self) -> Option<usize> {
@@ -880,11 +1057,27 @@ impl AppState {
         self.tabs.iter().position(|tab| tab.title == target)
     }
 
+    fn parent_id_from_target(&self, target: &str) -> Result<Option<u64>> {
+        if matches!(target, "root" | "none" | "-") {
+            return Ok(None);
+        }
+        let Some(position) = self.target_position(Some(target)) else {
+            anyhow::bail!("can't find parent tab: {target}");
+        };
+        Ok(Some(self.tabs[position].id))
+    }
+
     fn close_tab(&mut self, id: u64) {
         self.save_active_composer();
         let Some(position) = self.tabs.iter().position(|tab| tab.id == id) else {
             return;
         };
+        let parent_id = self.tabs[position].parent_id;
+        for tab in &mut self.tabs {
+            if tab.parent_id == Some(id) {
+                tab.parent_id = parent_id;
+            }
+        }
         self.tabs[position].close_process();
         self.tabs.remove(position);
         if self.active == Some(id) {
@@ -929,30 +1122,45 @@ impl AppState {
     fn tick(&mut self) -> bool {
         let mut changed = false;
         if self.startup_tab_pending {
-            match self.startup_tab_receiver.try_recv() {
-                Ok(Ok(tab)) => {
-                    let id = tab.id;
-                    self.tabs.push(tab);
-                    self.tabs.sort_by_key(|tab| tab.index);
-                    if self.active.is_none() {
-                        self.active = Some(id);
-                        self.load_active_composer();
+            loop {
+                match self.startup_tab_receiver.try_recv() {
+                    Ok(Ok(tab)) => {
+                        let id = tab.id;
+                        self.tabs.push(tab);
+                        self.tabs.sort_by_key(|tab| tab.index);
+                        if self.active.is_none() {
+                            self.active = Some(id);
+                        }
+                        if self.active == Some(id) {
+                            self.load_active_composer();
+                        }
+                        self.startup_tabs_remaining = self.startup_tabs_remaining.saturating_sub(1);
+                        changed = true;
                     }
-                    self.startup_tab_pending = false;
-                    changed = true;
+                    Ok(Err(error)) => {
+                        self.startup_tabs_remaining = self.startup_tabs_remaining.saturating_sub(1);
+                        self.last_error = Some(format!("restored terminal failed: {error}"));
+                        changed = true;
+                    }
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        if self.startup_tabs_remaining > 0 {
+                            self.last_error =
+                                Some("workspace restore worker stopped unexpectedly".to_owned());
+                            self.startup_tabs_remaining = 0;
+                            changed = true;
+                        }
+                        break;
+                    }
+                    Err(mpsc::TryRecvError::Empty) => break,
                 }
-                Ok(Err(error)) => {
-                    self.startup_tab_pending = false;
-                    self.last_error = Some(format!("initial terminal failed: {error}"));
-                    changed = true;
-                }
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    self.startup_tab_pending = false;
-                    self.last_error =
-                        Some("initial terminal worker stopped unexpectedly".to_owned());
-                    changed = true;
-                }
-                Err(mpsc::TryRecvError::Empty) => {}
+            }
+            self.startup_tab_pending = self.startup_tabs_remaining > 0;
+            if !self.startup_tab_pending
+                && self.active_position().is_none()
+                && let Some(tab) = self.tabs.first()
+            {
+                self.active = Some(tab.id);
+                self.load_active_composer();
             }
         }
         for tab in &mut self.tabs {
@@ -973,21 +1181,30 @@ impl AppState {
     fn layout(&self) {
         let mut client: RECT = unsafe { mem::zeroed() };
         unsafe { GetClientRect(self.window, &mut client) };
+        let content_bottom = (client.bottom - STATUS_BAR_HEIGHT).max(0);
         let content_width = (client.right - SIDEBAR_WIDTH).max(180);
         let edit_width = (content_width - 104).max(80);
         unsafe {
             MoveWindow(
                 self.settings_button,
                 12,
-                (client.bottom - 72).max(0),
+                (content_bottom - 42).max(0),
                 92,
+                30,
+                1,
+            );
+            MoveWindow(
+                self.new_button,
+                112,
+                (content_bottom - 42).max(0),
+                82,
                 30,
                 1,
             );
             MoveWindow(
                 self.edit,
                 SIDEBAR_WIDTH + 10,
-                (client.bottom - COMPOSER_HEIGHT + 30).max(0),
+                (content_bottom - COMPOSER_HEIGHT + 30).max(0),
                 edit_width,
                 COMPOSER_HEIGHT - 40,
                 1,
@@ -995,13 +1212,13 @@ impl AppState {
             MoveWindow(
                 self.send_button,
                 SIDEBAR_WIDTH + 20 + edit_width,
-                (client.bottom - COMPOSER_HEIGHT + 32).max(0),
+                (content_bottom - COMPOSER_HEIGHT + 32).max(0),
                 74,
                 34,
                 1,
             );
             let settings_left = SIDEBAR_WIDTH + (content_width - 520) / 2;
-            let settings_top = (client.bottom - 260) / 2;
+            let settings_top = (content_bottom - 260) / 2;
             MoveWindow(
                 self.settings_font,
                 settings_left + 34,
@@ -1113,7 +1330,7 @@ impl AppState {
             let mut client: RECT = unsafe { mem::zeroed() };
             unsafe { GetClientRect(self.window, &mut client) };
             let modal_left = SIDEBAR_WIDTH + (client.right - SIDEBAR_WIDTH - 460) / 2;
-            let modal_top = (client.bottom - 190) / 2;
+            let modal_top = (client.bottom - STATUS_BAR_HEIGHT - 190) / 2;
             if y >= modal_top + 125 && y <= modal_top + 163 {
                 if x >= modal_left + 238 && x <= modal_left + 432 {
                     self.finish_close_confirmation(true);
@@ -1134,20 +1351,13 @@ impl AppState {
             }
             return;
         }
-        if (12..=46).contains(&y) && x >= SIDEBAR_WIDTH - 48 {
-            if let Err(error) = self.create_tab(None, Vec::new(), true) {
-                self.last_error = Some(format!("{error:#}"));
-            }
-            unsafe { InvalidateRect(self.window, ptr::null(), 0) };
-            return;
-        }
         if y < TAB_TOP {
             return;
         }
-        let position = ((y - TAB_TOP) / TAB_HEIGHT) as usize;
-        if position >= self.tabs.len() {
+        let row = ((y - TAB_TOP) / TAB_HEIGHT) as usize;
+        let Some(position) = self.tree_row_position(row) else {
             return;
-        }
+        };
         let id = self.tabs[position].id;
         if x >= SIDEBAR_WIDTH - 36 {
             self.request_close_tab(id);
@@ -1166,7 +1376,10 @@ impl AppState {
         if x >= SIDEBAR_WIDTH || y < TAB_TOP || self.pending_close.is_some() {
             return;
         }
-        let position = ((y - TAB_TOP) / TAB_HEIGHT) as usize;
+        let row = ((y - TAB_TOP) / TAB_HEIGHT) as usize;
+        let Some(position) = self.tree_row_position(row) else {
+            return;
+        };
         let Some(tab) = self.tabs.get(position) else {
             return;
         };
@@ -1266,7 +1479,12 @@ impl AppState {
     fn terminal_cell_at(&self, x: i32, y: i32) -> Option<(u16, u16)> {
         let mut client: RECT = unsafe { mem::zeroed() };
         unsafe { GetClientRect(self.window, &mut client) };
-        if x < SIDEBAR_WIDTH || y < 0 || y >= client.bottom.saturating_sub(COMPOSER_HEIGHT) {
+        if x < SIDEBAR_WIDTH
+            || y < 0
+            || y >= client
+                .bottom
+                .saturating_sub(STATUS_BAR_HEIGHT + COMPOSER_HEIGHT)
+        {
             return None;
         }
 
@@ -1406,6 +1624,7 @@ impl AppState {
         } else {
             paint_device
         };
+        let content_bottom = (client.bottom - STATUS_BAR_HEIGHT).max(0);
 
         fill(device, &client, COLOR_TERMINAL);
         fill(
@@ -1414,7 +1633,7 @@ impl AppState {
                 left: 0,
                 top: 0,
                 right: SIDEBAR_WIDTH,
-                bottom: client.bottom,
+                bottom: content_bottom,
             },
             COLOR_SIDEBAR,
         );
@@ -1422,11 +1641,21 @@ impl AppState {
             device,
             &RECT {
                 left: SIDEBAR_WIDTH,
-                top: (client.bottom - COMPOSER_HEIGHT).max(0),
+                top: (content_bottom - COMPOSER_HEIGHT).max(0),
+                right: client.right,
+                bottom: content_bottom,
+            },
+            COLOR_COMPOSER,
+        );
+        fill(
+            device,
+            &RECT {
+                left: 0,
+                top: content_bottom,
                 right: client.right,
                 bottom: client.bottom,
             },
-            COLOR_COMPOSER,
+            COLOR_STATUS,
         );
 
         let ui_font = unsafe { GetStockObject(DEFAULT_GUI_FONT) as HFONT };
@@ -1435,45 +1664,13 @@ impl AppState {
             SelectObject(device, ui_font as HGDIOBJ);
             SetBkMode(device, TRANSPARENT as i32);
         }
-        draw_text(
-            device,
-            "AgenTerm",
-            RECT {
-                left: 14,
-                top: 10,
-                right: 145,
-                bottom: 48,
-            },
-            COLOR_TEXT,
-            DT_LEFT | DT_SINGLELINE | DT_VCENTER,
-        );
-        draw_text(
-            device,
-            &self.session_name,
-            RECT {
-                left: 14,
-                top: 28,
-                right: SIDEBAR_WIDTH - 72,
-                bottom: 52,
-            },
-            COLOR_MUTED,
-            DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS,
-        );
-        draw_text(
-            device,
-            "+ New",
-            RECT {
-                left: SIDEBAR_WIDTH - 62,
-                top: 10,
-                right: SIDEBAR_WIDTH - 10,
-                bottom: 47,
-            },
-            COLOR_GREEN,
-            DT_LEFT | DT_SINGLELINE | DT_VCENTER,
-        );
-
-        for (position, tab) in self.tabs.iter().enumerate() {
-            let top = TAB_TOP + position as i32 * TAB_HEIGHT;
+        let tree_rows = self.tree_rows();
+        for (visual_position, row) in tree_rows.iter().enumerate() {
+            let Some(tab) = self.tabs.iter().find(|tab| tab.id == row.id) else {
+                continue;
+            };
+            let top = TAB_TOP + visual_position as i32 * TAB_HEIGHT;
+            let indent = row.depth.min(7) as i32 * 14;
             let rect = RECT {
                 left: 6,
                 top,
@@ -1483,12 +1680,26 @@ impl AppState {
             if self.active == Some(tab.id) {
                 fill(device, &rect, COLOR_ACTIVE);
             }
+            if row.depth > 0 {
+                draw_text(
+                    device,
+                    if row.is_last { "└─" } else { "├─" },
+                    RECT {
+                        left: 8 + indent - 14,
+                        top: top + 2,
+                        right: 28 + indent,
+                        bottom: top + 25,
+                    },
+                    COLOR_MUTED,
+                    DT_LEFT | DT_SINGLELINE | DT_VCENTER,
+                );
+            }
             fill(
                 device,
                 &RECT {
-                    left: 12,
+                    left: 12 + indent,
                     top: top + 13,
-                    right: 20,
+                    right: 20 + indent,
                     bottom: top + 21,
                 },
                 if tab.exited.is_some() {
@@ -1498,21 +1709,16 @@ impl AppState {
                 },
             );
             let terminal_title = tab.parser.callbacks().title.trim();
-            let display_title = if terminal_title.is_empty() {
-                tab.title.as_str()
-            } else {
-                terminal_title
-            };
-            let primary = if display_title.eq_ignore_ascii_case(&tab.command_name) {
+            let primary = if tab.title.eq_ignore_ascii_case(&tab.command_name) {
                 format!("{}  {}", tab.index, tab.command_name)
             } else {
-                format!("{}  {} · {}", tab.index, tab.command_name, display_title)
+                format!("{}  {} · {}", tab.index, tab.title, tab.command_name)
             };
             draw_text(
                 device,
                 &primary,
                 RECT {
-                    left: 27,
+                    left: 27 + indent,
                     top: top + 2,
                     right: SIDEBAR_WIDTH - 39,
                     bottom: top + 25,
@@ -1522,6 +1728,11 @@ impl AppState {
             );
             let secondary = if !tab.note.is_empty() {
                 tab.note.clone()
+            } else if !terminal_title.is_empty()
+                && !terminal_title.eq_ignore_ascii_case(&tab.title)
+                && !terminal_title.eq_ignore_ascii_case(&tab.command_name)
+            {
+                terminal_title.to_owned()
             } else {
                 match tab.exited {
                     Some(0) => "done · right-click to add note".to_owned(),
@@ -1536,7 +1747,7 @@ impl AppState {
                 device,
                 &secondary,
                 RECT {
-                    left: 27,
+                    left: 27 + indent,
                     top: top + 24,
                     right: SIDEBAR_WIDTH - 39,
                     bottom: top + TAB_HEIGHT - 3,
@@ -1562,18 +1773,29 @@ impl AppState {
             );
         }
 
-        let exited = self.tabs.iter().filter(|tab| tab.exited.is_some()).count();
         draw_text(
             device,
-            &format!("{} tabs · {} exited", self.tabs.len(), exited),
+            "Status",
             RECT {
                 left: 14,
-                top: client.bottom - 34,
+                top: content_bottom,
                 right: SIDEBAR_WIDTH - 10,
-                bottom: client.bottom - 8,
+                bottom: client.bottom,
             },
             COLOR_MUTED,
             DT_LEFT | DT_SINGLELINE | DT_VCENTER,
+        );
+        draw_text(
+            device,
+            "metrics · agent context · extensible providers",
+            RECT {
+                left: SIDEBAR_WIDTH + 10,
+                top: content_bottom,
+                right: client.right - 10,
+                bottom: client.bottom,
+            },
+            COLOR_MUTED,
+            DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
         );
 
         if let Some(position) = self.active_position() {
@@ -1585,7 +1807,7 @@ impl AppState {
                 if self.startup_tab_pending {
                     "Starting cmd.exe…"
                 } else {
-                    "Click + to create a cmd.exe tab"
+                    "Click New to create a cmd.exe tab"
                 },
                 RECT {
                     left: SIDEBAR_WIDTH + 24,
@@ -1613,9 +1835,9 @@ impl AppState {
                 },
                 RECT {
                     left: SIDEBAR_WIDTH + 10,
-                    top: client.bottom - COMPOSER_HEIGHT + 4,
+                    top: content_bottom - COMPOSER_HEIGHT + 4,
                     right: client.right - 210,
-                    bottom: client.bottom - COMPOSER_HEIGHT + 28,
+                    bottom: content_bottom - COMPOSER_HEIGHT + 28,
                 },
                 if tab.exited.is_some() {
                     COLOR_ORANGE
@@ -1633,9 +1855,9 @@ impl AppState {
                 },
                 RECT {
                     left: client.right - 390,
-                    top: client.bottom - COMPOSER_HEIGHT + 4,
+                    top: content_bottom - COMPOSER_HEIGHT + 4,
                     right: client.right - 10,
-                    bottom: client.bottom - COMPOSER_HEIGHT + 28,
+                    bottom: content_bottom - COMPOSER_HEIGHT + 28,
                 },
                 COLOR_MUTED,
                 DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS,
@@ -1649,9 +1871,9 @@ impl AppState {
                 device,
                 &RECT {
                     left: SIDEBAR_WIDTH,
-                    top: client.bottom - COMPOSER_HEIGHT - 30,
+                    top: content_bottom - COMPOSER_HEIGHT - 30,
                     right: client.right,
-                    bottom: client.bottom - COMPOSER_HEIGHT,
+                    bottom: content_bottom - COMPOSER_HEIGHT,
                 },
                 COLOR_MODAL,
             );
@@ -1662,9 +1884,9 @@ impl AppState {
                 ),
                 RECT {
                     left: SIDEBAR_WIDTH + 12,
-                    top: client.bottom - COMPOSER_HEIGHT - 30,
+                    top: content_bottom - COMPOSER_HEIGHT - 30,
                     right: client.right - 12,
-                    bottom: client.bottom - COMPOSER_HEIGHT,
+                    bottom: content_bottom - COMPOSER_HEIGHT,
                 },
                 COLOR_ORANGE,
                 DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
@@ -1677,9 +1899,9 @@ impl AppState {
                 feedback,
                 RECT {
                     left: SIDEBAR_WIDTH + 10,
-                    top: client.bottom - 25,
+                    top: content_bottom - 25,
                     right: client.right - 100,
-                    bottom: client.bottom - 3,
+                    bottom: content_bottom - 3,
                 },
                 COLOR_GREEN,
                 DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS,
@@ -1692,9 +1914,9 @@ impl AppState {
                 error,
                 RECT {
                     left: SIDEBAR_WIDTH + 10,
-                    top: (client.bottom - COMPOSER_HEIGHT - 28).max(0),
+                    top: (content_bottom - COMPOSER_HEIGHT - 28).max(0),
                     right: client.right - 10,
-                    bottom: (client.bottom - COMPOSER_HEIGHT).max(0),
+                    bottom: (content_bottom - COMPOSER_HEIGHT).max(0),
                 },
                 COLOR_RED,
                 DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS,
@@ -1736,7 +1958,7 @@ impl AppState {
             return;
         };
         let left = SIDEBAR_WIDTH + (client.right - SIDEBAR_WIDTH - 460) / 2;
-        let top = (client.bottom - 190) / 2;
+        let top = (client.bottom - STATUS_BAR_HEIGHT - 190) / 2;
         let rect = RECT {
             left,
             top,
@@ -1817,7 +2039,7 @@ impl AppState {
 
     fn paint_settings(&self, device: HDC, client: &RECT) {
         let left = SIDEBAR_WIDTH + (client.right - SIDEBAR_WIDTH - 520) / 2;
-        let top = (client.bottom - 260) / 2;
+        let top = (client.bottom - STATUS_BAR_HEIGHT - 260) / 2;
         let rect = RECT {
             left,
             top,
@@ -1907,7 +2129,7 @@ impl AppState {
         let cell_width = extent.cx.max(7);
         let cell_height = (metrics.tmHeight + metrics.tmExternalLeading).max(14);
         let width = (client.right - SIDEBAR_WIDTH).max(cell_width * 10);
-        let height = (client.bottom - COMPOSER_HEIGHT).max(cell_height * 2);
+        let height = (client.bottom - STATUS_BAR_HEIGHT - COMPOSER_HEIGHT).max(cell_height * 2);
         let cols = (width / cell_width).clamp(10, u16::MAX as i32) as u16;
         let rows = (height / cell_height).clamp(2, u16::MAX as i32) as u16;
         self.tabs[position].resize(rows, cols);
@@ -2044,19 +2266,23 @@ impl AppState {
         let mut client: RECT = unsafe { mem::zeroed() };
         unsafe { GetClientRect(self.window, &mut client) };
         let active_draft = window_text(self.edit);
-        let tabs = self
-            .tabs
+        let tree_rows = self.tree_rows();
+        let tabs = tree_rows
             .iter()
             .enumerate()
-            .map(|(position, tab)| {
+            .filter_map(|(position, row)| {
+                let tab = self.tabs.iter().find(|tab| tab.id == row.id)?;
                 let draft = if self.active == Some(tab.id) {
                     !active_draft.is_empty()
                 } else {
                     !tab.composer.is_empty()
                 };
-                serde_json::json!({
+                Some(serde_json::json!({
                     "id": format!("@{}", tab.id),
                     "index": tab.index,
+                    "parent_id": tab.parent_id.map(|id| format!("@{id}")),
+                    "depth": row.depth,
+                    "has_children": self.tabs.iter().any(|child| child.parent_id == Some(tab.id)),
                     "name": tab.title,
                     "terminal_title": tab.parser.callbacks().title,
                     "note": tab.note,
@@ -2076,7 +2302,7 @@ impl AppState {
                         "width": SIDEBAR_WIDTH - 12,
                         "height": TAB_HEIGHT - 3,
                     }
-                })
+                }))
             })
             .collect::<Vec<_>>();
         let (rows, cols) = self
@@ -2088,23 +2314,41 @@ impl AppState {
             "protocol_version": 1,
             "startup": {
                 "initial_tab_pending": self.startup_tab_pending,
+                "tabs_remaining": self.startup_tabs_remaining,
+                "workspace_file_exists": workspace_path().exists(),
+            },
+            "workspace": {
+                "persistent": true,
+                "path": workspace_path(),
+                "restore_behavior": "restart-processes",
             },
             "window": {
+                "title": WINDOW_TITLE,
                 "client_width": client.right,
                 "client_height": client.bottom,
                 "minimized": unsafe { IsIconic(self.window) } != 0,
             },
             "layout": {
-                "sidebar": {"x": 0, "y": 0, "width": SIDEBAR_WIDTH, "height": client.bottom},
+                "sidebar": {
+                    "x": 0, "y": 0, "width": SIDEBAR_WIDTH,
+                    "height": (client.bottom - STATUS_BAR_HEIGHT).max(0)
+                },
                 "terminal": {
                     "x": SIDEBAR_WIDTH, "y": 0,
                     "width": (client.right - SIDEBAR_WIDTH).max(0),
-                    "height": (client.bottom - COMPOSER_HEIGHT).max(0),
+                    "height": (client.bottom - STATUS_BAR_HEIGHT - COMPOSER_HEIGHT).max(0),
                     "rows": rows, "cols": cols,
                 },
                 "composer": {
                     "visible": self.pending_close.is_none() && !self.settings_open,
                     "height": COMPOSER_HEIGHT,
+                },
+                "status_bar": {
+                    "x": 0,
+                    "y": (client.bottom - STATUS_BAR_HEIGHT).max(0),
+                    "width": client.right,
+                    "height": STATUS_BAR_HEIGHT,
+                    "provider": "placeholder",
                 }
             },
             "focus": {
@@ -2163,7 +2407,14 @@ impl AppState {
             }
             "neww" | "new-window" => {
                 let (title, detached, child_command) = parse_new_command(args);
-                match self.create_tab(title, child_command, !detached) {
+                let parent_id = match option_value(args, "--parent") {
+                    Some(target) => match self.parent_id_from_target(target) {
+                        Ok(parent_id) => parent_id,
+                        Err(error) => return IpcResponse::failure(format!("{error:#}")),
+                    },
+                    None => None,
+                };
+                match self.create_tab_with_parent(title, child_command, !detached, parent_id) {
                     Ok(index) => IpcResponse::success(index.to_string()),
                     Err(error) => IpcResponse::failure(format!("{error:#}")),
                 }
@@ -2279,6 +2530,80 @@ impl AppState {
                     return IpcResponse::failure("can't find tab");
                 };
                 IpcResponse::success(self.tabs[position].note.clone())
+            }
+            "set-tab-parent" => {
+                let Some(child_position) = self.target_position(option_value(args, "-t")) else {
+                    return IpcResponse::failure("can't find child tab");
+                };
+                let Some(parent_target) = option_value(args, "--parent") else {
+                    return IpcResponse::failure(
+                        "usage: set-tab-parent -t child --parent parent|root",
+                    );
+                };
+                let parent_id = match self.parent_id_from_target(parent_target) {
+                    Ok(parent_id) => parent_id,
+                    Err(error) => return IpcResponse::failure(format!("{error:#}")),
+                };
+                let child_id = self.tabs[child_position].id;
+                match self.set_tab_parent(child_id, parent_id) {
+                    Ok(()) => {
+                        unsafe { InvalidateRect(self.window, ptr::null(), 0) };
+                        IpcResponse::success("")
+                    }
+                    Err(error) => IpcResponse::failure(format!("{error:#}")),
+                }
+            }
+            "show-tab-parent" => {
+                let Some(position) = self.target_position(option_value(args, "-t")) else {
+                    return IpcResponse::failure("can't find tab");
+                };
+                IpcResponse::success(
+                    self.tabs[position]
+                        .parent_id
+                        .map(|id| format!("@{id}"))
+                        .unwrap_or_else(|| "root".to_owned()),
+                )
+            }
+            "list-tab-tree" => {
+                let format = option_value(args, "-F").unwrap_or("#{window_id}:#{window_name}");
+                let rows = self.tree_rows();
+                IpcResponse::success(
+                    rows.iter()
+                        .filter_map(|row| {
+                            let tab = self.tabs.iter().find(|tab| tab.id == row.id)?;
+                            let branch = if row.depth == 0 {
+                                String::new()
+                            } else {
+                                format!(
+                                    "{}{} ",
+                                    "  ".repeat(row.depth.saturating_sub(1)),
+                                    if row.is_last { "└─" } else { "├─" }
+                                )
+                            };
+                            let rendered = render_format(
+                                format,
+                                tab,
+                                &self.session_name,
+                                self.active == Some(tab.id),
+                            )
+                            .replace("#{tab_depth}", &row.depth.to_string())
+                            .replace(
+                                "#{tab_has_children}",
+                                if self
+                                    .tabs
+                                    .iter()
+                                    .any(|child| child.parent_id == Some(tab.id))
+                                {
+                                    "1"
+                                } else {
+                                    "0"
+                                },
+                            );
+                            Some(format!("{branch}{rendered}"))
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n"),
+                )
             }
             "get-settings" => IpcResponse::success(
                 serde_json::to_string_pretty(&serde_json::json!({
@@ -2496,13 +2821,17 @@ impl AppState {
                         "inspect", "screenshot", "screenshot-pane", "dump-cells",
                         "wait-pane", "send-mouse", "show-composer",
                         "set-composer", "send-composer", "get-settings",
-                        "set-setting", "set-tab-note", "show-tab-note"
+                        "set-setting", "set-tab-note", "show-tab-note",
+                        "list-tab-tree", "set-tab-parent", "show-tab-parent",
+                        "save-workspace", "workspace-info", "shutdown"
                     ],
                     "features": {
                         "remain_on_exit": true,
                         "live_close_confirmation": true,
                         "rmux_status_click_bridge": true,
-                        "semantic_ui_automation": true
+                        "semantic_ui_automation": true,
+                        "hierarchical_tabs": true,
+                        "persistent_workspace": true
                     }
                 }))
                 .unwrap_or_default(),
@@ -2534,6 +2863,19 @@ impl AppState {
                         Ok(_) => None,
                         Err(error) => Some(IpcResponse::failure(format!("{error:#}"))),
                     },
+                    "new-child" => {
+                        let parent_position = self
+                            .target_position(option_value(args, "-t"))
+                            .or_else(|| self.active_position());
+                        let Some(parent_position) = parent_position else {
+                            return IpcResponse::failure("can't find parent tab");
+                        };
+                        let parent_id = self.tabs[parent_position].id;
+                        match self.create_tab_with_parent(None, Vec::new(), true, Some(parent_id)) {
+                            Ok(_) => None,
+                            Err(error) => Some(IpcResponse::failure(format!("{error:#}"))),
+                        }
+                    }
                     "select-tab" => {
                         let Some(position) = self.target_position(option_value(args, "-t")) else {
                             return IpcResponse::failure("can't find tab");
@@ -2638,6 +2980,8 @@ impl AppState {
                         serde_json::json!({
                             "id": format!("@{}", tab.id),
                             "index": tab.index,
+                            "parent_id": tab.parent_id.map(|id| format!("@{id}")),
+                            "depth": self.tab_depth(tab.id),
                             "name": tab.title,
                             "terminal_title": tab.parser.callbacks().title,
                             "note": tab.note,
@@ -2724,6 +3068,27 @@ impl AppState {
                 ]
                 .join("\n"),
             ),
+            "save-workspace" => match self.persist_workspace() {
+                Ok(()) => IpcResponse::success(workspace_path().display().to_string()),
+                Err(error) => IpcResponse::failure(format!("{error:#}")),
+            },
+            "workspace-info" => IpcResponse::success(
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "path": workspace_path(),
+                    "version": 1,
+                    "tab_count": self.tabs.len(),
+                    "active_id": self.active.map(|id| format!("@{id}")),
+                    "restore_behavior": "restart-processes",
+                }))
+                .unwrap_or_default(),
+            ),
+            "shutdown" => {
+                if let Err(error) = self.persist_workspace() {
+                    return IpcResponse::failure(format!("{error:#}"));
+                }
+                self.close_requested = true;
+                IpcResponse::success("")
+            }
             "lscm" | "list-commands" => IpcResponse::success(SUPPORTED_COMMANDS),
             "splitw" | "split-window" => IpcResponse::failure(
                 "split-window is not implemented yet; AgenTerm currently maps one ConPTY pane per tab",
@@ -2762,6 +3127,7 @@ impl AppState {
 
 impl Drop for AppState {
     fn drop(&mut self) {
+        let _ = save_workspace(&self.saved_workspace());
         if self.terminal_font_owned {
             unsafe { DeleteObject(self.terminal_font as HGDIOBJ) };
         }
@@ -3225,8 +3591,9 @@ AgenTerm CLI - control the native tabbed terminal
 
 Usage:
   agentermctl new-session [-s name]
-  agentermctl new-window [-dn name] [command [args...]]
+  agentermctl new-window [-d] [-n name] [--parent target] [command [args...]]
   agentermctl list-windows [-F format]
+  agentermctl list-tab-tree [-F format]
   agentermctl select-window -t target
   agentermctl rename-window [-t target] name
   agentermctl kill-window -t target
@@ -3244,12 +3611,17 @@ Usage:
   agentermctl send-composer [-t target]
   agentermctl set-tab-note [-t target] text
   agentermctl show-tab-note [-t target]
+  agentermctl set-tab-parent -t child --parent parent|root
+  agentermctl show-tab-parent [-t target]
+  agentermctl save-workspace
+  agentermctl workspace-info
+  agentermctl shutdown
   agentermctl get-settings
   agentermctl set-setting terminal.font-family FAMILY
   agentermctl set-setting terminal.font-size 8..36
   agentermctl send-mouse [-t target] -x col -y row [--button left] [--action press]
   agentermctl ui-snapshot
-  agentermctl ui-action new-tab|select-tab|close-tab|confirm|cancel|composer-send
+  agentermctl ui-action new-tab|new-child|select-tab|close-tab|confirm|cancel|composer-send
   agentermctl focus terminal|composer|sidebar [-t target]
   agentermctl wait-ui [--active @id] [--focus surface] [-t target --tab-state state]
   agentermctl protocol-info
@@ -3266,6 +3638,12 @@ fn render_format(format: &str, tab: &TerminalTab, session_name: &str, active: bo
         .replace("#{session_name}", session_name)
         .replace("#{window_index}", &tab.index.to_string())
         .replace("#{window_id}", &format!("@{}", tab.id))
+        .replace(
+            "#{tab_parent_id}",
+            &tab.parent_id
+                .map(|id| format!("@{id}"))
+                .unwrap_or_else(|| "root".to_owned()),
+        )
         .replace("#{window_name}", &tab.title)
         .replace("#{window_note}", &tab.note)
         .replace("#{terminal_title}", &tab.parser.callbacks().title)
@@ -3306,7 +3684,7 @@ fn save_window_png(window: HWND, path: &std::path::Path, pane_only: bool) -> Res
             SIDEBAR_WIDTH,
             0,
             (client.right - SIDEBAR_WIDTH).max(1),
-            (client.bottom - COMPOSER_HEIGHT).max(1),
+            (client.bottom - STATUS_BAR_HEIGHT - COMPOSER_HEIGHT).max(1),
         )
     } else {
         (

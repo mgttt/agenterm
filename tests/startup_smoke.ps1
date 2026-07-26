@@ -13,6 +13,11 @@ foreach ($path in @($GuiExe, $CliExe)) {
     }
 }
 
+$previousAddress = $env:AGENTERM_IPC_ADDRESS
+$previousWorkspace = $env:AGENTERM_WORKSPACE_PATH
+$env:AGENTERM_IPC_ADDRESS = "127.0.0.1:$((46000 + ($PID % 1000)))"
+$workspaceFile = Join-Path $env:TEMP "agenterm-startup-$PID.json"
+$env:AGENTERM_WORKSPACE_PATH = $workspaceFile
 & $CliExe kill-server 2>$null | Out-Null
 Start-Sleep -Milliseconds 200
 
@@ -37,6 +42,11 @@ try {
     if ($watch.ElapsedMilliseconds -gt $MaxWindowMs) {
         throw "AgenTerm first window took $($watch.ElapsedMilliseconds) ms; limit is $MaxWindowMs ms."
     }
+    $version = ((& $CliExe --version) -split '\s+')[-1]
+    $process.Refresh()
+    if ($process.MainWindowTitle -ne "AgenTerm-$version") {
+        throw "Unexpected window title: $($process.MainWindowTitle)"
+    }
 
     & $CliExe wait-ui -t 0 --tab-state running --timeout-ms 10000 | Out-Null
     if ($LASTEXITCODE -ne 0) {
@@ -52,4 +62,15 @@ try {
 }
 finally {
     & $CliExe kill-server 2>$null | Out-Null
+    Remove-Item -LiteralPath $workspaceFile -ErrorAction SilentlyContinue
+    if ($null -eq $previousAddress) {
+        Remove-Item Env:AGENTERM_IPC_ADDRESS -ErrorAction SilentlyContinue
+    } else {
+        $env:AGENTERM_IPC_ADDRESS = $previousAddress
+    }
+    if ($null -eq $previousWorkspace) {
+        Remove-Item Env:AGENTERM_WORKSPACE_PATH -ErrorAction SilentlyContinue
+    } else {
+        $env:AGENTERM_WORKSPACE_PATH = $previousWorkspace
+    }
 }

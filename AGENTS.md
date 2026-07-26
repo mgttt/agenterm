@@ -15,6 +15,8 @@ the information cannot live here or in the PRD.
 - `src/protocol.rs` — serialized local IPC request/response contract.
 - `src/rmux_status.rs` — RMUX status-line window parsing and click ranges.
 - `src/settings.rs` — persistent user settings.
+- `src/tab_tree.rs` — pure hierarchy ordering and cycle detection.
+- `src/workspace.rs` — versioned tab-workspace persistence.
 - `tests/` — black-box tests that drive only the public AgenTerm executable.
 - `assets/` — application icon sources.
 - `scripts/` — build metadata tooling.
@@ -47,7 +49,8 @@ Discover the live interface instead of duplicating a long command manual:
 .\dist\agentermctl.exe list-windows -F '#{window_id}:#{window_name}'
 ```
 
-Use a distinct `AGENTERM_IPC_ADDRESS` for isolated tests. Prefer stable tab IDs
+Use distinct `AGENTERM_IPC_ADDRESS` and `AGENTERM_WORKSPACE_PATH` values for
+isolated tests. Prefer stable tab IDs
 (`@N`) over mutable indexes or titles. Use `wait-pane` and `wait-ui`; do not add
 fixed sleeps. Rendering investigations should capture both structured state and
 PNG evidence.
@@ -59,6 +62,8 @@ waits through public state until the asynchronous terminal becomes ready.
 ## Change rules
 
 - Preserve the remain-on-exit and explicit-close invariants in the PRD.
+- Preserve tree safety: parent cycles are rejected and closing a parent promotes
+  its direct children instead of terminating them.
 - Keep pure parsing, protocol, and settings logic outside the Win32 state
   machine and cover it with unit tests.
 - Exercise behavior through the public CLI in black-box tests.
