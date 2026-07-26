@@ -736,6 +736,8 @@ struct AppState {
     session_name: String,
     started_at: SystemTime,
     ipc_receiver: Receiver<IpcEnvelope>,
+    startup_tab_receiver: Receiver<std::result::Result<TerminalTab, String>>,
+    startup_tab_pending: bool,
     last_error: Option<String>,
     close_requested: bool,
     pending_close: Option<u64>,
@@ -759,10 +761,11 @@ impl AppState {
         settings_apply: HWND,
     ) -> Result<Self> {
         let ipc_receiver = start_ipc_server(window)?;
+        let (startup_tab_sender, startup_tab_receiver) = mpsc::channel();
         let config = load_config();
         let (terminal_font, terminal_font_owned, resolved_font_family) =
             create_terminal_font(window, &config);
-        let mut state = Self {
+        let state = Self {
             window,
             edit,
             send_button,
@@ -772,10 +775,12 @@ impl AppState {
             settings_apply,
             tabs: Vec::new(),
             active: None,
-            next_id: 1,
+            next_id: 2,
             session_name: "agenterm".to_owned(),
             started_at: SystemTime::now(),
             ipc_receiver,
+            startup_tab_receiver,
+            startup_tab_pending: true,
             last_error: None,
             close_requested: false,
             pending_close: None,
@@ -787,7 +792,27 @@ impl AppState {
             terminal_font_owned,
             resolved_font_family,
         };
-        state.create_tab(None, Vec::new(), true)?;
+
+        let wake_window = window as isize;
+        thread::spawn(move || {
+            let tab = TerminalTab::spawn(
+                1,
+                0,
+                None,
+                Vec::new(),
+                wake_window as HWND,
+                TerminalSize {
+                    rows: INITIAL_ROWS,
+                    cols: INITIAL_COLS,
+                },
+            )
+            .map_err(|error| format!("{error:#}"));
+            if startup_tab_sender.send(tab).is_ok() {
+                unsafe {
+                    PostMessageW(wake_window as HWND, WM_APP_WAKE, 0, 0);
+                }
+            }
+        });
         Ok(state)
     }
 
@@ -801,7 +826,10 @@ impl AppState {
         let id = self.next_id;
         self.next_id += 1;
         let index = (0..)
-            .find(|candidate| !self.tabs.iter().any(|tab| tab.index == *candidate))
+            .find(|candidate| {
+                !(self.startup_tab_pending && *candidate == 0)
+                    && !self.tabs.iter().any(|tab| tab.index == *candidate)
+            })
             .unwrap_or(self.tabs.len() as u32);
         let (rows, cols) = self
             .active_position()
@@ -900,6 +928,33 @@ impl AppState {
 
     fn tick(&mut self) -> bool {
         let mut changed = false;
+        if self.startup_tab_pending {
+            match self.startup_tab_receiver.try_recv() {
+                Ok(Ok(tab)) => {
+                    let id = tab.id;
+                    self.tabs.push(tab);
+                    self.tabs.sort_by_key(|tab| tab.index);
+                    if self.active.is_none() {
+                        self.active = Some(id);
+                        self.load_active_composer();
+                    }
+                    self.startup_tab_pending = false;
+                    changed = true;
+                }
+                Ok(Err(error)) => {
+                    self.startup_tab_pending = false;
+                    self.last_error = Some(format!("initial terminal failed: {error}"));
+                    changed = true;
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.startup_tab_pending = false;
+                    self.last_error =
+                        Some("initial terminal worker stopped unexpectedly".to_owned());
+                    changed = true;
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+            }
+        }
         for tab in &mut self.tabs {
             changed |= tab.poll();
         }
@@ -1527,7 +1582,11 @@ impl AppState {
         } else {
             draw_text(
                 device,
-                "Click + to create a cmd.exe tab",
+                if self.startup_tab_pending {
+                    "Starting cmd.exe…"
+                } else {
+                    "Click + to create a cmd.exe tab"
+                },
                 RECT {
                     left: SIDEBAR_WIDTH + 24,
                     top: 24,
@@ -2027,6 +2086,9 @@ impl AppState {
             .unwrap_or((0, 0));
         serde_json::to_string_pretty(&serde_json::json!({
             "protocol_version": 1,
+            "startup": {
+                "initial_tab_pending": self.startup_tab_pending,
+            },
             "window": {
                 "client_width": client.right,
                 "client_height": client.bottom,
@@ -2852,8 +2914,12 @@ fn ipc_address() -> String {
 
 fn send_ipc_request(args: Vec<String>) -> Result<IpcResponse> {
     use std::io::BufRead as _;
-    let mut connection =
-        std::net::TcpStream::connect(ipc_address()).context("AgenTerm server is not running")?;
+    let address = ipc_address();
+    let socket = address
+        .parse()
+        .with_context(|| format!("invalid AgenTerm IPC address: {address}"))?;
+    let mut connection = std::net::TcpStream::connect_timeout(&socket, Duration::from_millis(100))
+        .context("AgenTerm server is not running")?;
     connection.write_all(serde_json::to_string(&IpcRequest { args })?.as_bytes())?;
     connection.write_all(b"\n")?;
     connection.flush()?;

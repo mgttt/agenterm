@@ -18,6 +18,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [x] one ConPTY-backed process per tab through `rmux-pty`
     - [x] VT100 parsing, ANSI colors, scrollback, resize, keyboard and mouse
     - [x] dirty-frame rendering and GDI double buffering
+    - [x] GUI shell appears before the initial ConPTY/cmd process is ready
+    - [x] initial terminal loads asynchronously with visible starting feedback
     - [x] exited process retains its final screen and exit code
     - [~] robust CJK double-cell layout; broader visual regression is needed
     - [ ] sustained high-throughput and long-output performance qualification
@@ -121,6 +123,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [x] release mode and `agenterm.json` build metadata
     - [x] GUI `agenterm.exe` has no startup console flash
     - [x] console `agentermctl.exe` preserves CLI output and exit codes
+    - [x] startup regression requires a main window within one second locally
     - [x] version-tagged GitHub Release automation for both EXEs, metadata,
       and ZIP
     - [x] unit tests for command parsing, protocol, settings, and RMUX status

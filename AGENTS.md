@@ -52,6 +52,10 @@ Use a distinct `AGENTERM_IPC_ADDRESS` for isolated tests. Prefer stable tab IDs
 fixed sleeps. Rendering investigations should capture both structured state and
 PNG evidence.
 
+The GUI must expose its native window before starting the initial ConPTY.
+`tests/startup_smoke.ps1` guards a one-second local first-window budget and then
+waits through public state until the asynchronous terminal becomes ready.
+
 ## Change rules
 
 - Preserve the remain-on-exit and explicit-close invariants in the PRD.

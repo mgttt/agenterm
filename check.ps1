@@ -70,6 +70,7 @@ try {
     }
 
     if (-not $SkipSmoke) {
+        Invoke-Checked 'startup smoke test' { & '.\tests\startup_smoke.ps1' }
         Invoke-Checked 'CLI smoke test' { & '.\tests\cli_smoke.ps1' }
         Invoke-Checked 'semantic UX smoke test' { & '.\tests\ux_smoke.ps1' }
     }
