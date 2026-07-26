@@ -35,7 +35,9 @@ Use PowerShell from the repository root:
 
 The former `.cargo/config.toml` forced `jobs = 1` and made clean builds much
 slower. Do not restore a global job limit. Keep the default dev path
-incremental; release-only optimization belongs in `[profile.release]`.
+incremental; release-only size optimization belongs in `[profile.release]`.
+The release gate enforces a 4 MiB `agenterm.exe` budget; investigate dependency
+or feature growth instead of raising it casually.
 
 ## Runtime control and observation
 

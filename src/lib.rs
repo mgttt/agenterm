@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     env,
     ffi::c_void,
     io::{Read, Write},
@@ -60,15 +61,17 @@ use tab_tree::{TabTreeNode, TabTreeRow, tree_rows, would_create_cycle};
 use workspace::{SavedTab, SavedWorkspace, load_workspace, save_workspace, workspace_path};
 
 const APP_NAME: &str = "AgenTerm";
-const WINDOW_TITLE: &str = concat!("AgenTerm-", env!("CARGO_PKG_VERSION"));
 const INITIAL_ROWS: u16 = 30;
 const INITIAL_COLS: u16 = 100;
 const SCROLLBACK_LINES: usize = 10_000;
-const SIDEBAR_WIDTH: i32 = 210;
+const SIDEBAR_WIDTH: i32 = 250;
 const COMPOSER_HEIGHT: i32 = 78;
 const STATUS_BAR_HEIGHT: i32 = 26;
 const TAB_TOP: i32 = 8;
 const TAB_HEIGHT: i32 = 52;
+const TAB_ADD_LEFT: i32 = SIDEBAR_WIDTH - 72;
+const TAB_EDIT_LEFT: i32 = SIDEBAR_WIDTH - 48;
+const TAB_CLOSE_LEFT: i32 = SIDEBAR_WIDTH - 24;
 const BUTTON_ID: usize = 1001;
 const EDIT_ID: usize = 1002;
 const SETTINGS_BUTTON_ID: usize = 1003;
@@ -151,7 +154,15 @@ fn run_gui() -> Result<()> {
     }
 
     let class_name = wide("AgenTermWindowClass");
-    let title = wide(WINDOW_TITLE);
+    let address = ipc_address();
+    let socket: std::net::SocketAddr = address
+        .parse()
+        .with_context(|| format!("invalid AgenTerm IPC address: {address}"))?;
+    let title = wide(&format!(
+        "AgenTerm-{}:{}",
+        env!("CARGO_PKG_VERSION"),
+        socket.port()
+    ));
     let mut window_class: WNDCLASSW = unsafe { mem::zeroed() };
     window_class.style = CS_HREDRAW | CS_VREDRAW;
     window_class.lpfnWndProc = Some(window_proc);
@@ -793,6 +804,7 @@ struct AppState {
     settings_size: HWND,
     settings_apply: HWND,
     tabs: Vec<TerminalTab>,
+    collapsed_tabs: HashSet<u64>,
     active: Option<u64>,
     next_id: u64,
     session_name: String,
@@ -819,27 +831,30 @@ impl AppState {
         let (startup_tab_sender, startup_tab_receiver) = mpsc::channel();
         let config = load_config();
         let restored = load_workspace();
-        let (session_name, active_id, saved_tabs) = if let Some(workspace) = restored {
-            (
-                if workspace.session_name.is_empty() {
-                    "agenterm".to_owned()
-                } else {
-                    workspace.session_name
-                },
-                workspace.active_id,
-                workspace.tabs,
-            )
-        } else {
-            (
-                "agenterm".to_owned(),
-                Some(1),
-                vec![SavedTab {
-                    id: 1,
-                    index: 0,
-                    ..SavedTab::default()
-                }],
-            )
-        };
+        let (session_name, active_id, collapsed_tabs, saved_tabs) =
+            if let Some(workspace) = restored {
+                (
+                    if workspace.session_name.is_empty() {
+                        "agenterm".to_owned()
+                    } else {
+                        workspace.session_name
+                    },
+                    workspace.active_id,
+                    workspace.collapsed_ids.into_iter().collect(),
+                    workspace.tabs,
+                )
+            } else {
+                (
+                    "agenterm".to_owned(),
+                    Some(1),
+                    HashSet::new(),
+                    vec![SavedTab {
+                        id: 1,
+                        index: 0,
+                        ..SavedTab::default()
+                    }],
+                )
+            };
         let next_id = saved_tabs.iter().map(|tab| tab.id).max().unwrap_or(0) + 1;
         let startup_tabs_remaining = saved_tabs.len();
         let (terminal_font, terminal_font_owned, resolved_font_family) =
@@ -854,6 +869,7 @@ impl AppState {
             settings_size: controls.settings_size,
             settings_apply: controls.settings_apply,
             tabs: Vec::new(),
+            collapsed_tabs,
             active: active_id,
             next_id,
             session_name,
@@ -921,6 +937,7 @@ impl AppState {
             version: 1,
             session_name: self.session_name.clone(),
             active_id: self.active,
+            collapsed_ids: self.collapsed_tabs.iter().copied().collect(),
             tabs: self
                 .tabs
                 .iter()
@@ -998,8 +1015,19 @@ impl AppState {
             .collect()
     }
 
-    fn tree_rows(&self) -> Vec<TabTreeRow> {
+    fn all_tree_rows(&self) -> Vec<TabTreeRow> {
         tree_rows(&self.tree_nodes())
+    }
+
+    fn tree_rows(&self) -> Vec<TabTreeRow> {
+        self.all_tree_rows()
+            .into_iter()
+            .filter(|row| {
+                !row.ancestors
+                    .iter()
+                    .any(|id| self.collapsed_tabs.contains(id))
+            })
+            .collect()
     }
 
     fn tree_row_position(&self, row: usize) -> Option<usize> {
@@ -1008,7 +1036,7 @@ impl AppState {
     }
 
     fn tab_depth(&self, id: u64) -> usize {
-        self.tree_rows()
+        self.all_tree_rows()
             .iter()
             .find(|row| row.id == id)
             .map(|row| row.depth)
@@ -1078,6 +1106,7 @@ impl AppState {
                 tab.parent_id = parent_id;
             }
         }
+        self.collapsed_tabs.remove(&id);
         self.tabs[position].close_process();
         self.tabs.remove(position);
         if self.active == Some(id) {
@@ -1189,15 +1218,15 @@ impl AppState {
                 self.settings_button,
                 12,
                 (content_bottom - 42).max(0),
-                92,
+                108,
                 30,
                 1,
             );
             MoveWindow(
                 self.new_button,
-                112,
+                130,
                 (content_bottom - 42).max(0),
-                82,
+                108,
                 30,
                 1,
             );
@@ -1359,8 +1388,43 @@ impl AppState {
             return;
         };
         let id = self.tabs[position].id;
-        if x >= SIDEBAR_WIDTH - 36 {
+        let tree_row = self.tree_rows().get(row).cloned();
+        let has_children = self.tabs.iter().any(|tab| tab.parent_id == Some(id));
+        let disclosure_left = 8 + tree_row.as_ref().map_or(0, |row| row.depth as i32 * 16);
+        if has_children && (disclosure_left..disclosure_left + 18).contains(&x) {
+            if !self.collapsed_tabs.remove(&id) {
+                self.collapsed_tabs.insert(id);
+            }
+            unsafe { InvalidateRect(self.window, ptr::null(), 0) };
+            return;
+        }
+        let actions_visible = self.active == Some(id);
+        if actions_visible && x >= TAB_CLOSE_LEFT {
             self.request_close_tab(id);
+        } else if actions_visible && x >= TAB_EDIT_LEFT {
+            self.open_tab_editor(id);
+            return;
+        } else if actions_visible && x >= TAB_ADD_LEFT {
+            self.collapsed_tabs.remove(&id);
+            match self.create_tab_with_parent(
+                Some("New child".to_owned()),
+                Vec::new(),
+                true,
+                Some(id),
+            ) {
+                Ok(index) => {
+                    if let Some(child_id) = self
+                        .tabs
+                        .iter()
+                        .find(|tab| tab.index == index)
+                        .map(|tab| tab.id)
+                    {
+                        self.open_tab_editor(child_id);
+                        return;
+                    }
+                }
+                Err(error) => self.last_error = Some(format!("{error:#}")),
+            }
         } else {
             self.save_active_composer();
             self.active = Some(id);
@@ -1380,28 +1444,45 @@ impl AppState {
         let Some(position) = self.tree_row_position(row) else {
             return;
         };
-        let Some(tab) = self.tabs.get(position) else {
+        let id = self.tabs[position].id;
+        self.open_tab_editor(id);
+    }
+
+    fn open_tab_editor(&mut self, id: u64) {
+        self.save_active_composer();
+        let Some(tab) = self.tabs.iter().find(|tab| tab.id == id) else {
             return;
         };
-        let id = tab.id;
-        let note = tab.note.clone();
-        self.save_active_composer();
+        let content = format!("{}\r\n{}", tab.title, tab.note);
+        self.active = Some(id);
         self.note_edit_target = Some(id);
         unsafe {
-            SetWindowTextW(self.edit, wide(&note).as_ptr());
-            SetWindowTextW(self.send_button, wide("Save note").as_ptr());
+            SetWindowTextW(self.edit, wide(&content).as_ptr());
+            SetWindowTextW(self.send_button, wide("Save").as_ptr());
             SetFocus(self.edit);
             InvalidateRect(self.window, ptr::null(), 0);
         }
     }
 
     fn finish_note_edit(&mut self, save: bool) {
-        if let Some(id) = self.note_edit_target.take()
-            && save
-            && let Some(tab) = self.tabs.iter_mut().find(|tab| tab.id == id)
-        {
-            tab.note = window_text(self.edit);
+        let Some(id) = self.note_edit_target else {
+            return;
+        };
+        if save {
+            let content = window_text(self.edit).replace("\r\n", "\n");
+            let (title, note) = content.split_once('\n').unwrap_or((&content, ""));
+            let title = title.trim();
+            if title.is_empty() {
+                self.last_error = Some("Tab name cannot be empty".to_owned());
+                unsafe { InvalidateRect(self.window, ptr::null(), 0) };
+                return;
+            }
+            if let Some(tab) = self.tabs.iter_mut().find(|tab| tab.id == id) {
+                tab.title = title.to_owned();
+                tab.note = note.trim_end().to_owned();
+            }
         }
+        self.note_edit_target = None;
         unsafe { SetWindowTextW(self.send_button, wide("发送").as_ptr()) };
         self.load_active_composer();
         unsafe {
@@ -1437,9 +1518,9 @@ impl AppState {
                     self.finish_note_edit(true);
                 } else {
                     self.send_composer();
+                    self.feedback = self.active.map(|id| format!("Sent to @{id}"));
                 }
                 unsafe { SetFocus(self.window) };
-                self.feedback = self.active.map(|id| format!("Sent to @{id}"));
                 unsafe { InvalidateRect(self.window, ptr::null(), 0) };
                 return true;
             }
@@ -1670,7 +1751,7 @@ impl AppState {
                 continue;
             };
             let top = TAB_TOP + visual_position as i32 * TAB_HEIGHT;
-            let indent = row.depth.min(7) as i32 * 14;
+            let indent = row.depth.min(8) as i32 * 16;
             let rect = RECT {
                 left: 6,
                 top,
@@ -1679,27 +1760,64 @@ impl AppState {
             };
             if self.active == Some(tab.id) {
                 fill(device, &rect, COLOR_ACTIVE);
+                fill(
+                    device,
+                    &RECT {
+                        left: 6,
+                        top: top + 5,
+                        right: 9,
+                        bottom: top + TAB_HEIGHT - 8,
+                    },
+                    COLOR_BLUE,
+                );
             }
             if row.depth > 0 {
+                let mut prefix = String::new();
+                for continues in &row.guides {
+                    prefix.push_str(if *continues { "│ " } else { "  " });
+                }
+                prefix.push_str(if row.is_last { "└─" } else { "├─" });
                 draw_text(
                     device,
-                    if row.is_last { "└─" } else { "├─" },
+                    &prefix,
                     RECT {
-                        left: 8 + indent - 14,
+                        left: 8,
                         top: top + 2,
-                        right: 28 + indent,
+                        right: 26 + indent,
                         bottom: top + 25,
                     },
                     COLOR_MUTED,
                     DT_LEFT | DT_SINGLELINE | DT_VCENTER,
                 );
             }
+            let has_children = self
+                .tabs
+                .iter()
+                .any(|child| child.parent_id == Some(tab.id));
+            if has_children {
+                draw_text(
+                    device,
+                    if self.collapsed_tabs.contains(&tab.id) {
+                        "▸"
+                    } else {
+                        "▾"
+                    },
+                    RECT {
+                        left: 8 + indent,
+                        top: top + 2,
+                        right: 26 + indent,
+                        bottom: top + 25,
+                    },
+                    COLOR_TEXT,
+                    DT_LEFT | DT_SINGLELINE | DT_VCENTER,
+                );
+            }
             fill(
                 device,
                 &RECT {
-                    left: 12 + indent,
+                    left: 27 + indent,
                     top: top + 13,
-                    right: 20 + indent,
+                    right: 35 + indent,
                     bottom: top + 21,
                 },
                 if tab.exited.is_some() {
@@ -1708,19 +1826,19 @@ impl AppState {
                     COLOR_GREEN
                 },
             );
-            let terminal_title = tab.parser.callbacks().title.trim();
-            let primary = if tab.title.eq_ignore_ascii_case(&tab.command_name) {
-                format!("{}  {}", tab.index, tab.command_name)
+            let actions_visible = self.active == Some(tab.id);
+            let text_right = if actions_visible {
+                TAB_ADD_LEFT - 4
             } else {
-                format!("{}  {} · {}", tab.index, tab.title, tab.command_name)
+                SIDEBAR_WIDTH - 10
             };
             draw_text(
                 device,
-                &primary,
+                &tab.title,
                 RECT {
-                    left: 27 + indent,
+                    left: 40 + indent,
                     top: top + 2,
-                    right: SIDEBAR_WIDTH - 39,
+                    right: text_right,
                     bottom: top + 25,
                 },
                 COLOR_TEXT,
@@ -1728,28 +1846,22 @@ impl AppState {
             );
             let secondary = if !tab.note.is_empty() {
                 tab.note.clone()
-            } else if !terminal_title.is_empty()
-                && !terminal_title.eq_ignore_ascii_case(&tab.title)
-                && !terminal_title.eq_ignore_ascii_case(&tab.command_name)
-            {
-                terminal_title.to_owned()
             } else {
                 match tab.exited {
-                    Some(0) => "done · right-click to add note".to_owned(),
-                    Some(code) => format!("exit {code} · right-click to add note"),
+                    Some(code) => format!("{} · {} · exit {code}", tab.index, tab.command_name),
                     None if !tab.composer.is_empty() => {
-                        "draft · right-click to add note".to_owned()
+                        format!("{} · {} · draft", tab.index, tab.command_name)
                     }
-                    None => "right-click to add note".to_owned(),
+                    None => format!("{} · {}", tab.index, tab.command_name),
                 }
             };
             draw_text(
                 device,
                 &secondary,
                 RECT {
-                    left: 27 + indent,
+                    left: 40 + indent,
                     top: top + 24,
-                    right: SIDEBAR_WIDTH - 39,
+                    right: text_right,
                     bottom: top + TAB_HEIGHT - 3,
                 },
                 if tab.note.is_empty() {
@@ -1759,18 +1871,44 @@ impl AppState {
                 },
                 DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
             );
-            draw_text(
-                device,
-                "x",
-                RECT {
-                    left: SIDEBAR_WIDTH - 31,
-                    top,
-                    right: SIDEBAR_WIDTH - 9,
-                    bottom: top + TAB_HEIGHT - 3,
-                },
-                COLOR_MUTED,
-                DT_LEFT | DT_SINGLELINE | DT_VCENTER,
-            );
+            if actions_visible {
+                draw_text(
+                    device,
+                    "T+",
+                    RECT {
+                        left: TAB_ADD_LEFT,
+                        top,
+                        right: TAB_EDIT_LEFT,
+                        bottom: top + TAB_HEIGHT - 3,
+                    },
+                    COLOR_GREEN,
+                    DT_LEFT | DT_SINGLELINE | DT_VCENTER,
+                );
+                draw_text(
+                    device,
+                    "✎",
+                    RECT {
+                        left: TAB_EDIT_LEFT,
+                        top,
+                        right: TAB_CLOSE_LEFT,
+                        bottom: top + TAB_HEIGHT - 3,
+                    },
+                    COLOR_BLUE,
+                    DT_LEFT | DT_SINGLELINE | DT_VCENTER,
+                );
+                draw_text(
+                    device,
+                    "×",
+                    RECT {
+                        left: TAB_CLOSE_LEFT,
+                        top,
+                        right: SIDEBAR_WIDTH - 4,
+                        bottom: top + TAB_HEIGHT - 3,
+                    },
+                    COLOR_MUTED,
+                    DT_LEFT | DT_SINGLELINE | DT_VCENTER,
+                );
+            }
         }
 
         draw_text(
@@ -1825,18 +1963,14 @@ impl AppState {
             draw_text(
                 device,
                 &if let Some(id) = self.note_edit_target {
-                    let target = self.tabs.iter().find(|tab| tab.id == id);
-                    format!(
-                        "Edit note for {}",
-                        target.map(|tab| tab.title.as_str()).unwrap_or("tab")
-                    )
+                    format!("Edit tab @{id} · line 1 name, remaining lines note")
                 } else {
                     format!("Compose input for {}:{}", tab.index, tab.title)
                 },
                 RECT {
                     left: SIDEBAR_WIDTH + 10,
                     top: content_bottom - COMPOSER_HEIGHT + 4,
-                    right: client.right - 210,
+                    right: client.right - 270,
                     bottom: content_bottom - COMPOSER_HEIGHT + 28,
                 },
                 if tab.exited.is_some() {
@@ -1848,13 +1982,15 @@ impl AppState {
             );
             draw_text(
                 device,
-                if tab.exited.is_some() {
+                if self.note_edit_target.is_some() {
+                    "Ctrl+Enter save · Esc cancel"
+                } else if tab.exited.is_some() {
                     "Process exited · draft preserved"
                 } else {
                     "Ctrl+Shift+I focus · Ctrl+Enter send · Esc terminal"
                 },
                 RECT {
-                    left: client.right - 390,
+                    left: client.right - 260,
                     top: content_bottom - COMPOSER_HEIGHT + 4,
                     right: client.right - 10,
                     bottom: content_bottom - COMPOSER_HEIGHT + 28,
@@ -2266,12 +2402,13 @@ impl AppState {
         let mut client: RECT = unsafe { mem::zeroed() };
         unsafe { GetClientRect(self.window, &mut client) };
         let active_draft = window_text(self.edit);
-        let tree_rows = self.tree_rows();
-        let tabs = tree_rows
+        let visible_rows = self.tree_rows();
+        let all_rows = self.all_tree_rows();
+        let tabs = all_rows
             .iter()
-            .enumerate()
-            .filter_map(|(position, row)| {
+            .filter_map(|row| {
                 let tab = self.tabs.iter().find(|tab| tab.id == row.id)?;
+                let visible_position = visible_rows.iter().position(|visible| visible.id == row.id);
                 let draft = if self.active == Some(tab.id) {
                     !active_draft.is_empty()
                 } else {
@@ -2283,6 +2420,8 @@ impl AppState {
                     "parent_id": tab.parent_id.map(|id| format!("@{id}")),
                     "depth": row.depth,
                     "has_children": self.tabs.iter().any(|child| child.parent_id == Some(tab.id)),
+                    "collapsed": self.collapsed_tabs.contains(&tab.id),
+                    "visible": visible_position.is_some(),
                     "name": tab.title,
                     "terminal_title": tab.parser.callbacks().title,
                     "note": tab.note,
@@ -2296,12 +2435,34 @@ impl AppState {
                     },
                     "exit_code": tab.exited,
                     "draft": draft,
-                    "bounds": {
+                    "bounds": visible_position.map(|position| serde_json::json!({
                         "x": 6,
                         "y": TAB_TOP + position as i32 * TAB_HEIGHT,
                         "width": SIDEBAR_WIDTH - 12,
                         "height": TAB_HEIGHT - 3,
-                    }
+                    })),
+                    "actions": visible_position
+                        .filter(|_| self.active == Some(tab.id))
+                        .map(|position| serde_json::json!({
+                        "new_child": {
+                            "x": TAB_ADD_LEFT,
+                            "y": TAB_TOP + position as i32 * TAB_HEIGHT,
+                            "width": TAB_EDIT_LEFT - TAB_ADD_LEFT,
+                            "height": TAB_HEIGHT - 3,
+                        },
+                        "edit": {
+                            "x": TAB_EDIT_LEFT,
+                            "y": TAB_TOP + position as i32 * TAB_HEIGHT,
+                            "width": TAB_CLOSE_LEFT - TAB_EDIT_LEFT,
+                            "height": TAB_HEIGHT - 3,
+                        },
+                        "close": {
+                            "x": TAB_CLOSE_LEFT,
+                            "y": TAB_TOP + position as i32 * TAB_HEIGHT,
+                            "width": SIDEBAR_WIDTH - TAB_CLOSE_LEFT,
+                            "height": TAB_HEIGHT - 3,
+                        }
+                    }))
                 }))
             })
             .collect::<Vec<_>>();
@@ -2323,7 +2484,7 @@ impl AppState {
                 "restore_behavior": "restart-processes",
             },
             "window": {
-                "title": WINDOW_TITLE,
+                "title": window_text(self.window),
                 "client_width": client.right,
                 "client_height": client.bottom,
                 "minimized": unsafe { IsIconic(self.window) } != 0,
@@ -2566,7 +2727,7 @@ impl AppState {
             }
             "list-tab-tree" => {
                 let format = option_value(args, "-F").unwrap_or("#{window_id}:#{window_name}");
-                let rows = self.tree_rows();
+                let rows = self.all_tree_rows();
                 IpcResponse::success(
                     rows.iter()
                         .filter_map(|row| {
@@ -2574,11 +2735,13 @@ impl AppState {
                             let branch = if row.depth == 0 {
                                 String::new()
                             } else {
-                                format!(
-                                    "{}{} ",
-                                    "  ".repeat(row.depth.saturating_sub(1)),
-                                    if row.is_last { "└─" } else { "├─" }
-                                )
+                                let mut branch = row
+                                    .guides
+                                    .iter()
+                                    .map(|continues| if *continues { "│ " } else { "  " })
+                                    .collect::<String>();
+                                branch.push_str(if row.is_last { "└─ " } else { "├─ " });
+                                branch
                             };
                             let rendered = render_format(
                                 format,
@@ -2871,10 +3034,45 @@ impl AppState {
                             return IpcResponse::failure("can't find parent tab");
                         };
                         let parent_id = self.tabs[parent_position].id;
-                        match self.create_tab_with_parent(None, Vec::new(), true, Some(parent_id)) {
-                            Ok(_) => None,
+                        match self.create_tab_with_parent(
+                            Some("New child".to_owned()),
+                            Vec::new(),
+                            true,
+                            Some(parent_id),
+                        ) {
+                            Ok(index) => {
+                                if let Some(id) = self
+                                    .tabs
+                                    .iter()
+                                    .find(|tab| tab.index == index)
+                                    .map(|tab| tab.id)
+                                {
+                                    self.open_tab_editor(id);
+                                }
+                                None
+                            }
                             Err(error) => Some(IpcResponse::failure(format!("{error:#}"))),
                         }
+                    }
+                    "edit-tab" => {
+                        let Some(position) = self.target_position(option_value(args, "-t")) else {
+                            return IpcResponse::failure("can't find tab");
+                        };
+                        self.open_tab_editor(self.tabs[position].id);
+                        None
+                    }
+                    "toggle-tree" => {
+                        let Some(position) = self.target_position(option_value(args, "-t")) else {
+                            return IpcResponse::failure("can't find tab");
+                        };
+                        let id = self.tabs[position].id;
+                        if !self.tabs.iter().any(|tab| tab.parent_id == Some(id)) {
+                            return IpcResponse::failure("tab has no child nodes");
+                        }
+                        if !self.collapsed_tabs.remove(&id) {
+                            self.collapsed_tabs.insert(id);
+                        }
+                        None
                     }
                     "select-tab" => {
                         let Some(position) = self.target_position(option_value(args, "-t")) else {
@@ -2903,6 +3101,8 @@ impl AppState {
                     "cancel" => {
                         if self.settings_open {
                             self.close_settings();
+                        } else if self.note_edit_target.is_some() {
+                            self.finish_note_edit(false);
                         } else {
                             if self.pending_close.is_none() {
                                 return IpcResponse::failure("no modal is pending");
@@ -2942,8 +3142,11 @@ impl AppState {
                     return IpcResponse::failure("can't find window");
                 };
                 let text = positional_values(args, &["-t"], &[]).join(" ");
-                self.tabs[position].composer = text.clone();
-                if self.active == Some(self.tabs[position].id) {
+                let id = self.tabs[position].id;
+                if self.note_edit_target != Some(id) {
+                    self.tabs[position].composer = text.clone();
+                }
+                if self.active == Some(id) {
                     unsafe { SetWindowTextW(self.edit, wide(&text).as_ptr()) };
                 }
                 IpcResponse::success("")
@@ -3621,7 +3824,7 @@ Usage:
   agentermctl set-setting terminal.font-size 8..36
   agentermctl send-mouse [-t target] -x col -y row [--button left] [--action press]
   agentermctl ui-snapshot
-  agentermctl ui-action new-tab|new-child|select-tab|close-tab|confirm|cancel|composer-send
+  agentermctl ui-action new-tab|new-child|edit-tab|toggle-tree|select-tab|close-tab|confirm|cancel|composer-send
   agentermctl focus terminal|composer|sidebar [-t target]
   agentermctl wait-ui [--active @id] [--focus surface] [-t target --tab-state state]
   agentermctl protocol-info

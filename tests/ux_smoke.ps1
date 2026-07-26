@@ -38,7 +38,7 @@ try {
     if ($null -eq $tab -or $tab.state -ne 'running') {
         throw 'ui-snapshot did not expose the running test tab'
     }
-    if ($snapshot.window.title -notmatch '^AgenTerm-\d+\.\d+\.\d+') {
+    if ($snapshot.window.title -notmatch '^AgenTerm-\d+\.\d+\.\d+:\d+$') {
         throw "Window title is not versioned: $($snapshot.window.title)"
     }
     if ($snapshot.layout.status_bar.height -le 0 -or
@@ -69,6 +69,38 @@ try {
         $tree.IndexOf($grandchildName) -lt $tree.IndexOf($childName)) {
         throw "list-tab-tree was not in preorder:`n$tree"
     }
+    $snapshot = Invoke-AgenTerm @('ui-action', 'select-tab', '-t', $id) | ConvertFrom-Json
+    $tab = $snapshot.tabs | Where-Object id -eq $id
+    if ($tab.actions.new_child.width -le 0 -or $tab.actions.edit.width -le 0) {
+        throw 'Tree node did not expose direct add-child and edit actions'
+    }
+    $snapshot = Invoke-AgenTerm @('ui-action', 'toggle-tree', '-t', $id) | ConvertFrom-Json
+    $child = $snapshot.tabs | Where-Object name -eq $childName
+    if (-not $tab.has_children -or -not ($snapshot.tabs | Where-Object id -eq $id).collapsed -or
+        $child.visible) {
+        throw 'Collapsing a tree node did not hide its descendants'
+    }
+    Invoke-AgenTerm @('ui-action', 'toggle-tree', '-t', $id) | Out-Null
+
+    Write-Host 'STEP direct node add-child and editor'
+    $snapshot = Invoke-AgenTerm @('ui-action', 'new-child', '-t', $id) | ConvertFrom-Json
+    $directChild = $snapshot.tabs | Where-Object {
+        $_.parent_id -eq $id -and $_.name -eq 'New child'
+    }
+    if ($null -eq $directChild -or $snapshot.focus.surface -ne 'note-editor') {
+        throw 'Direct add-child did not create a child and open its editor'
+    }
+    $directName = "direct-worker-$PID"
+    Invoke-AgenTerm @(
+        'set-composer', '-t', $directChild.id, "$directName`ncreated from node editor"
+    ) | Out-Null
+    $snapshot = Invoke-AgenTerm @('ui-action', 'composer-send') | ConvertFrom-Json
+    $directChild = $snapshot.tabs | Where-Object id -eq $directChild.id
+    if ($directChild.name -ne $directName -or
+        $directChild.note -ne 'created from node editor') {
+        throw 'Direct node editor did not save the name and note'
+    }
+    Invoke-AgenTerm @('kill-window', '-t', $directChild.id) | Out-Null
 
     $savedErrorPreference = $ErrorActionPreference
     $ErrorActionPreference = 'SilentlyContinue'

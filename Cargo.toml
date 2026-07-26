@@ -1,6 +1,6 @@
 [package]
 name = "agenterm"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 description = "A tabbed Windows cmd.exe terminal with persistent exited tabs"
 license = "MIT OR Apache-2.0"
@@ -41,7 +41,8 @@ debug = 1
 incremental = true
 
 [profile.release]
-opt-level = 1
-lto = false
-codegen-units = 16
+opt-level = "z"
+lto = "thin"
+codegen-units = 1
+panic = "abort"
 strip = true

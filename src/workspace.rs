@@ -9,6 +9,7 @@ pub(crate) struct SavedWorkspace {
     pub(crate) version: u32,
     pub(crate) session_name: String,
     pub(crate) active_id: Option<u64>,
+    pub(crate) collapsed_ids: Vec<u64>,
     pub(crate) tabs: Vec<SavedTab>,
 }
 

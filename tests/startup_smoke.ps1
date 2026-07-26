@@ -44,7 +44,8 @@ try {
     }
     $version = ((& $CliExe --version) -split '\s+')[-1]
     $process.Refresh()
-    if ($process.MainWindowTitle -ne "AgenTerm-$version") {
+    $ipcPort = ($env:AGENTERM_IPC_ADDRESS -split ':')[-1]
+    if ($process.MainWindowTitle -ne "AgenTerm-$version`:$ipcPort") {
         throw "Unexpected window title: $($process.MainWindowTitle)"
     }
 

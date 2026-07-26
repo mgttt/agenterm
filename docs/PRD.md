@@ -24,12 +24,16 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [~] robust CJK double-cell layout; broader visual regression is needed
     - [ ] sustained high-throughput and long-output performance qualification
   - Human workspace
+    - [x] window title identifies version and live IPC port
     - [x] vertical tabs on the left with stable ID and numeric index
     - [x] tree starts at the top without a redundant logo/header strip
     - [x] tabs form a visible parent/child tree for agent and program teams
     - [x] tree order is parent-first with indentation and branch connectors
     - [x] closing a parent promotes its children without closing their processes
-    - [ ] collapse/expand, drag/drop reparenting, and team-level actions
+    - [x] the selected node exposes direct add-child, edit, and close actions
+    - [x] add-child immediately opens the new node's name/note editor
+    - [x] collapse/expand with persisted node state
+    - [ ] drag/drop reparenting and team-level actions
     - [x] line 1: user-defined role/name plus the running program
     - [x] line 2: user note, with terminal-controlled TITLE as fallback
     - [x] explicit confirmation before closing a live process
@@ -126,7 +130,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
         - `set-tab-note [-t target] text`, `show-tab-note [-t target]`
       - Semantic UI control
         - `focus terminal|composer|sidebar [-t target]`
-        - `ui-action new-tab|new-child|select-tab|close-tab|confirm|cancel|
+        - `ui-action new-tab|new-child|edit-tab|toggle-tree|select-tab|close-tab|confirm|cancel|
           composer-send|open-settings [-t target]`
       - Visual and terminal diagnostics
         - `screenshot [-o path.png]`
@@ -150,6 +154,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   - Delivery and quality
     - [x] fast incremental developer build under ignored local `dist/`
     - [x] release mode and `agenterm.json` build metadata
+    - [x] size-optimized release profile and enforced 4 MiB GUI budget
     - [x] GUI `agenterm.exe` has no startup console flash
     - [x] console `agentermctl.exe` preserves CLI output and exit codes
     - [x] startup regression requires a main window within one second locally

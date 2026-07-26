@@ -7,26 +7,36 @@ pub(crate) struct TabTreeNode {
     pub(crate) sort_key: u32,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct TabTreeRow {
     pub(crate) id: u64,
     pub(crate) depth: usize,
     pub(crate) is_last: bool,
+    pub(crate) ancestors: Vec<u64>,
+    pub(crate) guides: Vec<bool>,
 }
 
 pub(crate) fn tree_rows(nodes: &[TabTreeNode]) -> Vec<TabTreeRow> {
     fn visit(
         nodes: &[TabTreeNode],
         id: u64,
-        depth: usize,
         is_last: bool,
+        ancestors: &[u64],
+        guides: &[bool],
         visited: &mut HashSet<u64>,
         rows: &mut Vec<TabTreeRow>,
     ) {
         if !visited.insert(id) {
             return;
         }
-        rows.push(TabTreeRow { id, depth, is_last });
+        let depth = ancestors.len();
+        rows.push(TabTreeRow {
+            id,
+            depth,
+            is_last,
+            ancestors: ancestors.to_vec(),
+            guides: guides.to_vec(),
+        });
 
         let mut children = nodes
             .iter()
@@ -36,11 +46,18 @@ pub(crate) fn tree_rows(nodes: &[TabTreeNode]) -> Vec<TabTreeRow> {
         children.sort_by_key(|node| node.sort_key);
         let child_count = children.len();
         for (position, child) in children.into_iter().enumerate() {
+            let mut child_ancestors = ancestors.to_vec();
+            child_ancestors.push(id);
+            let mut child_guides = guides.to_vec();
+            if depth > 0 {
+                child_guides.push(!is_last);
+            }
             visit(
                 nodes,
                 child.id,
-                depth + 1,
                 position + 1 == child_count,
+                &child_ancestors,
+                &child_guides,
                 visited,
                 rows,
             );
@@ -65,8 +82,9 @@ pub(crate) fn tree_rows(nodes: &[TabTreeNode]) -> Vec<TabTreeRow> {
         visit(
             nodes,
             root.id,
-            0,
             position + 1 == root_count,
+            &[],
+            &[],
             &mut visited,
             &mut rows,
         );
@@ -79,7 +97,7 @@ pub(crate) fn tree_rows(nodes: &[TabTreeNode]) -> Vec<TabTreeRow> {
         .collect::<Vec<_>>();
     remaining.sort_by_key(|node| node.sort_key);
     for node in remaining {
-        visit(nodes, node.id, 0, true, &mut visited, &mut rows);
+        visit(nodes, node.id, true, &[], &[], &mut visited, &mut rows);
     }
     rows
 }
@@ -113,7 +131,7 @@ mod tests {
         let nodes = [
             TabTreeNode {
                 id: 4,
-                parent_id: Some(1),
+                parent_id: Some(3),
                 sort_key: 3,
             },
             TabTreeNode {
@@ -138,8 +156,10 @@ mod tests {
             vec![1, 3, 4, 2]
         );
         assert_eq!(rows[1].depth, 1);
-        assert!(!rows[1].is_last);
+        assert!(rows[1].is_last);
         assert!(rows[2].is_last);
+        assert_eq!(rows[2].ancestors, vec![1, 3]);
+        assert_eq!(rows[2].guides, vec![false]);
     }
 
     #[test]

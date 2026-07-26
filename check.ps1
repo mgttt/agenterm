@@ -53,6 +53,9 @@ try {
         if ((Get-PeSubsystem $cli) -ne 3) {
             throw 'agentermctl.exe must use the Windows Console subsystem.'
         }
+        if ($Release -and (Get-Item $gui).Length -gt 4MB) {
+            throw 'Release agenterm.exe exceeds the 4 MiB size budget.'
+        }
 
         $metadata = Get-Content '.\dist\agenterm.json' -Raw | ConvertFrom-Json
         $names = @($metadata.executables.name)
