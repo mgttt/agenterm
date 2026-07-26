@@ -60,8 +60,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [ ] split panes and layout commands
     - [ ] full compatibility matrix; compatibility claims remain semantic
   - Delivery and quality
-    - [x] fast incremental developer build at repository-root `agenterm.exe`
-    - [x] release mode and root `agenterm.json` build metadata
+    - [x] fast incremental developer build under ignored local `dist/`
+    - [x] release mode and `agenterm.json` build metadata
+    - [x] version-tagged GitHub Release automation for EXE, metadata, and ZIP
     - [x] unit tests for command parsing, protocol, settings, and RMUX status
     - [x] CLI and semantic UX smoke tests through public interfaces
     - [x] one-command fmt, Clippy, test, build, and smoke regression

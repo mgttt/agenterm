@@ -1,0 +1,62 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install lint components
+        run: rustup component add rustfmt clippy
+
+      - name: Verify tag matches Cargo version
+        shell: pwsh
+        run: |
+          $cargo = Get-Content ./Cargo.toml -Raw
+          $match = [regex]::Match(
+            $cargo,
+            '(?ms)^\[package\].*?^version\s*=\s*"(?<version>[^"]+)"'
+          )
+          if (-not $match.Success) {
+            throw "Could not read Cargo.toml package version."
+          }
+          $expected = "v$($match.Groups['version'].Value)"
+          if ($env:GITHUB_REF_NAME -ne $expected) {
+            throw "Tag $env:GITHUB_REF_NAME does not match $expected."
+          }
+
+      - name: Run release quality gate
+        shell: pwsh
+        run: ./check.ps1 -Release -SkipSmoke
+
+      - name: Package Windows release
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME.TrimStart('v')
+          $zip = "./dist/agenterm-$version-windows-x86_64.zip"
+          Compress-Archive `
+            -LiteralPath ./dist/agenterm.exe, ./dist/agenterm.json `
+            -DestinationPath $zip
+
+      - name: Publish GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = $env:GITHUB_REF_NAME.TrimStart('v')
+          $zip = "./dist/agenterm-$version-windows-x86_64.zip"
+          gh release create $env:GITHUB_REF_NAME `
+            ./dist/agenterm.exe `
+            ./dist/agenterm.json `
+            $zip `
+            --verify-tag `
+            --generate-notes `
+            --title "AgenTerm $env:GITHUB_REF_NAME"

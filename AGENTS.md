@@ -22,10 +22,11 @@ the information cannot live here or in the PRD.
 Use PowerShell from the repository root:
 
 ```powershell
-.\build.bat             # fast incremental dev build -> .\agenterm.exe/json
+.\build.bat             # fast incremental dev build -> .\dist\
 .\check.ps1 -SkipSmoke  # fmt, Clippy, unit tests, dev artifact
 .\check.ps1             # full public-interface regression
 .\build.bat release     # distributable release artifact
+.\release.ps1           # validate, tag, push; CI publishes GitHub Release
 ```
 
 The former `.cargo/config.toml` forced `jobs = 1` and made clean builds much
@@ -37,11 +38,11 @@ incremental; release-only optimization belongs in `[profile.release]`.
 Discover the live interface instead of duplicating a long command manual:
 
 ```powershell
-.\agenterm.exe --help
-.\agenterm.exe list-commands
-.\agenterm.exe protocol-info
-.\agenterm.exe ui-snapshot
-.\agenterm.exe list-windows -F '#{window_id}:#{window_name}'
+.\dist\agenterm.exe --help
+.\dist\agenterm.exe list-commands
+.\dist\agenterm.exe protocol-info
+.\dist\agenterm.exe ui-snapshot
+.\dist\agenterm.exe list-windows -F '#{window_id}:#{window_name}'
 ```
 
 Use a distinct `AGENTERM_IPC_ADDRESS` for isolated tests. Prefer stable tab IDs
@@ -57,5 +58,7 @@ PNG evidence.
 - Exercise behavior through the public CLI in black-box tests.
 - Update the PRD tree when capability state changes.
 - Keep README human-facing and brief; keep this file agent-facing.
+- Do not commit generated binaries. Local artifacts belong in ignored `dist/`;
+  downloadable binaries are published by the tag-triggered release workflow.
 - Do not claim full tmux/RMUX compatibility. One AgenTerm tab is currently one
   pane, and unsupported commands must fail explicitly.

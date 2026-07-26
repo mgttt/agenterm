@@ -1,5 +1,4 @@
 /target/
-/agenterm.exe
-/agenterm.json
+/dist/
 /agenterm-window*.png
 /agenterm-pane*.png

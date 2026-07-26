@@ -5,6 +5,7 @@ pushd "%~dp0"
 set "PROFILE=dev"
 set "CARGO_ARGS="
 set "SOURCE_EXE=target\debug\agenterm.exe"
+set "DIST_DIR=%~dp0dist"
 
 if /i "%~1"=="release" (
     set "PROFILE=release"
@@ -24,17 +25,18 @@ if errorlevel 1 (
     exit /b 1
 )
 
-copy /y "%SOURCE_EXE%" "agenterm.exe" >nul
+if not exist "%DIST_DIR%" mkdir "%DIST_DIR%"
+copy /y "%SOURCE_EXE%" "%DIST_DIR%\agenterm.exe" >nul
 if errorlevel 1 (
     echo.
-    echo Failed to copy agenterm.exe to the repository root.
+    echo Failed to copy agenterm.exe to dist.
     popd
     exit /b 1
 )
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\write-build-metadata.ps1" ^
-    -ManifestPath "%~dp0agenterm.json" ^
-    -ExecutablePath "%~dp0agenterm.exe" ^
+    -ManifestPath "%DIST_DIR%\agenterm.json" ^
+    -ExecutablePath "%DIST_DIR%\agenterm.exe" ^
     -Profile "%PROFILE%"
 if errorlevel 1 (
     echo.
@@ -44,7 +46,7 @@ if errorlevel 1 (
 )
 
 echo.
-echo Built:    %CD%\agenterm.exe [%PROFILE%]
-echo Metadata: %CD%\agenterm.json
+echo Built:    %DIST_DIR%\agenterm.exe [%PROFILE%]
+echo Metadata: %DIST_DIR%\agenterm.json
 popd
 exit /b 0

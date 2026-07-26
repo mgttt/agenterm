@@ -21,15 +21,15 @@ per-tab external composer, and a tmux/RMUX-style command line.
 ```powershell
 cd D:\dev\agenterm
 .\build.bat
-.\agenterm.exe
+.\dist\agenterm.exe
 ```
 
 The default build is an incremental development build. Use
 `.\build.bat release` only for a distributable build. Both modes produce two
-artifacts in the repository root:
+ignored local artifacts under `dist/`:
 
-- `agenterm.exe` — the selected dev or release executable.
-- `agenterm.json` — version, UTC build time, Git state, Rust target, size, and
+- `dist/agenterm.exe` — the selected dev or release executable.
+- `dist/agenterm.json` — version, UTC build time, Git state, Rust target, size, and
   SHA-256 metadata.
 
 Run the complete quality gate:
@@ -41,7 +41,7 @@ Run the complete quality gate:
 ## Examples
 
 ```powershell
-$r = ".\agenterm.exe"
+$r = ".\dist\agenterm.exe"
 
 & $r new-window -d -n build
 & $r set-composer -t build "cargo check"
@@ -50,6 +50,19 @@ $r = ".\agenterm.exe"
 & $r capture-pane -p -t build
 & $r screenshot-pane -t build -o build.png
 ```
+
+## Release
+
+Keep `Cargo.toml`'s version current, commit the release state on `main`, then
+run:
+
+```powershell
+.\release.ps1
+```
+
+The script runs the full local quality gate and atomically pushes `main` plus
+the `v<version>` tag. GitHub Actions then builds on a clean Windows runner and
+publishes the EXE, metadata, ZIP, and generated notes to GitHub Releases.
 
 ## Documentation
 
