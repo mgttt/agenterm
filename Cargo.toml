@@ -1,9 +1,18 @@
 [package]
 name = "agenterm"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "A tabbed Windows cmd.exe terminal with persistent exited tabs"
 license = "MIT OR Apache-2.0"
+autobins = false
+
+[[bin]]
+name = "agenterm"
+path = "src/bin/agenterm.rs"
+
+[[bin]]
+name = "agentermctl"
+path = "src/bin/agentermctl.rs"
 
 [dependencies]
 anyhow = "1"

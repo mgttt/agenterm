@@ -95,33 +95,13 @@ struct IpcEnvelope {
     respond_to: Sender<IpcResponse>,
 }
 
-fn main() {
-    let arguments: Vec<String> = env::args().skip(1).collect();
-    if arguments
-        .first()
-        .is_some_and(|arg| arg == "-V" || arg == "--version")
-    {
-        println!("agenterm {}", env!("CARGO_PKG_VERSION"));
-        return;
-    }
-    if arguments
-        .first()
-        .is_some_and(|arg| arg == "-h" || arg == "--help")
-    {
-        print_help();
-        return;
-    }
-    if !arguments.is_empty() {
-        std::process::exit(run_cli(arguments));
-    }
-
+pub fn run_gui_entry() {
     if env::var_os("AGENTERM_SERVER").is_none()
         && send_ipc_request(vec!["__focus".to_owned()]).is_ok()
     {
         return;
     }
 
-    hide_owned_console_window();
     if let Err(error) = run_gui() {
         let message = wide(&format!("AgenTerm failed to start:\n\n{error:#}"));
         unsafe {
@@ -133,8 +113,27 @@ fn main() {
             );
         }
         eprintln!("{error:#}");
-        std::process::exit(1);
     }
+}
+
+pub fn run_cli_entry() -> i32 {
+    let arguments: Vec<String> = env::args().skip(1).collect();
+    if arguments
+        .first()
+        .is_some_and(|arg| arg == "-V" || arg == "--version")
+    {
+        println!("agentermctl {}", env!("CARGO_PKG_VERSION"));
+        return 0;
+    }
+    if arguments.is_empty()
+        || arguments
+            .first()
+            .is_some_and(|arg| arg == "-h" || arg == "--help")
+    {
+        print_help();
+        return 0;
+    }
+    run_cli(arguments)
 }
 
 fn run_gui() -> Result<()> {
@@ -2975,7 +2974,7 @@ fn run_cli(arguments: Vec<String>) -> i32 {
     let mut response = send_ipc_request(arguments.clone());
     if response.is_err()
         && may_start_server
-        && let Ok(executable) = env::current_exe()
+        && let Ok(executable) = gui_executable_path()
     {
         let executable = wide(&executable.to_string_lossy());
         let operation = wide("open");
@@ -3140,64 +3139,56 @@ fn run_wait_pane(arguments: &[String]) -> i32 {
     }
 }
 
-fn hide_owned_console_window() {
-    #[link(name = "Kernel32")]
-    unsafe extern "system" {
-        fn GetConsoleProcessList(process_list: *mut u32, process_count: u32) -> u32;
-        fn GetConsoleWindow() -> isize;
+fn gui_executable_path() -> Result<std::path::PathBuf> {
+    let current =
+        env::current_exe().context("could not locate the running agentermctl executable")?;
+    let gui = current.with_file_name("agenterm.exe");
+    if !gui.is_file() {
+        anyhow::bail!(
+            "AgenTerm GUI executable was not found beside agentermctl: {}",
+            gui.display()
+        );
     }
-    #[link(name = "User32")]
-    unsafe extern "system" {
-        fn ShowWindow(window: isize, command: i32) -> i32;
-    }
-    let mut processes = [0_u32; 2];
-    let count = unsafe { GetConsoleProcessList(processes.as_mut_ptr(), processes.len() as u32) };
-    if count == 1 {
-        let window = unsafe { GetConsoleWindow() };
-        if window != 0 {
-            let _ = unsafe { ShowWindow(window, 0) };
-        }
-    }
+    Ok(gui)
 }
 
 fn print_help() {
     println!(
         "\
-AgenTerm - native tabbed cmd.exe and tmux/rmux-style multiplexer
+AgenTerm CLI - control the native tabbed terminal
 
 Usage:
-  agenterm
-  agenterm new-session [-s name]
-  agenterm new-window [-dn name] [command [args...]]
-  agenterm list-windows [-F format]
-  agenterm select-window -t target
-  agenterm rename-window [-t target] name
-  agenterm kill-window -t target
-  agenterm send-keys [-t target] key...
-  agenterm capture-pane -p [-t target]
-  agenterm capture-pane --raw-escaped [-t target]
-  agenterm dump-cells [-t target] [-r row]
-  agenterm active-window [-F format]
-  agenterm inspect [-t target]
-  agenterm screenshot [-o file.png]
-  agenterm screenshot-pane [-t target] [-o file.png]
-  agenterm show-composer [-t target]
-  agenterm set-composer [-t target] text
-  agenterm set-composer [-t target] --stdin|--file path
-  agenterm send-composer [-t target]
-  agenterm set-tab-note [-t target] text
-  agenterm show-tab-note [-t target]
-  agenterm get-settings
-  agenterm set-setting terminal.font-family FAMILY
-  agenterm set-setting terminal.font-size 8..36
-  agenterm send-mouse [-t target] -x col -y row [--button left] [--action press]
-  agenterm ui-snapshot
-  agenterm ui-action new-tab|select-tab|close-tab|confirm|cancel|composer-send
-  agenterm focus terminal|composer|sidebar [-t target]
-  agenterm wait-ui [--active @id] [--focus surface] [-t target --tab-state state]
-  agenterm protocol-info
-  agenterm list-panes [-F format]
-  agenterm list-sessions | has-session | kill-server"
+  agentermctl new-session [-s name]
+  agentermctl new-window [-dn name] [command [args...]]
+  agentermctl list-windows [-F format]
+  agentermctl select-window -t target
+  agentermctl rename-window [-t target] name
+  agentermctl kill-window -t target
+  agentermctl send-keys [-t target] key...
+  agentermctl capture-pane -p [-t target]
+  agentermctl capture-pane --raw-escaped [-t target]
+  agentermctl dump-cells [-t target] [-r row]
+  agentermctl active-window [-F format]
+  agentermctl inspect [-t target]
+  agentermctl screenshot [-o file.png]
+  agentermctl screenshot-pane [-t target] [-o file.png]
+  agentermctl show-composer [-t target]
+  agentermctl set-composer [-t target] text
+  agentermctl set-composer [-t target] --stdin|--file path
+  agentermctl send-composer [-t target]
+  agentermctl set-tab-note [-t target] text
+  agentermctl show-tab-note [-t target]
+  agentermctl get-settings
+  agentermctl set-setting terminal.font-family FAMILY
+  agentermctl set-setting terminal.font-size 8..36
+  agentermctl send-mouse [-t target] -x col -y row [--button left] [--action press]
+  agentermctl ui-snapshot
+  agentermctl ui-action new-tab|select-tab|close-tab|confirm|cancel|composer-send
+  agentermctl focus terminal|composer|sidebar [-t target]
+  agentermctl wait-ui [--active @id] [--focus surface] [-t target --tab-state state]
+  agentermctl protocol-info
+  agentermctl list-panes [-F format]
+  agentermctl list-sessions | has-session | kill-server"
     );
 }
 

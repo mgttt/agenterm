@@ -25,10 +25,12 @@ cd D:\dev\agenterm
 ```
 
 The default build is an incremental development build. Use
-`.\build.bat release` only for a distributable build. Both modes produce two
+`.\build.bat release` only for a distributable build. Both modes produce three
 ignored local artifacts under `dist/`:
 
-- `dist/agenterm.exe` — the selected dev or release executable.
+- `dist/agenterm.exe` — GUI application; double-clicking does not create a
+  temporary console window.
+- `dist/agentermctl.exe` — console control client with tmux/RMUX-style commands.
 - `dist/agenterm.json` — version, UTC build time, Git state, Rust target, size, and
   SHA-256 metadata.
 
@@ -41,7 +43,7 @@ Run the complete quality gate:
 ## Examples
 
 ```powershell
-$r = ".\dist\agenterm.exe"
+$r = ".\dist\agentermctl.exe"
 
 & $r new-window -d -n build
 & $r set-composer -t build "cargo check"
@@ -62,7 +64,7 @@ run:
 
 The script runs the full local quality gate and atomically pushes `main` plus
 the `v<version>` tag. GitHub Actions then builds on a clean Windows runner and
-publishes the EXE, metadata, ZIP, and generated notes to GitHub Releases.
+publishes both EXEs, metadata, ZIP, and generated notes to GitHub Releases.
 
 ## Documentation
 

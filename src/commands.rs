@@ -40,6 +40,7 @@ show-options (show)
 start-server
 ui-action
 ui-snapshot
+wait-pane (expect-pane)
 wait-ui";
 
 pub(crate) fn option_value<'a>(args: &'a [String], option: &str) -> Option<&'a str> {

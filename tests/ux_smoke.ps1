@@ -1,5 +1,5 @@
 param(
-    [string]$Exe = (Join-Path $PSScriptRoot '..\dist\agenterm.exe')
+    [string]$Exe = (Join-Path $PSScriptRoot '..\dist\agentermctl.exe')
 )
 
 $ErrorActionPreference = 'Stop'

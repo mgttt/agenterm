@@ -4,13 +4,15 @@ pushd "%~dp0"
 
 set "PROFILE=dev"
 set "CARGO_ARGS="
-set "SOURCE_EXE=target\debug\agenterm.exe"
+set "GUI_SOURCE_EXE=target\debug\agenterm.exe"
+set "CLI_SOURCE_EXE=target\debug\agentermctl.exe"
 set "DIST_DIR=%~dp0dist"
 
 if /i "%~1"=="release" (
     set "PROFILE=release"
     set "CARGO_ARGS=--release"
-    set "SOURCE_EXE=target\release\agenterm.exe"
+    set "GUI_SOURCE_EXE=target\release\agenterm.exe"
+    set "CLI_SOURCE_EXE=target\release\agentermctl.exe"
 ) else if not "%~1"=="" (
     echo Usage: build.bat [release]
     popd
@@ -26,7 +28,7 @@ if errorlevel 1 (
 )
 
 if not exist "%DIST_DIR%" mkdir "%DIST_DIR%"
-copy /y "%SOURCE_EXE%" "%DIST_DIR%\agenterm.exe" >nul
+copy /y "%GUI_SOURCE_EXE%" "%DIST_DIR%\agenterm.exe" >nul
 if errorlevel 1 (
     echo.
     echo Failed to copy agenterm.exe to dist.
@@ -34,9 +36,18 @@ if errorlevel 1 (
     exit /b 1
 )
 
+copy /y "%CLI_SOURCE_EXE%" "%DIST_DIR%\agentermctl.exe" >nul
+if errorlevel 1 (
+    echo.
+    echo Failed to copy agentermctl.exe to dist.
+    popd
+    exit /b 1
+)
+
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\write-build-metadata.ps1" ^
     -ManifestPath "%DIST_DIR%\agenterm.json" ^
     -ExecutablePath "%DIST_DIR%\agenterm.exe" ^
+    -CliExecutablePath "%DIST_DIR%\agentermctl.exe" ^
     -Profile "%PROFILE%"
 if errorlevel 1 (
     echo.
@@ -47,6 +58,7 @@ if errorlevel 1 (
 
 echo.
 echo Built:    %DIST_DIR%\agenterm.exe [%PROFILE%]
+echo CLI:      %DIST_DIR%\agentermctl.exe
 echo Metadata: %DIST_DIR%\agenterm.json
 popd
 exit /b 0

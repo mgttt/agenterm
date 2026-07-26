@@ -6,8 +6,10 @@ the information cannot live here or in the PRD.
 
 ## Repository map
 
-- `src/main.rs` — Win32 window, terminal/tab state, rendering, and command
+- `src/lib.rs` — Win32 window, terminal/tab state, rendering, and command
   execution.
+- `src/bin/agenterm.rs` — Windows-subsystem GUI entry point.
+- `src/bin/agentermctl.rs` — console-subsystem CLI entry point.
 - `src/commands.rs` — reusable CLI parsing, command catalog, key mapping, and
   output-path helpers.
 - `src/protocol.rs` — serialized local IPC request/response contract.
@@ -38,11 +40,11 @@ incremental; release-only optimization belongs in `[profile.release]`.
 Discover the live interface instead of duplicating a long command manual:
 
 ```powershell
-.\dist\agenterm.exe --help
-.\dist\agenterm.exe list-commands
-.\dist\agenterm.exe protocol-info
-.\dist\agenterm.exe ui-snapshot
-.\dist\agenterm.exe list-windows -F '#{window_id}:#{window_name}'
+.\dist\agentermctl.exe --help
+.\dist\agentermctl.exe list-commands
+.\dist\agentermctl.exe protocol-info
+.\dist\agentermctl.exe ui-snapshot
+.\dist\agentermctl.exe list-windows -F '#{window_id}:#{window_name}'
 ```
 
 Use a distinct `AGENTERM_IPC_ADDRESS` for isolated tests. Prefer stable tab IDs
@@ -60,5 +62,7 @@ PNG evidence.
 - Keep README human-facing and brief; keep this file agent-facing.
 - Do not commit generated binaries. Local artifacts belong in ignored `dist/`;
   downloadable binaries are published by the tag-triggered release workflow.
+- Keep `agenterm.exe` as a Windows-subsystem GUI and `agentermctl.exe` as the
+  console control client. Both entry points must reuse the library.
 - Do not claim full tmux/RMUX compatibility. One AgenTerm tab is currently one
   pane, and unsupported commands must fail explicitly.

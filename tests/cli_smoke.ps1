@@ -1,5 +1,5 @@
 param(
-    [string]$Exe = (Join-Path $PSScriptRoot '..\dist\agenterm.exe')
+    [string]$Exe = (Join-Path $PSScriptRoot '..\dist\agentermctl.exe')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -38,6 +38,21 @@ try {
     Write-Host 'STEP create tab'
     Invoke-AgenTerm @('new-window', '-d', '-n', $name) | Out-Null
     $created = $true
+
+    Write-Host 'STEP discover aligned and extended commands'
+    $commands = Invoke-AgenTerm @('list-commands')
+    foreach ($expected in @(
+        'new-window (neww)',
+        'list-windows (lsw)',
+        'send-keys (send)',
+        'wait-pane (expect-pane)',
+        'set-composer',
+        'ui-snapshot'
+    )) {
+        if (-not $commands.Contains($expected)) {
+            throw "list-commands did not advertise: $expected"
+        }
+    }
 
     Write-Host 'STEP composer round trip'
     Invoke-AgenTerm @('set-composer', '-t', $name, "echo $token") | Out-Null

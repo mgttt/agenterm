@@ -50,6 +50,63 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       - [x] feature discovery through `protocol-info`
       - [x] explicit errors for unsupported operations
       - [ ] named-pipe transport and stable event subscription
+  - Command line (`agentermctl.exe`)
+    - Shared grammar
+      - target: `-t @id`, `-t %id`, `-t index`, or `-t exact-name`
+      - format: `-F FORMAT`; supports `#S`, `#I`, `#W`, `#P` and
+        `#{session_name}`, `#{window_*}`, `#{pane_*}`, `#{terminal_title}`
+      - stable IDs are preferred; numeric indexes may change after closing tabs
+    - tmux/RMUX-aligned commands
+      - Session/server
+        - `new-session|new [-s name] [command [args...]]`
+        - `attach-session|attach`, `start-server`
+        - `list-sessions|ls`, `has-session|has [-t target]`
+        - `rename-session|rename name`
+        - `kill-session`, `kill-server`
+      - Windows mapped to AgenTerm tabs
+        - `new-window|neww [-d] [-n name] [command [args...]]`
+        - `list-windows|lsw [-F format]`
+        - `select-window|selectw -t target`
+        - `next-window|next`, `previous-window|prev`
+        - `rename-window|renamew [-t target] name`
+        - `kill-window|killw -t target`
+      - Single pane per tab
+        - `list-panes|lsp [-t target] [-F format]`
+        - `send-keys|send [-t target] [-l] key...`
+        - `capture-pane|capturep -p [-t target]`
+        - `display-message|display -p [-t target] format`
+        - `show-options|show`, `list-commands|lscm`
+        - [ ] `split-window|splitw` returns an explicit unsupported error
+    - AgenTerm extensions
+      - State and deterministic waits
+        - `active-window|active-tab [-F format]`
+        - `inspect|pane-snapshot [-t target]`
+        - `dump-cells [-t target] [-r row]`
+        - `capture-pane --raw-escaped [-t target]`
+        - `wait-pane|expect-pane [-t target] [--contains text|--dead]
+          [--timeout-ms ms]`
+        - `ui-snapshot`, `protocol-info`
+        - `wait-ui [--active @id] [--focus surface] [-t target
+          --tab-state running|dead] [--timeout-ms ms]`
+      - Composer and tab metadata
+        - `show-composer [-t target]`
+        - `set-composer [-t target] text|--stdin|--file path`
+        - `send-composer [-t target]`
+        - `set-tab-note [-t target] text`, `show-tab-note [-t target]`
+      - Semantic UI control
+        - `focus terminal|composer|sidebar [-t target]`
+        - `ui-action new-tab|select-tab|close-tab|confirm|cancel|
+          composer-send|open-settings [-t target]`
+      - Visual and terminal diagnostics
+        - `screenshot [-o path.png]`
+        - `screenshot-pane|screenshot-tab [-t target] [-o path.png]`
+        - `send-mouse [-t target] -x col -y row [--button
+          left|middle|right|wheel-up|wheel-down] [--action press|release]
+          [--protocol auto|sgr|native]`
+      - Settings
+        - `get-settings`
+        - `set-setting terminal.font-family FAMILY`
+        - `set-setting terminal.font-size 8..36`
   - tmux/RMUX compatibility
     - [x] common session/window command names, aliases, targets, and formats
     - [x] function-key byte sequences including Byobu F2/F3/F4/F6/F8
@@ -62,7 +119,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   - Delivery and quality
     - [x] fast incremental developer build under ignored local `dist/`
     - [x] release mode and `agenterm.json` build metadata
-    - [x] version-tagged GitHub Release automation for EXE, metadata, and ZIP
+    - [x] GUI `agenterm.exe` has no startup console flash
+    - [x] console `agentermctl.exe` preserves CLI output and exit codes
+    - [x] version-tagged GitHub Release automation for both EXEs, metadata,
+      and ZIP
     - [x] unit tests for command parsing, protocol, settings, and RMUX status
     - [x] CLI and semantic UX smoke tests through public interfaces
     - [x] one-command fmt, Clippy, test, build, and smoke regression
@@ -84,6 +144,6 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 ## Current acceptance gate
 
 Run `.\check.ps1`. A change is ready only when formatting, Clippy with warnings
-denied, unit tests, root artifact generation, CLI smoke, and semantic UX smoke
-all pass. Rendering changes additionally require `screenshot` or
+denied, unit tests, `dist/` artifact generation, CLI smoke, and semantic UX
+smoke all pass. Rendering changes additionally require `screenshot` or
 `screenshot-pane` inspection.

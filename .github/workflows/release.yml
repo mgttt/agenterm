@@ -43,7 +43,10 @@ jobs:
           $version = $env:GITHUB_REF_NAME.TrimStart('v')
           $zip = "./dist/agenterm-$version-windows-x86_64.zip"
           Compress-Archive `
-            -LiteralPath ./dist/agenterm.exe, ./dist/agenterm.json `
+            -LiteralPath `
+              ./dist/agenterm.exe, `
+              ./dist/agentermctl.exe, `
+              ./dist/agenterm.json `
             -DestinationPath $zip
 
       - name: Publish GitHub Release
@@ -55,6 +58,7 @@ jobs:
           $zip = "./dist/agenterm-$version-windows-x86_64.zip"
           gh release create $env:GITHUB_REF_NAME `
             ./dist/agenterm.exe `
+            ./dist/agentermctl.exe `
             ./dist/agenterm.json `
             $zip `
             --verify-tag `
