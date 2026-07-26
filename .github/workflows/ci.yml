@@ -1,0 +1,16 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install lint components
+        run: rustup component add rustfmt clippy
+      - name: Run quality gate
+        shell: pwsh
+        run: ./check.ps1 -SkipSmoke
