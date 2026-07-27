@@ -64,6 +64,42 @@ The GUI must expose its native window before starting the initial ConPTY.
 `tests/startup_smoke.ps1` guards a one-second local first-window budget and then
 waits through public state until the asynchronous terminal becomes ready.
 
+## Terminal interaction engineering
+
+PuTTY is the local professional-terminal reference implementation. The reviewed
+baseline is `D:\dev\putty` commit
+`61574e2e98f7d262dea4ff6380e167541518aedf` (2026-07-25). Use it to check
+interaction invariants and edge cases, not as a source for blind code copying.
+Its permissive licence still requires preserving its notice with any substantial
+copied portion; prefer independent Rust implementations based on observed
+behavior.
+
+- Treat mouse input as an explicit arbitration between local selection and
+  application-requested raw mouse reporting. A selection gesture must keep
+  ownership through release; a future raw-mouse path should support a documented
+  Shift override for local selection and must never send an unmatched release.
+- Keep selection states distinct: button-down/about-to-select, dragging, and
+  completed. A click that never becomes a drag must retain its terminal/RMUX
+  click behavior. Capture loss, modal menus, tab changes, and shutdown must
+  cancel an unfinished drag instead of leaving input or rendering suspended.
+- Store and compare selection endpoints as terminal-cell positions. Normalize
+  forward/reverse selections, skip wide-cell continuations when copying, use
+  Windows CRLF in clipboard text, and test CJK plus wrapped/multiline content.
+  Dragging beyond the viewport should eventually auto-scroll without inventing
+  out-of-range cells.
+- Accumulate high-resolution wheel deltas until `WHEEL_DELTA`; do not discard
+  partial input. Wheel events go to scrollback unless an application raw-mouse
+  mode owns them. Scrollbar thumb positions need full-width arithmetic and the
+  viewport, capture, screenshots, and structured snapshot must agree.
+- Respect Win32 clipboard ownership: allocate movable NUL-terminated UTF-16,
+  transfer ownership only after `SetClipboardData` succeeds, and free on every
+  pre-transfer failure. Clipboard reads for future terminal paste must not block
+  the GUI thread; normalize newlines, filter unsafe control characters, and
+  honor bracketed-paste framing.
+- Minimize must not resize the PTY to the iconic client rectangle. Resize,
+  maximize/restore, font metrics, DPI changes, scrollbar geometry, and terminal
+  rows/columns form one contract and need state plus PNG evidence.
+
 ## Change rules
 
 - All agents and subagents work in the single shared `D:\dev\agenterm`

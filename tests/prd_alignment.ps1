@@ -106,7 +106,12 @@ foreach ($capability in $capabilities) {
 $registeredEvidence = [Collections.Generic.HashSet[string]]::new(
     [StringComparer]::Ordinal
 )
-foreach ($suite in @('cli_smoke.ps1', 'fleet_smoke.ps1', 'ux_smoke.ps1')) {
+foreach ($suite in @(
+    'cli_smoke.ps1'
+    'fleet_smoke.ps1'
+    'script_smoke.ps1'
+    'ux_smoke.ps1'
+)) {
     $suitePath = Join-Path $PSScriptRoot $suite
     $suiteEvidence = @(& $suitePath -ListEvidence 2>&1)
     if ($LASTEXITCODE -ne 0) {

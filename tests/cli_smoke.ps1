@@ -7,6 +7,8 @@ $ErrorActionPreference = 'Stop'
 $declaredEvidence = @(
     'cli.backspace-del-one'
     'cli.remain-on-exit'
+    'cli.stable-create-id'
+    'cli.observable-events'
 )
 if ($ListEvidence) {
     $declaredEvidence
@@ -76,6 +78,8 @@ try {
         'list-windows (lsw)',
         'send-keys (send)',
         'scroll-pane',
+        'read-events',
+        'wait-events',
         'new-agent',
         'list-instances',
         'wait-pane (expect-pane)',
@@ -86,6 +90,48 @@ try {
             throw "list-commands did not advertise: $expected"
         }
     }
+
+    Write-Host 'STEP observable event snapshot, read, and bounded wait'
+    $eventBaseline = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $eventName = "event-$PID"
+    Invoke-AgenTerm @('new-window', '-d', '-n', $eventName) | Out-Null
+    $eventBatch = Invoke-AgenTerm @(
+        'read-events',
+        '--epoch', $eventBaseline.event_position.epoch,
+        '--after', "$($eventBaseline.event_position.sequence)"
+    ) | ConvertFrom-Json
+    $createdEvent = @(
+        $eventBatch.events |
+            Where-Object kind -eq 'tab.created' |
+            Select-Object -First 1
+    )
+    if ($createdEvent.Count -ne 1 -or
+        $createdEvent[0].sequence -le $eventBaseline.event_position.sequence -or
+        $createdEvent[0].payload.index -lt 0) {
+        throw 'read-events did not return the committed tab creation after the snapshot baseline'
+    }
+    $waitedEvent = Invoke-AgenTerm @(
+        'wait-events',
+        '--epoch', $eventBaseline.event_position.epoch,
+        '--after', "$($eventBaseline.event_position.sequence)",
+        '--kind', 'tab.created',
+        '--tab', "@$($createdEvent[0].tab_id)",
+        '--timeout-ms', '1000'
+    ) | ConvertFrom-Json
+    if ($waitedEvent.sequence -ne $createdEvent[0].sequence) {
+        throw 'wait-events did not return the matching committed event'
+    }
+    $timeout = Invoke-AgenTermExpectedFailure @(
+        'wait-events',
+        '--epoch', $eventBatch.position.epoch,
+        '--after', "$($eventBatch.position.sequence)",
+        '--kind', 'never.test-event',
+        '--timeout-ms', '20'
+    )
+    if (-not $timeout.Contains('event_wait_timeout')) {
+        throw 'wait-events timeout did not return its stable typed error'
+    }
+    Write-Evidence 'cli.observable-events'
 
     Write-Host 'STEP composer round trip'
     Invoke-AgenTerm @('set-composer', '-t', $name, "echo $token") | Out-Null
@@ -175,6 +221,43 @@ try {
             throw "Screenshot was not created correctly: $image"
         }
     }
+
+    Write-Host 'STEP stable creation IDs survive unrelated index changes'
+    $stableRootName = "stable-root-$PID"
+    $stableChildName = "stable-child-$PID"
+    $disposableName = "disposable-$PID"
+    $stableRoot = Invoke-AgenTerm @(
+        'new-window', '-d', '-n', $stableRootName, '-F', '#{window_id}'
+    )
+    if ($stableRoot -notmatch '^@\d+$') {
+        throw "new-window stable format returned an invalid ID: $stableRoot"
+    }
+    $stableChild = Invoke-AgenTerm @(
+        'new-window', '-d', '-n', $stableChildName,
+        '--parent', $stableRoot, '-F', '#{window_id}'
+    )
+    $disposable = Invoke-AgenTerm @(
+        'new-window', '-d', '-n', $disposableName, '-F', '#{window_id}',
+        '--', 'cmd.exe', '/d', '/c', 'exit', '0'
+    )
+    Invoke-AgenTerm @(
+        'wait-ui', '-t', $disposable, '--tab-state', 'dead', '--timeout-ms', '10000'
+    ) | Out-Null
+    Invoke-AgenTerm @('kill-window', '-t', $disposable) | Out-Null
+    Invoke-AgenTerm @('select-window', '-t', $stableChild) | Out-Null
+    Invoke-AgenTerm @(
+        'wait-ui', '--active', $stableChild, '--timeout-ms', '10000'
+    ) | Out-Null
+    Invoke-AgenTerm @(
+        'rename-window', '-t', $stableChild, "$stableChildName-renamed"
+    ) | Out-Null
+    $reportedParent = Invoke-AgenTerm @('show-tab-parent', '-t', $stableChild)
+    if ($reportedParent -ne $stableRoot) {
+        throw "stable child parent changed after unrelated close: $reportedParent"
+    }
+    Invoke-AgenTerm @('kill-window', '-t', $stableChild) | Out-Null
+    Invoke-AgenTerm @('kill-window', '-t', $stableRoot) | Out-Null
+    Write-Evidence 'cli.stable-create-id'
 
     Write-Host 'STEP remain on exit'
     Invoke-AgenTerm @('send-keys', '-t', $name, 'exit', 'Enter') | Out-Null

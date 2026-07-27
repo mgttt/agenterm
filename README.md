@@ -18,6 +18,13 @@ native automation client, and a deliberately bounded tmux/RMUX frontend.
 - Exited processes leave a `[dead]` tab until the user explicitly closes it.
 - Every tab owns a composer text box and Send button.
 - Local CLI can create, select, rename, inspect, capture, and drive tabs.
+- Mouse-wheel history, a draggable scrollbar, and highlighted terminal text
+  selection share the same viewport; selected text copies to the Windows
+  clipboard.
+- Snapshot-positioned bounded event reads and waits expose explicit restart,
+  gap, and timeout results.
+- `agenterm-script.exe` runs bounded one-invocation Rhai `pure` and immutable
+  `observe` profiles without linking the scripting engine into the GUI.
 - `new-agent` launches Codex in a named fleet tab with stable AgenTerm context.
 - Tab-scoped environment and proxy values apply only to the child process and
   are not written to the persistent workspace.
@@ -43,6 +50,7 @@ ignored local artifacts under `dist/`:
 - `dist/agentermctl.exe` — full native observation and automation client.
 - `dist/agenterm-mux.exe` — tmux/RMUX compatibility frontend over the same IPC
   server.
+- `dist/agenterm-script.exe` — optional bounded Rhai scripting worker.
 - `dist/agenterm.json` — version, UTC build time, Git state, Rust target, size, and
   SHA-256 metadata.
 
@@ -64,6 +72,11 @@ $r = ".\dist\agentermctl.exe"
 & $r capture-pane -p -t build
 & $r scroll-pane -t build page-up
 & $r screenshot-pane -t build -o build.png
+
+# Discover and run the bounded scripting surface.
+& $r script api --json
+& $r script eval "40 + 2"
+& $r script eval "observe.event_position.sequence" --profile observe
 
 # Discover every registered server, then target one explicitly.
 & $r list-instances
@@ -93,7 +106,7 @@ run:
 
 The script runs the full local quality gate and atomically pushes `main` plus
 the `v<version>` tag. GitHub Actions then builds on a clean Windows runner and
-publishes all three EXEs, metadata, ZIP, and generated notes to GitHub Releases.
+publishes all four EXEs, metadata, ZIP, and generated notes to GitHub Releases.
 
 ## Documentation
 

@@ -15,7 +15,9 @@ use rmux_pty::{
     ChildCommand, ProcessId, PtyChild, PtyMaster, TerminalSize, write_windows_console_mouse_drag,
 };
 use windows_sys::Win32::{
-    Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, RECT, SIZE, WPARAM},
+    Foundation::{
+        COLORREF, GlobalFree, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM,
+    },
     Graphics::Gdi::{
         BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BeginPaint, BitBlt, CLEARTYPE_QUALITY,
         CLIP_DEFAULT_PRECIS, CreateCompatibleBitmap, CreateCompatibleDC, CreateFontW,
@@ -24,46 +26,65 @@ use windows_sys::Win32::{
         ExtTextOutW, FF_MODERN, FIXED_PITCH, FW_NORMAL, FillRect, FrameRect, GetDC, GetDIBits,
         GetDeviceCaps, GetStockObject, GetTextExtentPoint32W, GetTextFaceW, GetTextMetricsW,
         GetWindowDC, HDC, HFONT, HGDIOBJ, InvalidateRect, LOGPIXELSY, OUT_DEFAULT_PRECIS,
-        PAINTSTRUCT, ReleaseDC, SRCCOPY, SYSTEM_FIXED_FONT, SelectObject, SetBkMode, SetTextColor,
-        TEXTMETRICW, TRANSPARENT, UpdateWindow,
+        PAINTSTRUCT, ReleaseDC, SRCCOPY, SYSTEM_FIXED_FONT, ScreenToClient, SelectObject,
+        SetBkMode, SetTextColor, TEXTMETRICW, TRANSPARENT, UpdateWindow,
     },
-    System::LibraryLoader::GetModuleHandleW,
-    UI::Input::KeyboardAndMouse::{GetFocus, GetKeyState, SetFocus},
+    System::{
+        DataExchange::{CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData},
+        LibraryLoader::GetModuleHandleW,
+        Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock},
+    },
+    UI::Controls::EM_SETSEL,
+    UI::Input::KeyboardAndMouse::{GetFocus, GetKeyState, ReleaseCapture, SetCapture, SetFocus},
     UI::Shell::ShellExecuteW,
     UI::WindowsAndMessaging::{
         CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreateWindowExW, DefWindowProcW,
         DestroyWindow, DispatchMessageW, ES_AUTOVSCROLL, ES_MULTILINE, ES_WANTRETURN,
         GWLP_USERDATA, GetClientRect, GetMessageW, GetWindowLongPtrW, GetWindowRect,
-        GetWindowTextLengthW, GetWindowTextW, IDC_ARROW, IsIconic, LoadCursorW, LoadIconW,
-        MB_ICONERROR, MB_OK, MSG, MessageBoxW, MoveWindow, PostMessageW, PostQuitMessage,
-        RegisterClassW, SW_HIDE, SW_RESTORE, SW_SHOW, SW_SHOWNORMAL, SetForegroundWindow, SetTimer,
-        SetWindowLongPtrW, SetWindowTextW, ShowWindow, TranslateMessage, WM_APP, WM_CHAR, WM_CLOSE,
-        WM_COMMAND, WM_CREATE, WM_DESTROY, WM_ERASEBKGND, WM_KEYDOWN, WM_LBUTTONDOWN, WM_NCDESTROY,
-        WM_PAINT, WM_RBUTTONDOWN, WM_SETFOCUS, WM_SIZE, WM_TIMER, WNDCLASSW, WS_BORDER, WS_CHILD,
+        GetWindowTextLengthW, GetWindowTextW, IDC_ARROW, IsIconic, IsZoomed, LoadCursorW,
+        LoadIconW, MB_ICONERROR, MB_OK, MSG, MessageBoxW, MoveWindow, PostMessageW,
+        PostQuitMessage, RegisterClassW, SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW,
+        SW_SHOWNORMAL, SendMessageW, SetForegroundWindow, SetTimer, SetWindowLongPtrW,
+        SetWindowTextW, ShowWindow, TranslateMessage, WM_APP, WM_CHAR, WM_CLOSE, WM_COMMAND,
+        WM_COPY, WM_CREATE, WM_CUT, WM_DESTROY, WM_ERASEBKGND, WM_KEYDOWN, WM_LBUTTONDOWN,
+        WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY, WM_PAINT, WM_PASTE,
+        WM_RBUTTONDOWN, WM_SETFOCUS, WM_SIZE, WM_TIMER, WNDCLASSW, WS_BORDER, WS_CHILD,
         WS_CLIPCHILDREN, WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE,
     },
 };
 
 mod commands;
+mod event_journal;
 mod instances;
 mod protocol;
 mod rmux_status;
+pub mod script_protocol;
 mod settings;
 mod tab_tree;
 mod ui_geometry;
 mod workspace;
 
 use commands::{
-    BACKSPACE_INPUT, MUX_COMMANDS, MuxStatus, SUPPORTED_COMMANDS, has_option, last_positional,
-    mux_command, option_value, parse_new_command, parse_tab_environment, positional_values,
-    screenshot_output_path, tmux_key_bytes,
+    BACKSPACE_INPUT, MUX_COMMANDS, MuxStatus, SUPPORTED_COMMANDS, control_command_requests_help,
+    control_command_usage, has_option, last_positional, mux_command, option_value,
+    parse_new_command, parse_tab_environment, positional_values, screenshot_output_path,
+    tmux_key_bytes, validate_control_command,
 };
+use event_journal::EventJournal;
 use instances::{InstanceRegistration, discover_instances, prune_instance, register_instance};
 use protocol::{IpcRequest, IpcResponse};
 use rmux_status::parse_status_windows;
+use script_protocol::{
+    SCRIPT_API_VERSION, SCRIPT_ENVELOPE_VERSION, ScriptBudgets, ScriptInvocation, ScriptOperation,
+    ScriptProfile, ScriptResult,
+};
 use settings::{AppConfig, config_path, load_config, save_config};
 use tab_tree::{TabTreeNode, TabTreeRow, tree_rows, would_create_cycle};
-use ui_geometry::{PixelRect, TAB_HEIGHT, tree_anchor_x, tree_row_at_y, tree_row_geometry};
+use ui_geometry::{
+    PixelRect, TAB_HEIGHT, TERMINAL_SCROLLBAR_WIDTH, TerminalScrollbarGeometry,
+    scrollback_for_thumb_top, terminal_scrollbar_geometry, tree_anchor_x, tree_row_at_y,
+    tree_row_geometry,
+};
 use workspace::{SavedTab, SavedWorkspace, load_workspace, save_workspace, workspace_path};
 
 const APP_NAME: &str = "AgenTerm";
@@ -91,6 +112,14 @@ const IPC_AUTOSTART_TIMEOUT: Duration = Duration::from_secs(15);
 const IPC_AUTOSTART_POLL: Duration = Duration::from_millis(100);
 const COMPOSER_SUBMIT_DELAY: Duration = Duration::from_millis(500);
 const RAW_OUTPUT_LIMIT: usize = 1024 * 1024;
+const WHEEL_DELTA: i32 = 120;
+const WHEEL_ROWS_PER_NOTCH: usize = 3;
+const UI_LOCALE: &str = "en-US";
+const LABEL_SEND: &str = "Send";
+const LABEL_SETTINGS: &str = "Settings";
+const LABEL_NEW: &str = "New";
+const LABEL_APPLY: &str = "Apply";
+const LABEL_SAVE: &str = "Save";
 
 thread_local! {
     static IPC_ADDRESS_OVERRIDE: RefCell<Option<String>> = const { RefCell::new(None) };
@@ -204,6 +233,17 @@ pub fn run_cli_entry() -> i32 {
     {
         print_help();
         return 0;
+    }
+    if arguments
+        .first()
+        .is_some_and(|argument| argument.starts_with('-'))
+    {
+        eprintln!(
+            "unknown global option '{}'. To target an AgenTerm instance, use \
+             `agentermctl --address HOST:PORT COMMAND` or set AGENTERM_IPC_ADDRESS.",
+            arguments[0]
+        );
+        return 2;
     }
     run_cli(arguments)
 }
@@ -385,7 +425,7 @@ fn run_gui() -> Result<()> {
         CreateWindowExW(
             0,
             wide("BUTTON").as_ptr(),
-            wide("发送").as_ptr(),
+            wide(LABEL_SEND).as_ptr(),
             WS_CHILD | WS_VISIBLE | WS_TABSTOP,
             0,
             0,
@@ -401,7 +441,7 @@ fn run_gui() -> Result<()> {
         CreateWindowExW(
             0,
             wide("BUTTON").as_ptr(),
-            wide("Settings").as_ptr(),
+            wide(LABEL_SETTINGS).as_ptr(),
             WS_CHILD | WS_VISIBLE | WS_TABSTOP,
             0,
             0,
@@ -417,7 +457,7 @@ fn run_gui() -> Result<()> {
         CreateWindowExW(
             0,
             wide("BUTTON").as_ptr(),
-            wide("New").as_ptr(),
+            wide(LABEL_NEW).as_ptr(),
             WS_CHILD | WS_VISIBLE | WS_TABSTOP,
             0,
             0,
@@ -435,7 +475,7 @@ fn run_gui() -> Result<()> {
         CreateWindowExW(
             0,
             wide("BUTTON").as_ptr(),
-            wide("Apply").as_ptr(),
+            wide(LABEL_APPLY).as_ptr(),
             WS_CHILD | WS_TABSTOP,
             0,
             0,
@@ -566,7 +606,30 @@ unsafe extern "system" fn window_proc(
             let x = (lparam as u32 & 0xffff) as i16 as i32;
             let y = ((lparam as u32 >> 16) & 0xffff) as i16 as i32;
             if let Some(state) = state_mut(window) {
-                state.click(x, y);
+                state.left_button_down(x, y);
+            }
+            0
+        }
+        WM_LBUTTONUP => {
+            if let Some(state) = state_mut(window) {
+                state.left_button_up();
+            }
+            0
+        }
+        WM_MOUSEMOVE => {
+            let x = (lparam as u32 & 0xffff) as i16 as i32;
+            let y = ((lparam as u32 >> 16) & 0xffff) as i16 as i32;
+            if let Some(state) = state_mut(window) {
+                state.mouse_move(x, y);
+            }
+            0
+        }
+        WM_MOUSEWHEEL => {
+            let x = (lparam as u32 & 0xffff) as i16 as i32;
+            let y = ((lparam as u32 >> 16) & 0xffff) as i16 as i32;
+            let delta = ((wparam >> 16) & 0xffff) as u16 as i16 as i32;
+            if let Some(state) = state_mut(window) {
+                state.mouse_wheel(x, y, delta);
             }
             0
         }
@@ -903,6 +966,21 @@ impl TerminalTab {
         Ok(screen.scrollback())
     }
 
+    fn scrollback_bounds(&mut self) -> (usize, usize) {
+        let screen = self.parser.screen_mut();
+        let current = screen.scrollback();
+        screen.set_scrollback(usize::MAX);
+        let maximum = screen.scrollback();
+        screen.set_scrollback(current);
+        (screen.scrollback(), maximum)
+    }
+
+    fn set_scrollback(&mut self, offset: usize) -> usize {
+        let screen = self.parser.screen_mut();
+        screen.set_scrollback(offset);
+        screen.scrollback()
+    }
+
     fn send(&mut self, bytes: &[u8]) -> bool {
         if self.exited.is_some() {
             return false;
@@ -1031,6 +1109,143 @@ struct NativeControls {
     settings_apply: HWND,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EditShortcut {
+    SelectAll,
+    Copy,
+    Cut,
+    Paste,
+}
+
+fn edit_shortcut(control: bool, virtual_key: u32) -> Option<EditShortcut> {
+    control.then_some(())?;
+    match virtual_key {
+        key if key == b'A' as u32 => Some(EditShortcut::SelectAll),
+        key if key == b'C' as u32 => Some(EditShortcut::Copy),
+        key if key == b'X' as u32 => Some(EditShortcut::Cut),
+        key if key == b'V' as u32 => Some(EditShortcut::Paste),
+        _ => None,
+    }
+}
+
+fn terminal_copy_shortcut(
+    control: bool,
+    virtual_key: u32,
+    terminal_focused: bool,
+    has_active_selection: bool,
+) -> bool {
+    control && virtual_key == b'C' as u32 && terminal_focused && has_active_selection
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ScrollDrag {
+    thumb_grab_offset: i32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct TerminalPoint {
+    row: u16,
+    col: u16,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct TerminalSelection {
+    tab_id: u64,
+    anchor: TerminalPoint,
+    focus: TerminalPoint,
+    dragging: bool,
+    moved: bool,
+}
+
+impl TerminalSelection {
+    fn bounds(self) -> (TerminalPoint, TerminalPoint) {
+        if self.anchor <= self.focus {
+            (self.anchor, self.focus)
+        } else {
+            (self.focus, self.anchor)
+        }
+    }
+
+    fn contains(self, row: u16, col: u16) -> bool {
+        let (start, end) = self.bounds();
+        TerminalPoint { row, col } >= start && TerminalPoint { row, col } <= end
+    }
+}
+
+fn terminal_selection_text(screen: &vt100::Screen, selection: TerminalSelection) -> String {
+    let (rows, cols) = screen.size();
+    if rows == 0 || cols == 0 {
+        return String::new();
+    }
+    let (mut start, mut end) = selection.bounds();
+    start.row = start.row.min(rows - 1);
+    start.col = start.col.min(cols - 1);
+    end.row = end.row.min(rows - 1);
+    end.col = end.col.min(cols - 1);
+
+    let mut selected = String::new();
+    for row in start.row..=end.row {
+        let first_col = if row == start.row { start.col } else { 0 };
+        let last_col = if row == end.row { end.col } else { cols - 1 };
+        let mut line = String::new();
+        for col in first_col..=last_col {
+            match screen.cell(row, col) {
+                Some(cell) if cell.is_wide_continuation() => {}
+                Some(cell) if !cell.contents().is_empty() => line.push_str(cell.contents()),
+                _ => line.push(' '),
+            }
+        }
+        selected.push_str(line.trim_end_matches(' '));
+        if row != end.row {
+            selected.push_str("\r\n");
+        }
+    }
+    selected
+}
+
+fn set_clipboard_text(window: HWND, text: &str) -> Result<()> {
+    const CF_UNICODETEXT: u32 = 13;
+
+    if unsafe { OpenClipboard(window) } == 0 {
+        anyhow::bail!("could not open the Windows clipboard");
+    }
+    if unsafe { EmptyClipboard() } == 0 {
+        unsafe { CloseClipboard() };
+        anyhow::bail!("could not clear the Windows clipboard");
+    }
+
+    let encoded = text
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let allocation = unsafe { GlobalAlloc(GMEM_MOVEABLE, encoded.len() * mem::size_of::<u16>()) };
+    if allocation.is_null() {
+        unsafe { CloseClipboard() };
+        anyhow::bail!("could not allocate clipboard text");
+    }
+    let destination = unsafe { GlobalLock(allocation) } as *mut u16;
+    if destination.is_null() {
+        unsafe {
+            GlobalFree(allocation);
+            CloseClipboard();
+        }
+        anyhow::bail!("could not lock clipboard text");
+    }
+    unsafe {
+        ptr::copy_nonoverlapping(encoded.as_ptr(), destination, encoded.len());
+        GlobalUnlock(allocation);
+    }
+    if unsafe { SetClipboardData(CF_UNICODETEXT, allocation) }.is_null() {
+        unsafe {
+            GlobalFree(allocation);
+            CloseClipboard();
+        }
+        anyhow::bail!("could not publish clipboard text");
+    }
+    unsafe { CloseClipboard() };
+    Ok(())
+}
+
 struct AppState {
     window: HWND,
     edit: HWND,
@@ -1046,6 +1261,7 @@ struct AppState {
     next_id: u64,
     session_name: String,
     started_at: SystemTime,
+    event_journal: EventJournal,
     ipc_receiver: Receiver<IpcEnvelope>,
     startup_tab_receiver: Receiver<std::result::Result<TerminalTab, String>>,
     startup_tab_pending: bool,
@@ -1060,6 +1276,9 @@ struct AppState {
     terminal_font: HFONT,
     terminal_font_owned: bool,
     resolved_font_family: String,
+    wheel_remainder: i32,
+    scroll_drag: Option<ScrollDrag>,
+    terminal_selection: Option<TerminalSelection>,
     _instance_registration: InstanceRegistration,
 }
 
@@ -1115,6 +1334,7 @@ impl AppState {
             next_id,
             session_name,
             started_at: SystemTime::now(),
+            event_journal: EventJournal::new(),
             ipc_receiver,
             startup_tab_receiver,
             startup_tab_pending: startup_tabs_remaining > 0,
@@ -1129,6 +1349,9 @@ impl AppState {
             terminal_font,
             terminal_font_owned,
             resolved_font_family,
+            wheel_remainder: 0,
+            scroll_drag: None,
+            terminal_selection: None,
             _instance_registration: instance_registration,
         };
 
@@ -1200,7 +1423,10 @@ impl AppState {
 
     fn persist_workspace(&mut self) -> Result<()> {
         self.save_active_composer();
-        save_workspace(&self.saved_workspace())
+        save_workspace(&self.saved_workspace())?;
+        self.event_journal
+            .commit("workspace.saved", None, serde_json::json!({}));
+        Ok(())
     }
 
     fn create_tab_with_parent(
@@ -1244,9 +1470,20 @@ impl AppState {
         })?;
         self.tabs.push(tab);
         self.tabs.sort_by_key(|tab| tab.index);
+        self.event_journal.commit(
+            "tab.created",
+            Some(id),
+            serde_json::json!({
+                "index": index,
+                "parent_id": parent_id,
+                "selected": select,
+            }),
+        );
         if select {
             self.active = Some(id);
             self.load_active_composer();
+            self.event_journal
+                .commit("tab.selected", Some(id), serde_json::json!({}));
         }
         Ok(index)
     }
@@ -1302,7 +1539,16 @@ impl AppState {
                 anyhow::bail!("moving @{child_id} under @{parent_id} would create a cycle");
             }
         }
+        let previous_parent_id = self.tabs[child_position].parent_id;
         self.tabs[child_position].parent_id = parent_id;
+        self.event_journal.commit(
+            "tab.parent",
+            Some(child_id),
+            serde_json::json!({
+                "previous_parent_id": previous_parent_id,
+                "parent_id": parent_id,
+            }),
+        );
         Ok(())
     }
 
@@ -1348,6 +1594,14 @@ impl AppState {
             return;
         };
         let parent_id = self.tabs[position].parent_id;
+        let index = self.tabs[position].index;
+        let exit_code = self.tabs[position].exited;
+        let promoted_children = self
+            .tabs
+            .iter()
+            .filter(|tab| tab.parent_id == Some(id))
+            .map(|tab| tab.id)
+            .collect::<Vec<_>>();
         for tab in &mut self.tabs {
             if tab.parent_id == Some(id) {
                 tab.parent_id = parent_id;
@@ -1363,6 +1617,17 @@ impl AppState {
                 .or_else(|| position.checked_sub(1).and_then(|i| self.tabs.get(i)))
                 .map(|tab| tab.id);
         }
+        self.event_journal.commit(
+            "tab.closed",
+            Some(id),
+            serde_json::json!({
+                "index": index,
+                "parent_id": parent_id,
+                "exit_code": exit_code,
+                "promoted_children": promoted_children,
+                "active_id": self.active,
+            }),
+        );
         self.load_active_composer();
     }
 
@@ -1402,6 +1667,7 @@ impl AppState {
                 match self.startup_tab_receiver.try_recv() {
                     Ok(Ok(tab)) => {
                         let id = tab.id;
+                        let index = tab.index;
                         self.tabs.push(tab);
                         self.tabs.sort_by_key(|tab| tab.index);
                         if self.active.is_none() {
@@ -1410,6 +1676,15 @@ impl AppState {
                         if self.active == Some(id) {
                             self.load_active_composer();
                         }
+                        self.event_journal.commit(
+                            "tab.created",
+                            Some(id),
+                            serde_json::json!({
+                                "index": index,
+                                "restored": true,
+                                "selected": self.active == Some(id),
+                            }),
+                        );
                         self.startup_tabs_remaining = self.startup_tabs_remaining.saturating_sub(1);
                         changed = true;
                     }
@@ -1439,8 +1714,42 @@ impl AppState {
                 self.load_active_composer();
             }
         }
+        let mut polled_events = Vec::new();
         for tab in &mut self.tabs {
+            let output_before = tab.output_bytes;
+            let exit_before = tab.exited;
+            let error_before = tab.error.clone();
             changed |= tab.poll();
+            if tab.output_bytes != output_before {
+                polled_events.push((
+                    "terminal.output",
+                    tab.id,
+                    serde_json::json!({
+                        "output_bytes": tab.output_bytes,
+                        "advanced_by": tab.output_bytes - output_before,
+                    }),
+                ));
+            }
+            if tab.exited != exit_before || tab.error != error_before {
+                polled_events.push((
+                    "tab.state",
+                    tab.id,
+                    serde_json::json!({
+                        "state": if tab.error.is_some() {
+                            "error"
+                        } else if tab.exited.is_some() {
+                            "dead"
+                        } else {
+                            "running"
+                        },
+                        "exit_code": tab.exited,
+                        "error": tab.error.clone(),
+                    }),
+                ));
+            }
+        }
+        for (kind, tab_id, payload) in polled_events {
+            self.event_journal.commit(kind, Some(tab_id), payload);
         }
         let envelopes: Vec<IpcEnvelope> = self.ipc_receiver.try_iter().collect();
         changed |= !envelopes.is_empty();
@@ -1601,6 +1910,98 @@ impl AppState {
         unsafe { InvalidateRect(self.window, ptr::null(), 0) };
     }
 
+    fn left_button_down(&mut self, x: i32, y: i32) {
+        if self.pending_close.is_some() || self.settings_open || x < SIDEBAR_WIDTH {
+            self.terminal_selection = None;
+            self.click(x, y);
+            return;
+        }
+        unsafe { SetFocus(self.window) };
+        if self.click_scrollbar(x, y) {
+            self.terminal_selection = None;
+            return;
+        }
+        let Some((column, row)) = self.terminal_cell_at(x, y) else {
+            return;
+        };
+        let Some(position) = self.active_position() else {
+            return;
+        };
+        let point = TerminalPoint { row, col: column };
+        self.terminal_selection = Some(TerminalSelection {
+            tab_id: self.tabs[position].id,
+            anchor: point,
+            focus: point,
+            dragging: true,
+            moved: false,
+        });
+        unsafe {
+            SetCapture(self.window);
+            InvalidateRect(self.window, ptr::null(), 0);
+        }
+    }
+
+    fn left_button_up(&mut self) {
+        if self.scroll_drag.is_some() {
+            self.end_scroll_drag();
+            return;
+        }
+        let Some(mut selection) = self.terminal_selection else {
+            return;
+        };
+        if !selection.dragging {
+            return;
+        }
+        selection.dragging = false;
+        unsafe { ReleaseCapture() };
+        if selection.moved {
+            self.terminal_selection = Some(selection);
+        } else {
+            self.terminal_selection = None;
+            self.send_terminal_click(selection.anchor.col, selection.anchor.row);
+        }
+        unsafe { InvalidateRect(self.window, ptr::null(), 0) };
+    }
+
+    fn mouse_move(&mut self, x: i32, y: i32) {
+        if self.scroll_drag.is_some() {
+            self.drag_scrollbar(x, y);
+            return;
+        }
+        let Some(mut selection) = self.terminal_selection else {
+            return;
+        };
+        if !selection.dragging {
+            return;
+        }
+        let terminal = self.terminal_rect();
+        let max_x = (terminal.right - TERMINAL_SCROLLBAR_WIDTH - 1).max(terminal.left);
+        let max_y = terminal.bottom.saturating_sub(1).max(terminal.top);
+        let clamped_x = x.clamp(terminal.left, max_x);
+        let clamped_y = y.clamp(terminal.top, max_y);
+        let Some((column, row)) = self.terminal_cell_at(clamped_x, clamped_y) else {
+            return;
+        };
+        let focus = TerminalPoint { row, col: column };
+        if focus != selection.focus {
+            selection.focus = focus;
+            selection.moved = selection.focus != selection.anchor;
+            self.terminal_selection = Some(selection);
+            unsafe { InvalidateRect(self.window, ptr::null(), 0) };
+        }
+    }
+
+    fn send_terminal_click(&mut self, column: u16, row: u16) {
+        let Some(position) = self.active_position() else {
+            return;
+        };
+        if !self.tabs[position].send_rmux_status_click(column, row)
+            && let Err(error) = self.tabs[position].send_native_mouse_click(column, row)
+        {
+            self.last_error = Some(format!("native mouse input failed: {error}"));
+        }
+    }
+
     fn click(&mut self, x: i32, y: i32) {
         if self.pending_close.is_some() || self.settings_open {
             let mut client: RECT = unsafe { mem::zeroed() };
@@ -1618,12 +2019,11 @@ impl AppState {
         }
         if x >= SIDEBAR_WIDTH {
             unsafe { SetFocus(self.window) };
-            if let Some((column, row)) = self.terminal_cell_at(x, y)
-                && let Some(position) = self.active_position()
-                && !self.tabs[position].send_rmux_status_click(column, row)
-                && let Err(error) = self.tabs[position].send_native_mouse_click(column, row)
-            {
-                self.last_error = Some(format!("native mouse input failed: {error}"));
+            if self.click_scrollbar(x, y) {
+                return;
+            }
+            if let Some((column, row)) = self.terminal_cell_at(x, y) {
+                self.send_terminal_click(column, row);
             }
             return;
         }
@@ -1680,6 +2080,8 @@ impl AppState {
             self.save_active_composer();
             self.active = Some(id);
             self.load_active_composer();
+            self.event_journal
+                .commit("tab.selected", Some(id), serde_json::json!({}));
         }
         unsafe {
             SetFocus(self.window);
@@ -1711,7 +2113,7 @@ impl AppState {
         self.note_edit_target = Some(id);
         unsafe {
             SetWindowTextW(self.edit, wide(&content).as_ptr());
-            SetWindowTextW(self.send_button, wide("Save").as_ptr());
+            SetWindowTextW(self.send_button, wide(LABEL_SAVE).as_ptr());
             SetFocus(self.edit);
             InvalidateRect(self.window, ptr::null(), 0);
         }
@@ -1731,17 +2133,82 @@ impl AppState {
                 return;
             }
             if let Some(tab) = self.tabs.iter_mut().find(|tab| tab.id == id) {
+                let previous_title = tab.title.clone();
+                let previous_note = tab.note.clone();
                 tab.title = title.to_owned();
                 tab.note = note.trim_end().to_owned();
+                if tab.title != previous_title {
+                    self.event_journal.commit(
+                        "tab.renamed",
+                        Some(id),
+                        serde_json::json!({
+                            "previous_name": previous_title,
+                            "name": tab.title,
+                        }),
+                    );
+                }
+                if tab.note != previous_note {
+                    self.event_journal.commit(
+                        "tab.note",
+                        Some(id),
+                        serde_json::json!({
+                            "previous_note": previous_note,
+                            "note": tab.note,
+                        }),
+                    );
+                }
             }
         }
         self.note_edit_target = None;
-        unsafe { SetWindowTextW(self.send_button, wide("发送").as_ptr()) };
+        unsafe { SetWindowTextW(self.send_button, wide(LABEL_SEND).as_ptr()) };
         self.load_active_composer();
         unsafe {
             SetFocus(self.window);
             InvalidateRect(self.window, ptr::null(), 0);
         }
+    }
+
+    fn dispatch_edit_shortcut(&self, shortcut: EditShortcut, focused: HWND) {
+        unsafe {
+            match shortcut {
+                EditShortcut::SelectAll => {
+                    SendMessageW(focused, EM_SETSEL, 0, -1);
+                }
+                EditShortcut::Copy => {
+                    SendMessageW(focused, WM_COPY, 0, 0);
+                }
+                EditShortcut::Cut => {
+                    SendMessageW(focused, WM_CUT, 0, 0);
+                }
+                EditShortcut::Paste => {
+                    SendMessageW(focused, WM_PASTE, 0, 0);
+                }
+            }
+        }
+    }
+
+    fn copy_terminal_selection(&mut self) -> Result<usize> {
+        let selection = self
+            .terminal_selection
+            .context("no terminal text is selected")?;
+        let position = self
+            .tabs
+            .iter()
+            .position(|tab| tab.id == selection.tab_id)
+            .context("selected terminal is no longer available")?;
+        if self.active != Some(selection.tab_id) {
+            anyhow::bail!("selected terminal is not active");
+        }
+        let text = terminal_selection_text(self.tabs[position].parser.screen(), selection);
+        set_clipboard_text(self.window, &text)?;
+        let characters = text.chars().count();
+        self.feedback = Some(format!(
+            "Copied {characters} characters from @{}",
+            selection.tab_id
+        ));
+        self.last_error = None;
+        unsafe { InvalidateRect(self.window, ptr::null(), 0) };
+        Ok(characters)
     }
 
     fn handle_shortcut(&mut self, virtual_key: u32) -> bool {
@@ -1762,6 +2229,29 @@ impl AppState {
         }
         if self.settings_open && virtual_key == 0x1b {
             self.close_settings();
+            return true;
+        }
+
+        let has_active_selection = self
+            .terminal_selection
+            .is_some_and(|selection| self.active == Some(selection.tab_id));
+        if terminal_copy_shortcut(
+            control,
+            virtual_key,
+            focused == self.window,
+            has_active_selection,
+        ) {
+            if let Err(error) = self.copy_terminal_selection() {
+                self.last_error = Some(format!("terminal copy failed: {error:#}"));
+                unsafe { InvalidateRect(self.window, ptr::null(), 0) };
+            }
+            return true;
+        }
+
+        let focused_edit =
+            focused == self.edit || focused == self.settings_font || focused == self.settings_size;
+        if focused_edit && let Some(shortcut) = edit_shortcut(control, virtual_key) {
+            self.dispatch_edit_shortcut(shortcut, focused);
             return true;
         }
 
@@ -1810,10 +2300,133 @@ impl AppState {
         true
     }
 
+    fn terminal_rect(&self) -> PixelRect {
+        let mut client: RECT = unsafe { mem::zeroed() };
+        unsafe { GetClientRect(self.window, &mut client) };
+        PixelRect {
+            left: SIDEBAR_WIDTH,
+            top: 0,
+            right: client.right.max(SIDEBAR_WIDTH),
+            bottom: client
+                .bottom
+                .saturating_sub(STATUS_BAR_HEIGHT + COMPOSER_HEIGHT)
+                .max(0),
+        }
+    }
+
+    fn scrollbar_state(&mut self) -> Option<(TerminalScrollbarGeometry, usize)> {
+        let terminal = self.terminal_rect();
+        let position = self.active_position()?;
+        let visible_rows = usize::from(self.tabs[position].last_size.0);
+        let (offset, maximum) = self.tabs[position].scrollback_bounds();
+        Some((
+            terminal_scrollbar_geometry(terminal, visible_rows, offset, maximum),
+            maximum,
+        ))
+    }
+
+    fn click_scrollbar(&mut self, x: i32, y: i32) -> bool {
+        let Some((geometry, maximum)) = self.scrollbar_state() else {
+            return false;
+        };
+        if !geometry.track.contains(x, y) {
+            return false;
+        }
+        if maximum == 0 {
+            return true;
+        }
+        if geometry.thumb.contains(x, y) {
+            self.scroll_drag = Some(ScrollDrag {
+                thumb_grab_offset: y - geometry.thumb.top,
+            });
+            unsafe { SetCapture(self.window) };
+        } else if let Some(position) = self.active_position() {
+            let action = if y < geometry.thumb.top {
+                "page-up"
+            } else {
+                "page-down"
+            };
+            if let Ok(offset) = self.tabs[position].scroll_viewport(action, None) {
+                self.commit_viewport_event(position, offset, "scrollbar-track");
+            }
+            unsafe { InvalidateRect(self.window, ptr::null(), 0) };
+        }
+        true
+    }
+
+    fn drag_scrollbar(&mut self, _x: i32, y: i32) {
+        let Some(drag) = self.scroll_drag else {
+            return;
+        };
+        let Some((geometry, maximum)) = self.scrollbar_state() else {
+            self.end_scroll_drag();
+            return;
+        };
+        let offset = scrollback_for_thumb_top(geometry, y - drag.thumb_grab_offset, maximum);
+        if let Some(position) = self.active_position() {
+            let offset = self.tabs[position].set_scrollback(offset);
+            self.commit_viewport_event(position, offset, "scrollbar-drag");
+            unsafe { InvalidateRect(self.window, ptr::null(), 0) };
+        }
+    }
+
+    fn end_scroll_drag(&mut self) {
+        if self.scroll_drag.take().is_some() {
+            unsafe { ReleaseCapture() };
+        }
+    }
+
+    fn mouse_wheel(&mut self, screen_x: i32, screen_y: i32, delta: i32) {
+        if self.pending_close.is_some() || self.settings_open {
+            return;
+        }
+        let mut point = POINT {
+            x: screen_x,
+            y: screen_y,
+        };
+        unsafe { ScreenToClient(self.window, &mut point) };
+        if !self.terminal_rect().contains(point.x, point.y) {
+            return;
+        }
+        self.wheel_remainder += delta;
+        let notches = self.wheel_remainder / WHEEL_DELTA;
+        self.wheel_remainder %= WHEEL_DELTA;
+        if notches == 0 {
+            return;
+        }
+        let Some(position) = self.active_position() else {
+            return;
+        };
+        let before = self.tabs[position].parser.screen().scrollback();
+        let rows = notches.unsigned_abs() as usize * WHEEL_ROWS_PER_NOTCH;
+        let action = if notches > 0 { "up" } else { "down" };
+        let after = self.tabs[position]
+            .scroll_viewport(action, Some(rows))
+            .unwrap_or(before);
+        if after != before {
+            self.terminal_selection = None;
+            self.commit_viewport_event(position, after, "mouse-wheel");
+            unsafe { InvalidateRect(self.window, ptr::null(), 0) };
+        }
+    }
+
+    fn commit_viewport_event(&mut self, position: usize, offset: usize, source: &str) {
+        let id = self.tabs[position].id;
+        self.event_journal.commit(
+            "terminal.viewport",
+            Some(id),
+            serde_json::json!({
+                "scrollback_offset": offset,
+                "source": source,
+            }),
+        );
+    }
+
     fn terminal_cell_at(&self, x: i32, y: i32) -> Option<(u16, u16)> {
         let mut client: RECT = unsafe { mem::zeroed() };
         unsafe { GetClientRect(self.window, &mut client) };
         if x < SIDEBAR_WIDTH
+            || x >= client.right.saturating_sub(TERMINAL_SCROLLBAR_WIDTH)
             || y < 0
             || y >= client
                 .bottom
@@ -1839,8 +2452,14 @@ impl AppState {
         }
         let cell_width = extent.cx.max(7);
         let cell_height = (metrics.tmHeight + metrics.tmExternalLeading).max(14);
-        let column = ((x - SIDEBAR_WIDTH) / cell_width).clamp(0, u16::MAX as i32) as u16;
-        let row = (y / cell_height).clamp(0, u16::MAX as i32) as u16;
+        let (rows, cols) = self
+            .active_position()
+            .and_then(|position| self.tabs.get(position))
+            .map(|tab| tab.last_size)
+            .unwrap_or((1, 1));
+        let column =
+            ((x - SIDEBAR_WIDTH) / cell_width).clamp(0, i32::from(cols.saturating_sub(1))) as u16;
+        let row = (y / cell_height).clamp(0, i32::from(rows.saturating_sub(1))) as u16;
         Some((column, row))
     }
 
@@ -1852,6 +2471,9 @@ impl AppState {
             self.feedback = Some("Composer submission pending; terminal input paused".to_owned());
             unsafe { InvalidateRect(self.window, ptr::null(), 0) };
             return;
+        }
+        if self.terminal_selection.take().is_some() {
+            unsafe { InvalidateRect(self.window, ptr::null(), 0) };
         }
         match codepoint {
             8 => {
@@ -1909,6 +2531,9 @@ impl AppState {
             _ => None,
         };
         if let Some(bytes) = bytes {
+            if self.terminal_selection.take().is_some() {
+                unsafe { InvalidateRect(self.window, ptr::null(), 0) };
+            }
             self.tabs[position].send(bytes);
         }
     }
@@ -1920,7 +2545,18 @@ impl AppState {
         let Some(position) = self.active_position() else {
             return;
         };
-        self.tabs[position].composer = window_text(self.edit);
+        let composer = window_text(self.edit);
+        if self.tabs[position].composer != composer {
+            self.tabs[position].composer = composer.clone();
+            let id = self.tabs[position].id;
+            self.event_journal.commit(
+                "composer.draft",
+                Some(id),
+                serde_json::json!({
+                    "length": composer.chars().count(),
+                }),
+            );
+        }
     }
 
     fn load_active_composer(&self) {
@@ -1947,7 +2583,15 @@ impl AppState {
             return;
         }
         if self.tabs[position].submit(&text) {
+            let id = self.tabs[position].id;
             self.tabs[position].composer.clear();
+            self.event_journal.commit(
+                "composer.submitted",
+                Some(id),
+                serde_json::json!({
+                    "length": text.chars().count(),
+                }),
+            );
             self.feedback = Some(format!("Sending to @{}", self.tabs[position].id));
             unsafe { SetWindowTextW(self.edit, wide("").as_ptr()) };
         } else {
@@ -2582,11 +3226,26 @@ impl AppState {
         unsafe { GetTextExtentPoint32W(device, sample.as_ptr(), 1, &mut extent) };
         let cell_width = extent.cx.max(7);
         let cell_height = (metrics.tmHeight + metrics.tmExternalLeading).max(14);
-        let width = (client.right - SIDEBAR_WIDTH).max(cell_width * 10);
+        let width = (client.right - SIDEBAR_WIDTH - TERMINAL_SCROLLBAR_WIDTH).max(cell_width * 10);
         let height = (client.bottom - STATUS_BAR_HEIGHT - COMPOSER_HEIGHT).max(cell_height * 2);
         let cols = (width / cell_width).clamp(10, u16::MAX as i32) as u16;
         let rows = (height / cell_height).clamp(2, u16::MAX as i32) as u16;
         self.tabs[position].resize(rows, cols);
+        let (scrollback_offset, max_scrollback) = self.tabs[position].scrollback_bounds();
+        let scrollbar = terminal_scrollbar_geometry(
+            PixelRect {
+                left: SIDEBAR_WIDTH,
+                top: 0,
+                right: client.right,
+                bottom: height,
+            },
+            usize::from(rows),
+            scrollback_offset,
+            max_scrollback,
+        );
+        let selection = self
+            .terminal_selection
+            .filter(|selection| selection.tab_id == self.tabs[position].id);
 
         let screen = self.tabs[position].parser.screen();
         for row in 0..rows {
@@ -2601,6 +3260,9 @@ impl AppState {
                     .unwrap_or(COLOR_TERMINAL);
                 if cell.is_some_and(|value| value.inverse()) {
                     mem::swap(&mut foreground, &mut background);
+                }
+                if selection.is_some_and(|selection| selection.contains(row, col)) {
+                    background = COLOR_BLUE;
                 }
                 if let Some((_, end, run_background)) = backgrounds.last_mut()
                     && *run_background == background
@@ -2629,7 +3291,10 @@ impl AppState {
                 if cell.is_wide_continuation() || cell.contents().is_empty() {
                     continue;
                 }
-                let foreground = if cell.inverse() {
+                let foreground = if selection.is_some_and(|selection| selection.contains(row, col))
+                {
+                    COLOR_TERMINAL
+                } else if cell.inverse() {
                     terminal_color(cell.bgcolor(), true)
                 } else {
                     terminal_color(cell.fgcolor(), false)
@@ -2669,7 +3334,7 @@ impl AppState {
             }
         }
 
-        if self.tabs[position].exited.is_none() && !screen.hide_cursor() {
+        if scrollback_offset == 0 && self.tabs[position].exited.is_none() && !screen.hide_cursor() {
             let (row, col) = screen.cursor_position();
             let cursor = RECT {
                 left: SIDEBAR_WIDTH + col as i32 * cell_width,
@@ -2684,6 +3349,32 @@ impl AppState {
             }
         }
 
+        let track = win_rect(scrollbar.track);
+        fill(device, &track, COLOR_STATUS);
+        fill(
+            device,
+            &RECT {
+                left: track.left,
+                top: track.top,
+                right: track.left + 1,
+                bottom: track.bottom,
+            },
+            COLOR_TREE,
+        );
+        let thumb = win_rect(scrollbar.thumb);
+        fill(
+            device,
+            &thumb,
+            if max_scrollback == 0 {
+                COLOR_ACTIVE
+            } else {
+                COLOR_TREE
+            },
+        );
+        if max_scrollback > 0 {
+            frame(device, &thumb, COLOR_ACTIVE_BORDER);
+        }
+
         if let Some(code) = self.tabs[position].exited {
             draw_text(
                 device,
@@ -2691,7 +3382,7 @@ impl AppState {
                 RECT {
                     left: SIDEBAR_WIDTH + 8,
                     top: height - cell_height,
-                    right: client.right - 8,
+                    right: client.right - TERMINAL_SCROLLBAR_WIDTH - 8,
                     bottom: height,
                 },
                 COLOR_ORANGE,
@@ -2716,9 +3407,17 @@ impl AppState {
         }
     }
 
-    fn ui_snapshot(&self) -> String {
+    fn ui_snapshot(&mut self) -> String {
         let mut client: RECT = unsafe { mem::zeroed() };
         unsafe { GetClientRect(self.window, &mut client) };
+        let scrollbar = self.scrollbar_state().map(|(geometry, maximum)| {
+            serde_json::json!({
+                "visible": true,
+                "track": pixel_rect_json(geometry.track),
+                "thumb": pixel_rect_json(geometry.thumb),
+                "max_offset": maximum,
+            })
+        });
         let active_draft = window_text(self.edit);
         let visible_rows = self.tree_rows();
         let all_rows = self.all_tree_rows();
@@ -2756,6 +3455,16 @@ impl AppState {
                     "exit_code": tab.exited,
                     "environment_names": tab.environment_names,
                     "scrollback_offset": tab.parser.screen().scrollback(),
+                    "selection": self.terminal_selection
+                        .filter(|selection| selection.tab_id == tab.id)
+                        .map(|selection| {
+                            let (start, end) = selection.bounds();
+                            serde_json::json!({
+                                "start": {"row": start.row, "col": start.col},
+                                "end": {"row": end.row, "col": end.col},
+                                "dragging": selection.dragging,
+                            })
+                        }),
                     "draft": draft,
                     "bounds": geometry.map(|geometry| pixel_rect_json(geometry.row)),
                     "render": geometry.map(|geometry| serde_json::json!({
@@ -2803,8 +3512,10 @@ impl AppState {
             .and_then(|position| self.tabs.get(position))
             .map(|tab| tab.last_size)
             .unwrap_or((0, 0));
+        let event_position = self.event_journal.position();
         serde_json::to_string_pretty(&serde_json::json!({
             "protocol_version": 1,
+            "event_position": event_position,
             "startup": {
                 "initial_tab_pending": self.startup_tab_pending,
                 "tabs_remaining": self.startup_tabs_remaining,
@@ -2820,6 +3531,13 @@ impl AppState {
                 "client_width": client.right,
                 "client_height": client.bottom,
                 "minimized": unsafe { IsIconic(self.window) } != 0,
+                "state": if unsafe { IsIconic(self.window) } != 0 {
+                    "minimized"
+                } else if unsafe { IsZoomed(self.window) } != 0 {
+                    "maximized"
+                } else {
+                    "restored"
+                },
             },
             "layout": {
                 "sidebar": {
@@ -2829,8 +3547,12 @@ impl AppState {
                 "terminal": {
                     "x": SIDEBAR_WIDTH, "y": 0,
                     "width": (client.right - SIDEBAR_WIDTH).max(0),
+                    "viewport_width": (
+                        client.right - SIDEBAR_WIDTH - TERMINAL_SCROLLBAR_WIDTH
+                    ).max(0),
                     "height": (client.bottom - STATUS_BAR_HEIGHT - COMPOSER_HEIGHT).max(0),
                     "rows": rows, "cols": cols,
+                    "scrollbar": scrollbar,
                 },
                 "composer": {
                     "visible": self.pending_close.is_none() && !self.settings_open,
@@ -2861,6 +3583,16 @@ impl AppState {
                 "terminal_font_family": self.config.terminal_font_family,
                 "terminal_font_size": self.config.terminal_font_size,
                 "resolved_font_family": self.resolved_font_family,
+            },
+            "locale": {
+                "id": UI_LOCALE,
+                "controls": {
+                    "send": LABEL_SEND,
+                    "settings": LABEL_SETTINGS,
+                    "new": LABEL_NEW,
+                    "apply": LABEL_APPLY,
+                    "save": LABEL_SAVE,
+                }
             },
             "feedback": {
                 "message": self.feedback.as_deref(),
@@ -2940,7 +3672,20 @@ impl AppState {
                     !detached,
                     parent_id,
                 ) {
-                    Ok(index) => IpcResponse::success(index.to_string()),
+                    Ok(index) => {
+                        let format = option_value(args, "-F").unwrap_or("#{window_index}");
+                        let tab = self
+                            .tabs
+                            .iter()
+                            .find(|tab| tab.index == index)
+                            .expect("newly created tab must remain present");
+                        IpcResponse::success(render_format(
+                            format,
+                            tab,
+                            &self.session_name,
+                            self.active == Some(tab.id),
+                        ))
+                    }
                     Err(error) => IpcResponse::failure(format!("{error:#}")),
                 }
             }
@@ -2979,7 +3724,20 @@ impl AppState {
                     !detached,
                     parent_id,
                 ) {
-                    Ok(index) => IpcResponse::success(index.to_string()),
+                    Ok(index) => {
+                        let format = option_value(args, "-F").unwrap_or("#{window_index}");
+                        let tab = self
+                            .tabs
+                            .iter()
+                            .find(|tab| tab.index == index)
+                            .expect("newly created agent tab must remain present");
+                        IpcResponse::success(render_format(
+                            format,
+                            tab,
+                            &self.session_name,
+                            self.active == Some(tab.id),
+                        ))
+                    }
                     Err(error) => {
                         IpcResponse::failure(format!("failed to start Codex agent tab: {error:#}"))
                     }
@@ -3061,8 +3819,11 @@ impl AppState {
                     return IpcResponse::failure("can't find window");
                 };
                 self.save_active_composer();
-                self.active = Some(self.tabs[position].id);
+                let id = self.tabs[position].id;
+                self.active = Some(id);
                 self.load_active_composer();
+                self.event_journal
+                    .commit("tab.selected", Some(id), serde_json::json!({}));
                 unsafe {
                     ShowWindow(self.window, SW_RESTORE);
                     SetForegroundWindow(self.window);
@@ -3079,7 +3840,17 @@ impl AppState {
                 let Some(position) = self.target_position(option_value(args, "-t")) else {
                     return IpcResponse::failure("can't find window");
                 };
+                let id = self.tabs[position].id;
+                let previous_name = self.tabs[position].title.clone();
                 self.tabs[position].title = name.to_owned();
+                self.event_journal.commit(
+                    "tab.renamed",
+                    Some(id),
+                    serde_json::json!({
+                        "previous_name": previous_name,
+                        "name": name,
+                    }),
+                );
                 IpcResponse::success("")
             }
             "set-tab-note" => {
@@ -3087,7 +3858,16 @@ impl AppState {
                     return IpcResponse::failure("can't find tab");
                 };
                 let note = positional_values(args, &["-t"], &[]).join(" ");
-                self.tabs[position].note = note;
+                let id = self.tabs[position].id;
+                let previous_note = mem::replace(&mut self.tabs[position].note, note.clone());
+                self.event_journal.commit(
+                    "tab.note",
+                    Some(id),
+                    serde_json::json!({
+                        "previous_note": previous_note,
+                        "note": note,
+                    }),
+                );
                 unsafe { InvalidateRect(self.window, ptr::null(), 0) };
                 IpcResponse::success("")
             }
@@ -3278,6 +4058,13 @@ impl AppState {
                 };
                 match self.tabs[position].scroll_viewport(action, count) {
                     Ok(offset) => {
+                        self.commit_viewport_event(position, offset, "control");
+                        if self
+                            .terminal_selection
+                            .is_some_and(|selection| selection.tab_id == self.tabs[position].id)
+                        {
+                            self.terminal_selection = None;
+                        }
                         unsafe { InvalidateRect(self.window, ptr::null(), 0) };
                         IpcResponse::success(offset.to_string())
                     }
@@ -3408,13 +4195,47 @@ impl AppState {
                 ))
             }
             "ui-snapshot" => IpcResponse::success(self.ui_snapshot()),
+            "read-events" => {
+                let Some(epoch) = option_value(args, "--epoch") else {
+                    return IpcResponse::failure("read-events requires --epoch");
+                };
+                let Some(after) =
+                    option_value(args, "--after").and_then(|value| value.parse::<u64>().ok())
+                else {
+                    return IpcResponse::failure("read-events requires a numeric --after sequence");
+                };
+                let limit = match option_value(args, "--limit") {
+                    Some(value) => match value.parse::<usize>() {
+                        Ok(limit) if (1..=1_024).contains(&limit) => limit,
+                        _ => {
+                            return IpcResponse::failure(
+                                "read-events --limit must be from 1 to 1024",
+                            );
+                        }
+                    },
+                    None => 256,
+                };
+                match self.event_journal.read_after(epoch, after, limit) {
+                    Ok(events) => IpcResponse::success(
+                        serde_json::to_string_pretty(&serde_json::json!({
+                            "position": self.event_journal.position(),
+                            "events": events,
+                        }))
+                        .unwrap_or_default(),
+                    ),
+                    Err(error) => IpcResponse::failure(error.to_json().to_string()),
+                }
+            }
             "protocol-info" => IpcResponse::success(protocol_info_json()),
             "focus" => {
                 let surface = args.get(1).map(String::as_str).unwrap_or("terminal");
                 if let Some(position) = self.target_position(option_value(args, "-t")) {
                     self.save_active_composer();
-                    self.active = Some(self.tabs[position].id);
+                    let id = self.tabs[position].id;
+                    self.active = Some(id);
                     self.load_active_composer();
+                    self.event_journal
+                        .commit("tab.selected", Some(id), serde_json::json!({}));
                 }
                 match surface {
                     "terminal" => unsafe { SetFocus(self.window) },
@@ -3490,8 +4311,11 @@ impl AppState {
                             return IpcResponse::failure("can't find tab");
                         };
                         self.save_active_composer();
-                        self.active = Some(self.tabs[position].id);
+                        let id = self.tabs[position].id;
+                        self.active = Some(id);
                         self.load_active_composer();
+                        self.event_journal
+                            .commit("tab.selected", Some(id), serde_json::json!({}));
                         unsafe { SetFocus(self.window) };
                         None
                     }
@@ -3526,8 +4350,58 @@ impl AppState {
                         self.send_composer();
                         None
                     }
+                    "copy-selection" => match self.copy_terminal_selection() {
+                        Ok(_) => None,
+                        Err(error) => Some(IpcResponse::failure(format!("{error:#}"))),
+                    },
                     "open-settings" => {
                         self.open_settings();
+                        None
+                    }
+                    "window-minimize" => {
+                        unsafe { ShowWindow(self.window, SW_MINIMIZE) };
+                        None
+                    }
+                    "window-maximize" => {
+                        unsafe { ShowWindow(self.window, SW_MAXIMIZE) };
+                        None
+                    }
+                    "window-restore" => {
+                        unsafe { ShowWindow(self.window, SW_RESTORE) };
+                        None
+                    }
+                    "window-resize" => {
+                        let Some(width) = option_value(args, "--width")
+                            .and_then(|value| value.parse::<i32>().ok())
+                            .filter(|value| *value >= 320)
+                        else {
+                            return IpcResponse::failure(
+                                "window-resize requires --width of at least 320",
+                            );
+                        };
+                        let Some(height) = option_value(args, "--height")
+                            .and_then(|value| value.parse::<i32>().ok())
+                            .filter(|value| *value >= 240)
+                        else {
+                            return IpcResponse::failure(
+                                "window-resize requires --height of at least 240",
+                            );
+                        };
+                        unsafe { ShowWindow(self.window, SW_RESTORE) };
+                        let mut client = RECT::default();
+                        let mut outer = RECT::default();
+                        unsafe {
+                            GetClientRect(self.window, &mut client);
+                            GetWindowRect(self.window, &mut outer);
+                            MoveWindow(
+                                self.window,
+                                outer.left,
+                                outer.top,
+                                width + (outer.right - outer.left) - client.right,
+                                height + (outer.bottom - outer.top) - client.bottom,
+                                1,
+                            );
+                        }
                         None
                     }
                     other => {
@@ -3556,6 +4430,13 @@ impl AppState {
                 let id = self.tabs[position].id;
                 if self.note_edit_target != Some(id) {
                     self.tabs[position].composer = text.clone();
+                    self.event_journal.commit(
+                        "composer.draft",
+                        Some(id),
+                        serde_json::json!({
+                            "length": text.chars().count(),
+                        }),
+                    );
                 }
                 if self.active == Some(id) {
                     unsafe { SetWindowTextW(self.edit, wide(&text).as_ptr()) };
@@ -3571,6 +4452,16 @@ impl AppState {
                 if !text.is_empty() && !self.tabs[position].submit(&text) {
                     self.tabs[position].composer = text;
                     return IpcResponse::failure("a composer submission is already pending");
+                }
+                if !text.is_empty() {
+                    let id = self.tabs[position].id;
+                    self.event_journal.commit(
+                        "composer.submitted",
+                        Some(id),
+                        serde_json::json!({
+                            "length": text.chars().count(),
+                        }),
+                    );
                 }
                 if self.active == Some(self.tabs[position].id) {
                     unsafe { SetWindowTextW(self.edit, wide("").as_ptr()) };
@@ -3704,6 +4595,11 @@ impl AppState {
                 if let Err(error) = self.persist_workspace() {
                     return IpcResponse::failure(format!("{error:#}"));
                 }
+                self.event_journal.commit(
+                    "workspace.shutdown",
+                    None,
+                    serde_json::json!({"saved": true}),
+                );
                 self.close_requested = true;
                 IpcResponse::success("")
             }
@@ -3722,6 +4618,11 @@ impl AppState {
                 }
                 self.tabs.clear();
                 self.active = None;
+                self.event_journal.commit(
+                    "workspace.shutdown",
+                    None,
+                    serde_json::json!({"saved": false, "destroyed": true}),
+                );
                 self.close_requested = true;
                 IpcResponse::success("")
             }
@@ -3742,8 +4643,11 @@ impl AppState {
             return IpcResponse::failure("no windows");
         };
         self.save_active_composer();
-        self.active = Some(self.tabs[position].id);
+        let id = self.tabs[position].id;
+        self.active = Some(id);
         self.load_active_composer();
+        self.event_journal
+            .commit("tab.selected", Some(id), serde_json::json!({}));
         IpcResponse::success("")
     }
 }
@@ -3928,6 +4832,11 @@ fn ipc_address() -> String {
         (hash ^ u32::from(byte)).wrapping_mul(16_777_619)
     });
     format!("127.0.0.1:{}", 42_000 + hash % 10_000)
+}
+
+fn has_explicit_ipc_address() -> bool {
+    IPC_ADDRESS_OVERRIDE.with(|value| value.borrow().is_some())
+        || env::var("AGENTERM_IPC_ADDRESS").is_ok_and(|address| !address.trim().is_empty())
 }
 
 fn parse_loopback_ipc_address(address: &str) -> Result<std::net::SocketAddr> {
@@ -4117,6 +5026,17 @@ fn start_ipc_server(window: HWND) -> Result<Receiver<IpcEnvelope>> {
 
 fn run_cli(arguments: Vec<String>) -> i32 {
     let mut arguments = arguments;
+    if control_command_requests_help(&arguments) {
+        let command = arguments.first().map(String::as_str).unwrap_or_default();
+        if let Some(usage) = control_command_usage(command) {
+            println!("Usage: {usage}");
+            return 0;
+        }
+    }
+    if let Err(error) = validate_control_command(&arguments) {
+        eprintln!("{error}");
+        return 2;
+    }
     if arguments
         .first()
         .is_some_and(|command| command == "set-composer")
@@ -4171,11 +5091,28 @@ fn run_cli(arguments: Vec<String>) -> i32 {
     if command == "list-instances" {
         return run_list_instances(&arguments);
     }
+    if command == "script" {
+        return run_script_command(&arguments);
+    }
+    if !has_explicit_ipc_address() {
+        match select_implicit_control_instance() {
+            Ok(address) => IPC_ADDRESS_OVERRIDE.with(|value| {
+                *value.borrow_mut() = Some(address);
+            }),
+            Err(error) => {
+                eprintln!("{error}");
+                return 2;
+            }
+        }
+    }
     if command == "wait-ui" {
         return run_wait_ui(&arguments);
     }
     if matches!(command, "wait-pane" | "expect-pane") {
         return run_wait_pane(&arguments);
+    }
+    if command == "wait-events" {
+        return run_wait_events(&arguments);
     }
     let may_start_server = matches!(
         command,
@@ -4241,6 +5178,423 @@ fn run_cli(arguments: Vec<String>) -> i32 {
     }
 }
 
+fn run_script_command(arguments: &[String]) -> i32 {
+    let Some(operation_name) = arguments.get(1).map(String::as_str) else {
+        eprintln!("script requires api, check, eval, or run");
+        return 2;
+    };
+    let operation = match operation_name {
+        "api" => ScriptOperation::Api,
+        "check" => ScriptOperation::Check,
+        "eval" => ScriptOperation::Eval,
+        "run" => ScriptOperation::Run,
+        other => {
+            eprintln!("unknown script operation: {other}");
+            return 2;
+        }
+    };
+    let profile = match option_value(arguments, "--profile").unwrap_or("pure") {
+        "pure" => ScriptProfile::Pure,
+        "observe" => ScriptProfile::Observe,
+        other => {
+            eprintln!("unknown script profile: {other}");
+            return 2;
+        }
+    };
+    let mut budgets = ScriptBudgets::default();
+    if let Some(value) = option_value(arguments, "--timeout-ms") {
+        match value.parse::<u64>() {
+            Ok(value) if (1..=10_000).contains(&value) => budgets.wall_time_ms = value,
+            _ => {
+                eprintln!("script --timeout-ms must be from 1 to 10000");
+                return 2;
+            }
+        }
+    }
+    if let Some(value) = option_value(arguments, "--max-operations") {
+        match value.parse::<u64>() {
+            Ok(value) if (1..=10_000_000).contains(&value) => budgets.operations = value,
+            _ => {
+                eprintln!("script --max-operations must be from 1 to 10000000");
+                return 2;
+            }
+        }
+    }
+
+    let operand = script_operand(arguments);
+    let (source_label, source) = match operation {
+        ScriptOperation::Api => ("api".to_owned(), String::new()),
+        ScriptOperation::Eval => {
+            let Some(expression) = operand else {
+                eprintln!("script eval requires an expression");
+                return 2;
+            };
+            ("eval".to_owned(), expression.to_owned())
+        }
+        ScriptOperation::Check | ScriptOperation::Run => {
+            let Some(path) = operand else {
+                eprintln!("script {operation_name} requires a file path or -");
+                return 2;
+            };
+            if path == "-" {
+                let mut source = String::new();
+                if let Err(error) = std::io::stdin().read_to_string(&mut source) {
+                    eprintln!("failed to read script from stdin: {error}");
+                    return 1;
+                }
+                ("stdin".to_owned(), source)
+            } else {
+                match std::fs::read_to_string(path) {
+                    Ok(source) => (path.to_owned(), source),
+                    Err(error) => {
+                        eprintln!("failed to read script {path}: {error}");
+                        return 1;
+                    }
+                }
+            }
+        }
+    };
+    if source.len() > budgets.source_bytes {
+        eprintln!(
+            "script source exceeds the {} byte limit",
+            budgets.source_bytes
+        );
+        return 3;
+    }
+
+    let needs_observation = profile == ScriptProfile::Observe
+        && matches!(operation, ScriptOperation::Eval | ScriptOperation::Run);
+    let observation = if needs_observation {
+        if !has_explicit_ipc_address() {
+            match select_implicit_control_instance() {
+                Ok(address) => IPC_ADDRESS_OVERRIDE.with(|value| {
+                    *value.borrow_mut() = Some(address);
+                }),
+                Err(error) => {
+                    eprintln!("{error}");
+                    return 2;
+                }
+            }
+        }
+        match send_ipc_request(vec!["ui-snapshot".to_owned()]) {
+            Ok(response) if response.ok => match serde_json::from_str(&response.output) {
+                Ok(snapshot) => Some(snapshot),
+                Err(error) => {
+                    eprintln!("observe broker received an invalid snapshot: {error}");
+                    return 1;
+                }
+            },
+            Ok(response) => {
+                eprintln!("{}", response.error);
+                return 1;
+            }
+            Err(error) => {
+                eprintln!("{error:#}");
+                return 1;
+            }
+        }
+    } else {
+        None
+    };
+    let invocation_id = format!(
+        "{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    );
+    let delimiter = arguments.iter().position(|argument| argument == "--");
+    let script_arguments = delimiter
+        .and_then(|position| arguments.get(position + 1..))
+        .unwrap_or_default()
+        .to_vec();
+    let invocation = ScriptInvocation {
+        envelope_version: SCRIPT_ENVELOPE_VERSION,
+        invocation_id,
+        api_version: SCRIPT_API_VERSION,
+        operation,
+        profile,
+        source_label,
+        source,
+        arguments: script_arguments,
+        budgets,
+        observation,
+    };
+    let executable = match std::env::current_exe().ok().and_then(|path| {
+        path.parent()
+            .map(|parent| parent.join("agenterm-script.exe"))
+    }) {
+        Some(path) if path.is_file() => path,
+        _ => {
+            eprintln!(
+                "agenterm-script.exe is not installed next to agentermctl.exe; \
+                 scripting is an optional component"
+            );
+            return 2;
+        }
+    };
+    let mut worker = match std::process::Command::new(&executable)
+        .arg("--worker")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+    {
+        Ok(worker) => worker,
+        Err(error) => {
+            eprintln!("failed to start {}: {error}", executable.display());
+            return 1;
+        }
+    };
+    let serialized = match serde_json::to_vec(&invocation) {
+        Ok(serialized) => serialized,
+        Err(error) => {
+            let _ = worker.kill();
+            eprintln!("failed to encode script invocation: {error}");
+            return 1;
+        }
+    };
+    if worker
+        .stdin
+        .take()
+        .is_none_or(|mut input| input.write_all(&serialized).is_err())
+    {
+        let _ = worker.kill();
+        eprintln!("failed to send the invocation to agenterm-script.exe");
+        return 1;
+    }
+    let output = match worker.wait_with_output() {
+        Ok(output) => output,
+        Err(error) => {
+            eprintln!("failed to wait for agenterm-script.exe: {error}");
+            return 1;
+        }
+    };
+    let result: ScriptResult = match serde_json::from_slice(&output.stdout) {
+        Ok(result) => result,
+        Err(error) => {
+            eprintln!(
+                "agenterm-script.exe returned an invalid result: {error}\n{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return 1;
+        }
+    };
+    if arguments.iter().any(|argument| argument == "--json") {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&result).unwrap_or_else(|_| "{}".to_owned())
+        );
+    } else if result.ok {
+        if !result.stdout.is_empty() {
+            print!("{}", result.stdout);
+            if !result.stdout.ends_with('\n') {
+                println!();
+            }
+        }
+        if let Some(value) = result.value {
+            if let Some(value) = value.as_str() {
+                println!("{value}");
+            } else {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&value).unwrap_or_else(|_| value.to_string())
+                );
+            }
+        } else if operation == ScriptOperation::Check {
+            println!("OK");
+        }
+    } else if let Some(failure) = &result.failure {
+        eprintln!(
+            "{}",
+            serde_json::json!({
+                "code": failure.code,
+                "message": failure.message,
+                "invocation_id": result.invocation_id,
+                "exit_class": result.exit_class,
+            })
+        );
+    }
+    if result.ok {
+        0
+    } else {
+        match result.exit_class.as_str() {
+            "configuration" => 2,
+            "limit" => 3,
+            _ => 1,
+        }
+    }
+}
+
+fn script_operand(arguments: &[String]) -> Option<&str> {
+    let mut position = 2;
+    while position < arguments.len() {
+        match arguments[position].as_str() {
+            "--" => return None,
+            "--profile" | "--timeout-ms" | "--max-operations" => position += 2,
+            "--json" => position += 1,
+            value => return Some(value),
+        }
+    }
+    None
+}
+
+fn select_implicit_control_instance() -> std::result::Result<String, String> {
+    let instances = discover_instances().map_err(|error| {
+        instance_selection_error(
+            "instance_discovery_failed",
+            "AgenTerm instance discovery failed",
+            &format!("{error:#}"),
+            Vec::new(),
+        )
+    })?;
+    let mut candidates = Vec::new();
+    let mut healthy = Vec::new();
+    for instance in instances {
+        let running = send_ipc_request_to_with_timeout(
+            &instance.record.address,
+            vec!["protocol-info".to_owned()],
+            IPC_DISCOVERY_TIMEOUT,
+        )
+        .is_ok_and(|response| response.ok);
+        if running {
+            healthy.push(instance.record.address.clone());
+        }
+        candidates.push(serde_json::json!({
+            "pid": instance.record.pid,
+            "address": instance.record.address,
+            "session": instance.record.session,
+            "workspace_path": instance.record.workspace_path,
+            "status": if running { "running" } else { "unreachable" },
+        }));
+    }
+    match healthy.as_slice() {
+        [address] => Ok(address.clone()),
+        [] => Err(instance_selection_error(
+            "no_healthy_instance",
+            "No healthy AgenTerm instance is available",
+            "Start agenterm.exe, or use `agentermctl --address HOST:PORT COMMAND` to target and \
+             autostart a specific local server. Inspect registrations with \
+             `agentermctl list-instances --json`.",
+            candidates,
+        )),
+        _ => Err(instance_selection_error(
+            "ambiguous_instance",
+            "More than one healthy AgenTerm instance is available",
+            "Choose one with `agentermctl --address HOST:PORT COMMAND` or set \
+             AGENTERM_IPC_ADDRESS. Inspect details with `agentermctl list-instances --json`.",
+            candidates,
+        )),
+    }
+}
+
+fn instance_selection_error(
+    code: &str,
+    message: &str,
+    hint: &str,
+    candidates: Vec<serde_json::Value>,
+) -> String {
+    serde_json::to_string_pretty(&serde_json::json!({
+        "error": {
+            "code": code,
+            "message": message,
+            "hint": hint,
+            "candidates": candidates,
+        }
+    }))
+    .unwrap_or_else(|_| format!("{message}: {hint}"))
+}
+
+fn run_wait_events(arguments: &[String]) -> i32 {
+    let Some(epoch) = option_value(arguments, "--epoch") else {
+        eprintln!("wait-events requires --epoch");
+        return 2;
+    };
+    let Some(mut after) =
+        option_value(arguments, "--after").and_then(|value| value.parse::<u64>().ok())
+    else {
+        eprintln!("wait-events requires a numeric --after sequence");
+        return 2;
+    };
+    let Some(kind) = option_value(arguments, "--kind") else {
+        eprintln!("wait-events requires --kind");
+        return 2;
+    };
+    let tab_id = option_value(arguments, "--tab")
+        .map(|value| value.trim_start_matches('@'))
+        .and_then(|value| value.parse::<u64>().ok());
+    if option_value(arguments, "--tab").is_some() && tab_id.is_none() {
+        eprintln!("wait-events --tab must be a stable @ID");
+        return 2;
+    }
+    let timeout_ms = option_value(arguments, "--timeout-ms")
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(5_000)
+        .min(60_000);
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    loop {
+        let response = send_ipc_request(vec![
+            "read-events".to_owned(),
+            "--epoch".to_owned(),
+            epoch.to_owned(),
+            "--after".to_owned(),
+            after.to_string(),
+            "--limit".to_owned(),
+            "256".to_owned(),
+        ]);
+        let response = match response {
+            Ok(response) if response.ok => response,
+            Ok(response) => {
+                eprintln!("{}", response.error);
+                return 1;
+            }
+            Err(error) => {
+                eprintln!("{error:#}");
+                return 1;
+            }
+        };
+        let Ok(batch) = serde_json::from_str::<serde_json::Value>(&response.output) else {
+            eprintln!("wait-events received an invalid event batch");
+            return 1;
+        };
+        if let Some(events) = batch["events"].as_array() {
+            for event in events {
+                if let Some(sequence) = event["sequence"].as_u64() {
+                    after = after.max(sequence);
+                }
+                let kind_matches = event["kind"].as_str() == Some(kind);
+                let tab_matches =
+                    tab_id.is_none_or(|requested| event["tab_id"].as_u64() == Some(requested));
+                if kind_matches && tab_matches {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(event).unwrap_or_else(|_| event.to_string())
+                    );
+                    return 0;
+                }
+            }
+        }
+        if Instant::now() >= deadline {
+            eprintln!(
+                "{}",
+                serde_json::json!({
+                    "code": "event_wait_timeout",
+                    "epoch": epoch,
+                    "after": after,
+                    "kind": kind,
+                    "tab_id": tab_id,
+                    "timeout_ms": timeout_ms,
+                })
+            );
+            return 1;
+        }
+        thread::sleep(
+            Duration::from_millis(20).min(deadline.saturating_duration_since(Instant::now())),
+        );
+    }
+}
+
 fn run_wait_ui(arguments: &[String]) -> i32 {
     let timeout_ms = option_value(arguments, "--timeout-ms")
         .and_then(|value| value.parse::<u64>().ok())
@@ -4249,9 +5603,22 @@ fn run_wait_ui(arguments: &[String]) -> i32 {
     let expected_active = option_value(arguments, "--active");
     let expected_focus = option_value(arguments, "--focus");
     let expected_state = option_value(arguments, "--tab-state");
+    let expected_window_state = option_value(arguments, "--window-state");
+    let expected_client_width =
+        option_value(arguments, "--client-width").and_then(|value| value.parse::<i64>().ok());
+    let expected_client_height =
+        option_value(arguments, "--client-height").and_then(|value| value.parse::<i64>().ok());
     let target = option_value(arguments, "-t");
-    if expected_active.is_none() && expected_focus.is_none() && expected_state.is_none() {
-        eprintln!("wait-ui requires --active, --focus, or --tab-state");
+    if expected_active.is_none()
+        && expected_focus.is_none()
+        && expected_state.is_none()
+        && expected_window_state.is_none()
+        && expected_client_width.is_none()
+        && expected_client_height.is_none()
+    {
+        eprintln!(
+            "wait-ui requires an active, focus, tab-state, window-state, or client-size condition"
+        );
         return 1;
     }
     loop {
@@ -4278,7 +5645,22 @@ fn run_wait_ui(arguments: &[String]) -> i32 {
                             })
                         })
                     });
-                    if active_matches && focus_matches && state_matches {
+                    let window_state_matches = expected_window_state.is_none_or(|expected| {
+                        snapshot["window"]["state"].as_str() == Some(expected)
+                    });
+                    let width_matches = expected_client_width.is_none_or(|expected| {
+                        snapshot["window"]["client_width"].as_i64() == Some(expected)
+                    });
+                    let height_matches = expected_client_height.is_none_or(|expected| {
+                        snapshot["window"]["client_height"].as_i64() == Some(expected)
+                    });
+                    if active_matches
+                        && focus_matches
+                        && state_matches
+                        && window_state_matches
+                        && width_matches
+                        && height_matches
+                    {
                         println!("{}", response.output);
                         return 0;
                     }
@@ -4404,7 +5786,7 @@ Usage:
   agentermctl [--address HOST:PORT] command [args...]
   agentermctl list-instances [--json] [--prune]
   agentermctl new-session [-s name]
-  agentermctl new-window [-d] [-n name] [--parent target] [-e NAME=VALUE] [command [args...]]
+  agentermctl new-window [-d] [-n name] [--parent target] [-F format] [-e NAME=VALUE] [command [args...]]
   agentermctl new-agent [-d] [-n name] [--parent target] [--proxy URL] [--yolo] [-- [codex args...]]
   agentermctl list-windows [-F format]
   agentermctl list-tab-tree [-F format]
@@ -4413,6 +5795,8 @@ Usage:
   agentermctl kill-window -t target
   agentermctl send-keys [-t target] key...
   agentermctl scroll-pane [-t target] up|down|page-up|page-down|top|bottom [rows]
+  agentermctl read-events --epoch EPOCH --after SEQUENCE [--limit COUNT]
+  agentermctl wait-events --epoch EPOCH --after SEQUENCE --kind KIND [--tab @ID] [--timeout-ms MS]
   agentermctl capture-pane -p [-t target]
   agentermctl capture-pane --raw-escaped [-t target]
   agentermctl dump-cells [-t target] [-r row]
@@ -4436,7 +5820,7 @@ Usage:
   agentermctl set-setting terminal.font-size 8..36
   agentermctl send-mouse [-t target] -x col -y row [--button left] [--action press]
   agentermctl ui-snapshot
-  agentermctl ui-action new-tab|new-child|edit-tab|toggle-tree|select-tab|close-tab|confirm|cancel|composer-send
+  agentermctl ui-action new-tab|new-child|edit-tab|toggle-tree|select-tab|close-tab|confirm|cancel|composer-send|copy-selection
   agentermctl focus terminal|composer|sidebar [-t target]
   agentermctl wait-pane [-t target] (--contains text|--dead|--submit-complete) [--timeout-ms ms]
   agentermctl wait-ui [--active @id] [--focus surface] [-t target --tab-state state]
@@ -4496,7 +5880,8 @@ fn protocol_info_json() -> String {
             "set-setting", "set-tab-note", "show-tab-note",
             "list-tab-tree", "set-tab-parent", "show-tab-parent",
             "save-workspace", "workspace-info", "shutdown",
-            "new-agent", "list-instances", "scroll-pane"
+            "new-agent", "list-instances", "scroll-pane", "read-events",
+            "wait-events"
         ],
         "features": {
             "remain_on_exit": true,
@@ -4716,8 +6101,11 @@ fn save_window_png(window: HWND, path: &std::path::Path, pane_only: bool) -> Res
 }
 
 #[cfg(test)]
-mod ipc_address_tests {
-    use super::parse_loopback_ipc_address;
+mod tests {
+    use super::{
+        EditShortcut, TerminalPoint, TerminalSelection, edit_shortcut, parse_loopback_ipc_address,
+        terminal_copy_shortcut, terminal_selection_text,
+    };
 
     #[test]
     fn accepts_only_loopback_ipc_addresses() {
@@ -4726,5 +6114,64 @@ mod ipc_address_tests {
         assert!(parse_loopback_ipc_address("0.0.0.0:42000").is_err());
         assert!(parse_loopback_ipc_address("192.0.2.1:42000").is_err());
         assert!(parse_loopback_ipc_address("127.0.0.1:42\0").is_err());
+    }
+
+    #[test]
+    fn composer_edit_shortcuts_are_explicit_and_control_scoped() {
+        assert_eq!(
+            edit_shortcut(true, b'A' as u32),
+            Some(EditShortcut::SelectAll)
+        );
+        assert_eq!(edit_shortcut(true, b'C' as u32), Some(EditShortcut::Copy));
+        assert_eq!(edit_shortcut(true, b'X' as u32), Some(EditShortcut::Cut));
+        assert_eq!(edit_shortcut(true, b'V' as u32), Some(EditShortcut::Paste));
+        assert_eq!(edit_shortcut(false, b'A' as u32), None);
+        assert_eq!(edit_shortcut(true, b'Z' as u32), None);
+    }
+
+    #[test]
+    fn terminal_selection_extracts_forward_reverse_and_wide_text() {
+        let mut parser = vt100::Parser::new(3, 8, 0);
+        parser.process(b"alpha\r\nbeta");
+        let forward = TerminalSelection {
+            tab_id: 1,
+            anchor: TerminalPoint { row: 0, col: 1 },
+            focus: TerminalPoint { row: 1, col: 2 },
+            dragging: false,
+            moved: true,
+        };
+        let reverse = TerminalSelection {
+            anchor: forward.focus,
+            focus: forward.anchor,
+            ..forward
+        };
+        assert_eq!(
+            terminal_selection_text(parser.screen(), forward),
+            "lpha\r\nbet"
+        );
+        assert_eq!(
+            terminal_selection_text(parser.screen(), reverse),
+            "lpha\r\nbet"
+        );
+
+        let mut wide_parser = vt100::Parser::new(1, 8, 0);
+        wide_parser.process("你A".as_bytes());
+        let wide = TerminalSelection {
+            tab_id: 1,
+            anchor: TerminalPoint { row: 0, col: 0 },
+            focus: TerminalPoint { row: 0, col: 2 },
+            dragging: false,
+            moved: true,
+        };
+        assert_eq!(terminal_selection_text(wide_parser.screen(), wide), "你A");
+    }
+
+    #[test]
+    fn ctrl_c_copies_only_an_active_terminal_selection() {
+        assert!(terminal_copy_shortcut(true, b'C' as u32, true, true));
+        assert!(!terminal_copy_shortcut(false, b'C' as u32, true, true));
+        assert!(!terminal_copy_shortcut(true, b'C' as u32, true, false));
+        assert!(!terminal_copy_shortcut(true, b'C' as u32, false, true));
+        assert!(!terminal_copy_shortcut(true, b'V' as u32, true, true));
     }
 }

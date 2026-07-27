@@ -48,10 +48,12 @@ try {
         $gui = '.\dist\agenterm.exe'
         $cli = '.\dist\agentermctl.exe'
         $mux = '.\dist\agenterm-mux.exe'
+        $script = '.\dist\agenterm-script.exe'
         $releaseBudgets = [ordered]@{
             'agenterm.exe'     = 4MB
             'agentermctl.exe'  = 2MB
             'agenterm-mux.exe' = 2MB
+            'agenterm-script.exe' = 3MB
         }
         if ((Get-PeSubsystem $gui) -ne 2) {
             throw 'agenterm.exe must use the Windows GUI subsystem.'
@@ -61,6 +63,9 @@ try {
         }
         if ((Get-PeSubsystem $mux) -ne 3) {
             throw 'agenterm-mux.exe must use the Windows Console subsystem.'
+        }
+        if ((Get-PeSubsystem $script) -ne 3) {
+            throw 'agenterm-script.exe must use the Windows Console subsystem.'
         }
         if ($Release) {
             foreach ($entry in $releaseBudgets.GetEnumerator()) {
@@ -78,10 +83,16 @@ try {
             $names -notcontains 'agenterm.exe' -or
             $names -notcontains 'agentermctl.exe' -or
             $names -notcontains 'agenterm-mux.exe' -or
+            $names -notcontains 'agenterm-script.exe' -or
             $metadata.features -notcontains 'codex-launcher' -or
             $metadata.features -notcontains 'tab-environment' -or
             $metadata.features -notcontains 'mux-frontend') {
             throw 'agenterm.json does not describe all versioned executables.'
+        }
+        $scriptVersionOutput = & $script --version
+        if ($LASTEXITCODE -ne 0 -or
+            $scriptVersionOutput -ne "agenterm-script $($metadata.version)") {
+            throw 'agenterm-script --version does not match agenterm.json.'
         }
 
         $muxVersionOutput = & $mux --version
@@ -105,6 +116,7 @@ try {
         Invoke-Checked 'startup smoke test' { & '.\tests\startup_smoke.ps1' }
         Invoke-Checked 'CLI smoke test' { & '.\tests\cli_smoke.ps1' }
         Invoke-Checked 'AI fleet smoke test' { & '.\tests\fleet_smoke.ps1' }
+        Invoke-Checked 'safe scripting smoke test' { & '.\tests\script_smoke.ps1' }
         Invoke-Checked 'semantic UX smoke test' { & '.\tests\ux_smoke.ps1' }
     }
 

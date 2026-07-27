@@ -45,6 +45,9 @@ $environmentName = "env-$PID"
 $agentName = "codex-$PID"
 $role = "reviewer-$PID"
 $proxy = "http://127.0.0.1:$((30000 + ($PID % 1000)))"
+$secondAddress = "127.0.0.1:$((50000 + ($PID % 1000)))"
+$secondWorkspace = Join-Path $env:TEMP "agenterm-second-$PID.json"
+$secondStarted = $false
 
 function Invoke-CheckedExe {
     param(
@@ -80,6 +83,46 @@ function Invoke-ExpectedFailure {
 
 try {
     $expectedVersion = ((Invoke-CheckedExe $CtlExe @('--version')) -split '\s+')[-1]
+    Write-Host 'STEP control help and option errors are offline and fail fast'
+    $topHelp = Invoke-CheckedExe $CtlExe @('--help')
+    if (-not $topHelp.Contains('AgenTerm CLI')) {
+        throw 'top-level --help did not render locally'
+    }
+    $catalog = Invoke-CheckedExe $CtlExe @('list-commands')
+    foreach ($line in @($catalog -split "`n")) {
+        if ($line -notmatch '^(\S+)(?: \(([^)]+)\))?$') {
+            throw "could not parse command catalog line: $line"
+        }
+        foreach ($command in @($Matches[1], $Matches[2]) | Where-Object { $_ }) {
+            $commandHelp = Invoke-CheckedExe $CtlExe @($command, '--help')
+            if (-not $commandHelp.StartsWith('Usage: agentermctl ')) {
+                throw "$command --help did not render command help offline"
+            }
+        }
+    }
+    $optionWatch = [Diagnostics.Stopwatch]::StartNew()
+    $optionError = Invoke-ExpectedFailure $CtlExe @('-a', $address, 'list-windows')
+    $optionWatch.Stop()
+    if (-not $optionError.Contains('unknown global option') -or
+        -not $optionError.Contains('--address HOST:PORT') -or
+        $optionWatch.ElapsedMilliseconds -gt 2000) {
+        throw 'mistyped -a did not fail fast with correct instance-targeting guidance'
+    }
+
+    Write-Host 'STEP zero-instance live control reports structured candidates'
+    Remove-Item Env:AGENTERM_IPC_ADDRESS
+    try {
+        $emptyError = Invoke-ExpectedFailure $CtlExe @('list-windows')
+        if (-not $emptyError.Contains('"code": "no_healthy_instance"') -or
+            -not $emptyError.Contains('"candidates": []') -or
+            -not $emptyError.Contains('list-instances --json')) {
+            throw 'zero-instance selection error was not structured and actionable'
+        }
+    }
+    finally {
+        $env:AGENTERM_IPC_ADDRESS = $address
+    }
+
     Write-Host 'STEP mux compatibility is discoverable without a server'
     $compatibility = Invoke-CheckedExe $MuxExe @('compatibility', '--json') |
         ConvertFrom-Json
@@ -180,6 +223,56 @@ try {
         throw 'The child did not receive its scoped environment and authoritative tab context'
     }
     Write-Evidence 'fleet.tab-environment'
+
+    Write-Host 'STEP one healthy instance is selected without an explicit address'
+    Remove-Item Env:AGENTERM_IPC_ADDRESS
+    try {
+        $implicitWindows = Invoke-CheckedExe $CtlExe @(
+            'list-windows', '-F', '#{window_name}'
+        )
+        if (-not $implicitWindows.Contains($environmentName)) {
+            throw 'implicit single-instance selection targeted the wrong server'
+        }
+    }
+    finally {
+        $env:AGENTERM_IPC_ADDRESS = $address
+    }
+
+    Write-Host 'STEP multiple healthy instances require an explicit target'
+    $savedWorkspace = $env:AGENTERM_WORKSPACE_PATH
+    $env:AGENTERM_WORKSPACE_PATH = $secondWorkspace
+    try {
+        Invoke-CheckedExe $CtlExe @(
+            '--address', $secondAddress, 'new-window', '-d',
+            '-n', "second-$PID"
+        ) | Out-Null
+        $secondStarted = $true
+    }
+    finally {
+        $env:AGENTERM_WORKSPACE_PATH = $savedWorkspace
+    }
+    Remove-Item Env:AGENTERM_IPC_ADDRESS
+    try {
+        $ambiguousError = Invoke-ExpectedFailure $CtlExe @('list-windows')
+        if (-not $ambiguousError.Contains('"code": "ambiguous_instance"') -or
+            -not $ambiguousError.Contains($address) -or
+            -not $ambiguousError.Contains($secondAddress)) {
+            throw 'multiple-instance selection error did not list both candidates'
+        }
+    }
+    finally {
+        $env:AGENTERM_IPC_ADDRESS = $address
+    }
+    $explicitWindows = Invoke-CheckedExe $CtlExe @(
+        'list-windows', '-F', '#{window_name}'
+    )
+    if (-not $explicitWindows.Contains($environmentName) -or
+        $explicitWindows.Contains("second-$PID")) {
+        throw 'AGENTERM_IPC_ADDRESS did not take priority over discovery'
+    }
+    Invoke-CheckedExe $CtlExe @('--address', $secondAddress, 'shutdown') | Out-Null
+    $secondStarted = $false
+
     Invoke-CheckedExe $CtlExe @(
         'new-session', '--', 'cmd.exe', '/d', '/c', 'echo child', '-s', 'hijack'
     ) | Out-Null
@@ -305,8 +398,12 @@ try {
     Write-Host 'PASS: fleet launch, delimiter safety, loopback IPC, and destructive mux behavior'
 }
 finally {
+    if ($secondStarted) {
+        & $CtlExe --address $secondAddress shutdown 2>$null | Out-Null
+    }
     & $CtlExe kill-server 2>$null | Out-Null
     Remove-Item -LiteralPath $workspaceFile -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $secondWorkspace -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $instanceDir -Recurse -ErrorAction SilentlyContinue
     if ($null -eq $previousAddress) {
         Remove-Item Env:AGENTERM_IPC_ADDRESS -ErrorAction SilentlyContinue

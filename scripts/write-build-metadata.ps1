@@ -12,6 +12,9 @@ param(
     [string]$MuxExecutablePath,
 
     [Parameter(Mandatory = $true)]
+    [string]$ScriptExecutablePath,
+
+    [Parameter(Mandatory = $true)]
     [ValidateSet('dev', 'release')]
     [string]$Profile
 )
@@ -99,12 +102,14 @@ $manifest = [ordered]@{
         'hierarchical-tabs'
         'mux-frontend'
         'persistent-workspace'
+        'safe-scripting'
         'tab-environment'
     )
     executables    = @(
         Get-ExecutableInfo -Path $ExecutablePath -Role 'gui'
         Get-ExecutableInfo -Path $CliExecutablePath -Role 'cli'
         Get-ExecutableInfo -Path $MuxExecutablePath -Role 'compatibility-cli'
+        Get-ExecutableInfo -Path $ScriptExecutablePath -Role 'scripting-worker'
     )
 }
 

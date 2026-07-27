@@ -20,7 +20,22 @@ impl Default for AppConfig {
 }
 
 pub(crate) fn config_path() -> PathBuf {
-    env::var_os("LOCALAPPDATA")
+    config_path_from(
+        env::var_os("AGENTERM_SETTINGS_PATH"),
+        env::var_os("LOCALAPPDATA"),
+    )
+}
+
+fn config_path_from(
+    override_path: Option<std::ffi::OsString>,
+    local_app_data: Option<std::ffi::OsString>,
+) -> PathBuf {
+    if let Some(path) = override_path
+        && !path.is_empty()
+    {
+        return PathBuf::from(path);
+    }
+    local_app_data
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."))
         .join("AgenTerm")
@@ -53,5 +68,17 @@ mod tests {
         let config: AppConfig = serde_json::from_str("{}").unwrap();
         assert_eq!(config.terminal_font_family, "Consolas");
         assert_eq!(config.terminal_font_size, 12);
+    }
+
+    #[test]
+    fn explicit_settings_path_overrides_the_local_app_data_default() {
+        assert_eq!(
+            config_path_from(Some(r"D:\isolated\settings.json".into()), None),
+            PathBuf::from(r"D:\isolated\settings.json")
+        );
+        assert_eq!(
+            config_path_from(Some("".into()), Some(r"D:\profile".into())),
+            PathBuf::from(r"D:\profile\AgenTerm\settings.json")
+        );
     }
 }

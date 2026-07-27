@@ -29,7 +29,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 <!-- agenterm-alignment-contract
 {
   "schema_version": 2,
-  "planned_command_roots": ["agenterm-bash", "script"],
+  "planned_command_roots": ["agenterm-bash"],
   "capabilities": [
     {
       "id": "terminal.backspace-del-one",
@@ -38,6 +38,54 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       "evidence_mode": "black-box",
       "prd": "Backspace emits ConPTY VT `DEL` and deletes exactly one input",
       "evidence_ids": ["cli.backspace-del-one"]
+    },
+    {
+      "id": "terminal.mouse-scrollback",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "mouse wheel and a visible draggable scrollbar navigate terminal",
+      "evidence_ids": ["ux.mouse-scrollback"]
+    },
+    {
+      "id": "terminal.text-selection-copy",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "dragging selects visible terminal cells and Ctrl+C copies the selected",
+      "evidence_ids": ["ux.terminal-selection-copy"]
+    },
+    {
+      "id": "settings.path-isolation",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "`AGENTERM_SETTINGS_PATH` provides explicit settings isolation",
+      "evidence_ids": ["ux.settings-isolation"]
+    },
+    {
+      "id": "control.stable-create-id",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "`new-window -F` can return the new tab's stable ID",
+      "evidence_ids": ["cli.stable-create-id"]
+    },
+    {
+      "id": "workspace.locale-consistency",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "built-in control labels come from one declared English locale",
+      "evidence_ids": ["ux.locale-consistency"]
+    },
+    {
+      "id": "workspace.semantic-window-control",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "semantic actions control window state and client size without corrupting the PTY grid",
+      "evidence_ids": ["ux.semantic-window-control"]
     },
     {
       "id": "runtime.remain-on-exit",
@@ -130,6 +178,38 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       "evidence_ids": ["fleet.instance-discovery"]
     },
     {
+      "id": "control.observable-events",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "bounded event reads and waits follow a snapshot epoch and sequence",
+      "evidence_ids": ["cli.observable-events"]
+    },
+    {
+      "id": "scripting.rhai-pure",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "pure Rhai run, eval, check, and API discovery execute in a sidecar",
+      "evidence_ids": ["script.rhai-pure"]
+    },
+    {
+      "id": "scripting.rhai-observe",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "observe Rhai receives one brokered immutable UI snapshot",
+      "evidence_ids": ["script.rhai-observe"]
+    },
+    {
+      "id": "scripting.rhai-deny-budget",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "Rhai denies ambient mutation authority and enforces operation budgets",
+      "evidence_ids": ["script.rhai-deny-budget"]
+    },
+    {
       "id": "scripting.rust-host-rhai-language",
       "kind": "decision",
       "status": "accepted",
@@ -150,6 +230,21 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [x] VT100 parsing, ANSI colors, scrollback, resize, keyboard and mouse
     - [x] Backspace emits ConPTY VT `DEL` and deletes exactly one input
       character in the default `cmd.exe` line editor
+    - [x] mouse wheel and a visible draggable scrollbar navigate terminal
+      history; scrollbar track clicks page and dragging to the bottom restores
+      the live viewport
+    - [x] dragging selects visible terminal cells and Ctrl+C copies the selected
+      text; an unmodified click still reaches RMUX/native terminal mouse input
+    - Professional interaction follow-ups informed by the reviewed PuTTY
+      terminal model
+      - [ ] application-requested raw mouse reporting wins by default while
+        Shift provides a documented local-selection override
+      - [ ] dragging a selection beyond the viewport auto-scrolls at a bounded
+        rate and capture loss cancels the unfinished gesture cleanly
+      - [ ] double-click word, triple-click line, and optional rectangular
+        selection use terminal-cell rather than pixel semantics
+      - [ ] terminal paste reads the clipboard off the GUI thread, normalizes
+        newlines, filters unsafe controls, and honors bracketed-paste mode
     - [x] dirty-frame rendering and GDI double buffering
     - [x] GUI shell appears before the initial ConPTY/cmd process is ready
     - [x] initial terminal loads asynchronously with visible starting feedback
@@ -161,6 +256,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       renderer, and IPC server
     - [x] `agentermctl.exe`: native AgenTerm observation and automation client
     - [x] `agenterm-mux.exe`: tmux/RMUX-compatible fleet control entry point
+    - [x] `agenterm-script.exe`: optional one-invocation Rhai scripting worker
+      for the v0.1.5 safe scripting contract
     - [ ] `agenterm-mcp.exe`: MCP server/client and agentic orchestration
       sidecar
     - [ ] `agenterm-ai.exe`: CPU-first lightweight specialized-intelligence
@@ -294,6 +391,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [x] explicit confirmation before closing a live process
     - [x] dead tabs close only by explicit human or CLI action
     - [x] per-tab external composer with independent draft and Send action
+      - [x] native editing shortcuts explicitly support `Ctrl+A` select all,
+        `Ctrl+C` copy, `Ctrl+V` paste, and `Ctrl+X` cut
       - [x] submit text and Enter as distinct PTY events so interactive TUIs
         such as Codex execute the draft instead of leaving it in their editor
       - [x] schedule Enter asynchronously beyond paste-burst suppression and
@@ -302,7 +401,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       - [ ] automated interactive-TUI fixture that rejects batched paste+Enter
         without requiring a networked Codex session
     - [x] `Settings` and `New` actions grouped below the tree
+    - [x] built-in control labels come from one declared English locale;
+      semantic snapshots expose the locale and resolved labels
     - [x] settings UI for terminal font family and size
+    - [x] `AGENTERM_SETTINGS_PATH` provides explicit settings isolation while
+      the default remains `%LOCALAPPDATA%\AgenTerm\settings.json`
     - Persistent workspace
       - [x] normal application close preserves the tab tree and active tab
       - [x] names, notes, composer drafts, and original commands are restored
@@ -325,6 +428,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       - [x] text capture, raw escaped output, styled cell dumps
       - [x] JSON pane, tab, focus, modal, layout, and protocol snapshots
       - [x] whole-window and selected-pane PNG screenshots
+      - [ ] non-intrusive bounded transcript capture by stable tab ID, with
+        explicit visible-vs-scrollback range, truncation metadata, and no
+        viewport mutation; this requires a versioned protocol addition rather
+        than automating `scroll-pane`
       - [ ] incremental output sequence and event stream
     - Action
       - [x] create, select, rename, annotate, and close tabs
@@ -349,32 +456,35 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
         GUI autostart that returns as soon as IPC becomes ready
       - [x] explicit errors for unsupported operations
       - [ ] named-pipe transport and stable event subscription
-  - Observable Fleet event core (v0.1.4 minimum slice)
+  - Observable Fleet event core (v0.1.5 minimum slice)
     - Contract
-      - [ ] assign a new server `epoch` on every workspace-authority start so a
+      - [x] assign a new server `epoch` on every workspace-authority start so a
         consumer can distinguish restart from an in-process event gap
-      - [ ] assign one strictly increasing `sequence` within an epoch after
-        each committed observable state transition
-      - [ ] expose a bounded in-memory event journal whose envelopes contain
+      - [~] assign one strictly increasing `sequence` within an epoch after
+        each committed observable state transition; tab create/select are wired
+      - [x] expose a bounded in-memory event journal whose envelopes contain
         schema version, epoch, sequence, event kind, stable tab ID when
         applicable, and a minimal typed payload
-      - [ ] cover only tab create/close/select/rename/note/parent/state,
+      - [~] cover only tab create/close/select/rename/note/parent/state,
         composer-draft/submit state, terminal output advancement, viewport, and
-        workspace save/shutdown events in the first schema
-      - [ ] snapshot responses include the current epoch and sequence so clients
+        workspace save/shutdown events in the first schema; create/select ship
+        first
+      - [x] snapshot responses include the current epoch and sequence so clients
         can atomically establish a baseline before following the journal
     - Read and wait slice
-      - [ ] add one public bounded read operation for events after
+      - [x] add one public bounded read operation for events after
         `(epoch, sequence)`, with explicit gap/restart errors rather than silent
         loss or replay ambiguity
-      - [ ] add one deterministic wait operation over the same journal for a
+      - [x] add one deterministic wait operation over the same journal for a
         small allowlisted predicate set and deadline; cancellation or timeout
         cannot block the GUI thread
-      - [ ] journal mutation happens only after the corresponding state change
-        commits; readers never observe an event that snapshots cannot verify
-      - [ ] black-box tests prove ordering, restart epoch change, bounded-history
-        gaps, timeout, concurrent readers, and snapshot-to-follow handoff
-    - Explicitly deferred beyond the v0.1.4 slice
+      - [x] bounded event reads and waits follow a snapshot epoch and sequence
+      - [~] journal mutation happens only after the corresponding state change
+        commits; wired event kinds are snapshot-verifiable
+      - [~] black-box tests prove read/wait ordering, timeout, and
+        snapshot-to-follow handoff; restart, gap, and concurrent-reader
+        black-box coverage remains
+    - Explicitly deferred beyond the minimum slice
       - [ ] durable replay across process restarts, remote/network transport,
         arbitrary user predicates, unbounded terminal byte logging, delivery
         acknowledgements, and exactly-once side effects
@@ -387,10 +497,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [ ] surface staged-version availability and offer an explicit restart
       action without destroying persisted tabs
   - Rust host + Rhai scripting
+    - [x] pure Rhai run, eval, check, and API discovery execute in a sidecar
+    - [x] observe Rhai receives one brokered immutable UI snapshot
+    - [x] Rhai denies ambient mutation authority and enforces operation budgets
     - Product boundary
       - [x] design choice: Rust (`.rs`) implements the host, capability checks,
         and stable APIs; Rhai (`.rhai`) is the user scripting language
-      - [ ] scripting executes in an optional sidecar/worker; the GUI owns no
+      - [x] scripting executes in an optional sidecar/worker; the GUI owns no
         Rhai engine and communicates only through versioned typed contracts
       - [ ] scripts automate the public tab/workspace control plane; they do
         not receive direct Win32, PTY, or mutable GUI-state access
@@ -446,10 +559,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
         scoped Windows file access
       - [ ] audit source, requested/granted capabilities, duration, result
         class, and denial reason without recording content or secrets
-    - v0.1.5 minimum sidecar contract
+    - Future safe-scripting sidecar contract
       - Process boundary
         - [ ] one fresh worker process executes one `run`, `eval`, or `check`
-          invocation; v0.1.5 has no persistent daemon, background handler,
+          invocation; the first delivery has no persistent daemon, background handler,
           module resolver, or cross-invocation mutable state
         - [ ] the launcher places the worker in a kill-on-close Windows Job
           Object and owns its deadline, cancellation, stdout, stderr, and final
@@ -461,7 +574,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
           validates the profile and supplies only immutable typed inputs over
           the invocation channel
       - Initial profiles
-        - [ ] `pure` exposes bounded Rhai evaluation, JSON-compatible values,
+        - [x] `pure` exposes bounded Rhai evaluation, JSON-compatible values,
           invocation arguments, and captured stdout only; it has no clock,
           environment, filesystem, process, network, terminal, or fleet access
         - [ ] `observe` adds typed workspace metadata, tab-tree snapshots, pane
@@ -474,16 +587,16 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
           an implicit resnapshot
         - [ ] `control`, filesystem, environment, process execution, network,
           package loading, event handlers, and status providers remain outside
-          the v0.1.5 acceptance gate
+          the first-delivery acceptance gate
       - Public commands and discovery
-        - [ ] `script run FILE.rhai|- [-- ARGS...]` loads a file or stdin and
+        - [x] `script run FILE.rhai|- [-- ARGS...]` loads a file or stdin and
           returns script stdout separately from diagnostics
-        - [ ] `script eval EXPRESSION` evaluates one explicit expression under
+        - [x] `script eval EXPRESSION` evaluates one explicit expression under
           the selected profile without loading user modules
-        - [ ] `script check FILE.rhai` parses and validates API names,
+        - [x] `script check FILE.rhai` parses and validates API names,
           capability requirements, and static limits without executing code or
           contacting a live AgenTerm server
-        - [ ] `script api --json` reports host API/schema versions, profiles,
+        - [x] `script api --json` reports host API/schema versions, profiles,
           functions, typed parameters/results/errors, limits, and availability
           without starting a Rhai engine or AgenTerm GUI
         - [ ] every command accepts an explicit profile and bounded overrides;
@@ -521,7 +634,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
           verifies no Rhai code loads during normal GUI startup, and leaves no
           worker or temporary source behind after every result class
     - Extension surfaces
-      - [ ] phase 1 (v0.1.5): one-shot pure/observe run/eval/check and API
+      - [ ] phase 1 (after the Observable Fleet event core): one-shot
+        pure/observe run/eval/check and API
         discovery under the minimum sidecar contract
       - [ ] phase 2: status providers with timeout, last-good value, and visible
         degraded state
@@ -573,7 +687,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       - [ ] begin with read-only inventory/snapshot resources and bounded waits,
         then add explicit control tools, then durable flows; MCP client
         federation and autonomous scheduling remain later gates
-    - v0.1.5 first delivery: public read-only surface
+    - v0.1.9 first delivery: public read-only surface
       - Executable and discovery
         - [ ] `agenterm-mcp.exe --help`, `--version`, and
           `capabilities --json` work without starting a GUI or model runtime;
@@ -716,8 +830,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
         - `rename-session|rename name`
         - `kill-session`, `kill-server`
       - Windows mapped to AgenTerm tabs
-        - `new-window|neww [-d] [-n name] [--parent target]
+        - `new-window|neww [-d] [-n name] [--parent target] [-F format]
           [command [args...]]`
+        - [x] `new-window -F` can return the new tab's stable ID through
+          `#{window_id}` while default numeric-index output remains compatible
         - `list-windows|lsw [-F format]`
         - `select-window|selectw -t target`
         - `next-window|next`, `previous-window|prev`
@@ -747,6 +863,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
         - `capture-pane --raw-escaped [-t target]`
         - `scroll-pane [-t target]
           up|down|page-up|page-down|top|bottom [rows]`
+        - `read-events --epoch EPOCH --after SEQUENCE [--limit COUNT]`
+        - `wait-events --epoch EPOCH --after SEQUENCE --kind KIND
+          [--tab @ID] [--timeout-ms MS]`
         - `wait-pane|expect-pane [-t target]
           [--contains text|--dead|--submit-complete]
           [--timeout-ms ms]`
@@ -756,6 +875,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
           destination has become unwritable
         - `wait-ui [--active @id] [--focus surface] [-t target
           --tab-state running|dead] [--timeout-ms ms]`
+      - Safe scripting
+        - `script api [--json]`
+        - `script check FILE|- [--profile pure|observe]`
+        - `script eval EXPRESSION [--profile pure|observe]`
+        - `script run FILE|- [--profile pure|observe] [-- ARGS...]`
       - Composer and tab metadata
         - `show-composer [-t target]`
         - `set-composer [-t target] text|--stdin|--file path`
@@ -764,7 +888,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       - Semantic UI control
         - `focus terminal|composer|sidebar [-t target]`
         - `ui-action new-tab|new-child|edit-tab|toggle-tree|select-tab|close-tab|confirm|cancel|
-          composer-send|open-settings [-t target]`
+          composer-send|copy-selection|open-settings|window-minimize|
+          window-maximize|window-restore [-t target]`
+        - `ui-action window-resize --width PX --height PX`
+        - [x] semantic actions control window state and client size without corrupting the PTY grid
       - Visual and terminal diagnostics
         - `screenshot [-o path.png]`
         - `screenshot-pane|screenshot-tab [-t target] [-o path.png]`
@@ -835,20 +962,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [x] one-command fmt, Clippy, test, build, and smoke regression
     - [x] release CI runs the isolated public CLI and fleet smoke suites before
       packaging, even when the redundant GUI smoke suites are skipped
-    - v0.1.5 public-interface evidence gate
-      - MCP black-box evidence
-        - [ ] `tests/mcp_smoke.ps1` drives only the released
-          `agenterm-mcp.exe` stdio interface: initialize, capability discovery,
-          resource listing/reads, bounded wait success/timeout/cancellation,
-          protocol errors, and clean shutdown
-        - [ ] inventory and snapshot assertions cross-check stable IDs,
-          epoch, sequence, and state against `agentermctl` JSON from the same
-          isolated server instead of trusting MCP output in isolation
-        - [ ] crash/timeout fixtures kill and hang the sidecar while a public
-          `agentermctl` probe proves the GUI remains responsive, terminal output
-          advances, tabs remain present, and a new sidecar can resynchronize
+    - Scripting public-interface evidence gate
       - Rhai black-box evidence
-        - [ ] `tests/script_smoke.ps1` drives only public `script check`,
+        - [x] `tests/script_smoke.ps1` drives only public `script check`,
           `script eval`, `script run`, and `script api --json` commands; no test
           links the Rhai host or invokes an internal worker API
         - [ ] fixtures prove deterministic `pure` output, an `observe` snapshot
@@ -859,85 +975,110 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
           PTY, and workspace-health assertion; a sidecar error alone is not
           accepted as isolation evidence
       - PRD-command-test alignment
-        - [ ] reserve evidence IDs `mcp.readonly-inventory`,
-          `mcp.snapshot-baseline`, `mcp.bounded-wait`,
-          `mcp.sidecar-isolation`, `script.rhai-pure`,
-          `script.rhai-observe`, and `script.rhai-deny-budget`; register an ID
-          only in the same change that adds its post-assertion emission
-        - [ ] changing a shipped MCP resource/tool, script command, capability,
-          protocol feature, or evidence ID must atomically update the public
-          command/capability registry, PRD `[x]` leaf, black-box assertion, and
-          alignment contract
-        - [ ] `tests/prd_alignment.ps1` compares the MCP capability manifest and
-          Rhai API catalog with their public runtime discovery output and the
-          PRD contract; `check.ps1` runs both new black-box suites before a
-          v0.1.5 tag
+        - [x] evidence IDs `script.rhai-pure`, `script.rhai-observe`, and
+          `script.rhai-deny-budget` are registered with post-assertion emissions
+        - [x] changing a shipped script command, capability, API entry, or
+          evidence ID must atomically update the public command/API catalog,
+          PRD `[x]` leaf, black-box assertion, and alignment contract
+        - [~] `tests/prd_alignment.ps1` compares the public command/evidence
+          catalog with the PRD contract; exact Rhai API-field comparison remains
+          planned
+        - [x] `check.ps1` runs `tests/script_smoke.ps1` before the
+          safe-scripting release tag
+    - Autonomous human UX dogfood
+      - Latest reproducible findings
+        - [ ] P1 target ambiguity: `agentermctl new-window -d -n "Research
+          Team"` prints mutable index `1` rather than stable ID `@2`; feeding
+          that result to `--parent` or `wait-ui --active` can address a
+          different tab. Acceptance: creation JSON or a documented format
+          returns the stable ID, and a black-box test uses that exact value for
+          create-child, select, wait, rename, and close after indexes shift
+        - [ ] P1 settings isolation: distinct `AGENTERM_IPC_ADDRESS` and
+          `AGENTERM_WORKSPACE_PATH` still share
+          `%LOCALAPPDATA%\AgenTerm\settings.json`, so an isolated font test
+          changes every running instance. Acceptance: an explicit settings-path
+          override scopes read/write/restart tests and leaves the user's file
+          byte-identical
+        - [ ] P1 window-control gap: `ui-snapshot` observes minimized state and
+          geometry, but the public semantic interface cannot resize, minimize,
+          maximize, or restore a window; the 2026-07-27 run required Win32
+          automation. Acceptance: public actions drive each state, `wait-ui`
+          verifies it, minimize preserves the last PTY grid, and restore/resize
+          produce the expected new grid
+        - [ ] P2 active-tree readability: the three 24-pixel action targets
+          reduce the selected child row's note to `child agent wor...` at the
+          default 250-pixel sidebar. Acceptance: screenshot fixtures prove
+          name/note and actions remain distinguishable at default width, deep
+          nesting, long CJK text, and 125%/150% display scaling
+        - [ ] P3 language consistency: the default English surface mixes
+          `Settings`, `New`, and `Compose input` with `发送`. Acceptance: one
+          locale source selects all visible labels and snapshots contain no
+          unintended mixed-language controls
+      - [ ] add a public-interface dogfood gate that starts the release artifact
+        with isolated IPC, workspace, settings, session, and evidence paths;
+        fixed sleeps and private state hooks are forbidden
+      - [ ] drive first start, root/child creation, stable-ID targeting,
+        rename/note, switching, composer edit/send, keyboard/Backspace, terminal
+        mouse, viewport scroll, resize/minimize/restore, exit retention,
+        dead/live explicit close, normal shutdown/restart recovery, and font
+        settings in one deterministic journey
+      - [ ] after every transition save `ui-snapshot`, relevant
+        pane/workspace/settings JSON, command/exit result, and whole-window or
+        pane PNG under one timestamped evidence directory with build metadata
+      - [ ] post-assert state rather than command success alone: composer text
+        executes once, scroll offsets and PNG viewport agree, dead exit code and
+        final screen remain, live close exposes confirmation, tree/name/note/
+        active ID survive restart, and settings restore after the test
+      - [ ] always shut down the isolated instance, restore any external state,
+        detect orphan workers/windows, and fail release qualification for any
+        P0/P1 finding; P2/P3 findings require an owned planned leaf and retained
+        reproduction evidence
+      - [ ] the 2026-07-27 v0.1.3 baseline evidence is under
+        `D:\tmp\agenterm-dogfood-v014\`: `01-first`, `02b-tree-corrected`,
+        `03/04-composer`, `05/06/07-scroll`, `08/09/10-window-state`,
+        `12-settings`, `13-exit-retained`, `14-live-close-modal`, and
+        `16/17-restart` JSON/PNG pairs
     - [ ] automated terminal input/resize/ANSI/CJK/long-output matrix
     - [ ] installer, updater, stable PATH location, and signed releases
   - Focused super-fleet roadmap
-    - [ ] v0.1.4 Observable Fleet foundation: ship only the bounded
-      epoch/sequence journal, snapshot baseline, gap detection, and
-      deterministic event wait slice before event-driven extensions
-    - v0.1.5 Scriptable Fleet
-      - Release dependency and outcome
-        - [ ] branch from the accepted v0.1.4 contract, not an alternate event
-          path: ordering, restart epochs, gap recovery, bounded waits, and GUI
-          isolation must already pass before scripting work begins
-        - [ ] ship one optional, versioned scripting worker plus public
-          `check`, `eval`, `run`, and API-discovery commands; AgenTerm without
-          the worker retains identical terminal, workspace, and startup behavior
-        - [ ] prove one complete read-only vertical slice: an `observe` script
-          consumes a versioned fleet snapshot/event position, returns a typed
-          result, and drives one bounded status-bar segment with visible
-          freshness and degraded state
-      - In scope
-        - [ ] implement immutable `pure` and `observe` capability profiles,
-          typed arguments/results/errors, API-version negotiation, explicit
-          source identity, and discoverable granted capabilities
-        - [ ] expose only bounded tab-tree, active-tab, workspace, settings,
-          pane-capture, UI-snapshot, journal-read, and deterministic-wait
-          observation APIs through the public control plane
-        - [ ] enforce source, operation, call-depth, collection, output,
-          wall-clock, concurrency, and journal-window budgets on every
-          invocation; emit content-free audit metadata and stable exit codes
-        - [ ] invoke status providers off the GUI thread with timeout,
-          truncation, last-known-good freshness, retry backoff, and an explicit
-          degraded marker
-      - Explicitly out of scope for v0.1.5
-        - [ ] the `control`, filesystem, environment, process, and network
-          capability profiles; terminal mutation and destructive automation
-          remain unavailable to scripts
-        - [ ] persistent event handlers, arbitrary async jobs, schedulers,
-          package/import systems, MCP control tools and client federation,
-          brain/flow, agent orchestration, LLM gateway, and learned-model
-          inference; the bounded read-only MCP stdio surface remains in scope
-        - [ ] Bash/SSH/HTTP/SQLite component delivery and general soft-manager
-          rollout; they keep independent later release gates
-      - Failure isolation
-        - [ ] a worker crash, hang, budget exhaustion, incompatible API,
-          malformed response, or oversized output cannot block the GUI/IPC
-          threads, mutate workspace state, close a tab, or interrupt PTY I/O
-        - [ ] deadline expiry terminates or abandons the invocation, releases
-          capacity, returns a stable error, and leaves the status segment visibly
-          degraded; stale last-known-good data is never presented as fresh
-        - [ ] bounded queues apply backpressure without unbounded memory growth;
-          worker restart resynchronizes from a snapshot plus journal position
-          and never assumes process continuity
-      - Release budgets and acceptance
-        - [ ] retain the one-second local first-window gate, the 4 MiB
-          `agenterm.exe` gate, and 2 MiB per control-CLI gate; no Rhai type,
-          engine initialization, worker discovery, or script scan enters GUI
-          startup
-        - [ ] cap the optimized scripting worker at 3 MiB and a one-line `pure`
-          cold invocation at 500 ms on the documented Windows reference runner;
-          publish per-binary size and p50/p95 cold/warm timing evidence
-        - [ ] public black-box tests cover check/eval/run, API discovery,
-          deterministic pure output, snapshot-to-event observation, denied
-          capabilities, timeout, output limits, concurrent saturation, worker
-          kill/restart, malformed replies, and status last-good/degraded states
-        - [ ] the full regression proves scripting absent/disabled behavior is
-          unchanged and PRD capability leaves map to registered automated
-          evidence before the v0.1.5 tag
+    - v0.1.5 Control, Terminal & Bounded Automation
+      - Shipped interaction slice
+        - [x] offline command help and malformed global options fail locally
+          without probing or autostarting a GUI
+        - [x] zero, one, and multiple healthy instances produce structured,
+          deterministic target selection instead of silently choosing a fleet
+        - [x] high-resolution mouse-wheel scrolling and a visible draggable
+          scrollbar share the same viewport state as capture and screenshots
+        - [x] terminal-cell drag selection, visible highlighting, CJK-safe text
+          extraction, and Windows clipboard copy preserve plain-click RMUX input
+        - [x] composer and settings edits explicitly support `Ctrl+A/C/V/X`
+      - Shipped bounded automation slice
+        - [x] snapshot-positioned bounded event reads and predicate waits expose
+          typed epoch/gap/timeout failures
+        - [x] one-invocation Rhai sidecar provides pure and immutable-observe
+          profiles with API discovery and resource limits
+      - Remaining release work
+        - [x] creation output offers a documented stable-ID format and a
+          black-box journey reuses that exact ID after mutable indexes shift
+        - [x] `AGENTERM_SETTINGS_PATH` isolates settings tests and instances
+          without changing the default `%LOCALAPPDATA%` contract
+        - [x] public semantic actions resize, minimize, maximize, and restore
+          the window; waits verify post-state and minimize preserves the PTY grid
+        - [x] all built-in English controls use one locale source; the composer
+          button no longer mixes `发送` with English labels
+        - [x] release metadata, `--version`, Cargo lock state, and README report
+          `0.1.5`; the full release gate passes the existing size and one-second
+          first-window budgets
+      - Explicitly deferred
+        - [ ] event subscriptions, Rhai control authority, MCP, optional
+          component downloads, Bash, intelligence workers, and LLM routing add
+          no authority or binary surface in v0.1.5
+        - [ ] raw application mouse arbitration, selection auto-scroll,
+          word/line/rectangular selection, and terminal paste retain the
+          professional-terminal follow-up gates above
+    - [ ] v0.1.6 Observable Fleet expansion: complete transition coverage and
+      restart/gap/concurrent-reader black-box tests before event-driven
+      extensions
     - [ ] M0 boundaries and baselines: extract typed control operations, record
       per-binary size/startup, freeze the compatibility corpus, and define the
       sidecar protocol boundary
@@ -948,11 +1089,12 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [ ] M3 optional components: ship signed-manifest inventory/install/update/
       rollback foundations and independently gated SSH, HTTP, and SQLite
       sidecars without adding GUI network authority
-    - [ ] M4 safe scripting: ship sidecar Rhai pure/observe profiles,
+    - [ ] M4 / v0.1.7 safe scripting: ship sidecar Rhai pure/observe profiles,
       run/eval/check, API discovery, budgets, and audit records
-    - [ ] M5 dynamic bridge: script-backed status segments and named commands
-    - [ ] M6 controlled agentic bridge: ship MCP read-only resources, then
-      explicit control tools, Rhai control, brain/flow orchestration, and
+    - [ ] M5 / v0.1.8 dynamic bridge: script-backed status segments and named
+      commands
+    - [ ] M6 / v0.1.9 controlled agentic bridge: ship MCP read-only resources,
+      then explicit control tools, Rhai control, brain/flow orchestration, and
       agent/token status without weakening close safety
     - [ ] M7 lightweight intelligence: rules first, then benchmark-gated
       classic ML, then small GRU/LSTM candidates in isolated CPU workers

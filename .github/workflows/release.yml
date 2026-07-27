@@ -53,6 +53,7 @@ jobs:
               ./dist/agenterm.exe, `
               ./dist/agentermctl.exe, `
               ./dist/agenterm-mux.exe, `
+              ./dist/agenterm-script.exe, `
               ./dist/agenterm.json `
             -DestinationPath $zip
 
@@ -67,6 +68,7 @@ jobs:
             ./dist/agenterm.exe `
             ./dist/agentermctl.exe `
             ./dist/agenterm-mux.exe `
+            ./dist/agenterm-script.exe `
             ./dist/agenterm.json `
             $zip `
             --verify-tag `

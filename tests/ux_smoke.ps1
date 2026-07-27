@@ -7,8 +7,13 @@ $ErrorActionPreference = 'Stop'
 $declaredEvidence = @(
     'ux.hierarchical-tabs'
     'ux.live-close-confirmation'
+    'ux.locale-consistency'
+    'ux.mouse-scrollback'
     'ux.persistent-workspace'
     'ux.semantic-ui-automation'
+    'ux.semantic-window-control'
+    'ux.settings-isolation'
+    'ux.terminal-selection-copy'
 )
 if ($ListEvidence) {
     $declaredEvidence
@@ -33,10 +38,13 @@ if (-not (Test-Path -LiteralPath $GuiExe)) {
 }
 
 $previousAddress = $env:AGENTERM_IPC_ADDRESS
+$previousSettingsPath = $env:AGENTERM_SETTINGS_PATH
 $previousWorkspace = $env:AGENTERM_WORKSPACE_PATH
 $env:AGENTERM_IPC_ADDRESS = "127.0.0.1:$((47000 + ($PID % 1000)))"
 $workspaceFile = Join-Path $env:TEMP "agenterm-ux-$PID.json"
+$settingsFile = Join-Path $env:TEMP "agenterm-settings-$PID.json"
 $env:AGENTERM_WORKSPACE_PATH = $workspaceFile
+$env:AGENTERM_SETTINGS_PATH = $settingsFile
 $name = "ux-smoke-$PID"
 $token = "AGENTERM_UX_$PID"
 $draftFile = Join-Path $env:TEMP "$name.txt"
@@ -49,6 +57,46 @@ function Invoke-AgenTerm {
     }
     return ($output -join "`n")
 }
+
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+public static class AgenTermNativeTest {
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT {
+        public int X;
+        public int Y;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern bool ClientToScreen(IntPtr window, ref POINT point);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr SendMessageW(
+        IntPtr window, uint message, UIntPtr wParam, IntPtr lParam);
+
+    private static IntPtr PointParam(int x, int y) {
+        return (IntPtr)(((y & 0xffff) << 16) | (x & 0xffff));
+    }
+
+    public static void MouseWheel(IntPtr window, int clientX, int clientY, short delta) {
+        POINT point = new POINT { X = clientX, Y = clientY };
+        if (!ClientToScreen(window, ref point)) {
+            throw new InvalidOperationException("ClientToScreen failed");
+        }
+        ulong wheel = ((ulong)(ushort)delta) << 16;
+        SendMessageW(window, 0x020A, (UIntPtr)wheel, PointParam(point.X, point.Y));
+    }
+
+    public static void Drag(
+        IntPtr window, int startX, int startY, int endX, int endY) {
+        SendMessageW(window, 0x0201, UIntPtr.Zero, PointParam(startX, startY));
+        SendMessageW(window, 0x0200, (UIntPtr)1, PointParam(endX, endY));
+        SendMessageW(window, 0x0202, UIntPtr.Zero, PointParam(endX, endY));
+    }
+}
+'@
 
 try {
     Write-Host 'STEP create and discover stable tab'
@@ -65,7 +113,64 @@ try {
         $snapshot.layout.status_bar.provider -ne 'placeholder') {
         throw 'Bottom status bar was not exposed through ui-snapshot'
     }
+    if ($snapshot.locale.id -ne 'en-US' -or
+        $snapshot.locale.controls.send -ne 'Send' -or
+        @($snapshot.locale.controls.PSObject.Properties.Value) -contains '发送') {
+        throw 'built-in control labels did not use the declared English locale'
+    }
+    Write-Evidence 'ux.locale-consistency'
     $id = $tab.id
+
+    Write-Host 'STEP semantic window state and client resize'
+    $originalWidth = [int]$snapshot.window.client_width
+    $originalHeight = [int]$snapshot.window.client_height
+    $originalRows = [int]$snapshot.layout.terminal.rows
+    $originalCols = [int]$snapshot.layout.terminal.cols
+    Invoke-AgenTerm @('ui-action', 'window-minimize') | Out-Null
+    $minimized = Invoke-AgenTerm @(
+        'wait-ui', '--window-state', 'minimized', '--timeout-ms', '5000'
+    ) | ConvertFrom-Json
+    if ($minimized.layout.terminal.rows -ne $originalRows -or
+        $minimized.layout.terminal.cols -ne $originalCols) {
+        throw 'minimizing changed the last committed PTY grid'
+    }
+    Invoke-AgenTerm @('ui-action', 'window-restore') | Out-Null
+    Invoke-AgenTerm @('wait-ui', '--window-state', 'restored') | Out-Null
+    Invoke-AgenTerm @('ui-action', 'window-maximize') | Out-Null
+    Invoke-AgenTerm @('wait-ui', '--window-state', 'maximized') | Out-Null
+    Invoke-AgenTerm @('ui-action', 'window-restore') | Out-Null
+    Invoke-AgenTerm @('wait-ui', '--window-state', 'restored') | Out-Null
+    $resizedWidth = if ($originalWidth -gt 720) {
+        $originalWidth - 80
+    } else {
+        $originalWidth + 80
+    }
+    $resizedHeight = if ($originalHeight -gt 540) {
+        $originalHeight - 60
+    } else {
+        $originalHeight + 60
+    }
+    Invoke-AgenTerm @(
+        'ui-action', 'window-resize',
+        '--width', "$resizedWidth", '--height', "$resizedHeight"
+    ) | Out-Null
+    $resized = Invoke-AgenTerm @(
+        'wait-ui', '--client-width', "$resizedWidth",
+        '--client-height', "$resizedHeight", '--timeout-ms', '5000'
+    ) | ConvertFrom-Json
+    if ($resized.layout.terminal.rows -eq $originalRows -and
+        $resized.layout.terminal.cols -eq $originalCols) {
+        throw 'client resize did not update the PTY grid'
+    }
+    Invoke-AgenTerm @(
+        'ui-action', 'window-resize',
+        '--width', "$originalWidth", '--height', "$originalHeight"
+    ) | Out-Null
+    Invoke-AgenTerm @(
+        'wait-ui', '--client-width', "$originalWidth",
+        '--client-height', "$originalHeight", '--timeout-ms', '5000'
+    ) | Out-Null
+    Write-Evidence 'ux.semantic-window-control'
 
     Write-Host 'STEP hierarchical tab team'
     $childName = "worker-$PID"
@@ -173,6 +278,120 @@ try {
     ) | Out-Null
     Write-Evidence 'ux.semantic-ui-automation'
 
+    Write-Host 'STEP composer edit shortcut routing'
+    # The key-to-edit-command mapping is unit tested; this public focus assertion
+    # guards the native EDIT surface to which Ctrl+A/C/X/V are dispatched.
+    $snapshot = Invoke-AgenTerm @('focus', 'composer', '-t', $id) | ConvertFrom-Json
+    if ($snapshot.focus.surface -ne 'composer') {
+        throw 'composer shortcut target was not the focused native edit control'
+    }
+
+    Write-Host 'STEP physical mouse wheel and draggable terminal scrollbar'
+    $scrollPrefix = "AGENTERM_UX_SCROLL_$PID"
+    Invoke-AgenTerm @(
+        'send-keys', '-l', '-t', $id,
+        "for /L %i in (1,1,80) do @echo $scrollPrefix`_%i"
+    ) | Out-Null
+    Invoke-AgenTerm @('send-keys', '-t', $id, 'Enter') | Out-Null
+    Invoke-AgenTerm @(
+        'wait-pane', '-t', $id, '--contains', "$scrollPrefix`_80",
+        '--timeout-ms', '10000'
+    ) | Out-Null
+    $snapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $scrollbar = $snapshot.layout.terminal.scrollbar
+    $tab = $snapshot.tabs | Where-Object id -eq $id
+    if ($null -eq $scrollbar -or $scrollbar.max_offset -le 0 -or
+        $scrollbar.track.width -ne 12 -or $tab.scrollback_offset -ne 0) {
+        throw 'ui-snapshot did not expose a usable terminal scrollbar'
+    }
+    $window = @(
+        Get-Process agenterm -ErrorAction SilentlyContinue |
+            Where-Object MainWindowTitle -eq $snapshot.window.title |
+            Select-Object -First 1 -ExpandProperty MainWindowHandle
+    )
+    if ($window.Count -gt 0) {
+        $window = [IntPtr]$window[0]
+    } else {
+        $window = [IntPtr]::Zero
+    }
+    if ($window -eq [IntPtr]::Zero) {
+        throw 'could not resolve the public AgenTerm window for mouse regression'
+    }
+    [AgenTermNativeTest]::MouseWheel(
+        $window,
+        [int]$snapshot.layout.terminal.x + 10,
+        [int]$snapshot.layout.terminal.y + 10,
+        120
+    )
+    $snapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $tab = $snapshot.tabs | Where-Object id -eq $id
+    if ($tab.scrollback_offset -ne 3) {
+        throw "one mouse-wheel notch scrolled $($tab.scrollback_offset) rows instead of 3"
+    }
+    $scrollbar = $snapshot.layout.terminal.scrollbar
+    [AgenTermNativeTest]::Drag(
+        $window,
+        [int]($scrollbar.thumb.x + ($scrollbar.thumb.width / 2)),
+        [int]($scrollbar.thumb.y + ($scrollbar.thumb.height / 2)),
+        [int]($scrollbar.thumb.x + ($scrollbar.thumb.width / 2)),
+        [int]($scrollbar.track.y + $scrollbar.track.height - 1)
+    )
+    $snapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $tab = $snapshot.tabs | Where-Object id -eq $id
+    if ($tab.scrollback_offset -ne 0) {
+        throw 'dragging the terminal scrollbar to the bottom did not restore live output'
+    }
+    Write-Evidence 'ux.mouse-scrollback'
+
+    Write-Host 'STEP terminal text selection and system clipboard copy'
+    $selectionToken = "$scrollPrefix`_80"
+    $capture = Invoke-AgenTerm @('capture-pane', '-p', '-t', $id)
+    $captureLines = @($capture -split "`n" | ForEach-Object { $_.TrimEnd("`r") })
+    $selectionRow = -1
+    $selectionColumn = -1
+    for ($lineIndex = 0; $lineIndex -lt $captureLines.Count; $lineIndex++) {
+        $column = $captureLines[$lineIndex].IndexOf($selectionToken)
+        if ($column -ge 0) {
+            $selectionRow = $lineIndex
+            $selectionColumn = $column
+            break
+        }
+    }
+    if ($selectionRow -lt 0) {
+        throw 'could not locate the selection token in the visible terminal viewport'
+    }
+    $snapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $terminal = $snapshot.layout.terminal
+    $cellWidth = [int]([Math]::Floor($terminal.viewport_width / $terminal.cols))
+    $cellHeight = [int]([Math]::Floor($terminal.height / $terminal.rows))
+    if ($cellWidth -le 0 -or $cellHeight -le 0) {
+        throw 'terminal snapshot did not expose usable cell geometry'
+    }
+    $startX = [int]$terminal.x + ($selectionColumn * $cellWidth) + 1
+    $endColumn = $selectionColumn + $selectionToken.Length - 1
+    $endX = [int]$terminal.x + ($endColumn * $cellWidth) + [Math]::Max(1, $cellWidth - 2)
+    $selectionY = [int]$terminal.y + ($selectionRow * $cellHeight) + [Math]::Max(1, [int]($cellHeight / 2))
+    [AgenTermNativeTest]::Drag($window, $startX, $selectionY, $endX, $selectionY)
+    $snapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $tab = $snapshot.tabs | Where-Object id -eq $id
+    if ($null -eq $tab.selection -or $tab.selection.dragging -or
+        $tab.selection.start.row -ne $selectionRow -or
+        $tab.selection.start.col -ne $selectionColumn -or
+        $tab.selection.end.col -ne $endColumn) {
+        throw (
+            "mouse drag selection mismatch: expected " +
+            "$selectionRow,$selectionColumn..$selectionRow,$endColumn; actual " +
+            "$($tab.selection | ConvertTo-Json -Compress)"
+        )
+    }
+    Set-Clipboard -Value 'AGENTERM_CLIPBOARD_SENTINEL'
+    Invoke-AgenTerm @('ui-action', 'copy-selection') | Out-Null
+    $copied = Get-Clipboard -Raw
+    if ($copied -ne $selectionToken) {
+        throw "terminal selection copied unexpected text: '$copied'"
+    }
+    Write-Evidence 'ux.terminal-selection-copy'
+
     Write-Host 'STEP live close requires confirmation and cancel is safe'
     $snapshot = Invoke-AgenTerm @('ui-action', 'close-tab', '-t', $id) | ConvertFrom-Json
     if ($snapshot.modal.kind -ne 'confirm-close-live' -or $snapshot.modal.window_id -ne $id) {
@@ -188,9 +407,12 @@ try {
     Write-Host 'STEP settings discovery and modal'
     $settings = Invoke-AgenTerm @('get-settings') | ConvertFrom-Json
     if ($settings.terminal_font_size -lt 8 -or
-        $settings.recommended_cjk_font -ne 'Sarasa Fixed SC') {
-        throw 'get-settings did not expose font settings and CJK recommendation'
+        $settings.recommended_cjk_font -ne 'Sarasa Fixed SC' -or
+        [IO.Path]::GetFullPath($settings.config_path) -ne
+            [IO.Path]::GetFullPath($settingsFile)) {
+        throw 'get-settings did not expose isolated font settings and CJK recommendation'
     }
+    Write-Evidence 'ux.settings-isolation'
     $snapshot = Invoke-AgenTerm @('ui-action', 'open-settings') | ConvertFrom-Json
     if ($snapshot.modal.kind -ne 'settings' -or
         $snapshot.focus.surface -ne 'settings') {
@@ -250,6 +472,7 @@ finally {
     Remove-Item -LiteralPath $draftFile -ErrorAction SilentlyContinue
     & $Exe kill-server 2>$null | Out-Null
     Remove-Item -LiteralPath $workspaceFile -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $settingsFile -ErrorAction SilentlyContinue
     if ($null -eq $previousAddress) {
         Remove-Item Env:AGENTERM_IPC_ADDRESS -ErrorAction SilentlyContinue
     } else {
@@ -259,5 +482,11 @@ finally {
         Remove-Item Env:AGENTERM_WORKSPACE_PATH -ErrorAction SilentlyContinue
     } else {
         $env:AGENTERM_WORKSPACE_PATH = $previousWorkspace
+    }
+    if ($null -eq $previousSettingsPath) {
+        Remove-Item Env:AGENTERM_SETTINGS_PATH -ErrorAction SilentlyContinue
+    }
+    else {
+        $env:AGENTERM_SETTINGS_PATH = $previousSettingsPath
     }
 }
