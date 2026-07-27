@@ -7,7 +7,7 @@ use std::{
     mem, ptr,
     sync::mpsc::{self, Receiver, Sender},
     thread,
-    time::{Duration, SystemTime},
+    time::{Duration, Instant, SystemTime},
 };
 
 use anyhow::{Context as _, Result};
@@ -45,6 +45,7 @@ use windows_sys::Win32::{
 };
 
 mod commands;
+mod instances;
 mod protocol;
 mod rmux_status;
 mod settings;
@@ -56,6 +57,7 @@ use commands::{
     option_value, parse_new_command, parse_tab_environment, positional_values,
     screenshot_output_path, tmux_key_bytes,
 };
+use instances::{InstanceRegistration, discover_instances, prune_instance, register_instance};
 use protocol::{IpcRequest, IpcResponse};
 use rmux_status::parse_status_windows;
 use settings::{AppConfig, config_path, load_config, save_config};
@@ -70,7 +72,11 @@ const SIDEBAR_WIDTH: i32 = 250;
 const COMPOSER_HEIGHT: i32 = 78;
 const STATUS_BAR_HEIGHT: i32 = 26;
 const TAB_TOP: i32 = 8;
-const TAB_HEIGHT: i32 = 52;
+const TAB_HEIGHT: i32 = 44;
+const TAB_LEFT: i32 = 5;
+const TAB_RIGHT_MARGIN: i32 = 5;
+const TREE_INDENT: i32 = 16;
+const TREE_ANCHOR_LEFT: i32 = 17;
 const TAB_ADD_LEFT: i32 = SIDEBAR_WIDTH - 72;
 const TAB_EDIT_LEFT: i32 = SIDEBAR_WIDTH - 48;
 const TAB_CLOSE_LEFT: i32 = SIDEBAR_WIDTH - 24;
@@ -84,7 +90,8 @@ const NEW_BUTTON_ID: usize = 1007;
 const TIMER_ID: usize = 1;
 const WM_APP_WAKE: u32 = WM_APP + 1;
 const IPC_TIMEOUT: Duration = Duration::from_secs(5);
-const COMPOSER_SUBMIT_DELAY: Duration = Duration::from_millis(30);
+const IPC_DISCOVERY_TIMEOUT: Duration = Duration::from_millis(500);
+const COMPOSER_SUBMIT_DELAY: Duration = Duration::from_millis(500);
 const RAW_OUTPUT_LIMIT: usize = 1024 * 1024;
 
 thread_local! {
@@ -96,7 +103,9 @@ const COLOR_TERMINAL: COLORREF = rgb(12, 14, 18);
 const COLOR_COMPOSER: COLORREF = rgb(31, 35, 44);
 const COLOR_TEXT: COLORREF = rgb(214, 220, 230);
 const COLOR_MUTED: COLORREF = rgb(145, 153, 168);
-const COLOR_ACTIVE: COLORREF = rgb(53, 63, 80);
+const COLOR_TREE: COLORREF = rgb(82, 94, 112);
+const COLOR_ACTIVE: COLORREF = rgb(42, 49, 61);
+const COLOR_ACTIVE_BORDER: COLORREF = rgb(76, 94, 122);
 const COLOR_GREEN: COLORREF = rgb(121, 215, 135);
 const COLOR_ORANGE: COLORREF = rgb(245, 190, 100);
 const COLOR_RED: COLORREF = rgb(240, 100, 95);
@@ -114,6 +123,10 @@ struct IpcEnvelope {
 }
 
 pub fn run_gui_entry() {
+    if let Err(error) = configure_gui_address() {
+        show_startup_error(&error);
+        return;
+    }
     if env::var_os("AGENTERM_SERVER").is_none()
         && send_ipc_request(vec!["__focus".to_owned()]).is_ok()
     {
@@ -121,21 +134,64 @@ pub fn run_gui_entry() {
     }
 
     if let Err(error) = run_gui() {
-        let message = wide(&format!("AgenTerm failed to start:\n\n{error:#}"));
-        unsafe {
-            MessageBoxW(
-                ptr::null_mut(),
-                message.as_ptr(),
-                wide(APP_NAME).as_ptr(),
-                MB_OK | MB_ICONERROR,
-            );
-        }
-        eprintln!("{error:#}");
+        show_startup_error(&error);
     }
 }
 
+fn configure_gui_address() -> Result<()> {
+    let mut arguments = env::args().skip(1);
+    let Some(argument) = arguments.next() else {
+        return Ok(());
+    };
+    if argument != "--address" {
+        anyhow::bail!("unsupported AgenTerm GUI argument: {argument}");
+    }
+    let address = arguments
+        .next()
+        .context("agenterm.exe --address requires HOST:PORT")?;
+    if arguments.next().is_some() {
+        anyhow::bail!("agenterm.exe accepts only --address HOST:PORT");
+    }
+    parse_loopback_ipc_address(&address)?;
+    IPC_ADDRESS_OVERRIDE.with(|override_address| {
+        *override_address.borrow_mut() = Some(address);
+    });
+    Ok(())
+}
+
+fn show_startup_error(error: &anyhow::Error) {
+    let message = wide(&format!("AgenTerm failed to start:\n\n{error:#}"));
+    unsafe {
+        MessageBoxW(
+            ptr::null_mut(),
+            message.as_ptr(),
+            wide(APP_NAME).as_ptr(),
+            MB_OK | MB_ICONERROR,
+        );
+    }
+    eprintln!("{error:#}");
+}
+
 pub fn run_cli_entry() -> i32 {
-    let arguments: Vec<String> = env::args().skip(1).collect();
+    let mut arguments: Vec<String> = env::args().skip(1).collect();
+    if arguments
+        .first()
+        .is_some_and(|argument| argument == "--address")
+    {
+        if arguments.len() < 2 {
+            eprintln!("agentermctl --address requires HOST:PORT");
+            return 2;
+        }
+        arguments.remove(0);
+        let address = arguments.remove(0);
+        if let Err(error) = parse_loopback_ipc_address(&address) {
+            eprintln!("{error:#}");
+            return 2;
+        }
+        IPC_ADDRESS_OVERRIDE.with(|override_address| {
+            *override_address.borrow_mut() = Some(address);
+        });
+    }
     if arguments
         .first()
         .is_some_and(|arg| arg == "-V" || arg == "--version")
@@ -635,6 +691,7 @@ struct TerminalTab {
     last_size: (u16, u16),
     input_bytes: usize,
     input_writes: usize,
+    pending_submit_at: Option<Instant>,
     output_bytes: usize,
     raw_output: Vec<u8>,
 }
@@ -782,6 +839,7 @@ impl TerminalTab {
             last_size: (initial_size.rows, initial_size.cols),
             input_bytes: 0,
             input_writes: 0,
+            pending_submit_at: None,
             output_bytes: 0,
             raw_output: Vec::new(),
         })
@@ -805,6 +863,14 @@ impl TerminalTab {
                 PtyEvent::Error(error) => self.error = Some(error),
             }
         }
+        if self
+            .pending_submit_at
+            .is_some_and(|deadline| Instant::now() >= deadline)
+        {
+            self.pending_submit_at = None;
+            self.send(b"\r");
+            changed = true;
+        }
         changed
     }
 
@@ -819,25 +885,49 @@ impl TerminalTab {
         }
     }
 
-    fn send(&mut self, bytes: &[u8]) {
+    fn scroll_viewport(&mut self, action: &str, count: Option<usize>) -> Result<usize> {
+        let page = usize::from(self.last_size.0.saturating_sub(1)).max(1);
+        let screen = self.parser.screen_mut();
+        let current = screen.scrollback();
+        let requested = match action {
+            "up" => current.saturating_add(count.unwrap_or(1)),
+            "down" => current.saturating_sub(count.unwrap_or(1)),
+            "page-up" => current.saturating_add(count.unwrap_or(page)),
+            "page-down" => current.saturating_sub(count.unwrap_or(page)),
+            "top" if count.is_none() => usize::MAX,
+            "bottom" if count.is_none() => 0,
+            "top" | "bottom" => anyhow::bail!("{action} does not accept a row count"),
+            _ => anyhow::bail!(
+                "usage: scroll-pane [-t target] up|down|page-up|page-down|top|bottom [rows]"
+            ),
+        };
+        screen.set_scrollback(requested);
+        Ok(screen.scrollback())
+    }
+
+    fn send(&mut self, bytes: &[u8]) -> bool {
         if self.exited.is_some() {
-            return;
+            return false;
         }
         if let Err(error) = self.master.write_all(bytes) {
             self.error = Some(format!("input failed: {error}"));
+            false
         } else {
             self.input_bytes += bytes.len();
             self.input_writes += 1;
+            true
         }
     }
 
-    fn submit(&mut self, text: &str) {
-        self.send(text.as_bytes());
-        // Interactive TUIs such as Codex treat text plus CR in one PTY input
-        // batch as pasted editor content. Preserve an event boundary so Enter
-        // is interpreted as submit instead of becoming part of that paste.
-        thread::sleep(COMPOSER_SUBMIT_DELAY);
-        self.send(b"\r");
+    fn submit(&mut self, text: &str) -> bool {
+        if self.pending_submit_at.is_some() || !self.send(text.as_bytes()) {
+            return false;
+        }
+        // Interactive TUIs classify rapid character streams as paste and
+        // temporarily reinterpret Enter as a pasted newline. Schedule Enter
+        // after that suppression window without blocking the GUI thread.
+        self.pending_submit_at = Some(Instant::now() + COMPOSER_SUBMIT_DELAY);
+        true
     }
 
     fn send_native_mouse_click(&mut self, x: u16, y: u16) -> Result<()> {
@@ -972,6 +1062,7 @@ struct AppState {
     terminal_font: HFONT,
     terminal_font_owned: bool,
     resolved_font_family: String,
+    _instance_registration: InstanceRegistration,
 }
 
 impl AppState {
@@ -1007,6 +1098,8 @@ impl AppState {
         let next_id = saved_tabs.iter().map(|tab| tab.id).max().unwrap_or(0) + 1;
         let startup_tabs_remaining = saved_tabs.len();
         let startup_session_name = session_name.clone();
+        let instance_registration =
+            register_instance(&ipc_address(), &workspace_path(), &session_name)?;
         let (terminal_font, terminal_font_owned, resolved_font_family) =
             create_terminal_font(window, &config);
         let state = Self {
@@ -1038,6 +1131,7 @@ impl AppState {
             terminal_font,
             terminal_font_owned,
             resolved_font_family,
+            _instance_registration: instance_registration,
         };
 
         let wake_window = window as isize;
@@ -1545,7 +1639,10 @@ impl AppState {
         let id = self.tabs[position].id;
         let tree_row = self.tree_rows().get(row).cloned();
         let has_children = self.tabs.iter().any(|tab| tab.parent_id == Some(id));
-        let disclosure_left = 8 + tree_row.as_ref().map_or(0, |row| row.depth as i32 * 16);
+        let disclosure_left = TREE_ANCHOR_LEFT - 6
+            + tree_row
+                .as_ref()
+                .map_or(0, |row| row.depth as i32 * TREE_INDENT);
         if has_children && (disclosure_left..disclosure_left + 18).contains(&x) {
             if !self.collapsed_tabs.remove(&id) {
                 self.collapsed_tabs.insert(id);
@@ -1751,11 +1848,24 @@ impl AppState {
         let Some(position) = self.active_position() else {
             return;
         };
+        if self.tabs[position].pending_submit_at.is_some() {
+            self.feedback = Some("Composer submission pending; terminal input paused".to_owned());
+            unsafe { InvalidateRect(self.window, ptr::null(), 0) };
+            return;
+        }
         match codepoint {
-            8 => self.tabs[position].send(b"\x08"),
-            9 => self.tabs[position].send(b"\t"),
-            13 => self.tabs[position].send(b"\r"),
-            27 => self.tabs[position].send(b"\x1b"),
+            8 => {
+                self.tabs[position].send(b"\x08");
+            }
+            9 => {
+                self.tabs[position].send(b"\t");
+            }
+            13 => {
+                self.tabs[position].send(b"\r");
+            }
+            27 => {
+                self.tabs[position].send(b"\x1b");
+            }
             value => {
                 if let Some(character) = char::from_u32(value) {
                     let mut buffer = [0_u8; 4];
@@ -1769,6 +1879,11 @@ impl AppState {
         let Some(position) = self.active_position() else {
             return;
         };
+        if self.tabs[position].pending_submit_at.is_some() {
+            self.feedback = Some("Composer submission pending; terminal input paused".to_owned());
+            unsafe { InvalidateRect(self.window, ptr::null(), 0) };
+            return;
+        }
         let bytes = match virtual_key {
             0x21 => Some(b"\x1b[5~".as_slice()),
             0x22 => Some(b"\x1b[6~".as_slice()),
@@ -1831,10 +1946,16 @@ impl AppState {
         if text.is_empty() || self.tabs[position].exited.is_some() {
             return;
         }
-        self.tabs[position].submit(&text);
-        self.tabs[position].composer.clear();
-        self.feedback = Some(format!("Sent to @{}", self.tabs[position].id));
-        unsafe { SetWindowTextW(self.edit, wide("").as_ptr()) };
+        if self.tabs[position].submit(&text) {
+            self.tabs[position].composer.clear();
+            self.feedback = Some(format!("Sending to @{}", self.tabs[position].id));
+            unsafe { SetWindowTextW(self.edit, wide("").as_ptr()) };
+        } else {
+            self.feedback = Some(format!(
+                "A submission is already pending for @{}",
+                self.tabs[position].id
+            ));
+        }
     }
 
     fn paint(&mut self) {
@@ -1906,74 +2027,132 @@ impl AppState {
                 continue;
             };
             let top = TAB_TOP + visual_position as i32 * TAB_HEIGHT;
-            let indent = row.depth.min(8) as i32 * 16;
+            let indent = row.depth.min(10) as i32 * TREE_INDENT;
+            let node_x = TREE_ANCHOR_LEFT + indent;
+            let node_y = top + 13;
             let rect = RECT {
-                left: 6,
+                left: TAB_LEFT,
                 top,
-                right: SIDEBAR_WIDTH - 6,
-                bottom: top + TAB_HEIGHT - 3,
+                right: SIDEBAR_WIDTH - TAB_RIGHT_MARGIN,
+                bottom: top + TAB_HEIGHT - 1,
             };
             if self.active == Some(tab.id) {
                 fill(device, &rect, COLOR_ACTIVE);
-                fill(
-                    device,
-                    &RECT {
-                        left: 6,
-                        top: top + 5,
-                        right: 9,
-                        bottom: top + TAB_HEIGHT - 8,
-                    },
-                    COLOR_BLUE,
-                );
-            }
-            if row.depth > 0 {
-                let mut prefix = String::new();
-                for continues in &row.guides {
-                    prefix.push_str(if *continues { "│ " } else { "  " });
-                }
-                prefix.push_str(if row.is_last { "└─" } else { "├─" });
-                draw_text(
-                    device,
-                    &prefix,
-                    RECT {
-                        left: 8,
-                        top: top + 2,
-                        right: 26 + indent,
-                        bottom: top + 25,
-                    },
-                    COLOR_MUTED,
-                    DT_LEFT | DT_SINGLELINE | DT_VCENTER,
-                );
+                frame(device, &rect, COLOR_ACTIVE_BORDER);
             }
             let has_children = self
                 .tabs
                 .iter()
                 .any(|child| child.parent_id == Some(tab.id));
-            if has_children {
-                draw_text(
+            for (level, continues) in row.guides.iter().enumerate() {
+                if *continues {
+                    let x = TREE_ANCHOR_LEFT + level as i32 * TREE_INDENT;
+                    fill(
+                        device,
+                        &RECT {
+                            left: x,
+                            top,
+                            right: x + 1,
+                            bottom: top + TAB_HEIGHT,
+                        },
+                        COLOR_TREE,
+                    );
+                }
+            }
+            if row.depth > 0 {
+                let branch_x =
+                    TREE_ANCHOR_LEFT + (row.depth.saturating_sub(1) as i32 * TREE_INDENT);
+                fill(
                     device,
-                    if self.collapsed_tabs.contains(&tab.id) {
-                        "▸"
-                    } else {
-                        "▾"
+                    &RECT {
+                        left: branch_x,
+                        top,
+                        right: branch_x + 1,
+                        bottom: if row.is_last {
+                            node_y + 1
+                        } else {
+                            top + TAB_HEIGHT
+                        },
                     },
-                    RECT {
-                        left: 8 + indent,
-                        top: top + 2,
-                        right: 26 + indent,
-                        bottom: top + 25,
+                    COLOR_TREE,
+                );
+                fill(
+                    device,
+                    &RECT {
+                        left: branch_x,
+                        top: node_y,
+                        right: node_x + 1,
+                        bottom: node_y + 1,
                     },
-                    COLOR_TEXT,
-                    DT_LEFT | DT_SINGLELINE | DT_VCENTER,
+                    COLOR_TREE,
                 );
             }
+            if has_children && !self.collapsed_tabs.contains(&tab.id) {
+                fill(
+                    device,
+                    &RECT {
+                        left: node_x,
+                        top: node_y,
+                        right: node_x + 1,
+                        bottom: top + TAB_HEIGHT,
+                    },
+                    COLOR_TREE,
+                );
+            }
+            if has_children {
+                let expander = RECT {
+                    left: node_x - 5,
+                    top: node_y - 5,
+                    right: node_x + 6,
+                    bottom: node_y + 6,
+                };
+                fill(
+                    device,
+                    &expander,
+                    if self.active == Some(tab.id) {
+                        COLOR_ACTIVE
+                    } else {
+                        COLOR_SIDEBAR
+                    },
+                );
+                frame(device, &expander, COLOR_TREE);
+                fill(
+                    device,
+                    &RECT {
+                        left: node_x - 3,
+                        top: node_y,
+                        right: node_x + 4,
+                        bottom: node_y + 1,
+                    },
+                    COLOR_TEXT,
+                );
+                if self.collapsed_tabs.contains(&tab.id) {
+                    fill(
+                        device,
+                        &RECT {
+                            left: node_x,
+                            top: node_y - 3,
+                            right: node_x + 1,
+                            bottom: node_y + 4,
+                        },
+                        COLOR_TEXT,
+                    );
+                }
+            }
+            let status_rect = RECT {
+                left: node_x + 10,
+                top: node_y - 4,
+                right: node_x + 19,
+                bottom: node_y + 5,
+            };
+            frame(device, &status_rect, COLOR_TREE);
             fill(
                 device,
                 &RECT {
-                    left: 27 + indent,
-                    top: top + 13,
-                    right: 35 + indent,
-                    bottom: top + 21,
+                    left: status_rect.left + 2,
+                    top: status_rect.top + 2,
+                    right: status_rect.right - 2,
+                    bottom: status_rect.bottom - 2,
                 },
                 if tab.exited.is_some() {
                     COLOR_ORANGE
@@ -1991,10 +2170,10 @@ impl AppState {
                 device,
                 &tab.title,
                 RECT {
-                    left: 40 + indent,
-                    top: top + 2,
+                    left: node_x + 24,
+                    top: top + 1,
                     right: text_right,
-                    bottom: top + 25,
+                    bottom: top + 22,
                 },
                 COLOR_TEXT,
                 DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
@@ -2014,10 +2193,10 @@ impl AppState {
                 device,
                 &secondary,
                 RECT {
-                    left: 40 + indent,
-                    top: top + 24,
+                    left: node_x + 24,
+                    top: top + 21,
                     right: text_right,
-                    bottom: top + TAB_HEIGHT - 3,
+                    bottom: top + TAB_HEIGHT - 1,
                 },
                 if tab.note.is_empty() {
                     COLOR_MUTED
@@ -2034,7 +2213,7 @@ impl AppState {
                         left: TAB_ADD_LEFT,
                         top,
                         right: TAB_EDIT_LEFT,
-                        bottom: top + TAB_HEIGHT - 3,
+                        bottom: top + TAB_HEIGHT - 1,
                     },
                     COLOR_GREEN,
                     DT_LEFT | DT_SINGLELINE | DT_VCENTER,
@@ -2046,7 +2225,7 @@ impl AppState {
                         left: TAB_EDIT_LEFT,
                         top,
                         right: TAB_CLOSE_LEFT,
-                        bottom: top + TAB_HEIGHT - 3,
+                        bottom: top + TAB_HEIGHT - 1,
                     },
                     COLOR_BLUE,
                     DT_LEFT | DT_SINGLELINE | DT_VCENTER,
@@ -2058,7 +2237,7 @@ impl AppState {
                         left: TAB_CLOSE_LEFT,
                         top,
                         right: SIDEBAR_WIDTH - 4,
-                        bottom: top + TAB_HEIGHT - 3,
+                        bottom: top + TAB_HEIGHT - 1,
                     },
                     COLOR_MUTED,
                     DT_LEFT | DT_SINGLELINE | DT_VCENTER,
@@ -2590,12 +2769,13 @@ impl AppState {
                     },
                     "exit_code": tab.exited,
                     "environment_names": tab.environment_names,
+                    "scrollback_offset": tab.parser.screen().scrollback(),
                     "draft": draft,
                     "bounds": visible_position.map(|position| serde_json::json!({
-                        "x": 6,
+                        "x": TAB_LEFT,
                         "y": TAB_TOP + position as i32 * TAB_HEIGHT,
-                        "width": SIDEBAR_WIDTH - 12,
-                        "height": TAB_HEIGHT - 3,
+                        "width": SIDEBAR_WIDTH - TAB_LEFT - TAB_RIGHT_MARGIN,
+                        "height": TAB_HEIGHT - 1,
                     })),
                     "actions": visible_position
                         .filter(|_| self.active == Some(tab.id))
@@ -2604,19 +2784,19 @@ impl AppState {
                             "x": TAB_ADD_LEFT,
                             "y": TAB_TOP + position as i32 * TAB_HEIGHT,
                             "width": TAB_EDIT_LEFT - TAB_ADD_LEFT,
-                            "height": TAB_HEIGHT - 3,
+                            "height": TAB_HEIGHT - 1,
                         },
                         "edit": {
                             "x": TAB_EDIT_LEFT,
                             "y": TAB_TOP + position as i32 * TAB_HEIGHT,
                             "width": TAB_CLOSE_LEFT - TAB_EDIT_LEFT,
-                            "height": TAB_HEIGHT - 3,
+                            "height": TAB_HEIGHT - 1,
                         },
                         "close": {
                             "x": TAB_CLOSE_LEFT,
                             "y": TAB_TOP + position as i32 * TAB_HEIGHT,
                             "width": SIDEBAR_WIDTH - TAB_CLOSE_LEFT,
-                            "height": TAB_HEIGHT - 3,
+                            "height": TAB_HEIGHT - 1,
                         }
                     }))
                 }))
@@ -3057,6 +3237,12 @@ impl AppState {
                 let Some(position) = self.target_position(option_value(args, "-t")) else {
                     return IpcResponse::failure("can't find pane");
                 };
+                if self.tabs[position].pending_submit_at.is_some() {
+                    return IpcResponse::failure(
+                        "composer submission is pending; wait with \
+                         `wait-pane --submit-complete` before sending keys",
+                    );
+                }
                 let literal = args.iter().any(|arg| arg == "-l");
                 for key in positional_values(args, &["-t"], &["-l", "-R", "-X"]) {
                     if literal {
@@ -3068,6 +3254,39 @@ impl AppState {
                     }
                 }
                 IpcResponse::success("")
+            }
+            "scroll-pane" => {
+                let Some(position) = self.target_position(option_value(args, "-t")) else {
+                    return IpcResponse::failure("can't find pane");
+                };
+                let values = positional_values(args, &["-t"], &[]);
+                let Some(action) = values.first().copied() else {
+                    return IpcResponse::failure(
+                        "usage: scroll-pane [-t target] \
+                         up|down|page-up|page-down|top|bottom [rows]",
+                    );
+                };
+                if values.len() > 2 {
+                    return IpcResponse::failure("scroll-pane accepts at most one row count");
+                }
+                let count = match values.get(1) {
+                    Some(value) => match value.parse::<usize>() {
+                        Ok(count) if count > 0 => Some(count),
+                        _ => {
+                            return IpcResponse::failure(
+                                "scroll-pane row count must be a positive integer",
+                            );
+                        }
+                    },
+                    None => None,
+                };
+                match self.tabs[position].scroll_viewport(action, count) {
+                    Ok(offset) => {
+                        unsafe { InvalidateRect(self.window, ptr::null(), 0) };
+                        IpcResponse::success(offset.to_string())
+                    }
+                    Err(error) => IpcResponse::failure(format!("{error:#}")),
+                }
             }
             "capturep" | "capture-pane" => {
                 let Some(position) = self.target_position(option_value(args, "-t")) else {
@@ -3216,7 +3435,7 @@ impl AppState {
                         "set-setting", "set-tab-note", "show-tab-note",
                         "list-tab-tree", "set-tab-parent", "show-tab-parent",
                         "save-workspace", "workspace-info", "shutdown",
-                        "new-agent"
+                        "new-agent", "list-instances", "scroll-pane"
                     ],
                     "features": {
                         "remain_on_exit": true,
@@ -3227,7 +3446,8 @@ impl AppState {
                         "persistent_workspace": true,
                         "tab_environment": true,
                         "codex_launcher": true,
-                        "mux_frontend": true
+                        "mux_frontend": true,
+                        "instance_discovery": true
                     }
                 }))
                 .unwrap_or_default(),
@@ -3391,8 +3611,9 @@ impl AppState {
                     return IpcResponse::failure("can't find window");
                 };
                 let text = mem::take(&mut self.tabs[position].composer);
-                if !text.is_empty() {
-                    self.tabs[position].submit(&text);
+                if !text.is_empty() && !self.tabs[position].submit(&text) {
+                    self.tabs[position].composer = text;
+                    return IpcResponse::failure("a composer submission is already pending");
                 }
                 if self.active == Some(self.tabs[position].id) {
                     unsafe { SetWindowTextW(self.edit, wide("").as_ptr()) };
@@ -3431,6 +3652,8 @@ impl AppState {
                             "cols": tab.last_size.1,
                             "input_bytes": tab.input_bytes,
                             "input_writes": tab.input_writes,
+                            "submit_pending": tab.pending_submit_at.is_some(),
+                            "scrollback_offset": tab.parser.screen().scrollback(),
                             "output_bytes": tab.output_bytes,
                             "composer": tab.composer,
                             "error": tab.error,
@@ -3581,6 +3804,14 @@ fn fill(device: HDC, rect: &RECT, color: COLORREF) {
     let brush = unsafe { CreateSolidBrush(color) };
     unsafe {
         FillRect(device, rect, brush);
+        DeleteObject(brush as HGDIOBJ);
+    }
+}
+
+fn frame(device: HDC, rect: &RECT, color: COLORREF) {
+    let brush = unsafe { CreateSolidBrush(color) };
+    unsafe {
+        FrameRect(device, rect, brush);
         DeleteObject(brush as HGDIOBJ);
     }
 }
@@ -3744,10 +3975,24 @@ fn ipc_socket_addr() -> Result<std::net::SocketAddr> {
 }
 
 fn send_ipc_request(args: Vec<String>) -> Result<IpcResponse> {
+    send_ipc_request_to(&ipc_address(), args)
+}
+
+fn send_ipc_request_to(address: &str, args: Vec<String>) -> Result<IpcResponse> {
+    send_ipc_request_to_with_timeout(address, args, IPC_TIMEOUT)
+}
+
+fn send_ipc_request_to_with_timeout(
+    address: &str,
+    args: Vec<String>,
+    timeout: Duration,
+) -> Result<IpcResponse> {
     use std::io::BufRead as _;
-    let socket = ipc_socket_addr()?;
+    let socket = parse_loopback_ipc_address(address)?;
     let mut connection = std::net::TcpStream::connect_timeout(&socket, Duration::from_millis(100))
         .context("AgenTerm server is not running")?;
+    connection.set_read_timeout(Some(timeout))?;
+    connection.set_write_timeout(Some(timeout))?;
     connection.write_all(serde_json::to_string(&IpcRequest { args })?.as_bytes())?;
     connection.write_all(b"\n")?;
     connection.flush()?;
@@ -3758,6 +4003,89 @@ fn send_ipc_request(args: Vec<String>) -> Result<IpcResponse> {
         anyhow::bail!("AgenTerm server closed the IPC connection");
     }
     serde_json::from_str(&response).context("invalid response from AgenTerm server")
+}
+
+fn run_list_instances(arguments: &[String]) -> i32 {
+    let json = arguments.iter().any(|argument| argument == "--json");
+    let prune = arguments.iter().any(|argument| argument == "--prune");
+    let instances = match discover_instances() {
+        Ok(instances) => instances,
+        Err(error) => {
+            eprintln!("failed to discover AgenTerm instances: {error:#}");
+            return 1;
+        }
+    };
+    let mut views = Vec::new();
+    for instance in instances {
+        let response = send_ipc_request_to_with_timeout(
+            &instance.record.address,
+            vec!["ui-snapshot".to_owned()],
+            IPC_DISCOVERY_TIMEOUT,
+        );
+        let (status, snapshot) = match response {
+            Ok(response) if response.ok => (
+                "running",
+                serde_json::from_str::<serde_json::Value>(&response.output).ok(),
+            ),
+            Ok(_) => ("running", None),
+            Err(_) => ("unreachable", None),
+        };
+        if prune && status == "unreachable" {
+            if let Err(error) = prune_instance(&instance) {
+                eprintln!("{error:#}");
+                return 1;
+            }
+            continue;
+        }
+        let tab_count = snapshot
+            .as_ref()
+            .and_then(|value| value["tabs"].as_array())
+            .map_or(0, Vec::len);
+        let active_tab = snapshot
+            .as_ref()
+            .and_then(|value| value["focus"]["window_id"].as_str())
+            .unwrap_or("-");
+        let window_title = snapshot
+            .as_ref()
+            .and_then(|value| value["window"]["title"].as_str())
+            .unwrap_or("");
+        views.push(serde_json::json!({
+            "pid": instance.record.pid,
+            "address": instance.record.address,
+            "version": instance.record.version,
+            "status": status,
+            "tab_count": tab_count,
+            "active_tab": active_tab,
+            "session": instance.record.session,
+            "workspace_path": instance.record.workspace_path,
+            "started_at_unix_ms": instance.record.started_at_unix_ms,
+            "window_title": window_title,
+        }));
+    }
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&views).unwrap_or_else(|_| "[]".to_owned())
+        );
+    } else if views.is_empty() {
+        println!("No registered AgenTerm instances.");
+    } else {
+        println!("PID\tADDRESS\tVERSION\tSTATUS\tTABS\tACTIVE\tSESSION\tWORKSPACE");
+        for view in views {
+            println!(
+                "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                view["pid"].as_u64().unwrap_or_default(),
+                view["address"].as_str().unwrap_or_default(),
+                view["version"].as_str().unwrap_or_default(),
+                view["status"].as_str().unwrap_or_default(),
+                view["tab_count"].as_u64().unwrap_or_default(),
+                view["active_tab"].as_str().unwrap_or("-"),
+                view["session"].as_str().unwrap_or_default(),
+                view["workspace_path"].as_str().unwrap_or_default(),
+            );
+        }
+    }
+    0
 }
 
 fn start_ipc_server(window: HWND) -> Result<Receiver<IpcEnvelope>> {
@@ -3857,6 +4185,9 @@ fn run_cli(arguments: Vec<String>) -> i32 {
         }
     }
     let command = arguments.first().map(String::as_str).unwrap_or_default();
+    if command == "list-instances" {
+        return run_list_instances(&arguments);
+    }
     if command == "wait-ui" {
         return run_wait_ui(&arguments);
     }
@@ -3881,12 +4212,13 @@ fn run_cli(arguments: Vec<String>) -> i32 {
     {
         let executable = wide(&executable.to_string_lossy());
         let operation = wide("open");
+        let parameters = wide(&format!("--address {}", ipc_address()));
         let launched = unsafe {
             ShellExecuteW(
                 ptr::null_mut(),
                 operation.as_ptr(),
                 executable.as_ptr(),
-                ptr::null(),
+                parameters.as_ptr(),
                 ptr::null(),
                 SW_SHOWNORMAL,
             )
@@ -4002,13 +4334,20 @@ fn run_wait_pane(arguments: &[String]) -> i32 {
             .map(str::to_owned)
         });
     let wait_dead = arguments.iter().any(|argument| argument == "--dead");
-    if contains.is_none() && !wait_dead {
-        eprintln!("usage: wait-pane [-t target] (--contains text | --dead) [--timeout-ms ms]");
+    let wait_submit = arguments
+        .iter()
+        .any(|argument| argument == "--submit-complete");
+    if contains.is_none() && !wait_dead && !wait_submit {
+        eprintln!(
+            "usage: wait-pane [-t target] (--contains text | --dead | --submit-complete) \
+             [--timeout-ms ms]"
+        );
         return 2;
     }
     let deadline = std::time::Instant::now() + Duration::from_millis(timeout_ms);
     loop {
-        let matched = if wait_dead {
+        let mut matched = true;
+        if wait_dead {
             let mut request = vec![
                 "display-message".to_owned(),
                 "-p".to_owned(),
@@ -4017,20 +4356,35 @@ fn run_wait_pane(arguments: &[String]) -> i32 {
             if let Some(target) = &target {
                 request.extend(["-t".to_owned(), target.clone()]);
             }
-            send_ipc_request(request)
-                .is_ok_and(|response| response.ok && response.output.trim() == "1")
-        } else {
+            matched &= send_ipc_request(request)
+                .is_ok_and(|response| response.ok && response.output.trim() == "1");
+        }
+        if let Some(needle) = &contains {
             let mut request = vec!["capture-pane".to_owned(), "-p".to_owned()];
             if let Some(target) = &target {
                 request.extend(["-t".to_owned(), target.clone()]);
             }
-            send_ipc_request(request).is_ok_and(|response| {
+            matched &= send_ipc_request(request)
+                .is_ok_and(|response| response.ok && response.output.contains(needle));
+        }
+        if wait_submit {
+            let mut request = vec!["inspect".to_owned()];
+            if let Some(target) = &target {
+                request.extend(["-t".to_owned(), target.clone()]);
+            }
+            matched &= send_ipc_request(request).is_ok_and(|response| {
                 response.ok
-                    && contains
-                        .as_ref()
-                        .is_some_and(|needle| response.output.contains(needle))
-            })
-        };
+                    && serde_json::from_str::<serde_json::Value>(&response.output)
+                        .ok()
+                        .and_then(|snapshot| snapshot["windows"].as_array().cloned())
+                        .is_some_and(|windows| {
+                            !windows.is_empty()
+                                && windows.iter().all(|window| {
+                                    !window["submit_pending"].as_bool().unwrap_or(true)
+                                })
+                        })
+            });
+        }
         if matched {
             return 0;
         }
@@ -4061,6 +4415,8 @@ fn print_help() {
 AgenTerm CLI - control the native tabbed terminal
 
 Usage:
+  agentermctl [--address HOST:PORT] command [args...]
+  agentermctl list-instances [--json] [--prune]
   agentermctl new-session [-s name]
   agentermctl new-window [-d] [-n name] [--parent target] [-e NAME=VALUE] [command [args...]]
   agentermctl new-agent [-d] [-n name] [--parent target] [--proxy URL] [--yolo] [-- [codex args...]]
@@ -4070,6 +4426,7 @@ Usage:
   agentermctl rename-window [-t target] name
   agentermctl kill-window -t target
   agentermctl send-keys [-t target] key...
+  agentermctl scroll-pane [-t target] up|down|page-up|page-down|top|bottom [rows]
   agentermctl capture-pane -p [-t target]
   agentermctl capture-pane --raw-escaped [-t target]
   agentermctl dump-cells [-t target] [-r row]
@@ -4095,6 +4452,7 @@ Usage:
   agentermctl ui-snapshot
   agentermctl ui-action new-tab|new-child|edit-tab|toggle-tree|select-tab|close-tab|confirm|cancel|composer-send
   agentermctl focus terminal|composer|sidebar [-t target]
+  agentermctl wait-pane [-t target] (--contains text|--dead|--submit-complete) [--timeout-ms ms]
   agentermctl wait-ui [--active @id] [--focus surface] [-t target --tab-state state]
   agentermctl protocol-info
   agentermctl list-panes [-F format]

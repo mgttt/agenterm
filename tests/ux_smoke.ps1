@@ -146,7 +146,10 @@ try {
     Invoke-AgenTerm @('focus', 'composer', '-t', $id) | Out-Null
     Invoke-AgenTerm @('wait-ui', '--active', $id, '--focus', 'composer') | Out-Null
     Invoke-AgenTerm @('ui-action', 'composer-send', '-t', $id) | Out-Null
-    Invoke-AgenTerm @('wait-pane', '-t', $id, '--contains', $token, '--timeout-ms', '10000') | Out-Null
+    Invoke-AgenTerm @(
+        'wait-pane', '-t', $id, '--contains', $token,
+        '--submit-complete', '--timeout-ms', '10000'
+    ) | Out-Null
 
     Write-Host 'STEP live close requires confirmation and cancel is safe'
     $snapshot = Invoke-AgenTerm @('ui-action', 'close-tab', '-t', $id) | ConvertFrom-Json

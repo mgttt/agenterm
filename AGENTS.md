@@ -13,6 +13,7 @@ the information cannot live here or in the PRD.
 - `src/bin/agenterm-mux.rs` — tmux/RMUX compatibility CLI entry point.
 - `src/commands.rs` — reusable CLI parsing, command catalog, key mapping, and
   output-path helpers.
+- `src/instances.rs` — multi-server registration and discovery records.
 - `src/protocol.rs` — serialized local IPC request/response contract.
 - `src/rmux_status.rs` — RMUX status-line window parsing and click ranges.
 - `src/settings.rs` — persistent user settings.

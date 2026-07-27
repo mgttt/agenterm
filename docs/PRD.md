@@ -12,6 +12,17 @@ same state. Human interaction and local CLI automation operate on the same
 tabs, PTYs, drafts, settings, and observable state. A process exiting never
 silently destroys its tab.
 
+The visual language favors industrial confidence over decoration: repeated
+integer-grid spacing, solid right-angle connections, strict baseline
+alignment, restrained colors, and explicit boundaries should make the fleet
+feel precisely assembled and dependable.
+
+Terminal durability comes from deterministic two-dimensional state, not from
+nostalgia. AgenTerm extends that contract from a character grid to the whole
+agent fleet: humans and agents must be able to address, read, wait for, and
+control the same tree nodes, focus, input, viewport, process lifecycle, and
+rendered evidence precisely.
+
 Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
 ## Product tree
@@ -110,6 +121,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [x] the selected node exposes direct add-child, edit, and close actions
     - [x] add-child immediately opens the new node's name/note editor
     - [x] collapse/expand with persisted node state
+    - [x] compact rows with continuous native tree connectors, grid-aligned
+      expand boxes, status lamps, and bordered selection
     - [ ] drag/drop reparenting and team-level actions
     - [x] line 1: user-defined role/name plus the running program
     - [x] line 2: user note, with terminal-controlled TITLE as fallback
@@ -118,6 +131,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [x] per-tab external composer with independent draft and Send action
       - [x] submit text and Enter as distinct PTY events so interactive TUIs
         such as Codex execute the draft instead of leaving it in their editor
+      - [x] schedule Enter asynchronously beyond paste-burst suppression and
+        reject overlapping composer or direct-key input instead of merging
+        transactions
       - [ ] automated interactive-TUI fixture that rejects batched paste+Enter
         without requiring a networked Codex session
     - [x] `Settings` and `New` actions grouped below the tree
@@ -150,6 +166,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       - [x] launch Codex agent tabs with stable tab/session/IPC context and
         optional tab-scoped proxy settings
       - [x] send keys and terminal mouse events
+      - [x] scroll a selected terminal viewport by rows, pages, top, or bottom
+        while keeping screenshots and capture aligned with the human view
       - [x] read, replace, and submit composer content
       - [x] semantic focus and UI actions
       - [x] deterministic waits for output, dead state, focus, and modal state
@@ -157,8 +175,17 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - Protocol
       - [x] loopback-only newline-delimited JSON IPC
       - [x] feature discovery through `protocol-info`
+      - [x] registered multi-instance discovery with PID, address, version,
+        session, workspace, tab count, active tab, and liveness
+      - [x] explicit `--address` targeting and opt-in stale-record pruning
+      - [x] bounded discovery probes and explicit-address GUI autostart
       - [x] explicit errors for unsupported operations
       - [ ] named-pipe transport and stable event subscription
+  - Self-hosted development loop
+    - [x] a running AgenTerm can build and stage the next AgenTerm binaries
+      without first terminating the development fleet
+    - [ ] surface staged-version availability and offer an explicit restart
+      action without destroying persisted tabs
   - Rust host + Rhai scripting
     - Product boundary
       - [x] design choice: Rust (`.rs`) implements the host, capability checks,
@@ -275,14 +302,21 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
         - parent cycles fail explicitly
         - closing a parent promotes direct children to its parent
       - State and deterministic waits
+        - `list-instances [--json] [--prune]`
+        - global `--address HOST:PORT` targets a discovered server explicitly
         - `active-window|active-tab [-F format]`
         - `inspect|pane-snapshot [-t target]`
         - `dump-cells [-t target] [-r row]`
         - `capture-pane --raw-escaped [-t target]`
-        - `wait-pane|expect-pane [-t target] [--contains text|--dead]
+        - `scroll-pane [-t target]
+          up|down|page-up|page-down|top|bottom [rows]`
+        - `wait-pane|expect-pane [-t target]
+          [--contains text|--dead|--submit-complete]
           [--timeout-ms ms]`
         - `ui-snapshot`, `protocol-info`
         - `workspace-info`, `save-workspace`, `shutdown`
+        - [ ] `shutdown --no-save` escape hatch for instances whose workspace
+          destination has become unwritable
         - `wait-ui [--active @id] [--focus surface] [-t target
           --tab-state running|dead] [--timeout-ms ms]`
       - Composer and tab metadata

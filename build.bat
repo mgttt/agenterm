@@ -32,7 +32,8 @@ if errorlevel 1 (
 )
 
 if not exist "%DIST_DIR%" mkdir "%DIST_DIR%"
-copy /y "%GUI_SOURCE_EXE%" "%DIST_DIR%\agenterm.exe" >nul
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\stage-artifact.ps1" ^
+    -Source "%GUI_SOURCE_EXE%" -Destination "%DIST_DIR%\agenterm.exe"
 if errorlevel 1 (
     echo.
     echo Failed to copy agenterm.exe to dist.
@@ -40,7 +41,8 @@ if errorlevel 1 (
     exit /b 1
 )
 
-copy /y "%CLI_SOURCE_EXE%" "%DIST_DIR%\agentermctl.exe" >nul
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\stage-artifact.ps1" ^
+    -Source "%CLI_SOURCE_EXE%" -Destination "%DIST_DIR%\agentermctl.exe"
 if errorlevel 1 (
     echo.
     echo Failed to copy agentermctl.exe to dist.
@@ -48,7 +50,8 @@ if errorlevel 1 (
     exit /b 1
 )
 
-copy /y "%MUX_SOURCE_EXE%" "%DIST_DIR%\agenterm-mux.exe" >nul
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\stage-artifact.ps1" ^
+    -Source "%MUX_SOURCE_EXE%" -Destination "%DIST_DIR%\agenterm-mux.exe"
 if errorlevel 1 (
     echo.
     echo Failed to copy agenterm-mux.exe to dist.

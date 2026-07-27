@@ -15,6 +15,7 @@ kill-session
 kill-window (killw)
 list-tab-tree
 list-commands (lscm)
+list-instances
 list-panes (lsp)
 list-sessions (ls)
 list-windows (lsw)
@@ -30,6 +31,7 @@ rename-window (renamew)
 screenshot
 screenshot-pane (screenshot-tab)
 save-workspace
+scroll-pane
 select-window (selectw)
 send-keys (send)
 send-composer

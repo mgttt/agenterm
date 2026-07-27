@@ -62,7 +62,12 @@ $r = ".\dist\agentermctl.exe"
 & $r send-composer -t build
 & $r wait-pane -t build --contains "Finished" --timeout-ms 30000
 & $r capture-pane -p -t build
+& $r scroll-pane -t build page-up
 & $r screenshot-pane -t build -o build.png
+
+# Discover every registered server, then target one explicitly.
+& $r list-instances
+& $r --address 127.0.0.1:48915 ui-snapshot
 
 # Launch Codex with proxy settings scoped to this tab.
 & $r new-agent -n reviewer --proxy http://127.0.0.1:7890 -- --full-auto

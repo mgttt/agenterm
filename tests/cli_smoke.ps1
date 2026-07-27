@@ -17,6 +17,23 @@ function Invoke-AgenTerm {
     return ($output -join "`n")
 }
 
+function Invoke-AgenTermExpectedFailure {
+    param([string[]]$CommandArgs)
+    $savedErrorPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'SilentlyContinue'
+    try {
+        $output = & $Exe @CommandArgs 2>&1
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $savedErrorPreference
+    }
+    if ($exitCode -eq 0) {
+        throw "agenterm $($CommandArgs -join ' ') unexpectedly succeeded"
+    }
+    return ($output -join "`n")
+}
+
 $previousAddress = $env:AGENTERM_IPC_ADDRESS
 $previousWorkspace = $env:AGENTERM_WORKSPACE_PATH
 $env:AGENTERM_IPC_ADDRESS = "127.0.0.1:$((45000 + ($PID % 1000)))"
@@ -40,7 +57,9 @@ try {
         'new-window (neww)',
         'list-windows (lsw)',
         'send-keys (send)',
+        'scroll-pane',
         'new-agent',
+        'list-instances',
         'wait-pane (expect-pane)',
         'set-composer',
         'ui-snapshot'
@@ -60,15 +79,56 @@ try {
 
     Write-Host 'STEP submit and wait for output'
     Invoke-AgenTerm @('send-composer', '-t', $name) | Out-Null
+    $pendingError = Invoke-AgenTermExpectedFailure @(
+        'send-keys', '-t', $name, 'SHOULD_NOT_MERGE'
+    )
+    if (-not $pendingError.Contains('composer submission is pending')) {
+        throw 'send-keys did not explicitly reject pending composer input'
+    }
+    Invoke-AgenTerm @(
+        'wait-pane', '-t', $name, '--contains', $token,
+        '--submit-complete', '--timeout-ms', '10000'
+    ) | Out-Null
     $afterSubmit = Invoke-AgenTerm @('inspect', '-t', $name) | ConvertFrom-Json
     if ($afterSubmit.windows[0].input_writes -ne
-        ($beforeSubmit.windows[0].input_writes + 2)) {
+        ($beforeSubmit.windows[0].input_writes + 2) -or
+        $afterSubmit.windows[0].submit_pending) {
         throw 'send-composer did not preserve separate text and Enter PTY events'
     }
-    Invoke-AgenTerm @('wait-pane', '-t', $name, '--contains', $token, '--timeout-ms', '10000') | Out-Null
     $capture = Invoke-AgenTerm @('capture-pane', '-p', '-t', $name)
     if (-not $capture.Contains($token)) {
         throw 'capture-pane did not contain the smoke token'
+    }
+
+    Write-Host 'STEP terminal viewport scrolling'
+    $scrollPrefix = "AGENTERM_SCROLL_$PID"
+    Invoke-AgenTerm @(
+        'set-composer', '-t', $name,
+        "for /L %i in (1,1,80) do @echo $scrollPrefix`_%i"
+    ) | Out-Null
+    Invoke-AgenTerm @('send-composer', '-t', $name) | Out-Null
+    Invoke-AgenTerm @(
+        'wait-pane', '-t', $name, '--contains', "$scrollPrefix`_80",
+        '--submit-complete', '--timeout-ms', '10000'
+    ) | Out-Null
+    $topOffset = [int](Invoke-AgenTerm @('scroll-pane', '-t', $name, 'top'))
+    $topCapture = Invoke-AgenTerm @('capture-pane', '-p', '-t', $name)
+    if ($topOffset -le 0 -or $topCapture.Contains("$scrollPrefix`_80")) {
+        throw 'scroll-pane top did not move capture to historical terminal content'
+    }
+    $lowerOffset = [int](Invoke-AgenTerm @(
+        'scroll-pane', '-t', $name, 'down', '5'
+    ))
+    if ($lowerOffset -ge $topOffset) {
+        throw 'scroll-pane down did not reduce the scrollback offset'
+    }
+    $bottomOffset = [int](Invoke-AgenTerm @(
+        'scroll-pane', '-t', $name, 'bottom'
+    ))
+    $bottomCapture = Invoke-AgenTerm @('capture-pane', '-p', '-t', $name)
+    if ($bottomOffset -ne 0 -or
+        -not $bottomCapture.Contains("$scrollPrefix`_80")) {
+        throw 'scroll-pane bottom did not restore the live terminal viewport'
     }
 
     Write-Host 'STEP screenshots'
@@ -94,7 +154,7 @@ try {
     Write-Host 'STEP explicit close'
     Invoke-AgenTerm @('kill-window', '-t', $name) | Out-Null
     $created = $false
-    Write-Host "PASS: composer, PTY I/O, waits, capture, PNG screenshots, remain-on-exit, manual close"
+    Write-Host "PASS: composer, viewport scroll, PTY I/O, waits, capture, PNG screenshots, remain-on-exit, manual close"
 }
 finally {
     if ($created) {

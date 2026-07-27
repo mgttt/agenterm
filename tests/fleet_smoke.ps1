@@ -14,10 +14,13 @@ foreach ($path in @($CtlExe, $MuxExe)) {
 
 $previousAddress = $env:AGENTERM_IPC_ADDRESS
 $previousWorkspace = $env:AGENTERM_WORKSPACE_PATH
+$previousInstanceDir = $env:AGENTERM_INSTANCE_DIR
 $address = "127.0.0.1:$((48000 + ($PID % 1000)))"
 $workspaceFile = Join-Path $env:TEMP "agenterm-fleet-$PID.json"
+$instanceDir = Join-Path $env:TEMP "agenterm-fleet-instances-$PID"
 $env:AGENTERM_IPC_ADDRESS = $address
 $env:AGENTERM_WORKSPACE_PATH = $workspaceFile
+$env:AGENTERM_INSTANCE_DIR = $instanceDir
 $environmentName = "env-$PID"
 $agentName = "codex-$PID"
 $role = "reviewer-$PID"
@@ -56,6 +59,7 @@ function Invoke-ExpectedFailure {
 }
 
 try {
+    $expectedVersion = ((Invoke-CheckedExe $CtlExe @('--version')) -split '\s+')[-1]
     Write-Host 'STEP mux compatibility is discoverable without a server'
     $compatibility = Invoke-CheckedExe $MuxExe @('compatibility', '--json') |
         ConvertFrom-Json
@@ -86,6 +90,36 @@ try {
         '--address', '0.0.0.0:42000', 'compatibility'
     ) | Out-Null
 
+    Write-Host 'STEP explicit CLI address autostarts the requested server'
+    $explicitAddress = "127.0.0.1:$((49000 + ($PID % 1000)))"
+    $explicitWorkspace = Join-Path $env:TEMP "agenterm-explicit-$PID.json"
+    $savedAddress = $env:AGENTERM_IPC_ADDRESS
+    $savedWorkspace = $env:AGENTERM_WORKSPACE_PATH
+    Remove-Item Env:AGENTERM_IPC_ADDRESS
+    $env:AGENTERM_WORKSPACE_PATH = $explicitWorkspace
+    try {
+        Invoke-CheckedExe $CtlExe @(
+            '--address', $explicitAddress, 'new-window', '-d',
+            '-n', "explicit-$PID", '--', 'cmd.exe', '/d', '/c', 'echo explicit'
+        ) | Out-Null
+        $explicitInstances = Invoke-CheckedExe $CtlExe @(
+            'list-instances', '--json'
+        ) | ConvertFrom-Json
+        $explicitInstance = @($explicitInstances) |
+            Where-Object address -eq $explicitAddress
+        if ($null -eq $explicitInstance -or
+            $explicitInstance.status -ne 'running' -or
+            $explicitInstance.workspace_path -ne $explicitWorkspace) {
+            throw 'agentermctl --address autostarted a different or undiscoverable server'
+        }
+    }
+    finally {
+        & $CtlExe --address $explicitAddress shutdown 2>$null | Out-Null
+        $env:AGENTERM_IPC_ADDRESS = $savedAddress
+        $env:AGENTERM_WORKSPACE_PATH = $savedWorkspace
+        Remove-Item -LiteralPath $explicitWorkspace -ErrorAction SilentlyContinue
+    }
+
     Write-Host 'STEP tab-scoped environment and reserved AgenTerm context'
     Invoke-CheckedExe $CtlExe @(
         'new-window', '-d', '-n', $environmentName,
@@ -96,6 +130,24 @@ try {
     Invoke-CheckedExe $CtlExe @(
         'wait-pane', '-t', $environmentName, '--dead', '--timeout-ms', '10000'
     ) | Out-Null
+
+    Write-Host 'STEP live servers are discoverable and explicitly targetable'
+    $instances = Invoke-CheckedExe $CtlExe @('list-instances', '--json') |
+        ConvertFrom-Json
+    $instance = @($instances) | Where-Object address -eq $address
+    if ($null -eq $instance -or
+        $instance.status -ne 'running' -or
+        $instance.version -ne $expectedVersion -or
+        $instance.workspace_path -ne $workspaceFile) {
+        throw 'list-instances did not report the isolated live server'
+    }
+    $targetedProtocol = Invoke-CheckedExe $CtlExe @(
+        '--address', $address, 'protocol-info'
+    ) | ConvertFrom-Json
+    if (-not $targetedProtocol.features.instance_discovery) {
+        throw 'agentermctl --address did not target the requested server'
+    }
+
     $capture = Invoke-CheckedExe $CtlExe @('capture-pane', '-p', '-t', $environmentName)
     $snapshot = Invoke-CheckedExe $CtlExe @('ui-snapshot') | ConvertFrom-Json
     $tab = $snapshot.tabs | Where-Object name -eq $environmentName
@@ -231,6 +283,7 @@ try {
 finally {
     & $CtlExe kill-server 2>$null | Out-Null
     Remove-Item -LiteralPath $workspaceFile -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $instanceDir -Recurse -ErrorAction SilentlyContinue
     if ($null -eq $previousAddress) {
         Remove-Item Env:AGENTERM_IPC_ADDRESS -ErrorAction SilentlyContinue
     } else {
@@ -240,6 +293,11 @@ finally {
         Remove-Item Env:AGENTERM_WORKSPACE_PATH -ErrorAction SilentlyContinue
     } else {
         $env:AGENTERM_WORKSPACE_PATH = $previousWorkspace
+    }
+    if ($null -eq $previousInstanceDir) {
+        Remove-Item Env:AGENTERM_INSTANCE_DIR -ErrorAction SilentlyContinue
+    } else {
+        $env:AGENTERM_INSTANCE_DIR = $previousInstanceDir
     }
     # A successful destructive-session test leaves no server for best-effort cleanup.
     $global:LASTEXITCODE = 0
