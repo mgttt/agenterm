@@ -1148,6 +1148,28 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
         - [ ] route keyboard and semantic focus through one typed operation,
           retain `ui-snapshot.focus.surface` as the fact source, and black-box
           direction, pass-through, repeat, modal, and focus-indicator behavior
+      - Release core: working-context status segments
+        - [ ] partition the bottom bar into host-owned Tabs recovery,
+          last-known CWD, flexible provider, and right-aligned Proxy segments;
+          narrow layouts preserve interactive recovery targets and Dark/Light
+          hover, pressed, focus, and selection states
+        - [ ] report CWD honestly with `launch|osc7|user_requested|unknown`
+          provenance; support OSC 7 and future shell integration, but never
+          inspect remote process PEBs or parse prompt pixels to pretend that a
+          last-known path is authoritative
+        - [ ] a CWD editor safely quotes known cmd/PowerShell/future-Bash
+          commands and defaults to preparing them in Composer; explicit
+          non-default Send Now is unavailable for unknown shells because the
+          host cannot prove that a foreground terminal is waiting at a prompt
+        - [ ] after CWD is accepted, show tab-scoped HTTP(S) proxy state with a
+          GDI eye/eye-slash toggle and editor; closed-eye shows only on/off,
+          open-eye shows sanitized scheme/host/port, and credential/query/
+          fragment values require a second editor reveal and remain redacted
+          from snapshots, events, audits, logs, and semantic screenshot data
+        - [ ] CWD/proxy editors are keyboard focus traps with typed semantic
+          prepare actions; proxy values and reveal state remain ephemeral,
+          never persist to workspace, and never falsely claim to mutate the
+          environment of already-running arbitrary descendants
       - Release core: adaptive Tabs workspace
         - [ ] place a `Tabs` button immediately left of `Settings`; activating
           it collapses the complete tab tree and its controls so terminal and
@@ -1210,6 +1232,42 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
           typed semantic actions as well as physical UI, with stable snapshot
           fields for visibility, configured/effective width, grip geometry,
           bounds, and system-menu state
+      - Release core: Script Platform v2
+        - [ ] repair the shipped v1 contract before adding authority:
+          `script check` rejects unknown/profile-inaccessible APIs, wall-time
+          exhaustion returns the typed limit class, invocation input is bounded,
+          and the host validates result envelope/API/invocation identity plus
+          stable success/script/configuration/limit/host exit classes
+        - [ ] extract a Rhai-independent worker supervisor with kill-on-close
+          Windows Job Object, parent-enforced deadline, bounded cooperative
+          cancellation then forced termination, protocol/output limits,
+          concurrency ceilings, and no orphan after timeout, crash, CLI
+          interruption, or parent exit
+        - [ ] replace the stdin-to-EOF/final-stdout-only worker exchange with a
+          versioned inherited-pipe frame protocol for invoke, broker request/
+          response, cancel, and result; script stdout remains captured data and
+          can never corrupt protocol frames
+        - [ ] keep `pure` ambient-authority-free and upgrade `observe` from one
+          raw snapshot variable to discoverable typed workspace/tab/snapshot/
+          bounded-capture/event-read/event-wait APIs brokered through the host;
+          restart, gap, timeout, truncation, and return limits remain explicit
+        - [ ] make `script api --json` the exact typed catalog and make
+          `script check` validate API names, profiles, capabilities, versions,
+          and static limits offline rather than only compiling Rhai syntax
+        - [ ] append privacy-bounded audit records for identity/fingerprint,
+          requested/effective profile, capabilities and budgets, broker
+          operation IDs, duration, result class, denial, cancellation, timeout,
+          and crash without source, argv, pane content, environment values,
+          stdout, clipboard data, or credentials
+        - [ ] expose the supervisor, capability broker, typed operation adapter,
+          and audit sink as Rust boundaries reusable by future Bash and MCP
+          executables without making either depend on Rhai types or shipping
+          their runtime/transport in v0.1.6
+        - [ ] public adversarial tests cover malformed/oversized/duplicate
+          frames, unsupported versions, every budget class, hard timeout,
+          cancel, crash, parent exit, concurrency, restart/gap, authority
+          denial, audit privacy, subsequent recovery, first-window isolation,
+          binary budgets, and absence of orphan workers or temporary source
       - Quality gate
         - [ ] pure geometry tests cover visible/hidden, narrow-window clamps,
           resize/reset, and terminal origin; settings tests cover defaults,
@@ -1230,16 +1288,19 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       - Candidate enhancement lanes after the core is green
         - [ ] non-intrusive bounded transcript capture by stable tab ID, with
           visible/scrollback ranges and explicit truncation metadata
-        - [ ] Rhai observe consumes a snapshot baseline plus bounded ordered
-          journal reads/waits with typed restart/gap errors and no mutation API
+        - [ ] an explicit Rhai `control` preview may expose only individually
+          allowlisted, non-destructive typed operations after broker/capability/
+          audit gates pass; send-keys, close, kill, shutdown, filesystem,
+          process, and network authority remain denied
         - [ ] terminal selection auto-scroll plus double-click word and
           triple-click visual-line selection; rectangular selection and raw
           application-mouse arbitration remain later work
       - Explicitly outside v0.1.6
-        - [ ] MCP, Rhai control authority/event handlers, dynamic status
-          providers, Bash runtime distribution, optional-component networking,
-          installer/updater/signing, intelligence workers, and LLM routing
-          remain separately gated roadmap items
+        - [ ] MCP, default/destructive Rhai control authority and event handlers,
+          dynamic status providers, Bash runtime distribution,
+          optional-component networking, installer/updater/signing,
+          intelligence workers, and LLM routing remain separately gated roadmap
+          items
     - [ ] M0 boundaries and baselines: extract typed control operations, record
       per-binary size/startup, freeze the compatibility corpus, and define the
       sidecar protocol boundary
@@ -1250,9 +1311,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [ ] M3 optional components: ship signed-manifest inventory/install/update/
       rollback foundations and independently gated SSH, HTTP, and SQLite
       sidecars without adding GUI network authority
-    - [ ] M4 / v0.1.7 scripting expansion: build on the shipped one-shot Rhai
-      pure/immutable-observe slice with control authority, cancellation/job
-      isolation, audit records, and adversarial sidecar tests
+    - [ ] M4 / v0.1.7 scripting expansion: build on the v0.1.6 supervised
+      observe broker with reviewed control authority, persistent/event-driven
+      execution, named commands, and dynamic status providers
     - [ ] M5 / v0.1.8 dynamic bridge: script-backed status segments and named
       commands
     - [ ] M6 / v0.1.9 controlled agentic bridge: ship MCP read-only resources,
