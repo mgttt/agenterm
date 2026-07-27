@@ -22,14 +22,15 @@ use windows_sys::Win32::{
     },
     Graphics::Gdi::{
         BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BeginPaint, BitBlt, CLEARTYPE_QUALITY,
-        CLIP_DEFAULT_PRECIS, CreateCompatibleBitmap, CreateCompatibleDC, CreateFontW,
+        CLIP_DEFAULT_PRECIS, CreateCompatibleBitmap, CreateCompatibleDC, CreateFontW, CreatePen,
         CreateSolidBrush, DEFAULT_CHARSET, DEFAULT_GUI_FONT, DIB_RGB_COLORS, DT_END_ELLIPSIS,
-        DT_LEFT, DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject, DrawTextW, EndPaint,
+        DT_LEFT, DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject, DrawTextW, Ellipse, EndPaint,
         ExtTextOutW, FF_MODERN, FIXED_PITCH, FW_NORMAL, FillRect, FrameRect, GetDC, GetDIBits,
         GetDeviceCaps, GetStockObject, GetTextExtentPoint32W, GetTextFaceW, GetTextMetricsW,
-        GetWindowDC, HDC, HFONT, HGDIOBJ, InvalidateRect, LOGPIXELSY, OUT_DEFAULT_PRECIS,
-        PAINTSTRUCT, ReleaseDC, SRCCOPY, SYSTEM_FIXED_FONT, ScreenToClient, SelectObject,
-        SetBkMode, SetTextColor, TEXTMETRICW, TRANSPARENT, UpdateWindow,
+        GetWindowDC, HDC, HFONT, HGDIOBJ, InvalidateRect, LOGPIXELSY, LineTo, MoveToEx, NULL_BRUSH,
+        OUT_DEFAULT_PRECIS, PAINTSTRUCT, PS_SOLID, ReleaseDC, SRCCOPY, SYSTEM_FIXED_FONT,
+        ScreenToClient, SelectObject, SetBkMode, SetTextColor, TEXTMETRICW, TRANSPARENT,
+        UpdateWindow,
     },
     System::{
         Console::{
@@ -53,15 +54,15 @@ use windows_sys::Win32::{
         GetWindowTextW, IDC_ARROW, IDC_SIZEWE, InsertMenuW, IsIconic, IsWindowVisible, IsZoomed,
         LoadCursorW, LoadIconW, MB_ICONERROR, MB_OK, MF_BYCOMMAND, MF_CHECKED, MF_ENABLED,
         MF_GRAYED, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MSG, MessageBoxW, MoveWindow,
-        PostMessageW, PostQuitMessage, RegisterClassW, SC_CLOSE, SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE,
-        SW_SHOW, SW_SHOWMAXIMIZED, SW_SHOWNOACTIVATE, SW_SHOWNORMAL, SendMessageW, SetCursor,
-        SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowTextW, ShowWindow,
-        TranslateMessage, WM_APP, WM_CHAR, WM_CLOSE, WM_COMMAND, WM_COPY, WM_CREATE, WM_CUT,
-        WM_DESTROY, WM_ENDSESSION, WM_ERASEBKGND, WM_INITMENUPOPUP, WM_KEYDOWN, WM_KEYUP,
-        WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY,
-        WM_PAINT, WM_PASTE, WM_QUERYENDSESSION, WM_RBUTTONDOWN, WM_SETCURSOR, WM_SETFOCUS, WM_SIZE,
-        WM_SYSCOMMAND, WM_TIMER, WNDCLASSW, WS_BORDER, WS_CHILD, WS_CLIPCHILDREN,
-        WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE,
+        PostMessageW, PostQuitMessage, RegisterClassW, SC_CLOSE, SIZE_MINIMIZED, SW_HIDE,
+        SW_MAXIMIZE, SW_MINIMIZE, SW_SHOW, SW_SHOWMAXIMIZED, SW_SHOWNOACTIVATE, SW_SHOWNORMAL,
+        SendMessageW, SetCursor, SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowTextW,
+        ShowWindow, TranslateMessage, WM_ACTIVATEAPP, WM_APP, WM_CHAR, WM_CLOSE, WM_COMMAND,
+        WM_COPY, WM_CREATE, WM_CUT, WM_DESTROY, WM_ENDSESSION, WM_ERASEBKGND, WM_INITMENUPOPUP,
+        WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
+        WM_MOUSEWHEEL, WM_NCDESTROY, WM_PAINT, WM_PASTE, WM_QUERYENDSESSION, WM_RBUTTONDOWN,
+        WM_SETCURSOR, WM_SETFOCUS, WM_SIZE, WM_SYSCOMMAND, WM_TIMER, WNDCLASSW, WS_BORDER,
+        WS_CHILD, WS_CLIPCHILDREN, WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE,
     },
 };
 
@@ -100,7 +101,10 @@ use ui_geometry::{
     WorkspaceLayoutInput, reset_tabs_width, scrollback_for_thumb_top, tabs_width_from_drag,
     terminal_scrollbar_geometry, tree_anchor_x, tree_row_at_y, tree_row_geometry, workspace_layout,
 };
-use working_context::{CwdSource, CwdTracker, ShellKind, cwd_command, parse_osc7, validate_path};
+use working_context::{
+    CwdSource, CwdTracker, PROXY_MAX_BYTES, ProxyState, SecretValue, ShellKind, cwd_command,
+    parse_osc7, parse_proxy_editor, proxy_command, validate_path,
+};
 use workspace::{SavedTab, SavedWorkspace, load_workspace, save_workspace, workspace_path};
 
 const APP_NAME: &str = "AgenTerm";
@@ -133,6 +137,9 @@ const IPC_AUTOSTART_TIMEOUT: Duration = Duration::from_secs(15);
 const IPC_AUTOSTART_POLL: Duration = Duration::from_millis(100);
 const COMPOSER_SUBMIT_DELAY: Duration = Duration::from_millis(500);
 const RAW_OUTPUT_LIMIT: usize = 1024 * 1024;
+const PROXY_REDACTION_MAX_NEEDLES: usize = 8;
+const PROXY_REDACTION_MAX_BYTES: usize = 32 * 1024;
+const PROXY_REDACTION_MARKER: &[u8] = b"<redacted-proxy>";
 const WHEEL_DELTA: i32 = 120;
 const WHEEL_ROWS_PER_NOTCH: usize = 3;
 const UI_LOCALE: &str = "en-US";
@@ -868,6 +875,9 @@ unsafe extern "system" fn window_proc(
         }
         WM_SIZE => {
             if let Some(state) = state_mut(window) {
+                if wparam == SIZE_MINIMIZED as usize {
+                    state.remask_proxy_credentials();
+                }
                 state.layout();
                 unsafe { InvalidateRect(window, ptr::null(), 0) };
             }
@@ -940,7 +950,7 @@ unsafe extern "system" fn window_proc(
         WM_COMMAND => {
             let command_id = wparam & 0xffff;
             if let Some(state) = state_mut(window)
-                && state.cwd_edit_target.is_some()
+                && (state.cwd_edit_target.is_some() || state.proxy_edit_target.is_some())
                 && command_id != BUTTON_ID
                 && command_id != EDIT_ID
             {
@@ -949,7 +959,12 @@ unsafe extern "system" fn window_proc(
             }
             if command_id == BUTTON_ID {
                 if let Some(state) = state_mut(window) {
-                    if state.cwd_edit_target.is_some() {
+                    if state.proxy_edit_target.is_some() {
+                        if let Err(error) = state.prepare_proxy(None, None) {
+                            state.last_error = Some(format!("{error:#}"));
+                            unsafe { InvalidateRect(window, ptr::null(), 0) };
+                        }
+                    } else if state.cwd_edit_target.is_some() {
                         if let Err(error) =
                             state.prepare_cwd(None, None, ComposerWriteMode::EmptyOnly)
                         {
@@ -1024,7 +1039,7 @@ unsafe extern "system" fn window_proc(
         WM_SYSCOMMAND => match wparam & 0xfff0 {
             SYSTEM_MENU_TOGGLE_TABS_ID => {
                 if let Some(state) = state_mut(window) {
-                    if state.cwd_edit_target.is_some() {
+                    if state.cwd_edit_target.is_some() || state.proxy_edit_target.is_some() {
                         unsafe { SetFocus(state.edit) };
                     } else {
                         state.set_tabs_visible(!state.config.tabs_visible, "system-menu");
@@ -1047,6 +1062,14 @@ unsafe extern "system" fn window_proc(
             _ => unsafe { DefWindowProcW(window, message, wparam, lparam) },
         },
         WM_SETFOCUS => 0,
+        WM_ACTIVATEAPP => {
+            if wparam == 0
+                && let Some(state) = state_mut(window)
+            {
+                state.remask_proxy_credentials();
+            }
+            0
+        }
         WM_ERASEBKGND => 1,
         WM_CLOSE => {
             if let Some(state) = state_mut(window) {
@@ -1138,7 +1161,11 @@ struct TerminalTab {
     process_id: Option<u32>,
     shell_kind: ShellKind,
     cwd: CwdTracker,
+    proxy: ProxyState,
     composer: String,
+    sensitive_composer: Option<SecretValue>,
+    proxy_redaction_needles: Vec<SecretValue>,
+    proxy_redaction_pending: Vec<u8>,
     parser: vt100::Parser<TerminalCallbacks>,
     receiver: Receiver<PtyEvent>,
     master: PtyMaster,
@@ -1165,7 +1192,86 @@ struct TerminalLaunch {
     initial_size: TerminalSize,
 }
 
+fn redact_proxy_stream_chunk(
+    pending: &mut Vec<u8>,
+    needles: &[&[u8]],
+    bytes: &[u8],
+    flush: bool,
+) -> Vec<u8> {
+    if needles.is_empty() {
+        return bytes.to_vec();
+    }
+    pending.extend_from_slice(bytes);
+    let mut ordered = needles
+        .iter()
+        .copied()
+        .filter(|needle| !needle.is_empty())
+        .collect::<Vec<_>>();
+    ordered.sort_by_key(|needle| std::cmp::Reverse(needle.len()));
+    let mut output = Vec::new();
+    let mut consumed = 0;
+    while consumed < pending.len() {
+        let remaining = &pending[consumed..];
+        if !flush
+            && ordered
+                .iter()
+                .any(|needle| needle.len() > remaining.len() && needle.starts_with(remaining))
+        {
+            break;
+        }
+        if let Some(needle) = ordered.iter().find(|needle| remaining.starts_with(needle)) {
+            output.extend_from_slice(PROXY_REDACTION_MARKER);
+            consumed += needle.len();
+        } else {
+            output.push(remaining[0]);
+            consumed += 1;
+        }
+    }
+    pending.drain(..consumed);
+    output
+}
+
 impl TerminalTab {
+    fn register_proxy_redactions(&mut self, values: &[&str]) -> Result<()> {
+        let mut additions = Vec::new();
+        for value in values.iter().copied().filter(|value| !value.is_empty()) {
+            if !self
+                .proxy_redaction_needles
+                .iter()
+                .any(|needle| needle.expose() == value)
+                && !additions.contains(&value)
+            {
+                additions.push(value);
+            }
+        }
+        let next_count = self.proxy_redaction_needles.len() + additions.len();
+        let next_bytes = self
+            .proxy_redaction_needles
+            .iter()
+            .map(|needle| needle.expose_bytes().len())
+            .sum::<usize>()
+            + additions.iter().map(|value| value.len()).sum::<usize>();
+        if next_count > PROXY_REDACTION_MAX_NEEDLES || next_bytes > PROXY_REDACTION_MAX_BYTES {
+            anyhow::bail!(
+                "proxy redaction history is full; restart this tab before changing proxy again"
+            );
+        }
+        for value in additions {
+            self.proxy_redaction_needles
+                .push(SecretValue::new(value.to_owned())?);
+        }
+        Ok(())
+    }
+
+    fn redact_proxy_output(&mut self, bytes: &[u8], flush: bool) -> Vec<u8> {
+        let needles = self
+            .proxy_redaction_needles
+            .iter()
+            .map(SecretValue::expose_bytes)
+            .collect::<Vec<_>>();
+        redact_proxy_stream_chunk(&mut self.proxy_redaction_pending, &needles, bytes, flush)
+    }
+
     fn spawn(launch: TerminalLaunch) -> Result<Self> {
         let TerminalLaunch {
             id,
@@ -1199,6 +1305,16 @@ impl TerminalTab {
             .env("AGENTERM_TAB_ID", format!("@{id}"))
             .env("AGENTERM_SESSION", session_name)
             .env("AGENTERM_WORKSPACE_PATH", workspace_path());
+        let proxy = ProxyState::from_environment(&tab_environment)?;
+        let mut proxy_redaction_needles = Vec::new();
+        for value in [proxy.http(), proxy.https()].into_iter().flatten() {
+            if !proxy_redaction_needles
+                .iter()
+                .any(|needle: &SecretValue| needle.expose() == value)
+            {
+                proxy_redaction_needles.push(SecretValue::new(value.to_owned())?);
+            }
+        }
         let environment_names = tab_environment
             .iter()
             .map(|(name, _)| name.clone())
@@ -1287,7 +1403,11 @@ impl TerminalTab {
             cwd: CwdTracker::launch(
                 launch_cwd.and_then(|path| path.into_os_string().into_string().ok()),
             ),
+            proxy,
             composer: String::new(),
+            sensitive_composer: None,
+            proxy_redaction_needles,
+            proxy_redaction_pending: Vec::new(),
             note: String::new(),
             parser: vt100::Parser::new_with_callbacks(
                 initial_size.rows,
@@ -1318,6 +1438,7 @@ impl TerminalTab {
             changed = true;
             match event {
                 PtyEvent::Output(bytes) => {
+                    let bytes = self.redact_proxy_output(&bytes, false);
                     self.output_bytes += bytes.len();
                     self.parser.process(&bytes);
                     if let Some(path) = self.parser.callbacks_mut().pending_cwd.take() {
@@ -1329,8 +1450,20 @@ impl TerminalTab {
                         self.raw_output.drain(..excess);
                     }
                 }
-                PtyEvent::Exited(code) => self.exited = Some(code),
-                PtyEvent::Error(error) => self.error = Some(error),
+                PtyEvent::Exited(code) => {
+                    let tail = self.redact_proxy_output(&[], true);
+                    self.output_bytes += tail.len();
+                    self.parser.process(&tail);
+                    self.raw_output.extend_from_slice(&tail);
+                    self.exited = Some(code);
+                }
+                PtyEvent::Error(error) => {
+                    let tail = self.redact_proxy_output(&[], true);
+                    self.output_bytes += tail.len();
+                    self.parser.process(&tail);
+                    self.raw_output.extend_from_slice(&tail);
+                    self.error = Some(error);
+                }
             }
         }
         if self
@@ -1411,6 +1544,20 @@ impl TerminalTab {
         // Interactive TUIs classify rapid character streams as paste and
         // temporarily reinterpret Enter as a pasted newline. Schedule Enter
         // after that suppression window without blocking the GUI thread.
+        self.pending_submit_at = Some(Instant::now() + COMPOSER_SUBMIT_DELAY);
+        true
+    }
+
+    fn submit_sensitive(&mut self, text: &str) -> bool {
+        if self.pending_submit_at.is_some() || self.exited.is_some() {
+            return false;
+        }
+        if let Err(error) = self.master.write_all(text.as_bytes()) {
+            self.error = Some(format!("sensitive input failed: {error}"));
+            return false;
+        }
+        self.input_bytes += PROXY_REDACTION_MARKER.len();
+        self.input_writes += 1;
         self.pending_submit_at = Some(Instant::now() + COMPOSER_SUBMIT_DELAY);
         true
     }
@@ -1544,6 +1691,7 @@ enum FocusSurface {
     Settings,
     NoteEditor,
     CwdEditor,
+    ProxyEditor,
 }
 
 impl FocusSurface {
@@ -1555,6 +1703,7 @@ impl FocusSurface {
             Self::Settings => "settings",
             Self::NoteEditor => "note-editor",
             Self::CwdEditor => "cwd-editor",
+            Self::ProxyEditor => "proxy-editor",
         }
     }
 }
@@ -1860,6 +2009,9 @@ struct AppState {
     feedback: Option<String>,
     note_edit_target: Option<u64>,
     cwd_edit_target: Option<u64>,
+    proxy_edit_target: Option<u64>,
+    proxy_credentials_revealed: bool,
+    proxy_endpoint_visible: HashSet<u64>,
     settings_open: bool,
     settings_theme_draft: ThemeId,
     host_focus_surface: HostFocusSurface,
@@ -1950,6 +2102,9 @@ impl AppState {
             feedback: None,
             note_edit_target: None,
             cwd_edit_target: None,
+            proxy_edit_target: None,
+            proxy_credentials_revealed: false,
+            proxy_endpoint_visible: HashSet::new(),
             settings_open: false,
             settings_theme_draft: config.color_theme,
             host_focus_surface: HostFocusSurface::Terminal,
@@ -2047,6 +2202,9 @@ impl AppState {
         select: bool,
         parent_id: Option<u64>,
     ) -> Result<u32> {
+        if self.proxy_edit_target.is_some() {
+            self.close_proxy_editor();
+        }
         if let Some(parent_id) = parent_id
             && !self.tabs.iter().any(|tab| tab.id == parent_id)
         {
@@ -2202,6 +2360,9 @@ impl AppState {
         if self.cwd_edit_target == Some(id) {
             self.close_cwd_editor();
         }
+        if self.proxy_edit_target == Some(id) {
+            self.close_proxy_editor();
+        }
         self.save_active_composer();
         let Some(position) = self.tabs.iter().position(|tab| tab.id == id) else {
             return;
@@ -2245,6 +2406,9 @@ impl AppState {
     }
 
     fn request_close_tab(&mut self, id: u64) {
+        if self.proxy_edit_target.is_some() {
+            self.close_proxy_editor();
+        }
         let Some(tab) = self.tabs.iter().find(|tab| tab.id == id) else {
             return;
         };
@@ -2296,6 +2460,9 @@ impl AppState {
         }
         if self.cwd_edit_target.is_some() {
             self.close_cwd_editor();
+        }
+        if self.proxy_edit_target.is_some() {
+            self.close_proxy_editor();
         }
         self.save_active_composer();
         self.navigation_latch = None;
@@ -2677,6 +2844,9 @@ impl AppState {
         if self.cwd_edit_target.is_some() {
             self.close_cwd_editor();
         }
+        if self.proxy_edit_target.is_some() {
+            self.close_proxy_editor();
+        }
         self.save_active_composer();
         self.navigation_latch = None;
         self.settings_open = true;
@@ -2816,6 +2986,8 @@ impl AppState {
             && !self.window_close_pending
             && self.pending_close.is_none()
             && !self.settings_open
+            && self.cwd_edit_target.is_none()
+            && self.proxy_edit_target.is_none()
         {
             self.begin_tabs_resize();
             return;
@@ -2827,6 +2999,8 @@ impl AppState {
             && !self.window_close_pending
             && self.pending_close.is_none()
             && !self.settings_open
+            && self.cwd_edit_target.is_none()
+            && self.proxy_edit_target.is_none()
         {
             self.set_tabs_visible(true, "status-bar");
             return;
@@ -2836,8 +3010,25 @@ impl AppState {
             && self.pending_close.is_none()
             && !self.settings_open
             && self.cwd_edit_target.is_none()
+            && self.proxy_edit_target.is_none()
         {
             if let Err(error) = self.open_cwd_editor(None) {
+                self.last_error = Some(format!("{error:#}"));
+            }
+            return;
+        }
+        if layout.status_segments.proxy.contains(x, y)
+            && !self.window_close_pending
+            && self.pending_close.is_none()
+            && !self.settings_open
+            && self.cwd_edit_target.is_none()
+            && self.proxy_edit_target.is_none()
+        {
+            if x >= layout.status_segments.proxy.right - 28 {
+                if let Err(error) = self.toggle_proxy_endpoint(None) {
+                    self.last_error = Some(format!("{error:#}"));
+                }
+            } else if let Err(error) = self.open_proxy_editor(None) {
                 self.last_error = Some(format!("{error:#}"));
             }
             return;
@@ -2846,6 +3037,7 @@ impl AppState {
             || self.pending_close.is_some()
             || self.settings_open
             || self.cwd_edit_target.is_some()
+            || self.proxy_edit_target.is_some()
             || x < sidebar_width
         {
             self.terminal_selection = None;
@@ -2936,6 +3128,9 @@ impl AppState {
     }
 
     fn left_button_double_click(&mut self, x: i32, y: i32) {
+        if self.cwd_edit_target.is_some() || self.proxy_edit_target.is_some() {
+            return;
+        }
         if self
             .workspace_layout()
             .resize_grip
@@ -2989,7 +3184,7 @@ impl AppState {
             }
             return;
         }
-        if self.cwd_edit_target.is_some() {
+        if self.cwd_edit_target.is_some() || self.proxy_edit_target.is_some() {
             return;
         }
         if layout
@@ -3100,6 +3295,9 @@ impl AppState {
         if self.cwd_edit_target.is_some() {
             self.close_cwd_editor();
         }
+        if self.proxy_edit_target.is_some() {
+            self.close_proxy_editor();
+        }
         self.save_active_composer();
         let Some(tab) = self.tabs.iter().find(|tab| tab.id == id) else {
             return;
@@ -3166,6 +3364,7 @@ impl AppState {
             || self.pending_close.is_some()
             || self.window_close_pending
             || self.note_edit_target.is_some()
+            || self.proxy_edit_target.is_some()
         {
             anyhow::bail!("another modal surface is active");
         }
@@ -3307,6 +3506,236 @@ impl AppState {
         if self.cwd_edit_target == Some(id) {
             self.close_cwd_editor();
         }
+        Ok(())
+    }
+
+    fn open_proxy_editor(&mut self, target: Option<&str>) -> Result<()> {
+        if self.settings_open
+            || self.pending_close.is_some()
+            || self.window_close_pending
+            || self.note_edit_target.is_some()
+            || self.cwd_edit_target.is_some()
+        {
+            anyhow::bail!("another modal surface is active");
+        }
+        let position = self
+            .target_position(target)
+            .or_else(|| self.active_position())
+            .context("can't find tab")?;
+        self.save_active_composer();
+        let id = self.tabs[position].id;
+        self.active = Some(id);
+        self.proxy_edit_target = Some(id);
+        self.proxy_credentials_revealed = false;
+        self.navigation_latch = None;
+        self.feedback = Some(
+            "Proxy editor: reveal credentials before editing · Ctrl+Enter prepare · Esc cancel"
+                .to_owned(),
+        );
+        unsafe {
+            SetWindowTextW(
+                self.edit,
+                wide("HTTP_PROXY=<hidden>\r\nHTTPS_PROXY=<hidden>").as_ptr(),
+            );
+            SetWindowTextW(self.send_button, wide("Prepare").as_ptr());
+            ShowWindow(self.edit, SW_SHOW);
+            ShowWindow(self.send_button, SW_SHOW);
+            SetFocus(self.edit);
+            InvalidateRect(self.window, ptr::null(), 0);
+        }
+        self.event_journal.commit(
+            "working-context.proxy.editor",
+            Some(id),
+            serde_json::json!({"open": true}),
+        );
+        Ok(())
+    }
+
+    fn reveal_proxy_credentials(&mut self) -> Result<()> {
+        let id = self
+            .proxy_edit_target
+            .context("proxy editor is not active")?;
+        let position = self
+            .tabs
+            .iter()
+            .position(|tab| tab.id == id)
+            .context("can't find tab")?;
+        self.proxy_credentials_revealed = true;
+        let mut text = self.tabs[position].proxy.editor_text();
+        unsafe {
+            SetWindowTextW(self.edit, wide(&text).as_ptr());
+            SetFocus(self.edit);
+            InvalidateRect(self.window, ptr::null(), 0);
+            text.as_mut_vec().fill(0);
+        }
+        Ok(())
+    }
+
+    fn remask_proxy_credentials(&mut self) {
+        if !self.proxy_credentials_revealed {
+            return;
+        }
+        self.proxy_credentials_revealed = false;
+        if self.proxy_edit_target.is_some() {
+            unsafe {
+                SetWindowTextW(
+                    self.edit,
+                    wide("HTTP_PROXY=<hidden>\r\nHTTPS_PROXY=<hidden>").as_ptr(),
+                );
+                InvalidateRect(self.window, ptr::null(), 0);
+            }
+        }
+    }
+
+    fn close_proxy_editor(&mut self) {
+        let Some(id) = self.proxy_edit_target.take() else {
+            return;
+        };
+        self.proxy_credentials_revealed = false;
+        unsafe {
+            SetWindowTextW(self.edit, wide("").as_ptr());
+            SetWindowTextW(self.send_button, wide(LABEL_SEND).as_ptr());
+        }
+        self.load_active_composer();
+        self.host_focus_surface = HostFocusSurface::Terminal;
+        unsafe {
+            SetFocus(self.window);
+            InvalidateRect(self.window, ptr::null(), 0);
+        }
+        self.event_journal.commit(
+            "working-context.proxy.editor",
+            Some(id),
+            serde_json::json!({"open": false}),
+        );
+    }
+
+    fn proxy_input(&self, provided: Option<String>) -> Result<(Option<String>, Option<String>)> {
+        if let Some(mut text) = provided {
+            let parsed = parse_proxy_editor(&text);
+            unsafe {
+                text.as_mut_vec().fill(0);
+            }
+            return parsed;
+        }
+        if !self.proxy_credentials_revealed {
+            anyhow::bail!("reveal credentials before editing proxy values");
+        }
+        let mut text = window_text(self.edit);
+        let parsed = parse_proxy_editor(&text);
+        unsafe {
+            text.as_mut_vec().fill(0);
+        }
+        parsed
+    }
+
+    fn prepare_proxy(&mut self, target: Option<&str>, provided: Option<String>) -> Result<()> {
+        let position = self
+            .target_position(target)
+            .or_else(|| {
+                self.proxy_edit_target
+                    .and_then(|id| self.tabs.iter().position(|tab| tab.id == id))
+            })
+            .or_else(|| self.active_position())
+            .context("can't find tab")?;
+        if !self.tabs[position].composer.is_empty() {
+            anyhow::bail!(
+                "Composer already has a normal draft; proxy commands cannot be mixed with it"
+            );
+        }
+        let (http, https) = self.proxy_input(provided)?;
+        let command = proxy_command(
+            self.tabs[position].shell_kind,
+            http.as_deref(),
+            https.as_deref(),
+        )?;
+        self.tabs[position].register_proxy_redactions(
+            &[http.as_deref(), https.as_deref()]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>(),
+        )?;
+        let requested = ProxyState::requested(http, https)?;
+        let id = self.tabs[position].id;
+        self.tabs[position].sensitive_composer = Some(command);
+        self.tabs[position].proxy = requested;
+        self.event_journal.commit(
+            "working-context.proxy.requested",
+            Some(id),
+            serde_json::json!({
+                "configured": self.tabs[position].proxy.configured(),
+                "source": self.tabs[position].proxy.source().as_str(),
+                "request_pending": true,
+                "disposition": "prepared",
+            }),
+        );
+        self.feedback = Some(
+            "Prepared a sensitive proxy command; it affects only this shell and future descendants"
+                .to_owned(),
+        );
+        if self.proxy_edit_target == Some(id) {
+            self.close_proxy_editor();
+        } else if self.active == Some(id) {
+            self.load_active_composer();
+        }
+        Ok(())
+    }
+
+    fn send_proxy_now(&mut self, target: Option<&str>, provided: Option<String>) -> Result<()> {
+        let position = self
+            .target_position(target)
+            .or_else(|| {
+                self.proxy_edit_target
+                    .and_then(|id| self.tabs.iter().position(|tab| tab.id == id))
+            })
+            .or_else(|| self.active_position())
+            .context("can't find tab")?;
+        let (http, https) = self.proxy_input(provided)?;
+        let command = proxy_command(
+            self.tabs[position].shell_kind,
+            http.as_deref(),
+            https.as_deref(),
+        )?;
+        self.tabs[position].register_proxy_redactions(
+            &[http.as_deref(), https.as_deref()]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>(),
+        )?;
+        if !self.tabs[position].submit_sensitive(command.expose()) {
+            anyhow::bail!("terminal is unavailable or already has a pending submission");
+        }
+        let requested = ProxyState::requested(http, https)?;
+        let id = self.tabs[position].id;
+        self.tabs[position].proxy = requested;
+        self.event_journal.commit(
+            "working-context.proxy.requested",
+            Some(id),
+            serde_json::json!({
+                "configured": self.tabs[position].proxy.configured(),
+                "source": self.tabs[position].proxy.source().as_str(),
+                "request_pending": true,
+                "disposition": "sent",
+            }),
+        );
+        self.feedback = Some(
+            "Sent a proxy command; it affects only this shell and future descendants".to_owned(),
+        );
+        if self.proxy_edit_target == Some(id) {
+            self.close_proxy_editor();
+        }
+        Ok(())
+    }
+
+    fn toggle_proxy_endpoint(&mut self, target: Option<&str>) -> Result<()> {
+        let position = self
+            .target_position(target)
+            .or_else(|| self.active_position())
+            .context("can't find tab")?;
+        let id = self.tabs[position].id;
+        if !self.proxy_endpoint_visible.remove(&id) {
+            self.proxy_endpoint_visible.insert(id);
+        }
+        unsafe { InvalidateRect(self.window, ptr::null(), 0) };
         Ok(())
     }
 
@@ -3555,6 +3984,8 @@ impl AppState {
             || focused == self.settings_apply
         {
             FocusSurface::Settings
+        } else if focused == self.edit && self.proxy_edit_target.is_some() {
+            FocusSurface::ProxyEditor
         } else if focused == self.edit && self.cwd_edit_target.is_some() {
             FocusSurface::CwdEditor
         } else if focused == self.edit && self.note_edit_target.is_some() {
@@ -3703,7 +4134,7 @@ impl AppState {
         let previous = self.current_focus_surface();
         let focused = match target {
             FocusSurface::Terminal => {
-                if self.cwd_edit_target.is_some() {
+                if self.cwd_edit_target.is_some() || self.proxy_edit_target.is_some() {
                     unsafe { SetFocus(self.edit) };
                     return false;
                 }
@@ -3715,6 +4146,7 @@ impl AppState {
                 if self.settings_open
                     || self.note_edit_target.is_some()
                     || self.cwd_edit_target.is_some()
+                    || self.proxy_edit_target.is_some()
                     || self.window_close_pending
                     || self.pending_close.is_some()
                     || self.active.is_none()
@@ -3729,6 +4161,7 @@ impl AppState {
                 if self.settings_open
                     || self.note_edit_target.is_some()
                     || self.cwd_edit_target.is_some()
+                    || self.proxy_edit_target.is_some()
                     || self.window_close_pending
                     || self.pending_close.is_some()
                 {
@@ -3750,7 +4183,10 @@ impl AppState {
                     }
                 }
             }
-            FocusSurface::Settings | FocusSurface::NoteEditor | FocusSurface::CwdEditor => false,
+            FocusSurface::Settings
+            | FocusSurface::NoteEditor
+            | FocusSurface::CwdEditor
+            | FocusSurface::ProxyEditor => false,
         };
         let current = self.current_focus_surface();
         if focused && current != previous {
@@ -3805,6 +4241,28 @@ impl AppState {
         if self.settings_open && virtual_key == 0x1b {
             self.close_settings();
             return true;
+        }
+        if self.proxy_edit_target.is_some() {
+            if virtual_key == 0x1b {
+                self.close_proxy_editor();
+                return true;
+            }
+            if control && virtual_key == b'R' as u32 {
+                if let Err(error) = self.reveal_proxy_credentials() {
+                    self.last_error = Some(format!("{error:#}"));
+                }
+                return true;
+            }
+            if control && virtual_key == 0x0d {
+                if let Err(error) = self.prepare_proxy(None, None) {
+                    self.last_error = Some(format!("{error:#}"));
+                    unsafe { InvalidateRect(self.window, ptr::null(), 0) };
+                }
+                return true;
+            }
+            if focused != self.edit {
+                unsafe { SetFocus(self.edit) };
+            }
         }
         if self.cwd_edit_target.is_some() {
             if virtual_key == 0x1b {
@@ -3866,7 +4324,7 @@ impl AppState {
             self.dispatch_edit_shortcut(shortcut, focused);
             return true;
         }
-        if self.cwd_edit_target.is_some() {
+        if self.cwd_edit_target.is_some() || self.proxy_edit_target.is_some() {
             return false;
         }
 
@@ -4149,12 +4607,19 @@ impl AppState {
     }
 
     fn save_active_composer(&mut self) {
-        if self.note_edit_target.is_some() || self.cwd_edit_target.is_some() || self.settings_open {
+        if self.note_edit_target.is_some()
+            || self.cwd_edit_target.is_some()
+            || self.proxy_edit_target.is_some()
+            || self.settings_open
+        {
             return;
         }
         let Some(position) = self.active_position() else {
             return;
         };
+        if self.tabs[position].sensitive_composer.is_some() {
+            return;
+        }
         let composer = window_text(self.edit);
         if self.tabs[position].composer != composer {
             self.tabs[position].composer = composer.clone();
@@ -4173,20 +4638,53 @@ impl AppState {
         let text = self
             .active_position()
             .and_then(|position| self.tabs.get(position))
-            .map(|tab| tab.composer.as_str())
+            .map(|tab| {
+                if tab.sensitive_composer.is_some() {
+                    "<sensitive proxy command · Ctrl+Enter to send>"
+                } else {
+                    tab.composer.as_str()
+                }
+            })
             .unwrap_or("");
         let text = wide(text);
         unsafe { SetWindowTextW(self.edit, text.as_ptr()) };
     }
 
     fn send_composer(&mut self) {
-        if self.note_edit_target.is_some() || self.cwd_edit_target.is_some() {
+        if self.cwd_edit_target.is_some() || self.proxy_edit_target.is_some() {
+            return;
+        }
+        if self.note_edit_target.is_some() {
             self.finish_note_edit(true);
             return;
         }
         let Some(position) = self.active_position() else {
             return;
         };
+        if let Some(secret) = self.tabs[position].sensitive_composer.take() {
+            if self.tabs[position].exited.is_some() {
+                self.tabs[position].sensitive_composer = Some(secret);
+                return;
+            }
+            if self.tabs[position].submit_sensitive(secret.expose()) {
+                let id = self.tabs[position].id;
+                self.event_journal.commit(
+                    "working-context.proxy.submitted",
+                    Some(id),
+                    serde_json::json!({"sensitive": true}),
+                );
+                self.feedback = Some(
+                    "Sent a sensitive proxy command to the shell; existing descendants are unchanged"
+                        .to_owned(),
+                );
+                unsafe { SetWindowTextW(self.edit, wide("").as_ptr()) };
+            } else {
+                self.tabs[position].sensitive_composer = Some(secret);
+                self.feedback =
+                    Some("A submission is already pending; sensitive draft preserved".to_owned());
+            }
+            return;
+        }
         let text = window_text(self.edit);
         self.tabs[position].composer = text.clone();
         if text.is_empty() || self.tabs[position].exited.is_some() {
@@ -4560,16 +5058,45 @@ impl AppState {
             DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
         );
         let proxy_segment = win_rect(layout.status_segments.proxy);
+        frame(device, &proxy_segment, colors.tree);
+        let (proxy_label, proxy_endpoint_visible) = self
+            .active_position()
+            .and_then(|position| self.tabs.get(position))
+            .map(|tab| {
+                let visible = self.proxy_endpoint_visible.contains(&tab.id);
+                (
+                    if visible {
+                        tab.proxy.sanitized_label()
+                    } else if tab.proxy.configured() {
+                        "Proxy · On".to_owned()
+                    } else {
+                        "Proxy · Off".to_owned()
+                    },
+                    visible,
+                )
+            })
+            .unwrap_or_else(|| ("Proxy · Off".to_owned(), false));
         draw_text(
             device,
-            "Proxy · later",
+            &proxy_label,
             RECT {
                 left: proxy_segment.left + 6,
-                right: proxy_segment.right - 4,
+                right: proxy_segment.right - 28,
                 ..proxy_segment
             },
-            colors.muted,
+            colors.text,
             DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
+        );
+        draw_proxy_eye(
+            device,
+            &RECT {
+                left: proxy_segment.right - 25,
+                top: proxy_segment.top + 5,
+                right: proxy_segment.right - 5,
+                bottom: proxy_segment.bottom - 5,
+            },
+            colors.blue,
+            !proxy_endpoint_visible,
         );
 
         if let Some(position) = self.active_position() {
@@ -4598,7 +5125,9 @@ impl AppState {
             let tab = &self.tabs[position];
             draw_text(
                 device,
-                &if let Some(id) = self.cwd_edit_target {
+                &if let Some(id) = self.proxy_edit_target {
+                    format!("HTTP(S) proxy for @{id} · shell and future descendants only")
+                } else if let Some(id) = self.cwd_edit_target {
                     format!("Working directory for @{id}")
                 } else if let Some(id) = self.note_edit_target {
                     format!("Edit tab @{id} · line 1 name, remaining lines note")
@@ -4620,7 +5149,13 @@ impl AppState {
             );
             draw_text(
                 device,
-                if self.cwd_edit_target.is_some() {
+                if self.proxy_edit_target.is_some() {
+                    if self.proxy_credentials_revealed {
+                        "Credentials revealed · Ctrl+Enter prepare · Esc re-mask/cancel"
+                    } else {
+                        "Credentials hidden · use Reveal action before editing"
+                    }
+                } else if self.cwd_edit_target.is_some() {
                     "Ctrl+Enter prepare · Ctrl+Shift+Enter append · Ctrl+Alt+Enter replace · Esc cancel"
                 } else if self.note_edit_target.is_some() {
                     "Ctrl+Enter save · Esc cancel"
@@ -5255,10 +5790,11 @@ impl AppState {
                 let draft = if self.active == Some(tab.id)
                     && self.note_edit_target.is_none()
                     && self.cwd_edit_target.is_none()
+                    && self.proxy_edit_target.is_none()
                 {
-                    !active_draft.is_empty()
+                    !active_draft.is_empty() || tab.sensitive_composer.is_some()
                 } else {
-                    !tab.composer.is_empty()
+                    !tab.composer.is_empty() || tab.sensitive_composer.is_some()
                 };
                 Some(serde_json::json!({
                     "id": format!("@{}", tab.id),
@@ -5289,6 +5825,13 @@ impl AppState {
                             "pending": tab.cwd.pending(),
                         },
                         "shell": tab.shell_kind.as_str(),
+                        "proxy": {
+                            "configured": tab.proxy.configured(),
+                            "source": tab.proxy.source().as_str(),
+                            "request_pending": tab.proxy.request_pending(),
+                            "endpoint_visible": self.proxy_endpoint_visible.contains(&tab.id),
+                            "credential_revealed": false,
+                        },
                     },
                     "scrollback_offset": tab.parser.screen().scrollback(),
                     "selection": self.terminal_selection
@@ -5425,7 +5968,16 @@ impl AppState {
                     },
                     "proxy": {
                         "bounds": pixel_rect_json(layout.status_segments.proxy),
-                        "available": false,
+                        "eye_bounds": pixel_rect_json(PixelRect {
+                            left: (layout.status_segments.proxy.right - 28)
+                                .max(layout.status_segments.proxy.left),
+                            top: layout.status_segments.proxy.top,
+                            right: layout.status_segments.proxy.right,
+                            bottom: layout.status_segments.proxy.bottom,
+                        }),
+                        "available": self.active.is_some(),
+                        "action": "open-proxy-editor",
+                        "eye_action": "proxy-toggle-visibility",
                     },
                     "provider": "placeholder",
                 }
@@ -5474,6 +6026,19 @@ impl AppState {
                         "cwd-prepare-append",
                         "cwd-prepare-replace",
                         "cwd-send-now",
+                        "cancel"
+                    ],
+                }))
+            } else if let Some(id) = self.proxy_edit_target {
+                Some(serde_json::json!({
+                    "kind": "proxy-editor",
+                    "window_id": format!("@{id}"),
+                    "default_action": "proxy-prepare",
+                    "credential_revealed": false,
+                    "actions": [
+                        "proxy-reveal-credentials",
+                        "proxy-prepare",
+                        "proxy-send-now",
                         "cancel"
                     ],
                 }))
@@ -5729,6 +6294,9 @@ impl AppState {
                 let Some(position) = target else {
                     return IpcResponse::failure("can't find window");
                 };
+                if self.proxy_edit_target.is_some() {
+                    self.close_proxy_editor();
+                }
                 self.save_active_composer();
                 let id = self.tabs[position].id;
                 self.active = Some(id);
@@ -6137,6 +6705,9 @@ impl AppState {
             "focus" => {
                 let surface = args.get(1).map(String::as_str).unwrap_or("terminal");
                 if let Some(position) = self.target_position(option_value(args, "-t")) {
+                    if self.proxy_edit_target.is_some() {
+                        self.close_proxy_editor();
+                    }
                     self.save_active_composer();
                     let id = self.tabs[position].id;
                     self.active = Some(id);
@@ -6175,6 +6746,17 @@ impl AppState {
                 {
                     return IpcResponse::failure(
                         "CWD editor is a focus trap; prepare, send now, or cancel it first",
+                    );
+                }
+                if self.proxy_edit_target.is_some()
+                    && !matches!(
+                        action,
+                        "proxy-reveal-credentials" | "proxy-prepare" | "proxy-send-now" | "cancel"
+                    )
+                {
+                    self.remask_proxy_credentials();
+                    return IpcResponse::failure(
+                        "Proxy editor is a focus trap; reveal, prepare, send now, or cancel it first",
                     );
                 }
                 let response = match action {
@@ -6272,6 +6854,8 @@ impl AppState {
                             self.close_settings();
                         } else if self.cwd_edit_target.is_some() {
                             self.close_cwd_editor();
+                        } else if self.proxy_edit_target.is_some() {
+                            self.close_proxy_editor();
                         } else if self.note_edit_target.is_some() {
                             self.finish_note_edit(false);
                         } else {
@@ -6301,7 +6885,7 @@ impl AppState {
                         None
                     }
                     "composer-send" => {
-                        if self.cwd_edit_target.is_some() {
+                        if self.cwd_edit_target.is_some() || self.proxy_edit_target.is_some() {
                             return IpcResponse::failure(
                                 "CWD editor is active; prepare, send now, or cancel it first",
                             );
@@ -6353,6 +6937,38 @@ impl AppState {
                             Err(error) => Some(IpcResponse::failure(format!("{error:#}"))),
                         }
                     }
+                    "open-proxy-editor" => match self.open_proxy_editor(option_value(args, "-t")) {
+                        Ok(()) => None,
+                        Err(error) => Some(IpcResponse::failure(format!("{error:#}"))),
+                    },
+                    "proxy-toggle-visibility" => {
+                        match self.toggle_proxy_endpoint(option_value(args, "-t")) {
+                            Ok(()) => None,
+                            Err(error) => Some(IpcResponse::failure(format!("{error:#}"))),
+                        }
+                    }
+                    "proxy-reveal-credentials" => match self.reveal_proxy_credentials() {
+                        Ok(()) => None,
+                        Err(error) => Some(IpcResponse::failure(format!("{error:#}"))),
+                    },
+                    "proxy-prepare" => {
+                        match self.prepare_proxy(
+                            option_value(args, "-t"),
+                            option_value(args, "--proxy-input").map(str::to_owned),
+                        ) {
+                            Ok(()) => None,
+                            Err(error) => Some(IpcResponse::failure(format!("{error:#}"))),
+                        }
+                    }
+                    "proxy-send-now" => {
+                        match self.send_proxy_now(
+                            option_value(args, "-t"),
+                            option_value(args, "--proxy-input").map(str::to_owned),
+                        ) {
+                            Ok(()) => None,
+                            Err(error) => Some(IpcResponse::failure(format!("{error:#}"))),
+                        }
+                    }
                     "copy-selection" => match self.copy_terminal_selection() {
                         Ok(_) => None,
                         Err(error) => Some(IpcResponse::failure(format!("{error:#}"))),
@@ -6362,6 +6978,7 @@ impl AppState {
                         None
                     }
                     "window-minimize" => {
+                        self.remask_proxy_credentials();
                         unsafe { ShowWindow(self.window, SW_MINIMIZE) };
                         None
                     }
@@ -6423,12 +7040,22 @@ impl AppState {
                 let Some(position) = self.target_position(option_value(args, "-t")) else {
                     return IpcResponse::failure("can't find window");
                 };
+                if self.tabs[position].sensitive_composer.is_some() {
+                    return IpcResponse::failure(
+                        "Composer contains a sensitive proxy draft; content is redacted",
+                    );
+                }
                 IpcResponse::success(self.tabs[position].composer.clone())
             }
             "set-composer" => {
                 let Some(position) = self.target_position(option_value(args, "-t")) else {
                     return IpcResponse::failure("can't find window");
                 };
+                if self.tabs[position].sensitive_composer.is_some() {
+                    return IpcResponse::failure(
+                        "Composer contains a sensitive proxy draft; send or discard it first",
+                    );
+                }
                 let text = positional_values(args, &["-t"], &[]).join(" ");
                 let id = self.tabs[position].id;
                 if self.note_edit_target != Some(id) {
@@ -6451,6 +7078,22 @@ impl AppState {
                 let Some(position) = self.target_position(option_value(args, "-t")) else {
                     return IpcResponse::failure("can't find window");
                 };
+                if let Some(secret) = self.tabs[position].sensitive_composer.take() {
+                    if !self.tabs[position].submit_sensitive(secret.expose()) {
+                        self.tabs[position].sensitive_composer = Some(secret);
+                        return IpcResponse::failure("a composer submission is already pending");
+                    }
+                    let id = self.tabs[position].id;
+                    self.event_journal.commit(
+                        "working-context.proxy.submitted",
+                        Some(id),
+                        serde_json::json!({"sensitive": true}),
+                    );
+                    if self.active == Some(id) {
+                        unsafe { SetWindowTextW(self.edit, wide("").as_ptr()) };
+                    }
+                    return IpcResponse::success("");
+                }
                 let text = mem::take(&mut self.tabs[position].composer);
                 if !text.is_empty() && !self.tabs[position].submit(&text) {
                     self.tabs[position].composer = text;
@@ -6506,7 +7149,12 @@ impl AppState {
                             "submit_pending": tab.pending_submit_at.is_some(),
                             "scrollback_offset": tab.parser.screen().scrollback(),
                             "output_bytes": tab.output_bytes,
-                            "composer": tab.composer,
+                            "composer": if tab.sensitive_composer.is_some() {
+                                "<redacted>"
+                            } else {
+                                tab.composer.as_str()
+                            },
+                            "composer_sensitive": tab.sensitive_composer.is_some(),
                             "error": tab.error,
                             "text": tab.parser.screen().contents(),
                         })
@@ -6646,6 +7294,9 @@ impl AppState {
         let Some(position) = self.adjacent_position(direction) else {
             return IpcResponse::failure("no windows");
         };
+        if self.proxy_edit_target.is_some() {
+            self.close_proxy_editor();
+        }
         self.save_active_composer();
         let id = self.tabs[position].id;
         self.active = Some(id);
@@ -6696,6 +7347,46 @@ fn frame(device: HDC, rect: &RECT, color: COLORREF) {
     unsafe {
         FrameRect(device, rect, brush);
         DeleteObject(brush as HGDIOBJ);
+    }
+}
+
+fn draw_proxy_eye(device: HDC, rect: &RECT, color: COLORREF, slashed: bool) {
+    if rect.right - rect.left < 8 || rect.bottom - rect.top < 6 {
+        return;
+    }
+    let pen = unsafe { CreatePen(PS_SOLID, 1, color) };
+    let pupil = unsafe { CreateSolidBrush(color) };
+    if pen.is_null() || pupil.is_null() {
+        if !pen.is_null() {
+            unsafe { DeleteObject(pen as HGDIOBJ) };
+        }
+        if !pupil.is_null() {
+            unsafe { DeleteObject(pupil as HGDIOBJ) };
+        }
+        return;
+    }
+    let previous_pen = unsafe { SelectObject(device, pen as HGDIOBJ) };
+    let previous_brush = unsafe { SelectObject(device, GetStockObject(NULL_BRUSH) as HGDIOBJ) };
+    unsafe {
+        Ellipse(device, rect.left, rect.top, rect.right, rect.bottom);
+        SelectObject(device, pupil as HGDIOBJ);
+        let center_x = (rect.left + rect.right) / 2;
+        let center_y = (rect.top + rect.bottom) / 2;
+        Ellipse(
+            device,
+            center_x - 2,
+            center_y - 2,
+            center_x + 3,
+            center_y + 3,
+        );
+        if slashed {
+            MoveToEx(device, rect.left - 1, rect.bottom, ptr::null_mut());
+            LineTo(device, rect.right + 1, rect.top - 1);
+        }
+        SelectObject(device, previous_brush);
+        SelectObject(device, previous_pen);
+        DeleteObject(pupil as HGDIOBJ);
+        DeleteObject(pen as HGDIOBJ);
     }
 }
 
@@ -7064,6 +7755,30 @@ fn run_cli(arguments: Vec<String>) -> i32 {
             arguments.push("--".to_owned());
             arguments.push(content);
         }
+    }
+    if arguments
+        .first()
+        .is_some_and(|command| command == "ui-action")
+        && arguments
+            .get(1)
+            .is_some_and(|action| matches!(action.as_str(), "proxy-prepare" | "proxy-send-now"))
+        && let Some(position) = arguments.iter().position(|argument| argument == "--stdin")
+    {
+        arguments.remove(position);
+        let mut content = String::new();
+        if let Err(error) = std::io::stdin()
+            .take(PROXY_MAX_BYTES as u64 + 1)
+            .read_to_string(&mut content)
+        {
+            eprintln!("failed to read proxy values from stdin: {error}");
+            return 1;
+        }
+        if content.len() > PROXY_MAX_BYTES {
+            eprintln!("proxy input exceeds {PROXY_MAX_BYTES} bytes");
+            return 2;
+        }
+        arguments.push("--proxy-input".to_owned());
+        arguments.push(content);
     }
     if let Some(command) = arguments.first_mut() {
         let canonical = canonical_control_command(command);
@@ -7872,7 +8587,8 @@ Usage:
   agenterm-cli set-setting terminal.font-size 8..36
   agenterm-cli send-mouse [-t target] -x col -y row [--button left] [--action press]
   agenterm-cli ui-snapshot
-  agenterm-cli ui-action new-tab|new-child|edit-tab|toggle-tree|toggle-tabs|select-tab|close-tab|close-window|keep-server-running|stop-server-and-exit|confirm|cancel|composer-send|copy-selection|open-cwd-editor|cwd-prepare|cwd-prepare-append|cwd-prepare-replace|cwd-send-now
+  agenterm-cli ui-action new-tab|new-child|edit-tab|toggle-tree|toggle-tabs|select-tab|close-tab|close-window|keep-server-running|stop-server-and-exit|confirm|cancel|composer-send|copy-selection|open-cwd-editor|cwd-prepare|cwd-prepare-append|cwd-prepare-replace|cwd-send-now|open-proxy-editor|proxy-toggle-visibility|proxy-reveal-credentials|proxy-prepare|proxy-send-now
+  agenterm-cli ui-action proxy-prepare|proxy-send-now [-t target] --stdin
   agenterm-cli focus terminal|composer|tabs [-t target]
   agenterm-cli wait-pane [-t target] (--contains text|--dead|--submit-complete) [--timeout-ms ms]
   agenterm-cli wait-ui [--active @id] [--focus surface] [-t target --tab-state state]
@@ -8157,8 +8873,8 @@ mod tests {
     use super::{
         EditShortcut, FocusSurface, TerminalPoint, TerminalSelection, ThemeId, edit_shortcut,
         effective_theme, gui_cli_guidance, is_latched_navigation_repeat, normalize_terminal_paste,
-        parse_gui_launch, parse_loopback_ipc_address, surface_navigation, terminal_copy_shortcut,
-        terminal_selection_text,
+        parse_gui_launch, parse_loopback_ipc_address, redact_proxy_stream_chunk,
+        surface_navigation, terminal_copy_shortcut, terminal_selection_text,
     };
 
     #[test]
@@ -8233,6 +8949,85 @@ mod tests {
             surface_navigation(FocusSurface::Terminal, true, false, true, 0x28),
             None
         );
+    }
+
+    #[test]
+    fn proxy_redaction_matches_longest_and_survives_every_chunk_boundary() {
+        let input = b"before https://user:secret@proxy.example/path after";
+        let long = b"https://user:secret@proxy.example/path".as_slice();
+        let short = b"user:secret".as_slice();
+        for split in 0..=input.len() {
+            let mut pending = Vec::new();
+            let mut output =
+                redact_proxy_stream_chunk(&mut pending, &[short, long], &input[..split], false);
+            output.extend(redact_proxy_stream_chunk(
+                &mut pending,
+                &[short, long],
+                &input[split..],
+                false,
+            ));
+            output.extend(redact_proxy_stream_chunk(
+                &mut pending,
+                &[short, long],
+                &[],
+                true,
+            ));
+            let output = String::from_utf8(output).unwrap();
+            assert_eq!(output, "before <redacted-proxy> after");
+        }
+    }
+
+    #[test]
+    fn proxy_redaction_retains_historical_values_in_byte_sized_streams() {
+        let old = b"http://old-secret@old.example".as_slice();
+        let new = b"https://new-secret@new.example".as_slice();
+        let input = b"http://old-secret@old.example https://new-secret@new.example";
+        let mut pending = Vec::new();
+        let mut output = Vec::new();
+        for byte in input {
+            output.extend(redact_proxy_stream_chunk(
+                &mut pending,
+                &[old, new],
+                std::slice::from_ref(byte),
+                false,
+            ));
+        }
+        output.extend(redact_proxy_stream_chunk(
+            &mut pending,
+            &[old, new],
+            &[],
+            true,
+        ));
+        assert_eq!(
+            String::from_utf8(output).unwrap(),
+            "<redacted-proxy> <redacted-proxy>"
+        );
+    }
+
+    #[test]
+    fn proxy_redaction_flushes_unrelated_short_output_without_waiting_for_long_secrets() {
+        let long = vec![b'x'; 4096];
+        let mut pending = Vec::new();
+        let output = redact_proxy_stream_chunk(&mut pending, &[long.as_slice()], b"prompt>", false);
+        assert_eq!(output, b"prompt>");
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn proxy_redaction_hides_secret_length_behind_a_fixed_marker() {
+        let short = b"http://u:a@proxy".as_slice();
+        let long = b"http://user:a-much-longer-password@proxy".as_slice();
+        for needle in [short, long] {
+            let mut pending = Vec::new();
+            let mut output = redact_proxy_stream_chunk(&mut pending, &[needle], needle, false);
+            output.extend(redact_proxy_stream_chunk(
+                &mut pending,
+                &[needle],
+                &[],
+                true,
+            ));
+            assert_eq!(output, b"<redacted-proxy>");
+        }
     }
 
     #[test]

@@ -72,6 +72,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       "evidence_ids": ["ux.settings-isolation"]
     },
     {
+      "id": "workspace.theme-settings",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "Dark and Light theme settings preview, apply, cancel, and persist without interrupting PTYs",
+      "evidence_ids": ["ux.theme-settings"]
+    },
+    {
       "id": "control.stable-create-id",
       "kind": "behavior",
       "status": "shipped",
@@ -170,6 +178,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       "evidence_mode": "black-box",
       "prd": "truthful working-context CWD uses launch and OSC 7 provenance with safe Composer preparation",
       "evidence_ids": ["ux.working-context-cwd"]
+    },
+    {
+      "id": "workspace.working-context-proxy",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "tab-scoped HTTP(S) proxy context remains ephemeral and redacted across UI, control, persistence, and terminal evidence",
+      "evidence_ids": ["ux.working-context-proxy"]
     },
     {
       "id": "workspace.hierarchical-tabs",
@@ -1171,7 +1187,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
           focus-aware window system menu
     - [ ] v0.1.6 Observable & Adaptable Workspace
       - Frozen implementation defaults
-        - [ ] Settings uses `Dark`/`Light` labels with stable `dark|light` IDs,
+        - [x] Settings uses `Dark`/`Light` labels with stable `dark|light` IDs,
           live preview, atomic Apply, and Cancel/Esc rollback; dark remains the
           migration default and custom theme files remain unfrozen
         - [x] Terminal `Ctrl+Down` focuses Composer and Composer `Ctrl+Up`
@@ -1183,11 +1199,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
           menu recovery is always available. Width defaults to 250 px, clamps
           around 180..480 px while retaining a usable terminal, double-click
           resets it, and visibility plus configured width persist
-        - [ ] the status bar orders host segments as hidden-Tabs recovery,
+        - [x] the status bar orders host segments as hidden-Tabs recovery,
           last-known CWD, flexible provider space, and right-aligned Proxy.
           CWD/proxy edits default to safely quoted Composer preparation;
           immediate injection is explicit and never offered for unknown shells
-        - [ ] Proxy closed-eye reveals only on/off, open-eye reveals sanitized
+        - [x] Proxy closed-eye reveals only on/off, open-eye reveals sanitized
           scheme/host/port, and credential material requires a second temporary
           reveal inside the editor; all reveal state is ephemeral and secret
           values remain absent from persistence, snapshots, events, and audit
@@ -1205,18 +1221,19 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
           selected; the recommended first candidate is bounded transcript
           capture, not simultaneous scope expansion across all candidates
       - Release core: Settings and built-in themes
-        - [ ] redesign Settings as a keyboard-accessible draft dialog with
+        - [x] Dark and Light theme settings preview, apply, cancel, and persist without interrupting PTYs
+        - [x] redesign Settings as a keyboard-accessible draft dialog with
           Appearance and Terminal sections plus explicit Apply and Cancel;
           theme selection previews the complete window, Apply atomically saves,
           and Cancel/Esc restores the configuration from dialog open
-        - [ ] ship stable built-in `dark` and `light` theme IDs, preserving dark
+        - [x] ship stable built-in `dark` and `light` theme IDs, preserving dark
           as the migration default; themes own host surfaces, controls, terminal
           defaults, selection, scrollbar, and basic ANSI 16 colors while
           explicit RGB and the standard 256-color cube retain their values
-        - [ ] use an internal theme registry and persist only `color_theme` so
+        - [x] use an internal theme registry and persist only `color_theme` so
           later custom save/load/import can extend the model without freezing a
           premature external theme-file contract in v0.1.6
-        - [ ] expose theme ID through settings and snapshots; public UX evidence
+        - [x] expose theme ID through settings and snapshots; public UX evidence
           covers preview, Apply, Cancel/Esc rollback, restart persistence, PTY
           continuity, Dark/Light screenshots, and readable focus/contrast
       - Release core: keyboard-first surface navigation
@@ -1255,14 +1272,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
           Prepare performs no PTY write, and a request remains
           `user_requested`/pending until a valid bounded local OSC 7 confirms
           the path; invalid OSC does not replace the last-known value
-        - [ ] after CWD is accepted, show tab-scoped HTTP(S) proxy state with a
+        - [x] tab-scoped HTTP(S) proxy context remains ephemeral and redacted across UI, control, persistence, and terminal evidence
+        - [x] after CWD is accepted, show tab-scoped HTTP(S) proxy state with a
           GDI eye/eye-slash toggle and editor; closed-eye shows only on/off,
           open-eye shows sanitized scheme/host/port, and credential/query/
           fragment values require a second editor reveal and remain redacted
           from snapshots, events, audits, logs, and semantic screenshot data
-        - [~] CWD/proxy editors are keyboard focus traps with typed semantic
-          prepare actions; the CWD editor and actions ship, while Proxy remains
-          planned; proxy values and reveal state remain ephemeral,
+        - [x] CWD/proxy editors are keyboard focus traps with typed semantic
+          prepare actions; proxy values and reveal state remain ephemeral,
           never persist to workspace, and never falsely claim to mutate the
           environment of already-running arbitrary descendants
       - Release core: adaptive Tabs workspace

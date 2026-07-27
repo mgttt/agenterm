@@ -125,6 +125,10 @@ try {
         Invoke-Checked 'CLI smoke test' { & '.\tests\cli_smoke.ps1' }
         Invoke-Checked 'AI fleet smoke test' { & '.\tests\fleet_smoke.ps1' }
         Invoke-Checked 'safe scripting smoke test' { & '.\tests\script_smoke.ps1' }
+        Invoke-Checked 'theme settings smoke test' { & '.\tests\theme_smoke.ps1' }
+        Invoke-Checked 'working context privacy smoke test' {
+            & '.\tests\working_context_smoke.ps1'
+        }
         Invoke-Checked 'semantic UX smoke test' { & '.\tests\ux_smoke.ps1' }
     }
 

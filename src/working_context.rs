@@ -1,9 +1,321 @@
-use std::path::Path;
+use std::{env, path::Path};
 
 use anyhow::{Result, bail};
 
 pub(crate) const OSC7_MAX_BYTES: usize = 4096;
 pub(crate) const CWD_MAX_CHARS: usize = 4096;
+pub(crate) const PROXY_MAX_BYTES: usize = 8192;
+
+pub(crate) struct SecretValue(String);
+
+impl SecretValue {
+    pub(crate) fn new(value: String) -> Result<Self> {
+        if value.len() > PROXY_MAX_BYTES {
+            bail!("proxy value exceeds {PROXY_MAX_BYTES} bytes");
+        }
+        if value.contains('\0')
+            || value
+                .chars()
+                .any(|character| matches!(character, '\r' | '\n'))
+        {
+            bail!("proxy value contains a forbidden control character");
+        }
+        Ok(Self(value))
+    }
+
+    pub(crate) fn expose(&self) -> &str {
+        &self.0
+    }
+
+    pub(crate) fn expose_bytes(&self) -> &[u8] {
+        self.0.as_bytes()
+    }
+}
+
+impl Drop for SecretValue {
+    fn drop(&mut self) {
+        // This cannot erase copies made by Windows or the child process, but it
+        // prevents AgenTerm's owned heap buffer from retaining the value after
+        // the tab or sensitive draft is discarded.
+        unsafe {
+            self.0.as_mut_vec().fill(0);
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ProxySource {
+    Launch,
+    UserRequested,
+    Off,
+}
+
+impl ProxySource {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Launch => "launch",
+            Self::UserRequested => "user_requested",
+            Self::Off => "off",
+        }
+    }
+}
+
+pub(crate) struct ProxyState {
+    http: Option<SecretValue>,
+    https: Option<SecretValue>,
+    source: ProxySource,
+    request_pending: bool,
+}
+
+impl ProxyState {
+    pub(crate) fn from_environment(environment: &[(String, String)]) -> Result<Self> {
+        let find = |name: &str| {
+            environment
+                .iter()
+                .rev()
+                .find(|(candidate, _)| candidate.eq_ignore_ascii_case(name))
+                .map(|(_, value)| value.clone())
+                .or_else(|| {
+                    env::vars()
+                        .find(|(candidate, _)| candidate.eq_ignore_ascii_case(name))
+                        .map(|(_, value)| value)
+                })
+        };
+        Self::new(
+            find("HTTP_PROXY"),
+            find("HTTPS_PROXY"),
+            ProxySource::Launch,
+            false,
+        )
+    }
+
+    fn new(
+        http: Option<String>,
+        https: Option<String>,
+        source: ProxySource,
+        request_pending: bool,
+    ) -> Result<Self> {
+        for value in [http.as_deref(), https.as_deref()].into_iter().flatten() {
+            if !value.is_empty() && parse_proxy_url(value).is_none() {
+                bail!("proxy URL must be a valid http:// or https:// URL");
+            }
+        }
+        let http = http
+            .filter(|value| !value.is_empty())
+            .map(SecretValue::new)
+            .transpose()?;
+        let https = https
+            .filter(|value| !value.is_empty())
+            .map(SecretValue::new)
+            .transpose()?;
+        let configured = http.is_some() || https.is_some();
+        Ok(Self {
+            http,
+            https,
+            source: if configured { source } else { ProxySource::Off },
+            request_pending: configured && request_pending,
+        })
+    }
+
+    pub(crate) fn requested(http: Option<String>, https: Option<String>) -> Result<Self> {
+        Self::new(http, https, ProxySource::UserRequested, true)
+    }
+
+    pub(crate) fn configured(&self) -> bool {
+        self.http.is_some() || self.https.is_some()
+    }
+
+    pub(crate) const fn source(&self) -> ProxySource {
+        self.source
+    }
+
+    pub(crate) const fn request_pending(&self) -> bool {
+        self.request_pending
+    }
+
+    pub(crate) fn http(&self) -> Option<&str> {
+        self.http.as_ref().map(SecretValue::expose)
+    }
+
+    pub(crate) fn https(&self) -> Option<&str> {
+        self.https.as_ref().map(SecretValue::expose)
+    }
+
+    pub(crate) fn sanitized_label(&self) -> String {
+        let mut labels = Vec::new();
+        if let Some(endpoint) = self.http().and_then(parse_proxy_url) {
+            labels.push(format!("H {}", endpoint.display()));
+        }
+        if let Some(endpoint) = self.https().and_then(parse_proxy_url) {
+            labels.push(format!("S {}", endpoint.display()));
+        }
+        if labels.is_empty() {
+            if self.configured() {
+                "Proxy · On".to_owned()
+            } else {
+                "Proxy · Off".to_owned()
+            }
+        } else {
+            labels.join(" · ")
+        }
+    }
+
+    pub(crate) fn editor_text(&self) -> String {
+        format!(
+            "HTTP_PROXY={}\r\nHTTPS_PROXY={}",
+            self.http().unwrap_or(""),
+            self.https().unwrap_or("")
+        )
+    }
+}
+
+pub(crate) struct ProxyEndpoint {
+    scheme: &'static str,
+    host: String,
+    port: u16,
+}
+
+impl ProxyEndpoint {
+    pub(crate) fn display(&self) -> String {
+        format!("{}://{}:{}", self.scheme, self.host, self.port)
+    }
+}
+
+pub(crate) fn parse_proxy_url(value: &str) -> Option<ProxyEndpoint> {
+    if value.is_empty()
+        || value.len() > PROXY_MAX_BYTES
+        || value.chars().any(char::is_control)
+        || value.chars().any(char::is_whitespace)
+    {
+        return None;
+    }
+    let (raw_scheme, rest) = value.split_once("://")?;
+    let (scheme, default_port) = if raw_scheme.eq_ignore_ascii_case("http") {
+        ("http", 80)
+    } else if raw_scheme.eq_ignore_ascii_case("https") {
+        ("https", 443)
+    } else {
+        return None;
+    };
+    let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let authority = &rest[..authority_end];
+    if authority.is_empty() {
+        return None;
+    }
+    let host_port = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    let (host, port) = if let Some(bracketed) = host_port.strip_prefix('[') {
+        let close = bracketed.find(']')?;
+        let host_body = &bracketed[..close];
+        if host_body.is_empty()
+            || !host_body
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() || matches!(byte, b':' | b'.' | b'%'))
+        {
+            return None;
+        }
+        let suffix = &bracketed[close + 1..];
+        let port = if suffix.is_empty() {
+            default_port
+        } else {
+            suffix
+                .strip_prefix(':')?
+                .parse::<u16>()
+                .ok()
+                .filter(|port| *port != 0)?
+        };
+        (format!("[{host_body}]"), port)
+    } else {
+        if host_port.matches(':').count() > 1 {
+            return None;
+        }
+        let (host, port) =
+            host_port
+                .rsplit_once(':')
+                .map_or((host_port, default_port), |(host, port)| {
+                    (
+                        host,
+                        port.parse::<u16>()
+                            .ok()
+                            .filter(|port| *port != 0)
+                            .unwrap_or(0),
+                    )
+                });
+        if port == 0
+            || host.is_empty()
+            || !host
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
+        {
+            return None;
+        }
+        (host.to_owned(), port)
+    };
+    Some(ProxyEndpoint { scheme, host, port })
+}
+
+pub(crate) fn parse_proxy_editor(text: &str) -> Result<(Option<String>, Option<String>)> {
+    let mut http = None;
+    let mut https = None;
+    for line in text.lines() {
+        let line = line.trim_end_matches('\r');
+        if line.is_empty() {
+            continue;
+        }
+        let (name, value) = line
+            .split_once('=')
+            .ok_or_else(|| anyhow::anyhow!("proxy editor requires NAME=value lines"))?;
+        match name.trim() {
+            name if name.eq_ignore_ascii_case("HTTP_PROXY") => http = Some(value.to_owned()),
+            name if name.eq_ignore_ascii_case("HTTPS_PROXY") => https = Some(value.to_owned()),
+            _ => bail!("proxy editor accepts only HTTP_PROXY and HTTPS_PROXY"),
+        }
+    }
+    for value in [http.as_deref(), https.as_deref()].into_iter().flatten() {
+        SecretValue::new(value.to_owned())?;
+        if parse_proxy_url(value).is_none() {
+            bail!("proxy URL must be a valid http:// or https:// URL");
+        }
+    }
+    Ok((
+        http.filter(|value| !value.is_empty()),
+        https.filter(|value| !value.is_empty()),
+    ))
+}
+
+pub(crate) fn proxy_command(
+    shell: ShellKind,
+    http: Option<&str>,
+    https: Option<&str>,
+) -> Result<SecretValue> {
+    let command = match shell {
+        ShellKind::Cmd => {
+            for value in [http, https].into_iter().flatten() {
+                if value.contains(['"', '%', '!']) {
+                    bail!("cmd proxy value contains a character that cannot be quoted safely");
+                }
+            }
+            format!(
+                "set \"HTTP_PROXY={}\" & set \"HTTPS_PROXY={}\"",
+                http.unwrap_or(""),
+                https.unwrap_or("")
+            )
+        }
+        ShellKind::PowerShell => format!(
+            "$env:HTTP_PROXY = '{}'; $env:HTTPS_PROXY = '{}'",
+            http.unwrap_or("").replace('\'', "''"),
+            https.unwrap_or("").replace('\'', "''")
+        ),
+        ShellKind::Bash => format!(
+            "export HTTP_PROXY='{}' HTTPS_PROXY='{}'",
+            http.unwrap_or("").replace('\'', "'\\''"),
+            https.unwrap_or("").replace('\'', "'\\''")
+        ),
+        ShellKind::Unknown => bail!("the active shell is unknown"),
+    };
+    SecretValue::new(command)
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CwdSource {
@@ -318,5 +630,86 @@ mod tests {
         assert_eq!(tracker.confirmed_path(), Some(r"C:\actual"));
         assert_eq!(tracker.source(), CwdSource::Osc7);
         assert!(!tracker.pending());
+    }
+
+    #[test]
+    fn proxy_parser_redacts_everything_except_scheme_host_and_port() {
+        let parsed = parse_proxy_url(
+            "https://alice:super-secret@proxy.example:8443/private?token=hidden#fragment",
+        )
+        .unwrap();
+        assert_eq!(parsed.display(), "https://proxy.example:8443");
+        let ipv6 = parse_proxy_url("http://user:pass@[2001:db8::1]/ignored").unwrap();
+        assert_eq!(ipv6.display(), "http://[2001:db8::1]:80");
+        for invalid in [
+            "socks5://proxy.example:1080",
+            "http://",
+            "http://2001:db8::1",
+            "http://proxy.example:0",
+            "http://proxy.example:70000",
+            "http://proxy example",
+        ] {
+            assert!(parse_proxy_url(invalid).is_none(), "{invalid}");
+        }
+    }
+
+    #[test]
+    fn proxy_environment_lookup_is_case_insensitive_and_snapshot_safe_by_type() {
+        let state = ProxyState::from_environment(&[
+            ("http_proxy".into(), "http://one.example".into()),
+            (
+                "HTTPS_PROXY".into(),
+                "https://user:secret@two.example:9443/query?secret".into(),
+            ),
+        ])
+        .unwrap();
+        assert!(state.configured());
+        assert_eq!(state.source(), ProxySource::Launch);
+        assert!(!state.request_pending());
+        assert_eq!(
+            state.sanitized_label(),
+            "H http://one.example:80 · S https://two.example:9443"
+        );
+    }
+
+    #[test]
+    fn proxy_editor_accepts_only_two_strict_http_values() {
+        let (http, https) = parse_proxy_editor(
+            "HTTP_PROXY=http://proxy.example:8080\r\n\
+             HTTPS_PROXY=https://user:pass@secure.example/path?q=x",
+        )
+        .unwrap();
+        assert_eq!(http.as_deref(), Some("http://proxy.example:8080"));
+        assert!(https.as_deref().unwrap().contains("user:pass"));
+        assert!(parse_proxy_editor("NO_PROXY=localhost").is_err());
+        assert!(parse_proxy_editor("HTTP_PROXY=socks5://proxy").is_err());
+        assert!(parse_proxy_editor("HTTP_PROXY=http://proxy\r\ninjected").is_err());
+    }
+
+    #[test]
+    fn proxy_commands_quote_known_shells_and_reject_unsafe_cmd_expansion() {
+        assert_eq!(
+            proxy_command(ShellKind::PowerShell, Some("http://user:p'ass@host"), None)
+                .unwrap()
+                .expose(),
+            "$env:HTTP_PROXY = 'http://user:p''ass@host'; $env:HTTPS_PROXY = ''"
+        );
+        assert_eq!(
+            proxy_command(ShellKind::Bash, Some("http://host/a'b"), None)
+                .unwrap()
+                .expose(),
+            "export HTTP_PROXY='http://host/a'\\''b' HTTPS_PROXY=''"
+        );
+        assert!(proxy_command(ShellKind::Cmd, Some("http://host/%USER%"), None).is_err());
+        assert!(proxy_command(ShellKind::Unknown, None, None).is_err());
+    }
+
+    #[test]
+    fn secret_value_zeroes_its_owned_buffer_before_release() {
+        let mut secret = SecretValue::new("sentinel-value".to_owned()).unwrap();
+        unsafe {
+            secret.0.as_mut_vec().fill(0);
+        }
+        assert!(secret.0.bytes().all(|byte| byte == 0));
     }
 }

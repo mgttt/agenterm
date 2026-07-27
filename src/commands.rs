@@ -605,9 +605,16 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
         "start-server" => ("agenterm-cli start-server", &[][..], &[][..], false),
         "ui-action" => (
             "agenterm-cli ui-action ACTION [-t target] [--path PATH] \
-             [--mode empty|append|replace] [--width PX --height PX]",
-            &["-t", "--path", "--mode", "--width", "--height"][..],
-            &[][..],
+             [--mode empty|append|replace] [--stdin] [--width PX --height PX]",
+            &[
+                "-t",
+                "--path",
+                "--mode",
+                "--proxy-input",
+                "--width",
+                "--height",
+            ][..],
+            &["--stdin"][..],
             false,
         ),
         "ui-snapshot" => ("agenterm-cli ui-snapshot", &[][..], &[][..], false),
