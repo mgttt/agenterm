@@ -29,8 +29,9 @@ unless the information cannot live here or in that product set.
 - `scripts/` — build metadata tooling.
 - `prd/` — detailed product-tree modules linked from the canonical `PRD.md`
   index; do not duplicate scope between modules.
-- `plan-0.1.7.md` — version execution projection for dependencies, milestones,
-  risks, and sequencing; it must link to, not replace, the owning PRD nodes.
+- `dist/plan-*.md` — optional ignored discussion drafts for dependencies,
+  milestones, risks, and sequencing; they are temporary and must not become
+  dependencies of the tracked product set.
 
 ## Parallel execution discipline
 

@@ -33,10 +33,10 @@ second-level tree. Linked `prd/PRD_*.md` modules own third-level requirements,
 decisions, status, and acceptance detail. A requirement has exactly one owning
 module; other documents link to it instead of copying it.
 
-Version plans are execution projections rather than product truth. The current
-[v0.1.7 execution plan](plan-0.1.7.md) manages dependencies, work packages,
-risks, and sequencing; every product scope or status change must first align
-the owning PRD module.
+Temporary version plans may live under ignored `dist/` while they are being
+discussed. They are execution projections rather than product truth and must
+not become dependencies of the tracked product set. Every accepted product
+scope or status change belongs in its owning PRD module.
 
 Machine-readable shipped capability/evidence alignment lives in
 [`prd/alignment-contract.json`](prd/alignment-contract.json).
