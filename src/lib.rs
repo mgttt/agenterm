@@ -77,6 +77,7 @@ mod script_audit;
 pub mod script_protocol;
 mod settings;
 mod tab_tree;
+mod terminal_observation;
 mod theme;
 mod ui_geometry;
 mod worker_supervisor;
@@ -112,6 +113,7 @@ use script_protocol::{
 };
 use settings::{AppConfig, config_path, load_config, save_config};
 use tab_tree::{TabTreeNode, TabTreeRow, tree_rows, would_create_cycle};
+use terminal_observation::{TerminalObservation, TerminalProcessState};
 use theme::{ThemeId, ThemePalette};
 use ui_geometry::{
     PixelRect, TAB_HEIGHT, TERMINAL_SCROLLBAR_WIDTH, TerminalScrollbarGeometry, WorkspaceLayout,
@@ -1349,6 +1351,18 @@ fn redact_proxy_stream_chunk(
 }
 
 impl TerminalTab {
+    fn observation(&self) -> TerminalObservation {
+        TerminalObservation {
+            process_id: self.process_id,
+            exit_code: self.exited,
+            error: self.error.clone(),
+            input_bytes: self.input_bytes,
+            input_writes: self.input_writes,
+            output_bytes: self.output_bytes,
+            submit_pending: self.pending_submit_at.is_some(),
+        }
+    }
+
     fn register_proxy_redactions(&mut self, values: &[&str]) -> Result<()> {
         let mut additions = Vec::new();
         for value in values.iter().copied().filter(|value| !value.is_empty()) {
@@ -2814,37 +2828,52 @@ impl AppState {
         }
         let mut polled_events = Vec::new();
         for tab in &mut self.tabs {
-            let output_before = tab.output_bytes;
-            let exit_before = tab.exited;
-            let error_before = tab.error.clone();
+            let observation_before = tab.observation();
             let cwd_before = tab.cwd.clone();
             changed |= tab.poll();
-            if tab.output_bytes != output_before {
-                polled_events.push((
-                    EventKind::TerminalOutput,
-                    tab.id,
-                    serde_json::json!({
-                        "output_bytes": tab.output_bytes,
-                        "advanced_by": tab.output_bytes - output_before,
-                    }),
-                ));
-            }
-            if tab.exited != exit_before || tab.error != error_before {
-                polled_events.push((
-                    EventKind::TabState,
-                    tab.id,
-                    serde_json::json!({
-                        "state": if tab.error.is_some() {
-                            "error"
-                        } else if tab.exited.is_some() {
-                            "dead"
-                        } else {
-                            "running"
-                        },
-                        "exit_code": tab.exited,
-                        "error": tab.error.clone(),
-                    }),
-                ));
+            let mut observation_after = tab.observation();
+            match observation_before.delta_to(&observation_after) {
+                Ok(delta) => {
+                    if delta.output_advanced_by > 0 {
+                        polled_events.push((
+                            EventKind::TerminalOutput,
+                            tab.id,
+                            serde_json::json!({
+                                "output_bytes": observation_after.output_bytes,
+                                "advanced_by": delta.output_advanced_by,
+                            }),
+                        ));
+                    }
+                    if delta.process_state_changed {
+                        let state = match observation_after.process_state() {
+                            TerminalProcessState::Running => "running",
+                            TerminalProcessState::Exited { .. } => "dead",
+                            TerminalProcessState::Error { .. } => "error",
+                        };
+                        polled_events.push((
+                            EventKind::TabState,
+                            tab.id,
+                            serde_json::json!({
+                                "state": state,
+                                "exit_code": observation_after.exit_code,
+                                "error": observation_after.error,
+                            }),
+                        ));
+                    }
+                }
+                Err(error) => {
+                    tab.error = Some(error.to_string());
+                    observation_after = tab.observation();
+                    polled_events.push((
+                        EventKind::TabState,
+                        tab.id,
+                        serde_json::json!({
+                            "state": "error",
+                            "exit_code": observation_after.exit_code,
+                            "error": observation_after.error,
+                        }),
+                    ));
+                }
             }
             if tab.cwd != cwd_before {
                 polled_events.push((
@@ -7424,6 +7453,7 @@ impl AppState {
                 let windows = selected
                     .into_iter()
                     .map(|tab| {
+                        let observation = tab.observation();
                         serde_json::json!({
                             "id": format!("@{}", tab.id),
                             "index": tab.index,
@@ -7433,25 +7463,25 @@ impl AppState {
                             "terminal_title": tab.parser.callbacks().title,
                             "note": tab.note,
                             "active": self.active == Some(tab.id),
-                            "dead": tab.exited.is_some(),
-                            "exit_code": tab.exited,
-                            "pid": tab.process_id,
+                            "dead": observation.exit_code.is_some(),
+                            "exit_code": observation.exit_code,
+                            "pid": observation.process_id,
                             "command": tab.command_name,
                             "environment_names": tab.environment_names,
                             "rows": tab.last_size.0,
                             "cols": tab.last_size.1,
-                            "input_bytes": tab.input_bytes,
-                            "input_writes": tab.input_writes,
-                            "submit_pending": tab.pending_submit_at.is_some(),
+                            "input_bytes": observation.input_bytes,
+                            "input_writes": observation.input_writes,
+                            "submit_pending": observation.submit_pending,
                             "scrollback_offset": tab.parser.screen().scrollback(),
-                            "output_bytes": tab.output_bytes,
+                            "output_bytes": observation.output_bytes,
                             "composer": if tab.sensitive_composer.is_some() {
                                 "<redacted>"
                             } else {
                                 tab.composer.as_str()
                             },
                             "composer_sensitive": tab.sensitive_composer.is_some(),
-                            "error": tab.error,
+                            "error": observation.error,
                             "text": tab.parser.screen().contents(),
                         })
                     })
