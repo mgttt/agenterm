@@ -25,6 +25,17 @@ if /i "%~1"=="release" (
     exit /b 2
 )
 
+if exist "%DIST_DIR%" (
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\clean-locked-artifacts.ps1" ^
+        -Directory "%DIST_DIR%"
+    if errorlevel 1 (
+        echo.
+        echo Failed to clean stale locked artifacts from dist.
+        popd
+        exit /b 1
+    )
+)
+
 cargo build %CARGO_ARGS%
 if errorlevel 1 (
     echo.
@@ -80,6 +91,15 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\write-buil
 if errorlevel 1 (
     echo.
     echo Failed to generate agenterm.json.
+    popd
+    exit /b 1
+)
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\clean-locked-artifacts.ps1" ^
+    -Directory "%DIST_DIR%"
+if errorlevel 1 (
+    echo.
+    echo Failed to clean stale locked artifacts from dist.
     popd
     exit /b 1
 )
