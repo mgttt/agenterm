@@ -11,6 +11,8 @@ use windows_sys::Win32::{
     System::Threading::{GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION},
 };
 
+use crate::{build_identity::BuildIdentity, upgrade_identity::UpgradeIdentity};
+
 const INSTANCE_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -22,6 +24,8 @@ pub(crate) struct InstanceRecord {
     pub session: String,
     pub workspace_path: String,
     pub started_at_unix_ms: u128,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upgrade_identity: Option<UpgradeIdentity>,
 }
 
 #[derive(Debug)]
@@ -53,6 +57,7 @@ pub(crate) fn register_instance(
     workspace_path: &Path,
     session: &str,
 ) -> Result<InstanceRegistration> {
+    let build = BuildIdentity::current();
     register_instance_in(
         &instances_dir(),
         InstanceRecord {
@@ -66,8 +71,20 @@ pub(crate) fn register_instance(
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis(),
+            upgrade_identity: Some(UpgradeIdentity {
+                protocol_version: Some(1),
+                version: Some(env!("CARGO_PKG_VERSION").to_owned()),
+                git_commit: known_build_value(build.git_commit),
+                profile: known_build_value(build.profile),
+                cargo_lock_sha256: known_build_value(build.cargo_lock_sha256),
+                artifact_manifest_sha256: known_build_value(build.artifact_manifest_sha256),
+            }),
         },
     )
+}
+
+fn known_build_value(value: &str) -> Option<String> {
+    (value != "unknown" && !value.trim().is_empty()).then(|| value.to_owned())
 }
 
 pub(crate) fn discover_instances() -> Result<Vec<DiscoveredInstance>> {
@@ -187,6 +204,7 @@ mod tests {
             session: "fleet".to_owned(),
             workspace_path: "workspace.json".to_owned(),
             started_at_unix_ms: 1,
+            upgrade_identity: None,
         };
         let registration = register_instance_in(&directory, record).unwrap();
         let discovered = discover_instances_in(&directory).unwrap();

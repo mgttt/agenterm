@@ -6,24 +6,18 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'TestHarness.ps1')
 $declaredEvidence = @(
     'fleet.codex-launcher'
     'fleet.event-transition-catalog'
     'fleet.instance-discovery'
     'fleet.mux-frontend'
     'fleet.tab-environment'
+    'fleet.upgrade-truth'
 )
 if ($ListEvidence) {
     $declaredEvidence
     exit 0
-}
-
-function Write-Evidence {
-    param([Parameter(Mandatory = $true)][string]$Id)
-    if ($declaredEvidence -notcontains $Id) {
-        throw "Fleet smoke emitted undeclared evidence ID: $Id"
-    }
-    Write-Host "EVIDENCE $Id"
 }
 
 $CtlExe = [IO.Path]::GetFullPath($CtlExe)
@@ -34,36 +28,76 @@ foreach ($path in @($CtlExe, $MuxExe)) {
     }
 }
 
-$previousAddress = $env:AGENTERM_IPC_ADDRESS
-$previousWorkspace = $env:AGENTERM_WORKSPACE_PATH
-$previousInstanceDir = $env:AGENTERM_INSTANCE_DIR
-$address = "127.0.0.1:$((48000 + ($PID % 1000)))"
-$workspaceFile = Join-Path $env:TEMP "agenterm-fleet-$PID.json"
-$instanceDir = Join-Path $env:TEMP "agenterm-fleet-instances-$PID"
-$env:AGENTERM_IPC_ADDRESS = $address
-$env:AGENTERM_WORKSPACE_PATH = $workspaceFile
+$context = New-SmokeRunContext -Suite 'fleet' -Executable $CtlExe `
+    -DeclaredEvidence $declaredEvidence
+$context.PreviousEnvironment['AGENTERM_INSTANCE_DIR'] = $env:AGENTERM_INSTANCE_DIR
+$address = $context.Address
+$workspaceFile = $context.WorkspacePath
+$instanceDir = Join-Path $context.RunDirectory 'instances'
 $env:AGENTERM_INSTANCE_DIR = $instanceDir
 $environmentName = "env-$PID"
 $agentName = "codex-$PID"
 $role = "reviewer-$PID"
 $proxy = "http://127.0.0.1:$((30000 + ($PID % 1000)))"
-$secondAddress = "127.0.0.1:$((50000 + ($PID % 1000)))"
-$secondWorkspace = Join-Path $env:TEMP "agenterm-second-$PID.json"
+$usedAddresses = [Collections.Generic.HashSet[string]]::new(
+    [StringComparer]::Ordinal
+)
+$usedAddresses.Add($address) | Out-Null
+function Get-FleetAddress {
+    do {
+        $candidate = Get-SmokeLoopbackAddress
+    } while (-not $script:usedAddresses.Add($candidate))
+    return $candidate
+}
+$explicitAddress = Get-FleetAddress
+$secondAddress = Get-FleetAddress
+$explicitWorkspace = Join-Path $context.WorkspaceDirectory 'explicit.json'
+$secondWorkspace = Join-Path $context.WorkspaceDirectory 'second.json'
+$asyncDirectory = Join-Path $context.RunDirectory 'async'
+New-Item -ItemType Directory -Path $asyncDirectory -Force | Out-Null
 $secondStarted = $false
 $eventWaiters = @()
-$eventFiles = @()
 $loadJobs = @()
+$loadJobFiles = @()
+$succeeded = $false
+$failureRecord = $null
+
+function Add-FleetCommandRecord {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string[]]$CommandArgs,
+        [Parameter(Mandatory = $true)][int]$ExitCode,
+        [Parameter(Mandatory = $true)][bool]$ExpectedFailure,
+        [AllowNull()][string]$Output
+    )
+
+    $recordContext = $context.PSObject.Copy()
+    $recordContext.Executable = $Path
+    $recordContext.CommandLogBytes = $context.CommandLogBytes
+    Add-SmokeCommandRecord -Context $recordContext -Arguments $CommandArgs `
+        -ExitCode $ExitCode -ExpectedFailure $ExpectedFailure -Output $Output
+    $context.CommandLogBytes = $recordContext.CommandLogBytes
+}
+
+function Write-Evidence {
+    param([Parameter(Mandatory = $true)][string]$Id)
+    Write-SmokeEvidence -Context $context -Id $Id
+}
 
 function Invoke-CheckedExe {
     param(
         [string]$Path,
         [string[]]$CommandArgs
     )
-    $output = & $Path @CommandArgs 2>&1
-    if ($LASTEXITCODE -ne 0) {
+    $outputItems = @(& $Path @CommandArgs 2>&1)
+    $exitCode = $LASTEXITCODE
+    $output = $outputItems -join "`n"
+    Add-FleetCommandRecord -Path $Path -CommandArgs $CommandArgs `
+        -ExitCode $exitCode -ExpectedFailure $false -Output $output
+    if ($exitCode -ne 0) {
         throw "$([IO.Path]::GetFileName($Path)) $($CommandArgs -join ' ') failed:`n$($output -join "`n")"
     }
-    return ($output -join "`n")
+    return $output
 }
 
 function Invoke-ExpectedFailure {
@@ -74,16 +108,19 @@ function Invoke-ExpectedFailure {
     $savedErrorPreference = $ErrorActionPreference
     $ErrorActionPreference = 'SilentlyContinue'
     try {
-        $output = & $Path @CommandArgs 2>&1
+        $outputItems = @(& $Path @CommandArgs 2>&1)
         $exitCode = $LASTEXITCODE
     }
     finally {
         $ErrorActionPreference = $savedErrorPreference
     }
+    $output = $outputItems -join "`n"
+    Add-FleetCommandRecord -Path $Path -CommandArgs $CommandArgs `
+        -ExitCode $exitCode -ExpectedFailure $true -Output $output
     if ($exitCode -eq 0) {
         throw "$([IO.Path]::GetFileName($Path)) $($CommandArgs -join ' ') unexpectedly succeeded"
     }
-    return ($output -join "`n")
+    return $output
 }
 
 function Start-EventWaiter {
@@ -94,23 +131,25 @@ function Start-EventWaiter {
         [string]$Tag,
         [int]$TimeoutMs = 10000
     )
-    $stdout = Join-Path $env:TEMP "agenterm-fleet-wait-$PID-$Tag.out"
-    $stderr = Join-Path $env:TEMP "agenterm-fleet-wait-$PID-$Tag.err"
-    $script:eventFiles += @($stdout, $stderr)
-    $process = Start-Process -FilePath $CtlExe -ArgumentList @(
+    $stdout = Join-Path $asyncDirectory "wait-$Tag.out"
+    $stderr = Join-Path $asyncDirectory "wait-$Tag.err"
+    $arguments = @(
         '--address', $address,
         'wait-events',
         '--epoch', $Epoch,
         '--after', "$After",
         '--kind', $Kind,
         '--timeout-ms', "$TimeoutMs"
-    ) -RedirectStandardOutput $stdout -RedirectStandardError $stderr `
+    )
+    $process = Start-Process -FilePath $CtlExe -ArgumentList $arguments `
+        -RedirectStandardOutput $stdout -RedirectStandardError $stderr `
         -WindowStyle Hidden -PassThru
     $script:eventWaiters += $process
     return [pscustomobject]@{
         Process = $process
         Stdout = $stdout
         Stderr = $stderr
+        Arguments = $arguments
     }
 }
 
@@ -125,6 +164,9 @@ function Complete-EventWaiter {
     $Waiter.Process.Refresh()
     $stdout = Get-Content -LiteralPath $Waiter.Stdout -Raw -ErrorAction SilentlyContinue
     $stderr = Get-Content -LiteralPath $Waiter.Stderr -Raw -ErrorAction SilentlyContinue
+    Add-FleetCommandRecord -Path $CtlExe -CommandArgs $Waiter.Arguments `
+        -ExitCode $Waiter.Process.ExitCode -ExpectedFailure $false `
+        -Output "$stdout`n$stderr"
     if ($Waiter.Process.ExitCode -ne 0) {
         throw "event waiter failed with exit $($Waiter.Process.ExitCode): $stderr"
     }
@@ -225,8 +267,6 @@ try {
     Write-Evidence 'fleet.mux-frontend'
 
     Write-Host 'STEP explicit CLI address autostarts the requested server'
-    $explicitAddress = "127.0.0.1:$((49000 + ($PID % 1000)))"
-    $explicitWorkspace = Join-Path $env:TEMP "agenterm-explicit-$PID.json"
     $savedAddress = $env:AGENTERM_IPC_ADDRESS
     $savedWorkspace = $env:AGENTERM_WORKSPACE_PATH
     Remove-Item Env:AGENTERM_IPC_ADDRESS
@@ -287,6 +327,9 @@ try {
         $null -ne $server.modal_kind -or
         [string]::IsNullOrWhiteSpace($server.event_epoch) -or
         $null -eq $server.event_sequence -or
+        $server.upgrade.status -ne 'same' -or
+        $server.running_identity.git_commit -ne
+            $server.staged_identity.git_commit -or
         $instance.version -ne $expectedVersion -or
         $instance.workspace_path -ne $workspaceFile) {
         throw (
@@ -295,16 +338,21 @@ try {
         )
     }
     $targetedProtocol = Invoke-CheckedExe $CtlExe @(
-        '--address', $address, 'protocol-info'
+        '--address', $address, 'protocol-info', '--running'
     ) | ConvertFrom-Json
-    if (-not $targetedProtocol.features.instance_discovery) {
-        throw 'agenterm-cli --address did not target the requested server'
+    if (-not $targetedProtocol.features.instance_discovery -or
+        $targetedProtocol.identity_scope -ne 'running_host' -or
+        $targetedProtocol.pid -ne $server.pid -or
+        -not $targetedProtocol.build_identity_complete -or
+        $targetedProtocol.build_identity.git_commit -ne
+            $server.running_identity.git_commit) {
+        throw 'protocol-info --running did not report the requested server build'
     }
     $eventCatalog = @($targetedProtocol.event_catalog.events)
     $eventKinds = @($eventCatalog | ForEach-Object kind)
     if ($targetedProtocol.event_catalog.schema_version -ne 1 -or
         -not $targetedProtocol.features.typed_events -or
-        $eventCatalog.Count -ne 24 -or
+        $eventCatalog.Count -ne 25 -or
         @($eventKinds | Sort-Object -Unique).Count -ne $eventCatalog.Count -or
         @($eventCatalog | Where-Object {
                 [string]::IsNullOrWhiteSpace($_.kind) -or
@@ -315,6 +363,7 @@ try {
             }).Count -ne 0) {
         throw 'protocol-info event catalog was incomplete, open-ended, or untyped'
     }
+    Write-Evidence 'fleet.upgrade-truth'
 
     Write-Host 'STEP server-scoped event transition matches its post-state'
     $layoutBaseline = Invoke-CheckedExe $CtlExe @('ui-snapshot') | ConvertFrom-Json
@@ -572,6 +621,7 @@ try {
         $workerCount = 16
         $eventsPerWorker = 258
         foreach ($worker in 0..($workerCount - 1)) {
+            $jobOutputPath = Join-Path $asyncDirectory "load-$worker.log"
             $job = Start-Job -ScriptBlock {
                 param($Executable, $ServerAddress, $Target, $Worker, $Count)
                 for ($iteration = 0; $iteration -lt $Count; $iteration++) {
@@ -586,17 +636,22 @@ try {
                         )
                     }
                 }
+                "worker=$Worker events=$Count status=completed"
             } -ArgumentList @(
                 $CtlExe, $address, $gapTarget, $worker, $eventsPerWorker
             )
             $loadJobs += $job
+            $loadJobFiles += $jobOutputPath
         }
         $finishedLoad = @($loadJobs | Wait-Job -Timeout 180)
         if ($finishedLoad.Count -ne $workerCount) {
             throw 'bounded event load exceeded its job deadline'
         }
-        foreach ($job in $loadJobs) {
-            Receive-Job -Job $job -ErrorAction Stop | Out-Null
+        for ($jobIndex = 0; $jobIndex -lt $loadJobs.Count; $jobIndex++) {
+            $job = $loadJobs[$jobIndex]
+            $jobOutput = @(Receive-Job -Job $job -ErrorAction Stop)
+            $jobOutput -join "`n" |
+                Set-Content -LiteralPath $loadJobFiles[$jobIndex] -Encoding UTF8
             if ($job.State -ne 'Completed') {
                 throw "bounded event load job $($job.Id) ended in state $($job.State)"
             }
@@ -625,7 +680,17 @@ try {
     Invoke-CheckedExe $CtlExe @('shutdown') | Out-Null
     $oldServer = Get-Process -Id $serverBeforeRestart.pid -ErrorAction SilentlyContinue
     if ($null -ne $oldServer) {
-        Wait-Process -Id $serverBeforeRestart.pid -Timeout 10 -ErrorAction Stop
+        try {
+            Wait-Process -Id $serverBeforeRestart.pid -Timeout 10 -ErrorAction Stop
+        }
+        catch {
+            if ($null -ne (
+                    Get-Process -Id $serverBeforeRestart.pid `
+                        -ErrorAction SilentlyContinue
+                )) {
+                throw
+            }
+        }
     }
     Invoke-CheckedExe $CtlExe @('start-server') | Out-Null
     Invoke-CheckedExe $CtlExe @(
@@ -665,7 +730,7 @@ try {
             throw 'agenterm-mux did not observe AgenTerm tabs through --address'
         }
         $protocol = Invoke-CheckedExe $MuxExe @(
-            '--address', $address, 'agenterm', 'protocol-info'
+            '--address', $address, 'agenterm', 'protocol-info', '--running'
         ) | ConvertFrom-Json
         if (-not $protocol.features.mux_frontend) {
             throw 'The namespaced native control plane did not advertise mux support'
@@ -717,42 +782,64 @@ try {
     ) | Out-Null
 
     Write-Host 'PASS: fleet launch, delimiter safety, loopback IPC, and destructive mux behavior'
+    $succeeded = $true
+}
+catch {
+    $failureRecord = $_
 }
 finally {
+    $cleanupFailure = $null
     foreach ($waiter in $eventWaiters) {
         if (-not $waiter.HasExited) {
             Stop-Process -Id $waiter.Id -Force -ErrorAction SilentlyContinue
+            $waiter.WaitForExit(5000) | Out-Null
         }
     }
     foreach ($job in $loadJobs) {
         Stop-Job -Job $job -ErrorAction SilentlyContinue
         Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
     }
-    foreach ($eventFile in $eventFiles) {
-        Remove-Item -LiteralPath $eventFile -ErrorAction SilentlyContinue
+    try {
+        $cleanupAddresses = @($explicitAddress, $secondAddress)
+        if ($succeeded) {
+            $cleanupAddresses += $address
+        }
+        foreach ($ownedAddress in $cleanupAddresses) {
+            & $CtlExe --address $ownedAddress kill-server 2>$null | Out-Null
+        }
+        if ($succeeded) {
+            Remove-Item Env:AGENTERM_IPC_ADDRESS -ErrorAction SilentlyContinue
+            & $CtlExe server-list --json 2>$null | Out-Null
+            $remainingRegistrations = @(
+                Get-ChildItem -LiteralPath $instanceDir -File -Filter '*.json' `
+                    -ErrorAction SilentlyContinue
+            )
+            if ($remainingRegistrations.Count -ne 0) {
+                throw (
+                    'fleet cleanup left stale instance registrations: ' +
+                    ($remainingRegistrations.Name -join ', ')
+                )
+            }
+        }
     }
-    if ($secondStarted) {
-        & $CtlExe --address $secondAddress shutdown 2>$null | Out-Null
+    catch {
+        $cleanupFailure = $_
+        $succeeded = $false
+        if ($null -eq $failureRecord) {
+            $failureRecord = $_
+        }
     }
-    & $CtlExe kill-server 2>$null | Out-Null
-    Remove-Item -LiteralPath $workspaceFile -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $secondWorkspace -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $instanceDir -Recurse -ErrorAction SilentlyContinue
-    if ($null -eq $previousAddress) {
-        Remove-Item Env:AGENTERM_IPC_ADDRESS -ErrorAction SilentlyContinue
-    } else {
-        $env:AGENTERM_IPC_ADDRESS = $previousAddress
+    finally {
+        $env:AGENTERM_IPC_ADDRESS = $address
     }
-    if ($null -eq $previousWorkspace) {
-        Remove-Item Env:AGENTERM_WORKSPACE_PATH -ErrorAction SilentlyContinue
-    } else {
-        $env:AGENTERM_WORKSPACE_PATH = $previousWorkspace
+    Complete-SmokeRun -Context $context -Succeeded $succeeded `
+        -FailureRecord $failureRecord
+    if ($null -ne $cleanupFailure) {
+        throw $cleanupFailure
     }
-    if ($null -eq $previousInstanceDir) {
-        Remove-Item Env:AGENTERM_INSTANCE_DIR -ErrorAction SilentlyContinue
-    } else {
-        $env:AGENTERM_INSTANCE_DIR = $previousInstanceDir
+    if (-not $succeeded) {
+        throw $failureRecord
     }
-    # A successful destructive-session test leaves no server for best-effort cleanup.
-    $global:LASTEXITCODE = 0
 }
+
+exit 0

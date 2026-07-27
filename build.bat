@@ -30,6 +30,26 @@ if /i "%~1"=="release" (
     exit /b 2
 )
 
+set "BUILD_IDENTITY_ENV=%TEMP%\agenterm-build-identity-%RANDOM%-%RANDOM%.cmd"
+"%POWERSHELL_EXE%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\build-identity.ps1" ^
+    -Profile "%PROFILE%" ^
+    -OutputPath "%BUILD_IDENTITY_ENV%"
+if errorlevel 1 (
+    echo.
+    echo Failed to determine truthful AgenTerm build identity.
+    popd
+    exit /b 1
+)
+call "%BUILD_IDENTITY_ENV%"
+set "BUILD_IDENTITY_RESULT=%ERRORLEVEL%"
+del /q "%BUILD_IDENTITY_ENV%" >nul 2>nul
+if not "%BUILD_IDENTITY_RESULT%"=="0" (
+    echo.
+    echo Failed to import AgenTerm build identity.
+    popd
+    exit /b 1
+)
+
 cargo build --locked %CARGO_ARGS%
 if errorlevel 1 (
     echo.

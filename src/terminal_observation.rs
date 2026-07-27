@@ -16,6 +16,10 @@ pub(crate) struct TerminalObservation {
     pub(crate) input_writes: usize,
     pub(crate) output_bytes: usize,
     pub(crate) submit_pending: bool,
+    pub(crate) submission_enter_written: Option<bool>,
+    pub(crate) reader_closed: bool,
+    pub(crate) parser_drained: bool,
+    pub(crate) finalized: bool,
 }
 
 impl TerminalObservation {
@@ -45,6 +49,10 @@ impl TerminalObservation {
             output_advanced_by: after.output_bytes - self.output_bytes,
             process_state_changed: self.process_state() != after.process_state(),
             submission_finished: self.submit_pending && !after.submit_pending,
+            lifecycle_changed: self.reader_closed != after.reader_closed
+                || self.parser_drained != after.parser_drained
+                || self.finalized != after.finalized,
+            became_finalized: !self.finalized && after.finalized,
         })
     }
 }
@@ -54,6 +62,8 @@ pub(crate) struct TerminalObservationDelta {
     pub(crate) output_advanced_by: usize,
     pub(crate) process_state_changed: bool,
     pub(crate) submission_finished: bool,
+    pub(crate) lifecycle_changed: bool,
+    pub(crate) became_finalized: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -87,6 +97,10 @@ mod tests {
             input_writes: 2,
             output_bytes: 100,
             submit_pending: false,
+            submission_enter_written: None,
+            reader_closed: false,
+            parser_drained: false,
+            finalized: false,
         }
     }
 
@@ -167,6 +181,21 @@ mod tests {
         assert!(!idle.delta_to(&pending).unwrap().submission_finished);
         assert!(!idle.delta_to(&idle).unwrap().submission_finished);
         assert!(!pending.delta_to(&pending).unwrap().submission_finished);
+    }
+
+    #[test]
+    fn reader_and_parser_completion_exposes_finalization_transition() {
+        let mut before = observation();
+        before.exit_code = Some(0);
+        let mut after = before.clone();
+        after.reader_closed = true;
+        after.parser_drained = true;
+        after.finalized = true;
+
+        let delta = before.delta_to(&after).unwrap();
+        assert!(delta.lifecycle_changed);
+        assert!(delta.became_finalized);
+        assert!(!delta.process_state_changed);
     }
 
     #[test]

@@ -1,11 +1,15 @@
 use serde::{Deserialize, Serialize};
 
+use crate::control_contract::{ControlReceipt, ControlRequest};
+
 const IPC_ERROR_CODE_COMMAND_FAILED: &str = "ipc.command_failed";
 const IPC_ERROR_CATEGORY_COMMAND: &str = "command";
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct IpcRequest {
     pub(crate) args: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) control: Option<ControlRequest>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -19,6 +23,8 @@ pub(crate) struct IpcResponse {
     pub(crate) error_category: String,
     #[serde(default)]
     pub(crate) retryable: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) receipt: Option<ControlReceipt>,
 }
 
 impl IpcResponse {
@@ -30,6 +36,7 @@ impl IpcResponse {
             error_code: String::new(),
             error_category: String::new(),
             retryable: false,
+            receipt: None,
         }
     }
 
@@ -44,7 +51,30 @@ impl IpcResponse {
             error_code: IPC_ERROR_CODE_COMMAND_FAILED.to_owned(),
             error_category: IPC_ERROR_CATEGORY_COMMAND.to_owned(),
             retryable: false,
+            receipt: None,
         }
+    }
+
+    pub(crate) fn typed_failure(
+        error: impl Into<String>,
+        code: impl Into<String>,
+        category: impl Into<String>,
+        retryable: bool,
+    ) -> Self {
+        Self {
+            ok: false,
+            output: String::new(),
+            error: error.into(),
+            error_code: code.into(),
+            error_category: category.into(),
+            retryable,
+            receipt: None,
+        }
+    }
+
+    pub(crate) fn with_receipt(mut self, receipt: ControlReceipt) -> Self {
+        self.receipt = Some(receipt);
+        self
     }
 }
 
@@ -56,6 +86,7 @@ mod tests {
     fn request_and_response_are_newline_protocol_safe() {
         let request = IpcRequest {
             args: vec!["set-composer".to_owned(), "hello\nworld".to_owned()],
+            control: None,
         };
         let encoded = serde_json::to_string(&request).unwrap();
         assert!(!encoded.contains('\n'));

@@ -1,12 +1,12 @@
 use std::{
     cell::RefCell,
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     env,
     ffi::c_void,
     fs::OpenOptions,
     io::{Read, Write},
     mem, ptr,
-    sync::mpsc::{self, Receiver, Sender},
+    sync::mpsc::{self, Receiver, Sender, SyncSender},
     thread,
     time::{Duration, Instant, SystemTime},
 };
@@ -67,7 +67,9 @@ use windows_sys::Win32::{
     },
 };
 
+mod build_identity;
 mod commands;
+mod control_contract;
 mod event_journal;
 mod instances;
 pub mod operations;
@@ -77,13 +79,16 @@ mod script_audit;
 pub mod script_protocol;
 mod settings;
 mod tab_tree;
+mod terminal_lifecycle;
 mod terminal_observation;
 mod theme;
 mod ui_geometry;
+mod upgrade_identity;
 mod worker_supervisor;
 mod working_context;
 mod workspace;
 
+use build_identity::BuildIdentity;
 use commands::{
     BACKSPACE_INPUT, COMMAND_CATALOG, COMMAND_CATALOG_SCHEMA_VERSION, MUX_COMMANDS, MuxStatus,
     canonical_control_command, control_command_requests_help, control_command_usage, has_option,
@@ -91,14 +96,20 @@ use commands::{
     positional_values, screenshot_output_path, snapshot_modal_matches, supported_commands,
     tmux_key_bytes, validate_control_command,
 };
+use control_contract::{
+    Admission, ControlError, ControlReceipt, ControlRequest, ErrorCategory,
+    EventPosition as ControlEventPosition, OperationId, PayloadFingerprint, ReceiptOutcome,
+    ReplayWindow, RequestId, RequestIntent, ResolvedTarget, WaitCondition, WaitDescriptor,
+};
 use event_journal::{EVENT_CATALOG, EVENT_CATALOG_SCHEMA_VERSION, EventJournal, EventKind};
 use instances::{
     InstanceRegistration, discover_instances, instance_process_is_alive, prune_instance,
     register_instance,
 };
 use operations::{
-    OPERATION_CATALOG, OPERATION_CATALOG_SCHEMA_VERSION, OperationSpec, UI_TABS_HIDE,
-    UI_TABS_SET_WIDTH, UI_TABS_SHOW, UI_TABS_TOGGLE, validate_operation_args,
+    OPERATION_CATALOG, OPERATION_CATALOG_SCHEMA_VERSION, OperationClass, OperationSpec,
+    UI_TABS_HIDE, UI_TABS_SET_WIDTH, UI_TABS_SHOW, UI_TABS_TOGGLE, operation_for_args,
+    validate_operation_args,
 };
 use protocol::{IpcRequest, IpcResponse};
 use rmux_status::parse_status_windows;
@@ -113,6 +124,7 @@ use script_protocol::{
 };
 use settings::{AppConfig, config_path, load_config, save_config};
 use tab_tree::{TabTreeNode, TabTreeRow, tree_rows, would_create_cycle};
+use terminal_lifecycle::{BoundedByteRing, SubmissionState, TerminalLifecycle};
 use terminal_observation::{TerminalObservation, TerminalProcessState};
 use theme::{ThemeId, ThemePalette};
 use ui_geometry::{
@@ -120,6 +132,7 @@ use ui_geometry::{
     WorkspaceLayoutInput, reset_tabs_width, scrollback_for_thumb_top, tabs_width_from_drag,
     terminal_scrollbar_geometry, tree_anchor_x, tree_row_at_y, tree_row_geometry, workspace_layout,
 };
+use upgrade_identity::UpgradeIdentity;
 use worker_supervisor::{SupervisorError, WorkerSupervisor};
 use working_context::{
     CwdSource, CwdTracker, PROXY_MAX_BYTES, ProxyState, SecretValue, ShellKind, cwd_command,
@@ -174,6 +187,9 @@ const IPC_AUTOSTART_POLL: Duration = Duration::from_millis(100);
 const IPC_MAX_REQUEST_BYTES: u64 = 256 * 1024;
 const IPC_MAX_RESPONSE_BYTES: u64 = 8 * 1024 * 1024;
 const IPC_MAX_CONCURRENT_CONNECTIONS: usize = 32;
+const IPC_MAX_PENDING_REQUESTS: usize = 64;
+const IPC_REQUESTS_PER_TICK: usize = 16;
+const CONTROL_REPLAY_CAPACITY: usize = 512;
 const COMPOSER_SUBMIT_DELAY: Duration = Duration::from_millis(500);
 const RAW_OUTPUT_LIMIT: usize = 1024 * 1024;
 const PROXY_REDACTION_MAX_NEEDLES: usize = 8;
@@ -263,6 +279,11 @@ fn effective_theme(configured: ThemeId, draft: ThemeId, settings_open: bool) -> 
 struct IpcEnvelope {
     request: IpcRequest,
     respond_to: Sender<IpcResponse>,
+}
+
+struct PendingControlReceipt {
+    request: ControlRequest,
+    receipt: ControlReceipt,
 }
 
 pub fn run_gui_entry() -> i32 {
@@ -480,25 +501,69 @@ fn show_startup_error(error: &anyhow::Error) {
     write_best_effort_stderr(&text);
 }
 
+#[derive(Default)]
+struct CliControlOptions {
+    request_id: Option<String>,
+    deadline_ms: Option<u64>,
+    receipt_json: bool,
+}
+
 pub fn run_cli_entry() -> i32 {
     let mut arguments: Vec<String> = env::args().skip(1).collect();
-    if arguments
-        .first()
-        .is_some_and(|argument| argument == "--address")
-    {
-        if arguments.len() < 2 {
-            eprintln!("agenterm-cli --address requires HOST:PORT");
-            return 2;
+    let mut control_options = CliControlOptions::default();
+    loop {
+        match arguments.first().map(String::as_str) {
+            Some("--address") => {
+                if arguments.len() < 2 {
+                    eprintln!("agenterm-cli --address requires HOST:PORT");
+                    return 2;
+                }
+                arguments.remove(0);
+                let address = arguments.remove(0);
+                if let Err(error) = parse_loopback_ipc_address(&address) {
+                    eprintln!("{error:#}");
+                    return 2;
+                }
+                IPC_ADDRESS_OVERRIDE.with(|override_address| {
+                    *override_address.borrow_mut() = Some(address);
+                });
+            }
+            Some("--request-id") => {
+                if arguments.len() < 2 {
+                    eprintln!("agenterm-cli --request-id requires an ID");
+                    return 2;
+                }
+                arguments.remove(0);
+                let value = arguments.remove(0);
+                if let Err(error) = RequestId::new(value.clone()) {
+                    eprintln!("{error}");
+                    return 2;
+                }
+                control_options.request_id = Some(value);
+            }
+            Some("--deadline-ms") => {
+                if arguments.len() < 2 {
+                    eprintln!("agenterm-cli --deadline-ms requires milliseconds");
+                    return 2;
+                }
+                arguments.remove(0);
+                let value = arguments.remove(0);
+                match value.parse::<u64>() {
+                    Ok(value) if (1..=60_000).contains(&value) => {
+                        control_options.deadline_ms = Some(value);
+                    }
+                    _ => {
+                        eprintln!("agenterm-cli --deadline-ms must be from 1 to 60000");
+                        return 2;
+                    }
+                }
+            }
+            Some("--receipt-json") => {
+                arguments.remove(0);
+                control_options.receipt_json = true;
+            }
+            _ => break,
         }
-        arguments.remove(0);
-        let address = arguments.remove(0);
-        if let Err(error) = parse_loopback_ipc_address(&address) {
-            eprintln!("{error:#}");
-            return 2;
-        }
-        IPC_ADDRESS_OVERRIDE.with(|override_address| {
-            *override_address.borrow_mut() = Some(address);
-        });
     }
     if arguments
         .first()
@@ -526,7 +591,7 @@ pub fn run_cli_entry() -> i32 {
         );
         return 2;
     }
-    run_cli(arguments)
+    run_cli(arguments, control_options)
 }
 
 pub fn run_mux_entry() -> i32 {
@@ -629,7 +694,7 @@ pub fn run_mux_entry() -> i32 {
     IPC_ADDRESS_OVERRIDE.with(|override_address| {
         *override_address.borrow_mut() = address;
     });
-    run_cli(arguments)
+    run_cli(arguments, CliControlOptions::default())
 }
 
 fn run_gui(no_activate: bool) -> Result<()> {
@@ -1245,8 +1310,10 @@ fn state_mut(window: HWND) -> Option<&'static mut AppState> {
 
 enum PtyEvent {
     Output(Vec<u8>),
+    ReaderClosed,
+    ReaderError(String),
     Exited(u32),
-    Error(String),
+    ProcessError(String),
 }
 
 #[derive(Default)]
@@ -1294,9 +1361,11 @@ struct TerminalTab {
     last_size: (u16, u16),
     input_bytes: usize,
     input_writes: usize,
-    pending_submit_at: Option<Instant>,
+    submission: SubmissionState,
+    submission_enter_written: Option<bool>,
+    lifecycle: TerminalLifecycle,
     output_bytes: usize,
-    raw_output: Vec<u8>,
+    raw_output: BoundedByteRing,
 }
 
 struct TerminalLaunch {
@@ -1352,6 +1421,7 @@ fn redact_proxy_stream_chunk(
 
 impl TerminalTab {
     fn observation(&self) -> TerminalObservation {
+        let process_finished = self.exited.is_some() || self.error.is_some();
         TerminalObservation {
             process_id: self.process_id,
             exit_code: self.exited,
@@ -1359,7 +1429,11 @@ impl TerminalTab {
             input_bytes: self.input_bytes,
             input_writes: self.input_writes,
             output_bytes: self.output_bytes,
-            submit_pending: self.pending_submit_at.is_some(),
+            submit_pending: self.submission.is_pending(),
+            submission_enter_written: self.submission_enter_written,
+            reader_closed: self.lifecycle.reader_closed(),
+            parser_drained: self.lifecycle.parser_drained(),
+            finalized: self.lifecycle.finalized(process_finished),
         }
     }
 
@@ -1401,6 +1475,17 @@ impl TerminalTab {
             .map(SecretValue::expose_bytes)
             .collect::<Vec<_>>();
         redact_proxy_stream_chunk(&mut self.proxy_redaction_pending, &needles, bytes, flush)
+    }
+
+    fn finish_output_stream(&mut self) {
+        if self.lifecycle.reader_closed() {
+            return;
+        }
+        let tail = self.redact_proxy_output(&[], true);
+        self.output_bytes += tail.len();
+        self.parser.process(&tail);
+        self.raw_output.extend(&tail);
+        self.lifecycle.close_reader_after_parser_drain();
     }
 
     fn spawn(launch: TerminalLaunch) -> Result<Self> {
@@ -1479,7 +1564,13 @@ impl TerminalTab {
             let mut buffer = [0_u8; 16 * 1024];
             loop {
                 match reader.io().read(&mut buffer) {
-                    Ok(0) => break,
+                    Ok(0) => {
+                        let _ = output_sender.send(PtyEvent::ReaderClosed);
+                        unsafe {
+                            PostMessageW(wake_window as HWND, WM_APP_WAKE, 0, 0);
+                        }
+                        break;
+                    }
                     Ok(size) => {
                         if output_sender
                             .send(PtyEvent::Output(buffer[..size].to_vec()))
@@ -1492,7 +1583,7 @@ impl TerminalTab {
                         }
                     }
                     Err(error) => {
-                        let _ = output_sender.send(PtyEvent::Error(error.to_string()));
+                        let _ = output_sender.send(PtyEvent::ReaderError(error.to_string()));
                         unsafe {
                             PostMessageW(wake_window as HWND, WM_APP_WAKE, 0, 0);
                         }
@@ -1508,7 +1599,7 @@ impl TerminalTab {
                     wait_child.close_pseudoconsole();
                     PtyEvent::Exited(status.code().unwrap_or(1) as u32)
                 }
-                Err(error) => PtyEvent::Error(format!("process wait failed: {error}")),
+                Err(error) => PtyEvent::ProcessError(format!("process wait failed: {error}")),
             };
             let _ = sender.send(event);
             unsafe {
@@ -1557,9 +1648,11 @@ impl TerminalTab {
             last_size: (initial_size.rows, initial_size.cols),
             input_bytes: 0,
             input_writes: 0,
-            pending_submit_at: None,
+            submission: SubmissionState::default(),
+            submission_enter_written: None,
+            lifecycle: TerminalLifecycle::default(),
             output_bytes: 0,
-            raw_output: Vec::new(),
+            raw_output: BoundedByteRing::new(RAW_OUTPUT_LIMIT),
         })
     }
 
@@ -1569,40 +1662,37 @@ impl TerminalTab {
             changed = true;
             match event {
                 PtyEvent::Output(bytes) => {
+                    if self.lifecycle.reader_closed() {
+                        self.error = Some(
+                            "terminal output arrived after the reader was finalized".to_owned(),
+                        );
+                        continue;
+                    }
                     let bytes = self.redact_proxy_output(&bytes, false);
                     self.output_bytes += bytes.len();
                     self.parser.process(&bytes);
                     if let Some(path) = self.parser.callbacks_mut().pending_cwd.take() {
                         self.cwd.confirm_osc7(path);
                     }
-                    self.raw_output.extend_from_slice(&bytes);
-                    if self.raw_output.len() > RAW_OUTPUT_LIMIT {
-                        let excess = self.raw_output.len() - RAW_OUTPUT_LIMIT;
-                        self.raw_output.drain(..excess);
-                    }
+                    self.raw_output.extend(&bytes);
+                }
+                PtyEvent::ReaderClosed => {
+                    self.finish_output_stream();
+                }
+                PtyEvent::ReaderError(error) => {
+                    self.finish_output_stream();
+                    self.error = Some(format!("terminal output failed: {error}"));
                 }
                 PtyEvent::Exited(code) => {
-                    let tail = self.redact_proxy_output(&[], true);
-                    self.output_bytes += tail.len();
-                    self.parser.process(&tail);
-                    self.raw_output.extend_from_slice(&tail);
                     self.exited = Some(code);
                 }
-                PtyEvent::Error(error) => {
-                    let tail = self.redact_proxy_output(&[], true);
-                    self.output_bytes += tail.len();
-                    self.parser.process(&tail);
-                    self.raw_output.extend_from_slice(&tail);
+                PtyEvent::ProcessError(error) => {
                     self.error = Some(error);
                 }
             }
         }
-        if self
-            .pending_submit_at
-            .is_some_and(|deadline| Instant::now() >= deadline)
-        {
-            self.pending_submit_at = None;
-            self.send(b"\r");
+        if self.submission.take_if_due(Instant::now()) {
+            self.submission_enter_written = Some(self.send(b"\r"));
             changed = true;
         }
         changed
@@ -1655,7 +1745,7 @@ impl TerminalTab {
     }
 
     fn send(&mut self, bytes: &[u8]) -> bool {
-        if self.exited.is_some() {
+        if self.exited.is_some() || self.error.is_some() || self.lifecycle.reader_closed() {
             return false;
         }
         if let Err(error) = self.master.write_all(bytes) {
@@ -1669,18 +1759,23 @@ impl TerminalTab {
     }
 
     fn submit(&mut self, text: &str) -> bool {
-        if self.pending_submit_at.is_some() || !self.send(text.as_bytes()) {
+        if self.submission.is_pending() || !self.send(text.as_bytes()) {
             return false;
         }
         // Interactive TUIs classify rapid character streams as paste and
         // temporarily reinterpret Enter as a pasted newline. Schedule Enter
         // after that suppression window without blocking the GUI thread.
-        self.pending_submit_at = Some(Instant::now() + COMPOSER_SUBMIT_DELAY);
-        true
+        self.submission_enter_written = None;
+        self.submission
+            .schedule(Instant::now(), COMPOSER_SUBMIT_DELAY)
     }
 
     fn submit_sensitive(&mut self, text: &str) -> bool {
-        if self.pending_submit_at.is_some() || self.exited.is_some() {
+        if self.submission.is_pending()
+            || self.exited.is_some()
+            || self.error.is_some()
+            || self.lifecycle.reader_closed()
+        {
             return false;
         }
         if let Err(error) = self.master.write_all(text.as_bytes()) {
@@ -1689,8 +1784,9 @@ impl TerminalTab {
         }
         self.input_bytes += PROXY_REDACTION_MARKER.len();
         self.input_writes += 1;
-        self.pending_submit_at = Some(Instant::now() + COMPOSER_SUBMIT_DELAY);
-        true
+        self.submission_enter_written = None;
+        self.submission
+            .schedule(Instant::now(), COMPOSER_SUBMIT_DELAY)
     }
 
     fn send_native_mouse_click(&mut self, x: u16, y: u16) -> Result<()> {
@@ -2123,6 +2219,8 @@ struct AppState {
     session_name: String,
     started_at: SystemTime,
     event_journal: EventJournal,
+    replay_window: ReplayWindow,
+    pending_control_receipts: HashMap<u64, PendingControlReceipt>,
     ipc_receiver: Receiver<IpcEnvelope>,
     clipboard_sender: Sender<ClipboardPaste>,
     clipboard_receiver: Receiver<ClipboardPaste>,
@@ -2216,6 +2314,8 @@ impl AppState {
             session_name,
             started_at: SystemTime::now(),
             event_journal: EventJournal::new(),
+            replay_window: ReplayWindow::new(CONTROL_REPLAY_CAPACITY),
+            pending_control_receipts: HashMap::new(),
             ipc_receiver,
             clipboard_sender,
             clipboard_receiver,
@@ -2827,6 +2927,7 @@ impl AppState {
             changed |= self.apply_terminal_paste(paste);
         }
         let mut polled_events = Vec::new();
+        let mut completed_submissions = Vec::new();
         for tab in &mut self.tabs {
             let observation_before = tab.observation();
             let cwd_before = tab.cwd.clone();
@@ -2834,6 +2935,13 @@ impl AppState {
             let mut observation_after = tab.observation();
             match observation_before.delta_to(&observation_after) {
                 Ok(delta) => {
+                    if delta.submission_finished {
+                        completed_submissions.push((
+                            tab.id,
+                            observation_after.submission_enter_written.unwrap_or(false),
+                            observation_after.finalized,
+                        ));
+                    }
                     if delta.output_advanced_by > 0 {
                         polled_events.push((
                             EventKind::TerminalOutput,
@@ -2844,7 +2952,7 @@ impl AppState {
                             }),
                         ));
                     }
-                    if delta.process_state_changed {
+                    if delta.process_state_changed || delta.lifecycle_changed {
                         let state = match observation_after.process_state() {
                             TerminalProcessState::Running => "running",
                             TerminalProcessState::Exited { .. } => "dead",
@@ -2857,6 +2965,10 @@ impl AppState {
                                 "state": state,
                                 "exit_code": observation_after.exit_code,
                                 "error": observation_after.error,
+                                "reader_closed": observation_after.reader_closed,
+                                "parser_drained": observation_after.parser_drained,
+                                "finalized": observation_after.finalized,
+                                "became_finalized": delta.became_finalized,
                             }),
                         ));
                     }
@@ -2871,6 +2983,10 @@ impl AppState {
                             "state": "error",
                             "exit_code": observation_after.exit_code,
                             "error": observation_after.error,
+                            "reader_closed": observation_after.reader_closed,
+                            "parser_drained": observation_after.parser_drained,
+                            "finalized": observation_after.finalized,
+                            "became_finalized": false,
                         }),
                     ));
                 }
@@ -2890,13 +3006,52 @@ impl AppState {
         for (kind, tab_id, payload) in polled_events {
             self.event_journal.commit(kind, Some(tab_id), payload);
         }
-        let envelopes: Vec<IpcEnvelope> = self.ipc_receiver.try_iter().collect();
+        for (tab_id, enter_written, terminal_finalized) in completed_submissions {
+            let Some(pending) = self.pending_control_receipts.remove(&tab_id) else {
+                continue;
+            };
+            let completion_event = self.event_journal.commit_correlated(
+                EventKind::ComposerSubmissionFinished,
+                Some(tab_id),
+                Some(pending.request.request_id.as_str().to_owned()),
+                Some(pending.request.operation_id.as_str().to_owned()),
+                serde_json::json!({
+                    "enter_written": enter_written,
+                    "terminal_finalized": terminal_finalized,
+                }),
+            );
+            let mut receipt = pending.receipt;
+            receipt.after_position = Some(ControlEventPosition {
+                epoch: completion_event.epoch,
+                sequence: completion_event.sequence,
+            });
+            receipt.wait = None;
+            if enter_written {
+                receipt.outcome = ReceiptOutcome::Committed;
+            } else {
+                receipt.outcome = ReceiptOutcome::OutcomeUnknown;
+                receipt.result = None;
+                receipt.error = Some(ControlError::new(
+                    "terminal_submission_incomplete",
+                    ErrorCategory::Precondition,
+                    "composer text was written, but the terminal did not accept the final Enter",
+                    false,
+                ));
+            }
+            if let Err(error) = self.replay_window.complete(&pending.request, receipt) {
+                self.last_error = Some(format!(
+                    "failed to finalize control receipt for tab @{tab_id}: {error}"
+                ));
+            }
+        }
+        let envelopes: Vec<IpcEnvelope> = self
+            .ipc_receiver
+            .try_iter()
+            .take(IPC_REQUESTS_PER_TICK)
+            .collect();
         changed |= !envelopes.is_empty();
         for envelope in envelopes {
-            let response = match validate_operation_args(&envelope.request.args) {
-                Ok(operation) => self.execute_command(&envelope.request.args, operation),
-                Err(error) => IpcResponse::failure(error),
-            };
+            let response = self.execute_ipc_request(envelope.request);
             let _ = envelope.respond_to.send(response);
         }
         if self.close_requested {
@@ -4058,7 +4213,7 @@ impl AppState {
             unsafe { InvalidateRect(self.window, ptr::null(), 0) };
             return;
         }
-        if self.tabs[position].pending_submit_at.is_some() {
+        if self.tabs[position].submission.is_pending() {
             self.last_error =
                 Some("system menu paste failed: composer submission is pending".to_owned());
             unsafe { InvalidateRect(self.window, ptr::null(), 0) };
@@ -4777,7 +4932,7 @@ impl AppState {
         let Some(position) = self.active_position() else {
             return;
         };
-        if self.tabs[position].pending_submit_at.is_some() {
+        if self.tabs[position].submission.is_pending() {
             self.feedback = Some("Composer submission pending; terminal input paused".to_owned());
             unsafe { InvalidateRect(self.window, ptr::null(), 0) };
             return;
@@ -4815,7 +4970,7 @@ impl AppState {
         let Some(position) = self.active_position() else {
             return;
         };
-        if self.tabs[position].pending_submit_at.is_some() {
+        if self.tabs[position].submission.is_pending() {
             self.feedback = Some("Composer submission pending; terminal input paused".to_owned());
             unsafe { InvalidateRect(self.window, ptr::null(), 0) };
             return;
@@ -6355,6 +6510,238 @@ impl AppState {
         .unwrap_or_else(|error| format!(r#"{{"error":"{error}"}}"#))
     }
 
+    fn control_event_position(&self) -> ControlEventPosition {
+        let position = self.event_journal.position();
+        ControlEventPosition {
+            epoch: position.epoch,
+            sequence: position.sequence,
+        }
+    }
+
+    fn resolved_control_target(&self, args: &[String]) -> ResolvedTarget {
+        let command = args.first().map(String::as_str).unwrap_or_default();
+        let tab_scoped = option_value(args, "-t").is_some()
+            || matches!(
+                command,
+                "capture-pane"
+                    | "display-message"
+                    | "dump-cells"
+                    | "focus"
+                    | "inspect"
+                    | "kill-window"
+                    | "rename-window"
+                    | "scroll-pane"
+                    | "send-composer"
+                    | "send-keys"
+                    | "send-mouse"
+                    | "set-composer"
+                    | "set-tab-note"
+                    | "show-composer"
+                    | "show-tab-note"
+            );
+        let tab_id = tab_scoped
+            .then(|| self.target_position(option_value(args, "-t")))
+            .flatten()
+            .map(|position| self.tabs[position].id);
+        let position = self.event_journal.position();
+        ResolvedTarget {
+            server_pid: std::process::id(),
+            server_address: ipc_address(),
+            server_epoch: position.epoch,
+            session: self.session_name.clone(),
+            tab_id,
+        }
+    }
+
+    fn response_from_receipt(receipt: ControlReceipt) -> IpcResponse {
+        if let Some(error) = &receipt.error {
+            return IpcResponse::typed_failure(
+                error.message.clone(),
+                error.code.clone(),
+                error.category.as_str(),
+                error.retryable,
+            )
+            .with_receipt(receipt);
+        }
+        let output = receipt
+            .result
+            .as_ref()
+            .and_then(|result| result["output"].as_str())
+            .unwrap_or_default()
+            .to_owned();
+        IpcResponse::success(output).with_receipt(receipt)
+    }
+
+    fn execute_ipc_request(&mut self, request: IpcRequest) -> IpcResponse {
+        let Some(control) = request.control else {
+            return match validate_operation_args(&request.args) {
+                Ok(operation) => self.execute_command(&request.args, operation),
+                Err(error) => IpcResponse::typed_failure(
+                    error,
+                    "operation_invalid_arguments",
+                    "validation",
+                    false,
+                ),
+            };
+        };
+        if control.schema_version != control_contract::CONTROL_CONTRACT_SCHEMA_VERSION {
+            return IpcResponse::typed_failure(
+                "unsupported control contract schema version",
+                "control_schema_unsupported",
+                "unsupported",
+                false,
+            );
+        }
+        let expected_identity = control_request_identity(&request.args);
+        let expected_fingerprint = control_payload_fingerprint(&request.args);
+        let identity_matches = expected_identity.as_ref().is_ok_and(|(operation, intent)| {
+            operation == &control.operation_id && intent == &control.intent
+        });
+        let fingerprint_matches = expected_fingerprint
+            .as_ref()
+            .is_ok_and(|fingerprint| fingerprint == &control.payload_fingerprint);
+        if !identity_matches || !fingerprint_matches {
+            let error = ControlError::new(
+                "control_request_mismatch",
+                ErrorCategory::Validation,
+                "control metadata does not match the command payload",
+                false,
+            );
+            let receipt = ControlReceipt::rejected(&control, error.clone());
+            return IpcResponse::typed_failure(
+                error.message,
+                error.code,
+                error.category.as_str(),
+                error.retryable,
+            )
+            .with_receipt(receipt);
+        }
+
+        match self.replay_window.admit(&control, unix_time_ms()) {
+            Admission::Replay { receipt } | Admission::Reject { receipt } => {
+                return Self::response_from_receipt(receipt);
+            }
+            Admission::Execute { .. } => {}
+        }
+
+        let before_position = self.control_event_position();
+        let mut resolved = self.resolved_control_target(&request.args);
+        let response = match validate_operation_args(&request.args) {
+            Ok(operation) => self.execute_command(&request.args, operation),
+            Err(error) => IpcResponse::typed_failure(
+                error,
+                "operation_invalid_arguments",
+                "validation",
+                false,
+            ),
+        };
+        let after_position = self.control_event_position();
+        if resolved.tab_id.is_none()
+            && let Some(id) = response
+                .output
+                .trim()
+                .strip_prefix('@')
+                .and_then(|value| value.parse::<u64>().ok())
+        {
+            resolved.tab_id = Some(id);
+        }
+        let error = (!response.ok).then(|| {
+            ControlError::new(
+                if response.error_code.is_empty() {
+                    "command_outcome_unknown"
+                } else {
+                    response.error_code.as_str()
+                },
+                error_category_from_wire(&response.error_category),
+                response.error.clone(),
+                response.retryable,
+            )
+        });
+        let mut outcome = if response.ok {
+            ReceiptOutcome::Committed
+        } else if matches!(
+            error.as_ref().map(|error| error.category),
+            Some(
+                ErrorCategory::Validation
+                    | ErrorCategory::Conflict
+                    | ErrorCategory::NotFound
+                    | ErrorCategory::Precondition
+                    | ErrorCategory::Policy
+                    | ErrorCategory::Unsupported
+            )
+        ) {
+            ReceiptOutcome::NoOp
+        } else {
+            ReceiptOutcome::OutcomeUnknown
+        };
+        let wait = (response.ok && control.operation_id.as_str() == "command.send.composer")
+            .then_some(resolved.tab_id)
+            .flatten()
+            .and_then(|tab_id| {
+                let position = self.tabs.iter().position(|tab| tab.id == tab_id)?;
+                self.tabs[position]
+                    .submission
+                    .is_pending()
+                    .then(|| WaitDescriptor {
+                        condition: WaitCondition::SubmissionComplete,
+                        target: resolved.clone(),
+                        minimum_position: after_position.clone(),
+                        event_kind: Some("composer.submission-finished".to_owned()),
+                        deadline_unix_ms: control.deadline_unix_ms,
+                    })
+            });
+        if wait.is_some() {
+            outcome = ReceiptOutcome::Accepted;
+        }
+        let receipt = ControlReceipt {
+            schema_version: control_contract::CONTROL_CONTRACT_SCHEMA_VERSION,
+            request_id: control.request_id.clone(),
+            operation_id: control.operation_id.clone(),
+            payload_fingerprint: control.payload_fingerprint.clone(),
+            outcome,
+            resolved: Some(resolved),
+            before_position: Some(before_position),
+            after_position: Some(after_position),
+            result: response
+                .ok
+                .then(|| serde_json::json!({ "output": response.output })),
+            error,
+            wait,
+        };
+        let completion = if receipt.outcome == ReceiptOutcome::Accepted {
+            self.replay_window
+                .update_accepted(&control, receipt.clone())
+        } else {
+            self.replay_window.complete(&control, receipt.clone())
+        };
+        if let Err(error) = completion {
+            return IpcResponse::typed_failure(
+                format!("failed to finalize control receipt: {error}"),
+                "control_receipt_internal",
+                "internal",
+                false,
+            );
+        }
+        if receipt.outcome == ReceiptOutcome::Accepted {
+            let Some(tab_id) = receipt.resolved.as_ref().and_then(|target| target.tab_id) else {
+                return IpcResponse::typed_failure(
+                    "accepted control request did not resolve a terminal",
+                    "control_receipt_internal",
+                    "internal",
+                    false,
+                );
+            };
+            self.pending_control_receipts.insert(
+                tab_id,
+                PendingControlReceipt {
+                    request: control,
+                    receipt: receipt.clone(),
+                },
+            );
+        }
+        response.with_receipt(receipt)
+    }
+
     fn execute_command(
         &mut self,
         args: &[String],
@@ -6766,22 +7153,38 @@ impl AppState {
             }
             "send" | "send-keys" => {
                 let Some(position) = self.target_position(option_value(args, "-t")) else {
-                    return IpcResponse::failure("can't find pane");
+                    return IpcResponse::typed_failure(
+                        "can't find pane",
+                        "operation_target_not_found",
+                        "not_found",
+                        false,
+                    );
                 };
-                if self.tabs[position].pending_submit_at.is_some() {
-                    return IpcResponse::failure(
+                if self.tabs[position].submission.is_pending() {
+                    return IpcResponse::typed_failure(
                         "composer submission is pending; wait with \
                          `wait-pane --submit-complete` before sending keys",
+                        "operation_conflict",
+                        "conflict",
+                        true,
                     );
                 }
                 let literal = args.iter().any(|arg| arg == "-l");
                 for key in positional_values(args, &["-t"], &["-l", "-R", "-X"]) {
-                    if literal {
-                        self.tabs[position].send(key.as_bytes());
+                    let sent = if literal {
+                        self.tabs[position].send(key.as_bytes())
                     } else if let Some(bytes) = tmux_key_bytes(key) {
-                        self.tabs[position].send(&bytes);
+                        self.tabs[position].send(&bytes)
                     } else {
-                        self.tabs[position].send(key.as_bytes());
+                        self.tabs[position].send(key.as_bytes())
+                    };
+                    if !sent {
+                        return IpcResponse::typed_failure(
+                            "terminal input was not accepted because the pane is no longer writable",
+                            "terminal_not_writable",
+                            "precondition",
+                            false,
+                        );
                     }
                 }
                 IpcResponse::success("")
@@ -6828,7 +7231,12 @@ impl AppState {
             }
             "capturep" | "capture-pane" => {
                 let Some(position) = self.target_position(option_value(args, "-t")) else {
-                    return IpcResponse::failure("can't find pane");
+                    return IpcResponse::typed_failure(
+                        "can't find pane",
+                        "operation_target_not_found",
+                        "not_found",
+                        false,
+                    );
                 };
                 let requested_maximum = match option_value(args, "--max-bytes") {
                     Some(value) => match value.parse::<usize>() {
@@ -6843,7 +7251,7 @@ impl AppState {
                 };
                 let json = args.iter().any(|argument| argument == "--json");
                 let contents = if args.iter().any(|argument| argument == "--raw-escaped") {
-                    String::from_utf8_lossy(&self.tabs[position].raw_output)
+                    String::from_utf8_lossy(&self.tabs[position].raw_output.to_vec())
                         .escape_debug()
                         .to_string()
                 } else {
@@ -6954,19 +7362,30 @@ impl AppState {
                             IpcResponse::failure(format!("{error:#}"))
                         }
                         Err(_) => {
-                            self.tabs[position].send(
+                            if self.tabs[position].send(
                                 format!("\x1b[<{button};{};{}{suffix}", x + 1, y + 1).as_bytes(),
-                            );
-                            IpcResponse::success("")
+                            ) {
+                                IpcResponse::success("")
+                            } else {
+                                IpcResponse::failure(
+                                    "terminal mouse input was not accepted because the pane is no longer writable",
+                                )
+                            }
                         }
                     };
                 }
                 if protocol != "auto" && protocol != "sgr" && protocol != "native" {
                     return IpcResponse::failure(format!("unknown mouse protocol: {protocol}"));
                 }
-                self.tabs[position]
-                    .send(format!("\x1b[<{button};{};{}{suffix}", x + 1, y + 1).as_bytes());
-                IpcResponse::success("")
+                if self.tabs[position]
+                    .send(format!("\x1b[<{button};{};{}{suffix}", x + 1, y + 1).as_bytes())
+                {
+                    IpcResponse::success("")
+                } else {
+                    IpcResponse::failure(
+                        "terminal mouse input was not accepted because the pane is no longer writable",
+                    )
+                }
             }
             "active-window" | "active-tab" => {
                 let Some(position) = self.active_position() else {
@@ -7009,10 +7428,15 @@ impl AppState {
                         }))
                         .unwrap_or_default(),
                     ),
-                    Err(error) => IpcResponse::failure(error.to_json().to_string()),
+                    Err(error) => IpcResponse::typed_failure(
+                        error.to_json().to_string(),
+                        error.code(),
+                        "precondition",
+                        false,
+                    ),
                 }
             }
-            "protocol-info" => IpcResponse::success(protocol_info_json()),
+            "protocol-info" => IpcResponse::success(protocol_info_json("running_host")),
             "focus" => {
                 let surface = args.get(1).map(String::as_str).unwrap_or("terminal");
                 if let Some(position) = self.target_position(option_value(args, "-t")) {
@@ -7473,6 +7897,9 @@ impl AppState {
                             "input_bytes": observation.input_bytes,
                             "input_writes": observation.input_writes,
                             "submit_pending": observation.submit_pending,
+                            "reader_closed": observation.reader_closed,
+                            "parser_drained": observation.parser_drained,
+                            "finalized": observation.finalized,
                             "scrollback_offset": tab.parser.screen().scrollback(),
                             "output_bytes": observation.output_bytes,
                             "composer": if tab.sensitive_composer.is_some() {
@@ -7870,17 +8297,139 @@ fn ipc_socket_addr() -> Result<std::net::SocketAddr> {
     parse_loopback_ipc_address(&ipc_address())
 }
 
-fn send_ipc_request(args: Vec<String>) -> Result<IpcResponse> {
-    send_ipc_request_to(&ipc_address(), args)
+fn unix_time_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .min(u128::from(u64::MAX)) as u64
 }
 
-fn send_ipc_request_to(address: &str, args: Vec<String>) -> Result<IpcResponse> {
-    send_ipc_request_to_with_timeout(address, args, IPC_TIMEOUT)
+fn current_upgrade_identity() -> UpgradeIdentity {
+    let build = BuildIdentity::current();
+    let known =
+        |value: &str| (value != "unknown" && !value.trim().is_empty()).then(|| value.to_owned());
+    UpgradeIdentity {
+        protocol_version: Some(1),
+        version: Some(env!("CARGO_PKG_VERSION").to_owned()),
+        git_commit: known(build.git_commit),
+        profile: known(build.profile),
+        cargo_lock_sha256: known(build.cargo_lock_sha256),
+        artifact_manifest_sha256: known(build.artifact_manifest_sha256),
+    }
+}
+
+fn control_request_identity(args: &[String]) -> Result<(OperationId, RequestIntent)> {
+    if let Some(operation) = operation_for_args(args).map_err(anyhow::Error::msg)? {
+        let intent = if operation.class == OperationClass::Observe {
+            RequestIntent::Query
+        } else {
+            RequestIntent::Mutation
+        };
+        return Ok((
+            OperationId::new(operation.id).map_err(anyhow::Error::msg)?,
+            intent,
+        ));
+    }
+    let command = args.first().map(String::as_str).unwrap_or("unknown");
+    let intent = if matches!(
+        canonical_control_command(command),
+        "active-window"
+            | "capture-pane"
+            | "display-message"
+            | "dump-cells"
+            | "get-settings"
+            | "has-session"
+            | "inspect"
+            | "list-panes"
+            | "list-sessions"
+            | "list-tab-tree"
+            | "list-windows"
+            | "read-events"
+            | "show-composer"
+            | "show-options"
+            | "show-tab-note"
+            | "show-tab-parent"
+            | "workspace-info"
+    ) {
+        RequestIntent::Query
+    } else {
+        RequestIntent::Mutation
+    };
+    let identity = format!(
+        "command.{}",
+        canonical_control_command(command).replace('-', ".")
+    );
+    Ok((
+        OperationId::new(identity).map_err(anyhow::Error::msg)?,
+        intent,
+    ))
+}
+
+fn control_payload_fingerprint(args: &[String]) -> Result<PayloadFingerprint> {
+    Ok(PayloadFingerprint::from_bytes(&serde_json::to_vec(args)?))
+}
+
+fn error_category_from_wire(category: &str) -> ErrorCategory {
+    match category {
+        "validation" => ErrorCategory::Validation,
+        "conflict" => ErrorCategory::Conflict,
+        "not_found" => ErrorCategory::NotFound,
+        "precondition" => ErrorCategory::Precondition,
+        "availability" => ErrorCategory::Availability,
+        "timeout" => ErrorCategory::Timeout,
+        "policy" => ErrorCategory::Policy,
+        "unsupported" => ErrorCategory::Unsupported,
+        _ => ErrorCategory::Internal,
+    }
+}
+
+fn build_control_request(
+    args: &[String],
+    request_id: Option<String>,
+    deadline_ms: u64,
+) -> Result<ControlRequest> {
+    static NEXT_REQUEST_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let request_id = request_id.unwrap_or_else(|| {
+        format!(
+            "client:{}:{}:{}",
+            std::process::id(),
+            unix_time_ms(),
+            NEXT_REQUEST_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        )
+    });
+    let (operation_id, intent) = control_request_identity(args)?;
+    Ok(ControlRequest::new(
+        RequestId::new(request_id).map_err(anyhow::Error::msg)?,
+        operation_id,
+        control_payload_fingerprint(args)?,
+        intent,
+        Some(unix_time_ms().saturating_add(deadline_ms)),
+    ))
+}
+
+fn send_ipc_request(args: Vec<String>) -> Result<IpcResponse> {
+    let control = build_control_request(&args, None, IPC_TIMEOUT.as_millis() as u64)?;
+    send_ipc_request_to_with_timeout(&ipc_address(), args, Some(control), IPC_TIMEOUT)
+}
+
+fn send_control_request(args: Vec<String>, control: ControlRequest) -> Result<IpcResponse> {
+    send_ipc_request_to_with_timeout(&ipc_address(), args, Some(control), IPC_TIMEOUT)
+}
+
+fn send_ipc_request_to_timeout(
+    address: &str,
+    args: Vec<String>,
+    timeout: Duration,
+) -> Result<IpcResponse> {
+    let control = build_control_request(&args, None, timeout.as_millis() as u64)?;
+    send_ipc_request_to_with_timeout(address, args, Some(control), timeout)
 }
 
 fn send_ipc_request_to_with_timeout(
     address: &str,
     args: Vec<String>,
+    control: Option<ControlRequest>,
     timeout: Duration,
 ) -> Result<IpcResponse> {
     let socket = parse_loopback_ipc_address(address)?;
@@ -7898,7 +8447,7 @@ fn send_ipc_request_to_with_timeout(
     let mut connection = std::net::TcpStream::connect_timeout(&socket, connect_timeout)
         .context("AgenTerm server is not running")?;
     connection.set_write_timeout(Some(remaining()?))?;
-    connection.write_all(serde_json::to_string(&IpcRequest { args })?.as_bytes())?;
+    connection.write_all(serde_json::to_string(&IpcRequest { args, control })?.as_bytes())?;
     connection.set_write_timeout(Some(remaining()?))?;
     connection.write_all(b"\n")?;
     connection.set_write_timeout(Some(remaining()?))?;
@@ -7921,6 +8470,7 @@ fn run_list_instances(arguments: &[String]) -> i32 {
         }
     };
     let mut views = Vec::new();
+    let staged_identity = current_upgrade_identity();
     for instance in instances {
         if !instance_process_is_alive(instance.record.pid) {
             if let Err(error) = prune_instance(&instance) {
@@ -7929,7 +8479,7 @@ fn run_list_instances(arguments: &[String]) -> i32 {
             }
             continue;
         }
-        let response = send_ipc_request_to_with_timeout(
+        let response = send_ipc_request_to_timeout(
             &instance.record.address,
             vec!["ui-snapshot".to_owned()],
             IPC_DISCOVERY_TIMEOUT,
@@ -7979,6 +8529,9 @@ fn run_list_instances(arguments: &[String]) -> i32 {
         let event_sequence = snapshot
             .as_ref()
             .and_then(|value| value["event_position"]["sequence"].as_u64());
+        let running_identity = instance.record.upgrade_identity.clone().unwrap_or_default();
+        let upgrade = running_identity.compare_staged(&staged_identity);
+        let upgrade_explanation = upgrade.explanation();
         views.push(serde_json::json!({
             "pid": instance.record.pid,
             "address": instance.record.address,
@@ -7996,6 +8549,10 @@ fn run_list_instances(arguments: &[String]) -> i32 {
             "modal_kind": modal_kind,
             "event_epoch": event_epoch,
             "event_sequence": event_sequence,
+            "running_identity": running_identity,
+            "staged_identity": staged_identity,
+            "upgrade": upgrade,
+            "upgrade_explanation": upgrade_explanation,
         }));
     }
     if json {
@@ -8006,7 +8563,9 @@ fn run_list_instances(arguments: &[String]) -> i32 {
     } else if views.is_empty() {
         println!("No registered AgenTerm instances.");
     } else {
-        println!("PID\tADDRESS\tVERSION\tSTATUS\tWINDOW\tTABS\tACTIVE\tSESSION\tWORKSPACE");
+        println!(
+            "PID\tADDRESS\tVERSION\tSTATUS\tUPGRADE\tWINDOW\tTABS\tACTIVE\tSESSION\tWORKSPACE"
+        );
         for view in views {
             let window = match (
                 view["window_visible"].as_bool(),
@@ -8019,11 +8578,12 @@ fn run_list_instances(arguments: &[String]) -> i32 {
                 _ => "-",
             };
             println!(
-                "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
                 view["pid"].as_u64().unwrap_or_default(),
                 view["address"].as_str().unwrap_or_default(),
                 view["version"].as_str().unwrap_or_default(),
                 view["status"].as_str().unwrap_or_default(),
+                view["upgrade"]["status"].as_str().unwrap_or("unknown"),
                 window,
                 view["tab_count"].as_u64().unwrap_or_default(),
                 view["active_tab"].as_str().unwrap_or("-"),
@@ -8038,7 +8598,7 @@ fn run_list_instances(arguments: &[String]) -> i32 {
 fn start_ipc_server(window: HWND) -> Result<Receiver<IpcEnvelope>> {
     let listener = std::net::TcpListener::bind(ipc_socket_addr()?)
         .context("another AgenTerm server is already using the local IPC port")?;
-    let (sender, receiver) = mpsc::channel();
+    let (sender, receiver) = mpsc::sync_channel(IPC_MAX_PENDING_REQUESTS);
     let wake_window = window as isize;
     thread::spawn(move || {
         let active_connections = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -8101,7 +8661,7 @@ fn read_bounded_ipc_line(
 
 fn handle_ipc_connection(
     connection: std::net::TcpStream,
-    sender: &Sender<IpcEnvelope>,
+    sender: &SyncSender<IpcEnvelope>,
     wake_window: isize,
 ) {
     let _ = connection.set_read_timeout(Some(IPC_TIMEOUT));
@@ -8113,13 +8673,18 @@ fn handle_ipc_connection(
                 Ok(request) => {
                     let (response_sender, response_receiver) = mpsc::channel();
                     if sender
-                        .send(IpcEnvelope {
+                        .try_send(IpcEnvelope {
                             request,
                             respond_to: response_sender,
                         })
                         .is_err()
                     {
-                        IpcResponse::failure("AgenTerm GUI is shutting down")
+                        IpcResponse::typed_failure(
+                            "AgenTerm IPC mailbox is unavailable or full",
+                            "ipc_mailbox_unavailable",
+                            "availability",
+                            true,
+                        )
                     } else {
                         unsafe {
                             PostMessageW(wake_window as HWND, WM_APP_WAKE, 0, 0);
@@ -8143,7 +8708,7 @@ fn handle_ipc_connection(
     }
 }
 
-fn run_cli(arguments: Vec<String>) -> i32 {
+fn run_cli(arguments: Vec<String>, control_options: CliControlOptions) -> i32 {
     let mut arguments = arguments;
     if control_command_requests_help(&arguments) {
         let command = arguments.first().map(String::as_str).unwrap_or_default();
@@ -8237,8 +8802,8 @@ fn run_cli(arguments: Vec<String>) -> i32 {
         print!("{}", supported_commands());
         return 0;
     }
-    if command == "protocol-info" {
-        println!("{}", protocol_info_json());
+    if command == "protocol-info" && !has_option(&arguments, "--running") {
+        println!("{}", protocol_info_json("client_binary"));
         return 0;
     }
     if matches!(command, "list-instances" | "server-list") {
@@ -8278,7 +8843,18 @@ fn run_cli(arguments: Vec<String>) -> i32 {
             | "attach"
             | "start-server"
     );
-    let mut response = send_ipc_request(arguments.clone());
+    let control = match build_control_request(
+        &arguments,
+        control_options.request_id,
+        control_options.deadline_ms.unwrap_or(5_000),
+    ) {
+        Ok(control) => control,
+        Err(error) => {
+            eprintln!("{error:#}");
+            return 2;
+        }
+    };
+    let mut response = send_control_request(arguments.clone(), control.clone());
     if response.is_err()
         && may_start_server
         && let Ok(executable) = gui_executable_path()
@@ -8308,7 +8884,7 @@ fn run_cli(arguments: Vec<String>) -> i32 {
             thread::sleep(
                 IPC_AUTOSTART_POLL.min(deadline.saturating_duration_since(Instant::now())),
             );
-            response = send_ipc_request(arguments.clone());
+            response = send_control_request(arguments.clone(), control.clone());
             if response.is_ok() {
                 break;
             }
@@ -8316,6 +8892,21 @@ fn run_cli(arguments: Vec<String>) -> i32 {
     }
     match response {
         Ok(response) if response.ok => {
+            if control_options.receipt_json {
+                match response.receipt {
+                    Some(receipt) => {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&receipt).unwrap_or_default()
+                        );
+                        return 0;
+                    }
+                    None => {
+                        eprintln!("AgenTerm server did not return a control receipt");
+                        return 1;
+                    }
+                }
+            }
             if !response.output.is_empty() {
                 print!("{}", response.output);
                 if !response.output.ends_with('\n') {
@@ -8325,7 +8916,26 @@ fn run_cli(arguments: Vec<String>) -> i32 {
             0
         }
         Ok(response) => {
-            eprintln!("{}", response.error);
+            if control_options.receipt_json {
+                if let Some(receipt) = response.receipt {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&receipt).unwrap_or_default()
+                    );
+                } else {
+                    eprintln!(
+                        "{}",
+                        serde_json::json!({
+                            "error": response.error,
+                            "error_code": response.error_code,
+                            "error_category": response.error_category,
+                            "retryable": response.retryable,
+                        })
+                    );
+                }
+            } else {
+                eprintln!("{}", response.error);
+            }
             1
         }
         Err(error) => {
@@ -8712,13 +9322,15 @@ fn script_broker_ipc(
     arguments: Vec<String>,
     timeout: Duration,
 ) -> Result<String, ScriptBrokerResponse> {
-    match send_ipc_request_to_with_timeout(&ipc_address(), arguments, timeout) {
+    match send_ipc_request_to_timeout(&ipc_address(), arguments, timeout) {
         Ok(response) if response.ok => Ok(response.output),
         Ok(response) => {
-            let code = ["server_restart", "journal_gap", "future_sequence"]
-                .into_iter()
-                .find(|code| response.error.contains(code))
-                .unwrap_or("broker_host_error");
+            let code = match response.error_code.as_str() {
+                "server_restart" | "journal_gap" | "future_sequence" => {
+                    response.error_code.as_str()
+                }
+                _ => "broker_host_error",
+            };
             Err(script_broker_error(code, response.error))
         }
         Err(error) => Err(script_broker_error(
@@ -9077,7 +9689,7 @@ fn select_implicit_control_instance() -> std::result::Result<String, String> {
     let mut candidates = Vec::new();
     let mut healthy = Vec::new();
     for instance in instances {
-        let running = send_ipc_request_to_with_timeout(
+        let running = send_ipc_request_to_timeout(
             &instance.record.address,
             vec!["protocol-info".to_owned()],
             IPC_DISCOVERY_TIMEOUT,
@@ -9354,7 +9966,7 @@ fn run_wait_ui(arguments: &[String]) -> i32 {
 }
 
 fn run_wait_pane(arguments: &[String]) -> i32 {
-    let target = option_value(arguments, "-t").map(str::to_owned);
+    let requested_target = option_value(arguments, "-t").map(str::to_owned);
     let timeout_ms = option_value(arguments, "--timeout-ms")
         .and_then(|value| value.parse::<u64>().ok())
         .unwrap_or(5_000);
@@ -9372,13 +9984,36 @@ fn run_wait_pane(arguments: &[String]) -> i32 {
     let wait_submit = arguments
         .iter()
         .any(|argument| argument == "--submit-complete");
-    if contains.is_none() && !wait_dead && !wait_submit {
+    let wait_finalized = arguments.iter().any(|argument| argument == "--finalized");
+    if contains.is_none() && !wait_dead && !wait_submit && !wait_finalized {
         eprintln!(
-            "usage: wait-pane [-t target] (--contains text | --dead | --submit-complete) \
+            "usage: wait-pane [-t target] \
+             (--contains text | --dead | --submit-complete | --finalized) \
              [--timeout-ms ms]"
         );
         return 2;
     }
+    let mut resolve_request = vec![
+        "display-message".to_owned(),
+        "-p".to_owned(),
+        "#{window_id}".to_owned(),
+    ];
+    if let Some(target) = &requested_target {
+        resolve_request.extend(["-t".to_owned(), target.clone()]);
+    }
+    let target = match send_ipc_request(resolve_request) {
+        Ok(response) if response.ok && response.output.trim().starts_with('@') => {
+            response.output.trim().to_owned()
+        }
+        Ok(response) => {
+            eprintln!("{}", response.error);
+            return 1;
+        }
+        Err(error) => {
+            eprintln!("{error:#}");
+            return 1;
+        }
+    };
     let deadline = std::time::Instant::now() + Duration::from_millis(timeout_ms);
     loop {
         let mut matched = true;
@@ -9388,25 +10023,18 @@ fn run_wait_pane(arguments: &[String]) -> i32 {
                 "-p".to_owned(),
                 "#{pane_dead}".to_owned(),
             ];
-            if let Some(target) = &target {
-                request.extend(["-t".to_owned(), target.clone()]);
-            }
+            request.extend(["-t".to_owned(), target.clone()]);
             matched &= send_ipc_request(request)
                 .is_ok_and(|response| response.ok && response.output.trim() == "1");
         }
         if let Some(needle) = &contains {
             let mut request = vec!["capture-pane".to_owned(), "-p".to_owned()];
-            if let Some(target) = &target {
-                request.extend(["-t".to_owned(), target.clone()]);
-            }
+            request.extend(["-t".to_owned(), target.clone()]);
             matched &= send_ipc_request(request)
                 .is_ok_and(|response| response.ok && response.output.contains(needle));
         }
-        if wait_submit {
-            let mut request = vec!["inspect".to_owned()];
-            if let Some(target) = &target {
-                request.extend(["-t".to_owned(), target.clone()]);
-            }
+        if wait_submit || wait_finalized {
+            let request = vec!["inspect".to_owned(), "-t".to_owned(), target.clone()];
             matched &= send_ipc_request(request).is_ok_and(|response| {
                 response.ok
                     && serde_json::from_str::<serde_json::Value>(&response.output)
@@ -9415,7 +10043,10 @@ fn run_wait_pane(arguments: &[String]) -> i32 {
                         .is_some_and(|windows| {
                             !windows.is_empty()
                                 && windows.iter().all(|window| {
-                                    !window["submit_pending"].as_bool().unwrap_or(true)
+                                    (!wait_submit
+                                        || !window["submit_pending"].as_bool().unwrap_or(true))
+                                        && (!wait_finalized
+                                            || window["finalized"].as_bool().unwrap_or(false))
                                 })
                         })
             });
@@ -9424,7 +10055,20 @@ fn run_wait_pane(arguments: &[String]) -> i32 {
             return 0;
         }
         if std::time::Instant::now() >= deadline {
-            eprintln!("wait-pane timed out after {timeout_ms} ms");
+            eprintln!(
+                "{}",
+                serde_json::json!({
+                    "code": "pane_wait_timeout",
+                    "timeout_ms": timeout_ms,
+                    "target": target,
+                    "conditions": {
+                        "contains": contains,
+                        "dead": wait_dead,
+                        "submit_complete": wait_submit,
+                        "finalized": wait_finalized,
+                    }
+                })
+            );
             return 1;
         }
         thread::sleep(Duration::from_millis(50));
@@ -9450,7 +10094,8 @@ fn print_help() {
 AgenTerm CLI - control the native tabbed terminal
 
 Usage:
-  agenterm-cli [--address HOST:PORT] command [args...]
+  agenterm-cli [--address HOST:PORT] [--request-id ID] [--deadline-ms MS]
+                [--receipt-json] command [args...]
   agenterm-cli list-instances [--json] [--prune]
   agenterm-cli server-list [--json] [--prune]
   agenterm-cli new-session [-s name]
@@ -9527,10 +10172,23 @@ fn print_mux_commands() {
     }
 }
 
-fn protocol_info_json() -> String {
+fn protocol_info_json(identity_scope: &str) -> String {
+    let build_identity = BuildIdentity::current();
     serde_json::to_string_pretty(&serde_json::json!({
         "protocol_version": 1,
         "agenterm_version": env!("CARGO_PKG_VERSION"),
+        "identity_scope": identity_scope,
+        "pid": std::process::id(),
+        "address": ipc_address(),
+        "build_identity": build_identity,
+        "build_identity_complete": build_identity.is_complete(),
+        "upgrade_identity": current_upgrade_identity(),
+        "control_contract": {
+            "schema_version": control_contract::CONTROL_CONTRACT_SCHEMA_VERSION,
+            "request_dedupe": true,
+            "deadline_guard": true,
+            "receipt_outcomes": ["committed", "accepted", "no_op", "outcome_unknown"],
+        },
         "command_catalog": {
             "schema_version": COMMAND_CATALOG_SCHEMA_VERSION,
             "commands": COMMAND_CATALOG,

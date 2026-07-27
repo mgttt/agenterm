@@ -15,6 +15,7 @@ pub(crate) const DEFAULT_EVENT_CAPACITY: usize = 4_096;
 pub(crate) enum EventKind {
     ComposerDraft,
     ComposerSubmitted,
+    ComposerSubmissionFinished,
     FocusChanged,
     LayoutTabsVisibility,
     LayoutTabsWidth,
@@ -40,9 +41,10 @@ pub(crate) enum EventKind {
 }
 
 impl EventKind {
-    pub(crate) const ALL: [Self; 24] = [
+    pub(crate) const ALL: [Self; 25] = [
         Self::ComposerDraft,
         Self::ComposerSubmitted,
+        Self::ComposerSubmissionFinished,
         Self::FocusChanged,
         Self::LayoutTabsVisibility,
         Self::LayoutTabsWidth,
@@ -71,6 +73,7 @@ impl EventKind {
         match self {
             Self::ComposerDraft => "composer.draft",
             Self::ComposerSubmitted => "composer.submitted",
+            Self::ComposerSubmissionFinished => "composer.submission-finished",
             Self::FocusChanged => "focus.changed",
             Self::LayoutTabsVisibility => "layout.tabs.visibility",
             Self::LayoutTabsWidth => "layout.tabs.width",
@@ -122,7 +125,7 @@ const fn event_spec(
     }
 }
 
-pub(crate) const EVENT_CATALOG: [EventSpec; 24] = [
+pub(crate) const EVENT_CATALOG: [EventSpec; 25] = [
     event_spec(
         EventKind::ComposerDraft,
         "tabs[].draft",
@@ -136,6 +139,13 @@ pub(crate) const EVENT_CATALOG: [EventSpec; 24] = [
         "{length:u64}",
         "tab",
         "0.1.5",
+    ),
+    event_spec(
+        EventKind::ComposerSubmissionFinished,
+        "tabs[].submit_pending",
+        "{enter_written:bool,terminal_finalized:bool}",
+        "tab",
+        "0.1.7",
     ),
     event_spec(
         EventKind::FocusChanged,
@@ -308,6 +318,10 @@ pub(crate) struct EventEnvelope {
     pub(crate) kind: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) tab_id: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) request_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) operation_id: Option<String>,
     pub(crate) payload: Value,
 }
 
@@ -362,6 +376,14 @@ impl fmt::Display for JournalReadError {
 }
 
 impl JournalReadError {
+    pub(crate) const fn code(&self) -> &'static str {
+        match self {
+            Self::Restart { .. } => "server_restart",
+            Self::Gap { .. } => "journal_gap",
+            Self::FutureSequence { .. } => "future_sequence",
+        }
+    }
+
     pub(crate) fn to_json(&self) -> Value {
         match self {
             Self::Restart {
@@ -428,6 +450,17 @@ impl EventJournal {
         tab_id: Option<u64>,
         payload: Value,
     ) -> EventEnvelope {
+        self.commit_correlated(kind, tab_id, None, None, payload)
+    }
+
+    pub(crate) fn commit_correlated(
+        &mut self,
+        kind: EventKind,
+        tab_id: Option<u64>,
+        request_id: Option<String>,
+        operation_id: Option<String>,
+        payload: Value,
+    ) -> EventEnvelope {
         self.sequence = self
             .sequence
             .checked_add(1)
@@ -438,6 +471,8 @@ impl EventJournal {
             sequence: self.sequence,
             kind: kind.as_str().to_owned(),
             tab_id,
+            request_id,
+            operation_id,
             payload,
         };
         if self.events.len() == self.capacity {
@@ -580,7 +615,7 @@ mod tests {
             assert!(!spec.state_path.is_empty());
             assert!(!spec.payload.is_empty());
             assert!(matches!(spec.scope, "server" | "tab"));
-            assert!(matches!(spec.since, "0.1.5" | "0.1.6"));
+            assert!(matches!(spec.since, "0.1.5" | "0.1.6" | "0.1.7"));
         }
     }
 }

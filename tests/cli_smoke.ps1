@@ -10,6 +10,7 @@ $declaredEvidence = @(
     'cli.stable-create-id'
     'cli.observable-events'
     'cli.typed-tabs-operations'
+    'cli.control-receipts'
 )
 if ($ListEvidence) {
     $declaredEvidence
@@ -50,6 +51,36 @@ try {
     Write-Host 'STEP create tab'
     Invoke-AgenTerm @('new-window', '-d', '-n', $name) | Out-Null
     $created = $true
+
+    Write-Host 'STEP request receipts and replay protection'
+    $requestId = "receipt-$($run.RunId)"
+    $receiptArgs = @(
+        '--request-id', $requestId, '--receipt-json',
+        'set-tab-note', '-t', $name, 'receipt-test'
+    )
+    $firstReceipt = Invoke-AgenTerm $receiptArgs | ConvertFrom-Json
+    $replayedReceipt = Invoke-AgenTerm $receiptArgs | ConvertFrom-Json
+    if (
+        $firstReceipt.outcome -ne 'committed' -or
+        $firstReceipt.request_id -ne $requestId -or
+        $firstReceipt.resolved.tab_id -notmatch '^\d+$' -or
+        $firstReceipt.after_position.sequence -ne
+            $replayedReceipt.after_position.sequence
+    ) {
+        throw 'Control receipt did not preserve committed replay identity'
+    }
+    $conflictReceipt = Invoke-AgenTermExpectedFailure @(
+        '--request-id', $requestId, '--receipt-json',
+        'set-tab-note', '-t', $name, 'different-payload'
+    ) | ConvertFrom-Json
+    if (
+        $conflictReceipt.outcome -ne 'no_op' -or
+        $conflictReceipt.error.code -ne 'request_id_conflict' -or
+        $conflictReceipt.error.category -ne 'conflict'
+    ) {
+        throw 'Request ID reuse with a different payload was not rejected'
+    }
+    Write-Evidence 'cli.control-receipts'
 
     Write-Host 'STEP discover aligned and extended commands'
     $commands = Invoke-AgenTerm @('list-commands')
@@ -301,7 +332,20 @@ try {
     }
 
     Write-Host 'STEP submit and wait for output'
-    Invoke-AgenTerm @('send-composer', '-t', $name) | Out-Null
+    $submitBaseline = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $submitRequestId = "submit-$($run.RunId)"
+    $submitArgs = @(
+        '--request-id', $submitRequestId, '--receipt-json',
+        'send-composer', '-t', $name
+    )
+    $acceptedSubmit = Invoke-AgenTerm $submitArgs | ConvertFrom-Json
+    if (
+        $acceptedSubmit.outcome -ne 'accepted' -or
+        $acceptedSubmit.wait.condition -ne 'submission_complete' -or
+        $acceptedSubmit.wait.event_kind -ne 'composer.submission-finished'
+    ) {
+        throw 'send-composer did not expose an accepted receipt with a stable wait condition'
+    }
     $pendingError = Invoke-AgenTermExpectedFailure @(
         'send-keys', '-t', $name, 'SHOULD_NOT_MERGE'
     )
@@ -312,6 +356,33 @@ try {
         'wait-pane', '-t', $name, '--contains', $token,
         '--submit-complete', '--timeout-ms', '10000'
     ) | Out-Null
+    $committedSubmit = Invoke-AgenTerm $submitArgs | ConvertFrom-Json
+    if (
+        $committedSubmit.outcome -ne 'committed' -or
+        $committedSubmit.after_position.sequence -le
+            $acceptedSubmit.after_position.sequence
+    ) {
+        throw 'send-composer replay did not advance from accepted to committed'
+    }
+    $submitEvents = Invoke-AgenTerm @(
+        'read-events',
+        '--epoch', $submitBaseline.event_position.epoch,
+        '--after', "$($submitBaseline.event_position.sequence)"
+    ) | ConvertFrom-Json
+    $submitCompletion = @(
+        $submitEvents.events |
+            Where-Object {
+                $_.kind -eq 'composer.submission-finished' -and
+                $_.request_id -eq $submitRequestId -and
+                $_.operation_id -eq $committedSubmit.operation_id
+            }
+    )
+    if (
+        $submitCompletion.Count -ne 1 -or
+        -not $submitCompletion[0].payload.enter_written
+    ) {
+        throw 'composer completion event was not causally linked to its control request'
+    }
     $afterSubmit = Invoke-AgenTerm @('inspect', '-t', $name) | ConvertFrom-Json
     if ($afterSubmit.windows[0].input_writes -ne
         ($beforeSubmit.windows[0].input_writes + 2) -or
@@ -421,6 +492,32 @@ try {
     Write-Host 'STEP remain on exit'
     Invoke-AgenTerm @('send-keys', '-t', $name, 'exit', 'Enter') | Out-Null
     Invoke-AgenTerm @('wait-pane', '-t', $name, '--dead', '--timeout-ms', '10000') | Out-Null
+    Invoke-AgenTerm @(
+        'wait-pane', '-t', $name, '--finalized', '--timeout-ms', '10000'
+    ) | Out-Null
+    $finalizedFirst = (
+        Invoke-AgenTerm @('inspect', '-t', $name) | ConvertFrom-Json
+    ).windows[0]
+    $finalizedSecond = (
+        Invoke-AgenTerm @('inspect', '-t', $name) | ConvertFrom-Json
+    ).windows[0]
+    if (
+        -not $finalizedFirst.reader_closed -or
+        -not $finalizedFirst.parser_drained -or
+        -not $finalizedFirst.finalized -or
+        $finalizedFirst.output_bytes -ne $finalizedSecond.output_bytes
+    ) {
+        throw 'Finalized terminal did not expose a stable drained output boundary'
+    }
+    $deadWrite = Invoke-AgenTermExpectedFailure @(
+        '--receipt-json', 'send-keys', '-t', $name, '-l', 'late-input'
+    ) | ConvertFrom-Json
+    if (
+        $deadWrite.outcome -ne 'no_op' -or
+        $deadWrite.error.code -ne 'terminal_not_writable'
+    ) {
+        throw 'Finalized terminal write did not return a typed no-op receipt'
+    }
     $state = Invoke-AgenTerm @(
         'display-message', '-p', '-t', $name,
         '#{window_id}:#{window_name}:#{pane_dead}'

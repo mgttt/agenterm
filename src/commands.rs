@@ -515,7 +515,12 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
         ),
         "next-window" | "next" => ("agenterm-cli next-window", &[][..], &[][..], false),
         "previous-window" | "prev" => ("agenterm-cli previous-window", &[][..], &[][..], false),
-        "protocol-info" => ("agenterm-cli protocol-info", &[][..], &[][..], false),
+        "protocol-info" => (
+            "agenterm-cli protocol-info [--running]",
+            &[][..],
+            &["--running"][..],
+            false,
+        ),
         "rename-session" | "rename" => (
             "agenterm-cli rename-session new-name",
             &[][..],
@@ -656,9 +661,9 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
         "ui-snapshot" => ("agenterm-cli ui-snapshot", &[][..], &[][..], false),
         "wait-pane" | "expect-pane" => (
             "agenterm-cli wait-pane [-t target] \
-             (--contains text|--dead|--submit-complete) [--timeout-ms ms]",
+             (--contains text|--dead|--submit-complete|--finalized) [--timeout-ms ms]",
             &["-t", "--contains", "--timeout-ms"][..],
-            &["--dead", "--submit-complete"][..],
+            &["--dead", "--submit-complete", "--finalized"][..],
             false,
         ),
         "wait-events" => (
