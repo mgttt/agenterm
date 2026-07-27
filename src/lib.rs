@@ -169,6 +169,9 @@ const IPC_TIMEOUT: Duration = Duration::from_secs(5);
 const IPC_DISCOVERY_TIMEOUT: Duration = Duration::from_millis(500);
 const IPC_AUTOSTART_TIMEOUT: Duration = Duration::from_secs(15);
 const IPC_AUTOSTART_POLL: Duration = Duration::from_millis(100);
+const IPC_MAX_REQUEST_BYTES: u64 = 256 * 1024;
+const IPC_MAX_RESPONSE_BYTES: u64 = 8 * 1024 * 1024;
+const IPC_MAX_CONCURRENT_CONNECTIONS: usize = 32;
 const COMPOSER_SUBMIT_DELAY: Duration = Duration::from_millis(500);
 const RAW_OUTPUT_LIMIT: usize = 1024 * 1024;
 const PROXY_REDACTION_MAX_NEEDLES: usize = 8;
@@ -7850,7 +7853,6 @@ fn send_ipc_request_to_with_timeout(
     args: Vec<String>,
     timeout: Duration,
 ) -> Result<IpcResponse> {
-    use std::io::BufRead as _;
     let socket = parse_loopback_ipc_address(address)?;
     let deadline = Instant::now() + timeout;
     let remaining = || {
@@ -7873,11 +7875,8 @@ fn send_ipc_request_to_with_timeout(
     connection.flush()?;
     connection.set_read_timeout(Some(remaining()?))?;
     let mut reader = std::io::BufReader::new(connection);
-    let mut response = String::new();
-    reader.read_line(&mut response)?;
-    if response.is_empty() {
-        anyhow::bail!("AgenTerm server closed the IPC connection");
-    }
+    let response =
+        read_bounded_ipc_line(&mut reader, IPC_MAX_RESPONSE_BYTES, "AgenTerm IPC response")?;
     serde_json::from_str(&response).context("invalid response from AgenTerm server")
 }
 
@@ -8007,55 +8006,111 @@ fn run_list_instances(arguments: &[String]) -> i32 {
 }
 
 fn start_ipc_server(window: HWND) -> Result<Receiver<IpcEnvelope>> {
-    use std::io::BufRead as _;
     let listener = std::net::TcpListener::bind(ipc_socket_addr()?)
         .context("another AgenTerm server is already using the local IPC port")?;
     let (sender, receiver) = mpsc::channel();
     let wake_window = window as isize;
     thread::spawn(move || {
+        let active_connections = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
         for connection in listener.incoming() {
             let Ok(connection) = connection else {
                 continue;
             };
-            let mut reader = std::io::BufReader::new(connection);
-            let mut line = String::new();
-            let response = if reader.read_line(&mut line).is_err() {
-                IpcResponse::failure("could not read IPC request")
-            } else {
-                match serde_json::from_str::<IpcRequest>(&line) {
-                    Ok(request) => {
-                        let (response_sender, response_receiver) = mpsc::channel();
-                        if sender
-                            .send(IpcEnvelope {
-                                request,
-                                respond_to: response_sender,
-                            })
-                            .is_err()
-                        {
-                            IpcResponse::failure("AgenTerm GUI is shutting down")
-                        } else {
-                            unsafe {
-                                PostMessageW(wake_window as HWND, WM_APP_WAKE, 0, 0);
-                            }
-                            response_receiver
-                                .recv_timeout(IPC_TIMEOUT)
-                                .unwrap_or_else(|_| {
-                                    IpcResponse::failure("AgenTerm GUI did not process the command")
-                                })
-                        }
-                    }
-                    Err(error) => IpcResponse::failure(format!("invalid IPC request: {error}")),
-                }
-            };
-            if let Ok(serialized) = serde_json::to_string(&response) {
-                let connection = reader.get_mut();
-                let _ = connection.write_all(serialized.as_bytes());
-                let _ = connection.write_all(b"\n");
-                let _ = connection.flush();
+            let admitted = active_connections
+                .fetch_update(
+                    std::sync::atomic::Ordering::Relaxed,
+                    std::sync::atomic::Ordering::Relaxed,
+                    |active| (active < IPC_MAX_CONCURRENT_CONNECTIONS).then_some(active + 1),
+                )
+                .is_ok();
+            if !admitted {
+                continue;
             }
+            let sender = sender.clone();
+            let permit = IpcConnectionPermit(active_connections.clone());
+            thread::spawn(move || {
+                let _permit = permit;
+                handle_ipc_connection(connection, &sender, wake_window);
+            });
         }
     });
     Ok(receiver)
+}
+
+struct IpcConnectionPermit(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+
+impl Drop for IpcConnectionPermit {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+fn read_bounded_ipc_line(
+    reader: &mut impl std::io::BufRead,
+    max_bytes: u64,
+    label: &str,
+) -> Result<String> {
+    use std::io::BufRead as _;
+
+    let mut bytes = Vec::new();
+    reader
+        .take(max_bytes + 1)
+        .read_until(b'\n', &mut bytes)
+        .with_context(|| format!("could not read {label}"))?;
+    if bytes.is_empty() {
+        anyhow::bail!("{label} connection closed before a message arrived");
+    }
+    if bytes.len() as u64 > max_bytes {
+        anyhow::bail!("{label} exceeded the {max_bytes}-byte limit");
+    }
+    if bytes.last() != Some(&b'\n') {
+        anyhow::bail!("{label} was not newline terminated");
+    }
+    String::from_utf8(bytes).with_context(|| format!("{label} was not valid UTF-8"))
+}
+
+fn handle_ipc_connection(
+    connection: std::net::TcpStream,
+    sender: &Sender<IpcEnvelope>,
+    wake_window: isize,
+) {
+    let _ = connection.set_read_timeout(Some(IPC_TIMEOUT));
+    let _ = connection.set_write_timeout(Some(IPC_TIMEOUT));
+    let mut reader = std::io::BufReader::new(connection);
+    let response =
+        match read_bounded_ipc_line(&mut reader, IPC_MAX_REQUEST_BYTES, "AgenTerm IPC request") {
+            Ok(line) => match serde_json::from_str::<IpcRequest>(&line) {
+                Ok(request) => {
+                    let (response_sender, response_receiver) = mpsc::channel();
+                    if sender
+                        .send(IpcEnvelope {
+                            request,
+                            respond_to: response_sender,
+                        })
+                        .is_err()
+                    {
+                        IpcResponse::failure("AgenTerm GUI is shutting down")
+                    } else {
+                        unsafe {
+                            PostMessageW(wake_window as HWND, WM_APP_WAKE, 0, 0);
+                        }
+                        response_receiver
+                            .recv_timeout(IPC_TIMEOUT)
+                            .unwrap_or_else(|_| {
+                                IpcResponse::failure("AgenTerm GUI did not process the command")
+                            })
+                    }
+                }
+                Err(error) => IpcResponse::failure(format!("invalid IPC request: {error}")),
+            },
+            Err(error) => IpcResponse::failure(format!("{error:#}")),
+        };
+    if let Ok(serialized) = serde_json::to_string(&response) {
+        let connection = reader.get_mut();
+        let _ = connection.write_all(serialized.as_bytes());
+        let _ = connection.write_all(b"\n");
+        let _ = connection.flush();
+    }
 }
 
 fn run_cli(arguments: Vec<String>) -> i32 {
@@ -9708,9 +9763,42 @@ mod tests {
         bounded_utf8_prefix, edit_shortcut, effective_theme, gui_cli_guidance,
         gui_handoff_succeeded, is_latched_navigation_repeat, no_activate_from_value,
         normalize_terminal_paste, parse_gui_launch, parse_loopback_ipc_address,
-        redact_proxy_stream_chunk, run_wait_ui, surface_navigation, terminal_copy_shortcut,
-        terminal_selection_text,
+        read_bounded_ipc_line, redact_proxy_stream_chunk, run_wait_ui, surface_navigation,
+        terminal_copy_shortcut, terminal_selection_text,
     };
+
+    #[test]
+    fn ipc_lines_require_a_bounded_newline_terminated_utf8_message() {
+        let mut valid = std::io::Cursor::new(b"{\"ok\":true}\ntrailing".to_vec());
+        assert_eq!(
+            read_bounded_ipc_line(&mut valid, 32, "test message").unwrap(),
+            "{\"ok\":true}\n"
+        );
+
+        let mut oversized = std::io::Cursor::new(b"12345\n".to_vec());
+        assert!(
+            read_bounded_ipc_line(&mut oversized, 4, "test message")
+                .unwrap_err()
+                .to_string()
+                .contains("exceeded")
+        );
+
+        let mut unterminated = std::io::Cursor::new(b"{}".to_vec());
+        assert!(
+            read_bounded_ipc_line(&mut unterminated, 4, "test message")
+                .unwrap_err()
+                .to_string()
+                .contains("newline terminated")
+        );
+
+        let mut invalid_utf8 = std::io::Cursor::new(vec![0xff, b'\n']);
+        assert!(
+            read_bounded_ipc_line(&mut invalid_utf8, 4, "test message")
+                .unwrap_err()
+                .to_string()
+                .contains("valid UTF-8")
+        );
+    }
 
     #[test]
     fn settings_theme_draft_only_affects_an_open_settings_preview() {
