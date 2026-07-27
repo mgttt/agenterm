@@ -7,10 +7,11 @@ Planned default shell: `agenterm-bash.exe` after its clean-machine gate passes
 
 AgenTerm is a native super-fleet terminal for people and AI agents. Its window
 is the bridge, the tab tree is the fleet, shells are crew workspaces, and the
-local control and scripting planes let people and agents observe and steer the
-same state. Human interaction and local CLI automation operate on the same
-tabs, PTYs, drafts, settings, and observable state. A process exiting never
-silently destroys its tab.
+local control plane lets people and agents observe and steer the same state.
+The planned scripting plane will reuse that public contract rather than bypass
+it. Human interaction and local CLI automation operate on the same tabs, PTYs,
+drafts, settings, and observable state. A process exiting never silently
+destroys its tab.
 
 The visual language favors industrial confidence over decoration: repeated
 integer-grid spacing, solid right-angle connections, strict baseline
@@ -24,6 +25,58 @@ control the same tree nodes, focus, input, viewport, process lifecycle, and
 rendered evidence precisely.
 
 Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
+
+<!-- agenterm-alignment-contract
+{
+  "schema_version": 1,
+  "planned_command_roots": ["agenterm-bash", "script"],
+  "runtime_features": {
+    "remain_on_exit": {
+      "prd": "exited process retains its final screen and exit code",
+      "evidence": [{"path": "tests/cli_smoke.ps1", "token": "STEP remain on exit"}]
+    },
+    "live_close_confirmation": {
+      "prd": "explicit confirmation before closing a live process",
+      "evidence": [{"path": "tests/ux_smoke.ps1", "token": "STEP live close requires confirmation and cancel is safe"}]
+    },
+    "rmux_status_click_bridge": {
+      "prd": "RMUX status active-marker parsing and clickable window labels",
+      "evidence": [
+        {"path": "src/rmux_status.rs", "token": "parses_rmux_status_windows_and_active_marker"},
+        {"path": "src/rmux_status.rs", "token": "records_clickable_utf8_byte_ranges"}
+      ]
+    },
+    "semantic_ui_automation": {
+      "prd": "semantic focus and UI actions",
+      "evidence": [{"path": "tests/ux_smoke.ps1", "token": "STEP semantic focus and composer send"}]
+    },
+    "hierarchical_tabs": {
+      "prd": "tabs form a visible parent/child tree",
+      "evidence": [{"path": "tests/ux_smoke.ps1", "token": "STEP hierarchical tab team"}]
+    },
+    "persistent_workspace": {
+      "prd": "normal application close preserves the tab tree and active tab",
+      "evidence": [{"path": "tests/ux_smoke.ps1", "token": "STEP workspace survives a normal application restart"}]
+    },
+    "tab_environment": {
+      "prd": "per-tab child environment injection",
+      "evidence": [{"path": "tests/fleet_smoke.ps1", "token": "STEP tab-scoped environment and reserved AgenTerm context"}]
+    },
+    "codex_launcher": {
+      "prd": "launch Codex agent tabs",
+      "evidence": [{"path": "tests/fleet_smoke.ps1", "token": "STEP supported Codex launcher proxy workflow"}]
+    },
+    "mux_frontend": {
+      "prd": "tmux/RMUX-compatible fleet control entry point",
+      "evidence": [{"path": "tests/fleet_smoke.ps1", "token": "STEP mux compatibility is discoverable without a server"}]
+    },
+    "instance_discovery": {
+      "prd": "registered multi-instance discovery",
+      "evidence": [{"path": "tests/fleet_smoke.ps1", "token": "STEP live servers are discoverable and explicitly targetable"}]
+    }
+  }
+}
+-->
 
 ## Product tree
 
@@ -97,9 +150,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
         one tab remains one pane until split panes are genuinely implemented
       - [~] support tmux/RMUX aliases, `-t` targets, `-F` formats, stable IDs,
         exit codes, stdout/stderr separation, and unsupported-command errors
-      - [x] expose native AgenTerm extensions under an unambiguous namespace so
-        tree, composer, screenshot, wait, agent, and scripting commands do not
-        masquerade as tmux features
+      - [x] expose shipped native AgenTerm tree, composer, screenshot, wait, and
+        agent extensions under an unambiguous namespace
+      - [ ] expose future scripting commands through that same native namespace
+        without masquerading as tmux features
       - [x] `agentermctl` remains the richer machine API; `agenterm-mux` is the
         compatibility UX and migration path
     - Conformance
@@ -113,7 +167,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
         the public regression suite
   - Human workspace
     - [x] window title identifies version and live IPC port
-    - [x] vertical tabs on the left with stable ID and numeric index
+    - [x] vertical tabs on the left show the numeric index; the stable `@id` is
+      exposed through the control plane
     - [x] tree starts at the top without a redundant logo/header strip
     - [x] tabs form a visible parent/child tree for agent and program teams
     - [x] tree order is parent-first with indentation and branch connectors
@@ -124,8 +179,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [x] compact rows with continuous native tree connectors, grid-aligned
       expand boxes, status lamps, and bordered selection
     - [ ] drag/drop reparenting and team-level actions
-    - [x] line 1: user-defined role/name plus the running program
-    - [x] line 2: user note, with terminal-controlled TITLE as fallback
+    - [x] line 1: user-defined role/name
+    - [x] line 2: user note, otherwise numeric index plus running program;
+      terminal-controlled TITLE remains separately observable
     - [x] explicit confirmation before closing a live process
     - [x] dead tabs close only by explicit human or CLI action
     - [x] per-tab external composer with independent draft and Send action
@@ -170,7 +226,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
         while keeping screenshots and capture aligned with the human view
       - [x] read, replace, and submit composer content
       - [x] semantic focus and UI actions
-      - [x] deterministic waits for output, dead state, focus, and modal state
+      - [x] deterministic waits for output, composer completion, dead state,
+        active tab, and focus
+      - [ ] direct deterministic wait predicates for modal kind and target
       - [ ] broadcast input and synchronized panes
     - Protocol
       - [x] loopback-only newline-delimited JSON IPC
@@ -372,7 +430,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [x] initial ConPTY grid sizing keeps RMUX status at the bottom
     - [x] minimizing the GUI does not resize PTYs to the iconic rectangle
     - [ ] split panes and layout commands
-    - [ ] full compatibility matrix; compatibility claims remain semantic
+    - [ ] full behavioral conformance corpus beyond the shipped
+      registry-generated command compatibility matrix
   - Delivery and quality
     - [x] fast incremental developer build under ignored local `dist/`
     - [x] release mode and `agenterm.json` build metadata
@@ -383,11 +442,16 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [x] startup regression requires a main window within one second locally
     - [x] version-tagged GitHub Release automation for all three EXEs, metadata,
       and ZIP
-    - [~] release automation publishes `agenterm-mux.exe` after its acceptance
-      gate; `agenterm-bash.exe` remains gated and unpublished
+    - [x] release automation publishes `agenterm-mux.exe` after its acceptance
+      gate
+    - [ ] `agenterm-bash.exe` remains gated and unpublished
     - [x] release metadata reports version, build time, commit, enabled
       features, and SHA-256 for every executable/runtime component
     - [x] unit tests for command parsing, protocol, settings, and RMUX status
+    - [x] PRD alignment lint keeps the public command registry, protocol feature
+      flags, mux compatibility output, and declared evidence synchronized
+    - [ ] stable evidence IDs for every shipped leaf capability, including
+      rendering, CJK, performance, and interaction fixtures
     - [x] CLI and semantic UX smoke tests through public interfaces
     - [x] one-command fmt, Clippy, test, build, and smoke regression
     - [x] release CI runs the isolated public CLI and fleet smoke suites before

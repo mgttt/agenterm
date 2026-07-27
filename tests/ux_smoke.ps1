@@ -197,14 +197,14 @@ try {
     Invoke-AgenTerm @('select-window', '-t', $persistName) | Out-Null
     Invoke-AgenTerm @('shutdown') | Out-Null
     for ($attempt = 0; $attempt -lt 50; $attempt++) {
-        & $Exe protocol-info 2>$null | Out-Null
+        & $Exe ui-snapshot 2>$null | Out-Null
         if ($LASTEXITCODE -ne 0) { break }
         Start-Sleep -Milliseconds 50
     }
     Start-Process -FilePath $GuiExe | Out-Null
     $ready = $false
     for ($attempt = 0; $attempt -lt 100; $attempt++) {
-        & $Exe protocol-info 2>$null | Out-Null
+        & $Exe ui-snapshot 2>$null | Out-Null
         if ($LASTEXITCODE -eq 0) {
             $ready = $true
             break

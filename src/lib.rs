@@ -3414,46 +3414,7 @@ impl AppState {
                 ))
             }
             "ui-snapshot" => IpcResponse::success(self.ui_snapshot()),
-            "protocol-info" => IpcResponse::success(
-                serde_json::to_string_pretty(&serde_json::json!({
-                    "protocol_version": 1,
-                    "agenterm_version": env!("CARGO_PKG_VERSION"),
-                    "compatibility": {
-                        "tmux_rmux": [
-                            "new-session", "list-sessions", "has-session",
-                            "new-window", "list-windows", "select-window",
-                            "next-window", "previous-window", "rename-window",
-                            "kill-window", "list-panes", "capture-pane",
-                            "send-keys", "display-message", "show-options"
-                        ],
-                        "partial": ["kill-session", "kill-server"],
-                        "planned": ["split-window", "layouts"]
-                    },
-                    "extensions": [
-                        "ui-snapshot", "ui-action", "focus", "protocol-info",
-                        "inspect", "screenshot", "screenshot-pane", "dump-cells",
-                        "wait-pane", "send-mouse", "show-composer",
-                        "set-composer", "send-composer", "get-settings",
-                        "set-setting", "set-tab-note", "show-tab-note",
-                        "list-tab-tree", "set-tab-parent", "show-tab-parent",
-                        "save-workspace", "workspace-info", "shutdown",
-                        "new-agent", "list-instances", "scroll-pane"
-                    ],
-                    "features": {
-                        "remain_on_exit": true,
-                        "live_close_confirmation": true,
-                        "rmux_status_click_bridge": true,
-                        "semantic_ui_automation": true,
-                        "hierarchical_tabs": true,
-                        "persistent_workspace": true,
-                        "tab_environment": true,
-                        "codex_launcher": true,
-                        "mux_frontend": true,
-                        "instance_discovery": true
-                    }
-                }))
-                .unwrap_or_default(),
-            ),
+            "protocol-info" => IpcResponse::success(protocol_info_json()),
             "focus" => {
                 let surface = args.get(1).map(String::as_str).unwrap_or("terminal");
                 if let Some(position) = self.target_position(option_value(args, "-t")) {
@@ -4187,6 +4148,14 @@ fn run_cli(arguments: Vec<String>) -> i32 {
         }
     }
     let command = arguments.first().map(String::as_str).unwrap_or_default();
+    if matches!(command, "list-commands" | "lscm") {
+        print!("{SUPPORTED_COMMANDS}");
+        return 0;
+    }
+    if command == "protocol-info" {
+        println!("{}", protocol_info_json());
+        return 0;
+    }
     if command == "list-instances" {
         return run_list_instances(&arguments);
     }
@@ -4490,6 +4459,47 @@ fn print_mux_commands() {
             }
         }
     }
+}
+
+fn protocol_info_json() -> String {
+    serde_json::to_string_pretty(&serde_json::json!({
+        "protocol_version": 1,
+        "agenterm_version": env!("CARGO_PKG_VERSION"),
+        "compatibility": {
+            "tmux_rmux": [
+                "new-session", "list-sessions", "has-session",
+                "new-window", "list-windows", "select-window",
+                "next-window", "previous-window", "rename-window",
+                "kill-window", "list-panes", "capture-pane",
+                "send-keys", "display-message", "show-options"
+            ],
+            "partial": ["kill-session", "kill-server"],
+            "planned": ["split-window", "layouts"]
+        },
+        "extensions": [
+            "ui-snapshot", "ui-action", "focus", "protocol-info",
+            "inspect", "screenshot", "screenshot-pane", "dump-cells",
+            "wait-pane", "send-mouse", "show-composer",
+            "set-composer", "send-composer", "get-settings",
+            "set-setting", "set-tab-note", "show-tab-note",
+            "list-tab-tree", "set-tab-parent", "show-tab-parent",
+            "save-workspace", "workspace-info", "shutdown",
+            "new-agent", "list-instances", "scroll-pane"
+        ],
+        "features": {
+            "remain_on_exit": true,
+            "live_close_confirmation": true,
+            "rmux_status_click_bridge": true,
+            "semantic_ui_automation": true,
+            "hierarchical_tabs": true,
+            "persistent_workspace": true,
+            "tab_environment": true,
+            "codex_launcher": true,
+            "mux_frontend": true,
+            "instance_discovery": true
+        }
+    }))
+    .unwrap_or_default()
 }
 
 fn print_mux_compatibility(json: bool) {

@@ -97,6 +97,10 @@ try {
         }
     }
 
+    Invoke-Checked 'PRD capability alignment' {
+        & '.\tests\prd_alignment.ps1'
+    }
+
     if (-not $SkipSmoke) {
         Invoke-Checked 'startup smoke test' { & '.\tests\startup_smoke.ps1' }
         Invoke-Checked 'CLI smoke test' { & '.\tests\cli_smoke.ps1' }
