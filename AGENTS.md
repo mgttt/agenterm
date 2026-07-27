@@ -66,6 +66,11 @@ waits through public state until the asynchronous terminal becomes ready.
 
 ## Change rules
 
+- All agents and subagents work in the single shared `D:\dev\agenterm`
+  checkout on `main`. Do not create Git worktrees, task branches, or hidden
+  planning copies. Material planning progress must be written incrementally to
+  `docs/PRD.md` so it is immediately visible in the repository; the primary
+  agent reviews, commits, and pushes small coherent increments.
 - Preserve the remain-on-exit and explicit-close invariants in the PRD.
 - Preserve tree safety: parent cycles are rejected and closing a parent promotes
   its direct children instead of terminating them.
