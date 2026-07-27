@@ -84,6 +84,11 @@ if ([string]$receipt.provenance.artifact_manifest_sha256 -ne
     $artifactManifestHash) {
     throw 'Qualification receipt artifact manifest hash mismatch.'
 }
+$sbomPath = Join-Path $repo 'dist\agenterm-sbom.spdx.json'
+$sbomHash = Get-PackageSha256 -Path $sbomPath
+if ([string]$receipt.provenance.sbom_sha256 -ne $sbomHash) {
+    throw 'Qualification receipt SPDX inventory hash mismatch.'
+}
 $gateManifestPath = Join-Path $repo 'scripts\qualification-gates.json'
 $gateManifestHash = Get-PackageSha256 -Path $gateManifestPath
 if ([string]$receipt.gate_manifest.sha256 -ne $gateManifestHash) {
@@ -147,6 +152,7 @@ $staticPayload = @(
     @{ name = 'agenterm.json'; path = $metadataPath }
     @{ name = 'artifacts.json'; path = $artifactManifestPath }
     @{ name = 'qualification-receipt.json'; path = $receiptFile }
+    @{ name = 'agenterm-sbom.spdx.json'; path = $sbomPath }
     @{ name = 'LICENSE-APACHE'; path = (Join-Path $repo 'LICENSE-APACHE') }
     @{ name = 'LICENSE-MIT'; path = (Join-Path $repo 'LICENSE-MIT') }
     @{
@@ -178,6 +184,7 @@ try {
             'agenterm.json' { $metadataPath }
             'artifacts.json' { $artifactManifestPath }
             'qualification-receipt.json' { $receiptFile }
+            'agenterm-sbom.spdx.json' { $sbomPath }
             default {
                 if ($artifactNames -contains [string]$entry.name) {
                     Join-Path (Join-Path $repo 'dist') ([string]$entry.name)
@@ -202,6 +209,7 @@ try {
         qualification_receipt_sha256 = Get-PackageSha256 -Path $receiptFile
         cargo_lock_sha256 = $cargoLockHash
         artifact_manifest_sha256 = $artifactManifestHash
+        sbom_sha256 = $sbomHash
         payload = @($payload)
     }
     $packageManifestPath = Join-Path $staging 'package-manifest.json'

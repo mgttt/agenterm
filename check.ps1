@@ -109,17 +109,12 @@ try {
 
     Invoke-Checked -Id 'artifact-verification' `
         -Label 'binary roles and metadata' {
-        $gui = '.\dist\agenterm.exe'
         $cli = '.\dist\agenterm-cli.exe'
         $mux = '.\dist\agenterm-mux.exe'
         $script = '.\dist\agenterm-script.exe'
         $artifactManifestPath = '.\scripts\artifacts.json'
         . '.\scripts\artifact-manifest.ps1'
         $artifactSpec = Get-AgenTermArtifactManifest -Path $artifactManifestPath
-        $releaseBudgets = [ordered]@{}
-        foreach ($artifact in @($artifactSpec.executables)) {
-            $releaseBudgets[$artifact.name] = [uint64]$artifact.release_budget_bytes
-        }
         $obsoleteCliArtifacts = @(
             Get-ChildItem -LiteralPath '.\dist' -File -Filter 'agentermctl*.exe'
         )
@@ -128,24 +123,23 @@ try {
                 $obsoleteCliArtifacts.Name -join ', '
             )"
         }
-        if ((Get-PeSubsystem $gui) -ne 2) {
-            throw 'agenterm.exe must use the Windows GUI subsystem.'
-        }
-        if ((Get-PeSubsystem $cli) -ne 3) {
-            throw 'agenterm-cli.exe must use the Windows Console subsystem.'
-        }
-        if ((Get-PeSubsystem $mux) -ne 3) {
-            throw 'agenterm-mux.exe must use the Windows Console subsystem.'
-        }
-        if ((Get-PeSubsystem $script) -ne 3) {
-            throw 'agenterm-script.exe must use the Windows Console subsystem.'
-        }
-        if ($Release) {
-            foreach ($entry in $releaseBudgets.GetEnumerator()) {
-                $path = Join-Path '.\dist' $entry.Key
+        foreach ($artifact in @($artifactSpec.executables)) {
+            $path = Join-Path '.\dist' $artifact.name
+            $actualSubsystem = Get-PeSubsystem $path
+            if ($actualSubsystem -ne [int]$artifact.pe_subsystem) {
+                throw (
+                    "$($artifact.name) PE subsystem is $actualSubsystem; " +
+                    "manifest requires $($artifact.pe_subsystem)."
+                )
+            }
+            if ($Release) {
                 $size = (Get-Item -LiteralPath $path).Length
-                if ($size -gt $entry.Value) {
-                    throw "Release $($entry.Key) is $size bytes; budget is $($entry.Value) bytes."
+                $budget = [uint64]$artifact.release_budget_bytes
+                if ($size -gt $budget) {
+                    throw (
+                        "Release $($artifact.name) is $size bytes; " +
+                        "budget is $budget bytes."
+                    )
                 }
             }
         }
@@ -195,6 +189,18 @@ try {
             $versionOutput -ne "agenterm-cli $($metadata.version)") {
             throw 'agenterm-cli --version does not match agenterm.json.'
         }
+    }
+
+    Invoke-Checked -Id 'readme-examples' `
+        -Label 'manifest-driven README examples' {
+        & '.\tests\readme_examples.ps1'
+    }
+    Invoke-Checked -Id 'supply-chain' `
+        -Label 'locked dependency licenses and SPDX inventory' {
+        & '.\scripts\supply-chain.ps1'
+    }
+    Invoke-Checked -Id 'target-report' -Label 'Cargo target inventory' {
+        & '.\scripts\target-report.ps1'
     }
 
     Invoke-Checked -Id 'prd-alignment' -Label 'PRD capability alignment' {

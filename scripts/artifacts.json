@@ -1,24 +1,36 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "executables": [
     {
       "name": "agenterm.exe",
       "role": "gui",
+      "pe_subsystem": 2,
+      "documentation_role": "GUI application",
+      "offline_probe": [],
       "release_budget_bytes": 4194304
     },
     {
       "name": "agenterm-cli.exe",
       "role": "cli",
+      "pe_subsystem": 3,
+      "documentation_role": "native observation and automation client",
+      "offline_probe": ["--version"],
       "release_budget_bytes": 2097152
     },
     {
       "name": "agenterm-mux.exe",
       "role": "compatibility-cli",
+      "pe_subsystem": 3,
+      "documentation_role": "tmux/RMUX compatibility frontend",
+      "offline_probe": ["--version"],
       "release_budget_bytes": 2097152
     },
     {
       "name": "agenterm-script.exe",
       "role": "scripting-worker",
+      "pe_subsystem": 3,
+      "documentation_role": "bounded Rhai scripting worker",
+      "offline_probe": ["--version"],
       "release_budget_bytes": 3145728
     }
   ]

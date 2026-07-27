@@ -80,6 +80,10 @@ try {
         Join-Path $fixture 'Cargo.lock'
     )
     $artifactHash = Get-SelfTestSha256 -Path $artifactPath
+    $sbomPath = Join-Path $fixture 'dist\agenterm-sbom.spdx.json'
+    'fixture deterministic SPDX inventory' |
+        Set-Content -LiteralPath $sbomPath
+    $sbomHash = Get-SelfTestSha256 -Path $sbomPath
     $gateHash = Get-SelfTestSha256 -Path (
         Join-Path $fixture 'scripts\qualification-gates.json'
     )
@@ -109,6 +113,7 @@ try {
             source_dirty = $false
             cargo_lock_sha256 = $cargoHash
             artifact_manifest_sha256 = $artifactHash
+            sbom_sha256 = $sbomHash
             executables = @(
                 $executableRecords | ForEach-Object {
                     [ordered]@{
@@ -161,6 +166,7 @@ try {
         'agenterm.json'
         'artifacts.json'
         'qualification-receipt.json'
+        'agenterm-sbom.spdx.json'
         'LICENSE-APACHE'
         'LICENSE-MIT'
         'THIRD_PARTY_NOTICES.md'

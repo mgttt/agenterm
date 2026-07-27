@@ -2,6 +2,8 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$Directory,
 
+    [string]$ArtifactManifestPath = (Join-Path $PSScriptRoot 'artifacts.json'),
+
     [string[]]$ObsoleteName = @()
 )
 
@@ -11,20 +13,25 @@ $directoryPath = [IO.Path]::GetFullPath($Directory)
 if (-not (Test-Path -LiteralPath $directoryPath -PathType Container)) {
     exit 0
 }
+. (Join-Path $PSScriptRoot 'artifact-manifest.ps1')
+$manifest = Get-AgenTermArtifactManifest -Path $ArtifactManifestPath
 
 $removed = 0
 $retained = @()
-foreach ($artifact in Get-ChildItem -LiteralPath $directoryPath `
-    -File -Filter 'agenterm*.locked-*.exe') {
-    try {
-        Remove-Item -LiteralPath $artifact.FullName -Force -ErrorAction Stop
-        $removed++
-    }
-    catch [IO.IOException] {
-        $retained += $artifact.Name
-    }
-    catch [UnauthorizedAccessException] {
-        $retained += $artifact.Name
+foreach ($entry in @($manifest.executables)) {
+    $stem = [IO.Path]::GetFileNameWithoutExtension([string]$entry.name)
+    foreach ($artifact in Get-ChildItem -LiteralPath $directoryPath `
+        -File -Filter "$stem.locked-*.exe") {
+        try {
+            Remove-Item -LiteralPath $artifact.FullName -Force -ErrorAction Stop
+            $removed++
+        }
+        catch [IO.IOException] {
+            $retained += $artifact.Name
+        }
+        catch [UnauthorizedAccessException] {
+            $retained += $artifact.Name
+        }
     }
 }
 

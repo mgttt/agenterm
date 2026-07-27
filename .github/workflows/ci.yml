@@ -4,11 +4,16 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
       - name: Install lint components
         run: rustup component add rustfmt clippy
       - name: Run quality gate

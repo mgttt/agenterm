@@ -48,8 +48,8 @@ The default build is an incremental development build. Use
 uses parallel code generation, and retains incremental state. Use
 `.\build.bat release` only for a distributable build; it applies the
 size-focused profile, stages the finished artifacts in `dist/`, and then clears
-Cargo's `target/` build cache. All modes produce four ignored local artifacts
-under `dist/`:
+Cargo's `target/` build cache. All modes produce four ignored executables plus
+build metadata under `dist/`:
 
 - `dist/agenterm.exe` — GUI application; double-clicking does not create a
   temporary console window.

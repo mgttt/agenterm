@@ -35,6 +35,13 @@ try {
     if ($version -notmatch '^\d+\.\d+\.\d+([+-][0-9A-Za-z.-]+)?$') {
         throw "Cargo package version is not valid semantic versioning: $version"
     }
+    if ($version -eq '0.1.7') {
+        throw (
+            'AgenTerm 0.1.7 is an internal-only consolidation baseline. ' +
+            'Do not create a tag or GitHub Release; use the qualified ' +
+            'offline package dry-run instead.'
+        )
+    }
     $tag = "v$version"
 
     $existingTag = & git tag --list $tag

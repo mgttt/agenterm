@@ -213,11 +213,15 @@ function Get-AgenTermQualificationProvenance {
             }
         }
     )
+    $sbomHash = Get-QualificationSha256 -Path (
+        Join-Path $StagedDirectory 'agenterm-sbom.spdx.json'
+    )
     return [ordered]@{
         git_head = $head
         source_dirty = [bool]$metadata.git_dirty
         cargo_lock_sha256 = $cargoLockHash
         artifact_manifest_sha256 = $artifactManifestHash
+        sbom_sha256 = $sbomHash
         executables = $artifactRecords
     }
 }

@@ -13,7 +13,9 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
 
       - name: Install lint components
         run: rustup component add rustfmt clippy
@@ -32,6 +34,9 @@ jobs:
           $expected = "v$($match.Groups['version'].Value)"
           if ($env:GITHUB_REF_NAME -ne $expected) {
             throw "Tag $env:GITHUB_REF_NAME does not match $expected."
+          }
+          if ($expected -eq 'v0.1.7') {
+            throw 'v0.1.7 is an internal-only baseline and must not be published.'
           }
 
       - name: Run release quality gate
@@ -54,7 +59,7 @@ jobs:
 
       - name: Upload failed quality-gate diagnostics
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-quality-gate-failure-${{ github.run_id }}
           if-no-files-found: warn
