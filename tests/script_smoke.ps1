@@ -1,6 +1,7 @@
 param(
     [string]$Exe = (Join-Path $PSScriptRoot '..\dist\agenterm-cli.exe'),
-    [switch]$ListEvidence
+    [switch]$ListEvidence,
+    [switch]$InternalFailureBundleProbe
 )
 
 $ErrorActionPreference = 'Stop'
@@ -353,6 +354,9 @@ try {
     $value = Invoke-Script @('script', 'eval', '40 + 2')
     if ($value -ne '42') {
         throw "pure eval returned unexpected value: $value"
+    }
+    if ($InternalFailureBundleProbe) {
+        throw "INTERNAL_FAILURE_BUNDLE_PROBE:script:$($smokeRun.RunId)"
     }
     [IO.File]::WriteAllText($sourceFile, 'print("hello"); args[0] + args[1]')
     $run = Invoke-Script @('script', 'run', $sourceFile, '--', 'safe', '-script')

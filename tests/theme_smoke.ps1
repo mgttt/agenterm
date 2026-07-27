@@ -1,7 +1,8 @@
 param(
     [string]$GuiExe = (Join-Path $PSScriptRoot '..\dist\agenterm.exe'),
     [string]$CliExe = (Join-Path $PSScriptRoot '..\dist\agenterm-cli.exe'),
-    [switch]$ListEvidence
+    [switch]$ListEvidence,
+    [switch]$InternalFailureBundleProbe
 )
 
 $ErrorActionPreference = 'Stop'
@@ -217,6 +218,9 @@ try {
     Invoke-AgenTerm @(
         'wait-ui', '-t', $tab.id, '--tab-state', 'running', '--timeout-ms', '10000'
     ) | Out-Null
+    if ($InternalFailureBundleProbe) {
+        throw "INTERNAL_FAILURE_BUNDLE_PROBE:gui:$($themeRun.RunId)"
+    }
     $paneBefore = Get-Pane -Target $tab.id
     $tokenBefore = "AGENTERM_THEME_BEFORE_$PID"
     Invoke-AgenTerm @('send-keys', '-t', $tab.id, "echo $tokenBefore", 'Enter') | Out-Null
