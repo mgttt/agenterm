@@ -65,10 +65,10 @@ mod ui_geometry;
 mod workspace;
 
 use commands::{
-    BACKSPACE_INPUT, MUX_COMMANDS, MuxStatus, SUPPORTED_COMMANDS, control_command_requests_help,
-    control_command_usage, has_option, last_positional, mux_command, option_value,
-    parse_new_command, parse_tab_environment, positional_values, screenshot_output_path,
-    tmux_key_bytes, validate_control_command,
+    BACKSPACE_INPUT, MUX_COMMANDS, MuxStatus, SUPPORTED_COMMANDS, canonical_control_command,
+    control_command_requests_help, control_command_usage, has_option, last_positional, mux_command,
+    option_value, parse_new_command, parse_tab_environment, positional_values,
+    screenshot_output_path, tmux_key_bytes, validate_control_command,
 };
 use event_journal::EventJournal;
 use instances::{InstanceRegistration, discover_instances, prune_instance, register_instance};
@@ -5079,6 +5079,12 @@ fn run_cli(arguments: Vec<String>) -> i32 {
             arguments.push(content);
         }
     }
+    if let Some(command) = arguments.first_mut() {
+        let canonical = canonical_control_command(command);
+        if canonical != command {
+            *command = canonical.to_owned();
+        }
+    }
     let command = arguments.first().map(String::as_str).unwrap_or_default();
     if matches!(command, "list-commands" | "lscm") {
         print!("{SUPPORTED_COMMANDS}");
@@ -5827,7 +5833,7 @@ Usage:
   agentermctl wait-ui [--active @id] [--focus surface] [-t target --tab-state state]
   agentermctl protocol-info
   agentermctl list-panes [-F format]
-  agentermctl list-sessions | has-session | kill-server"
+  agentermctl list-sessions | has-session | kill-server | server-kill"
     );
 }
 
@@ -5881,7 +5887,7 @@ fn protocol_info_json() -> String {
             "set-setting", "set-tab-note", "show-tab-note",
             "list-tab-tree", "set-tab-parent", "show-tab-parent",
             "save-workspace", "workspace-info", "shutdown",
-            "new-agent", "list-instances", "server-list", "scroll-pane", "read-events",
+            "new-agent", "list-instances", "server-list", "server-kill", "scroll-pane", "read-events",
             "wait-events"
         ],
         "features": {

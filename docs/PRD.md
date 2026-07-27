@@ -858,6 +858,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
         - [x] `server-list [--json] [--prune]` is an offline fleet-discovery
           alias over the same registered-instance records; it never autostarts
           a GUI and therefore provides the read-side companion to `kill-server`
+        - [x] `server-kill` is a client-side alias that canonicalizes to the
+          existing `kill-server` operation before IPC dispatch; it preserves
+          the same destructive workspace and process-lifecycle semantics
         - global `--address HOST:PORT` targets a discovered server explicitly
         - `active-window|active-tab [-F format]`
         - `inspect|pane-snapshot [-t target]`
@@ -873,10 +876,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
           [--timeout-ms ms]`
         - `ui-snapshot`, `protocol-info`
         - `workspace-info`, `save-workspace`, `shutdown`
-        - [ ] explore a coherent `server-*` lifecycle namespace only as aliases
-          over typed discovery, health, start, shutdown, and destructive-kill
-          operations; do not create a second server registry or weaken the
-          current `kill-server` workspace-destruction contract
+        - [~] `server-list` and `server-kill` establish a `server-*` lifecycle
+          namespace; explore health, start, and graceful-shutdown helpers only
+          as aliases over typed operations, without creating a second server
+          registry or weakening the `kill-server` destruction contract
         - [ ] `shutdown --no-save` escape hatch for instances whose workspace
           destination has become unwritable
         - `wait-ui [--active @id] [--focus surface] [-t target

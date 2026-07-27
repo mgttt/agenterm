@@ -40,6 +40,7 @@ select-window (selectw)
 send-keys (send)
 send-composer
 send-mouse
+server-kill
 server-list
 set-setting
 set-composer
@@ -550,6 +551,7 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
             &[][..],
             false,
         ),
+        "server-kill" => ("agentermctl server-kill", &[][..], &[][..], false),
         "server-list" => (
             "agentermctl server-list [--json] [--prune]",
             &[][..],
@@ -643,6 +645,13 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
         flag_options,
         child_at_first_positional,
     })
+}
+
+pub(crate) fn canonical_control_command(command: &str) -> &str {
+    match command {
+        "server-kill" => "kill-server",
+        _ => command,
+    }
 }
 
 pub(crate) fn has_option(args: &[String], option: &str) -> bool {
@@ -993,5 +1002,11 @@ mod tests {
         assert!(error.contains("unknown option '-a'"));
         assert!(error.contains("--address HOST:PORT"));
         assert!(validate_control_command(&args(&["capture-pane", "-p", "-t", "@1"])).is_ok());
+    }
+
+    #[test]
+    fn canonicalizes_server_kill_to_the_existing_destructive_operation() {
+        assert_eq!(canonical_control_command("server-kill"), "kill-server");
+        assert_eq!(canonical_control_command("server-list"), "server-list");
     }
 }

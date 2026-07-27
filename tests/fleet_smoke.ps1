@@ -183,7 +183,10 @@ try {
         }
     }
     finally {
-        & $CtlExe --address $explicitAddress shutdown 2>$null | Out-Null
+        Write-Host 'STEP server-kill aliases the existing destructive operation'
+        Invoke-CheckedExe $CtlExe @(
+            '--address', $explicitAddress, 'server-kill'
+        ) | Out-Null
         $env:AGENTERM_IPC_ADDRESS = $savedAddress
         $env:AGENTERM_WORKSPACE_PATH = $savedWorkspace
         Remove-Item -LiteralPath $explicitWorkspace -ErrorAction SilentlyContinue
