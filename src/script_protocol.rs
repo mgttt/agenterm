@@ -4,6 +4,8 @@ use serde_json::Value;
 pub const SCRIPT_ENVELOPE_VERSION: u32 = 1;
 pub const SCRIPT_API_VERSION: u32 = 1;
 pub const SCRIPT_INVOCATION_MAX_BYTES: u64 = 2 * 1024 * 1024;
+pub const SCRIPT_FRAME_VERSION: u32 = 1;
+pub const SCRIPT_FRAME_MAX_BYTES: u32 = 2 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -133,4 +135,32 @@ pub struct ScriptResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failure: Option<ScriptFailure>,
     pub duration_ms: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ScriptFrame {
+    pub frame_version: u32,
+    pub frame_id: String,
+    #[serde(flatten)]
+    pub payload: ScriptFramePayload,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(tag = "kind", content = "payload", rename_all = "snake_case")]
+pub enum ScriptFramePayload {
+    Invoke(ScriptInvocation),
+    Cancel {
+        invocation_id: String,
+    },
+    Result(ScriptResult),
+    BrokerRequest {
+        invocation_id: String,
+        request_id: String,
+        request: Value,
+    },
+    BrokerResponse {
+        invocation_id: String,
+        request_id: String,
+        response: Value,
+    },
 }

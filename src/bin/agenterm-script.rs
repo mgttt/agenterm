@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     io::{Read, Write},
     process::ExitCode,
     sync::{
@@ -9,8 +10,9 @@ use std::{
 };
 
 use agenterm::script_protocol::{
-    SCRIPT_API_VERSION, SCRIPT_ENVELOPE_VERSION, SCRIPT_INVOCATION_MAX_BYTES, ScriptBudgets,
-    ScriptExitClass, ScriptFailure, ScriptFailureCategory, ScriptInvocation, ScriptOperation,
+    SCRIPT_API_VERSION, SCRIPT_ENVELOPE_VERSION, SCRIPT_FRAME_MAX_BYTES, SCRIPT_FRAME_VERSION,
+    SCRIPT_INVOCATION_MAX_BYTES, ScriptBudgets, ScriptExitClass, ScriptFailure,
+    ScriptFailureCategory, ScriptFrame, ScriptFramePayload, ScriptInvocation, ScriptOperation,
     ScriptProfile, ScriptResult,
 };
 use rhai::{Dynamic, Engine, Scope};
@@ -29,6 +31,7 @@ fn run() -> anyhow::Result<u8> {
     let mut arguments = std::env::args().skip(1);
     match arguments.next().as_deref() {
         Some("--worker") if arguments.next().is_none() => run_worker(),
+        Some("--framed-worker") if arguments.next().is_none() => run_framed_worker(),
         Some("--version") if arguments.next().is_none() => {
             println!("agenterm-script {}", env!("CARGO_PKG_VERSION"));
             Ok(0)
@@ -36,7 +39,7 @@ fn run() -> anyhow::Result<u8> {
         Some("--help") | None => {
             println!(
                 "AgenTerm scripting worker\n\
-                 Usage: agenterm-script --worker\n\
+                 Usage: agenterm-script --worker | --framed-worker\n\
                  Public scripts are invoked through `agenterm-cli script ...`."
             );
             Ok(0)
@@ -66,6 +69,223 @@ fn run_worker() -> anyhow::Result<u8> {
     serde_json::to_writer(std::io::stdout().lock(), &result)?;
     std::io::stdout().lock().write_all(b"\n")?;
     Ok(u8::from(!result.ok))
+}
+
+fn run_framed_worker() -> anyhow::Result<u8> {
+    process_framed_stream(std::io::stdin().lock(), std::io::stdout().lock())?;
+    Ok(0)
+}
+
+fn process_framed_stream<R: Read, W: Write>(mut input: R, mut output: W) -> anyhow::Result<()> {
+    let mut seen_frames = HashSet::new();
+    let mut completed_invocations = HashSet::new();
+    loop {
+        let Some(length) = read_frame_length(&mut input, &mut output)? else {
+            return Ok(());
+        };
+        if length > SCRIPT_FRAME_MAX_BYTES {
+            let drained = drain_frame(&mut input, u64::from(length))?;
+            write_protocol_frame(
+                &mut output,
+                "unknown",
+                "unknown",
+                "protocol_frame_too_large",
+                format!("frame length {length} exceeds the {SCRIPT_FRAME_MAX_BYTES} byte limit"),
+            )?;
+            if !drained {
+                return Ok(());
+            }
+            continue;
+        }
+        let mut bytes = vec![0_u8; length as usize];
+        if let Err(error) = input.read_exact(&mut bytes) {
+            write_protocol_frame(
+                &mut output,
+                "unknown",
+                "unknown",
+                "protocol_truncated_frame",
+                format!("frame payload ended before {length} bytes: {error}"),
+            )?;
+            return Ok(());
+        }
+        let frame: ScriptFrame = match serde_json::from_slice(&bytes) {
+            Ok(frame) => frame,
+            Err(error) => {
+                write_protocol_frame(
+                    &mut output,
+                    "unknown",
+                    "unknown",
+                    "protocol_malformed_frame",
+                    error.to_string(),
+                )?;
+                continue;
+            }
+        };
+        let response = process_frame(frame, &mut seen_frames, &mut completed_invocations);
+        write_frame(&mut output, &response)?;
+    }
+}
+
+fn read_frame_length<R: Read, W: Write>(
+    input: &mut R,
+    output: &mut W,
+) -> anyhow::Result<Option<u32>> {
+    let mut header = [0_u8; 4];
+    match input.read(&mut header[..1])? {
+        0 => return Ok(None),
+        1 => {}
+        _ => unreachable!("one-byte read returned more than one byte"),
+    }
+    if let Err(error) = input.read_exact(&mut header[1..]) {
+        write_protocol_frame(
+            output,
+            "unknown",
+            "unknown",
+            "protocol_truncated_header",
+            format!("frame header ended before four bytes: {error}"),
+        )?;
+        return Ok(None);
+    }
+    Ok(Some(u32::from_be_bytes(header)))
+}
+
+fn drain_frame<R: Read>(input: &mut R, length: u64) -> anyhow::Result<bool> {
+    let mut limited = input.take(length);
+    let copied = std::io::copy(&mut limited, &mut std::io::sink())?;
+    Ok(copied == length)
+}
+
+fn process_frame(
+    frame: ScriptFrame,
+    seen_frames: &mut HashSet<String>,
+    completed_invocations: &mut HashSet<String>,
+) -> ScriptFrame {
+    let frame_id = frame.frame_id;
+    if frame_id.is_empty() || frame_id.len() > 128 {
+        return result_frame(
+            frame_id,
+            protocol_failure_for(
+                "unknown",
+                "protocol_invalid_frame_id",
+                "frame_id must contain from 1 to 128 bytes",
+            ),
+        );
+    }
+    if !seen_frames.insert(frame_id.clone()) {
+        return result_frame(
+            frame_id,
+            protocol_failure_for(
+                "unknown",
+                "protocol_duplicate_frame",
+                "frame_id has already been processed",
+            ),
+        );
+    }
+    if frame.frame_version != SCRIPT_FRAME_VERSION {
+        return result_frame(
+            frame_id,
+            protocol_failure_for(
+                "unknown",
+                "protocol_unsupported_frame_version",
+                format!(
+                    "worker supports frame version {SCRIPT_FRAME_VERSION}, requested {}",
+                    frame.frame_version
+                ),
+            ),
+        );
+    }
+    let result = match frame.payload {
+        ScriptFramePayload::Invoke(invocation) => {
+            if invocation.invocation_id.is_empty() || invocation.invocation_id.len() > 128 {
+                protocol_failure_for(
+                    &invocation.invocation_id,
+                    "protocol_invalid_invocation_id",
+                    "invocation_id must contain from 1 to 128 bytes",
+                )
+            } else if !completed_invocations.insert(invocation.invocation_id.clone()) {
+                protocol_failure_for(
+                    &invocation.invocation_id,
+                    "protocol_duplicate_invocation",
+                    "invocation_id has already been processed",
+                )
+            } else {
+                execute(invocation)
+            }
+        }
+        ScriptFramePayload::Cancel { invocation_id } => {
+            let (code, message) = if completed_invocations.contains(&invocation_id) {
+                (
+                    "protocol_cancel_too_late",
+                    "invocation has already completed",
+                )
+            } else {
+                (
+                    "protocol_cancel_unknown",
+                    "no active invocation has this invocation_id",
+                )
+            };
+            protocol_failure_for(&invocation_id, code, message)
+        }
+        ScriptFramePayload::BrokerRequest { invocation_id, .. }
+        | ScriptFramePayload::BrokerResponse { invocation_id, .. } => protocol_failure_for(
+            &invocation_id,
+            "protocol_broker_unavailable",
+            "broker frames are reserved but unavailable in this worker version",
+        ),
+        ScriptFramePayload::Result(result) => protocol_failure_for(
+            &result.invocation_id,
+            "protocol_unexpected_result",
+            "result frames are worker output and cannot be sent to the worker",
+        ),
+    };
+    result_frame(frame_id, result)
+}
+
+fn result_frame(frame_id: String, result: ScriptResult) -> ScriptFrame {
+    ScriptFrame {
+        frame_version: SCRIPT_FRAME_VERSION,
+        frame_id,
+        payload: ScriptFramePayload::Result(result),
+    }
+}
+
+fn write_protocol_frame<W: Write>(
+    output: &mut W,
+    frame_id: &str,
+    invocation_id: &str,
+    code: &str,
+    message: impl Into<String>,
+) -> anyhow::Result<()> {
+    write_frame(
+        output,
+        &result_frame(
+            frame_id.to_owned(),
+            protocol_failure_for(invocation_id, code, message),
+        ),
+    )
+}
+
+fn write_frame<W: Write>(output: &mut W, frame: &ScriptFrame) -> anyhow::Result<()> {
+    let mut bytes = serde_json::to_vec(frame)?;
+    if bytes.len() > SCRIPT_FRAME_MAX_BYTES as usize {
+        let invocation_id = match &frame.payload {
+            ScriptFramePayload::Result(result) => result.invocation_id.as_str(),
+            _ => "unknown",
+        };
+        let replacement = result_frame(
+            frame.frame_id.clone(),
+            protocol_failure_for(
+                invocation_id,
+                "protocol_result_frame_too_large",
+                format!("encoded result exceeds the {SCRIPT_FRAME_MAX_BYTES} byte frame limit"),
+            ),
+        );
+        bytes = serde_json::to_vec(&replacement)?;
+    }
+    output.write_all(&(bytes.len() as u32).to_be_bytes())?;
+    output.write_all(&bytes)?;
+    output.flush()?;
+    Ok(())
 }
 
 fn execute(invocation: ScriptInvocation) -> ScriptResult {
@@ -269,6 +489,18 @@ fn api_catalog() -> serde_json::Value {
             },
         },
         "operations": ["api", "check", "eval", "run"],
+        "framing": {
+            "version": SCRIPT_FRAME_VERSION,
+            "max_frame_bytes": SCRIPT_FRAME_MAX_BYTES,
+            "mode": "--framed-worker",
+            "input_kinds": {
+                "invoke": "available",
+                "cancel": "available",
+                "result": "worker_output_only",
+                "broker_request": "reserved",
+                "broker_response": "reserved",
+            },
+        },
         "limits": {
             "defaults": defaults,
             "hard_maximums": hard_limits,
@@ -469,9 +701,17 @@ fn classify_compile_error(message: String) -> ScriptFailure {
 }
 
 fn protocol_failure(code: impl Into<String>, message: impl Into<String>) -> ScriptResult {
+    protocol_failure_for("unknown", code, message)
+}
+
+fn protocol_failure_for(
+    invocation_id: &str,
+    code: impl Into<String>,
+    message: impl Into<String>,
+) -> ScriptResult {
     ScriptResult {
         envelope_version: SCRIPT_ENVELOPE_VERSION,
-        invocation_id: "unknown".to_owned(),
+        invocation_id: invocation_id.to_owned(),
         api_version: SCRIPT_API_VERSION,
         ok: false,
         exit_class: ScriptExitClass::Protocol,
@@ -515,6 +755,7 @@ fn failure(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Cursor;
 
     fn invocation(operation: ScriptOperation, source: &str) -> ScriptInvocation {
         ScriptInvocation {
@@ -537,6 +778,43 @@ mod tests {
             .as_ref()
             .map(|failure| failure.code.as_str())
             .expect("expected failure")
+    }
+
+    fn invoke_frame(frame_id: &str, invocation_id: &str, source: &str) -> ScriptFrame {
+        let mut invocation = invocation(ScriptOperation::Eval, source);
+        invocation.invocation_id = invocation_id.to_owned();
+        ScriptFrame {
+            frame_version: SCRIPT_FRAME_VERSION,
+            frame_id: frame_id.to_owned(),
+            payload: ScriptFramePayload::Invoke(invocation),
+        }
+    }
+
+    fn encoded_frame(frame: &ScriptFrame) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        write_frame(&mut bytes, frame).expect("encode frame");
+        bytes
+    }
+
+    fn decoded_frames(bytes: &[u8]) -> Vec<ScriptFrame> {
+        let mut input = Cursor::new(bytes);
+        let mut frames = Vec::new();
+        while input.position() < bytes.len() as u64 {
+            let mut header = [0_u8; 4];
+            input.read_exact(&mut header).expect("frame header");
+            let length = u32::from_be_bytes(header) as usize;
+            let mut payload = vec![0_u8; length];
+            input.read_exact(&mut payload).expect("frame payload");
+            frames.push(serde_json::from_slice(&payload).expect("JSON frame"));
+        }
+        frames
+    }
+
+    fn frame_result(frame: &ScriptFrame) -> &ScriptResult {
+        match &frame.payload {
+            ScriptFramePayload::Result(result) => result,
+            _ => panic!("expected result frame"),
+        }
     }
 
     #[test]
@@ -700,5 +978,134 @@ mod tests {
     fn api_scanner_accepts_forward_function_declarations() {
         let source = "twice(21); fn twice(value) { value * 2 }";
         assert!(external_function_calls(source).is_empty());
+    }
+
+    #[test]
+    fn framed_worker_runs_multiple_invocations_without_stdout_corruption() {
+        let mut input = encoded_frame(&invoke_frame(
+            "frame-one",
+            "invocation-one",
+            r#"print("inside-result"); 21 * 2"#,
+        ));
+        input.extend(encoded_frame(&invoke_frame(
+            "frame-two",
+            "invocation-two",
+            "6 * 7",
+        )));
+        let mut output = Vec::new();
+        process_framed_stream(Cursor::new(input), &mut output).expect("framed stream");
+
+        let frames = decoded_frames(&output);
+        assert_eq!(frames.len(), 2);
+        assert_eq!(frames[0].frame_id, "frame-one");
+        assert_eq!(frame_result(&frames[0]).stdout, "inside-result\n");
+        assert_eq!(frame_result(&frames[0]).value, Some(serde_json::json!(42)));
+        assert_eq!(frames[1].frame_id, "frame-two");
+        assert_eq!(frame_result(&frames[1]).value, Some(serde_json::json!(42)));
+    }
+
+    #[test]
+    fn framed_worker_recovers_after_malformed_and_oversized_frames() {
+        let mut input = Vec::new();
+        input.extend(1_u32.to_be_bytes());
+        input.push(b'{');
+        let oversized = SCRIPT_FRAME_MAX_BYTES + 1;
+        input.extend(oversized.to_be_bytes());
+        input.resize(input.len() + oversized as usize, b'x');
+        input.extend(encoded_frame(&invoke_frame(
+            "recovery-frame",
+            "recovery-invocation",
+            "40 + 2",
+        )));
+        let mut output = Vec::new();
+        process_framed_stream(Cursor::new(input), &mut output).expect("framed stream");
+
+        let frames = decoded_frames(&output);
+        assert_eq!(frames.len(), 3);
+        assert_eq!(
+            failure_code(frame_result(&frames[0])),
+            "protocol_malformed_frame"
+        );
+        assert_eq!(
+            failure_code(frame_result(&frames[1])),
+            "protocol_frame_too_large"
+        );
+        assert_eq!(frames[2].frame_id, "recovery-frame");
+        assert_eq!(frame_result(&frames[2]).value, Some(serde_json::json!(42)));
+    }
+
+    #[test]
+    fn framed_worker_rejects_versions_duplicates_cancel_and_reserved_frames() {
+        let mut unsupported = invoke_frame("unsupported", "never-run", "1");
+        unsupported.frame_version = SCRIPT_FRAME_VERSION + 1;
+        let first = invoke_frame("first", "same-invocation", "1");
+        let duplicate_invocation = invoke_frame("second", "same-invocation", "2");
+        let duplicate_frame = invoke_frame("first", "another-invocation", "3");
+        let cancel = ScriptFrame {
+            frame_version: SCRIPT_FRAME_VERSION,
+            frame_id: "cancel".to_owned(),
+            payload: ScriptFramePayload::Cancel {
+                invocation_id: "same-invocation".to_owned(),
+            },
+        };
+        let broker = ScriptFrame {
+            frame_version: SCRIPT_FRAME_VERSION,
+            frame_id: "broker".to_owned(),
+            payload: ScriptFramePayload::BrokerRequest {
+                invocation_id: "same-invocation".to_owned(),
+                request_id: "request-one".to_owned(),
+                request: serde_json::json!({"reserved": true}),
+            },
+        };
+        let mut input = Vec::new();
+        for frame in [
+            unsupported,
+            first,
+            duplicate_invocation,
+            duplicate_frame,
+            cancel,
+            broker,
+        ] {
+            input.extend(encoded_frame(&frame));
+        }
+        let mut output = Vec::new();
+        process_framed_stream(Cursor::new(input), &mut output).expect("framed stream");
+
+        let frames = decoded_frames(&output);
+        let codes: Vec<_> = frames
+            .iter()
+            .map(|frame| {
+                frame_result(frame)
+                    .failure
+                    .as_ref()
+                    .map(|failure| failure.code.as_str())
+            })
+            .collect();
+        assert_eq!(
+            codes,
+            vec![
+                Some("protocol_unsupported_frame_version"),
+                None,
+                Some("protocol_duplicate_invocation"),
+                Some("protocol_duplicate_frame"),
+                Some("protocol_cancel_too_late"),
+                Some("protocol_broker_unavailable"),
+            ]
+        );
+    }
+
+    #[test]
+    fn framed_worker_replaces_unencodable_large_result_with_typed_failure() {
+        let mut result = execute(invocation(ScriptOperation::Eval, "42"));
+        result.stdout = "\0".repeat(1024 * 1024);
+        let frame = result_frame("large-result".to_owned(), result);
+        let mut output = Vec::new();
+        write_frame(&mut output, &frame).expect("bounded replacement frame");
+        assert!(output.len() <= SCRIPT_FRAME_MAX_BYTES as usize + 4);
+        let frames = decoded_frames(&output);
+        assert_eq!(
+            failure_code(frame_result(&frames[0])),
+            "protocol_result_frame_too_large"
+        );
     }
 }

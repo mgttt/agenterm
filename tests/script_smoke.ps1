@@ -8,6 +8,7 @@ $declaredEvidence = @(
     'script.rhai-pure'
     'script.rhai-observe'
     'script.rhai-deny-budget'
+    'script.rhai-framed'
 )
 if ($ListEvidence) {
     $declaredEvidence
@@ -86,6 +87,116 @@ function Invoke-WorkerFailure {
     return ($output -join "`n")
 }
 
+function Add-FramePayload {
+    param(
+        [Parameter(Mandatory = $true)][IO.MemoryStream]$Stream,
+        [Parameter(Mandatory = $true)][byte[]]$Payload
+    )
+    $length = [uint32]$Payload.Length
+    $header = [byte[]]@(
+        (($length -shr 24) -band 0xff)
+        (($length -shr 16) -band 0xff)
+        (($length -shr 8) -band 0xff)
+        ($length -band 0xff)
+    )
+    $Stream.Write($header, 0, $header.Length)
+    $Stream.Write($Payload, 0, $Payload.Length)
+}
+
+function Add-JsonFrame {
+    param(
+        [Parameter(Mandatory = $true)][IO.MemoryStream]$Stream,
+        [Parameter(Mandatory = $true)][hashtable]$Frame
+    )
+    $json = $Frame | ConvertTo-Json -Compress -Depth 20
+    Add-FramePayload -Stream $Stream -Payload ([Text.Encoding]::UTF8.GetBytes($json))
+}
+
+function New-FramedInvocation {
+    param(
+        [Parameter(Mandatory = $true)][string]$FrameId,
+        [Parameter(Mandatory = $true)][string]$InvocationId,
+        [Parameter(Mandatory = $true)][string]$Source,
+        [uint32]$FrameVersion = 1
+    )
+    return @{
+        frame_version = $FrameVersion
+        frame_id = $FrameId
+        kind = 'invoke'
+        payload = @{
+            envelope_version = 1
+            invocation_id = $InvocationId
+            api_version = 1
+            operation = 'eval'
+            profile = 'pure'
+            source_label = 'smoke'
+            source = $Source
+            arguments = @()
+            budgets = @{
+                source_bytes = 262144
+                operations = 1000000
+                call_depth = 64
+                expression_depth = 64
+                collection_items = 10000
+                string_bytes = 262144
+                output_bytes = 65536
+                wall_time_ms = 2000
+            }
+        }
+    }
+}
+
+function Invoke-FramedWorker {
+    param([Parameter(Mandatory = $true)][byte[]]$InputBytes)
+    $startInfo = New-Object Diagnostics.ProcessStartInfo
+    $startInfo.FileName = $workerExe
+    $startInfo.Arguments = '--framed-worker'
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardInput = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $process = [Diagnostics.Process]::Start($startInfo)
+    try {
+        $process.StandardInput.BaseStream.Write($InputBytes, 0, $InputBytes.Length)
+        $process.StandardInput.Close()
+        $output = New-Object IO.MemoryStream
+        $process.StandardOutput.BaseStream.CopyTo($output)
+        $stderr = $process.StandardError.ReadToEnd()
+        $process.WaitForExit()
+        if ($process.ExitCode -ne 0) {
+            throw "framed worker exited $($process.ExitCode): $stderr"
+        }
+        return ,$output.ToArray()
+    }
+    finally {
+        $process.Dispose()
+    }
+}
+
+function ConvertFrom-FramedOutput {
+    param([Parameter(Mandatory = $true)][byte[]]$Bytes)
+    $frames = @()
+    $offset = 0
+    while ($offset -lt $Bytes.Length) {
+        if ($Bytes.Length - $offset -lt 4) {
+            throw 'framed worker returned a truncated length prefix'
+        }
+        $length = ([uint32]$Bytes[$offset] -shl 24) -bor
+            ([uint32]$Bytes[$offset + 1] -shl 16) -bor
+            ([uint32]$Bytes[$offset + 2] -shl 8) -bor
+            [uint32]$Bytes[$offset + 3]
+        $offset += 4
+        if ($length -gt 2097152 -or $Bytes.Length - $offset -lt $length) {
+            throw "framed worker returned an invalid $length byte payload"
+        }
+        $json = [Text.Encoding]::UTF8.GetString($Bytes, $offset, $length)
+        $frames += $json | ConvertFrom-Json
+        $offset += $length
+    }
+    return $frames
+}
+
 try {
     Remove-Item Env:AGENTERM_IPC_ADDRESS -ErrorAction SilentlyContinue
 
@@ -98,6 +209,9 @@ try {
         $apiResult.value.limits.defaults.wall_time_ms -ne 2000 -or
         $apiResult.value.limits.hard_maximums.wall_time_ms -ne 10000 -or
         $apiResult.value.limits.invocation_bytes -ne 2097152 -or
+        $apiResult.value.framing.version -ne 1 -or
+        $apiResult.value.framing.max_frame_bytes -ne 2097152 -or
+        $apiResult.value.framing.input_kinds.broker_request -ne 'reserved' -or
         $apiResult.value.exit_classes.limit -ne 3 -or
         $apiResult.value.failure_categories -notcontains 'protocol' -or
         @($apiResult.value.apis | Where-Object {
@@ -176,6 +290,49 @@ try {
         throw 'worker invocation did not recover after malformed protocol inputs'
     }
     Write-Evidence 'script.rhai-deny-budget'
+
+    Write-Host 'STEP framed worker sequencing, isolation, rejection, and recovery'
+    $framedInput = New-Object IO.MemoryStream
+    Add-FramePayload -Stream $framedInput -Payload ([Text.Encoding]::UTF8.GetBytes('{'))
+    Add-FramePayload -Stream $framedInput -Payload ([byte[]]::new(2097153))
+    Add-JsonFrame -Stream $framedInput -Frame (
+        New-FramedInvocation -FrameId 'frame-one' -InvocationId 'invoke-one' `
+            -Source 'print("framed-output"); 40 + 2'
+    )
+    Add-JsonFrame -Stream $framedInput -Frame (
+        New-FramedInvocation -FrameId 'frame-two' -InvocationId 'invoke-one' -Source '1'
+    )
+    Add-JsonFrame -Stream $framedInput -Frame (
+        New-FramedInvocation -FrameId 'bad-version' -InvocationId 'never-run' `
+            -Source '1' -FrameVersion 2
+    )
+    Add-JsonFrame -Stream $framedInput -Frame @{
+        frame_version = 1
+        frame_id = 'cancel-late'
+        kind = 'cancel'
+        payload = @{ invocation_id = 'invoke-one' }
+    }
+    Add-JsonFrame -Stream $framedInput -Frame (
+        New-FramedInvocation -FrameId 'recovery' -InvocationId 'invoke-recovery' -Source '6 * 7'
+    )
+    $framedOutput = Invoke-FramedWorker -InputBytes $framedInput.ToArray()
+    $framedInput.Dispose()
+    $frames = @(ConvertFrom-FramedOutput -Bytes $framedOutput)
+    $codes = @($frames | ForEach-Object { $_.payload.failure.code })
+    if ($frames.Count -ne 7 -or
+        $codes[0] -ne 'protocol_malformed_frame' -or
+        $codes[1] -ne 'protocol_frame_too_large' -or
+        -not $frames[2].payload.ok -or
+        $frames[2].payload.stdout -ne "framed-output`n" -or
+        $frames[2].payload.value -ne 42 -or
+        $codes[3] -ne 'protocol_duplicate_invocation' -or
+        $codes[4] -ne 'protocol_unsupported_frame_version' -or
+        $codes[5] -ne 'protocol_cancel_too_late' -or
+        -not $frames[6].payload.ok -or
+        $frames[6].payload.value -ne 42) {
+        throw 'framed worker did not preserve typed framing and recovery invariants'
+    }
+    Write-Evidence 'script.rhai-framed'
 
     Write-Host 'STEP brokered observe snapshot'
     $env:AGENTERM_IPC_ADDRESS = $address
