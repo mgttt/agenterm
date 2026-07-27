@@ -781,7 +781,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
           output exhaustion, oversized values, cancellation, worker crash,
           parent exit, concurrent worker ceiling, malformed envelopes, and
           unsupported API versions without GUI latency or workspace damage
-        - [ ] acceptance records GUI/CLI/worker sizes and first-window timing,
+        - [x] acceptance records GUI/CLI/worker sizes and first-window timing,
           verifies no Rhai code loads during normal GUI startup, and leaves no
           worker or temporary source behind after every result class
     - Extension surfaces
@@ -1245,7 +1245,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
           and word/line/rectangular selection retain the professional-terminal
           follow-up gates above; bounded terminal paste shipped through the
           focus-aware window system menu
-    - [ ] v0.1.6 Observable & Adaptable Workspace
+    - [x] v0.1.6 Observable & Adaptable Workspace
       - Frozen implementation defaults
         - [x] Settings uses `Dark`/`Light` labels with stable `dark|light` IDs,
           live preview, atomic Apply, and Cancel/Esc rollback; dark remains the
@@ -1464,7 +1464,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
           scrollback, drafts, and server discovery across reattach, while
           stop-and-exit must create a new epoch/PTY on the next start and CLI
           shutdown/kill paths must never wait for a modal
-        - [ ] release qualification adds Observable Fleet restart/gap/
+        - [x] release qualification adds Observable Fleet restart/gap/
           concurrent-reader evidence while preserving the 4 MiB GUI,
           per-sidecar size, one-second first-window, remain-on-exit, and
           explicit-close gates
