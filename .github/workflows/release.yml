@@ -11,6 +11,7 @@ permissions:
 jobs:
   windows:
     runs-on: windows-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -35,19 +36,62 @@ jobs:
 
       - name: Run release quality gate
         shell: pwsh
-        run: ./check.ps1 -Release -SkipSmoke
-
-      - name: Run isolated public CLI and fleet smoke
-        shell: pwsh
         run: |
-          ./tests/cli_smoke.ps1
-          ./tests/fleet_smoke.ps1
+          $log = Join-Path $env:RUNNER_TEMP 'agenterm-release-check.log'
+          try {
+            ./check.ps1 -Release *>&1 | Tee-Object -LiteralPath $log
+            if ($LASTEXITCODE -ne 0) {
+              throw "Release quality gate failed with exit code $LASTEXITCODE."
+            }
+          }
+          catch {
+            $errorText = $_ | Out-String
+            $errorText |
+              Tee-Object -LiteralPath $log -Append |
+              Write-Host
+            throw
+          }
+
+      - name: Upload failed quality-gate diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-quality-gate-failure-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 7
+          path: |
+            ${{ runner.temp }}/agenterm-release-check.log
+            ${{ runner.temp }}/agenterm-theme-*.png
+            ${{ runner.temp }}/agenterm-proxy-eye-*.png
+            target/smoke/*.png
 
       - name: Package Windows release
         shell: pwsh
         run: |
           $version = $env:GITHUB_REF_NAME.TrimStart('v')
           $zip = "./dist/agenterm-$version-windows-x86_64.zip"
+          $metadata = Get-Content ./dist/agenterm.json -Raw |
+            ConvertFrom-Json
+          if ($metadata.version -ne $version) {
+            throw "Build metadata version $($metadata.version) does not match $version."
+          }
+          $expectedNames = @(
+            'agenterm.exe'
+            'agenterm-cli.exe'
+            'agenterm-mux.exe'
+            'agenterm-script.exe'
+          )
+          $metadataNames = @($metadata.executables.name)
+          if (Compare-Object $expectedNames $metadataNames) {
+            throw 'Build metadata does not contain the expected release executable names.'
+          }
+          foreach ($entry in $metadata.executables) {
+            $path = Join-Path ./dist $entry.name
+            $actualHash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actualHash -ne $entry.sha256) {
+              throw "SHA-256 mismatch for $($entry.name)."
+            }
+          }
           Compress-Archive `
             -LiteralPath `
               ./dist/agenterm.exe, `
