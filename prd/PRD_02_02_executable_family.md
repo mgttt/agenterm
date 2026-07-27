@@ -43,20 +43,19 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] `agenterm-mux.exe`: tmux/RMUX-compatible fleet control entry point
 - [x] `agenterm-script.exe`: optional one-invocation Rhai scripting worker
   for the v0.1.5 safe scripting contract
-- [ ] `agenterm-mcp.exe`: MCP server/client and agentic orchestration
-  sidecar
-- [ ] `agenterm-ai.exe`: CPU-first lightweight specialized-intelligence
-  sidecar
-- [ ] `agenterm-llm-gateway.exe`: governed local LLM forwarding and routing
-  sidecar
 - [ ] `agenterm-bash.exe`: AgenTerm-owned default Bash entry point
-- [ ] `agenterm-ssh.exe`: AgenTerm-owned SSH entry point
-- [ ] `agenterm-curl.exe`: AgenTerm-owned HTTP transfer entry point
-- [ ] `agenterm-sqlite.exe`: AgenTerm-owned SQLite entry point
-- [ ] `agenterm-softmgr.exe`: signed optional-component lifecycle manager
-- [ ] an AgenTerm-owned executable means a stable product contract,
-  discovery, diagnostics, policy, and fleet integration; it does not imply
-  rewriting mature Bash, SSH, HTTP, or SQLite protocol engines
+- Future executable hypotheses, not release commitments:
+  - `agenterm-mcp.exe`: MCP server/client and agentic orchestration sidecar
+  - `agenterm-ai.exe`: CPU-first specialized-intelligence sidecar
+  - `agenterm-llm-gateway.exe`: governed local LLM forwarding and routing
+    sidecar
+  - `agenterm-ssh.exe`, `agenterm-curl.exe`, and `agenterm-sqlite.exe`:
+    possible stable fleet-integrated entry points over mature runtimes
+  - `agenterm-softmgr.exe`: possible signed optional-component lifecycle
+    manager
+  - an AgenTerm-owned executable would mean a stable product contract,
+    discovery, diagnostics, policy, and fleet integration; it would not imply
+    rewriting mature Bash, SSH, HTTP, or SQLite protocol engines
 - [x] all control frontends reuse shared request/target/format libraries;
   they do not duplicate GUI state or start a second workspace authority
 - [~] each binary has independent release size reporting and an enforced

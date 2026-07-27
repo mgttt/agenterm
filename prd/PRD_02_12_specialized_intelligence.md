@@ -4,6 +4,9 @@ Parent: [AgenTerm product tree](../PRD.md#product-tree)
 
 Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
+This module records admission gates for an unassigned research direction. It
+does not commit a model family, executable, or release version.
+
 - Product boundary
   - [ ] run inference in an optional CPU-first sidecar; `agenterm.exe`
     links no model runtime and performs no inference during startup or on
@@ -31,22 +34,16 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   - [ ] admit a model only after fixed Windows x64 CPU benchmarks cover
     artifact size, RSS, cold start, p95 latency, CPU load, accuracy,
     calibration, false alarms, failure isolation, and simpler baselines
-- Capability route
-  - [ ] A0 rules and expert systems cover no-progress/stall detection,
-    known error and exit patterns, command risk, event priority, resource
-    thresholds, and deterministic degradation
-  - [ ] A1 benchmark XGBoost, random forest, constrained SVM, and small MLP
-    candidates in shadow mode for anomaly/error classification, resource
-    warning, and event prioritization; model and runtime size are measured,
-    not assumed from the algorithm name
-  - [ ] A2 benchmark small GRU first and LSTM second for typed event rhythm,
-    prolonged no-progress, resource trend, and context-exhaustion
-    prediction; recurrent state is epoch-bound and resets on restart or gap
-  - [ ] A3 keeps sub-million-parameter RWKV-small as research only:
-    constant context-state memory does not include weights, vocabulary, or
-    runtime, and it must beat simpler models on the Windows CPU baseline
-  - [ ] A4 keeps Mamba-small as research only until a reproducible portable
-    Windows CPU kernel and export path beat GRU and classic-ML baselines
+- Research route, not a release commitment
+  - deterministic rules and expert systems establish the first labeled
+    baseline for no-progress, known errors, command risk, event priority, and
+    resource thresholds
+  - classic ML or small neural candidates are evaluated only when they beat
+    that baseline on user-visible accuracy, latency, memory, package size, and
+    false-positive cost
+  - sequence-model families, including recurrent, RWKV, or state-space
+    approaches, remain research candidates until reproducible portable
+    Windows CPU evidence beats simpler methods
   - [ ] GPU/NPU-required models, large Transformers, installed endpoint
     training, unsigned model hot-load, default raw-PTY collection, and
     automatic high-risk actions are out of scope

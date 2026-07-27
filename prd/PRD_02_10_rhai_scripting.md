@@ -164,13 +164,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   - [ ] no network client, package manager, arbitrary import, or general
     async runtime without a concrete reviewed product use case
 - Verification and delivery
-  - [ ] P0 records current approximately 714 KiB optimized GUI size,
-    first-window timing, and no-script behavior
-  - [ ] P1 adds the pure engine, budgets, CLI golden tests, and measured
-    size/startup A/B results
-  - [ ] P2 adds observation APIs before control APIs; each has
-    deny/success/scope-boundary black-box tests
-  - [ ] P3 adds status-provider timeout, error, reload, truncation, and
-    last-good-value tests
-  - [ ] every phase keeps `agenterm.exe` below the 4 MiB release gate; a
+  - [x] the shipped pure/observe slice records per-binary size, first-window
+    timing, no-script startup behavior, budgets, public CLI results, typed
+    observation, authority denial, timeout/crash recovery, and worker cleanup
+  - [ ] every future authority or provider slice adds
+    deny/success/scope-boundary and failure-isolation black-box tests before
+    its product status changes
+  - [ ] status-provider delivery additionally covers timeout, invalid result,
+    reload, truncation, last-known-good value, degraded state, and backoff
+  - [ ] every future slice keeps `agenterm.exe` below the 4 MiB release gate; a
     large dependency or Rhai feature must earn its measured cost

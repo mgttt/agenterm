@@ -18,12 +18,19 @@ unless the information cannot live here or in that product set.
   output-path helpers.
 - `src/event_journal.rs` — bounded observable-event ordering and gap detection.
 - `src/instances.rs` — multi-server registration and discovery records.
+- `src/operations.rs` — typed operation catalog, classes, and validation.
 - `src/protocol.rs` — serialized local IPC request/response contract.
 - `src/rmux_status.rs` — RMUX status-line window parsing and click ranges.
+- `src/script_audit.rs` — privacy-bounded script invocation audit records.
 - `src/script_protocol.rs` — versioned host/worker scripting contract.
 - `src/settings.rs` — persistent user settings.
 - `src/tab_tree.rs` — pure hierarchy ordering and cycle detection.
+- `src/theme.rs` — built-in theme IDs and color palettes.
+- `src/ui_geometry.rs` — pure host-surface layout and sidebar geometry.
+- `src/worker_supervisor.rs` — bounded sidecar lifetime and cancellation.
+- `src/working_context.rs` — CWD/proxy provenance and safe command preparation.
 - `src/workspace.rs` — versioned tab-workspace persistence.
+- `prd/` — modular product requirements and capability/evidence alignment.
 - `tests/` — black-box tests that drive only the public AgenTerm executable.
 - `assets/` — application icon sources.
 - `scripts/` — build metadata tooling.

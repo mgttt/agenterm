@@ -4,6 +4,9 @@ Parent: [AgenTerm product tree](../PRD.md#product-tree)
 
 Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
+This module records safety gates for an unassigned product hypothesis. It does
+not commit the gateway executable or a release version.
+
 - Dependency and isolation
   - [ ] implementation begins only after Observable Fleet, Rhai capability
     policy, MCP typed tools, credential isolation, and audit contracts pass

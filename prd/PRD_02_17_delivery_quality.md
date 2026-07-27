@@ -95,10 +95,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [x] `tests/script_smoke.ps1` drives only public `script check`,
       `script eval`, `script run`, and `script api --json` commands; no test
       links the Rhai host or invokes an internal worker API
-    - [ ] fixtures prove deterministic `pure` output, an `observe` snapshot
-      and journal position matching `agenterm-cli`, denied mutation and
-      ambient authority, stable parse/runtime/limit exit classes, timeout,
-      output truncation, worker crash, and subsequent recovery
+    - [x] fixtures prove deterministic `pure` output, typed `observe`
+      snapshot/journal baselines, denied mutation and ambient authority,
+      stable parse/runtime/limit/host exit classes, timeout, worker crash,
+      cleanup, and subsequent recovery
     - [ ] every Rhai timeout/crash case includes an independent public GUI,
       PTY, and workspace-health assertion; a sidecar error alone is not
       accepted as isolation evidence
@@ -115,34 +115,24 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [x] `check.ps1` runs `tests/script_smoke.ps1` before the
       safe-scripting release tag
 - Autonomous human UX dogfood
-  - Latest reproducible findings
-    - [ ] P1 target ambiguity: `agenterm-cli new-window -d -n "Research
-      Team"` prints mutable index `1` rather than stable ID `@2`; feeding
-      that result to `--parent` or `wait-ui --active` can address a
-      different tab. Acceptance: creation JSON or a documented format
-      returns the stable ID, and a black-box test uses that exact value for
-      create-child, select, wait, rename, and close after indexes shift
-    - [ ] P1 settings isolation: distinct `AGENTERM_IPC_ADDRESS` and
-      `AGENTERM_WORKSPACE_PATH` still share
-      `%LOCALAPPDATA%\AgenTerm\settings.json`, so an isolated font test
-      changes every running instance. Acceptance: an explicit settings-path
-      override scopes read/write/restart tests and leaves the user's file
-      byte-identical
-    - [ ] P1 window-control gap: `ui-snapshot` observes minimized state and
-      geometry, but the public semantic interface cannot resize, minimize,
-      maximize, or restore a window; the 2026-07-27 run required Win32
-      automation. Acceptance: public actions drive each state, `wait-ui`
-      verifies it, minimize preserves the last PTY grid, and restore/resize
-      produce the expected new grid
+  - Resolved findings retained as regression contracts
+    - [x] stable creation output is available through the documented
+      `new-window -F '#{window_id}'` format, and a black-box journey reuses
+      that exact stable ID for child creation, selection, wait, rename, and
+      close after indexes shift
+    - [x] `AGENTERM_SETTINGS_PATH` isolates settings read/write/restart tests
+      from the default `%LOCALAPPDATA%\AgenTerm\settings.json`
+    - [x] public semantic actions resize, minimize, maximize, and restore the
+      window; `wait-ui` verifies post-state, minimize preserves the last PTY
+      grid, and resize updates the grid
     - [ ] P2 active-tree readability: the three 24-pixel action targets
       reduce the selected child row's note to `child agent wor...` at the
       default 250-pixel sidebar. Acceptance: screenshot fixtures prove
       name/note and actions remain distinguishable at default width, deep
       nesting, long CJK text, and 125%/150% display scaling
-    - [ ] P3 language consistency: the default English surface mixes
-      `Settings`, `New`, and `Compose input` with `发送`. Acceptance: one
-      locale source selects all visible labels and snapshots contain no
-      unintended mixed-language controls
+    - [x] one declared English locale selects all built-in visible labels;
+      semantic snapshots and black-box assertions reject unintended
+      mixed-language controls
   - [ ] add a public-interface dogfood gate that starts the release artifact
     with isolated IPC, workspace, settings, session, and evidence paths;
     fixed sleeps and private state hooks are forbidden

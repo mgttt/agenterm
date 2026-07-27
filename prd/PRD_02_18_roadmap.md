@@ -1,4 +1,4 @@
-# Focused super-fleet roadmap
+# Focused product roadmap
 
 Parent: [AgenTerm product tree](../PRD.md#product-tree)
 
@@ -333,10 +333,9 @@ track remains planned, but every declared dependency must still pass.
 - [ ] M6 later controlled agentic bridge: ship MCP read-only resources,
   then explicit control tools, Rhai control, brain/flow orchestration, and
   agent/token status without weakening close safety
-- [ ] M7 lightweight intelligence: rules first, then benchmark-gated
-  classic ML, then small GRU/LSTM candidates in isolated CPU workers
-- [ ] M8 governed LLM gateway: local forwarding, routing, quota, audit,
-  cost, credential isolation, and redaction after scripting/MCP/event-core
-  gates
-- [ ] M9 experimental sequence frontier: RWKV-small and Mamba-small advance
-  only when portable Windows CPU evidence beats simpler models
+- [ ] M7 evidence-gated optional intelligence: deterministic rules establish
+  the baseline; any learned worker advances only after a concrete user case
+  and portable Windows CPU evidence beat simpler methods
+- [ ] M8 governed LLM gateway hypothesis: local forwarding, routing, quota,
+  audit, cost, credential isolation, and redaction remain unassigned until
+  scripting, MCP, and event-core gates produce a concrete product need
