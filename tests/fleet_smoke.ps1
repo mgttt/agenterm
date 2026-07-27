@@ -7,6 +7,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $declaredEvidence = @(
     'fleet.codex-launcher'
+    'fleet.event-transition-catalog'
     'fleet.instance-discovery'
     'fleet.mux-frontend'
     'fleet.tab-environment'
@@ -160,10 +161,25 @@ try {
     Write-Host 'STEP zero-instance live control reports structured candidates'
     Remove-Item Env:AGENTERM_IPC_ADDRESS
     try {
+        New-Item -ItemType Directory -Path $instanceDir -Force | Out-Null
+        $deadRecord = Join-Path $instanceDir '4294967295.json'
+        @{
+            schema_version = 1
+            pid = [uint32]::MaxValue
+            address = '127.0.0.1:59999'
+            version = $expectedVersion
+            session = 'stale'
+            workspace_path = 'stale-workspace.json'
+            started_at_unix_ms = 1
+        } | ConvertTo-Json | Set-Content -LiteralPath $deadRecord -Encoding utf8
         $emptyServers = Invoke-CheckedExe $CtlExe @('server-list', '--json') |
             ConvertFrom-Json
-        if (@($emptyServers).Count -ne 0) {
-            throw 'server-list did not report an empty fleet without autostarting a GUI'
+        if (@($emptyServers).Count -ne 0 -or
+            (Test-Path -LiteralPath $deadRecord)) {
+            throw (
+                'server-list did not remove a definitively dead registration ' +
+                'without autostarting a GUI'
+            )
         }
         $emptyError = Invoke-ExpectedFailure $CtlExe @('list-windows')
         if (-not $emptyError.Contains('"code": "no_healthy_instance"') -or
@@ -264,9 +280,18 @@ try {
         $server.status -ne $instance.status -or
         $server.pid -ne $instance.pid -or
         $server.workspace_path -ne $instance.workspace_path -or
+        $server.window_visible -ne $true -or
+        $server.window_detached -ne $false -or
+        $server.window_state -notin @('restored', 'maximized') -or
+        $null -ne $server.modal_kind -or
+        [string]::IsNullOrWhiteSpace($server.event_epoch) -or
+        $null -eq $server.event_sequence -or
         $instance.version -ne $expectedVersion -or
         $instance.workspace_path -ne $workspaceFile) {
-        throw 'list-instances and server-list did not report the same isolated live server'
+        throw (
+            'list-instances/server-list did not report the same live server with ' +
+            'typed window and event state'
+        )
     }
     $targetedProtocol = Invoke-CheckedExe $CtlExe @(
         '--address', $address, 'protocol-info'
@@ -274,6 +299,42 @@ try {
     if (-not $targetedProtocol.features.instance_discovery) {
         throw 'agenterm-cli --address did not target the requested server'
     }
+    $eventCatalog = @($targetedProtocol.event_catalog.events)
+    $eventKinds = @($eventCatalog | ForEach-Object kind)
+    if ($targetedProtocol.event_catalog.schema_version -ne 1 -or
+        -not $targetedProtocol.features.typed_events -or
+        $eventCatalog.Count -ne 24 -or
+        @($eventKinds | Sort-Object -Unique).Count -ne $eventCatalog.Count -or
+        @($eventCatalog | Where-Object {
+                [string]::IsNullOrWhiteSpace($_.kind) -or
+                [string]::IsNullOrWhiteSpace($_.state_path) -or
+                [string]::IsNullOrWhiteSpace($_.payload) -or
+                $_.scope -notin @('server', 'tab') -or
+                [string]::IsNullOrWhiteSpace($_.since)
+            }).Count -ne 0) {
+        throw 'protocol-info event catalog was incomplete, open-ended, or untyped'
+    }
+
+    Write-Host 'STEP server-scoped event transition matches its post-state'
+    $layoutBaseline = Invoke-CheckedExe $CtlExe @('ui-snapshot') | ConvertFrom-Json
+    $layoutBefore = [bool]$layoutBaseline.layout.sidebar.visible
+    Invoke-CheckedExe $CtlExe @('ui-action', 'toggle-tabs') | Out-Null
+    $layoutAfter = Invoke-CheckedExe $CtlExe @('ui-snapshot') | ConvertFrom-Json
+    $layoutEvents = Invoke-CheckedExe $CtlExe @(
+        'read-events',
+        '--epoch', $layoutBaseline.event_position.epoch,
+        '--after', "$($layoutBaseline.event_position.sequence)",
+        '--limit', '32'
+    ) | ConvertFrom-Json
+    $visibilityEvent = @($layoutEvents.events |
+        Where-Object kind -eq 'layout.tabs.visibility')[-1]
+    if ($null -eq $visibilityEvent -or
+        $visibilityEvent.tab_id -ne $null -or
+        [bool]$visibilityEvent.payload.visible -ne [bool]$layoutAfter.layout.sidebar.visible -or
+        [bool]$layoutAfter.layout.sidebar.visible -eq $layoutBefore) {
+        throw 'server-scoped layout event did not describe its committed snapshot state'
+    }
+    Invoke-CheckedExe $CtlExe @('ui-action', 'toggle-tabs') | Out-Null
     Write-Evidence 'fleet.instance-discovery'
 
     $capture = Invoke-CheckedExe $CtlExe @('capture-pane', '-p', '-t', $environmentName)
@@ -332,6 +393,16 @@ try {
     if (-not $foundFollowEvent) {
         throw 'snapshot-to-follow handoff omitted the event returned to both waiters'
     }
+    $followSnapshot = Invoke-CheckedExe $CtlExe @('ui-snapshot') | ConvertFrom-Json
+    $followTab = @($followSnapshot.tabs |
+        Where-Object id -eq "@$($followA.tab_id)")[0]
+    if ($null -eq $followTab -or
+        $followTab.name -ne $followName -or
+        $followTab.index -ne $followA.payload.index -or
+        $followA.tab_id -eq $null) {
+        throw 'tab-scoped create event did not describe its committed snapshot state'
+    }
+    Write-Evidence 'fleet.event-transition-catalog'
 
     Write-Host 'STEP timed out and cancelled waiters leave no client or server residue'
     $timeoutBaseline = Invoke-CheckedExe $CtlExe @('ui-snapshot') | ConvertFrom-Json
@@ -432,11 +503,14 @@ try {
     }
 
     Write-Host 'STEP supported Codex launcher proxy workflow'
+    $agentCommand = (
+        'if defined HTTPS_PROXY echo HTTPS_PROXY_PRESENT&' +
+        'set NO_PROXY&set AGENTERM_TAB_ID'
+    )
     Invoke-CheckedExe $CtlExe @(
         'new-agent', '-d', '-n', $agentName, '--program', 'cmd.exe',
         '--proxy', $proxy, '--no-proxy', 'localhost,127.0.0.1',
-        '--', '/d', '/c',
-        'set HTTPS_PROXY&set NO_PROXY&set AGENTERM_TAB_ID'
+        '--', '/d', '/c', $agentCommand
     ) | Out-Null
     Invoke-CheckedExe $CtlExe @(
         'wait-pane', '-t', $agentName, '--dead', '--timeout-ms', '10000'
@@ -444,12 +518,16 @@ try {
     $capture = Invoke-CheckedExe $CtlExe @('capture-pane', '-p', '-t', $agentName)
     $snapshot = Invoke-CheckedExe $CtlExe @('ui-snapshot') | ConvertFrom-Json
     $agent = $snapshot.tabs | Where-Object name -eq $agentName
-    if (-not $capture.Contains("HTTPS_PROXY=$proxy") -or
+    if (-not $capture.Contains('HTTPS_PROXY_PRESENT') -or
         -not $capture.Contains('NO_PROXY=localhost,127.0.0.1') -or
         $capture -notmatch "AGENTERM_TAB_ID=$([regex]::Escape($agent.id))" -or
         $capture.Contains('--dangerously-bypass-approvals-and-sandbox') -or
         $agent.environment_names -notcontains 'HTTPS_PROXY') {
-        throw 'new-agent default was not safe or missed proxy/tab context'
+        throw (
+            "new-agent default was not safe or missed proxy/tab context`n" +
+            "capture=$capture`n" +
+            "agent=$($agent | ConvertTo-Json -Depth 6 -Compress)"
+        )
     }
     Write-Evidence 'fleet.codex-launcher'
 
@@ -495,10 +573,15 @@ try {
         $job = Start-Job -ScriptBlock {
             param($Executable, $ServerAddress, $Target, $Worker, $Count)
             for ($iteration = 0; $iteration -lt $Count; $iteration++) {
-                & $Executable --address $ServerAddress set-tab-note `
-                    -t $Target "gap-$Worker-$iteration" 2>&1 | Out-Null
+                $workerOutput = @(
+                    & $Executable --address $ServerAddress set-tab-note `
+                        -t $Target "gap-$Worker-$iteration" 2>&1
+                )
                 if ($LASTEXITCODE -ne 0) {
-                    throw "event load worker $Worker failed at iteration $iteration"
+                    throw (
+                        "event load worker $Worker failed at iteration $iteration`: " +
+                        ($workerOutput -join "`n")
+                    )
                 }
             }
         } -ArgumentList @(

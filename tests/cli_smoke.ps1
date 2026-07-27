@@ -136,6 +136,23 @@ try {
     if (@($operationIds | Select-Object -Unique).Count -ne $operationIds.Count) {
         throw 'typed operation catalog contains duplicate stable IDs'
     }
+    foreach ($operation in @($operationCatalog.operations)) {
+        $propertyNames = @($operation.PSObject.Properties.Name)
+        foreach ($requiredProperty in @(
+            'id', 'class', 'command', 'aliases', 'parameters', 'result_type',
+            'errors', 'events', 'destructive', 'available', 'since'
+        )) {
+            if ($propertyNames -notcontains $requiredProperty) {
+                throw "typed operation $($operation.id) omitted $requiredProperty"
+            }
+        }
+        if (-not $operation.available -or
+            [string]::IsNullOrWhiteSpace($operation.result_type) -or
+            [string]::IsNullOrWhiteSpace($operation.since) -or
+            ($operation.class -eq 'destructive') -ne [bool]$operation.destructive) {
+            throw "typed operation $($operation.id) exposed incomplete contract metadata"
+        }
+    }
     foreach ($entry in $expectedOperations.GetEnumerator()) {
         $operation = @(
             $operationCatalog.operations |
@@ -144,6 +161,20 @@ try {
         if ($operation.Count -ne 1 -or $operation[0].class -ne $entry.Value) {
             throw "typed operation $($entry.Key) was absent or misclassified"
         }
+    }
+    $widthOperation = @(
+        $operationCatalog.operations |
+            Where-Object id -eq 'ui.tabs.set-width'
+    )[0]
+    $widthParameter = @($widthOperation.parameters)[0]
+    if ($widthParameter.name -ne 'width' -or
+        $widthParameter.value_type -ne 'integer' -or
+        -not $widthParameter.required -or
+        $widthParameter.minimum -ne 180 -or
+        $widthParameter.maximum -ne 480 -or
+        $widthOperation.result_type -ne 'ui_snapshot' -or
+        @($widthOperation.events) -notcontains 'layout.tabs.width') {
+        throw 'ui.tabs.set-width discovery did not expose its exact typed contract'
     }
     $toggleOperation = @(
         $operationCatalog.operations |

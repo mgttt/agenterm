@@ -6,6 +6,10 @@ use std::{
 
 use anyhow::{Context as _, Result};
 use serde::{Deserialize, Serialize};
+use windows_sys::Win32::{
+    Foundation::{CloseHandle, ERROR_INVALID_PARAMETER, GetLastError, STILL_ACTIVE},
+    System::Threading::{GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION},
+};
 
 const INSTANCE_SCHEMA_VERSION: u32 = 1;
 
@@ -71,8 +75,28 @@ pub(crate) fn discover_instances() -> Result<Vec<DiscoveredInstance>> {
 }
 
 pub(crate) fn prune_instance(instance: &DiscoveredInstance) -> Result<()> {
-    fs::remove_file(&instance.path)
-        .with_context(|| format!("failed to prune {}", instance.path.display()))
+    match fs::remove_file(&instance.path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => {
+            Err(error).with_context(|| format!("failed to prune {}", instance.path.display()))
+        }
+    }
+}
+
+pub(crate) fn instance_process_is_alive(pid: u32) -> bool {
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    if process.is_null() {
+        // Access-denied and other indeterminate failures must fail open: only a
+        // PID that Windows positively reports as invalid is safe to auto-prune.
+        return unsafe { GetLastError() } != ERROR_INVALID_PARAMETER;
+    }
+    let mut exit_code = 0;
+    let queried = unsafe { GetExitCodeProcess(process, &mut exit_code) } != 0;
+    unsafe {
+        CloseHandle(process);
+    }
+    !queried || exit_code == STILL_ACTIVE as u32
 }
 
 fn instances_dir() -> PathBuf {
@@ -171,5 +195,11 @@ mod tests {
         drop(registration);
         assert!(discover_instances_in(&directory).unwrap().is_empty());
         fs::remove_dir(&directory).unwrap();
+    }
+
+    #[test]
+    fn process_liveness_only_rejects_a_definitively_dead_pid() {
+        assert!(instance_process_is_alive(std::process::id()));
+        assert!(!instance_process_is_alive(u32::MAX));
     }
 }

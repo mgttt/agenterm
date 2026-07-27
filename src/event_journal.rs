@@ -8,7 +8,291 @@ use serde::Serialize;
 use serde_json::Value;
 
 pub(crate) const EVENT_SCHEMA_VERSION: u32 = 1;
+pub(crate) const EVENT_CATALOG_SCHEMA_VERSION: u32 = 1;
 pub(crate) const DEFAULT_EVENT_CAPACITY: usize = 4_096;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum EventKind {
+    ComposerDraft,
+    ComposerSubmitted,
+    FocusChanged,
+    LayoutTabsVisibility,
+    LayoutTabsWidth,
+    TabClosed,
+    TabCreated,
+    TabNote,
+    TabParent,
+    TabRenamed,
+    TabSelected,
+    TabState,
+    TerminalOutput,
+    TerminalPasted,
+    TerminalViewport,
+    WindowVisibility,
+    WorkingContextCwd,
+    WorkingContextCwdEditor,
+    WorkingContextCwdRequested,
+    WorkingContextProxyEditor,
+    WorkingContextProxyRequested,
+    WorkingContextProxySubmitted,
+    WorkspaceSaved,
+    WorkspaceShutdown,
+}
+
+impl EventKind {
+    pub(crate) const ALL: [Self; 24] = [
+        Self::ComposerDraft,
+        Self::ComposerSubmitted,
+        Self::FocusChanged,
+        Self::LayoutTabsVisibility,
+        Self::LayoutTabsWidth,
+        Self::TabClosed,
+        Self::TabCreated,
+        Self::TabNote,
+        Self::TabParent,
+        Self::TabRenamed,
+        Self::TabSelected,
+        Self::TabState,
+        Self::TerminalOutput,
+        Self::TerminalPasted,
+        Self::TerminalViewport,
+        Self::WindowVisibility,
+        Self::WorkingContextCwd,
+        Self::WorkingContextCwdEditor,
+        Self::WorkingContextCwdRequested,
+        Self::WorkingContextProxyEditor,
+        Self::WorkingContextProxyRequested,
+        Self::WorkingContextProxySubmitted,
+        Self::WorkspaceSaved,
+        Self::WorkspaceShutdown,
+    ];
+
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::ComposerDraft => "composer.draft",
+            Self::ComposerSubmitted => "composer.submitted",
+            Self::FocusChanged => "focus.changed",
+            Self::LayoutTabsVisibility => "layout.tabs.visibility",
+            Self::LayoutTabsWidth => "layout.tabs.width",
+            Self::TabClosed => "tab.closed",
+            Self::TabCreated => "tab.created",
+            Self::TabNote => "tab.note",
+            Self::TabParent => "tab.parent",
+            Self::TabRenamed => "tab.renamed",
+            Self::TabSelected => "tab.selected",
+            Self::TabState => "tab.state",
+            Self::TerminalOutput => "terminal.output",
+            Self::TerminalPasted => "terminal.pasted",
+            Self::TerminalViewport => "terminal.viewport",
+            Self::WindowVisibility => "window.visibility",
+            Self::WorkingContextCwd => "working-context.cwd",
+            Self::WorkingContextCwdEditor => "working-context.cwd.editor",
+            Self::WorkingContextCwdRequested => "working-context.cwd.requested",
+            Self::WorkingContextProxyEditor => "working-context.proxy.editor",
+            Self::WorkingContextProxyRequested => "working-context.proxy.requested",
+            Self::WorkingContextProxySubmitted => "working-context.proxy.submitted",
+            Self::WorkspaceSaved => "workspace.saved",
+            Self::WorkspaceShutdown => "workspace.shutdown",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub(crate) struct EventSpec {
+    pub(crate) kind: &'static str,
+    pub(crate) state_path: &'static str,
+    pub(crate) payload: &'static str,
+    pub(crate) scope: &'static str,
+    pub(crate) since: &'static str,
+}
+
+const fn event_spec(
+    kind: EventKind,
+    state_path: &'static str,
+    payload: &'static str,
+    scope: &'static str,
+    since: &'static str,
+) -> EventSpec {
+    EventSpec {
+        kind: kind.as_str(),
+        state_path,
+        payload,
+        scope,
+        since,
+    }
+}
+
+pub(crate) const EVENT_CATALOG: [EventSpec; 24] = [
+    event_spec(
+        EventKind::ComposerDraft,
+        "tabs[].draft",
+        "{length:u64}",
+        "tab",
+        "0.1.5",
+    ),
+    event_spec(
+        EventKind::ComposerSubmitted,
+        "tabs[].draft",
+        "{length:u64}",
+        "tab",
+        "0.1.5",
+    ),
+    event_spec(
+        EventKind::FocusChanged,
+        "focus.surface",
+        "{from:string,to:string}",
+        "server",
+        "0.1.6",
+    ),
+    event_spec(
+        EventKind::LayoutTabsVisibility,
+        "layout.sidebar.visible",
+        "{visible:bool,cause:string,operation_id:string}",
+        "server",
+        "0.1.6",
+    ),
+    event_spec(
+        EventKind::LayoutTabsWidth,
+        "layout.sidebar.configured_width",
+        "{configured_width:u16,effective_width:i32,cause:string,operation_id:string}",
+        "server",
+        "0.1.6",
+    ),
+    event_spec(
+        EventKind::TabClosed,
+        "tabs[]",
+        "{index:u32,parent_id:u64?,exit_code:i32?,promoted_children:[u64],active_id:u64?}",
+        "tab",
+        "0.1.5",
+    ),
+    event_spec(
+        EventKind::TabCreated,
+        "tabs[]",
+        "{index:u32,parent_id:u64?,selected:bool}",
+        "tab",
+        "0.1.5",
+    ),
+    event_spec(
+        EventKind::TabNote,
+        "tabs[].note",
+        "{previous_note:string,note:string}",
+        "tab",
+        "0.1.5",
+    ),
+    event_spec(
+        EventKind::TabParent,
+        "tabs[].parent_id",
+        "{previous_parent_id:u64?,parent_id:u64?}",
+        "tab",
+        "0.1.5",
+    ),
+    event_spec(
+        EventKind::TabRenamed,
+        "tabs[].name",
+        "{previous_name:string,name:string}",
+        "tab",
+        "0.1.5",
+    ),
+    event_spec(
+        EventKind::TabSelected,
+        "tabs[].active",
+        "{}",
+        "tab",
+        "0.1.5",
+    ),
+    event_spec(
+        EventKind::TabState,
+        "tabs[].state",
+        "{state:string,exit_code:i32?,error:string?}",
+        "tab",
+        "0.1.5",
+    ),
+    event_spec(
+        EventKind::TerminalOutput,
+        "inspect.windows[].output_bytes",
+        "{output_bytes:u64,advanced_by:u64}",
+        "tab",
+        "0.1.5",
+    ),
+    event_spec(
+        EventKind::TerminalPasted,
+        "inspect.windows[].output_bytes",
+        "{characters:u64,bytes:u64,bracketed:bool,source:string}",
+        "tab",
+        "0.1.5",
+    ),
+    event_spec(
+        EventKind::TerminalViewport,
+        "tabs[].scrollback_offset",
+        "{scrollback_offset:u64,source:string}",
+        "tab",
+        "0.1.5",
+    ),
+    event_spec(
+        EventKind::WindowVisibility,
+        "window.visible",
+        "{visible:bool,reason:string}",
+        "server",
+        "0.1.6",
+    ),
+    event_spec(
+        EventKind::WorkingContextCwd,
+        "tabs[].working_context.cwd",
+        "{path:string?,source:string,pending:bool}",
+        "tab",
+        "0.1.6",
+    ),
+    event_spec(
+        EventKind::WorkingContextCwdEditor,
+        "modal.kind",
+        "{open:bool}",
+        "tab",
+        "0.1.6",
+    ),
+    event_spec(
+        EventKind::WorkingContextCwdRequested,
+        "tabs[].working_context.cwd",
+        "{path:string,source:string,pending:bool,disposition:string,composer_mode:string?|shell:string?}",
+        "tab",
+        "0.1.6",
+    ),
+    event_spec(
+        EventKind::WorkingContextProxyEditor,
+        "modal.kind",
+        "{open:bool}",
+        "tab",
+        "0.1.6",
+    ),
+    event_spec(
+        EventKind::WorkingContextProxyRequested,
+        "tabs[].working_context.proxy",
+        "{configured:bool,source:string,request_pending:bool,disposition:string}",
+        "tab",
+        "0.1.6",
+    ),
+    event_spec(
+        EventKind::WorkingContextProxySubmitted,
+        "tabs[].working_context.proxy",
+        "{sensitive:bool}",
+        "tab",
+        "0.1.6",
+    ),
+    event_spec(
+        EventKind::WorkspaceSaved,
+        "startup.workspace_file_exists",
+        "{}",
+        "server",
+        "0.1.5",
+    ),
+    event_spec(
+        EventKind::WorkspaceShutdown,
+        "server-list[]",
+        "{saved:bool,destroyed:bool?}",
+        "server",
+        "0.1.5",
+    ),
+];
+const _: [(); EventKind::ALL.len()] = [(); EVENT_CATALOG.len()];
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub(crate) struct EventPosition {
@@ -140,7 +424,7 @@ impl EventJournal {
 
     pub(crate) fn commit(
         &mut self,
-        kind: impl Into<String>,
+        kind: EventKind,
         tab_id: Option<u64>,
         payload: Value,
     ) -> EventEnvelope {
@@ -152,7 +436,7 @@ impl EventJournal {
             schema_version: EVENT_SCHEMA_VERSION,
             epoch: self.epoch.clone(),
             sequence: self.sequence,
-            kind: kind.into(),
+            kind: kind.as_str().to_owned(),
             tab_id,
             payload,
         };
@@ -222,11 +506,11 @@ mod tests {
         let mut journal = EventJournal::with_epoch("epoch-a", 4);
         let baseline = journal.position();
         journal.commit(
-            "tab.created",
+            EventKind::TabCreated,
             Some(7),
             serde_json::json!({"name": "worker"}),
         );
-        journal.commit("tab.selected", Some(7), serde_json::json!({}));
+        journal.commit(EventKind::TabSelected, Some(7), serde_json::json!({}));
 
         let events = journal
             .read_after(&baseline.epoch, baseline.sequence, 10)
@@ -244,9 +528,9 @@ mod tests {
     #[test]
     fn bounded_history_reports_a_gap_instead_of_silent_loss() {
         let mut journal = EventJournal::with_epoch("epoch-a", 2);
-        journal.commit("one", None, Value::Null);
-        journal.commit("two", None, Value::Null);
-        journal.commit("three", None, Value::Null);
+        journal.commit(EventKind::TabCreated, None, Value::Null);
+        journal.commit(EventKind::TabSelected, None, Value::Null);
+        journal.commit(EventKind::TabClosed, None, Value::Null);
 
         assert!(matches!(
             journal.read_after("epoch-a", 0, 10),
@@ -270,7 +554,7 @@ mod tests {
     #[test]
     fn restart_and_future_positions_are_distinct_errors() {
         let mut journal = EventJournal::with_epoch("epoch-b", 2);
-        journal.commit("one", None, Value::Null);
+        journal.commit(EventKind::TabCreated, None, Value::Null);
 
         assert!(matches!(
             journal.read_after("epoch-a", 0, 10),
@@ -280,5 +564,23 @@ mod tests {
             journal.read_after("epoch-b", 2, 10),
             Err(JournalReadError::FutureSequence { .. })
         ));
+    }
+
+    #[test]
+    fn event_catalog_is_a_complete_unique_view_of_the_closed_kind_set() {
+        assert_eq!(EVENT_CATALOG.len(), EventKind::ALL.len());
+        for kind in EventKind::ALL {
+            let matches = EVENT_CATALOG
+                .iter()
+                .filter(|spec| spec.kind == kind.as_str())
+                .count();
+            assert_eq!(matches, 1, "catalog entry for {}", kind.as_str());
+        }
+        for spec in EVENT_CATALOG {
+            assert!(!spec.state_path.is_empty());
+            assert!(!spec.payload.is_empty());
+            assert!(matches!(spec.scope, "server" | "tab"));
+            assert!(matches!(spec.since, "0.1.5" | "0.1.6"));
+        }
     }
 }

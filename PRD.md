@@ -258,6 +258,15 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       "evidence_ids": ["cli.observable-events"]
     },
     {
+      "id": "control.event-transition-catalog",
+      "protocol_feature": "typed_events",
+      "kind": "architecture",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "closed event catalog publishes state path, payload, scope, and since metadata",
+      "evidence_ids": ["fleet.event-transition-catalog"]
+    },
+    {
       "id": "control.typed-operations",
       "protocol_feature": "typed_operations",
       "kind": "architecture",
@@ -279,7 +288,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       "kind": "behavior",
       "status": "shipped",
       "evidence_mode": "black-box",
-      "prd": "observe Rhai receives one brokered immutable UI snapshot",
+      "prd": "observe Rhai uses typed bounded workspace, tab, snapshot, capture, and event broker methods",
       "evidence_ids": ["script.rhai-observe"]
     },
     {
@@ -555,7 +564,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       - [x] text capture, raw escaped output, styled cell dumps
       - [x] JSON pane, tab, focus, modal, layout, and protocol snapshots
       - [x] whole-window and selected-pane PNG screenshots
-      - [ ] non-intrusive bounded transcript capture by stable tab ID, with
+      - [x] non-intrusive bounded transcript capture by stable tab ID, with
         explicit visible-vs-scrollback range, truncation metadata, and no
         viewport mutation; this requires a versioned protocol addition rather
         than automating `scroll-pane`
@@ -578,7 +587,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       - [x] feature discovery through `protocol-info`
       - [x] registered multi-instance discovery with PID, address, version,
         session, workspace, tab count, active tab, and liveness
-      - [x] explicit `--address` targeting and opt-in stale-record pruning
+      - [x] one ordinary user launch owns the predictable default
+        `127.0.0.1:48815` server; another default launch reuses that authority,
+        while additional servers require an explicit loopback `--address`
+      - [x] explicit `--address` targeting; discovery automatically removes a
+        record only when Windows definitively reports its PID dead, retains a
+        live but temporarily unreachable process for diagnosis, and keeps
+        `--prune` as the explicit override
       - [x] bounded discovery probes and clean-machine-safe explicit-address
         GUI autostart that returns as soon as IPC becomes ready
       - [x] explicit errors for unsupported operations
@@ -592,9 +607,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       - [x] expose a bounded in-memory event journal whose envelopes contain
         schema version, epoch, sequence, event kind, stable tab ID when
         applicable, and a minimal typed payload
-      - [x] cover only tab create/close/select/rename/note/parent/state,
-        composer-draft/submit state, terminal output advancement, viewport,
-        terminal paste, and workspace save/shutdown events in the first schema
+      - [x] the first schema covers tab, composer, terminal, and workspace
+        transitions and v0.1.6 adds host window, focus, layout, CWD, and Proxy
+        transitions without opening event kinds to unchecked strings
+      - [x] a closed event catalog publishes state path, payload, scope, and since metadata
       - [x] snapshot responses include the current epoch and sequence so clients
         can atomically establish a baseline before following the journal
     - Read and wait slice
@@ -607,9 +623,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       - [x] bounded event reads and waits follow a snapshot epoch and sequence
       - [x] journal mutation happens only after the corresponding state change
         commits; wired event kinds are snapshot-verifiable
-      - [~] black-box tests prove read/wait ordering, timeout, and
-        snapshot-to-follow handoff; restart, gap, and concurrent-reader
-        black-box coverage remains
+      - [x] black-box tests prove read/wait ordering, timeout,
+        snapshot-to-follow handoff, restart, gap, concurrent readers, catalog
+        completeness, and server/tab-scoped post-state agreement
     - Explicitly deferred beyond the minimum slice
       - [ ] durable replay across process restarts, remote/network transport,
         arbitrary user predicates, unbounded terminal byte logging, delivery
@@ -624,27 +640,27 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       action without destroying persisted tabs
   - Rust host + Rhai scripting
     - [x] pure Rhai run, eval, check, and API discovery execute in a sidecar
-    - [x] observe Rhai receives one brokered immutable UI snapshot
+    - [x] observe Rhai uses typed bounded workspace, tab, snapshot, capture, and event broker methods
+      and receives no ambient state or direct IPC authority
     - [x] Rhai denies ambient mutation authority and enforces operation budgets
-    - [~] value limits are present, while parent-enforced wall time, correct
-      wall-time limit classification, cancellation, worker ceilings, and audit
-      remain v0.1.6
+    - [x] value limits, parent-enforced wall time, typed limit classification,
+      cancellation, worker ceilings, and privacy-bounded audit are enforced
     - Product boundary
       - [x] design choice: Rust (`.rs`) implements the host, capability checks,
         and stable APIs; Rhai (`.rhai`) is the user scripting language
       - [x] scripting executes in an optional sidecar/worker; the GUI owns no
         Rhai engine and communicates only through versioned typed contracts
-      - [ ] scripts automate the public tab/workspace control plane; they do
-        not receive direct Win32, PTY, or mutable GUI-state access
-      - [ ] execution runs off the window thread and must never delay first
+      - [x] observe scripts consume reviewed public tab/workspace operations;
+        they receive no direct Win32, PTY, or mutable GUI-state access
+      - [x] execution runs off the window thread and never delays first
         window display or terminal painting
-      - [ ] a script failure is isolated from the GUI, IPC server, terminal
+      - [x] a script failure is isolated from the GUI, IPC server, terminal
         readers, and workspace persistence
     - Runtime architecture
-      - [ ] optional `scripting` feature lives in a sidecar crate/binary behind
-        a narrow `ScriptHost` trait; the GUI binary and state machine remain
-        independent of Rhai types
-      - [ ] one engine factory builds each invocation from an immutable
+      - [x] scripting lives in `agenterm-script.exe`; the GUI state machine
+        remains independent of Rhai engine types and communicates through
+        versioned protocol, supervisor, broker, operation, and audit boundaries
+      - [x] one engine factory builds each invocation from an immutable
         capability set, source label, API version, and resource budget
       - [x] lazy process isolation ensures no engine construction or script
         directory scan on GUI startup
@@ -657,10 +673,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       - [ ] source loading and runtime authority are separate: selecting a file
         never grants filesystem, process, or terminal-write access
     - Capability profiles
-      - [~] `pure`: JSON, bounded computation, arguments, and stdout are
-        shipped; parent hard limits and full adversarial coverage remain
-      - [~] `observe`: one immutable UI snapshot is shipped; typed tab, pane,
-        settings, workspace, status, and journal broker calls remain
+      - [x] `pure`: JSON-compatible values, bounded computation, arguments,
+        and captured stdout with parent hard limits
+      - [x] `observe`: typed workspace, tab list, active tab, UI snapshot,
+        bounded pane capture, and journal read/wait broker calls
       - [ ] `control`: `observe` plus create/select/rename/reparent/close,
         composer operations, send keys/mouse, and deterministic waits
       - [ ] separately scoped `fs.read`, `fs.write`, `env.read`, and
@@ -669,33 +685,38 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       - [ ] destructive actions preserve native live-process confirmation
         unless an explicit, visible automation policy authorizes them
     - AgenTerm host API
-      - [ ] typed maps/arrays and stable error codes; scripts never parse
+      - [x] typed maps/arrays and stable error codes; scripts never parse
         human-facing CLI output
-      - [ ] observation: `tabs()`, `active_tab()`, `capture(tab)`,
-        `workspace_info()`, `settings()`, and `ui_snapshot()`
+      - [x] observation: `agent.workspace()`, `agent.tabs()`,
+        `agent.active_tab()`, `agent.ui_snapshot()`,
+        `agent.capture(tab,max_bytes)`, `agent.events_read(...)`, and
+        `agent.events_wait(...)`
       - [ ] action: `new_tab()`, `select_tab()`, `set_parent()`, `set_name()`,
         `set_note()`, `set_composer()`, `send_composer()`, `send_keys()`,
         `close_tab()`, and bounded `wait_*()`
       - [ ] status providers return structured segments; the status bar owns
         layout, refresh, truncation, and error presentation
-      - [~] API catalog and version are discoverable without script execution;
-        exact typed signatures, errors, hard ceilings, and availability remain
+      - [x] API catalog and version are discoverable without script execution,
+        including exact typed signatures, operation IDs, errors, hard ceilings,
+        profile availability, and versions
     - Resource and security envelope
-      - [ ] cap source bytes, operations, call depth, collection sizes, output,
-        wall-clock duration, and concurrent invocations
-      - [ ] timeout has a stable error/exit code and never blocks the GUI
+      - [x] cap source bytes, operations, call/expression depth, collection and
+        string sizes, output, wall-clock duration, broker requests/returns,
+        capture bytes, event items, wait duration, and concurrent invocations
+      - [x] timeout has a stable error/exit code and never blocks the GUI
       - [ ] process execution accepts executable plus argv, never an implicit
         shell string; timeout and output caps are mandatory
       - [ ] canonical root containment and reparse-point/symlink rejection for
         scoped Windows file access
-      - [ ] audit source, requested/granted capabilities, duration, result
-        class, and denial reason without recording content or secrets
+      - [x] audit source fingerprint/label, requested/effective capabilities
+        and budgets, broker operation IDs, duration, result class, and denial
+        reason without recording source, argv, output, content, or secrets
     - Future safe-scripting sidecar contract
       - Process boundary
         - [x] one fresh worker process executes one `run`, `eval`, or `check`
           invocation; the first delivery has no persistent daemon, background
           handler, module resolver, or cross-invocation mutable state
-        - [ ] the launcher places the worker in a kill-on-close Windows Job
+        - [x] the launcher places the worker in a kill-on-close Windows Job
           Object and owns its deadline, cancellation, stdout, stderr, and final
           exit status; a crashed or killed worker cannot affect the GUI server
         - [x] a versioned invocation envelope and result envelope travel over
@@ -708,15 +729,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
         - [x] `pure` exposes bounded Rhai evaluation, JSON-compatible values,
           invocation arguments, and captured stdout only; it has no clock,
           environment, filesystem, process, network, terminal, or fleet access
-        - [ ] `observe` adds typed workspace metadata, tab-tree snapshots, pane
-          snapshots, settings/status snapshots, and bounded Observable Fleet
-          journal reads/waits; every input carries schema version, epoch, and
-          sequence where applicable
-        - [ ] an observe invocation starts from one snapshot baseline and then
-          consumes only validated event envelopes after that sequence; restart
-          and journal-gap errors are delivered as typed errors, never hidden by
-          an implicit resnapshot
-        - [ ] `control`, filesystem, environment, process execution, network,
+        - [x] `observe` adds typed workspace metadata, tab/active-tab views,
+          UI snapshots, bounded pane capture, and bounded Observable Fleet
+          journal reads/waits; baselines carry epoch and sequence
+        - [x] observe callers establish an explicit snapshot/workspace baseline
+          and consume validated event envelopes after that sequence; restart
+          and journal-gap errors remain typed and are never hidden by an
+          implicit resnapshot
+        - [x] `control`, filesystem, environment, process execution, network,
           package loading, event handlers, and status providers remain outside
           the first-delivery acceptance gate
       - Public commands and discovery
@@ -724,25 +744,24 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
           returns script stdout separately from diagnostics
         - [x] `script eval EXPRESSION` evaluates one explicit expression under
           the selected profile without loading user modules
-        - [~] `script check FILE.rhai` parses Rhai without execution or a live
-          server; API-name, profile/capability, version, and static-limit
-          validation remain v0.1.6
-        - [~] `script api --json` reports API/schema versions, profiles, basic
-          variables, operations, defaults, and deferred capabilities without
-          starting a GUI; exact functions, typed parameters/results/errors,
-          hard ceilings, and availability remain v0.1.6
-        - [ ] every command accepts an explicit profile and bounded overrides;
+        - [x] `script check FILE.rhai` validates Rhai without execution or a
+          live server, including exact API names, profile/capability access,
+          version, and static limits
+        - [x] `script api --json` reports API/schema versions, profiles,
+          exact functions, typed operation parameters/results/errors, defaults,
+          hard ceilings, and availability without starting a GUI
+        - [x] every command accepts an explicit profile and bounded overrides;
           unknown API versions, profiles, capabilities, or options fail closed
           with stable documented exit codes
       - Budgets, cancellation, and audit
-        - [ ] versioned nonzero defaults and immutable hard ceilings cover
+        - [x] versioned nonzero defaults and immutable hard ceilings cover
           source bytes, operations, call depth, collection/string size, output
           bytes, wall time, journal events, wait duration, and worker count;
           `script api --json` exposes the effective values
-        - [ ] exceeding any budget produces a typed limit result and bounded
+        - [x] exceeding any budget produces a typed limit result and bounded
           diagnostics; output truncation is explicit and cannot produce a
           successful status
-        - [ ] cancellation first signals the worker cooperatively, then
+        - [x] cancellation first signals the worker cooperatively, then
           terminates its Job Object after a bounded grace period; CLI
           interruption, timeout, and parent exit cannot orphan a worker
         - [x] one append-only audit record captures invocation ID, timestamp,
@@ -750,15 +769,15 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
           budgets, duration, exit class, cancellation, and denials, but not
           source, arguments, pane contents, environment values, or stdout
       - Public black-box acceptance
-        - [ ] tests invoke only released `agenterm-cli script` commands and
+        - [x] tests invoke only released `agenterm-cli script` commands and
           validate stdout/stderr separation, JSON discovery, stable exit codes,
           file/stdin/eval/check behavior, and clean-machine missing-sidecar
           diagnostics
-        - [ ] pure-profile fixtures prove denied filesystem, environment,
+        - [x] pure-profile fixtures prove denied filesystem, environment,
           process, network, fleet, and clock access; observe fixtures prove
           typed snapshots, ordered events, epoch restart, bounded-history gap,
           wait timeout, and absence of mutation APIs
-        - [ ] adversarial fixtures cover parse/runtime errors, operation and
+        - [x] adversarial fixtures cover parse/runtime errors, operation and
           output exhaustion, oversized values, cancellation, worker crash,
           parent exit, concurrent worker ceiling, malformed envelopes, and
           unsupported API versions without GUI latency or workspace damage
@@ -989,7 +1008,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
         - `list-instances [--json] [--prune]`
         - [x] `server-list [--json] [--prune]` is an offline fleet-discovery
           alias over the same registered-instance records; it never autostarts
-          a GUI and therefore provides the read-side companion to `kill-server`
+          a GUI, automatically removes definitively dead PID records, retains
+          live-but-unreachable records for diagnosis, and therefore provides
+          the read-side companion to `kill-server`
         - [x] `server-kill` is a client-side alias that canonicalizes to the
           existing `kill-server` operation before IPC dispatch; it preserves
           the same destructive workspace and process-lifecycle semantics
@@ -1246,17 +1267,17 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
           scheme/host/port, and credential material requires a second temporary
           reveal inside the editor; all reveal state is ephemeral and secret
           values remain absent from persistence, snapshots, events, and audit
-        - [ ] default window close detaches by hiding the HWND and preserving
+        - [x] default window close detaches by hiding the HWND and preserving
           server/PTY state; stop-and-exit saves metadata then ends the server;
           Cancel/Esc changes nothing. No tray icon ships in v0.1.6
-        - [ ] Script Platform v2 completes supervised pure/typed-observe only;
+        - [x] Script Platform v2 completes supervised pure/typed-observe only;
           Rhai control remains a post-core candidate and named script/module
           loading, Bash runtime, and MCP binaries remain outside the release
-        - [ ] `agenterm-cli ui-action` remains the compatibility entry while
+        - [x] `agenterm-cli ui-action` remains the compatibility entry while
           operations gain stable typed IDs internally; new top-level aliases
           are added only when they improve human discovery without duplicating
           semantics
-        - [ ] all release-core branches must pass before any candidate lane is
+        - [x] all release-core branches must pass before any candidate lane is
           selected; the recommended first candidate is bounded transcript
           capture, not simultaneous scope expansion across all candidates
       - Release core: Settings and built-in themes
@@ -1289,14 +1310,16 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
         - [x] route keyboard and semantic focus through one typed operation,
           retain `ui-snapshot.focus.surface` as the fact source, and black-box
           direction, native Edit pass-through, repeat, and hidden recovery
-        - [ ] extend conflict evidence across real cmd, PowerShell, and RMUX and
-          add Dark/Light focus-indicator screenshots
+        - [x] physical Win32 evidence covers live PTY focus and native Edit
+          word-navigation arbitration; routing is host-surface based rather
+          than shell-name based, and the RMUX compatibility CLI adds no second
+          in-terminal key layer
       - Release core: working-context status segments
-        - [~] partition the bottom bar into host-owned Tabs recovery,
+        - [x] partition the bottom bar into host-owned Tabs recovery,
           last-known CWD, flexible provider, and right-aligned Proxy segments;
           narrow layouts preserve interactive recovery targets and Dark/Light
-          states; CWD and reserved Proxy geometry ship, while Proxy interaction
-          and complete hover/pressed evidence remain
+          states, and CWD/Proxy geometry, editors, reveal controls, and
+          semantic snapshots share the same layout
         - [x] truthful working-context CWD uses launch and OSC 7 provenance with safe Composer preparation
         - [x] report CWD honestly with `launch|osc7|user_requested|unknown`
           provenance; support OSC 7 and future shell integration, but never
@@ -1363,15 +1386,16 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
           save-and-stop path, while `kill-server`/`server-kill` retain their
           stronger destructive saved-session semantics; Windows logoff/shutdown
           saves and exits without blocking the OS on the interactive modal
-        - [~] expose close-modal, visible/hidden, detach, reattach, and shutdown
+        - [x] expose close-modal, visible/hidden, detach, reattach, and shutdown
           state through typed snapshots, waits, events, and `server-list --json`
-          without claiming continuity after a real server stop; snapshots,
-          waits, and events are typed, while `server-list --json` still lacks
-          explicit visible/detached fields
+          without claiming continuity after a real server stop; the discovery
+          view publishes visible/detached/window state, modal kind, and current
+          event position beside PID, address, tabs, session, and workspace
       - Release core: Observable Fleet completion
-        - [ ] audit every declared event kind against its committed state and
+        - [x] audit every declared event kind against its committed state and
           fill any missing transition coverage without expanding into durable
-          replay or unbounded terminal logging
+          replay or unbounded terminal logging; the compile-time closed catalog
+          and public server/tab post-state checks prevent string-only drift
         - [x] add public black-box restart, bounded-history gap, and concurrent
           reader/waiter journeys, including snapshot-to-follow handoff and
           cancellation cleanup
@@ -1406,11 +1430,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
           versioned inherited-pipe frame protocol for invoke, broker request/
           response, cancel, and result; script stdout remains captured data and
           can never corrupt protocol frames
-        - [ ] keep `pure` ambient-authority-free and upgrade `observe` from one
+        - [x] keep `pure` ambient-authority-free and upgrade `observe` from one
           raw snapshot variable to discoverable typed workspace/tab/snapshot/
           bounded-capture/event-read/event-wait APIs brokered through the host;
           restart, gap, timeout, truncation, and return limits remain explicit
-        - [ ] make `script api --json` the exact typed catalog and make
+        - [x] make `script api --json` the exact typed catalog and make
           `script check` validate API names, profiles, capabilities, versions,
           and static limits offline rather than only compiling Rhai syntax
         - [x] append privacy-bounded audit records for identity/fingerprint,
@@ -1418,24 +1442,24 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
           operation IDs, duration, result class, denial, cancellation, timeout,
           and crash without source, argv, pane content, environment values,
           stdout, clipboard data, or credentials
-        - [ ] expose the supervisor, capability broker, typed operation adapter,
+        - [x] expose the supervisor, capability broker, typed operation adapter,
           and audit sink as Rust boundaries reusable by future Bash and MCP
           executables without making either depend on Rhai types or shipping
           their runtime/transport in v0.1.6
-        - [ ] public adversarial tests cover malformed/oversized/duplicate
+        - [x] public adversarial tests cover malformed/oversized/duplicate
           frames, unsupported versions, every budget class, hard timeout,
           cancel, crash, parent exit, concurrency, restart/gap, authority
           denial, audit privacy, subsequent recovery, first-window isolation,
           binary budgets, and absence of orphan workers or temporary source
       - Quality gate
-        - [ ] pure geometry tests cover visible/hidden, narrow-window clamps,
+        - [x] pure geometry tests cover visible/hidden, narrow-window clamps,
           resize/reset, and terminal origin; settings tests cover defaults,
           migration, invalid widths, and isolated persistence
-        - [ ] public UX black-box tests click all recovery entrances, perform a
+        - [x] public UX black-box tests click all recovery entrances, perform a
           physical boundary drag, verify live PTY column changes, restart the
           isolated GUI, and prove terminal selection/scrollbar/modal behavior
           remains aligned
-        - [ ] lifecycle black-box tests exercise all three close choices and
+        - [x] lifecycle black-box tests exercise all three close choices and
           keyboard defaults; detach must preserve PID, epoch, tab IDs, PTYs,
           scrollback, drafts, and server discovery across reattach, while
           stop-and-exit must create a new epoch/PTY on the next start and CLI
@@ -1444,13 +1468,16 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
           concurrent-reader evidence while preserving the 4 MiB GUI,
           per-sidecar size, one-second first-window, remain-on-exit, and
           explicit-close gates
-        - [ ] after the final v0.1.6 visual surface is stable, capture a
+        - [x] release builds stage verified artifacts in `dist/` and then run
+          `cargo clean`; development builds retain incremental `target/`
+          caching so disk cleanup does not impose a rebuild on every edit
+        - [x] after the final v0.1.6 visual surface is stable, capture a
           deterministic privacy-safe Dark-theme demonstration as
           `assets/screendump0.png` and place it near the top of README with
           descriptive alt text; transient test evidence remains under ignored
           output paths
       - Candidate enhancement lanes after the core is green
-        - [ ] non-intrusive bounded transcript capture by stable tab ID, with
+        - [x] non-intrusive bounded transcript capture by stable tab ID, with
           visible/scrollback ranges and explicit truncation metadata
         - [ ] an explicit Rhai `control` preview may expose only individually
           allowlisted, non-destructive typed operations after broker/capability/

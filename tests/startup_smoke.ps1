@@ -23,6 +23,10 @@ $guidanceStdoutFile = Join-Path $env:TEMP "agenterm-guidance-stdout-$PID.txt"
 $guidanceStderrFile = Join-Path $env:TEMP "agenterm-guidance-stderr-$PID.txt"
 $argumentStdoutFile = Join-Path $env:TEMP "agenterm-argument-stdout-$PID.txt"
 $argumentStderrFile = Join-Path $env:TEMP "agenterm-argument-stderr-$PID.txt"
+$workerIdsBefore = @(
+    Get-Process -Name 'agenterm-script' -ErrorAction SilentlyContinue |
+        ForEach-Object { $_.Id }
+)
 $env:AGENTERM_WORKSPACE_PATH = $workspaceFile
 & $CliExe kill-server 2>$null | Out-Null
 Start-Sleep -Milliseconds 200
@@ -58,6 +62,16 @@ try {
     & $CliExe wait-ui -t 0 --tab-state running --timeout-ms 10000 | Out-Null
     if ($LASTEXITCODE -ne 0) {
         throw 'The asynchronously started initial terminal did not become ready.'
+    }
+    $unexpectedWorkers = @(
+        Get-Process -Name 'agenterm-script' -ErrorAction SilentlyContinue |
+            Where-Object { $workerIdsBefore -notcontains $_.Id }
+    )
+    if ($unexpectedWorkers.Count -ne 0) {
+        throw (
+            'Normal GUI startup unexpectedly launched script worker PID(s): ' +
+            ($unexpectedWorkers.Id -join ', ')
+        )
     }
     $startupStderr = Get-Content -LiteralPath $stderrFile -Raw
     $expectedStartupStderr = @(

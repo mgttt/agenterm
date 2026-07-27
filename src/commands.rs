@@ -348,9 +348,10 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
             false,
         ),
         "capture-pane" | "capturep" => (
-            "agenterm-cli capture-pane (-p|--raw-escaped) [-t target]",
-            &["-t"][..],
-            &["-p", "--raw-escaped"][..],
+            "agenterm-cli capture-pane (-p|--raw-escaped) [-t target] \
+             [--max-bytes N --json]",
+            &["-t", "--max-bytes"][..],
+            &["-p", "--raw-escaped", "--json"][..],
             false,
         ),
         "display-message" | "display" => (

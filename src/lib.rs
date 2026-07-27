@@ -70,7 +70,7 @@ use windows_sys::Win32::{
 mod commands;
 mod event_journal;
 mod instances;
-mod operations;
+pub mod operations;
 mod protocol;
 mod rmux_status;
 mod script_audit;
@@ -89,8 +89,11 @@ use commands::{
     option_value, parse_new_command, parse_tab_environment, positional_values,
     screenshot_output_path, snapshot_modal_matches, tmux_key_bytes, validate_control_command,
 };
-use event_journal::EventJournal;
-use instances::{InstanceRegistration, discover_instances, prune_instance, register_instance};
+use event_journal::{EVENT_CATALOG, EVENT_CATALOG_SCHEMA_VERSION, EventJournal, EventKind};
+use instances::{
+    InstanceRegistration, discover_instances, instance_process_is_alive, prune_instance,
+    register_instance,
+};
 use operations::{
     OPERATION_CATALOG, OPERATION_CATALOG_SCHEMA_VERSION, OperationSpec, UI_TABS_HIDE,
     UI_TABS_SET_WIDTH, UI_TABS_SHOW, UI_TABS_TOGGLE, validate_operation_args,
@@ -102,8 +105,9 @@ use script_audit::{
     source_fingerprint,
 };
 use script_protocol::{
-    SCRIPT_API_VERSION, SCRIPT_ENVELOPE_VERSION, ScriptBudgets, ScriptExitClass, ScriptInvocation,
-    ScriptOperation, ScriptProfile,
+    SCRIPT_API_VERSION, SCRIPT_ENVELOPE_VERSION, ScriptBrokerError, ScriptBrokerRequest,
+    ScriptBrokerResponse, ScriptBudgets, ScriptExitClass, ScriptInvocation, ScriptOperation,
+    ScriptProfile,
 };
 use settings::{AppConfig, config_path, load_config, save_config};
 use tab_tree::{TabTreeNode, TabTreeRow, tree_rows, would_create_cycle};
@@ -144,6 +148,15 @@ const SYSTEM_MENU_PASTE_ID: usize = 0x1f10;
 const SYSTEM_MENU_TOGGLE_TABS_ID: usize = 0x1f20;
 const CLIPBOARD_UNICODE_TEXT: u32 = 13;
 const TERMINAL_PASTE_LIMIT_BYTES: usize = 256 * 1024;
+const CAPTURE_PUBLIC_MAX_BYTES: usize = 1024 * 1024;
+
+fn bounded_utf8_prefix(value: &str, maximum: usize) -> &str {
+    let mut take = maximum.min(value.len());
+    while take > 0 && !value.is_char_boundary(take) {
+        take -= 1;
+    }
+    &value[..take]
+}
 const IPC_TIMEOUT: Duration = Duration::from_secs(5);
 const IPC_DISCOVERY_TIMEOUT: Duration = Duration::from_millis(500);
 const IPC_AUTOSTART_TIMEOUT: Duration = Duration::from_secs(15);
@@ -2214,7 +2227,7 @@ impl AppState {
         self.save_active_composer();
         save_workspace(&self.saved_workspace())?;
         self.event_journal
-            .commit("workspace.saved", None, serde_json::json!({}));
+            .commit(EventKind::WorkspaceSaved, None, serde_json::json!({}));
         Ok(())
     }
 
@@ -2263,7 +2276,7 @@ impl AppState {
         self.tabs.push(tab);
         self.tabs.sort_by_key(|tab| tab.index);
         self.event_journal.commit(
-            "tab.created",
+            EventKind::TabCreated,
             Some(id),
             serde_json::json!({
                 "index": index,
@@ -2275,7 +2288,7 @@ impl AppState {
             self.active = Some(id);
             self.load_active_composer();
             self.event_journal
-                .commit("tab.selected", Some(id), serde_json::json!({}));
+                .commit(EventKind::TabSelected, Some(id), serde_json::json!({}));
         }
         Ok(index)
     }
@@ -2334,7 +2347,7 @@ impl AppState {
         let previous_parent_id = self.tabs[child_position].parent_id;
         self.tabs[child_position].parent_id = parent_id;
         self.event_journal.commit(
-            "tab.parent",
+            EventKind::TabParent,
             Some(child_id),
             serde_json::json!({
                 "previous_parent_id": previous_parent_id,
@@ -2416,7 +2429,7 @@ impl AppState {
                 .map(|tab| tab.id);
         }
         self.event_journal.commit(
-            "tab.closed",
+            EventKind::TabClosed,
             Some(id),
             serde_json::json!({
                 "index": index,
@@ -2521,7 +2534,7 @@ impl AppState {
                 self.window_detached = true;
                 self.navigation_latch = None;
                 self.event_journal.commit(
-                    "window.visibility",
+                    EventKind::WindowVisibility,
                     None,
                     serde_json::json!({"visible": false, "reason": "detach"}),
                 );
@@ -2534,7 +2547,7 @@ impl AppState {
                     return;
                 }
                 self.event_journal.commit(
-                    "workspace.shutdown",
+                    EventKind::WorkspaceShutdown,
                     None,
                     serde_json::json!({"saved": true, "source": "window-close"}),
                 );
@@ -2624,7 +2637,7 @@ impl AppState {
         }
         if was_detached {
             self.event_journal.commit(
-                "window.visibility",
+                EventKind::WindowVisibility,
                 None,
                 serde_json::json!({"visible": true, "reason": reason}),
             );
@@ -2642,7 +2655,7 @@ impl AppState {
                 InvalidateRect(self.window, ptr::null(), 0);
             }
             self.event_journal.commit(
-                "window.visibility",
+                EventKind::WindowVisibility,
                 None,
                 serde_json::json!({
                     "visible": true,
@@ -2670,7 +2683,7 @@ impl AppState {
                             self.load_active_composer();
                         }
                         self.event_journal.commit(
-                            "tab.created",
+                            EventKind::TabCreated,
                             Some(id),
                             serde_json::json!({
                                 "index": index,
@@ -2720,7 +2733,7 @@ impl AppState {
             changed |= tab.poll();
             if tab.output_bytes != output_before {
                 polled_events.push((
-                    "terminal.output",
+                    EventKind::TerminalOutput,
                     tab.id,
                     serde_json::json!({
                         "output_bytes": tab.output_bytes,
@@ -2730,7 +2743,7 @@ impl AppState {
             }
             if tab.exited != exit_before || tab.error != error_before {
                 polled_events.push((
-                    "tab.state",
+                    EventKind::TabState,
                     tab.id,
                     serde_json::json!({
                         "state": if tab.error.is_some() {
@@ -2747,7 +2760,7 @@ impl AppState {
             }
             if tab.cwd != cwd_before {
                 polled_events.push((
-                    "working-context.cwd",
+                    EventKind::WorkingContextCwd,
                     tab.id,
                     serde_json::json!({
                         "path": tab.cwd.path(),
@@ -3334,7 +3347,7 @@ impl AppState {
             self.active = Some(id);
             self.load_active_composer();
             self.event_journal
-                .commit("tab.selected", Some(id), serde_json::json!({}));
+                .commit(EventKind::TabSelected, Some(id), serde_json::json!({}));
         }
         self.set_focus_surface(FocusSurface::Tabs, "mouse");
     }
@@ -3398,7 +3411,7 @@ impl AppState {
                 tab.note = note.trim_end().to_owned();
                 if tab.title != previous_title {
                     self.event_journal.commit(
-                        "tab.renamed",
+                        EventKind::TabRenamed,
                         Some(id),
                         serde_json::json!({
                             "previous_name": previous_title,
@@ -3408,7 +3421,7 @@ impl AppState {
                 }
                 if tab.note != previous_note {
                     self.event_journal.commit(
-                        "tab.note",
+                        EventKind::TabNote,
                         Some(id),
                         serde_json::json!({
                             "previous_note": previous_note,
@@ -3459,7 +3472,7 @@ impl AppState {
             InvalidateRect(self.window, ptr::null(), 0);
         }
         self.event_journal.commit(
-            "working-context.cwd.editor",
+            EventKind::WorkingContextCwdEditor,
             Some(id),
             serde_json::json!({"open": true}),
         );
@@ -3478,7 +3491,7 @@ impl AppState {
             InvalidateRect(self.window, ptr::null(), 0);
         }
         self.event_journal.commit(
-            "working-context.cwd.editor",
+            EventKind::WorkingContextCwdEditor,
             Some(id),
             serde_json::json!({"open": false}),
         );
@@ -3519,7 +3532,7 @@ impl AppState {
         self.tabs[position].composer = next;
         self.tabs[position].cwd.request(path.clone())?;
         self.event_journal.commit(
-            "working-context.cwd.requested",
+            EventKind::WorkingContextCwdRequested,
             Some(id),
             serde_json::json!({
                 "path": path,
@@ -3555,7 +3568,7 @@ impl AppState {
         let id = self.tabs[position].id;
         self.tabs[position].cwd.request(requested_path.clone())?;
         self.event_journal.commit(
-            "working-context.cwd.requested",
+            EventKind::WorkingContextCwdRequested,
             Some(id),
             serde_json::json!({
                 "path": requested_path,
@@ -3609,7 +3622,7 @@ impl AppState {
             InvalidateRect(self.window, ptr::null(), 0);
         }
         self.event_journal.commit(
-            "working-context.proxy.editor",
+            EventKind::WorkingContextProxyEditor,
             Some(id),
             serde_json::json!({"open": true}),
         );
@@ -3668,7 +3681,7 @@ impl AppState {
             InvalidateRect(self.window, ptr::null(), 0);
         }
         self.event_journal.commit(
-            "working-context.proxy.editor",
+            EventKind::WorkingContextProxyEditor,
             Some(id),
             serde_json::json!({"open": false}),
         );
@@ -3724,7 +3737,7 @@ impl AppState {
         self.tabs[position].sensitive_composer = Some(command);
         self.tabs[position].proxy = requested;
         self.event_journal.commit(
-            "working-context.proxy.requested",
+            EventKind::WorkingContextProxyRequested,
             Some(id),
             serde_json::json!({
                 "configured": self.tabs[position].proxy.configured(),
@@ -3773,7 +3786,7 @@ impl AppState {
         let id = self.tabs[position].id;
         self.tabs[position].proxy = requested;
         self.event_journal.commit(
-            "working-context.proxy.requested",
+            EventKind::WorkingContextProxyRequested,
             Some(id),
             serde_json::json!({
                 "configured": self.tabs[position].proxy.configured(),
@@ -3998,7 +4011,7 @@ impl AppState {
         self.terminal_selection = None;
         let characters = text.chars().count();
         self.event_journal.commit(
-            "terminal.pasted",
+            EventKind::TerminalPasted,
             Some(paste.tab_id),
             serde_json::json!({
                 "characters": characters,
@@ -4096,7 +4109,7 @@ impl AppState {
             self.last_error = Some(format!("could not save Tabs visibility: {error:#}"));
         }
         self.event_journal.commit(
-            "layout.tabs.visibility",
+            EventKind::LayoutTabsVisibility,
             None,
             serde_json::json!({
                 "visible": visible,
@@ -4150,7 +4163,7 @@ impl AppState {
             self.last_error = Some(format!("could not save Tabs width: {error:#}"));
         }
         self.event_journal.commit(
-            "layout.tabs.width",
+            EventKind::LayoutTabsWidth,
             None,
             serde_json::json!({
                 "configured_width": self.config.tabs_width,
@@ -4169,7 +4182,7 @@ impl AppState {
             self.last_error = Some(format!("could not save Tabs width: {error:#}"));
         }
         self.event_journal.commit(
-            "layout.tabs.width",
+            EventKind::LayoutTabsWidth,
             None,
             serde_json::json!({
                 "configured_width": self.config.tabs_width,
@@ -4288,7 +4301,7 @@ impl AppState {
         let current = self.current_focus_surface();
         if focused && current != previous {
             self.event_journal.commit(
-                "focus.changed",
+                EventKind::FocusChanged,
                 self.active,
                 serde_json::json!({
                     "from": previous.as_str(),
@@ -4572,7 +4585,7 @@ impl AppState {
     fn commit_viewport_event(&mut self, position: usize, offset: usize, source: &str) {
         let id = self.tabs[position].id;
         self.event_journal.commit(
-            "terminal.viewport",
+            EventKind::TerminalViewport,
             Some(id),
             serde_json::json!({
                 "scrollback_offset": offset,
@@ -4722,7 +4735,7 @@ impl AppState {
             self.tabs[position].composer = composer.clone();
             let id = self.tabs[position].id;
             self.event_journal.commit(
-                "composer.draft",
+                EventKind::ComposerDraft,
                 Some(id),
                 serde_json::json!({
                     "length": composer.chars().count(),
@@ -4766,7 +4779,7 @@ impl AppState {
             if self.tabs[position].submit_sensitive(secret.expose()) {
                 let id = self.tabs[position].id;
                 self.event_journal.commit(
-                    "working-context.proxy.submitted",
+                    EventKind::WorkingContextProxySubmitted,
                     Some(id),
                     serde_json::json!({"sensitive": true}),
                 );
@@ -4791,7 +4804,7 @@ impl AppState {
             let id = self.tabs[position].id;
             self.tabs[position].composer.clear();
             self.event_journal.commit(
-                "composer.submitted",
+                EventKind::ComposerSubmitted,
                 Some(id),
                 serde_json::json!({
                     "length": text.chars().count(),
@@ -6404,7 +6417,7 @@ impl AppState {
                 self.active = Some(id);
                 self.load_active_composer();
                 self.event_journal
-                    .commit("tab.selected", Some(id), serde_json::json!({}));
+                    .commit(EventKind::TabSelected, Some(id), serde_json::json!({}));
                 self.reattach_window("select-window");
                 IpcResponse::success("")
             }
@@ -6421,7 +6434,7 @@ impl AppState {
                 let previous_name = self.tabs[position].title.clone();
                 self.tabs[position].title = name.to_owned();
                 self.event_journal.commit(
-                    "tab.renamed",
+                    EventKind::TabRenamed,
                     Some(id),
                     serde_json::json!({
                         "previous_name": previous_name,
@@ -6438,7 +6451,7 @@ impl AppState {
                 let id = self.tabs[position].id;
                 let previous_note = mem::replace(&mut self.tabs[position].note, note.clone());
                 self.event_journal.commit(
-                    "tab.note",
+                    EventKind::TabNote,
                     Some(id),
                     serde_json::json!({
                         "previous_note": previous_note,
@@ -6652,14 +6665,45 @@ impl AppState {
                 let Some(position) = self.target_position(option_value(args, "-t")) else {
                     return IpcResponse::failure("can't find pane");
                 };
-                if args.iter().any(|argument| argument == "--raw-escaped") {
-                    return IpcResponse::success(
-                        String::from_utf8_lossy(&self.tabs[position].raw_output)
-                            .escape_debug()
-                            .to_string(),
-                    );
+                let requested_maximum = match option_value(args, "--max-bytes") {
+                    Some(value) => match value.parse::<usize>() {
+                        Ok(value) if (1..=CAPTURE_PUBLIC_MAX_BYTES).contains(&value) => Some(value),
+                        _ => {
+                            return IpcResponse::failure(format!(
+                                "capture-pane --max-bytes must be from 1 to {CAPTURE_PUBLIC_MAX_BYTES}"
+                            ));
+                        }
+                    },
+                    None => None,
+                };
+                let json = args.iter().any(|argument| argument == "--json");
+                let contents = if args.iter().any(|argument| argument == "--raw-escaped") {
+                    String::from_utf8_lossy(&self.tabs[position].raw_output)
+                        .escape_debug()
+                        .to_string()
+                } else {
+                    self.tabs[position].parser.screen().contents()
+                };
+                let original_bytes = contents.len();
+                let maximum = requested_maximum.or(json.then_some(CAPTURE_PUBLIC_MAX_BYTES));
+                let text = maximum.map_or(contents.as_str(), |maximum| {
+                    bounded_utf8_prefix(&contents, maximum)
+                });
+                if json {
+                    IpcResponse::success(
+                        serde_json::to_string_pretty(&serde_json::json!({
+                            "tab_id": format!("@{}", self.tabs[position].id),
+                            "text": text,
+                            "bytes": text.len(),
+                            "original_bytes": original_bytes,
+                            "max_bytes": maximum,
+                            "truncated": text.len() < original_bytes,
+                        }))
+                        .unwrap_or_else(|_| "{}".to_owned()),
+                    )
+                } else {
+                    IpcResponse::success(text.to_owned())
                 }
-                IpcResponse::success(self.tabs[position].parser.screen().contents())
             }
             "dump-cells" => {
                 let Some(position) = self.target_position(option_value(args, "-t")) else {
@@ -6814,8 +6858,11 @@ impl AppState {
                     let id = self.tabs[position].id;
                     self.active = Some(id);
                     self.load_active_composer();
-                    self.event_journal
-                        .commit("tab.selected", Some(id), serde_json::json!({}));
+                    self.event_journal.commit(
+                        EventKind::TabSelected,
+                        Some(id),
+                        serde_json::json!({}),
+                    );
                 }
                 let focused = match surface {
                     "terminal" => self.set_focus_surface(FocusSurface::Terminal, "semantic"),
@@ -6935,8 +6982,11 @@ impl AppState {
                         let id = self.tabs[position].id;
                         self.active = Some(id);
                         self.load_active_composer();
-                        self.event_journal
-                            .commit("tab.selected", Some(id), serde_json::json!({}));
+                        self.event_journal.commit(
+                            EventKind::TabSelected,
+                            Some(id),
+                            serde_json::json!({}),
+                        );
                         self.set_focus_surface(FocusSurface::Terminal, "semantic");
                         None
                     }
@@ -7171,7 +7221,7 @@ impl AppState {
                 if self.note_edit_target != Some(id) {
                     self.tabs[position].composer = text.clone();
                     self.event_journal.commit(
-                        "composer.draft",
+                        EventKind::ComposerDraft,
                         Some(id),
                         serde_json::json!({
                             "length": text.chars().count(),
@@ -7195,7 +7245,7 @@ impl AppState {
                     }
                     let id = self.tabs[position].id;
                     self.event_journal.commit(
-                        "working-context.proxy.submitted",
+                        EventKind::WorkingContextProxySubmitted,
                         Some(id),
                         serde_json::json!({"sensitive": true}),
                     );
@@ -7212,7 +7262,7 @@ impl AppState {
                 if !text.is_empty() {
                     let id = self.tabs[position].id;
                     self.event_journal.commit(
-                        "composer.submitted",
+                        EventKind::ComposerSubmitted,
                         Some(id),
                         serde_json::json!({
                             "length": text.chars().count(),
@@ -7355,10 +7405,12 @@ impl AppState {
             ),
             "shutdown" => {
                 if let Err(error) = self.persist_workspace() {
-                    return IpcResponse::failure(format!("{error:#}"));
+                    return IpcResponse::failure(format!(
+                        "operation_persistence_failed[workspace.shutdown]: {error:#}"
+                    ));
                 }
                 self.event_journal.commit(
-                    "workspace.shutdown",
+                    EventKind::WorkspaceShutdown,
                     None,
                     serde_json::json!({"saved": true}),
                 );
@@ -7373,7 +7425,14 @@ impl AppState {
                 if let Some(requested) = option_value(args, "-t")
                     && requested != self.session_name
                 {
-                    return IpcResponse::failure(format!("can't find session: {requested}"));
+                    return IpcResponse::failure(if command == "kill-session" {
+                        format!("can't find session: {requested}")
+                    } else {
+                        format!(
+                            "operation_target_not_found[server.kill]: \
+                             can't find session: {requested}"
+                        )
+                    });
                 }
                 for tab in &mut self.tabs {
                     tab.close_process();
@@ -7381,7 +7440,7 @@ impl AppState {
                 self.tabs.clear();
                 self.active = None;
                 self.event_journal.commit(
-                    "workspace.shutdown",
+                    EventKind::WorkspaceShutdown,
                     None,
                     serde_json::json!({"saved": false, "destroyed": true}),
                 );
@@ -7412,7 +7471,7 @@ impl AppState {
         self.active = Some(id);
         self.load_active_composer();
         self.event_journal
-            .commit("tab.selected", Some(id), serde_json::json!({}));
+            .commit(EventKind::TabSelected, Some(id), serde_json::json!({}));
         IpcResponse::success("")
     }
 }
@@ -7660,13 +7719,26 @@ fn send_ipc_request_to_with_timeout(
 ) -> Result<IpcResponse> {
     use std::io::BufRead as _;
     let socket = parse_loopback_ipc_address(address)?;
-    let mut connection = std::net::TcpStream::connect_timeout(&socket, Duration::from_millis(100))
+    let deadline = Instant::now() + timeout;
+    let remaining = || {
+        let duration = deadline.saturating_duration_since(Instant::now());
+        if duration.is_zero() {
+            anyhow::bail!("AgenTerm IPC request timed out");
+        }
+        Ok(duration)
+    };
+    let connect_timeout = timeout
+        .min(Duration::from_millis(100))
+        .max(Duration::from_millis(1));
+    let mut connection = std::net::TcpStream::connect_timeout(&socket, connect_timeout)
         .context("AgenTerm server is not running")?;
-    connection.set_read_timeout(Some(timeout))?;
-    connection.set_write_timeout(Some(timeout))?;
+    connection.set_write_timeout(Some(remaining()?))?;
     connection.write_all(serde_json::to_string(&IpcRequest { args })?.as_bytes())?;
+    connection.set_write_timeout(Some(remaining()?))?;
     connection.write_all(b"\n")?;
+    connection.set_write_timeout(Some(remaining()?))?;
     connection.flush()?;
+    connection.set_read_timeout(Some(remaining()?))?;
     let mut reader = std::io::BufReader::new(connection);
     let mut response = String::new();
     reader.read_line(&mut response)?;
@@ -7688,6 +7760,13 @@ fn run_list_instances(arguments: &[String]) -> i32 {
     };
     let mut views = Vec::new();
     for instance in instances {
+        if !instance_process_is_alive(instance.record.pid) {
+            if let Err(error) = prune_instance(&instance) {
+                eprintln!("{error:#}");
+                return 1;
+            }
+            continue;
+        }
         let response = send_ipc_request_to_with_timeout(
             &instance.record.address,
             vec!["ui-snapshot".to_owned()],
@@ -7720,6 +7799,24 @@ fn run_list_instances(arguments: &[String]) -> i32 {
             .as_ref()
             .and_then(|value| value["window"]["title"].as_str())
             .unwrap_or("");
+        let window_visible = snapshot
+            .as_ref()
+            .and_then(|value| value["window"]["visible"].as_bool());
+        let window_detached = snapshot
+            .as_ref()
+            .and_then(|value| value["window"]["detached"].as_bool());
+        let window_state = snapshot
+            .as_ref()
+            .and_then(|value| value["window"]["state"].as_str());
+        let modal_kind = snapshot
+            .as_ref()
+            .and_then(|value| value["modal"]["kind"].as_str());
+        let event_epoch = snapshot
+            .as_ref()
+            .and_then(|value| value["event_position"]["epoch"].as_str());
+        let event_sequence = snapshot
+            .as_ref()
+            .and_then(|value| value["event_position"]["sequence"].as_u64());
         views.push(serde_json::json!({
             "pid": instance.record.pid,
             "address": instance.record.address,
@@ -7731,6 +7828,12 @@ fn run_list_instances(arguments: &[String]) -> i32 {
             "workspace_path": instance.record.workspace_path,
             "started_at_unix_ms": instance.record.started_at_unix_ms,
             "window_title": window_title,
+            "window_visible": window_visible,
+            "window_detached": window_detached,
+            "window_state": window_state,
+            "modal_kind": modal_kind,
+            "event_epoch": event_epoch,
+            "event_sequence": event_sequence,
         }));
     }
     if json {
@@ -7741,14 +7844,25 @@ fn run_list_instances(arguments: &[String]) -> i32 {
     } else if views.is_empty() {
         println!("No registered AgenTerm instances.");
     } else {
-        println!("PID\tADDRESS\tVERSION\tSTATUS\tTABS\tACTIVE\tSESSION\tWORKSPACE");
+        println!("PID\tADDRESS\tVERSION\tSTATUS\tWINDOW\tTABS\tACTIVE\tSESSION\tWORKSPACE");
         for view in views {
+            let window = match (
+                view["window_visible"].as_bool(),
+                view["window_detached"].as_bool(),
+                view["window_state"].as_str(),
+            ) {
+                (Some(false), Some(true), _) => "detached",
+                (Some(true), _, Some(state)) => state,
+                (Some(false), _, _) => "hidden",
+                _ => "-",
+            };
             println!(
-                "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
                 view["pid"].as_u64().unwrap_or_default(),
                 view["address"].as_str().unwrap_or_default(),
                 view["version"].as_str().unwrap_or_default(),
                 view["status"].as_str().unwrap_or_default(),
+                window,
                 view["tab_count"].as_u64().unwrap_or_default(),
                 view["active_tab"].as_str().unwrap_or("-"),
                 view["session"].as_str().unwrap_or_default(),
@@ -8114,23 +8228,7 @@ fn run_script_command(arguments: &[String]) -> i32 {
                 }
             }
         }
-        match send_ipc_request(vec!["ui-snapshot".to_owned()]) {
-            Ok(response) if response.ok => match serde_json::from_str(&response.output) {
-                Ok(snapshot) => Some(snapshot),
-                Err(error) => {
-                    eprintln!("observe broker received an invalid snapshot: {error}");
-                    return 1;
-                }
-            },
-            Ok(response) => {
-                eprintln!("{}", response.error);
-                return 1;
-            }
-            Err(error) => {
-                eprintln!("{error:#}");
-                return 1;
-            }
-        }
+        None
     } else {
         None
     };
@@ -8160,11 +8258,11 @@ fn run_script_command(arguments: &[String]) -> i32 {
         ScriptProfile::Observe => "observe",
     };
     let capabilities = if profile == ScriptProfile::Observe {
-        vec!["observe.snapshot".to_owned()]
+        vec!["observe".to_owned()]
     } else {
         Vec::new()
     };
-    let audit_invocation = AuditInvocation {
+    let mut audit_invocation = AuditInvocation {
         invocation_id: invocation_id.clone(),
         source_fingerprint: source_fingerprint(&source),
         source_kind: audit_source_kind,
@@ -8176,11 +8274,7 @@ fn run_script_command(arguments: &[String]) -> i32 {
         effective_capabilities: capabilities,
         requested_budgets: audit_budgets(&budgets),
         effective_budgets: audit_budgets(&budgets),
-        broker_operation_ids: if needs_observation {
-            vec!["ui.snapshot".to_owned()]
-        } else {
-            Vec::new()
-        },
+        broker_operation_ids: Vec::new(),
     };
     let audit_sink = match ScriptAuditSink::discover() {
         Ok(sink) => sink,
@@ -8226,14 +8320,17 @@ fn run_script_command(arguments: &[String]) -> i32 {
     };
     let expected_invocation_id = invocation.invocation_id.clone();
     let deadline = Duration::from_millis(invocation.budgets.wall_time_ms);
+    let broker_budgets = invocation.budgets.clone();
     let (result, cancel_requested) = match WorkerSupervisor::invoke(
         &executable,
         invocation,
         deadline,
         Duration::from_millis(150),
+        |request, remaining| handle_script_broker(request, &broker_budgets, remaining),
     ) {
         Ok(outcome) => {
             let _worker_pid = outcome.worker_pid;
+            audit_invocation.broker_operation_ids = outcome.broker_operation_ids;
             (outcome.result, outcome.cancel_requested)
         }
         Err(error) => {
@@ -8377,6 +8474,252 @@ fn report_supervisor_error(error: SupervisorError) -> i32 {
     exit_code
 }
 
+fn script_broker_error(code: &str, message: impl Into<String>) -> ScriptBrokerResponse {
+    ScriptBrokerResponse {
+        ok: false,
+        value: None,
+        error: Some(ScriptBrokerError {
+            code: code.to_owned(),
+            message: message.into(),
+            details: None,
+        }),
+    }
+}
+
+fn script_broker_ipc(
+    arguments: Vec<String>,
+    timeout: Duration,
+) -> Result<String, ScriptBrokerResponse> {
+    match send_ipc_request_to_with_timeout(&ipc_address(), arguments, timeout) {
+        Ok(response) if response.ok => Ok(response.output),
+        Ok(response) => {
+            let code = ["server_restart", "journal_gap", "future_sequence"]
+                .into_iter()
+                .find(|code| response.error.contains(code))
+                .unwrap_or("broker_host_error");
+            Err(script_broker_error(code, response.error))
+        }
+        Err(error) => Err(script_broker_error(
+            "broker_transport",
+            format!("{error:#}"),
+        )),
+    }
+}
+
+fn handle_script_broker(
+    request: &ScriptBrokerRequest,
+    budgets: &ScriptBudgets,
+    remaining: Duration,
+) -> ScriptBrokerResponse {
+    let started = Instant::now();
+    let parse_json = |output: String| {
+        serde_json::from_str::<serde_json::Value>(&output)
+            .map_err(|error| script_broker_error("broker_invalid_response", error.to_string()))
+    };
+    let value = match request.operation.as_str() {
+        "workspace.info" => script_broker_ipc(vec!["workspace-info".to_owned()], remaining)
+            .and_then(parse_json)
+            .and_then(|mut workspace| {
+                let request_remaining = remaining.saturating_sub(started.elapsed());
+                if request_remaining.is_zero() {
+                    return Err(script_broker_error(
+                        "broker_transport",
+                        "workspace observation exceeded the host deadline",
+                    ));
+                }
+                let snapshot = script_broker_ipc(vec!["ui-snapshot".to_owned()], request_remaining)
+                    .and_then(parse_json)?;
+                workspace["event_position"] = snapshot
+                    .get("event_position")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null);
+                Ok(workspace)
+            }),
+        "ui.snapshot" | "tabs.list" | "tabs.active" => {
+            script_broker_ipc(vec!["ui-snapshot".to_owned()], remaining)
+                .and_then(parse_json)
+                .map(|snapshot| match request.operation.as_str() {
+                    "tabs.list" => snapshot
+                        .get("tabs")
+                        .cloned()
+                        .unwrap_or_else(|| serde_json::json!([])),
+                    "tabs.active" => snapshot
+                        .get("tabs")
+                        .and_then(serde_json::Value::as_array)
+                        .and_then(|tabs| {
+                            tabs.iter().find(|tab| {
+                                tab.get("active").and_then(serde_json::Value::as_bool) == Some(true)
+                            })
+                        })
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Null),
+                    _ => snapshot,
+                })
+        }
+        "pane.capture" => {
+            let tab = request
+                .arguments
+                .get("tab")
+                .and_then(serde_json::Value::as_str);
+            let requested = request
+                .arguments
+                .get("max_bytes")
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|value| usize::try_from(value).ok());
+            match (tab, requested) {
+                (Some(tab), Some(requested))
+                    if tab.starts_with('@') && (1..=budgets.capture_bytes).contains(&requested) =>
+                {
+                    script_broker_ipc(
+                        vec![
+                            "capture-pane".to_owned(),
+                            "-p".to_owned(),
+                            "-t".to_owned(),
+                            tab.to_owned(),
+                            "--max-bytes".to_owned(),
+                            requested.to_string(),
+                            "--json".to_owned(),
+                        ],
+                        remaining,
+                    )
+                    .and_then(parse_json)
+                }
+                _ => Err(script_broker_error(
+                    "broker_invalid_arguments",
+                    "pane.capture requires stable tab @ID and max_bytes within the capture budget",
+                )),
+            }
+        }
+        "events.read" => {
+            let epoch = request
+                .arguments
+                .get("epoch")
+                .and_then(serde_json::Value::as_str);
+            let after = request
+                .arguments
+                .get("after")
+                .and_then(serde_json::Value::as_u64);
+            let limit = request
+                .arguments
+                .get("limit")
+                .and_then(serde_json::Value::as_u64);
+            match (epoch, after, limit) {
+                (Some(epoch), Some(after), Some(limit))
+                    if limit > 0 && limit <= budgets.event_items as u64 =>
+                {
+                    script_broker_ipc(
+                        vec![
+                            "read-events".to_owned(),
+                            "--epoch".to_owned(),
+                            epoch.to_owned(),
+                            "--after".to_owned(),
+                            after.to_string(),
+                            "--limit".to_owned(),
+                            limit.to_string(),
+                        ],
+                        remaining,
+                    )
+                    .and_then(parse_json)
+                }
+                _ => Err(script_broker_error(
+                    "broker_invalid_arguments",
+                    "events.read requires epoch, nonnegative after, and a bounded positive limit",
+                )),
+            }
+        }
+        "events.wait" => script_broker_wait(&request.arguments, budgets, remaining),
+        _ => Err(script_broker_error(
+            "broker_operation_denied",
+            format!(
+                "operation {} is not available to observe scripts",
+                request.operation
+            ),
+        )),
+    };
+    match value {
+        Ok(value) => ScriptBrokerResponse {
+            ok: true,
+            value: Some(value),
+            error: None,
+        },
+        Err(response) => response,
+    }
+}
+
+fn script_broker_wait(
+    arguments: &serde_json::Value,
+    budgets: &ScriptBudgets,
+    remaining: Duration,
+) -> Result<serde_json::Value, ScriptBrokerResponse> {
+    let epoch = arguments
+        .get("epoch")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| script_broker_error("broker_invalid_arguments", "epoch is required"))?;
+    let mut after = arguments
+        .get("after")
+        .and_then(serde_json::Value::as_u64)
+        .ok_or_else(|| script_broker_error("broker_invalid_arguments", "after is required"))?;
+    let kind = arguments
+        .get("kind")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| script_broker_error("broker_invalid_arguments", "kind is required"))?;
+    let timeout_ms = arguments
+        .get("timeout_ms")
+        .and_then(serde_json::Value::as_u64)
+        .ok_or_else(|| script_broker_error("broker_invalid_arguments", "timeout_ms is required"))?;
+    if timeout_ms == 0 || timeout_ms > budgets.wait_time_ms {
+        return Err(script_broker_error(
+            "broker_invalid_arguments",
+            "timeout_ms exceeds the wait budget",
+        ));
+    }
+    let deadline = Instant::now()
+        + Duration::from_millis(timeout_ms)
+            .min(remaining.saturating_sub(Duration::from_millis(10)));
+    loop {
+        let ipc_remaining = deadline.saturating_duration_since(Instant::now());
+        if ipc_remaining.is_zero() {
+            return Err(script_broker_error(
+                "event_wait_timeout",
+                format!("no {kind} event arrived within {timeout_ms} ms"),
+            ));
+        }
+        let output = script_broker_ipc(
+            vec![
+                "read-events".to_owned(),
+                "--epoch".to_owned(),
+                epoch.to_owned(),
+                "--after".to_owned(),
+                after.to_string(),
+                "--limit".to_owned(),
+                budgets.event_items.min(256).to_string(),
+            ],
+            ipc_remaining,
+        )?;
+        let batch: serde_json::Value = serde_json::from_str(&output)
+            .map_err(|error| script_broker_error("broker_invalid_response", error.to_string()))?;
+        if let Some(events) = batch.get("events").and_then(serde_json::Value::as_array) {
+            for event in events {
+                if let Some(sequence) = event.get("sequence").and_then(serde_json::Value::as_u64) {
+                    after = after.max(sequence);
+                }
+                if event.get("kind").and_then(serde_json::Value::as_str) == Some(kind) {
+                    return Ok(event.clone());
+                }
+            }
+        }
+        if Instant::now() >= deadline {
+            return Err(script_broker_error(
+                "event_wait_timeout",
+                format!("no {kind} event arrived within {timeout_ms} ms"),
+            ));
+        }
+        thread::sleep(
+            Duration::from_millis(20).min(deadline.saturating_duration_since(Instant::now())),
+        );
+    }
+}
+
 fn audit_budgets(budgets: &ScriptBudgets) -> AuditBudgets {
     AuditBudgets {
         source_bytes: budgets.source_bytes,
@@ -8387,6 +8730,11 @@ fn audit_budgets(budgets: &ScriptBudgets) -> AuditBudgets {
         string_bytes: budgets.string_bytes,
         output_bytes: budgets.output_bytes,
         wall_time_ms: budgets.wall_time_ms,
+        broker_requests: budgets.broker_requests,
+        broker_return_bytes: budgets.broker_return_bytes,
+        capture_bytes: budgets.capture_bytes,
+        event_items: budgets.event_items,
+        wait_time_ms: budgets.wait_time_ms,
     }
 }
 
@@ -8967,6 +9315,10 @@ fn protocol_info_json() -> String {
             "authorization_policy": false,
             "operations": OPERATION_CATALOG,
         },
+        "event_catalog": {
+            "schema_version": EVENT_CATALOG_SCHEMA_VERSION,
+            "events": EVENT_CATALOG,
+        },
         "compatibility": {
             "tmux_rmux": [
                 "new-session", "list-sessions", "has-session",
@@ -9000,7 +9352,8 @@ fn protocol_info_json() -> String {
             "codex_launcher": true,
             "mux_frontend": true,
             "instance_discovery": true,
-            "typed_operations": true
+            "typed_operations": true,
+            "typed_events": true
         }
     }))
     .unwrap_or_default()
@@ -9210,10 +9563,11 @@ fn save_window_png(window: HWND, path: &std::path::Path, pane: Option<PixelRect>
 #[cfg(test)]
 mod tests {
     use super::{
-        EditShortcut, FocusSurface, TerminalPoint, TerminalSelection, ThemeId, edit_shortcut,
-        effective_theme, gui_cli_guidance, is_latched_navigation_repeat, normalize_terminal_paste,
-        parse_gui_launch, parse_loopback_ipc_address, redact_proxy_stream_chunk, run_wait_ui,
-        surface_navigation, terminal_copy_shortcut, terminal_selection_text,
+        EditShortcut, FocusSurface, TerminalPoint, TerminalSelection, ThemeId, bounded_utf8_prefix,
+        edit_shortcut, effective_theme, gui_cli_guidance, is_latched_navigation_repeat,
+        normalize_terminal_paste, parse_gui_launch, parse_loopback_ipc_address,
+        redact_proxy_stream_chunk, run_wait_ui, surface_navigation, terminal_copy_shortcut,
+        terminal_selection_text,
     };
 
     #[test]
@@ -9511,5 +9865,14 @@ mod tests {
             "@1".to_owned(),
         ];
         assert_eq!(run_wait_ui(&arguments), 2);
+    }
+
+    #[test]
+    fn bounded_capture_prefix_is_utf8_safe_and_preserves_legacy_unbounded_text() {
+        let text = "ab终端";
+        assert_eq!(bounded_utf8_prefix(text, text.len()), text);
+        assert_eq!(bounded_utf8_prefix(text, 4), "ab");
+        assert_eq!(bounded_utf8_prefix(text, 5), "ab终");
+        assert_eq!(bounded_utf8_prefix(text, 0), "");
     }
 }

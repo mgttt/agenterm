@@ -40,7 +40,7 @@ $listener.Stop()
 $env:AGENTERM_IPC_ADDRESS = "127.0.0.1:$port"
 $workspaceFile = Join-Path $env:TEMP "agenterm-theme-workspace-$PID.json"
 $settingsFile = Join-Path $env:TEMP "agenterm-theme-settings-$PID.json"
-$stderrFile = Join-Path $env:TEMP "agenterm-theme-stderr-$PID.txt"
+$stderrFiles = [Collections.Generic.List[string]]::new()
 $darkPng = Join-Path $env:TEMP "agenterm-theme-dark-$PID.png"
 $lightPng = Join-Path $env:TEMP "agenterm-theme-light-$PID.png"
 $env:AGENTERM_WORKSPACE_PATH = $workspaceFile
@@ -88,9 +88,10 @@ function Wait-AgenTermReady {
 }
 
 function Start-IsolatedGui {
-    if (Test-Path -LiteralPath $stderrFile) {
-        Remove-Item -LiteralPath $stderrFile -Force
-    }
+    $stderrFile = Join-Path $env:TEMP (
+        "agenterm-theme-stderr-$PID-$($guiProcesses.Count).txt"
+    )
+    $stderrFiles.Add($stderrFile)
     $process = Start-Process -FilePath $GuiExe `
         -RedirectStandardError $stderrFile `
         -PassThru
@@ -347,7 +348,9 @@ finally {
     }
     Remove-Item -LiteralPath $workspaceFile -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $settingsFile -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $stderrFile -ErrorAction SilentlyContinue
+    foreach ($stderrFile in $stderrFiles) {
+        Remove-Item -LiteralPath $stderrFile -ErrorAction SilentlyContinue
+    }
     # PNGs intentionally remain in TEMP for manual visual inspection.
     if ($null -eq $previousAddress) {
         Remove-Item Env:AGENTERM_IPC_ADDRESS -ErrorAction SilentlyContinue

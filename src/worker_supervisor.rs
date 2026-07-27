@@ -9,7 +9,7 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
     sync::mpsc,
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use windows_sys::Win32::{
@@ -25,8 +25,8 @@ use windows_sys::Win32::{
 };
 
 use crate::script_protocol::{
-    SCRIPT_FRAME_MAX_BYTES, SCRIPT_FRAME_VERSION, ScriptFrame, ScriptFramePayload,
-    ScriptInvocation, ScriptResult,
+    SCRIPT_FRAME_MAX_BYTES, SCRIPT_FRAME_VERSION, ScriptBrokerRequest, ScriptBrokerResponse,
+    ScriptFrame, ScriptFramePayload, ScriptInvocation, ScriptResult,
 };
 
 const PROCESS_CONCURRENCY_LIMIT: usize = 2;
@@ -53,17 +53,22 @@ pub(crate) struct SupervisedResult {
     pub(crate) result: ScriptResult,
     pub(crate) worker_pid: u32,
     pub(crate) cancel_requested: bool,
+    pub(crate) broker_operation_ids: Vec<String>,
 }
 
 pub(crate) struct WorkerSupervisor;
 
 impl WorkerSupervisor {
-    pub(crate) fn invoke(
+    pub(crate) fn invoke<F>(
         executable: &Path,
         invocation: ScriptInvocation,
         deadline: Duration,
         cancel_grace: Duration,
-    ) -> Result<SupervisedResult, SupervisorError> {
+        mut broker: F,
+    ) -> Result<SupervisedResult, SupervisorError>
+    where
+        F: FnMut(&ScriptBrokerRequest, Duration) -> ScriptBrokerResponse,
+    {
         let _permit = ConcurrencyPermit::try_acquire()?;
         let mut child = Command::new(executable)
             .arg("--framed-worker")
@@ -91,6 +96,8 @@ impl WorkerSupervisor {
             SupervisorError::Transport("worker stdout pipe is unavailable".to_owned())
         })?;
         let invocation_id = invocation.invocation_id.clone();
+        let broker_request_limit = invocation.budgets.broker_requests;
+        let broker_return_limit = invocation.budgets.broker_return_bytes;
         let invoke_frame_id = format!("invoke-{invocation_id}");
         let invoke_frame = ScriptFrame {
             frame_version: SCRIPT_FRAME_VERSION,
@@ -99,42 +106,129 @@ impl WorkerSupervisor {
         };
         write_frame(&mut stdin, &invoke_frame)?;
 
-        let (sender, receiver) = mpsc::sync_channel(1);
+        let (sender, receiver) = mpsc::channel();
         let reader = thread::spawn(move || {
-            let _ = sender.send(read_frame(stdout));
+            let mut stdout = stdout;
+            loop {
+                let response = read_frame(&mut stdout);
+                let terminal = match response.as_ref() {
+                    Ok(frame) => matches!(frame.payload, ScriptFramePayload::Result(_)),
+                    Err(_) => true,
+                };
+                if sender.send(response).is_err() || terminal {
+                    break;
+                }
+            }
         });
         let mut cancel_requested = false;
-        let response = match receiver.recv_timeout(deadline) {
-            Ok(response) => response,
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                let status = child.try_wait().ok().flatten();
-                drop(stdin);
-                let _ = child.wait();
-                let _ = reader.join();
-                return Err(SupervisorError::WorkerCrash {
-                    worker_pid,
-                    exit_code: status.and_then(|status| status.code()),
-                });
-            }
-            Err(mpsc::RecvTimeoutError::Timeout) => {
-                cancel_requested = true;
-                let cancel = ScriptFrame {
-                    frame_version: SCRIPT_FRAME_VERSION,
-                    frame_id: format!("cancel-{invocation_id}"),
-                    payload: ScriptFramePayload::Cancel {
-                        invocation_id: invocation_id.clone(),
-                    },
-                };
-                let _ = write_frame(&mut stdin, &cancel);
-                match receiver.recv_timeout(cancel_grace) {
-                    Ok(response) => response,
-                    Err(_) => {
-                        let _ = job.terminate(124);
-                        drop(stdin);
-                        let _ = child.wait();
-                        let _ = reader.join();
-                        return Err(SupervisorError::HardTimeout { worker_pid });
+        let started = Instant::now();
+        let mut broker_operation_ids = Vec::new();
+        let mut broker_request_ids = std::collections::HashSet::new();
+        let mut broker_requests = 0_usize;
+        let response = loop {
+            let remaining = deadline.saturating_sub(started.elapsed());
+            let response = match receiver.recv_timeout(remaining) {
+                Ok(response) => response,
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    let status = child.try_wait().ok().flatten();
+                    drop(stdin);
+                    let _ = child.wait();
+                    let _ = reader.join();
+                    return Err(SupervisorError::WorkerCrash {
+                        worker_pid,
+                        exit_code: status.and_then(|status| status.code()),
+                    });
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    cancel_requested = true;
+                    let cancel = ScriptFrame {
+                        frame_version: SCRIPT_FRAME_VERSION,
+                        frame_id: format!("cancel-{invocation_id}"),
+                        payload: ScriptFramePayload::Cancel {
+                            invocation_id: invocation_id.clone(),
+                        },
+                    };
+                    let _ = write_frame(&mut stdin, &cancel);
+                    match receiver.recv_timeout(cancel_grace) {
+                        Ok(response) => break response,
+                        Err(_) => {
+                            let _ = job.terminate(124);
+                            drop(stdin);
+                            let _ = child.wait();
+                            let _ = reader.join();
+                            return Err(SupervisorError::HardTimeout { worker_pid });
+                        }
                     }
+                }
+            };
+            let frame = match response {
+                Ok(frame) => frame,
+                Err(error) => break Err(error),
+            };
+            match frame.payload {
+                ScriptFramePayload::BrokerRequest {
+                    invocation_id: request_invocation_id,
+                    request_id,
+                    request,
+                } => {
+                    if request_invocation_id != invocation_id {
+                        break Err(SupervisorError::Protocol(
+                            "worker broker request used a mismatched invocation_id".to_owned(),
+                        ));
+                    }
+                    broker_requests += 1;
+                    if broker_requests > broker_request_limit {
+                        break Err(SupervisorError::Protocol(
+                            "worker exceeded the broker request budget".to_owned(),
+                        ));
+                    }
+                    if !broker_request_ids.insert(request_id.clone()) {
+                        break Err(SupervisorError::Protocol(
+                            "worker reused a broker request_id".to_owned(),
+                        ));
+                    }
+                    let operation = request.operation.clone();
+                    let remaining = deadline.saturating_sub(started.elapsed());
+                    if remaining.is_zero() {
+                        continue;
+                    }
+                    let mut broker_response = broker(&request, remaining);
+                    if started.elapsed() >= deadline {
+                        continue;
+                    }
+                    let encoded_len = serde_json::to_vec(&broker_response)
+                        .map(|bytes| bytes.len())
+                        .unwrap_or(usize::MAX);
+                    if encoded_len > broker_return_limit {
+                        broker_response = ScriptBrokerResponse {
+                            ok: false,
+                            value: None,
+                            error: Some(crate::script_protocol::ScriptBrokerError {
+                                code: "broker_return_too_large".to_owned(),
+                                message: format!(
+                                    "broker response exceeds the {broker_return_limit} byte budget"
+                                ),
+                                details: None,
+                            }),
+                        };
+                    }
+                    broker_operation_ids.push(operation);
+                    let response_frame = ScriptFrame {
+                        frame_version: SCRIPT_FRAME_VERSION,
+                        frame_id: format!("response-{request_id}"),
+                        payload: ScriptFramePayload::BrokerResponse {
+                            invocation_id: invocation_id.clone(),
+                            request_id,
+                            response: broker_response,
+                        },
+                    };
+                    write_frame(&mut stdin, &response_frame)?;
+                }
+                ScriptFramePayload::Result(_) => break Ok(frame),
+                _ => {
+                    break Err(SupervisorError::Protocol(
+                        "worker returned an unexpected frame kind".to_owned(),
+                    ));
                 }
             }
         };
@@ -187,6 +281,7 @@ impl WorkerSupervisor {
             result,
             worker_pid,
             cancel_requested,
+            broker_operation_ids,
         })
     }
 }

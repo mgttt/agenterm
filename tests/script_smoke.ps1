@@ -287,13 +287,15 @@ try {
     if (-not $apiResult.ok -or
         $apiResult.value.api_version -ne 1 -or
         $apiResult.value.profiles.pure.variables -notcontains 'args' -or
-        $apiResult.value.profiles.observe.variables -notcontains 'observe' -or
+        $apiResult.value.profiles.observe.variables -notcontains 'agent' -or
         $apiResult.value.limits.defaults.wall_time_ms -ne 2000 -or
         $apiResult.value.limits.hard_maximums.wall_time_ms -ne 10000 -or
         $apiResult.value.limits.invocation_bytes -ne 2097152 -or
         $apiResult.value.framing.version -ne 1 -or
         $apiResult.value.framing.max_frame_bytes -ne 2097152 -or
-        $apiResult.value.framing.input_kinds.broker_request -ne 'reserved' -or
+        $apiResult.value.framing.input_kinds.broker_request -ne 'available_worker_to_host' -or
+        $apiResult.value.limits.defaults.broker_requests -ne 64 -or
+        $apiResult.value.limits.hard_maximums.capture_bytes -ne 262144 -or
         $apiResult.value.supervisor.job_object -ne 'kill_on_close' -or
         $apiResult.value.supervisor.global_concurrency -ne 4 -or
         $apiResult.value.exit_classes.limit -ne 3 -or
@@ -337,9 +339,9 @@ try {
     Write-Evidence 'script.rhai-pure'
 
     Write-Host 'STEP pure authority denial and operation budget'
-    $denied = Invoke-ScriptFailure 1 @('script', 'eval', 'observe')
+    $denied = Invoke-ScriptFailure 1 @('script', 'eval', 'agent.workspace()')
     if (-not $denied.Contains('"code":"script_runtime"')) {
-        throw 'pure profile unexpectedly received observe authority'
+        throw 'pure profile unexpectedly received broker authority'
     }
     $limited = Invoke-ScriptFailure 3 @(
         'script', 'eval', 'loop {}', '--max-operations', '1000'
@@ -543,7 +545,7 @@ try {
     }
     Write-Evidence 'script.supervisor'
 
-    Write-Host 'STEP brokered observe snapshot'
+    Write-Host 'STEP typed brokered observation'
     $env:AGENTERM_IPC_ADDRESS = $address
     $env:AGENTERM_WORKSPACE_PATH = $workspaceFile
     Invoke-Script @(
@@ -551,11 +553,76 @@ try {
     ) | Out-Null
     $serverStarted = $true
     $snapshot = Invoke-Script @('ui-snapshot') | ConvertFrom-Json
+    $publicCapture = Invoke-Script @(
+        'capture-pane', '-p', '-t', '@1', '--max-bytes', '5', '--json'
+    ) | ConvertFrom-Json
+    if ($publicCapture.max_bytes -ne 5 -or $publicCapture.bytes -gt 5) {
+        throw 'public bounded capture did not return typed bounded metadata'
+    }
+    $invalidCapture = Invoke-ScriptFailure 1 @(
+        'capture-pane', '-p', '-t', '@1', '--max-bytes', '0'
+    )
+    if (-not $invalidCapture.Contains('must be from 1 to 1048576')) {
+        throw 'public bounded capture accepted an invalid byte limit'
+    }
     $observed = Invoke-Script @(
-        'script', 'eval', 'observe.event_position.sequence', '--profile', 'observe'
+        'script', 'eval', 'agent.ui_snapshot().event_position.sequence',
+        '--profile', 'observe'
     )
     if ([uint64]$observed -lt [uint64]$snapshot.event_position.sequence) {
-        throw 'observe script did not receive the brokered snapshot event position'
+        throw 'observe script did not receive the typed snapshot event position'
+    }
+    $workspace = Invoke-Script @(
+        'script', 'eval', 'agent.workspace()', '--profile', 'observe', '--json'
+    ) | ConvertFrom-Json
+    if (-not $workspace.ok -or -not $workspace.value.event_position.epoch) {
+        throw 'workspace observation did not include the stable event baseline'
+    }
+    $tabs = Invoke-Script @(
+        'script', 'eval', 'agent.tabs()', '--profile', 'observe', '--json'
+    ) | ConvertFrom-Json
+    if (-not $tabs.ok -or @($tabs.value).Count -lt 1) {
+        throw 'typed tabs observation returned no terminal tabs'
+    }
+    $active = Invoke-Script @(
+        'script', 'eval', 'agent.active_tab()', '--profile', 'observe', '--json'
+    ) | ConvertFrom-Json
+    if (-not $active.ok -or -not $active.value.active) {
+        throw 'typed active-tab observation did not identify the active tab'
+    }
+    $capture = Invoke-Script @(
+        'script', 'eval', 'agent.capture(`@1`, 32)', '--profile', 'observe', '--json'
+    ) | ConvertFrom-Json
+    if (-not $capture.ok -or $capture.value.bytes -gt 32 -or
+        $capture.value.max_bytes -ne 32) {
+        throw 'typed pane capture exceeded its requested byte boundary'
+    }
+    $eventEpochLiteral = ConvertTo-Json -Compress ([string]$snapshot.event_position.epoch)
+    $eventReadExpression = "agent.events_read($eventEpochLiteral, $($snapshot.event_position.sequence), 16)"
+    $eventBatch = Invoke-Script @(
+        'script', 'eval', $eventReadExpression,
+        '--profile', 'observe', '--json'
+    ) | ConvertFrom-Json
+    if (-not $eventBatch.ok -or -not $eventBatch.value.position) {
+        throw 'typed event read did not return an observable-fleet position'
+    }
+    $restart = Invoke-ScriptFailure 1 @(
+        'script', 'eval', 'agent.events_read(`wrong-epoch`, 0, 1)',
+        '--profile', 'observe'
+    )
+    if (-not $restart.Contains('server_restart')) {
+        throw 'typed event read did not preserve the stable restart error'
+    }
+    $waitStopwatch = [Diagnostics.Stopwatch]::StartNew()
+    $eventWaitExpression = "agent.events_wait($eventEpochLiteral, $($snapshot.event_position.sequence), ""never.matches"", 50)"
+    $waitTimeout = Invoke-ScriptFailure 1 @(
+        'script', 'eval', $eventWaitExpression,
+        '--profile', 'observe', '--timeout-ms', '200'
+    )
+    $waitStopwatch.Stop()
+    if (-not $waitTimeout.Contains('event_wait_timeout') -or
+        $waitStopwatch.ElapsedMilliseconds -ge 500) {
+        throw 'broker wait did not remain inside the host deadline'
     }
     $mutationDenied = Invoke-ScriptFailure 1 @(
         'script', 'eval', 'new_tab()', '--profile', 'observe'
@@ -619,7 +686,7 @@ try {
         @($auditRecords | Where-Object { $_.crashed }).Count -lt 1 -or
         @($auditRecords | Where-Object {
             $_.effective_profile -eq 'observe' -and
-            $_.effective_capabilities -contains 'observe.snapshot' -and
+            $_.effective_capabilities -contains 'observe' -and
             $_.broker_operation_ids -contains 'ui.snapshot'
         }).Count -lt 1 -or
         @($auditRecords | Where-Object {

@@ -29,6 +29,11 @@ pub(crate) struct AuditBudgets {
     pub(crate) string_bytes: usize,
     pub(crate) output_bytes: usize,
     pub(crate) wall_time_ms: u64,
+    pub(crate) broker_requests: usize,
+    pub(crate) broker_return_bytes: usize,
+    pub(crate) capture_bytes: usize,
+    pub(crate) event_items: usize,
+    pub(crate) wait_time_ms: u64,
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -269,6 +274,11 @@ mod tests {
             string_bytes: 1024,
             output_bytes: 1024,
             wall_time_ms: 100,
+            broker_requests: 4,
+            broker_return_bytes: 4096,
+            capture_bytes: 1024,
+            event_items: 16,
+            wait_time_ms: 100,
         };
         AuditInvocation {
             invocation_id: "audit-unit".to_owned(),

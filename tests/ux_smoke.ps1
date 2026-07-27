@@ -114,7 +114,7 @@ function Test-AgenTermReady {
 
 function Get-IsolatedServer {
     param([string]$Address = $env:AGENTERM_IPC_ADDRESS)
-    $instances = Invoke-AgenTerm @('list-instances', '--json') | ConvertFrom-Json
+    $instances = Invoke-AgenTerm @('server-list', '--json') | ConvertFrom-Json
     $matches = @($instances | Where-Object {
         $_.address -eq $Address -and $_.status -eq 'running'
     })
@@ -146,6 +146,7 @@ Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 
 public static class AgenTermNativeTest {
     [StructLayout(LayoutKind.Sequential)]
@@ -169,7 +170,20 @@ public static class AgenTermNativeTest {
     private static extern bool SetForegroundWindow(IntPtr window);
 
     [DllImport("user32.dll")]
+    private static extern IntPtr SetActiveWindow(IntPtr window);
+
+    [DllImport("user32.dll")]
+    private static extern bool BringWindowToTop(IntPtr window);
+
+    [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern bool AttachThreadInput(
+        uint sourceThread, uint targetThread, bool attach);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern IntPtr CreateWindowExW(
@@ -186,6 +200,10 @@ public static class AgenTermNativeTest {
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern IntPtr FindWindowExW(
         IntPtr parent, IntPtr after, string className, string windowName);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetClassNameW(
+        IntPtr window, StringBuilder className, int capacity);
 
     [DllImport("user32.dll")]
     private static extern void keybd_event(
@@ -300,12 +318,104 @@ public static class AgenTermNativeTest {
             throw new InvalidOperationException("CreateWindowExW test host failed");
         }
         ShowWindow(window, 5);
-        SetForegroundWindow(window);
+        try {
+            RequireForeground(window, 1500);
+        }
+        catch {
+            DestroyWindow(window);
+            throw;
+        }
         return window;
     }
 
     public static IntPtr ForegroundWindow() {
         return GetForegroundWindow();
+    }
+
+    private static string WindowClass(IntPtr window) {
+        if (window == IntPtr.Zero) {
+            return "<none>";
+        }
+        StringBuilder value = new StringBuilder(128);
+        return GetClassNameW(window, value, value.Capacity) > 0
+            ? value.ToString()
+            : "<unknown>";
+    }
+
+    private static string FocusDiagnostics(IntPtr target) {
+        uint targetProcess;
+        uint targetThread = GetWindowThreadProcessId(target, out targetProcess);
+        IntPtr foreground = GetForegroundWindow();
+        uint foregroundProcess;
+        uint foregroundThread = GetWindowThreadProcessId(
+            foreground, out foregroundProcess);
+        IntPtr focus = IntPtr.Zero;
+        if (targetThread != 0) {
+            GUITHREADINFO info = new GUITHREADINFO();
+            info.cbSize = (uint)Marshal.SizeOf<GUITHREADINFO>();
+            if (GetGUIThreadInfo(targetThread, ref info)) {
+                focus = info.hwndFocus;
+            }
+        }
+        return String.Format(
+            "target=0x{0:X} targetThread={1} targetProcess={2} " +
+            "foreground=0x{3:X} foregroundThread={4} foregroundProcess={5} " +
+            "focus=0x{6:X} focusClass={7}",
+            target.ToInt64(), targetThread, targetProcess,
+            foreground.ToInt64(), foregroundThread, foregroundProcess,
+            focus.ToInt64(), WindowClass(focus));
+    }
+
+    private static void TryActivateWindow(IntPtr window) {
+        uint targetProcess;
+        uint targetThread = GetWindowThreadProcessId(window, out targetProcess);
+        IntPtr foreground = GetForegroundWindow();
+        uint foregroundProcess;
+        uint foregroundThread = GetWindowThreadProcessId(
+            foreground, out foregroundProcess);
+        uint currentThread = GetCurrentThreadId();
+        bool attachedForeground = false;
+        bool attachedTarget = false;
+        try {
+            if (foregroundThread != 0 && foregroundThread != currentThread) {
+                attachedForeground = AttachThreadInput(
+                    currentThread, foregroundThread, true);
+            }
+            if (targetThread != 0 && targetThread != currentThread &&
+                targetThread != foregroundThread) {
+                attachedTarget = AttachThreadInput(
+                    currentThread, targetThread, true);
+            }
+            ShowWindow(window, 5);
+            BringWindowToTop(window);
+            SetActiveWindow(window);
+            SetForegroundWindow(window);
+        }
+        finally {
+            if (attachedTarget) {
+                AttachThreadInput(currentThread, targetThread, false);
+            }
+            if (attachedForeground) {
+                AttachThreadInput(currentThread, foregroundThread, false);
+            }
+        }
+    }
+
+    public static void RequireForeground(IntPtr window, int timeoutMs) {
+        int started = Environment.TickCount;
+        do {
+            if (GetForegroundWindow() == window) {
+                return;
+            }
+            TryActivateWindow(window);
+            if (GetForegroundWindow() == window) {
+                return;
+            }
+            Thread.Sleep(5);
+        } while (unchecked(Environment.TickCount - started) < timeoutMs);
+        throw new InvalidOperationException(
+            "could not establish foreground ownership: " +
+            FocusDiagnostics(window));
     }
 
     public static void DestroyHost(IntPtr window) {
@@ -315,7 +425,7 @@ public static class AgenTermNativeTest {
     }
 
     public static void KeyDown(IntPtr window, byte virtualKey) {
-        SetForegroundWindow(window);
+        RequireForeground(window, 1000);
         keybd_event(virtualKey, 0, 0, UIntPtr.Zero);
     }
 
@@ -341,8 +451,23 @@ public static class AgenTermNativeTest {
         return info.hwndFocus;
     }
 
+    public static IntPtr WaitForFocusedEdit(IntPtr window, int timeoutMs) {
+        int started = Environment.TickCount;
+        do {
+            IntPtr focus = FocusedControl(window);
+            if (focus != IntPtr.Zero &&
+                String.Equals(WindowClass(focus), "Edit",
+                    StringComparison.OrdinalIgnoreCase)) {
+                return focus;
+            }
+            Thread.Sleep(5);
+        } while (unchecked(Environment.TickCount - started) < timeoutMs);
+        throw new InvalidOperationException(
+            "native Edit did not acquire focus: " + FocusDiagnostics(window));
+    }
+
     public static int[] EditSelection(IntPtr window) {
-        IntPtr edit = FocusedControl(window);
+        IntPtr edit = WaitForFocusedEdit(window, 1000);
         IntPtr start = Marshal.AllocHGlobal(4);
         IntPtr end = Marshal.AllocHGlobal(4);
         try {
@@ -358,7 +483,8 @@ public static class AgenTermNativeTest {
     }
 
     public static void SetEditSelection(IntPtr window, int start, int end) {
-        IntPtr edit = FocusedControl(window);
+        RequireForeground(window, 1000);
+        IntPtr edit = WaitForFocusedEdit(window, 1000);
         SendMessageW(edit, 0x00B1, (UIntPtr)(uint)start, (IntPtr)end);
     }
 }
@@ -1163,8 +1289,16 @@ try {
     $closeModalWait = Invoke-AgenTerm @(
         'wait-ui', '--modal-kind', 'confirm-window-close', '--timeout-ms', '1000'
     ) | ConvertFrom-Json
-    if ($closeModalWait.modal.default_action -ne 'keep-server-running') {
-        throw 'wait-ui did not match the untargeted window-close confirmation'
+    $closeModalServer = Get-IsolatedServer
+    if ($closeModalWait.modal.default_action -ne 'keep-server-running' -or
+        $closeModalServer.modal_kind -ne 'confirm-window-close' -or
+        -not $closeModalServer.window_visible -or
+        $closeModalServer.window_detached -or
+        $closeModalServer.event_epoch -ne $closeModal.event_position.epoch) {
+        throw (
+            'wait-ui/server-list did not agree on the visible window-close ' +
+            'confirmation'
+        )
     }
 
     $afterCancel = Invoke-AgenTerm @('ui-action', 'cancel') | ConvertFrom-Json
@@ -1194,11 +1328,18 @@ try {
         '--kind', 'window.visibility',
         '--timeout-ms', '5000'
     ) | ConvertFrom-Json
+    $detachedServer = Get-IsolatedServer
     if ($detachEvent.payload.visible -ne $false -or
         $detachEvent.payload.reason -ne 'detach' -or
         $detached.window.visible -or -not $detached.window.detached -or
-        $detached.layout.composer.visible) {
-        throw 'keep-server-running did not publish and expose detached window state'
+        $detached.layout.composer.visible -or
+        $detachedServer.window_visible -ne $false -or
+        $detachedServer.window_detached -ne $true -or
+        $detachedServer.event_epoch -ne $detached.event_position.epoch) {
+        throw (
+            'keep-server-running did not publish and expose one consistent ' +
+            'detached window state'
+        )
     }
 
     $hiddenToken = "AGENTERM_DETACH_HIDDEN_$PID"
@@ -1235,6 +1376,9 @@ try {
         -not $reattached.layout.composer.visible -or
         -not $reattached.layout.composer.input_visible -or
         -not $reattached.layout.composer.send_visible -or
+        $reattachedServer.window_visible -ne $true -or
+        $reattachedServer.window_detached -ne $false -or
+        $reattachedServer.event_epoch -ne $reattached.event_position.epoch -or
         $reattached.event_position.epoch -ne $beforeWindowClose.event_position.epoch -or
         $reattachedPane.pid -ne $beforePane.pid -or
         $reattachedServer.pid -ne $beforeServer.pid -or
