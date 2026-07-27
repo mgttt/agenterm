@@ -48,6 +48,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     boundary and typed rejection of writes after finalization, while complete
     receipt coverage for text written, Enter written/failed, terminal output
     observed, process exit, and terminal finalization remains incomplete
+  - [x] producer notifications share one atomic wake signal: PTY, process,
+    startup, clipboard, and bounded IPC queues coalesce outstanding Win32
+    messages, the GUI owner clears before draining and rearms an exhausted IPC
+    budget without losing a concurrent wake; public stress proves PTY and 32
+    IPC clients progress together and an expired mutation remains a typed no-op
   - [ ] model sequence, render generation, and last-painted event sequence
     make snapshot, bounded capture, cell dump, and PNG evidence causally
     comparable

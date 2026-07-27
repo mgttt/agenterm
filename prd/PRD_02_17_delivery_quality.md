@@ -32,11 +32,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] CLI and semantic UX smoke tests through public interfaces
 - [x] one-command fmt, Clippy, test, build, and smoke regression
 - v0.1.7 self-diagnosing test harness (P0)
-  - [~] one shared harness assigns a run ID, OS-selected loopback address,
-    isolated workspace/settings and evidence directories, and restores
-    environment state; migrated suites use bounded shutdown and exact owned
-    process fallbacks, but session and process-handle ownership are not yet
-    centralized in the shared context
+  - [x] one shared harness assigns a run ID, OS-selected loopback address,
+    isolated workspace/settings/instance registry and evidence directories,
+    restores environment state, and centrally records owned addresses plus
+    PID/start-time/window identities
   - [~] commands and emitted evidence are bounded and recorded per run, and
     qualification gates record status and duration; command receipt,
     duration, target/build/server identity, and artifact references in a
@@ -50,9 +49,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     failed runs retain a single run-scoped bundle and print its path; the
     fail-closed self-test verifies retention and default no-pane-capture
     behavior, while CI upload policy remains to be wired
-  - [~] cleanup uses explicit-address shutdown and migrated GUI suites add
-    bounded exact-PID forced fallback; a shared post-cleanup proof for no
-    orphan GUI/server/worker or stale registration remains planned
+  - [x] cleanup grants graceful shutdown only to a server confirmed in this
+    run's isolated registry, then uses a bounded PID/start-time-matched forced
+    fallback and writes proof that no owned GUI/server/worker, window, or
+    registration remains; an injected self-test proves an unregistered
+    same-name process is not killed and the original failure is preserved
   - [~] qualification extracts evidence IDs actually emitted by the current
     gate, rejects duplicates or mismatch with its versioned manifest, and has
     fail-closed tests for failed/skipped gates; the complete required-gate run
@@ -63,9 +64,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     logs and retained text/JSON failure evidence; retained-bundle injection is
     implemented, while final qualification of that injected journey remains
     pending
-  - [ ] push/PR feedback runs a bounded representative public black-box slice;
-    full release journeys remain artifact-bound without deferring the first
-    behavioral signal until after tagging
+  - [x] push/PR feedback runs no-activate startup and CLI public black-box
+    slices after the fast quality gate; the full desktop/stress journey remains
+    candidate-bound instead of deferring the first behavioral signal until
+    after tagging
 - [x] release CI runs the isolated public CLI and fleet smoke suites before
   packaging, even when the redundant GUI smoke suites are skipped
 - v0.1.7 internal delivery rehearsal (no tag or public GitHub Release)
@@ -80,23 +82,23 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   - [ ] CI reports queue, cold/cache-hit, job/step and candidate-to-qualified
     timing; an injected early-stage failure produces its first actionable
     diagnostic within 90 seconds after that stage starts
-  - [~] build metadata plus the qualification gate manifest identify source,
-    lock, artifact-manifest, and executable hashes for one staged artifact
-    set; qualification validates those values, but package/publish does not
-    yet consume and promote it
-  - [~] qualification has a repository-native script boundary and fail-closed
-    self-test; a separate package/publish script or job, its explicit
-    qualification dependency, and unchanged-candidate packaging retry remain
-    unimplemented
+  - [x] build metadata plus the qualification gate manifest identify source,
+    lock, artifact-manifest, SPDX inventory, and executable hashes for one
+    staged artifact set; qualification validates them and the offline package
+    boundary copies only byte-identical qualified inputs without rebuilding
+  - [x] qualification and package are separate repository-native script
+    boundaries with tamper self-tests; missing receipt, failed/omitted gate,
+    HEAD/lock/manifest/SBOM mismatch, or any executable hash mismatch fails
+    closed before staging
   - [~] qualification can emit a versioned receipt containing source commit SHA,
     candidate manifest and executable hashes, Cargo lock/toolchain/profile
     identity, required-suite and emitted-evidence results, run identity, and
     gate-manifest hash, with timestamps excluded from eligibility; an
     integrated full required-gate receipt is still pending
-  - [ ] package independently rejects a missing/failed receipt, source SHA
+  - [x] package independently rejects a missing/failed receipt, source SHA
     mismatch, candidate hash mismatch, incomplete required suite, missing
-    required evidence, or disallowed skip; v0.1.7 proves this in dry-run mode
-    without invoking a publish step
+    required evidence, or disallowed skip; v0.1.7 permits only an ignored
+    dry-run ZIP and both local/tag publication entry points reject v0.1.7
   - [~] the versioned manifest and fail-closed self-tests define release
     qualification as 100% of required gates
     manifest passed, not 100% source-code coverage; optional environmental
@@ -108,6 +110,16 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   - [ ] Cargo registry, Git sources and compatible build outputs use bounded,
     correctly keyed CI caches; cache miss/corruption cannot alter correctness,
     and developer `target/` cleanup remains explicit
+- [x] artifact manifest schema 2 drives all four executable names, roles,
+  PE subsystems, budgets, offline probes, staging metadata, and README checks;
+  locked-artifact cleanup enumerates only exact manifest stems
+- [x] locked `cargo metadata` validates every resolved registry checksum and a
+  reviewed license-expression allowlist, checks exact direct-dependency notice
+  coverage, and emits a deterministic SPDX inventory bound into qualification
+  and package hashes
+- [x] Rust 1.97.0 and GitHub Actions revisions are immutable inputs; target
+  reporting exposes resolved path, local/external cleanup authority, bytes,
+  age, and profile totals before repo-local release cleanup
 - Scripting public-interface evidence gate
   - Rhai black-box evidence
     - [x] `tests/script_smoke.ps1` drives only public `script check`,

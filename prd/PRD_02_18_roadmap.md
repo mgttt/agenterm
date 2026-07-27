@@ -320,13 +320,13 @@ track remains planned, but every declared dependency must still pass.
     Composer completion, terminal finalization, and dead-write paths are wired,
     while command-wide and wait-wide coverage remains incomplete
   - [~] an isolated shared test harness now retains privacy-bounded
-    first-failure evidence and migrated suites use owned cleanup; centralized
-    orphan/stale-registration proof and the final integrated gate remain
-    incomplete
+    first-failure evidence and proves bounded cleanup of identity-matched
+    owned processes/windows/workers/registrations; the final integrated gate
+    receipt remains incomplete
   - [~] qualification now has a versioned required-gate manifest, provenance
-    validation, fail-closed receipt logic, and self-tests; package promotion of
-    the exact candidate bytes remains unimplemented, so the internal
-    provenance-bound candidate is not yet complete
+    validation, fail-closed receipt logic and self-tests, while an independent
+    dry-run packager accepts only the exact qualified executable/SBOM bytes;
+    the final clean-SHA receipt and dry-run archive remain to be produced
   - [~] running and staged identities expose
     `same|stale|incompatible|unknown` with public fleet evidence, while
     lifecycle actions and the final GUI/server compatibility decision remain
