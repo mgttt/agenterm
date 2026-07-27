@@ -30,23 +30,35 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   - [x] direct deterministic wait predicates for modal kind and target
   - [ ] broadcast input and synchronized panes
 - v0.1.7 self-feedback command contract (P0 before expanding script control)
-  - [ ] every public control/destructive request has a versioned
+  - [~] CLI-to-server requests now carry a versioned
     `request_id`, stable `operation_id`, resolved server/tab identity,
     before/after event position, truthful completion phase, and typed
-    result/error available through a global machine-readable mode
-  - [ ] the server keeps a bounded request deduplication/replay window;
+    result/error through `--receipt-json`; representative control and dead-PTY
+    paths are black-box tested, but resolved-target and typed-result coverage
+    is not yet complete across every public control/destructive command
+  - [~] the server keeps a bounded in-memory request deduplication/replay
+    window and black-box tests cover same-ID replay plus different-payload
+    rejection;
     retrying the same ID and payload cannot repeat a side effect, reusing an
-    ID with different input is rejected, and a transport timeout reports
-    `outcome_unknown` unless non-execution is proven
-  - [ ] expired or cancelled requests cannot execute later after a blocked
-    GUI thread recovers
-  - [ ] success means committed, accepted asynchronously, or explicit no-op;
+    ID with different input is rejected, but a client-side transport timeout
+    does not yet recover a receipt proving `outcome_unknown` versus
+    non-execution
+  - [~] mutation deadlines are checked on the GUI thread before execution so
+    an expired request is rejected without reserving or running it; explicit
+    cancellation and a blocked-GUI recovery black-box remain planned
+  - [~] receipts distinguish committed, accepted, no-op, and unknown outcome,
+    and the dead-PTY write regression returns a typed no-op;
     dead/unavailable targets, failed PTY writes, and unresolved selectors
-    never return ordinary success
-  - [ ] asynchronous receipts publish the exact stable wait predicate and
-    baseline cursor needed to observe completion or failure
-  - [ ] operation catalog contract tests cover dispatch, result/error schema,
-    completion semantics, emitted events, aliases, and stable target identity
+    still require a command-wide false-success audit
+  - [~] asynchronous Composer submission receipts publish a resolved tab,
+    epoch/sequence baseline, deadline, and submission-complete wait descriptor;
+    other asynchronous paths and descriptor/event-name conformance remain
+    unproven
+  - [~] unit and public CLI tests cover receipt serialization, replay,
+    conflicts, deadline rejection, Composer completion, dead writes, and
+    stable target identity; full operation-catalog dispatch, alias, result,
+    error, and emitted-event contract coverage remains planned
+  - [x] one public receipt replay slice proves same-ID same-payload replay and different-payload conflict without repeating the tab-note mutation
 - Protocol
   - [x] loopback-only newline-delimited JSON IPC
   - [x] feature discovery through `protocol-info`
@@ -62,6 +74,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   - [x] bounded discovery probes and clean-machine-safe explicit-address
     GUI autostart that returns as soon as IPC becomes ready
   - [x] explicit errors for unsupported operations
-  - [ ] one canonical structured success/error envelope across commands;
-    human text is rendered from it rather than forming a second contract
+  - [~] IPC responses now carry optional structured error fields and a
+    versioned receipt while preserving legacy fields; many command branches
+    still originate human error text and ordinary CLI mode does not yet render
+    every message from one canonical typed envelope
   - [ ] named-pipe transport and stable event subscription

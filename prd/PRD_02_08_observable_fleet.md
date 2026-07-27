@@ -32,14 +32,22 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     snapshot-to-follow handoff, restart, gap, concurrent readers, catalog
     completeness, and server/tab-scoped post-state agreement
 - v0.1.7 causal completion and evidence (P0)
-  - [ ] event envelopes can correlate a transition with its request and
-    operation; mutation receipts identify the committed event range
-  - [ ] all deterministic waits freeze selectors to stable IDs and bind to
-    server identity, epoch, and a minimum sequence so a pre-existing state,
-    target replacement, or server restart cannot produce false success
-  - [ ] input feedback distinguishes text written, Enter written/failed,
-    terminal output observed, process exited, and terminal finalized; final
-    means process exit plus PTY reader EOF and parser drain
+  - [~] event envelopes can carry request and operation correlation, Composer
+    submission completion is wired to it, and mutation receipts carry
+    before/after event positions; other mutation events are not yet
+    comprehensively correlated
+  - [~] control receipts define a stable resolved target, server epoch,
+    minimum event position, deadline, and typed wait condition for Composer
+    completion; existing deterministic wait commands do not yet all freeze
+    selectors or bind to server identity, epoch, and a minimum sequence, so
+    pre-existing state, target replacement, and restart false-success coverage
+    remains incomplete
+  - [~] terminal observation now distinguishes input/output counters,
+    submission pending and Enter completion, process exit/error, reader EOF,
+    parser drain, and finalization; public CLI tests prove a stable finalized
+    boundary and typed rejection of writes after finalization, while complete
+    receipt coverage for text written, Enter written/failed, terminal output
+    observed, process exit, and terminal finalization remains incomplete
   - [ ] model sequence, render generation, and last-painted event sequence
     make snapshot, bounded capture, cell dump, and PNG evidence causally
     comparable

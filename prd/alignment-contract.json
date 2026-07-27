@@ -221,6 +221,14 @@
       "evidence_ids": ["fleet.instance-discovery"]
     },
     {
+      "id": "development.upgrade-identity-comparison",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "public fleet discovery distinguishes same, stale, incompatible, and unknown running-versus-staged identity without guessing missing build fields",
+      "evidence_ids": ["fleet.upgrade-truth"]
+    },
+    {
       "id": "control.observable-events",
       "kind": "behavior",
       "status": "shipped",
@@ -245,6 +253,14 @@
       "evidence_mode": "black-box",
       "prd": "typed operation catalog shared by CLI validation, IPC dispatch, capability discovery, stable errors, and event attribution",
       "evidence_ids": ["cli.typed-tabs-operations"]
+    },
+    {
+      "id": "control.receipt-replay-slice",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "one public receipt replay slice proves same-ID same-payload replay and different-payload conflict without repeating the tab-note mutation",
+      "evidence_ids": ["cli.control-receipts"]
     },
     {
       "id": "scripting.rhai-pure",

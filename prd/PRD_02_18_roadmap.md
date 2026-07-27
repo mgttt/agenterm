@@ -310,22 +310,31 @@ track remains planned, but every declared dependency must still pass.
 - [ ] M3 optional components: ship signed-manifest inventory/install/update/
   rollback foundations and independently gated SSH, HTTP, and SQLite
   sidecars without adding GUI network authority
-- [ ] M4 / v0.1.7 internal Control-Plane Integrity & Delivery Reset
-  - [ ] reset product truth, ownership, public-interface inventory, and
-    executable evidence before adding capabilities
-  - [ ] close the command feedback loop with versioned receipts, stable
+- [~] M4 / v0.1.7 internal Control-Plane Integrity & Delivery Reset
+  - [~] product truth is split into owned PRD modules and command, operation,
+    event, executable, and evidence registries have drift checks; final
+    integrated inventory and status audit remain pending
+  - [~] close the command feedback loop with versioned receipts, stable
     resolved targets, bounded idempotency, truthful completion, causal events,
-    epoch-bound waits, and false-success regression coverage
-  - [ ] build an isolated shared test harness that retains privacy-bounded
-    first-failure evidence and proves cleanup leaves no run-owned orphan
-  - [ ] build one provenance-bound candidate, qualify and package those exact
-    bytes through independent fail-closed stages, and produce an internal
-    receipt bound to the final commit without creating a v0.1.7 tag or Release
-  - [ ] expose running-versus-staged build identity and freeze GUI/server
-    ownership and compatibility decisions without changing the default process
-    model
-  - [ ] extract command, error, IPC, terminal, observation, scripting, test,
-    and artifact boundaries incrementally; no Win32/renderer/ConPTY rewrite
+    epoch-bound waits, and false-success regression coverage: receipt replay,
+    Composer completion, terminal finalization, and dead-write paths are wired,
+    while command-wide and wait-wide coverage remains incomplete
+  - [~] an isolated shared test harness now retains privacy-bounded
+    first-failure evidence and migrated suites use owned cleanup; centralized
+    orphan/stale-registration proof and the final integrated gate remain
+    incomplete
+  - [~] qualification now has a versioned required-gate manifest, provenance
+    validation, fail-closed receipt logic, and self-tests; package promotion of
+    the exact candidate bytes remains unimplemented, so the internal
+    provenance-bound candidate is not yet complete
+  - [~] running and staged identities expose
+    `same|stale|incompatible|unknown` with public fleet evidence, while
+    lifecycle actions and the final GUI/server compatibility decision remain
+    gated
+  - [~] command, receipt/error, terminal lifecycle, observation, upgrade
+    identity, scripting protocol, test-harness, and qualification boundaries
+    are being extracted incrementally without a Win32/renderer/ConPTY rewrite;
+    IPC/mailbox and remaining hot-file decomposition are incomplete
 - [ ] M5 next public product version: scope intentionally remains unassigned
   until the v0.1.7 internal qualification and dogfood review; registry, named
   commands, providers, Rhai control, and event handlers are candidates rather

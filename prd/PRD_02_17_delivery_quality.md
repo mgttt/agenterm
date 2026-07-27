@@ -10,7 +10,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   per-control-CLI budgets
 - [x] GUI `agenterm.exe` has no startup console flash
 - [x] console `agenterm-cli.exe` preserves CLI output and exit codes
-- [x] startup regression requires a main window within one second locally
+- [x] startup regression requires a main window within one second locally;
+  `startup.first-window-async-ready` is emitted only after the native-window
+  budget and the separately awaited asynchronous terminal-ready state pass
 - [x] version-tagged GitHub Release automation for all four EXEs, metadata,
   and ZIP
 - [x] release automation publishes `agenterm-mux.exe` after its acceptance
@@ -22,31 +24,45 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] PRD alignment lint keeps the public command registry, protocol feature
   flags, mux compatibility output, and declared evidence synchronized
 - [~] stable capability/evidence ID contract covers protocol features and
-  critical terminal input behavior; rendering, CJK, performance, and the
-  remaining shipped leaves still need registered evidence
+  critical terminal input behavior; startup and working-context suites now
+  declare `startup.first-window-async-ready` and
+  `ux.working-context-proxy` through the qualification manifest, while
+  rendering, CJK, performance, and the remaining shipped leaves still need
+  registered evidence
 - [x] CLI and semantic UX smoke tests through public interfaces
 - [x] one-command fmt, Clippy, test, build, and smoke regression
 - v0.1.7 self-diagnosing test harness (P0)
-  - [ ] one shared harness assigns a run ID and isolated address, workspace,
-    settings, session, evidence directory, and owned process handles; port
-    allocation cannot collide through PID modulo arithmetic or kill another
-    run
-  - [ ] every step records requirement/evidence IDs, command receipt, status,
+  - [~] one shared harness assigns a run ID, OS-selected loopback address,
+    isolated workspace/settings and evidence directories, and restores
+    environment state; migrated suites use bounded shutdown and exact owned
+    process fallbacks, but session and process-handle ownership are not yet
+    centralized in the shared context
+  - [~] commands and emitted evidence are bounded and recorded per run, and
+    qualification gates record status and duration; command receipt,
     duration, target/build/server identity, and artifact references in a
-    machine-readable run manifest plus JUnit-compatible summary
-  - [ ] on first failure, before cleanup, the harness captures privacy-filtered
-    UI state, bounded pane text, relevant event tail, PNG when available,
-    stdout/stderr, process/registration state, and artifact hashes without
-    masking the original error
-  - [ ] successful runs may discard transient evidence; failed runs retain a
-    single run-scoped bundle and print/upload its path. Cleanup never deletes
-    evidence promised to CI
-  - [ ] cleanup uses owned handles and bounded shutdown with forced fallback,
-    then proves there are no orphan GUI/server/worker processes or stale
-    registrations from that run
-  - [ ] CI validates evidence IDs actually emitted in the current run, not
-    merely strings declared in source; no silent retry may turn a first
-    failure green
+    machine-readable step manifest plus a JUnit-compatible summary are not yet
+    complete
+  - [~] on first failure, before cleanup, the harness captures a
+    privacy-bounded command log and UI snapshot, with explicitly enabled
+    bounded pane/event diagnostics; PNG, process/registration state, artifact
+    hashes, and complete per-suite stdout/stderr collection remain planned
+  - [~] successful harness runs discard their owned transient directory and
+    failed runs retain a single run-scoped bundle and print its path; the
+    fail-closed self-test verifies retention and default no-pane-capture
+    behavior, while CI upload policy remains to be wired
+  - [~] cleanup uses explicit-address shutdown and migrated GUI suites add
+    bounded exact-PID forced fallback; a shared post-cleanup proof for no
+    orphan GUI/server/worker or stale registration remains planned
+  - [~] qualification extracts evidence IDs actually emitted by the current
+    gate, rejects duplicates or mismatch with its versioned manifest, and has
+    fail-closed tests for failed/skipped gates; the complete required-gate run
+    has not yet produced the final integrated receipt
+  - [~] startup and working-context now use the shared harness with dynamic
+    isolation, no-activate, owned cleanup, and registered evidence.
+    Working-context additionally scrubs fixture proxy credentials from command
+    logs and retained text/JSON failure evidence; retained-bundle injection is
+    implemented, while final qualification of that injected journey remains
+    pending
   - [ ] push/PR feedback runs a bounded representative public black-box slice;
     full release journeys remain artifact-bound without deferring the first
     behavioral signal until after tagging
@@ -64,27 +80,29 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   - [ ] CI reports queue, cold/cache-hit, job/step and candidate-to-qualified
     timing; an injected early-stage failure produces its first actionable
     diagnostic within 90 seconds after that stage starts
-  - [ ] one commit/version/hash provenance manifest identifies the only release
-    artifact set; all required tests consume it and the publish job promotes it
-    byte-for-byte without rebuilding
-  - [ ] qualification and package/publish are independent job and script
-    boundaries joined only by an explicit dependency: package/publish cannot
-    start until qualification succeeds, while a packaging-only retry may reuse
-    the unchanged qualified candidate
-  - [ ] qualification emits a versioned receipt containing source commit SHA,
+  - [~] build metadata plus the qualification gate manifest identify source,
+    lock, artifact-manifest, and executable hashes for one staged artifact
+    set; qualification validates those values, but package/publish does not
+    yet consume and promote it
+  - [~] qualification has a repository-native script boundary and fail-closed
+    self-test; a separate package/publish script or job, its explicit
+    qualification dependency, and unchanged-candidate packaging retry remain
+    unimplemented
+  - [~] qualification can emit a versioned receipt containing source commit SHA,
     candidate manifest and executable hashes, Cargo lock/toolchain/profile
     identity, required-suite and emitted-evidence results, run identity, and
-    evidence-manifest hash. Timestamps measure latency but never establish
-    eligibility
+    gate-manifest hash, with timestamps excluded from eligibility; an
+    integrated full required-gate receipt is still pending
   - [ ] package independently rejects a missing/failed receipt, source SHA
     mismatch, candidate hash mismatch, incomplete required suite, missing
     required evidence, or disallowed skip; v0.1.7 proves this in dry-run mode
     without invoking a publish step
-  - [ ] release qualification means 100% of the versioned required-gate
+  - [~] the versioned manifest and fail-closed self-tests define release
+    qualification as 100% of required gates
     manifest passed, not 100% source-code coverage; optional environmental
-    probes are identified separately and cannot silently replace a required
-    gate
-  - [ ] the 4,128-write bounded-journal saturation journey runs exactly once
+    probes still need an explicit separate classification
+  - [~] receipt generation requires the explicit bounded-journal stress gate
+    and refuses a skipped stress run; proving it executes exactly once
     per candidate SHA, while desktop GUI journeys remain isolated and
     `no-activate`
   - [ ] Cargo registry, Git sources and compatible build outputs use bounded,
