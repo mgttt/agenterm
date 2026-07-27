@@ -1143,6 +1143,23 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
           terminal; Settings, close confirmation, composer, scrollbars,
           selection, screenshots, PTY sizing, and hit testing all consume the
           same effective content origin
+      - Release core: detach-first server lifecycle
+        - [ ] replace unconditional `WM_CLOSE` destruction with a host-owned
+          three-choice close confirmation: `Keep Server Running` is the default
+          and hides the window while preserving the same server, epoch, IPC,
+          live PTYs, scrollback, and drafts; `Stop Server & Exit` saves
+          workspace metadata then ends the server and PTYs; `Cancel` and Esc
+          return without changing state
+        - [ ] treat the default choice as detach rather than false process exit:
+          a later `agenterm.exe`, `start-server`, or `attach-session` invocation
+          re-shows and focuses the same hidden HWND and server process
+        - [ ] keep explicit automation noninteractive: `shutdown` performs the
+          save-and-stop path, while `kill-server`/`server-kill` retain their
+          stronger destructive saved-session semantics; Windows logoff/shutdown
+          saves and exits without blocking the OS on the interactive modal
+        - [ ] expose close-modal, visible/hidden, detach, reattach, and shutdown
+          state through typed snapshots, waits, events, and `server-list --json`
+          without claiming continuity after a real server stop
       - Release core: Observable Fleet completion
         - [ ] audit every declared event kind against its committed state and
           fill any missing transition coverage without expanding into durable
@@ -1171,6 +1188,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
           physical boundary drag, verify live PTY column changes, restart the
           isolated GUI, and prove terminal selection/scrollbar/modal behavior
           remains aligned
+        - [ ] lifecycle black-box tests exercise all three close choices and
+          keyboard defaults; detach must preserve PID, epoch, tab IDs, PTYs,
+          scrollback, drafts, and server discovery across reattach, while
+          stop-and-exit must create a new epoch/PTY on the next start and CLI
+          shutdown/kill paths must never wait for a modal
         - [ ] release qualification adds Observable Fleet restart/gap/
           concurrent-reader evidence while preserving the 4 MiB GUI,
           per-sidecar size, one-second first-window, remain-on-exit, and
