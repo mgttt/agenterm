@@ -5,7 +5,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$prdPath = Join-Path $root 'docs\PRD.md'
+$prdPath = Join-Path $root 'PRD.md'
 $commandsPath = Join-Path $root 'src\commands.rs'
 $CliExe = [IO.Path]::GetFullPath($CliExe)
 $MuxExe = [IO.Path]::GetFullPath($MuxExe)

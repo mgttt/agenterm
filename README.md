@@ -110,5 +110,5 @@ publishes all four EXEs, metadata, ZIP, and generated notes to GitHub Releases.
 
 ## Documentation
 
-- [Product tree and requirements](docs/PRD.md)
+- [Product tree and requirements](PRD.md)
 - [Coding-agent guide](AGENTS.md)

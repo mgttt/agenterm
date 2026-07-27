@@ -1,7 +1,7 @@
 # AgenTerm agent guide
 
 This is the operational source of truth for coding agents. Product intent and
-status live in `docs/PRD.md`; avoid creating additional design documents unless
+status live in `PRD.md`; avoid creating additional design documents unless
 the information cannot live here or in the PRD.
 
 ## Repository map
@@ -108,7 +108,7 @@ behavior.
 - All agents and subagents work in the single shared `D:\dev\agenterm`
   checkout on `main`. Do not create Git worktrees, task branches, or hidden
   planning copies. Material planning progress must be written incrementally to
-  `docs/PRD.md` so it is immediately visible in the repository; the primary
+  `PRD.md` so it is immediately visible in the repository; the primary
   agent reviews, commits, and pushes small coherent increments.
 - Preserve the remain-on-exit and explicit-close invariants in the PRD.
 - Preserve tree safety: parent cycles are rejected and closing a parent promotes
