@@ -530,6 +530,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [x] pure Rhai run, eval, check, and API discovery execute in a sidecar
     - [x] observe Rhai receives one brokered immutable UI snapshot
     - [x] Rhai denies ambient mutation authority and enforces operation budgets
+    - [~] value limits are present, while parent-enforced wall time, correct
+      wall-time limit classification, cancellation, worker ceilings, and audit
+      remain v0.1.6
     - Product boundary
       - [x] design choice: Rust (`.rs`) implements the host, capability checks,
         and stable APIs; Rhai (`.rhai`) is the user scripting language
@@ -547,7 +550,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
         independent of Rhai types
       - [ ] one engine factory builds each invocation from an immutable
         capability set, source label, API version, and resource budget
-      - [ ] lazy initialization on first use; no engine construction or script
+      - [x] lazy process isolation ensures no engine construction or script
         directory scan on GUI startup
       - [ ] bounded compiled-AST cache keyed by source fingerprint, API version,
         and capability profile
@@ -558,9 +561,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       - [ ] source loading and runtime authority are separate: selecting a file
         never grants filesystem, process, or terminal-write access
     - Capability profiles
-      - [ ] `pure`: JSON, bounded computation, arguments, and stdout
-      - [ ] `observe`: `pure` plus tab tree/list, active tab, pane capture,
-        settings read, workspace info, and status snapshots
+      - [~] `pure`: JSON, bounded computation, arguments, and stdout are
+        shipped; parent hard limits and full adversarial coverage remain
+      - [~] `observe`: one immutable UI snapshot is shipped; typed tab, pane,
+        settings, workspace, status, and journal broker calls remain
       - [ ] `control`: `observe` plus create/select/rename/reparent/close,
         composer operations, send keys/mouse, and deterministic waits
       - [ ] separately scoped `fs.read`, `fs.write`, `env.read`, and
@@ -578,7 +582,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
         `close_tab()`, and bounded `wait_*()`
       - [ ] status providers return structured segments; the status bar owns
         layout, refresh, truncation, and error presentation
-      - [ ] API catalog and version are discoverable without script execution
+      - [~] API catalog and version are discoverable without script execution;
+        exact typed signatures, errors, hard ceilings, and availability remain
     - Resource and security envelope
       - [ ] cap source bytes, operations, call depth, collection sizes, output,
         wall-clock duration, and concurrent invocations
@@ -591,16 +596,16 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
         class, and denial reason without recording content or secrets
     - Future safe-scripting sidecar contract
       - Process boundary
-        - [ ] one fresh worker process executes one `run`, `eval`, or `check`
-          invocation; the first delivery has no persistent daemon, background handler,
-          module resolver, or cross-invocation mutable state
+        - [x] one fresh worker process executes one `run`, `eval`, or `check`
+          invocation; the first delivery has no persistent daemon, background
+          handler, module resolver, or cross-invocation mutable state
         - [ ] the launcher places the worker in a kill-on-close Windows Job
           Object and owns its deadline, cancellation, stdout, stderr, and final
           exit status; a crashed or killed worker cannot affect the GUI server
-        - [ ] a versioned invocation envelope and result envelope travel over
+        - [x] a versioned invocation envelope and result envelope travel over
           inherited anonymous pipes; source text, arguments, capabilities, and
           secrets are not placed in the process command line
-        - [ ] the worker never connects to GUI IPC directly. A host broker
+        - [x] the worker never connects to GUI IPC directly. A host broker
           validates the profile and supplies only immutable typed inputs over
           the invocation channel
       - Initial profiles
@@ -623,12 +628,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
           returns script stdout separately from diagnostics
         - [x] `script eval EXPRESSION` evaluates one explicit expression under
           the selected profile without loading user modules
-        - [x] `script check FILE.rhai` parses and validates API names,
-          capability requirements, and static limits without executing code or
-          contacting a live AgenTerm server
-        - [x] `script api --json` reports host API/schema versions, profiles,
-          functions, typed parameters/results/errors, limits, and availability
-          without starting a Rhai engine or AgenTerm GUI
+        - [~] `script check FILE.rhai` parses Rhai without execution or a live
+          server; API-name, profile/capability, version, and static-limit
+          validation remain v0.1.6
+        - [~] `script api --json` reports API/schema versions, profiles, basic
+          variables, operations, defaults, and deferred capabilities without
+          starting a GUI; exact functions, typed parameters/results/errors,
+          hard ceilings, and availability remain v0.1.6
         - [ ] every command accepts an explicit profile and bounded overrides;
           unknown API versions, profiles, capabilities, or options fail closed
           with stable documented exit codes
@@ -664,9 +670,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
           verifies no Rhai code loads during normal GUI startup, and leaves no
           worker or temporary source behind after every result class
     - Extension surfaces
-      - [ ] phase 1 (after the Observable Fleet event core): one-shot
-        pure/observe run/eval/check and API
-        discovery under the minimum sidecar contract
+      - [x] phase 1 one-shot pure/immutable-observe run/eval/check and API
+        discovery shipped with the v0.1.5 minimum sidecar contract
       - [ ] phase 2: status providers with timeout, last-good value, and visible
         degraded state
       - [ ] phase 3: named commands callable by people, agents, and IPC
@@ -1118,6 +1123,40 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
           follow-up gates above; bounded terminal paste shipped through the
           focus-aware window system menu
     - [ ] v0.1.6 Observable & Adaptable Workspace
+      - Frozen implementation defaults
+        - [ ] Settings uses `Dark`/`Light` labels with stable `dark|light` IDs,
+          live preview, atomic Apply, and Cancel/Esc rollback; dark remains the
+          migration default and custom theme files remain unfrozen
+        - [ ] Terminal `Ctrl+Down` focuses Composer and Composer `Ctrl+Up`
+          returns to Terminal; source-inapplicable directions pass through.
+          Terminal `Ctrl+Left` shows/focuses Tabs when hidden and Tabs
+          `Ctrl+Right` returns to Terminal, but no native Edit control loses
+          standard Ctrl+Arrow word navigation
+        - [ ] Tabs recovery appears in the status bar only while hidden; system
+          menu recovery is always available. Width defaults to 250 px, clamps
+          around 180..480 px while retaining a usable terminal, double-click
+          resets it, and visibility plus configured width persist
+        - [ ] the status bar orders host segments as hidden-Tabs recovery,
+          last-known CWD, flexible provider space, and right-aligned Proxy.
+          CWD/proxy edits default to safely quoted Composer preparation;
+          immediate injection is explicit and never offered for unknown shells
+        - [ ] Proxy closed-eye reveals only on/off, open-eye reveals sanitized
+          scheme/host/port, and credential material requires a second temporary
+          reveal inside the editor; all reveal state is ephemeral and secret
+          values remain absent from persistence, snapshots, events, and audit
+        - [ ] default window close detaches by hiding the HWND and preserving
+          server/PTY state; stop-and-exit saves metadata then ends the server;
+          Cancel/Esc changes nothing. No tray icon ships in v0.1.6
+        - [ ] Script Platform v2 completes supervised pure/typed-observe only;
+          Rhai control remains a post-core candidate and named script/module
+          loading, Bash runtime, and MCP binaries remain outside the release
+        - [ ] `agenterm-cli ui-action` remains the compatibility entry while
+          operations gain stable typed IDs internally; new top-level aliases
+          are added only when they improve human discovery without duplicating
+          semantics
+        - [ ] all release-core branches must pass before any candidate lane is
+          selected; the recommended first candidate is bounded transcript
+          capture, not simultaneous scope expansion across all candidates
       - Release core: Settings and built-in themes
         - [ ] redesign Settings as a keyboard-accessible draft dialog with
           Appearance and Terminal sections plus explicit Apply and Cancel;
