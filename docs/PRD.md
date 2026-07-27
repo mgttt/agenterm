@@ -460,15 +460,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - Contract
       - [x] assign a new server `epoch` on every workspace-authority start so a
         consumer can distinguish restart from an in-process event gap
-      - [~] assign one strictly increasing `sequence` within an epoch after
-        each committed observable state transition; tab create/select are wired
+      - [x] assign one strictly increasing `sequence` within an epoch after
+        each committed observable state transition in the minimum event schema
       - [x] expose a bounded in-memory event journal whose envelopes contain
         schema version, epoch, sequence, event kind, stable tab ID when
         applicable, and a minimal typed payload
-      - [~] cover only tab create/close/select/rename/note/parent/state,
+      - [x] cover only tab create/close/select/rename/note/parent/state,
         composer-draft/submit state, terminal output advancement, viewport, and
-        workspace save/shutdown events in the first schema; create/select ship
-        first
+        workspace save/shutdown events in the first schema
       - [x] snapshot responses include the current epoch and sequence so clients
         can atomically establish a baseline before following the journal
     - Read and wait slice
@@ -479,7 +478,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
         small allowlisted predicate set and deadline; cancellation or timeout
         cannot block the GUI thread
       - [x] bounded event reads and waits follow a snapshot epoch and sequence
-      - [~] journal mutation happens only after the corresponding state change
+      - [x] journal mutation happens only after the corresponding state change
         commits; wired event kinds are snapshot-verifiable
       - [~] black-box tests prove read/wait ordering, timeout, and
         snapshot-to-follow handoff; restart, gap, and concurrent-reader

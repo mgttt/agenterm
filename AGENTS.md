@@ -11,11 +11,14 @@ the information cannot live here or in the PRD.
 - `src/bin/agenterm.rs` — Windows-subsystem GUI entry point.
 - `src/bin/agentermctl.rs` — console-subsystem CLI entry point.
 - `src/bin/agenterm-mux.rs` — tmux/RMUX compatibility CLI entry point.
+- `src/bin/agenterm-script.rs` — one-invocation constrained Rhai worker.
 - `src/commands.rs` — reusable CLI parsing, command catalog, key mapping, and
   output-path helpers.
+- `src/event_journal.rs` — bounded observable-event ordering and gap detection.
 - `src/instances.rs` — multi-server registration and discovery records.
 - `src/protocol.rs` — serialized local IPC request/response contract.
 - `src/rmux_status.rs` — RMUX status-line window parsing and click ranges.
+- `src/script_protocol.rs` — versioned host/worker scripting contract.
 - `src/settings.rs` — persistent user settings.
 - `src/tab_tree.rs` — pure hierarchy ordering and cycle detection.
 - `src/workspace.rs` — versioned tab-workspace persistence.
