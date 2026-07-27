@@ -1118,6 +1118,36 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
           follow-up gates above; bounded terminal paste shipped through the
           focus-aware window system menu
     - [ ] v0.1.6 Observable & Adaptable Workspace
+      - Release core: Settings and built-in themes
+        - [ ] redesign Settings as a keyboard-accessible draft dialog with
+          Appearance and Terminal sections plus explicit Apply and Cancel;
+          theme selection previews the complete window, Apply atomically saves,
+          and Cancel/Esc restores the configuration from dialog open
+        - [ ] ship stable built-in `dark` and `light` theme IDs, preserving dark
+          as the migration default; themes own host surfaces, controls, terminal
+          defaults, selection, scrollbar, and basic ANSI 16 colors while
+          explicit RGB and the standard 256-color cube retain their values
+        - [ ] use an internal theme registry and persist only `color_theme` so
+          later custom save/load/import can extend the model without freezing a
+          premature external theme-file contract in v0.1.6
+        - [ ] expose theme ID through settings and snapshots; public UX evidence
+          covers preview, Apply, Cancel/Esc rollback, restart persistence, PTY
+          continuity, Dark/Light screenshots, and readable focus/contrast
+      - Release core: keyboard-first surface navigation
+        - [ ] directionally map Terminal `Ctrl+Down` to Composer and Composer
+          `Ctrl+Up` to Terminal while retaining `Ctrl+Up` in the PTY,
+          `Ctrl+Down` in native Edit, existing `Ctrl+Shift+I`, and Esc
+        - [ ] fire surface navigation once per physical press and suppress
+          auto-repeat crossing into the newly focused surface; modal focus traps
+          and unavailable surfaces fail safely
+        - [ ] after real cmd, PowerShell, and RMUX conflict tests, consider
+          Terminal `Ctrl+Left` to Tabs and Tabs `Ctrl+Right` to Terminal;
+          native Edit/Settings controls must always retain standard
+          `Ctrl+Left/Right` word navigation, and hidden-Tabs behavior remains a
+          product decision
+        - [ ] route keyboard and semantic focus through one typed operation,
+          retain `ui-snapshot.focus.surface` as the fact source, and black-box
+          direction, pass-through, repeat, modal, and focus-indicator behavior
       - Release core: adaptive Tabs workspace
         - [ ] place a `Tabs` button immediately left of `Settings`; activating
           it collapses the complete tab tree and its controls so terminal and
