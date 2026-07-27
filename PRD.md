@@ -56,6 +56,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       "evidence_ids": ["ux.terminal-selection-copy"]
     },
     {
+      "id": "terminal.system-menu-clipboard",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "window-icon system menu exposes focus-aware Copy and Paste",
+      "evidence_ids": ["ux.system-menu-clipboard"]
+    },
+    {
       "id": "settings.path-isolation",
       "kind": "behavior",
       "status": "shipped",
@@ -235,6 +243,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       the live viewport
     - [x] dragging selects visible terminal cells and Ctrl+C copies the selected
       text; an unmodified click still reaches RMUX/native terminal mouse input
+    - [x] window-icon system menu exposes focus-aware Copy and Paste: native
+      edit controls receive their standard messages, while terminal Copy uses
+      the active cell selection and terminal Paste uses the active PTY
     - Professional interaction follow-ups informed by the reviewed PuTTY
       terminal model
       - [ ] application-requested raw mouse reporting wins by default while
@@ -243,8 +254,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
         rate and capture loss cancels the unfinished gesture cleanly
       - [ ] double-click word, triple-click line, and optional rectangular
         selection use terminal-cell rather than pixel semantics
-      - [ ] terminal paste reads the clipboard off the GUI thread, normalizes
-        newlines, filters unsafe controls, and honors bracketed-paste mode
+      - [x] terminal paste reads bounded Unicode clipboard text off the GUI
+        thread, normalizes newlines, filters unsafe controls, and honors
+        bracketed-paste mode
     - [x] dirty-frame rendering and GDI double buffering
     - [x] GUI shell appears before the initial ConPTY/cmd process is ready
     - [x] initial terminal loads asynchronously with visible starting feedback
@@ -254,6 +266,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   - Executable family
     - [x] `agenterm.exe`: Windows-subsystem GUI, PTY owner, workspace authority,
       renderer, and IPC server
+    - [x] `agenterm.exe` rejects CLI-style or invalid GUI arguments without
+      creating a window or information dialog: it writes best-effort
+      inherited-stderr guidance and exits nonzero; normal GUI startup reports
+      its PID and server address/port, then points to
+      `agenterm-cli.exe server-list` for the authoritative PID/port map and
+      `agenterm-cli.exe -h` for further commands when stderr exists; startup
+      smoke verifies new-GUI and focus-existing inherited-stderr paths
     - [x] `agenterm-cli.exe`: native AgenTerm observation and automation client;
       the pre-release `agentermctl.exe` name is removed rather than retained as
       a parallel compatibility shim
@@ -474,8 +493,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
         schema version, epoch, sequence, event kind, stable tab ID when
         applicable, and a minimal typed payload
       - [x] cover only tab create/close/select/rename/note/parent/state,
-        composer-draft/submit state, terminal output advancement, viewport, and
-        workspace save/shutdown events in the first schema
+        composer-draft/submit state, terminal output advancement, viewport,
+        terminal paste, and workspace save/shutdown events in the first schema
       - [x] snapshot responses include the current epoch and sequence so clients
         can atomically establish a baseline before following the journal
     - Read and wait slice

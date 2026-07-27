@@ -13,6 +13,7 @@ $declaredEvidence = @(
     'ux.semantic-ui-automation'
     'ux.semantic-window-control'
     'ux.settings-isolation'
+    'ux.system-menu-clipboard'
     'ux.terminal-selection-copy'
 )
 if ($ListEvidence) {
@@ -61,6 +62,7 @@ function Invoke-AgenTerm {
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
+using System.Text;
 
 public static class AgenTermNativeTest {
     [StructLayout(LayoutKind.Sequential)]
@@ -75,6 +77,13 @@ public static class AgenTermNativeTest {
     [DllImport("user32.dll")]
     private static extern IntPtr SendMessageW(
         IntPtr window, uint message, UIntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetSystemMenu(IntPtr window, bool revert);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetMenuStringW(
+        IntPtr menu, uint item, StringBuilder text, int length, uint flags);
 
     private static IntPtr PointParam(int x, int y) {
         return (IntPtr)(((y & 0xffff) << 16) | (x & 0xffff));
@@ -94,6 +103,23 @@ public static class AgenTermNativeTest {
         SendMessageW(window, 0x0201, UIntPtr.Zero, PointParam(startX, startY));
         SendMessageW(window, 0x0200, (UIntPtr)1, PointParam(endX, endY));
         SendMessageW(window, 0x0202, UIntPtr.Zero, PointParam(endX, endY));
+    }
+
+    public static string SystemMenuLabel(IntPtr window, uint command) {
+        IntPtr menu = GetSystemMenu(window, false);
+        if (menu == IntPtr.Zero) {
+            throw new InvalidOperationException("GetSystemMenu failed");
+        }
+        StringBuilder text = new StringBuilder(128);
+        if (GetMenuStringW(menu, command, text, text.Capacity, 0) <= 0) {
+            throw new InvalidOperationException(
+                "system menu command was not found: " + command);
+        }
+        return text.ToString();
+    }
+
+    public static void SystemCommand(IntPtr window, uint command) {
+        SendMessageW(window, 0x0112, (UIntPtr)command, IntPtr.Zero);
     }
 }
 '@
@@ -317,6 +343,10 @@ try {
     if ($window -eq [IntPtr]::Zero) {
         throw 'could not resolve the public AgenTerm window for mouse regression'
     }
+    if ([AgenTermNativeTest]::SystemMenuLabel($window, 0x1f00) -notlike 'Copy*' -or
+        [AgenTermNativeTest]::SystemMenuLabel($window, 0x1f10) -notlike 'Paste*') {
+        throw 'window icon system menu did not expose Copy and Paste'
+    }
     [AgenTermNativeTest]::MouseWheel(
         $window,
         [int]$snapshot.layout.terminal.x + 10,
@@ -385,12 +415,43 @@ try {
         )
     }
     Set-Clipboard -Value 'AGENTERM_CLIPBOARD_SENTINEL'
-    Invoke-AgenTerm @('ui-action', 'copy-selection') | Out-Null
+    $snapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    if (-not $snapshot.system_menu.copy.enabled -or
+        -not $snapshot.system_menu.paste.enabled) {
+        throw 'system-menu clipboard state was not enabled for terminal selection and text'
+    }
+    [AgenTermNativeTest]::SystemCommand($window, 0x1f00)
     $copied = Get-Clipboard -Raw
     if ($copied -ne $selectionToken) {
         throw "terminal selection copied unexpected text: '$copied'"
     }
     Write-Evidence 'ux.terminal-selection-copy'
+
+    Write-Host 'STEP window icon system-menu terminal paste'
+    $pasteCommand = "echo AGENTERM_SYSTEM_MENU_PASTE_$PID"
+    Set-Clipboard -Value $pasteCommand
+    [AgenTermNativeTest]::SystemCommand($window, 0x1f10)
+    try {
+        Invoke-AgenTerm @(
+            'wait-pane', '-t', $id, '--contains', $pasteCommand, '--timeout-ms', '5000'
+        ) | Out-Null
+    }
+    catch {
+        $pasteFailureSnapshot = Invoke-AgenTerm @('ui-snapshot')
+        $pasteFailureCapture = Invoke-AgenTerm @('capture-pane', '-p', '-t', $id)
+        throw (
+            "$($_.Exception.Message)`nPaste failure snapshot:`n$pasteFailureSnapshot" +
+            "`nPaste failure capture:`n$pasteFailureCapture"
+        )
+    }
+    $snapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $tab = $snapshot.tabs | Where-Object id -eq $id
+    if ($null -ne $tab.selection -or
+        $snapshot.feedback.message -notmatch '^Pasted \d+ characters into @\d+$') {
+        throw 'system-menu paste did not clear selection and report terminal delivery'
+    }
+    Invoke-AgenTerm @('send-keys', '-t', $id, 'Enter') | Out-Null
+    Write-Evidence 'ux.system-menu-clipboard'
 
     Write-Host 'STEP live close requires confirmation and cancel is safe'
     $snapshot = Invoke-AgenTerm @('ui-action', 'close-tab', '-t', $id) | ConvertFrom-Json

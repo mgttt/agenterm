@@ -30,26 +30,30 @@ use windows_sys::Win32::{
         SetBkMode, SetTextColor, TEXTMETRICW, TRANSPARENT, UpdateWindow,
     },
     System::{
-        DataExchange::{CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData},
+        DataExchange::{
+            CloseClipboard, EmptyClipboard, GetClipboardData, IsClipboardFormatAvailable,
+            OpenClipboard, SetClipboardData,
+        },
         LibraryLoader::GetModuleHandleW,
-        Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock},
+        Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock},
     },
-    UI::Controls::EM_SETSEL,
+    UI::Controls::{EM_GETSEL, EM_SETSEL},
     UI::Input::KeyboardAndMouse::{GetFocus, GetKeyState, ReleaseCapture, SetCapture, SetFocus},
     UI::Shell::ShellExecuteW,
     UI::WindowsAndMessaging::{
         CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreateWindowExW, DefWindowProcW,
         DestroyWindow, DispatchMessageW, ES_AUTOVSCROLL, ES_MULTILINE, ES_WANTRETURN,
-        GWLP_USERDATA, GetClientRect, GetMessageW, GetWindowLongPtrW, GetWindowRect,
-        GetWindowTextLengthW, GetWindowTextW, IDC_ARROW, IsIconic, IsZoomed, LoadCursorW,
-        LoadIconW, MB_ICONERROR, MB_OK, MSG, MessageBoxW, MoveWindow, PostMessageW,
-        PostQuitMessage, RegisterClassW, SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW,
-        SW_SHOWNORMAL, SendMessageW, SetForegroundWindow, SetTimer, SetWindowLongPtrW,
+        EnableMenuItem, GWLP_USERDATA, GetClientRect, GetMessageW, GetSystemMenu,
+        GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW, IDC_ARROW,
+        InsertMenuW, IsIconic, IsZoomed, LoadCursorW, LoadIconW, MB_ICONERROR, MB_OK, MF_BYCOMMAND,
+        MF_ENABLED, MF_GRAYED, MF_SEPARATOR, MF_STRING, MSG, MessageBoxW, MoveWindow, PostMessageW,
+        PostQuitMessage, RegisterClassW, SC_CLOSE, SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE,
+        SW_SHOW, SW_SHOWNORMAL, SendMessageW, SetForegroundWindow, SetTimer, SetWindowLongPtrW,
         SetWindowTextW, ShowWindow, TranslateMessage, WM_APP, WM_CHAR, WM_CLOSE, WM_COMMAND,
-        WM_COPY, WM_CREATE, WM_CUT, WM_DESTROY, WM_ERASEBKGND, WM_KEYDOWN, WM_LBUTTONDOWN,
-        WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY, WM_PAINT, WM_PASTE,
-        WM_RBUTTONDOWN, WM_SETFOCUS, WM_SIZE, WM_TIMER, WNDCLASSW, WS_BORDER, WS_CHILD,
-        WS_CLIPCHILDREN, WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE,
+        WM_COPY, WM_CREATE, WM_CUT, WM_DESTROY, WM_ERASEBKGND, WM_INITMENUPOPUP, WM_KEYDOWN,
+        WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY, WM_PAINT,
+        WM_PASTE, WM_RBUTTONDOWN, WM_SETFOCUS, WM_SIZE, WM_SYSCOMMAND, WM_TIMER, WNDCLASSW,
+        WS_BORDER, WS_CHILD, WS_CLIPCHILDREN, WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE,
     },
 };
 
@@ -106,6 +110,10 @@ const SETTINGS_APPLY_ID: usize = 1006;
 const NEW_BUTTON_ID: usize = 1007;
 const TIMER_ID: usize = 1;
 const WM_APP_WAKE: u32 = WM_APP + 1;
+const SYSTEM_MENU_COPY_ID: usize = 0x1f00;
+const SYSTEM_MENU_PASTE_ID: usize = 0x1f10;
+const CLIPBOARD_UNICODE_TEXT: u32 = 13;
+const TERMINAL_PASTE_LIMIT_BYTES: usize = 256 * 1024;
 const IPC_TIMEOUT: Duration = Duration::from_secs(5);
 const IPC_DISCOVERY_TIMEOUT: Duration = Duration::from_millis(500);
 const IPC_AUTOSTART_TIMEOUT: Duration = Duration::from_secs(15);
@@ -149,45 +157,98 @@ struct IpcEnvelope {
     respond_to: Sender<IpcResponse>,
 }
 
-pub fn run_gui_entry() {
-    if let Err(error) = configure_gui_address() {
-        show_startup_error(&error);
-        return;
+pub fn run_gui_entry() -> i32 {
+    let arguments = env::args().skip(1).collect::<Vec<_>>();
+    if arguments
+        .first()
+        .is_some_and(|argument| argument != "--address")
+    {
+        write_best_effort_stderr(&gui_cli_guidance(&arguments));
+        return 2;
+    }
+    if let Err(error) = configure_gui_address(&arguments) {
+        write_best_effort_stderr(&format!(
+            "AgenTerm GUI argument error: {error:#}\n\
+             No GUI server was started by this invocation.\n\
+             More CLI commands: agenterm-cli.exe -h"
+        ));
+        return 2;
     }
     if env::var_os("AGENTERM_SERVER").is_none()
         && send_ipc_request(vec!["__focus".to_owned()]).is_ok()
     {
-        return;
+        write_best_effort_stderr(&format!(
+            "Focused the existing AgenTerm GUI server at {}.\n\
+             List server PID and port: agenterm-cli.exe server-list\n\
+             More CLI commands: agenterm-cli.exe -h",
+            ipc_address()
+        ));
+        return 0;
     }
 
     if let Err(error) = run_gui() {
         show_startup_error(&error);
+        return 1;
     }
+    0
 }
 
-fn configure_gui_address() -> Result<()> {
-    let mut arguments = env::args().skip(1);
-    let Some(argument) = arguments.next() else {
+fn configure_gui_address(arguments: &[String]) -> Result<()> {
+    let Some(argument) = arguments.first() else {
         return Ok(());
     };
     if argument != "--address" {
         anyhow::bail!("unsupported AgenTerm GUI argument: {argument}");
     }
     let address = arguments
-        .next()
+        .get(1)
         .context("agenterm.exe --address requires HOST:PORT")?;
-    if arguments.next().is_some() {
+    if arguments.len() != 2 {
         anyhow::bail!("agenterm.exe accepts only --address HOST:PORT");
     }
-    parse_loopback_ipc_address(&address)?;
+    parse_loopback_ipc_address(address)?;
     IPC_ADDRESS_OVERRIDE.with(|override_address| {
-        *override_address.borrow_mut() = Some(address);
+        *override_address.borrow_mut() = Some(address.clone());
     });
     Ok(())
 }
 
+fn quote_argument_for_display(argument: &str) -> String {
+    if argument.is_empty() || argument.chars().any(char::is_whitespace) {
+        format!("\"{}\"", argument.replace('"', "\\\""))
+    } else {
+        argument.to_owned()
+    }
+}
+
+fn gui_cli_guidance(arguments: &[String]) -> String {
+    let forwarded = arguments
+        .iter()
+        .map(|argument| quote_argument_for_display(argument))
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!(
+        "AgenTerm GUI entry point\n\n\
+         No CLI command was executed and no GUI server was started by this invocation.\n\n\
+         Use instead:\nagenterm-cli.exe {forwarded}\n\n\
+         Launcher PID: {}\nConfigured server address: {}\n\n\
+         List running server PID and port: agenterm-cli.exe server-list\n\
+         More CLI commands: agenterm-cli.exe -h",
+        std::process::id(),
+        ipc_address()
+    )
+}
+
+fn write_best_effort_stderr(message: &str) {
+    let mut stderr = std::io::stderr().lock();
+    let _ = stderr.write_all(message.as_bytes());
+    let _ = stderr.write_all(b"\n");
+    let _ = stderr.flush();
+}
+
 fn show_startup_error(error: &anyhow::Error) {
-    let message = wide(&format!("AgenTerm failed to start:\n\n{error:#}"));
+    let text = format!("AgenTerm failed to start:\n\n{error:#}");
+    let message = wide(&text);
     unsafe {
         MessageBoxW(
             ptr::null_mut(),
@@ -196,7 +257,7 @@ fn show_startup_error(error: &anyhow::Error) {
             MB_OK | MB_ICONERROR,
         );
     }
-    eprintln!("{error:#}");
+    write_best_effort_stderr(&text);
 }
 
 pub fn run_cli_entry() -> i32 {
@@ -398,6 +459,7 @@ fn run_gui() -> Result<()> {
     if window.is_null() {
         anyhow::bail!("CreateWindowExW failed");
     }
+    install_system_clipboard_menu(window)?;
 
     let edit = unsafe {
         CreateWindowExW(
@@ -519,6 +581,16 @@ fn run_gui() -> Result<()> {
         state.layout();
         state.load_active_composer();
     }
+    write_best_effort_stderr(&format!(
+        "AgenTerm GUI ready.\n\
+         GUI PID: {}\n\
+         Server address: {} (port {})\n\
+         List server PID and port: agenterm-cli.exe server-list\n\
+         More CLI commands: agenterm-cli.exe -h",
+        std::process::id(),
+        address,
+        socket.port()
+    ));
 
     unsafe {
         ShowWindow(window, SW_SHOW);
@@ -537,6 +609,36 @@ fn run_gui() -> Result<()> {
             TranslateMessage(&message);
             DispatchMessageW(&message);
         }
+    }
+    Ok(())
+}
+
+fn install_system_clipboard_menu(window: HWND) -> Result<()> {
+    let menu = unsafe { GetSystemMenu(window, 0) };
+    if menu.is_null() {
+        anyhow::bail!("GetSystemMenu failed");
+    }
+    if unsafe {
+        InsertMenuW(
+            menu,
+            SC_CLOSE,
+            MF_BYCOMMAND | MF_STRING,
+            SYSTEM_MENU_COPY_ID,
+            wide("Copy\tCtrl+C").as_ptr(),
+        )
+    } == 0
+        || unsafe {
+            InsertMenuW(
+                menu,
+                SC_CLOSE,
+                MF_BYCOMMAND | MF_STRING,
+                SYSTEM_MENU_PASTE_ID,
+                wide("Paste\tCtrl+V").as_ptr(),
+            )
+        } == 0
+        || unsafe { InsertMenuW(menu, SC_CLOSE, MF_BYCOMMAND | MF_SEPARATOR, 0, ptr::null()) } == 0
+    {
+        anyhow::bail!("could not add Copy and Paste to the window system menu");
     }
     Ok(())
 }
@@ -681,6 +783,27 @@ unsafe extern "system" fn window_proc(
             }
             0
         }
+        WM_INITMENUPOPUP => {
+            if let Some(state) = state_mut(window) {
+                state.refresh_system_clipboard_menu();
+            }
+            unsafe { DefWindowProcW(window, message, wparam, lparam) }
+        }
+        WM_SYSCOMMAND => match wparam & 0xfff0 {
+            SYSTEM_MENU_COPY_ID => {
+                if let Some(state) = state_mut(window) {
+                    state.system_menu_copy();
+                }
+                0
+            }
+            SYSTEM_MENU_PASTE_ID => {
+                if let Some(state) = state_mut(window) {
+                    state.system_menu_paste();
+                }
+                0
+            }
+            _ => unsafe { DefWindowProcW(window, message, wparam, lparam) },
+        },
         WM_SETFOCUS => 0,
         WM_ERASEBKGND => 1,
         WM_CLOSE => {
@@ -1204,8 +1327,6 @@ fn terminal_selection_text(screen: &vt100::Screen, selection: TerminalSelection)
 }
 
 fn set_clipboard_text(window: HWND, text: &str) -> Result<()> {
-    const CF_UNICODETEXT: u32 = 13;
-
     if unsafe { OpenClipboard(window) } == 0 {
         anyhow::bail!("could not open the Windows clipboard");
     }
@@ -1235,7 +1356,7 @@ fn set_clipboard_text(window: HWND, text: &str) -> Result<()> {
         ptr::copy_nonoverlapping(encoded.as_ptr(), destination, encoded.len());
         GlobalUnlock(allocation);
     }
-    if unsafe { SetClipboardData(CF_UNICODETEXT, allocation) }.is_null() {
+    if unsafe { SetClipboardData(CLIPBOARD_UNICODE_TEXT, allocation) }.is_null() {
         unsafe {
             GlobalFree(allocation);
             CloseClipboard();
@@ -1244,6 +1365,82 @@ fn set_clipboard_text(window: HWND, text: &str) -> Result<()> {
     }
     unsafe { CloseClipboard() };
     Ok(())
+}
+
+fn clipboard_has_unicode_text() -> bool {
+    (unsafe { IsClipboardFormatAvailable(CLIPBOARD_UNICODE_TEXT) }) != 0
+}
+
+fn read_clipboard_text() -> Result<String> {
+    let deadline = Instant::now() + Duration::from_millis(500);
+    loop {
+        if unsafe { OpenClipboard(ptr::null_mut()) } != 0 {
+            break;
+        }
+        if Instant::now() >= deadline {
+            anyhow::bail!("could not open the Windows clipboard within 500 ms");
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    let result = (|| {
+        if !clipboard_has_unicode_text() {
+            anyhow::bail!("the clipboard does not contain Unicode text");
+        }
+        let allocation = unsafe { GetClipboardData(CLIPBOARD_UNICODE_TEXT) };
+        if allocation.is_null() {
+            anyhow::bail!("could not read Unicode clipboard data");
+        }
+        let allocation_size = unsafe { GlobalSize(allocation) };
+        if allocation_size == 0 {
+            anyhow::bail!("Unicode clipboard data has no readable allocation");
+        }
+        if allocation_size > (TERMINAL_PASTE_LIMIT_BYTES + 1) * mem::size_of::<u16>() {
+            anyhow::bail!(
+                "clipboard text exceeds the {TERMINAL_PASTE_LIMIT_BYTES} byte terminal paste limit"
+            );
+        }
+        let source = unsafe { GlobalLock(allocation) } as *const u16;
+        if source.is_null() {
+            anyhow::bail!("could not lock Unicode clipboard data");
+        }
+        let units =
+            unsafe { std::slice::from_raw_parts(source, allocation_size / mem::size_of::<u16>()) };
+        let length = units
+            .iter()
+            .position(|unit| *unit == 0)
+            .unwrap_or(units.len());
+        let decoded = String::from_utf16(&units[..length])
+            .context("Unicode clipboard data is not valid UTF-16");
+        unsafe { GlobalUnlock(allocation) };
+        decoded
+    })();
+    unsafe { CloseClipboard() };
+    result
+}
+
+fn normalize_terminal_paste(text: &str) -> String {
+    let mut normalized = String::with_capacity(text.len());
+    let mut characters = text.chars().peekable();
+    while let Some(character) = characters.next() {
+        match character {
+            '\r' => {
+                if characters.peek() == Some(&'\n') {
+                    characters.next();
+                }
+                normalized.push('\r');
+            }
+            '\n' => normalized.push('\r'),
+            '\t' => normalized.push('\t'),
+            value if !value.is_control() => normalized.push(value),
+            _ => {}
+        }
+    }
+    normalized
+}
+
+struct ClipboardPaste {
+    tab_id: u64,
+    result: std::result::Result<String, String>,
 }
 
 struct AppState {
@@ -1263,6 +1460,8 @@ struct AppState {
     started_at: SystemTime,
     event_journal: EventJournal,
     ipc_receiver: Receiver<IpcEnvelope>,
+    clipboard_sender: Sender<ClipboardPaste>,
+    clipboard_receiver: Receiver<ClipboardPaste>,
     startup_tab_receiver: Receiver<std::result::Result<TerminalTab, String>>,
     startup_tab_pending: bool,
     startup_tabs_remaining: usize,
@@ -1286,6 +1485,7 @@ impl AppState {
     fn new(window: HWND, controls: NativeControls) -> Result<Self> {
         let ipc_receiver = start_ipc_server(window)?;
         let (startup_tab_sender, startup_tab_receiver) = mpsc::channel();
+        let (clipboard_sender, clipboard_receiver) = mpsc::channel();
         let config = load_config();
         let restored = load_workspace();
         let (session_name, active_id, collapsed_tabs, saved_tabs) =
@@ -1336,6 +1536,8 @@ impl AppState {
             started_at: SystemTime::now(),
             event_journal: EventJournal::new(),
             ipc_receiver,
+            clipboard_sender,
+            clipboard_receiver,
             startup_tab_receiver,
             startup_tab_pending: startup_tabs_remaining > 0,
             startup_tabs_remaining,
@@ -1713,6 +1915,10 @@ impl AppState {
                 self.active = Some(tab.id);
                 self.load_active_composer();
             }
+        }
+        let clipboard_pastes: Vec<ClipboardPaste> = self.clipboard_receiver.try_iter().collect();
+        for paste in clipboard_pastes {
+            changed |= self.apply_terminal_paste(paste);
         }
         let mut polled_events = Vec::new();
         for tab in &mut self.tabs {
@@ -2185,6 +2391,187 @@ impl AppState {
                 }
             }
         }
+    }
+
+    fn is_edit_control(&self, window: HWND) -> bool {
+        window == self.edit || window == self.settings_font || window == self.settings_size
+    }
+
+    fn edit_has_selection(&self, window: HWND) -> bool {
+        let mut start = 0_u32;
+        let mut end = 0_u32;
+        unsafe {
+            SendMessageW(
+                window,
+                EM_GETSEL,
+                (&mut start as *mut u32) as usize,
+                (&mut end as *mut u32) as isize,
+            );
+        }
+        start != end
+    }
+
+    fn system_clipboard_menu_state(&self) -> (bool, bool) {
+        let focused = unsafe { GetFocus() };
+        if self.is_edit_control(focused) {
+            return (
+                self.edit_has_selection(focused),
+                clipboard_has_unicode_text(),
+            );
+        }
+        let terminal_active = focused == self.window
+            && self
+                .active_position()
+                .is_some_and(|position| self.tabs[position].exited.is_none());
+        let copy_enabled = terminal_active
+            && self
+                .terminal_selection
+                .is_some_and(|selection| self.active == Some(selection.tab_id));
+        let paste_enabled = terminal_active
+            && self.pending_close.is_none()
+            && !self.settings_open
+            && clipboard_has_unicode_text();
+        (copy_enabled, paste_enabled)
+    }
+
+    fn refresh_system_clipboard_menu(&self) {
+        let menu = unsafe { GetSystemMenu(self.window, 0) };
+        if menu.is_null() {
+            return;
+        }
+        let (copy_enabled, paste_enabled) = self.system_clipboard_menu_state();
+        unsafe {
+            EnableMenuItem(
+                menu,
+                SYSTEM_MENU_COPY_ID as u32,
+                MF_BYCOMMAND | if copy_enabled { MF_ENABLED } else { MF_GRAYED },
+            );
+            EnableMenuItem(
+                menu,
+                SYSTEM_MENU_PASTE_ID as u32,
+                MF_BYCOMMAND | if paste_enabled { MF_ENABLED } else { MF_GRAYED },
+            );
+        }
+    }
+
+    fn system_menu_copy(&mut self) {
+        let focused = unsafe { GetFocus() };
+        if self.is_edit_control(focused) {
+            if self.edit_has_selection(focused) {
+                self.dispatch_edit_shortcut(EditShortcut::Copy, focused);
+                self.feedback = Some("Copied selected editor text".to_owned());
+                self.last_error = None;
+            }
+        } else if let Err(error) = self.copy_terminal_selection() {
+            self.last_error = Some(format!("system menu copy failed: {error:#}"));
+        }
+        unsafe { InvalidateRect(self.window, ptr::null(), 0) };
+    }
+
+    fn system_menu_paste(&mut self) {
+        let focused = unsafe { GetFocus() };
+        if self.is_edit_control(focused) {
+            self.dispatch_edit_shortcut(EditShortcut::Paste, focused);
+            self.feedback = Some("Pasted clipboard text into editor".to_owned());
+            self.last_error = None;
+            unsafe { InvalidateRect(self.window, ptr::null(), 0) };
+            return;
+        }
+        let Some(position) = self.active_position() else {
+            self.last_error = Some("system menu paste failed: no active terminal".to_owned());
+            return;
+        };
+        if focused != self.window || self.tabs[position].exited.is_some() {
+            self.last_error =
+                Some("system menu paste failed: focus is not in a running terminal".to_owned());
+            unsafe { InvalidateRect(self.window, ptr::null(), 0) };
+            return;
+        }
+        if self.tabs[position].pending_submit_at.is_some() {
+            self.last_error =
+                Some("system menu paste failed: composer submission is pending".to_owned());
+            unsafe { InvalidateRect(self.window, ptr::null(), 0) };
+            return;
+        }
+        let tab_id = self.tabs[position].id;
+        let sender = self.clipboard_sender.clone();
+        let wake_window = self.window as isize;
+        self.feedback = Some(format!("Reading clipboard for @{tab_id}"));
+        self.last_error = None;
+        thread::spawn(move || {
+            let result = read_clipboard_text()
+                .map(|text| normalize_terminal_paste(&text))
+                .and_then(|text| {
+                    if text.is_empty() {
+                        anyhow::bail!("clipboard text contains no pasteable characters");
+                    }
+                    if text.len() > TERMINAL_PASTE_LIMIT_BYTES {
+                        anyhow::bail!(
+                            "normalized clipboard text exceeds the \
+                             {TERMINAL_PASTE_LIMIT_BYTES} byte terminal paste limit"
+                        );
+                    }
+                    Ok(text)
+                })
+                .map_err(|error| format!("{error:#}"));
+            let _ = sender.send(ClipboardPaste { tab_id, result });
+            unsafe {
+                PostMessageW(wake_window as HWND, WM_APP_WAKE, 0, 0);
+            }
+        });
+        unsafe { InvalidateRect(self.window, ptr::null(), 0) };
+    }
+
+    fn apply_terminal_paste(&mut self, paste: ClipboardPaste) -> bool {
+        let text = match paste.result {
+            Ok(text) => text,
+            Err(error) => {
+                self.last_error = Some(format!("system menu paste failed: {error}"));
+                return true;
+            }
+        };
+        let Some(position) = self.tabs.iter().position(|tab| tab.id == paste.tab_id) else {
+            self.last_error =
+                Some("system menu paste canceled: target terminal was closed".to_owned());
+            return true;
+        };
+        if self.active != Some(paste.tab_id) || unsafe { GetFocus() } != self.window {
+            self.last_error =
+                Some("system menu paste canceled because terminal focus changed".to_owned());
+            return true;
+        }
+        let bracketed = self.tabs[position].parser.screen().bracketed_paste();
+        let mut bytes = Vec::with_capacity(text.len() + if bracketed { 12 } else { 0 });
+        if bracketed {
+            bytes.extend_from_slice(b"\x1b[200~");
+        }
+        bytes.extend_from_slice(text.as_bytes());
+        if bracketed {
+            bytes.extend_from_slice(b"\x1b[201~");
+        }
+        if !self.tabs[position].send(&bytes) {
+            self.last_error =
+                Some("system menu paste failed: terminal input was rejected".to_owned());
+            return true;
+        }
+        self.terminal_selection = None;
+        let characters = text.chars().count();
+        self.event_journal.commit(
+            "terminal.pasted",
+            Some(paste.tab_id),
+            serde_json::json!({
+                "characters": characters,
+                "bytes": text.len(),
+                "bracketed": bracketed,
+                "source": "system-menu",
+            }),
+        );
+        self.feedback = Some(format!(
+            "Pasted {characters} characters into @{}",
+            paste.tab_id
+        ));
+        self.last_error = None;
+        true
     }
 
     fn copy_terminal_selection(&mut self) -> Result<usize> {
@@ -3512,6 +3899,7 @@ impl AppState {
             .and_then(|position| self.tabs.get(position))
             .map(|tab| tab.last_size)
             .unwrap_or((0, 0));
+        let (system_copy_enabled, system_paste_enabled) = self.system_clipboard_menu_state();
         let event_position = self.event_journal.position();
         serde_json::to_string_pretty(&serde_json::json!({
             "protocol_version": 1,
@@ -3569,6 +3957,18 @@ impl AppState {
             "focus": {
                 "surface": self.focus_surface(),
                 "window_id": self.active.map(|id| format!("@{id}")),
+            },
+            "system_menu": {
+                "copy": {
+                    "id": SYSTEM_MENU_COPY_ID,
+                    "label": "Copy",
+                    "enabled": system_copy_enabled,
+                },
+                "paste": {
+                    "id": SYSTEM_MENU_PASTE_ID,
+                    "label": "Paste",
+                    "enabled": system_paste_enabled,
+                },
             },
             "tabs": tabs,
             "modal": if self.settings_open {
@@ -6110,8 +6510,9 @@ fn save_window_png(window: HWND, path: &std::path::Path, pane_only: bool) -> Res
 #[cfg(test)]
 mod tests {
     use super::{
-        EditShortcut, TerminalPoint, TerminalSelection, edit_shortcut, parse_loopback_ipc_address,
-        terminal_copy_shortcut, terminal_selection_text,
+        EditShortcut, TerminalPoint, TerminalSelection, edit_shortcut, gui_cli_guidance,
+        normalize_terminal_paste, parse_loopback_ipc_address, terminal_copy_shortcut,
+        terminal_selection_text,
     };
 
     #[test]
@@ -6180,5 +6581,30 @@ mod tests {
         assert!(!terminal_copy_shortcut(true, b'C' as u32, true, false));
         assert!(!terminal_copy_shortcut(true, b'C' as u32, false, true));
         assert!(!terminal_copy_shortcut(true, b'V' as u32, true, true));
+    }
+
+    #[test]
+    fn terminal_paste_normalizes_lines_and_filters_unsafe_controls() {
+        assert_eq!(
+            normalize_terminal_paste("one\r\ntwo\nthree\rfour\t\u{1b}[31m\0"),
+            "one\rtwo\rthree\rfour\t[31m"
+        );
+    }
+
+    #[test]
+    fn gui_cli_guidance_preserves_arguments_and_names_the_real_cli() {
+        let guidance = gui_cli_guidance(&[
+            "list-windows".to_owned(),
+            "-F".to_owned(),
+            "#{window_id} #{window_name}".to_owned(),
+        ]);
+        assert!(guidance.contains("No CLI command was executed"));
+        assert!(
+            guidance.contains("agenterm-cli.exe list-windows -F \"#{window_id} #{window_name}\"")
+        );
+        assert!(guidance.contains("Launcher PID:"));
+        assert!(guidance.contains("Configured server address:"));
+        assert!(guidance.contains("agenterm-cli.exe server-list"));
+        assert!(guidance.contains("agenterm-cli.exe -h"));
     }
 }
