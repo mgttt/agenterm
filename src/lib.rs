@@ -179,15 +179,10 @@ pub fn run_gui_entry() -> i32 {
         ));
         return 2;
     }
+    write_best_effort_stderr(&gui_console_summary(&ipc_address()));
     if env::var_os("AGENTERM_SERVER").is_none()
         && send_ipc_request(vec!["__focus".to_owned()]).is_ok()
     {
-        write_best_effort_stderr(&format!(
-            "Focused the existing AgenTerm GUI server at {}.\n\
-             List server PID and port: agenterm-cli.exe server-list\n\
-             More CLI commands: agenterm-cli.exe -h",
-            ipc_address()
-        ));
         return 0;
     }
 
@@ -241,6 +236,16 @@ fn gui_cli_guidance(arguments: &[String]) -> String {
          More CLI commands: agenterm-cli.exe -h",
         std::process::id(),
         ipc_address()
+    )
+}
+
+fn gui_console_summary(address: &str) -> String {
+    format!(
+        "Launcher PID: {}\n\
+         Configured server address: {address}\n\n\
+         List running server PID and port: agenterm-cli.exe server-list\n\
+         More CLI commands: agenterm-cli.exe -h",
+        std::process::id()
     )
 }
 
@@ -605,17 +610,6 @@ fn run_gui() -> Result<()> {
         state.layout();
         state.load_active_composer();
     }
-    write_best_effort_stderr(&format!(
-        "AgenTerm GUI ready.\n\
-         GUI PID: {}\n\
-         Server address: {} (port {})\n\
-         List server PID and port: agenterm-cli.exe server-list\n\
-         More CLI commands: agenterm-cli.exe -h",
-        std::process::id(),
-        address,
-        socket.port()
-    ));
-
     unsafe {
         ShowWindow(window, SW_SHOW);
         UpdateWindow(window);

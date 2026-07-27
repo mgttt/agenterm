@@ -268,13 +268,15 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       renderer, and IPC server
     - [x] `agenterm.exe` rejects CLI-style or invalid GUI arguments without
       creating a window or information dialog: it writes best-effort
-      inherited-stderr guidance and exits nonzero; normal GUI startup reports
-      its PID and server address/port, then points to
+      inherited-stderr guidance and exits nonzero; normal and focus-existing
+      launches use the same compact four-line summary for launcher PID,
+      configured server address, and pointers to
       `agenterm-cli.exe server-list` for the authoritative PID/port map and
-      `agenterm-cli.exe -h` for further commands; output prefers inherited
-      stderr and otherwise briefly attaches to the parent console without
-      allocating a console or rebinding stdio; startup smoke verifies new-GUI
-      and focus-existing inherited-stderr paths
+      `agenterm-cli.exe -h` for further commands; it prints before GUI
+      initialization so an interactive shell prompt is not overwritten by
+      delayed output, prefers inherited stderr, and otherwise briefly attaches
+      to the parent console without allocating a console or rebinding stdio;
+      startup smoke verifies new-GUI and focus-existing inherited-stderr paths
     - [x] `agenterm-cli.exe`: native AgenTerm observation and automation client;
       the pre-release `agentermctl.exe` name is removed rather than retained as
       a parallel compatibility shim

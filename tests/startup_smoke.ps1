@@ -60,10 +60,14 @@ try {
         throw 'The asynchronously started initial terminal did not become ready.'
     }
     $startupStderr = Get-Content -LiteralPath $stderrFile -Raw
-    if (-not $startupStderr.Contains("GUI PID: $($process.Id)") -or
-        -not $startupStderr.Contains("Server address: $($env:AGENTERM_IPC_ADDRESS) (port $ipcPort)") -or
-        -not $startupStderr.Contains('agenterm-cli.exe server-list') -or
-        -not $startupStderr.Contains('agenterm-cli.exe -h')) {
+    $expectedStartupStderr = @(
+        "Launcher PID: $($process.Id)"
+        "Configured server address: $($env:AGENTERM_IPC_ADDRESS)"
+        ''
+        'List running server PID and port: agenterm-cli.exe server-list'
+        'More CLI commands: agenterm-cli.exe -h'
+    ) -join "`n"
+    if ($startupStderr.TrimEnd() -ne $expectedStartupStderr) {
         throw "GUI inherited-stderr guidance was incomplete:`n$startupStderr"
     }
 
@@ -72,9 +76,14 @@ try {
         throw 'A second GUI launch did not hand off to the existing instance.'
     }
     $focusStderr = Get-Content -LiteralPath $secondStderrFile -Raw
-    if (-not $focusStderr.Contains("Focused the existing AgenTerm GUI server at $($env:AGENTERM_IPC_ADDRESS)") -or
-        -not $focusStderr.Contains('agenterm-cli.exe server-list') -or
-        -not $focusStderr.Contains('agenterm-cli.exe -h')) {
+    $expectedFocusStderr = @(
+        "Launcher PID: $($second.Id)"
+        "Configured server address: $($env:AGENTERM_IPC_ADDRESS)"
+        ''
+        'List running server PID and port: agenterm-cli.exe server-list'
+        'More CLI commands: agenterm-cli.exe -h'
+    ) -join "`n"
+    if ($focusStderr.TrimEnd() -ne $expectedFocusStderr) {
         throw "existing-GUI inherited-stderr guidance was incomplete:`n$focusStderr"
     }
 
