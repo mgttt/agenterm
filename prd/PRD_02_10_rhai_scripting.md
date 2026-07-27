@@ -152,14 +152,15 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - Extension surfaces
   - [x] phase 1 one-shot pure/immutable-observe run/eval/check and API
     discovery shipped with the v0.1.5 minimum sidecar contract
-  - [ ] phase 2 / v0.1.7: versioned local registry and named commands callable
+  - [ ] future candidate: versioned local registry and named commands callable
     by people, agents, and IPC through one stable ID
-  - [ ] phase 3 / v0.1.7 P1: read-only status providers with timeout,
-    last-good value, visible degraded state, truncation, backoff, and
-    host-owned layout
-  - [ ] phase 4 / v0.1.8: opt-in tab/process/workspace event handlers with
+  - [ ] later candidate: read-only status providers with timeout, last-good
+    value, visible degraded state, truncation, backoff, and host-owned layout
+  - [ ] later candidate: opt-in tab/process/workspace event handlers with
     bounded queues, restart/gap semantics, cancellation, and no re-entrant GUI
     mutation
+  - [ ] future scope and version ownership are intentionally reassessed after
+    the v0.1.7 internal consolidation rather than inherited as commitments
   - [ ] no network client, package manager, arbitrary import, or general
     async runtime without a concrete reviewed product use case
 - Verification and delivery

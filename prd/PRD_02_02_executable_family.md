@@ -8,9 +8,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   renderer, and IPC server
 - [ ] target architecture separates the replaceable Win32 GUI client from the
   workspace/PTY/server authority so a GUI-only restart can preserve live tabs;
-  v0.1.7 first freezes ownership, version handshake, bootstrap, reconnect and
-  rollback semantics and proves them in an isolated prototype before changing
-  the default process model
+  v0.1.7 freezes an ownership, version-handshake, bootstrap, reconnect, and
+  rollback decision plus compatibility test plan; an isolated prototype is
+  P1 and the default process model does not change in that internal milestone
 - [x] `agenterm.exe` rejects CLI-style or invalid GUI arguments without
   creating a window or information dialog: it writes best-effort
   inherited-stderr guidance and exits nonzero; normal and focus-existing

@@ -310,43 +310,27 @@ track remains planned, but every declared dependency must still pass.
 - [ ] M3 optional components: ship signed-manifest inventory/install/update/
   rollback foundations and independently gated SSH, HTTP, and SQLite
   sidecars without adding GUI network authority
-- [ ] M4 / v0.1.7 Governed Automation & Fast Delivery
-  - [ ] first close the self-feedback loop: versioned request receipts,
-    idempotent retry, truthful async phases, causal event/wait/render/
-    persistence evidence, and a failure-retaining isolated test harness are
-    P0 prerequisites for exposing additional Rhai control
-  - [ ] make the repository-native `release.ps1` a fast preflight/tag handoff;
-    CI caches compatible Rust inputs, builds one provenance-bound artifact,
-    runs functional and stress gates against that exact artifact, and promotes
-    it without recompilation
-  - [ ] separate qualification from package/publish and gate the latter with a
-    machine-verifiable receipt bound to the exact source SHA and candidate
-    hashes; wall-clock ordering alone never authorizes publication
-  - [ ] ship a versioned local script registry with stable IDs and
-    list/inspect/check/run-by-name discovery; source loading never grants
-    runtime filesystem authority and normal GUI startup never scans or loads
-    Rhai
-  - [ ] add named commands discoverable through CLI, semantic automation, and
-    a keyboard-first GUI command surface, all using the same stable command ID
-  - [ ] preview an explicit `control` profile only for individually allowlisted
-    low-destructive typed operations; send, close, kill, shutdown, filesystem,
-    environment, process, network, and wildcard authority remain denied
-  - [ ] add bounded read-only status providers with host-owned layout,
-    timeout, truncation, last-known-good, degraded state, backoff, and
-    no-orphan isolation; this P1 lane may ship as preview rather than weaken or
-    delay the P0 command/control gates
-  - [ ] expose staged-vs-running build identity and complete the GUI/server
-    state-ownership, version-handshake, compatibility, rollback, and isolated
-    GUI-restart prototype; full process separation requires its own scope gate
-    and is not implied by this milestone
-  - [ ] meet the frozen v0.1.7 release latency, artifact identity, startup,
-    binary-size, privacy, explicit-close, and public black-box gates without
-    deleting coverage
-- [ ] M5 / v0.1.8 event-driven automation: opt-in tab/process/workspace
-  handlers, bounded queues, backpressure, cancellation, restart/gap semantics,
-  and no re-entrant GUI mutation; durable replay and exactly-once side effects
-  remain out of scope
-- [ ] M6 / v0.1.9 controlled agentic bridge: ship MCP read-only resources,
+- [ ] M4 / v0.1.7 internal Control-Plane Integrity & Delivery Reset
+  - [ ] reset product truth, ownership, public-interface inventory, and
+    executable evidence before adding capabilities
+  - [ ] close the command feedback loop with versioned receipts, stable
+    resolved targets, bounded idempotency, truthful completion, causal events,
+    epoch-bound waits, and false-success regression coverage
+  - [ ] build an isolated shared test harness that retains privacy-bounded
+    first-failure evidence and proves cleanup leaves no run-owned orphan
+  - [ ] build one provenance-bound candidate, qualify and package those exact
+    bytes through independent fail-closed stages, and produce an internal
+    receipt bound to the final commit without creating a v0.1.7 tag or Release
+  - [ ] expose running-versus-staged build identity and freeze GUI/server
+    ownership and compatibility decisions without changing the default process
+    model
+  - [ ] extract command, error, IPC, terminal, observation, scripting, test,
+    and artifact boundaries incrementally; no Win32/renderer/ConPTY rewrite
+- [ ] M5 next public product version: scope intentionally remains unassigned
+  until the v0.1.7 internal qualification and dogfood review; registry, named
+  commands, providers, Rhai control, and event handlers are candidates rather
+  than inherited commitments
+- [ ] M6 later controlled agentic bridge: ship MCP read-only resources,
   then explicit control tools, Rhai control, brain/flow orchestration, and
   agent/token status without weakening close safety
 - [ ] M7 lightweight intelligence: rules first, then benchmark-gated

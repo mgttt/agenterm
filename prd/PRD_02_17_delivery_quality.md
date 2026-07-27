@@ -52,17 +52,18 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     behavioral signal until after tagging
 - [x] release CI runs the isolated public CLI and fleet smoke suites before
   packaging, even when the redundant GUI smoke suites are skipped
-- v0.1.7 fast and trustworthy release gate
-  - [ ] `release.ps1` completes local clean-tree/version/tag/remote/auth
-    preflight in p95 <= 15 seconds excluding interactive authentication and
-    network retry, then atomically pushes `main` and the version tag
+- v0.1.7 internal delivery rehearsal (no tag or public GitHub Release)
+  - [ ] the repository-native coordinator completes local
+    clean-tree/version/HEAD/lock/remote/auth preflight or dry-run in p95 <= 15
+    seconds excluding interactive authentication and network retry; v0.1.7
+    does not push a version tag
   - [ ] the v0.1.6 baseline is approximately 4m20s local release qualification
-    plus 4m11s tag workflow; v0.1.7 cache-hit tag-to-Release median over the
-    latest three runs is <= 2m30s and at least 35% faster, while a cold run does
-    not exceed 4m11s
-  - [ ] CI reports queue, cold/cache-hit, job/step and tag-to-Release timing;
-    the first actionable failure diagnostic appears within 90 seconds when the
-    failing stage can start within that bound
+    plus 4m11s tag workflow; v0.1.7 records three internal dry-run
+    qualification/package timings and treats public tag-to-Release latency as
+    an observed future SLO rather than an impossible internal-release gate
+  - [ ] CI reports queue, cold/cache-hit, job/step and candidate-to-qualified
+    timing; an injected early-stage failure produces its first actionable
+    diagnostic within 90 seconds after that stage starts
   - [ ] one commit/version/hash provenance manifest identifies the only release
     artifact set; all required tests consume it and the publish job promotes it
     byte-for-byte without rebuilding
@@ -75,16 +76,16 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     identity, required-suite and emitted-evidence results, run identity, and
     evidence-manifest hash. Timestamps measure latency but never establish
     eligibility
-  - [ ] package/publish independently rejects a missing/failed receipt, source
-    SHA mismatch, candidate hash mismatch, incomplete required suite, missing
-    required evidence, or disallowed release skip before creating a public
-    GitHub Release
+  - [ ] package independently rejects a missing/failed receipt, source SHA
+    mismatch, candidate hash mismatch, incomplete required suite, missing
+    required evidence, or disallowed skip; v0.1.7 proves this in dry-run mode
+    without invoking a publish step
   - [ ] release qualification means 100% of the versioned required-gate
     manifest passed, not 100% source-code coverage; optional environmental
     probes are identified separately and cannot silently replace a required
     gate
   - [ ] the 4,128-write bounded-journal saturation journey runs exactly once
-    per release SHA, while desktop GUI journeys remain isolated and
+    per candidate SHA, while desktop GUI journeys remain isolated and
     `no-activate`
   - [ ] Cargo registry, Git sources and compatible build outputs use bounded,
     correctly keyed CI caches; cache miss/corruption cannot alter correctness,
