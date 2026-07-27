@@ -1516,6 +1516,22 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [ ] M4 / v0.1.7 scripting expansion: build on the v0.1.6 supervised
       observe broker with reviewed control authority, persistent/event-driven
       execution, named commands, and dynamic status providers
+      - [ ] release pipeline latency: make the repository-native
+        `release.ps1` perform only clean-tree/version/tag/auth preflight before
+        its atomic push, leaving the authoritative full qualification to CI
+      - [ ] cache Cargo registry, Git sources, and compatible build outputs on
+        the Windows release runner without weakening the final size/LTO profile
+        or allowing `target/` to grow indefinitely on developer machines
+      - [ ] run functional/stress qualification and distributable compilation
+        as independent jobs where safe; upload the release binaries once and
+        promote those exact verified artifacts into the GitHub Release instead
+        of compiling them again
+      - [ ] keep the 4,128-write event-journal saturation test exactly once per
+        release commit, expose live job/step progress, and surface direct
+        diagnostics on failure
+      - [ ] record cold, cache-hit, and end-to-end tag-to-Release timings; the
+        v0.1.7 pipeline must materially beat the v0.1.6 baseline without
+        dropping binary budgets, startup, UX, scripting, or fleet coverage
     - [ ] M5 / v0.1.8 dynamic bridge: script-backed status segments and named
       commands
     - [ ] M6 / v0.1.9 controlled agentic bridge: ship MCP read-only resources,

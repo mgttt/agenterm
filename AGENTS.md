@@ -72,6 +72,12 @@ Use PowerShell from the repository root:
 .\release.ps1           # validate, tag, push; CI publishes GitHub Release
 ```
 
+For this repository, `release.ps1` is the authoritative formal-release entry
+point. It pushes `main` and the version tag directly through Git/GCM; do not
+create a release PR, require a local `gh` installation, or substitute a generic
+GitHub publishing workflow. The tag-triggered runner owns GitHub Release
+creation and may use its bundled `gh` with `GITHUB_TOKEN`.
+
 The former `.cargo/config.toml` forced `jobs = 1` and made clean builds much
 slower. Do not restore a global job limit. Keep the default dev path
 incremental and let Cargo use the machine's logical CPUs. Use `release-fast`
