@@ -202,6 +202,10 @@ try {
     Invoke-Checked -Id 'target-report' -Label 'Cargo target inventory' {
         & '.\scripts\target-report.ps1'
     }
+    Invoke-Checked -Id 'internal-version-policy' `
+        -Label 'internal version publication policy' {
+        & '.\scripts\internal-version-policy.ps1'
+    }
 
     Invoke-Checked -Id 'prd-alignment' -Label 'PRD capability alignment' {
         & '.\tests\prd_alignment.ps1'

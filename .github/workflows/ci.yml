@@ -19,3 +19,11 @@ jobs:
       - name: Run quality gate
         shell: pwsh
         run: ./check.ps1 -SkipSmoke
+      - name: Run representative public-interface slice
+        shell: pwsh
+        env:
+          AGENTERM_NO_ACTIVATE: "1"
+        run: |
+          ./tests/startup_smoke.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./tests/cli_smoke.ps1
