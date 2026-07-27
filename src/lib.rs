@@ -55,15 +55,15 @@ use windows_sys::Win32::{
         IsWindowVisible, IsZoomed, LoadCursorW, LoadIconW, MB_ICONERROR, MB_OK, MF_BYCOMMAND,
         MF_CHECKED, MF_ENABLED, MF_GRAYED, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MSG, MessageBoxW,
         MoveWindow, PostMessageW, PostQuitMessage, RegisterClassW, SC_CLOSE, SIZE_MINIMIZED,
-        SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE, SW_SHOW, SW_SHOWMAXIMIZED, SW_SHOWNORMAL,
-        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SendMessageW,
-        SetCursor, SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW,
-        ShowWindow, TranslateMessage, WM_ACTIVATEAPP, WM_APP, WM_CHAR, WM_CLOSE, WM_COMMAND,
-        WM_COPY, WM_CREATE, WM_CUT, WM_DESTROY, WM_ENDSESSION, WM_ERASEBKGND, WM_INITMENUPOPUP,
-        WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
-        WM_MOUSEWHEEL, WM_NCDESTROY, WM_PAINT, WM_PASTE, WM_QUERYENDSESSION, WM_RBUTTONDOWN,
-        WM_SETCURSOR, WM_SETFOCUS, WM_SIZE, WM_SYSCOMMAND, WM_TIMER, WNDCLASSW, WS_BORDER,
-        WS_CHILD, WS_CLIPCHILDREN, WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE,
+        SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE, SW_SHOW, SW_SHOWMAXIMIZED, SW_SHOWNOACTIVATE,
+        SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW,
+        SendMessageW, SetCursor, SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowPos,
+        SetWindowTextW, ShowWindow, TranslateMessage, WM_ACTIVATEAPP, WM_APP, WM_CHAR, WM_CLOSE,
+        WM_COMMAND, WM_COPY, WM_CREATE, WM_CUT, WM_DESTROY, WM_ENDSESSION, WM_ERASEBKGND,
+        WM_INITMENUPOPUP, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP,
+        WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY, WM_PAINT, WM_PASTE, WM_QUERYENDSESSION,
+        WM_RBUTTONDOWN, WM_SETCURSOR, WM_SETFOCUS, WM_SIZE, WM_SYSCOMMAND, WM_TIMER, WNDCLASSW,
+        WS_BORDER, WS_CHILD, WS_CLIPCHILDREN, WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE,
     },
 };
 
@@ -143,6 +143,12 @@ const SETTINGS_CANCEL_ID: usize = 1010;
 const TABS_BUTTON_ID: usize = 1011;
 const TIMER_ID: usize = 1;
 const WM_APP_WAKE: u32 = WM_APP + 1;
+const WM_APP_AUTOMATION_SHORTCUT: u32 = WM_APP + 2;
+const AUTOMATION_MOD_CONTROL: u32 = 1;
+const AUTOMATION_MOD_SHIFT: u32 = 1 << 1;
+const AUTOMATION_MOD_ALT: u32 = 1 << 2;
+const AUTOMATION_KEY_UP: u32 = 1 << 3;
+const AUTOMATION_KEY_REPEAT: u32 = 1 << 4;
 const SYSTEM_MENU_COPY_ID: usize = 0x1f00;
 const SYSTEM_MENU_PASTE_ID: usize = 0x1f10;
 const SYSTEM_MENU_TOGGLE_TABS_ID: usize = 0x1f20;
@@ -273,9 +279,10 @@ pub fn run_gui_entry() -> i32 {
             return 2;
         }
     };
+    let no_activate = launch_options.no_activate || no_activate_from_environment();
     write_best_effort_stderr(&gui_console_summary(&ipc_address()));
     if env::var_os("AGENTERM_SERVER").is_none() {
-        let handoff = if launch_options.no_activate {
+        let handoff = if no_activate {
             "__show-no-activate"
         } else {
             "__focus"
@@ -294,11 +301,22 @@ pub fn run_gui_entry() -> i32 {
         }
     }
 
-    if let Err(error) = run_gui(launch_options.no_activate) {
+    if let Err(error) = run_gui(no_activate) {
         show_startup_error(&error);
         return 1;
     }
     0
+}
+
+fn no_activate_from_environment() -> bool {
+    no_activate_from_value(env::var_os("AGENTERM_NO_ACTIVATE").as_deref())
+}
+
+fn no_activate_from_value(value: Option<&std::ffi::OsStr>) -> bool {
+    value.is_some_and(|value| {
+        let value = value.to_string_lossy();
+        !value.is_empty() && value != "0" && !value.eq_ignore_ascii_case("false")
+    })
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -1095,6 +1113,31 @@ unsafe extern "system" fn window_proc(
                 state.key_down(wparam as u32);
             }
             0
+        }
+        WM_APP_AUTOMATION_SHORTCUT => {
+            if !no_activate_from_environment() {
+                return unsafe { DefWindowProcW(window, message, wparam, lparam) };
+            }
+            let flags = lparam as u32;
+            let Some(state) = state_mut(window) else {
+                return 0;
+            };
+            if flags & AUTOMATION_KEY_UP != 0 {
+                state.handle_shortcut_key_up(wparam as u32);
+                return 1;
+            }
+            let shortcut_lparam = if flags & AUTOMATION_KEY_REPEAT != 0 {
+                1_isize << 30
+            } else {
+                0
+            };
+            state.handle_shortcut_with_modifiers(
+                wparam as u32,
+                shortcut_lparam,
+                flags & AUTOMATION_MOD_CONTROL != 0,
+                flags & AUTOMATION_MOD_SHIFT != 0,
+                flags & AUTOMATION_MOD_ALT != 0,
+            ) as LRESULT
         }
         WM_INITMENUPOPUP => {
             if let Some(state) = state_mut(window) {
@@ -2649,24 +2692,32 @@ impl AppState {
         if was_detached {
             self.restore_window_close_controls();
         }
-        unsafe {
-            ShowWindow(
-                self.window,
-                if self.detached_was_maximized {
-                    SW_SHOWMAXIMIZED
-                } else {
-                    SW_SHOWNORMAL
-                },
-            );
-            SetForegroundWindow(self.window);
-            if self.settings_open {
-                SetFocus(self.settings_font);
-            } else if self.note_edit_target.is_some() {
-                SetFocus(self.edit);
-            } else {
-                SetFocus(self.window);
+        if no_activate_from_environment() {
+            unsafe {
+                ShowWindow(self.window, SW_SHOWNOACTIVATE);
+                show_window_behind_foreground(self.window);
+                InvalidateRect(self.window, ptr::null(), 0);
             }
-            InvalidateRect(self.window, ptr::null(), 0);
+        } else {
+            unsafe {
+                ShowWindow(
+                    self.window,
+                    if self.detached_was_maximized {
+                        SW_SHOWMAXIMIZED
+                    } else {
+                        SW_SHOWNORMAL
+                    },
+                );
+                SetForegroundWindow(self.window);
+                if self.settings_open {
+                    SetFocus(self.settings_font);
+                } else if self.note_edit_target.is_some() {
+                    SetFocus(self.edit);
+                } else {
+                    SetFocus(self.window);
+                }
+                InvalidateRect(self.window, ptr::null(), 0);
+            }
         }
         if was_detached {
             self.event_journal.commit(
@@ -4087,6 +4138,14 @@ impl AppState {
 
     fn current_focus_surface(&self) -> FocusSurface {
         let focused = unsafe { GetFocus() };
+        let focused = if (focused.is_null() || focused == self.window)
+            && no_activate_from_environment()
+            && !self.window_close_previous_focus.is_null()
+        {
+            self.window_close_previous_focus
+        } else {
+            focused
+        };
         if focused == self.settings_font
             || focused == self.settings_size
             || focused == self.settings_dark
@@ -4354,12 +4413,23 @@ impl AppState {
     }
 
     fn handle_shortcut(&mut self, virtual_key: u32, lparam: LPARAM) -> bool {
-        if is_latched_navigation_repeat(self.navigation_latch, virtual_key, lparam) {
-            return true;
-        }
         let control = unsafe { GetKeyState(0x11) } < 0;
         let shift = unsafe { GetKeyState(0x10) } < 0;
         let alt = unsafe { GetKeyState(0x12) } < 0;
+        self.handle_shortcut_with_modifiers(virtual_key, lparam, control, shift, alt)
+    }
+
+    fn handle_shortcut_with_modifiers(
+        &mut self,
+        virtual_key: u32,
+        lparam: LPARAM,
+        control: bool,
+        shift: bool,
+        alt: bool,
+    ) -> bool {
+        if is_latched_navigation_repeat(self.navigation_latch, virtual_key, lparam) {
+            return true;
+        }
         let focused = unsafe { GetFocus() };
 
         if self.window_close_pending {
@@ -8129,7 +8199,11 @@ fn run_cli(arguments: Vec<String>) -> i32 {
     {
         let executable = wide(&executable.to_string_lossy());
         let operation = wide("open");
-        let parameters = wide(&format!("--address {}", ipc_address()));
+        let parameters = if no_activate_from_environment() {
+            wide(&format!("--no-activate --address {}", ipc_address()))
+        } else {
+            wide(&format!("--address {}", ipc_address()))
+        };
         let launched = unsafe {
             ShellExecuteW(
                 ptr::null_mut(),
@@ -9627,9 +9701,10 @@ mod tests {
     use super::{
         EditShortcut, FocusSurface, IpcResponse, TerminalPoint, TerminalSelection, ThemeId,
         bounded_utf8_prefix, edit_shortcut, effective_theme, gui_cli_guidance,
-        gui_handoff_succeeded, is_latched_navigation_repeat, normalize_terminal_paste,
-        parse_gui_launch, parse_loopback_ipc_address, redact_proxy_stream_chunk, run_wait_ui,
-        surface_navigation, terminal_copy_shortcut, terminal_selection_text,
+        gui_handoff_succeeded, is_latched_navigation_repeat, no_activate_from_value,
+        normalize_terminal_paste, parse_gui_launch, parse_loopback_ipc_address,
+        redact_proxy_stream_chunk, run_wait_ui, surface_navigation, terminal_copy_shortcut,
+        terminal_selection_text,
     };
 
     #[test]
@@ -9892,6 +9967,18 @@ mod tests {
         .unwrap();
         assert!(options.no_activate);
         assert_eq!(address.as_deref(), Some("127.0.0.1:48816"));
+    }
+
+    #[test]
+    fn automation_no_activate_environment_has_explicit_false_values() {
+        use std::ffi::OsStr;
+
+        assert!(!no_activate_from_value(None));
+        assert!(!no_activate_from_value(Some(OsStr::new(""))));
+        assert!(!no_activate_from_value(Some(OsStr::new("0"))));
+        assert!(!no_activate_from_value(Some(OsStr::new("FALSE"))));
+        assert!(no_activate_from_value(Some(OsStr::new("1"))));
+        assert!(no_activate_from_value(Some(OsStr::new("true"))));
     }
 
     #[test]

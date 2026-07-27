@@ -6,34 +6,24 @@ set "PROFILE=dev"
 set "CARGO_ARGS="
 set "CARGO_OUTPUT_DIR=target"
 if defined CARGO_TARGET_DIR set "CARGO_OUTPUT_DIR=%CARGO_TARGET_DIR%"
-set "GUI_SOURCE_EXE=%CARGO_OUTPUT_DIR%\debug\agenterm.exe"
-set "CLI_SOURCE_EXE=%CARGO_OUTPUT_DIR%\debug\agenterm-cli.exe"
-set "MUX_SOURCE_EXE=%CARGO_OUTPUT_DIR%\debug\agenterm-mux.exe"
-set "SCRIPT_SOURCE_EXE=%CARGO_OUTPUT_DIR%\debug\agenterm-script.exe"
+set "CARGO_PROFILE_DIR=%CARGO_OUTPUT_DIR%\debug"
 set "DIST_DIR=%~dp0dist"
+set "POWERSHELL_EXE=powershell.exe"
+where pwsh.exe >nul 2>nul
+if not errorlevel 1 set "POWERSHELL_EXE=pwsh.exe"
 
 if /i "%~1"=="release" (
     set "PROFILE=release"
     set "CARGO_ARGS=--release"
-    set "GUI_SOURCE_EXE=%CARGO_OUTPUT_DIR%\release\agenterm.exe"
-    set "CLI_SOURCE_EXE=%CARGO_OUTPUT_DIR%\release\agenterm-cli.exe"
-    set "MUX_SOURCE_EXE=%CARGO_OUTPUT_DIR%\release\agenterm-mux.exe"
-    set "SCRIPT_SOURCE_EXE=%CARGO_OUTPUT_DIR%\release\agenterm-script.exe"
+    set "CARGO_PROFILE_DIR=%CARGO_OUTPUT_DIR%\release"
+) else if /i "%~1"=="release-fast" (
+    set "PROFILE=release-fast"
+    set "CARGO_ARGS=--profile release-fast"
+    set "CARGO_PROFILE_DIR=%CARGO_OUTPUT_DIR%\release-fast"
 ) else if not "%~1"=="" (
-    echo Usage: build.bat [release]
+    echo Usage: build.bat [release^|release-fast]
     popd
     exit /b 2
-)
-
-if exist "%DIST_DIR%" (
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\clean-locked-artifacts.ps1" ^
-        -Directory "%DIST_DIR%" -ObsoleteName "agentermctl.exe"
-    if errorlevel 1 (
-        echo.
-        echo Failed to clean stale locked artifacts from dist.
-        popd
-        exit /b 1
-    )
 )
 
 cargo build %CARGO_ARGS%
@@ -44,62 +34,13 @@ if errorlevel 1 (
     exit /b 1
 )
 
-if not exist "%DIST_DIR%" mkdir "%DIST_DIR%"
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\stage-artifact.ps1" ^
-    -Source "%GUI_SOURCE_EXE%" -Destination "%DIST_DIR%\agenterm.exe"
-if errorlevel 1 (
-    echo.
-    echo Failed to copy agenterm.exe to dist.
-    popd
-    exit /b 1
-)
-
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\stage-artifact.ps1" ^
-    -Source "%CLI_SOURCE_EXE%" -Destination "%DIST_DIR%\agenterm-cli.exe"
-if errorlevel 1 (
-    echo.
-    echo Failed to copy agenterm-cli.exe to dist.
-    popd
-    exit /b 1
-)
-
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\stage-artifact.ps1" ^
-    -Source "%MUX_SOURCE_EXE%" -Destination "%DIST_DIR%\agenterm-mux.exe"
-if errorlevel 1 (
-    echo.
-    echo Failed to copy agenterm-mux.exe to dist.
-    popd
-    exit /b 1
-)
-
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\stage-artifact.ps1" ^
-    -Source "%SCRIPT_SOURCE_EXE%" -Destination "%DIST_DIR%\agenterm-script.exe"
-if errorlevel 1 (
-    echo.
-    echo Failed to copy agenterm-script.exe to dist.
-    popd
-    exit /b 1
-)
-
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\write-build-metadata.ps1" ^
-    -ManifestPath "%DIST_DIR%\agenterm.json" ^
-    -ExecutablePath "%DIST_DIR%\agenterm.exe" ^
-    -CliExecutablePath "%DIST_DIR%\agenterm-cli.exe" ^
-    -MuxExecutablePath "%DIST_DIR%\agenterm-mux.exe" ^
-    -ScriptExecutablePath "%DIST_DIR%\agenterm-script.exe" ^
+"%POWERSHELL_EXE%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\stage-build.ps1" ^
+    -SourceDirectory "%CARGO_PROFILE_DIR%" ^
+    -DestinationDirectory "%DIST_DIR%" ^
     -Profile "%PROFILE%"
 if errorlevel 1 (
     echo.
-    echo Failed to generate agenterm.json.
-    popd
-    exit /b 1
-)
-
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\clean-locked-artifacts.ps1" ^
-    -Directory "%DIST_DIR%" -ObsoleteName "agentermctl.exe"
-if errorlevel 1 (
-    echo.
-    echo Failed to clean stale locked artifacts from dist.
+    echo Failed to stage AgenTerm artifacts and metadata.
     popd
     exit /b 1
 )

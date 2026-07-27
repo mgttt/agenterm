@@ -39,7 +39,7 @@ jobs:
         run: |
           $log = Join-Path $env:RUNNER_TEMP 'agenterm-release-check.log'
           try {
-            ./check.ps1 -Release *>&1 | Tee-Object -LiteralPath $log
+            ./check.ps1 -Release -IncludeStress *>&1 | Tee-Object -LiteralPath $log
             if ($LASTEXITCODE -ne 0) {
               throw "Release quality gate failed with exit code $LASTEXITCODE."
             }

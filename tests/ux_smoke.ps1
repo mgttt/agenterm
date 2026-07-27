@@ -61,8 +61,6 @@ $env:AGENTERM_SETTINGS_PATH = $settingsFile
 $name = "ux-smoke-$PID"
 $token = "AGENTERM_UX_$PID"
 $draftFile = Join-Path $env:TEMP "$name.txt"
-$foregroundHost = [IntPtr]::Zero
-
 function Invoke-AgenTerm {
     param([string[]]$CommandArgs)
     $previousPreference = $ErrorActionPreference
@@ -167,13 +165,21 @@ public static class AgenTermNativeTest {
         IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
 
     [DllImport("user32.dll")]
-    private static extern bool SetForegroundWindow(IntPtr window);
+    private static extern bool PostMessageW(
+        IntPtr window, uint message, UIntPtr wParam, IntPtr lParam);
 
     [DllImport("user32.dll")]
-    private static extern IntPtr SetActiveWindow(IntPtr window);
+    private static extern bool AttachThreadInput(
+        uint sourceThread, uint targetThread, bool attach);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
 
     [DllImport("user32.dll")]
-    private static extern bool BringWindowToTop(IntPtr window);
+    private static extern bool GetKeyboardState(byte[] state);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetKeyboardState(byte[] state);
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
@@ -184,25 +190,6 @@ public static class AgenTermNativeTest {
     [DllImport("user32.dll")]
     private static extern IntPtr GetWindow(IntPtr window, uint command);
 
-    [DllImport("user32.dll")]
-    private static extern bool AttachThreadInput(
-        uint sourceThread, uint targetThread, bool attach);
-
-    [DllImport("kernel32.dll")]
-    private static extern uint GetCurrentThreadId();
-
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    private static extern IntPtr CreateWindowExW(
-        uint exStyle, string className, string title, uint style,
-        int x, int y, int width, int height, IntPtr parent, IntPtr menu,
-        IntPtr instance, IntPtr parameter);
-
-    [DllImport("user32.dll")]
-    private static extern bool DestroyWindow(IntPtr window);
-
-    [DllImport("user32.dll")]
-    private static extern bool ShowWindow(IntPtr window, int command);
-
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern IntPtr FindWindowExW(
         IntPtr parent, IntPtr after, string className, string windowName);
@@ -210,10 +197,6 @@ public static class AgenTermNativeTest {
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern int GetClassNameW(
         IntPtr window, StringBuilder className, int capacity);
-
-    [DllImport("user32.dll")]
-    private static extern void keybd_event(
-        byte virtualKey, byte scanCode, uint flags, UIntPtr extraInfo);
 
     [DllImport("user32.dll")]
     private static extern uint GetWindowThreadProcessId(
@@ -316,24 +299,6 @@ public static class AgenTermNativeTest {
         SendMessageW(window, 0x0112, (UIntPtr)command, IntPtr.Zero);
     }
 
-    public static IntPtr CreateForegroundHost() {
-        IntPtr window = CreateWindowExW(
-            0, "STATIC", "AgenTerm no-activate test host", 0x10CF0000,
-            80, 80, 420, 160, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
-        if (window == IntPtr.Zero) {
-            throw new InvalidOperationException("CreateWindowExW test host failed");
-        }
-        ShowWindow(window, 5);
-        try {
-            RequireForeground(window, 1500);
-        }
-        catch {
-            DestroyWindow(window);
-            throw;
-        }
-        return window;
-    }
-
     public static IntPtr ForegroundWindow() {
         return GetForegroundWindow();
     }
@@ -387,78 +352,85 @@ public static class AgenTermNativeTest {
             focus.ToInt64(), WindowClass(focus));
     }
 
-    private static void TryActivateWindow(IntPtr window) {
+    private static bool controlHeld;
+    private static byte repeatedKey;
+
+    private static void SendNativeControlKey(IntPtr target, byte virtualKey) {
         uint targetProcess;
-        uint targetThread = GetWindowThreadProcessId(window, out targetProcess);
-        IntPtr foreground = GetForegroundWindow();
-        uint foregroundProcess;
-        uint foregroundThread = GetWindowThreadProcessId(
-            foreground, out foregroundProcess);
+        uint targetThread = GetWindowThreadProcessId(target, out targetProcess);
         uint currentThread = GetCurrentThreadId();
-        bool attachedForeground = false;
-        bool attachedTarget = false;
+        bool attached = targetThread != 0 && targetThread != currentThread &&
+            AttachThreadInput(currentThread, targetThread, true);
+        byte[] original = new byte[256];
         try {
-            if (foregroundThread != 0 && foregroundThread != currentThread) {
-                attachedForeground = AttachThreadInput(
-                    currentThread, foregroundThread, true);
+            if (!GetKeyboardState(original)) {
+                throw new InvalidOperationException("GetKeyboardState failed");
             }
-            if (targetThread != 0 && targetThread != currentThread &&
-                targetThread != foregroundThread) {
-                attachedTarget = AttachThreadInput(
-                    currentThread, targetThread, true);
+            byte[] modified = (byte[])original.Clone();
+            modified[0x11] = (byte)(modified[0x11] | 0x80);
+            if (!SetKeyboardState(modified)) {
+                throw new InvalidOperationException("SetKeyboardState failed");
             }
-            ShowWindow(window, 5);
-            BringWindowToTop(window);
-            SetActiveWindow(window);
-            SetForegroundWindow(window);
+            SendMessageW(target, 0x0100, (UIntPtr)virtualKey, IntPtr.Zero);
+            SendMessageW(target, 0x0101, (UIntPtr)virtualKey, IntPtr.Zero);
         }
         finally {
-            if (attachedTarget) {
+            SetKeyboardState(original);
+            if (attached) {
                 AttachThreadInput(currentThread, targetThread, false);
             }
-            if (attachedForeground) {
-                AttachThreadInput(currentThread, foregroundThread, false);
-            }
-        }
-    }
-
-    public static void RequireForeground(IntPtr window, int timeoutMs) {
-        int started = Environment.TickCount;
-        do {
-            if (GetForegroundWindow() == window) {
-                return;
-            }
-            TryActivateWindow(window);
-            if (GetForegroundWindow() == window) {
-                return;
-            }
-            Thread.Sleep(5);
-        } while (unchecked(Environment.TickCount - started) < timeoutMs);
-        throw new InvalidOperationException(
-            "could not establish foreground ownership: " +
-            FocusDiagnostics(window));
-    }
-
-    public static void DestroyHost(IntPtr window) {
-        if (window != IntPtr.Zero) {
-            DestroyWindow(window);
         }
     }
 
     public static void KeyDown(IntPtr window, byte virtualKey) {
-        RequireForeground(window, 1000);
-        keybd_event(virtualKey, 0, 0, UIntPtr.Zero);
+        if (virtualKey == 0x11) {
+            controlHeld = true;
+            return;
+        }
+        uint flags = controlHeld ? 0x1u : 0u;
+        if (repeatedKey == virtualKey) {
+            flags |= 0x10u;
+        }
+        repeatedKey = virtualKey;
+        IntPtr handled = SendMessageW(
+            window, 0x8002, (UIntPtr)virtualKey, (IntPtr)flags);
+        if (handled == IntPtr.Zero && controlHeld) {
+            IntPtr target = FocusedControl(window);
+            if (target != IntPtr.Zero &&
+                String.Equals(WindowClass(target), "Edit",
+                    StringComparison.OrdinalIgnoreCase)) {
+                SendNativeControlKey(target, virtualKey);
+            }
+        }
     }
 
-    public static void KeyUp(byte virtualKey) {
-        keybd_event(virtualKey, 0, 2, UIntPtr.Zero);
+    public static void KeyUp(IntPtr window, byte virtualKey) {
+        if (virtualKey == 0x11) {
+            controlHeld = false;
+            repeatedKey = 0;
+            return;
+        }
+        uint flags = (controlHeld ? 0x1u : 0u) | 0x8u;
+        SendMessageW(window, 0x8002, (UIntPtr)virtualKey, (IntPtr)flags);
+        repeatedKey = 0;
+    }
+
+    public static void PostOrdinaryKey(IntPtr window, byte virtualKey) {
+        IntPtr target = FocusedControl(window);
+        if (target == IntPtr.Zero) {
+            target = window;
+        }
+        if (!PostMessageW(target, 0x0100, (UIntPtr)virtualKey, IntPtr.Zero) ||
+            !PostMessageW(target, 0x0101, (UIntPtr)virtualKey, IntPtr.Zero)) {
+            throw new InvalidOperationException("PostMessageW ordinary key failed");
+        }
     }
 
     public static void ControlArrow(IntPtr window, byte virtualKey) {
         KeyDown(window, 0x11);
         KeyDown(window, virtualKey);
-        KeyUp(virtualKey);
-        KeyUp(0x11);
+        KeyUp(window, virtualKey);
+        KeyUp(window, 0x11);
     }
 
     private static IntPtr FocusedControl(IntPtr window) {
@@ -504,7 +476,6 @@ public static class AgenTermNativeTest {
     }
 
     public static void SetEditSelection(IntPtr window, int start, int end) {
-        RequireForeground(window, 1000);
         IntPtr edit = WaitForFocusedEdit(window, 1000);
         SendMessageW(edit, 0x00B1, (UIntPtr)(uint)start, (IntPtr)end);
     }
@@ -921,20 +892,12 @@ try {
     }
 
     Write-Host 'STEP no-activate launcher preserves foreground on existing server'
-    $foregroundHost = [AgenTermNativeTest]::CreateForegroundHost()
-    $foregroundWait = [Diagnostics.Stopwatch]::StartNew()
-    while ([AgenTermNativeTest]::ForegroundWindow() -ne $foregroundHost -and
-        $foregroundWait.ElapsedMilliseconds -lt 1000) {
-        Start-Sleep -Milliseconds 10
-    }
-    if ([AgenTermNativeTest]::ForegroundWindow() -ne $foregroundHost) {
-        throw 'could not establish the no-activate test host as foreground'
-    }
+    $foregroundBeforeNoActivate = [AgenTermNativeTest]::ForegroundWindow()
     $noActivate = Start-Process -FilePath $GuiExe -ArgumentList @(
         '--no-activate', '--address', $env:AGENTERM_IPC_ADDRESS
     ) -PassThru
     if (-not $noActivate.WaitForExit(1000) -or
-        [AgenTermNativeTest]::ForegroundWindow() -ne $foregroundHost) {
+        [AgenTermNativeTest]::ForegroundWindow() -ne $foregroundBeforeNoActivate) {
         throw '--no-activate existing-server handoff stole foreground or did not exit'
     }
     $noActivateSnapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
@@ -970,10 +933,11 @@ try {
     $newNoActivate.Refresh()
     $newNoActivateWindow = $newNoActivate.MainWindowHandle
     if ($newNoActivateWindow -eq [IntPtr]::Zero -or
-        [AgenTermNativeTest]::ForegroundWindow() -ne $foregroundHost -or
-        -not [AgenTermNativeTest]::IsAbove(
-            $foregroundHost, $newNoActivateWindow
-        ) -or
+        [AgenTermNativeTest]::ForegroundWindow() -ne $foregroundBeforeNoActivate -or
+        ($foregroundBeforeNoActivate -ne [IntPtr]::Zero -and
+            -not [AgenTermNativeTest]::IsAbove(
+                $foregroundBeforeNoActivate, $newNoActivateWindow
+            )) -or
         -not $newNoActivateSnapshot.window.visible -or
         $newNoActivateSnapshot.window.detached) {
         throw (
@@ -983,8 +947,6 @@ try {
     }
     Invoke-AgenTermAt -Address $noActivateAddress -CommandArgs @('kill-server') | Out-Null
     $newNoActivate.WaitForExit(5000) | Out-Null
-    [AgenTermNativeTest]::DestroyHost($foregroundHost)
-    $foregroundHost = [IntPtr]::Zero
     Write-Evidence 'ux.no-activate-launch'
 
     Write-Host 'STEP adaptive Tabs controls, resizing, and shared layout'
@@ -1109,8 +1071,8 @@ try {
     Invoke-AgenTerm @('wait-ui', '--active', $id, '--focus', 'composer') | Out-Null
     [AgenTermNativeTest]::KeyDown($window, 0x28)
     [AgenTermNativeTest]::KeyDown($window, 0x28)
-    [AgenTermNativeTest]::KeyUp(0x28)
-    [AgenTermNativeTest]::KeyUp(0x11)
+    [AgenTermNativeTest]::KeyUp($window, 0x28)
+    [AgenTermNativeTest]::KeyUp($window, 0x11)
     $repeatSnapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
     $repeatEvents = Invoke-AgenTerm @(
         'read-events',
@@ -1410,7 +1372,7 @@ try {
     }
 
     $reattachStart = $detached.event_position
-    Start-Process -FilePath $GuiExe | Out-Null
+    Start-Process -FilePath $GuiExe -ArgumentList @('--no-activate') | Out-Null
     $reattachEvent = Invoke-AgenTerm @(
         'wait-events',
         '--epoch', $reattachStart.epoch,
@@ -1422,7 +1384,7 @@ try {
     $reattachedPane = Get-PaneSnapshot -Target $id
     $reattachedServer = Get-IsolatedServer
     if ($reattachEvent.payload.visible -ne $true -or
-        $reattachEvent.payload.reason -ne 'launcher' -or
+        $reattachEvent.payload.reason -ne 'launcher-no-activate' -or
         -not $reattached.window.visible -or $reattached.window.detached -or
         -not $reattached.layout.composer.visible -or
         -not $reattached.layout.composer.input_visible -or
@@ -1454,7 +1416,7 @@ try {
         -not $noteDetached.window.detached) {
         throw 'tab-editor detach did not hide the complete parent surface'
     }
-    Start-Process -FilePath $GuiExe | Out-Null
+    Start-Process -FilePath $GuiExe -ArgumentList @('--no-activate') | Out-Null
     Invoke-AgenTerm @(
         'wait-events',
         '--epoch', $noteDetachStart.event_position.epoch,
@@ -1595,7 +1557,7 @@ try {
         if (-not (Test-AgenTermReady)) { break }
         Start-Sleep -Milliseconds 50
     }
-    Start-Process -FilePath $GuiExe | Out-Null
+    Start-Process -FilePath $GuiExe -ArgumentList @('--no-activate') | Out-Null
     $ready = $false
     for ($attempt = 0; $attempt -lt 100; $attempt++) {
         if (Test-AgenTermReady) {
@@ -1624,7 +1586,6 @@ try {
     Write-Host 'PASS: UX state, two-line tabs, settings, composer, focus, safe close, dead close, protocol discovery'
 }
 finally {
-    [AgenTermNativeTest]::DestroyHost($foregroundHost)
     Remove-Item -LiteralPath $draftFile -ErrorAction SilentlyContinue
     try {
         & $Exe --address $stopAddress kill-server 2>$null | Out-Null

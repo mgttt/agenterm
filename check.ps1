@@ -1,9 +1,12 @@
 param(
     [switch]$Release,
-    [switch]$SkipSmoke
+    [switch]$SkipSmoke,
+    [switch]$IncludeStress
 )
 
 $ErrorActionPreference = 'Stop'
+$hadNoActivateEnvironment = Test-Path Env:AGENTERM_NO_ACTIVATE
+$previousNoActivateEnvironment = $env:AGENTERM_NO_ACTIVATE
 Push-Location $PSScriptRoot
 
 function Invoke-Checked {
@@ -121,15 +124,35 @@ try {
     }
 
     if (-not $SkipSmoke) {
-        Invoke-Checked 'startup smoke test' { & '.\tests\startup_smoke.ps1' }
-        Invoke-Checked 'CLI smoke test' { & '.\tests\cli_smoke.ps1' }
-        Invoke-Checked 'AI fleet smoke test' { & '.\tests\fleet_smoke.ps1' }
-        Invoke-Checked 'safe scripting smoke test' { & '.\tests\script_smoke.ps1' }
-        Invoke-Checked 'theme settings smoke test' { & '.\tests\theme_smoke.ps1' }
-        Invoke-Checked 'working context privacy smoke test' {
-            & '.\tests\working_context_smoke.ps1'
+        # GUI tests must never interrupt the interactive desktop running them.
+        # The GUI entry point and CLI autostart both honor this inherited flag.
+        $env:AGENTERM_NO_ACTIVATE = '1'
+        try {
+            Invoke-Checked 'startup smoke test' { & '.\tests\startup_smoke.ps1' }
+            Invoke-Checked 'CLI smoke test' { & '.\tests\cli_smoke.ps1' }
+            Invoke-Checked 'AI fleet smoke test' {
+                if ($Release -and -not $IncludeStress) {
+                    & '.\tests\fleet_smoke.ps1' -SkipEventLoad
+                }
+                else {
+                    & '.\tests\fleet_smoke.ps1'
+                }
+            }
+            Invoke-Checked 'safe scripting smoke test' { & '.\tests\script_smoke.ps1' }
+            Invoke-Checked 'theme settings smoke test' { & '.\tests\theme_smoke.ps1' }
+            Invoke-Checked 'working context privacy smoke test' {
+                & '.\tests\working_context_smoke.ps1'
+            }
+            Invoke-Checked 'semantic UX smoke test' { & '.\tests\ux_smoke.ps1' }
         }
-        Invoke-Checked 'semantic UX smoke test' { & '.\tests\ux_smoke.ps1' }
+        finally {
+            if ($hadNoActivateEnvironment) {
+                $env:AGENTERM_NO_ACTIVATE = $previousNoActivateEnvironment
+            }
+            else {
+                Remove-Item Env:AGENTERM_NO_ACTIVATE -ErrorAction SilentlyContinue
+            }
+        }
     }
 
     Write-Host "`nPASS: AgenTerm quality gate"

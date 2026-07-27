@@ -15,7 +15,7 @@ param(
     [string]$ScriptExecutablePath,
 
     [Parameter(Mandatory = $true)]
-    [ValidateSet('dev', 'release')]
+    [ValidateSet('dev', 'release-fast', 'release')]
     [string]$Profile
 )
 

@@ -1,6 +1,7 @@
 param(
     [string]$CtlExe = (Join-Path $PSScriptRoot '..\dist\agenterm-cli.exe'),
     [string]$MuxExe = (Join-Path $PSScriptRoot '..\dist\agenterm-mux.exe'),
+    [switch]$SkipEventLoad,
     [switch]$ListEvidence
 )
 
@@ -561,53 +562,58 @@ try {
         throw 'Ephemeral proxy configuration leaked into persistent workspace state'
     }
 
-    Write-Host 'STEP bounded event history reports an explicit gap'
-    $gapBaseline = Invoke-CheckedExe $CtlExe @('ui-snapshot') | ConvertFrom-Json
-    $gapTarget = @($gapBaseline.tabs | Where-Object active)[0].id
-    if (-not $gapTarget.StartsWith('@')) {
-        throw 'event gap load could not resolve the active stable tab ID'
-    }
-    $workerCount = 16
-    $eventsPerWorker = 258
-    foreach ($worker in 0..($workerCount - 1)) {
-        $job = Start-Job -ScriptBlock {
-            param($Executable, $ServerAddress, $Target, $Worker, $Count)
-            for ($iteration = 0; $iteration -lt $Count; $iteration++) {
-                $workerOutput = @(
-                    & $Executable --address $ServerAddress set-tab-note `
-                        -t $Target "gap-$Worker-$iteration" 2>&1
-                )
-                if ($LASTEXITCODE -ne 0) {
-                    throw (
-                        "event load worker $Worker failed at iteration $iteration`: " +
-                        ($workerOutput -join "`n")
+    if (-not $SkipEventLoad) {
+        Write-Host 'STEP bounded event history reports an explicit gap'
+        $gapBaseline = Invoke-CheckedExe $CtlExe @('ui-snapshot') | ConvertFrom-Json
+        $gapTarget = @($gapBaseline.tabs | Where-Object active)[0].id
+        if (-not $gapTarget.StartsWith('@')) {
+            throw 'event gap load could not resolve the active stable tab ID'
+        }
+        $workerCount = 16
+        $eventsPerWorker = 258
+        foreach ($worker in 0..($workerCount - 1)) {
+            $job = Start-Job -ScriptBlock {
+                param($Executable, $ServerAddress, $Target, $Worker, $Count)
+                for ($iteration = 0; $iteration -lt $Count; $iteration++) {
+                    $workerOutput = @(
+                        & $Executable --address $ServerAddress set-tab-note `
+                            -t $Target "gap-$Worker-$iteration" 2>&1
                     )
+                    if ($LASTEXITCODE -ne 0) {
+                        throw (
+                            "event load worker $Worker failed at iteration $iteration`: " +
+                            ($workerOutput -join "`n")
+                        )
+                    }
                 }
+            } -ArgumentList @(
+                $CtlExe, $address, $gapTarget, $worker, $eventsPerWorker
+            )
+            $loadJobs += $job
+        }
+        $finishedLoad = @($loadJobs | Wait-Job -Timeout 180)
+        if ($finishedLoad.Count -ne $workerCount) {
+            throw 'bounded event load exceeded its job deadline'
+        }
+        foreach ($job in $loadJobs) {
+            Receive-Job -Job $job -ErrorAction Stop | Out-Null
+            if ($job.State -ne 'Completed') {
+                throw "bounded event load job $($job.Id) ended in state $($job.State)"
             }
-        } -ArgumentList @(
-            $CtlExe, $address, $gapTarget, $worker, $eventsPerWorker
+        }
+        $gapError = Invoke-ExpectedFailure $CtlExe @(
+            'read-events',
+            '--epoch', $gapBaseline.event_position.epoch,
+            '--after', "$($gapBaseline.event_position.sequence)"
         )
-        $loadJobs += $job
-    }
-    $finishedLoad = @($loadJobs | Wait-Job -Timeout 180)
-    if ($finishedLoad.Count -ne $workerCount) {
-        throw 'bounded event load exceeded its job deadline'
-    }
-    foreach ($job in $loadJobs) {
-        Receive-Job -Job $job -ErrorAction Stop | Out-Null
-        if ($job.State -ne 'Completed') {
-            throw "bounded event load job $($job.Id) ended in state $($job.State)"
+        if (-not $gapError.Contains('"code":"journal_gap"') -or
+            -not $gapError.Contains('"earliest_available"') -or
+            -not $gapError.Contains('"current"')) {
+            throw 'bounded event history silently lost events instead of reporting journal_gap'
         }
     }
-    $gapError = Invoke-ExpectedFailure $CtlExe @(
-        'read-events',
-        '--epoch', $gapBaseline.event_position.epoch,
-        '--after', "$($gapBaseline.event_position.sequence)"
-    )
-    if (-not $gapError.Contains('"code":"journal_gap"') -or
-        -not $gapError.Contains('"earliest_available"') -or
-        -not $gapError.Contains('"current"')) {
-        throw 'bounded event history silently lost events instead of reporting journal_gap'
+    else {
+        Write-Host 'SKIP bounded event journal concurrent load'
     }
 
     Write-Host 'STEP a restarted server rejects positions from the previous epoch'

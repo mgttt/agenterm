@@ -61,3 +61,11 @@ lto = "thin"
 codegen-units = 1
 panic = "abort"
 strip = true
+
+# Fast optimized builds for local testing. Keep the distributable release
+# profile focused on size, while allowing Cargo to reuse work between builds.
+[profile.release-fast]
+inherits = "release"
+lto = false
+codegen-units = 16
+incremental = true

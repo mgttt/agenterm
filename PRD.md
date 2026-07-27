@@ -1474,6 +1474,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
         - [x] release builds stage verified artifacts in `dist/` and then run
           `cargo clean`; development builds retain incremental `target/`
           caching so disk cleanup does not impose a rebuild on every edit
+        - [x] `build.bat release-fast` provides an optimized incremental local
+          loop with LTO disabled and parallel codegen, while consolidated
+          staging uses one PowerShell process (preferring `pwsh`) instead of
+          paying one interpreter startup per artifact
+        - [x] every local smoke-test GUI launch and CLI autostart inherits
+          `AGENTERM_NO_ACTIVATE=1` and must remain behind the user's foreground
+          work; local release qualification skips the 4,128-write bounded-event
+          saturation load, which runs explicitly on the clean release CI worker
         - [x] after the final v0.1.6 visual surface is stable, capture a
           deterministic privacy-safe Dark-theme demonstration as
           `assets/screendump0.png` and place it near the top of README with

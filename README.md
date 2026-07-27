@@ -44,10 +44,12 @@ cd D:\dev\agenterm
 ```
 
 The default build is an incremental development build. Use
-`.\build.bat release` only for a distributable build. It stages the finished
-artifacts in `dist/` and then clears Cargo's `target/` build cache; ordinary
-development builds retain the incremental cache. Both modes produce four
-ignored local artifacts under `dist/`:
+`.\build.bat release-fast` for repeated optimized local testing: it skips LTO,
+uses parallel code generation, and retains incremental state. Use
+`.\build.bat release` only for a distributable build; it applies the
+size-focused profile, stages the finished artifacts in `dist/`, and then clears
+Cargo's `target/` build cache. All modes produce four ignored local artifacts
+under `dist/`:
 
 - `dist/agenterm.exe` — GUI application; double-clicking does not create a
   temporary console window.
@@ -63,6 +65,11 @@ Run the complete quality gate:
 ```powershell
 .\check.ps1
 ```
+
+Smoke tests inherit `AGENTERM_NO_ACTIVATE=1`, so their isolated GUI windows do
+not interrupt the foreground application. `.\check.ps1 -Release` omits the
+4,128-write event-journal load test; the clean GitHub release runner adds
+`-IncludeStress`.
 
 ## Examples
 
@@ -108,9 +115,10 @@ run:
 .\release.ps1
 ```
 
-The script runs the full local quality gate and atomically pushes `main` plus
-the `v<version>` tag. GitHub Actions then builds on a clean Windows runner and
-publishes all four EXEs, metadata, ZIP, and generated notes to GitHub Releases.
+The script runs the local release quality gate without the event-journal load
+test, then atomically pushes `main` plus the `v<version>` tag. GitHub Actions
+runs that stress coverage on a clean Windows runner before publishing all four
+EXEs, metadata, ZIP, and generated notes to GitHub Releases.
 
 ## Documentation
 

@@ -15,7 +15,7 @@ $destinationDirectory = [IO.Path]::GetDirectoryName($destinationPath)
 
 try {
     Copy-Item -LiteralPath $sourcePath -Destination $destinationPath -Force
-    exit 0
+    return
 }
 catch [IO.IOException] {
     if (-not (Test-Path -LiteralPath $destinationPath)) {

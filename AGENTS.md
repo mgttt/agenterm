@@ -26,23 +26,66 @@ the information cannot live here or in the PRD.
 - `assets/` — application icon sources.
 - `scripts/` — build metadata tooling.
 
+## Parallel execution discipline
+
+Before editing, sketch the task's dependency graph: identify independent work,
+shared prerequisites, integration points, and the final validation path. Use
+subagents by default for genuinely independent branches such as:
+
+- changes whose owned file sets do not overlap;
+- read-only code or reference audits that can inform an implementation;
+- isolated black-box test investigations with distinct IPC and workspace paths;
+- documentation or test work that does not depend on an unfinished interface.
+
+Give every subagent a bounded deliverable, an explicit file-owner list, and the
+evidence it must return. Ownership is exclusive while the task is active. The
+subagent must report changed files, tests run, findings, and any assumptions,
+then hand control of those files back to the primary agent. The primary agent
+owns cross-cutting decisions, reviews every handoff, resolves integration
+issues, and commits only small coherent increments.
+
+All agents share one checkout and see edits immediately. Never concurrently
+edit a hot/shared file such as `src/lib.rs`, `PRD.md`, `Cargo.toml`, build
+scripts, or this guide. Split work at stable file boundaries where possible; if
+two tasks must touch the same file, serialize them under one owner. Do not run
+competing Cargo builds against the same target directory, and do not let a test
+agent rebuild or replace an artifact another agent is actively validating.
+
+Parallelism is a latency tool, not a goal. Keep tightly coupled changes,
+one-file refactors, quick inspections, and tasks dominated by a shared
+prerequisite on the primary path. After parallel work returns, integrate and
+review it before validation. Run the final formatting, Clippy, unit-test,
+artifact, and full public-interface gates serially on the integrated tree so the
+result represents one reproducible source state.
+
 ## Development loop
 
 Use PowerShell from the repository root:
 
 ```powershell
 .\build.bat             # fast incremental dev build -> .\dist\
+.\build.bat release-fast # optimized incremental local-test build -> .\dist\
 .\check.ps1 -SkipSmoke  # fmt, Clippy, unit tests, dev artifact
 .\check.ps1             # full public-interface regression
+.\check.ps1 -Release    # local release gate; skips event-journal load stress
 .\build.bat release     # distributable release artifact
 .\release.ps1           # validate, tag, push; CI publishes GitHub Release
 ```
 
 The former `.cargo/config.toml` forced `jobs = 1` and made clean builds much
 slower. Do not restore a global job limit. Keep the default dev path
-incremental; after staging all distributable files in `dist/`, the release
-build deliberately runs `cargo clean` so `target/` cannot grow without bound.
-Release-only size optimization belongs in `[profile.release]`.
+incremental and let Cargo use the machine's logical CPUs. Use `release-fast`
+for repeated optimized local testing: it disables LTO, uses parallel codegen,
+and retains incremental state. After staging all distributable files in
+`dist/`, the final `release` build deliberately runs `cargo clean` so `target/`
+cannot grow without bound. Release-only size optimization belongs in
+`[profile.release]`. The staging path is intentionally one PowerShell process
+and prefers `pwsh` when available; do not split it back into one interpreter
+startup per artifact.
+All smoke tests inherit `AGENTERM_NO_ACTIVATE=1`; GUI launches and CLI
+autostarts must honor it without taking foreground focus. Local release
+qualification skips the bounded-journal saturation load. Only the clean release
+CI runner should opt back in with `check.ps1 -Release -IncludeStress`.
 The release gate enforces explicit budgets of 4 MiB for `agenterm.exe` and
 2 MiB each for `agenterm-cli.exe` and `agenterm-mux.exe`; investigate dependency
 or feature growth instead of raising them casually.
