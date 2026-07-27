@@ -3,6 +3,7 @@ use std::{
     collections::HashSet,
     env,
     ffi::c_void,
+    fs::OpenOptions,
     io::{Read, Write},
     mem, ptr,
     sync::mpsc::{self, Receiver, Sender},
@@ -16,7 +17,8 @@ use rmux_pty::{
 };
 use windows_sys::Win32::{
     Foundation::{
-        COLORREF, GlobalFree, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM,
+        COLORREF, GlobalFree, HINSTANCE, HWND, INVALID_HANDLE_VALUE, LPARAM, LRESULT, POINT, RECT,
+        SIZE, WPARAM,
     },
     Graphics::Gdi::{
         BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BeginPaint, BitBlt, CLEARTYPE_QUALITY,
@@ -30,6 +32,9 @@ use windows_sys::Win32::{
         SetBkMode, SetTextColor, TEXTMETRICW, TRANSPARENT, UpdateWindow,
     },
     System::{
+        Console::{
+            ATTACH_PARENT_PROCESS, AttachConsole, FreeConsole, GetStdHandle, STD_ERROR_HANDLE,
+        },
         DataExchange::{
             CloseClipboard, EmptyClipboard, GetClipboardData, IsClipboardFormatAvailable,
             OpenClipboard, SetClipboardData,
@@ -240,10 +245,29 @@ fn gui_cli_guidance(arguments: &[String]) -> String {
 }
 
 fn write_best_effort_stderr(message: &str) {
-    let mut stderr = std::io::stderr().lock();
-    let _ = stderr.write_all(message.as_bytes());
-    let _ = stderr.write_all(b"\n");
-    let _ = stderr.flush();
+    let payload = format!("{message}\n");
+    let stderr_handle = unsafe { GetStdHandle(STD_ERROR_HANDLE) };
+    if !stderr_handle.is_null() && stderr_handle != INVALID_HANDLE_VALUE {
+        let mut stderr = std::io::stderr().lock();
+        if stderr.write_all(payload.as_bytes()).is_ok() && stderr.flush().is_ok() {
+            return;
+        }
+    }
+
+    // A /SUBSYSTEM:WINDOWS process normally has no standard handles even when
+    // launched from PowerShell or cmd. Briefly attach to the parent's console
+    // and write directly to its output buffer without allocating a console,
+    // rebinding process-wide stdio, or reading stdin.
+    if unsafe { AttachConsole(ATTACH_PARENT_PROCESS) } == 0 {
+        return;
+    }
+    if let Ok(mut console) = OpenOptions::new().write(true).open("CONOUT$") {
+        let _ = console.write_all(payload.as_bytes());
+        let _ = console.flush();
+    }
+    unsafe {
+        FreeConsole();
+    }
 }
 
 fn show_startup_error(error: &anyhow::Error) {
