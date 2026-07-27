@@ -9,6 +9,7 @@ $declaredEvidence = @(
     'ux.detach-first-window-close'
     'ux.live-close-confirmation'
     'ux.locale-consistency'
+    'ux.keyboard-surface-navigation'
     'ux.mouse-scrollback'
     'ux.persistent-workspace'
     'ux.semantic-ui-automation'
@@ -56,8 +57,16 @@ $draftFile = Join-Path $env:TEMP "$name.txt"
 
 function Invoke-AgenTerm {
     param([string[]]$CommandArgs)
-    $output = & $Exe @CommandArgs 2>&1
-    if ($LASTEXITCODE -ne 0) {
+    $previousPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $output = & $Exe @CommandArgs 2>&1
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousPreference
+    }
+    if ($exitCode -ne 0) {
         throw "agenterm $($CommandArgs -join ' ') failed:`n$($output -join "`n")"
     }
     return ($output -join "`n")
@@ -68,8 +77,16 @@ function Invoke-AgenTermAt {
         [Parameter(Mandatory = $true)][string]$Address,
         [string[]]$CommandArgs
     )
-    $output = & $Exe '--address' $Address @CommandArgs 2>&1
-    if ($LASTEXITCODE -ne 0) {
+    $previousPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $output = & $Exe '--address' $Address @CommandArgs 2>&1
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousPreference
+    }
+    if ($exitCode -ne 0) {
         throw "agenterm --address $Address $($CommandArgs -join ' ') failed:`n$($output -join "`n")"
     }
     return ($output -join "`n")
@@ -136,6 +153,46 @@ public static class AgenTermNativeTest {
     private static extern IntPtr SendMessageW(
         IntPtr window, uint message, UIntPtr wParam, IntPtr lParam);
 
+    [DllImport("user32.dll", EntryPoint = "SendMessageW")]
+    private static extern IntPtr SendMessagePointer(
+        IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr window);
+
+    [DllImport("user32.dll")]
+    private static extern void keybd_event(
+        byte virtualKey, byte scanCode, uint flags, UIntPtr extraInfo);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(
+        IntPtr window, out uint processId);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetGUIThreadInfo(
+        uint threadId, ref GUITHREADINFO info);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct GUITHREADINFO {
+        public uint cbSize;
+        public uint flags;
+        public IntPtr hwndActive;
+        public IntPtr hwndFocus;
+        public IntPtr hwndCapture;
+        public IntPtr hwndMenuOwner;
+        public IntPtr hwndMoveSize;
+        public IntPtr hwndCaret;
+        public RECT rcCaret;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RECT {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
     [DllImport("user32.dll")]
     private static extern IntPtr GetSystemMenu(IntPtr window, bool revert);
 
@@ -178,6 +235,54 @@ public static class AgenTermNativeTest {
 
     public static void SystemCommand(IntPtr window, uint command) {
         SendMessageW(window, 0x0112, (UIntPtr)command, IntPtr.Zero);
+    }
+
+    public static void KeyDown(IntPtr window, byte virtualKey) {
+        SetForegroundWindow(window);
+        keybd_event(virtualKey, 0, 0, UIntPtr.Zero);
+    }
+
+    public static void KeyUp(byte virtualKey) {
+        keybd_event(virtualKey, 0, 2, UIntPtr.Zero);
+    }
+
+    public static void ControlArrow(IntPtr window, byte virtualKey) {
+        KeyDown(window, 0x11);
+        KeyDown(window, virtualKey);
+        KeyUp(virtualKey);
+        KeyUp(0x11);
+    }
+
+    private static IntPtr FocusedControl(IntPtr window) {
+        uint processId;
+        uint threadId = GetWindowThreadProcessId(window, out processId);
+        GUITHREADINFO info = new GUITHREADINFO();
+        info.cbSize = (uint)Marshal.SizeOf<GUITHREADINFO>();
+        if (threadId == 0 || !GetGUIThreadInfo(threadId, ref info)) {
+            throw new InvalidOperationException("GetGUIThreadInfo failed");
+        }
+        return info.hwndFocus;
+    }
+
+    public static int[] EditSelection(IntPtr window) {
+        IntPtr edit = FocusedControl(window);
+        IntPtr start = Marshal.AllocHGlobal(4);
+        IntPtr end = Marshal.AllocHGlobal(4);
+        try {
+            Marshal.WriteInt32(start, 0);
+            Marshal.WriteInt32(end, 0);
+            SendMessagePointer(edit, 0x00B0, start, end);
+            return new int[] { Marshal.ReadInt32(start), Marshal.ReadInt32(end) };
+        }
+        finally {
+            Marshal.FreeHGlobal(start);
+            Marshal.FreeHGlobal(end);
+        }
+    }
+
+    public static void SetEditSelection(IntPtr window, int start, int end) {
+        IntPtr edit = FocusedControl(window);
+        SendMessageW(edit, 0x00B1, (UIntPtr)(uint)start, (IntPtr)end);
     }
 }
 '@
@@ -402,6 +507,99 @@ try {
     if ($window -eq [IntPtr]::Zero) {
         throw 'could not resolve the public AgenTerm window for mouse regression'
     }
+
+    Write-Host 'STEP physical keyboard surface navigation and native Edit arbitration'
+    Invoke-AgenTerm @('set-composer', '-t', $id, 'alpha beta gamma') | Out-Null
+    Invoke-AgenTerm @('focus', 'composer', '-t', $id) | Out-Null
+    [AgenTermNativeTest]::SetEditSelection($window, 16, 16)
+    $composerBefore = [AgenTermNativeTest]::EditSelection($window)
+    [AgenTermNativeTest]::ControlArrow($window, 0x25)
+    $composerSnapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $composerAfter = [AgenTermNativeTest]::EditSelection($window)
+    if ($composerSnapshot.focus.surface -ne 'composer' -or
+        $composerAfter[0] -ge $composerBefore[0]) {
+        throw 'Composer Ctrl+Left was stolen instead of reaching the native Edit control'
+    }
+
+    Invoke-AgenTerm @('focus', 'terminal', '-t', $id) | Out-Null
+    [AgenTermNativeTest]::ControlArrow($window, 0x28)
+    Invoke-AgenTerm @('wait-ui', '--active', $id, '--focus', 'composer') | Out-Null
+    [AgenTermNativeTest]::ControlArrow($window, 0x26)
+    Invoke-AgenTerm @('wait-ui', '--active', $id, '--focus', 'terminal') | Out-Null
+
+    $hiddenTabs = Invoke-AgenTerm @('ui-action', 'toggle-tabs') | ConvertFrom-Json
+    if ($hiddenTabs.layout.sidebar.visible -or
+        $hiddenTabs.layout.sidebar.effective_width -ne 0) {
+        throw 'toggle-tabs did not expose a hidden zero-width Tabs surface'
+    }
+    [AgenTermNativeTest]::ControlArrow($window, 0x25)
+    Invoke-AgenTerm @(
+        'wait-ui', '--active', $id, '--focus', 'tabs'
+    ) | Out-Null
+    $restoredTabs = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    if (-not $restoredTabs.layout.sidebar.visible -or
+        $restoredTabs.layout.sidebar.effective_width -le 0) {
+        throw 'Terminal Ctrl+Left did not restore and focus hidden Tabs'
+    }
+    [AgenTermNativeTest]::ControlArrow($window, 0x27)
+    Invoke-AgenTerm @('wait-ui', '--active', $id, '--focus', 'terminal') | Out-Null
+
+    $repeatBaseline = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    [AgenTermNativeTest]::KeyDown($window, 0x11)
+    [AgenTermNativeTest]::KeyDown($window, 0x28)
+    Invoke-AgenTerm @('wait-ui', '--active', $id, '--focus', 'composer') | Out-Null
+    [AgenTermNativeTest]::KeyDown($window, 0x28)
+    [AgenTermNativeTest]::KeyDown($window, 0x28)
+    [AgenTermNativeTest]::KeyUp(0x28)
+    [AgenTermNativeTest]::KeyUp(0x11)
+    $repeatSnapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $repeatEvents = Invoke-AgenTerm @(
+        'read-events',
+        '--epoch', $repeatBaseline.event_position.epoch,
+        '--after', "$($repeatBaseline.event_position.sequence)"
+    ) | ConvertFrom-Json
+    $keyboardFocusEvents = @(
+        $repeatEvents.events |
+            Where-Object {
+                $_.kind -eq 'focus.changed' -and $_.payload.cause -eq 'keyboard'
+            }
+    )
+    if ($repeatSnapshot.focus.surface -ne 'composer' -or
+        $keyboardFocusEvents.Count -ne 1) {
+        throw 'held Ctrl+Down crossed focus more than once'
+    }
+
+    $settingsSnapshot = Invoke-AgenTerm @('ui-action', 'open-settings') | ConvertFrom-Json
+    if ($settingsSnapshot.focus.surface -ne 'settings') {
+        throw 'Settings did not expose its native Edit focus'
+    }
+    [AgenTermNativeTest]::SetEditSelection($window, 7, 7)
+    $settingsBefore = [AgenTermNativeTest]::EditSelection($window)
+    [AgenTermNativeTest]::ControlArrow($window, 0x25)
+    $settingsAfterSnapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $settingsAfter = [AgenTermNativeTest]::EditSelection($window)
+    if ($settingsAfterSnapshot.focus.surface -ne 'settings' -or
+        $settingsAfter[0] -ge $settingsBefore[0]) {
+        throw 'Settings Ctrl+Left was stolen instead of reaching the native Edit control'
+    }
+    Invoke-AgenTerm @('ui-action', 'cancel') | Out-Null
+
+    $noteSnapshot = Invoke-AgenTerm @('ui-action', 'edit-tab', '-t', $id) | ConvertFrom-Json
+    if ($noteSnapshot.focus.surface -ne 'note-editor') {
+        throw 'Tab note editor did not expose its native Edit focus'
+    }
+    [AgenTermNativeTest]::SetEditSelection($window, 7, 7)
+    $noteBefore = [AgenTermNativeTest]::EditSelection($window)
+    [AgenTermNativeTest]::ControlArrow($window, 0x25)
+    $noteAfterSnapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $noteAfter = [AgenTermNativeTest]::EditSelection($window)
+    if ($noteAfterSnapshot.focus.surface -ne 'note-editor' -or
+        $noteAfter[0] -ge $noteBefore[0]) {
+        throw 'Note editor Ctrl+Left was stolen instead of reaching the native Edit control'
+    }
+    Invoke-AgenTerm @('ui-action', 'cancel') | Out-Null
+    Write-Evidence 'ux.keyboard-surface-navigation'
+
     if ([AgenTermNativeTest]::SystemMenuLabel($window, 0x1f00) -notlike 'Copy*' -or
         [AgenTermNativeTest]::SystemMenuLabel($window, 0x1f10) -notlike 'Paste*') {
         throw 'window icon system menu did not expose Copy and Paste'
@@ -487,7 +685,13 @@ try {
         throw 'system-menu clipboard state was not enabled for terminal selection and text'
     }
     [AgenTermNativeTest]::SystemCommand($window, 0x1f00)
-    $copied = Get-Clipboard -Raw
+    $copyWait = [Diagnostics.Stopwatch]::StartNew()
+    do {
+        $copied = Get-Clipboard -Raw
+        if ($copied -eq $selectionToken) {
+            break
+        }
+    } while ($copyWait.ElapsedMilliseconds -lt 1000)
     if ($copied -ne $selectionToken) {
         throw "terminal selection copied unexpected text: '$copied'"
     }
@@ -655,7 +859,10 @@ try {
     }
     Invoke-AgenTermAt -Address $stopAddress `
         -CommandArgs @('ui-action', 'stop-server-and-exit') | Out-Null
-    Wait-Process -Id ([int]$stopServerBefore.pid) -Timeout 10 -ErrorAction Stop
+    $stoppingServer = Get-Process -Id ([int]$stopServerBefore.pid) -ErrorAction SilentlyContinue
+    if ($null -ne $stoppingServer) {
+        $stoppingServer | Wait-Process -Timeout 10 -ErrorAction Stop
+    }
     if (Get-Process -Id ([int]$stopServerBefore.pid) -ErrorAction SilentlyContinue) {
         throw 'stop-server-and-exit left the isolated server process running'
     }

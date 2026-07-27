@@ -140,6 +140,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       "evidence_ids": ["ux.semantic-ui-automation"]
     },
     {
+      "id": "workspace.keyboard-surface-navigation",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "keyboard-first Ctrl+Arrow surface navigation preserves native Edit word movement and suppresses cross-focus repeat",
+      "evidence_ids": ["ux.keyboard-surface-navigation"]
+    },
+    {
       "id": "workspace.hierarchical-tabs",
       "protocol_feature": "hierarchical_tabs",
       "kind": "behavior",
@@ -223,7 +231,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       "status": "shipped",
       "evidence_mode": "black-box",
       "prd": "Rhai denies ambient mutation authority and enforces operation budgets",
-      "evidence_ids": ["script.rhai-deny-budget"]
+      "evidence_ids": ["script.rhai-deny-budget", "script.rhai-framed"]
     },
     {
       "id": "scripting.rust-host-rhai-language",
@@ -939,8 +947,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
         - `send-composer [-t target]`
         - `set-tab-note [-t target] text`, `show-tab-note [-t target]`
       - Semantic UI control
-        - `focus terminal|composer|sidebar [-t target]`
-        - `ui-action new-tab|new-child|edit-tab|toggle-tree|select-tab|close-tab|confirm|cancel|
+        - `focus terminal|composer|tabs [-t target]` (`sidebar` remains an alias)
+        - `ui-action new-tab|new-child|edit-tab|toggle-tree|toggle-tabs|select-tab|close-tab|confirm|cancel|
           composer-send|copy-selection|open-settings|window-minimize|
           window-maximize|window-restore [-t target]`
         - `ui-action window-resize --width PX --height PX`
@@ -1028,8 +1036,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
           PTY, and workspace-health assertion; a sidecar error alone is not
           accepted as isolation evidence
       - PRD-command-test alignment
-        - [x] evidence IDs `script.rhai-pure`, `script.rhai-observe`, and
-          `script.rhai-deny-budget` are registered with post-assertion emissions
+        - [x] evidence IDs `script.rhai-pure`, `script.rhai-observe`,
+          `script.rhai-deny-budget`, and `script.rhai-framed` are registered with
+          post-assertion emissions
         - [x] changing a shipped script command, capability, API entry, or
           evidence ID must atomically update the public command/API catalog,
           PRD `[x]` leaf, black-box assertion, and alignment contract
@@ -1135,7 +1144,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
         - [ ] Settings uses `Dark`/`Light` labels with stable `dark|light` IDs,
           live preview, atomic Apply, and Cancel/Esc rollback; dark remains the
           migration default and custom theme files remain unfrozen
-        - [ ] Terminal `Ctrl+Down` focuses Composer and Composer `Ctrl+Up`
+        - [x] Terminal `Ctrl+Down` focuses Composer and Composer `Ctrl+Up`
           returns to Terminal; source-inapplicable directions pass through.
           Terminal `Ctrl+Left` shows/focuses Tabs when hidden and Tabs
           `Ctrl+Right` returns to Terminal, but no native Edit control loses
@@ -1181,20 +1190,21 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
           covers preview, Apply, Cancel/Esc rollback, restart persistence, PTY
           continuity, Dark/Light screenshots, and readable focus/contrast
       - Release core: keyboard-first surface navigation
-        - [ ] directionally map Terminal `Ctrl+Down` to Composer and Composer
+        - [x] keyboard-first Ctrl+Arrow surface navigation preserves native Edit word movement and suppresses cross-focus repeat
+        - [x] directionally map Terminal `Ctrl+Down` to Composer and Composer
           `Ctrl+Up` to Terminal while retaining `Ctrl+Up` in the PTY,
           `Ctrl+Down` in native Edit, existing `Ctrl+Shift+I`, and Esc
-        - [ ] fire surface navigation once per physical press and suppress
+        - [x] fire surface navigation once per physical press and suppress
           auto-repeat crossing into the newly focused surface; modal focus traps
           and unavailable surfaces fail safely
-        - [ ] after real cmd, PowerShell, and RMUX conflict tests, consider
-          Terminal `Ctrl+Left` to Tabs and Tabs `Ctrl+Right` to Terminal;
-          native Edit/Settings controls must always retain standard
-          `Ctrl+Left/Right` word navigation, and hidden-Tabs behavior remains a
-          product decision
-        - [ ] route keyboard and semantic focus through one typed operation,
+        - [x] Terminal `Ctrl+Left` shows and focuses Tabs, including when hidden,
+          and Tabs `Ctrl+Right` returns to Terminal; Composer, note, and Settings
+          Edit controls retain native `Ctrl+Left/Right` word navigation
+        - [x] route keyboard and semantic focus through one typed operation,
           retain `ui-snapshot.focus.surface` as the fact source, and black-box
-          direction, pass-through, repeat, modal, and focus-indicator behavior
+          direction, native Edit pass-through, repeat, and hidden recovery
+        - [ ] extend conflict evidence across real cmd, PowerShell, and RMUX and
+          add Dark/Light focus-indicator screenshots
       - Release core: working-context status segments
         - [ ] partition the bottom bar into host-owned Tabs recovery,
           last-known CWD, flexible provider, and right-aligned Proxy segments;

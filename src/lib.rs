@@ -56,10 +56,10 @@ use windows_sys::Win32::{
         SW_MINIMIZE, SW_SHOW, SW_SHOWMAXIMIZED, SW_SHOWNORMAL, SendMessageW, SetForegroundWindow,
         SetTimer, SetWindowLongPtrW, SetWindowTextW, ShowWindow, TranslateMessage, WM_APP, WM_CHAR,
         WM_CLOSE, WM_COMMAND, WM_COPY, WM_CREATE, WM_CUT, WM_DESTROY, WM_ENDSESSION, WM_ERASEBKGND,
-        WM_INITMENUPOPUP, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL,
-        WM_NCDESTROY, WM_PAINT, WM_PASTE, WM_QUERYENDSESSION, WM_RBUTTONDOWN, WM_SETFOCUS, WM_SIZE,
-        WM_SYSCOMMAND, WM_TIMER, WNDCLASSW, WS_BORDER, WS_CHILD, WS_CLIPCHILDREN,
-        WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE,
+        WM_INITMENUPOPUP, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
+        WM_MOUSEWHEEL, WM_NCDESTROY, WM_PAINT, WM_PASTE, WM_QUERYENDSESSION, WM_RBUTTONDOWN,
+        WM_SETFOCUS, WM_SIZE, WM_SYSCOMMAND, WM_TIMER, WNDCLASSW, WS_BORDER, WS_CHILD,
+        WS_CLIPCHILDREN, WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE,
     },
 };
 
@@ -680,11 +680,15 @@ fn run_gui() -> Result<()> {
 
     let mut message: MSG = unsafe { mem::zeroed() };
     while unsafe { GetMessageW(&mut message, ptr::null_mut(), 0, 0) } > 0 {
-        if message.message == WM_KEYDOWN
-            && let Some(state) = state_mut(window)
-            && state.handle_shortcut(message.wParam as u32)
-        {
-            continue;
+        if let Some(state) = state_mut(window) {
+            if message.message == WM_KEYDOWN
+                && state.handle_shortcut(message.wParam as u32, message.lParam)
+            {
+                continue;
+            }
+            if message.message == WM_KEYUP {
+                state.handle_shortcut_key_up(message.wParam as u32);
+            }
         }
         unsafe {
             TranslateMessage(&message);
@@ -1379,6 +1383,56 @@ enum EditShortcut {
     Paste,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HostFocusSurface {
+    Terminal,
+    Tabs,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FocusSurface {
+    Terminal,
+    Composer,
+    Tabs,
+    Settings,
+    NoteEditor,
+}
+
+impl FocusSurface {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Terminal => "terminal",
+            Self::Composer => "composer",
+            Self::Tabs => "tabs",
+            Self::Settings => "settings",
+            Self::NoteEditor => "note-editor",
+        }
+    }
+}
+
+fn surface_navigation(
+    source: FocusSurface,
+    control: bool,
+    shift: bool,
+    alt: bool,
+    virtual_key: u32,
+) -> Option<FocusSurface> {
+    if !control || shift || alt {
+        return None;
+    }
+    match (source, virtual_key) {
+        (FocusSurface::Terminal, 0x28) => Some(FocusSurface::Composer),
+        (FocusSurface::Composer, 0x26) => Some(FocusSurface::Terminal),
+        (FocusSurface::Terminal, 0x25) => Some(FocusSurface::Tabs),
+        (FocusSurface::Tabs, 0x27) => Some(FocusSurface::Terminal),
+        _ => None,
+    }
+}
+
+fn is_latched_navigation_repeat(latch: Option<u32>, virtual_key: u32, lparam: LPARAM) -> bool {
+    latch == Some(virtual_key) && (lparam as usize & (1usize << 30)) != 0
+}
+
 fn edit_shortcut(control: bool, virtual_key: u32) -> Option<EditShortcut> {
     control.then_some(())?;
     match virtual_key {
@@ -1626,6 +1680,8 @@ struct AppState {
     note_edit_target: Option<u64>,
     settings_open: bool,
     settings_theme_draft: ThemeId,
+    host_focus_surface: HostFocusSurface,
+    navigation_latch: Option<u32>,
     config: AppConfig,
     terminal_font: HFONT,
     terminal_font_owned: bool,
@@ -1711,6 +1767,8 @@ impl AppState {
             note_edit_target: None,
             settings_open: false,
             settings_theme_draft: config.color_theme,
+            host_focus_surface: HostFocusSurface::Terminal,
+            navigation_latch: None,
             config,
             terminal_font,
             terminal_font_owned,
@@ -2006,6 +2064,7 @@ impl AppState {
             return;
         }
         self.pending_close = Some(id);
+        self.navigation_latch = None;
         unsafe {
             ShowWindow(self.edit, SW_HIDE);
             ShowWindow(self.send_button, SW_HIDE);
@@ -2047,6 +2106,7 @@ impl AppState {
             self.finish_close_confirmation(false);
         }
         self.save_active_composer();
+        self.navigation_latch = None;
         self.window_close_previous_focus = previous_focus;
         self.window_close_pending = true;
         unsafe {
@@ -2071,6 +2131,7 @@ impl AppState {
                 }
                 self.detached_was_maximized = unsafe { IsZoomed(self.window) } != 0;
                 self.window_detached = true;
+                self.navigation_latch = None;
                 self.event_journal.commit(
                     "window.visibility",
                     None,
@@ -2126,6 +2187,8 @@ impl AppState {
     fn reattach_window(&mut self, reason: &str) {
         let was_detached = self.window_detached || unsafe { IsWindowVisible(self.window) } == 0;
         self.window_detached = false;
+        self.host_focus_surface = HostFocusSurface::Terminal;
+        self.navigation_latch = None;
         unsafe {
             ShowWindow(
                 self.window,
@@ -2258,10 +2321,27 @@ impl AppState {
     fn layout(&self) {
         let mut client: RECT = unsafe { mem::zeroed() };
         unsafe { GetClientRect(self.window, &mut client) };
+        let sidebar_width = self.effective_tabs_width();
         let content_bottom = (client.bottom - STATUS_BAR_HEIGHT).max(0);
-        let content_width = (client.right - SIDEBAR_WIDTH).max(180);
+        let content_width = (client.right - sidebar_width).max(180);
         let edit_width = (content_width - 104).max(80);
         unsafe {
+            ShowWindow(
+                self.settings_button,
+                if self.config.tabs_visible {
+                    SW_SHOW
+                } else {
+                    SW_HIDE
+                },
+            );
+            ShowWindow(
+                self.new_button,
+                if self.config.tabs_visible {
+                    SW_SHOW
+                } else {
+                    SW_HIDE
+                },
+            );
             MoveWindow(
                 self.settings_button,
                 12,
@@ -2280,7 +2360,7 @@ impl AppState {
             );
             MoveWindow(
                 self.edit,
-                SIDEBAR_WIDTH + 10,
+                sidebar_width + 10,
                 (content_bottom - COMPOSER_HEIGHT + 30).max(0),
                 edit_width,
                 COMPOSER_HEIGHT - 40,
@@ -2288,13 +2368,13 @@ impl AppState {
             );
             MoveWindow(
                 self.send_button,
-                SIDEBAR_WIDTH + 20 + edit_width,
+                sidebar_width + 20 + edit_width,
                 (content_bottom - COMPOSER_HEIGHT + 32).max(0),
                 74,
                 34,
                 1,
             );
-            let settings_left = SIDEBAR_WIDTH + (content_width - 520) / 2;
+            let settings_left = sidebar_width + (content_width - 520) / 2;
             let settings_top = (content_bottom - 320) / 2;
             MoveWindow(
                 self.settings_font,
@@ -2349,6 +2429,7 @@ impl AppState {
 
     fn open_settings(&mut self) {
         self.save_active_composer();
+        self.navigation_latch = None;
         self.settings_open = true;
         self.settings_theme_draft = self.config.color_theme;
         self.note_edit_target = None;
@@ -2378,6 +2459,7 @@ impl AppState {
     fn close_settings(&mut self) {
         self.settings_open = false;
         self.settings_theme_draft = self.config.color_theme;
+        self.host_focus_surface = HostFocusSurface::Terminal;
         unsafe {
             ShowWindow(self.settings_font, SW_HIDE);
             ShowWindow(self.settings_size, SW_HIDE);
@@ -2479,16 +2561,17 @@ impl AppState {
     }
 
     fn left_button_down(&mut self, x: i32, y: i32) {
+        let sidebar_width = self.effective_tabs_width();
         if self.window_close_pending
             || self.pending_close.is_some()
             || self.settings_open
-            || x < SIDEBAR_WIDTH
+            || x < sidebar_width
         {
             self.terminal_selection = None;
             self.click(x, y);
             return;
         }
-        unsafe { SetFocus(self.window) };
+        self.set_focus_surface(FocusSurface::Terminal, "mouse");
         if self.click_scrollbar(x, y) {
             self.terminal_selection = None;
             return;
@@ -2575,6 +2658,7 @@ impl AppState {
     }
 
     fn click(&mut self, x: i32, y: i32) {
+        let sidebar_width = self.effective_tabs_width();
         if self.window_close_pending {
             let mut client: RECT = unsafe { mem::zeroed() };
             unsafe { GetClientRect(self.window, &mut client) };
@@ -2605,8 +2689,8 @@ impl AppState {
             }
             return;
         }
-        if x >= SIDEBAR_WIDTH {
-            unsafe { SetFocus(self.window) };
+        if x >= sidebar_width {
+            self.set_focus_surface(FocusSurface::Terminal, "mouse");
             if self.click_scrollbar(x, y) {
                 return;
             }
@@ -2615,6 +2699,7 @@ impl AppState {
             }
             return;
         }
+        self.set_focus_surface(FocusSurface::Tabs, "mouse");
         let Some(row) = tree_row_at_y(y) else {
             return;
         };
@@ -2671,14 +2756,14 @@ impl AppState {
             self.event_journal
                 .commit("tab.selected", Some(id), serde_json::json!({}));
         }
-        unsafe {
-            SetFocus(self.window);
-            InvalidateRect(self.window, ptr::null(), 0);
-        }
+        self.set_focus_surface(FocusSurface::Tabs, "mouse");
     }
 
     fn right_click(&mut self, x: i32, y: i32) {
-        if x >= SIDEBAR_WIDTH || self.pending_close.is_some() || self.window_close_pending {
+        if x >= self.effective_tabs_width()
+            || self.pending_close.is_some()
+            || self.window_close_pending
+        {
             return;
         }
         let Some(row) = tree_row_at_y(y) else {
@@ -2750,10 +2835,7 @@ impl AppState {
         self.note_edit_target = None;
         unsafe { SetWindowTextW(self.send_button, wide(LABEL_SEND).as_ptr()) };
         self.load_active_composer();
-        unsafe {
-            SetFocus(self.window);
-            InvalidateRect(self.window, ptr::null(), 0);
-        }
+        self.set_focus_surface(FocusSurface::Terminal, "note-editor");
     }
 
     fn dispatch_edit_shortcut(&self, shortcut: EditShortcut, focused: HWND) {
@@ -2981,9 +3063,135 @@ impl AppState {
         Ok(characters)
     }
 
-    fn handle_shortcut(&mut self, virtual_key: u32) -> bool {
+    fn current_focus_surface(&self) -> FocusSurface {
+        let focused = unsafe { GetFocus() };
+        if focused == self.settings_font
+            || focused == self.settings_size
+            || focused == self.settings_dark
+            || focused == self.settings_light
+            || focused == self.settings_cancel
+            || focused == self.settings_apply
+        {
+            FocusSurface::Settings
+        } else if focused == self.edit && self.note_edit_target.is_some() {
+            FocusSurface::NoteEditor
+        } else if focused == self.edit {
+            FocusSurface::Composer
+        } else {
+            match self.host_focus_surface {
+                HostFocusSurface::Terminal => FocusSurface::Terminal,
+                HostFocusSurface::Tabs => FocusSurface::Tabs,
+            }
+        }
+    }
+
+    fn effective_tabs_width(&self) -> i32 {
+        if !self.config.tabs_visible {
+            return 0;
+        }
+        let mut client: RECT = unsafe { mem::zeroed() };
+        unsafe { GetClientRect(self.window, &mut client) };
+        i32::from(self.config.tabs_width)
+            .min((client.right - ui_geometry::TERMINAL_MIN_WIDTH).max(0))
+    }
+
+    fn set_tabs_visible(&mut self, visible: bool, cause: &str) {
+        if self.config.tabs_visible == visible {
+            return;
+        }
+        self.config.tabs_visible = visible;
+        if !visible && self.host_focus_surface == HostFocusSurface::Tabs {
+            self.host_focus_surface = HostFocusSurface::Terminal;
+            unsafe { SetFocus(self.window) };
+        }
+        if let Err(error) = save_config(&self.config) {
+            self.last_error = Some(format!("could not save Tabs visibility: {error:#}"));
+        }
+        self.event_journal.commit(
+            "layout.tabs.visibility",
+            None,
+            serde_json::json!({"visible": visible, "cause": cause}),
+        );
+        self.layout();
+        unsafe { InvalidateRect(self.window, ptr::null(), 0) };
+    }
+
+    fn set_focus_surface(&mut self, target: FocusSurface, cause: &str) -> bool {
+        let previous = self.current_focus_surface();
+        let focused = match target {
+            FocusSurface::Terminal => {
+                self.host_focus_surface = HostFocusSurface::Terminal;
+                unsafe { SetFocus(self.window) };
+                true
+            }
+            FocusSurface::Composer => {
+                if self.settings_open
+                    || self.note_edit_target.is_some()
+                    || self.window_close_pending
+                    || self.pending_close.is_some()
+                    || self.active.is_none()
+                {
+                    false
+                } else {
+                    unsafe { SetFocus(self.edit) };
+                    true
+                }
+            }
+            FocusSurface::Tabs => {
+                if self.settings_open
+                    || self.note_edit_target.is_some()
+                    || self.window_close_pending
+                    || self.pending_close.is_some()
+                {
+                    false
+                } else {
+                    if !self.config.tabs_visible {
+                        self.set_tabs_visible(true, cause);
+                    }
+                    if self.effective_tabs_width() <= 0 {
+                        self.host_focus_surface = HostFocusSurface::Terminal;
+                        self.feedback =
+                            Some("Tabs cannot receive focus at this window width".to_owned());
+                        unsafe { SetFocus(self.window) };
+                        false
+                    } else {
+                        self.host_focus_surface = HostFocusSurface::Tabs;
+                        unsafe { SetFocus(self.window) };
+                        true
+                    }
+                }
+            }
+            FocusSurface::Settings | FocusSurface::NoteEditor => false,
+        };
+        let current = self.current_focus_surface();
+        if focused && current != previous {
+            self.event_journal.commit(
+                "focus.changed",
+                self.active,
+                serde_json::json!({
+                    "from": previous.as_str(),
+                    "to": current.as_str(),
+                    "cause": cause,
+                }),
+            );
+        }
+        unsafe { InvalidateRect(self.window, ptr::null(), 0) };
+        focused
+    }
+
+    fn handle_shortcut_key_up(&mut self, virtual_key: u32) {
+        if self.navigation_latch == Some(virtual_key) || virtual_key == 0x11 {
+            self.navigation_latch = None;
+        }
+    }
+
+    fn handle_shortcut(&mut self, virtual_key: u32, lparam: LPARAM) -> bool {
+        if is_latched_navigation_repeat(self.navigation_latch, virtual_key, lparam) {
+            return true;
+        }
         let control = unsafe { GetKeyState(0x11) } < 0;
         let shift = unsafe { GetKeyState(0x10) } < 0;
+        let alt = unsafe { GetKeyState(0x12) } < 0;
         let focused = unsafe { GetFocus() };
 
         if self.window_close_pending {
@@ -3010,13 +3218,25 @@ impl AppState {
             return true;
         }
 
+        if let Some(target) = surface_navigation(
+            self.current_focus_surface(),
+            control,
+            shift,
+            alt,
+            virtual_key,
+        ) {
+            self.navigation_latch = Some(virtual_key);
+            self.set_focus_surface(target, "keyboard");
+            return true;
+        }
+
         let has_active_selection = self
             .terminal_selection
             .is_some_and(|selection| self.active == Some(selection.tab_id));
         if terminal_copy_shortcut(
             control,
             virtual_key,
-            focused == self.window,
+            focused == self.window && self.host_focus_surface == HostFocusSurface::Terminal,
             has_active_selection,
         ) {
             if let Err(error) = self.copy_terminal_selection() {
@@ -3041,8 +3261,7 @@ impl AppState {
                     self.send_composer();
                     self.feedback = self.active.map(|id| format!("Sent to @{id}"));
                 }
-                unsafe { SetFocus(self.window) };
-                unsafe { InvalidateRect(self.window, ptr::null(), 0) };
+                self.set_focus_surface(FocusSurface::Terminal, "composer-submit");
                 return true;
             }
             if virtual_key == 0x1b {
@@ -3050,7 +3269,7 @@ impl AppState {
                     self.finish_note_edit(false);
                 } else {
                     self.save_active_composer();
-                    unsafe { SetFocus(self.window) };
+                    self.set_focus_surface(FocusSurface::Terminal, "composer-escape");
                 }
                 return true;
             }
@@ -3065,7 +3284,7 @@ impl AppState {
                 self.request_close_tab(self.tabs[position].id);
             }
         } else if control && shift && virtual_key == b'I' as u32 {
-            unsafe { SetFocus(self.edit) };
+            self.set_focus_surface(FocusSurface::Composer, "keyboard");
         } else if control && virtual_key == 0x09 {
             let response = self.select_adjacent(if shift { -1 } else { 1 });
             if !response.ok {
@@ -3081,10 +3300,11 @@ impl AppState {
     fn terminal_rect(&self) -> PixelRect {
         let mut client: RECT = unsafe { mem::zeroed() };
         unsafe { GetClientRect(self.window, &mut client) };
+        let sidebar_width = self.effective_tabs_width();
         PixelRect {
-            left: SIDEBAR_WIDTH,
+            left: sidebar_width,
             top: 0,
-            right: client.right.max(SIDEBAR_WIDTH),
+            right: client.right.max(sidebar_width),
             bottom: client
                 .bottom
                 .saturating_sub(STATUS_BAR_HEIGHT + COMPOSER_HEIGHT)
@@ -3203,7 +3423,8 @@ impl AppState {
     fn terminal_cell_at(&self, x: i32, y: i32) -> Option<(u16, u16)> {
         let mut client: RECT = unsafe { mem::zeroed() };
         unsafe { GetClientRect(self.window, &mut client) };
-        if x < SIDEBAR_WIDTH
+        let sidebar_width = self.effective_tabs_width();
+        if x < sidebar_width
             || x >= client.right.saturating_sub(TERMINAL_SCROLLBAR_WIDTH)
             || y < 0
             || y >= client
@@ -3236,12 +3457,16 @@ impl AppState {
             .map(|tab| tab.last_size)
             .unwrap_or((1, 1));
         let column =
-            ((x - SIDEBAR_WIDTH) / cell_width).clamp(0, i32::from(cols.saturating_sub(1))) as u16;
+            ((x - sidebar_width) / cell_width).clamp(0, i32::from(cols.saturating_sub(1))) as u16;
         let row = (y / cell_height).clamp(0, i32::from(rows.saturating_sub(1))) as u16;
         Some((column, row))
     }
 
     fn character(&mut self, codepoint: u32) {
+        if self.host_focus_surface == HostFocusSurface::Tabs && unsafe { GetFocus() } == self.window
+        {
+            return;
+        }
         let Some(position) = self.active_position() else {
             return;
         };
@@ -3276,6 +3501,10 @@ impl AppState {
     }
 
     fn key_down(&mut self, virtual_key: u32) {
+        if self.host_focus_surface == HostFocusSurface::Tabs && unsafe { GetFocus() } == self.window
+        {
+            return;
+        }
         let Some(position) = self.active_position() else {
             return;
         };
@@ -3405,6 +3634,7 @@ impl AppState {
             paint_device
         };
         let content_bottom = (client.bottom - STATUS_BAR_HEIGHT).max(0);
+        let sidebar_width = self.effective_tabs_width();
 
         fill(device, &client, colors.terminal);
         fill(
@@ -3412,7 +3642,7 @@ impl AppState {
             &RECT {
                 left: 0,
                 top: 0,
-                right: SIDEBAR_WIDTH,
+                right: sidebar_width,
                 bottom: content_bottom,
             },
             colors.sidebar,
@@ -3420,7 +3650,7 @@ impl AppState {
         fill(
             device,
             &RECT {
-                left: SIDEBAR_WIDTH,
+                left: sidebar_width,
                 top: (content_bottom - COMPOSER_HEIGHT).max(0),
                 right: client.right,
                 bottom: content_bottom,
@@ -3444,7 +3674,11 @@ impl AppState {
             SelectObject(device, ui_font as HGDIOBJ);
             SetBkMode(device, TRANSPARENT as i32);
         }
-        let tree_rows = self.tree_rows();
+        let tree_rows = if self.config.tabs_visible {
+            self.tree_rows()
+        } else {
+            Vec::new()
+        };
         for (visual_position, row) in tree_rows.iter().enumerate() {
             let Some(tab) = self.tabs.iter().find(|tab| tab.id == row.id) else {
                 continue;
@@ -3658,7 +3892,7 @@ impl AppState {
             RECT {
                 left: 14,
                 top: content_bottom,
-                right: SIDEBAR_WIDTH - 10,
+                right: sidebar_width - 10,
                 bottom: client.bottom,
             },
             colors.muted,
@@ -3668,7 +3902,7 @@ impl AppState {
             device,
             "metrics · agent context · extensible providers",
             RECT {
-                left: SIDEBAR_WIDTH + 10,
+                left: sidebar_width + 10,
                 top: content_bottom,
                 right: client.right - 10,
                 bottom: client.bottom,
@@ -3689,7 +3923,7 @@ impl AppState {
                     "Click New to create a cmd.exe tab"
                 },
                 RECT {
-                    left: SIDEBAR_WIDTH + 24,
+                    left: sidebar_width + 24,
                     top: 24,
                     right: client.right - 24,
                     bottom: 64,
@@ -3709,7 +3943,7 @@ impl AppState {
                     format!("Compose input for {}:{}", tab.index, tab.title)
                 },
                 RECT {
-                    left: SIDEBAR_WIDTH + 10,
+                    left: sidebar_width + 10,
                     top: content_bottom - COMPOSER_HEIGHT + 4,
                     right: client.right - 270,
                     bottom: content_bottom - COMPOSER_HEIGHT + 28,
@@ -3747,7 +3981,7 @@ impl AppState {
             fill(
                 device,
                 &RECT {
-                    left: SIDEBAR_WIDTH,
+                    left: sidebar_width,
                     top: content_bottom - COMPOSER_HEIGHT - 30,
                     right: client.right,
                     bottom: content_bottom - COMPOSER_HEIGHT,
@@ -3760,7 +3994,7 @@ impl AppState {
                     "Process exited with code {code}. Output and draft remain until you close this tab."
                 ),
                 RECT {
-                    left: SIDEBAR_WIDTH + 12,
+                    left: sidebar_width + 12,
                     top: content_bottom - COMPOSER_HEIGHT - 30,
                     right: client.right - 12,
                     bottom: content_bottom - COMPOSER_HEIGHT,
@@ -3775,7 +4009,7 @@ impl AppState {
                 device,
                 feedback,
                 RECT {
-                    left: SIDEBAR_WIDTH + 10,
+                    left: sidebar_width + 10,
                     top: content_bottom - 25,
                     right: client.right - 100,
                     bottom: content_bottom - 3,
@@ -3790,7 +4024,7 @@ impl AppState {
                 device,
                 error,
                 RECT {
-                    left: SIDEBAR_WIDTH + 10,
+                    left: sidebar_width + 10,
                     top: (content_bottom - COMPOSER_HEIGHT - 28).max(0),
                     right: client.right - 10,
                     bottom: (content_bottom - COMPOSER_HEIGHT).max(0),
@@ -4144,7 +4378,8 @@ impl AppState {
         unsafe { GetTextExtentPoint32W(device, sample.as_ptr(), 1, &mut extent) };
         let cell_width = extent.cx.max(7);
         let cell_height = (metrics.tmHeight + metrics.tmExternalLeading).max(14);
-        let width = (client.right - SIDEBAR_WIDTH - TERMINAL_SCROLLBAR_WIDTH).max(cell_width * 10);
+        let sidebar_width = self.effective_tabs_width();
+        let width = (client.right - sidebar_width - TERMINAL_SCROLLBAR_WIDTH).max(cell_width * 10);
         let height = (client.bottom - STATUS_BAR_HEIGHT - COMPOSER_HEIGHT).max(cell_height * 2);
         let cols = (width / cell_width).clamp(10, u16::MAX as i32) as u16;
         let rows = (height / cell_height).clamp(2, u16::MAX as i32) as u16;
@@ -4152,7 +4387,7 @@ impl AppState {
         let (scrollback_offset, max_scrollback) = self.tabs[position].scrollback_bounds();
         let scrollbar = terminal_scrollbar_geometry(
             PixelRect {
-                left: SIDEBAR_WIDTH,
+                left: sidebar_width,
                 top: 0,
                 right: client.right,
                 bottom: height,
@@ -4194,9 +4429,9 @@ impl AppState {
                 fill(
                     device,
                     &RECT {
-                        left: SIDEBAR_WIDTH + start_col as i32 * cell_width,
+                        left: sidebar_width + start_col as i32 * cell_width,
                         top: row as i32 * cell_height,
-                        right: SIDEBAR_WIDTH + end_col as i32 * cell_width,
+                        right: sidebar_width + end_col as i32 * cell_width,
                         bottom: (row as i32 + 1) * cell_height,
                     },
                     background,
@@ -4218,7 +4453,7 @@ impl AppState {
                     terminal_color(cell.fgcolor(), false, self.palette())
                 };
                 let encoded: Vec<u16> = cell.contents().encode_utf16().collect();
-                let left = SIDEBAR_WIDTH + col as i32 * cell_width;
+                let left = sidebar_width + col as i32 * cell_width;
                 let top = row as i32 * cell_height;
                 let cell_span = if col + 1 < cols
                     && screen
@@ -4255,9 +4490,9 @@ impl AppState {
         if scrollback_offset == 0 && self.tabs[position].exited.is_none() && !screen.hide_cursor() {
             let (row, col) = screen.cursor_position();
             let cursor = RECT {
-                left: SIDEBAR_WIDTH + col as i32 * cell_width,
+                left: sidebar_width + col as i32 * cell_width,
                 top: row as i32 * cell_height,
-                right: SIDEBAR_WIDTH + (col as i32 + 1) * cell_width,
+                right: sidebar_width + (col as i32 + 1) * cell_width,
                 bottom: (row as i32 + 1) * cell_height,
             };
             let brush = unsafe { CreateSolidBrush(rgb(235, 235, 235)) };
@@ -4310,22 +4545,7 @@ impl AppState {
     }
 
     fn focus_surface(&self) -> &'static str {
-        let focused = unsafe { GetFocus() };
-        if focused == self.settings_font
-            || focused == self.settings_size
-            || focused == self.settings_dark
-            || focused == self.settings_light
-            || focused == self.settings_cancel
-            || focused == self.settings_apply
-        {
-            "settings"
-        } else if focused == self.edit && self.note_edit_target.is_some() {
-            "note-editor"
-        } else if focused == self.edit {
-            "composer"
-        } else {
-            "terminal"
-        }
+        self.current_focus_surface().as_str()
     }
 
     fn ui_snapshot(&mut self) -> String {
@@ -4346,7 +4566,11 @@ impl AppState {
             .iter()
             .filter_map(|row| {
                 let tab = self.tabs.iter().find(|tab| tab.id == row.id)?;
-                let visible_position = visible_rows.iter().position(|visible| visible.id == row.id);
+                let visible_position = self
+                    .config
+                    .tabs_visible
+                    .then(|| visible_rows.iter().position(|visible| visible.id == row.id))
+                    .flatten();
                 let geometry = visible_position
                     .map(|position| tree_row_geometry(position, row.depth, SIDEBAR_WIDTH));
                 let draft = if self.active == Some(tab.id) {
@@ -4435,6 +4659,7 @@ impl AppState {
             .unwrap_or((0, 0));
         let (system_copy_enabled, system_paste_enabled) = self.system_clipboard_menu_state();
         let event_position = self.event_journal.position();
+        let sidebar_width = self.effective_tabs_width();
         serde_json::to_string_pretty(&serde_json::json!({
             "protocol_version": 1,
             "event_position": event_position,
@@ -4465,14 +4690,18 @@ impl AppState {
             },
             "layout": {
                 "sidebar": {
-                    "x": 0, "y": 0, "width": SIDEBAR_WIDTH,
+                    "x": 0, "y": 0,
+                    "visible": self.config.tabs_visible,
+                    "configured_width": self.config.tabs_width,
+                    "effective_width": self.effective_tabs_width(),
+                    "width": self.effective_tabs_width(),
                     "height": (client.bottom - STATUS_BAR_HEIGHT).max(0)
                 },
                 "terminal": {
-                    "x": SIDEBAR_WIDTH, "y": 0,
-                    "width": (client.right - SIDEBAR_WIDTH).max(0),
+                    "x": sidebar_width, "y": 0,
+                    "width": (client.right - sidebar_width).max(0),
                     "viewport_width": (
-                        client.right - SIDEBAR_WIDTH - TERMINAL_SCROLLBAR_WIDTH
+                        client.right - sidebar_width - TERMINAL_SCROLLBAR_WIDTH
                     ).max(0),
                     "height": (client.bottom - STATUS_BAR_HEIGHT - COMPOSER_HEIGHT).max(0),
                     "rows": rows, "cols": cols,
@@ -4537,6 +4766,8 @@ impl AppState {
                     "id": theme.as_str(),
                     "label": theme.label(),
                 })),
+                "tabs_visible": self.config.tabs_visible,
+                "tabs_width": self.config.tabs_width,
             },
             "locale": {
                 "id": UI_LOCALE,
@@ -5182,15 +5413,19 @@ impl AppState {
                     self.event_journal
                         .commit("tab.selected", Some(id), serde_json::json!({}));
                 }
-                match surface {
-                    "terminal" => unsafe { SetFocus(self.window) },
-                    "composer" => unsafe { SetFocus(self.edit) },
-                    "sidebar" => unsafe { SetFocus(self.window) },
+                let focused = match surface {
+                    "terminal" => self.set_focus_surface(FocusSurface::Terminal, "semantic"),
+                    "composer" => self.set_focus_surface(FocusSurface::Composer, "semantic"),
+                    "tabs" | "sidebar" => self.set_focus_surface(FocusSurface::Tabs, "semantic"),
                     other => {
                         return IpcResponse::failure(format!("unknown focus surface: {other}"));
                     }
                 };
-                unsafe { InvalidateRect(self.window, ptr::null(), 0) };
+                if !focused {
+                    return IpcResponse::failure(format!(
+                        "focus surface is unavailable: {surface}"
+                    ));
+                }
                 IpcResponse::success(self.ui_snapshot())
             }
             "ui-action" => {
@@ -5251,6 +5486,10 @@ impl AppState {
                         }
                         None
                     }
+                    "toggle-tabs" => {
+                        self.set_tabs_visible(!self.config.tabs_visible, "semantic");
+                        None
+                    }
                     "select-tab" => {
                         let Some(position) = self.target_position(option_value(args, "-t")) else {
                             return IpcResponse::failure("can't find tab");
@@ -5261,7 +5500,7 @@ impl AppState {
                         self.load_active_composer();
                         self.event_journal
                             .commit("tab.selected", Some(id), serde_json::json!({}));
-                        unsafe { SetFocus(self.window) };
+                        self.set_focus_surface(FocusSurface::Terminal, "semantic");
                         None
                     }
                     "close-tab" => {
@@ -6836,8 +7075,8 @@ Usage:
   agenterm-cli set-setting terminal.font-size 8..36
   agenterm-cli send-mouse [-t target] -x col -y row [--button left] [--action press]
   agenterm-cli ui-snapshot
-  agenterm-cli ui-action new-tab|new-child|edit-tab|toggle-tree|select-tab|close-tab|close-window|keep-server-running|stop-server-and-exit|confirm|cancel|composer-send|copy-selection
-  agenterm-cli focus terminal|composer|sidebar [-t target]
+  agenterm-cli ui-action new-tab|new-child|edit-tab|toggle-tree|toggle-tabs|select-tab|close-tab|close-window|keep-server-running|stop-server-and-exit|confirm|cancel|composer-send|copy-selection
+  agenterm-cli focus terminal|composer|tabs [-t target]
   agenterm-cli wait-pane [-t target] (--contains text|--dead|--submit-complete) [--timeout-ms ms]
   agenterm-cli wait-ui [--active @id] [--focus surface] [-t target --tab-state state]
   agenterm-cli protocol-info
@@ -7119,9 +7358,10 @@ fn save_window_png(window: HWND, path: &std::path::Path, pane_only: bool) -> Res
 #[cfg(test)]
 mod tests {
     use super::{
-        EditShortcut, TerminalPoint, TerminalSelection, ThemeId, edit_shortcut, effective_theme,
-        gui_cli_guidance, normalize_terminal_paste, parse_loopback_ipc_address,
-        terminal_copy_shortcut, terminal_selection_text,
+        EditShortcut, FocusSurface, TerminalPoint, TerminalSelection, ThemeId, edit_shortcut,
+        effective_theme, gui_cli_guidance, is_latched_navigation_repeat, normalize_terminal_paste,
+        parse_loopback_ipc_address, surface_navigation, terminal_copy_shortcut,
+        terminal_selection_text,
     };
 
     #[test]
@@ -7156,6 +7396,63 @@ mod tests {
         assert_eq!(edit_shortcut(true, b'V' as u32), Some(EditShortcut::Paste));
         assert_eq!(edit_shortcut(false, b'A' as u32), None);
         assert_eq!(edit_shortcut(true, b'Z' as u32), None);
+    }
+
+    #[test]
+    fn surface_navigation_is_directional_and_preserves_native_edit_arrows() {
+        assert_eq!(
+            surface_navigation(FocusSurface::Terminal, true, false, false, 0x28),
+            Some(FocusSurface::Composer)
+        );
+        assert_eq!(
+            surface_navigation(FocusSurface::Composer, true, false, false, 0x26),
+            Some(FocusSurface::Terminal)
+        );
+        assert_eq!(
+            surface_navigation(FocusSurface::Terminal, true, false, false, 0x25),
+            Some(FocusSurface::Tabs)
+        );
+        assert_eq!(
+            surface_navigation(FocusSurface::Tabs, true, false, false, 0x27),
+            Some(FocusSurface::Terminal)
+        );
+        assert_eq!(
+            surface_navigation(FocusSurface::Composer, true, false, false, 0x25),
+            None
+        );
+        assert_eq!(
+            surface_navigation(FocusSurface::Settings, true, false, false, 0x25),
+            None
+        );
+        assert_eq!(
+            surface_navigation(FocusSurface::NoteEditor, true, false, false, 0x27),
+            None
+        );
+        assert_eq!(
+            surface_navigation(FocusSurface::Terminal, true, true, false, 0x28),
+            None
+        );
+        assert_eq!(
+            surface_navigation(FocusSurface::Terminal, true, false, true, 0x28),
+            None
+        );
+    }
+
+    #[test]
+    fn only_repeat_messages_for_the_latched_navigation_key_are_consumed() {
+        let repeat_lparam = 1_isize << 30;
+        assert!(is_latched_navigation_repeat(
+            Some(0x28),
+            0x28,
+            repeat_lparam
+        ));
+        assert!(!is_latched_navigation_repeat(Some(0x28), 0x28, 0));
+        assert!(!is_latched_navigation_repeat(
+            Some(0x28),
+            0x25,
+            repeat_lparam
+        ));
+        assert!(!is_latched_navigation_repeat(None, 0x28, repeat_lparam));
     }
 
     #[test]
