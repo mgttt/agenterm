@@ -100,6 +100,23 @@ try {
         throw 'capture-pane did not contain the smoke token'
     }
 
+    Write-Host 'STEP Backspace deletes exactly one input character'
+    $backspacePrefix = "AGENTERM_BACKSPACE_$PID"
+    Invoke-AgenTerm @(
+        'send-keys', '-t', $name, '-l', "echo $backspacePrefix`X"
+    ) | Out-Null
+    Invoke-AgenTerm @('send-keys', '-t', $name, 'Backspace') | Out-Null
+    Invoke-AgenTerm @('send-keys', '-t', $name, '-l', 'Y') | Out-Null
+    Invoke-AgenTerm @('send-keys', '-t', $name, 'Enter') | Out-Null
+    Invoke-AgenTerm @(
+        'wait-pane', '-t', $name, '--contains', "$backspacePrefix`Y",
+        '--timeout-ms', '10000'
+    ) | Out-Null
+    $backspaceCapture = Invoke-AgenTerm @('capture-pane', '-p', '-t', $name)
+    if ($backspaceCapture -notmatch "(?m)^$([regex]::Escape($backspacePrefix))Y\s*$") {
+        throw 'Backspace did not delete exactly the preceding input character'
+    }
+
     Write-Host 'STEP terminal viewport scrolling'
     $scrollPrefix = "AGENTERM_SCROLL_$PID"
     Invoke-AgenTerm @(

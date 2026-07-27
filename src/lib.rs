@@ -53,8 +53,8 @@ mod tab_tree;
 mod workspace;
 
 use commands::{
-    MUX_COMMANDS, MuxStatus, SUPPORTED_COMMANDS, has_option, last_positional, mux_command,
-    option_value, parse_new_command, parse_tab_environment, positional_values,
+    BACKSPACE_INPUT, MUX_COMMANDS, MuxStatus, SUPPORTED_COMMANDS, has_option, last_positional,
+    mux_command, option_value, parse_new_command, parse_tab_environment, positional_values,
     screenshot_output_path, tmux_key_bytes,
 };
 use instances::{InstanceRegistration, discover_instances, prune_instance, register_instance};
@@ -1857,7 +1857,7 @@ impl AppState {
         }
         match codepoint {
             8 => {
-                self.tabs[position].send(b"\x08");
+                self.tabs[position].send(BACKSPACE_INPUT);
             }
             9 => {
                 self.tabs[position].send(b"\t");

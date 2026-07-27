@@ -1,5 +1,7 @@
 use std::{env, path::PathBuf, time::SystemTime};
 
+pub(crate) const BACKSPACE_INPUT: &[u8] = b"\x7f";
+
 pub(crate) const SUPPORTED_COMMANDS: &str = "\
 attach-session (attach)
 active-window (active-tab)
@@ -423,7 +425,7 @@ pub(crate) fn tmux_key_bytes(key: &str) -> Option<Vec<u8>> {
         "Enter" => b"\r".as_slice(),
         "Escape" | "Esc" => b"\x1b".as_slice(),
         "Space" => b" ".as_slice(),
-        "BSpace" | "Backspace" => b"\x08".as_slice(),
+        "BSpace" | "Backspace" => BACKSPACE_INPUT,
         "Tab" => b"\t".as_slice(),
         "Up" => b"\x1b[A".as_slice(),
         "Down" => b"\x1b[B".as_slice(),
@@ -504,6 +506,7 @@ mod tests {
     fn maps_tmux_function_and_control_keys() {
         assert_eq!(tmux_key_bytes("F2"), Some(b"\x1bOQ".to_vec()));
         assert_eq!(tmux_key_bytes("C-c"), Some(vec![3]));
+        assert_eq!(tmux_key_bytes("Backspace"), Some(vec![0x7f]));
         assert_eq!(tmux_key_bytes("not-a-key"), None);
     }
 

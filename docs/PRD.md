@@ -85,6 +85,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [x] Win32/GDI window without GPU or OpenGL requirements
     - [x] one ConPTY-backed process per tab through `rmux-pty`
     - [x] VT100 parsing, ANSI colors, scrollback, resize, keyboard and mouse
+    - [x] Backspace emits ConPTY VT `DEL` and deletes exactly one input
+      character in the default `cmd.exe` line editor
     - [x] dirty-frame rendering and GDI double buffering
     - [x] GUI shell appears before the initial ConPTY/cmd process is ready
     - [x] initial terminal loads asynchronously with visible starting feedback
