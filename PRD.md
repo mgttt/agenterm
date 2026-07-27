@@ -1114,11 +1114,80 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
           component downloads, Bash, intelligence workers, and LLM routing add
           no authority or binary surface in v0.1.5
         - [ ] raw application mouse arbitration, selection auto-scroll,
-          word/line/rectangular selection, and terminal paste retain the
-          professional-terminal follow-up gates above
-    - [ ] v0.1.6 Observable Fleet expansion: complete transition coverage and
-      restart/gap/concurrent-reader black-box tests before event-driven
-      extensions
+          and word/line/rectangular selection retain the professional-terminal
+          follow-up gates above; bounded terminal paste shipped through the
+          focus-aware window system menu
+    - [ ] v0.1.6 Observable & Adaptable Workspace
+      - Release core: adaptive Tabs workspace
+        - [ ] place a `Tabs` button immediately left of `Settings`; activating
+          it collapses the complete tab tree and its controls so terminal and
+          composer reclaim the width
+        - [ ] when collapsed, reserve a small host-owned `Tabs` reveal segment
+          at the far left of the existing bottom status bar; it is layout
+          chrome, not a dynamic provider, and therefore remains available when
+          future status scripts fail, time out, or have no value
+        - [ ] add an always-available, checked-state `Toggle Tabs` item to the
+          window-icon system menu; the hidden status segment and system menu
+          prevent a persisted collapsed state from trapping the user
+        - [ ] make the tab/terminal boundary a draggable horizontal resize grip
+          with a resize cursor, pointer capture, live terminal/composer
+          relayout, and double-click reset to the default width
+        - [ ] central geometry clamps tab width around a proposed 180 px
+          minimum, 250 px default, and 480 px maximum while preserving a
+          usable terminal floor on narrow windows; exact values require visual
+          and CJK-label evidence rather than scattered constants
+        - [ ] persist `tabs_visible` and the last expanded width as user layout
+          preferences; hiding never discards the width, and restoring uses the
+          last valid clamped value
+        - [ ] hiding while focus is in the tab tree moves focus safely to the
+          terminal; Settings, close confirmation, composer, scrollbars,
+          selection, screenshots, PTY sizing, and hit testing all consume the
+          same effective content origin
+      - Release core: Observable Fleet completion
+        - [ ] audit every declared event kind against its committed state and
+          fill any missing transition coverage without expanding into durable
+          replay or unbounded terminal logging
+        - [ ] add public black-box restart, bounded-history gap, and concurrent
+          reader/waiter journeys, including snapshot-to-follow handoff and
+          cancellation cleanup
+        - [ ] make modal kind/target directly waitable so close-confirmation and
+          Settings automation no longer require client-side polling
+      - Release core: typed operation foundation
+        - [ ] replace UI-specific command branching incrementally with one
+          typed operation catalog shared by CLI validation, IPC dispatch,
+          capability discovery, stable errors, and event/audit attribution
+        - [ ] classify operations as observe, control, or destructive; this is
+          an honest authority boundary for later Rhai/MCP consumers, not yet a
+          policy system that grants autonomous control
+        - [ ] expose tabs show/hide/toggle and bounded width adjustment through
+          typed semantic actions as well as physical UI, with stable snapshot
+          fields for visibility, configured/effective width, grip geometry,
+          bounds, and system-menu state
+      - Quality gate
+        - [ ] pure geometry tests cover visible/hidden, narrow-window clamps,
+          resize/reset, and terminal origin; settings tests cover defaults,
+          migration, invalid widths, and isolated persistence
+        - [ ] public UX black-box tests click all recovery entrances, perform a
+          physical boundary drag, verify live PTY column changes, restart the
+          isolated GUI, and prove terminal selection/scrollbar/modal behavior
+          remains aligned
+        - [ ] release qualification adds Observable Fleet restart/gap/
+          concurrent-reader evidence while preserving the 4 MiB GUI,
+          per-sidecar size, one-second first-window, remain-on-exit, and
+          explicit-close gates
+      - Candidate enhancement lanes after the core is green
+        - [ ] non-intrusive bounded transcript capture by stable tab ID, with
+          visible/scrollback ranges and explicit truncation metadata
+        - [ ] Rhai observe consumes a snapshot baseline plus bounded ordered
+          journal reads/waits with typed restart/gap errors and no mutation API
+        - [ ] terminal selection auto-scroll plus double-click word and
+          triple-click visual-line selection; rectangular selection and raw
+          application-mouse arbitration remain later work
+      - Explicitly outside v0.1.6
+        - [ ] MCP, Rhai control authority/event handlers, dynamic status
+          providers, Bash runtime distribution, optional-component networking,
+          installer/updater/signing, intelligence workers, and LLM routing
+          remain separately gated roadmap items
     - [ ] M0 boundaries and baselines: extract typed control operations, record
       per-binary size/startup, freeze the compatibility corpus, and define the
       sidecar protocol boundary
@@ -1129,8 +1198,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [ ] M3 optional components: ship signed-manifest inventory/install/update/
       rollback foundations and independently gated SSH, HTTP, and SQLite
       sidecars without adding GUI network authority
-    - [ ] M4 / v0.1.7 safe scripting: ship sidecar Rhai pure/observe profiles,
-      run/eval/check, API discovery, budgets, and audit records
+    - [ ] M4 / v0.1.7 scripting expansion: build on the shipped one-shot Rhai
+      pure/immutable-observe slice with control authority, cancellation/job
+      isolation, audit records, and adversarial sidecar tests
     - [ ] M5 / v0.1.8 dynamic bridge: script-backed status segments and named
       commands
     - [ ] M6 / v0.1.9 controlled agentic bridge: ship MCP read-only resources,
