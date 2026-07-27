@@ -66,6 +66,23 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   - [ ] one commit/version/hash provenance manifest identifies the only release
     artifact set; all required tests consume it and the publish job promotes it
     byte-for-byte without rebuilding
+  - [ ] qualification and package/publish are independent job and script
+    boundaries joined only by an explicit dependency: package/publish cannot
+    start until qualification succeeds, while a packaging-only retry may reuse
+    the unchanged qualified candidate
+  - [ ] qualification emits a versioned receipt containing source commit SHA,
+    candidate manifest and executable hashes, Cargo lock/toolchain/profile
+    identity, required-suite and emitted-evidence results, run identity, and
+    evidence-manifest hash. Timestamps measure latency but never establish
+    eligibility
+  - [ ] package/publish independently rejects a missing/failed receipt, source
+    SHA mismatch, candidate hash mismatch, incomplete required suite, missing
+    required evidence, or disallowed release skip before creating a public
+    GitHub Release
+  - [ ] release qualification means 100% of the versioned required-gate
+    manifest passed, not 100% source-code coverage; optional environmental
+    probes are identified separately and cannot silently replace a required
+    gate
   - [ ] the 4,128-write bounded-journal saturation journey runs exactly once
     per release SHA, while desktop GUI journeys remain isolated and
     `no-activate`

@@ -319,6 +319,9 @@ track remains planned, but every declared dependency must still pass.
     CI caches compatible Rust inputs, builds one provenance-bound artifact,
     runs functional and stress gates against that exact artifact, and promotes
     it without recompilation
+  - [ ] separate qualification from package/publish and gate the latter with a
+    machine-verifiable receipt bound to the exact source SHA and candidate
+    hashes; wall-clock ordering alone never authorizes publication
   - [ ] ship a versioned local script registry with stable IDs and
     list/inspect/check/run-by-name discovery; source loading never grants
     runtime filesystem authority and normal GUI startup never scans or loads
