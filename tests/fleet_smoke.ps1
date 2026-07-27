@@ -48,6 +48,9 @@ $proxy = "http://127.0.0.1:$((30000 + ($PID % 1000)))"
 $secondAddress = "127.0.0.1:$((50000 + ($PID % 1000)))"
 $secondWorkspace = Join-Path $env:TEMP "agenterm-second-$PID.json"
 $secondStarted = $false
+$eventWaiters = @()
+$eventFiles = @()
+$loadJobs = @()
 
 function Invoke-CheckedExe {
     param(
@@ -79,6 +82,51 @@ function Invoke-ExpectedFailure {
         throw "$([IO.Path]::GetFileName($Path)) $($CommandArgs -join ' ') unexpectedly succeeded"
     }
     return ($output -join "`n")
+}
+
+function Start-EventWaiter {
+    param(
+        [string]$Epoch,
+        [uint64]$After,
+        [string]$Kind,
+        [string]$Tag,
+        [int]$TimeoutMs = 10000
+    )
+    $stdout = Join-Path $env:TEMP "agenterm-fleet-wait-$PID-$Tag.out"
+    $stderr = Join-Path $env:TEMP "agenterm-fleet-wait-$PID-$Tag.err"
+    $script:eventFiles += @($stdout, $stderr)
+    $process = Start-Process -FilePath $CtlExe -ArgumentList @(
+        '--address', $address,
+        'wait-events',
+        '--epoch', $Epoch,
+        '--after', "$After",
+        '--kind', $Kind,
+        '--timeout-ms', "$TimeoutMs"
+    ) -RedirectStandardOutput $stdout -RedirectStandardError $stderr `
+        -WindowStyle Hidden -PassThru
+    $script:eventWaiters += $process
+    return [pscustomobject]@{
+        Process = $process
+        Stdout = $stdout
+        Stderr = $stderr
+    }
+}
+
+function Complete-EventWaiter {
+    param(
+        [Parameter(Mandatory = $true)]$Waiter,
+        [int]$TimeoutMs = 15000
+    )
+    if (-not $Waiter.Process.WaitForExit($TimeoutMs)) {
+        throw "event waiter $($Waiter.Process.Id) exceeded its bounded deadline"
+    }
+    $Waiter.Process.Refresh()
+    $stdout = Get-Content -LiteralPath $Waiter.Stdout -Raw -ErrorAction SilentlyContinue
+    $stderr = Get-Content -LiteralPath $Waiter.Stderr -Raw -ErrorAction SilentlyContinue
+    if ($Waiter.Process.ExitCode -ne 0) {
+        throw "event waiter failed with exit $($Waiter.Process.ExitCode): $stderr"
+    }
+    return ($stdout | ConvertFrom-Json)
 }
 
 try {
@@ -239,6 +287,93 @@ try {
     }
     Write-Evidence 'fleet.tab-environment'
 
+    Write-Host 'STEP snapshot-to-follow handoff is ordered for concurrent readers'
+    $followBaseline = Invoke-CheckedExe $CtlExe @('ui-snapshot') | ConvertFrom-Json
+    $readerA = Start-EventWaiter `
+        $followBaseline.event_position.epoch `
+        ([uint64]$followBaseline.event_position.sequence) `
+        'tab.created' 'reader-a'
+    $readerB = Start-EventWaiter `
+        $followBaseline.event_position.epoch `
+        ([uint64]$followBaseline.event_position.sequence) `
+        'tab.created' 'reader-b'
+    $followName = "follow-$PID"
+    Invoke-CheckedExe $CtlExe @(
+        'new-window', '-d', '-n', $followName,
+        '--', 'cmd.exe', '/d', '/c', 'echo follow'
+    ) | Out-Null
+    $followA = Complete-EventWaiter $readerA
+    $followB = Complete-EventWaiter $readerB
+    if ($followA.kind -ne 'tab.created' -or
+        $followA.sequence -le $followBaseline.event_position.sequence -or
+        $followA.epoch -ne $followBaseline.event_position.epoch -or
+        $followA.sequence -ne $followB.sequence -or
+        $followA.tab_id -ne $followB.tab_id -or
+        $followA.payload.index -ne $followB.payload.index) {
+        throw 'concurrent waiters did not observe the same ordered event after the snapshot'
+    }
+    $followBatch = Invoke-CheckedExe $CtlExe @(
+        'read-events',
+        '--epoch', $followBaseline.event_position.epoch,
+        '--after', "$($followBaseline.event_position.sequence)",
+        '--limit', '1024'
+    ) | ConvertFrom-Json
+    $previousSequence = [uint64]$followBaseline.event_position.sequence
+    $foundFollowEvent = $false
+    foreach ($event in @($followBatch.events)) {
+        if ([uint64]$event.sequence -le $previousSequence) {
+            throw 'snapshot-to-follow batch was duplicated or out of order'
+        }
+        $previousSequence = [uint64]$event.sequence
+        if ($event.sequence -eq $followA.sequence) {
+            $foundFollowEvent = $true
+        }
+    }
+    if (-not $foundFollowEvent) {
+        throw 'snapshot-to-follow handoff omitted the event returned to both waiters'
+    }
+
+    Write-Host 'STEP timed out and cancelled waiters leave no client or server residue'
+    $timeoutBaseline = Invoke-CheckedExe $CtlExe @('ui-snapshot') | ConvertFrom-Json
+    $timeoutError = Invoke-ExpectedFailure $CtlExe @(
+        'wait-events',
+        '--epoch', $timeoutBaseline.event_position.epoch,
+        '--after', "$($timeoutBaseline.event_position.sequence)",
+        '--kind', 'never.fleet-timeout',
+        '--timeout-ms', '25'
+    )
+    if (-not $timeoutError.Contains('"code":"event_wait_timeout"')) {
+        throw 'bounded event wait did not report its typed timeout'
+    }
+    $serverBeforeCancel = @(
+        (Invoke-CheckedExe $CtlExe @('server-list', '--json') | ConvertFrom-Json) |
+            Where-Object address -eq $address
+    )[0]
+    $cancelWaiter = Start-EventWaiter `
+        $timeoutBaseline.event_position.epoch `
+        ([uint64]$timeoutBaseline.event_position.sequence) `
+        'never.fleet-cancel' 'cancelled-reader' 60000
+    if ($cancelWaiter.Process.HasExited) {
+        throw 'long event waiter exited before cancellation could be exercised'
+    }
+    Stop-Process -Id $cancelWaiter.Process.Id -Force
+    if (-not $cancelWaiter.Process.WaitForExit(5000)) {
+        throw 'cancelled event waiter left a client process behind'
+    }
+    $serverAfterCancel = @(
+        (Invoke-CheckedExe $CtlExe @('server-list', '--json') | ConvertFrom-Json) |
+            Where-Object address -eq $address
+    )[0]
+    $afterCancel = Invoke-CheckedExe $CtlExe @(
+        'read-events',
+        '--epoch', $timeoutBaseline.event_position.epoch,
+        '--after', "$($timeoutBaseline.event_position.sequence)"
+    ) | ConvertFrom-Json
+    if ($serverAfterCancel.pid -ne $serverBeforeCancel.pid -or
+        $afterCancel.position.epoch -ne $timeoutBaseline.event_position.epoch) {
+        throw 'timeout or cancellation disturbed the server-side observation stream'
+    }
+
     Write-Host 'STEP one healthy instance is selected without an explicit address'
     Remove-Item Env:AGENTERM_IPC_ADDRESS
     try {
@@ -348,6 +483,88 @@ try {
         throw 'Ephemeral proxy configuration leaked into persistent workspace state'
     }
 
+    Write-Host 'STEP bounded event history reports an explicit gap'
+    $gapBaseline = Invoke-CheckedExe $CtlExe @('ui-snapshot') | ConvertFrom-Json
+    $gapTarget = @($gapBaseline.tabs | Where-Object active)[0].id
+    if (-not $gapTarget.StartsWith('@')) {
+        throw 'event gap load could not resolve the active stable tab ID'
+    }
+    $workerCount = 16
+    $eventsPerWorker = 258
+    foreach ($worker in 0..($workerCount - 1)) {
+        $job = Start-Job -ScriptBlock {
+            param($Executable, $ServerAddress, $Target, $Worker, $Count)
+            for ($iteration = 0; $iteration -lt $Count; $iteration++) {
+                & $Executable --address $ServerAddress set-tab-note `
+                    -t $Target "gap-$Worker-$iteration" 2>&1 | Out-Null
+                if ($LASTEXITCODE -ne 0) {
+                    throw "event load worker $Worker failed at iteration $iteration"
+                }
+            }
+        } -ArgumentList @(
+            $CtlExe, $address, $gapTarget, $worker, $eventsPerWorker
+        )
+        $loadJobs += $job
+    }
+    $finishedLoad = @($loadJobs | Wait-Job -Timeout 180)
+    if ($finishedLoad.Count -ne $workerCount) {
+        throw 'bounded event load exceeded its job deadline'
+    }
+    foreach ($job in $loadJobs) {
+        Receive-Job -Job $job -ErrorAction Stop | Out-Null
+        if ($job.State -ne 'Completed') {
+            throw "bounded event load job $($job.Id) ended in state $($job.State)"
+        }
+    }
+    $gapError = Invoke-ExpectedFailure $CtlExe @(
+        'read-events',
+        '--epoch', $gapBaseline.event_position.epoch,
+        '--after', "$($gapBaseline.event_position.sequence)"
+    )
+    if (-not $gapError.Contains('"code":"journal_gap"') -or
+        -not $gapError.Contains('"earliest_available"') -or
+        -not $gapError.Contains('"current"')) {
+        throw 'bounded event history silently lost events instead of reporting journal_gap'
+    }
+
+    Write-Host 'STEP a restarted server rejects positions from the previous epoch'
+    $restartBefore = Invoke-CheckedExe $CtlExe @('ui-snapshot') | ConvertFrom-Json
+    $serverBeforeRestart = @(
+        (Invoke-CheckedExe $CtlExe @('server-list', '--json') | ConvertFrom-Json) |
+            Where-Object address -eq $address
+    )[0]
+    Invoke-CheckedExe $CtlExe @('shutdown') | Out-Null
+    $oldServer = Get-Process -Id $serverBeforeRestart.pid -ErrorAction SilentlyContinue
+    if ($null -ne $oldServer) {
+        Wait-Process -Id $serverBeforeRestart.pid -Timeout 10 -ErrorAction Stop
+    }
+    Invoke-CheckedExe $CtlExe @('start-server') | Out-Null
+    Invoke-CheckedExe $CtlExe @(
+        'wait-ui', '--window-state', 'restored', '--timeout-ms', '10000'
+    ) | Out-Null
+    $restartName = "restart-$PID"
+    Invoke-CheckedExe $CtlExe @(
+        'new-window', '-d', '-n', $restartName,
+        '--', 'cmd.exe', '/d', '/c', 'echo restarted'
+    ) | Out-Null
+    $restartAfter = Invoke-CheckedExe $CtlExe @('ui-snapshot') | ConvertFrom-Json
+    $serverAfterRestart = @(
+        (Invoke-CheckedExe $CtlExe @('server-list', '--json') | ConvertFrom-Json) |
+            Where-Object address -eq $address
+    )[0]
+    $restartError = Invoke-ExpectedFailure $CtlExe @(
+        'read-events',
+        '--epoch', $restartBefore.event_position.epoch,
+        '--after', "$($restartBefore.event_position.sequence)"
+    )
+    if ($restartAfter.event_position.epoch -eq $restartBefore.event_position.epoch -or
+        $serverAfterRestart.pid -eq $serverBeforeRestart.pid -or
+        -not $restartError.Contains('"code":"server_restart"') -or
+        -not $restartError.Contains('"requested_epoch"') -or
+        -not $restartError.Contains('"current"')) {
+        throw 'server restart did not reject the stale observation epoch with typed recovery data'
+    }
+
     Write-Host 'STEP mux uses shared IPC, address override, and native namespace'
     $savedAddress = $env:AGENTERM_IPC_ADDRESS
     Remove-Item Env:AGENTERM_IPC_ADDRESS
@@ -413,6 +630,18 @@ try {
     Write-Host 'PASS: fleet launch, delimiter safety, loopback IPC, and destructive mux behavior'
 }
 finally {
+    foreach ($waiter in $eventWaiters) {
+        if (-not $waiter.HasExited) {
+            Stop-Process -Id $waiter.Id -Force -ErrorAction SilentlyContinue
+        }
+    }
+    foreach ($job in $loadJobs) {
+        Stop-Job -Job $job -ErrorAction SilentlyContinue
+        Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
+    }
+    foreach ($eventFile in $eventFiles) {
+        Remove-Item -LiteralPath $eventFile -ErrorAction SilentlyContinue
+    }
     if ($secondStarted) {
         & $CtlExe --address $secondAddress shutdown 2>$null | Out-Null
     }
