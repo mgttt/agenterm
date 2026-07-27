@@ -1380,7 +1380,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
           and hides the window while preserving the same server, epoch, IPC,
           live PTYs, scrollback, and drafts; `Stop Server & Exit` saves
           workspace metadata then ends the server and PTYs; `Cancel` and Esc
-          return without changing state
+          return without changing state; all three button labels are centered
+          horizontally and vertically
         - [x] treat the default choice as detach rather than false process exit:
           a later `agenterm.exe`, `start-server`, or `attach-session` invocation
           re-shows and focuses the same hidden HWND and server process

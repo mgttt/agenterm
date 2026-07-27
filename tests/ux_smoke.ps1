@@ -1313,6 +1313,27 @@ try {
         ) @($closeModal.modal.actions))) {
         throw 'window close did not expose the three-choice detach-first modal'
     }
+    $closeButtons = @($closeModal.modal.buttons)
+    $expectedCloseButtonActions = @(
+        'keep-server-running', 'stop-server-and-exit', 'cancel'
+    )
+    # DrawTextW: DT_CENTER | DT_VCENTER | DT_SINGLELINE.
+    $centeredWin32TextFormat = 0x00000001 -bor 0x00000004 -bor 0x00000020
+    if ($closeButtons.Count -ne 3 -or
+        (Compare-Object $expectedCloseButtonActions @($closeButtons.action))) {
+        throw 'window close did not expose rendering state for all three buttons'
+    }
+    foreach ($closeButton in $closeButtons) {
+        if ($closeButton.text_alignment.horizontal -ne 'center' -or
+            $closeButton.text_alignment.vertical -ne 'center' -or
+            [uint32]$closeButton.text_alignment.win32_draw_text_format -ne
+                $centeredWin32TextFormat) {
+            throw (
+                "window-close button '$($closeButton.action)' is not rendered " +
+                'with centered Win32 DrawText flags'
+            )
+        }
+    }
     if (-not $closeModal.window.visible -or $closeModal.window.detached) {
         throw 'opening the window-close modal changed window visibility'
     }

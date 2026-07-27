@@ -23,14 +23,14 @@ use windows_sys::Win32::{
     Graphics::Gdi::{
         BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BeginPaint, BitBlt, CLEARTYPE_QUALITY,
         CLIP_DEFAULT_PRECIS, CreateCompatibleBitmap, CreateCompatibleDC, CreateFontW, CreatePen,
-        CreateSolidBrush, DEFAULT_CHARSET, DEFAULT_GUI_FONT, DIB_RGB_COLORS, DT_END_ELLIPSIS,
-        DT_LEFT, DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject, DrawTextW, Ellipse, EndPaint,
-        ExtTextOutW, FF_MODERN, FIXED_PITCH, FW_NORMAL, FillRect, FrameRect, GetDC, GetDIBits,
-        GetDeviceCaps, GetStockObject, GetTextExtentPoint32W, GetTextFaceW, GetTextMetricsW,
-        GetWindowDC, HDC, HFONT, HGDIOBJ, InvalidateRect, LOGPIXELSY, LineTo, MoveToEx, NULL_BRUSH,
-        OUT_DEFAULT_PRECIS, PAINTSTRUCT, PS_SOLID, ReleaseDC, SRCCOPY, SYSTEM_FIXED_FONT,
-        ScreenToClient, SelectObject, SetBkMode, SetTextColor, TEXTMETRICW, TRANSPARENT,
-        UpdateWindow,
+        CreateSolidBrush, DEFAULT_CHARSET, DEFAULT_GUI_FONT, DIB_RGB_COLORS, DT_CENTER,
+        DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject, DrawTextW,
+        Ellipse, EndPaint, ExtTextOutW, FF_MODERN, FIXED_PITCH, FW_NORMAL, FillRect, FrameRect,
+        GetDC, GetDIBits, GetDeviceCaps, GetStockObject, GetTextExtentPoint32W, GetTextFaceW,
+        GetTextMetricsW, GetWindowDC, HDC, HFONT, HGDIOBJ, InvalidateRect, LOGPIXELSY, LineTo,
+        MoveToEx, NULL_BRUSH, OUT_DEFAULT_PRECIS, PAINTSTRUCT, PS_SOLID, ReleaseDC, SRCCOPY,
+        SYSTEM_FIXED_FONT, ScreenToClient, SelectObject, SetBkMode, SetTextColor, TEXTMETRICW,
+        TRANSPARENT, UpdateWindow,
     },
     System::{
         Console::{
@@ -146,6 +146,7 @@ const WM_APP_WAKE: u32 = WM_APP + 1;
 const SYSTEM_MENU_COPY_ID: usize = 0x1f00;
 const SYSTEM_MENU_PASTE_ID: usize = 0x1f10;
 const SYSTEM_MENU_TOGGLE_TABS_ID: usize = 0x1f20;
+const WINDOW_CLOSE_BUTTON_TEXT_FORMAT: u32 = DT_CENTER | DT_SINGLELINE | DT_VCENTER;
 const CLIPBOARD_UNICODE_TEXT: u32 = 13;
 const TERMINAL_PASTE_LIMIT_BYTES: usize = 256 * 1024;
 const CAPTURE_PUBLIC_MAX_BYTES: usize = 1024 * 1024;
@@ -5500,21 +5501,21 @@ impl AppState {
             "Keep Server Running",
             keep,
             colors.green,
-            DT_LEFT | DT_SINGLELINE | DT_VCENTER,
+            WINDOW_CLOSE_BUTTON_TEXT_FORMAT,
         );
         draw_text(
             device,
             "Stop Server & Exit",
             stop,
             colors.red,
-            DT_LEFT | DT_SINGLELINE | DT_VCENTER,
+            WINDOW_CLOSE_BUTTON_TEXT_FORMAT,
         );
         draw_text(
             device,
             "Cancel",
             cancel,
             colors.blue,
-            DT_LEFT | DT_SINGLELINE | DT_VCENTER,
+            WINDOW_CLOSE_BUTTON_TEXT_FORMAT,
         );
     }
 
@@ -6155,6 +6156,35 @@ impl AppState {
                         "keep-server-running",
                         "stop-server-and-exit",
                         "cancel"
+                    ],
+                    "buttons": [
+                        {
+                            "action": "keep-server-running",
+                            "label": "Keep Server Running",
+                            "text_alignment": {
+                                "horizontal": "center",
+                                "vertical": "center",
+                                "win32_draw_text_format": WINDOW_CLOSE_BUTTON_TEXT_FORMAT,
+                            },
+                        },
+                        {
+                            "action": "stop-server-and-exit",
+                            "label": "Stop Server & Exit",
+                            "text_alignment": {
+                                "horizontal": "center",
+                                "vertical": "center",
+                                "win32_draw_text_format": WINDOW_CLOSE_BUTTON_TEXT_FORMAT,
+                            },
+                        },
+                        {
+                            "action": "cancel",
+                            "label": "Cancel",
+                            "text_alignment": {
+                                "horizontal": "center",
+                                "vertical": "center",
+                                "win32_draw_text_format": WINDOW_CLOSE_BUTTON_TEXT_FORMAT,
+                            },
+                        },
                     ],
                 }))
             } else if self.settings_open {
