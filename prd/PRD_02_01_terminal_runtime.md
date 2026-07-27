@@ -32,5 +32,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] GUI shell appears before the initial ConPTY/cmd process is ready
 - [x] initial terminal loads asynchronously with visible starting feedback
 - [x] exited process retains its final screen and exit code
+- [x] explicit tab/server close cancels I/O, closes ConPTY ownership, and
+  waits within a 750 ms bound for the process-wait and reader workers; success
+  is reported only after both workers finish, while an incomplete shutdown
+  returns a typed error instead of pretending the terminal was closed
 - [~] robust CJK double-cell layout; broader visual regression is needed
 - [ ] sustained high-throughput and long-output performance qualification

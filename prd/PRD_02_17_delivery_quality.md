@@ -43,8 +43,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     complete
   - [~] on first failure, before cleanup, the harness captures a
     privacy-bounded command log and UI snapshot, with explicitly enabled
-    bounded pane/event diagnostics; PNG, process/registration state, artifact
-    hashes, and complete per-suite stdout/stderr collection remain planned
+    bounded pane/event diagnostics; injected CLI, real-GUI, and script-worker
+    journeys prove bounded, private, orphan-free retained bundles. PNG,
+    artifact hashes, and complete per-suite stdout/stderr collection remain
+    planned
   - [~] successful harness runs discard their owned transient directory and
     failed runs retain a single run-scoped bundle and print its path; the
     fail-closed self-test verifies retention and default no-pane-capture
@@ -54,10 +56,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     fallback and writes proof that no owned GUI/server/worker, window, or
     registration remains; an injected self-test proves an unregistered
     same-name process is not killed and the original failure is preserved
-  - [~] qualification extracts evidence IDs actually emitted by the current
+  - [x] qualification extracts evidence IDs actually emitted by the current
     gate, rejects duplicates or mismatch with its versioned manifest, and has
-    fail-closed tests for failed/skipped gates; the complete required-gate run
-    has not yet produced the final integrated receipt
+    fail-closed tests for failed/skipped gates; a clean, stress-inclusive run
+    emits the one integrated receipt consumed by packaging
   - [~] startup and working-context now use the shared harness with dynamic
     isolation, no-activate, owned cleanup, and registered evidence.
     Working-context additionally scrubs fixture proxy credentials from command
@@ -71,10 +73,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] release CI runs the isolated public CLI and fleet smoke suites before
   packaging, even when the redundant GUI smoke suites are skipped
 - v0.1.7 internal delivery rehearsal (no tag or public GitHub Release)
-  - [ ] the repository-native coordinator completes local
+  - [x] the repository-native coordinator completes a read-only local
     clean-tree/version/HEAD/lock/remote/auth preflight or dry-run in p95 <= 15
-    seconds excluding interactive authentication and network retry; v0.1.7
-    does not push a version tag
+    seconds excluding interactive authentication and network retry; five
+    clean-tree samples measured p95 at 1.49 seconds, and v0.1.7 does not push a
+    version tag
   - [ ] the v0.1.6 baseline is approximately 4m20s local release qualification
     plus 4m11s tag workflow; v0.1.7 records three internal dry-run
     qualification/package timings and treats public tag-to-Release latency as
@@ -90,19 +93,17 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     boundaries with tamper self-tests; missing receipt, failed/omitted gate,
     HEAD/lock/manifest/SBOM mismatch, or any executable hash mismatch fails
     closed before staging
-  - [~] qualification can emit a versioned receipt containing source commit SHA,
+  - [x] qualification emits a versioned receipt containing source commit SHA,
     candidate manifest and executable hashes, Cargo lock/toolchain/profile
     identity, required-suite and emitted-evidence results, run identity, and
-    gate-manifest hash, with timestamps excluded from eligibility; an
-    integrated full required-gate receipt is still pending
+    gate-manifest hash, with timestamps excluded from eligibility
   - [x] package independently rejects a missing/failed receipt, source SHA
     mismatch, candidate hash mismatch, incomplete required suite, missing
     required evidence, or disallowed skip; v0.1.7 permits only an ignored
     dry-run ZIP and both local/tag publication entry points reject v0.1.7
-  - [~] the versioned manifest and fail-closed self-tests define release
-    qualification as 100% of required gates
-    manifest passed, not 100% source-code coverage; optional environmental
-    probes still need an explicit separate classification
+  - [x] the versioned manifest and fail-closed self-tests define release
+    qualification as 100% of the required gate manifest passed, not 100%
+    source-code coverage
   - [~] receipt generation requires the explicit bounded-journal stress gate
     and refuses a skipped stress run; proving it executes exactly once
     per candidate SHA, while desktop GUI journeys remain isolated and

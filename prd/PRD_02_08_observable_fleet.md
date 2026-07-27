@@ -38,10 +38,12 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     comprehensively correlated
   - [~] control receipts define a stable resolved target, server epoch,
     minimum event position, deadline, and typed wait condition for Composer
-    completion; existing deterministic wait commands do not yet all freeze
-    selectors or bind to server identity, epoch, and a minimum sequence, so
-    pre-existing state, target replacement, and restart false-success coverage
-    remains incomplete
+    completion; `wait-pane` freezes its selector and `wait-ui` now freezes
+    active/tab/modal selectors, captures a baseline event position, rejects a
+    server-epoch change, and distinguishes target closure from timeout.
+    Other deterministic waits do not yet all bind to server identity, epoch,
+    and a minimum sequence, so pre-existing-state and restart false-success
+    coverage remains incomplete
   - [~] terminal observation now distinguishes input/output counters,
     submission pending and Enter completion, process exit/error, reader EOF,
     parser drain, and finalization; public CLI tests prove a stable finalized
@@ -62,10 +64,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   - [ ] workspace save uses crash-safe replacement and exposes revision,
     hash, path, commit position, and failure without destroying the previous
     readable workspace; shutdown has a public lifecycle completion wait
-  - [ ] timeout results include the unsatisfied predicate, resolved target,
-    start/last position, elapsed/deadline, last bounded observation, and a
-    typed recovery hint instead of collapsing server/target errors into a
-    generic timeout
+  - [~] `wait-ui` timeout reports its resolved predicates, baseline event
+    position, and last bounded snapshot and has distinct target-closed and
+    server-restart codes; elapsed/deadline, recovery hints, and equivalent
+    detail across every wait remain planned
 - Explicitly deferred beyond the minimum slice
   - [ ] durable replay across process restarts, remote/network transport,
     arbitrary user predicates, unbounded terminal byte logging, delivery

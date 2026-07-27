@@ -85,7 +85,13 @@ tree does not promise a version or implementation strategy.
 
 ## Current acceptance gate
 
-Run `.\check.ps1`. A change is ready only when formatting, Clippy with warnings
-denied, unit tests, `dist/` artifact generation, CLI smoke, and semantic UX
-smoke all pass. Rendering changes additionally require `screenshot` or
-`screenshot-pane` inspection.
+Run `.\check.ps1` for ordinary changes. A change is ready only when formatting,
+Clippy with warnings denied, unit tests, `dist/` artifact generation, CLI smoke,
+and semantic UX smoke all pass. Rendering changes additionally require
+`screenshot` or `screenshot-pane` inspection.
+
+An exact internal candidate uses `.\check.ps1 -Release -IncludeStress` on a
+clean commit and must emit a complete qualification receipt. The independent
+`.\scripts\package-qualified.ps1` step may only copy the byte-identical
+qualified artifacts; it does not rebuild. Version 0.1.7 is internal-only and
+must never produce a tag or public GitHub Release.

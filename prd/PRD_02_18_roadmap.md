@@ -311,30 +311,31 @@ track remains planned, but every declared dependency must still pass.
   rollback foundations and independently gated SSH, HTTP, and SQLite
   sidecars without adding GUI network authority
 - [~] M4 / v0.1.7 internal Control-Plane Integrity & Delivery Reset
-  - [~] product truth is split into owned PRD modules and command, operation,
-    event, executable, and evidence registries have drift checks; final
-    integrated inventory and status audit remain pending
+  - [x] product truth is split into owned PRD modules and command, operation,
+    event, executable, and evidence registries have drift checks; the
+    integrated inventory and status audit are qualification gates
   - [~] close the command feedback loop with versioned receipts, stable
     resolved targets, bounded idempotency, truthful completion, causal events,
     epoch-bound waits, and false-success regression coverage: receipt replay,
     Composer completion, terminal finalization, and dead-write paths are wired,
     while command-wide and wait-wide coverage remains incomplete
-  - [~] an isolated shared test harness now retains privacy-bounded
+  - [x] an isolated shared test harness retains privacy-bounded
     first-failure evidence and proves bounded cleanup of identity-matched
-    owned processes/windows/workers/registrations; the final integrated gate
-    receipt remains incomplete
-  - [~] qualification now has a versioned required-gate manifest, provenance
+    owned processes/windows/workers/registrations, including injected CLI,
+    GUI, and script-worker failures
+  - [x] qualification has a versioned required-gate manifest, provenance
     validation, fail-closed receipt logic and self-tests, while an independent
-    dry-run packager accepts only the exact qualified executable/SBOM bytes;
-    the final clean-SHA receipt and dry-run archive remain to be produced
+    dry-run packager accepts only the exact qualified executable/SBOM bytes
   - [~] running and staged identities expose
     `same|stale|incompatible|unknown` with public fleet evidence, while
     lifecycle actions and the final GUI/server compatibility decision remain
     gated
   - [~] command, receipt/error, terminal lifecycle, observation, upgrade
     identity, scripting protocol, test-harness, and qualification boundaries
-    are being extracted incrementally without a Win32/renderer/ConPTY rewrite;
-    IPC/mailbox and remaining hot-file decomposition are incomplete
+    are extracted incrementally without a Win32/renderer/ConPTY rewrite;
+    bounded IPC transport, ConPTY runtime, and lossless wake signaling now
+    have owned modules, while the remaining Win32 state-machine decomposition
+    is intentionally deferred until a concrete change needs it
 - [ ] M5 next public product version: scope intentionally remains unassigned
   until the v0.1.7 internal qualification and dogfood review; registry, named
   commands, providers, Rhai control, and event handlers are candidates rather

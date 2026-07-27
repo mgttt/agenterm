@@ -55,10 +55,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     other asynchronous paths and descriptor/event-name conformance remain
     unproven
   - [~] unit and public CLI tests cover receipt serialization, replay,
-    conflicts, deadline rejection, Composer completion, dead writes, and
-    stable target identity; full operation-catalog dispatch, alias, result,
-    error, and emitted-event contract coverage remains planned
-  - [x] one public receipt replay slice proves same-ID same-payload replay and different-payload conflict without repeating the tab-note mutation
+    conflicts, deadline rejection, Composer completion, dead writes, stable
+    target identity, and destructive terminal shutdown; full
+    operation-catalog dispatch, alias, result, error, and emitted-event
+    contract coverage remains planned
+  - [x] public receipt replay proves same-ID same-payload replay and different-payload conflict without repeating a tab-note mutation, and proves retried `new-window`/`kill-window` create and close exactly one stable tab
 - Protocol
   - [x] loopback-only newline-delimited JSON IPC
   - [x] feature discovery through `protocol-info`

@@ -259,7 +259,7 @@
       "kind": "behavior",
       "status": "shipped",
       "evidence_mode": "black-box",
-      "prd": "one public receipt replay slice proves same-ID same-payload replay and different-payload conflict without repeating the tab-note mutation",
+      "prd": "public receipt replay proves same-ID same-payload replay and different-payload conflict without repeating a tab-note mutation, and proves retried `new-window`/`kill-window` create and close exactly one stable tab",
       "evidence_ids": ["cli.control-receipts"]
     },
     {

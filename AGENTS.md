@@ -16,8 +16,13 @@ unless the information cannot live here or in that product set.
 - `src/bin/agenterm-script.rs` — one-invocation constrained Rhai worker.
 - `src/commands.rs` — reusable CLI parsing, command catalog, key mapping, and
   output-path helpers.
+- `src/build_identity.rs` — source/build identity classification shared by
+  runtime and staged-artifact reports.
+- `src/control_contract.rs` — request identity, receipts, typed errors,
+  deadlines, replay, and completion descriptors.
 - `src/event_journal.rs` — bounded observable-event ordering and gap detection.
 - `src/instances.rs` — multi-server registration and discovery records.
+- `src/ipc_transport.rs` — bounded loopback request/response transport.
 - `src/operations.rs` — typed operation catalog, classes, and validation.
 - `src/protocol.rs` — serialized local IPC request/response contract.
 - `src/rmux_status.rs` — RMUX status-line window parsing and click ranges.
@@ -25,8 +30,14 @@ unless the information cannot live here or in that product set.
 - `src/script_protocol.rs` — versioned host/worker scripting contract.
 - `src/settings.rs` — persistent user settings.
 - `src/tab_tree.rs` — pure hierarchy ordering and cycle detection.
+- `src/terminal_lifecycle.rs` — process/reader/parser lifecycle truth.
+- `src/terminal_observation.rs` — terminal counters and finalization snapshots.
+- `src/terminal_runtime.rs` — ConPTY creation, I/O workers, resize, and bounded
+  worker shutdown.
 - `src/theme.rs` — built-in theme IDs and color palettes.
 - `src/ui_geometry.rs` — pure host-surface layout and sidebar geometry.
+- `src/upgrade_identity.rs` — running/staged compatibility truth.
+- `src/wake_signal.rs` — lossless coalesced GUI-owner wake notification.
 - `src/worker_supervisor.rs` — bounded sidecar lifetime and cancellation.
 - `src/working_context.rs` — CWD/proxy provenance and safe command preparation.
 - `src/workspace.rs` — versioned tab-workspace persistence.
@@ -34,8 +45,6 @@ unless the information cannot live here or in that product set.
 - `tests/` — black-box tests that drive only the public AgenTerm executable.
 - `assets/` — application icon sources.
 - `scripts/` — build metadata tooling.
-- `prd/` — detailed product-tree modules linked from the canonical `PRD.md`
-  index; do not duplicate scope between modules.
 - `dist/plan-*.md` — optional ignored discussion drafts for dependencies,
   milestones, risks, and sequencing; they are temporary and must not become
   dependencies of the tracked product set.
@@ -82,8 +91,10 @@ Use PowerShell from the repository root:
 .\check.ps1 -SkipSmoke  # fmt, Clippy, unit tests, dev artifact
 .\check.ps1             # full public-interface regression
 .\check.ps1 -Release    # local release gate; skips event-journal load stress
+.\check.ps1 -Release -IncludeStress # exact candidate qualification + receipt
+.\scripts\package-qualified.ps1     # package only the qualified bytes
 .\build.bat release     # distributable release artifact
-.\release.ps1           # validate, tag, push; CI publishes GitHub Release
+.\release.ps1           # public versions only: validate/tag/push for CI
 ```
 
 For this repository, `release.ps1` is the authoritative formal-release entry
@@ -91,6 +102,9 @@ point. It pushes `main` and the version tag directly through Git/GCM; do not
 create a release PR, require a local `gh` installation, or substitute a generic
 GitHub publishing workflow. The tag-triggered runner owns GitHub Release
 creation and may use its bundled `gh` with `GITHUB_TOKEN`.
+Version 0.1.7 is an internal qualification baseline: both `release.ps1` and
+the tag workflow reject it. Never create or push `v0.1.7`; qualify it with the
+stress-inclusive command above and use only the ignored dry-run package.
 
 The former `.cargo/config.toml` forced `jobs = 1` and made clean builds much
 slower. Do not restore a global job limit. Keep the default dev path
@@ -103,9 +117,10 @@ cannot grow without bound. Release-only size optimization belongs in
 and prefers `pwsh` when available; do not split it back into one interpreter
 startup per artifact.
 All smoke tests inherit `AGENTERM_NO_ACTIVATE=1`; GUI launches and CLI
-autostarts must honor it without taking foreground focus. Local release
-qualification skips the bounded-journal saturation load. Only the clean release
-CI runner should opt back in with `check.ps1 -Release -IncludeStress`.
+autostarts must honor it without taking foreground focus. Routine local release
+checks may skip the bounded-journal saturation load. A candidate-bound
+qualification receipt requires `check.ps1 -Release -IncludeStress`; packaging
+must consume that exact receipt and must not rebuild.
 The release gate enforces explicit budgets of 4 MiB for `agenterm.exe` and
 2 MiB each for `agenterm-cli.exe` and `agenterm-mux.exe`; investigate dependency
 or feature growth instead of raising them casually.
