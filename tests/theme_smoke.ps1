@@ -73,6 +73,8 @@ function Start-IsolatedGui {
         -RedirectStandardError $stderrFile `
         -PassThru
     $guiProcesses.Add($process)
+    Register-SmokeOwnedProcess -Context $themeRun -Id $process.Id `
+        -Kind 'gui' -Address $themeRun.Address
     Wait-AgenTermReady
     for ($attempt = 0; $attempt -lt 200; $attempt++) {
         $process.Refresh()

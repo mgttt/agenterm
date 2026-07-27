@@ -128,6 +128,7 @@ function Invoke-SmokeCli {
     $output = $outputItems -join "`n"
     Add-SmokeCommandRecord -Context $Context -Arguments $Arguments `
         -ExitCode $exitCode -ExpectedFailure ([bool]$ExpectFailure) -Output $output
+    Sync-SmokeOwnedServers -Context $Context
     $safeCommand = (ConvertTo-SmokeSafeArguments -Arguments $Arguments) -join ' '
 
     if ($ExpectFailure) {
@@ -152,6 +153,86 @@ function Write-SmokeEvidence {
     }
     Add-Content -LiteralPath $Context.EvidencePath -Value $Id -Encoding UTF8
     Write-Host "EVIDENCE $Id"
+}
+
+function Register-SmokeOwnedAddress {
+    param(
+        [Parameter(Mandatory = $true)]$Context,
+        [Parameter(Mandatory = $true)][string]$Address
+    )
+    $Context.OwnedAddresses.Add($Address) | Out-Null
+}
+
+function Register-SmokeOwnedProcess {
+    param(
+        [Parameter(Mandatory = $true)]$Context,
+        [Parameter(Mandatory = $true)][int]$Id,
+        [Parameter(Mandatory = $true)][string]$Kind,
+        [string]$Address = ''
+    )
+
+    if ($Id -le 0) {
+        throw "Refusing to register invalid owned PID: $Id"
+    }
+    $process = Get-Process -Id $Id -ErrorAction SilentlyContinue
+    if ($null -eq $process) {
+        return
+    }
+    $existing = @($Context.OwnedProcesses |
+        Where-Object { $_.pid -eq $Id }) | Select-Object -First 1
+    $windowHandle = [int64]$process.MainWindowHandle
+    if ($null -ne $existing) {
+        if ($Kind -eq 'server') {
+            $existing.kind = 'server'
+        }
+        if ($windowHandle -ne 0) {
+            $existing.window_handle = $windowHandle
+        }
+        if (-not [string]::IsNullOrWhiteSpace($Address)) {
+            $existing.address = $Address
+            Register-SmokeOwnedAddress -Context $Context -Address $Address
+        }
+        return
+    }
+    $startTime = try {
+        $process.StartTime.ToUniversalTime().ToString('o')
+    } catch {
+        ''
+    }
+    $Context.OwnedProcesses.Add([pscustomobject]@{
+        pid = $Id
+        kind = $Kind
+        address = $Address
+        process_name = $process.ProcessName
+        start_time_utc = $startTime
+        window_handle = $windowHandle
+        forced = $false
+    })
+    if (-not [string]::IsNullOrWhiteSpace($Address)) {
+        Register-SmokeOwnedAddress -Context $Context -Address $Address
+    }
+}
+
+function Sync-SmokeOwnedServers {
+    param([Parameter(Mandatory = $true)]$Context)
+
+    foreach ($recordPath in @(
+        Get-ChildItem -LiteralPath $Context.InstanceDirectory -File `
+            -Filter '*.json' -ErrorAction SilentlyContinue
+    )) {
+        try {
+            $record = Get-Content -LiteralPath $recordPath.FullName -Raw |
+                ConvertFrom-Json
+            $address = [string]$record.address
+            if ($Context.OwnedAddresses.Contains($address)) {
+                Register-SmokeOwnedProcess -Context $Context `
+                    -Id ([int]$record.pid) -Kind 'server' -Address $address
+            }
+        }
+        catch {
+            # A concurrently retiring registration is handled by final cleanup.
+        }
+    }
 }
 
 function Invoke-SmokeDiagnostic {
@@ -268,31 +349,164 @@ function Restore-SmokeEnvironment {
     }
 }
 
-function Stop-SmokeOwnedServer {
-    param([Parameter(Mandatory = $true)]$Context)
-
-    $savedPreference = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
+function Test-SmokeOwnedProcessIdentity {
+    param(
+        [Parameter(Mandatory = $true)]$Record,
+        [Parameter(Mandatory = $true)][Diagnostics.Process]$Process
+    )
+    if ([string]::IsNullOrWhiteSpace([string]$Record.start_time_utc)) {
+        return $false
+    }
     try {
-        $output = @(
-            & $Context.Executable --address $Context.Address kill-server 2>&1
-        )
-        $exitCode = $LASTEXITCODE
+        return $Process.StartTime.ToUniversalTime().ToString('o') -eq
+            [string]$Record.start_time_utc
     }
     catch {
-        $output = @($_ | Out-String)
-        $exitCode = -1
+        return $false
+    }
+}
+
+function Stop-SmokeOwnedResources {
+    param([Parameter(Mandatory = $true)]$Context)
+
+    Sync-SmokeOwnedServers -Context $Context
+    $graceful = [Collections.Generic.List[object]]::new()
+    foreach ($address in @($Context.OwnedAddresses)) {
+        $liveServer = @($Context.OwnedProcesses | Where-Object {
+            $_.address -eq $address -and $_.kind -eq 'server'
+        } | Where-Object {
+            $candidate = Get-Process -Id $_.pid -ErrorAction SilentlyContinue
+            $null -ne $candidate -and
+                (Test-SmokeOwnedProcessIdentity -Record $_ -Process $candidate)
+        })
+        if ($liveServer.Count -eq 0) {
+            continue
+        }
+        $savedPreference = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            $output = @(
+                & $Context.Executable --address $address kill-server 2>&1
+            )
+            $exitCode = $LASTEXITCODE
+        }
+        catch {
+            $output = @($_ | Out-String)
+            $exitCode = -1
+        }
+        finally {
+            $ErrorActionPreference = $savedPreference
+        }
+        $graceful.Add([ordered]@{
+            address = $address
+            exit_code = $exitCode
+            output = Limit-SmokeText -Text ($output -join "`n") `
+                -MaximumBytes 8192
+        })
+    }
+
+    $deadline = [DateTime]::UtcNow.AddSeconds(3)
+    do {
+        $live = @($Context.OwnedProcesses | Where-Object {
+            $candidate = Get-Process -Id $_.pid -ErrorAction SilentlyContinue
+            $null -ne $candidate -and
+                (Test-SmokeOwnedProcessIdentity -Record $_ -Process $candidate)
+        })
+        if ($live.Count -eq 0) {
+            break
+        }
+        Start-Sleep -Milliseconds 50
+    } while ([DateTime]::UtcNow -lt $deadline)
+
+    $forcedPids = [Collections.Generic.List[int]]::new()
+    $forceErrors = [Collections.Generic.List[string]]::new()
+    foreach ($record in $Context.OwnedProcesses) {
+        $process = Get-Process -Id $record.pid -ErrorAction SilentlyContinue
+        if ($null -eq $process -or
+            -not (Test-SmokeOwnedProcessIdentity -Record $record `
+                -Process $process)) {
+            continue
+        }
+        try {
+            Stop-Process -Id $record.pid -Force -ErrorAction Stop
+            $record.forced = $true
+            $forcedPids.Add([int]$record.pid)
+        }
+        catch {
+            $forceErrors.Add(
+                "PID $($record.pid): $(($_ | Out-String).Trim())"
+            )
+        }
+    }
+    $forceDeadline = [DateTime]::UtcNow.AddSeconds(3)
+    do {
+        $remaining = @($Context.OwnedProcesses | Where-Object {
+            $candidate = Get-Process -Id $_.pid -ErrorAction SilentlyContinue
+            $null -ne $candidate -and
+                (Test-SmokeOwnedProcessIdentity -Record $_ -Process $candidate)
+        })
+        if ($remaining.Count -eq 0) {
+            break
+        }
+        Start-Sleep -Milliseconds 50
+    } while ([DateTime]::UtcNow -lt $forceDeadline)
+
+    $savedAddress = $env:AGENTERM_IPC_ADDRESS
+    Remove-Item Env:AGENTERM_IPC_ADDRESS -ErrorAction SilentlyContinue
+    try {
+        & $Context.Executable server-list --json 2>$null | Out-Null
     }
     finally {
-        $ErrorActionPreference = $savedPreference
+        if ($null -eq $savedAddress) {
+            Remove-Item Env:AGENTERM_IPC_ADDRESS -ErrorAction SilentlyContinue
+        } else {
+            $env:AGENTERM_IPC_ADDRESS = $savedAddress
+        }
     }
-    $text = "exit_code=$exitCode`n" + ($output -join "`n")
-    $text = Limit-SmokeText -Text $text -MaximumBytes 8192
-    [IO.File]::WriteAllText(
-        (Join-Path $Context.RunDirectory 'cleanup-server.txt'),
-        $text,
-        [Text.UTF8Encoding]::new($false)
+
+    $remainingRegistrations = @(
+        Get-ChildItem -LiteralPath $Context.InstanceDirectory -File `
+            -Filter '*.json' -ErrorAction SilentlyContinue
     )
+    $remainingWindows = @($Context.OwnedProcesses | Where-Object {
+        $candidate = Get-Process -Id $_.pid -ErrorAction SilentlyContinue
+        [int64]$_.window_handle -ne 0 -and $null -ne $candidate -and
+            (Test-SmokeOwnedProcessIdentity -Record $_ -Process $candidate)
+    })
+    $result = [ordered]@{
+        schema_version = 1
+        completed_at_utc = [DateTime]::UtcNow.ToString('o')
+        owned_processes = @($Context.OwnedProcesses)
+        graceful_shutdowns = @($graceful)
+        forced_pids = @($forcedPids)
+        force_errors = @($forceErrors)
+        remaining_pids = @($remaining | ForEach-Object { [int]$_.pid })
+        remaining_windows = @(
+            $remainingWindows | ForEach-Object { [int64]$_.window_handle }
+        )
+        remaining_registrations = @(
+            $remainingRegistrations | Select-Object -ExpandProperty Name
+        )
+        orphan_free = (
+            $remaining.Count -eq 0 -and
+            $remainingWindows.Count -eq 0 -and
+            $remainingRegistrations.Count -eq 0 -and
+            $forceErrors.Count -eq 0
+        )
+    }
+    $result | ConvertTo-Json -Depth 7 |
+        Set-Content -LiteralPath $Context.CleanupPath -Encoding UTF8
+    Add-Content -LiteralPath $Context.EvidencePath `
+        -Value "HARNESS cleanup.orphan-free=$($result.orphan_free)" `
+        -Encoding UTF8
+    Write-Host (
+        "CLEANUP orphan_free=$($result.orphan_free) " +
+        "owned=$($Context.OwnedProcesses.Count) forced=$($forcedPids.Count)"
+    )
+    if (-not $result.orphan_free) {
+        throw 'Smoke cleanup left owned processes, windows, or registrations.'
+    }
+    return $result
 }
 
 function Complete-SmokeRun {
@@ -312,8 +526,12 @@ function Complete-SmokeRun {
             $bundleError = $_
         }
     }
+    $cleanupError = $null
     try {
-        Stop-SmokeOwnedServer -Context $Context
+        Stop-SmokeOwnedResources -Context $Context | Out-Null
+    }
+    catch {
+        $cleanupError = $_
     }
     finally {
         Restore-SmokeEnvironment -Context $Context
@@ -323,6 +541,41 @@ function Complete-SmokeRun {
             "Failure bundle collection was incomplete: " +
             ($bundleError | Out-String).Trim()
         )
+    }
+
+    if ($null -ne $cleanupError) {
+        if (Test-Path -LiteralPath $Context.ManifestPath) {
+            $manifest = Get-Content -LiteralPath $Context.ManifestPath -Raw |
+                ConvertFrom-Json
+            $manifest | Add-Member -NotePropertyName cleanup `
+                -NotePropertyValue @{
+                    path = [IO.Path]::GetFileName($Context.CleanupPath)
+                    error = ($cleanupError | Out-String).Trim()
+                } -Force
+            $manifest | ConvertTo-Json -Depth 8 |
+                Set-Content -LiteralPath $Context.ManifestPath -Encoding UTF8
+        }
+        if (-not $Succeeded) {
+            Write-Warning (
+                'Smoke cleanup also failed; preserving original test failure: ' +
+                ($cleanupError | Out-String).Trim()
+            )
+        } else {
+            Save-SmokeFailureBundle -Context $Context `
+                -FailureRecord $cleanupError
+            $Succeeded = $false
+        }
+    }
+    elseif (Test-Path -LiteralPath $Context.ManifestPath) {
+        $manifest = Get-Content -LiteralPath $Context.ManifestPath -Raw |
+            ConvertFrom-Json
+        $manifest | Add-Member -NotePropertyName cleanup `
+            -NotePropertyValue @{
+                path = [IO.Path]::GetFileName($Context.CleanupPath)
+                orphan_free = $true
+            } -Force
+        $manifest | ConvertTo-Json -Depth 8 |
+            Set-Content -LiteralPath $Context.ManifestPath -Encoding UTF8
     }
 
     if ($Succeeded) {
@@ -340,6 +593,9 @@ function Complete-SmokeRun {
         Remove-Item -LiteralPath $runPath -Recurse -Force
     } else {
         Write-Host "FAILURE BUNDLE $($Context.RunDirectory)"
+    }
+    if ($null -ne $cleanupError -and $null -eq $FailureRecord) {
+        throw $cleanupError
     }
 }
 
@@ -365,10 +621,12 @@ function New-SmokeRunContext {
     $runDirectory = Join-Path $ownedRoot "$Suite-$runId"
     $workspaceDirectory = Join-Path $runDirectory 'workspace'
     $settingsDirectory = Join-Path $runDirectory 'settings'
+    $instanceDirectory = Join-Path $runDirectory 'instances'
     $evidenceDirectory = Join-Path $runDirectory 'evidence'
     $failureDirectory = Join-Path $runDirectory 'failure'
     foreach ($path in @(
-        $workspaceDirectory, $settingsDirectory, $evidenceDirectory
+        $workspaceDirectory, $settingsDirectory, $instanceDirectory,
+        $evidenceDirectory
     )) {
         New-Item -ItemType Directory -Path $path -Force | Out-Null
     }
@@ -379,14 +637,16 @@ function New-SmokeRunContext {
         AGENTERM_IPC_ADDRESS = $env:AGENTERM_IPC_ADDRESS
         AGENTERM_WORKSPACE_PATH = $env:AGENTERM_WORKSPACE_PATH
         AGENTERM_SETTINGS_PATH = $env:AGENTERM_SETTINGS_PATH
+        AGENTERM_INSTANCE_DIR = $env:AGENTERM_INSTANCE_DIR
         AGENTERM_NO_ACTIVATE = $env:AGENTERM_NO_ACTIVATE
     }
     $env:AGENTERM_IPC_ADDRESS = $address
     $env:AGENTERM_WORKSPACE_PATH = $workspacePath
     $env:AGENTERM_SETTINGS_PATH = $settingsPath
+    $env:AGENTERM_INSTANCE_DIR = $instanceDirectory
     $env:AGENTERM_NO_ACTIVATE = '1'
 
-    return [pscustomobject]@{
+    $context = [pscustomobject]@{
         Suite = $Suite
         RunId = $runId
         StartedAtUtc = [DateTime]::UtcNow.ToString('o')
@@ -396,6 +656,7 @@ function New-SmokeRunContext {
         RunDirectory = $runDirectory
         WorkspaceDirectory = $workspaceDirectory
         SettingsDirectory = $settingsDirectory
+        InstanceDirectory = $instanceDirectory
         EvidenceDirectory = $evidenceDirectory
         FailureDirectory = $failureDirectory
         WorkspacePath = $workspacePath
@@ -403,9 +664,16 @@ function New-SmokeRunContext {
         CommandLogPath = (Join-Path $runDirectory 'commands.log')
         EvidencePath = (Join-Path $evidenceDirectory 'emitted.txt')
         ManifestPath = (Join-Path $runDirectory 'manifest.json')
+        CleanupPath = (Join-Path $runDirectory 'cleanup.json')
         CommandLogBytes = 0
         AllowPaneCapture = [bool]$AllowPaneCapture
         DeclaredEvidence = @($DeclaredEvidence)
         PreviousEnvironment = $previousEnvironment
+        OwnedProcesses = [Collections.Generic.List[object]]::new()
+        OwnedAddresses = [Collections.Generic.HashSet[string]]::new(
+            [StringComparer]::Ordinal
+        )
     }
+    Register-SmokeOwnedAddress -Context $context -Address $address
+    return $context
 }

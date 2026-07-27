@@ -40,6 +40,8 @@ function Invoke-AgenTerm {
 function Add-OwnedProcess {
     param([Parameter(Mandatory = $true)][Diagnostics.Process]$Process)
     $ownedProcesses.Add($Process)
+    Register-SmokeOwnedProcess -Context $run -Id $Process.Id `
+        -Kind 'gui' -Address $run.Address
     return $Process
 }
 

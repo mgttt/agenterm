@@ -167,6 +167,8 @@ function Invoke-FramedWorker {
     $startInfo.RedirectStandardOutput = $true
     $startInfo.RedirectStandardError = $true
     $process = [Diagnostics.Process]::Start($startInfo)
+    Register-SmokeOwnedProcess -Context $smokeRun -Id $process.Id `
+        -Kind 'script-worker'
     try {
         $process.StandardInput.BaseStream.Write($InputBytes, 0, $InputBytes.Length)
         $process.StandardInput.Close()
@@ -218,6 +220,8 @@ function Start-ScriptClient {
     $startInfo.RedirectStandardError = $true
     $process = [Diagnostics.Process]::Start($startInfo)
     $script:ownedScriptClients.Add($process)
+    Register-SmokeOwnedProcess -Context $smokeRun -Id $process.Id `
+        -Kind 'script-client'
     return $process
 }
 
@@ -232,6 +236,8 @@ function Wait-NewWorker {
             Where-Object { $Existing -notcontains $_.Id } |
             Select-Object -First 1
         if ($null -ne $worker) {
+            Register-SmokeOwnedProcess -Context $smokeRun -Id $worker.Id `
+                -Kind 'script-worker'
             return $worker
         }
         Start-Sleep -Milliseconds 5

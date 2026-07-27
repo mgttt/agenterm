@@ -30,11 +30,9 @@ foreach ($path in @($CtlExe, $MuxExe)) {
 
 $context = New-SmokeRunContext -Suite 'fleet' -Executable $CtlExe `
     -DeclaredEvidence $declaredEvidence
-$context.PreviousEnvironment['AGENTERM_INSTANCE_DIR'] = $env:AGENTERM_INSTANCE_DIR
 $address = $context.Address
 $workspaceFile = $context.WorkspacePath
-$instanceDir = Join-Path $context.RunDirectory 'instances'
-$env:AGENTERM_INSTANCE_DIR = $instanceDir
+$instanceDir = $context.InstanceDirectory
 $environmentName = "env-$PID"
 $agentName = "codex-$PID"
 $role = "reviewer-$PID"
@@ -51,6 +49,8 @@ function Get-FleetAddress {
 }
 $explicitAddress = Get-FleetAddress
 $secondAddress = Get-FleetAddress
+Register-SmokeOwnedAddress -Context $context -Address $explicitAddress
+Register-SmokeOwnedAddress -Context $context -Address $secondAddress
 $explicitWorkspace = Join-Path $context.WorkspaceDirectory 'explicit.json'
 $secondWorkspace = Join-Path $context.WorkspaceDirectory 'second.json'
 $asyncDirectory = Join-Path $context.RunDirectory 'async'
@@ -94,6 +94,7 @@ function Invoke-CheckedExe {
     $output = $outputItems -join "`n"
     Add-FleetCommandRecord -Path $Path -CommandArgs $CommandArgs `
         -ExitCode $exitCode -ExpectedFailure $false -Output $output
+    Sync-SmokeOwnedServers -Context $context
     if ($exitCode -ne 0) {
         throw "$([IO.Path]::GetFileName($Path)) $($CommandArgs -join ' ') failed:`n$($output -join "`n")"
     }
@@ -144,6 +145,8 @@ function Start-EventWaiter {
     $process = Start-Process -FilePath $CtlExe -ArgumentList $arguments `
         -RedirectStandardOutput $stdout -RedirectStandardError $stderr `
         -WindowStyle Hidden -PassThru
+    Register-SmokeOwnedProcess -Context $context -Id $process.Id `
+        -Kind 'client'
     $script:eventWaiters += $process
     return [pscustomobject]@{
         Process = $process

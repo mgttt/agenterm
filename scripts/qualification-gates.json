@@ -39,6 +39,18 @@
       "evidence": []
     },
     {
+      "id": "qualification-selftest",
+      "evidence": []
+    },
+    {
+      "id": "package-boundary-selftest",
+      "evidence": []
+    },
+    {
+      "id": "harness-cleanup-selftest",
+      "evidence": []
+    },
+    {
       "id": "prd-alignment",
       "evidence": []
     },
@@ -47,6 +59,10 @@
       "evidence": [
         "startup.first-window-async-ready"
       ]
+    },
+    {
+      "id": "wake-smoke",
+      "evidence": []
     },
     {
       "id": "cli-smoke",

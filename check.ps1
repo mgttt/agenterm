@@ -206,6 +206,18 @@ try {
         -Label 'internal version publication policy' {
         & '.\scripts\internal-version-policy.ps1'
     }
+    Invoke-Checked -Id 'qualification-selftest' `
+        -Label 'qualification fail-closed self-test' {
+        & '.\scripts\qualification-selftest.ps1'
+    }
+    Invoke-Checked -Id 'package-boundary-selftest' `
+        -Label 'qualified package boundary self-test' {
+        & '.\scripts\package-qualified-selftest.ps1'
+    }
+    Invoke-Checked -Id 'harness-cleanup-selftest' `
+        -Label 'owned-resource cleanup self-test' {
+        & '.\tests\harness_cleanup_selftest.ps1'
+    }
 
     Invoke-Checked -Id 'prd-alignment' -Label 'PRD capability alignment' {
         & '.\tests\prd_alignment.ps1'
@@ -218,6 +230,10 @@ try {
         try {
             Invoke-Checked -Id 'startup-smoke' -Label 'startup smoke test' {
                 & '.\tests\startup_smoke.ps1'
+            }
+            Invoke-Checked -Id 'wake-smoke' `
+                -Label 'coalesced runtime wake smoke test' {
+                & '.\tests\wake_smoke.ps1'
             }
             Invoke-Checked -Id 'cli-smoke' -Label 'CLI smoke test' {
                 & '.\tests\cli_smoke.ps1'

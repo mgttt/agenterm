@@ -143,12 +143,11 @@ foreach ($path in @($GuiExe, $CliExe)) {
 . (Join-Path $PSScriptRoot 'TestHarness.ps1')
 $context = New-SmokeRunContext -Suite 'working-context' `
     -Executable $CliExe -DeclaredEvidence $declaredEvidence
-$context.PreviousEnvironment['AGENTERM_INSTANCE_DIR'] = $env:AGENTERM_INSTANCE_DIR
 $context.PreviousEnvironment['HTTP_PROXY'] = $env:HTTP_PROXY
 $context.PreviousEnvironment['HTTPS_PROXY'] = $env:HTTPS_PROXY
 $address = $context.Address
 $workspace = $context.WorkspacePath
-$instances = Join-Path $context.RunDirectory 'instances'
+$instances = $context.InstanceDirectory
 $stderrFile = Join-Path $context.RunDirectory 'gui-stderr.txt'
 $png = Join-Path $context.RunDirectory 'proxy-eye.png'
 $script:secret = ('credential-' + $PID + '-sentinel')
@@ -190,6 +189,8 @@ try {
     $env:HTTP_PROXY = $proxyUrl
     $env:HTTPS_PROXY = $proxyUrl
     $process = Start-Process -FilePath $GuiExe -RedirectStandardError $stderrFile -PassThru
+    Register-SmokeOwnedProcess -Context $context -Id $process.Id `
+        -Kind 'gui' -Address $address
     Remove-Item Env:HTTP_PROXY -ErrorAction SilentlyContinue
     Remove-Item Env:HTTPS_PROXY -ErrorAction SilentlyContinue
 
@@ -309,6 +310,8 @@ try {
         throw 'First proxy test server did not stop'
     }
     $process = Start-Process -FilePath $GuiExe -RedirectStandardError $stderrFile -PassThru
+    Register-SmokeOwnedProcess -Context $context -Id $process.Id `
+        -Kind 'gui' -Address $address
     Wait-Server $process
     Invoke-Cli wait-ui -t 0 --tab-state running --timeout-ms 10000 | Out-Null
     $restoredText = Invoke-Cli ui-snapshot
