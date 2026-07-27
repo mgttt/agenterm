@@ -399,8 +399,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       - [ ] a script failure is isolated from the GUI, IPC server, terminal
         readers, and workspace persistence
     - Runtime architecture
-      - [ ] optional `scripting` Cargo feature behind a narrow `ScriptHost`
-        trait; the GUI state machine remains independent of Rhai types
+      - [ ] optional `scripting` feature lives in a sidecar crate/binary behind
+        a narrow `ScriptHost` trait; the GUI binary and state machine remain
+        independent of Rhai types
       - [ ] one engine factory builds each invocation from an immutable
         capability set, source label, API version, and resource budget
       - [ ] lazy initialization on first use; no engine construction or script
@@ -445,8 +446,83 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
         scoped Windows file access
       - [ ] audit source, requested/granted capabilities, duration, result
         class, and denial reason without recording content or secrets
+    - v0.1.5 minimum sidecar contract
+      - Process boundary
+        - [ ] one fresh worker process executes one `run`, `eval`, or `check`
+          invocation; v0.1.5 has no persistent daemon, background handler,
+          module resolver, or cross-invocation mutable state
+        - [ ] the launcher places the worker in a kill-on-close Windows Job
+          Object and owns its deadline, cancellation, stdout, stderr, and final
+          exit status; a crashed or killed worker cannot affect the GUI server
+        - [ ] a versioned invocation envelope and result envelope travel over
+          inherited anonymous pipes; source text, arguments, capabilities, and
+          secrets are not placed in the process command line
+        - [ ] the worker never connects to GUI IPC directly. A host broker
+          validates the profile and supplies only immutable typed inputs over
+          the invocation channel
+      - Initial profiles
+        - [ ] `pure` exposes bounded Rhai evaluation, JSON-compatible values,
+          invocation arguments, and captured stdout only; it has no clock,
+          environment, filesystem, process, network, terminal, or fleet access
+        - [ ] `observe` adds typed workspace metadata, tab-tree snapshots, pane
+          snapshots, settings/status snapshots, and bounded Observable Fleet
+          journal reads/waits; every input carries schema version, epoch, and
+          sequence where applicable
+        - [ ] an observe invocation starts from one snapshot baseline and then
+          consumes only validated event envelopes after that sequence; restart
+          and journal-gap errors are delivered as typed errors, never hidden by
+          an implicit resnapshot
+        - [ ] `control`, filesystem, environment, process execution, network,
+          package loading, event handlers, and status providers remain outside
+          the v0.1.5 acceptance gate
+      - Public commands and discovery
+        - [ ] `script run FILE.rhai|- [-- ARGS...]` loads a file or stdin and
+          returns script stdout separately from diagnostics
+        - [ ] `script eval EXPRESSION` evaluates one explicit expression under
+          the selected profile without loading user modules
+        - [ ] `script check FILE.rhai` parses and validates API names,
+          capability requirements, and static limits without executing code or
+          contacting a live AgenTerm server
+        - [ ] `script api --json` reports host API/schema versions, profiles,
+          functions, typed parameters/results/errors, limits, and availability
+          without starting a Rhai engine or AgenTerm GUI
+        - [ ] every command accepts an explicit profile and bounded overrides;
+          unknown API versions, profiles, capabilities, or options fail closed
+          with stable documented exit codes
+      - Budgets, cancellation, and audit
+        - [ ] versioned nonzero defaults and immutable hard ceilings cover
+          source bytes, operations, call depth, collection/string size, output
+          bytes, wall time, journal events, wait duration, and worker count;
+          `script api --json` exposes the effective values
+        - [ ] exceeding any budget produces a typed limit result and bounded
+          diagnostics; output truncation is explicit and cannot produce a
+          successful status
+        - [ ] cancellation first signals the worker cooperatively, then
+          terminates its Job Object after a bounded grace period; CLI
+          interruption, timeout, and parent exit cannot orphan a worker
+        - [ ] one append-only audit record captures invocation ID, timestamp,
+          source fingerprint/label, API version, profile, requested/effective
+          budgets, duration, exit class, cancellation, and denials, but not
+          source, arguments, pane contents, environment values, or stdout
+      - Public black-box acceptance
+        - [ ] tests invoke only released `agentermctl script` commands and
+          validate stdout/stderr separation, JSON discovery, stable exit codes,
+          file/stdin/eval/check behavior, and clean-machine missing-sidecar
+          diagnostics
+        - [ ] pure-profile fixtures prove denied filesystem, environment,
+          process, network, fleet, and clock access; observe fixtures prove
+          typed snapshots, ordered events, epoch restart, bounded-history gap,
+          wait timeout, and absence of mutation APIs
+        - [ ] adversarial fixtures cover parse/runtime errors, operation and
+          output exhaustion, oversized values, cancellation, worker crash,
+          parent exit, concurrent worker ceiling, malformed envelopes, and
+          unsupported API versions without GUI latency or workspace damage
+        - [ ] acceptance records GUI/CLI/worker sizes and first-window timing,
+          verifies no Rhai code loads during normal GUI startup, and leaves no
+          worker or temporary source behind after every result class
     - Extension surfaces
-      - [ ] phase 1: one-shot run/eval/check and API discovery
+      - [ ] phase 1 (v0.1.5): one-shot pure/observe run/eval/check and API
+        discovery under the minimum sidecar contract
       - [ ] phase 2: status providers with timeout, last-good value, and visible
         degraded state
       - [ ] phase 3: named commands callable by people, agents, and IPC
@@ -497,6 +573,51 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       - [ ] begin with read-only inventory/snapshot resources and bounded waits,
         then add explicit control tools, then durable flows; MCP client
         federation and autonomous scheduling remain later gates
+    - v0.1.5 first delivery: public read-only surface
+      - Executable and discovery
+        - [ ] `agenterm-mcp.exe --help`, `--version`, and
+          `capabilities --json` work without starting a GUI or model runtime;
+          capability output declares protocol/schema versions, transport,
+          resources, tools, limits, and unavailable later-stage roles
+        - [ ] `agenterm-mcp.exe serve --stdio` is the only first-delivery MCP
+          transport; initialization negotiates a supported protocol version and
+          publishes stable server identity without opening a network listener
+        - [ ] an absent, stale, restarted, or incompatible AgenTerm server
+          returns a typed MCP error with address/session diagnostics and never
+          causes the sidecar to create a second workspace authority
+      - Inventory and snapshots
+        - [ ] `resources/list` advertises versioned read-only resources for
+          instance inventory, workspace inventory, tab inventory, and one fleet
+          snapshot; stable resource URIs do not encode mutable tab indexes or
+          titles
+        - [ ] `resources/read` returns the same stable IDs and observable state
+          as the public AgenTerm control plane, plus schema version, server
+          epoch, and snapshot sequence so a client can establish a verifiable
+          event baseline
+        - [ ] pane text or other content-bearing fields are absent by default;
+          any future content snapshot requires an explicit observe capability,
+          bounded output, and a resource distinct from metadata inventory
+      - Bounded wait
+        - [ ] `tools/list` exposes only one read-only `agenterm_wait` tool in
+          the first delivery; no create, send, close, script, process, or
+          filesystem tool is advertised
+        - [ ] `agenterm_wait` accepts a snapshot epoch/sequence, one allowlisted
+          predicate, and a bounded `timeout_ms`; success returns the matching
+          event and new position, while restart, journal gap, cancellation, and
+          deadline expiry remain distinct typed results
+        - [ ] client disconnect, cancellation, or timeout releases capacity
+          within a bounded grace period and cannot block the GUI IPC loop or
+          another MCP client
+      - Failure isolation and deferred roles
+        - [ ] malformed JSON-RPC, oversized frames, a killed or hung sidecar,
+          backend disconnect, and wait exhaustion cannot stall terminal output,
+          mutate workspace state, close tabs, or terminate `agenterm.exe`
+        - [ ] sidecar restart reconstructs read-only state from a fresh snapshot
+          and epoch/sequence; it never claims uninterrupted subscription or
+          process continuity
+        - [ ] MCP client federation, network transport, subscriptions, control
+          tools, Rhai tool execution, brain/flow, durable scheduling, and
+          autonomous actions remain outside this first-delivery gate
   - Lightweight specialized intelligence (`agenterm-ai.exe`)
     - Product boundary
       - [ ] run inference in an optional CPU-first sidecar; `agenterm.exe`
@@ -714,12 +835,109 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [x] one-command fmt, Clippy, test, build, and smoke regression
     - [x] release CI runs the isolated public CLI and fleet smoke suites before
       packaging, even when the redundant GUI smoke suites are skipped
+    - v0.1.5 public-interface evidence gate
+      - MCP black-box evidence
+        - [ ] `tests/mcp_smoke.ps1` drives only the released
+          `agenterm-mcp.exe` stdio interface: initialize, capability discovery,
+          resource listing/reads, bounded wait success/timeout/cancellation,
+          protocol errors, and clean shutdown
+        - [ ] inventory and snapshot assertions cross-check stable IDs,
+          epoch, sequence, and state against `agentermctl` JSON from the same
+          isolated server instead of trusting MCP output in isolation
+        - [ ] crash/timeout fixtures kill and hang the sidecar while a public
+          `agentermctl` probe proves the GUI remains responsive, terminal output
+          advances, tabs remain present, and a new sidecar can resynchronize
+      - Rhai black-box evidence
+        - [ ] `tests/script_smoke.ps1` drives only public `script check`,
+          `script eval`, `script run`, and `script api --json` commands; no test
+          links the Rhai host or invokes an internal worker API
+        - [ ] fixtures prove deterministic `pure` output, an `observe` snapshot
+          and journal position matching `agentermctl`, denied mutation and
+          ambient authority, stable parse/runtime/limit exit classes, timeout,
+          output truncation, worker crash, and subsequent recovery
+        - [ ] every Rhai timeout/crash case includes an independent public GUI,
+          PTY, and workspace-health assertion; a sidecar error alone is not
+          accepted as isolation evidence
+      - PRD-command-test alignment
+        - [ ] reserve evidence IDs `mcp.readonly-inventory`,
+          `mcp.snapshot-baseline`, `mcp.bounded-wait`,
+          `mcp.sidecar-isolation`, `script.rhai-pure`,
+          `script.rhai-observe`, and `script.rhai-deny-budget`; register an ID
+          only in the same change that adds its post-assertion emission
+        - [ ] changing a shipped MCP resource/tool, script command, capability,
+          protocol feature, or evidence ID must atomically update the public
+          command/capability registry, PRD `[x]` leaf, black-box assertion, and
+          alignment contract
+        - [ ] `tests/prd_alignment.ps1` compares the MCP capability manifest and
+          Rhai API catalog with their public runtime discovery output and the
+          PRD contract; `check.ps1` runs both new black-box suites before a
+          v0.1.5 tag
     - [ ] automated terminal input/resize/ANSI/CJK/long-output matrix
     - [ ] installer, updater, stable PATH location, and signed releases
   - Focused super-fleet roadmap
     - [ ] v0.1.4 Observable Fleet foundation: ship only the bounded
       epoch/sequence journal, snapshot baseline, gap detection, and
       deterministic event wait slice before event-driven extensions
+    - v0.1.5 Scriptable Fleet
+      - Release dependency and outcome
+        - [ ] branch from the accepted v0.1.4 contract, not an alternate event
+          path: ordering, restart epochs, gap recovery, bounded waits, and GUI
+          isolation must already pass before scripting work begins
+        - [ ] ship one optional, versioned scripting worker plus public
+          `check`, `eval`, `run`, and API-discovery commands; AgenTerm without
+          the worker retains identical terminal, workspace, and startup behavior
+        - [ ] prove one complete read-only vertical slice: an `observe` script
+          consumes a versioned fleet snapshot/event position, returns a typed
+          result, and drives one bounded status-bar segment with visible
+          freshness and degraded state
+      - In scope
+        - [ ] implement immutable `pure` and `observe` capability profiles,
+          typed arguments/results/errors, API-version negotiation, explicit
+          source identity, and discoverable granted capabilities
+        - [ ] expose only bounded tab-tree, active-tab, workspace, settings,
+          pane-capture, UI-snapshot, journal-read, and deterministic-wait
+          observation APIs through the public control plane
+        - [ ] enforce source, operation, call-depth, collection, output,
+          wall-clock, concurrency, and journal-window budgets on every
+          invocation; emit content-free audit metadata and stable exit codes
+        - [ ] invoke status providers off the GUI thread with timeout,
+          truncation, last-known-good freshness, retry backoff, and an explicit
+          degraded marker
+      - Explicitly out of scope for v0.1.5
+        - [ ] the `control`, filesystem, environment, process, and network
+          capability profiles; terminal mutation and destructive automation
+          remain unavailable to scripts
+        - [ ] persistent event handlers, arbitrary async jobs, schedulers,
+          package/import systems, MCP control tools and client federation,
+          brain/flow, agent orchestration, LLM gateway, and learned-model
+          inference; the bounded read-only MCP stdio surface remains in scope
+        - [ ] Bash/SSH/HTTP/SQLite component delivery and general soft-manager
+          rollout; they keep independent later release gates
+      - Failure isolation
+        - [ ] a worker crash, hang, budget exhaustion, incompatible API,
+          malformed response, or oversized output cannot block the GUI/IPC
+          threads, mutate workspace state, close a tab, or interrupt PTY I/O
+        - [ ] deadline expiry terminates or abandons the invocation, releases
+          capacity, returns a stable error, and leaves the status segment visibly
+          degraded; stale last-known-good data is never presented as fresh
+        - [ ] bounded queues apply backpressure without unbounded memory growth;
+          worker restart resynchronizes from a snapshot plus journal position
+          and never assumes process continuity
+      - Release budgets and acceptance
+        - [ ] retain the one-second local first-window gate, the 4 MiB
+          `agenterm.exe` gate, and 2 MiB per control-CLI gate; no Rhai type,
+          engine initialization, worker discovery, or script scan enters GUI
+          startup
+        - [ ] cap the optimized scripting worker at 3 MiB and a one-line `pure`
+          cold invocation at 500 ms on the documented Windows reference runner;
+          publish per-binary size and p50/p95 cold/warm timing evidence
+        - [ ] public black-box tests cover check/eval/run, API discovery,
+          deterministic pure output, snapshot-to-event observation, denied
+          capabilities, timeout, output limits, concurrent saturation, worker
+          kill/restart, malformed replies, and status last-good/degraded states
+        - [ ] the full regression proves scripting absent/disabled behavior is
+          unchanged and PRD capability leaves map to registered automated
+          evidence before the v0.1.5 tag
     - [ ] M0 boundaries and baselines: extract typed control operations, record
       per-binary size/startup, freeze the compatibility corpus, and define the
       sidecar protocol boundary
