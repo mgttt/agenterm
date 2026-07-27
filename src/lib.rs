@@ -91,6 +91,7 @@ use script_protocol::{
 };
 use settings::{AppConfig, config_path, load_config, save_config};
 use tab_tree::{TabTreeNode, TabTreeRow, tree_rows, would_create_cycle};
+use theme::{ThemeId, ThemePalette};
 use ui_geometry::{
     PixelRect, TAB_HEIGHT, TERMINAL_SCROLLBAR_WIDTH, TerminalScrollbarGeometry,
     scrollback_for_thumb_top, terminal_scrollbar_geometry, tree_anchor_x, tree_row_at_y,
@@ -115,6 +116,9 @@ const SETTINGS_FONT_ID: usize = 1004;
 const SETTINGS_SIZE_ID: usize = 1005;
 const SETTINGS_APPLY_ID: usize = 1006;
 const NEW_BUTTON_ID: usize = 1007;
+const SETTINGS_DARK_ID: usize = 1008;
+const SETTINGS_LIGHT_ID: usize = 1009;
+const SETTINGS_CANCEL_ID: usize = 1010;
 const TIMER_ID: usize = 1;
 const WM_APP_WAKE: u32 = WM_APP + 1;
 const SYSTEM_MENU_COPY_ID: usize = 0x1f00;
@@ -140,23 +144,71 @@ thread_local! {
     static IPC_ADDRESS_OVERRIDE: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
-const COLOR_SIDEBAR: COLORREF = rgb(24, 27, 34);
-const COLOR_TERMINAL: COLORREF = rgb(12, 14, 18);
-const COLOR_COMPOSER: COLORREF = rgb(31, 35, 44);
-const COLOR_TEXT: COLORREF = rgb(214, 220, 230);
-const COLOR_MUTED: COLORREF = rgb(145, 153, 168);
-const COLOR_TREE: COLORREF = rgb(82, 94, 112);
-const COLOR_ACTIVE: COLORREF = rgb(42, 49, 61);
-const COLOR_ACTIVE_BORDER: COLORREF = rgb(76, 94, 122);
-const COLOR_GREEN: COLORREF = rgb(121, 215, 135);
-const COLOR_ORANGE: COLORREF = rgb(245, 190, 100);
-const COLOR_RED: COLORREF = rgb(240, 100, 95);
-const COLOR_BLUE: COLORREF = rgb(100, 155, 235);
-const COLOR_MODAL: COLORREF = rgb(38, 43, 54);
-const COLOR_STATUS: COLORREF = rgb(19, 22, 28);
-
 const fn rgb(red: u8, green: u8, blue: u8) -> COLORREF {
     red as u32 | ((green as u32) << 8) | ((blue as u32) << 16)
+}
+
+#[derive(Clone, Copy)]
+struct PaintColors {
+    sidebar: COLORREF,
+    terminal: COLORREF,
+    terminal_text: COLORREF,
+    composer: COLORREF,
+    text: COLORREF,
+    muted: COLORREF,
+    tree: COLORREF,
+    active: COLORREF,
+    active_border: COLORREF,
+    green: COLORREF,
+    orange: COLORREF,
+    red: COLORREF,
+    blue: COLORREF,
+    modal: COLORREF,
+    status: COLORREF,
+    control: COLORREF,
+    control_hover: COLORREF,
+    control_pressed: COLORREF,
+    focus_ring: COLORREF,
+    selection_foreground: COLORREF,
+    selection_background: COLORREF,
+    scrollbar_track: COLORREF,
+    scrollbar_thumb: COLORREF,
+    scrollbar_thumb_active: COLORREF,
+}
+
+impl From<&ThemePalette> for PaintColors {
+    fn from(palette: &ThemePalette) -> Self {
+        Self {
+            sidebar: palette.sidebar.colorref(),
+            terminal: palette.terminal_background.colorref(),
+            terminal_text: palette.terminal_foreground.colorref(),
+            composer: palette.composer.colorref(),
+            text: palette.text.colorref(),
+            muted: palette.muted_text.colorref(),
+            tree: palette.divider.colorref(),
+            active: palette.active.colorref(),
+            active_border: palette.active_border.colorref(),
+            green: palette.success.colorref(),
+            orange: palette.warning.colorref(),
+            red: palette.danger.colorref(),
+            blue: palette.accent.colorref(),
+            modal: palette.modal.colorref(),
+            status: palette.status.colorref(),
+            control: palette.control.colorref(),
+            control_hover: palette.control_hover.colorref(),
+            control_pressed: palette.control_pressed.colorref(),
+            focus_ring: palette.focus_ring.colorref(),
+            selection_foreground: palette.selection_foreground.colorref(),
+            selection_background: palette.selection_background.colorref(),
+            scrollbar_track: palette.scrollbar_track.colorref(),
+            scrollbar_thumb: palette.scrollbar_thumb.colorref(),
+            scrollbar_thumb_active: palette.scrollbar_thumb_active.colorref(),
+        }
+    }
+}
+
+fn effective_theme(configured: ThemeId, draft: ThemeId, settings_open: bool) -> ThemeId {
+    if settings_open { draft } else { configured }
 }
 
 struct IpcEnvelope {
@@ -564,6 +616,9 @@ fn run_gui() -> Result<()> {
     };
     let settings_font = create_hidden_edit(window, instance, SETTINGS_FONT_ID);
     let settings_size = create_hidden_edit(window, instance, SETTINGS_SIZE_ID);
+    let settings_dark = create_hidden_button(window, instance, SETTINGS_DARK_ID, "Dark");
+    let settings_light = create_hidden_button(window, instance, SETTINGS_LIGHT_ID, "Light");
+    let settings_cancel = create_hidden_button(window, instance, SETTINGS_CANCEL_ID, "Cancel");
     let settings_apply = unsafe {
         CreateWindowExW(
             0,
@@ -586,6 +641,9 @@ fn run_gui() -> Result<()> {
         || new_button.is_null()
         || settings_font.is_null()
         || settings_size.is_null()
+        || settings_dark.is_null()
+        || settings_light.is_null()
+        || settings_cancel.is_null()
         || settings_apply.is_null()
     {
         unsafe { DestroyWindow(window) };
@@ -601,6 +659,9 @@ fn run_gui() -> Result<()> {
             new_button,
             settings_font,
             settings_size,
+            settings_dark,
+            settings_light,
+            settings_cancel,
             settings_apply,
         },
     )?);
@@ -674,6 +735,25 @@ fn create_hidden_edit(window: HWND, instance: HINSTANCE, id: usize) -> HWND {
             0,
             100,
             28,
+            window,
+            id as *mut c_void,
+            instance,
+            ptr::null(),
+        )
+    }
+}
+
+fn create_hidden_button(window: HWND, instance: HINSTANCE, id: usize, label: &str) -> HWND {
+    unsafe {
+        CreateWindowExW(
+            0,
+            wide("BUTTON").as_ptr(),
+            wide(label).as_ptr(),
+            WS_CHILD | WS_TABSTOP,
+            0,
+            0,
+            100,
+            30,
             window,
             id as *mut c_void,
             instance,
@@ -785,6 +865,21 @@ unsafe extern "system" fn window_proc(
             } else if (wparam & 0xffff) == SETTINGS_APPLY_ID {
                 if let Some(state) = state_mut(window) {
                     state.apply_settings_from_controls();
+                }
+                0
+            } else if (wparam & 0xffff) == SETTINGS_DARK_ID {
+                if let Some(state) = state_mut(window) {
+                    state.preview_theme(ThemeId::Dark);
+                }
+                0
+            } else if (wparam & 0xffff) == SETTINGS_LIGHT_ID {
+                if let Some(state) = state_mut(window) {
+                    state.preview_theme(ThemeId::Light);
+                }
+                0
+            } else if (wparam & 0xffff) == SETTINGS_CANCEL_ID {
+                if let Some(state) = state_mut(window) {
+                    state.close_settings();
                 }
                 0
             } else {
@@ -1270,6 +1365,9 @@ struct NativeControls {
     new_button: HWND,
     settings_font: HWND,
     settings_size: HWND,
+    settings_dark: HWND,
+    settings_light: HWND,
+    settings_cancel: HWND,
     settings_apply: HWND,
 }
 
@@ -1499,6 +1597,9 @@ struct AppState {
     new_button: HWND,
     settings_font: HWND,
     settings_size: HWND,
+    settings_dark: HWND,
+    settings_light: HWND,
+    settings_cancel: HWND,
     settings_apply: HWND,
     tabs: Vec<TerminalTab>,
     collapsed_tabs: HashSet<u64>,
@@ -1524,6 +1625,7 @@ struct AppState {
     feedback: Option<String>,
     note_edit_target: Option<u64>,
     settings_open: bool,
+    settings_theme_draft: ThemeId,
     config: AppConfig,
     terminal_font: HFONT,
     terminal_font_owned: bool,
@@ -1580,6 +1682,9 @@ impl AppState {
             new_button: controls.new_button,
             settings_font: controls.settings_font,
             settings_size: controls.settings_size,
+            settings_dark: controls.settings_dark,
+            settings_light: controls.settings_light,
+            settings_cancel: controls.settings_cancel,
             settings_apply: controls.settings_apply,
             tabs: Vec::new(),
             collapsed_tabs,
@@ -1605,6 +1710,7 @@ impl AppState {
             feedback: None,
             note_edit_target: None,
             settings_open: false,
+            settings_theme_draft: config.color_theme,
             config,
             terminal_font,
             terminal_font_owned,
@@ -1931,6 +2037,9 @@ impl AppState {
             unsafe {
                 ShowWindow(self.settings_font, SW_HIDE);
                 ShowWindow(self.settings_size, SW_HIDE);
+                ShowWindow(self.settings_dark, SW_HIDE);
+                ShowWindow(self.settings_light, SW_HIDE);
+                ShowWindow(self.settings_cancel, SW_HIDE);
                 ShowWindow(self.settings_apply, SW_HIDE);
             }
         }
@@ -1993,6 +2102,9 @@ impl AppState {
                 self.settings_open = true;
                 ShowWindow(self.settings_font, SW_SHOW);
                 ShowWindow(self.settings_size, SW_SHOW);
+                ShowWindow(self.settings_dark, SW_SHOW);
+                ShowWindow(self.settings_light, SW_SHOW);
+                ShowWindow(self.settings_cancel, SW_SHOW);
                 ShowWindow(self.settings_apply, SW_SHOW);
             } else {
                 ShowWindow(self.edit, SW_SHOW);
@@ -2183,7 +2295,7 @@ impl AppState {
                 1,
             );
             let settings_left = SIDEBAR_WIDTH + (content_width - 520) / 2;
-            let settings_top = (content_bottom - 260) / 2;
+            let settings_top = (content_bottom - 320) / 2;
             MoveWindow(
                 self.settings_font,
                 settings_left + 34,
@@ -2201,9 +2313,33 @@ impl AppState {
                 1,
             );
             MoveWindow(
+                self.settings_dark,
+                settings_left + 34,
+                settings_top + 174,
+                128,
+                32,
+                1,
+            );
+            MoveWindow(
+                self.settings_light,
+                settings_left + 174,
+                settings_top + 174,
+                128,
+                32,
+                1,
+            );
+            MoveWindow(
+                self.settings_cancel,
+                settings_left + 264,
+                settings_top + 246,
+                86,
+                34,
+                1,
+            );
+            MoveWindow(
                 self.settings_apply,
                 settings_left + 362,
-                settings_top + 174,
+                settings_top + 246,
                 86,
                 34,
                 1,
@@ -2214,7 +2350,9 @@ impl AppState {
     fn open_settings(&mut self) {
         self.save_active_composer();
         self.settings_open = true;
+        self.settings_theme_draft = self.config.color_theme;
         self.note_edit_target = None;
+        self.refresh_theme_controls();
         unsafe {
             SetWindowTextW(
                 self.settings_font,
@@ -2228,6 +2366,9 @@ impl AppState {
             ShowWindow(self.send_button, SW_HIDE);
             ShowWindow(self.settings_font, SW_SHOW);
             ShowWindow(self.settings_size, SW_SHOW);
+            ShowWindow(self.settings_dark, SW_SHOW);
+            ShowWindow(self.settings_light, SW_SHOW);
+            ShowWindow(self.settings_cancel, SW_SHOW);
             ShowWindow(self.settings_apply, SW_SHOW);
             SetFocus(self.settings_font);
             InvalidateRect(self.window, ptr::null(), 0);
@@ -2236,9 +2377,13 @@ impl AppState {
 
     fn close_settings(&mut self) {
         self.settings_open = false;
+        self.settings_theme_draft = self.config.color_theme;
         unsafe {
             ShowWindow(self.settings_font, SW_HIDE);
             ShowWindow(self.settings_size, SW_HIDE);
+            ShowWindow(self.settings_dark, SW_HIDE);
+            ShowWindow(self.settings_light, SW_HIDE);
+            ShowWindow(self.settings_cancel, SW_HIDE);
             ShowWindow(self.settings_apply, SW_HIDE);
             ShowWindow(self.edit, SW_SHOW);
             ShowWindow(self.send_button, SW_SHOW);
@@ -2246,6 +2391,44 @@ impl AppState {
             InvalidateRect(self.window, ptr::null(), 0);
         }
         self.load_active_composer();
+    }
+
+    fn preview_theme(&mut self, theme: ThemeId) {
+        if !self.settings_open {
+            return;
+        }
+        self.settings_theme_draft = theme;
+        self.refresh_theme_controls();
+        unsafe { InvalidateRect(self.window, ptr::null(), 0) };
+    }
+
+    fn refresh_theme_controls(&self) {
+        for theme in ThemeId::ALL {
+            let control = match theme {
+                ThemeId::Dark => self.settings_dark,
+                ThemeId::Light => self.settings_light,
+            };
+            let marker = if theme == self.settings_theme_draft {
+                "Selected"
+            } else {
+                "Preview"
+            };
+            unsafe {
+                SetWindowTextW(
+                    control,
+                    wide(&format!("{} · {marker}", theme.label())).as_ptr(),
+                );
+            }
+        }
+    }
+
+    fn palette(&self) -> &'static ThemePalette {
+        effective_theme(
+            self.config.color_theme,
+            self.settings_theme_draft,
+            self.settings_open,
+        )
+        .palette()
     }
 
     fn apply_settings_from_controls(&mut self) {
@@ -2262,20 +2445,25 @@ impl AppState {
             unsafe { InvalidateRect(self.window, ptr::null(), 0) };
             return;
         }
-        self.config.terminal_font_family = family;
-        self.config.terminal_font_size = size;
-        self.rebuild_terminal_font();
-        if let Err(error) = save_config(&self.config) {
+        let mut next_config = self.config.clone();
+        next_config.terminal_font_family = family;
+        next_config.terminal_font_size = size;
+        next_config.color_theme = self.settings_theme_draft;
+        if let Err(error) = save_config(&next_config) {
             self.last_error = Some(format!("Could not save settings: {error:#}"));
-        } else {
-            self.last_error = None;
-            self.feedback = Some(format!(
-                "Terminal font: {} {}pt (resolved: {})",
-                self.config.terminal_font_family,
-                self.config.terminal_font_size,
-                self.resolved_font_family
-            ));
+            unsafe { InvalidateRect(self.window, ptr::null(), 0) };
+            return;
         }
+        self.config = next_config;
+        self.rebuild_terminal_font();
+        self.last_error = None;
+        self.feedback = Some(format!(
+            "{} theme · Terminal font: {} {}pt (resolved: {})",
+            self.config.color_theme.label(),
+            self.config.terminal_font_family,
+            self.config.terminal_font_size,
+            self.resolved_font_family
+        ));
         self.close_settings();
     }
 
@@ -3193,6 +3381,7 @@ impl AppState {
     }
 
     fn paint(&mut self) {
+        let colors = PaintColors::from(self.palette());
         let mut paint: PAINTSTRUCT = unsafe { mem::zeroed() };
         let paint_device = unsafe { BeginPaint(self.window, &mut paint) };
         if paint_device.is_null() {
@@ -3217,7 +3406,7 @@ impl AppState {
         };
         let content_bottom = (client.bottom - STATUS_BAR_HEIGHT).max(0);
 
-        fill(device, &client, COLOR_TERMINAL);
+        fill(device, &client, colors.terminal);
         fill(
             device,
             &RECT {
@@ -3226,7 +3415,7 @@ impl AppState {
                 right: SIDEBAR_WIDTH,
                 bottom: content_bottom,
             },
-            COLOR_SIDEBAR,
+            colors.sidebar,
         );
         fill(
             device,
@@ -3236,7 +3425,7 @@ impl AppState {
                 right: client.right,
                 bottom: content_bottom,
             },
-            COLOR_COMPOSER,
+            colors.composer,
         );
         fill(
             device,
@@ -3246,7 +3435,7 @@ impl AppState {
                 right: client.right,
                 bottom: client.bottom,
             },
-            COLOR_STATUS,
+            colors.status,
         );
 
         let ui_font = unsafe { GetStockObject(DEFAULT_GUI_FONT) as HFONT };
@@ -3266,8 +3455,8 @@ impl AppState {
             let node_y = geometry.node_y;
             let rect = win_rect(geometry.selection);
             if self.active == Some(tab.id) {
-                fill(device, &rect, COLOR_ACTIVE);
-                frame(device, &rect, COLOR_ACTIVE_BORDER);
+                fill(device, &rect, colors.active);
+                frame(device, &rect, colors.active_border);
             }
             let has_children = self
                 .tabs
@@ -3284,7 +3473,7 @@ impl AppState {
                             right: x + 1,
                             bottom: top + TAB_HEIGHT,
                         },
-                        COLOR_TREE,
+                        colors.tree,
                     );
                 }
             }
@@ -3302,7 +3491,7 @@ impl AppState {
                             top + TAB_HEIGHT
                         },
                     },
-                    COLOR_TREE,
+                    colors.tree,
                 );
                 fill(
                     device,
@@ -3312,7 +3501,7 @@ impl AppState {
                         right: node_x + 1,
                         bottom: node_y + 1,
                     },
-                    COLOR_TREE,
+                    colors.tree,
                 );
             }
             if has_children && !self.collapsed_tabs.contains(&tab.id) {
@@ -3324,7 +3513,7 @@ impl AppState {
                         right: node_x + 1,
                         bottom: top + TAB_HEIGHT,
                     },
-                    COLOR_TREE,
+                    colors.tree,
                 );
             }
             if has_children {
@@ -3333,12 +3522,12 @@ impl AppState {
                     device,
                     &expander,
                     if self.active == Some(tab.id) {
-                        COLOR_ACTIVE
+                        colors.active
                     } else {
-                        COLOR_SIDEBAR
+                        colors.sidebar
                     },
                 );
-                frame(device, &expander, COLOR_TREE);
+                frame(device, &expander, colors.tree);
                 fill(
                     device,
                     &RECT {
@@ -3347,7 +3536,7 @@ impl AppState {
                         right: node_x + 4,
                         bottom: node_y + 1,
                     },
-                    COLOR_TEXT,
+                    colors.text,
                 );
                 if self.collapsed_tabs.contains(&tab.id) {
                     fill(
@@ -3358,12 +3547,12 @@ impl AppState {
                             right: node_x + 1,
                             bottom: node_y + 4,
                         },
-                        COLOR_TEXT,
+                        colors.text,
                     );
                 }
             }
             let status_rect = win_rect(geometry.status);
-            frame(device, &status_rect, COLOR_TREE);
+            frame(device, &status_rect, colors.tree);
             fill(
                 device,
                 &RECT {
@@ -3373,9 +3562,9 @@ impl AppState {
                     bottom: status_rect.bottom - 2,
                 },
                 if tab.exited.is_some() {
-                    COLOR_ORANGE
+                    colors.orange
                 } else {
-                    COLOR_GREEN
+                    colors.green
                 },
             );
             let actions_visible = self.active == Some(tab.id);
@@ -3393,7 +3582,7 @@ impl AppState {
                     right: text_right,
                     bottom: top + 22,
                 },
-                COLOR_TEXT,
+                colors.text,
                 DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
             );
             let secondary = if !tab.note.is_empty() {
@@ -3417,9 +3606,9 @@ impl AppState {
                     bottom: top + TAB_HEIGHT - 1,
                 },
                 if tab.note.is_empty() {
-                    COLOR_MUTED
+                    colors.muted
                 } else {
-                    COLOR_BLUE
+                    colors.blue
                 },
                 DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
             );
@@ -3433,7 +3622,7 @@ impl AppState {
                         right: TAB_EDIT_LEFT,
                         bottom: top + TAB_HEIGHT - 1,
                     },
-                    COLOR_GREEN,
+                    colors.green,
                     DT_LEFT | DT_SINGLELINE | DT_VCENTER,
                 );
                 draw_text(
@@ -3445,7 +3634,7 @@ impl AppState {
                         right: TAB_CLOSE_LEFT,
                         bottom: top + TAB_HEIGHT - 1,
                     },
-                    COLOR_BLUE,
+                    colors.blue,
                     DT_LEFT | DT_SINGLELINE | DT_VCENTER,
                 );
                 draw_text(
@@ -3457,7 +3646,7 @@ impl AppState {
                         right: SIDEBAR_WIDTH - 4,
                         bottom: top + TAB_HEIGHT - 1,
                     },
-                    COLOR_MUTED,
+                    colors.muted,
                     DT_LEFT | DT_SINGLELINE | DT_VCENTER,
                 );
             }
@@ -3472,7 +3661,7 @@ impl AppState {
                 right: SIDEBAR_WIDTH - 10,
                 bottom: client.bottom,
             },
-            COLOR_MUTED,
+            colors.muted,
             DT_LEFT | DT_SINGLELINE | DT_VCENTER,
         );
         draw_text(
@@ -3484,7 +3673,7 @@ impl AppState {
                 right: client.right - 10,
                 bottom: client.bottom,
             },
-            COLOR_MUTED,
+            colors.muted,
             DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
         );
 
@@ -3505,7 +3694,7 @@ impl AppState {
                     right: client.right - 24,
                     bottom: 64,
                 },
-                COLOR_MUTED,
+                colors.muted,
                 DT_LEFT | DT_SINGLELINE | DT_VCENTER,
             );
         }
@@ -3526,9 +3715,9 @@ impl AppState {
                     bottom: content_bottom - COMPOSER_HEIGHT + 28,
                 },
                 if tab.exited.is_some() {
-                    COLOR_ORANGE
+                    colors.orange
                 } else {
-                    COLOR_MUTED
+                    colors.muted
                 },
                 DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS,
             );
@@ -3547,7 +3736,7 @@ impl AppState {
                     right: client.right - 10,
                     bottom: content_bottom - COMPOSER_HEIGHT + 28,
                 },
-                COLOR_MUTED,
+                colors.muted,
                 DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS,
             );
         }
@@ -3563,7 +3752,7 @@ impl AppState {
                     right: client.right,
                     bottom: content_bottom - COMPOSER_HEIGHT,
                 },
-                COLOR_MODAL,
+                colors.modal,
             );
             draw_text(
                 device,
@@ -3576,7 +3765,7 @@ impl AppState {
                     right: client.right - 12,
                     bottom: content_bottom - COMPOSER_HEIGHT,
                 },
-                COLOR_ORANGE,
+                colors.orange,
                 DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
             );
         }
@@ -3591,7 +3780,7 @@ impl AppState {
                     right: client.right - 100,
                     bottom: content_bottom - 3,
                 },
-                COLOR_GREEN,
+                colors.green,
                 DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS,
             );
         }
@@ -3606,7 +3795,7 @@ impl AppState {
                     right: client.right - 10,
                     bottom: (content_bottom - COMPOSER_HEIGHT).max(0),
                 },
-                COLOR_RED,
+                colors.red,
                 DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS,
             );
         }
@@ -3645,6 +3834,7 @@ impl AppState {
     }
 
     fn paint_window_close_confirmation(&self, device: HDC, client: &RECT) {
+        let colors = PaintColors::from(self.palette());
         let left = SIDEBAR_WIDTH + (client.right - SIDEBAR_WIDTH - 620) / 2;
         let top = (client.bottom - STATUS_BAR_HEIGHT - 230) / 2;
         let rect = RECT {
@@ -3653,8 +3843,8 @@ impl AppState {
             right: left + 620,
             bottom: top + 230,
         };
-        fill(device, &rect, COLOR_MODAL);
-        frame(device, &rect, COLOR_BLUE);
+        fill(device, &rect, colors.modal);
+        frame(device, &rect, colors.blue);
         draw_text(
             device,
             "Close AgenTerm window?",
@@ -3664,7 +3854,7 @@ impl AppState {
                 right: left + 596,
                 bottom: top + 52,
             },
-            COLOR_TEXT,
+            colors.text,
             DT_LEFT | DT_SINGLELINE | DT_VCENTER,
         );
         draw_text(
@@ -3676,7 +3866,7 @@ impl AppState {
                 right: left + 596,
                 bottom: top + 88,
             },
-            COLOR_MUTED,
+            colors.muted,
             DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS,
         );
         draw_text(
@@ -3688,7 +3878,7 @@ impl AppState {
                 right: left + 596,
                 bottom: top + 120,
             },
-            COLOR_MUTED,
+            colors.muted,
             DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS,
         );
         let keep = RECT {
@@ -3709,34 +3899,35 @@ impl AppState {
             right: left + 596,
             bottom: top + 194,
         };
-        fill(device, &keep, COLOR_ACTIVE);
-        frame(device, &keep, COLOR_GREEN);
-        frame(device, &stop, COLOR_RED);
-        frame(device, &cancel, COLOR_BLUE);
+        fill(device, &keep, colors.active);
+        frame(device, &keep, colors.green);
+        frame(device, &stop, colors.red);
+        frame(device, &cancel, colors.blue);
         draw_text(
             device,
             "Keep Server Running",
             keep,
-            COLOR_GREEN,
+            colors.green,
             DT_LEFT | DT_SINGLELINE | DT_VCENTER,
         );
         draw_text(
             device,
             "Stop Server & Exit",
             stop,
-            COLOR_RED,
+            colors.red,
             DT_LEFT | DT_SINGLELINE | DT_VCENTER,
         );
         draw_text(
             device,
             "Cancel",
             cancel,
-            COLOR_BLUE,
+            colors.blue,
             DT_LEFT | DT_SINGLELINE | DT_VCENTER,
         );
     }
 
     fn paint_close_confirmation(&self, device: HDC, client: &RECT, id: u64) {
+        let colors = PaintColors::from(self.palette());
         let Some(tab) = self.tabs.iter().find(|tab| tab.id == id) else {
             return;
         };
@@ -3748,8 +3939,8 @@ impl AppState {
             right: left + 460,
             bottom: top + 190,
         };
-        fill(device, &rect, COLOR_MODAL);
-        let border = unsafe { CreateSolidBrush(COLOR_ORANGE) };
+        fill(device, &rect, colors.modal);
+        let border = unsafe { CreateSolidBrush(colors.orange) };
         unsafe {
             FrameRect(device, &rect, border);
             DeleteObject(border as HGDIOBJ);
@@ -3763,7 +3954,7 @@ impl AppState {
                 right: left + 430,
                 bottom: top + 52,
             },
-            COLOR_TEXT,
+            colors.text,
             DT_LEFT | DT_SINGLELINE | DT_VCENTER,
         );
         draw_text(
@@ -3781,7 +3972,7 @@ impl AppState {
                 right: left + 430,
                 bottom: top + 108,
             },
-            COLOR_MUTED,
+            colors.muted,
             DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS,
         );
         fill(
@@ -3792,7 +3983,7 @@ impl AppState {
                 right: left + 432,
                 bottom: top + 163,
             },
-            COLOR_RED,
+            colors.red,
         );
         draw_text(
             device,
@@ -3803,7 +3994,7 @@ impl AppState {
                 right: left + 424,
                 bottom: top + 163,
             },
-            COLOR_TEXT,
+            colors.text,
             DT_LEFT | DT_SINGLELINE | DT_VCENTER,
         );
         draw_text(
@@ -3815,22 +4006,23 @@ impl AppState {
                 right: left + 212,
                 bottom: top + 163,
             },
-            COLOR_BLUE,
+            colors.blue,
             DT_LEFT | DT_SINGLELINE | DT_VCENTER,
         );
     }
 
     fn paint_settings(&self, device: HDC, client: &RECT) {
+        let colors = PaintColors::from(self.palette());
         let left = SIDEBAR_WIDTH + (client.right - SIDEBAR_WIDTH - 520) / 2;
-        let top = (client.bottom - STATUS_BAR_HEIGHT - 260) / 2;
+        let top = (client.bottom - STATUS_BAR_HEIGHT - 320) / 2;
         let rect = RECT {
             left,
             top,
             right: left + 520,
-            bottom: top + 260,
+            bottom: top + 320,
         };
-        fill(device, &rect, COLOR_MODAL);
-        let border = unsafe { CreateSolidBrush(COLOR_BLUE) };
+        fill(device, &rect, colors.modal);
+        let border = unsafe { CreateSolidBrush(colors.blue) };
         unsafe {
             FrameRect(device, &rect, border);
             DeleteObject(border as HGDIOBJ);
@@ -3844,7 +4036,7 @@ impl AppState {
                 right: left + 490,
                 bottom: top + 52,
             },
-            COLOR_TEXT,
+            colors.text,
             DT_LEFT | DT_SINGLELINE | DT_VCENTER,
         );
         draw_text(
@@ -3856,7 +4048,7 @@ impl AppState {
                 right: left + 350,
                 bottom: top + 88,
             },
-            COLOR_MUTED,
+            colors.muted,
             DT_LEFT | DT_SINGLELINE | DT_VCENTER,
         );
         draw_text(
@@ -3868,7 +4060,7 @@ impl AppState {
                 right: left + 472,
                 bottom: top + 88,
             },
-            COLOR_MUTED,
+            colors.muted,
             DT_LEFT | DT_SINGLELINE | DT_VCENTER,
         );
         draw_text(
@@ -3879,11 +4071,11 @@ impl AppState {
             ),
             RECT {
                 left: left + 34,
-                top: top + 132,
+                top: top + 124,
                 right: left + 480,
-                bottom: top + 160,
+                bottom: top + 146,
             },
-            COLOR_MUTED,
+            colors.muted,
             DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS,
         );
         draw_text(
@@ -3891,16 +4083,57 @@ impl AppState {
             "Esc cancels · Changing font size resizes the ConPTY grid",
             RECT {
                 left: left + 34,
-                top: top + 174,
+                top: top + 232,
                 right: left + 330,
-                bottom: top + 210,
+                bottom: top + 276,
             },
-            COLOR_ORANGE,
+            colors.orange,
             DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS,
+        );
+        draw_text(
+            device,
+            "Color theme · selection previews immediately",
+            RECT {
+                left: left + 34,
+                top: top + 148,
+                right: left + 448,
+                bottom: top + 170,
+            },
+            colors.muted,
+            DT_LEFT | DT_SINGLELINE | DT_VCENTER,
+        );
+        let sample = RECT {
+            left: left + 318,
+            top: top + 174,
+            right: left + 448,
+            bottom: top + 206,
+        };
+        fill(device, &sample, colors.control);
+        frame(device, &sample, colors.focus_ring);
+        fill(
+            device,
+            &RECT {
+                left: sample.left + 8,
+                top: sample.top + 8,
+                right: sample.left + 38,
+                bottom: sample.bottom - 8,
+            },
+            colors.control_hover,
+        );
+        fill(
+            device,
+            &RECT {
+                left: sample.left + 46,
+                top: sample.top + 8,
+                right: sample.left + 76,
+                bottom: sample.bottom - 8,
+            },
+            colors.control_pressed,
         );
     }
 
     fn paint_terminal(&mut self, device: HDC, position: usize, client: &RECT) {
+        let colors = PaintColors::from(self.palette());
         if unsafe { IsIconic(self.window) } != 0 {
             return;
         }
@@ -3938,16 +4171,16 @@ impl AppState {
             for col in 0..cols {
                 let cell = screen.cell(row, col);
                 let mut foreground = cell
-                    .map(|cell| terminal_color(cell.fgcolor(), false))
-                    .unwrap_or(COLOR_TEXT);
+                    .map(|cell| terminal_color(cell.fgcolor(), false, self.palette()))
+                    .unwrap_or(colors.terminal_text);
                 let mut background = cell
-                    .map(|cell| terminal_color(cell.bgcolor(), true))
-                    .unwrap_or(COLOR_TERMINAL);
+                    .map(|cell| terminal_color(cell.bgcolor(), true, self.palette()))
+                    .unwrap_or(colors.terminal);
                 if cell.is_some_and(|value| value.inverse()) {
                     mem::swap(&mut foreground, &mut background);
                 }
                 if selection.is_some_and(|selection| selection.contains(row, col)) {
-                    background = COLOR_BLUE;
+                    background = colors.selection_background;
                 }
                 if let Some((_, end, run_background)) = backgrounds.last_mut()
                     && *run_background == background
@@ -3978,11 +4211,11 @@ impl AppState {
                 }
                 let foreground = if selection.is_some_and(|selection| selection.contains(row, col))
                 {
-                    COLOR_TERMINAL
+                    colors.selection_foreground
                 } else if cell.inverse() {
-                    terminal_color(cell.bgcolor(), true)
+                    terminal_color(cell.bgcolor(), true, self.palette())
                 } else {
-                    terminal_color(cell.fgcolor(), false)
+                    terminal_color(cell.fgcolor(), false, self.palette())
                 };
                 let encoded: Vec<u16> = cell.contents().encode_utf16().collect();
                 let left = SIDEBAR_WIDTH + col as i32 * cell_width;
@@ -4035,7 +4268,7 @@ impl AppState {
         }
 
         let track = win_rect(scrollbar.track);
-        fill(device, &track, COLOR_STATUS);
+        fill(device, &track, colors.scrollbar_track);
         fill(
             device,
             &RECT {
@@ -4044,20 +4277,20 @@ impl AppState {
                 right: track.left + 1,
                 bottom: track.bottom,
             },
-            COLOR_TREE,
+            colors.tree,
         );
         let thumb = win_rect(scrollbar.thumb);
         fill(
             device,
             &thumb,
             if max_scrollback == 0 {
-                COLOR_ACTIVE
+                colors.scrollbar_thumb_active
             } else {
-                COLOR_TREE
+                colors.scrollbar_thumb
             },
         );
         if max_scrollback > 0 {
-            frame(device, &thumb, COLOR_ACTIVE_BORDER);
+            frame(device, &thumb, colors.active_border);
         }
 
         if let Some(code) = self.tabs[position].exited {
@@ -4070,7 +4303,7 @@ impl AppState {
                     right: client.right - TERMINAL_SCROLLBAR_WIDTH - 8,
                     bottom: height,
                 },
-                COLOR_ORANGE,
+                colors.orange,
                 DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS,
             );
         }
@@ -4080,6 +4313,9 @@ impl AppState {
         let focused = unsafe { GetFocus() };
         if focused == self.settings_font
             || focused == self.settings_size
+            || focused == self.settings_dark
+            || focused == self.settings_light
+            || focused == self.settings_cancel
             || focused == self.settings_apply
         {
             "settings"
@@ -4295,6 +4531,12 @@ impl AppState {
                 "terminal_font_family": self.config.terminal_font_family,
                 "terminal_font_size": self.config.terminal_font_size,
                 "resolved_font_family": self.resolved_font_family,
+                "color_theme": self.config.color_theme.as_str(),
+                "theme_draft": self.settings_open.then(|| self.settings_theme_draft.as_str()),
+                "theme_options": ThemeId::ALL.map(|theme| serde_json::json!({
+                    "id": theme.as_str(),
+                    "label": theme.label(),
+                })),
             },
             "locale": {
                 "id": UI_LOCALE,
@@ -5436,36 +5678,18 @@ fn draw_text(device: HDC, text: &str, mut rect: RECT, color: COLORREF, format: u
     }
 }
 
-fn terminal_color(color: vt100::Color, background: bool) -> COLORREF {
+fn terminal_color(color: vt100::Color, background: bool, palette: &ThemePalette) -> COLORREF {
     match color {
-        vt100::Color::Default if background => COLOR_TERMINAL,
-        vt100::Color::Default => COLOR_TEXT,
+        vt100::Color::Default if background => palette.terminal_background.colorref(),
+        vt100::Color::Default => palette.terminal_foreground.colorref(),
         vt100::Color::Rgb(red, green, blue) => rgb(red, green, blue),
-        vt100::Color::Idx(index) => ansi_color(index),
+        vt100::Color::Idx(index) => ansi_color(index, palette),
     }
 }
 
-fn ansi_color(index: u8) -> COLORREF {
-    const BASIC: [(u8, u8, u8); 16] = [
-        (12, 14, 18),
-        (205, 73, 69),
-        (91, 184, 104),
-        (220, 184, 87),
-        (84, 132, 214),
-        (176, 101, 193),
-        (69, 179, 184),
-        (214, 220, 230),
-        (100, 108, 123),
-        (240, 100, 95),
-        (121, 215, 135),
-        (245, 210, 112),
-        (112, 159, 236),
-        (205, 132, 222),
-        (97, 211, 216),
-        (255, 255, 255),
-    ];
-    if let Some(&(red, green, blue)) = BASIC.get(index as usize) {
-        return rgb(red, green, blue);
+fn ansi_color(index: u8, palette: &ThemePalette) -> COLORREF {
+    if let Some(color) = palette.ansi.get(index as usize) {
+        return color.colorref();
     }
     if (16..=231).contains(&index) {
         let value = index - 16;
@@ -6895,10 +7119,22 @@ fn save_window_png(window: HWND, path: &std::path::Path, pane_only: bool) -> Res
 #[cfg(test)]
 mod tests {
     use super::{
-        EditShortcut, TerminalPoint, TerminalSelection, edit_shortcut, gui_cli_guidance,
-        normalize_terminal_paste, parse_loopback_ipc_address, terminal_copy_shortcut,
-        terminal_selection_text,
+        EditShortcut, TerminalPoint, TerminalSelection, ThemeId, edit_shortcut, effective_theme,
+        gui_cli_guidance, normalize_terminal_paste, parse_loopback_ipc_address,
+        terminal_copy_shortcut, terminal_selection_text,
     };
+
+    #[test]
+    fn settings_theme_draft_only_affects_an_open_settings_preview() {
+        assert_eq!(
+            effective_theme(ThemeId::Dark, ThemeId::Light, true),
+            ThemeId::Light
+        );
+        assert_eq!(
+            effective_theme(ThemeId::Dark, ThemeId::Light, false),
+            ThemeId::Dark
+        );
+    }
 
     #[test]
     fn accepts_only_loopback_ipc_addresses() {
