@@ -75,6 +75,7 @@ mod settings;
 mod tab_tree;
 mod theme;
 mod ui_geometry;
+mod working_context;
 mod workspace;
 
 use commands::{
@@ -99,6 +100,7 @@ use ui_geometry::{
     WorkspaceLayoutInput, reset_tabs_width, scrollback_for_thumb_top, tabs_width_from_drag,
     terminal_scrollbar_geometry, tree_anchor_x, tree_row_at_y, tree_row_geometry, workspace_layout,
 };
+use working_context::{CwdSource, CwdTracker, ShellKind, cwd_command, parse_osc7, validate_path};
 use workspace::{SavedTab, SavedWorkspace, load_workspace, save_workspace, workspace_path};
 
 const APP_NAME: &str = "AgenTerm";
@@ -936,22 +938,40 @@ unsafe extern "system" fn window_proc(
             0
         }
         WM_COMMAND => {
-            if (wparam & 0xffff) == BUTTON_ID {
+            let command_id = wparam & 0xffff;
+            if let Some(state) = state_mut(window)
+                && state.cwd_edit_target.is_some()
+                && command_id != BUTTON_ID
+                && command_id != EDIT_ID
+            {
+                unsafe { SetFocus(state.edit) };
+                return 0;
+            }
+            if command_id == BUTTON_ID {
                 if let Some(state) = state_mut(window) {
-                    state.send_composer();
+                    if state.cwd_edit_target.is_some() {
+                        if let Err(error) =
+                            state.prepare_cwd(None, None, ComposerWriteMode::EmptyOnly)
+                        {
+                            state.last_error = Some(format!("{error:#}"));
+                            unsafe { InvalidateRect(window, ptr::null(), 0) };
+                        }
+                    } else {
+                        state.send_composer();
+                    }
                 }
                 0
-            } else if (wparam & 0xffff) == TABS_BUTTON_ID {
+            } else if command_id == TABS_BUTTON_ID {
                 if let Some(state) = state_mut(window) {
                     state.set_tabs_visible(false, "button");
                 }
                 0
-            } else if (wparam & 0xffff) == SETTINGS_BUTTON_ID {
+            } else if command_id == SETTINGS_BUTTON_ID {
                 if let Some(state) = state_mut(window) {
                     state.open_settings();
                 }
                 0
-            } else if (wparam & 0xffff) == NEW_BUTTON_ID {
+            } else if command_id == NEW_BUTTON_ID {
                 if let Some(state) = state_mut(window) {
                     if let Err(error) = state.create_tab(None, Vec::new(), true) {
                         state.last_error = Some(format!("{error:#}"));
@@ -959,22 +979,22 @@ unsafe extern "system" fn window_proc(
                     unsafe { InvalidateRect(window, ptr::null(), 0) };
                 }
                 0
-            } else if (wparam & 0xffff) == SETTINGS_APPLY_ID {
+            } else if command_id == SETTINGS_APPLY_ID {
                 if let Some(state) = state_mut(window) {
                     state.apply_settings_from_controls();
                 }
                 0
-            } else if (wparam & 0xffff) == SETTINGS_DARK_ID {
+            } else if command_id == SETTINGS_DARK_ID {
                 if let Some(state) = state_mut(window) {
                     state.preview_theme(ThemeId::Dark);
                 }
                 0
-            } else if (wparam & 0xffff) == SETTINGS_LIGHT_ID {
+            } else if command_id == SETTINGS_LIGHT_ID {
                 if let Some(state) = state_mut(window) {
                     state.preview_theme(ThemeId::Light);
                 }
                 0
-            } else if (wparam & 0xffff) == SETTINGS_CANCEL_ID {
+            } else if command_id == SETTINGS_CANCEL_ID {
                 if let Some(state) = state_mut(window) {
                     state.close_settings();
                 }
@@ -1004,7 +1024,11 @@ unsafe extern "system" fn window_proc(
         WM_SYSCOMMAND => match wparam & 0xfff0 {
             SYSTEM_MENU_TOGGLE_TABS_ID => {
                 if let Some(state) = state_mut(window) {
-                    state.set_tabs_visible(!state.config.tabs_visible, "system-menu");
+                    if state.cwd_edit_target.is_some() {
+                        unsafe { SetFocus(state.edit) };
+                    } else {
+                        state.set_tabs_visible(!state.config.tabs_visible, "system-menu");
+                    }
                 }
                 0
             }
@@ -1086,11 +1110,19 @@ enum PtyEvent {
 #[derive(Default)]
 struct TerminalCallbacks {
     title: String,
+    pending_cwd: Option<String>,
+    local_hostname: Option<String>,
 }
 
 impl vt100::Callbacks for TerminalCallbacks {
     fn set_window_title(&mut self, _: &mut vt100::Screen, title: &[u8]) {
         self.title = String::from_utf8_lossy(title).trim().to_owned();
+    }
+
+    fn unhandled_osc(&mut self, _: &mut vt100::Screen, params: &[&[u8]]) {
+        if let Some(path) = parse_osc7(params, self.local_hostname.as_deref()) {
+            self.pending_cwd = Some(path);
+        }
     }
 }
 
@@ -1104,6 +1136,8 @@ struct TerminalTab {
     command_line: Vec<String>,
     environment_names: Vec<String>,
     process_id: Option<u32>,
+    shell_kind: ShellKind,
+    cwd: CwdTracker,
     composer: String,
     parser: vt100::Parser<TerminalCallbacks>,
     receiver: Receiver<PtyEvent>,
@@ -1152,6 +1186,9 @@ impl TerminalTab {
         } else {
             command_line.clone()
         };
+        // Resolve once: this exact value both configures the child and becomes
+        // the truthful launch observation shown by the host.
+        let launch_cwd = env::current_dir().ok();
         let mut command = ChildCommand::new(&program)
             .size(initial_size)
             .env("TERM", "xterm-256color")
@@ -1172,7 +1209,7 @@ impl TerminalTab {
         for argument in command_line.iter().skip(1) {
             command = command.arg(argument);
         }
-        if let Ok(directory) = env::current_dir() {
+        if let Some(directory) = &launch_cwd {
             command = command.current_dir(directory);
         }
 
@@ -1246,13 +1283,20 @@ impl TerminalTab {
             command_line: persisted_command_line,
             environment_names,
             process_id,
+            shell_kind: ShellKind::from_program(&program),
+            cwd: CwdTracker::launch(
+                launch_cwd.and_then(|path| path.into_os_string().into_string().ok()),
+            ),
             composer: String::new(),
             note: String::new(),
             parser: vt100::Parser::new_with_callbacks(
                 initial_size.rows,
                 initial_size.cols,
                 SCROLLBACK_LINES,
-                TerminalCallbacks::default(),
+                TerminalCallbacks {
+                    local_hostname: env::var("COMPUTERNAME").ok(),
+                    ..TerminalCallbacks::default()
+                },
             ),
             receiver,
             master,
@@ -1276,6 +1320,9 @@ impl TerminalTab {
                 PtyEvent::Output(bytes) => {
                     self.output_bytes += bytes.len();
                     self.parser.process(&bytes);
+                    if let Some(path) = self.parser.callbacks_mut().pending_cwd.take() {
+                        self.cwd.confirm_osc7(path);
+                    }
                     self.raw_output.extend_from_slice(&bytes);
                     if self.raw_output.len() > RAW_OUTPUT_LIMIT {
                         let excess = self.raw_output.len() - RAW_OUTPUT_LIMIT;
@@ -1496,6 +1543,7 @@ enum FocusSurface {
     Tabs,
     Settings,
     NoteEditor,
+    CwdEditor,
 }
 
 impl FocusSurface {
@@ -1506,6 +1554,33 @@ impl FocusSurface {
             Self::Tabs => "tabs",
             Self::Settings => "settings",
             Self::NoteEditor => "note-editor",
+            Self::CwdEditor => "cwd-editor",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ComposerWriteMode {
+    EmptyOnly,
+    Append,
+    Replace,
+}
+
+impl ComposerWriteMode {
+    fn parse(value: Option<&str>) -> Result<Self> {
+        match value.unwrap_or("empty") {
+            "empty" => Ok(Self::EmptyOnly),
+            "append" => Ok(Self::Append),
+            "replace" => Ok(Self::Replace),
+            other => anyhow::bail!("unknown composer write mode: {other}"),
+        }
+    }
+
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::EmptyOnly => "empty",
+            Self::Append => "append",
+            Self::Replace => "replace",
         }
     }
 }
@@ -1784,6 +1859,7 @@ struct AppState {
     pending_close: Option<u64>,
     feedback: Option<String>,
     note_edit_target: Option<u64>,
+    cwd_edit_target: Option<u64>,
     settings_open: bool,
     settings_theme_draft: ThemeId,
     host_focus_surface: HostFocusSurface,
@@ -1873,6 +1949,7 @@ impl AppState {
             pending_close: None,
             feedback: None,
             note_edit_target: None,
+            cwd_edit_target: None,
             settings_open: false,
             settings_theme_draft: config.color_theme,
             host_focus_surface: HostFocusSurface::Terminal,
@@ -2122,6 +2199,9 @@ impl AppState {
     }
 
     fn close_tab(&mut self, id: u64) {
+        if self.cwd_edit_target == Some(id) {
+            self.close_cwd_editor();
+        }
         self.save_active_composer();
         let Some(position) = self.tabs.iter().position(|tab| tab.id == id) else {
             return;
@@ -2213,6 +2293,9 @@ impl AppState {
         }
         if self.pending_close.is_some() {
             self.finish_close_confirmation(false);
+        }
+        if self.cwd_edit_target.is_some() {
+            self.close_cwd_editor();
         }
         self.save_active_composer();
         self.navigation_latch = None;
@@ -2404,6 +2487,7 @@ impl AppState {
             let output_before = tab.output_bytes;
             let exit_before = tab.exited;
             let error_before = tab.error.clone();
+            let cwd_before = tab.cwd.clone();
             changed |= tab.poll();
             if tab.output_bytes != output_before {
                 polled_events.push((
@@ -2429,6 +2513,17 @@ impl AppState {
                         },
                         "exit_code": tab.exited,
                         "error": tab.error.clone(),
+                    }),
+                ));
+            }
+            if tab.cwd != cwd_before {
+                polled_events.push((
+                    "working-context.cwd",
+                    tab.id,
+                    serde_json::json!({
+                        "path": tab.cwd.path(),
+                        "source": tab.cwd.source().as_str(),
+                        "pending": tab.cwd.pending(),
                     }),
                 ));
             }
@@ -2579,6 +2674,9 @@ impl AppState {
     }
 
     fn open_settings(&mut self) {
+        if self.cwd_edit_target.is_some() {
+            self.close_cwd_editor();
+        }
         self.save_active_composer();
         self.navigation_latch = None;
         self.settings_open = true;
@@ -2733,9 +2831,21 @@ impl AppState {
             self.set_tabs_visible(true, "status-bar");
             return;
         }
+        if layout.status_segments.cwd.contains(x, y)
+            && !self.window_close_pending
+            && self.pending_close.is_none()
+            && !self.settings_open
+            && self.cwd_edit_target.is_none()
+        {
+            if let Err(error) = self.open_cwd_editor(None) {
+                self.last_error = Some(format!("{error:#}"));
+            }
+            return;
+        }
         if self.window_close_pending
             || self.pending_close.is_some()
             || self.settings_open
+            || self.cwd_edit_target.is_some()
             || x < sidebar_width
         {
             self.terminal_selection = None;
@@ -2879,12 +2989,21 @@ impl AppState {
             }
             return;
         }
+        if self.cwd_edit_target.is_some() {
+            return;
+        }
         if layout
             .status_segments
             .tabs_recovery
             .is_some_and(|segment| segment.contains(x, y))
         {
             self.set_tabs_visible(true, "status-bar");
+            return;
+        }
+        if layout.status_segments.cwd.contains(x, y) {
+            if let Err(error) = self.open_cwd_editor(None) {
+                self.last_error = Some(format!("{error:#}"));
+            }
             return;
         }
         if layout.terminal.contains(x, y) {
@@ -2978,6 +3097,9 @@ impl AppState {
     }
 
     fn open_tab_editor(&mut self, id: u64) {
+        if self.cwd_edit_target.is_some() {
+            self.close_cwd_editor();
+        }
         self.save_active_composer();
         let Some(tab) = self.tabs.iter().find(|tab| tab.id == id) else {
             return;
@@ -3037,6 +3159,155 @@ impl AppState {
         unsafe { SetWindowTextW(self.send_button, wide(LABEL_SEND).as_ptr()) };
         self.load_active_composer();
         self.set_focus_surface(FocusSurface::Terminal, "note-editor");
+    }
+
+    fn open_cwd_editor(&mut self, target: Option<&str>) -> Result<()> {
+        if self.settings_open
+            || self.pending_close.is_some()
+            || self.window_close_pending
+            || self.note_edit_target.is_some()
+        {
+            anyhow::bail!("another modal surface is active");
+        }
+        let position = self
+            .target_position(target)
+            .or_else(|| self.active_position())
+            .context("can't find tab")?;
+        self.save_active_composer();
+        let id = self.tabs[position].id;
+        self.active = Some(id);
+        self.cwd_edit_target = Some(id);
+        let path = self.tabs[position]
+            .cwd
+            .path()
+            .unwrap_or_default()
+            .to_owned();
+        self.navigation_latch = None;
+        self.feedback = Some(
+            "CWD editor: Ctrl+Enter prepare · Ctrl+Shift+Enter append · Esc cancel".to_owned(),
+        );
+        unsafe {
+            SetWindowTextW(self.edit, wide(&path).as_ptr());
+            SetWindowTextW(self.send_button, wide("Prepare").as_ptr());
+            ShowWindow(self.edit, SW_SHOW);
+            ShowWindow(self.send_button, SW_SHOW);
+            SetFocus(self.edit);
+            InvalidateRect(self.window, ptr::null(), 0);
+        }
+        self.event_journal.commit(
+            "working-context.cwd.editor",
+            Some(id),
+            serde_json::json!({"open": true}),
+        );
+        Ok(())
+    }
+
+    fn close_cwd_editor(&mut self) {
+        let Some(id) = self.cwd_edit_target.take() else {
+            return;
+        };
+        unsafe { SetWindowTextW(self.send_button, wide(LABEL_SEND).as_ptr()) };
+        self.load_active_composer();
+        self.host_focus_surface = HostFocusSurface::Terminal;
+        unsafe {
+            SetFocus(self.window);
+            InvalidateRect(self.window, ptr::null(), 0);
+        }
+        self.event_journal.commit(
+            "working-context.cwd.editor",
+            Some(id),
+            serde_json::json!({"open": false}),
+        );
+    }
+
+    fn prepare_cwd(
+        &mut self,
+        target: Option<&str>,
+        requested_path: Option<String>,
+        mode: ComposerWriteMode,
+    ) -> Result<()> {
+        let position = self
+            .target_position(target)
+            .or_else(|| {
+                self.cwd_edit_target
+                    .and_then(|id| self.tabs.iter().position(|tab| tab.id == id))
+            })
+            .or_else(|| self.active_position())
+            .context("can't find tab")?;
+        let path = requested_path.unwrap_or_else(|| window_text(self.edit).trim().to_owned());
+        validate_path(&path)?;
+        let command = cwd_command(self.tabs[position].shell_kind, &path)?;
+        let previous = self.tabs[position].composer.clone();
+        let next = match mode {
+            ComposerWriteMode::EmptyOnly if !previous.is_empty() => anyhow::bail!(
+                "Composer already has a draft; explicitly choose --mode append or --mode replace"
+            ),
+            ComposerWriteMode::EmptyOnly | ComposerWriteMode::Replace => command.clone(),
+            ComposerWriteMode::Append => {
+                if previous.is_empty() {
+                    command.clone()
+                } else {
+                    format!("{previous}\r\n{command}")
+                }
+            }
+        };
+        let id = self.tabs[position].id;
+        self.tabs[position].composer = next;
+        self.tabs[position].cwd.request(path.clone())?;
+        self.event_journal.commit(
+            "working-context.cwd.requested",
+            Some(id),
+            serde_json::json!({
+                "path": path,
+                "source": CwdSource::UserRequested.as_str(),
+                "pending": true,
+                "disposition": "prepared",
+                "composer_mode": mode.as_str(),
+            }),
+        );
+        self.feedback = Some(format!(
+            "Prepared a safely quoted {} CWD command in Composer; it has not been sent",
+            self.tabs[position].shell_kind.as_str()
+        ));
+        if self.cwd_edit_target == Some(id) {
+            self.close_cwd_editor();
+        } else if self.active == Some(id) {
+            self.load_active_composer();
+        }
+        Ok(())
+    }
+
+    fn send_cwd_now(&mut self, target: Option<&str>, requested_path: String) -> Result<()> {
+        let position = self
+            .target_position(target)
+            .or_else(|| self.active_position())
+            .context("can't find tab")?;
+        validate_path(&requested_path)?;
+        let shell = self.tabs[position].shell_kind;
+        let command = cwd_command(shell, &requested_path)?;
+        if !self.tabs[position].submit(&command) {
+            anyhow::bail!("terminal is unavailable or already has a pending submission");
+        }
+        let id = self.tabs[position].id;
+        self.tabs[position].cwd.request(requested_path.clone())?;
+        self.event_journal.commit(
+            "working-context.cwd.requested",
+            Some(id),
+            serde_json::json!({
+                "path": requested_path,
+                "source": CwdSource::UserRequested.as_str(),
+                "pending": true,
+                "disposition": "sent",
+                "shell": shell.as_str(),
+            }),
+        );
+        self.feedback = Some(format!(
+            "Sent a safely quoted CWD command to @{id}; waiting for OSC 7 confirmation"
+        ));
+        if self.cwd_edit_target == Some(id) {
+            self.close_cwd_editor();
+        }
+        Ok(())
     }
 
     fn dispatch_edit_shortcut(&self, shortcut: EditShortcut, focused: HWND) {
@@ -3284,6 +3555,8 @@ impl AppState {
             || focused == self.settings_apply
         {
             FocusSurface::Settings
+        } else if focused == self.edit && self.cwd_edit_target.is_some() {
+            FocusSurface::CwdEditor
         } else if focused == self.edit && self.note_edit_target.is_some() {
             FocusSurface::NoteEditor
         } else if focused == self.edit {
@@ -3430,6 +3703,10 @@ impl AppState {
         let previous = self.current_focus_surface();
         let focused = match target {
             FocusSurface::Terminal => {
+                if self.cwd_edit_target.is_some() {
+                    unsafe { SetFocus(self.edit) };
+                    return false;
+                }
                 self.host_focus_surface = HostFocusSurface::Terminal;
                 unsafe { SetFocus(self.window) };
                 true
@@ -3437,6 +3714,7 @@ impl AppState {
             FocusSurface::Composer => {
                 if self.settings_open
                     || self.note_edit_target.is_some()
+                    || self.cwd_edit_target.is_some()
                     || self.window_close_pending
                     || self.pending_close.is_some()
                     || self.active.is_none()
@@ -3450,6 +3728,7 @@ impl AppState {
             FocusSurface::Tabs => {
                 if self.settings_open
                     || self.note_edit_target.is_some()
+                    || self.cwd_edit_target.is_some()
                     || self.window_close_pending
                     || self.pending_close.is_some()
                 {
@@ -3471,7 +3750,7 @@ impl AppState {
                     }
                 }
             }
-            FocusSurface::Settings | FocusSurface::NoteEditor => false,
+            FocusSurface::Settings | FocusSurface::NoteEditor | FocusSurface::CwdEditor => false,
         };
         let current = self.current_focus_surface();
         if focused && current != previous {
@@ -3527,6 +3806,31 @@ impl AppState {
             self.close_settings();
             return true;
         }
+        if self.cwd_edit_target.is_some() {
+            if virtual_key == 0x1b {
+                self.close_cwd_editor();
+                return true;
+            }
+            if control && virtual_key == 0x0d {
+                let mode = if shift {
+                    ComposerWriteMode::Append
+                } else if alt {
+                    ComposerWriteMode::Replace
+                } else {
+                    ComposerWriteMode::EmptyOnly
+                };
+                if let Err(error) = self.prepare_cwd(None, None, mode) {
+                    self.last_error = Some(format!("{error:#}"));
+                    unsafe { InvalidateRect(self.window, ptr::null(), 0) };
+                }
+                return true;
+            }
+            // The native edit keeps ordinary text/edit shortcuts, but this
+            // modal surface must not leak global tab or focus navigation.
+            if focused != self.edit {
+                unsafe { SetFocus(self.edit) };
+            }
+        }
 
         if let Some(target) = surface_navigation(
             self.current_focus_surface(),
@@ -3561,6 +3865,9 @@ impl AppState {
         if focused_edit && let Some(shortcut) = edit_shortcut(control, virtual_key) {
             self.dispatch_edit_shortcut(shortcut, focused);
             return true;
+        }
+        if self.cwd_edit_target.is_some() {
+            return false;
         }
 
         if focused == self.edit {
@@ -3842,7 +4149,7 @@ impl AppState {
     }
 
     fn save_active_composer(&mut self) {
-        if self.note_edit_target.is_some() || self.settings_open {
+        if self.note_edit_target.is_some() || self.cwd_edit_target.is_some() || self.settings_open {
             return;
         }
         let Some(position) = self.active_position() else {
@@ -3873,7 +4180,7 @@ impl AppState {
     }
 
     fn send_composer(&mut self) {
-        if self.note_edit_target.is_some() {
+        if self.note_edit_target.is_some() || self.cwd_edit_target.is_some() {
             self.finish_note_edit(true);
             return;
         }
@@ -4215,14 +4522,51 @@ impl AppState {
                 DT_LEFT | DT_SINGLELINE | DT_VCENTER,
             );
         }
+        let cwd_label = self
+            .active_position()
+            .and_then(|position| self.tabs.get(position))
+            .map(|tab| {
+                let path = tab.cwd.path().unwrap_or("unknown");
+                if tab.cwd.pending() {
+                    format!("CWD · {path} · pending")
+                } else {
+                    format!("CWD · {path} · {}", tab.cwd.source().as_str())
+                }
+            })
+            .unwrap_or_else(|| "CWD · unknown".to_owned());
+        let cwd_segment = win_rect(layout.status_segments.cwd);
+        frame(device, &cwd_segment, colors.tree);
+        draw_text(
+            device,
+            &cwd_label,
+            RECT {
+                left: cwd_segment.left + 8,
+                right: cwd_segment.right - 6,
+                ..cwd_segment
+            },
+            colors.text,
+            DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
+        );
         draw_text(
             device,
             "metrics · agent context · extensible providers",
             RECT {
                 left: layout.status_segments.provider.left + 10,
                 top: content_bottom,
-                right: client.right - 10,
+                right: layout.status_segments.provider.right - 6,
                 bottom: client.bottom,
+            },
+            colors.muted,
+            DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
+        );
+        let proxy_segment = win_rect(layout.status_segments.proxy);
+        draw_text(
+            device,
+            "Proxy · later",
+            RECT {
+                left: proxy_segment.left + 6,
+                right: proxy_segment.right - 4,
+                ..proxy_segment
             },
             colors.muted,
             DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
@@ -4254,7 +4598,9 @@ impl AppState {
             let tab = &self.tabs[position];
             draw_text(
                 device,
-                &if let Some(id) = self.note_edit_target {
+                &if let Some(id) = self.cwd_edit_target {
+                    format!("Working directory for @{id}")
+                } else if let Some(id) = self.note_edit_target {
                     format!("Edit tab @{id} · line 1 name, remaining lines note")
                 } else {
                     format!("Compose input for {}:{}", tab.index, tab.title)
@@ -4274,7 +4620,9 @@ impl AppState {
             );
             draw_text(
                 device,
-                if self.note_edit_target.is_some() {
+                if self.cwd_edit_target.is_some() {
+                    "Ctrl+Enter prepare · Ctrl+Shift+Enter append · Ctrl+Alt+Enter replace · Esc cancel"
+                } else if self.note_edit_target.is_some() {
                     "Ctrl+Enter save · Esc cancel"
                 } else if tab.exited.is_some() {
                     "Process exited · draft preserved"
@@ -4904,7 +5252,10 @@ impl AppState {
                 let geometry = visible_position.map(|position| {
                     tree_row_geometry(position, row.depth, layout.effective_tabs_width)
                 });
-                let draft = if self.active == Some(tab.id) {
+                let draft = if self.active == Some(tab.id)
+                    && self.note_edit_target.is_none()
+                    && self.cwd_edit_target.is_none()
+                {
                     !active_draft.is_empty()
                 } else {
                     !tab.composer.is_empty()
@@ -4930,6 +5281,15 @@ impl AppState {
                     },
                     "exit_code": tab.exited,
                     "environment_names": tab.environment_names,
+                    "working_context": {
+                        "cwd": {
+                            "path": tab.cwd.path(),
+                            "confirmed_path": tab.cwd.confirmed_path(),
+                            "source": tab.cwd.source().as_str(),
+                            "pending": tab.cwd.pending(),
+                        },
+                        "shell": tab.shell_kind.as_str(),
+                    },
                     "scrollback_offset": tab.parser.screen().scrollback(),
                     "selection": self.terminal_selection
                         .filter(|selection| selection.tab_id == tab.id)
@@ -5059,6 +5419,14 @@ impl AppState {
                     "height": layout.status.height(),
                     "bounds": pixel_rect_json(layout.status),
                     "tabs_recovery": layout.status_segments.tabs_recovery.map(pixel_rect_json),
+                    "cwd": {
+                        "bounds": pixel_rect_json(layout.status_segments.cwd),
+                        "action": "open-cwd-editor",
+                    },
+                    "proxy": {
+                        "bounds": pixel_rect_json(layout.status_segments.proxy),
+                        "available": false,
+                    },
                     "provider": "placeholder",
                 }
             },
@@ -5096,6 +5464,19 @@ impl AppState {
                 }))
             } else if self.settings_open {
                 Some(serde_json::json!({"kind": "settings"}))
+            } else if let Some(id) = self.cwd_edit_target {
+                Some(serde_json::json!({
+                    "kind": "cwd-editor",
+                    "window_id": format!("@{id}"),
+                    "default_action": "cwd-prepare",
+                    "actions": [
+                        "cwd-prepare",
+                        "cwd-prepare-append",
+                        "cwd-prepare-replace",
+                        "cwd-send-now",
+                        "cancel"
+                    ],
+                }))
             } else {
                 self.pending_close.map(|id| serde_json::json!({
                     "kind": "confirm-close-live",
@@ -5782,6 +6163,20 @@ impl AppState {
                 let Some(action) = args.get(1).map(String::as_str) else {
                     return IpcResponse::failure("ui-action requires an action");
                 };
+                if self.cwd_edit_target.is_some()
+                    && !matches!(
+                        action,
+                        "cwd-prepare"
+                            | "cwd-prepare-append"
+                            | "cwd-prepare-replace"
+                            | "cwd-send-now"
+                            | "cancel"
+                    )
+                {
+                    return IpcResponse::failure(
+                        "CWD editor is a focus trap; prepare, send now, or cancel it first",
+                    );
+                }
                 let response = match action {
                     "new-tab" => match self.create_tab(None, Vec::new(), true) {
                         Ok(_) => None,
@@ -5875,6 +6270,8 @@ impl AppState {
                             self.finish_window_close(WindowCloseChoice::Cancel);
                         } else if self.settings_open {
                             self.close_settings();
+                        } else if self.cwd_edit_target.is_some() {
+                            self.close_cwd_editor();
                         } else if self.note_edit_target.is_some() {
                             self.finish_note_edit(false);
                         } else {
@@ -5904,8 +6301,57 @@ impl AppState {
                         None
                     }
                     "composer-send" => {
+                        if self.cwd_edit_target.is_some() {
+                            return IpcResponse::failure(
+                                "CWD editor is active; prepare, send now, or cancel it first",
+                            );
+                        }
                         self.send_composer();
                         None
+                    }
+                    "open-cwd-editor" => match self.open_cwd_editor(option_value(args, "-t")) {
+                        Ok(()) => None,
+                        Err(error) => Some(IpcResponse::failure(format!("{error:#}"))),
+                    },
+                    "cwd-prepare" => {
+                        let mode = match ComposerWriteMode::parse(option_value(args, "--mode")) {
+                            Ok(mode) => mode,
+                            Err(error) => {
+                                return IpcResponse::failure(format!("{error:#}"));
+                            }
+                        };
+                        match self.prepare_cwd(
+                            option_value(args, "-t"),
+                            option_value(args, "--path").map(str::to_owned),
+                            mode,
+                        ) {
+                            Ok(()) => None,
+                            Err(error) => Some(IpcResponse::failure(format!("{error:#}"))),
+                        }
+                    }
+                    "cwd-prepare-append" | "cwd-prepare-replace" => {
+                        let mode = if action == "cwd-prepare-append" {
+                            ComposerWriteMode::Append
+                        } else {
+                            ComposerWriteMode::Replace
+                        };
+                        match self.prepare_cwd(
+                            option_value(args, "-t"),
+                            option_value(args, "--path").map(str::to_owned),
+                            mode,
+                        ) {
+                            Ok(()) => None,
+                            Err(error) => Some(IpcResponse::failure(format!("{error:#}"))),
+                        }
+                    }
+                    "cwd-send-now" => {
+                        let Some(path) = option_value(args, "--path") else {
+                            return IpcResponse::failure("cwd-send-now requires --path");
+                        };
+                        match self.send_cwd_now(option_value(args, "-t"), path.to_owned()) {
+                            Ok(()) => None,
+                            Err(error) => Some(IpcResponse::failure(format!("{error:#}"))),
+                        }
                     }
                     "copy-selection" => match self.copy_terminal_selection() {
                         Ok(_) => None,
@@ -7426,7 +7872,7 @@ Usage:
   agenterm-cli set-setting terminal.font-size 8..36
   agenterm-cli send-mouse [-t target] -x col -y row [--button left] [--action press]
   agenterm-cli ui-snapshot
-  agenterm-cli ui-action new-tab|new-child|edit-tab|toggle-tree|toggle-tabs|select-tab|close-tab|close-window|keep-server-running|stop-server-and-exit|confirm|cancel|composer-send|copy-selection
+  agenterm-cli ui-action new-tab|new-child|edit-tab|toggle-tree|toggle-tabs|select-tab|close-tab|close-window|keep-server-running|stop-server-and-exit|confirm|cancel|composer-send|copy-selection|open-cwd-editor|cwd-prepare|cwd-prepare-append|cwd-prepare-replace|cwd-send-now
   agenterm-cli focus terminal|composer|tabs [-t target]
   agenterm-cli wait-pane [-t target] (--contains text|--dead|--submit-complete) [--timeout-ms ms]
   agenterm-cli wait-ui [--active @id] [--focus surface] [-t target --tab-state state]

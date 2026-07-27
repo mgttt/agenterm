@@ -19,6 +19,7 @@ $declaredEvidence = @(
     'ux.settings-isolation'
     'ux.system-menu-clipboard'
     'ux.terminal-selection-copy'
+    'ux.working-context-cwd'
 )
 if ($ListEvidence) {
     $declaredEvidence
@@ -542,6 +543,133 @@ try {
         '--submit-complete', '--timeout-ms', '10000'
     ) | Out-Null
     Write-Evidence 'ux.semantic-ui-automation'
+
+    Write-Host 'STEP truthful working-directory context and safe preparation'
+    $snapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $cmdTab = $snapshot.tabs | Where-Object id -eq $id
+    if ($cmdTab.working_context.cwd.source -ne 'launch' -or
+        $cmdTab.working_context.cwd.pending -or
+        [string]::IsNullOrWhiteSpace($cmdTab.working_context.cwd.path) -or
+        $cmdTab.working_context.shell -ne 'cmd') {
+        throw 'Initial cmd tab did not expose its truthful launch CWD and shell'
+    }
+    $cwdEditor = Invoke-AgenTerm @('ui-action', 'open-cwd-editor', '-t', $id) |
+        ConvertFrom-Json
+    if ($cwdEditor.modal.kind -ne 'cwd-editor' -or
+        $cwdEditor.focus.surface -ne 'cwd-editor' -or
+        $cwdEditor.layout.status_bar.cwd.action -ne 'open-cwd-editor' -or
+        $cwdEditor.layout.status_bar.cwd.bounds.width -le 0) {
+        throw 'CWD status segment/editor did not expose typed modal and focus semantics'
+    }
+    Invoke-AgenTerm @('ui-action', 'cancel') | Out-Null
+    $inputBytesBefore = [int](Invoke-AgenTerm @(
+        'list-panes', '-t', $id, '-F', '#{pane_input_bytes}'
+    ))
+    $protectedDraft = "echo AGENTERM_CWD_DRAFT_$PID"
+    Invoke-AgenTerm @('set-composer', '-t', $id, $protectedDraft) | Out-Null
+    $previousPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $null = & $Exe ui-action cwd-prepare -t $id --path 'C:\Program Files' 2>&1
+        $protectedExitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousPreference
+    }
+    if ($protectedExitCode -eq 0 -or
+        (Invoke-AgenTerm @('show-composer', '-t', $id)) -ne $protectedDraft) {
+        throw 'Default CWD Prepare silently overwrote an existing Composer draft'
+    }
+    Invoke-AgenTerm @(
+        'ui-action', 'cwd-prepare-append', '-t', $id,
+        '--path', 'C:\Program Files'
+    ) | Out-Null
+    $preparedCmd = Invoke-AgenTerm @('show-composer', '-t', $id)
+    if ($preparedCmd -notlike "$protectedDraft*cd /d `"C:\Program Files`"") {
+        throw "cmd CWD preparation was not safely quoted and explicitly appended: [$preparedCmd]"
+    }
+    $inputBytesAfter = [int](Invoke-AgenTerm @(
+        'list-panes', '-t', $id, '-F', '#{pane_input_bytes}'
+    ))
+    $snapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $cmdTab = $snapshot.tabs | Where-Object id -eq $id
+    if ($inputBytesAfter -ne $inputBytesBefore -or
+        $cmdTab.working_context.cwd.source -ne 'user_requested' -or
+        -not $cmdTab.working_context.cwd.pending -or
+        $cmdTab.working_context.cwd.confirmed_path -eq
+            $cmdTab.working_context.cwd.path) {
+        throw 'CWD Prepare sent input or falsely reported an unconfirmed request as applied'
+    }
+
+    $powershellId = Invoke-AgenTerm @(
+        'new-window', '-d', '-n', "cwd-powershell-$PID", '-F', '#{window_id}',
+        '--', 'powershell.exe', '-NoLogo', '-NoProfile'
+    )
+    Invoke-AgenTerm @(
+        'wait-ui', '-t', $powershellId, '--tab-state', 'running', '--timeout-ms', '10000'
+    ) | Out-Null
+    Invoke-AgenTerm @(
+        'ui-action', 'cwd-prepare-replace', '-t', $powershellId,
+        '--path', "C:\O'Brien"
+    ) | Out-Null
+    $preparedPowerShell = Invoke-AgenTerm @('show-composer', '-t', $powershellId)
+    if ($preparedPowerShell -ne "Set-Location -LiteralPath 'C:\O''Brien'") {
+        throw "PowerShell CWD preparation was not literal-safe: [$preparedPowerShell]"
+    }
+
+    $validOscCommand =
+        "[Console]::Write([char]27 + ']7;file:///C:/osc%20valid' + [char]7)"
+    Invoke-AgenTerm @('set-composer', '-t', $powershellId, $validOscCommand) | Out-Null
+    Invoke-AgenTerm @('send-composer', '-t', $powershellId) | Out-Null
+    Invoke-AgenTerm @(
+        'wait-pane', '-t', $powershellId, '--submit-complete', '--timeout-ms', '10000'
+    ) | Out-Null
+    $oscConfirmed = $false
+    for ($attempt = 0; $attempt -lt 50; $attempt++) {
+        $snapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+        $powershellTab = $snapshot.tabs | Where-Object id -eq $powershellId
+        if ($powershellTab.working_context.cwd.source -eq 'osc7' -and
+            $powershellTab.working_context.cwd.path -eq 'C:\osc valid' -and
+            -not $powershellTab.working_context.cwd.pending) {
+            $oscConfirmed = $true
+            break
+        }
+        Start-Sleep -Milliseconds 50
+    }
+    if (-not $oscConfirmed) {
+        throw 'Valid local OSC 7 did not confirm the last-known CWD'
+    }
+    $invalidOscCommand =
+        "[Console]::Write([char]27 + ']7;file:///C:/bad%0dvalue' + [char]7)"
+    Invoke-AgenTerm @('set-composer', '-t', $powershellId, $invalidOscCommand) | Out-Null
+    Invoke-AgenTerm @('send-composer', '-t', $powershellId) | Out-Null
+    Invoke-AgenTerm @(
+        'wait-pane', '-t', $powershellId, '--submit-complete', '--timeout-ms', '10000'
+    ) | Out-Null
+    $snapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $powershellTab = $snapshot.tabs | Where-Object id -eq $powershellId
+    if ($powershellTab.working_context.cwd.path -ne 'C:\osc valid' -or
+        $powershellTab.working_context.cwd.source -ne 'osc7') {
+        throw 'Malformed OSC 7 overwrote the last valid CWD'
+    }
+
+    $unknownId = Invoke-AgenTerm @(
+        'new-window', '-d', '-n', "cwd-unknown-$PID", '-F', '#{window_id}',
+        '--', "$env:SystemRoot\System32\where.exe", 'cmd'
+    )
+    $previousPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $null = & $Exe ui-action cwd-send-now -t $unknownId --path 'C:\Windows' 2>&1
+        $unknownSendExitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousPreference
+    }
+    if ($unknownSendExitCode -eq 0) {
+        throw 'CWD Send Now was available for an unknown shell'
+    }
+    Write-Evidence 'ux.working-context-cwd'
 
     Write-Host 'STEP composer edit shortcut routing'
     # The key-to-edit-command mapping is unit tested; this public focus assertion
@@ -1140,6 +1268,10 @@ try {
     Invoke-AgenTerm @('new-window', '-d', '-n', $persistName) | Out-Null
     Invoke-AgenTerm @('set-tab-note', '-t', $persistName, 'restored note') | Out-Null
     Invoke-AgenTerm @('set-composer', '-t', $persistName, 'restored draft') | Out-Null
+    Invoke-AgenTerm @(
+        'ui-action', 'cwd-prepare-append', '-t', $persistName,
+        '--path', 'C:\restart-request-must-not-persist'
+    ) | Out-Null
     Invoke-AgenTerm @('select-window', '-t', $persistName) | Out-Null
     Invoke-AgenTerm @('shutdown') | Out-Null
     for ($attempt = 0; $attempt -lt 50; $attempt++) {
@@ -1162,6 +1294,11 @@ try {
     $restored = $snapshot.tabs | Where-Object name -eq $persistName
     if ($null -eq $restored -or $restored.note -ne 'restored note' -or
         -not $restored.draft -or -not $restored.active -or
+        $restored.working_context.cwd.source -ne 'launch' -or
+        $restored.working_context.cwd.pending -or
+        $restored.working_context.cwd.path -ne
+            $restored.working_context.cwd.confirmed_path -or
+        $restored.working_context.cwd.path -eq 'C:\restart-request-must-not-persist' -or
         $snapshot.layout.sidebar.configured_width -ne 250 -or
         -not $snapshot.layout.sidebar.visible) {
         throw 'Workspace metadata or adaptive Tabs settings did not survive restart'

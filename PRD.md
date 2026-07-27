@@ -164,6 +164,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       "evidence_ids": ["ux.keyboard-surface-navigation"]
     },
     {
+      "id": "workspace.working-context-cwd",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "truthful working-context CWD uses launch and OSC 7 provenance with safe Composer preparation",
+      "evidence_ids": ["ux.working-context-cwd"]
+    },
+    {
       "id": "workspace.hierarchical-tabs",
       "protocol_feature": "hierarchical_tabs",
       "kind": "behavior",
@@ -1228,25 +1236,33 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
         - [ ] extend conflict evidence across real cmd, PowerShell, and RMUX and
           add Dark/Light focus-indicator screenshots
       - Release core: working-context status segments
-        - [ ] partition the bottom bar into host-owned Tabs recovery,
+        - [~] partition the bottom bar into host-owned Tabs recovery,
           last-known CWD, flexible provider, and right-aligned Proxy segments;
           narrow layouts preserve interactive recovery targets and Dark/Light
-          hover, pressed, focus, and selection states
-        - [ ] report CWD honestly with `launch|osc7|user_requested|unknown`
+          states; CWD and reserved Proxy geometry ship, while Proxy interaction
+          and complete hover/pressed evidence remain
+        - [x] truthful working-context CWD uses launch and OSC 7 provenance with safe Composer preparation
+        - [x] report CWD honestly with `launch|osc7|user_requested|unknown`
           provenance; support OSC 7 and future shell integration, but never
           inspect remote process PEBs or parse prompt pixels to pretend that a
           last-known path is authoritative
-        - [ ] a CWD editor safely quotes known cmd/PowerShell/future-Bash
+        - [x] a CWD editor safely quotes known cmd/PowerShell/future-Bash
           commands and defaults to preparing them in Composer; explicit
           non-default Send Now is unavailable for unknown shells because the
           host cannot prove that a foreground terminal is waiting at a prompt
+        - [x] CWD preparation never silently overwrites a Composer draft:
+          empty-only is the default, append/replace are explicit typed actions,
+          Prepare performs no PTY write, and a request remains
+          `user_requested`/pending until a valid bounded local OSC 7 confirms
+          the path; invalid OSC does not replace the last-known value
         - [ ] after CWD is accepted, show tab-scoped HTTP(S) proxy state with a
           GDI eye/eye-slash toggle and editor; closed-eye shows only on/off,
           open-eye shows sanitized scheme/host/port, and credential/query/
           fragment values require a second editor reveal and remain redacted
           from snapshots, events, audits, logs, and semantic screenshot data
-        - [ ] CWD/proxy editors are keyboard focus traps with typed semantic
-          prepare actions; proxy values and reveal state remain ephemeral,
+        - [~] CWD/proxy editors are keyboard focus traps with typed semantic
+          prepare actions; the CWD editor and actions ship, while Proxy remains
+          planned; proxy values and reveal state remain ephemeral,
           never persist to workspace, and never falsely claim to mutate the
           environment of already-running arbitrary descendants
       - Release core: adaptive Tabs workspace
