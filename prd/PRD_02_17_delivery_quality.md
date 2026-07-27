@@ -26,6 +26,30 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   remaining shipped leaves still need registered evidence
 - [x] CLI and semantic UX smoke tests through public interfaces
 - [x] one-command fmt, Clippy, test, build, and smoke regression
+- v0.1.7 self-diagnosing test harness (P0)
+  - [ ] one shared harness assigns a run ID and isolated address, workspace,
+    settings, session, evidence directory, and owned process handles; port
+    allocation cannot collide through PID modulo arithmetic or kill another
+    run
+  - [ ] every step records requirement/evidence IDs, command receipt, status,
+    duration, target/build/server identity, and artifact references in a
+    machine-readable run manifest plus JUnit-compatible summary
+  - [ ] on first failure, before cleanup, the harness captures privacy-filtered
+    UI state, bounded pane text, relevant event tail, PNG when available,
+    stdout/stderr, process/registration state, and artifact hashes without
+    masking the original error
+  - [ ] successful runs may discard transient evidence; failed runs retain a
+    single run-scoped bundle and print/upload its path. Cleanup never deletes
+    evidence promised to CI
+  - [ ] cleanup uses owned handles and bounded shutdown with forced fallback,
+    then proves there are no orphan GUI/server/worker processes or stale
+    registrations from that run
+  - [ ] CI validates evidence IDs actually emitted in the current run, not
+    merely strings declared in source; no silent retry may turn a first
+    failure green
+  - [ ] push/PR feedback runs a bounded representative public black-box slice;
+    full release journeys remain artifact-bound without deferring the first
+    behavioral signal until after tagging
 - [x] release CI runs the isolated public CLI and fleet smoke suites before
   packaging, even when the redundant GUI smoke suites are skipped
 - v0.1.7 fast and trustworthy release gate

@@ -31,6 +31,28 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   - [x] black-box tests prove read/wait ordering, timeout,
     snapshot-to-follow handoff, restart, gap, concurrent readers, catalog
     completeness, and server/tab-scoped post-state agreement
+- v0.1.7 causal completion and evidence (P0)
+  - [ ] event envelopes can correlate a transition with its request and
+    operation; mutation receipts identify the committed event range
+  - [ ] all deterministic waits freeze selectors to stable IDs and bind to
+    server identity, epoch, and a minimum sequence so a pre-existing state,
+    target replacement, or server restart cannot produce false success
+  - [ ] input feedback distinguishes text written, Enter written/failed,
+    terminal output observed, process exited, and terminal finalized; final
+    means process exit plus PTY reader EOF and parser drain
+  - [ ] model sequence, render generation, and last-painted event sequence
+    make snapshot, bounded capture, cell dump, and PNG evidence causally
+    comparable
+  - [ ] capture/screenshot machine metadata includes server identity, epoch,
+    sampled/rendered sequence, stable tab ID, output position, viewport, and
+    explicit truncation without exposing secrets
+  - [ ] workspace save uses crash-safe replacement and exposes revision,
+    hash, path, commit position, and failure without destroying the previous
+    readable workspace; shutdown has a public lifecycle completion wait
+  - [ ] timeout results include the unsatisfied predicate, resolved target,
+    start/last position, elapsed/deadline, last bounded observation, and a
+    typed recovery hint instead of collapsing server/target errors into a
+    generic timeout
 - Explicitly deferred beyond the minimum slice
   - [ ] durable replay across process restarts, remote/network transport,
     arbitrary user predicates, unbounded terminal byte logging, delivery

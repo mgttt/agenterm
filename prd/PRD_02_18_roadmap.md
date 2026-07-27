@@ -311,6 +311,10 @@ track remains planned, but every declared dependency must still pass.
   rollback foundations and independently gated SSH, HTTP, and SQLite
   sidecars without adding GUI network authority
 - [ ] M4 / v0.1.7 Governed Automation & Fast Delivery
+  - [ ] first close the self-feedback loop: versioned request receipts,
+    idempotent retry, truthful async phases, causal event/wait/render/
+    persistence evidence, and a failure-retaining isolated test harness are
+    P0 prerequisites for exposing additional Rhai control
   - [ ] make the repository-native `release.ps1` a fast preflight/tag handoff;
     CI caches compatible Rust inputs, builds one provenance-bound artifact,
     runs functional and stress gates against that exact artifact, and promotes
