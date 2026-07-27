@@ -160,8 +160,21 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [x] `agenterm.exe`: Windows-subsystem GUI, PTY owner, workspace authority,
       renderer, and IPC server
     - [x] `agentermctl.exe`: native AgenTerm observation and automation client
-    - [ ] `agenterm-bash.exe`: AgenTerm-owned default Bash entry point
     - [x] `agenterm-mux.exe`: tmux/RMUX-compatible fleet control entry point
+    - [ ] `agenterm-mcp.exe`: MCP server/client and agentic orchestration
+      sidecar
+    - [ ] `agenterm-ai.exe`: CPU-first lightweight specialized-intelligence
+      sidecar
+    - [ ] `agenterm-llm-gateway.exe`: governed local LLM forwarding and routing
+      sidecar
+    - [ ] `agenterm-bash.exe`: AgenTerm-owned default Bash entry point
+    - [ ] `agenterm-ssh.exe`: AgenTerm-owned SSH entry point
+    - [ ] `agenterm-curl.exe`: AgenTerm-owned HTTP transfer entry point
+    - [ ] `agenterm-sqlite.exe`: AgenTerm-owned SQLite entry point
+    - [ ] `agenterm-softmgr.exe`: signed optional-component lifecycle manager
+    - [ ] an AgenTerm-owned executable means a stable product contract,
+      discovery, diagnostics, policy, and fleet integration; it does not imply
+      rewriting mature Bash, SSH, HTTP, or SQLite protocol engines
     - [x] all control frontends reuse shared request/target/format libraries;
       they do not duplicate GUI state or start a second workspace authority
     - [~] each binary has independent release size reporting and an enforced
@@ -198,6 +211,37 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       - [ ] Windows path and executable launching rules are documented and
         tested without pretending POSIX and Win32 paths are identical
       - [ ] shell exit leaves the AgenTerm tab visible and explicitly closable
+  - Optional component lifecycle (`agenterm-softmgr.exe`)
+    - Product boundary
+      - [ ] `agenterm.exe` never downloads, updates, or resolves packages during
+        startup; optional network and installation work stays in an explicit
+        console sidecar
+      - [ ] Bash, SSH, HTTP, SQLite, MCP, scripting runtimes, and future tools
+        remain independently versioned sidecars so capability growth does not
+        inflate GUI size or first-window latency
+      - [ ] the GUI consumes only a small installed-component manifest and
+        reports missing or incompatible components without silently fetching
+        them
+    - Supply chain and transaction
+      - [ ] a signed, versioned manifest declares platform, component version,
+        URLs, byte size, SHA-256, signer/key identity, dependencies, and minimum
+        AgenTerm protocol/API version
+      - [ ] downloads use a staging directory, bounded size/time, signature and
+        hash verification, and no execution before verification
+      - [ ] install and update use same-volume atomic promotion; interrupted or
+        failed activation preserves the last known-good version
+      - [ ] rollback, repair, inventory, provenance, and garbage collection are
+        explicit commands with machine-readable results
+      - [ ] user-scoped installation is the default; elevation is never
+        implicit, and PATH or file-association mutation requires explicit
+        consent
+    - Verification
+      - [ ] black-box fixtures cover clean install, offline cache, corrupt
+        archive, bad signature, incompatible manifest, interrupted promotion,
+        rollback, concurrent invocation, and locked executable behavior
+      - [ ] release metadata and size/startup gates report each sidecar
+        independently; an optional component is not counted as GUI capability
+        until its integration and failure-isolation tests pass
   - Fleet multiplexer (`agenterm-mux.exe`)
     - Architecture
       - [x] thin console frontend over AgenTerm IPC; `agenterm.exe` remains the
@@ -305,6 +349,38 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
         GUI autostart that returns as soon as IPC becomes ready
       - [x] explicit errors for unsupported operations
       - [ ] named-pipe transport and stable event subscription
+  - Observable Fleet event core (v0.1.4 minimum slice)
+    - Contract
+      - [ ] assign a new server `epoch` on every workspace-authority start so a
+        consumer can distinguish restart from an in-process event gap
+      - [ ] assign one strictly increasing `sequence` within an epoch after
+        each committed observable state transition
+      - [ ] expose a bounded in-memory event journal whose envelopes contain
+        schema version, epoch, sequence, event kind, stable tab ID when
+        applicable, and a minimal typed payload
+      - [ ] cover only tab create/close/select/rename/note/parent/state,
+        composer-draft/submit state, terminal output advancement, viewport, and
+        workspace save/shutdown events in the first schema
+      - [ ] snapshot responses include the current epoch and sequence so clients
+        can atomically establish a baseline before following the journal
+    - Read and wait slice
+      - [ ] add one public bounded read operation for events after
+        `(epoch, sequence)`, with explicit gap/restart errors rather than silent
+        loss or replay ambiguity
+      - [ ] add one deterministic wait operation over the same journal for a
+        small allowlisted predicate set and deadline; cancellation or timeout
+        cannot block the GUI thread
+      - [ ] journal mutation happens only after the corresponding state change
+        commits; readers never observe an event that snapshots cannot verify
+      - [ ] black-box tests prove ordering, restart epoch change, bounded-history
+        gaps, timeout, concurrent readers, and snapshot-to-follow handoff
+    - Explicitly deferred beyond the v0.1.4 slice
+      - [ ] durable replay across process restarts, remote/network transport,
+        arbitrary user predicates, unbounded terminal byte logging, delivery
+        acknowledgements, and exactly-once side effects
+      - [ ] Rhai event handlers, MCP subscriptions, brain/flow scheduling,
+        status-provider events, and multi-agent orchestration remain consumers
+        of this core, not shortcuts around its acceptance gate
   - Self-hosted development loop
     - [x] a running AgenTerm can build and stage the next AgenTerm binaries
       without first terminating the development fleet
@@ -314,6 +390,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - Product boundary
       - [x] design choice: Rust (`.rs`) implements the host, capability checks,
         and stable APIs; Rhai (`.rhai`) is the user scripting language
+      - [ ] scripting executes in an optional sidecar/worker; the GUI owns no
+        Rhai engine and communicates only through versioned typed contracts
       - [ ] scripts automate the public tab/workspace control plane; they do
         not receive direct Win32, PTY, or mutable GUI-state access
       - [ ] execution runs off the window thread and must never delay first
@@ -387,6 +465,120 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
         last-good-value tests
       - [ ] every phase keeps `agenterm.exe` below the 4 MiB release gate; a
         large dependency or Rhai feature must earn its measured cost
+  - MCP and agentic orchestration (`agenterm-mcp.exe`)
+    - Architecture boundary
+      - [ ] run MCP server, MCP client connections, Rhai execution, and
+        brain/flow scheduling in sidecar/worker processes; `agenterm.exe`
+        remains the fleet authority, renderer, and PTY owner
+      - [ ] use the public typed control plane plus Observable Fleet epoch,
+        sequence, snapshot, journal, and wait contracts; no component reads or
+        mutates GUI internals directly
+      - [ ] a worker crash, blocked tool, malformed peer, or script budget
+        failure cannot stall terminal rendering, corrupt the workspace, or
+        terminate tabs
+      - [ ] server and client roles have separate capability profiles,
+        credentials, connection allowlists, budgets, audit records, and
+        lifecycle controls
+    - Brain/flow model
+      - [ ] `brain` owns bounded decision state and chooses declared tools;
+        `flow` owns a persisted, inspectable graph of steps, waits, branches,
+        retries, cancellation, and compensation
+      - [ ] every run, node, tool call, tab, and child agent has a stable ID;
+        transitions are observable and recover from a snapshot plus journal
+        without assuming process continuity
+      - [ ] MCP tools expose typed AgenTerm operations and return verifiable
+        post-state; natural-language output is never the sole success signal
+      - [ ] destructive fleet actions retain AgenTerm confirmation and policy
+        boundaries, including when initiated by an MCP peer or Rhai flow
+    - Delivery dependency
+      - [ ] no event-driven MCP, Rhai handler, or brain/flow runtime ships before
+        the Observable Fleet minimum slice passes ordering, gap, restart, wait,
+        and GUI-isolation tests
+      - [ ] begin with read-only inventory/snapshot resources and bounded waits,
+        then add explicit control tools, then durable flows; MCP client
+        federation and autonomous scheduling remain later gates
+  - Lightweight specialized intelligence (`agenterm-ai.exe`)
+    - Product boundary
+      - [ ] run inference in an optional CPU-first sidecar; `agenterm.exe`
+        links no model runtime and performs no inference during startup or on
+        the paint thread
+      - [ ] consume versioned Observable Fleet events and typed feature windows
+        by default; raw PTY content requires an explicit scoped capability and
+        is never persisted, uploaded, or used for training by default
+      - [ ] return confidence, abstention, model ID/version/hash, feature-schema
+        version, explanation, source epoch/sequence, TTL, and fallback state
+      - [ ] learned output is advisory: it may observe, rank, warn, or escalate
+        risk, but cannot authorize or execute a high-risk fleet action
+      - [ ] deterministic command-safety rules remain authoritative and a model
+        can raise risk but never override a rule denial
+    - Runtime and model lifecycle
+      - [ ] isolate model execution in a worker with no network or terminal
+        control capability and explicit CPU, memory, deadline, and concurrency
+        budgets; failure immediately degrades to rules without affecting GUI
+      - [ ] keep training, labeling, and evaluation outside the installed
+        inference path; begin with shadow mode and human-confirmed labels
+      - [ ] signed model packs declare feature schema, preprocessing,
+        calibration and rejection thresholds, budgets, provenance/licenses,
+        compatibility range, and fixed golden input/output vectors
+      - [ ] `agenterm-softmgr.exe` installs, atomically activates, audits, and
+        rolls back model and runtime components independently of the GUI
+      - [ ] admit a model only after fixed Windows x64 CPU benchmarks cover
+        artifact size, RSS, cold start, p95 latency, CPU load, accuracy,
+        calibration, false alarms, failure isolation, and simpler baselines
+    - Capability route
+      - [ ] A0 rules and expert systems cover no-progress/stall detection,
+        known error and exit patterns, command risk, event priority, resource
+        thresholds, and deterministic degradation
+      - [ ] A1 benchmark XGBoost, random forest, constrained SVM, and small MLP
+        candidates in shadow mode for anomaly/error classification, resource
+        warning, and event prioritization; model and runtime size are measured,
+        not assumed from the algorithm name
+      - [ ] A2 benchmark small GRU first and LSTM second for typed event rhythm,
+        prolonged no-progress, resource trend, and context-exhaustion
+        prediction; recurrent state is epoch-bound and resets on restart or gap
+      - [ ] A3 keeps sub-million-parameter RWKV-small as research only:
+        constant context-state memory does not include weights, vocabulary, or
+        runtime, and it must beat simpler models on the Windows CPU baseline
+      - [ ] A4 keeps Mamba-small as research only until a reproducible portable
+        Windows CPU kernel and export path beat GRU and classic-ML baselines
+      - [ ] GPU/NPU-required models, large Transformers, installed endpoint
+        training, unsigned model hot-load, default raw-PTY collection, and
+        automatic high-risk actions are out of scope
+  - Local LLM gateway (`agenterm-llm-gateway.exe`)
+    - Dependency and isolation
+      - [ ] implementation begins only after Observable Fleet, Rhai capability
+        policy, MCP typed tools, credential isolation, and audit contracts pass
+        their gates
+      - [ ] run as an optional loopback-authenticated sidecar, separate from the
+        lightweight specialized-model worker and from GUI startup
+      - [ ] keep provider credentials in an OS credential store, outside
+        workspaces, tab environments, scripts, and child-process inheritance
+      - [ ] prompt and response bodies are not logged by default; PTY content
+        requires explicit scoped authorization, redaction, and bounded lifetime
+    - Governed forwarding
+      - [ ] support provider and local endpoints through destination allowlists,
+        policy routing, per-workspace/tab/agent quotas, token and monetary
+        budgets, deadlines, retry/idempotency, circuit breaking, health checks,
+        streaming cancellation, and policy-controlled fallback
+      - [ ] audit provider/model route, latency, actual or estimated token use,
+        versioned price basis, cost, policy decision, and denial reason without
+        recording credentials or content secrets
+      - [ ] prefer provider-reported usage to estimates and reconcile retries so
+        cancellation or duplicate attempts cannot silently hide cost
+      - [ ] LLM text is never the sole proof of a successful fleet operation;
+        MCP tools verify typed post-state through the AgenTerm control plane
+  - Research provenance and clean-room boundary
+    - [ ] `..\moltbaby` `bin/mux` and mapp `brain`/`flow` are research inputs
+      only while their source files lack a definitive reusable license grant
+    - [ ] AgenTerm may record public behavior, architectural lessons, test
+      vectors created independently, and rejected approaches, but copies no
+      source, comments, identifiers, documentation prose, or non-public fixture
+      data from that repository
+    - [ ] implementation starts from AgenTerm's PRD and public contracts in a
+      clean-room pass; provenance is recorded per imported dependency or
+      externally derived compatibility fixture
+    - [ ] direct reuse requires an explicit compatible license and provenance
+      review first; a placeholder or absent license is treated as no permission
   - Command line (`agentermctl.exe`)
     - Shared grammar
       - target: `-t @id`, `-t %id`, `-t index`, or `-t exact-name`
@@ -525,17 +717,32 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [ ] automated terminal input/resize/ANSI/CJK/long-output matrix
     - [ ] installer, updater, stable PATH location, and signed releases
   - Focused super-fleet roadmap
+    - [ ] v0.1.4 Observable Fleet foundation: ship only the bounded
+      epoch/sequence journal, snapshot baseline, gap detection, and
+      deterministic event wait slice before event-driven extensions
     - [ ] M0 boundaries and baselines: extract typed control operations, record
-      per-binary size/startup, and freeze the compatibility corpus
+      per-binary size/startup, freeze the compatibility corpus, and define the
+      sidecar protocol boundary
     - [x] M1 fleet CLI: ship `agenterm-mux.exe` from the existing supported
       tmux/RMUX command surface and generated compatibility matrix
     - [ ] M2 shell gate: prototype `agenterm-bash.exe`, select and license the
       real Bash runtime strategy, then pass clean-machine terminal tests
-    - [ ] M3 safe scripting: ship Rhai pure/observe profiles, run/eval/check,
-      API discovery, budgets, and audit records
-    - [ ] M4 dynamic bridge: script-backed status segments and named commands
-    - [ ] M5 controlled fleet automation: control profile, bounded event stream,
-      team operations, and agent/token status without weakening close safety
+    - [ ] M3 optional components: ship signed-manifest inventory/install/update/
+      rollback foundations and independently gated SSH, HTTP, and SQLite
+      sidecars without adding GUI network authority
+    - [ ] M4 safe scripting: ship sidecar Rhai pure/observe profiles,
+      run/eval/check, API discovery, budgets, and audit records
+    - [ ] M5 dynamic bridge: script-backed status segments and named commands
+    - [ ] M6 controlled agentic bridge: ship MCP read-only resources, then
+      explicit control tools, Rhai control, brain/flow orchestration, and
+      agent/token status without weakening close safety
+    - [ ] M7 lightweight intelligence: rules first, then benchmark-gated
+      classic ML, then small GRU/LSTM candidates in isolated CPU workers
+    - [ ] M8 governed LLM gateway: local forwarding, routing, quota, audit,
+      cost, credential isolation, and redaction after scripting/MCP/event-core
+      gates
+    - [ ] M9 experimental sequence frontier: RWKV-small and Mamba-small advance
+      only when portable Windows CPU evidence beats simpler models
 
 ## Non-negotiable invariants
 
