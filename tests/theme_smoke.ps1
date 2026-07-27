@@ -11,12 +11,11 @@ if ($ListEvidence) {
     exit 0
 }
 
+. (Join-Path $PSScriptRoot 'TestHarness.ps1')
+
 function Write-Evidence {
     param([Parameter(Mandatory = $true)][string]$Id)
-    if ($declaredEvidence -notcontains $Id) {
-        throw "Theme smoke emitted undeclared evidence ID: $Id"
-    }
-    Write-Host "EVIDENCE $Id"
+    Write-SmokeEvidence -Context $themeRun -Id $Id
 }
 
 $GuiExe = [IO.Path]::GetFullPath($GuiExe)
@@ -27,41 +26,20 @@ foreach ($path in @($GuiExe, $CliExe)) {
     }
 }
 
-$previousAddress = $env:AGENTERM_IPC_ADDRESS
-$previousWorkspace = $env:AGENTERM_WORKSPACE_PATH
-$previousSettings = $env:AGENTERM_SETTINGS_PATH
-$listener = [Net.Sockets.TcpListener]::new(
-    [Net.IPAddress]::Loopback,
-    0
-)
-$listener.Start()
-$port = ([Net.IPEndPoint]$listener.LocalEndpoint).Port
-$listener.Stop()
-$env:AGENTERM_IPC_ADDRESS = "127.0.0.1:$port"
-$workspaceFile = Join-Path $env:TEMP "agenterm-theme-workspace-$PID.json"
-$settingsFile = Join-Path $env:TEMP "agenterm-theme-settings-$PID.json"
-$stderrFiles = [Collections.Generic.List[string]]::new()
-$darkPng = Join-Path $env:TEMP "agenterm-theme-dark-$PID.png"
-$lightPng = Join-Path $env:TEMP "agenterm-theme-light-$PID.png"
-$env:AGENTERM_WORKSPACE_PATH = $workspaceFile
-$env:AGENTERM_SETTINGS_PATH = $settingsFile
+$themeRun = New-SmokeRunContext -Suite 'theme' -Executable $CliExe `
+    -DeclaredEvidence $declaredEvidence
+$CliExe = $themeRun.Executable
+$workspaceFile = $themeRun.WorkspacePath
+$settingsFile = $themeRun.SettingsPath
+$darkPng = Join-Path $themeRun.EvidenceDirectory 'theme-dark.png'
+$lightPng = Join-Path $themeRun.EvidenceDirectory 'theme-light.png'
 $guiProcesses = [Collections.Generic.List[Diagnostics.Process]]::new()
+$runSucceeded = $false
+$runFailure = $null
 
 function Invoke-AgenTerm {
     param([string[]]$CommandArgs)
-    $previousPreference = $ErrorActionPreference
-    try {
-        $ErrorActionPreference = 'Continue'
-        $output = & $CliExe @CommandArgs 2>&1
-        $exitCode = $LASTEXITCODE
-    }
-    finally {
-        $ErrorActionPreference = $previousPreference
-    }
-    if ($exitCode -ne 0) {
-        throw "agenterm-cli $($CommandArgs -join ' ') failed:`n$($output -join "`n")"
-    }
-    return ($output -join "`n")
+    Invoke-SmokeCli -Context $themeRun -Arguments $CommandArgs
 }
 
 function Test-AgenTermReady {
@@ -88,10 +66,9 @@ function Wait-AgenTermReady {
 }
 
 function Start-IsolatedGui {
-    $stderrFile = Join-Path $env:TEMP (
-        "agenterm-theme-stderr-$PID-$($guiProcesses.Count).txt"
+    $stderrFile = Join-Path $themeRun.RunDirectory (
+        "gui-stderr-$($guiProcesses.Count).txt"
     )
-    $stderrFiles.Add($stderrFile)
     $process = Start-Process -FilePath $GuiExe `
         -RedirectStandardError $stderrFile `
         -PassThru
@@ -233,12 +210,6 @@ public static class AgenTermThemeNativeTest {
 
 try {
     Write-Host 'STEP launch isolated Dark workspace and keep a PTY active'
-    try {
-        & $CliExe kill-server 2>$null | Out-Null
-    }
-    catch {
-        # A fresh isolated address normally has no server to stop.
-    }
     $process = Start-IsolatedGui
     $tab = Get-OnlyTab
     Invoke-AgenTerm @(
@@ -328,43 +299,32 @@ try {
     Assert-ThemeSnapshot -Snapshot $snapshot -Saved light -Draft $null -Open $false
 
     Write-Evidence 'ux.theme-settings'
+    $runSucceeded = $true
     Write-Host 'PASS: theme preview, rollback, persistence, PTY continuity, and rendering'
+}
+catch {
+    $runFailure = $_
+    throw
 }
 finally {
     try {
-        & $CliExe kill-server 2>$null | Out-Null
+        Complete-SmokeRun -Context $themeRun -Succeeded $runSucceeded `
+            -FailureRecord $runFailure
     }
-    catch {
-        # Cleanup is best-effort if the isolated server already stopped.
-    }
-    foreach ($process in $guiProcesses) {
-        if ($null -ne $process -and -not $process.HasExited) {
-            $process.Kill()
-            $process.WaitForExit()
+    finally {
+        foreach ($process in $guiProcesses) {
+            try {
+                if ($null -ne $process -and -not $process.HasExited) {
+                    $process.Kill()
+                    $process.WaitForExit()
+                }
+                if ($null -ne $process) {
+                    $process.Dispose()
+                }
+            }
+            catch {
+                # The shared harness already stopped the owned server.
+            }
         }
-        if ($null -ne $process) {
-            $process.Dispose()
-        }
-    }
-    Remove-Item -LiteralPath $workspaceFile -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $settingsFile -ErrorAction SilentlyContinue
-    foreach ($stderrFile in $stderrFiles) {
-        Remove-Item -LiteralPath $stderrFile -ErrorAction SilentlyContinue
-    }
-    # PNGs intentionally remain in TEMP for manual visual inspection.
-    if ($null -eq $previousAddress) {
-        Remove-Item Env:AGENTERM_IPC_ADDRESS -ErrorAction SilentlyContinue
-    } else {
-        $env:AGENTERM_IPC_ADDRESS = $previousAddress
-    }
-    if ($null -eq $previousWorkspace) {
-        Remove-Item Env:AGENTERM_WORKSPACE_PATH -ErrorAction SilentlyContinue
-    } else {
-        $env:AGENTERM_WORKSPACE_PATH = $previousWorkspace
-    }
-    if ($null -eq $previousSettings) {
-        Remove-Item Env:AGENTERM_SETTINGS_PATH -ErrorAction SilentlyContinue
-    } else {
-        $env:AGENTERM_SETTINGS_PATH = $previousSettings
     }
 }
