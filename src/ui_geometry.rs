@@ -292,7 +292,7 @@ pub(crate) fn tree_row_geometry(
     let selection = PixelRect {
         left: TAB_LEFT,
         top,
-        right: sidebar_width - TAB_RIGHT_MARGIN,
+        right: (sidebar_width - TAB_RIGHT_MARGIN).max(TAB_LEFT),
         bottom: top + TAB_HEIGHT - 1,
     };
     TreeRowGeometry {
@@ -505,6 +505,18 @@ mod tests {
         );
         assert_eq!(geometry.selection.width(), 240);
         assert_eq!(geometry.selection.height(), 43);
+    }
+
+    #[test]
+    fn selection_safely_collapses_for_an_extremely_narrow_sidebar() {
+        for sidebar_width in [0, 5, TAB_LEFT + TAB_RIGHT_MARGIN - 1] {
+            let geometry = tree_row_geometry(0, 0, sidebar_width);
+
+            assert_eq!(geometry.selection.left, TAB_LEFT);
+            assert_eq!(geometry.selection.right, TAB_LEFT);
+            assert_eq!(geometry.selection.width(), 0);
+            assert!(geometry.selection.height() >= 0);
+        }
     }
 
     #[test]

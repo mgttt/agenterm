@@ -3,11 +3,16 @@ use std::{env, path::PathBuf};
 use anyhow::{Context as _, Result};
 use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::theme::ThemeId;
+use crate::{
+    theme::ThemeId,
+    ui_geometry::{
+        TABS_DEFAULT_WIDTH, TABS_MAX_WIDTH, TABS_MIN_WIDTH, clamp_configured_tabs_width,
+    },
+};
 
-pub(crate) const MIN_TABS_WIDTH: u16 = 180;
-pub(crate) const DEFAULT_TABS_WIDTH: u16 = 250;
-pub(crate) const MAX_TABS_WIDTH: u16 = 480;
+pub(crate) const MIN_TABS_WIDTH: u16 = TABS_MIN_WIDTH as u16;
+pub(crate) const DEFAULT_TABS_WIDTH: u16 = TABS_DEFAULT_WIDTH as u16;
+pub(crate) const MAX_TABS_WIDTH: u16 = TABS_MAX_WIDTH as u16;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -39,13 +44,7 @@ impl AppConfig {
 }
 
 pub(crate) fn clamp_tabs_width(width: i32) -> u16 {
-    width.clamp(i32::from(MIN_TABS_WIDTH), i32::from(MAX_TABS_WIDTH)) as u16
-}
-
-/// Resolves a persisted/configured width against a geometry-owned upper bound.
-/// A very narrow window may necessarily return less than the normal minimum.
-pub(crate) fn effective_tabs_width(configured: u16, available: u16) -> u16 {
-    clamp_tabs_width(i32::from(configured)).min(available)
+    clamp_configured_tabs_width(width) as u16
 }
 
 fn deserialize_tabs_width<'de, D>(deserializer: D) -> Result<u16, D::Error>
@@ -53,8 +52,12 @@ where
     D: Deserializer<'de>,
 {
     let width = i64::deserialize(deserializer)?;
-    let width = width.clamp(i64::from(MIN_TABS_WIDTH), i64::from(MAX_TABS_WIDTH));
-    Ok(width as u16)
+    let width = i32::try_from(width).unwrap_or(if width.is_negative() {
+        i32::MIN
+    } else {
+        i32::MAX
+    });
+    Ok(clamp_tabs_width(width))
 }
 
 pub(crate) fn config_path() -> PathBuf {
@@ -163,13 +166,10 @@ mod tests {
     }
 
     #[test]
-    fn configured_and_effective_widths_are_separate() {
+    fn persisted_width_clamp_delegates_to_geometry_policy() {
         assert_eq!(clamp_tabs_width(250), 250);
         assert_eq!(clamp_tabs_width(0), MIN_TABS_WIDTH);
         assert_eq!(clamp_tabs_width(10_000), MAX_TABS_WIDTH);
-        assert_eq!(effective_tabs_width(300, 240), 240);
-        assert_eq!(effective_tabs_width(300, 500), 300);
-        assert_eq!(effective_tabs_width(0, 500), MIN_TABS_WIDTH);
     }
 
     #[test]
