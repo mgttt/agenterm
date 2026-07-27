@@ -50,12 +50,12 @@ use windows_sys::Win32::{
         CREATESTRUCTW, CS_DBLCLKS, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CheckMenuItem,
         CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, ES_AUTOVSCROLL,
         ES_MULTILINE, ES_WANTRETURN, EnableMenuItem, GWLP_USERDATA, GetClientRect, GetCursorPos,
-        GetMessageW, GetSystemMenu, GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW,
-        GetWindowTextW, IDC_ARROW, IDC_SIZEWE, InsertMenuW, IsIconic, IsWindowVisible, IsZoomed,
-        LoadCursorW, LoadIconW, MB_ICONERROR, MB_OK, MF_BYCOMMAND, MF_CHECKED, MF_ENABLED,
-        MF_GRAYED, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MSG, MessageBoxW, MoveWindow,
-        PostMessageW, PostQuitMessage, RegisterClassW, SC_CLOSE, SIZE_MINIMIZED, SW_HIDE,
-        SW_MAXIMIZE, SW_MINIMIZE, SW_SHOW, SW_SHOWMAXIMIZED, SW_SHOWNOACTIVATE, SW_SHOWNORMAL,
+        GetForegroundWindow, GetMessageW, GetSystemMenu, GetWindowLongPtrW, GetWindowRect,
+        GetWindowTextLengthW, GetWindowTextW, IDC_ARROW, IDC_SIZEWE, InsertMenuW, IsIconic,
+        IsWindowVisible, IsZoomed, LoadCursorW, LoadIconW, MB_ICONERROR, MB_OK, MF_BYCOMMAND,
+        MF_CHECKED, MF_ENABLED, MF_GRAYED, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MSG, MessageBoxW,
+        MoveWindow, PostMessageW, PostQuitMessage, RegisterClassW, SC_CLOSE, SIZE_MINIMIZED,
+        SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE, SW_SHOW, SW_SHOWMAXIMIZED, SW_SHOWNORMAL,
         SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SendMessageW,
         SetCursor, SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW,
         ShowWindow, TranslateMessage, WM_ACTIVATEAPP, WM_APP, WM_CHAR, WM_CLOSE, WM_COMMAND,
@@ -279,8 +279,17 @@ pub fn run_gui_entry() -> i32 {
         } else {
             "__focus"
         };
-        if send_ipc_request(vec![handoff.to_owned()]).is_ok() {
-            return 0;
+        match send_ipc_request(vec![handoff.to_owned()]) {
+            Ok(response) if gui_handoff_succeeded(&response) => return 0,
+            Ok(response) => {
+                write_best_effort_stderr(&format!(
+                    "The running AgenTerm server rejected the launcher handoff: {}\n\
+                     Restart that server to use this launcher capability.",
+                    response.error
+                ));
+                return 1;
+            }
+            Err(_) => {}
         }
     }
 
@@ -302,6 +311,10 @@ fn configure_gui_launch(arguments: &[String]) -> Result<GuiLaunchOptions> {
         *override_address.borrow_mut() = address;
     });
     Ok(options)
+}
+
+fn gui_handoff_succeeded(response: &IpcResponse) -> bool {
+    response.ok
 }
 
 fn parse_gui_launch(arguments: &[String]) -> Result<(GuiLaunchOptions, Option<String>)> {
@@ -337,6 +350,33 @@ fn parse_gui_launch(arguments: &[String]) -> Result<(GuiLaunchOptions, Option<St
         }
     }
     Ok((options, address))
+}
+
+fn show_window_behind_foreground(window: HWND) {
+    unsafe {
+        let foreground = GetForegroundWindow();
+        if !foreground.is_null() && foreground != window {
+            SetWindowPos(
+                window,
+                foreground,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+            );
+        } else {
+            SetWindowPos(
+                window,
+                ptr::null_mut(),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+            );
+        }
+    }
 }
 
 fn quote_argument_for_display(argument: &str) -> String {
@@ -766,15 +806,7 @@ fn run_gui(no_activate: bool) -> Result<()> {
     }
     unsafe {
         if no_activate {
-            SetWindowPos(
-                window,
-                ptr::null_mut(),
-                0,
-                0,
-                0,
-                0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW,
-            );
+            show_window_behind_foreground(window);
         } else {
             ShowWindow(window, SW_SHOW);
         }
@@ -2651,7 +2683,7 @@ impl AppState {
             self.navigation_latch = None;
             self.restore_window_close_controls();
             unsafe {
-                ShowWindow(self.window, SW_SHOWNOACTIVATE);
+                show_window_behind_foreground(self.window);
                 InvalidateRect(self.window, ptr::null(), 0);
             }
             self.event_journal.commit(
@@ -9563,11 +9595,11 @@ fn save_window_png(window: HWND, path: &std::path::Path, pane: Option<PixelRect>
 #[cfg(test)]
 mod tests {
     use super::{
-        EditShortcut, FocusSurface, TerminalPoint, TerminalSelection, ThemeId, bounded_utf8_prefix,
-        edit_shortcut, effective_theme, gui_cli_guidance, is_latched_navigation_repeat,
-        normalize_terminal_paste, parse_gui_launch, parse_loopback_ipc_address,
-        redact_proxy_stream_chunk, run_wait_ui, surface_navigation, terminal_copy_shortcut,
-        terminal_selection_text,
+        EditShortcut, FocusSurface, IpcResponse, TerminalPoint, TerminalSelection, ThemeId,
+        bounded_utf8_prefix, edit_shortcut, effective_theme, gui_cli_guidance,
+        gui_handoff_succeeded, is_latched_navigation_repeat, normalize_terminal_paste,
+        parse_gui_launch, parse_loopback_ipc_address, redact_proxy_stream_chunk, run_wait_ui,
+        surface_navigation, terminal_copy_shortcut, terminal_selection_text,
     };
 
     #[test]
@@ -9830,6 +9862,14 @@ mod tests {
         .unwrap();
         assert!(options.no_activate);
         assert_eq!(address.as_deref(), Some("127.0.0.1:48816"));
+    }
+
+    #[test]
+    fn gui_launcher_accepts_only_a_successful_server_handoff() {
+        assert!(gui_handoff_succeeded(&IpcResponse::success("shown")));
+        assert!(!gui_handoff_succeeded(&IpcResponse::failure(
+            "unsupported launcher operation"
+        )));
     }
 
     #[test]

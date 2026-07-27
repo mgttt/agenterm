@@ -179,6 +179,12 @@ public static class AgenTermNativeTest {
     private static extern IntPtr GetForegroundWindow();
 
     [DllImport("user32.dll")]
+    private static extern IntPtr GetTopWindow(IntPtr parent);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetWindow(IntPtr window, uint command);
+
+    [DllImport("user32.dll")]
     private static extern bool AttachThreadInput(
         uint sourceThread, uint targetThread, bool attach);
 
@@ -330,6 +336,21 @@ public static class AgenTermNativeTest {
 
     public static IntPtr ForegroundWindow() {
         return GetForegroundWindow();
+    }
+
+    public static bool IsAbove(IntPtr upper, IntPtr lower) {
+        for (IntPtr window = GetTopWindow(IntPtr.Zero);
+             window != IntPtr.Zero;
+             window = GetWindow(window, 2)) {
+            if (window == upper) {
+                return true;
+            }
+            if (window == lower) {
+                return false;
+            }
+        }
+        throw new InvalidOperationException(
+            "could not resolve both windows in the desktop Z order");
     }
 
     private static string WindowClass(IntPtr window) {
@@ -946,10 +967,19 @@ try {
             if ($newNoActivateWait.ElapsedMilliseconds -ge 5000) { throw }
         }
     } while ($null -eq $newNoActivateSnapshot)
-    if ([AgenTermNativeTest]::ForegroundWindow() -ne $foregroundHost -or
+    $newNoActivate.Refresh()
+    $newNoActivateWindow = $newNoActivate.MainWindowHandle
+    if ($newNoActivateWindow -eq [IntPtr]::Zero -or
+        [AgenTermNativeTest]::ForegroundWindow() -ne $foregroundHost -or
+        -not [AgenTermNativeTest]::IsAbove(
+            $foregroundHost, $newNoActivateWindow
+        ) -or
         -not $newNoActivateSnapshot.window.visible -or
         $newNoActivateSnapshot.window.detached) {
-        throw '--no-activate alias new-server launch stole foreground or hid its window'
+        throw (
+            '--no-activate alias new-server launch stole foreground, covered ' +
+            'the current work window, or hid its own window'
+        )
     }
     Invoke-AgenTermAt -Address $noActivateAddress -CommandArgs @('kill-server') | Out-Null
     $newNoActivate.WaitForExit(5000) | Out-Null

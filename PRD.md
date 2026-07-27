@@ -116,7 +116,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       "kind": "behavior",
       "status": "shipped",
       "evidence_mode": "black-box",
-      "prd": "`agenterm.exe --no-activate` shows or starts the workspace without activation or focus transfer; `--not-foreground` remains an alias",
+      "prd": "`agenterm.exe --no-activate` shows or starts the workspace without activation and behind the current foreground window; `--not-foreground` remains an alias",
       "evidence_ids": ["ux.no-activate-launch"]
     },
     {
@@ -381,7 +381,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       workspace becomes visible without activation, while an existing visible
       or minimized window is left untouched and a detached window is shown in
       the background without changing its server, tabs, or PTYs; duplicate,
-      unknown, and missing-value options fail before startup
+      unknown, and missing-value options fail before startup, and a running
+      older server that rejects the internal handoff produces nonzero stderr
+      guidance rather than a false-success launcher exit
     - [x] `agenterm-cli.exe`: native AgenTerm observation and automation client;
       the pre-release `agentermctl.exe` name is removed rather than retained as
       a parallel compatibility shim
@@ -1370,7 +1372,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
           terminal; Settings, close confirmation, composer, scrollbars,
           selection, screenshots, PTY sizing, and hit testing all consume the
           same effective content origin
-      - [x] `agenterm.exe --no-activate` shows or starts the workspace without activation or focus transfer; `--not-foreground` remains an alias
+      - [x] `agenterm.exe --no-activate` shows or starts the workspace without activation and behind the current foreground window; `--not-foreground` remains an alias
       - Release core: detach-first server lifecycle
         - [x] detach-first window close preserves the live server and explicit stop creates a fresh runtime
         - [x] replace unconditional `WM_CLOSE` destruction with a host-owned
