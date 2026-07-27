@@ -104,6 +104,16 @@ if errorlevel 1 (
     exit /b 1
 )
 
+if /i "%PROFILE%"=="release" (
+    cargo clean
+    if errorlevel 1 (
+        echo.
+        echo Release artifacts were staged, but the Cargo target cleanup failed.
+        popd
+        exit /b 1
+    )
+)
+
 echo.
 echo Built:    %DIST_DIR%\agenterm.exe [%PROFILE%]
 echo CLI:      %DIST_DIR%\agenterm-cli.exe

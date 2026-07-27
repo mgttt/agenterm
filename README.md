@@ -44,7 +44,9 @@ cd D:\dev\agenterm
 ```
 
 The default build is an incremental development build. Use
-`.\build.bat release` only for a distributable build. Both modes produce four
+`.\build.bat release` only for a distributable build. It stages the finished
+artifacts in `dist/` and then clears Cargo's `target/` build cache; ordinary
+development builds retain the incremental cache. Both modes produce four
 ignored local artifacts under `dist/`:
 
 - `dist/agenterm.exe` — GUI application; double-clicking does not create a
