@@ -254,7 +254,15 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   - Executable family
     - [x] `agenterm.exe`: Windows-subsystem GUI, PTY owner, workspace authority,
       renderer, and IPC server
-    - [x] `agentermctl.exe`: native AgenTerm observation and automation client
+    - [x] `agenterm-cli.exe`: native AgenTerm observation and automation client;
+      the pre-release `agentermctl.exe` name is removed rather than retained as
+      a parallel compatibility shim
+    - [ ] optional `agenterm.exe` command forwarding remains exploratory:
+      `agenterm-cli.exe` stays the authoritative Console-subsystem entry point,
+      no forwarding path may call `AllocConsole` or regress the no-console-flash
+      GUI launch, and acceptance requires correct inherited/redirection handles,
+      synchronous pipeline behavior, and child exit-code propagation in both
+      `cmd.exe` and PowerShell
     - [x] `agenterm-mux.exe`: tmux/RMUX-compatible fleet control entry point
     - [x] `agenterm-script.exe`: optional one-invocation Rhai scripting worker
       for the v0.1.5 safe scripting contract
@@ -349,8 +357,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
         centrally restricted to numeric loopback IPs
       - [x] if no server exists, server-start behavior is explicit and mirrors
         supported tmux/RMUX semantics without creating a hidden second fleet
-      - [~] shared parser and command catalog with `agentermctl`; mux aliases map
-        to typed internal operations, not shelling out to `agentermctl.exe`
+      - [~] shared parser and command catalog with `agenterm-cli`; mux aliases map
+        to typed internal operations, not shelling out to `agenterm-cli.exe`
     - Compatibility surface
       - [x] sessions map to AgenTerm workspaces and windows map to tree tabs;
         one tab remains one pane until split panes are genuinely implemented
@@ -360,7 +368,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
         agent extensions under an unambiguous namespace
       - [ ] expose future scripting commands through that same native namespace
         without masquerading as tmux features
-      - [x] `agentermctl` remains the richer machine API; `agenterm-mux` is the
+      - [x] `agenterm-cli` remains the richer machine API; `agenterm-mux` is the
         compatibility UX and migration path
     - Conformance
       - [x] machine-readable compatibility matrix generated from the command
@@ -617,7 +625,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
           budgets, duration, exit class, cancellation, and denials, but not
           source, arguments, pane contents, environment values, or stdout
       - Public black-box acceptance
-        - [ ] tests invoke only released `agentermctl script` commands and
+        - [ ] tests invoke only released `agenterm-cli script` commands and
           validate stdout/stderr separation, JSON discovery, stable exit codes,
           file/stdin/eval/check behavior, and clean-machine missing-sidecar
           diagnostics
@@ -813,7 +821,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       externally derived compatibility fixture
     - [ ] direct reuse requires an explicit compatible license and provenance
       review first; a placeholder or absent license is treated as no permission
-  - Command line (`agentermctl.exe`)
+  - Command line (`agenterm-cli.exe`)
     - Shared grammar
       - target: `-t @id`, `-t %id`, `-t index`, or `-t exact-name`
       - format: `-F FORMAT`; supports `#S`, `#I`, `#W`, `#P` and
@@ -952,7 +960,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [x] size-optimized release profile and enforced 4 MiB GUI plus 2 MiB
       per-control-CLI budgets
     - [x] GUI `agenterm.exe` has no startup console flash
-    - [x] console `agentermctl.exe` preserves CLI output and exit codes
+    - [x] console `agenterm-cli.exe` preserves CLI output and exit codes
     - [x] startup regression requires a main window within one second locally
     - [x] version-tagged GitHub Release automation for all three EXEs, metadata,
       and ZIP
@@ -977,7 +985,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
           `script eval`, `script run`, and `script api --json` commands; no test
           links the Rhai host or invokes an internal worker API
         - [ ] fixtures prove deterministic `pure` output, an `observe` snapshot
-          and journal position matching `agentermctl`, denied mutation and
+          and journal position matching `agenterm-cli`, denied mutation and
           ambient authority, stable parse/runtime/limit exit classes, timeout,
           output truncation, worker crash, and subsequent recovery
         - [ ] every Rhai timeout/crash case includes an independent public GUI,
@@ -996,7 +1004,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
           safe-scripting release tag
     - Autonomous human UX dogfood
       - Latest reproducible findings
-        - [ ] P1 target ambiguity: `agentermctl new-window -d -n "Research
+        - [ ] P1 target ambiguity: `agenterm-cli new-window -d -n "Research
           Team"` prints mutable index `1` rather than stable ID `@2`; feeding
           that result to `--parent` or `wait-ui --active` can address a
           different tab. Acceptance: creation JSON or a documented format

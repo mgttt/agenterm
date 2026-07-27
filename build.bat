@@ -7,7 +7,7 @@ set "CARGO_ARGS="
 set "CARGO_OUTPUT_DIR=target"
 if defined CARGO_TARGET_DIR set "CARGO_OUTPUT_DIR=%CARGO_TARGET_DIR%"
 set "GUI_SOURCE_EXE=%CARGO_OUTPUT_DIR%\debug\agenterm.exe"
-set "CLI_SOURCE_EXE=%CARGO_OUTPUT_DIR%\debug\agentermctl.exe"
+set "CLI_SOURCE_EXE=%CARGO_OUTPUT_DIR%\debug\agenterm-cli.exe"
 set "MUX_SOURCE_EXE=%CARGO_OUTPUT_DIR%\debug\agenterm-mux.exe"
 set "SCRIPT_SOURCE_EXE=%CARGO_OUTPUT_DIR%\debug\agenterm-script.exe"
 set "DIST_DIR=%~dp0dist"
@@ -16,7 +16,7 @@ if /i "%~1"=="release" (
     set "PROFILE=release"
     set "CARGO_ARGS=--release"
     set "GUI_SOURCE_EXE=%CARGO_OUTPUT_DIR%\release\agenterm.exe"
-    set "CLI_SOURCE_EXE=%CARGO_OUTPUT_DIR%\release\agentermctl.exe"
+    set "CLI_SOURCE_EXE=%CARGO_OUTPUT_DIR%\release\agenterm-cli.exe"
     set "MUX_SOURCE_EXE=%CARGO_OUTPUT_DIR%\release\agenterm-mux.exe"
     set "SCRIPT_SOURCE_EXE=%CARGO_OUTPUT_DIR%\release\agenterm-script.exe"
 ) else if not "%~1"=="" (
@@ -27,7 +27,7 @@ if /i "%~1"=="release" (
 
 if exist "%DIST_DIR%" (
     powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\clean-locked-artifacts.ps1" ^
-        -Directory "%DIST_DIR%"
+        -Directory "%DIST_DIR%" -ObsoleteName "agentermctl.exe"
     if errorlevel 1 (
         echo.
         echo Failed to clean stale locked artifacts from dist.
@@ -55,10 +55,10 @@ if errorlevel 1 (
 )
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\stage-artifact.ps1" ^
-    -Source "%CLI_SOURCE_EXE%" -Destination "%DIST_DIR%\agentermctl.exe"
+    -Source "%CLI_SOURCE_EXE%" -Destination "%DIST_DIR%\agenterm-cli.exe"
 if errorlevel 1 (
     echo.
-    echo Failed to copy agentermctl.exe to dist.
+    echo Failed to copy agenterm-cli.exe to dist.
     popd
     exit /b 1
 )
@@ -84,7 +84,7 @@ if errorlevel 1 (
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\write-build-metadata.ps1" ^
     -ManifestPath "%DIST_DIR%\agenterm.json" ^
     -ExecutablePath "%DIST_DIR%\agenterm.exe" ^
-    -CliExecutablePath "%DIST_DIR%\agentermctl.exe" ^
+    -CliExecutablePath "%DIST_DIR%\agenterm-cli.exe" ^
     -MuxExecutablePath "%DIST_DIR%\agenterm-mux.exe" ^
     -ScriptExecutablePath "%DIST_DIR%\agenterm-script.exe" ^
     -Profile "%PROFILE%"
@@ -96,7 +96,7 @@ if errorlevel 1 (
 )
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\clean-locked-artifacts.ps1" ^
-    -Directory "%DIST_DIR%"
+    -Directory "%DIST_DIR%" -ObsoleteName "agentermctl.exe"
 if errorlevel 1 (
     echo.
     echo Failed to clean stale locked artifacts from dist.
@@ -106,7 +106,7 @@ if errorlevel 1 (
 
 echo.
 echo Built:    %DIST_DIR%\agenterm.exe [%PROFILE%]
-echo CLI:      %DIST_DIR%\agentermctl.exe
+echo CLI:      %DIST_DIR%\agenterm-cli.exe
 echo Mux:      %DIST_DIR%\agenterm-mux.exe
 echo Script:   %DIST_DIR%\agenterm-script.exe
 echo Metadata: %DIST_DIR%\agenterm.json

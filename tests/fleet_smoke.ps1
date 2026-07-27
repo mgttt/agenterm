@@ -1,5 +1,5 @@
 param(
-    [string]$CtlExe = (Join-Path $PSScriptRoot '..\dist\agentermctl.exe'),
+    [string]$CtlExe = (Join-Path $PSScriptRoot '..\dist\agenterm-cli.exe'),
     [string]$MuxExe = (Join-Path $PSScriptRoot '..\dist\agenterm-mux.exe'),
     [switch]$ListEvidence
 )
@@ -95,7 +95,7 @@ try {
         }
         foreach ($command in @($Matches[1], $Matches[2]) | Where-Object { $_ }) {
             $commandHelp = Invoke-CheckedExe $CtlExe @($command, '--help')
-            if (-not $commandHelp.StartsWith('Usage: agentermctl ')) {
+            if (-not $commandHelp.StartsWith('Usage: agenterm-cli ')) {
                 throw "$command --help did not render command help offline"
             }
         }
@@ -179,7 +179,7 @@ try {
         if ($null -eq $explicitInstance -or
             $explicitInstance.status -ne 'running' -or
             $explicitInstance.workspace_path -ne $explicitWorkspace) {
-            throw 'agentermctl --address autostarted a different or undiscoverable server'
+            throw 'agenterm-cli --address autostarted a different or undiscoverable server'
         }
     }
     finally {
@@ -224,7 +224,7 @@ try {
         '--address', $address, 'protocol-info'
     ) | ConvertFrom-Json
     if (-not $targetedProtocol.features.instance_discovery) {
-        throw 'agentermctl --address did not target the requested server'
+        throw 'agenterm-cli --address did not target the requested server'
     }
     Write-Evidence 'fleet.instance-discovery'
 

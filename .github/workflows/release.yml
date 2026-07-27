@@ -51,7 +51,7 @@ jobs:
           Compress-Archive `
             -LiteralPath `
               ./dist/agenterm.exe, `
-              ./dist/agentermctl.exe, `
+              ./dist/agenterm-cli.exe, `
               ./dist/agenterm-mux.exe, `
               ./dist/agenterm-script.exe, `
               ./dist/agenterm.json `
@@ -66,7 +66,7 @@ jobs:
           $zip = "./dist/agenterm-$version-windows-x86_64.zip"
           gh release create $env:GITHUB_REF_NAME `
             ./dist/agenterm.exe `
-            ./dist/agentermctl.exe `
+            ./dist/agenterm-cli.exe `
             ./dist/agenterm-mux.exe `
             ./dist/agenterm-script.exe `
             ./dist/agenterm.json `

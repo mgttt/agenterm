@@ -9,7 +9,7 @@ the information cannot live here or in the PRD.
 - `src/lib.rs` — Win32 window, terminal/tab state, rendering, and command
   execution.
 - `src/bin/agenterm.rs` — Windows-subsystem GUI entry point.
-- `src/bin/agentermctl.rs` — console-subsystem CLI entry point.
+- `src/bin/agenterm-cli.rs` — console-subsystem CLI entry point.
 - `src/bin/agenterm-mux.rs` — tmux/RMUX compatibility CLI entry point.
 - `src/bin/agenterm-script.rs` — one-invocation constrained Rhai worker.
 - `src/commands.rs` — reusable CLI parsing, command catalog, key mapping, and
@@ -42,7 +42,7 @@ The former `.cargo/config.toml` forced `jobs = 1` and made clean builds much
 slower. Do not restore a global job limit. Keep the default dev path
 incremental; release-only size optimization belongs in `[profile.release]`.
 The release gate enforces explicit budgets of 4 MiB for `agenterm.exe` and
-2 MiB each for `agentermctl.exe` and `agenterm-mux.exe`; investigate dependency
+2 MiB each for `agenterm-cli.exe` and `agenterm-mux.exe`; investigate dependency
 or feature growth instead of raising them casually.
 
 ## Runtime control and observation
@@ -50,11 +50,11 @@ or feature growth instead of raising them casually.
 Discover the live interface instead of duplicating a long command manual:
 
 ```powershell
-.\dist\agentermctl.exe --help
-.\dist\agentermctl.exe list-commands
-.\dist\agentermctl.exe protocol-info
-.\dist\agentermctl.exe ui-snapshot
-.\dist\agentermctl.exe list-windows -F '#{window_id}:#{window_name}'
+.\dist\agenterm-cli.exe --help
+.\dist\agenterm-cli.exe list-commands
+.\dist\agenterm-cli.exe protocol-info
+.\dist\agenterm-cli.exe ui-snapshot
+.\dist\agenterm-cli.exe list-windows -F '#{window_id}:#{window_name}'
 ```
 
 Use distinct `AGENTERM_IPC_ADDRESS` and `AGENTERM_WORKSPACE_PATH` values for
@@ -120,7 +120,7 @@ behavior.
 - Keep README human-facing and brief; keep this file agent-facing.
 - Do not commit generated binaries. Local artifacts belong in ignored `dist/`;
   downloadable binaries are published by the tag-triggered release workflow.
-- Keep `agenterm.exe` as a Windows-subsystem GUI, `agentermctl.exe` as the
+- Keep `agenterm.exe` as a Windows-subsystem GUI, `agenterm-cli.exe` as the
   native control client, and `agenterm-mux.exe` as the compatibility client.
   All entry points must reuse the library.
 - Do not claim full tmux/RMUX compatibility. One AgenTerm tab is currently one

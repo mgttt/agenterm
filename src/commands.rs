@@ -282,7 +282,7 @@ pub(crate) fn validate_control_command(args: &[String]) -> Result<(), String> {
     };
     let Some(specification) = control_command_spec(command) else {
         return Err(format!(
-            "unknown AgenTerm command '{command}'; run `agentermctl list-commands`"
+            "unknown AgenTerm command '{command}'; run `agenterm-cli list-commands`"
         ));
     };
     let mut position = 1;
@@ -334,95 +334,95 @@ pub(crate) fn validate_control_command(args: &[String]) -> Result<(), String> {
 fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
     let (usage, value_options, flag_options, child_at_first_positional) = match command {
         "attach" | "attach-session" => (
-            "agentermctl attach-session [-t session]",
+            "agenterm-cli attach-session [-t session]",
             &["-t"][..],
             &[][..],
             false,
         ),
         "active-window" | "active-tab" => (
-            "agentermctl active-window [-F format]",
+            "agenterm-cli active-window [-F format]",
             &["-F"][..],
             &[][..],
             false,
         ),
         "capture-pane" | "capturep" => (
-            "agentermctl capture-pane (-p|--raw-escaped) [-t target]",
+            "agenterm-cli capture-pane (-p|--raw-escaped) [-t target]",
             &["-t"][..],
             &["-p", "--raw-escaped"][..],
             false,
         ),
         "display-message" | "display" => (
-            "agentermctl display-message [-p] [-t target] [format]",
+            "agenterm-cli display-message [-p] [-t target] [format]",
             &["-t"][..],
             &["-p"][..],
             false,
         ),
         "dump-cells" => (
-            "agentermctl dump-cells [-t target] [-r row]",
+            "agenterm-cli dump-cells [-t target] [-r row]",
             &["-t", "-r"][..],
             &[][..],
             false,
         ),
-        "get-settings" => ("agentermctl get-settings", &[][..], &[][..], false),
+        "get-settings" => ("agenterm-cli get-settings", &[][..], &[][..], false),
         "has-session" | "has" => (
-            "agentermctl has-session [-t session]",
+            "agenterm-cli has-session [-t session]",
             &["-t"][..],
             &[][..],
             false,
         ),
         "inspect" | "pane-snapshot" => (
-            "agentermctl inspect [-t target]",
+            "agenterm-cli inspect [-t target]",
             &["-t"][..],
             &[][..],
             false,
         ),
         "focus" => (
-            "agentermctl focus terminal|composer|sidebar [-t target]",
+            "agenterm-cli focus terminal|composer|sidebar [-t target]",
             &["-t"][..],
             &[][..],
             false,
         ),
-        "kill-server" => ("agentermctl kill-server", &[][..], &[][..], false),
+        "kill-server" => ("agenterm-cli kill-server", &[][..], &[][..], false),
         "kill-session" => (
-            "agentermctl kill-session [-t session]",
+            "agenterm-cli kill-session [-t session]",
             &["-t"][..],
             &[][..],
             false,
         ),
         "kill-window" | "killw" => (
-            "agentermctl kill-window -t target",
+            "agenterm-cli kill-window -t target",
             &["-t"][..],
             &[][..],
             false,
         ),
         "list-tab-tree" => (
-            "agentermctl list-tab-tree [-F format]",
+            "agenterm-cli list-tab-tree [-F format]",
             &["-F"][..],
             &[][..],
             false,
         ),
-        "list-commands" | "lscm" => ("agentermctl list-commands", &[][..], &[][..], false),
+        "list-commands" | "lscm" => ("agenterm-cli list-commands", &[][..], &[][..], false),
         "list-instances" => (
-            "agentermctl list-instances [--json] [--prune]",
+            "agenterm-cli list-instances [--json] [--prune]",
             &[][..],
             &["--json", "--prune"][..],
             false,
         ),
         "list-panes" | "lsp" => (
-            "agentermctl list-panes [-a] [-t target] [-F format]",
+            "agenterm-cli list-panes [-a] [-t target] [-F format]",
             &["-t", "-F"][..],
             &["-a"][..],
             false,
         ),
-        "list-sessions" | "ls" => ("agentermctl list-sessions", &[][..], &[][..], false),
+        "list-sessions" | "ls" => ("agenterm-cli list-sessions", &[][..], &[][..], false),
         "list-windows" | "lsw" => (
-            "agentermctl list-windows [-F format]",
+            "agenterm-cli list-windows [-F format]",
             &["-F"][..],
             &[][..],
             false,
         ),
         "new-session" | "new" => (
-            "agentermctl new-session [-s name] [-- command [args...]]",
+            "agenterm-cli new-session [-s name] [-- command [args...]]",
             &[
                 "-n",
                 "-s",
@@ -440,7 +440,7 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
             true,
         ),
         "new-window" | "neww" => (
-            "agentermctl new-window [-d] [-n name] [--parent target] \
+            "agenterm-cli new-window [-d] [-n name] [--parent target] \
              [-F format] [-e NAME=VALUE] [-- command [args...]]",
             &[
                 "-n",
@@ -459,7 +459,7 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
             true,
         ),
         "new-agent" => (
-            "agentermctl new-agent [-d] [-n name] [--parent target] [--program exe] \
+            "agenterm-cli new-agent [-d] [-n name] [--parent target] [--program exe] \
              [--proxy URL] [--yolo] [-- agent args...]",
             &[
                 "-n",
@@ -477,36 +477,36 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
             &["-d", "-A", "-P", "-E", "--yolo"][..],
             false,
         ),
-        "next-window" | "next" => ("agentermctl next-window", &[][..], &[][..], false),
-        "previous-window" | "prev" => ("agentermctl previous-window", &[][..], &[][..], false),
-        "protocol-info" => ("agentermctl protocol-info", &[][..], &[][..], false),
+        "next-window" | "next" => ("agenterm-cli next-window", &[][..], &[][..], false),
+        "previous-window" | "prev" => ("agenterm-cli previous-window", &[][..], &[][..], false),
+        "protocol-info" => ("agenterm-cli protocol-info", &[][..], &[][..], false),
         "rename-session" | "rename" => (
-            "agentermctl rename-session new-name",
+            "agenterm-cli rename-session new-name",
             &[][..],
             &[][..],
             false,
         ),
         "rename-window" | "renamew" => (
-            "agentermctl rename-window [-t target] new-name",
+            "agenterm-cli rename-window [-t target] new-name",
             &["-t"][..],
             &[][..],
             false,
         ),
         "screenshot" => (
-            "agentermctl screenshot [-o file.png]",
+            "agenterm-cli screenshot [-o file.png]",
             &["-o"][..],
             &[][..],
             false,
         ),
         "screenshot-pane" | "screenshot-tab" => (
-            "agentermctl screenshot-pane [-t target] [-o file.png]",
+            "agenterm-cli screenshot-pane [-t target] [-o file.png]",
             &["-t", "-o"][..],
             &[][..],
             false,
         ),
-        "save-workspace" => ("agentermctl save-workspace", &[][..], &[][..], false),
+        "save-workspace" => ("agenterm-cli save-workspace", &[][..], &[][..], false),
         "script" => (
-            "agentermctl script api [--json] | check FILE|- [--profile pure|observe] | \
+            "agenterm-cli script api [--json] | check FILE|- [--profile pure|observe] | \
              eval EXPRESSION [--profile pure|observe] | run FILE|- \
              [--profile pure|observe] [-- ARGS...]",
             &["--profile", "--timeout-ms", "--max-operations"][..],
@@ -514,113 +514,118 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
             false,
         ),
         "read-events" => (
-            "agentermctl read-events --epoch EPOCH --after SEQUENCE [--limit COUNT]",
+            "agenterm-cli read-events --epoch EPOCH --after SEQUENCE [--limit COUNT]",
             &["--epoch", "--after", "--limit"][..],
             &[][..],
             false,
         ),
         "scroll-pane" => (
-            "agentermctl scroll-pane [-t target] \
+            "agenterm-cli scroll-pane [-t target] \
              up|down|page-up|page-down|top|bottom [rows]",
             &["-t"][..],
             &[][..],
             false,
         ),
         "select-window" | "selectw" => (
-            "agentermctl select-window (-t target|-n|-p)",
+            "agenterm-cli select-window (-t target|-n|-p)",
             &["-t"][..],
             &["-n", "-p"][..],
             false,
         ),
         "send-keys" | "send" => (
-            "agentermctl send-keys [-t target] [-l] key...",
+            "agenterm-cli send-keys [-t target] [-l] key...",
             &["-t"][..],
             &["-l", "-R", "-X"][..],
             false,
         ),
         "send-composer" => (
-            "agentermctl send-composer [-t target]",
+            "agenterm-cli send-composer [-t target]",
             &["-t"][..],
             &[][..],
             false,
         ),
         "send-mouse" => (
-            "agentermctl send-mouse [-t target] -x col -y row \
+            "agenterm-cli send-mouse [-t target] -x col -y row \
              [--button button] [--action action] [--protocol protocol]",
             &["-t", "-x", "-y", "--button", "--action", "--protocol"][..],
             &[][..],
             false,
         ),
-        "server-kill" => ("agentermctl server-kill", &[][..], &[][..], false),
+        "server-kill" => ("agenterm-cli server-kill", &[][..], &[][..], false),
         "server-list" => (
-            "agentermctl server-list [--json] [--prune]",
+            "agenterm-cli server-list [--json] [--prune]",
             &[][..],
             &["--json", "--prune"][..],
             false,
         ),
-        "set-setting" => ("agentermctl set-setting key value", &[][..], &[][..], false),
+        "set-setting" => (
+            "agenterm-cli set-setting key value",
+            &[][..],
+            &[][..],
+            false,
+        ),
         "set-composer" => (
-            "agentermctl set-composer [-t target] (text|--stdin|--file path)",
+            "agenterm-cli set-composer [-t target] (text|--stdin|--file path)",
             &["-t", "--file"][..],
             &["--stdin"][..],
             false,
         ),
         "set-tab-parent" => (
-            "agentermctl set-tab-parent -t child --parent parent|root",
+            "agenterm-cli set-tab-parent -t child --parent parent|root",
             &["-t", "--parent"][..],
             &[][..],
             false,
         ),
         "set-tab-note" => (
-            "agentermctl set-tab-note [-t target] text",
+            "agenterm-cli set-tab-note [-t target] text",
             &["-t"][..],
             &[][..],
             false,
         ),
         "show-composer" => (
-            "agentermctl show-composer [-t target]",
+            "agenterm-cli show-composer [-t target]",
             &["-t"][..],
             &[][..],
             false,
         ),
-        "show-options" | "show" => ("agentermctl show-options", &[][..], &[][..], false),
+        "show-options" | "show" => ("agenterm-cli show-options", &[][..], &[][..], false),
         "show-tab-parent" => (
-            "agentermctl show-tab-parent [-t target]",
+            "agenterm-cli show-tab-parent [-t target]",
             &["-t"][..],
             &[][..],
             false,
         ),
         "show-tab-note" => (
-            "agentermctl show-tab-note [-t target]",
+            "agenterm-cli show-tab-note [-t target]",
             &["-t"][..],
             &[][..],
             false,
         ),
-        "shutdown" => ("agentermctl shutdown", &[][..], &[][..], false),
-        "start-server" => ("agentermctl start-server", &[][..], &[][..], false),
+        "shutdown" => ("agenterm-cli shutdown", &[][..], &[][..], false),
+        "start-server" => ("agenterm-cli start-server", &[][..], &[][..], false),
         "ui-action" => (
-            "agentermctl ui-action ACTION [-t target] [--width PX --height PX]",
+            "agenterm-cli ui-action ACTION [-t target] [--width PX --height PX]",
             &["-t", "--width", "--height"][..],
             &[][..],
             false,
         ),
-        "ui-snapshot" => ("agentermctl ui-snapshot", &[][..], &[][..], false),
+        "ui-snapshot" => ("agenterm-cli ui-snapshot", &[][..], &[][..], false),
         "wait-pane" | "expect-pane" => (
-            "agentermctl wait-pane [-t target] \
+            "agenterm-cli wait-pane [-t target] \
              (--contains text|--dead|--submit-complete) [--timeout-ms ms]",
             &["-t", "--contains", "--timeout-ms"][..],
             &["--dead", "--submit-complete"][..],
             false,
         ),
         "wait-events" => (
-            "agentermctl wait-events --epoch EPOCH --after SEQUENCE --kind KIND \
+            "agenterm-cli wait-events --epoch EPOCH --after SEQUENCE --kind KIND \
              [--tab @ID] [--timeout-ms MS]",
             &["--epoch", "--after", "--kind", "--tab", "--timeout-ms"][..],
             &[][..],
             false,
         ),
         "wait-ui" => (
-            "agentermctl wait-ui [--active @id] [--focus surface] \
+            "agenterm-cli wait-ui [--active @id] [--focus surface] \
              [-t target --tab-state state] [--window-state state] \
              [--client-width PX --client-height PX] [--timeout-ms ms]",
             &[
@@ -636,7 +641,7 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
             &[][..],
             false,
         ),
-        "workspace-info" => ("agentermctl workspace-info", &[][..], &[][..], false),
+        "workspace-info" => ("agenterm-cli workspace-info", &[][..], &[][..], false),
         _ => return None,
     };
     Some(ControlCommandSpec {

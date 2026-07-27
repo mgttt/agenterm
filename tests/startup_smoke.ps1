@@ -1,6 +1,6 @@
 param(
     [string]$GuiExe = (Join-Path $PSScriptRoot '..\dist\agenterm.exe'),
-    [string]$CliExe = (Join-Path $PSScriptRoot '..\dist\agentermctl.exe'),
+    [string]$CliExe = (Join-Path $PSScriptRoot '..\dist\agenterm-cli.exe'),
     [int]$MaxWindowMs = 1000
 )
 

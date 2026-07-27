@@ -46,20 +46,28 @@ try {
 
     Invoke-Checked 'binary roles and metadata' {
         $gui = '.\dist\agenterm.exe'
-        $cli = '.\dist\agentermctl.exe'
+        $cli = '.\dist\agenterm-cli.exe'
         $mux = '.\dist\agenterm-mux.exe'
         $script = '.\dist\agenterm-script.exe'
         $releaseBudgets = [ordered]@{
             'agenterm.exe'     = 4MB
-            'agentermctl.exe'  = 2MB
+            'agenterm-cli.exe'  = 2MB
             'agenterm-mux.exe' = 2MB
             'agenterm-script.exe' = 3MB
+        }
+        $obsoleteCliArtifacts = @(
+            Get-ChildItem -LiteralPath '.\dist' -File -Filter 'agentermctl*.exe'
+        )
+        if ($obsoleteCliArtifacts.Count -gt 0) {
+            throw "dist contains obsolete agentermctl artifacts: $(
+                $obsoleteCliArtifacts.Name -join ', '
+            )"
         }
         if ((Get-PeSubsystem $gui) -ne 2) {
             throw 'agenterm.exe must use the Windows GUI subsystem.'
         }
         if ((Get-PeSubsystem $cli) -ne 3) {
-            throw 'agentermctl.exe must use the Windows Console subsystem.'
+            throw 'agenterm-cli.exe must use the Windows Console subsystem.'
         }
         if ((Get-PeSubsystem $mux) -ne 3) {
             throw 'agenterm-mux.exe must use the Windows Console subsystem.'
@@ -81,7 +89,7 @@ try {
         $names = @($metadata.executables.name)
         if ($metadata.schema_version -ne 2 -or
             $names -notcontains 'agenterm.exe' -or
-            $names -notcontains 'agentermctl.exe' -or
+            $names -notcontains 'agenterm-cli.exe' -or
             $names -notcontains 'agenterm-mux.exe' -or
             $names -notcontains 'agenterm-script.exe' -or
             $metadata.features -notcontains 'codex-launcher' -or
@@ -103,8 +111,8 @@ try {
 
         $versionOutput = & $cli --version
         if ($LASTEXITCODE -ne 0 -or
-            $versionOutput -ne "agentermctl $($metadata.version)") {
-            throw 'agentermctl --version does not match agenterm.json.'
+            $versionOutput -ne "agenterm-cli $($metadata.version)") {
+            throw 'agenterm-cli --version does not match agenterm.json.'
         }
     }
 

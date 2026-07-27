@@ -1,5 +1,5 @@
 param(
-    [string]$CliExe = (Join-Path $PSScriptRoot '..\dist\agentermctl.exe'),
+    [string]$CliExe = (Join-Path $PSScriptRoot '..\dist\agenterm-cli.exe'),
     [string]$MuxExe = (Join-Path $PSScriptRoot '..\dist\agenterm-mux.exe')
 )
 
@@ -171,7 +171,7 @@ $catalogLines = @(
 
 $runtimeCatalog = @(& $CliExe list-commands 2>&1)
 if ($LASTEXITCODE -ne 0) {
-    throw "agentermctl list-commands failed:`n$($runtimeCatalog -join "`n")"
+    throw "agenterm-cli list-commands failed:`n$($runtimeCatalog -join "`n")"
 }
 $runtimeCatalog = @($runtimeCatalog | ForEach-Object { "$_".Trim() } | Where-Object { $_ })
 Compare-ExactList -Label 'source and runtime command catalogs' `

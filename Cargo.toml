@@ -11,8 +11,8 @@ name = "agenterm"
 path = "src/bin/agenterm.rs"
 
 [[bin]]
-name = "agentermctl"
-path = "src/bin/agentermctl.rs"
+name = "agenterm-cli"
+path = "src/bin/agenterm-cli.rs"
 
 [[bin]]
 name = "agenterm-mux"

@@ -36,12 +36,12 @@ fn run() -> anyhow::Result<u8> {
             println!(
                 "AgenTerm scripting worker\n\
                  Usage: agenterm-script --worker\n\
-                 Public scripts are invoked through `agentermctl script ...`."
+                 Public scripts are invoked through `agenterm-cli script ...`."
             );
             Ok(0)
         }
         _ => anyhow::bail!(
-            "unknown agenterm-script option; use --help or invoke scripts through agentermctl"
+            "unknown agenterm-script option; use --help or invoke scripts through agenterm-cli"
         ),
     }
 }

@@ -1,6 +1,8 @@
 param(
     [Parameter(Mandatory = $true)]
-    [string]$Directory
+    [string]$Directory,
+
+    [string[]]$ObsoleteName = @()
 )
 
 $ErrorActionPreference = 'Stop'
@@ -30,4 +32,15 @@ if ($removed -gt 0) {
 }
 if ($retained.Count -gt 0) {
     Write-Host "Retained $($retained.Count) locked artifact(s) still in use; the next build will retry."
+}
+
+foreach ($name in $ObsoleteName) {
+    if ([IO.Path]::GetFileName($name) -ne $name) {
+        throw "Obsolete artifact names must not contain a path: $name"
+    }
+    $obsoletePath = Join-Path $directoryPath $name
+    if (Test-Path -LiteralPath $obsoletePath) {
+        Remove-Item -LiteralPath $obsoletePath -Force
+        Write-Host "Removed obsolete artifact $name from $directoryPath"
+    }
 }

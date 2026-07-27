@@ -47,7 +47,7 @@ ignored local artifacts under `dist/`:
 
 - `dist/agenterm.exe` — GUI application; double-clicking does not create a
   temporary console window.
-- `dist/agentermctl.exe` — full native observation and automation client.
+- `dist/agenterm-cli.exe` — full native observation and automation client.
 - `dist/agenterm-mux.exe` — tmux/RMUX compatibility frontend over the same IPC
   server.
 - `dist/agenterm-script.exe` — optional bounded Rhai scripting worker.
@@ -63,7 +63,7 @@ Run the complete quality gate:
 ## Examples
 
 ```powershell
-$r = ".\dist\agentermctl.exe"
+$r = ".\dist\agenterm-cli.exe"
 
 & $r new-window -d -n build
 & $r set-composer -t build "cargo check"

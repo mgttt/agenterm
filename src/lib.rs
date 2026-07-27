@@ -206,7 +206,7 @@ pub fn run_cli_entry() -> i32 {
         .is_some_and(|argument| argument == "--address")
     {
         if arguments.len() < 2 {
-            eprintln!("agentermctl --address requires HOST:PORT");
+            eprintln!("agenterm-cli --address requires HOST:PORT");
             return 2;
         }
         arguments.remove(0);
@@ -223,7 +223,7 @@ pub fn run_cli_entry() -> i32 {
         .first()
         .is_some_and(|arg| arg == "-V" || arg == "--version")
     {
-        println!("agentermctl {}", env!("CARGO_PKG_VERSION"));
+        println!("agenterm-cli {}", env!("CARGO_PKG_VERSION"));
         return 0;
     }
     if arguments.is_empty()
@@ -240,7 +240,7 @@ pub fn run_cli_entry() -> i32 {
     {
         eprintln!(
             "unknown global option '{}'. To target an AgenTerm instance, use \
-             `agentermctl --address HOST:PORT COMMAND` or set AGENTERM_IPC_ADDRESS.",
+             `agenterm-cli --address HOST:PORT COMMAND` or set AGENTERM_IPC_ADDRESS.",
             arguments[0]
         );
         return 2;
@@ -5334,7 +5334,7 @@ fn run_script_command(arguments: &[String]) -> i32 {
         Some(path) if path.is_file() => path,
         _ => {
             eprintln!(
-                "agenterm-script.exe is not installed next to agentermctl.exe; \
+                "agenterm-script.exe is not installed next to agenterm-cli.exe; \
                  scripting is an optional component"
             );
             return 2;
@@ -5480,16 +5480,16 @@ fn select_implicit_control_instance() -> std::result::Result<String, String> {
         [] => Err(instance_selection_error(
             "no_healthy_instance",
             "No healthy AgenTerm instance is available",
-            "Start agenterm.exe, or use `agentermctl --address HOST:PORT COMMAND` to target and \
+            "Start agenterm.exe, or use `agenterm-cli --address HOST:PORT COMMAND` to target and \
              autostart a specific local server. Inspect registrations with \
-             `agentermctl list-instances --json`.",
+             `agenterm-cli list-instances --json`.",
             candidates,
         )),
         _ => Err(instance_selection_error(
             "ambiguous_instance",
             "More than one healthy AgenTerm instance is available",
-            "Choose one with `agentermctl --address HOST:PORT COMMAND` or set \
-             AGENTERM_IPC_ADDRESS. Inspect details with `agentermctl list-instances --json`.",
+            "Choose one with `agenterm-cli --address HOST:PORT COMMAND` or set \
+             AGENTERM_IPC_ADDRESS. Inspect details with `agenterm-cli list-instances --json`.",
             candidates,
         )),
     }
@@ -5772,11 +5772,11 @@ fn run_wait_pane(arguments: &[String]) -> i32 {
 
 fn gui_executable_path() -> Result<std::path::PathBuf> {
     let current =
-        env::current_exe().context("could not locate the running agentermctl executable")?;
+        env::current_exe().context("could not locate the running agenterm-cli executable")?;
     let gui = current.with_file_name("agenterm.exe");
     if !gui.is_file() {
         anyhow::bail!(
-            "AgenTerm GUI executable was not found beside agentermctl: {}",
+            "AgenTerm GUI executable was not found beside agenterm-cli: {}",
             gui.display()
         );
     }
@@ -5789,51 +5789,51 @@ fn print_help() {
 AgenTerm CLI - control the native tabbed terminal
 
 Usage:
-  agentermctl [--address HOST:PORT] command [args...]
-  agentermctl list-instances [--json] [--prune]
-  agentermctl server-list [--json] [--prune]
-  agentermctl new-session [-s name]
-  agentermctl new-window [-d] [-n name] [--parent target] [-F format] [-e NAME=VALUE] [command [args...]]
-  agentermctl new-agent [-d] [-n name] [--parent target] [--proxy URL] [--yolo] [-- [codex args...]]
-  agentermctl list-windows [-F format]
-  agentermctl list-tab-tree [-F format]
-  agentermctl select-window -t target
-  agentermctl rename-window [-t target] name
-  agentermctl kill-window -t target
-  agentermctl send-keys [-t target] key...
-  agentermctl scroll-pane [-t target] up|down|page-up|page-down|top|bottom [rows]
-  agentermctl read-events --epoch EPOCH --after SEQUENCE [--limit COUNT]
-  agentermctl wait-events --epoch EPOCH --after SEQUENCE --kind KIND [--tab @ID] [--timeout-ms MS]
-  agentermctl capture-pane -p [-t target]
-  agentermctl capture-pane --raw-escaped [-t target]
-  agentermctl dump-cells [-t target] [-r row]
-  agentermctl active-window [-F format]
-  agentermctl inspect [-t target]
-  agentermctl screenshot [-o file.png]
-  agentermctl screenshot-pane [-t target] [-o file.png]
-  agentermctl show-composer [-t target]
-  agentermctl set-composer [-t target] text
-  agentermctl set-composer [-t target] --stdin|--file path
-  agentermctl send-composer [-t target]
-  agentermctl set-tab-note [-t target] text
-  agentermctl show-tab-note [-t target]
-  agentermctl set-tab-parent -t child --parent parent|root
-  agentermctl show-tab-parent [-t target]
-  agentermctl save-workspace
-  agentermctl workspace-info
-  agentermctl shutdown
-  agentermctl get-settings
-  agentermctl set-setting terminal.font-family FAMILY
-  agentermctl set-setting terminal.font-size 8..36
-  agentermctl send-mouse [-t target] -x col -y row [--button left] [--action press]
-  agentermctl ui-snapshot
-  agentermctl ui-action new-tab|new-child|edit-tab|toggle-tree|select-tab|close-tab|confirm|cancel|composer-send|copy-selection
-  agentermctl focus terminal|composer|sidebar [-t target]
-  agentermctl wait-pane [-t target] (--contains text|--dead|--submit-complete) [--timeout-ms ms]
-  agentermctl wait-ui [--active @id] [--focus surface] [-t target --tab-state state]
-  agentermctl protocol-info
-  agentermctl list-panes [-F format]
-  agentermctl list-sessions | has-session | kill-server | server-kill"
+  agenterm-cli [--address HOST:PORT] command [args...]
+  agenterm-cli list-instances [--json] [--prune]
+  agenterm-cli server-list [--json] [--prune]
+  agenterm-cli new-session [-s name]
+  agenterm-cli new-window [-d] [-n name] [--parent target] [-F format] [-e NAME=VALUE] [command [args...]]
+  agenterm-cli new-agent [-d] [-n name] [--parent target] [--proxy URL] [--yolo] [-- [codex args...]]
+  agenterm-cli list-windows [-F format]
+  agenterm-cli list-tab-tree [-F format]
+  agenterm-cli select-window -t target
+  agenterm-cli rename-window [-t target] name
+  agenterm-cli kill-window -t target
+  agenterm-cli send-keys [-t target] key...
+  agenterm-cli scroll-pane [-t target] up|down|page-up|page-down|top|bottom [rows]
+  agenterm-cli read-events --epoch EPOCH --after SEQUENCE [--limit COUNT]
+  agenterm-cli wait-events --epoch EPOCH --after SEQUENCE --kind KIND [--tab @ID] [--timeout-ms MS]
+  agenterm-cli capture-pane -p [-t target]
+  agenterm-cli capture-pane --raw-escaped [-t target]
+  agenterm-cli dump-cells [-t target] [-r row]
+  agenterm-cli active-window [-F format]
+  agenterm-cli inspect [-t target]
+  agenterm-cli screenshot [-o file.png]
+  agenterm-cli screenshot-pane [-t target] [-o file.png]
+  agenterm-cli show-composer [-t target]
+  agenterm-cli set-composer [-t target] text
+  agenterm-cli set-composer [-t target] --stdin|--file path
+  agenterm-cli send-composer [-t target]
+  agenterm-cli set-tab-note [-t target] text
+  agenterm-cli show-tab-note [-t target]
+  agenterm-cli set-tab-parent -t child --parent parent|root
+  agenterm-cli show-tab-parent [-t target]
+  agenterm-cli save-workspace
+  agenterm-cli workspace-info
+  agenterm-cli shutdown
+  agenterm-cli get-settings
+  agenterm-cli set-setting terminal.font-family FAMILY
+  agenterm-cli set-setting terminal.font-size 8..36
+  agenterm-cli send-mouse [-t target] -x col -y row [--button left] [--action press]
+  agenterm-cli ui-snapshot
+  agenterm-cli ui-action new-tab|new-child|edit-tab|toggle-tree|select-tab|close-tab|confirm|cancel|composer-send|copy-selection
+  agenterm-cli focus terminal|composer|sidebar [-t target]
+  agenterm-cli wait-pane [-t target] (--contains text|--dead|--submit-complete) [--timeout-ms ms]
+  agenterm-cli wait-ui [--active @id] [--focus surface] [-t target --tab-state state]
+  agenterm-cli protocol-info
+  agenterm-cli list-panes [-F format]
+  agenterm-cli list-sessions | has-session | kill-server | server-kill"
     );
 }
 
