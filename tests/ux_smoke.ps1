@@ -75,6 +75,18 @@ function Invoke-AgenTermAt {
     return ($output -join "`n")
 }
 
+function Test-AgenTermReady {
+    $previousPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $null = & $Exe ui-snapshot 2>&1
+        return $LASTEXITCODE -eq 0
+    }
+    finally {
+        $ErrorActionPreference = $previousPreference
+    }
+}
+
 function Get-IsolatedServer {
     param([string]$Address = $env:AGENTERM_IPC_ADDRESS)
     $instances = Invoke-AgenTerm @('list-instances', '--json') | ConvertFrom-Json
@@ -185,9 +197,10 @@ try {
         $snapshot.layout.status_bar.provider -ne 'placeholder') {
         throw 'Bottom status bar was not exposed through ui-snapshot'
     }
+    $localizedSendLabel = ([char]0x53D1).ToString() + [char]0x9001
     if ($snapshot.locale.id -ne 'en-US' -or
         $snapshot.locale.controls.send -ne 'Send' -or
-        @($snapshot.locale.controls.PSObject.Properties.Value) -contains '发送') {
+        @($snapshot.locale.controls.PSObject.Properties.Value) -contains $localizedSendLabel) {
         throw 'built-in control labels did not use the declared English locale'
     }
     Write-Evidence 'ux.locale-consistency'
@@ -461,7 +474,14 @@ try {
         )
     }
     Set-Clipboard -Value 'AGENTERM_CLIPBOARD_SENTINEL'
-    $snapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $clipboardWait = [Diagnostics.Stopwatch]::StartNew()
+    do {
+        $snapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+        if ($snapshot.system_menu.copy.enabled -and
+            $snapshot.system_menu.paste.enabled) {
+            break
+        }
+    } while ($clipboardWait.ElapsedMilliseconds -lt 1000)
     if (-not $snapshot.system_menu.copy.enabled -or
         -not $snapshot.system_menu.paste.enabled) {
         throw 'system-menu clipboard state was not enabled for terminal selection and text'
@@ -703,15 +723,13 @@ try {
     Invoke-AgenTerm @('select-window', '-t', $persistName) | Out-Null
     Invoke-AgenTerm @('shutdown') | Out-Null
     for ($attempt = 0; $attempt -lt 50; $attempt++) {
-        & $Exe ui-snapshot 2>$null | Out-Null
-        if ($LASTEXITCODE -ne 0) { break }
+        if (-not (Test-AgenTermReady)) { break }
         Start-Sleep -Milliseconds 50
     }
     Start-Process -FilePath $GuiExe | Out-Null
     $ready = $false
     for ($attempt = 0; $attempt -lt 100; $attempt++) {
-        & $Exe ui-snapshot 2>$null | Out-Null
-        if ($LASTEXITCODE -eq 0) {
+        if (Test-AgenTermReady) {
             $ready = $true
             break
         }
@@ -731,8 +749,18 @@ try {
 }
 finally {
     Remove-Item -LiteralPath $draftFile -ErrorAction SilentlyContinue
-    & $Exe --address $stopAddress kill-server 2>$null | Out-Null
-    & $Exe kill-server 2>$null | Out-Null
+    try {
+        & $Exe --address $stopAddress kill-server 2>$null | Out-Null
+    }
+    catch {
+        # The isolated stop journey normally leaves no server to clean up.
+    }
+    try {
+        & $Exe kill-server 2>$null | Out-Null
+    }
+    catch {
+        # Cleanup is best-effort when the main journey already stopped the server.
+    }
     Remove-Item -LiteralPath $workspaceFile -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $settingsFile -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $stopWorkspaceFile -ErrorAction SilentlyContinue
