@@ -112,6 +112,11 @@ try {
     Write-Host 'STEP zero-instance live control reports structured candidates'
     Remove-Item Env:AGENTERM_IPC_ADDRESS
     try {
+        $emptyServers = Invoke-CheckedExe $CtlExe @('server-list', '--json') |
+            ConvertFrom-Json
+        if (@($emptyServers).Count -ne 0) {
+            throw 'server-list did not report an empty fleet without autostarting a GUI'
+        }
         $emptyError = Invoke-ExpectedFailure $CtlExe @('list-windows')
         if (-not $emptyError.Contains('"code": "no_healthy_instance"') -or
             -not $emptyError.Contains('"candidates": []') -or
@@ -198,12 +203,19 @@ try {
     Write-Host 'STEP live servers are discoverable and explicitly targetable'
     $instances = Invoke-CheckedExe $CtlExe @('list-instances', '--json') |
         ConvertFrom-Json
+    $servers = Invoke-CheckedExe $CtlExe @('server-list', '--json') |
+        ConvertFrom-Json
     $instance = @($instances) | Where-Object address -eq $address
+    $server = @($servers) | Where-Object address -eq $address
     if ($null -eq $instance -or
+        $null -eq $server -or
         $instance.status -ne 'running' -or
+        $server.status -ne $instance.status -or
+        $server.pid -ne $instance.pid -or
+        $server.workspace_path -ne $instance.workspace_path -or
         $instance.version -ne $expectedVersion -or
         $instance.workspace_path -ne $workspaceFile) {
-        throw 'list-instances did not report the isolated live server'
+        throw 'list-instances and server-list did not report the same isolated live server'
     }
     $targetedProtocol = Invoke-CheckedExe $CtlExe @(
         '--address', $address, 'protocol-info'

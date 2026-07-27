@@ -5088,7 +5088,7 @@ fn run_cli(arguments: Vec<String>) -> i32 {
         println!("{}", protocol_info_json());
         return 0;
     }
-    if command == "list-instances" {
+    if matches!(command, "list-instances" | "server-list") {
         return run_list_instances(&arguments);
     }
     if command == "script" {
@@ -5785,6 +5785,7 @@ AgenTerm CLI - control the native tabbed terminal
 Usage:
   agentermctl [--address HOST:PORT] command [args...]
   agentermctl list-instances [--json] [--prune]
+  agentermctl server-list [--json] [--prune]
   agentermctl new-session [-s name]
   agentermctl new-window [-d] [-n name] [--parent target] [-F format] [-e NAME=VALUE] [command [args...]]
   agentermctl new-agent [-d] [-n name] [--parent target] [--proxy URL] [--yolo] [-- [codex args...]]
@@ -5880,7 +5881,7 @@ fn protocol_info_json() -> String {
             "set-setting", "set-tab-note", "show-tab-note",
             "list-tab-tree", "set-tab-parent", "show-tab-parent",
             "save-workspace", "workspace-info", "shutdown",
-            "new-agent", "list-instances", "scroll-pane", "read-events",
+            "new-agent", "list-instances", "server-list", "scroll-pane", "read-events",
             "wait-events"
         ],
         "features": {

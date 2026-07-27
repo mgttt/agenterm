@@ -79,7 +79,7 @@ $r = ".\dist\agentermctl.exe"
 & $r script eval "observe.event_position.sequence" --profile observe
 
 # Discover every registered server, then target one explicitly.
-& $r list-instances
+& $r server-list
 & $r --address 127.0.0.1:48915 ui-snapshot
 
 # Launch Codex with proxy settings scoped to this tab.

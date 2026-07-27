@@ -855,6 +855,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
         - closing a parent promotes direct children to its parent
       - State and deterministic waits
         - `list-instances [--json] [--prune]`
+        - [x] `server-list [--json] [--prune]` is an offline fleet-discovery
+          alias over the same registered-instance records; it never autostarts
+          a GUI and therefore provides the read-side companion to `kill-server`
         - global `--address HOST:PORT` targets a discovered server explicitly
         - `active-window|active-tab [-F format]`
         - `inspect|pane-snapshot [-t target]`
@@ -870,6 +873,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
           [--timeout-ms ms]`
         - `ui-snapshot`, `protocol-info`
         - `workspace-info`, `save-workspace`, `shutdown`
+        - [ ] explore a coherent `server-*` lifecycle namespace only as aliases
+          over typed discovery, health, start, shutdown, and destructive-kill
+          operations; do not create a second server registry or weaken the
+          current `kill-server` workspace-destruction contract
         - [ ] `shutdown --no-save` escape hatch for instances whose workspace
           destination has become unwritable
         - `wait-ui [--active @id] [--focus surface] [-t target

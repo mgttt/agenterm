@@ -40,6 +40,7 @@ select-window (selectw)
 send-keys (send)
 send-composer
 send-mouse
+server-list
 set-setting
 set-composer
 set-tab-parent
@@ -547,6 +548,12 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
              [--button button] [--action action] [--protocol protocol]",
             &["-t", "-x", "-y", "--button", "--action", "--protocol"][..],
             &[][..],
+            false,
+        ),
+        "server-list" => (
+            "agentermctl server-list [--json] [--prune]",
+            &[][..],
+            &["--json", "--prune"][..],
             false,
         ),
         "set-setting" => ("agentermctl set-setting key value", &[][..], &[][..], false),
