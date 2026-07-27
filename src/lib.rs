@@ -84,10 +84,11 @@ mod working_context;
 mod workspace;
 
 use commands::{
-    BACKSPACE_INPUT, MUX_COMMANDS, MuxStatus, SUPPORTED_COMMANDS, canonical_control_command,
-    control_command_requests_help, control_command_usage, has_option, last_positional, mux_command,
-    option_value, parse_new_command, parse_tab_environment, positional_values,
-    screenshot_output_path, snapshot_modal_matches, tmux_key_bytes, validate_control_command,
+    BACKSPACE_INPUT, COMMAND_CATALOG, COMMAND_CATALOG_SCHEMA_VERSION, MUX_COMMANDS, MuxStatus,
+    canonical_control_command, control_command_requests_help, control_command_usage, has_option,
+    last_positional, mux_command, option_value, parse_new_command, parse_tab_environment,
+    positional_values, screenshot_output_path, snapshot_modal_matches, supported_commands,
+    tmux_key_bytes, validate_control_command,
 };
 use event_journal::{EVENT_CATALOG, EVENT_CATALOG_SCHEMA_VERSION, EventJournal, EventKind};
 use instances::{
@@ -7549,7 +7550,7 @@ impl AppState {
                 self.close_requested = true;
                 IpcResponse::success("")
             }
-            "lscm" | "list-commands" => IpcResponse::success(SUPPORTED_COMMANDS),
+            "lscm" | "list-commands" => IpcResponse::success(supported_commands()),
             "splitw" | "split-window" => IpcResponse::failure(
                 "split-window is not implemented yet; AgenTerm currently maps one ConPTY pane per tab",
             ),
@@ -8148,7 +8149,7 @@ fn run_cli(arguments: Vec<String>) -> i32 {
     }
     let command = arguments.first().map(String::as_str).unwrap_or_default();
     if matches!(command, "list-commands" | "lscm") {
-        print!("{SUPPORTED_COMMANDS}");
+        print!("{}", supported_commands());
         return 0;
     }
     if command == "protocol-info" {
@@ -9445,6 +9446,10 @@ fn protocol_info_json() -> String {
     serde_json::to_string_pretty(&serde_json::json!({
         "protocol_version": 1,
         "agenterm_version": env!("CARGO_PKG_VERSION"),
+        "command_catalog": {
+            "schema_version": COMMAND_CATALOG_SCHEMA_VERSION,
+            "commands": COMMAND_CATALOG,
+        },
         "operation_catalog": {
             "schema_version": OPERATION_CATALOG_SCHEMA_VERSION,
             "classification_only": true,

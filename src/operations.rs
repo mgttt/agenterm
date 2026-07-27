@@ -1,6 +1,9 @@
 use serde::Serialize;
 
-use crate::ui_geometry::{TABS_MAX_WIDTH, TABS_MIN_WIDTH};
+use crate::{
+    commands::{canonical_control_command, option_value},
+    ui_geometry::{TABS_MAX_WIDTH, TABS_MIN_WIDTH},
+};
 
 pub const OPERATION_CATALOG_SCHEMA_VERSION: u32 = 1;
 
@@ -351,6 +354,7 @@ pub(crate) fn operation_for_args(
     let Some(command) = args.first().map(String::as_str) else {
         return Ok(None);
     };
+    let command = canonical_control_command(command);
     let operation = match command {
         "protocol-info" => operation_by_id("protocol.info"),
         "ui-snapshot" => operation_by_id("ui.snapshot"),
@@ -429,12 +433,6 @@ pub(crate) fn validate_operation_args(
     Ok(Some(operation))
 }
 
-fn option_value<'a>(args: &'a [String], option: &str) -> Option<&'a str> {
-    args.windows(2)
-        .find(|pair| pair[0] == option)
-        .map(|pair| pair[1].as_str())
-}
-
 fn operation_error(code: &str, identity: &str, message: &str) -> String {
     format!("{code}[{identity}]: {message}")
 }
@@ -472,6 +470,12 @@ mod tests {
                 .any(|operation| { operation.class == OperationClass::Destructive })
         );
         for operation in OPERATION_CATALOG {
+            assert!(
+                crate::commands::command_identity(operation.command).is_some(),
+                "operation {} references unknown command {}",
+                operation.id,
+                operation.command
+            );
             assert!(!operation.result_type.is_empty());
             assert!(!operation.since.is_empty());
             assert!(operation.available);

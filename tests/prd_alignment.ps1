@@ -8,11 +8,10 @@ $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $prdPath = Join-Path $root 'PRD.md'
 $prdDetailDirectory = Join-Path $root 'prd'
 $contractPath = Join-Path $prdDetailDirectory 'alignment-contract.json'
-$commandsPath = Join-Path $root 'src\commands.rs'
 $CliExe = [IO.Path]::GetFullPath($CliExe)
 $MuxExe = [IO.Path]::GetFullPath($MuxExe)
 
-foreach ($path in @($prdPath, $prdDetailDirectory, $contractPath, $commandsPath, $CliExe, $MuxExe)) {
+foreach ($path in @($prdPath, $prdDetailDirectory, $contractPath, $CliExe, $MuxExe)) {
     if (-not (Test-Path -LiteralPath $path)) {
         throw "PRD alignment input does not exist: $path"
     }
@@ -69,8 +68,6 @@ $prdDocuments = @($prdPath) + @(
 $prd = ($prdDocuments | ForEach-Object {
     Get-Content -LiteralPath $_ -Raw
 }) -join "`n"
-$commandsSource = Get-Content -LiteralPath $commandsPath -Raw
-
 $contract = Get-Content -LiteralPath $contractPath -Raw | ConvertFrom-Json
 if ($contract.schema_version -ne 2) {
     throw "Unsupported PRD alignment schema: $($contract.schema_version)"
@@ -174,26 +171,15 @@ $actualEvidence = @($registeredEvidence | Sort-Object)
 Compare-ExactList -Label 'shipped capability and executable evidence IDs' `
     -Expected $expectedEvidence -Actual $actualEvidence
 
-$catalogMatch = [regex]::Match(
-    $commandsSource,
-    '(?ms)pub\(crate\) const SUPPORTED_COMMANDS: &str = "\\\r?\n(?<body>.*?)";'
-)
-if (-not $catalogMatch.Success) {
-    throw 'Could not read SUPPORTED_COMMANDS from src/commands.rs.'
-}
-$catalogLines = @(
-    $catalogMatch.Groups['body'].Value -split '\r?\n' |
-        ForEach-Object { $_.Trim() } |
-        Where-Object { $_ }
-)
-
 $runtimeCatalog = @(& $CliExe list-commands 2>&1)
 if ($LASTEXITCODE -ne 0) {
     throw "agenterm-cli list-commands failed:`n$($runtimeCatalog -join "`n")"
 }
-$runtimeCatalog = @($runtimeCatalog | ForEach-Object { "$_".Trim() } | Where-Object { $_ })
-Compare-ExactList -Label 'source and runtime command catalogs' `
-    -Expected $catalogLines -Actual $runtimeCatalog
+$catalogLines = @(
+    $runtimeCatalog |
+        ForEach-Object { "$_".Trim() } |
+        Where-Object { $_ }
+)
 
 $publicNames = [Collections.Generic.HashSet[string]]::new(
     [StringComparer]::Ordinal
@@ -227,6 +213,23 @@ foreach ($rootName in @($contract.planned_command_roots)) {
 }
 
 $protocol = Invoke-JsonCommand -Path $CliExe -CommandArgs @('protocol-info')
+if ($protocol.command_catalog.schema_version -ne 1) {
+    throw "Unsupported command catalog schema: $($protocol.command_catalog.schema_version)"
+}
+$discoveredCatalog = @(
+    $protocol.command_catalog.commands |
+        ForEach-Object {
+            if (@($_.aliases).Count -eq 0) {
+                $_.id
+            }
+            else {
+                "$($_.id) ($(@($_.aliases) -join ', '))"
+            }
+        }
+)
+Compare-ExactList -Label 'list-commands and protocol command catalog' `
+    -Expected $catalogLines -Actual $discoveredCatalog
+
 $runtimeFeatureNames = @($protocol.features.PSObject.Properties.Name | Sort-Object)
 $protocolCapabilities = @(
     $capabilities |

@@ -1,65 +1,98 @@
 use std::{env, path::PathBuf, time::SystemTime};
 
+use serde::Serialize;
 use serde_json::Value;
 
 pub(crate) const BACKSPACE_INPUT: &[u8] = b"\x7f";
 
-pub(crate) const SUPPORTED_COMMANDS: &str = "\
-attach-session (attach)
-active-window (active-tab)
-capture-pane (capturep)
-display-message (display)
-dump-cells
-get-settings
-has-session (has)
-inspect
-focus
-kill-server
-kill-session
-kill-window (killw)
-list-tab-tree
-list-commands (lscm)
-list-instances
-list-panes (lsp)
-list-sessions (ls)
-list-windows (lsw)
-new-session (new)
-new-agent
-new-window (neww)
-next-window (next)
-pane-snapshot
-protocol-info
-previous-window (prev)
-read-events
-rename-session (rename)
-rename-window (renamew)
-screenshot
-screenshot-pane (screenshot-tab)
-save-workspace
-script
-scroll-pane
-select-window (selectw)
-send-keys (send)
-send-composer
-send-mouse
-server-kill
-server-list
-set-setting
-set-composer
-set-tab-parent
-set-tab-note
-show-composer
-show-tab-parent
-show-tab-note
-show-options (show)
-shutdown
-start-server
-ui-action
-ui-snapshot
-wait-pane (expect-pane)
-wait-events
-wait-ui
-workspace-info";
+pub(crate) const COMMAND_CATALOG_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+pub(crate) struct CommandIdentity {
+    pub(crate) id: &'static str,
+    pub(crate) aliases: &'static [&'static str],
+}
+
+const fn command(id: &'static str, aliases: &'static [&'static str]) -> CommandIdentity {
+    CommandIdentity { id, aliases }
+}
+
+pub(crate) const COMMAND_CATALOG: &[CommandIdentity] = &[
+    command("attach-session", &["attach"]),
+    command("active-window", &["active-tab"]),
+    command("capture-pane", &["capturep"]),
+    command("display-message", &["display"]),
+    command("dump-cells", &[]),
+    command("get-settings", &[]),
+    command("has-session", &["has"]),
+    command("inspect", &[]),
+    command("focus", &[]),
+    command("kill-server", &["server-kill"]),
+    command("kill-session", &[]),
+    command("kill-window", &["killw"]),
+    command("list-tab-tree", &[]),
+    command("list-commands", &["lscm"]),
+    command("list-instances", &[]),
+    command("list-panes", &["lsp"]),
+    command("list-sessions", &["ls"]),
+    command("list-windows", &["lsw"]),
+    command("new-session", &["new"]),
+    command("new-agent", &[]),
+    command("new-window", &["neww"]),
+    command("next-window", &["next"]),
+    command("pane-snapshot", &[]),
+    command("protocol-info", &[]),
+    command("previous-window", &["prev"]),
+    command("read-events", &[]),
+    command("rename-session", &["rename"]),
+    command("rename-window", &["renamew"]),
+    command("screenshot", &[]),
+    command("screenshot-pane", &["screenshot-tab"]),
+    command("save-workspace", &[]),
+    command("script", &[]),
+    command("scroll-pane", &[]),
+    command("select-window", &["selectw"]),
+    command("send-keys", &["send"]),
+    command("send-composer", &[]),
+    command("send-mouse", &[]),
+    command("server-list", &[]),
+    command("set-setting", &[]),
+    command("set-composer", &[]),
+    command("set-tab-parent", &[]),
+    command("set-tab-note", &[]),
+    command("show-composer", &[]),
+    command("show-tab-parent", &[]),
+    command("show-tab-note", &[]),
+    command("show-options", &["show"]),
+    command("shutdown", &[]),
+    command("start-server", &[]),
+    command("ui-action", &[]),
+    command("ui-snapshot", &[]),
+    command("wait-pane", &["expect-pane"]),
+    command("wait-events", &[]),
+    command("wait-ui", &[]),
+    command("workspace-info", &[]),
+];
+
+pub(crate) fn command_identity(name: &str) -> Option<&'static CommandIdentity> {
+    COMMAND_CATALOG
+        .iter()
+        .find(|identity| identity.id == name || identity.aliases.contains(&name))
+}
+
+pub(crate) fn supported_commands() -> String {
+    let mut output = String::new();
+    for identity in COMMAND_CATALOG {
+        output.push_str(identity.id);
+        if !identity.aliases.is_empty() {
+            output.push_str(" (");
+            output.push_str(&identity.aliases.join(", "));
+            output.push(')');
+        }
+        output.push('\n');
+    }
+    output
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum MuxStatus {
@@ -668,10 +701,7 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
 }
 
 pub(crate) fn canonical_control_command(command: &str) -> &str {
-    match command {
-        "server-kill" => "kill-server",
-        _ => command,
-    }
+    command_identity(command).map_or(command, |identity| identity.id)
 }
 
 pub(crate) fn has_option(args: &[String], option: &str) -> bool {
@@ -1060,8 +1090,36 @@ mod tests {
     }
 
     #[test]
-    fn canonicalizes_server_kill_to_the_existing_destructive_operation() {
+    fn command_catalog_is_unique_and_drives_public_identity() {
+        let mut names = std::collections::BTreeSet::new();
+        for identity in COMMAND_CATALOG {
+            assert!(
+                names.insert(identity.id),
+                "duplicate command {}",
+                identity.id
+            );
+            assert!(
+                control_command_spec(identity.id).is_some(),
+                "command {} lacks an argument contract",
+                identity.id
+            );
+            for alias in identity.aliases {
+                assert!(names.insert(alias), "duplicate command alias {alias}");
+                assert!(
+                    control_command_spec(alias).is_some(),
+                    "alias {alias} lacks an argument contract"
+                );
+                assert_eq!(canonical_control_command(alias), identity.id);
+            }
+        }
+        assert_eq!(supported_commands().lines().count(), COMMAND_CATALOG.len());
+    }
+
+    #[test]
+    fn canonicalizes_aliases_to_stable_command_identity() {
         assert_eq!(canonical_control_command("server-kill"), "kill-server");
+        assert_eq!(canonical_control_command("neww"), "new-window");
+        assert_eq!(canonical_control_command("capturep"), "capture-pane");
         assert_eq!(canonical_control_command("server-list"), "server-list");
     }
 
