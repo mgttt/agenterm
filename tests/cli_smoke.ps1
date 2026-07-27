@@ -80,6 +80,51 @@ try {
     ) {
         throw 'Request ID reuse with a different payload was not rejected'
     }
+    $retryName = "receipt-window-$($run.RunId)"
+    $createRequestId = "receipt-create-$($run.RunId)"
+    $createArgs = @(
+        '--request-id', $createRequestId, '--receipt-json',
+        'new-window', '-d', '-n', $retryName
+    )
+    $createReceipt = Invoke-AgenTerm $createArgs | ConvertFrom-Json
+    $createReplay = Invoke-AgenTerm $createArgs | ConvertFrom-Json
+    $retryTabs = @(
+        (Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json).tabs |
+            Where-Object name -eq $retryName
+    )
+    if (
+        $createReceipt.outcome -ne 'committed' -or
+        $createReceipt.request_id -ne $createRequestId -or
+        $createReceipt.after_position.sequence -ne
+            $createReplay.after_position.sequence -or
+        $retryTabs.Count -ne 1
+    ) {
+        throw 'Retried new-window did not commit exactly one stable tab'
+    }
+    $retryTabId = $retryTabs[0].id
+    if ($retryTabId -notmatch '^@\d+$') {
+        throw 'Retried new-window did not expose a stable tab ID'
+    }
+    $killRequestId = "receipt-kill-$($run.RunId)"
+    $killArgs = @(
+        '--request-id', $killRequestId, '--receipt-json',
+        'kill-window', '-t', $retryTabId
+    )
+    $killReceipt = Invoke-AgenTerm $killArgs | ConvertFrom-Json
+    $killReplay = Invoke-AgenTerm $killArgs | ConvertFrom-Json
+    $retryTabsAfterKill = @(
+        (Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json).tabs |
+            Where-Object id -eq $retryTabId
+    )
+    if (
+        $killReceipt.outcome -ne 'committed' -or
+        $killReceipt.request_id -ne $killRequestId -or
+        $killReceipt.after_position.sequence -ne
+            $killReplay.after_position.sequence -or
+        $retryTabsAfterKill.Count -ne 0
+    ) {
+        throw 'Retried kill-window did not replay its committed terminal close'
+    }
     Write-Evidence 'cli.control-receipts'
 
     Write-Host 'STEP discover aligned and extended commands'

@@ -9180,6 +9180,33 @@ fn run_wait_events(arguments: &[String]) -> i32 {
     }
 }
 
+fn resolve_stable_wait_target(selector: &str) -> Result<String> {
+    let response = send_ipc_request(vec![
+        "display-message".to_owned(),
+        "-p".to_owned(),
+        "-t".to_owned(),
+        selector.to_owned(),
+        "#{window_id}".to_owned(),
+    ])?;
+    if !response.ok || !response.output.trim().starts_with('@') {
+        anyhow::bail!(
+            "wait target could not be resolved to a stable tab ID: {}",
+            response.error
+        );
+    }
+    Ok(response.output.trim().to_owned())
+}
+
+fn fetch_ui_wait_snapshot() -> Result<(String, serde_json::Value)> {
+    let response = send_ipc_request(vec!["ui-snapshot".to_owned()])?;
+    if !response.ok {
+        anyhow::bail!("{}", response.error);
+    }
+    let snapshot = serde_json::from_str::<serde_json::Value>(&response.output)
+        .context("wait-ui received an invalid UI snapshot")?;
+    Ok((response.output, snapshot))
+}
+
 fn run_wait_ui(arguments: &[String]) -> i32 {
     let timeout_ms = match option_value(arguments, "--timeout-ms") {
         Some(value) => match value.parse::<u64>() {
@@ -9192,31 +9219,31 @@ fn run_wait_ui(arguments: &[String]) -> i32 {
         None => 10_000,
     };
     let deadline = std::time::Instant::now() + Duration::from_millis(timeout_ms);
-    let expected_active = option_value(arguments, "--active");
+    let requested_active = option_value(arguments, "--active");
     let expected_focus = option_value(arguments, "--focus");
     let expected_state = option_value(arguments, "--tab-state");
     let expected_window_state = option_value(arguments, "--window-state");
     let expected_modal_kind = option_value(arguments, "--modal-kind");
-    let expected_modal_target = option_value(arguments, "--modal-target");
+    let requested_modal_target = option_value(arguments, "--modal-target");
     let expected_client_width =
         option_value(arguments, "--client-width").and_then(|value| value.parse::<i64>().ok());
     let expected_client_height =
         option_value(arguments, "--client-height").and_then(|value| value.parse::<i64>().ok());
-    let target = option_value(arguments, "-t");
+    let requested_target = option_value(arguments, "-t");
     if expected_modal_kind.is_some_and(|kind| matches!(kind, "none" | "closed"))
-        && expected_modal_target.is_some()
+        && requested_modal_target.is_some()
     {
         eprintln!("wait-ui --modal-target cannot be combined with --modal-kind none or closed");
         return 2;
     }
-    if expected_active.is_none()
+    if requested_active.is_none()
         && expected_focus.is_none()
         && expected_state.is_none()
         && expected_window_state.is_none()
         && expected_client_width.is_none()
         && expected_client_height.is_none()
         && expected_modal_kind.is_none()
-        && expected_modal_target.is_none()
+        && requested_modal_target.is_none()
     {
         eprintln!(
             "wait-ui requires an active, focus, tab-state, window-state, client-size, \
@@ -9224,85 +9251,149 @@ fn run_wait_ui(arguments: &[String]) -> i32 {
         );
         return 1;
     }
+    let expected_active = match requested_active.map(resolve_stable_wait_target).transpose() {
+        Ok(value) => value,
+        Err(error) => {
+            eprintln!("{error:#}");
+            return 1;
+        }
+    };
+    let target = match requested_target.map(resolve_stable_wait_target).transpose() {
+        Ok(value) => value,
+        Err(error) => {
+            eprintln!("{error:#}");
+            return 1;
+        }
+    };
+    let expected_modal_target = match requested_modal_target
+        .map(resolve_stable_wait_target)
+        .transpose()
+    {
+        Ok(value) => value,
+        Err(error) => {
+            eprintln!("{error:#}");
+            return 1;
+        }
+    };
+    let (baseline_output, baseline_snapshot) = match fetch_ui_wait_snapshot() {
+        Ok(value) => value,
+        Err(error) => {
+            eprintln!("{error:#}");
+            return 1;
+        }
+    };
+    let baseline_position = baseline_snapshot["event_position"].clone();
+    let baseline_epoch = baseline_snapshot["event_position"]["epoch"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
+    if baseline_epoch.is_empty() {
+        eprintln!("wait-ui baseline did not contain a server epoch");
+        return 1;
+    }
+    let mut pending_snapshot = Some((baseline_output, baseline_snapshot));
     loop {
-        match send_ipc_request(vec!["ui-snapshot".to_owned()]) {
-            Ok(response) if response.ok => {
-                if let Ok(snapshot) = serde_json::from_str::<serde_json::Value>(&response.output) {
-                    let active_matches = expected_active.is_none_or(|expected| {
-                        snapshot["focus"]["window_id"].as_str() == Some(expected)
-                    });
-                    let focus_matches = expected_focus.is_none_or(|expected| {
-                        snapshot["focus"]["surface"].as_str() == Some(expected)
-                    });
-                    let state_matches = expected_state.is_none_or(|expected| {
-                        snapshot["tabs"].as_array().is_some_and(|tabs| {
-                            tabs.iter().any(|tab| {
-                                let target_matches = target.is_none_or(|selector| {
-                                    tab["id"].as_str() == Some(selector)
-                                        || tab["name"].as_str() == Some(selector)
-                                        || selector.parse::<u64>().ok().is_some_and(|index| {
-                                            tab["index"].as_u64() == Some(index)
-                                        })
-                                });
-                                target_matches && tab["state"].as_str() == Some(expected)
-                            })
+        match pending_snapshot
+            .take()
+            .map(Ok)
+            .unwrap_or_else(fetch_ui_wait_snapshot)
+        {
+            Ok((output, snapshot)) => {
+                let current_epoch = snapshot["event_position"]["epoch"]
+                    .as_str()
+                    .unwrap_or_default();
+                if current_epoch != baseline_epoch {
+                    eprintln!(
+                        "{}",
+                        serde_json::json!({
+                            "code": "server_restart",
+                            "expected_epoch": baseline_epoch,
+                            "current_epoch": current_epoch,
+                            "baseline_position": baseline_position,
+                            "last_state": snapshot,
                         })
-                    });
-                    let window_state_matches = expected_window_state.is_none_or(|expected| {
-                        snapshot["window"]["state"].as_str() == Some(expected)
-                    });
-                    let width_matches = expected_client_width.is_none_or(|expected| {
-                        snapshot["window"]["client_width"].as_i64() == Some(expected)
-                    });
-                    let height_matches = expected_client_height.is_none_or(|expected| {
-                        snapshot["window"]["client_height"].as_i64() == Some(expected)
-                    });
-                    let modal_matches = snapshot_modal_matches(
-                        &snapshot,
-                        expected_modal_kind,
-                        expected_modal_target,
                     );
-                    if active_matches
-                        && focus_matches
-                        && state_matches
-                        && window_state_matches
-                        && width_matches
-                        && height_matches
-                        && modal_matches
-                    {
-                        println!("{}", response.output);
-                        return 0;
-                    }
-                    if std::time::Instant::now() >= deadline {
-                        eprintln!(
-                            "{}",
-                            serde_json::json!({
-                                "code": "ui_wait_timeout",
-                                "timeout_ms": timeout_ms,
-                                "expected": {
-                                    "active": expected_active,
-                                    "focus": expected_focus,
-                                    "tab_state": expected_state,
-                                    "target": target,
-                                    "window_state": expected_window_state,
-                                    "client_width": expected_client_width,
-                                    "client_height": expected_client_height,
-                                    "modal_kind": expected_modal_kind,
-                                    "modal_target": expected_modal_target,
-                                },
-                                "last_state": snapshot,
-                            })
-                        );
-                        return 1;
-                    }
-                } else {
-                    eprintln!("wait-ui received an invalid UI snapshot");
                     return 1;
                 }
-            }
-            Ok(response) => {
-                eprintln!("{}", response.error);
-                return 1;
+                let active_matches = expected_active.as_deref().is_none_or(|expected| {
+                    snapshot["focus"]["window_id"].as_str() == Some(expected)
+                });
+                let focus_matches = expected_focus
+                    .is_none_or(|expected| snapshot["focus"]["surface"].as_str() == Some(expected));
+                let state_matches = expected_state.is_none_or(|expected| {
+                    snapshot["tabs"].as_array().is_some_and(|tabs| {
+                        tabs.iter().any(|tab| {
+                            let target_matches = target
+                                .as_deref()
+                                .is_none_or(|selector| tab["id"].as_str() == Some(selector));
+                            target_matches && tab["state"].as_str() == Some(expected)
+                        })
+                    })
+                });
+                let window_state_matches = expected_window_state
+                    .is_none_or(|expected| snapshot["window"]["state"].as_str() == Some(expected));
+                let width_matches = expected_client_width.is_none_or(|expected| {
+                    snapshot["window"]["client_width"].as_i64() == Some(expected)
+                });
+                let height_matches = expected_client_height.is_none_or(|expected| {
+                    snapshot["window"]["client_height"].as_i64() == Some(expected)
+                });
+                let modal_matches = snapshot_modal_matches(
+                    &snapshot,
+                    expected_modal_kind,
+                    expected_modal_target.as_deref(),
+                );
+                if active_matches
+                    && focus_matches
+                    && state_matches
+                    && window_state_matches
+                    && width_matches
+                    && height_matches
+                    && modal_matches
+                {
+                    println!("{output}");
+                    return 0;
+                }
+                let resolved_target_closed = target.as_deref().is_some_and(|resolved| {
+                    !snapshot["tabs"].as_array().is_some_and(|tabs| {
+                        tabs.iter().any(|tab| tab["id"].as_str() == Some(resolved))
+                    })
+                });
+                if resolved_target_closed {
+                    eprintln!(
+                        "{}",
+                        serde_json::json!({
+                            "code": "ui_wait_target_closed",
+                            "target": target,
+                            "baseline_position": baseline_position,
+                            "last_state": snapshot,
+                        })
+                    );
+                    return 1;
+                }
+                if std::time::Instant::now() >= deadline {
+                    eprintln!(
+                        "{}",
+                        serde_json::json!({
+                            "code": "ui_wait_timeout",
+                            "timeout_ms": timeout_ms,
+                            "expected": {
+                                "active": expected_active,
+                                "focus": expected_focus,
+                                "tab_state": expected_state,
+                                "target": target,
+                                "window_state": expected_window_state,
+                                "client_width": expected_client_width,
+                                "client_height": expected_client_height,
+                                "modal_kind": expected_modal_kind,
+                                "modal_target": expected_modal_target,
+                            },
+                            "baseline_position": baseline_position,
+                            "last_state": snapshot,
+                        })
+                    );
+                    return 1;
+                }
             }
             Err(error) => {
                 eprintln!("{error:#}");

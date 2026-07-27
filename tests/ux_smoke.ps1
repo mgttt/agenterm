@@ -1043,6 +1043,7 @@ try {
     }
 
     Invoke-AgenTerm @('focus', 'terminal', '-t', $id) | Out-Null
+    Invoke-AgenTerm @('wait-ui', '--active', $id, '--focus', 'terminal') | Out-Null
     [AgenTermNativeTest]::ControlArrow($window, 0x28)
     Invoke-AgenTerm @('wait-ui', '--active', $id, '--focus', 'composer') | Out-Null
     [AgenTermNativeTest]::ControlArrow($window, 0x26)
