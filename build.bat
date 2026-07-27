@@ -73,14 +73,14 @@ if /i "%PROFILE%"=="release" (
     if "%USING_EXTERNAL_CARGO_TARGET%"=="1" (
         echo Skipped Cargo cleanup because CARGO_TARGET_DIR is externally configured.
     ) else (
-        "%POWERSHELL_EXE%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\target-report.ps1" -RepoRoot "%~dp0"
+        "%POWERSHELL_EXE%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\target-report.ps1" -RepoRoot "%CD%"
         if errorlevel 1 (
             echo.
             echo Release artifacts were staged, but the Cargo target report failed.
             popd
             exit /b 1
         )
-        cargo clean --target-dir "%~dp0target"
+        cargo clean --target-dir "%CD%\target"
         if errorlevel 1 (
             echo.
             echo Release artifacts were staged, but the repository-local Cargo target cleanup failed.
