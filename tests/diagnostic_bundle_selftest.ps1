@@ -32,11 +32,13 @@ function Get-RetainedBundlePaths {
 
 function Get-OnlyNewBundle {
     param(
-        [Parameter(Mandatory = $true)][string[]]$Before,
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [string[]]$Before,
         [Parameter(Mandatory = $true)][string]$ExpectedSuite
     )
 
-    $after = Get-RetainedBundlePaths
+    $after = @(Get-RetainedBundlePaths)
     $newBundles = @($after | Where-Object { $Before -notcontains $_ })
     if ($newBundles.Count -ne 1) {
         throw (
@@ -183,7 +185,7 @@ function Invoke-ExternalProbe {
         [Parameter(Mandatory = $true)][string]$Suite
     )
 
-    $before = Get-RetainedBundlePaths
+    $before = @(Get-RetainedBundlePaths)
     $shellPath = (Get-Process -Id $PID).Path
     $startInfo = [Diagnostics.ProcessStartInfo]::new()
     $startInfo.FileName = $shellPath
@@ -223,7 +225,7 @@ function Invoke-ExternalProbe {
 
 try {
     Write-Host 'STEP CLI failure bundle'
-    $before = Get-RetainedBundlePaths
+    $before = @(Get-RetainedBundlePaths)
     $context = New-SmokeRunContext -Suite 'diagnostic-cli-probe' `
         -Executable $CliExe
     $marker = "INTERNAL_FAILURE_BUNDLE_PROBE:cli:$($context.RunId)"
