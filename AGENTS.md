@@ -1,8 +1,10 @@
 # AgenTerm agent guide
 
 This is the operational source of truth for coding agents. Product intent and
-status live in `PRD.md`; avoid creating additional design documents unless
-the information cannot live here or in the PRD.
+status live in the product set rooted at `PRD.md`; third-level detail lives in
+the linked `prd/PRD_*.md` modules, and machine alignment lives in
+`prd/alignment-contract.json`. Avoid creating additional design documents
+unless the information cannot live here or in that product set.
 
 ## Repository map
 
@@ -25,6 +27,10 @@ the information cannot live here or in the PRD.
 - `tests/` — black-box tests that drive only the public AgenTerm executable.
 - `assets/` — application icon sources.
 - `scripts/` — build metadata tooling.
+- `prd/` — detailed product-tree modules linked from the canonical `PRD.md`
+  index; do not duplicate scope between modules.
+- `plan-0.1.7.md` — version execution projection for dependencies, milestones,
+  risks, and sequencing; it must link to, not replace, the owning PRD nodes.
 
 ## Parallel execution discipline
 
@@ -159,8 +165,9 @@ behavior.
 - All agents and subagents work in the single shared `D:\dev\agenterm`
   checkout on `main`. Do not create Git worktrees, task branches, or hidden
   planning copies. Material planning progress must be written incrementally to
-  `PRD.md` so it is immediately visible in the repository; the primary
-  agent reviews, commits, and pushes small coherent increments.
+  the applicable `PRD.md`/`prd/PRD_*.md` product node so it is immediately
+  visible in the repository; the primary agent reviews, commits, and pushes
+  small coherent increments.
 - Preserve the remain-on-exit and explicit-close invariants in the PRD.
 - Preserve tree safety: parent cycles are rejected and closing a parent promotes
   its direct children instead of terminating them.

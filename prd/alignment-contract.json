@@ -1,0 +1,298 @@
+{
+  "schema_version": 2,
+  "planned_command_roots": ["agenterm-bash"],
+  "capabilities": [
+    {
+      "id": "terminal.backspace-del-one",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "Backspace emits ConPTY VT `DEL` and deletes exactly one input",
+      "evidence_ids": ["cli.backspace-del-one"]
+    },
+    {
+      "id": "terminal.mouse-scrollback",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "mouse wheel and a visible draggable scrollbar navigate terminal",
+      "evidence_ids": ["ux.mouse-scrollback"]
+    },
+    {
+      "id": "terminal.text-selection-copy",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "dragging selects visible terminal cells and Ctrl+C copies the selected",
+      "evidence_ids": ["ux.terminal-selection-copy"]
+    },
+    {
+      "id": "terminal.system-menu-clipboard",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "window-icon system menu exposes focus-aware Copy and Paste",
+      "evidence_ids": ["ux.system-menu-clipboard"]
+    },
+    {
+      "id": "settings.path-isolation",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "`AGENTERM_SETTINGS_PATH` provides explicit settings isolation",
+      "evidence_ids": ["ux.settings-isolation"]
+    },
+    {
+      "id": "workspace.theme-settings",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "Dark and Light theme settings preview, apply, cancel, and persist without interrupting PTYs",
+      "evidence_ids": ["ux.theme-settings"]
+    },
+    {
+      "id": "control.stable-create-id",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "`new-window -F` can return the new tab's stable ID",
+      "evidence_ids": ["cli.stable-create-id"]
+    },
+    {
+      "id": "workspace.locale-consistency",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "built-in control labels come from one declared English locale",
+      "evidence_ids": ["ux.locale-consistency"]
+    },
+    {
+      "id": "workspace.semantic-window-control",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "semantic actions control window state and client size without corrupting the PTY grid",
+      "evidence_ids": ["ux.semantic-window-control"]
+    },
+    {
+      "id": "workspace.adaptive-tabs",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "Tabs collapse, recovery, and resizing share one persisted workspace geometry",
+      "evidence_ids": ["ux.adaptive-tabs"]
+    },
+    {
+      "id": "workspace.no-activate-launch",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "`agenterm.exe --no-activate` shows or starts the workspace without activation and behind the current foreground window; `--not-foreground` remains an alias",
+      "evidence_ids": ["ux.no-activate-launch"]
+    },
+    {
+      "id": "runtime.remain-on-exit",
+      "protocol_feature": "remain_on_exit",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "exited process retains its final screen and exit code",
+      "evidence_ids": ["cli.remain-on-exit"]
+    },
+    {
+      "id": "workspace.live-close-confirmation",
+      "protocol_feature": "live_close_confirmation",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "explicit confirmation before closing a live process",
+      "evidence_ids": ["ux.live-close-confirmation"]
+    },
+    {
+      "id": "workspace.detach-first-window-close",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "detach-first window close preserves the live server and explicit stop creates a fresh runtime",
+      "evidence_ids": ["ux.detach-first-window-close"]
+    },
+    {
+      "id": "compat.rmux-status-click-bridge",
+      "protocol_feature": "rmux_status_click_bridge",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "unit-source-partial",
+      "prd": "RMUX status active-marker parsing and clickable window labels",
+      "evidence_ids": ["unit.rmux-status-parser"]
+    },
+    {
+      "id": "control.semantic-ui-automation",
+      "protocol_feature": "semantic_ui_automation",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "semantic focus and UI actions",
+      "evidence_ids": ["ux.semantic-ui-automation"]
+    },
+    {
+      "id": "control.modal-wait",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "`wait-ui` directly waits for modal kind, target, or closed state with a stable timeout code",
+      "evidence_ids": ["ux.modal-wait"]
+    },
+    {
+      "id": "workspace.keyboard-surface-navigation",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "keyboard-first Ctrl+Arrow surface navigation preserves native Edit word movement and suppresses cross-focus repeat",
+      "evidence_ids": ["ux.keyboard-surface-navigation"]
+    },
+    {
+      "id": "workspace.working-context-cwd",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "truthful working-context CWD uses launch and OSC 7 provenance with safe Composer preparation",
+      "evidence_ids": ["ux.working-context-cwd"]
+    },
+    {
+      "id": "workspace.working-context-proxy",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "tab-scoped HTTP(S) proxy context remains ephemeral and redacted across UI, control, persistence, and terminal evidence",
+      "evidence_ids": ["ux.working-context-proxy"]
+    },
+    {
+      "id": "workspace.hierarchical-tabs",
+      "protocol_feature": "hierarchical_tabs",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "tabs form a visible parent/child tree",
+      "evidence_ids": ["ux.hierarchical-tabs"]
+    },
+    {
+      "id": "workspace.persistence",
+      "protocol_feature": "persistent_workspace",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "normal application close preserves the tab tree and active tab",
+      "evidence_ids": ["ux.persistent-workspace"]
+    },
+    {
+      "id": "fleet.tab-environment",
+      "protocol_feature": "tab_environment",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "per-tab child environment injection",
+      "evidence_ids": ["fleet.tab-environment"]
+    },
+    {
+      "id": "fleet.codex-launcher",
+      "protocol_feature": "codex_launcher",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "launch Codex agent tabs",
+      "evidence_ids": ["fleet.codex-launcher"]
+    },
+    {
+      "id": "compat.mux-frontend",
+      "protocol_feature": "mux_frontend",
+      "kind": "architecture",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "tmux/RMUX-compatible fleet control entry point",
+      "evidence_ids": ["fleet.mux-frontend"]
+    },
+    {
+      "id": "control.instance-discovery",
+      "protocol_feature": "instance_discovery",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "registered multi-instance discovery",
+      "evidence_ids": ["fleet.instance-discovery"]
+    },
+    {
+      "id": "control.observable-events",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "bounded event reads and waits follow a snapshot epoch and sequence",
+      "evidence_ids": ["cli.observable-events"]
+    },
+    {
+      "id": "control.event-transition-catalog",
+      "protocol_feature": "typed_events",
+      "kind": "architecture",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "closed event catalog publishes state path, payload, scope, and since metadata",
+      "evidence_ids": ["fleet.event-transition-catalog"]
+    },
+    {
+      "id": "control.typed-operations",
+      "protocol_feature": "typed_operations",
+      "kind": "architecture",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "typed operation catalog shared by CLI validation, IPC dispatch, capability discovery, stable errors, and event attribution",
+      "evidence_ids": ["cli.typed-tabs-operations"]
+    },
+    {
+      "id": "scripting.rhai-pure",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "pure Rhai run, eval, check, and API discovery execute in a sidecar",
+      "evidence_ids": ["script.rhai-pure"]
+    },
+    {
+      "id": "scripting.rhai-observe",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "observe Rhai uses typed bounded workspace, tab, snapshot, capture, and event broker methods",
+      "evidence_ids": ["script.rhai-observe"]
+    },
+    {
+      "id": "scripting.rhai-deny-budget",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "Rhai denies ambient mutation authority and enforces operation budgets",
+      "evidence_ids": ["script.rhai-deny-budget", "script.rhai-framed"]
+    },
+    {
+      "id": "scripting.supervisor",
+      "kind": "architecture",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "extract a Rhai-independent worker supervisor with kill-on-close",
+      "evidence_ids": ["script.supervisor"]
+    },
+    {
+      "id": "scripting.audit",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "append privacy-bounded audit records for identity/fingerprint",
+      "evidence_ids": ["script.audit"]
+    },
+    {
+      "id": "scripting.rust-host-rhai-language",
+      "kind": "decision",
+      "status": "accepted",
+      "evidence_mode": "decision",
+      "prd": "design choice: Rust (`.rs`) implements the host",
+      "evidence_ids": []
+    }
+  ]
+}

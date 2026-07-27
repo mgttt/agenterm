@@ -6,11 +6,13 @@ param(
 $ErrorActionPreference = 'Stop'
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $prdPath = Join-Path $root 'PRD.md'
+$prdDetailDirectory = Join-Path $root 'prd'
+$contractPath = Join-Path $prdDetailDirectory 'alignment-contract.json'
 $commandsPath = Join-Path $root 'src\commands.rs'
 $CliExe = [IO.Path]::GetFullPath($CliExe)
 $MuxExe = [IO.Path]::GetFullPath($MuxExe)
 
-foreach ($path in @($prdPath, $commandsPath, $CliExe, $MuxExe)) {
+foreach ($path in @($prdPath, $prdDetailDirectory, $contractPath, $commandsPath, $CliExe, $MuxExe)) {
     if (-not (Test-Path -LiteralPath $path)) {
         throw "PRD alignment input does not exist: $path"
     }
@@ -45,17 +47,31 @@ function Invoke-JsonCommand {
     return (($output -join "`n") | ConvertFrom-Json)
 }
 
-$prd = Get-Content -LiteralPath $prdPath -Raw
+$prdIndex = Get-Content -LiteralPath $prdPath -Raw
+$linkedDetailNames = @(
+    [regex]::Matches($prdIndex, '\(prd/(?<file>PRD_[^)]+\.md)\)') |
+        ForEach-Object { $_.Groups['file'].Value }
+)
+$actualDetailNames = @(
+    Get-ChildItem -LiteralPath $prdDetailDirectory -File -Filter 'PRD_*.md' |
+        Sort-Object Name |
+        ForEach-Object Name
+)
+Compare-ExactList `
+    -Label 'PRD index links and detail modules' `
+    -Expected @($actualDetailNames) `
+    -Actual @($linkedDetailNames | Sort-Object)
+$prdDocuments = @($prdPath) + @(
+    $linkedDetailNames | ForEach-Object {
+        Join-Path $prdDetailDirectory $_
+    }
+)
+$prd = ($prdDocuments | ForEach-Object {
+    Get-Content -LiteralPath $_ -Raw
+}) -join "`n"
 $commandsSource = Get-Content -LiteralPath $commandsPath -Raw
 
-$contractMatch = [regex]::Match(
-    $prd,
-    '(?s)<!--\s*agenterm-alignment-contract\s*(?<json>\{.*?\})\s*-->'
-)
-if (-not $contractMatch.Success) {
-    throw 'PRD.md is missing the agenterm-alignment-contract JSON block.'
-}
-$contract = $contractMatch.Groups['json'].Value | ConvertFrom-Json
+$contract = Get-Content -LiteralPath $contractPath -Raw | ConvertFrom-Json
 if ($contract.schema_version -ne 2) {
     throw "Unsupported PRD alignment schema: $($contract.schema_version)"
 }
@@ -201,7 +217,7 @@ foreach ($line in $catalogLines) {
 foreach ($name in $publicNames) {
     $pattern = "(?<![A-Za-z0-9-])$([regex]::Escape($name))(?![A-Za-z0-9-])"
     if ($prd -notmatch $pattern) {
-        throw "Public command '$name' is implemented but absent from PRD.md."
+        throw "Public command '$name' is implemented but absent from the PRD product set."
     }
 }
 foreach ($rootName in @($contract.planned_command_roots)) {
@@ -269,7 +285,7 @@ Compare-ExactList -Label 'mux unsupported registry and compatibility JSON' `
 foreach ($name in @($muxCompatibility.supported) + $unsupportedMuxNames) {
     $pattern = "(?<![A-Za-z0-9-])$([regex]::Escape($name))(?![A-Za-z0-9-])"
     if ($prd -notmatch $pattern) {
-        throw "Mux compatibility command '$name' is absent from PRD.md."
+        throw "Mux compatibility command '$name' is absent from the PRD product set."
     }
 }
 
