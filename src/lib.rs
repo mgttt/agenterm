@@ -6,7 +6,10 @@ use std::{
     fs::OpenOptions,
     io::{Read, Write},
     mem, ptr,
-    sync::mpsc::{self, Receiver, Sender, SyncSender},
+    sync::{
+        Arc,
+        mpsc::{self, Receiver, Sender, SyncSender},
+    },
     thread,
     time::{Duration, Instant, SystemTime},
 };
@@ -84,6 +87,7 @@ mod terminal_observation;
 mod theme;
 mod ui_geometry;
 mod upgrade_identity;
+mod wake_signal;
 mod worker_supervisor;
 mod working_context;
 mod workspace;
@@ -133,6 +137,7 @@ use ui_geometry::{
     terminal_scrollbar_geometry, tree_anchor_x, tree_row_at_y, tree_row_geometry, workspace_layout,
 };
 use upgrade_identity::UpgradeIdentity;
+use wake_signal::WakeSignal;
 use worker_supervisor::{SupervisorError, WorkerSupervisor};
 use working_context::{
     CwdSource, CwdTracker, PROXY_MAX_BYTES, ProxyState, SecretValue, ShellKind, cwd_command,
@@ -197,6 +202,14 @@ const PROXY_REDACTION_MAX_BYTES: usize = 32 * 1024;
 const PROXY_REDACTION_MARKER: &[u8] = b"<redacted-proxy>";
 const WHEEL_DELTA: i32 = 120;
 const WHEEL_ROWS_PER_NOTCH: usize = 3;
+
+fn request_gui_wake(wake_window: isize, wake_signal: &WakeSignal) {
+    if wake_signal.request() {
+        unsafe {
+            PostMessageW(wake_window as HWND, WM_APP_WAKE, 0, 0);
+        }
+    }
+}
 const UI_LOCALE: &str = "en-US";
 const LABEL_SEND: &str = "Send";
 const LABEL_SETTINGS: &str = "Settings";
@@ -1021,10 +1034,11 @@ unsafe extern "system" fn window_proc(
             0
         }
         WM_APP_WAKE => {
-            if let Some(state) = state_mut(window)
-                && state.tick()
-            {
-                unsafe { InvalidateRect(window, ptr::null(), 0) };
+            if let Some(state) = state_mut(window) {
+                state.wake_signal.begin_drain();
+                if state.tick() {
+                    unsafe { InvalidateRect(window, ptr::null(), 0) };
+                }
             }
             0
         }
@@ -1377,6 +1391,7 @@ struct TerminalLaunch {
     tab_environment: Vec<(String, String)>,
     session_name: String,
     window: HWND,
+    wake_signal: Arc<WakeSignal>,
     initial_size: TerminalSize,
 }
 
@@ -1498,6 +1513,7 @@ impl TerminalTab {
             tab_environment,
             session_name,
             window,
+            wake_signal,
             initial_size,
         } = launch;
         let program = command_line.first().cloned().unwrap_or_else(|| {
@@ -1560,14 +1576,14 @@ impl TerminalTab {
         let wake_window = window as isize;
 
         let output_sender = sender.clone();
+        let output_wake_signal = Arc::clone(&wake_signal);
         thread::spawn(move || {
             let mut buffer = [0_u8; 16 * 1024];
             loop {
                 match reader.io().read(&mut buffer) {
                     Ok(0) => {
-                        let _ = output_sender.send(PtyEvent::ReaderClosed);
-                        unsafe {
-                            PostMessageW(wake_window as HWND, WM_APP_WAKE, 0, 0);
+                        if output_sender.send(PtyEvent::ReaderClosed).is_ok() {
+                            request_gui_wake(wake_window, &output_wake_signal);
                         }
                         break;
                     }
@@ -1578,14 +1594,14 @@ impl TerminalTab {
                         {
                             break;
                         }
-                        unsafe {
-                            PostMessageW(wake_window as HWND, WM_APP_WAKE, 0, 0);
-                        }
+                        request_gui_wake(wake_window, &output_wake_signal);
                     }
                     Err(error) => {
-                        let _ = output_sender.send(PtyEvent::ReaderError(error.to_string()));
-                        unsafe {
-                            PostMessageW(wake_window as HWND, WM_APP_WAKE, 0, 0);
+                        if output_sender
+                            .send(PtyEvent::ReaderError(error.to_string()))
+                            .is_ok()
+                        {
+                            request_gui_wake(wake_window, &output_wake_signal);
                         }
                         break;
                     }
@@ -1593,6 +1609,7 @@ impl TerminalTab {
             }
         });
 
+        let wait_wake_signal = wake_signal;
         thread::spawn(move || {
             let event = match wait_child.wait() {
                 Ok(status) => {
@@ -1601,9 +1618,8 @@ impl TerminalTab {
                 }
                 Err(error) => PtyEvent::ProcessError(format!("process wait failed: {error}")),
             };
-            let _ = sender.send(event);
-            unsafe {
-                PostMessageW(wake_window as HWND, WM_APP_WAKE, 0, 0);
+            if sender.send(event).is_ok() {
+                request_gui_wake(wake_window, &wait_wake_signal);
             }
         });
 
@@ -2219,6 +2235,7 @@ struct AppState {
     session_name: String,
     started_at: SystemTime,
     event_journal: EventJournal,
+    wake_signal: Arc<WakeSignal>,
     replay_window: ReplayWindow,
     pending_control_receipts: HashMap<u64, PendingControlReceipt>,
     ipc_receiver: Receiver<IpcEnvelope>,
@@ -2258,7 +2275,8 @@ struct AppState {
 
 impl AppState {
     fn new(window: HWND, controls: NativeControls) -> Result<Self> {
-        let ipc_receiver = start_ipc_server(window)?;
+        let wake_signal = Arc::new(WakeSignal::new());
+        let ipc_receiver = start_ipc_server(window, Arc::clone(&wake_signal))?;
         let (startup_tab_sender, startup_tab_receiver) = mpsc::channel();
         let (clipboard_sender, clipboard_receiver) = mpsc::channel();
         let config = load_config();
@@ -2314,6 +2332,7 @@ impl AppState {
             session_name,
             started_at: SystemTime::now(),
             event_journal: EventJournal::new(),
+            wake_signal: Arc::clone(&wake_signal),
             replay_window: ReplayWindow::new(CONTROL_REPLAY_CAPACITY),
             pending_control_receipts: HashMap::new(),
             ipc_receiver,
@@ -2352,6 +2371,7 @@ impl AppState {
         };
 
         let wake_window = window as isize;
+        let startup_wake_signal = wake_signal;
         thread::spawn(move || {
             for saved in saved_tabs {
                 let title = (!saved.title.is_empty()).then(|| saved.title.clone());
@@ -2364,6 +2384,7 @@ impl AppState {
                     tab_environment: Vec::new(),
                     session_name: startup_session_name.clone(),
                     window: wake_window as HWND,
+                    wake_signal: Arc::clone(&startup_wake_signal),
                     initial_size: TerminalSize {
                         rows: INITIAL_ROWS,
                         cols: INITIAL_COLS,
@@ -2378,9 +2399,7 @@ impl AppState {
                 if startup_tab_sender.send(tab).is_err() {
                     break;
                 }
-                unsafe {
-                    PostMessageW(wake_window as HWND, WM_APP_WAKE, 0, 0);
-                }
+                request_gui_wake(wake_window, &startup_wake_signal);
             }
         });
         Ok(state)
@@ -2465,6 +2484,7 @@ impl AppState {
             tab_environment,
             session_name: self.session_name.clone(),
             window: self.window,
+            wake_signal: Arc::clone(&self.wake_signal),
             initial_size: TerminalSize { rows, cols },
         })?;
         self.tabs.push(tab);
@@ -3049,6 +3069,7 @@ impl AppState {
             .try_iter()
             .take(IPC_REQUESTS_PER_TICK)
             .collect();
+        let ipc_budget_exhausted = envelopes.len() == IPC_REQUESTS_PER_TICK;
         changed |= !envelopes.is_empty();
         for envelope in envelopes {
             let response = self.execute_ipc_request(envelope.request);
@@ -3056,6 +3077,11 @@ impl AppState {
         }
         if self.close_requested {
             unsafe { PostMessageW(self.window, WM_CLOSE, 0, 0) };
+        }
+        if self.wake_signal.rearm_if(ipc_budget_exhausted) {
+            unsafe {
+                PostMessageW(self.window, WM_APP_WAKE, 0, 0);
+            }
         }
         changed
     }
@@ -4222,6 +4248,7 @@ impl AppState {
         let tab_id = self.tabs[position].id;
         let sender = self.clipboard_sender.clone();
         let wake_window = self.window as isize;
+        let wake_signal = Arc::clone(&self.wake_signal);
         self.feedback = Some(format!("Reading clipboard for @{tab_id}"));
         self.last_error = None;
         thread::spawn(move || {
@@ -4240,9 +4267,8 @@ impl AppState {
                     Ok(text)
                 })
                 .map_err(|error| format!("{error:#}"));
-            let _ = sender.send(ClipboardPaste { tab_id, result });
-            unsafe {
-                PostMessageW(wake_window as HWND, WM_APP_WAKE, 0, 0);
+            if sender.send(ClipboardPaste { tab_id, result }).is_ok() {
+                request_gui_wake(wake_window, &wake_signal);
             }
         });
         unsafe { InvalidateRect(self.window, ptr::null(), 0) };
@@ -8595,7 +8621,7 @@ fn run_list_instances(arguments: &[String]) -> i32 {
     0
 }
 
-fn start_ipc_server(window: HWND) -> Result<Receiver<IpcEnvelope>> {
+fn start_ipc_server(window: HWND, wake_signal: Arc<WakeSignal>) -> Result<Receiver<IpcEnvelope>> {
     let listener = std::net::TcpListener::bind(ipc_socket_addr()?)
         .context("another AgenTerm server is already using the local IPC port")?;
     let (sender, receiver) = mpsc::sync_channel(IPC_MAX_PENDING_REQUESTS);
@@ -8617,10 +8643,11 @@ fn start_ipc_server(window: HWND) -> Result<Receiver<IpcEnvelope>> {
                 continue;
             }
             let sender = sender.clone();
+            let wake_signal = Arc::clone(&wake_signal);
             let permit = IpcConnectionPermit(active_connections.clone());
             thread::spawn(move || {
                 let _permit = permit;
-                handle_ipc_connection(connection, &sender, wake_window);
+                handle_ipc_connection(connection, &sender, wake_window, &wake_signal);
             });
         }
     });
@@ -8663,6 +8690,7 @@ fn handle_ipc_connection(
     connection: std::net::TcpStream,
     sender: &SyncSender<IpcEnvelope>,
     wake_window: isize,
+    wake_signal: &WakeSignal,
 ) {
     let _ = connection.set_read_timeout(Some(IPC_TIMEOUT));
     let _ = connection.set_write_timeout(Some(IPC_TIMEOUT));
@@ -8686,9 +8714,7 @@ fn handle_ipc_connection(
                             true,
                         )
                     } else {
-                        unsafe {
-                            PostMessageW(wake_window as HWND, WM_APP_WAKE, 0, 0);
-                        }
+                        request_gui_wake(wake_window, wake_signal);
                         response_receiver
                             .recv_timeout(IPC_TIMEOUT)
                             .unwrap_or_else(|_| {
