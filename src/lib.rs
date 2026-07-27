@@ -2018,7 +2018,7 @@ impl AppState {
         Ok(Some(self.tabs[position].id))
     }
 
-    fn close_tab(&mut self, id: u64) {
+    fn close_tab(&mut self, id: u64) -> bool {
         if self.cwd_edit_target == Some(id) {
             self.close_cwd_editor();
         }
@@ -2027,7 +2027,7 @@ impl AppState {
         }
         self.save_active_composer();
         let Some(position) = self.tabs.iter().position(|tab| tab.id == id) else {
-            return;
+            return false;
         };
         let parent_id = self.tabs[position].parent_id;
         let index = self.tabs[position].index;
@@ -2044,7 +2044,7 @@ impl AppState {
             }
         }
         self.collapsed_tabs.remove(&id);
-        self.tabs[position].close_process();
+        let terminal_shutdown_complete = self.tabs[position].close_process();
         self.tabs.remove(position);
         if self.active == Some(id) {
             self.active = self
@@ -2062,9 +2062,11 @@ impl AppState {
                 "exit_code": exit_code,
                 "promoted_children": promoted_children,
                 "active_id": self.active,
+                "terminal_shutdown_complete": terminal_shutdown_complete,
             }),
         );
         self.load_active_composer();
+        terminal_shutdown_complete
     }
 
     fn request_close_tab(&mut self, id: u64) {
@@ -6585,8 +6587,16 @@ impl AppState {
                     return IpcResponse::failure("can't find window");
                 };
                 let id = self.tabs[position].id;
-                self.close_tab(id);
-                IpcResponse::success("")
+                if self.close_tab(id) {
+                    IpcResponse::success("")
+                } else {
+                    IpcResponse::typed_failure(
+                        "terminal was removed, but its workers did not finish bounded shutdown",
+                        "terminal_shutdown_incomplete",
+                        "internal",
+                        false,
+                    )
+                }
             }
             "send" | "send-keys" => {
                 let Some(position) = self.target_position(option_value(args, "-t")) else {
@@ -7464,18 +7474,32 @@ impl AppState {
                         )
                     });
                 }
+                let mut terminal_shutdown_complete = true;
                 for tab in &mut self.tabs {
-                    tab.close_process();
+                    terminal_shutdown_complete &= tab.close_process();
                 }
                 self.tabs.clear();
                 self.active = None;
                 self.event_journal.commit(
                     EventKind::WorkspaceShutdown,
                     None,
-                    serde_json::json!({"saved": false, "destroyed": true}),
+                    serde_json::json!({
+                        "saved": false,
+                        "destroyed": true,
+                        "terminal_shutdown_complete": terminal_shutdown_complete,
+                    }),
                 );
                 self.close_requested = true;
-                IpcResponse::success("")
+                if terminal_shutdown_complete {
+                    IpcResponse::success("")
+                } else {
+                    IpcResponse::typed_failure(
+                        "server shutdown began, but a terminal worker missed its bounded deadline",
+                        "terminal_shutdown_incomplete",
+                        "internal",
+                        false,
+                    )
+                }
             }
             _ => IpcResponse::failure(format!("unknown command: {command}")),
         }

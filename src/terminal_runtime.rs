@@ -4,8 +4,8 @@ use std::{
         Arc,
         mpsc::{self, Receiver},
     },
-    thread,
-    time::Instant,
+    thread::{self, JoinHandle},
+    time::{Duration, Instant},
 };
 
 use anyhow::{Context as _, Result};
@@ -36,6 +36,12 @@ pub(super) enum PtyEvent {
     ReaderError(String),
     Exited(u32),
     ProcessError(String),
+}
+
+#[derive(Clone, Copy)]
+enum TerminalWorkerCompletion {
+    Reader,
+    Waiter,
 }
 
 #[derive(Default)]
@@ -76,6 +82,12 @@ pub(super) struct TerminalTab {
     pub(super) proxy_redaction_pending: Vec<u8>,
     pub(super) parser: vt100::Parser<TerminalCallbacks>,
     pub(super) receiver: Receiver<PtyEvent>,
+    worker_completion_receiver: Receiver<TerminalWorkerCompletion>,
+    reader_thread: Option<JoinHandle<()>>,
+    wait_thread: Option<JoinHandle<()>>,
+    reader_worker_complete: bool,
+    wait_worker_complete: bool,
+    shutdown_complete: bool,
     pub(super) master: PtyMaster,
     pub(super) child: PtyChild,
     pub(super) exited: Option<u32>,
@@ -281,11 +293,13 @@ impl TerminalTab {
             .try_clone_for_wait()
             .context("failed to clone ConPTY child wait handle")?;
         let (sender, receiver) = mpsc::channel();
+        let (worker_completion_sender, worker_completion_receiver) = mpsc::channel();
         let wake_window = window as isize;
 
         let output_sender = sender.clone();
         let output_wake_signal = Arc::clone(&wake_signal);
-        thread::spawn(move || {
+        let reader_completion_sender = worker_completion_sender.clone();
+        let reader_thread = thread::spawn(move || {
             let mut buffer = [0_u8; 16 * 1024];
             loop {
                 match reader.io().read(&mut buffer) {
@@ -315,10 +329,11 @@ impl TerminalTab {
                     }
                 }
             }
+            let _ = reader_completion_sender.send(TerminalWorkerCompletion::Reader);
         });
 
         let wait_wake_signal = wake_signal;
-        thread::spawn(move || {
+        let wait_thread = thread::spawn(move || {
             let event = match wait_child.wait() {
                 Ok(status) => {
                     wait_child.close_pseudoconsole();
@@ -329,6 +344,7 @@ impl TerminalTab {
             if sender.send(event).is_ok() {
                 request_gui_wake(wake_window, &wait_wake_signal);
             }
+            let _ = worker_completion_sender.send(TerminalWorkerCompletion::Waiter);
         });
 
         let command_name = std::path::Path::new(&program)
@@ -365,6 +381,12 @@ impl TerminalTab {
                 },
             ),
             receiver,
+            worker_completion_receiver,
+            reader_thread: Some(reader_thread),
+            wait_thread: Some(wait_thread),
+            reader_worker_complete: false,
+            wait_worker_complete: false,
+            shutdown_complete: false,
             master,
             child,
             exited: None,
@@ -593,16 +615,61 @@ impl TerminalTab {
         true
     }
 
-    pub(super) fn close_process(&mut self) {
-        if self.exited.is_none() {
-            let _ = self.child.terminate_forcefully();
+    fn record_worker_completion(&mut self, completion: TerminalWorkerCompletion) {
+        match completion {
+            TerminalWorkerCompletion::Reader => self.reader_worker_complete = true,
+            TerminalWorkerCompletion::Waiter => self.wait_worker_complete = true,
         }
+    }
+
+    pub(super) fn close_process(&mut self) -> bool {
+        if self.shutdown_complete {
+            return true;
+        }
+        if self.exited.is_none()
+            && let Err(error) = self.child.terminate_forcefully()
+        {
+            self.error
+                .get_or_insert_with(|| format!("terminal termination failed: {error}"));
+        }
+        self.child.close_pseudoconsole();
+
+        let deadline = Instant::now() + Duration::from_millis(750);
+        while !(self.reader_worker_complete && self.wait_worker_complete) {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            match self.worker_completion_receiver.recv_timeout(remaining) {
+                Ok(completion) => self.record_worker_completion(completion),
+                Err(mpsc::RecvTimeoutError::Timeout | mpsc::RecvTimeoutError::Disconnected) => {
+                    break;
+                }
+            }
+        }
+        if self.reader_worker_complete
+            && let Some(handle) = self.reader_thread.take()
+        {
+            self.reader_worker_complete = handle.join().is_ok();
+        }
+        if self.wait_worker_complete
+            && let Some(handle) = self.wait_thread.take()
+        {
+            self.wait_worker_complete = handle.join().is_ok();
+        }
+        self.shutdown_complete = self.reader_worker_complete && self.wait_worker_complete;
+        if !self.shutdown_complete {
+            self.error.get_or_insert_with(|| {
+                "terminal worker shutdown did not complete within 750 ms".to_owned()
+            });
+        }
+        self.shutdown_complete
     }
 }
 
 impl Drop for TerminalTab {
     fn drop(&mut self) {
-        self.close_process();
+        let _ = self.close_process();
     }
 }
 

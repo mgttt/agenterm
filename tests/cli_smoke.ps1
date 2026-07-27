@@ -528,7 +528,31 @@ try {
     Write-Evidence 'cli.remain-on-exit'
 
     Write-Host 'STEP explicit close'
+    $closeBaseline = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $closingId = (
+        $closeBaseline.tabs |
+            Where-Object name -eq $name |
+            Select-Object -First 1
+    ).id
     Invoke-AgenTerm @('kill-window', '-t', $name) | Out-Null
+    $closeEvents = Invoke-AgenTerm @(
+        'read-events',
+        '--epoch', $closeBaseline.event_position.epoch,
+        '--after', "$($closeBaseline.event_position.sequence)"
+    ) | ConvertFrom-Json
+    $closeEvent = @(
+        $closeEvents.events |
+            Where-Object {
+                $_.kind -eq 'tab.closed' -and $_.tab_id -eq
+                    [uint64]$closingId.TrimStart('@')
+            }
+    )
+    if (
+        $closeEvent.Count -ne 1 -or
+        -not $closeEvent[0].payload.terminal_shutdown_complete
+    ) {
+        throw 'explicit close did not prove bounded terminal worker shutdown'
+    }
     $created = $false
     $runSucceeded = $true
     Write-Host "PASS: composer, viewport scroll, PTY I/O, waits, capture, PNG screenshots, remain-on-exit, manual close"
