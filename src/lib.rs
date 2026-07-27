@@ -1,4 +1,5 @@
 use std::{
+    cell::RefCell,
     collections::HashSet,
     env,
     ffi::c_void,
@@ -51,7 +52,8 @@ mod tab_tree;
 mod workspace;
 
 use commands::{
-    SUPPORTED_COMMANDS, last_positional, option_value, parse_new_command, positional_values,
+    MUX_COMMANDS, MuxStatus, SUPPORTED_COMMANDS, has_option, last_positional, mux_command,
+    option_value, parse_new_command, parse_tab_environment, positional_values,
     screenshot_output_path, tmux_key_bytes,
 };
 use protocol::{IpcRequest, IpcResponse};
@@ -82,7 +84,12 @@ const NEW_BUTTON_ID: usize = 1007;
 const TIMER_ID: usize = 1;
 const WM_APP_WAKE: u32 = WM_APP + 1;
 const IPC_TIMEOUT: Duration = Duration::from_secs(5);
+const COMPOSER_SUBMIT_DELAY: Duration = Duration::from_millis(30);
 const RAW_OUTPUT_LIMIT: usize = 1024 * 1024;
+
+thread_local! {
+    static IPC_ADDRESS_OVERRIDE: RefCell<Option<String>> = const { RefCell::new(None) };
+}
 
 const COLOR_SIDEBAR: COLORREF = rgb(24, 27, 34);
 const COLOR_TERMINAL: COLORREF = rgb(12, 14, 18);
@@ -147,6 +154,109 @@ pub fn run_cli_entry() -> i32 {
     run_cli(arguments)
 }
 
+pub fn run_mux_entry() -> i32 {
+    let mut arguments: Vec<String> = env::args().skip(1).collect();
+    if arguments
+        .first()
+        .is_some_and(|arg| arg == "-V" || arg == "--version")
+    {
+        println!(
+            "agenterm-mux {} (AgenTerm compatibility frontend)",
+            env!("CARGO_PKG_VERSION")
+        );
+        return 0;
+    }
+    if arguments.is_empty()
+        || arguments
+            .first()
+            .is_some_and(|arg| arg == "-h" || arg == "--help")
+    {
+        print_mux_help();
+        return 0;
+    }
+
+    let mut address = None;
+    let mut session = None;
+    loop {
+        match arguments.first().map(String::as_str) {
+            Some("--address") => {
+                if arguments.len() < 2 {
+                    eprintln!("agenterm-mux --address requires HOST:PORT");
+                    return 2;
+                }
+                arguments.remove(0);
+                let candidate = arguments.remove(0);
+                if let Err(error) = parse_loopback_ipc_address(&candidate) {
+                    eprintln!("{error:#}");
+                    return 2;
+                }
+                address = Some(candidate);
+            }
+            Some("--session") => {
+                if arguments.len() < 2 {
+                    eprintln!("agenterm-mux --session requires a session name");
+                    return 2;
+                }
+                arguments.remove(0);
+                session = Some(arguments.remove(0));
+            }
+            Some("-L" | "-S") => {
+                eprintln!(
+                    "agenterm-mux does not support tmux socket selection; use --address HOST:PORT"
+                );
+                return 2;
+            }
+            _ => break,
+        }
+    }
+    let Some(command) = arguments.first().cloned() else {
+        eprintln!("agenterm-mux requires a command");
+        return 2;
+    };
+
+    if command == "compatibility" {
+        print_mux_compatibility(arguments.iter().any(|argument| argument == "--json"));
+        return 0;
+    }
+    if command == "agenterm" {
+        arguments.remove(0);
+        if arguments.is_empty() {
+            eprintln!("agenterm-mux agenterm requires a native AgenTerm command");
+            return 2;
+        }
+    } else {
+        let Some(specification) = mux_command(&command) else {
+            eprintln!(
+                "{command} is not in the agenterm-mux compatibility surface; \
+                 use `agenterm-mux agenterm {command} ...` for native AgenTerm extensions"
+            );
+            return 2;
+        };
+        if let MuxStatus::Unsupported(reason) = specification.status {
+            eprintln!("{command} is unsupported: {reason}");
+            return 1;
+        }
+        if matches!(command.as_str(), "list-commands" | "lscm") {
+            print_mux_commands();
+            return 0;
+        }
+    }
+
+    if let Some(session) = session
+        && matches!(
+            arguments.first().map(String::as_str),
+            Some("attach" | "attach-session" | "has" | "has-session" | "kill-session")
+        )
+        && !has_option(&arguments, "-t")
+    {
+        arguments.extend(["-t".to_owned(), session]);
+    }
+    IPC_ADDRESS_OVERRIDE.with(|override_address| {
+        *override_address.borrow_mut() = address;
+    });
+    run_cli(arguments)
+}
+
 fn run_gui() -> Result<()> {
     let instance = unsafe { GetModuleHandleW(ptr::null()) };
     if instance.is_null() {
@@ -155,9 +265,7 @@ fn run_gui() -> Result<()> {
 
     let class_name = wide("AgenTermWindowClass");
     let address = ipc_address();
-    let socket: std::net::SocketAddr = address
-        .parse()
-        .with_context(|| format!("invalid AgenTerm IPC address: {address}"))?;
+    let socket = parse_loopback_ipc_address(&address)?;
     let title = wide(&format!(
         "AgenTerm-{}:{}",
         env!("CARGO_PKG_VERSION"),
@@ -515,6 +623,7 @@ struct TerminalTab {
     note: String,
     command_name: String,
     command_line: Vec<String>,
+    environment_names: Vec<String>,
     process_id: Option<u32>,
     composer: String,
     parser: vt100::Parser<TerminalCallbacks>,
@@ -525,20 +634,36 @@ struct TerminalTab {
     error: Option<String>,
     last_size: (u16, u16),
     input_bytes: usize,
+    input_writes: usize,
     output_bytes: usize,
     raw_output: Vec<u8>,
 }
 
+struct TerminalLaunch {
+    id: u64,
+    index: u32,
+    parent_id: Option<u64>,
+    title: Option<String>,
+    command_line: Vec<String>,
+    tab_environment: Vec<(String, String)>,
+    session_name: String,
+    window: HWND,
+    initial_size: TerminalSize,
+}
+
 impl TerminalTab {
-    fn spawn(
-        id: u64,
-        index: u32,
-        parent_id: Option<u64>,
-        title: Option<String>,
-        command_line: Vec<String>,
-        window: HWND,
-        initial_size: TerminalSize,
-    ) -> Result<Self> {
+    fn spawn(launch: TerminalLaunch) -> Result<Self> {
+        let TerminalLaunch {
+            id,
+            index,
+            parent_id,
+            title,
+            command_line,
+            tab_environment,
+            session_name,
+            window,
+            initial_size,
+        } = launch;
         let program = command_line.first().cloned().unwrap_or_else(|| {
             env::var("COMSPEC").unwrap_or_else(|_| r"C:\Windows\System32\cmd.exe".to_owned())
         });
@@ -551,7 +676,19 @@ impl TerminalTab {
             .size(initial_size)
             .env("TERM", "xterm-256color")
             .env("COLORTERM", "truecolor")
-            .env("TERM_PROGRAM", "AgenTerm");
+            .env("TERM_PROGRAM", "AgenTerm")
+            .env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"))
+            .env("AGENTERM_IPC_ADDRESS", ipc_address())
+            .env("AGENTERM_TAB_ID", format!("@{id}"))
+            .env("AGENTERM_SESSION", session_name)
+            .env("AGENTERM_WORKSPACE_PATH", workspace_path());
+        let environment_names = tab_environment
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect();
+        for (name, value) in tab_environment {
+            command = command.env(name, value);
+        }
         for argument in command_line.iter().skip(1) {
             command = command.arg(argument);
         }
@@ -627,6 +764,7 @@ impl TerminalTab {
             title: title.unwrap_or_else(|| command_name.clone()),
             command_name,
             command_line: persisted_command_line,
+            environment_names,
             process_id,
             composer: String::new(),
             note: String::new(),
@@ -643,6 +781,7 @@ impl TerminalTab {
             error: None,
             last_size: (initial_size.rows, initial_size.cols),
             input_bytes: 0,
+            input_writes: 0,
             output_bytes: 0,
             raw_output: Vec::new(),
         })
@@ -688,7 +827,17 @@ impl TerminalTab {
             self.error = Some(format!("input failed: {error}"));
         } else {
             self.input_bytes += bytes.len();
+            self.input_writes += 1;
         }
+    }
+
+    fn submit(&mut self, text: &str) {
+        self.send(text.as_bytes());
+        // Interactive TUIs such as Codex treat text plus CR in one PTY input
+        // batch as pasted editor content. Preserve an event boundary so Enter
+        // is interpreted as submit instead of becoming part of that paste.
+        thread::sleep(COMPOSER_SUBMIT_DELAY);
+        self.send(b"\r");
     }
 
     fn send_native_mouse_click(&mut self, x: u16, y: u16) -> Result<()> {
@@ -857,6 +1006,7 @@ impl AppState {
             };
         let next_id = saved_tabs.iter().map(|tab| tab.id).max().unwrap_or(0) + 1;
         let startup_tabs_remaining = saved_tabs.len();
+        let startup_session_name = session_name.clone();
         let (terminal_font, terminal_font_owned, resolved_font_family) =
             create_terminal_font(window, &config);
         let state = Self {
@@ -894,18 +1044,20 @@ impl AppState {
         thread::spawn(move || {
             for saved in saved_tabs {
                 let title = (!saved.title.is_empty()).then(|| saved.title.clone());
-                let tab = TerminalTab::spawn(
-                    saved.id,
-                    saved.index,
-                    saved.parent_id,
+                let tab = TerminalTab::spawn(TerminalLaunch {
+                    id: saved.id,
+                    index: saved.index,
+                    parent_id: saved.parent_id,
                     title,
-                    saved.command_line,
-                    wake_window as HWND,
-                    TerminalSize {
+                    command_line: saved.command_line,
+                    tab_environment: Vec::new(),
+                    session_name: startup_session_name.clone(),
+                    window: wake_window as HWND,
+                    initial_size: TerminalSize {
                         rows: INITIAL_ROWS,
                         cols: INITIAL_COLS,
                     },
-                )
+                })
                 .map(|mut tab| {
                     tab.note = saved.note;
                     tab.composer = saved.composer;
@@ -929,7 +1081,7 @@ impl AppState {
         command: Vec<String>,
         select: bool,
     ) -> Result<u32> {
-        self.create_tab_with_parent(title, command, select, None)
+        self.create_tab_with_parent(title, command, Vec::new(), select, None)
     }
 
     fn saved_workspace(&self) -> SavedWorkspace {
@@ -963,6 +1115,7 @@ impl AppState {
         &mut self,
         title: Option<String>,
         command: Vec<String>,
+        tab_environment: Vec<(String, String)>,
         select: bool,
         parent_id: Option<u64>,
     ) -> Result<u32> {
@@ -986,15 +1139,17 @@ impl AppState {
             .or_else(|| self.tabs.first())
             .map(|tab| tab.last_size)
             .unwrap_or((INITIAL_ROWS, INITIAL_COLS));
-        let tab = TerminalTab::spawn(
+        let tab = TerminalTab::spawn(TerminalLaunch {
             id,
             index,
             parent_id,
             title,
-            command,
-            self.window,
-            TerminalSize { rows, cols },
-        )?;
+            command_line: command,
+            tab_environment,
+            session_name: self.session_name.clone(),
+            window: self.window,
+            initial_size: TerminalSize { rows, cols },
+        })?;
         self.tabs.push(tab);
         self.tabs.sort_by_key(|tab| tab.index);
         if select {
@@ -1409,6 +1564,7 @@ impl AppState {
             match self.create_tab_with_parent(
                 Some("New child".to_owned()),
                 Vec::new(),
+                Vec::new(),
                 true,
                 Some(id),
             ) {
@@ -1675,8 +1831,7 @@ impl AppState {
         if text.is_empty() || self.tabs[position].exited.is_some() {
             return;
         }
-        self.tabs[position].send(text.as_bytes());
-        self.tabs[position].send(b"\r");
+        self.tabs[position].submit(&text);
         self.tabs[position].composer.clear();
         self.feedback = Some(format!("Sent to @{}", self.tabs[position].id));
         unsafe { SetWindowTextW(self.edit, wide("").as_ptr()) };
@@ -2434,6 +2589,7 @@ impl AppState {
                         "running"
                     },
                     "exit_code": tab.exited,
+                    "environment_names": tab.environment_names,
                     "draft": draft,
                     "bounds": visible_position.map(|position| serde_json::json!({
                         "x": 6,
@@ -2543,7 +2699,19 @@ impl AppState {
             return IpcResponse::failure("no command specified");
         };
         match command {
-            "__focus" | "attach" | "attach-session" | "start-server" => {
+            "__focus" | "start-server" => {
+                unsafe {
+                    ShowWindow(self.window, SW_RESTORE);
+                    SetForegroundWindow(self.window);
+                }
+                IpcResponse::success("")
+            }
+            "attach" | "attach-session" => {
+                if let Some(requested) = option_value(args, "-t")
+                    && requested != self.session_name
+                {
+                    return IpcResponse::failure(format!("can't find session: {requested}"));
+                }
                 unsafe {
                     ShowWindow(self.window, SW_RESTORE);
                     SetForegroundWindow(self.window);
@@ -2556,7 +2724,17 @@ impl AppState {
                 }
                 if self.tabs.is_empty() {
                     let (_, _, child_command) = parse_new_command(args);
-                    if let Err(error) = self.create_tab(None, child_command, true) {
+                    let tab_environment = match parse_tab_environment(args) {
+                        Ok(environment) => environment,
+                        Err(error) => return IpcResponse::failure(error),
+                    };
+                    if let Err(error) = self.create_tab_with_parent(
+                        None,
+                        child_command,
+                        tab_environment,
+                        true,
+                        None,
+                    ) {
                         return IpcResponse::failure(format!("{error:#}"));
                     }
                 }
@@ -2568,6 +2746,10 @@ impl AppState {
             }
             "neww" | "new-window" => {
                 let (title, detached, child_command) = parse_new_command(args);
+                let tab_environment = match parse_tab_environment(args) {
+                    Ok(environment) => environment,
+                    Err(error) => return IpcResponse::failure(error),
+                };
                 let parent_id = match option_value(args, "--parent") {
                     Some(target) => match self.parent_id_from_target(target) {
                         Ok(parent_id) => parent_id,
@@ -2575,9 +2757,56 @@ impl AppState {
                     },
                     None => None,
                 };
-                match self.create_tab_with_parent(title, child_command, !detached, parent_id) {
+                match self.create_tab_with_parent(
+                    title,
+                    child_command,
+                    tab_environment,
+                    !detached,
+                    parent_id,
+                ) {
                     Ok(index) => IpcResponse::success(index.to_string()),
                     Err(error) => IpcResponse::failure(format!("{error:#}")),
+                }
+            }
+            "new-agent" => {
+                let (title, detached, agent_arguments) = parse_new_command(args);
+                let tab_environment = match parse_tab_environment(args) {
+                    Ok(environment) => environment,
+                    Err(error) => return IpcResponse::failure(error),
+                };
+                let parent_id = match option_value(args, "--parent") {
+                    Some(target) => match self.parent_id_from_target(target) {
+                        Ok(parent_id) => parent_id,
+                        Err(error) => return IpcResponse::failure(format!("{error:#}")),
+                    },
+                    None => None,
+                };
+                let mut child_command = if let Some(program) = option_value(args, "--program") {
+                    vec![program.to_owned()]
+                } else {
+                    vec![
+                        env::var("COMSPEC")
+                            .unwrap_or_else(|_| r"C:\Windows\System32\cmd.exe".to_owned()),
+                        "/d".to_owned(),
+                        "/c".to_owned(),
+                        "codex".to_owned(),
+                    ]
+                };
+                if has_option(args, "--yolo") {
+                    child_command.push("--dangerously-bypass-approvals-and-sandbox".to_owned());
+                }
+                child_command.extend(agent_arguments);
+                match self.create_tab_with_parent(
+                    title.or_else(|| Some("Codex".to_owned())),
+                    child_command,
+                    tab_environment,
+                    !detached,
+                    parent_id,
+                ) {
+                    Ok(index) => IpcResponse::success(index.to_string()),
+                    Err(error) => {
+                        IpcResponse::failure(format!("failed to start Codex agent tab: {error:#}"))
+                    }
                 }
             }
             "ls" | "list-sessions" => IpcResponse::success(format!(
@@ -2986,7 +3215,8 @@ impl AppState {
                         "set-composer", "send-composer", "get-settings",
                         "set-setting", "set-tab-note", "show-tab-note",
                         "list-tab-tree", "set-tab-parent", "show-tab-parent",
-                        "save-workspace", "workspace-info", "shutdown"
+                        "save-workspace", "workspace-info", "shutdown",
+                        "new-agent"
                     ],
                     "features": {
                         "remain_on_exit": true,
@@ -2994,7 +3224,10 @@ impl AppState {
                         "rmux_status_click_bridge": true,
                         "semantic_ui_automation": true,
                         "hierarchical_tabs": true,
-                        "persistent_workspace": true
+                        "persistent_workspace": true,
+                        "tab_environment": true,
+                        "codex_launcher": true,
+                        "mux_frontend": true
                     }
                 }))
                 .unwrap_or_default(),
@@ -3036,6 +3269,7 @@ impl AppState {
                         let parent_id = self.tabs[parent_position].id;
                         match self.create_tab_with_parent(
                             Some("New child".to_owned()),
+                            Vec::new(),
                             Vec::new(),
                             true,
                             Some(parent_id),
@@ -3158,8 +3392,7 @@ impl AppState {
                 };
                 let text = mem::take(&mut self.tabs[position].composer);
                 if !text.is_empty() {
-                    self.tabs[position].send(text.as_bytes());
-                    self.tabs[position].send(b"\r");
+                    self.tabs[position].submit(&text);
                 }
                 if self.active == Some(self.tabs[position].id) {
                     unsafe { SetWindowTextW(self.edit, wide("").as_ptr()) };
@@ -3193,9 +3426,11 @@ impl AppState {
                             "exit_code": tab.exited,
                             "pid": tab.process_id,
                             "command": tab.command_name,
+                            "environment_names": tab.environment_names,
                             "rows": tab.last_size.0,
                             "cols": tab.last_size.1,
                             "input_bytes": tab.input_bytes,
+                            "input_writes": tab.input_writes,
                             "output_bytes": tab.output_bytes,
                             "composer": tab.composer,
                             "error": tab.error,
@@ -3297,6 +3532,11 @@ impl AppState {
                 "split-window is not implemented yet; AgenTerm currently maps one ConPTY pane per tab",
             ),
             "kill-session" | "kill-server" => {
+                if let Some(requested) = option_value(args, "-t")
+                    && requested != self.session_name
+                {
+                    return IpcResponse::failure(format!("can't find session: {requested}"));
+                }
                 for tab in &mut self.tabs {
                     tab.close_process();
                 }
@@ -3469,6 +3709,9 @@ fn create_terminal_font(window: HWND, config: &AppConfig) -> (HFONT, bool, Strin
 }
 
 fn ipc_address() -> String {
+    if let Some(address) = IPC_ADDRESS_OVERRIDE.with(|value| value.borrow().clone()) {
+        return address;
+    }
     if let Ok(address) = env::var("AGENTERM_IPC_ADDRESS")
         && !address.trim().is_empty()
     {
@@ -3481,12 +3724,28 @@ fn ipc_address() -> String {
     format!("127.0.0.1:{}", 42_000 + hash % 10_000)
 }
 
-fn send_ipc_request(args: Vec<String>) -> Result<IpcResponse> {
-    use std::io::BufRead as _;
-    let address = ipc_address();
-    let socket = address
+fn parse_loopback_ipc_address(address: &str) -> Result<std::net::SocketAddr> {
+    if address.contains('\0') {
+        anyhow::bail!("invalid AgenTerm IPC address: NUL is not allowed");
+    }
+    let socket: std::net::SocketAddr = address
         .parse()
         .with_context(|| format!("invalid AgenTerm IPC address: {address}"))?;
+    if !socket.ip().is_loopback() {
+        anyhow::bail!(
+            "AgenTerm IPC address must use a loopback IP (127.0.0.0/8 or ::1): {address}"
+        );
+    }
+    Ok(socket)
+}
+
+fn ipc_socket_addr() -> Result<std::net::SocketAddr> {
+    parse_loopback_ipc_address(&ipc_address())
+}
+
+fn send_ipc_request(args: Vec<String>) -> Result<IpcResponse> {
+    use std::io::BufRead as _;
+    let socket = ipc_socket_addr()?;
     let mut connection = std::net::TcpStream::connect_timeout(&socket, Duration::from_millis(100))
         .context("AgenTerm server is not running")?;
     connection.write_all(serde_json::to_string(&IpcRequest { args })?.as_bytes())?;
@@ -3503,7 +3762,7 @@ fn send_ipc_request(args: Vec<String>) -> Result<IpcResponse> {
 
 fn start_ipc_server(window: HWND) -> Result<Receiver<IpcEnvelope>> {
     use std::io::BufRead as _;
-    let listener = std::net::TcpListener::bind(ipc_address())
+    let listener = std::net::TcpListener::bind(ipc_socket_addr()?)
         .context("another AgenTerm server is already using the local IPC port")?;
     let (sender, receiver) = mpsc::channel();
     let wake_window = window as isize;
@@ -3559,7 +3818,11 @@ fn run_cli(arguments: Vec<String>) -> i32 {
         .first()
         .is_some_and(|command| command == "set-composer")
     {
-        let content = if let Some(position) = arguments.iter().position(|arg| arg == "--stdin") {
+        let content = if let Some(position) = arguments
+            .iter()
+            .take_while(|argument| argument.as_str() != "--")
+            .position(|argument| argument == "--stdin")
+        {
             arguments.remove(position);
             let mut content = String::new();
             if let Err(error) = std::io::stdin().read_to_string(&mut content) {
@@ -3567,7 +3830,11 @@ fn run_cli(arguments: Vec<String>) -> i32 {
                 return 1;
             }
             Some(content)
-        } else if let Some(position) = arguments.iter().position(|arg| arg == "--file") {
+        } else if let Some(position) = arguments
+            .iter()
+            .take_while(|argument| argument.as_str() != "--")
+            .position(|argument| argument == "--file")
+        {
             if position + 1 >= arguments.len() {
                 eprintln!("set-composer --file requires a path");
                 return 1;
@@ -3600,6 +3867,7 @@ fn run_cli(arguments: Vec<String>) -> i32 {
         command,
         "new-session"
             | "new"
+            | "new-agent"
             | "new-window"
             | "neww"
             | "attach-session"
@@ -3794,7 +4062,8 @@ AgenTerm CLI - control the native tabbed terminal
 
 Usage:
   agentermctl new-session [-s name]
-  agentermctl new-window [-d] [-n name] [--parent target] [command [args...]]
+  agentermctl new-window [-d] [-n name] [--parent target] [-e NAME=VALUE] [command [args...]]
+  agentermctl new-agent [-d] [-n name] [--parent target] [--proxy URL] [--yolo] [-- [codex args...]]
   agentermctl list-windows [-F format]
   agentermctl list-tab-tree [-F format]
   agentermctl select-window -t target
@@ -3831,6 +4100,90 @@ Usage:
   agentermctl list-panes [-F format]
   agentermctl list-sessions | has-session | kill-server"
     );
+}
+
+fn print_mux_help() {
+    println!(
+        "\
+agenterm-mux - tmux/RMUX compatibility frontend for AgenTerm
+
+Usage:
+  agenterm-mux [--address HOST:PORT] [--session NAME] COMMAND [ARGS...]
+  agenterm-mux compatibility [--json]
+  agenterm-mux agenterm COMMAND [ARGS...]
+
+The GUI remains the only server and PTY owner. One AgenTerm tab maps to one
+window and one pane. Unsupported tmux operations fail explicitly. Native
+AgenTerm commands are available only through the `agenterm` namespace."
+    );
+}
+
+fn print_mux_commands() {
+    for command in MUX_COMMANDS {
+        match command.status {
+            MuxStatus::Supported => println!("{}", command.name),
+            MuxStatus::Unsupported(reason) => {
+                println!("{} (unsupported: {reason})", command.name);
+            }
+        }
+    }
+}
+
+fn print_mux_compatibility(json: bool) {
+    let supported = MUX_COMMANDS
+        .iter()
+        .filter(|command| command.status == MuxStatus::Supported)
+        .map(|command| command.name)
+        .collect::<Vec<_>>();
+    let unsupported = MUX_COMMANDS
+        .iter()
+        .filter_map(|command| match command.status {
+            MuxStatus::Supported => None,
+            MuxStatus::Unsupported(reason) => Some(serde_json::json!({
+                "name": command.name,
+                "reason": reason,
+            })),
+        })
+        .collect::<Vec<_>>();
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "schema_version": 1,
+                "frontend": "agenterm-mux",
+                "agenterm_version": env!("CARGO_PKG_VERSION"),
+                "model": {
+                    "server": "agenterm.exe",
+                    "session": "workspace",
+                    "window": "tab",
+                    "pane": "single-pane-tab"
+                },
+                "differences": {
+                    "workspace_persistence": "normal GUI shutdown saves tabs and restarts their commands on restore",
+                    "process_ownership": "agenterm.exe owns every ConPTY child",
+                    "live_close": "GUI close actions require confirmation; explicit CLI kill commands are authoritative",
+                    "server_lifetime": "kill-server intentionally clears the saved workspace",
+                    "split_panes": false
+                },
+                "supported": supported,
+                "explicitly_unsupported": unsupported,
+                "native_namespace": "agenterm",
+            }))
+            .unwrap_or_default()
+        );
+    } else {
+        println!("agenterm-mux {}", env!("CARGO_PKG_VERSION"));
+        println!("sessions=workspaces windows=tabs panes=single-pane-tabs");
+        println!("supported: {}", supported.join(", "));
+        for entry in unsupported {
+            println!(
+                "unsupported: {} ({})",
+                entry["name"].as_str().unwrap_or_default(),
+                entry["reason"].as_str().unwrap_or_default()
+            );
+        }
+        println!("native AgenTerm extensions: agenterm-mux agenterm COMMAND ...");
+    }
 }
 
 fn render_format(format: &str, tab: &TerminalTab, session_name: &str, active: bool) -> String {
@@ -3975,4 +4328,18 @@ fn save_window_png(window: HWND, path: &std::path::Path, pane_only: bool) -> Res
         .write_image_data(&rgba)
         .context("failed to write PNG pixels")?;
     Ok(())
+}
+
+#[cfg(test)]
+mod ipc_address_tests {
+    use super::parse_loopback_ipc_address;
+
+    #[test]
+    fn accepts_only_loopback_ipc_addresses() {
+        assert!(parse_loopback_ipc_address("127.0.0.1:42000").is_ok());
+        assert!(parse_loopback_ipc_address("[::1]:42000").is_ok());
+        assert!(parse_loopback_ipc_address("0.0.0.0:42000").is_err());
+        assert!(parse_loopback_ipc_address("192.0.2.1:42000").is_err());
+        assert!(parse_loopback_ipc_address("127.0.0.1:42\0").is_err());
+    }
 }

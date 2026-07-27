@@ -9,6 +9,9 @@ param(
     [string]$CliExecutablePath,
 
     [Parameter(Mandatory = $true)]
+    [string]$MuxExecutablePath,
+
+    [Parameter(Mandatory = $true)]
     [ValidateSet('dev', 'release')]
     [string]$Profile
 )
@@ -91,9 +94,17 @@ $manifest = [ordered]@{
     git_dirty      = $isDirty
     profile        = $Profile
     rust_target    = $hostTarget
+    features       = @(
+        'codex-launcher'
+        'hierarchical-tabs'
+        'mux-frontend'
+        'persistent-workspace'
+        'tab-environment'
+    )
     executables    = @(
         Get-ExecutableInfo -Path $ExecutablePath -Role 'gui'
         Get-ExecutableInfo -Path $CliExecutablePath -Role 'cli'
+        Get-ExecutableInfo -Path $MuxExecutablePath -Role 'compatibility-cli'
     )
 }
 

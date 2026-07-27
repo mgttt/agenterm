@@ -37,6 +37,12 @@ jobs:
         shell: pwsh
         run: ./check.ps1 -Release -SkipSmoke
 
+      - name: Run isolated public CLI and fleet smoke
+        shell: pwsh
+        run: |
+          ./tests/cli_smoke.ps1
+          ./tests/fleet_smoke.ps1
+
       - name: Package Windows release
         shell: pwsh
         run: |
@@ -46,6 +52,7 @@ jobs:
             -LiteralPath `
               ./dist/agenterm.exe, `
               ./dist/agentermctl.exe, `
+              ./dist/agenterm-mux.exe, `
               ./dist/agenterm.json `
             -DestinationPath $zip
 
@@ -59,6 +66,7 @@ jobs:
           gh release create $env:GITHUB_REF_NAME `
             ./dist/agenterm.exe `
             ./dist/agentermctl.exe `
+            ./dist/agenterm-mux.exe `
             ./dist/agenterm.json `
             $zip `
             --verify-tag `

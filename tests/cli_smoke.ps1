@@ -17,16 +17,11 @@ function Invoke-AgenTerm {
     return ($output -join "`n")
 }
 
-$hadServer = $true
-$savedErrorPreference = $ErrorActionPreference
-$ErrorActionPreference = 'SilentlyContinue'
-& $Exe list-sessions 2>$null | Out-Null
-$probeExitCode = $LASTEXITCODE
-$ErrorActionPreference = $savedErrorPreference
-if ($probeExitCode -ne 0) {
-    $hadServer = $false
-}
-
+$previousAddress = $env:AGENTERM_IPC_ADDRESS
+$previousWorkspace = $env:AGENTERM_WORKSPACE_PATH
+$env:AGENTERM_IPC_ADDRESS = "127.0.0.1:$((45000 + ($PID % 1000)))"
+$workspaceFile = Join-Path $env:TEMP "agenterm-cli-$PID.json"
+$env:AGENTERM_WORKSPACE_PATH = $workspaceFile
 $name = "agenterm-smoke-$PID"
 $token = "AGENTERM_SMOKE_$PID"
 $targetDir = Join-Path $PSScriptRoot '..\target\smoke'
@@ -45,6 +40,7 @@ try {
         'new-window (neww)',
         'list-windows (lsw)',
         'send-keys (send)',
+        'new-agent',
         'wait-pane (expect-pane)',
         'set-composer',
         'ui-snapshot'
@@ -56,6 +52,7 @@ try {
 
     Write-Host 'STEP composer round trip'
     Invoke-AgenTerm @('set-composer', '-t', $name, "echo $token") | Out-Null
+    $beforeSubmit = Invoke-AgenTerm @('inspect', '-t', $name) | ConvertFrom-Json
     $draft = Invoke-AgenTerm @('show-composer', '-t', $name)
     if ($draft -ne "echo $token") {
         throw "Composer round trip mismatch: [$draft]"
@@ -63,6 +60,11 @@ try {
 
     Write-Host 'STEP submit and wait for output'
     Invoke-AgenTerm @('send-composer', '-t', $name) | Out-Null
+    $afterSubmit = Invoke-AgenTerm @('inspect', '-t', $name) | ConvertFrom-Json
+    if ($afterSubmit.windows[0].input_writes -ne
+        ($beforeSubmit.windows[0].input_writes + 2)) {
+        throw 'send-composer did not preserve separate text and Enter PTY events'
+    }
     Invoke-AgenTerm @('wait-pane', '-t', $name, '--contains', $token, '--timeout-ms', '10000') | Out-Null
     $capture = Invoke-AgenTerm @('capture-pane', '-p', '-t', $name)
     if (-not $capture.Contains($token)) {
@@ -98,7 +100,16 @@ finally {
     if ($created) {
         & $Exe kill-window -t $name *> $null
     }
-    if (-not $hadServer) {
-        & $Exe kill-server *> $null
+    & $Exe kill-server *> $null
+    Remove-Item -LiteralPath $workspaceFile -ErrorAction SilentlyContinue
+    if ($null -eq $previousAddress) {
+        Remove-Item Env:AGENTERM_IPC_ADDRESS -ErrorAction SilentlyContinue
+    } else {
+        $env:AGENTERM_IPC_ADDRESS = $previousAddress
+    }
+    if ($null -eq $previousWorkspace) {
+        Remove-Item Env:AGENTERM_WORKSPACE_PATH -ErrorAction SilentlyContinue
+    } else {
+        $env:AGENTERM_WORKSPACE_PATH = $previousWorkspace
     }
 }

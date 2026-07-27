@@ -1,8 +1,8 @@
 # AgenTerm
 
-AgenTerm is a native Windows terminal and scriptable terminal controller written
-in Rust. It combines a left-side tab UI, one ConPTY-backed shell per tab, a
-per-tab external composer, and a tmux/RMUX-style command line.
+AgenTerm is a native Windows terminal and AI fleet controller written in Rust.
+It combines hierarchical ConPTY tabs, per-tab composers and environments, a
+native automation client, and a deliberately bounded tmux/RMUX frontend.
 
 ## Current highlights
 
@@ -18,6 +18,11 @@ per-tab external composer, and a tmux/RMUX-style command line.
 - Exited processes leave a `[dead]` tab until the user explicitly closes it.
 - Every tab owns a composer text box and Send button.
 - Local CLI can create, select, rename, inspect, capture, and drive tabs.
+- `new-agent` launches Codex in a named fleet tab with stable AgenTerm context.
+- Tab-scoped environment and proxy values apply only to the child process and
+  are not written to the persistent workspace.
+- `agenterm-mux.exe` provides the supported tmux/RMUX session/window surface;
+  unsupported operations fail explicitly.
 - Whole-window and per-pane PNG screenshots support visual feedback testing.
 - PTY process management uses `rmux-pty`.
 
@@ -30,12 +35,14 @@ cd D:\dev\agenterm
 ```
 
 The default build is an incremental development build. Use
-`.\build.bat release` only for a distributable build. Both modes produce three
+`.\build.bat release` only for a distributable build. Both modes produce four
 ignored local artifacts under `dist/`:
 
 - `dist/agenterm.exe` — GUI application; double-clicking does not create a
   temporary console window.
-- `dist/agentermctl.exe` — console control client with tmux/RMUX-style commands.
+- `dist/agentermctl.exe` — full native observation and automation client.
+- `dist/agenterm-mux.exe` — tmux/RMUX compatibility frontend over the same IPC
+  server.
 - `dist/agenterm.json` — version, UTC build time, Git state, Rust target, size, and
   SHA-256 metadata.
 
@@ -56,7 +63,19 @@ $r = ".\dist\agentermctl.exe"
 & $r wait-pane -t build --contains "Finished" --timeout-ms 30000
 & $r capture-pane -p -t build
 & $r screenshot-pane -t build -o build.png
+
+# Launch Codex with proxy settings scoped to this tab.
+& $r new-agent -n reviewer --proxy http://127.0.0.1:7890 -- --full-auto
+
+# Explicit opt-in convenience for Codex's unsafe bypass mode; omitted by default.
+& $r new-agent -n scratch --yolo
+
+# Inspect the honest mux compatibility matrix.
+.\dist\agenterm-mux.exe compatibility --json
 ```
+
+IPC listens and connects only on numeric loopback addresses (`127.0.0.0/8` or
+`::1`), including explicit `agenterm-mux --address` overrides.
 
 ## Release
 
@@ -69,7 +88,7 @@ run:
 
 The script runs the full local quality gate and atomically pushes `main` plus
 the `v<version>` tag. GitHub Actions then builds on a clean Windows runner and
-publishes both EXEs, metadata, ZIP, and generated notes to GitHub Releases.
+publishes all three EXEs, metadata, ZIP, and generated notes to GitHub Releases.
 
 ## Documentation
 

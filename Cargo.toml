@@ -1,6 +1,6 @@
 [package]
 name = "agenterm"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2024"
 description = "A tabbed Windows cmd.exe terminal with persistent exited tabs"
 license = "MIT OR Apache-2.0"
@@ -13,6 +13,10 @@ path = "src/bin/agenterm.rs"
 [[bin]]
 name = "agentermctl"
 path = "src/bin/agentermctl.rs"
+
+[[bin]]
+name = "agenterm-mux"
+path = "src/bin/agenterm-mux.rs"
 
 [dependencies]
 anyhow = "1"

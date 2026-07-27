@@ -10,6 +10,7 @@ the information cannot live here or in the PRD.
   execution.
 - `src/bin/agenterm.rs` — Windows-subsystem GUI entry point.
 - `src/bin/agentermctl.rs` — console-subsystem CLI entry point.
+- `src/bin/agenterm-mux.rs` — tmux/RMUX compatibility CLI entry point.
 - `src/commands.rs` — reusable CLI parsing, command catalog, key mapping, and
   output-path helpers.
 - `src/protocol.rs` — serialized local IPC request/response contract.
@@ -36,8 +37,9 @@ Use PowerShell from the repository root:
 The former `.cargo/config.toml` forced `jobs = 1` and made clean builds much
 slower. Do not restore a global job limit. Keep the default dev path
 incremental; release-only size optimization belongs in `[profile.release]`.
-The release gate enforces a 4 MiB `agenterm.exe` budget; investigate dependency
-or feature growth instead of raising it casually.
+The release gate enforces explicit budgets of 4 MiB for `agenterm.exe` and
+2 MiB each for `agentermctl.exe` and `agenterm-mux.exe`; investigate dependency
+or feature growth instead of raising them casually.
 
 ## Runtime control and observation
 
@@ -73,7 +75,8 @@ waits through public state until the asynchronous terminal becomes ready.
 - Keep README human-facing and brief; keep this file agent-facing.
 - Do not commit generated binaries. Local artifacts belong in ignored `dist/`;
   downloadable binaries are published by the tag-triggered release workflow.
-- Keep `agenterm.exe` as a Windows-subsystem GUI and `agentermctl.exe` as the
-  console control client. Both entry points must reuse the library.
+- Keep `agenterm.exe` as a Windows-subsystem GUI, `agentermctl.exe` as the
+  native control client, and `agenterm-mux.exe` as the compatibility client.
+  All entry points must reuse the library.
 - Do not claim full tmux/RMUX compatibility. One AgenTerm tab is currently one
   pane, and unsupported commands must fail explicitly.

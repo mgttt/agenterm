@@ -19,6 +19,7 @@ list-panes (lsp)
 list-sessions (ls)
 list-windows (lsw)
 new-session (new)
+new-agent
 new-window (neww)
 next-window (next)
 pane-snapshot
@@ -49,10 +50,206 @@ wait-pane (expect-pane)
 wait-ui
 workspace-info";
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum MuxStatus {
+    Supported,
+    Unsupported(&'static str),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct MuxCommand {
+    pub name: &'static str,
+    pub status: MuxStatus,
+}
+
+const SPLIT_UNSUPPORTED: &str = "AgenTerm currently maps one ConPTY pane per tab";
+
+pub(crate) const MUX_COMMANDS: &[MuxCommand] = &[
+    MuxCommand {
+        name: "attach",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "attach-session",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "capture-pane",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "capturep",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "display",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "display-message",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "has",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "has-session",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "kill-server",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "kill-session",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "kill-window",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "killw",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "list-commands",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "list-panes",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "list-sessions",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "list-windows",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "lscm",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "lsp",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "ls",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "lsw",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "new",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "new-session",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "new-window",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "neww",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "next",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "next-window",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "previous-window",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "prev",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "rename",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "rename-session",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "rename-window",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "renamew",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "select-window",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "selectw",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "send",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "send-keys",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "show",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "show-options",
+        status: MuxStatus::Supported,
+    },
+    MuxCommand {
+        name: "split-window",
+        status: MuxStatus::Unsupported(SPLIT_UNSUPPORTED),
+    },
+    MuxCommand {
+        name: "splitw",
+        status: MuxStatus::Unsupported(SPLIT_UNSUPPORTED),
+    },
+    MuxCommand {
+        name: "start-server",
+        status: MuxStatus::Supported,
+    },
+];
+
+pub(crate) fn mux_command(name: &str) -> Option<MuxCommand> {
+    MUX_COMMANDS
+        .iter()
+        .find(|command| command.name == name)
+        .copied()
+}
+
+pub(crate) fn has_option(args: &[String], option: &str) -> bool {
+    args.iter()
+        .take_while(|argument| argument.as_str() != "--")
+        .any(|argument| argument == option)
+}
+
 pub(crate) fn option_value<'a>(args: &'a [String], option: &str) -> Option<&'a str> {
     args.iter()
+        .take_while(|argument| argument.as_str() != "--")
         .position(|argument| argument == option)
         .and_then(|position| args.get(position + 1))
+        .filter(|value| value.as_str() != "--")
         .map(String::as_str)
 }
 
@@ -71,7 +268,8 @@ pub(crate) fn parse_new_command(args: &[String]) -> (Option<String>, bool, Vec<S
                 position += 1;
             }
             "-A" | "-P" | "-E" => position += 1,
-            "-s" | "-t" | "-c" | "-F" | "--parent" => position += 2,
+            "-s" | "-t" | "-c" | "-F" | "--parent" | "-e" | "--env" | "--proxy" | "--no-proxy"
+            | "--program" => position += 2,
             "--" => {
                 position += 1;
                 break;
@@ -81,6 +279,96 @@ pub(crate) fn parse_new_command(args: &[String]) -> (Option<String>, bool, Vec<S
         }
     }
     (title, detached, args[position..].to_vec())
+}
+
+pub(crate) fn parse_tab_environment(args: &[String]) -> Result<Vec<(String, String)>, String> {
+    let mut environment = Vec::new();
+    let mut position = 1;
+    while position < args.len() {
+        let argument = args[position].as_str();
+        if matches!(argument, "-e" | "--env") {
+            let assignment = args
+                .get(position + 1)
+                .ok_or_else(|| format!("{argument} requires NAME=VALUE"))?;
+            let (name, value) = assignment
+                .split_once('=')
+                .ok_or_else(|| format!("{argument} requires NAME=VALUE"))?;
+            validate_environment_name(name)?;
+            validate_environment_value(value, argument)?;
+            upsert_environment(&mut environment, name, value);
+            position += 2;
+        } else if argument == "--proxy" {
+            let value = args
+                .get(position + 1)
+                .ok_or_else(|| "--proxy requires a URL".to_owned())?;
+            if value.is_empty() {
+                return Err("--proxy requires a non-empty URL".to_owned());
+            }
+            validate_environment_value(value, "--proxy")?;
+            upsert_environment(&mut environment, "HTTP_PROXY", value);
+            upsert_environment(&mut environment, "HTTPS_PROXY", value);
+            position += 2;
+        } else if argument == "--no-proxy" {
+            let value = args
+                .get(position + 1)
+                .ok_or_else(|| "--no-proxy requires a host list".to_owned())?;
+            validate_environment_value(value, "--no-proxy")?;
+            upsert_environment(&mut environment, "NO_PROXY", value);
+            position += 2;
+        } else if argument == "--" {
+            break;
+        } else if matches!(
+            argument,
+            "-n" | "-s" | "-t" | "-c" | "-F" | "--parent" | "--program"
+        ) {
+            position += 2;
+        } else if matches!(argument, "-d" | "-A" | "-P" | "-E") || argument.starts_with('-') {
+            position += 1;
+        } else {
+            break;
+        }
+    }
+    Ok(environment)
+}
+
+fn validate_environment_value(value: &str, option: &str) -> Result<(), String> {
+    if value.contains('\0') {
+        return Err(format!("{option} value must not contain NUL"));
+    }
+    Ok(())
+}
+
+fn validate_environment_name(name: &str) -> Result<(), String> {
+    if name.is_empty()
+        || name.contains(['=', '\0'])
+        || !name
+            .chars()
+            .all(|character| character == '_' || character.is_ascii_alphanumeric())
+        || name
+            .chars()
+            .next()
+            .is_some_and(|character| character.is_ascii_digit())
+    {
+        return Err(format!("invalid environment variable name: {name}"));
+    }
+    if name.to_ascii_uppercase().starts_with("AGENTERM_") {
+        return Err(format!(
+            "{name} is reserved; AgenTerm injects its own tab context"
+        ));
+    }
+    Ok(())
+}
+
+fn upsert_environment(environment: &mut Vec<(String, String)>, name: &str, value: &str) {
+    if let Some(existing) = environment
+        .iter_mut()
+        .find(|(existing, _)| existing.eq_ignore_ascii_case(name))
+    {
+        existing.0 = name.to_owned();
+        existing.1 = value.to_owned();
+    } else {
+        environment.push((name.to_owned(), value.to_owned()));
+    }
 }
 
 pub(crate) fn positional_values<'a>(
@@ -215,5 +503,56 @@ mod tests {
         assert_eq!(tmux_key_bytes("F2"), Some(b"\x1bOQ".to_vec()));
         assert_eq!(tmux_key_bytes("C-c"), Some(vec![3]));
         assert_eq!(tmux_key_bytes("not-a-key"), None);
+    }
+
+    #[test]
+    fn parses_scoped_environment_and_proxy_convenience() {
+        let parsed = parse_tab_environment(&args(&[
+            "new-window",
+            "-e",
+            "ROLE=reviewer",
+            "--proxy",
+            "http://127.0.0.1:7890",
+            "--no-proxy",
+            "localhost,127.0.0.1",
+        ]))
+        .unwrap();
+        assert_eq!(
+            parsed,
+            vec![
+                ("ROLE".to_owned(), "reviewer".to_owned()),
+                ("HTTP_PROXY".to_owned(), "http://127.0.0.1:7890".to_owned()),
+                ("HTTPS_PROXY".to_owned(), "http://127.0.0.1:7890".to_owned()),
+                ("NO_PROXY".to_owned(), "localhost,127.0.0.1".to_owned()),
+            ]
+        );
+    }
+
+    #[test]
+    fn rejects_reserved_or_malformed_environment_names() {
+        assert!(parse_tab_environment(&args(&["new-window", "-e", "1BAD=x"])).is_err());
+        assert!(
+            parse_tab_environment(&args(&["new-window", "-e", "AGENTERM_TAB_ID=fake"])).is_err()
+        );
+        assert!(parse_tab_environment(&args(&["new-window", "-e", "ROLE=a\0b"])).is_err());
+        assert!(parse_tab_environment(&args(&["new-window", "--proxy", "a\0b"])).is_err());
+    }
+
+    #[test]
+    fn option_lookup_stops_at_child_argument_delimiter() {
+        let input = args(&[
+            "new-agent",
+            "--program",
+            "cmd.exe",
+            "--",
+            "--program",
+            "wrong.exe",
+            "--parent",
+            "@999",
+            "--yolo",
+        ]);
+        assert_eq!(option_value(&input, "--program"), Some("cmd.exe"));
+        assert_eq!(option_value(&input, "--parent"), None);
+        assert!(!has_option(&input, "--yolo"));
     }
 }
