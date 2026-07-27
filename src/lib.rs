@@ -56,7 +56,8 @@ use windows_sys::Win32::{
         MF_GRAYED, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MSG, MessageBoxW, MoveWindow,
         PostMessageW, PostQuitMessage, RegisterClassW, SC_CLOSE, SIZE_MINIMIZED, SW_HIDE,
         SW_MAXIMIZE, SW_MINIMIZE, SW_SHOW, SW_SHOWMAXIMIZED, SW_SHOWNOACTIVATE, SW_SHOWNORMAL,
-        SendMessageW, SetCursor, SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowTextW,
+        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SendMessageW,
+        SetCursor, SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW,
         ShowWindow, TranslateMessage, WM_ACTIVATEAPP, WM_APP, WM_CHAR, WM_CLOSE, WM_COMMAND,
         WM_COPY, WM_CREATE, WM_CUT, WM_DESTROY, WM_ENDSESSION, WM_ERASEBKGND, WM_INITMENUPOPUP,
         WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
@@ -69,8 +70,10 @@ use windows_sys::Win32::{
 mod commands;
 mod event_journal;
 mod instances;
+mod operations;
 mod protocol;
 mod rmux_status;
+mod script_audit;
 pub mod script_protocol;
 mod settings;
 mod tab_tree;
@@ -84,12 +87,20 @@ use commands::{
     BACKSPACE_INPUT, MUX_COMMANDS, MuxStatus, SUPPORTED_COMMANDS, canonical_control_command,
     control_command_requests_help, control_command_usage, has_option, last_positional, mux_command,
     option_value, parse_new_command, parse_tab_environment, positional_values,
-    screenshot_output_path, tmux_key_bytes, validate_control_command,
+    screenshot_output_path, snapshot_modal_matches, tmux_key_bytes, validate_control_command,
 };
 use event_journal::EventJournal;
 use instances::{InstanceRegistration, discover_instances, prune_instance, register_instance};
+use operations::{
+    OPERATION_CATALOG, OPERATION_CATALOG_SCHEMA_VERSION, OperationSpec, UI_TABS_HIDE,
+    UI_TABS_SET_WIDTH, UI_TABS_SHOW, UI_TABS_TOGGLE, validate_operation_args,
+};
 use protocol::{IpcRequest, IpcResponse};
 use rmux_status::parse_status_windows;
+use script_audit::{
+    AuditBudgets, AuditInvocation, AuditOutcome, AuditSourceKind, ScriptAuditSink,
+    source_fingerprint,
+};
 use script_protocol::{
     SCRIPT_API_VERSION, SCRIPT_ENVELOPE_VERSION, ScriptBudgets, ScriptExitClass, ScriptInvocation,
     ScriptOperation, ScriptProfile,
@@ -250,7 +261,7 @@ pub fn run_gui_entry() -> i32 {
     };
     write_best_effort_stderr(&gui_console_summary(&ipc_address()));
     if env::var_os("AGENTERM_SERVER").is_none() {
-        let handoff = if launch_options.not_foreground {
+        let handoff = if launch_options.no_activate {
             "__show-no-activate"
         } else {
             "__focus"
@@ -260,7 +271,7 @@ pub fn run_gui_entry() -> i32 {
         }
     }
 
-    if let Err(error) = run_gui(launch_options.not_foreground) {
+    if let Err(error) = run_gui(launch_options.no_activate) {
         show_startup_error(&error);
         return 1;
     }
@@ -269,7 +280,7 @@ pub fn run_gui_entry() -> i32 {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct GuiLaunchOptions {
-    not_foreground: bool,
+    no_activate: bool,
 }
 
 fn configure_gui_launch(arguments: &[String]) -> Result<GuiLaunchOptions> {
@@ -286,11 +297,13 @@ fn parse_gui_launch(arguments: &[String]) -> Result<(GuiLaunchOptions, Option<St
     let mut position = 0;
     while position < arguments.len() {
         match arguments[position].as_str() {
-            "--not-foreground" => {
-                if options.not_foreground {
-                    anyhow::bail!("agenterm.exe --not-foreground may be specified only once");
+            "--no-activate" | "--not-foreground" => {
+                if options.no_activate {
+                    anyhow::bail!(
+                        "agenterm.exe --no-activate/--not-foreground may be specified only once"
+                    );
                 }
-                options.not_foreground = true;
+                options.no_activate = true;
                 position += 1;
             }
             "--address" => {
@@ -541,7 +554,7 @@ pub fn run_mux_entry() -> i32 {
     run_cli(arguments)
 }
 
-fn run_gui(not_foreground: bool) -> Result<()> {
+fn run_gui(no_activate: bool) -> Result<()> {
     let instance = unsafe { GetModuleHandleW(ptr::null()) };
     if instance.is_null() {
         anyhow::bail!("GetModuleHandleW failed");
@@ -739,14 +752,19 @@ fn run_gui(not_foreground: bool) -> Result<()> {
         state.refresh_system_menu();
     }
     unsafe {
-        ShowWindow(
-            window,
-            if not_foreground {
-                SW_SHOWNOACTIVATE
-            } else {
-                SW_SHOW
-            },
-        );
+        if no_activate {
+            SetWindowPos(
+                window,
+                ptr::null_mut(),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+            );
+        } else {
+            ShowWindow(window, SW_SHOW);
+        }
         UpdateWindow(window);
     }
 
@@ -980,7 +998,7 @@ unsafe extern "system" fn window_proc(
                 0
             } else if command_id == TABS_BUTTON_ID {
                 if let Some(state) = state_mut(window) {
-                    state.set_tabs_visible(false, "button");
+                    state.set_tabs_visible(false, "button", UI_TABS_HIDE);
                 }
                 0
             } else if command_id == SETTINGS_BUTTON_ID {
@@ -1044,7 +1062,11 @@ unsafe extern "system" fn window_proc(
                     if state.cwd_edit_target.is_some() || state.proxy_edit_target.is_some() {
                         unsafe { SetFocus(state.edit) };
                     } else {
-                        state.set_tabs_visible(!state.config.tabs_visible, "system-menu");
+                        state.set_tabs_visible(
+                            !state.config.tabs_visible,
+                            "system-menu",
+                            UI_TABS_TOGGLE,
+                        );
                     }
                 }
                 0
@@ -2490,6 +2512,11 @@ impl AppState {
                     self.restore_after_window_close_modal();
                     return;
                 }
+                // Closing the parent window hides the native composer/settings controls
+                // while the confirmation surface is active. Restore the selected child
+                // surface before detaching so a later launcher handoff does not re-show
+                // a parent whose input controls are still individually hidden.
+                self.restore_window_close_controls();
                 self.detached_was_maximized = unsafe { IsZoomed(self.window) } != 0;
                 self.window_detached = true;
                 self.navigation_latch = None;
@@ -2518,10 +2545,14 @@ impl AppState {
         }
     }
 
-    fn restore_after_window_close_modal(&mut self) {
+    fn restore_window_close_controls(&mut self) {
+        if self.window_close_restore_settings {
+            self.settings_open = true;
+        }
         unsafe {
-            if self.window_close_restore_settings {
-                self.settings_open = true;
+            if self.settings_open {
+                ShowWindow(self.edit, SW_HIDE);
+                ShowWindow(self.send_button, SW_HIDE);
                 ShowWindow(self.settings_font, SW_SHOW);
                 ShowWindow(self.settings_size, SW_SHOW);
                 ShowWindow(self.settings_dark, SW_SHOW);
@@ -2529,20 +2560,39 @@ impl AppState {
                 ShowWindow(self.settings_cancel, SW_SHOW);
                 ShowWindow(self.settings_apply, SW_SHOW);
             } else {
+                ShowWindow(self.settings_font, SW_HIDE);
+                ShowWindow(self.settings_size, SW_HIDE);
+                ShowWindow(self.settings_dark, SW_HIDE);
+                ShowWindow(self.settings_light, SW_HIDE);
+                ShowWindow(self.settings_cancel, SW_HIDE);
+                ShowWindow(self.settings_apply, SW_HIDE);
                 ShowWindow(self.edit, SW_SHOW);
                 ShowWindow(self.send_button, SW_SHOW);
             }
-            if self.window_close_previous_focus.is_null() {
-                SetFocus(self.window);
+        }
+        self.window_close_restore_settings = false;
+    }
+
+    fn restore_after_window_close_modal(&mut self) {
+        let restore_settings = self.window_close_restore_settings;
+        self.restore_window_close_controls();
+        unsafe {
+            if restore_settings {
+                SetFocus(self.settings_font);
+            } else if self.note_edit_target.is_some() {
+                SetFocus(self.edit);
             } else {
-                SetFocus(self.window_close_previous_focus);
+                if self.window_close_previous_focus.is_null() {
+                    SetFocus(self.window);
+                } else {
+                    SetFocus(self.window_close_previous_focus);
+                }
             }
             InvalidateRect(self.window, ptr::null(), 0);
         }
-        if !self.window_close_restore_settings {
+        if !restore_settings && self.note_edit_target.is_none() {
             self.load_active_composer();
         }
-        self.window_close_restore_settings = false;
     }
 
     fn reattach_window(&mut self, reason: &str) {
@@ -2550,6 +2600,9 @@ impl AppState {
         self.window_detached = false;
         self.host_focus_surface = HostFocusSurface::Terminal;
         self.navigation_latch = None;
+        if was_detached {
+            self.restore_window_close_controls();
+        }
         unsafe {
             ShowWindow(
                 self.window,
@@ -2560,7 +2613,13 @@ impl AppState {
                 },
             );
             SetForegroundWindow(self.window);
-            SetFocus(self.window);
+            if self.settings_open {
+                SetFocus(self.settings_font);
+            } else if self.note_edit_target.is_some() {
+                SetFocus(self.edit);
+            } else {
+                SetFocus(self.window);
+            }
             InvalidateRect(self.window, ptr::null(), 0);
         }
         if was_detached {
@@ -2577,6 +2636,7 @@ impl AppState {
         if was_detached {
             self.window_detached = false;
             self.navigation_latch = None;
+            self.restore_window_close_controls();
             unsafe {
                 ShowWindow(self.window, SW_SHOWNOACTIVATE);
                 InvalidateRect(self.window, ptr::null(), 0);
@@ -2703,7 +2763,10 @@ impl AppState {
         let envelopes: Vec<IpcEnvelope> = self.ipc_receiver.try_iter().collect();
         changed |= !envelopes.is_empty();
         for envelope in envelopes {
-            let response = self.execute_command(&envelope.request.args);
+            let response = match validate_operation_args(&envelope.request.args) {
+                Ok(operation) => self.execute_command(&envelope.request.args, operation),
+                Err(error) => IpcResponse::failure(error),
+            };
             let _ = envelope.respond_to.send(response);
         }
         if self.close_requested {
@@ -3004,7 +3067,7 @@ impl AppState {
             && self.cwd_edit_target.is_none()
             && self.proxy_edit_target.is_none()
         {
-            self.set_tabs_visible(true, "status-bar");
+            self.set_tabs_visible(true, "status-bar", UI_TABS_SHOW);
             return;
         }
         if layout.status_segments.cwd.contains(x, y)
@@ -3073,7 +3136,7 @@ impl AppState {
 
     fn left_button_up(&mut self) {
         if self.tabs_resize_drag.is_some() {
-            self.finish_tabs_resize(true, "mouse-drag");
+            self.finish_tabs_resize(true, "mouse-drag", UI_TABS_SET_WIDTH);
             return;
         }
         if self.scroll_drag.is_some() {
@@ -3194,7 +3257,7 @@ impl AppState {
             .tabs_recovery
             .is_some_and(|segment| segment.contains(x, y))
         {
-            self.set_tabs_visible(true, "status-bar");
+            self.set_tabs_visible(true, "status-bar", UI_TABS_SHOW);
             return;
         }
         if layout.status_segments.cwd.contains(x, y) {
@@ -4019,7 +4082,7 @@ impl AppState {
         })
     }
 
-    fn set_tabs_visible(&mut self, visible: bool, cause: &str) {
+    fn set_tabs_visible(&mut self, visible: bool, cause: &str, operation_id: &str) {
         if self.config.tabs_visible == visible {
             return;
         }
@@ -4035,7 +4098,11 @@ impl AppState {
         self.event_journal.commit(
             "layout.tabs.visibility",
             None,
-            serde_json::json!({"visible": visible, "cause": cause}),
+            serde_json::json!({
+                "visible": visible,
+                "cause": cause,
+                "operation_id": operation_id,
+            }),
         );
         self.layout();
         self.refresh_system_menu();
@@ -4068,7 +4135,7 @@ impl AppState {
         }
     }
 
-    fn finish_tabs_resize(&mut self, persist: bool, cause: &str) {
+    fn finish_tabs_resize(&mut self, persist: bool, cause: &str, operation_id: &str) {
         let Some(drag) = self.tabs_resize_drag.take() else {
             return;
         };
@@ -4089,14 +4156,15 @@ impl AppState {
                 "configured_width": self.config.tabs_width,
                 "effective_width": self.effective_tabs_width(),
                 "cause": cause,
+                "operation_id": operation_id,
             }),
         );
         unsafe { UpdateWindow(self.window) };
     }
 
-    fn reset_tabs_width(&mut self, cause: &str) {
-        self.finish_tabs_resize(false, cause);
-        self.config.tabs_width = reset_tabs_width() as u16;
+    fn set_tabs_width(&mut self, width: u16, cause: &str, operation_id: &str) {
+        self.finish_tabs_resize(false, cause, operation_id);
+        self.config.tabs_width = width;
         if let Err(error) = save_config(&self.config) {
             self.last_error = Some(format!("could not save Tabs width: {error:#}"));
         }
@@ -4107,10 +4175,37 @@ impl AppState {
                 "configured_width": self.config.tabs_width,
                 "effective_width": self.effective_tabs_width(),
                 "cause": cause,
+                "operation_id": operation_id,
             }),
         );
         self.layout();
         unsafe { InvalidateRect(self.window, ptr::null(), 0) };
+    }
+
+    fn reset_tabs_width(&mut self, cause: &str) {
+        self.set_tabs_width(reset_tabs_width() as u16, cause, UI_TABS_SET_WIDTH);
+    }
+
+    fn execute_tabs_operation(
+        &mut self,
+        operation: &'static OperationSpec,
+        args: &[String],
+    ) -> Result<()> {
+        match operation.id {
+            UI_TABS_SHOW => self.set_tabs_visible(true, "semantic", operation.id),
+            UI_TABS_HIDE => self.set_tabs_visible(false, "semantic", operation.id),
+            UI_TABS_TOGGLE => {
+                self.set_tabs_visible(!self.config.tabs_visible, "semantic", operation.id);
+            }
+            UI_TABS_SET_WIDTH => {
+                let width = option_value(args, "--width")
+                    .and_then(|value| value.parse::<u16>().ok())
+                    .context("validated ui.tabs.set-width request lost --width")?;
+                self.set_tabs_width(width, "semantic", operation.id);
+            }
+            _ => anyhow::bail!("unsupported typed Tabs operation: {}", operation.id),
+        }
+        Ok(())
     }
 
     fn set_resize_cursor_if_needed(&self) -> bool {
@@ -4170,7 +4265,7 @@ impl AppState {
                     false
                 } else {
                     if !self.config.tabs_visible {
-                        self.set_tabs_visible(true, cause);
+                        self.set_tabs_visible(true, cause, UI_TABS_SHOW);
                     }
                     if self.effective_tabs_width() <= 0 {
                         self.host_focus_surface = HostFocusSurface::Terminal;
@@ -5948,9 +6043,10 @@ impl AppState {
                     "scrollbar": scrollbar,
                 },
                 "composer": {
-                    "visible": !self.window_close_pending
-                        && self.pending_close.is_none()
-                        && !self.settings_open,
+                    "visible": unsafe { IsWindowVisible(self.edit) } != 0
+                        && unsafe { IsWindowVisible(self.send_button) } != 0,
+                    "input_visible": unsafe { IsWindowVisible(self.edit) } != 0,
+                    "send_visible": unsafe { IsWindowVisible(self.send_button) } != 0,
                     "x": layout.composer.left,
                     "y": layout.composer.top,
                     "width": layout.composer.width(),
@@ -6081,7 +6177,11 @@ impl AppState {
         .unwrap_or_else(|error| format!(r#"{{"error":"{error}"}}"#))
     }
 
-    fn execute_command(&mut self, args: &[String]) -> IpcResponse {
+    fn execute_command(
+        &mut self,
+        args: &[String],
+        operation: Option<&'static OperationSpec>,
+    ) -> IpcResponse {
         let Some(command) = args.first().map(String::as_str) else {
             return IpcResponse::failure("no command specified");
         };
@@ -6761,6 +6861,18 @@ impl AppState {
                         "Proxy editor is a focus trap; reveal, prepare, send now, or cancel it first",
                     );
                 }
+                if let Some(operation) = operation.filter(|operation| {
+                    matches!(
+                        operation.id,
+                        UI_TABS_SHOW | UI_TABS_HIDE | UI_TABS_TOGGLE | UI_TABS_SET_WIDTH
+                    )
+                }) {
+                    if let Err(error) = self.execute_tabs_operation(operation, args) {
+                        return IpcResponse::failure(format!("{error:#}"));
+                    }
+                    unsafe { InvalidateRect(self.window, ptr::null(), 0) };
+                    return IpcResponse::success(self.ui_snapshot());
+                }
                 let response = match action {
                     "new-tab" => match self.create_tab(None, Vec::new(), true) {
                         Ok(_) => None,
@@ -6813,10 +6925,6 @@ impl AppState {
                         if !self.collapsed_tabs.remove(&id) {
                             self.collapsed_tabs.insert(id);
                         }
-                        None
-                    }
-                    "toggle-tabs" => {
-                        self.set_tabs_visible(!self.config.tabs_visible, "semantic");
                         None
                     }
                     "select-tab" => {
@@ -7788,6 +7896,10 @@ fn run_cli(arguments: Vec<String>) -> i32 {
             *command = canonical.to_owned();
         }
     }
+    if let Err(error) = validate_operation_args(&arguments) {
+        eprintln!("{error}");
+        return 2;
+    }
     let command = arguments.first().map(String::as_str).unwrap_or_default();
     if matches!(command, "list-commands" | "lscm") {
         print!("{SUPPORTED_COMMANDS}");
@@ -8035,6 +8147,46 @@ fn run_script_command(arguments: &[String]) -> i32 {
         .and_then(|position| arguments.get(position + 1..))
         .unwrap_or_default()
         .to_vec();
+    let audit_source_kind = match operation {
+        ScriptOperation::Api => AuditSourceKind::Api,
+        ScriptOperation::Eval => AuditSourceKind::Eval,
+        ScriptOperation::Check | ScriptOperation::Run if source_label == "stdin" => {
+            AuditSourceKind::Stdin
+        }
+        ScriptOperation::Check | ScriptOperation::Run => AuditSourceKind::File,
+    };
+    let profile_name = match profile {
+        ScriptProfile::Pure => "pure",
+        ScriptProfile::Observe => "observe",
+    };
+    let capabilities = if profile == ScriptProfile::Observe {
+        vec!["observe.snapshot".to_owned()]
+    } else {
+        Vec::new()
+    };
+    let audit_invocation = AuditInvocation {
+        invocation_id: invocation_id.clone(),
+        source_fingerprint: source_fingerprint(&source),
+        source_kind: audit_source_kind,
+        api_version: SCRIPT_API_VERSION,
+        operation: operation_name.to_owned(),
+        requested_profile: profile_name.to_owned(),
+        effective_profile: profile_name.to_owned(),
+        requested_capabilities: capabilities.clone(),
+        effective_capabilities: capabilities,
+        requested_budgets: audit_budgets(&budgets),
+        effective_budgets: audit_budgets(&budgets),
+        broker_operation_ids: if needs_observation {
+            vec!["ui.snapshot".to_owned()]
+        } else {
+            Vec::new()
+        },
+    };
+    let audit_sink = match ScriptAuditSink::discover() {
+        Ok(sink) => sink,
+        Err(error) => return report_audit_error(error),
+    };
+    let audit_started = Instant::now();
     let invocation = ScriptInvocation {
         envelope_version: SCRIPT_ENVELOPE_VERSION,
         invocation_id,
@@ -8053,6 +8205,18 @@ fn run_script_command(arguments: &[String]) -> i32 {
     }) {
         Some(path) if path.is_file() => path,
         _ => {
+            let outcome = AuditOutcome {
+                duration_ms: audit_duration_ms(audit_started),
+                result_class: "configuration".to_owned(),
+                failure_code: Some("host_worker_missing".to_owned()),
+                denied: true,
+                cancelled: false,
+                timed_out: false,
+                crashed: false,
+            };
+            if let Err(error) = audit_sink.append(&audit_invocation, &outcome) {
+                return report_audit_error(error);
+            }
             eprintln!(
                 "agenterm-script.exe is not installed next to agenterm-cli.exe; \
                  scripting is an optional component"
@@ -8062,7 +8226,7 @@ fn run_script_command(arguments: &[String]) -> i32 {
     };
     let expected_invocation_id = invocation.invocation_id.clone();
     let deadline = Duration::from_millis(invocation.budgets.wall_time_ms);
-    let result = match WorkerSupervisor::invoke(
+    let (result, cancel_requested) = match WorkerSupervisor::invoke(
         &executable,
         invocation,
         deadline,
@@ -8070,9 +8234,15 @@ fn run_script_command(arguments: &[String]) -> i32 {
     ) {
         Ok(outcome) => {
             let _worker_pid = outcome.worker_pid;
-            outcome.result
+            (outcome.result, outcome.cancel_requested)
         }
-        Err(error) => return report_supervisor_error(error),
+        Err(error) => {
+            let audit_outcome = audit_outcome_for_supervisor_error(&error, audit_started);
+            if let Err(audit_error) = audit_sink.append(&audit_invocation, &audit_outcome) {
+                return report_audit_error(audit_error);
+            }
+            return report_supervisor_error(error);
+        }
     };
     if result.envelope_version != SCRIPT_ENVELOPE_VERSION
         || result.api_version != SCRIPT_API_VERSION
@@ -8080,6 +8250,18 @@ fn run_script_command(arguments: &[String]) -> i32 {
         || result.operation != Some(operation)
         || result.profile != Some(profile)
     {
+        let audit_outcome = AuditOutcome {
+            duration_ms: audit_duration_ms(audit_started),
+            result_class: "host".to_owned(),
+            failure_code: Some("host_worker_protocol".to_owned()),
+            denied: true,
+            cancelled: cancel_requested,
+            timed_out: false,
+            crashed: false,
+        };
+        if let Err(error) = audit_sink.append(&audit_invocation, &audit_outcome) {
+            return report_audit_error(error);
+        }
         eprintln!(
             "agenterm-script.exe returned a mismatched protocol result \
              (envelope/API/invocation/operation/profile identity)"
@@ -8092,8 +8274,24 @@ fn run_script_command(arguments: &[String]) -> i32 {
         result.exit_class != ScriptExitClass::Success && result.failure.is_some()
     };
     if !result_consistent {
+        let audit_outcome = AuditOutcome {
+            duration_ms: audit_duration_ms(audit_started),
+            result_class: "host".to_owned(),
+            failure_code: Some("host_worker_protocol".to_owned()),
+            denied: true,
+            cancelled: cancel_requested,
+            timed_out: false,
+            crashed: false,
+        };
+        if let Err(error) = audit_sink.append(&audit_invocation, &audit_outcome) {
+            return report_audit_error(error);
+        }
         eprintln!("agenterm-script.exe returned an inconsistent result envelope");
         return 1;
+    }
+    let audit_outcome = audit_outcome_for_result(&result, audit_started, cancel_requested);
+    if let Err(error) = audit_sink.append(&audit_invocation, &audit_outcome) {
+        return report_audit_error(error);
     }
     if arguments.iter().any(|argument| argument == "--json") {
         println!(
@@ -8177,6 +8375,96 @@ fn report_supervisor_error(error: SupervisorError) -> i32 {
         })
     );
     exit_code
+}
+
+fn audit_budgets(budgets: &ScriptBudgets) -> AuditBudgets {
+    AuditBudgets {
+        source_bytes: budgets.source_bytes,
+        operations: budgets.operations,
+        call_depth: budgets.call_depth,
+        expression_depth: budgets.expression_depth,
+        collection_items: budgets.collection_items,
+        string_bytes: budgets.string_bytes,
+        output_bytes: budgets.output_bytes,
+        wall_time_ms: budgets.wall_time_ms,
+    }
+}
+
+fn audit_duration_ms(started: Instant) -> u64 {
+    started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
+}
+
+fn audit_outcome_for_result(
+    result: &script_protocol::ScriptResult,
+    started: Instant,
+    cancel_requested: bool,
+) -> AuditOutcome {
+    let failure_code = result.failure.as_ref().map(|failure| failure.code.clone());
+    let denied = result.exit_class == ScriptExitClass::Configuration
+        || failure_code.as_deref().is_some_and(|code| {
+            matches!(
+                code,
+                "script_api_unknown"
+                    | "script_api_unavailable"
+                    | "configuration_observation"
+                    | "protocol_broker_unavailable"
+            )
+        });
+    let timed_out = failure_code.as_deref() == Some("limit_wall_time");
+    AuditOutcome {
+        duration_ms: audit_duration_ms(started),
+        result_class: result.exit_class.as_str().to_owned(),
+        failure_code,
+        denied,
+        cancelled: cancel_requested,
+        timed_out,
+        crashed: false,
+    }
+}
+
+fn audit_outcome_for_supervisor_error(error: &SupervisorError, started: Instant) -> AuditOutcome {
+    let (result_class, failure_code, denied, cancelled, timed_out, crashed) = match error {
+        SupervisorError::ConcurrencyLimit => (
+            "configuration",
+            "host_concurrency_limit",
+            true,
+            false,
+            false,
+            false,
+        ),
+        SupervisorError::HardTimeout { .. } => {
+            ("limit", "host_hard_timeout", false, true, true, false)
+        }
+        SupervisorError::WorkerCrash { .. } => {
+            ("host", "host_worker_crash", false, false, false, true)
+        }
+        SupervisorError::Spawn(_) => ("host", "host_worker_spawn", true, false, false, false),
+        SupervisorError::Transport(_) => {
+            ("host", "host_worker_transport", false, false, false, false)
+        }
+        SupervisorError::Protocol(_) => ("host", "host_worker_protocol", true, false, false, false),
+    };
+    AuditOutcome {
+        duration_ms: audit_duration_ms(started),
+        result_class: result_class.to_owned(),
+        failure_code: Some(failure_code.to_owned()),
+        denied,
+        cancelled,
+        timed_out,
+        crashed,
+    }
+}
+
+fn report_audit_error(message: String) -> i32 {
+    eprintln!(
+        "{}",
+        serde_json::json!({
+            "code": "host_audit_write",
+            "message": message,
+            "exit_class": "host",
+        })
+    );
+    1
 }
 
 fn read_script_source(
@@ -8363,28 +8651,46 @@ fn run_wait_events(arguments: &[String]) -> i32 {
 }
 
 fn run_wait_ui(arguments: &[String]) -> i32 {
-    let timeout_ms = option_value(arguments, "--timeout-ms")
-        .and_then(|value| value.parse::<u64>().ok())
-        .unwrap_or(10_000);
+    let timeout_ms = match option_value(arguments, "--timeout-ms") {
+        Some(value) => match value.parse::<u64>() {
+            Ok(value) => value,
+            Err(_) => {
+                eprintln!("wait-ui --timeout-ms must be a non-negative integer");
+                return 2;
+            }
+        },
+        None => 10_000,
+    };
     let deadline = std::time::Instant::now() + Duration::from_millis(timeout_ms);
     let expected_active = option_value(arguments, "--active");
     let expected_focus = option_value(arguments, "--focus");
     let expected_state = option_value(arguments, "--tab-state");
     let expected_window_state = option_value(arguments, "--window-state");
+    let expected_modal_kind = option_value(arguments, "--modal-kind");
+    let expected_modal_target = option_value(arguments, "--modal-target");
     let expected_client_width =
         option_value(arguments, "--client-width").and_then(|value| value.parse::<i64>().ok());
     let expected_client_height =
         option_value(arguments, "--client-height").and_then(|value| value.parse::<i64>().ok());
     let target = option_value(arguments, "-t");
+    if expected_modal_kind.is_some_and(|kind| matches!(kind, "none" | "closed"))
+        && expected_modal_target.is_some()
+    {
+        eprintln!("wait-ui --modal-target cannot be combined with --modal-kind none or closed");
+        return 2;
+    }
     if expected_active.is_none()
         && expected_focus.is_none()
         && expected_state.is_none()
         && expected_window_state.is_none()
         && expected_client_width.is_none()
         && expected_client_height.is_none()
+        && expected_modal_kind.is_none()
+        && expected_modal_target.is_none()
     {
         eprintln!(
-            "wait-ui requires an active, focus, tab-state, window-state, or client-size condition"
+            "wait-ui requires an active, focus, tab-state, window-state, client-size, \
+             modal-kind, or modal-target condition"
         );
         return 1;
     }
@@ -8421,23 +8727,47 @@ fn run_wait_ui(arguments: &[String]) -> i32 {
                     let height_matches = expected_client_height.is_none_or(|expected| {
                         snapshot["window"]["client_height"].as_i64() == Some(expected)
                     });
+                    let modal_matches = snapshot_modal_matches(
+                        &snapshot,
+                        expected_modal_kind,
+                        expected_modal_target,
+                    );
                     if active_matches
                         && focus_matches
                         && state_matches
                         && window_state_matches
                         && width_matches
                         && height_matches
+                        && modal_matches
                     {
                         println!("{}", response.output);
                         return 0;
                     }
                     if std::time::Instant::now() >= deadline {
                         eprintln!(
-                            "wait-ui timed out after {timeout_ms}ms; last state:\n{}",
-                            response.output
+                            "{}",
+                            serde_json::json!({
+                                "code": "ui_wait_timeout",
+                                "timeout_ms": timeout_ms,
+                                "expected": {
+                                    "active": expected_active,
+                                    "focus": expected_focus,
+                                    "tab_state": expected_state,
+                                    "target": target,
+                                    "window_state": expected_window_state,
+                                    "client_width": expected_client_width,
+                                    "client_height": expected_client_height,
+                                    "modal_kind": expected_modal_kind,
+                                    "modal_target": expected_modal_target,
+                                },
+                                "last_state": snapshot,
+                            })
                         );
                         return 1;
                     }
+                } else {
+                    eprintln!("wait-ui received an invalid UI snapshot");
+                    return 1;
                 }
             }
             Ok(response) => {
@@ -8588,11 +8918,12 @@ Usage:
   agenterm-cli set-setting terminal.font-size 8..36
   agenterm-cli send-mouse [-t target] -x col -y row [--button left] [--action press]
   agenterm-cli ui-snapshot
-  agenterm-cli ui-action new-tab|new-child|edit-tab|toggle-tree|toggle-tabs|select-tab|close-tab|close-window|keep-server-running|stop-server-and-exit|confirm|cancel|composer-send|copy-selection|open-cwd-editor|cwd-prepare|cwd-prepare-append|cwd-prepare-replace|cwd-send-now|open-proxy-editor|proxy-toggle-visibility|proxy-reveal-credentials|proxy-prepare|proxy-send-now
+  agenterm-cli ui-action new-tab|new-child|edit-tab|toggle-tree|tabs-show|tabs-hide|tabs-toggle|toggle-tabs|tabs-set-width|select-tab|close-tab|close-window|keep-server-running|stop-server-and-exit|confirm|cancel|composer-send|copy-selection|open-cwd-editor|cwd-prepare|cwd-prepare-append|cwd-prepare-replace|cwd-send-now|open-proxy-editor|proxy-toggle-visibility|proxy-reveal-credentials|proxy-prepare|proxy-send-now
+  agenterm-cli ui-action tabs-set-width --width 180..480
   agenterm-cli ui-action proxy-prepare|proxy-send-now [-t target] --stdin
   agenterm-cli focus terminal|composer|tabs [-t target]
   agenterm-cli wait-pane [-t target] (--contains text|--dead|--submit-complete) [--timeout-ms ms]
-  agenterm-cli wait-ui [--active @id] [--focus surface] [-t target --tab-state state]
+  agenterm-cli wait-ui [--active @id] [--focus surface] [-t target --tab-state state] [--modal-kind KIND|none|closed] [--modal-target target]
   agenterm-cli protocol-info
   agenterm-cli list-panes [-F format]
   agenterm-cli list-sessions | has-session | kill-server | server-kill"
@@ -8630,6 +8961,12 @@ fn protocol_info_json() -> String {
     serde_json::to_string_pretty(&serde_json::json!({
         "protocol_version": 1,
         "agenterm_version": env!("CARGO_PKG_VERSION"),
+        "operation_catalog": {
+            "schema_version": OPERATION_CATALOG_SCHEMA_VERSION,
+            "classification_only": true,
+            "authorization_policy": false,
+            "operations": OPERATION_CATALOG,
+        },
         "compatibility": {
             "tmux_rmux": [
                 "new-session", "list-sessions", "has-session",
@@ -8662,7 +8999,8 @@ fn protocol_info_json() -> String {
             "tab_environment": true,
             "codex_launcher": true,
             "mux_frontend": true,
-            "instance_discovery": true
+            "instance_discovery": true,
+            "typed_operations": true
         }
     }))
     .unwrap_or_default()
@@ -8874,7 +9212,7 @@ mod tests {
     use super::{
         EditShortcut, FocusSurface, TerminalPoint, TerminalSelection, ThemeId, edit_shortcut,
         effective_theme, gui_cli_guidance, is_latched_navigation_repeat, normalize_terminal_paste,
-        parse_gui_launch, parse_loopback_ipc_address, redact_proxy_stream_chunk,
+        parse_gui_launch, parse_loopback_ipc_address, redact_proxy_stream_chunk, run_wait_ui,
         surface_navigation, terminal_copy_shortcut, terminal_selection_text,
     };
 
@@ -9122,12 +9460,12 @@ mod tests {
     #[test]
     fn gui_launcher_accepts_no_activate_and_address_in_either_order() {
         let (options, address) = parse_gui_launch(&[
-            "--not-foreground".to_owned(),
+            "--no-activate".to_owned(),
             "--address".to_owned(),
             "127.0.0.1:48815".to_owned(),
         ])
         .unwrap();
-        assert!(options.not_foreground);
+        assert!(options.no_activate);
         assert_eq!(address.as_deref(), Some("127.0.0.1:48815"));
 
         let (options, address) = parse_gui_launch(&[
@@ -9136,13 +9474,15 @@ mod tests {
             "--not-foreground".to_owned(),
         ])
         .unwrap();
-        assert!(options.not_foreground);
+        assert!(options.no_activate);
         assert_eq!(address.as_deref(), Some("127.0.0.1:48816"));
     }
 
     #[test]
     fn gui_launcher_rejects_duplicate_unknown_and_missing_options() {
         for arguments in [
+            vec!["--no-activate", "--no-activate"],
+            vec!["--no-activate", "--not-foreground"],
             vec!["--not-foreground", "--not-foreground"],
             vec![
                 "--address",
@@ -9151,7 +9491,7 @@ mod tests {
                 "127.0.0.1:48816",
             ],
             vec!["--address"],
-            vec!["--address", "--not-foreground"],
+            vec!["--address", "--no-activate"],
             vec!["--unknown"],
         ] {
             assert!(
@@ -9159,5 +9499,17 @@ mod tests {
                     .is_err()
             );
         }
+    }
+
+    #[test]
+    fn wait_ui_rejects_closed_modal_with_a_target_without_polling() {
+        let arguments = vec![
+            "wait-ui".to_owned(),
+            "--modal-kind".to_owned(),
+            "closed".to_owned(),
+            "--modal-target".to_owned(),
+            "@1".to_owned(),
+        ];
+        assert_eq!(run_wait_ui(&arguments), 2);
     }
 }

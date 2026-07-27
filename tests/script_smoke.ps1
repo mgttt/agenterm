@@ -10,6 +10,7 @@ $declaredEvidence = @(
     'script.rhai-deny-budget'
     'script.rhai-framed'
     'script.supervisor'
+    'script.audit'
 )
 if ($ListEvidence) {
     $declaredEvidence
@@ -34,9 +35,12 @@ if (-not (Test-Path -LiteralPath $workerExe)) {
 
 $previousAddress = $env:AGENTERM_IPC_ADDRESS
 $previousWorkspace = $env:AGENTERM_WORKSPACE_PATH
+$previousAuditPath = $env:AGENTERM_SCRIPT_AUDIT_PATH
+$previousAuditSecret = $env:AGENTERM_AUDIT_ENV_SECRET
 $address = "127.0.0.1:$((51000 + ($PID % 1000)))"
 $workspaceFile = Join-Path $env:TEMP "agenterm-script-$PID.json"
 $sourceFile = Join-Path $env:TEMP "agenterm-script-$PID.rhai"
+$auditFile = Join-Path $env:TEMP "agenterm-script-audit-$PID.jsonl"
 $serverStarted = $false
 
 function Invoke-Script {
@@ -275,6 +279,8 @@ namespace AgenTermSmoke {
 
 try {
     Remove-Item Env:AGENTERM_IPC_ADDRESS -ErrorAction SilentlyContinue
+    $env:AGENTERM_SCRIPT_AUDIT_PATH = $auditFile
+    $env:AGENTERM_AUDIT_ENV_SECRET = 'AUDIT_ENV_SECRET'
 
     Write-Host 'STEP offline scripting API discovery'
     $apiResult = Invoke-Script @('script', 'api', '--json') | ConvertFrom-Json
@@ -559,7 +565,77 @@ try {
     }
     Write-Evidence 'script.rhai-observe'
 
-    Write-Host 'PASS: safe scripting API, pure/observe profiles, denial, and budgets'
+    Write-Host 'STEP privacy-bounded reusable script audit'
+    [IO.File]::WriteAllText(
+        $sourceFile,
+        'print("AUDIT_STDOUT_SECRET"); args[0] + "AUDIT_SOURCE_SECRET"'
+    )
+    $auditSecretResult = Invoke-Script @(
+        'script', 'run', $sourceFile, '--', 'AUDIT_ARG_SECRET'
+    )
+    if (-not $auditSecretResult.Contains('AUDIT_STDOUT_SECRET') -or
+        -not $auditSecretResult.Contains('AUDIT_ARG_SECRETAUDIT_SOURCE_SECRET')) {
+        throw 'audit privacy fixture did not exercise source/stdout/argv secrets'
+    }
+    $auditText = [IO.File]::ReadAllText($auditFile)
+    foreach ($secret in @(
+        'AUDIT_STDOUT_SECRET',
+        'AUDIT_ARG_SECRET',
+        'AUDIT_SOURCE_SECRET',
+        'AUDIT_ENV_SECRET'
+    )) {
+        if ($auditText.Contains($secret)) {
+            throw "script audit leaked forbidden value: $secret"
+        }
+    }
+    foreach ($forbiddenField in @(
+        '"source":',
+        '"arguments":',
+        '"argv":',
+        '"stdout":',
+        '"pane":',
+        '"environment":',
+        '"clipboard":',
+        '"credentials":'
+    )) {
+        if ($auditText.Contains($forbiddenField)) {
+            throw "script audit exposed forbidden field: $forbiddenField"
+        }
+    }
+    $auditRecords = @(
+        [IO.File]::ReadAllLines($auditFile) |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            ForEach-Object { $_ | ConvertFrom-Json }
+    )
+    $auditFailureCodes = @($auditRecords | ForEach-Object { $_.failure_code })
+    if ($auditRecords.Count -lt 10 -or
+        $auditFailureCodes -notcontains 'script_api_unavailable' -or
+        $auditFailureCodes -notcontains 'limit_wall_time' -or
+        $auditFailureCodes -notcontains 'host_hard_timeout' -or
+        $auditFailureCodes -notcontains 'host_worker_crash' -or
+        $auditFailureCodes -notcontains 'host_concurrency_limit' -or
+        @($auditRecords | Where-Object { $_.denied }).Count -lt 1 -or
+        @($auditRecords | Where-Object { $_.cancelled -and $_.timed_out }).Count -lt 1 -or
+        @($auditRecords | Where-Object { $_.crashed }).Count -lt 1 -or
+        @($auditRecords | Where-Object {
+            $_.effective_profile -eq 'observe' -and
+            $_.effective_capabilities -contains 'observe.snapshot' -and
+            $_.broker_operation_ids -contains 'ui.snapshot'
+        }).Count -lt 1 -or
+        @($auditRecords | Where-Object {
+            $_.source_fingerprint -match '^fnv1a128:[0-9a-f]{32}$'
+        }).Count -ne $auditRecords.Count) {
+        throw 'script audit did not capture the required bounded result metadata'
+    }
+    $env:AGENTERM_SCRIPT_AUDIT_PATH = $env:TEMP
+    $auditWriteFailure = Invoke-ScriptFailure 1 @('script', 'eval', '1')
+    $env:AGENTERM_SCRIPT_AUDIT_PATH = $auditFile
+    if (-not $auditWriteFailure.Contains('"code":"host_audit_write"')) {
+        throw 'script audit write failure did not fail closed with a typed host error'
+    }
+    Write-Evidence 'script.audit'
+
+    Write-Host 'PASS: safe scripting API, supervision, audit privacy, denial, and budgets'
 }
 finally {
     if ($serverStarted) {
@@ -567,6 +643,8 @@ finally {
     }
     Remove-Item -LiteralPath $sourceFile -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $workspaceFile -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $auditFile -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath "$auditFile.1" -ErrorAction SilentlyContinue
     if ($null -eq $previousAddress) {
         Remove-Item Env:AGENTERM_IPC_ADDRESS -ErrorAction SilentlyContinue
     }
@@ -578,5 +656,17 @@ finally {
     }
     else {
         $env:AGENTERM_WORKSPACE_PATH = $previousWorkspace
+    }
+    if ($null -eq $previousAuditPath) {
+        Remove-Item Env:AGENTERM_SCRIPT_AUDIT_PATH -ErrorAction SilentlyContinue
+    }
+    else {
+        $env:AGENTERM_SCRIPT_AUDIT_PATH = $previousAuditPath
+    }
+    if ($null -eq $previousAuditSecret) {
+        Remove-Item Env:AGENTERM_AUDIT_ENV_SECRET -ErrorAction SilentlyContinue
+    }
+    else {
+        $env:AGENTERM_AUDIT_ENV_SECRET = $previousAuditSecret
     }
 }

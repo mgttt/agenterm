@@ -116,7 +116,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       "kind": "behavior",
       "status": "shipped",
       "evidence_mode": "black-box",
-      "prd": "`agenterm.exe --not-foreground` shows or starts the workspace without stealing foreground",
+      "prd": "`agenterm.exe --no-activate` shows or starts the workspace without activation or focus transfer; `--not-foreground` remains an alias",
       "evidence_ids": ["ux.no-activate-launch"]
     },
     {
@@ -162,6 +162,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       "evidence_mode": "black-box",
       "prd": "semantic focus and UI actions",
       "evidence_ids": ["ux.semantic-ui-automation"]
+    },
+    {
+      "id": "control.modal-wait",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "`wait-ui` directly waits for modal kind, target, or closed state with a stable timeout code",
+      "evidence_ids": ["ux.modal-wait"]
     },
     {
       "id": "workspace.keyboard-surface-navigation",
@@ -250,6 +258,15 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       "evidence_ids": ["cli.observable-events"]
     },
     {
+      "id": "control.typed-operations",
+      "protocol_feature": "typed_operations",
+      "kind": "architecture",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "typed operation catalog shared by CLI validation, IPC dispatch, capability discovery, stable errors, and event attribution",
+      "evidence_ids": ["cli.typed-tabs-operations"]
+    },
+    {
       "id": "scripting.rhai-pure",
       "kind": "behavior",
       "status": "shipped",
@@ -272,6 +289,22 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       "evidence_mode": "black-box",
       "prd": "Rhai denies ambient mutation authority and enforces operation budgets",
       "evidence_ids": ["script.rhai-deny-budget", "script.rhai-framed"]
+    },
+    {
+      "id": "scripting.supervisor",
+      "kind": "architecture",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "extract a Rhai-independent worker supervisor with kill-on-close",
+      "evidence_ids": ["script.supervisor"]
+    },
+    {
+      "id": "scripting.audit",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "append privacy-bounded audit records for identity/fingerprint",
+      "evidence_ids": ["script.audit"]
     },
     {
       "id": "scripting.rust-host-rhai-language",
@@ -333,8 +366,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       delayed output, prefers inherited stderr, and otherwise briefly attaches
       to the parent console without allocating a console or rebinding stdio;
       startup smoke verifies new-GUI and focus-existing inherited-stderr paths
-    - [x] `agenterm.exe --not-foreground` is a per-launch, non-persistent
-      no-activate request accepted before or after `--address HOST:PORT`: a new
+    - [x] `agenterm.exe --no-activate` is a per-launch, non-persistent
+      no-activate request accepted before or after `--address HOST:PORT`; the
+      original `--not-foreground` spelling remains a compatibility alias: a new
       workspace becomes visible without activation, while an existing visible
       or minimized window is left untouched and a detached window is shown in
       the background without changing its server, tabs, or PTYs; duplicate,
@@ -711,7 +745,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
         - [ ] cancellation first signals the worker cooperatively, then
           terminates its Job Object after a bounded grace period; CLI
           interruption, timeout, and parent exit cannot orphan a worker
-        - [ ] one append-only audit record captures invocation ID, timestamp,
+        - [x] one append-only audit record captures invocation ID, timestamp,
           source fingerprint/label, API version, profile, requested/effective
           budgets, duration, exit class, cancellation, and denials, but not
           source, arguments, pane contents, environment values, or stdout
@@ -981,7 +1015,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
         - [ ] `shutdown --no-save` escape hatch for instances whose workspace
           destination has become unwritable
         - `wait-ui [--active @id] [--focus surface] [-t target
-          --tab-state running|dead] [--timeout-ms ms]`
+          --tab-state running|dead] [--modal-kind KIND|none|closed]
+          [--modal-target target] [--timeout-ms ms]`
       - Safe scripting
         - `script api [--json]`
         - `script check FILE|- [--profile pure|observe]`
@@ -994,11 +1029,15 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
         - `set-tab-note [-t target] text`, `show-tab-note [-t target]`
       - Semantic UI control
         - `focus terminal|composer|tabs [-t target]` (`sidebar` remains an alias)
-        - `ui-action new-tab|new-child|edit-tab|toggle-tree|toggle-tabs|select-tab|close-tab|confirm|cancel|
+        - `ui-action new-tab|new-child|edit-tab|toggle-tree|tabs-show|tabs-hide|tabs-toggle|toggle-tabs|tabs-set-width|select-tab|close-tab|confirm|cancel|
           composer-send|copy-selection|open-settings|window-minimize|
           window-maximize|window-restore [-t target]`
         - `ui-action window-resize --width PX --height PX`
         - [x] semantic actions control window state and client size without corrupting the PTY grid
+        - [x] `wait-ui` directly waits for modal kind, target, or closed state with a stable timeout code
+          - Settings, confirmation, CWD, and proxy surfaces are addressable by
+            kind/target; `none` and `closed` both mean no modal, and timeout
+            failures expose the stable `ui_wait_timeout` code
       - Visual and terminal diagnostics
         - `screenshot [-o path.png]`
         - `screenshot-pane|screenshot-tab [-t target] [-o path.png]`
@@ -1308,45 +1347,50 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
           terminal; Settings, close confirmation, composer, scrollbars,
           selection, screenshots, PTY sizing, and hit testing all consume the
           same effective content origin
-      - [x] `agenterm.exe --not-foreground` shows or starts the workspace without stealing foreground
+      - [x] `agenterm.exe --no-activate` shows or starts the workspace without activation or focus transfer; `--not-foreground` remains an alias
       - Release core: detach-first server lifecycle
         - [x] detach-first window close preserves the live server and explicit stop creates a fresh runtime
-        - [ ] replace unconditional `WM_CLOSE` destruction with a host-owned
+        - [x] replace unconditional `WM_CLOSE` destruction with a host-owned
           three-choice close confirmation: `Keep Server Running` is the default
           and hides the window while preserving the same server, epoch, IPC,
           live PTYs, scrollback, and drafts; `Stop Server & Exit` saves
           workspace metadata then ends the server and PTYs; `Cancel` and Esc
           return without changing state
-        - [ ] treat the default choice as detach rather than false process exit:
+        - [x] treat the default choice as detach rather than false process exit:
           a later `agenterm.exe`, `start-server`, or `attach-session` invocation
           re-shows and focuses the same hidden HWND and server process
-        - [ ] keep explicit automation noninteractive: `shutdown` performs the
+        - [x] keep explicit automation noninteractive: `shutdown` performs the
           save-and-stop path, while `kill-server`/`server-kill` retain their
           stronger destructive saved-session semantics; Windows logoff/shutdown
           saves and exits without blocking the OS on the interactive modal
-        - [ ] expose close-modal, visible/hidden, detach, reattach, and shutdown
+        - [~] expose close-modal, visible/hidden, detach, reattach, and shutdown
           state through typed snapshots, waits, events, and `server-list --json`
-          without claiming continuity after a real server stop
+          without claiming continuity after a real server stop; snapshots,
+          waits, and events are typed, while `server-list --json` still lacks
+          explicit visible/detached fields
       - Release core: Observable Fleet completion
         - [ ] audit every declared event kind against its committed state and
           fill any missing transition coverage without expanding into durable
           replay or unbounded terminal logging
-        - [ ] add public black-box restart, bounded-history gap, and concurrent
+        - [x] add public black-box restart, bounded-history gap, and concurrent
           reader/waiter journeys, including snapshot-to-follow handoff and
           cancellation cleanup
-        - [ ] make modal kind/target directly waitable so close-confirmation and
+        - [x] make modal kind/target directly waitable so close-confirmation and
           Settings automation no longer require client-side polling
       - Release core: typed operation foundation
-        - [ ] replace UI-specific command branching incrementally with one
-          typed operation catalog shared by CLI validation, IPC dispatch,
-          capability discovery, stable errors, and event/audit attribution
-        - [ ] classify operations as observe, control, or destructive; this is
+        - [x] typed operation catalog shared by CLI validation, IPC dispatch, capability discovery, stable errors, and event attribution
+          replaces UI-specific branching incrementally, beginning with adaptive
+          Tabs operations rather than claiming every legacy command is migrated
+        - [x] classify operations as observe, control, or destructive; this is
           an honest authority boundary for later Rhai/MCP consumers, not yet a
-          policy system that grants autonomous control
-        - [ ] expose tabs show/hide/toggle and bounded width adjustment through
+          policy system that grants autonomous control; discovery labels the
+          catalog classification-only and reports no authorization policy
+        - [x] expose tabs show/hide/toggle and bounded width adjustment through
           typed semantic actions as well as physical UI, with stable snapshot
           fields for visibility, configured/effective width, grip geometry,
-          bounds, and system-menu state
+          bounds, and system-menu state; `tabs-show`, `tabs-hide`,
+          `tabs-toggle`, and `tabs-set-width --width 180..480` use stable
+          `ui.tabs.*` IDs while legacy `toggle-tabs` remains an alias
       - Release core: Script Platform v2
         - [x] repair the shipped v1 contract before adding authority:
           `script check` rejects unknown/profile-inaccessible APIs, wall-time
@@ -1369,7 +1413,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
         - [ ] make `script api --json` the exact typed catalog and make
           `script check` validate API names, profiles, capabilities, versions,
           and static limits offline rather than only compiling Rhai syntax
-        - [ ] append privacy-bounded audit records for identity/fingerprint,
+        - [x] append privacy-bounded audit records for identity/fingerprint,
           requested/effective profile, capabilities and budgets, broker
           operation IDs, duration, result class, denial, cancellation, timeout,
           and crash without source, argv, pane content, environment values,

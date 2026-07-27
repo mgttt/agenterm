@@ -52,6 +52,7 @@ pub(crate) enum SupervisorError {
 pub(crate) struct SupervisedResult {
     pub(crate) result: ScriptResult,
     pub(crate) worker_pid: u32,
+    pub(crate) cancel_requested: bool,
 }
 
 pub(crate) struct WorkerSupervisor;
@@ -102,6 +103,7 @@ impl WorkerSupervisor {
         let reader = thread::spawn(move || {
             let _ = sender.send(read_frame(stdout));
         });
+        let mut cancel_requested = false;
         let response = match receiver.recv_timeout(deadline) {
             Ok(response) => response,
             Err(mpsc::RecvTimeoutError::Disconnected) => {
@@ -115,6 +117,7 @@ impl WorkerSupervisor {
                 });
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
+                cancel_requested = true;
                 let cancel = ScriptFrame {
                     frame_version: SCRIPT_FRAME_VERSION,
                     frame_id: format!("cancel-{invocation_id}"),
@@ -180,7 +183,11 @@ impl WorkerSupervisor {
             failure.message =
                 "host deadline reached; worker stopped during cooperative cancellation".to_owned();
         }
-        Ok(SupervisedResult { result, worker_pid })
+        Ok(SupervisedResult {
+            result,
+            worker_pid,
+            cancel_requested,
+        })
     }
 }
 

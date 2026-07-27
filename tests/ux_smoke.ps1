@@ -11,6 +11,7 @@ $declaredEvidence = @(
     'ux.live-close-confirmation'
     'ux.locale-consistency'
     'ux.keyboard-surface-navigation'
+    'ux.modal-wait'
     'ux.mouse-scrollback'
     'ux.no-activate-launch'
     'ux.persistent-workspace'
@@ -561,7 +562,68 @@ try {
         $cwdEditor.layout.status_bar.cwd.bounds.width -le 0) {
         throw 'CWD status segment/editor did not expose typed modal and focus semantics'
     }
+    $cwdTargetWait = Invoke-AgenTerm @(
+        'wait-ui', '--modal-target', $id, '--timeout-ms', '1000'
+    ) | ConvertFrom-Json
+    if ($cwdTargetWait.modal.kind -ne 'cwd-editor' -or
+        $cwdTargetWait.modal.window_id -ne $id) {
+        throw 'wait-ui --modal-target did not match the open CWD editor'
+    }
+    $cwdKindTargetWait = Invoke-AgenTerm @(
+        'wait-ui', '--modal-kind', 'cwd-editor', '--modal-target', $name,
+        '--timeout-ms', '1000'
+    ) | ConvertFrom-Json
+    if ($cwdKindTargetWait.modal.window_id -ne $id) {
+        throw 'wait-ui did not resolve a named modal target to its stable tab ID'
+    }
     Invoke-AgenTerm @('ui-action', 'cancel') | Out-Null
+    Invoke-AgenTerm @(
+        'wait-ui', '--modal-kind', 'none', '--timeout-ms', '1000'
+    ) | Out-Null
+
+    $previousPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $modalTimeoutOutput = & $Exe wait-ui --modal-kind proxy-editor `
+            --modal-target $id --timeout-ms 0 2>&1
+        $modalTimeoutExitCode = $LASTEXITCODE
+        $closedTargetOutput = & $Exe wait-ui --modal-kind closed `
+            --modal-target $id --timeout-ms 0 2>&1
+        $closedTargetExitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousPreference
+    }
+    $modalTimeout = (($modalTimeoutOutput | ForEach-Object ToString) -join "`n") |
+        ConvertFrom-Json
+    if ($modalTimeoutExitCode -ne 1 -or
+        $modalTimeout.code -ne 'ui_wait_timeout' -or
+        $modalTimeout.timeout_ms -ne 0 -or
+        $modalTimeout.expected.modal_kind -ne 'proxy-editor' -or
+        $modalTimeout.expected.modal_target -ne $id) {
+        throw 'wait-ui modal timeout did not expose its stable typed condition'
+    }
+    if ($closedTargetExitCode -ne 2 -or
+        (($closedTargetOutput | ForEach-Object ToString) -join "`n") -notmatch
+            'cannot be combined') {
+        throw 'wait-ui accepted a contradictory closed-modal target condition'
+    }
+
+    $proxyEditor = Invoke-AgenTerm @(
+        'ui-action', 'open-proxy-editor', '-t', $id
+    ) | ConvertFrom-Json
+    $proxyWait = Invoke-AgenTerm @(
+        'wait-ui', '--modal-kind', 'proxy-editor', '--modal-target', $id,
+        '--timeout-ms', '1000'
+    ) | ConvertFrom-Json
+    if ($proxyEditor.modal.kind -ne 'proxy-editor' -or
+        $proxyWait.modal.window_id -ne $id) {
+        throw 'wait-ui did not match the targeted proxy editor'
+    }
+    Invoke-AgenTerm @('ui-action', 'cancel') | Out-Null
+    Invoke-AgenTerm @(
+        'wait-ui', '--modal-kind', 'closed', '--timeout-ms', '1000'
+    ) | Out-Null
     $inputBytesBefore = [int](Invoke-AgenTerm @(
         'list-panes', '-t', $id, '-F', '#{pane_input_bytes}'
     ))
@@ -722,16 +784,16 @@ try {
         throw 'could not establish the no-activate test host as foreground'
     }
     $noActivate = Start-Process -FilePath $GuiExe -ArgumentList @(
-        '--not-foreground', '--address', $env:AGENTERM_IPC_ADDRESS
+        '--no-activate', '--address', $env:AGENTERM_IPC_ADDRESS
     ) -PassThru
     if (-not $noActivate.WaitForExit(1000) -or
         [AgenTermNativeTest]::ForegroundWindow() -ne $foregroundHost) {
-        throw '--not-foreground existing-server handoff stole foreground or did not exit'
+        throw '--no-activate existing-server handoff stole foreground or did not exit'
     }
     $noActivateSnapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
     if (-not $noActivateSnapshot.window.visible -or
         $noActivateSnapshot.window.detached) {
-        throw '--not-foreground existing-server handoff lost the visible window'
+        throw '--no-activate existing-server handoff lost the visible window'
     }
 
     $mainWorkspaceForNoActivate = $env:AGENTERM_WORKSPACE_PATH
@@ -761,7 +823,7 @@ try {
     if ([AgenTermNativeTest]::ForegroundWindow() -ne $foregroundHost -or
         -not $newNoActivateSnapshot.window.visible -or
         $newNoActivateSnapshot.window.detached) {
-        throw '--not-foreground new-server launch stole foreground or hid its window'
+        throw '--no-activate alias new-server launch stole foreground or hid its window'
     }
     Invoke-AgenTermAt -Address $noActivateAddress -CommandArgs @('kill-server') | Out-Null
     $newNoActivate.WaitForExit(5000) | Out-Null
@@ -1098,12 +1160,24 @@ try {
     if (-not $closeModal.window.visible -or $closeModal.window.detached) {
         throw 'opening the window-close modal changed window visibility'
     }
+    $closeModalWait = Invoke-AgenTerm @(
+        'wait-ui', '--modal-kind', 'confirm-window-close', '--timeout-ms', '1000'
+    ) | ConvertFrom-Json
+    if ($closeModalWait.modal.default_action -ne 'keep-server-running') {
+        throw 'wait-ui did not match the untargeted window-close confirmation'
+    }
 
     $afterCancel = Invoke-AgenTerm @('ui-action', 'cancel') | ConvertFrom-Json
+    Invoke-AgenTerm @(
+        'wait-ui', '--modal-kind', 'none', '--timeout-ms', '1000'
+    ) | Out-Null
     $afterCancelPane = Get-PaneSnapshot -Target $id
     $afterCancelServer = Get-IsolatedServer
     if ($null -ne $afterCancel.modal -or
         -not $afterCancel.window.visible -or $afterCancel.window.detached -or
+        -not $afterCancel.layout.composer.visible -or
+        -not $afterCancel.layout.composer.input_visible -or
+        -not $afterCancel.layout.composer.send_visible -or
         $afterCancel.event_position.epoch -ne $beforeWindowClose.event_position.epoch -or
         $afterCancelPane.pid -ne $beforePane.pid -or
         $afterCancelServer.pid -ne $beforeServer.pid -or
@@ -1122,7 +1196,8 @@ try {
     ) | ConvertFrom-Json
     if ($detachEvent.payload.visible -ne $false -or
         $detachEvent.payload.reason -ne 'detach' -or
-        $detached.window.visible -or -not $detached.window.detached) {
+        $detached.window.visible -or -not $detached.window.detached -or
+        $detached.layout.composer.visible) {
         throw 'keep-server-running did not publish and expose detached window state'
     }
 
@@ -1157,12 +1232,49 @@ try {
     if ($reattachEvent.payload.visible -ne $true -or
         $reattachEvent.payload.reason -ne 'launcher' -or
         -not $reattached.window.visible -or $reattached.window.detached -or
+        -not $reattached.layout.composer.visible -or
+        -not $reattached.layout.composer.input_visible -or
+        -not $reattached.layout.composer.send_visible -or
         $reattached.event_position.epoch -ne $beforeWindowClose.event_position.epoch -or
         $reattachedPane.pid -ne $beforePane.pid -or
         $reattachedServer.pid -ne $beforeServer.pid -or
         (Compare-Object $beforeTabIds @($reattached.tabs.id | Sort-Object))) {
-        throw 'agenterm.exe reattach did not preserve server, epoch, tabs, and PTY identity'
+        throw (
+            'agenterm.exe reattach did not preserve server, epoch, tabs, PTY identity, ' +
+            'and native composer controls'
+        )
     }
+
+    Write-Host 'STEP tab editor controls survive detach and reattach'
+    $noteEditor = Invoke-AgenTerm @('ui-action', 'edit-tab', '-t', $id) | ConvertFrom-Json
+    if (-not $noteEditor.layout.composer.visible -or
+        $noteEditor.focus.surface -ne 'note-editor') {
+        throw 'tab editor did not start with its native composer visible'
+    }
+    $noteDetachStart = Invoke-AgenTerm @('ui-action', 'close-window') | ConvertFrom-Json
+    $noteDetached = Invoke-AgenTerm @(
+        'ui-action', 'keep-server-running'
+    ) | ConvertFrom-Json
+    if ($noteDetached.layout.composer.visible -or
+        -not $noteDetached.window.detached) {
+        throw 'tab-editor detach did not hide the complete parent surface'
+    }
+    Start-Process -FilePath $GuiExe | Out-Null
+    Invoke-AgenTerm @(
+        'wait-events',
+        '--epoch', $noteDetachStart.event_position.epoch,
+        '--after', "$($noteDetachStart.event_position.sequence)",
+        '--kind', 'window.visibility',
+        '--timeout-ms', '5000'
+    ) | Out-Null
+    $noteReattached = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    if (-not $noteReattached.layout.composer.visible -or
+        -not $noteReattached.layout.composer.input_visible -or
+        -not $noteReattached.layout.composer.send_visible -or
+        $noteReattached.focus.surface -ne 'note-editor') {
+        throw 'reattached tab editor left its native input or Save control hidden'
+    }
+    Invoke-AgenTerm @('ui-action', 'cancel') | Out-Null
 
     Write-Host 'STEP stop server and exit creates a fresh isolated runtime'
     $mainWorkspace = $env:AGENTERM_WORKSPACE_PATH
@@ -1247,7 +1359,17 @@ try {
         $snapshot.focus.surface -ne 'settings') {
         throw 'settings modal/focus was not exposed'
     }
+    $settingsWait = Invoke-AgenTerm @(
+        'wait-ui', '--modal-kind', 'settings', '--timeout-ms', '1000'
+    ) | ConvertFrom-Json
+    if ($settingsWait.focus.surface -ne 'settings') {
+        throw 'wait-ui did not match the Settings modal'
+    }
     Invoke-AgenTerm @('ui-action', 'cancel') | Out-Null
+    Invoke-AgenTerm @(
+        'wait-ui', '--modal-kind', 'closed', '--timeout-ms', '1000'
+    ) | Out-Null
+    Write-Evidence 'ux.modal-wait'
 
     Write-Host 'STEP dead tab remains and closes without confirmation'
     Invoke-AgenTerm @('send-keys', '-t', $id, 'exit', 'Enter') | Out-Null

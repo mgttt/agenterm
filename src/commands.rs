@@ -1,5 +1,7 @@
 use std::{env, path::PathBuf, time::SystemTime};
 
+use serde_json::Value;
+
 pub(crate) const BACKSPACE_INPUT: &[u8] = b"\x7f";
 
 pub(crate) const SUPPORTED_COMMANDS: &str = "\
@@ -635,7 +637,9 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
         "wait-ui" => (
             "agenterm-cli wait-ui [--active @id] [--focus surface] \
              [-t target --tab-state state] [--window-state state] \
-             [--client-width PX --client-height PX] [--timeout-ms ms]",
+             [--client-width PX --client-height PX] \
+             [--modal-kind KIND|none|closed] [--modal-target target] \
+             [--timeout-ms ms]",
             &[
                 "--active",
                 "--focus",
@@ -644,6 +648,8 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
                 "--window-state",
                 "--client-width",
                 "--client-height",
+                "--modal-kind",
+                "--modal-target",
                 "--timeout-ms",
             ][..],
             &[][..],
@@ -680,6 +686,41 @@ pub(crate) fn option_value<'a>(args: &'a [String], option: &str) -> Option<&'a s
         .and_then(|position| args.get(position + 1))
         .filter(|value| value.as_str() != "--")
         .map(String::as_str)
+}
+
+pub(crate) fn snapshot_modal_matches(
+    snapshot: &Value,
+    expected_kind: Option<&str>,
+    expected_target: Option<&str>,
+) -> bool {
+    let modal = snapshot.get("modal").filter(|value| !value.is_null());
+    let kind_matches = expected_kind.is_none_or(|expected| {
+        if matches!(expected, "none" | "closed") {
+            modal.is_none()
+        } else {
+            modal.and_then(|value| value["kind"].as_str()) == Some(expected)
+        }
+    });
+    let target_matches = expected_target.is_none_or(|selector| {
+        let Some(actual) = modal.and_then(|value| value["window_id"].as_str()) else {
+            return false;
+        };
+        if actual == selector {
+            return true;
+        }
+        snapshot["tabs"].as_array().is_some_and(|tabs| {
+            tabs.iter().any(|tab| {
+                let selector_matches = tab["id"].as_str() == Some(selector)
+                    || tab["name"].as_str() == Some(selector)
+                    || selector
+                        .parse::<u64>()
+                        .ok()
+                        .is_some_and(|index| tab["index"].as_u64() == Some(index));
+                selector_matches && tab["id"].as_str() == Some(actual)
+            })
+        })
+    });
+    kind_matches && target_matches
 }
 
 pub(crate) fn parse_new_command(args: &[String]) -> (Option<String>, bool, Vec<String>) {
@@ -1021,5 +1062,65 @@ mod tests {
     fn canonicalizes_server_kill_to_the_existing_destructive_operation() {
         assert_eq!(canonical_control_command("server-kill"), "kill-server");
         assert_eq!(canonical_control_command("server-list"), "server-list");
+    }
+
+    #[test]
+    fn modal_wait_matches_kind_and_stable_or_resolved_target() {
+        let snapshot = serde_json::json!({
+            "modal": {
+                "kind": "cwd-editor",
+                "window_id": "@7",
+            },
+            "tabs": [{
+                "id": "@7",
+                "index": 2,
+                "name": "build",
+            }],
+        });
+        assert!(snapshot_modal_matches(
+            &snapshot,
+            Some("cwd-editor"),
+            Some("@7")
+        ));
+        assert!(snapshot_modal_matches(
+            &snapshot,
+            Some("cwd-editor"),
+            Some("build")
+        ));
+        assert!(snapshot_modal_matches(
+            &snapshot,
+            Some("cwd-editor"),
+            Some("2")
+        ));
+        assert!(snapshot_modal_matches(&snapshot, None, Some("build")));
+        assert!(!snapshot_modal_matches(
+            &snapshot,
+            Some("proxy-editor"),
+            Some("@7")
+        ));
+        assert!(!snapshot_modal_matches(
+            &snapshot,
+            Some("cwd-editor"),
+            Some("@8")
+        ));
+    }
+
+    #[test]
+    fn modal_wait_none_and_closed_require_no_open_modal() {
+        let closed = serde_json::json!({"modal": null, "tabs": []});
+        let settings = serde_json::json!({
+            "modal": {"kind": "settings"},
+            "tabs": [],
+        });
+        assert!(snapshot_modal_matches(&closed, Some("none"), None));
+        assert!(snapshot_modal_matches(&closed, Some("closed"), None));
+        assert!(!snapshot_modal_matches(&closed, None, Some("@1")));
+        assert!(!snapshot_modal_matches(&settings, Some("none"), None));
+        assert!(snapshot_modal_matches(&settings, Some("settings"), None));
+        assert!(!snapshot_modal_matches(
+            &settings,
+            Some("settings"),
+            Some("@1")
+        ));
     }
 }

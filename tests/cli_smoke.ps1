@@ -9,6 +9,7 @@ $declaredEvidence = @(
     'cli.remain-on-exit'
     'cli.stable-create-id'
     'cli.observable-events'
+    'cli.typed-tabs-operations'
 )
 if ($ListEvidence) {
     $declaredEvidence
@@ -90,6 +91,154 @@ try {
             throw "list-commands did not advertise: $expected"
         }
     }
+
+    Write-Host 'STEP typed operation discovery, Tabs semantics, and stable errors'
+    $liveAddress = $env:AGENTERM_IPC_ADDRESS
+    try {
+        $env:AGENTERM_IPC_ADDRESS = '127.0.0.1:1'
+        $offlineTypedError = Invoke-AgenTermExpectedFailure @(
+            'ui-action', 'tabs-teleport'
+        )
+        $offlineWidthError = Invoke-AgenTermExpectedFailure @(
+            'ui-action', 'tabs-set-width'
+        )
+    }
+    finally {
+        $env:AGENTERM_IPC_ADDRESS = $liveAddress
+    }
+    if (-not $offlineTypedError.Contains(
+        'operation_unknown[tabs-teleport]'
+    ) -or $offlineTypedError.Contains('connect')) {
+        throw 'typed operation validation did not fail offline before IPC discovery'
+    }
+    if (-not $offlineWidthError.Contains(
+        'operation_invalid_arguments[ui.tabs.set-width]'
+    ) -or $offlineWidthError.Contains('connect')) {
+        throw 'typed Tabs width validation did not fail offline before IPC discovery'
+    }
+
+    $protocol = Invoke-AgenTerm @('protocol-info') | ConvertFrom-Json
+    $operationCatalog = $protocol.operation_catalog
+    if ($operationCatalog.schema_version -ne 1 -or
+        -not $operationCatalog.classification_only -or
+        $operationCatalog.authorization_policy) {
+        throw 'protocol-info did not expose the classification-only typed operation catalog'
+    }
+    $expectedOperations = @{
+        'protocol.info' = 'observe'
+        'ui.tabs.show' = 'control'
+        'ui.tabs.hide' = 'control'
+        'ui.tabs.toggle' = 'control'
+        'ui.tabs.set-width' = 'control'
+        'server.kill' = 'destructive'
+    }
+    $operationIds = @($operationCatalog.operations.id)
+    if (@($operationIds | Select-Object -Unique).Count -ne $operationIds.Count) {
+        throw 'typed operation catalog contains duplicate stable IDs'
+    }
+    foreach ($entry in $expectedOperations.GetEnumerator()) {
+        $operation = @(
+            $operationCatalog.operations |
+                Where-Object id -eq $entry.Key
+        )
+        if ($operation.Count -ne 1 -or $operation[0].class -ne $entry.Value) {
+            throw "typed operation $($entry.Key) was absent or misclassified"
+        }
+    }
+    $toggleOperation = @(
+        $operationCatalog.operations |
+            Where-Object id -eq 'ui.tabs.toggle'
+    )[0]
+    if (@($toggleOperation.aliases) -notcontains 'toggle-tabs') {
+        throw 'typed operation discovery omitted the legacy toggle-tabs alias'
+    }
+
+    $tabsBaseline = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $configuredWidth = [int]$tabsBaseline.layout.sidebar.configured_width
+    $hiddenTabs = Invoke-AgenTerm @('ui-action', 'tabs-hide') | ConvertFrom-Json
+    if ($hiddenTabs.layout.sidebar.visible -or
+        $hiddenTabs.layout.sidebar.effective_width -ne 0 -or
+        $hiddenTabs.layout.sidebar.configured_width -ne $configuredWidth) {
+        throw 'ui.tabs.hide did not preserve configured width while collapsing Tabs'
+    }
+    $tabsEvents = Invoke-AgenTerm @(
+        'read-events',
+        '--epoch', $tabsBaseline.event_position.epoch,
+        '--after', "$($tabsBaseline.event_position.sequence)"
+    ) | ConvertFrom-Json
+    $hideEvent = @(
+        $tabsEvents.events |
+            Where-Object kind -eq 'layout.tabs.visibility' |
+            Select-Object -Last 1
+    )
+    if ($hideEvent.Count -ne 1 -or
+        $hideEvent[0].payload.operation_id -ne 'ui.tabs.hide') {
+        throw 'Tabs visibility event was not attributed to ui.tabs.hide'
+    }
+
+    $shownTabs = Invoke-AgenTerm @('ui-action', 'tabs-show') | ConvertFrom-Json
+    if (-not $shownTabs.layout.sidebar.visible) {
+        throw 'ui.tabs.show did not reveal Tabs'
+    }
+    $toggledTabs = Invoke-AgenTerm @('ui-action', 'tabs-toggle') | ConvertFrom-Json
+    if ($toggledTabs.layout.sidebar.visible) {
+        throw 'ui.tabs.toggle did not invert Tabs visibility'
+    }
+    $legacyToggle = Invoke-AgenTerm @('ui-action', 'toggle-tabs') | ConvertFrom-Json
+    if (-not $legacyToggle.layout.sidebar.visible) {
+        throw 'legacy toggle-tabs did not map to ui.tabs.toggle'
+    }
+
+    $widthBaseline = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    foreach ($width in @(180, 480)) {
+        $sizedTabs = Invoke-AgenTerm @(
+            'ui-action', 'tabs-set-width', '--width', "$width"
+        ) | ConvertFrom-Json
+        if ($sizedTabs.layout.sidebar.configured_width -ne $width -or
+            $sizedTabs.settings.tabs_width -ne $width) {
+            throw "ui.tabs.set-width did not accept boundary $width"
+        }
+    }
+    $widthEvents = Invoke-AgenTerm @(
+        'read-events',
+        '--epoch', $widthBaseline.event_position.epoch,
+        '--after', "$($widthBaseline.event_position.sequence)"
+    ) | ConvertFrom-Json
+    $widthEvent = @(
+        $widthEvents.events |
+            Where-Object kind -eq 'layout.tabs.width' |
+            Select-Object -Last 1
+    )
+    if ($widthEvent.Count -ne 1 -or
+        $widthEvent[0].payload.operation_id -ne 'ui.tabs.set-width' -or
+        $widthEvent[0].payload.configured_width -ne 480) {
+        throw 'Tabs width event was not attributed to ui.tabs.set-width'
+    }
+    foreach ($width in @(179, 481)) {
+        $widthError = Invoke-AgenTermExpectedFailure @(
+            'ui-action', 'tabs-set-width', '--width', "$width"
+        )
+        if (-not $widthError.Contains(
+            'operation_invalid_arguments[ui.tabs.set-width]'
+        )) {
+            throw "Tabs width $width did not fail with the stable typed error"
+        }
+    }
+    $unknownTabsError = Invoke-AgenTermExpectedFailure @(
+        'ui-action', 'tabs-teleport'
+    )
+    if (-not $unknownTabsError.Contains('operation_unknown[tabs-teleport]')) {
+        throw 'unknown typed Tabs action did not fail with its stable error'
+    }
+    $afterInvalidTabs = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    if ($afterInvalidTabs.layout.sidebar.configured_width -ne 480 -or
+        -not $afterInvalidTabs.layout.sidebar.visible) {
+        throw 'invalid typed Tabs operations mutated committed layout state'
+    }
+    Invoke-AgenTerm @(
+        'ui-action', 'tabs-set-width', '--width', "$configuredWidth"
+    ) | Out-Null
+    Write-Evidence 'cli.typed-tabs-operations'
 
     Write-Host 'STEP observable event snapshot, read, and bounded wait'
     $eventBaseline = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
