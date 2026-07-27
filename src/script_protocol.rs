@@ -94,6 +94,7 @@ pub enum ScriptFailureCategory {
     Limit,
     Script,
     Protocol,
+    Host,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -104,6 +105,7 @@ pub enum ScriptExitClass {
     Limit,
     Script,
     Protocol,
+    Host,
 }
 
 impl ScriptExitClass {
@@ -114,6 +116,7 @@ impl ScriptExitClass {
             Self::Limit => "limit",
             Self::Script => "script",
             Self::Protocol => "protocol",
+            Self::Host => "host",
         }
     }
 }

@@ -76,6 +76,7 @@ mod settings;
 mod tab_tree;
 mod theme;
 mod ui_geometry;
+mod worker_supervisor;
 mod working_context;
 mod workspace;
 
@@ -91,7 +92,7 @@ use protocol::{IpcRequest, IpcResponse};
 use rmux_status::parse_status_windows;
 use script_protocol::{
     SCRIPT_API_VERSION, SCRIPT_ENVELOPE_VERSION, ScriptBudgets, ScriptExitClass, ScriptInvocation,
-    ScriptOperation, ScriptProfile, ScriptResult,
+    ScriptOperation, ScriptProfile,
 };
 use settings::{AppConfig, config_path, load_config, save_config};
 use tab_tree::{TabTreeNode, TabTreeRow, tree_rows, would_create_cycle};
@@ -101,6 +102,7 @@ use ui_geometry::{
     WorkspaceLayoutInput, reset_tabs_width, scrollback_for_thumb_top, tabs_width_from_drag,
     terminal_scrollbar_geometry, tree_anchor_x, tree_row_at_y, tree_row_geometry, workspace_layout,
 };
+use worker_supervisor::{SupervisorError, WorkerSupervisor};
 use working_context::{
     CwdSource, CwdTracker, PROXY_MAX_BYTES, ProxyState, SecretValue, ShellKind, cwd_command,
     parse_osc7, parse_proxy_editor, proxy_command, validate_path,
@@ -8058,56 +8060,23 @@ fn run_script_command(arguments: &[String]) -> i32 {
             return 2;
         }
     };
-    let mut worker = match std::process::Command::new(&executable)
-        .arg("--worker")
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-    {
-        Ok(worker) => worker,
-        Err(error) => {
-            eprintln!("failed to start {}: {error}", executable.display());
-            return 1;
+    let expected_invocation_id = invocation.invocation_id.clone();
+    let deadline = Duration::from_millis(invocation.budgets.wall_time_ms);
+    let result = match WorkerSupervisor::invoke(
+        &executable,
+        invocation,
+        deadline,
+        Duration::from_millis(150),
+    ) {
+        Ok(outcome) => {
+            let _worker_pid = outcome.worker_pid;
+            outcome.result
         }
-    };
-    let serialized = match serde_json::to_vec(&invocation) {
-        Ok(serialized) => serialized,
-        Err(error) => {
-            let _ = worker.kill();
-            eprintln!("failed to encode script invocation: {error}");
-            return 1;
-        }
-    };
-    if worker
-        .stdin
-        .take()
-        .is_none_or(|mut input| input.write_all(&serialized).is_err())
-    {
-        let _ = worker.kill();
-        eprintln!("failed to send the invocation to agenterm-script.exe");
-        return 1;
-    }
-    let output = match worker.wait_with_output() {
-        Ok(output) => output,
-        Err(error) => {
-            eprintln!("failed to wait for agenterm-script.exe: {error}");
-            return 1;
-        }
-    };
-    let result: ScriptResult = match serde_json::from_slice(&output.stdout) {
-        Ok(result) => result,
-        Err(error) => {
-            eprintln!(
-                "agenterm-script.exe returned an invalid result: {error}\n{}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-            return 1;
-        }
+        Err(error) => return report_supervisor_error(error),
     };
     if result.envelope_version != SCRIPT_ENVELOPE_VERSION
         || result.api_version != SCRIPT_API_VERSION
-        || result.invocation_id != invocation.invocation_id
+        || result.invocation_id != expected_invocation_id
         || result.operation != Some(operation)
         || result.profile != Some(profile)
     {
@@ -8118,18 +8087,12 @@ fn run_script_command(arguments: &[String]) -> i32 {
         return 1;
     }
     let result_consistent = if result.ok {
-        output.status.success()
-            && result.exit_class == ScriptExitClass::Success
-            && result.failure.is_none()
+        result.exit_class == ScriptExitClass::Success && result.failure.is_none()
     } else {
-        !output.status.success()
-            && result.exit_class != ScriptExitClass::Success
-            && result.failure.is_some()
+        result.exit_class != ScriptExitClass::Success && result.failure.is_some()
     };
     if !result_consistent {
-        eprintln!(
-            "agenterm-script.exe returned an inconsistent process status and result envelope"
-        );
+        eprintln!("agenterm-script.exe returned an inconsistent result envelope");
         return 1;
     }
     if arguments.iter().any(|argument| argument == "--json") {
@@ -8176,6 +8139,44 @@ fn run_script_command(arguments: &[String]) -> i32 {
             _ => 1,
         }
     }
+}
+
+fn report_supervisor_error(error: SupervisorError) -> i32 {
+    let (code, message, exit_class, exit_code) = match error {
+        SupervisorError::ConcurrencyLimit => (
+            "host_concurrency_limit",
+            "script worker concurrency limit reached".to_owned(),
+            "configuration",
+            2,
+        ),
+        SupervisorError::HardTimeout { worker_pid } => (
+            "host_hard_timeout",
+            format!("script worker {worker_pid} exceeded the host deadline and was terminated"),
+            "limit",
+            3,
+        ),
+        SupervisorError::WorkerCrash {
+            worker_pid,
+            exit_code: worker_exit,
+        } => (
+            "host_worker_crash",
+            format!("script worker {worker_pid} exited before a valid result ({worker_exit:?})"),
+            "host",
+            1,
+        ),
+        SupervisorError::Spawn(message) => ("host_worker_spawn", message, "host", 1),
+        SupervisorError::Transport(message) => ("host_worker_transport", message, "host", 1),
+        SupervisorError::Protocol(message) => ("host_worker_protocol", message, "host", 1),
+    };
+    eprintln!(
+        "{}",
+        serde_json::json!({
+            "code": code,
+            "message": message,
+            "exit_class": exit_class,
+        })
+    );
+    exit_code
 }
 
 fn read_script_source(

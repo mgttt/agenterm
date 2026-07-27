@@ -1348,17 +1348,17 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
           fields for visibility, configured/effective width, grip geometry,
           bounds, and system-menu state
       - Release core: Script Platform v2
-        - [ ] repair the shipped v1 contract before adding authority:
+        - [x] repair the shipped v1 contract before adding authority:
           `script check` rejects unknown/profile-inaccessible APIs, wall-time
           exhaustion returns the typed limit class, invocation input is bounded,
           and the host validates result envelope/API/invocation identity plus
           stable success/script/configuration/limit/host exit classes
-        - [ ] extract a Rhai-independent worker supervisor with kill-on-close
+        - [x] extract a Rhai-independent worker supervisor with kill-on-close
           Windows Job Object, parent-enforced deadline, bounded cooperative
           cancellation then forced termination, protocol/output limits,
           concurrency ceilings, and no orphan after timeout, crash, CLI
           interruption, or parent exit
-        - [ ] replace the stdin-to-EOF/final-stdout-only worker exchange with a
+        - [x] replace the stdin-to-EOF/final-stdout-only worker exchange with a
           versioned inherited-pipe frame protocol for invoke, broker request/
           response, cancel, and result; script stdout remains captured data and
           can never corrupt protocol frames

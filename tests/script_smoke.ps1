@@ -9,6 +9,7 @@ $declaredEvidence = @(
     'script.rhai-observe'
     'script.rhai-deny-budget'
     'script.rhai-framed'
+    'script.supervisor'
 )
 if ($ListEvidence) {
     $declaredEvidence
@@ -197,6 +198,81 @@ function ConvertFrom-FramedOutput {
     return $frames
 }
 
+function Start-ScriptClient {
+    param([Parameter(Mandatory = $true)][string]$Arguments)
+    $startInfo = New-Object Diagnostics.ProcessStartInfo
+    $startInfo.FileName = $Exe
+    $startInfo.Arguments = $Arguments
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    return [Diagnostics.Process]::Start($startInfo)
+}
+
+function Wait-NewWorker {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][int[]]$Existing,
+        [int]$TimeoutMs = 3000
+    )
+    $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMs)
+    do {
+        $worker = Get-Process -Name 'agenterm-script' -ErrorAction SilentlyContinue |
+            Where-Object { $Existing -notcontains $_.Id } |
+            Select-Object -First 1
+        if ($null -ne $worker) {
+            return $worker
+        }
+        Start-Sleep -Milliseconds 5
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw 'timed out waiting for a supervised agenterm-script worker'
+}
+
+function Wait-ProcessGone {
+    param(
+        [Parameter(Mandatory = $true)][int]$Id,
+        [int]$TimeoutMs = 3000
+    )
+    $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMs)
+    do {
+        if ($null -eq (Get-Process -Id $Id -ErrorAction SilentlyContinue)) {
+            return
+        }
+        Start-Sleep -Milliseconds 10
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw "process $Id remained alive after its supervisor exited"
+}
+
+if (-not ('AgenTermSmoke.NativeProcess' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+namespace AgenTermSmoke {
+    public static class NativeProcess {
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern IntPtr OpenProcess(uint access, bool inherit, int processId);
+        [DllImport("kernel32.dll")]
+        static extern bool CloseHandle(IntPtr handle);
+        [DllImport("ntdll.dll")]
+        static extern int NtSuspendProcess(IntPtr process);
+        public static void Suspend(int processId) {
+            IntPtr handle = OpenProcess(0x0800, false, processId);
+            if (handle == IntPtr.Zero) {
+                throw new System.ComponentModel.Win32Exception();
+            }
+            try {
+                int status = NtSuspendProcess(handle);
+                if (status != 0) throw new InvalidOperationException(
+                    "NtSuspendProcess failed: 0x" + status.ToString("x"));
+            } finally {
+                CloseHandle(handle);
+            }
+        }
+    }
+}
+'@
+}
+
 try {
     Remove-Item Env:AGENTERM_IPC_ADDRESS -ErrorAction SilentlyContinue
 
@@ -212,6 +288,8 @@ try {
         $apiResult.value.framing.version -ne 1 -or
         $apiResult.value.framing.max_frame_bytes -ne 2097152 -or
         $apiResult.value.framing.input_kinds.broker_request -ne 'reserved' -or
+        $apiResult.value.supervisor.job_object -ne 'kill_on_close' -or
+        $apiResult.value.supervisor.global_concurrency -ne 4 -or
         $apiResult.value.exit_classes.limit -ne 3 -or
         $apiResult.value.failure_categories -notcontains 'protocol' -or
         @($apiResult.value.apis | Where-Object {
@@ -296,7 +374,7 @@ try {
     Add-FramePayload -Stream $framedInput -Payload ([Text.Encoding]::UTF8.GetBytes('{'))
     Add-FramePayload -Stream $framedInput -Payload ([byte[]]::new(2097153))
     Add-JsonFrame -Stream $framedInput -Frame (
-        New-FramedInvocation -FrameId 'frame-one' -InvocationId 'invoke-one' `
+        New-FramedInvocation -FrameId 'recovery' -InvocationId 'invoke-one' `
             -Source 'print("framed-output"); 40 + 2'
     )
     Add-JsonFrame -Stream $framedInput -Frame (
@@ -306,33 +384,158 @@ try {
         New-FramedInvocation -FrameId 'bad-version' -InvocationId 'never-run' `
             -Source '1' -FrameVersion 2
     )
-    Add-JsonFrame -Stream $framedInput -Frame @{
-        frame_version = 1
-        frame_id = 'cancel-late'
-        kind = 'cancel'
-        payload = @{ invocation_id = 'invoke-one' }
-    }
-    Add-JsonFrame -Stream $framedInput -Frame (
-        New-FramedInvocation -FrameId 'recovery' -InvocationId 'invoke-recovery' -Source '6 * 7'
-    )
     $framedOutput = Invoke-FramedWorker -InputBytes $framedInput.ToArray()
     $framedInput.Dispose()
     $frames = @(ConvertFrom-FramedOutput -Bytes $framedOutput)
+    $recoveryFrame = @($frames | Where-Object { $_.frame_id -eq 'recovery' })
     $codes = @($frames | ForEach-Object { $_.payload.failure.code })
-    if ($frames.Count -ne 7 -or
-        $codes[0] -ne 'protocol_malformed_frame' -or
-        $codes[1] -ne 'protocol_frame_too_large' -or
-        -not $frames[2].payload.ok -or
-        $frames[2].payload.stdout -ne "framed-output`n" -or
-        $frames[2].payload.value -ne 42 -or
-        $codes[3] -ne 'protocol_duplicate_invocation' -or
-        $codes[4] -ne 'protocol_unsupported_frame_version' -or
-        $codes[5] -ne 'protocol_cancel_too_late' -or
-        -not $frames[6].payload.ok -or
-        $frames[6].payload.value -ne 42) {
+    if ($frames.Count -ne 5 -or
+        $codes -notcontains 'protocol_malformed_frame' -or
+        $codes -notcontains 'protocol_frame_too_large' -or
+        $codes -notcontains 'protocol_duplicate_invocation' -or
+        $codes -notcontains 'protocol_unsupported_frame_version' -or
+        $recoveryFrame.Count -ne 1 -or
+        -not $recoveryFrame[0].payload.ok -or
+        $recoveryFrame[0].payload.stdout -ne "framed-output`n" -or
+        $recoveryFrame[0].payload.value -ne 42) {
         throw 'framed worker did not preserve typed framing and recovery invariants'
     }
+    $cancelInput = New-Object IO.MemoryStream
+    $cancelInvocation = New-FramedInvocation -FrameId 'cancel-invoke' `
+        -InvocationId 'cancel-running' -Source 'loop {}'
+    $cancelInvocation.payload.budgets.wall_time_ms = 10000
+    $cancelInvocation.payload.budgets.operations = 10000000
+    Add-JsonFrame -Stream $cancelInput -Frame $cancelInvocation
+    Add-JsonFrame -Stream $cancelInput -Frame @{
+        frame_version = 1
+        frame_id = 'cancel-request'
+        kind = 'cancel'
+        payload = @{ invocation_id = 'cancel-running' }
+    }
+    $cancelOutput = Invoke-FramedWorker -InputBytes $cancelInput.ToArray()
+    $cancelInput.Dispose()
+    $cancelFrames = @(ConvertFrom-FramedOutput -Bytes $cancelOutput)
+    if ($cancelFrames.Count -ne 1 -or
+        $cancelFrames[0].frame_id -ne 'cancel-invoke' -or
+        $cancelFrames[0].payload.failure.code -ne 'limit_cancelled') {
+        throw 'framed worker did not cooperatively cancel an active invocation'
+    }
     Write-Evidence 'script.rhai-framed'
+
+    Write-Host 'STEP supervisor timeout, crash, parent exit, concurrency, and recovery'
+    $existingWorkers = @(
+        Get-Process -Name 'agenterm-script' -ErrorAction SilentlyContinue |
+            ForEach-Object { $_.Id }
+    )
+    $hardTimeoutClient = Start-ScriptClient -Arguments (
+        'script eval "loop {}" --timeout-ms 500 --max-operations 10000000'
+    )
+    $hardTimeoutWorker = Wait-NewWorker -Existing $existingWorkers
+    [AgenTermSmoke.NativeProcess]::Suspend($hardTimeoutWorker.Id)
+    if (-not $hardTimeoutClient.WaitForExit(5000)) {
+        $hardTimeoutClient.Kill()
+        throw 'host deadline did not terminate a suspended worker'
+    }
+    $hardTimeoutError = $hardTimeoutClient.StandardError.ReadToEnd()
+    if ($hardTimeoutClient.ExitCode -ne 3 -or
+        -not $hardTimeoutError.Contains('"code":"host_hard_timeout"')) {
+        throw "host hard timeout was not typed: $hardTimeoutError"
+    }
+    Wait-ProcessGone -Id $hardTimeoutWorker.Id
+    $hardTimeoutClient.Dispose()
+
+    $existingWorkers = @(
+        Get-Process -Name 'agenterm-script' -ErrorAction SilentlyContinue |
+            ForEach-Object { $_.Id }
+    )
+    $crashClient = Start-ScriptClient -Arguments (
+        'script eval "loop {}" --timeout-ms 10000 --max-operations 10000000'
+    )
+    $crashWorker = Wait-NewWorker -Existing $existingWorkers
+    $crashWorker.Kill()
+    if (-not $crashClient.WaitForExit(5000)) {
+        $crashClient.Kill()
+        throw 'host did not finish after its worker crashed'
+    }
+    $crashError = $crashClient.StandardError.ReadToEnd()
+    if ($crashClient.ExitCode -ne 1 -or
+        -not $crashError.Contains('"code":"host_worker_crash"')) {
+        throw "worker crash was not typed: $crashError"
+    }
+    $crashClient.Dispose()
+
+    $existingWorkers = @(
+        Get-Process -Name 'agenterm-script' -ErrorAction SilentlyContinue |
+            ForEach-Object { $_.Id }
+    )
+    $interruptedClient = Start-ScriptClient -Arguments (
+        'script eval "loop {}" --timeout-ms 10000 --max-operations 10000000'
+    )
+    $interruptedWorker = Wait-NewWorker -Existing $existingWorkers
+    [AgenTermSmoke.NativeProcess]::Suspend($interruptedWorker.Id)
+    $interruptedClient.Kill()
+    $interruptedClient.WaitForExit()
+    Wait-ProcessGone -Id $interruptedWorker.Id
+    $interruptedClient.Dispose()
+
+    $holderClients = @()
+    $holderWorkers = @()
+    for ($index = 0; $index -lt 4; $index++) {
+        $existingWorkers = @(
+            Get-Process -Name 'agenterm-script' -ErrorAction SilentlyContinue |
+                ForEach-Object { $_.Id }
+        )
+        $holder = Start-ScriptClient -Arguments (
+            'script eval "loop {}" --timeout-ms 10000 --max-operations 10000000'
+        )
+        $holderWorker = Wait-NewWorker -Existing $existingWorkers
+        [AgenTermSmoke.NativeProcess]::Suspend($holderWorker.Id)
+        $holderClients += $holder
+        $holderWorkers += $holderWorker
+    }
+    $deniedClient = Start-ScriptClient -Arguments 'script eval "42"'
+    if (-not $deniedClient.WaitForExit(3000)) {
+        $deniedClient.Kill()
+        throw 'global concurrency denial did not complete without spawning'
+    }
+    $deniedError = $deniedClient.StandardError.ReadToEnd()
+    if ($deniedClient.ExitCode -ne 2 -or
+        -not $deniedError.Contains('"code":"host_concurrency_limit"')) {
+        throw "global concurrency ceiling was not typed: $deniedError"
+    }
+    $deniedClient.Dispose()
+
+    $releasedWorkerId = $holderWorkers[0].Id
+    $holderClients[0].Kill()
+    $holderClients[0].WaitForExit()
+    Wait-ProcessGone -Id $releasedWorkerId
+    $holderClients[0].Dispose()
+    $existingWorkers = @(
+        Get-Process -Name 'agenterm-script' -ErrorAction SilentlyContinue |
+            ForEach-Object { $_.Id }
+    )
+    $replacementClient = Start-ScriptClient -Arguments (
+        'script eval "loop {}" --timeout-ms 10000 --max-operations 10000000'
+    )
+    $replacementWorker = Wait-NewWorker -Existing $existingWorkers
+    [AgenTermSmoke.NativeProcess]::Suspend($replacementWorker.Id)
+
+    for ($index = 1; $index -lt $holderClients.Count; $index++) {
+        $workerId = $holderWorkers[$index].Id
+        $holderClients[$index].Kill()
+        $holderClients[$index].WaitForExit()
+        Wait-ProcessGone -Id $workerId
+        $holderClients[$index].Dispose()
+    }
+    $replacementClient.Kill()
+    $replacementClient.WaitForExit()
+    Wait-ProcessGone -Id $replacementWorker.Id
+    $replacementClient.Dispose()
+    $supervisorRecovered = Invoke-Script @('script', 'eval', '6 * 7')
+    if ($supervisorRecovered -ne '42') {
+        throw 'script supervisor did not recover after timeout/crash/interruption/concurrency'
+    }
+    Write-Evidence 'script.supervisor'
 
     Write-Host 'STEP brokered observe snapshot'
     $env:AGENTERM_IPC_ADDRESS = $address

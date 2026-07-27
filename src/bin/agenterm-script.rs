@@ -72,10 +72,244 @@ fn run_worker() -> anyhow::Result<u8> {
 }
 
 fn run_framed_worker() -> anyhow::Result<u8> {
-    process_framed_stream(std::io::stdin().lock(), std::io::stdout().lock())?;
+    process_concurrent_framed_worker(std::io::stdin().lock(), std::io::stdout())?;
     Ok(0)
 }
 
+fn process_concurrent_framed_worker<R: Read>(
+    mut input: R,
+    output: std::io::Stdout,
+) -> anyhow::Result<()> {
+    let output = Arc::new(Mutex::new(output));
+    let active = Arc::new(Mutex::new(None::<(String, Arc<AtomicBool>)>));
+    let completed = Arc::new(Mutex::new(HashSet::<String>::new()));
+    let mut seen_frames = HashSet::new();
+    let mut known_invocations = HashSet::new();
+    let mut workers = Vec::new();
+    loop {
+        let mut header = [0_u8; 4];
+        match input.read(&mut header[..1])? {
+            0 => break,
+            1 => {}
+            _ => unreachable!("one-byte read returned more than one byte"),
+        }
+        if let Err(error) = input.read_exact(&mut header[1..]) {
+            write_shared_protocol_frame(
+                &output,
+                "unknown",
+                "unknown",
+                "protocol_truncated_header",
+                format!("frame header ended before four bytes: {error}"),
+            )?;
+            break;
+        }
+        let length = u32::from_be_bytes(header);
+        if length > SCRIPT_FRAME_MAX_BYTES {
+            let drained = drain_frame(&mut input, u64::from(length))?;
+            write_shared_protocol_frame(
+                &output,
+                "unknown",
+                "unknown",
+                "protocol_frame_too_large",
+                format!("frame length {length} exceeds the {SCRIPT_FRAME_MAX_BYTES} byte limit"),
+            )?;
+            if !drained {
+                break;
+            }
+            continue;
+        }
+        let mut bytes = vec![0_u8; length as usize];
+        if let Err(error) = input.read_exact(&mut bytes) {
+            write_shared_protocol_frame(
+                &output,
+                "unknown",
+                "unknown",
+                "protocol_truncated_frame",
+                format!("frame payload ended before {length} bytes: {error}"),
+            )?;
+            break;
+        }
+        let frame: ScriptFrame = match serde_json::from_slice(&bytes) {
+            Ok(frame) => frame,
+            Err(error) => {
+                write_shared_protocol_frame(
+                    &output,
+                    "unknown",
+                    "unknown",
+                    "protocol_malformed_frame",
+                    error.to_string(),
+                )?;
+                continue;
+            }
+        };
+        let frame_id = frame.frame_id;
+        if frame_id.is_empty() || frame_id.len() > 128 {
+            write_shared_protocol_frame(
+                &output,
+                &frame_id,
+                "unknown",
+                "protocol_invalid_frame_id",
+                "frame_id must contain from 1 to 128 bytes",
+            )?;
+            continue;
+        }
+        if !seen_frames.insert(frame_id.clone()) {
+            write_shared_protocol_frame(
+                &output,
+                &frame_id,
+                "unknown",
+                "protocol_duplicate_frame",
+                "frame_id has already been processed",
+            )?;
+            continue;
+        }
+        if frame.frame_version != SCRIPT_FRAME_VERSION {
+            write_shared_protocol_frame(
+                &output,
+                &frame_id,
+                "unknown",
+                "protocol_unsupported_frame_version",
+                format!(
+                    "worker supports frame version {SCRIPT_FRAME_VERSION}, requested {}",
+                    frame.frame_version
+                ),
+            )?;
+            continue;
+        }
+        match frame.payload {
+            ScriptFramePayload::Invoke(invocation) => {
+                let invocation_id = invocation.invocation_id.clone();
+                if invocation_id.is_empty() || invocation_id.len() > 128 {
+                    write_shared_protocol_frame(
+                        &output,
+                        &frame_id,
+                        &invocation_id,
+                        "protocol_invalid_invocation_id",
+                        "invocation_id must contain from 1 to 128 bytes",
+                    )?;
+                    continue;
+                }
+                if !known_invocations.insert(invocation_id.clone()) {
+                    write_shared_protocol_frame(
+                        &output,
+                        &frame_id,
+                        &invocation_id,
+                        "protocol_duplicate_invocation",
+                        "invocation_id has already been processed",
+                    )?;
+                    continue;
+                }
+                let cancellation = Arc::new(AtomicBool::new(false));
+                {
+                    let mut active_guard = active.lock().expect("active invocation lock poisoned");
+                    if active_guard.is_some() {
+                        write_shared_protocol_frame(
+                            &output,
+                            &frame_id,
+                            &invocation_id,
+                            "protocol_worker_busy",
+                            "this worker already has an active invocation",
+                        )?;
+                        continue;
+                    }
+                    *active_guard = Some((invocation_id.clone(), Arc::clone(&cancellation)));
+                }
+                let output_for_worker = Arc::clone(&output);
+                let active_for_worker = Arc::clone(&active);
+                let completed_for_worker = Arc::clone(&completed);
+                workers.push(std::thread::spawn(move || {
+                    let result = execute_with_cancellation(invocation, Some(cancellation));
+                    let mut active_guard = active_for_worker
+                        .lock()
+                        .expect("active invocation lock poisoned");
+                    let _ = write_shared_frame(&output_for_worker, &result_frame(frame_id, result));
+                    completed_for_worker
+                        .lock()
+                        .expect("completed invocation lock poisoned")
+                        .insert(invocation_id);
+                    *active_guard = None;
+                }));
+            }
+            ScriptFramePayload::Cancel { invocation_id } => {
+                let cancellation = active
+                    .lock()
+                    .expect("active invocation lock poisoned")
+                    .as_ref()
+                    .filter(|(active_id, _)| active_id == &invocation_id)
+                    .map(|(_, cancellation)| Arc::clone(cancellation));
+                if let Some(cancellation) = cancellation {
+                    cancellation.store(true, Ordering::Relaxed);
+                } else {
+                    let (code, message) = if completed
+                        .lock()
+                        .expect("completed invocation lock poisoned")
+                        .contains(&invocation_id)
+                    {
+                        (
+                            "protocol_cancel_too_late",
+                            "invocation has already completed",
+                        )
+                    } else {
+                        (
+                            "protocol_cancel_unknown",
+                            "no active invocation has this invocation_id",
+                        )
+                    };
+                    write_shared_protocol_frame(&output, &frame_id, &invocation_id, code, message)?;
+                }
+            }
+            ScriptFramePayload::BrokerRequest { invocation_id, .. }
+            | ScriptFramePayload::BrokerResponse { invocation_id, .. } => {
+                write_shared_protocol_frame(
+                    &output,
+                    &frame_id,
+                    &invocation_id,
+                    "protocol_broker_unavailable",
+                    "broker frames are reserved but unavailable in this worker version",
+                )?;
+            }
+            ScriptFramePayload::Result(result) => {
+                write_shared_protocol_frame(
+                    &output,
+                    &frame_id,
+                    &result.invocation_id,
+                    "protocol_unexpected_result",
+                    "result frames are worker output and cannot be sent to the worker",
+                )?;
+            }
+        }
+    }
+    for worker in workers {
+        let _ = worker.join();
+    }
+    Ok(())
+}
+
+fn write_shared_frame(
+    output: &Arc<Mutex<std::io::Stdout>>,
+    frame: &ScriptFrame,
+) -> anyhow::Result<()> {
+    let mut output = output.lock().expect("framed stdout lock poisoned");
+    write_frame(&mut *output, frame)
+}
+
+fn write_shared_protocol_frame(
+    output: &Arc<Mutex<std::io::Stdout>>,
+    frame_id: &str,
+    invocation_id: &str,
+    code: &str,
+    message: impl Into<String>,
+) -> anyhow::Result<()> {
+    write_shared_frame(
+        output,
+        &result_frame(
+            frame_id.to_owned(),
+            protocol_failure_for(invocation_id, code, message),
+        ),
+    )
+}
+
+#[cfg(test)]
 fn process_framed_stream<R: Read, W: Write>(mut input: R, mut output: W) -> anyhow::Result<()> {
     let mut seen_frames = HashSet::new();
     let mut completed_invocations = HashSet::new();
@@ -126,6 +360,7 @@ fn process_framed_stream<R: Read, W: Write>(mut input: R, mut output: W) -> anyh
     }
 }
 
+#[cfg(test)]
 fn read_frame_length<R: Read, W: Write>(
     input: &mut R,
     output: &mut W,
@@ -155,6 +390,7 @@ fn drain_frame<R: Read>(input: &mut R, length: u64) -> anyhow::Result<bool> {
     Ok(copied == length)
 }
 
+#[cfg(test)]
 fn process_frame(
     frame: ScriptFrame,
     seen_frames: &mut HashSet<String>,
@@ -249,6 +485,7 @@ fn result_frame(frame_id: String, result: ScriptResult) -> ScriptFrame {
     }
 }
 
+#[cfg(test)]
 fn write_protocol_frame<W: Write>(
     output: &mut W,
     frame_id: &str,
@@ -289,6 +526,13 @@ fn write_frame<W: Write>(output: &mut W, frame: &ScriptFrame) -> anyhow::Result<
 }
 
 fn execute(invocation: ScriptInvocation) -> ScriptResult {
+    execute_with_cancellation(invocation, None)
+}
+
+fn execute_with_cancellation(
+    invocation: ScriptInvocation,
+    cancellation: Option<Arc<AtomicBool>>,
+) -> ScriptResult {
     let started = Instant::now();
     let mut result = ScriptResult {
         envelope_version: SCRIPT_ENVELOPE_VERSION,
@@ -303,7 +547,7 @@ fn execute(invocation: ScriptInvocation) -> ScriptResult {
         failure: None,
         duration_ms: 0,
     };
-    let execution = execute_inner(&invocation);
+    let execution = execute_inner(&invocation, cancellation);
     match execution {
         Ok((stdout, value)) => {
             result.ok = true;
@@ -317,6 +561,7 @@ fn execute(invocation: ScriptInvocation) -> ScriptResult {
                 ScriptFailureCategory::Limit => ScriptExitClass::Limit,
                 ScriptFailureCategory::Script => ScriptExitClass::Script,
                 ScriptFailureCategory::Protocol => ScriptExitClass::Protocol,
+                ScriptFailureCategory::Host => ScriptExitClass::Host,
             };
             result.failure = Some(failure);
         }
@@ -327,6 +572,7 @@ fn execute(invocation: ScriptInvocation) -> ScriptResult {
 
 fn execute_inner(
     invocation: &ScriptInvocation,
+    cancellation: Option<Arc<AtomicBool>>,
 ) -> Result<(String, Option<serde_json::Value>), ScriptFailure> {
     if invocation.envelope_version != SCRIPT_ENVELOPE_VERSION {
         return Err(protocol_error(
@@ -360,6 +606,7 @@ fn execute_inner(
     let output = Arc::new(Mutex::new(String::new()));
     let output_exceeded = Arc::new(AtomicBool::new(false));
     let wall_time_exceeded = Arc::new(AtomicBool::new(false));
+    let cancellation = cancellation.unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
     let output_for_print = Arc::clone(&output);
     let exceeded_for_print = Arc::clone(&output_exceeded);
     let output_limit = invocation.budgets.output_bytes;
@@ -369,6 +616,7 @@ fn execute_inner(
         ))
         .unwrap_or_else(Instant::now);
     let wall_time_for_progress = Arc::clone(&wall_time_exceeded);
+    let cancellation_for_progress = Arc::clone(&cancellation);
     let mut engine = Engine::new();
     engine.set_max_operations(invocation.budgets.operations);
     engine.set_max_call_levels(invocation.budgets.call_depth);
@@ -397,7 +645,9 @@ fn execute_inner(
         }
     });
     engine.on_progress(move |_| {
-        if Instant::now() >= deadline {
+        if cancellation_for_progress.load(Ordering::Relaxed) {
+            Some(Dynamic::from("script cancellation requested"))
+        } else if Instant::now() >= deadline {
             wall_time_for_progress.store(true, Ordering::Relaxed);
             Some(Dynamic::from("wall-time budget exceeded"))
         } else {
@@ -436,7 +686,9 @@ fn execute_inner(
         .eval_ast_with_scope::<Dynamic>(&mut scope, &ast)
         .map_err(|error| {
             let message = error.to_string();
-            if wall_time_exceeded.load(Ordering::Relaxed) {
+            if cancellation.load(Ordering::Relaxed) {
+                limit_error("limit_cancelled", message)
+            } else if wall_time_exceeded.load(Ordering::Relaxed) {
                 limit_error("limit_wall_time", message)
             } else if message.contains("Too many operations") {
                 limit_error("limit_operations", message)
@@ -501,6 +753,13 @@ fn api_catalog() -> serde_json::Value {
                 "broker_response": "reserved",
             },
         },
+        "supervisor": {
+            "transport": "inherited_length_bounded_frames",
+            "job_object": "kill_on_close",
+            "cancel_grace_ms": 150,
+            "per_process_concurrency": 2,
+            "global_concurrency": 4,
+        },
         "limits": {
             "defaults": defaults,
             "hard_maximums": hard_limits,
@@ -527,11 +786,12 @@ fn api_catalog() -> serde_json::Value {
                 "reason": "control capability is deferred",
             },
         ],
-        "failure_categories": ["configuration", "limit", "script", "protocol"],
+        "failure_categories": ["configuration", "limit", "script", "protocol", "host"],
         "exit_classes": {
             "success": 0,
             "script": 1,
             "protocol": 1,
+            "host": 1,
             "configuration": 2,
             "limit": 3,
         },
@@ -897,6 +1157,17 @@ mod tests {
         let wall_time = execute(wall_time);
         assert_eq!(failure_code(&wall_time), "limit_wall_time");
         assert_eq!(wall_time.exit_class, ScriptExitClass::Limit);
+    }
+
+    #[test]
+    fn cooperative_cancellation_is_typed_before_wall_time() {
+        let mut invocation = invocation(ScriptOperation::Eval, "loop {}");
+        invocation.budgets.wall_time_ms = ScriptBudgets::hard_limits().wall_time_ms;
+        invocation.budgets.operations = ScriptBudgets::hard_limits().operations;
+        let cancellation = Arc::new(AtomicBool::new(true));
+        let result = execute_with_cancellation(invocation, Some(cancellation));
+        assert_eq!(failure_code(&result), "limit_cancelled");
+        assert_eq!(result.exit_class, ScriptExitClass::Limit);
     }
 
     #[test]
