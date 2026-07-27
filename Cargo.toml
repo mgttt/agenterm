@@ -2,6 +2,7 @@
 name = "agenterm"
 version = "0.1.6"
 edition = "2024"
+rust-version = "1.97"
 description = "A tabbed Windows cmd.exe terminal with persistent exited tabs"
 license = "MIT OR Apache-2.0"
 autobins = false

@@ -5,7 +5,11 @@ pushd "%~dp0"
 set "PROFILE=dev"
 set "CARGO_ARGS="
 set "CARGO_OUTPUT_DIR=target"
-if defined CARGO_TARGET_DIR set "CARGO_OUTPUT_DIR=%CARGO_TARGET_DIR%"
+set "USING_EXTERNAL_CARGO_TARGET=0"
+if defined CARGO_TARGET_DIR (
+    set "CARGO_OUTPUT_DIR=%CARGO_TARGET_DIR%"
+    set "USING_EXTERNAL_CARGO_TARGET=1"
+)
 set "CARGO_PROFILE_DIR=%CARGO_OUTPUT_DIR%\debug"
 set "DIST_DIR=%~dp0dist"
 set "POWERSHELL_EXE=powershell.exe"
@@ -26,7 +30,7 @@ if /i "%~1"=="release" (
     exit /b 2
 )
 
-cargo build %CARGO_ARGS%
+cargo build --locked %CARGO_ARGS%
 if errorlevel 1 (
     echo.
     echo AgenTerm %PROFILE% build failed.
@@ -46,12 +50,16 @@ if errorlevel 1 (
 )
 
 if /i "%PROFILE%"=="release" (
-    cargo clean
-    if errorlevel 1 (
-        echo.
-        echo Release artifacts were staged, but the Cargo target cleanup failed.
-        popd
-        exit /b 1
+    if "%USING_EXTERNAL_CARGO_TARGET%"=="1" (
+        echo Skipped Cargo cleanup because CARGO_TARGET_DIR is externally configured.
+    ) else (
+        cargo clean --target-dir "%~dp0target"
+        if errorlevel 1 (
+            echo.
+            echo Release artifacts were staged, but the repository-local Cargo target cleanup failed.
+            popd
+            exit /b 1
+        )
     )
 )
 

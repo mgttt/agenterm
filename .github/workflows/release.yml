@@ -68,6 +68,9 @@ jobs:
       - name: Package Windows release
         shell: pwsh
         run: |
+          . ./scripts/artifact-manifest.ps1
+          $artifactSpec = Get-AgenTermArtifactManifest `
+            -Path ./scripts/artifacts.json
           $version = $env:GITHUB_REF_NAME.TrimStart('v')
           $zip = "./dist/agenterm-$version-windows-x86_64.zip"
           $metadata = Get-Content ./dist/agenterm.json -Raw |
@@ -75,15 +78,16 @@ jobs:
           if ($metadata.version -ne $version) {
             throw "Build metadata version $($metadata.version) does not match $version."
           }
-          $expectedNames = @(
-            'agenterm.exe'
-            'agenterm-cli.exe'
-            'agenterm-mux.exe'
-            'agenterm-script.exe'
-          )
+          $expectedNames = @($artifactSpec.executables.name)
           $metadataNames = @($metadata.executables.name)
           if (Compare-Object $expectedNames $metadataNames) {
             throw 'Build metadata does not contain the expected release executable names.'
+          }
+          $artifactManifestHash = (
+            Get-FileHash ./scripts/artifacts.json -Algorithm SHA256
+          ).Hash.ToLowerInvariant()
+          if ($metadata.artifact_manifest_sha256 -ne $artifactManifestHash) {
+            throw 'Build metadata does not match the release artifact manifest.'
           }
           foreach ($entry in $metadata.executables) {
             $path = Join-Path ./dist $entry.name
@@ -92,13 +96,18 @@ jobs:
               throw "SHA-256 mismatch for $($entry.name)."
             }
           }
+          $packageFiles = @(
+            $artifactSpec.executables |
+              ForEach-Object { Join-Path ./dist $_.name }
+          ) + @(
+            './dist/agenterm.json'
+            './scripts/artifacts.json'
+            './LICENSE-APACHE'
+            './LICENSE-MIT'
+            './THIRD_PARTY_NOTICES.md'
+          )
           Compress-Archive `
-            -LiteralPath `
-              ./dist/agenterm.exe, `
-              ./dist/agenterm-cli.exe, `
-              ./dist/agenterm-mux.exe, `
-              ./dist/agenterm-script.exe, `
-              ./dist/agenterm.json `
+            -LiteralPath $packageFiles `
             -DestinationPath $zip
 
       - name: Publish GitHub Release
@@ -106,15 +115,22 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          . ./scripts/artifact-manifest.ps1
+          $artifactSpec = Get-AgenTermArtifactManifest `
+            -Path ./scripts/artifacts.json
           $version = $env:GITHUB_REF_NAME.TrimStart('v')
           $zip = "./dist/agenterm-$version-windows-x86_64.zip"
-          gh release create $env:GITHUB_REF_NAME `
-            ./dist/agenterm.exe `
-            ./dist/agenterm-cli.exe `
-            ./dist/agenterm-mux.exe `
-            ./dist/agenterm-script.exe `
-            ./dist/agenterm.json `
-            $zip `
+          $releaseFiles = @(
+            $artifactSpec.executables |
+              ForEach-Object { Join-Path ./dist $_.name }
+          ) + @(
+            './dist/agenterm.json'
+            './LICENSE-APACHE'
+            './LICENSE-MIT'
+            './THIRD_PARTY_NOTICES.md'
+            $zip
+          )
+          gh release create $env:GITHUB_REF_NAME @releaseFiles `
             --verify-tag `
             --generate-notes `
             --title "AgenTerm $env:GITHUB_REF_NAME"

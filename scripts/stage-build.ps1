@@ -15,29 +15,24 @@ $ErrorActionPreference = 'Stop'
 $sourceDirectoryPath = [IO.Path]::GetFullPath($SourceDirectory)
 $destinationDirectoryPath = [IO.Path]::GetFullPath($DestinationDirectory)
 [IO.Directory]::CreateDirectory($destinationDirectoryPath) | Out-Null
+$artifactManifestPath = Join-Path $PSScriptRoot 'artifacts.json'
+. (Join-Path $PSScriptRoot 'artifact-manifest.ps1')
+$artifactManifest = Get-AgenTermArtifactManifest -Path $artifactManifestPath
 
 & (Join-Path $PSScriptRoot 'clean-locked-artifacts.ps1') `
     -Directory $destinationDirectoryPath `
     -ObsoleteName 'agentermctl.exe'
 
-$executables = @(
-    'agenterm.exe'
-    'agenterm-cli.exe'
-    'agenterm-mux.exe'
-    'agenterm-script.exe'
-)
-foreach ($name in $executables) {
+foreach ($artifact in @($artifactManifest.executables)) {
     & (Join-Path $PSScriptRoot 'stage-artifact.ps1') `
-        -Source (Join-Path $sourceDirectoryPath $name) `
-        -Destination (Join-Path $destinationDirectoryPath $name)
+        -Source (Join-Path $sourceDirectoryPath $artifact.name) `
+        -Destination (Join-Path $destinationDirectoryPath $artifact.name)
 }
 
 & (Join-Path $PSScriptRoot 'write-build-metadata.ps1') `
     -ManifestPath (Join-Path $destinationDirectoryPath 'agenterm.json') `
-    -ExecutablePath (Join-Path $destinationDirectoryPath 'agenterm.exe') `
-    -CliExecutablePath (Join-Path $destinationDirectoryPath 'agenterm-cli.exe') `
-    -MuxExecutablePath (Join-Path $destinationDirectoryPath 'agenterm-mux.exe') `
-    -ScriptExecutablePath (Join-Path $destinationDirectoryPath 'agenterm-script.exe') `
+    -ArtifactManifestPath $artifactManifestPath `
+    -StagedDirectory $destinationDirectoryPath `
     -Profile $Profile
 
 & (Join-Path $PSScriptRoot 'clean-locked-artifacts.ps1') `

@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "executables": [
+    {
+      "name": "agenterm.exe",
+      "role": "gui",
+      "release_budget_bytes": 4194304
+    },
+    {
+      "name": "agenterm-cli.exe",
+      "role": "cli",
+      "release_budget_bytes": 2097152
+    },
+    {
+      "name": "agenterm-mux.exe",
+      "role": "compatibility-cli",
+      "release_budget_bytes": 2097152
+    },
+    {
+      "name": "agenterm-script.exe",
+      "role": "scripting-worker",
+      "release_budget_bytes": 3145728
+    }
+  ]
+}

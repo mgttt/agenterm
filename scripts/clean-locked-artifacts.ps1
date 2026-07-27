@@ -14,7 +14,8 @@ if (-not (Test-Path -LiteralPath $directoryPath -PathType Container)) {
 
 $removed = 0
 $retained = @()
-foreach ($artifact in Get-ChildItem -LiteralPath $directoryPath -File -Filter '*locked*') {
+foreach ($artifact in Get-ChildItem -LiteralPath $directoryPath `
+    -File -Filter 'agenterm*.locked-*.exe') {
     try {
         Remove-Item -LiteralPath $artifact.FullName -Force -ErrorAction Stop
         $removed++

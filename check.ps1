@@ -36,9 +36,9 @@ function Get-PeSubsystem {
 try {
     Invoke-Checked 'rustfmt' { cargo fmt -- --check }
     Invoke-Checked 'Clippy' {
-        cargo clippy --all-targets --all-features -- -D warnings
+        cargo clippy --locked --all-targets --all-features -- -D warnings
     }
-    Invoke-Checked 'unit tests' { cargo test --all-features }
+    Invoke-Checked 'unit tests' { cargo test --locked --all-features }
 
     if ($Release) {
         Invoke-Checked 'release artifact' { & '.\build.bat' release }
@@ -52,11 +52,12 @@ try {
         $cli = '.\dist\agenterm-cli.exe'
         $mux = '.\dist\agenterm-mux.exe'
         $script = '.\dist\agenterm-script.exe'
-        $releaseBudgets = [ordered]@{
-            'agenterm.exe'     = 4MB
-            'agenterm-cli.exe'  = 2MB
-            'agenterm-mux.exe' = 2MB
-            'agenterm-script.exe' = 3MB
+        $artifactManifestPath = '.\scripts\artifacts.json'
+        . '.\scripts\artifact-manifest.ps1'
+        $artifactSpec = Get-AgenTermArtifactManifest -Path $artifactManifestPath
+        $releaseBudgets = [ordered]@{}
+        foreach ($artifact in @($artifactSpec.executables)) {
+            $releaseBudgets[$artifact.name] = [uint64]$artifact.release_budget_bytes
         }
         $obsoleteCliArtifacts = @(
             Get-ChildItem -LiteralPath '.\dist' -File -Filter 'agentermctl*.exe'
@@ -90,15 +91,31 @@ try {
 
         $metadata = Get-Content '.\dist\agenterm.json' -Raw | ConvertFrom-Json
         $names = @($metadata.executables.name)
+        $expectedNames = @($artifactSpec.executables.name)
         if ($metadata.schema_version -ne 2 -or
-            $names -notcontains 'agenterm.exe' -or
-            $names -notcontains 'agenterm-cli.exe' -or
-            $names -notcontains 'agenterm-mux.exe' -or
-            $names -notcontains 'agenterm-script.exe' -or
+            (Compare-Object $expectedNames $names) -or
             $metadata.features -notcontains 'codex-launcher' -or
             $metadata.features -notcontains 'tab-environment' -or
             $metadata.features -notcontains 'mux-frontend') {
             throw 'agenterm.json does not describe all versioned executables.'
+        }
+        $head = (& git rev-parse HEAD).Trim()
+        if ($LASTEXITCODE -ne 0 -or $metadata.git_commit -ne $head) {
+            throw 'agenterm.json Git commit does not match the checked source.'
+        }
+        $cargoLockHash = (
+            Get-FileHash '.\Cargo.lock' -Algorithm SHA256
+        ).Hash.ToLowerInvariant()
+        $artifactManifestHash = (
+            Get-FileHash $artifactManifestPath -Algorithm SHA256
+        ).Hash.ToLowerInvariant()
+        if ($metadata.cargo_lock_sha256 -ne $cargoLockHash -or
+            $metadata.artifact_manifest_sha256 -ne $artifactManifestHash -or
+            [string]::IsNullOrWhiteSpace([string]$metadata.rust_version)) {
+            throw 'agenterm.json provenance does not match locked build inputs.'
+        }
+        if ($Release -and $metadata.git_dirty) {
+            throw 'Release metadata must describe a clean source tree.'
         }
         $scriptVersionOutput = & $script --version
         if ($LASTEXITCODE -ne 0 -or
@@ -131,7 +148,7 @@ try {
             Invoke-Checked 'startup smoke test' { & '.\tests\startup_smoke.ps1' }
             Invoke-Checked 'CLI smoke test' { & '.\tests\cli_smoke.ps1' }
             Invoke-Checked 'AI fleet smoke test' {
-                if ($Release -and -not $IncludeStress) {
+                if (-not $IncludeStress) {
                     & '.\tests\fleet_smoke.ps1' -SkipEventLoad
                 }
                 else {

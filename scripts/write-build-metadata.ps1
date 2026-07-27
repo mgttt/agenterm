@@ -3,16 +3,10 @@ param(
     [string]$ManifestPath,
 
     [Parameter(Mandatory = $true)]
-    [string]$ExecutablePath,
+    [string]$ArtifactManifestPath,
 
     [Parameter(Mandatory = $true)]
-    [string]$CliExecutablePath,
-
-    [Parameter(Mandatory = $true)]
-    [string]$MuxExecutablePath,
-
-    [Parameter(Mandatory = $true)]
-    [string]$ScriptExecutablePath,
+    [string]$StagedDirectory,
 
     [Parameter(Mandatory = $true)]
     [ValidateSet('dev', 'release-fast', 'release')]
@@ -21,6 +15,9 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
+$stagedDirectoryPath = [IO.Path]::GetFullPath($StagedDirectory)
+. (Join-Path $PSScriptRoot 'artifact-manifest.ps1')
+$artifactManifest = Get-AgenTermArtifactManifest -Path $ArtifactManifestPath
 $cargoToml = Get-Content -LiteralPath (Join-Path $repoRoot 'Cargo.toml') -Raw
 $versionMatch = [regex]::Match(
     $cargoToml,
@@ -30,25 +27,47 @@ if (-not $versionMatch.Success) {
     throw 'Could not read the package version from Cargo.toml.'
 }
 
-$commit = $null
 $previousErrorAction = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
-$commitOutput = & git -C $repoRoot rev-parse --short=12 HEAD 2>$null
+$commitOutput = & git -C $repoRoot rev-parse HEAD 2>$null
 $commitExitCode = $LASTEXITCODE
 $ErrorActionPreference = $previousErrorAction
-if ($commitExitCode -eq 0) {
-    $commit = ($commitOutput | Select-Object -First 1).Trim()
+if ($commitExitCode -ne 0) {
+    throw "Could not resolve the source Git commit (exit $commitExitCode)."
+}
+$commit = ($commitOutput | Select-Object -First 1).Trim()
+if ($commit -notmatch '^[0-9a-fA-F]{40}$') {
+    throw "Git returned an invalid source commit: $commit"
 }
 
+$previousErrorAction = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
 $statusOutput = & git -C $repoRoot status --porcelain 2>$null
-$isDirty = $LASTEXITCODE -eq 0 -and @($statusOutput).Count -gt 0
+$statusExitCode = $LASTEXITCODE
+$ErrorActionPreference = $previousErrorAction
+if ($statusExitCode -ne 0) {
+    throw "Could not inspect source Git status (exit $statusExitCode)."
+}
+$isDirty = @($statusOutput).Count -gt 0
 
-$hostTarget = $null
-$hostLine = & rustc -vV |
+$rustVersionLines = @(& rustc -vV)
+if ($LASTEXITCODE -ne 0) {
+    throw "Could not inspect the Rust compiler (exit $LASTEXITCODE)."
+}
+$hostLine = $rustVersionLines |
     Where-Object { $_ -like 'host: *' } |
     Select-Object -First 1
-if ($hostLine) {
-    $hostTarget = $hostLine.Substring('host: '.Length).Trim()
+if (-not $hostLine) {
+    throw 'Rust compiler metadata did not include its host target.'
+}
+$hostTarget = $hostLine.Substring('host: '.Length).Trim()
+$rustVersion = ($rustVersionLines | Select-Object -First 1).Trim()
+
+function Get-FileSha256 {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).
+        Hash.ToLowerInvariant()
 }
 
 function Get-ExecutableInfo {
@@ -61,30 +80,17 @@ function Get-ExecutableInfo {
     )
 
     $executable = Get-Item -LiteralPath $Path
-    $stream = [IO.File]::OpenRead($Path)
-    try {
-        $sha256 = [Security.Cryptography.SHA256]::Create()
-        try {
-            $hash = [BitConverter]::ToString($sha256.ComputeHash($stream)).
-                Replace('-', '').
-                ToLowerInvariant()
-        }
-        finally {
-            $sha256.Dispose()
-        }
-    }
-    finally {
-        $stream.Dispose()
-    }
 
     [ordered]@{
         name   = $executable.Name
         role   = $Role
         size   = $executable.Length
-        sha256 = $hash
+        sha256 = Get-FileSha256 -Path $Path
     }
 }
 
+$artifactManifestResolvedPath = (Resolve-Path -LiteralPath $ArtifactManifestPath).Path
+$cargoLockPath = Join-Path $repoRoot 'Cargo.lock'
 $manifest = [ordered]@{
     schema_version = 2
     product        = 'AgenTerm'
@@ -97,6 +103,9 @@ $manifest = [ordered]@{
     git_dirty      = $isDirty
     profile        = $Profile
     rust_target    = $hostTarget
+    rust_version   = $rustVersion
+    cargo_lock_sha256 = Get-FileSha256 -Path $cargoLockPath
+    artifact_manifest_sha256 = Get-FileSha256 -Path $artifactManifestResolvedPath
     features       = @(
         'codex-launcher'
         'hierarchical-tabs'
@@ -106,10 +115,11 @@ $manifest = [ordered]@{
         'tab-environment'
     )
     executables    = @(
-        Get-ExecutableInfo -Path $ExecutablePath -Role 'gui'
-        Get-ExecutableInfo -Path $CliExecutablePath -Role 'cli'
-        Get-ExecutableInfo -Path $MuxExecutablePath -Role 'compatibility-cli'
-        Get-ExecutableInfo -Path $ScriptExecutablePath -Role 'scripting-worker'
+        foreach ($artifact in @($artifactManifest.executables)) {
+            Get-ExecutableInfo `
+                -Path (Join-Path $stagedDirectoryPath $artifact.name) `
+                -Role $artifact.role
+        }
     )
 }
 
