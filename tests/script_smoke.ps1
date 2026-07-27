@@ -17,12 +17,11 @@ if ($ListEvidence) {
     exit 0
 }
 
+. (Join-Path $PSScriptRoot 'TestHarness.ps1')
+
 function Write-Evidence {
     param([Parameter(Mandatory = $true)][string]$Id)
-    if ($declaredEvidence -notcontains $Id) {
-        throw "Script smoke emitted undeclared evidence ID: $Id"
-    }
-    Write-Host "EVIDENCE $Id"
+    Write-SmokeEvidence -Context $smokeRun -Id $Id
 }
 $Exe = [IO.Path]::GetFullPath($Exe)
 if (-not (Test-Path -LiteralPath $Exe)) {
@@ -33,23 +32,24 @@ if (-not (Test-Path -LiteralPath $workerExe)) {
     throw "AgenTerm script worker not found: $workerExe"
 }
 
-$previousAddress = $env:AGENTERM_IPC_ADDRESS
-$previousWorkspace = $env:AGENTERM_WORKSPACE_PATH
+$smokeRun = New-SmokeRunContext -Suite 'script' -Executable $Exe `
+    -DeclaredEvidence $declaredEvidence
+$Exe = $smokeRun.Executable
 $previousAuditPath = $env:AGENTERM_SCRIPT_AUDIT_PATH
 $previousAuditSecret = $env:AGENTERM_AUDIT_ENV_SECRET
-$address = "127.0.0.1:$((51000 + ($PID % 1000)))"
-$workspaceFile = Join-Path $env:TEMP "agenterm-script-$PID.json"
-$sourceFile = Join-Path $env:TEMP "agenterm-script-$PID.rhai"
-$auditFile = Join-Path $env:TEMP "agenterm-script-audit-$PID.jsonl"
-$serverStarted = $false
+$address = $smokeRun.Address
+$workspaceFile = $smokeRun.WorkspacePath
+$runtimeDirectory = Join-Path $smokeRun.RunDirectory 'script-runtime'
+New-Item -ItemType Directory -Path $runtimeDirectory -Force | Out-Null
+$sourceFile = Join-Path $runtimeDirectory 'source.rhai'
+$auditFile = Join-Path $runtimeDirectory 'audit.jsonl'
+$runSucceeded = $false
+$runFailure = $null
+$script:ownedScriptClients = [Collections.Generic.List[Diagnostics.Process]]::new()
 
 function Invoke-Script {
     param([string[]]$CommandArgs)
-    $output = & $Exe @CommandArgs 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw "agenterm $($CommandArgs -join ' ') failed:`n$($output -join "`n")"
-    }
-    return ($output -join "`n")
+    Invoke-SmokeCli -Context $smokeRun -Arguments $CommandArgs
 }
 
 function Invoke-ScriptFailure {
@@ -66,9 +66,14 @@ function Invoke-ScriptFailure {
     finally {
         $ErrorActionPreference = $savedPreference
     }
+    Add-SmokeCommandRecord -Context $smokeRun -Arguments $CommandArgs `
+        -ExitCode $exitCode -ExpectedFailure $true -Output ($output -join "`n")
     if ($exitCode -ne $ExpectedExit) {
+        $safeCommand = (
+            ConvertTo-SmokeSafeArguments -Arguments $CommandArgs
+        ) -join ' '
         throw (
-            "agenterm $($CommandArgs -join ' ') exited $exitCode, " +
+            "agenterm $safeCommand exited $exitCode, " +
             "expected $ExpectedExit`n$($output -join "`n")"
         )
     }
@@ -211,7 +216,9 @@ function Start-ScriptClient {
     $startInfo.CreateNoWindow = $true
     $startInfo.RedirectStandardOutput = $true
     $startInfo.RedirectStandardError = $true
-    return [Diagnostics.Process]::Start($startInfo)
+    $process = [Diagnostics.Process]::Start($startInfo)
+    $script:ownedScriptClients.Add($process)
+    return $process
 }
 
 function Wait-NewWorker {
@@ -275,6 +282,35 @@ namespace AgenTermSmoke {
     }
 }
 '@
+}
+
+function Protect-ScriptSmokeDiagnosticText {
+    param([AllowNull()][string]$Text)
+    if ($null -eq $Text) {
+        return $null
+    }
+    foreach ($secret in @(
+        'AUDIT_STDOUT_SECRET',
+        'AUDIT_ARG_SECRET',
+        'AUDIT_SOURCE_SECRET',
+        'AUDIT_ENV_SECRET'
+    )) {
+        $Text = $Text.Replace($secret, '<redacted>')
+    }
+    return $Text
+}
+
+function Protect-ScriptSmokeCommandLog {
+    if (-not (Test-Path -LiteralPath $smokeRun.CommandLogPath)) {
+        return
+    }
+    $text = [IO.File]::ReadAllText($smokeRun.CommandLogPath)
+    $text = Protect-ScriptSmokeDiagnosticText -Text $text
+    [IO.File]::WriteAllText(
+        $smokeRun.CommandLogPath,
+        $text,
+        [Text.UTF8Encoding]::new($false)
+    )
 }
 
 try {
@@ -551,7 +587,6 @@ try {
     Invoke-Script @(
         '--address', $address, 'new-window', '-d', '-n', "script-observe-$PID"
     ) | Out-Null
-    $serverStarted = $true
     $snapshot = Invoke-Script @('ui-snapshot') | ConvertFrom-Json
     $publicCapture = Invoke-Script @(
         'capture-pane', '-p', '-t', '@1', '--max-bytes', '5', '--json'
@@ -702,38 +737,47 @@ try {
     }
     Write-Evidence 'script.audit'
 
+    $runSucceeded = $true
     Write-Host 'PASS: safe scripting API, supervision, audit privacy, denial, and budgets'
 }
+catch {
+    $runFailure = Protect-ScriptSmokeDiagnosticText -Text ($_ | Out-String)
+    throw
+}
 finally {
-    if ($serverStarted) {
-        & $Exe --address $address shutdown 2>$null | Out-Null
+    foreach ($client in $script:ownedScriptClients) {
+        try {
+            if (-not $client.HasExited) {
+                $client.Kill()
+                $client.WaitForExit()
+            }
+        }
+        catch {
+            # A scenario may already have disposed its owned client.
+        }
     }
     Remove-Item -LiteralPath $sourceFile -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $workspaceFile -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $auditFile -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath "$auditFile.1" -ErrorAction SilentlyContinue
-    if ($null -eq $previousAddress) {
-        Remove-Item Env:AGENTERM_IPC_ADDRESS -ErrorAction SilentlyContinue
+    Protect-ScriptSmokeCommandLog
+    $env:AGENTERM_IPC_ADDRESS = $address
+    $env:AGENTERM_WORKSPACE_PATH = $workspaceFile
+    try {
+        Complete-SmokeRun -Context $smokeRun -Succeeded $runSucceeded `
+            -FailureRecord $runFailure
     }
-    else {
-        $env:AGENTERM_IPC_ADDRESS = $previousAddress
-    }
-    if ($null -eq $previousWorkspace) {
-        Remove-Item Env:AGENTERM_WORKSPACE_PATH -ErrorAction SilentlyContinue
-    }
-    else {
-        $env:AGENTERM_WORKSPACE_PATH = $previousWorkspace
-    }
-    if ($null -eq $previousAuditPath) {
-        Remove-Item Env:AGENTERM_SCRIPT_AUDIT_PATH -ErrorAction SilentlyContinue
-    }
-    else {
-        $env:AGENTERM_SCRIPT_AUDIT_PATH = $previousAuditPath
-    }
-    if ($null -eq $previousAuditSecret) {
-        Remove-Item Env:AGENTERM_AUDIT_ENV_SECRET -ErrorAction SilentlyContinue
-    }
-    else {
-        $env:AGENTERM_AUDIT_ENV_SECRET = $previousAuditSecret
+    finally {
+        if ($null -eq $previousAuditPath) {
+            Remove-Item Env:AGENTERM_SCRIPT_AUDIT_PATH -ErrorAction SilentlyContinue
+        }
+        else {
+            $env:AGENTERM_SCRIPT_AUDIT_PATH = $previousAuditPath
+        }
+        if ($null -eq $previousAuditSecret) {
+            Remove-Item Env:AGENTERM_AUDIT_ENV_SECRET -ErrorAction SilentlyContinue
+        }
+        else {
+            $env:AGENTERM_AUDIT_ENV_SECRET = $previousAuditSecret
+        }
     }
 }
