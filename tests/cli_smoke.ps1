@@ -16,56 +16,35 @@ if ($ListEvidence) {
     exit 0
 }
 
+. (Join-Path $PSScriptRoot 'TestHarness.ps1')
+
 function Write-Evidence {
     param([Parameter(Mandatory = $true)][string]$Id)
-    if ($declaredEvidence -notcontains $Id) {
-        throw "CLI smoke emitted undeclared evidence ID: $Id"
-    }
-    Write-Host "EVIDENCE $Id"
+    Write-SmokeEvidence -Context $run -Id $Id
 }
 
-$Exe = [IO.Path]::GetFullPath($Exe)
-if (-not (Test-Path -LiteralPath $Exe)) {
-    throw "AgenTerm executable not found: $Exe"
-}
+$run = New-SmokeRunContext -Suite 'cli' -Executable $Exe `
+    -DeclaredEvidence $declaredEvidence -AllowPaneCapture
+$Exe = $run.Executable
 
 function Invoke-AgenTerm {
     param([string[]]$CommandArgs)
-    $output = & $Exe @CommandArgs 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw "agenterm $($CommandArgs -join ' ') failed:`n$($output -join "`n")"
-    }
-    return ($output -join "`n")
+    Invoke-SmokeCli -Context $run -Arguments $CommandArgs
 }
 
 function Invoke-AgenTermExpectedFailure {
     param([string[]]$CommandArgs)
-    $savedErrorPreference = $ErrorActionPreference
-    $ErrorActionPreference = 'SilentlyContinue'
-    try {
-        $output = & $Exe @CommandArgs 2>&1
-        $exitCode = $LASTEXITCODE
-    }
-    finally {
-        $ErrorActionPreference = $savedErrorPreference
-    }
-    if ($exitCode -eq 0) {
-        throw "agenterm $($CommandArgs -join ' ') unexpectedly succeeded"
-    }
-    return ($output -join "`n")
+    Invoke-SmokeCli -Context $run -Arguments $CommandArgs -ExpectFailure
 }
 
-$previousAddress = $env:AGENTERM_IPC_ADDRESS
-$previousWorkspace = $env:AGENTERM_WORKSPACE_PATH
-$env:AGENTERM_IPC_ADDRESS = "127.0.0.1:$((45000 + ($PID % 1000)))"
-$workspaceFile = Join-Path $env:TEMP "agenterm-cli-$PID.json"
-$env:AGENTERM_WORKSPACE_PATH = $workspaceFile
-$name = "agenterm-smoke-$PID"
-$token = "AGENTERM_SMOKE_$PID"
-$targetDir = Join-Path $PSScriptRoot '..\target\smoke'
+$name = "agenterm-smoke-$($run.RunId)"
+$token = "AGENTERM_SMOKE_$($run.RunId)"
+$targetDir = $run.RunDirectory
 $windowPng = Join-Path $targetDir "$name-window.png"
 $panePng = Join-Path $targetDir "$name-pane.png"
 $created = $false
+$runSucceeded = $false
+$runFailure = $null
 
 try {
     Write-Host 'STEP create tab'
@@ -454,22 +433,14 @@ try {
     Write-Host 'STEP explicit close'
     Invoke-AgenTerm @('kill-window', '-t', $name) | Out-Null
     $created = $false
+    $runSucceeded = $true
     Write-Host "PASS: composer, viewport scroll, PTY I/O, waits, capture, PNG screenshots, remain-on-exit, manual close"
 }
+catch {
+    $runFailure = $_
+    throw
+}
 finally {
-    if ($created) {
-        & $Exe kill-window -t $name *> $null
-    }
-    & $Exe kill-server *> $null
-    Remove-Item -LiteralPath $workspaceFile -ErrorAction SilentlyContinue
-    if ($null -eq $previousAddress) {
-        Remove-Item Env:AGENTERM_IPC_ADDRESS -ErrorAction SilentlyContinue
-    } else {
-        $env:AGENTERM_IPC_ADDRESS = $previousAddress
-    }
-    if ($null -eq $previousWorkspace) {
-        Remove-Item Env:AGENTERM_WORKSPACE_PATH -ErrorAction SilentlyContinue
-    } else {
-        $env:AGENTERM_WORKSPACE_PATH = $previousWorkspace
-    }
+    Complete-SmokeRun -Context $run -Succeeded $runSucceeded `
+        -FailureRecord $runFailure
 }
