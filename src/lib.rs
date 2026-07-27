@@ -91,6 +91,8 @@ const TIMER_ID: usize = 1;
 const WM_APP_WAKE: u32 = WM_APP + 1;
 const IPC_TIMEOUT: Duration = Duration::from_secs(5);
 const IPC_DISCOVERY_TIMEOUT: Duration = Duration::from_millis(500);
+const IPC_AUTOSTART_TIMEOUT: Duration = Duration::from_secs(15);
+const IPC_AUTOSTART_POLL: Duration = Duration::from_millis(100);
 const COMPOSER_SUBMIT_DELAY: Duration = Duration::from_millis(500);
 const RAW_OUTPUT_LIMIT: usize = 1024 * 1024;
 
@@ -4226,8 +4228,11 @@ fn run_cli(arguments: Vec<String>) -> i32 {
         if launched <= 32 {
             eprintln!("failed to launch AgenTerm GUI through Windows Shell ({launched})");
         }
-        for _ in 0..40 {
-            thread::sleep(Duration::from_millis(100));
+        let deadline = Instant::now() + IPC_AUTOSTART_TIMEOUT;
+        while Instant::now() < deadline {
+            thread::sleep(
+                IPC_AUTOSTART_POLL.min(deadline.saturating_duration_since(Instant::now())),
+            );
             response = send_ipc_request(arguments.clone());
             if response.is_ok() {
                 break;

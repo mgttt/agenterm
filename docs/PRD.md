@@ -178,7 +178,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       - [x] registered multi-instance discovery with PID, address, version,
         session, workspace, tab count, active tab, and liveness
       - [x] explicit `--address` targeting and opt-in stale-record pruning
-      - [x] bounded discovery probes and explicit-address GUI autostart
+      - [x] bounded discovery probes and clean-machine-safe explicit-address
+        GUI autostart that returns as soon as IPC becomes ready
       - [x] explicit errors for unsupported operations
       - [ ] named-pipe transport and stable event subscription
   - Self-hosted development loop
