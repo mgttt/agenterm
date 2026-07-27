@@ -114,6 +114,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       "evidence_ids": ["ux.live-close-confirmation"]
     },
     {
+      "id": "workspace.detach-first-window-close",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "detach-first window close preserves the live server and explicit stop creates a fresh runtime",
+      "evidence_ids": ["ux.detach-first-window-close"]
+    },
+    {
       "id": "compat.rmux-status-click-bridge",
       "protocol_feature": "rmux_status_click_bridge",
       "kind": "behavior",
@@ -1235,6 +1243,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
           selection, screenshots, PTY sizing, and hit testing all consume the
           same effective content origin
       - Release core: detach-first server lifecycle
+        - [x] detach-first window close preserves the live server and explicit stop creates a fresh runtime
         - [ ] replace unconditional `WM_CLOSE` destruction with a host-owned
           three-choice close confirmation: `Keep Server Running` is the default
           and hides the window while preserving the same server, epoch, IPC,
@@ -1324,6 +1333,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
           concurrent-reader evidence while preserving the 4 MiB GUI,
           per-sidecar size, one-second first-window, remain-on-exit, and
           explicit-close gates
+        - [ ] after the final v0.1.6 visual surface is stable, capture a
+          deterministic privacy-safe Dark-theme demonstration as
+          `assets/screendump0.png` and place it near the top of README with
+          descriptive alt text; transient test evidence remains under ignored
+          output paths
       - Candidate enhancement lanes after the core is green
         - [ ] non-intrusive bounded transcript capture by stable tab ID, with
           visible/scrollback ranges and explicit truncation metadata

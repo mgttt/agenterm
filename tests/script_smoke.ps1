@@ -25,6 +25,10 @@ $Exe = [IO.Path]::GetFullPath($Exe)
 if (-not (Test-Path -LiteralPath $Exe)) {
     throw "AgenTerm executable not found: $Exe"
 }
+$workerExe = Join-Path ([IO.Path]::GetDirectoryName($Exe)) 'agenterm-script.exe'
+if (-not (Test-Path -LiteralPath $workerExe)) {
+    throw "AgenTerm script worker not found: $workerExe"
+}
 
 $previousAddress = $env:AGENTERM_IPC_ADDRESS
 $previousWorkspace = $env:AGENTERM_WORKSPACE_PATH
@@ -48,7 +52,7 @@ function Invoke-ScriptFailure {
         [string[]]$CommandArgs
     )
     $savedPreference = $ErrorActionPreference
-    $ErrorActionPreference = 'SilentlyContinue'
+    $ErrorActionPreference = 'Continue'
     try {
         $output = & $Exe @CommandArgs 2>&1
         $exitCode = $LASTEXITCODE
@@ -65,6 +69,23 @@ function Invoke-ScriptFailure {
     return ($output -join "`n")
 }
 
+function Invoke-WorkerFailure {
+    param([Parameter(Mandatory = $true)][string]$InputText)
+    $savedPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $output = $InputText | & $workerExe --worker 2>&1
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $savedPreference
+    }
+    if ($exitCode -ne 1) {
+        throw "agenterm-script --worker exited $exitCode, expected 1"
+    }
+    return ($output -join "`n")
+}
+
 try {
     Remove-Item Env:AGENTERM_IPC_ADDRESS -ErrorAction SilentlyContinue
 
@@ -74,6 +95,14 @@ try {
         $apiResult.value.api_version -ne 1 -or
         $apiResult.value.profiles.pure.variables -notcontains 'args' -or
         $apiResult.value.profiles.observe.variables -notcontains 'observe' -or
+        $apiResult.value.limits.defaults.wall_time_ms -ne 2000 -or
+        $apiResult.value.limits.hard_maximums.wall_time_ms -ne 10000 -or
+        $apiResult.value.limits.invocation_bytes -ne 2097152 -or
+        $apiResult.value.exit_classes.limit -ne 3 -or
+        $apiResult.value.failure_categories -notcontains 'protocol' -or
+        @($apiResult.value.apis | Where-Object {
+            $_.name -eq 'new_tab' -and -not $_.available
+        }).Count -ne 1 -or
         $apiResult.value.deferred_capabilities -notcontains 'control') {
         throw 'script api did not expose the versioned fail-closed capability catalog'
     }
@@ -95,7 +124,17 @@ try {
     [IO.File]::WriteAllText($sourceFile, 'let = ;')
     $parseError = Invoke-ScriptFailure 1 @('script', 'check', $sourceFile)
     if (-not $parseError.Contains('"code":"script_parse"')) {
-        throw 'script check did not return a stable parse-error class'
+        throw "script check did not return a stable parse-error class: $parseError"
+    }
+    [IO.File]::WriteAllText($sourceFile, 'new_tab()')
+    $unavailableApi = Invoke-ScriptFailure 1 @('script', 'check', $sourceFile)
+    if (-not $unavailableApi.Contains('"code":"script_api_unavailable"')) {
+        throw 'script check accepted an unavailable control API'
+    }
+    [IO.File]::WriteAllText($sourceFile, 'made_up_api()')
+    $unknownApi = Invoke-ScriptFailure 1 @('script', 'check', $sourceFile)
+    if (-not $unknownApi.Contains('"code":"script_api_unknown"')) {
+        throw 'script check accepted an API absent from the shipped catalog'
     }
     Write-Evidence 'script.rhai-pure'
 
@@ -109,6 +148,32 @@ try {
     )
     if (-not $limited.Contains('"code":"limit_operations"')) {
         throw 'operation exhaustion did not return a typed limit result'
+    }
+    $wallLimited = Invoke-ScriptFailure 3 @(
+        'script', 'eval', 'loop {}', '--timeout-ms', '1',
+        '--max-operations', '10000000'
+    )
+    if (-not $wallLimited.Contains('"code":"limit_wall_time"') -or
+        -not $wallLimited.Contains('"exit_class":"limit"')) {
+        throw 'wall-time exhaustion did not return a typed limit result'
+    }
+    [IO.File]::WriteAllText($sourceFile, (' ' * 262145))
+    $sourceLimited = Invoke-ScriptFailure 3 @('script', 'check', $sourceFile)
+    if (-not $sourceLimited.Contains('script source exceeds the 262144 byte limit')) {
+        throw 'source exhaustion did not return the public limit exit'
+    }
+    $malformed = Invoke-WorkerFailure -InputText '{'
+    if (-not $malformed.Contains('"code":"protocol_invalid_invocation"') -or
+        -not $malformed.Contains('"exit_class":"protocol"')) {
+        throw 'malformed invocation did not return a typed protocol envelope'
+    }
+    $oversized = Invoke-WorkerFailure -InputText ('x' * 2097153)
+    if (-not $oversized.Contains('"code":"protocol_invocation_too_large"')) {
+        throw 'oversized invocation was not rejected at the worker protocol boundary'
+    }
+    $recovered = Invoke-Script @('script', 'eval', '6 * 7')
+    if ($recovered -ne '42') {
+        throw 'worker invocation did not recover after malformed protocol inputs'
     }
     Write-Evidence 'script.rhai-deny-budget'
 

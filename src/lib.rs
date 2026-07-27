@@ -50,15 +50,16 @@ use windows_sys::Win32::{
         DestroyWindow, DispatchMessageW, ES_AUTOVSCROLL, ES_MULTILINE, ES_WANTRETURN,
         EnableMenuItem, GWLP_USERDATA, GetClientRect, GetMessageW, GetSystemMenu,
         GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW, IDC_ARROW,
-        InsertMenuW, IsIconic, IsZoomed, LoadCursorW, LoadIconW, MB_ICONERROR, MB_OK, MF_BYCOMMAND,
-        MF_ENABLED, MF_GRAYED, MF_SEPARATOR, MF_STRING, MSG, MessageBoxW, MoveWindow, PostMessageW,
-        PostQuitMessage, RegisterClassW, SC_CLOSE, SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE,
-        SW_SHOW, SW_SHOWNORMAL, SendMessageW, SetForegroundWindow, SetTimer, SetWindowLongPtrW,
-        SetWindowTextW, ShowWindow, TranslateMessage, WM_APP, WM_CHAR, WM_CLOSE, WM_COMMAND,
-        WM_COPY, WM_CREATE, WM_CUT, WM_DESTROY, WM_ERASEBKGND, WM_INITMENUPOPUP, WM_KEYDOWN,
-        WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY, WM_PAINT,
-        WM_PASTE, WM_RBUTTONDOWN, WM_SETFOCUS, WM_SIZE, WM_SYSCOMMAND, WM_TIMER, WNDCLASSW,
-        WS_BORDER, WS_CHILD, WS_CLIPCHILDREN, WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE,
+        InsertMenuW, IsIconic, IsWindowVisible, IsZoomed, LoadCursorW, LoadIconW, MB_ICONERROR,
+        MB_OK, MF_BYCOMMAND, MF_ENABLED, MF_GRAYED, MF_SEPARATOR, MF_STRING, MSG, MessageBoxW,
+        MoveWindow, PostMessageW, PostQuitMessage, RegisterClassW, SC_CLOSE, SW_HIDE, SW_MAXIMIZE,
+        SW_MINIMIZE, SW_SHOW, SW_SHOWMAXIMIZED, SW_SHOWNORMAL, SendMessageW, SetForegroundWindow,
+        SetTimer, SetWindowLongPtrW, SetWindowTextW, ShowWindow, TranslateMessage, WM_APP, WM_CHAR,
+        WM_CLOSE, WM_COMMAND, WM_COPY, WM_CREATE, WM_CUT, WM_DESTROY, WM_ENDSESSION, WM_ERASEBKGND,
+        WM_INITMENUPOPUP, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL,
+        WM_NCDESTROY, WM_PAINT, WM_PASTE, WM_QUERYENDSESSION, WM_RBUTTONDOWN, WM_SETFOCUS, WM_SIZE,
+        WM_SYSCOMMAND, WM_TIMER, WNDCLASSW, WS_BORDER, WS_CHILD, WS_CLIPCHILDREN,
+        WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE,
     },
 };
 
@@ -70,6 +71,7 @@ mod rmux_status;
 pub mod script_protocol;
 mod settings;
 mod tab_tree;
+mod theme;
 mod ui_geometry;
 mod workspace;
 
@@ -84,8 +86,8 @@ use instances::{InstanceRegistration, discover_instances, prune_instance, regist
 use protocol::{IpcRequest, IpcResponse};
 use rmux_status::parse_status_windows;
 use script_protocol::{
-    SCRIPT_API_VERSION, SCRIPT_ENVELOPE_VERSION, ScriptBudgets, ScriptInvocation, ScriptOperation,
-    ScriptProfile, ScriptResult,
+    SCRIPT_API_VERSION, SCRIPT_ENVELOPE_VERSION, ScriptBudgets, ScriptExitClass, ScriptInvocation,
+    ScriptOperation, ScriptProfile, ScriptResult,
 };
 use settings::{AppConfig, config_path, load_config, save_config};
 use tab_tree::{TabTreeNode, TabTreeRow, tree_rows, would_create_cycle};
@@ -825,12 +827,33 @@ unsafe extern "system" fn window_proc(
         WM_SETFOCUS => 0,
         WM_ERASEBKGND => 1,
         WM_CLOSE => {
+            if let Some(state) = state_mut(window) {
+                if state.close_requested {
+                    unsafe { DestroyWindow(window) };
+                } else {
+                    state.request_window_close();
+                }
+            } else {
+                unsafe { DestroyWindow(window) };
+            }
+            0
+        }
+        WM_QUERYENDSESSION => {
             if let Some(state) = state_mut(window)
                 && let Err(error) = state.persist_workspace()
             {
                 state.last_error = Some(format!("workspace save failed: {error:#}"));
+                return 0;
             }
-            unsafe { DestroyWindow(window) };
+            1
+        }
+        WM_ENDSESSION => {
+            if wparam != 0 {
+                if let Some(state) = state_mut(window) {
+                    state.close_requested = true;
+                }
+                unsafe { DestroyWindow(window) };
+            }
             0
         }
         WM_DESTROY => {
@@ -1461,6 +1484,13 @@ struct ClipboardPaste {
     result: std::result::Result<String, String>,
 }
 
+#[derive(Clone, Copy)]
+enum WindowCloseChoice {
+    KeepServerRunning,
+    StopServerAndExit,
+    Cancel,
+}
+
 struct AppState {
     window: HWND,
     edit: HWND,
@@ -1485,6 +1515,11 @@ struct AppState {
     startup_tabs_remaining: usize,
     last_error: Option<String>,
     close_requested: bool,
+    window_close_pending: bool,
+    window_detached: bool,
+    detached_was_maximized: bool,
+    window_close_previous_focus: HWND,
+    window_close_restore_settings: bool,
     pending_close: Option<u64>,
     feedback: Option<String>,
     note_edit_target: Option<u64>,
@@ -1561,6 +1596,11 @@ impl AppState {
             startup_tabs_remaining,
             last_error: None,
             close_requested: false,
+            window_close_pending: false,
+            window_detached: false,
+            detached_was_maximized: false,
+            window_close_previous_focus: ptr::null_mut(),
+            window_close_restore_settings: false,
             pending_close: None,
             feedback: None,
             note_edit_target: None,
@@ -1880,6 +1920,122 @@ impl AppState {
         }
     }
 
+    fn request_window_close(&mut self) {
+        if self.window_close_pending {
+            return;
+        }
+        let previous_focus = unsafe { GetFocus() };
+        self.window_close_restore_settings = self.settings_open;
+        if self.settings_open {
+            self.settings_open = false;
+            unsafe {
+                ShowWindow(self.settings_font, SW_HIDE);
+                ShowWindow(self.settings_size, SW_HIDE);
+                ShowWindow(self.settings_apply, SW_HIDE);
+            }
+        }
+        if self.pending_close.is_some() {
+            self.finish_close_confirmation(false);
+        }
+        self.save_active_composer();
+        self.window_close_previous_focus = previous_focus;
+        self.window_close_pending = true;
+        unsafe {
+            ShowWindow(self.edit, SW_HIDE);
+            ShowWindow(self.send_button, SW_HIDE);
+            SetFocus(self.window);
+            InvalidateRect(self.window, ptr::null(), 0);
+        }
+    }
+
+    fn finish_window_close(&mut self, choice: WindowCloseChoice) {
+        if !self.window_close_pending {
+            return;
+        }
+        self.window_close_pending = false;
+        match choice {
+            WindowCloseChoice::KeepServerRunning => {
+                if let Err(error) = self.persist_workspace() {
+                    self.last_error = Some(format!("workspace save failed: {error:#}"));
+                    self.restore_after_window_close_modal();
+                    return;
+                }
+                self.detached_was_maximized = unsafe { IsZoomed(self.window) } != 0;
+                self.window_detached = true;
+                self.event_journal.commit(
+                    "window.visibility",
+                    None,
+                    serde_json::json!({"visible": false, "reason": "detach"}),
+                );
+                unsafe { ShowWindow(self.window, SW_HIDE) };
+            }
+            WindowCloseChoice::StopServerAndExit => {
+                if let Err(error) = self.persist_workspace() {
+                    self.last_error = Some(format!("workspace save failed: {error:#}"));
+                    self.restore_after_window_close_modal();
+                    return;
+                }
+                self.event_journal.commit(
+                    "workspace.shutdown",
+                    None,
+                    serde_json::json!({"saved": true, "source": "window-close"}),
+                );
+                self.close_requested = true;
+                unsafe { PostMessageW(self.window, WM_CLOSE, 0, 0) };
+            }
+            WindowCloseChoice::Cancel => self.restore_after_window_close_modal(),
+        }
+    }
+
+    fn restore_after_window_close_modal(&mut self) {
+        unsafe {
+            if self.window_close_restore_settings {
+                self.settings_open = true;
+                ShowWindow(self.settings_font, SW_SHOW);
+                ShowWindow(self.settings_size, SW_SHOW);
+                ShowWindow(self.settings_apply, SW_SHOW);
+            } else {
+                ShowWindow(self.edit, SW_SHOW);
+                ShowWindow(self.send_button, SW_SHOW);
+            }
+            if self.window_close_previous_focus.is_null() {
+                SetFocus(self.window);
+            } else {
+                SetFocus(self.window_close_previous_focus);
+            }
+            InvalidateRect(self.window, ptr::null(), 0);
+        }
+        if !self.window_close_restore_settings {
+            self.load_active_composer();
+        }
+        self.window_close_restore_settings = false;
+    }
+
+    fn reattach_window(&mut self, reason: &str) {
+        let was_detached = self.window_detached || unsafe { IsWindowVisible(self.window) } == 0;
+        self.window_detached = false;
+        unsafe {
+            ShowWindow(
+                self.window,
+                if self.detached_was_maximized {
+                    SW_SHOWMAXIMIZED
+                } else {
+                    SW_SHOWNORMAL
+                },
+            );
+            SetForegroundWindow(self.window);
+            SetFocus(self.window);
+            InvalidateRect(self.window, ptr::null(), 0);
+        }
+        if was_detached {
+            self.event_journal.commit(
+                "window.visibility",
+                None,
+                serde_json::json!({"visible": true, "reason": reason}),
+            );
+        }
+    }
+
     fn tick(&mut self) -> bool {
         let mut changed = false;
         if self.startup_tab_pending {
@@ -2135,7 +2291,11 @@ impl AppState {
     }
 
     fn left_button_down(&mut self, x: i32, y: i32) {
-        if self.pending_close.is_some() || self.settings_open || x < SIDEBAR_WIDTH {
+        if self.window_close_pending
+            || self.pending_close.is_some()
+            || self.settings_open
+            || x < SIDEBAR_WIDTH
+        {
             self.terminal_selection = None;
             self.click(x, y);
             return;
@@ -2227,6 +2387,22 @@ impl AppState {
     }
 
     fn click(&mut self, x: i32, y: i32) {
+        if self.window_close_pending {
+            let mut client: RECT = unsafe { mem::zeroed() };
+            unsafe { GetClientRect(self.window, &mut client) };
+            let left = SIDEBAR_WIDTH + (client.right - SIDEBAR_WIDTH - 620) / 2;
+            let top = (client.bottom - STATUS_BAR_HEIGHT - 230) / 2;
+            if y >= top + 154 && y <= top + 194 {
+                if x >= left + 24 && x <= left + 234 {
+                    self.finish_window_close(WindowCloseChoice::KeepServerRunning);
+                } else if x >= left + 246 && x <= left + 456 {
+                    self.finish_window_close(WindowCloseChoice::StopServerAndExit);
+                } else if x >= left + 468 && x <= left + 596 {
+                    self.finish_window_close(WindowCloseChoice::Cancel);
+                }
+            }
+            return;
+        }
         if self.pending_close.is_some() || self.settings_open {
             let mut client: RECT = unsafe { mem::zeroed() };
             unsafe { GetClientRect(self.window, &mut client) };
@@ -2314,7 +2490,7 @@ impl AppState {
     }
 
     fn right_click(&mut self, x: i32, y: i32) {
-        if x >= SIDEBAR_WIDTH || self.pending_close.is_some() {
+        if x >= SIDEBAR_WIDTH || self.pending_close.is_some() || self.window_close_pending {
             return;
         }
         let Some(row) = tree_row_at_y(y) else {
@@ -2446,6 +2622,7 @@ impl AppState {
                 .terminal_selection
                 .is_some_and(|selection| self.active == Some(selection.tab_id));
         let paste_enabled = terminal_active
+            && !self.window_close_pending
             && self.pending_close.is_none()
             && !self.settings_open
             && clipboard_has_unicode_text();
@@ -2621,6 +2798,14 @@ impl AppState {
         let shift = unsafe { GetKeyState(0x10) } < 0;
         let focused = unsafe { GetFocus() };
 
+        if self.window_close_pending {
+            if virtual_key == 0x0d {
+                self.finish_window_close(WindowCloseChoice::KeepServerRunning);
+            } else if virtual_key == 0x1b {
+                self.finish_window_close(WindowCloseChoice::Cancel);
+            }
+            return true;
+        }
         if self.pending_close.is_some() {
             if virtual_key == 0x0d {
                 self.finish_close_confirmation(true);
@@ -2782,7 +2967,7 @@ impl AppState {
     }
 
     fn mouse_wheel(&mut self, screen_x: i32, screen_y: i32, delta: i32) {
-        if self.pending_close.is_some() || self.settings_open {
+        if self.window_close_pending || self.pending_close.is_some() || self.settings_open {
             return;
         }
         let mut point = POINT {
@@ -3428,6 +3613,9 @@ impl AppState {
         if let Some(id) = self.pending_close {
             self.paint_close_confirmation(device, &client, id);
         }
+        if self.window_close_pending {
+            self.paint_window_close_confirmation(device, &client);
+        }
         if self.settings_open {
             self.paint_settings(device, &client);
         }
@@ -3454,6 +3642,98 @@ impl AppState {
             }
             EndPaint(self.window, &paint);
         };
+    }
+
+    fn paint_window_close_confirmation(&self, device: HDC, client: &RECT) {
+        let left = SIDEBAR_WIDTH + (client.right - SIDEBAR_WIDTH - 620) / 2;
+        let top = (client.bottom - STATUS_BAR_HEIGHT - 230) / 2;
+        let rect = RECT {
+            left,
+            top,
+            right: left + 620,
+            bottom: top + 230,
+        };
+        fill(device, &rect, COLOR_MODAL);
+        frame(device, &rect, COLOR_BLUE);
+        draw_text(
+            device,
+            "Close AgenTerm window?",
+            RECT {
+                left: left + 24,
+                top: top + 18,
+                right: left + 596,
+                bottom: top + 52,
+            },
+            COLOR_TEXT,
+            DT_LEFT | DT_SINGLELINE | DT_VCENTER,
+        );
+        draw_text(
+            device,
+            "Keep the server running to preserve live tabs, processes, and terminal history.",
+            RECT {
+                left: left + 24,
+                top: top + 58,
+                right: left + 596,
+                bottom: top + 88,
+            },
+            COLOR_MUTED,
+            DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS,
+        );
+        draw_text(
+            device,
+            "Run agenterm.exe again to reopen this window.",
+            RECT {
+                left: left + 24,
+                top: top + 90,
+                right: left + 596,
+                bottom: top + 120,
+            },
+            COLOR_MUTED,
+            DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS,
+        );
+        let keep = RECT {
+            left: left + 24,
+            top: top + 154,
+            right: left + 234,
+            bottom: top + 194,
+        };
+        let stop = RECT {
+            left: left + 246,
+            top: top + 154,
+            right: left + 456,
+            bottom: top + 194,
+        };
+        let cancel = RECT {
+            left: left + 468,
+            top: top + 154,
+            right: left + 596,
+            bottom: top + 194,
+        };
+        fill(device, &keep, COLOR_ACTIVE);
+        frame(device, &keep, COLOR_GREEN);
+        frame(device, &stop, COLOR_RED);
+        frame(device, &cancel, COLOR_BLUE);
+        draw_text(
+            device,
+            "Keep Server Running",
+            keep,
+            COLOR_GREEN,
+            DT_LEFT | DT_SINGLELINE | DT_VCENTER,
+        );
+        draw_text(
+            device,
+            "Stop Server & Exit",
+            stop,
+            COLOR_RED,
+            DT_LEFT | DT_SINGLELINE | DT_VCENTER,
+        );
+        draw_text(
+            device,
+            "Cancel",
+            cancel,
+            COLOR_BLUE,
+            DT_LEFT | DT_SINGLELINE | DT_VCENTER,
+        );
     }
 
     fn paint_close_confirmation(&self, device: HDC, client: &RECT, id: u64) {
@@ -3936,6 +4216,8 @@ impl AppState {
                 "title": window_text(self.window),
                 "client_width": client.right,
                 "client_height": client.bottom,
+                "visible": unsafe { IsWindowVisible(self.window) } != 0,
+                "detached": self.window_detached,
                 "minimized": unsafe { IsIconic(self.window) } != 0,
                 "state": if unsafe { IsIconic(self.window) } != 0 {
                     "minimized"
@@ -3961,7 +4243,9 @@ impl AppState {
                     "scrollbar": scrollbar,
                 },
                 "composer": {
-                    "visible": self.pending_close.is_none() && !self.settings_open,
+                    "visible": !self.window_close_pending
+                        && self.pending_close.is_none()
+                        && !self.settings_open,
                     "height": COMPOSER_HEIGHT,
                 },
                 "status_bar": {
@@ -3989,7 +4273,17 @@ impl AppState {
                 },
             },
             "tabs": tabs,
-            "modal": if self.settings_open {
+            "modal": if self.window_close_pending {
+                Some(serde_json::json!({
+                    "kind": "confirm-window-close",
+                    "default_action": "keep-server-running",
+                    "actions": [
+                        "keep-server-running",
+                        "stop-server-and-exit",
+                        "cancel"
+                    ],
+                }))
+            } else if self.settings_open {
                 Some(serde_json::json!({"kind": "settings"}))
             } else {
                 self.pending_close.map(|id| serde_json::json!({
@@ -4026,10 +4320,11 @@ impl AppState {
         };
         match command {
             "__focus" | "start-server" => {
-                unsafe {
-                    ShowWindow(self.window, SW_RESTORE);
-                    SetForegroundWindow(self.window);
-                }
+                self.reattach_window(if command == "__focus" {
+                    "launcher"
+                } else {
+                    "start-server"
+                });
                 IpcResponse::success("")
             }
             "attach" | "attach-session" => {
@@ -4038,10 +4333,7 @@ impl AppState {
                 {
                     return IpcResponse::failure(format!("can't find session: {requested}"));
                 }
-                unsafe {
-                    ShowWindow(self.window, SW_RESTORE);
-                    SetForegroundWindow(self.window);
-                }
+                self.reattach_window("attach-session");
                 IpcResponse::success("")
             }
             "new" | "new-session" => {
@@ -4064,10 +4356,7 @@ impl AppState {
                         return IpcResponse::failure(format!("{error:#}"));
                     }
                 }
-                unsafe {
-                    ShowWindow(self.window, SW_RESTORE);
-                    SetForegroundWindow(self.window);
-                }
+                self.reattach_window("new-session");
                 IpcResponse::success("")
             }
             "neww" | "new-window" => {
@@ -4242,11 +4531,7 @@ impl AppState {
                 self.load_active_composer();
                 self.event_journal
                     .commit("tab.selected", Some(id), serde_json::json!({}));
-                unsafe {
-                    ShowWindow(self.window, SW_RESTORE);
-                    SetForegroundWindow(self.window);
-                    InvalidateRect(self.window, ptr::null(), 0);
-                }
+                self.reattach_window("select-window");
                 IpcResponse::success("")
             }
             "next" | "next-window" => self.select_adjacent(1),
@@ -4745,14 +5030,19 @@ impl AppState {
                         None
                     }
                     "confirm" => {
-                        if self.pending_close.is_none() {
+                        if self.window_close_pending {
+                            self.finish_window_close(WindowCloseChoice::KeepServerRunning);
+                        } else if self.pending_close.is_some() {
+                            self.finish_close_confirmation(true);
+                        } else {
                             return IpcResponse::failure("no confirmation is pending");
                         }
-                        self.finish_close_confirmation(true);
                         None
                     }
                     "cancel" => {
-                        if self.settings_open {
+                        if self.window_close_pending {
+                            self.finish_window_close(WindowCloseChoice::Cancel);
+                        } else if self.settings_open {
                             self.close_settings();
                         } else if self.note_edit_target.is_some() {
                             self.finish_note_edit(false);
@@ -4762,6 +5052,24 @@ impl AppState {
                             }
                             self.finish_close_confirmation(false);
                         }
+                        None
+                    }
+                    "close-window" => {
+                        self.request_window_close();
+                        None
+                    }
+                    "keep-server-running" => {
+                        if !self.window_close_pending {
+                            return IpcResponse::failure("no window-close confirmation is pending");
+                        }
+                        self.finish_window_close(WindowCloseChoice::KeepServerRunning);
+                        None
+                    }
+                    "stop-server-and-exit" => {
+                        if !self.window_close_pending {
+                            return IpcResponse::failure("no window-close confirmation is pending");
+                        }
+                        self.finish_window_close(WindowCloseChoice::StopServerAndExit);
                         None
                     }
                     "composer-send" => {
@@ -4785,7 +5093,7 @@ impl AppState {
                         None
                     }
                     "window-restore" => {
-                        unsafe { ShowWindow(self.window, SW_RESTORE) };
+                        self.reattach_window("ui-action");
                         None
                     }
                     "window-resize" => {
@@ -4805,7 +5113,7 @@ impl AppState {
                                 "window-resize requires --height of at least 240",
                             );
                         };
-                        unsafe { ShowWindow(self.window, SW_RESTORE) };
+                        self.reattach_window("window-resize");
                         let mut client = RECT::default();
                         let mut outer = RECT::default();
                         unsafe {
@@ -5661,18 +5969,35 @@ fn run_script_command(arguments: &[String]) -> i32 {
                 return 2;
             };
             if path == "-" {
-                let mut source = String::new();
-                if let Err(error) = std::io::stdin().read_to_string(&mut source) {
-                    eprintln!("failed to read script from stdin: {error}");
-                    return 1;
+                match read_script_source(std::io::stdin().lock(), budgets.source_bytes) {
+                    Ok(source) => ("stdin".to_owned(), source),
+                    Err((code, error)) => {
+                        eprintln!("failed to read script from stdin: {error}");
+                        return code;
+                    }
                 }
-                ("stdin".to_owned(), source)
             } else {
-                match std::fs::read_to_string(path) {
-                    Ok(source) => (path.to_owned(), source),
+                if std::fs::metadata(path)
+                    .is_ok_and(|metadata| metadata.len() > budgets.source_bytes as u64)
+                {
+                    eprintln!(
+                        "script source exceeds the {} byte limit",
+                        budgets.source_bytes
+                    );
+                    return 3;
+                }
+                let file = match std::fs::File::open(path) {
+                    Ok(file) => file,
                     Err(error) => {
                         eprintln!("failed to read script {path}: {error}");
                         return 1;
+                    }
+                };
+                match read_script_source(file, budgets.source_bytes) {
+                    Ok(source) => (path.to_owned(), source),
+                    Err((code, error)) => {
+                        eprintln!("failed to read script {path}: {error}");
+                        return code;
                     }
                 }
             }
@@ -5805,6 +6130,33 @@ fn run_script_command(arguments: &[String]) -> i32 {
             return 1;
         }
     };
+    if result.envelope_version != SCRIPT_ENVELOPE_VERSION
+        || result.api_version != SCRIPT_API_VERSION
+        || result.invocation_id != invocation.invocation_id
+        || result.operation != Some(operation)
+        || result.profile != Some(profile)
+    {
+        eprintln!(
+            "agenterm-script.exe returned a mismatched protocol result \
+             (envelope/API/invocation/operation/profile identity)"
+        );
+        return 1;
+    }
+    let result_consistent = if result.ok {
+        output.status.success()
+            && result.exit_class == ScriptExitClass::Success
+            && result.failure.is_none()
+    } else {
+        !output.status.success()
+            && result.exit_class != ScriptExitClass::Success
+            && result.failure.is_some()
+    };
+    if !result_consistent {
+        eprintln!(
+            "agenterm-script.exe returned an inconsistent process status and result envelope"
+        );
+        return 1;
+    }
     if arguments.iter().any(|argument| argument == "--json") {
         println!(
             "{}",
@@ -5849,6 +6201,21 @@ fn run_script_command(arguments: &[String]) -> i32 {
             _ => 1,
         }
     }
+}
+
+fn read_script_source(
+    reader: impl Read,
+    limit: usize,
+) -> std::result::Result<String, (i32, String)> {
+    let mut bytes = Vec::with_capacity(limit.min(64 * 1024).saturating_add(1));
+    reader
+        .take(limit.saturating_add(1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|error| (1, error.to_string()))?;
+    if bytes.len() > limit {
+        return Err((3, format!("script source exceeds the {limit} byte limit")));
+    }
+    String::from_utf8(bytes).map_err(|error| (1, format!("script source is not UTF-8: {error}")))
 }
 
 fn script_operand(arguments: &[String]) -> Option<&str> {
@@ -6245,7 +6612,7 @@ Usage:
   agenterm-cli set-setting terminal.font-size 8..36
   agenterm-cli send-mouse [-t target] -x col -y row [--button left] [--action press]
   agenterm-cli ui-snapshot
-  agenterm-cli ui-action new-tab|new-child|edit-tab|toggle-tree|select-tab|close-tab|confirm|cancel|composer-send|copy-selection
+  agenterm-cli ui-action new-tab|new-child|edit-tab|toggle-tree|select-tab|close-tab|close-window|keep-server-running|stop-server-and-exit|confirm|cancel|composer-send|copy-selection
   agenterm-cli focus terminal|composer|sidebar [-t target]
   agenterm-cli wait-pane [-t target] (--contains text|--dead|--submit-complete) [--timeout-ms ms]
   agenterm-cli wait-ui [--active @id] [--focus surface] [-t target --tab-state state]

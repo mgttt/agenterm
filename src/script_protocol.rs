@@ -3,6 +3,7 @@ use serde_json::Value;
 
 pub const SCRIPT_ENVELOPE_VERSION: u32 = 1;
 pub const SCRIPT_API_VERSION: u32 = 1;
+pub const SCRIPT_INVOCATION_MAX_BYTES: u64 = 2 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -47,6 +48,21 @@ impl Default for ScriptBudgets {
     }
 }
 
+impl ScriptBudgets {
+    pub fn hard_limits() -> Self {
+        Self {
+            source_bytes: 256 * 1024,
+            operations: 10_000_000,
+            call_depth: 128,
+            expression_depth: 128,
+            collection_items: 100_000,
+            string_bytes: 1024 * 1024,
+            output_bytes: 1024 * 1024,
+            wall_time_ms: 10_000,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ScriptInvocation {
     pub envelope_version: u32,
@@ -66,6 +82,38 @@ pub struct ScriptInvocation {
 pub struct ScriptFailure {
     pub code: String,
     pub message: String,
+    pub category: ScriptFailureCategory,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ScriptFailureCategory {
+    Configuration,
+    Limit,
+    Script,
+    Protocol,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ScriptExitClass {
+    Success,
+    Configuration,
+    Limit,
+    Script,
+    Protocol,
+}
+
+impl ScriptExitClass {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Success => "success",
+            Self::Configuration => "configuration",
+            Self::Limit => "limit",
+            Self::Script => "script",
+            Self::Protocol => "protocol",
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -74,7 +122,11 @@ pub struct ScriptResult {
     pub invocation_id: String,
     pub api_version: u32,
     pub ok: bool,
-    pub exit_class: String,
+    pub exit_class: ScriptExitClass,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation: Option<ScriptOperation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<ScriptProfile>,
     pub stdout: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<Value>,

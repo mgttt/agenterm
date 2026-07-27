@@ -6,6 +6,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $declaredEvidence = @(
     'ux.hierarchical-tabs'
+    'ux.detach-first-window-close'
     'ux.live-close-confirmation'
     'ux.locale-consistency'
     'ux.mouse-scrollback'
@@ -44,6 +45,9 @@ $previousWorkspace = $env:AGENTERM_WORKSPACE_PATH
 $env:AGENTERM_IPC_ADDRESS = "127.0.0.1:$((47000 + ($PID % 1000)))"
 $workspaceFile = Join-Path $env:TEMP "agenterm-ux-$PID.json"
 $settingsFile = Join-Path $env:TEMP "agenterm-settings-$PID.json"
+$stopAddress = "127.0.0.1:$((48000 + ($PID % 1000)))"
+$stopWorkspaceFile = Join-Path $env:TEMP "agenterm-stop-ux-$PID.json"
+$stopSettingsFile = Join-Path $env:TEMP "agenterm-stop-settings-$PID.json"
 $env:AGENTERM_WORKSPACE_PATH = $workspaceFile
 $env:AGENTERM_SETTINGS_PATH = $settingsFile
 $name = "ux-smoke-$PID"
@@ -57,6 +61,48 @@ function Invoke-AgenTerm {
         throw "agenterm $($CommandArgs -join ' ') failed:`n$($output -join "`n")"
     }
     return ($output -join "`n")
+}
+
+function Invoke-AgenTermAt {
+    param(
+        [Parameter(Mandatory = $true)][string]$Address,
+        [string[]]$CommandArgs
+    )
+    $output = & $Exe '--address' $Address @CommandArgs 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "agenterm --address $Address $($CommandArgs -join ' ') failed:`n$($output -join "`n")"
+    }
+    return ($output -join "`n")
+}
+
+function Get-IsolatedServer {
+    param([string]$Address = $env:AGENTERM_IPC_ADDRESS)
+    $instances = Invoke-AgenTerm @('list-instances', '--json') | ConvertFrom-Json
+    $matches = @($instances | Where-Object {
+        $_.address -eq $Address -and $_.status -eq 'running'
+    })
+    if ($matches.Count -ne 1) {
+        throw "expected one running isolated server, found $($matches.Count)"
+    }
+    return $matches[0]
+}
+
+function Get-PaneSnapshot {
+    param(
+        [Parameter(Mandatory = $true)][string]$Target,
+        [string]$Address
+    )
+    $inspection = if ([string]::IsNullOrWhiteSpace($Address)) {
+        Invoke-AgenTerm @('pane-snapshot', '-t', $Target) | ConvertFrom-Json
+    } else {
+        Invoke-AgenTermAt -Address $Address `
+            -CommandArgs @('pane-snapshot', '-t', $Target) | ConvertFrom-Json
+    }
+    $panes = @($inspection.windows)
+    if ($panes.Count -ne 1 -or $panes[0].id -ne $Target) {
+        throw "pane-snapshot did not return exactly $Target"
+    }
+    return $panes[0]
 }
 
 Add-Type -TypeDefinition @'
@@ -465,6 +511,160 @@ try {
     }
     Write-Evidence 'ux.live-close-confirmation'
 
+    Write-Host 'STEP window close cancel and detach preserve the live server'
+    $continuityToken = "AGENTERM_DETACH_BEFORE_$PID"
+    Invoke-AgenTerm @('send-keys', '-t', $id, "echo $continuityToken", 'Enter') | Out-Null
+    Invoke-AgenTerm @(
+        'wait-pane', '-t', $id, '--contains', $continuityToken, '--timeout-ms', '5000'
+    ) | Out-Null
+    $beforeWindowClose = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $beforePane = Get-PaneSnapshot -Target $id
+    $beforeServer = Get-IsolatedServer
+    $beforeTabIds = @($beforeWindowClose.tabs.id | Sort-Object)
+
+    $closeModal = Invoke-AgenTerm @('ui-action', 'close-window') | ConvertFrom-Json
+    if ($closeModal.modal.kind -ne 'confirm-window-close' -or
+        $closeModal.modal.default_action -ne 'keep-server-running' -or
+        (Compare-Object @(
+            'keep-server-running', 'stop-server-and-exit', 'cancel'
+        ) @($closeModal.modal.actions))) {
+        throw 'window close did not expose the three-choice detach-first modal'
+    }
+    if (-not $closeModal.window.visible -or $closeModal.window.detached) {
+        throw 'opening the window-close modal changed window visibility'
+    }
+
+    $afterCancel = Invoke-AgenTerm @('ui-action', 'cancel') | ConvertFrom-Json
+    $afterCancelPane = Get-PaneSnapshot -Target $id
+    $afterCancelServer = Get-IsolatedServer
+    if ($null -ne $afterCancel.modal -or
+        -not $afterCancel.window.visible -or $afterCancel.window.detached -or
+        $afterCancel.event_position.epoch -ne $beforeWindowClose.event_position.epoch -or
+        $afterCancelPane.pid -ne $beforePane.pid -or
+        $afterCancelServer.pid -ne $beforeServer.pid -or
+        (Compare-Object $beforeTabIds @($afterCancel.tabs.id | Sort-Object))) {
+        throw 'cancel changed server, epoch, tab, PTY, or visible-window identity'
+    }
+
+    $detachStart = Invoke-AgenTerm @('ui-action', 'close-window') | ConvertFrom-Json
+    $detached = Invoke-AgenTerm @('ui-action', 'keep-server-running') | ConvertFrom-Json
+    $detachEvent = Invoke-AgenTerm @(
+        'wait-events',
+        '--epoch', $detachStart.event_position.epoch,
+        '--after', "$($detachStart.event_position.sequence)",
+        '--kind', 'window.visibility',
+        '--timeout-ms', '5000'
+    ) | ConvertFrom-Json
+    if ($detachEvent.payload.visible -ne $false -or
+        $detachEvent.payload.reason -ne 'detach' -or
+        $detached.window.visible -or -not $detached.window.detached) {
+        throw 'keep-server-running did not publish and expose detached window state'
+    }
+
+    $hiddenToken = "AGENTERM_DETACH_HIDDEN_$PID"
+    Invoke-AgenTerm @('send-keys', '-t', $id, "echo $hiddenToken", 'Enter') | Out-Null
+    Invoke-AgenTerm @(
+        'wait-pane', '-t', $id, '--contains', $hiddenToken, '--timeout-ms', '5000'
+    ) | Out-Null
+    $hiddenPane = Get-PaneSnapshot -Target $id
+    $hiddenServer = Get-IsolatedServer
+    $hiddenCapture = Invoke-AgenTerm @('capture-pane', '-p', '-t', $id)
+    if ($hiddenPane.pid -ne $beforePane.pid -or
+        $hiddenPane.output_bytes -le $beforePane.output_bytes -or
+        $hiddenServer.pid -ne $beforeServer.pid -or
+        $hiddenCapture -notmatch [regex]::Escape($continuityToken) -or
+        $hiddenCapture -notmatch [regex]::Escape($hiddenToken)) {
+        throw 'detached server did not preserve and advance the existing live PTY'
+    }
+
+    $reattachStart = $detached.event_position
+    Start-Process -FilePath $GuiExe | Out-Null
+    $reattachEvent = Invoke-AgenTerm @(
+        'wait-events',
+        '--epoch', $reattachStart.epoch,
+        '--after', "$($reattachStart.sequence)",
+        '--kind', 'window.visibility',
+        '--timeout-ms', '5000'
+    ) | ConvertFrom-Json
+    $reattached = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $reattachedPane = Get-PaneSnapshot -Target $id
+    $reattachedServer = Get-IsolatedServer
+    if ($reattachEvent.payload.visible -ne $true -or
+        $reattachEvent.payload.reason -ne 'launcher' -or
+        -not $reattached.window.visible -or $reattached.window.detached -or
+        $reattached.event_position.epoch -ne $beforeWindowClose.event_position.epoch -or
+        $reattachedPane.pid -ne $beforePane.pid -or
+        $reattachedServer.pid -ne $beforeServer.pid -or
+        (Compare-Object $beforeTabIds @($reattached.tabs.id | Sort-Object))) {
+        throw 'agenterm.exe reattach did not preserve server, epoch, tabs, and PTY identity'
+    }
+
+    Write-Host 'STEP stop server and exit creates a fresh isolated runtime'
+    $mainWorkspace = $env:AGENTERM_WORKSPACE_PATH
+    $mainSettings = $env:AGENTERM_SETTINGS_PATH
+    try {
+        $env:AGENTERM_WORKSPACE_PATH = $stopWorkspaceFile
+        $env:AGENTERM_SETTINGS_PATH = $stopSettingsFile
+        Invoke-AgenTermAt -Address $stopAddress -CommandArgs @('start-server') | Out-Null
+    }
+    finally {
+        $env:AGENTERM_WORKSPACE_PATH = $mainWorkspace
+        $env:AGENTERM_SETTINGS_PATH = $mainSettings
+    }
+    $stopName = "stop-runtime-$PID"
+    Invoke-AgenTermAt -Address $stopAddress `
+        -CommandArgs @('new-window', '-d', '-n', $stopName) | Out-Null
+    $stopSnapshotBefore = Invoke-AgenTermAt -Address $stopAddress `
+        -CommandArgs @('ui-snapshot') | ConvertFrom-Json
+    $stopTabBefore = $stopSnapshotBefore.tabs | Where-Object name -eq $stopName
+    if ($null -eq $stopTabBefore) {
+        throw 'isolated stop-and-exit tab was not created'
+    }
+    Invoke-AgenTermAt -Address $stopAddress -CommandArgs @(
+        'wait-ui', '-t', $stopTabBefore.id, '--tab-state', 'running', '--timeout-ms', '5000'
+    ) | Out-Null
+    $stopSnapshotBefore = Invoke-AgenTermAt -Address $stopAddress `
+        -CommandArgs @('ui-snapshot') | ConvertFrom-Json
+    $stopPaneBefore = Get-PaneSnapshot -Target $stopTabBefore.id -Address $stopAddress
+    $stopServerBefore = Get-IsolatedServer -Address $stopAddress
+
+    $stopModal = Invoke-AgenTermAt -Address $stopAddress `
+        -CommandArgs @('ui-action', 'close-window') | ConvertFrom-Json
+    if ($stopModal.modal.kind -ne 'confirm-window-close') {
+        throw 'isolated server did not expose the stop-and-exit confirmation'
+    }
+    Invoke-AgenTermAt -Address $stopAddress `
+        -CommandArgs @('ui-action', 'stop-server-and-exit') | Out-Null
+    Wait-Process -Id ([int]$stopServerBefore.pid) -Timeout 10 -ErrorAction Stop
+    if (Get-Process -Id ([int]$stopServerBefore.pid) -ErrorAction SilentlyContinue) {
+        throw 'stop-server-and-exit left the isolated server process running'
+    }
+
+    try {
+        $env:AGENTERM_WORKSPACE_PATH = $stopWorkspaceFile
+        $env:AGENTERM_SETTINGS_PATH = $stopSettingsFile
+        Invoke-AgenTermAt -Address $stopAddress -CommandArgs @('start-server') | Out-Null
+    }
+    finally {
+        $env:AGENTERM_WORKSPACE_PATH = $mainWorkspace
+        $env:AGENTERM_SETTINGS_PATH = $mainSettings
+    }
+    Invoke-AgenTermAt -Address $stopAddress -CommandArgs @(
+        'wait-ui', '-t', $stopTabBefore.id, '--tab-state', 'running', '--timeout-ms', '5000'
+    ) | Out-Null
+    $stopSnapshotAfter = Invoke-AgenTermAt -Address $stopAddress `
+        -CommandArgs @('ui-snapshot') | ConvertFrom-Json
+    $stopPaneAfter = Get-PaneSnapshot -Target $stopTabBefore.id -Address $stopAddress
+    $stopServerAfter = Get-IsolatedServer -Address $stopAddress
+    if ($stopSnapshotAfter.event_position.epoch -eq
+            $stopSnapshotBefore.event_position.epoch -or
+        $stopServerAfter.pid -eq $stopServerBefore.pid -or
+        $stopPaneAfter.pid -eq $stopPaneBefore.pid) {
+        throw 'restart after stop-and-exit reused the old server epoch or PTY'
+    }
+    Invoke-AgenTermAt -Address $stopAddress -CommandArgs @('kill-server') | Out-Null
+    Write-Evidence 'ux.detach-first-window-close'
+
     Write-Host 'STEP settings discovery and modal'
     $settings = Invoke-AgenTerm @('get-settings') | ConvertFrom-Json
     if ($settings.terminal_font_size -lt 8 -or
@@ -531,9 +731,12 @@ try {
 }
 finally {
     Remove-Item -LiteralPath $draftFile -ErrorAction SilentlyContinue
+    & $Exe --address $stopAddress kill-server 2>$null | Out-Null
     & $Exe kill-server 2>$null | Out-Null
     Remove-Item -LiteralPath $workspaceFile -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $settingsFile -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $stopWorkspaceFile -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $stopSettingsFile -ErrorAction SilentlyContinue
     if ($null -eq $previousAddress) {
         Remove-Item Env:AGENTERM_IPC_ADDRESS -ErrorAction SilentlyContinue
     } else {
