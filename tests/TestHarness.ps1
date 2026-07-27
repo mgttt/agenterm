@@ -379,10 +379,12 @@ function New-SmokeRunContext {
         AGENTERM_IPC_ADDRESS = $env:AGENTERM_IPC_ADDRESS
         AGENTERM_WORKSPACE_PATH = $env:AGENTERM_WORKSPACE_PATH
         AGENTERM_SETTINGS_PATH = $env:AGENTERM_SETTINGS_PATH
+        AGENTERM_NO_ACTIVATE = $env:AGENTERM_NO_ACTIVATE
     }
     $env:AGENTERM_IPC_ADDRESS = $address
     $env:AGENTERM_WORKSPACE_PATH = $workspacePath
     $env:AGENTERM_SETTINGS_PATH = $settingsPath
+    $env:AGENTERM_NO_ACTIVATE = '1'
 
     return [pscustomobject]@{
         Suite = $Suite

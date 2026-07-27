@@ -1,7 +1,8 @@
 param(
     [string]$GuiExe = (Join-Path $PSScriptRoot '..\dist\agenterm.exe'),
     [string]$CliExe = (Join-Path $PSScriptRoot '..\dist\agenterm-cli.exe'),
-    [switch]$ListEvidence
+    [switch]$ListEvidence,
+    [switch]$InternalFailureBundleProbe
 )
 
 $ErrorActionPreference = 'Stop'
@@ -9,14 +10,6 @@ $declaredEvidence = @('ux.working-context-proxy')
 if ($ListEvidence) {
     $declaredEvidence
     exit 0
-}
-
-function Write-Evidence {
-    param([Parameter(Mandatory = $true)][string]$Id)
-    if ($declaredEvidence -notcontains $Id) {
-        throw "Working-context smoke emitted undeclared evidence ID: $Id"
-    }
-    Write-Host "EVIDENCE $Id"
 }
 
 function Assert-NoSecret {
@@ -29,13 +22,27 @@ function Assert-NoSecret {
     }
 }
 
+function Remove-FixtureSecrets {
+    param([AllowNull()][string]$Text)
+    if ($null -eq $Text) {
+        return ''
+    }
+    return $Text.Replace($script:proxyUrl, '<fixture-proxy>').
+        Replace($script:secret, '<fixture-secret>')
+}
+
 function Invoke-Cli {
     param([Parameter(ValueFromRemainingArguments = $true)][string[]]$CommandArgs)
-    $output = & $CliExe @CommandArgs 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw "agenterm-cli $($CommandArgs -join ' ') failed:`n$($output -join "`n")"
+    $outputItems = @(& $CliExe @CommandArgs 2>&1)
+    $exitCode = $LASTEXITCODE
+    $output = $outputItems -join "`n"
+    Add-SmokeCommandRecord -Context $context -Arguments $CommandArgs `
+        -ExitCode $exitCode -ExpectedFailure $false `
+        -Output (Remove-FixtureSecrets $output)
+    if ($exitCode -ne 0) {
+        throw "agenterm-cli $($CommandArgs -join ' ') failed:`n$output"
     }
-    ($output -join "`n")
+    $output
 }
 
 function Invoke-ExpectedFailure {
@@ -43,16 +50,20 @@ function Invoke-ExpectedFailure {
     $oldPreference = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        $output = & $CliExe @CommandArgs 2>&1
+        $outputItems = @(& $CliExe @CommandArgs 2>&1)
         $exitCode = $LASTEXITCODE
     }
     finally {
         $ErrorActionPreference = $oldPreference
     }
+    $output = $outputItems -join "`n"
+    Add-SmokeCommandRecord -Context $context -Arguments $CommandArgs `
+        -ExitCode $exitCode -ExpectedFailure $true `
+        -Output (Remove-FixtureSecrets $output)
     if ($exitCode -eq 0) {
         throw "agenterm-cli $($CommandArgs -join ' ') unexpectedly succeeded"
     }
-    ($output -join "`n")
+    $output
 }
 
 function Wait-Server {
@@ -62,20 +73,34 @@ function Wait-Server {
         $Process.Refresh()
         if ($Process.HasExited) {
             $stderr = Get-Content -LiteralPath $stderrFile -Raw -ErrorAction SilentlyContinue
+            Add-SmokeCommandRecord -Context $context `
+                -Arguments @('ui-snapshot') -ExitCode -1 `
+                -ExpectedFailure $false `
+                -Output (Remove-FixtureSecrets $stderr)
             throw "AgenTerm exited before its server became ready:`n$stderr"
         }
         $oldPreference = $ErrorActionPreference
         $ErrorActionPreference = 'SilentlyContinue'
         try {
-            & $CliExe ui-snapshot 2>$null | Out-Null
-            $ready = $LASTEXITCODE -eq 0
+            $probeOutput = @(& $CliExe ui-snapshot 2>&1)
+            $probeExitCode = $LASTEXITCODE
+            $ready = $probeExitCode -eq 0
         }
         finally {
             $ErrorActionPreference = $oldPreference
         }
-        if ($ready) { return }
+        if ($ready) {
+            Add-SmokeCommandRecord -Context $context `
+                -Arguments @('ui-snapshot') -ExitCode $probeExitCode `
+                -ExpectedFailure $false `
+                -Output (Remove-FixtureSecrets ($probeOutput -join "`n"))
+            return
+        }
         Start-Sleep -Milliseconds 50
     } while ([DateTime]::UtcNow -lt $deadline)
+    Add-SmokeCommandRecord -Context $context -Arguments @('ui-snapshot') `
+        -ExitCode $probeExitCode -ExpectedFailure $false `
+        -Output (Remove-FixtureSecrets ($probeOutput -join "`n"))
     throw 'AgenTerm server did not become ready within 10 seconds'
 }
 
@@ -110,22 +135,57 @@ public static class AgenTermProxyNativeTest {
 
 $GuiExe = [IO.Path]::GetFullPath($GuiExe)
 $CliExe = [IO.Path]::GetFullPath($CliExe)
-$previousAddress = $env:AGENTERM_IPC_ADDRESS
-$previousWorkspace = $env:AGENTERM_WORKSPACE_PATH
-$previousInstances = $env:AGENTERM_INSTANCE_DIR
-$previousHttp = $env:HTTP_PROXY
-$previousHttps = $env:HTTPS_PROXY
-$address = "127.0.0.1:$((55500 + ($PID % 400)))"
-$workspace = Join-Path $env:TEMP "agenterm-proxy-$PID.json"
-$instances = Join-Path $env:TEMP "agenterm-proxy-instances-$PID"
-$stderrFile = Join-Path $env:TEMP "agenterm-proxy-stderr-$PID.txt"
+foreach ($path in @($GuiExe, $CliExe)) {
+    if (-not (Test-Path -LiteralPath $path)) {
+        throw "AgenTerm executable not found: $path"
+    }
+}
+. (Join-Path $PSScriptRoot 'TestHarness.ps1')
+$context = New-SmokeRunContext -Suite 'working-context' `
+    -Executable $CliExe -DeclaredEvidence $declaredEvidence
+$context.PreviousEnvironment['AGENTERM_INSTANCE_DIR'] = $env:AGENTERM_INSTANCE_DIR
+$context.PreviousEnvironment['HTTP_PROXY'] = $env:HTTP_PROXY
+$context.PreviousEnvironment['HTTPS_PROXY'] = $env:HTTPS_PROXY
+$address = $context.Address
+$workspace = $context.WorkspacePath
+$instances = Join-Path $context.RunDirectory 'instances'
+$stderrFile = Join-Path $context.RunDirectory 'gui-stderr.txt'
+$png = Join-Path $context.RunDirectory 'proxy-eye.png'
 $script:secret = ('credential-' + $PID + '-sentinel')
 $proxyUrl = "https://alice:$script:secret@proxy.example:8443/private?token=$script:secret#fragment"
+$script:proxyUrl = $proxyUrl
 $process = $null
+$succeeded = $false
+$failureRecord = $null
+
+function Write-Evidence {
+    param([Parameter(Mandatory = $true)][string]$Id)
+    Write-SmokeEvidence -Context $context -Id $Id
+}
+
+function Protect-WorkingContextFailureBundle {
+    foreach ($file in @(
+        Get-ChildItem -LiteralPath $context.RunDirectory -Recurse -File `
+            -ErrorAction SilentlyContinue
+    )) {
+        if ($file.Extension -notin @('.json', '.txt', '.log') -and
+            $file.Name -ne 'emitted.txt') {
+            continue
+        }
+        $text = Get-Content -LiteralPath $file.FullName -Raw `
+            -ErrorAction SilentlyContinue
+        if ($null -ne $text) {
+            $scrubbed = Remove-FixtureSecrets $text
+            [IO.File]::WriteAllText(
+                $file.FullName,
+                $scrubbed,
+                [Text.UTF8Encoding]::new($false)
+            )
+        }
+    }
+}
 
 try {
-    $env:AGENTERM_IPC_ADDRESS = $address
-    $env:AGENTERM_WORKSPACE_PATH = $workspace
     $env:AGENTERM_INSTANCE_DIR = $instances
     $env:HTTP_PROXY = $proxyUrl
     $env:HTTPS_PROXY = $proxyUrl
@@ -134,6 +194,9 @@ try {
     Remove-Item Env:HTTPS_PROXY -ErrorAction SilentlyContinue
 
     Wait-Server $process
+    if ($InternalFailureBundleProbe) {
+        throw "Injected failure containing fixture secret: $proxyUrl"
+    }
     Invoke-Cli wait-ui -t 0 --tab-state running --timeout-ms 10000 | Out-Null
     $snapshotText = Invoke-Cli ui-snapshot
     Assert-NoSecret $snapshotText 'launch ui-snapshot'
@@ -162,7 +225,6 @@ try {
     if ($eye.width -le 0 -or $eye.height -le 0) {
         throw 'Proxy eye did not expose a bounded GDI hit target'
     }
-    $png = Join-Path $env:TEMP "agenterm-proxy-eye-$PID.png"
     Invoke-Cli screenshot '-o' $png | Out-Null
     if (-not (Test-Path -LiteralPath $png) -or (Get-Item $png).Length -le 1000) {
         throw 'Proxy GDI eye screenshot evidence was not created'
@@ -184,8 +246,17 @@ try {
     Invoke-Cli ui-action cancel | Out-Null
 
     $proxyInput = "HTTP_PROXY=$proxyUrl`nHTTPS_PROXY=$proxyUrl"
-    $prepareOutput = $proxyInput | & $CliExe ui-action proxy-prepare -t $tabId --stdin 2>&1
-    if ($LASTEXITCODE -ne 0) {
+    $prepareArguments = @(
+        'ui-action', 'proxy-prepare', '-t', $tabId, '--stdin'
+    )
+    $prepareOutput = @(
+        $proxyInput | & $CliExe @prepareArguments 2>&1
+    )
+    $prepareExitCode = $LASTEXITCODE
+    Add-SmokeCommandRecord -Context $context -Arguments $prepareArguments `
+        -ExitCode $prepareExitCode -ExpectedFailure $false `
+        -Output (Remove-FixtureSecrets ($prepareOutput -join "`n"))
+    if ($prepareExitCode -ne 0) {
         throw "Proxy prepare failed:`n$($prepareOutput -join "`n")"
     }
     $prepareText = $prepareOutput -join "`n"
@@ -251,25 +322,30 @@ try {
     Assert-NoSecret (Get-Content -LiteralPath $stderrFile -Raw) 'GUI stderr'
     Write-Evidence 'ux.working-context-proxy'
     Write-Host 'PASS: proxy privacy, GDI eye, sensitive prepare/send, remask, and restart'
+    $succeeded = $true
+}
+catch {
+    $failureRecord = $_
 }
 finally {
-    & $CliExe kill-server 2>$null | Out-Null
-    if ($null -ne $process -and -not $process.HasExited) {
-        $process.WaitForExit(2000) | Out-Null
+    Remove-Item Env:HTTP_PROXY -ErrorAction SilentlyContinue
+    Remove-Item Env:HTTPS_PROXY -ErrorAction SilentlyContinue
+    $safeFailure = if ($null -eq $failureRecord) {
+        $null
+    } else {
+        Remove-FixtureSecrets ($failureRecord | Out-String)
     }
-    Remove-Item -LiteralPath $workspace -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $stderrFile -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $instances -Recurse -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath (Join-Path $env:TEMP "agenterm-proxy-eye-$PID.png") `
-        -ErrorAction SilentlyContinue
-    if ($null -eq $previousAddress) { Remove-Item Env:AGENTERM_IPC_ADDRESS -ErrorAction SilentlyContinue }
-    else { $env:AGENTERM_IPC_ADDRESS = $previousAddress }
-    if ($null -eq $previousWorkspace) { Remove-Item Env:AGENTERM_WORKSPACE_PATH -ErrorAction SilentlyContinue }
-    else { $env:AGENTERM_WORKSPACE_PATH = $previousWorkspace }
-    if ($null -eq $previousInstances) { Remove-Item Env:AGENTERM_INSTANCE_DIR -ErrorAction SilentlyContinue }
-    else { $env:AGENTERM_INSTANCE_DIR = $previousInstances }
-    if ($null -eq $previousHttp) { Remove-Item Env:HTTP_PROXY -ErrorAction SilentlyContinue }
-    else { $env:HTTP_PROXY = $previousHttp }
-    if ($null -eq $previousHttps) { Remove-Item Env:HTTPS_PROXY -ErrorAction SilentlyContinue }
-    else { $env:HTTPS_PROXY = $previousHttps }
+    Complete-SmokeRun -Context $context -Succeeded $succeeded `
+        -FailureRecord $safeFailure
+    if ($null -ne $process -and -not $process.HasExited) {
+        if (-not $process.WaitForExit(2000)) {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+        }
+    }
+    if (-not $succeeded) {
+        Protect-WorkingContextFailureBundle
+    }
+}
+if (-not $succeeded) {
+    throw $failureRecord
 }

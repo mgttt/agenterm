@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "receipt_schema_version": 1,
+  "required_gates": [
+    {
+      "id": "rustfmt",
+      "evidence": []
+    },
+    {
+      "id": "clippy",
+      "evidence": []
+    },
+    {
+      "id": "unit-tests",
+      "evidence": []
+    },
+    {
+      "id": "artifact-build",
+      "evidence": []
+    },
+    {
+      "id": "artifact-verification",
+      "evidence": []
+    },
+    {
+      "id": "prd-alignment",
+      "evidence": []
+    },
+    {
+      "id": "startup-smoke",
+      "evidence": [
+        "startup.first-window-async-ready"
+      ]
+    },
+    {
+      "id": "cli-smoke",
+      "evidence": [
+        "cli.backspace-del-one",
+        "cli.remain-on-exit",
+        "cli.stable-create-id",
+        "cli.observable-events",
+        "cli.typed-tabs-operations",
+        "cli.control-receipts"
+      ]
+    },
+    {
+      "id": "fleet-smoke",
+      "evidence": [
+        "fleet.codex-launcher",
+        "fleet.event-transition-catalog",
+        "fleet.instance-discovery",
+        "fleet.mux-frontend",
+        "fleet.tab-environment",
+        "fleet.upgrade-truth"
+      ]
+    },
+    {
+      "id": "script-smoke",
+      "evidence": [
+        "script.rhai-pure",
+        "script.rhai-observe",
+        "script.rhai-deny-budget",
+        "script.rhai-framed",
+        "script.supervisor",
+        "script.audit"
+      ]
+    },
+    {
+      "id": "theme-smoke",
+      "evidence": [
+        "ux.theme-settings"
+      ]
+    },
+    {
+      "id": "working-context-smoke",
+      "evidence": [
+        "ux.working-context-proxy"
+      ]
+    },
+    {
+      "id": "ux-smoke",
+      "evidence": [
+        "ux.adaptive-tabs",
+        "ux.hierarchical-tabs",
+        "ux.detach-first-window-close",
+        "ux.live-close-confirmation",
+        "ux.locale-consistency",
+        "ux.keyboard-surface-navigation",
+        "ux.modal-wait",
+        "ux.mouse-scrollback",
+        "ux.no-activate-launch",
+        "ux.persistent-workspace",
+        "ux.semantic-ui-automation",
+        "ux.semantic-window-control",
+        "ux.settings-isolation",
+        "ux.system-menu-clipboard",
+        "ux.terminal-selection-copy",
+        "ux.working-context-cwd"
+      ]
+    }
+  ]
+}

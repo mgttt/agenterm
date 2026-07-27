@@ -1,7 +1,9 @@
 param(
     [switch]$Release,
     [switch]$SkipSmoke,
-    [switch]$IncludeStress
+    [switch]$IncludeStress,
+    [switch]$InternalQualificationDryRun,
+    [string]$QualificationReceiptPath = 'target\qualification\receipt.json'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -12,6 +14,9 @@ Push-Location $PSScriptRoot
 function Invoke-Checked {
     param(
         [Parameter(Mandatory = $true)]
+        [string]$Id,
+
+        [Parameter(Mandatory = $true)]
         [string]$Label,
 
         [Parameter(Mandatory = $true)]
@@ -19,9 +24,32 @@ function Invoke-Checked {
     )
 
     Write-Host "`n==> $Label"
-    & $Command
-    if ($LASTEXITCODE -ne 0) {
-        throw "$Label failed with exit code $LASTEXITCODE"
+    $watch = [Diagnostics.Stopwatch]::StartNew()
+    $outputItems = @()
+    try {
+        $global:LASTEXITCODE = 0
+        $outputItems = @(
+            & $Command *>&1 | ForEach-Object {
+                Write-Host ([string]$_)
+                $_
+            }
+        )
+        $exitCode = $LASTEXITCODE
+        if ($exitCode -ne 0) {
+            throw "$Label failed with exit code $exitCode"
+        }
+        Add-AgenTermQualificationResult -Context $qualification `
+            -GateId $Id -Status passed -DurationMs $watch.ElapsedMilliseconds `
+            -Output $outputItems
+    }
+    catch {
+        $failureOutput = @($outputItems) + @($_ | Out-String)
+        if (-not $qualification.Results.Contains($Id)) {
+            Add-AgenTermQualificationResult -Context $qualification `
+                -GateId $Id -Status failed `
+                -DurationMs $watch.ElapsedMilliseconds -Output $failureOutput
+        }
+        throw
     }
 }
 
@@ -34,20 +62,53 @@ function Get-PeSubsystem {
 }
 
 try {
-    Invoke-Checked 'rustfmt' { cargo fmt -- --check }
-    Invoke-Checked 'Clippy' {
+    if ($InternalQualificationDryRun) {
+        & '.\scripts\qualification-selftest.ps1'
+        return
+    }
+
+    $receiptPath = [IO.Path]::GetFullPath($QualificationReceiptPath)
+    if (Test-Path -LiteralPath $receiptPath) {
+        Remove-Item -LiteralPath $receiptPath -Force
+    }
+    . '.\scripts\qualification.ps1'
+    $qualificationManifestPath = '.\scripts\qualification-gates.json'
+    $qualification = New-AgenTermQualificationContext `
+        -ManifestPath $qualificationManifestPath `
+        -Release ([bool]$Release) `
+        -StressIncluded ([bool]$IncludeStress)
+    Assert-AgenTermQualificationDeclarations -Context $qualification `
+        -SuiteScripts @{
+            'cli-smoke' = '.\tests\cli_smoke.ps1'
+            'fleet-smoke' = '.\tests\fleet_smoke.ps1'
+            'script-smoke' = '.\tests\script_smoke.ps1'
+            'theme-smoke' = '.\tests\theme_smoke.ps1'
+            'working-context-smoke' = '.\tests\working_context_smoke.ps1'
+            'ux-smoke' = '.\tests\ux_smoke.ps1'
+        }
+    Invoke-Checked -Id 'rustfmt' -Label 'rustfmt' {
+        cargo fmt -- --check
+    }
+    Invoke-Checked -Id 'clippy' -Label 'Clippy' {
         cargo clippy --locked --all-targets --all-features -- -D warnings
     }
-    Invoke-Checked 'unit tests' { cargo test --locked --all-features }
+    Invoke-Checked -Id 'unit-tests' -Label 'unit tests' {
+        cargo test --locked --all-features
+    }
 
     if ($Release) {
-        Invoke-Checked 'release artifact' { & '.\build.bat' release }
+        Invoke-Checked -Id 'artifact-build' -Label 'release artifact' {
+            & '.\build.bat' release
+        }
     }
     else {
-        Invoke-Checked 'development artifact' { & '.\build.bat' }
+        Invoke-Checked -Id 'artifact-build' -Label 'development artifact' {
+            & '.\build.bat'
+        }
     }
 
-    Invoke-Checked 'binary roles and metadata' {
+    Invoke-Checked -Id 'artifact-verification' `
+        -Label 'binary roles and metadata' {
         $gui = '.\dist\agenterm.exe'
         $cli = '.\dist\agenterm-cli.exe'
         $mux = '.\dist\agenterm-mux.exe'
@@ -136,7 +197,7 @@ try {
         }
     }
 
-    Invoke-Checked 'PRD capability alignment' {
+    Invoke-Checked -Id 'prd-alignment' -Label 'PRD capability alignment' {
         & '.\tests\prd_alignment.ps1'
     }
 
@@ -145,9 +206,13 @@ try {
         # The GUI entry point and CLI autostart both honor this inherited flag.
         $env:AGENTERM_NO_ACTIVATE = '1'
         try {
-            Invoke-Checked 'startup smoke test' { & '.\tests\startup_smoke.ps1' }
-            Invoke-Checked 'CLI smoke test' { & '.\tests\cli_smoke.ps1' }
-            Invoke-Checked 'AI fleet smoke test' {
+            Invoke-Checked -Id 'startup-smoke' -Label 'startup smoke test' {
+                & '.\tests\startup_smoke.ps1'
+            }
+            Invoke-Checked -Id 'cli-smoke' -Label 'CLI smoke test' {
+                & '.\tests\cli_smoke.ps1'
+            }
+            Invoke-Checked -Id 'fleet-smoke' -Label 'AI fleet smoke test' {
                 if (-not $IncludeStress) {
                     & '.\tests\fleet_smoke.ps1' -SkipEventLoad
                 }
@@ -155,12 +220,21 @@ try {
                     & '.\tests\fleet_smoke.ps1'
                 }
             }
-            Invoke-Checked 'safe scripting smoke test' { & '.\tests\script_smoke.ps1' }
-            Invoke-Checked 'theme settings smoke test' { & '.\tests\theme_smoke.ps1' }
-            Invoke-Checked 'working context privacy smoke test' {
+            Invoke-Checked -Id 'script-smoke' `
+                -Label 'safe scripting smoke test' {
+                & '.\tests\script_smoke.ps1'
+            }
+            Invoke-Checked -Id 'theme-smoke' `
+                -Label 'theme settings smoke test' {
+                & '.\tests\theme_smoke.ps1'
+            }
+            Invoke-Checked -Id 'working-context-smoke' `
+                -Label 'working context privacy smoke test' {
                 & '.\tests\working_context_smoke.ps1'
             }
-            Invoke-Checked 'semantic UX smoke test' { & '.\tests\ux_smoke.ps1' }
+            Invoke-Checked -Id 'ux-smoke' -Label 'semantic UX smoke test' {
+                & '.\tests\ux_smoke.ps1'
+            }
         }
         finally {
             if ($hadNoActivateEnvironment) {
@@ -172,6 +246,22 @@ try {
         }
     }
 
+    if ($SkipSmoke) {
+        Write-Host (
+            "`nQUALIFICATION RECEIPT NOT WRITTEN: smoke gates were skipped."
+        )
+    }
+    elseif (-not $IncludeStress) {
+        Write-Host (
+            "`nQUALIFICATION RECEIPT NOT WRITTEN: explicit stress gate was not included."
+        )
+    }
+    else {
+        $writtenReceipt = Write-AgenTermQualificationReceipt `
+            -Context $qualification -RepoRoot $PSScriptRoot `
+            -OutputPath $receiptPath
+        Write-Host "`nQUALIFICATION RECEIPT $writtenReceipt"
+    }
     Write-Host "`nPASS: AgenTerm quality gate"
 }
 finally {
