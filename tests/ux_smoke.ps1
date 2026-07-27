@@ -5,12 +5,14 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $declaredEvidence = @(
+    'ux.adaptive-tabs'
     'ux.hierarchical-tabs'
     'ux.detach-first-window-close'
     'ux.live-close-confirmation'
     'ux.locale-consistency'
     'ux.keyboard-surface-navigation'
     'ux.mouse-scrollback'
+    'ux.no-activate-launch'
     'ux.persistent-workspace'
     'ux.semantic-ui-automation'
     'ux.semantic-window-control'
@@ -49,11 +51,15 @@ $settingsFile = Join-Path $env:TEMP "agenterm-settings-$PID.json"
 $stopAddress = "127.0.0.1:$((48000 + ($PID % 1000)))"
 $stopWorkspaceFile = Join-Path $env:TEMP "agenterm-stop-ux-$PID.json"
 $stopSettingsFile = Join-Path $env:TEMP "agenterm-stop-settings-$PID.json"
+$noActivateAddress = "127.0.0.1:$((49000 + ($PID % 1000)))"
+$noActivateWorkspaceFile = Join-Path $env:TEMP "agenterm-no-activate-ux-$PID.json"
+$noActivateSettingsFile = Join-Path $env:TEMP "agenterm-no-activate-settings-$PID.json"
 $env:AGENTERM_WORKSPACE_PATH = $workspaceFile
 $env:AGENTERM_SETTINGS_PATH = $settingsFile
 $name = "ux-smoke-$PID"
 $token = "AGENTERM_UX_$PID"
 $draftFile = Join-Path $env:TEMP "$name.txt"
+$foregroundHost = [IntPtr]::Zero
 
 function Invoke-AgenTerm {
     param([string[]]$CommandArgs)
@@ -161,6 +167,25 @@ public static class AgenTermNativeTest {
     private static extern bool SetForegroundWindow(IntPtr window);
 
     [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr CreateWindowExW(
+        uint exStyle, string className, string title, uint style,
+        int x, int y, int width, int height, IntPtr parent, IntPtr menu,
+        IntPtr instance, IntPtr parameter);
+
+    [DllImport("user32.dll")]
+    private static extern bool DestroyWindow(IntPtr window);
+
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindow(IntPtr window, int command);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr FindWindowExW(
+        IntPtr parent, IntPtr after, string className, string windowName);
+
+    [DllImport("user32.dll")]
     private static extern void keybd_event(
         byte virtualKey, byte scanCode, uint flags, UIntPtr extraInfo);
 
@@ -200,6 +225,9 @@ public static class AgenTermNativeTest {
     private static extern int GetMenuStringW(
         IntPtr menu, uint item, StringBuilder text, int length, uint flags);
 
+    [DllImport("user32.dll")]
+    private static extern uint GetMenuState(IntPtr menu, uint item, uint flags);
+
     private static IntPtr PointParam(int x, int y) {
         return (IntPtr)(((y & 0xffff) << 16) | (x & 0xffff));
     }
@@ -220,6 +248,23 @@ public static class AgenTermNativeTest {
         SendMessageW(window, 0x0202, UIntPtr.Zero, PointParam(endX, endY));
     }
 
+    public static void Click(IntPtr window, int x, int y) {
+        SendMessageW(window, 0x0201, UIntPtr.Zero, PointParam(x, y));
+        SendMessageW(window, 0x0202, UIntPtr.Zero, PointParam(x, y));
+    }
+
+    public static void ClickButton(IntPtr window, string label) {
+        IntPtr button = FindWindowExW(window, IntPtr.Zero, "BUTTON", label);
+        if (button == IntPtr.Zero) {
+            throw new InvalidOperationException("button was not found: " + label);
+        }
+        SendMessageW(button, 0x00F5, UIntPtr.Zero, IntPtr.Zero);
+    }
+
+    public static void DoubleClick(IntPtr window, int x, int y) {
+        SendMessageW(window, 0x0203, (UIntPtr)1, PointParam(x, y));
+    }
+
     public static string SystemMenuLabel(IntPtr window, uint command) {
         IntPtr menu = GetSystemMenu(window, false);
         if (menu == IntPtr.Zero) {
@@ -233,8 +278,38 @@ public static class AgenTermNativeTest {
         return text.ToString();
     }
 
+    public static bool SystemMenuChecked(IntPtr window, uint command) {
+        IntPtr menu = GetSystemMenu(window, false);
+        if (menu == IntPtr.Zero) {
+            throw new InvalidOperationException("GetSystemMenu failed");
+        }
+        return (GetMenuState(menu, command, 0) & 0x8) != 0;
+    }
+
     public static void SystemCommand(IntPtr window, uint command) {
         SendMessageW(window, 0x0112, (UIntPtr)command, IntPtr.Zero);
+    }
+
+    public static IntPtr CreateForegroundHost() {
+        IntPtr window = CreateWindowExW(
+            0, "STATIC", "AgenTerm no-activate test host", 0x10CF0000,
+            80, 80, 420, 160, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
+        if (window == IntPtr.Zero) {
+            throw new InvalidOperationException("CreateWindowExW test host failed");
+        }
+        ShowWindow(window, 5);
+        SetForegroundWindow(window);
+        return window;
+    }
+
+    public static IntPtr ForegroundWindow() {
+        return GetForegroundWindow();
+    }
+
+    public static void DestroyHost(IntPtr window) {
+        if (window != IntPtr.Zero) {
+            DestroyWindow(window);
+        }
     }
 
     public static void KeyDown(IntPtr window, byte virtualKey) {
@@ -507,6 +582,144 @@ try {
     if ($window -eq [IntPtr]::Zero) {
         throw 'could not resolve the public AgenTerm window for mouse regression'
     }
+
+    Write-Host 'STEP no-activate launcher preserves foreground on existing server'
+    $foregroundHost = [AgenTermNativeTest]::CreateForegroundHost()
+    $foregroundWait = [Diagnostics.Stopwatch]::StartNew()
+    while ([AgenTermNativeTest]::ForegroundWindow() -ne $foregroundHost -and
+        $foregroundWait.ElapsedMilliseconds -lt 1000) {
+        Start-Sleep -Milliseconds 10
+    }
+    if ([AgenTermNativeTest]::ForegroundWindow() -ne $foregroundHost) {
+        throw 'could not establish the no-activate test host as foreground'
+    }
+    $noActivate = Start-Process -FilePath $GuiExe -ArgumentList @(
+        '--not-foreground', '--address', $env:AGENTERM_IPC_ADDRESS
+    ) -PassThru
+    if (-not $noActivate.WaitForExit(1000) -or
+        [AgenTermNativeTest]::ForegroundWindow() -ne $foregroundHost) {
+        throw '--not-foreground existing-server handoff stole foreground or did not exit'
+    }
+    $noActivateSnapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    if (-not $noActivateSnapshot.window.visible -or
+        $noActivateSnapshot.window.detached) {
+        throw '--not-foreground existing-server handoff lost the visible window'
+    }
+
+    $mainWorkspaceForNoActivate = $env:AGENTERM_WORKSPACE_PATH
+    $mainSettingsForNoActivate = $env:AGENTERM_SETTINGS_PATH
+    try {
+        $env:AGENTERM_WORKSPACE_PATH = $noActivateWorkspaceFile
+        $env:AGENTERM_SETTINGS_PATH = $noActivateSettingsFile
+        $newNoActivate = Start-Process -FilePath $GuiExe -ArgumentList @(
+            '--address', $noActivateAddress, '--not-foreground'
+        ) -PassThru
+    }
+    finally {
+        $env:AGENTERM_WORKSPACE_PATH = $mainWorkspaceForNoActivate
+        $env:AGENTERM_SETTINGS_PATH = $mainSettingsForNoActivate
+    }
+    $newNoActivateWait = [Diagnostics.Stopwatch]::StartNew()
+    $newNoActivateSnapshot = $null
+    do {
+        try {
+            $newNoActivateSnapshot = Invoke-AgenTermAt -Address $noActivateAddress `
+                -CommandArgs @('ui-snapshot') | ConvertFrom-Json
+        }
+        catch {
+            if ($newNoActivateWait.ElapsedMilliseconds -ge 5000) { throw }
+        }
+    } while ($null -eq $newNoActivateSnapshot)
+    if ([AgenTermNativeTest]::ForegroundWindow() -ne $foregroundHost -or
+        -not $newNoActivateSnapshot.window.visible -or
+        $newNoActivateSnapshot.window.detached) {
+        throw '--not-foreground new-server launch stole foreground or hid its window'
+    }
+    Invoke-AgenTermAt -Address $noActivateAddress -CommandArgs @('kill-server') | Out-Null
+    $newNoActivate.WaitForExit(5000) | Out-Null
+    [AgenTermNativeTest]::DestroyHost($foregroundHost)
+    $foregroundHost = [IntPtr]::Zero
+    Write-Evidence 'ux.no-activate-launch'
+
+    Write-Host 'STEP adaptive Tabs controls, resizing, and shared layout'
+    $tabsBaseline = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $baselineCols = [int]$tabsBaseline.layout.terminal.cols
+    if ($tabsBaseline.layout.sidebar.configured_width -ne 250 -or
+        $tabsBaseline.layout.sidebar.resize_grip.width -ne 6 -or
+        -not $tabsBaseline.system_menu.toggle_tabs.checked -or
+        [AgenTermNativeTest]::SystemMenuLabel($window, 0x1f20) -ne 'Toggle Tabs') {
+        throw 'adaptive Tabs baseline, grip, or system menu was not exposed'
+    }
+
+    [AgenTermNativeTest]::ClickButton($window, 'Tabs')
+    $tabsHidden = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    if ($tabsHidden.layout.sidebar.visible -or
+        $tabsHidden.layout.sidebar.effective_width -ne 0 -or
+        $tabsHidden.layout.terminal.x -ne 0 -or
+        $null -eq $tabsHidden.layout.status_bar.tabs_recovery -or
+        $tabsHidden.layout.terminal.cols -le $baselineCols -or
+        $tabsHidden.system_menu.toggle_tabs.checked -or
+        [AgenTermNativeTest]::SystemMenuChecked($window, 0x1f20)) {
+        throw 'Tabs button did not hide the tree and release its terminal width'
+    }
+    $recovery = $tabsHidden.layout.status_bar.tabs_recovery
+    [AgenTermNativeTest]::Click(
+        $window,
+        [int]($recovery.x + ($recovery.width / 2)),
+        [int]($recovery.y + ($recovery.height / 2))
+    )
+    $tabsRecovered = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    if (-not $tabsRecovered.layout.sidebar.visible -or
+        $tabsRecovered.layout.sidebar.effective_width -ne 250 -or
+        $null -ne $tabsRecovered.layout.status_bar.tabs_recovery) {
+        throw 'hidden status segment did not restore Tabs'
+    }
+
+    [AgenTermNativeTest]::SystemCommand($window, 0x1f20)
+    $systemHidden = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    if ($systemHidden.layout.sidebar.visible -or
+        $systemHidden.system_menu.toggle_tabs.checked) {
+        throw 'Toggle Tabs system-menu command did not hide Tabs'
+    }
+    [AgenTermNativeTest]::SystemCommand($window, 0x1f20)
+    $systemShown = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    if (-not $systemShown.layout.sidebar.visible -or
+        -not $systemShown.system_menu.toggle_tabs.checked) {
+        throw 'Toggle Tabs system-menu command did not restore checked state'
+    }
+
+    $grip = $systemShown.layout.sidebar.resize_grip
+    [AgenTermNativeTest]::Drag(
+        $window,
+        [int]($grip.x + ($grip.width / 2)),
+        [int]($grip.y + 80),
+        330,
+        [int]($grip.y + 80)
+    )
+    $tabsResized = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    if ($tabsResized.layout.sidebar.configured_width -ne 330 -or
+        $tabsResized.layout.sidebar.effective_width -ne 330 -or
+        $tabsResized.layout.terminal.cols -ge $baselineCols -or
+        $tabsResized.layout.terminal.scrollbar.track.x -ne
+            ($tabsResized.layout.terminal.x +
+                $tabsResized.layout.terminal.width - 12)) {
+        throw (
+            'physical Tabs grip drag did not resize the shared terminal geometry: ' +
+            ($tabsResized.layout | ConvertTo-Json -Depth 8 -Compress) +
+            "; baseline_cols=$baselineCols"
+        )
+    }
+    [AgenTermNativeTest]::DoubleClick(
+        $window,
+        [int]($tabsResized.layout.sidebar.resize_grip.x + 2),
+        [int]($tabsResized.layout.sidebar.resize_grip.y + 80)
+    )
+    $tabsReset = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    if ($tabsReset.layout.sidebar.configured_width -ne 250 -or
+        $tabsReset.layout.sidebar.effective_width -ne 250) {
+        throw 'double-clicking the Tabs grip did not restore the 250px default'
+    }
+    Write-Evidence 'ux.adaptive-tabs'
 
     Write-Host 'STEP physical keyboard surface navigation and native Edit arbitration'
     Invoke-AgenTerm @('set-composer', '-t', $id, 'alpha beta gamma') | Out-Null
@@ -948,19 +1161,28 @@ try {
     $snapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
     $restored = $snapshot.tabs | Where-Object name -eq $persistName
     if ($null -eq $restored -or $restored.note -ne 'restored note' -or
-        -not $restored.draft -or -not $restored.active) {
-        throw 'Workspace tab metadata and active selection did not survive restart'
+        -not $restored.draft -or -not $restored.active -or
+        $snapshot.layout.sidebar.configured_width -ne 250 -or
+        -not $snapshot.layout.sidebar.visible) {
+        throw 'Workspace metadata or adaptive Tabs settings did not survive restart'
     }
     Write-Evidence 'ux.persistent-workspace'
     Write-Host 'PASS: UX state, two-line tabs, settings, composer, focus, safe close, dead close, protocol discovery'
 }
 finally {
+    [AgenTermNativeTest]::DestroyHost($foregroundHost)
     Remove-Item -LiteralPath $draftFile -ErrorAction SilentlyContinue
     try {
         & $Exe --address $stopAddress kill-server 2>$null | Out-Null
     }
     catch {
         # The isolated stop journey normally leaves no server to clean up.
+    }
+    try {
+        & $Exe --address $noActivateAddress kill-server 2>$null | Out-Null
+    }
+    catch {
+        # The isolated no-activate server normally stopped in its journey.
     }
     try {
         & $Exe kill-server 2>$null | Out-Null
@@ -972,6 +1194,8 @@ finally {
     Remove-Item -LiteralPath $settingsFile -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $stopWorkspaceFile -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $stopSettingsFile -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $noActivateWorkspaceFile -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $noActivateSettingsFile -ErrorAction SilentlyContinue
     if ($null -eq $previousAddress) {
         Remove-Item Env:AGENTERM_IPC_ADDRESS -ErrorAction SilentlyContinue
     } else {

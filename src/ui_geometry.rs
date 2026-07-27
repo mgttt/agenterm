@@ -129,14 +129,8 @@ pub(crate) fn workspace_layout(input: WorkspaceLayoutInput) -> WorkspaceLayout {
     let resize_grip = input
         .tabs_visible
         .then(|| {
-            let half = TABS_RESIZE_GRIP_WIDTH / 2;
-            let left = (effective_tabs_width - half).clamp(0, width);
-            rect(
-                left,
-                0,
-                (left + TABS_RESIZE_GRIP_WIDTH).min(width),
-                status_top,
-            )
+            let left = (effective_tabs_width - TABS_RESIZE_GRIP_WIDTH).clamp(0, width);
+            rect(left, 0, effective_tabs_width.min(width), status_top)
         })
         .filter(|grip| grip.width() > 0);
 
@@ -367,7 +361,12 @@ mod tests {
         assert_eq!(geometry.terminal, rect(250, 0, 1000, 596));
         assert_eq!(geometry.composer, rect(250, 596, 1000, 674));
         assert_eq!(geometry.status, rect(0, 674, 1000, 700));
-        assert_eq!(geometry.resize_grip, Some(rect(247, 0, 253, 674)));
+        assert_eq!(geometry.resize_grip, Some(rect(244, 0, 250, 674)));
+        assert_eq!(
+            geometry.resize_grip.unwrap().right,
+            geometry.terminal.left,
+            "the full six-pixel grip stays outside the terminal viewport"
+        );
         assert_eq!(geometry.status_segments.tabs_recovery, None);
         assert_eq!(geometry.status_segments.cwd.width(), STATUS_CWD_WIDTH);
         assert_eq!(geometry.status_segments.proxy.width(), STATUS_PROXY_WIDTH);

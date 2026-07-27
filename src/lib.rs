@@ -46,20 +46,22 @@ use windows_sys::Win32::{
     UI::Input::KeyboardAndMouse::{GetFocus, GetKeyState, ReleaseCapture, SetCapture, SetFocus},
     UI::Shell::ShellExecuteW,
     UI::WindowsAndMessaging::{
-        CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreateWindowExW, DefWindowProcW,
-        DestroyWindow, DispatchMessageW, ES_AUTOVSCROLL, ES_MULTILINE, ES_WANTRETURN,
-        EnableMenuItem, GWLP_USERDATA, GetClientRect, GetMessageW, GetSystemMenu,
-        GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW, IDC_ARROW,
-        InsertMenuW, IsIconic, IsWindowVisible, IsZoomed, LoadCursorW, LoadIconW, MB_ICONERROR,
-        MB_OK, MF_BYCOMMAND, MF_ENABLED, MF_GRAYED, MF_SEPARATOR, MF_STRING, MSG, MessageBoxW,
-        MoveWindow, PostMessageW, PostQuitMessage, RegisterClassW, SC_CLOSE, SW_HIDE, SW_MAXIMIZE,
-        SW_MINIMIZE, SW_SHOW, SW_SHOWMAXIMIZED, SW_SHOWNORMAL, SendMessageW, SetForegroundWindow,
-        SetTimer, SetWindowLongPtrW, SetWindowTextW, ShowWindow, TranslateMessage, WM_APP, WM_CHAR,
-        WM_CLOSE, WM_COMMAND, WM_COPY, WM_CREATE, WM_CUT, WM_DESTROY, WM_ENDSESSION, WM_ERASEBKGND,
-        WM_INITMENUPOPUP, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
-        WM_MOUSEWHEEL, WM_NCDESTROY, WM_PAINT, WM_PASTE, WM_QUERYENDSESSION, WM_RBUTTONDOWN,
-        WM_SETFOCUS, WM_SIZE, WM_SYSCOMMAND, WM_TIMER, WNDCLASSW, WS_BORDER, WS_CHILD,
-        WS_CLIPCHILDREN, WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE,
+        CREATESTRUCTW, CS_DBLCLKS, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CheckMenuItem,
+        CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, ES_AUTOVSCROLL,
+        ES_MULTILINE, ES_WANTRETURN, EnableMenuItem, GWLP_USERDATA, GetClientRect, GetCursorPos,
+        GetMessageW, GetSystemMenu, GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW,
+        GetWindowTextW, IDC_ARROW, IDC_SIZEWE, InsertMenuW, IsIconic, IsWindowVisible, IsZoomed,
+        LoadCursorW, LoadIconW, MB_ICONERROR, MB_OK, MF_BYCOMMAND, MF_CHECKED, MF_ENABLED,
+        MF_GRAYED, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MSG, MessageBoxW, MoveWindow,
+        PostMessageW, PostQuitMessage, RegisterClassW, SC_CLOSE, SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE,
+        SW_SHOW, SW_SHOWMAXIMIZED, SW_SHOWNOACTIVATE, SW_SHOWNORMAL, SendMessageW, SetCursor,
+        SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowTextW, ShowWindow,
+        TranslateMessage, WM_APP, WM_CHAR, WM_CLOSE, WM_COMMAND, WM_COPY, WM_CREATE, WM_CUT,
+        WM_DESTROY, WM_ENDSESSION, WM_ERASEBKGND, WM_INITMENUPOPUP, WM_KEYDOWN, WM_KEYUP,
+        WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY,
+        WM_PAINT, WM_PASTE, WM_QUERYENDSESSION, WM_RBUTTONDOWN, WM_SETCURSOR, WM_SETFOCUS, WM_SIZE,
+        WM_SYSCOMMAND, WM_TIMER, WNDCLASSW, WS_BORDER, WS_CHILD, WS_CLIPCHILDREN,
+        WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE,
     },
 };
 
@@ -93,9 +95,9 @@ use settings::{AppConfig, config_path, load_config, save_config};
 use tab_tree::{TabTreeNode, TabTreeRow, tree_rows, would_create_cycle};
 use theme::{ThemeId, ThemePalette};
 use ui_geometry::{
-    PixelRect, TAB_HEIGHT, TERMINAL_SCROLLBAR_WIDTH, TerminalScrollbarGeometry,
-    scrollback_for_thumb_top, terminal_scrollbar_geometry, tree_anchor_x, tree_row_at_y,
-    tree_row_geometry,
+    PixelRect, TAB_HEIGHT, TERMINAL_SCROLLBAR_WIDTH, TerminalScrollbarGeometry, WorkspaceLayout,
+    WorkspaceLayoutInput, reset_tabs_width, scrollback_for_thumb_top, tabs_width_from_drag,
+    terminal_scrollbar_geometry, tree_anchor_x, tree_row_at_y, tree_row_geometry, workspace_layout,
 };
 use workspace::{SavedTab, SavedWorkspace, load_workspace, save_workspace, workspace_path};
 
@@ -103,12 +105,8 @@ const APP_NAME: &str = "AgenTerm";
 const INITIAL_ROWS: u16 = 30;
 const INITIAL_COLS: u16 = 100;
 const SCROLLBACK_LINES: usize = 10_000;
-const SIDEBAR_WIDTH: i32 = 250;
 const COMPOSER_HEIGHT: i32 = 78;
 const STATUS_BAR_HEIGHT: i32 = 26;
-const TAB_ADD_LEFT: i32 = SIDEBAR_WIDTH - 72;
-const TAB_EDIT_LEFT: i32 = SIDEBAR_WIDTH - 48;
-const TAB_CLOSE_LEFT: i32 = SIDEBAR_WIDTH - 24;
 const BUTTON_ID: usize = 1001;
 const EDIT_ID: usize = 1002;
 const SETTINGS_BUTTON_ID: usize = 1003;
@@ -119,10 +117,12 @@ const NEW_BUTTON_ID: usize = 1007;
 const SETTINGS_DARK_ID: usize = 1008;
 const SETTINGS_LIGHT_ID: usize = 1009;
 const SETTINGS_CANCEL_ID: usize = 1010;
+const TABS_BUTTON_ID: usize = 1011;
 const TIMER_ID: usize = 1;
 const WM_APP_WAKE: u32 = WM_APP + 1;
 const SYSTEM_MENU_COPY_ID: usize = 0x1f00;
 const SYSTEM_MENU_PASTE_ID: usize = 0x1f10;
+const SYSTEM_MENU_TOGGLE_TABS_ID: usize = 0x1f20;
 const CLIPBOARD_UNICODE_TEXT: u32 = 13;
 const TERMINAL_PASTE_LIMIT_BYTES: usize = 256 * 1024;
 const IPC_TIMEOUT: Duration = Duration::from_secs(5);
@@ -137,6 +137,7 @@ const UI_LOCALE: &str = "en-US";
 const LABEL_SEND: &str = "Send";
 const LABEL_SETTINGS: &str = "Settings";
 const LABEL_NEW: &str = "New";
+const LABEL_TABS: &str = "Tabs";
 const LABEL_APPLY: &str = "Apply";
 const LABEL_SAVE: &str = "Save";
 
@@ -220,51 +221,85 @@ pub fn run_gui_entry() -> i32 {
     let arguments = env::args().skip(1).collect::<Vec<_>>();
     if arguments
         .first()
-        .is_some_and(|argument| argument != "--address")
+        .is_some_and(|argument| !argument.starts_with("--"))
     {
         write_best_effort_stderr(&gui_cli_guidance(&arguments));
         return 2;
     }
-    if let Err(error) = configure_gui_address(&arguments) {
-        write_best_effort_stderr(&format!(
-            "AgenTerm GUI argument error: {error:#}\n\
+    let launch_options = match configure_gui_launch(&arguments) {
+        Ok(options) => options,
+        Err(error) => {
+            write_best_effort_stderr(&format!(
+                "AgenTerm GUI argument error: {error:#}\n\
              No GUI server was started by this invocation.\n\
              More CLI commands: agenterm-cli.exe -h"
-        ));
-        return 2;
-    }
+            ));
+            return 2;
+        }
+    };
     write_best_effort_stderr(&gui_console_summary(&ipc_address()));
-    if env::var_os("AGENTERM_SERVER").is_none()
-        && send_ipc_request(vec!["__focus".to_owned()]).is_ok()
-    {
-        return 0;
+    if env::var_os("AGENTERM_SERVER").is_none() {
+        let handoff = if launch_options.not_foreground {
+            "__show-no-activate"
+        } else {
+            "__focus"
+        };
+        if send_ipc_request(vec![handoff.to_owned()]).is_ok() {
+            return 0;
+        }
     }
 
-    if let Err(error) = run_gui() {
+    if let Err(error) = run_gui(launch_options.not_foreground) {
         show_startup_error(&error);
         return 1;
     }
     0
 }
 
-fn configure_gui_address(arguments: &[String]) -> Result<()> {
-    let Some(argument) = arguments.first() else {
-        return Ok(());
-    };
-    if argument != "--address" {
-        anyhow::bail!("unsupported AgenTerm GUI argument: {argument}");
-    }
-    let address = arguments
-        .get(1)
-        .context("agenterm.exe --address requires HOST:PORT")?;
-    if arguments.len() != 2 {
-        anyhow::bail!("agenterm.exe accepts only --address HOST:PORT");
-    }
-    parse_loopback_ipc_address(address)?;
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct GuiLaunchOptions {
+    not_foreground: bool,
+}
+
+fn configure_gui_launch(arguments: &[String]) -> Result<GuiLaunchOptions> {
+    let (options, address) = parse_gui_launch(arguments)?;
     IPC_ADDRESS_OVERRIDE.with(|override_address| {
-        *override_address.borrow_mut() = Some(address.clone());
+        *override_address.borrow_mut() = address;
     });
-    Ok(())
+    Ok(options)
+}
+
+fn parse_gui_launch(arguments: &[String]) -> Result<(GuiLaunchOptions, Option<String>)> {
+    let mut options = GuiLaunchOptions::default();
+    let mut address = None;
+    let mut position = 0;
+    while position < arguments.len() {
+        match arguments[position].as_str() {
+            "--not-foreground" => {
+                if options.not_foreground {
+                    anyhow::bail!("agenterm.exe --not-foreground may be specified only once");
+                }
+                options.not_foreground = true;
+                position += 1;
+            }
+            "--address" => {
+                if address.is_some() {
+                    anyhow::bail!("agenterm.exe --address may be specified only once");
+                }
+                let value = arguments
+                    .get(position + 1)
+                    .context("agenterm.exe --address requires HOST:PORT")?;
+                if value.starts_with("--") {
+                    anyhow::bail!("agenterm.exe --address requires HOST:PORT");
+                }
+                parse_loopback_ipc_address(value)?;
+                address = Some(value.clone());
+                position += 2;
+            }
+            argument => anyhow::bail!("unsupported AgenTerm GUI argument: {argument}"),
+        }
+    }
+    Ok((options, address))
 }
 
 fn quote_argument_for_display(argument: &str) -> String {
@@ -495,7 +530,7 @@ pub fn run_mux_entry() -> i32 {
     run_cli(arguments)
 }
 
-fn run_gui() -> Result<()> {
+fn run_gui(not_foreground: bool) -> Result<()> {
     let instance = unsafe { GetModuleHandleW(ptr::null()) };
     if instance.is_null() {
         anyhow::bail!("GetModuleHandleW failed");
@@ -510,7 +545,7 @@ fn run_gui() -> Result<()> {
         socket.port()
     ));
     let mut window_class: WNDCLASSW = unsafe { mem::zeroed() };
-    window_class.style = CS_HREDRAW | CS_VREDRAW;
+    window_class.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS;
     window_class.lpfnWndProc = Some(window_proc);
     window_class.hInstance = instance as HINSTANCE;
     window_class.hCursor = unsafe { LoadCursorW(ptr::null_mut(), IDC_ARROW) };
@@ -542,7 +577,7 @@ fn run_gui() -> Result<()> {
     if window.is_null() {
         anyhow::bail!("CreateWindowExW failed");
     }
-    install_system_clipboard_menu(window)?;
+    install_system_menu(window)?;
 
     let edit = unsafe {
         CreateWindowExW(
@@ -598,6 +633,22 @@ fn run_gui() -> Result<()> {
             ptr::null(),
         )
     };
+    let tabs_button = unsafe {
+        CreateWindowExW(
+            0,
+            wide("BUTTON").as_ptr(),
+            wide(LABEL_TABS).as_ptr(),
+            WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+            0,
+            0,
+            54,
+            30,
+            window,
+            TABS_BUTTON_ID as *mut c_void,
+            instance,
+            ptr::null(),
+        )
+    };
     let new_button = unsafe {
         CreateWindowExW(
             0,
@@ -637,6 +688,7 @@ fn run_gui() -> Result<()> {
     };
     if edit.is_null()
         || send_button.is_null()
+        || tabs_button.is_null()
         || settings_button.is_null()
         || new_button.is_null()
         || settings_font.is_null()
@@ -655,6 +707,7 @@ fn run_gui() -> Result<()> {
         NativeControls {
             edit,
             send_button,
+            tabs_button,
             settings_button,
             new_button,
             settings_font,
@@ -672,9 +725,17 @@ fn run_gui() -> Result<()> {
     if let Some(state) = state_mut(window) {
         state.layout();
         state.load_active_composer();
+        state.refresh_system_menu();
     }
     unsafe {
-        ShowWindow(window, SW_SHOW);
+        ShowWindow(
+            window,
+            if not_foreground {
+                SW_SHOWNOACTIVATE
+            } else {
+                SW_SHOW
+            },
+        );
         UpdateWindow(window);
     }
 
@@ -698,7 +759,7 @@ fn run_gui() -> Result<()> {
     Ok(())
 }
 
-fn install_system_clipboard_menu(window: HWND) -> Result<()> {
+fn install_system_menu(window: HWND) -> Result<()> {
     let menu = unsafe { GetSystemMenu(window, 0) };
     if menu.is_null() {
         anyhow::bail!("GetSystemMenu failed");
@@ -708,10 +769,20 @@ fn install_system_clipboard_menu(window: HWND) -> Result<()> {
             menu,
             SC_CLOSE,
             MF_BYCOMMAND | MF_STRING,
-            SYSTEM_MENU_COPY_ID,
-            wide("Copy\tCtrl+C").as_ptr(),
+            SYSTEM_MENU_TOGGLE_TABS_ID,
+            wide("Toggle Tabs").as_ptr(),
         )
     } == 0
+        || unsafe { InsertMenuW(menu, SC_CLOSE, MF_BYCOMMAND | MF_SEPARATOR, 0, ptr::null()) } == 0
+        || unsafe {
+            InsertMenuW(
+                menu,
+                SC_CLOSE,
+                MF_BYCOMMAND | MF_STRING,
+                SYSTEM_MENU_COPY_ID,
+                wide("Copy\tCtrl+C").as_ptr(),
+            )
+        } == 0
         || unsafe {
             InsertMenuW(
                 menu,
@@ -816,6 +887,14 @@ unsafe extern "system" fn window_proc(
             }
             0
         }
+        WM_LBUTTONDBLCLK => {
+            let x = (lparam as u32 & 0xffff) as i16 as i32;
+            let y = ((lparam as u32 >> 16) & 0xffff) as i16 as i32;
+            if let Some(state) = state_mut(window) {
+                state.left_button_double_click(x, y);
+            }
+            0
+        }
         WM_LBUTTONUP => {
             if let Some(state) = state_mut(window) {
                 state.left_button_up();
@@ -829,6 +908,15 @@ unsafe extern "system" fn window_proc(
                 state.mouse_move(x, y);
             }
             0
+        }
+        WM_SETCURSOR => {
+            if let Some(state) = state_mut(window)
+                && state.set_resize_cursor_if_needed()
+            {
+                1
+            } else {
+                unsafe { DefWindowProcW(window, message, wparam, lparam) }
+            }
         }
         WM_MOUSEWHEEL => {
             let x = (lparam as u32 & 0xffff) as i16 as i32;
@@ -851,6 +939,11 @@ unsafe extern "system" fn window_proc(
             if (wparam & 0xffff) == BUTTON_ID {
                 if let Some(state) = state_mut(window) {
                     state.send_composer();
+                }
+                0
+            } else if (wparam & 0xffff) == TABS_BUTTON_ID {
+                if let Some(state) = state_mut(window) {
+                    state.set_tabs_visible(false, "button");
                 }
                 0
             } else if (wparam & 0xffff) == SETTINGS_BUTTON_ID {
@@ -904,11 +997,17 @@ unsafe extern "system" fn window_proc(
         }
         WM_INITMENUPOPUP => {
             if let Some(state) = state_mut(window) {
-                state.refresh_system_clipboard_menu();
+                state.refresh_system_menu();
             }
             unsafe { DefWindowProcW(window, message, wparam, lparam) }
         }
         WM_SYSCOMMAND => match wparam & 0xfff0 {
+            SYSTEM_MENU_TOGGLE_TABS_ID => {
+                if let Some(state) = state_mut(window) {
+                    state.set_tabs_visible(!state.config.tabs_visible, "system-menu");
+                }
+                0
+            }
             SYSTEM_MENU_COPY_ID => {
                 if let Some(state) = state_mut(window) {
                     state.system_menu_copy();
@@ -1365,6 +1464,7 @@ impl Drop for TerminalTab {
 struct NativeControls {
     edit: HWND,
     send_button: HWND,
+    tabs_button: HWND,
     settings_button: HWND,
     new_button: HWND,
     settings_font: HWND,
@@ -1456,6 +1556,11 @@ fn terminal_copy_shortcut(
 #[derive(Clone, Copy, Debug)]
 struct ScrollDrag {
     thumb_grab_offset: i32,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct TabsResizeDrag {
+    original_width: u16,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -1647,6 +1752,7 @@ struct AppState {
     window: HWND,
     edit: HWND,
     send_button: HWND,
+    tabs_button: HWND,
     settings_button: HWND,
     new_button: HWND,
     settings_font: HWND,
@@ -1688,6 +1794,7 @@ struct AppState {
     resolved_font_family: String,
     wheel_remainder: i32,
     scroll_drag: Option<ScrollDrag>,
+    tabs_resize_drag: Option<TabsResizeDrag>,
     terminal_selection: Option<TerminalSelection>,
     _instance_registration: InstanceRegistration,
 }
@@ -1734,6 +1841,7 @@ impl AppState {
             window,
             edit: controls.edit,
             send_button: controls.send_button,
+            tabs_button: controls.tabs_button,
             settings_button: controls.settings_button,
             new_button: controls.new_button,
             settings_font: controls.settings_font,
@@ -1775,6 +1883,7 @@ impl AppState {
             resolved_font_family,
             wheel_remainder: 0,
             scroll_drag: None,
+            tabs_resize_drag: None,
             terminal_selection: None,
             _instance_registration: instance_registration,
         };
@@ -2211,6 +2320,27 @@ impl AppState {
         }
     }
 
+    fn show_window_no_activate(&mut self, reason: &str) {
+        let was_detached = self.window_detached || unsafe { IsWindowVisible(self.window) } == 0;
+        if was_detached {
+            self.window_detached = false;
+            self.navigation_latch = None;
+            unsafe {
+                ShowWindow(self.window, SW_SHOWNOACTIVATE);
+                InvalidateRect(self.window, ptr::null(), 0);
+            }
+            self.event_journal.commit(
+                "window.visibility",
+                None,
+                serde_json::json!({
+                    "visible": true,
+                    "reason": reason,
+                    "activated": false,
+                }),
+            );
+        }
+    }
+
     fn tick(&mut self) -> bool {
         let mut changed = false;
         if self.startup_tab_pending {
@@ -2319,13 +2449,26 @@ impl AppState {
     }
 
     fn layout(&self) {
-        let mut client: RECT = unsafe { mem::zeroed() };
-        unsafe { GetClientRect(self.window, &mut client) };
-        let sidebar_width = self.effective_tabs_width();
-        let content_bottom = (client.bottom - STATUS_BAR_HEIGHT).max(0);
-        let content_width = (client.right - sidebar_width).max(180);
+        let layout = self.workspace_layout();
+        let sidebar_width = layout.effective_tabs_width;
+        let content_bottom = layout.status.top;
+        let content_width = layout.terminal.width().max(180);
         let edit_width = (content_width - 104).max(80);
+        let button_left = 8;
+        let button_gap = 4;
+        let tabs_button_width = 52.min((sidebar_width - 16).max(0));
+        let new_button_width = 50.min((sidebar_width - 16 - tabs_button_width).max(0));
+        let settings_button_width =
+            (sidebar_width - 16 - tabs_button_width - new_button_width - button_gap * 2).max(0);
         unsafe {
+            ShowWindow(
+                self.tabs_button,
+                if self.config.tabs_visible {
+                    SW_SHOW
+                } else {
+                    SW_HIDE
+                },
+            );
             ShowWindow(
                 self.settings_button,
                 if self.config.tabs_visible {
@@ -2343,38 +2486,46 @@ impl AppState {
                 },
             );
             MoveWindow(
-                self.settings_button,
-                12,
+                self.tabs_button,
+                button_left,
                 (content_bottom - 42).max(0),
-                108,
+                tabs_button_width,
+                30,
+                1,
+            );
+            MoveWindow(
+                self.settings_button,
+                button_left + tabs_button_width + button_gap,
+                (content_bottom - 42).max(0),
+                settings_button_width,
                 30,
                 1,
             );
             MoveWindow(
                 self.new_button,
-                130,
+                sidebar_width - 8 - new_button_width,
                 (content_bottom - 42).max(0),
-                108,
+                new_button_width,
                 30,
                 1,
             );
             MoveWindow(
                 self.edit,
-                sidebar_width + 10,
-                (content_bottom - COMPOSER_HEIGHT + 30).max(0),
+                layout.composer.left + 10,
+                (layout.composer.top + 30).max(0),
                 edit_width,
                 COMPOSER_HEIGHT - 40,
                 1,
             );
             MoveWindow(
                 self.send_button,
-                sidebar_width + 20 + edit_width,
-                (content_bottom - COMPOSER_HEIGHT + 32).max(0),
+                layout.composer.left + 20 + edit_width,
+                (layout.composer.top + 32).max(0),
                 74,
                 34,
                 1,
             );
-            let settings_left = sidebar_width + (content_width - 520) / 2;
+            let settings_left = layout.terminal.left + (content_width - 520) / 2;
             let settings_top = (content_bottom - 320) / 2;
             MoveWindow(
                 self.settings_font,
@@ -2561,7 +2712,27 @@ impl AppState {
     }
 
     fn left_button_down(&mut self, x: i32, y: i32) {
-        let sidebar_width = self.effective_tabs_width();
+        let layout = self.workspace_layout();
+        let sidebar_width = layout.effective_tabs_width;
+        if layout.resize_grip.is_some_and(|grip| grip.contains(x, y))
+            && !self.window_close_pending
+            && self.pending_close.is_none()
+            && !self.settings_open
+        {
+            self.begin_tabs_resize();
+            return;
+        }
+        if layout
+            .status_segments
+            .tabs_recovery
+            .is_some_and(|segment| segment.contains(x, y))
+            && !self.window_close_pending
+            && self.pending_close.is_none()
+            && !self.settings_open
+        {
+            self.set_tabs_visible(true, "status-bar");
+            return;
+        }
         if self.window_close_pending
             || self.pending_close.is_some()
             || self.settings_open
@@ -2597,6 +2768,10 @@ impl AppState {
     }
 
     fn left_button_up(&mut self) {
+        if self.tabs_resize_drag.is_some() {
+            self.finish_tabs_resize(true, "mouse-drag");
+            return;
+        }
         if self.scroll_drag.is_some() {
             self.end_scroll_drag();
             return;
@@ -2619,6 +2794,10 @@ impl AppState {
     }
 
     fn mouse_move(&mut self, x: i32, y: i32) {
+        if self.tabs_resize_drag.is_some() {
+            self.drag_tabs_resize(x);
+            return;
+        }
         if self.scroll_drag.is_some() {
             self.drag_scrollbar(x, y);
             return;
@@ -2646,6 +2825,16 @@ impl AppState {
         }
     }
 
+    fn left_button_double_click(&mut self, x: i32, y: i32) {
+        if self
+            .workspace_layout()
+            .resize_grip
+            .is_some_and(|grip| grip.contains(x, y))
+        {
+            self.reset_tabs_width("mouse-double-click");
+        }
+    }
+
     fn send_terminal_click(&mut self, column: u16, row: u16) {
         let Some(position) = self.active_position() else {
             return;
@@ -2658,11 +2847,12 @@ impl AppState {
     }
 
     fn click(&mut self, x: i32, y: i32) {
-        let sidebar_width = self.effective_tabs_width();
+        let layout = self.workspace_layout();
+        let sidebar_width = layout.effective_tabs_width;
         if self.window_close_pending {
             let mut client: RECT = unsafe { mem::zeroed() };
             unsafe { GetClientRect(self.window, &mut client) };
-            let left = SIDEBAR_WIDTH + (client.right - SIDEBAR_WIDTH - 620) / 2;
+            let left = layout.terminal.left + (layout.terminal.width() - 620) / 2;
             let top = (client.bottom - STATUS_BAR_HEIGHT - 230) / 2;
             if y >= top + 154 && y <= top + 194 {
                 if x >= left + 24 && x <= left + 234 {
@@ -2678,7 +2868,7 @@ impl AppState {
         if self.pending_close.is_some() || self.settings_open {
             let mut client: RECT = unsafe { mem::zeroed() };
             unsafe { GetClientRect(self.window, &mut client) };
-            let modal_left = SIDEBAR_WIDTH + (client.right - SIDEBAR_WIDTH - 460) / 2;
+            let modal_left = layout.terminal.left + (layout.terminal.width() - 460) / 2;
             let modal_top = (client.bottom - STATUS_BAR_HEIGHT - 190) / 2;
             if y >= modal_top + 125 && y <= modal_top + 163 {
                 if x >= modal_left + 238 && x <= modal_left + 432 {
@@ -2689,7 +2879,15 @@ impl AppState {
             }
             return;
         }
-        if x >= sidebar_width {
+        if layout
+            .status_segments
+            .tabs_recovery
+            .is_some_and(|segment| segment.contains(x, y))
+        {
+            self.set_tabs_visible(true, "status-bar");
+            return;
+        }
+        if layout.terminal.contains(x, y) {
             self.set_focus_surface(FocusSurface::Terminal, "mouse");
             if self.click_scrollbar(x, y) {
                 return;
@@ -2712,7 +2910,7 @@ impl AppState {
         let geometry = tree_row_geometry(
             row,
             tree_row.as_ref().map_or(0, |row| row.depth),
-            SIDEBAR_WIDTH,
+            sidebar_width,
         );
         if has_children && geometry.disclosure_hit.contains_x(x) {
             if !self.collapsed_tabs.remove(&id) {
@@ -2722,12 +2920,15 @@ impl AppState {
             return;
         }
         let actions_visible = self.active == Some(id);
-        if actions_visible && x >= TAB_CLOSE_LEFT {
+        let tab_add_left = sidebar_width - 72;
+        let tab_edit_left = sidebar_width - 48;
+        let tab_close_left = sidebar_width - 24;
+        if actions_visible && x >= tab_close_left {
             self.request_close_tab(id);
-        } else if actions_visible && x >= TAB_EDIT_LEFT {
+        } else if actions_visible && x >= tab_edit_left {
             self.open_tab_editor(id);
             return;
-        } else if actions_visible && x >= TAB_ADD_LEFT {
+        } else if actions_visible && x >= tab_add_left {
             self.collapsed_tabs.remove(&id);
             match self.create_tab_with_parent(
                 Some("New child".to_owned()),
@@ -2899,13 +3100,23 @@ impl AppState {
         (copy_enabled, paste_enabled)
     }
 
-    fn refresh_system_clipboard_menu(&self) {
+    fn refresh_system_menu(&self) {
         let menu = unsafe { GetSystemMenu(self.window, 0) };
         if menu.is_null() {
             return;
         }
         let (copy_enabled, paste_enabled) = self.system_clipboard_menu_state();
         unsafe {
+            CheckMenuItem(
+                menu,
+                SYSTEM_MENU_TOGGLE_TABS_ID as u32,
+                MF_BYCOMMAND
+                    | if self.config.tabs_visible {
+                        MF_CHECKED
+                    } else {
+                        MF_UNCHECKED
+                    },
+            );
             EnableMenuItem(
                 menu,
                 SYSTEM_MENU_COPY_ID as u32,
@@ -3086,13 +3297,20 @@ impl AppState {
     }
 
     fn effective_tabs_width(&self) -> i32 {
-        if !self.config.tabs_visible {
-            return 0;
-        }
+        self.workspace_layout().effective_tabs_width
+    }
+
+    fn workspace_layout(&self) -> WorkspaceLayout {
         let mut client: RECT = unsafe { mem::zeroed() };
         unsafe { GetClientRect(self.window, &mut client) };
-        i32::from(self.config.tabs_width)
-            .min((client.right - ui_geometry::TERMINAL_MIN_WIDTH).max(0))
+        workspace_layout(WorkspaceLayoutInput {
+            client_width: client.right,
+            client_height: client.bottom,
+            tabs_visible: self.config.tabs_visible,
+            configured_tabs_width: i32::from(self.config.tabs_width),
+            composer_height: COMPOSER_HEIGHT,
+            status_height: STATUS_BAR_HEIGHT,
+        })
     }
 
     fn set_tabs_visible(&mut self, visible: bool, cause: &str) {
@@ -3100,6 +3318,7 @@ impl AppState {
             return;
         }
         self.config.tabs_visible = visible;
+        self.tabs_resize_drag = None;
         if !visible && self.host_focus_surface == HostFocusSurface::Tabs {
             self.host_focus_surface = HostFocusSurface::Terminal;
             unsafe { SetFocus(self.window) };
@@ -3113,7 +3332,98 @@ impl AppState {
             serde_json::json!({"visible": visible, "cause": cause}),
         );
         self.layout();
+        self.refresh_system_menu();
         unsafe { InvalidateRect(self.window, ptr::null(), 0) };
+    }
+
+    fn begin_tabs_resize(&mut self) {
+        self.terminal_selection = None;
+        self.end_scroll_drag();
+        self.tabs_resize_drag = Some(TabsResizeDrag {
+            original_width: self.config.tabs_width,
+        });
+        unsafe { SetCapture(self.window) };
+    }
+
+    fn drag_tabs_resize(&mut self, x: i32) {
+        if self.tabs_resize_drag.is_none() {
+            return;
+        }
+        let mut client: RECT = unsafe { mem::zeroed() };
+        unsafe { GetClientRect(self.window, &mut client) };
+        let width = tabs_width_from_drag(x, client.right) as u16;
+        if self.config.tabs_width != width {
+            self.config.tabs_width = width;
+            self.layout();
+            unsafe {
+                InvalidateRect(self.window, ptr::null(), 0);
+                UpdateWindow(self.window);
+            };
+        }
+    }
+
+    fn finish_tabs_resize(&mut self, persist: bool, cause: &str) {
+        let Some(drag) = self.tabs_resize_drag.take() else {
+            return;
+        };
+        unsafe { ReleaseCapture() };
+        if !persist {
+            self.config.tabs_width = drag.original_width;
+            self.layout();
+            unsafe { InvalidateRect(self.window, ptr::null(), 0) };
+            return;
+        }
+        if let Err(error) = save_config(&self.config) {
+            self.last_error = Some(format!("could not save Tabs width: {error:#}"));
+        }
+        self.event_journal.commit(
+            "layout.tabs.width",
+            None,
+            serde_json::json!({
+                "configured_width": self.config.tabs_width,
+                "effective_width": self.effective_tabs_width(),
+                "cause": cause,
+            }),
+        );
+        unsafe { UpdateWindow(self.window) };
+    }
+
+    fn reset_tabs_width(&mut self, cause: &str) {
+        self.finish_tabs_resize(false, cause);
+        self.config.tabs_width = reset_tabs_width() as u16;
+        if let Err(error) = save_config(&self.config) {
+            self.last_error = Some(format!("could not save Tabs width: {error:#}"));
+        }
+        self.event_journal.commit(
+            "layout.tabs.width",
+            None,
+            serde_json::json!({
+                "configured_width": self.config.tabs_width,
+                "effective_width": self.effective_tabs_width(),
+                "cause": cause,
+            }),
+        );
+        self.layout();
+        unsafe { InvalidateRect(self.window, ptr::null(), 0) };
+    }
+
+    fn set_resize_cursor_if_needed(&self) -> bool {
+        let mut point = POINT { x: 0, y: 0 };
+        if unsafe { GetCursorPos(&mut point) } == 0 {
+            return false;
+        }
+        unsafe { ScreenToClient(self.window, &mut point) };
+        if self.tabs_resize_drag.is_some()
+            || self
+                .workspace_layout()
+                .resize_grip
+                .is_some_and(|grip| grip.contains(point.x, point.y))
+        {
+            unsafe { SetCursor(LoadCursorW(ptr::null_mut(), IDC_SIZEWE)) };
+            true
+        } else {
+            false
+        }
     }
 
     fn set_focus_surface(&mut self, target: FocusSurface, cause: &str) -> bool {
@@ -3298,18 +3608,7 @@ impl AppState {
     }
 
     fn terminal_rect(&self) -> PixelRect {
-        let mut client: RECT = unsafe { mem::zeroed() };
-        unsafe { GetClientRect(self.window, &mut client) };
-        let sidebar_width = self.effective_tabs_width();
-        PixelRect {
-            left: sidebar_width,
-            top: 0,
-            right: client.right.max(sidebar_width),
-            bottom: client
-                .bottom
-                .saturating_sub(STATUS_BAR_HEIGHT + COMPOSER_HEIGHT)
-                .max(0),
-        }
+        self.workspace_layout().terminal
     }
 
     fn scrollbar_state(&mut self) -> Option<(TerminalScrollbarGeometry, usize)> {
@@ -3421,15 +3720,11 @@ impl AppState {
     }
 
     fn terminal_cell_at(&self, x: i32, y: i32) -> Option<(u16, u16)> {
-        let mut client: RECT = unsafe { mem::zeroed() };
-        unsafe { GetClientRect(self.window, &mut client) };
-        let sidebar_width = self.effective_tabs_width();
-        if x < sidebar_width
-            || x >= client.right.saturating_sub(TERMINAL_SCROLLBAR_WIDTH)
-            || y < 0
-            || y >= client
-                .bottom
-                .saturating_sub(STATUS_BAR_HEIGHT + COMPOSER_HEIGHT)
+        let terminal = self.workspace_layout().terminal;
+        if x < terminal.left
+            || x >= terminal.right.saturating_sub(TERMINAL_SCROLLBAR_WIDTH)
+            || y < terminal.top
+            || y >= terminal.bottom
         {
             return None;
         }
@@ -3457,8 +3752,9 @@ impl AppState {
             .map(|tab| tab.last_size)
             .unwrap_or((1, 1));
         let column =
-            ((x - sidebar_width) / cell_width).clamp(0, i32::from(cols.saturating_sub(1))) as u16;
-        let row = (y / cell_height).clamp(0, i32::from(rows.saturating_sub(1))) as u16;
+            ((x - terminal.left) / cell_width).clamp(0, i32::from(cols.saturating_sub(1))) as u16;
+        let row =
+            ((y - terminal.top) / cell_height).clamp(0, i32::from(rows.saturating_sub(1))) as u16;
         Some((column, row))
     }
 
@@ -3633,8 +3929,9 @@ impl AppState {
         } else {
             paint_device
         };
-        let content_bottom = (client.bottom - STATUS_BAR_HEIGHT).max(0);
-        let sidebar_width = self.effective_tabs_width();
+        let layout = self.workspace_layout();
+        let content_bottom = layout.status.top;
+        let sidebar_width = layout.effective_tabs_width;
 
         fill(device, &client, colors.terminal);
         fill(
@@ -3651,7 +3948,7 @@ impl AppState {
             device,
             &RECT {
                 left: sidebar_width,
-                top: (content_bottom - COMPOSER_HEIGHT).max(0),
+                top: layout.composer.top,
                 right: client.right,
                 bottom: content_bottom,
             },
@@ -3683,7 +3980,7 @@ impl AppState {
             let Some(tab) = self.tabs.iter().find(|tab| tab.id == row.id) else {
                 continue;
             };
-            let geometry = tree_row_geometry(visual_position, row.depth, SIDEBAR_WIDTH);
+            let geometry = tree_row_geometry(visual_position, row.depth, sidebar_width);
             let top = geometry.row.top;
             let node_x = geometry.node_x;
             let node_y = geometry.node_y;
@@ -3802,10 +4099,13 @@ impl AppState {
                 },
             );
             let actions_visible = self.active == Some(tab.id);
+            let tab_add_left = sidebar_width - 72;
+            let tab_edit_left = sidebar_width - 48;
+            let tab_close_left = sidebar_width - 24;
             let text_right = if actions_visible {
-                TAB_ADD_LEFT - 4
+                tab_add_left - 4
             } else {
-                SIDEBAR_WIDTH - 10
+                sidebar_width - 10
             };
             draw_text(
                 device,
@@ -3851,9 +4151,9 @@ impl AppState {
                     device,
                     "T+",
                     RECT {
-                        left: TAB_ADD_LEFT,
+                        left: tab_add_left,
                         top,
-                        right: TAB_EDIT_LEFT,
+                        right: tab_edit_left,
                         bottom: top + TAB_HEIGHT - 1,
                     },
                     colors.green,
@@ -3863,9 +4163,9 @@ impl AppState {
                     device,
                     "✎",
                     RECT {
-                        left: TAB_EDIT_LEFT,
+                        left: tab_edit_left,
                         top,
-                        right: TAB_CLOSE_LEFT,
+                        right: tab_close_left,
                         bottom: top + TAB_HEIGHT - 1,
                     },
                     colors.blue,
@@ -3875,9 +4175,9 @@ impl AppState {
                     device,
                     "×",
                     RECT {
-                        left: TAB_CLOSE_LEFT,
+                        left: tab_close_left,
                         top,
-                        right: SIDEBAR_WIDTH - 4,
+                        right: sidebar_width - 4,
                         bottom: top + TAB_HEIGHT - 1,
                     },
                     colors.muted,
@@ -3886,23 +4186,40 @@ impl AppState {
             }
         }
 
-        draw_text(
-            device,
-            "Status",
-            RECT {
-                left: 14,
-                top: content_bottom,
-                right: sidebar_width - 10,
-                bottom: client.bottom,
-            },
-            colors.muted,
-            DT_LEFT | DT_SINGLELINE | DT_VCENTER,
-        );
+        if let Some(segment) = layout.status_segments.tabs_recovery {
+            let segment = win_rect(segment);
+            fill(device, &segment, colors.control);
+            frame(device, &segment, colors.active_border);
+            draw_text(
+                device,
+                "▸ Tabs",
+                RECT {
+                    left: segment.left + 8,
+                    right: segment.right - 4,
+                    ..segment
+                },
+                colors.text,
+                DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
+            );
+        } else {
+            draw_text(
+                device,
+                "Status",
+                RECT {
+                    left: 14,
+                    top: content_bottom,
+                    right: sidebar_width - 10,
+                    bottom: client.bottom,
+                },
+                colors.muted,
+                DT_LEFT | DT_SINGLELINE | DT_VCENTER,
+            );
+        }
         draw_text(
             device,
             "metrics · agent context · extensible providers",
             RECT {
-                left: sidebar_width + 10,
+                left: layout.status_segments.provider.left + 10,
                 top: content_bottom,
                 right: client.right - 10,
                 bottom: client.bottom,
@@ -3913,7 +4230,7 @@ impl AppState {
 
         if let Some(position) = self.active_position() {
             unsafe { SelectObject(device, terminal_font as HGDIOBJ) };
-            self.paint_terminal(device, position, &client);
+            self.paint_terminal(device, position, layout.terminal);
         } else {
             draw_text(
                 device,
@@ -3944,9 +4261,9 @@ impl AppState {
                 },
                 RECT {
                     left: sidebar_width + 10,
-                    top: content_bottom - COMPOSER_HEIGHT + 4,
+                    top: layout.composer.top + 4,
                     right: client.right - 270,
-                    bottom: content_bottom - COMPOSER_HEIGHT + 28,
+                    bottom: layout.composer.top + 28,
                 },
                 if tab.exited.is_some() {
                     colors.orange
@@ -3966,9 +4283,9 @@ impl AppState {
                 },
                 RECT {
                     left: client.right - 260,
-                    top: content_bottom - COMPOSER_HEIGHT + 4,
+                    top: layout.composer.top + 4,
                     right: client.right - 10,
-                    bottom: content_bottom - COMPOSER_HEIGHT + 28,
+                    bottom: layout.composer.top + 28,
                 },
                 colors.muted,
                 DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS,
@@ -3982,9 +4299,9 @@ impl AppState {
                 device,
                 &RECT {
                     left: sidebar_width,
-                    top: content_bottom - COMPOSER_HEIGHT - 30,
+                    top: layout.terminal.bottom - 30,
                     right: client.right,
-                    bottom: content_bottom - COMPOSER_HEIGHT,
+                    bottom: layout.terminal.bottom,
                 },
                 colors.modal,
             );
@@ -3995,9 +4312,9 @@ impl AppState {
                 ),
                 RECT {
                     left: sidebar_width + 12,
-                    top: content_bottom - COMPOSER_HEIGHT - 30,
+                    top: layout.terminal.bottom - 30,
                     right: client.right - 12,
-                    bottom: content_bottom - COMPOSER_HEIGHT,
+                    bottom: layout.terminal.bottom,
                 },
                 colors.orange,
                 DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
@@ -4025,9 +4342,9 @@ impl AppState {
                 error,
                 RECT {
                     left: sidebar_width + 10,
-                    top: (content_bottom - COMPOSER_HEIGHT - 28).max(0),
+                    top: (layout.terminal.bottom - 28).max(0),
                     right: client.right - 10,
-                    bottom: (content_bottom - COMPOSER_HEIGHT).max(0),
+                    bottom: layout.terminal.bottom.max(0),
                 },
                 colors.red,
                 DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS,
@@ -4041,6 +4358,21 @@ impl AppState {
         }
         if self.settings_open {
             self.paint_settings(device, &client);
+        }
+        if let Some(grip) = layout.resize_grip {
+            let grip = win_rect(grip);
+            fill(device, &grip, colors.tree);
+            let center = (grip.left + grip.right) / 2;
+            fill(
+                device,
+                &RECT {
+                    left: center,
+                    top: grip.top,
+                    right: center + 1,
+                    bottom: grip.bottom,
+                },
+                colors.active_border,
+            );
         }
         unsafe {
             if buffered {
@@ -4069,7 +4401,8 @@ impl AppState {
 
     fn paint_window_close_confirmation(&self, device: HDC, client: &RECT) {
         let colors = PaintColors::from(self.palette());
-        let left = SIDEBAR_WIDTH + (client.right - SIDEBAR_WIDTH - 620) / 2;
+        let terminal = self.workspace_layout().terminal;
+        let left = terminal.left + (terminal.width() - 620) / 2;
         let top = (client.bottom - STATUS_BAR_HEIGHT - 230) / 2;
         let rect = RECT {
             left,
@@ -4165,7 +4498,8 @@ impl AppState {
         let Some(tab) = self.tabs.iter().find(|tab| tab.id == id) else {
             return;
         };
-        let left = SIDEBAR_WIDTH + (client.right - SIDEBAR_WIDTH - 460) / 2;
+        let terminal = self.workspace_layout().terminal;
+        let left = terminal.left + (terminal.width() - 460) / 2;
         let top = (client.bottom - STATUS_BAR_HEIGHT - 190) / 2;
         let rect = RECT {
             left,
@@ -4247,7 +4581,8 @@ impl AppState {
 
     fn paint_settings(&self, device: HDC, client: &RECT) {
         let colors = PaintColors::from(self.palette());
-        let left = SIDEBAR_WIDTH + (client.right - SIDEBAR_WIDTH - 520) / 2;
+        let terminal = self.workspace_layout().terminal;
+        let left = terminal.left + (terminal.width() - 520) / 2;
         let top = (client.bottom - STATUS_BAR_HEIGHT - 320) / 2;
         let rect = RECT {
             left,
@@ -4366,7 +4701,7 @@ impl AppState {
         );
     }
 
-    fn paint_terminal(&mut self, device: HDC, position: usize, client: &RECT) {
+    fn paint_terminal(&mut self, device: HDC, position: usize, terminal: PixelRect) {
         let colors = PaintColors::from(self.palette());
         if unsafe { IsIconic(self.window) } != 0 {
             return;
@@ -4378,20 +4713,14 @@ impl AppState {
         unsafe { GetTextExtentPoint32W(device, sample.as_ptr(), 1, &mut extent) };
         let cell_width = extent.cx.max(7);
         let cell_height = (metrics.tmHeight + metrics.tmExternalLeading).max(14);
-        let sidebar_width = self.effective_tabs_width();
-        let width = (client.right - sidebar_width - TERMINAL_SCROLLBAR_WIDTH).max(cell_width * 10);
-        let height = (client.bottom - STATUS_BAR_HEIGHT - COMPOSER_HEIGHT).max(cell_height * 2);
+        let width = (terminal.width() - TERMINAL_SCROLLBAR_WIDTH).max(cell_width * 10);
+        let height = terminal.height().max(cell_height * 2);
         let cols = (width / cell_width).clamp(10, u16::MAX as i32) as u16;
         let rows = (height / cell_height).clamp(2, u16::MAX as i32) as u16;
         self.tabs[position].resize(rows, cols);
         let (scrollback_offset, max_scrollback) = self.tabs[position].scrollback_bounds();
         let scrollbar = terminal_scrollbar_geometry(
-            PixelRect {
-                left: sidebar_width,
-                top: 0,
-                right: client.right,
-                bottom: height,
-            },
+            terminal,
             usize::from(rows),
             scrollback_offset,
             max_scrollback,
@@ -4429,10 +4758,10 @@ impl AppState {
                 fill(
                     device,
                     &RECT {
-                        left: sidebar_width + start_col as i32 * cell_width,
-                        top: row as i32 * cell_height,
-                        right: sidebar_width + end_col as i32 * cell_width,
-                        bottom: (row as i32 + 1) * cell_height,
+                        left: terminal.left + start_col as i32 * cell_width,
+                        top: terminal.top + row as i32 * cell_height,
+                        right: terminal.left + end_col as i32 * cell_width,
+                        bottom: terminal.top + (row as i32 + 1) * cell_height,
                     },
                     background,
                 );
@@ -4453,8 +4782,8 @@ impl AppState {
                     terminal_color(cell.fgcolor(), false, self.palette())
                 };
                 let encoded: Vec<u16> = cell.contents().encode_utf16().collect();
-                let left = sidebar_width + col as i32 * cell_width;
-                let top = row as i32 * cell_height;
+                let left = terminal.left + col as i32 * cell_width;
+                let top = terminal.top + row as i32 * cell_height;
                 let cell_span = if col + 1 < cols
                     && screen
                         .cell(row, col + 1)
@@ -4490,10 +4819,10 @@ impl AppState {
         if scrollback_offset == 0 && self.tabs[position].exited.is_none() && !screen.hide_cursor() {
             let (row, col) = screen.cursor_position();
             let cursor = RECT {
-                left: sidebar_width + col as i32 * cell_width,
-                top: row as i32 * cell_height,
-                right: sidebar_width + (col as i32 + 1) * cell_width,
-                bottom: (row as i32 + 1) * cell_height,
+                left: terminal.left + col as i32 * cell_width,
+                top: terminal.top + row as i32 * cell_height,
+                right: terminal.left + (col as i32 + 1) * cell_width,
+                bottom: terminal.top + (row as i32 + 1) * cell_height,
             };
             let brush = unsafe { CreateSolidBrush(rgb(235, 235, 235)) };
             unsafe {
@@ -4533,10 +4862,10 @@ impl AppState {
                 device,
                 &format!("Process exited with code {code}. This tab remains until you close it."),
                 RECT {
-                    left: SIDEBAR_WIDTH + 8,
-                    top: height - cell_height,
-                    right: client.right - TERMINAL_SCROLLBAR_WIDTH - 8,
-                    bottom: height,
+                    left: terminal.left + 8,
+                    top: terminal.bottom - cell_height,
+                    right: terminal.right - TERMINAL_SCROLLBAR_WIDTH - 8,
+                    bottom: terminal.bottom,
                 },
                 colors.orange,
                 DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS,
@@ -4551,6 +4880,7 @@ impl AppState {
     fn ui_snapshot(&mut self) -> String {
         let mut client: RECT = unsafe { mem::zeroed() };
         unsafe { GetClientRect(self.window, &mut client) };
+        let layout = self.workspace_layout();
         let scrollbar = self.scrollbar_state().map(|(geometry, maximum)| {
             serde_json::json!({
                 "visible": true,
@@ -4571,8 +4901,9 @@ impl AppState {
                     .tabs_visible
                     .then(|| visible_rows.iter().position(|visible| visible.id == row.id))
                     .flatten();
-                let geometry = visible_position
-                    .map(|position| tree_row_geometry(position, row.depth, SIDEBAR_WIDTH));
+                let geometry = visible_position.map(|position| {
+                    tree_row_geometry(position, row.depth, layout.effective_tabs_width)
+                });
                 let draft = if self.active == Some(tab.id) {
                     !active_draft.is_empty()
                 } else {
@@ -4627,24 +4958,27 @@ impl AppState {
                         .filter(|_| self.active == Some(tab.id))
                         .map(|position| {
                             let geometry =
-                                tree_row_geometry(position, row.depth, SIDEBAR_WIDTH);
+                                tree_row_geometry(position, row.depth, layout.effective_tabs_width);
+                            let tab_add_left = layout.effective_tabs_width - 72;
+                            let tab_edit_left = layout.effective_tabs_width - 48;
+                            let tab_close_left = layout.effective_tabs_width - 24;
                             serde_json::json!({
                         "new_child": {
-                            "x": TAB_ADD_LEFT,
+                            "x": tab_add_left,
                             "y": geometry.row.top,
-                            "width": TAB_EDIT_LEFT - TAB_ADD_LEFT,
+                            "width": tab_edit_left - tab_add_left,
                             "height": geometry.row.height(),
                         },
                         "edit": {
-                            "x": TAB_EDIT_LEFT,
+                            "x": tab_edit_left,
                             "y": geometry.row.top,
-                            "width": TAB_CLOSE_LEFT - TAB_EDIT_LEFT,
+                            "width": tab_close_left - tab_edit_left,
                             "height": geometry.row.height(),
                         },
                         "close": {
-                            "x": TAB_CLOSE_LEFT,
+                            "x": tab_close_left,
                             "y": geometry.row.top,
-                            "width": SIDEBAR_WIDTH - TAB_CLOSE_LEFT,
+                            "width": layout.effective_tabs_width - tab_close_left,
                             "height": geometry.row.height(),
                         }
                     })
@@ -4659,7 +4993,6 @@ impl AppState {
             .unwrap_or((0, 0));
         let (system_copy_enabled, system_paste_enabled) = self.system_clipboard_menu_state();
         let event_position = self.event_journal.position();
-        let sidebar_width = self.effective_tabs_width();
         serde_json::to_string_pretty(&serde_json::json!({
             "protocol_version": 1,
             "event_position": event_position,
@@ -4690,20 +5023,22 @@ impl AppState {
             },
             "layout": {
                 "sidebar": {
-                    "x": 0, "y": 0,
+                    "x": layout.sidebar.left, "y": layout.sidebar.top,
                     "visible": self.config.tabs_visible,
                     "configured_width": self.config.tabs_width,
-                    "effective_width": self.effective_tabs_width(),
-                    "width": self.effective_tabs_width(),
-                    "height": (client.bottom - STATUS_BAR_HEIGHT).max(0)
+                    "effective_width": layout.effective_tabs_width,
+                    "width": layout.sidebar.width(),
+                    "height": layout.sidebar.height(),
+                    "bounds": pixel_rect_json(layout.sidebar),
+                    "resize_grip": layout.resize_grip.map(pixel_rect_json),
+                    "resizing": self.tabs_resize_drag.is_some(),
                 },
                 "terminal": {
-                    "x": sidebar_width, "y": 0,
-                    "width": (client.right - sidebar_width).max(0),
-                    "viewport_width": (
-                        client.right - sidebar_width - TERMINAL_SCROLLBAR_WIDTH
-                    ).max(0),
-                    "height": (client.bottom - STATUS_BAR_HEIGHT - COMPOSER_HEIGHT).max(0),
+                    "x": layout.terminal.left, "y": layout.terminal.top,
+                    "width": layout.terminal.width(),
+                    "viewport_width": (layout.terminal.width() - TERMINAL_SCROLLBAR_WIDTH).max(0),
+                    "height": layout.terminal.height(),
+                    "bounds": pixel_rect_json(layout.terminal),
                     "rows": rows, "cols": cols,
                     "scrollbar": scrollbar,
                 },
@@ -4711,13 +5046,19 @@ impl AppState {
                     "visible": !self.window_close_pending
                         && self.pending_close.is_none()
                         && !self.settings_open,
-                    "height": COMPOSER_HEIGHT,
+                    "x": layout.composer.left,
+                    "y": layout.composer.top,
+                    "width": layout.composer.width(),
+                    "height": layout.composer.height(),
+                    "bounds": pixel_rect_json(layout.composer),
                 },
                 "status_bar": {
-                    "x": 0,
-                    "y": (client.bottom - STATUS_BAR_HEIGHT).max(0),
-                    "width": client.right,
-                    "height": STATUS_BAR_HEIGHT,
+                    "x": layout.status.left,
+                    "y": layout.status.top,
+                    "width": layout.status.width(),
+                    "height": layout.status.height(),
+                    "bounds": pixel_rect_json(layout.status),
+                    "tabs_recovery": layout.status_segments.tabs_recovery.map(pixel_rect_json),
                     "provider": "placeholder",
                 }
             },
@@ -4726,6 +5067,11 @@ impl AppState {
                 "window_id": self.active.map(|id| format!("@{id}")),
             },
             "system_menu": {
+                "toggle_tabs": {
+                    "id": SYSTEM_MENU_TOGGLE_TABS_ID,
+                    "label": "Toggle Tabs",
+                    "checked": self.config.tabs_visible,
+                },
                 "copy": {
                     "id": SYSTEM_MENU_COPY_ID,
                     "label": "Copy",
@@ -4792,6 +5138,10 @@ impl AppState {
             return IpcResponse::failure("no command specified");
         };
         match command {
+            "__show-no-activate" => {
+                self.show_window_no_activate("launcher-no-activate");
+                IpcResponse::success("")
+            }
             "__focus" | "start-server" => {
                 self.reattach_window(if command == "__focus" {
                     "launcher"
@@ -5731,7 +6081,7 @@ impl AppState {
                 }
                 self.paint();
                 let path = screenshot_output_path(args, "agenterm-window");
-                match save_window_png(self.window, &path, false) {
+                match save_window_png(self.window, &path, None) {
                     Ok(()) => IpcResponse::success(path.display().to_string()),
                     Err(error) => IpcResponse::failure(format!("{error:#}")),
                 }
@@ -5749,7 +6099,8 @@ impl AppState {
                 }
                 self.paint();
                 let path = screenshot_output_path(args, "agenterm-pane");
-                let result = save_window_png(self.window, &path, true);
+                let result =
+                    save_window_png(self.window, &path, Some(self.workspace_layout().terminal));
                 self.save_active_composer();
                 self.active = previous;
                 self.load_active_composer();
@@ -7252,20 +7603,20 @@ fn render_format(format: &str, tab: &TerminalTab, session_name: &str, active: bo
         .replace("#P", "0")
 }
 
-fn save_window_png(window: HWND, path: &std::path::Path, pane_only: bool) -> Result<()> {
+fn save_window_png(window: HWND, path: &std::path::Path, pane: Option<PixelRect>) -> Result<()> {
     let mut client: RECT = unsafe { mem::zeroed() };
     let mut outer: RECT = unsafe { mem::zeroed() };
     unsafe {
         GetClientRect(window, &mut client);
         GetWindowRect(window, &mut outer);
     }
-    let (source, source_x, source_y, width, height) = if pane_only {
+    let (source, source_x, source_y, width, height) = if let Some(pane) = pane {
         (
             unsafe { GetDC(window) },
-            SIDEBAR_WIDTH,
-            0,
-            (client.right - SIDEBAR_WIDTH).max(1),
-            (client.bottom - STATUS_BAR_HEIGHT - COMPOSER_HEIGHT).max(1),
+            pane.left,
+            pane.top,
+            pane.width().max(1),
+            pane.height().max(1),
         )
     } else {
         (
@@ -7360,7 +7711,7 @@ mod tests {
     use super::{
         EditShortcut, FocusSurface, TerminalPoint, TerminalSelection, ThemeId, edit_shortcut,
         effective_theme, gui_cli_guidance, is_latched_navigation_repeat, normalize_terminal_paste,
-        parse_loopback_ipc_address, surface_navigation, terminal_copy_shortcut,
+        parse_gui_launch, parse_loopback_ipc_address, surface_navigation, terminal_copy_shortcut,
         terminal_selection_text,
     };
 
@@ -7524,5 +7875,47 @@ mod tests {
         assert!(guidance.contains("Configured server address:"));
         assert!(guidance.contains("agenterm-cli.exe server-list"));
         assert!(guidance.contains("agenterm-cli.exe -h"));
+    }
+
+    #[test]
+    fn gui_launcher_accepts_no_activate_and_address_in_either_order() {
+        let (options, address) = parse_gui_launch(&[
+            "--not-foreground".to_owned(),
+            "--address".to_owned(),
+            "127.0.0.1:48815".to_owned(),
+        ])
+        .unwrap();
+        assert!(options.not_foreground);
+        assert_eq!(address.as_deref(), Some("127.0.0.1:48815"));
+
+        let (options, address) = parse_gui_launch(&[
+            "--address".to_owned(),
+            "127.0.0.1:48816".to_owned(),
+            "--not-foreground".to_owned(),
+        ])
+        .unwrap();
+        assert!(options.not_foreground);
+        assert_eq!(address.as_deref(), Some("127.0.0.1:48816"));
+    }
+
+    #[test]
+    fn gui_launcher_rejects_duplicate_unknown_and_missing_options() {
+        for arguments in [
+            vec!["--not-foreground", "--not-foreground"],
+            vec![
+                "--address",
+                "127.0.0.1:48815",
+                "--address",
+                "127.0.0.1:48816",
+            ],
+            vec!["--address"],
+            vec!["--address", "--not-foreground"],
+            vec!["--unknown"],
+        ] {
+            assert!(
+                parse_gui_launch(&arguments.into_iter().map(str::to_owned).collect::<Vec<_>>())
+                    .is_err()
+            );
+        }
     }
 }

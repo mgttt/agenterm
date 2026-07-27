@@ -5,14 +5,10 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{
     theme::ThemeId,
-    ui_geometry::{
-        TABS_DEFAULT_WIDTH, TABS_MAX_WIDTH, TABS_MIN_WIDTH, clamp_configured_tabs_width,
-    },
+    ui_geometry::{TABS_DEFAULT_WIDTH, clamp_configured_tabs_width},
 };
 
-pub(crate) const MIN_TABS_WIDTH: u16 = TABS_MIN_WIDTH as u16;
 pub(crate) const DEFAULT_TABS_WIDTH: u16 = TABS_DEFAULT_WIDTH as u16;
-pub(crate) const MAX_TABS_WIDTH: u16 = TABS_MAX_WIDTH as u16;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -96,13 +92,16 @@ pub(crate) fn save_config(config: &AppConfig) -> Result<()> {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("failed to create {}", parent.display()))?;
     }
-    let json = serde_json::to_string_pretty(config)?;
+    let mut normalized = config.clone();
+    normalized.normalize();
+    let json = serde_json::to_string_pretty(&normalized)?;
     std::fs::write(&path, json).with_context(|| format!("failed to write {}", path.display()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui_geometry::{TABS_MAX_WIDTH, TABS_MIN_WIDTH};
 
     #[test]
     fn missing_fields_receive_stable_defaults() {
@@ -156,20 +155,22 @@ mod tests {
     fn tabs_width_is_clamped_during_deserialization_and_normalization() {
         let narrow: AppConfig = serde_json::from_str(r#"{"tabs_width":-10}"#).unwrap();
         let wide: AppConfig = serde_json::from_str(r#"{"tabs_width":100000}"#).unwrap();
-        assert_eq!(narrow.tabs_width, MIN_TABS_WIDTH);
-        assert_eq!(wide.tabs_width, MAX_TABS_WIDTH);
+        assert_eq!(narrow.tabs_width, TABS_MIN_WIDTH as u16);
+        assert_eq!(wide.tabs_width, TABS_MAX_WIDTH as u16);
 
-        let mut config = AppConfig::default();
-        config.tabs_width = 0;
+        let mut config = AppConfig {
+            tabs_width: 0,
+            ..AppConfig::default()
+        };
         config.normalize();
-        assert_eq!(config.tabs_width, MIN_TABS_WIDTH);
+        assert_eq!(config.tabs_width, TABS_MIN_WIDTH as u16);
     }
 
     #[test]
     fn persisted_width_clamp_delegates_to_geometry_policy() {
         assert_eq!(clamp_tabs_width(250), 250);
-        assert_eq!(clamp_tabs_width(0), MIN_TABS_WIDTH);
-        assert_eq!(clamp_tabs_width(10_000), MAX_TABS_WIDTH);
+        assert_eq!(clamp_tabs_width(0), TABS_MIN_WIDTH as u16);
+        assert_eq!(clamp_tabs_width(10_000), TABS_MAX_WIDTH as u16);
     }
 
     #[test]

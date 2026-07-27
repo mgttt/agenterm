@@ -96,6 +96,22 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       "evidence_ids": ["ux.semantic-window-control"]
     },
     {
+      "id": "workspace.adaptive-tabs",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "Tabs collapse, recovery, and resizing share one persisted workspace geometry",
+      "evidence_ids": ["ux.adaptive-tabs"]
+    },
+    {
+      "id": "workspace.no-activate-launch",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "`agenterm.exe --not-foreground` shows or starts the workspace without stealing foreground",
+      "evidence_ids": ["ux.no-activate-launch"]
+    },
+    {
       "id": "runtime.remain-on-exit",
       "protocol_feature": "remain_on_exit",
       "kind": "behavior",
@@ -293,6 +309,12 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       delayed output, prefers inherited stderr, and otherwise briefly attaches
       to the parent console without allocating a console or rebinding stdio;
       startup smoke verifies new-GUI and focus-existing inherited-stderr paths
+    - [x] `agenterm.exe --not-foreground` is a per-launch, non-persistent
+      no-activate request accepted before or after `--address HOST:PORT`: a new
+      workspace becomes visible without activation, while an existing visible
+      or minimized window is left untouched and a detached window is shown in
+      the background without changing its server, tabs, or PTYs; duplicate,
+      unknown, and missing-value options fail before startup
     - [x] `agenterm-cli.exe`: native AgenTerm observation and automation client;
       the pre-release `agentermctl.exe` name is removed rather than retained as
       a parallel compatibility shim
@@ -1149,7 +1171,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
           Terminal `Ctrl+Left` shows/focuses Tabs when hidden and Tabs
           `Ctrl+Right` returns to Terminal, but no native Edit control loses
           standard Ctrl+Arrow word navigation
-        - [ ] Tabs recovery appears in the status bar only while hidden; system
+        - [x] Tabs recovery appears in the status bar only while hidden; system
           menu recovery is always available. Width defaults to 250 px, clamps
           around 180..480 px while retaining a usable terminal, double-click
           resets it, and visibility plus configured width persist
@@ -1228,30 +1250,32 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
           never persist to workspace, and never falsely claim to mutate the
           environment of already-running arbitrary descendants
       - Release core: adaptive Tabs workspace
-        - [ ] place a `Tabs` button immediately left of `Settings`; activating
+        - [x] Tabs collapse, recovery, and resizing share one persisted workspace geometry
+        - [x] place a `Tabs` button immediately left of `Settings`; activating
           it collapses the complete tab tree and its controls so terminal and
           composer reclaim the width
-        - [ ] when collapsed, reserve a small host-owned `Tabs` reveal segment
+        - [x] when collapsed, reserve a small host-owned `Tabs` reveal segment
           at the far left of the existing bottom status bar; it is layout
           chrome, not a dynamic provider, and therefore remains available when
           future status scripts fail, time out, or have no value
-        - [ ] add an always-available, checked-state `Toggle Tabs` item to the
+        - [x] add an always-available, checked-state `Toggle Tabs` item to the
           window-icon system menu; the hidden status segment and system menu
           prevent a persisted collapsed state from trapping the user
-        - [ ] make the tab/terminal boundary a draggable horizontal resize grip
+        - [x] make the tab/terminal boundary a draggable horizontal resize grip
           with a resize cursor, pointer capture, live terminal/composer
           relayout, and double-click reset to the default width
-        - [ ] central geometry clamps tab width around a proposed 180 px
+        - [x] central geometry clamps tab width around a proposed 180 px
           minimum, 250 px default, and 480 px maximum while preserving a
           usable terminal floor on narrow windows; exact values require visual
           and CJK-label evidence rather than scattered constants
-        - [ ] persist `tabs_visible` and the last expanded width as user layout
+        - [x] persist `tabs_visible` and the last expanded width as user layout
           preferences; hiding never discards the width, and restoring uses the
           last valid clamped value
-        - [ ] hiding while focus is in the tab tree moves focus safely to the
+        - [x] hiding while focus is in the tab tree moves focus safely to the
           terminal; Settings, close confirmation, composer, scrollbars,
           selection, screenshots, PTY sizing, and hit testing all consume the
           same effective content origin
+      - [x] `agenterm.exe --not-foreground` shows or starts the workspace without stealing foreground
       - Release core: detach-first server lifecycle
         - [x] detach-first window close preserves the live server and explicit stop creates a fresh runtime
         - [ ] replace unconditional `WM_CLOSE` destruction with a host-owned
