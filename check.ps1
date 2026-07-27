@@ -86,6 +86,20 @@ try {
             'working-context-smoke' = '.\tests\working_context_smoke.ps1'
             'ux-smoke' = '.\tests\ux_smoke.ps1'
         }
+    Invoke-Checked -Id 'preflight-selftest' `
+        -Label 'read-only preflight self-test' {
+        & '.\scripts\preflight-selftest.ps1'
+    }
+    if ($Release) {
+        Invoke-Checked -Id 'release-preflight' `
+            -Label 'clean internal candidate preflight' {
+            & '.\scripts\preflight.ps1'
+        }
+        Invoke-Checked -Id 'preflight-benchmark' `
+            -Label 'local preflight p95 benchmark' {
+            & '.\scripts\preflight-benchmark.ps1' -Iterations 5
+        }
+    }
     Invoke-Checked -Id 'rustfmt' -Label 'rustfmt' {
         cargo fmt -- --check
     }
@@ -217,6 +231,10 @@ try {
     Invoke-Checked -Id 'harness-cleanup-selftest' `
         -Label 'owned-resource cleanup self-test' {
         & '.\tests\harness_cleanup_selftest.ps1'
+    }
+    Invoke-Checked -Id 'diagnostic-bundle-selftest' `
+        -Label 'CLI GUI and script diagnostic bundle self-test' {
+        & '.\tests\diagnostic_bundle_selftest.ps1'
     }
 
     Invoke-Checked -Id 'prd-alignment' -Label 'PRD capability alignment' {

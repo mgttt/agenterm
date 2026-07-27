@@ -51,6 +51,22 @@
       "evidence": []
     },
     {
+      "id": "diagnostic-bundle-selftest",
+      "evidence": []
+    },
+    {
+      "id": "preflight-selftest",
+      "evidence": []
+    },
+    {
+      "id": "release-preflight",
+      "evidence": []
+    },
+    {
+      "id": "preflight-benchmark",
+      "evidence": []
+    },
+    {
       "id": "prd-alignment",
       "evidence": []
     },
