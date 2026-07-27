@@ -166,3 +166,4 @@ finally {
 }
 
 Write-Host 'PASS: read-only preflight fixture self-test'
+exit 0
