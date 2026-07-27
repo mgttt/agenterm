@@ -4,6 +4,8 @@ AgenTerm is a native Windows terminal and AI fleet controller written in Rust.
 It combines hierarchical ConPTY tabs, per-tab composers and environments, a
 native automation client, and a deliberately bounded tmux/RMUX frontend.
 
+![AgenTerm showing a hierarchical terminal workspace, composer, and working-context status bar](assets/screendump0.png)
+
 ## Current highlights
 
 - Native Win32/GDI UI with hierarchical team tabs on the left.
