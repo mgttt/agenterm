@@ -56,9 +56,100 @@ if (-not $contractMatch.Success) {
     throw 'PRD.md is missing the agenterm-alignment-contract JSON block.'
 }
 $contract = $contractMatch.Groups['json'].Value | ConvertFrom-Json
-if ($contract.schema_version -ne 1) {
+if ($contract.schema_version -ne 2) {
     throw "Unsupported PRD alignment schema: $($contract.schema_version)"
 }
+
+$allowedKinds = @('architecture', 'behavior', 'decision', 'visual')
+$allowedEvidenceModes = @(
+    'black-box'
+    'decision'
+    'unit-source-partial'
+)
+$capabilities = @($contract.capabilities)
+if ($capabilities.Count -eq 0) {
+    throw 'PRD alignment contract has no capabilities.'
+}
+$capabilityIds = @($capabilities.id)
+if (@($capabilityIds | Sort-Object -Unique).Count -ne $capabilityIds.Count) {
+    throw 'PRD alignment contract contains duplicate capability IDs.'
+}
+foreach ($capability in $capabilities) {
+    if ([string]::IsNullOrWhiteSpace($capability.id) -or
+        $capability.id -notmatch '^[a-z0-9]+(?:[.-][a-z0-9]+)*$') {
+        throw "Malformed capability ID: $($capability.id)"
+    }
+    if ($allowedKinds -notcontains $capability.kind) {
+        throw "Capability '$($capability.id)' has unknown kind '$($capability.kind)'."
+    }
+    if ($allowedEvidenceModes -notcontains $capability.evidence_mode) {
+        throw "Capability '$($capability.id)' has unknown evidence mode '$($capability.evidence_mode)'."
+    }
+    if ($capability.kind -eq 'decision') {
+        if ($capability.status -ne 'accepted' -or
+            $capability.evidence_mode -ne 'decision' -or
+            @($capability.evidence_ids).Count -ne 0) {
+            throw "Decision '$($capability.id)' must be accepted with decision mode and no test evidence."
+        }
+    }
+    elseif ($capability.status -ne 'shipped' -or
+        $capability.evidence_mode -eq 'decision' -or
+        @($capability.evidence_ids).Count -eq 0) {
+        throw "Shipped capability '$($capability.id)' must declare executable evidence."
+    }
+    $shippedPattern = "(?m)^\s*-\s+\[x\][^\r\n]*$([regex]::Escape($capability.prd))"
+    if ($prd -notmatch $shippedPattern) {
+        throw "Capability '$($capability.id)' is not declared [x] on its referenced PRD line: $($capability.prd)"
+    }
+}
+
+$registeredEvidence = [Collections.Generic.HashSet[string]]::new(
+    [StringComparer]::Ordinal
+)
+foreach ($suite in @('cli_smoke.ps1', 'fleet_smoke.ps1', 'ux_smoke.ps1')) {
+    $suitePath = Join-Path $PSScriptRoot $suite
+    $suiteEvidence = @(& $suitePath -ListEvidence 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        throw "$suite -ListEvidence failed:`n$($suiteEvidence -join "`n")"
+    }
+    $suiteSource = Get-Content -LiteralPath $suitePath -Raw
+    foreach ($evidenceId in @($suiteEvidence)) {
+        $evidenceId = "$evidenceId".Trim()
+        if ($evidenceId -notmatch '^[a-z0-9]+(?:[.-][a-z0-9]+)*$') {
+            throw "$suite registered malformed evidence ID: $evidenceId"
+        }
+        if (-not $registeredEvidence.Add($evidenceId)) {
+            throw "Duplicate executable evidence ID: $evidenceId"
+        }
+        $emission = "Write-Evidence '$evidenceId'"
+        if (-not $suiteSource.Contains($emission)) {
+            throw "$suite advertises '$evidenceId' but never emits it after an assertion."
+        }
+    }
+}
+
+$rmuxStatusSource = Get-Content -LiteralPath (
+    Join-Path $root 'src\rmux_status.rs'
+) -Raw
+foreach ($unitName in @(
+    'parses_rmux_status_windows_and_active_marker'
+    'records_clickable_utf8_byte_ranges'
+)) {
+    if (-not $rmuxStatusSource.Contains("fn $unitName")) {
+        throw "RMUX partial unit evidence is missing test: $unitName"
+    }
+}
+[void]$registeredEvidence.Add('unit.rmux-status-parser')
+
+$expectedEvidence = @(
+    $capabilities |
+        Where-Object kind -ne 'decision' |
+        ForEach-Object { @($_.evidence_ids) } |
+        Sort-Object
+)
+$actualEvidence = @($registeredEvidence | Sort-Object)
+Compare-ExactList -Label 'shipped capability and executable evidence IDs' `
+    -Expected $expectedEvidence -Actual $actualEvidence
 
 $catalogMatch = [regex]::Match(
     $commandsSource,
@@ -114,9 +205,11 @@ foreach ($rootName in @($contract.planned_command_roots)) {
 
 $protocol = Invoke-JsonCommand -Path $CliExe -CommandArgs @('protocol-info')
 $runtimeFeatureNames = @($protocol.features.PSObject.Properties.Name | Sort-Object)
-$contractFeatureNames = @(
-    $contract.runtime_features.PSObject.Properties.Name | Sort-Object
+$protocolCapabilities = @(
+    $capabilities |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_.protocol_feature) }
 )
+$contractFeatureNames = @($protocolCapabilities.protocol_feature | Sort-Object)
 Compare-ExactList -Label 'protocol features and PRD evidence contract' `
     -Expected $contractFeatureNames -Actual $runtimeFeatureNames
 
@@ -124,23 +217,12 @@ foreach ($feature in $protocol.features.PSObject.Properties) {
     if ($feature.Value -ne $true) {
         throw "protocol-info advertises non-shipped feature '$($feature.Name)'."
     }
-    $declaration = $contract.runtime_features.($feature.Name)
-    $shippedPattern = "(?m)^\s*-\s+\[x\][^\r\n]*$([regex]::Escape($declaration.prd))"
-    if ($prd -notmatch $shippedPattern) {
-        throw "Feature '$($feature.Name)' is not declared [x] on its referenced PRD line: $($declaration.prd)"
-    }
-    if (@($declaration.evidence).Count -eq 0) {
-        throw "Feature '$($feature.Name)' has no declared verification evidence."
-    }
-    foreach ($evidence in @($declaration.evidence)) {
-        $evidencePath = Join-Path $root $evidence.path
-        if (-not (Test-Path -LiteralPath $evidencePath)) {
-            throw "Feature '$($feature.Name)' evidence file is missing: $($evidence.path)"
-        }
-        $evidenceText = Get-Content -LiteralPath $evidencePath -Raw
-        if (-not $evidenceText.Contains($evidence.token)) {
-            throw "Feature '$($feature.Name)' evidence token is missing from $($evidence.path): $($evidence.token)"
-        }
+    $declaration = @(
+        $protocolCapabilities |
+            Where-Object protocol_feature -eq $feature.Name
+    )
+    if ($declaration.Count -ne 1) {
+        throw "Protocol feature '$($feature.Name)' must map to exactly one capability ID."
     }
 }
 
@@ -187,10 +269,13 @@ foreach ($name in @($muxCompatibility.supported) + $unsupportedMuxNames) {
 Write-Host (
     (
         "PASS: PRD aligns with {0} catalog entries, {1} public names, " +
-        "{2} protocol features, and {3} mux commands"
+        "{2} protocol features, {3} mux commands, {4} capability IDs, " +
+        "and {5} executable evidence IDs"
     ) -f
     $catalogLines.Count,
     $publicNames.Count,
     $runtimeFeatureNames.Count,
-    $muxLines.Count
+    $muxLines.Count,
+    $capabilityIds.Count,
+    $actualEvidence.Count
 )

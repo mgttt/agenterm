@@ -50,6 +50,7 @@ mod protocol;
 mod rmux_status;
 mod settings;
 mod tab_tree;
+mod ui_geometry;
 mod workspace;
 
 use commands::{
@@ -62,6 +63,7 @@ use protocol::{IpcRequest, IpcResponse};
 use rmux_status::parse_status_windows;
 use settings::{AppConfig, config_path, load_config, save_config};
 use tab_tree::{TabTreeNode, TabTreeRow, tree_rows, would_create_cycle};
+use ui_geometry::{PixelRect, TAB_HEIGHT, tree_anchor_x, tree_row_at_y, tree_row_geometry};
 use workspace::{SavedTab, SavedWorkspace, load_workspace, save_workspace, workspace_path};
 
 const APP_NAME: &str = "AgenTerm";
@@ -71,12 +73,6 @@ const SCROLLBACK_LINES: usize = 10_000;
 const SIDEBAR_WIDTH: i32 = 250;
 const COMPOSER_HEIGHT: i32 = 78;
 const STATUS_BAR_HEIGHT: i32 = 26;
-const TAB_TOP: i32 = 8;
-const TAB_HEIGHT: i32 = 44;
-const TAB_LEFT: i32 = 5;
-const TAB_RIGHT_MARGIN: i32 = 5;
-const TREE_INDENT: i32 = 16;
-const TREE_ANCHOR_LEFT: i32 = 17;
 const TAB_ADD_LEFT: i32 = SIDEBAR_WIDTH - 72;
 const TAB_EDIT_LEFT: i32 = SIDEBAR_WIDTH - 48;
 const TAB_CLOSE_LEFT: i32 = SIDEBAR_WIDTH - 24;
@@ -1631,21 +1627,21 @@ impl AppState {
             }
             return;
         }
-        if y < TAB_TOP {
+        let Some(row) = tree_row_at_y(y) else {
             return;
-        }
-        let row = ((y - TAB_TOP) / TAB_HEIGHT) as usize;
+        };
         let Some(position) = self.tree_row_position(row) else {
             return;
         };
         let id = self.tabs[position].id;
         let tree_row = self.tree_rows().get(row).cloned();
         let has_children = self.tabs.iter().any(|tab| tab.parent_id == Some(id));
-        let disclosure_left = TREE_ANCHOR_LEFT - 6
-            + tree_row
-                .as_ref()
-                .map_or(0, |row| row.depth as i32 * TREE_INDENT);
-        if has_children && (disclosure_left..disclosure_left + 18).contains(&x) {
+        let geometry = tree_row_geometry(
+            row,
+            tree_row.as_ref().map_or(0, |row| row.depth),
+            SIDEBAR_WIDTH,
+        );
+        if has_children && geometry.disclosure_hit.contains_x(x) {
             if !self.collapsed_tabs.remove(&id) {
                 self.collapsed_tabs.insert(id);
             }
@@ -1692,10 +1688,12 @@ impl AppState {
     }
 
     fn right_click(&mut self, x: i32, y: i32) {
-        if x >= SIDEBAR_WIDTH || y < TAB_TOP || self.pending_close.is_some() {
+        if x >= SIDEBAR_WIDTH || self.pending_close.is_some() {
             return;
         }
-        let row = ((y - TAB_TOP) / TAB_HEIGHT) as usize;
+        let Some(row) = tree_row_at_y(y) else {
+            return;
+        };
         let Some(position) = self.tree_row_position(row) else {
             return;
         };
@@ -2028,16 +2026,11 @@ impl AppState {
             let Some(tab) = self.tabs.iter().find(|tab| tab.id == row.id) else {
                 continue;
             };
-            let top = TAB_TOP + visual_position as i32 * TAB_HEIGHT;
-            let indent = row.depth.min(10) as i32 * TREE_INDENT;
-            let node_x = TREE_ANCHOR_LEFT + indent;
-            let node_y = top + 13;
-            let rect = RECT {
-                left: TAB_LEFT,
-                top,
-                right: SIDEBAR_WIDTH - TAB_RIGHT_MARGIN,
-                bottom: top + TAB_HEIGHT - 1,
-            };
+            let geometry = tree_row_geometry(visual_position, row.depth, SIDEBAR_WIDTH);
+            let top = geometry.row.top;
+            let node_x = geometry.node_x;
+            let node_y = geometry.node_y;
+            let rect = win_rect(geometry.selection);
             if self.active == Some(tab.id) {
                 fill(device, &rect, COLOR_ACTIVE);
                 frame(device, &rect, COLOR_ACTIVE_BORDER);
@@ -2048,7 +2041,7 @@ impl AppState {
                 .any(|child| child.parent_id == Some(tab.id));
             for (level, continues) in row.guides.iter().enumerate() {
                 if *continues {
-                    let x = TREE_ANCHOR_LEFT + level as i32 * TREE_INDENT;
+                    let x = tree_anchor_x(level);
                     fill(
                         device,
                         &RECT {
@@ -2062,8 +2055,7 @@ impl AppState {
                 }
             }
             if row.depth > 0 {
-                let branch_x =
-                    TREE_ANCHOR_LEFT + (row.depth.saturating_sub(1) as i32 * TREE_INDENT);
+                let branch_x = tree_anchor_x(row.depth.saturating_sub(1));
                 fill(
                     device,
                     &RECT {
@@ -2102,12 +2094,7 @@ impl AppState {
                 );
             }
             if has_children {
-                let expander = RECT {
-                    left: node_x - 5,
-                    top: node_y - 5,
-                    right: node_x + 6,
-                    bottom: node_y + 6,
-                };
+                let expander = win_rect(geometry.expander);
                 fill(
                     device,
                     &expander,
@@ -2141,12 +2128,7 @@ impl AppState {
                     );
                 }
             }
-            let status_rect = RECT {
-                left: node_x + 10,
-                top: node_y - 4,
-                right: node_x + 19,
-                bottom: node_y + 5,
-            };
+            let status_rect = win_rect(geometry.status);
             frame(device, &status_rect, COLOR_TREE);
             fill(
                 device,
@@ -2745,6 +2727,8 @@ impl AppState {
             .filter_map(|row| {
                 let tab = self.tabs.iter().find(|tab| tab.id == row.id)?;
                 let visible_position = visible_rows.iter().position(|visible| visible.id == row.id);
+                let geometry = visible_position
+                    .map(|position| tree_row_geometry(position, row.depth, SIDEBAR_WIDTH));
                 let draft = if self.active == Some(tab.id) {
                     !active_draft.is_empty()
                 } else {
@@ -2773,34 +2757,44 @@ impl AppState {
                     "environment_names": tab.environment_names,
                     "scrollback_offset": tab.parser.screen().scrollback(),
                     "draft": draft,
-                    "bounds": visible_position.map(|position| serde_json::json!({
-                        "x": TAB_LEFT,
-                        "y": TAB_TOP + position as i32 * TAB_HEIGHT,
-                        "width": SIDEBAR_WIDTH - TAB_LEFT - TAB_RIGHT_MARGIN,
-                        "height": TAB_HEIGHT - 1,
+                    "bounds": geometry.map(|geometry| pixel_rect_json(geometry.row)),
+                    "render": geometry.map(|geometry| serde_json::json!({
+                        "row": pixel_rect_json(geometry.row),
+                        "selection": pixel_rect_json(geometry.selection),
+                        "node": {
+                            "x": geometry.node_x,
+                            "y": geometry.node_y,
+                        },
+                        "expander": pixel_rect_json(geometry.expander),
+                        "status": pixel_rect_json(geometry.status),
+                        "disclosure_hit": pixel_rect_json(geometry.disclosure_hit),
                     })),
                     "actions": visible_position
                         .filter(|_| self.active == Some(tab.id))
-                        .map(|position| serde_json::json!({
+                        .map(|position| {
+                            let geometry =
+                                tree_row_geometry(position, row.depth, SIDEBAR_WIDTH);
+                            serde_json::json!({
                         "new_child": {
                             "x": TAB_ADD_LEFT,
-                            "y": TAB_TOP + position as i32 * TAB_HEIGHT,
+                            "y": geometry.row.top,
                             "width": TAB_EDIT_LEFT - TAB_ADD_LEFT,
-                            "height": TAB_HEIGHT - 1,
+                            "height": geometry.row.height(),
                         },
                         "edit": {
                             "x": TAB_EDIT_LEFT,
-                            "y": TAB_TOP + position as i32 * TAB_HEIGHT,
+                            "y": geometry.row.top,
                             "width": TAB_CLOSE_LEFT - TAB_EDIT_LEFT,
-                            "height": TAB_HEIGHT - 1,
+                            "height": geometry.row.height(),
                         },
                         "close": {
                             "x": TAB_CLOSE_LEFT,
-                            "y": TAB_TOP + position as i32 * TAB_HEIGHT,
+                            "y": geometry.row.top,
                             "width": SIDEBAR_WIDTH - TAB_CLOSE_LEFT,
-                            "height": TAB_HEIGHT - 1,
+                            "height": geometry.row.height(),
                         }
-                    }))
+                    })
+                        })
                 }))
             })
             .collect::<Vec<_>>();
@@ -3761,6 +3755,24 @@ impl Drop for AppState {
             unsafe { DeleteObject(self.terminal_font as HGDIOBJ) };
         }
     }
+}
+
+fn win_rect(rect: PixelRect) -> RECT {
+    RECT {
+        left: rect.left,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+    }
+}
+
+fn pixel_rect_json(rect: PixelRect) -> serde_json::Value {
+    serde_json::json!({
+        "x": rect.left,
+        "y": rect.top,
+        "width": rect.width(),
+        "height": rect.height(),
+    })
 }
 
 fn fill(device: HDC, rect: &RECT, color: COLORREF) {

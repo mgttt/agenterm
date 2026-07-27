@@ -28,53 +28,116 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
 <!-- agenterm-alignment-contract
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "planned_command_roots": ["agenterm-bash", "script"],
-  "runtime_features": {
-    "remain_on_exit": {
+  "capabilities": [
+    {
+      "id": "terminal.backspace-del-one",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "Backspace emits ConPTY VT `DEL` and deletes exactly one input",
+      "evidence_ids": ["cli.backspace-del-one"]
+    },
+    {
+      "id": "runtime.remain-on-exit",
+      "protocol_feature": "remain_on_exit",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
       "prd": "exited process retains its final screen and exit code",
-      "evidence": [{"path": "tests/cli_smoke.ps1", "token": "STEP remain on exit"}]
+      "evidence_ids": ["cli.remain-on-exit"]
     },
-    "live_close_confirmation": {
+    {
+      "id": "workspace.live-close-confirmation",
+      "protocol_feature": "live_close_confirmation",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
       "prd": "explicit confirmation before closing a live process",
-      "evidence": [{"path": "tests/ux_smoke.ps1", "token": "STEP live close requires confirmation and cancel is safe"}]
+      "evidence_ids": ["ux.live-close-confirmation"]
     },
-    "rmux_status_click_bridge": {
+    {
+      "id": "compat.rmux-status-click-bridge",
+      "protocol_feature": "rmux_status_click_bridge",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "unit-source-partial",
       "prd": "RMUX status active-marker parsing and clickable window labels",
-      "evidence": [
-        {"path": "src/rmux_status.rs", "token": "parses_rmux_status_windows_and_active_marker"},
-        {"path": "src/rmux_status.rs", "token": "records_clickable_utf8_byte_ranges"}
-      ]
+      "evidence_ids": ["unit.rmux-status-parser"]
     },
-    "semantic_ui_automation": {
+    {
+      "id": "control.semantic-ui-automation",
+      "protocol_feature": "semantic_ui_automation",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
       "prd": "semantic focus and UI actions",
-      "evidence": [{"path": "tests/ux_smoke.ps1", "token": "STEP semantic focus and composer send"}]
+      "evidence_ids": ["ux.semantic-ui-automation"]
     },
-    "hierarchical_tabs": {
+    {
+      "id": "workspace.hierarchical-tabs",
+      "protocol_feature": "hierarchical_tabs",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
       "prd": "tabs form a visible parent/child tree",
-      "evidence": [{"path": "tests/ux_smoke.ps1", "token": "STEP hierarchical tab team"}]
+      "evidence_ids": ["ux.hierarchical-tabs"]
     },
-    "persistent_workspace": {
+    {
+      "id": "workspace.persistence",
+      "protocol_feature": "persistent_workspace",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
       "prd": "normal application close preserves the tab tree and active tab",
-      "evidence": [{"path": "tests/ux_smoke.ps1", "token": "STEP workspace survives a normal application restart"}]
+      "evidence_ids": ["ux.persistent-workspace"]
     },
-    "tab_environment": {
+    {
+      "id": "fleet.tab-environment",
+      "protocol_feature": "tab_environment",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
       "prd": "per-tab child environment injection",
-      "evidence": [{"path": "tests/fleet_smoke.ps1", "token": "STEP tab-scoped environment and reserved AgenTerm context"}]
+      "evidence_ids": ["fleet.tab-environment"]
     },
-    "codex_launcher": {
+    {
+      "id": "fleet.codex-launcher",
+      "protocol_feature": "codex_launcher",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
       "prd": "launch Codex agent tabs",
-      "evidence": [{"path": "tests/fleet_smoke.ps1", "token": "STEP supported Codex launcher proxy workflow"}]
+      "evidence_ids": ["fleet.codex-launcher"]
     },
-    "mux_frontend": {
+    {
+      "id": "compat.mux-frontend",
+      "protocol_feature": "mux_frontend",
+      "kind": "architecture",
+      "status": "shipped",
+      "evidence_mode": "black-box",
       "prd": "tmux/RMUX-compatible fleet control entry point",
-      "evidence": [{"path": "tests/fleet_smoke.ps1", "token": "STEP mux compatibility is discoverable without a server"}]
+      "evidence_ids": ["fleet.mux-frontend"]
     },
-    "instance_discovery": {
+    {
+      "id": "control.instance-discovery",
+      "protocol_feature": "instance_discovery",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
       "prd": "registered multi-instance discovery",
-      "evidence": [{"path": "tests/fleet_smoke.ps1", "token": "STEP live servers are discoverable and explicitly targetable"}]
+      "evidence_ids": ["fleet.instance-discovery"]
+    },
+    {
+      "id": "scripting.rust-host-rhai-language",
+      "kind": "decision",
+      "status": "accepted",
+      "evidence_mode": "decision",
+      "prd": "design choice: Rust (`.rs`) implements the host",
+      "evidence_ids": []
     }
-  }
+  ]
 }
 -->
 
@@ -452,8 +515,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [x] unit tests for command parsing, protocol, settings, and RMUX status
     - [x] PRD alignment lint keeps the public command registry, protocol feature
       flags, mux compatibility output, and declared evidence synchronized
-    - [ ] stable evidence IDs for every shipped leaf capability, including
-      rendering, CJK, performance, and interaction fixtures
+    - [~] stable capability/evidence ID contract covers protocol features and
+      critical terminal input behavior; rendering, CJK, performance, and the
+      remaining shipped leaves still need registered evidence
     - [x] CLI and semantic UX smoke tests through public interfaces
     - [x] one-command fmt, Clippy, test, build, and smoke regression
     - [x] release CI runs the isolated public CLI and fleet smoke suites before

@@ -1,8 +1,26 @@
 param(
-    [string]$Exe = (Join-Path $PSScriptRoot '..\dist\agentermctl.exe')
+    [string]$Exe = (Join-Path $PSScriptRoot '..\dist\agentermctl.exe'),
+    [switch]$ListEvidence
 )
 
 $ErrorActionPreference = 'Stop'
+$declaredEvidence = @(
+    'cli.backspace-del-one'
+    'cli.remain-on-exit'
+)
+if ($ListEvidence) {
+    $declaredEvidence
+    exit 0
+}
+
+function Write-Evidence {
+    param([Parameter(Mandatory = $true)][string]$Id)
+    if ($declaredEvidence -notcontains $Id) {
+        throw "CLI smoke emitted undeclared evidence ID: $Id"
+    }
+    Write-Host "EVIDENCE $Id"
+}
+
 $Exe = [IO.Path]::GetFullPath($Exe)
 if (-not (Test-Path -LiteralPath $Exe)) {
     throw "AgenTerm executable not found: $Exe"
@@ -116,6 +134,7 @@ try {
     if ($backspaceCapture -notmatch "(?m)^$([regex]::Escape($backspacePrefix))Y\s*$") {
         throw 'Backspace did not delete exactly the preceding input character'
     }
+    Write-Evidence 'cli.backspace-del-one'
 
     Write-Host 'STEP terminal viewport scrolling'
     $scrollPrefix = "AGENTERM_SCROLL_$PID"
@@ -167,6 +186,7 @@ try {
     if (-not $state.EndsWith(":${name}:1")) {
         throw "Exited tab did not remain visible and dead: $state"
     }
+    Write-Evidence 'cli.remain-on-exit'
 
     Write-Host 'STEP explicit close'
     Invoke-AgenTerm @('kill-window', '-t', $name) | Out-Null

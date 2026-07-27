@@ -1,9 +1,29 @@
 param(
     [string]$CtlExe = (Join-Path $PSScriptRoot '..\dist\agentermctl.exe'),
-    [string]$MuxExe = (Join-Path $PSScriptRoot '..\dist\agenterm-mux.exe')
+    [string]$MuxExe = (Join-Path $PSScriptRoot '..\dist\agenterm-mux.exe'),
+    [switch]$ListEvidence
 )
 
 $ErrorActionPreference = 'Stop'
+$declaredEvidence = @(
+    'fleet.codex-launcher'
+    'fleet.instance-discovery'
+    'fleet.mux-frontend'
+    'fleet.tab-environment'
+)
+if ($ListEvidence) {
+    $declaredEvidence
+    exit 0
+}
+
+function Write-Evidence {
+    param([Parameter(Mandatory = $true)][string]$Id)
+    if ($declaredEvidence -notcontains $Id) {
+        throw "Fleet smoke emitted undeclared evidence ID: $Id"
+    }
+    Write-Host "EVIDENCE $Id"
+}
+
 $CtlExe = [IO.Path]::GetFullPath($CtlExe)
 $MuxExe = [IO.Path]::GetFullPath($MuxExe)
 foreach ($path in @($CtlExe, $MuxExe)) {
@@ -89,6 +109,7 @@ try {
     Invoke-ExpectedFailure $MuxExe @(
         '--address', '0.0.0.0:42000', 'compatibility'
     ) | Out-Null
+    Write-Evidence 'fleet.mux-frontend'
 
     Write-Host 'STEP explicit CLI address autostarts the requested server'
     $explicitAddress = "127.0.0.1:$((49000 + ($PID % 1000)))"
@@ -147,6 +168,7 @@ try {
     if (-not $targetedProtocol.features.instance_discovery) {
         throw 'agentermctl --address did not target the requested server'
     }
+    Write-Evidence 'fleet.instance-discovery'
 
     $capture = Invoke-CheckedExe $CtlExe @('capture-pane', '-p', '-t', $environmentName)
     $snapshot = Invoke-CheckedExe $CtlExe @('ui-snapshot') | ConvertFrom-Json
@@ -157,6 +179,7 @@ try {
         $tab.environment_names -notcontains 'FLEET_ROLE') {
         throw 'The child did not receive its scoped environment and authoritative tab context'
     }
+    Write-Evidence 'fleet.tab-environment'
     Invoke-CheckedExe $CtlExe @(
         'new-session', '--', 'cmd.exe', '/d', '/c', 'echo child', '-s', 'hijack'
     ) | Out-Null
@@ -185,6 +208,7 @@ try {
         $agent.environment_names -notcontains 'HTTPS_PROXY') {
         throw 'new-agent default was not safe or missed proxy/tab context'
     }
+    Write-Evidence 'fleet.codex-launcher'
 
     Write-Host 'STEP child arguments cannot escape -- and --yolo is explicit'
     $delimiterName = "delimiter-$PID"

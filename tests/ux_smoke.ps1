@@ -1,8 +1,28 @@
 param(
-    [string]$Exe = (Join-Path $PSScriptRoot '..\dist\agentermctl.exe')
+    [string]$Exe = (Join-Path $PSScriptRoot '..\dist\agentermctl.exe'),
+    [switch]$ListEvidence
 )
 
 $ErrorActionPreference = 'Stop'
+$declaredEvidence = @(
+    'ux.hierarchical-tabs'
+    'ux.live-close-confirmation'
+    'ux.persistent-workspace'
+    'ux.semantic-ui-automation'
+)
+if ($ListEvidence) {
+    $declaredEvidence
+    exit 0
+}
+
+function Write-Evidence {
+    param([Parameter(Mandatory = $true)][string]$Id)
+    if ($declaredEvidence -notcontains $Id) {
+        throw "UX smoke emitted undeclared evidence ID: $Id"
+    }
+    Write-Host "EVIDENCE $Id"
+}
+
 $Exe = [IO.Path]::GetFullPath($Exe)
 $GuiExe = Join-Path (Split-Path -Parent $Exe) 'agenterm.exe'
 if (-not (Test-Path -LiteralPath $Exe)) {
@@ -118,6 +138,7 @@ try {
         throw 'Closing a parent did not safely promote its child'
     }
     Invoke-AgenTerm @('kill-window', '-t', $grandchild.id) | Out-Null
+    Write-Evidence 'ux.hierarchical-tabs'
 
     Write-Host 'STEP two-line tab metadata'
     $note = "build verification $PID"
@@ -150,6 +171,7 @@ try {
         'wait-pane', '-t', $id, '--contains', $token,
         '--submit-complete', '--timeout-ms', '10000'
     ) | Out-Null
+    Write-Evidence 'ux.semantic-ui-automation'
 
     Write-Host 'STEP live close requires confirmation and cancel is safe'
     $snapshot = Invoke-AgenTerm @('ui-action', 'close-tab', '-t', $id) | ConvertFrom-Json
@@ -161,6 +183,7 @@ try {
     if ($null -ne $snapshot.modal) {
         throw 'cancel did not clear the confirmation modal'
     }
+    Write-Evidence 'ux.live-close-confirmation'
 
     Write-Host 'STEP settings discovery and modal'
     $settings = Invoke-AgenTerm @('get-settings') | ConvertFrom-Json
@@ -220,6 +243,7 @@ try {
         -not $restored.draft -or -not $restored.active) {
         throw 'Workspace tab metadata and active selection did not survive restart'
     }
+    Write-Evidence 'ux.persistent-workspace'
     Write-Host 'PASS: UX state, two-line tabs, settings, composer, focus, safe close, dead close, protocol discovery'
 }
 finally {
