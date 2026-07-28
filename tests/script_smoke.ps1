@@ -329,8 +329,10 @@ try {
     $apiResult = Invoke-Script @('script', 'api', '--json') | ConvertFrom-Json
     if (-not $apiResult.ok -or
         $apiResult.value.api_version -ne 1 -or
+        $apiResult.value.schema_version -ne 2 -or
         $apiResult.value.profiles.pure.variables -notcontains 'args' -or
         $apiResult.value.profiles.observe.variables -notcontains 'agent' -or
+        $apiResult.value.profiles.local.status -ne 'shipped' -or
         $apiResult.value.limits.defaults.wall_time_ms -ne 2000 -or
         $apiResult.value.limits.hard_maximums.wall_time_ms -ne 10000 -or
         $apiResult.value.limits.invocation_bytes -ne 2097152 -or
@@ -343,10 +345,22 @@ try {
         $apiResult.value.supervisor.global_concurrency -ne 4 -or
         $apiResult.value.exit_classes.limit -ne 3 -or
         $apiResult.value.failure_categories -notcontains 'protocol' -or
-        @($apiResult.value.apis | Where-Object {
-            $_.name -eq 'new_tab' -and -not $_.available
+        @($apiResult.value.entries | Where-Object {
+            $_.stable_id -eq 'fleet.tabs.new' -and $_.status -eq 'planned'
         }).Count -ne 1 -or
-        $apiResult.value.deferred_capabilities -notcontains 'control') {
+        @($apiResult.value.entries | Where-Object {
+            $_.surface_path -eq 'agent.workspace' -and
+            $_.status -eq 'shipped' -and
+            $_.catalog_path -eq 'fleet/workspace/get' -and
+            $_.operation_id -eq 'workspace.info'
+        }).Count -ne 1 -or
+        @($apiResult.value.entries | Where-Object {
+            $_.stable_id -eq 'std.fs.read-to-string' -and
+            $_.surface_path -eq 'std::fs::read_to_string' -and
+            $_.rust_path -eq 'std::fs::read_to_string' -and
+            $_.rust_mapping -eq 'adapted' -and
+            $_.status -eq 'planned'
+        }).Count -ne 1) {
         throw 'script api did not expose the versioned fail-closed capability catalog'
     }
 
@@ -366,6 +380,13 @@ try {
     $check = Invoke-Script @('script', 'check', $sourceFile)
     if ($check -ne 'OK') {
         throw 'script check did not validate a well-formed source file'
+    }
+    $localValue = Invoke-Script @(
+        'script', 'eval', 'args[0] + args[1]', '--profile', 'local',
+        '--', 'local-', 'profile'
+    )
+    if ($localValue -ne 'local-profile') {
+        throw "explicit local profile returned unexpected value: $localValue"
     }
     [IO.File]::WriteAllText($sourceFile, 'let = ;')
     $parseError = Invoke-ScriptFailure 1 @('script', 'check', $sourceFile)

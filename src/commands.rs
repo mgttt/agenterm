@@ -547,9 +547,9 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
         ),
         "save-workspace" => ("agenterm-cli save-workspace", &[][..], &[][..], false),
         "script" => (
-            "agenterm-cli script api [--json] | check FILE|- [--profile pure|observe] | \
-             eval EXPRESSION [--profile pure|observe] | run FILE|- \
-             [--profile pure|observe] [-- ARGS...]",
+            "agenterm-cli script api [--json] | check FILE|- [--profile pure|observe|local] | \
+             eval EXPRESSION [--profile pure|observe|local] | run FILE|- \
+             [--profile pure|observe|local] [-- ARGS...]",
             &["--profile", "--timeout-ms", "--max-operations"][..],
             &["--json"][..],
             false,

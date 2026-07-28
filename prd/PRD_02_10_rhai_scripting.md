@@ -203,6 +203,12 @@ and it is not positioned as a restricted security plugin.
 - [ ] `script api --json` is the exact versioned runtime catalog and matches
   the engine, standard library, modules/tasks, profiles, Fleet operations,
   defaults, hard ceilings, and availability.
+  - [x] catalog schema v2 separates its schema version from Script API v1 and
+    provides one typed source for shipped v1 observations plus explicitly
+    planned v0.1.9 nodes; full engine/module/task conformance remains open.
+  - [x] an explicit `local` profile foundation runs base Rhai without requiring
+    a server or inheriting observe authority. It remains opt-in until the first
+    useful local standard-library slice ships.
 - [ ] each callable entry describes stable ID, signature, result/error schema,
   filesystem/process/network/Fleet access, mutation and destructive facts,
   expected duration, cancellation and streaming support, and any dry-run or
@@ -214,10 +220,15 @@ and it is not positioned as a restricted security plugin.
 - [ ] every entry separates `catalog_path` from its shallow `surface_path`, so
   product taxonomy can evolve without forcing nested namespaces into user
   source or silently renaming callable contracts.
+  - [x] schema v2 entries carry both paths and a stable ID; the current
+    `agent.*` v1 surface is reported honestly while `fleet` migration remains
+    planned.
 - [ ] every entry also carries nullable `rust_path`, a mapping level
   (`direct`, `adapted`, `inspired`, or `none`) and machine-readable semantic
   differences for error, type, blocking, cancellation, platform and limits.
   An API without an honest Rust std analogue cannot enter `std::`.
+  - [x] schema v2 establishes these fields and publishes semantic differences
+    for shipped and planned entries.
 - [ ] optional comparison metadata maps a capability to a reviewed Node.js or
   Bun analogue as `similar`, `agenterm-specific`, `deferred`, or
   `not-applicable`, with source/version and review date. It supports gap
