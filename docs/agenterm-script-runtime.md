@@ -1,6 +1,6 @@
 # AgenTerm Script Runtime Specification
 
-Status: Draft specification for v0.1.9
+Status: Stable Script API v2 specification for v0.1.9
 
 Specification ID: `agenterm-script-runtime`
 
@@ -54,7 +54,7 @@ Stability values:
 ```text
 agenterm-script
 │  AgenTerm's general-purpose Rhai automation runtime.
-│  [planned product completion; reserved; designed 2026-07-28]
+│  [shipped v0.1.9 product slice; stable; designed 2026-07-28]
 │
 ├─ Rhai language
 │  Upstream language syntax and values; not an AgenTerm compatibility layer.
@@ -67,7 +67,7 @@ agenterm-script
 │  │  [shipped; upstream-defined; designed 2026-07-28]
 │  └─ import
 │     Local project module composition; resolver policy is AgenTerm-owned.
-│     [planned; reserved; designed 2026-07-28]
+│     [shipped; stable; designed 2026-07-28]
 │
 ├─ globals
 │  Minimal invocation prelude; general capabilities do not become globals.
@@ -1183,19 +1183,20 @@ let commit = git.wait_with_output();
 let response = release.wait(std::time::Duration::from_secs(10));
 ```
 
-### 19.4 Planned Fleet mutation evidence
+### 19.4 Shipped Fleet mutation evidence
 
 ```rhai
 let active = fleet.tabs.active();
 let capture = fleet.terminal(active.id).capture(8192);
 
 let receipt = fleet.tabs.set_note(active.id, "captured");
-receipt.wait(std::time::Duration::from_secs(5));
 
 print(#{
     tab: active.id,
     truncated: capture.truncated,
-    confirmed: receipt.post_state.confirmed
+    operation: receipt.operation_id,
+    event_count: receipt.events.len(),
+    verified: receipt.post_state.verified
 });
 ```
 
@@ -1215,11 +1216,12 @@ A capability becomes `shipped` only when:
 9. GUI startup, PTYs, and server health do not regress;
 10. a subsequent invocation succeeds after injected failure.
 
-The suite ultimately covers Unicode, long paths, UNC, access denial,
+The v0.1.9 suite covers Unicode, explicit-target filesystem lifecycle,
 environment inheritance, executable/argv/cwd/stdin/stdout/stderr, process
 exit, concurrency, backpressure, loopback HTTP, module cycles, root escape,
-Fleet receipts/events/post-state, malformed frames, worker crash, and parent
-exit.
+Fleet receipts/events/post-state, malformed frames, worker crash, parent
+exit, and orphan-free recovery. Long-path, UNC, reparse-point, and access-
+denial policy remain explicit future qualification slices.
 
 ## 21. Explicitly deferred
 

@@ -119,7 +119,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   - [ ] Cargo registry, Git sources and compatible build outputs use bounded,
     correctly keyed CI caches; cache miss/corruption cannot alter correctness,
     and developer `target/` cleanup remains explicit
-- v0.1.8 public-ready candidate and non-publishing release rehearsal (P0)
+- v0.1.9 candidate and non-publishing release rehearsal (P0)
   - [ ] one repository-native coordinator owns one clean candidate build and
     its integrated qualification; a candidate SHA can have only one eligible,
     complete stress-inclusive receipt selected for packaging
@@ -140,7 +140,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     inventory, and equality between rehearsed asset hashes and the local
     qualified package manifest
   - [ ] public-ready status does not create release authority: creation or
-    push of the `v0.1.8` tag and creation of a public GitHub Release occur only
+    push of the `v0.1.9` tag and creation of a public GitHub Release occur only
     after the user explicitly approves publication
 - [x] artifact manifest schema 2 drives all four executable names, roles,
   PE subsystems, budgets, offline probes, staging metadata, and README checks;

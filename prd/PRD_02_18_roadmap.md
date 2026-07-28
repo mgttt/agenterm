@@ -343,8 +343,8 @@ track remains planned, but every declared dependency must still pass.
   - [ ] public-ready does not authorize publication: creating or pushing the
     `v0.1.8` tag and creating a public GitHub Release require explicit user
     approval after the candidate and rehearsal gates pass
-- [ ] M6 / v0.1.9 General Script Runtime
-  - [ ] deliver the cross-cutting stable-server/replaceable-GUI migration:
+- [~] M6 / v0.1.9 General Script Runtime
+  - [x] deliver the cross-cutting stable-server/replaceable-GUI migration:
     internal `agenterm-server.exe` owns session/PTY truth, current
     `agenterm.exe` reconnects as a versioned UI client, and upgrade/rollback
     evidence preserves server/PTY identity and continuing output
@@ -352,31 +352,32 @@ track remains planned, but every declared dependency must still pass.
     Script API v2 protocol version, including reviewed Node.js/Bun research
     analogues, and add an explicit server-independent `local`
     profile foundation without changing the ordinary default prematurely
-  - [ ] make `local` the ordinary `agenterm-script.exe` execution profile and
+  - [x] make `local` the ordinary `agenterm-script.exe` execution profile and
     deliver the Rust-shaped `std::{fs,path,env,process,time}` subset plus
     `rhai::{task,http,json,bytes,runtime}` extensions without moving future
     Agent approval policy into the runtime
-  - [ ] add bounded task/stream/cancellation, local modules, versioned
+  - [x] add bounded task/stream/cancellation, local modules, versioned
     `agenterm.tasks.json`, named task list/show/check/run, and one machine-readable
     API catalog shared by check, runtime, Fleet tools and future consumers
-  - [ ] publish that catalog as a stable three-level capability tree with
-    shipped/planned/deferred/degraded facts and reviewed purpose-level
-    Rust/Node.js/Bun analogues; every entry separates catalog, surface and Rust
-    paths and records semantic differences, then generates the comparison
-    matrix, manual index and implementation coverage from the same source
+  - [x] publish that catalog as a stable three-level capability tree with
+    shipped/planned machine facts, explicit deferred/out-of-scope specification
+    facts, typed degraded reasons, and reviewed purpose-level Rust/Node.js/Bun
+    analogues; every entry separates catalog, surface and Rust paths and
+    records semantic differences, while the CLI tree and machine matrix render
+    from the same source
   - [x] make runtime/module/task identity package-ready through stable
     version, provenance hooks, requirements, capabilities and entry points,
     without adding remote resolution, installation, signature policy or a
     public registry to the runtime; task schema v2 ships runtime/API/catalog
     identity, API/capability requirements, fail-closed compatibility, and
     bounded non-trust origin/provenance hooks
-  - [ ] systematically expose every public typed Fleet operation or a stable
+  - [x] systematically expose every public typed Fleet operation or a stable
     degraded reason; mutations return request identity, receipt, correlated
     event and verified post-state while pure/observe behavior remains stable
-  - [ ] public file/process/loopback-HTTP/task/module/Fleet/privacy/crash/orphan
+  - [x] public file/process/loopback-HTTP/task/module/Fleet/privacy/crash/orphan
     journeys prove one complete local automation task and one low-risk
     PowerShell/Rhai self-hosting dual-run without replacing release scripts
-  - [ ] implementation sequencing, budgets, risks and release evidence are
+  - [x] implementation sequencing, budgets, risks and release evidence are
     owned by [the v0.1.9 public plan](../plan/plan-v0.1.9.md)
 - [ ] M7 / v0.1.10 Rhai Self-Hosting and Verifiable Read-Only Agent Bridge
   - [ ] complete the evidence-gated replacement of all repository-owned
