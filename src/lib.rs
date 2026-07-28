@@ -84,6 +84,7 @@ mod tab_tree;
 mod terminal_lifecycle;
 mod terminal_observation;
 mod terminal_runtime;
+mod terminal_selection;
 mod theme;
 mod ui_geometry;
 mod upgrade_identity;
@@ -130,6 +131,7 @@ use settings::{AppConfig, config_path, load_config, save_config};
 use tab_tree::{TabTreeNode, TabTreeRow, tree_rows, would_create_cycle};
 use terminal_observation::TerminalProcessState;
 use terminal_runtime::{TerminalLaunch, TerminalTab};
+use terminal_selection::{TerminalPoint, TerminalSelection, terminal_selection_text};
 use theme::{ThemeId, ThemePalette};
 use ui_geometry::{
     PixelRect, TAB_HEIGHT, TERMINAL_SCROLLBAR_WIDTH, TerminalScrollbarGeometry, WorkspaceLayout,
@@ -1439,67 +1441,6 @@ struct ScrollDrag {
 #[derive(Clone, Copy, Debug)]
 struct TabsResizeDrag {
     original_width: u16,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-struct TerminalPoint {
-    row: u16,
-    col: u16,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct TerminalSelection {
-    tab_id: u64,
-    anchor: TerminalPoint,
-    focus: TerminalPoint,
-    dragging: bool,
-    moved: bool,
-}
-
-impl TerminalSelection {
-    fn bounds(self) -> (TerminalPoint, TerminalPoint) {
-        if self.anchor <= self.focus {
-            (self.anchor, self.focus)
-        } else {
-            (self.focus, self.anchor)
-        }
-    }
-
-    fn contains(self, row: u16, col: u16) -> bool {
-        let (start, end) = self.bounds();
-        TerminalPoint { row, col } >= start && TerminalPoint { row, col } <= end
-    }
-}
-
-fn terminal_selection_text(screen: &vt100::Screen, selection: TerminalSelection) -> String {
-    let (rows, cols) = screen.size();
-    if rows == 0 || cols == 0 {
-        return String::new();
-    }
-    let (mut start, mut end) = selection.bounds();
-    start.row = start.row.min(rows - 1);
-    start.col = start.col.min(cols - 1);
-    end.row = end.row.min(rows - 1);
-    end.col = end.col.min(cols - 1);
-
-    let mut selected = String::new();
-    for row in start.row..=end.row {
-        let first_col = if row == start.row { start.col } else { 0 };
-        let last_col = if row == end.row { end.col } else { cols - 1 };
-        let mut line = String::new();
-        for col in first_col..=last_col {
-            match screen.cell(row, col) {
-                Some(cell) if cell.is_wide_continuation() => {}
-                Some(cell) if !cell.contents().is_empty() => line.push_str(cell.contents()),
-                _ => line.push(' '),
-            }
-        }
-        selected.push_str(line.trim_end_matches(' '));
-        if row != end.row {
-            selected.push_str("\r\n");
-        }
-    }
-    selected
 }
 
 fn set_clipboard_text(window: HWND, text: &str) -> Result<()> {
@@ -9886,11 +9827,10 @@ fn save_window_png(window: HWND, path: &std::path::Path, pane: Option<PixelRect>
 #[cfg(test)]
 mod tests {
     use super::{
-        EditShortcut, FocusSurface, IpcResponse, TerminalPoint, TerminalSelection, ThemeId,
-        bounded_utf8_prefix, edit_shortcut, effective_theme, gui_cli_guidance,
-        gui_handoff_succeeded, is_latched_navigation_repeat, no_activate_from_value,
-        normalize_terminal_paste, parse_gui_launch, parse_loopback_ipc_address, run_wait_ui,
-        surface_navigation, terminal_copy_shortcut, terminal_selection_text,
+        EditShortcut, FocusSurface, IpcResponse, ThemeId, bounded_utf8_prefix, edit_shortcut,
+        effective_theme, gui_cli_guidance, gui_handoff_succeeded, is_latched_navigation_repeat,
+        no_activate_from_value, normalize_terminal_paste, parse_gui_launch,
+        parse_loopback_ipc_address, run_wait_ui, surface_navigation, terminal_copy_shortcut,
     };
 
     #[test]
@@ -9982,43 +9922,6 @@ mod tests {
             repeat_lparam
         ));
         assert!(!is_latched_navigation_repeat(None, 0x28, repeat_lparam));
-    }
-
-    #[test]
-    fn terminal_selection_extracts_forward_reverse_and_wide_text() {
-        let mut parser = vt100::Parser::new(3, 8, 0);
-        parser.process(b"alpha\r\nbeta");
-        let forward = TerminalSelection {
-            tab_id: 1,
-            anchor: TerminalPoint { row: 0, col: 1 },
-            focus: TerminalPoint { row: 1, col: 2 },
-            dragging: false,
-            moved: true,
-        };
-        let reverse = TerminalSelection {
-            anchor: forward.focus,
-            focus: forward.anchor,
-            ..forward
-        };
-        assert_eq!(
-            terminal_selection_text(parser.screen(), forward),
-            "lpha\r\nbet"
-        );
-        assert_eq!(
-            terminal_selection_text(parser.screen(), reverse),
-            "lpha\r\nbet"
-        );
-
-        let mut wide_parser = vt100::Parser::new(1, 8, 0);
-        wide_parser.process("你A".as_bytes());
-        let wide = TerminalSelection {
-            tab_id: 1,
-            anchor: TerminalPoint { row: 0, col: 0 },
-            focus: TerminalPoint { row: 0, col: 2 },
-            dragging: false,
-            moved: true,
-        };
-        assert_eq!(terminal_selection_text(wide_parser.screen(), wide), "你A");
     }
 
     #[test]
