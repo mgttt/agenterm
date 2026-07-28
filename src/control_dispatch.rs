@@ -902,13 +902,7 @@ pub(crate) fn dispatch_shared_command(
                 Err(error) => Some(IpcResponse::failure(error)),
             }
         }
-        "ui-snapshot" => {
-            if let Some(json) = host.ui_snapshot_json() {
-                Some(IpcResponse::success(json))
-            } else {
-                None
-            }
-        }
+        "ui-snapshot" => host.ui_snapshot_json().map(IpcResponse::success),
         _ => None,
     }
 }

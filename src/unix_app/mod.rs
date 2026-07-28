@@ -12,7 +12,7 @@ use std::{
 use softbuffer::{Context, Surface};
 use winit::{
     application::ApplicationHandler,
-    event::WindowEvent,
+    event::{ElementState, MouseButton, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     window::{Window, WindowAttributes, WindowId},
 };
@@ -20,6 +20,7 @@ use winit::{
 use crate::{
     client::no_activate_from_environment,
     control_dispatch::{ControlHost, dispatch_shared_command},
+    event_journal::{EventJournal, EventKind},
     gui_wake::{UnixWake, install_unix_wake},
     instances::register_instance,
     ipc_transport::{IpcEnvelope, start_ipc_server},
@@ -31,7 +32,10 @@ use crate::{
     workspace::workspace_path,
 };
 
-use render::{TerminalGrid, grid_dimensions_for_pixels, render_grid, theme_palette};
+use render::{
+    SIDEBAR_WIDTH, SidebarTabRow, TerminalGrid, grid_dimensions_for_pixels, render_frame,
+    sidebar_row_at_y, theme_palette,
+};
 
 const APP_NAME: &str = "AgenTerm";
 const INITIAL_WIDTH: u32 = 960;
@@ -131,6 +135,7 @@ struct UnixApp {
     ipc_receiver: Receiver<IpcEnvelope>,
     session_name: String,
     started_at: SystemTime,
+    event_journal: EventJournal,
     window: Option<Rc<Window>>,
     surface: Option<Surface<winit::event_loop::OwnedDisplayHandle, Rc<Window>>>,
     grid: Option<TerminalGrid>,
@@ -138,6 +143,7 @@ struct UnixApp {
     active: Option<u64>,
     next_tab_id: u64,
     close_requested: bool,
+    last_cursor: (f64, f64),
 }
 
 impl UnixApp {
@@ -157,6 +163,7 @@ impl UnixApp {
             ipc_receiver,
             session_name,
             started_at: SystemTime::now(),
+            event_journal: EventJournal::new(),
             window: None,
             surface: None,
             grid: None,
@@ -164,7 +171,82 @@ impl UnixApp {
             active: None,
             next_tab_id: 1,
             close_requested: false,
+            last_cursor: (0.0, 0.0),
         }
+    }
+
+    fn sidebar_rows(&self) -> Vec<SidebarTabRow> {
+        self.all_tree_rows()
+            .into_iter()
+            .filter_map(|row| {
+                let tab = self.tabs.iter().find(|tab| tab.id == row.id)?;
+                Some(SidebarTabRow {
+                    id: tab.id,
+                    depth: row.depth,
+                    title: tab.title.clone(),
+                    active: self.active == Some(tab.id),
+                })
+            })
+            .collect()
+    }
+
+    fn tab_position_for_sidebar_y(&self, y: u32) -> Option<usize> {
+        let row_index = sidebar_row_at_y(y)?;
+        let rows = self.all_tree_rows();
+        let row_id = rows.get(row_index)?.id;
+        self.tabs.iter().position(|tab| tab.id == row_id)
+    }
+
+    fn tab_state(tab: &TerminalTab) -> &'static str {
+        if tab.error.is_some() {
+            "error"
+        } else if tab.exited.is_some() {
+            "dead"
+        } else {
+            "running"
+        }
+    }
+
+    fn build_ui_snapshot_json(&self) -> String {
+        let active = self.active;
+        let rows = self.all_tree_rows();
+        let tabs = rows
+            .iter()
+            .filter_map(|row| {
+                let tab = self.tabs.iter().find(|tab| tab.id == row.id)?;
+                Some(serde_json::json!({
+                    "id": format!("@{}", tab.id),
+                    "index": tab.index,
+                    "name": tab.title,
+                    "active": active == Some(tab.id),
+                    "state": Self::tab_state(tab),
+                    "scrollback_offset": tab.parser.screen().scrollback(),
+                    "depth": row.depth,
+                }))
+            })
+            .collect::<Vec<_>>();
+        serde_json::to_string_pretty(&serde_json::json!({
+            "session": self.session_name,
+            "active_window_id": active.map(|id| format!("@{id}")),
+            "tabs_visible": true,
+            "focus_surface": "terminal",
+            "event_position": self.event_journal.position(),
+            "tabs": tabs,
+        }))
+        .unwrap_or_else(|_| "{}".to_owned())
+    }
+
+    fn handle_sidebar_click(&mut self, x: f64, y: f64) {
+        if x >= f64::from(SIDEBAR_WIDTH) {
+            return;
+        }
+        let Some(position) = self.tab_position_for_sidebar_y(y.max(0.0) as u32) else {
+            return;
+        };
+        if self.active_position() == Some(position) {
+            return;
+        }
+        let _ = self.select_tab_at(position);
     }
 
     fn active_position(&self) -> Option<usize> {
@@ -229,6 +311,20 @@ impl UnixApp {
         self.grid = Some(grid);
         self.active = Some(id);
         self.tabs.push(tab);
+        self.event_journal_mut().commit(
+            EventKind::TabCreated,
+            Some(id),
+            serde_json::json!({
+                "index": 0,
+                "parent_id": None::<u64>,
+                "selected": true,
+            }),
+        );
+        self.event_journal_mut().commit(
+            EventKind::TabSelected,
+            Some(id),
+            serde_json::json!({}),
+        );
         Ok(())
     }
 
@@ -313,17 +409,20 @@ impl UnixApp {
         let Some(window) = self.window.as_ref() else {
             return;
         };
-        let Some(surface) = self.surface.as_mut() else {
-            return;
-        };
-        let Some(grid) = self.grid.as_ref() else {
-            return;
-        };
-
         let size = window.inner_size();
         if size.width == 0 || size.height == 0 {
             return;
         }
+
+        let sidebar_rows = self.sidebar_rows();
+        let palette = ThemeId::Dark.palette();
+        let Some(grid) = self.grid.as_ref() else {
+            return;
+        };
+
+        let Some(surface) = self.surface.as_mut() else {
+            return;
+        };
 
         if let (Some(width), Some(height)) = (
             std::num::NonZeroU32::new(size.width),
@@ -337,8 +436,7 @@ impl UnixApp {
         };
         let width = buffer.width().get();
         let height = buffer.height().get();
-        let palette = ThemeId::Dark.palette();
-        render_grid(&mut buffer, width, width, height, grid, palette);
+        render_frame(&mut buffer, width, width, height, grid, palette, &sidebar_rows);
         let _ = buffer.present();
     }
 }
@@ -346,6 +444,22 @@ impl UnixApp {
 impl ControlHost for UnixApp {
     fn session_name(&self) -> &str {
         &self.session_name
+    }
+
+    fn event_journal(&self) -> &EventJournal {
+        &self.event_journal
+    }
+
+    fn event_journal_mut(&mut self) -> &mut EventJournal {
+        &mut self.event_journal
+    }
+
+    fn request_ui_redraw(&mut self) {
+        self.request_redraw();
+    }
+
+    fn ui_snapshot_json(&mut self) -> Option<String> {
+        Some(self.build_ui_snapshot_json())
     }
 
     fn started_at_unix_secs(&self) -> u64 {
@@ -415,10 +529,24 @@ impl ControlHost for UnixApp {
 
         self.tabs.push(tab);
         self.tabs.sort_by_key(|tab| tab.index);
+        self.event_journal_mut().commit(
+            EventKind::TabCreated,
+            Some(id),
+            serde_json::json!({
+                "index": index,
+                "parent_id": parent_id,
+                "selected": select,
+            }),
+        );
         if select {
             self.active = Some(id);
+            self.event_journal_mut().commit(
+                EventKind::TabSelected,
+                Some(id),
+                serde_json::json!({}),
+            );
             self.sync_grid_from_tab();
-            self.request_redraw();
+            self.request_ui_redraw();
         }
         Ok(index)
     }
@@ -427,9 +555,12 @@ impl ControlHost for UnixApp {
         let Some(tab) = self.tabs.get(position) else {
             return Err("can't find window".to_owned());
         };
-        self.active = Some(tab.id);
+        let id = tab.id;
+        self.active = Some(id);
+        self.event_journal_mut()
+            .commit(EventKind::TabSelected, Some(id), serde_json::json!({}));
         self.sync_grid_from_tab();
-        self.request_redraw();
+        self.request_ui_redraw();
         Ok(())
     }
 
@@ -438,9 +569,19 @@ impl ControlHost for UnixApp {
             return Err(format!("can't find window: @{id}"));
         };
 
+        let parent_id = self.tabs[position].parent_id;
+        let index = self.tabs[position].index;
+        let exit_code = self.tabs[position].exited;
+        let promoted_children = self
+            .tabs
+            .iter()
+            .filter(|tab| tab.parent_id == Some(id))
+            .map(|tab| tab.id)
+            .collect::<Vec<_>>();
+
         for tab in &mut self.tabs {
             if tab.parent_id == Some(id) {
-                tab.parent_id = None;
+                tab.parent_id = parent_id;
             }
         }
 
@@ -450,8 +591,22 @@ impl ControlHost for UnixApp {
         if self.active == Some(id) {
             self.active = self.tabs.first().map(|tab| tab.id);
             self.sync_grid_from_tab();
-            self.request_redraw();
+            self.request_ui_redraw();
         }
+
+        let active_id = self.active;
+        self.event_journal_mut().commit(
+            EventKind::TabClosed,
+            Some(id),
+            serde_json::json!({
+                "index": index,
+                "parent_id": parent_id,
+                "exit_code": exit_code,
+                "promoted_children": promoted_children,
+                "active_id": active_id,
+                "terminal_shutdown_complete": terminal_shutdown_complete,
+            }),
+        );
 
         Ok(terminal_shutdown_complete)
     }
@@ -501,6 +656,17 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                 if let Some(bytes) = input::key_event_to_bytes(&event) {
                     self.queue_pty_input(bytes);
                 }
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                self.last_cursor = (position.x, position.y);
+            }
+            WindowEvent::MouseInput {
+                state: ElementState::Pressed,
+                button: MouseButton::Left,
+                ..
+            } => {
+                let (x, y) = self.last_cursor;
+                self.handle_sidebar_click(x, y);
             }
             _ => {}
         }
