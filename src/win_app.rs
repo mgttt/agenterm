@@ -55,9 +55,9 @@ use windows_sys::Win32::{
 
 use crate::commands::{
     BACKSPACE_INPUT, has_option, last_positional, option_value, parse_new_command,
-    parse_tab_environment, positional_values, screenshot_output_path, supported_commands,
-    tmux_key_bytes,
+    parse_tab_environment, positional_values, screenshot_output_path,
 };
+use crate::control_dispatch::{ControlHost, dispatch_shared_command, render_format};
 use crate::control_contract::{
     Admission, ControlError, ControlReceipt, ControlRequest, ErrorCategory,
     EventPosition as ControlEventPosition, ReceiptOutcome, ReplayWindow, ResolvedTarget,
@@ -112,7 +112,6 @@ use std::{
 const APP_NAME: &str = "AgenTerm";
 const INITIAL_ROWS: u16 = 30;
 const INITIAL_COLS: u16 = 100;
-const SCROLLBACK_LINES: usize = crate::SCROLLBACK_LINES;
 const COMPOSER_HEADER_HEIGHT: i32 = 26;
 const COMPOSER_MARGIN: i32 = 6;
 const COMPOSER_CONTROL_GAP: i32 = 6;
@@ -169,7 +168,6 @@ const SYSTEM_MENU_TOGGLE_TABS_ID: usize = 0x1f20;
 const WINDOW_CLOSE_BUTTON_TEXT_FORMAT: u32 = DT_CENTER | DT_SINGLELINE | DT_VCENTER;
 const CLIPBOARD_UNICODE_TEXT: u32 = 13;
 const TERMINAL_PASTE_LIMIT_BYTES: usize = 256 * 1024;
-const CAPTURE_PUBLIC_MAX_BYTES: usize = 1024 * 1024;
 static PROXY_NONCE_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 fn new_proxy_confirmation_marker() -> Result<ProxyConfirmationMarker> {
@@ -182,13 +180,6 @@ fn new_proxy_confirmation_marker() -> Result<ProxyConfirmationMarker> {
     ProxyConfirmationMarker::from_nonce(&format!("{time:016x}{sequence:016x}"))
 }
 
-fn bounded_utf8_prefix(value: &str, maximum: usize) -> &str {
-    let mut take = maximum.min(value.len());
-    while take > 0 && !value.is_char_boundary(take) {
-        take -= 1;
-    }
-    &value[..take]
-}
 pub(crate) fn request_gui_wake(wake_window: isize, wake_signal: &WakeSignal) {
     if wake_signal.request() {
         unsafe {
@@ -1734,14 +1725,6 @@ impl AppState {
     fn tree_row_position(&self, row: usize) -> Option<usize> {
         let id = self.tree_rows().get(row)?.id;
         self.tabs.iter().position(|tab| tab.id == id)
-    }
-
-    fn tab_depth(&self, id: u64) -> usize {
-        self.all_tree_rows()
-            .iter()
-            .find(|row| row.id == id)
-            .map(|row| row.depth)
-            .unwrap_or(0)
     }
 
     fn set_tab_parent(&mut self, child_id: u64, parent_id: Option<u64>) -> Result<()> {
@@ -6370,7 +6353,99 @@ impl AppState {
         }
         response.with_receipt(receipt)
     }
+}
 
+impl ControlHost for AppState {
+    fn session_name(&self) -> &str {
+        &self.session_name
+    }
+
+    fn started_at_unix_secs(&self) -> u64 {
+        self.started_at
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|duration| duration.as_secs())
+            .unwrap_or_default()
+    }
+
+    fn tabs(&self) -> &[TerminalTab] {
+        &self.tabs
+    }
+
+    fn tabs_mut(&mut self) -> &mut Vec<TerminalTab> {
+        &mut self.tabs
+    }
+
+    fn active_id(&self) -> Option<u64> {
+        self.active
+    }
+
+    fn set_active_id(&mut self, id: Option<u64>) {
+        self.active = id;
+    }
+
+    fn request_shutdown(&mut self) {
+        self.close_requested = true;
+    }
+
+    fn before_destructive_ui(&mut self) {
+        self.finish_note_edit(false);
+        self.cancel_terminal_selection(true);
+    }
+
+    fn sync_composer_from_ui(&mut self) {
+        self.save_active_composer();
+    }
+
+    fn set_session_name(&mut self, name: String) {
+        self.session_name = name;
+    }
+
+    fn create_tab(
+        &mut self,
+        title: Option<String>,
+        command_line: Vec<String>,
+        tab_environment: Vec<(String, String)>,
+        select: bool,
+        parent_id: Option<u64>,
+    ) -> Result<u32, String> {
+        self.create_tab_with_parent(title, command_line, tab_environment, select, parent_id)
+            .map_err(|error| format!("{error:#}"))
+    }
+
+    fn select_tab_at(&mut self, position: usize) -> Result<(), String> {
+        if position >= self.tabs.len() {
+            return Err("can't find window".to_owned());
+        }
+        if self.proxy_edit_target.is_some() {
+            self.close_proxy_editor();
+        }
+        self.save_active_composer();
+        let id = self.tabs[position].id;
+        self.finish_note_edit(false);
+        self.cancel_terminal_selection(true);
+        self.active = Some(id);
+        self.load_active_composer();
+        self.event_journal
+            .commit(EventKind::TabSelected, Some(id), serde_json::json!({}));
+        self.reattach_window("select-window");
+        Ok(())
+    }
+
+    fn close_tab_id(&mut self, id: u64) -> Result<bool, String> {
+        Ok(self.close_tab(id))
+    }
+
+    fn adjacent_tab_position(&self, direction: i32) -> Option<usize> {
+        self.adjacent_position(direction)
+    }
+
+    fn resolve_parent_id(&self, target: &str) -> Result<Option<u64>, String> {
+        self.parent_id_from_target(target)
+            .map_err(|error| format!("{error:#}"))
+    }
+}
+
+impl AppState {
     fn execute_command(
         &mut self,
         args: &[String],
@@ -6379,6 +6454,9 @@ impl AppState {
         let Some(command) = args.first().map(String::as_str) else {
             return IpcResponse::failure("no command specified");
         };
+        if let Some(response) = dispatch_shared_command(self, args) {
+            return response;
+        }
         match command {
             "__show-no-activate" => {
                 self.show_window_no_activate("launcher-no-activate");
@@ -6423,43 +6501,6 @@ impl AppState {
                 }
                 self.reattach_window("new-session");
                 IpcResponse::success("")
-            }
-            "neww" | "new-window" => {
-                let (title, detached, child_command) = parse_new_command(args);
-                let tab_environment = match parse_tab_environment(args) {
-                    Ok(environment) => environment,
-                    Err(error) => return IpcResponse::failure(error),
-                };
-                let parent_id = match option_value(args, "--parent") {
-                    Some(target) => match self.parent_id_from_target(target) {
-                        Ok(parent_id) => parent_id,
-                        Err(error) => return IpcResponse::failure(format!("{error:#}")),
-                    },
-                    None => None,
-                };
-                match self.create_tab_with_parent(
-                    title,
-                    child_command,
-                    tab_environment,
-                    !detached,
-                    parent_id,
-                ) {
-                    Ok(index) => {
-                        let format = option_value(args, "-F").unwrap_or("#{window_index}");
-                        let tab = self
-                            .tabs
-                            .iter()
-                            .find(|tab| tab.index == index)
-                            .expect("newly created tab must remain present");
-                        IpcResponse::success(render_format(
-                            format,
-                            tab,
-                            &self.session_name,
-                            self.active == Some(tab.id),
-                        ))
-                    }
-                    Err(error) => IpcResponse::failure(format!("{error:#}")),
-                }
             }
             "new-agent" => {
                 let (title, detached, agent_arguments) = parse_new_command(args);
@@ -6514,95 +6555,6 @@ impl AppState {
                         IpcResponse::failure(format!("failed to start Codex agent tab: {error:#}"))
                     }
                 }
-            }
-            "ls" | "list-sessions" => IpcResponse::success(format!(
-                "{}: {} windows (created {}) (attached)",
-                self.session_name,
-                self.tabs.len(),
-                self.started_at
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .map(|duration| duration.as_secs())
-                    .unwrap_or_default()
-            )),
-            "has" | "has-session" => {
-                let requested = option_value(args, "-t");
-                if requested.is_none_or(|name| name == self.session_name) {
-                    IpcResponse::success("")
-                } else {
-                    IpcResponse::failure(format!(
-                        "can't find session: {}",
-                        requested.unwrap_or_default()
-                    ))
-                }
-            }
-            "lsw" | "list-windows" => {
-                let format = option_value(args, "-F").unwrap_or("#I:#W#{?window_active,*,}");
-                IpcResponse::success(
-                    self.tabs
-                        .iter()
-                        .map(|tab| {
-                            render_format(
-                                format,
-                                tab,
-                                &self.session_name,
-                                self.active == Some(tab.id),
-                            )
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n"),
-                )
-            }
-            "lsp" | "list-panes" => {
-                let format = option_value(args, "-F").unwrap_or(
-                    "#{pane_id}: [#{pane_width}x#{pane_height}] #{pane_current_command}",
-                );
-                let all = args.iter().any(|arg| arg == "-a");
-                let tabs: Vec<&TerminalTab> = if all {
-                    self.tabs.iter().collect()
-                } else {
-                    self.target_position(option_value(args, "-t"))
-                        .and_then(|position| self.tabs.get(position))
-                        .into_iter()
-                        .collect()
-                };
-                IpcResponse::success(
-                    tabs.into_iter()
-                        .map(|tab| {
-                            render_format(
-                                format,
-                                tab,
-                                &self.session_name,
-                                self.active == Some(tab.id),
-                            )
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n"),
-                )
-            }
-            "selectw" | "select-window" => {
-                let target = if args.iter().any(|arg| arg == "-n") {
-                    self.adjacent_position(1)
-                } else if args.iter().any(|arg| arg == "-p") {
-                    self.adjacent_position(-1)
-                } else {
-                    self.target_position(option_value(args, "-t"))
-                };
-                let Some(position) = target else {
-                    return IpcResponse::failure("can't find window");
-                };
-                if self.proxy_edit_target.is_some() {
-                    self.close_proxy_editor();
-                }
-                self.save_active_composer();
-                let id = self.tabs[position].id;
-                self.finish_note_edit(false);
-                self.cancel_terminal_selection(true);
-                self.active = Some(id);
-                self.load_active_composer();
-                self.event_journal
-                    .commit(EventKind::TabSelected, Some(id), serde_json::json!({}));
-                self.reattach_window("select-window");
-                IpcResponse::success("")
             }
             "next" | "next-window" => self.select_adjacent(1),
             "prev" | "previous-window" => self.select_adjacent(-1),
@@ -6767,67 +6719,6 @@ impl AppState {
                 unsafe { InvalidateRect(self.window, ptr::null(), 0) };
                 IpcResponse::success(self.ui_snapshot())
             }
-            "rename" | "rename-session" => {
-                let Some(name) = last_positional(args, &["-t"]) else {
-                    return IpcResponse::failure("usage: rename-session new-name");
-                };
-                self.session_name = name.to_owned();
-                IpcResponse::success("")
-            }
-            "killw" | "kill-window" => {
-                let Some(position) = self.target_position(option_value(args, "-t")) else {
-                    return IpcResponse::failure("can't find window");
-                };
-                let id = self.tabs[position].id;
-                if self.close_tab(id) {
-                    IpcResponse::success("")
-                } else {
-                    IpcResponse::typed_failure(
-                        "terminal was removed, but its workers did not finish bounded shutdown",
-                        "terminal_shutdown_incomplete",
-                        "internal",
-                        false,
-                    )
-                }
-            }
-            "send" | "send-keys" => {
-                let Some(position) = self.target_position(option_value(args, "-t")) else {
-                    return IpcResponse::typed_failure(
-                        "can't find pane",
-                        "operation_target_not_found",
-                        "not_found",
-                        false,
-                    );
-                };
-                if self.tabs[position].submission.is_pending() {
-                    return IpcResponse::typed_failure(
-                        "composer submission is pending; wait with \
-                         `wait-pane --submit-complete` before sending keys",
-                        "operation_conflict",
-                        "conflict",
-                        true,
-                    );
-                }
-                let literal = args.iter().any(|arg| arg == "-l");
-                for key in positional_values(args, &["-t"], &["-l", "-R", "-X"]) {
-                    let sent = if literal {
-                        self.tabs[position].send(key.as_bytes())
-                    } else if let Some(bytes) = tmux_key_bytes(key) {
-                        self.tabs[position].send(&bytes)
-                    } else {
-                        self.tabs[position].send(key.as_bytes())
-                    };
-                    if !sent {
-                        return IpcResponse::typed_failure(
-                            "terminal input was not accepted because the pane is no longer writable",
-                            "terminal_not_writable",
-                            "precondition",
-                            false,
-                        );
-                    }
-                }
-                IpcResponse::success("")
-            }
             "scroll-pane" => {
                 let Some(position) = self.target_position(option_value(args, "-t")) else {
                     return IpcResponse::failure("can't find pane");
@@ -6866,55 +6757,6 @@ impl AppState {
                         IpcResponse::success(offset.to_string())
                     }
                     Err(error) => IpcResponse::failure(format!("{error:#}")),
-                }
-            }
-            "capturep" | "capture-pane" => {
-                let Some(position) = self.target_position(option_value(args, "-t")) else {
-                    return IpcResponse::typed_failure(
-                        "can't find pane",
-                        "operation_target_not_found",
-                        "not_found",
-                        false,
-                    );
-                };
-                let requested_maximum = match option_value(args, "--max-bytes") {
-                    Some(value) => match value.parse::<usize>() {
-                        Ok(value) if (1..=CAPTURE_PUBLIC_MAX_BYTES).contains(&value) => Some(value),
-                        _ => {
-                            return IpcResponse::failure(format!(
-                                "capture-pane --max-bytes must be from 1 to {CAPTURE_PUBLIC_MAX_BYTES}"
-                            ));
-                        }
-                    },
-                    None => None,
-                };
-                let json = args.iter().any(|argument| argument == "--json");
-                let contents = if args.iter().any(|argument| argument == "--raw-escaped") {
-                    String::from_utf8_lossy(&self.tabs[position].raw_output.to_vec())
-                        .escape_debug()
-                        .to_string()
-                } else {
-                    self.tabs[position].parser.screen().contents()
-                };
-                let original_bytes = contents.len();
-                let maximum = requested_maximum.or(json.then_some(CAPTURE_PUBLIC_MAX_BYTES));
-                let text = maximum.map_or(contents.as_str(), |maximum| {
-                    bounded_utf8_prefix(&contents, maximum)
-                });
-                if json {
-                    IpcResponse::success(
-                        serde_json::to_string_pretty(&serde_json::json!({
-                            "tab_id": format!("@{}", self.tabs[position].id),
-                            "text": text,
-                            "bytes": text.len(),
-                            "original_bytes": original_bytes,
-                            "max_bytes": maximum,
-                            "truncated": text.len() < original_bytes,
-                        }))
-                        .unwrap_or_else(|_| "{}".to_owned()),
-                    )
-                } else {
-                    IpcResponse::success(text.to_owned())
                 }
             }
             "dump-cells" => {
@@ -7026,18 +6868,6 @@ impl AppState {
                     )
                 }
             }
-            "active-window" | "active-tab" => {
-                let Some(position) = self.active_position() else {
-                    return IpcResponse::failure("no active window");
-                };
-                let format = option_value(args, "-F").unwrap_or("#{window_id}:#{window_name}");
-                IpcResponse::success(render_format(
-                    format,
-                    &self.tabs[position],
-                    &self.session_name,
-                    true,
-                ))
-            }
             "ui-snapshot" => IpcResponse::success(self.ui_snapshot()),
             "read-events" => {
                 let Some(epoch) = option_value(args, "--epoch") else {
@@ -7074,9 +6904,6 @@ impl AppState {
                         false,
                     ),
                 }
-            }
-            "protocol-info" => {
-                IpcResponse::success(crate::client::protocol_info_json("running_host"))
             }
             "focus" => {
                 let surface = args.get(1).map(String::as_str).unwrap_or("terminal");
@@ -7536,65 +7363,6 @@ impl AppState {
                 }
                 IpcResponse::success("")
             }
-            "inspect" | "pane-snapshot" => {
-                self.save_active_composer();
-                let selected: Vec<&TerminalTab> = match option_value(args, "-t") {
-                    Some(target) => {
-                        let Some(position) = self.target_position(Some(target)) else {
-                            return IpcResponse::failure("can't find window");
-                        };
-                        vec![&self.tabs[position]]
-                    }
-                    None => self.tabs.iter().collect(),
-                };
-                let windows = selected
-                    .into_iter()
-                    .map(|tab| {
-                        let observation = tab.observation();
-                        serde_json::json!({
-                            "id": format!("@{}", tab.id),
-                            "index": tab.index,
-                            "parent_id": tab.parent_id.map(|id| format!("@{id}")),
-                            "depth": self.tab_depth(tab.id),
-                            "name": tab.title,
-                            "terminal_title": tab.parser.callbacks().title,
-                            "note": tab.note,
-                            "active": self.active == Some(tab.id),
-                            "dead": observation.exit_code.is_some(),
-                            "exit_code": observation.exit_code,
-                            "pid": observation.process_id,
-                            "command": tab.command_name,
-                            "environment_names": tab.environment_names,
-                            "rows": tab.last_size.0,
-                            "cols": tab.last_size.1,
-                            "input_bytes": observation.input_bytes,
-                            "input_writes": observation.input_writes,
-                            "submit_pending": observation.submit_pending,
-                            "reader_closed": observation.reader_closed,
-                            "parser_drained": observation.parser_drained,
-                            "finalized": observation.finalized,
-                            "scrollback_offset": tab.parser.screen().scrollback(),
-                            "output_bytes": observation.output_bytes,
-                            "composer": if tab.sensitive_composer.is_some() {
-                                "<redacted>"
-                            } else {
-                                tab.composer.as_str()
-                            },
-                            "composer_sensitive": tab.sensitive_composer.is_some(),
-                            "error": observation.error,
-                            "text": tab.parser.screen().contents(),
-                        })
-                    })
-                    .collect::<Vec<_>>();
-                match serde_json::to_string_pretty(&serde_json::json!({
-                    "session": self.session_name,
-                    "active_window_id": self.active.map(|id| format!("@{id}")),
-                    "windows": windows,
-                })) {
-                    Ok(json) => IpcResponse::success(json),
-                    Err(error) => IpcResponse::failure(error.to_string()),
-                }
-            }
             "screenshot" => {
                 unsafe {
                     InvalidateRect(self.window, ptr::null(), 0);
@@ -7635,19 +7403,6 @@ impl AppState {
                     Err(error) => IpcResponse::failure(format!("{error:#}")),
                 }
             }
-            "display" | "display-message" => {
-                let Some(position) = self.target_position(option_value(args, "-t")) else {
-                    return IpcResponse::failure("can't find pane");
-                };
-                let format = last_positional(args, &["-t"])
-                    .unwrap_or("#{session_name}:#{window_index}.#{pane_index}");
-                IpcResponse::success(render_format(
-                    format,
-                    &self.tabs[position],
-                    &self.session_name,
-                    self.active == Some(self.tabs[position].id),
-                ))
-            }
             "show" | "show-options" => IpcResponse::success(
                 [
                     format!("default-shell {}", env::var("COMSPEC").unwrap_or_default()),
@@ -7686,52 +7441,9 @@ impl AppState {
                 self.close_requested = true;
                 IpcResponse::success("")
             }
-            "lscm" | "list-commands" => IpcResponse::success(supported_commands()),
             "splitw" | "split-window" => IpcResponse::failure(
                 "split-window is not implemented yet; AgenTerm currently maps one ConPTY pane per tab",
             ),
-            "kill-session" | "kill-server" => {
-                if let Some(requested) = option_value(args, "-t")
-                    && requested != self.session_name
-                {
-                    return IpcResponse::failure(if command == "kill-session" {
-                        format!("can't find session: {requested}")
-                    } else {
-                        format!(
-                            "operation_target_not_found[server.kill]: \
-                             can't find session: {requested}"
-                        )
-                    });
-                }
-                let mut terminal_shutdown_complete = true;
-                self.finish_note_edit(false);
-                self.cancel_terminal_selection(true);
-                for tab in &mut self.tabs {
-                    terminal_shutdown_complete &= tab.close_process();
-                }
-                self.tabs.clear();
-                self.active = None;
-                self.event_journal.commit(
-                    EventKind::WorkspaceShutdown,
-                    None,
-                    serde_json::json!({
-                        "saved": false,
-                        "destroyed": true,
-                        "terminal_shutdown_complete": terminal_shutdown_complete,
-                    }),
-                );
-                self.close_requested = true;
-                if terminal_shutdown_complete {
-                    IpcResponse::success("")
-                } else {
-                    IpcResponse::typed_failure(
-                        "server shutdown began, but a terminal worker missed its bounded deadline",
-                        "terminal_shutdown_incomplete",
-                        "internal",
-                        false,
-                    )
-                }
-            }
             _ => IpcResponse::failure(format!("unknown command: {command}")),
         }
     }
@@ -7917,47 +7629,6 @@ fn create_terminal_font(window: HWND, config: &AppConfig) -> (HFONT, bool, Strin
     (font, owned, resolved)
 }
 
-fn render_format(format: &str, tab: &TerminalTab, session_name: &str, active: bool) -> String {
-    let dead = tab.exited.is_some();
-    format
-        .replace("#{?pane_dead,dead,}", if dead { "dead" } else { "" })
-        .replace("#{?window_active,*,}", if active { "*" } else { "" })
-        .replace("#{session_name}", session_name)
-        .replace("#{window_index}", &tab.index.to_string())
-        .replace("#{window_id}", &format!("@{}", tab.id))
-        .replace(
-            "#{tab_parent_id}",
-            &tab.parent_id
-                .map(|id| format!("@{id}"))
-                .unwrap_or_else(|| "root".to_owned()),
-        )
-        .replace("#{window_name}", &tab.title)
-        .replace("#{window_note}", &tab.note)
-        .replace("#{terminal_title}", &tab.parser.callbacks().title)
-        .replace("#{window_active}", if active { "1" } else { "0" })
-        .replace("#{pane_index}", "0")
-        .replace("#{pane_id}", &format!("%{}", tab.id))
-        .replace("#{pane_dead}", if dead { "1" } else { "0" })
-        .replace(
-            "#{pane_pid}",
-            &tab.process_id
-                .map(|pid| pid.to_string())
-                .unwrap_or_default(),
-        )
-        .replace("#{pane_current_command}", &tab.command_name)
-        .replace("#{pane_start_command}", &tab.command_name)
-        .replace("#{pane_input_bytes}", &tab.input_bytes.to_string())
-        .replace("#{pane_output_bytes}", &tab.output_bytes.to_string())
-        .replace("#{pane_error}", tab.error.as_deref().unwrap_or(""))
-        .replace("#{pane_width}", &tab.last_size.1.to_string())
-        .replace("#{pane_height}", &tab.last_size.0.to_string())
-        .replace("#{history_limit}", &SCROLLBACK_LINES.to_string())
-        .replace("#I", &tab.index.to_string())
-        .replace("#W", &tab.title)
-        .replace("#S", session_name)
-        .replace("#P", "0")
-}
-
 fn save_window_png(window: HWND, path: &std::path::Path, pane: Option<PixelRect>) -> Result<()> {
     let mut client: RECT = unsafe { mem::zeroed() };
     let mut outer: RECT = unsafe { mem::zeroed() };
@@ -8065,10 +7736,11 @@ fn save_window_png(window: HWND, path: &std::path::Path, pane: Option<PixelRect>
 mod tests {
     use super::{
         COMPOSER_TARGET_ROWS, EditShortcut, FocusSurface, IpcResponse, PixelRect, ThemeId,
-        bounded_utf8_prefix, composer_input_rect, edit_shortcut, effective_theme, gui_cli_guidance,
+        composer_input_rect, edit_shortcut, effective_theme, gui_cli_guidance,
         gui_handoff_succeeded, is_latched_navigation_repeat, normalize_terminal_paste,
         parse_gui_launch, surface_navigation, terminal_copy_shortcut,
     };
+    use crate::control_dispatch::bounded_utf8_prefix;
     use crate::client::run_wait_ui;
 
     #[test]
