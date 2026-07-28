@@ -10,10 +10,20 @@ pub(crate) const TABS_DEFAULT_WIDTH: i32 = 250;
 pub(crate) const TABS_MAX_WIDTH: i32 = 480;
 pub(crate) const TERMINAL_MIN_WIDTH: i32 = 320;
 pub(crate) const TABS_RESIZE_GRIP_WIDTH: i32 = 6;
+pub(crate) const SIDEBAR_TOOLBAR_HEIGHT: i32 = 46;
 
 const MAX_TREE_DEPTH: usize = 10;
 const NODE_Y_OFFSET: i32 = 13;
 const MIN_SCROLLBAR_THUMB_HEIGHT: i32 = 24;
+const SIDEBAR_TOOLBAR_DIVIDER_HEIGHT: i32 = 1;
+const SIDEBAR_TOOLBAR_HORIZONTAL_PADDING: i32 = 8;
+const SIDEBAR_TOOLBAR_BUTTON_GAP: i32 = 6;
+const SIDEBAR_TOOLBAR_BUTTON_HEIGHT: i32 = 34;
+const SIDEBAR_NEW_BUTTON_WIDTH: i32 = 66;
+const SIDEBAR_TABS_BUTTON_WIDTH: i32 = 52;
+const SIDEBAR_SETTINGS_BUTTON_WIDTH: i32 = 78;
+const SIDEBAR_COMPACT_NEW_BUTTON_WIDTH: i32 = 64;
+const SIDEBAR_COMPACT_ACTION_BUTTON_WIDTH: i32 = 36;
 const STATUS_TABS_WIDTH: i32 = 72;
 const STATUS_CWD_WIDTH: i32 = 260;
 const STATUS_CWD_MIN_WIDTH: i32 = 80;
@@ -69,12 +79,34 @@ pub(crate) struct StatusSegmentLayout {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SidebarToolbarMode {
+    Full,
+    Compact,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct SidebarToolbarLayout {
+    pub(crate) bounds: PixelRect,
+    pub(crate) divider: PixelRect,
+    pub(crate) mode: SidebarToolbarMode,
+    pub(crate) new_tab: PixelRect,
+    pub(crate) tabs: PixelRect,
+    pub(crate) settings: PixelRect,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct WorkspaceLayout {
     pub(crate) client: PixelRect,
     pub(crate) tabs_visible: bool,
     pub(crate) configured_tabs_width: i32,
     pub(crate) effective_tabs_width: i32,
     pub(crate) sidebar: PixelRect,
+    /// Tree-owned sidebar surface. It never extends underneath the resize grip
+    /// or into the host-owned action toolbar.
+    pub(crate) sidebar_tree: PixelRect,
+    /// Host-owned New/Tabs/Settings action surface. It is absent when Tabs are
+    /// hidden or the constrained sidebar cannot provide its minimum width.
+    pub(crate) sidebar_toolbar: Option<SidebarToolbarLayout>,
     pub(crate) resize_grip: Option<PixelRect>,
     pub(crate) terminal: PixelRect,
     pub(crate) composer: PixelRect,
@@ -133,6 +165,7 @@ pub(crate) fn workspace_layout(input: WorkspaceLayoutInput) -> WorkspaceLayout {
             rect(left, 0, effective_tabs_width.min(width), status_top)
         })
         .filter(|grip| grip.width() > 0);
+    let (sidebar_tree, sidebar_toolbar) = sidebar_regions(sidebar, resize_grip, input.tabs_visible);
 
     WorkspaceLayout {
         client,
@@ -140,12 +173,111 @@ pub(crate) fn workspace_layout(input: WorkspaceLayoutInput) -> WorkspaceLayout {
         configured_tabs_width,
         effective_tabs_width,
         sidebar,
+        sidebar_tree,
+        sidebar_toolbar,
         resize_grip,
         terminal,
         composer,
         status,
         status_segments: status_segment_layout(status, input.tabs_visible),
     }
+}
+
+fn sidebar_regions(
+    sidebar: PixelRect,
+    resize_grip: Option<PixelRect>,
+    tabs_visible: bool,
+) -> (PixelRect, Option<SidebarToolbarLayout>) {
+    let content_right = resize_grip
+        .map(|grip| grip.left)
+        .unwrap_or(sidebar.right)
+        .clamp(sidebar.left, sidebar.right);
+    let content = rect(sidebar.left, sidebar.top, content_right, sidebar.bottom);
+    if !tabs_visible
+        || sidebar.width() < TABS_MIN_WIDTH
+        || content.width() < compact_toolbar_required_width()
+        || content.height() < SIDEBAR_TOOLBAR_HEIGHT
+    {
+        return (content, None);
+    }
+
+    let toolbar = rect(
+        content.left,
+        content.bottom - SIDEBAR_TOOLBAR_HEIGHT,
+        content.right,
+        content.bottom,
+    );
+    let tree = rect(content.left, content.top, content.right, toolbar.top);
+    let divider = rect(
+        toolbar.left,
+        toolbar.top,
+        toolbar.right,
+        toolbar.top + SIDEBAR_TOOLBAR_DIVIDER_HEIGHT,
+    );
+    let mode = if toolbar.width() >= full_toolbar_required_width() {
+        SidebarToolbarMode::Full
+    } else {
+        SidebarToolbarMode::Compact
+    };
+    let (new_width, tabs_width, settings_width) = match mode {
+        SidebarToolbarMode::Full => (
+            SIDEBAR_NEW_BUTTON_WIDTH,
+            SIDEBAR_TABS_BUTTON_WIDTH,
+            SIDEBAR_SETTINGS_BUTTON_WIDTH,
+        ),
+        SidebarToolbarMode::Compact => (
+            SIDEBAR_COMPACT_NEW_BUTTON_WIDTH,
+            SIDEBAR_COMPACT_ACTION_BUTTON_WIDTH,
+            SIDEBAR_COMPACT_ACTION_BUTTON_WIDTH,
+        ),
+    };
+    let button_top = toolbar.top + (toolbar.height() - SIDEBAR_TOOLBAR_BUTTON_HEIGHT) / 2;
+    let button_bottom = button_top + SIDEBAR_TOOLBAR_BUTTON_HEIGHT;
+    let new_tab = rect(
+        toolbar.left + SIDEBAR_TOOLBAR_HORIZONTAL_PADDING,
+        button_top,
+        toolbar.left + SIDEBAR_TOOLBAR_HORIZONTAL_PADDING + new_width,
+        button_bottom,
+    );
+    let settings = rect(
+        toolbar.right - SIDEBAR_TOOLBAR_HORIZONTAL_PADDING - settings_width,
+        button_top,
+        toolbar.right - SIDEBAR_TOOLBAR_HORIZONTAL_PADDING,
+        button_bottom,
+    );
+    let tabs = rect(
+        settings.left - SIDEBAR_TOOLBAR_BUTTON_GAP - tabs_width,
+        button_top,
+        settings.left - SIDEBAR_TOOLBAR_BUTTON_GAP,
+        button_bottom,
+    );
+
+    (
+        tree,
+        Some(SidebarToolbarLayout {
+            bounds: toolbar,
+            divider,
+            mode,
+            new_tab,
+            tabs,
+            settings,
+        }),
+    )
+}
+
+const fn full_toolbar_required_width() -> i32 {
+    SIDEBAR_TOOLBAR_HORIZONTAL_PADDING * 2
+        + SIDEBAR_NEW_BUTTON_WIDTH
+        + SIDEBAR_TABS_BUTTON_WIDTH
+        + SIDEBAR_SETTINGS_BUTTON_WIDTH
+        + SIDEBAR_TOOLBAR_BUTTON_GAP * 2
+}
+
+const fn compact_toolbar_required_width() -> i32 {
+    SIDEBAR_TOOLBAR_HORIZONTAL_PADDING * 2
+        + SIDEBAR_COMPACT_NEW_BUTTON_WIDTH
+        + SIDEBAR_COMPACT_ACTION_BUTTON_WIDTH * 2
+        + SIDEBAR_TOOLBAR_BUTTON_GAP * 2
 }
 
 fn status_segment_layout(status: PixelRect, tabs_visible: bool) -> StatusSegmentLayout {
@@ -341,6 +473,34 @@ mod tests {
         assert!(rect.bottom <= client.bottom, "{rect:?}");
     }
 
+    fn assert_toolbar_valid(layout: WorkspaceLayout, expected_mode: SidebarToolbarMode) {
+        let toolbar = layout
+            .sidebar_toolbar
+            .expect("sidebar toolbar should be present");
+        let grip = layout.resize_grip.expect("resize grip should be present");
+
+        assert_eq!(toolbar.mode, expected_mode);
+        assert_eq!(layout.sidebar_tree.bottom, toolbar.bounds.top);
+        assert_eq!(toolbar.bounds.right, grip.left);
+        assert_eq!(toolbar.divider.top, toolbar.bounds.top);
+        assert_eq!(
+            toolbar.divider.bottom,
+            toolbar.bounds.top + SIDEBAR_TOOLBAR_DIVIDER_HEIGHT
+        );
+        for action in [toolbar.new_tab, toolbar.tabs, toolbar.settings] {
+            assert_valid_rect(action, toolbar.bounds);
+            assert_eq!(action.height(), SIDEBAR_TOOLBAR_BUTTON_HEIGHT);
+            assert!(action.width() > 0);
+            assert!(action.right <= grip.left);
+        }
+        assert!(toolbar.new_tab.right <= toolbar.tabs.left);
+        assert_eq!(
+            toolbar.tabs.right + SIDEBAR_TOOLBAR_BUTTON_GAP,
+            toolbar.settings.left
+        );
+        assert!(toolbar.new_tab.bottom <= layout.status.top);
+    }
+
     #[test]
     fn configured_tabs_width_has_stable_proposed_bounds_and_reset() {
         assert_eq!(clamp_configured_tabs_width(-1), TABS_MIN_WIDTH);
@@ -371,6 +531,8 @@ mod tests {
         assert_eq!(geometry.status_segments.cwd.width(), STATUS_CWD_WIDTH);
         assert_eq!(geometry.status_segments.proxy.width(), STATUS_PROXY_WIDTH);
         assert_eq!(geometry.status_segments.provider.width(), 628);
+        assert_eq!(geometry.sidebar_tree, rect(0, 0, 244, 628));
+        assert_toolbar_valid(geometry, SidebarToolbarMode::Full);
     }
 
     #[test]
@@ -384,6 +546,8 @@ mod tests {
         assert_eq!(geometry.terminal.left, 0);
         assert_eq!(geometry.composer.left, 0);
         assert_eq!(geometry.resize_grip, None);
+        assert_eq!(geometry.sidebar_tree, geometry.sidebar);
+        assert_eq!(geometry.sidebar_toolbar, None);
         assert_eq!(
             geometry.status_segments.tabs_recovery,
             Some(rect(0, 674, STATUS_TABS_WIDTH, 700))
@@ -406,6 +570,40 @@ mod tests {
         assert_eq!(very_narrow.terminal.width(), 200);
         assert_eq!(very_narrow.composer.height(), 54);
         assert_eq!(very_narrow.terminal.height(), 0);
+    }
+
+    #[test]
+    fn sidebar_toolbar_uses_compact_and_full_modes_without_moving_workspace_surfaces() {
+        let compact = layout(500, 300, true, 250);
+        assert_eq!(compact.effective_tabs_width, 180);
+        assert_eq!(compact.terminal, rect(180, 0, 500, 196));
+        assert_eq!(compact.composer, rect(180, 196, 500, 274));
+        assert_eq!(compact.status, rect(0, 274, 500, 300));
+        assert_toolbar_valid(compact, SidebarToolbarMode::Compact);
+
+        let default = layout(1000, 700, true, 250);
+        assert_eq!(default.effective_tabs_width, 250);
+        assert_toolbar_valid(default, SidebarToolbarMode::Full);
+
+        let wide = layout(1000, 700, true, 480);
+        assert_eq!(wide.effective_tabs_width, 480);
+        assert_eq!(wide.terminal, rect(480, 0, 1000, 596));
+        assert_eq!(wide.composer, rect(480, 596, 1000, 674));
+        assert_eq!(wide.status, rect(0, 674, 1000, 700));
+        assert_toolbar_valid(wide, SidebarToolbarMode::Full);
+    }
+
+    #[test]
+    fn constrained_sidebar_keeps_tree_bounded_and_omits_unusable_toolbar() {
+        let narrow = layout(400, 300, true, 250);
+
+        assert_eq!(narrow.effective_tabs_width, 80);
+        assert_eq!(narrow.resize_grip, Some(rect(74, 0, 80, 274)));
+        assert_eq!(narrow.sidebar_tree, rect(0, 0, 74, 274));
+        assert_eq!(narrow.sidebar_toolbar, None);
+        assert_eq!(narrow.terminal, rect(80, 0, 400, 196));
+        assert_eq!(narrow.composer, rect(80, 196, 400, 274));
+        assert_eq!(narrow.status, rect(0, 274, 400, 300));
     }
 
     #[test]
@@ -450,6 +648,7 @@ mod tests {
             let geometry = layout(width, height, visible, configured);
             for candidate in [
                 geometry.sidebar,
+                geometry.sidebar_tree,
                 geometry.terminal,
                 geometry.composer,
                 geometry.status,
@@ -461,6 +660,22 @@ mod tests {
             }
             if let Some(candidate) = geometry.resize_grip {
                 assert_valid_rect(candidate, geometry.client);
+            }
+            if let Some(toolbar) = geometry.sidebar_toolbar {
+                for candidate in [
+                    toolbar.bounds,
+                    toolbar.divider,
+                    toolbar.new_tab,
+                    toolbar.tabs,
+                    toolbar.settings,
+                ] {
+                    assert_valid_rect(candidate, geometry.client);
+                }
+                let grip = geometry.resize_grip.expect("toolbar requires resize grip");
+                assert!(toolbar.bounds.right <= grip.left);
+                assert!(geometry.sidebar_tree.bottom <= toolbar.bounds.top);
+                assert!(toolbar.new_tab.right <= toolbar.tabs.left);
+                assert!(toolbar.tabs.right <= toolbar.settings.left);
             }
             if let Some(candidate) = geometry.status_segments.tabs_recovery {
                 assert_valid_rect(candidate, geometry.client);
