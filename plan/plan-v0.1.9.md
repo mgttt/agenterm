@@ -42,8 +42,9 @@ Runtime 做实，MCP 与 Agent 层可以复用已经经过文件、进程、网�
 
 > 界面简单实用，软件稳定可靠，编程接口丰富，并为扩展保留足够空间。
 
-这一轮主要增强 CLI/runtime，不给普通 GUI 堆新面板。运行时对标
-Node.js/Bun 的是“本地自动化用途和组合能力”，不是 JavaScript 语法、
+这一轮主要增强 CLI/runtime，不给普通 GUI 堆新面板。Rust std 是首要的
+命名、模块和对象心智参照，但不复制 Rust 语言/类型系统；Node.js/Bun
+用于检查“本地自动化用途和组合能力”覆盖，不追求 JavaScript 语法、
 Node API、npm 或 Bun 二进制兼容。
 
 横向比较只用于发现问题域和能力缺口，不继承历史接口形状。AgenTerm

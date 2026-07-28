@@ -1,10 +1,13 @@
 # AgenTerm Script Runtime 规范
 
-状态：首版讨论稿  
-目标版本：v0.1.9  
+状态：首版讨论稿
+
+目标版本：v0.1.9
+
 规范语言：中文；关键字 `MUST`、`SHOULD`、`MAY` 具有约束意义
 
-产品所有者：[Rust host + Rhai scripting PRD](../prd/PRD_02_10_rhai_scripting.md)  
+产品所有者：[Rust host + Rhai scripting PRD](../prd/PRD_02_10_rhai_scripting.md)
+
 执行计划：[AgenTerm v0.1.9 公开计划](../plan/plan-v0.1.9.md)
 
 本文定义 `agenterm-script.exe` 面向脚本作者、宿主实现者、测试工具和未来
