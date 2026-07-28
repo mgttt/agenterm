@@ -392,6 +392,10 @@ pub(crate) trait ControlHost {
     fn set_active_id(&mut self, id: Option<u64>);
     fn request_shutdown(&mut self);
 
+    fn ui_bridge_facts(&self) -> crate::ui_bridge::UiBridgeFacts {
+        crate::ui_bridge::current_facts()
+    }
+
     /// Win: finish note edit / cancel selection; Unix: no-op default.
     fn before_destructive_ui(&mut self) {}
 
@@ -870,9 +874,12 @@ pub(crate) fn dispatch_shared_command(
     let command = command_name(args)?;
 
     match command {
-        "protocol-info" => Some(IpcResponse::success(crate::client::protocol_info_json(
-            "running_host",
-        ))),
+        "protocol-info" => Some(IpcResponse::success(
+            crate::client::protocol_info_json_with_ui_bridge(
+                "running_host",
+                host.ui_bridge_facts(),
+            ),
+        )),
         "ui-hello" => {
             let Some(minimum) =
                 option_value(args, "--minimum").and_then(|value| value.parse::<u32>().ok())

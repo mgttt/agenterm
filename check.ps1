@@ -80,6 +80,7 @@ try {
     Assert-AgenTermQualificationDeclarations -Context $qualification `
         -SuiteScripts @{
             'cli-smoke' = '.\tests\cli_smoke.ps1'
+            'server-smoke' = '.\tests\server_smoke.ps1'
             'fleet-smoke' = '.\tests\fleet_smoke.ps1'
             'script-smoke' = '.\tests\script_smoke.ps1'
             'theme-smoke' = '.\tests\theme_smoke.ps1'
@@ -279,6 +280,10 @@ try {
             }
             Invoke-Checked -Id 'cli-smoke' -Label 'CLI smoke test' {
                 & '.\tests\cli_smoke.ps1'
+            }
+            Invoke-Checked -Id 'server-smoke' `
+                -Label 'headless server authority smoke test' {
+                & '.\tests\server_smoke.ps1'
             }
             Invoke-Checked -Id 'fleet-smoke' -Label 'AI fleet smoke test' {
                 if (-not $IncludeStress) {

@@ -121,6 +121,7 @@ $registeredEvidence = [Collections.Generic.HashSet[string]]::new(
 )
 foreach ($suite in @(
     'cli_smoke.ps1'
+    'server_smoke.ps1'
     'fleet_smoke.ps1'
     'script_smoke.ps1'
     'theme_smoke.ps1'

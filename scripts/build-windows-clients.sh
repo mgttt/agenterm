@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build all four Windows binaries via cargo-xwin (x86_64 default, ARCH=arm64 for ARM64).
+# Build all Windows binaries via cargo-xwin (x86_64 default, ARCH=arm64 for ARM64).
 #
 # Rust toolchain targets:
 #   x86_64 (default): x86_64-pc-windows-msvc (pinned in rust-toolchain.toml)
@@ -25,7 +25,7 @@ esac
 
 cd "$ROOT"
 
-BINS=(agenterm agenterm-cli agenterm-mux agenterm-script)
+BINS=(agenterm agenterm-server agenterm-cli agenterm-mux agenterm-script)
 ARGS=(xwin build --target "$TARGET")
 if [[ $PROFILE == release ]]; then
   ARGS+=(--release)

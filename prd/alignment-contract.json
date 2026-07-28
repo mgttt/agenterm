@@ -253,6 +253,14 @@
       "evidence_ids": ["cli.ui-follow"]
     },
     {
+      "id": "development.headless-server-authority",
+      "kind": "architecture",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "the first internal `agenterm-server.exe` is a real headless process that owns workspace persistence, tab/tree selection, ConPTY children, parser/scrollback and the event journal; public server smoke proves hello/bootstrap/delta, terminal output, stable IDs, persistence, graceful shutdown and zero user-facing HWND",
+      "evidence_ids": ["server.headless-authority"]
+    },
+    {
       "id": "control.observable-events",
       "kind": "behavior",
       "status": "shipped",

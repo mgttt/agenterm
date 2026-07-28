@@ -48,6 +48,8 @@ mod unix_app;
 
 #[cfg(windows)]
 mod script_audit;
+#[cfg(windows)]
+mod server_app;
 #[cfg(any(windows, unix))]
 mod terminal_runtime;
 #[cfg(windows)]
@@ -59,6 +61,9 @@ pub use client::{run_cli_entry, run_mux_entry, run_script_entry_with_args};
 
 #[cfg(windows)]
 pub use win_app::run_gui_entry;
+
+#[cfg(windows)]
+pub use server_app::run_server_entry;
 
 #[cfg(unix)]
 pub use unix_app::run_gui_entry;

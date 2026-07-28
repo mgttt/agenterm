@@ -257,6 +257,7 @@ jobs:
           name: release-windows-x86_64
           path: |
             dist/agenterm.exe
+            dist/agenterm-server.exe
             dist/agenterm-cli.exe
             dist/agenterm-mux.exe
             dist/agenterm-script.exe

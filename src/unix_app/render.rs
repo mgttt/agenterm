@@ -414,7 +414,15 @@ pub(super) fn render_frame(
     if let Some(scrollbar) = content.scrollbar {
         render_scrollbar(buffer, stride, palette, scrollbar);
     }
-    render_composer(buffer, stride, width, height, palette, content.sidebar_width, content.composer);
+    render_composer(
+        buffer,
+        stride,
+        width,
+        height,
+        palette,
+        content.sidebar_width,
+        content.composer,
+    );
     if let Some(status) = content.status {
         render_status_bar(buffer, stride, width, height, palette, status);
     }

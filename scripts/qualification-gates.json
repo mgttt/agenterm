@@ -107,6 +107,12 @@
       ]
     },
     {
+      "id": "server-smoke",
+      "evidence": [
+        "server.headless-authority"
+      ]
+    },
+    {
       "id": "fleet-smoke",
       "evidence": [
         "fleet.codex-launcher",

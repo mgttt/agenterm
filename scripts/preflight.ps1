@@ -216,8 +216,15 @@ Invoke-PreflightGate -Id 'artifact-manifest' -Check {
         Join-Path $repo 'scripts\artifacts.json'
     ) -Raw | ConvertFrom-Json
     $names = @($manifest.executables.name | ForEach-Object { [string]$_ })
-    if ($manifest.schema_version -ne 2 -or $names.Count -ne 4 -or
-        @($names | Sort-Object -Unique).Count -ne 4 -or
+    $expectedNames = @(
+        'agenterm.exe'
+        'agenterm-server.exe'
+        'agenterm-cli.exe'
+        'agenterm-mux.exe'
+        'agenterm-script.exe'
+    )
+    if ($manifest.schema_version -ne 2 -or
+        (Compare-Object $expectedNames $names) -or
         @($names | Where-Object {
             $_ -notmatch '^agenterm(?:-[a-z]+)?\.exe$'
         }).Count -ne 0 -or

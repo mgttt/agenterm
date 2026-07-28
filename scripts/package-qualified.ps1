@@ -108,8 +108,11 @@ $artifactSpec = Get-Content -LiteralPath $artifactManifestPath -Raw |
 $artifactNames = @($artifactSpec.executables | ForEach-Object {
     [string]$_.name
 })
-if ($artifactNames.Count -ne 4) {
-    throw 'Package qualification requires exactly four executable artifacts.'
+if ($artifactNames.Count -eq 0) {
+    throw 'Package qualification requires at least one executable artifact.'
+}
+if (@($artifactNames | Sort-Object -Unique).Count -ne $artifactNames.Count) {
+    throw 'Package qualification artifact names must be unique.'
 }
 $receiptExecutables = @($receipt.provenance.executables)
 Compare-PackageNames -Expected $artifactNames `

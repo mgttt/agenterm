@@ -28,6 +28,8 @@ native automation client, and a deliberately bounded tmux/RMUX frontend.
 - `agenterm-script.exe` is the public Rhai CLI for local automation, pure
   computation, observable Fleet tools, and versioned named tasks without
   linking the scripting engine into the GUI.
+- An internal, non-default `agenterm-server.exe` now proves the headless
+  workspace/PTY/parser/event authority required for replaceable GUI work.
 - `new-agent` launches Codex in a named fleet tab with stable AgenTerm context.
 - Tab-scoped environment and proxy values apply only to the child process and
   are not written to the persistent workspace.
@@ -49,11 +51,13 @@ The default build is an incremental development build. Use
 uses parallel code generation, and retains incremental state. Use
 `.\build.bat release` only for a distributable build; it applies the
 size-focused profile, stages the finished artifacts in `dist/`, and then clears
-Cargo's `target/` build cache. All modes produce four ignored executables plus
+Cargo's `target/` build cache. All modes produce five ignored executables plus
 build metadata under `dist/`:
 
 - `dist/agenterm.exe` — GUI application; double-clicking does not create a
   temporary console window.
+- `dist/agenterm-server.exe` — internal headless workspace, PTY, parser, and
+  event authority; not yet the default GUI backend.
 - `dist/agenterm-cli.exe` — full native observation and automation client.
 - `dist/agenterm-mux.exe` — tmux/RMUX compatibility frontend over the same IPC
   server.

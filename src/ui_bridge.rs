@@ -113,6 +113,13 @@ pub const fn current_facts() -> UiBridgeFacts {
     }
 }
 
+pub const fn headless_server_facts() -> UiBridgeFacts {
+    let mut facts = current_facts();
+    facts.ownership_mode = UiOwnershipMode::SplitServerClient;
+    facts.server_executable = "agenterm-server.exe";
+    facts
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct UiHelloRequest {
     pub schema_version: u32,
@@ -657,6 +664,17 @@ mod tests {
         assert_eq!(facts.hard_limits.bootstrap_bytes, UI_BOOTSTRAP_MAX_BYTES);
         assert_eq!(facts.hard_limits.delta_bytes, UI_DELTA_MAX_BYTES);
         assert_eq!(facts.hard_limits.delta_events, UI_DELTA_MAX_EVENTS);
+    }
+
+    #[test]
+    fn headless_server_facts_name_the_actual_authority_without_claiming_a_client() {
+        let facts = headless_server_facts();
+        assert_eq!(facts.ownership_mode, UiOwnershipMode::SplitServerClient);
+        assert_eq!(facts.server_executable, "agenterm-server.exe");
+        assert!(!facts.replaceable_ui);
+        assert!(!facts.reconnect);
+        assert!(facts.bootstrap_snapshot);
+        assert!(facts.ordered_deltas);
     }
 
     #[test]

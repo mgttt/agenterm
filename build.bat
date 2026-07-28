@@ -99,6 +99,7 @@ if /i "%PROFILE%"=="release" (
 
 echo.
 echo Built:    %DIST_DIR%\agenterm.exe [%PROFILE%]
+echo Server:   %DIST_DIR%\agenterm-server.exe
 echo CLI:      %DIST_DIR%\agenterm-cli.exe
 echo Mux:      %DIST_DIR%\agenterm-mux.exe
 echo Script:   %DIST_DIR%\agenterm-script.exe

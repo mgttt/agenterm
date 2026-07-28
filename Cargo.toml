@@ -23,6 +23,10 @@ path = "src/bin/agenterm-mux.rs"
 name = "agenterm-script"
 path = "src/bin/agenterm-script.rs"
 
+[[bin]]
+name = "agenterm-server"
+path = "src/bin/agenterm-server.rs"
+
 [dependencies]
 anyhow = "1"
 png = "0.17"

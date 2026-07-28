@@ -3137,6 +3137,13 @@ fn print_mux_commands() {
 }
 
 pub(crate) fn protocol_info_json(identity_scope: &str) -> String {
+    protocol_info_json_with_ui_bridge(identity_scope, ui_bridge::current_facts())
+}
+
+pub(crate) fn protocol_info_json_with_ui_bridge(
+    identity_scope: &str,
+    ui_bridge_facts: ui_bridge::UiBridgeFacts,
+) -> String {
     let build_identity = BuildIdentity::current();
     serde_json::to_string_pretty(&serde_json::json!({
         "protocol_version": 1,
@@ -3147,7 +3154,7 @@ pub(crate) fn protocol_info_json(identity_scope: &str) -> String {
         "build_identity": build_identity,
         "build_identity_complete": build_identity.is_complete(),
         "upgrade_identity": current_upgrade_identity(),
-        "ui_bridge": ui_bridge::current_facts(),
+        "ui_bridge": ui_bridge_facts,
         "control_contract": {
             "schema_version": crate::control_contract::CONTROL_CONTRACT_SCHEMA_VERSION,
             "request_dedupe": true,

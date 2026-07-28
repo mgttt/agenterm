@@ -74,8 +74,10 @@ function Assert-AgenTermQualificationDeclarations {
     )
 
     foreach ($gateId in $SuiteScripts.Keys) {
-        $gate = @($Context.Manifest.required_gates) |
-            Where-Object { $_.id -eq $gateId }
+        $gate = @(
+            $Context.Manifest.required_gates |
+                Where-Object -Property id -CEQ -Value $gateId
+        )
         if ($gate.Count -ne 1) {
             throw "Evidence suite references undeclared qualification gate: $gateId"
         }
@@ -106,8 +108,10 @@ function Add-AgenTermQualificationResult {
     if ($Context.Results.Contains($GateId)) {
         throw "Qualification gate was recorded more than once: $GateId"
     }
-    $declaredGate = @($Context.Manifest.required_gates) |
-        Where-Object { $_.id -eq $GateId }
+    $declaredGate = @(
+        $Context.Manifest.required_gates |
+            Where-Object -Property id -CEQ -Value $GateId
+    )
     if ($declaredGate.Count -ne 1) {
         throw "Qualification result references undeclared gate: $GateId"
     }
@@ -194,8 +198,12 @@ function Get-AgenTermQualificationProvenance {
     $artifactSpec = Get-Content -LiteralPath $ArtifactManifestPath -Raw |
         ConvertFrom-Json
     $expectedNames = @($artifactSpec.executables.name)
-    if ($expectedNames.Count -ne 4) {
-        throw 'Qualification requires exactly four staged executables.'
+    if ($expectedNames.Count -eq 0) {
+        throw 'Qualification requires at least one staged executable.'
+    }
+    if (@($expectedNames | Sort-Object -Unique).Count -ne
+        $expectedNames.Count) {
+        throw 'Qualification executable names must be unique.'
     }
     $artifactRecords = @(
         foreach ($name in $expectedNames) {

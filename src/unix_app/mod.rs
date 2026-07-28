@@ -48,10 +48,10 @@ use crate::{
 
 use render::{
     CELL_HEIGHT, CELL_WIDTH, COMPOSER_HEIGHT, ComposerView, ConfirmCloseHit, ConfirmCloseView,
-    FrameContent, SettingsHit, SettingsModalView, SidebarTabRow, SidebarToolbarView, StatusBarView,
-    TerminalGrid, TerminalPaint, ToolbarHit, WindowCloseHit, WindowCloseView, effective_palette,
-    grid_dimensions_for_pixels, render_frame, scrollbar_view_from_geometry, sidebar_row_at_y,
-    STATUS_HEIGHT,
+    FrameContent, STATUS_HEIGHT, SettingsHit, SettingsModalView, SidebarTabRow, SidebarToolbarView,
+    StatusBarView, TerminalGrid, TerminalPaint, ToolbarHit, WindowCloseHit, WindowCloseView,
+    effective_palette, grid_dimensions_for_pixels, render_frame, scrollbar_view_from_geometry,
+    sidebar_row_at_y,
 };
 
 use layout::{
@@ -487,9 +487,7 @@ impl UnixApp {
     }
 
     fn composer_region_contains(&self, x: f64, y: f64) -> bool {
-        self.layout()
-            .composer
-            .contains(x as i32, y as i32)
+        self.layout().composer.contains(x as i32, y as i32)
     }
 
     fn modal_surface_active(&self) -> bool {
@@ -578,8 +576,7 @@ impl UnixApp {
             })
             .or_else(|| self.active_position())
             .ok_or_else(|| "can't find tab".to_owned())?;
-        let path = requested_path
-            .unwrap_or_else(|| self.composer_buffer.trim().to_owned());
+        let path = requested_path.unwrap_or_else(|| self.composer_buffer.trim().to_owned());
         validate_path(&path).map_err(|error| error.to_string())?;
         let shell = ShellKind::from_program(&self.tabs[position].command_name);
         let command = cwd_command(shell, &path).map_err(|error| error.to_string())?;
@@ -635,9 +632,7 @@ impl UnixApp {
         let shell = ShellKind::from_program(&self.tabs[position].command_name);
         let command = cwd_command(shell, &requested_path).map_err(|error| error.to_string())?;
         if !self.tabs[position].submit(&command) {
-            return Err(
-                "terminal is unavailable or already has a pending submission".to_owned(),
-            );
+            return Err("terminal is unavailable or already has a pending submission".to_owned());
         }
         let id = self.tabs[position].id;
         self.tabs[position]
@@ -1173,7 +1168,9 @@ impl UnixApp {
         if self.handle_status_click(x as i32, y as i32) {
             return;
         }
-        if layout.resize_grip.is_some_and(|grip| grip.contains(x as i32, y as i32))
+        if layout
+            .resize_grip
+            .is_some_and(|grip| grip.contains(x as i32, y as i32))
             && !self.modal_surface_active()
         {
             self.begin_tabs_resize();
@@ -1858,13 +1855,12 @@ impl UnixApp {
                             }
                         }
                         "cwd-send-now" => match option_value(args, "--path") {
-                            Some(path) => match self.send_cwd_now(
-                                option_value(args, "-t"),
-                                path.to_owned(),
-                            ) {
-                                Ok(()) => None,
-                                Err(error) => Some(IpcResponse::failure(error)),
-                            },
+                            Some(path) => {
+                                match self.send_cwd_now(option_value(args, "-t"), path.to_owned()) {
+                                    Ok(()) => None,
+                                    Err(error) => Some(IpcResponse::failure(error)),
+                                }
+                            }
                             None => Some(IpcResponse::failure("cwd-send-now requires --path")),
                         },
                         other => Some(IpcResponse::failure(format!("unknown UI action: {other}"))),

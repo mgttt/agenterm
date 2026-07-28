@@ -1609,7 +1609,10 @@ S1  [x] current combined server 已能从同一
 S2  [~] `ui-hello`、`ui-bootstrap`、有界 `ui-deltas` polling 已通过公共
         loopback IPC 与黑盒 snapshot-follow/restart/gap 证据；专用
         subscription transport 与 GUI consumer/reconnect 进入 S4
-S3  build internal headless agenterm-server.exe
+S3  [~] internal `agenterm-server.exe` 已能无 HWND 地持有 workspace、
+        tab/tree、真实 ConPTY、parser/scrollback 和 event journal，并通过公共
+        hello/bootstrap/delta/PTY 黑盒；operation replay/receipt、完整命令面
+        与默认 authority 切换待补
 S4  agenterm.exe becomes replaceable client; reconnect and interactive lease
 S5  same-server GUI upgrade + rollback black-box
 S6  remove combined-process handoff only after parity gates
