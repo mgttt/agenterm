@@ -37,6 +37,30 @@ v0.1.10 必须完成 Rhai 对仓库自有 PowerShell 自动化的替代，这不
 - MCP 是本轮并行产品线，但不得以它为理由降低 PowerShell 归零完成门；
 - 若版本时间受限，先缩减 MCP 的非核心表面，不缩减 Rhai 自举与归零目标。
 
+### “替代 PowerShell”的范围边界
+
+这里的“替代”是一个可测量的仓库与交付合同，不是对 Windows 平台能力的
+禁用：
+
+```text
+必须归零
+├─ 受 Git 跟踪的仓库自有 .ps1
+├─ build / lint / test / qualification / package / release 中的 PowerShell 调用
+├─ Rhai、batch、CI YAML 中隐藏或转写的 PowerShell 业务逻辑
+└─ 仅为回退而保留在活动树中的 PowerShell 影子实现
+
+允许保留
+├─ 用户在 AgenTerm 终端里主动运行 powershell.exe / pwsh.exe
+├─ 对 PowerShell shell 行为的终端兼容性测试（由 Rhai harness 驱动）
+├─ Git 历史中的旧实现
+└─ 不承载产品规则的最薄平台 bootstrap；Windows 默认入口为 .bat，非 .ps1
+```
+
+因此进度不按“已经写出多少 `.rhai` 文件”计算，而只按完成闭环的迁移项
+计算：Rhai parity 证据通过、全部 caller 已切换、对应 `.ps1` 已删除、漂移
+门已覆盖。最终同时检查静态仓库清单和动态进程树，防止“文件归零、运行时
+仍偷偷启动 PowerShell”的假完成。
+
 ## 〇、产品判断
 
 AgenTerm 不需要通过堆叠可见按钮与竞品竞争。v0.1.10 延续以下准绳：

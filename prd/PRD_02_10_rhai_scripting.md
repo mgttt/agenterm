@@ -384,8 +384,8 @@ Migration ledger:
 - [ ] v0.1.10 completes the replacement of repository-owned PowerShell
   automation; this is a release completion gate rather than a best-effort
   migration track.
-- [ ] the dated 2026-07-29 baseline is 41 tracked `.ps1` files: 3 at the
-  repository root, 17 under `scripts/`, 19 under `tests/`, and 2 retained in
+- [ ] the dated 2026-07-29 rolling baseline is 43 tracked `.ps1` files: 3 at
+  the repository root, 17 under `scripts/`, 21 under `tests/`, and 2 retained in
   `scripts/archive/powershell/`.
 - [ ] completion requires `git ls-files '*.ps1'` to return no files. Tests,
   helpers, and archived implementations are not exceptions; Git history is the
@@ -404,6 +404,16 @@ Migration ledger:
   modules. Rhai scripts must never invoke PowerShell as an escape hatch.
 - [ ] a no-PowerShell clean-checkout qualification and a zero-`.ps1` drift gate
   prevent the old automation layer from returning.
+- [ ] “PowerShell replacement” applies to repository-owned automation and its
+  delivery process, not to users launching PowerShell as a terminal shell or
+  to terminal-compatibility coverage. Such compatibility tests must be driven
+  by the Rhai harness and cannot carry repository business rules in
+  PowerShell.
+- [ ] completion is measured only after parity evidence, every caller cutover,
+  source `.ps1` deletion, and drift-gate coverage. Static zero-file evidence is
+  paired with clean-checkout process-tree evidence proving that bootstrap,
+  build, check, qualification, packaging, and release rehearsal do not spawn
+  `powershell.exe` or `pwsh.exe`.
 
 ## Public black-box acceptance
 

@@ -378,7 +378,15 @@ track remains planned, but every declared dependency must still pass.
     PowerShell/Rhai self-hosting dual-run without replacing release scripts
   - [ ] implementation sequencing, budgets, risks and release evidence are
     owned by [the v0.1.9 public plan](../plan/plan-v0.1.9.md)
-- [ ] M7 / v0.1.10 Verifiable Read-Only Agent Bridge
+- [ ] M7 / v0.1.10 Rhai Self-Hosting and Verifiable Read-Only Agent Bridge
+  - [ ] complete the evidence-gated replacement of all repository-owned
+    PowerShell automation: no tracked `.ps1`, no hidden PowerShell business
+    logic in bootstrap/CI, and no PowerShell process in the clean build,
+    check, qualification, package, or release-rehearsal process tree
+  - [ ] use the stable Rhai task catalog and shared modules as the sole source
+    of build, quality, black-box, qualification, packaging, and approved
+    release semantics; platform entry points only bootstrap and forward
+    arguments/exit status
   - [ ] ship `agenterm-mcp.exe` as an on-demand stdio sidecar pinned to one
     stable MCP protocol revision; offline discovery declares exact methods,
     resources, tools, limits, schemas, and unavailable future roles
