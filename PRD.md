@@ -46,6 +46,11 @@ dependencies, risks, decisions, and delivery history, but remain execution
 projections rather than canonical product truth. Every accepted product scope
 or capability-status change also belongs in its owning PRD module.
 
+Stable public technical contracts that are too detailed for an owning PRD
+module may live under [`docs/`](docs/). Every such specification links back to
+exactly one owning PRD module; it defines interface semantics and conformance,
+not independent product scope or shipped status.
+
 Machine-readable shipped capability/evidence alignment lives in
 [`prd/alignment-contract.json`](prd/alignment-contract.json).
 

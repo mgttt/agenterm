@@ -113,9 +113,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [ ] `script eval [OPTIONS] EXPRESSION [--] [ARGS...]`
     - [ ] `script check [OPTIONS] FILE.rhai|-`
     - [ ] `script api [MODULE] [--status STATE]` renders the hierarchical
-      human catalog, `script api --compare node|bun|all` renders reviewed
-      purpose-level analogues, and `script api --json` emits their common
-      machine-readable source
+      human catalog, `script api --compare rust|node|bun|all` renders reviewed
+      analogues and semantic differences, and `script api --json` emits their
+      common machine-readable source
     - [ ] `script task list [--manifest PATH] [--json]`
     - [ ] `script task show TASK [--manifest PATH] [--json]`
     - [ ] `script task run TASK [--manifest PATH] [--] [ARGS...]`
