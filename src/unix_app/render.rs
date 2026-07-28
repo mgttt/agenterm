@@ -229,9 +229,7 @@ pub(super) struct SidebarToolbarView {
 }
 
 impl SidebarToolbarView {
-    pub(super) fn from_layout(
-        toolbar: crate::ui_geometry::SidebarToolbarLayout,
-    ) -> Self {
+    pub(super) fn from_layout(toolbar: crate::ui_geometry::SidebarToolbarLayout) -> Self {
         Self {
             bounds: u32_rect(toolbar.bounds),
             new_tab: u32_rect(toolbar.new_tab),
@@ -665,15 +663,7 @@ fn render_confirm_close(
         (confirm.cancel_button, "Cancel"),
     ] {
         let (x, y, w, h) = rect;
-        fill_rect(
-            buffer,
-            stride,
-            x,
-            y,
-            w,
-            h,
-            rgb_to_pixel(palette.composer),
-        );
+        fill_rect(buffer, stride, x, y, w, h, rgb_to_pixel(palette.composer));
         draw_text(
             buffer,
             stride,

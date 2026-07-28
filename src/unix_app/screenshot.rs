@@ -45,9 +45,7 @@ pub(super) fn write_xrgb_png(
         .into_stream_writer()
         .map_err(|error| error.to_string())?;
     use std::io::Write;
-    writer
-        .write_all(&rgba)
-        .map_err(|error| error.to_string())?;
+    writer.write_all(&rgba).map_err(|error| error.to_string())?;
     writer.finish().map_err(|error| error.to_string())?;
     Ok(())
 }

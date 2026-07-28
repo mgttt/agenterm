@@ -807,11 +807,8 @@ impl UnixApp {
             }
             ToolbarHit::ToggleTabs => {
                 let visible = !self.config.tabs_visible;
-                let _ = self.set_tabs_visible(
-                    visible,
-                    "toolbar",
-                    crate::operations::UI_TABS_TOGGLE,
-                );
+                let _ =
+                    self.set_tabs_visible(visible, "toolbar", crate::operations::UI_TABS_TOGGLE);
             }
             ToolbarHit::Settings => {
                 self.open_settings();
@@ -910,8 +907,7 @@ impl UnixApp {
                 && now.duration_since(click.at) <= Duration::from_millis(DOUBLE_CLICK_MS)
         }) {
             self.recent_terminal_click = None;
-            if let Some((start, end)) = word_selection(self.tabs[position].parser.screen(), point)
-            {
+            if let Some((start, end)) = word_selection(self.tabs[position].parser.screen(), point) {
                 let _ = self.set_completed_terminal_selection(tab_id, start, end, rows, cols);
                 self.terminal_double_click = now
                     .checked_add(Duration::from_millis(DOUBLE_CLICK_MS))
@@ -990,12 +986,8 @@ impl UnixApp {
             return;
         };
         let updated = gesture.drag_to(TerminalPoint { row, col }, rows, cols);
-        let next_autoscroll = autoscroll_step(
-            y as i32,
-            terminal.top,
-            terminal.bottom,
-            CELL_HEIGHT as i32,
-        );
+        let next_autoscroll =
+            autoscroll_step(y as i32, terminal.top, terminal.bottom, CELL_HEIGHT as i32);
         self.terminal_selection = updated.selection();
         self.terminal_selection_gesture = Some(updated);
         self.terminal_selection_pointer = Some((clamped_x, clamped_y));
@@ -1492,18 +1484,16 @@ impl UnixApp {
                         .filter(|selection| self.active == Some(selection.tab_id)),
                 },
                 sidebar_rows: &sidebar_rows,
-                sidebar_toolbar: layout
-                    .sidebar_toolbar
-                    .map(SidebarToolbarView::from_layout),
+                sidebar_toolbar: layout.sidebar_toolbar.map(SidebarToolbarView::from_layout),
                 composer: ComposerView {
                     text: &self.composer_buffer,
                     focused: self.focus_surface == UnixFocusSurface::Composer,
                 },
                 scrollbar,
                 settings,
-                confirm_close: self.pending_close.map(|id| {
-                    ConfirmCloseView::for_client(size.width, size.height, id)
-                }),
+                confirm_close: self
+                    .pending_close
+                    .map(|id| ConfirmCloseView::for_client(size.width, size.height, id)),
             },
         );
         self.last_frame = Some((width, height, buffer.to_vec()));
