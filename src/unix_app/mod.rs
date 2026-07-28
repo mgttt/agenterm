@@ -22,8 +22,14 @@ use winit::{
 use crate::{
     client::no_activate_from_environment,
     gui_wake::install_unix_wake,
+    instances::register_instance,
+    ipc_transport::{IpcEnvelope, start_ipc_server},
+    protocol::IpcResponse,
+    pty::TerminalSize,
+    terminal_runtime::{TerminalLaunch, TerminalTab},
     theme::ThemeId,
     wake_signal::WakeSignal,
+    workspace::workspace_path,
 };
 
 use render::{TerminalGrid, grid_dimensions_for_pixels, render_grid, theme_palette};
@@ -31,9 +37,6 @@ use render::{TerminalGrid, grid_dimensions_for_pixels, render_grid, theme_palett
 const APP_NAME: &str = "AgenTerm";
 const INITIAL_WIDTH: u32 = 960;
 const INITIAL_HEIGHT: u32 = 600;
-
-/// `terminal_runtime` is compiled on Unix but its types are `pub(super)` today.
-const TERMINAL_RUNTIME_INTEGRATED: bool = false;
 
 pub fn run_gui_entry() -> i32 {
     let arguments = env::args().skip(1).collect::<Vec<_>>();
@@ -104,9 +107,19 @@ fn run_gui(no_activate: bool) -> anyhow::Result<()> {
     let (wake_tx, wake_rx) = mpsc::sync_channel(64);
     install_unix_wake(wake_tx);
 
-    // TODO integrate: start_ipc_server(0, Arc::clone(&wake_signal)) once Unix IPC server lands.
+    let ipc_receiver = start_ipc_server(0, Arc::clone(&wake_signal))?;
+    let session_name = format!("agenterm-{}", std::process::id());
+    let _instance = register_instance(&crate::ipc_address(), &workspace_path(), &session_name)?;
 
-    let mut app = UnixApp::new(title, no_activate, context, wake_signal, wake_rx);
+    let mut app = UnixApp::new(
+        title,
+        no_activate,
+        context,
+        wake_signal,
+        wake_rx,
+        ipc_receiver,
+        session_name,
+    );
     event_loop.set_control_flow(ControlFlow::Wait);
     event_loop.run_app(&mut app)?;
     Ok(())
@@ -118,9 +131,13 @@ struct UnixApp {
     context: Context<OwnedDisplayHandle>,
     wake_signal: Arc<WakeSignal>,
     wake_rx: Receiver<()>,
+    ipc_receiver: Receiver<IpcEnvelope>,
+    session_name: String,
     window: Option<Rc<Window>>,
     surface: Option<Surface<OwnedDisplayHandle, Rc<Window>>>,
     grid: Option<TerminalGrid>,
+    tab: Option<TerminalTab>,
+    next_tab_id: u64,
 }
 
 impl UnixApp {
@@ -130,6 +147,8 @@ impl UnixApp {
         context: Context<OwnedDisplayHandle>,
         wake_signal: Arc<WakeSignal>,
         wake_rx: Receiver<()>,
+        ipc_receiver: Receiver<IpcEnvelope>,
+        session_name: String,
     ) -> Self {
         Self {
             title,
@@ -137,9 +156,13 @@ impl UnixApp {
             context,
             wake_signal,
             wake_rx,
+            ipc_receiver,
+            session_name,
             window: None,
             surface: None,
             grid: None,
+            tab: None,
+            next_tab_id: 1,
         }
     }
 
@@ -160,15 +183,26 @@ impl UnixApp {
         let (cols, rows) = grid_dimensions_for_pixels(size.width, size.height);
         let grid = TerminalGrid::new(cols, rows, theme_palette());
 
-        // TODO integrate: TerminalTab::spawn with default shell and initial (cols, rows).
-        if TERMINAL_RUNTIME_INTEGRATED {
-            let _ = (&self.wake_signal, cols, rows);
-        }
+        let id = self.next_tab_id;
+        self.next_tab_id += 1;
+        let tab = TerminalTab::spawn(TerminalLaunch {
+            id,
+            index: 0,
+            parent_id: None,
+            title: None,
+            command_line: Vec::new(),
+            tab_environment: Vec::new(),
+            session_name: self.session_name.clone(),
+            window: 0,
+            wake_signal: Arc::clone(&self.wake_signal),
+            initial_size: TerminalSize { rows, cols },
+        })?;
 
         window.request_redraw();
         self.window = Some(window);
         self.surface = Some(surface);
         self.grid = Some(grid);
+        self.tab = Some(tab);
         Ok(())
     }
 
@@ -181,32 +215,56 @@ impl UnixApp {
         if let Some(grid) = self.grid.as_mut() {
             grid.resize(cols, rows);
         }
-        // TODO integrate: tab.resize(rows, cols) via terminal_runtime once exposed to unix_app.
-        let _ = (cols, rows);
+        if let Some(tab) = self.tab.as_mut() {
+            tab.resize(rows, cols);
+        }
     }
 
-    fn drain_wake_and_pty(&mut self) {
+    fn drain_wake_and_pty(&mut self) -> bool {
         self.wake_signal.begin_drain();
         while self.wake_rx.try_recv().is_ok() {}
 
-        // TODO integrate: poll `tab.receiver` for PtyEvent::Output and feed vt100 parser.
-        if TERMINAL_RUNTIME_INTEGRATED {
-            return;
+        let mut changed = false;
+        while let Ok(envelope) = self.ipc_receiver.try_recv() {
+            changed = true;
+            let _ = envelope.respond_to.send(IpcResponse::typed_failure(
+                "Unix GUI control plane is still integrating; window and PTY are live",
+                "unix_gui_partial",
+                "availability",
+                true,
+            ));
         }
+
+        if let Some(tab) = self.tab.as_mut()
+            && tab.poll()
+        {
+            changed = true;
+        }
+        if changed {
+            self.sync_grid_from_tab();
+        }
+        changed
+    }
+
+    fn sync_grid_from_tab(&mut self) {
+        let Some(tab) = self.tab.as_ref() else {
+            return;
+        };
+        let Some(grid) = self.grid.as_mut() else {
+            return;
+        };
+        grid.sync_from_screen(tab.parser.screen());
     }
 
     fn queue_pty_input(&mut self, bytes: Vec<u8>) {
         if bytes.is_empty() {
             return;
         }
-        // TODO integrate: tab.send(&bytes) via terminal_runtime once exposed to unix_app.
-        if !TERMINAL_RUNTIME_INTEGRATED {
-            if let Some(grid) = self.grid.as_mut() {
-                grid.apply_local_echo(&bytes);
-            }
-            if let Some(window) = self.window.as_ref() {
-                window.request_redraw();
-            }
+        if let Some(tab) = self.tab.as_mut() {
+            let _ = tab.send(&bytes);
+        }
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
         }
     }
 
@@ -280,11 +338,14 @@ impl ApplicationHandler for UnixApp {
     }
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-        if self.wake_rx.try_recv().is_ok() {
-            self.wake_signal.begin_drain();
-            if let Some(window) = self.window.as_ref() {
-                window.request_redraw();
-            }
+        let mut woke = false;
+        while self.wake_rx.try_recv().is_ok() {
+            woke = true;
+        }
+        if (woke || self.drain_wake_and_pty())
+            && let Some(window) = self.window.as_ref()
+        {
+            window.request_redraw();
         }
     }
 }

@@ -66,4 +66,4 @@ pub use windows::{
     ChildCommand, PtyChild, PtyMaster, SpawnedPty, write_windows_console_mouse_drag,
 };
 #[cfg(unix)]
-pub use unix::{ChildCommand, PtyChild, PtyMaster, SpawnedPty};
+pub use unix::{ChildCommand, PtyChild, PtyMaster};

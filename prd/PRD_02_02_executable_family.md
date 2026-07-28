@@ -6,9 +6,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
 - [x] `agenterm.exe`: Windows-subsystem GUI, PTY owner, workspace authority,
   renderer, and IPC server
-- [ ] `agenterm` on Linux/macOS: same binary role (GUI + PTY owner + IPC
-  server) with POSIX PTY and software-raster window; ships in the
-  `linux-*` / `macos-*` release archives alongside cli/mux/script
+- [~] `agenterm` on Linux/macOS: GUI binary builds and packages with
+  POSIX PTY + software-raster window; IPC server listens and registers
+  instances; full control-plane command parity with Win32 GUI remains
+  in progress
 - [ ] target architecture separates the replaceable Win32 GUI client from the
   workspace/PTY/server authority so a GUI-only restart can preserve live tabs;
   this is now an accepted v0.1.9 requirement rather than an exploratory

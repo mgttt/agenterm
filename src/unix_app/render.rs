@@ -41,14 +41,12 @@ pub(super) struct TerminalGrid {
 
 impl TerminalGrid {
     pub(super) fn new(cols: u16, rows: u16, palette: &'static ThemePalette) -> Self {
-        let mut grid = Self {
+        Self {
             cols,
             rows,
             cells: vec![TerminalCell::blank(); usize::from(cols) * usize::from(rows)],
             palette,
-        };
-        grid.fill_stub_message();
-        grid
+        }
     }
 
     pub(super) fn resize(&mut self, cols: u16, rows: u16) {
@@ -58,7 +56,28 @@ impl TerminalGrid {
             usize::from(cols) * usize::from(rows),
             TerminalCell::blank(),
         );
-        self.fill_stub_message();
+    }
+
+    pub(super) fn sync_from_screen(&mut self, screen: &vt100::Screen) {
+        for row in 0..self.rows {
+            for col in 0..self.cols {
+                let cell = screen.cell(row, col).map_or_else(TerminalCell::blank, |cell| {
+                    if cell.is_wide_continuation() {
+                        return TerminalCell::blank();
+                    }
+                    let text = cell.contents();
+                    let ch = text.chars().next().unwrap_or(' ');
+                    let ch = if text.is_empty() { ' ' } else { ch };
+                    let mut fg = color_index(cell.fgcolor(), false);
+                    let mut bg = color_index(cell.bgcolor(), true);
+                    if cell.inverse() {
+                        std::mem::swap(&mut fg, &mut bg);
+                    }
+                    TerminalCell { ch, fg, bg }
+                });
+                self.set_cell(col, row, cell);
+            }
+        }
     }
 
     pub(super) fn cell(&self, col: u16, row: u16) -> TerminalCell {
@@ -73,8 +92,7 @@ impl TerminalGrid {
     }
 
     pub(super) fn put_text(&mut self, col: u16, row: u16, text: &str) {
-        let mut column = col;
-        for ch in text.chars() {
+        for (column, ch) in (col..).zip(text.chars()) {
             if column >= self.cols {
                 break;
             }
@@ -83,51 +101,20 @@ impl TerminalGrid {
                 row,
                 TerminalCell::with_defaults(ch, self.palette),
             );
-            column += 1;
         }
     }
 
     fn index(&self, col: u16, row: u16) -> usize {
         usize::from(row) * usize::from(self.cols) + usize::from(col)
     }
+}
 
-    fn fill_stub_message(&mut self) {
-        for cell in &mut self.cells {
-            *cell = TerminalCell::blank();
-        }
-        self.put_text(0, 0, "AgenTerm Unix GUI — waiting for PTY");
-        self.put_text(0, 2, "Type to queue PTY input (stub echo).");
-    }
-
-    /// Local echo for the stub backend until `terminal_runtime` is wired on Unix.
-    pub(super) fn apply_local_echo(&mut self, bytes: &[u8]) {
-        let mut col = 0_u16;
-        let mut row = 4_u16;
-        for &byte in bytes {
-            match byte {
-                b'\r' | b'\n' => {
-                    col = 0;
-                    row = row.saturating_add(1);
-                }
-                0x7F | 0x08 => {
-                    if col > 0 {
-                        col -= 1;
-                        self.set_cell(col, row, TerminalCell::blank());
-                    }
-                }
-                b if b.is_ascii_graphic() || b == b' ' => {
-                    if col < self.cols {
-                        self.set_cell(
-                            col,
-                            row,
-                            TerminalCell::with_defaults(b as char, self.palette),
-                        );
-                        col += 1;
-                    }
-                }
-                _ => {}
-            }
-        }
+fn color_index(color: vt100::Color, background: bool) -> u8 {
+    match color {
+        vt100::Color::Default if background => 0,
+        vt100::Color::Default => 7,
+        vt100::Color::Idx(index) => index,
+        vt100::Color::Rgb(_, _, _) => 7,
     }
 }
 
@@ -160,6 +147,7 @@ pub(super) fn render_grid(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_cell(
     buffer: &mut [u32],
     stride: u32,

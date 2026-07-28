@@ -10,9 +10,9 @@ use std::{
 
 use anyhow::{Context as _, Result};
 
-use crate::pty::{ChildCommand, ProcessId, PtyChild, PtyMaster, TerminalSize};
+use crate::pty::{ChildCommand, PtyChild, PtyMaster, TerminalSize};
 #[cfg(windows)]
-use crate::pty::write_windows_console_mouse_drag;
+use crate::pty::{ProcessId, write_windows_console_mouse_drag};
 
 use crate::{
     SCROLLBACK_LINES, ipc_address, request_gui_wake,
@@ -39,7 +39,7 @@ struct PendingProxyConfirmation {
     deadline: Instant,
 }
 
-pub(super) enum PtyEvent {
+pub(crate) enum PtyEvent {
     Output(Vec<u8>),
     ReaderClosed,
     ReaderError(String),
@@ -54,7 +54,7 @@ enum TerminalWorkerCompletion {
 }
 
 #[derive(Default)]
-pub(super) struct TerminalCallbacks {
+pub(crate) struct TerminalCallbacks {
     pub(super) title: String,
     pub(super) pending_cwd: Option<String>,
     pub(super) local_hostname: Option<String>,
@@ -72,7 +72,7 @@ impl vt100::Callbacks for TerminalCallbacks {
     }
 }
 
-pub(super) struct TerminalTab {
+pub(crate) struct TerminalTab {
     pub(super) id: u64,
     pub(super) index: u32,
     pub(super) parent_id: Option<u64>,
@@ -91,7 +91,7 @@ pub(super) struct TerminalTab {
     pending_proxy_confirmation: Option<PendingProxyConfirmation>,
     pub(super) proxy_redaction_needles: Vec<SecretValue>,
     pub(super) proxy_redaction_pending: Vec<u8>,
-    pub(super) parser: vt100::Parser<TerminalCallbacks>,
+    pub(crate) parser: vt100::Parser<TerminalCallbacks>,
     pub(super) receiver: Receiver<PtyEvent>,
     worker_completion_receiver: Receiver<TerminalWorkerCompletion>,
     reader_thread: Option<JoinHandle<()>>,
@@ -113,7 +113,7 @@ pub(super) struct TerminalTab {
     pub(super) raw_output: BoundedByteRing,
 }
 
-pub(super) struct TerminalLaunch {
+pub(crate) struct TerminalLaunch {
     pub(super) id: u64,
     pub(super) index: u32,
     pub(super) parent_id: Option<u64>,
@@ -296,7 +296,7 @@ impl TerminalTab {
         self.lifecycle.close_reader_after_parser_drain();
     }
 
-    pub(super) fn spawn(launch: TerminalLaunch) -> Result<Self> {
+    pub(crate) fn spawn(launch: TerminalLaunch) -> Result<Self> {
         let TerminalLaunch {
             id,
             index,
@@ -374,7 +374,7 @@ impl TerminalTab {
             .context("failed to clone ConPTY child wait handle")?;
         let (sender, receiver) = mpsc::channel();
         let (worker_completion_sender, worker_completion_receiver) = mpsc::channel();
-        let wake_window = window as isize;
+        let wake_window = window;
 
         let output_sender = sender.clone();
         let output_wake_signal = Arc::clone(&wake_signal);
@@ -458,7 +458,9 @@ impl TerminalTab {
                 initial_size.cols,
                 SCROLLBACK_LINES,
                 TerminalCallbacks {
-                    local_hostname: env::var("COMPUTERNAME").ok(),
+                    local_hostname: env::var("COMPUTERNAME")
+                        .or_else(|_| env::var("HOSTNAME"))
+                        .ok(),
                     ..TerminalCallbacks::default()
                 },
             ),
@@ -484,7 +486,7 @@ impl TerminalTab {
         })
     }
 
-    pub(super) fn poll(&mut self) -> bool {
+    pub(crate) fn poll(&mut self) -> bool {
         let mut changed = false;
         while let Ok(event) = self.receiver.try_recv() {
             changed = true;
@@ -538,7 +540,7 @@ impl TerminalTab {
         changed
     }
 
-    pub(super) fn resize(&mut self, rows: u16, cols: u16) {
+    pub(crate) fn resize(&mut self, rows: u16, cols: u16) {
         if self.last_size == (rows, cols) {
             return;
         }
@@ -584,7 +586,7 @@ impl TerminalTab {
         screen.scrollback()
     }
 
-    pub(super) fn send(&mut self, bytes: &[u8]) -> bool {
+    pub(crate) fn send(&mut self, bytes: &[u8]) -> bool {
         if self.exited.is_some() || self.error.is_some() || self.lifecycle.reader_closed() {
             return false;
         }

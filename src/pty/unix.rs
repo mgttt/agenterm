@@ -265,13 +265,13 @@ fn child_setup(
         }
     }
 
-    if let Some(directory) = &command.current_dir {
-        if std::env::set_current_dir(directory).is_err() {
-            return Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                "failed to set child working directory",
-            ));
-        }
+    if let Some(directory) = &command.current_dir
+        && std::env::set_current_dir(directory).is_err()
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "failed to set child working directory",
+        ));
     }
 
     for (key, value) in &command.env {
@@ -579,8 +579,8 @@ mod tests {
             .spawn()
             .expect("spawn shell in pty");
 
-        let (master, mut child) = spawned.into_parts();
-        let mut reader = master
+        let (mut master, mut child) = spawned.into_parts();
+        let reader = master
             .try_clone_for_startup_reader()
             .expect("clone pty reader");
 
