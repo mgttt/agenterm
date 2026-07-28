@@ -261,6 +261,14 @@
       "evidence_ids": ["server.headless-authority"]
     },
     {
+      "id": "development.replaceable-ui-client-slice",
+      "kind": "architecture",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "opt-in `agenterm.exe --ui-client` starts or connects to the independent headless authority, acquires the exact interactive lease, renders renderer-neutral tab/screen/composer DTOs, routes stable-ID selection/input/resize through the lease, acknowledges applied event positions, detaches without ending the server or PTY, and a replacement GUI recovers the same server PID, active tab and live terminal marker with PNG and orphan-free public evidence",
+      "evidence_ids": ["ui.replaceable-client"]
+    },
+    {
       "id": "control.observable-events",
       "kind": "behavior",
       "status": "shipped",

@@ -703,9 +703,10 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
         ),
         "ui-lease" => (
             "agenterm-cli ui-lease \
-             (attach --client-id ID --client-pid PID|heartbeat|detach|status) \
+             (attach --client-id ID --client-pid PID|heartbeat|\
+             acknowledge --sequence N|detach|status) \
              [--lease-id ID --client-pid PID]",
-            &["--client-id", "--client-pid", "--lease-id"][..],
+            &["--client-id", "--client-pid", "--lease-id", "--sequence"][..],
             &[][..],
             false,
         ),

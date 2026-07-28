@@ -15,6 +15,8 @@ mod instances;
 mod ipc_transport;
 pub mod operations;
 mod protocol;
+#[cfg(windows)]
+mod remote_win_app;
 mod rmux_status;
 pub mod script_api_view;
 pub mod script_catalog;
@@ -34,6 +36,8 @@ mod terminal_observation;
 mod terminal_selection;
 mod theme;
 pub mod ui_bridge;
+#[cfg(any(windows, unix))]
+mod ui_client;
 mod ui_geometry;
 #[cfg(any(windows, unix))]
 mod ui_interaction;

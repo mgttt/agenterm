@@ -12,6 +12,7 @@ pub(crate) struct UiLeaseRecord {
     pub(crate) client_id: String,
     pub(crate) client_pid: u32,
     pub(crate) expires_unix_ms: u64,
+    pub(crate) observed_sequence: u64,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -22,6 +23,7 @@ pub(crate) enum UiLeaseError {
     Conflict,
     NotAttached,
     OwnerMismatch,
+    InvalidObservedSequence,
 }
 
 impl UiLeaseError {
@@ -33,12 +35,16 @@ impl UiLeaseError {
             Self::Conflict => "ui_lease_conflict",
             Self::NotAttached => "ui_lease_not_attached",
             Self::OwnerMismatch => "ui_lease_owner_mismatch",
+            Self::InvalidObservedSequence => "ui_lease_observed_sequence_invalid",
         }
     }
 
     pub(crate) const fn category(self) -> &'static str {
         match self {
-            Self::InvalidClientId | Self::InvalidClientPid | Self::InvalidLeaseId => "validation",
+            Self::InvalidClientId
+            | Self::InvalidClientPid
+            | Self::InvalidLeaseId
+            | Self::InvalidObservedSequence => "validation",
             Self::Conflict => "conflict",
             Self::NotAttached => "availability",
             Self::OwnerMismatch => "conflict",
@@ -57,6 +63,9 @@ impl UiLeaseError {
             Self::Conflict => "another live UI client currently owns the interactive lease",
             Self::NotAttached => "no live UI client currently owns the interactive lease",
             Self::OwnerMismatch => "UI lease ID or client PID does not match the current owner",
+            Self::InvalidObservedSequence => {
+                "UI observed sequence must advance monotonically within the current journal"
+            }
         }
     }
 }
@@ -99,6 +108,7 @@ impl UiLeaseAuthority {
             client_id: client_id.to_owned(),
             client_pid,
             expires_unix_ms: now_unix_ms.saturating_add(UI_LEASE_TTL_MS),
+            observed_sequence: 0,
         };
         self.active = Some(record.clone());
         Ok((record, true))
@@ -134,6 +144,29 @@ impl UiLeaseAuthority {
             return Err(UiLeaseError::OwnerMismatch);
         }
         Ok(self.active.take().expect("active UI lease was checked"))
+    }
+
+    pub(crate) fn acknowledge(
+        &mut self,
+        lease_id: &str,
+        client_pid: u32,
+        observed_sequence: u64,
+        current_sequence: u64,
+        now_unix_ms: u64,
+    ) -> Result<UiLeaseRecord, UiLeaseError> {
+        validate_lease_id(lease_id)?;
+        let Some(active) = self.active.as_mut() else {
+            return Err(UiLeaseError::NotAttached);
+        };
+        if active.lease_id != lease_id || active.client_pid != client_pid {
+            return Err(UiLeaseError::OwnerMismatch);
+        }
+        if observed_sequence < active.observed_sequence || observed_sequence > current_sequence {
+            return Err(UiLeaseError::InvalidObservedSequence);
+        }
+        active.observed_sequence = observed_sequence;
+        active.expires_unix_ms = now_unix_ms.saturating_add(UI_LEASE_TTL_MS);
+        Ok(active.clone())
     }
 
     pub(crate) fn reap_stale(
@@ -208,6 +241,25 @@ mod tests {
         );
         assert_eq!(authority.detach(&lease.lease_id, 42).unwrap(), renewed);
         assert!(authority.active().is_none());
+    }
+
+    #[test]
+    fn observed_sequence_is_monotonic_bounded_and_renews_the_owner() {
+        let mut authority = UiLeaseAuthority::default();
+        let (lease, _) = authority.attach("gui", 42, 1_000).unwrap();
+        let acknowledged = authority
+            .acknowledge(&lease.lease_id, 42, 7, 9, 2_000)
+            .unwrap();
+        assert_eq!(acknowledged.observed_sequence, 7);
+        assert!(acknowledged.expires_unix_ms > lease.expires_unix_ms);
+        assert_eq!(
+            authority.acknowledge(&lease.lease_id, 42, 6, 9, 3_000),
+            Err(UiLeaseError::InvalidObservedSequence)
+        );
+        assert_eq!(
+            authority.acknowledge(&lease.lease_id, 42, 10, 9, 3_000),
+            Err(UiLeaseError::InvalidObservedSequence)
+        );
     }
 
     #[test]

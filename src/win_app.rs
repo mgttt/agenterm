@@ -282,6 +282,13 @@ pub fn run_gui_entry() -> i32 {
     };
     let no_activate = launch_options.no_activate || crate::client::no_activate_from_environment();
     write_best_effort_stderr(&gui_console_summary(&crate::ipc_address()));
+    if launch_options.ui_client {
+        if let Err(error) = crate::remote_win_app::run_remote_gui(no_activate) {
+            show_startup_error(&error);
+            return 1;
+        }
+        return 0;
+    }
     if env::var_os("AGENTERM_SERVER").is_none() {
         let handoff = if no_activate {
             "__show-no-activate"
@@ -312,6 +319,7 @@ pub fn run_gui_entry() -> i32 {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct GuiLaunchOptions {
     no_activate: bool,
+    ui_client: bool,
 }
 
 fn configure_gui_launch(arguments: &[String]) -> Result<GuiLaunchOptions> {
@@ -337,6 +345,13 @@ fn parse_gui_launch(arguments: &[String]) -> Result<(GuiLaunchOptions, Option<St
                     );
                 }
                 options.no_activate = true;
+                position += 1;
+            }
+            "--ui-client" => {
+                if options.ui_client {
+                    anyhow::bail!("agenterm.exe --ui-client may be specified only once");
+                }
+                options.ui_client = true;
                 position += 1;
             }
             "--address" => {
@@ -7361,6 +7376,7 @@ mod tests {
         ])
         .unwrap();
         assert!(options.no_activate);
+        assert!(!options.ui_client);
         assert_eq!(address.as_deref(), Some("127.0.0.1:48815"));
 
         let (options, address) = parse_gui_launch(&[
@@ -7370,7 +7386,19 @@ mod tests {
         ])
         .unwrap();
         assert!(options.no_activate);
+        assert!(!options.ui_client);
         assert_eq!(address.as_deref(), Some("127.0.0.1:48816"));
+
+        let (options, address) = parse_gui_launch(&[
+            "--ui-client".to_owned(),
+            "--address".to_owned(),
+            "127.0.0.1:48817".to_owned(),
+            "--no-activate".to_owned(),
+        ])
+        .unwrap();
+        assert!(options.ui_client);
+        assert!(options.no_activate);
+        assert_eq!(address.as_deref(), Some("127.0.0.1:48817"));
     }
 
     #[test]
@@ -7405,6 +7433,7 @@ mod tests {
             vec!["--no-activate", "--no-activate"],
             vec!["--no-activate", "--not-foreground"],
             vec!["--not-foreground", "--not-foreground"],
+            vec!["--ui-client", "--ui-client"],
             vec![
                 "--address",
                 "127.0.0.1:48815",

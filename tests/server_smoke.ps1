@@ -163,6 +163,23 @@ try {
         $interactionState.screen.columns -ne 90) {
         throw 'headless server did not enforce lease-gated UI interaction'
     }
+    $acknowledged = Invoke-AgenTerm @(
+        'ui-lease', 'acknowledge',
+        '--lease-id', $lease.lease_id,
+        '--client-pid', "$PID",
+        '--sequence', "$($interactionBootstrap.position.sequence)"
+    ) | ConvertFrom-Json
+    $regression = Invoke-AgenTermExpectedFailure @(
+        'ui-lease', 'acknowledge',
+        '--lease-id', $lease.lease_id,
+        '--client-pid', "$PID",
+        '--sequence', "$($interactionBootstrap.position.sequence - 1)"
+    )
+    if ($acknowledged.observed_sequence -ne
+            $interactionBootstrap.position.sequence -or
+        -not $regression.Contains('advance monotonically')) {
+        throw 'headless server did not retain a monotonic UI observation position'
+    }
 
     $detached = Invoke-AgenTerm @(
         'ui-lease', 'detach',

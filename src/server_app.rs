@@ -251,6 +251,7 @@ impl ServerState {
             },
             expires_unix_ms: record.expires_unix_ms,
             ttl_ms: UI_LEASE_TTL_MS,
+            observed_sequence: record.observed_sequence,
         };
         if let Err(error) = grant.validate() {
             return IpcResponse::typed_failure(error, "ui_lease_grant_invalid", "internal", false);
@@ -376,6 +377,47 @@ impl ServerState {
                     Err(error) => Self::ui_lease_failure(error),
                 }
             }
+            "acknowledge" => {
+                let Some(lease_id) = option_value(args, "--lease-id") else {
+                    return IpcResponse::typed_failure(
+                        "ui-lease acknowledge requires --lease-id",
+                        "ui_lease_invalid_arguments",
+                        "validation",
+                        false,
+                    );
+                };
+                let Some(client_pid) =
+                    option_value(args, "--client-pid").and_then(|value| value.parse::<u32>().ok())
+                else {
+                    return IpcResponse::typed_failure(
+                        "ui-lease acknowledge requires numeric --client-pid",
+                        "ui_lease_invalid_arguments",
+                        "validation",
+                        false,
+                    );
+                };
+                let Some(sequence) =
+                    option_value(args, "--sequence").and_then(|value| value.parse::<u64>().ok())
+                else {
+                    return IpcResponse::typed_failure(
+                        "ui-lease acknowledge requires numeric --sequence",
+                        "ui_lease_invalid_arguments",
+                        "validation",
+                        false,
+                    );
+                };
+                let current_sequence = self.event_journal.position().sequence;
+                match self.ui_lease.acknowledge(
+                    lease_id,
+                    client_pid,
+                    sequence,
+                    current_sequence,
+                    now_unix_ms,
+                ) {
+                    Ok(record) => self.ui_lease_grant_json(record),
+                    Err(error) => Self::ui_lease_failure(error),
+                }
+            }
             "status" => {
                 let position = self.event_journal.position();
                 let active = self.ui_lease.active();
@@ -386,6 +428,7 @@ impl ServerState {
                         "client_id": active.map(|record| record.client_id.as_str()),
                         "client_pid": active.map(|record| record.client_pid),
                         "expires_unix_ms": active.map(|record| record.expires_unix_ms),
+                        "observed_sequence": active.map(|record| record.observed_sequence),
                         "position": {
                             "server_epoch": position.epoch,
                             "sequence": position.sequence,
@@ -395,7 +438,7 @@ impl ServerState {
                 )
             }
             _ => IpcResponse::typed_failure(
-                "ui-lease requires attach, heartbeat, detach, or status",
+                "ui-lease requires attach, heartbeat, acknowledge, detach, or status",
                 "ui_lease_invalid_arguments",
                 "validation",
                 false,

@@ -113,6 +113,12 @@
       ]
     },
     {
+      "id": "remote-ui-smoke",
+      "evidence": [
+        "ui.replaceable-client"
+      ]
+    },
+    {
       "id": "fleet-smoke",
       "evidence": [
         "fleet.codex-launcher",

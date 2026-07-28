@@ -29,6 +29,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     if no compatible server exists it bootstraps `agenterm-server.exe`, then
     connects through the same typed loopback control boundary instead of
     becoming the server itself
+    - [x] opt-in `agenterm.exe --ui-client` starts or connects to the independent headless authority, acquires the exact interactive lease, renders renderer-neutral tab/screen/composer DTOs, routes stable-ID selection/input/resize through the lease, acknowledges applied event positions, detaches without ending the server or PTY, and a replacement GUI recovers the same server PID, active tab and live terminal marker with PNG and orphan-free public evidence
+    - [ ] switch ordinary `agenterm.exe` launches only after the replaceable
+      client reaches the accepted workbench, settings, editing, selection,
+      clipboard, scrollback, close-dialog and observation parity gates
   - [~] UI bootstrap uses a versioned hello, complete bounded workspace and
     terminal-screen snapshot, event baseline, then ordered deltas; reconnect
     detects restart, journal gap and incompatible protocol without silently
@@ -48,15 +52,17 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [x] the dedicated `ui-interact` path requires the exact live lease for
       stable-ID active-tab selection, bounded binary terminal input and bounded
       PTY resize; independent typed automation remains a separate control plane
-    - [ ] the reconnecting GUI consumer acquires and uses that path by default
+    - [~] the opt-in replaceable GUI consumer acquires and uses that path;
+      ordinary launches and in-place disconnect recovery are still pending
   - [ ] compatibility is fail-closed and asymmetric: a new GUI may connect to
     its declared server protocol range; an incompatible server remains alive
     and reports a precise upgrade/restart choice instead of being killed
   - [x] S0 protocol discovery publishes a typed UI bridge schema, compatible
      version range, current `combined_gui_server` ownership, target executable
      and independently truthful capability flags. Bootstrap and ordered delta
-     poll are now shipped; replaceable UI, reconnect and rollback remain false
-     until their black-box gates pass.
+     poll and an opt-in replaceable consumer are now shipped; the default
+     capability facts remain conservative, and default replacement, in-place
+     reconnect and rollback remain false until their own black-box gates pass.
   - [ ] black-box upgrade proof keeps server PID, epoch, tab IDs, PTY child
     PIDs, scrollback and continuing output stable while HWND and GUI build
     identity change; rollback to the previous compatible GUI is also proven

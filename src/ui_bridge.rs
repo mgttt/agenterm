@@ -2,13 +2,13 @@ use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 
-pub const UI_BRIDGE_SCHEMA_VERSION: u32 = 4;
+pub const UI_BRIDGE_SCHEMA_VERSION: u32 = 6;
 pub const UI_BRIDGE_PROTOCOL_VERSION: u32 = 1;
 pub const UI_HELLO_SCHEMA_VERSION: u32 = 1;
-pub const UI_BOOTSTRAP_SCHEMA_VERSION: u32 = 1;
+pub const UI_BOOTSTRAP_SCHEMA_VERSION: u32 = 2;
 pub const UI_SCREEN_SCHEMA_VERSION: u32 = 1;
-pub const UI_DELTA_SCHEMA_VERSION: u32 = 1;
-pub const UI_LEASE_SCHEMA_VERSION: u32 = 1;
+pub const UI_DELTA_SCHEMA_VERSION: u32 = 2;
+pub const UI_LEASE_SCHEMA_VERSION: u32 = 2;
 pub const UI_INTERACTION_SCHEMA_VERSION: u32 = 1;
 pub const UI_BOOTSTRAP_MAX_BYTES: usize = 8 * 1024 * 1024;
 pub const UI_BOOTSTRAP_MAX_TABS: usize = 1024;
@@ -265,6 +265,7 @@ pub struct UiScreenSnapshot {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct UiTabBootstrap {
     pub id: String,
+    pub index: u32,
     pub parent_id: Option<String>,
     pub title: String,
     pub note: String,
@@ -343,6 +344,7 @@ pub struct UiLeaseGrant {
     pub position: UiEventPosition,
     pub expires_unix_ms: u64,
     pub ttl_ms: u64,
+    pub observed_sequence: u64,
 }
 
 impl UiLeaseGrant {
@@ -370,6 +372,7 @@ impl UiLeaseGrant {
             || self.position.server_epoch.is_empty()
             || self.ttl_ms == 0
             || self.expires_unix_ms < self.ttl_ms
+            || self.observed_sequence > self.position.sequence
         {
             return Err("ui_lease_grant_invalid".to_owned());
         }
@@ -516,8 +519,12 @@ impl UiBootstrapSnapshot {
             return Err("ui_bootstrap_completeness_invalid".to_owned());
         }
         let mut ids = HashSet::with_capacity(self.tabs.len());
+        let mut indices = HashSet::with_capacity(self.tabs.len());
         for tab in &self.tabs {
-            if !valid_stable_tab_id(&tab.id) || !ids.insert(tab.id.as_str()) {
+            if !valid_stable_tab_id(&tab.id)
+                || !ids.insert(tab.id.as_str())
+                || !indices.insert(tab.index)
+            {
                 return Err("ui_bootstrap_tab_id_invalid".to_owned());
             }
             if tab.title.len() > UI_TAB_TITLE_MAX_BYTES || tab.note.len() > UI_TAB_NOTE_MAX_BYTES {
@@ -632,6 +639,7 @@ mod tests {
             tabs: vec![
                 UiTabBootstrap {
                     id: "@1".to_owned(),
+                    index: 0,
                     parent_id: None,
                     title: "root".to_owned(),
                     note: String::new(),
@@ -657,6 +665,7 @@ mod tests {
                 },
                 UiTabBootstrap {
                     id: "@2".to_owned(),
+                    index: 1,
                     parent_id: Some("@1".to_owned()),
                     title: "child".to_owned(),
                     note: "ready".to_owned(),
@@ -701,7 +710,7 @@ mod tests {
     #[test]
     fn current_facts_do_not_claim_the_planned_split() {
         let facts = current_facts();
-        assert_eq!(facts.schema_version, 4);
+        assert_eq!(facts.schema_version, 6);
         assert_eq!(facts.ownership_mode, UiOwnershipMode::CombinedGuiServer);
         assert!(!facts.replaceable_ui);
         assert!(!facts.interactive_lease);
@@ -755,6 +764,7 @@ mod tests {
             },
             expires_unix_ms: 6_000,
             ttl_ms: 5_000,
+            observed_sequence: 8,
         };
         grant.validate().unwrap();
         let mut invalid = grant;

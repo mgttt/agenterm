@@ -148,6 +148,7 @@ fn ui_tab_bootstrap(tab: &TerminalTab, generation: u64) -> Result<UiTabBootstrap
     };
     Ok(UiTabBootstrap {
         id: format!("@{}", tab.id),
+        index: tab.index,
         parent_id: tab.parent_id.map(|parent| format!("@{parent}")),
         title: tab.title.clone(),
         note: tab.note.clone(),

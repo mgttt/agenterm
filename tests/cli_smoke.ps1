@@ -180,7 +180,7 @@ try {
 
     $protocol = Invoke-AgenTerm @('protocol-info') | ConvertFrom-Json
     $operationCatalog = $protocol.operation_catalog
-    if ($protocol.ui_bridge.schema_version -ne 4 -or
+    if ($protocol.ui_bridge.schema_version -ne 6 -or
         $protocol.ui_bridge.ownership_mode -ne 'combined_gui_server' -or
         $protocol.ui_bridge.replaceable_ui -or
         $protocol.ui_bridge.interactive_lease -or
@@ -189,10 +189,10 @@ try {
         -not $protocol.ui_bridge.ordered_deltas -or
         $protocol.ui_bridge.reconnect -or
         $protocol.ui_bridge.contract_schemas.hello -ne 1 -or
-        $protocol.ui_bridge.contract_schemas.bootstrap -ne 1 -or
+        $protocol.ui_bridge.contract_schemas.bootstrap -ne 2 -or
         $protocol.ui_bridge.contract_schemas.screen -ne 1 -or
-        $protocol.ui_bridge.contract_schemas.delta -ne 1 -or
-        $protocol.ui_bridge.contract_schemas.lease -ne 1 -or
+        $protocol.ui_bridge.contract_schemas.delta -ne 2 -or
+        $protocol.ui_bridge.contract_schemas.lease -ne 2 -or
         $protocol.ui_bridge.contract_schemas.interaction -ne 1 -or
         $protocol.ui_bridge.hard_limits.bootstrap_bytes -ne 8388608 -or
         $protocol.ui_bridge.hard_limits.tabs -ne 1024 -or
@@ -214,7 +214,7 @@ try {
     $bootstrap = Invoke-AgenTerm @('ui-bootstrap') | ConvertFrom-Json
     $inspect = Invoke-AgenTerm @('inspect') | ConvertFrom-Json
     $uiSnapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
-    if ($bootstrap.schema_version -ne 1 -or
+    if ($bootstrap.schema_version -ne 2 -or
         $runningProtocol.identity_scope -ne 'running_host' -or
         $bootstrap.server_pid -ne $runningProtocol.pid -or
         $bootstrap.server_epoch -ne $bootstrap.position.server_epoch -or
@@ -270,8 +270,8 @@ try {
         $hello.client_id -ne "cli-smoke-$($run.RunId)" -or
         $hello.protocol_version -ne 1 -or
         $hello.server_pid -ne $runningProtocol.pid -or
-        $hello.bootstrap_schema_version -ne 1 -or
-        $hello.delta_schema_version -ne 1 -or
+        $hello.bootstrap_schema_version -ne 2 -or
+        $hello.delta_schema_version -ne 2 -or
         @($hello.capabilities) -notcontains 'ordered_delta_poll') {
         throw 'ui-hello did not negotiate a stable renderer contract'
     }
@@ -320,7 +320,7 @@ try {
         $postBootstrap.tabs |
             Where-Object id -eq $followTab[0].id
     )
-    if ($deltas.schema_version -ne 1 -or
+    if ($deltas.schema_version -ne 2 -or
         $deltas.server_epoch -ne $hello.position.server_epoch -or
         $deltas.after_sequence -ne $hello.position.sequence -or
         $deltas.through_sequence -ne $deltas.current_sequence -or
