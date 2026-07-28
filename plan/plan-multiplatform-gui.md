@@ -41,7 +41,11 @@ PRD + Cargo deps (primary)
 - [x] G Win32 `execute_command` 收敛到同一 `ControlHost`；共享叶扩展
   `new-window` / `select-window` / `kill-window` / `active-window` /
   `display-message` / `rename-session`；Unix 实现 tab lifecycle
-- [ ] H Unix tab tree UI / composer / settings / ui-action / event journal
+- [~] H Unix tab tree UI / composer / settings / ui-action / event journal
+  - [x] event journal + `read-events` on Unix
+  - [x] shared workspace commands (`list-tab-tree`, `scroll-pane`, rename/note/parent, `workspace-info`, `dump-cells`, `ui-snapshot` simplified)
+  - [x] Unix tab sidebar (select by click)
+  - [ ] composer strip, settings, full `ui-action`, Win-grade `ui-snapshot` geometry
 
 ## 能力叶
 
