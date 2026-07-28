@@ -307,7 +307,7 @@ Migration ledger:
 | Responsibility | Replacement | Archived source | Switching commit | Evidence | Rollback boundary |
 |---|---|---|---|---|---|
 | Cargo target inventory | `scripts/rhai/target-report.rhai` | `scripts/archive/powershell/target-report.ps1` | `b9d1906` | public CLI fixture plus live PowerShell/Rhai field parity | retain through the next completed runtime slice |
-| Internal-only version policy | `scripts/rhai/internal-version-policy.rhai` | `scripts/archive/powershell/internal-version-policy.ps1` | pending commit | public CLI `check` plus identical live PowerShell/Rhai PASS result | retain through the task/module slice |
+| Internal-only version policy | `scripts/rhai/internal-version-policy.rhai` | `scripts/archive/powershell/internal-version-policy.ps1` | `b0010f5` | public CLI `check` plus identical live PowerShell/Rhai PASS result | retain through the task/module slice |
 
 ## Public black-box acceptance
 
