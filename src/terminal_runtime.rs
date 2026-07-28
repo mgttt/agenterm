@@ -9,10 +9,10 @@ use std::{
 };
 
 use anyhow::{Context as _, Result};
-use rmux_pty::{
-    ChildCommand, ProcessId, PtyChild, PtyMaster, TerminalSize, write_windows_console_mouse_drag,
-};
-use windows_sys::Win32::Foundation::HWND;
+
+use crate::pty::{ChildCommand, ProcessId, PtyChild, PtyMaster, TerminalSize};
+#[cfg(windows)]
+use crate::pty::write_windows_console_mouse_drag;
 
 use crate::{
     SCROLLBACK_LINES, ipc_address, request_gui_wake,
@@ -121,7 +121,7 @@ pub(super) struct TerminalLaunch {
     pub(super) command_line: Vec<String>,
     pub(super) tab_environment: Vec<(String, String)>,
     pub(super) session_name: String,
-    pub(super) window: HWND,
+    pub(super) window: isize,
     pub(super) wake_signal: Arc<WakeSignal>,
     pub(super) initial_size: TerminalSize,
 }
@@ -310,7 +310,14 @@ impl TerminalTab {
             initial_size,
         } = launch;
         let program = command_line.first().cloned().unwrap_or_else(|| {
-            env::var("COMSPEC").unwrap_or_else(|_| r"C:\Windows\System32\cmd.exe".to_owned())
+            #[cfg(windows)]
+            {
+                env::var("COMSPEC").unwrap_or_else(|_| r"C:\Windows\System32\cmd.exe".to_owned())
+            }
+            #[cfg(unix)]
+            {
+                env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into())
+            }
         });
         let persisted_command_line = if command_line.is_empty() {
             vec![program.clone()]
@@ -623,17 +630,25 @@ impl TerminalTab {
     }
 
     pub(super) fn send_native_mouse_click(&mut self, x: u16, y: u16) -> Result<()> {
-        if self.exited.is_some() {
-            anyhow::bail!("process has exited");
+        #[cfg(not(windows))]
+        {
+            let _ = (x, y);
+            anyhow::bail!("native console mouse is Windows-only");
         }
-        let raw_pid = self.process_id.context("process id is unavailable")?;
-        let process_id = ProcessId::new(raw_pid).context("invalid process id")?;
-        let x = i16::try_from(x).context("mouse x coordinate is too large")?;
-        let y = i16::try_from(y).context("mouse y coordinate is too large")?;
-        write_windows_console_mouse_drag(process_id, x, y, x, y)
-            .context("WriteConsoleInputW click failed")?;
-        self.input_bytes += 3;
-        Ok(())
+        #[cfg(windows)]
+        {
+            if self.exited.is_some() {
+                anyhow::bail!("process has exited");
+            }
+            let raw_pid = self.process_id.context("process id is unavailable")?;
+            let process_id = ProcessId::new(raw_pid).context("invalid process id")?;
+            let x = i16::try_from(x).context("mouse x coordinate is too large")?;
+            let y = i16::try_from(y).context("mouse y coordinate is too large")?;
+            write_windows_console_mouse_drag(process_id, x, y, x, y)
+                .context("WriteConsoleInputW click failed")?;
+            self.input_bytes += 3;
+            Ok(())
+        }
     }
 
     pub(super) fn send_rmux_status_click(&mut self, x: u16, y: u16) -> bool {
