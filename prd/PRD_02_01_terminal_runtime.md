@@ -5,7 +5,11 @@ Parent: [AgenTerm product tree](../PRD.md#product-tree)
 Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
 - [x] Win32/GDI window without GPU or OpenGL requirements
-- [x] one ConPTY-backed process per tab through `rmux-pty`
+- [ ] Linux/macOS GUI window without GPU requirements via `winit` +
+  `softbuffer` software raster (shared theme/geometry/selection/vt100)
+- [x] one ConPTY-backed process per tab through `rmux-pty` on Windows
+- [ ] shared PTY backend trait: Windows keeps `rmux-pty`; Unix uses
+  POSIX `openpty` + fork/exec; `terminal_runtime` consumes one API
 - [x] VT100 parsing, ANSI colors, scrollback, resize, keyboard and mouse
 - [x] Backspace emits ConPTY VT `DEL` and deletes exactly one input
   character in the default `cmd.exe` line editor

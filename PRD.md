@@ -1,13 +1,17 @@
 # AgenTerm product tree
 
 Status: active development
-Platform: Windows
-Current default shell: the real system `cmd.exe`.
+Platform: Windows shipped; Linux/macOS GUI and POSIX PTY in active delivery
+  (see [`plan/plan-multiplatform-gui.md`](plan/plan-multiplatform-gui.md)).
+Current default shell: Windows uses the real system `cmd.exe`; Unix GUI uses
+`$SHELL` with `/bin/sh` fallback.
 Future default-shell candidate: `agenterm-bash.exe`, only after its
 clean-machine gate passes; no release version is committed
 
-AgenTerm is a native Windows terminal and local fleet workspace for people and
-AI agents. Its window is the bridge, the tab tree organizes the fleet, shells
+AgenTerm is a native terminal and local fleet workspace for people and
+AI agents. The Windows GUI is the shipped human surface; Linux and macOS
+share the same protocol, clients, and terminal kernel while their GUI
+surface is delivered through continuous PTY/render abstraction. Its window is the bridge, the tab tree organizes the fleet, shells
 are crew workspaces, and the local control plane lets people and agents observe
 and steer the same state. Scripting reuses that public contract rather than
 bypassing it. Human interaction and local CLI automation operate on the same
