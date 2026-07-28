@@ -1,6 +1,9 @@
 use crate::{
     SCROLLBACK_LINES,
-    commands::{option_value, positional_values, supported_commands, tmux_key_bytes},
+    commands::{
+        has_option, last_positional, option_value, parse_new_command, parse_tab_environment,
+        positional_values, supported_commands, tmux_key_bytes,
+    },
     protocol::IpcResponse,
     terminal_runtime::TerminalTab,
 };
@@ -125,6 +128,46 @@ pub(crate) trait ControlHost {
 
     /// Win: save composer from HWND; Unix: no-op default.
     fn sync_composer_from_ui(&mut self) {}
+
+    fn set_session_name(&mut self, name: String);
+
+    /// Create a tab. Returns the stable window index used in -F output.
+    fn create_tab(
+        &mut self,
+        title: Option<String>,
+        command_line: Vec<String>,
+        tab_environment: Vec<(String, String)>,
+        select: bool,
+        parent_id: Option<u64>,
+    ) -> Result<u32, String>;
+
+    /// Select tab at position (after resolve). Host does UI sync.
+    fn select_tab_at(&mut self, position: usize) -> Result<(), String>;
+
+    /// Close tab by id. Ok(true)=workers finished; Ok(false)=incomplete shutdown.
+    fn close_tab_id(&mut self, id: u64) -> Result<bool, String>;
+
+    /// Adjacent tab position for select-window -n/-p. Default: None.
+    fn adjacent_tab_position(&self, direction: i32) -> Option<usize> {
+        let tabs = self.tabs();
+        if tabs.is_empty() {
+            return None;
+        }
+        let current = resolve_target_position(tabs, self.active_id(), None).unwrap_or(0) as i32;
+        Some((current + direction).rem_euclid(tabs.len() as i32) as usize)
+    }
+
+    fn resolve_parent_id(&self, target: &str) -> Result<Option<u64>, String> {
+        if matches!(target, "root" | "none" | "-") {
+            return Ok(None);
+        }
+        let Some(position) =
+            resolve_target_position(self.tabs(), self.active_id(), Some(target))
+        else {
+            return Err(format!("can't find parent tab: {target}"));
+        };
+        Ok(Some(self.tabs()[position].id))
+    }
 }
 
 pub(crate) fn dispatch_shared_command(
@@ -361,6 +404,115 @@ pub(crate) fn dispatch_shared_command(
                 Ok(json) => Some(IpcResponse::success(json)),
                 Err(error) => Some(IpcResponse::failure(error.to_string())),
             }
+        }
+        "neww" | "new-window" => {
+            let (title, detached, child_command) = parse_new_command(args);
+            let tab_environment = match parse_tab_environment(args) {
+                Ok(environment) => environment,
+                Err(error) => return Some(IpcResponse::failure(error)),
+            };
+            let parent_id = match option_value(args, "--parent") {
+                Some(target) => match host.resolve_parent_id(target) {
+                    Ok(parent_id) => parent_id,
+                    Err(error) => return Some(IpcResponse::failure(error)),
+                },
+                None => None,
+            };
+            match host.create_tab(
+                title,
+                child_command,
+                tab_environment,
+                !detached,
+                parent_id,
+            ) {
+                Ok(index) => {
+                    let format = option_value(args, "-F").unwrap_or("#{window_index}");
+                    let tab = host
+                        .tabs()
+                        .iter()
+                        .find(|tab| tab.index == index)
+                        .expect("newly created tab must remain present");
+                    Some(IpcResponse::success(render_format(
+                        format,
+                        tab,
+                        host.session_name(),
+                        host.active_id() == Some(tab.id),
+                    )))
+                }
+                Err(error) => Some(IpcResponse::failure(error)),
+            }
+        }
+        "selectw" | "select-window" => {
+            let position = if has_option(args, "-n") {
+                host.adjacent_tab_position(1)
+            } else if has_option(args, "-p") {
+                host.adjacent_tab_position(-1)
+            } else {
+                resolve_target_position(host.tabs(), host.active_id(), option_value(args, "-t"))
+            };
+            let Some(position) = position else {
+                return Some(IpcResponse::failure("can't find window"));
+            };
+            match host.select_tab_at(position) {
+                Ok(()) => Some(IpcResponse::success("")),
+                Err(error) => Some(IpcResponse::failure(error)),
+            }
+        }
+        "killw" | "kill-window" => {
+            let Some(position) =
+                resolve_target_position(host.tabs(), host.active_id(), option_value(args, "-t"))
+            else {
+                return Some(IpcResponse::failure("can't find window"));
+            };
+            let id = host.tabs()[position].id;
+            match host.close_tab_id(id) {
+                Ok(true) => Some(IpcResponse::success("")),
+                Ok(false) => Some(IpcResponse::typed_failure(
+                    "terminal was removed, but its workers did not finish bounded shutdown",
+                    "terminal_shutdown_incomplete",
+                    "internal",
+                    false,
+                )),
+                Err(error) => Some(IpcResponse::failure(error)),
+            }
+        }
+        "active-window" | "active-tab" => {
+            let Some(position) =
+                resolve_target_position(host.tabs(), host.active_id(), None)
+            else {
+                return Some(IpcResponse::failure("no active window"));
+            };
+            let format = option_value(args, "-F").unwrap_or("#{window_id}:#{window_name}");
+            let tab = &host.tabs()[position];
+            Some(IpcResponse::success(render_format(
+                format,
+                tab,
+                host.session_name(),
+                true,
+            )))
+        }
+        "display" | "display-message" => {
+            let Some(position) =
+                resolve_target_position(host.tabs(), host.active_id(), option_value(args, "-t"))
+            else {
+                return Some(IpcResponse::failure("can't find pane"));
+            };
+            let format = last_positional(args, &["-t"])
+                .unwrap_or("#{session_name}:#{window_index}.#{pane_index}");
+            let tab = &host.tabs()[position];
+            Some(IpcResponse::success(render_format(
+                format,
+                tab,
+                host.session_name(),
+                host.active_id() == Some(tab.id),
+            )))
+        }
+        "rename" | "rename-session" => {
+            let Some(name) = last_positional(args, &["-t"]) else {
+                return Some(IpcResponse::failure("usage: rename-session new-name"));
+            };
+            host.set_session_name(name.to_owned());
+            Some(IpcResponse::success(""))
         }
         "kill-session" | "kill-server" => {
             if let Some(requested) = option_value(args, "-t")
