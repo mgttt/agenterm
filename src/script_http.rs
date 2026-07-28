@@ -321,8 +321,8 @@ fn parse_proxy(value: Option<Dynamic>) -> Result<ProxySetting, Box<EvalAltResult
 
 fn perform_request(spec: HttpRequestSpec) -> Result<ScriptHttpResponse, String> {
     let tls = TlsConfig::builder()
-        .provider(TlsProvider::NativeTls)
-        .root_certs(RootCerts::PlatformVerifier)
+        .provider(TlsProvider::Rustls)
+        .root_certs(RootCerts::WebPki)
         .build();
     let mut config = Agent::config_builder()
         .http_status_as_error(false)
@@ -427,6 +427,7 @@ fn map_ureq_error(error: UreqError) -> String {
         {
             "http_timeout"
         }
+        UreqError::Io(ref error) if error.kind() == std::io::ErrorKind::InvalidData => "http_tls",
         UreqError::Io(_) | UreqError::ConnectionFailed | UreqError::Other(_) => "http_transport",
         UreqError::Timeout(_) => "http_timeout",
         UreqError::HostNotFound => "http_host_not_found",
@@ -567,5 +568,41 @@ mod tests {
             .to_string();
         assert!(error.contains("http_timeout_option"));
         assert!(error.contains("greater than zero"));
+    }
+
+    #[test]
+    fn rustls_handshake_failure_is_typed_and_bounded() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut client_hello = [0_u8; 1024];
+            let bytes = stream.read(&mut client_hello).unwrap();
+            assert!(bytes > 0);
+            stream
+                .write_all(
+                    b"HTTP/1.1 400 Bad Request\r\n\
+                      Connection: close\r\nContent-Length: 0\r\n\r\n",
+                )
+                .unwrap();
+        });
+        let started = std::time::Instant::now();
+        let error = engine()
+            .eval::<Dynamic>(&format!(
+                r#"
+                    rhai::http::request("GET", "https://{address}/tls", #{{
+                        proxy: false,
+                        timeout: std::time::Duration::from_millis(500)
+                    }})
+                "#
+            ))
+            .unwrap_err()
+            .to_string();
+        server.join().unwrap();
+        assert!(error.contains("http_tls"), "{error}");
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "TLS failure ignored the request deadline"
+        );
     }
 }

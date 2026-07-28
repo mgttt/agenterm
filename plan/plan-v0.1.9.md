@@ -1623,14 +1623,14 @@ S0  [x] ownership inventory + typed discovery/negotiation 已交付；
 S1  [x] current combined server 已能从同一
         ControlHost/TerminalTab/EventJournal truth 生成 bootstrap 和受影响标签
         的完整 delta post-state；独立 state owner 仍属于 S3
-S2  [~] `ui-hello`、`ui-bootstrap`、有界 `ui-deltas` polling 已通过公共
+S2  [x] `ui-hello`、`ui-bootstrap`、有界 `ui-deltas` polling 已通过公共
         loopback IPC 与黑盒 snapshot-follow/restart/gap 证据；专用
-        subscription transport 与 GUI consumer/reconnect 进入 S4
-S3  [~] internal `agenterm-server.exe` 已能无 HWND 地持有 workspace、
+        subscription transport 是未来优化，不是正确性依赖
+S3  [x] internal `agenterm-server.exe` 已能无 HWND 地持有 workspace、
         tab/tree、真实 ConPTY、parser/scrollback、event journal 和共享
         operation replay/receipt authority，并通过公共 hello/bootstrap/
-        delta/PTY/receipt 黑盒；完整 server 命令面与默认 authority 切换待补
-S4  [~] server-owned 单活 interactive UI lease 已交付 attach/idempotent
+        delta/PTY/receipt 黑盒；完整 server 命令面与默认 authority 已切换
+S4  [x] server-owned 单活 interactive UI lease 已交付 attach/idempotent
         renewal/live-owner conflict/heartbeat/detach 与 dead/expired 回收；
         `ui-interact` 已对 stable-ID select、有界 binary input、PTY resize
         强制 exact-live-lease；opt-in `agenterm.exe --ui-client` 已能启动/
@@ -1669,9 +1669,10 @@ S4  [~] server-owned 单活 interactive UI lease 已交付 attach/idempotent
         Composer 命令并发布 pending working-context/event，Esc 或再次点击
         segment 则无变更恢复原 draft。鼠标 Prepare/Cancel、稳定 tab target、
         pending CWD 与 Composer post-state 已进入公开黑盒。
-        普通启动默认切换与最终旧工作台 parity 审计待补
+        普通启动默认切换、旧工作台 parity 与零孤儿审计已通过
 S5  [x] same-server GUI upgrade + rollback black-box
-S6  remove combined-process handoff only after parity gates
+S6  [x] parity gates 后删除不可达的 combined Win32 runtime；启动器只做
+        replaceable client handoff，永不成为 server
 ```
 
 验收必须同时证明：

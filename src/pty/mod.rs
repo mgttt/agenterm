@@ -3,7 +3,7 @@
 //! Windows delegates to `rmux-pty`; Unix uses POSIX `openpty` with `libc`.
 
 #[cfg(windows)]
-pub use rmux_pty::{ProcessId, TerminalSize};
+pub use rmux_pty::TerminalSize;
 
 #[cfg(unix)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -64,4 +64,4 @@ mod windows;
 #[cfg(unix)]
 pub use unix::{ChildCommand, PtyChild, PtyMaster};
 #[cfg(windows)]
-pub use windows::{ChildCommand, PtyChild, PtyMaster, write_windows_console_mouse_drag};
+pub use windows::{ChildCommand, PtyChild, PtyMaster};

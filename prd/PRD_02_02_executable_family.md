@@ -4,8 +4,9 @@ Parent: [AgenTerm product tree](../PRD.md#product-tree)
 
 Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
-- [x] `agenterm.exe`: Windows-subsystem GUI, PTY owner, workspace authority,
-  renderer, and IPC server
+- [x] `agenterm.exe`: Windows-subsystem replaceable GUI client; it owns HWND,
+  renderer, layout, focus, clipboard and menus but never PTYs or workspace
+  truth
 - [~] `agenterm` on Linux/macOS: GUI + POSIX PTY + software-raster window;
   shared `control_dispatch` covers observe/input/tab lifecycle/kill
   (`protocol-info`, `list-*`, `new/select/kill-window`, `send-keys`,
@@ -13,19 +14,19 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   `execute_command` routes the same arms through `ControlHost`; remaining
   UI-only commands (`ui-snapshot`, screenshots, composer HWND, settings)
   stay host-specific
-- [~] target architecture separates the replaceable Win32 GUI client from the
+- [x] the shipped architecture separates the replaceable Win32 GUI client from the
   workspace/PTY/server authority so a GUI-only restart can preserve live tabs;
   this is now an accepted v0.1.9 requirement rather than an exploratory
   ownership question:
-  - [~] `agenterm-server.exe` is an internal Windows-subsystem process and the
+  - [x] `agenterm-server.exe` is an internal Windows-subsystem process and the
     stable owner of workspace/tree selection, PTYs and child PIDs, terminal
     parser/scrollback, composer drafts, working-context facts, operation
     receipts and the event journal; it has no user-facing HWND and does not own
     layout, theme, focus, clipboard, menus or rendering
     - [x] the first internal `agenterm-server.exe` is a real headless process that owns workspace persistence, tab/tree selection, ConPTY children, parser/scrollback, the event journal, shared replay/receipt authority outside Win32 `AppState`, and a single live interactive UI lease; public server smoke proves hello/bootstrap/delta, lease attach/idempotent renewal/live-owner conflict/heartbeat/detach, lease-gated stable-ID selection/bounded binary input/PTY resize, terminal output, committed replay, conflict rejection, asynchronous receipt completion, persistence, graceful shutdown and zero user-facing HWND
-    - [ ] complete every server-owned command and make this executable the
-      default authority before declaring the server role complete
-  - [ ] `agenterm.exe` always runs the current on-disk replaceable GUI client;
+    - [x] the shared command surface and ordinary-launch black boxes prove this
+      executable is the default authority
+  - [x] `agenterm.exe` always runs the current on-disk replaceable GUI client;
     if no compatible server exists it bootstraps `agenterm-server.exe`, then
     connects through the same typed loopback control boundary instead of
     becoming the server itself
@@ -52,22 +53,21 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       the lease, while `stop-server-and-exit` additionally delays server
       shutdown until the CLI has collected that result; both paths are
       orphan-free in the public black box.
-    - [ ] switch ordinary `agenterm.exe` launches only after the replaceable
-      client reaches the accepted workbench, settings, editing, selection,
-      clipboard, scrollback, close-dialog and observation parity gates
-  - [~] UI bootstrap uses a versioned hello, complete bounded workspace and
+    - [x] ordinary `agenterm.exe` launches use the replaceable client after
+      passing workbench, settings, editing, selection, clipboard, scrollback,
+      close-dialog, observation and orphan-free parity gates
+  - [x] UI bootstrap uses a versioned hello, complete bounded workspace and
     terminal-screen snapshot, event baseline, then ordered deltas; reconnect
     detects restart, journal gap and incompatible protocol without silently
     discarding live server state
     - [x] renderer-neutral UI bootstrap and terminal-screen DTOs publish independent schema versions, causal server epoch/sequence identity, stable tab/tree identity, completeness facts and hard byte/item/dimension limits
-    - [x] `ui-bootstrap` projects current combined-server tab/tree/process/composer/working-context/screen truth through those DTOs and public black-box evidence compares its causal position and tab metadata with `ui-snapshot` and `inspect`
+    - [x] `ui-bootstrap` projects authoritative server tab/tree/process/composer/working-context/screen truth through those DTOs and public black-box evidence compares its causal position and tab metadata with `ui-snapshot` and `inspect`
     - [x] `ui-hello` negotiates a bounded protocol range, echoes an additive bounded client-build identity, and returns the server build, PID, epoch, sequence and contract schemas while compatible prior peers may omit the new identities; `ui-deltas` follows that baseline with ordered journal events, affected-tab terminal post-state, active-tab identity, explicit completeness and typed restart, gap and future-sequence recovery
-    - [~] the current combined and split servers populate and serve hello,
-      bootstrap and bounded delta-poll contracts through public loopback IPC;
-      the replaceable GUI consumes them and reconnects after epoch restart.
-      A dedicated subscription channel remains pending; polling is the shipped
-      bounded transport.
-  - [~] one interactive UI lease owns terminal resize/focus/input while future
+    - [x] the independent server serves hello, bootstrap and bounded delta-poll
+      contracts through public loopback IPC; the replaceable GUI consumes them
+      and reconnects after epoch restart. A dedicated subscription channel is
+      a future transport optimization, not a correctness dependency.
+  - [x] one interactive UI lease owns terminal resize/focus/input while future
     read-only observers remain possible; replacing or crashing the GUI releases
     only that lease and never ends PTYs
     - [x] `ui-lease attach|heartbeat|detach|status` provides single-live-owner
@@ -76,7 +76,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [x] the dedicated `ui-interact` path requires the exact live lease for
       stable-ID active-tab selection, bounded binary terminal input and bounded
       PTY resize; independent typed automation remains a separate control plane
-    - [~] the opt-in replaceable GUI consumer acquires and uses that path; it
+    - [x] the ordinary replaceable GUI consumer acquires and uses that path; it
       reconnects in place with the same GUI PID/HWND after a server epoch
       restart and adopts the new causal bootstrap/lease identity. Tabs
       visibility and drag width remain client-owned and persist through the
@@ -126,23 +126,21 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       `Prepare`/Ctrl+Enter asks the server to generate a shell-safe replacement
       Composer command and publish pending working-context plus causal events,
       while Esc or a second segment click restores the prior draft unchanged.
-      Same-server GUI upgrade and rollback qualification is shipped. Ordinary
-      launches and the remaining observation-shape parity audit are still
-      pending before the split path can become the default.
-  - [ ] compatibility is fail-closed and asymmetric: a new GUI may connect to
+      Same-server GUI upgrade/rollback, ordinary-launch and observation-shape
+      parity qualification are shipped.
+  - [x] compatibility is fail-closed and asymmetric: a new GUI may connect to
     its declared server protocol range; an incompatible server remains alive
     and reports a precise upgrade/restart choice instead of being killed
   - [x] S0 protocol discovery publishes a typed UI bridge schema, compatible
-     version range, current `combined_gui_server` ownership, target executable
+     version range, ownership mode, target executable
      and independently truthful capability flags. Bootstrap, ordered delta
      polling, an opt-in replaceable consumer, and in-place reconnect are now
-     shipped. Combined-host facts remain conservative; split-server facts
-     advertise the proven replaceable/reconnect/rollback set, while default
-     replacement remains false until its ordinary-launch black-box gate passes.
+     shipped. Split-server facts advertise the proven replaceable/reconnect/
+     rollback/default-launch set.
   - [x] black-box upgrade proof uses two genuinely different GUI binaries and keeps server PID, epoch, stable tab ID, PTY child PID, Composer/CWD facts, scrollback markers and continuing output stable while HWND and GUI build identity change; competing startup exits nonzero without a blocking dialog, incompatible hello fails closed without disturbing the server, and rollback restores the prior compatible GUI identity
-  - [~] migration is phased through extracted server state and renderer-neutral
-    screen contracts. The current combined `agenterm.exe` remains truthful
-    until those gates pass; merely hiding its old HWND is not GUI replacement
+  - [x] migration completed through extracted server state and renderer-neutral
+    screen contracts. The unreachable combined Win32 runtime was removed after
+    parity gates; ordinary launches never become the server process.
 - [x] `agenterm.exe` rejects CLI-style or invalid GUI arguments without
   creating a window or information dialog: it writes best-effort
   inherited-stderr guidance and exits nonzero; normal and focus-existing

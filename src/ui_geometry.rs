@@ -5,6 +5,7 @@ pub(crate) const TAB_RIGHT_MARGIN: i32 = 5;
 pub(crate) const TREE_INDENT: i32 = 12;
 pub(crate) const TREE_ANCHOR_LEFT: i32 = 12;
 pub(crate) const TERMINAL_SCROLLBAR_WIDTH: i32 = 12;
+#[cfg(test)]
 pub(crate) const COMPOSER_HEIGHT: i32 = 104;
 pub(crate) const TABS_MIN_WIDTH: i32 = 180;
 pub(crate) const TABS_DEFAULT_WIDTH: i32 = 250;

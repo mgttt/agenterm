@@ -17,7 +17,6 @@ pub mod operations;
 mod protocol;
 #[cfg(windows)]
 mod remote_win_app;
-mod rmux_status;
 pub mod script_api_view;
 pub mod script_catalog;
 pub mod script_error;
@@ -33,6 +32,7 @@ mod settings;
 mod tab_tree;
 mod terminal_lifecycle;
 mod terminal_observation;
+#[cfg(unix)]
 mod terminal_selection;
 mod theme;
 pub mod ui_bridge;

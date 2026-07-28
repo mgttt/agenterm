@@ -13,17 +13,17 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   The UI ownership explanation is available through discovery, but a governed
   lifecycle-action surface and end-to-end upgrade qualification remain planned
 - [x] public fleet discovery distinguishes same, stale, incompatible, and unknown running-versus-staged identity without guessing missing build fields
-- [~] define and prototype a split server/GUI restart path that preserves
-  server PID, tab IDs, PTYs and scrollback; do not claim GUI-only upgrade until
-  the version handshake, bootstrap, reconnect and rollback black-box passes
+- [x] the split server/GUI restart path preserves server PID, tab IDs, PTYs
+  and scrollback through version handshake, bootstrap, reconnect and rollback
+  black-box evidence
   - [x] v0.1.9 ownership decision: a dedicated internal
     `agenterm-server.exe` owns session/runtime state and has no GUI surface;
     `agenterm.exe` is a replaceable client. This separate image is intentional:
     Windows must not keep the replaceable GUI executable locked merely because
     the stable server is alive.
-  - [~] renderer-neutral hello/bootstrap/delta DTOs and typed interaction
-    adapters now drive the opt-in GUI without duplicated PTY truth. Closing and
+  - [x] renderer-neutral hello/bootstrap/delta DTOs and typed interaction
+    adapters drive the ordinary GUI without duplicated PTY truth. Closing and
     replacing the GUI preserves the same server/tab/PTY marker, and the same
     GUI PID/HWND reconnects across a server epoch restart. Default launch,
-    full workbench parity and previous-compatible-GUI rollback remain before
-    ownership migration is complete.
+    full workbench parity, previous-compatible-GUI rollback and zero-orphan
+    cleanup are qualified.

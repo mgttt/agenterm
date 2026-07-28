@@ -847,6 +847,29 @@ impl ServerState {
                 {
                     self.commit_client_ui_action_event(command, &response);
                 }
+                if response.ok
+                    && let Ok(mut value) =
+                        serde_json::from_str::<serde_json::Value>(&response.output)
+                    && value["projection"].as_str() == Some("replaceable_ui_client")
+                {
+                    let position = self.event_journal.position();
+                    value["event_position"]["epoch"] = serde_json::Value::String(position.epoch);
+                    value["event_position"]["sequence"] =
+                        serde_json::Value::from(position.sequence);
+                    response.output =
+                        serde_json::to_string_pretty(&value).unwrap_or(response.output);
+                    if let Err(error) = self
+                        .ui_client_commands
+                        .replace_completed(command_id, &response)
+                    {
+                        return IpcResponse::typed_failure(
+                            error,
+                            "ui_client_command_completion_invalid",
+                            "internal",
+                            false,
+                        );
+                    }
+                }
                 if has_option(args, "--detach") {
                     let record = match self.ui_lease.detach(lease_id, client_pid) {
                         Ok(record) => record,

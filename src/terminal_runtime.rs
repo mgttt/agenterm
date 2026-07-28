@@ -11,12 +11,9 @@ use std::{
 use anyhow::{Context as _, Result};
 
 use crate::pty::{ChildCommand, PtyChild, PtyMaster, TerminalSize};
-#[cfg(windows)]
-use crate::pty::{ProcessId, write_windows_console_mouse_drag};
 
 use crate::{
     SCROLLBACK_LINES, ipc_address, request_gui_wake,
-    rmux_status::parse_status_windows,
     terminal_lifecycle::{BoundedByteRing, SubmissionState, TerminalLifecycle},
     terminal_observation::TerminalObservation,
     wake_signal::WakeSignal,
@@ -28,8 +25,6 @@ use crate::{
 
 const COMPOSER_SUBMIT_DELAY: std::time::Duration = std::time::Duration::from_millis(500);
 const RAW_OUTPUT_LIMIT: usize = 1024 * 1024;
-const PROXY_REDACTION_MAX_NEEDLES: usize = 8;
-const PROXY_REDACTION_MAX_BYTES: usize = 32 * 1024;
 const PROXY_REDACTION_MARKER: &[u8] = b"<redacted-proxy>";
 const PROXY_CONFIRMATION_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -181,70 +176,6 @@ impl TerminalTab {
             parser_drained: self.lifecycle.parser_drained(),
             finalized: self.lifecycle.finalized(process_finished),
         }
-    }
-
-    pub(super) fn register_proxy_redactions(&mut self, values: &[&str]) -> Result<()> {
-        let mut additions = Vec::new();
-        for value in values.iter().copied().filter(|value| !value.is_empty()) {
-            if !self
-                .proxy_redaction_needles
-                .iter()
-                .any(|needle| needle.expose() == value)
-                && !additions.contains(&value)
-            {
-                additions.push(value);
-            }
-        }
-        let next_count = self.proxy_redaction_needles.len() + additions.len();
-        let next_bytes = self
-            .proxy_redaction_needles
-            .iter()
-            .map(|needle| needle.expose_bytes().len())
-            .sum::<usize>()
-            + additions.iter().map(|value| value.len()).sum::<usize>();
-        if next_count > PROXY_REDACTION_MAX_NEEDLES || next_bytes > PROXY_REDACTION_MAX_BYTES {
-            anyhow::bail!(
-                "proxy redaction history is full; restart this tab before changing proxy again"
-            );
-        }
-        for value in additions {
-            self.proxy_redaction_needles
-                .push(SecretValue::new(value.to_owned())?);
-        }
-        Ok(())
-    }
-
-    pub(super) fn ensure_interactive_proxy_shell(&self) -> Result<()> {
-        let arguments = self
-            .command_line
-            .iter()
-            .skip(1)
-            .map(|argument| argument.to_ascii_lowercase())
-            .collect::<Vec<_>>();
-        let unsupported = match self.shell_kind {
-            ShellKind::Cmd => arguments
-                .iter()
-                .any(|argument| matches!(argument.as_str(), "/c" | "/k")),
-            ShellKind::PowerShell => arguments.iter().any(|argument| {
-                matches!(
-                    argument.as_str(),
-                    "-command" | "-c" | "-encodedcommand" | "-enc" | "-file" | "-f"
-                )
-            }),
-            ShellKind::Bash => {
-                arguments.iter().any(|argument| argument == "-c")
-                    || arguments.iter().any(|argument| !argument.starts_with('-'))
-            }
-            ShellKind::Unknown => true,
-        };
-        if unsupported {
-            anyhow::bail!(
-                "proxy changes require an interactive cmd, PowerShell, or Bash shell; \
-                 direct commands and TUI child programs are not supported; \
-                 create a new tab with --proxy instead"
-            );
-        }
-        Ok(())
     }
 
     pub(super) fn begin_proxy_confirmation(&mut self, marker: ProxyConfirmationMarker) {
@@ -580,12 +511,6 @@ impl TerminalTab {
         (screen.scrollback(), maximum)
     }
 
-    pub(super) fn set_scrollback(&mut self, offset: usize) -> usize {
-        let screen = self.parser.screen_mut();
-        screen.set_scrollback(offset);
-        screen.scrollback()
-    }
-
     pub(crate) fn send(&mut self, bytes: &[u8]) -> bool {
         if self.exited.is_some() || self.error.is_some() || self.lifecycle.reader_closed() {
             return false;
@@ -629,94 +554,6 @@ impl TerminalTab {
         self.submission_enter_written = None;
         self.submission
             .schedule(Instant::now(), COMPOSER_SUBMIT_DELAY)
-    }
-
-    pub(super) fn send_native_mouse_click(&mut self, x: u16, y: u16) -> Result<()> {
-        #[cfg(not(windows))]
-        {
-            let _ = (x, y);
-            anyhow::bail!("native console mouse is Windows-only");
-        }
-        #[cfg(windows)]
-        {
-            if self.exited.is_some() {
-                anyhow::bail!("process has exited");
-            }
-            let raw_pid = self.process_id.context("process id is unavailable")?;
-            let process_id = ProcessId::new(raw_pid).context("invalid process id")?;
-            let x = i16::try_from(x).context("mouse x coordinate is too large")?;
-            let y = i16::try_from(y).context("mouse y coordinate is too large")?;
-            write_windows_console_mouse_drag(process_id, x, y, x, y)
-                .context("WriteConsoleInputW click failed")?;
-            self.input_bytes += 3;
-            Ok(())
-        }
-    }
-
-    pub(super) fn send_rmux_status_click(&mut self, x: u16, y: u16) -> bool {
-        let (rows, cols) = self.last_size;
-        if y >= rows {
-            return false;
-        }
-        let (target, active, mut windows) = {
-            let screen = self.parser.screen();
-            let mut target = None;
-            let mut active = None;
-            let mut windows = Vec::new();
-            for row in 0..rows {
-                let mut line = String::with_capacity(cols as usize);
-                for col in 0..cols {
-                    let text = screen
-                        .cell(row, col)
-                        .map(|cell| cell.contents())
-                        .unwrap_or(" ");
-                    line.push(if text.is_empty() {
-                        ' '
-                    } else {
-                        text.chars().next().unwrap_or(' ')
-                    });
-                }
-                for status_window in parse_status_windows(&line) {
-                    if status_window.active {
-                        active = Some(status_window.index);
-                    }
-                    if row == y
-                        && usize::from(x) >= status_window.start
-                        && usize::from(x) < status_window.end
-                    {
-                        target = Some(status_window.index);
-                    }
-                    if !windows.contains(&status_window.index) {
-                        windows.push(status_window.index);
-                    }
-                }
-            }
-            (target, active, windows)
-        };
-        let (Some(target), Some(active)) = (target, active) else {
-            return false;
-        };
-        if target == active {
-            return true;
-        }
-        windows.sort_unstable();
-        let Some(active_position) = windows.iter().position(|index| *index == active) else {
-            return false;
-        };
-        let Some(target_position) = windows.iter().position(|index| *index == target) else {
-            return false;
-        };
-        let forward = (target_position + windows.len() - active_position) % windows.len();
-        let backward = (active_position + windows.len() - target_position) % windows.len();
-        let (key, repeats) = if forward <= backward {
-            (b"\x1bOS".as_slice(), forward)
-        } else {
-            (b"\x1bOR".as_slice(), backward)
-        };
-        for _ in 0..repeats {
-            self.send(key);
-        }
-        true
     }
 
     fn record_worker_completion(&mut self, completion: TerminalWorkerCompletion) {

@@ -554,6 +554,33 @@ try {
         }).Count -ne 0) {
         throw 'Script API v2 did not map every typed operation exactly once'
     }
+    $pipeInfo = [Diagnostics.ProcessStartInfo]::new()
+    $pipeInfo.FileName = $workerExe
+    $pipeInfo.UseShellExecute = $false
+    $pipeInfo.CreateNoWindow = $true
+    $pipeInfo.RedirectStandardOutput = $true
+    $pipeInfo.RedirectStandardError = $true
+    $pipeInfo.ArgumentList.Add('api')
+    $pipeInfo.ArgumentList.Add('--json')
+    $pipeProcess = [Diagnostics.Process]::Start($pipeInfo)
+    Register-SmokeOwnedProcess -Context $smokeRun -Id $pipeProcess.Id `
+        -Kind 'script-client'
+    try {
+        $pipelinePrefix = $pipeProcess.StandardOutput.ReadLine()
+        $pipeProcess.StandardOutput.Dispose()
+        $pipelineError = $pipeProcess.StandardError.ReadToEnd()
+        $pipeProcess.WaitForExit()
+        $pipelineExit = $pipeProcess.ExitCode
+    }
+    finally {
+        $pipeProcess.Dispose()
+    }
+    if ($pipelineExit -ne 0 -or [string]::IsNullOrEmpty($pipelinePrefix)) {
+        throw (
+            'script stdout did not treat a downstream closed pipe as a ' +
+            "normal early consumer exit: code=$pipelineExit error=$pipelineError"
+        )
+    }
 
     Write-Host 'STEP filtered scripting API object tree'
     $apiTree = Invoke-DirectScript @(
@@ -931,7 +958,11 @@ task.cancel();
             @'
 let base = args[0];
 let tls_base = args[1];
-let options = #{proxy: false, timeout: std::time::Duration::from_secs(2)};
+let options = #{proxy: false, timeout: std::time::Duration::from_secs(1)};
+let protocol_error_options = #{
+    proxy: false,
+    timeout: std::time::Duration::from_millis(500)
+};
 
 let status = rhai::http::request("GET", base + "/status", options);
 let status_values = status.header("x-test");
@@ -983,21 +1014,24 @@ try {
 
 let malformed_error = "";
 try {
-    rhai::http::request("GET", base + "/malformed", options);
+    rhai::http::request("GET", base + "/malformed", protocol_error_options);
 } catch (error) {
     malformed_error = error;
 }
 
 let disconnect_error = "";
 try {
-    rhai::http::request("GET", base + "/disconnect", options);
+    rhai::http::request("GET", base + "/disconnect", protocol_error_options);
 } catch (error) {
     disconnect_error = error;
 }
 
 let tls_error = "";
 try {
-    rhai::http::request("GET", tls_base + "/tls", options);
+    rhai::http::request("GET", tls_base + "/tls", #{
+        proxy: false,
+        timeout: std::time::Duration::from_millis(250)
+    });
 } catch (error) {
     tls_error = error;
 }
@@ -1799,7 +1833,9 @@ try {
     Invoke-Script @(
         '--address', $address, 'new-window', '-d', '-n', "script-observe-$PID"
     ) | Out-Null
-    $snapshot = Invoke-Script @('ui-snapshot') | ConvertFrom-Json
+    $snapshot = Invoke-Script @(
+        'wait-ui', '--window-state', 'restored', '--timeout-ms', '10000'
+    ) | ConvertFrom-Json
     $publicCapture = Invoke-Script @(
         'capture-pane', '-p', '-t', '@1', '--max-bytes', '5', '--json'
     ) | ConvertFrom-Json
@@ -1891,16 +1927,16 @@ let receipt = fleet.ui.tabs.toggle();
     operation_id: receipt.operation_id,
     outcome: receipt.outcome,
     event_count: receipt.events.len(),
-    event_kind: receipt.events[0].kind,
+    event_kind: if receipt.events.is_empty() { "" } else { receipt.events[0].kind },
     verified: receipt.post_state.verified,
-    reason: receipt.post_state.reason,
-    visible: receipt.post_state.value.layout.sidebar.visible
+    reason: receipt.post_state.reason
 }
 '@
     $fleetMutation = Invoke-Script @(
         'script', 'eval', $fleetMutationExpression,
         '--profile', 'local', '--json'
     ) | ConvertFrom-Json
+    $fleetMutationSnapshot = Invoke-Script @('ui-snapshot') | ConvertFrom-Json
     if (-not $fleetMutation.ok -or
         [string]::IsNullOrWhiteSpace($fleetMutation.value.request_id) -or
         $fleetMutation.value.operation_id -ne 'ui.tabs.toggle' -or
@@ -1908,8 +1944,13 @@ let receipt = fleet.ui.tabs.toggle();
         $fleetMutation.value.event_count -lt 1 -or
         $fleetMutation.value.event_kind -ne 'layout.tabs.visibility' -or
         -not $fleetMutation.value.verified -or
-        [bool]$fleetMutation.value.visible -eq $fleetBaselineVisible) {
-        throw 'Fleet mutation did not expose its receipt, correlated event, and verified post-state'
+        [bool]$fleetMutationSnapshot.layout.sidebar.visible -eq
+            $fleetBaselineVisible) {
+        throw (
+            'Fleet mutation did not expose its receipt, correlated event, and ' +
+            'verified post-state: ' +
+            ($fleetMutation.value | ConvertTo-Json -Compress -Depth 10)
+        )
     }
     $fleetRestore = Invoke-Script @(
         'script', 'eval', 'fleet.ui.tabs.toggle().post_state.verified',
@@ -1931,7 +1972,7 @@ let receipt = fleet.tabs.set_note($fleetTabIdLiteral, $fleetNoteLiteral);
     operation_id: receipt.operation_id,
     outcome: receipt.outcome,
     event_count: receipt.events.len(),
-    event_kind: receipt.events[0].kind,
+    event_kind: if receipt.events.is_empty() { "" } else { receipt.events[0].kind },
     verified: receipt.post_state.verified,
     reason: receipt.post_state.reason,
     tab: receipt.post_state.value.id,

@@ -5,8 +5,11 @@ use anyhow::{Result, bail};
 pub(crate) const OSC7_MAX_BYTES: usize = 4096;
 pub(crate) const CWD_MAX_CHARS: usize = 4096;
 pub(crate) const PROXY_MAX_BYTES: usize = 8192;
+#[cfg(test)]
 const PROXY_CONFIRMATION_PREFIX: &str = "__AGENTERM_PROXY_APPLIED_";
+#[cfg(test)]
 const PROXY_CONFIRMATION_SUFFIX: &str = "__";
+#[cfg(test)]
 const PROXY_CONFIRMATION_NONCE_BYTES: usize = 32;
 
 pub(crate) struct SecretValue(String);
@@ -49,6 +52,7 @@ impl Drop for SecretValue {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ProxySource {
     Launch,
+    #[cfg(test)]
     UserRequested,
     Off,
 }
@@ -57,6 +61,7 @@ impl ProxySource {
     pub(crate) const fn as_str(self) -> &'static str {
         match self {
             Self::Launch => "launch",
+            #[cfg(test)]
             Self::UserRequested => "user_requested",
             Self::Off => "off",
         }
@@ -162,6 +167,7 @@ impl ProxyState {
         })
     }
 
+    #[cfg(test)]
     pub(crate) fn requested(http: Option<String>, https: Option<String>) -> Result<Self> {
         Self::new(
             http,
@@ -181,6 +187,7 @@ impl ProxyState {
             )
     }
 
+    #[cfg(test)]
     pub(crate) const fn source(&self) -> ProxySource {
         self.source
     }
@@ -192,6 +199,7 @@ impl ProxyState {
         )
     }
 
+    #[cfg(test)]
     pub(crate) const fn application_state(&self) -> ProxyApplicationState {
         self.application_state
     }
@@ -245,14 +253,6 @@ impl ProxyState {
      * `sanitized_label` and `compact_label` formatted the visible status
      * segment. Validation and redacted machine facts remain compiled.
      */
-
-    pub(crate) fn editor_text(&self) -> String {
-        format!(
-            "HTTP_PROXY={}\r\nHTTPS_PROXY={}",
-            self.http().unwrap_or(""),
-            self.https().unwrap_or("")
-        )
-    }
 
     fn has_values(&self) -> bool {
         self.http.is_some() || self.https.is_some()
@@ -359,6 +359,7 @@ pub(crate) fn parse_proxy_url(value: &str) -> Option<ProxyEndpoint> {
     Some(ProxyEndpoint)
 }
 
+#[cfg(test)]
 pub(crate) fn parse_proxy_editor(text: &str) -> Result<(Option<String>, Option<String>)> {
     let mut http = None;
     let mut https = None;
@@ -426,6 +427,7 @@ pub(crate) fn proxy_command(
 pub(crate) struct ProxyConfirmationMarker(String);
 
 impl ProxyConfirmationMarker {
+    #[cfg(test)]
     pub(crate) fn from_nonce(nonce: &str) -> Result<Self> {
         if nonce.len() != PROXY_CONFIRMATION_NONCE_BYTES
             || !nonce
@@ -457,11 +459,13 @@ impl ProxyConfirmationMarker {
     }
 }
 
+#[cfg(test)]
 pub(crate) struct ProxyCommandPlan {
     command: SecretValue,
     marker: ProxyConfirmationMarker,
 }
 
+#[cfg(test)]
 impl ProxyCommandPlan {
     #[cfg(test)]
     pub(crate) fn command(&self) -> &SecretValue {
@@ -480,6 +484,7 @@ impl ProxyCommandPlan {
 /// Builds a shell command whose marker is written only after every requested
 /// environment change succeeds. The marker is caller-supplied, nonsecret, and
 /// deliberately independent from the proxy values.
+#[cfg(test)]
 pub(crate) fn proxy_command_with_confirmation(
     shell: ShellKind,
     http: Option<&str>,

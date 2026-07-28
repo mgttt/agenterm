@@ -236,16 +236,15 @@ pub fn run_script_entry_with_args(mut arguments: Vec<String>) -> i32 {
             .first()
             .is_some_and(|argument| argument == "-h" || argument == "--help")
     {
-        print_script_help();
-        return 0;
+        return write_script_stdout(&format!("{}\n", script_help_text()))
+            .map_or_else(|code| code, |()| 0);
     }
     arguments.insert(0, "script".to_owned());
     run_cli(arguments, CliControlOptions::default())
 }
 
-fn print_script_help() {
-    println!(
-        "AgenTerm Script Runtime\n\
+fn script_help_text() -> &'static str {
+    "AgenTerm Script Runtime\n\
          Usage:\n\
            agenterm-script api [MODULE] [--status STATE] [--tree|--json]\n\
            agenterm-script check [OPTIONS] FILE.rhai|-\n\
@@ -257,7 +256,21 @@ fn print_script_help() {
            agenterm-script task run TASK [--manifest PATH] [OPTIONS] [--] [ARGS...]\n\
          Options: --profile local|pure|observe --timeout-ms N \
          --max-operations N --json"
-    );
+}
+
+fn write_script_stdout(text: &str) -> std::result::Result<(), i32> {
+    let mut stdout = std::io::stdout().lock();
+    match stdout
+        .write_all(text.as_bytes())
+        .and_then(|()| stdout.flush())
+    {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => Err(0),
+        Err(error) => {
+            eprintln!("script_stdout: failed to write output: {error}");
+            Err(1)
+        }
+    }
 }
 
 pub fn run_mux_entry() -> i32 {
@@ -519,6 +532,14 @@ fn send_control_request(args: Vec<String>, control: ControlRequest) -> Result<Ip
 }
 
 fn await_ui_client_relay(response: IpcResponse, timeout: Duration) -> Result<IpcResponse> {
+    await_ui_client_relay_to(response, &ipc_address(), timeout)
+}
+
+fn await_ui_client_relay_to(
+    response: IpcResponse,
+    address: &str,
+    timeout: Duration,
+) -> Result<IpcResponse> {
     if !response.ok {
         return Ok(response);
     }
@@ -532,14 +553,23 @@ fn await_ui_client_relay(response: IpcResponse, timeout: Duration) -> Result<Ipc
         .as_str()
         .context("UI client relay omitted command_id")?
         .to_owned();
+    let relay_receipt = response.receipt;
     let deadline = Instant::now() + timeout;
     loop {
-        let result = send_ipc_request(vec![
-            "ui-client-command".to_owned(),
-            "result".to_owned(),
-            "--command-id".to_owned(),
-            command_id.clone(),
-        ])?;
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            anyhow::bail!("UI client command {command_id} timed out");
+        }
+        let result = send_ipc_request_to_timeout(
+            address,
+            vec![
+                "ui-client-command".to_owned(),
+                "result".to_owned(),
+                "--command-id".to_owned(),
+                command_id.clone(),
+            ],
+            remaining,
+        )?;
         if !result.ok {
             anyhow::bail!(
                 "{} [{}:{}]",
@@ -551,11 +581,22 @@ fn await_ui_client_relay(response: IpcResponse, timeout: Duration) -> Result<Ipc
         let value: serde_json::Value =
             serde_json::from_str(&result.output).context("invalid UI client relay result")?;
         if value["state"].as_str() == Some("complete") {
-            return serde_json::from_value(value["response"].clone())
-                .context("invalid completed UI client response");
-        }
-        if Instant::now() >= deadline {
-            anyhow::bail!("UI client command {command_id} timed out");
+            let mut completed: IpcResponse = serde_json::from_value(value["response"].clone())
+                .context("invalid completed UI client response")?;
+            if completed.receipt.is_none()
+                && let Some(mut receipt) = relay_receipt.clone()
+            {
+                if let Ok(snapshot) = serde_json::from_str::<serde_json::Value>(&completed.output)
+                    && let Ok(position) = serde_json::from_value(snapshot["event_position"].clone())
+                {
+                    receipt.after_position = Some(position);
+                }
+                receipt.result = completed
+                    .ok
+                    .then(|| serde_json::json!({ "output": completed.output }));
+                completed.receipt = Some(receipt);
+            }
+            return Ok(completed);
         }
         thread::sleep(
             Duration::from_millis(20).min(deadline.saturating_duration_since(Instant::now())),
@@ -1385,40 +1426,44 @@ fn run_script_command_with_context(
     if let Err(error) = audit_sink.append(&audit_invocation, &audit_outcome) {
         return report_audit_error(error);
     }
-    if has_option(arguments, "--json") {
-        println!(
-            "{}",
+    let rendered_stdout = if has_option(arguments, "--json") {
+        Some(format!(
+            "{}\n",
             serde_json::to_string_pretty(&result).unwrap_or_else(|_| "{}".to_owned())
-        );
+        ))
     } else if result.ok {
+        let mut output = String::new();
         if !result.stdout.is_empty() {
-            print!("{}", result.stdout);
+            output.push_str(&result.stdout);
             if !result.stdout.ends_with('\n') {
-                println!();
+                output.push('\n');
             }
         }
         if let Some(value) = result.value {
             if operation == ScriptOperation::Api {
                 match render_script_api_tree(&value) {
-                    Ok(tree) => println!("{tree}"),
+                    Ok(tree) => {
+                        output.push_str(&tree);
+                        output.push('\n');
+                    }
                     Err(error) => {
                         eprintln!("agenterm-script.exe returned an invalid API catalog: {error}");
                         return 1;
                     }
                 }
-                return 0;
-            }
-            if let Some(value) = value.as_str() {
-                println!("{value}");
+            } else if let Some(value) = value.as_str() {
+                output.push_str(value);
+                output.push('\n');
             } else {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&value).unwrap_or_else(|_| value.to_string())
+                output.push_str(
+                    &serde_json::to_string_pretty(&value).unwrap_or_else(|_| value.to_string()),
                 );
+                output.push('\n');
             }
         } else if operation == ScriptOperation::Check {
-            println!("OK");
+            output.push_str("OK\n");
         }
+        Some(output)
     } else if let Some(failure) = &result.failure {
         eprintln!(
             "{}",
@@ -1429,6 +1474,14 @@ fn run_script_command_with_context(
                 "exit_class": result.exit_class,
             })
         );
+        None
+    } else {
+        None
+    };
+    if let Some(output) = rendered_stdout
+        && let Err(code) = write_script_stdout(&output)
+    {
+        return code;
     }
     if result.ok {
         0
@@ -1514,10 +1567,8 @@ fn run_script_task_command(arguments: &[String]) -> i32 {
         }
     };
     match action {
-        "list" => {
-            print_task_catalog(&catalog, has_option(arguments, "--json"));
-            0
-        }
+        "list" => print_task_catalog(&catalog, has_option(arguments, "--json"))
+            .map_or_else(|code| code, |()| 0),
         "show" => {
             let Some(id) = arguments.get(3).filter(|value| !value.starts_with('-')) else {
                 eprintln!("script task show requires a task ID");
@@ -1533,8 +1584,8 @@ fn run_script_task_command(arguments: &[String]) -> i32 {
                 return 2;
             }
             if has_option(arguments, "--json") {
-                println!(
-                    "{}",
+                let output = format!(
+                    "{}\n",
                     serde_json::to_string_pretty(&serde_json::json!({
                         "schema_version": catalog.schema_version,
                         "runtime_version": catalog.runtime_version,
@@ -1553,9 +1604,17 @@ fn run_script_task_command(arguments: &[String]) -> i32 {
                     }))
                     .unwrap_or_else(|_| "{}".to_owned())
                 );
+                if let Err(code) = write_script_stdout(&output) {
+                    return code;
+                }
             } else {
+                let mut output = String::new();
                 for task in matches {
-                    print_task_entry(task);
+                    output.push_str(&task_entry_text(task));
+                    output.push('\n');
+                }
+                if let Err(code) = write_script_stdout(&output) {
+                    return code;
                 }
             }
             0
@@ -1588,9 +1647,13 @@ fn run_script_task_command(arguments: &[String]) -> i32 {
                 return 2;
             }
             if has_option(arguments, "--json") {
-                print_task_catalog(&catalog, true);
+                if let Err(code) = print_task_catalog(&catalog, true) {
+                    return code;
+                }
             } else {
-                println!("OK");
+                if let Err(code) = write_script_stdout("OK\n") {
+                    return code;
+                }
             }
             0
         }
@@ -1626,21 +1689,23 @@ fn script_task_manifest(arguments: &[String]) -> Result<PathBuf, String> {
 }
 
 #[cfg(windows)]
-fn print_task_catalog(catalog: &ScriptTaskCatalog, json: bool) {
+fn print_task_catalog(catalog: &ScriptTaskCatalog, json: bool) -> std::result::Result<(), i32> {
     if json {
-        println!(
-            "{}",
+        return write_script_stdout(&format!(
+            "{}\n",
             serde_json::to_string_pretty(catalog).unwrap_or_else(|_| "{}".to_owned())
-        );
-        return;
+        ));
     }
+    let mut output = String::new();
     for task in &catalog.tasks {
-        print_task_entry(task);
+        output.push_str(&task_entry_text(task));
+        output.push('\n');
     }
+    write_script_stdout(&output)
 }
 
 #[cfg(windows)]
-fn print_task_entry(task: &crate::script_project::ScriptTaskEntry) {
+fn task_entry_text(task: &crate::script_project::ScriptTaskEntry) -> String {
     let status = match task.status {
         ScriptTaskStatus::Ready => "ready",
         ScriptTaskStatus::Degraded => "degraded",
@@ -1650,7 +1715,7 @@ fn print_task_entry(task: &crate::script_project::ScriptTaskEntry) {
         .as_deref()
         .filter(|value| !value.is_empty())
         .unwrap_or(task.description.as_str());
-    println!("{}\t{}\t{}", task.id, status, detail);
+    format!("{}\t{}\t{}", task.id, status, detail)
 }
 
 #[cfg(windows)]
@@ -2169,8 +2234,15 @@ fn script_fleet_mutation(
     remaining: Duration,
 ) -> Result<serde_json::Value, ScriptBrokerResponse> {
     let started = Instant::now();
-    let response = send_ipc_request_to_timeout(&ipc_address(), command, remaining)
+    let address = ipc_address();
+    let response = send_ipc_request_to_timeout(&address, command, remaining)
         .map_err(|error| script_broker_error("broker_transport", format!("{error:#}")))?;
+    let response = await_ui_client_relay_to(
+        response,
+        &address,
+        remaining.saturating_sub(started.elapsed()),
+    )
+    .map_err(|error| script_broker_error("broker_transport", format!("{error:#}")))?;
     let receipt = response.receipt.as_ref().ok_or_else(|| {
         script_broker_error(
             "broker_receipt_missing",
