@@ -92,6 +92,7 @@ foreach ($license in @(
         'BSD-3-Clause',
         'BSD-3-Clause OR MIT OR Apache-2.0',
         'CC0-1.0',
+        'CDLA-Permissive-2.0',
         'ISC',
         'MIT',
         'MIT OR Apache-2.0',

@@ -3,11 +3,17 @@ use serde_json::{Value, json};
 
 use crate::{
     operations::{OperationSpec, operation_by_id},
+    script_http::{
+        DEFAULT_HTTP_BODY_BYTES, DEFAULT_HTTP_REDIRECTS, DEFAULT_HTTP_TIMEOUT, MAX_HTTP_BODY_BYTES,
+        MAX_HTTP_HEADER_BYTES, MAX_HTTP_HEADERS, MAX_HTTP_REDIRECTS, MAX_HTTP_REQUEST_BODY_BYTES,
+        MAX_HTTP_TIMEOUT, MAX_HTTP_URL_BYTES,
+    },
     script_protocol::{
         SCRIPT_API_VERSION, SCRIPT_FRAME_MAX_BYTES, SCRIPT_FRAME_VERSION,
         SCRIPT_INVOCATION_MAX_BYTES, ScriptBudgets,
     },
     script_stream::{STREAM_BUFFER_BYTES, STREAM_READ_MAX_BYTES},
+    script_task::MAX_ACTIVE_TASKS,
 };
 
 pub const SCRIPT_CATALOG_SCHEMA_VERSION: u32 = 2;
@@ -72,6 +78,43 @@ const OBSERVE_PROFILE: &[&str] = &["observe"];
 const LOCAL_PROFILE: &[&str] = &["local"];
 const NO_STRINGS: &[&str] = &[];
 const BROKER_ERRORS: &[&str] = &["broker_host_error", "broker_transport"];
+const HTTP_REQUEST_ERRORS: &[&str] = &[
+    "http_method_invalid",
+    "http_method_unsupported",
+    "http_url_invalid",
+    "http_option_unknown",
+    "http_headers_limit",
+    "http_request_body_limit",
+    "http_timeout",
+    "http_redirect",
+    "http_proxy",
+    "http_tls",
+    "http_transport",
+];
+const HTTP_START_ERRORS: &[&str] = &[
+    "http_method_invalid",
+    "http_method_unsupported",
+    "http_url_invalid",
+    "http_option_unknown",
+    "http_headers_limit",
+    "http_request_body_limit",
+    "http_timeout",
+    "http_redirect",
+    "http_proxy",
+    "http_tls",
+    "http_transport",
+    "task_limit",
+    "task_spawn_failed",
+    "task_failed",
+    "task_cancelled",
+];
+const HTTP_RESPONSE_ERRORS: &[&str] = &[
+    "http_header_name",
+    "stream_read_timeout",
+    "stream_read_failed",
+    "stream_collect_limit",
+    "stream_closed",
+];
 
 pub fn entries() -> Vec<ScriptApiEntry> {
     let mut entries = vec![ScriptApiEntry {
@@ -666,11 +709,41 @@ pub fn entries() -> Vec<ScriptApiEntry> {
         shipped_local_entry(
             "rhai.task.handle",
             "runtime/task/handle",
-            "Task.id/state/done/cancelled/wait/cancel",
+            "Task.id/kind/state/done/cancelled/wait/cancel",
             None,
             RustMapping::None,
-            "task.id / task.state / task.done / task.cancelled / task.wait([timeout]) / task.cancel()",
-            (&["typed_host_payload_only", "no_rhai_dynamic_cross_thread"], &["task_wait_timeout", "task_cancelled"]),
+            "task.id / task.kind / task.state / task.done / task.cancelled / task.wait([timeout]) / task.cancel()",
+            (&["typed_host_payload_only", "no_rhai_dynamic_cross_thread", "failed_terminal_state"], &["task_wait_timeout", "task_failed", "task_cancelled"]),
+        ),
+        http_entry(
+            "rhai.http.request",
+            "network/http/client/request",
+            "rhai::http::request",
+            "rhai::http::request(method, url[, options]) -> HttpResponse",
+            "sync",
+            "supervisor_deadline_and_transport_timeout",
+            Some("HttpResponse"),
+            HTTP_REQUEST_ERRORS,
+        ),
+        http_entry(
+            "rhai.http.start",
+            "network/http/client/start",
+            "rhai::http::start",
+            "rhai::http::start(method, url[, options]) -> Task",
+            "background_task",
+            "task_cancel_immediate_late_completion_ignored_transport_timeout_bounded",
+            Some("Task<HttpResponse>"),
+            HTTP_START_ERRORS,
+        ),
+        http_entry(
+            "rhai.http.response",
+            "network/http/client/response",
+            "HttpResponse.status/version/headers/body/header",
+            "response.status / response.version / response.headers / response.body / response.header(name)",
+            "typed_value",
+            "body_stream_close",
+            Some("status_headers_and_bounded_body_stream"),
+            HTTP_RESPONSE_ERRORS,
         ),
         shipped_local_entry(
             "runtime.project.module-import",
@@ -777,6 +850,19 @@ pub fn catalog() -> Value {
             "invocation_bytes": SCRIPT_INVOCATION_MAX_BYTES,
             "stream_buffer_bytes": STREAM_BUFFER_BYTES,
             "stream_read_max_bytes": STREAM_READ_MAX_BYTES,
+            "max_active_tasks": MAX_ACTIVE_TASKS,
+            "http": {
+                "default_timeout_ms": DEFAULT_HTTP_TIMEOUT.as_millis(),
+                "max_timeout_ms": MAX_HTTP_TIMEOUT.as_millis(),
+                "default_body_bytes": DEFAULT_HTTP_BODY_BYTES,
+                "max_body_bytes": MAX_HTTP_BODY_BYTES,
+                "max_request_body_bytes": MAX_HTTP_REQUEST_BODY_BYTES,
+                "max_headers": MAX_HTTP_HEADERS,
+                "max_header_bytes": MAX_HTTP_HEADER_BYTES,
+                "max_url_bytes": MAX_HTTP_URL_BYTES,
+                "default_redirects": DEFAULT_HTTP_REDIRECTS,
+                "max_redirects": MAX_HTTP_REDIRECTS,
+            },
         },
         "entries": entries(),
         "failure_categories": ["configuration", "limit", "script", "protocol", "host"],
@@ -903,6 +989,47 @@ fn shipped_local_entry(
         cancellation: "between_native_calls",
         errors: behavior.1,
         result: None,
+        operation_id: None,
+        operation: None,
+        availability_reason: None,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn http_entry(
+    stable_id: &'static str,
+    catalog_path: &'static str,
+    surface_path: &'static str,
+    signature: &'static str,
+    execution: &'static str,
+    cancellation: &'static str,
+    result: Option<&'static str>,
+    errors: &'static [&'static str],
+) -> ScriptApiEntry {
+    ScriptApiEntry {
+        stable_id,
+        catalog_path,
+        surface_path,
+        rust_path: None,
+        rust_mapping: RustMapping::None,
+        semantic_differences: &[
+            "AgenTerm-owned high-level client; Rust std has no HTTP client",
+            "headers and bodies are bytes-first and bounded",
+            "errors expose stable privacy-safe codes without URL, credentials, or body",
+        ],
+        status: ScriptApiStatus::Shipped,
+        stability: ScriptApiStability::Stable,
+        designed_on: "2026-07-28",
+        since: "0.1.9",
+        profiles: LOCAL_PROFILE,
+        signature,
+        kind: "native_http",
+        authority: "network",
+        side_effects: &["network_request", "environment_proxy_when_not_overridden"],
+        execution,
+        cancellation,
+        errors,
+        result,
         operation_id: None,
         operation: None,
         availability_reason: None,

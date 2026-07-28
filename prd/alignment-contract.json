@@ -319,6 +319,14 @@
       "evidence_ids": ["script.stream"]
     },
     {
+      "id": "scripting.http",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "an independent loopback HTTP fixture covers request/response, headers,",
+      "evidence_ids": ["script.http"]
+    },
+    {
       "id": "scripting.rust-host-rhai-language",
       "kind": "decision",
       "status": "accepted",

@@ -115,6 +115,7 @@
         "script.rhai-framed",
         "script.modules-tasks",
         "script.stream",
+        "script.http",
         "script.supervisor",
         "script.audit"
       ]

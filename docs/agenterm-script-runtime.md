@@ -207,13 +207,13 @@ agenterm-script
 │  │
 │  ├─ http::
 │  │  Bounded, cancellable HTTP(S) client operations.
-│  │  [planned; stable namespace reservation; designed 2026-07-28]
+│  │  [shipped; stable; designed 2026-07-28]
 │  │  ├─ request(method, url, options) -> HttpResponse
 │  │  │  Performs one sequential request.
-│  │  │  [planned; reserved; designed 2026-07-28]
+│  │  │  [shipped; stable; designed 2026-07-28]
 │  │  └─ start(method, url, options) -> Task
 │  │     Starts one explicit concurrent request.
-│  │     [planned; reserved; designed 2026-07-28]
+│  │     [shipped; stable; designed 2026-07-28]
 │  │
 │  ├─ runtime::
 │  │  Read-only invocation, profile, version, and limit facts.
@@ -272,11 +272,11 @@ agenterm-script
 │  │  Child lifecycle, live stdout/stderr Streams, and bounded final output.
 │  │  [shipped; stable; designed 2026-07-28]
 │  ├─ Task
-│  │  Invocation-owned asynchronous state with id/wait/cancel facts.
-│  │  [shipped timer payload; stable; designed 2026-07-28]
+│  │  Invocation-owned timer or HTTP state with id/kind/wait/cancel facts.
+│  │  [shipped timer and HTTP payloads; stable; designed 2026-07-28]
 │  ├─ Stream
 │  │  Invocation-owned bytes stream with bounded queue and backpressure.
-│  │  [shipped for child stdout/stderr; stable; designed 2026-07-28]
+│  │  [shipped for child stdout/stderr and HTTP bodies; stable; designed 2026-07-28]
 │  │  ├─ .id / .kind / .state / .buffered_bytes
 │  │  │  Reports stable identity, bytes kind, lifecycle, and queued bytes.
 │  │  ├─ .read(max_bytes[, timeout]) / .collect(max_bytes[, timeout])
@@ -284,8 +284,8 @@ agenterm-script
 │  │  └─ .close() / .truncated / .complete
 │  │     Cancels consumption and distinguishes incomplete capture from EOF.
 │  ├─ HttpResponse
-│  │  Status, headers, body, truncation, and transport facts.
-│  │  [planned; reserved; designed 2026-07-28]
+│  │  Status, HTTP version, bytes-first headers, and a bounded body Stream.
+│  │  [shipped; stable; designed 2026-07-28]
 │  └─ Receipt / Event / PostState
 │     Fleet mutation evidence and verified resulting state.
 │     [planned; reserved; designed 2026-07-28]
@@ -721,16 +721,18 @@ let child = command.start();
 let web = rhai::http::start("GET", url, #{});
 
 let output = child.wait_with_output();
-let response = web.wait(std::time::Duration::from_secs(15));
+let response = web.wait(std::time::Duration::from_secs(10));
 ```
 
 `Task` MUST have an invocation-local stable ID, state, wait, cancel, and stable
 terminal outcome. Late completion MUST NOT overwrite `cancelled`.
 
-The shipped first payload is a timer. `after(Duration)` starts it, while
-`sleep(Duration)` provides the sequential form. `wait_all` preserves input
-ordering, `race` returns the winning input index, and `cancel_all` returns the
-number of tasks whose state changed. Composition accepts at most 64 tasks.
+The shipped task payloads are timers and HTTP responses. `after(Duration)`
+starts a timer, while `sleep(Duration)` provides the sequential form.
+`wait_all` preserves input ordering, `race` returns the winning input index,
+and `cancel_all` returns the number of tasks whose state changed. `Task.kind`
+distinguishes `timer` from `http`; `Task.state` also exposes a stable `failed`
+terminal state. Composition and active host work each accept at most 64 tasks.
 Wait timeouts do not silently cancel a still-pending task.
 
 The shipped first `Stream` payload is child stdout/stderr. `Child.stdout` and
@@ -757,6 +759,49 @@ reports `truncated=true` and `complete=false`.
 
 The public Task/Stream contract is executor-neutral. Tokio or any other
 executor type MUST NOT enter the Rhai API.
+
+### 10.1 HTTP client
+
+`rhai::http` is a client-only AgenTerm extension. It is deliberately not
+`std::http`, because Rust `std` has no high-level HTTP client. The shipped
+methods are `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`, and `OPTIONS`;
+only absolute `http` and `https` URLs are accepted.
+
+The optional map supports:
+
+```text
+headers          map<string, string | array<string>>
+body             string | Bytes
+timeout          std::time::Duration
+max_body_bytes   integer
+max_redirects    integer
+proxy            false | proxy URL
+```
+
+An absent `proxy` uses the process `HTTP_PROXY`, `HTTPS_PROXY`, and
+`NO_PROXY` environment contract. `false` disables proxy discovery for that
+request. The default timeout is 2 seconds and the hard maximum is 10 seconds.
+The default response-body ceiling is 64 KiB and the hard ceiling is 256 KiB;
+request bodies are also limited to 256 KiB. URLs are limited to 8 KiB,
+request headers to 64 fields and 32 KiB, and redirects to 10.
+
+`HttpResponse.status` is an integer, `version` is a stable HTTP version string,
+and `headers` maps lower-case names to arrays of `Bytes`, preserving duplicate
+values. `header(name)` returns the corresponding array. `body` is a
+bytes-first `Stream`; data beyond `max_body_bytes` is discarded and reported
+with `truncated=true` and `complete=false`.
+
+HTTPS uses the platform TLS implementation and platform root verifier. Public
+errors expose stable categories such as `http_timeout`, `http_proxy`,
+`http_tls`, and `http_transport`; they never retain or echo the URL,
+credentials, header values, or body.
+
+`http::start` returns a `Task<HttpResponse>`. Explicit cancellation changes
+the Task to `cancelled` immediately, wakes waiters, and prevents a late
+transport completion from overwriting that terminal state. The underlying
+blocking transport remains bounded by the request's maximum 10-second
+deadline and by supervisor process cleanup; prompt in-process socket abort is
+not part of this first transport adapter.
 
 ## 11. Thread and host boundary
 
@@ -979,7 +1024,7 @@ if !output.success {
 print(output.stdout_text());
 ```
 
-### 19.3 Planned concurrent HTTP and process work
+### 19.3 Shipped concurrent HTTP and process work
 
 ```rhai
 let command = std::process::command("git");
@@ -991,7 +1036,7 @@ let release = rhai::http::start("GET", release_url, #{
 });
 
 let commit = git.wait_with_output();
-let response = release.wait(std::time::Duration::from_secs(15));
+let response = release.wait(std::time::Duration::from_secs(10));
 ```
 
 ### 19.4 Planned Fleet mutation evidence
@@ -1056,12 +1101,11 @@ stable:
 
 - the exact relationship among `Command.output`, `Child.wait_with_output`, and
   `Task`;
-- whether sequential HTTP returns `HttpResponse` directly or through an
-  explicitly named wait;
 - whether both `Path` and `PathBuf` are useful without importing Rust borrowing
   concepts;
 - foreground/background task lifetime at natural script exit;
-- HTTP/TLS backend, executor, and binary-size budgets;
+- whether a future transport adapter should add prompt in-process socket abort
+  beyond Task cancellation, bounded deadlines, and supervisor cleanup;
 - local default soft budgets;
 - the explicit form of destructive Fleet operations;
 - whether the prelude remains exactly `args` plus `print`.

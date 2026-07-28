@@ -605,19 +605,20 @@ agenterm-script
 ├─ concurrency
 │  ├─ time
 │  │  ├─ [>] Duration / wall clock 已交付；Instant 待补
-│  │  └─ [ ] sleep / cancellable timer
+│  │  └─ [x] sleep / cancellable timer
 │  ├─ task
 │  │  ├─ [x] timer wait / wait_all / indexed race
-│  │  └─ [>] cancel / terminal state 已交付；typed payload propagation 待补
+│  │  └─ [>] cancel / terminal state / HTTP typed payload 已交付；
+│  │      Fleet payload 与 prompt transport abort 待补
 │  └─ stream
 │     ├─ [x] child stdout/stderr read / bounded collect
-│     └─ [x] 64 KiB queue backpressure / truncation / close
+│     └─ [x] child/HTTP 64 KiB queue backpressure / truncation / close
 │
 ├─ network
 │  ├─ http client
-│  │  ├─ [ ] request / response
-│  │  ├─ [ ] headers / text / bytes / bounded stream
-│  │  └─ [ ] proxy / TLS / timeout / cancellation diagnostics
+│  │  ├─ [x] request / response / start -> Task
+│  │  ├─ [x] duplicate headers / text / bytes / bounded stream
+│  │  └─ [x] proxy / native TLS / timeout / logical cancellation diagnostics
 │  └─ server and low-level
 │     ├─ [>] HTTP listener / WebSocket / TCP / UDP
 │     └─ [>] agenterm-net / libp2p / IPFS
@@ -1312,8 +1313,10 @@ agenterm-script.exe
 预算：
 
 - `agenterm.exe` 4 MiB 上限不提高；
-- `agenterm-script.exe` 使用独立 2 MiB 建议门；如 HTTP/TLS 使其不现实，
-  必须先给出依赖和 clean release 实测，再由产品决定，不能顺手抬高；
+- `agenterm-script.exe` 原 2 MiB 建议值经 HTTP/native-TLS spike 复核：
+  clean release 为 2,359,808 bytes；采用系统 TLS/root verifier、关闭 ureq
+  默认 rustls/gzip feature，并保留仓库已经审核的 3 MiB artifact gate，
+  本轮不再抬高；
 - 第一窗口 1 秒门不提高；
 - GUI 无 script startup work；
 - local invocation startup、cache hit/miss、peak output/task 数进入报告；
@@ -1520,8 +1523,9 @@ README 增加一个简短 script task 示例；稳定运行时合同由
   [x] task list/show/run
 
 提交 6
-  rhai::http + loopback HTTP
-  bounded body/timeout/cancel/privacy
+  [x] rhai::http + independent loopback HTTP
+  [x] bounded body/timeout/cancel/privacy + typed HTTP Task payload
+  [x] clean release 2,359,808 bytes；保留既有 3 MiB 门，不再抬高
 
 提交 7
   generated Fleet API

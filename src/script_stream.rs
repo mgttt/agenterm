@@ -48,6 +48,17 @@ struct StreamInner {
 #[derive(Clone, Debug)]
 pub struct ScriptStream(Arc<StreamInner>);
 
+impl Drop for ScriptStream {
+    fn drop(&mut self) {
+        // A producer thread owns one Arc directly. If this is the final
+        // script/response/child-visible wrapper, wake a backpressured producer
+        // so dropping an unread response cannot strand a thread.
+        if Arc::strong_count(&self.0) <= 2 {
+            cancel(self);
+        }
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct CapturedStream {
     pub(crate) bytes: Vec<u8>,
@@ -70,9 +81,27 @@ pub(crate) fn register(engine: &mut Engine) {
 }
 
 pub(crate) fn from_reader(
+    reader: impl Read + Send + 'static,
+    kind: &'static str,
+    capture_limit: usize,
+) -> ScriptStream {
+    from_reader_inner(reader, kind, capture_limit, None)
+}
+
+pub(crate) fn from_bounded_reader(
+    reader: impl Read + Send + 'static,
+    kind: &'static str,
+    capture_limit: usize,
+    delivery_limit: usize,
+) -> ScriptStream {
+    from_reader_inner(reader, kind, capture_limit, Some(delivery_limit))
+}
+
+fn from_reader_inner(
     mut reader: impl Read + Send + 'static,
     kind: &'static str,
     capture_limit: usize,
+    delivery_limit: Option<usize>,
 ) -> ScriptStream {
     let inner = Arc::new(StreamInner {
         id: NEXT_STREAM_ID.fetch_add(1, Ordering::Relaxed),
@@ -91,14 +120,31 @@ pub(crate) fn from_reader(
     let pump = Arc::clone(&inner);
     thread::spawn(move || {
         let mut buffer = [0_u8; STREAM_PUMP_CHUNK_BYTES];
+        let mut delivered = 0_usize;
         loop {
-            match reader.read(&mut buffer) {
+            let read_limit = delivery_limit
+                .map(|limit| {
+                    limit
+                        .saturating_sub(delivered)
+                        .saturating_add(1)
+                        .min(buffer.len())
+                })
+                .unwrap_or(buffer.len());
+            match reader.read(&mut buffer[..read_limit]) {
                 Ok(0) => {
                     finish_pump(&pump, StreamStatus::Closed);
                     return;
                 }
                 Ok(read) => {
-                    if !publish_bytes(&pump, &buffer[..read]) {
+                    let retained = delivery_limit
+                        .map(|limit| read.min(limit.saturating_sub(delivered)))
+                        .unwrap_or(read);
+                    if retained > 0 && !publish_bytes(&pump, &buffer[..retained]) {
+                        return;
+                    }
+                    delivered += retained;
+                    if retained < read {
+                        finish_truncated(&pump);
                         return;
                     }
                 }
@@ -154,6 +200,18 @@ fn finish_pump(stream: &Arc<StreamInner>, status: StreamStatus) {
     };
     if state.status == StreamStatus::Open {
         state.status = status;
+    }
+    stream.changed.notify_all();
+    stream.space.notify_all();
+}
+
+fn finish_truncated(stream: &Arc<StreamInner>) {
+    let Ok(mut state) = stream.state.lock() else {
+        return;
+    };
+    if state.status == StreamStatus::Open {
+        state.status = StreamStatus::Closed;
+        state.truncated = true;
     }
     stream.changed.notify_all();
     stream.space.notify_all();

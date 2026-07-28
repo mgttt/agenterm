@@ -1,7 +1,7 @@
 use std::{
     sync::{
         Arc, Condvar, Mutex,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
     },
     thread,
     time::{Duration, Instant},
@@ -12,23 +12,35 @@ use rhai::{Array, Dynamic, Engine, EvalAltResult, Module};
 use crate::script_process::ScriptDuration;
 
 const MAX_TASKS_PER_CALL: usize = 64;
+pub const MAX_ACTIVE_TASKS: usize = 64;
 static NEXT_TASK_ID: AtomicU64 = AtomicU64::new(1);
+static ACTIVE_TASKS: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum TaskStatus {
     Pending,
     Completed,
+    Failed,
     Cancelled,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum ScriptTaskPayload {
+    Unit,
+    Http(crate::script_http::ScriptHttpResponse),
 }
 
 #[derive(Debug)]
 struct TaskState {
     status: TaskStatus,
+    payload: Option<ScriptTaskPayload>,
+    failure_code: Option<String>,
 }
 
 #[derive(Debug)]
 struct TaskInner {
     id: u64,
+    kind: &'static str,
     state: Mutex<TaskState>,
     changed: Condvar,
 }
@@ -50,6 +62,7 @@ impl Drop for ScriptTask {
 pub(crate) fn register(engine: &mut Engine, rhai_module: &mut Module) {
     engine.register_type_with_name::<ScriptTask>("Task");
     engine.register_get("id", task_id);
+    engine.register_get("kind", task_kind);
     engine.register_get("state", task_state);
     engine.register_get("done", task_done);
     engine.register_get("cancelled", task_cancelled);
@@ -69,41 +82,56 @@ pub(crate) fn register(engine: &mut Engine, rhai_module: &mut Module) {
 }
 
 fn task_after(duration: ScriptDuration) -> Result<ScriptTask, Box<EvalAltResult>> {
+    let permit = acquire_task_permit()?;
     let inner = Arc::new(TaskInner {
         id: NEXT_TASK_ID.fetch_add(1, Ordering::Relaxed),
+        kind: "timer",
         state: Mutex::new(TaskState {
             status: TaskStatus::Pending,
+            payload: None,
+            failure_code: None,
         }),
         changed: Condvar::new(),
     });
     let timer = Arc::clone(&inner);
-    thread::spawn(move || {
-        let state = match timer.state.lock() {
-            Ok(state) => state,
-            Err(_) => return,
-        };
-        let result = timer
-            .changed
-            .wait_timeout_while(state, duration.0, |state| {
-                state.status == TaskStatus::Pending
-            });
-        let Ok((mut state, timeout)) = result else {
-            return;
-        };
-        if timeout.timed_out() && state.status == TaskStatus::Pending {
-            state.status = TaskStatus::Completed;
-            timer.changed.notify_all();
-        }
-    });
+    thread::Builder::new()
+        .name("agenterm-task-timer".to_owned())
+        .spawn(move || {
+            let _permit = permit;
+            let state = match timer.state.lock() {
+                Ok(state) => state,
+                Err(_) => return,
+            };
+            let result = timer
+                .changed
+                .wait_timeout_while(state, duration.0, |state| {
+                    state.status == TaskStatus::Pending
+                });
+            let Ok((mut state, timeout)) = result else {
+                return;
+            };
+            if timeout.timed_out() && state.status == TaskStatus::Pending {
+                state.status = TaskStatus::Completed;
+                state.payload = Some(ScriptTaskPayload::Unit);
+                timer.changed.notify_all();
+            }
+        })
+        .map_err(|_| -> Box<EvalAltResult> {
+            "task_spawn_failed: timer worker could not be created".into()
+        })?;
     Ok(ScriptTask(inner))
 }
 
 fn task_sleep(duration: ScriptDuration) -> Result<(), Box<EvalAltResult>> {
-    wait_inner(&task_after(duration)?.0, None)
+    wait_inner(&task_after(duration)?.0, None).map(|_| ())
 }
 
 fn task_id(task: &mut ScriptTask) -> Result<rhai::INT, Box<EvalAltResult>> {
     rhai::INT::try_from(task.0.id).map_err(|_| "task_id_overflow".into())
+}
+
+fn task_kind(task: &mut ScriptTask) -> String {
+    task.0.kind.to_owned()
 }
 
 fn task_state(task: &mut ScriptTask) -> Result<String, Box<EvalAltResult>> {
@@ -136,12 +164,15 @@ fn task_cancelled(task: &mut ScriptTask) -> Result<bool, Box<EvalAltResult>> {
         == TaskStatus::Cancelled)
 }
 
-fn task_wait(task: &mut ScriptTask) -> Result<(), Box<EvalAltResult>> {
-    wait_inner(&task.0, None)
+fn task_wait(task: &mut ScriptTask) -> Result<Dynamic, Box<EvalAltResult>> {
+    wait_inner(&task.0, None).map(payload_dynamic)
 }
 
-fn task_wait_for(task: &mut ScriptTask, timeout: ScriptDuration) -> Result<(), Box<EvalAltResult>> {
-    wait_inner(&task.0, Some(timeout.0))
+fn task_wait_for(
+    task: &mut ScriptTask,
+    timeout: ScriptDuration,
+) -> Result<Dynamic, Box<EvalAltResult>> {
+    wait_inner(&task.0, Some(timeout.0)).map(payload_dynamic)
 }
 
 fn task_cancel(task: &mut ScriptTask) -> Result<bool, Box<EvalAltResult>> {
@@ -158,7 +189,10 @@ fn cancel_inner(task: &Arc<TaskInner>) -> Result<bool, Box<EvalAltResult>> {
     Ok(true)
 }
 
-fn wait_inner(task: &Arc<TaskInner>, timeout: Option<Duration>) -> Result<(), Box<EvalAltResult>> {
+fn wait_inner(
+    task: &Arc<TaskInner>,
+    timeout: Option<Duration>,
+) -> Result<ScriptTaskPayload, Box<EvalAltResult>> {
     let state = task.state.lock().map_err(|_| "task_state_poisoned")?;
     let state = if let Some(timeout) = timeout {
         let (state, timed) = task
@@ -175,7 +209,15 @@ fn wait_inner(task: &Arc<TaskInner>, timeout: Option<Duration>) -> Result<(), Bo
             .map_err(|_| "task_state_poisoned")?
     };
     match state.status {
-        TaskStatus::Completed => Ok(()),
+        TaskStatus::Completed => state
+            .payload
+            .clone()
+            .ok_or_else(|| "task_invariant: completed task has no payload".into()),
+        TaskStatus::Failed => Err(format!(
+            "task_failed: {}",
+            state.failure_code.as_deref().unwrap_or("task_host_failure")
+        )
+        .into()),
         TaskStatus::Cancelled => Err("task_cancelled: task was cancelled".into()),
         TaskStatus::Pending => Err("task_invariant: wait returned while pending".into()),
     }
@@ -195,8 +237,7 @@ fn wait_all(tasks: Array, timeout: Option<Duration>) -> Result<Array, Box<EvalAl
     let mut results = Array::with_capacity(tasks.len());
     for task in tasks {
         let remaining = deadline.map(|deadline| deadline.saturating_duration_since(Instant::now()));
-        wait_inner(&task.0, remaining)?;
-        results.push(Dynamic::UNIT);
+        results.push(payload_dynamic(wait_inner(&task.0, remaining)?));
     }
     Ok(results)
 }
@@ -225,6 +266,14 @@ fn race(tasks: Array, timeout: Option<Duration>) -> Result<rhai::INT, Box<EvalAl
                 .status;
             if status == TaskStatus::Completed {
                 return rhai::INT::try_from(index).map_err(|_| "task_index_overflow".into());
+            }
+            if status == TaskStatus::Failed {
+                let state = task.0.state.lock().map_err(|_| "task_state_poisoned")?;
+                return Err(format!(
+                    "task_failed: raced task {index} failed with {}",
+                    state.failure_code.as_deref().unwrap_or("task_host_failure")
+                )
+                .into());
             }
             if status == TaskStatus::Cancelled {
                 return Err(format!("task_cancelled: raced task {index} was cancelled").into());
@@ -266,8 +315,79 @@ const fn status_name(status: TaskStatus) -> &'static str {
     match status {
         TaskStatus::Pending => "pending",
         TaskStatus::Completed => "completed",
+        TaskStatus::Failed => "failed",
         TaskStatus::Cancelled => "cancelled",
     }
+}
+
+fn payload_dynamic(payload: ScriptTaskPayload) -> Dynamic {
+    match payload {
+        ScriptTaskPayload::Unit => Dynamic::UNIT,
+        ScriptTaskPayload::Http(response) => Dynamic::from(response),
+    }
+}
+
+struct ActiveTaskPermit;
+
+impl Drop for ActiveTaskPermit {
+    fn drop(&mut self) {
+        ACTIVE_TASKS.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+fn acquire_task_permit() -> Result<ActiveTaskPermit, Box<EvalAltResult>> {
+    ACTIVE_TASKS
+        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |active| {
+            (active < MAX_ACTIVE_TASKS).then_some(active + 1)
+        })
+        .map_err(|_| -> Box<EvalAltResult> {
+            format!("task_limit: maximum active host tasks is {MAX_ACTIVE_TASKS}").into()
+        })?;
+    Ok(ActiveTaskPermit)
+}
+
+pub(crate) fn start_http_task(
+    work: impl FnOnce() -> Result<crate::script_http::ScriptHttpResponse, String> + Send + 'static,
+) -> Result<ScriptTask, Box<EvalAltResult>> {
+    let permit = acquire_task_permit()?;
+    let inner = Arc::new(TaskInner {
+        id: NEXT_TASK_ID.fetch_add(1, Ordering::Relaxed),
+        kind: "http",
+        state: Mutex::new(TaskState {
+            status: TaskStatus::Pending,
+            payload: None,
+            failure_code: None,
+        }),
+        changed: Condvar::new(),
+    });
+    let worker = Arc::clone(&inner);
+    thread::Builder::new()
+        .name("agenterm-task-http".to_owned())
+        .spawn(move || {
+            let _permit = permit;
+            let result = work();
+            let Ok(mut state) = worker.state.lock() else {
+                return;
+            };
+            if state.status != TaskStatus::Pending {
+                return;
+            }
+            match result {
+                Ok(response) => {
+                    state.status = TaskStatus::Completed;
+                    state.payload = Some(ScriptTaskPayload::Http(response));
+                }
+                Err(code) => {
+                    state.status = TaskStatus::Failed;
+                    state.failure_code = Some(code);
+                }
+            }
+            worker.changed.notify_all();
+        })
+        .map_err(|_| -> Box<EvalAltResult> {
+            "task_spawn_failed: HTTP worker could not be created".into()
+        })?;
+    Ok(ScriptTask(inner))
 }
 
 #[cfg(test)]

@@ -15,6 +15,7 @@ Copyright and license terms remain with their respective authors.
 | `serde` | MIT OR Apache-2.0 |
 | `serde_json` | MIT OR Apache-2.0 |
 | `softbuffer` | MIT OR Apache-2.0 |
+| `ureq` | MIT OR Apache-2.0 |
 | `vt100` | MIT |
 | `windows-sys` | MIT OR Apache-2.0 |
 | `winit` | Apache-2.0 |

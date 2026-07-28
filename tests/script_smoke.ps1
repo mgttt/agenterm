@@ -12,6 +12,7 @@ $declaredEvidence = @(
     'script.rhai-framed'
     'script.modules-tasks'
     'script.stream'
+    'script.http'
     'script.supervisor'
     'script.audit'
 )
@@ -228,6 +229,58 @@ function Start-ScriptClient {
     return $process
 }
 
+function Start-HttpFixture {
+    param(
+        [Parameter(Mandatory = $true)][string]$FixturePath,
+        [Parameter(Mandatory = $true)][string]$ReadyPath,
+        [Parameter(Mandatory = $true)][string]$LogPath
+    )
+    $hostExe = [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $hostExe
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    foreach ($argument in @(
+        '-NoProfile',
+        '-NonInteractive',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-File',
+        $FixturePath,
+        '-ReadyPath',
+        $ReadyPath,
+        '-LogPath',
+        $LogPath,
+        '-MaxRequests',
+        '9'
+    )) {
+        $startInfo.ArgumentList.Add($argument)
+    }
+    $process = [Diagnostics.Process]::Start($startInfo)
+    Register-SmokeOwnedProcess -Context $smokeRun -Id $process.Id `
+        -Kind 'script-http-fixture'
+    return $process
+}
+
+function Wait-HttpFixtureReady {
+    param(
+        [Parameter(Mandatory = $true)][Diagnostics.Process]$Process,
+        [Parameter(Mandatory = $true)][string]$ReadyPath,
+        [int]$TimeoutMs = 3000
+    )
+    $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMs)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        if (Test-Path -LiteralPath $ReadyPath) {
+            return Get-Content -LiteralPath $ReadyPath -Raw | ConvertFrom-Json
+        }
+        if ($Process.HasExited) {
+            throw "HTTP fixture exited before readiness with $($Process.ExitCode)"
+        }
+        Start-Sleep -Milliseconds 5
+    }
+    throw 'timed out waiting for the loopback HTTP fixture'
+}
+
 function Wait-NewWorker {
     param(
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][int[]]$Existing,
@@ -302,7 +355,10 @@ function Protect-ScriptSmokeDiagnosticText {
         'AUDIT_STDOUT_SECRET',
         'AUDIT_ARG_SECRET',
         'AUDIT_SOURCE_SECRET',
-        'AUDIT_ENV_SECRET'
+        'AUDIT_ENV_SECRET',
+        'HTTP_CREDENTIAL_SECRET',
+        'PRIVATE_PATH_SECRET',
+        'PROXY_CREDENTIAL_SECRET'
     )) {
         $Text = $Text.Replace($secret, '<redacted>')
     }
@@ -388,6 +444,23 @@ try {
             $_.surface_path -eq 'rhai::task::race' -and
             $_.status -eq 'shipped' -and
             $_.profiles -contains 'local'
+        }).Count -ne 1 -or
+        $apiResult.value.limits.max_active_tasks -ne 64 -or
+        $apiResult.value.limits.http.default_timeout_ms -ne 2000 -or
+        $apiResult.value.limits.http.max_timeout_ms -ne 10000 -or
+        $apiResult.value.limits.http.max_body_bytes -ne 262144 -or
+        @($apiResult.value.entries | Where-Object {
+            $_.stable_id -eq 'rhai.http.request' -and
+            $_.surface_path -eq 'rhai::http::request' -and
+            $_.authority -eq 'network' -and
+            $_.status -eq 'shipped' -and
+            $_.profiles -contains 'local'
+        }).Count -ne 1 -or
+        @($apiResult.value.entries | Where-Object {
+            $_.stable_id -eq 'rhai.http.start' -and
+            $_.surface_path -eq 'rhai::http::start' -and
+            $_.execution -eq 'background_task' -and
+            $_.status -eq 'shipped'
         }).Count -ne 1 -or
         @($apiResult.value.entries | Where-Object {
             $_.stable_id -eq 'std.env.get' -and
@@ -665,6 +738,215 @@ task.cancel();
     if ($taskTimeout -notlike '*task_wait_timeout*') {
         throw "task wait timeout was not typed: $taskTimeout"
     }
+
+    Write-Host 'STEP bounded loopback HTTP, async task, cancellation, and privacy'
+    $httpFixtureScript = Join-Path $repositoryRoot 'tests\script_http_fixture.ps1'
+    $httpReadyPath = Join-Path $runtimeDirectory 'http-ready.json'
+    $httpLogPath = Join-Path $runtimeDirectory 'http-requests.jsonl'
+    $httpFixture = Start-HttpFixture -FixturePath $httpFixtureScript `
+        -ReadyPath $httpReadyPath -LogPath $httpLogPath
+    try {
+        $httpReady = Wait-HttpFixtureReady -Process $httpFixture `
+            -ReadyPath $httpReadyPath
+        if ($httpReady.schema_version -ne 1 -or
+            $httpReady.pid -ne $httpFixture.Id -or
+            $httpReady.url -notlike 'http://127.0.0.1:*' -or
+            $httpReady.tls_url -notlike 'https://127.0.0.1:*') {
+            throw 'loopback HTTP fixture returned invalid readiness facts'
+        }
+
+        $httpSource = Join-Path $runtimeDirectory 'http.rhai'
+        [IO.File]::WriteAllText(
+            $httpSource,
+            @'
+let base = args[0];
+let tls_base = args[1];
+let options = #{proxy: false, timeout: std::time::Duration::from_secs(2)};
+
+let status = rhai::http::request("GET", base + "/status", options);
+let status_values = status.header("x-test");
+let status_body = status.body;
+let status_text = status_body.collect(16).to_text();
+
+let echo = rhai::http::request("POST", base + "/echo", #{
+    proxy: false,
+    timeout: std::time::Duration::from_secs(2),
+    headers: #{"content-type": "application/octet-stream"},
+    body: rhai::bytes::from_text("payload")
+});
+let echo_text = echo.body.collect(16).to_text();
+
+let large = rhai::http::request("GET", base + "/large", #{
+    proxy: false,
+    timeout: std::time::Duration::from_secs(2),
+    max_body_bytes: 4
+});
+let large_body = large.body;
+let large_text = large_body.collect(16).to_text();
+
+let async_task = rhai::http::start("GET", base + "/async", options);
+let async_kind = async_task.kind;
+let async_response = async_task.wait(std::time::Duration::from_secs(2));
+let async_text = async_response.body.collect(16).to_text();
+
+let cancel_task = rhai::http::start("GET", base + "/cancel", options);
+rhai::task::sleep(std::time::Duration::from_millis(50));
+let cancel_changed = cancel_task.cancel();
+let cancel_error = "";
+try {
+    cancel_task.wait(std::time::Duration::from_secs(1));
+} catch (error) {
+    cancel_error = error;
+}
+rhai::task::sleep(std::time::Duration::from_millis(600));
+let cancel_state = cancel_task.state;
+
+let timeout_error = "";
+try {
+    rhai::http::request("GET", base + "/slow", #{
+        proxy: false,
+        timeout: std::time::Duration::from_millis(50)
+    });
+} catch (error) {
+    timeout_error = error;
+}
+
+let malformed_error = "";
+try {
+    rhai::http::request("GET", base + "/malformed", options);
+} catch (error) {
+    malformed_error = error;
+}
+
+let disconnect_error = "";
+try {
+    rhai::http::request("GET", base + "/disconnect", options);
+} catch (error) {
+    disconnect_error = error;
+}
+
+let tls_error = "";
+try {
+    rhai::http::request("GET", tls_base + "/tls", options);
+} catch (error) {
+    tls_error = error;
+}
+
+let proxy_error = "";
+try {
+    rhai::http::request(
+        "GET",
+        "http://HTTP_CREDENTIAL_SECRET.invalid/PRIVATE_PATH_SECRET",
+        #{
+            proxy: "http://user:PROXY_CREDENTIAL_SECRET@127.0.0.1:1",
+            timeout: std::time::Duration::from_millis(50)
+        }
+    );
+} catch (error) {
+    proxy_error = error;
+}
+
+#{
+    status: status.status,
+    version: status.version,
+    first_header: status_values[0].to_text(),
+    second_header: status_values[1].to_text(),
+    status_text: status_text,
+    status_kind: status_body.kind,
+    status_complete: status_body.complete,
+    echo_text: echo_text,
+    large_text: large_text,
+    large_truncated: large_body.truncated,
+    large_complete: large_body.complete,
+    async_kind: async_kind,
+    async_text: async_text,
+    async_state: async_task.state,
+    cancel_changed: cancel_changed,
+    cancel_error: cancel_error,
+    cancel_state: cancel_state,
+    timeout_error: timeout_error,
+    malformed_error: malformed_error,
+    disconnect_error: disconnect_error,
+    tls_error: tls_error,
+    proxy_error: proxy_error
+}
+'@,
+            [Text.UTF8Encoding]::new($false)
+        )
+        $httpResult = Invoke-Script @(
+            'script', 'run', $httpSource, '--profile', 'local',
+            '--timeout-ms', '10000', '--max-operations', '1000000',
+            '--', $httpReady.url, $httpReady.tls_url
+        ) | ConvertFrom-Json
+        if ($httpResult.status -ne 201 -or
+            $httpResult.version -ne 'HTTP/1.1' -or
+            $httpResult.first_header -ne 'one' -or
+            $httpResult.second_header -ne 'two' -or
+            $httpResult.status_text -ne 'hello' -or
+            $httpResult.status_kind -ne 'bytes' -or
+            -not $httpResult.status_complete -or
+            $httpResult.echo_text -ne 'payload' -or
+            $httpResult.large_text -ne 'abcd' -or
+            -not $httpResult.large_truncated -or
+            $httpResult.large_complete -or
+            $httpResult.async_kind -ne 'http' -or
+            $httpResult.async_text -ne 'async-ok' -or
+            $httpResult.async_state -ne 'completed' -or
+            -not $httpResult.cancel_changed -or
+            $httpResult.cancel_error -notlike '*task_cancelled*' -or
+            $httpResult.cancel_state -ne 'cancelled' -or
+            $httpResult.timeout_error -notlike '*http_timeout*' -or
+            $httpResult.malformed_error -notlike '*http_*' -or
+            $httpResult.disconnect_error -notlike '*http_transport*' -or
+            $httpResult.tls_error -notlike '*http_tls*' -or
+            $httpResult.proxy_error -notlike '*http_*') {
+            throw 'HTTP client did not preserve typed response, stream, task, and error facts'
+        }
+        $httpJson = $httpResult | ConvertTo-Json -Compress
+        foreach ($secret in @(
+            'HTTP_CREDENTIAL_SECRET',
+            'PRIVATE_PATH_SECRET',
+            'PROXY_CREDENTIAL_SECRET'
+        )) {
+            if ($httpJson.Contains($secret)) {
+                throw "HTTP diagnostics leaked secret sentinel: $secret"
+            }
+        }
+
+        if (-not $httpFixture.WaitForExit(3000)) {
+            throw 'loopback HTTP fixture did not exit after its bounded request set'
+        }
+        if ($httpFixture.ExitCode -ne 0) {
+            throw "loopback HTTP fixture exited $($httpFixture.ExitCode)"
+        }
+        $httpRequests = @(
+            Get-Content -LiteralPath $httpLogPath |
+                ForEach-Object { $_ | ConvertFrom-Json }
+        )
+        $echoRequest = @($httpRequests | Where-Object path -eq '/echo')
+        $tlsRequest = @($httpRequests | Where-Object tls -eq $true)
+        if ($httpRequests.Count -ne 9 -or
+            $echoRequest.Count -ne 1 -or
+            $echoRequest[0].method -ne 'POST' -or
+            $echoRequest[0].body_bytes -ne 7 -or
+            $tlsRequest.Count -ne 1) {
+            throw 'loopback HTTP fixture did not observe the bounded request matrix'
+        }
+    }
+    finally {
+        if (-not $httpFixture.HasExited) {
+            $httpFixture.Kill()
+            $httpFixture.WaitForExit()
+        }
+        $httpFixture.Dispose()
+    }
+    $httpRecovery = Invoke-Script @(
+        'script', 'eval', '6 * 7', '--profile', 'local'
+    )
+    if ($httpRecovery -ne '42') {
+        throw 'script worker did not recover after HTTP timeout and cancellation'
+    }
+    Write-Evidence 'script.http'
 
     Write-Host 'STEP project modules and versioned named-task discovery'
     $projectFixture = Join-Path $repositoryRoot 'tests\fixtures\script-project'
@@ -1245,7 +1527,10 @@ task.cancel();
         'AUDIT_STDOUT_SECRET',
         'AUDIT_ARG_SECRET',
         'AUDIT_SOURCE_SECRET',
-        'AUDIT_ENV_SECRET'
+        'AUDIT_ENV_SECRET',
+        'HTTP_CREDENTIAL_SECRET',
+        'PRIVATE_PATH_SECRET',
+        'PROXY_CREDENTIAL_SECRET'
     )) {
         if ($auditText.Contains($secret)) {
             throw "script audit leaked forbidden value: $secret"

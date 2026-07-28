@@ -145,17 +145,28 @@ and it is not positioned as a restricted security plugin.
     `Child.wait_with_output` drains live queues while preserving the bounded
     final capture, so large output cannot deadlock the child and truncation
     never reports `complete=true`.
-  - [ ] typed HTTP/Fleet Task payloads and cross-resource cancellation remain
-    open.
+  - [x] HTTP `start` ships a typed `Task<HttpResponse>` payload, `kind=http`,
+    stable failed/cancelled outcomes, and late-completion rejection.
+  - [ ] Fleet Task payloads and prompt in-process transport cancellation remain
+    open; the first HTTP adapter bounds blocking transport work to 10 seconds
+    and relies on supervisor process cleanup after invocation exit.
 - [ ] `rhai::json` plus Rhai-native strings and a typed `Bytes` object provide
   bounded parsing, serialization, Unicode/encoding and explicit conversions
   without duplicating language primitives as fake Rust collections.
   - [x] first local slice ships JSON parse/compact/pretty serialization and
     typed UTF-8 `Bytes` conversion/length.
-- [ ] `rhai::http` provides HTTP(S) method, URL, headers, body, timeout,
+- [x] `rhai::http` provides HTTP(S) method, URL, headers, body, timeout,
   status, bounded response streaming, cancellation, proxy/TLS diagnostics and
   credential-safe errors. Rust std has no high-level HTTP client, so
   `std::http` is forbidden; low-level sockets are outside v0.1.9.
+  - [x] `request` and `start` use native platform TLS/root verification,
+    environment/disabled/explicit proxy selection, bytes-first duplicate
+    headers, 64 KiB default and 256 KiB maximum bodies, a 2-second default and
+    10-second hard deadline, stable privacy-safe error codes, and the shared
+    bounded `Stream`/`Task` contracts.
+  - [x] the clean release `agenterm-script.exe` is 2,359,808 bytes with the
+    reviewed native-TLS feature set, below the existing 3 MiB artifact gate;
+    the gate was not raised for this slice.
 - [ ] `rhai::runtime` may expose only safe invocation/API/profile/version/
   limits facts, never private supervisor, HWND, renderer, PTY or broker
   handles.
@@ -348,16 +359,18 @@ Migration ledger:
     truncation that reports `Output.complete=false` without falsely truncating
     the fully delivered Stream; unit coverage fills the queue, rejects
     oversized collect, and proves close wakes a backpressured producer.
-- [ ] an independent loopback HTTP fixture covers request/response, headers,
+- [x] an independent loopback HTTP fixture covers request/response, headers,
   body, status, bounded streaming, timeout, cancellation, malformed data,
   connection failure, proxy/TLS-safe diagnostics, and no public-network
   dependency.
 - [ ] timer and task fixtures prove concurrent progress, deterministic wait and
   stream results, natural worker exit, cancellation propagation, bounded
   queues, and recovery on the next invocation.
-  - [x] timer composition and child-process Stream state/backpressure have
-    unit and public-CLI evidence; HTTP/Fleet payload propagation and unified
-    cancellation remain open.
+  - [x] timer composition, child-process Stream state/backpressure, typed HTTP
+    Task payload, timeout, cancellation with rejected late completion, bounded
+    body Stream and immediate next-invocation recovery have unit and public-CLI
+    evidence; Fleet payload propagation and prompt transport abort remain
+    open.
 - [ ] module/task fixtures cover roots, relative imports, cycles, duplicate and
   missing modules, manifest version/error handling, named-task discovery,
   degraded entries, arguments, and working directory.
@@ -378,6 +391,9 @@ Migration ledger:
 - [ ] retained diagnostics and audit fixtures prove that file content,
   arguments, environment secrets, HTTP credentials/bodies, terminal content,
   and script stdout do not leak.
+  - [x] the HTTP loopback journey checks URL, path and proxy credential
+    sentinels against returned diagnostics, the reusable audit JSONL and the
+    redacted command record.
 - [ ] every slice records worker/CLI/GUI size, first-window/no-script startup,
   duration, limits, and orphan cleanup before its status changes to shipped.
 
