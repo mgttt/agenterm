@@ -92,6 +92,7 @@ mod terminal_observation;
 mod terminal_runtime;
 mod terminal_selection;
 mod theme;
+pub mod ui_bridge;
 mod ui_geometry;
 mod upgrade_identity;
 mod wake_signal;
@@ -10196,6 +10197,7 @@ fn protocol_info_json(identity_scope: &str) -> String {
         "build_identity": build_identity,
         "build_identity_complete": build_identity.is_complete(),
         "upgrade_identity": current_upgrade_identity(),
+        "ui_bridge": ui_bridge::current_facts(),
         "control_contract": {
             "schema_version": control_contract::CONTROL_CONTRACT_SCHEMA_VERSION,
             "request_dedupe": true,

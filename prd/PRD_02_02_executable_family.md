@@ -29,6 +29,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   - [ ] compatibility is fail-closed and asymmetric: a new GUI may connect to
     its declared server protocol range; an incompatible server remains alive
     and reports a precise upgrade/restart choice instead of being killed
+  - [x] S0 protocol discovery publishes a typed UI bridge schema, compatible
+    version range, current `combined_gui_server` ownership, target executable
+    and false capability flags. Discovery must never claim replaceable UI,
+    bootstrap, reconnect or rollback before their black-box gates pass.
   - [ ] black-box upgrade proof keeps server PID, epoch, tab IDs, PTY child
     PIDs, scrollback and continuing output stable while HWND and GUI build
     identity change; rollback to the previous compatible GUI is also proven
