@@ -1,217 +1,482 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AgenTerm — a tabbed Windows terminal that keeps exited tabs alive</title>
-<meta name="description" content="AgenTerm is a tabbed cmd.exe terminal for Windows with persistent exited tabs, a native control CLI, tmux-style compatibility client, and a constrained Rhai scripting runtime.">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230d1117'/%3E%3Cpath d='M3.5 4.5 7 8l-3.5 3.5' stroke='%237ee787' stroke-width='1.8' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M8 12h4.5' stroke='%237ee787' stroke-width='1.8' stroke-linecap='round'/%3E%3C/svg%3E">
-<style>
-  :root {
-    --bg: #0d1117;
-    --bg-soft: #161b22;
-    --border: #30363d;
-    --fg: #e6edf3;
-    --fg-dim: #8b949e;
-    --accent: #7ee787;
-    --accent-dim: #3fb950;
-    --link: #79c0ff;
-    --mono: ui-monospace, "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
-    --sans: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  html { scroll-behavior: smooth; }
-  body {
-    background: var(--bg);
-    color: var(--fg);
-    font-family: var(--sans);
-    line-height: 1.6;
-  }
-  a { color: var(--link); text-decoration: none; }
-  a:hover { text-decoration: underline; }
-  .wrap { max-width: 960px; margin: 0 auto; padding: 0 24px; }
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b1016">
+  <title>AgenTerm — a native Windows terminal for people and agents</title>
+  <meta name="description" content="AgenTerm is a native Windows terminal and local fleet workspace with hierarchical tabs, durable process output, a per-tab composer, and a public automation CLI.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230b1016'/%3E%3Cpath d='M3.5 4.5 7 8l-3.5 3.5M8 12h4.5' stroke='%237ee787' stroke-width='1.8' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b1016;
+      --surface: #111821;
+      --surface-2: #17212c;
+      --border: #2b3948;
+      --text: #eef4f8;
+      --muted: #9baab8;
+      --green: #7ee787;
+      --green-strong: #49c760;
+      --cyan: #68d8f0;
+      --blue: #8bc8ff;
+      --mono: "Cascadia Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      --sans: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
 
-  header.site {
-    border-bottom: 1px solid var(--border);
-    padding: 18px 0;
-    position: sticky; top: 0;
-    background: rgba(13,17,23,.9);
-    backdrop-filter: blur(8px);
-    z-index: 10;
-  }
-  header.site .wrap { display: flex; align-items: center; justify-content: space-between; }
-  .brand { font-family: var(--mono); font-weight: 700; font-size: 18px; color: var(--fg); }
-  .brand .prompt { color: var(--accent); }
-  nav.top a { margin-left: 20px; font-size: 14px; color: var(--fg-dim); }
-  nav.top a:hover { color: var(--fg); text-decoration: none; }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 75% 0%, rgba(55, 129, 151, .14), transparent 28rem),
+        linear-gradient(rgba(255, 255, 255, .018) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, .018) 1px, transparent 1px),
+        var(--bg);
+      background-size: auto, 32px 32px, 32px 32px, auto;
+      font-family: var(--sans);
+      line-height: 1.6;
+    }
+    a { color: var(--blue); text-underline-offset: .18em; }
+    a:hover { color: var(--text); }
+    a:focus-visible, button:focus-visible {
+      outline: 3px solid var(--cyan);
+      outline-offset: 3px;
+    }
+    code { font-family: var(--mono); font-size: .92em; }
+    .wrap { width: min(1120px, calc(100% - 40px)); margin-inline: auto; }
+    .skip {
+      position: fixed;
+      z-index: 30;
+      top: 8px;
+      left: 8px;
+      padding: 8px 12px;
+      color: #061014;
+      background: var(--green);
+      transform: translateY(-160%);
+    }
+    .skip:focus { transform: translateY(0); }
 
-  section.hero { padding: 88px 0 64px; text-align: center; }
-  .badge {
-    display: inline-block;
-    font-family: var(--mono); font-size: 12px;
-    color: var(--accent); border: 1px solid var(--accent-dim);
-    border-radius: 999px; padding: 4px 14px; margin-bottom: 24px;
-  }
-  h1 { font-size: 44px; line-height: 1.15; letter-spacing: -0.02em; }
-  h1 .accent { color: var(--accent); }
-  .tagline { color: var(--fg-dim); font-size: 18px; max-width: 640px; margin: 20px auto 36px; }
-  .cta { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
-  .btn {
-    font-family: var(--mono); font-size: 14px;
-    padding: 12px 24px; border-radius: 8px;
-    border: 1px solid var(--border);
-    color: var(--fg); background: var(--bg-soft);
-    transition: border-color .15s ease;
-  }
-  .btn:hover { border-color: var(--accent-dim); text-decoration: none; }
-  .btn.primary { background: var(--accent-dim); border-color: var(--accent-dim); color: #0d1117; font-weight: 700; }
-  .btn.primary:hover { background: var(--accent); }
+    .site-header {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      border-bottom: 1px solid rgba(43, 57, 72, .82);
+      background: rgba(11, 16, 22, .9);
+      backdrop-filter: blur(12px);
+    }
+    .site-header .wrap {
+      min-height: 68px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+    }
+    .brand {
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 1.05rem;
+      font-weight: 700;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    .brand span { color: var(--green); }
+    nav { display: flex; align-items: center; gap: 22px; }
+    nav a { color: var(--muted); font-size: .9rem; text-decoration: none; }
+    nav a:hover { color: var(--text); }
 
-  .term {
-    margin: 64px auto 0; max-width: 720px; text-align: left;
-    background: var(--bg-soft); border: 1px solid var(--border);
-    border-radius: 10px; overflow: hidden;
-    box-shadow: 0 24px 64px rgba(0,0,0,.45);
-  }
-  .term-bar { display: flex; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--border); }
-  .dot { width: 12px; height: 12px; border-radius: 50%; }
-  .dot.r { background: #ff5f57; } .dot.y { background: #febc2e; } .dot.g { background: #28c840; }
-  .term-body { padding: 18px 20px; font-family: var(--mono); font-size: 13.5px; line-height: 1.75; }
-  .term-body .p { color: var(--accent); }
-  .term-body .c { color: var(--fg-dim); }
-  .term-body .w { color: #d2a8ff; }
+    .hero { padding: clamp(72px, 10vw, 126px) 0 64px; }
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      margin: 0 0 22px;
+      color: var(--green);
+      font: 700 .76rem/1 var(--mono);
+      letter-spacing: .09em;
+      text-transform: uppercase;
+    }
+    .eyebrow::before {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: currentColor;
+      box-shadow: 0 0 16px currentColor;
+      content: "";
+    }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 {
+      max-width: 930px;
+      margin-bottom: 24px;
+      font-size: clamp(2.65rem, 7vw, 5.5rem);
+      line-height: .98;
+      letter-spacing: -.055em;
+    }
+    h1 em { color: var(--green); font-style: normal; }
+    .lead {
+      max-width: 760px;
+      margin-bottom: 34px;
+      color: #b7c4cf;
+      font-size: clamp(1.08rem, 2vw, 1.35rem);
+    }
+    .actions { display: flex; flex-wrap: wrap; gap: 12px; }
+    .button {
+      display: inline-flex;
+      min-height: 46px;
+      align-items: center;
+      justify-content: center;
+      padding: 10px 18px;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      color: var(--text);
+      background: var(--surface);
+      font: 700 .88rem/1 var(--mono);
+      text-decoration: none;
+    }
+    .button:hover { border-color: var(--green); color: var(--text); }
+    .button.primary {
+      border-color: var(--green-strong);
+      color: #07100a;
+      background: var(--green);
+    }
+    .button.primary:hover { background: #a4f2ab; }
 
-  section.features { padding: 80px 0; }
-  h2 { font-size: 28px; letter-spacing: -0.01em; margin-bottom: 8px; }
-  .section-sub { color: var(--fg-dim); margin-bottom: 40px; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; }
-  .card {
-    background: var(--bg-soft); border: 1px solid var(--border);
-    border-radius: 10px; padding: 22px;
-  }
-  .card h3 { font-size: 16px; margin-bottom: 8px; font-family: var(--mono); font-weight: 600; }
-  .card h3 .glyph { color: var(--accent); margin-right: 8px; }
-  .card p { color: var(--fg-dim); font-size: 14px; }
+    .product-shot { padding: 16px 0 86px; }
+    figure {
+      margin: 0;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: #06090c;
+      box-shadow: 0 28px 85px rgba(0, 0, 0, .48);
+    }
+    figure img {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+    figcaption {
+      padding: 13px 16px;
+      border-top: 1px solid var(--border);
+      color: var(--muted);
+      background: var(--surface);
+      font-size: .84rem;
+    }
 
-  section.cli { padding: 0 0 80px; }
-  .code {
-    background: var(--bg-soft); border: 1px solid var(--border);
-    border-radius: 10px; padding: 20px 24px;
-    font-family: var(--mono); font-size: 13.5px; overflow-x: auto;
-  }
-  .code .p { color: var(--accent); }
-  .code .c { color: var(--fg-dim); }
+    section.content { padding: 86px 0; border-top: 1px solid var(--border); }
+    .section-head {
+      display: grid;
+      grid-template-columns: minmax(0, .7fr) minmax(300px, 1fr);
+      gap: 40px;
+      align-items: end;
+      margin-bottom: 42px;
+    }
+    h2 {
+      margin-bottom: 0;
+      font-size: clamp(2rem, 4vw, 3rem);
+      line-height: 1.05;
+      letter-spacing: -.035em;
+    }
+    .section-head p { margin-bottom: 0; color: var(--muted); }
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .card {
+      min-height: 225px;
+      padding: 26px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: linear-gradient(145deg, rgba(23, 33, 44, .93), rgba(17, 24, 33, .93));
+    }
+    .card .index {
+      display: block;
+      margin-bottom: 30px;
+      color: var(--green);
+      font: .74rem/1 var(--mono);
+    }
+    .card h3 { margin-bottom: 10px; font-size: 1.06rem; }
+    .card p { margin-bottom: 0; color: var(--muted); font-size: .92rem; }
 
-  footer.site { border-top: 1px solid var(--border); padding: 32px 0 48px; }
-  footer.site .wrap { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
-  footer.site p { color: var(--fg-dim); font-size: 13px; }
-  footer.site a { font-size: 13px; margin-left: 16px; }
+    .control-grid {
+      display: grid;
+      grid-template-columns: minmax(0, .9fr) minmax(0, 1.25fr);
+      gap: 42px;
+      align-items: center;
+    }
+    .control-copy p { color: var(--muted); }
+    .control-copy ul { margin: 24px 0 0; padding: 0; list-style: none; }
+    .control-copy li {
+      position: relative;
+      margin-top: 12px;
+      padding-left: 24px;
+      color: #c5d0d9;
+    }
+    .control-copy li::before {
+      position: absolute;
+      left: 0;
+      color: var(--green);
+      font-family: var(--mono);
+      content: "✓";
+    }
+    pre {
+      margin: 0;
+      overflow-x: auto;
+      padding: 25px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: #dbe8ef;
+      background: #080d12;
+      font: .84rem/1.75 var(--mono);
+      box-shadow: inset 3px 0 0 var(--green-strong);
+    }
+    pre .prompt { color: var(--green); }
+    pre .comment { color: #7f91a0; }
 
-  @media (max-width: 640px) {
-    h1 { font-size: 32px; }
-    section.hero { padding: 56px 0 48px; }
-  }
-</style>
+    .principle {
+      padding: 46px;
+      border: 1px solid var(--border);
+      border-left: 4px solid var(--cyan);
+      background: var(--surface);
+    }
+    .principle p {
+      max-width: 920px;
+      margin: 0;
+      color: #ccd7df;
+      font-size: clamp(1.14rem, 2.3vw, 1.55rem);
+      line-height: 1.55;
+    }
+    .principle strong { color: var(--text); }
+
+    .links {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+    }
+    .link-card {
+      display: block;
+      padding: 24px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      background: var(--surface);
+      text-decoration: none;
+    }
+    .link-card:hover { border-color: var(--cyan); color: var(--text); }
+    .link-card strong { display: block; margin-bottom: 7px; }
+    .link-card span { color: var(--muted); font-size: .9rem; }
+
+    footer {
+      padding: 30px 0 46px;
+      border-top: 1px solid var(--border);
+      color: var(--muted);
+      font-size: .82rem;
+    }
+    footer .wrap {
+      display: flex;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px 24px;
+    }
+    footer p { margin: 0; }
+    footer a { margin-left: 16px; color: var(--muted); }
+
+    @media (max-width: 820px) {
+      nav a:not(.nav-github) { display: none; }
+      .section-head, .control-grid { grid-template-columns: 1fr; gap: 20px; }
+      .feature-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .links { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 560px) {
+      .wrap { width: min(100% - 28px, 1120px); }
+      .site-header .wrap { min-height: 60px; }
+      .feature-grid { grid-template-columns: 1fr; }
+      .card { min-height: auto; }
+      .card .index { margin-bottom: 18px; }
+      section.content { padding: 62px 0; }
+      .principle { padding: 28px; }
+      footer a { margin: 0 14px 0 0; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+    }
+  </style>
 </head>
 <body>
+  <a class="skip" href="#main">Skip to content</a>
 
-<header class="site">
-  <div class="wrap">
-    <span class="brand"><span class="prompt">&gt;_</span> AgenTerm</span>
-    <nav class="top">
-      <a href="#features">Features</a>
-      <a href="#control">Control</a>
-      <a href="https://github.com/mgttt/agenterm">GitHub</a>
-      <a href="https://github.com/mgttt/agenterm/releases">Releases</a>
-    </nav>
-  </div>
-</header>
-
-<section class="hero">
-  <div class="wrap">
-    <span class="badge">Windows-first &middot; more platforms on the way</span>
-    <h1>A tabbed terminal<br>that <span class="accent">keeps exited tabs alive</span>.</h1>
-    <p class="tagline">
-      AgenTerm is a native Windows cmd.exe terminal with persistent tabs, a tab tree,
-      a scriptable control plane, and a tmux-style compatibility client &mdash;
-      built to be driven by both humans and agents.
-    </p>
-    <div class="cta">
-      <a class="btn primary" href="https://github.com/mgttt/agenterm/releases">Download for Windows</a>
-      <a class="btn" href="https://github.com/mgttt/agenterm">View on GitHub</a>
+  <header class="site-header">
+    <div class="wrap">
+      <a class="brand" href="#"><span>&gt;_</span> AgenTerm</a>
+      <nav aria-label="Primary navigation">
+        <a href="#workspace">Workspace</a>
+        <a href="#automation">Automation</a>
+        <a href="#docs">Docs</a>
+        <a class="nav-github" href="https://github.com/mgttt/agenterm">GitHub</a>
+      </nav>
     </div>
+  </header>
 
-    <div class="term">
-      <div class="term-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span></div>
-      <div class="term-body">
-        <div><span class="p">C:\&gt;</span> agenterm-cli list-windows -F '#{window_id}:#{window_name}'</div>
-        <div><span class="c">@1:build &middot; @2:tests (exited, kept) &middot; @3:scratch</span></div>
-        <div><span class="p">C:\&gt;</span> agenterm-cli send-keys -t @2 Enter</div>
-        <div><span class="c"># re-run inside a tab whose process already exited</span></div>
-        <div><span class="p">C:\&gt;</span> agenterm-mux new-window -n <span class="w">release-check</span></div>
-        <div><span class="c"># tmux-compatible control, one tab = one pane</span></div>
+  <main id="main">
+    <section class="hero">
+      <div class="wrap">
+        <p class="eyebrow">Native Windows terminal · active development</p>
+        <h1>One visible workspace for <em>people and agents.</em></h1>
+        <p class="lead">
+          AgenTerm combines hierarchical ConPTY tabs, a per-tab composer and
+          environment, and a native automation client. Humans and local agents
+          observe and steer the same terminal fleet.
+        </p>
+        <div class="actions">
+          <a class="button primary" href="https://github.com/mgttt/agenterm/releases">Download a public release</a>
+          <a class="button" href="https://github.com/mgttt/agenterm#build-and-run">Build from source</a>
+        </div>
       </div>
+    </section>
+
+    <section class="product-shot" aria-labelledby="workspace-preview">
+      <div class="wrap">
+        <figure>
+          <img src="assets/agenterm-workspace.png" width="1164" height="752" loading="eager"
+               alt="AgenTerm window showing a hierarchical team tab tree, a PowerShell terminal, per-tab composer, and bottom workspace status bar">
+          <figcaption id="workspace-preview">
+            A real AgenTerm workspace: tree-organized tabs at left, terminal in
+            the center, the selected tab's composer below, and shared status at
+            the bottom.
+          </figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="content" id="workspace">
+      <div class="wrap">
+        <div class="section-head">
+          <h2>A fleet that stays understandable.</h2>
+          <p>
+            AgenTerm keeps its daily interface quiet while making process
+            lifecycle, hierarchy, input, and state explicit.
+          </p>
+        </div>
+        <div class="feature-grid">
+          <article class="card">
+            <span class="index">01 / DURABLE OUTPUT</span>
+            <h3>Exited does not mean erased</h3>
+            <p>An exited process leaves its final screen and exit code in a readable tab. The tab closes only when you explicitly close it.</p>
+          </article>
+          <article class="card">
+            <span class="index">02 / TEAM TREE</span>
+            <h3>Hierarchical tabs</h3>
+            <p>Organize agents and programs as a visible parent/child tree. Closing a parent promotes its direct children instead of terminating them.</p>
+          </article>
+          <article class="card">
+            <span class="index">03 / COMPOSER</span>
+            <h3>Input per workspace</h3>
+            <p>Every tab owns an independent multiline draft and Send action, keeping prepared instructions attached to the right terminal.</p>
+          </article>
+          <article class="card">
+            <span class="index">04 / RESTORE</span>
+            <h3>Workspace continuity</h3>
+            <p>Normal restarts preserve the tab tree, names, notes, drafts, commands, and active tab. Commands restart honestly as new processes.</p>
+          </article>
+          <article class="card">
+            <span class="index">05 / TERMINAL</span>
+            <h3>Native, practical interaction</h3>
+            <p>Win32/GDI rendering, ConPTY processes, scrollback, a draggable scrollbar, terminal selection, clipboard copy and bounded paste are built in.</p>
+          </article>
+          <article class="card">
+            <span class="index">06 / CONTEXT</span>
+            <h3>Scoped agent launches</h3>
+            <p>Launch Codex into named fleet tabs and inject tab-scoped environment or proxy values without persisting those values into the workspace.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="content" id="automation">
+      <div class="wrap control-grid">
+        <div class="control-copy">
+          <p class="eyebrow">Public control plane</p>
+          <h2>Observe, act, then verify.</h2>
+          <p>
+            <code>agenterm-cli.exe</code> exposes the same fleet through typed
+            loopback IPC. Stable tab IDs, structured snapshots, event
+            positions, deterministic waits, and PNG evidence make automation
+            inspectable.
+          </p>
+          <ul>
+            <li>Create, select, rename, nest, capture, and drive tabs</li>
+            <li>Wait for output or UI state without fixed sleeps</li>
+            <li>Target an explicit local AgenTerm server</li>
+            <li>Use a documented single-pane tmux/RMUX subset through <code>agenterm-mux.exe</code></li>
+          </ul>
+        </div>
+        <pre aria-label="AgenTerm command line example"><span class="prompt">PS&gt;</span> .\agenterm-cli.exe list-tab-tree
+<span class="prompt">PS&gt;</span> .\agenterm-cli.exe new-agent -n reviewer
+<span class="prompt">PS&gt;</span> .\agenterm-cli.exe wait-pane `
+      -t @2 --contains "Finished" --timeout-ms 30000
+<span class="prompt">PS&gt;</span> .\agenterm-cli.exe screenshot-pane `
+      -t @2 -o reviewer.png
+
+<span class="comment"># Discover the live contract</span>
+<span class="prompt">PS&gt;</span> .\agenterm-cli.exe list-commands
+<span class="prompt">PS&gt;</span> .\agenterm-cli.exe protocol-info
+<span class="prompt">PS&gt;</span> .\agenterm-cli.exe ui-snapshot</pre>
+      </div>
+    </section>
+
+    <section class="content">
+      <div class="wrap">
+        <div class="principle">
+          <p>
+            <strong>One authority, several clients.</strong> The GUI,
+            <code>agenterm-cli.exe</code>, <code>agenterm-mux.exe</code>, and
+            the bounded <code>agenterm-script.exe</code> worker reuse the same
+            public product contract. Unsupported compatibility operations fail
+            explicitly rather than pretending to succeed.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="content" id="docs">
+      <div class="wrap">
+        <div class="section-head">
+          <h2>Start with the contract.</h2>
+          <p>
+            AgenTerm is under active development. The product tree distinguishes
+            shipped, partial, and planned capability; consult it before relying
+            on roadmap work.
+          </p>
+        </div>
+        <div class="links">
+          <a class="link-card" href="https://github.com/mgttt/agenterm/blob/main/README.md">
+            <strong>README →</strong>
+            <span>Current highlights, build commands, CLI examples, and release workflow.</span>
+          </a>
+          <a class="link-card" href="https://github.com/mgttt/agenterm/blob/main/PRD.md">
+            <strong>Product tree →</strong>
+            <span>Canonical requirements, current status, invariants, and links to owning modules.</span>
+          </a>
+          <a class="link-card" href="https://github.com/mgttt/agenterm/blob/main/docs/agenterm-script-runtime.md">
+            <strong>Script runtime draft →</strong>
+            <span>The versioned Rhai runtime design, including shipped foundations and clearly marked planned work.</span>
+          </a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <p>AgenTerm · Windows · MIT OR Apache-2.0</p>
+      <p>
+        <a href="https://github.com/mgttt/agenterm">Repository</a>
+        <a href="https://github.com/mgttt/agenterm/releases">Releases</a>
+        <a href="https://github.com/mgttt/agenterm/blob/main/THIRD_PARTY_NOTICES.md">Notices</a>
+      </p>
     </div>
-  </div>
-</section>
-
-<section class="features" id="features">
-  <div class="wrap">
-    <h2>Features</h2>
-    <p class="section-sub">A small, deliberate surface: everything is reachable from the GUI and the CLI.</p>
-    <div class="grid">
-      <div class="card">
-        <h3><span class="glyph">&#9635;</span>Persistent tabs</h3>
-        <p>Exited shells stay open as readable, scrollable snapshots. Close is always explicit &mdash; output is never lost to a process exit.</p>
-      </div>
-      <div class="card">
-        <h3><span class="glyph">&#9500;</span>Tab tree</h3>
-        <p>Tabs form a hierarchy. Closing a parent promotes its children instead of killing them; parent cycles are rejected.</p>
-      </div>
-      <div class="card">
-        <h3><span class="glyph">&gt;_</span>Control CLI</h3>
-        <p><code>agenterm-cli</code> drives windows, tabs, keys, capture and workspaces over a bounded loopback IPC with typed receipts.</p>
-      </div>
-      <div class="card">
-        <h3><span class="glyph">&#9881;</span>tmux compatibility</h3>
-        <p><code>agenterm-mux</code> maps a documented tmux/RMUX subset onto AgenTerm. Unsupported commands fail explicitly, never silently.</p>
-      </div>
-      <div class="card">
-        <h3><span class="glyph">&#123; &#125;</span>Rhai scripting</h3>
-        <p>One-invocation constrained Rhai workers call a versioned script API with budgets, audit records, and typed failures.</p>
-      </div>
-      <div class="card">
-        <h3><span class="glyph">&#9684;</span>Themes &amp; snapshots</h3>
-        <p>Built-in light/dark palettes, PNG capture, and structured UI snapshots for rendering verification and automation.</p>
-      </div>
-    </div>
-  </div>
-</section>
-
-<section class="cli" id="control">
-  <div class="wrap">
-    <h2>Scriptable by design</h2>
-    <p class="section-sub">Discover the live interface instead of reading a manual.</p>
-    <div class="code">
-      <div><span class="p">$</span> agenterm-cli list-commands</div>
-      <div><span class="p">$</span> agenterm-cli protocol-info</div>
-      <div><span class="p">$</span> agenterm-cli ui-snapshot <span class="c"># structured state for agents</span></div>
-      <div><span class="p">$</span> agenterm-cli wait-pane -t @1 --text "BUILD SUCCEEDED" <span class="c"># no fixed sleeps</span></div>
-    </div>
-  </div>
-</section>
-
-<footer class="site">
-  <div class="wrap">
-    <p>AgenTerm &middot; MIT OR Apache-2.0</p>
-    <p>
-      <a href="https://github.com/mgttt/agenterm">Repository</a>
-      <a href="https://github.com/mgttt/agenterm/blob/main/README.md">README</a>
-      <a href="https://github.com/mgttt/agenterm/blob/main/docs/agenterm-script-runtime.md">Script runtime</a>
-      <a href="https://github.com/mgttt/agenterm/blob/main/THIRD_PARTY_NOTICES.md">Notices</a>
-    </p>
-  </div>
-</footer>
-
+  </footer>
 </body>
 </html>
