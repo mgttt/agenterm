@@ -7,7 +7,7 @@ $ErrorActionPreference = 'Stop'
 $declaredEvidence = @(
     'ux.workbench-inline-edit'
     'ux.workbench-compact-tree'
-    'ux.workbench-proxy-controls'
+    'ux.workbench-proxy-archived'
 )
 if ($ListEvidence) {
     $declaredEvidence
@@ -209,37 +209,15 @@ try {
     }
     Write-Evidence 'ux.workbench-inline-edit'
 
-    Write-Host 'STEP proxy credentials have physical Reveal and Re-mask controls'
-    $snapshot = Invoke-AgenTerm @('ui-action', 'open-proxy-editor', '-t', $root) |
-        ConvertFrom-Json
-    if ($snapshot.modal.kind -ne 'proxy-editor' -or
-        $snapshot.modal.credential_revealed) {
-        throw 'proxy editor did not start safely masked'
-    }
-    [WorkbenchNativeTest]::ClickButton($window, 'Reveal')
+    Write-Host 'STEP archived Proxy status surface releases its layout and actions'
     $snapshot = Get-Snapshot
-    if (-not $snapshot.modal.credential_revealed) {
-        throw 'physical Reveal button did not reveal the proxy editor'
+    $proxyStatus = $snapshot.layout.status_bar.proxy
+    if (-not $proxyStatus.archived -or $proxyStatus.available -or
+        $proxyStatus.bounds.width -ne 0 -or $null -ne $proxyStatus.action -or
+        $null -ne $proxyStatus.eye_action) {
+        throw 'Proxy status surface was not truthfully archived'
     }
-    [WorkbenchNativeTest]::ClickButton($window, 'Re-mask')
-    $snapshot = Get-Snapshot
-    if ($snapshot.modal.credential_revealed) {
-        throw 'physical Re-mask button did not hide proxy credentials'
-    }
-    [WorkbenchNativeTest]::ClickButton($window, 'Reveal')
-    [WorkbenchNativeTest]::ClickButton($window, 'Send now')
-    Invoke-AgenTerm @(
-        'wait-ui', '-t', $root, '--proxy-state', 'applied',
-        '--modal-kind', 'closed', '--timeout-ms', '10000'
-    ) | Out-Null
-    Invoke-AgenTerm @('ui-action', 'open-proxy-editor', '-t', $root) | Out-Null
-    [WorkbenchNativeTest]::ClickButton($window, 'Reveal')
-    [WorkbenchNativeTest]::ClickButton($window, 'Prepare')
-    Invoke-AgenTerm @(
-        'wait-ui', '-t', $root, '--proxy-state', 'prepared',
-        '--modal-kind', 'closed', '--timeout-ms', '2000'
-    ) | Out-Null
-    Write-Evidence 'ux.workbench-proxy-controls'
+    Write-Evidence 'ux.workbench-proxy-archived'
 
     Write-Host 'STEP compact and full geometry stay bounded for a deep CJK row'
     $target = $root

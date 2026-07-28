@@ -85,16 +85,10 @@ impl ProxyApplicationState {
         }
     }
 
-    const fn label(self) -> &'static str {
-        match self {
-            Self::Off => "Off",
-            Self::LaunchApplied => "Launch applied",
-            Self::Prepared => "Prepared",
-            Self::Submitted => "Submitted",
-            Self::Applied => "Applied",
-            Self::Failed => "Failed",
-        }
-    }
+    /*
+     * Archived with the bottom status-bar Proxy label renderer.
+     * The stable machine state remains available through `as_str`.
+     */
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -246,30 +240,11 @@ impl ProxyState {
         self.https.as_ref().map(SecretValue::expose)
     }
 
-    pub(crate) fn sanitized_label(&self) -> String {
-        let mut labels = Vec::new();
-        if let Some(endpoint) = self.http().and_then(parse_proxy_url) {
-            labels.push(format!("H {}", endpoint.display()));
-        }
-        if let Some(endpoint) = self.https().and_then(parse_proxy_url) {
-            labels.push(format!("S {}", endpoint.display()));
-        }
-        if self.application_state == ProxyApplicationState::Off {
-            return "Proxy · Off".to_owned();
-        }
-        if labels.is_empty() {
-            labels.push("Clear".to_owned());
-        }
-        format!(
-            "Proxy · {} · {}",
-            self.application_state.label(),
-            labels.join(" · ")
-        )
-    }
-
-    pub(crate) fn compact_label(&self) -> String {
-        format!("Proxy · {}", self.application_state.label())
-    }
+    /*
+     * Archived with the bottom status-bar Proxy surface:
+     * `sanitized_label` and `compact_label` formatted the visible status
+     * segment. Validation and redacted machine facts remain compiled.
+     */
 
     pub(crate) fn editor_text(&self) -> String {
         format!(
@@ -300,17 +275,14 @@ impl ProxyState {
     }
 }
 
-pub(crate) struct ProxyEndpoint {
-    scheme: &'static str,
-    host: String,
-    port: u16,
-}
+pub(crate) struct ProxyEndpoint;
 
-impl ProxyEndpoint {
-    pub(crate) fn display(&self) -> String {
-        format!("{}://{}:{}", self.scheme, self.host, self.port)
-    }
-}
+/*
+ * Archived status-display payload:
+ *
+ * struct ProxyEndpoint { scheme: &'static str, host: String, port: u16 }
+ * fn display(&self) -> String { format!("{}://{}:{}", ...) }
+ */
 
 pub(crate) fn parse_proxy_url(value: &str) -> Option<ProxyEndpoint> {
     if value.is_empty()
@@ -383,7 +355,8 @@ pub(crate) fn parse_proxy_url(value: &str) -> Option<ProxyEndpoint> {
         }
         (host.to_owned(), port)
     };
-    Some(ProxyEndpoint { scheme, host, port })
+    let _ = (scheme, host, port);
+    Some(ProxyEndpoint)
 }
 
 pub(crate) fn parse_proxy_editor(text: &str) -> Result<(Option<String>, Option<String>)> {
@@ -902,14 +875,14 @@ mod tests {
     }
 
     #[test]
-    fn proxy_parser_redacts_everything_except_scheme_host_and_port() {
-        let parsed = parse_proxy_url(
-            "https://alice:super-secret@proxy.example:8443/private?token=hidden#fragment",
-        )
-        .unwrap();
-        assert_eq!(parsed.display(), "https://proxy.example:8443");
-        let ipv6 = parse_proxy_url("http://user:pass@[2001:db8::1]/ignored").unwrap();
-        assert_eq!(ipv6.display(), "http://[2001:db8::1]:80");
+    fn proxy_parser_accepts_strict_http_endpoints_without_exposing_values() {
+        assert!(
+            parse_proxy_url(
+                "https://alice:super-secret@proxy.example:8443/private?token=hidden#fragment",
+            )
+            .is_some()
+        );
+        assert!(parse_proxy_url("http://user:pass@[2001:db8::1]/ignored").is_some());
         for invalid in [
             "socks5://proxy.example:1080",
             "http://",
@@ -939,10 +912,6 @@ mod tests {
             state.application_state(),
             ProxyApplicationState::LaunchApplied
         );
-        assert_eq!(
-            state.sanitized_label(),
-            "Proxy · Launch applied · H http://one.example:80 · S https://two.example:9443"
-        );
     }
 
     #[test]
@@ -952,10 +921,6 @@ mod tests {
         assert!(!state.configured());
         assert!(state.request_pending());
         assert_eq!(state.application_state(), ProxyApplicationState::Prepared);
-        assert_eq!(
-            state.sanitized_label(),
-            "Proxy · Prepared · H http://proxy.example:8080"
-        );
         assert_eq!(
             state.facts(),
             ProxyFacts {
@@ -990,10 +955,8 @@ mod tests {
         let mut state = ProxyState::requested(None, None).unwrap();
         assert_eq!(state.source(), ProxySource::UserRequested);
         assert_eq!(state.application_state(), ProxyApplicationState::Prepared);
-        assert_eq!(state.sanitized_label(), "Proxy · Prepared · Clear");
         state.mark_submitted().unwrap();
         state.mark_applied().unwrap();
-        assert_eq!(state.sanitized_label(), "Proxy · Applied · Clear");
         assert!(!state.configured());
     }
 

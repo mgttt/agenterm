@@ -7,15 +7,14 @@ use windows_sys::Win32::{
     },
     Graphics::Gdi::{
         BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BeginPaint, BitBlt, CLEARTYPE_QUALITY,
-        CLIP_DEFAULT_PRECIS, CreateCompatibleBitmap, CreateCompatibleDC, CreateFontW, CreatePen,
+        CLIP_DEFAULT_PRECIS, CreateCompatibleBitmap, CreateCompatibleDC, CreateFontW,
         CreateSolidBrush, DEFAULT_CHARSET, DEFAULT_GUI_FONT, DIB_RGB_COLORS, DT_CENTER,
         DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject, DrawTextW,
-        Ellipse, EndPaint, ExtTextOutW, FF_MODERN, FIXED_PITCH, FW_NORMAL, FillRect, FrameRect,
-        GetDC, GetDIBits, GetDeviceCaps, GetStockObject, GetTextExtentPoint32W, GetTextFaceW,
-        GetTextMetricsW, GetWindowDC, HDC, HFONT, HGDIOBJ, InvalidateRect, LOGPIXELSY, LineTo,
-        MoveToEx, NULL_BRUSH, OUT_DEFAULT_PRECIS, PAINTSTRUCT, PS_SOLID, ReleaseDC, SRCCOPY,
-        SYSTEM_FIXED_FONT, ScreenToClient, SelectObject, SetBkMode, SetTextColor, TEXTMETRICW,
-        TRANSPARENT, UpdateWindow,
+        EndPaint, ExtTextOutW, FF_MODERN, FIXED_PITCH, FW_NORMAL, FillRect, FrameRect, GetDC,
+        GetDIBits, GetDeviceCaps, GetStockObject, GetTextExtentPoint32W, GetTextFaceW,
+        GetTextMetricsW, GetWindowDC, HDC, HFONT, HGDIOBJ, InvalidateRect, LOGPIXELSY,
+        OUT_DEFAULT_PRECIS, PAINTSTRUCT, ReleaseDC, SRCCOPY, SYSTEM_FIXED_FONT, ScreenToClient,
+        SelectObject, SetBkMode, SetTextColor, TEXTMETRICW, TRANSPARENT, UpdateWindow,
     },
     System::{
         Console::{
@@ -2774,22 +2773,13 @@ impl AppState {
             }
             return;
         }
-        if layout.status_segments.proxy.contains(x, y)
-            && !self.window_close_pending
-            && self.pending_close.is_none()
-            && !self.settings_open
-            && self.cwd_edit_target.is_none()
-            && self.proxy_edit_target.is_none()
-        {
-            if x >= layout.status_segments.proxy.right - 28 {
-                if let Err(error) = self.toggle_proxy_endpoint(None) {
-                    self.last_error = Some(format!("{error:#}"));
-                }
-            } else if let Err(error) = self.open_proxy_editor(None) {
-                self.last_error = Some(format!("{error:#}"));
-            }
-            return;
-        }
+        /*
+         * Archived bottom-bar Proxy hit target. Proxy configuration remains a
+         * shell responsibility; the underlying typed state/CLI compatibility
+         * is retained without advertising a GUI control.
+         *
+         * if layout.status_segments.proxy.contains(x, y) { ... }
+         */
         if self.window_close_pending
             || self.pending_close.is_some()
             || self.settings_open
@@ -5025,45 +5015,15 @@ impl AppState {
             colors.muted,
             DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
         );
-        let proxy_segment = win_rect(layout.status_segments.proxy);
-        frame(device, &proxy_segment, colors.tree);
-        let (proxy_label, proxy_endpoint_visible) = self
-            .active_position()
-            .and_then(|position| self.tabs.get(position))
-            .map(|tab| {
-                let visible = self.proxy_endpoint_visible.contains(&tab.id);
-                (
-                    if visible {
-                        tab.proxy.sanitized_label()
-                    } else {
-                        tab.proxy.compact_label()
-                    },
-                    visible,
-                )
-            })
-            .unwrap_or_else(|| ("Proxy · Off".to_owned(), false));
-        draw_text(
-            device,
-            &proxy_label,
-            RECT {
-                left: proxy_segment.left + 6,
-                right: proxy_segment.right - 28,
-                ..proxy_segment
-            },
-            colors.text,
-            DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
-        );
-        draw_proxy_eye(
-            device,
-            &RECT {
-                left: proxy_segment.right - 25,
-                top: proxy_segment.top + 5,
-                right: proxy_segment.right - 5,
-                bottom: proxy_segment.bottom - 5,
-            },
-            colors.blue,
-            !proxy_endpoint_visible,
-        );
+        /*
+         * Archived bottom-bar Proxy renderer. The geometry slot remains
+         * zero-width for structured-snapshot compatibility.
+         *
+         * let proxy_segment = win_rect(layout.status_segments.proxy);
+         * frame(...);
+         * draw_text(...);
+         * draw_proxy_eye(...);
+         */
 
         if let Some(position) = self.active_position() {
             unsafe { SelectObject(device, terminal_font as HGDIOBJ) };
@@ -6039,16 +5999,11 @@ impl AppState {
                     },
                     "proxy": {
                         "bounds": pixel_rect_json(layout.status_segments.proxy),
-                        "eye_bounds": pixel_rect_json(PixelRect {
-                            left: (layout.status_segments.proxy.right - 28)
-                                .max(layout.status_segments.proxy.left),
-                            top: layout.status_segments.proxy.top,
-                            right: layout.status_segments.proxy.right,
-                            bottom: layout.status_segments.proxy.bottom,
-                        }),
-                        "available": self.active.is_some(),
-                        "action": "open-proxy-editor",
-                        "eye_action": "proxy-toggle-visibility",
+                        "eye_bounds": pixel_rect_json(layout.status_segments.proxy),
+                        "available": false,
+                        "archived": true,
+                        "action": serde_json::Value::Null,
+                        "eye_action": serde_json::Value::Null,
                     },
                     "provider": "placeholder",
                 }
@@ -7851,45 +7806,11 @@ fn frame(device: HDC, rect: &RECT, color: COLORREF) {
     }
 }
 
-fn draw_proxy_eye(device: HDC, rect: &RECT, color: COLORREF, slashed: bool) {
-    if rect.right - rect.left < 8 || rect.bottom - rect.top < 6 {
-        return;
-    }
-    let pen = unsafe { CreatePen(PS_SOLID, 1, color) };
-    let pupil = unsafe { CreateSolidBrush(color) };
-    if pen.is_null() || pupil.is_null() {
-        if !pen.is_null() {
-            unsafe { DeleteObject(pen as HGDIOBJ) };
-        }
-        if !pupil.is_null() {
-            unsafe { DeleteObject(pupil as HGDIOBJ) };
-        }
-        return;
-    }
-    let previous_pen = unsafe { SelectObject(device, pen as HGDIOBJ) };
-    let previous_brush = unsafe { SelectObject(device, GetStockObject(NULL_BRUSH) as HGDIOBJ) };
-    unsafe {
-        Ellipse(device, rect.left, rect.top, rect.right, rect.bottom);
-        SelectObject(device, pupil as HGDIOBJ);
-        let center_x = (rect.left + rect.right) / 2;
-        let center_y = (rect.top + rect.bottom) / 2;
-        Ellipse(
-            device,
-            center_x - 2,
-            center_y - 2,
-            center_x + 3,
-            center_y + 3,
-        );
-        if slashed {
-            MoveToEx(device, rect.left - 1, rect.bottom, ptr::null_mut());
-            LineTo(device, rect.right + 1, rect.top - 1);
-        }
-        SelectObject(device, previous_brush);
-        SelectObject(device, previous_pen);
-        DeleteObject(pupil as HGDIOBJ);
-        DeleteObject(pen as HGDIOBJ);
-    }
-}
+/*
+ * Archived with the bottom status-bar Proxy surface. The former GDI eye
+ * renderer stays in history and can be restored with the surface if product
+ * need returns; it is deliberately not compiled while the surface is hidden.
+ */
 
 fn draw_text(device: HDC, text: &str, mut rect: RECT, color: COLORREF, format: u32) {
     let encoded = wide(text);

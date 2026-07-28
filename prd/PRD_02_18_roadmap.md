@@ -55,13 +55,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       around 180..480 px while retaining a usable terminal, double-click
       resets it, and visibility plus configured width persist
     - [x] the status bar orders host segments as hidden-Tabs recovery,
-      last-known CWD, flexible provider space, and right-aligned Proxy.
-      CWD/proxy edits default to safely quoted Composer preparation;
-      immediate injection is explicit and never offered for unknown shells
-    - [x] Proxy closed-eye reveals only on/off, open-eye reveals sanitized
-      scheme/host/port, and credential material requires a second temporary
-      reveal inside the editor; all reveal state is ephemeral and secret
-      values remain absent from persistence, snapshots, events, and audit
+      last-known CWD, and flexible provider space. The former right-aligned
+      Proxy surface is archived and returns its width to providers
+    - [>] the former Proxy eye/editor status entry is archived; users configure
+      proxy variables in their shell while redacted CLI compatibility remains
     - [x] default window close detaches by hiding the HWND and preserving
       server/PTY state; stop-and-exit saves metadata then ends the server;
       Cancel/Esc changes nothing. No tray icon ships in v0.1.6
@@ -111,10 +108,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       in-terminal key layer
   - Release core: working-context status segments
     - [x] partition the bottom bar into host-owned Tabs recovery,
-      last-known CWD, flexible provider, and right-aligned Proxy segments;
-      narrow layouts preserve interactive recovery targets and Dark/Light
-      states, and CWD/Proxy geometry, editors, reveal controls, and
-      semantic snapshots share the same layout
+      last-known CWD, and flexible provider segments; the archived Proxy slot
+      remains zero-width and non-actionable in semantic snapshots
     - [x] truthful working-context CWD uses launch and OSC 7 provenance with safe Composer preparation
     - [x] report CWD honestly with `launch|osc7|user_requested|unknown`
       provenance; support OSC 7 and future shell integration, but never
@@ -130,11 +125,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       `user_requested`/pending until a valid bounded local OSC 7 confirms
       the path; invalid OSC does not replace the last-known value
     - [x] tab-scoped HTTP(S) proxy context remains ephemeral and redacted across UI, control, persistence, and terminal evidence
-    - [x] after CWD is accepted, show tab-scoped HTTP(S) proxy state with a
-      GDI eye/eye-slash toggle and editor; closed-eye shows only on/off,
-      open-eye shows sanitized scheme/host/port, and credential/query/
-      fragment values require a second editor reveal and remain redacted
-      from snapshots, events, audits, logs, and semantic screenshot data
+    - [>] the former tab-scoped HTTP(S) Proxy GDI eye/editor status surface is
+      archived; retained compatibility state remains ephemeral and redacted
     - [x] CWD/proxy editors are keyboard focus traps with typed semantic
       prepare actions; proxy values and reveal state remain ephemeral,
       never persist to workspace, and never falsely claim to mutate the

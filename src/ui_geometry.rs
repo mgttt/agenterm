@@ -42,9 +42,6 @@ const SIDEBAR_COMPACT_NEW_BUTTON_WIDTH: i32 = 64;
 const SIDEBAR_COMPACT_ACTION_BUTTON_WIDTH: i32 = 36;
 const STATUS_TABS_WIDTH: i32 = 72;
 const STATUS_CWD_WIDTH: i32 = 260;
-const STATUS_CWD_MIN_WIDTH: i32 = 80;
-const STATUS_PROXY_WIDTH: i32 = 112;
-const STATUS_PROXY_MIN_WIDTH: i32 = 64;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct PixelRect {
@@ -306,26 +303,21 @@ fn status_segment_layout(status: PixelRect, tabs_visible: bool) -> StatusSegment
         segment
     });
 
-    let remaining = (right - left).max(0);
-    // Provider space disappears first. Proxy then compacts to its minimum,
-    // followed by CWD truncation. At extremely small widths the host-owned Tabs
-    // recovery (when present) and Proxy remain the highest-priority controls.
-    let proxy_width = if remaining >= STATUS_CWD_MIN_WIDTH + STATUS_PROXY_MIN_WIDTH {
-        STATUS_PROXY_WIDTH
-            .min(remaining - STATUS_CWD_MIN_WIDTH)
-            .max(STATUS_PROXY_MIN_WIDTH)
-    } else {
-        STATUS_PROXY_MIN_WIDTH.min(remaining)
-    };
-    let proxy_left = right - proxy_width;
-    let cwd_width = STATUS_CWD_WIDTH.min((proxy_left - left).max(0));
+    // The bottom-bar Proxy surface is archived. Users configure proxy state in
+    // their shell; keep a zero-width geometry slot so old structured snapshot
+    // readers degrade cleanly while the implementation remains easy to revive.
+    //
+    // Archived allocation:
+    // let proxy_width = STATUS_PROXY_WIDTH.min(remaining);
+    // let proxy_left = right - proxy_width;
+    let cwd_width = STATUS_CWD_WIDTH.min((right - left).max(0));
     let cwd_right = left + cwd_width;
 
     StatusSegmentLayout {
         tabs_recovery,
         cwd: rect(left, status.top, cwd_right, status.bottom),
-        provider: rect(cwd_right, status.top, proxy_left, status.bottom),
-        proxy: rect(proxy_left, status.top, right, status.bottom),
+        provider: rect(cwd_right, status.top, right, status.bottom),
+        proxy: rect(right, status.top, right, status.bottom),
     }
 }
 
@@ -749,8 +741,8 @@ mod tests {
         );
         assert_eq!(geometry.status_segments.tabs_recovery, None);
         assert_eq!(geometry.status_segments.cwd.width(), STATUS_CWD_WIDTH);
-        assert_eq!(geometry.status_segments.proxy.width(), STATUS_PROXY_WIDTH);
-        assert_eq!(geometry.status_segments.provider.width(), 628);
+        assert_eq!(geometry.status_segments.proxy.width(), 0);
+        assert_eq!(geometry.status_segments.provider.width(), 740);
         assert_eq!(geometry.sidebar_tree, rect(0, 0, 244, 628));
         assert_toolbar_valid(geometry, SidebarToolbarMode::Full);
     }
@@ -827,14 +819,14 @@ mod tests {
     }
 
     #[test]
-    fn status_segments_degrade_without_overlap_and_keep_hidden_tabs_recovery() {
+    fn archived_proxy_releases_status_space_and_keeps_hidden_tabs_recovery() {
         let hidden = layout(210, 100, false, 250);
         let segments = hidden.status_segments;
 
         assert_eq!(segments.tabs_recovery.unwrap().width(), STATUS_TABS_WIDTH);
         assert_eq!(segments.provider.width(), 0);
-        assert_eq!(segments.proxy.width(), STATUS_PROXY_MIN_WIDTH);
-        assert_eq!(segments.cwd.width(), 74);
+        assert_eq!(segments.proxy.width(), 0);
+        assert_eq!(segments.cwd.width(), 138);
         assert_eq!(segments.cwd.right, segments.provider.left);
         assert_eq!(segments.provider.right, segments.proxy.left);
 

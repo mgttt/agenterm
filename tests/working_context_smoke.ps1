@@ -149,7 +149,6 @@ $address = $context.Address
 $workspace = $context.WorkspacePath
 $instances = $context.InstanceDirectory
 $stderrFile = Join-Path $context.RunDirectory 'gui-stderr.txt'
-$png = Join-Path $context.RunDirectory 'proxy-eye.png'
 $script:secret = ('credential-' + $PID + '-sentinel')
 $proxyUrl = "https://alice:$script:secret@proxy.example:8443/private?token=$script:secret#fragment"
 $script:proxyUrl = $proxyUrl
@@ -213,6 +212,12 @@ try {
     $epoch = $snapshot.event_position.epoch
     $launchPane = Invoke-Cli pane-snapshot -t $tabId | ConvertFrom-Json
     $inputWrites = [int]$launchPane.windows[0].input_writes
+    $proxyStatus = $snapshot.layout.status_bar.proxy
+    if (-not $proxyStatus.archived -or $proxyStatus.available -or
+        $proxyStatus.bounds.width -ne 0 -or $null -ne $proxyStatus.action -or
+        $null -ne $proxyStatus.eye_action) {
+        throw 'Archived Proxy status surface remained visible or actionable'
+    }
 
     $visibleText = Invoke-Cli ui-action proxy-toggle-visibility -t $tabId
     Assert-NoSecret $visibleText 'visible endpoint snapshot'
@@ -220,17 +225,8 @@ try {
     $visibleTab = $visible.tabs | Where-Object id -eq $tabId
     if (-not $visibleTab.working_context.proxy.endpoint_visible -or
         $visibleTab.working_context.proxy.credential_revealed) {
-        throw 'Proxy eye did not toggle only the sanitized endpoint state'
+        throw 'Proxy visibility compatibility action changed more than sanitized endpoint state'
     }
-    $eye = $visible.layout.status_bar.proxy.eye_bounds
-    if ($eye.width -le 0 -or $eye.height -le 0) {
-        throw 'Proxy eye did not expose a bounded GDI hit target'
-    }
-    Invoke-Cli screenshot '-o' $png | Out-Null
-    if (-not (Test-Path -LiteralPath $png) -or (Get-Item $png).Length -le 1000) {
-        throw 'Proxy GDI eye screenshot evidence was not created'
-    }
-
     Invoke-Cli ui-action open-proxy-editor -t $tabId | Out-Null
     Invoke-Cli ui-action proxy-reveal-credentials | Out-Null
     $process.Refresh()
@@ -324,7 +320,7 @@ try {
     }
     Assert-NoSecret (Get-Content -LiteralPath $stderrFile -Raw) 'GUI stderr'
     Write-Evidence 'ux.working-context-proxy'
-    Write-Host 'PASS: proxy privacy, GDI eye, sensitive prepare/send, remask, and restart'
+    Write-Host 'PASS: archived Proxy status surface, privacy compatibility, prepare/send, remask, and restart'
     $succeeded = $true
 }
 catch {

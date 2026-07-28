@@ -327,12 +327,12 @@
       "evidence_ids": ["ux.workbench-compact-tree"]
     },
     {
-      "id": "workspace.proxy-mouse-controls",
+      "id": "workspace.proxy-status-archived",
       "kind": "behavior",
       "status": "shipped",
       "evidence_mode": "black-box",
-      "prd": "GUI editor provides mouse-reachable `Reveal`/`Re-mask`, `Prepare`",
-      "evidence_ids": ["ux.workbench-proxy-controls"]
+      "prd": "former right-aligned Proxy display/editor entry is archived",
+      "evidence_ids": ["ux.workbench-proxy-archived"]
     },
     {
       "id": "workspace.proxy-confirmed-application",

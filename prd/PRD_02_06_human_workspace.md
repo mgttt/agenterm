@@ -92,15 +92,19 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - Status bar
   - [x] full-window bottom status surface, independent of the active terminal
   - [x] semantic bounds exposed through `ui-snapshot`
+  - [x] the former right-aligned Proxy display/editor entry is archived and
+    releases its width to the provider region; its snapshot slot is zero-width,
+    unavailable, and explicitly marked `archived`
   - [ ] built-in CPU, disk, clock, active-agent, and token segments
   - [ ] CLI-configurable segment layout and refresh policy
   - [ ] dynamic script/provider segments with timeout and failure isolation
 - [x] embedded AgenTerm icon
 - [ ] configurable shell, colors, working directory, and startup tabs
 - [x] per-tab child environment injection.
-- [~] Ephemeral per-tab proxy convenience with confirmed shell application;
-  values are never persisted to the workspace, and v0.1.8 must repair the
-  preparation/application state contract before public release
+- [>] The bottom-bar Proxy convenience is archived. Users configure proxy
+  variables in their terminal; the redacted state/application machinery and
+  public CLI compatibility remain temporarily available but are no longer
+  advertised as GUI workspace controls.
 
 ## v0.1.8 P0 tab proxy correctness
 
@@ -122,9 +126,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [ ] command rejection, marker mismatch, environment/child mismatch, terminal
   exit, process exit, timeout, cancellation, or any other failed application
   moves the attempt to `Failed` with a non-secret reason and never claims `On`
-- [x] the GUI editor provides mouse-reachable `Reveal`/`Re-mask`, `Prepare`,
-  and `Send Now`; revealing changes only presentation, never persistence,
-  logging, snapshot content, or application state
+- [>] the former bottom-bar entry to the GUI Proxy editor is archived; its
+  implementation remains commented/compatibility-addressable for now rather
+  than being deleted in the same change
 - [ ] `ui-snapshot` truthfully exposes the stable target, `revealed` boolean,
   `Off|Prepared|Submitted|Applied|Failed`, validation/error category, and
   bounded editor/action geometry, but never the proxy URL, credential,
