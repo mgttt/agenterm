@@ -1,8 +1,3 @@
-#![expect(
-    dead_code,
-    reason = "v0.1.8 pure selection semantics await serialized Win32 host integration"
-)]
-
 // This module owns linear local-selection semantics only. Application raw-mouse
 // arbitration and rectangular selection are intentionally outside this slice.
 
@@ -40,6 +35,17 @@ pub(crate) enum SelectionGesturePhase {
     Cancelled,
 }
 
+impl SelectionGesturePhase {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Prepared => "prepared",
+            Self::Dragging => "dragging",
+            Self::Completed => "completed",
+            Self::Cancelled => "cancelled",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct SelectionGesture {
     tab_id: u64,
@@ -65,6 +71,17 @@ impl SelectionGesture {
 
     pub(crate) const fn phase(self) -> SelectionGesturePhase {
         self.phase
+    }
+
+    pub(crate) const fn tab_id(self) -> u64 {
+        self.tab_id
+    }
+
+    pub(crate) const fn active(self) -> bool {
+        matches!(
+            self.phase,
+            SelectionGesturePhase::Prepared | SelectionGesturePhase::Dragging
+        )
     }
 
     pub(crate) fn drag_to(mut self, focus: TerminalPoint, rows: u16, cols: u16) -> Self {
@@ -107,6 +124,31 @@ impl SelectionGesture {
             focus: self.focus,
             dragging: false,
             moved: true,
+        })
+    }
+
+    pub(crate) fn selection(self) -> Option<TerminalSelection> {
+        (self.phase != SelectionGesturePhase::Cancelled).then_some(TerminalSelection {
+            tab_id: self.tab_id,
+            anchor: self.anchor,
+            focus: self.focus,
+            dragging: self.active(),
+            moved: self.anchor != self.focus,
+        })
+    }
+
+    pub(crate) fn completed(
+        tab_id: u64,
+        anchor: TerminalPoint,
+        focus: TerminalPoint,
+        rows: u16,
+        cols: u16,
+    ) -> Option<Self> {
+        Some(Self {
+            tab_id,
+            anchor: clamp_point(anchor, rows, cols)?,
+            focus: clamp_point(focus, rows, cols)?,
+            phase: SelectionGesturePhase::Completed,
         })
     }
 }
