@@ -1,5 +1,5 @@
 use anyhow::{Context as _, Result};
-use rmux_pty::TerminalSize;
+use crate::pty::TerminalSize;
 use windows_sys::Win32::{
     Foundation::{
         COLORREF, GlobalFree, HINSTANCE, HWND, INVALID_HANDLE_VALUE, LPARAM, LRESULT, POINT, RECT,
@@ -1578,7 +1578,7 @@ impl AppState {
                     command_line: saved.command_line,
                     tab_environment: Vec::new(),
                     session_name: startup_session_name.clone(),
-                    window: wake_window as HWND,
+                    window: wake_window,
                     wake_signal: Arc::clone(&startup_wake_signal),
                     initial_size: TerminalSize {
                         rows: INITIAL_ROWS,
@@ -1678,7 +1678,7 @@ impl AppState {
             command_line: command,
             tab_environment,
             session_name: self.session_name.clone(),
-            window: self.window,
+            window: self.window as isize,
             wake_signal: Arc::clone(&self.wake_signal),
             initial_size: TerminalSize { rows, cols },
         })?;
