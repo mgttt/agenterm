@@ -128,6 +128,8 @@ jobs:
           persist-credentials: false
       - name: Install lint components
         run: rustup component add rustfmt clippy
+      - name: Install Windows ARM64 target
+        run: rustup target add aarch64-pc-windows-msvc
       - name: Install cargo-xwin
         run: cargo install cargo-xwin --locked
       - name: Clippy (Windows ARM64 client binaries)

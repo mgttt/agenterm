@@ -433,11 +433,7 @@ fn map_ureq_error(error: UreqError) -> String {
         UreqError::RedirectFailed | UreqError::TooManyRedirects => "http_redirect",
         UreqError::InvalidProxyUrl | UreqError::ConnectProxyFailed(_) => "http_proxy",
         UreqError::BodyExceedsLimit(_) => "http_request_body_limit",
-        UreqError::Tls(_)
-        | UreqError::NativeTls(_)
-        | UreqError::Der(_)
-        | UreqError::Pem(_)
-        | UreqError::TlsRequired => "http_tls",
+        UreqError::Tls(_) | UreqError::Pem(_) | UreqError::TlsRequired => "http_tls",
         UreqError::RequireHttpsOnly(_) => "http_scheme",
         UreqError::LargeResponseHeader(_, _) => "http_header_limit",
         _ => "http_transport",

@@ -255,7 +255,7 @@ fn child_setup(
             return Err(io::Error::last_os_error());
         }
 
-        if libc::ioctl(libc::STDIN_FILENO, libc::TIOCSCTTY, 0) == -1 {
+        if libc::ioctl(libc::STDIN_FILENO, libc::TIOCSCTTY as libc::c_ulong, 0) == -1 {
             return Err(io::Error::last_os_error());
         }
 
@@ -367,17 +367,17 @@ fn set_os_env(key: &OsStr, value: &OsStr) -> io::Result<()> {
 fn open_pty_pair(size: Option<TerminalSize>) -> io::Result<(OwnedFd, OwnedFd)> {
     let mut master: c_int = 0;
     let mut slave: c_int = 0;
-    let winsize = size.map(into_winsize);
+    let mut winsize = size.map(into_winsize);
     let winsize_ptr = winsize
-        .as_ref()
-        .map_or(std::ptr::null(), |value| value as *const libc::winsize);
+        .as_mut()
+        .map_or(std::ptr::null_mut(), |value| value as *mut libc::winsize);
 
     let result = unsafe {
         libc::openpty(
             &mut master,
             &mut slave,
             std::ptr::null_mut(),
-            std::ptr::null(),
+            std::ptr::null_mut(),
             winsize_ptr,
         )
     };

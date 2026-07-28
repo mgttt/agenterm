@@ -2209,7 +2209,15 @@ let receipt = fleet.tabs.set_note($fleetTabIdLiteral, $fleetNoteLiteral);
     Write-Host 'PASS: safe scripting API, supervision, audit privacy, denial, and budgets'
 }
 catch {
-    $runFailure = Protect-ScriptSmokeDiagnosticText -Text ($_ | Out-String)
+    $runFailure = if ($InternalFailureBundleProbe) {
+        @(
+            "INTERNAL_FAILURE_BUNDLE_PROBE:script:$($smokeRun.RunId)"
+            'intentional script failure-bundle probe'
+        ) -join "`n"
+    }
+    else {
+        Protect-ScriptSmokeDiagnosticText -Text ($_ | Out-String)
+    }
     throw
 }
 finally {
