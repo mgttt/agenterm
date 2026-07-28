@@ -60,7 +60,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       visibility and drag width remain client-owned and persist through the
       shared settings file, while mouse-wheel history navigation mutates the
       server-owned terminal viewport and PTY resize follows the effective
-      layout. Ordinary launches, full workbench parity and same-server rollback
+      layout. Tab rows now own their title/note editor in place: `Edit` is
+      replaced by bounded native title/note inputs plus `Save` and `Cancel`;
+      Save updates the same stable server tab and Cancel performs no mutation.
+      Ordinary launches, full workbench parity and same-server rollback
       qualification are still pending.
   - [ ] compatibility is fail-closed and asymmetric: a new GUI may connect to
     its declared server protocol range; an incompatible server remains alive

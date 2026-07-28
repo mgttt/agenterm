@@ -39,6 +39,17 @@ public static class AgenTermRemoteUiNativeTest {
     public static extern IntPtr SendMessage(
         IntPtr window, uint message, IntPtr wparam, IntPtr lparam);
 
+    [DllImport("user32.dll", EntryPoint = "SendMessageW",
+        CharSet = CharSet.Unicode)]
+    public static extern IntPtr SendMessageText(
+        IntPtr window, uint message, IntPtr wparam, string text);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetDlgItem(IntPtr window, int id);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsWindowVisible(IntPtr window);
+
     public static IntPtr MousePoint(int x, int y) {
         return new IntPtr((y << 16) | (x & 0xffff));
     }
@@ -308,6 +319,93 @@ try {
             "before_columns=$columnsBeforeResize " +
             "after_columns=$($activeAfterResize.screen.columns)"
         )
+    }
+
+    Write-Host 'STEP edit title and note in place with Save and Cancel'
+    $editedTitle = "remote-edited-$($run.RunId)"
+    $editedNote = "note-$($run.RunId)"
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, 0x0201, [IntPtr]::Zero,
+        [AgenTermRemoteUiNativeTest]::MousePoint(330, 20)
+    ) | Out-Null
+    $titleEditor = [AgenTermRemoteUiNativeTest]::GetDlgItem(
+        $gui.MainWindowHandle, 2105
+    )
+    $noteEditor = [AgenTermRemoteUiNativeTest]::GetDlgItem(
+        $gui.MainWindowHandle, 2106
+    )
+    $saveButton = [AgenTermRemoteUiNativeTest]::GetDlgItem(
+        $gui.MainWindowHandle, 2107
+    )
+    $cancelButton = [AgenTermRemoteUiNativeTest]::GetDlgItem(
+        $gui.MainWindowHandle, 2108
+    )
+    if ($titleEditor -eq [IntPtr]::Zero -or
+        $noteEditor -eq [IntPtr]::Zero -or
+        $saveButton -eq [IntPtr]::Zero -or
+        $cancelButton -eq [IntPtr]::Zero -or
+        -not [AgenTermRemoteUiNativeTest]::IsWindowVisible($titleEditor) -or
+        -not [AgenTermRemoteUiNativeTest]::IsWindowVisible($saveButton)) {
+        throw 'replaceable UI did not replace Edit with inline Save/Cancel controls'
+    }
+    [AgenTermRemoteUiNativeTest]::SendMessageText(
+        $titleEditor, 0x000C, [IntPtr]::Zero, $editedTitle
+    ) | Out-Null
+    [AgenTermRemoteUiNativeTest]::SendMessageText(
+        $noteEditor, 0x000C, [IntPtr]::Zero, $editedNote
+    ) | Out-Null
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $saveButton, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero
+    ) | Out-Null
+    $edited = Invoke-AgenTerm @('inspect', '-t', $tabId) |
+        ConvertFrom-Json
+    if ($edited.windows[0].name -ne $editedTitle -or
+        $edited.windows[0].note -ne $editedNote -or
+        [AgenTermRemoteUiNativeTest]::IsWindowVisible($titleEditor)) {
+        Save-WindowPng -Window $gui.MainWindowHandle `
+            -Path (Join-Path $run.RunDirectory 'inline-edit-failure.png')
+        throw (
+            'inline Save did not persist title/note and return to Edit state: ' +
+            "name=$($edited.windows[0].name) note=$($edited.windows[0].note) " +
+            "editor_visible=$([AgenTermRemoteUiNativeTest]::IsWindowVisible($titleEditor))"
+        )
+    }
+
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, 0x0201, [IntPtr]::Zero,
+        [AgenTermRemoteUiNativeTest]::MousePoint(330, 20)
+    ) | Out-Null
+    [AgenTermRemoteUiNativeTest]::SendMessageText(
+        $titleEditor, 0x000C, [IntPtr]::Zero, ('x' * 4097)
+    ) | Out-Null
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $saveButton, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero
+    ) | Out-Null
+    $rejected = Invoke-AgenTerm @('inspect', '-t', $tabId) |
+        ConvertFrom-Json
+    if ($rejected.windows[0].name -ne $editedTitle -or
+        -not [AgenTermRemoteUiNativeTest]::IsWindowVisible($titleEditor)) {
+        throw 'inline editor did not reject an oversized title without mutation'
+    }
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $cancelButton, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero
+    ) | Out-Null
+
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, 0x0201, [IntPtr]::Zero,
+        [AgenTermRemoteUiNativeTest]::MousePoint(330, 20)
+    ) | Out-Null
+    [AgenTermRemoteUiNativeTest]::SendMessageText(
+        $titleEditor, 0x000C, [IntPtr]::Zero, 'must-not-save'
+    ) | Out-Null
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $cancelButton, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero
+    ) | Out-Null
+    $cancelled = Invoke-AgenTerm @('inspect', '-t', $tabId) |
+        ConvertFrom-Json
+    if ($cancelled.windows[0].name -ne $editedTitle -or
+        [AgenTermRemoteUiNativeTest]::IsWindowVisible($titleEditor)) {
+        throw 'inline Cancel changed the server title or left editor controls visible'
     }
 
     $scrollMarker = "AGENTERM_REMOTE_SCROLL_$($run.RunId)_"

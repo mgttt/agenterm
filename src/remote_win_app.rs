@@ -29,7 +29,7 @@ use windows_sys::Win32::{
             DispatchMessageW, ES_AUTOVSCROLL, ES_MULTILINE, ES_WANTRETURN, GWLP_USERDATA,
             GetClientRect, GetCursorPos, GetForegroundWindow, GetMessageW, GetWindowLongPtrW,
             GetWindowTextLengthW, GetWindowTextW, IDC_ARROW, IDC_SIZEWE, LoadCursorW, LoadIconW,
-            MSG, MoveWindow, PostQuitMessage, RegisterClassW, SW_SHOW, SW_SHOWNOACTIVATE,
+            MSG, MoveWindow, PostQuitMessage, RegisterClassW, SW_HIDE, SW_SHOW, SW_SHOWNOACTIVATE,
             SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SetCursor,
             SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW,
             ShowWindow, TranslateMessage, WM_CAPTURECHANGED, WM_CHAR, WM_CLOSE, WM_COMMAND,
@@ -46,7 +46,10 @@ use crate::{
     commands::tmux_key_bytes,
     settings::{AppConfig, clamp_tabs_width, load_config, save_config},
     theme::{Rgb, ThemePalette},
-    ui_bridge::{UiCellStyle, UiColor, UiScreenSnapshot, UiTabBootstrap},
+    ui_bridge::{
+        UI_TAB_NOTE_MAX_BYTES, UI_TAB_TITLE_MAX_BYTES, UiCellStyle, UiColor, UiScreenSnapshot,
+        UiTabBootstrap,
+    },
     ui_client::{UiClientModel, tab_by_id},
     ui_geometry::{
         PixelRect, WorkspaceLayout, WorkspaceLayoutInput, tabs_width_from_drag, workspace_layout,
@@ -58,6 +61,10 @@ const EDIT_ID: usize = 2101;
 const SEND_ID: usize = 2102;
 const NEW_ID: usize = 2103;
 const TABS_ID: usize = 2104;
+const TAB_TITLE_EDIT_ID: usize = 2105;
+const TAB_NOTE_EDIT_ID: usize = 2106;
+const TAB_SAVE_ID: usize = 2107;
+const TAB_CANCEL_ID: usize = 2108;
 const SIDEBAR_ROW_HEIGHT: i32 = 44;
 const TOOLBAR_HEIGHT: i32 = 44;
 const STATUS_HEIGHT: i32 = 26;
@@ -140,13 +147,37 @@ pub(crate) fn run_remote_gui(no_activate: bool) -> Result<()> {
     let send = create_button(window, instance, SEND_ID, "Send");
     let new_tab = create_button(window, instance, NEW_ID, "New");
     let tabs = create_button(window, instance, TABS_ID, "Tabs");
-    if edit.is_null() || send.is_null() || new_tab.is_null() || tabs.is_null() {
+    let tab_title_edit = create_hidden_edit(window, instance, TAB_TITLE_EDIT_ID);
+    let tab_note_edit = create_hidden_edit(window, instance, TAB_NOTE_EDIT_ID);
+    let tab_save = create_hidden_button(window, instance, TAB_SAVE_ID, "Save");
+    let tab_cancel = create_hidden_button(window, instance, TAB_CANCEL_ID, "Cancel");
+    if edit.is_null()
+        || send.is_null()
+        || new_tab.is_null()
+        || tabs.is_null()
+        || tab_title_edit.is_null()
+        || tab_note_edit.is_null()
+        || tab_save.is_null()
+        || tab_cancel.is_null()
+    {
         unsafe { DestroyWindow(window) };
         anyhow::bail!("failed to create replaceable UI controls");
     }
 
     let state = Box::new(RemoteWindowState::new(
-        window, edit, send, new_tab, tabs, client_id, client,
+        window,
+        RemoteControls {
+            edit,
+            send,
+            new_tab,
+            tabs_button: tabs,
+            tab_title_edit,
+            tab_note_edit,
+            tab_save,
+            tab_cancel,
+        },
+        client_id,
+        client,
     )?);
     unsafe {
         SetWindowLongPtrW(window, GWLP_USERDATA, Box::into_raw(state) as isize);
@@ -222,12 +253,27 @@ fn start_server_process() -> Result<()> {
     Ok(())
 }
 
+struct RemoteControls {
+    edit: HWND,
+    send: HWND,
+    new_tab: HWND,
+    tabs_button: HWND,
+    tab_title_edit: HWND,
+    tab_note_edit: HWND,
+    tab_save: HWND,
+    tab_cancel: HWND,
+}
+
 struct RemoteWindowState {
     window: HWND,
     edit: HWND,
     send: HWND,
     new_tab: HWND,
     tabs_button: HWND,
+    tab_title_edit: HWND,
+    tab_note_edit: HWND,
+    tab_save: HWND,
+    tab_cancel: HWND,
     client_id: String,
     client: Option<UiClientModel>,
     reconnect_after: Instant,
@@ -240,18 +286,26 @@ struct RemoteWindowState {
     pending_high_surrogate: Option<u16>,
     last_active_id: Option<String>,
     tabs_resize_dragging: bool,
+    editing_tab_id: Option<String>,
 }
 
 impl RemoteWindowState {
     fn new(
         window: HWND,
-        edit: HWND,
-        send: HWND,
-        new_tab: HWND,
-        tabs_button: HWND,
+        controls: RemoteControls,
         client_id: String,
         client: UiClientModel,
     ) -> Result<Self> {
+        let RemoteControls {
+            edit,
+            send,
+            new_tab,
+            tabs_button,
+            tab_title_edit,
+            tab_note_edit,
+            tab_save,
+            tab_cancel,
+        } = controls;
         let config = load_config();
         let (font, cell_width, cell_height) = create_terminal_font(window, &config)?;
         let last_active_id = client.snapshot().active_tab_id.clone();
@@ -261,6 +315,10 @@ impl RemoteWindowState {
             send,
             new_tab,
             tabs_button,
+            tab_title_edit,
+            tab_note_edit,
+            tab_save,
+            tab_cancel,
             client_id,
             client: Some(client),
             reconnect_after: Instant::now(),
@@ -273,6 +331,7 @@ impl RemoteWindowState {
             pending_high_surrogate: None,
             last_active_id,
             tabs_resize_dragging: false,
+            editing_tab_id: None,
         })
     }
 
@@ -288,6 +347,7 @@ impl RemoteWindowState {
             });
         match result {
             Ok(changed) => {
+                self.reconcile_tab_editor();
                 let active = self
                     .client
                     .as_ref()
@@ -306,6 +366,8 @@ impl RemoteWindowState {
                     match UiClientModel::connect(self.client_id.clone()) {
                         Ok(client) => {
                             self.client = Some(client);
+                            self.editing_tab_id = None;
+                            self.show_tab_editor(false);
                             self.last_active_id = self
                                 .client
                                 .as_ref()
@@ -329,6 +391,18 @@ impl RemoteWindowState {
         let client = self.client.as_ref()?;
         let active = client.snapshot().active_tab_id.as_deref()?;
         tab_by_id(client.snapshot(), active)
+    }
+
+    fn reconcile_tab_editor(&mut self) {
+        let still_exists = self.editing_tab_id.as_deref().is_some_and(|id| {
+            self.client
+                .as_ref()
+                .is_some_and(|client| client.snapshot().tabs.iter().any(|tab| tab.id == id))
+        });
+        if self.editing_tab_id.is_some() && !still_exists {
+            self.editing_tab_id = None;
+            self.show_tab_editor(false);
+        }
     }
 
     fn workspace_geometry(&self) -> WorkspaceLayout {
@@ -392,6 +466,52 @@ impl RemoteWindowState {
                 1,
             );
             ShowWindow(self.new_tab, if self.tabs_visible { SW_SHOW } else { 0 });
+        }
+        self.layout_tab_editor();
+    }
+
+    fn layout_tab_editor(&self) {
+        let Some(tab_id) = self.editing_tab_id.as_deref() else {
+            self.show_tab_editor(false);
+            return;
+        };
+        let Some(client) = &self.client else {
+            self.show_tab_editor(false);
+            return;
+        };
+        let Some(position) = client
+            .snapshot()
+            .tabs
+            .iter()
+            .position(|tab| tab.id == tab_id)
+        else {
+            self.show_tab_editor(false);
+            return;
+        };
+        let (sidebar, _, _, _) = self.layout_rects();
+        let top = i32::try_from(position)
+            .unwrap_or(i32::MAX)
+            .saturating_mul(SIDEBAR_ROW_HEIGHT)
+            + 4;
+        let actions_width = 88;
+        let left = sidebar.left + 6;
+        let edit_width = (sidebar.right - left - actions_width - 8).max(44);
+        unsafe {
+            MoveWindow(self.tab_title_edit, left, top, edit_width, 18, 1);
+            MoveWindow(self.tab_note_edit, left, top + 20, edit_width, 18, 1);
+            MoveWindow(self.tab_save, left + edit_width + 4, top, 40, 38, 1);
+            MoveWindow(self.tab_cancel, left + edit_width + 46, top, 42, 38, 1);
+        }
+        self.show_tab_editor(self.tabs_visible);
+    }
+
+    fn show_tab_editor(&self, visible: bool) {
+        let command = if visible { SW_SHOW } else { SW_HIDE };
+        unsafe {
+            ShowWindow(self.tab_title_edit, command);
+            ShowWindow(self.tab_note_edit, command);
+            ShowWindow(self.tab_save, command);
+            ShowWindow(self.tab_cancel, command);
         }
     }
 
@@ -512,6 +632,88 @@ impl RemoteWindowState {
             self.load_composer();
             self.resize_active_terminal();
         }
+    }
+
+    fn tab_at_y(&self, y: i32) -> Option<&UiTabBootstrap> {
+        if !self.tabs_visible || y < 0 {
+            return None;
+        }
+        let index = usize::try_from(y / SIDEBAR_ROW_HEIGHT).ok()?;
+        self.client.as_ref()?.snapshot().tabs.get(index)
+    }
+
+    fn tab_edit_action_contains(&self, x: i32, y: i32) -> bool {
+        if self.tab_at_y(y).is_none() {
+            return false;
+        }
+        let sidebar = self.layout_rects().0;
+        x >= sidebar.right - 52 && x < sidebar.right - 6
+    }
+
+    fn begin_tab_edit_at(&mut self, y: i32) {
+        let Some(tab) = self.tab_at_y(y).cloned() else {
+            return;
+        };
+        self.editing_tab_id = Some(tab.id);
+        unsafe {
+            SetWindowTextW(self.tab_title_edit, wide(&tab.title).as_ptr());
+            SetWindowTextW(self.tab_note_edit, wide(&tab.note).as_ptr());
+        }
+        self.layout_tab_editor();
+        unsafe { SetFocus(self.tab_title_edit) };
+    }
+
+    fn finish_tab_edit(&mut self, save: bool) {
+        let Some(tab_id) = self.editing_tab_id.clone() else {
+            return;
+        };
+        if save {
+            let title = window_text(self.tab_title_edit);
+            let note = window_text(self.tab_note_edit);
+            if title.trim().is_empty() {
+                self.last_error = Some("Tab title cannot be empty".to_owned());
+                return;
+            }
+            if title.len() > UI_TAB_TITLE_MAX_BYTES {
+                self.last_error = Some(format!(
+                    "Tab title exceeds the {UI_TAB_TITLE_MAX_BYTES}-byte UI limit"
+                ));
+                return;
+            }
+            if note.len() > UI_TAB_NOTE_MAX_BYTES {
+                self.last_error = Some(format!(
+                    "Tab note exceeds the {UI_TAB_NOTE_MAX_BYTES}-byte UI limit"
+                ));
+                return;
+            }
+            let result = self
+                .client
+                .as_mut()
+                .context("UI is disconnected")
+                .and_then(|client| {
+                    client.run_control(vec![
+                        "rename-window".to_owned(),
+                        "-t".to_owned(),
+                        tab_id.clone(),
+                        title,
+                    ])?;
+                    client.run_control(vec![
+                        "set-tab-note".to_owned(),
+                        "-t".to_owned(),
+                        tab_id,
+                        note,
+                    ])?;
+                    client.poll_deltas()?;
+                    Ok(())
+                });
+            if let Err(error) = result {
+                self.last_error = Some(format!("Tab edit failed: {error:#}"));
+                return;
+            }
+        }
+        self.editing_tab_id = None;
+        self.show_tab_editor(false);
+        unsafe { SetFocus(self.window) };
     }
 
     fn terminal_input(&mut self, bytes: &[u8]) {
@@ -784,13 +986,24 @@ impl RemoteWindowState {
                 fill(device, &row, palette.active.colorref());
                 frame(device, &row, palette.active_border.colorref());
             }
+            if self.editing_tab_id.as_deref() == Some(tab.id.as_str()) {
+                continue;
+            }
+            let edit = RECT {
+                left: row.right - 46,
+                top: row.top + 5,
+                right: row.right - 2,
+                bottom: row.bottom - 5,
+            };
+            frame(device, &edit, palette.active_border.colorref());
+            draw_text(device, edit, "Edit", palette.muted_text.colorref());
             let depth = tab_depth(&client.snapshot().tabs, tab);
             draw_text(
                 device,
                 RECT {
                     left: row.left + 7 + i32::try_from(depth).unwrap_or(0) * 12,
                     top: row.top,
-                    right: row.right - 6,
+                    right: edit.left - 4,
                     bottom: row.bottom,
                 },
                 &format!(
@@ -872,8 +1085,14 @@ unsafe extern "system" fn window_proc(
                 }
                 let sidebar = state.layout_rects().0;
                 if state.tabs_visible && x < sidebar.right {
-                    state.select_tab_at(y);
+                    if state.tab_edit_action_contains(x, y) {
+                        state.begin_tab_edit_at(y);
+                    } else {
+                        state.finish_tab_edit(false);
+                        state.select_tab_at(y);
+                    }
                 } else {
+                    state.finish_tab_edit(false);
                     unsafe { SetFocus(window) };
                 }
                 unsafe {
@@ -948,6 +1167,7 @@ unsafe extern "system" fn window_proc(
                     SEND_ID => state.send_composer(),
                     NEW_ID => state.new_tab(),
                     TABS_ID => {
+                        state.finish_tab_edit(false);
                         state.tabs_visible = !state.tabs_visible;
                         state.config.tabs_visible = state.tabs_visible;
                         if let Err(error) = save_config(&state.config) {
@@ -957,6 +1177,8 @@ unsafe extern "system" fn window_proc(
                         state.layout();
                         state.resize_active_terminal();
                     }
+                    TAB_SAVE_ID => state.finish_tab_edit(true),
+                    TAB_CANCEL_ID => state.finish_tab_edit(false),
                     _ => {}
                 }
                 unsafe {
@@ -998,6 +1220,44 @@ fn create_button(window: HWND, instance: HINSTANCE, id: usize, text: &str) -> HW
             0,
             70,
             32,
+            window,
+            id as *mut c_void,
+            instance,
+            ptr::null(),
+        )
+    }
+}
+
+fn create_hidden_edit(window: HWND, instance: HINSTANCE, id: usize) -> HWND {
+    unsafe {
+        CreateWindowExW(
+            0,
+            wide("EDIT").as_ptr(),
+            wide("").as_ptr(),
+            WS_CHILD | WS_BORDER | WS_TABSTOP,
+            0,
+            0,
+            100,
+            18,
+            window,
+            id as *mut c_void,
+            instance,
+            ptr::null(),
+        )
+    }
+}
+
+fn create_hidden_button(window: HWND, instance: HINSTANCE, id: usize, text: &str) -> HWND {
+    unsafe {
+        CreateWindowExW(
+            0,
+            wide("BUTTON").as_ptr(),
+            wide(text).as_ptr(),
+            WS_CHILD | WS_TABSTOP,
+            0,
+            0,
+            42,
+            38,
             window,
             id as *mut c_void,
             instance,
