@@ -114,11 +114,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
      and independently truthful capability flags. Bootstrap, ordered delta
      polling, an opt-in replaceable consumer, and in-place reconnect are now
      shipped. Combined-host facts remain conservative; split-server facts
-     advertise only the proven replaceable/reconnect pair, while default
-     replacement and rollback remain false until their own black-box gates pass.
-  - [ ] black-box upgrade proof keeps server PID, epoch, tab IDs, PTY child
-    PIDs, scrollback and continuing output stable while HWND and GUI build
-    identity change; rollback to the previous compatible GUI is also proven
+     advertise the proven replaceable/reconnect/rollback set, while default
+     replacement remains false until its ordinary-launch black-box gate passes.
+  - [x] black-box upgrade proof uses two genuinely different GUI binaries and keeps server PID, epoch, stable tab ID, PTY child PID, Composer/CWD facts, scrollback markers and continuing output stable while HWND and GUI build identity change; competing startup and incompatible hello fail closed without disturbing the server, and rollback restores the prior compatible GUI identity
   - [~] migration is phased through extracted server state and renderer-neutral
     screen contracts. The current combined `agenterm.exe` remains truthful
     until those gates pass; merely hiding its old HWND is not GUI replacement

@@ -134,6 +134,7 @@ pub const fn headless_server_facts() -> UiBridgeFacts {
     facts.server_executable = "agenterm-server.exe";
     facts.interactive_lease = true;
     facts.reconnect = true;
+    facts.rollback_proven = true;
     facts
 }
 
@@ -795,7 +796,7 @@ mod tests {
         assert!(facts.replaceable_ui);
         assert!(facts.interactive_lease);
         assert!(facts.reconnect);
-        assert!(!facts.rollback_proven);
+        assert!(facts.rollback_proven);
         assert!(facts.bootstrap_snapshot);
         assert!(facts.ordered_deltas);
     }

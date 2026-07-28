@@ -74,7 +74,7 @@ try {
         -not $protocol.ui_bridge.replaceable_ui -or
         -not $protocol.ui_bridge.interactive_lease -or
         -not $protocol.ui_bridge.reconnect -or
-        $protocol.ui_bridge.rollback_proven) {
+        -not $protocol.ui_bridge.rollback_proven) {
         throw 'headless server did not publish its truthful process/ownership boundary'
     }
 

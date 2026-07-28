@@ -179,7 +179,7 @@ try {
         -not $protocol.ui_bridge.replaceable_ui -or
         -not $protocol.ui_bridge.interactive_lease -or
         -not $protocol.ui_bridge.reconnect -or
-        $protocol.ui_bridge.rollback_proven -or
+        -not $protocol.ui_bridge.rollback_proven -or
         $guiHandle -eq 0) {
         throw 'replaceable GUI and headless authority roles were not separated'
     }

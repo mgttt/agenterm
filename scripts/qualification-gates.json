@@ -119,6 +119,12 @@
       ]
     },
     {
+      "id": "remote-ui-upgrade-smoke",
+      "evidence": [
+        "ui.same-server-upgrade-rollback"
+      ]
+    },
+    {
       "id": "fleet-smoke",
       "evidence": [
         "fleet.codex-launcher",

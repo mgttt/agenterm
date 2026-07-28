@@ -82,6 +82,7 @@ try {
             'cli-smoke' = '.\tests\cli_smoke.ps1'
             'server-smoke' = '.\tests\server_smoke.ps1'
             'remote-ui-smoke' = '.\tests\remote_ui_smoke.ps1'
+            'remote-ui-upgrade-smoke' = '.\tests\remote_ui_upgrade_smoke.ps1'
             'fleet-smoke' = '.\tests\fleet_smoke.ps1'
             'script-smoke' = '.\tests\script_smoke.ps1'
             'theme-smoke' = '.\tests\theme_smoke.ps1'
@@ -121,13 +122,23 @@ try {
         cargo test --locked --all-features
     }
 
-    if ($Release) {
-        Invoke-Checked -Id 'artifact-build' -Label 'release artifact' {
+    $upgradeGuiFixture = Join-Path (
+        [IO.Path]::GetTempPath()
+    ) "agenterm-upgrade-gui-$PID-$([Guid]::NewGuid().ToString('N')).exe"
+    Invoke-Checked -Id 'artifact-build' `
+        -Label 'current artifact and alternate GUI fixture' {
+        if (-not $SkipSmoke) {
+            & '.\build.bat' release-fast
+            if ($LASTEXITCODE -ne 0) {
+                throw 'release-fast GUI fixture build failed'
+            }
+            Copy-Item -LiteralPath '.\dist\agenterm.exe' `
+                -Destination $upgradeGuiFixture -Force
+        }
+        if ($Release) {
             & '.\build.bat' release
         }
-    }
-    else {
-        Invoke-Checked -Id 'artifact-build' -Label 'development artifact' {
+        else {
             & '.\build.bat'
         }
     }
@@ -290,6 +301,11 @@ try {
                 -Label 'replaceable UI client smoke test' {
                 & '.\tests\remote_ui_smoke.ps1'
             }
+            Invoke-Checked -Id 'remote-ui-upgrade-smoke' `
+                -Label 'same-server GUI upgrade and rollback smoke test' {
+                & '.\tests\remote_ui_upgrade_smoke.ps1' `
+                    -NextGuiExe $upgradeGuiFixture
+            }
             Invoke-Checked -Id 'fleet-smoke' -Label 'AI fleet smoke test' {
                 if (-not $IncludeStress) {
                     & '.\tests\fleet_smoke.ps1' -SkipEventLoad
@@ -351,5 +367,9 @@ try {
     Write-Host "`nPASS: AgenTerm quality gate"
 }
 finally {
+    if ($null -ne $upgradeGuiFixture -and
+        (Test-Path -LiteralPath $upgradeGuiFixture)) {
+        Remove-Item -LiteralPath $upgradeGuiFixture -Force
+    }
     Pop-Location
 }

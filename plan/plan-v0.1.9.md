@@ -1669,8 +1669,8 @@ S4  [~] server-owned 单活 interactive UI lease 已交付 attach/idempotent
         Composer 命令并发布 pending working-context/event，Esc 或再次点击
         segment 则无变更恢复原 draft。鼠标 Prepare/Cancel、稳定 tab target、
         pending CWD 与 Composer post-state 已进入公开黑盒。
-        普通启动默认切换、旧工作台完整 parity 与 same-server rollback 待补
-S5  same-server GUI upgrade + rollback black-box
+        普通启动默认切换与最终旧工作台 parity 审计待补
+S5  [x] same-server GUI upgrade + rollback black-box
 S6  remove combined-process handoff only after parity gates
 ```
 
