@@ -27,9 +27,9 @@
     },
     {
       "name": "agenterm-script.exe",
-      "role": "scripting-worker",
+      "role": "scripting-cli",
       "pe_subsystem": 3,
-      "documentation_role": "bounded Rhai scripting worker",
+      "documentation_role": "public Rhai scripting CLI and worker",
       "offline_probe": ["--version"],
       "release_budget_bytes": 3145728
     }
@@ -66,9 +66,9 @@
         },
         {
           "name": "agenterm-script.exe",
-          "role": "scripting-worker",
+          "role": "scripting-cli",
           "pe_subsystem": 3,
-          "documentation_role": "bounded Rhai scripting worker",
+          "documentation_role": "public Rhai scripting CLI and worker",
           "offline_probe": ["--version"],
           "release_budget_bytes": 3145728
         }
@@ -102,9 +102,9 @@
         },
         {
           "name": "agenterm-script.exe",
-          "role": "scripting-worker",
+          "role": "scripting-cli",
           "pe_subsystem": 3,
-          "documentation_role": "bounded Rhai scripting worker",
+          "documentation_role": "public Rhai scripting CLI and worker",
           "offline_probe": ["--version"]
         }
       ]
@@ -134,8 +134,8 @@
         },
         {
           "name": "agenterm-script",
-          "role": "scripting-worker",
-          "documentation_role": "bounded Rhai scripting worker",
+          "role": "scripting-cli",
+          "documentation_role": "public Rhai scripting CLI and worker",
           "offline_probe": ["--help"]
         }
       ]
@@ -165,8 +165,8 @@
         },
         {
           "name": "agenterm-script",
-          "role": "scripting-worker",
-          "documentation_role": "bounded Rhai scripting worker",
+          "role": "scripting-cli",
+          "documentation_role": "public Rhai scripting CLI and worker",
           "offline_probe": ["--help"]
         }
       ]
@@ -196,8 +196,8 @@
         },
         {
           "name": "agenterm-script",
-          "role": "scripting-worker",
-          "documentation_role": "bounded Rhai scripting worker",
+          "role": "scripting-cli",
+          "documentation_role": "public Rhai scripting CLI and worker",
           "offline_probe": ["--help"]
         }
       ]
@@ -227,8 +227,8 @@
         },
         {
           "name": "agenterm-script",
-          "role": "scripting-worker",
-          "documentation_role": "bounded Rhai scripting worker",
+          "role": "scripting-cli",
+          "documentation_role": "public Rhai scripting CLI and worker",
           "offline_probe": ["--help"]
         }
       ]
