@@ -55,7 +55,7 @@ enum TerminalWorkerCompletion {
 
 #[derive(Default)]
 pub(crate) struct TerminalCallbacks {
-    pub(super) title: String,
+    pub(crate) title: String,
     pub(super) pending_cwd: Option<String>,
     pub(super) local_hostname: Option<String>,
 }
@@ -73,20 +73,20 @@ impl vt100::Callbacks for TerminalCallbacks {
 }
 
 pub(crate) struct TerminalTab {
-    pub(super) id: u64,
-    pub(super) index: u32,
-    pub(super) parent_id: Option<u64>,
-    pub(super) title: String,
-    pub(super) note: String,
-    pub(super) command_name: String,
+    pub(crate) id: u64,
+    pub(crate) index: u32,
+    pub(crate) parent_id: Option<u64>,
+    pub(crate) title: String,
+    pub(crate) note: String,
+    pub(crate) command_name: String,
     pub(super) command_line: Vec<String>,
-    pub(super) environment_names: Vec<String>,
-    pub(super) process_id: Option<u32>,
+    pub(crate) environment_names: Vec<String>,
+    pub(crate) process_id: Option<u32>,
     pub(super) shell_kind: ShellKind,
     pub(super) cwd: CwdTracker,
     pub(super) proxy: ProxyState,
-    pub(super) composer: String,
-    pub(super) sensitive_composer: Option<SecretValue>,
+    pub(crate) composer: String,
+    pub(crate) sensitive_composer: Option<SecretValue>,
     pub(super) sensitive_proxy_marker: Option<ProxyConfirmationMarker>,
     pending_proxy_confirmation: Option<PendingProxyConfirmation>,
     pub(super) proxy_redaction_needles: Vec<SecretValue>,
@@ -101,16 +101,16 @@ pub(crate) struct TerminalTab {
     shutdown_complete: bool,
     pub(super) master: PtyMaster,
     pub(super) child: PtyChild,
-    pub(super) exited: Option<u32>,
-    pub(super) error: Option<String>,
-    pub(super) last_size: (u16, u16),
-    pub(super) input_bytes: usize,
+    pub(crate) exited: Option<u32>,
+    pub(crate) error: Option<String>,
+    pub(crate) last_size: (u16, u16),
+    pub(crate) input_bytes: usize,
     pub(super) input_writes: usize,
-    pub(super) submission: SubmissionState,
+    pub(crate) submission: SubmissionState,
     pub(super) submission_enter_written: Option<bool>,
     pub(super) lifecycle: TerminalLifecycle,
-    pub(super) output_bytes: usize,
-    pub(super) raw_output: BoundedByteRing,
+    pub(crate) output_bytes: usize,
+    pub(crate) raw_output: BoundedByteRing,
 }
 
 pub(crate) struct TerminalLaunch {
@@ -166,7 +166,7 @@ fn redact_proxy_stream_chunk(
 }
 
 impl TerminalTab {
-    pub(super) fn observation(&self) -> TerminalObservation {
+    pub(crate) fn observation(&self) -> TerminalObservation {
         let process_finished = self.exited.is_some() || self.error.is_some();
         TerminalObservation {
             process_id: self.process_id,
@@ -726,7 +726,7 @@ impl TerminalTab {
         }
     }
 
-    pub(super) fn close_process(&mut self) -> bool {
+    pub(crate) fn close_process(&mut self) -> bool {
         if self.shutdown_complete {
             return true;
         }
