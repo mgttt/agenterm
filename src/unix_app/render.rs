@@ -212,11 +212,61 @@ pub(super) struct TerminalPaint<'a> {
     pub(super) selection: Option<crate::terminal_selection::TerminalSelection>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ToolbarHit {
+    NewTab,
+    ToggleTabs,
+    Settings,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct SidebarToolbarView {
+    pub(super) bounds: (u32, u32, u32, u32),
+    pub(super) new_tab: (u32, u32, u32, u32),
+    pub(super) tabs: (u32, u32, u32, u32),
+    pub(super) settings: (u32, u32, u32, u32),
+    pub(super) compact: bool,
+}
+
+impl SidebarToolbarView {
+    pub(super) fn from_layout(
+        toolbar: crate::ui_geometry::SidebarToolbarLayout,
+    ) -> Self {
+        Self {
+            bounds: u32_rect(toolbar.bounds),
+            new_tab: u32_rect(toolbar.new_tab),
+            tabs: u32_rect(toolbar.tabs),
+            settings: u32_rect(toolbar.settings),
+            compact: matches!(
+                toolbar.mode,
+                crate::ui_geometry::SidebarToolbarMode::Compact
+            ),
+        }
+    }
+
+    pub(super) fn hit_test(&self, x: f64, y: f64) -> Option<ToolbarHit> {
+        let x = x as u32;
+        let y = y as u32;
+        if rect_contains(self.new_tab, x, y) {
+            return Some(ToolbarHit::NewTab);
+        }
+        if rect_contains(self.tabs, x, y) {
+            return Some(ToolbarHit::ToggleTabs);
+        }
+        if rect_contains(self.settings, x, y) {
+            return Some(ToolbarHit::Settings);
+        }
+        None
+    }
+}
+
 pub(super) struct FrameContent<'a> {
     pub(super) sidebar_width: u32,
     pub(super) content_height: u32,
+    pub(super) tree_height: u32,
     pub(super) terminal: TerminalPaint<'a>,
     pub(super) sidebar_rows: &'a [SidebarTabRow],
+    pub(super) sidebar_toolbar: Option<SidebarToolbarView>,
     pub(super) composer: ComposerView<'a>,
     pub(super) scrollbar: Option<ScrollbarView>,
     pub(super) settings: Option<SettingsModalView<'a>>,
@@ -240,11 +290,14 @@ pub(super) fn render_frame(
             buffer,
             stride,
             width,
-            content.content_height,
+            content.tree_height,
             palette,
             content.sidebar_rows,
             content.sidebar_width,
         );
+        if let Some(toolbar) = content.sidebar_toolbar {
+            render_sidebar_toolbar(buffer, stride, width, height, palette, toolbar);
+        }
     }
     render_terminal_grid(
         buffer,
@@ -343,6 +396,45 @@ fn render_composer(
         &truncate_chars(&label, max_chars),
         palette.text,
     );
+}
+
+fn render_sidebar_toolbar(
+    buffer: &mut [u32],
+    stride: u32,
+    width: u32,
+    height: u32,
+    palette: &ThemePalette,
+    toolbar: SidebarToolbarView,
+) {
+    let (bx, by, bw, bh) = toolbar.bounds;
+    let bg = rgb_to_pixel(palette.sidebar);
+    fill_rect(buffer, stride, bx, by, bw, bh, bg);
+    let divider = rgb_to_pixel(palette.divider);
+    fill_rect(buffer, stride, bx, by, bw, 1, divider);
+    let button_bg = rgb_to_pixel(palette.composer);
+    let labels = if toolbar.compact {
+        ("+", "T", "S")
+    } else {
+        ("New", "Tabs", "Settings")
+    };
+    for (rect, label) in [
+        (toolbar.new_tab, labels.0),
+        (toolbar.tabs, labels.1),
+        (toolbar.settings, labels.2),
+    ] {
+        let (x, y, w, h) = rect;
+        fill_rect(buffer, stride, x, y, w, h, button_bg);
+        draw_text(
+            buffer,
+            stride,
+            width,
+            height,
+            x + 8,
+            y + h.saturating_sub(12) / 2,
+            label,
+            palette.text,
+        );
+    }
 }
 
 fn render_sidebar(
@@ -756,8 +848,11 @@ pub(super) fn effective_palette(
     }
 }
 
-pub(super) fn sidebar_row_at_y(y: u32) -> Option<usize> {
-    (y < u32::MAX).then_some((y / SIDEBAR_TAB_ROW_HEIGHT) as usize)
+pub(super) fn sidebar_row_at_y(y: u32, tree_height: u32) -> Option<usize> {
+    if y >= tree_height {
+        return None;
+    }
+    Some((y / SIDEBAR_TAB_ROW_HEIGHT) as usize)
 }
 
 pub(super) fn scrollbar_view_from_geometry(

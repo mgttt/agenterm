@@ -39,14 +39,17 @@ use crate::{
     instances::{discover_instances, instance_process_is_alive, prune_instance},
     ipc_transport::read_bounded_ipc_line,
     operations::{
-        OPERATION_CATALOG, OPERATION_CATALOG_SCHEMA_VERSION, OperationClass, operation_by_id,
-        operation_for_args, validate_operation_args,
+        OPERATION_CATALOG, OPERATION_CATALOG_SCHEMA_VERSION, OperationClass, operation_for_args,
+        validate_operation_args,
     },
     protocol::{IpcRequest, IpcResponse},
     ui_bridge,
     upgrade_identity::UpgradeIdentity,
     working_context::PROXY_MAX_BYTES,
 };
+
+#[cfg(windows)]
+use crate::operations::operation_by_id;
 
 #[cfg(windows)]
 use crate::script_audit::{

@@ -53,6 +53,7 @@ PRD + Cargo deps (primary)
   - [x] Unix `ui-snapshot` scrollbar/modal/system_menu/tab metadata
 - [x] I Unix mouse-wheel + scrollbar track/thumb (live max offset, event journal)
 - [x] J Unix terminal cell selection + clipboard copy (`copy-selection`, Ctrl+C)
+- [x] K Unix paste / word+row selection / selection autoscroll / sidebar toolbar
 
 ### A — PTY 后端抽象
 - 用户问题：Windows ConPTY 与 Unix PTY 不能各写一套 runtime。
