@@ -7,9 +7,12 @@ use crate::{
         positional_values, supported_commands, tmux_key_bytes,
     },
     event_journal::{EventJournal, EventKind},
+    operations::{UI_TABS_HIDE, UI_TABS_SET_WIDTH, UI_TABS_SHOW, UI_TABS_TOGGLE},
     protocol::IpcResponse,
+    settings::clamp_tabs_width,
     tab_tree::{TabTreeNode, TabTreeRow, tree_rows, would_create_cycle},
     terminal_runtime::TerminalTab,
+    theme::ThemeId,
     workspace::workspace_path,
 };
 
@@ -188,6 +191,54 @@ pub(crate) trait ControlHost {
 
     /// Win: open tab editor after `new-child`.
     fn after_create_tab(&mut self, _id: u64, _parent_id: Option<u64>) {}
+
+    fn set_tabs_visible(
+        &mut self,
+        _visible: bool,
+        _cause: &str,
+        _operation_id: &str,
+    ) -> Result<(), String> {
+        Err("tabs visibility is not supported on this host".to_owned())
+    }
+
+    fn set_tabs_width(
+        &mut self,
+        _width: u16,
+        _cause: &str,
+        _operation_id: &str,
+    ) -> Result<(), String> {
+        Err("tabs width is not supported on this host".to_owned())
+    }
+
+    fn toggle_tab_collapsed(&mut self, _tab_id: u64) -> Result<(), String> {
+        Err("tab tree collapse is not supported on this host".to_owned())
+    }
+
+    fn open_settings_modal(&mut self) -> Result<(), String> {
+        Err("settings UI is not supported on this host".to_owned())
+    }
+
+    fn close_settings_modal(&mut self, _apply: bool) -> Result<(), String> {
+        Err("settings UI is not supported on this host".to_owned())
+    }
+
+    fn preview_settings_theme(&mut self, _theme: ThemeId) {}
+
+    fn open_tab_editor(&mut self, _tab_id: u64) -> Result<(), String> {
+        Err("tab editor is not supported on this host".to_owned())
+    }
+
+    fn finish_tab_editor(&mut self, _save: bool) -> Result<(), String> {
+        Err("tab editor is not supported on this host".to_owned())
+    }
+
+    fn ui_action_cancel(&mut self) -> Result<bool, String> {
+        Ok(false)
+    }
+
+    fn config_tabs_visible(&self) -> bool {
+        true
+    }
 
     fn set_session_name(&mut self, name: String);
 
@@ -447,6 +498,77 @@ fn dispatch_shared_ui_action(host: &mut dyn ControlHost, args: &[String]) -> Opt
                 Some(response)
             }
         }
+        "tabs-show" => match host.set_tabs_visible(true, "semantic", UI_TABS_SHOW) {
+            Ok(()) => Some(ui_snapshot_response(host)),
+            Err(error) => Some(IpcResponse::failure(error)),
+        },
+        "tabs-hide" => match host.set_tabs_visible(false, "semantic", UI_TABS_HIDE) {
+            Ok(()) => Some(ui_snapshot_response(host)),
+            Err(error) => Some(IpcResponse::failure(error)),
+        },
+        "tabs-toggle" | "toggle-tabs" => {
+            let visible = !host.config_tabs_visible();
+            match host.set_tabs_visible(visible, "semantic", UI_TABS_TOGGLE) {
+                Ok(()) => Some(ui_snapshot_response(host)),
+                Err(error) => Some(IpcResponse::failure(error)),
+            }
+        }
+        "tabs-set-width" => {
+            let Some(width) = option_value(args, "--width").and_then(|value| value.parse::<i32>().ok())
+            else {
+                return Some(IpcResponse::failure("tabs-set-width requires --width"));
+            };
+            let width = clamp_tabs_width(width);
+            match host.set_tabs_width(width, "semantic", UI_TABS_SET_WIDTH) {
+                Ok(()) => Some(ui_snapshot_response(host)),
+                Err(error) => Some(IpcResponse::failure(error)),
+            }
+        }
+        "toggle-tree" => {
+            let Some(position) =
+                resolve_target_position(host.tabs(), host.active_id(), option_value(args, "-t"))
+            else {
+                return Some(IpcResponse::failure("can't find tab"));
+            };
+            let id = host.tabs()[position].id;
+            match host.toggle_tab_collapsed(id) {
+                Ok(()) => Some(ui_snapshot_response(host)),
+                Err(error) => Some(IpcResponse::failure(error)),
+            }
+        }
+        "edit-tab" => {
+            let Some(position) =
+                resolve_target_position(host.tabs(), host.active_id(), option_value(args, "-t"))
+            else {
+                return Some(IpcResponse::failure("can't find tab"));
+            };
+            let id = host.tabs()[position].id;
+            match host.open_tab_editor(id) {
+                Ok(()) => Some(ui_snapshot_response(host)),
+                Err(error) => Some(IpcResponse::failure(error)),
+            }
+        }
+        "open-settings" => match host.open_settings_modal() {
+            Ok(()) => Some(ui_snapshot_response(host)),
+            Err(error) => Some(IpcResponse::failure(error)),
+        },
+        "settings-apply" => match host.close_settings_modal(true) {
+            Ok(()) => Some(ui_snapshot_response(host)),
+            Err(error) => Some(IpcResponse::failure(error)),
+        },
+        "tab-editor-save" => match host.finish_tab_editor(true) {
+            Ok(()) => Some(ui_snapshot_response(host)),
+            Err(error) => Some(IpcResponse::failure(error)),
+        },
+        "tab-editor-cancel" => match host.finish_tab_editor(false) {
+            Ok(()) => Some(ui_snapshot_response(host)),
+            Err(error) => Some(IpcResponse::failure(error)),
+        },
+        "cancel" => match host.ui_action_cancel() {
+            Ok(true) => Some(ui_snapshot_response(host)),
+            Ok(false) => Some(IpcResponse::failure("no modal is pending")),
+            Err(error) => Some(IpcResponse::failure(error)),
+        },
         _ => None,
     }
 }

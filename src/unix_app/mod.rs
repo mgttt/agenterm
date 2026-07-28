@@ -1,8 +1,10 @@
 mod font;
 mod input;
+mod layout;
 mod render;
 
 use std::{
+    collections::HashSet,
     env,
     rc::Rc,
     sync::{Arc, mpsc::Receiver},
@@ -14,7 +16,7 @@ use winit::{
     application::ApplicationHandler,
     event::{ElementState, MouseButton, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
-    keyboard::ModifiersState,
+    keyboard::{Key, ModifiersState, NamedKey},
     window::{Window, WindowAttributes, WindowId},
 };
 
@@ -35,8 +37,13 @@ use crate::{
 };
 
 use render::{
-    COMPOSER_HEIGHT, ComposerView, FrameContent, SIDEBAR_WIDTH, SidebarTabRow, TerminalGrid,
-    grid_dimensions_for_pixels, render_frame, sidebar_row_at_y, theme_palette,
+    COMPOSER_HEIGHT, ComposerView, FrameContent, SettingsHit, SettingsModalView,
+    SidebarTabRow, TerminalGrid, effective_palette, grid_dimensions_for_pixels, render_frame,
+    scrollbar_view_from_geometry, sidebar_row_at_y,
+};
+
+use layout::{
+    pixel_rect_json, scrollbar_geometry, sidebar_width_u32, workspace_layout_for,
 };
 
 const APP_NAME: &str = "AgenTerm";
@@ -48,6 +55,7 @@ enum UnixFocusSurface {
     Terminal,
     Composer,
     Sidebar,
+    Settings,
 }
 
 impl UnixFocusSurface {
@@ -56,6 +64,7 @@ impl UnixFocusSurface {
             Self::Terminal => "terminal",
             Self::Composer => "composer",
             Self::Sidebar => "sidebar",
+            Self::Settings => "settings",
         }
     }
 
@@ -64,6 +73,7 @@ impl UnixFocusSurface {
             "terminal" => Ok(Self::Terminal),
             "composer" => Ok(Self::Composer),
             "tabs" | "sidebar" => Ok(Self::Sidebar),
+            "settings" => Ok(Self::Settings),
             other => Err(format!("unknown focus surface: {other}")),
         }
     }
@@ -176,6 +186,14 @@ struct UnixApp {
     composer_buffer: String,
     config: AppConfig,
     modifiers: ModifiersState,
+    settings_open: bool,
+    settings_theme_draft: ThemeId,
+    settings_font_draft: String,
+    settings_size_draft: u16,
+    collapsed_tabs: HashSet<u64>,
+    note_edit_target: Option<u64>,
+    tab_name_draft: String,
+    tab_note_draft: String,
 }
 
 impl UnixApp {
@@ -187,6 +205,7 @@ impl UnixApp {
         ipc_receiver: Receiver<IpcEnvelope>,
         session_name: String,
     ) -> Self {
+        let config = load_config();
         Self {
             title,
             no_activate,
@@ -206,9 +225,46 @@ impl UnixApp {
             last_cursor: (0.0, 0.0),
             focus_surface: UnixFocusSurface::Terminal,
             composer_buffer: String::new(),
-            config: load_config(),
+            settings_open: false,
+            settings_theme_draft: config.color_theme,
+            settings_font_draft: config.terminal_font_family.clone(),
+            settings_size_draft: config.terminal_font_size,
+            collapsed_tabs: HashSet::new(),
+            note_edit_target: None,
+            tab_name_draft: String::new(),
+            tab_note_draft: String::new(),
+            config,
             modifiers: ModifiersState::empty(),
         }
+    }
+
+    fn palette(&self) -> &'static crate::theme::ThemePalette {
+        effective_palette(
+            self.config.color_theme,
+            self.settings_theme_draft,
+            self.settings_open,
+        )
+    }
+
+    fn layout(&self) -> crate::ui_geometry::WorkspaceLayout {
+        let (width, height) = self.client_size();
+        workspace_layout_for(width, height, &self.config)
+    }
+
+    fn sidebar_width(&self) -> u32 {
+        sidebar_width_u32(&self.layout())
+    }
+
+    fn visible_tree_rows(&self) -> Vec<crate::tab_tree::TabTreeRow> {
+        self.all_tree_rows()
+            .into_iter()
+            .filter(|row| {
+                !row
+                    .ancestors
+                    .iter()
+                    .any(|id| self.collapsed_tabs.contains(id))
+            })
+            .collect()
     }
 
     fn commit_composer_draft(&mut self, position: usize) {
@@ -308,20 +364,151 @@ impl UnixApp {
     }
 
     fn composer_region_contains(&self, x: f64, y: f64, window_height: u32) -> bool {
-        x >= f64::from(SIDEBAR_WIDTH)
+        x >= f64::from(self.sidebar_width())
             && y >= f64::from(window_height.saturating_sub(COMPOSER_HEIGHT))
     }
 
+    fn relayout_after_config_change(&mut self) {
+        self.resize_to_window();
+        self.request_redraw();
+    }
+
+    fn open_settings(&mut self) {
+        if self.note_edit_target.is_some() {
+            let _ = self.complete_tab_editor(false);
+        }
+        self.sync_composer_buffer_to_tab();
+        self.settings_open = true;
+        self.settings_theme_draft = self.config.color_theme;
+        self.settings_font_draft = self.config.terminal_font_family.clone();
+        self.settings_size_draft = self.config.terminal_font_size;
+        self.set_focus_surface_internal(UnixFocusSurface::Settings, "semantic");
+    }
+
+    fn close_settings(&mut self, apply: bool) -> Result<(), String> {
+        if !self.settings_open {
+            return Err("settings are not open".to_owned());
+        }
+        if apply {
+            if self.settings_font_draft.trim().is_empty() {
+                return Err("font family cannot be empty".to_owned());
+            }
+            if !(8..=36).contains(&self.settings_size_draft) {
+                return Err("font size must be from 8 to 36".to_owned());
+            }
+            self.config.terminal_font_family = self.settings_font_draft.clone();
+            self.config.terminal_font_size = self.settings_size_draft;
+            self.config.color_theme = self.settings_theme_draft;
+            save_config(&self.config).map_err(|error| format!("{error:#}"))?;
+        } else {
+            self.settings_theme_draft = self.config.color_theme;
+            self.settings_font_draft = self.config.terminal_font_family.clone();
+            self.settings_size_draft = self.config.terminal_font_size;
+        }
+        self.settings_open = false;
+        self.set_focus_surface_internal(UnixFocusSurface::Terminal, "settings-close");
+        Ok(())
+    }
+
+    fn open_tab_editor_for(&mut self, tab_id: u64) -> Result<(), String> {
+        if self.settings_open {
+            let _ = self.close_settings(false);
+        }
+        let Some(tab) = self.tabs.iter().find(|tab| tab.id == tab_id) else {
+            return Err(format!("can't find tab: @{tab_id}"));
+        };
+        self.note_edit_target = Some(tab_id);
+        self.tab_name_draft = tab.title.clone();
+        self.tab_note_draft = tab.note.clone();
+        self.set_focus_surface_internal(UnixFocusSurface::Settings, "tab-editor");
+        Ok(())
+    }
+
+    fn complete_tab_editor(&mut self, save: bool) -> Result<(), String> {
+        let Some(tab_id) = self.note_edit_target.take() else {
+            return Err("tab editor is not open".to_owned());
+        };
+        if save {
+            let Some(position) = self.tabs.iter().position(|tab| tab.id == tab_id) else {
+                return Err(format!("can't find tab: @{tab_id}"));
+            };
+            let previous_name = self.tabs[position].title.clone();
+            let previous_note = self.tabs[position].note.clone();
+            let name = self.tab_name_draft.clone();
+            let note = self.tab_note_draft.clone();
+            self.tabs[position].title = name.clone();
+            self.tabs[position].note = note.clone();
+            if previous_name != name {
+                self.event_journal_mut().commit(
+                    EventKind::TabRenamed,
+                    Some(tab_id),
+                    serde_json::json!({
+                        "previous_name": previous_name,
+                        "name": name,
+                    }),
+                );
+            }
+            if previous_note != note {
+                self.event_journal_mut().commit(
+                    EventKind::TabNote,
+                    Some(tab_id),
+                    serde_json::json!({
+                        "previous_note": previous_note,
+                        "note": note,
+                    }),
+                );
+            }
+        }
+        self.tab_name_draft.clear();
+        self.tab_note_draft.clear();
+        self.set_focus_surface_internal(UnixFocusSurface::Terminal, "tab-editor-close");
+        self.request_redraw();
+        Ok(())
+    }
+
+    fn toggle_collapsed(&mut self, tab_id: u64) -> Result<(), String> {
+        if !self.tabs.iter().any(|tab| tab.parent_id == Some(tab_id)) {
+            return Err("tab has no child nodes".to_owned());
+        }
+        if !self.collapsed_tabs.remove(&tab_id) {
+            self.collapsed_tabs.insert(tab_id);
+        }
+        self.request_redraw();
+        Ok(())
+    }
+
+    fn handle_settings_click(&mut self, hit: SettingsHit) {
+        match hit {
+            SettingsHit::Dark => {
+                self.settings_theme_draft = ThemeId::Dark;
+                self.request_redraw();
+            }
+            SettingsHit::Light => {
+                self.settings_theme_draft = ThemeId::Light;
+                self.request_redraw();
+            }
+            SettingsHit::Cancel => {
+                let _ = self.close_settings(false);
+            }
+            SettingsHit::Apply => {
+                let _ = self.close_settings(true);
+            }
+        }
+    }
+
     fn sidebar_rows(&self) -> Vec<SidebarTabRow> {
-        self.all_tree_rows()
+        self.visible_tree_rows()
             .into_iter()
             .filter_map(|row| {
                 let tab = self.tabs.iter().find(|tab| tab.id == row.id)?;
+                let has_children = self.tabs.iter().any(|child| child.parent_id == Some(tab.id));
                 Some(SidebarTabRow {
                     id: tab.id,
                     depth: row.depth,
                     title: tab.title.clone(),
                     active: self.active == Some(tab.id),
+                    collapsed: self.collapsed_tabs.contains(&tab.id),
+                    has_children,
                 })
             })
             .collect()
@@ -347,51 +534,104 @@ impl UnixApp {
     fn build_ui_snapshot_json(&self) -> String {
         let active = self.active;
         let (client_width, client_height) = self.client_size();
-        let content_height = client_height.saturating_sub(COMPOSER_HEIGHT);
-        let terminal_width = client_width.saturating_sub(SIDEBAR_WIDTH);
-        let rows = self.all_tree_rows();
-        let tabs = rows
+        let layout = self.layout();
+        let sidebar_width = sidebar_width_u32(&layout);
+        let visible_rows = self.visible_tree_rows();
+        let all_rows = self.all_tree_rows();
+        let scrollbar = self.active_position().map(|position| {
+            let tab = &self.tabs[position];
+            let geometry = scrollbar_geometry(&layout, usize::from(tab.last_size.0), tab.parser.screen().scrollback());
+            serde_json::json!({
+                "visible": true,
+                "track": pixel_rect_json(geometry.track),
+                "thumb": pixel_rect_json(geometry.thumb),
+                "max_offset": crate::SCROLLBACK_LINES,
+            })
+        });
+        let tab_editor = self.note_edit_target.map(|id| {
+            serde_json::json!({
+                "target": format!("@{id}"),
+                "name_length": self.tab_name_draft.chars().count(),
+                "note_length": self.tab_note_draft.chars().count(),
+                "focus": serde_json::Value::Null,
+            })
+        });
+        let tabs = all_rows
             .iter()
             .filter_map(|row| {
                 let tab = self.tabs.iter().find(|tab| tab.id == row.id)?;
+                let visible_position = self
+                    .config
+                    .tabs_visible
+                    .then(|| visible_rows.iter().position(|visible| visible.id == row.id))
+                    .flatten();
+                let draft = if self.active == Some(tab.id) {
+                    !self.composer_buffer.is_empty() || tab.sensitive_composer.is_some()
+                } else {
+                    !tab.composer.is_empty() || tab.sensitive_composer.is_some()
+                };
                 Some(serde_json::json!({
                     "id": format!("@{}", tab.id),
                     "index": tab.index,
+                    "parent_id": tab.parent_id.map(|id| format!("@{id}")),
+                    "depth": row.depth,
+                    "has_children": self.tabs.iter().any(|child| child.parent_id == Some(tab.id)),
+                    "collapsed": self.collapsed_tabs.contains(&tab.id),
+                    "visible": visible_position.is_some(),
                     "name": tab.title,
+                    "note": tab.note,
                     "active": active == Some(tab.id),
                     "state": Self::tab_state(tab),
                     "scrollback_offset": tab.parser.screen().scrollback(),
-                    "depth": row.depth,
+                    "draft": draft,
+                    "bounds": visible_position.map(|position| pixel_rect_json(crate::ui_geometry::PixelRect {
+                        left: 0,
+                        top: (position as i32) * render::SIDEBAR_TAB_ROW_HEIGHT as i32,
+                        right: sidebar_width as i32,
+                        bottom: ((position + 1) as i32) * render::SIDEBAR_TAB_ROW_HEIGHT as i32,
+                    })),
                 }))
             })
             .collect::<Vec<_>>();
         serde_json::to_string_pretty(&serde_json::json!({
+            "protocol_version": 1,
             "session": self.session_name,
             "active_window_id": active.map(|id| format!("@{id}")),
             "tabs_visible": self.config.tabs_visible,
+            "window": {
+                "client_width": client_width,
+                "client_height": client_height,
+            },
             "client": {
                 "width": client_width,
                 "height": client_height,
             },
             "layout": {
                 "sidebar": {
-                    "x": 0,
-                    "y": 0,
-                    "width": SIDEBAR_WIDTH,
-                    "height": content_height,
+                    "x": layout.sidebar.left,
+                    "y": layout.sidebar.top,
+                    "visible": self.config.tabs_visible,
+                    "configured_width": self.config.tabs_width,
+                    "effective_width": layout.effective_tabs_width,
+                    "width": layout.sidebar.width(),
+                    "height": layout.sidebar.height(),
+                    "bounds": pixel_rect_json(layout.sidebar),
                 },
                 "terminal": {
-                    "x": SIDEBAR_WIDTH,
-                    "y": 0,
-                    "width": terminal_width,
-                    "height": content_height,
+                    "x": layout.terminal.left,
+                    "y": layout.terminal.top,
+                    "width": layout.terminal.width(),
+                    "height": layout.terminal.height(),
+                    "bounds": pixel_rect_json(layout.terminal),
                 },
                 "composer": {
-                    "x": SIDEBAR_WIDTH,
-                    "y": content_height,
-                    "width": terminal_width,
-                    "height": COMPOSER_HEIGHT,
+                    "x": layout.composer.left,
+                    "y": layout.composer.top,
+                    "width": layout.composer.width(),
+                    "height": layout.composer.height(),
+                    "bounds": pixel_rect_json(layout.composer),
                 },
+                "scrollbar": scrollbar,
             },
             "focus": {
                 "surface": self.focus_surface.as_str(),
@@ -401,6 +641,20 @@ impl UnixApp {
                 "draft_length": self.composer_buffer.chars().count(),
                 "focused": self.focus_surface == UnixFocusSurface::Composer,
             },
+            "modal": if self.settings_open {
+                Some(serde_json::json!({"kind": "settings"}))
+            } else if self.note_edit_target.is_some() {
+                Some(serde_json::json!({"kind": "tab-editor"}))
+            } else {
+                None
+            },
+            "system_menu": {
+                "toggle_tabs": {
+                    "label": "Toggle Tabs",
+                    "checked": self.config.tabs_visible,
+                },
+            },
+            "tab_editor": tab_editor,
             "event_position": self.event_journal.position(),
             "tabs": tabs,
         }))
@@ -416,7 +670,16 @@ impl UnixApp {
     }
 
     fn handle_sidebar_click(&mut self, x: f64, y: f64) {
-        if x >= f64::from(SIDEBAR_WIDTH) {
+        let sidebar_width = self.sidebar_width();
+        if x >= f64::from(sidebar_width) {
+            return;
+        }
+        if x < 28.0
+            && let Some(row_index) = sidebar_row_at_y(y.max(0.0) as u32)
+            && let Some(row) = self.visible_tree_rows().get(row_index)
+            && self.tabs.iter().any(|tab| tab.parent_id == Some(row.id))
+        {
+            let _ = self.toggle_collapsed(row.id);
             return;
         }
         let Some(position) = self.tab_position_for_sidebar_y(y.max(0.0) as u32) else {
@@ -432,7 +695,21 @@ impl UnixApp {
     }
 
     fn handle_content_click(&mut self, x: f64, y: f64, window_height: u32) {
-        if x < f64::from(SIDEBAR_WIDTH) {
+        if self.settings_open {
+            let (width, height) = self.client_size();
+            let modal = SettingsModalView::for_client(
+                width,
+                height,
+                &self.settings_font_draft,
+                self.settings_size_draft,
+                self.settings_theme_draft,
+            );
+            if let Some(hit) = modal.hit_test(x, y) {
+                self.handle_settings_click(hit);
+            }
+            return;
+        }
+        if x < f64::from(self.sidebar_width()) {
             return;
         }
         if self.composer_region_contains(x, y, window_height) {
@@ -480,8 +757,10 @@ impl UnixApp {
         let surface = Surface::new(&self.context, Rc::clone(&window))
             .map_err(|error| anyhow::anyhow!("{error}"))?;
         let size = window.inner_size();
-        let (cols, rows) = grid_dimensions_for_pixels(size.width, size.height);
-        let grid = TerminalGrid::new(cols, rows, theme_palette());
+        let sidebar_width = self.sidebar_width();
+        let (cols, rows) =
+            grid_dimensions_for_pixels(size.width, size.height, sidebar_width, COMPOSER_HEIGHT);
+        let grid = TerminalGrid::new(cols, rows, self.palette());
 
         let id = self.next_tab_id;
         self.next_tab_id += 1;
@@ -526,7 +805,9 @@ impl UnixApp {
             return;
         };
         let size = window.inner_size();
-        let (cols, rows) = grid_dimensions_for_pixels(size.width, size.height);
+        let sidebar_width = self.sidebar_width();
+        let (cols, rows) =
+            grid_dimensions_for_pixels(size.width, size.height, sidebar_width, COMPOSER_HEIGHT);
         if let Some(grid) = self.grid.as_mut() {
             grid.resize(cols, rows);
         }
@@ -618,7 +899,27 @@ impl UnixApp {
         }
 
         let sidebar_rows = self.sidebar_rows();
-        let palette = ThemeId::Dark.palette();
+        let palette = self.palette();
+        let layout = self.layout();
+        let sidebar_width = self.sidebar_width();
+        let content_height = size.height.saturating_sub(COMPOSER_HEIGHT);
+        let scrollbar = self.active_position().map(|position| {
+            let tab = &self.tabs[position];
+            scrollbar_view_from_geometry(scrollbar_geometry(
+                &layout,
+                usize::from(tab.last_size.0),
+                tab.parser.screen().scrollback(),
+            ))
+        });
+        let settings = self.settings_open.then(|| {
+            SettingsModalView::for_client(
+                size.width,
+                size.height,
+                &self.settings_font_draft,
+                self.settings_size_draft,
+                self.settings_theme_draft,
+            )
+        });
         let Some(grid) = self.grid.as_ref() else {
             return;
         };
@@ -646,12 +947,16 @@ impl UnixApp {
             height,
             palette,
             FrameContent {
+                sidebar_width,
+                content_height,
                 grid,
                 sidebar_rows: &sidebar_rows,
                 composer: ComposerView {
                     text: &self.composer_buffer,
                     focused: self.focus_surface == UnixFocusSurface::Composer,
                 },
+                scrollbar,
+                settings,
             },
         );
         let _ = buffer.present();
@@ -697,6 +1002,10 @@ impl ControlHost for UnixApp {
         if surface == UnixFocusSurface::Composer && self.active.is_none() {
             return Err(format!("focus surface is unavailable: {}", surface.as_str()));
         }
+        if surface == UnixFocusSurface::Settings && !self.settings_open && self.note_edit_target.is_none()
+        {
+            return Err(format!("focus surface is unavailable: {}", surface.as_str()));
+        }
         self.set_focus_surface_internal(surface, "semantic");
         Ok(())
     }
@@ -734,8 +1043,126 @@ impl ControlHost for UnixApp {
             other => return Err(format!("unknown setting: {other}")),
         }
         save_config(&self.config).map_err(|error| format!("{error:#}"))?;
-        self.request_redraw();
+        self.relayout_after_config_change();
         Ok(())
+    }
+
+    fn apply_set_composer(&mut self, position: usize, text: String) -> Result<(), String> {
+        let id = self.tabs[position].id;
+        if self.note_edit_target == Some(id) {
+            let normalized = text.replace("\r\n", "\n");
+            let (name, note) = normalized.split_once('\n').unwrap_or((&normalized, ""));
+            self.tab_name_draft = name.to_owned();
+            self.tab_note_draft = note.to_owned();
+            return Ok(());
+        }
+        self.tabs_mut()[position].composer = text.clone();
+        self.event_journal_mut().commit(
+            EventKind::ComposerDraft,
+            Some(id),
+            serde_json::json!({
+                "length": text.chars().count(),
+            }),
+        );
+        if self.active_id() == Some(id) {
+            self.load_composer_to_ui();
+        }
+        Ok(())
+    }
+
+    fn config_tabs_visible(&self) -> bool {
+        self.config.tabs_visible
+    }
+
+    fn set_tabs_visible(
+        &mut self,
+        visible: bool,
+        cause: &str,
+        operation_id: &str,
+    ) -> Result<(), String> {
+        if self.config.tabs_visible == visible {
+            return Ok(());
+        }
+        self.config.tabs_visible = visible;
+        save_config(&self.config).map_err(|error| format!("{error:#}"))?;
+        self.event_journal_mut().commit(
+            EventKind::LayoutTabsVisibility,
+            None,
+            serde_json::json!({
+                "visible": visible,
+                "cause": cause,
+                "operation_id": operation_id,
+            }),
+        );
+        if !visible && self.focus_surface == UnixFocusSurface::Sidebar {
+            self.set_focus_surface_internal(UnixFocusSurface::Terminal, "tabs-hide");
+        }
+        self.relayout_after_config_change();
+        Ok(())
+    }
+
+    fn set_tabs_width(
+        &mut self,
+        width: u16,
+        cause: &str,
+        operation_id: &str,
+    ) -> Result<(), String> {
+        self.config.tabs_width = width;
+        save_config(&self.config).map_err(|error| format!("{error:#}"))?;
+        let configured_width = self.config.tabs_width;
+        let effective_width = self.layout().effective_tabs_width;
+        self.event_journal_mut().commit(
+            EventKind::LayoutTabsWidth,
+            None,
+            serde_json::json!({
+                "configured_width": configured_width,
+                "effective_width": effective_width,
+                "cause": cause,
+                "operation_id": operation_id,
+            }),
+        );
+        self.relayout_after_config_change();
+        Ok(())
+    }
+
+    fn toggle_tab_collapsed(&mut self, tab_id: u64) -> Result<(), String> {
+        self.toggle_collapsed(tab_id)
+    }
+
+    fn open_settings_modal(&mut self) -> Result<(), String> {
+        self.open_settings();
+        Ok(())
+    }
+
+    fn close_settings_modal(&mut self, apply: bool) -> Result<(), String> {
+        self.close_settings(apply)
+    }
+
+    fn preview_settings_theme(&mut self, theme: ThemeId) {
+        if self.settings_open {
+            self.settings_theme_draft = theme;
+            self.request_redraw();
+        }
+    }
+
+    fn open_tab_editor(&mut self, tab_id: u64) -> Result<(), String> {
+        self.open_tab_editor_for(tab_id)
+    }
+
+    fn finish_tab_editor(&mut self, save: bool) -> Result<(), String> {
+        self.complete_tab_editor(save)
+    }
+
+    fn ui_action_cancel(&mut self) -> Result<bool, String> {
+        if self.settings_open {
+            self.close_settings(false)?;
+            return Ok(true);
+        }
+        if self.note_edit_target.is_some() {
+            self.complete_tab_editor(false)?;
+            return Ok(true);
+        }
+        Ok(false)
     }
 
     fn started_at_unix_secs(&self) -> u64 {
@@ -939,6 +1366,12 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                 event,
                 ..
             } => {
+                if self.settings_open {
+                    if let Key::Named(NamedKey::Escape) = event.logical_key {
+                        let _ = self.close_settings(false);
+                    }
+                    return;
+                }
                 if self.focus_surface == UnixFocusSurface::Composer {
                     match input::composer_key_action(
                         &event,
@@ -986,7 +1419,7 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                     .as_ref()
                     .map(|window| window.inner_size().height)
                     .unwrap_or(INITIAL_HEIGHT);
-                if x < f64::from(SIDEBAR_WIDTH) {
+                if x < f64::from(self.sidebar_width()) {
                     self.handle_sidebar_click(x, y);
                 } else {
                     self.handle_content_click(x, y, window_height);

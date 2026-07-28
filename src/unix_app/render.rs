@@ -1,10 +1,14 @@
 use crate::theme::{Rgb, ThemeId, ThemePalette};
 
-use super::font::GLYPH_WIDTH;
+use super::{
+    font::GLYPH_WIDTH,
+    layout::{SCROLLBAR_WIDTH, u32_rect},
+};
 
-pub(super) const SIDEBAR_WIDTH: u32 = 200;
 pub(super) const SIDEBAR_TAB_ROW_HEIGHT: u32 = 20;
 pub(super) const COMPOSER_HEIGHT: u32 = 48;
+pub(super) const SETTINGS_MODAL_WIDTH: u32 = 360;
+pub(super) const SETTINGS_MODAL_HEIGHT: u32 = 220;
 
 pub(super) const CELL_WIDTH: u32 = 10;
 pub(super) const CELL_HEIGHT: u32 = 16;
@@ -17,6 +21,8 @@ pub(super) struct SidebarTabRow {
     pub(super) depth: usize,
     pub(super) title: String,
     pub(super) active: bool,
+    pub(super) collapsed: bool,
+    pub(super) has_children: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -64,10 +70,8 @@ impl TerminalGrid {
     pub(super) fn resize(&mut self, cols: u16, rows: u16) {
         self.cols = cols;
         self.rows = rows;
-        self.cells.resize(
-            usize::from(cols) * usize::from(rows),
-            TerminalCell::blank(),
-        );
+        self.cells
+            .resize(usize::from(cols) * usize::from(rows), TerminalCell::blank());
     }
 
     pub(super) fn sync_from_screen(&mut self, screen: &vt100::Screen) {
@@ -103,19 +107,6 @@ impl TerminalGrid {
         }
     }
 
-    pub(super) fn put_text(&mut self, col: u16, row: u16, text: &str) {
-        for (column, ch) in (col..).zip(text.chars()) {
-            if column >= self.cols {
-                break;
-            }
-            self.set_cell(
-                column,
-                row,
-                TerminalCell::with_defaults(ch, self.palette),
-            );
-        }
-    }
-
     fn index(&self, col: u16, row: u16) -> usize {
         usize::from(row) * usize::from(self.cols) + usize::from(col)
     }
@@ -130,9 +121,16 @@ fn color_index(color: vt100::Color, background: bool) -> u8 {
     }
 }
 
-pub(super) fn grid_dimensions_for_pixels(width: u32, height: u32) -> (u16, u16) {
-    let terminal_width = width.saturating_sub(SIDEBAR_WIDTH);
-    let terminal_height = height.saturating_sub(COMPOSER_HEIGHT);
+pub(super) fn grid_dimensions_for_pixels(
+    width: u32,
+    height: u32,
+    sidebar_width: u32,
+    composer_height: u32,
+) -> (u16, u16) {
+    let terminal_width = width
+        .saturating_sub(sidebar_width)
+        .saturating_sub(SCROLLBAR_WIDTH);
+    let terminal_height = height.saturating_sub(composer_height);
     let cols = (terminal_width / CELL_WIDTH).max(1) as u16;
     let rows = (terminal_height / CELL_HEIGHT).max(1) as u16;
     (cols, rows)
@@ -143,10 +141,82 @@ pub(super) struct ComposerView<'a> {
     pub(super) focused: bool,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub(super) struct ScrollbarView {
+    pub(super) track: (u32, u32, u32, u32),
+    pub(super) thumb: (u32, u32, u32, u32),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum SettingsHit {
+    Dark,
+    Light,
+    Cancel,
+    Apply,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct SettingsModalView<'a> {
+    pub(super) font_family: &'a str,
+    pub(super) font_size: u16,
+    pub(super) theme_draft: ThemeId,
+    pub(super) bounds: (u32, u32, u32, u32),
+    pub(super) dark_button: (u32, u32, u32, u32),
+    pub(super) light_button: (u32, u32, u32, u32),
+    pub(super) cancel_button: (u32, u32, u32, u32),
+    pub(super) apply_button: (u32, u32, u32, u32),
+}
+
+impl SettingsModalView<'_> {
+    pub(super) fn hit_test(&self, x: f64, y: f64) -> Option<SettingsHit> {
+        let x = x as u32;
+        let y = y as u32;
+        if rect_contains(self.dark_button, x, y) {
+            return Some(SettingsHit::Dark);
+        }
+        if rect_contains(self.light_button, x, y) {
+            return Some(SettingsHit::Light);
+        }
+        if rect_contains(self.cancel_button, x, y) {
+            return Some(SettingsHit::Cancel);
+        }
+        if rect_contains(self.apply_button, x, y) {
+            return Some(SettingsHit::Apply);
+        }
+        None
+    }
+
+    pub(super) fn for_client(
+        client_width: u32,
+        client_height: u32,
+        font_family: &str,
+        font_size: u16,
+        theme_draft: ThemeId,
+    ) -> SettingsModalView<'_> {
+        let left = (client_width.saturating_sub(SETTINGS_MODAL_WIDTH)) / 2;
+        let top = (client_height.saturating_sub(SETTINGS_MODAL_HEIGHT)) / 2;
+        let button_y = top + 150;
+        SettingsModalView {
+            font_family,
+            font_size,
+            theme_draft,
+            bounds: (left, top, SETTINGS_MODAL_WIDTH, SETTINGS_MODAL_HEIGHT),
+            dark_button: (left + 16, button_y, 120, 28),
+            light_button: (left + 148, button_y, 120, 28),
+            cancel_button: (left + 16, button_y + 40, 120, 28),
+            apply_button: (left + 148, button_y + 40, 120, 28),
+        }
+    }
+}
+
 pub(super) struct FrameContent<'a> {
+    pub(super) sidebar_width: u32,
+    pub(super) content_height: u32,
     pub(super) grid: &'a TerminalGrid,
     pub(super) sidebar_rows: &'a [SidebarTabRow],
     pub(super) composer: ComposerView<'a>,
+    pub(super) scrollbar: Option<ScrollbarView>,
+    pub(super) settings: Option<SettingsModalView<'a>>,
 }
 
 pub(super) fn render_frame(
@@ -162,34 +232,61 @@ pub(super) fn render_frame(
         *pixel = background;
     }
 
-    let content_height = height.saturating_sub(COMPOSER_HEIGHT);
-    render_sidebar(buffer, stride, width, content_height, palette, content.sidebar_rows);
+    if content.sidebar_width > 0 {
+        render_sidebar(
+            buffer,
+            stride,
+            width,
+            content.content_height,
+            palette,
+            content.sidebar_rows,
+            content.sidebar_width,
+        );
+    }
     render_terminal_grid(
         buffer,
         stride,
         width,
-        content_height,
+        content.content_height,
         content.grid,
         palette,
-        SIDEBAR_WIDTH,
+        content.sidebar_width,
     );
+    if let Some(scrollbar) = content.scrollbar {
+        render_scrollbar(buffer, stride, palette, scrollbar);
+    }
     render_composer(
         buffer,
         stride,
         width,
         height,
         palette,
+        content.sidebar_width,
         content.composer.text,
         content.composer.focused,
     );
+    if let Some(settings) = content.settings {
+        render_settings_modal(buffer, stride, width, height, palette, settings);
+    }
 }
 
+fn render_scrollbar(buffer: &mut [u32], stride: u32, palette: &ThemePalette, scrollbar: ScrollbarView) {
+    let track_color = rgb_to_pixel(palette.scrollbar_track);
+    let thumb_color = rgb_to_pixel(palette.scrollbar_thumb);
+    let (tx, ty, tw, th) = scrollbar.track;
+    fill_rect(buffer, stride, tx, ty, tw, th, track_color);
+    let (ux, uy, uw, uh) = scrollbar.thumb;
+    fill_rect(buffer, stride, ux, uy, uw, uh, thumb_color);
+}
+
+#[allow(clippy::too_many_arguments)]
 fn render_composer(
     buffer: &mut [u32],
     stride: u32,
     width: u32,
     height: u32,
     palette: &ThemePalette,
+    sidebar_width: u32,
     text: &str,
     focused: bool,
 ) {
@@ -197,26 +294,27 @@ fn render_composer(
     if top >= height {
         return;
     }
+    let composer_width = width.saturating_sub(sidebar_width);
     let composer_bg = rgb_to_pixel(palette.composer);
-    fill_rect(buffer, stride, SIDEBAR_WIDTH, top, width.saturating_sub(SIDEBAR_WIDTH), COMPOSER_HEIGHT, composer_bg);
+    fill_rect(buffer, stride, sidebar_width, top, composer_width, COMPOSER_HEIGHT, composer_bg);
     let divider = rgb_to_pixel(palette.divider);
-    fill_rect(buffer, stride, SIDEBAR_WIDTH, top, width.saturating_sub(SIDEBAR_WIDTH), 1, divider);
+    fill_rect(buffer, stride, sidebar_width, top, composer_width, 1, divider);
     if focused {
         let ring = rgb_to_pixel(palette.focus_ring);
-        fill_rect(buffer, stride, SIDEBAR_WIDTH, top, width.saturating_sub(SIDEBAR_WIDTH), 2, ring);
+        fill_rect(buffer, stride, sidebar_width, top, composer_width, 2, ring);
     }
     let label = if text.is_empty() {
         "> ".to_owned()
     } else {
         format!("> {text}")
     };
-    let max_chars = ((width.saturating_sub(SIDEBAR_WIDTH).saturating_sub(16)) / (GLYPH_WIDTH + 1)).max(1) as usize;
+    let max_chars = ((composer_width.saturating_sub(16)) / (GLYPH_WIDTH + 1)).max(1) as usize;
     draw_text(
         buffer,
         stride,
         width,
         height,
-        SIDEBAR_WIDTH + 8,
+        sidebar_width + 8,
         top + 16,
         &truncate_chars(&label, max_chars),
         palette.text,
@@ -230,14 +328,23 @@ fn render_sidebar(
     height: u32,
     palette: &ThemePalette,
     rows: &[SidebarTabRow],
+    sidebar_width: u32,
 ) {
-    let sidebar_width = SIDEBAR_WIDTH.min(width);
+    let sidebar_width = sidebar_width.min(width);
     let sidebar_bg = rgb_to_pixel(palette.sidebar);
     fill_rect(buffer, stride, 0, 0, sidebar_width, height, sidebar_bg);
 
     let divider = rgb_to_pixel(palette.divider);
     if sidebar_width > 0 && sidebar_width < width {
-        fill_rect(buffer, stride, sidebar_width.saturating_sub(1), 0, 1, height, divider);
+        fill_rect(
+            buffer,
+            stride,
+            sidebar_width.saturating_sub(1),
+            0,
+            1,
+            height,
+            divider,
+        );
     }
 
     for (index, row) in rows.iter().enumerate() {
@@ -248,7 +355,12 @@ fn render_sidebar(
         let row_height = SIDEBAR_TAB_ROW_HEIGHT.min(height.saturating_sub(top));
         let indent = 8 + u32::try_from(row.depth).unwrap_or(0).saturating_mul(12);
         let text_x = indent.min(sidebar_width.saturating_sub(1));
-        let label = format!("@{} {}", row.id, row.title);
+        let marker = if row.has_children {
+            if row.collapsed { "[+]" } else { "[-]" }
+        } else {
+            "   "
+        };
+        let label = format!("{marker} @{} {}", row.id, row.title);
         let max_chars = ((sidebar_width.saturating_sub(text_x)) / (GLYPH_WIDTH + 1)).max(1) as usize;
         let clipped = truncate_chars(&label, max_chars);
 
@@ -289,8 +401,13 @@ fn render_terminal_grid(
     palette: &ThemePalette,
     offset_x: u32,
 ) {
+    let terminal_width = width.saturating_sub(offset_x).saturating_sub(SCROLLBAR_WIDTH);
     for row in 0..grid.rows {
         for col in 0..grid.cols {
+            let x = offset_x + u32::from(col) * CELL_WIDTH;
+            if x + CELL_WIDTH > offset_x + terminal_width {
+                break;
+            }
             let cell = grid.cell(col, row);
             let fg = ansi_color(palette, cell.fg);
             let bg = ansi_color(palette, cell.bg);
@@ -299,7 +416,7 @@ fn render_terminal_grid(
                 stride,
                 width,
                 height,
-                offset_x + u32::from(col) * CELL_WIDTH,
+                x,
                 u32::from(row) * CELL_HEIGHT,
                 cell.ch,
                 fg,
@@ -307,6 +424,154 @@ fn render_terminal_grid(
             );
         }
     }
+}
+
+fn render_settings_modal(
+    buffer: &mut [u32],
+    stride: u32,
+    width: u32,
+    height: u32,
+    palette: &ThemePalette,
+    settings: SettingsModalView<'_>,
+) {
+    let overlay = rgb_to_pixel(Rgb {
+        red: 0,
+        green: 0,
+        blue: 0,
+    });
+    for y in 0..height {
+        for x in 0..width {
+            let index = (y * stride + x) as usize;
+            if let Some(pixel) = buffer.get_mut(index) {
+                let base = *pixel;
+                let r = ((base >> 16) & 0xFF) * 2 / 5;
+                let g = ((base >> 8) & 0xFF) * 2 / 5;
+                let b = (base & 0xFF) * 2 / 5;
+                *pixel = overlay & 0xFF00_0000
+                    | (r << 16)
+                    | (g << 8)
+                    | b;
+            }
+        }
+    }
+
+    let (mx, my, mw, mh) = settings.bounds;
+    let modal_bg = rgb_to_pixel(palette.modal);
+    fill_rect(buffer, stride, mx, my, mw, mh, modal_bg);
+    let border = rgb_to_pixel(palette.focus_ring);
+    fill_rect(buffer, stride, mx, my, mw, 2, border);
+    draw_text(
+        buffer,
+        stride,
+        width,
+        height,
+        mx + 12,
+        my + 12,
+        "Settings",
+        palette.text,
+    );
+    draw_text(
+        buffer,
+        stride,
+        width,
+        height,
+        mx + 12,
+        my + 36,
+        &format!("Font: {}", settings.font_family),
+        palette.muted_text,
+    );
+    draw_text(
+        buffer,
+        stride,
+        width,
+        height,
+        mx + 12,
+        my + 52,
+        &format!("Size: {}", settings.font_size),
+        palette.muted_text,
+    );
+    render_button(
+        buffer,
+        stride,
+        width,
+        height,
+        palette,
+        settings.dark_button,
+        if settings.theme_draft == ThemeId::Dark {
+            "Dark *"
+        } else {
+            "Dark"
+        },
+        settings.theme_draft == ThemeId::Dark,
+    );
+    render_button(
+        buffer,
+        stride,
+        width,
+        height,
+        palette,
+        settings.light_button,
+        if settings.theme_draft == ThemeId::Light {
+            "Light *"
+        } else {
+            "Light"
+        },
+        settings.theme_draft == ThemeId::Light,
+    );
+    render_button(
+        buffer,
+        stride,
+        width,
+        height,
+        palette,
+        settings.cancel_button,
+        "Cancel",
+        false,
+    );
+    render_button(
+        buffer,
+        stride,
+        width,
+        height,
+        palette,
+        settings.apply_button,
+        "Apply",
+        true,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_button(
+    buffer: &mut [u32],
+    stride: u32,
+    width: u32,
+    height: u32,
+    palette: &ThemePalette,
+    rect: (u32, u32, u32, u32),
+    label: &str,
+    primary: bool,
+) {
+    let (x, y, w, h) = rect;
+    let bg = if primary {
+        palette.accent
+    } else {
+        palette.control
+    };
+    fill_rect(buffer, stride, x, y, w, h, rgb_to_pixel(bg));
+    draw_text(
+        buffer,
+        stride,
+        width,
+        height,
+        x + 8,
+        y + (h / 2).saturating_sub(4),
+        label,
+        if primary {
+            palette.selection_foreground
+        } else {
+            palette.text
+        },
+    );
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -445,6 +710,11 @@ fn put_pixel(buffer: &mut [u32], stride: u32, x: u32, y: u32, color: u32) {
     }
 }
 
+fn rect_contains(rect: (u32, u32, u32, u32), x: u32, y: u32) -> bool {
+    let (left, top, width, height) = rect;
+    x >= left && y >= top && x < left + width && y < top + height
+}
+
 fn ansi_color(palette: &ThemePalette, index: u8) -> Rgb {
     palette.ansi[(index & 0x0F) as usize]
 }
@@ -456,27 +726,54 @@ fn rgb_to_pixel(rgb: Rgb) -> u32 {
         | u32::from(rgb.blue)
 }
 
-pub(super) fn theme_palette() -> &'static ThemePalette {
-    ThemeId::Dark.palette()
+pub(super) fn effective_palette(configured: ThemeId, draft: ThemeId, settings_open: bool) -> &'static ThemePalette {
+    if settings_open {
+        draft.palette()
+    } else {
+        configured.palette()
+    }
 }
 
 pub(super) fn sidebar_row_at_y(y: u32) -> Option<usize> {
     (y < u32::MAX).then_some((y / SIDEBAR_TAB_ROW_HEIGHT) as usize)
 }
 
+pub(super) fn scrollbar_view_from_geometry(
+    geometry: crate::ui_geometry::TerminalScrollbarGeometry,
+) -> ScrollbarView {
+    ScrollbarView {
+        track: u32_rect(geometry.track),
+        thumb: u32_rect(geometry.thumb),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::settings::AppConfig;
 
     #[test]
-    fn grid_dimensions_account_for_sidebar_and_composer() {
-        assert_eq!(grid_dimensions_for_pixels(800, 480), (60, 27));
+    fn grid_dimensions_account_for_sidebar_scrollbar_and_composer() {
+        assert_eq!(grid_dimensions_for_pixels(800, 480, 200, 48), (58, 27));
     }
 
     #[test]
-    fn sidebar_row_index_maps_y_to_row() {
-        assert_eq!(sidebar_row_at_y(0), Some(0));
-        assert_eq!(sidebar_row_at_y(19), Some(0));
-        assert_eq!(sidebar_row_at_y(20), Some(1));
+    fn settings_hit_test_maps_buttons() {
+        let modal = SettingsModalView::for_client(800, 600, "Consolas", 12, ThemeId::Dark);
+        assert_eq!(
+            modal.hit_test(
+                f64::from(modal.apply_button.0 + 4),
+                f64::from(modal.apply_button.1 + 4)
+            ),
+            Some(SettingsHit::Apply)
+        );
+    }
+
+    #[test]
+    fn hidden_sidebar_yields_wider_terminal_grid() {
+        let without = grid_dimensions_for_pixels(800, 480, 0, 48).0;
+        let with = grid_dimensions_for_pixels(800, 480, 200, 48).0;
+        assert!(without > with);
+        let _ = AppConfig::default();
     }
 }

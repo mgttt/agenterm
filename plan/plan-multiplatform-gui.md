@@ -41,16 +41,16 @@ PRD + Cargo deps (primary)
 - [x] G Win32 `execute_command` 收敛到同一 `ControlHost`；共享叶扩展
   `new-window` / `select-window` / `kill-window` / `active-window` /
   `display-message` / `rename-session`；Unix 实现 tab lifecycle
-- [~] H Unix tab tree UI / composer / settings / ui-action / event journal
+- [x] H Unix tab tree UI / composer / settings / ui-action / event journal
   - [x] event journal + `read-events` on Unix
   - [x] shared workspace commands (`list-tab-tree`, `scroll-pane`, rename/note/parent, `workspace-info`, `dump-cells`, `ui-snapshot` simplified)
   - [x] Unix tab sidebar (select by click)
   - [x] composer strip + `show/set/send-composer`, `focus`, `get-settings` (shared dispatch)
   - [x] `set-setting` + `ui-action` core subset (`new-tab`, `new-child`, `select-tab`, `close-tab`, `composer-send`)
   - [x] Unix `ui-snapshot` layout geometry (client + sidebar/terminal/composer bounds)
-  - [ ] settings editor UI, full `ui-action`, Win-grade `ui-snapshot` remainder
-
-## 能力叶
+  - [x] settings modal UI + `open-settings` / `settings-apply` / `cancel`
+  - [x] full shared `ui-action` tabs/layout/tree/editor subset
+  - [x] Unix `ui-snapshot` scrollbar/modal/system_menu/tab metadata
 
 ### A — PTY 后端抽象
 - 用户问题：Windows ConPTY 与 Unix PTY 不能各写一套 runtime。

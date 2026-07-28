@@ -6462,6 +6462,108 @@ impl ControlHost for AppState {
         }
     }
 
+    fn config_tabs_visible(&self) -> bool {
+        self.config.tabs_visible
+    }
+
+    fn set_tabs_visible(
+        &mut self,
+        visible: bool,
+        cause: &str,
+        operation_id: &str,
+    ) -> Result<(), String> {
+        AppState::set_tabs_visible(self, visible, cause, operation_id);
+        Ok(())
+    }
+
+    fn set_tabs_width(
+        &mut self,
+        width: u16,
+        cause: &str,
+        operation_id: &str,
+    ) -> Result<(), String> {
+        AppState::set_tabs_width(self, width, cause, operation_id);
+        Ok(())
+    }
+
+    fn toggle_tab_collapsed(&mut self, tab_id: u64) -> Result<(), String> {
+        let Some(position) = self.tabs.iter().position(|tab| tab.id == tab_id) else {
+            return Err(format!("can't find tab: @{tab_id}"));
+        };
+        if !self.tabs.iter().any(|tab| tab.parent_id == Some(tab_id)) {
+            return Err("tab has no child nodes".to_owned());
+        }
+        if !self.collapsed_tabs.remove(&tab_id) {
+            self.collapsed_tabs.insert(tab_id);
+        }
+        self.layout();
+        unsafe { InvalidateRect(self.window, ptr::null(), 0) };
+        let _ = position;
+        Ok(())
+    }
+
+    fn open_settings_modal(&mut self) -> Result<(), String> {
+        self.open_settings();
+        Ok(())
+    }
+
+    fn close_settings_modal(&mut self, apply: bool) -> Result<(), String> {
+        if !self.settings_open {
+            return Err("settings are not open".to_owned());
+        }
+        if apply {
+            self.apply_settings_from_controls();
+        } else {
+            self.close_settings();
+        }
+        Ok(())
+    }
+
+    fn preview_settings_theme(&mut self, theme: ThemeId) {
+        self.preview_theme(theme);
+    }
+
+    fn open_tab_editor(&mut self, tab_id: u64) -> Result<(), String> {
+        AppState::open_tab_editor(self, tab_id);
+        Ok(())
+    }
+
+    fn finish_tab_editor(&mut self, save: bool) -> Result<(), String> {
+        if self.note_edit_target.is_none() {
+            return Err("tab editor is not open".to_owned());
+        }
+        self.finish_note_edit(save);
+        Ok(())
+    }
+
+    fn ui_action_cancel(&mut self) -> Result<bool, String> {
+        if self.window_close_pending {
+            self.finish_window_close(WindowCloseChoice::Cancel);
+            return Ok(true);
+        }
+        if self.settings_open {
+            self.close_settings();
+            return Ok(true);
+        }
+        if self.cwd_edit_target.is_some() {
+            self.close_cwd_editor();
+            return Ok(true);
+        }
+        if self.proxy_edit_target.is_some() {
+            self.close_proxy_editor();
+            return Ok(true);
+        }
+        if self.note_edit_target.is_some() {
+            self.finish_note_edit(false);
+            return Ok(true);
+        }
+        if self.pending_close.is_some() {
+            self.finish_close_confirmation(false);
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
     fn set_session_name(&mut self, name: String) {
         self.session_name = name;
     }
@@ -6761,28 +6863,6 @@ impl AppState {
                     return IpcResponse::success(self.ui_snapshot());
                 }
                 let response = match action {
-                    "edit-tab" => {
-                        let Some(position) = self.target_position(option_value(args, "-t")) else {
-                            return IpcResponse::failure("can't find tab");
-                        };
-                        self.open_tab_editor(self.tabs[position].id);
-                        None
-                    }
-                    "toggle-tree" => {
-                        self.finish_note_edit(false);
-                        let Some(position) = self.target_position(option_value(args, "-t")) else {
-                            return IpcResponse::failure("can't find tab");
-                        };
-                        let id = self.tabs[position].id;
-                        if !self.tabs.iter().any(|tab| tab.parent_id == Some(id)) {
-                            return IpcResponse::failure("tab has no child nodes");
-                        }
-                        if !self.collapsed_tabs.remove(&id) {
-                            self.collapsed_tabs.insert(id);
-                        }
-                        self.layout();
-                        None
-                    }
                     "confirm" => {
                         if self.window_close_pending {
                             self.finish_window_close(WindowCloseChoice::KeepServerRunning);
@@ -6790,25 +6870,6 @@ impl AppState {
                             self.finish_close_confirmation(true);
                         } else {
                             return IpcResponse::failure("no confirmation is pending");
-                        }
-                        None
-                    }
-                    "cancel" => {
-                        if self.window_close_pending {
-                            self.finish_window_close(WindowCloseChoice::Cancel);
-                        } else if self.settings_open {
-                            self.close_settings();
-                        } else if self.cwd_edit_target.is_some() {
-                            self.close_cwd_editor();
-                        } else if self.proxy_edit_target.is_some() {
-                            self.close_proxy_editor();
-                        } else if self.note_edit_target.is_some() {
-                            self.finish_note_edit(false);
-                        } else {
-                            if self.pending_close.is_none() {
-                                return IpcResponse::failure("no modal is pending");
-                            }
-                            self.finish_close_confirmation(false);
                         }
                         None
                     }
@@ -6910,10 +6971,6 @@ impl AppState {
                         Ok(_) => None,
                         Err(error) => Some(IpcResponse::failure(format!("{error:#}"))),
                     },
-                    "open-settings" => {
-                        self.open_settings();
-                        None
-                    }
                     "window-minimize" => {
                         self.remask_proxy_credentials();
                         unsafe { ShowWindow(self.window, SW_MINIMIZE) };
