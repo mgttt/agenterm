@@ -56,14 +56,12 @@ impl std::fmt::Display for InvalidProcessId {
 #[cfg(unix)]
 impl std::error::Error for InvalidProcessId {}
 
-#[cfg(windows)]
-mod windows;
 #[cfg(unix)]
 mod unix;
-
 #[cfg(windows)]
-pub use windows::{
-    ChildCommand, PtyChild, PtyMaster, SpawnedPty, write_windows_console_mouse_drag,
-};
+mod windows;
+
 #[cfg(unix)]
 pub use unix::{ChildCommand, PtyChild, PtyMaster};
+#[cfg(windows)]
+pub use windows::{ChildCommand, PtyChild, PtyMaster, write_windows_console_mouse_drag};
