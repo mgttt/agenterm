@@ -1658,6 +1658,10 @@ S4  [~] server-owned 单活 interactive UI lease 已交付 attach/idempotent
         `Terminate & Close`/`Cancel` 确认，对 server 的终止与树提升语义
         不做本地复制。真实鼠标 Add、编辑 Cancel、关闭 Cancel/Confirm、
         稳定 parent ID 与仅删除目标子标签已进入同一 orphan-free 黑盒。
+        parent-first 可见行、缩进和 disclosure 命中也已切到同一树投影；
+        折叠只隐藏后代、不删除 tab 或改变 active stable ID，server 通过
+        additive `collapsed` bootstrap fact 与 `layout.tree.collapse` 事件
+        提供因果 post-state，旧兼容 server 缺字段时安全解释为展开。
         普通启动默认切换、旧工作台完整 parity 与 same-server rollback 待补
 S5  same-server GUI upgrade + rollback black-box
 S6  remove combined-process handoff only after parity gates

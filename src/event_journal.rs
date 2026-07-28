@@ -17,6 +17,7 @@ pub(crate) enum EventKind {
     ComposerSubmitted,
     ComposerSubmissionFinished,
     FocusChanged,
+    LayoutTreeCollapse,
     LayoutTabsVisibility,
     LayoutTabsWidth,
     TabClosed,
@@ -44,11 +45,12 @@ pub(crate) enum EventKind {
 }
 
 impl EventKind {
-    pub(crate) const ALL: [Self; 28] = [
+    pub(crate) const ALL: [Self; 29] = [
         Self::ComposerDraft,
         Self::ComposerSubmitted,
         Self::ComposerSubmissionFinished,
         Self::FocusChanged,
+        Self::LayoutTreeCollapse,
         Self::LayoutTabsVisibility,
         Self::LayoutTabsWidth,
         Self::TabClosed,
@@ -81,6 +83,7 @@ impl EventKind {
             Self::ComposerSubmitted => "composer.submitted",
             Self::ComposerSubmissionFinished => "composer.submission-finished",
             Self::FocusChanged => "focus.changed",
+            Self::LayoutTreeCollapse => "layout.tree.collapse",
             Self::LayoutTabsVisibility => "layout.tabs.visibility",
             Self::LayoutTabsWidth => "layout.tabs.width",
             Self::TabClosed => "tab.closed",
@@ -134,7 +137,7 @@ const fn event_spec(
     }
 }
 
-pub(crate) const EVENT_CATALOG: [EventSpec; 28] = [
+pub(crate) const EVENT_CATALOG: [EventSpec; 29] = [
     event_spec(
         EventKind::ComposerDraft,
         "tabs[].draft",
@@ -162,6 +165,13 @@ pub(crate) const EVENT_CATALOG: [EventSpec; 28] = [
         "{from:string,to:string}",
         "server",
         "0.1.6",
+    ),
+    event_spec(
+        EventKind::LayoutTreeCollapse,
+        "tabs[].collapsed",
+        "{collapsed:bool}",
+        "tab",
+        "0.1.9",
     ),
     event_spec(
         EventKind::LayoutTabsVisibility,

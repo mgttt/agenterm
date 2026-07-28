@@ -6285,7 +6285,14 @@ impl ControlHost for AppState {
     }
 
     fn after_create_tab(&mut self, id: u64, parent_id: Option<u64>) {
-        if parent_id.is_some() {
+        if let Some(parent_id) = parent_id {
+            if self.collapsed_tabs.remove(&parent_id) {
+                self.event_journal.commit(
+                    EventKind::LayoutTreeCollapse,
+                    Some(parent_id),
+                    serde_json::json!({ "collapsed": false }),
+                );
+            }
             self.open_tab_editor(id);
         }
     }
@@ -6314,6 +6321,10 @@ impl ControlHost for AppState {
         Ok(())
     }
 
+    fn collapsed_tab_ids(&self) -> Vec<u64> {
+        self.collapsed_tabs.iter().copied().collect()
+    }
+
     fn toggle_tab_collapsed(&mut self, tab_id: u64) -> Result<(), String> {
         let Some(position) = self.tabs.iter().position(|tab| tab.id == tab_id) else {
             return Err(format!("can't find tab: @{tab_id}"));
@@ -6321,9 +6332,17 @@ impl ControlHost for AppState {
         if !self.tabs.iter().any(|tab| tab.parent_id == Some(tab_id)) {
             return Err("tab has no child nodes".to_owned());
         }
-        if !self.collapsed_tabs.remove(&tab_id) {
+        let collapsed = if self.collapsed_tabs.remove(&tab_id) {
+            false
+        } else {
             self.collapsed_tabs.insert(tab_id);
-        }
+            true
+        };
+        self.event_journal.commit(
+            EventKind::LayoutTreeCollapse,
+            Some(tab_id),
+            serde_json::json!({ "collapsed": collapsed }),
+        );
         self.layout();
         unsafe { InvalidateRect(self.window, ptr::null(), 0) };
         let _ = position;

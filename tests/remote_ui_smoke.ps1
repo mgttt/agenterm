@@ -581,6 +581,41 @@ try {
         $childEditCancel, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero
     ) | Out-Null
 
+    Write-Host 'STEP collapse and expand the server-owned tab tree'
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, 0x0201, [IntPtr]::Zero,
+        [AgenTermRemoteUiNativeTest]::MousePoint(12, 20)
+    ) | Out-Null
+    $collapsedBootstrap = Invoke-AgenTerm @('ui-bootstrap') |
+        ConvertFrom-Json
+    $collapsedRoot = @(
+        $collapsedBootstrap.tabs | Where-Object id -eq $tabId
+    )[0]
+    if (-not $collapsedRoot.collapsed -or
+        $collapsedBootstrap.active_tab_id -ne $childId -or
+        $collapsedBootstrap.tabs.Count -ne 2) {
+        throw (
+            'tree collapse did not preserve server tabs and active identity: ' +
+            ($collapsedBootstrap | ConvertTo-Json -Depth 8 -Compress)
+        )
+    }
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, 0x0201, [IntPtr]::Zero,
+        [AgenTermRemoteUiNativeTest]::MousePoint(12, 20)
+    ) | Out-Null
+    $expandedBootstrap = Invoke-AgenTerm @('ui-bootstrap') |
+        ConvertFrom-Json
+    $expandedRoot = @(
+        $expandedBootstrap.tabs | Where-Object id -eq $tabId
+    )[0]
+    if ($expandedRoot.collapsed -or
+        $expandedBootstrap.active_tab_id -ne $childId) {
+        throw (
+            'tree expand changed active identity or remained collapsed: ' +
+            ($expandedBootstrap | ConvertTo-Json -Depth 8 -Compress)
+        )
+    }
+
     [AgenTermRemoteUiNativeTest]::SendMessage(
         $gui.MainWindowHandle, 0x0201, [IntPtr]::Zero,
         [AgenTermRemoteUiNativeTest]::MousePoint(330, 64)

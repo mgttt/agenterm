@@ -852,6 +852,31 @@ impl ControlHost for ServerState {
         self.session_name = name;
     }
 
+    fn collapsed_tab_ids(&self) -> Vec<u64> {
+        self.collapsed_tabs.iter().copied().collect()
+    }
+
+    fn toggle_tab_collapsed(&mut self, tab_id: u64) -> Result<(), String> {
+        if !self.tabs.iter().any(|tab| tab.id == tab_id) {
+            return Err(format!("can't find tab: @{tab_id}"));
+        }
+        if !self.tabs.iter().any(|tab| tab.parent_id == Some(tab_id)) {
+            return Err("tab has no child nodes".to_owned());
+        }
+        let collapsed = if self.collapsed_tabs.remove(&tab_id) {
+            false
+        } else {
+            self.collapsed_tabs.insert(tab_id);
+            true
+        };
+        self.event_journal.commit(
+            EventKind::LayoutTreeCollapse,
+            Some(tab_id),
+            serde_json::json!({ "collapsed": collapsed }),
+        );
+        Ok(())
+    }
+
     fn create_tab(
         &mut self,
         title: Option<String>,
@@ -892,6 +917,15 @@ impl ControlHost for ServerState {
         .map_err(|error| format!("{error:#}"))?;
         self.tabs.push(tab);
         self.tabs.sort_by_key(|tab| tab.index);
+        if let Some(parent_id) = parent_id
+            && self.collapsed_tabs.remove(&parent_id)
+        {
+            self.event_journal.commit(
+                EventKind::LayoutTreeCollapse,
+                Some(parent_id),
+                serde_json::json!({ "collapsed": false }),
+            );
+        }
         self.event_journal.commit(
             EventKind::TabCreated,
             Some(id),
@@ -954,6 +988,7 @@ impl ControlHost for ServerState {
                     "id": format!("@{}", tab.id),
                     "index": tab.index,
                     "parent_id": tab.parent_id.map(|id| format!("@{id}")),
+                    "collapsed": self.collapsed_tabs.contains(&tab.id),
                     "name": tab.title,
                     "note": tab.note,
                     "active": self.active == Some(tab.id),

@@ -55,6 +55,7 @@ use crate::{
     client::{ipc_address, ipc_socket_addr},
     commands::tmux_key_bytes,
     settings::{AppConfig, clamp_tabs_width, load_config, save_config},
+    tab_tree::{TabTreeNode, tree_rows},
     theme::{Rgb, ThemeId, ThemePalette},
     ui_bridge::{
         UI_TAB_NOTE_MAX_BYTES, UI_TAB_TITLE_MAX_BYTES, UiCellStyle, UiColor, UiScreenSnapshot,
@@ -370,6 +371,14 @@ enum RemoteTabAction {
     AddChild,
     Edit,
     Close,
+}
+
+#[derive(Clone, Copy)]
+struct RemoteTreeRow {
+    tab_index: usize,
+    depth: usize,
+    has_children: bool,
+    collapsed: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -751,20 +760,19 @@ impl RemoteWindowState {
             self.show_tab_editor(false);
             return;
         };
-        let Some(position) = client
-            .snapshot()
-            .tabs
+        let rows = remote_tree_rows(&client.snapshot().tabs);
+        let Some((position, row)) = rows
             .iter()
-            .position(|tab| tab.id == tab_id)
+            .enumerate()
+            .find(|(_, row)| client.snapshot().tabs[row.tab_index].id == tab_id)
         else {
             self.show_tab_editor(false);
             return;
         };
         let (sidebar, _, _, _) = self.layout_rects();
-        let tab = &client.snapshot().tabs[position];
         let geometry = tree_row_geometry_for_mode(
             position,
-            tab_depth(&client.snapshot().tabs, tab),
+            row.depth,
             sidebar.right - sidebar.left,
             TreeRowMode::Editing,
         );
@@ -1177,13 +1185,17 @@ impl RemoteWindowState {
         if !self.tabs_visible {
             return;
         }
-        let Some(index) = tree_row_at_y(y) else {
+        let Some(row_index) = tree_row_at_y(y) else {
             return;
         };
         let Some(tab_id) = self
             .client
             .as_ref()
-            .and_then(|client| client.snapshot().tabs.get(index))
+            .and_then(|client| {
+                remote_tree_rows(&client.snapshot().tabs)
+                    .get(row_index)
+                    .map(|row| &client.snapshot().tabs[row.tab_index])
+            })
             .map(|tab| tab.id.clone())
         else {
             return;
@@ -1216,18 +1228,28 @@ impl RemoteWindowState {
         if !self.tabs_visible || y < 0 {
             return None;
         }
-        let index = tree_row_at_y(y)?;
-        self.client.as_ref()?.snapshot().tabs.get(index)
+        let row_index = tree_row_at_y(y)?;
+        let client = self.client.as_ref()?;
+        let row = remote_tree_rows(&client.snapshot().tabs)
+            .get(row_index)
+            .copied()?;
+        client.snapshot().tabs.get(row.tab_index)
     }
 
     fn tab_action_at(&self, x: i32, y: i32) -> Option<RemoteTabAction> {
-        let index = tree_row_at_y(y)?;
+        let row_index = tree_row_at_y(y)?;
         let client = self.client.as_ref()?;
-        let tab = client.snapshot().tabs.get(index)?;
+        let row = remote_tree_rows(&client.snapshot().tabs)
+            .get(row_index)
+            .copied()?;
+        let tab = client.snapshot().tabs.get(row.tab_index)?;
+        if client.snapshot().active_tab_id.as_deref() != Some(tab.id.as_str()) {
+            return None;
+        }
         let sidebar = self.layout_rects().0;
         let geometry = tree_row_geometry_for_mode(
-            index,
-            tab_depth(&client.snapshot().tabs, tab),
+            row_index,
+            row.depth,
             sidebar.right - sidebar.left,
             TreeRowMode::Normal,
         );
@@ -1244,6 +1266,55 @@ impl RemoteWindowState {
         } else {
             None
         }
+    }
+
+    fn tab_disclosure_at(&self, x: i32, y: i32) -> Option<String> {
+        let row_index = tree_row_at_y(y)?;
+        let client = self.client.as_ref()?;
+        let row = remote_tree_rows(&client.snapshot().tabs)
+            .get(row_index)
+            .copied()?;
+        if !row.has_children {
+            return None;
+        }
+        let sidebar = self.layout_rects().0;
+        let geometry = tree_row_geometry_for_mode(
+            row_index,
+            row.depth,
+            sidebar.right - sidebar.left,
+            TreeRowMode::Normal,
+        );
+        geometry
+            .disclosure_hit
+            .contains(x, y)
+            .then(|| client.snapshot().tabs[row.tab_index].id.clone())
+    }
+
+    fn toggle_tree_at(&mut self, x: i32, y: i32) -> bool {
+        let Some(tab_id) = self.tab_disclosure_at(x, y) else {
+            return false;
+        };
+        let result = self
+            .client
+            .as_mut()
+            .context("UI is disconnected")
+            .and_then(|client| {
+                client.run_control(vec![
+                    "ui-action".to_owned(),
+                    "toggle-tree".to_owned(),
+                    "-t".to_owned(),
+                    tab_id,
+                ])?;
+                client.poll_deltas()?;
+                Ok(())
+            });
+        if let Err(error) = result {
+            self.last_error = Some(format!("Toggle tree failed: {error:#}"));
+        } else {
+            self.last_error = None;
+            self.reconcile_tab_editor();
+        }
+        true
     }
 
     fn new_child_at(&mut self, y: i32) {
@@ -2476,11 +2547,14 @@ impl RemoteWindowState {
         let Some(client) = &self.client else {
             return;
         };
-        for (position, tab) in client.snapshot().tabs.iter().enumerate() {
-            let depth = tab_depth(&client.snapshot().tabs, tab);
+        for (position, tree_row) in remote_tree_rows(&client.snapshot().tabs)
+            .into_iter()
+            .enumerate()
+        {
+            let tab = &client.snapshot().tabs[tree_row.tab_index];
             let geometry = tree_row_geometry_for_mode(
                 position,
-                depth,
+                tree_row.depth,
                 sidebar.right - sidebar.left,
                 TreeRowMode::Normal,
             );
@@ -2493,27 +2567,39 @@ impl RemoteWindowState {
                 fill(device, &row, palette.active.colorref());
                 frame(device, &row, palette.active_border.colorref());
             }
+            if tree_row.has_children {
+                let expander = win_rect(geometry.expander);
+                frame(device, &expander, palette.active_border.colorref());
+                draw_text(
+                    device,
+                    expander,
+                    if tree_row.collapsed { "+" } else { "-" },
+                    palette.muted_text.colorref(),
+                );
+            }
             if self.editing_tab_id.as_deref() == Some(tab.id.as_str()) {
                 continue;
             }
-            let compact = geometry.actions.density == TreeRowActionDensity::Compact;
-            for (bounds, label) in [
-                (
-                    geometry
-                        .actions
-                        .add_child
-                        .expect("normal tab rows expose Add"),
-                    "+",
-                ),
-                (geometry.actions.primary, if compact { "E" } else { "Edit" }),
-                (
-                    geometry.actions.secondary,
-                    if compact { "X" } else { "Close" },
-                ),
-            ] {
-                let bounds = win_rect(bounds);
-                frame(device, &bounds, palette.active_border.colorref());
-                draw_text(device, bounds, label, palette.muted_text.colorref());
+            if active {
+                let compact = geometry.actions.density == TreeRowActionDensity::Compact;
+                for (bounds, label) in [
+                    (
+                        geometry
+                            .actions
+                            .add_child
+                            .expect("normal tab rows expose Add"),
+                        "+",
+                    ),
+                    (geometry.actions.primary, if compact { "E" } else { "Edit" }),
+                    (
+                        geometry.actions.secondary,
+                        if compact { "X" } else { "Close" },
+                    ),
+                ] {
+                    let bounds = win_rect(bounds);
+                    frame(device, &bounds, palette.active_border.colorref());
+                    draw_text(device, bounds, label, palette.muted_text.colorref());
+                }
             }
             draw_text(
                 device,
@@ -2609,13 +2695,18 @@ unsafe extern "system" fn window_proc(
                 }
                 let sidebar = state.layout_rects().0;
                 if state.tabs_visible && x < sidebar.right {
-                    match state.tab_action_at(x, y) {
-                        Some(RemoteTabAction::AddChild) => state.new_child_at(y),
-                        Some(RemoteTabAction::Edit) => state.begin_tab_edit_at(y),
-                        Some(RemoteTabAction::Close) => state.request_close_tab_at(y),
-                        None => {
-                            state.finish_tab_edit(false);
-                            state.select_tab_at(y);
+                    if state.toggle_tree_at(x, y) {
+                        // Disclosure changes only the server-owned tree view;
+                        // it does not implicitly select the row.
+                    } else {
+                        match state.tab_action_at(x, y) {
+                            Some(RemoteTabAction::AddChild) => state.new_child_at(y),
+                            Some(RemoteTabAction::Edit) => state.begin_tab_edit_at(y),
+                            Some(RemoteTabAction::Close) => state.request_close_tab_at(y),
+                            None => {
+                                state.finish_tab_edit(false);
+                                state.select_tab_at(y);
+                            }
                         }
                     }
                 } else {
@@ -3277,20 +3368,41 @@ fn indexed_rgb(index: u8) -> Rgb {
     Rgb::new(channel(cube / 36), channel(cube / 6), channel(cube))
 }
 
-fn tab_depth(tabs: &[UiTabBootstrap], tab: &UiTabBootstrap) -> usize {
-    let mut depth = 0;
-    let mut parent = tab.parent_id.as_deref();
-    while let Some(parent_id) = parent {
-        depth += 1;
-        parent = tabs
-            .iter()
-            .find(|candidate| candidate.id == parent_id)
-            .and_then(|candidate| candidate.parent_id.as_deref());
-        if depth > tabs.len() {
-            break;
-        }
-    }
-    depth
+fn stable_tab_number(id: &str) -> Option<u64> {
+    id.strip_prefix('@')?.parse().ok()
+}
+
+fn remote_tree_rows(tabs: &[UiTabBootstrap]) -> Vec<RemoteTreeRow> {
+    let nodes = tabs
+        .iter()
+        .filter_map(|tab| {
+            Some(TabTreeNode {
+                id: stable_tab_number(&tab.id)?,
+                parent_id: tab.parent_id.as_deref().and_then(stable_tab_number),
+                sort_key: tab.index,
+            })
+        })
+        .collect::<Vec<_>>();
+    tree_rows(&nodes)
+        .into_iter()
+        .filter(|row| {
+            !row.ancestors.iter().any(|ancestor| {
+                tabs.iter()
+                    .any(|tab| stable_tab_number(&tab.id) == Some(*ancestor) && tab.collapsed)
+            })
+        })
+        .filter_map(|row| {
+            let tab_index = tabs
+                .iter()
+                .position(|tab| stable_tab_number(&tab.id) == Some(row.id))?;
+            Some(RemoteTreeRow {
+                tab_index,
+                depth: row.depth,
+                has_children: nodes.iter().any(|node| node.parent_id == Some(row.id)),
+                collapsed: tabs[tab_index].collapsed,
+            })
+        })
+        .collect()
 }
 
 fn fill(device: HDC, rect: &RECT, color: COLORREF) {

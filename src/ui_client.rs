@@ -319,6 +319,7 @@ mod tests {
             id: id.to_owned(),
             index,
             parent_id: None,
+            collapsed: false,
             title: id.to_owned(),
             note: String::new(),
             process_id: Some(index + 10),

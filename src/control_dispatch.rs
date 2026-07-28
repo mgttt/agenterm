@@ -134,7 +134,11 @@ fn ui_screen_snapshot(tab: &mut TerminalTab, generation: u64) -> Result<UiScreen
     Ok(snapshot)
 }
 
-fn ui_tab_bootstrap(tab: &mut TerminalTab, generation: u64) -> Result<UiTabBootstrap, String> {
+fn ui_tab_bootstrap(
+    tab: &mut TerminalTab,
+    generation: u64,
+    collapsed: bool,
+) -> Result<UiTabBootstrap, String> {
     let proxy = tab.proxy.facts();
     let composer = match tab.sensitive_composer.as_ref() {
         Some(secret) => UiComposerSnapshot {
@@ -152,6 +156,7 @@ fn ui_tab_bootstrap(tab: &mut TerminalTab, generation: u64) -> Result<UiTabBoots
         id: format!("@{}", tab.id),
         index: tab.index,
         parent_id: tab.parent_id.map(|parent| format!("@{parent}")),
+        collapsed,
         title: tab.title.clone(),
         note: tab.note.clone(),
         process_id: tab.process_id,
@@ -176,10 +181,17 @@ pub(crate) fn ui_bootstrap_snapshot(
     host: &mut dyn ControlHost,
 ) -> Result<UiBootstrapSnapshot, String> {
     let position = host.event_journal().position();
+    let collapsed_ids = host
+        .collapsed_tab_ids()
+        .into_iter()
+        .collect::<BTreeSet<_>>();
     let tabs = host
         .tabs_mut()
         .iter_mut()
-        .map(|tab| ui_tab_bootstrap(tab, position.sequence))
+        .map(|tab| {
+            let collapsed = collapsed_ids.contains(&tab.id);
+            ui_tab_bootstrap(tab, position.sequence, collapsed)
+        })
         .collect::<Result<Vec<_>, String>>()?;
     let truncated = tabs.iter().any(|tab| tab.screen.truncated);
     let snapshot = UiBootstrapSnapshot {
@@ -272,11 +284,18 @@ fn ui_delta_batch(
             .iter()
             .map(|tab| tab.id)
             .collect::<BTreeSet<_>>();
+        let collapsed_ids = host
+            .collapsed_tab_ids()
+            .into_iter()
+            .collect::<BTreeSet<_>>();
         let tab_updates = host
             .tabs_mut()
             .iter_mut()
             .filter(|tab| affected_ids.contains(&tab.id))
-            .map(|tab| ui_tab_bootstrap(tab, position.sequence))
+            .map(|tab| {
+                let collapsed = collapsed_ids.contains(&tab.id);
+                ui_tab_bootstrap(tab, position.sequence, collapsed)
+            })
             .collect::<Result<Vec<_>, String>>()?;
         let closed_tab_ids = affected_ids
             .difference(&live_ids)
@@ -496,6 +515,10 @@ pub(crate) trait ControlHost {
         _operation_id: &str,
     ) -> Result<(), String> {
         Err("tabs width is not supported on this host".to_owned())
+    }
+
+    fn collapsed_tab_ids(&self) -> Vec<u64> {
+        Vec::new()
     }
 
     fn toggle_tab_collapsed(&mut self, _tab_id: u64) -> Result<(), String> {

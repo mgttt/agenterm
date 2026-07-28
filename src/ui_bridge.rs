@@ -270,6 +270,10 @@ pub struct UiTabBootstrap {
     pub id: String,
     pub index: u32,
     pub parent_id: Option<String>,
+    /// Additive v2 field. Older compatible servers omit it and therefore
+    /// expose every tree row as expanded.
+    #[serde(default)]
+    pub collapsed: bool,
     pub title: String,
     pub note: String,
     pub process_id: Option<u32>,
@@ -648,6 +652,7 @@ mod tests {
                     id: "@1".to_owned(),
                     index: 0,
                     parent_id: None,
+                    collapsed: false,
                     title: "root".to_owned(),
                     note: String::new(),
                     process_id: Some(100),
@@ -674,6 +679,7 @@ mod tests {
                     id: "@2".to_owned(),
                     index: 1,
                     parent_id: Some("@1".to_owned()),
+                    collapsed: false,
                     title: "child".to_owned(),
                     note: "ready".to_owned(),
                     process_id: None,
@@ -828,6 +834,17 @@ mod tests {
         snapshot.validate().unwrap();
         let encoded = serde_json::to_vec(&snapshot).unwrap();
         assert!(encoded.len() < UI_BOOTSTRAP_MAX_BYTES);
+    }
+
+    #[test]
+    fn additive_collapsed_fact_accepts_a_prior_compatible_server() {
+        let mut encoded = serde_json::to_value(valid_bootstrap()).unwrap();
+        for tab in encoded["tabs"].as_array_mut().unwrap() {
+            tab.as_object_mut().unwrap().remove("collapsed");
+        }
+        let decoded: UiBootstrapSnapshot = serde_json::from_value(encoded).unwrap();
+        decoded.validate().unwrap();
+        assert!(decoded.tabs.iter().all(|tab| !tab.collapsed));
     }
 
     #[test]

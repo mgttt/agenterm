@@ -66,6 +66,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       child's inline editor; closing a live child requires a non-blocking
       client-owned `Terminate & Close`/`Cancel` decision, while the server
       remains the authority for termination and child-promotion semantics.
+      Shared disclosure geometry now collapses/expands the server-owned
+      parent-first tree without removing hidden descendants or changing the
+      active stable ID; the additive bootstrap `collapsed` fact defaults to
+      expanded when read from a prior compatible server, and every toggle has
+      a causal `layout.tree.collapse` event plus tab post-state.
       Each row owns its title/note editor in place: `Edit` is replaced by
       bounded native title/note inputs plus `Save` and `Cancel`; Save updates
       the same stable server tab and Cancel performs no mutation.
