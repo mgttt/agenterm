@@ -361,9 +361,29 @@ try {
             $_.rust_path -eq 'std::fs::read_to_string' -and
             $_.rust_mapping -eq 'adapted' -and
             $_.status -eq 'shipped' -and
+            $_.stability -eq 'stable' -and
+            $_.designed_on -eq '2026-07-28' -and
             $_.profiles -contains 'local'
         }).Count -ne 1) {
         throw 'script api did not expose the versioned fail-closed capability catalog'
+    }
+
+    Write-Host 'STEP Rhai repository dogfood contract check'
+    $catalogFile = Join-Path $runtimeDirectory 'script-catalog.json'
+    [IO.File]::WriteAllText(
+        $catalogFile,
+        ($apiResult.value | ConvertTo-Json -Depth 100),
+        [Text.UTF8Encoding]::new($false)
+    )
+    $repositoryRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+    $contractScript = Join-Path $repositoryRoot 'scripts\rhai\verify-script-contract.rhai'
+    $runtimeSpecification = Join-Path $repositoryRoot 'docs\agenterm-script-runtime.md'
+    $dogfoodResult = Invoke-Script @(
+        'script', 'run', $contractScript, '--profile', 'local',
+        '--', $runtimeSpecification, $catalogFile
+    )
+    if ($dogfoodResult -notlike 'PASS: Rhai verified the Script API contract*') {
+        throw "Rhai repository dogfood returned unexpected output: $dogfoodResult"
     }
 
     Write-Host 'STEP pure eval, file run, arguments, and check'

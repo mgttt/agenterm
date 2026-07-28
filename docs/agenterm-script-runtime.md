@@ -1,349 +1,611 @@
-# AgenTerm Script Runtime 规范
+# AgenTerm Script Runtime Specification
 
-状态：首版讨论稿
+Status: Draft specification for v0.1.9
 
-目标版本：v0.1.9
+Specification ID: `agenterm-script-runtime`
 
-规范语言：中文；关键字 `MUST`、`SHOULD`、`MAY` 具有约束意义
+Script API currently shipped: v1
 
-产品所有者：[Rust host + Rhai scripting PRD](../prd/PRD_02_10_rhai_scripting.md)
+Catalog schema currently shipped: v2
 
-执行计划：[AgenTerm v0.1.9 公开计划](../plan/plan-v0.1.9.md)
+Initial design date: 2026-07-28
 
-本文定义 `agenterm-script.exe` 面向脚本作者、宿主实现者、测试工具和未来
-Agent 消费者的稳定运行时合同。它描述目标表面，而不是当前实现清单。
-除非能力目录明确标记为 `shipped`，本文中的接口均不得被理解为已经交付。
+Last reviewed: 2026-07-28
+Normative language: English
 
-## 1. 核心模型
+Product authority:
+[Rust host and Rhai scripting PRD](../prd/PRD_02_10_rhai_scripting.md)
 
-AgenTerm Script Runtime 是：
+Delivery plan:
+[AgenTerm v0.1.9 public plan](../plan/plan-v0.1.9.md)
 
-```text
-Rhai language
-  + Rust-shaped 精选 std 子集
-  + Rhai-native 扩展
-  + AgenTerm-bound Fleet domain
-```
+This document defines the stable AgenTerm Rhai object and interface model for
+script authors, runtime implementers, tests, documentation generators, and
+future tool consumers. The Rhai surface is the product contract. Rust, Node.js,
+and Bun are research references only and do not own this API.
 
-推荐产品表述：
+`MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` are normative as defined
+by RFC 2119-style usage.
 
-> AgenTerm Script 是以 Rhai 为语言、采用 Rust-shaped 标准能力，并叠加
-> Rhai-native 与 AgenTerm-native 扩展的自动化运行时。
+## 1. Complete public object and interface tree
 
-它不是 Rust、Node.js、Bun 或其他 Rhai 宿主的兼容层。Rust、Node.js 与
-Bun 只用于复用成熟心智、检查问题域覆盖和发现遗漏；AgenTerm 不承诺其
-语法、类型、模块、包、异步或 API 兼容。
+Every node below includes its purpose, lifecycle status, stability class, and
+design date. The date records when the node was accepted into this
+specification; it is not a claim that the node shipped on that date.
 
-### 1.1 一页 API 对象树
+Status values:
+
+- `shipped`: implemented and exercised through a public executable;
+- `planned`: accepted for the named target version but not yet shipped;
+- `deferred`: intentionally outside the current target;
+- `legacy-v1`: shipped only as a migration source, not the canonical future
+  surface.
+
+Stability values:
+
+- `stable`: the Rhai path and its documented meaning are protected within the
+  current Script API major;
+- `reserved`: namespace ownership and purpose are protected, but leaf
+  signatures remain subject to explicit design review;
+- `legacy`: available for migration and eligible for removal at the declared
+  next major;
+- `research`: no compatibility promise.
 
 ```text
 agenterm-script
+│  AgenTerm's general-purpose Rhai automation runtime.
+│  [planned product completion; reserved; designed 2026-07-28]
 │
 ├─ Rhai language
-│  ├─ let / fn / if / for / while / try-catch
-│  ├─ array / map / string / number / bool
-│  ├─ closures
+│  Upstream language syntax and values; not an AgenTerm compatibility layer.
+│  [shipped; upstream-defined; designed 2026-07-28]
+│  ├─ control flow and functions
+│  │  let/fn/if/for/while/loop/try-catch and closures.
+│  │  [shipped; upstream-defined; designed 2026-07-28]
+│  ├─ values
+│  │  bool, integer, float, string, array, map, range, and Dynamic values.
+│  │  [shipped; upstream-defined; designed 2026-07-28]
 │  └─ import
+│     Local project module composition; resolver policy is AgenTerm-owned.
+│     [planned; reserved; designed 2026-07-28]
 │
-├─ globals                         极少量 invocation prelude
-│  ├─ args                         只读脚本参数
-│  └─ print(value)                 有界标准输出
+├─ globals
+│  Minimal invocation prelude; general capabilities do not become globals.
+│  [shipped; stable; designed 2026-07-28]
+│  ├─ args
+│  │  Script arguments supplied after the CLI `--` delimiter.
+│  │  [shipped; stable; designed 2026-07-28]
+│  └─ print(value)
+│     Writes one bounded line to captured script standard output.
+│     [shipped; stable; designed 2026-07-28]
 │
-├─ std::                           Rust-shaped 精选标准能力
+├─ std::
+│  Selected, Rust-shaped low-level local capabilities.
+│  [partially shipped; reserved; designed 2026-07-28]
 │  ├─ fs::
-│  │  ├─ read_to_string / read / write
-│  │  ├─ metadata / read_dir
-│  │  └─ create_dir_all / copy / rename / remove_*
+│  │  Blocking filesystem operations owned by the local profile.
+│  │  [partially shipped; stable namespace; designed 2026-07-28]
+│  │  ├─ read_to_string(path)
+│  │  │  Reads one UTF-8 file and returns a string.
+│  │  │  [shipped; stable; designed 2026-07-28]
+│  │  ├─ read(path)
+│  │  │  Reads one file and returns `Bytes`.
+│  │  │  [shipped; stable; designed 2026-07-28]
+│  │  ├─ write(path, text)
+│  │  │  Replaces one explicit file with UTF-8 text.
+│  │  │  [shipped; stable; designed 2026-07-28]
+│  │  ├─ write_bytes(path, bytes)
+│  │  │  Replaces one explicit file with typed bytes.
+│  │  │  [shipped; stable; designed 2026-07-28]
+│  │  ├─ exists(path)
+│  │  │  Reports whether an explicit path currently exists.
+│  │  │  [shipped; stable; designed 2026-07-28]
+│  │  ├─ metadata(path) / read_dir(path)
+│  │  │  Typed file facts and bounded directory enumeration.
+│  │  │  [planned; reserved; designed 2026-07-28]
+│  │  ├─ create_dir_all(path) / copy(from, to) / rename(from, to)
+│  │  │  Explicit-target filesystem mutation.
+│  │  │  [planned; reserved; designed 2026-07-28]
+│  │  └─ remove_file(path) / remove_dir(path)
+│  │     Explicit-target deletion with broad-target guards.
+│  │     [planned; reserved; designed 2026-07-28]
+│  │
 │  ├─ path::
-│  │  └─ Path / PathBuf 与常用路径操作
+│  │  Typed, Windows-aware path construction and inspection.
+│  │  [partially shipped; stable namespace; designed 2026-07-28]
+│  │  ├─ PathBuf::from(value)
+│  │  │  Creates an owned typed path from a string.
+│  │  │  [shipped; stable; designed 2026-07-28]
+│  │  └─ join(parent, child)
+│  │     Creates a typed path by joining two strings.
+│  │     [shipped; stable; designed 2026-07-28]
+│  │
 │  ├─ env::
-│  │  └─ var / vars / current_dir / child environment
+│  │  Worker environment and current-directory facts.
+│  │  [planned; reserved; designed 2026-07-28]
+│  │  ├─ var(name) / has(name) / names()
+│  │  │  Reads environment facts without logging values.
+│  │  │  [planned; reserved; designed 2026-07-28]
+│  │  ├─ current_dir()
+│  │  │  Returns the worker's typed current directory.
+│  │  │  [planned; reserved; designed 2026-07-28]
+│  │  └─ set/remove and child environment construction
+│  │     Worker-local mutation and explicit child inheritance policy.
+│  │     [planned; reserved; designed 2026-07-28]
+│  │
 │  ├─ process::
-│  │  └─ Command / Child / Output
+│  │  Shell-free executable-plus-argv process construction.
+│  │  [planned; stable namespace; designed 2026-07-28]
+│  │  └─ command(program) -> Command
+│  │     Creates a typed process builder; `new` is not used because it is a
+│  │     Rhai reserved word.
+│  │     [planned; stable path reservation; designed 2026-07-28]
+│  │
 │  └─ time::
-│     └─ Duration / Instant / SystemTime
+│     Typed duration, monotonic, and wall-clock values.
+│     [planned; reserved; designed 2026-07-28]
+│     ├─ Duration
+│     │  A non-negative span used by deadlines and waits.
+│     │  [planned; reserved; designed 2026-07-28]
+│     ├─ Instant
+│     │  A monotonic runtime timestamp.
+│     │  [planned; reserved; designed 2026-07-28]
+│     └─ SystemTime
+│        A wall-clock timestamp that is never used as a monotonic deadline.
+│        [planned; reserved; designed 2026-07-28]
 │
-├─ rhai::                          Runtime 自有扩展
-│  ├─ task::                       wait_all / race / cancel_all
-│  ├─ http::                       request / start
-│  ├─ json::                       parse / stringify
-│  ├─ bytes::                      construction / conversion helpers
-│  ├─ runtime::                    profile / limits / invocation facts
-│  └─ package::                    明确延后
+├─ rhai::
+│  High-level extensions owned by AgenTerm Script Runtime.
+│  [partially shipped; stable namespace; designed 2026-07-28]
+│  ├─ json::
+│  │  Bounded JSON conversion between text and Rhai-compatible values.
+│  │  [shipped; stable namespace; designed 2026-07-28]
+│  │  ├─ parse(text)
+│  │  │  Parses JSON text into a Rhai value.
+│  │  │  [shipped; stable; designed 2026-07-28]
+│  │  ├─ stringify(value)
+│  │  │  Serializes one Rhai-compatible value to compact JSON.
+│  │  │  [shipped; stable; designed 2026-07-28]
+│  │  └─ stringify_pretty(value)
+│  │     Serializes one Rhai-compatible value to indented JSON.
+│  │     [shipped; stable; designed 2026-07-28]
+│  │
+│  ├─ bytes::
+│  │  Construction helpers for the typed `Bytes` value.
+│  │  [partially shipped; stable namespace; designed 2026-07-28]
+│  │  └─ from_text(text)
+│  │     Encodes UTF-8 text into `Bytes`.
+│  │     [shipped; stable; designed 2026-07-28]
+│  │
+│  ├─ task::
+│  │  Executor-neutral task composition, waiting, racing, and cancellation.
+│  │  [planned; stable namespace reservation; designed 2026-07-28]
+│  │  ├─ wait_all(tasks)
+│  │  │  Waits for all tasks with deterministic result ordering.
+│  │  │  [planned; reserved; designed 2026-07-28]
+│  │  ├─ race(tasks)
+│  │  │  Returns the first stable terminal outcome.
+│  │  │  [planned; reserved; designed 2026-07-28]
+│  │  └─ cancel_all(tasks)
+│  │     Requests cancellation and reports final cancellation outcomes.
+│  │     [planned; reserved; designed 2026-07-28]
+│  │
+│  ├─ http::
+│  │  Bounded, cancellable HTTP(S) client operations.
+│  │  [planned; stable namespace reservation; designed 2026-07-28]
+│  │  ├─ request(method, url, options) -> HttpResponse
+│  │  │  Performs one sequential request.
+│  │  │  [planned; reserved; designed 2026-07-28]
+│  │  └─ start(method, url, options) -> Task
+│  │     Starts one explicit concurrent request.
+│  │     [planned; reserved; designed 2026-07-28]
+│  │
+│  ├─ runtime::
+│  │  Read-only invocation, profile, version, and limit facts.
+│  │  [planned; stable namespace reservation; designed 2026-07-28]
+│  │
+│  └─ package::
+│     Future package-facing capability namespace; no v0.1.9 API promise.
+│     [deferred; research; designed 2026-07-28]
 │
-├─ typed objects                  identity/lifecycle 使用点号
-│  ├─ Path / Metadata
-│  ├─ Command / Child / Output
-│  ├─ Duration / Instant / SystemTime
-│  ├─ Task / Stream / Bytes
+├─ typed objects
+│  Values with identity, state, resource ownership, or lifecycle use `.`.
+│  [partially shipped; stable rule; designed 2026-07-28]
+│  ├─ PathBuf
+│  │  An owned Windows path value.
+│  │  [shipped; stable; designed 2026-07-28]
+│  │  ├─ .join(child)
+│  │  │  Mutates the path by appending one component.
+│  │  │  [shipped; stable; designed 2026-07-28]
+│  │  ├─ .display
+│  │  │  Returns a display-safe path string.
+│  │  │  [shipped; stable; designed 2026-07-28]
+│  │  ├─ .file_name / .extension
+│  │  │  Returns the final name or extension, or an empty string.
+│  │  │  [shipped; stable; designed 2026-07-28]
+│  │  └─ .is_absolute
+│  │     Reports whether the path is absolute.
+│  │     [shipped; stable; designed 2026-07-28]
+│  │
+│  ├─ Bytes
+│  │  An owned, bounded byte sequence.
+│  │  [shipped; stable; designed 2026-07-28]
+│  │  ├─ .len
+│  │  │  Returns the byte length.
+│  │  │  [shipped; stable; designed 2026-07-28]
+│  │  └─ .to_text()
+│  │     Decodes strict UTF-8 or throws `bytes_invalid_utf8`.
+│  │     [shipped; stable; designed 2026-07-28]
+│  │
+│  ├─ Command
+│  │  A mutable executable-plus-argv process builder.
+│  │  [planned; reserved; designed 2026-07-28]
+│  │  ├─ .arg(value) / .args(values)
+│  │  │  Appends argv entries without shell parsing.
+│  │  │  [planned; reserved; designed 2026-07-28]
+│  │  ├─ .current_dir(path) / .env(name, value)
+│  │  │  Configures child launch context.
+│  │  │  [planned; reserved; designed 2026-07-28]
+│  │  ├─ .output() -> Output
+│  │  │  Runs synchronously with bounded captured output.
+│  │  │  [planned; reserved; designed 2026-07-28]
+│  │  └─ .spawn() -> Child
+│  │     Starts an invocation-owned child.
+│  │     [planned; reserved; designed 2026-07-28]
+│  │
+│  ├─ Child / Output
+│  │  Child lifecycle and bounded final process output.
+│  │  [planned; reserved; designed 2026-07-28]
+│  ├─ Task / Stream
+│  │  Invocation-owned asynchronous completion and bounded stream state.
+│  │  [planned; reserved; designed 2026-07-28]
 │  ├─ HttpResponse
+│  │  Status, headers, body, truncation, and transport facts.
+│  │  [planned; reserved; designed 2026-07-28]
 │  └─ Receipt / Event / PostState
+│     Fleet mutation evidence and verified resulting state.
+│     [planned; reserved; designed 2026-07-28]
 │
-├─ fleet                          绑定当前 server/profile/broker
+├─ agent
+│  Script API v1 read-only broker facade.
+│  [legacy-v1; legacy; designed 2026-07-28]
+│  ├─ .workspace()
+│  │  Reads workspace metadata and event position.
+│  │  [shipped v1; legacy; designed 2026-07-28]
+│  ├─ .tabs() / .active_tab()
+│  │  Reads the tab list or active tab.
+│  │  [shipped v1; legacy; designed 2026-07-28]
+│  ├─ .ui_snapshot()
+│  │  Reads the bounded semantic UI snapshot.
+│  │  [shipped v1; legacy; designed 2026-07-28]
+│  ├─ .capture(tab, max_bytes)
+│  │  Reads bounded terminal capture.
+│  │  [shipped v1; legacy; designed 2026-07-28]
+│  └─ .events_read(...) / .events_wait(...)
+│     Reads or waits for bounded Fleet events.
+│     [shipped v1; legacy; designed 2026-07-28]
+│
+├─ fleet
+│  Canonical Script API v2 object bound to one AgenTerm server and broker.
+│  [planned; stable name reservation; designed 2026-07-28]
 │  ├─ .workspace
-│  ├─ .tabs.list() / .tabs.active()
-│  ├─ .terminal(tab_id).capture(...)
-│  └─ .events.read(...) / .events.wait(...)
+│  │  Typed workspace identity and state.
+│  │  [planned; reserved; designed 2026-07-28]
+│  ├─ .tabs
+│  │  Typed tab discovery and mutation.
+│  │  [planned; reserved; designed 2026-07-28]
+│  │  ├─ .list() / .active()
+│  │  │  Reads stable tab objects.
+│  │  │  [planned; reserved; designed 2026-07-28]
+│  │  └─ mutation methods -> Receipt
+│  │     Performs typed tab/tree/composer operations.
+│  │     [planned; reserved; designed 2026-07-28]
+│  ├─ .terminal(tab_id)
+│  │  Binds terminal observation, input, viewport, and lifecycle operations.
+│  │  [planned; reserved; designed 2026-07-28]
+│  └─ .events
+│     Reads, waits for, or starts waits over the typed event journal.
+│     [planned; reserved; designed 2026-07-28]
 │
 ├─ project composition
+│  Local modules and named task discovery.
+│  [planned; stable mechanism reservation; designed 2026-07-28]
 │  ├─ import "relative/module" as module
+│  │  Resolves only inside the declared project root.
+│  │  [planned; reserved; designed 2026-07-28]
 │  └─ agenterm.tasks.json
+│     Versioned local task manifest; not a package manifest.
+│     [planned; stable filename reservation; designed 2026-07-28]
 │
 └─ discovery
-   ├─ api [PATH] / api --json
-   ├─ check
-   └─ task list / show / run
+   Offline and runtime-aligned interface inspection.
+   [partially shipped; stable mechanism; designed 2026-07-28]
+   ├─ script api --json
+   │  Emits the machine-readable catalog and runtime limits.
+   │  [shipped; stable; designed 2026-07-28]
+   ├─ script api [PATH]
+   │  Renders this tree and optionally expands one node.
+   │  [planned; reserved; designed 2026-07-28]
+   ├─ script check FILE
+   │  Validates syntax, profile availability, and known interfaces offline.
+   │  [shipped baseline; stable; designed 2026-07-28]
+   └─ script task list / show / run
+      Discovers and invokes named local tasks.
+      [planned; reserved; designed 2026-07-28]
 ```
 
-对象树是用户入口，不是内部 Rust 模块图。产品能力分类可以更深，但公开
-脚本表面 `surface_path` SHOULD 保持浅、可猜测和唯一。
+The tree is normative for namespace ownership, public path spelling, and the
+meaning of nodes marked `stable`. The machine catalog is normative for exact
+shipped signatures and availability in a particular build.
 
-## 2. 目标与非目标
-
-### 2.1 目标
-
-运行时 MUST：
-
-- 让 Rust 程序员和熟悉 Rust 资料的 LLM 能借助 `std::fs`、
-  `std::process::Command` 等心智快速开工；
-- 保持 Rhai-native 的脚本体验，不暴露借用、生命周期、泛型、trait、
-  `Pin`、`Poll` 或 executor 细节；
-- 为文件、路径、环境、进程、时间、HTTP、任务、流和 Fleet 提供
-  typed、bounded、cancellable、observable 的合同；
-- 让同一个机器能力目录生成发现、检查、手册、覆盖率以及未来
-  MCP/Agent schema；
-- 在成功、失败、取消、超时和宿主崩溃后给出可验证终态，并清理
-  invocation-owned 资源。
-
-### 2.2 非目标
-
-运行时不承诺：
-
-- Rust 语言、Cargo crate、完整 Rust `std` 或 ABI 兼容；
-- JavaScript/TypeScript、Node API、Bun API、npm 或包解析兼容；
-- 模拟 Rust 的 `Result<T, E>`、`?`、trait、iterator 或 `Future` 类型系统；
-- 浏览器 DOM、通用 socket server、远程任意 import 或常驻脚本 daemon；
-- 充当 Agent 审批系统、软件包信任根或系统级安全沙箱；
-- 为历史兼容保留重复的 sync/async API、旧别名或多种等价调用方式。
-
-## 3. 规范关键字与能力状态
-
-- `MUST`：实现和一致性测试必须满足。
-- `SHOULD`：除非有记录在案且可测试的理由，否则必须满足。
-- `MAY`：兼容合同允许，但不要求交付。
-
-机器目录中的每个节点 MUST 标记状态：
+## 2. Core model
 
 ```text
-shipped       已实现且通过公开一致性测试
-planned       已接受目标，尚未交付
-experimental  可试用但不承诺稳定
-deferred      已记录，当前版本不实现
-unavailable   当前构建或 profile 不可用，并附原因
+AgenTerm Rhai Environment
+  = Rhai language
+  + AgenTerm stable Rhai surface
+  + selected low-level local capabilities
+  + Rhai-native high-level extensions
+  + AgenTerm Fleet domain
 ```
 
-v0.1.9 目前是目标版本。文档生成器和 CLI MUST 避免把 `planned` 渲染成
-`shipped`。
+The recommended description is:
 
-## 4. 命名空间所有权
+> AgenTerm Script is a general-purpose automation runtime using Rhai as its
+> language, an AgenTerm-owned stable object model, selected Rust-shaped local
+> capabilities, and native Fleet integration.
 
-### 4.1 `std::`
+The phrase "Rust-shaped" describes familiarity, not ownership. A Rust API
+change, deprecation, rename, or semantic revision MUST NOT automatically
+change an AgenTerm Rhai path.
 
-`std::` 由 Rust-shaped 标准能力独占。一个 API 只有同时满足以下条件才可
-进入该空间：
+## 3. Goals and non-goals
 
-1. Rust 标准库存在明确对应路径；
-2. 主要用途和用户预期足够对应；
-3. Rhai 适配后的差异可以被简短、精确地记录；
-4. 名称不会暗示未实现的 Rust 类型系统或平台保证。
+### 3.1 Goals
 
-因此 `std::fs`、`std::path`、`std::env`、`std::process`、`std::time`
-是候选；`std::http` 和高层 `std::task::spawn` MUST NOT 出现，因为 Rust
-标准库没有这些对应的高层运行时能力。
+The runtime MUST:
 
-### 4.2 `rhai::`
+- provide a small, coherent, predictable Rhai interface tree;
+- keep shipped stable paths compatible within one Script API major;
+- expose typed, bounded, cancellable, and observable contracts for local and
+  Fleet automation;
+- keep resource identity and lifecycle visible through typed objects;
+- generate discovery, validation, manuals, and future tool schemas from one
+  catalog;
+- produce verifiable terminal outcomes after success, failure, cancellation,
+  timeout, or worker failure;
+- clean every invocation-owned child, task, stream, pipe, and temporary
+  resource.
 
-`rhai::` 由 AgenTerm Script Runtime 自有、跨产品领域的扩展独占：
+### 3.2 Non-goals
 
-- `rhai::task`：跨 I/O 域的任务组合；
-- `rhai::http`：高层 HTTP(S) client；
-- `rhai::json`：受预算约束的数据转换；
-- `rhai::runtime`：当前 invocation、profile、limits 和版本事实；
-- `rhai::package`：仅保留未来命名，不在 v0.1.9 实现。
+The runtime does not promise:
 
-`rhai::` 不是 Rhai 上游官方 API 的声明，也不表示所有 Rhai 宿主可用。
+- Rust language, Rust `std`, Cargo crate, ABI, trait, generic, borrow, or
+  `Result<T, E>` compatibility;
+- JavaScript, TypeScript, Node.js, Bun, npm, or module-resolution
+  compatibility;
+- browser APIs, a general socket server, arbitrary remote imports, or a
+  persistent script daemon;
+- an Agent approval model, package trust root, or operating-system sandbox;
+- multiple historical aliases or duplicate sync/async families for the same
+  operation.
 
-### 4.3 `fleet`
+## 4. Stability authority
 
-`fleet` 是当前 AgenTerm server、profile 和 broker 绑定的对象，不是静态
-namespace。它 MUST 通过点号暴露带身份和 authority 的资源。
+The following precedence is normative:
 
-现有 Script API v1 的 `agent` facade 向 v2 `fleet` 迁移，是 v0.1.9 的
-已接受方案，不是已交付事实。迁移期 SHOULD 提供明确诊断；除非另行批准，
-不得永久保留两个等价 facade。
+```text
+stable Rhai surface_path and object semantics
+  > Script API major compatibility rules
+  > typed machine catalog for the current build
+  > this specification's prose
+  > Rust/Node/Bun comparison metadata
+  > implementation module or Rust function names
+```
 
-### 4.4 全局与 Prelude
+Consequences:
 
-全局空间 MUST 极小。首版目标只有：
+1. `surface_path` is the user contract.
+2. `stable_id` is the machine identity of that contract.
+3. `catalog_path` is documentation taxonomy and MAY be reorganized without
+   renaming the Rhai surface.
+4. `rust_path` and `rust_mapping` are explanatory metadata and MAY be corrected
+   without a Script API major.
+5. Internal Rust module, crate, executor, or function names are not public.
+6. A convenient Rust analogue MUST NOT be added if it makes the Rhai model
+   ambiguous or forces Rust-only concepts into scripts.
 
-- `args`：只读参数数组；
-- `print(value)`：受输出预算限制的显示函数。
+### 4.1 Stable changes
 
-普通能力 MUST NOT 为了少写前缀而注入全局。运行时 MAY 提供显式 prelude
-导入，但其内容、版本和冲突规则必须可发现，且不得静默覆盖用户符号。
+Within one Script API major, a stable node MAY receive:
 
-### 4.5 静态能力与有状态对象
+- new optional parameters with explicit defaults only when old calls remain
+  unambiguous;
+- new optional result fields;
+- new typed error codes that do not reinterpret existing codes;
+- new methods or sibling nodes;
+- stricter protection against unsafe or invalid input when valid historical
+  input remains valid.
 
-- 无 invocation identity 的能力使用 `::`；
-- 具有 identity、状态或生命周期的值使用 typed object 与 `.`；
-- 同一操作 SHOULD 只有一条规范调用路径；
-- 便利函数不得掩盖资源所有权、取消或截断状态。
+Within one Script API major, a stable node MUST NOT:
 
-## 5. API 目录模型
+- be silently renamed or moved;
+- change from a property to a function, or vice versa;
+- change a unit, encoding, blocking model, mutation target, or return meaning;
+- broaden authority into another profile without an explicit catalog change;
+- turn complete output into silently truncated output;
+- change a stable error code to a message-only failure.
 
-每个公开能力 MUST 来自同一 typed catalog，并至少包含：
+### 4.2 Reserved and planned nodes
+
+A reserved namespace name and purpose are protected. Planned leaf signatures
+MAY change before they become stable, but every change MUST update this tree,
+the PRD, the plan, and catalog proposal in one reviewable change.
+
+## 5. Namespace ownership
+
+### 5.1 `std::`
+
+`std::` contains selected low-level capabilities only when an honest Rust
+standard-library analogue exists. AgenTerm owns the final Rhai signature and
+semantics.
+
+`std::fs`, `std::path`, `std::env`, `std::process`, and `std::time` are valid.
+`std::http` and high-level `std::task` MUST NOT exist because Rust `std` does
+not own those high-level facilities.
+
+### 5.2 `rhai::`
+
+`rhai::` contains high-level extensions owned by AgenTerm Script Runtime:
+tasks, HTTP, JSON, bytes helpers, and runtime facts. It does not claim that
+these APIs exist in upstream Rhai or in another Rhai host.
+
+### 5.3 `fleet`
+
+`fleet` is an invocation-bound object, not a static namespace. It represents a
+selected AgenTerm server, broker, profile, and event epoch. Stateful Fleet
+resources use typed objects and dot methods.
+
+### 5.4 Globals
+
+The global prelude is intentionally minimal. General filesystem, process,
+network, and Fleet operations MUST NOT be injected as globals.
+
+### 5.5 Static capabilities and stateful values
+
+- Static capability groups use `::`.
+- Values with identity, mutable state, or lifecycle use `.`.
+- One operation SHOULD have one canonical public path.
+- Convenience APIs MUST NOT conceal cancellation, truncation, ownership, or
+  destructive scope.
+
+## 6. Typed catalog contract
+
+Every public capability MUST be represented in one catalog entry containing at
+least:
 
 ```text
 stable_id
 catalog_path
 surface_path
-rust_path
-rust_mapping
-semantic_differences
 status
-since / deprecated_since / removed_in
+stability
+designed_on
+since
+deprecated_since / removed_in / replacement
 profiles
 signatures
-input / output / error schema
+input / output / error schemas
 authority and side-effect facts
 sync / task / stream behavior
-timeout / cancellation behavior
-soft limits / hard ceilings
+timeout and cancellation behavior
+soft limits and hard ceilings
 secret-bearing fields
-availability / degraded reason
+availability or degraded reason
+rust_path (nullable research metadata)
+rust_mapping (research metadata)
+semantic_differences (research metadata)
 ```
 
-四个路径字段不得混淆：
+`rust_mapping` is one of:
 
-- `catalog_path`：用于产品分类、覆盖率和手册导航，例如
-  `system/filesystem/read-text`；
-- `surface_path`：用户实际调用路径，例如
-  `std::fs::read_to_string`；
-- `rust_path`：Rust 参照路径，例如 `std::fs::read_to_string`；无参照时
-  为 `null`；
-- `semantic_differences`：结构化列出错误、类型、阻塞、编码、平台和预算
-  差异。
+- `direct`: the name and primary purpose closely correspond;
+- `adapted`: an analogue exists, but Rhai, Windows, error, or budget semantics
+  differ;
+- `inspired`: only the object model is borrowed;
+- `none`: the capability is AgenTerm/Rhai-specific.
 
-`rust_mapping` MUST 为以下之一：
+The first three values MUST NOT imply compatibility.
 
-```text
-direct      名称、用途和主要语义高度对应
-adapted     有明确对应，但为 Rhai/Windows/预算语义做了适配
-inspired    只复用对象心智，不声称行为对应
-none        AgenTerm/Rhai 自有能力
-```
-
-示例：
+Example:
 
 ```json
 {
-  "stable_id": "script.std.fs.read_to_string.v1",
+  "stable_id": "std.fs.read-to-string",
   "catalog_path": "system/filesystem/read-text",
   "surface_path": "std::fs::read_to_string",
+  "status": "shipped",
+  "stability": "stable",
+  "designed_on": "2026-07-28",
+  "profiles": ["local"],
   "rust_path": "std::fs::read_to_string",
   "rust_mapping": "adapted",
   "semantic_differences": [
-    "成功时直接返回 string，失败时抛出 typed script error",
-    "只接受 UTF-8；不猜测本地编码",
-    "受单次读取与 invocation 累计字节预算限制"
-  ],
-  "status": "planned"
+    "returns a string directly and throws a typed script error on failure",
+    "accepts UTF-8 only",
+    "is governed by invocation byte and time limits"
+  ]
 }
 ```
 
-Node/Bun 对照 MAY 作为附加 research metadata，但 MUST NOT 参与运行时
-解析或暗示兼容性。
+## 7. Shipped local capability semantics
 
-## 6. Rust-shaped 标准能力
+### 7.1 Files
 
-### 6.1 文件与路径
+`std::fs::read_to_string` MUST decode strict UTF-8.
+`std::fs::read` MUST return `Bytes`.
+`std::fs::write` and `write_bytes` MUST target one explicit path and replace
+that file's contents. They do not currently promise atomic replacement.
 
-`std::fs` SHOULD 采用 Rust 熟悉的动词和返回对象。文本读取 MUST 明确
-UTF-8；二进制读取 MUST 返回 `Bytes`。文件删除 MUST 只作用于明确解析的
-目标，不得接受空路径、根目录或未解析的广泛目标。
+Filesystem failures MUST carry a stable error code. Safe diagnostics MAY
+include the final file name but MUST NOT automatically retain a full
+secret-bearing path.
 
-`std::path` SHOULD 提供 `Path`/`PathBuf` 风格的不可变/可构建心智，但
-不得模拟 Rust 借用。Windows drive、UNC、长路径、separator、Unicode、
-canonicalization 和 reparse point 差异 MUST 有结构化说明和测试。
+### 7.2 Paths
 
-### 6.2 环境
+`PathBuf` is an owned script value. It does not model Rust borrowing.
 
-`std::env` MUST 正确处理 Windows 环境变量名称语义。worker 内修改不得
-改变父 AgenTerm 进程。child environment 的继承、overlay、replace 和
-remove MUST 显式可区分。诊断不得记录 secret value。
+The shipped `.join(child)` method mutates its receiver. This behavior is part
+of the Rhai contract even though the nearest Rust method comparison may use a
+different ownership pattern. A future immutable operation MUST use a distinct,
+unambiguous name rather than silently changing `.join`.
 
-### 6.3 进程
+Windows drive, UNC, long-path, separator, canonicalization, and reparse-point
+behavior remain subject to explicit tests before stronger guarantees are
+added.
 
-规范入口 SHOULD 是 `std::process::Command`：
+### 7.3 JSON
 
-```rhai
-let command = std::process::command("git");
-command.args(["status", "--short"]);
-command.current_dir(repo);
-let output = command.output();
-```
-
-进程启动 MUST 使用 executable + argv，不得将一个 command string
-隐式交给 shell。需要 shell 时，用户必须显式启动 shell executable。
-
-`Command`、`Child` 和 `Output` MUST 是 typed objects。`Child` 必须公开
-清晰的 wait、cancel/kill 和 output 生命周期；parent 取消或退出后，不得
-遗留 invocation-owned process tree。
-
-### 6.4 时间
-
-`std::time::Duration`、`Instant` 和 `SystemTime` SHOULD 复用 Rust 的对象
-心智。monotonic deadline 与 wall clock MUST 分离。可取消 timer 属于
-runtime task 能力；不得暗示 Rust `std::thread::sleep` 可取消。
-
-## 7. Rhai-native 扩展
-
-### 7.1 JSON
-
-`rhai::json::parse` 与 `stringify` MUST 有深度、节点、输入和输出预算。
-无效 UTF-8、超深数据与超限集合 MUST 返回稳定错误代码。
-
-### 7.2 HTTP
-
-`rhai::http` 首版目标仅为 HTTP(S) client：
-
-```rhai
-let response = rhai::http::request("GET", url, #{
-    timeout: std::time::Duration::from_secs(10)
-});
-```
-
-响应 MUST 区分 status、headers、bounded body、截断和 transport error。
-超时与取消不得泄露 credential、proxy secret 或任意 body。首版不包含
-listener、raw socket、WebSocket 或远程模块下载。
-
-### 7.3 Runtime facts
-
-`rhai::runtime` MAY 公开只读的 runtime/API 版本、profile、project root、
-invocation ID 和有效 limits。它 MUST NOT 暴露 secret、私有 HWND、
-renderer、PTY 内部字段或可绕过 Fleet authority 的句柄。
+JSON conversion MUST accept only Rhai values representable in the documented
+JSON schema. Invalid JSON or unsupported values MUST fail with a stable code.
+Input size, output size, nesting depth, and collection limits remain governed
+by invocation budgets.
 
 ### 7.4 Bytes
 
-`Bytes` 是带边界的 typed object，常用读取、切片和转换使用对象方法。
-`rhai::bytes` 只拥有从 text/hex/base64 等值构造或跨值组合所需的 helper；
-最终首版编码集合必须由 HTTP/process 真实旅程决定，不得复制一套与 Rhai
-string 平行的文本库。
+`Bytes` is an owned byte sequence. `.len` counts bytes. `.to_text()` performs
+strict UTF-8 decoding and throws `bytes_invalid_utf8` on failure.
 
-## 8. 错误语义
+## 8. Planned process and time semantics
 
-公开 API MUST 使用稳定的 typed error，而不是要求脚本解析 message。
-错误至少包含：
+The canonical process constructor is:
+
+```rhai
+let command = std::process::command("git");
+command.arg("status");
+command.arg("--short");
+let output = command.output();
+```
+
+`Command::new` MUST NOT be introduced: `new` is a Rhai reserved word.
+Custom syntax MUST NOT be added merely to imitate a Rust spelling.
+
+Process launch MUST use executable plus argv. It MUST NOT pass an implicit
+command string to a shell. A user who needs shell behavior explicitly launches
+that shell executable.
+
+`Command`, `Child`, and `Output` are typed objects. Parent cancellation or
+termination MUST clean the invocation-owned process tree.
+
+`Duration`, `Instant`, and `SystemTime` keep monotonic deadlines separate from
+wall-clock time. A cancellable timer belongs to `rhai::task`, not to a fake
+cancellable `std::thread::sleep`.
+
+## 9. Typed errors
+
+Stable public APIs MUST expose typed errors rather than requiring message
+parsing. The target error object contains:
 
 ```text
 class
@@ -353,42 +615,39 @@ safe_message
 retryable
 target_kind
 truncated
-cause_class（可选）
+cause_class (optional)
 ```
 
-Rust-shaped API 不复制 `Result<T, E>` 和 `?`。成功时直接返回目标值；失败
-时抛出可由 Rhai `try/catch` 捕获的 typed error。错误 message MAY 改善，
-但自动化只能依赖稳定字段。
+Rust-style APIs do not emulate Rust `Result` or `?`. A successful call returns
+its value. A failed call throws an error catchable by Rhai `try/catch`.
 
-错误类 SHOULD 覆盖：
+Messages MAY improve without a major version. Stable automation MUST depend on
+typed fields, not message text.
 
-```text
-script / configuration / data / io / child / network
-limit / timeout / cancelled / host / fleet
-```
+Source text, secret environment values, credentials, HTTP bodies, full argv,
+terminal content, and unbounded output MUST NOT be copied into errors, audit
+records, or retained diagnostics.
 
-源代码、环境值、HTTP credential/body、完整 argv、终端内容和任意大输出
-MUST NOT 自动进入错误、audit 或 retained diagnostic。
+## 10. Task, Stream, and asynchronous work
 
-## 9. Task、Stream 与异步
-
-Rhai 脚本求值保持同步，不新增假装 JavaScript 的 `async/await`。异步 I/O
-由 Rust host 推进，脚本通过显式 typed handle 组合。
+Rhai evaluation remains synchronous. AgenTerm does not add JavaScript-style
+`async/await`. The host performs concurrent work and exposes explicit typed
+handles:
 
 ```text
 Rhai evaluation thread
-  start() ───────────────> invocation-owned Rust task runtime
-  Task.wait() <────────── typed completion / error / stream state
+  start() ───────────────> invocation-owned host task runtime
+  Task.wait() <────────── typed completion, error, or stream state
 ```
 
-顺序调用 SHOULD 最短：
+Sequential calls remain shortest:
 
 ```rhai
 let output = command.output();
 let response = rhai::http::request("GET", url, #{});
 ```
 
-显式并发 MUST 可见：
+Concurrent work is explicit:
 
 ```rhai
 let command = std::process::command("git");
@@ -401,231 +660,195 @@ let output = child.wait_with_output();
 let response = web.wait(std::time::Duration::from_secs(15));
 ```
 
-`Task` MUST 具有 invocation-local stable ID、状态、wait、cancel 和稳定终态。
-迟到完成不得覆盖 `cancelled`。`rhai::task::wait_all`、`race` 和
-`cancel_all` MUST 定义结果顺序、失败传播和取消传播。
-可取消 `sleep(Duration)` 与 `after(Duration)` 归 `rhai::task`，不得伪装成
-Rust `std::time` 自带的 executor 或可取消 `std::thread::sleep`。
+`Task` MUST have an invocation-local stable ID, state, wait, cancel, and stable
+terminal outcome. Late completion MUST NOT overwrite `cancelled`.
 
-`Stream` MUST 有界并表达：
+`Stream` MUST report readable, closed, and failed states; truncation; encoding
+failure; backpressure; and cumulative limits. Truncated data MUST NOT be
+reported as complete.
 
-- readable / closed / failed 状态；
-- 当前读取是否完整；
-- `truncated` 事实；
-- bytes/text 转换错误；
-- backpressure 和累计上限。
+The public Task/Stream contract is executor-neutral. Tokio or any other
+executor type MUST NOT enter the Rhai API.
 
-截断数据不得伪装成完整结果。丢弃最后一个脚本句柄不得自动取消仍由
-invocation 拥有的 foreground task；foreground/background 与退出策略必须
-显式定义。
+## 11. Thread and host boundary
 
-## 10. 线程与宿主边界
+The Rhai `Engine`, `Scope`, and `Dynamic` values remain on the evaluation
+thread. Background work stores Rust-native payloads, bytes, task state, and
+cancellation tokens. Conversion into Rhai values occurs only at a wait/read
+boundary on the evaluation thread.
 
-后台线程 MUST 只保存 Rust typed payload、bytes、task state 和 cancellation
-token。`Engine`、`Scope` 与任意 Rhai `Dynamic` MUST NOT 为 I/O 并发而在
-线程间共享。只有 Rhai evaluation thread 在 wait/read 边界将 Rust 结果
-转换为脚本值。
+Cancellation covers:
 
-底层 MAY 使用 worker threads、channel/condition variable 或 async
-executor。公开 Task/Stream 合同 MUST 与 Tokio 或任何 executor 解耦。
+1. Ctrl+C, deadline, parent exit, or explicit cancellation;
+2. HTTP, Fleet waits, timers, and child processes;
+3. stable `Task.wait()` cancellation results;
+4. CPU-bound Rhai interruption through the engine progress hook;
+5. supervisor and Job Object cleanup after the grace period.
 
-取消路径 MUST 覆盖：
+A script wait, panic, or worker crash MUST NOT block or terminate the AgenTerm
+GUI, PTYs, or server.
 
-1. Ctrl+C、deadline、parent exit 或显式 cancel 设置 invocation token；
-2. HTTP、Fleet wait、timer 与 child process 观察 token 并停止；
-3. `Task.wait()` 被唤醒并取得稳定取消错误；
-4. CPU-bound Rhai 代码由 engine progress hook 中断；
-5. grace period 后由 supervisor/Job Object 清理整个 process tree。
+## 12. Execution profiles
 
-GUI、PTY 和 server MUST 不因脚本 wait、panic 或 runtime crash 被阻塞或
-终止。
+Profiles are runtime execution modes, not Agent approval roles.
 
-## 11. Execution Profiles
+### 12.1 `local`
 
-profile 是 runtime execution profile，不是未来 Agent 的角色或审批模型。
+`local` is the ordinary default. It has the authority of a normal local program
+started by the user. It remains subject to typed errors, budgets, cancellation,
+resource ownership, audit privacy, and Fleet public-operation invariants.
 
-### `local`
+### 12.2 `pure`
 
-目标默认 profile。权限等同于用户主动启动的普通本地程序，可使用完整
-本地标准能力。它仍受 typed error、budgets、取消、资源所有权、隐私和
-Fleet 公共操作合同约束。
+`pure` has no ambient filesystem, environment, process, network, clock, or
+Fleet authority. It is intended for deterministic computation over bounded
+JSON-compatible input and output.
 
-### `pure`
+### 12.3 `observe`
 
-用于确定性计算：无 ambient filesystem、environment、process、network、
-clock 或 Fleet。输入输出保持 JSON-compatible，并受固定预算约束。
+`observe` allows read-only workspace, tab, snapshot, capture, and event
+operations. It does not allow local filesystem/process/network access or Fleet
+mutation.
 
-### `observe`
+Every catalog entry MUST state profile availability. `check` SHOULD reject a
+known unavailable call before execution.
 
-用于只读 Fleet：允许 workspace/tab/snapshot/capture/event read/wait；
-不允许本地文件、进程、网络或 Fleet mutation。
+## 13. Fleet domain
 
-同一 catalog entry MUST 声明 profile availability。不可用调用 MUST 在
-`check` 阶段尽可能被发现，在运行时返回稳定 `configuration/authority`
-错误，不能静默降级。
+Fleet APIs MUST derive from AgenTerm's typed operation catalog and MUST NOT read
+private GUI or PTY fields.
 
-## 12. Fleet Domain
+Every public operation is either mapped to the Rhai surface or reported with a
+stable unavailable/degraded reason. Mutations use stable targets, request
+identity, receipts, event positions, and verified post-state. Retries MUST NOT
+repeat committed side effects.
 
-`fleet` MUST 从公共 typed operation catalog 系统派生，不得手写第二套
-状态机或读取 GUI/PTY 私有字段。
+Script API v1 currently exposes the legacy `agent` object. Script API v2
+reserves `fleet` as its only canonical facade. The v2 migration MUST provide
+machine-readable replacements and MUST NOT retain two permanent equivalent
+facades.
 
-每个 public operation 必须：
+Operation classification is a tool fact, not Agent authorization. A future
+Agent layer MAY filter these capabilities without redefining Script Runtime.
 
-- 映射为脚本 API，或明确显示 `unavailable/degraded` 原因；
-- 声明 observe/control/destructive 事实；
-- 使用 stable target ID；
-- mutation 使用 request identity、receipt、event position 和 post-state；
-- retry 不重复副作用；
-- server unavailable、restart、gap、timeout 和 false-success 分型。
+## 14. Modules, projects, and named tasks
 
-示例（目标表面）：
-
-```rhai
-let active = fleet.tabs.active();
-let screen = fleet.terminal(active.id).capture(4096);
-print(screen.text);
-```
-
-```rhai
-let receipt = fleet.tabs.set_note("@3", "build running");
-receipt.wait(std::time::Duration::from_secs(5));
-if !receipt.post_state.confirmed {
-    throw "Fleet mutation was not confirmed";
-}
-```
-
-operation classification 是工具事实，不是 Agent authorization。未来
-`agenterm-agent.exe` MAY 根据这些事实过滤或审批工具，但不得迫使 Script
-Runtime 复制一套标准库。
-
-## 13. 模块、项目与命名任务
-
-首版模块 MUST 是本地、project-root-relative：
+Initial modules are local and project-root-relative:
 
 ```rhai
 import "lib/report" as report;
 report::run(args)
 ```
 
-resolution MUST 防止未声明的 root escape，并对 cycle、missing、duplicate
-identity 和 parse failure 分型。运行时不得扫描用户 home、PATH 或网络来
-猜测模块。
+Resolution MUST reject root escape and distinguish cycles, missing modules,
+duplicate identity, and parse failure. It MUST NOT scan the user's home, PATH,
+or network to guess a module.
 
-命名任务清单固定为 versioned `agenterm.tasks.json`。它描述“如何运行本地
-任务”，不是包清单，也不承担 URL、下载、签名、安装或信任。`task list`
-和 `task show` MUST 不执行用户代码；无效任务 MUST 保持可发现并附
-degraded reason。
+The named task manifest is `agenterm.tasks.json`. It describes local task
+execution and is not a package manifest. `task list` and `task show` MUST NOT
+execute user code. Invalid tasks remain discoverable with a degraded reason.
 
-## 14. Discovery 与手册生成
+## 15. Discovery and generated manuals
 
-以下消费者 MUST 复用同一个 catalog：
+The following consumers share one catalog:
 
 ```text
 runtime registration
 script check
-api tree / api --json
+api tree and api --json
 reference manual
 implementation coverage
-Node/Bun/Rust research comparison
-future MCP tool adapter
+Rust/Node/Bun research comparison
+future MCP adapter
 future Agent tool policy
 ```
 
-目标 CLI：
+Human-facing `api` output SHOULD show the object tree first, then expand the
+selected node. Generated pages include signature, status, stability, design
+date, profile, typed errors, limits, and semantic notes.
 
-```text
-agenterm-script.exe api
-agenterm-script.exe api std::fs
-agenterm-script.exe api --status planned
-agenterm-script.exe api --compare rust|node|bun|all
-agenterm-script.exe api --json
-agenterm-script.exe check FILE.rhai
-```
+`check` MUST NOT execute user code, access the network, or require a GUI. It
+validates syntax, known qualified paths, profile availability, and statically
+provable limits.
 
-`api` 默认 SHOULD 先显示对象树，再展开选定节点。手册页面 MUST 从
-catalog 生成签名、状态、profile、错误、limits、Rust mapping 和语义差异，
-避免维护第二份手写函数清单。
+## 16. Versioning and migration
 
-`check` MUST 不执行用户代码、不访问网络、不连接 GUI。它 SHOULD 验证
-import、API 名称、signature、profile、manifest/runtime version，以及可
-静态确认的 hard limit。
+Runtime version, Script API version, catalog schema version, task manifest
+version, and per-entry `stable_id` are independent and discoverable.
 
-## 15. 版本与迁移
+Compatibility rules:
 
-Runtime version、API schema version、manifest schema version 和单项 API
-`stable_id` MUST 可独立发现。
+- stable paths and meanings do not silently change within one API major;
+- optional fields MAY be added compatibly;
+- rename or removal requires deprecation, a machine-readable replacement, and
+  a declared removal major;
+- `check` reports exact migration diagnostics;
+- aliases are not retained forever solely to avoid migration;
+- planned leaves may change only through synchronized specification, PRD,
+  plan, and catalog updates.
 
-兼容规则：
+Rust, Node.js, Bun, Rhai-host, crate, or dependency version changes do not
+justify a Rhai breaking change.
 
-- 在同一 API major 内，已 shipped 的名称和稳定错误字段不得静默改义；
-- 新增 optional 字段 MAY 向后兼容；
-- 删除或重命名 MUST 先进入 deprecated 状态，并提供机器可读 replacement；
-- `check` MUST 对 deprecated/removed API 给出精确迁移诊断；
-- 不得仅为避免迁移而无限保留历史别名；
-- `planned` API 在 shipped 前 MAY 调整，但调整必须同步计划、PRD 与
-  catalog proposal。
+## 17. Authority, safety, and privacy
 
-`agent` -> `fleet` 是 Script API v2 的迁移提案/已接受计划。完成实现和
-一致性证据前，文档必须继续标注为 planned。
+The `local` profile is a normal local program capability, not an
+Agent-approved sandbox. Its authority derives from:
 
-## 16. Authority、安全与隐私
+- the current OS user;
+- the selected execution profile;
+- Fleet public typed operations;
+- invocation-owned resources;
+- explicit budgets and cancellation;
+- any future higher Agent or package policy as a separate layer.
 
-Script Runtime 的 `local` profile 是普通本地程序能力，不是受 Agent 审批
-的沙箱。authority 边界来自：
+The runtime MUST NOT bypass Fleet operations to mutate private GUI, PTY, or
+workspace state. It MUST NOT become a package-signing trust root.
 
-- 当前 OS 用户；
-- execution profile；
-- Fleet 公共 typed operations；
-- invocation-owned 资源；
-- 明确 budgets 和 cancellation；
-- 未来上层 Agent/softmgr 的独立策略。
+Audit and diagnostics record only required operation IDs, counts,
+classifications, duration, limits, and safe target facts. Secret-bearing fields
+are machine-marked in the catalog.
 
-运行时 MUST：
+## 18. Budgets
 
-- 不绕过 Fleet broker 直接修改 GUI、PTY 或 workspace 私有状态；
-- 不把 `agenterm-script.exe` 变成软件包签名信任根；
-- 不在 audit/diagnostic 中保留 source、secret env value、credential、
-  HTTP body、完整 terminal content 或任意大输出；
-- 对日志只记录必要的 operation ID、计数、分类、duration、limit 和
-  safe target facts；
-- 对可能包含秘密的字段在 catalog 中机器标注；
-- 在 child、stream、temp、pipe、task 和 worker 上保持明确所有权。
+Every invocation has hard ceilings covering at least:
 
-## 17. Budgets
+- wall time and CPU progress;
+- source, input, output, and cumulative bytes;
+- Rhai operations and expression/call depth;
+- collection size;
+- tasks, children, streams, and queues;
+- HTTP body, redirects, and deadlines;
+- modules, imports, and source bytes;
+- Fleet waits, event batches, and captures.
 
-每个 invocation MUST 有 hard ceilings，至少覆盖：
+Defaults and hard ceilings are published by `api --json`. Reaching a limit
+returns a typed limit error, cleans owned resources, and leaves the next
+invocation healthy.
 
-- wall time 与 CPU progress；
-- 单次/累计输入输出 bytes；
-- Rhai operations 或 progress ticks；
-- collection/depth；
-- tasks、children、streams 和 queue；
-- HTTP body、redirect 与 deadline；
-- module 数、source bytes 和 import depth；
-- Fleet wait、event batch 和 capture bytes。
+## 19. Examples
 
-默认值、soft limits 和 hard ceilings MUST 由 `api --json` 公开。CLI 或
-manifest override 只能在允许范围内调整。达到上限必须返回 typed limit
-错误，清理 owned resources，并确保下一次 invocation 健康。
+Examples can contain planned APIs. Shipped status is determined by the catalog,
+not by appearance in an example.
 
-## 18. 完整示例
-
-### 18.1 Rust-shaped 文件与 JSON
+### 19.1 Shipped file, path, bytes, and JSON slice
 
 ```rhai
-let text = std::fs::read_to_string("agenterm.local.json");
-let config = rhai::json::parse(text);
+let path = std::path::PathBuf::from("agenterm.local.json");
+let config = rhai::json::parse(std::fs::read_to_string(path.display));
 
-let output_path = std::path::PathBuf::from(config.output)
-    .join("summary.json");
-
+let output = std::path::join("out", "summary.json");
 std::fs::write(
-    output_path,
-    rhai::json::stringify(#{ ok: true, source: "agenterm-script" })
+    output.display,
+    rhai::json::stringify_pretty(#{
+        ok: true,
+        source: "agenterm-script",
+        input_extension: path.extension
+    })
 );
 ```
 
-### 18.2 argv-safe 子进程
+### 19.2 Planned argv-safe process
 
 ```rhai
 let command = std::process::command("git");
@@ -640,7 +863,7 @@ if !output.success {
 print(output.stdout_text());
 ```
 
-### 18.3 并发 HTTP 与进程
+### 19.3 Planned concurrent HTTP and process work
 
 ```rhai
 let command = std::process::command("git");
@@ -653,11 +876,9 @@ let release = rhai::http::start("GET", release_url, #{
 
 let commit = git.wait_with_output();
 let response = release.wait(std::time::Duration::from_secs(15));
-
-print(#{ commit: commit.stdout_text().trim(), status: response.status });
 ```
 
-### 18.4 Fleet observe 与 mutation evidence
+### 19.4 Planned Fleet mutation evidence
 
 ```rhai
 let active = fleet.tabs.active();
@@ -668,78 +889,75 @@ receipt.wait(std::time::Duration::from_secs(5));
 
 print(#{
     tab: active.id,
-    text: capture.text,
     truncated: capture.truncated,
     confirmed: receipt.post_state.confirmed
 });
 ```
 
-这些示例表达目标 API，不代表 v0.1.9 能力已经 shipped。最终签名以机器
-catalog 和一致性测试为准。
+## 20. Conformance
 
-## 19. Conformance 与验收
+A capability becomes `shipped` only when:
 
-一个能力只有同时满足以下条件才可标记 `shipped`：
+1. its catalog entry includes stable identity, surface, status, stability,
+   design date, profiles, schemas, and semantic differences;
+2. pure logic and error behavior have unit coverage;
+3. the public `agenterm-cli script` path has black-box coverage;
+4. success, typed failure, timeout, cancellation, and limits have evidence;
+5. no child, worker, task, stream, pipe, or temporary resource is orphaned;
+6. secret sentinels do not enter output, audit, or diagnostics;
+7. catalog, `check`, runtime registration, and generated manual agree;
+8. profile availability agrees with runtime behavior;
+9. GUI startup, PTYs, and server health do not regress;
+10. a subsequent invocation succeeds after injected failure.
 
-1. catalog entry 完整，包括四类路径和 semantic differences；
-2. Rust unit test 覆盖纯解析、状态与错误逻辑；
-3. 通过 `agenterm-script.exe` 公共入口的黑盒测试；
-4. 成功、typed failure、timeout、cancel 和 limit 有证据；
-5. 无 child、worker、task、stream、pipe 或 temp orphan；
-6. secret sentinel 未进入输出、audit 或 diagnostic bundle；
-7. `api --json`、`check`、手册与 runtime registration 对齐；
-8. pure/observe/local profile availability 符合 catalog；
-9. GUI startup、PTY 和 server health 无回退；
-10. 下一次 invocation 在故障后仍可成功。
+The suite ultimately covers Unicode, long paths, UNC, access denial,
+environment inheritance, executable/argv/cwd/stdin/stdout/stderr, process
+exit, concurrency, backpressure, loopback HTTP, module cycles, root escape,
+Fleet receipts/events/post-state, malformed frames, worker crash, and parent
+exit.
 
-规范级一致性套件 MUST 至少覆盖：
+## 21. Explicitly deferred
 
-- Unicode、长路径、UNC、只读、占用和 access denied；
-- environment overlay/replace/remove 与 parent isolation；
-- executable/argv/cwd/stdin/stdout/stderr/nonzero exit；
-- concurrent progress、backpressure、truncation、race 与迟到完成；
-- loopback HTTP、disconnect、timeout、cancel 和隐私错误；
-- module cycle/root escape/manifest version/invalid task visibility；
-- Fleet stable target、receipt、event、post-state、restart 和 gap；
-- malformed/oversized frame、panic、worker crash 和 parent exit。
+The following are outside the v0.1.9 stable contract:
 
-## 20. 明确延后
+- remote package registry, dependency resolution, signing, and installation;
+- npm, Cargo crate, Node.js, Bun, or complete Rust `std` compatibility;
+- persistent script daemon, durable scheduler, watch mode, and REPL;
+- raw sockets, listeners, WebSockets, and public network servers;
+- arbitrary remote imports;
+- Agent approval and natural-language authorization;
+- the software marketplace and `agenterm-softmgr.exe`;
+- replacing qualification, packaging, or release-critical scripts with Rhai;
+- exposing executor, Tokio, or Rhai `Dynamic` internals.
 
-以下能力不属于 v0.1.9 稳定合同：
+Deferred nodes MAY remain visible in the catalog so users can distinguish
+"not shipped yet" from "intentionally not part of this runtime."
 
-- `rhai::package`、远程 registry、依赖解析、签名和安装事务；
-- npm、Cargo crate、Node、Bun 或完整 Rust `std` 兼容；
-- persistent script daemon、durable scheduler、watch mode 和 REPL；
-- raw socket、listener、WebSocket 和公网 server；
-- 任意远程 import；
-- Agent 审批、自然语言权限策略和自主控制；
-- 软件市场与 `agenterm-softmgr.exe`；
-- 用 Rhai 替换 qualification、package 或 release 关键脚本；
-- 把 executor 类型、Tokio 类型或 Rhai `Dynamic` 暴露为公开合同。
+## 22. Open design decisions
 
-这些节点 MAY 保留在 catalog 中并标记 `deferred`，以便路线和手册能说明
-“尚未交付”与“有意不做”的区别。
+The following require spikes and public journeys before their leaves become
+stable:
 
-## 21. 首版待冻结问题
+- the exact relationship among `Command.output`, `Child.wait_with_output`, and
+  `Task`;
+- whether sequential HTTP returns `HttpResponse` directly or through an
+  explicitly named wait;
+- whether both `Path` and `PathBuf` are useful without importing Rust borrowing
+  concepts;
+- foreground/background task lifetime at natural script exit;
+- HTTP/TLS backend, executor, and binary-size budgets;
+- local default soft budgets;
+- the explicit form of destructive Fleet operations;
+- whether the prelude remains exactly `args` plus `print`.
 
-以下问题必须用 spike 和公开旅程收敛，本文暂不伪装成既定实现：
-
-- `Command::output()`、`Child::wait_with_output()` 与统一 `Task` 的最终关系；
-- `rhai::http::request` 返回直接 `HttpResponse` 还是可隐式等待的 Task；
-- `Path`/`PathBuf` 是否首版都需要，或只提供一个不可歧义的 typed path；
-- Task foreground/background 与脚本自然退出的精确规则；
-- HTTP/TLS backend、executor 和 binary size 预算；
-- local profile 的默认 soft budgets；
-- Fleet destructive operation 的显式调用表面；
-- prelude 是否除 `args`、`print` 外保持完全为空。
-
-冻结这些问题时，决策顺序 SHOULD 是：
+Decision order:
 
 ```text
-用户最短路径
-  -> 语义唯一性
-  -> 取消与失败真实性
-  -> 可生成 catalog
-  -> 黑盒可证据化
-  -> 实现与二进制成本
+shortest clear user path
+  -> one unambiguous Rhai meaning
+  -> stable cancellation and failure truth
+  -> catalog generation
+  -> black-box evidence
+  -> implementation and binary cost
+  -> optional Rust/Node/Bun comparison
 ```

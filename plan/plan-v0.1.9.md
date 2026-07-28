@@ -42,8 +42,10 @@ Runtime 做实，MCP 与 Agent 层可以复用已经经过文件、进程、网�
 
 > 界面简单实用，软件稳定可靠，编程接口丰富，并为扩展保留足够空间。
 
-这一轮主要增强 CLI/runtime，不给普通 GUI 堆新面板。Rust std 是首要的
-命名、模块和对象心智参照，但不复制 Rust 语言/类型系统；Node.js/Bun
+这一轮主要增强 CLI/runtime，不给普通 GUI 堆新面板。AgenTerm Rhai
+对象/接口树是稳定规范和首要产品合同；Rust std 是命名、模块和对象心智
+的研究参照，但不复制 Rust 语言/类型系统，也不能驱动 Rhai API 改名；
+Node.js/Bun
 用于检查“本地自动化用途和组合能力”覆盖，不追求 JavaScript 语法、
 Node API、npm 或 Bun 二进制兼容。
 
@@ -1005,6 +1007,16 @@ operation spec
 
 catalog 是实现、check、文档、MCP/Agent 消费者的同一事实源。
 
+稳定性优先级固定为：
+
+```text
+Rhai surface_path / object semantics
+  > Script API major rules
+  > current typed catalog
+  > Rust / Node.js / Bun comparison metadata
+  > internal Rust implementation names
+```
+
 每个 API entry 至少包含：
 
 - stable ID；
@@ -1216,33 +1228,51 @@ src/bin/agenterm-script.rs
   retained audit/diagnostic；
 - worker/child/task/stream/temp/pipe orphan 为零。
 
-## 十四、自托管第一步
+## 十四、自托管与渐进置换
 
-v0.1.9 只选择一个低风险、只读、结果可结构化比较的 helper 做双跑。
-
-推荐候选：
+这不是一次性重写 `.ps1`，而是从 v0.1.9 开始平行建设 `.rhai` 脚本集，
+把仓库自身作为运行时的长期真实负载。PowerShell 至少保留到 v0.2.0；
+到时也只是开始归档已经完成长期等价验证的旧实现。
 
 ```text
-scripts/target-report.ps1
+parallel
+  PowerShell last-known-good + Rhai candidate
+        |
+        | same inputs / structured outputs / exit class / cleanup
+        v
+parity-proven
+  clean-machine、路径、编码、取消与恢复持续等价
+        |
+        v
+default-rhai
+  默认入口切到 Rhai，PowerShell 仍可显式回退
+        |
+        v
+PowerShell archived (not before v0.2.0)
+  只归档已有充分运行证据的单项脚本
 ```
 
-原因：
+第一项已落地：
 
-- 只读 target inventory；
-- 能验证 fs/path/json/process 基础；
-- 不影响 build artifact 正确性；
-- PowerShell 与 Rhai 结果容易逐字段比较；
-- 失败时可立即回退。
+```text
+scripts/rhai/verify-script-contract.rhai
+```
 
-双跑要求：
+- 读取英文 runtime spec 与机器 API catalog；
+- 校验稳定性、设计日期、版本和对象树合同；
+- 由公开 `agenterm-cli script run --profile local` 在黑盒套件中执行；
+- PowerShell 目前只负责生成测试 fixture 和作 qualification fallback。
+
+下一候选是 `scripts/target-report.ps1` 的平行 Rhai 版本，因为它只读、
+结果可结构化比较，并能推动 fs/path/json/process 能力成熟。每项双跑要求：
 
 - 同一输入生成结构化结果；
 - 忽略明确的时间性字段后逐字段相等；
-- 记录 duration 与错误；
-- 默认仍以 PowerShell 为 last-known-good；
-- Rhai 未通过 clean machine、取消、路径、编码和 recovery 前不替换原脚本。
+- 对比退出分类、duration、错误与 orphan/临时文件清理；
+- Rhai 失败不遮蔽 PowerShell 结果；
+- 未满足 clean machine、取消、路径、编码和 recovery 前不切默认入口。
 
-明确不迁移：
+v0.1.9 不切换以下关键流程的默认实现，但允许提前编写 Rhai 候选并双跑：
 
 - `build.bat`；
 - `check.ps1`；

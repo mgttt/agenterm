@@ -42,9 +42,10 @@ extensions, and the AgenTerm-bound Fleet domain. This is a capability overlay,
 not Rust, Node.js, Bun, npm, Cargo, or another Rhai host compatibility layer,
 and it is not positioned as a restricted security plugin.
 
-- Rust std is the primary naming and object-model reference where a stable
-  analogue exists, but every mapping declares how Rhai errors, types, blocking,
-  cancellation, limits and Windows behavior differ;
+- the AgenTerm Rhai object/interface tree is the primary stable contract.
+  Rust std is a naming and object-model research reference where an honest
+  analogue exists, but upstream Rust stability or change never drives a Rhai
+  rename or semantic change;
 - Node.js and Bun are coverage and use-case references, not API-shape
   specifications. AgenTerm does not inherit callback/Promise duality,
   sync/async duplication, legacy aliases, module-resolution compatibility, or
@@ -215,12 +216,16 @@ and it is not positioned as a restricted security plugin.
     provides one typed source for shipped v1 observations plus explicitly
     planned v0.1.9 nodes; full engine/module/task conformance remains open.
   - [x] an explicit `local` profile foundation runs base Rhai without requiring
-    a server or inheriting observe authority. It remains opt-in until the first
-    useful local standard-library slice ships.
+    a server or inheriting observe authority; the first useful fs/path/bytes/
+    JSON slice has shipped and `local` is now the ordinary default.
 - [ ] each callable entry describes stable ID, signature, result/error schema,
   filesystem/process/network/Fleet access, mutation and destructive facts,
   expected duration, cancellation and streaming support, and any dry-run or
   inspect support.
+  - [x] every current entry publishes `stability`, `designed_on`, and `since`
+    facts; the English runtime specification opens with the complete
+    human-readable object/interface tree carrying node descriptions, status,
+    stability, and design dates.
 - [ ] the catalog is hierarchical, using stable
   `domain -> capability group -> callable/type` paths and ordering. Human
   `script api [MODULE]` output renders that same tree; unavailable, degraded,
@@ -237,6 +242,9 @@ and it is not positioned as a restricted security plugin.
   An API without an honest Rust std analogue cannot enter `std::`.
   - [x] schema v2 establishes these fields and publishes semantic differences
     for shipped and planned entries.
+  - [x] `surface_path` and Rhai object semantics outrank `rust_path`;
+    Rust/Node/Bun comparison metadata may be corrected without changing the
+    Script API major.
 - [ ] optional comparison metadata maps a capability to a reviewed Node.js or
   Bun analogue as `similar`, `agenterm-specific`, `deferred`, or
   `not-applicable`, with source/version and review date. It supports gap
@@ -256,6 +264,26 @@ and it is not positioned as a restricted security plugin.
   future local package tooling can inspect them without executing source.
   This is a package-ready contract, not a registry, downloader, installer,
   signature policy or second package manifest in v0.1.9.
+
+## Repository dogfood and gradual replacement
+
+- [x] start a parallel Rhai script set in v0.1.9 instead of rewriting or
+  deleting the existing PowerShell automation.
+  - [x] `scripts/rhai/verify-script-contract.rhai` uses the shipped local
+    fs/JSON surface to validate the English runtime specification and the
+    versioned API catalog through the public CLI black-box suite.
+- [ ] migrate one independently testable responsibility at a time through
+  `parallel -> parity-proven -> default-rhai -> PowerShell archived`.
+- [ ] parity evidence compares the same inputs, structured outputs, exit
+  classification, diagnostics, cancellation, cleanup, encoding, path behavior,
+  and clean-machine recovery; a Rhai failure cannot hide the PowerShell
+  last-known-good result.
+- [ ] PowerShell remains the qualification fallback through v0.1.x. No
+  PowerShell implementation is archived before v0.2.0, and reaching v0.2.0
+  does not automatically qualify every script for removal.
+- [ ] build, check, qualification, package, release, credential, and GitHub
+  workflow entry points may gain parallel Rhai candidates but do not switch
+  their default implementation in v0.1.9.
 
 ## Public black-box acceptance
 
