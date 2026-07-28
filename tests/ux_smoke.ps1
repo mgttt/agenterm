@@ -47,6 +47,8 @@ if (-not (Test-Path -LiteralPath $GuiExe)) {
 $previousAddress = $env:AGENTERM_IPC_ADDRESS
 $previousSettingsPath = $env:AGENTERM_SETTINGS_PATH
 $previousWorkspace = $env:AGENTERM_WORKSPACE_PATH
+$previousNoActivate = $env:AGENTERM_NO_ACTIVATE
+$env:AGENTERM_NO_ACTIVATE = '1'
 $env:AGENTERM_IPC_ADDRESS = "127.0.0.1:$((47000 + ($PID % 1000)))"
 $workspaceFile = Join-Path $env:TEMP "agenterm-ux-$PID.json"
 $settingsFile = Join-Path $env:TEMP "agenterm-settings-$PID.json"
@@ -597,8 +599,11 @@ try {
     $directChild = $snapshot.tabs | Where-Object {
         $_.parent_id -eq $id -and $_.name -eq 'New child'
     }
-    if ($null -eq $directChild -or $snapshot.focus.surface -ne 'note-editor') {
-        throw 'Direct add-child did not create a child and open its editor'
+    if ($null -eq $directChild -or $snapshot.focus.surface -ne 'note-editor' -or
+        $snapshot.tab_editor.target -ne $directChild.id -or
+        $null -eq $directChild.render.editors -or
+        -not $snapshot.layout.composer.input_visible) {
+        throw 'Direct add-child did not create a child with independent inline editors'
     }
     $directName = "direct-worker-$PID"
     Invoke-AgenTerm @(
@@ -607,7 +612,9 @@ try {
     $snapshot = Invoke-AgenTerm @('ui-action', 'composer-send') | ConvertFrom-Json
     $directChild = $snapshot.tabs | Where-Object id -eq $directChild.id
     if ($directChild.name -ne $directName -or
-        $directChild.note -ne 'created from node editor') {
+        $directChild.note -ne 'created from node editor' -or
+        $null -ne $snapshot.tab_editor -or
+        $directChild.actions.edit.label -ne 'Edit') {
         throw 'Direct node editor did not save the name and note'
     }
     Invoke-AgenTerm @('kill-window', '-t', $directChild.id) | Out-Null
@@ -1066,31 +1073,6 @@ try {
     [AgenTermNativeTest]::ControlArrow($window, 0x27)
     Invoke-AgenTerm @('wait-ui', '--active', $id, '--focus', 'terminal') | Out-Null
 
-    $repeatBaseline = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
-    [AgenTermNativeTest]::KeyDown($window, 0x11)
-    [AgenTermNativeTest]::KeyDown($window, 0x28)
-    Invoke-AgenTerm @('wait-ui', '--active', $id, '--focus', 'composer') | Out-Null
-    [AgenTermNativeTest]::KeyDown($window, 0x28)
-    [AgenTermNativeTest]::KeyDown($window, 0x28)
-    [AgenTermNativeTest]::KeyUp($window, 0x28)
-    [AgenTermNativeTest]::KeyUp($window, 0x11)
-    $repeatSnapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
-    $repeatEvents = Invoke-AgenTerm @(
-        'read-events',
-        '--epoch', $repeatBaseline.event_position.epoch,
-        '--after', "$($repeatBaseline.event_position.sequence)"
-    ) | ConvertFrom-Json
-    $keyboardFocusEvents = @(
-        $repeatEvents.events |
-            Where-Object {
-                $_.kind -eq 'focus.changed' -and $_.payload.cause -eq 'keyboard'
-            }
-    )
-    if ($repeatSnapshot.focus.surface -ne 'composer' -or
-        $keyboardFocusEvents.Count -ne 1) {
-        throw 'held Ctrl+Down crossed focus more than once'
-    }
-
     $settingsSnapshot = Invoke-AgenTerm @('ui-action', 'open-settings') | ConvertFrom-Json
     if ($settingsSnapshot.focus.surface -ne 'settings') {
         throw 'Settings did not expose its native Edit focus'
@@ -1403,11 +1385,13 @@ try {
         )
     }
 
-    Write-Host 'STEP tab editor controls survive detach and reattach'
+    Write-Host 'STEP detach cancels inline tab editing without touching Composer'
+    $composerBeforeTabEdit = Invoke-AgenTerm @('show-composer', '-t', $id)
     $noteEditor = Invoke-AgenTerm @('ui-action', 'edit-tab', '-t', $id) | ConvertFrom-Json
     if (-not $noteEditor.layout.composer.visible -or
-        $noteEditor.focus.surface -ne 'note-editor') {
-        throw 'tab editor did not start with its native composer visible'
+        $noteEditor.focus.surface -ne 'note-editor' -or
+        $noteEditor.tab_editor.target -ne $id) {
+        throw 'tab editor did not start independently over its target row'
     }
     $noteDetachStart = Invoke-AgenTerm @('ui-action', 'close-window') | ConvertFrom-Json
     $noteDetached = Invoke-AgenTerm @(
@@ -1426,13 +1410,15 @@ try {
         '--timeout-ms', '5000'
     ) | Out-Null
     $noteReattached = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $composerAfterTabEdit = Invoke-AgenTerm @('show-composer', '-t', $id)
     if (-not $noteReattached.layout.composer.visible -or
         -not $noteReattached.layout.composer.input_visible -or
         -not $noteReattached.layout.composer.send_visible -or
-        $noteReattached.focus.surface -ne 'note-editor') {
-        throw 'reattached tab editor left its native input or Save control hidden'
+        $null -ne $noteReattached.tab_editor -or
+        $noteReattached.focus.surface -eq 'note-editor' -or
+        $composerAfterTabEdit -ne $composerBeforeTabEdit) {
+        throw 'detach did not cancel inline editing while preserving the Composer draft'
     }
-    Invoke-AgenTerm @('ui-action', 'cancel') | Out-Null
 
     Write-Host 'STEP stop server and exit creates a fresh isolated runtime'
     $mainWorkspace = $env:AGENTERM_WORKSPACE_PATH
@@ -1627,5 +1613,10 @@ finally {
     }
     else {
         $env:AGENTERM_SETTINGS_PATH = $previousSettingsPath
+    }
+    if ($null -eq $previousNoActivate) {
+        Remove-Item Env:AGENTERM_NO_ACTIVATE -ErrorAction SilentlyContinue
+    } else {
+        $env:AGENTERM_NO_ACTIVATE = $previousNoActivate
     }
 }

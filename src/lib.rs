@@ -140,9 +140,10 @@ use terminal_selection::{
 };
 use theme::{ThemeId, ThemePalette};
 use ui_geometry::{
-    PixelRect, TAB_HEIGHT, TERMINAL_SCROLLBAR_WIDTH, TerminalScrollbarGeometry, WorkspaceLayout,
-    WorkspaceLayoutInput, reset_tabs_width, scrollback_for_thumb_top, tabs_width_from_drag,
-    terminal_scrollbar_geometry, tree_anchor_x, tree_row_at_y, tree_row_geometry, workspace_layout,
+    PixelRect, TAB_HEIGHT, TERMINAL_SCROLLBAR_WIDTH, TerminalScrollbarGeometry,
+    TreeRowActionDensity, TreeRowMode, WorkspaceLayout, WorkspaceLayoutInput, reset_tabs_width,
+    scrollback_for_thumb_top, tabs_width_from_drag, terminal_scrollbar_geometry, tree_connector_x,
+    tree_row_at_y, tree_row_geometry_for_mode, workspace_layout,
 };
 use upgrade_identity::UpgradeIdentity;
 use wake_signal::WakeSignal;
@@ -170,6 +171,8 @@ const SETTINGS_DARK_ID: usize = 1008;
 const SETTINGS_LIGHT_ID: usize = 1009;
 const SETTINGS_CANCEL_ID: usize = 1010;
 const TABS_BUTTON_ID: usize = 1011;
+const TAB_NAME_EDIT_ID: usize = 1012;
+const TAB_NOTE_EDIT_ID: usize = 1013;
 const TIMER_ID: usize = 1;
 const WM_APP_WAKE: u32 = WM_APP + 1;
 const WM_APP_AUTOMATION_SHORTCUT: u32 = WM_APP + 2;
@@ -845,6 +848,8 @@ fn run_gui(no_activate: bool) -> Result<()> {
     let settings_dark = create_hidden_button(window, instance, SETTINGS_DARK_ID, "Dark");
     let settings_light = create_hidden_button(window, instance, SETTINGS_LIGHT_ID, "Light");
     let settings_cancel = create_hidden_button(window, instance, SETTINGS_CANCEL_ID, "Cancel");
+    let tab_name_edit = create_hidden_edit(window, instance, TAB_NAME_EDIT_ID);
+    let tab_note_edit = create_hidden_edit(window, instance, TAB_NOTE_EDIT_ID);
     let settings_apply = unsafe {
         CreateWindowExW(
             0,
@@ -872,6 +877,8 @@ fn run_gui(no_activate: bool) -> Result<()> {
         || settings_light.is_null()
         || settings_cancel.is_null()
         || settings_apply.is_null()
+        || tab_name_edit.is_null()
+        || tab_note_edit.is_null()
     {
         unsafe { DestroyWindow(window) };
         anyhow::bail!("failed to create native controls");
@@ -891,6 +898,8 @@ fn run_gui(no_activate: bool) -> Result<()> {
             settings_light,
             settings_cancel,
             settings_apply,
+            tab_name_edit,
+            tab_note_edit,
         },
     )?);
     unsafe {
@@ -1335,6 +1344,8 @@ struct NativeControls {
     settings_light: HWND,
     settings_cancel: HWND,
     settings_apply: HWND,
+    tab_name_edit: HWND,
+    tab_note_edit: HWND,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1599,6 +1610,8 @@ struct AppState {
     settings_light: HWND,
     settings_cancel: HWND,
     settings_apply: HWND,
+    tab_name_edit: HWND,
+    tab_note_edit: HWND,
     tabs: Vec<TerminalTab>,
     collapsed_tabs: HashSet<u64>,
     active: Option<u64>,
@@ -1700,6 +1713,8 @@ impl AppState {
             settings_light: controls.settings_light,
             settings_cancel: controls.settings_cancel,
             settings_apply: controls.settings_apply,
+            tab_name_edit: controls.tab_name_edit,
+            tab_note_edit: controls.tab_note_edit,
             tabs: Vec::new(),
             collapsed_tabs,
             active: active_id,
@@ -1869,6 +1884,7 @@ impl AppState {
         self.tabs.push(tab);
         self.tabs.sort_by_key(|tab| tab.index);
         if select {
+            self.finish_note_edit(false);
             self.cancel_terminal_selection(true);
         }
         self.event_journal.commit(
@@ -1991,6 +2007,7 @@ impl AppState {
 
     fn close_tab(&mut self, id: u64) -> bool {
         self.cancel_terminal_selection(true);
+        self.finish_note_edit(false);
         if self.cwd_edit_target == Some(id) {
             self.close_cwd_editor();
         }
@@ -2043,6 +2060,7 @@ impl AppState {
 
     fn request_close_tab(&mut self, id: u64) {
         self.cancel_terminal_selection(true);
+        self.finish_note_edit(false);
         if self.proxy_edit_target.is_some() {
             self.close_proxy_editor();
         }
@@ -2080,6 +2098,7 @@ impl AppState {
             return;
         }
         self.cancel_terminal_selection(true);
+        self.finish_note_edit(false);
         let previous_focus = unsafe { GetFocus() };
         self.window_close_restore_settings = self.settings_open;
         if self.settings_open {
@@ -2481,7 +2500,7 @@ impl AppState {
         changed
     }
 
-    fn layout(&self) {
+    fn layout(&mut self) {
         let layout = self.workspace_layout();
         let sidebar_width = layout.effective_tabs_width;
         let content_bottom = layout.status.top;
@@ -2493,6 +2512,21 @@ impl AppState {
         let new_button_width = 50.min((sidebar_width - 16 - tabs_button_width).max(0));
         let settings_button_width =
             (sidebar_width - 16 - tabs_button_width - new_button_width - button_gap * 2).max(0);
+        let tab_editor_geometry = self.note_edit_target.and_then(|target| {
+            self.config.tabs_visible.then_some(())?;
+            let rows = self.tree_rows();
+            let position = rows.iter().position(|row| row.id == target)?;
+            tree_row_geometry_for_mode(
+                position,
+                rows[position].depth,
+                sidebar_width,
+                TreeRowMode::Editing,
+            )
+            .editors
+        });
+        if self.note_edit_target.is_some() && tab_editor_geometry.is_none() {
+            self.finish_note_edit(false);
+        }
         unsafe {
             ShowWindow(
                 self.tabs_button,
@@ -2558,6 +2592,29 @@ impl AppState {
                 34,
                 1,
             );
+            if let Some(editors) = tab_editor_geometry {
+                MoveWindow(
+                    self.tab_name_edit,
+                    editors.name.left,
+                    editors.name.top,
+                    editors.name.width(),
+                    editors.name.height(),
+                    1,
+                );
+                MoveWindow(
+                    self.tab_note_edit,
+                    editors.note.left,
+                    editors.note.top,
+                    editors.note.width(),
+                    editors.note.height(),
+                    1,
+                );
+                ShowWindow(self.tab_name_edit, SW_SHOW);
+                ShowWindow(self.tab_note_edit, SW_SHOW);
+            } else {
+                ShowWindow(self.tab_name_edit, SW_HIDE);
+                ShowWindow(self.tab_note_edit, SW_HIDE);
+            }
             let settings_left = layout.terminal.left + (content_width - 520) / 2;
             let settings_top = (content_bottom - 320) / 2;
             MoveWindow(
@@ -2613,6 +2670,7 @@ impl AppState {
 
     fn open_settings(&mut self) {
         self.cancel_terminal_selection(true);
+        self.finish_note_edit(false);
         if self.cwd_edit_target.is_some() {
             self.close_cwd_editor();
         }
@@ -2623,7 +2681,6 @@ impl AppState {
         self.navigation_latch = None;
         self.settings_open = true;
         self.settings_theme_draft = self.config.color_theme;
-        self.note_edit_target = None;
         self.refresh_theme_controls();
         unsafe {
             SetWindowTextW(
@@ -3148,28 +3205,45 @@ impl AppState {
         let id = self.tabs[position].id;
         let tree_row = self.tree_rows().get(row).cloned();
         let has_children = self.tabs.iter().any(|tab| tab.parent_id == Some(id));
-        let geometry = tree_row_geometry(
+        let mode = if self.note_edit_target == Some(id) {
+            TreeRowMode::Editing
+        } else {
+            TreeRowMode::Normal
+        };
+        let geometry = tree_row_geometry_for_mode(
             row,
             tree_row.as_ref().map_or(0, |row| row.depth),
             sidebar_width,
+            mode,
         );
         if has_children && geometry.disclosure_hit.contains_x(x) {
+            self.finish_note_edit(false);
             if !self.collapsed_tabs.remove(&id) {
                 self.collapsed_tabs.insert(id);
             }
+            self.layout();
             unsafe { InvalidateRect(self.window, ptr::null(), 0) };
             return;
         }
         let actions_visible = self.active == Some(id);
-        let tab_add_left = sidebar_width - 72;
-        let tab_edit_left = sidebar_width - 48;
-        let tab_close_left = sidebar_width - 24;
-        if actions_visible && x >= tab_close_left {
-            self.request_close_tab(id);
-        } else if actions_visible && x >= tab_edit_left {
-            self.open_tab_editor(id);
+        if actions_visible && geometry.actions.secondary.contains(x, y) {
+            if mode == TreeRowMode::Editing {
+                self.finish_note_edit(false);
+            } else {
+                self.request_close_tab(id);
+            }
             return;
-        } else if actions_visible && x >= tab_add_left {
+        } else if actions_visible && geometry.actions.primary.contains(x, y) {
+            if mode == TreeRowMode::Editing {
+                self.finish_note_edit(true);
+            } else {
+                self.open_tab_editor(id);
+            }
+            return;
+        } else if actions_visible
+            && let Some(add_child) = geometry.actions.add_child
+            && add_child.contains(x, y)
+        {
             self.collapsed_tabs.remove(&id);
             match self.create_tab_with_parent(
                 Some("New child".to_owned()),
@@ -3186,12 +3260,12 @@ impl AppState {
                         .map(|tab| tab.id)
                     {
                         self.open_tab_editor(child_id);
-                        return;
                     }
                 }
                 Err(error) => self.last_error = Some(format!("{error:#}")),
             }
         } else {
+            self.finish_note_edit(false);
             self.save_active_composer();
             self.cancel_terminal_selection(true);
             self.active = Some(id);
@@ -3221,6 +3295,7 @@ impl AppState {
 
     fn open_tab_editor(&mut self, id: u64) {
         self.cancel_terminal_selection(true);
+        self.finish_note_edit(false);
         if self.cwd_edit_target.is_some() {
             self.close_cwd_editor();
         }
@@ -3231,13 +3306,18 @@ impl AppState {
         let Some(tab) = self.tabs.iter().find(|tab| tab.id == id) else {
             return;
         };
-        let content = format!("{}\r\n{}", tab.title, tab.note);
+        let title = tab.title.clone();
+        let note = tab.note.clone();
         self.active = Some(id);
         self.note_edit_target = Some(id);
+        self.last_error = None;
         unsafe {
-            SetWindowTextW(self.edit, wide(&content).as_ptr());
-            SetWindowTextW(self.send_button, wide(LABEL_SAVE).as_ptr());
-            SetFocus(self.edit);
+            SetWindowTextW(self.tab_name_edit, wide(&title).as_ptr());
+            SetWindowTextW(self.tab_note_edit, wide(&note).as_ptr());
+        }
+        self.layout();
+        unsafe {
+            SetFocus(self.tab_name_edit);
             InvalidateRect(self.window, ptr::null(), 0);
         }
     }
@@ -3247,14 +3327,16 @@ impl AppState {
             return;
         };
         if save {
-            let content = window_text(self.edit).replace("\r\n", "\n");
-            let (title, note) = content.split_once('\n').unwrap_or((&content, ""));
+            let title = window_text(self.tab_name_edit);
+            let note = window_text(self.tab_note_edit);
             let title = title.trim();
             if title.is_empty() {
                 self.last_error = Some("Tab name cannot be empty".to_owned());
+                unsafe { SetFocus(self.tab_name_edit) };
                 unsafe { InvalidateRect(self.window, ptr::null(), 0) };
                 return;
             }
+            self.last_error = None;
             if let Some(tab) = self.tabs.iter_mut().find(|tab| tab.id == id) {
                 let previous_title = tab.title.clone();
                 let previous_note = tab.note.clone();
@@ -3283,16 +3365,20 @@ impl AppState {
             }
         }
         self.note_edit_target = None;
-        unsafe { SetWindowTextW(self.send_button, wide(LABEL_SEND).as_ptr()) };
-        self.load_active_composer();
-        self.set_focus_surface(FocusSurface::Terminal, "note-editor");
+        unsafe {
+            ShowWindow(self.tab_name_edit, SW_HIDE);
+            ShowWindow(self.tab_note_edit, SW_HIDE);
+            SetFocus(self.window);
+        }
+        self.host_focus_surface = HostFocusSurface::Tabs;
+        unsafe { InvalidateRect(self.window, ptr::null(), 0) };
     }
 
     fn open_cwd_editor(&mut self, target: Option<&str>) -> Result<()> {
+        self.finish_note_edit(false);
         if self.settings_open
             || self.pending_close.is_some()
             || self.window_close_pending
-            || self.note_edit_target.is_some()
             || self.proxy_edit_target.is_some()
         {
             anyhow::bail!("another modal surface is active");
@@ -3440,10 +3526,10 @@ impl AppState {
     }
 
     fn open_proxy_editor(&mut self, target: Option<&str>) -> Result<()> {
+        self.finish_note_edit(false);
         if self.settings_open
             || self.pending_close.is_some()
             || self.window_close_pending
-            || self.note_edit_target.is_some()
             || self.cwd_edit_target.is_some()
         {
             anyhow::bail!("another modal surface is active");
@@ -3927,7 +4013,9 @@ impl AppState {
             FocusSurface::ProxyEditor
         } else if focused == self.edit && self.cwd_edit_target.is_some() {
             FocusSurface::CwdEditor
-        } else if focused == self.edit && self.note_edit_target.is_some() {
+        } else if self.note_edit_target.is_some()
+            && (focused == self.tab_name_edit || focused == self.tab_note_edit)
+        {
             FocusSurface::NoteEditor
         } else if focused == self.edit {
             FocusSurface::Composer
@@ -3959,6 +4047,9 @@ impl AppState {
     fn set_tabs_visible(&mut self, visible: bool, cause: &str, operation_id: &str) {
         if self.config.tabs_visible == visible {
             return;
+        }
+        if !visible {
+            self.finish_note_edit(false);
         }
         self.config.tabs_visible = visible;
         self.tabs_resize_drag = None;
@@ -4154,10 +4245,15 @@ impl AppState {
                     }
                 }
             }
-            FocusSurface::Settings
-            | FocusSurface::NoteEditor
-            | FocusSurface::CwdEditor
-            | FocusSurface::ProxyEditor => false,
+            FocusSurface::Settings | FocusSurface::CwdEditor | FocusSurface::ProxyEditor => false,
+            FocusSurface::NoteEditor => {
+                if self.note_edit_target.is_some() {
+                    unsafe { SetFocus(self.tab_name_edit) };
+                    true
+                } else {
+                    false
+                }
+            }
         };
         let current = self.current_focus_surface();
         if focused && current != previous {
@@ -4300,8 +4396,11 @@ impl AppState {
             return true;
         }
 
-        let focused_edit =
-            focused == self.edit || focused == self.settings_font || focused == self.settings_size;
+        let focused_edit = focused == self.edit
+            || focused == self.settings_font
+            || focused == self.settings_size
+            || focused == self.tab_name_edit
+            || focused == self.tab_note_edit;
         if focused_edit && let Some(shortcut) = edit_shortcut(control, virtual_key) {
             self.dispatch_edit_shortcut(shortcut, focused);
             return true;
@@ -4310,24 +4409,29 @@ impl AppState {
             return false;
         }
 
+        if self.note_edit_target.is_some()
+            && (focused == self.tab_name_edit || focused == self.tab_note_edit)
+        {
+            if control && virtual_key == 0x0d {
+                self.finish_note_edit(true);
+                return true;
+            }
+            if virtual_key == 0x1b {
+                self.finish_note_edit(false);
+                return true;
+            }
+        }
+
         if focused == self.edit {
             if control && virtual_key == 0x0d {
-                if self.note_edit_target.is_some() {
-                    self.finish_note_edit(true);
-                } else {
-                    self.send_composer();
-                    self.feedback = self.active.map(|id| format!("Sent to @{id}"));
-                }
+                self.send_composer();
+                self.feedback = self.active.map(|id| format!("Sent to @{id}"));
                 self.set_focus_surface(FocusSurface::Terminal, "composer-submit");
                 return true;
             }
             if virtual_key == 0x1b {
-                if self.note_edit_target.is_some() {
-                    self.finish_note_edit(false);
-                } else {
-                    self.save_active_composer();
-                    self.set_focus_surface(FocusSurface::Terminal, "composer-escape");
-                }
+                self.save_active_composer();
+                self.set_focus_surface(FocusSurface::Terminal, "composer-escape");
                 return true;
             }
         }
@@ -4589,10 +4693,7 @@ impl AppState {
     }
 
     fn save_active_composer(&mut self) {
-        if self.note_edit_target.is_some()
-            || self.cwd_edit_target.is_some()
-            || self.proxy_edit_target.is_some()
-            || self.settings_open
+        if self.cwd_edit_target.is_some() || self.proxy_edit_target.is_some() || self.settings_open
         {
             return;
         }
@@ -4634,10 +4735,6 @@ impl AppState {
 
     fn send_composer(&mut self) {
         if self.cwd_edit_target.is_some() || self.proxy_edit_target.is_some() {
-            return;
-        }
-        if self.note_edit_target.is_some() {
-            self.finish_note_edit(true);
             return;
         }
         let Some(position) = self.active_position() else {
@@ -4767,7 +4864,13 @@ impl AppState {
             let Some(tab) = self.tabs.iter().find(|tab| tab.id == row.id) else {
                 continue;
             };
-            let geometry = tree_row_geometry(visual_position, row.depth, sidebar_width);
+            let mode = if self.note_edit_target == Some(tab.id) {
+                TreeRowMode::Editing
+            } else {
+                TreeRowMode::Normal
+            };
+            let geometry =
+                tree_row_geometry_for_mode(visual_position, row.depth, sidebar_width, mode);
             let top = geometry.row.top;
             let node_x = geometry.node_x;
             let node_y = geometry.node_y;
@@ -4782,7 +4885,7 @@ impl AppState {
                 .any(|child| child.parent_id == Some(tab.id));
             for (level, continues) in row.guides.iter().enumerate() {
                 if *continues {
-                    let x = tree_anchor_x(level);
+                    let x = tree_connector_x(level, sidebar_width, mode);
                     fill(
                         device,
                         &RECT {
@@ -4796,7 +4899,7 @@ impl AppState {
                 }
             }
             if row.depth > 0 {
-                let branch_x = tree_anchor_x(row.depth.saturating_sub(1));
+                let branch_x = tree_connector_x(row.depth.saturating_sub(1), sidebar_width, mode);
                 fill(
                     device,
                     &RECT {
@@ -4886,26 +4989,15 @@ impl AppState {
                 },
             );
             let actions_visible = self.active == Some(tab.id);
-            let tab_add_left = sidebar_width - 72;
-            let tab_edit_left = sidebar_width - 48;
-            let tab_close_left = sidebar_width - 24;
-            let text_right = if actions_visible {
-                tab_add_left - 4
-            } else {
-                sidebar_width - 10
-            };
-            draw_text(
-                device,
-                &tab.title,
-                RECT {
-                    left: node_x + 24,
-                    top: top + 1,
-                    right: text_right,
-                    bottom: top + 22,
-                },
-                colors.text,
-                DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
-            );
+            if mode == TreeRowMode::Normal {
+                draw_text(
+                    device,
+                    &tab.title,
+                    win_rect(geometry.name),
+                    colors.text,
+                    DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
+                );
+            }
             let secondary = if !tab.note.is_empty() {
                 tab.note.clone()
             } else {
@@ -4917,58 +5009,51 @@ impl AppState {
                     None => format!("{} · {}", tab.index, tab.command_name),
                 }
             };
-            draw_text(
-                device,
-                &secondary,
-                RECT {
-                    left: node_x + 24,
-                    top: top + 21,
-                    right: text_right,
-                    bottom: top + TAB_HEIGHT - 1,
-                },
-                if tab.note.is_empty() {
-                    colors.muted
-                } else {
-                    colors.blue
-                },
-                DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
-            );
+            if mode == TreeRowMode::Normal {
+                draw_text(
+                    device,
+                    &secondary,
+                    win_rect(geometry.note),
+                    if tab.note.is_empty() {
+                        colors.muted
+                    } else {
+                        colors.blue
+                    },
+                    DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
+                );
+            }
             if actions_visible {
+                let compact = geometry.actions.density == TreeRowActionDensity::Compact;
+                if let Some(add_child) = geometry.actions.add_child {
+                    draw_text(
+                        device,
+                        if compact { "T+" } else { "Add" },
+                        win_rect(add_child),
+                        colors.green,
+                        DT_CENTER | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
+                    );
+                }
                 draw_text(
                     device,
-                    "T+",
-                    RECT {
-                        left: tab_add_left,
-                        top,
-                        right: tab_edit_left,
-                        bottom: top + TAB_HEIGHT - 1,
+                    match (mode, compact) {
+                        (TreeRowMode::Normal, true) => "✎",
+                        (TreeRowMode::Normal, false) => "Edit",
+                        (TreeRowMode::Editing, _) => "Save",
                     },
-                    colors.green,
-                    DT_LEFT | DT_SINGLELINE | DT_VCENTER,
-                );
-                draw_text(
-                    device,
-                    "✎",
-                    RECT {
-                        left: tab_edit_left,
-                        top,
-                        right: tab_close_left,
-                        bottom: top + TAB_HEIGHT - 1,
-                    },
+                    win_rect(geometry.actions.primary),
                     colors.blue,
-                    DT_LEFT | DT_SINGLELINE | DT_VCENTER,
+                    DT_CENTER | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
                 );
                 draw_text(
                     device,
-                    "×",
-                    RECT {
-                        left: tab_close_left,
-                        top,
-                        right: sidebar_width - 4,
-                        bottom: top + TAB_HEIGHT - 1,
+                    match (mode, compact) {
+                        (TreeRowMode::Normal, true) => "×",
+                        (TreeRowMode::Normal, false) => "Close",
+                        (TreeRowMode::Editing, _) => "Cancel",
                     },
+                    win_rect(geometry.actions.secondary),
                     colors.muted,
-                    DT_LEFT | DT_SINGLELINE | DT_VCENTER,
+                    DT_CENTER | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
                 );
             }
         }
@@ -5111,8 +5196,6 @@ impl AppState {
                     format!("HTTP(S) proxy for @{id} · shell and future descendants only")
                 } else if let Some(id) = self.cwd_edit_target {
                     format!("Working directory for @{id}")
-                } else if let Some(id) = self.note_edit_target {
-                    format!("Edit tab @{id} · line 1 name, remaining lines note")
                 } else {
                     format!("Compose input for {}:{}", tab.index, tab.title)
                 },
@@ -5139,8 +5222,6 @@ impl AppState {
                     }
                 } else if self.cwd_edit_target.is_some() {
                     "Ctrl+Enter prepare · Ctrl+Shift+Enter append · Ctrl+Alt+Enter replace · Esc cancel"
-                } else if self.note_edit_target.is_some() {
-                    "Ctrl+Enter save · Esc cancel"
                 } else if tab.exited.is_some() {
                     "Process exited · draft preserved"
                 } else {
@@ -5755,6 +5836,21 @@ impl AppState {
             })
         });
         let active_draft = window_text(self.edit);
+        let tab_editor = self.note_edit_target.map(|id| {
+            let focused = unsafe { GetFocus() };
+            serde_json::json!({
+                "target": format!("@{id}"),
+                "name_length": window_text(self.tab_name_edit).chars().count(),
+                "note_length": window_text(self.tab_note_edit).chars().count(),
+                "focus": if focused == self.tab_name_edit {
+                    Some("name")
+                } else if focused == self.tab_note_edit {
+                    Some("note")
+                } else {
+                    None
+                },
+            })
+        });
         let visible_rows = self.tree_rows();
         let all_rows = self.all_tree_rows();
         let tabs = all_rows
@@ -5766,8 +5862,18 @@ impl AppState {
                     .tabs_visible
                     .then(|| visible_rows.iter().position(|visible| visible.id == row.id))
                     .flatten();
+                let mode = if self.note_edit_target == Some(tab.id) {
+                    TreeRowMode::Editing
+                } else {
+                    TreeRowMode::Normal
+                };
                 let geometry = visible_position.map(|position| {
-                    tree_row_geometry(position, row.depth, layout.effective_tabs_width)
+                    tree_row_geometry_for_mode(
+                        position,
+                        row.depth,
+                        layout.effective_tabs_width,
+                        mode,
+                    )
                 });
                 let draft = if self.active == Some(tab.id)
                     && self.note_edit_target.is_none()
@@ -5829,6 +5935,10 @@ impl AppState {
                     "draft": draft,
                     "bounds": geometry.map(|geometry| pixel_rect_json(geometry.row)),
                     "render": geometry.map(|geometry| serde_json::json!({
+                        "mode": match geometry.mode {
+                            TreeRowMode::Normal => "normal",
+                            TreeRowMode::Editing => "editing",
+                        },
                         "row": pixel_rect_json(geometry.row),
                         "selection": pixel_rect_json(geometry.selection),
                         "node": {
@@ -5838,35 +5948,67 @@ impl AppState {
                         "expander": pixel_rect_json(geometry.expander),
                         "status": pixel_rect_json(geometry.status),
                         "disclosure_hit": pixel_rect_json(geometry.disclosure_hit),
+                        "text": pixel_rect_json(geometry.text),
+                        "name": pixel_rect_json(geometry.name),
+                        "note": pixel_rect_json(geometry.note),
+                        "editors": geometry.editors.map(|editors| serde_json::json!({
+                            "name": pixel_rect_json(editors.name),
+                            "note": pixel_rect_json(editors.note),
+                        })),
                     })),
                     "actions": visible_position
                         .filter(|_| self.active == Some(tab.id))
                         .map(|position| {
-                            let geometry =
-                                tree_row_geometry(position, row.depth, layout.effective_tabs_width);
-                            let tab_add_left = layout.effective_tabs_width - 72;
-                            let tab_edit_left = layout.effective_tabs_width - 48;
-                            let tab_close_left = layout.effective_tabs_width - 24;
-                            serde_json::json!({
-                        "new_child": {
-                            "x": tab_add_left,
-                            "y": geometry.row.top,
-                            "width": tab_edit_left - tab_add_left,
-                            "height": geometry.row.height(),
-                        },
-                        "edit": {
-                            "x": tab_edit_left,
-                            "y": geometry.row.top,
-                            "width": tab_close_left - tab_edit_left,
-                            "height": geometry.row.height(),
-                        },
-                        "close": {
-                            "x": tab_close_left,
-                            "y": geometry.row.top,
-                            "width": layout.effective_tabs_width - tab_close_left,
-                            "height": geometry.row.height(),
-                        }
-                    })
+                            let geometry = tree_row_geometry_for_mode(
+                                position,
+                                row.depth,
+                                layout.effective_tabs_width,
+                                mode,
+                            );
+                            let action = |id: &str, label: &str, bounds: PixelRect| {
+                                serde_json::json!({
+                                    "id": id,
+                                    "label": label,
+                                    "bounds": pixel_rect_json(bounds),
+                                    "x": bounds.left,
+                                    "y": bounds.top,
+                                    "width": bounds.width(),
+                                    "height": bounds.height(),
+                                })
+                            };
+                            match mode {
+                                TreeRowMode::Normal => serde_json::json!({
+                                    "mode": "normal",
+                                    "density": match geometry.actions.density {
+                                        TreeRowActionDensity::Full => "full",
+                                        TreeRowActionDensity::Compact => "compact",
+                                    },
+                                    "new_child": action(
+                                        "new-child",
+                                        "Add",
+                                        geometry.actions.add_child.expect("normal rows have Add"),
+                                    ),
+                                    "edit": action("edit-tab", "Edit", geometry.actions.primary),
+                                    "close": action("close-tab", "Close", geometry.actions.secondary),
+                                }),
+                                TreeRowMode::Editing => serde_json::json!({
+                                    "mode": "editing",
+                                    "density": match geometry.actions.density {
+                                        TreeRowActionDensity::Full => "full",
+                                        TreeRowActionDensity::Compact => "compact",
+                                    },
+                                    "save": action(
+                                        "tab-editor-save",
+                                        "Save",
+                                        geometry.actions.primary,
+                                    ),
+                                    "cancel": action(
+                                        "tab-editor-cancel",
+                                        "Cancel",
+                                        geometry.actions.secondary,
+                                    ),
+                                }),
+                            }
                         })
                 }))
             })
@@ -6022,6 +6164,7 @@ impl AppState {
                 },
             },
             "tabs": tabs,
+            "tab_editor": tab_editor,
             "modal": if self.window_close_pending {
                 Some(serde_json::json!({
                     "kind": "confirm-window-close",
@@ -6582,6 +6725,7 @@ impl AppState {
                 }
                 self.save_active_composer();
                 let id = self.tabs[position].id;
+                self.finish_note_edit(false);
                 self.cancel_terminal_selection(true);
                 self.active = Some(id);
                 self.load_active_composer();
@@ -7070,6 +7214,7 @@ impl AppState {
                     }
                     self.save_active_composer();
                     let id = self.tabs[position].id;
+                    self.finish_note_edit(false);
                     self.cancel_terminal_selection(true);
                     self.active = Some(id);
                     self.load_active_composer();
@@ -7177,6 +7322,7 @@ impl AppState {
                         None
                     }
                     "toggle-tree" => {
+                        self.finish_note_edit(false);
                         let Some(position) = self.target_position(option_value(args, "-t")) else {
                             return IpcResponse::failure("can't find tab");
                         };
@@ -7187,6 +7333,7 @@ impl AppState {
                         if !self.collapsed_tabs.remove(&id) {
                             self.collapsed_tabs.insert(id);
                         }
+                        self.layout();
                         None
                     }
                     "select-tab" => {
@@ -7195,6 +7342,7 @@ impl AppState {
                         };
                         self.save_active_composer();
                         let id = self.tabs[position].id;
+                        self.finish_note_edit(false);
                         self.cancel_terminal_selection(true);
                         self.active = Some(id);
                         self.load_active_composer();
@@ -7266,7 +7414,11 @@ impl AppState {
                                 "CWD editor is active; prepare, send now, or cancel it first",
                             );
                         }
-                        self.send_composer();
+                        if self.note_edit_target.is_some() {
+                            self.finish_note_edit(true);
+                        } else {
+                            self.send_composer();
+                        }
                         None
                     }
                     "open-cwd-editor" => match self.open_cwd_editor(option_value(args, "-t")) {
@@ -7434,16 +7586,23 @@ impl AppState {
                 }
                 let text = positional_values(args, &["-t"], &[]).join(" ");
                 let id = self.tabs[position].id;
-                if self.note_edit_target != Some(id) {
-                    self.tabs[position].composer = text.clone();
-                    self.event_journal.commit(
-                        EventKind::ComposerDraft,
-                        Some(id),
-                        serde_json::json!({
-                            "length": text.chars().count(),
-                        }),
-                    );
+                if self.note_edit_target == Some(id) {
+                    let normalized = text.replace("\r\n", "\n");
+                    let (name, note) = normalized.split_once('\n').unwrap_or((&normalized, ""));
+                    unsafe {
+                        SetWindowTextW(self.tab_name_edit, wide(name).as_ptr());
+                        SetWindowTextW(self.tab_note_edit, wide(note).as_ptr());
+                    }
+                    return IpcResponse::success("");
                 }
+                self.tabs[position].composer = text.clone();
+                self.event_journal.commit(
+                    EventKind::ComposerDraft,
+                    Some(id),
+                    serde_json::json!({
+                        "length": text.chars().count(),
+                    }),
+                );
                 if self.active == Some(id) {
                     unsafe { SetWindowTextW(self.edit, wide(&text).as_ptr()) };
                 }
@@ -7566,6 +7725,9 @@ impl AppState {
                 };
                 self.save_active_composer();
                 let previous = self.active;
+                if previous != Some(self.tabs[position].id) {
+                    self.finish_note_edit(false);
+                }
                 self.active = Some(self.tabs[position].id);
                 self.load_active_composer();
                 unsafe {
@@ -7655,6 +7817,7 @@ impl AppState {
                     });
                 }
                 let mut terminal_shutdown_complete = true;
+                self.finish_note_edit(false);
                 self.cancel_terminal_selection(true);
                 for tab in &mut self.tabs {
                     terminal_shutdown_complete &= tab.close_process();
@@ -7703,6 +7866,7 @@ impl AppState {
         }
         self.save_active_composer();
         let id = self.tabs[position].id;
+        self.finish_note_edit(false);
         self.cancel_terminal_selection(true);
         self.active = Some(id);
         self.load_active_composer();

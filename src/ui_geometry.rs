@@ -2,8 +2,8 @@ pub(crate) const TAB_TOP: i32 = 8;
 pub(crate) const TAB_HEIGHT: i32 = 44;
 pub(crate) const TAB_LEFT: i32 = 5;
 pub(crate) const TAB_RIGHT_MARGIN: i32 = 5;
-pub(crate) const TREE_INDENT: i32 = 16;
-pub(crate) const TREE_ANCHOR_LEFT: i32 = 17;
+pub(crate) const TREE_INDENT: i32 = 12;
+pub(crate) const TREE_ANCHOR_LEFT: i32 = 12;
 pub(crate) const TERMINAL_SCROLLBAR_WIDTH: i32 = 12;
 pub(crate) const TABS_MIN_WIDTH: i32 = 180;
 pub(crate) const TABS_DEFAULT_WIDTH: i32 = 250;
@@ -13,6 +13,21 @@ pub(crate) const TABS_RESIZE_GRIP_WIDTH: i32 = 6;
 pub(crate) const SIDEBAR_TOOLBAR_HEIGHT: i32 = 46;
 
 const MAX_TREE_DEPTH: usize = 10;
+const TREE_MIN_RESPONSIVE_INDENT: i32 = 3;
+const TREE_TEXT_GAP: i32 = 4;
+const TREE_MIN_TEXT_WIDTH: i32 = 28;
+const TREE_ACTION_GAP: i32 = 2;
+const TREE_ACTION_INSET: i32 = 4;
+const TREE_ACTION_TOP_INSET: i32 = 6;
+const TREE_COMPACT_ACTION_WIDTH: i32 = 24;
+const TREE_ADD_ACTION_WIDTH: i32 = 24;
+const TREE_EDIT_ACTION_WIDTH: i32 = 38;
+const TREE_CLOSE_ACTION_WIDTH: i32 = 42;
+const TREE_SAVE_ACTION_WIDTH: i32 = 42;
+const TREE_CANCEL_ACTION_WIDTH: i32 = 48;
+const TREE_COMPACT_SAVE_ACTION_WIDTH: i32 = 34;
+const TREE_COMPACT_CANCEL_ACTION_WIDTH: i32 = 40;
+const TREE_COMPACT_ACTION_THRESHOLD: i32 = 220;
 const NODE_Y_OFFSET: i32 = 13;
 const MIN_SCROLLBAR_THUMB_HEIGHT: i32 = 24;
 const SIDEBAR_TOOLBAR_DIVIDER_HEIGHT: i32 = 1;
@@ -389,7 +404,38 @@ pub(crate) fn scrollback_for_thumb_top(
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TreeRowMode {
+    Normal,
+    Editing,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TreeRowActionDensity {
+    Full,
+    Compact,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct TreeRowEditorGeometry {
+    pub(crate) name: PixelRect,
+    pub(crate) note: PixelRect,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct TreeRowActionGeometry {
+    pub(crate) bounds: PixelRect,
+    pub(crate) density: TreeRowActionDensity,
+    /// The add-child action in normal mode. Editing mode omits it.
+    pub(crate) add_child: Option<PixelRect>,
+    /// Edit in normal mode, Save in editing mode.
+    pub(crate) primary: PixelRect,
+    /// Close in normal mode, Cancel in editing mode.
+    pub(crate) secondary: PixelRect,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct TreeRowGeometry {
+    pub(crate) mode: TreeRowMode,
     pub(crate) row: PixelRect,
     pub(crate) selection: PixelRect,
     pub(crate) node_x: i32,
@@ -397,23 +443,71 @@ pub(crate) struct TreeRowGeometry {
     pub(crate) expander: PixelRect,
     pub(crate) status: PixelRect,
     pub(crate) disclosure_hit: PixelRect,
+    /// Complete two-line label surface, excluding the action cluster.
+    pub(crate) text: PixelRect,
+    pub(crate) name: PixelRect,
+    pub(crate) note: PixelRect,
+    /// Two native single-line edit overlays in editing mode.
+    pub(crate) editors: Option<TreeRowEditorGeometry>,
+    pub(crate) actions: TreeRowActionGeometry,
 }
 
+#[cfg(test)]
 pub(crate) fn tree_anchor_x(depth: usize) -> i32 {
     TREE_ANCHOR_LEFT + depth as i32 * TREE_INDENT
+}
+
+/// Responsive tree anchor shared by row content and connector painting.
+///
+/// At the 180 px Tabs minimum width this keeps every supported depth distinct
+/// while reserving one CJK glyph plus ellipsis and the compact action cluster.
+pub(crate) fn tree_connector_x(depth: usize, sidebar_width: i32, mode: TreeRowMode) -> i32 {
+    let depth = depth.min(MAX_TREE_DEPTH);
+    TREE_ANCHOR_LEFT + depth as i32 * responsive_tree_indent(sidebar_width, mode)
 }
 
 pub(crate) fn tree_row_at_y(y: i32) -> Option<usize> {
     (y >= TAB_TOP).then_some(((y - TAB_TOP) / TAB_HEIGHT) as usize)
 }
 
+/// Compatibility geometry for the current host. New host code should use
+/// `tree_row_geometry_for_mode` and switch connectors, painting, hit-testing,
+/// native edit placement, and snapshots in one change.
+#[cfg(test)]
 pub(crate) fn tree_row_geometry(
     visual_position: usize,
     depth: usize,
     sidebar_width: i32,
 ) -> TreeRowGeometry {
+    tree_row_geometry_impl(
+        visual_position,
+        tree_anchor_x(depth.min(MAX_TREE_DEPTH)),
+        sidebar_width,
+        TreeRowMode::Normal,
+    )
+}
+
+pub(crate) fn tree_row_geometry_for_mode(
+    visual_position: usize,
+    depth: usize,
+    sidebar_width: i32,
+    mode: TreeRowMode,
+) -> TreeRowGeometry {
+    tree_row_geometry_impl(
+        visual_position,
+        tree_connector_x(depth, sidebar_width, mode),
+        sidebar_width,
+        mode,
+    )
+}
+
+fn tree_row_geometry_impl(
+    visual_position: usize,
+    node_x: i32,
+    sidebar_width: i32,
+    mode: TreeRowMode,
+) -> TreeRowGeometry {
     let top = TAB_TOP + visual_position as i32 * TAB_HEIGHT;
-    let node_x = tree_anchor_x(depth.min(MAX_TREE_DEPTH));
     let node_y = top + NODE_Y_OFFSET;
     let selection = PixelRect {
         left: TAB_LEFT,
@@ -421,7 +515,20 @@ pub(crate) fn tree_row_geometry(
         right: (sidebar_width - TAB_RIGHT_MARGIN).max(TAB_LEFT),
         bottom: top + TAB_HEIGHT - 1,
     };
+    let actions = tree_row_actions(selection, mode);
+    let text_left = (node_x + 20).clamp(selection.left, selection.right);
+    let text_right = (actions.bounds.left - TREE_TEXT_GAP).clamp(text_left, selection.right);
+    let text = rect(text_left, top + 3, text_right, selection.bottom - 3);
+    let name = rect(text.left, text.top, text.right, (top + 21).min(text.bottom));
+    let note = rect(
+        text.left,
+        (top + 22).min(text.bottom),
+        text.right,
+        text.bottom,
+    );
+    let editors = (mode == TreeRowMode::Editing).then_some(TreeRowEditorGeometry { name, note });
     TreeRowGeometry {
+        mode,
         row: selection,
         selection,
         node_x,
@@ -445,6 +552,118 @@ pub(crate) fn tree_row_geometry(
             top,
             right: node_x + 12,
             bottom: top + TAB_HEIGHT,
+        },
+        text,
+        name,
+        note,
+        editors,
+        actions,
+    }
+}
+
+fn responsive_tree_indent(sidebar_width: i32, mode: TreeRowMode) -> i32 {
+    let action_width = desired_tree_action_width(sidebar_width, mode);
+    let available_anchor_span = (sidebar_width
+        - TAB_RIGHT_MARGIN
+        - TREE_ACTION_INSET
+        - action_width
+        - TREE_TEXT_GAP
+        - TREE_MIN_TEXT_WIDTH
+        - 20
+        - TREE_ANCHOR_LEFT)
+        .max(0);
+    (available_anchor_span / MAX_TREE_DEPTH as i32).clamp(TREE_MIN_RESPONSIVE_INDENT, TREE_INDENT)
+}
+
+fn desired_tree_action_width(sidebar_width: i32, mode: TreeRowMode) -> i32 {
+    let compact = sidebar_width < TREE_COMPACT_ACTION_THRESHOLD;
+    match (mode, compact) {
+        (TreeRowMode::Normal, true) => TREE_COMPACT_ACTION_WIDTH * 3 + TREE_ACTION_GAP * 2,
+        (TreeRowMode::Normal, false) => {
+            TREE_ADD_ACTION_WIDTH
+                + TREE_EDIT_ACTION_WIDTH
+                + TREE_CLOSE_ACTION_WIDTH
+                + TREE_ACTION_GAP * 2
+        }
+        (TreeRowMode::Editing, true) => {
+            TREE_COMPACT_SAVE_ACTION_WIDTH + TREE_COMPACT_CANCEL_ACTION_WIDTH + TREE_ACTION_GAP
+        }
+        (TreeRowMode::Editing, false) => {
+            TREE_SAVE_ACTION_WIDTH + TREE_CANCEL_ACTION_WIDTH + TREE_ACTION_GAP
+        }
+    }
+}
+
+fn tree_row_actions(row: PixelRect, mode: TreeRowMode) -> TreeRowActionGeometry {
+    let density = if row.right + TAB_RIGHT_MARGIN < TREE_COMPACT_ACTION_THRESHOLD {
+        TreeRowActionDensity::Compact
+    } else {
+        TreeRowActionDensity::Full
+    };
+    let (desired_widths, action_count) = match (mode, density) {
+        (TreeRowMode::Normal, TreeRowActionDensity::Full) => (
+            [
+                TREE_ADD_ACTION_WIDTH,
+                TREE_EDIT_ACTION_WIDTH,
+                TREE_CLOSE_ACTION_WIDTH,
+            ],
+            3_usize,
+        ),
+        (TreeRowMode::Normal, TreeRowActionDensity::Compact) => ([TREE_COMPACT_ACTION_WIDTH; 3], 3),
+        (TreeRowMode::Editing, TreeRowActionDensity::Full) => {
+            ([TREE_SAVE_ACTION_WIDTH, TREE_CANCEL_ACTION_WIDTH, 0], 2)
+        }
+        (TreeRowMode::Editing, TreeRowActionDensity::Compact) => (
+            [
+                TREE_COMPACT_SAVE_ACTION_WIDTH,
+                TREE_COMPACT_CANCEL_ACTION_WIDTH,
+                0,
+            ],
+            2,
+        ),
+    };
+    let right = (row.right - TREE_ACTION_INSET).max(row.left);
+    let available = (right - row.left).max(0);
+    let gap_count = action_count.saturating_sub(1) as i32;
+    let gap = TREE_ACTION_GAP.min(available / action_count as i32);
+    let width_budget = (available - gap * gap_count).max(0);
+    let desired_total: i32 = desired_widths[..action_count].iter().sum();
+    let mut widths = [0; 3];
+    for index in 0..action_count {
+        widths[index] = if desired_total <= width_budget {
+            desired_widths[index]
+        } else if desired_total == 0 {
+            0
+        } else {
+            (desired_widths[index] * width_budget) / desired_total
+        };
+    }
+    let assigned: i32 = widths[..action_count].iter().sum();
+    let mut cursor = right - assigned - gap * gap_count;
+    let top = (row.top + TREE_ACTION_TOP_INSET).min(row.bottom);
+    let bottom = (row.bottom - TREE_ACTION_TOP_INSET).max(top);
+    let empty = rect(right, top, right, bottom);
+    let mut rects = [empty; 3];
+    for index in 0..action_count {
+        let action = rect(cursor, top, cursor + widths[index], bottom);
+        rects[index] = action;
+        cursor = action.right + gap;
+    }
+    let bounds = rect(rects[0].left, top, rects[action_count - 1].right, bottom);
+    match mode {
+        TreeRowMode::Normal => TreeRowActionGeometry {
+            bounds,
+            density,
+            add_child: Some(rects[0]),
+            primary: rects[1],
+            secondary: rects[2],
+        },
+        TreeRowMode::Editing => TreeRowActionGeometry {
+            bounds,
+            density,
+            add_child: None,
+            primary: rects[0],
+            secondary: rects[1],
         },
     }
 }
@@ -694,13 +913,15 @@ mod tests {
             tree_row_geometry(2, 2, 250),
         ];
 
-        assert_eq!(rows[0].node_x, 17);
-        assert_eq!(rows[1].node_x, 17 + 16);
-        assert_eq!(rows[2].node_x, 17 + 16 * 2);
+        assert_eq!(rows[0].node_x, 12);
+        assert_eq!(rows[1].node_x, 12 + 12);
+        assert_eq!(rows[2].node_x, 12 + 12 * 2);
         assert_eq!(rows[1].row.top - rows[0].row.top, 44);
         assert_eq!(rows[2].row.top - rows[1].row.top, 44);
         assert_eq!(rows[0].expander.width(), 11);
         assert_eq!(rows[0].expander.height(), 11);
+        assert_eq!(rows[0].mode, TreeRowMode::Normal);
+        assert!(rows[0].editors.is_none());
     }
 
     #[test]
@@ -743,6 +964,116 @@ mod tests {
         assert_eq!(tree_row_at_y(7), None);
         assert_eq!(tree_row_at_y(8), Some(0));
         assert_eq!(tree_row_at_y(52), Some(1));
+    }
+
+    #[test]
+    fn normal_row_partitions_text_and_three_actions_without_overlap() {
+        let geometry = tree_row_geometry_for_mode(0, 1, 250, TreeRowMode::Normal);
+        let add = geometry
+            .actions
+            .add_child
+            .expect("normal mode has add-child");
+
+        assert_eq!(geometry.actions.density, TreeRowActionDensity::Full);
+        assert!(geometry.text.right <= geometry.actions.bounds.left);
+        assert!(add.right <= geometry.actions.primary.left);
+        assert!(geometry.actions.primary.right <= geometry.actions.secondary.left);
+        assert_eq!(add.width(), TREE_ADD_ACTION_WIDTH);
+        assert_eq!(geometry.actions.primary.width(), TREE_EDIT_ACTION_WIDTH);
+        assert_eq!(geometry.actions.secondary.width(), TREE_CLOSE_ACTION_WIDTH);
+        assert_eq!(geometry.name.left, geometry.note.left);
+        assert_eq!(geometry.name.right, geometry.note.right);
+        assert!(geometry.name.bottom <= geometry.note.top);
+        assert!(geometry.editors.is_none());
+    }
+
+    #[test]
+    fn editing_row_replaces_actions_and_exposes_two_inline_editors() {
+        let geometry = tree_row_geometry_for_mode(3, 2, 250, TreeRowMode::Editing);
+        let editors = geometry.editors.expect("editing mode has two editors");
+
+        assert_eq!(geometry.mode, TreeRowMode::Editing);
+        assert_eq!(geometry.actions.density, TreeRowActionDensity::Full);
+        assert_eq!(geometry.actions.add_child, None);
+        assert_eq!(geometry.actions.primary.width(), TREE_SAVE_ACTION_WIDTH);
+        assert_eq!(geometry.actions.secondary.width(), TREE_CANCEL_ACTION_WIDTH);
+        assert!(geometry.actions.primary.right <= geometry.actions.secondary.left);
+        assert_eq!(editors.name, geometry.name);
+        assert_eq!(editors.note, geometry.note);
+        assert_eq!(geometry.text.left, geometry.name.left);
+        assert_eq!(geometry.text.right, geometry.note.right);
+        assert!(geometry.text.right <= geometry.actions.bounds.left);
+    }
+
+    #[test]
+    fn minimum_tabs_width_keeps_deep_cjk_text_and_compact_actions_bounded() {
+        for mode in [TreeRowMode::Normal, TreeRowMode::Editing] {
+            let geometry = tree_row_geometry_for_mode(0, MAX_TREE_DEPTH, 180, mode);
+
+            assert_eq!(geometry.actions.density, TreeRowActionDensity::Compact);
+            assert!(geometry.text.width() >= TREE_MIN_TEXT_WIDTH);
+            assert!(geometry.text.right <= geometry.actions.bounds.left);
+            assert!(geometry.actions.bounds.right <= geometry.selection.right);
+            assert!(geometry.node_x < geometry.text.left);
+            assert_eq!(geometry.node_x, tree_connector_x(MAX_TREE_DEPTH, 180, mode));
+            if let Some(add) = geometry.actions.add_child {
+                assert!(add.width() >= 20);
+                assert!(add.right <= geometry.actions.primary.left);
+            }
+            assert!(geometry.actions.primary.width() >= 20);
+            assert!(geometry.actions.secondary.width() >= 20);
+            assert!(geometry.actions.primary.right <= geometry.actions.secondary.left);
+        }
+    }
+
+    #[test]
+    fn responsive_connector_grid_uses_one_indent_for_every_depth() {
+        for (width, mode) in [
+            (180, TreeRowMode::Normal),
+            (180, TreeRowMode::Editing),
+            (250, TreeRowMode::Normal),
+            (480, TreeRowMode::Normal),
+        ] {
+            let anchors: Vec<i32> = (0..=MAX_TREE_DEPTH)
+                .map(|depth| tree_connector_x(depth, width, mode))
+                .collect();
+            let indent = anchors[1] - anchors[0];
+
+            assert!((TREE_MIN_RESPONSIVE_INDENT..=TREE_INDENT).contains(&indent));
+            for pair in anchors.windows(2) {
+                assert_eq!(pair[1] - pair[0], indent);
+            }
+        }
+        assert!(
+            tree_connector_x(MAX_TREE_DEPTH, 180, TreeRowMode::Normal)
+                < tree_connector_x(MAX_TREE_DEPTH, 480, TreeRowMode::Normal)
+        );
+    }
+
+    #[test]
+    fn degenerate_row_geometry_collapses_safely_without_inverted_rectangles() {
+        for width in [0, 5, 20, 80] {
+            for mode in [TreeRowMode::Normal, TreeRowMode::Editing] {
+                let geometry = tree_row_geometry_for_mode(0, 10, width, mode);
+                for candidate in [
+                    geometry.row,
+                    geometry.text,
+                    geometry.name,
+                    geometry.note,
+                    geometry.actions.bounds,
+                    geometry.actions.primary,
+                    geometry.actions.secondary,
+                ] {
+                    assert!(candidate.width() >= 0, "{candidate:?}");
+                    assert!(candidate.height() >= 0, "{candidate:?}");
+                }
+                if let Some(add) = geometry.actions.add_child {
+                    assert!(add.width() >= 0);
+                    assert!(add.right <= geometry.actions.primary.left);
+                }
+                assert!(geometry.actions.primary.right <= geometry.actions.secondary.left);
+            }
+        }
     }
 
     #[test]
