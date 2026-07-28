@@ -5,9 +5,10 @@ Parent: [AgenTerm product tree](../PRD.md#product-tree)
 Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
 - [x] window title identifies version and live IPC port
-- [~] Linux/macOS human workspace MVP: one window, one live PTY tab,
-  keyboard input, visible VT grid, tab sidebar, event journal, and shared
-  workspace IPC; composer / settings / full ui-snapshot geometry remain
+- [~] Linux/macOS human workspace MVP: one window, live POSIX PTY tabs,
+  keyboard input, visible VT grid, tab sidebar, event journal, shared
+  workspace IPC, composer strip, settings modal, and wheel/scrollbar
+  scrollback; cell selection / clipboard / Win-only cwd-proxy editors remain
   host-specific follow-ups
 - [x] vertical tabs on the left show the numeric index; the stable `@id` is
   exposed through the control plane

@@ -14,7 +14,7 @@ use std::{
 use softbuffer::{Context, Surface};
 use winit::{
     application::ApplicationHandler,
-    event::{ElementState, MouseButton, WindowEvent},
+    event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     keyboard::{Key, ModifiersState, NamedKey},
     window::{Window, WindowAttributes, WindowId},
@@ -43,8 +43,17 @@ use render::{
 };
 
 use layout::{
-    pixel_rect_json, scrollbar_geometry, sidebar_width_u32, workspace_layout_for,
+    WHEEL_DELTA, WHEEL_ROWS_PER_NOTCH, ScrollbarHit, pixel_rect_json, scrollbar_geometry,
+    scrollbar_hit_test, sidebar_width_u32, terminal_pixel_rect, wheel_delta_units,
+    workspace_layout_for,
 };
+
+use crate::ui_geometry::scrollback_for_thumb_top;
+
+#[derive(Clone, Copy, Debug)]
+struct ScrollDrag {
+    thumb_grab_offset: i32,
+}
 
 const APP_NAME: &str = "AgenTerm";
 const INITIAL_WIDTH: u32 = 960;
@@ -194,6 +203,8 @@ struct UnixApp {
     note_edit_target: Option<u64>,
     tab_name_draft: String,
     tab_note_draft: String,
+    wheel_remainder: i32,
+    scroll_drag: Option<ScrollDrag>,
 }
 
 impl UnixApp {
@@ -233,6 +244,8 @@ impl UnixApp {
             note_edit_target: None,
             tab_name_draft: String::new(),
             tab_note_draft: String::new(),
+            wheel_remainder: 0,
+            scroll_drag: None,
             config,
             modifiers: ModifiersState::empty(),
         }
@@ -547,7 +560,7 @@ impl UnixApp {
         }
     }
 
-    fn build_ui_snapshot_json(&self) -> String {
+    fn build_ui_snapshot_json(&mut self) -> String {
         let active = self.active;
         let (client_width, client_height) = self.client_size();
         let layout = self.layout();
@@ -555,13 +568,14 @@ impl UnixApp {
         let visible_rows = self.visible_tree_rows();
         let all_rows = self.all_tree_rows();
         let scrollbar = self.active_position().map(|position| {
-            let tab = &self.tabs[position];
-            let geometry = scrollbar_geometry(&layout, usize::from(tab.last_size.0), tab.parser.screen().scrollback());
+            let visible_rows = usize::from(self.tabs[position].last_size.0);
+            let (offset, maximum) = self.tabs[position].scrollback_bounds();
+            let geometry = scrollbar_geometry(&layout, visible_rows, offset, maximum);
             serde_json::json!({
                 "visible": true,
                 "track": pixel_rect_json(geometry.track),
                 "thumb": pixel_rect_json(geometry.thumb),
-                "max_offset": crate::SCROLLBACK_LINES,
+                "max_offset": maximum,
             })
         });
         let tab_editor = self.note_edit_target.map(|id| {
@@ -728,10 +742,107 @@ impl UnixApp {
         if x < f64::from(self.sidebar_width()) {
             return;
         }
+        if self.click_scrollbar(x as i32, y as i32) {
+            return;
+        }
         if self.composer_region_contains(x, y, window_height) {
             self.set_focus_surface_internal(UnixFocusSurface::Composer, "mouse");
         } else {
             self.set_focus_surface_internal(UnixFocusSurface::Terminal, "mouse");
+        }
+    }
+
+    fn scrollbar_state(&mut self) -> Option<(crate::ui_geometry::TerminalScrollbarGeometry, usize)> {
+        let position = self.active_position()?;
+        let layout = self.layout();
+        let visible_rows = usize::from(self.tabs[position].last_size.0);
+        let (offset, maximum) = self.tabs[position].scrollback_bounds();
+        Some((
+            scrollbar_geometry(&layout, visible_rows, offset, maximum),
+            maximum,
+        ))
+    }
+
+    fn click_scrollbar(&mut self, x: i32, y: i32) -> bool {
+        let Some((geometry, maximum)) = self.scrollbar_state() else {
+            return false;
+        };
+        let Some(hit) = scrollbar_hit_test(&geometry, x, y) else {
+            return false;
+        };
+        if maximum == 0 {
+            return true;
+        }
+        match hit {
+            ScrollbarHit::Thumb => {
+                self.scroll_drag = Some(ScrollDrag {
+                    thumb_grab_offset: y - geometry.thumb.top,
+                });
+            }
+            ScrollbarHit::TrackAbove | ScrollbarHit::TrackBelow => {
+                if let Some(position) = self.active_position() {
+                    let action = if matches!(hit, ScrollbarHit::TrackAbove) {
+                        "page-up"
+                    } else {
+                        "page-down"
+                    };
+                    if let Ok(offset) = self.tabs[position].scroll_viewport(action, None) {
+                        self.on_viewport_scrolled(position, offset, "scrollbar-track");
+                    }
+                }
+            }
+        }
+        true
+    }
+
+    fn drag_scrollbar(&mut self, y: i32) {
+        let Some(drag) = self.scroll_drag else {
+            return;
+        };
+        let Some((geometry, maximum)) = self.scrollbar_state() else {
+            self.end_scroll_drag();
+            return;
+        };
+        let offset = scrollback_for_thumb_top(geometry, y - drag.thumb_grab_offset, maximum);
+        if let Some(position) = self.active_position() {
+            let offset = self.tabs[position].set_scrollback(offset);
+            self.on_viewport_scrolled(position, offset, "scrollbar-drag");
+        }
+    }
+
+    fn end_scroll_drag(&mut self) {
+        self.scroll_drag = None;
+    }
+
+    fn mouse_wheel(&mut self, x: f64, y: f64, delta: MouseScrollDelta) {
+        if self.settings_open {
+            return;
+        }
+        let terminal = terminal_pixel_rect(&self.layout());
+        if !terminal.contains(x as i32, y as i32) {
+            return;
+        }
+        let units = match delta {
+            MouseScrollDelta::LineDelta(_, lines) => wheel_delta_units(f64::from(lines), true),
+            MouseScrollDelta::PixelDelta(pos) => wheel_delta_units(pos.y, false),
+        };
+        self.wheel_remainder += units;
+        let notches = self.wheel_remainder / WHEEL_DELTA;
+        self.wheel_remainder %= WHEEL_DELTA;
+        if notches == 0 {
+            return;
+        }
+        let Some(position) = self.active_position() else {
+            return;
+        };
+        let before = self.tabs[position].parser.screen().scrollback();
+        let rows = notches.unsigned_abs() as usize * WHEEL_ROWS_PER_NOTCH;
+        let action = if notches > 0 { "up" } else { "down" };
+        let after = self.tabs[position]
+            .scroll_viewport(action, Some(rows))
+            .unwrap_or(before);
+        if after != before {
+            self.on_viewport_scrolled(position, after, "mouse-wheel");
         }
     }
 
@@ -906,6 +1017,7 @@ impl UnixApp {
     }
 
     fn redraw(&mut self) {
+        self.sync_grid_from_tab();
         let Some(window) = self.window.as_ref() else {
             return;
         };
@@ -920,11 +1032,13 @@ impl UnixApp {
         let sidebar_width = self.sidebar_width();
         let content_height = size.height.saturating_sub(COMPOSER_HEIGHT);
         let scrollbar = self.active_position().map(|position| {
-            let tab = &self.tabs[position];
+            let visible_rows = usize::from(self.tabs[position].last_size.0);
+            let (offset, maximum) = self.tabs[position].scrollback_bounds();
             scrollbar_view_from_geometry(scrollbar_geometry(
                 &layout,
-                usize::from(tab.last_size.0),
-                tab.parser.screen().scrollback(),
+                visible_rows,
+                offset,
+                maximum,
             ))
         });
         let settings = self.settings_open.then(|| {
@@ -1451,6 +1565,13 @@ impl ApplicationHandler<UnixWake> for UnixApp {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 self.last_cursor = (position.x, position.y);
+                if self.scroll_drag.is_some() {
+                    self.drag_scrollbar(position.y as i32);
+                }
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                let (x, y) = self.last_cursor;
+                self.mouse_wheel(x, y, delta);
             }
             WindowEvent::MouseInput {
                 state: ElementState::Pressed,
@@ -1468,6 +1589,13 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                 } else {
                     self.handle_content_click(x, y, window_height);
                 }
+            }
+            WindowEvent::MouseInput {
+                state: ElementState::Released,
+                button: MouseButton::Left,
+                ..
+            } => {
+                self.end_scroll_drag();
             }
             _ => {}
         }
