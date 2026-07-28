@@ -54,7 +54,7 @@ use windows_sys::Win32::{
 };
 
 use crate::commands::{
-    BACKSPACE_INPUT, has_option, last_positional, option_value, parse_new_command,
+    BACKSPACE_INPUT, has_option, option_value, parse_new_command,
     parse_tab_environment, positional_values, screenshot_output_path,
 };
 use crate::control_dispatch::{ControlHost, dispatch_shared_command, render_format};
@@ -72,7 +72,7 @@ use crate::operations::{
 };
 use crate::protocol::{IpcRequest, IpcResponse};
 use crate::settings::{AppConfig, config_path, load_config, save_config};
-use crate::tab_tree::{TabTreeNode, TabTreeRow, tree_rows, would_create_cycle};
+use crate::tab_tree::{TabTreeNode, TabTreeRow, tree_rows};
 use crate::terminal_observation::TerminalProcessState;
 use crate::terminal_runtime::{TerminalLaunch, TerminalTab};
 use crate::terminal_selection::{
@@ -1725,31 +1725,6 @@ impl AppState {
     fn tree_row_position(&self, row: usize) -> Option<usize> {
         let id = self.tree_rows().get(row)?.id;
         self.tabs.iter().position(|tab| tab.id == id)
-    }
-
-    fn set_tab_parent(&mut self, child_id: u64, parent_id: Option<u64>) -> Result<()> {
-        let Some(child_position) = self.tabs.iter().position(|tab| tab.id == child_id) else {
-            anyhow::bail!("can't find child tab: @{child_id}");
-        };
-        if let Some(parent_id) = parent_id {
-            if !self.tabs.iter().any(|tab| tab.id == parent_id) {
-                anyhow::bail!("can't find parent tab: @{parent_id}");
-            }
-            if would_create_cycle(&self.tree_nodes(), child_id, parent_id) {
-                anyhow::bail!("moving @{child_id} under @{parent_id} would create a cycle");
-            }
-        }
-        let previous_parent_id = self.tabs[child_position].parent_id;
-        self.tabs[child_position].parent_id = parent_id;
-        self.event_journal.commit(
-            EventKind::TabParent,
-            Some(child_id),
-            serde_json::json!({
-                "previous_parent_id": previous_parent_id,
-                "parent_id": parent_id,
-            }),
-        );
-        Ok(())
     }
 
     fn active_position(&self) -> Option<usize> {
@@ -4352,9 +4327,8 @@ impl AppState {
                 "page-down"
             };
             if let Ok(offset) = self.tabs[position].scroll_viewport(action, None) {
-                self.commit_viewport_event(position, offset, "scrollbar-track");
+                self.on_viewport_scrolled(position, offset, "scrollbar-track");
             }
-            unsafe { InvalidateRect(self.window, ptr::null(), 0) };
         }
         true
     }
@@ -4370,8 +4344,7 @@ impl AppState {
         let offset = scrollback_for_thumb_top(geometry, y - drag.thumb_grab_offset, maximum);
         if let Some(position) = self.active_position() {
             let offset = self.tabs[position].set_scrollback(offset);
-            self.commit_viewport_event(position, offset, "scrollbar-drag");
-            unsafe { InvalidateRect(self.window, ptr::null(), 0) };
+            self.on_viewport_scrolled(position, offset, "scrollbar-drag");
         }
     }
 
@@ -4409,22 +4382,8 @@ impl AppState {
             .scroll_viewport(action, Some(rows))
             .unwrap_or(before);
         if after != before {
-            self.cancel_terminal_selection(true);
-            self.commit_viewport_event(position, after, "mouse-wheel");
-            unsafe { InvalidateRect(self.window, ptr::null(), 0) };
+            self.on_viewport_scrolled(position, after, "mouse-wheel");
         }
-    }
-
-    fn commit_viewport_event(&mut self, position: usize, offset: usize, source: &str) {
-        let id = self.tabs[position].id;
-        self.event_journal.commit(
-            EventKind::TerminalViewport,
-            Some(id),
-            serde_json::json!({
-                "scrollback_offset": offset,
-                "source": source,
-            }),
-        );
     }
 
     fn terminal_cell_at(&self, x: i32, y: i32) -> Option<(u16, u16)> {
@@ -6443,6 +6402,41 @@ impl ControlHost for AppState {
         self.parent_id_from_target(target)
             .map_err(|error| format!("{error:#}"))
     }
+
+    fn event_journal(&self) -> &EventJournal {
+        &self.event_journal
+    }
+
+    fn event_journal_mut(&mut self) -> &mut EventJournal {
+        &mut self.event_journal
+    }
+
+    fn request_ui_redraw(&mut self) {
+        unsafe { InvalidateRect(self.window, ptr::null(), 0) };
+    }
+
+    fn ui_snapshot_json(&mut self) -> Option<String> {
+        Some(self.ui_snapshot())
+    }
+
+    fn on_viewport_scrolled(&mut self, position: usize, offset: usize, source: &str) {
+        if self
+            .terminal_selection
+            .is_some_and(|selection| selection.tab_id == self.tabs[position].id)
+        {
+            self.cancel_terminal_selection(true);
+        }
+        let id = self.tabs[position].id;
+        self.event_journal_mut().commit(
+            EventKind::TerminalViewport,
+            Some(id),
+            serde_json::json!({
+                "scrollback_offset": offset,
+                "source": source,
+            }),
+        );
+        self.request_ui_redraw();
+    }
 }
 
 impl AppState {
@@ -6556,128 +6550,6 @@ impl AppState {
                     }
                 }
             }
-            "next" | "next-window" => self.select_adjacent(1),
-            "prev" | "previous-window" => self.select_adjacent(-1),
-            "renamew" | "rename-window" => {
-                let Some(name) = last_positional(args, &["-t"]) else {
-                    return IpcResponse::failure("usage: rename-window [-t target] new-name");
-                };
-                let Some(position) = self.target_position(option_value(args, "-t")) else {
-                    return IpcResponse::failure("can't find window");
-                };
-                let id = self.tabs[position].id;
-                let previous_name = self.tabs[position].title.clone();
-                self.tabs[position].title = name.to_owned();
-                self.event_journal.commit(
-                    EventKind::TabRenamed,
-                    Some(id),
-                    serde_json::json!({
-                        "previous_name": previous_name,
-                        "name": name,
-                    }),
-                );
-                IpcResponse::success("")
-            }
-            "set-tab-note" => {
-                let Some(position) = self.target_position(option_value(args, "-t")) else {
-                    return IpcResponse::failure("can't find tab");
-                };
-                let note = positional_values(args, &["-t"], &[]).join(" ");
-                let id = self.tabs[position].id;
-                let previous_note = mem::replace(&mut self.tabs[position].note, note.clone());
-                self.event_journal.commit(
-                    EventKind::TabNote,
-                    Some(id),
-                    serde_json::json!({
-                        "previous_note": previous_note,
-                        "note": note,
-                    }),
-                );
-                unsafe { InvalidateRect(self.window, ptr::null(), 0) };
-                IpcResponse::success("")
-            }
-            "show-tab-note" => {
-                let Some(position) = self.target_position(option_value(args, "-t")) else {
-                    return IpcResponse::failure("can't find tab");
-                };
-                IpcResponse::success(self.tabs[position].note.clone())
-            }
-            "set-tab-parent" => {
-                let Some(child_position) = self.target_position(option_value(args, "-t")) else {
-                    return IpcResponse::failure("can't find child tab");
-                };
-                let Some(parent_target) = option_value(args, "--parent") else {
-                    return IpcResponse::failure(
-                        "usage: set-tab-parent -t child --parent parent|root",
-                    );
-                };
-                let parent_id = match self.parent_id_from_target(parent_target) {
-                    Ok(parent_id) => parent_id,
-                    Err(error) => return IpcResponse::failure(format!("{error:#}")),
-                };
-                let child_id = self.tabs[child_position].id;
-                match self.set_tab_parent(child_id, parent_id) {
-                    Ok(()) => {
-                        unsafe { InvalidateRect(self.window, ptr::null(), 0) };
-                        IpcResponse::success("")
-                    }
-                    Err(error) => IpcResponse::failure(format!("{error:#}")),
-                }
-            }
-            "show-tab-parent" => {
-                let Some(position) = self.target_position(option_value(args, "-t")) else {
-                    return IpcResponse::failure("can't find tab");
-                };
-                IpcResponse::success(
-                    self.tabs[position]
-                        .parent_id
-                        .map(|id| format!("@{id}"))
-                        .unwrap_or_else(|| "root".to_owned()),
-                )
-            }
-            "list-tab-tree" => {
-                let format = option_value(args, "-F").unwrap_or("#{window_id}:#{window_name}");
-                let rows = self.all_tree_rows();
-                IpcResponse::success(
-                    rows.iter()
-                        .filter_map(|row| {
-                            let tab = self.tabs.iter().find(|tab| tab.id == row.id)?;
-                            let branch = if row.depth == 0 {
-                                String::new()
-                            } else {
-                                let mut branch = row
-                                    .guides
-                                    .iter()
-                                    .map(|continues| if *continues { "│ " } else { "  " })
-                                    .collect::<String>();
-                                branch.push_str(if row.is_last { "└─ " } else { "├─ " });
-                                branch
-                            };
-                            let rendered = render_format(
-                                format,
-                                tab,
-                                &self.session_name,
-                                self.active == Some(tab.id),
-                            )
-                            .replace("#{tab_depth}", &row.depth.to_string())
-                            .replace(
-                                "#{tab_has_children}",
-                                if self
-                                    .tabs
-                                    .iter()
-                                    .any(|child| child.parent_id == Some(tab.id))
-                                {
-                                    "1"
-                                } else {
-                                    "0"
-                                },
-                            );
-                            Some(format!("{branch}{rendered}"))
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n"),
-                )
-            }
             "get-settings" => IpcResponse::success(
                 serde_json::to_string_pretty(&serde_json::json!({
                     "terminal_font_family": self.config.terminal_font_family,
@@ -6718,93 +6590,6 @@ impl AppState {
                 }
                 unsafe { InvalidateRect(self.window, ptr::null(), 0) };
                 IpcResponse::success(self.ui_snapshot())
-            }
-            "scroll-pane" => {
-                let Some(position) = self.target_position(option_value(args, "-t")) else {
-                    return IpcResponse::failure("can't find pane");
-                };
-                let values = positional_values(args, &["-t"], &[]);
-                let Some(action) = values.first().copied() else {
-                    return IpcResponse::failure(
-                        "usage: scroll-pane [-t target] \
-                         up|down|page-up|page-down|top|bottom [rows]",
-                    );
-                };
-                if values.len() > 2 {
-                    return IpcResponse::failure("scroll-pane accepts at most one row count");
-                }
-                let count = match values.get(1) {
-                    Some(value) => match value.parse::<usize>() {
-                        Ok(count) if count > 0 => Some(count),
-                        _ => {
-                            return IpcResponse::failure(
-                                "scroll-pane row count must be a positive integer",
-                            );
-                        }
-                    },
-                    None => None,
-                };
-                match self.tabs[position].scroll_viewport(action, count) {
-                    Ok(offset) => {
-                        self.commit_viewport_event(position, offset, "control");
-                        if self
-                            .terminal_selection
-                            .is_some_and(|selection| selection.tab_id == self.tabs[position].id)
-                        {
-                            self.cancel_terminal_selection(true);
-                        }
-                        unsafe { InvalidateRect(self.window, ptr::null(), 0) };
-                        IpcResponse::success(offset.to_string())
-                    }
-                    Err(error) => IpcResponse::failure(format!("{error:#}")),
-                }
-            }
-            "dump-cells" => {
-                let Some(position) = self.target_position(option_value(args, "-t")) else {
-                    return IpcResponse::failure("can't find pane");
-                };
-                let requested_row =
-                    option_value(args, "-r").and_then(|value| value.parse::<u16>().ok());
-                let tab = &self.tabs[position];
-                let screen = tab.parser.screen();
-                let mut cells = Vec::new();
-                for row in 0..tab.last_size.0 {
-                    if requested_row.is_some_and(|requested| requested != row) {
-                        continue;
-                    }
-                    for col in 0..tab.last_size.1 {
-                        let Some(cell) = screen.cell(row, col) else {
-                            continue;
-                        };
-                        let foreground = format!("{:?}", cell.fgcolor());
-                        let background = format!("{:?}", cell.bgcolor());
-                        if cell.contents().is_empty()
-                            && foreground == "Default"
-                            && background == "Default"
-                            && !cell.inverse()
-                        {
-                            continue;
-                        }
-                        cells.push(serde_json::json!({
-                            "row": row,
-                            "col": col,
-                            "text": cell.contents(),
-                            "fg": foreground,
-                            "bg": background,
-                            "inverse": cell.inverse(),
-                            "wide_continuation": cell.is_wide_continuation(),
-                        }));
-                    }
-                }
-                match serde_json::to_string_pretty(&serde_json::json!({
-                    "window_id": format!("@{}", tab.id),
-                    "rows": tab.last_size.0,
-                    "cols": tab.last_size.1,
-                    "cells": cells,
-                })) {
-                    Ok(json) => IpcResponse::success(json),
-                    Err(error) => IpcResponse::failure(error.to_string()),
-                }
             }
             "send-mouse" => {
                 let Some(position) = self.target_position(option_value(args, "-t")) else {
@@ -6866,43 +6651,6 @@ impl AppState {
                     IpcResponse::failure(
                         "terminal mouse input was not accepted because the pane is no longer writable",
                     )
-                }
-            }
-            "ui-snapshot" => IpcResponse::success(self.ui_snapshot()),
-            "read-events" => {
-                let Some(epoch) = option_value(args, "--epoch") else {
-                    return IpcResponse::failure("read-events requires --epoch");
-                };
-                let Some(after) =
-                    option_value(args, "--after").and_then(|value| value.parse::<u64>().ok())
-                else {
-                    return IpcResponse::failure("read-events requires a numeric --after sequence");
-                };
-                let limit = match option_value(args, "--limit") {
-                    Some(value) => match value.parse::<usize>() {
-                        Ok(limit) if (1..=1_024).contains(&limit) => limit,
-                        _ => {
-                            return IpcResponse::failure(
-                                "read-events --limit must be from 1 to 1024",
-                            );
-                        }
-                    },
-                    None => 256,
-                };
-                match self.event_journal.read_after(epoch, after, limit) {
-                    Ok(events) => IpcResponse::success(
-                        serde_json::to_string_pretty(&serde_json::json!({
-                            "position": self.event_journal.position(),
-                            "events": events,
-                        }))
-                        .unwrap_or_default(),
-                    ),
-                    Err(error) => IpcResponse::typed_failure(
-                        error.to_json().to_string(),
-                        error.code(),
-                        "precondition",
-                        false,
-                    ),
                 }
             }
             "focus" => {
@@ -7417,16 +7165,6 @@ impl AppState {
                 Ok(()) => IpcResponse::success(workspace_path().display().to_string()),
                 Err(error) => IpcResponse::failure(format!("{error:#}")),
             },
-            "workspace-info" => IpcResponse::success(
-                serde_json::to_string_pretty(&serde_json::json!({
-                    "path": workspace_path(),
-                    "version": 1,
-                    "tab_count": self.tabs.len(),
-                    "active_id": self.active.map(|id| format!("@{id}")),
-                    "restore_behavior": "restart-processes",
-                }))
-                .unwrap_or_default(),
-            ),
             "shutdown" => {
                 if let Err(error) = self.persist_workspace() {
                     return IpcResponse::failure(format!(
@@ -7460,18 +7198,10 @@ impl AppState {
         let Some(position) = self.adjacent_position(direction) else {
             return IpcResponse::failure("no windows");
         };
-        if self.proxy_edit_target.is_some() {
-            self.close_proxy_editor();
+        match self.select_tab_at(position) {
+            Ok(()) => IpcResponse::success(""),
+            Err(error) => IpcResponse::failure(error),
         }
-        self.save_active_composer();
-        let id = self.tabs[position].id;
-        self.finish_note_edit(false);
-        self.cancel_terminal_selection(true);
-        self.active = Some(id);
-        self.load_active_composer();
-        self.event_journal
-            .commit(EventKind::TabSelected, Some(id), serde_json::json!({}));
-        IpcResponse::success("")
     }
 }
 
