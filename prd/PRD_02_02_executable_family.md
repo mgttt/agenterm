@@ -58,9 +58,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       reconnects in place with the same GUI PID/HWND after a server epoch
       restart and adopts the new causal bootstrap/lease identity. Tabs
       visibility and drag width remain client-owned and persist through the
-      shared settings file, while mouse-wheel history navigation mutates the
-      server-owned terminal viewport and PTY resize follows the effective
-      layout. Tab rows use the shared responsive row geometry for painting and
+      shared settings file; hiding Tabs also hides its toolbar instead of
+      overlaying terminal content, while an always-available checked
+      `Toggle Tabs` system-menu item and a host-owned bottom status recovery
+      segment prevent a persisted hidden state from trapping the user.
+      Mouse-wheel history navigation mutates the server-owned terminal
+      viewport and PTY resize follows the effective layout. Tab rows use the
+      shared responsive row geometry for painting and
       hit-testing and expose `+`, `Edit`, and `Close`: add creates and selects
       a direct child through typed server control and immediately opens that
       child's inline editor; closing a live child requires a non-blocking

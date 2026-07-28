@@ -347,6 +347,46 @@ try {
         )
     }
 
+    Write-Host 'STEP recover hidden Tabs from the system menu and status bar'
+    $tabsButton = [AgenTermRemoteUiNativeTest]::GetDlgItem(
+        $gui.MainWindowHandle, 2104
+    )
+    $settingsButton = [AgenTermRemoteUiNativeTest]::GetDlgItem(
+        $gui.MainWindowHandle, 2112
+    )
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $tabsButton, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero
+    ) | Out-Null
+    if ([AgenTermRemoteUiNativeTest]::IsWindowVisible($tabsButton) -or
+        [AgenTermRemoteUiNativeTest]::IsWindowVisible($settingsButton)) {
+        throw 'hiding Tabs left sidebar toolbar controls visible over the terminal'
+    }
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, 0x0112, [IntPtr]0x1F20, [IntPtr]::Zero
+    ) | Out-Null
+    if (-not [AgenTermRemoteUiNativeTest]::IsWindowVisible($tabsButton)) {
+        throw 'system-menu Toggle Tabs did not restore the sidebar'
+    }
+
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $tabsButton, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero
+    ) | Out-Null
+    $hiddenTabsClient = [AgenTermRemoteUiNativeTest+Rect]::new()
+    if (-not [AgenTermRemoteUiNativeTest]::GetClientRect(
+            $gui.MainWindowHandle, [ref]$hiddenTabsClient
+        )) {
+        throw 'GetClientRect failed for hidden Tabs recovery'
+    }
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, 0x0201, [IntPtr]::Zero,
+        [AgenTermRemoteUiNativeTest]::MousePoint(
+            36, $hiddenTabsClient.Bottom - 13
+        )
+    ) | Out-Null
+    if (-not [AgenTermRemoteUiNativeTest]::IsWindowVisible($tabsButton)) {
+        throw 'bottom status Tabs recovery segment did not restore the sidebar'
+    }
+
     Write-Host 'STEP navigate Terminal, Composer, and Tabs without the mouse'
     $focusMessage = 0x8003
     $shortcutMessage = 0x8002
@@ -410,9 +450,6 @@ try {
     Write-Host 'STEP preview, cancel, and apply client-owned Settings'
     $replacementComposer = [AgenTermRemoteUiNativeTest]::GetDlgItem(
         $gui.MainWindowHandle, 2101
-    )
-    $settingsButton = [AgenTermRemoteUiNativeTest]::GetDlgItem(
-        $gui.MainWindowHandle, 2112
     )
     $settingsFont = [AgenTermRemoteUiNativeTest]::GetDlgItem(
         $gui.MainWindowHandle, 2113

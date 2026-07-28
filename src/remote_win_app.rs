@@ -33,20 +33,21 @@ use windows_sys::Win32::{
             VK_F10, VK_F11, VK_F12, VK_HOME, VK_LEFT, VK_NEXT, VK_PRIOR, VK_RIGHT, VK_UP,
         },
         WindowsAndMessaging::{
-            CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DestroyWindow,
-            DispatchMessageW, ES_AUTOVSCROLL, ES_MULTILINE, ES_WANTRETURN, EnableMenuItem,
-            GWLP_USERDATA, GetClientRect, GetCursorPos, GetForegroundWindow, GetMessageW,
-            GetSystemMenu, GetWindowLongPtrW, GetWindowTextLengthW, GetWindowTextW, IDC_ARROW,
-            IDC_SIZEWE, InsertMenuW, LoadCursorW, LoadIconW, MF_BYCOMMAND, MF_ENABLED, MF_GRAYED,
-            MF_SEPARATOR, MF_STRING, MSG, MoveWindow, PostQuitMessage, RegisterClassW, SC_CLOSE,
-            SW_HIDE, SW_SHOW, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
-            SWP_NOZORDER, SWP_SHOWWINDOW, SendMessageW, SetCursor, SetForegroundWindow, SetTimer,
-            SetWindowLongPtrW, SetWindowPos, SetWindowTextW, ShowWindow, TranslateMessage,
-            WM_CAPTURECHANGED, WM_CHAR, WM_CLOSE, WM_COMMAND, WM_COPY, WM_CREATE, WM_DESTROY,
-            WM_ERASEBKGND, WM_INITMENUPOPUP, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP,
-            WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY, WM_PAINT, WM_PASTE, WM_SETCURSOR,
-            WM_SETFOCUS, WM_SIZE, WM_SYSCOMMAND, WM_TIMER, WNDCLASSW, WS_BORDER, WS_CHILD,
-            WS_CLIPCHILDREN, WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE, WS_VSCROLL,
+            CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CheckMenuItem, CreateWindowExW, DefWindowProcW,
+            DestroyWindow, DispatchMessageW, ES_AUTOVSCROLL, ES_MULTILINE, ES_WANTRETURN,
+            EnableMenuItem, GWLP_USERDATA, GetClientRect, GetCursorPos, GetForegroundWindow,
+            GetMessageW, GetSystemMenu, GetWindowLongPtrW, GetWindowTextLengthW, GetWindowTextW,
+            IDC_ARROW, IDC_SIZEWE, InsertMenuW, LoadCursorW, LoadIconW, MF_BYCOMMAND, MF_CHECKED,
+            MF_ENABLED, MF_GRAYED, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MSG, MoveWindow,
+            PostQuitMessage, RegisterClassW, SC_CLOSE, SW_HIDE, SW_SHOW, SW_SHOWNOACTIVATE,
+            SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SendMessageW,
+            SetCursor, SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowPos,
+            SetWindowTextW, ShowWindow, TranslateMessage, WM_CAPTURECHANGED, WM_CHAR, WM_CLOSE,
+            WM_COMMAND, WM_COPY, WM_CREATE, WM_DESTROY, WM_ERASEBKGND, WM_INITMENUPOPUP,
+            WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY,
+            WM_PAINT, WM_PASTE, WM_SETCURSOR, WM_SETFOCUS, WM_SIZE, WM_SYSCOMMAND, WM_TIMER,
+            WNDCLASSW, WS_BORDER, WS_CHILD, WS_CLIPCHILDREN, WS_OVERLAPPEDWINDOW, WS_TABSTOP,
+            WS_VISIBLE, WS_VSCROLL,
         },
     },
 };
@@ -93,6 +94,7 @@ const TAB_CLOSE_CONFIRM_ID: usize = 2119;
 const TAB_CLOSE_CANCEL_ID: usize = 2120;
 const SYSTEM_MENU_COPY_ID: usize = 0x1f00;
 const SYSTEM_MENU_PASTE_ID: usize = 0x1f10;
+const SYSTEM_MENU_TOGGLE_TABS_ID: usize = 0x1f20;
 const CLIPBOARD_UNICODE_TEXT: u32 = 13;
 const TERMINAL_PASTE_LIMIT_BYTES: usize = 256 * 1024;
 const WM_APP_AUTOMATION_SHORTCUT: u32 = 0x8000 + 2;
@@ -710,13 +712,47 @@ impl RemoteWindowState {
 
     fn cwd_status_rect(&self) -> RECT {
         let status = self.layout_rects().3;
-        let width = (status.right - status.left).clamp(180, 420);
+        let recovery_width = if self.tabs_visible { 0 } else { 72 };
+        let width = (status.right - status.left - recovery_width).clamp(0, 420);
         RECT {
             left: status.right - width,
             top: status.top,
             right: status.right,
             bottom: status.bottom,
         }
+    }
+
+    fn tabs_recovery_rect(&self) -> Option<RECT> {
+        if self.tabs_visible {
+            return None;
+        }
+        let status = self.layout_rects().3;
+        Some(RECT {
+            left: status.left,
+            top: status.top,
+            right: (status.left + 72).min(status.right),
+            bottom: status.bottom,
+        })
+    }
+
+    fn set_tabs_visible(&mut self, visible: bool) {
+        self.finish_cwd_editor(false);
+        self.finish_tab_edit(false);
+        self.tabs_visible = visible;
+        self.config.tabs_visible = visible;
+        if let Err(error) = save_config(&self.config) {
+            self.last_error = Some(format!("Tabs visibility save failed: {error:#}"));
+        }
+        if !visible && self.focus_surface == RemoteFocusSurface::Tabs {
+            self.focus_surface = RemoteFocusSurface::Terminal;
+            unsafe { SetFocus(self.window) };
+        }
+        self.layout();
+        self.resize_active_terminal();
+    }
+
+    fn toggle_tabs(&mut self) {
+        self.set_tabs_visible(!self.tabs_visible);
     }
 
     fn layout(&mut self) {
@@ -776,6 +812,14 @@ impl RemoteWindowState {
                     SW_HIDE
                 },
             );
+            let sidebar_command =
+                if self.tabs_visible && !self.window_close_pending && !self.settings_open {
+                    SW_SHOW
+                } else {
+                    SW_HIDE
+                };
+            ShowWindow(self.tabs_button, sidebar_command);
+            ShowWindow(self.settings, sidebar_command);
         }
         self.layout_tab_editor();
         self.layout_close_controls();
@@ -939,8 +983,13 @@ impl RemoteWindowState {
         unsafe {
             ShowWindow(self.edit, command);
             ShowWindow(self.send, command);
-            ShowWindow(self.tabs_button, command);
-            ShowWindow(self.settings, command);
+            let sidebar_command = if visible && self.tabs_visible {
+                SW_SHOW
+            } else {
+                SW_HIDE
+            };
+            ShowWindow(self.tabs_button, sidebar_command);
+            ShowWindow(self.settings, sidebar_command);
             ShowWindow(
                 self.new_tab,
                 if visible && self.tabs_visible && self.pending_close_tab_id.is_none() {
@@ -1959,13 +2008,7 @@ impl RemoteWindowState {
             }
             RemoteFocusSurface::Tabs => {
                 if !self.tabs_visible {
-                    self.tabs_visible = true;
-                    self.config.tabs_visible = true;
-                    if let Err(error) = save_config(&self.config) {
-                        self.last_error = Some(format!("Tabs visibility save failed: {error:#}"));
-                    }
-                    self.layout();
-                    self.resize_active_terminal();
+                    self.set_tabs_visible(true);
                 }
                 self.focus_surface = RemoteFocusSurface::Tabs;
                 unsafe { SetFocus(self.window) };
@@ -2024,6 +2067,16 @@ impl RemoteWindowState {
         }
         let (copy, paste) = self.system_menu_state();
         unsafe {
+            CheckMenuItem(
+                menu,
+                SYSTEM_MENU_TOGGLE_TABS_ID as u32,
+                MF_BYCOMMAND
+                    | if self.tabs_visible {
+                        MF_CHECKED
+                    } else {
+                        MF_UNCHECKED
+                    },
+            );
             EnableMenuItem(
                 menu,
                 SYSTEM_MENU_COPY_ID as u32,
@@ -2404,10 +2457,25 @@ impl RemoteWindowState {
             "Disconnected · reconnecting".to_owned()
         };
         let cwd_status = self.cwd_status_rect();
+        let tabs_recovery = self.tabs_recovery_rect();
+        if let Some(recovery) = tabs_recovery {
+            frame(device, &recovery, palette.active_border.colorref());
+            draw_text(
+                device,
+                RECT {
+                    left: recovery.left + MARGIN,
+                    top: recovery.top,
+                    right: recovery.right - MARGIN,
+                    bottom: recovery.bottom,
+                },
+                "Tabs",
+                palette.muted_text.colorref(),
+            );
+        }
         draw_text(
             device,
             RECT {
-                left: status.left + MARGIN,
+                left: tabs_recovery.map_or(status.left + MARGIN, |rect| rect.right + MARGIN),
                 top: status.top,
                 right: cwd_status.left - MARGIN,
                 bottom: status.bottom,
@@ -2829,6 +2897,15 @@ unsafe extern "system" fn window_proc(
                 }
                 let x = (lparam as u32 & 0xffff) as i16 as i32;
                 let y = ((lparam as u32 >> 16) & 0xffff) as i16 as i32;
+                if state.tabs_recovery_rect().is_some_and(|rect| {
+                    x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom
+                }) {
+                    state.set_tabs_visible(true);
+                    unsafe {
+                        windows_sys::Win32::Graphics::Gdi::InvalidateRect(window, ptr::null(), 0)
+                    };
+                    return 0;
+                }
                 let cwd_status = state.cwd_status_rect();
                 let in_cwd_status = x >= cwd_status.left
                     && x < cwd_status.right
@@ -2981,6 +3058,15 @@ unsafe extern "system" fn window_proc(
             0
         }
         WM_SYSCOMMAND => match wparam & 0xfff0 {
+            SYSTEM_MENU_TOGGLE_TABS_ID => {
+                if let Some(state) = state_mut(window) {
+                    state.toggle_tabs();
+                    unsafe {
+                        windows_sys::Win32::Graphics::Gdi::InvalidateRect(window, ptr::null(), 0)
+                    };
+                }
+                0
+            }
             SYSTEM_MENU_COPY_ID => {
                 if let Some(state) = state_mut(window) {
                     state.system_menu_copy();
@@ -3078,16 +3164,7 @@ unsafe extern "system" fn window_proc(
                         state.open_settings();
                     }
                     TABS_ID => {
-                        state.finish_cwd_editor(false);
-                        state.finish_tab_edit(false);
-                        state.tabs_visible = !state.tabs_visible;
-                        state.config.tabs_visible = state.tabs_visible;
-                        if let Err(error) = save_config(&state.config) {
-                            state.last_error =
-                                Some(format!("Tabs visibility save failed: {error:#}"));
-                        }
-                        state.layout();
-                        state.resize_active_terminal();
+                        state.toggle_tabs();
                     }
                     TAB_SAVE_ID => state.finish_tab_edit(true),
                     TAB_CANCEL_ID => state.finish_tab_edit(false),
@@ -3208,10 +3285,20 @@ fn install_system_menu(window: HWND) -> Result<()> {
             menu,
             SC_CLOSE,
             MF_BYCOMMAND | MF_STRING,
-            SYSTEM_MENU_COPY_ID,
-            wide("Copy\tCtrl+C").as_ptr(),
+            SYSTEM_MENU_TOGGLE_TABS_ID,
+            wide("Toggle Tabs").as_ptr(),
         )
     } == 0
+        || unsafe { InsertMenuW(menu, SC_CLOSE, MF_BYCOMMAND | MF_SEPARATOR, 0, ptr::null()) } == 0
+        || unsafe {
+            InsertMenuW(
+                menu,
+                SC_CLOSE,
+                MF_BYCOMMAND | MF_STRING,
+                SYSTEM_MENU_COPY_ID,
+                wide("Copy\tCtrl+C").as_ptr(),
+            )
+        } == 0
         || unsafe {
             InsertMenuW(
                 menu,
@@ -3223,7 +3310,7 @@ fn install_system_menu(window: HWND) -> Result<()> {
         } == 0
         || unsafe { InsertMenuW(menu, SC_CLOSE, MF_BYCOMMAND | MF_SEPARATOR, 0, ptr::null()) } == 0
     {
-        anyhow::bail!("could not add Copy and Paste to the window system menu");
+        anyhow::bail!("could not add Toggle Tabs, Copy, and Paste to the window system menu");
     }
     Ok(())
 }

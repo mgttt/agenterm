@@ -1638,7 +1638,9 @@ S4  [~] server-owned 单活 interactive UI lease 已交付 attach/idempotent
         且 replacement GUI 恢复同一 server/tab/terminal marker；同一 GUI
         PID/HWND 也已通过 server epoch 重启、重新 bootstrap/lease 的
         in-place reconnect 黑盒；client-owned Tabs 显隐/宽度持久化、拖动
-        PTY resize、server-owned 滚轮 viewport，以及标签行内 title/note
+        PTY resize、隐藏时不覆盖终端的 toolbar、始终可用且带 checked state
+        的系统菜单 `Toggle Tabs`、底部状态栏恢复入口、server-owned 滚轮
+        viewport，以及标签行内 title/note
         Edit -> Save/Cancel 的稳定 ID 写回也已进入同一公开旅程。关闭窗口的
         Keep Server Running（默认）/ Stop Server & Exit / Cancel 三分支已由
         非阻塞原生控件交付，并先同步 Composer 草稿；三条路径均有 public
