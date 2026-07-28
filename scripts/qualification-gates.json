@@ -120,6 +120,8 @@
         "script.rhai-pure",
         "script.rhai-observe",
         "script.fleet-v2",
+        "script.fleet-tabs-set-note",
+        "script.direct-entry",
         "script.north-star",
         "script.rhai-deny-budget",
         "script.rhai-framed",

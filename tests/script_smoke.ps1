@@ -9,6 +9,8 @@ $declaredEvidence = @(
     'script.rhai-pure'
     'script.rhai-observe'
     'script.fleet-v2'
+    'script.fleet-tabs-set-note'
+    'script.direct-entry'
     'script.north-star'
     'script.rhai-deny-budget'
     'script.rhai-framed'
@@ -1770,6 +1772,7 @@ let receipt = fleet.tabs.set_note($fleetTabIdLiteral, $fleetNoteLiteral);
     )) -ne 'true') {
         throw 'typed tab-note mutation did not restore the isolated fixture'
     }
+    Write-Evidence 'script.fleet-tabs-set-note'
     Write-Evidence 'script.fleet-v2'
 
     Write-Host 'STEP direct agenterm-script north-star named task'
@@ -1837,6 +1840,7 @@ let receipt = fleet.tabs.set_note($fleetTabIdLiteral, $fleetNoteLiteral);
             $northStarShow.tasks[0].profile -ne 'local') {
             throw 'north-star task list/show lost inspectable manifest facts'
         }
+        Write-Evidence 'script.direct-entry'
 
         $northStarRun = Invoke-DirectScript @(
             'task', 'run', 'daily-check',

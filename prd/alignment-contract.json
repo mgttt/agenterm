@@ -267,7 +267,7 @@
       "kind": "behavior",
       "status": "shipped",
       "evidence_mode": "black-box",
-      "prd": "`agenterm-script.exe` executes pure Rhai",
+      "prd": "explicit `pure` profile provides deterministic JSON-compatible",
       "evidence_ids": ["script.rhai-pure"]
     },
     {
@@ -339,15 +339,15 @@
       "kind": "behavior",
       "status": "shipped",
       "evidence_mode": "black-box",
-      "prd": "`fleet.tabs.set_note` targets a stable tab ID and returns a native receipt, causal `tab.note` event and verified tab snapshot",
-      "evidence_ids": ["script.fleet-v2"]
+      "prd": "`fleet.tabs.set_note` returns a receipt, causal `tab.note` event",
+      "evidence_ids": ["script.fleet-tabs-set-note"]
     },
     {
       "id": "scripting.fs-lifecycle",
       "kind": "behavior",
       "status": "shipped",
       "evidence_mode": "black-box",
-      "prd": "`std::fs` provides explicit-target directory creation, copy, rename, file removal and tree removal while rejecting workspace-wide cleanup",
+      "prd": "blocking `read`, `read_to_string`, text/bytes `write`, `exists`",
       "evidence_ids": ["script.fs-lifecycle"]
     },
     {
@@ -355,7 +355,7 @@
       "kind": "architecture",
       "status": "shipped",
       "evidence_mode": "black-box",
-      "prd": "`rhai::runtime` exposes an invocation-owned temporary root and same-volume atomic replacement with normal, crash, parent-exit and recovery cleanup evidence",
+      "prd": "`temp_dir` exposes only the current invocation-owned directory",
       "evidence_ids": ["script.runtime-lifecycle"]
     },
     {
@@ -363,15 +363,15 @@
       "kind": "behavior",
       "status": "shipped",
       "evidence_mode": "black-box",
-      "prd": "`agenterm-script.exe` is the public script and named-task CLI while worker modes remain internal implementation entry points",
-      "evidence_ids": ["script.north-star"]
+      "prd": "`agenterm-script.exe` is the public `run`, `eval`, `check`, `api`, and",
+      "evidence_ids": ["script.direct-entry"]
     },
     {
       "id": "scripting.north-star",
-      "kind": "journey",
+      "kind": "behavior",
       "status": "shipped",
       "evidence_mode": "black-box",
-      "prd": "the daily-check named task closes Unicode config, concurrent argv-safe children, loopback HTTP, JSON, Fleet evidence, atomic output and cleanup in one public invocation",
+      "prd": "public `examples/script-daily-check` north-star task combines Unicode",
       "evidence_ids": ["script.north-star"]
     },
     {

@@ -402,6 +402,8 @@ Migration ledger:
     local UI mutation and typed tab-note mutation with native request/operation
     identity, receipt, correlated event, verified snapshot, restoration, and
     audit attribution.
+  - [x] `fleet.tabs.set_note` returns a receipt, causal `tab.note` event, and
+    verified tab snapshot for one stable tab ID.
     Destructive failure/restart and future operation families remain open.
 - [ ] local mode proves the general runtime loop while regression fixtures keep
   pure deterministic and observe read-only.
