@@ -1,10 +1,14 @@
 # AgenTerm v0.1.10 公开计划
 
 状态：范围已冻结，等待 v0.1.9 收口后实施
-工作主题：**Rhai 自举工具链与可验证的只读 Agent 桥梁**
+工作主题：**Rhai 完整接替 PowerShell，并建立可验证的只读 Agent 桥梁**
 版本定位：在 v0.1.9 完善通用 Rhai 运行时、模块任务与机器可读工具
 schema 后，让 AgenTerm 首次用自己的脚本运行时驱动完整开发生命周期，
 同时把同一份 Fleet 事实稳定地开放给外部 Agent 客户端。
+
+本版不可拆分的第一交付目标是 **PowerShell 归零**。MCP 是可并行推进的
+第二产品线；若资源、时间或共享热点发生冲突，先保证 Rhai 自举、迁移与
+归零闭环，缩减 MCP 表面而不是保留 PowerShell 尾巴。
 
 本文是版本执行计划与决策记录，不是产品事实，也不得成为实现依赖。
 评审接受的能力、边界和验收条件必须同步进入对应 `PRD.md` 模块；完成后
@@ -16,11 +20,14 @@ v0.1.10 必须完成 Rhai 对仓库自有 PowerShell 自动化的替代，这不
 的候选项，也不能顺延为后续版本：
 
 - 截至 2026-07-29 的滚动基线为 **42 个受 Git 跟踪的 `.ps1`**：根目录
-  3 个、`scripts/` 活跃脚本 18 个、`tests/` 19 个、旧 PowerShell
-  archive 2 个；相较最初计划新增的 `tests/server_smoke.ps1` 也必须迁移；
+  3 个、`scripts/` 活跃脚本 17 个、`tests/` 20 个、旧 PowerShell
+  archive 2 个；v0.1.9 收口期间新增并最终纳入 Git 的脚本也必须迁移；
 - v0.1.10 开工提交冻结最终迁移清单；从该提交起，zero-PS1 漂移门既拒绝
   新增 `.ps1`，也拒绝从清单中遗漏、改名规避或把 PowerShell 藏进字符串；
 - 完成时 `git ls-files '*.ps1'` 必须返回空结果，archive 不作为例外；
+- Rhai task graph、`.bat` 薄入口、CI workflow 和发布链路不得再启动
+  `powershell.exe` / `pwsh.exe`，也不得通过命令字符串、临时脚本或下载
+  脚本变相保留 PowerShell 业务逻辑；
 - 已迁移实现由 Git 历史保存，不在活动工作树维护 PowerShell 影子副本；
 - `.bat`、Unix shell 和 CI YAML 可以作为平台薄入口，但不得包含业务规则；
 - 如果某个迁移暴露 Script Runtime 能力缺口，先补稳定 typed API，再继续
@@ -52,7 +59,7 @@ v0.1.10 不自动继承 v0.1.9 的所有未完成想法。任何 carry-over 都�
 ## 一、版本目录树
 
 ```text
-v0.1.10  Rhai 自举工具链与可验证的只读 Agent 桥梁
+v0.1.10  Rhai 完整接替 PowerShell 与可验证的只读 Agent 桥梁
 │
 ├─ 最高优先级：Rhai 完整接替仓库 PowerShell
 │  ├─ 建立全部 .ps1 入口、职责、调用者、输入输出和副作用清单
@@ -60,7 +67,8 @@ v0.1.10  Rhai 自举工具链与可验证的只读 Agent 桥梁
 │  ├─ build / lint / test / qualification / package / release 全部迁移
 │  ├─ 每项先双跑比较，再切换唯一入口并删除对应 .ps1
 │  ├─ agenterm.tasks.json 成为开发任务唯一机器可读目录
-│  └─ 完成门：仓库自有、可执行 .ps1 为零，并由漂移门持续保证
+│  ├─ 禁止 Rhai / CI / 薄入口反向调用 powershell.exe 或 pwsh.exe
+│  └─ 完成门：仓库自有 .ps1 与 PowerShell 执行依赖均为零
 │
 ├─ 最高优先级：可自举且跨平台的开发入口
 │  ├─ stage 0 仅定位 Rust 工具链并构建 agenterm-script.exe
@@ -220,6 +228,7 @@ v0.1.10 必须能够通过以下两条完整旅程解释自身价值。
 v0.1.10 public-ready 必须满足：
 
 - 仓库自有、可执行 `.ps1` 文件为零；
+- 从 bootstrap 到 release rehearsal 的进程树中不存在 PowerShell；
 - build、check、test、qualification、package、release 均有公开 Rhai task；
 - `agenterm.tasks.json` 可离线列出上述 task、依赖、平台和副作用分类；
 - 干净 Windows checkout 在不要求 PowerShell 的条件下完成 release
@@ -813,6 +822,8 @@ entry 是集成热点，只允许一个串行 owner 收口。
 ### 门零：PowerShell 退出与自举闭环
 
 - `git ls-files '*.ps1'` 返回空结果，测试、helper 和 archive 均无例外；
+- clean-checkout 资格运行的进程证据中不存在 `powershell.exe` /
+  `pwsh.exe`，Rhai、`.bat` 和 workflow 均无反向调用；
 - lint gate 拒绝新增 `.ps1` 和入口脚本中的业务规则回流；
 - 干净 checkout 只经 stage 0 + Rhai task 完成 build/check/qualification；
 - 开发机与 CI 使用同一 task ID、依赖图、预算和 evidence catalog；
