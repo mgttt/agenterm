@@ -13,6 +13,7 @@ $declaredEvidence = @(
     'cli.control-receipts'
     'cli.ui-bridge-contracts'
     'cli.ui-bootstrap'
+    'cli.ui-follow'
 )
 if ($ListEvidence) {
     $declaredEvidence
@@ -143,6 +144,8 @@ try {
         'wait-pane (expect-pane)',
         'set-composer',
         'ui-bootstrap',
+        'ui-deltas',
+        'ui-hello',
         'ui-snapshot'
     )) {
         if (-not $commands.Contains($expected)) {
@@ -181,15 +184,21 @@ try {
         $protocol.ui_bridge.ownership_mode -ne 'combined_gui_server' -or
         $protocol.ui_bridge.replaceable_ui -or
         $protocol.ui_bridge.target_server_executable -ne 'agenterm-server.exe' -or
-        $protocol.ui_bridge.bootstrap_snapshot -or
+        -not $protocol.ui_bridge.bootstrap_snapshot -or
+        -not $protocol.ui_bridge.ordered_deltas -or
+        $protocol.ui_bridge.reconnect -or
+        $protocol.ui_bridge.contract_schemas.hello -ne 1 -or
         $protocol.ui_bridge.contract_schemas.bootstrap -ne 1 -or
         $protocol.ui_bridge.contract_schemas.screen -ne 1 -or
+        $protocol.ui_bridge.contract_schemas.delta -ne 1 -or
         $protocol.ui_bridge.hard_limits.bootstrap_bytes -ne 8388608 -or
         $protocol.ui_bridge.hard_limits.tabs -ne 1024 -or
         $protocol.ui_bridge.hard_limits.screen_rows -ne 512 -or
         $protocol.ui_bridge.hard_limits.screen_columns -ne 512 -or
         $protocol.ui_bridge.hard_limits.screen_runs -ne 262144 -or
         $protocol.ui_bridge.hard_limits.screen_text_bytes -ne 4194304 -or
+        $protocol.ui_bridge.hard_limits.delta_bytes -ne 8388608 -or
+        $protocol.ui_bridge.hard_limits.delta_events -ne 64 -or
         $operationCatalog.schema_version -ne 1 -or
         -not $operationCatalog.classification_only -or
         $operationCatalog.authorization_policy) {
@@ -245,9 +254,105 @@ try {
         }
     }
     Write-Evidence 'cli.ui-bootstrap'
+
+    Write-Host 'STEP UI handshake and causal snapshot-follow'
+    $hello = Invoke-AgenTerm @(
+        'ui-hello', '--minimum', '1', '--maximum', '1',
+        '--client-id', "cli-smoke-$($run.RunId)"
+    ) | ConvertFrom-Json
+    if ($hello.schema_version -ne 1 -or
+        -not $hello.accepted -or
+        $hello.compatibility -ne 'compatible' -or
+        $hello.client_id -ne "cli-smoke-$($run.RunId)" -or
+        $hello.protocol_version -ne 1 -or
+        $hello.server_pid -ne $runningProtocol.pid -or
+        $hello.bootstrap_schema_version -ne 1 -or
+        $hello.delta_schema_version -ne 1 -or
+        @($hello.capabilities) -notcontains 'ordered_delta_poll') {
+        throw 'ui-hello did not negotiate a stable renderer contract'
+    }
+    $tooNew = Invoke-AgenTerm @(
+        'ui-hello', '--minimum', '2', '--maximum', '2',
+        '--client-id', "future-renderer-$($run.RunId)"
+    ) | ConvertFrom-Json
+    if ($tooNew.accepted -or $tooNew.compatibility -ne 'client_too_new') {
+        throw 'ui-hello did not report an incompatible future renderer explicitly'
+    }
+    $followTab = @($bootstrap.tabs | Where-Object title -eq $name)
+    if ($followTab.Count -ne 1) {
+        throw 'UI follow test could not resolve its stable tab'
+    }
+    $followNote = "ui-follow-$($run.RunId)"
+    Invoke-AgenTerm @(
+        'set-tab-note', '-t', $followTab[0].id, $followNote
+    ) | Out-Null
+    $deltas = Invoke-AgenTerm @(
+        'ui-deltas',
+        '--epoch', $hello.position.server_epoch,
+        '--after', "$($hello.position.sequence)",
+        '--limit', '64'
+    ) | ConvertFrom-Json
+    $previousSequence = [uint64]$hello.position.sequence
+    foreach ($event in @($deltas.events)) {
+        if ([uint64]$event.sequence -le $previousSequence) {
+            throw 'ui-deltas returned duplicated or unordered events'
+        }
+        $previousSequence = [uint64]$event.sequence
+    }
+    $followEvent = @(
+        $deltas.events |
+            Where-Object {
+                $_.kind -eq 'tab.note' -and
+                $_.tab_id -eq $followTab[0].id
+            } |
+            Select-Object -Last 1
+    )
+    $followUpdate = @(
+        $deltas.tab_updates |
+            Where-Object id -eq $followTab[0].id
+    )
+    $postBootstrap = Invoke-AgenTerm @('ui-bootstrap') | ConvertFrom-Json
+    $postTab = @(
+        $postBootstrap.tabs |
+            Where-Object id -eq $followTab[0].id
+    )
+    if ($deltas.schema_version -ne 1 -or
+        $deltas.server_epoch -ne $hello.position.server_epoch -or
+        $deltas.after_sequence -ne $hello.position.sequence -or
+        $deltas.through_sequence -ne $deltas.current_sequence -or
+        -not $deltas.complete -or $deltas.truncated -or
+        $followEvent.Count -ne 1 -or
+        $followUpdate.Count -ne 1 -or
+        $followUpdate[0].note -ne $followNote -or
+        $followUpdate[0].screen.generation -ne $deltas.current_sequence -or
+        $postBootstrap.position.sequence -ne $deltas.current_sequence -or
+        $postTab.Count -ne 1 -or
+        $postTab[0].note -ne $followUpdate[0].note -or
+        $postTab[0].screen.generation -ne $followUpdate[0].screen.generation) {
+        throw 'ui-deltas did not return causal event and post-state identity'
+    }
+    $restartError = Invoke-AgenTermExpectedFailure @(
+        'ui-deltas', '--epoch', 'definitely-stale-ui-epoch',
+        '--after', '0'
+    )
+    $futureError = Invoke-AgenTermExpectedFailure @(
+        'ui-deltas',
+        '--epoch', $deltas.server_epoch,
+        '--after', "$([uint64]$deltas.current_sequence + 1)"
+    )
+    if (-not $restartError.Contains('"code":"server_restart"') -or
+        -not $restartError.Contains('"current"') -or
+        -not $futureError.Contains('"code":"future_sequence"') -or
+        -not $futureError.Contains('"current"')) {
+        throw 'ui-deltas did not expose typed restart and future-position recovery'
+    }
+    Write-Evidence 'cli.ui-follow'
+
     $expectedOperations = @{
         'protocol.info' = 'observe'
+        'ui.hello' = 'observe'
         'ui.bootstrap' = 'observe'
+        'ui.deltas' = 'observe'
         'ui.tabs.show' = 'control'
         'ui.tabs.hide' = 'control'
         'ui.tabs.toggle' = 'control'

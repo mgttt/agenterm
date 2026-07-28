@@ -1600,13 +1600,15 @@ GUI ui.hello(build, protocol range, capabilities)
 迁移波次：
 
 ```text
-S0  [~] ownership inventory + typed discovery/negotiation 已交付；
-        renderer-neutral bootstrap/screen DTO、schema 与 hard limits 已交付，
-        current-state adapter 与实际 transport 待补
-S1  [~] current combined server 已能通过公共 `ui-bootstrap` 从同一
-        ControlHost/TerminalTab/EventJournal truth 生成 DTO；独立 state owner
-        与 delta adapter 待补
-S2  add hello/bootstrap/screen snapshot/event delta protocol
+S0  [x] ownership inventory + typed discovery/negotiation 已交付；
+        renderer-neutral hello/bootstrap/screen/delta DTO、schema 与 hard limits
+        已交付，且 capability flags 按当前事实独立发布
+S1  [x] current combined server 已能从同一
+        ControlHost/TerminalTab/EventJournal truth 生成 bootstrap 和受影响标签
+        的完整 delta post-state；独立 state owner 仍属于 S3
+S2  [~] `ui-hello`、`ui-bootstrap`、有界 `ui-deltas` polling 已通过公共
+        loopback IPC 与黑盒 snapshot-follow/restart/gap 证据；专用
+        subscription transport 与 GUI consumer/reconnect 进入 S4
 S3  build internal headless agenterm-server.exe
 S4  agenterm.exe becomes replaceable client; reconnect and interactive lease
 S5  same-server GUI upgrade + rollback black-box

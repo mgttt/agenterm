@@ -67,6 +67,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       [--contains text|--dead|--submit-complete]
       [--timeout-ms ms]`
     - `ui-snapshot`, `ui-bootstrap`, `protocol-info`
+    - [x] `ui-hello --minimum VERSION --maximum VERSION [--client-id ID]`
+      negotiates the renderer protocol and returns server identity plus a causal
+      baseline without mutating state
+    - [x] `ui-deltas --epoch EPOCH --after SEQUENCE [--limit 1..64]`
+      returns ordered events and affected-tab post-state under an 8 MiB response
+      budget; restart, journal gap and future sequence fail with typed recovery
+      facts
     - `workspace-info`, `save-workspace`, `shutdown`
     - [~] `server-list` and `server-kill` establish a `server-*` lifecycle
       namespace; explore health, start, and graceful-shutdown helpers only

@@ -68,6 +68,8 @@ pub(crate) const COMMAND_CATALOG: &[CommandIdentity] = &[
     command("start-server", &[]),
     command("ui-action", &[]),
     command("ui-bootstrap", &[]),
+    command("ui-deltas", &[]),
+    command("ui-hello", &[]),
     command("ui-snapshot", &[]),
     command("wait-pane", &["expect-pane"]),
     command("wait-events", &[]),
@@ -670,6 +672,18 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
             false,
         ),
         "ui-bootstrap" => ("agenterm-cli ui-bootstrap", &[][..], &[][..], false),
+        "ui-deltas" => (
+            "agenterm-cli ui-deltas --epoch EPOCH --after SEQUENCE [--limit 1..64]",
+            &["--epoch", "--after", "--limit"][..],
+            &[][..],
+            false,
+        ),
+        "ui-hello" => (
+            "agenterm-cli ui-hello --minimum VERSION --maximum VERSION [--client-id ID]",
+            &["--minimum", "--maximum", "--client-id"][..],
+            &[][..],
+            false,
+        ),
         "ui-snapshot" => ("agenterm-cli ui-snapshot", &[][..], &[][..], false),
         "wait-pane" | "expect-pane" => (
             "agenterm-cli wait-pane [-t target] \

@@ -664,9 +664,17 @@ try {
             '--epoch', $gapBaseline.event_position.epoch,
             '--after', "$($gapBaseline.event_position.sequence)"
         )
+        $uiGapError = Invoke-ExpectedFailure $CtlExe @(
+            'ui-deltas',
+            '--epoch', $gapBaseline.event_position.epoch,
+            '--after', "$($gapBaseline.event_position.sequence)"
+        )
         if (-not $gapError.Contains('"code":"journal_gap"') -or
             -not $gapError.Contains('"earliest_available"') -or
-            -not $gapError.Contains('"current"')) {
+            -not $gapError.Contains('"current"') -or
+            -not $uiGapError.Contains('"code":"journal_gap"') -or
+            -not $uiGapError.Contains('"earliest_available"') -or
+            -not $uiGapError.Contains('"current"')) {
             throw 'bounded event history silently lost events instead of reporting journal_gap'
         }
     }
@@ -714,11 +722,19 @@ try {
         '--epoch', $restartBefore.event_position.epoch,
         '--after', "$($restartBefore.event_position.sequence)"
     )
+    $uiRestartError = Invoke-ExpectedFailure $CtlExe @(
+        'ui-deltas',
+        '--epoch', $restartBefore.event_position.epoch,
+        '--after', "$($restartBefore.event_position.sequence)"
+    )
     if ($restartAfter.event_position.epoch -eq $restartBefore.event_position.epoch -or
         $serverAfterRestart.pid -eq $serverBeforeRestart.pid -or
         -not $restartError.Contains('"code":"server_restart"') -or
         -not $restartError.Contains('"requested_epoch"') -or
-        -not $restartError.Contains('"current"')) {
+        -not $restartError.Contains('"current"') -or
+        -not $uiRestartError.Contains('"code":"server_restart"') -or
+        -not $uiRestartError.Contains('"requested_epoch"') -or
+        -not $uiRestartError.Contains('"current"')) {
         throw 'server restart did not reject the stale observation epoch with typed recovery data'
     }
 

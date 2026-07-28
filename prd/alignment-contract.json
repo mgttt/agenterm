@@ -245,6 +245,14 @@
       "evidence_ids": ["cli.ui-bootstrap"]
     },
     {
+      "id": "development.ui-snapshot-follow",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "`ui-hello` negotiates a bounded protocol range and returns the current server PID, epoch, sequence and contract schemas; `ui-deltas` follows that baseline with ordered journal events, affected-tab terminal post-state, active-tab identity, explicit completeness and typed restart, gap and future-sequence recovery",
+      "evidence_ids": ["cli.ui-follow"]
+    },
+    {
       "id": "control.observable-events",
       "kind": "behavior",
       "status": "shipped",

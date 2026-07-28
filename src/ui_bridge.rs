@@ -4,8 +4,10 @@ use serde::{Deserialize, Serialize};
 
 pub const UI_BRIDGE_SCHEMA_VERSION: u32 = 2;
 pub const UI_BRIDGE_PROTOCOL_VERSION: u32 = 1;
+pub const UI_HELLO_SCHEMA_VERSION: u32 = 1;
 pub const UI_BOOTSTRAP_SCHEMA_VERSION: u32 = 1;
 pub const UI_SCREEN_SCHEMA_VERSION: u32 = 1;
+pub const UI_DELTA_SCHEMA_VERSION: u32 = 1;
 pub const UI_BOOTSTRAP_MAX_BYTES: usize = 8 * 1024 * 1024;
 pub const UI_BOOTSTRAP_MAX_TABS: usize = 1024;
 pub const UI_SCREEN_MAX_ROWS: u32 = 512;
@@ -14,6 +16,9 @@ pub const UI_SCREEN_MAX_RUNS: usize = 256 * 1024;
 pub const UI_SCREEN_MAX_TEXT_BYTES: usize = 4 * 1024 * 1024;
 pub const UI_TAB_TITLE_MAX_BYTES: usize = 4096;
 pub const UI_TAB_NOTE_MAX_BYTES: usize = 64 * 1024;
+pub const UI_DELTA_MAX_BYTES: usize = 8 * 1024 * 1024;
+pub const UI_DELTA_MAX_EVENTS: usize = 64;
+pub const UI_CLIENT_ID_MAX_BYTES: usize = 128;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -28,7 +33,7 @@ pub struct UiProtocolRange {
     pub maximum: u32,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum UiCompatibility {
     Compatible,
@@ -55,8 +60,10 @@ pub struct UiBridgeFacts {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 pub struct UiContractSchemas {
+    pub hello: u32,
     pub bootstrap: u32,
     pub screen: u32,
+    pub delta: u32,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -67,6 +74,8 @@ pub struct UiContractLimits {
     pub screen_columns: u32,
     pub screen_runs: usize,
     pub screen_text_bytes: usize,
+    pub delta_bytes: usize,
+    pub delta_events: usize,
 }
 
 pub const fn current_facts() -> UiBridgeFacts {
@@ -81,13 +90,15 @@ pub const fn current_facts() -> UiBridgeFacts {
         replaceable_ui: false,
         server_executable: "agenterm.exe",
         target_server_executable: "agenterm-server.exe",
-        bootstrap_snapshot: false,
-        ordered_deltas: false,
+        bootstrap_snapshot: true,
+        ordered_deltas: true,
         reconnect: false,
         rollback_proven: false,
         contract_schemas: UiContractSchemas {
+            hello: UI_HELLO_SCHEMA_VERSION,
             bootstrap: UI_BOOTSTRAP_SCHEMA_VERSION,
             screen: UI_SCREEN_SCHEMA_VERSION,
+            delta: UI_DELTA_SCHEMA_VERSION,
         },
         hard_limits: UiContractLimits {
             bootstrap_bytes: UI_BOOTSTRAP_MAX_BYTES,
@@ -96,7 +107,85 @@ pub const fn current_facts() -> UiBridgeFacts {
             screen_columns: UI_SCREEN_MAX_COLUMNS,
             screen_runs: UI_SCREEN_MAX_RUNS,
             screen_text_bytes: UI_SCREEN_MAX_TEXT_BYTES,
+            delta_bytes: UI_DELTA_MAX_BYTES,
+            delta_events: UI_DELTA_MAX_EVENTS,
         },
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct UiHelloRequest {
+    pub schema_version: u32,
+    pub client_id: String,
+    pub protocol_range: UiProtocolRange,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct UiHelloResponse {
+    pub schema_version: u32,
+    pub accepted: bool,
+    pub compatibility: UiCompatibility,
+    pub client_id: String,
+    pub protocol_version: u32,
+    pub server_pid: u32,
+    pub position: UiEventPosition,
+    pub bootstrap_schema_version: u32,
+    pub delta_schema_version: u32,
+    pub capabilities: Vec<String>,
+}
+
+impl UiHelloRequest {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.schema_version != UI_HELLO_SCHEMA_VERSION {
+            return Err("ui_hello_schema_unsupported".to_owned());
+        }
+        if self.client_id.is_empty()
+            || self.client_id.len() > UI_CLIENT_ID_MAX_BYTES
+            || self.client_id.chars().any(char::is_control)
+        {
+            return Err("ui_hello_client_id_invalid".to_owned());
+        }
+        if self.protocol_range.minimum == 0
+            || self.protocol_range.maximum < self.protocol_range.minimum
+        {
+            return Err("ui_hello_protocol_range_invalid".to_owned());
+        }
+        Ok(())
+    }
+}
+
+impl UiHelloResponse {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.schema_version != UI_HELLO_SCHEMA_VERSION {
+            return Err("ui_hello_schema_unsupported".to_owned());
+        }
+        UiHelloRequest {
+            schema_version: self.schema_version,
+            client_id: self.client_id.clone(),
+            protocol_range: UiProtocolRange {
+                minimum: self.protocol_version,
+                maximum: self.protocol_version,
+            },
+        }
+        .validate()?;
+        if self.position.server_epoch.is_empty()
+            || self.position.server_epoch.len() > 128
+            || self.bootstrap_schema_version != UI_BOOTSTRAP_SCHEMA_VERSION
+            || self.delta_schema_version != UI_DELTA_SCHEMA_VERSION
+            || self.accepted != (self.compatibility == UiCompatibility::Compatible)
+        {
+            return Err("ui_hello_response_invalid".to_owned());
+        }
+        let mut capabilities = HashSet::with_capacity(self.capabilities.len());
+        if self.capabilities.is_empty()
+            || self
+                .capabilities
+                .iter()
+                .any(|capability| !capabilities.insert(capability.as_str()))
+        {
+            return Err("ui_hello_capabilities_invalid".to_owned());
+        }
+        Ok(())
     }
 }
 
@@ -198,6 +287,104 @@ pub struct UiBootstrapSnapshot {
     pub tabs: Vec<UiTabBootstrap>,
     pub complete: bool,
     pub truncated: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct UiDeltaEvent {
+    pub sequence: u64,
+    pub kind: String,
+    pub tab_id: Option<String>,
+    pub request_id: Option<String>,
+    pub operation_id: Option<String>,
+    pub payload: serde_json::Value,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct UiDeltaBatch {
+    pub schema_version: u32,
+    pub server_epoch: String,
+    pub after_sequence: u64,
+    pub through_sequence: u64,
+    pub current_sequence: u64,
+    pub events: Vec<UiDeltaEvent>,
+    pub tab_updates: Vec<UiTabBootstrap>,
+    pub closed_tab_ids: Vec<String>,
+    pub active_tab_id: Option<String>,
+    pub complete: bool,
+    pub truncated: bool,
+}
+
+impl UiDeltaBatch {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.schema_version != UI_DELTA_SCHEMA_VERSION {
+            return Err("ui_delta_schema_unsupported".to_owned());
+        }
+        if self.server_epoch.is_empty()
+            || self.server_epoch.len() > 128
+            || self.through_sequence < self.after_sequence
+            || self.current_sequence < self.through_sequence
+        {
+            return Err("ui_delta_position_invalid".to_owned());
+        }
+        if self.events.len() > UI_DELTA_MAX_EVENTS {
+            return Err("ui_delta_events_limit".to_owned());
+        }
+        if self.complete == self.truncated {
+            return Err("ui_delta_completeness_invalid".to_owned());
+        }
+        if self.complete != (self.through_sequence == self.current_sequence) {
+            return Err("ui_delta_completeness_invalid".to_owned());
+        }
+        let mut previous = self.after_sequence;
+        for event in &self.events {
+            if event.sequence <= previous || event.sequence > self.through_sequence {
+                return Err("ui_delta_order_invalid".to_owned());
+            }
+            if event
+                .tab_id
+                .as_deref()
+                .is_some_and(|id| !valid_stable_tab_id(id))
+            {
+                return Err("ui_delta_event_tab_id_invalid".to_owned());
+            }
+            previous = event.sequence;
+        }
+        if previous != self.through_sequence {
+            return Err("ui_delta_through_sequence_invalid".to_owned());
+        }
+        let mut update_ids = HashSet::with_capacity(self.tab_updates.len());
+        for tab in &self.tab_updates {
+            if !valid_stable_tab_id(&tab.id)
+                || tab.screen.tab_id != tab.id
+                || !update_ids.insert(tab.id.as_str())
+            {
+                return Err("ui_delta_tab_update_duplicate".to_owned());
+            }
+            tab.screen.validate()?;
+        }
+        let mut closed_ids = HashSet::with_capacity(self.closed_tab_ids.len());
+        for id in &self.closed_tab_ids {
+            if !valid_stable_tab_id(id)
+                || !closed_ids.insert(id.as_str())
+                || update_ids.contains(id.as_str())
+            {
+                return Err("ui_delta_closed_tab_invalid".to_owned());
+            }
+        }
+        if self
+            .active_tab_id
+            .as_deref()
+            .is_some_and(|id| !valid_stable_tab_id(id))
+        {
+            return Err("ui_delta_active_tab_invalid".to_owned());
+        }
+        let encoded =
+            serde_json::to_vec(self).map_err(|_| "ui_delta_serialization_failed".to_owned())?;
+        if encoded.len() > UI_DELTA_MAX_BYTES {
+            return Err("ui_delta_bytes_limit".to_owned());
+        }
+        Ok(())
+    }
 }
 
 impl UiScreenSnapshot {
@@ -455,15 +642,63 @@ mod tests {
         assert_eq!(facts.ownership_mode, UiOwnershipMode::CombinedGuiServer);
         assert!(!facts.replaceable_ui);
         assert!(!facts.reconnect);
+        assert!(facts.bootstrap_snapshot);
+        assert!(facts.ordered_deltas);
         assert_eq!(facts.server_executable, "agenterm.exe");
         assert_eq!(facts.target_server_executable, "agenterm-server.exe");
+        assert_eq!(facts.contract_schemas.hello, UI_HELLO_SCHEMA_VERSION);
         assert_eq!(
             facts.contract_schemas.bootstrap,
             UI_BOOTSTRAP_SCHEMA_VERSION
         );
         assert_eq!(facts.contract_schemas.screen, UI_SCREEN_SCHEMA_VERSION);
+        assert_eq!(facts.contract_schemas.delta, UI_DELTA_SCHEMA_VERSION);
         assert_eq!(facts.hard_limits.tabs, UI_BOOTSTRAP_MAX_TABS);
         assert_eq!(facts.hard_limits.bootstrap_bytes, UI_BOOTSTRAP_MAX_BYTES);
+        assert_eq!(facts.hard_limits.delta_bytes, UI_DELTA_MAX_BYTES);
+        assert_eq!(facts.hard_limits.delta_events, UI_DELTA_MAX_EVENTS);
+    }
+
+    #[test]
+    fn hello_contract_validates_identity_compatibility_and_capabilities() {
+        let request = UiHelloRequest {
+            schema_version: UI_HELLO_SCHEMA_VERSION,
+            client_id: "renderer-smoke".to_owned(),
+            protocol_range: UiProtocolRange {
+                minimum: 1,
+                maximum: 1,
+            },
+        };
+        request.validate().unwrap();
+        let response = UiHelloResponse {
+            schema_version: UI_HELLO_SCHEMA_VERSION,
+            accepted: true,
+            compatibility: UiCompatibility::Compatible,
+            client_id: request.client_id.clone(),
+            protocol_version: UI_BRIDGE_PROTOCOL_VERSION,
+            server_pid: 42,
+            position: UiEventPosition {
+                server_epoch: "epoch-1".to_owned(),
+                sequence: 9,
+            },
+            bootstrap_schema_version: UI_BOOTSTRAP_SCHEMA_VERSION,
+            delta_schema_version: UI_DELTA_SCHEMA_VERSION,
+            capabilities: vec![
+                "bootstrap_snapshot".to_owned(),
+                "ordered_delta_poll".to_owned(),
+            ],
+        };
+        response.validate().unwrap();
+
+        let mut invalid = response;
+        invalid.accepted = false;
+        assert_eq!(invalid.validate().unwrap_err(), "ui_hello_response_invalid");
+        let mut invalid_request = request;
+        invalid_request.client_id = "bad\nclient".to_owned();
+        assert_eq!(
+            invalid_request.validate().unwrap_err(),
+            "ui_hello_client_id_invalid"
+        );
     }
 
     #[test]
@@ -495,5 +730,56 @@ mod tests {
         run_overflow.tabs[0].screen.runs[0].column = 79;
         run_overflow.tabs[0].screen.runs[0].columns = 2;
         assert_eq!(run_overflow.validate().unwrap_err(), "ui_screen_run_bounds");
+    }
+
+    #[test]
+    fn ordered_delta_contract_accepts_post_state_and_rejects_sequence_drift() {
+        let bootstrap = valid_bootstrap();
+        let batch = UiDeltaBatch {
+            schema_version: UI_DELTA_SCHEMA_VERSION,
+            server_epoch: "epoch-1".to_owned(),
+            after_sequence: 7,
+            through_sequence: 9,
+            current_sequence: 9,
+            events: vec![
+                UiDeltaEvent {
+                    sequence: 8,
+                    kind: "tab.note".to_owned(),
+                    tab_id: Some("@1".to_owned()),
+                    request_id: Some("request-1".to_owned()),
+                    operation_id: Some("tabs.set-note".to_owned()),
+                    payload: serde_json::json!({"note": "ready"}),
+                },
+                UiDeltaEvent {
+                    sequence: 9,
+                    kind: "tab.active".to_owned(),
+                    tab_id: Some("@2".to_owned()),
+                    request_id: None,
+                    operation_id: None,
+                    payload: serde_json::json!({}),
+                },
+            ],
+            tab_updates: bootstrap.tabs,
+            closed_tab_ids: Vec::new(),
+            active_tab_id: Some("@2".to_owned()),
+            complete: true,
+            truncated: false,
+        };
+        batch.validate().unwrap();
+
+        let mut bad_through = batch.clone();
+        bad_through.through_sequence = 8;
+        bad_through.complete = false;
+        bad_through.truncated = true;
+        assert_eq!(
+            bad_through.validate().unwrap_err(),
+            "ui_delta_order_invalid"
+        );
+        let mut bad_completeness = batch;
+        bad_completeness.current_sequence = 10;
+        assert_eq!(
+            bad_completeness.validate().unwrap_err(),
+            "ui_delta_completeness_invalid"
+        );
     }
 }

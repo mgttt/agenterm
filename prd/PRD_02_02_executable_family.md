@@ -32,9 +32,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     discarding live server state
     - [x] renderer-neutral UI bootstrap and terminal-screen DTOs publish independent schema versions, causal server epoch/sequence identity, stable tab/tree identity, completeness facts and hard byte/item/dimension limits
     - [x] `ui-bootstrap` projects current combined-server tab/tree/process/composer/working-context/screen truth through those DTOs and public black-box evidence compares its causal position and tab metadata with `ui-snapshot` and `inspect`
-    - [ ] current server-owned state must populate the DTOs and deliver
-      them through the future hello/bootstrap transport plus ordered deltas
-      before `bootstrap_snapshot` becomes true
+    - [x] `ui-hello` negotiates a bounded protocol range and returns the current server PID, epoch, sequence and contract schemas; `ui-deltas` follows that baseline with ordered journal events, affected-tab terminal post-state, active-tab identity, explicit completeness and typed restart, gap and future-sequence recovery
+    - [~] the current combined server now populates and serves hello, bootstrap
+      and bounded delta-poll contracts through public loopback IPC; a dedicated
+      subscription channel and reconnecting GUI consumer remain pending
   - [ ] one interactive UI lease owns terminal resize/focus/input while future
     read-only observers remain possible; replacing or crashing the GUI releases
     only that lease and never ends PTYs
@@ -42,9 +43,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     its declared server protocol range; an incompatible server remains alive
     and reports a precise upgrade/restart choice instead of being killed
   - [x] S0 protocol discovery publishes a typed UI bridge schema, compatible
-    version range, current `combined_gui_server` ownership, target executable
-    and false capability flags. Discovery must never claim replaceable UI,
-    bootstrap, reconnect or rollback before their black-box gates pass.
+     version range, current `combined_gui_server` ownership, target executable
+     and independently truthful capability flags. Bootstrap and ordered delta
+     poll are now shipped; replaceable UI, reconnect and rollback remain false
+     until their black-box gates pass.
   - [ ] black-box upgrade proof keeps server PID, epoch, tab IDs, PTY child
     PIDs, scrollback and continuing output stable while HWND and GUI build
     identity change; rollback to the previous compatible GUI is also proven

@@ -52,6 +52,52 @@ pub struct OperationSpec {
 }
 
 const NO_PARAMETERS: &[OperationParameterSpec] = &[];
+const UI_HELLO_PARAMETERS: &[OperationParameterSpec] = &[
+    OperationParameterSpec {
+        name: "minimum",
+        value_type: "uint32",
+        required: true,
+        minimum: Some(1),
+        maximum: None,
+    },
+    OperationParameterSpec {
+        name: "maximum",
+        value_type: "uint32",
+        required: true,
+        minimum: Some(1),
+        maximum: None,
+    },
+    OperationParameterSpec {
+        name: "client_id",
+        value_type: "string",
+        required: false,
+        minimum: Some(1),
+        maximum: Some(128),
+    },
+];
+const UI_DELTA_PARAMETERS: &[OperationParameterSpec] = &[
+    OperationParameterSpec {
+        name: "epoch",
+        value_type: "string",
+        required: true,
+        minimum: None,
+        maximum: None,
+    },
+    OperationParameterSpec {
+        name: "after",
+        value_type: "uint64",
+        required: true,
+        minimum: Some(0),
+        maximum: None,
+    },
+    OperationParameterSpec {
+        name: "limit",
+        value_type: "uint32",
+        required: false,
+        minimum: Some(1),
+        maximum: Some(64),
+    },
+];
 const EVENT_POSITION_PARAMETERS: &[OperationParameterSpec] = &[
     OperationParameterSpec {
         name: "epoch",
@@ -183,6 +229,25 @@ pub const OPERATION_CATALOG: &[OperationSpec] = &[
         since: "0.1.5",
     },
     OperationSpec {
+        id: "ui.hello",
+        script_surface: "fleet.ui.hello",
+        class: OperationClass::Observe,
+        command: "ui-hello",
+        action: None,
+        aliases: &[],
+        parameters: UI_HELLO_PARAMETERS,
+        result_type: "ui_hello",
+        errors: &[
+            "server_unavailable",
+            "ui_hello_invalid_arguments",
+            "ui_hello_serialization_failed",
+        ],
+        events: &[],
+        destructive: false,
+        available: true,
+        since: "0.1.9",
+    },
+    OperationSpec {
         id: "ui.bootstrap",
         script_surface: "fleet.ui.bootstrap",
         class: OperationClass::Observe,
@@ -195,6 +260,29 @@ pub const OPERATION_CATALOG: &[OperationSpec] = &[
             "server_unavailable",
             "ui_bootstrap_unavailable",
             "ui_bootstrap_serialization_failed",
+        ],
+        events: &[],
+        destructive: false,
+        available: true,
+        since: "0.1.9",
+    },
+    OperationSpec {
+        id: "ui.deltas",
+        script_surface: "fleet.ui.deltas",
+        class: OperationClass::Observe,
+        command: "ui-deltas",
+        action: None,
+        aliases: &[],
+        parameters: UI_DELTA_PARAMETERS,
+        result_type: "ui_delta_batch",
+        errors: &[
+            "server_unavailable",
+            "ui_delta_invalid_arguments",
+            "ui_delta_unavailable",
+            "ui_delta_serialization_failed",
+            "server_restart",
+            "journal_gap",
+            "future_sequence",
         ],
         events: &[],
         destructive: false,
@@ -424,7 +512,9 @@ pub(crate) fn operation_for_args(
     let command = canonical_control_command(command);
     let operation = match command {
         "protocol-info" => operation_by_id("protocol.info"),
+        "ui-hello" => operation_by_id("ui.hello"),
         "ui-bootstrap" => operation_by_id("ui.bootstrap"),
+        "ui-deltas" => operation_by_id("ui.deltas"),
         "ui-snapshot" => operation_by_id("ui.snapshot"),
         "read-events" => operation_by_id("events.read"),
         "wait-events" => operation_by_id("events.wait"),

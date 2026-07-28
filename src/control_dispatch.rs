@@ -1,4 +1,4 @@
-use std::mem;
+use std::{collections::BTreeSet, mem};
 
 use crate::{
     SCROLLBACK_LINES,
@@ -6,7 +6,7 @@ use crate::{
         has_option, last_positional, option_value, parse_new_command, parse_tab_environment,
         positional_values, supported_commands, tmux_key_bytes,
     },
-    event_journal::{EventJournal, EventKind},
+    event_journal::{EventEnvelope, EventJournal, EventKind, EventPosition},
     operations::{UI_TABS_HIDE, UI_TABS_SET_WIDTH, UI_TABS_SHOW, UI_TABS_TOGGLE},
     protocol::IpcResponse,
     settings::clamp_tabs_width,
@@ -14,10 +14,13 @@ use crate::{
     terminal_runtime::TerminalTab,
     theme::ThemeId,
     ui_bridge::{
-        UI_BOOTSTRAP_SCHEMA_VERSION, UI_SCREEN_MAX_COLUMNS, UI_SCREEN_MAX_ROWS, UI_SCREEN_MAX_RUNS,
-        UI_SCREEN_MAX_TEXT_BYTES, UI_SCREEN_SCHEMA_VERSION, UiBootstrapSnapshot, UiCellRun,
-        UiCellStyle, UiColor, UiComposerSnapshot, UiCursorSnapshot, UiEventPosition,
-        UiScreenSnapshot, UiTabBootstrap, UiWorkingContextSnapshot,
+        UI_BOOTSTRAP_SCHEMA_VERSION, UI_BRIDGE_PROTOCOL_VERSION, UI_DELTA_MAX_EVENTS,
+        UI_DELTA_SCHEMA_VERSION, UI_HELLO_SCHEMA_VERSION, UI_SCREEN_MAX_COLUMNS,
+        UI_SCREEN_MAX_ROWS, UI_SCREEN_MAX_RUNS, UI_SCREEN_MAX_TEXT_BYTES, UI_SCREEN_SCHEMA_VERSION,
+        UiBootstrapSnapshot, UiCellRun, UiCellStyle, UiColor, UiCompatibility, UiComposerSnapshot,
+        UiCursorSnapshot, UiDeltaBatch, UiDeltaEvent, UiEventPosition, UiHelloRequest,
+        UiHelloResponse, UiProtocolRange, UiScreenSnapshot, UiTabBootstrap,
+        UiWorkingContextSnapshot, negotiate,
     },
     workspace::workspace_path,
 };
@@ -129,47 +132,49 @@ fn ui_screen_snapshot(tab: &TerminalTab, generation: u64) -> Result<UiScreenSnap
     Ok(snapshot)
 }
 
+fn ui_tab_bootstrap(tab: &TerminalTab, generation: u64) -> Result<UiTabBootstrap, String> {
+    let proxy = tab.proxy.facts();
+    let composer = match tab.sensitive_composer.as_ref() {
+        Some(secret) => UiComposerSnapshot {
+            text: None,
+            sensitive: true,
+            byte_length: secret.expose_bytes().len(),
+        },
+        None => UiComposerSnapshot {
+            text: Some(tab.composer.clone()),
+            sensitive: false,
+            byte_length: tab.composer.len(),
+        },
+    };
+    Ok(UiTabBootstrap {
+        id: format!("@{}", tab.id),
+        parent_id: tab.parent_id.map(|parent| format!("@{parent}")),
+        title: tab.title.clone(),
+        note: tab.note.clone(),
+        process_id: tab.process_id,
+        dead: tab.exited.is_some(),
+        exit_code: tab.exited,
+        composer,
+        working_context: UiWorkingContextSnapshot {
+            cwd: tab.cwd.path().map(str::to_owned),
+            cwd_confirmed: tab.cwd.path() == tab.cwd.confirmed_path(),
+            cwd_source: tab.cwd.source().as_str().to_owned(),
+            cwd_request_pending: tab.cwd.pending(),
+            proxy_configured: proxy.configured,
+            proxy_source: proxy.source.as_str().to_owned(),
+            proxy_application_state: proxy.application_state.as_str().to_owned(),
+            proxy_request_pending: proxy.request_pending,
+        },
+        screen: ui_screen_snapshot(tab, generation)?,
+    })
+}
+
 pub(crate) fn ui_bootstrap_snapshot(host: &dyn ControlHost) -> Result<UiBootstrapSnapshot, String> {
     let position = host.event_journal().position();
     let tabs = host
         .tabs()
         .iter()
-        .map(|tab| {
-            let proxy = tab.proxy.facts();
-            let composer = match tab.sensitive_composer.as_ref() {
-                Some(secret) => UiComposerSnapshot {
-                    text: None,
-                    sensitive: true,
-                    byte_length: secret.expose_bytes().len(),
-                },
-                None => UiComposerSnapshot {
-                    text: Some(tab.composer.clone()),
-                    sensitive: false,
-                    byte_length: tab.composer.len(),
-                },
-            };
-            Ok(UiTabBootstrap {
-                id: format!("@{}", tab.id),
-                parent_id: tab.parent_id.map(|parent| format!("@{parent}")),
-                title: tab.title.clone(),
-                note: tab.note.clone(),
-                process_id: tab.process_id,
-                dead: tab.exited.is_some(),
-                exit_code: tab.exited,
-                composer,
-                working_context: UiWorkingContextSnapshot {
-                    cwd: tab.cwd.path().map(str::to_owned),
-                    cwd_confirmed: tab.cwd.path() == tab.cwd.confirmed_path(),
-                    cwd_source: tab.cwd.source().as_str().to_owned(),
-                    cwd_request_pending: tab.cwd.pending(),
-                    proxy_configured: proxy.configured,
-                    proxy_source: proxy.source.as_str().to_owned(),
-                    proxy_application_state: proxy.application_state.as_str().to_owned(),
-                    proxy_request_pending: proxy.request_pending,
-                },
-                screen: ui_screen_snapshot(tab, position.sequence)?,
-            })
-        })
+        .map(|tab| ui_tab_bootstrap(tab, position.sequence))
         .collect::<Result<Vec<_>, String>>()?;
     let truncated = tabs.iter().any(|tab| tab.screen.truncated);
     let snapshot = UiBootstrapSnapshot {
@@ -188,6 +193,103 @@ pub(crate) fn ui_bootstrap_snapshot(host: &dyn ControlHost) -> Result<UiBootstra
     };
     snapshot.validate()?;
     Ok(snapshot)
+}
+
+fn ui_hello_response(
+    host: &dyn ControlHost,
+    request: UiHelloRequest,
+) -> Result<UiHelloResponse, String> {
+    request.validate()?;
+    let compatibility = negotiate(request.protocol_range, UI_BRIDGE_PROTOCOL_VERSION);
+    let position = host.event_journal().position();
+    let response = UiHelloResponse {
+        schema_version: UI_HELLO_SCHEMA_VERSION,
+        accepted: compatibility == UiCompatibility::Compatible,
+        compatibility,
+        client_id: request.client_id,
+        protocol_version: UI_BRIDGE_PROTOCOL_VERSION,
+        server_pid: std::process::id(),
+        position: UiEventPosition {
+            server_epoch: position.epoch,
+            sequence: position.sequence,
+        },
+        bootstrap_schema_version: UI_BOOTSTRAP_SCHEMA_VERSION,
+        delta_schema_version: UI_DELTA_SCHEMA_VERSION,
+        capabilities: vec![
+            "bootstrap_snapshot".to_owned(),
+            "ordered_delta_poll".to_owned(),
+            "full_screen_post_state".to_owned(),
+            "epoch_restart_detection".to_owned(),
+        ],
+    };
+    response.validate()?;
+    Ok(response)
+}
+
+fn ui_delta_event(event: &EventEnvelope) -> UiDeltaEvent {
+    UiDeltaEvent {
+        sequence: event.sequence,
+        kind: event.kind.clone(),
+        tab_id: event.tab_id.map(|id| format!("@{id}")),
+        request_id: event.request_id.clone(),
+        operation_id: event.operation_id.clone(),
+        payload: event.payload.clone(),
+    }
+}
+
+fn ui_delta_batch(
+    host: &dyn ControlHost,
+    after_sequence: u64,
+    position: &EventPosition,
+    events: &[EventEnvelope],
+) -> Result<UiDeltaBatch, String> {
+    let mut event_count = events.len();
+    loop {
+        let selected = &events[..event_count];
+        let affected_ids = selected
+            .iter()
+            .filter_map(|event| event.tab_id)
+            .collect::<BTreeSet<_>>();
+        let live_ids = host
+            .tabs()
+            .iter()
+            .map(|tab| tab.id)
+            .collect::<BTreeSet<_>>();
+        let tab_updates = host
+            .tabs()
+            .iter()
+            .filter(|tab| affected_ids.contains(&tab.id))
+            .map(|tab| ui_tab_bootstrap(tab, position.sequence))
+            .collect::<Result<Vec<_>, String>>()?;
+        let closed_tab_ids = affected_ids
+            .difference(&live_ids)
+            .map(|id| format!("@{id}"))
+            .collect::<Vec<_>>();
+        let through_sequence = selected
+            .last()
+            .map_or(after_sequence, |event| event.sequence);
+        let complete = through_sequence == position.sequence;
+        let batch = UiDeltaBatch {
+            schema_version: UI_DELTA_SCHEMA_VERSION,
+            server_epoch: position.epoch.clone(),
+            after_sequence,
+            through_sequence,
+            current_sequence: position.sequence,
+            events: selected.iter().map(ui_delta_event).collect(),
+            tab_updates,
+            closed_tab_ids,
+            active_tab_id: host.active_id().map(|id| format!("@{id}")),
+            complete,
+            truncated: !complete,
+        };
+        match batch.validate() {
+            Ok(()) => return Ok(batch),
+            Err(error) if error == "ui_delta_bytes_limit" && event_count > 1 => {
+                event_count -= 1;
+            }
+            Err(error) => return Err(error),
+        }
+    }
 }
 
 pub(crate) fn render_format(
@@ -771,6 +873,52 @@ pub(crate) fn dispatch_shared_command(
         "protocol-info" => Some(IpcResponse::success(crate::client::protocol_info_json(
             "running_host",
         ))),
+        "ui-hello" => {
+            let Some(minimum) =
+                option_value(args, "--minimum").and_then(|value| value.parse::<u32>().ok())
+            else {
+                return Some(IpcResponse::typed_failure(
+                    "ui-hello requires numeric --minimum",
+                    "ui_hello_invalid_arguments",
+                    "configuration",
+                    false,
+                ));
+            };
+            let Some(maximum) =
+                option_value(args, "--maximum").and_then(|value| value.parse::<u32>().ok())
+            else {
+                return Some(IpcResponse::typed_failure(
+                    "ui-hello requires numeric --maximum",
+                    "ui_hello_invalid_arguments",
+                    "configuration",
+                    false,
+                ));
+            };
+            let request = UiHelloRequest {
+                schema_version: UI_HELLO_SCHEMA_VERSION,
+                client_id: option_value(args, "--client-id")
+                    .unwrap_or("agenterm-cli")
+                    .to_owned(),
+                protocol_range: UiProtocolRange { minimum, maximum },
+            };
+            match ui_hello_response(host, request) {
+                Ok(response) => match serde_json::to_string_pretty(&response) {
+                    Ok(json) => Some(IpcResponse::success(json)),
+                    Err(error) => Some(IpcResponse::typed_failure(
+                        error.to_string(),
+                        "ui_hello_serialization_failed",
+                        "internal",
+                        false,
+                    )),
+                },
+                Err(error) => Some(IpcResponse::typed_failure(
+                    error,
+                    "ui_hello_invalid_arguments",
+                    "configuration",
+                    false,
+                )),
+            }
+        }
         "ui-bootstrap" => match ui_bootstrap_snapshot(host) {
             Ok(snapshot) => match serde_json::to_string_pretty(&snapshot) {
                 Ok(json) => Some(IpcResponse::success(json)),
@@ -788,6 +936,68 @@ pub(crate) fn dispatch_shared_command(
                 true,
             )),
         },
+        "ui-deltas" => {
+            let Some(epoch) = option_value(args, "--epoch") else {
+                return Some(IpcResponse::typed_failure(
+                    "ui-deltas requires --epoch",
+                    "ui_delta_invalid_arguments",
+                    "configuration",
+                    false,
+                ));
+            };
+            let Some(after) =
+                option_value(args, "--after").and_then(|value| value.parse::<u64>().ok())
+            else {
+                return Some(IpcResponse::typed_failure(
+                    "ui-deltas requires numeric --after",
+                    "ui_delta_invalid_arguments",
+                    "configuration",
+                    false,
+                ));
+            };
+            let limit = match option_value(args, "--limit") {
+                Some(value) => match value.parse::<usize>() {
+                    Ok(limit) if (1..=UI_DELTA_MAX_EVENTS).contains(&limit) => limit,
+                    _ => {
+                        return Some(IpcResponse::typed_failure(
+                            format!("ui-deltas --limit must be from 1 to {UI_DELTA_MAX_EVENTS}"),
+                            "ui_delta_invalid_arguments",
+                            "configuration",
+                            false,
+                        ));
+                    }
+                },
+                None => UI_DELTA_MAX_EVENTS,
+            };
+            match host.event_journal().read_after(epoch, after, limit) {
+                Ok(events) => {
+                    let position = host.event_journal().position();
+                    match ui_delta_batch(host, after, &position, &events) {
+                        Ok(batch) => match serde_json::to_string_pretty(&batch) {
+                            Ok(json) => Some(IpcResponse::success(json)),
+                            Err(error) => Some(IpcResponse::typed_failure(
+                                error.to_string(),
+                                "ui_delta_serialization_failed",
+                                "internal",
+                                false,
+                            )),
+                        },
+                        Err(error) => Some(IpcResponse::typed_failure(
+                            error,
+                            "ui_delta_unavailable",
+                            "precondition",
+                            true,
+                        )),
+                    }
+                }
+                Err(error) => Some(IpcResponse::typed_failure(
+                    error.to_json().to_string(),
+                    error.code(),
+                    "precondition",
+                    false,
+                )),
+            }
+        }
         "lscm" | "list-commands" => Some(IpcResponse::success(supported_commands())),
         "ls" | "list-sessions" => Some(IpcResponse::success(format!(
             "{}: {} windows (created {}) (attached)",
