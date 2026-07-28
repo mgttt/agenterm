@@ -34,7 +34,10 @@ if (($targetInfo.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
     throw "Refusing to prepare a reparse-point Cargo target: $target"
 }
 
-$signature = 'Signature: 8a477f597d28d172789f06886806bc55d'
+$signature = 'Signature: 8a477f597d28d172789f06886806bc55'
+if ($signature -notmatch '^Signature: [0-9a-f]{32}$') {
+    throw 'Internal Cargo cache tag signature is malformed'
+}
 $content = @"
 $signature
 # This file is a cache directory tag created by cargo.
