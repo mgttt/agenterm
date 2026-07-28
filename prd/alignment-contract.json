@@ -237,6 +237,14 @@
       "evidence_ids": ["cli.ui-bridge-contracts"]
     },
     {
+      "id": "development.ui-bootstrap-projection",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "`ui-bootstrap` projects current combined-server tab/tree/process/composer/working-context/screen truth through those DTOs and public black-box evidence compares its causal position and tab metadata with `ui-snapshot` and `inspect`",
+      "evidence_ids": ["cli.ui-bootstrap"]
+    },
+    {
       "id": "control.observable-events",
       "kind": "behavior",
       "status": "shipped",

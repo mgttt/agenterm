@@ -520,8 +520,8 @@ try {
         $apiResult.value.entries |
             Where-Object { -not [string]::IsNullOrWhiteSpace($_.operation_id) }
     )
-    if ($fleetEntries.Count -ne 15 -or
-        @($fleetEntries.operation_id | Sort-Object -Unique).Count -ne 15 -or
+    if ($fleetEntries.Count -ne 16 -or
+        @($fleetEntries.operation_id | Sort-Object -Unique).Count -ne 16 -or
         @($fleetEntries | Where-Object {
             $_.surface_path -ne $_.operation.script_surface -or
             $_.operation.id -ne $_.operation_id

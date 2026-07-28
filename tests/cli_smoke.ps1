@@ -12,6 +12,7 @@ $declaredEvidence = @(
     'cli.typed-tabs-operations'
     'cli.control-receipts'
     'cli.ui-bridge-contracts'
+    'cli.ui-bootstrap'
 )
 if ($ListEvidence) {
     $declaredEvidence
@@ -141,6 +142,7 @@ try {
         'list-instances',
         'wait-pane (expect-pane)',
         'set-composer',
+        'ui-bootstrap',
         'ui-snapshot'
     )) {
         if (-not $commands.Contains($expected)) {
@@ -194,8 +196,58 @@ try {
         throw 'protocol-info did not expose truthful UI ownership and operation facts'
     }
     Write-Evidence 'cli.ui-bridge-contracts'
+    Write-Host 'STEP renderer-neutral server bootstrap projection'
+    $runningProtocol = Invoke-AgenTerm @('protocol-info', '--running') | ConvertFrom-Json
+    $bootstrap = Invoke-AgenTerm @('ui-bootstrap') | ConvertFrom-Json
+    $inspect = Invoke-AgenTerm @('inspect') | ConvertFrom-Json
+    $uiSnapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    if ($bootstrap.schema_version -ne 1 -or
+        $runningProtocol.identity_scope -ne 'running_host' -or
+        $bootstrap.server_pid -ne $runningProtocol.pid -or
+        $bootstrap.server_epoch -ne $bootstrap.position.server_epoch -or
+        $bootstrap.server_epoch -ne $uiSnapshot.event_position.epoch -or
+        $bootstrap.position.sequence -ne $uiSnapshot.event_position.sequence -or
+        -not $bootstrap.complete -or $bootstrap.truncated -or
+        $bootstrap.active_tab_id -ne $inspect.active_window_id -or
+        @($bootstrap.tabs).Count -ne @($inspect.windows).Count) {
+        throw 'ui-bootstrap did not preserve causal server/workspace identity'
+    }
+    foreach ($tab in @($bootstrap.tabs)) {
+        $window = @($inspect.windows | Where-Object id -eq $tab.id)
+        if ($window.Count -ne 1 -or
+            $tab.parent_id -ne $window[0].parent_id -or
+            $tab.title -ne $window[0].name -or
+            $tab.note -ne $window[0].note -or
+            $tab.process_id -ne $window[0].pid -or
+            $tab.dead -ne $window[0].dead -or
+            $tab.exit_code -ne $window[0].exit_code -or
+            $tab.screen.tab_id -ne $tab.id -or
+            $tab.screen.rows -ne $window[0].rows -or
+            $tab.screen.columns -ne $window[0].cols -or
+            $tab.screen.scrollback_offset -ne $window[0].scrollback_offset -or
+            -not $tab.screen.complete -or $tab.screen.truncated -or
+            @($tab.screen.runs).Count -eq 0) {
+            throw "ui-bootstrap tab projection drifted from inspect for $($tab.id)"
+        }
+        if ($tab.composer.sensitive) {
+            if ($null -ne $tab.composer.text) {
+                throw 'ui-bootstrap disclosed a sensitive composer draft'
+            }
+        }
+        elseif ($tab.composer.byte_length -ne
+            [Text.Encoding]::UTF8.GetByteCount([string]$tab.composer.text)) {
+            throw 'ui-bootstrap composer byte identity was inconsistent'
+        }
+        $workingProperties = @($tab.working_context.PSObject.Properties.Name)
+        if ($workingProperties -contains 'http_proxy' -or
+            $workingProperties -contains 'https_proxy') {
+            throw 'ui-bootstrap exposed proxy values instead of redacted facts'
+        }
+    }
+    Write-Evidence 'cli.ui-bootstrap'
     $expectedOperations = @{
         'protocol.info' = 'observe'
+        'ui.bootstrap' = 'observe'
         'ui.tabs.show' = 'control'
         'ui.tabs.hide' = 'control'
         'ui.tabs.toggle' = 'control'

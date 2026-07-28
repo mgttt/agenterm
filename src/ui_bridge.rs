@@ -115,12 +115,20 @@ pub struct UiCursorSnapshot {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct UiCellStyle {
-    pub foreground_rgb: u32,
-    pub background_rgb: u32,
+    pub foreground: UiColor,
+    pub background: UiColor,
     pub bold: bool,
     pub italic: bool,
     pub underline: bool,
     pub inverse: bool,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum UiColor {
+    Default,
+    Indexed { index: u8 },
+    Rgb { red: u8, green: u8, blue: u8 },
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -155,7 +163,28 @@ pub struct UiTabBootstrap {
     pub process_id: Option<u32>,
     pub dead: bool,
     pub exit_code: Option<u32>,
+    pub composer: UiComposerSnapshot,
+    pub working_context: UiWorkingContextSnapshot,
     pub screen: UiScreenSnapshot,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct UiComposerSnapshot {
+    pub text: Option<String>,
+    pub sensitive: bool,
+    pub byte_length: usize,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct UiWorkingContextSnapshot {
+    pub cwd: Option<String>,
+    pub cwd_confirmed: bool,
+    pub cwd_source: String,
+    pub cwd_request_pending: bool,
+    pub proxy_configured: bool,
+    pub proxy_source: String,
+    pub proxy_application_state: String,
+    pub proxy_request_pending: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -164,7 +193,7 @@ pub struct UiBootstrapSnapshot {
     pub server_pid: u32,
     pub server_epoch: String,
     pub position: UiEventPosition,
-    pub workspace_revision: u64,
+    pub workspace_revision: Option<u64>,
     pub active_tab_id: Option<String>,
     pub tabs: Vec<UiTabBootstrap>,
     pub complete: bool,
@@ -244,6 +273,15 @@ impl UiBootstrapSnapshot {
             if tab.title.len() > UI_TAB_TITLE_MAX_BYTES || tab.note.len() > UI_TAB_NOTE_MAX_BYTES {
                 return Err("ui_bootstrap_tab_metadata_limit".to_owned());
             }
+            if tab.composer.sensitive == tab.composer.text.is_some()
+                || tab
+                    .composer
+                    .text
+                    .as_ref()
+                    .is_some_and(|text| text.len() != tab.composer.byte_length)
+            {
+                return Err("ui_bootstrap_composer_invalid".to_owned());
+            }
             if tab.screen.tab_id != tab.id {
                 return Err("ui_bootstrap_screen_identity_mismatch".to_owned());
             }
@@ -313,8 +351,12 @@ mod tests {
                 columns: 5,
                 text: "hello".to_owned(),
                 style: UiCellStyle {
-                    foreground_rgb: 0xffffff,
-                    background_rgb: 0,
+                    foreground: UiColor::Rgb {
+                        red: 255,
+                        green: 255,
+                        blue: 255,
+                    },
+                    background: UiColor::Default,
                     bold: false,
                     italic: false,
                     underline: false,
@@ -335,7 +377,7 @@ mod tests {
                 server_epoch: "epoch-1".to_owned(),
                 sequence: 9,
             },
-            workspace_revision: 3,
+            workspace_revision: Some(3),
             active_tab_id: Some("@1".to_owned()),
             tabs: vec![
                 UiTabBootstrap {
@@ -346,6 +388,21 @@ mod tests {
                     process_id: Some(100),
                     dead: false,
                     exit_code: None,
+                    composer: UiComposerSnapshot {
+                        text: Some(String::new()),
+                        sensitive: false,
+                        byte_length: 0,
+                    },
+                    working_context: UiWorkingContextSnapshot {
+                        cwd: Some("C:\\work".to_owned()),
+                        cwd_confirmed: true,
+                        cwd_source: "launch".to_owned(),
+                        cwd_request_pending: false,
+                        proxy_configured: false,
+                        proxy_source: "off".to_owned(),
+                        proxy_application_state: "off".to_owned(),
+                        proxy_request_pending: false,
+                    },
                     screen: valid_screen("@1"),
                 },
                 UiTabBootstrap {
@@ -356,6 +413,21 @@ mod tests {
                     process_id: None,
                     dead: true,
                     exit_code: Some(0),
+                    composer: UiComposerSnapshot {
+                        text: None,
+                        sensitive: true,
+                        byte_length: 12,
+                    },
+                    working_context: UiWorkingContextSnapshot {
+                        cwd: None,
+                        cwd_confirmed: false,
+                        cwd_source: "unknown".to_owned(),
+                        cwd_request_pending: false,
+                        proxy_configured: true,
+                        proxy_source: "launch".to_owned(),
+                        proxy_application_state: "launch_applied".to_owned(),
+                        proxy_request_pending: false,
+                    },
                     screen: valid_screen("@2"),
                 },
             ],

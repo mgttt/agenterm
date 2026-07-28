@@ -3094,6 +3094,7 @@ Usage:
   agenterm-cli script task list|show|run [TASK] [--manifest FILE] [--json] [-- ARGS...]
   agenterm-cli send-mouse [-t target] -x col -y row [--button left] [--action press]
   agenterm-cli ui-snapshot
+  agenterm-cli ui-bootstrap
   agenterm-cli ui-action new-tab|new-child|edit-tab|toggle-tree|tabs-show|tabs-hide|tabs-toggle|toggle-tabs|tabs-set-width|select-tab|close-tab|close-window|keep-server-running|stop-server-and-exit|confirm|cancel|composer-send|copy-selection|open-cwd-editor|cwd-prepare|cwd-prepare-append|cwd-prepare-replace|cwd-send-now|open-proxy-editor|proxy-toggle-visibility|proxy-reveal-credentials|proxy-prepare|proxy-send-now
   agenterm-cli ui-action tabs-set-width --width 180..480
   agenterm-cli ui-action proxy-prepare|proxy-send-now [-t target] --stdin

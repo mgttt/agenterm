@@ -66,7 +66,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - `wait-pane|expect-pane [-t target]
       [--contains text|--dead|--submit-complete]
       [--timeout-ms ms]`
-    - `ui-snapshot`, `protocol-info`
+    - `ui-snapshot`, `ui-bootstrap`, `protocol-info`
     - `workspace-info`, `save-workspace`, `shutdown`
     - [~] `server-list` and `server-kill` establish a `server-*` lifecycle
       namespace; explore health, start, and graceful-shutdown helpers only

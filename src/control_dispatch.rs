@@ -13,6 +13,12 @@ use crate::{
     tab_tree::{TabTreeNode, TabTreeRow, tree_rows, would_create_cycle},
     terminal_runtime::TerminalTab,
     theme::ThemeId,
+    ui_bridge::{
+        UI_BOOTSTRAP_SCHEMA_VERSION, UI_SCREEN_MAX_COLUMNS, UI_SCREEN_MAX_ROWS, UI_SCREEN_MAX_RUNS,
+        UI_SCREEN_MAX_TEXT_BYTES, UI_SCREEN_SCHEMA_VERSION, UiBootstrapSnapshot, UiCellRun,
+        UiCellStyle, UiColor, UiComposerSnapshot, UiCursorSnapshot, UiEventPosition,
+        UiScreenSnapshot, UiTabBootstrap, UiWorkingContextSnapshot,
+    },
     workspace::workspace_path,
 };
 
@@ -28,6 +34,160 @@ pub(crate) fn bounded_utf8_prefix(value: &str, maximum: usize) -> &str {
         take -= 1;
     }
     &value[..take]
+}
+
+fn ui_color(color: vt100::Color) -> UiColor {
+    match color {
+        vt100::Color::Default => UiColor::Default,
+        vt100::Color::Idx(index) => UiColor::Indexed { index },
+        vt100::Color::Rgb(red, green, blue) => UiColor::Rgb { red, green, blue },
+    }
+}
+
+fn ui_cell_style(cell: &vt100::Cell) -> UiCellStyle {
+    UiCellStyle {
+        foreground: ui_color(cell.fgcolor()),
+        background: ui_color(cell.bgcolor()),
+        bold: cell.bold(),
+        italic: cell.italic(),
+        underline: cell.underline(),
+        inverse: cell.inverse(),
+    }
+}
+
+fn ui_screen_snapshot(tab: &TerminalTab, generation: u64) -> Result<UiScreenSnapshot, String> {
+    let screen = tab.parser.screen();
+    let (rows, columns) = screen.size();
+    let rows = u32::from(rows);
+    let columns = u32::from(columns);
+    if rows == 0 || columns == 0 || rows > UI_SCREEN_MAX_ROWS || columns > UI_SCREEN_MAX_COLUMNS {
+        return Err("ui_screen_dimensions_limit".to_owned());
+    }
+    let mut runs: Vec<UiCellRun> = Vec::new();
+    let mut text_bytes = 0usize;
+    let mut truncated = false;
+    'rows: for row in 0..rows {
+        for column in 0..columns {
+            let Some(cell) = screen.cell(row as u16, column as u16) else {
+                continue;
+            };
+            if cell.is_wide_continuation() {
+                continue;
+            }
+            let cell_columns = if cell.is_wide() { 2 } else { 1 };
+            let text = if cell.has_contents() {
+                cell.contents()
+            } else {
+                " "
+            };
+            if runs.len() >= UI_SCREEN_MAX_RUNS
+                || text_bytes
+                    .checked_add(text.len())
+                    .is_none_or(|total| total > UI_SCREEN_MAX_TEXT_BYTES)
+            {
+                truncated = true;
+                break 'rows;
+            }
+            let style = ui_cell_style(cell);
+            if let Some(previous) = runs.last_mut()
+                && previous.row == row
+                && previous.column + previous.columns == column
+                && previous.style == style
+            {
+                previous.columns += cell_columns;
+                previous.text.push_str(text);
+            } else {
+                runs.push(UiCellRun {
+                    row,
+                    column,
+                    columns: cell_columns,
+                    text: text.to_owned(),
+                    style,
+                });
+            }
+            text_bytes += text.len();
+        }
+    }
+    let (cursor_row, cursor_column) = screen.cursor_position();
+    let snapshot = UiScreenSnapshot {
+        schema_version: UI_SCREEN_SCHEMA_VERSION,
+        tab_id: format!("@{}", tab.id),
+        generation,
+        rows,
+        columns,
+        scrollback_offset: screen.scrollback(),
+        cursor: UiCursorSnapshot {
+            row: u32::from(cursor_row),
+            column: u32::from(cursor_column),
+            visible: !screen.hide_cursor(),
+        },
+        runs,
+        complete: !truncated,
+        truncated,
+    };
+    snapshot.validate()?;
+    Ok(snapshot)
+}
+
+pub(crate) fn ui_bootstrap_snapshot(host: &dyn ControlHost) -> Result<UiBootstrapSnapshot, String> {
+    let position = host.event_journal().position();
+    let tabs = host
+        .tabs()
+        .iter()
+        .map(|tab| {
+            let proxy = tab.proxy.facts();
+            let composer = match tab.sensitive_composer.as_ref() {
+                Some(secret) => UiComposerSnapshot {
+                    text: None,
+                    sensitive: true,
+                    byte_length: secret.expose_bytes().len(),
+                },
+                None => UiComposerSnapshot {
+                    text: Some(tab.composer.clone()),
+                    sensitive: false,
+                    byte_length: tab.composer.len(),
+                },
+            };
+            Ok(UiTabBootstrap {
+                id: format!("@{}", tab.id),
+                parent_id: tab.parent_id.map(|parent| format!("@{parent}")),
+                title: tab.title.clone(),
+                note: tab.note.clone(),
+                process_id: tab.process_id,
+                dead: tab.exited.is_some(),
+                exit_code: tab.exited,
+                composer,
+                working_context: UiWorkingContextSnapshot {
+                    cwd: tab.cwd.path().map(str::to_owned),
+                    cwd_confirmed: tab.cwd.path() == tab.cwd.confirmed_path(),
+                    cwd_source: tab.cwd.source().as_str().to_owned(),
+                    cwd_request_pending: tab.cwd.pending(),
+                    proxy_configured: proxy.configured,
+                    proxy_source: proxy.source.as_str().to_owned(),
+                    proxy_application_state: proxy.application_state.as_str().to_owned(),
+                    proxy_request_pending: proxy.request_pending,
+                },
+                screen: ui_screen_snapshot(tab, position.sequence)?,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let truncated = tabs.iter().any(|tab| tab.screen.truncated);
+    let snapshot = UiBootstrapSnapshot {
+        schema_version: UI_BOOTSTRAP_SCHEMA_VERSION,
+        server_pid: std::process::id(),
+        server_epoch: position.epoch.clone(),
+        position: UiEventPosition {
+            server_epoch: position.epoch,
+            sequence: position.sequence,
+        },
+        workspace_revision: None,
+        active_tab_id: host.active_id().map(|id| format!("@{id}")),
+        tabs,
+        complete: !truncated,
+        truncated,
+    };
+    snapshot.validate()?;
+    Ok(snapshot)
 }
 
 pub(crate) fn render_format(
@@ -611,6 +771,23 @@ pub(crate) fn dispatch_shared_command(
         "protocol-info" => Some(IpcResponse::success(crate::client::protocol_info_json(
             "running_host",
         ))),
+        "ui-bootstrap" => match ui_bootstrap_snapshot(host) {
+            Ok(snapshot) => match serde_json::to_string_pretty(&snapshot) {
+                Ok(json) => Some(IpcResponse::success(json)),
+                Err(error) => Some(IpcResponse::typed_failure(
+                    error.to_string(),
+                    "ui_bootstrap_serialization_failed",
+                    "internal",
+                    false,
+                )),
+            },
+            Err(error) => Some(IpcResponse::typed_failure(
+                error,
+                "ui_bootstrap_unavailable",
+                "precondition",
+                true,
+            )),
+        },
         "lscm" | "list-commands" => Some(IpcResponse::success(supported_commands())),
         "ls" | "list-sessions" => Some(IpcResponse::success(format!(
             "{}: {} windows (created {}) (attached)",

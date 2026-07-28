@@ -1603,7 +1603,9 @@ GUI ui.hello(build, protocol range, capabilities)
 S0  [~] ownership inventory + typed discovery/negotiation 已交付；
         renderer-neutral bootstrap/screen DTO、schema 与 hard limits 已交付，
         current-state adapter 与实际 transport 待补
-S1  extract server-owned workspace/terminal state behind adapters
+S1  [~] current combined server 已能通过公共 `ui-bootstrap` 从同一
+        ControlHost/TerminalTab/EventJournal truth 生成 DTO；独立 state owner
+        与 delta adapter 待补
 S2  add hello/bootstrap/screen snapshot/event delta protocol
 S3  build internal headless agenterm-server.exe
 S4  agenterm.exe becomes replaceable client; reconnect and interactive lease

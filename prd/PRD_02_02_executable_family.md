@@ -31,8 +31,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     detects restart, journal gap and incompatible protocol without silently
     discarding live server state
     - [x] renderer-neutral UI bootstrap and terminal-screen DTOs publish independent schema versions, causal server epoch/sequence identity, stable tab/tree identity, completeness facts and hard byte/item/dimension limits
+    - [x] `ui-bootstrap` projects current combined-server tab/tree/process/composer/working-context/screen truth through those DTOs and public black-box evidence compares its causal position and tab metadata with `ui-snapshot` and `inspect`
     - [ ] current server-owned state must populate the DTOs and deliver
-      bootstrap plus ordered deltas before `bootstrap_snapshot` becomes true
+      them through the future hello/bootstrap transport plus ordered deltas
+      before `bootstrap_snapshot` becomes true
   - [ ] one interactive UI lease owns terminal resize/focus/input while future
     read-only observers remain possible; replacing or crashing the GUI releases
     only that lease and never ends PTYs

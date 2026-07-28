@@ -183,6 +183,25 @@ pub const OPERATION_CATALOG: &[OperationSpec] = &[
         since: "0.1.5",
     },
     OperationSpec {
+        id: "ui.bootstrap",
+        script_surface: "fleet.ui.bootstrap",
+        class: OperationClass::Observe,
+        command: "ui-bootstrap",
+        action: None,
+        aliases: &[],
+        parameters: NO_PARAMETERS,
+        result_type: "ui_bootstrap_snapshot",
+        errors: &[
+            "server_unavailable",
+            "ui_bootstrap_unavailable",
+            "ui_bootstrap_serialization_failed",
+        ],
+        events: &[],
+        destructive: false,
+        available: true,
+        since: "0.1.9",
+    },
+    OperationSpec {
         id: "workspace.info",
         script_surface: "fleet.workspace.info",
         class: OperationClass::Observe,
@@ -405,6 +424,7 @@ pub(crate) fn operation_for_args(
     let command = canonical_control_command(command);
     let operation = match command {
         "protocol-info" => operation_by_id("protocol.info"),
+        "ui-bootstrap" => operation_by_id("ui.bootstrap"),
         "ui-snapshot" => operation_by_id("ui.snapshot"),
         "read-events" => operation_by_id("events.read"),
         "wait-events" => operation_by_id("events.wait"),
