@@ -169,6 +169,26 @@ pub(crate) trait ControlHost {
         Ok(())
     }
 
+    fn apply_setting(&mut self, _key: &str, _value: &str) -> Result<(), String> {
+        Err("set-setting is not supported on this host".to_owned())
+    }
+
+    /// Win: may queue close confirmation; default closes immediately.
+    fn close_tab_by_ui_action(&mut self, id: u64) -> Result<(), String> {
+        match self.close_tab_id(id) {
+            Ok(_) => Ok(()),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Win: trap editors / note submit before `composer-send`.
+    fn prepare_composer_send(&mut self) -> Result<bool, String> {
+        Ok(false)
+    }
+
+    /// Win: open tab editor after `new-child`.
+    fn after_create_tab(&mut self, _id: u64, _parent_id: Option<u64>) {}
+
     fn set_session_name(&mut self, name: String);
 
     /// Create a tab. Returns the stable window index used in -F output.
@@ -278,6 +298,157 @@ pub(crate) fn set_tab_parent_on_host(
         }),
     );
     Ok(())
+}
+
+fn ui_snapshot_response(host: &mut dyn ControlHost) -> IpcResponse {
+    match host.ui_snapshot_json() {
+        Some(json) => IpcResponse::success(json),
+        None => IpcResponse::success(""),
+    }
+}
+
+fn send_composer_at_position(host: &mut dyn ControlHost, position: usize) -> IpcResponse {
+    if let Some(secret) = host.tabs_mut()[position].sensitive_composer.take() {
+        let marker = host.tabs_mut()[position].sensitive_proxy_marker.take();
+        if !host.tabs_mut()[position].submit_sensitive(secret.expose()) {
+            host.tabs_mut()[position].sensitive_composer = Some(secret);
+            host.tabs_mut()[position].sensitive_proxy_marker = marker;
+            return IpcResponse::failure("a composer submission is already pending");
+        }
+        let Some(marker) = marker else {
+            host.tabs_mut()[position].proxy.mark_failed().ok();
+            return IpcResponse::failure(
+                "sensitive proxy draft lost its confirmation identity",
+            );
+        };
+        if let Err(error) = host.tabs_mut()[position].proxy.mark_submitted() {
+            return IpcResponse::failure(error.to_string());
+        }
+        let id = host.tabs_mut()[position].id;
+        host.tabs_mut()[position].begin_proxy_confirmation(marker);
+        host.event_journal_mut().commit(
+            EventKind::WorkingContextProxySubmitted,
+            Some(id),
+            serde_json::json!({
+                "sensitive": true,
+                "application_state": "submitted",
+            }),
+        );
+        if host.active_id() == Some(id) {
+            host.load_composer_to_ui();
+        }
+        return IpcResponse::success("");
+    }
+    let text = mem::take(&mut host.tabs_mut()[position].composer);
+    if !text.is_empty() && !host.tabs_mut()[position].submit(&text) {
+        host.tabs_mut()[position].composer = text;
+        return IpcResponse::failure("a composer submission is already pending");
+    }
+    if !text.is_empty() {
+        let id = host.tabs_mut()[position].id;
+        host.event_journal_mut().commit(
+            EventKind::ComposerSubmitted,
+            Some(id),
+            serde_json::json!({
+                "length": text.chars().count(),
+            }),
+        );
+    }
+    if host.active_id() == Some(host.tabs()[position].id) {
+        host.load_composer_to_ui();
+    }
+    IpcResponse::success("")
+}
+
+fn dispatch_shared_ui_action(host: &mut dyn ControlHost, args: &[String]) -> Option<IpcResponse> {
+    let action = args.get(1).map(String::as_str)?;
+    match action {
+        "new-tab" => match host.create_tab(None, Vec::new(), Vec::new(), true, None) {
+            Ok(index) => {
+                if let Some(id) = host.tabs().iter().find(|tab| tab.index == index).map(|tab| tab.id)
+                {
+                    host.after_create_tab(id, None);
+                }
+                Some(ui_snapshot_response(host))
+            }
+            Err(error) => Some(IpcResponse::failure(error)),
+        },
+        "new-child" => {
+            let Some(parent_position) = resolve_target_position(
+                host.tabs(),
+                host.active_id(),
+                option_value(args, "-t"),
+            )
+            .or_else(|| resolve_target_position(host.tabs(), host.active_id(), None))
+            else {
+                return Some(IpcResponse::failure("can't find parent tab"));
+            };
+            let parent_id = host.tabs()[parent_position].id;
+            match host.create_tab(
+                Some("New child".to_owned()),
+                Vec::new(),
+                Vec::new(),
+                true,
+                Some(parent_id),
+            ) {
+                Ok(index) => {
+                    if let Some(id) =
+                        host.tabs().iter().find(|tab| tab.index == index).map(|tab| tab.id)
+                    {
+                        host.after_create_tab(id, Some(parent_id));
+                    }
+                    Some(ui_snapshot_response(host))
+                }
+                Err(error) => Some(IpcResponse::failure(error)),
+            }
+        }
+        "select-tab" => {
+            let Some(position) =
+                resolve_target_position(host.tabs(), host.active_id(), option_value(args, "-t"))
+            else {
+                return Some(IpcResponse::failure("can't find tab"));
+            };
+            host.sync_composer_from_ui();
+            if let Err(error) = host.select_tab_at(position) {
+                return Some(IpcResponse::failure(error));
+            }
+            let _ = host.set_ipc_focus_surface("terminal");
+            Some(ui_snapshot_response(host))
+        }
+        "close-tab" => {
+            let Some(position) =
+                resolve_target_position(host.tabs(), host.active_id(), option_value(args, "-t"))
+            else {
+                return Some(IpcResponse::failure("can't find tab"));
+            };
+            let id = host.tabs()[position].id;
+            if let Err(error) = host.close_tab_by_ui_action(id) {
+                return Some(IpcResponse::failure(error));
+            }
+            Some(ui_snapshot_response(host))
+        }
+        "composer-send" => {
+            match host.prepare_composer_send() {
+                Ok(true) => return Some(ui_snapshot_response(host)),
+                Ok(false) => {}
+                Err(error) => return Some(IpcResponse::failure(error)),
+            }
+            host.sync_composer_from_ui();
+            let Some(position) =
+                resolve_target_position(host.tabs(), host.active_id(), option_value(args, "-t"))
+                    .or_else(|| resolve_target_position(host.tabs(), host.active_id(), None))
+            else {
+                return Some(IpcResponse::failure("can't find window"));
+            };
+            let response = send_composer_at_position(host, position);
+            if response.ok {
+                Some(ui_snapshot_response(host))
+            } else {
+                Some(response)
+            }
+        }
+        _ => None,
+    }
 }
 
 pub(crate) fn dispatch_shared_command(
@@ -976,61 +1147,19 @@ pub(crate) fn dispatch_shared_command(
             else {
                 return Some(IpcResponse::failure("can't find window"));
             };
-            if let Some(secret) = host.tabs_mut()[position].sensitive_composer.take() {
-                let marker = host.tabs_mut()[position].sensitive_proxy_marker.take();
-                if !host.tabs_mut()[position].submit_sensitive(secret.expose()) {
-                    host.tabs_mut()[position].sensitive_composer = Some(secret);
-                    host.tabs_mut()[position].sensitive_proxy_marker = marker;
-                    return Some(IpcResponse::failure(
-                        "a composer submission is already pending",
-                    ));
-                }
-                let Some(marker) = marker else {
-                    host.tabs_mut()[position].proxy.mark_failed().ok();
-                    return Some(IpcResponse::failure(
-                        "sensitive proxy draft lost its confirmation identity",
-                    ));
-                };
-                if let Err(error) = host.tabs_mut()[position].proxy.mark_submitted() {
-                    return Some(IpcResponse::failure(error.to_string()));
-                }
-                let id = host.tabs_mut()[position].id;
-                host.tabs_mut()[position].begin_proxy_confirmation(marker);
-                host.event_journal_mut().commit(
-                    EventKind::WorkingContextProxySubmitted,
-                    Some(id),
-                    serde_json::json!({
-                        "sensitive": true,
-                        "application_state": "submitted",
-                    }),
-                );
-                if host.active_id() == Some(id) {
-                    host.load_composer_to_ui();
-                }
-                return Some(IpcResponse::success(""));
-            }
-            let text = mem::take(&mut host.tabs_mut()[position].composer);
-            if !text.is_empty() && !host.tabs_mut()[position].submit(&text) {
-                host.tabs_mut()[position].composer = text;
-                return Some(IpcResponse::failure(
-                    "a composer submission is already pending",
-                ));
-            }
-            if !text.is_empty() {
-                let id = host.tabs_mut()[position].id;
-                host.event_journal_mut().commit(
-                    EventKind::ComposerSubmitted,
-                    Some(id),
-                    serde_json::json!({
-                        "length": text.chars().count(),
-                    }),
-                );
-            }
-            if host.active_id() == Some(host.tabs()[position].id) {
-                host.load_composer_to_ui();
-            }
-            Some(IpcResponse::success(""))
+            Some(send_composer_at_position(host, position))
         }
+        "set-setting" => {
+            let Some(key) = args.get(1).map(String::as_str) else {
+                return Some(IpcResponse::failure("set-setting requires a key and value"));
+            };
+            let value = args.get(2..).unwrap_or_default().join(" ");
+            match host.apply_setting(key, &value) {
+                Ok(()) => Some(ui_snapshot_response(host)),
+                Err(error) => Some(IpcResponse::failure(error)),
+            }
+        }
+        "ui-action" => dispatch_shared_ui_action(host, args),
         "get-settings" => Some(IpcResponse::success(host.settings_json())),
         "focus" => {
             let surface = args.get(1).map(String::as_str).unwrap_or("terminal");

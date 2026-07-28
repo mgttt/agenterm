@@ -27,7 +27,7 @@ use crate::{
     ipc_transport::{IpcEnvelope, start_ipc_server},
     protocol::IpcResponse,
     pty::TerminalSize,
-    settings::{AppConfig, config_path, load_config},
+    settings::{AppConfig, config_path, load_config, save_config},
     terminal_runtime::{TerminalLaunch, TerminalTab},
     theme::ThemeId,
     wake_signal::WakeSignal,
@@ -346,6 +346,9 @@ impl UnixApp {
 
     fn build_ui_snapshot_json(&self) -> String {
         let active = self.active;
+        let (client_width, client_height) = self.client_size();
+        let content_height = client_height.saturating_sub(COMPOSER_HEIGHT);
+        let terminal_width = client_width.saturating_sub(SIDEBAR_WIDTH);
         let rows = self.all_tree_rows();
         let tabs = rows
             .iter()
@@ -365,7 +368,31 @@ impl UnixApp {
         serde_json::to_string_pretty(&serde_json::json!({
             "session": self.session_name,
             "active_window_id": active.map(|id| format!("@{id}")),
-            "tabs_visible": true,
+            "tabs_visible": self.config.tabs_visible,
+            "client": {
+                "width": client_width,
+                "height": client_height,
+            },
+            "layout": {
+                "sidebar": {
+                    "x": 0,
+                    "y": 0,
+                    "width": SIDEBAR_WIDTH,
+                    "height": content_height,
+                },
+                "terminal": {
+                    "x": SIDEBAR_WIDTH,
+                    "y": 0,
+                    "width": terminal_width,
+                    "height": content_height,
+                },
+                "composer": {
+                    "x": SIDEBAR_WIDTH,
+                    "y": content_height,
+                    "width": terminal_width,
+                    "height": COMPOSER_HEIGHT,
+                },
+            },
             "focus": {
                 "surface": self.focus_surface.as_str(),
                 "window_id": active.map(|id| format!("@{id}")),
@@ -378,6 +405,14 @@ impl UnixApp {
             "tabs": tabs,
         }))
         .unwrap_or_else(|_| "{}".to_owned())
+    }
+
+    fn client_size(&self) -> (u32, u32) {
+        self.window
+            .as_ref()
+            .map(|window| window.inner_size())
+            .map(|size| (size.width, size.height))
+            .unwrap_or((INITIAL_WIDTH, INITIAL_HEIGHT))
     }
 
     fn handle_sidebar_click(&mut self, x: f64, y: f64) {
@@ -501,8 +536,18 @@ impl UnixApp {
     }
 
     fn handle_ipc(&mut self, envelope: IpcEnvelope) {
+        let command = envelope.request.args.first().map(String::as_str);
         let response = match dispatch_shared_command(self, &envelope.request.args) {
             Some(response) => response,
+            None if command == Some("ui-action") => {
+                let action = envelope
+                    .request
+                    .args
+                    .get(1)
+                    .map(String::as_str)
+                    .unwrap_or("");
+                IpcResponse::failure(format!("unknown UI action: {action}"))
+            }
             None => IpcResponse::typed_failure(
                 format!(
                     "Unix GUI does not implement `{}` yet",
@@ -669,6 +714,28 @@ impl ControlHost for UnixApp {
             "recommended_font_license": "SIL Open Font License 1.1",
         }))
         .unwrap_or_default()
+    }
+
+    fn apply_setting(&mut self, key: &str, value: &str) -> Result<(), String> {
+        match key {
+            "terminal.font-family" if !value.trim().is_empty() => {
+                self.config.terminal_font_family = value.to_owned();
+            }
+            "terminal.font-size" => {
+                let Ok(size) = value.parse::<u16>() else {
+                    return Err("font size must be a number from 8 to 36".to_owned());
+                };
+                if !(8..=36).contains(&size) {
+                    return Err("font size must be from 8 to 36".to_owned());
+                }
+                self.config.terminal_font_size = size;
+            }
+            "terminal.font-family" => return Err("font family cannot be empty".to_owned()),
+            other => return Err(format!("unknown setting: {other}")),
+        }
+        save_config(&self.config).map_err(|error| format!("{error:#}"))?;
+        self.request_redraw();
+        Ok(())
     }
 
     fn started_at_unix_secs(&self) -> u64 {

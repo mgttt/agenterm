@@ -6414,6 +6414,54 @@ impl ControlHost for AppState {
         Ok(())
     }
 
+    fn apply_setting(&mut self, key: &str, value: &str) -> Result<(), String> {
+        match key {
+            "terminal.font-family" if !value.trim().is_empty() => {
+                self.config.terminal_font_family = value.to_owned();
+            }
+            "terminal.font-size" => {
+                let Ok(size) = value.parse::<u16>() else {
+                    return Err("font size must be a number from 8 to 36".to_owned());
+                };
+                if !(8..=36).contains(&size) {
+                    return Err("font size must be from 8 to 36".to_owned());
+                }
+                self.config.terminal_font_size = size;
+            }
+            "terminal.font-family" => return Err("font family cannot be empty".to_owned()),
+            other => return Err(format!("unknown setting: {other}")),
+        }
+        self.rebuild_terminal_font();
+        save_config(&self.config).map_err(|error| format!("{error:#}"))
+    }
+
+    fn close_tab_by_ui_action(&mut self, id: u64) -> Result<(), String> {
+        if !self.tabs.iter().any(|tab| tab.id == id) {
+            return Err(format!("can't find tab: @{id}"));
+        }
+        self.request_close_tab(id);
+        Ok(())
+    }
+
+    fn prepare_composer_send(&mut self) -> Result<bool, String> {
+        if self.cwd_edit_target.is_some() || self.proxy_edit_target.is_some() {
+            return Err(
+                "CWD editor is active; prepare, send now, or cancel it first".to_owned(),
+            );
+        }
+        if self.note_edit_target.is_some() {
+            self.finish_note_edit(true);
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    fn after_create_tab(&mut self, id: u64, parent_id: Option<u64>) {
+        if parent_id.is_some() {
+            self.open_tab_editor(id);
+        }
+    }
+
     fn set_session_name(&mut self, name: String) {
         self.session_name = name;
     }
@@ -6609,36 +6657,6 @@ impl AppState {
                     }
                 }
             }
-            "set-setting" => {
-                let Some(key) = args.get(1).map(String::as_str) else {
-                    return IpcResponse::failure("set-setting requires a key and value");
-                };
-                let value = args.get(2..).unwrap_or_default().join(" ");
-                match key {
-                    "terminal.font-family" if !value.trim().is_empty() => {
-                        self.config.terminal_font_family = value;
-                    }
-                    "terminal.font-size" => {
-                        let Ok(size) = value.parse::<u16>() else {
-                            return IpcResponse::failure("font size must be a number from 8 to 36");
-                        };
-                        if !(8..=36).contains(&size) {
-                            return IpcResponse::failure("font size must be from 8 to 36");
-                        }
-                        self.config.terminal_font_size = size;
-                    }
-                    "terminal.font-family" => {
-                        return IpcResponse::failure("font family cannot be empty");
-                    }
-                    other => return IpcResponse::failure(format!("unknown setting: {other}")),
-                }
-                self.rebuild_terminal_font();
-                if let Err(error) = save_config(&self.config) {
-                    return IpcResponse::failure(format!("{error:#}"));
-                }
-                unsafe { InvalidateRect(self.window, ptr::null(), 0) };
-                IpcResponse::success(self.ui_snapshot())
-            }
             "send-mouse" => {
                 let Some(position) = self.target_position(option_value(args, "-t")) else {
                     return IpcResponse::failure("can't find pane");
@@ -6743,39 +6761,6 @@ impl AppState {
                     return IpcResponse::success(self.ui_snapshot());
                 }
                 let response = match action {
-                    "new-tab" => match self.create_tab(None, Vec::new(), true) {
-                        Ok(_) => None,
-                        Err(error) => Some(IpcResponse::failure(format!("{error:#}"))),
-                    },
-                    "new-child" => {
-                        let parent_position = self
-                            .target_position(option_value(args, "-t"))
-                            .or_else(|| self.active_position());
-                        let Some(parent_position) = parent_position else {
-                            return IpcResponse::failure("can't find parent tab");
-                        };
-                        let parent_id = self.tabs[parent_position].id;
-                        match self.create_tab_with_parent(
-                            Some("New child".to_owned()),
-                            Vec::new(),
-                            Vec::new(),
-                            true,
-                            Some(parent_id),
-                        ) {
-                            Ok(index) => {
-                                if let Some(id) = self
-                                    .tabs
-                                    .iter()
-                                    .find(|tab| tab.index == index)
-                                    .map(|tab| tab.id)
-                                {
-                                    self.open_tab_editor(id);
-                                }
-                                None
-                            }
-                            Err(error) => Some(IpcResponse::failure(format!("{error:#}"))),
-                        }
-                    }
                     "edit-tab" => {
                         let Some(position) = self.target_position(option_value(args, "-t")) else {
                             return IpcResponse::failure("can't find tab");
@@ -6796,31 +6781,6 @@ impl AppState {
                             self.collapsed_tabs.insert(id);
                         }
                         self.layout();
-                        None
-                    }
-                    "select-tab" => {
-                        let Some(position) = self.target_position(option_value(args, "-t")) else {
-                            return IpcResponse::failure("can't find tab");
-                        };
-                        self.save_active_composer();
-                        let id = self.tabs[position].id;
-                        self.finish_note_edit(false);
-                        self.cancel_terminal_selection(true);
-                        self.active = Some(id);
-                        self.load_active_composer();
-                        self.event_journal.commit(
-                            EventKind::TabSelected,
-                            Some(id),
-                            serde_json::json!({}),
-                        );
-                        self.set_focus_surface(FocusSurface::Terminal, "semantic");
-                        None
-                    }
-                    "close-tab" => {
-                        let Some(position) = self.target_position(option_value(args, "-t")) else {
-                            return IpcResponse::failure("can't find tab");
-                        };
-                        self.request_close_tab(self.tabs[position].id);
                         None
                     }
                     "confirm" => {
@@ -6868,19 +6828,6 @@ impl AppState {
                             return IpcResponse::failure("no window-close confirmation is pending");
                         }
                         self.finish_window_close(WindowCloseChoice::StopServerAndExit);
-                        None
-                    }
-                    "composer-send" => {
-                        if self.cwd_edit_target.is_some() || self.proxy_edit_target.is_some() {
-                            return IpcResponse::failure(
-                                "CWD editor is active; prepare, send now, or cancel it first",
-                            );
-                        }
-                        if self.note_edit_target.is_some() {
-                            self.finish_note_edit(true);
-                        } else {
-                            self.send_composer();
-                        }
                         None
                     }
                     "open-cwd-editor" => match self.open_cwd_editor(option_value(args, "-t")) {

@@ -46,7 +46,9 @@ PRD + Cargo deps (primary)
   - [x] shared workspace commands (`list-tab-tree`, `scroll-pane`, rename/note/parent, `workspace-info`, `dump-cells`, `ui-snapshot` simplified)
   - [x] Unix tab sidebar (select by click)
   - [x] composer strip + `show/set/send-composer`, `focus`, `get-settings` (shared dispatch)
-  - [ ] settings editor / `set-setting`, full `ui-action`, Win-grade `ui-snapshot` geometry
+  - [x] `set-setting` + `ui-action` core subset (`new-tab`, `new-child`, `select-tab`, `close-tab`, `composer-send`)
+  - [x] Unix `ui-snapshot` layout geometry (client + sidebar/terminal/composer bounds)
+  - [ ] settings editor UI, full `ui-action`, Win-grade `ui-snapshot` remainder
 
 ## 能力叶
 
