@@ -66,6 +66,7 @@ v0.1.10  可验证的只读 Agent 桥梁
 │  ├─ 复用公共 operation/event/snapshot contracts
 │  ├─ MCP 不解析 CLI 人类文本，也不读取 Win32 私有状态
 │  ├─ resource/tool schema 由一个 typed catalog 驱动
+│  ├─ 保留 v0.1.9 domain/group/callable 层级，不重新压平成另一份清单
 │  ├─ unavailable 能力显式可发现，不静默消失
 │  └─ 为后续 Rhai control 与 agenterm-agent.exe 保留复用边界
 │

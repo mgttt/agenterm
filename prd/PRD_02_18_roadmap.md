@@ -358,6 +358,10 @@ track remains planned, but every declared dependency must still pass.
   - [ ] add bounded task/stream/cancellation, local modules, versioned
     `agenterm.tasks.json`, named task list/show/run, and one machine-readable
     API catalog shared by check, runtime, Fleet tools and future consumers
+  - [ ] publish that catalog as a stable three-level capability tree with
+    shipped/planned/deferred/degraded facts and reviewed purpose-level
+    Node.js/Bun analogues, then generate the comparison matrix, manual index
+    and implementation coverage from the same source
   - [ ] make runtime/module/task identity package-ready through stable
     version, provenance hooks, requirements, capabilities and entry points,
     without adding remote resolution, installation, signature policy or a

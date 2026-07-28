@@ -228,7 +228,9 @@ agenterm-script.exe task list
 agenterm-script.exe run [OPTIONS] FILE.rhai|- [--] [ARGS...]
 agenterm-script.exe eval [OPTIONS] EXPRESSION [--] [ARGS...]
 agenterm-script.exe check [OPTIONS] FILE.rhai|-
+agenterm-script.exe api [MODULE] [--status STATE]
 agenterm-script.exe api --json
+agenterm-script.exe api --compare node|bun|all
 agenterm-script.exe task list [--manifest PATH] [--json]
 agenterm-script.exe task show TASK [--manifest PATH] [--json]
 agenterm-script.exe task run TASK [--manifest PATH] [--] [ARGS...]
@@ -370,6 +372,138 @@ request(method, url, options) -> TaskHandle|Response
 - explicit text/bytes conversion；
 - hex/base64 是否进入首版由实际 HTTP/process 旅程决定；
 - 深层 JSON、巨大 collection、无效 UTF-8 返回 typed limit/data error。
+
+### API 能力全景树
+
+API 不使用一张不断变长的平面函数表，而使用稳定的
+`domain -> capability group -> callable/type` 三层树。状态图例：
+
+```text
+[x] 已交付    [~] 已有基础但需扩展    [ ] v0.1.9
+[>] 明确延后  [-] 有意不兼容/不属于 Script Runtime
+
+agenterm-script
+├─ runtime
+│  ├─ entry
+│  │  ├─ [x] run / eval / check
+│  │  ├─ [x] api --json baseline
+│  │  ├─ [ ] api tree / filters / comparison
+│  │  └─ [ ] named task list / show / run
+│  ├─ profile
+│  │  ├─ [x] pure
+│  │  ├─ [x] observe
+│  │  └─ [ ] local（ordinary default）
+│  └─ output
+│     ├─ [x] print / bounded stdout
+│     └─ [ ] typed result / stderr / exit class
+│
+├─ data
+│  ├─ json
+│  │  ├─ [ ] parse
+│  │  └─ [ ] stringify
+│  ├─ text
+│  │  ├─ [ ] UTF-8 length / slice / search / replace
+│  │  └─ [ ] encode / decode
+│  └─ bytes
+│     ├─ [ ] text conversion / slice / concat
+│     ├─ [ ] hex / base64（由真实旅程决定）
+│     └─ [>] hash / crypto（独立需求和供应链边界）
+│
+├─ system
+│  ├─ fs
+│  │  ├─ [ ] read text / bytes
+│  │  ├─ [ ] write / atomic write
+│  │  ├─ [ ] list / metadata
+│  │  ├─ [ ] create / copy / move
+│  │  └─ [ ] remove explicit target
+│  ├─ path
+│  │  ├─ [ ] join / parent / name / extension
+│  │  ├─ [ ] normalize / relative / canonical facts
+│  │  └─ [ ] Windows drive / UNC / long path
+│  ├─ temp
+│  │  ├─ [ ] owned file / directory
+│  │  └─ [ ] cleanup / atomic promotion
+│  ├─ env
+│  │  ├─ [ ] get / has / names
+│  │  ├─ [ ] set / remove in worker
+│  │  └─ [ ] construct child environment
+│  └─ process
+│     ├─ [ ] run(program, argv, options)
+│     ├─ [ ] spawn -> TaskHandle
+│     ├─ [ ] stdin / stdout / stderr streams
+│     └─ [ ] exit / timeout / cancel / orphan cleanup
+│
+├─ concurrency
+│  ├─ time
+│  │  ├─ [ ] wall clock / monotonic deadline
+│  │  └─ [ ] sleep / cancellable timer
+│  ├─ task
+│  │  ├─ [ ] wait / wait_all / race
+│  │  └─ [ ] cancel / terminal state / failure propagation
+│  └─ stream
+│     ├─ [ ] read / bounded collect
+│     └─ [ ] backpressure / truncation / close
+│
+├─ network
+│  ├─ http client
+│  │  ├─ [ ] request / response
+│  │  ├─ [ ] headers / text / bytes / bounded stream
+│  │  └─ [ ] proxy / TLS / timeout / cancellation diagnostics
+│  └─ server and low-level
+│     ├─ [>] HTTP listener / WebSocket / TCP / UDP
+│     └─ [>] agenterm-net / libp2p / IPFS
+│
+├─ code-and-automation
+│  ├─ module
+│  │  ├─ [ ] local relative import / project root
+│  │  └─ [ ] identity / version / cycle / cache
+│  ├─ task-manifest
+│  │  ├─ [ ] agenterm.tasks.json
+│  │  └─ [ ] entry / args / cwd / env names / profile
+│  ├─ package
+│  │  ├─ [-] npm / Node module compatibility
+│  │  └─ [>] softmgr / signed package and application market
+│  └─ development
+│     ├─ [>] REPL / watch / test runner
+│     └─ [>] bundler / transpiler / FFI / worker threads
+│
+├─ fleet
+│  ├─ observe
+│  │  ├─ [x] workspace / tabs / active tab / UI snapshot
+│  │  ├─ [x] bounded capture
+│  │  └─ [x] events read / bounded wait
+│  ├─ control
+│  │  ├─ [ ] tab/tree metadata and Composer
+│  │  ├─ [ ] terminal input / viewport / workspace
+│  │  └─ [ ] lifecycle / destructive explicit calls
+│  └─ evidence
+│     ├─ [ ] request / receipt / event
+│     └─ [ ] verified post-state / replay / degraded reason
+│
+└─ observability
+   ├─ [x] budgets / hard ceilings baseline
+   ├─ [x] typed error / audit / crash isolation baseline
+   ├─ [ ] API hierarchy / availability / comparison metadata
+   └─ [ ] docs/manual generation and catalog/runtime conformance
+```
+
+这棵树是范围地图，不表示追求 Node.js/Bun API 兼容。横向比较采用
+“用途相似”而不是“函数同名”：
+
+| AgenTerm 领域 | Node.js 主要参照 | Bun 主要参照 | v0.1.9 策略 |
+|---|---|---|---|
+| fs/path | `node:fs`, `node:path` | `Bun.file`, `Bun.write`, Node-compatible fs | Windows-first typed subset |
+| env/process | `process`, `node:child_process` | `Bun.env`, `Bun.spawn` | executable + argv，无隐式 shell |
+| http | global `fetch`, HTTP/HTTPS modules | `fetch` | 只做有界 client |
+| task/stream/time | Promise/timers/streams | Promise/Web Streams/`Bun.sleep` | Rhai typed handles，不模仿 Promise |
+| modules/tasks | ESM/CJS/package scripts | module resolver/package scripts | 本地 Rhai module + AgenTerm task |
+| data/text/bytes | JSON/string/Buffer | Web/Bun binary APIs | 小而显式、有界转换 |
+| Fleet | 无对应物 | 无对应物 | AgenTerm 的核心差异能力 |
+| package/tooling | npm/npx | package manager/build/test | 延后给 AgenTerm 组件生态 |
+
+对照基线记录来源和复核日期，不能写成兼容性承诺。初始参照为
+[Node.js API index](https://nodejs.org/api/) 与
+[Bun API index](https://bun.sh/docs/runtime/bun-apis)（2026-07-28 复核）。
 
 ## 七、Task 与 Stream 模型
 
@@ -520,6 +654,7 @@ catalog 是实现、check、文档、MCP/Agent 消费者的同一事实源。
 每个 API entry 至少包含：
 
 - stable ID；
+- hierarchy path（domain/group/name）与稳定排序键；
 - module/function/signature；
 - profile availability；
 - input/result/error schema；
@@ -531,6 +666,23 @@ catalog 是实现、check、文档、MCP/Agent 消费者的同一事实源。
 - runtime/API version；
 - degraded/unavailable reason；
 - secret-bearing input/output facts。
+- `comparison` metadata：`node`/`bun` analogue、关系
+  `similar|agenterm-specific|deferred|not-applicable`、reference/version 与
+  last-reviewed；它只用于差距分析和手册，不参与运行时语义。
+
+人类默认看到树，机器看到同一棵树的 JSON：
+
+```text
+agenterm-script.exe api
+agenterm-script.exe api fs
+agenterm-script.exe api --status planned
+agenterm-script.exe api --compare all
+agenterm-script.exe api --json
+```
+
+树、横向比较表、参考手册索引和实现覆盖率都从 catalog 生成；仓库不维护
+第二份手写函数清单。未知、degraded 和 deferred 节点也保留在树中，防止
+“没实现”被误读成“忘记记录”。
 
 `check` 使用同一 catalog 验证：
 
@@ -557,7 +709,8 @@ compatibility planning，`agenterm-mcp.exe`/`agenterm-agent.exe` 也能解释
 
 - `agenterm.tasks.json` 描述如何运行本地任务，不承担下载、签名或安装；
 - future package manifest 描述分发单元、文件、hash、签名、依赖和入口；
-- `agenterm-script.exe` 可以提供 hash、文件、HTTP、进程等通用自动化能力，
+- `agenterm-script.exe` 可以提供文件、HTTP、进程等通用自动化能力，
+  hashing/crypto 是否加入须另立需求，
   但不能自行成为信任根或绕过 `agenterm-softmgr.exe` 的事务边界；
 - v0.1.9 不扫描全机组件、不访问公共 registry、不安装任何 package；
 - 这层合同服务于整个 `agenterm-{script,bash,mcp,agent,desktop,...}.exe`

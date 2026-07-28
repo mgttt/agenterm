@@ -112,7 +112,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [ ] `script run [OPTIONS] FILE.rhai|- [--] [ARGS...]`
     - [ ] `script eval [OPTIONS] EXPRESSION [--] [ARGS...]`
     - [ ] `script check [OPTIONS] FILE.rhai|-`
-    - [ ] `script api --json`
+    - [ ] `script api [MODULE] [--status STATE]` renders the hierarchical
+      human catalog, `script api --compare node|bun|all` renders reviewed
+      purpose-level analogues, and `script api --json` emits their common
+      machine-readable source
     - [ ] `script task list [--manifest PATH] [--json]`
     - [ ] `script task show TASK [--manifest PATH] [--json]`
     - [ ] `script task run TASK [--manifest PATH] [--] [ARGS...]`

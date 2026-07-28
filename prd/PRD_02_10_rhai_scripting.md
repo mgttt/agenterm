@@ -149,6 +149,18 @@ security plugin.
   filesystem/process/network/Fleet access, mutation and destructive facts,
   expected duration, cancellation and streaming support, and any dry-run or
   inspect support.
+- [ ] the catalog is hierarchical, using stable
+  `domain -> capability group -> callable/type` paths and ordering. Human
+  `script api [MODULE]` output renders that same tree; unavailable, degraded,
+  planned, deferred, and intentionally out-of-scope nodes do not disappear.
+- [ ] optional comparison metadata maps a capability to a reviewed Node.js or
+  Bun analogue as `similar`, `agenterm-specific`, `deferred`, or
+  `not-applicable`, with source/version and review date. It supports gap
+  analysis and generated manuals but never claims JavaScript, Node, Bun, npm,
+  module, or binary compatibility.
+- [ ] the API tree, comparison matrix, reference-manual index, and coverage
+  report are generated from the catalog; a second handwritten callable list is
+  rejected by alignment tests.
 - [ ] these are capability facts for people and future tool consumers, not an
   authorization decision. A future agent layer may filter or constrain the
   schema without reimplementing the runtime.
