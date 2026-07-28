@@ -39,6 +39,15 @@ with Node.js/Bun-like local-automation usefulness rather than JavaScript,
 Node API, npm, or Bun compatibility. It is not positioned as a restricted
 security plugin.
 
+- Node.js and Bun are coverage and use-case references, not API-shape
+  specifications. AgenTerm does not inherit callback/Promise duality,
+  sync/async duplication, legacy aliases, module-resolution compatibility, or
+  platform history merely because an analogue exists;
+- each domain selects one AgenTerm-native, Rhai-native, typed, Windows-first,
+  bounded, cancellable, and observable contract. Compatibility aliases require
+  a concrete AgenTerm migration need rather than resemblance to another
+  runtime;
+
 - an explicit human invocation of ordinary `script run` or `script eval`
   defaults to `local`, with the authority expected of an ordinary local
   program launched by that user;

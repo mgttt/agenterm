@@ -46,6 +46,11 @@ Runtime 做实，MCP 与 Agent 层可以复用已经经过文件、进程、网�
 Node.js/Bun 的是“本地自动化用途和组合能力”，不是 JavaScript 语法、
 Node API、npm 或 Bun 二进制兼容。
 
+横向比较只用于发现问题域和能力缺口，不继承历史接口形状。AgenTerm
+没有必要复制 callback/Promise 双轨、sync/async 重复族、旧别名、平台遗留
+语义或包生态兼容层；每项能力只选择最符合 Rhai、typed contracts、
+Windows-first、自反馈、取消与有界资源原则的 AgenTerm-native 设计。
+
 ## 一、版本目录树
 
 ```text
@@ -489,6 +494,20 @@ agenterm-script
 
 这棵树是范围地图，不表示追求 Node.js/Bun API 兼容。横向比较采用
 “用途相似”而不是“函数同名”：
+
+```text
+Node.js / Bun
+  提供问题域、成熟用例和遗漏检查
+          |
+          v
+  不复制 API 形状或历史兼容层
+          |
+          v
+AgenTerm-native contract
+  Rhai-native + typed + Windows-first
+  bounded + cancellable + observable
+  one preferred path, few compatibility aliases
+```
 
 | AgenTerm 领域 | Node.js 主要参照 | Bun 主要参照 | v0.1.9 策略 |
 |---|---|---|---|
