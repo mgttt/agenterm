@@ -925,6 +925,21 @@ pub fn catalog() -> Value {
             },
         },
         "entries": entries(),
+        "typed_error": {
+            "fields": [
+                "class",
+                "code",
+                "operation",
+                "safe_message",
+                "retryable",
+                "target_kind",
+                "truncated",
+                "cause_class",
+            ],
+            "catchable_slices": [
+                "std.process.Output.require_success",
+            ],
+        },
         "failure_categories": [
             "configuration", "limit", "script", "child", "cancelled", "fleet", "protocol", "host"
         ],

@@ -15,6 +15,7 @@ $declaredEvidence = @(
     'script.rhai-deny-budget'
     'script.rhai-framed'
     'script.exit-classes'
+    'script.typed-errors'
     'script.modules-tasks'
     'script.stream'
     'script.http'
@@ -442,6 +443,9 @@ try {
         $apiResult.value.exit_classes.child -ne 4 -or
         $apiResult.value.exit_classes.cancelled -ne 5 -or
         $apiResult.value.exit_classes.fleet -ne 6 -or
+        @($apiResult.value.typed_error.fields).Count -ne 8 -or
+        $apiResult.value.typed_error.catchable_slices -notcontains
+            'std.process.Output.require_success' -or
         $apiResult.value.failure_categories -notcontains 'protocol' -or
         @($apiResult.value.entries | Where-Object {
             $_.stable_id -eq 'fleet.tabs.new' -and $_.status -eq 'planned'
@@ -631,6 +635,33 @@ output.require_success("test-child");
         -not $childNonzero.Contains('test-child')) {
         throw 'required nonzero child exit did not preserve its typed exit class'
     }
+    $typedCatchExpression = @'
+let caught = ();
+try {
+    let command = std::process::command("cmd.exe");
+    command.args(["/d", "/s", "/c", "exit /b 7"]);
+    let output = command.output();
+    output.require_success("test-child");
+} catch (error) {
+    caught = error;
+}
+caught
+'@
+    $typedCatch = Invoke-Script @(
+        'script', 'eval', $typedCatchExpression, '--profile', 'local', '--json'
+    ) | ConvertFrom-Json
+    if (-not $typedCatch.ok -or
+        $typedCatch.value.class -ne 'child' -or
+        $typedCatch.value.code -ne 'child_nonzero' -or
+        $typedCatch.value.operation -ne 'std.process.Output.require_success' -or
+        $typedCatch.value.safe_message -notlike 'test-child:*' -or
+        $typedCatch.value.retryable -ne $false -or
+        $typedCatch.value.target_kind -ne 'child_process' -or
+        $typedCatch.value.truncated -ne $false -or
+        $typedCatch.value.cause_class -ne 'exit_status') {
+        throw 'Rhai catch did not receive the complete typed child error object'
+    }
+    Write-Evidence 'script.typed-errors'
 
     $childExpression = @'
 let command = std::process::command("cmd.exe");

@@ -18,7 +18,7 @@ use agenterm::script_protocol::{
     ScriptFrameTracker, ScriptInvocation, ScriptOperation, ScriptProfile, ScriptResult,
     encode_script_frame, read_script_frame, write_encoded_script_frame,
 };
-use rhai::{Dynamic, Engine, Scope};
+use rhai::{Dynamic, Engine, EvalAltResult, Scope};
 
 type PendingBroker = Option<(String, mpsc::SyncSender<ScriptBrokerResponse>)>;
 
@@ -719,7 +719,7 @@ fn execute_inner(
             } else if output_exceeded.load(Ordering::Relaxed) {
                 limit_error("limit_output_bytes", message)
             } else {
-                classify_runtime_error(message)
+                classify_runtime_error(&error, message)
             }
         })?;
     let value = if value.is_unit() {
@@ -1218,7 +1218,23 @@ fn fleet_error(code: impl Into<String>, message: impl Into<String>) -> ScriptFai
     failure(code, message, ScriptFailureCategory::Fleet)
 }
 
-fn classify_runtime_error(message: String) -> ScriptFailure {
+fn classify_runtime_error(error: &EvalAltResult, message: String) -> ScriptFailure {
+    if let Some(fields) = agenterm::script_error::runtime_error_fields(error) {
+        return match fields.class.as_str() {
+            "configuration" => configuration_error(fields.code, fields.safe_message),
+            "limit" => limit_error(fields.code, fields.safe_message),
+            "child" => child_error(fields.code, fields.safe_message),
+            "cancelled" => cancelled_error(fields.code, fields.safe_message),
+            "fleet" => fleet_error(fields.code, fields.safe_message),
+            "protocol" => protocol_error(fields.code, fields.safe_message),
+            "host" => failure(
+                fields.code,
+                fields.safe_message,
+                ScriptFailureCategory::Host,
+            ),
+            _ => script_error(fields.code, fields.safe_message),
+        };
+    }
     let classified = message
         .split(|character: char| {
             !character.is_ascii_alphanumeric() && character != '_' && character != '-'
@@ -1378,6 +1394,14 @@ mod tests {
         assert_eq!(catalog["exit_classes"]["child"], 4);
         assert_eq!(catalog["exit_classes"]["cancelled"], 5);
         assert_eq!(catalog["exit_classes"]["fleet"], 6);
+        assert_eq!(
+            catalog["typed_error"]["catchable_slices"][0],
+            "std.process.Output.require_success"
+        );
+        assert_eq!(
+            catalog["typed_error"]["fields"].as_array().map(Vec::len),
+            Some(8)
+        );
         assert_eq!(catalog["schema_version"], 2);
         let apis = catalog["entries"].as_array().expect("API entries");
         let new_tab = apis
@@ -1532,25 +1556,24 @@ mod tests {
 
     #[test]
     fn runtime_failures_preserve_child_and_fleet_exit_classes() {
-        let child = classify_runtime_error(
-            "Runtime error: process_spawn: executable missing (line 1)".to_owned(),
-        );
+        let child_error: Box<EvalAltResult> = "process_spawn: executable missing (line 1)".into();
+        let child = classify_runtime_error(&child_error, child_error.to_string());
         assert_eq!(child.code, "process_spawn");
         assert_eq!(child.category, ScriptFailureCategory::Child);
 
-        let fleet = classify_runtime_error(
-            "Runtime error: server_restart: epoch changed (line 1)".to_owned(),
-        );
+        let fleet_error: Box<EvalAltResult> = "server_restart: epoch changed (line 1)".into();
+        let fleet = classify_runtime_error(&fleet_error, fleet_error.to_string());
         assert_eq!(fleet.code, "server_restart");
         assert_eq!(fleet.category, ScriptFailureCategory::Fleet);
 
-        let script = classify_runtime_error("Runtime error: user failure (line 1)".to_owned());
+        let script_error_value: Box<EvalAltResult> = "user failure (line 1)".into();
+        let script = classify_runtime_error(&script_error_value, script_error_value.to_string());
         assert_eq!(script.code, "script_runtime");
         assert_eq!(script.category, ScriptFailureCategory::Script);
 
-        let denied = classify_runtime_error(
-            "Runtime error: fleet_operation_denied: observe is read-only (line 1)".to_owned(),
-        );
+        let denied_error: Box<EvalAltResult> =
+            "fleet_operation_denied: observe is read-only (line 1)".into();
+        let denied = classify_runtime_error(&denied_error, denied_error.to_string());
         assert_eq!(denied.code, "script_runtime");
         assert_eq!(denied.category, ScriptFailureCategory::Script);
     }

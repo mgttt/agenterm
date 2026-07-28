@@ -566,7 +566,8 @@ agenterm-script
 │     ├─ [x] print / bounded stdout
 │     └─ [>] typed result / stderr / exit class（稳定结果信封、失败 code、
 │        child/cancelled/fleet 分类及 CLI 退出码已交付；Rhai catch 内的
-│        丰富 typed error object 仍待完成）
+│        丰富 typed error object 已由 require_success 打通第一条纵切，
+│        其余公共 API 仍待迁移）
 │
 ├─ data
 │  ├─ json
@@ -1503,7 +1504,7 @@ README 增加一个简短 script task 示例；稳定运行时合同由
   [x] typed script catalog schema v2（现已升为 Script API v2）
   [x] explicit local profile foundation
   [>] typed result/error/exit expansion（稳定结果信封与退出分类已交付；
-      catchable typed error object 仍待完成）
+      catchable typed error object 已交付首个 process 纵切）
   [>] api --json + check alignment（v1 agent method 已由 catalog 驱动；
       nested namespace/signature alignment 随首个 std slice 完成）
 

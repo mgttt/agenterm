@@ -126,6 +126,7 @@
         "script.rhai-deny-budget",
         "script.rhai-framed",
         "script.exit-classes",
+        "script.typed-errors",
         "script.modules-tasks",
         "script.stream",
         "script.http",

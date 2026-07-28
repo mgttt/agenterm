@@ -36,6 +36,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   script, child, cancelled, Fleet, protocol, and host classes; the CLI maps
   them to documented process codes, and `Output.require_success(code)`
   explicitly propagates a required nonzero child exit.
+- [x] `Output.require_success(code)` is the first catchable typed-error slice:
+  Rhai receives class, code, operation, safe message, retryability, target
+  kind, truncation, and optional cause class from the same object used by the
+  unhandled CLI result; other public runtime errors migrate incrementally.
 - [x] privacy-bounded audit records contain identity, source fingerprint and
   label, API/profile/budget facts, broker operation IDs, duration, result
   class, denial, cancellation, timeout, and crash, but never source, argv,

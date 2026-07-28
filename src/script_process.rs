@@ -11,6 +11,7 @@ use std::{
 use rhai::{Array, Engine, EvalAltResult, Module};
 
 use crate::{
+    script_error::runtime_error,
     script_stdlib::{ScriptBytes, ScriptPath},
     script_stream::{
         CapturedStream, ScriptStream, cancel as cancel_stream, capture_after_close,
@@ -499,16 +500,24 @@ fn output_require_success(output: &mut ScriptOutput, code: &str) -> Result<(), B
     if output.success {
         return Ok(());
     }
-    Err(format!(
-        "child_nonzero: {code}: process exited with code {}{}",
-        output.exit_code,
-        if output.truncated {
-            " (captured output truncated)"
-        } else {
-            ""
-        }
-    )
-    .into())
+    Err(runtime_error(
+        "child",
+        "child_nonzero",
+        "std.process.Output.require_success",
+        format!(
+            "{code}: required child process exited with code {}{}",
+            output.exit_code,
+            if output.truncated {
+                " (captured output truncated)"
+            } else {
+                ""
+            }
+        ),
+        false,
+        "child_process",
+        output.truncated,
+        Some("exit_status"),
+    ))
 }
 
 fn output_text(bytes: &ScriptBytes, code: &str) -> Result<String, Box<EvalAltResult>> {
@@ -633,6 +642,57 @@ mod tests {
         assert!(error.contains("child_nonzero"));
         assert!(error.contains("test-child"));
         assert!(error.contains("code 7"));
+    }
+
+    #[test]
+    fn required_child_failure_is_a_catchable_typed_error() {
+        let source = if cfg!(windows) {
+            r#"
+                let caught = ();
+                try {
+                    let c = std::process::command("cmd.exe");
+                    c.args(["/d", "/s", "/c", "exit /b 7"]);
+                    let output = c.output();
+                    output.require_success("test-child");
+                } catch (error) {
+                    caught = error;
+                }
+                caught
+            "#
+        } else {
+            r#"
+                let caught = ();
+                try {
+                    let c = std::process::command("/bin/sh");
+                    c.args(["-c", "exit 7"]);
+                    let output = c.output();
+                    output.require_success("test-child");
+                } catch (error) {
+                    caught = error;
+                }
+                caught
+            "#
+        };
+        let error = engine().eval::<rhai::Map>(source).unwrap();
+        assert_eq!(error["class"].clone().into_string().unwrap(), "child");
+        assert_eq!(
+            error["code"].clone().into_string().unwrap(),
+            "child_nonzero"
+        );
+        assert_eq!(
+            error["operation"].clone().into_string().unwrap(),
+            "std.process.Output.require_success"
+        );
+        assert_eq!(
+            error["target_kind"].clone().into_string().unwrap(),
+            "child_process"
+        );
+        assert!(!error["retryable"].as_bool().unwrap());
+        assert!(!error["truncated"].as_bool().unwrap());
+        assert_eq!(
+            error["cause_class"].clone().into_string().unwrap(),
+            "exit_status"
+        );
     }
 
     #[test]

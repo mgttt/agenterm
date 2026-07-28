@@ -737,9 +737,14 @@ The public result envelope and process exit status use these stable classes:
 
 Unhandled child runtime failures and `Output.require_success(code)` use
 `child`; Fleet broker failures use `fleet`. A Rhai `try/catch` may deliberately
-handle either failure and return a successful result. The richer catchable
-error object described above remains the target contract; the shipped result
-envelope already exposes stable `exit_class` and `failure.code`.
+handle either failure and return a successful result.
+
+`Output.require_success(code)` is the first shipped catchable typed-error
+slice. Its caught value contains every field listed above, and an unhandled
+instance drives the CLI `child` result from that same object. Other runtime
+APIs still migrate incrementally from stable coded strings to this object;
+their documented codes and outer result classification remain stable during
+that migration.
 
 ## 10. Task, Stream, and asynchronous work
 

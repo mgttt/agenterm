@@ -367,6 +367,14 @@
       "evidence_ids": ["script.exit-classes"]
     },
     {
+      "id": "scripting.typed-errors",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "`Output.require_success(code)` is the first catchable typed-error slice",
+      "evidence_ids": ["script.typed-errors"]
+    },
+    {
       "id": "scripting.direct-entry",
       "kind": "behavior",
       "status": "shipped",
