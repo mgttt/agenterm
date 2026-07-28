@@ -22,10 +22,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     parser/scrollback, composer drafts, working-context facts, operation
     receipts and the event journal; it has no user-facing HWND and does not own
     layout, theme, focus, clipboard, menus or rendering
-    - [x] the first internal `agenterm-server.exe` is a real headless process that owns workspace persistence, tab/tree selection, ConPTY children, parser/scrollback and the event journal; public server smoke proves hello/bootstrap/delta, terminal output, stable IDs, persistence, graceful shutdown and zero user-facing HWND
-    - [ ] move the replay/receipt authority out of `AppState`, complete every
-      server-owned command, and make this executable the default authority
-      before declaring the server role complete
+    - [x] the first internal `agenterm-server.exe` is a real headless process that owns workspace persistence, tab/tree selection, ConPTY children, parser/scrollback, the event journal and shared replay/receipt authority outside Win32 `AppState`; public server smoke proves hello/bootstrap/delta, terminal output, stable IDs, committed replay, conflict rejection, asynchronous receipt completion, persistence, graceful shutdown and zero user-facing HWND
+    - [ ] complete every server-owned command and make this executable the
+      default authority before declaring the server role complete
   - [ ] `agenterm.exe` always runs the current on-disk replaceable GUI client;
     if no compatible server exists it bootstraps `agenterm-server.exe`, then
     connects through the same typed loopback control boundary instead of

@@ -9,6 +9,10 @@ use std::{
 use anyhow::{Context as _, Result};
 
 use crate::{
+    control_authority::{
+        ControlAdmission, ControlAuthority, control_event_position, resolved_control_target,
+        submission_wait,
+    },
     control_dispatch::{ControlHost, dispatch_shared_command, resolve_target_position},
     event_journal::{EventJournal, EventKind},
     instances::{InstanceRegistration, register_instance},
@@ -83,6 +87,7 @@ struct ServerState {
     session_name: String,
     started_at: SystemTime,
     event_journal: EventJournal,
+    control_authority: ControlAuthority,
     wake_signal: Arc<WakeSignal>,
     ipc_receiver: Receiver<IpcEnvelope>,
     shutdown_requested: bool,
@@ -116,6 +121,7 @@ impl ServerState {
             session_name,
             started_at: SystemTime::now(),
             event_journal: EventJournal::new(),
+            control_authority: ControlAuthority::default(),
             wake_signal,
             ipc_receiver,
             shutdown_requested: false,
@@ -201,8 +207,8 @@ impl ServerState {
         Ok(())
     }
 
-    fn execute_request(&mut self, request: IpcRequest) -> IpcResponse {
-        if let Err(error) = validate_operation_args(&request.args) {
+    fn execute_command(&mut self, args: &[String]) -> IpcResponse {
+        if let Err(error) = validate_operation_args(args) {
             return IpcResponse::typed_failure(
                 error,
                 "operation_invalid_arguments",
@@ -210,10 +216,10 @@ impl ServerState {
                 false,
             );
         }
-        if let Some(response) = dispatch_shared_command(self, &request.args) {
+        if let Some(response) = dispatch_shared_command(self, args) {
             return response;
         }
-        match request.args.first().map(String::as_str) {
+        match args.first().map(String::as_str) {
             Some("save-workspace") => match self.persist_workspace() {
                 Ok(()) => IpcResponse::success(workspace_path().display().to_string()),
                 Err(error) => IpcResponse::typed_failure(
@@ -256,6 +262,41 @@ impl ServerState {
         }
     }
 
+    fn execute_request(&mut self, request: IpcRequest) -> IpcResponse {
+        let IpcRequest { args, control } = request;
+        let control =
+            match self
+                .control_authority
+                .admit(control, &args, crate::client::unix_time_ms())
+            {
+                ControlAdmission::Uncontrolled => return self.execute_command(&args),
+                ControlAdmission::Respond(response) => return *response,
+                ControlAdmission::Execute(control) => control,
+            };
+        let before_position = control_event_position(self);
+        let mut resolved = resolved_control_target(self, &args);
+        let response = self.execute_command(&args);
+        let after_position = control_event_position(self);
+        if resolved.tab_id.is_none()
+            && let Some(id) = response
+                .output
+                .trim()
+                .strip_prefix('@')
+                .and_then(|value| value.parse::<u64>().ok())
+        {
+            resolved.tab_id = Some(id);
+        }
+        let wait = submission_wait(self, &control, response.ok, &resolved, &after_position);
+        self.control_authority.complete(
+            control,
+            response,
+            resolved,
+            before_position,
+            after_position,
+            wait,
+        )
+    }
+
     fn drain(&mut self) {
         self.wake_signal.begin_drain();
         self.poll_terminals();
@@ -274,6 +315,7 @@ impl ServerState {
 
     fn poll_terminals(&mut self) {
         let mut events = Vec::new();
+        let mut completed_submissions = Vec::new();
         for tab in &mut self.tabs {
             let before = tab.observation();
             let cwd_before = tab.cwd.clone();
@@ -282,6 +324,13 @@ impl ServerState {
             let after = tab.observation();
             match before.delta_to(&after) {
                 Ok(delta) => {
+                    if delta.submission_finished {
+                        completed_submissions.push((
+                            tab.id,
+                            after.submission_enter_written.unwrap_or(false),
+                            after.finalized,
+                        ));
+                    }
                     if delta.output_advanced_by > 0 {
                         events.push((
                             EventKind::TerminalOutput,
@@ -353,6 +402,17 @@ impl ServerState {
         }
         for (kind, tab_id, payload) in events {
             self.event_journal.commit(kind, Some(tab_id), payload);
+        }
+        for (tab_id, enter_written, terminal_finalized) in completed_submissions {
+            if let Err(error) = self.control_authority.finish_submission(
+                &mut self.event_journal,
+                tab_id,
+                enter_written,
+                terminal_finalized,
+            ) && let Some(tab) = self.tabs.iter_mut().find(|tab| tab.id == tab_id)
+            {
+                tab.error = Some(format!("failed to finalize control receipt: {error}"));
+            }
         }
     }
 

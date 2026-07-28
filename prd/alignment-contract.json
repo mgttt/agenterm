@@ -257,7 +257,7 @@
       "kind": "architecture",
       "status": "shipped",
       "evidence_mode": "black-box",
-      "prd": "the first internal `agenterm-server.exe` is a real headless process that owns workspace persistence, tab/tree selection, ConPTY children, parser/scrollback and the event journal; public server smoke proves hello/bootstrap/delta, terminal output, stable IDs, persistence, graceful shutdown and zero user-facing HWND",
+      "prd": "the first internal `agenterm-server.exe` is a real headless process that owns workspace persistence, tab/tree selection, ConPTY children, parser/scrollback, the event journal and shared replay/receipt authority outside Win32 `AppState`; public server smoke proves hello/bootstrap/delta, terminal output, stable IDs, committed replay, conflict rejection, asynchronous receipt completion, persistence, graceful shutdown and zero user-facing HWND",
       "evidence_ids": ["server.headless-authority"]
     },
     {

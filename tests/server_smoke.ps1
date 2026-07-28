@@ -28,6 +28,11 @@ function Invoke-AgenTerm {
     Invoke-SmokeCli -Context $run -Arguments $CommandArgs
 }
 
+function Invoke-AgenTermExpectedFailure {
+    param([string[]]$CommandArgs)
+    Invoke-SmokeCli -Context $run -Arguments $CommandArgs -ExpectFailure
+}
+
 function Write-Evidence {
     param([Parameter(Mandatory = $true)][string]$Id)
     Write-SmokeEvidence -Context $run -Id $Id
@@ -93,6 +98,56 @@ try {
     )
     if (-not $capture.Contains('AGENTERM_HEADLESS_OK')) {
         throw 'headless server did not retain parsed terminal output'
+    }
+
+    Write-Host 'STEP prove server-owned receipt replay and asynchronous completion'
+    $receiptRequestId = "server-receipt-$($run.RunId)"
+    $receiptArgs = @(
+        '--request-id', $receiptRequestId, '--receipt-json',
+        'set-tab-note', '-t', $tabId, "receipt-note-$($run.RunId)"
+    )
+    $firstReceipt = Invoke-AgenTerm $receiptArgs | ConvertFrom-Json
+    $replayedReceipt = Invoke-AgenTerm $receiptArgs | ConvertFrom-Json
+    $conflictReceipt = Invoke-AgenTermExpectedFailure @(
+        '--request-id', $receiptRequestId, '--receipt-json',
+        'set-tab-note', '-t', $tabId, 'different-note'
+    ) | ConvertFrom-Json
+    if ($firstReceipt.outcome -ne 'committed' -or
+        $firstReceipt.request_id -ne $receiptRequestId -or
+        $firstReceipt.after_position.sequence -ne
+            $replayedReceipt.after_position.sequence -or
+        $conflictReceipt.outcome -ne 'no_op' -or
+        $conflictReceipt.error.code -ne 'request_id_conflict') {
+        throw 'headless server did not own committed replay and conflict rejection'
+    }
+
+    $bootstrap = Invoke-AgenTerm @('ui-bootstrap') | ConvertFrom-Json
+    $interactiveTab = [string]$bootstrap.active_tab_id
+    $submissionMarker = "AGENTERM_SERVER_RECEIPT_$($run.RunId)"
+    Invoke-AgenTerm @(
+        'set-composer', '-t', $interactiveTab, "echo $submissionMarker"
+    ) | Out-Null
+    $submissionRequestId = "server-submit-$($run.RunId)"
+    $submissionArgs = @(
+        '--request-id', $submissionRequestId, '--receipt-json',
+        'send-composer', '-t', $interactiveTab
+    )
+    $acceptedReceipt = Invoke-AgenTerm $submissionArgs | ConvertFrom-Json
+    if ($acceptedReceipt.outcome -ne 'accepted' -or
+        $acceptedReceipt.wait.condition -ne 'submission_complete') {
+        throw 'headless server did not return an asynchronous accepted receipt'
+    }
+    Invoke-AgenTerm @(
+        'wait-pane', '-t', $interactiveTab,
+        '--contains', $submissionMarker, '--submit-complete',
+        '--timeout-ms', '5000'
+    ) | Out-Null
+    $committedReceipt = Invoke-AgenTerm $submissionArgs | ConvertFrom-Json
+    if ($committedReceipt.outcome -ne 'committed' -or
+        $committedReceipt.wait -or
+        $committedReceipt.after_position.sequence -le
+            $acceptedReceipt.after_position.sequence) {
+        throw 'headless server did not finalize the accepted receipt after terminal input'
     }
 
     Write-Host 'STEP follow server-owned events into terminal post-state'

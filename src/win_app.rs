@@ -57,10 +57,9 @@ use crate::commands::{
     BACKSPACE_INPUT, has_option, option_value, parse_new_command, parse_tab_environment,
     screenshot_output_path,
 };
-use crate::control_contract::{
-    Admission, ControlError, ControlReceipt, ControlRequest, ErrorCategory,
-    EventPosition as ControlEventPosition, ReceiptOutcome, ReplayWindow, ResolvedTarget,
-    WaitCondition, WaitDescriptor,
+use crate::control_authority::{
+    ControlAdmission, ControlAuthority, control_event_position, resolved_control_target,
+    submission_wait,
 };
 use crate::control_dispatch::{ControlHost, dispatch_shared_command, render_format};
 use crate::event_journal::{EventJournal, EventKind};
@@ -94,7 +93,7 @@ use crate::working_context::{
 use crate::workspace::{SavedTab, SavedWorkspace, load_workspace, save_workspace, workspace_path};
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashSet,
     env,
     ffi::c_void,
     fs::OpenOptions,
@@ -152,7 +151,6 @@ const PROXY_REVEAL_ID: usize = 1014;
 const PROXY_SEND_NOW_ID: usize = 1015;
 const TIMER_ID: usize = 1;
 const IPC_REQUESTS_PER_TICK: usize = 16;
-const CONTROL_REPLAY_CAPACITY: usize = 512;
 const WHEEL_DELTA: i32 = 120;
 const WHEEL_ROWS_PER_NOTCH: usize = 3;
 const WM_APP_WAKE: u32 = WM_APP + 1;
@@ -262,10 +260,6 @@ fn effective_theme(configured: ThemeId, draft: ThemeId, settings_open: bool) -> 
     if settings_open { draft } else { configured }
 }
 
-struct PendingControlReceipt {
-    request: ControlRequest,
-    receipt: ControlReceipt,
-}
 pub fn run_gui_entry() -> i32 {
     let arguments = env::args().skip(1).collect::<Vec<_>>();
     if arguments
@@ -1409,8 +1403,7 @@ struct AppState {
     started_at: SystemTime,
     event_journal: EventJournal,
     wake_signal: Arc<WakeSignal>,
-    replay_window: ReplayWindow,
-    pending_control_receipts: HashMap<u64, PendingControlReceipt>,
+    control_authority: ControlAuthority,
     ipc_receiver: Receiver<IpcEnvelope>,
     clipboard_sender: Sender<ClipboardPaste>,
     clipboard_receiver: Receiver<ClipboardPaste>,
@@ -1514,8 +1507,7 @@ impl AppState {
             started_at: SystemTime::now(),
             event_journal: EventJournal::new(),
             wake_signal: Arc::clone(&wake_signal),
-            replay_window: ReplayWindow::new(CONTROL_REPLAY_CAPACITY),
-            pending_control_receipts: HashMap::new(),
+            control_authority: ControlAuthority::default(),
             ipc_receiver,
             clipboard_sender,
             clipboard_receiver,
@@ -2213,38 +2205,12 @@ impl AppState {
             self.event_journal.commit(kind, Some(tab_id), payload);
         }
         for (tab_id, enter_written, terminal_finalized) in completed_submissions {
-            let Some(pending) = self.pending_control_receipts.remove(&tab_id) else {
-                continue;
-            };
-            let completion_event = self.event_journal.commit_correlated(
-                EventKind::ComposerSubmissionFinished,
-                Some(tab_id),
-                Some(pending.request.request_id.as_str().to_owned()),
-                Some(pending.request.operation_id.as_str().to_owned()),
-                serde_json::json!({
-                    "enter_written": enter_written,
-                    "terminal_finalized": terminal_finalized,
-                }),
-            );
-            let mut receipt = pending.receipt;
-            receipt.after_position = Some(ControlEventPosition {
-                epoch: completion_event.epoch,
-                sequence: completion_event.sequence,
-            });
-            receipt.wait = None;
-            if enter_written {
-                receipt.outcome = ReceiptOutcome::Committed;
-            } else {
-                receipt.outcome = ReceiptOutcome::OutcomeUnknown;
-                receipt.result = None;
-                receipt.error = Some(ControlError::new(
-                    "terminal_submission_incomplete",
-                    ErrorCategory::Precondition,
-                    "composer text was written, but the terminal did not accept the final Enter",
-                    false,
-                ));
-            }
-            if let Err(error) = self.replay_window.complete(&pending.request, receipt) {
+            if let Err(error) = self.control_authority.finish_submission(
+                &mut self.event_journal,
+                tab_id,
+                enter_written,
+                terminal_finalized,
+            ) {
                 self.last_error = Some(format!(
                     "failed to finalize control receipt for tab @{tab_id}: {error}"
                 ));
@@ -6078,127 +6044,32 @@ impl AppState {
         .unwrap_or_else(|error| format!(r#"{{"error":"{error}"}}"#))
     }
 
-    fn control_event_position(&self) -> ControlEventPosition {
-        let position = self.event_journal.position();
-        ControlEventPosition {
-            epoch: position.epoch,
-            sequence: position.sequence,
-        }
-    }
-
-    fn resolved_control_target(&self, args: &[String]) -> ResolvedTarget {
-        let command = args.first().map(String::as_str).unwrap_or_default();
-        let tab_scoped = option_value(args, "-t").is_some()
-            || matches!(
-                command,
-                "capture-pane"
-                    | "display-message"
-                    | "dump-cells"
-                    | "focus"
-                    | "inspect"
-                    | "kill-window"
-                    | "rename-window"
-                    | "scroll-pane"
-                    | "send-composer"
-                    | "send-keys"
-                    | "send-mouse"
-                    | "set-composer"
-                    | "set-tab-note"
-                    | "show-composer"
-                    | "show-tab-note"
-            );
-        let tab_id = tab_scoped
-            .then(|| self.target_position(option_value(args, "-t")))
-            .flatten()
-            .map(|position| self.tabs[position].id);
-        let position = self.event_journal.position();
-        ResolvedTarget {
-            server_pid: std::process::id(),
-            server_address: crate::ipc_address(),
-            server_epoch: position.epoch,
-            session: self.session_name.clone(),
-            tab_id,
-        }
-    }
-
-    fn response_from_receipt(receipt: ControlReceipt) -> IpcResponse {
-        if let Some(error) = &receipt.error {
-            return IpcResponse::typed_failure(
-                error.message.clone(),
-                error.code.clone(),
-                error.category.as_str(),
-                error.retryable,
-            )
-            .with_receipt(receipt);
-        }
-        let output = receipt
-            .result
-            .as_ref()
-            .and_then(|result| result["output"].as_str())
-            .unwrap_or_default()
-            .to_owned();
-        IpcResponse::success(output).with_receipt(receipt)
-    }
-
     fn execute_ipc_request(&mut self, request: IpcRequest) -> IpcResponse {
-        let Some(control) = request.control else {
-            return match validate_operation_args(&request.args) {
-                Ok(operation) => self.execute_command(&request.args, operation),
-                Err(error) => IpcResponse::typed_failure(
-                    error,
-                    "operation_invalid_arguments",
-                    "validation",
-                    false,
-                ),
+        let IpcRequest { args, control } = request;
+        let control =
+            match self
+                .control_authority
+                .admit(control, &args, crate::client::unix_time_ms())
+            {
+                ControlAdmission::Uncontrolled => {
+                    return match validate_operation_args(&args) {
+                        Ok(operation) => self.execute_command(&args, operation),
+                        Err(error) => IpcResponse::typed_failure(
+                            error,
+                            "operation_invalid_arguments",
+                            "validation",
+                            false,
+                        ),
+                    };
+                }
+                ControlAdmission::Respond(response) => return *response,
+                ControlAdmission::Execute(control) => control,
             };
-        };
-        if control.schema_version != crate::control_contract::CONTROL_CONTRACT_SCHEMA_VERSION {
-            return IpcResponse::typed_failure(
-                "unsupported control contract schema version",
-                "control_schema_unsupported",
-                "unsupported",
-                false,
-            );
-        }
-        let expected_identity = crate::client::control_request_identity(&request.args);
-        let expected_fingerprint = crate::client::control_payload_fingerprint(&request.args);
-        let identity_matches = expected_identity.as_ref().is_ok_and(|(operation, intent)| {
-            operation == &control.operation_id && intent == &control.intent
-        });
-        let fingerprint_matches = expected_fingerprint
-            .as_ref()
-            .is_ok_and(|fingerprint| fingerprint == &control.payload_fingerprint);
-        if !identity_matches || !fingerprint_matches {
-            let error = ControlError::new(
-                "control_request_mismatch",
-                ErrorCategory::Validation,
-                "control metadata does not match the command payload",
-                false,
-            );
-            let receipt = ControlReceipt::rejected(&control, error.clone());
-            return IpcResponse::typed_failure(
-                error.message,
-                error.code,
-                error.category.as_str(),
-                error.retryable,
-            )
-            .with_receipt(receipt);
-        }
 
-        match self
-            .replay_window
-            .admit(&control, crate::client::unix_time_ms())
-        {
-            Admission::Replay { receipt } | Admission::Reject { receipt } => {
-                return Self::response_from_receipt(receipt);
-            }
-            Admission::Execute { .. } => {}
-        }
-
-        let before_position = self.control_event_position();
-        let mut resolved = self.resolved_control_target(&request.args);
-        let response = match validate_operation_args(&request.args) {
-            Ok(operation) => self.execute_command(&request.args, operation),
+        let before_position = control_event_position(self);
+        let mut resolved = resolved_control_target(self, &args);
+        let response = match validate_operation_args(&args) {
+            Ok(operation) => self.execute_command(&args, operation),
             Err(error) => IpcResponse::typed_failure(
                 error,
                 "operation_invalid_arguments",
@@ -6206,7 +6077,7 @@ impl AppState {
                 false,
             ),
         };
-        let after_position = self.control_event_position();
+        let after_position = control_event_position(self);
         if resolved.tab_id.is_none()
             && let Some(id) = response
                 .output
@@ -6216,101 +6087,15 @@ impl AppState {
         {
             resolved.tab_id = Some(id);
         }
-        let error = (!response.ok).then(|| {
-            ControlError::new(
-                if response.error_code.is_empty() {
-                    "command_outcome_unknown"
-                } else {
-                    response.error_code.as_str()
-                },
-                crate::client::error_category_from_wire(&response.error_category),
-                response.error.clone(),
-                response.retryable,
-            )
-        });
-        let mut outcome = if response.ok {
-            ReceiptOutcome::Committed
-        } else if matches!(
-            error.as_ref().map(|error| error.category),
-            Some(
-                ErrorCategory::Validation
-                    | ErrorCategory::Conflict
-                    | ErrorCategory::NotFound
-                    | ErrorCategory::Precondition
-                    | ErrorCategory::Policy
-                    | ErrorCategory::Unsupported
-            )
-        ) {
-            ReceiptOutcome::NoOp
-        } else {
-            ReceiptOutcome::OutcomeUnknown
-        };
-        let wait = (response.ok && control.operation_id.as_str() == "command.send.composer")
-            .then_some(resolved.tab_id)
-            .flatten()
-            .and_then(|tab_id| {
-                let position = self.tabs.iter().position(|tab| tab.id == tab_id)?;
-                self.tabs[position]
-                    .submission
-                    .is_pending()
-                    .then(|| WaitDescriptor {
-                        condition: WaitCondition::SubmissionComplete,
-                        target: resolved.clone(),
-                        minimum_position: after_position.clone(),
-                        event_kind: Some("composer.submission-finished".to_owned()),
-                        deadline_unix_ms: control.deadline_unix_ms,
-                    })
-            });
-        if wait.is_some() {
-            outcome = ReceiptOutcome::Accepted;
-        }
-        let receipt = ControlReceipt {
-            schema_version: crate::control_contract::CONTROL_CONTRACT_SCHEMA_VERSION,
-            request_id: control.request_id.clone(),
-            operation_id: control.operation_id.clone(),
-            payload_fingerprint: control.payload_fingerprint.clone(),
-            outcome,
-            resolved: Some(resolved),
-            before_position: Some(before_position),
-            after_position: Some(after_position),
-            result: response
-                .ok
-                .then(|| serde_json::json!({ "output": response.output })),
-            error,
+        let wait = submission_wait(self, &control, response.ok, &resolved, &after_position);
+        self.control_authority.complete(
+            control,
+            response,
+            resolved,
+            before_position,
+            after_position,
             wait,
-        };
-        let completion = if receipt.outcome == ReceiptOutcome::Accepted {
-            self.replay_window
-                .update_accepted(&control, receipt.clone())
-        } else {
-            self.replay_window.complete(&control, receipt.clone())
-        };
-        if let Err(error) = completion {
-            return IpcResponse::typed_failure(
-                format!("failed to finalize control receipt: {error}"),
-                "control_receipt_internal",
-                "internal",
-                false,
-            );
-        }
-        if receipt.outcome == ReceiptOutcome::Accepted {
-            let Some(tab_id) = receipt.resolved.as_ref().and_then(|target| target.tab_id) else {
-                return IpcResponse::typed_failure(
-                    "accepted control request did not resolve a terminal",
-                    "control_receipt_internal",
-                    "internal",
-                    false,
-                );
-            };
-            self.pending_control_receipts.insert(
-                tab_id,
-                PendingControlReceipt {
-                    request: control,
-                    receipt: receipt.clone(),
-                },
-            );
-        }
-        response.with_receipt(receipt)
+        )
     }
 }
 

@@ -5,6 +5,8 @@ use std::time::Duration;
 mod build_identity;
 mod client;
 mod commands;
+#[cfg(any(windows, unix))]
+mod control_authority;
 mod control_contract;
 #[cfg(any(windows, unix))]
 mod control_dispatch;
