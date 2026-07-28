@@ -23,11 +23,7 @@ pub(super) fn key_event_to_bytes(event: &KeyEvent) -> Option<Vec<u8>> {
                     bytes.push(ch as u8);
                 }
             }
-            if bytes.is_empty() {
-                None
-            } else {
-                Some(bytes)
-            }
+            if bytes.is_empty() { None } else { Some(bytes) }
         }
         Key::Unidentified(_) => match event.physical_key {
             PhysicalKey::Code(code) => physical_code_to_byte(code),

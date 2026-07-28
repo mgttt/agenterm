@@ -303,9 +303,11 @@ fn build_argv(program: &CStr, args: &[OsString]) -> io::Result<Vec<CString>> {
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "argv0 contains NUL"))?,
     );
     for arg in args {
-        argv.push(CString::new(arg.as_bytes()).map_err(|_| {
-            io::Error::new(io::ErrorKind::InvalidInput, "argument contains NUL")
-        })?);
+        argv.push(
+            CString::new(arg.as_bytes()).map_err(|_| {
+                io::Error::new(io::ErrorKind::InvalidInput, "argument contains NUL")
+            })?,
+        );
     }
     Ok(argv)
 }
@@ -338,15 +340,22 @@ fn env_entry_to_cstring(key: &OsStr, value: &OsStr) -> io::Result<CString> {
     bytes.extend_from_slice(key.as_bytes());
     bytes.push(b'=');
     bytes.extend_from_slice(value.as_bytes());
-    CString::new(bytes)
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "environment value contains NUL"))
+    CString::new(bytes).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "environment value contains NUL",
+        )
+    })
 }
 
 fn set_os_env(key: &OsStr, value: &OsStr) -> io::Result<()> {
     let key = CString::new(key.as_bytes())
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "environment key contains NUL"))?;
     let value = CString::new(value.as_bytes()).map_err(|_| {
-        io::Error::new(io::ErrorKind::InvalidInput, "environment value contains NUL")
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "environment value contains NUL",
+        )
     })?;
     let result = unsafe { libc::setenv(key.as_ptr(), value.as_ptr(), 1) };
     if result == -1 {
@@ -435,13 +444,8 @@ fn set_nonblocking(fd: RawFd) -> io::Result<()> {
 
 fn read_fd(fd: RawFd, buffer: &mut [u8]) -> io::Result<usize> {
     loop {
-        let result = unsafe {
-            libc::read(
-                fd,
-                buffer.as_mut_ptr().cast::<libc::c_void>(),
-                buffer.len(),
-            )
-        };
+        let result =
+            unsafe { libc::read(fd, buffer.as_mut_ptr().cast::<libc::c_void>(), buffer.len()) };
         if result == -1 {
             let error = io::Error::last_os_error();
             if error.kind() == io::ErrorKind::Interrupted {
@@ -463,19 +467,11 @@ fn write_all_with_timeout(fd: RawFd, mut buffer: &[u8], timeout: Duration) -> io
         if started.elapsed() >= timeout {
             return Err(io::Error::new(
                 io::ErrorKind::TimedOut,
-                format!(
-                    "pty write made no progress for {} ms",
-                    timeout.as_millis()
-                ),
+                format!("pty write made no progress for {} ms", timeout.as_millis()),
             ));
         }
-        let result = unsafe {
-            libc::write(
-                fd,
-                buffer.as_ptr().cast::<libc::c_void>(),
-                buffer.len(),
-            )
-        };
+        let result =
+            unsafe { libc::write(fd, buffer.as_ptr().cast::<libc::c_void>(), buffer.len()) };
         if result == -1 {
             let error = io::Error::last_os_error();
             if error.kind() == io::ErrorKind::Interrupted {
@@ -517,16 +513,17 @@ fn wait_until_readable(fd: RawFd) -> io::Result<()> {
     }
 }
 
-fn wait_until_writable(fd: RawFd, started: std::time::Instant, timeout: Duration) -> io::Result<()> {
+fn wait_until_writable(
+    fd: RawFd,
+    started: std::time::Instant,
+    timeout: Duration,
+) -> io::Result<()> {
     loop {
         let remaining = timeout.saturating_sub(started.elapsed());
         if remaining.is_zero() {
             return Err(io::Error::new(
                 io::ErrorKind::TimedOut,
-                format!(
-                    "pty write made no progress for {} ms",
-                    timeout.as_millis()
-                ),
+                format!("pty write made no progress for {} ms", timeout.as_millis()),
             ));
         }
         let millis = i32::try_from(remaining.as_millis().max(1)).unwrap_or(i32::MAX);
@@ -551,10 +548,7 @@ fn wait_until_writable(fd: RawFd, started: std::time::Instant, timeout: Duration
         if ready == 0 {
             return Err(io::Error::new(
                 io::ErrorKind::TimedOut,
-                format!(
-                    "pty write made no progress for {} ms",
-                    timeout.as_millis()
-                ),
+                format!("pty write made no progress for {} ms", timeout.as_millis()),
             ));
         }
         let error = io::Error::last_os_error();
@@ -602,7 +596,9 @@ mod tests {
         let _ = child.wait();
 
         assert!(
-            output.windows(b"marker".len()).any(|window| window == b"marker"),
+            output
+                .windows(b"marker".len())
+                .any(|window| window == b"marker"),
             "expected marker in pty output, got {:?}",
             String::from_utf8_lossy(&output)
         );

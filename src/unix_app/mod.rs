@@ -45,9 +45,10 @@ pub fn run_gui_entry() -> i32 {
         return 2;
     }
 
-    let no_activate = arguments.iter().any(|arg| {
-        matches!(arg.as_str(), "--no-activate" | "--not-foreground")
-    }) || no_activate_from_environment();
+    let no_activate = arguments
+        .iter()
+        .any(|arg| matches!(arg.as_str(), "--no-activate" | "--not-foreground"))
+        || no_activate_from_environment();
 
     if !display_available() {
         eprintln!(

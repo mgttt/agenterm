@@ -24,11 +24,7 @@ impl TerminalCell {
     }
 
     pub(super) fn with_defaults(ch: char, _palette: &ThemePalette) -> Self {
-        Self {
-            ch,
-            fg: 7,
-            bg: 0,
-        }
+        Self { ch, fg: 7, bg: 0 }
     }
 }
 
@@ -52,29 +48,29 @@ impl TerminalGrid {
     pub(super) fn resize(&mut self, cols: u16, rows: u16) {
         self.cols = cols;
         self.rows = rows;
-        self.cells.resize(
-            usize::from(cols) * usize::from(rows),
-            TerminalCell::blank(),
-        );
+        self.cells
+            .resize(usize::from(cols) * usize::from(rows), TerminalCell::blank());
     }
 
     pub(super) fn sync_from_screen(&mut self, screen: &vt100::Screen) {
         for row in 0..self.rows {
             for col in 0..self.cols {
-                let cell = screen.cell(row, col).map_or_else(TerminalCell::blank, |cell| {
-                    if cell.is_wide_continuation() {
-                        return TerminalCell::blank();
-                    }
-                    let text = cell.contents();
-                    let ch = text.chars().next().unwrap_or(' ');
-                    let ch = if text.is_empty() { ' ' } else { ch };
-                    let mut fg = color_index(cell.fgcolor(), false);
-                    let mut bg = color_index(cell.bgcolor(), true);
-                    if cell.inverse() {
-                        std::mem::swap(&mut fg, &mut bg);
-                    }
-                    TerminalCell { ch, fg, bg }
-                });
+                let cell = screen
+                    .cell(row, col)
+                    .map_or_else(TerminalCell::blank, |cell| {
+                        if cell.is_wide_continuation() {
+                            return TerminalCell::blank();
+                        }
+                        let text = cell.contents();
+                        let ch = text.chars().next().unwrap_or(' ');
+                        let ch = if text.is_empty() { ' ' } else { ch };
+                        let mut fg = color_index(cell.fgcolor(), false);
+                        let mut bg = color_index(cell.bgcolor(), true);
+                        if cell.inverse() {
+                            std::mem::swap(&mut fg, &mut bg);
+                        }
+                        TerminalCell { ch, fg, bg }
+                    });
                 self.set_cell(col, row, cell);
             }
         }
@@ -96,11 +92,7 @@ impl TerminalGrid {
             if column >= self.cols {
                 break;
             }
-            self.set_cell(
-                column,
-                row,
-                TerminalCell::with_defaults(ch, self.palette),
-            );
+            self.set_cell(column, row, TerminalCell::with_defaults(ch, self.palette));
         }
     }
 
@@ -168,15 +160,7 @@ fn draw_cell(
     let cell_w = CELL_WIDTH.min(width - origin_x);
     let cell_h = CELL_HEIGHT.min(height - origin_y);
     let bg_pixel = rgb_to_pixel(bg);
-    fill_rect(
-        buffer,
-        stride,
-        origin_x,
-        origin_y,
-        cell_w,
-        cell_h,
-        bg_pixel,
-    );
+    fill_rect(buffer, stride, origin_x, origin_y, cell_w, cell_h, bg_pixel);
 
     let Some(glyph) = super::font::glyph_rows(ch) else {
         return;
@@ -202,15 +186,7 @@ fn draw_cell(
     }
 }
 
-fn fill_rect(
-    buffer: &mut [u32],
-    stride: u32,
-    x: u32,
-    y: u32,
-    width: u32,
-    height: u32,
-    color: u32,
-) {
+fn fill_rect(buffer: &mut [u32], stride: u32, x: u32, y: u32, width: u32, height: u32, color: u32) {
     for row in y..y + height {
         let start = (row * stride + x) as usize;
         let end = start + width as usize;
@@ -232,10 +208,7 @@ fn ansi_color(palette: &ThemePalette, index: u8) -> Rgb {
 }
 
 fn rgb_to_pixel(rgb: Rgb) -> u32 {
-    0xFF00_0000
-        | (u32::from(rgb.red) << 16)
-        | (u32::from(rgb.green) << 8)
-        | u32::from(rgb.blue)
+    0xFF00_0000 | (u32::from(rgb.red) << 16) | (u32::from(rgb.green) << 8) | u32::from(rgb.blue)
 }
 
 pub(super) fn theme_palette() -> &'static ThemePalette {

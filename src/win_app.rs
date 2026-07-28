@@ -1,5 +1,5 @@
-use anyhow::{Context as _, Result};
 use crate::pty::TerminalSize;
+use anyhow::{Context as _, Result};
 use windows_sys::Win32::{
     Foundation::{
         COLORREF, GlobalFree, HINSTANCE, HWND, INVALID_HANDLE_VALUE, LPARAM, LRESULT, POINT, RECT,
