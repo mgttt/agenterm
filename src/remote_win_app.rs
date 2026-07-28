@@ -12,9 +12,9 @@ use windows_sys::Win32::{
     Foundation::{COLORREF, GlobalFree, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
     Graphics::Gdi::{
         BeginPaint, CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS, CreateFontW, CreateSolidBrush,
-        DEFAULT_CHARSET, DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE, DT_VCENTER, DeleteObject,
-        DrawTextW, EndPaint, FF_MODERN, FIXED_PITCH, FW_NORMAL, FillRect, FrameRect, GetDC,
-        GetTextMetricsW, HDC, HFONT, HGDIOBJ, LOGPIXELSY, OUT_DEFAULT_PRECIS, PAINTSTRUCT,
+        DEFAULT_CHARSET, DT_CENTER, DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE, DT_VCENTER,
+        DeleteObject, DrawTextW, EndPaint, FF_MODERN, FIXED_PITCH, FW_NORMAL, FillRect, FrameRect,
+        GetDC, GetTextMetricsW, HDC, HFONT, HGDIOBJ, LOGPIXELSY, OUT_DEFAULT_PRECIS, PAINTSTRUCT,
         ReleaseDC, ScreenToClient, SelectObject, SetBkMode, SetTextColor, TEXTMETRICW, TRANSPARENT,
         UpdateWindow,
     },
@@ -37,17 +37,17 @@ use windows_sys::Win32::{
             DestroyWindow, DispatchMessageW, ES_AUTOVSCROLL, ES_MULTILINE, ES_WANTRETURN,
             EnableMenuItem, GWLP_USERDATA, GetClientRect, GetCursorPos, GetForegroundWindow,
             GetMessageW, GetSystemMenu, GetWindowLongPtrW, GetWindowTextLengthW, GetWindowTextW,
-            IDC_ARROW, IDC_SIZEWE, InsertMenuW, LoadCursorW, LoadIconW, MF_BYCOMMAND, MF_CHECKED,
-            MF_ENABLED, MF_GRAYED, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MSG, MoveWindow,
-            PostQuitMessage, RegisterClassW, SC_CLOSE, SW_HIDE, SW_SHOW, SW_SHOWNOACTIVATE,
-            SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SendMessageW,
-            SetCursor, SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowPos,
-            SetWindowTextW, ShowWindow, TranslateMessage, WM_CAPTURECHANGED, WM_CHAR, WM_CLOSE,
-            WM_COMMAND, WM_COPY, WM_CREATE, WM_DESTROY, WM_ERASEBKGND, WM_INITMENUPOPUP,
-            WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY,
-            WM_PAINT, WM_PASTE, WM_SETCURSOR, WM_SETFOCUS, WM_SIZE, WM_SYSCOMMAND, WM_TIMER,
-            WNDCLASSW, WS_BORDER, WS_CHILD, WS_CLIPCHILDREN, WS_OVERLAPPEDWINDOW, WS_TABSTOP,
-            WS_VISIBLE, WS_VSCROLL,
+            IDC_ARROW, IDC_SIZEWE, InsertMenuW, IsIconic, IsWindowVisible, IsZoomed, LoadCursorW,
+            LoadIconW, MF_BYCOMMAND, MF_CHECKED, MF_ENABLED, MF_GRAYED, MF_SEPARATOR, MF_STRING,
+            MF_UNCHECKED, MSG, MoveWindow, PostQuitMessage, RegisterClassW, SC_CLOSE, SW_HIDE,
+            SW_SHOW, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+            SWP_SHOWWINDOW, SendMessageW, SetCursor, SetForegroundWindow, SetTimer,
+            SetWindowLongPtrW, SetWindowPos, SetWindowTextW, ShowWindow, TranslateMessage,
+            WM_CAPTURECHANGED, WM_CHAR, WM_CLOSE, WM_COMMAND, WM_COPY, WM_CREATE, WM_DESTROY,
+            WM_ERASEBKGND, WM_INITMENUPOPUP, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP,
+            WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY, WM_PAINT, WM_PASTE, WM_SETCURSOR,
+            WM_SETFOCUS, WM_SIZE, WM_SYSCOMMAND, WM_TIMER, WNDCLASSW, WS_BORDER, WS_CHILD,
+            WS_CLIPCHILDREN, WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE, WS_VSCROLL,
         },
     },
 };
@@ -105,6 +105,7 @@ const COMPOSER_HEIGHT: i32 = 104;
 const MARGIN: i32 = 6;
 const RECONNECT_INTERVAL: Duration = Duration::from_millis(500);
 const START_TIMEOUT: Duration = Duration::from_secs(8);
+const WINDOW_CLOSE_BUTTON_TEXT_FORMAT: u32 = DT_CENTER | DT_SINGLELINE | DT_VCENTER;
 
 pub(crate) fn run_remote_gui(no_activate: bool) -> Result<()> {
     let client_id = format!(
@@ -488,6 +489,7 @@ struct RemoteWindowState {
     focus_surface: RemoteFocusSurface,
     pending_close_tab_id: Option<String>,
     cwd_edit_tab_id: Option<String>,
+    last_published_snapshot: Option<String>,
 }
 
 impl RemoteWindowState {
@@ -566,6 +568,7 @@ impl RemoteWindowState {
             focus_surface: RemoteFocusSurface::Terminal,
             pending_close_tab_id: None,
             cwd_edit_tab_id: None,
+            last_published_snapshot: None,
         })
     }
 
@@ -594,7 +597,14 @@ impl RemoteWindowState {
                     self.load_composer();
                 }
                 self.last_error = None;
-                changed
+                match self.publish_ui_snapshot() {
+                    Ok(published) => changed || published,
+                    Err(error) => {
+                        self.last_error =
+                            Some(format!("UI snapshot publication failed: {error:#}"));
+                        true
+                    }
+                }
             }
             Err(error) => {
                 self.last_error = Some(format!("{error:#}"));
@@ -603,6 +613,7 @@ impl RemoteWindowState {
                     match UiClientModel::connect(self.client_id.clone()) {
                         Ok(client) => {
                             self.client = Some(client);
+                            self.last_published_snapshot = None;
                             self.editing_tab_id = None;
                             self.terminal_selection = None;
                             self.pending_close_tab_id = None;
@@ -698,6 +709,395 @@ impl RemoteWindowState {
             composer_height: COMPOSER_HEIGHT,
             status_height: STATUS_HEIGHT,
         })
+    }
+
+    fn ui_snapshot_json(&self) -> Result<String> {
+        let client = self
+            .client
+            .as_ref()
+            .context("replaceable UI is disconnected")?;
+        let source = client.snapshot();
+        let mut client_rect: RECT = unsafe { mem::zeroed() };
+        unsafe { GetClientRect(self.window, &mut client_rect) };
+        let layout = self.workspace_geometry();
+        let visible_rows = remote_tree_rows(&source.tabs);
+        let tabs = source
+            .tabs
+            .iter()
+            .map(|tab| {
+                let visible_position = self
+                    .tabs_visible
+                    .then(|| {
+                        visible_rows
+                            .iter()
+                            .position(|row| source.tabs[row.tab_index].id == tab.id)
+                    })
+                    .flatten();
+                let depth = remote_tab_depth(&source.tabs, tab);
+                let mode = if self.editing_tab_id.as_ref() == Some(&tab.id) {
+                    TreeRowMode::Editing
+                } else {
+                    TreeRowMode::Normal
+                };
+                let geometry = visible_position.map(|position| {
+                    tree_row_geometry_for_mode(position, depth, layout.effective_tabs_width, mode)
+                });
+                let selection = self
+                    .terminal_selection
+                    .as_ref()
+                    .filter(|selection| selection.tab_id == tab.id)
+                    .map(|selection| {
+                        let (start, end) = selection.bounds();
+                        serde_json::json!({
+                            "start": {"row": start.row, "col": start.column},
+                            "end": {"row": end.row, "col": end.column},
+                            "dragging": selection.dragging,
+                        })
+                    });
+                let actions = visible_position
+                    .filter(|_| source.active_tab_id.as_ref() == Some(&tab.id))
+                    .map(|position| {
+                        let geometry = tree_row_geometry_for_mode(
+                            position,
+                            depth,
+                            layout.effective_tabs_width,
+                            mode,
+                        );
+                        let action = |id: &str, label: &str, bounds: PixelRect| {
+                            serde_json::json!({
+                                "id": id,
+                                "label": label,
+                                "bounds": pixel_rect_json(bounds),
+                                "x": bounds.left,
+                                "y": bounds.top,
+                                "width": bounds.width(),
+                                "height": bounds.height(),
+                            })
+                        };
+                        match mode {
+                            TreeRowMode::Normal => serde_json::json!({
+                                "mode": "normal",
+                                "density": tree_action_density_name(geometry.actions.density),
+                                "new_child": action(
+                                    "new-child",
+                                    "Add",
+                                    geometry.actions.add_child.expect("normal row has Add"),
+                                ),
+                                "edit": action("edit-tab", "Edit", geometry.actions.primary),
+                                "close": action("close-tab", "Close", geometry.actions.secondary),
+                            }),
+                            TreeRowMode::Editing => serde_json::json!({
+                                "mode": "editing",
+                                "density": tree_action_density_name(geometry.actions.density),
+                                "save": action(
+                                    "tab-editor-save",
+                                    "Save",
+                                    geometry.actions.primary,
+                                ),
+                                "cancel": action(
+                                    "tab-editor-cancel",
+                                    "Cancel",
+                                    geometry.actions.secondary,
+                                ),
+                            }),
+                        }
+                    });
+                serde_json::json!({
+                    "id": tab.id,
+                    "index": tab.index,
+                    "parent_id": tab.parent_id,
+                    "depth": depth,
+                    "has_children": source.tabs.iter().any(
+                        |candidate| candidate.parent_id.as_ref() == Some(&tab.id)
+                    ),
+                    "collapsed": tab.collapsed,
+                    "visible": visible_position.is_some(),
+                    "name": tab.title,
+                    "note": tab.note,
+                    "active": source.active_tab_id.as_ref() == Some(&tab.id),
+                    "pid": tab.process_id,
+                    "state": if tab.dead { "dead" } else { "running" },
+                    "exit_code": tab.exit_code,
+                    "working_context": {
+                        "cwd": {
+                            "path": tab.working_context.cwd,
+                            "confirmed": tab.working_context.cwd_confirmed,
+                            "source": tab.working_context.cwd_source,
+                            "pending": tab.working_context.cwd_request_pending,
+                        },
+                        "proxy": {
+                            "configured": tab.working_context.proxy_configured,
+                            "source": tab.working_context.proxy_source,
+                            "application_state": tab.working_context.proxy_application_state,
+                            "request_pending": tab.working_context.proxy_request_pending,
+                            "endpoint_visible": false,
+                            "credential_revealed": false,
+                        },
+                    },
+                    "scrollback_offset": tab.screen.scrollback_offset,
+                    "selection": selection,
+                    "draft": tab.composer.byte_length > 0,
+                    "bounds": geometry.map(|value| pixel_rect_json(value.row)),
+                    "render": geometry.map(|value| serde_json::json!({
+                        "mode": match value.mode {
+                            TreeRowMode::Normal => "normal",
+                            TreeRowMode::Editing => "editing",
+                        },
+                        "row": pixel_rect_json(value.row),
+                        "selection": pixel_rect_json(value.selection),
+                        "node": {"x": value.node_x, "y": value.node_y},
+                        "expander": pixel_rect_json(value.expander),
+                        "status": pixel_rect_json(value.status),
+                        "disclosure_hit": pixel_rect_json(value.disclosure_hit),
+                        "text": pixel_rect_json(value.text),
+                        "name": pixel_rect_json(value.name),
+                        "note": pixel_rect_json(value.note),
+                        "editors": value.editors.map(|editors| serde_json::json!({
+                            "name": pixel_rect_json(editors.name),
+                            "note": pixel_rect_json(editors.note),
+                        })),
+                    })),
+                    "actions": actions,
+                })
+            })
+            .collect::<Vec<_>>();
+        let scrollbar = self.scrollbar_state().map(|(geometry, offset, maximum)| {
+            serde_json::json!({
+                "visible": true,
+                "track": pixel_rect_json(geometry.track),
+                "thumb": pixel_rect_json(geometry.thumb),
+                "offset": offset,
+                "max_offset": maximum,
+            })
+        });
+        let (rows, columns) = self
+            .active_tab()
+            .map(|tab| (tab.screen.rows, tab.screen.columns))
+            .unwrap_or_default();
+        let tab_editor = self.editing_tab_id.as_ref().map(|id| {
+            let focused = unsafe { GetFocus() };
+            serde_json::json!({
+                "target": id,
+                "name_length": window_text(self.tab_title_edit).chars().count(),
+                "note_length": window_text(self.tab_note_edit).chars().count(),
+                "focus": if focused == self.tab_title_edit {
+                    Some("name")
+                } else if focused == self.tab_note_edit {
+                    Some("note")
+                } else {
+                    None
+                },
+            })
+        });
+        let modal = if self.window_close_pending {
+            Some(serde_json::json!({
+                "kind": "confirm-window-close",
+                "default_action": "keep-server-running",
+                "actions": ["keep-server-running", "stop-server-and-exit", "cancel"],
+                "buttons": [
+                    close_button_snapshot("keep-server-running", "Keep Server Running"),
+                    close_button_snapshot("stop-server-and-exit", "Stop Server & Exit"),
+                    close_button_snapshot("cancel", "Cancel"),
+                ],
+            }))
+        } else if self.settings_open {
+            Some(serde_json::json!({"kind": "settings"}))
+        } else if let Some(id) = &self.cwd_edit_tab_id {
+            Some(serde_json::json!({
+                "kind": "cwd-editor",
+                "window_id": id,
+                "default_action": "cwd-prepare",
+                "actions": [
+                    "cwd-prepare",
+                    "cwd-prepare-append",
+                    "cwd-prepare-replace",
+                    "cwd-send-now",
+                    "cancel"
+                ],
+            }))
+        } else {
+            self.pending_close_tab_id.as_ref().map(|id| {
+                serde_json::json!({
+                    "kind": "confirm-close-live",
+                    "window_id": id,
+                })
+            })
+        };
+        let (copy_enabled, paste_enabled) = self.system_menu_state();
+        let focus = match self.current_focus_surface() {
+            RemoteFocusSurface::Terminal => "terminal",
+            RemoteFocusSurface::Composer => "composer",
+            RemoteFocusSurface::Tabs => "tabs",
+        };
+        serde_json::to_string_pretty(&serde_json::json!({
+            "schema_version": crate::ui_bridge::UI_CLIENT_STATE_SCHEMA_VERSION,
+            "protocol_version": 1,
+            "projection": "replaceable_ui_client",
+            "client_pid": std::process::id(),
+            "server_pid": source.server_pid,
+            "event_position": {
+                "epoch": source.server_epoch,
+                "sequence": source.position.sequence,
+            },
+            "window": {
+                "title": window_text(self.window),
+                "client_width": client_rect.right,
+                "client_height": client_rect.bottom,
+                "visible": unsafe { IsWindowVisible(self.window) } != 0,
+                "detached": false,
+                "minimized": unsafe { IsIconic(self.window) } != 0,
+                "state": if unsafe { IsIconic(self.window) } != 0 {
+                    "minimized"
+                } else if unsafe { IsZoomed(self.window) } != 0 {
+                    "maximized"
+                } else {
+                    "restored"
+                },
+            },
+            "layout": {
+                "sidebar": {
+                    "x": layout.sidebar.left,
+                    "y": layout.sidebar.top,
+                    "visible": self.tabs_visible,
+                    "configured_width": self.config.tabs_width,
+                    "effective_width": layout.effective_tabs_width,
+                    "width": layout.sidebar.width(),
+                    "height": layout.sidebar.height(),
+                    "bounds": pixel_rect_json(layout.sidebar),
+                    "resize_grip": layout.resize_grip.map(pixel_rect_json),
+                    "resizing": self.tabs_resize_dragging,
+                },
+                "terminal": {
+                    "x": layout.terminal.left,
+                    "y": layout.terminal.top,
+                    "width": layout.terminal.width(),
+                    "viewport_width": (
+                        layout.terminal.width() - TERMINAL_SCROLLBAR_WIDTH
+                    ).max(0),
+                    "height": layout.terminal.height(),
+                    "bounds": pixel_rect_json(layout.terminal),
+                    "rows": rows,
+                    "cols": columns,
+                    "scrollbar": scrollbar,
+                },
+                "composer": {
+                    "visible": unsafe { IsWindowVisible(self.edit) } != 0
+                        && unsafe { IsWindowVisible(self.send) } != 0,
+                    "input_visible": unsafe { IsWindowVisible(self.edit) } != 0,
+                    "send_visible": unsafe { IsWindowVisible(self.send) } != 0,
+                    "x": layout.composer.left,
+                    "y": layout.composer.top,
+                    "width": layout.composer.width(),
+                    "height": layout.composer.height(),
+                    "bounds": pixel_rect_json(layout.composer),
+                    "input": {
+                        "target_rows": 3,
+                        "vertical_scrollbar": true,
+                    },
+                },
+                "status_bar": {
+                    "x": layout.status.left,
+                    "y": layout.status.top,
+                    "width": layout.status.width(),
+                    "height": layout.status.height(),
+                    "bounds": pixel_rect_json(layout.status),
+                    "tabs_recovery": layout.status_segments.tabs_recovery.map(pixel_rect_json),
+                    "cwd": {
+                        "bounds": pixel_rect_json(layout.status_segments.cwd),
+                        "action": "open-cwd-editor",
+                    },
+                    "proxy": {
+                        "available": false,
+                        "archived": true,
+                        "action": serde_json::Value::Null,
+                        "eye_action": serde_json::Value::Null,
+                    },
+                    "provider": "placeholder",
+                },
+            },
+            "focus": {
+                "surface": focus,
+                "window_id": source.active_tab_id,
+            },
+            "system_menu": {
+                "toggle_tabs": {
+                    "id": SYSTEM_MENU_TOGGLE_TABS_ID,
+                    "label": "Toggle Tabs",
+                    "checked": self.tabs_visible,
+                },
+                "copy": {
+                    "id": SYSTEM_MENU_COPY_ID,
+                    "label": "Copy",
+                    "enabled": copy_enabled,
+                },
+                "paste": {
+                    "id": SYSTEM_MENU_PASTE_ID,
+                    "label": "Paste",
+                    "enabled": paste_enabled,
+                },
+            },
+            "terminal_interaction": {
+                "selection": self.terminal_selection.as_ref().map(|selection| {
+                    let (start, end) = selection.bounds();
+                    serde_json::json!({
+                        "phase": if selection.dragging { "dragging" } else { "complete" },
+                        "tab_id": selection.tab_id,
+                        "selection": {
+                            "start": {"row": start.row, "col": start.column},
+                            "end": {"row": end.row, "col": end.column},
+                        },
+                        "autoscroll": {"active": false},
+                    })
+                }),
+                "raw_mouse_arbitration": false,
+                "rectangular_selection": false,
+            },
+            "tabs": tabs,
+            "tab_editor": tab_editor,
+            "modal": modal,
+            "settings": {
+                "terminal_font_family": self.config.terminal_font_family,
+                "terminal_font_size": self.config.terminal_font_size,
+                "color_theme": self.config.color_theme.as_str(),
+                "theme_draft": self.settings_open.then(
+                    || self.settings_theme_draft.as_str()
+                ),
+                "theme_options": ThemeId::ALL.map(|theme| serde_json::json!({
+                    "id": theme.as_str(),
+                    "label": theme.label(),
+                })),
+                "tabs_visible": self.tabs_visible,
+                "tabs_width": self.config.tabs_width,
+            },
+            "locale": {
+                "id": "en-US",
+                "controls": {
+                    "send": "Send",
+                    "settings": "Settings",
+                    "new": "New",
+                    "apply": "Apply",
+                    "save": "Save",
+                },
+            },
+            "feedback": {
+                "message": serde_json::Value::Null,
+                "error": self.last_error,
+            },
+        }))
+        .context("could not encode replaceable UI snapshot")
+    }
+
+    fn publish_ui_snapshot(&mut self) -> Result<bool> {
+        let json = self.ui_snapshot_json()?;
+        if self.last_published_snapshot.as_deref() == Some(json.as_str()) {
+            return Ok(false);
+        }
+        self.client
+            .as_mut()
+            .context("replaceable UI is disconnected")?
+            .publish_snapshot(&json)?;
+        self.last_published_snapshot = Some(json);
+        Ok(true)
     }
 
     fn layout_rects(&self) -> (RECT, RECT, RECT, RECT) {
@@ -3666,6 +4066,52 @@ fn remote_tree_rows(tabs: &[UiTabBootstrap]) -> Vec<RemoteTreeRow> {
             })
         })
         .collect()
+}
+
+fn remote_tab_depth(tabs: &[UiTabBootstrap], tab: &UiTabBootstrap) -> usize {
+    let mut depth = 0_usize;
+    let mut parent = tab.parent_id.as_deref();
+    while let Some(parent_id) = parent {
+        if depth >= tabs.len() {
+            break;
+        }
+        let Some(parent_tab) = tabs.iter().find(|candidate| candidate.id == parent_id) else {
+            break;
+        };
+        depth += 1;
+        parent = parent_tab.parent_id.as_deref();
+    }
+    depth
+}
+
+fn tree_action_density_name(density: TreeRowActionDensity) -> &'static str {
+    match density {
+        TreeRowActionDensity::Full => "full",
+        TreeRowActionDensity::Compact => "compact",
+    }
+}
+
+fn pixel_rect_json(rect: PixelRect) -> serde_json::Value {
+    serde_json::json!({
+        "left": rect.left,
+        "top": rect.top,
+        "right": rect.right,
+        "bottom": rect.bottom,
+        "width": rect.width(),
+        "height": rect.height(),
+    })
+}
+
+fn close_button_snapshot(action: &str, label: &str) -> serde_json::Value {
+    serde_json::json!({
+        "action": action,
+        "label": label,
+        "text_alignment": {
+            "horizontal": "center",
+            "vertical": "center",
+            "win32_draw_text_format": WINDOW_CLOSE_BUTTON_TEXT_FORMAT,
+        },
+    })
 }
 
 fn fill(device: HDC, rect: &RECT, color: COLORREF) {

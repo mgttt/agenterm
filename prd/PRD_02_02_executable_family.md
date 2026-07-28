@@ -30,6 +30,16 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     connects through the same typed loopback control boundary instead of
     becoming the server itself
     - [x] opt-in `agenterm.exe --ui-client` starts or connects to the independent headless authority, acquires the exact interactive lease with an observable additive client-build identity, renders renderer-neutral tab/screen/composer DTOs, routes stable-ID selection/input/resize through the lease, acknowledges applied event positions, detaches without ending the server or PTY, and a replacement GUI recovers the same server PID, active tab and live terminal marker with PNG and orphan-free public evidence
+    - [x] the live lease owner publishes a bounded, versioned and redacted
+      `replaceable_ui_client` projection back to the stable server; public
+      `ui-snapshot` therefore observes client-owned window/layout/focus/modal/
+      editing/selection facts without moving those facts into server
+      ownership. Publication rejects mismatched PID, lease, server epoch/PID,
+      future sequence, malformed shape and payloads above 1 MiB. Detach,
+      replacement or stale-owner reaping clears the projection immediately
+      and `ui-snapshot` falls back to truthful `headless_server` state.
+      Public replaceable-UI smoke proves both projection and fallback with
+      the same server PID and retained PTY.
     - [ ] switch ordinary `agenterm.exe` launches only after the replaceable
       client reaches the accepted workbench, settings, editing, selection,
       clipboard, scrollback, close-dialog and observation parity gates
@@ -104,8 +114,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       `Prepare`/Ctrl+Enter asks the server to generate a shell-safe replacement
       Composer command and publish pending working-context plus causal events,
       while Esc or a second segment click restores the prior draft unchanged.
-      Ordinary launches, remaining workbench parity and same-server rollback
-      qualification are still pending.
+      Same-server GUI upgrade and rollback qualification is shipped. Ordinary
+      launches and the remaining client-local typed action relay are still
+      pending before the split path can become the default.
   - [ ] compatibility is fail-closed and asymmetric: a new GUI may connect to
     its declared server protocol range; an incompatible server remains alive
     and reports a precise upgrade/restart choice instead of being killed

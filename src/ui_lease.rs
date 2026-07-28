@@ -81,6 +81,21 @@ impl UiLeaseAuthority {
         self.active.as_ref()
     }
 
+    pub(crate) fn verify_owner(
+        &self,
+        lease_id: &str,
+        client_pid: u32,
+    ) -> Result<&UiLeaseRecord, UiLeaseError> {
+        validate_lease_id(lease_id)?;
+        let Some(active) = self.active.as_ref() else {
+            return Err(UiLeaseError::NotAttached);
+        };
+        if active.lease_id != lease_id || active.client_pid != client_pid {
+            return Err(UiLeaseError::OwnerMismatch);
+        }
+        Ok(active)
+    }
+
     pub(crate) fn attach(
         &mut self,
         client_id: &str,
@@ -274,6 +289,27 @@ mod tests {
         );
         assert_eq!(authority.detach(&lease.lease_id, 42).unwrap(), renewed);
         assert!(authority.active().is_none());
+    }
+
+    #[test]
+    fn owner_verification_is_read_only_and_exact() {
+        let mut authority = UiLeaseAuthority::default();
+        let (lease, _) = authority.attach("gui", 42, None, 1_000).unwrap();
+        assert_eq!(
+            authority
+                .verify_owner(&lease.lease_id, 42)
+                .unwrap()
+                .expires_unix_ms,
+            lease.expires_unix_ms
+        );
+        assert_eq!(
+            authority.verify_owner(&lease.lease_id, 43),
+            Err(UiLeaseError::OwnerMismatch)
+        );
+        assert_eq!(
+            authority.verify_owner("bad\nlease", 42),
+            Err(UiLeaseError::InvalidLeaseId)
+        );
     }
 
     #[test]

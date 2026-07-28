@@ -201,6 +201,7 @@ try {
     if (-not $hello.capabilities.Contains('interactive_lease') -or
         -not $hello.capabilities.Contains('lease_gated_interaction') -or
         -not $hello.capabilities.Contains('replaceable_ui_client') -or
+        -not $hello.capabilities.Contains('lease_owned_client_state') -or
         -not $hello.capabilities.Contains('in_place_reconnect')) {
         throw 'headless server hello did not discover its interactive contracts'
     }

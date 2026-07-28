@@ -25,8 +25,8 @@ use crate::{
     terminal_observation::TerminalProcessState,
     terminal_runtime::{TerminalLaunch, TerminalTab},
     ui_bridge::{
-        UI_BUILD_IDENTITY_MAX_BYTES, UI_INTERACTION_SCHEMA_VERSION, UI_LEASE_SCHEMA_VERSION,
-        UiEventPosition, UiLeaseGrant,
+        UI_BUILD_IDENTITY_MAX_BYTES, UI_CLIENT_STATE_MAX_BYTES, UI_CLIENT_STATE_SCHEMA_VERSION,
+        UI_INTERACTION_SCHEMA_VERSION, UI_LEASE_SCHEMA_VERSION, UiEventPosition, UiLeaseGrant,
     },
     ui_interaction::{UiInteraction, parse_ui_interaction},
     ui_lease::{UI_LEASE_TTL_MS, UiLeaseAuthority, UiLeaseError, UiLeaseRecord},
@@ -39,6 +39,77 @@ const INITIAL_ROWS: u16 = 30;
 const INITIAL_COLUMNS: u16 = 100;
 const IPC_REQUESTS_PER_TICK: usize = 16;
 const SERVER_TICK: Duration = Duration::from_millis(5);
+
+fn validate_ui_client_snapshot(
+    json: &str,
+    client_pid: u32,
+    server_pid: u32,
+    server_epoch: &str,
+    current_sequence: u64,
+) -> Result<(), String> {
+    let byte_len = json.len();
+    if byte_len == 0 || byte_len > UI_CLIENT_STATE_MAX_BYTES {
+        return Err(format!(
+            "UI client snapshot must contain 1..={UI_CLIENT_STATE_MAX_BYTES} bytes"
+        ));
+    }
+    let value = serde_json::from_str::<serde_json::Value>(json)
+        .map_err(|error| format!("UI client snapshot is not valid JSON: {error}"))?;
+    let object = value
+        .as_object()
+        .ok_or_else(|| "UI client snapshot must be a JSON object".to_owned())?;
+    if object
+        .get("schema_version")
+        .and_then(serde_json::Value::as_u64)
+        != Some(u64::from(UI_CLIENT_STATE_SCHEMA_VERSION))
+    {
+        return Err(format!(
+            "UI client snapshot schema_version must be {UI_CLIENT_STATE_SCHEMA_VERSION}"
+        ));
+    }
+    if object.get("projection").and_then(serde_json::Value::as_str) != Some("replaceable_ui_client")
+    {
+        return Err("UI client snapshot projection must be replaceable_ui_client".to_owned());
+    }
+    if object.get("client_pid").and_then(serde_json::Value::as_u64) != Some(u64::from(client_pid)) {
+        return Err("UI client snapshot client_pid does not match the lease owner".to_owned());
+    }
+    if object.get("server_pid").and_then(serde_json::Value::as_u64) != Some(u64::from(server_pid)) {
+        return Err("UI client snapshot server_pid does not match this server".to_owned());
+    }
+    let event_position = object
+        .get("event_position")
+        .and_then(serde_json::Value::as_object)
+        .ok_or_else(|| "UI client snapshot requires event_position".to_owned())?;
+    if event_position
+        .get("epoch")
+        .and_then(serde_json::Value::as_str)
+        != Some(server_epoch)
+    {
+        return Err(
+            "UI client snapshot event_position epoch does not match this server".to_owned(),
+        );
+    }
+    let sequence = event_position
+        .get("sequence")
+        .and_then(serde_json::Value::as_u64)
+        .ok_or_else(|| "UI client snapshot event_position requires numeric sequence".to_owned())?;
+    if sequence > current_sequence {
+        return Err(format!(
+            "UI client snapshot sequence {sequence} is ahead of server sequence {current_sequence}"
+        ));
+    }
+    if !object.get("tabs").is_some_and(serde_json::Value::is_array) {
+        return Err("UI client snapshot requires a tabs array".to_owned());
+    }
+    Ok(())
+}
+
+struct UiClientSnapshotRecord {
+    lease_id: String,
+    client_pid: u32,
+    json: String,
+}
 
 pub fn run_server_entry() -> i32 {
     let arguments = env::args().skip(1).collect::<Vec<_>>();
@@ -98,6 +169,7 @@ struct ServerState {
     event_journal: EventJournal,
     control_authority: ControlAuthority,
     ui_lease: UiLeaseAuthority,
+    ui_client_snapshot: Option<UiClientSnapshotRecord>,
     wake_signal: Arc<WakeSignal>,
     ipc_receiver: Receiver<IpcEnvelope>,
     shutdown_requested: bool,
@@ -133,6 +205,7 @@ impl ServerState {
             event_journal: EventJournal::new(),
             control_authority: ControlAuthority::default(),
             ui_lease: UiLeaseAuthority::default(),
+            ui_client_snapshot: None,
             wake_signal,
             ipc_receiver,
             shutdown_requested: false,
@@ -223,6 +296,7 @@ impl ServerState {
             .ui_lease
             .reap_stale(now_unix_ms, instance_process_is_alive)
         {
+            self.ui_client_snapshot = None;
             self.commit_ui_lease_event(&record, "detached", reason);
         }
     }
@@ -338,6 +412,7 @@ impl ServerState {
                 {
                     Ok((record, created)) => {
                         if created {
+                            self.ui_client_snapshot = None;
                             self.commit_ui_lease_event(&record, "attached", "requested");
                         }
                         self.ui_lease_grant_json(record)
@@ -390,6 +465,7 @@ impl ServerState {
                 };
                 match self.ui_lease.detach(lease_id, client_pid) {
                     Ok(record) => {
+                        self.ui_client_snapshot = None;
                         self.commit_ui_lease_event(&record, "detached", "requested");
                         let position = self.event_journal.position();
                         IpcResponse::success(
@@ -478,6 +554,78 @@ impl ServerState {
                 false,
             ),
         }
+    }
+
+    fn execute_ui_client_state_command(&mut self, args: &[String]) -> IpcResponse {
+        if args.get(1).map(String::as_str) != Some("publish") {
+            return IpcResponse::typed_failure(
+                "ui-client-state requires publish",
+                "ui_client_state_invalid_arguments",
+                "validation",
+                false,
+            );
+        }
+        let Some(lease_id) = option_value(args, "--lease-id") else {
+            return IpcResponse::typed_failure(
+                "ui-client-state publish requires --lease-id",
+                "ui_client_state_invalid_arguments",
+                "validation",
+                false,
+            );
+        };
+        let Some(client_pid) =
+            option_value(args, "--client-pid").and_then(|value| value.parse::<u32>().ok())
+        else {
+            return IpcResponse::typed_failure(
+                "ui-client-state publish requires numeric --client-pid",
+                "ui_client_state_invalid_arguments",
+                "validation",
+                false,
+            );
+        };
+        if let Err(error) = self.ui_lease.verify_owner(lease_id, client_pid) {
+            return Self::ui_lease_failure(error);
+        }
+        let Some(snapshot_json) = option_value(args, "--snapshot-json") else {
+            return IpcResponse::typed_failure(
+                "ui-client-state publish requires --snapshot-json",
+                "ui_client_state_invalid_arguments",
+                "validation",
+                false,
+            );
+        };
+        let position = self.event_journal.position();
+        if let Err(error) = validate_ui_client_snapshot(
+            snapshot_json,
+            client_pid,
+            std::process::id(),
+            &position.epoch,
+            position.sequence,
+        ) {
+            return IpcResponse::typed_failure(
+                error,
+                "ui_client_state_invalid",
+                "validation",
+                false,
+            );
+        }
+        self.ui_client_snapshot = Some(UiClientSnapshotRecord {
+            lease_id: lease_id.to_owned(),
+            client_pid,
+            json: snapshot_json.to_owned(),
+        });
+        IpcResponse::success(
+            serde_json::json!({
+                "schema_version": UI_CLIENT_STATE_SCHEMA_VERSION,
+                "published": true,
+                "client_pid": client_pid,
+                "position": {
+                    "server_epoch": position.epoch,
+                    "sequence": position.sequence,
+                },
+            })
+            .to_string(),
+        )
     }
 
     fn execute_ui_interaction_command(&mut self, args: &[String]) -> IpcResponse {
@@ -594,6 +742,12 @@ impl ServerState {
         }
         if args.first().is_some_and(|command| command == "ui-lease") {
             return self.execute_ui_lease_command(args);
+        }
+        if args
+            .first()
+            .is_some_and(|command| command == "ui-client-state")
+        {
+            return self.execute_ui_client_state_command(args);
         }
         if args.first().is_some_and(|command| command == "ui-interact") {
             return self.execute_ui_interaction_command(args);
@@ -1083,6 +1237,13 @@ impl ControlHost for ServerState {
     }
 
     fn ui_snapshot_json(&mut self) -> Option<String> {
+        if let Some(snapshot) = &self.ui_client_snapshot
+            && self.ui_lease.active().is_some_and(|lease| {
+                lease.lease_id == snapshot.lease_id && lease.client_pid == snapshot.client_pid
+            })
+        {
+            return Some(snapshot.json.clone());
+        }
         let position = self.event_journal.position();
         Some(
             serde_json::to_string_pretty(&serde_json::json!({
@@ -1133,7 +1294,7 @@ fn default_workspace() -> SavedWorkspace {
 
 #[cfg(test)]
 mod tests {
-    use super::configure_server_launch;
+    use super::{configure_server_launch, validate_ui_client_snapshot};
 
     #[test]
     fn server_arguments_are_internal_bounded_and_loopback_only() {
@@ -1146,5 +1307,67 @@ mod tests {
             configure_server_launch(&["--address".to_owned(), "0.0.0.0:48815".to_owned()]).is_err()
         );
         assert!(configure_server_launch(&["--unknown".to_owned()]).is_err());
+    }
+
+    #[test]
+    fn ui_client_snapshot_is_bounded_causal_and_owned() {
+        let valid = serde_json::json!({
+            "schema_version": 1,
+            "projection": "replaceable_ui_client",
+            "client_pid": 42,
+            "server_pid": 7,
+            "event_position": {
+                "epoch": "epoch-1",
+                "sequence": 8,
+            },
+            "tabs": [],
+        })
+        .to_string();
+        assert!(validate_ui_client_snapshot(&valid, 42, 7, "epoch-1", 9).is_ok());
+
+        let mismatched_owner = valid.replace("\"client_pid\":42", "\"client_pid\":43");
+        assert!(
+            validate_ui_client_snapshot(&mismatched_owner, 42, 7, "epoch-1", 9)
+                .unwrap_err()
+                .contains("lease owner")
+        );
+        let future = valid.replace("\"sequence\":8", "\"sequence\":10");
+        assert!(
+            validate_ui_client_snapshot(&future, 42, 7, "epoch-1", 9)
+                .unwrap_err()
+                .contains("ahead")
+        );
+    }
+
+    #[test]
+    fn ui_client_snapshot_rejects_wrong_shape_and_oversize_payloads() {
+        assert!(validate_ui_client_snapshot("[]", 42, 7, "epoch-1", 9).is_err());
+        assert!(
+            validate_ui_client_snapshot(
+                &"x".repeat(crate::ui_bridge::UI_CLIENT_STATE_MAX_BYTES + 1),
+                42,
+                7,
+                "epoch-1",
+                9,
+            )
+            .unwrap_err()
+            .contains("bytes")
+        );
+        let missing_tabs = serde_json::json!({
+            "schema_version": 1,
+            "projection": "replaceable_ui_client",
+            "client_pid": 42,
+            "server_pid": 7,
+            "event_position": {
+                "epoch": "epoch-1",
+                "sequence": 8,
+            },
+        })
+        .to_string();
+        assert!(
+            validate_ui_client_snapshot(&missing_tabs, 42, 7, "epoch-1", 9)
+                .unwrap_err()
+                .contains("tabs")
+        );
     }
 }

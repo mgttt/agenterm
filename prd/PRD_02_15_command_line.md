@@ -74,6 +74,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       returns ordered events and affected-tab post-state under an 8 MiB response
       budget; restart, journal gap and future sequence fail with typed recovery
       facts
+    - [x] `ui-client-state publish --lease-id ID --client-pid PID
+      --snapshot-json JSON` is the bounded internal publication arm used by
+      the exact interactive lease owner; it preserves public `ui-snapshot`
+      observation while keeping client-local UI facts out of server authority
     - `workspace-info`, `save-workspace`, `shutdown`
     - [~] `server-list` and `server-kill` establish a `server-*` lifecycle
       namespace; explore health, start, and graceful-shutdown helpers only

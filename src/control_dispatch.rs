@@ -233,6 +233,7 @@ fn ui_hello_response(
     }
     if facts.replaceable_ui {
         capabilities.push("replaceable_ui_client".to_owned());
+        capabilities.push("lease_owned_client_state".to_owned());
     }
     if facts.reconnect {
         capabilities.push("in_place_reconnect".to_owned());

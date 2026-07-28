@@ -127,6 +127,22 @@ function Write-Evidence {
     Write-SmokeEvidence -Context $run -Id $Id
 }
 
+function Wait-UiProjection {
+    param(
+        [Parameter(Mandatory = $true)][string]$Projection,
+        [int]$TimeoutMs = 5000
+    )
+    $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMs)
+    do {
+        $snapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+        if ($snapshot.projection -eq $Projection) {
+            return $snapshot
+        }
+        Start-Sleep -Milliseconds 25
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw "UI projection did not become '$Projection' within ${TimeoutMs}ms"
+}
+
 try {
     Write-Host 'STEP start replaceable UI and let it start the independent server'
     $stderrPath = Join-Path $run.RunDirectory 'remote-ui-stderr.txt'
@@ -165,12 +181,29 @@ try {
     }
     Sync-SmokeOwnedServers -Context $run
 
+    Write-Host 'STEP observe the lease-owned GUI projection through public CLI'
+    $uiSnapshot = Wait-UiProjection -Projection 'replaceable_ui_client'
+    if ($uiSnapshot.schema_version -ne 1 -or
+        $uiSnapshot.client_pid -ne $gui.Id -or
+        $uiSnapshot.event_position.epoch -ne
+            $lease.position.server_epoch -or
+        $uiSnapshot.window.visible -ne $true -or
+        $uiSnapshot.window.client_width -lt 320 -or
+        $uiSnapshot.layout.terminal.rows -lt 1 -or
+        $uiSnapshot.layout.composer.input.target_rows -ne 3 -or
+        $uiSnapshot.layout.status_bar.proxy.archived -ne $true -or
+        $uiSnapshot.focus.surface -notin @('terminal', 'composer', 'tabs') -or
+        $uiSnapshot.tabs.Count -lt 1) {
+        throw 'public UI snapshot did not expose the replaceable GUI projection'
+    }
+
     Write-Host 'STEP prove GUI and server are different process roles'
     $bootstrap = Invoke-AgenTerm @('ui-bootstrap') | ConvertFrom-Json
     $protocol = Invoke-AgenTerm @('protocol-info', '--running') |
         ConvertFrom-Json
     $guiHandle = [int64]$gui.MainWindowHandle
     if ($bootstrap.schema_version -ne 2 -or
+        $uiSnapshot.server_pid -ne $bootstrap.server_pid -or
         $bootstrap.server_pid -eq $gui.Id -or
         $bootstrap.tabs.Count -lt 1 -or
         $lease.client_build.protocol_version -ne 1 -or
@@ -285,6 +318,11 @@ try {
     )
     if ($leaseAfter.attached -or -not $captureAfter.Contains($marker)) {
         throw 'closing replaceable UI incorrectly ended its server or PTY'
+    }
+    $headlessSnapshot = Wait-UiProjection -Projection 'headless_server'
+    if ($headlessSnapshot.server_pid -ne $bootstrap.server_pid -or
+        $headlessSnapshot.tabs.Count -lt 1) {
+        throw 'public UI snapshot did not fall back to the retained server'
     }
 
     Write-Host 'STEP replace the GUI and recover the same live server state'

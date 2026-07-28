@@ -68,6 +68,7 @@ pub(crate) const COMMAND_CATALOG: &[CommandIdentity] = &[
     command("start-server", &[]),
     command("ui-action", &[]),
     command("ui-bootstrap", &[]),
+    command("ui-client-state", &[]),
     command("ui-deltas", &[]),
     command("ui-hello", &[]),
     command("ui-interact", &[]),
@@ -674,6 +675,13 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
             false,
         ),
         "ui-bootstrap" => ("agenterm-cli ui-bootstrap", &[][..], &[][..], false),
+        "ui-client-state" => (
+            "agenterm-cli ui-client-state publish --lease-id ID \
+             --client-pid PID --snapshot-json JSON",
+            &["--lease-id", "--client-pid", "--snapshot-json"][..],
+            &[][..],
+            false,
+        ),
         "ui-deltas" => (
             "agenterm-cli ui-deltas --epoch EPOCH --after SEQUENCE [--limit 1..64]",
             &["--epoch", "--after", "--limit"][..],

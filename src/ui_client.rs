@@ -6,9 +6,9 @@ use crate::{
     client::send_ipc_request,
     protocol::IpcResponse,
     ui_bridge::{
-        UI_BRIDGE_PROTOCOL_VERSION, UI_DELTA_MAX_EVENTS, UI_HELLO_SCHEMA_VERSION,
-        UiBootstrapSnapshot, UiDeltaBatch, UiHelloRequest, UiHelloResponse, UiLeaseGrant,
-        UiProtocolRange, UiTabBootstrap,
+        UI_BRIDGE_PROTOCOL_VERSION, UI_CLIENT_STATE_SCHEMA_VERSION, UI_DELTA_MAX_EVENTS,
+        UI_HELLO_SCHEMA_VERSION, UiBootstrapSnapshot, UiDeltaBatch, UiHelloRequest,
+        UiHelloResponse, UiLeaseGrant, UiProtocolRange, UiTabBootstrap,
     },
     upgrade_identity::UpgradeIdentity,
 };
@@ -21,6 +21,7 @@ pub(crate) struct UiClientModel {
     client_pid: u32,
     lease: UiLeaseGrant,
     snapshot: UiBootstrapSnapshot,
+    supports_state_publication: bool,
     last_heartbeat: Instant,
 }
 
@@ -106,6 +107,10 @@ impl UiClientModel {
             client_pid,
             lease,
             snapshot,
+            supports_state_publication: hello
+                .capabilities
+                .iter()
+                .any(|capability| capability == "lease_owned_client_state"),
             last_heartbeat: Instant::now(),
         };
         model.acknowledge_observed()?;
@@ -201,6 +206,31 @@ impl UiClientModel {
 
     pub(crate) fn run_control(&mut self, arguments: Vec<String>) -> Result<IpcResponse> {
         require_success(send_ipc_request(arguments)?)
+    }
+
+    pub(crate) fn publish_snapshot(&mut self, snapshot_json: &str) -> Result<()> {
+        if !self.supports_state_publication {
+            return Ok(());
+        }
+        let response: serde_json::Value = request_json(vec![
+            "ui-client-state".to_owned(),
+            "publish".to_owned(),
+            "--lease-id".to_owned(),
+            self.lease.lease_id.clone(),
+            "--client-pid".to_owned(),
+            self.client_pid.to_string(),
+            "--snapshot-json".to_owned(),
+            snapshot_json.to_owned(),
+        ])?;
+        if response["schema_version"].as_u64() != Some(u64::from(UI_CLIENT_STATE_SCHEMA_VERSION))
+            || response["published"].as_bool() != Some(true)
+            || response["client_pid"].as_u64() != Some(u64::from(self.client_pid))
+            || response["position"]["server_epoch"].as_str()
+                != Some(self.snapshot.server_epoch.as_str())
+        {
+            anyhow::bail!("UI client snapshot publication identity changed");
+        }
+        Ok(())
     }
 
     fn interact(&mut self, action: &str, tab_id: &str, tail: Vec<String>) -> Result<()> {

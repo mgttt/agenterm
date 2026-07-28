@@ -24,6 +24,8 @@ pub const UI_DELTA_MAX_BYTES: usize = 8 * 1024 * 1024;
 pub const UI_DELTA_MAX_EVENTS: usize = 64;
 pub const UI_CLIENT_ID_MAX_BYTES: usize = 128;
 pub const UI_BUILD_IDENTITY_MAX_BYTES: usize = 2048;
+pub const UI_CLIENT_STATE_SCHEMA_VERSION: u32 = 1;
+pub const UI_CLIENT_STATE_MAX_BYTES: usize = 1024 * 1024;
 pub const UI_INPUT_MAX_BYTES: usize = 256 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
