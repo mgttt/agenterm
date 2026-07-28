@@ -297,7 +297,7 @@ Migration ledger:
 
 | Responsibility | Replacement | Archived source | Switching commit | Evidence | Rollback boundary |
 |---|---|---|---|---|---|
-| Cargo target inventory | `scripts/rhai/target-report.rhai` | `scripts/archive/powershell/target-report.ps1` | pending commit | public CLI fixture plus live PowerShell/Rhai field parity | retain through the next completed runtime slice |
+| Cargo target inventory | `scripts/rhai/target-report.rhai` | `scripts/archive/powershell/target-report.ps1` | `4571a14` | public CLI fixture plus live PowerShell/Rhai field parity | retain through the next completed runtime slice |
 
 ## Public black-box acceptance
 
