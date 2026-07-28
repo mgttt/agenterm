@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "project": {
+    "id": "script-smoke",
+    "version": "1.0.0"
+  },
+  "tasks": [
+    {
+      "id": "duplicate",
+      "entry": "main.rhai",
+      "profile": "local"
+    },
+    {
+      "id": "duplicate",
+      "entry": "main.rhai",
+      "profile": "local"
+    }
+  ]
+}

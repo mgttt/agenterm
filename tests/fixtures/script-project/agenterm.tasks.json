@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "project": {
+    "id": "script-smoke",
+    "version": "1.0.0"
+  },
+  "tasks": [
+    {
+      "id": "daily-check",
+      "description": "Public named-task and module fixture",
+      "entry": "main.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "args": ["manifest-default"],
+      "env": ["AGENTERM_TASK_FIXTURE"]
+    },
+    {
+      "id": "missing-entry",
+      "description": "Intentionally degraded discovery fixture",
+      "entry": "missing.rhai",
+      "profile": "local"
+    },
+    {
+      "id": "unknown-field",
+      "description": "Intentionally malformed discovery fixture",
+      "entry": "main.rhai",
+      "profile": "local",
+      "unexpected": true
+    },
+    {
+      "id": "no-execute",
+      "description": "Discovery must not execute this source",
+      "entry": "compile-only.rhai",
+      "profile": "local"
+    }
+  ]
+}

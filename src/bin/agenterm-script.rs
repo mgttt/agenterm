@@ -168,7 +168,7 @@ fn process_concurrent_framed_worker<R: Read>(
     loop {
         let frame = match read_script_frame(&mut input)? {
             ScriptFrameRead::Eof => break,
-            ScriptFrameRead::Frame(frame) => frame,
+            ScriptFrameRead::Frame(frame) => *frame,
             ScriptFrameRead::Rejected(rejection) => {
                 let recoverable = rejection.recoverable;
                 write_shared_rejection(&output, rejection)?;
@@ -386,7 +386,7 @@ fn process_framed_stream<R: Read, W: Write>(mut input: R, mut output: W) -> anyh
     loop {
         let frame = match read_script_frame(&mut input)? {
             ScriptFrameRead::Eof => return Ok(()),
-            ScriptFrameRead::Frame(frame) => frame,
+            ScriptFrameRead::Frame(frame) => *frame,
             ScriptFrameRead::Rejected(rejection) => {
                 let recoverable = rejection.recoverable;
                 write_protocol_frame(
@@ -690,13 +690,35 @@ fn execute_inner(
         },
     );
 
-    let ast = engine
-        .compile(&invocation.source)
-        .map_err(|error| classify_compile_error(error.to_string()))?;
     if invocation.operation == ScriptOperation::Check {
+        engine
+            .compile(&invocation.source)
+            .map_err(|error| classify_compile_error(error.to_string()))?;
+        if let Some(project_root) = invocation.project_root.as_deref() {
+            let module_sources = agenterm::script_project::validate_project_imports(
+                &engine,
+                std::path::Path::new(project_root),
+                &invocation.source,
+            )
+            .map_err(classify_compile_error)?;
+            for module_source in module_sources {
+                validate_profile_apis(&module_source, invocation.profile, &invocation.budgets)?;
+            }
+        }
         validate_profile_apis(&invocation.source, invocation.profile, &invocation.budgets)?;
         return Ok((String::new(), None));
     }
+
+    if let Some(project_root) = invocation.project_root.as_deref() {
+        let resolver = agenterm::script_project::ProjectModuleResolver::new(std::path::Path::new(
+            project_root,
+        ))
+        .map_err(|error| configuration_error("script_project_root", error))?;
+        engine.set_module_resolver(resolver);
+    }
+    let ast = engine
+        .compile_into_self_contained(&Scope::new(), &invocation.source)
+        .map_err(|error| classify_compile_error(error.to_string()))?;
 
     let mut scope = Scope::new();
     let arguments = rhai::serde::to_dynamic(&invocation.arguments)
@@ -1092,7 +1114,18 @@ fn classify_engine_limit(message: String) -> ScriptFailure {
 
 fn classify_compile_error(message: String) -> ScriptFailure {
     let lowercase = message.to_ascii_lowercase();
-    if lowercase.contains("expression")
+    if lowercase.contains("script_module_root_escape") {
+        script_error("script_module_root_escape", message)
+    } else if lowercase.contains("script_module_cycle") {
+        script_error("script_module_cycle", message)
+    } else if lowercase.contains("script_module_missing") || lowercase.contains("module not found")
+    {
+        script_error("script_module_missing", message)
+    } else if lowercase.contains("script_module_import_literal") {
+        script_error("script_module_import_literal", message)
+    } else if lowercase.contains("script_module_") {
+        script_error("script_module_invalid", message)
+    } else if lowercase.contains("expression")
         && (lowercase.contains("depth") || lowercase.contains("complexity"))
     {
         limit_error("limit_expression_depth", message)
@@ -1173,6 +1206,7 @@ mod tests {
             profile: ScriptProfile::Pure,
             source_label: "unit".to_owned(),
             source: source.to_owned(),
+            project_root: None,
             arguments: Vec::new(),
             budgets: ScriptBudgets::default(),
             observation: None,
@@ -1209,7 +1243,7 @@ mod tests {
         loop {
             match read_script_frame(&mut input).expect("decode frame") {
                 ScriptFrameRead::Eof => break,
-                ScriptFrameRead::Frame(frame) => frames.push(frame),
+                ScriptFrameRead::Frame(frame) => frames.push(*frame),
                 ScriptFrameRead::Rejected(rejection) => {
                     panic!("unexpected rejected frame: {rejection:?}")
                 }

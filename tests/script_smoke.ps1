@@ -10,6 +10,7 @@ $declaredEvidence = @(
     'script.rhai-observe'
     'script.rhai-deny-budget'
     'script.rhai-framed'
+    'script.modules-tasks'
     'script.supervisor'
     'script.audit'
 )
@@ -135,7 +136,7 @@ function New-FramedInvocation {
         frame_id = $FrameId
         kind = 'invoke'
         payload = @{
-            envelope_version = 1
+            envelope_version = 2
             invocation_id = $InvocationId
             api_version = 1
             operation = 'eval'
@@ -386,6 +387,14 @@ try {
             $_.surface_path -eq 'rhai::task::race' -and
             $_.status -eq 'shipped' -and
             $_.profiles -contains 'local'
+        }).Count -ne 1 -or
+        @($apiResult.value.entries | Where-Object {
+            $_.stable_id -eq 'std.env.get' -and
+            $_.surface_path -eq 'std::env::get' -and
+            $_.rust_path -eq 'std::env::var' -and
+            $_.semantic_differences -contains
+                'std::env::var is exposed as get because var is Rhai-reserved' -and
+            $_.status -eq 'shipped'
         }).Count -ne 1) {
         throw 'script api did not expose the versioned fail-closed capability catalog'
     }
@@ -544,6 +553,143 @@ task.cancel();
         throw "task wait timeout was not typed: $taskTimeout"
     }
 
+    Write-Host 'STEP project modules and versioned named-task discovery'
+    $projectFixture = Join-Path $repositoryRoot 'tests\fixtures\script-project'
+    $taskManifest = Join-Path $projectFixture 'agenterm.tasks.json'
+    $taskCatalog = Invoke-Script @(
+        'script', 'task', 'list', '--manifest', $taskManifest, '--json'
+    ) | ConvertFrom-Json
+    $readyTask = @($taskCatalog.tasks | Where-Object id -eq 'daily-check')
+    $degradedTask = @($taskCatalog.tasks | Where-Object id -eq 'missing-entry')
+    $unknownFieldTask = @($taskCatalog.tasks | Where-Object id -eq 'unknown-field')
+    $noExecuteTask = @($taskCatalog.tasks | Where-Object id -eq 'no-execute')
+    if ($taskCatalog.schema_version -ne 1 -or
+        $taskCatalog.project_id -ne 'script-smoke' -or
+        $readyTask.Count -ne 1 -or $readyTask[0].status -ne 'ready' -or
+        $degradedTask.Count -ne 1 -or $degradedTask[0].status -ne 'degraded' -or
+        $degradedTask[0].degraded_reason -notlike 'task_path_missing:*' -or
+        $unknownFieldTask.Count -ne 1 -or
+        $unknownFieldTask[0].status -ne 'degraded' -or
+        $unknownFieldTask[0].degraded_reason -notlike 'task_manifest_entry:*' -or
+        $noExecuteTask.Count -ne 1 -or $noExecuteTask[0].status -ne 'ready') {
+        throw 'named-task discovery hid or misclassified a manifest entry'
+    }
+    $taskShow = Invoke-Script @(
+        'script', 'task', 'show', 'daily-check',
+        '--manifest', $taskManifest, '--json'
+    ) | ConvertFrom-Json
+    if ($taskShow.project_version -ne '1.0.0' -or
+        @($taskShow.tasks).Count -ne 1 -or
+        $taskShow.tasks[0].entry -ne 'main.rhai') {
+        throw 'named-task inspection lost project or entry identity'
+    }
+    $noExecuteShow = Invoke-Script @(
+        'script', 'task', 'show', 'no-execute',
+        '--manifest', $taskManifest, '--json'
+    ) | ConvertFrom-Json
+    if ($noExecuteShow.tasks[0].entry -ne 'compile-only.rhai') {
+        throw 'task show did not inspect the no-execution fixture'
+    }
+    $badVersion = Invoke-ScriptFailure 2 @(
+        'script', 'task', 'list',
+        '--manifest', (Join-Path $projectFixture 'bad-version.tasks.json')
+    )
+    if ($badVersion -notlike '*task_manifest_version:*') {
+        throw 'task manifest version failure was not typed'
+    }
+    $duplicateCatalog = Invoke-Script @(
+        'script', 'task', 'list',
+        '--manifest', (Join-Path $projectFixture 'duplicate.tasks.json'), '--json'
+    ) | ConvertFrom-Json
+    $duplicates = @($duplicateCatalog.tasks | Where-Object id -eq 'duplicate')
+    if ($duplicates.Count -ne 2 -or
+        @($duplicates | Where-Object status -eq 'degraded').Count -ne 1) {
+        throw 'duplicate task identity was not kept visible and degraded'
+    }
+
+    $previousTaskEnvironment = [Environment]::GetEnvironmentVariable(
+        'AGENTERM_TASK_FIXTURE',
+        [EnvironmentVariableTarget]::Process
+    )
+    try {
+        $env:AGENTERM_TASK_FIXTURE = 'fixture-ok'
+        $namedTask = Invoke-Script @(
+            'script', 'task', 'run', 'daily-check',
+            '--manifest', $taskManifest, '--json', '--', 'cli-extra'
+        ) | ConvertFrom-Json
+        if (-not $namedTask.ok -or
+            $namedTask.envelope_version -ne 2 -or
+            $namedTask.value.answer -ne 42 -or
+            $namedTask.value.environment -ne 'fixture-ok' -or
+            @($namedTask.value.args).Count -ne 2 -or
+            $namedTask.value.args[0] -ne 'manifest-default' -or
+            $namedTask.value.args[1] -ne 'cli-extra' -or
+            [IO.Path]::GetFileName($namedTask.value.cwd) -ne 'script-project') {
+            throw 'named task did not preserve module, cwd, env-name, or argv contracts'
+        }
+    }
+    finally {
+        [Environment]::SetEnvironmentVariable(
+            'AGENTERM_TASK_FIXTURE',
+            $previousTaskEnvironment,
+            [EnvironmentVariableTarget]::Process
+        )
+    }
+    try {
+        Remove-Item Env:AGENTERM_TASK_FIXTURE -ErrorAction SilentlyContinue
+        $missingEnvironment = Invoke-ScriptFailure 2 @(
+            'script', 'task', 'run', 'daily-check',
+            '--manifest', $taskManifest
+        )
+    }
+    finally {
+        [Environment]::SetEnvironmentVariable(
+            'AGENTERM_TASK_FIXTURE',
+            $previousTaskEnvironment,
+            [EnvironmentVariableTarget]::Process
+        )
+    }
+    if ($missingEnvironment -notlike '*task_environment_missing:*') {
+        throw 'named task did not reject a missing declared environment name'
+    }
+    $degradedRun = Invoke-ScriptFailure 2 @(
+        'script', 'task', 'run', 'missing-entry',
+        '--manifest', $taskManifest
+    )
+    if ($degradedRun -notlike '*task_degraded:*') {
+        throw 'degraded named task did not fail with a typed configuration error'
+    }
+
+    $moduleCheck = Invoke-Script @(
+        'script', 'check', (Join-Path $projectFixture 'main.rhai'),
+        '--profile', 'local', '--project-root', $projectFixture
+    )
+    if ($moduleCheck -ne 'OK') {
+        throw 'script check did not resolve a valid project-local module'
+    }
+    $noExecuteCheck = Invoke-Script @(
+        'script', 'check', (Join-Path $projectFixture 'check-no-execute.rhai'),
+        '--profile', 'local', '--project-root', $projectFixture
+    )
+    if ($noExecuteCheck -ne 'OK') {
+        throw 'script check executed module top-level code instead of compiling only'
+    }
+    foreach ($failureFixture in @(
+        @{ file = 'missing-module.rhai'; code = 'script_module_missing' }
+        @{ file = 'escape-module.rhai'; code = 'script_module_root_escape' }
+        @{ file = 'cycle-module.rhai'; code = 'script_module_cycle' }
+        @{ file = 'bad-module-api.rhai'; code = 'script_api_unknown' }
+    )) {
+        $moduleFailure = Invoke-ScriptFailure 1 @(
+            'script', 'check', (Join-Path $projectFixture $failureFixture.file),
+            '--profile', 'local', '--project-root', $projectFixture
+        )
+        if ($moduleFailure -notlike "*$($failureFixture.code)*") {
+            throw "module failure was not typed as $($failureFixture.code): $moduleFailure"
+        }
+    }
+    Write-Evidence 'script.modules-tasks'
+
     Write-Host 'STEP Rhai Cargo target inventory migration'
     $targetReportScript = Join-Path $repositoryRoot 'scripts\rhai\target-report.rhai'
     $targetFixture = Join-Path $runtimeDirectory 'target'
@@ -568,7 +714,7 @@ task.cancel();
     $targetEnvelope = Invoke-Script @(
         'script', 'run', $targetReportScript, '--profile', 'local',
         '--timeout-ms', '10000', '--max-operations', '10000000',
-        '--', $runtimeDirectory, 'target', '--json'
+        '--json', '--', $runtimeDirectory, 'target', '--json'
     ) | ConvertFrom-Json
     $targetReport = $targetEnvelope.stdout | ConvertFrom-Json
     $rootProfile = @($targetReport.profiles | Where-Object name -eq '(root)')

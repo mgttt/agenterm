@@ -547,10 +547,19 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
         ),
         "save-workspace" => ("agenterm-cli save-workspace", &[][..], &[][..], false),
         "script" => (
-            "agenterm-cli script api [--json] | check FILE|- [--profile pure|observe|local] | \
-             eval EXPRESSION [--profile pure|observe|local] | run FILE|- \
-             [--profile pure|observe|local] [-- ARGS...] (default profile: local)",
-            &["--profile", "--timeout-ms", "--max-operations"][..],
+            "agenterm-cli script api [--json] | check FILE|- [--profile pure|observe|local] \
+             [--project-root DIR] | eval EXPRESSION [--profile pure|observe|local] | \
+             run FILE|- [--profile pure|observe|local] [--cwd DIR] [--project-root DIR] \
+             [-- ARGS...] | task list|show|run [TASK] [--manifest FILE] [--json] \
+             (default profile: local)",
+            &[
+                "--profile",
+                "--timeout-ms",
+                "--max-operations",
+                "--cwd",
+                "--project-root",
+                "--manifest",
+            ][..],
             &["--json"][..],
             false,
         ),

@@ -303,6 +303,14 @@
       "evidence_ids": ["script.audit"]
     },
     {
+      "id": "scripting.modules-tasks",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "local modules resolve from an explicit script/project root",
+      "evidence_ids": ["script.modules-tasks"]
+    },
+    {
       "id": "scripting.rust-host-rhai-language",
       "kind": "decision",
       "status": "accepted",

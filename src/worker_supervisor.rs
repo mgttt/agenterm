@@ -61,6 +61,7 @@ pub(crate) struct WorkerSupervisor;
 impl WorkerSupervisor {
     pub(crate) fn invoke<F>(
         executable: &Path,
+        working_directory: Option<&Path>,
         invocation: ScriptInvocation,
         deadline: Duration,
         cancel_grace: Duration,
@@ -70,11 +71,16 @@ impl WorkerSupervisor {
         F: FnMut(&ScriptBrokerRequest, Duration) -> ScriptBrokerResponse,
     {
         let _permit = ConcurrencyPermit::try_acquire()?;
-        let mut child = Command::new(executable)
+        let mut command = Command::new(executable);
+        command
             .arg("--framed-worker")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::null());
+        if let Some(working_directory) = working_directory {
+            command.current_dir(working_directory);
+        }
+        let mut child = command
             .spawn()
             .map_err(|error| SupervisorError::Spawn(error.to_string()))?;
         let worker_pid = child.id();

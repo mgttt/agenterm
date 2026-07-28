@@ -167,21 +167,23 @@ and it is not positioned as a restricted security plugin.
 
 ## Local modules, tasks, and named commands
 
-- [ ] local modules resolve from an explicit script/project root using
+- [x] local modules resolve from an explicit script/project root using
   deterministic relative paths; missing modules, root escape, cycles, duplicate
-  identities, incompatible versions, and parse failures are typed.
-- [ ] project tasks use one versioned declarative manifest that maps stable task
+  identities, incompatible versions, and parse failures are typed. The shipped
+  resolver embeds local imports into a self-contained AST and never searches
+  home, PATH, or the network.
+- [x] project tasks use one versioned declarative manifest that maps stable task
   IDs to a script/module entry point, arguments, working directory, environment
-  construction, and execution profile.
-- [ ] TOML versus reuse of an existing AgenTerm manifest encoding is the one
-  remaining implementation-before-parser decision. v0.1.9 selects a versioned
-  `agenterm.tasks.json` format and records the exact schema before
-  task-manifest parsing begins, but does not block the selected `std::` or
-  `rhai::task` contracts.
-- [ ] project tasks and user-level named commands are discoverable through one
+  construction, and execution profile. Schema v1 uses a project identity/
+  version plus an ordered task array with `id`, `description`, `entry`,
+  `profile`, `cwd`, default `args`, and required environment-name `env` fields;
+  it stores no environment values.
+- [x] v0.1.9 selects versioned JSON at `agenterm.tasks.json`; it is explicitly
+  a local task manifest rather than a package/download/signature manifest.
+- [x] project tasks and user-level named commands are discoverable through one
   typed catalog. Invalid entries remain visible with a stable degraded reason
   instead of disappearing.
-- [ ] CLI listing, inspection, and invocation of named tasks is P0 for v0.1.9.
+- [x] CLI listing, inspection, and invocation of named tasks is P0 for v0.1.9.
   A GUI command palette is a P1 consumer of the same catalog and does not own a
   second registry.
 
@@ -279,6 +281,10 @@ and it is not positioned as a restricted security plugin.
   future local package tooling can inspect them without executing source.
   This is a package-ready contract, not a registry, downloader, installer,
   signature policy or second package manifest in v0.1.9.
+  - [x] the module/task slice exposes manifest path, canonical project root,
+    project ID/version, stable task ID, entry, profile, cwd, default argv,
+    required environment names, readiness and degraded reason without running
+    task source; required API/capability declarations remain open.
 
 ## Repository dogfood and gradual replacement
 
@@ -338,6 +344,11 @@ Migration ledger:
 - [ ] module/task fixtures cover roots, relative imports, cycles, duplicate and
   missing modules, manifest version/error handling, named-task discovery,
   degraded entries, arguments, and working directory.
+  - [x] the first public fixture covers valid relative import, root escape,
+    missing module, cycle, bad manifest version, duplicate identity, unknown
+    field, ready/degraded discovery, list/show/check without code execution,
+    default-plus-caller argv, cwd, required environment-name validation and
+    successful named invocation.
 - [ ] Fleet conformance compares every operation-catalog entry with its script
   exposure or explicit degraded reason; mutations verify typed receipts,
   correlated public post-state/events, no duplicate side effect, and honest

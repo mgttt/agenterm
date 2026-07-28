@@ -399,17 +399,24 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             "time.rfc3339",
             (&["utc_rfc3339_millisecond_precision"], NO_STRINGS),
         ),
-        shipped_local_entry(
-            "std.env.var",
+        shipped_local_entry_with_semantics(
+            shipped_local_entry(
+            "std.env.get",
             "system/environment/read",
-            "std::env::var",
+            "std::env::get",
             Some("std::env::var"),
             RustMapping::Adapted,
-            "std::env::var(name)",
+            "std::env::get(name)",
             (
-                &["worker_environment_snapshot", "value_not_audited"],
+                &[
+                    "var_is_a_rhai_reserved_word",
+                    "worker_environment_snapshot",
+                    "value_not_audited",
+                ],
                 &["environment_missing", "environment_not_unicode"],
             ),
+            ),
+            &["std::env::var is exposed as get because var is Rhai-reserved"],
         ),
         shipped_local_entry(
             "std.env.has",
@@ -642,6 +649,46 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             "task.id / task.state / task.done / task.cancelled / task.wait([timeout]) / task.cancel()",
             (&["typed_host_payload_only", "no_rhai_dynamic_cross_thread"], &["task_wait_timeout", "task_cancelled"]),
         ),
+        shipped_local_entry(
+            "runtime.project.module-import",
+            "code-and-automation/module/import",
+            "import \"relative/module\" as module",
+            None,
+            RustMapping::None,
+            "import \"relative/module\" as module",
+            (
+                &[
+                    "project_root_relative",
+                    "rhai_extension_implicit",
+                    "compiled_self_contained",
+                ],
+                &[
+                    "script_module_missing",
+                    "script_module_root_escape",
+                    "script_module_cycle",
+                ],
+            ),
+        ),
+        shipped_local_entry(
+            "runtime.project.named-task",
+            "code-and-automation/task-manifest/invoke",
+            "script task list/show/run",
+            None,
+            RustMapping::None,
+            "script task list|show|run [TASK] [--manifest PATH]",
+            (
+                &[
+                    "agenterm_tasks_json_schema_v1",
+                    "invalid_entries_remain_visible",
+                    "environment_names_only",
+                ],
+                &[
+                    "task_manifest_version",
+                    "task_degraded",
+                    "task_environment_missing",
+                ],
+            ),
+        ),
         planned_entry(
             "fleet.tabs.new",
             "fleet/tabs/new",
@@ -681,7 +728,7 @@ pub fn catalog() -> Value {
                 "availability": "first_std_slice",
             },
         },
-        "operations": ["api", "check", "eval", "run"],
+        "operations": ["api", "check", "eval", "run", "task-list", "task-show", "task-run"],
         "framing": {
             "version": SCRIPT_FRAME_VERSION,
             "max_frame_bytes": SCRIPT_FRAME_MAX_BYTES,

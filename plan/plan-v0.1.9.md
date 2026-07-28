@@ -555,7 +555,7 @@ agenterm-script
 │  │  ├─ [x] run / eval / check
 │  │  ├─ [x] api --json baseline
 │  │  ├─ [ ] api tree / filters / comparison
-│  │  └─ [ ] named task list / show / run
+│  │  └─ [x] named task list / show / run
 │  ├─ profile
 │  │  ├─ [x] pure
 │  │  ├─ [x] observe
@@ -623,11 +623,11 @@ agenterm-script
 │
 ├─ code-and-automation
 │  ├─ module
-│  │  ├─ [ ] local relative import / project root
-│  │  └─ [ ] identity / version / cycle / cache
+│  │  ├─ [x] local relative import / explicit project root
+│  │  └─ [>] root escape / missing / cycle 已分型；跨 invocation cache 延后
 │  ├─ task-manifest
-│  │  ├─ [ ] agenterm.tasks.json
-│  │  └─ [ ] entry / args / cwd / env names / profile
+│  │  ├─ [x] agenterm.tasks.json schema v1
+│  │  └─ [x] project identity/version + entry/args/cwd/env names/profile
 │  ├─ package
 │  │  ├─ [-] npm / Node module compatibility
 │  │  └─ [>] softmgr / signed package and application market
@@ -936,32 +936,37 @@ agenterm.tasks.json
 - schema、error location、machine editing 和工具消费直接；
 - 与 `api --json`、receipt、diagnostic manifest 语言一致。
 
-候选 schema：
+已交付 schema v1：
 
 ```json
 {
   "schema_version": 1,
-  "tasks": {
-    "daily-check": {
+  "project": {
+    "id": "daily-tools",
+    "version": "1.0.0"
+  },
+  "tasks": [
+    {
+      "id": "daily-check",
       "description": "Run the local daily check",
-      "script": "tasks/daily-check.rhai",
+      "entry": "tasks/daily-check.rhai",
       "profile": "local",
       "cwd": ".",
       "args": [],
-      "env_names": [],
-      "timeout_ms": 30000
+      "env": ["REQUIRED_ENV_NAME"]
     }
-  }
+  ]
 }
 ```
 
 约束：
 
-- task key 是 stable ID，description 只是显示；
-- list 按 stable ID 排序；
-- invalid task 不消失，显示 `available:false` 和 degraded reason；
+- project `id/version` 与 task `id` 是稳定、可发现的 identity，
+  description 只是显示；
+- tasks 保留 manifest 顺序；
+- invalid task 不消失，显示 `status:degraded` 和 degraded reason；
 - duplicate、unknown field、bad version、root escape、missing script 分型；
-- manifest 不保存 secret env values；
+- `env` 只保存 required name，不保存 secret env values；
 - project manifest 与用户级 named command 暂不合并搜索路径，除非先定义
   优先级和冲突语义；
 - GUI command palette 以后只消费这个 catalog，不创建第二注册表。

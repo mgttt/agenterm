@@ -6,6 +6,8 @@ fn wide(value: &str) -> Vec<u16> {
     value.encode_utf16().chain(Some(0)).collect()
 }
 
+#[cfg(windows)]
+use std::path::{Path, PathBuf};
 use std::{
     cell::RefCell,
     env,
@@ -50,6 +52,11 @@ use crate::{
 use crate::script_audit::{
     AuditBudgets, AuditInvocation, AuditOutcome, AuditSourceKind, ScriptAuditSink,
     source_fingerprint,
+};
+#[cfg(windows)]
+use crate::script_project::{
+    ResolvedScriptTask, ScriptTaskCatalog, ScriptTaskStatus, discover_task_manifest,
+    load_task_catalog, resolve_task,
 };
 #[cfg(windows)]
 use crate::worker_supervisor::{SupervisorError, WorkerSupervisor};
@@ -864,8 +871,26 @@ fn run_script_command(_arguments: &[String]) -> i32 {
 
 #[cfg(windows)]
 fn run_script_command(arguments: &[String]) -> i32 {
+    if arguments.get(1).is_some_and(|value| value == "task") {
+        return run_script_task_command(arguments);
+    }
+    run_script_command_with_context(arguments, None)
+}
+
+#[cfg(windows)]
+#[derive(Clone, Debug)]
+struct ScriptExecutionContext {
+    project_root: PathBuf,
+    working_directory: PathBuf,
+}
+
+#[cfg(windows)]
+fn run_script_command_with_context(
+    arguments: &[String],
+    context: Option<ScriptExecutionContext>,
+) -> i32 {
     let Some(operation_name) = arguments.get(1).map(String::as_str) else {
-        eprintln!("script requires api, check, eval, or run");
+        eprintln!("script requires api, check, eval, run, or task");
         return 2;
     };
     let operation = match operation_name {
@@ -931,7 +956,14 @@ fn run_script_command(arguments: &[String]) -> i32 {
                     }
                 }
             } else {
-                if std::fs::metadata(path)
+                let canonical = match std::fs::canonicalize(path) {
+                    Ok(path) => path,
+                    Err(error) => {
+                        eprintln!("failed to resolve script {path}: {error}");
+                        return 1;
+                    }
+                };
+                if std::fs::metadata(&canonical)
                     .is_ok_and(|metadata| metadata.len() > budgets.source_bytes as u64)
                 {
                     eprintln!(
@@ -940,7 +972,7 @@ fn run_script_command(arguments: &[String]) -> i32 {
                     );
                     return 3;
                 }
-                let file = match std::fs::File::open(path) {
+                let file = match std::fs::File::open(&canonical) {
                     Ok(file) => file,
                     Err(error) => {
                         eprintln!("failed to read script {path}: {error}");
@@ -948,7 +980,7 @@ fn run_script_command(arguments: &[String]) -> i32 {
                     }
                 };
                 match read_script_source(file, budgets.source_bytes) {
-                    Ok(source) => (path.to_owned(), source),
+                    Ok(source) => (canonical.display().to_string(), source),
                     Err((code, error)) => {
                         eprintln!("failed to read script {path}: {error}");
                         return code;
@@ -964,6 +996,16 @@ fn run_script_command(arguments: &[String]) -> i32 {
         );
         return 3;
     }
+    let context = match context {
+        Some(context) => context,
+        None => match direct_script_context(arguments, &source_label) {
+            Ok(context) => context,
+            Err(error) => {
+                eprintln!("{error}");
+                return 2;
+            }
+        },
+    };
 
     let needs_observation = profile == ScriptProfile::Observe
         && matches!(operation, ScriptOperation::Eval | ScriptOperation::Run);
@@ -1037,6 +1079,7 @@ fn run_script_command(arguments: &[String]) -> i32 {
         profile,
         source_label,
         source,
+        project_root: Some(context.project_root.display().to_string()),
         arguments: script_arguments,
         budgets,
         observation,
@@ -1071,6 +1114,7 @@ fn run_script_command(arguments: &[String]) -> i32 {
     let broker_budgets = invocation.budgets.clone();
     let (result, cancel_requested) = match WorkerSupervisor::invoke(
         &executable,
+        Some(&context.working_directory),
         invocation,
         deadline,
         Duration::from_millis(150),
@@ -1138,7 +1182,7 @@ fn run_script_command(arguments: &[String]) -> i32 {
     if let Err(error) = audit_sink.append(&audit_invocation, &audit_outcome) {
         return report_audit_error(error);
     }
-    if arguments.iter().any(|argument| argument == "--json") {
+    if has_option(arguments, "--json") {
         println!(
             "{}",
             serde_json::to_string_pretty(&result).unwrap_or_else(|_| "{}".to_owned())
@@ -1182,6 +1226,219 @@ fn run_script_command(arguments: &[String]) -> i32 {
             _ => 1,
         }
     }
+}
+
+#[cfg(windows)]
+fn direct_script_context(
+    arguments: &[String],
+    source_label: &str,
+) -> Result<ScriptExecutionContext, String> {
+    let current =
+        std::env::current_dir().map_err(|error| format!("script_current_dir: {error}"))?;
+    let working_directory = match option_value(arguments, "--cwd") {
+        Some(path) => canonical_script_directory(&current, path, "script_cwd")?,
+        None => current.clone(),
+    };
+    let project_root = match option_value(arguments, "--project-root") {
+        Some(path) => canonical_script_directory(&current, path, "script_project_root")?,
+        None => {
+            let source = Path::new(source_label);
+            if source.is_file() {
+                source
+                    .parent()
+                    .map(Path::to_path_buf)
+                    .unwrap_or_else(|| current.clone())
+            } else {
+                current
+            }
+        }
+    };
+    Ok(ScriptExecutionContext {
+        project_root,
+        working_directory,
+    })
+}
+
+#[cfg(windows)]
+fn canonical_script_directory(base: &Path, value: &str, code: &str) -> Result<PathBuf, String> {
+    let candidate = if Path::new(value).is_absolute() {
+        PathBuf::from(value)
+    } else {
+        base.join(value)
+    };
+    let canonical = std::fs::canonicalize(&candidate)
+        .map_err(|error| format!("{code}: {}: {error}", candidate.display()))?;
+    if !canonical.is_dir() {
+        return Err(format!(
+            "{code}: {} is not a directory",
+            canonical.display()
+        ));
+    }
+    Ok(canonical)
+}
+
+#[cfg(windows)]
+fn run_script_task_command(arguments: &[String]) -> i32 {
+    let Some(action) = arguments.get(2).map(String::as_str) else {
+        eprintln!("script task requires list, show, or run");
+        return 2;
+    };
+    let manifest = match script_task_manifest(arguments) {
+        Ok(path) => path,
+        Err(error) => {
+            eprintln!("{error}");
+            return 2;
+        }
+    };
+    let catalog = match load_task_catalog(&manifest) {
+        Ok(catalog) => catalog,
+        Err(error) => {
+            eprintln!("{error}");
+            return 2;
+        }
+    };
+    match action {
+        "list" => {
+            print_task_catalog(&catalog, has_option(arguments, "--json"));
+            0
+        }
+        "show" => {
+            let Some(id) = arguments.get(3).filter(|value| !value.starts_with('-')) else {
+                eprintln!("script task show requires a task ID");
+                return 2;
+            };
+            let matches = catalog
+                .tasks
+                .iter()
+                .filter(|task| task.id == *id)
+                .collect::<Vec<_>>();
+            if matches.is_empty() {
+                eprintln!("task_not_found: {id}");
+                return 2;
+            }
+            if has_option(arguments, "--json") {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "schema_version": catalog.schema_version,
+                        "manifest_path": catalog.manifest_path,
+                        "project_root": catalog.project_root,
+                        "project_id": catalog.project_id,
+                        "project_version": catalog.project_version,
+                        "tasks": matches,
+                    }))
+                    .unwrap_or_else(|_| "{}".to_owned())
+                );
+            } else {
+                for task in matches {
+                    print_task_entry(task);
+                }
+            }
+            0
+        }
+        "run" => {
+            let Some(id) = arguments.get(3).filter(|value| !value.starts_with('-')) else {
+                eprintln!("script task run requires a task ID");
+                return 2;
+            };
+            let task = match resolve_task(&catalog, id) {
+                Ok(task) => task,
+                Err(error) => {
+                    eprintln!("{error}");
+                    return 2;
+                }
+            };
+            run_resolved_script_task(arguments, task)
+        }
+        other => {
+            eprintln!("unknown script task operation: {other}");
+            2
+        }
+    }
+}
+
+#[cfg(windows)]
+fn script_task_manifest(arguments: &[String]) -> Result<PathBuf, String> {
+    if let Some(path) = option_value(arguments, "--manifest") {
+        return Ok(PathBuf::from(path));
+    }
+    let current =
+        std::env::current_dir().map_err(|error| format!("task_manifest_current_dir: {error}"))?;
+    discover_task_manifest(&current)
+}
+
+#[cfg(windows)]
+fn print_task_catalog(catalog: &ScriptTaskCatalog, json: bool) {
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(catalog).unwrap_or_else(|_| "{}".to_owned())
+        );
+        return;
+    }
+    for task in &catalog.tasks {
+        print_task_entry(task);
+    }
+}
+
+#[cfg(windows)]
+fn print_task_entry(task: &crate::script_project::ScriptTaskEntry) {
+    let status = match task.status {
+        ScriptTaskStatus::Ready => "ready",
+        ScriptTaskStatus::Degraded => "degraded",
+    };
+    let detail = task
+        .degraded_reason
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .unwrap_or(task.description.as_str());
+    println!("{}\t{}\t{}", task.id, status, detail);
+}
+
+#[cfg(windows)]
+fn run_resolved_script_task(arguments: &[String], task: ResolvedScriptTask) -> i32 {
+    let missing = task
+        .env
+        .iter()
+        .filter(|name| std::env::var_os(name).is_none())
+        .cloned()
+        .collect::<Vec<_>>();
+    if !missing.is_empty() {
+        eprintln!(
+            "task_environment_missing: {} requires {}",
+            task.id,
+            missing.join(", ")
+        );
+        return 2;
+    }
+    let mut translated = vec![
+        "script".to_owned(),
+        "run".to_owned(),
+        task.entry.display().to_string(),
+        "--profile".to_owned(),
+        task.profile,
+    ];
+    for option in ["--timeout-ms", "--max-operations"] {
+        if let Some(value) = option_value(arguments, option) {
+            translated.push(option.to_owned());
+            translated.push(value.to_owned());
+        }
+    }
+    if has_option(arguments, "--json") {
+        translated.push("--json".to_owned());
+    }
+    translated.push("--".to_owned());
+    translated.extend(task.args);
+    if let Some(delimiter) = arguments.iter().position(|value| value == "--") {
+        translated.extend_from_slice(&arguments[delimiter + 1..]);
+    }
+    run_script_command_with_context(
+        &translated,
+        Some(ScriptExecutionContext {
+            project_root: task.project_root,
+            working_directory: task.cwd,
+        }),
+    )
 }
 
 #[cfg(windows)]
@@ -1612,7 +1869,8 @@ fn script_operand(arguments: &[String]) -> Option<&str> {
     while position < arguments.len() {
         match arguments[position].as_str() {
             "--" => return None,
-            "--profile" | "--timeout-ms" | "--max-operations" => position += 2,
+            "--profile" | "--timeout-ms" | "--max-operations" | "--cwd" | "--project-root"
+            | "--manifest" => position += 2,
             "--json" => position += 1,
             value => return Some(value),
         }
@@ -2186,6 +2444,10 @@ Usage:
   agenterm-cli get-settings
   agenterm-cli set-setting terminal.font-family FAMILY
   agenterm-cli set-setting terminal.font-size 8..36
+  agenterm-cli script api [--json]
+  agenterm-cli script check|run FILE|- [--profile local|pure|observe] [--project-root DIR] [--cwd DIR]
+  agenterm-cli script eval EXPRESSION [--profile local|pure|observe] [--cwd DIR]
+  agenterm-cli script task list|show|run [TASK] [--manifest FILE] [--json] [-- ARGS...]
   agenterm-cli send-mouse [-t target] -x col -y row [--button left] [--action press]
   agenterm-cli ui-snapshot
   agenterm-cli ui-action new-tab|new-child|edit-tab|toggle-tree|tabs-show|tabs-hide|tabs-toggle|toggle-tabs|tabs-set-width|select-tab|close-tab|close-window|keep-server-running|stop-server-and-exit|confirm|cancel|composer-send|copy-selection|open-cwd-editor|cwd-prepare|cwd-prepare-append|cwd-prepare-replace|cwd-send-now|open-proxy-editor|proxy-toggle-visibility|proxy-reveal-credentials|proxy-prepare|proxy-send-now

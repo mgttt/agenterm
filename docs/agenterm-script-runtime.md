@@ -327,13 +327,13 @@ agenterm-script
 │
 ├─ project composition
 │  Local modules and named task discovery.
-│  [planned; stable mechanism reservation; designed 2026-07-28]
+│  [shipped; stable mechanism; designed 2026-07-28]
 │  ├─ import "relative/module" as module
 │  │  Resolves only inside the declared project root.
-│  │  [planned; reserved; designed 2026-07-28]
+│  │  [shipped; stable; designed 2026-07-28]
 │  └─ agenterm.tasks.json
 │     Versioned local task manifest; not a package manifest.
-│     [planned; stable filename reservation; designed 2026-07-28]
+│     [shipped schema v1; stable; designed 2026-07-28]
 │
 └─ discovery
    Offline and runtime-aligned interface inspection.
@@ -349,7 +349,7 @@ agenterm-script
    │  [shipped baseline; stable; designed 2026-07-28]
    └─ script task list / show / run
       Discovers and invokes named local tasks.
-      [planned; reserved; designed 2026-07-28]
+      [shipped; stable; designed 2026-07-28]
 ```
 
 The tree is normative for namespace ownership, public path spelling, and the
@@ -627,10 +627,12 @@ that shell executable.
 `Command`, `Child`, and `Output` are typed objects. Parent cancellation or
 termination MUST clean the invocation-owned process tree.
 
-`std::env::var`, `has`, `names`, and `current_dir` observe the worker
-environment. Environment values are available to the running script but MUST
-NOT be copied into retained audit or diagnostics. `Command.env`, `env_remove`,
-and `env_clear` configure only the child; they do not mutate the AgenTerm host.
+`std::env::get`, `has`, `names`, and `current_dir` observe the worker
+environment. `get` is the Rhai spelling of Rust `std::env::var` because `var`
+is reserved by the language. Environment values are available to the running
+script but MUST NOT be copied into retained audit or diagnostics.
+`Command.env`, `env_remove`, and `env_clear` configure only the child; they do
+not mutate the AgenTerm host.
 
 The shipped process defaults are a 2,000 ms child deadline and 64 KiB retained
 for each captured stream. A script MAY lower or raise them through
@@ -809,6 +811,34 @@ or network to guess a module.
 The named task manifest is `agenterm.tasks.json`. It describes local task
 execution and is not a package manifest. `task list` and `task show` MUST NOT
 execute user code. Invalid tasks remain discoverable with a degraded reason.
+
+Schema v1 is:
+
+```json
+{
+  "schema_version": 1,
+  "project": {"id": "daily-tools", "version": "1.0.0"},
+  "tasks": [
+    {
+      "id": "daily-check",
+      "description": "Run the local daily check",
+      "entry": "tasks/daily-check.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "args": [],
+      "env": ["REQUIRED_ENV_NAME"]
+    }
+  ]
+}
+```
+
+Project/task IDs, project version, entry, profile, working directory, default
+arguments, and required environment names are inspectable without execution.
+`env` contains names only; values are inherited at invocation and are never
+copied into the manifest, task catalog, audit, or diagnostics. Entries and
+working directories MUST resolve inside the manifest directory. Discovery
+walks from the current directory to its ancestors unless `--manifest` is
+explicit. Task execution appends caller arguments after manifest defaults.
 
 ## 15. Discovery and generated manuals
 

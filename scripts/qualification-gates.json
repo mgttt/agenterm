@@ -113,6 +113,7 @@
         "script.rhai-observe",
         "script.rhai-deny-budget",
         "script.rhai-framed",
+        "script.modules-tasks",
         "script.supervisor",
         "script.audit"
       ]

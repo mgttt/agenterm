@@ -8,7 +8,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub const SCRIPT_ENVELOPE_VERSION: u32 = 1;
+pub const SCRIPT_ENVELOPE_VERSION: u32 = 2;
 pub const SCRIPT_API_VERSION: u32 = 1;
 pub const SCRIPT_INVOCATION_MAX_BYTES: u64 = 2 * 1024 * 1024;
 pub const SCRIPT_FRAME_VERSION: u32 = 1;
@@ -152,6 +152,8 @@ pub struct ScriptInvocation {
     pub profile: ScriptProfile,
     pub source_label: String,
     pub source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_root: Option<String>,
     pub arguments: Vec<String>,
     pub budgets: ScriptBudgets,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -382,7 +384,7 @@ impl ScriptFrameRejection {
 #[derive(Debug)]
 pub enum ScriptFrameRead {
     Eof,
-    Frame(ScriptFrame),
+    Frame(Box<ScriptFrame>),
     Rejected(ScriptFrameRejection),
 }
 
@@ -419,7 +421,7 @@ pub fn read_script_frame(input: &mut impl Read) -> io::Result<ScriptFrameRead> {
         )));
     }
     match serde_json::from_slice(&bytes) {
-        Ok(frame) => Ok(ScriptFrameRead::Frame(frame)),
+        Ok(frame) => Ok(ScriptFrameRead::Frame(Box::new(frame))),
         Err(error) => Ok(ScriptFrameRead::Rejected(ScriptFrameRejection::transport(
             "protocol_malformed_frame",
             error.to_string(),
@@ -574,7 +576,7 @@ mod tests {
         ));
         assert!(matches!(
             recovered,
-            ScriptFrameRead::Frame(ScriptFrame { frame_id, .. }) if frame_id == "valid"
+            ScriptFrameRead::Frame(frame) if frame.frame_id == "valid"
         ));
     }
 

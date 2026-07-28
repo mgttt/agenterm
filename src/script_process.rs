@@ -131,7 +131,7 @@ fn register_types(engine: &mut Engine) {
 
 fn env_module() -> Module {
     let mut module = Module::new();
-    module.set_native_fn("var", env_var);
+    module.set_native_fn("get", env_get);
     module.set_native_fn("has", env_has);
     module.set_native_fn("names", env_names);
     module.set_native_fn("current_dir", env_current_dir);
@@ -172,7 +172,7 @@ fn duration_millis(value: &mut ScriptDuration) -> Result<rhai::INT, Box<EvalAltR
         .map_err(|_| "duration_overflow: milliseconds exceed Rhai integer".into())
 }
 
-fn env_var(name: &str) -> Result<String, Box<EvalAltResult>> {
+fn env_get(name: &str) -> Result<String, Box<EvalAltResult>> {
     validate_env_name(name)?;
     std::env::var(name).map_err(|error| match error {
         std::env::VarError::NotPresent => format!("environment_missing: {name}").into(),
@@ -553,6 +553,11 @@ mod tests {
     #[test]
     fn environment_and_duration_are_typed() {
         assert!(engine().eval::<bool>("std::env::has(\"PATH\")").unwrap());
+        assert!(
+            engine()
+                .eval::<bool>("std::env::get(\"PATH\").len > 0")
+                .unwrap()
+        );
         assert_eq!(
             engine()
                 .eval::<rhai::INT>("std::time::Duration::from_secs(2).millis")
