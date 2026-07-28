@@ -3357,7 +3357,6 @@ pub(crate) fn protocol_info_json_with_ui_bridge(
         "features": {
             "remain_on_exit": true,
             "live_close_confirmation": true,
-            "rmux_status_click_bridge": true,
             "semantic_ui_automation": true,
             "hierarchical_tabs": true,
             "persistent_workspace": true,

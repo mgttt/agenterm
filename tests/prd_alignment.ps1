@@ -153,19 +153,6 @@ foreach ($suite in @(
     }
 }
 
-$rmuxStatusSource = Get-Content -LiteralPath (
-    Join-Path $root 'src\rmux_status.rs'
-) -Raw
-foreach ($unitName in @(
-    'parses_rmux_status_windows_and_active_marker'
-    'records_clickable_utf8_byte_ranges'
-)) {
-    if (-not $rmuxStatusSource.Contains("fn $unitName")) {
-        throw "RMUX partial unit evidence is missing test: $unitName"
-    }
-}
-[void]$registeredEvidence.Add('unit.rmux-status-parser')
-
 $expectedEvidence = @(
     $capabilities |
         Where-Object kind -ne 'decision' |

@@ -117,15 +117,6 @@
       "evidence_ids": ["ux.detach-first-window-close"]
     },
     {
-      "id": "compat.rmux-status-click-bridge",
-      "protocol_feature": "rmux_status_click_bridge",
-      "kind": "behavior",
-      "status": "shipped",
-      "evidence_mode": "unit-source-partial",
-      "prd": "RMUX status active-marker parsing and clickable window labels",
-      "evidence_ids": ["unit.rmux-status-parser"]
-    },
-    {
       "id": "control.semantic-ui-automation",
       "protocol_feature": "semantic_ui_automation",
       "kind": "behavior",
