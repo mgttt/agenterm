@@ -1530,13 +1530,15 @@ README 增加一个简短 script task 示例；稳定运行时合同由
   [x] clean release 2,359,808 bytes；保留既有 3 MiB 门，不再抬高
 
 提交 7
-  [x] 从全部 14 个现有 typed operations 系统生成 Fleet API
+  [x] 从全部 15 个现有 typed operations 系统生成 Fleet API
   [x] observe/local 权限、receipt/event/post-state 与迁移诊断
 
 提交 8
-  north-star dogfood
-  self-host dual-run
-  clean qualification and release rehearsal
+  [x] north-star dogfood（直接 agenterm-script task list/show/check/run）
+  [x] self-host dual-run
+  [x] release rehearsal：四个 release 二进制均低于既有预算
+  [>] qualification：完整 no-activate 公共门与 bounded event stress 全绿；
+      clean receipt 等共享 Unix/GUI 暂存工作落库后生成
 ```
 
 这一刀完成后，AgenTerm 不只是“内置 Rhai 的终端”，而是拥有一个能被人、
