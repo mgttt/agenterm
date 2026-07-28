@@ -347,6 +347,66 @@ try {
         )
     }
 
+    Write-Host 'STEP navigate Terminal, Composer, and Tabs without the mouse'
+    $focusMessage = 0x8003
+    $shortcutMessage = 0x8002
+    if ([AgenTermRemoteUiNativeTest]::SendMessage(
+            $gui.MainWindowHandle, $focusMessage,
+            [IntPtr]::Zero, [IntPtr]::Zero
+        ).ToInt64() -ne 1) {
+        throw 'replaceable UI did not start with terminal focus'
+    }
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, $shortcutMessage,
+        [IntPtr]0x28, [IntPtr]1
+    ) | Out-Null
+    if ([AgenTermRemoteUiNativeTest]::SendMessage(
+            $gui.MainWindowHandle, $focusMessage,
+            [IntPtr]::Zero, [IntPtr]::Zero
+        ).ToInt64() -ne 2) {
+        throw 'Ctrl+Down did not move focus from terminal to Composer'
+    }
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, $shortcutMessage,
+        [IntPtr]0x26, [IntPtr]1
+    ) | Out-Null
+    if ([AgenTermRemoteUiNativeTest]::SendMessage(
+            $gui.MainWindowHandle, $focusMessage,
+            [IntPtr]::Zero, [IntPtr]::Zero
+        ).ToInt64() -ne 1) {
+        throw 'Ctrl+Up did not return focus from Composer to terminal'
+    }
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, $shortcutMessage,
+        [IntPtr]0x25, [IntPtr]1
+    ) | Out-Null
+    if ([AgenTermRemoteUiNativeTest]::SendMessage(
+            $gui.MainWindowHandle, $focusMessage,
+            [IntPtr]::Zero, [IntPtr]::Zero
+        ).ToInt64() -ne 3) {
+        throw 'Ctrl+Left did not move focus from terminal to Tabs'
+    }
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, $shortcutMessage,
+        [IntPtr]0x27, [IntPtr]1
+    ) | Out-Null
+    if ([AgenTermRemoteUiNativeTest]::SendMessage(
+            $gui.MainWindowHandle, $focusMessage,
+            [IntPtr]::Zero, [IntPtr]::Zero
+        ).ToInt64() -ne 1) {
+        throw 'Ctrl+Right did not return focus from Tabs to terminal'
+    }
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, $shortcutMessage,
+        [IntPtr]0x28, [IntPtr]3
+    ) | Out-Null
+    if ([AgenTermRemoteUiNativeTest]::SendMessage(
+            $gui.MainWindowHandle, $focusMessage,
+            [IntPtr]::Zero, [IntPtr]::Zero
+        ).ToInt64() -ne 1) {
+        throw 'Ctrl+Shift+Down incorrectly stole the native key behavior'
+    }
+
     Write-Host 'STEP preview, cancel, and apply client-owned Settings'
     $replacementComposer = [AgenTermRemoteUiNativeTest]::GetDlgItem(
         $gui.MainWindowHandle, 2101

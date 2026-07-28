@@ -1649,7 +1649,9 @@ S4  [~] server-owned 单活 interactive UI lease 已交付 attach/idempotent
         Copy/Paste 已恢复；选区绑定 screen generation，paste 仍经 lease
         有界写入 PTY。screen schema v2 发布 max scrollback，client 为终端
         保留可见滚动条，并以 typed server control 支持轨道翻页及 thumb
-        精确拖到历史顶端/实时底端。
+        精确拖到历史顶端/实时底端。Ctrl+Down/Up 的 Terminal↔Composer 与
+        Ctrl+Left/Right 的 Terminal↔Tabs 区域跳转也已在 child HWND 和
+        virtual Tabs focus 两层通过，非精确 modifier 不被劫持。
         普通启动默认切换、旧工作台完整 parity 与 same-server rollback 待补
 S5  same-server GUI upgrade + rollback black-box
 S6  remove combined-process handoff only after parity gates

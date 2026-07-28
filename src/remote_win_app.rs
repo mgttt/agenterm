@@ -91,6 +91,8 @@ const SYSTEM_MENU_COPY_ID: usize = 0x1f00;
 const SYSTEM_MENU_PASTE_ID: usize = 0x1f10;
 const CLIPBOARD_UNICODE_TEXT: u32 = 13;
 const TERMINAL_PASTE_LIMIT_BYTES: usize = 256 * 1024;
+const WM_APP_AUTOMATION_SHORTCUT: u32 = 0x8000 + 2;
+const WM_APP_FOCUS_QUERY: u32 = 0x8000 + 3;
 const SIDEBAR_ROW_HEIGHT: i32 = 44;
 const TOOLBAR_HEIGHT: i32 = 44;
 const STATUS_HEIGHT: i32 = 26;
@@ -257,6 +259,13 @@ pub(crate) fn run_remote_gui(no_activate: bool) -> Result<()> {
 
     let mut message: MSG = unsafe { mem::zeroed() };
     while unsafe { GetMessageW(&mut message, ptr::null_mut(), 0, 0) } > 0 {
+        if message.message == WM_KEYDOWN
+            && let Some(state) = state_mut(window)
+            && state.handle_keyboard_navigation(message.wParam as u32)
+        {
+            unsafe { windows_sys::Win32::Graphics::Gdi::InvalidateRect(window, ptr::null(), 0) };
+            continue;
+        }
         unsafe {
             TranslateMessage(&message);
             DispatchMessageW(&message);
@@ -338,6 +347,13 @@ enum RemoteCloseChoice {
     Cancel,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RemoteFocusSurface {
+    Terminal,
+    Composer,
+    Tabs,
+}
+
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 struct RemoteTerminalPoint {
     row: u32,
@@ -369,6 +385,33 @@ impl RemoteTerminalSelection {
 
     fn is_empty(&self) -> bool {
         self.anchor == self.active
+    }
+}
+
+fn remote_surface_navigation(
+    source: RemoteFocusSurface,
+    control: bool,
+    shift: bool,
+    alt: bool,
+    key: u32,
+) -> Option<RemoteFocusSurface> {
+    if !control || shift || alt {
+        return None;
+    }
+    match (source, key) {
+        (RemoteFocusSurface::Terminal, key) if key == u32::from(VK_DOWN) => {
+            Some(RemoteFocusSurface::Composer)
+        }
+        (RemoteFocusSurface::Composer, key) if key == u32::from(VK_UP) => {
+            Some(RemoteFocusSurface::Terminal)
+        }
+        (RemoteFocusSurface::Terminal, key) if key == u32::from(VK_LEFT) => {
+            Some(RemoteFocusSurface::Tabs)
+        }
+        (RemoteFocusSurface::Tabs, key) if key == u32::from(VK_RIGHT) => {
+            Some(RemoteFocusSurface::Terminal)
+        }
+        _ => None,
     }
 }
 
@@ -410,6 +453,7 @@ struct RemoteWindowState {
     settings_theme_draft: ThemeId,
     terminal_selection: Option<RemoteTerminalSelection>,
     scroll_drag: Option<RemoteScrollDrag>,
+    focus_surface: RemoteFocusSurface,
 }
 
 impl RemoteWindowState {
@@ -481,6 +525,7 @@ impl RemoteWindowState {
             settings_theme_draft,
             terminal_selection: None,
             scroll_drag: None,
+            focus_surface: RemoteFocusSurface::Terminal,
         })
     }
 
@@ -1016,6 +1061,7 @@ impl RemoteWindowState {
         if let Err(error) = result {
             self.last_error = Some(format!("Tab selection failed: {error:#}"));
         } else {
+            self.focus_surface = RemoteFocusSurface::Tabs;
             self.last_active_id = Some(tab_id);
             self.load_composer();
             self.resize_active_terminal();
@@ -1042,6 +1088,7 @@ impl RemoteWindowState {
         let Some(tab) = self.tab_at_y(y).cloned() else {
             return;
         };
+        self.focus_surface = RemoteFocusSurface::Tabs;
         self.editing_tab_id = Some(tab.id);
         unsafe {
             SetWindowTextW(self.tab_title_edit, wide(&tab.title).as_ptr());
@@ -1101,6 +1148,7 @@ impl RemoteWindowState {
         }
         self.editing_tab_id = None;
         self.show_tab_editor(false);
+        self.focus_surface = RemoteFocusSurface::Tabs;
         unsafe { SetFocus(self.window) };
     }
 
@@ -1198,6 +1246,7 @@ impl RemoteWindowState {
         self.settings_theme_draft = self.config.color_theme;
         self.show_settings_controls(false);
         self.show_workspace_controls(true);
+        self.focus_surface = RemoteFocusSurface::Terminal;
         self.layout();
         self.load_composer();
         self.resize_active_terminal();
@@ -1256,6 +1305,7 @@ impl RemoteWindowState {
                 self.window_close_pending = false;
                 self.show_close_controls(false);
                 self.show_workspace_controls(true);
+                self.focus_surface = RemoteFocusSurface::Terminal;
                 unsafe { SetFocus(self.window) };
             }
         }
@@ -1301,6 +1351,7 @@ impl RemoteWindowState {
             active: point,
             dragging: true,
         });
+        self.focus_surface = RemoteFocusSurface::Terminal;
         unsafe {
             SetFocus(self.window);
             SetCapture(self.window);
@@ -1408,6 +1459,71 @@ impl RemoteWindowState {
             self.settings_size,
         ]
         .contains(&window)
+    }
+
+    fn current_focus_surface(&self) -> RemoteFocusSurface {
+        if unsafe { GetFocus() } == self.edit {
+            RemoteFocusSurface::Composer
+        } else {
+            self.focus_surface
+        }
+    }
+
+    fn set_focus_surface(&mut self, target: RemoteFocusSurface) -> bool {
+        if self.window_close_pending || self.settings_open || self.editing_tab_id.is_some() {
+            return false;
+        }
+        match target {
+            RemoteFocusSurface::Terminal => {
+                self.focus_surface = RemoteFocusSurface::Terminal;
+                unsafe { SetFocus(self.window) };
+            }
+            RemoteFocusSurface::Composer => {
+                if self.active_tab().is_none() {
+                    return false;
+                }
+                self.focus_surface = RemoteFocusSurface::Composer;
+                unsafe { SetFocus(self.edit) };
+            }
+            RemoteFocusSurface::Tabs => {
+                if !self.tabs_visible {
+                    self.tabs_visible = true;
+                    self.config.tabs_visible = true;
+                    if let Err(error) = save_config(&self.config) {
+                        self.last_error = Some(format!("Tabs visibility save failed: {error:#}"));
+                    }
+                    self.layout();
+                    self.resize_active_terminal();
+                }
+                self.focus_surface = RemoteFocusSurface::Tabs;
+                unsafe { SetFocus(self.window) };
+            }
+        }
+        true
+    }
+
+    fn handle_surface_navigation(
+        &mut self,
+        key: u32,
+        control: bool,
+        shift: bool,
+        alt: bool,
+    ) -> bool {
+        let Some(target) =
+            remote_surface_navigation(self.current_focus_surface(), control, shift, alt, key)
+        else {
+            return false;
+        };
+        self.set_focus_surface(target)
+    }
+
+    fn handle_keyboard_navigation(&mut self, key: u32) -> bool {
+        self.handle_surface_navigation(
+            key,
+            unsafe { GetKeyState(VK_CONTROL as i32) } < 0,
+            unsafe { GetKeyState(0x10) } < 0,
+            unsafe { GetKeyState(0x12) } < 0,
+        )
     }
 
     fn system_menu_state(&self) -> (bool, bool) {
@@ -1831,6 +1947,14 @@ impl RemoteWindowState {
                 palette.muted_text.colorref()
             },
         );
+        if !self.window_close_pending && !self.settings_open {
+            let focus = match self.current_focus_surface() {
+                RemoteFocusSurface::Terminal => terminal,
+                RemoteFocusSurface::Composer => composer,
+                RemoteFocusSurface::Tabs => sidebar,
+            };
+            frame(device, &focus, palette.focus_ring.colorref());
+        }
         if self.window_close_pending {
             self.paint_window_close(device, palette);
         } else if self.settings_open {
@@ -2292,6 +2416,30 @@ unsafe extern "system" fn window_proc(
                 }
             }
             unsafe { DefWindowProcW(window, message, wparam, lparam) }
+        }
+        WM_APP_AUTOMATION_SHORTCUT => {
+            if let Some(state) = state_mut(window) {
+                let modifiers = lparam as usize;
+                if state.handle_surface_navigation(
+                    wparam as u32,
+                    modifiers & 1 != 0,
+                    modifiers & 2 != 0,
+                    modifiers & 4 != 0,
+                ) {
+                    unsafe {
+                        windows_sys::Win32::Graphics::Gdi::InvalidateRect(window, ptr::null(), 0)
+                    };
+                    return 1;
+                }
+            }
+            0
+        }
+        WM_APP_FOCUS_QUERY => {
+            state_ref(window).map_or(0, |state| match state.current_focus_surface() {
+                RemoteFocusSurface::Terminal => 1,
+                RemoteFocusSurface::Composer => 2,
+                RemoteFocusSurface::Tabs => 3,
+            })
         }
         WM_CHAR => {
             if let Some(state) = state_mut(window) {
@@ -2956,6 +3104,38 @@ mod tests {
         assert_eq!(
             normalize_terminal_paste("one\r\ntwo\nthree\rfour\t\u{1b}[31m\0"),
             "one\rtwo\rthree\rfour\t[31m"
+        );
+    }
+
+    #[test]
+    fn surface_navigation_is_directional_and_modifier_exact() {
+        assert_eq!(
+            remote_surface_navigation(RemoteFocusSurface::Terminal, true, false, false, 0x28),
+            Some(RemoteFocusSurface::Composer)
+        );
+        assert_eq!(
+            remote_surface_navigation(RemoteFocusSurface::Composer, true, false, false, 0x26),
+            Some(RemoteFocusSurface::Terminal)
+        );
+        assert_eq!(
+            remote_surface_navigation(RemoteFocusSurface::Terminal, true, false, false, 0x25),
+            Some(RemoteFocusSurface::Tabs)
+        );
+        assert_eq!(
+            remote_surface_navigation(RemoteFocusSurface::Tabs, true, false, false, 0x27),
+            Some(RemoteFocusSurface::Terminal)
+        );
+        assert_eq!(
+            remote_surface_navigation(RemoteFocusSurface::Composer, true, false, false, 0x25),
+            None
+        );
+        assert_eq!(
+            remote_surface_navigation(RemoteFocusSurface::Terminal, true, true, false, 0x28),
+            None
+        );
+        assert_eq!(
+            remote_surface_navigation(RemoteFocusSurface::Terminal, true, false, true, 0x28),
+            None
         );
     }
 }

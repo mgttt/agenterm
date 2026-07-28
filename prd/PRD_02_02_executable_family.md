@@ -80,6 +80,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       offset; the client reserves a visible terminal scrollbar, paints its
       proportional thumb, supports track paging and exact top/bottom dragging,
       and routes every viewport change back through typed server control.
+      Exact-modifier directional focus navigation is also client-owned:
+      Ctrl+Down/Up moves Terminal↔Composer and Ctrl+Left/Right moves
+      Terminal↔Tabs; native arrows and Ctrl+Shift/Ctrl+Alt combinations are not
+      intercepted, and the focused surface has a palette focus ring.
       Ordinary launches, remaining workbench parity and same-server rollback
       qualification are still pending.
   - [ ] compatibility is fail-closed and asymmetric: a new GUI may connect to
