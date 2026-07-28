@@ -1,9 +1,10 @@
 # AgenTerm v0.1.10 公开计划
 
 状态：讨论稿  
-工作主题：**可验证的只读 Agent 桥梁**  
+工作主题：**Rhai 自举工具链与可验证的只读 Agent 桥梁**
 版本定位：在 v0.1.9 完善通用 Rhai 运行时、模块任务与机器可读工具
-schema 后，第一次把同一份 Fleet 事实稳定地开放给外部 Agent 客户端。
+schema 后，让 AgenTerm 首次用自己的脚本运行时驱动完整开发生命周期，
+同时把同一份 Fleet 事实稳定地开放给外部 Agent 客户端。
 
 本文是版本执行计划与决策记录，不是产品事实，也不得成为实现依赖。
 评审接受的能力、边界和验收条件必须同步进入对应 `PRD.md` 模块；完成后
@@ -15,9 +16,11 @@ AgenTerm 不需要通过堆叠可见按钮与竞品竞争。v0.1.10 延续以下
 
 > 界面简单实用，软件稳定可靠，编程接口丰富，并为扩展保留足够空间。
 
-这一轮的外部能力主要出现在接口层，而不是 GUI：
+这一轮的能力主要出现在工具链与接口层，而不是 GUI：
 
 - 默认工作台不增加 MCP 面板、连接列表、授权弹窗或常驻状态动画；
+- `agenterm-script.exe` 接替仓库自有 PowerShell 脚本的业务编排职责；
+- 构建、lint、测试、资格认证和发布使用同一套 Rhai task graph；
 - `agenterm.exe` 继续只负责窗口、终端、标签与 Fleet authority；
 - `agenterm-mcp.exe` 是按需启动、可独立退出的 stdio sidecar；
 - 首个版本只提供只读资源与一个有界等待工具；
@@ -31,7 +34,23 @@ v0.1.10 不自动继承 v0.1.9 的所有未完成想法。任何 carry-over 都�
 ## 一、版本目录树
 
 ```text
-v0.1.10  可验证的只读 Agent 桥梁
+v0.1.10  Rhai 自举工具链与可验证的只读 Agent 桥梁
+│
+├─ 最高优先级：Rhai 完整接替仓库 PowerShell
+│  ├─ 建立全部 .ps1 入口、职责、调用者、输入输出和副作用清单
+│  ├─ 公共 helper 下沉为稳定 Rhai modules，不逐文件机械翻译
+│  ├─ build / lint / test / qualification / package / release 全部迁移
+│  ├─ 每项先双跑比较，再切换唯一入口并删除对应 .ps1
+│  ├─ agenterm.tasks.json 成为开发任务唯一机器可读目录
+│  └─ 完成门：仓库自有、可执行 .ps1 为零，并由漂移门持续保证
+│
+├─ 最高优先级：可自举且跨平台的开发入口
+│  ├─ stage 0 仅定位 Rust 工具链并构建 agenterm-script.exe
+│  ├─ stage 1 起全部业务判断交给 Rhai task
+│  ├─ build.bat 只保留 Windows 薄入口，不承载测试/发布逻辑
+│  ├─ CI 只负责环境准备和调用同名 Rhai task
+│  ├─ Windows/Linux/macOS 共用任务语义，平台差异进入 typed adapter
+│  └─ 干净 checkout、无 PowerShell 环境仍可构建、测试和生成资格收据
 │
 ├─ 最高优先级：agenterm-mcp.exe 公共入口
 │  ├─ --help / --version / capabilities --json 完全离线
@@ -77,6 +96,8 @@ v0.1.10  可验证的只读 Agent 桥梁
 │  └─ 为未来 softmgr/市场/desktop 工具保留 typed adapter 边界
 │
 ├─ 第一优先级：自反馈与兼容资格
+│  ├─ Rhai 黑盒 harness 能启动、观察、断言并清理 GUI/PTY/server
+│  ├─ 迁移前后对同一 fixture 生成可比较的规范化证据
 │  ├─ 原始 JSON-RPC 黑盒覆盖完整生命周期
 │  ├─ MCP resource 与 agenterm-cli 同时读取并逐字段比较
 │  ├─ 外部 CLI 触发事件，MCP wait 只观察并返回证据
@@ -110,7 +131,30 @@ v0.1.10  可验证的只读 Agent 桥梁
 
 ## 二、北极星演示
 
-v0.1.10 必须能够通过以下一条完整旅程解释自身价值：
+v0.1.10 必须能够通过以下两条完整旅程解释自身价值。
+
+### 旅程 A：Rhai 驱动自身交付
+
+```text
+一个干净 checkout，没有依赖仓库 .ps1
+  -> build.bat / CI 完成最小 stage-0 bootstrap
+     -> agenterm-script.exe task run check
+        -> Rhai task graph 执行 fmt、lint、unit 与公共黑盒
+           -> GUI 测试保持 no-activate，并通过 typed wait 获取结果
+              -> agenterm-script.exe task run qualify-release
+                 -> 生成绑定 commit、源码状态和制品 hash 的资格收据
+                    -> package/release 只消费这批已验证字节
+                       -> 全程无 PowerShell 业务逻辑和残留测试资源
+```
+
+该旅程必须证明：
+
+- 从干净 checkout 到 release candidate 不执行任何仓库自有 `.ps1`；
+- 开发机与 CI 调用同名 task，任务图、默认值、错误分类和清理语义一致；
+- 失败可定位到稳定 task/step/evidence ID，修复后可只重跑安全子树；
+- stage 0 不复制 lint、测试、打包或发布判断，只解决自举循环。
+
+### 旅程 B：只读 MCP 桥梁
 
 ```text
 一个真实 AgenTerm server 正在运行
@@ -148,11 +192,22 @@ v0.1.10 必须能够通过以下一条完整旅程解释自身价值：
    读取 `AppState`、HWND 或 renderer 私有字段。
 5. 先冻结首发 MCP 方法、resource URI、tool schema、错误分类和预算，再
    并行写 transport、adapter 与测试。
+6. v0.1.9 Script API、task manifest、process/fs/env/time/JSON、typed error、
+   cancellation、temporary ownership 和 atomic result 已足够承载首批迁移；
+   缺口必须先补入 runtime/catalog，不允许在 Rhai 文件中调用 PowerShell
+   绕过。
 
 ### 完成定义
 
 v0.1.10 public-ready 必须满足：
 
+- 仓库自有、可执行 `.ps1` 文件为零；
+- build、check、test、qualification、package、release 均有公开 Rhai task；
+- `agenterm.tasks.json` 可离线列出上述 task、依赖、平台和副作用分类；
+- 干净 Windows checkout 在不要求 PowerShell 的条件下完成 release
+  qualification，Linux/macOS 使用相同任务语义；
+- CI、开发入口与 release workflow 不复制 Rhai 中的业务规则；
+- 迁移过程每删除一个 `.ps1` 都有等价或更强的公共证据；
 - 一个新发布制品 `agenterm-mcp.exe`；
 - 一个 stable MCP protocol revision；
 - 四类只读资源；
@@ -165,7 +220,114 @@ v0.1.10 public-ready 必须满足：
 - 普通资格和 clean release qualification 均通过；
 - 是否创建 tag/Release 仍由用户单独批准。
 
-## 四、MCP 协议基线
+## 四、Rhai 接替 PowerShell 的迁移合同
+
+### 迁移范围
+
+“完整接替”指仓库拥有并执行的 PowerShell 逻辑全部退出主线，包括：
+
+```text
+build
+├─ dev / release build
+├─ artifact copy、size budget 与 locked cleanup
+└─ target cache / qualification evidence retention
+
+quality
+├─ fmt / Clippy / lint / unit
+├─ PRD、catalog、manifest、SBOM 与文档对齐
+└─ source-dirty、commit identity 与 byte identity
+
+black-box
+├─ startup / no-activate / UI / terminal / Fleet
+├─ script / MCP / mux / compatibility
+├─ stress / fault injection / privacy / orphan cleanup
+└─ screenshot、structured snapshot 与首错诊断包
+
+delivery
+├─ qualification receipt
+├─ package / checksum / SBOM
+├─ non-publishing release rehearsal
+└─ tag / push / publish 前置验证
+```
+
+不要求删除 `.bat`、shell 或 CI YAML 这些平台入口，但它们只能：
+
+1. 定位或安装明确版本的 Rust 工具链；
+2. 构建/定位 `agenterm-script`；
+3. 把参数和退出码原样转交给公开 Rhai task。
+
+入口不得包含能力选择、测试清单、预算、制品判断、发布条件或清理策略。
+Git 历史就是已迁移 `.ps1` 的归档，不在活动树保留第二套实现。
+
+### 迁移方法
+
+每个脚本按同一状态机推进：
+
+```text
+inventory
+  -> extract contract
+     -> fill typed runtime/API gap
+        -> implement Rhai module/task
+           -> dual-run same fixture
+              -> compare normalized evidence
+                 -> switch every caller
+                    -> delete .ps1
+                       -> add no-regression inventory gate
+```
+
+禁止逐行翻译 PowerShell。重复的进程、环境、文件、JSON、等待、诊断和清理
+逻辑必须进入 `agenterm-script` 的 typed API 或共享 Rhai module。平台差异由
+明确的 adapter/capability 表达；脚本不得通过 shell 字符串拼接模拟 argv。
+
+### Task graph
+
+建议冻结以下公开任务面，最终名称以 catalog 为准：
+
+```text
+bootstrap-info
+build-dev
+build-release
+lint
+test-unit
+test-smoke
+test-stress
+check
+qualify-release
+package
+release-rehearsal
+release
+clean
+```
+
+task 必须公开 stable ID、依赖、平台、输入、产物、副作用、预算、是否允许
+联网以及 evidence ID。`release` 是唯一可修改远端的任务，必须要求用户明确
+批准；其它任务不得因迁移而扩大外部权限。
+
+### 自举与失败恢复
+
+- stage 0 使用 Cargo 只构建 `agenterm-script` 及必要共享库；
+- stage 0 失败输出工具链/编译错误并原样返回非零退出码；
+- stage 1 由 Rhai 校验 runtime/build identity 后接管 task graph；
+- runtime 源码变化时自动重建一次，禁止递归自举；
+- task 失败保留有界、脱敏的 step/evidence 诊断；
+- cleanup 在成功、失败、取消、超时和父进程退出时都执行；
+- qualification receipt 记录 task catalog/runtime/schema/commit/artifact
+  identity，release 只消费匹配收据的既有字节。
+
+### 迁移验收矩阵
+
+| 维度 | 必须证明 |
+|---|---|
+| 行为 | 原 fixture 的成功、失败和边界结果等价或更强 |
+| 错误 | 稳定 class/code/step，自动化不解析自然语言 |
+| 等待 | 无固定 sleep；使用 typed process/Fleet/UI wait |
+| 清理 | 无 child、GUI、PTY、server、temp、locked artifact 残留 |
+| 隐私 | argv、环境值、credential、pane content 不进入诊断 |
+| 平台 | 共享 task 语义；unsupported 明确失败而非静默跳过 |
+| 性能 | 增量路径不显著慢于旧路径，独立记录 bootstrap 与 task 时间 |
+| 漂移 | CI 拒绝新增 `.ps1` 或入口重新承载业务规则 |
+
+## 五、MCP 协议基线
 
 实现基线固定到官方当前 stable revision `2025-11-25`。官方 `latest`
 当前解析到该 revision：
@@ -215,7 +377,7 @@ stdio 合同：
   明确 transport 策略决定并测试；
 - panic 不得跨过 frame loop；sidecar 失败不得向 stdout 写半个 JSON。
 
-## 五、Executable 与 server 选择
+## 六、Executable 与 server 选择
 
 首发命令面：
 
@@ -248,7 +410,7 @@ agenterm-mcp.exe serve --stdio [--address 127.0.0.1:PORT]
 - control、subscriptions、content、network、client、brain/flow 等
   unavailable capability 及稳定原因。
 
-## 六、Resource 模型
+## 七、Resource 模型
 
 首发使用固定、可读、无 mutable index/title 的 URI：
 
@@ -280,7 +442,7 @@ agenterm-mcp.exe serve --stdio [--address 127.0.0.1:PORT]
 字段，要么明确声明 redacted/unsupported；资源过大时返回 typed bounded
 错误或显式 truncation，不允许生成不完整却标记成功的 JSON。
 
-## 七、唯一工具：`agenterm_wait`
+## 八、唯一工具：`agenterm_wait`
 
 `tools/list` 首发只返回：
 
@@ -339,7 +501,7 @@ agenterm_wait
 
 预算只能因实测正常场景不足而调整，并同步 capabilities、PRD 与测试。
 
-## 八、架构边界
+## 九、架构边界
 
 建议提取以下 Rust 边界：
 
@@ -378,7 +540,7 @@ src/bin/agenterm-mcp.rs
   可接受、release binary 不超预算、panic/stdio 行为符合本产品合同；
   否则实现经过 golden/conformance 测试的最小 typed subset。
 
-## 九、错误与隔离模型
+## 十、错误与隔离模型
 
 MCP 标准 JSON-RPC code 与 AgenTerm typed details 分层：
 
@@ -421,9 +583,11 @@ agenterm_response_too_large
 - server restart 后旧 epoch 的 wait 必须失败，不能悄悄接到新 server；
 - MCP client 断开后不保留跨连接 mutable state。
 
-## 十、公共黑盒与自反馈
+## 十一、公共黑盒与自反馈
 
-新增 `tests/mcp_smoke.ps1`，只驱动发布制品和公开接口。
+MCP 测试作为 Rhai task/module 实现，只驱动发布制品和公开接口；不新增
+`tests/mcp_smoke.ps1`。迁移期可以复用旧 fixture，但完成门前必须由 Rhai
+harness 独立拥有启动、协议帧、等待、断言、诊断和清理。
 
 ### 协议生命周期
 
@@ -481,7 +645,7 @@ agenterm_response_too_large
 - cleanup proof；
 - 不保存完整 resource body，除非 fixture 明确无敏感内容。
 
-## 十一、交付与文档
+## 十二、交付与文档
 
 构建清单增加：
 
@@ -498,6 +662,8 @@ agenterm-mcp.exe
 - `dist/*locked*` 与 target 清理继续遵守现有构建策略；
 - 全部 GUI 测试继续继承 `AGENTERM_NO_ACTIVATE=1`；
 - release qualification 不因 MCP 增加公共网络访问。
+- 发布清单和文档列出 Rhai task catalog/schema identity；
+- 文档中的开发、测试和发布示例不再把 `.ps1` 作为主路径或备用路径。
 
 README 只增加：
 
@@ -508,31 +674,36 @@ README 只增加：
 
 详细 URI、schema、错误、预算和未来角色留在 PRD/协议发现输出中。
 
-## 十二、依赖图与并行实施
+## 十三、依赖图与并行实施
 
 ```text
-波次 0：串行冻结合同
-  protocol revision
-  method/resource/tool catalog
+波次 0：串行盘点与冻结合同
+  .ps1 responsibility/caller/evidence inventory
+  Rhai task graph + bootstrap boundary
+  MCP revision/method/resource/tool catalog
   URI/schema/error/budget
-  public demo and negative space
           |
           v
 波次 1：可并行
-  A. mcp_protocol + golden tests
-  B. public IPC adapter + resource mapping
-  C. wait/cancel core + race tests
-  D. build manifest + qualification declarations
-  E. black-box fixture + privacy/orphan harness
+  A. Rhai runtime/API gaps + shared modules
+  B. metadata/lint/build task migration
+  C. typed black-box harness + cleanup proof
+  D. mcp_protocol + golden tests
+  E. public IPC adapter + resource mapping
+  F. wait/cancel core + race tests
           |
           v
 波次 2：串行集成
+  check / qualification / package task migration
+  caller cutover + delete migrated .ps1
   agenterm-mcp.exe entry
   stdio loop + adapter + wait
   protocol-info/capability alignment
           |
           v
 波次 3：并行验证
+  clean bootstrap without PowerShell
+  task parity / platform / cancellation / cleanup
   lifecycle/conformance
   resource same-source
   wait/restart/gap/cancel
@@ -540,6 +711,7 @@ README 只增加：
           |
           v
 波次 4：串行候选
+  zero repo-owned executable .ps1 gate
   full check
   clean qualification
   byte-identical package
@@ -550,17 +722,29 @@ README 只增加：
 
 | 分支 | 首选文件所有权 | 不应同时修改 |
 |---|---|---|
+| Runtime | script runtime/API/catalog, typed unit fixtures | task implementations |
+| Task migration | Rhai modules, task manifest | runtime internals |
+| Harness | Rhai black-box helpers, fixtures | product private state |
 | Protocol | `mcp_protocol.rs`, protocol unit fixtures | Win32 state machine |
 | Catalog | `mcp_catalog.rs`, capability fixtures | runtime adapter |
 | Adapter | `mcp_adapter.rs`, public IPC contracts | stdio parser |
 | Wait | wait/cancel module与 race fixtures | resource schemas |
-| Delivery | build/qualification manifests | protocol semantics |
-| Black-box | `tests/mcp_smoke.ps1`, harness helpers | production internals |
+| Delivery | build/qualification manifests and Rhai tasks | protocol semantics |
+| MCP black-box | Rhai MCP fixtures and harness calls | production internals |
 
 `Cargo.toml`、`src/lib.rs`、PRD alignment、artifact manifest 和最终 binary
 entry 是集成热点，只允许一个串行 owner 收口。
 
-## 十三、验收门
+## 十四、验收门
+
+### 门零：PowerShell 退出与自举闭环
+
+- `git ls-files '*.ps1'` 中不存在仓库自有可执行脚本；
+- lint gate 拒绝新增 `.ps1` 和入口脚本中的业务规则回流；
+- 干净 checkout 只经 stage 0 + Rhai task 完成 build/check/qualification；
+- 开发机与 CI 使用同一 task ID、依赖图、预算和 evidence catalog；
+- build、test、qualification、package、release 没有隐式 PowerShell 子进程；
+- 失败、取消与超时后无 child/temp/GUI/server/locked artifact 残留。
 
 ### 门一：只读真实性
 
@@ -600,10 +784,16 @@ entry 是集成热点，只允许一个串行 owner 收口。
 - package 不重建；
 - 用户明确批准后才允许 tag/Release。
 
-## 十四、主要风险
+## 十五、主要风险
 
 | 风险 | 早期信号 | 应对 |
 |---|---|---|
+| 为赶进度逐行翻译 PS1 | Rhai 中出现 shell 字符串、重复 helper | 先提取合同和 typed API，再迁移 task |
+| 自举形成循环依赖 | 构建 runtime 需要先运行 runtime | stage 0 只做一次 Cargo bootstrap，stage 1 验 identity |
+| 双轨长期存在 | 同一测试同时维护 PS1/Rhai 两份真相 | 每项双跑通过后立即切 caller 并删除 PS1 |
+| 平台差异泄漏进 task | 大量 OS 判断和命令字符串 | typed platform adapter + explicit unavailable |
+| 新 harness 降低覆盖 | 只验证 happy path 或依赖 fixed sleep | 逐 evidence parity，typed wait，旧脚本删除前审核 |
+| 迁移拖慢 MCP 主线 | 共享热点频繁冲突 | runtime/task/MCP 分文件所有权，波次 2 串行收口 |
 | “只读”被等待工具偷换成控制 | tool schema 出现 action/command 字段 | allowlist 只接受 event predicate |
 | MCP 与 CLI 形成两份产品事实 | adapter 开始拼人类文本或复制状态 | 强制复用 typed contracts并逐字段比较 |
 | pane 内容意外泄露 | resource 直接复用完整 ui-snapshot | 建立专用 metadata DTO 与 secret sentinel 扫描 |
@@ -616,22 +806,26 @@ entry 是集成热点，只允许一个串行 owner 收口。
 | 版本变成 agent 平台大爆炸 | 出现 control、brain、flow、LLM 工作项 | 保持一资源链 + 一 wait 工具纵向闭环 |
 | MCP 偷变软件管理远程入口 | resources/tools 出现 install/update | 首发不公布 package inventory 或 mutation |
 
-## 十五、第一次评审建议结论
+## 十六、第一次评审建议结论
 
 建议直接接受以下默认决策：
 
-1. 主题：**可验证的只读 Agent 桥梁**。
-2. 新二进制：`agenterm-mcp.exe`。
-3. transport：只做 stdio。
-4. stable protocol revision：`2025-11-25`。
-5. resources：instances、workspace、tabs、fleet snapshot。
-6. tools：只做 `agenterm_wait`。
-7. pane text：默认不提供，本版完全延后。
-8. server 选择：复用 CLI explicit/zero/one/many 规则，不自动启动。
-9. GUI：不增加 MCP 控件和状态动画。
-10. control tools、subscriptions、tasks、HTTP、MCP client、Rhai execution、
-    brain/flow、agent 权限全部延后。
-11. v0.1.10 只复用组件 availability 语言，不暴露包清单、市场或安装能力。
+1. 主题：**Rhai 自举工具链与可验证的只读 Agent 桥梁**。
+2. 仓库自有 PowerShell 业务逻辑在 v0.1.10 完整退出，完成门为可执行
+   `.ps1` 数量归零。
+3. `agenterm.tasks.json` 和 Script API catalog 成为开发任务事实源。
+4. stage 0 只解决 Rust/runtime bootstrap，不承载业务规则。
+5. 新二进制：`agenterm-mcp.exe`。
+6. transport：只做 stdio。
+7. stable protocol revision：`2025-11-25`。
+8. resources：instances、workspace、tabs、fleet snapshot。
+9. tools：只做 `agenterm_wait`。
+10. pane text：默认不提供，本版完全延后。
+11. server 选择：复用 CLI explicit/zero/one/many 规则，不自动启动。
+12. GUI：不增加 MCP 控件和状态动画。
+13. MCP control tools、subscriptions、MCP client、brain/flow、Agent 权限
+    全部延后；这里的 tasks 指 MCP experimental tasks，不是 Rhai task。
+14. v0.1.10 只复用组件 availability 语言，不暴露包清单、市场或安装能力。
 
 仍需在实现波次 0 用 spike 决定：
 
@@ -643,32 +837,50 @@ entry 是集成热点，只允许一个串行 owner 收口。
 - 是否把一个真实第三方 MCP host 的手工兼容验证作为 release evidence，
   还是仅作为非阻塞互操作报告。
 
-## 十六、建议第一刀
+## 十七、建议第一刀
 
 ```text
 第一提交
+  PowerShell responsibility/caller/evidence inventory
+  stable Rhai task graph
+  stage-0 bootstrap contract
+  no-new-ps1 lint gate
+
+第二提交
+  shared Rhai build/test helpers
+  first low-risk task migration
+  dual-run normalized evidence
+  caller cutover + delete first .ps1
+
+第三提交
   offline mcp catalog
   protocol revision + methods + resources + tool + budgets
   capabilities --json
   golden schema tests
 
-第二提交
+第四提交
   bounded stdio JSON-RPC
   initialize / initialized / ping
   malformed / oversize / EOF tests
 
-第三提交
+第五提交
   instances / workspace / tabs / fleet snapshot resources
   与 CLI 同源对比
 
-第四提交
+第六提交
   agenterm_wait
   cancel / timeout / restart / gap / target closed
 
-第五提交
+第七提交
+  migrate remaining build/test/qualification/package/release tasks
+  clean bootstrap parity
+  remove final .ps1 + activate zero-ps1 drift gate
+
+第八提交
   crash / privacy / load / orphan qualification
   artifact / SBOM / README / PRD alignment
 ```
 
-这条切法能够在不引入自主控制、不扩大 GUI、不开放网络 listener 的前提
-下，让 AgenTerm 第一次成为任何兼容 MCP client 都能稳定观察的 Fleet。
+这条切法让 AgenTerm 用自己的 Rhai 工具链完成自我构建、验证与交付，同时
+在不引入自主控制、不扩大 GUI、不开放网络 listener 的前提下，第一次成为
+任何兼容 MCP client 都能稳定观察的 Fleet。
