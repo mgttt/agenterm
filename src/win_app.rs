@@ -32,7 +32,6 @@ use windows_sys::Win32::{
     UI::Input::KeyboardAndMouse::{
         GetCapture, GetDoubleClickTime, GetFocus, GetKeyState, ReleaseCapture, SetCapture, SetFocus,
     },
-    UI::Shell::ShellExecuteW,
     UI::WindowsAndMessaging::{
         CREATESTRUCTW, CS_DBLCLKS, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CheckMenuItem,
         CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, ES_AUTOVSCROLL,
@@ -55,40 +54,24 @@ use windows_sys::Win32::{
     },
 };
 
-use crate::build_identity::BuildIdentity;
 use crate::commands::{
-    BACKSPACE_INPUT, COMMAND_CATALOG, COMMAND_CATALOG_SCHEMA_VERSION, MUX_COMMANDS, MuxStatus,
-    canonical_control_command, control_command_requests_help, control_command_usage, has_option,
-    last_positional, mux_command, option_value, parse_new_command, parse_tab_environment,
-    positional_values, screenshot_output_path, snapshot_modal_matches, supported_commands,
-    tmux_key_bytes, validate_control_command,
+    BACKSPACE_INPUT, has_option, last_positional, option_value, parse_new_command,
+    parse_tab_environment, positional_values, screenshot_output_path, supported_commands,
+    tmux_key_bytes,
 };
 use crate::control_contract::{
     Admission, ControlError, ControlReceipt, ControlRequest, ErrorCategory,
-    EventPosition as ControlEventPosition, OperationId, PayloadFingerprint, ReceiptOutcome,
-    ReplayWindow, RequestId, RequestIntent, ResolvedTarget, WaitCondition, WaitDescriptor,
+    EventPosition as ControlEventPosition, ReceiptOutcome, ReplayWindow, ResolvedTarget,
+    WaitCondition, WaitDescriptor,
 };
-use crate::event_journal::{EVENT_CATALOG, EVENT_CATALOG_SCHEMA_VERSION, EventJournal, EventKind};
-use crate::instances::{
-    InstanceRegistration, discover_instances, instance_process_is_alive, prune_instance,
-    register_instance,
-};
-use crate::ipc_transport::{IpcEnvelope, read_bounded_ipc_line, start_ipc_server};
+use crate::event_journal::{EventJournal, EventKind};
+use crate::instances::{InstanceRegistration, register_instance};
+use crate::ipc_transport::{IpcEnvelope, start_ipc_server};
 use crate::operations::{
-    OPERATION_CATALOG, OPERATION_CATALOG_SCHEMA_VERSION, OperationClass, OperationSpec,
-    UI_TABS_HIDE, UI_TABS_SET_WIDTH, UI_TABS_SHOW, UI_TABS_TOGGLE, operation_for_args,
+    OperationSpec, UI_TABS_HIDE, UI_TABS_SET_WIDTH, UI_TABS_SHOW, UI_TABS_TOGGLE,
     validate_operation_args,
 };
 use crate::protocol::{IpcRequest, IpcResponse};
-use crate::script_audit::{
-    AuditBudgets, AuditInvocation, AuditOutcome, AuditSourceKind, ScriptAuditSink,
-    source_fingerprint,
-};
-use crate::script_protocol::{
-    SCRIPT_API_VERSION, SCRIPT_ENVELOPE_VERSION, ScriptBrokerError, ScriptBrokerRequest,
-    ScriptBrokerResponse, ScriptBudgets, ScriptExitClass, ScriptInvocation, ScriptOperation,
-    ScriptProfile,
-};
 use crate::settings::{AppConfig, config_path, load_config, save_config};
 use crate::tab_tree::{TabTreeNode, TabTreeRow, tree_rows, would_create_cycle};
 use crate::terminal_observation::TerminalProcessState;
@@ -104,22 +87,19 @@ use crate::ui_geometry::{
     scrollback_for_thumb_top, tabs_width_from_drag, terminal_scrollbar_geometry, tree_connector_x,
     tree_row_at_y, tree_row_geometry_for_mode, workspace_layout,
 };
-use crate::upgrade_identity::UpgradeIdentity;
 use crate::wake_signal::WakeSignal;
-use crate::worker_supervisor::{SupervisorError, WorkerSupervisor};
 use crate::working_context::{
-    CwdSource, PROXY_MAX_BYTES, ProxyConfirmationMarker, ProxyState, cwd_command,
-    parse_proxy_editor, proxy_command_with_confirmation, validate_path,
+    CwdSource, ProxyConfirmationMarker, ProxyState, cwd_command, parse_proxy_editor,
+    proxy_command_with_confirmation, validate_path,
 };
 use crate::workspace::{SavedTab, SavedWorkspace, load_workspace, save_workspace, workspace_path};
 
 use std::{
-    cell::RefCell,
     collections::{HashMap, HashSet},
     env,
     ffi::c_void,
     fs::OpenOptions,
-    io::{Read, Write},
+    io::Write,
     mem, ptr,
     sync::{
         Arc,
@@ -6308,7 +6288,10 @@ impl AppState {
             .with_receipt(receipt);
         }
 
-        match self.replay_window.admit(&control, crate::client::unix_time_ms()) {
+        match self
+            .replay_window
+            .admit(&control, crate::client::unix_time_ms())
+        {
             Admission::Replay { receipt } | Admission::Reject { receipt } => {
                 return Self::response_from_receipt(receipt);
             }
@@ -7137,7 +7120,9 @@ impl AppState {
                     ),
                 }
             }
-            "protocol-info" => IpcResponse::success(crate::client::protocol_info_json("running_host")),
+            "protocol-info" => {
+                IpcResponse::success(crate::client::protocol_info_json("running_host"))
+            }
             "focus" => {
                 let surface = args.get(1).map(String::as_str).unwrap_or("terminal");
                 if let Some(position) = self.target_position(option_value(args, "-t")) {
@@ -8011,7 +7996,6 @@ fn create_terminal_font(window: HWND, config: &AppConfig) -> (HFONT, bool, Strin
     (font, owned, resolved)
 }
 
-
 fn render_format(format: &str, tab: &TerminalTab, session_name: &str, active: bool) -> String {
     let dead = tab.exited.is_some();
     format
@@ -8161,10 +8145,10 @@ mod tests {
     use super::{
         COMPOSER_TARGET_ROWS, EditShortcut, FocusSurface, IpcResponse, PixelRect, ThemeId,
         bounded_utf8_prefix, composer_input_rect, edit_shortcut, effective_theme, gui_cli_guidance,
-        gui_handoff_succeeded, is_latched_navigation_repeat, no_activate_from_value,
-        normalize_terminal_paste, parse_gui_launch, parse_loopback_ipc_address, run_wait_ui,
-        surface_navigation, terminal_copy_shortcut,
+        gui_handoff_succeeded, is_latched_navigation_repeat, normalize_terminal_paste,
+        parse_gui_launch, surface_navigation, terminal_copy_shortcut,
     };
+    use crate::client::run_wait_ui;
 
     #[test]
     fn settings_theme_draft_only_affects_an_open_settings_preview() {
@@ -8337,10 +8321,16 @@ mod tests {
 
         assert!(!crate::client::no_activate_from_value(None));
         assert!(!crate::client::no_activate_from_value(Some(OsStr::new(""))));
-        assert!(!crate::client::no_activate_from_value(Some(OsStr::new("0"))));
-        assert!(!crate::client::no_activate_from_value(Some(OsStr::new("FALSE"))));
+        assert!(!crate::client::no_activate_from_value(Some(OsStr::new(
+            "0"
+        ))));
+        assert!(!crate::client::no_activate_from_value(Some(OsStr::new(
+            "FALSE"
+        ))));
         assert!(crate::client::no_activate_from_value(Some(OsStr::new("1"))));
-        assert!(crate::client::no_activate_from_value(Some(OsStr::new("true"))));
+        assert!(crate::client::no_activate_from_value(Some(OsStr::new(
+            "true"
+        ))));
     }
 
     #[test]
@@ -8395,4 +8385,3 @@ mod tests {
         assert_eq!(bounded_utf8_prefix(text, 0), "");
     }
 }
-

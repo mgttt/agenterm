@@ -128,11 +128,11 @@ fn instances_dir() -> PathBuf {
     }
     #[cfg(windows)]
     {
-        return env::var_os("LOCALAPPDATA")
+        env::var_os("LOCALAPPDATA")
             .map(PathBuf::from)
             .unwrap_or_else(env::temp_dir)
             .join("AgenTerm")
-            .join("instances");
+            .join("instances")
     }
     #[cfg(not(windows))]
     {

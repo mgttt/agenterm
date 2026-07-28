@@ -31,9 +31,9 @@ mod script_audit;
 #[cfg(windows)]
 mod terminal_runtime;
 #[cfg(windows)]
-mod worker_supervisor;
-#[cfg(windows)]
 mod win_app;
+#[cfg(windows)]
+mod worker_supervisor;
 
 pub use client::{run_cli_entry, run_mux_entry};
 

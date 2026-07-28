@@ -1,4 +1,4 @@
-use std::io::{BufRead as _, Read as _, Write as _};
+use std::io::{BufRead as _, Read as _};
 
 use anyhow::{Context as _, Result};
 
@@ -40,7 +40,9 @@ mod server {
     use anyhow::{Context as _, Result};
 
     use crate::{
-        IPC_TIMEOUT, client, protocol::{IpcRequest, IpcResponse}, request_gui_wake,
+        IPC_TIMEOUT, client,
+        protocol::{IpcRequest, IpcResponse},
+        request_gui_wake,
         wake_signal::WakeSignal,
     };
 
@@ -106,40 +108,38 @@ mod server {
         let _ = connection.set_read_timeout(Some(IPC_TIMEOUT));
         let _ = connection.set_write_timeout(Some(IPC_TIMEOUT));
         let mut reader = std::io::BufReader::new(connection);
-        let response = match read_bounded_ipc_line(
-            &mut reader,
-            IPC_MAX_REQUEST_BYTES,
-            "AgenTerm IPC request",
-        ) {
-            Ok(line) => match serde_json::from_str::<IpcRequest>(&line) {
-                Ok(request) => {
-                    let (response_sender, response_receiver) = mpsc::channel();
-                    if sender
-                        .try_send(IpcEnvelope {
-                            request,
-                            respond_to: response_sender,
-                        })
-                        .is_err()
-                    {
-                        IpcResponse::typed_failure(
-                            "AgenTerm IPC mailbox is unavailable or full",
-                            "ipc_mailbox_unavailable",
-                            "availability",
-                            true,
-                        )
-                    } else {
-                        request_gui_wake(wake_window, wake_signal);
-                        response_receiver
-                            .recv_timeout(IPC_TIMEOUT)
-                            .unwrap_or_else(|_| {
-                                IpcResponse::failure("AgenTerm GUI did not process the command")
+        let response =
+            match read_bounded_ipc_line(&mut reader, IPC_MAX_REQUEST_BYTES, "AgenTerm IPC request")
+            {
+                Ok(line) => match serde_json::from_str::<IpcRequest>(&line) {
+                    Ok(request) => {
+                        let (response_sender, response_receiver) = mpsc::channel();
+                        if sender
+                            .try_send(IpcEnvelope {
+                                request,
+                                respond_to: response_sender,
                             })
+                            .is_err()
+                        {
+                            IpcResponse::typed_failure(
+                                "AgenTerm IPC mailbox is unavailable or full",
+                                "ipc_mailbox_unavailable",
+                                "availability",
+                                true,
+                            )
+                        } else {
+                            request_gui_wake(wake_window, wake_signal);
+                            response_receiver
+                                .recv_timeout(IPC_TIMEOUT)
+                                .unwrap_or_else(|_| {
+                                    IpcResponse::failure("AgenTerm GUI did not process the command")
+                                })
+                        }
                     }
-                }
-                Err(error) => IpcResponse::failure(format!("invalid IPC request: {error}")),
-            },
-            Err(error) => IpcResponse::failure(format!("{error:#}")),
-        };
+                    Err(error) => IpcResponse::failure(format!("invalid IPC request: {error}")),
+                },
+                Err(error) => IpcResponse::failure(format!("{error:#}")),
+            };
         if let Ok(serialized) = serde_json::to_string(&response) {
             let connection = reader.get_mut();
             let _ = connection.write_all(serialized.as_bytes());

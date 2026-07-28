@@ -1,8 +1,5 @@
 #[cfg(windows)]
-use windows_sys::Win32::{
-    UI::Shell::ShellExecuteW,
-    UI::WindowsAndMessaging::SW_SHOWNORMAL,
-};
+use windows_sys::Win32::{UI::Shell::ShellExecuteW, UI::WindowsAndMessaging::SW_SHOWNORMAL};
 
 #[cfg(windows)]
 fn wide(value: &str) -> Vec<u16> {
@@ -12,11 +9,9 @@ fn wide(value: &str) -> Vec<u16> {
 use std::{
     cell::RefCell,
     env,
-    fs::OpenOptions,
     io::{Read, Write},
-    sync::mpsc,
     thread,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime},
 };
 
 use anyhow::{Context as _, Result};
@@ -24,23 +19,19 @@ use anyhow::{Context as _, Result};
 use crate::{
     build_identity::BuildIdentity,
     commands::{
-        BACKSPACE_INPUT, COMMAND_CATALOG, COMMAND_CATALOG_SCHEMA_VERSION, MUX_COMMANDS, MuxStatus,
-        canonical_control_command, control_command_requests_help, control_command_usage, has_option,
-        last_positional, mux_command, option_value, parse_new_command, parse_tab_environment,
-        positional_values, screenshot_output_path, snapshot_modal_matches, supported_commands,
-        tmux_key_bytes, validate_control_command,
+        COMMAND_CATALOG, COMMAND_CATALOG_SCHEMA_VERSION, MUX_COMMANDS, MuxStatus,
+        canonical_control_command, control_command_requests_help, control_command_usage,
+        has_option, last_positional, mux_command, option_value, snapshot_modal_matches,
+        supported_commands, validate_control_command,
     },
     control_contract::{
-        Admission, ControlError, ControlReceipt, ControlRequest, ErrorCategory,
-        EventPosition as ControlEventPosition, OperationId, PayloadFingerprint, ReceiptOutcome,
-        ReplayWindow, RequestId, RequestIntent, ResolvedTarget, WaitCondition, WaitDescriptor,
+        ControlRequest, ErrorCategory, OperationId, PayloadFingerprint, RequestId, RequestIntent,
     },
-    event_journal::{EVENT_CATALOG, EVENT_CATALOG_SCHEMA_VERSION, EventJournal, EventKind},
+    event_journal::{EVENT_CATALOG, EVENT_CATALOG_SCHEMA_VERSION},
     instances::{discover_instances, instance_process_is_alive, prune_instance},
     ipc_transport::read_bounded_ipc_line,
     operations::{
-        OPERATION_CATALOG, OPERATION_CATALOG_SCHEMA_VERSION, OperationClass, OperationSpec,
-        UI_TABS_HIDE, UI_TABS_SET_WIDTH, UI_TABS_SHOW, UI_TABS_TOGGLE, operation_for_args,
+        OPERATION_CATALOG, OPERATION_CATALOG_SCHEMA_VERSION, OperationClass, operation_for_args,
         validate_operation_args,
     },
     protocol::{IpcRequest, IpcResponse},
@@ -49,30 +40,10 @@ use crate::{
         ScriptBrokerResponse, ScriptBudgets, ScriptExitClass, ScriptInvocation, ScriptOperation,
         ScriptProfile,
     },
-    settings::{AppConfig, config_path, load_config, save_config},
-    tab_tree::{TabTreeNode, TabTreeRow, tree_rows, would_create_cycle},
-    terminal_observation::TerminalProcessState,
-    terminal_selection::{
-        AutoScrollDirection, AutoScrollStep, SelectionGesture, TerminalPoint, TerminalSelection,
-        autoscroll_step, terminal_selection_text, visible_row_selection, word_selection,
-    },
-    theme::{ThemeId, ThemePalette},
     ui_bridge,
-    ui_geometry::{
-        COMPOSER_HEIGHT, PixelRect, TAB_HEIGHT, TERMINAL_SCROLLBAR_WIDTH, TerminalScrollbarGeometry,
-        TreeRowActionDensity, TreeRowMode, WorkspaceLayout, WorkspaceLayoutInput, reset_tabs_width,
-        scrollback_for_thumb_top, tabs_width_from_drag, terminal_scrollbar_geometry, tree_connector_x,
-        tree_row_at_y, tree_row_geometry_for_mode, workspace_layout,
-    },
     upgrade_identity::UpgradeIdentity,
-    working_context::{
-        CwdSource, PROXY_MAX_BYTES, ProxyConfirmationMarker, ProxyState, cwd_command,
-        parse_proxy_editor, proxy_command_with_confirmation, validate_path,
-    },
-    workspace::{SavedTab, SavedWorkspace, load_workspace, save_workspace, workspace_path},
+    working_context::PROXY_MAX_BYTES,
 };
-
-
 
 #[cfg(windows)]
 use crate::script_audit::{
@@ -82,18 +53,15 @@ use crate::script_audit::{
 #[cfg(windows)]
 use crate::worker_supervisor::{SupervisorError, WorkerSupervisor};
 
-
 const IPC_TIMEOUT: Duration = Duration::from_secs(5);
 const IPC_DISCOVERY_TIMEOUT: Duration = Duration::from_millis(500);
 const IPC_AUTOSTART_TIMEOUT: Duration = Duration::from_secs(15);
 const IPC_AUTOSTART_POLL: Duration = Duration::from_millis(100);
 const IPC_MAX_RESPONSE_BYTES: u64 = 8 * 1024 * 1024;
-const CAPTURE_PUBLIC_MAX_BYTES: usize = 1024 * 1024;
 
 thread_local! {
     static IPC_ADDRESS_OVERRIDE: RefCell<Option<String>> = const { RefCell::new(None) };
 }
-
 
 pub(crate) fn no_activate_from_environment() -> bool {
     no_activate_from_value(env::var_os("AGENTERM_NO_ACTIVATE").as_deref())
@@ -1827,7 +1795,7 @@ fn fetch_ui_wait_snapshot() -> Result<(String, serde_json::Value)> {
     Ok((response.output, snapshot))
 }
 
-fn run_wait_ui(arguments: &[String]) -> i32 {
+pub(crate) fn run_wait_ui(arguments: &[String]) -> i32 {
     let timeout_ms = match option_value(arguments, "--timeout-ms") {
         Some(value) => match value.parse::<u64>() {
             Ok(value) => value,
@@ -2380,7 +2348,6 @@ fn print_mux_compatibility(json: bool) {
         println!("native AgenTerm extensions: agenterm-mux agenterm COMMAND ...");
     }
 }
-
 
 #[cfg(test)]
 mod tests {
