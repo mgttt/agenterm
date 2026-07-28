@@ -55,6 +55,7 @@ PRD + Cargo deps (primary)
 - [x] J Unix terminal cell selection + clipboard copy (`copy-selection`, Ctrl+C)
 - [x] K Unix paste / word+row selection / selection autoscroll / sidebar toolbar
 - [x] L Unix close-tab confirm + screenshot PNG IPC
+- [x] M Unix status-bar CWD editor + window-close confirm + tabs resize grip
 
 ### A — PTY 后端抽象
 - 用户问题：Windows ConPTY 与 Unix PTY 不能各写一套 runtime。

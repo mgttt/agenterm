@@ -7,7 +7,7 @@ use crate::{
 };
 
 pub(super) const UNIX_COMPOSER_HEIGHT: i32 = 48;
-pub(super) const UNIX_STATUS_HEIGHT: i32 = 0;
+pub(super) const UNIX_STATUS_HEIGHT: i32 = 26;
 pub(super) const SCROLLBAR_WIDTH: u32 = TERMINAL_SCROLLBAR_WIDTH as u32;
 pub(super) const WHEEL_DELTA: i32 = 120;
 pub(super) const WHEEL_ROWS_PER_NOTCH: usize = 3;

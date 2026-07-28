@@ -8,8 +8,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [~] Linux/macOS human workspace MVP: one window, live POSIX PTY tabs,
   keyboard input, visible VT grid, tab sidebar with New/Tabs/Settings
   toolbar, event journal, shared workspace IPC, composer, settings modal,
-  wheel/scrollbar, paste, and word/row/drag selection; status-bar CWD,
-  close confirm, and Win-only cwd-proxy editors remain follow-ups
+  wheel/scrollbar, paste, and word/row/drag selection; status-bar CWD editor,
+  window-close confirm, and tabs resize grip on Unix; Win-only proxy editor
+  remains a follow-up
 - [x] vertical tabs on the left show the numeric index; the stable `@id` is
   exposed through the control plane
 - [x] tree starts at the top without a redundant logo/header strip

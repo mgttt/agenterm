@@ -24,12 +24,13 @@ use winit::{
 
 use crate::{
     client::no_activate_from_environment,
-    commands::screenshot_output_path,
-    control_dispatch::{ControlHost, dispatch_shared_command},
+    commands::{option_value, screenshot_output_path},
+    control_dispatch::{ControlHost, dispatch_shared_command, resolve_target_position},
     event_journal::{EventJournal, EventKind},
     gui_wake::{UnixWake, install_unix_wake},
     instances::register_instance,
     ipc_transport::{IpcEnvelope, start_ipc_server},
+    operations::{UI_TABS_SET_WIDTH, UI_TABS_SHOW},
     protocol::IpcResponse,
     pty::TerminalSize,
     settings::{AppConfig, config_path, load_config, save_config},
@@ -39,20 +40,23 @@ use crate::{
         autoscroll_step, terminal_selection_text, visible_row_selection, word_selection,
     },
     theme::ThemeId,
+    ui_geometry::tabs_width_from_drag,
     wake_signal::WakeSignal,
+    working_context::{CwdSource, ShellKind, cwd_command, validate_path},
     workspace::workspace_path,
 };
 
 use render::{
     CELL_HEIGHT, CELL_WIDTH, COMPOSER_HEIGHT, ComposerView, ConfirmCloseHit, ConfirmCloseView,
-    FrameContent, SettingsHit, SettingsModalView, SidebarTabRow, SidebarToolbarView, TerminalGrid,
-    TerminalPaint, ToolbarHit, effective_palette, grid_dimensions_for_pixels, render_frame,
-    scrollbar_view_from_geometry, sidebar_row_at_y,
+    FrameContent, SettingsHit, SettingsModalView, SidebarTabRow, SidebarToolbarView, StatusBarView,
+    TerminalGrid, TerminalPaint, ToolbarHit, WindowCloseHit, WindowCloseView, effective_palette,
+    grid_dimensions_for_pixels, render_frame, scrollbar_view_from_geometry, sidebar_row_at_y,
+    STATUS_HEIGHT,
 };
 
 use layout::{
     ScrollbarHit, WHEEL_DELTA, WHEEL_ROWS_PER_NOTCH, pixel_rect_json, scrollbar_geometry,
-    scrollbar_hit_test, sidebar_width_u32, terminal_cell_at, terminal_pixel_rect,
+    scrollbar_hit_test, sidebar_width_u32, terminal_cell_at, terminal_pixel_rect, u32_rect,
     wheel_delta_units, workspace_layout_for,
 };
 
@@ -75,6 +79,44 @@ struct RecentTerminalClick {
     tab_id: u64,
     point: TerminalPoint,
     at: Instant,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct TabsResizeDrag {
+    original_width: u16,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ComposerWriteMode {
+    EmptyOnly,
+    Append,
+    Replace,
+}
+
+impl ComposerWriteMode {
+    fn parse(value: Option<&str>) -> Result<Self, String> {
+        match value.unwrap_or("empty-only") {
+            "empty" | "empty-only" => Ok(Self::EmptyOnly),
+            "append" => Ok(Self::Append),
+            "replace" => Ok(Self::Replace),
+            other => Err(format!("unknown composer write mode: {other}")),
+        }
+    }
+
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::EmptyOnly => "empty",
+            Self::Append => "append",
+            Self::Replace => "replace",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WindowCloseChoice {
+    KeepServerRunning,
+    StopServerAndExit,
+    Cancel,
 }
 
 const DOUBLE_CLICK_MS: u64 = 500;
@@ -237,6 +279,9 @@ struct UnixApp {
     terminal_double_click: Option<TerminalDoubleClick>,
     recent_terminal_click: Option<RecentTerminalClick>,
     pending_close: Option<u64>,
+    window_close_pending: bool,
+    cwd_edit_target: Option<u64>,
+    tabs_resize_drag: Option<TabsResizeDrag>,
     last_frame: Option<(u32, u32, Vec<u32>)>,
 }
 
@@ -286,6 +331,9 @@ impl UnixApp {
             terminal_double_click: None,
             recent_terminal_click: None,
             pending_close: None,
+            window_close_pending: false,
+            cwd_edit_target: None,
+            tabs_resize_drag: None,
             last_frame: None,
             config,
             modifiers: ModifiersState::empty(),
@@ -344,6 +392,9 @@ impl UnixApp {
             self.tab_note_draft = note.to_owned();
             return;
         }
+        if self.cwd_edit_target == Some(tab_id) {
+            return;
+        }
         if self.tabs[position].sensitive_composer.is_some() {
             return;
         }
@@ -354,6 +405,9 @@ impl UnixApp {
     }
 
     fn load_composer_buffer_from_tab(&mut self) {
+        if self.cwd_edit_target.is_some() {
+            return;
+        }
         self.composer_buffer = self
             .active_position()
             .and_then(|position| self.tabs.get(position))
@@ -394,6 +448,11 @@ impl UnixApp {
 
     fn send_active_composer(&mut self) -> Result<(), String> {
         self.sync_composer_buffer_to_tab();
+        if self.cwd_edit_target.is_some() {
+            return self
+                .prepare_cwd(None, None, ComposerWriteMode::EmptyOnly)
+                .map_err(|error| error.to_string());
+        }
         if self.note_edit_target.is_some() {
             return self.complete_tab_editor(true);
         }
@@ -427,9 +486,318 @@ impl UnixApp {
         Ok(())
     }
 
-    fn composer_region_contains(&self, x: f64, y: f64, window_height: u32) -> bool {
-        x >= f64::from(self.sidebar_width())
-            && y >= f64::from(window_height.saturating_sub(COMPOSER_HEIGHT))
+    fn composer_region_contains(&self, x: f64, y: f64) -> bool {
+        self.layout()
+            .composer
+            .contains(x as i32, y as i32)
+    }
+
+    fn modal_surface_active(&self) -> bool {
+        self.window_close_pending
+            || self.pending_close.is_some()
+            || self.settings_open
+            || self.cwd_edit_target.is_some()
+            || self.note_edit_target.is_some()
+    }
+
+    fn target_position(&self, target: Option<&str>) -> Option<usize> {
+        resolve_target_position(&self.tabs, self.active, target)
+    }
+
+    fn active_cwd_status_text(&self) -> String {
+        self.active_position()
+            .and_then(|position| self.tabs.get(position))
+            .map(|tab| {
+                let path = tab.cwd.path().unwrap_or("unknown");
+                if tab.cwd.pending() {
+                    format!("CWD · {path} · pending")
+                } else {
+                    format!("CWD · {path} · {}", tab.cwd.source().as_str())
+                }
+            })
+            .unwrap_or_else(|| "CWD · unknown".to_owned())
+    }
+
+    fn open_cwd_editor(&mut self, target: Option<&str>) -> Result<(), String> {
+        if self.settings_open
+            || self.pending_close.is_some()
+            || self.window_close_pending
+            || self.note_edit_target.is_some()
+        {
+            return Err("another modal surface is active".to_owned());
+        }
+        let _ = self.cancel_terminal_selection(true);
+        let position = self
+            .target_position(target)
+            .or_else(|| self.active_position())
+            .ok_or_else(|| "can't find tab".to_owned())?;
+        self.sync_composer_buffer_to_tab();
+        let id = self.tabs[position].id;
+        self.active = Some(id);
+        self.cwd_edit_target = Some(id);
+        self.composer_buffer = self.tabs[position]
+            .cwd
+            .path()
+            .unwrap_or_default()
+            .to_owned();
+        self.set_focus_surface_internal(UnixFocusSurface::Composer, "cwd-editor");
+        self.event_journal_mut().commit(
+            EventKind::WorkingContextCwdEditor,
+            Some(id),
+            serde_json::json!({"open": true}),
+        );
+        self.request_redraw();
+        Ok(())
+    }
+
+    fn close_cwd_editor(&mut self) {
+        let Some(id) = self.cwd_edit_target.take() else {
+            return;
+        };
+        self.load_composer_buffer_from_tab();
+        self.set_focus_surface_internal(UnixFocusSurface::Terminal, "cwd-editor-close");
+        self.event_journal_mut().commit(
+            EventKind::WorkingContextCwdEditor,
+            Some(id),
+            serde_json::json!({"open": false}),
+        );
+        self.request_redraw();
+    }
+
+    fn prepare_cwd(
+        &mut self,
+        target: Option<&str>,
+        requested_path: Option<String>,
+        mode: ComposerWriteMode,
+    ) -> Result<(), String> {
+        let position = self
+            .target_position(target)
+            .or_else(|| {
+                self.cwd_edit_target
+                    .and_then(|id| self.tabs.iter().position(|tab| tab.id == id))
+            })
+            .or_else(|| self.active_position())
+            .ok_or_else(|| "can't find tab".to_owned())?;
+        let path = requested_path
+            .unwrap_or_else(|| self.composer_buffer.trim().to_owned());
+        validate_path(&path).map_err(|error| error.to_string())?;
+        let shell = ShellKind::from_program(&self.tabs[position].command_name);
+        let command = cwd_command(shell, &path).map_err(|error| error.to_string())?;
+        let previous = self.tabs[position].composer.clone();
+        let next = match mode {
+            ComposerWriteMode::EmptyOnly if !previous.is_empty() => {
+                return Err(
+                    "Composer already has a draft; explicitly choose --mode append or --mode replace"
+                        .to_owned(),
+                );
+            }
+            ComposerWriteMode::EmptyOnly | ComposerWriteMode::Replace => command.clone(),
+            ComposerWriteMode::Append => {
+                if previous.is_empty() {
+                    command.clone()
+                } else {
+                    format!("{previous}\n{command}")
+                }
+            }
+        };
+        let id = self.tabs[position].id;
+        self.tabs[position].composer = next;
+        self.tabs[position]
+            .cwd
+            .request(path.clone())
+            .map_err(|error| error.to_string())?;
+        self.event_journal_mut().commit(
+            EventKind::WorkingContextCwdRequested,
+            Some(id),
+            serde_json::json!({
+                "path": path,
+                "source": CwdSource::UserRequested.as_str(),
+                "pending": true,
+                "disposition": "prepared",
+                "composer_mode": mode.as_str(),
+            }),
+        );
+        if self.cwd_edit_target == Some(id) {
+            self.close_cwd_editor();
+        } else if self.active == Some(id) {
+            self.load_composer_buffer_from_tab();
+            self.request_redraw();
+        }
+        Ok(())
+    }
+
+    fn send_cwd_now(&mut self, target: Option<&str>, requested_path: String) -> Result<(), String> {
+        let position = self
+            .target_position(target)
+            .or_else(|| self.active_position())
+            .ok_or_else(|| "can't find tab".to_owned())?;
+        validate_path(&requested_path).map_err(|error| error.to_string())?;
+        let shell = ShellKind::from_program(&self.tabs[position].command_name);
+        let command = cwd_command(shell, &requested_path).map_err(|error| error.to_string())?;
+        if !self.tabs[position].submit(&command) {
+            return Err(
+                "terminal is unavailable or already has a pending submission".to_owned(),
+            );
+        }
+        let id = self.tabs[position].id;
+        self.tabs[position]
+            .cwd
+            .request(requested_path.clone())
+            .map_err(|error| error.to_string())?;
+        self.event_journal_mut().commit(
+            EventKind::WorkingContextCwdRequested,
+            Some(id),
+            serde_json::json!({
+                "path": requested_path,
+                "source": CwdSource::UserRequested.as_str(),
+                "pending": true,
+                "disposition": "sent",
+                "shell": shell.as_str(),
+            }),
+        );
+        if self.cwd_edit_target == Some(id) {
+            self.close_cwd_editor();
+        }
+        self.request_redraw();
+        Ok(())
+    }
+
+    fn request_window_close(&mut self) {
+        if self.window_close_pending {
+            return;
+        }
+        let _ = self.cancel_terminal_selection(true);
+        if self.note_edit_target.is_some() {
+            let _ = self.complete_tab_editor(false);
+        }
+        if self.settings_open {
+            let _ = self.close_settings(false);
+        }
+        if self.pending_close.is_some() {
+            self.finish_close_confirmation(false);
+        }
+        if self.cwd_edit_target.is_some() {
+            self.close_cwd_editor();
+        }
+        self.sync_composer_buffer_to_tab();
+        self.window_close_pending = true;
+        self.request_redraw();
+    }
+
+    fn finish_window_close(&mut self, choice: WindowCloseChoice) {
+        if !self.window_close_pending {
+            return;
+        }
+        self.window_close_pending = false;
+        match choice {
+            WindowCloseChoice::KeepServerRunning => {
+                if let Some(window) = self.window.as_ref() {
+                    window.set_visible(false);
+                }
+                self.event_journal_mut().commit(
+                    EventKind::WindowVisibility,
+                    None,
+                    serde_json::json!({"visible": false, "reason": "detach"}),
+                );
+            }
+            WindowCloseChoice::StopServerAndExit => {
+                self.close_requested = true;
+            }
+            WindowCloseChoice::Cancel => {}
+        }
+        self.request_redraw();
+    }
+
+    fn begin_tabs_resize(&mut self) {
+        let _ = self.cancel_terminal_selection(true);
+        self.end_scroll_drag();
+        self.tabs_resize_drag = Some(TabsResizeDrag {
+            original_width: self.config.tabs_width,
+        });
+    }
+
+    fn drag_tabs_resize(&mut self, x: i32) {
+        if self.tabs_resize_drag.is_none() {
+            return;
+        }
+        let (client_width, _) = self.client_size();
+        let width = tabs_width_from_drag(x, client_width as i32) as u16;
+        if self.config.tabs_width != width {
+            self.config.tabs_width = width;
+            self.relayout_after_config_change();
+        }
+    }
+
+    fn finish_tabs_resize(&mut self, persist: bool, cause: &str, operation_id: &str) {
+        let Some(drag) = self.tabs_resize_drag.take() else {
+            return;
+        };
+        if !persist {
+            self.config.tabs_width = drag.original_width;
+            self.relayout_after_config_change();
+            return;
+        }
+        if let Err(error) = save_config(&self.config) {
+            eprintln!("could not save Tabs width: {error:#}");
+            return;
+        }
+        let configured_width = self.config.tabs_width;
+        let effective_width = self.layout().effective_tabs_width;
+        self.event_journal_mut().commit(
+            EventKind::LayoutTabsWidth,
+            None,
+            serde_json::json!({
+                "configured_width": configured_width,
+                "effective_width": effective_width,
+                "cause": cause,
+                "operation_id": operation_id,
+            }),
+        );
+        self.request_redraw();
+    }
+
+    fn handle_status_click(&mut self, x: i32, y: i32) -> bool {
+        let layout = self.layout();
+        if !layout.status.contains(x, y) {
+            return false;
+        }
+        if self.modal_surface_active() {
+            return true;
+        }
+        if layout
+            .status_segments
+            .tabs_recovery
+            .is_some_and(|segment| segment.contains(x, y))
+        {
+            let _ = self.set_tabs_visible(true, "status-bar", UI_TABS_SHOW);
+            return true;
+        }
+        if layout.status_segments.cwd.contains(x, y) {
+            let _ = self.open_cwd_editor(None);
+            return true;
+        }
+        true
+    }
+
+    fn handle_window_close_click(&mut self, x: f64, y: f64) -> bool {
+        if !self.window_close_pending {
+            return false;
+        }
+        let (width, height) = self.client_size();
+        let modal = WindowCloseView::for_client(width, height);
+        match modal.hit_test(x, y) {
+            Some(WindowCloseHit::KeepServer) => {
+                self.finish_window_close(WindowCloseChoice::KeepServerRunning);
+            }
+            Some(WindowCloseHit::StopServer) => {
+                self.finish_window_close(WindowCloseChoice::StopServerAndExit);
+            }
+            Some(WindowCloseHit::Cancel) => {
+                self.finish_window_close(WindowCloseChoice::Cancel);
+            }
+            None => {}
+        }
+        true
     }
 
     fn relayout_after_config_change(&mut self) {
@@ -438,6 +806,9 @@ impl UnixApp {
     }
 
     fn open_settings(&mut self) {
+        if self.cwd_edit_target.is_some() {
+            self.close_cwd_editor();
+        }
         if self.note_edit_target.is_some() {
             let _ = self.complete_tab_editor(false);
         }
@@ -690,6 +1061,8 @@ impl UnixApp {
                     "width": layout.sidebar.width(),
                     "height": layout.sidebar.height(),
                     "bounds": pixel_rect_json(layout.sidebar),
+                    "resize_grip": layout.resize_grip.map(pixel_rect_json),
+                    "resizing": self.tabs_resize_drag.is_some(),
                 },
                 "terminal": {
                     "x": layout.terminal.left,
@@ -706,6 +1079,18 @@ impl UnixApp {
                     "bounds": pixel_rect_json(layout.composer),
                 },
                 "scrollbar": scrollbar,
+                "status_bar": {
+                    "x": layout.status.left,
+                    "y": layout.status.top,
+                    "width": layout.status.width(),
+                    "height": layout.status.height(),
+                    "bounds": pixel_rect_json(layout.status),
+                    "tabs_recovery": layout.status_segments.tabs_recovery.map(pixel_rect_json),
+                    "cwd": {
+                        "bounds": pixel_rect_json(layout.status_segments.cwd),
+                        "action": "open-cwd-editor",
+                    },
+                },
             },
             "focus": {
                 "surface": self.focus_surface.as_str(),
@@ -715,8 +1100,25 @@ impl UnixApp {
                 "draft_length": self.composer_buffer.chars().count(),
                 "focused": self.focus_surface == UnixFocusSurface::Composer,
             },
-            "modal": if self.settings_open {
+            "modal": if self.window_close_pending {
+                Some(serde_json::json!({
+                    "kind": "confirm-window-close",
+                    "default_action": "keep-server-running",
+                    "actions": [
+                        "keep-server-running",
+                        "stop-server-and-exit",
+                        "cancel"
+                    ],
+                }))
+            } else if self.settings_open {
                 Some(serde_json::json!({"kind": "settings"}))
+            } else if self.cwd_edit_target.is_some() {
+                self.cwd_edit_target.map(|id| {
+                    serde_json::json!({
+                        "kind": "cwd-editor",
+                        "target": format!("@{id}"),
+                    })
+                })
             } else if self.note_edit_target.is_some() {
                 Some(serde_json::json!({"kind": "tab-editor"}))
             } else {
@@ -764,7 +1166,19 @@ impl UnixApp {
     }
 
     fn handle_sidebar_click(&mut self, x: f64, y: f64) {
+        if self.handle_window_close_click(x, y) {
+            return;
+        }
         let layout = self.layout();
+        if self.handle_status_click(x as i32, y as i32) {
+            return;
+        }
+        if layout.resize_grip.is_some_and(|grip| grip.contains(x as i32, y as i32))
+            && !self.modal_surface_active()
+        {
+            self.begin_tabs_resize();
+            return;
+        }
         let sidebar_width = sidebar_width_u32(&layout);
         if x >= f64::from(sidebar_width) {
             return;
@@ -817,7 +1231,13 @@ impl UnixApp {
         self.request_redraw();
     }
 
-    fn handle_content_click(&mut self, x: f64, y: f64, window_height: u32) {
+    fn handle_content_click(&mut self, x: f64, y: f64) {
+        if self.handle_window_close_click(x, y) {
+            return;
+        }
+        if self.handle_status_click(x as i32, y as i32) {
+            return;
+        }
         if let Some(id) = self.pending_close {
             let (width, height) = self.client_size();
             let modal = ConfirmCloseView::for_client(width, height, id);
@@ -851,7 +1271,7 @@ impl UnixApp {
         if self.begin_terminal_selection(x, y) {
             return;
         }
-        if self.composer_region_contains(x, y, window_height) {
+        if self.composer_region_contains(x, y) {
             self.set_focus_surface_internal(UnixFocusSurface::Composer, "mouse");
         } else {
             self.set_focus_surface_internal(UnixFocusSurface::Terminal, "mouse");
@@ -1102,7 +1522,11 @@ impl UnixApp {
     }
 
     fn paste_clipboard_into_terminal(&mut self) -> Result<(), String> {
-        if self.settings_open || self.note_edit_target.is_some() {
+        if self.settings_open
+            || self.window_close_pending
+            || self.note_edit_target.is_some()
+            || self.cwd_edit_target.is_some()
+        {
             return Err("paste is unavailable while a modal is open".to_owned());
         }
         if self.focus_surface != UnixFocusSurface::Terminal {
@@ -1209,7 +1633,7 @@ impl UnixApp {
     }
 
     fn mouse_wheel(&mut self, x: f64, y: f64, delta: MouseScrollDelta) {
-        if self.settings_open {
+        if self.settings_open || self.window_close_pending {
             return;
         }
         let terminal = terminal_pixel_rect(&self.layout());
@@ -1279,8 +1703,13 @@ impl UnixApp {
             .map_err(|error| anyhow::anyhow!("{error}"))?;
         let size = window.inner_size();
         let sidebar_width = self.sidebar_width();
-        let (cols, rows) =
-            grid_dimensions_for_pixels(size.width, size.height, sidebar_width, COMPOSER_HEIGHT);
+        let (cols, rows) = grid_dimensions_for_pixels(
+            size.width,
+            size.height,
+            sidebar_width,
+            COMPOSER_HEIGHT,
+            STATUS_HEIGHT,
+        );
         let grid = TerminalGrid::new(cols, rows, self.palette());
 
         let id = self.next_tab_id;
@@ -1324,8 +1753,13 @@ impl UnixApp {
         };
         let size = window.inner_size();
         let sidebar_width = self.sidebar_width();
-        let (cols, rows) =
-            grid_dimensions_for_pixels(size.width, size.height, sidebar_width, COMPOSER_HEIGHT);
+        let (cols, rows) = grid_dimensions_for_pixels(
+            size.width,
+            size.height,
+            sidebar_width,
+            COMPOSER_HEIGHT,
+            STATUS_HEIGHT,
+        );
         if let Some(grid) = self.grid.as_mut() {
             grid.resize(cols, rows);
         }
@@ -1350,13 +1784,96 @@ impl UnixApp {
                 }
             }
             None if command == Some("ui-action") => {
-                let action = envelope
-                    .request
-                    .args
-                    .get(1)
-                    .map(String::as_str)
-                    .unwrap_or("");
-                IpcResponse::failure(format!("unknown UI action: {action}"))
+                let args = &envelope.request.args;
+                let action = args.get(1).map(String::as_str).unwrap_or("");
+                if self.cwd_edit_target.is_some()
+                    && !matches!(
+                        action,
+                        "cwd-prepare"
+                            | "cwd-prepare-append"
+                            | "cwd-prepare-replace"
+                            | "cwd-send-now"
+                            | "cancel"
+                    )
+                {
+                    IpcResponse::failure(
+                        "CWD editor is a focus trap; prepare, send now, or cancel it first",
+                    )
+                } else {
+                    let response = match action {
+                        "close-window" => {
+                            self.request_window_close();
+                            None
+                        }
+                        "keep-server-running" => {
+                            if !self.window_close_pending {
+                                Some(IpcResponse::failure(
+                                    "no window-close confirmation is pending",
+                                ))
+                            } else {
+                                self.finish_window_close(WindowCloseChoice::KeepServerRunning);
+                                None
+                            }
+                        }
+                        "stop-server-and-exit" => {
+                            if !self.window_close_pending {
+                                Some(IpcResponse::failure(
+                                    "no window-close confirmation is pending",
+                                ))
+                            } else {
+                                self.finish_window_close(WindowCloseChoice::StopServerAndExit);
+                                None
+                            }
+                        }
+                        "open-cwd-editor" => match self.open_cwd_editor(option_value(args, "-t")) {
+                            Ok(()) => None,
+                            Err(error) => Some(IpcResponse::failure(error)),
+                        },
+                        "cwd-prepare" => {
+                            match ComposerWriteMode::parse(option_value(args, "--mode")) {
+                                Ok(mode) => match self.prepare_cwd(
+                                    option_value(args, "-t"),
+                                    option_value(args, "--path").map(str::to_owned),
+                                    mode,
+                                ) {
+                                    Ok(()) => None,
+                                    Err(error) => Some(IpcResponse::failure(error)),
+                                },
+                                Err(error) => Some(IpcResponse::failure(error)),
+                            }
+                        }
+                        "cwd-prepare-append" | "cwd-prepare-replace" => {
+                            let mode = if action == "cwd-prepare-append" {
+                                ComposerWriteMode::Append
+                            } else {
+                                ComposerWriteMode::Replace
+                            };
+                            match self.prepare_cwd(
+                                option_value(args, "-t"),
+                                option_value(args, "--path").map(str::to_owned),
+                                mode,
+                            ) {
+                                Ok(()) => None,
+                                Err(error) => Some(IpcResponse::failure(error)),
+                            }
+                        }
+                        "cwd-send-now" => match option_value(args, "--path") {
+                            Some(path) => match self.send_cwd_now(
+                                option_value(args, "-t"),
+                                path.to_owned(),
+                            ) {
+                                Ok(()) => None,
+                                Err(error) => Some(IpcResponse::failure(error)),
+                            },
+                            None => Some(IpcResponse::failure("cwd-send-now requires --path")),
+                        },
+                        other => Some(IpcResponse::failure(format!("unknown UI action: {other}"))),
+                    };
+                    match response {
+                        Some(response) => response,
+                        None => IpcResponse::success(self.build_ui_snapshot_json()),
+                    }
+                }
             }
             None => IpcResponse::typed_failure(
                 format!(
@@ -1432,7 +1949,13 @@ impl UnixApp {
         let palette = self.palette();
         let layout = self.layout();
         let sidebar_width = self.sidebar_width();
-        let content_height = size.height.saturating_sub(COMPOSER_HEIGHT);
+        let content_height = layout.terminal.bottom.max(0) as u32;
+        let cwd_label = self.active_cwd_status_text();
+        let composer_label = if self.cwd_edit_target.is_some() {
+            "CWD> "
+        } else {
+            ""
+        };
         let scrollbar = self.active_position().map(|position| {
             let visible_rows = usize::from(self.tabs[position].last_size.0);
             let (offset, maximum) = self.tabs[position].scrollback_bounds();
@@ -1488,12 +2011,24 @@ impl UnixApp {
                 composer: ComposerView {
                     text: &self.composer_buffer,
                     focused: self.focus_surface == UnixFocusSurface::Composer,
+                    top: layout.composer.top.max(0) as u32,
+                    label: composer_label,
                 },
                 scrollbar,
                 settings,
                 confirm_close: self
                     .pending_close
                     .map(|id| ConfirmCloseView::for_client(size.width, size.height, id)),
+                window_close: self
+                    .window_close_pending
+                    .then(|| WindowCloseView::for_client(size.width, size.height)),
+                status: Some(StatusBarView {
+                    bounds: u32_rect(layout.status),
+                    cwd_bounds: u32_rect(layout.status_segments.cwd),
+                    tabs_recovery: layout.status_segments.tabs_recovery.map(u32_rect),
+                    cwd_text: &cwd_label,
+                }),
+                resize_grip: layout.resize_grip.map(u32_rect),
             },
         );
         self.last_frame = Some((width, height, buffer.to_vec()));
@@ -1502,6 +2037,9 @@ impl UnixApp {
 
     fn request_close_tab(&mut self, id: u64) {
         let _ = self.cancel_terminal_selection(true);
+        if self.cwd_edit_target == Some(id) {
+            self.close_cwd_editor();
+        }
         if self.note_edit_target.is_some() {
             let _ = self.complete_tab_editor(false);
         }
@@ -1580,6 +2118,10 @@ impl ControlHost for UnixApp {
     }
 
     fn prepare_composer_send(&mut self) -> Result<bool, String> {
+        if self.cwd_edit_target.is_some() {
+            self.prepare_cwd(None, None, ComposerWriteMode::EmptyOnly)?;
+            return Ok(true);
+        }
         if self.note_edit_target.is_some() {
             self.sync_composer_buffer_to_tab();
             self.complete_tab_editor(true)?;
@@ -1777,12 +2319,20 @@ impl ControlHost for UnixApp {
     }
 
     fn ui_action_cancel(&mut self) -> Result<bool, String> {
+        if self.window_close_pending {
+            self.finish_window_close(WindowCloseChoice::Cancel);
+            return Ok(true);
+        }
         if self.pending_close.is_some() {
             self.finish_close_confirmation(false);
             return Ok(true);
         }
         if self.settings_open {
             self.close_settings(false)?;
+            return Ok(true);
+        }
+        if self.cwd_edit_target.is_some() {
+            self.close_cwd_editor();
             return Ok(true);
         }
         if self.note_edit_target.is_some() {
@@ -1796,6 +2346,10 @@ impl ControlHost for UnixApp {
     }
 
     fn ui_action_confirm(&mut self) -> Result<bool, String> {
+        if self.window_close_pending {
+            self.finish_window_close(WindowCloseChoice::KeepServerRunning);
+            return Ok(true);
+        }
         if self.pending_close.is_some() {
             self.finish_close_confirmation(true);
             return Ok(true);
@@ -1909,6 +2463,9 @@ impl ControlHost for UnixApp {
             return Err("can't find window".to_owned());
         }
         let _ = self.cancel_terminal_selection(true);
+        if self.cwd_edit_target.is_some() {
+            self.close_cwd_editor();
+        }
         if self.focus_surface == UnixFocusSurface::Composer {
             self.sync_composer_buffer_to_tab();
         }
@@ -1996,7 +2553,7 @@ impl ApplicationHandler<UnixWake> for UnixApp {
         event: WindowEvent,
     ) {
         match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::CloseRequested => self.request_window_close(),
             WindowEvent::Resized(_) => {
                 self.resize_to_window();
                 if let Some(window) = self.window.as_ref() {
@@ -2017,6 +2574,14 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                 if !event.state.is_pressed() {
                     return;
                 }
+                if self.window_close_pending {
+                    if let Key::Named(NamedKey::Escape) = event.logical_key {
+                        self.finish_window_close(WindowCloseChoice::Cancel);
+                    } else if matches!(event.logical_key, Key::Named(NamedKey::Enter)) {
+                        self.finish_window_close(WindowCloseChoice::KeepServerRunning);
+                    }
+                    return;
+                }
                 if self.settings_open {
                     if let Key::Named(NamedKey::Escape) = event.logical_key {
                         let _ = self.close_settings(false);
@@ -2035,6 +2600,25 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                     return;
                 }
                 if self.focus_surface == UnixFocusSurface::Composer {
+                    if self.cwd_edit_target.is_some() {
+                        if matches!(event.logical_key, Key::Named(NamedKey::Escape)) {
+                            self.close_cwd_editor();
+                            return;
+                        }
+                        if self.modifiers.control_key()
+                            && matches!(event.logical_key, Key::Named(NamedKey::Enter))
+                        {
+                            let mode = if self.modifiers.shift_key() {
+                                ComposerWriteMode::Append
+                            } else if self.modifiers.alt_key() {
+                                ComposerWriteMode::Replace
+                            } else {
+                                ComposerWriteMode::EmptyOnly
+                            };
+                            let _ = self.prepare_cwd(None, None, mode);
+                            return;
+                        }
+                    }
                     match input::composer_key_action(
                         &event,
                         self.modifiers,
@@ -2053,7 +2637,9 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                             }
                         }
                         input::ComposerKeyAction::Escape => {
-                            if self.note_edit_target.is_some() {
+                            if self.cwd_edit_target.is_some() {
+                                self.close_cwd_editor();
+                            } else if self.note_edit_target.is_some() {
                                 let _ = self.complete_tab_editor(false);
                             } else {
                                 self.sync_composer_buffer_to_tab();
@@ -2089,7 +2675,9 @@ impl ApplicationHandler<UnixWake> for UnixApp {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 self.last_cursor = (position.x, position.y);
-                if self.scroll_drag.is_some() {
+                if self.tabs_resize_drag.is_some() {
+                    self.drag_tabs_resize(position.x as i32);
+                } else if self.scroll_drag.is_some() {
                     self.drag_scrollbar(position.y as i32);
                 } else if self
                     .terminal_selection_gesture
@@ -2108,16 +2696,11 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                 ..
             } => {
                 let (x, y) = self.last_cursor;
-                let window_height = self
-                    .window
-                    .as_ref()
-                    .map(|window| window.inner_size().height)
-                    .unwrap_or(INITIAL_HEIGHT);
                 if x < f64::from(self.sidebar_width()) {
                     let _ = self.cancel_terminal_selection(true);
                     self.handle_sidebar_click(x, y);
                 } else {
-                    self.handle_content_click(x, y, window_height);
+                    self.handle_content_click(x, y);
                 }
             }
             WindowEvent::MouseInput {
@@ -2125,7 +2708,9 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                 button: MouseButton::Left,
                 ..
             } => {
-                if self.scroll_drag.is_some() {
+                if self.tabs_resize_drag.is_some() {
+                    self.finish_tabs_resize(true, "mouse-drag", UI_TABS_SET_WIDTH);
+                } else if self.scroll_drag.is_some() {
                     self.end_scroll_drag();
                 } else {
                     self.complete_terminal_selection();

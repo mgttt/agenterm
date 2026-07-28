@@ -7,6 +7,7 @@ use super::{
 
 pub(super) const SIDEBAR_TAB_ROW_HEIGHT: u32 = 20;
 pub(super) const COMPOSER_HEIGHT: u32 = 48;
+pub(super) const STATUS_HEIGHT: u32 = 26;
 pub(super) const SETTINGS_MODAL_WIDTH: u32 = 360;
 pub(super) const SETTINGS_MODAL_HEIGHT: u32 = 220;
 
@@ -124,11 +125,14 @@ pub(super) fn grid_dimensions_for_pixels(
     height: u32,
     sidebar_width: u32,
     composer_height: u32,
+    status_height: u32,
 ) -> (u16, u16) {
     let terminal_width = width
         .saturating_sub(sidebar_width)
         .saturating_sub(SCROLLBAR_WIDTH);
-    let terminal_height = height.saturating_sub(composer_height);
+    let terminal_height = height
+        .saturating_sub(composer_height)
+        .saturating_sub(status_height);
     let cols = (terminal_width / CELL_WIDTH).max(1) as u16;
     let rows = (terminal_height / CELL_HEIGHT).max(1) as u16;
     (cols, rows)
@@ -137,6 +141,8 @@ pub(super) fn grid_dimensions_for_pixels(
 pub(super) struct ComposerView<'a> {
     pub(super) text: &'a str,
     pub(super) focused: bool,
+    pub(super) top: u32,
+    pub(super) label: &'a str,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -300,6 +306,59 @@ impl ConfirmCloseView {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum WindowCloseHit {
+    KeepServer,
+    StopServer,
+    Cancel,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct WindowCloseView {
+    pub(super) bounds: (u32, u32, u32, u32),
+    pub(super) keep_button: (u32, u32, u32, u32),
+    pub(super) stop_button: (u32, u32, u32, u32),
+    pub(super) cancel_button: (u32, u32, u32, u32),
+}
+
+impl WindowCloseView {
+    pub(super) fn for_client(client_width: u32, client_height: u32) -> Self {
+        let width = 520u32;
+        let height = 160u32;
+        let left = client_width.saturating_sub(width) / 2;
+        let top = client_height.saturating_sub(height + STATUS_HEIGHT) / 2;
+        let button_y = top + 110;
+        Self {
+            bounds: (left, top, width, height),
+            keep_button: (left + 24, button_y, 150, 28),
+            stop_button: (left + 186, button_y, 150, 28),
+            cancel_button: (left + 348, button_y, 140, 28),
+        }
+    }
+
+    pub(super) fn hit_test(&self, x: f64, y: f64) -> Option<WindowCloseHit> {
+        let x = x as u32;
+        let y = y as u32;
+        if rect_contains(self.keep_button, x, y) {
+            Some(WindowCloseHit::KeepServer)
+        } else if rect_contains(self.stop_button, x, y) {
+            Some(WindowCloseHit::StopServer)
+        } else if rect_contains(self.cancel_button, x, y) {
+            Some(WindowCloseHit::Cancel)
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct StatusBarView<'a> {
+    pub(super) bounds: (u32, u32, u32, u32),
+    pub(super) cwd_bounds: (u32, u32, u32, u32),
+    pub(super) tabs_recovery: Option<(u32, u32, u32, u32)>,
+    pub(super) cwd_text: &'a str,
+}
+
 pub(super) struct FrameContent<'a> {
     pub(super) sidebar_width: u32,
     pub(super) content_height: u32,
@@ -311,6 +370,9 @@ pub(super) struct FrameContent<'a> {
     pub(super) scrollbar: Option<ScrollbarView>,
     pub(super) settings: Option<SettingsModalView<'a>>,
     pub(super) confirm_close: Option<ConfirmCloseView>,
+    pub(super) window_close: Option<WindowCloseView>,
+    pub(super) status: Option<StatusBarView<'a>>,
+    pub(super) resize_grip: Option<(u32, u32, u32, u32)>,
 }
 
 pub(super) fn render_frame(
@@ -352,21 +414,31 @@ pub(super) fn render_frame(
     if let Some(scrollbar) = content.scrollbar {
         render_scrollbar(buffer, stride, palette, scrollbar);
     }
-    render_composer(
-        buffer,
-        stride,
-        width,
-        height,
-        palette,
-        content.sidebar_width,
-        content.composer.text,
-        content.composer.focused,
-    );
+    render_composer(buffer, stride, width, height, palette, content.sidebar_width, content.composer);
+    if let Some(status) = content.status {
+        render_status_bar(buffer, stride, width, height, palette, status);
+    }
+    if let Some(grip) = content.resize_grip {
+        let (x, y, w, h) = grip;
+        fill_rect(buffer, stride, x, y, w, h, rgb_to_pixel(palette.divider));
+        fill_rect(
+            buffer,
+            stride,
+            x + w.saturating_sub(1) / 2,
+            y + 4,
+            1,
+            h.saturating_sub(8),
+            rgb_to_pixel(palette.focus_ring),
+        );
+    }
     if let Some(settings) = content.settings {
         render_settings_modal(buffer, stride, width, height, palette, settings);
     }
     if let Some(confirm) = content.confirm_close {
         render_confirm_close(buffer, stride, width, height, palette, confirm);
+    }
+    if let Some(window_close) = content.window_close {
+        render_window_close(buffer, stride, width, height, palette, window_close);
     }
 }
 
@@ -384,7 +456,6 @@ fn render_scrollbar(
     fill_rect(buffer, stride, ux, uy, uw, uh, thumb_color);
 }
 
-#[allow(clippy::too_many_arguments)]
 fn render_composer(
     buffer: &mut [u32],
     stride: u32,
@@ -392,10 +463,9 @@ fn render_composer(
     height: u32,
     palette: &ThemePalette,
     sidebar_width: u32,
-    text: &str,
-    focused: bool,
+    composer: ComposerView<'_>,
 ) {
-    let top = height.saturating_sub(COMPOSER_HEIGHT);
+    let top = composer.top;
     if top >= height {
         return;
     }
@@ -420,14 +490,19 @@ fn render_composer(
         1,
         divider,
     );
-    if focused {
+    if composer.focused {
         let ring = rgb_to_pixel(palette.focus_ring);
         fill_rect(buffer, stride, sidebar_width, top, composer_width, 2, ring);
     }
-    let label = if text.is_empty() {
-        "> ".to_owned()
+    let prefix = if composer.label.is_empty() {
+        "> "
     } else {
-        format!("> {text}")
+        composer.label
+    };
+    let label = if composer.text.is_empty() {
+        prefix.to_owned()
+    } else {
+        format!("{prefix}{}", composer.text)
     };
     let max_chars = ((composer_width.saturating_sub(16)) / (GLYPH_WIDTH + 1)).max(1) as usize;
     draw_text(
@@ -440,6 +515,125 @@ fn render_composer(
         &truncate_chars(&label, max_chars),
         palette.text,
     );
+}
+
+fn render_status_bar(
+    buffer: &mut [u32],
+    stride: u32,
+    width: u32,
+    height: u32,
+    palette: &ThemePalette,
+    status: StatusBarView<'_>,
+) {
+    let (x, y, w, h) = status.bounds;
+    fill_rect(buffer, stride, x, y, w, h, rgb_to_pixel(palette.composer));
+    fill_rect(buffer, stride, x, y, w, 1, rgb_to_pixel(palette.divider));
+    if let Some((rx, ry, rw, rh)) = status.tabs_recovery {
+        fill_rect(buffer, stride, rx, ry, rw, rh, rgb_to_pixel(palette.active));
+        draw_text(
+            buffer,
+            stride,
+            width,
+            height,
+            rx + 8,
+            ry + 6,
+            "Tabs",
+            palette.selection_foreground,
+        );
+    }
+    let (cx, cy, cw, _ch) = status.cwd_bounds;
+    let cwd = if status.cwd_text.is_empty() {
+        "CWD: (unknown)"
+    } else {
+        status.cwd_text
+    };
+    let max_chars = ((cw.saturating_sub(8)) / (GLYPH_WIDTH + 1)).max(1) as usize;
+    draw_text(
+        buffer,
+        stride,
+        width,
+        height,
+        cx + 4,
+        cy + 6,
+        &truncate_chars(cwd, max_chars),
+        palette.text,
+    );
+}
+
+fn render_window_close(
+    buffer: &mut [u32],
+    stride: u32,
+    width: u32,
+    height: u32,
+    palette: &ThemePalette,
+    modal: WindowCloseView,
+) {
+    let dim = rgb_to_pixel(Rgb {
+        red: 0,
+        green: 0,
+        blue: 0,
+    });
+    for y in 0..height {
+        for x in 0..width {
+            let index = (y * stride + x) as usize;
+            if let Some(pixel) = buffer.get_mut(index) {
+                let base = *pixel;
+                let r = ((base >> 16) & 0xFF) * 2 / 5;
+                let g = ((base >> 8) & 0xFF) * 2 / 5;
+                let b = (base & 0xFF) * 2 / 5;
+                *pixel = dim & 0xFF00_0000 | (r << 16) | (g << 8) | b;
+            }
+        }
+    }
+    let (mx, my, mw, mh) = modal.bounds;
+    fill_rect(buffer, stride, mx, my, mw, mh, rgb_to_pixel(palette.modal));
+    fill_rect(
+        buffer,
+        stride,
+        mx,
+        my,
+        mw,
+        2,
+        rgb_to_pixel(palette.focus_ring),
+    );
+    draw_text(
+        buffer,
+        stride,
+        width,
+        height,
+        mx + 16,
+        my + 20,
+        "Close AgenTerm window?",
+        palette.text,
+    );
+    draw_text(
+        buffer,
+        stride,
+        width,
+        height,
+        mx + 16,
+        my + 48,
+        "Keep server running hides the GUI; Stop exits.",
+        palette.text,
+    );
+    for (rect, label) in [
+        (modal.keep_button, "Keep server"),
+        (modal.stop_button, "Stop & exit"),
+        (modal.cancel_button, "Cancel"),
+    ] {
+        let (x, y, w, h) = rect;
+        fill_rect(buffer, stride, x, y, w, h, rgb_to_pixel(palette.composer));
+        draw_text(
+            buffer,
+            stride,
+            width,
+            height,
+            x + 12,
+            y + 8,
+            label,
+            palette.text,
+        );
+    }
 }
 
 fn render_sidebar_toolbar(
@@ -990,7 +1184,7 @@ mod tests {
 
     #[test]
     fn grid_dimensions_account_for_sidebar_scrollbar_and_composer() {
-        assert_eq!(grid_dimensions_for_pixels(800, 480, 200, 48), (58, 27));
+        assert_eq!(grid_dimensions_for_pixels(800, 480, 200, 48, 26), (58, 25));
     }
 
     #[test]
@@ -1007,8 +1201,8 @@ mod tests {
 
     #[test]
     fn hidden_sidebar_yields_wider_terminal_grid() {
-        let without = grid_dimensions_for_pixels(800, 480, 0, 48).0;
-        let with = grid_dimensions_for_pixels(800, 480, 200, 48).0;
+        let without = grid_dimensions_for_pixels(800, 480, 0, 48, 26).0;
+        let with = grid_dimensions_for_pixels(800, 480, 200, 48, 26).0;
         assert!(without > with);
         let _ = AppConfig::default();
     }
