@@ -8,6 +8,7 @@ Copyright and license terms remain with their respective authors.
 | Package | Declared license |
 | --- | --- |
 | `anyhow` | MIT OR Apache-2.0 |
+| `libc` | MIT OR Apache-2.0 |
 | `png` | MIT OR Apache-2.0 |
 | `rhai` | MIT OR Apache-2.0 |
 | `rmux-pty` | MIT OR Apache-2.0 |
