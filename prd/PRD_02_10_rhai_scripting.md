@@ -266,9 +266,10 @@ and it is not positioned as a restricted security plugin.
 - [ ] `script api --json` is the exact versioned runtime catalog and matches
   the engine, standard library, modules/tasks, profiles, Fleet operations,
   defaults, hard ceilings, and availability.
-  - [x] catalog schema v2 separates its schema version from Script API v2 and
-    provides one typed source for every public typed Fleet operation plus
-    explicitly planned nodes; full engine/module/task conformance remains open.
+  - [x] catalog schema v3 separates its schema version from stable Script API
+    v2 and provides one typed source for every public typed Fleet operation,
+    explicitly planned nodes, and reviewed Node.js/Bun analogue metadata; full
+    engine/module/task conformance remains open.
   - [x] an explicit `local` profile foundation runs base Rhai without requiring
     a server or inheriting observe authority; the first useful fs/path/bytes/
     JSON slice has shipped and `local` is now the ordinary default.
@@ -288,7 +289,7 @@ and it is not positioned as a restricted security plugin.
   `domain -> capability group -> callable/type` paths and ordering. Human
   `script api [MODULE]` output renders that same tree; unavailable, degraded,
   planned, deferred, and intentionally out-of-scope nodes do not disappear.
-  - [x] `script api [MODULE] [--status shipped|planned|all]` renders a deterministic hierarchical object tree and `--json` returns the same filtered versioned catalog with explicit view metadata.
+  - [x] `script api [MODULE] [--status shipped|planned|all] [--tree|--json]` renders one deterministic hierarchical object tree with reviewed Node.js/Bun analogues and returns the same filtered versioned catalog with explicit view and comparison metadata.
   - [ ] deferred and intentionally out-of-scope nodes require catalog status
     expansion beyond the current shipped/planned schema.
 - [ ] every entry separates `catalog_path` from its shallow `surface_path`, so
@@ -306,14 +307,15 @@ and it is not positioned as a restricted security plugin.
   - [x] `surface_path` and Rhai object semantics outrank `rust_path`;
     Rust/Node/Bun comparison metadata may be corrected without changing the
     Script API major.
-- [ ] optional comparison metadata maps a capability to a reviewed Node.js or
+- [x] optional comparison metadata maps every capability to a reviewed Node.js or
   Bun analogue as `similar`, `agenterm-specific`, `deferred`, or
   `not-applicable`, with source/version and review date. It supports gap
   analysis and generated manuals but never claims JavaScript, Node, Bun, npm,
   module, or binary compatibility.
-- [ ] the API tree, comparison matrix, reference-manual index, and coverage
-  report are generated from the catalog; a second handwritten callable list is
-  rejected by alignment tests.
+- [~] the human API tree and compact Node.js/Bun comparison index are generated
+  from the same catalog entries and `api --json` is the machine matrix;
+  generated long-form reference pages and a no-second-callable-list alignment
+  gate remain open.
 - [ ] these are capability facts for people and future tool consumers, not an
   authorization decision. A future agent layer may filter or constrain the
   schema without reimplementing the runtime.

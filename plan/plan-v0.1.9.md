@@ -555,7 +555,7 @@ agenterm-script
 │  ├─ entry
 │  │  ├─ [x] run / eval / check
 │  │  ├─ [x] api --json baseline
-│  │  ├─ [~] api tree + module/status filters 已交付；comparison metadata 待补
+│  │  ├─ [x] api tree + module/status filters + Node.js/Bun comparison metadata
 │  │  └─ [x] named task list / show / run
 │  ├─ profile
 │  │  ├─ [x] pure
@@ -656,8 +656,8 @@ agenterm-script
 └─ observability
    ├─ [x] budgets / hard ceilings baseline
    ├─ [x] typed error / audit / crash isolation baseline
-   ├─ [~] catalog hierarchy / availability / Rust comparison metadata 已交付；
-   │  人类可读 tree/filter/comparison CLI 待补
+   ├─ [x] catalog hierarchy / availability / Rust/Node.js/Bun metadata 与
+   │  人类可读 tree/filter/comparison CLI
    └─ [~] 英文 spec 与部分 catalog/runtime conformance 已交付；
       自动 manual/index 生成待补
 ```
@@ -1503,7 +1503,8 @@ README 增加一个简短 script task 示例；稳定运行时合同由
 
 ```text
 提交 1
-  [x] typed script catalog schema v2（现已升为 Script API v2）
+  [x] typed script catalog schema v3（Script API 仍为稳定 v2；v3 增加
+      Node.js/Bun 研究比较合同）
   [x] explicit local profile foundation
   [>] typed result/error/exit expansion（稳定结果信封与退出分类已交付；
       catchable typed error object 已交付首个 process 纵切）

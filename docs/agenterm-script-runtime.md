@@ -6,11 +6,11 @@ Specification ID: `agenterm-script-runtime`
 
 Script API currently shipped: v2
 
-Catalog schema currently shipped: v2
+Catalog schema currently shipped: v3
 
 Initial design date: 2026-07-28
 
-Last reviewed: 2026-07-28
+Last reviewed: 2026-07-29
 Normative language: English
 
 Product authority:
@@ -398,6 +398,33 @@ The recommended description is:
 The phrase "Rust-shaped" describes familiarity, not ownership. A Rust API
 change, deprecation, rename, or semantic revision MUST NOT automatically
 change an AgenTerm Rhai path.
+
+### 2.1 Research comparison contract
+
+Catalog schema v3 adds one reviewed Node.js and Bun classification to every
+entry. These fields exist for horizontal discovery, gap analysis, generated
+trees, and future reference-manual generation. They MUST NOT be interpreted as
+source, module, binary, behavioral, or package compatibility.
+
+Each `comparisons.nodejs` and `comparisons.bun` object contains:
+
+- `relationship`: `similar`, `agenterm_specific`, `deferred`, or
+  `not_applicable`;
+- `path`: the closest public analogue when the relationship is `similar`;
+- `documentation` and `reviewed_version`: the reviewed external reference;
+- `reviewed_on`: the date of the comparison review;
+- `semantic_note`: the important reason AgenTerm behavior differs.
+
+The initial comparison set was reviewed on 2026-07-29 against
+[Node.js 26.5.0 API documentation](https://nodejs.org/docs/latest/api/) and
+[Bun 1.3.14 runtime documentation](https://bun.com/docs/runtime/bun-apis).
+Those versions identify research inputs only. Updating a comparison never
+renames or changes a stable AgenTerm Rhai interface.
+
+`agenterm-script api --tree` renders a compact Rust/Node.js/Bun index from the
+same entries returned by `agenterm-script api --json`. Long-form prose may add
+examples and rationale, but exact callable identity, status, signatures,
+availability, limits, and comparisons come from the machine catalog.
 
 ## 3. Goals and non-goals
 

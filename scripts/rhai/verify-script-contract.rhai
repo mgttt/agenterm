@@ -27,9 +27,14 @@ require(
 );
 
 let catalog = rhai::json::parse(std::fs::read_to_string(args[1]));
-require(catalog.schema_version == 2, "unexpected script catalog schema");
+require(catalog.schema_version == 3, "unexpected script catalog schema");
 require(catalog.api_version == 2, "unexpected Script API major");
 require(catalog.entries.len > 0, "script catalog must not be empty");
+require(catalog.comparison.schema_version == 1, "unexpected comparison schema");
+require(
+    catalog.comparison.reviewed_on == "2026-07-29",
+    "comparison review date drifted"
+);
 
 let stable_count = 0;
 let reserved_count = 0;
@@ -40,6 +45,24 @@ for entry in catalog.entries {
     require(entry.surface_path != "", "catalog entry is missing surface_path");
     require(entry.designed_on != "", "catalog entry is missing designed_on");
     require(entry.since != "", "catalog entry is missing since");
+    require(
+        entry.comparisons.nodejs.reviewed_on == "2026-07-29",
+        "Node.js comparison is not reviewed: " + entry.stable_id
+    );
+    require(
+        entry.comparisons.bun.reviewed_on == "2026-07-29",
+        "Bun comparison is not reviewed: " + entry.stable_id
+    );
+    require(
+        entry.comparisons.nodejs.relationship == "similar" ||
+        entry.comparisons.nodejs.relationship == "agenterm_specific",
+        "Node.js comparison is not classified: " + entry.stable_id
+    );
+    require(
+        entry.comparisons.bun.relationship == "similar" ||
+        entry.comparisons.bun.relationship == "agenterm_specific",
+        "Bun comparison is not classified: " + entry.stable_id
+    );
 
     if entry.stability == "stable" {
         stable_count += 1;

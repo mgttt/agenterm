@@ -424,8 +424,12 @@ try {
     $apiResult = Invoke-Script @('script', 'api', '--json') | ConvertFrom-Json
     if (-not $apiResult.ok -or
         $apiResult.value.api_version -ne 2 -or
-        $apiResult.value.schema_version -ne 2 -or
+        $apiResult.value.schema_version -ne 3 -or
         $apiResult.value.default_profile -ne 'local' -or
+        $apiResult.value.comparison.schema_version -ne 1 -or
+        $apiResult.value.comparison.reviewed_on -ne '2026-07-29' -or
+        $apiResult.value.comparison.nodejs.reviewed_version -ne '26.5.0' -or
+        $apiResult.value.comparison.bun.reviewed_version -ne '1.3.14' -or
         $apiResult.value.profiles.pure.variables -notcontains 'args' -or
         $apiResult.value.profiles.observe.variables -notcontains 'fleet' -or
         $apiResult.value.profiles.local.variables -notcontains 'fleet' -or
@@ -516,6 +520,28 @@ try {
         }).Count -ne 1) {
         throw 'script api did not expose the versioned fail-closed capability catalog'
     }
+    $unreviewedComparisons = @(
+        $apiResult.value.entries |
+            Where-Object {
+                $_.comparisons.nodejs.relationship -notin @(
+                    'similar', 'agenterm_specific', 'deferred', 'not_applicable'
+                ) -or
+                $_.comparisons.bun.relationship -notin @(
+                    'similar', 'agenterm_specific', 'deferred', 'not_applicable'
+                ) -or
+                $_.comparisons.nodejs.reviewed_on -ne '2026-07-29' -or
+                $_.comparisons.bun.reviewed_on -ne '2026-07-29' -or
+                [string]::IsNullOrWhiteSpace(
+                    $_.comparisons.nodejs.semantic_note
+                ) -or
+                [string]::IsNullOrWhiteSpace(
+                    $_.comparisons.bun.semantic_note
+                )
+            }
+    )
+    if ($unreviewedComparisons.Count -ne 0) {
+        throw 'Script API entries did not carry reviewed Node.js/Bun comparisons'
+    }
     $fleetEntries = @(
         $apiResult.value.entries |
             Where-Object { -not [string]::IsNullOrWhiteSpace($_.operation_id) }
@@ -530,10 +556,14 @@ try {
     }
 
     Write-Host 'STEP filtered scripting API object tree'
-    $apiTree = Invoke-DirectScript @('api', 'std::fs', '--status', 'shipped')
+    $apiTree = Invoke-DirectScript @(
+        'api', 'std::fs', '--status', 'shipped', '--tree'
+    )
     if ($apiTree -notlike 'AgenTerm Script API v2*module=std.fs*status=shipped*' -or
         -not $apiTree.Contains('read-to-string  [shipped]') -or
         -not $apiTree.Contains('std::fs::read_to_string') -or
+        -not $apiTree.Contains('Node.js~node:fs') -or
+        -not $apiTree.Contains('Bun~Bun.file / Bun.write / node:fs') -or
         $apiTree.Contains('[planned]')) {
         throw "script api did not render the filtered std::fs object tree: $apiTree"
     }

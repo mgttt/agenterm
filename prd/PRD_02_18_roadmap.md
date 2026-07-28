@@ -348,8 +348,9 @@ track remains planned, but every declared dependency must still pass.
     internal `agenterm-server.exe` owns session/PTY truth, current
     `agenterm.exe` reconnects as a versioned UI client, and upgrade/rollback
     evidence preserves server/PTY identity and continuing output
-  - [x] establish typed script catalog schema v2 independently of the Script
-    API protocol version, and add an explicit server-independent `local`
+  - [x] establish typed script catalog schema v3 independently of the stable
+    Script API v2 protocol version, including reviewed Node.js/Bun research
+    analogues, and add an explicit server-independent `local`
     profile foundation without changing the ordinary default prematurely
   - [ ] make `local` the ordinary `agenterm-script.exe` execution profile and
     deliver the Rust-shaped `std::{fs,path,env,process,time}` subset plus

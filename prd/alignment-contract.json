@@ -323,7 +323,7 @@
       "kind": "behavior",
       "status": "shipped",
       "evidence_mode": "black-box",
-      "prd": "`script api [MODULE] [--status shipped|planned|all]` renders a deterministic hierarchical object tree and `--json` returns the same filtered versioned catalog with explicit view metadata",
+      "prd": "`script api [MODULE] [--status shipped|planned|all] [--tree|--json]` renders one deterministic hierarchical object tree with reviewed Node.js/Bun analogues and returns the same filtered versioned catalog with explicit view and comparison metadata",
       "evidence_ids": ["script.api-tree"]
     },
     {

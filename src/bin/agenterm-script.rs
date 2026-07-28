@@ -1402,7 +1402,7 @@ mod tests {
             catalog["typed_error"]["fields"].as_array().map(Vec::len),
             Some(8)
         );
-        assert_eq!(catalog["schema_version"], 2);
+        assert_eq!(catalog["schema_version"], 3);
         let apis = catalog["entries"].as_array().expect("API entries");
         let new_tab = apis
             .iter()

@@ -247,7 +247,7 @@ fn print_script_help() {
     println!(
         "AgenTerm Script Runtime\n\
          Usage:\n\
-           agenterm-script api [MODULE] [--status STATE] [--json]\n\
+           agenterm-script api [MODULE] [--status STATE] [--tree|--json]\n\
            agenterm-script check [OPTIONS] FILE.rhai|-\n\
            agenterm-script eval [OPTIONS] EXPRESSION [--] [ARGS...]\n\
            agenterm-script run [OPTIONS] FILE.rhai|- [--] [ARGS...]\n\
@@ -3088,7 +3088,7 @@ Usage:
   agenterm-cli get-settings
   agenterm-cli set-setting terminal.font-family FAMILY
   agenterm-cli set-setting terminal.font-size 8..36
-  agenterm-cli script api [MODULE] [--status shipped|planned|all] [--json]
+  agenterm-cli script api [MODULE] [--status shipped|planned|all] [--tree|--json]
   agenterm-cli script check|run FILE|- [--profile local|pure|observe] [--project-root DIR] [--cwd DIR]
   agenterm-cli script eval EXPRESSION [--profile local|pure|observe] [--cwd DIR]
   agenterm-cli script task list|show|run [TASK] [--manifest FILE] [--json] [-- ARGS...]

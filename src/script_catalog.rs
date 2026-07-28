@@ -16,7 +16,9 @@ use crate::{
     script_task::MAX_ACTIVE_TASKS,
 };
 
-pub const SCRIPT_CATALOG_SCHEMA_VERSION: u32 = 2;
+pub const SCRIPT_CATALOG_SCHEMA_VERSION: u32 = 3;
+pub const SCRIPT_COMPARISON_SCHEMA_VERSION: u32 = 1;
+pub const SCRIPT_COMPARISON_REVIEWED_ON: &str = "2026-07-29";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -42,6 +44,32 @@ pub enum RustMapping {
     None,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnalogueRelationship {
+    Similar,
+    AgentermSpecific,
+    Deferred,
+    NotApplicable,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+pub struct ScriptApiAnalogue {
+    pub relationship: AnalogueRelationship,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<&'static str>,
+    pub documentation: &'static str,
+    pub reviewed_version: &'static str,
+    pub reviewed_on: &'static str,
+    pub semantic_note: &'static str,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+pub struct ScriptApiComparisons {
+    pub nodejs: ScriptApiAnalogue,
+    pub bun: ScriptApiAnalogue,
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct ScriptApiEntry {
     pub stable_id: &'static str,
@@ -51,6 +79,7 @@ pub struct ScriptApiEntry {
     pub rust_path: Option<&'static str>,
     pub rust_mapping: RustMapping,
     pub semantic_differences: &'static [&'static str],
+    pub comparisons: ScriptApiComparisons,
     pub status: ScriptApiStatus,
     pub stability: ScriptApiStability,
     pub designed_on: &'static str,
@@ -137,6 +166,7 @@ pub fn entries() -> Vec<ScriptApiEntry> {
         rust_path: None,
         rust_mapping: RustMapping::None,
         semantic_differences: &["output is captured and bounded by the invocation"],
+        comparisons: unreviewed_comparisons(),
         status: ScriptApiStatus::Shipped,
         stability: ScriptApiStability::Stable,
         designed_on: "2026-07-28",
@@ -855,6 +885,9 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             "Fleet control API is not shipped yet",
         ),
     ]);
+    for entry in &mut entries {
+        entry.comparisons = comparisons_for(entry.stable_id);
+    }
     entries
 }
 
@@ -866,6 +899,19 @@ pub fn catalog() -> Value {
         "api_version": SCRIPT_API_VERSION,
         "default_profile": "local",
         "model": "rhai_language + rust_shaped_std_subset + rhai_native_extensions + agenterm_fleet",
+        "comparison": {
+            "schema_version": SCRIPT_COMPARISON_SCHEMA_VERSION,
+            "purpose": "research analogues for horizontal discovery; never a compatibility claim",
+            "reviewed_on": SCRIPT_COMPARISON_REVIEWED_ON,
+            "nodejs": {
+                "reviewed_version": "26.5.0",
+                "documentation": "https://nodejs.org/docs/latest/api/",
+            },
+            "bun": {
+                "reviewed_version": "1.3.14",
+                "documentation": "https://bun.com/docs/runtime/bun-apis",
+            },
+        },
         "profiles": {
             "pure": {
                 "status": "shipped",
@@ -991,6 +1037,7 @@ fn fleet_operation_entry(operation: &'static OperationSpec) -> ScriptApiEntry {
             "typed operations are derived from the public operation catalog",
             "mutations return native receipt, correlated events, and verified post-state",
         ],
+        comparisons: unreviewed_comparisons(),
         status: if operation.available {
             ScriptApiStatus::Shipped
         } else {
@@ -1040,6 +1087,7 @@ fn planned_entry(
         rust_path,
         rust_mapping,
         semantic_differences: &["planned surface; runtime semantics are not frozen"],
+        comparisons: unreviewed_comparisons(),
         status: ScriptApiStatus::Planned,
         stability: ScriptApiStability::Reserved,
         designed_on: "2026-07-28",
@@ -1078,6 +1126,7 @@ fn shipped_local_entry(
             "blocking call inside one supervised worker invocation",
             "errors use stable AgenTerm codes rather than Rust io::Error values",
         ],
+        comparisons: unreviewed_comparisons(),
         status: ScriptApiStatus::Shipped,
         stability: ScriptApiStability::Stable,
         designed_on: "2026-07-28",
@@ -1115,6 +1164,7 @@ fn shipped_runtime_entry(
             "AgenTerm/Rhai invocation lifecycle extension with no Rust std surface equivalent",
             "temporary ownership and atomic promotion are enforced by the host runtime",
         ],
+        comparisons: unreviewed_comparisons(),
         status: ScriptApiStatus::Shipped,
         stability: ScriptApiStability::Stable,
         designed_on: "2026-07-28",
@@ -1156,6 +1206,7 @@ fn http_entry(
             "headers and bodies are bytes-first and bounded",
             "errors expose stable privacy-safe codes without URL, credentials, or body",
         ],
+        comparisons: unreviewed_comparisons(),
         status: ScriptApiStatus::Shipped,
         stability: ScriptApiStability::Stable,
         designed_on: "2026-07-28",
@@ -1184,6 +1235,200 @@ fn shipped_local_entry_with_semantics(
     entry
 }
 
+const NODE_DOCUMENTATION: &str = "https://nodejs.org/docs/latest/api/";
+const BUN_DOCUMENTATION: &str = "https://bun.com/docs/runtime/bun-apis";
+
+const fn analogue(
+    relationship: AnalogueRelationship,
+    path: Option<&'static str>,
+    documentation: &'static str,
+    reviewed_version: &'static str,
+    semantic_note: &'static str,
+) -> ScriptApiAnalogue {
+    ScriptApiAnalogue {
+        relationship,
+        path,
+        documentation,
+        reviewed_version,
+        reviewed_on: SCRIPT_COMPARISON_REVIEWED_ON,
+        semantic_note,
+    }
+}
+
+const fn similar_comparisons(
+    node_path: &'static str,
+    bun_path: &'static str,
+    semantic_note: &'static str,
+) -> ScriptApiComparisons {
+    ScriptApiComparisons {
+        nodejs: analogue(
+            AnalogueRelationship::Similar,
+            Some(node_path),
+            NODE_DOCUMENTATION,
+            "26.5.0",
+            semantic_note,
+        ),
+        bun: analogue(
+            AnalogueRelationship::Similar,
+            Some(bun_path),
+            BUN_DOCUMENTATION,
+            "1.3.14",
+            semantic_note,
+        ),
+    }
+}
+
+const fn agenterm_specific_comparisons(semantic_note: &'static str) -> ScriptApiComparisons {
+    ScriptApiComparisons {
+        nodejs: analogue(
+            AnalogueRelationship::AgentermSpecific,
+            None,
+            NODE_DOCUMENTATION,
+            "26.5.0",
+            semantic_note,
+        ),
+        bun: analogue(
+            AnalogueRelationship::AgentermSpecific,
+            None,
+            BUN_DOCUMENTATION,
+            "1.3.14",
+            semantic_note,
+        ),
+    }
+}
+
+const fn unreviewed_comparisons() -> ScriptApiComparisons {
+    ScriptApiComparisons {
+        nodejs: analogue(
+            AnalogueRelationship::NotApplicable,
+            None,
+            NODE_DOCUMENTATION,
+            "26.5.0",
+            "comparison assignment is completed before the catalog is returned",
+        ),
+        bun: analogue(
+            AnalogueRelationship::NotApplicable,
+            None,
+            BUN_DOCUMENTATION,
+            "1.3.14",
+            "comparison assignment is completed before the catalog is returned",
+        ),
+    }
+}
+
+fn comparisons_for(stable_id: &str) -> ScriptApiComparisons {
+    if stable_id == "rhai.print" {
+        return similar_comparisons(
+            "console.log",
+            "console.log",
+            "AgenTerm captures and bounds output instead of writing an ambient console",
+        );
+    }
+    if stable_id.starts_with("std.fs.") {
+        return similar_comparisons(
+            "node:fs",
+            "Bun.file / Bun.write / node:fs",
+            "AgenTerm is synchronous, typed, invocation-bounded, and rejects broad deletion targets",
+        );
+    }
+    if stable_id.starts_with("std.path.") {
+        return similar_comparisons(
+            "node:path",
+            "node:path / Bun.fileURLToPath",
+            "AgenTerm uses a typed PathBuf value and host-native path semantics",
+        );
+    }
+    if stable_id.starts_with("std.env.") {
+        return similar_comparisons(
+            "process.env / process.cwd",
+            "Bun.env / process.cwd",
+            "AgenTerm exposes a worker snapshot and never audits environment values",
+        );
+    }
+    if stable_id.starts_with("std.process.") {
+        return similar_comparisons(
+            "node:child_process",
+            "Bun.spawn / Bun.spawnSync",
+            "AgenTerm requires executable-plus-argv and owns bounded capture, timeout, and cleanup",
+        );
+    }
+    if stable_id.starts_with("std.time.") {
+        return similar_comparisons(
+            "Date / node:timers / performance",
+            "Date / Bun.sleep / Bun.nanoseconds",
+            "AgenTerm separates wall-clock SystemTime from monotonic Duration and task deadlines",
+        );
+    }
+    if stable_id.starts_with("rhai.json.") {
+        return similar_comparisons(
+            "JSON",
+            "JSON",
+            "AgenTerm conversion is bounded and uses Rhai-compatible Dynamic values",
+        );
+    }
+    if stable_id.starts_with("rhai.bytes.") {
+        return similar_comparisons(
+            "Buffer / TextEncoder / TextDecoder",
+            "Uint8Array / Buffer / Bun.readableStreamToBytes",
+            "AgenTerm Bytes is an owned bounded value with strict UTF-8 conversion",
+        );
+    }
+    if stable_id.starts_with("rhai.stream.") {
+        return similar_comparisons(
+            "node:stream",
+            "ReadableStream / Bun.readableStreamToBytes",
+            "AgenTerm streams have invocation ownership, bounded queues, backpressure, and completeness facts",
+        );
+    }
+    if stable_id.starts_with("rhai.task.") {
+        return similar_comparisons(
+            "Promise / AbortController / node:timers",
+            "Promise / AbortController / Bun.sleep",
+            "AgenTerm exposes explicit Task identity and state rather than JavaScript promises or async syntax",
+        );
+    }
+    if stable_id.starts_with("rhai.http.") {
+        return similar_comparisons(
+            "fetch",
+            "fetch",
+            "AgenTerm returns typed bounded streams and privacy-safe errors with explicit task ownership",
+        );
+    }
+    if stable_id == "runtime.project.module-import" {
+        return similar_comparisons(
+            "ECMAScript modules",
+            "ECMAScript modules",
+            "AgenTerm resolves only deterministic project-root-relative Rhai modules without network lookup",
+        );
+    }
+    if stable_id == "runtime.project.named-task" {
+        return similar_comparisons(
+            "package.json scripts",
+            "bun run / package.json scripts",
+            "agenterm.tasks.json is a typed local task manifest, not a package or dependency manifest",
+        );
+    }
+    if stable_id.starts_with("rhai.runtime.") {
+        return agenterm_specific_comparisons(
+            "invocation-owned temporary resources and atomic publication are AgenTerm runtime contracts",
+        );
+    }
+    if stable_id.starts_with("fleet.")
+        || stable_id.starts_with("protocol.")
+        || stable_id.starts_with("ui.")
+        || stable_id.starts_with("workspace.")
+        || stable_id.starts_with("tabs.")
+        || stable_id.starts_with("pane.")
+        || stable_id.starts_with("events.")
+        || stable_id.starts_with("server.")
+    {
+        return agenterm_specific_comparisons(
+            "Fleet identity, receipts, causal events, and terminal post-state are AgenTerm-specific",
+        );
+    }
+    unreviewed_comparisons()
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
@@ -1207,6 +1452,21 @@ mod tests {
             assert!(!entry.semantic_differences.is_empty());
             assert_eq!(entry.designed_on, "2026-07-28");
             assert!(!entry.since.is_empty());
+            for analogue in [entry.comparisons.nodejs, entry.comparisons.bun] {
+                assert_ne!(
+                    analogue.relationship,
+                    AnalogueRelationship::NotApplicable,
+                    "{} has no reviewed analogue classification",
+                    entry.stable_id
+                );
+                assert_eq!(analogue.reviewed_on, SCRIPT_COMPARISON_REVIEWED_ON);
+                assert!(!analogue.reviewed_version.is_empty());
+                assert!(analogue.documentation.starts_with("https://"));
+                assert!(!analogue.semantic_note.is_empty());
+                if analogue.relationship == AnalogueRelationship::Similar {
+                    assert!(analogue.path.is_some());
+                }
+            }
             if entry.status == ScriptApiStatus::Planned {
                 assert!(entry.availability_reason.is_some());
                 assert_eq!(entry.stability, ScriptApiStability::Reserved);
@@ -1260,5 +1520,28 @@ mod tests {
                 .any(|character| ('\u{4e00}'..='\u{9fff}').contains(&character)),
             "the international runtime specification must remain English"
         );
+    }
+
+    #[test]
+    fn catalog_publishes_one_reviewed_node_and_bun_comparison_per_entry() {
+        let catalog = catalog();
+        assert_eq!(catalog["schema_version"], SCRIPT_CATALOG_SCHEMA_VERSION);
+        assert_eq!(
+            catalog["comparison"]["schema_version"],
+            SCRIPT_COMPARISON_SCHEMA_VERSION
+        );
+        assert_eq!(
+            catalog["comparison"]["reviewed_on"],
+            SCRIPT_COMPARISON_REVIEWED_ON
+        );
+        for entry in catalog["entries"].as_array().unwrap() {
+            for ecosystem in ["nodejs", "bun"] {
+                let comparison = &entry["comparisons"][ecosystem];
+                assert!(comparison["relationship"].is_string());
+                assert!(comparison["reviewed_version"].is_string());
+                assert!(comparison["reviewed_on"].is_string());
+                assert!(comparison["semantic_note"].is_string());
+            }
+        }
     }
 }

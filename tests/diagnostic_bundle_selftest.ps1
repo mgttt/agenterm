@@ -98,7 +98,13 @@ function Assert-BoundedFailureBundle {
     if ($manifest.schema_version -ne 1 -or
         $manifest.suite -ne $Suite -or
         $markerMatches.Count -ne 1) {
-        throw "$Suite bundle did not retain its one original failure marker."
+        throw (
+            "$Suite bundle identity/failure marker mismatch: " +
+            "schema=$($manifest.schema_version) suite=$($manifest.suite) " +
+            "expected_suite=$Suite marker_matches=$($markerMatches.Count) " +
+            "run_id=$($manifest.run_id) " +
+            "failure_length=$(([string]$manifest.failure).Length)"
+        )
     }
     if ($manifest.privacy.command_arguments -ne
             'known content-bearing arguments redacted' -or

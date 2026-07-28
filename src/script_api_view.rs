@@ -38,7 +38,7 @@ pub fn parse_script_api_view(arguments: &[String]) -> Result<ScriptApiView, Stri
     let mut position = 2;
     while position < arguments.len() {
         match arguments[position].as_str() {
-            "--json" => position += 1,
+            "--json" | "--tree" => position += 1,
             "--status" => {
                 if status_set {
                     return Err(
@@ -191,6 +191,8 @@ pub fn render_script_api_tree(catalog: &serde_json::Value) -> Result<String> {
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or("none")
                 .to_owned(),
+            nodejs: tree_analogue(entry, "nodejs"),
+            bun: tree_analogue(entry, "bun"),
         });
     }
 
@@ -237,6 +239,18 @@ struct ScriptApiTreeEntry {
     signature: String,
     rust_path: Option<String>,
     rust_mapping: String,
+    nodejs: String,
+    bun: String,
+}
+
+fn tree_analogue(entry: &serde_json::Value, ecosystem: &str) -> String {
+    let analogue = &entry["comparisons"][ecosystem];
+    let relationship = analogue["relationship"]
+        .as_str()
+        .unwrap_or("not_applicable");
+    analogue["path"]
+        .as_str()
+        .map_or_else(|| relationship.replace('_', "-"), str::to_owned)
 }
 
 fn render_script_api_tree_children(
@@ -254,6 +268,7 @@ fn render_script_api_tree_children(
             if let Some(rust_path) = entry.rust_path.as_deref() {
                 line.push_str(&format!(" → {rust_path} ({})", entry.rust_mapping));
             }
+            line.push_str(&format!(" · Node.js~{} · Bun~{}", entry.nodejs, entry.bun));
         }
         lines.push(line);
         let next_prefix = format!("{prefix}{}", if last { "   " } else { "│  " });
@@ -278,6 +293,12 @@ mod tests {
         let view = parse_script_api_view(&arguments).unwrap();
         assert_eq!(view.module.as_deref(), Some("std.fs"));
         assert_eq!(view.status, ScriptApiStatusFilter::Shipped);
+
+        let tree_view =
+            parse_script_api_view(&["script".to_owned(), "api".to_owned(), "--tree".to_owned()])
+                .unwrap();
+        assert_eq!(tree_view.module, None);
+        assert_eq!(tree_view.status, ScriptApiStatusFilter::All);
     }
 
     #[test]
@@ -349,6 +370,8 @@ mod tests {
         assert!(tree.contains("module=std.fs"));
         assert!(tree.contains("read-to-string  [shipped]"));
         assert!(tree.contains("std::fs::read_to_string"));
+        assert!(tree.contains("Node.js~node:fs"));
+        assert!(tree.contains("Bun~Bun.file / Bun.write / node:fs"));
         assert_eq!(tree, render_script_api_tree(&catalog).unwrap());
     }
 }
