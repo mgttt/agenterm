@@ -609,11 +609,23 @@ pub fn entries() -> Vec<ScriptApiEntry> {
         shipped_local_entry(
             "std.process.output",
             "system/process/output",
-            "Output.success/exit_code/stdout/stderr/complete/truncated/stdout_text/stderr_text/error",
+            "Output.success/exit_code/stdout/stderr/complete/truncated/stdout_text/stderr_text/error/require_success",
             Some("std::process::Output"),
             RustMapping::Adapted,
-            "output.success / output.exit_code / output.stdout / output.stderr",
-            (&["bytes_first_output", "strict_utf8_helpers", "truthful_truncation"], &["process_stdout_not_utf8", "process_stderr_not_utf8"]),
+            "output.success / output.exit_code / output.stdout / output.stderr / output.require_success(code)",
+            (
+                &[
+                    "bytes_first_output",
+                    "strict_utf8_helpers",
+                    "truthful_truncation",
+                    "explicit_nonzero_propagation",
+                ],
+                &[
+                    "process_stdout_not_utf8",
+                    "process_stderr_not_utf8",
+                    "child_nonzero",
+                ],
+            ),
         ),
         shipped_local_entry(
             "rhai.stream.handle",
@@ -913,7 +925,9 @@ pub fn catalog() -> Value {
             },
         },
         "entries": entries(),
-        "failure_categories": ["configuration", "limit", "script", "protocol", "host"],
+        "failure_categories": [
+            "configuration", "limit", "script", "child", "cancelled", "fleet", "protocol", "host"
+        ],
         "exit_classes": {
             "success": 0,
             "script": 1,
@@ -921,6 +935,9 @@ pub fn catalog() -> Value {
             "host": 1,
             "configuration": 2,
             "limit": 3,
+            "child": 4,
+            "cancelled": 5,
+            "fleet": 6,
         },
     })
 }

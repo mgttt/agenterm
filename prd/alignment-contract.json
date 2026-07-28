@@ -359,6 +359,14 @@
       "evidence_ids": ["script.runtime-lifecycle"]
     },
     {
+      "id": "scripting.exit-classes",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "public result envelopes expose stable success, configuration, limit,",
+      "evidence_ids": ["script.exit-classes"]
+    },
+    {
       "id": "scripting.direct-entry",
       "kind": "behavior",
       "status": "shipped",

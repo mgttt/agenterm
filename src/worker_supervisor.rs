@@ -26,7 +26,8 @@ use windows_sys::Win32::{
 
 use crate::script_protocol::{
     SCRIPT_FRAME_MAX_BYTES, SCRIPT_FRAME_VERSION, ScriptBrokerRequest, ScriptBrokerResponse,
-    ScriptFrame, ScriptFramePayload, ScriptInvocation, ScriptResult,
+    ScriptExitClass, ScriptFailureCategory, ScriptFrame, ScriptFramePayload, ScriptInvocation,
+    ScriptResult,
 };
 
 const PROCESS_CONCURRENCY_LIMIT: usize = 2;
@@ -291,6 +292,8 @@ impl WorkerSupervisor {
             failure.code = "limit_wall_time".to_owned();
             failure.message =
                 "host deadline reached; worker stopped during cooperative cancellation".to_owned();
+            failure.category = ScriptFailureCategory::Limit;
+            result.exit_class = ScriptExitClass::Limit;
         }
         Ok(SupervisedResult {
             result,

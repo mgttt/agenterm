@@ -14,6 +14,7 @@ $declaredEvidence = @(
     'script.north-star'
     'script.rhai-deny-budget'
     'script.rhai-framed'
+    'script.exit-classes'
     'script.modules-tasks'
     'script.stream'
     'script.http'
@@ -438,6 +439,9 @@ try {
         $apiResult.value.supervisor.job_object -ne 'kill_on_close' -or
         $apiResult.value.supervisor.global_concurrency -ne 4 -or
         $apiResult.value.exit_classes.limit -ne 3 -or
+        $apiResult.value.exit_classes.child -ne 4 -or
+        $apiResult.value.exit_classes.cancelled -ne 5 -or
+        $apiResult.value.exit_classes.fleet -ne 6 -or
         $apiResult.value.failure_categories -notcontains 'protocol' -or
         @($apiResult.value.entries | Where-Object {
             $_.stable_id -eq 'fleet.tabs.new' -and $_.status -eq 'planned'
@@ -603,6 +607,29 @@ try {
     $processRecovery = Invoke-Script @('script', 'eval', '6 * 7', '--profile', 'local')
     if ($processRecovery -ne '42') {
         throw 'script worker did not recover after a timed-out child process'
+    }
+    $childFailure = Invoke-ScriptFailure 4 @(
+        'script', 'eval',
+        'std::process::command("agenterm-definitely-missing.exe").output()',
+        '--profile', 'local'
+    )
+    if (-not $childFailure.Contains('"code":"process_spawn"') -or
+        -not $childFailure.Contains('"exit_class":"child"')) {
+        throw 'unhandled child failure did not preserve its typed exit class'
+    }
+    $childNonzeroExpression = @'
+let command = std::process::command("cmd.exe");
+command.args(["/d", "/s", "/c", "exit /b 7"]);
+let output = command.output();
+output.require_success("test-child");
+'@
+    $childNonzero = Invoke-ScriptFailure 4 @(
+        'script', 'eval', $childNonzeroExpression, '--profile', 'local'
+    )
+    if (-not $childNonzero.Contains('"code":"child_nonzero"') -or
+        -not $childNonzero.Contains('"exit_class":"child"') -or
+        -not $childNonzero.Contains('test-child')) {
+        throw 'required nonzero child exit did not preserve its typed exit class'
     }
 
     $childExpression = @'
@@ -1463,7 +1490,8 @@ try {
     $cancelFrames = @(ConvertFrom-FramedOutput -Bytes $cancelOutput)
     if ($cancelFrames.Count -ne 1 -or
         $cancelFrames[0].frame_id -ne 'cancel-invoke' -or
-        $cancelFrames[0].payload.failure.code -ne 'limit_cancelled') {
+        $cancelFrames[0].payload.failure.code -ne 'limit_cancelled' -or
+        $cancelFrames[0].payload.exit_class -ne 'cancelled') {
         throw 'framed worker did not cooperatively cancel an active invocation'
     }
     Write-Evidence 'script.rhai-framed'
@@ -1666,16 +1694,18 @@ try {
     if (-not $eventBatch.ok -or -not $eventBatch.value.position) {
         throw 'typed event read did not return an observable-fleet position'
     }
-    $restart = Invoke-ScriptFailure 1 @(
+    $restart = Invoke-ScriptFailure 6 @(
         'script', 'eval', 'fleet.events.read(`wrong-epoch`, 0, 1)',
         '--profile', 'observe'
     )
-    if (-not $restart.Contains('server_restart')) {
+    if (-not $restart.Contains('"code":"server_restart"') -or
+        -not $restart.Contains('"exit_class":"fleet"')) {
         throw 'typed event read did not preserve the stable restart error'
     }
+    Write-Evidence 'script.exit-classes'
     $waitStopwatch = [Diagnostics.Stopwatch]::StartNew()
     $eventWaitExpression = "fleet.events.wait($eventEpochLiteral, $($snapshot.event_position.sequence), ""never.matches"", 50)"
-    $waitTimeout = Invoke-ScriptFailure 1 @(
+    $waitTimeout = Invoke-ScriptFailure 6 @(
         'script', 'eval', $eventWaitExpression,
         '--profile', 'observe', '--timeout-ms', '200'
     )

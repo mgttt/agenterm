@@ -132,6 +132,7 @@ fn register_types(engine: &mut Engine) {
         output_text(&output.stderr, "process_stderr_not_utf8")
     });
     engine.register_fn("error", output_error);
+    engine.register_fn("require_success", output_require_success);
 }
 
 fn env_module() -> Module {
@@ -493,6 +494,23 @@ fn output_error(output: &mut ScriptOutput, code: &str) -> Result<String, Box<Eva
     ))
 }
 
+fn output_require_success(output: &mut ScriptOutput, code: &str) -> Result<(), Box<EvalAltResult>> {
+    validate_error_code(code)?;
+    if output.success {
+        return Ok(());
+    }
+    Err(format!(
+        "child_nonzero: {code}: process exited with code {}{}",
+        output.exit_code,
+        if output.truncated {
+            " (captured output truncated)"
+        } else {
+            ""
+        }
+    )
+    .into())
+}
+
 fn output_text(bytes: &ScriptBytes, code: &str) -> Result<String, Box<EvalAltResult>> {
     String::from_utf8(bytes.0.clone()).map_err(|_| format!("{code}: output is not UTF-8").into())
 }
@@ -509,6 +527,21 @@ fn validate_env_name(name: &str) -> Result<(), Box<EvalAltResult>> {
 fn validate_text(value: &str, code: &str) -> Result<(), Box<EvalAltResult>> {
     if value.contains('\0') {
         return Err(format!("{code}: value contains NUL").into());
+    }
+    Ok(())
+}
+
+fn validate_error_code(code: &str) -> Result<(), Box<EvalAltResult>> {
+    if code.is_empty()
+        || code.len() > 64
+        || !code.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"_.-".contains(&byte)
+        })
+    {
+        return Err(
+            "process_error_code: code must be 1..64 lowercase ASCII letters, digits, '.', '_', or '-'"
+                .into(),
+        );
     }
     Ok(())
 }
@@ -577,6 +610,29 @@ mod tests {
         assert_eq!(result["code"].as_int().unwrap(), 7);
         assert_eq!(result["stdout"].clone().into_string().unwrap(), "argv-safe");
         assert_eq!(result["stderr"].clone().into_string().unwrap(), "error");
+    }
+
+    #[test]
+    fn output_can_require_a_successful_child_exit() {
+        let source = if cfg!(windows) {
+            r#"
+                let c = std::process::command("cmd.exe");
+                c.args(["/d", "/s", "/c", "exit /b 7"]);
+                let output = c.output();
+                output.require_success("test-child");
+            "#
+        } else {
+            r#"
+                let c = std::process::command("/bin/sh");
+                c.args(["-c", "exit 7"]);
+                let output = c.output();
+                output.require_success("test-child");
+            "#
+        };
+        let error = engine().eval::<()>(source).unwrap_err().to_string();
+        assert!(error.contains("child_nonzero"));
+        assert!(error.contains("test-child"));
+        assert!(error.contains("code 7"));
     }
 
     #[test]

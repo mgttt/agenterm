@@ -535,6 +535,9 @@ fn execute_with_cancellation_and_broker(
                 ScriptFailureCategory::Configuration => ScriptExitClass::Configuration,
                 ScriptFailureCategory::Limit => ScriptExitClass::Limit,
                 ScriptFailureCategory::Script => ScriptExitClass::Script,
+                ScriptFailureCategory::Child => ScriptExitClass::Child,
+                ScriptFailureCategory::Cancelled => ScriptExitClass::Cancelled,
+                ScriptFailureCategory::Fleet => ScriptExitClass::Fleet,
                 ScriptFailureCategory::Protocol => ScriptExitClass::Protocol,
                 ScriptFailureCategory::Host => ScriptExitClass::Host,
             };
@@ -703,7 +706,7 @@ fn execute_inner(
         .map_err(|error| {
             let message = error.to_string();
             if cancellation.load(Ordering::Relaxed) {
-                limit_error("limit_cancelled", message)
+                cancelled_error("limit_cancelled", message)
             } else if wall_time_exceeded.load(Ordering::Relaxed) {
                 limit_error("limit_wall_time", message)
             } else if message.contains("Too many operations") {
@@ -716,7 +719,7 @@ fn execute_inner(
             } else if output_exceeded.load(Ordering::Relaxed) {
                 limit_error("limit_output_bytes", message)
             } else {
-                script_error("script_runtime", message)
+                classify_runtime_error(message)
             }
         })?;
     let value = if value.is_unit() {
@@ -1203,6 +1206,70 @@ fn script_error(code: impl Into<String>, message: impl Into<String>) -> ScriptFa
     failure(code, message, ScriptFailureCategory::Script)
 }
 
+fn child_error(code: impl Into<String>, message: impl Into<String>) -> ScriptFailure {
+    failure(code, message, ScriptFailureCategory::Child)
+}
+
+fn cancelled_error(code: impl Into<String>, message: impl Into<String>) -> ScriptFailure {
+    failure(code, message, ScriptFailureCategory::Cancelled)
+}
+
+fn fleet_error(code: impl Into<String>, message: impl Into<String>) -> ScriptFailure {
+    failure(code, message, ScriptFailureCategory::Fleet)
+}
+
+fn classify_runtime_error(message: String) -> ScriptFailure {
+    let classified = message
+        .split(|character: char| {
+            !character.is_ascii_alphanumeric() && character != '_' && character != '-'
+        })
+        .find_map(|token| {
+            if matches!(
+                token,
+                "process_spawn"
+                    | "child_nonzero"
+                    | "process_stdout_unavailable"
+                    | "process_stderr_unavailable"
+                    | "process_stdin_write"
+                    | "process_child_state_poisoned"
+                    | "process_child_missing"
+                    | "process_child_completed"
+                    | "process_try_wait"
+                    | "process_kill"
+                    | "process_timeout"
+                    | "process_stdout_not_utf8"
+                    | "process_stderr_not_utf8"
+            ) {
+                Some((ScriptFailureCategory::Child, token.to_owned()))
+            } else if matches!(
+                token,
+                "fleet_catalog_encode"
+                    | "fleet_receipt_invalid"
+                    | "fleet_result_decode"
+                    | "broker_host_error"
+                    | "broker_invalid_receipt"
+                    | "broker_invalid_response"
+                    | "broker_post_state_missing"
+                    | "broker_receipt_missing"
+                    | "broker_transport"
+                    | "broker_response_timeout"
+                    | "server_restart"
+                    | "journal_gap"
+                    | "future_sequence"
+                    | "event_wait_timeout"
+            ) {
+                Some((ScriptFailureCategory::Fleet, token.to_owned()))
+            } else {
+                None
+            }
+        });
+    match classified {
+        Some((ScriptFailureCategory::Child, code)) => child_error(code, message),
+        Some((ScriptFailureCategory::Fleet, code)) => fleet_error(code, message),
+        _ => script_error("script_runtime", message),
+    }
+}
+
 fn protocol_error(code: impl Into<String>, message: impl Into<String>) -> ScriptFailure {
     failure(code, message, ScriptFailureCategory::Protocol)
 }
@@ -1308,6 +1375,9 @@ mod tests {
         );
         assert_eq!(catalog["exit_classes"]["configuration"], 2);
         assert_eq!(catalog["exit_classes"]["limit"], 3);
+        assert_eq!(catalog["exit_classes"]["child"], 4);
+        assert_eq!(catalog["exit_classes"]["cancelled"], 5);
+        assert_eq!(catalog["exit_classes"]["fleet"], 6);
         assert_eq!(catalog["schema_version"], 2);
         let apis = catalog["entries"].as_array().expect("API entries");
         let new_tab = apis
@@ -1457,7 +1527,32 @@ mod tests {
         let cancellation = Arc::new(AtomicBool::new(true));
         let result = execute_with_cancellation(invocation, Some(cancellation));
         assert_eq!(failure_code(&result), "limit_cancelled");
-        assert_eq!(result.exit_class, ScriptExitClass::Limit);
+        assert_eq!(result.exit_class, ScriptExitClass::Cancelled);
+    }
+
+    #[test]
+    fn runtime_failures_preserve_child_and_fleet_exit_classes() {
+        let child = classify_runtime_error(
+            "Runtime error: process_spawn: executable missing (line 1)".to_owned(),
+        );
+        assert_eq!(child.code, "process_spawn");
+        assert_eq!(child.category, ScriptFailureCategory::Child);
+
+        let fleet = classify_runtime_error(
+            "Runtime error: server_restart: epoch changed (line 1)".to_owned(),
+        );
+        assert_eq!(fleet.code, "server_restart");
+        assert_eq!(fleet.category, ScriptFailureCategory::Fleet);
+
+        let script = classify_runtime_error("Runtime error: user failure (line 1)".to_owned());
+        assert_eq!(script.code, "script_runtime");
+        assert_eq!(script.category, ScriptFailureCategory::Script);
+
+        let denied = classify_runtime_error(
+            "Runtime error: fleet_operation_denied: observe is read-only (line 1)".to_owned(),
+        );
+        assert_eq!(denied.code, "script_runtime");
+        assert_eq!(denied.category, ScriptFailureCategory::Script);
     }
 
     #[test]

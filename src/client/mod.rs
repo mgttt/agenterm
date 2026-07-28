@@ -1327,6 +1327,9 @@ fn run_script_command_with_context(
         match result.exit_class.as_str() {
             "configuration" => 2,
             "limit" => 3,
+            "child" => 4,
+            "cancelled" => 5,
+            "fleet" => 6,
             _ => 1,
         }
     }
@@ -2369,7 +2372,7 @@ fn audit_outcome_for_result(
         result_class: result.exit_class.as_str().to_owned(),
         failure_code,
         denied,
-        cancelled: cancel_requested,
+        cancelled: cancel_requested || result.exit_class == ScriptExitClass::Cancelled,
         timed_out,
         crashed: false,
     }

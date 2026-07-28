@@ -125,6 +125,7 @@
         "script.north-star",
         "script.rhai-deny-budget",
         "script.rhai-framed",
+        "script.exit-classes",
         "script.modules-tasks",
         "script.stream",
         "script.http",

@@ -674,6 +674,11 @@ perform strict UTF-8 decoding. `.truncated` MUST become true if either stream
 exceeds its retained capture; readers continue draining discarded bytes so a
 full pipe cannot deadlock the child. `.complete` is true only after the child
 and both captured streams reach terminal state.
+`Output.require_success(code)` returns normally for exit code zero and throws
+the stable `child_nonzero` failure otherwise. `code` is a caller-selected,
+privacy-safe identifier limited to 1–64 lowercase ASCII letters, digits,
+periods, underscores, or hyphens. Scripts that accept nonzero status inspect
+`Output.success` and `exit_code` directly instead.
 
 `Command.start()` returns an invocation-owned `Child`. `id`, `state`, `kill`,
 and `wait_with_output([Duration])` are observable in the same invocation.
@@ -715,6 +720,26 @@ typed fields, not message text.
 Source text, secret environment values, credentials, HTTP bodies, full argv,
 terminal content, and unbounded output MUST NOT be copied into errors, audit
 records, or retained diagnostics.
+
+The public result envelope and process exit status use these stable classes:
+
+| Exit class | Process code | Meaning |
+|---|---:|---|
+| `success` | 0 | The script and required foreground work completed. |
+| `script` | 1 | Rhai parse, runtime, result conversion, or user failure. |
+| `protocol` | 1 | Worker framing or identity failure. |
+| `host` | 1 | Worker launch, crash, or host invariant failure. |
+| `configuration` | 2 | Invalid arguments, profile, manifest, or unavailable API. |
+| `limit` | 3 | A time, operation, value, output, task, or stream ceiling. |
+| `child` | 4 | Child execution failed, or required child status was nonzero. |
+| `cancelled` | 5 | Explicit cooperative invocation cancellation. |
+| `fleet` | 6 | Fleet transport, restart, event, receipt, or post-state failure. |
+
+Unhandled child runtime failures and `Output.require_success(code)` use
+`child`; Fleet broker failures use `fleet`. A Rhai `try/catch` may deliberately
+handle either failure and return a successful result. The richer catchable
+error object described above remains the target contract; the shipped result
+envelope already exposes stable `exit_class` and `failure.code`.
 
 ## 10. Task, Stream, and asynchronous work
 
@@ -1054,9 +1079,7 @@ command.args(["status", "--short"]);
 command.current_dir(std::env::current_dir());
 
 let output = command.output();
-if !output.success {
-    throw output.error("git-status-failed");
-}
+output.require_success("git-status-failed");
 
 print(output.stdout_text());
 ```

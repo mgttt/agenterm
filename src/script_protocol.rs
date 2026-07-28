@@ -175,6 +175,9 @@ pub enum ScriptFailureCategory {
     Configuration,
     Limit,
     Script,
+    Child,
+    Cancelled,
+    Fleet,
     Protocol,
     Host,
 }
@@ -186,6 +189,9 @@ pub enum ScriptExitClass {
     Configuration,
     Limit,
     Script,
+    Child,
+    Cancelled,
+    Fleet,
     Protocol,
     Host,
 }
@@ -197,6 +203,9 @@ impl ScriptExitClass {
             Self::Configuration => "configuration",
             Self::Limit => "limit",
             Self::Script => "script",
+            Self::Child => "child",
+            Self::Cancelled => "cancelled",
+            Self::Fleet => "fleet",
             Self::Protocol => "protocol",
             Self::Host => "host",
         }
