@@ -2,12 +2,13 @@ use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 
-pub const UI_BRIDGE_SCHEMA_VERSION: u32 = 2;
+pub const UI_BRIDGE_SCHEMA_VERSION: u32 = 3;
 pub const UI_BRIDGE_PROTOCOL_VERSION: u32 = 1;
 pub const UI_HELLO_SCHEMA_VERSION: u32 = 1;
 pub const UI_BOOTSTRAP_SCHEMA_VERSION: u32 = 1;
 pub const UI_SCREEN_SCHEMA_VERSION: u32 = 1;
 pub const UI_DELTA_SCHEMA_VERSION: u32 = 1;
+pub const UI_LEASE_SCHEMA_VERSION: u32 = 1;
 pub const UI_BOOTSTRAP_MAX_BYTES: usize = 8 * 1024 * 1024;
 pub const UI_BOOTSTRAP_MAX_TABS: usize = 1024;
 pub const UI_SCREEN_MAX_ROWS: u32 = 512;
@@ -52,6 +53,7 @@ pub struct UiBridgeFacts {
     pub target_server_executable: &'static str,
     pub bootstrap_snapshot: bool,
     pub ordered_deltas: bool,
+    pub interactive_lease: bool,
     pub reconnect: bool,
     pub rollback_proven: bool,
     pub contract_schemas: UiContractSchemas,
@@ -64,6 +66,7 @@ pub struct UiContractSchemas {
     pub bootstrap: u32,
     pub screen: u32,
     pub delta: u32,
+    pub lease: u32,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -92,6 +95,7 @@ pub const fn current_facts() -> UiBridgeFacts {
         target_server_executable: "agenterm-server.exe",
         bootstrap_snapshot: true,
         ordered_deltas: true,
+        interactive_lease: false,
         reconnect: false,
         rollback_proven: false,
         contract_schemas: UiContractSchemas {
@@ -99,6 +103,7 @@ pub const fn current_facts() -> UiBridgeFacts {
             bootstrap: UI_BOOTSTRAP_SCHEMA_VERSION,
             screen: UI_SCREEN_SCHEMA_VERSION,
             delta: UI_DELTA_SCHEMA_VERSION,
+            lease: UI_LEASE_SCHEMA_VERSION,
         },
         hard_limits: UiContractLimits {
             bootstrap_bytes: UI_BOOTSTRAP_MAX_BYTES,
@@ -117,6 +122,7 @@ pub const fn headless_server_facts() -> UiBridgeFacts {
     let mut facts = current_facts();
     facts.ownership_mode = UiOwnershipMode::SplitServerClient;
     facts.server_executable = "agenterm-server.exe";
+    facts.interactive_lease = true;
     facts
 }
 
@@ -319,6 +325,50 @@ pub struct UiDeltaBatch {
     pub active_tab_id: Option<String>,
     pub complete: bool,
     pub truncated: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct UiLeaseGrant {
+    pub schema_version: u32,
+    pub lease_id: String,
+    pub client_id: String,
+    pub client_pid: u32,
+    pub server_pid: u32,
+    pub position: UiEventPosition,
+    pub expires_unix_ms: u64,
+    pub ttl_ms: u64,
+}
+
+impl UiLeaseGrant {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.schema_version != UI_LEASE_SCHEMA_VERSION {
+            return Err("ui_lease_schema_unsupported".to_owned());
+        }
+        if self.lease_id.is_empty()
+            || self.lease_id.len() > UI_CLIENT_ID_MAX_BYTES
+            || self.lease_id.chars().any(char::is_control)
+        {
+            return Err("ui_lease_id_invalid".to_owned());
+        }
+        UiHelloRequest {
+            schema_version: UI_HELLO_SCHEMA_VERSION,
+            client_id: self.client_id.clone(),
+            protocol_range: UiProtocolRange {
+                minimum: UI_BRIDGE_PROTOCOL_VERSION,
+                maximum: UI_BRIDGE_PROTOCOL_VERSION,
+            },
+        }
+        .validate()?;
+        if self.client_pid == 0
+            || self.server_pid == 0
+            || self.position.server_epoch.is_empty()
+            || self.ttl_ms == 0
+            || self.expires_unix_ms < self.ttl_ms
+        {
+            return Err("ui_lease_grant_invalid".to_owned());
+        }
+        Ok(())
+    }
 }
 
 impl UiDeltaBatch {
@@ -645,9 +695,10 @@ mod tests {
     #[test]
     fn current_facts_do_not_claim_the_planned_split() {
         let facts = current_facts();
-        assert_eq!(facts.schema_version, 2);
+        assert_eq!(facts.schema_version, 3);
         assert_eq!(facts.ownership_mode, UiOwnershipMode::CombinedGuiServer);
         assert!(!facts.replaceable_ui);
+        assert!(!facts.interactive_lease);
         assert!(!facts.reconnect);
         assert!(facts.bootstrap_snapshot);
         assert!(facts.ordered_deltas);
@@ -660,6 +711,7 @@ mod tests {
         );
         assert_eq!(facts.contract_schemas.screen, UI_SCREEN_SCHEMA_VERSION);
         assert_eq!(facts.contract_schemas.delta, UI_DELTA_SCHEMA_VERSION);
+        assert_eq!(facts.contract_schemas.lease, UI_LEASE_SCHEMA_VERSION);
         assert_eq!(facts.hard_limits.tabs, UI_BOOTSTRAP_MAX_TABS);
         assert_eq!(facts.hard_limits.bootstrap_bytes, UI_BOOTSTRAP_MAX_BYTES);
         assert_eq!(facts.hard_limits.delta_bytes, UI_DELTA_MAX_BYTES);
@@ -672,9 +724,31 @@ mod tests {
         assert_eq!(facts.ownership_mode, UiOwnershipMode::SplitServerClient);
         assert_eq!(facts.server_executable, "agenterm-server.exe");
         assert!(!facts.replaceable_ui);
+        assert!(facts.interactive_lease);
         assert!(!facts.reconnect);
         assert!(facts.bootstrap_snapshot);
         assert!(facts.ordered_deltas);
+    }
+
+    #[test]
+    fn interactive_lease_grant_has_bounded_owner_and_causal_identity() {
+        let grant = UiLeaseGrant {
+            schema_version: UI_LEASE_SCHEMA_VERSION,
+            lease_id: "ui-2a-3e8-1".to_owned(),
+            client_id: "agenterm-gui:42".to_owned(),
+            client_pid: 42,
+            server_pid: 7,
+            position: UiEventPosition {
+                server_epoch: "epoch-1".to_owned(),
+                sequence: 9,
+            },
+            expires_unix_ms: 6_000,
+            ttl_ms: 5_000,
+        };
+        grant.validate().unwrap();
+        let mut invalid = grant;
+        invalid.lease_id = "bad\nlease".to_owned();
+        assert_eq!(invalid.validate().unwrap_err(), "ui_lease_id_invalid");
     }
 
     #[test]

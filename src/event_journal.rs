@@ -29,6 +29,7 @@ pub(crate) enum EventKind {
     TerminalOutput,
     TerminalPasted,
     TerminalViewport,
+    UiLease,
     WindowVisibility,
     WorkingContextCwd,
     WorkingContextCwdEditor,
@@ -42,7 +43,7 @@ pub(crate) enum EventKind {
 }
 
 impl EventKind {
-    pub(crate) const ALL: [Self; 26] = [
+    pub(crate) const ALL: [Self; 27] = [
         Self::ComposerDraft,
         Self::ComposerSubmitted,
         Self::ComposerSubmissionFinished,
@@ -59,6 +60,7 @@ impl EventKind {
         Self::TerminalOutput,
         Self::TerminalPasted,
         Self::TerminalViewport,
+        Self::UiLease,
         Self::WindowVisibility,
         Self::WorkingContextCwd,
         Self::WorkingContextCwdEditor,
@@ -89,6 +91,7 @@ impl EventKind {
             Self::TerminalOutput => "terminal.output",
             Self::TerminalPasted => "terminal.pasted",
             Self::TerminalViewport => "terminal.viewport",
+            Self::UiLease => "ui.lease",
             Self::WindowVisibility => "window.visibility",
             Self::WorkingContextCwd => "working-context.cwd",
             Self::WorkingContextCwdEditor => "working-context.cwd.editor",
@@ -128,7 +131,7 @@ const fn event_spec(
     }
 }
 
-pub(crate) const EVENT_CATALOG: [EventSpec; 26] = [
+pub(crate) const EVENT_CATALOG: [EventSpec; 27] = [
     event_spec(
         EventKind::ComposerDraft,
         "tabs[].draft",
@@ -240,6 +243,13 @@ pub(crate) const EVENT_CATALOG: [EventSpec; 26] = [
         "{scrollback_offset:u64,source:string}",
         "tab",
         "0.1.5",
+    ),
+    event_spec(
+        EventKind::UiLease,
+        "ui.lease",
+        "{state:string,client_id:string,client_pid:u32,reason:string}",
+        "server",
+        "0.1.9",
     ),
     event_spec(
         EventKind::WindowVisibility,
@@ -625,7 +635,10 @@ mod tests {
             assert!(!spec.state_path.is_empty());
             assert!(!spec.payload.is_empty());
             assert!(matches!(spec.scope, "server" | "tab"));
-            assert!(matches!(spec.since, "0.1.5" | "0.1.6" | "0.1.7" | "0.1.8"));
+            assert!(matches!(
+                spec.since,
+                "0.1.5" | "0.1.6" | "0.1.7" | "0.1.8" | "0.1.9"
+            ));
         }
     }
 }

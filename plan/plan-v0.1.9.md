@@ -1613,7 +1613,9 @@ S3  [~] internal `agenterm-server.exe` 已能无 HWND 地持有 workspace、
         tab/tree、真实 ConPTY、parser/scrollback、event journal 和共享
         operation replay/receipt authority，并通过公共 hello/bootstrap/
         delta/PTY/receipt 黑盒；完整 server 命令面与默认 authority 切换待补
-S4  agenterm.exe becomes replaceable client; reconnect and interactive lease
+S4  [~] server-owned 单活 interactive UI lease 已交付 attach/idempotent
+        renewal/live-owner conflict/heartbeat/detach 与 dead/expired 回收；
+        agenterm.exe consumer、input/resize lease enforcement 与 reconnect 待补
 S5  same-server GUI upgrade + rollback black-box
 S6  remove combined-process handoff only after parity gates
 ```

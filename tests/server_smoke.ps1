@@ -72,8 +72,49 @@ try {
         $protocol.ui_bridge.ownership_mode -ne 'split_server_client' -or
         $protocol.ui_bridge.server_executable -ne 'agenterm-server.exe' -or
         $protocol.ui_bridge.replaceable_ui -or
+        -not $protocol.ui_bridge.interactive_lease -or
         $protocol.ui_bridge.reconnect) {
         throw 'headless server did not publish its truthful process/ownership boundary'
+    }
+
+    Write-Host 'STEP acquire, renew, conflict, heartbeat, and detach the UI lease'
+    $leaseClientId = "server-smoke-ui-$($run.RunId)"
+    $attachArgs = @(
+        'ui-lease', 'attach',
+        '--client-id', $leaseClientId,
+        '--client-pid', "$PID"
+    )
+    $lease = Invoke-AgenTerm $attachArgs | ConvertFrom-Json
+    $sameLease = Invoke-AgenTerm $attachArgs | ConvertFrom-Json
+    $conflict = Invoke-AgenTermExpectedFailure @(
+        'ui-lease', 'attach',
+        '--client-id', "conflict-$($run.RunId)",
+        '--client-pid', "$($server.Id)"
+    )
+    if ($lease.lease_id -notmatch '^ui-[a-f0-9-]+$' -or
+        $sameLease.lease_id -ne $lease.lease_id -or
+        $sameLease.expires_unix_ms -lt $lease.expires_unix_ms -or
+        -not $conflict.Contains('another live UI client')) {
+        throw 'headless server did not enforce one idempotent live UI lease owner'
+    }
+    $heartbeat = Invoke-AgenTerm @(
+        'ui-lease', 'heartbeat',
+        '--lease-id', $lease.lease_id,
+        '--client-pid', "$PID"
+    ) | ConvertFrom-Json
+    if ($heartbeat.lease_id -ne $lease.lease_id -or
+        $heartbeat.client_pid -ne $PID) {
+        throw 'headless server did not renew the exact UI lease owner'
+    }
+    $detached = Invoke-AgenTerm @(
+        'ui-lease', 'detach',
+        '--lease-id', $lease.lease_id,
+        '--client-pid', "$PID"
+    ) | ConvertFrom-Json
+    $leaseStatus = Invoke-AgenTerm @('ui-lease', 'status') |
+        ConvertFrom-Json
+    if (-not $detached.detached -or $leaseStatus.attached) {
+        throw 'headless server did not explicitly release the UI lease'
     }
 
     Write-Host 'STEP create and observe a real PTY through public IPC'

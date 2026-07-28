@@ -9,19 +9,22 @@ use std::{
 use anyhow::{Context as _, Result};
 
 use crate::{
+    commands::option_value,
     control_authority::{
         ControlAdmission, ControlAuthority, control_event_position, resolved_control_target,
         submission_wait,
     },
     control_dispatch::{ControlHost, dispatch_shared_command, resolve_target_position},
     event_journal::{EventJournal, EventKind},
-    instances::{InstanceRegistration, register_instance},
+    instances::{InstanceRegistration, instance_process_is_alive, register_instance},
     ipc_transport::{IpcEnvelope, start_ipc_server},
     operations::validate_operation_args,
     protocol::{IpcRequest, IpcResponse},
     pty::TerminalSize,
     terminal_observation::TerminalProcessState,
     terminal_runtime::{TerminalLaunch, TerminalTab},
+    ui_bridge::{UI_LEASE_SCHEMA_VERSION, UiEventPosition, UiLeaseGrant},
+    ui_lease::{UI_LEASE_TTL_MS, UiLeaseAuthority, UiLeaseError, UiLeaseRecord},
     wake_signal::WakeSignal,
     workspace::{SavedTab, SavedWorkspace, load_workspace, save_workspace, workspace_path},
 };
@@ -88,6 +91,7 @@ struct ServerState {
     started_at: SystemTime,
     event_journal: EventJournal,
     control_authority: ControlAuthority,
+    ui_lease: UiLeaseAuthority,
     wake_signal: Arc<WakeSignal>,
     ipc_receiver: Receiver<IpcEnvelope>,
     shutdown_requested: bool,
@@ -122,6 +126,7 @@ impl ServerState {
             started_at: SystemTime::now(),
             event_journal: EventJournal::new(),
             control_authority: ControlAuthority::default(),
+            ui_lease: UiLeaseAuthority::default(),
             wake_signal,
             ipc_receiver,
             shutdown_requested: false,
@@ -207,6 +212,194 @@ impl ServerState {
         Ok(())
     }
 
+    fn reap_stale_ui_lease(&mut self, now_unix_ms: u64) {
+        if let Some((record, reason)) = self
+            .ui_lease
+            .reap_stale(now_unix_ms, instance_process_is_alive)
+        {
+            self.commit_ui_lease_event(&record, "detached", reason);
+        }
+    }
+
+    fn commit_ui_lease_event(&mut self, record: &UiLeaseRecord, state: &str, reason: &str) {
+        self.event_journal.commit(
+            EventKind::UiLease,
+            None,
+            serde_json::json!({
+                "state": state,
+                "client_id": record.client_id,
+                "client_pid": record.client_pid,
+                "reason": reason,
+            }),
+        );
+    }
+
+    fn ui_lease_grant_json(&self, record: UiLeaseRecord) -> IpcResponse {
+        let position = self.event_journal.position();
+        let grant = UiLeaseGrant {
+            schema_version: UI_LEASE_SCHEMA_VERSION,
+            lease_id: record.lease_id,
+            client_id: record.client_id,
+            client_pid: record.client_pid,
+            server_pid: std::process::id(),
+            position: UiEventPosition {
+                server_epoch: position.epoch,
+                sequence: position.sequence,
+            },
+            expires_unix_ms: record.expires_unix_ms,
+            ttl_ms: UI_LEASE_TTL_MS,
+        };
+        if let Err(error) = grant.validate() {
+            return IpcResponse::typed_failure(error, "ui_lease_grant_invalid", "internal", false);
+        }
+        match serde_json::to_string_pretty(&grant) {
+            Ok(json) => IpcResponse::success(json),
+            Err(error) => IpcResponse::typed_failure(
+                error.to_string(),
+                "ui_lease_serialization_failed",
+                "internal",
+                false,
+            ),
+        }
+    }
+
+    fn ui_lease_failure(error: UiLeaseError) -> IpcResponse {
+        IpcResponse::typed_failure(
+            error.message(),
+            error.code(),
+            error.category(),
+            error.retryable(),
+        )
+    }
+
+    fn execute_ui_lease_command(&mut self, args: &[String]) -> IpcResponse {
+        let action = args.get(1).map(String::as_str).unwrap_or_default();
+        let now_unix_ms = crate::client::unix_time_ms();
+        self.reap_stale_ui_lease(now_unix_ms);
+        match action {
+            "attach" => {
+                let Some(client_id) = option_value(args, "--client-id") else {
+                    return IpcResponse::typed_failure(
+                        "ui-lease attach requires --client-id",
+                        "ui_lease_invalid_arguments",
+                        "validation",
+                        false,
+                    );
+                };
+                let Some(client_pid) =
+                    option_value(args, "--client-pid").and_then(|value| value.parse::<u32>().ok())
+                else {
+                    return IpcResponse::typed_failure(
+                        "ui-lease attach requires numeric --client-pid",
+                        "ui_lease_invalid_arguments",
+                        "validation",
+                        false,
+                    );
+                };
+                if !instance_process_is_alive(client_pid) {
+                    return Self::ui_lease_failure(UiLeaseError::InvalidClientPid);
+                }
+                match self.ui_lease.attach(client_id, client_pid, now_unix_ms) {
+                    Ok((record, created)) => {
+                        if created {
+                            self.commit_ui_lease_event(&record, "attached", "requested");
+                        }
+                        self.ui_lease_grant_json(record)
+                    }
+                    Err(error) => Self::ui_lease_failure(error),
+                }
+            }
+            "heartbeat" => {
+                let Some(lease_id) = option_value(args, "--lease-id") else {
+                    return IpcResponse::typed_failure(
+                        "ui-lease heartbeat requires --lease-id",
+                        "ui_lease_invalid_arguments",
+                        "validation",
+                        false,
+                    );
+                };
+                let Some(client_pid) =
+                    option_value(args, "--client-pid").and_then(|value| value.parse::<u32>().ok())
+                else {
+                    return IpcResponse::typed_failure(
+                        "ui-lease heartbeat requires numeric --client-pid",
+                        "ui_lease_invalid_arguments",
+                        "validation",
+                        false,
+                    );
+                };
+                match self.ui_lease.heartbeat(lease_id, client_pid, now_unix_ms) {
+                    Ok(record) => self.ui_lease_grant_json(record),
+                    Err(error) => Self::ui_lease_failure(error),
+                }
+            }
+            "detach" => {
+                let Some(lease_id) = option_value(args, "--lease-id") else {
+                    return IpcResponse::typed_failure(
+                        "ui-lease detach requires --lease-id",
+                        "ui_lease_invalid_arguments",
+                        "validation",
+                        false,
+                    );
+                };
+                let Some(client_pid) =
+                    option_value(args, "--client-pid").and_then(|value| value.parse::<u32>().ok())
+                else {
+                    return IpcResponse::typed_failure(
+                        "ui-lease detach requires numeric --client-pid",
+                        "ui_lease_invalid_arguments",
+                        "validation",
+                        false,
+                    );
+                };
+                match self.ui_lease.detach(lease_id, client_pid) {
+                    Ok(record) => {
+                        self.commit_ui_lease_event(&record, "detached", "requested");
+                        let position = self.event_journal.position();
+                        IpcResponse::success(
+                            serde_json::json!({
+                                "schema_version": UI_LEASE_SCHEMA_VERSION,
+                                "detached": true,
+                                "client_id": record.client_id,
+                                "client_pid": record.client_pid,
+                                "position": {
+                                    "server_epoch": position.epoch,
+                                    "sequence": position.sequence,
+                                },
+                            })
+                            .to_string(),
+                        )
+                    }
+                    Err(error) => Self::ui_lease_failure(error),
+                }
+            }
+            "status" => {
+                let position = self.event_journal.position();
+                let active = self.ui_lease.active();
+                IpcResponse::success(
+                    serde_json::json!({
+                        "schema_version": UI_LEASE_SCHEMA_VERSION,
+                        "attached": active.is_some(),
+                        "client_id": active.map(|record| record.client_id.as_str()),
+                        "client_pid": active.map(|record| record.client_pid),
+                        "expires_unix_ms": active.map(|record| record.expires_unix_ms),
+                        "position": {
+                            "server_epoch": position.epoch,
+                            "sequence": position.sequence,
+                        },
+                    })
+                    .to_string(),
+                )
+            }
+            _ => IpcResponse::typed_failure(
+                "ui-lease requires attach, heartbeat, detach, or status",
+                "ui_lease_invalid_arguments",
+                "validation",
+                false,
+            ),
+        }
+    }
+
     fn execute_command(&mut self, args: &[String]) -> IpcResponse {
         if let Err(error) = validate_operation_args(args) {
             return IpcResponse::typed_failure(
@@ -215,6 +408,9 @@ impl ServerState {
                 "validation",
                 false,
             );
+        }
+        if args.first().is_some_and(|command| command == "ui-lease") {
+            return self.execute_ui_lease_command(args);
         }
         if let Some(response) = dispatch_shared_command(self, args) {
             return response;
