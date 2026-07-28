@@ -66,3 +66,41 @@ pub(super) fn u32_rect(rect: PixelRect) -> (u32, u32, u32, u32) {
         rect.height().max(0) as u32,
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::settings::AppConfig;
+
+    #[test]
+    fn hidden_tabs_zero_sidebar_width() {
+        let mut config = AppConfig::default();
+        config.tabs_visible = false;
+        let layout = workspace_layout_for(800, 600, &config);
+        assert_eq!(sidebar_width_u32(&layout), 0);
+        assert_eq!(layout.effective_tabs_width, 0);
+    }
+
+    #[test]
+    fn pixel_rect_json_includes_bounds_and_size() {
+        let rect = PixelRect {
+            left: 10,
+            top: 20,
+            right: 110,
+            bottom: 220,
+        };
+        let json = pixel_rect_json(rect);
+        assert_eq!(json["left"], 10);
+        assert_eq!(json["width"], 100);
+        assert_eq!(json["height"], 200);
+    }
+
+    #[test]
+    fn scrollbar_geometry_fits_terminal_column() {
+        let config = AppConfig::default();
+        let layout = workspace_layout_for(800, 600, &config);
+        let geometry = scrollbar_geometry(&layout, 24, 0);
+        assert!(geometry.track.right <= layout.terminal.right);
+        assert!(geometry.thumb.bottom <= geometry.track.bottom);
+    }
+}

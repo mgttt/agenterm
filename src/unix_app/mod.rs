@@ -283,6 +283,14 @@ impl UnixApp {
         let Some(position) = self.active_position() else {
             return;
         };
+        let tab_id = self.tabs[position].id;
+        if self.note_edit_target == Some(tab_id) {
+            let normalized = self.composer_buffer.replace("\r\n", "\n");
+            let (name, note) = normalized.split_once('\n').unwrap_or((&normalized, ""));
+            self.tab_name_draft = name.to_owned();
+            self.tab_note_draft = note.to_owned();
+            return;
+        }
         if self.tabs[position].sensitive_composer.is_some() {
             return;
         }
@@ -333,6 +341,9 @@ impl UnixApp {
 
     fn send_active_composer(&mut self) -> Result<(), String> {
         self.sync_composer_buffer_to_tab();
+        if self.note_edit_target.is_some() {
+            return self.complete_tab_editor(true);
+        }
         let Some(position) = self.active_position() else {
             return Err("no active window".to_owned());
         };
@@ -420,7 +431,12 @@ impl UnixApp {
         self.note_edit_target = Some(tab_id);
         self.tab_name_draft = tab.title.clone();
         self.tab_note_draft = tab.note.clone();
-        self.set_focus_surface_internal(UnixFocusSurface::Settings, "tab-editor");
+        self.composer_buffer = if tab.note.is_empty() {
+            tab.title.clone()
+        } else {
+            format!("{}\n{}", tab.title, tab.note)
+        };
+        self.set_focus_surface_internal(UnixFocusSurface::Composer, "tab-editor");
         Ok(())
     }
 
@@ -988,7 +1004,31 @@ impl ControlHost for UnixApp {
         self.sync_composer_buffer_to_tab();
     }
 
+    fn prepare_composer_send(&mut self) -> Result<bool, String> {
+        if self.note_edit_target.is_some() {
+            self.sync_composer_buffer_to_tab();
+            self.complete_tab_editor(true)?;
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    fn after_create_tab(&mut self, id: u64, parent_id: Option<u64>) {
+        if parent_id.is_some() {
+            let _ = self.open_tab_editor_for(id);
+        }
+    }
+
     fn load_composer_to_ui(&mut self) {
+        if self.note_edit_target.is_some() {
+            self.composer_buffer = if self.tab_note_draft.is_empty() {
+                self.tab_name_draft.clone()
+            } else {
+                format!("{}\n{}", self.tab_name_draft, self.tab_note_draft)
+            };
+            self.request_redraw();
+            return;
+        }
         self.load_composer_buffer_from_tab();
         self.request_redraw();
     }
@@ -1391,11 +1431,15 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                             }
                         }
                         input::ComposerKeyAction::Escape => {
-                            self.sync_composer_buffer_to_tab();
-                            self.set_focus_surface_internal(
-                                UnixFocusSurface::Terminal,
-                                "composer-escape",
-                            );
+                            if self.note_edit_target.is_some() {
+                                let _ = self.complete_tab_editor(false);
+                            } else {
+                                self.sync_composer_buffer_to_tab();
+                                self.set_focus_surface_internal(
+                                    UnixFocusSurface::Terminal,
+                                    "composer-escape",
+                                );
+                            }
                         }
                         input::ComposerKeyAction::Ignored => {}
                     }
