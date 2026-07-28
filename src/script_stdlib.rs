@@ -7,10 +7,10 @@ use std::{
 use rhai::{Array, Dynamic, Engine, EvalAltResult, Module, Shared};
 
 #[derive(Clone, Debug)]
-pub struct ScriptPath(PathBuf);
+pub struct ScriptPath(pub(crate) PathBuf);
 
 #[derive(Clone, Debug)]
-pub struct ScriptBytes(Vec<u8>);
+pub struct ScriptBytes(pub(crate) Vec<u8>);
 
 #[derive(Clone, Debug)]
 pub struct ScriptDirEntry {
@@ -110,6 +110,7 @@ pub fn register_local(engine: &mut Engine) {
     let mut std_module = Module::new();
     std_module.set_sub_module("fs", fs);
     std_module.set_sub_module("path", path);
+    crate::script_process::register(engine, &mut std_module, &mut time);
     std_module.set_sub_module("time", time);
     engine.register_static_module("std", Shared::new(std_module));
 

@@ -116,16 +116,22 @@ and it is not positioned as a restricted security plugin.
   - [x] first local slice ships typed `PathBuf::from`, join, display, file name,
     extension and absolute-path facts; canonical, UNC/reparse and long-path
     policy remains open.
-- [ ] `std::env` reads/enumerates worker environment and current-directory
+- [x] `std::env` reads/enumerates worker environment and current-directory
   facts; worker-local mutation and child environment inheritance/overlay/
   replace/remove semantics are explicit and never leak values to diagnostics.
-- [ ] `std::process` uses the Rust-shaped `Command -> Child/Output` model with
+  Process-global mutation remains deferred; child overlay/clear/remove ships.
+- [x] `std::process` uses the Rust-shaped `Command -> Child/Output` model with
   executable plus argv, cwd, env, stdin, bounded stdout/stderr, timeout,
-  cancellation and typed exit state; it never substitutes an implicit shell
-  command string or exposes Rust ownership/trait/OS-handle internals.
+  explicit kill and typed exit state; it never substitutes an implicit shell
+  command string or exposes Rust ownership/trait/OS-handle internals. Children
+  are invocation-owned and inherit supervisor process-tree cleanup.
+  `Command.start()` is the script spelling because Rhai reserves `spawn`;
+  catalog metadata retains the Rust `Command::spawn` comparison.
 - [ ] `std::time` provides selected `Duration`, `Instant`, and `SystemTime`
   values while keeping monotonic deadlines and wall time distinct; high-level
   sleep/timer/task composition is not misrepresented as Rust `std`.
+  - [x] bounded `Duration` constructors and wall-clock `SystemTime` reporting
+    ship; monotonic `Instant` remains open.
 - [ ] `rhai::task` owns executor-neutral Task/Stream composition, cancellable
   sleep/timer, wait-all, race, cancel and bounded backpressure.
 - [ ] `rhai::json` plus Rhai-native strings and a typed `Bytes` object provide
@@ -276,6 +282,9 @@ and it is not positioned as a restricted security plugin.
   - [x] `scripts/rhai/verify-script-contract.rhai` uses the shipped local
     fs/JSON surface to validate the English runtime specification and the
     versioned API catalog through the public CLI black-box suite.
+  - [x] `scripts/rhai/internal-version-policy.rhai` is the second migrated
+    production responsibility and exercises argv-safe process execution,
+    bounded capture, typed exit status, cwd, and repository file reads.
 - [ ] migrate one independently testable responsibility at a time through
   `parallel -> parity-proven -> default-rhai -> PowerShell archived`.
 - [ ] parity evidence compares the same inputs, structured outputs, exit
@@ -298,6 +307,7 @@ Migration ledger:
 | Responsibility | Replacement | Archived source | Switching commit | Evidence | Rollback boundary |
 |---|---|---|---|---|---|
 | Cargo target inventory | `scripts/rhai/target-report.rhai` | `scripts/archive/powershell/target-report.ps1` | `b9d1906` | public CLI fixture plus live PowerShell/Rhai field parity | retain through the next completed runtime slice |
+| Internal-only version policy | `scripts/rhai/internal-version-policy.rhai` | `scripts/archive/powershell/internal-version-policy.ps1` | pending commit | public CLI `check` plus identical live PowerShell/Rhai PASS result | retain through the task/module slice |
 
 ## Public black-box acceptance
 
@@ -309,6 +319,10 @@ Migration ledger:
 - [ ] process fixtures cover argv boundaries, spaces, Unicode, cwd, env, stdin,
   separate stdout/stderr, nonzero exit, timeout, cancellation, parent exit,
   backpressure, and orphan-free cleanup.
+  - [x] the first public CLI process fixture covers executable-plus-argv, cwd,
+    child env overlay, text stdin, separate stdout/stderr, nonzero exit,
+    bounded Duration timeout, explicit Child kill/wait, and recovery on the
+    immediately following invocation.
 - [ ] an independent loopback HTTP fixture covers request/response, headers,
   body, status, bounded streaming, timeout, cancellation, malformed data,
   connection failure, proxy/TLS-safe diagnostics, and no public-network

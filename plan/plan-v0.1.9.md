@@ -85,7 +85,7 @@ agenterm-script
 │  │  ├─ command(...)
 │  │  ├─ .arg() / .args() / .current_dir() / .env()
 │  │  ├─ .status() / .output()
-│  │  └─ .spawn() -> Child
+│  │  └─ .start() -> Child（Rust `spawn` 对照；Rhai 保留该词）
 │  └─ time::
 │     ├─ Duration
 │     ├─ Instant
@@ -157,7 +157,7 @@ agenterm-script
 
 ```text
 std::fs::read_to_string(...)               Rust-shaped 基础能力
-std::process::command(...).spawn()          Rust-shaped 资源对象
+std::process::command(...).start()          Rust-shaped 资源对象
 rhai::http::start(...) -> Task.wait()       Rhai-native 高级并发
 fleet.tabs.active()                         AgenTerm-bound 领域对象
 ```
@@ -479,7 +479,7 @@ command.current_dir(repo);
 command.env("NAME", "value");
 
 let output = command.output();  // 本行取得终态
-let child = command.spawn();    // 立即取得有 identity 的 Child
+let child = command.start();    // `spawn` 是 Rhai 保留字
 ```
 
 候选对象：
@@ -592,18 +592,18 @@ agenterm-script
 │  │  ├─ [ ] owned file / directory
 │  │  └─ [ ] cleanup / atomic promotion
 │  ├─ env
-│  │  ├─ [ ] get / has / names
-│  │  ├─ [ ] set / remove in worker
-│  │  └─ [ ] construct child environment
+│  │  ├─ [x] var / has / names / current_dir
+│  │  ├─ [>] process-global set/remove 明确延后
+│  │  └─ [x] Command child env overlay / remove / clear
 │  └─ process
-│     ├─ [ ] run(program, argv, options)
-│     ├─ [ ] spawn -> TaskHandle
-│     ├─ [ ] stdin / stdout / stderr streams
-│     └─ [ ] exit / timeout / cancel / orphan cleanup
+│     ├─ [x] Command.output executable + argv
+│     ├─ [x] Command.start -> invocation-owned Child
+│     ├─ [>] bounded stdin / captured stdout / stderr 已交付；stream 待补
+│     └─ [>] exit / timeout / kill / Job cleanup 已交付；cancel token 待补
 │
 ├─ concurrency
 │  ├─ time
-│  │  ├─ [ ] wall clock / monotonic deadline
+│  │  ├─ [>] Duration / wall clock 已交付；Instant 待补
 │  │  └─ [ ] sleep / cancellable timer
 │  ├─ task
 │  │  ├─ [ ] wait / wait_all / race
@@ -795,7 +795,7 @@ command.args(["status", "--short"]);
 command.current_dir(repo);
 
 let web = rhai::http::start("GET", release_url, #{});
-let child = command.spawn();
+let child = command.start();
 let timeout = std::time::Duration::from_secs(15);
 
 // 两项已经并行运行；wait 的书写顺序不等于执行顺序。
@@ -808,7 +808,8 @@ let output = child.wait_with_output(timeout);
 - 快速、本地、有界操作只提供直接调用；
 - 外部 I/O/进程/Fleet wait 提供直接终态调用和显式 start/spawn；
 - `Command.output`、`http::request`、`wait` 表示本行取得终态；
-- `Command.spawn` 返回 `Child`，`http::start` 返回 `Task`；
+- `Command.start` 返回 `Child`，`http::start` 返回 `Task`；catalog 中保留
+  Rust `Command::spawn` 对照，脚本不使用 Rhai 保留字 `spawn`；
 - `Child`、`Task`、`Stream` 共享一致的 state/cancel/deadline 心智，但不
   为统一而抹掉有价值的 typed object；
 - `rhai::task` 提供跨 waitable 的组合面；
@@ -1268,6 +1269,10 @@ scripts/rhai/verify-script-contract.rhai
 read_dir、metadata、absolute path 和 SystemTime，正常 build/check 调用点切换
 后，旧 `scripts/target-report.ps1` 进入 PowerShell archive。
 
+第二个闭环是 internal-only version policy：Rhai 版本通过 `Command.output`
+调用 argv-safe Git，校验 typed exit/capture，并读取 release/workflow 合同；
+正常 check 调用点切换后，旧 PowerShell 实现进入 archive。
+
 后续每项双跑要求：
 
 - 同一输入生成结构化结果；
@@ -1493,8 +1498,9 @@ README 增加一个简短 script task 示例；稳定运行时合同由
       long-path/atomic/cleanup 继续扩展
 
 提交 3
-  std::env/process/time + Command/Child/Duration
-  argv/cwd/stdin/stdout/stderr/timeout/Job cleanup
+  [x] std::env/process + Command/Child/Output + Duration
+  [>] argv/cwd/env/stdin/stdout/stderr/timeout/kill/Job cleanup 已交付；
+      Instant、cancel token、streaming 继续进入 task/stream 波次
 
 提交 4
   rhai::task + Task/Stream

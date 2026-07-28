@@ -364,6 +364,22 @@ try {
             $_.stability -eq 'stable' -and
             $_.designed_on -eq '2026-07-28' -and
             $_.profiles -contains 'local'
+        }).Count -ne 1 -or
+        @($apiResult.value.entries | Where-Object {
+            $_.stable_id -eq 'std.process.command' -and
+            $_.surface_path -eq 'std::process::command' -and
+            $_.rust_path -eq 'std::process::Command::new' -and
+            $_.status -eq 'shipped' -and
+            $_.stability -eq 'stable' -and
+            $_.profiles -contains 'local'
+        }).Count -ne 1 -or
+        @($apiResult.value.entries | Where-Object {
+            $_.stable_id -eq 'std.process.command-start' -and
+            $_.surface_path -eq 'Command.start' -and
+            $_.rust_path -eq 'std::process::Command::spawn' -and
+            $_.semantic_differences -contains
+                'Command::spawn is exposed as start because spawn is Rhai-reserved' -and
+            $_.status -eq 'shipped'
         }).Count -ne 1) {
         throw 'script api did not expose the versioned fail-closed capability catalog'
     }
@@ -384,6 +400,93 @@ try {
     )
     if ($dogfoodResult -notlike 'PASS: Rhai verified the Script API contract*') {
         throw "Rhai repository dogfood returned unexpected output: $dogfoodResult"
+    }
+
+    Write-Host 'STEP local environment, process, duration, and child lifecycle'
+    $processSource = Join-Path $runtimeDirectory 'process.rhai'
+    [IO.File]::WriteAllText(
+        $processSource,
+        @'
+let command = std::process::command("cmd.exe");
+command.args([
+    "/d", "/v:on", "/s", "/c",
+    "set /p LINE=&echo out:!LINE!:%AGENTERM_PROCESS_TEST%&echo cwd:%CD% 1>&2&exit /b 7"
+]);
+command.current_dir(args[0]);
+command.env("AGENTERM_PROCESS_TEST", "argv-safe");
+command.stdin_text("hello\n");
+command.timeout(std::time::Duration::from_secs(2));
+let output = command.output();
+#{
+    success: output.success,
+    exit_code: output.exit_code,
+    stdout: output.stdout_text(),
+    stderr: output.stderr_text(),
+    complete: output.complete,
+    truncated: output.truncated,
+    cwd: std::env::current_dir().display,
+    has_path: std::env::has("PATH")
+}
+'@,
+        [Text.UTF8Encoding]::new($false)
+    )
+    $processResult = Invoke-Script @(
+        'script', 'run', $processSource, '--profile', 'local',
+        '--timeout-ms', '10000', '--max-operations', '1000000',
+        '--', $runtimeDirectory
+    ) | ConvertFrom-Json
+    if ($processResult.success -or
+        $processResult.exit_code -ne 7 -or
+        $processResult.stdout.Trim() -ne 'out:hello:argv-safe' -or
+        $processResult.stderr -notlike "*cwd:$runtimeDirectory*" -or
+        -not $processResult.complete -or
+        $processResult.truncated -or
+        -not $processResult.has_path -or
+        [string]::IsNullOrWhiteSpace($processResult.cwd)) {
+        throw 'local process output did not preserve argv, cwd, env, stdin, streams, and exit facts'
+    }
+
+    $timeoutExpression = @'
+let command = std::process::command("cmd.exe");
+command.args(["/d", "/s", "/c", "ping -n 6 127.0.0.1 >nul"]);
+command.timeout(std::time::Duration::from_millis(10));
+try {
+    command.output();
+    "missing-timeout"
+} catch (error) {
+    print(error);
+}
+'@
+    $timeoutResult = Invoke-Script @(
+        'script', 'eval', $timeoutExpression, '--profile', 'local',
+        '--timeout-ms', '10000'
+    )
+    if ($timeoutResult -notlike '*process_timeout*') {
+        throw "local process timeout was not typed: $timeoutResult"
+    }
+    $processRecovery = Invoke-Script @('script', 'eval', '6 * 7', '--profile', 'local')
+    if ($processRecovery -ne '42') {
+        throw 'script worker did not recover after a timed-out child process'
+    }
+
+    $childExpression = @'
+let command = std::process::command("cmd.exe");
+command.args(["/d", "/s", "/c", "ping -n 6 127.0.0.1 >nul"]);
+command.timeout(std::time::Duration::from_secs(2));
+let child = command.start();
+let pid = child.id;
+child.kill();
+let output = child.wait_with_output();
+#{ pid: pid, state: child.state, complete: output.complete }
+'@
+    $childResult = Invoke-Script @(
+        'script', 'eval', $childExpression, '--profile', 'local',
+        '--timeout-ms', '10000'
+    ) | ConvertFrom-Json
+    if ($childResult.pid -le 0 -or
+        $childResult.state -ne 'exited' -or
+        -not $childResult.complete) {
+        throw 'local spawned child did not expose a truthful kill/wait lifecycle'
     }
 
     Write-Host 'STEP Rhai Cargo target inventory migration'

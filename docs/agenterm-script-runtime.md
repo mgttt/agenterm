@@ -134,31 +134,30 @@ agenterm-script
 │  │
 │  ├─ env::
 │  │  Worker environment and current-directory facts.
-│  │  [planned; reserved; designed 2026-07-28]
+│  │  [partially shipped; stable delivered leaves; designed 2026-07-28]
 │  │  ├─ var(name) / has(name) / names()
 │  │  │  Reads environment facts without logging values.
-│  │  │  [planned; reserved; designed 2026-07-28]
+│  │  │  [shipped; stable; designed 2026-07-28]
 │  │  ├─ current_dir()
 │  │  │  Returns the worker's typed current directory.
-│  │  │  [planned; reserved; designed 2026-07-28]
+│  │  │  [shipped; stable; designed 2026-07-28]
 │  │  └─ set/remove and child environment construction
-│  │     Worker-local mutation and explicit child inheritance policy.
-│  │     [planned; reserved; designed 2026-07-28]
+│  │     Process-global mutation is deferred; Command child overlays ship.
+│  │     [partially shipped; stable child overlay; designed 2026-07-28]
 │  │
 │  ├─ process::
 │  │  Shell-free executable-plus-argv process construction.
-│  │  [planned; stable namespace; designed 2026-07-28]
+│  │  [shipped; stable namespace; designed 2026-07-28]
 │  │  └─ command(program) -> Command
-│  │     Creates a typed process builder; `new` is not used because it is a
-│  │     Rhai reserved word.
-│  │     [planned; stable path reservation; designed 2026-07-28]
+│  │     Creates a typed process builder; no implicit shell is inserted.
+│  │     [shipped; stable; designed 2026-07-28]
 │  │
 │  └─ time::
 │     Typed duration, monotonic, and wall-clock values.
 │     [partially shipped; stable namespace; designed 2026-07-28]
 │     ├─ Duration
 │     │  A non-negative span used by deadlines and waits.
-│     │  [planned; reserved; designed 2026-07-28]
+│     │  [shipped; stable; designed 2026-07-28]
 │     ├─ Instant
 │     │  A monotonic runtime timestamp.
 │     │  [planned; reserved; designed 2026-07-28]
@@ -252,23 +251,23 @@ agenterm-script
 │  │
 │  ├─ Command
 │  │  A mutable executable-plus-argv process builder.
-│  │  [planned; reserved; designed 2026-07-28]
+│  │  [shipped; stable; designed 2026-07-28]
 │  │  ├─ .arg(value) / .args(values)
 │  │  │  Appends argv entries without shell parsing.
-│  │  │  [planned; reserved; designed 2026-07-28]
+│  │  │  [shipped; stable; designed 2026-07-28]
 │  │  ├─ .current_dir(path) / .env(name, value)
 │  │  │  Configures child launch context.
-│  │  │  [planned; reserved; designed 2026-07-28]
+│  │  │  [shipped; stable; designed 2026-07-28]
 │  │  ├─ .output() -> Output
 │  │  │  Runs synchronously with bounded captured output.
-│  │  │  [planned; reserved; designed 2026-07-28]
-│  │  └─ .spawn() -> Child
-│  │     Starts an invocation-owned child.
-│  │     [planned; reserved; designed 2026-07-28]
+│  │  │  [shipped; stable; designed 2026-07-28]
+│  │  └─ .start() -> Child
+│  │     Starts an invocation-owned child; `spawn` is Rhai-reserved.
+│  │     [shipped; stable; designed 2026-07-28]
 │  │
 │  ├─ Child / Output
 │  │  Child lifecycle and bounded final process output.
-│  │  [planned; reserved; designed 2026-07-28]
+│  │  [shipped; stable; designed 2026-07-28]
 │  ├─ Task / Stream
 │  │  Invocation-owned asynchronous completion and bounded stream state.
 │  │  [planned; reserved; designed 2026-07-28]
@@ -600,7 +599,7 @@ strict UTF-8 decoding and throws `bytes_invalid_utf8` on failure.
 
 ## 8. Process and time semantics
 
-The canonical planned process constructor is:
+The canonical process constructor is:
 
 ```rhai
 let command = std::process::command("git");
@@ -610,6 +609,9 @@ let output = command.output();
 ```
 
 `Command::new` MUST NOT be introduced: `new` is a Rhai reserved word.
+`Command.spawn` MUST NOT be introduced either: `spawn` is also Rhai-reserved.
+The canonical asynchronous child constructor is `Command.start()`, while
+catalog comparison metadata records Rust `Command::spawn`.
 Custom syntax MUST NOT be added merely to imitate a Rust spelling.
 
 Process launch MUST use executable plus argv. It MUST NOT pass an implicit
@@ -618,6 +620,28 @@ that shell executable.
 
 `Command`, `Child`, and `Output` are typed objects. Parent cancellation or
 termination MUST clean the invocation-owned process tree.
+
+`std::env::var`, `has`, `names`, and `current_dir` observe the worker
+environment. Environment values are available to the running script but MUST
+NOT be copied into retained audit or diagnostics. `Command.env`, `env_remove`,
+and `env_clear` configure only the child; they do not mutate the AgenTerm host.
+
+The shipped process defaults are a 2,000 ms child deadline and 64 KiB retained
+for each captured stream. A script MAY lower or raise them through
+`Command.timeout(Duration)` and `capture_limit(bytes)`, up to hard ceilings of
+10,000 ms and 256 KiB. Text stdin is limited to 256 KiB.
+
+`Output.stdout` and `.stderr` are `Bytes`. `stdout_text()` and `stderr_text()`
+perform strict UTF-8 decoding. `.truncated` MUST become true if either stream
+exceeds its retained capture; readers continue draining discarded bytes so a
+full pipe cannot deadlock the child. `.complete` is true only after the child
+and both captured streams reach terminal state.
+
+`Command.start()` returns an invocation-owned `Child`. `id`, `state`, `kill`,
+and `wait_with_output([Duration])` are observable in the same invocation.
+No child handle survives an invocation. The outer supervisor Job Object owns
+the worker and its descendants, so timeout, cancellation, crash, parent exit,
+or normal completion cannot intentionally detach a child process tree.
 
 `Duration`, `Instant`, and `SystemTime` keep monotonic deadlines separate from
 wall-clock time. A cancellable timer belongs to `rhai::task`, not to a fake
@@ -679,7 +703,7 @@ Concurrent work is explicit:
 let command = std::process::command("git");
 command.args(["status", "--short"]);
 
-let child = command.spawn();
+let child = command.start();
 let web = rhai::http::start("GET", url, #{});
 
 let output = child.wait_with_output();
@@ -874,7 +898,7 @@ std::fs::write(
 );
 ```
 
-### 19.2 Planned argv-safe process
+### 19.2 Shipped argv-safe process
 
 ```rhai
 let command = std::process::command("git");
@@ -895,7 +919,7 @@ print(output.stdout_text());
 let command = std::process::command("git");
 command.args(["rev-parse", "HEAD"]);
 
-let git = command.spawn();
+let git = command.start();
 let release = rhai::http::start("GET", release_url, #{
     timeout: std::time::Duration::from_secs(10)
 });

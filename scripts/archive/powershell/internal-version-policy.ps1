@@ -1,5 +1,7 @@
+# Archived after scripts/rhai/internal-version-policy.rhai reached parity.
+# This file is retained only as a bounded rollback reference.
 param(
-    [string]$RepoRoot = (Join-Path $PSScriptRoot '..')
+    [string]$RepoRoot = (Join-Path $PSScriptRoot '..\..\..')
 )
 
 $ErrorActionPreference = 'Stop'

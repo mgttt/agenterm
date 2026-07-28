@@ -399,14 +399,133 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             "time.rfc3339",
             (&["utc_rfc3339_millisecond_precision"], NO_STRINGS),
         ),
-        planned_entry(
+        shipped_local_entry(
+            "std.env.var",
+            "system/environment/read",
+            "std::env::var",
+            Some("std::env::var"),
+            RustMapping::Adapted,
+            "std::env::var(name)",
+            (
+                &["worker_environment_snapshot", "value_not_audited"],
+                &["environment_missing", "environment_not_unicode"],
+            ),
+        ),
+        shipped_local_entry(
+            "std.env.has",
+            "system/environment/has",
+            "std::env::has",
+            Some("std::env::var_os"),
+            RustMapping::Adapted,
+            "std::env::has(name)",
+            (&["worker_environment_snapshot"], &["environment_name_invalid"]),
+        ),
+        shipped_local_entry(
+            "std.env.names",
+            "system/environment/names",
+            "std::env::names",
+            Some("std::env::vars_os"),
+            RustMapping::Adapted,
+            "std::env::names()",
+            (&["values_are_not_returned", "case_insensitive_deduplication"], NO_STRINGS),
+        ),
+        shipped_local_entry(
+            "std.env.current-dir",
+            "system/environment/current-directory",
+            "std::env::current_dir",
+            Some("std::env::current_dir"),
+            RustMapping::Direct,
+            "std::env::current_dir()",
+            (NO_STRINGS, &["environment_current_dir"]),
+        ),
+        shipped_local_entry_with_semantics(
             "std.process.command",
             "system/process/command",
             "std::process::command",
             Some("std::process::Command::new"),
             RustMapping::Adapted,
             "std::process::command(program)",
-            "process API is not shipped yet",
+            (&["new_is_a_rhai_reserved_word", "no_implicit_shell"], &["process_program_empty"]),
+            &[
+                "Command::new cannot be exposed because new is Rhai-reserved",
+                "the host never inserts an implicit shell",
+                "errors use stable AgenTerm codes rather than Rust io::Error values",
+            ],
+        ),
+        shipped_local_entry(
+            "std.process.command-builder",
+            "system/process/command/builder",
+            "Command.arg/args/current_dir/env/env_remove/env_clear/stdin_text/timeout/capture_limit",
+            Some("std::process::Command"),
+            RustMapping::Adapted,
+            "command.arg(value) / command.args(values) / command.current_dir(path) / command.env(name, value)",
+            (&["mutable_builder", "bounded_text_stdin", "invocation_owned"], &["process_argument", "environment_name_invalid"]),
+        ),
+        shipped_local_entry(
+            "std.process.command-output",
+            "system/process/command/output",
+            "Command.output",
+            Some("std::process::Command::output"),
+            RustMapping::Adapted,
+            "command.output()",
+            (&["bounded_capture", "typed_timeout", "job_object_cleanup"], &["process_spawn", "process_timeout"]),
+        ),
+        shipped_local_entry_with_semantics(
+            "std.process.command-start",
+            "system/process/command/start",
+            "Command.start",
+            Some("std::process::Command::spawn"),
+            RustMapping::Adapted,
+            "command.start()",
+            (
+                &[
+                    "spawn_is_a_rhai_reserved_word",
+                    "invocation_owned",
+                    "job_object_cleanup",
+                ],
+                &["process_spawn"],
+            ),
+            &[
+                "Command::spawn is exposed as start because spawn is Rhai-reserved",
+                "the Child is owned by one supervised invocation",
+                "descendants inherit supervisor process-tree cleanup",
+            ],
+        ),
+        shipped_local_entry(
+            "std.process.child",
+            "system/process/child",
+            "Child.id/state/kill/wait_with_output",
+            Some("std::process::Child"),
+            RustMapping::Adapted,
+            "child.id / child.state / child.kill() / child.wait_with_output([timeout])",
+            (&["bounded_capture", "typed_timeout", "invocation_owned"], &["process_kill", "process_timeout"]),
+        ),
+        shipped_local_entry(
+            "std.process.output",
+            "system/process/output",
+            "Output.success/exit_code/stdout/stderr/complete/truncated/stdout_text/stderr_text/error",
+            Some("std::process::Output"),
+            RustMapping::Adapted,
+            "output.success / output.exit_code / output.stdout / output.stderr",
+            (&["bytes_first_output", "strict_utf8_helpers", "truthful_truncation"], &["process_stdout_not_utf8", "process_stderr_not_utf8"]),
+        ),
+        shipped_local_entry(
+            "std.time.duration-from-millis",
+            "system/time/duration/from-millis",
+            "std::time::Duration::from_millis",
+            Some("std::time::Duration::from_millis"),
+            RustMapping::Adapted,
+            "std::time::Duration::from_millis(value)",
+            (&["maximum_10000_ms"], &["duration_millis"]),
+        ),
+        shipped_local_entry(
+            "std.time.duration-from-secs",
+            "system/time/duration/from-secs",
+            "std::time::Duration::from_secs",
+            Some("std::time::Duration::from_secs"),
+            RustMapping::Adapted,
+            "std::time::Duration::from_secs(value)",
+            (&["maximum_10_seconds"], &["duration_seconds"]),
         ),
         shipped_local_entry(
             "rhai.json.parse",
@@ -664,6 +783,29 @@ fn shipped_local_entry(
         operation: None,
         availability_reason: None,
     }
+}
+
+fn shipped_local_entry_with_semantics(
+    stable_id: &'static str,
+    catalog_path: &'static str,
+    surface_path: &'static str,
+    rust_path: Option<&'static str>,
+    rust_mapping: RustMapping,
+    signature: &'static str,
+    behavior: (&'static [&'static str], &'static [&'static str]),
+    semantic_differences: &'static [&'static str],
+) -> ScriptApiEntry {
+    let mut entry = shipped_local_entry(
+        stable_id,
+        catalog_path,
+        surface_path,
+        rust_path,
+        rust_mapping,
+        signature,
+        behavior,
+    );
+    entry.semantic_differences = semantic_differences;
+    entry
 }
 
 #[cfg(test)]

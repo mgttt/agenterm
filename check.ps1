@@ -223,7 +223,10 @@ try {
     }
     Invoke-Checked -Id 'internal-version-policy' `
         -Label 'internal version publication policy' {
-        & '.\scripts\internal-version-policy.ps1'
+        & '.\dist\agenterm-cli.exe' script run `
+            '.\scripts\rhai\internal-version-policy.rhai' `
+            --profile local --timeout-ms 10000 `
+            -- $PSScriptRoot
     }
     Invoke-Checked -Id 'qualification-selftest' `
         -Label 'qualification fail-closed self-test' {
