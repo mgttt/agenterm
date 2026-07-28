@@ -172,6 +172,25 @@ impl UnixApp {
         self.tabs.iter().position(|tab| tab.id == active)
     }
 
+    fn initial_tab_size(&self) -> (u16, u16) {
+        self.active_position()
+            .and_then(|position| self.tabs.get(position))
+            .or_else(|| self.tabs.first())
+            .map(|tab| tab.last_size)
+            .unwrap_or_else(|| {
+                self.grid
+                    .as_ref()
+                    .map(|grid| (grid.rows, grid.cols))
+                    .unwrap_or((24, 80))
+            })
+    }
+
+    fn request_redraw(&self) {
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
+        }
+    }
+
     fn ensure_window(&mut self, event_loop: &ActiveEventLoop) -> anyhow::Result<()> {
         if self.window.is_some() {
             return Ok(());
@@ -354,6 +373,87 @@ impl ControlHost for UnixApp {
 
     fn request_shutdown(&mut self) {
         self.close_requested = true;
+    }
+
+    fn set_session_name(&mut self, name: String) {
+        self.session_name = name;
+    }
+
+    fn create_tab(
+        &mut self,
+        title: Option<String>,
+        command_line: Vec<String>,
+        tab_environment: Vec<(String, String)>,
+        select: bool,
+        parent_id: Option<u64>,
+    ) -> Result<u32, String> {
+        if let Some(parent_id) = parent_id
+            && !self.tabs.iter().any(|tab| tab.id == parent_id)
+        {
+            return Err(format!("can't find parent tab: @{parent_id}"));
+        }
+
+        let id = self.next_tab_id;
+        self.next_tab_id += 1;
+        let index = (0..)
+            .find(|candidate| !self.tabs.iter().any(|tab| tab.index == *candidate))
+            .unwrap_or(self.tabs.len() as u32);
+        let (rows, cols) = self.initial_tab_size();
+        let tab = TerminalTab::spawn(TerminalLaunch {
+            id,
+            index,
+            parent_id,
+            title,
+            command_line,
+            tab_environment,
+            session_name: self.session_name.clone(),
+            window: 0,
+            wake_signal: Arc::clone(&self.wake_signal),
+            initial_size: TerminalSize { rows, cols },
+        })
+        .map_err(|error| error.to_string())?;
+
+        self.tabs.push(tab);
+        self.tabs.sort_by_key(|tab| tab.index);
+        if select {
+            self.active = Some(id);
+            self.sync_grid_from_tab();
+            self.request_redraw();
+        }
+        Ok(index)
+    }
+
+    fn select_tab_at(&mut self, position: usize) -> Result<(), String> {
+        let Some(tab) = self.tabs.get(position) else {
+            return Err("can't find window".to_owned());
+        };
+        self.active = Some(tab.id);
+        self.sync_grid_from_tab();
+        self.request_redraw();
+        Ok(())
+    }
+
+    fn close_tab_id(&mut self, id: u64) -> Result<bool, String> {
+        let Some(position) = self.tabs.iter().position(|tab| tab.id == id) else {
+            return Err(format!("can't find window: @{id}"));
+        };
+
+        for tab in &mut self.tabs {
+            if tab.parent_id == Some(id) {
+                tab.parent_id = None;
+            }
+        }
+
+        let terminal_shutdown_complete = self.tabs[position].close_process();
+        self.tabs.remove(position);
+
+        if self.active == Some(id) {
+            self.active = self.tabs.first().map(|tab| tab.id);
+            self.sync_grid_from_tab();
+            self.request_redraw();
+        }
+
+        Ok(terminal_shutdown_complete)
     }
 }
 
