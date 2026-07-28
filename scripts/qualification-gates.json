@@ -100,7 +100,8 @@
         "cli.stable-create-id",
         "cli.observable-events",
         "cli.typed-tabs-operations",
-        "cli.control-receipts"
+        "cli.control-receipts",
+        "cli.ui-bridge-contracts"
       ]
     },
     {

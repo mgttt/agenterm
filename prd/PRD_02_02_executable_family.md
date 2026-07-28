@@ -13,7 +13,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   `execute_command` routes the same arms through `ControlHost`; remaining
   UI-only commands (`ui-snapshot`, screenshots, composer HWND, settings)
   stay host-specific
-- [ ] target architecture separates the replaceable Win32 GUI client from the
+- [~] target architecture separates the replaceable Win32 GUI client from the
   workspace/PTY/server authority so a GUI-only restart can preserve live tabs;
   this is now an accepted v0.1.9 requirement rather than an exploratory
   ownership question:
@@ -26,10 +26,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     if no compatible server exists it bootstraps `agenterm-server.exe`, then
     connects through the same typed loopback control boundary instead of
     becoming the server itself
-  - [ ] UI bootstrap uses a versioned hello, complete bounded workspace and
+  - [~] UI bootstrap uses a versioned hello, complete bounded workspace and
     terminal-screen snapshot, event baseline, then ordered deltas; reconnect
     detects restart, journal gap and incompatible protocol without silently
     discarding live server state
+    - [x] renderer-neutral UI bootstrap and terminal-screen DTOs publish independent schema versions, causal server epoch/sequence identity, stable tab/tree identity, completeness facts and hard byte/item/dimension limits
+    - [ ] current server-owned state must populate the DTOs and deliver
+      bootstrap plus ordered deltas before `bootstrap_snapshot` becomes true
   - [ ] one interactive UI lease owns terminal resize/focus/input while future
     read-only observers remain possible; replacing or crashing the GUI releases
     only that lease and never ends PTYs
@@ -43,7 +46,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   - [ ] black-box upgrade proof keeps server PID, epoch, tab IDs, PTY child
     PIDs, scrollback and continuing output stable while HWND and GUI build
     identity change; rollback to the previous compatible GUI is also proven
-  - [ ] migration is phased through extracted server state and renderer-neutral
+  - [~] migration is phased through extracted server state and renderer-neutral
     screen contracts. The current combined `agenterm.exe` remains truthful
     until those gates pass; merely hiding its old HWND is not GUI replacement
 - [x] `agenterm.exe` rejects CLI-style or invalid GUI arguments without

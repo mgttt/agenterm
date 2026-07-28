@@ -1600,8 +1600,9 @@ GUI ui.hello(build, protocol range, capabilities)
 迁移波次：
 
 ```text
-S0  [>] ownership inventory + typed discovery/negotiation 已交付；
-        renderer-neutral bootstrap/screen contracts 待补
+S0  [~] ownership inventory + typed discovery/negotiation 已交付；
+        renderer-neutral bootstrap/screen DTO、schema 与 hard limits 已交付，
+        current-state adapter 与实际 transport 待补
 S1  extract server-owned workspace/terminal state behind adapters
 S2  add hello/bootstrap/screen snapshot/event delta protocol
 S3  build internal headless agenterm-server.exe

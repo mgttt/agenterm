@@ -11,6 +11,7 @@ $declaredEvidence = @(
     'cli.observable-events'
     'cli.typed-tabs-operations'
     'cli.control-receipts'
+    'cli.ui-bridge-contracts'
 )
 if ($ListEvidence) {
     $declaredEvidence
@@ -174,15 +175,25 @@ try {
 
     $protocol = Invoke-AgenTerm @('protocol-info') | ConvertFrom-Json
     $operationCatalog = $protocol.operation_catalog
-    if ($protocol.ui_bridge.schema_version -ne 1 -or
+    if ($protocol.ui_bridge.schema_version -ne 2 -or
         $protocol.ui_bridge.ownership_mode -ne 'combined_gui_server' -or
         $protocol.ui_bridge.replaceable_ui -or
         $protocol.ui_bridge.target_server_executable -ne 'agenterm-server.exe' -or
+        $protocol.ui_bridge.bootstrap_snapshot -or
+        $protocol.ui_bridge.contract_schemas.bootstrap -ne 1 -or
+        $protocol.ui_bridge.contract_schemas.screen -ne 1 -or
+        $protocol.ui_bridge.hard_limits.bootstrap_bytes -ne 8388608 -or
+        $protocol.ui_bridge.hard_limits.tabs -ne 1024 -or
+        $protocol.ui_bridge.hard_limits.screen_rows -ne 512 -or
+        $protocol.ui_bridge.hard_limits.screen_columns -ne 512 -or
+        $protocol.ui_bridge.hard_limits.screen_runs -ne 262144 -or
+        $protocol.ui_bridge.hard_limits.screen_text_bytes -ne 4194304 -or
         $operationCatalog.schema_version -ne 1 -or
         -not $operationCatalog.classification_only -or
         $operationCatalog.authorization_policy) {
         throw 'protocol-info did not expose truthful UI ownership and operation facts'
     }
+    Write-Evidence 'cli.ui-bridge-contracts'
     $expectedOperations = @{
         'protocol.info' = 'observe'
         'ui.tabs.show' = 'control'
