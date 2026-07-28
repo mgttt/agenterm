@@ -16,6 +16,14 @@ require(
     html.contains(expected_reference),
     "docs index must use the case-exact workspace image reference"
 );
+require(
+    html.contains("docs/agenterm-script-runtime.md"),
+    "docs index must use the case-exact script specification path"
+);
+require(
+    html.contains("© 2026 PARTNERNET SOFTWARE PTY LTD"),
+    "docs index must publish the product copyright owner"
+);
 
 let found = false;
 for entry in std::fs::read_dir(std::path::join(docs, "assets").display) {
