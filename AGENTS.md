@@ -201,19 +201,19 @@ with `cargo-xwin`. The snapshot already has Rust 1.97.0 (pinned by
 (`/usr/bin/clang-cl` -> `clang-18`), and Wine.
 
 CI covers all six architecture cells `{x86_64,aarch64} × {win,lnx,osx}`. Local
-build commands per cell (clients = `agenterm-cli`, `agenterm-mux`,
-`agenterm-script`; GUI `agenterm` is Windows-only):
+build commands per cell (all four binaries: `agenterm` GUI plus
+`agenterm-cli`, `agenterm-mux`, `agenterm-script`):
 
 | Cell | Host | Build |
 |------|------|-------|
 | **win × x86_64** | Linux + `cargo-xwin` | `cargo xwin build --target x86_64-pc-windows-msvc` (all four bins) |
 | **win × aarch64** | Linux + `cargo-xwin` | `cargo xwin build --target aarch64-pc-windows-msvc` (all four bins) |
-| **lnx × x86_64** | Linux native | `cargo build --target x86_64-unknown-linux-gnu --bin agenterm-cli --bin agenterm-mux --bin agenterm-script` |
-| **lnx × aarch64** | Linux + `gcc-aarch64-linux-gnu` | `CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc cargo build --target aarch64-unknown-linux-gnu --bin agenterm-cli --bin agenterm-mux --bin agenterm-script` |
-| **osx × aarch64** | macOS | `cargo build --target aarch64-apple-darwin --bin agenterm-cli --bin agenterm-mux --bin agenterm-script` |
-| **osx × x86_64** | macOS | `cargo build --target x86_64-apple-darwin --bin agenterm-cli --bin agenterm-mux --bin agenterm-script` |
+| **lnx × x86_64** | Linux native | `cargo build --target x86_64-unknown-linux-gnu --bin agenterm --bin agenterm-cli --bin agenterm-mux --bin agenterm-script` |
+| **lnx × aarch64** | Linux + `gcc-aarch64-linux-gnu` | `CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc cargo build --target aarch64-unknown-linux-gnu --bin agenterm --bin agenterm-cli --bin agenterm-mux --bin agenterm-script` |
+| **osx × aarch64** | macOS | `cargo build --target aarch64-apple-darwin --bin agenterm --bin agenterm-cli --bin agenterm-mux --bin agenterm-script` |
+| **osx × x86_64** | macOS | `cargo build --target x86_64-apple-darwin --bin agenterm --bin agenterm-cli --bin agenterm-mux --bin agenterm-script` |
 
-Clippy (client bins unless noted): append `-- -D warnings` to the matching
+Clippy (all four bins unless noted): append `-- -D warnings` to the matching
 `cargo clippy` or `cargo xwin clippy` invocation with the same `--target` and
 `--bin` flags. On Linux, `cargo fmt --check` runs natively.
 
@@ -236,6 +236,7 @@ Clippy (client bins unless noted): append `-- -D warnings` to the matching
 - aarch64: install `gcc-aarch64-linux-gnu`, then
   `./scripts/build-linux-aarch64-clients.sh` (or the `lnx × aarch64` cargo line above).
   Smoke under QEMU: `qemu-aarch64-static target/aarch64-unknown-linux-gnu/debug/agenterm-cli --help`
+- GUI `agenterm` builds on Linux/macOS; CI only checks the binary exists (no DISPLAY smoke).
 
 **Wine / ConPTY limits**: Wine cannot sustain an interactive ConPTY shell — a
 tab's `cmd.exe` starts and immediately exits `dead`, so live terminal I/O,

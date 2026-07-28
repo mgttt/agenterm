@@ -30,9 +30,17 @@ mod wake_signal;
 mod working_context;
 mod workspace;
 
+mod pty;
+
+#[cfg(not(windows))]
+mod gui_wake;
+
+#[cfg(unix)]
+mod unix_app;
+
 #[cfg(windows)]
 mod script_audit;
-#[cfg(windows)]
+#[cfg(any(windows, unix))]
 mod terminal_runtime;
 #[cfg(windows)]
 mod win_app;
@@ -44,11 +52,8 @@ pub use client::{run_cli_entry, run_mux_entry};
 #[cfg(windows)]
 pub use win_app::run_gui_entry;
 
-#[cfg(not(windows))]
-pub fn run_gui_entry() -> i32 {
-    eprintln!("AgenTerm GUI is only available on Windows.");
-    1
-}
+#[cfg(unix)]
+pub use unix_app::run_gui_entry;
 
 pub(crate) const IPC_TIMEOUT: Duration = Duration::from_secs(5);
 pub(crate) const SCROLLBACK_LINES: usize = 10_000;
@@ -57,7 +62,7 @@ pub(crate) const SCROLLBACK_LINES: usize = 10_000;
 pub(crate) use win_app::request_gui_wake;
 
 #[cfg(not(windows))]
-pub(crate) fn request_gui_wake(_wake_window: isize, _wake_signal: &wake_signal::WakeSignal) {}
+pub(crate) use gui_wake::request_gui_wake;
 
 pub(crate) fn ipc_address() -> String {
     client::ipc_address()

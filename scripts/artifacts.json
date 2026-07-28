@@ -115,6 +115,12 @@
       "package": "tar.gz",
       "executables": [
         {
+          "name": "agenterm",
+          "role": "gui",
+          "documentation_role": "GUI application",
+          "offline_probe": []
+        },
+        {
           "name": "agenterm-cli",
           "role": "cli",
           "documentation_role": "native observation and automation client",
@@ -140,6 +146,12 @@
       "package": "tar.gz",
       "executables": [
         {
+          "name": "agenterm",
+          "role": "gui",
+          "documentation_role": "GUI application",
+          "offline_probe": []
+        },
+        {
           "name": "agenterm-cli",
           "role": "cli",
           "documentation_role": "native observation and automation client",
@@ -165,6 +177,12 @@
       "package": "tar.gz",
       "executables": [
         {
+          "name": "agenterm",
+          "role": "gui",
+          "documentation_role": "GUI application",
+          "offline_probe": []
+        },
+        {
           "name": "agenterm-cli",
           "role": "cli",
           "documentation_role": "native observation and automation client",
@@ -189,6 +207,12 @@
       "arch": "x86_64",
       "package": "tar.gz",
       "executables": [
+        {
+          "name": "agenterm",
+          "role": "gui",
+          "documentation_role": "GUI application",
+          "offline_probe": []
+        },
         {
           "name": "agenterm-cli",
           "role": "cli",

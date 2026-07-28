@@ -395,6 +395,11 @@ track remains planned, but every declared dependency must still pass.
     autonomous scheduling remain later independently approved gates
   - [ ] implementation sequencing, budgets, risks and release evidence are
     owned by [the v0.1.10 public plan](../plan/plan-v0.1.10.md)
+- [ ] Multi-platform GUI track (independent of v0.1.8–v0.1.10 version gates):
+  shared PTY backend, Unix IPC server, Linux/macOS `winit`+`softbuffer`
+  human window MVP, and release packages that include `agenterm` on
+  linux/macos; sequencing in
+  [plan-multiplatform-gui.md](../plan/plan-multiplatform-gui.md)
 - [ ] M8 evidence-gated optional intelligence: deterministic rules establish
   the baseline; any learned worker advances only after a concrete user case
   and portable Windows CPU evidence beat simpler methods

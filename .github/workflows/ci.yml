@@ -38,6 +38,8 @@ jobs:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
           persist-credentials: false
+      - name: Install GUI system libraries
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon0 libxkbcommon-x11-0 libwayland-client0
       - name: Install lint components
         run: rustup component add rustfmt clippy
       - name: Check formatting
@@ -45,7 +47,7 @@ jobs:
       - name: Clippy (Linux client binaries)
         run: >-
           cargo clippy --locked --target x86_64-unknown-linux-gnu
-          --bin agenterm-cli --bin agenterm-mux --bin agenterm-script
+          --bin agenterm --bin agenterm-cli --bin agenterm-mux --bin agenterm-script
           -- -D warnings
       - name: Build Linux client binaries
         run: ./scripts/build-linux-clients.sh
@@ -54,6 +56,7 @@ jobs:
       - name: Smoke client entrypoints
         run: |
           BIN=target/x86_64-unknown-linux-gnu/debug
+          test -x "$BIN/agenterm"
           "$BIN/agenterm-cli" --help | head -3
           "$BIN/agenterm-mux" --version
           "$BIN/agenterm-script" --help | head -3
@@ -69,15 +72,16 @@ jobs:
       - name: Clippy (macOS client binaries)
         run: >-
           cargo clippy --locked --target aarch64-apple-darwin
-          --bin agenterm-cli --bin agenterm-mux --bin agenterm-script
+          --bin agenterm --bin agenterm-cli --bin agenterm-mux --bin agenterm-script
           -- -D warnings
       - name: Build macOS client binaries
         run: >-
           cargo build --locked --target aarch64-apple-darwin
-          --bin agenterm-cli --bin agenterm-mux --bin agenterm-script
+          --bin agenterm --bin agenterm-cli --bin agenterm-mux --bin agenterm-script
       - name: Smoke client entrypoints
         run: |
           BIN=target/aarch64-apple-darwin/debug
+          test -x "$BIN/agenterm"
           "$BIN/agenterm-cli" --help | head -3
           "$BIN/agenterm-mux" --version
           "$BIN/agenterm-script" --help | head -3
@@ -93,19 +97,20 @@ jobs:
       - name: Install lint components
         run: rustup component add rustfmt clippy
       - name: Install aarch64 cross linker
-        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu qemu-user-static
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu qemu-user-static libxkbcommon0 libxkbcommon-x11-0
       - name: Clippy (Linux aarch64 client binaries)
         run: >-
           cargo clippy --locked --target aarch64-unknown-linux-gnu
-          --bin agenterm-cli --bin agenterm-mux --bin agenterm-script
+          --bin agenterm --bin agenterm-cli --bin agenterm-mux --bin agenterm-script
           -- -D warnings
       - name: Build Linux aarch64 client binaries
         run: >-
           cargo build --locked --target aarch64-unknown-linux-gnu
-          --bin agenterm-cli --bin agenterm-mux --bin agenterm-script
+          --bin agenterm --bin agenterm-cli --bin agenterm-mux --bin agenterm-script
       - name: Smoke client entrypoints
         run: |
           BIN=target/aarch64-unknown-linux-gnu/debug
+          test -x "$BIN/agenterm"
           qemu-aarch64-static "$BIN/agenterm-cli" --help | head -3
           qemu-aarch64-static "$BIN/agenterm-mux" --version
           qemu-aarch64-static "$BIN/agenterm-script" --help | head -3
@@ -141,15 +146,16 @@ jobs:
       - name: Clippy (macOS x86_64 client binaries)
         run: >-
           cargo clippy --locked --target x86_64-apple-darwin
-          --bin agenterm-cli --bin agenterm-mux --bin agenterm-script
+          --bin agenterm --bin agenterm-cli --bin agenterm-mux --bin agenterm-script
           -- -D warnings
       - name: Build macOS x86_64 client binaries
         run: >-
           cargo build --locked --target x86_64-apple-darwin
-          --bin agenterm-cli --bin agenterm-mux --bin agenterm-script
+          --bin agenterm --bin agenterm-cli --bin agenterm-mux --bin agenterm-script
       - name: Smoke client entrypoints
         run: |
           BIN=target/x86_64-apple-darwin/debug
+          test -x "$BIN/agenterm"
           "$BIN/agenterm-cli" --help | head -3
           "$BIN/agenterm-mux" --version
           "$BIN/agenterm-script" --help | head -3

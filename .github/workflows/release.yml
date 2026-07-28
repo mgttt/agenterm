@@ -191,7 +191,10 @@ jobs:
         if: matrix.platform_id == 'linux-x86_64'
         env:
           AGENTERM_BUILD_PROFILE: release
-        run: ./scripts/build-linux-clients.sh
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon0 libxkbcommon-x11-0 libwayland-client0
+          ./scripts/build-linux-clients.sh
 
       - name: Package Linux x86_64 release
         if: matrix.platform_id == 'linux-x86_64'
@@ -204,7 +207,7 @@ jobs:
         if: matrix.platform_id == 'linux-aarch64'
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
+          sudo apt-get install -y gcc-aarch64-linux-gnu libxkbcommon0 libxkbcommon-x11-0
           rustup target add aarch64-unknown-linux-gnu
 
       - name: Build Linux ARM64 clients
@@ -224,7 +227,7 @@ jobs:
         if: matrix.platform_id == 'macos-aarch64'
         run: >-
           cargo build --locked --release --target aarch64-apple-darwin
-          --bin agenterm-cli --bin agenterm-mux --bin agenterm-script
+          --bin agenterm --bin agenterm-cli --bin agenterm-mux --bin agenterm-script
 
       - name: Package macOS ARM64 release
         if: matrix.platform_id == 'macos-aarch64'
@@ -238,7 +241,7 @@ jobs:
         run: |
           rustup target add x86_64-apple-darwin
           cargo build --locked --release --target x86_64-apple-darwin \
-            --bin agenterm-cli --bin agenterm-mux --bin agenterm-script
+            --bin agenterm --bin agenterm-cli --bin agenterm-mux --bin agenterm-script
 
       - name: Package macOS x86_64 release
         if: matrix.platform_id == 'macos-x86_64'

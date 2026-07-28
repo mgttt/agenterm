@@ -24,7 +24,6 @@ pub(crate) fn read_bounded_ipc_line(
     String::from_utf8(bytes).with_context(|| format!("{label} was not valid UTF-8"))
 }
 
-#[cfg(windows)]
 mod server {
     use std::{
         sync::{
@@ -149,7 +148,6 @@ mod server {
     }
 }
 
-#[cfg(windows)]
 pub(crate) use server::{IpcEnvelope, start_ipc_server};
 
 #[cfg(test)]
