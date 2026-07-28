@@ -194,36 +194,57 @@ The cloud VM is **Linux**, but AgenTerm is **Windows-only** (`windows-sys`,
 ConPTY, MSVC target). The PowerShell tooling (`build.bat`, `check.ps1`,
 `release.ps1`, every `tests/*.ps1` smoke test) is Windows-host-only and does not
 run here — for the authoritative Windows dev loop see the sections above and
-`README.md`. On the Linux VM, build/lint/test the real
-`x86_64-pc-windows-msvc` target by cross-compiling. The snapshot already has
-Rust 1.97.0 (pinned by `rust-toolchain.toml`, with the msvc target + clippy +
-rustfmt), `cargo-xwin`, LLVM `lld`/`llvm-lib`/`llvm-rc`, a `clang-cl` symlink
+`README.md`. On the Linux VM, build/lint/test Windows targets by cross-compiling
+with `cargo-xwin`. The snapshot already has Rust 1.97.0 (pinned by
+`rust-toolchain.toml`, with all six matrix targets + clippy + rustfmt),
+`cargo-xwin`, LLVM `lld`/`llvm-lib`/`llvm-rc`, a `clang-cl` symlink
 (`/usr/bin/clang-cl` -> `clang-18`), and Wine.
 
-- Lint: `cargo fmt --check` runs natively; `cargo clippy --target
- x86_64-pc-windows-msvc --all-targets -- -D warnings` matches CI's gate.
-- Build the four exes: `cargo xwin build --target x86_64-pc-windows-msvc`
- (`cargo-xwin` supplies the MSVC CRT/SDK and drives `lld-link`). Output lands in
- `target/x86_64-pc-windows-msvc/debug/`.
+CI covers all six architecture cells `{x86_64,aarch64} × {win,lnx,osx}`. Local
+build commands per cell (clients = `agenterm-cli`, `agenterm-mux`,
+`agenterm-script`; GUI `agenterm` is Windows-only):
+
+| Cell | Host | Build |
+|------|------|-------|
+| **win × x86_64** | Linux + `cargo-xwin` | `cargo xwin build --target x86_64-pc-windows-msvc` (all four bins) |
+| **win × aarch64** | Linux + `cargo-xwin` | `cargo xwin build --target aarch64-pc-windows-msvc` (all four bins) |
+| **lnx × x86_64** | Linux native | `cargo build --target x86_64-unknown-linux-gnu --bin agenterm-cli --bin agenterm-mux --bin agenterm-script` |
+| **lnx × aarch64** | Linux + `gcc-aarch64-linux-gnu` | `CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc cargo build --target aarch64-unknown-linux-gnu --bin agenterm-cli --bin agenterm-mux --bin agenterm-script` |
+| **osx × aarch64** | macOS | `cargo build --target aarch64-apple-darwin --bin agenterm-cli --bin agenterm-mux --bin agenterm-script` |
+| **osx × x86_64** | macOS | `cargo build --target x86_64-apple-darwin --bin agenterm-cli --bin agenterm-mux --bin agenterm-script` |
+
+Clippy (client bins unless noted): append `-- -D warnings` to the matching
+`cargo clippy` or `cargo xwin clippy` invocation with the same `--target` and
+`--bin` flags. On Linux, `cargo fmt --check` runs natively.
+
+**Windows x86_64 on Linux** (primary cloud loop):
+
+- Lint: `cargo clippy --target x86_64-pc-windows-msvc --all-targets -- -D warnings`
+- Build: `cargo xwin build --target x86_64-pc-windows-msvc` →
+  `target/x86_64-pc-windows-msvc/debug/`
 - Unit tests: `cargo xwin test --target x86_64-pc-windows-msvc` compiles for
- Windows and runs the test exes under Wine (137 lib + 16 script tests pass).
- Set `WINEPREFIX=$HOME/.wine-agenterm WINEDEBUG=-all` to keep Wine quiet.
-- The compiled console exes run under Wine, e.g.
- `wine target/x86_64-pc-windows-msvc/debug/agenterm-cli.exe --help`. Launching
- `agenterm.exe` on `DISPLAY=:1` starts a working IPC server: `server-list`,
- `ui-snapshot`, `new-window`, `inspect`, `save-workspace`, etc. all round-trip.
-- **Wine cannot sustain an interactive ConPTY shell**: a tab's `cmd.exe` starts
- and immediately exits `dead`, so live terminal I/O, `capture-pane` output, and
- the `tests/*.ps1` smoke suites cannot pass on Linux. Interactive-terminal and
- rendering work must be validated on a real Windows host (that is what CI on
- `windows-latest` covers). Treat Linux here as a fast lint/build/unit-test and
- control-plane sanity loop, not a full end-to-end terminal environment.
-- **Native Linux client binaries** (`agenterm-cli`, `agenterm-mux`, `agenterm-script`)
- build without cross-compilation: `cargo build --target x86_64-unknown-linux-gnu
- --bin agenterm-cli --bin agenterm-mux --bin agenterm-script`. The GUI binary
- (`agenterm`) is Windows-only; `agenterm-cli script` hosting is Windows-only for
- now — on Linux invoke `agenterm-script` directly. Instance discovery uses
- `~/.local/share/agenterm/instances/` (override with `AGENTERM_INSTANCE_DIR`).
-- CI also builds client binaries on `ubuntu-latest` (`linux-clients` job) and
- `macos-latest` (`macos-clients` job). Local build:
- `./scripts/build-linux-clients.sh` (or set `AGENTERM_BUILD_PROFILE=release`).
+  Windows and runs the test exes under Wine (137 lib + 16 script tests pass).
+  Set `WINEPREFIX=$HOME/.wine-agenterm WINEDEBUG=-all` to keep Wine quiet.
+- Smoke: `wine target/x86_64-pc-windows-msvc/debug/agenterm-cli.exe --help`.
+  Launching `agenterm.exe` on `DISPLAY=:1` starts a working IPC server:
+  `server-list`, `ui-snapshot`, `new-window`, `inspect`, `save-workspace`, etc.
+  all round-trip.
+
+**Linux clients on this VM**:
+
+- x86_64: `./scripts/build-linux-clients.sh` (or set `AGENTERM_BUILD_PROFILE=release`)
+- aarch64: install `gcc-aarch64-linux-gnu`, then
+  `./scripts/build-linux-aarch64-clients.sh` (or the `lnx × aarch64` cargo line above).
+  Smoke under QEMU: `qemu-aarch64-static target/aarch64-unknown-linux-gnu/debug/agenterm-cli --help`
+
+**Wine / ConPTY limits**: Wine cannot sustain an interactive ConPTY shell — a
+tab's `cmd.exe` starts and immediately exits `dead`, so live terminal I/O,
+`capture-pane` output, and the `tests/*.ps1` smoke suites cannot pass on Linux.
+Interactive-terminal and rendering work must be validated on a real Windows host
+(that is what CI on `windows-latest` covers). Treat Linux here as a fast
+lint/build/unit-test and control-plane sanity loop, not a full end-to-end
+terminal environment.
+
+On Linux/macOS, `agenterm-cli script` hosting is Windows-only for now — invoke
+`agenterm-script` directly. Instance discovery uses
+`~/.local/share/agenterm/instances/` (override with `AGENTERM_INSTANCE_DIR`).

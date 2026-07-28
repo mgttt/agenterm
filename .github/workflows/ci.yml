@@ -81,3 +81,75 @@ jobs:
           "$BIN/agenterm-cli" --help | head -3
           "$BIN/agenterm-mux" --version
           "$BIN/agenterm-script" --help | head -3
+
+  linux-aarch64-clients:
+    runs-on: ubuntu-latest
+    env:
+      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
+      - name: Install lint components
+        run: rustup component add rustfmt clippy
+      - name: Install aarch64 cross linker
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu qemu-user-static
+      - name: Clippy (Linux aarch64 client binaries)
+        run: >-
+          cargo clippy --locked --target aarch64-unknown-linux-gnu
+          --bin agenterm-cli --bin agenterm-mux --bin agenterm-script
+          -- -D warnings
+      - name: Build Linux aarch64 client binaries
+        run: >-
+          cargo build --locked --target aarch64-unknown-linux-gnu
+          --bin agenterm-cli --bin agenterm-mux --bin agenterm-script
+      - name: Smoke client entrypoints
+        run: |
+          BIN=target/aarch64-unknown-linux-gnu/debug
+          qemu-aarch64-static "$BIN/agenterm-cli" --help | head -3
+          qemu-aarch64-static "$BIN/agenterm-mux" --version
+          qemu-aarch64-static "$BIN/agenterm-script" --help | head -3
+
+  windows-arm64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
+      - name: Install lint components
+        run: rustup component add rustfmt clippy
+      - name: Install cargo-xwin
+        run: cargo install cargo-xwin --locked
+      - name: Clippy (Windows ARM64 client binaries)
+        run: >-
+          cargo xwin clippy --locked --target aarch64-pc-windows-msvc
+          --bin agenterm-cli --bin agenterm-mux --bin agenterm-script
+          -- -D warnings
+      - name: Build Windows ARM64 binaries
+        run: >-
+          cargo xwin build --locked --target aarch64-pc-windows-msvc
+          --bin agenterm --bin agenterm-cli --bin agenterm-mux --bin agenterm-script
+
+  macos-x86_64-clients:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
+      - name: Install lint components
+        run: rustup component add rustfmt clippy
+      - name: Clippy (macOS x86_64 client binaries)
+        run: >-
+          cargo clippy --locked --target x86_64-apple-darwin
+          --bin agenterm-cli --bin agenterm-mux --bin agenterm-script
+          -- -D warnings
+      - name: Build macOS x86_64 client binaries
+        run: >-
+          cargo build --locked --target x86_64-apple-darwin
+          --bin agenterm-cli --bin agenterm-mux --bin agenterm-script
+      - name: Smoke client entrypoints
+        run: |
+          BIN=target/x86_64-apple-darwin/debug
+          "$BIN/agenterm-cli" --help | head -3
+          "$BIN/agenterm-mux" --version
+          "$BIN/agenterm-script" --help | head -3
