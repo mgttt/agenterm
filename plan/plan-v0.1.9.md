@@ -1652,6 +1652,12 @@ S4  [~] server-owned 单活 interactive UI lease 已交付 attach/idempotent
         精确拖到历史顶端/实时底端。Ctrl+Down/Up 的 Terminal↔Composer 与
         Ctrl+Left/Right 的 Terminal↔Tabs 区域跳转也已在 child HWND 和
         virtual Tabs focus 两层通过，非精确 modifier 不被劫持。
+        Tabs 行的绘制、选择和动作命中现在统一使用共享响应式几何；`+` 通过
+        typed server control 新建并选中直接子标签后立即进入该行编辑，
+        `Close` 对存活 PTY 使用 client-owned 非阻塞
+        `Terminate & Close`/`Cancel` 确认，对 server 的终止与树提升语义
+        不做本地复制。真实鼠标 Add、编辑 Cancel、关闭 Cancel/Confirm、
+        稳定 parent ID 与仅删除目标子标签已进入同一 orphan-free 黑盒。
         普通启动默认切换、旧工作台完整 parity 与 same-server rollback 待补
 S5  same-server GUI upgrade + rollback black-box
 S6  remove combined-process handoff only after parity gates

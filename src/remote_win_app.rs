@@ -62,9 +62,10 @@ use crate::{
     },
     ui_client::{UiClientModel, tab_by_id},
     ui_geometry::{
-        PixelRect, TERMINAL_SCROLLBAR_WIDTH, TerminalScrollbarGeometry, WorkspaceLayout,
-        WorkspaceLayoutInput, scrollback_for_thumb_top, tabs_width_from_drag,
-        terminal_scrollbar_geometry, workspace_layout,
+        PixelRect, TERMINAL_SCROLLBAR_WIDTH, TerminalScrollbarGeometry, TreeRowActionDensity,
+        TreeRowMode, WorkspaceLayout, WorkspaceLayoutInput, scrollback_for_thumb_top,
+        tabs_width_from_drag, terminal_scrollbar_geometry, tree_row_at_y,
+        tree_row_geometry_for_mode, workspace_layout,
     },
 };
 
@@ -87,13 +88,14 @@ const SETTINGS_DARK_ID: usize = 2115;
 const SETTINGS_LIGHT_ID: usize = 2116;
 const SETTINGS_APPLY_ID: usize = 2117;
 const SETTINGS_CANCEL_ID: usize = 2118;
+const TAB_CLOSE_CONFIRM_ID: usize = 2119;
+const TAB_CLOSE_CANCEL_ID: usize = 2120;
 const SYSTEM_MENU_COPY_ID: usize = 0x1f00;
 const SYSTEM_MENU_PASTE_ID: usize = 0x1f10;
 const CLIPBOARD_UNICODE_TEXT: u32 = 13;
 const TERMINAL_PASTE_LIMIT_BYTES: usize = 256 * 1024;
 const WM_APP_AUTOMATION_SHORTCUT: u32 = 0x8000 + 2;
 const WM_APP_FOCUS_QUERY: u32 = 0x8000 + 3;
-const SIDEBAR_ROW_HEIGHT: i32 = 44;
 const TOOLBAR_HEIGHT: i32 = 44;
 const STATUS_HEIGHT: i32 = 26;
 const COMPOSER_HEIGHT: i32 = 104;
@@ -190,6 +192,9 @@ pub(crate) fn run_remote_gui(no_activate: bool) -> Result<()> {
     let settings_light = create_hidden_button(window, instance, SETTINGS_LIGHT_ID, "Light");
     let settings_apply = create_hidden_button(window, instance, SETTINGS_APPLY_ID, "Apply");
     let settings_cancel = create_hidden_button(window, instance, SETTINGS_CANCEL_ID, "Cancel");
+    let tab_close_confirm =
+        create_hidden_button(window, instance, TAB_CLOSE_CONFIRM_ID, "Terminate && Close");
+    let tab_close_cancel = create_hidden_button(window, instance, TAB_CLOSE_CANCEL_ID, "Cancel");
     if edit.is_null()
         || send.is_null()
         || new_tab.is_null()
@@ -208,6 +213,8 @@ pub(crate) fn run_remote_gui(no_activate: bool) -> Result<()> {
         || settings_light.is_null()
         || settings_apply.is_null()
         || settings_cancel.is_null()
+        || tab_close_confirm.is_null()
+        || tab_close_cancel.is_null()
     {
         unsafe { DestroyWindow(window) };
         anyhow::bail!("failed to create replaceable UI controls");
@@ -234,6 +241,8 @@ pub(crate) fn run_remote_gui(no_activate: bool) -> Result<()> {
             settings_light,
             settings_apply,
             settings_cancel,
+            tab_close_confirm,
+            tab_close_cancel,
         },
         client_id,
         client,
@@ -338,6 +347,8 @@ struct RemoteControls {
     settings_light: HWND,
     settings_apply: HWND,
     settings_cancel: HWND,
+    tab_close_confirm: HWND,
+    tab_close_cancel: HWND,
 }
 
 #[derive(Clone, Copy)]
@@ -352,6 +363,13 @@ enum RemoteFocusSurface {
     Terminal,
     Composer,
     Tabs,
+}
+
+#[derive(Clone, Copy)]
+enum RemoteTabAction {
+    AddChild,
+    Edit,
+    Close,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -435,6 +453,8 @@ struct RemoteWindowState {
     settings_light: HWND,
     settings_apply: HWND,
     settings_cancel: HWND,
+    tab_close_confirm: HWND,
+    tab_close_cancel: HWND,
     client_id: String,
     client: Option<UiClientModel>,
     reconnect_after: Instant,
@@ -454,6 +474,7 @@ struct RemoteWindowState {
     terminal_selection: Option<RemoteTerminalSelection>,
     scroll_drag: Option<RemoteScrollDrag>,
     focus_surface: RemoteFocusSurface,
+    pending_close_tab_id: Option<String>,
 }
 
 impl RemoteWindowState {
@@ -482,6 +503,8 @@ impl RemoteWindowState {
             settings_light,
             settings_apply,
             settings_cancel,
+            tab_close_confirm,
+            tab_close_cancel,
         } = controls;
         let config = load_config();
         let settings_theme_draft = config.color_theme;
@@ -507,6 +530,8 @@ impl RemoteWindowState {
             settings_light,
             settings_apply,
             settings_cancel,
+            tab_close_confirm,
+            tab_close_cancel,
             client_id,
             client: Some(client),
             reconnect_after: Instant::now(),
@@ -526,6 +551,7 @@ impl RemoteWindowState {
             terminal_selection: None,
             scroll_drag: None,
             focus_surface: RemoteFocusSurface::Terminal,
+            pending_close_tab_id: None,
         })
     }
 
@@ -543,6 +569,7 @@ impl RemoteWindowState {
             Ok(changed) => {
                 self.reconcile_tab_editor();
                 self.reconcile_terminal_selection();
+                self.reconcile_tab_close();
                 let active = self
                     .client
                     .as_ref()
@@ -563,7 +590,10 @@ impl RemoteWindowState {
                             self.client = Some(client);
                             self.editing_tab_id = None;
                             self.terminal_selection = None;
+                            self.pending_close_tab_id = None;
                             self.show_tab_editor(false);
+                            self.show_tab_close_controls(false);
+                            self.show_workspace_controls(true);
                             self.last_active_id = self
                                 .client
                                 .as_ref()
@@ -609,6 +639,19 @@ impl RemoteWindowState {
         });
         if self.terminal_selection.is_some() && !still_current {
             self.terminal_selection = None;
+        }
+    }
+
+    fn reconcile_tab_close(&mut self) {
+        let still_exists = self.pending_close_tab_id.as_ref().is_some_and(|id| {
+            self.client
+                .as_ref()
+                .is_some_and(|client| client.snapshot().tabs.iter().any(|tab| &tab.id == id))
+        });
+        if self.pending_close_tab_id.is_some() && !still_exists {
+            self.pending_close_tab_id = None;
+            self.show_tab_close_controls(false);
+            self.show_workspace_controls(true);
         }
     }
 
@@ -682,7 +725,11 @@ impl RemoteWindowState {
             );
             ShowWindow(
                 self.new_tab,
-                if self.tabs_visible && !self.window_close_pending && !self.settings_open {
+                if self.tabs_visible
+                    && !self.window_close_pending
+                    && !self.settings_open
+                    && self.pending_close_tab_id.is_none()
+                {
                     SW_SHOW
                 } else {
                     SW_HIDE
@@ -692,6 +739,7 @@ impl RemoteWindowState {
         self.layout_tab_editor();
         self.layout_close_controls();
         self.layout_settings_controls();
+        self.layout_tab_close_controls();
     }
 
     fn layout_tab_editor(&self) {
@@ -713,20 +761,58 @@ impl RemoteWindowState {
             return;
         };
         let (sidebar, _, _, _) = self.layout_rects();
-        let top = i32::try_from(position)
-            .unwrap_or(i32::MAX)
-            .saturating_mul(SIDEBAR_ROW_HEIGHT)
-            + 4;
-        let actions_width = 88;
-        let left = sidebar.left + 6;
-        let edit_width = (sidebar.right - left - actions_width - 8).max(44);
+        let tab = &client.snapshot().tabs[position];
+        let geometry = tree_row_geometry_for_mode(
+            position,
+            tab_depth(&client.snapshot().tabs, tab),
+            sidebar.right - sidebar.left,
+            TreeRowMode::Editing,
+        );
+        let Some(editors) = geometry.editors else {
+            self.show_tab_editor(false);
+            return;
+        };
         unsafe {
-            MoveWindow(self.tab_title_edit, left, top, edit_width, 18, 1);
-            MoveWindow(self.tab_note_edit, left, top + 20, edit_width, 18, 1);
-            MoveWindow(self.tab_save, left + edit_width + 4, top, 40, 38, 1);
-            MoveWindow(self.tab_cancel, left + edit_width + 46, top, 42, 38, 1);
+            let name = win_rect(editors.name);
+            let note = win_rect(editors.note);
+            let save = win_rect(geometry.actions.primary);
+            let cancel = win_rect(geometry.actions.secondary);
+            MoveWindow(
+                self.tab_title_edit,
+                name.left,
+                name.top,
+                name.right - name.left,
+                name.bottom - name.top,
+                1,
+            );
+            MoveWindow(
+                self.tab_note_edit,
+                note.left,
+                note.top,
+                note.right - note.left,
+                note.bottom - note.top,
+                1,
+            );
+            MoveWindow(
+                self.tab_save,
+                save.left,
+                save.top,
+                save.right - save.left,
+                save.bottom - save.top,
+                1,
+            );
+            MoveWindow(
+                self.tab_cancel,
+                cancel.left,
+                cancel.top,
+                cancel.right - cancel.left,
+                cancel.bottom - cancel.top,
+                1,
+            );
         }
-        self.show_tab_editor(self.tabs_visible && !self.window_close_pending);
+        self.show_tab_editor(
+            self.tabs_visible && !self.window_close_pending && self.pending_close_tab_id.is_none(),
+        );
     }
 
     fn show_tab_editor(&self, visible: bool) {
@@ -817,7 +903,7 @@ impl RemoteWindowState {
             ShowWindow(self.settings, command);
             ShowWindow(
                 self.new_tab,
-                if visible && self.tabs_visible {
+                if visible && self.tabs_visible && self.pending_close_tab_id.is_none() {
                     SW_SHOW
                 } else {
                     SW_HIDE
@@ -912,6 +998,62 @@ impl RemoteWindowState {
             ShowWindow(self.settings_light, command);
             ShowWindow(self.settings_apply, command);
             ShowWindow(self.settings_cancel, command);
+        }
+    }
+
+    fn tab_close_modal_geometry(&self) -> (RECT, [RECT; 2]) {
+        let mut client: RECT = unsafe { mem::zeroed() };
+        unsafe { GetClientRect(self.window, &mut client) };
+        let width = (client.right - 32).clamp(380, 500);
+        let height = 210;
+        let left = ((client.right - width) / 2).max(0);
+        let top = ((client.bottom - height) / 2).max(0);
+        let modal = RECT {
+            left,
+            top,
+            right: left + width,
+            bottom: top + height,
+        };
+        let confirm = RECT {
+            left: left + width - 250,
+            top: top + 148,
+            right: left + width - 116,
+            bottom: top + 184,
+        };
+        let cancel = RECT {
+            left: left + width - 104,
+            top: top + 148,
+            right: left + width - 24,
+            bottom: top + 184,
+        };
+        (modal, [confirm, cancel])
+    }
+
+    fn layout_tab_close_controls(&self) {
+        let (_, buttons) = self.tab_close_modal_geometry();
+        for (control, rect) in [
+            (self.tab_close_confirm, buttons[0]),
+            (self.tab_close_cancel, buttons[1]),
+        ] {
+            unsafe {
+                MoveWindow(
+                    control,
+                    rect.left,
+                    rect.top,
+                    rect.right - rect.left,
+                    rect.bottom - rect.top,
+                    1,
+                );
+            }
+        }
+        self.show_tab_close_controls(self.pending_close_tab_id.is_some());
+    }
+
+    fn show_tab_close_controls(&self, visible: bool) {
+        let command = if visible { SW_SHOW } else { SW_HIDE };
+        unsafe {
+            ShowWindow(self.tab_close_confirm, command);
+            ShowWindow(self.tab_close_cancel, command);
         }
     }
 
@@ -1032,10 +1174,12 @@ impl RemoteWindowState {
     }
 
     fn select_tab_at(&mut self, y: i32) {
-        if !self.tabs_visible || y < 0 {
+        if !self.tabs_visible {
             return;
         }
-        let index = usize::try_from(y / SIDEBAR_ROW_HEIGHT).unwrap_or(usize::MAX);
+        let Some(index) = tree_row_at_y(y) else {
+            return;
+        };
         let Some(tab_id) = self
             .client
             .as_ref()
@@ -1072,22 +1216,142 @@ impl RemoteWindowState {
         if !self.tabs_visible || y < 0 {
             return None;
         }
-        let index = usize::try_from(y / SIDEBAR_ROW_HEIGHT).ok()?;
+        let index = tree_row_at_y(y)?;
         self.client.as_ref()?.snapshot().tabs.get(index)
     }
 
-    fn tab_edit_action_contains(&self, x: i32, y: i32) -> bool {
-        if self.tab_at_y(y).is_none() {
-            return false;
-        }
+    fn tab_action_at(&self, x: i32, y: i32) -> Option<RemoteTabAction> {
+        let index = tree_row_at_y(y)?;
+        let client = self.client.as_ref()?;
+        let tab = client.snapshot().tabs.get(index)?;
         let sidebar = self.layout_rects().0;
-        x >= sidebar.right - 52 && x < sidebar.right - 6
+        let geometry = tree_row_geometry_for_mode(
+            index,
+            tab_depth(&client.snapshot().tabs, tab),
+            sidebar.right - sidebar.left,
+            TreeRowMode::Normal,
+        );
+        if geometry
+            .actions
+            .add_child
+            .is_some_and(|bounds| bounds.contains(x, y))
+        {
+            Some(RemoteTabAction::AddChild)
+        } else if geometry.actions.primary.contains(x, y) {
+            Some(RemoteTabAction::Edit)
+        } else if geometry.actions.secondary.contains(x, y) {
+            Some(RemoteTabAction::Close)
+        } else {
+            None
+        }
+    }
+
+    fn new_child_at(&mut self, y: i32) {
+        let Some(parent_id) = self.tab_at_y(y).map(|tab| tab.id.clone()) else {
+            return;
+        };
+        self.cancel_terminal_selection();
+        if let Err(error) = self.sync_composer() {
+            self.last_error = Some(format!("Composer save failed: {error:#}"));
+            return;
+        }
+        let result = self
+            .client
+            .as_mut()
+            .context("UI is disconnected")
+            .and_then(|client| {
+                client.run_control(vec![
+                    "ui-action".to_owned(),
+                    "new-child".to_owned(),
+                    "-t".to_owned(),
+                    parent_id,
+                ])?;
+                client.poll_deltas()?;
+                Ok(())
+            });
+        if let Err(error) = result {
+            self.last_error = Some(format!("Add child failed: {error:#}"));
+        } else {
+            self.last_active_id = self
+                .client
+                .as_ref()
+                .and_then(|client| client.snapshot().active_tab_id.clone());
+            self.load_composer();
+            self.resize_active_terminal();
+            if let Some(child) = self.active_tab().cloned() {
+                self.begin_tab_edit(child);
+            }
+        }
+    }
+
+    fn request_close_tab_at(&mut self, y: i32) {
+        let Some(tab) = self.tab_at_y(y).cloned() else {
+            return;
+        };
+        self.cancel_terminal_selection();
+        if tab.dead {
+            let _ = self.close_tab_now(tab.id);
+            return;
+        }
+        if let Err(error) = self.sync_composer() {
+            self.last_error = Some(format!("Composer save failed: {error:#}"));
+            return;
+        }
+        self.finish_tab_edit(false);
+        self.pending_close_tab_id = Some(tab.id);
+        self.show_workspace_controls(false);
+        self.layout_tab_close_controls();
+        unsafe { SetFocus(self.window) };
+    }
+
+    fn close_tab_now(&mut self, tab_id: String) -> bool {
+        let result = self
+            .client
+            .as_mut()
+            .context("UI is disconnected")
+            .and_then(|client| {
+                client.run_control(vec!["kill-window".to_owned(), "-t".to_owned(), tab_id])?;
+                client.poll_deltas()?;
+                Ok(())
+            });
+        if let Err(error) = result {
+            self.last_error = Some(format!("Close tab failed: {error:#}"));
+            false
+        } else {
+            self.last_error = None;
+            self.last_active_id = self
+                .client
+                .as_ref()
+                .and_then(|client| client.snapshot().active_tab_id.clone());
+            self.load_composer();
+            self.resize_active_terminal();
+            true
+        }
+    }
+
+    fn finish_close_tab(&mut self, confirm: bool) {
+        let pending = self.pending_close_tab_id.clone();
+        if confirm
+            && let Some(tab_id) = pending
+            && !self.close_tab_now(tab_id)
+        {
+            return;
+        }
+        self.pending_close_tab_id = None;
+        self.show_tab_close_controls(false);
+        self.show_workspace_controls(true);
+        self.focus_surface = RemoteFocusSurface::Tabs;
+        unsafe { SetFocus(self.window) };
     }
 
     fn begin_tab_edit_at(&mut self, y: i32) {
         let Some(tab) = self.tab_at_y(y).cloned() else {
             return;
         };
+        self.begin_tab_edit(tab);
+    }
+
+    fn begin_tab_edit(&mut self, tab: UiTabBootstrap) {
         self.focus_surface = RemoteFocusSurface::Tabs;
         self.editing_tab_id = Some(tab.id);
         unsafe {
@@ -1255,6 +1519,10 @@ impl RemoteWindowState {
 
     fn request_window_close(&mut self) {
         if self.window_close_pending {
+            return;
+        }
+        if self.pending_close_tab_id.is_some() {
+            self.finish_close_tab(false);
             return;
         }
         self.cancel_terminal_selection();
@@ -1470,7 +1738,11 @@ impl RemoteWindowState {
     }
 
     fn set_focus_surface(&mut self, target: RemoteFocusSurface) -> bool {
-        if self.window_close_pending || self.settings_open || self.editing_tab_id.is_some() {
+        if self.window_close_pending
+            || self.settings_open
+            || self.editing_tab_id.is_some()
+            || self.pending_close_tab_id.is_some()
+        {
             return false;
         }
         match target {
@@ -1947,7 +2219,8 @@ impl RemoteWindowState {
                 palette.muted_text.colorref()
             },
         );
-        if !self.window_close_pending && !self.settings_open {
+        if !self.window_close_pending && !self.settings_open && self.pending_close_tab_id.is_none()
+        {
             let focus = match self.current_focus_surface() {
                 RemoteFocusSurface::Terminal => terminal,
                 RemoteFocusSurface::Composer => composer,
@@ -1959,6 +2232,8 @@ impl RemoteWindowState {
             self.paint_window_close(device, palette);
         } else if self.settings_open {
             self.paint_settings(device, palette);
+        } else if self.pending_close_tab_id.is_some() {
+            self.paint_tab_close(device, palette);
         }
         unsafe { EndPaint(self.window, &paint) };
     }
@@ -2143,6 +2418,57 @@ impl RemoteWindowState {
         );
     }
 
+    fn paint_tab_close(&self, device: HDC, palette: &ThemePalette) {
+        let (modal, _) = self.tab_close_modal_geometry();
+        fill(device, &modal, palette.modal.colorref());
+        frame(device, &modal, palette.warning.colorref());
+        draw_text(
+            device,
+            RECT {
+                left: modal.left + 24,
+                top: modal.top + 18,
+                right: modal.right - 24,
+                bottom: modal.top + 50,
+            },
+            "Close live tab?",
+            palette.text.colorref(),
+        );
+        let target = self.pending_close_tab_id.as_deref().unwrap_or("-");
+        draw_text(
+            device,
+            RECT {
+                left: modal.left + 24,
+                top: modal.top + 60,
+                right: modal.right - 24,
+                bottom: modal.top + 90,
+            },
+            &format!("{target} is still running."),
+            palette.muted_text.colorref(),
+        );
+        draw_text(
+            device,
+            RECT {
+                left: modal.left + 24,
+                top: modal.top + 88,
+                right: modal.right - 24,
+                bottom: modal.top + 116,
+            },
+            "Closing it will terminate the PTY process.",
+            palette.muted_text.colorref(),
+        );
+        draw_text(
+            device,
+            RECT {
+                left: modal.left + 24,
+                top: modal.top + 116,
+                right: modal.right - 24,
+                bottom: modal.top + 144,
+            },
+            "Cancel returns without changing the tab tree.",
+            palette.muted_text.colorref(),
+        );
+    }
+
     fn paint_tabs(&self, device: HDC, sidebar: RECT, palette: &ThemePalette) {
         if !self.tabs_visible {
             return;
@@ -2151,18 +2477,17 @@ impl RemoteWindowState {
             return;
         };
         for (position, tab) in client.snapshot().tabs.iter().enumerate() {
-            let top = i32::try_from(position)
-                .unwrap_or(i32::MAX)
-                .saturating_mul(SIDEBAR_ROW_HEIGHT);
-            if top + SIDEBAR_ROW_HEIGHT > sidebar.bottom - TOOLBAR_HEIGHT {
+            let depth = tab_depth(&client.snapshot().tabs, tab);
+            let geometry = tree_row_geometry_for_mode(
+                position,
+                depth,
+                sidebar.right - sidebar.left,
+                TreeRowMode::Normal,
+            );
+            let row = win_rect(geometry.selection);
+            if row.bottom > sidebar.bottom - TOOLBAR_HEIGHT {
                 break;
             }
-            let row = RECT {
-                left: sidebar.left + 5,
-                top: top + 4,
-                right: sidebar.right - 6,
-                bottom: top + SIDEBAR_ROW_HEIGHT - 3,
-            };
             let active = client.snapshot().active_tab_id.as_deref() == Some(tab.id.as_str());
             if active {
                 fill(device, &row, palette.active.colorref());
@@ -2171,23 +2496,28 @@ impl RemoteWindowState {
             if self.editing_tab_id.as_deref() == Some(tab.id.as_str()) {
                 continue;
             }
-            let edit = RECT {
-                left: row.right - 46,
-                top: row.top + 5,
-                right: row.right - 2,
-                bottom: row.bottom - 5,
-            };
-            frame(device, &edit, palette.active_border.colorref());
-            draw_text(device, edit, "Edit", palette.muted_text.colorref());
-            let depth = tab_depth(&client.snapshot().tabs, tab);
+            let compact = geometry.actions.density == TreeRowActionDensity::Compact;
+            for (bounds, label) in [
+                (
+                    geometry
+                        .actions
+                        .add_child
+                        .expect("normal tab rows expose Add"),
+                    "+",
+                ),
+                (geometry.actions.primary, if compact { "E" } else { "Edit" }),
+                (
+                    geometry.actions.secondary,
+                    if compact { "X" } else { "Close" },
+                ),
+            ] {
+                let bounds = win_rect(bounds);
+                frame(device, &bounds, palette.active_border.colorref());
+                draw_text(device, bounds, label, palette.muted_text.colorref());
+            }
             draw_text(
                 device,
-                RECT {
-                    left: row.left + 7 + i32::try_from(depth).unwrap_or(0) * 12,
-                    top: row.top,
-                    right: edit.left - 4,
-                    bottom: row.bottom,
-                },
+                win_rect(geometry.text),
                 &format!(
                     "{} {}{}",
                     tab.id,
@@ -2260,7 +2590,10 @@ unsafe extern "system" fn window_proc(
         }
         WM_LBUTTONDOWN => {
             if let Some(state) = state_mut(window) {
-                if state.window_close_pending || state.settings_open {
+                if state.window_close_pending
+                    || state.settings_open
+                    || state.pending_close_tab_id.is_some()
+                {
                     return 0;
                 }
                 let x = (lparam as u32 & 0xffff) as i16 as i32;
@@ -2276,11 +2609,14 @@ unsafe extern "system" fn window_proc(
                 }
                 let sidebar = state.layout_rects().0;
                 if state.tabs_visible && x < sidebar.right {
-                    if state.tab_edit_action_contains(x, y) {
-                        state.begin_tab_edit_at(y);
-                    } else {
-                        state.finish_tab_edit(false);
-                        state.select_tab_at(y);
+                    match state.tab_action_at(x, y) {
+                        Some(RemoteTabAction::AddChild) => state.new_child_at(y),
+                        Some(RemoteTabAction::Edit) => state.begin_tab_edit_at(y),
+                        Some(RemoteTabAction::Close) => state.request_close_tab_at(y),
+                        None => {
+                            state.finish_tab_edit(false);
+                            state.select_tab_at(y);
+                        }
                     }
                 } else {
                     state.finish_tab_edit(false);
@@ -2355,6 +2691,12 @@ unsafe extern "system" fn window_proc(
         }
         WM_MOUSEWHEEL => {
             if let Some(state) = state_mut(window) {
+                if state.window_close_pending
+                    || state.settings_open
+                    || state.pending_close_tab_id.is_some()
+                {
+                    return 0;
+                }
                 let delta = ((wparam >> 16) & 0xffff) as u16 as i16 as i32;
                 state.scroll_terminal(delta);
                 unsafe {
@@ -2405,6 +2747,14 @@ unsafe extern "system" fn window_proc(
                     }
                     return 0;
                 }
+                if state.pending_close_tab_id.is_some() {
+                    match wparam as u32 {
+                        0x0d => state.finish_close_tab(true),
+                        key if key == u32::from(VK_ESCAPE) => state.finish_close_tab(false),
+                        _ => {}
+                    }
+                    return 0;
+                }
                 if state.settings_open {
                     if wparam as u32 == u32::from(VK_ESCAPE) {
                         state.finish_settings(false);
@@ -2443,7 +2793,10 @@ unsafe extern "system" fn window_proc(
         }
         WM_CHAR => {
             if let Some(state) = state_mut(window) {
-                if state.window_close_pending || state.settings_open {
+                if state.window_close_pending
+                    || state.settings_open
+                    || state.pending_close_tab_id.is_some()
+                {
                     return 0;
                 }
                 if unsafe { GetFocus() } == window {
@@ -2482,6 +2835,8 @@ unsafe extern "system" fn window_proc(
                     SETTINGS_LIGHT_ID => state.preview_settings_theme(ThemeId::Light),
                     SETTINGS_APPLY_ID => state.finish_settings(true),
                     SETTINGS_CANCEL_ID => state.finish_settings(false),
+                    TAB_CLOSE_CONFIRM_ID => state.finish_close_tab(true),
+                    TAB_CLOSE_CANCEL_ID => state.finish_close_tab(false),
                     _ => {}
                 }
                 unsafe {

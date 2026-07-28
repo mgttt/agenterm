@@ -22,13 +22,13 @@ const TREE_ACTION_INSET: i32 = 4;
 const TREE_ACTION_TOP_INSET: i32 = 6;
 const TREE_COMPACT_ACTION_WIDTH: i32 = 24;
 const TREE_ADD_ACTION_WIDTH: i32 = 24;
-const TREE_EDIT_ACTION_WIDTH: i32 = 38;
-const TREE_CLOSE_ACTION_WIDTH: i32 = 42;
+const TREE_EDIT_ACTION_WIDTH: i32 = 48;
+const TREE_CLOSE_ACTION_WIDTH: i32 = 62;
 const TREE_SAVE_ACTION_WIDTH: i32 = 42;
 const TREE_CANCEL_ACTION_WIDTH: i32 = 48;
 const TREE_COMPACT_SAVE_ACTION_WIDTH: i32 = 34;
 const TREE_COMPACT_CANCEL_ACTION_WIDTH: i32 = 40;
-const TREE_COMPACT_ACTION_THRESHOLD: i32 = 220;
+const TREE_COMPACT_ACTION_THRESHOLD: i32 = 300;
 const NODE_Y_OFFSET: i32 = 13;
 const MIN_SCROLLBAR_THUMB_HEIGHT: i32 = 24;
 const SIDEBAR_TOOLBAR_DIVIDER_HEIGHT: i32 = 1;
@@ -961,7 +961,7 @@ mod tests {
 
     #[test]
     fn normal_row_partitions_text_and_three_actions_without_overlap() {
-        let geometry = tree_row_geometry_for_mode(0, 1, 250, TreeRowMode::Normal);
+        let geometry = tree_row_geometry_for_mode(0, 1, 360, TreeRowMode::Normal);
         let add = geometry
             .actions
             .add_child
@@ -982,7 +982,7 @@ mod tests {
 
     #[test]
     fn editing_row_replaces_actions_and_exposes_two_inline_editors() {
-        let geometry = tree_row_geometry_for_mode(3, 2, 250, TreeRowMode::Editing);
+        let geometry = tree_row_geometry_for_mode(3, 2, 360, TreeRowMode::Editing);
         let editors = geometry.editors.expect("editing mode has two editors");
 
         assert_eq!(geometry.mode, TreeRowMode::Editing);

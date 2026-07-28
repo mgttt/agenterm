@@ -543,12 +543,114 @@ try {
         )
     }
 
+    Write-Host 'STEP add and close a child through the replaceable Tabs tree'
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, 0x0201, [IntPtr]::Zero,
+        [AgenTermRemoteUiNativeTest]::MousePoint(225, 20)
+    ) | Out-Null
+    $childBootstrap = Invoke-AgenTerm @('ui-bootstrap') |
+        ConvertFrom-Json
+    $childTab = @(
+        $childBootstrap.tabs |
+            Where-Object {
+                $_.id -eq $childBootstrap.active_tab_id -and
+                $_.parent_id -eq $tabId
+            }
+    )[0]
+    if ($null -eq $childTab -or $childBootstrap.tabs.Count -ne 2) {
+        throw (
+            'Tabs Add did not create and select one direct child: ' +
+            ($childBootstrap | ConvertTo-Json -Depth 8 -Compress)
+        )
+    }
+    $childId = $childTab.id
+    $childTitleEditor = [AgenTermRemoteUiNativeTest]::GetDlgItem(
+        $gui.MainWindowHandle, 2105
+    )
+    $childEditCancel = [AgenTermRemoteUiNativeTest]::GetDlgItem(
+        $gui.MainWindowHandle, 2108
+    )
+    if ($childTitleEditor -eq [IntPtr]::Zero -or
+        $childEditCancel -eq [IntPtr]::Zero -or
+        -not [AgenTermRemoteUiNativeTest]::IsWindowVisible(
+            $childTitleEditor
+        )) {
+        throw 'Tabs Add did not enter the new child inline editor'
+    }
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $childEditCancel, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero
+    ) | Out-Null
+
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, 0x0201, [IntPtr]::Zero,
+        [AgenTermRemoteUiNativeTest]::MousePoint(330, 64)
+    ) | Out-Null
+    $tabCloseConfirm = [AgenTermRemoteUiNativeTest]::GetDlgItem(
+        $gui.MainWindowHandle, 2119
+    )
+    $tabCloseCancel = [AgenTermRemoteUiNativeTest]::GetDlgItem(
+        $gui.MainWindowHandle, 2120
+    )
+    if ($tabCloseConfirm -eq [IntPtr]::Zero -or
+        $tabCloseCancel -eq [IntPtr]::Zero -or
+        -not [AgenTermRemoteUiNativeTest]::IsWindowVisible(
+            $tabCloseConfirm
+        ) -or
+        -not [AgenTermRemoteUiNativeTest]::IsWindowVisible(
+            $tabCloseCancel
+        )) {
+        throw 'closing a live remote tab did not open the client-owned confirmation'
+    }
+    if (-not [string]::IsNullOrWhiteSpace($ScreenshotPath)) {
+        $requestedScreenshot = [IO.Path]::GetFullPath($ScreenshotPath)
+        $tabCloseScreenshot = Join-Path `
+            ([IO.Path]::GetDirectoryName($requestedScreenshot)) `
+            "$([IO.Path]::GetFileNameWithoutExtension($requestedScreenshot))-tab-close.png"
+        Save-WindowPng -Window $gui.MainWindowHandle `
+            -Path $tabCloseScreenshot
+    }
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $tabCloseCancel, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero
+    ) | Out-Null
+    $cancelCloseBootstrap = Invoke-AgenTerm @('ui-bootstrap') |
+        ConvertFrom-Json
+    if (@(
+            $cancelCloseBootstrap.tabs |
+                Where-Object id -eq $childId
+        ).Count -ne 1 -or
+        [AgenTermRemoteUiNativeTest]::IsWindowVisible(
+            $tabCloseConfirm
+        )) {
+        throw 'Tabs close Cancel mutated the tree or left modal controls visible'
+    }
+
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, 0x0201, [IntPtr]::Zero,
+        [AgenTermRemoteUiNativeTest]::MousePoint(330, 64)
+    ) | Out-Null
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $tabCloseConfirm, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero
+    ) | Out-Null
+    $confirmedCloseBootstrap = Invoke-AgenTerm @('ui-bootstrap') |
+        ConvertFrom-Json
+    if ($confirmedCloseBootstrap.tabs.Count -ne 1 -or
+        $confirmedCloseBootstrap.tabs[0].id -ne $tabId -or
+        $confirmedCloseBootstrap.active_tab_id -ne $tabId -or
+        [AgenTermRemoteUiNativeTest]::IsWindowVisible(
+            $tabCloseConfirm
+        )) {
+        throw (
+            'Tabs close confirmation did not remove only the selected child: ' +
+            ($confirmedCloseBootstrap | ConvertTo-Json -Depth 8 -Compress)
+        )
+    }
+
     Write-Host 'STEP edit title and note in place with Save and Cancel'
     $editedTitle = "remote-edited-$($run.RunId)"
     $editedNote = "note-$($run.RunId)"
     [AgenTermRemoteUiNativeTest]::SendMessage(
         $gui.MainWindowHandle, 0x0201, [IntPtr]::Zero,
-        [AgenTermRemoteUiNativeTest]::MousePoint(330, 20)
+        [AgenTermRemoteUiNativeTest]::MousePoint(260, 20)
     ) | Out-Null
     $titleEditor = [AgenTermRemoteUiNativeTest]::GetDlgItem(
         $gui.MainWindowHandle, 2105
@@ -595,7 +697,7 @@ try {
 
     [AgenTermRemoteUiNativeTest]::SendMessage(
         $gui.MainWindowHandle, 0x0201, [IntPtr]::Zero,
-        [AgenTermRemoteUiNativeTest]::MousePoint(330, 20)
+        [AgenTermRemoteUiNativeTest]::MousePoint(260, 20)
     ) | Out-Null
     [AgenTermRemoteUiNativeTest]::SendMessageText(
         $titleEditor, 0x000C, [IntPtr]::Zero, ('x' * 4097)
@@ -615,7 +717,7 @@ try {
 
     [AgenTermRemoteUiNativeTest]::SendMessage(
         $gui.MainWindowHandle, 0x0201, [IntPtr]::Zero,
-        [AgenTermRemoteUiNativeTest]::MousePoint(330, 20)
+        [AgenTermRemoteUiNativeTest]::MousePoint(260, 20)
     ) | Out-Null
     [AgenTermRemoteUiNativeTest]::SendMessageText(
         $titleEditor, 0x000C, [IntPtr]::Zero, 'must-not-save'
@@ -640,6 +742,10 @@ try {
         'wait-pane', '-t', $tabId,
         '--contains', "${scrollMarker}80", '--timeout-ms', '5000'
     ) | Out-Null
+    Invoke-AgenTerm @(
+        'wait-pane', '-t', $tabId,
+        '--submit-complete', '--timeout-ms', '5000'
+    ) | Out-Null
     $scrollBootstrap = Invoke-AgenTerm @('ui-bootstrap') |
         ConvertFrom-Json
     $scrollTab = @(
@@ -648,6 +754,11 @@ try {
     if ([int]$scrollTab.screen.max_scrollback -le 0) {
         throw 'screen DTO did not publish the terminal history bound'
     }
+    # Drive one public window tick so the client consumes the same completed
+    # server screen state before physical scrollbar hit-testing.
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, 0x0113, [IntPtr]::Zero, [IntPtr]::Zero
+    ) | Out-Null
     $scrollClient = [AgenTermRemoteUiNativeTest+Rect]::new()
     if (-not [AgenTermRemoteUiNativeTest]::GetClientRect(
             $gui.MainWindowHandle, [ref]$scrollClient

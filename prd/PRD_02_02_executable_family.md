@@ -60,9 +60,15 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       visibility and drag width remain client-owned and persist through the
       shared settings file, while mouse-wheel history navigation mutates the
       server-owned terminal viewport and PTY resize follows the effective
-      layout. Tab rows now own their title/note editor in place: `Edit` is
-      replaced by bounded native title/note inputs plus `Save` and `Cancel`;
-      Save updates the same stable server tab and Cancel performs no mutation.
+      layout. Tab rows use the shared responsive row geometry for painting and
+      hit-testing and expose `+`, `Edit`, and `Close`: add creates and selects
+      a direct child through typed server control and immediately opens that
+      child's inline editor; closing a live child requires a non-blocking
+      client-owned `Terminate & Close`/`Cancel` decision, while the server
+      remains the authority for termination and child-promotion semantics.
+      Each row owns its title/note editor in place: `Edit` is replaced by
+      bounded native title/note inputs plus `Save` and `Cancel`; Save updates
+      the same stable server tab and Cancel performs no mutation.
       Window close now uses non-blocking native `Keep Server Running` (default),
       `Stop Server & Exit`, and `Cancel` choices: the current Composer draft is
       synchronized first, keep releases only the UI lease, stop performs the
