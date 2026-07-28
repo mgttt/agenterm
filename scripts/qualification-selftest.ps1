@@ -17,7 +17,8 @@ function Assert-Rejected {
         & $Action
     }
     catch {
-        if (($_ | Out-String) -notmatch $Pattern) {
+        $message = [string]$_.Exception.Message
+        if ($message -notmatch $Pattern) {
             throw "Expected rejection matching '$Pattern', got: $_"
         }
         return
