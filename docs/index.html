@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0b1016">
   <title>AgenTerm™ — a native terminal for people and agents</title>
-  <meta name="description" content="AgenTerm™ is a native terminal and local fleet workspace with hierarchical tabs, durable process output, a per-tab composer, and a public automation CLI.">
+  <meta name="description" content="AgenTerm is a native terminal and local fleet workspace with hierarchical tabs, durable process output, a per-tab composer, and a public automation CLI.">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230b1016'/%3E%3Cpath d='M3.5 4.5 7 8l-3.5 3.5M8 12h4.5' stroke='%237ee787' stroke-width='1.8' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
   <style>
     :root {
@@ -314,7 +314,7 @@
         <a href="#workspace">Workspace</a>
         <a href="#automation">Automation</a>
         <a href="#docs">Docs</a>
-        <a class="nav-github" href="https://github.com/mgttt/AgenTerm">GitHub</a>
+        <a class="nav-github" href="https://github.com/mgttt/agenterm">GitHub</a>
       </nav>
     </div>
   </header>
@@ -325,15 +325,15 @@
         <p class="eyebrow">Native terminal · active development</p>
         <h1>One visible workspace for <em>people and agents.</em></h1>
         <p class="lead">
-          AgenTerm™ combines hierarchical ConPTY tabs, a per-tab composer and
+          AgenTerm combines hierarchical ConPTY tabs, a per-tab composer and
           environment, and a native automation client. Humans and local agents
           observe and steer the same terminal fleet. The public build is
           Windows-first today; multi-architecture Windows builds and additional
           desktop platforms are on the product roadmap.
         </p>
         <div class="actions">
-          <a class="button primary" href="https://github.com/mgttt/AgenTerm/releases">Download a public release</a>
-          <a class="button" href="https://github.com/mgttt/AgenTerm#build-and-run">Build from source</a>
+          <a class="button primary" href="https://github.com/mgttt/agenterm/releases">Download a public release</a>
+          <a class="button" href="https://github.com/mgttt/agenterm#build-and-run">Build from source</a>
         </div>
       </div>
     </section>
@@ -342,9 +342,9 @@
       <div class="wrap">
         <figure>
           <img src="assets/agenterm-workspace.png" width="1164" height="752" loading="eager"
-               alt="AgenTerm™ window showing a hierarchical team tab tree, a PowerShell terminal, per-tab composer, and bottom workspace status bar">
+               alt="AgenTerm window showing a hierarchical team tab tree, a PowerShell terminal, per-tab composer, and bottom workspace status bar">
           <figcaption id="workspace-preview">
-            A real AgenTerm™ workspace: tree-organized tabs at left, terminal in
+            A real AgenTerm workspace: tree-organized tabs at left, terminal in
             the center, the selected tab's composer below, and shared status at
             the bottom.
           </figcaption>
@@ -357,7 +357,7 @@
         <div class="section-head">
           <h2>A fleet that stays understandable.</h2>
           <p>
-            AgenTerm™ keeps its daily interface quiet while making process
+            AgenTerm keeps its daily interface quiet while making process
             lifecycle, hierarchy, input, and state explicit.
           </p>
         </div>
@@ -402,7 +402,7 @@
           <p class="eyebrow">Public control plane</p>
           <h2>Observe, act, then verify.</h2>
           <p>
-            <code>AgenTerm™-cli.exe</code> exposes the same fleet through typed
+            <code>agenterm-cli.exe</code> exposes the same fleet through typed
             loopback IPC. Stable tab IDs, structured snapshots, event
             positions, deterministic waits, and PNG evidence make automation
             inspectable.
@@ -410,21 +410,21 @@
           <ul>
             <li>Create, select, rename, nest, capture, and drive tabs</li>
             <li>Wait for output or UI state without fixed sleeps</li>
-            <li>Target an explicit local AgenTerm™ server</li>
-            <li>Use a documented single-pane tmux/RMUX subset through <code>AgenTerm™-mux.exe</code></li>
+            <li>Target an explicit local AgenTerm server</li>
+            <li>Use a documented single-pane tmux/RMUX subset through <code>agenterm-mux.exe</code></li>
           </ul>
         </div>
-        <pre aria-label="AgenTerm™ command line example"><span class="prompt">PS&gt;</span> .\AgenTerm™-cli.exe list-tab-tree
-<span class="prompt">PS&gt;</span> .\AgenTerm™-cli.exe new-agent -n reviewer
-<span class="prompt">PS&gt;</span> .\AgenTerm™-cli.exe wait-pane `
+        <pre aria-label="AgenTerm command line example"><span class="prompt">PS&gt;</span> .\agenterm-cli.exe list-tab-tree
+<span class="prompt">PS&gt;</span> .\agenterm-cli.exe new-agent -n reviewer
+<span class="prompt">PS&gt;</span> .\agenterm-cli.exe wait-pane `
       -t @2 --contains "Finished" --timeout-ms 30000
-<span class="prompt">PS&gt;</span> .\AgenTerm™-cli.exe screenshot-pane `
+<span class="prompt">PS&gt;</span> .\agenterm-cli.exe screenshot-pane `
       -t @2 -o reviewer.png
 
 <span class="comment"># Discover the live contract</span>
-<span class="prompt">PS&gt;</span> .\AgenTerm™-cli.exe list-commands
-<span class="prompt">PS&gt;</span> .\AgenTerm™-cli.exe protocol-info
-<span class="prompt">PS&gt;</span> .\AgenTerm™-cli.exe ui-snapshot</pre>
+<span class="prompt">PS&gt;</span> .\agenterm-cli.exe list-commands
+<span class="prompt">PS&gt;</span> .\agenterm-cli.exe protocol-info
+<span class="prompt">PS&gt;</span> .\agenterm-cli.exe ui-snapshot</pre>
       </div>
     </section>
 
@@ -433,8 +433,8 @@
         <div class="principle">
           <p>
             <strong>One authority, several clients.</strong> The GUI,
-            <code>AgenTerm™-cli.exe</code>, <code>AgenTerm™-mux.exe</code>, and
-            the bounded <code>AgenTerm™-script.exe</code> worker reuse the same
+            <code>agenterm-cli.exe</code>, <code>agenterm-mux.exe</code>, and
+            the bounded <code>agenterm-script.exe</code> worker reuse the same
             public product contract. Unsupported compatibility operations fail
             explicitly rather than pretending to succeed.
           </p>
@@ -453,21 +453,21 @@
         <div class="section-head">
           <h2>Start with the contract.</h2>
           <p>
-            AgenTerm™ is under active development. The product tree distinguishes
+            AgenTerm is under active development. The product tree distinguishes
             shipped, partial, and planned capability; consult it before relying
             on roadmap work.
           </p>
         </div>
         <div class="links">
-          <a class="link-card" href="https://github.com/mgttt/AgenTerm/blob/main/README.md">
+          <a class="link-card" href="https://github.com/mgttt/agenterm/blob/main/README.md">
             <strong>README →</strong>
             <span>Current highlights, build commands, CLI examples, and release workflow.</span>
           </a>
-          <a class="link-card" href="https://github.com/mgttt/AgenTerm/blob/main/PRD.md">
+          <a class="link-card" href="https://github.com/mgttt/agenterm/blob/main/PRD.md">
             <strong>Product tree →</strong>
             <span>Canonical requirements, current status, invariants, and links to owning modules.</span>
           </a>
-          <a class="link-card" href="https://github.com/mgttt/AgenTerm/blob/main/docs/agenterm-script-runtime.md">
+          <a class="link-card" href="https://github.com/mgttt/agenterm/blob/main/docs/agenterm-script-runtime.md">
             <strong>Script runtime draft →</strong>
             <span>The versioned Rhai runtime design, including shipped foundations and clearly marked planned work.</span>
           </a>
@@ -484,9 +484,9 @@
         · MIT OR Apache-2.0
       </p>
       <p>
-        <a href="https://github.com/mgttt/AgenTerm">Repository</a>
-        <a href="https://github.com/mgttt/AgenTerm/releases">Releases</a>
-        <a href="https://github.com/mgttt/AgenTerm/blob/main/THIRD_PARTY_NOTICES.md">Notices</a>
+        <a href="https://github.com/mgttt/agenterm">Repository</a>
+        <a href="https://github.com/mgttt/agenterm/releases">Releases</a>
+        <a href="https://github.com/mgttt/agenterm/blob/main/THIRD_PARTY_NOTICES.md">Notices</a>
       </p>
     </div>
   </footer>
