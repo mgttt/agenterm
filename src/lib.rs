@@ -30,6 +30,9 @@ mod wake_signal;
 mod working_context;
 mod workspace;
 
+#[cfg(not(windows))]
+mod gui_wake;
+
 #[cfg(windows)]
 mod script_audit;
 #[cfg(windows)]
@@ -57,7 +60,7 @@ pub(crate) const SCROLLBACK_LINES: usize = 10_000;
 pub(crate) use win_app::request_gui_wake;
 
 #[cfg(not(windows))]
-pub(crate) fn request_gui_wake(_wake_window: isize, _wake_signal: &wake_signal::WakeSignal) {}
+pub(crate) use gui_wake::request_gui_wake;
 
 pub(crate) fn ipc_address() -> String {
     client::ipc_address()
