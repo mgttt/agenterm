@@ -4,7 +4,7 @@ Status: Draft specification for v0.1.9
 
 Specification ID: `agenterm-script-runtime`
 
-Script API currently shipped: v1
+Script API currently shipped: v2
 
 Catalog schema currently shipped: v2
 
@@ -112,12 +112,15 @@ agenterm-script
 │  │  ├─ Metadata
 │  │  │  Exposes is_file, is_dir, len, and modified wall-clock time.
 │  │  │  [shipped; stable; designed 2026-07-28]
-│  │  ├─ create_dir_all(path) / copy(from, to) / rename(from, to)
+│  │  ├─ create_dir(path) / create_dir_all(path)
+│  │  │  Creates one explicit directory or directory tree.
+│  │  │  [shipped; stable; designed 2026-07-28]
+│  │  ├─ copy(from, to) / rename(from, to)
 │  │  │  Explicit-target filesystem mutation.
-│  │  │  [planned; reserved; designed 2026-07-28]
-│  │  └─ remove_file(path) / remove_dir(path)
+│  │  │  [shipped; stable; designed 2026-07-28]
+│  │  └─ remove_file(path) / remove_dir(path) / remove_dir_all(path)
 │  │     Explicit-target deletion with broad-target guards.
-│  │     [planned; reserved; designed 2026-07-28]
+│  │     [shipped; stable; designed 2026-07-28]
 │  │
 │  ├─ path::
 │  │  Typed, Windows-aware path construction and inspection.
@@ -216,8 +219,17 @@ agenterm-script
 │  │     [shipped; stable; designed 2026-07-28]
 │  │
 │  ├─ runtime::
-│  │  Read-only invocation, profile, version, and limit facts.
-│  │  [planned; stable namespace reservation; designed 2026-07-28]
+│  │  Invocation-owned resources and safe runtime facts.
+│  │  [partially shipped; stable delivered leaves; designed 2026-07-28]
+│  │  ├─ temp_dir() -> PathBuf
+│  │  │  Returns the current invocation's host-cleaned temporary directory.
+│  │  │  [shipped; stable; designed 2026-07-28]
+│  │  ├─ atomic_write(path, text)
+│  │  │  Publishes UTF-8 text through same-volume atomic replacement.
+│  │  │  [shipped; stable; designed 2026-07-28]
+│  │  └─ atomic_write_bytes(path, bytes)
+│  │     Publishes typed bytes through same-volume atomic replacement.
+│  │     [shipped; stable; designed 2026-07-28]
 │  │
 │  └─ package::
 │     Future package-facing capability namespace; no v0.1.9 API promise.
@@ -572,6 +584,14 @@ Example:
 `std::fs::read` MUST return `Bytes`.
 `std::fs::write` and `write_bytes` MUST target one explicit path and replace
 that file's contents. They do not currently promise atomic replacement.
+`rhai::runtime::temp_dir()` returns a typed `PathBuf` for a directory owned by
+the current local invocation. The host removes it after success, script
+failure, worker crash, or timeout; the next invocation also prunes roots whose
+owning client process died before normal cleanup.
+`rhai::runtime::atomic_write(path, text)` and `atomic_write_bytes(path, bytes)`
+write and sync a unique sibling staging file before a same-volume atomic
+replacement. Failed publication removes the staging file and never reports a
+partial target as success.
 `std::fs::read_dir` enumerates exactly one directory and returns typed
 `DirEntry` values; recursion remains explicit script policy. Symlink entries
 are reported as symlinks and are not silently treated as directories.

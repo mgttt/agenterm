@@ -14,6 +14,8 @@ $declaredEvidence = @(
     'script.modules-tasks'
     'script.stream'
     'script.http'
+    'script.fs-lifecycle'
+    'script.runtime-lifecycle'
     'script.supervisor'
     'script.audit'
 )
@@ -51,6 +53,7 @@ $auditFile = Join-Path $runtimeDirectory 'audit.jsonl'
 $runSucceeded = $false
 $runFailure = $null
 $script:ownedScriptClients = [Collections.Generic.List[Diagnostics.Process]]::new()
+$abandonedTempOwnerPids = [Collections.Generic.List[int]]::new()
 
 function Invoke-Script {
     param([string[]]$CommandArgs)
@@ -1190,6 +1193,105 @@ try {
     if ($localRuntime -ne '42') {
         throw "local fs/json runtime returned unexpected value: $localRuntime"
     }
+    $fsTree = Join-Path $runtimeDirectory 'fs-lifecycle'
+    $fsNested = Join-Path $fsTree 'nested'
+    $fsSource = Join-Path $fsNested 'source.txt'
+    $fsCopy = Join-Path $fsNested 'copy.txt'
+    $fsRenamed = Join-Path $fsTree 'renamed.txt'
+    $fsTreeLiteral = $fsTree.Replace('`', '``')
+    $fsNestedLiteral = $fsNested.Replace('`', '``')
+    $fsSourceLiteral = $fsSource.Replace('`', '``')
+    $fsCopyLiteral = $fsCopy.Replace('`', '``')
+    $fsRenamedLiteral = $fsRenamed.Replace('`', '``')
+    Invoke-Script @(
+        'script', 'eval',
+        "std::fs::create_dir_all(``$fsNestedLiteral``)",
+        '--profile', 'local'
+    ) | Out-Null
+    Invoke-Script @(
+        'script', 'eval',
+        "std::fs::write(``$fsSourceLiteral``, ``Unicode lifecycle: 目录``)",
+        '--profile', 'local'
+    ) | Out-Null
+    $copiedBytes = Invoke-Script @(
+        'script', 'eval',
+        "std::fs::copy(``$fsSourceLiteral``, ``$fsCopyLiteral``)",
+        '--profile', 'local'
+    )
+    if ([int64]$copiedBytes -le 0) {
+        throw "std::fs::copy returned an invalid byte count: $copiedBytes"
+    }
+    Invoke-Script @(
+        'script', 'eval',
+        "std::fs::rename(``$fsCopyLiteral``, ``$fsRenamedLiteral``)",
+        '--profile', 'local'
+    ) | Out-Null
+    $renamedText = Invoke-Script @(
+        'script', 'eval',
+        "std::fs::read_to_string(``$fsRenamedLiteral``)",
+        '--profile', 'local'
+    )
+    if ($renamedText -ne 'Unicode lifecycle: 目录') {
+        throw "filesystem lifecycle corrupted Unicode content: $renamedText"
+    }
+    Invoke-Script @(
+        'script', 'eval',
+        "std::fs::remove_file(``$fsRenamedLiteral``)",
+        '--profile', 'local'
+    ) | Out-Null
+    Invoke-Script @(
+        'script', 'eval',
+        "std::fs::remove_dir_all(``$fsTreeLiteral``)",
+        '--profile', 'local'
+    ) | Out-Null
+    if (Test-Path -LiteralPath $fsTree) {
+        throw 'filesystem lifecycle did not remove its exact owned tree'
+    }
+    $broadDelete = Invoke-ScriptFailure 1 @(
+        'script', 'eval', 'std::fs::remove_dir_all(".")',
+        '--profile', 'local'
+    )
+    if (-not $broadDelete.Contains('fs_remove_dir_all_broad_target')) {
+        throw "broad filesystem cleanup did not return its stable error: $broadDelete"
+    }
+    if (-not (Test-Path -LiteralPath $runtimeDirectory)) {
+        throw 'broad filesystem cleanup damaged the smoke-run workspace'
+    }
+    if ((Invoke-Script @(
+        'script', 'eval', 'std::fs::exists(".")', '--profile', 'local'
+    )) -ne 'true') {
+        throw 'runtime did not recover after a rejected broad filesystem cleanup'
+    }
+    Write-Evidence 'script.fs-lifecycle'
+    $ownedTempRoot = Invoke-Script @(
+        'script', 'eval', 'rhai::runtime::temp_dir().display',
+        '--profile', 'local'
+    )
+    if ([string]::IsNullOrWhiteSpace($ownedTempRoot) -or
+        (Test-Path -LiteralPath $ownedTempRoot)) {
+        throw "invocation-owned temporary root survived completion: $ownedTempRoot"
+    }
+    $atomicResult = Join-Path $runtimeDirectory 'atomic-result-目录.json'
+    [IO.File]::WriteAllText($atomicResult, '{"state":"old"}')
+    $atomicResultLiteral = $atomicResult.Replace('`', '``')
+    $atomicExpression = (
+        "rhai::runtime::atomic_write(``$atomicResultLiteral``, " +
+        "``{`"state`":`"新`"}``)"
+    )
+    Invoke-Script @(
+        'script', 'eval', $atomicExpression,
+        '--profile', 'local'
+    ) | Out-Null
+    if ([IO.File]::ReadAllText($atomicResult) -ne '{"state":"新"}') {
+        throw 'runtime atomic replacement did not publish the complete Unicode result'
+    }
+    $atomicStaging = @(
+        Get-ChildItem -LiteralPath $runtimeDirectory -Force |
+            Where-Object { $_.Name -like '.atomic-result-*.agenterm-atomic-*' }
+    )
+    if ($atomicStaging.Count -ne 0) {
+        throw 'runtime atomic replacement left a sibling staging file'
+    }
     $localPath = Invoke-Script @(
         'script', 'eval',
         "std::path::PathBuf::from(``$localDataLiteral``).extension",
@@ -1390,6 +1492,7 @@ try {
     )
     $interruptedWorker = Wait-NewWorker -Existing $existingWorkers
     [AgenTermSmoke.NativeProcess]::Suspend($interruptedWorker.Id)
+    $abandonedTempOwnerPids.Add($interruptedClient.Id)
     $interruptedClient.Kill()
     $interruptedClient.WaitForExit()
     Wait-ProcessGone -Id $interruptedWorker.Id
@@ -1423,6 +1526,7 @@ try {
     $deniedClient.Dispose()
 
     $releasedWorkerId = $holderWorkers[0].Id
+    $abandonedTempOwnerPids.Add($holderClients[0].Id)
     $holderClients[0].Kill()
     $holderClients[0].WaitForExit()
     Wait-ProcessGone -Id $releasedWorkerId
@@ -1439,11 +1543,13 @@ try {
 
     for ($index = 1; $index -lt $holderClients.Count; $index++) {
         $workerId = $holderWorkers[$index].Id
+        $abandonedTempOwnerPids.Add($holderClients[$index].Id)
         $holderClients[$index].Kill()
         $holderClients[$index].WaitForExit()
         Wait-ProcessGone -Id $workerId
         $holderClients[$index].Dispose()
     }
+    $abandonedTempOwnerPids.Add($replacementClient.Id)
     $replacementClient.Kill()
     $replacementClient.WaitForExit()
     Wait-ProcessGone -Id $replacementWorker.Id
@@ -1452,6 +1558,25 @@ try {
     if ($supervisorRecovered -ne '42') {
         throw 'script supervisor did not recover after timeout/crash/interruption/concurrency'
     }
+    $invocationTempParent = Join-Path $env:TEMP 'AgenTerm\script-invocations'
+    if (Test-Path -LiteralPath $invocationTempParent) {
+        $orphanTempRoots = @(
+            Get-ChildItem -LiteralPath $invocationTempParent -Directory |
+                Where-Object {
+                    $ownerText = $_.Name.Split('-', 2)[0]
+                    $ownerPid = 0
+                    [int]::TryParse($ownerText, [ref]$ownerPid) -and
+                        $abandonedTempOwnerPids.Contains($ownerPid)
+                }
+        )
+        if ($orphanTempRoots.Count -ne 0) {
+            throw (
+                'recovery invocation did not prune abandoned owned temp roots: ' +
+                (($orphanTempRoots | ForEach-Object Name) -join ', ')
+            )
+        }
+    }
+    Write-Evidence 'script.runtime-lifecycle'
     Write-Evidence 'script.supervisor'
 
     Write-Host 'STEP typed brokered observation'

@@ -71,6 +71,54 @@ thread_local! {
     static IPC_ADDRESS_OVERRIDE: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
+#[cfg(windows)]
+struct OwnedScriptTemp {
+    root: PathBuf,
+}
+
+#[cfg(windows)]
+impl OwnedScriptTemp {
+    fn create(invocation_id: &str) -> std::io::Result<Self> {
+        let parent = env::temp_dir().join("AgenTerm").join("script-invocations");
+        std::fs::create_dir_all(&parent)?;
+        Self::prune_stale(&parent);
+        let root = parent.join(invocation_id);
+        std::fs::create_dir(&root)?;
+        Ok(Self { root })
+    }
+
+    fn prune_stale(parent: &Path) {
+        let Ok(entries) = std::fs::read_dir(parent) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+                continue;
+            };
+            let Some(owner_pid) = name
+                .split_once('-')
+                .and_then(|(prefix, _)| prefix.parse::<u32>().ok())
+            else {
+                continue;
+            };
+            if !instance_process_is_alive(owner_pid) {
+                let _ = std::fs::remove_dir_all(entry.path());
+            }
+        }
+    }
+
+    fn display(&self) -> String {
+        self.root.display().to_string()
+    }
+}
+
+#[cfg(windows)]
+impl Drop for OwnedScriptTemp {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.root);
+    }
+}
+
 pub(crate) fn no_activate_from_environment() -> bool {
     no_activate_from_value(env::var_os("AGENTERM_NO_ACTIVATE").as_deref())
 }
@@ -1071,6 +1119,29 @@ fn run_script_command_with_context(
         Err(error) => return report_audit_error(error),
     };
     let audit_started = Instant::now();
+    let invocation_temp = if profile == ScriptProfile::Local {
+        match OwnedScriptTemp::create(&invocation_id) {
+            Ok(owned) => Some(owned),
+            Err(error) => {
+                let outcome = AuditOutcome {
+                    duration_ms: audit_duration_ms(audit_started),
+                    result_class: "host".to_owned(),
+                    failure_code: Some("host_temp_create".to_owned()),
+                    denied: false,
+                    cancelled: false,
+                    timed_out: false,
+                    crashed: false,
+                };
+                if let Err(audit_error) = audit_sink.append(&audit_invocation, &outcome) {
+                    return report_audit_error(audit_error);
+                }
+                eprintln!("host_temp_create: invocation temporary root is unavailable: {error}");
+                return 1;
+            }
+        }
+    } else {
+        None
+    };
     let invocation = ScriptInvocation {
         envelope_version: SCRIPT_ENVELOPE_VERSION,
         invocation_id,
@@ -1080,6 +1151,7 @@ fn run_script_command_with_context(
         source_label,
         source,
         project_root: Some(context.project_root.display().to_string()),
+        invocation_temp_root: invocation_temp.as_ref().map(OwnedScriptTemp::display),
         arguments: script_arguments,
         budgets,
         observation,

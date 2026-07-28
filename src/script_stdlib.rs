@@ -1,10 +1,19 @@
 use std::{
+    cell::RefCell,
     fs::{DirEntry, FileType, Metadata},
-    path::PathBuf,
+    io::Write,
+    path::{Component, Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use rhai::{Array, Dynamic, Engine, EvalAltResult, Module, Shared};
+
+thread_local! {
+    static INVOCATION_TEMP_ROOT: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+}
+
+static ATOMIC_WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Debug)]
 pub struct ScriptPath(pub(crate) PathBuf);
@@ -23,6 +32,24 @@ pub struct ScriptMetadata(Metadata);
 
 #[derive(Clone, Copy, Debug)]
 pub struct ScriptSystemTime(SystemTime);
+
+pub struct InvocationTempScope {
+    previous: Option<PathBuf>,
+}
+
+pub fn enter_invocation_temp_root(root: Option<&Path>) -> InvocationTempScope {
+    let previous =
+        INVOCATION_TEMP_ROOT.with(|current| current.replace(root.map(Path::to_path_buf)));
+    InvocationTempScope { previous }
+}
+
+impl Drop for InvocationTempScope {
+    fn drop(&mut self) {
+        INVOCATION_TEMP_ROOT.with(|current| {
+            current.replace(self.previous.take());
+        });
+    }
+}
 
 pub fn register_local(engine: &mut Engine) {
     crate::script_stream::register(engine);
@@ -103,6 +130,13 @@ pub fn register_local(engine: &mut Engine) {
     fs.set_native_fn("exists", fs_exists);
     fs.set_native_fn("metadata", fs_metadata);
     fs.set_native_fn("read_dir", fs_read_dir);
+    fs.set_native_fn("create_dir", fs_create_dir);
+    fs.set_native_fn("create_dir_all", fs_create_dir_all);
+    fs.set_native_fn("copy", fs_copy);
+    fs.set_native_fn("rename", fs_rename);
+    fs.set_native_fn("remove_file", fs_remove_file);
+    fs.set_native_fn("remove_dir", fs_remove_dir);
+    fs.set_native_fn("remove_dir_all", fs_remove_dir_all);
 
     let mut system_time = Module::new();
     system_time.set_native_fn("now", system_time_now);
@@ -124,9 +158,15 @@ pub fn register_local(engine: &mut Engine) {
     let mut bytes = Module::new();
     bytes.set_native_fn("from_text", bytes_from_text);
 
+    let mut runtime = Module::new();
+    runtime.set_native_fn("temp_dir", runtime_temp_dir);
+    runtime.set_native_fn("atomic_write", runtime_atomic_write);
+    runtime.set_native_fn("atomic_write_bytes", runtime_atomic_write_bytes);
+
     let mut rhai_module = Module::new();
     rhai_module.set_sub_module("json", json);
     rhai_module.set_sub_module("bytes", bytes);
+    rhai_module.set_sub_module("runtime", runtime);
     crate::script_task::register(engine, &mut rhai_module);
     crate::script_http::register(engine, &mut rhai_module);
     engine.register_static_module("rhai", Shared::new(rhai_module));
@@ -182,6 +222,179 @@ fn fs_read_dir(path: &str) -> Result<Array, Box<EvalAltResult>> {
             script_dir_entry(entry).map(Dynamic::from)
         })
         .collect()
+}
+
+fn fs_create_dir(path: &str) -> Result<(), Box<EvalAltResult>> {
+    std::fs::create_dir(path).map_err(|error| io_error("fs_create_dir", path, error))
+}
+
+fn fs_create_dir_all(path: &str) -> Result<(), Box<EvalAltResult>> {
+    std::fs::create_dir_all(path).map_err(|error| io_error("fs_create_dir_all", path, error))
+}
+
+fn fs_copy(source: &str, destination: &str) -> Result<rhai::INT, Box<EvalAltResult>> {
+    let bytes = std::fs::copy(source, destination)
+        .map_err(|error| io_error("fs_copy", destination, error))?;
+    rhai::INT::try_from(bytes)
+        .map_err(|_| "fs_copy_overflow: byte count exceeds Rhai integer".into())
+}
+
+fn fs_rename(source: &str, destination: &str) -> Result<(), Box<EvalAltResult>> {
+    validate_destructive_path("fs_rename", source)?;
+    std::fs::rename(source, destination).map_err(|error| io_error("fs_rename", destination, error))
+}
+
+fn fs_remove_file(path: &str) -> Result<(), Box<EvalAltResult>> {
+    validate_destructive_path("fs_remove_file", path)?;
+    std::fs::remove_file(path).map_err(|error| io_error("fs_remove_file", path, error))
+}
+
+fn fs_remove_dir(path: &str) -> Result<(), Box<EvalAltResult>> {
+    validate_destructive_path("fs_remove_dir", path)?;
+    std::fs::remove_dir(path).map_err(|error| io_error("fs_remove_dir", path, error))
+}
+
+fn fs_remove_dir_all(path: &str) -> Result<(), Box<EvalAltResult>> {
+    validate_destructive_path("fs_remove_dir_all", path)?;
+    std::fs::remove_dir_all(path).map_err(|error| io_error("fs_remove_dir_all", path, error))
+}
+
+fn runtime_temp_dir() -> Result<ScriptPath, Box<EvalAltResult>> {
+    INVOCATION_TEMP_ROOT.with(|root| {
+        root.borrow().clone().map(ScriptPath).ok_or_else(|| {
+            "runtime_temp_unavailable: invocation has no owned temporary root".into()
+        })
+    })
+}
+
+fn runtime_atomic_write(path: &str, value: &str) -> Result<(), Box<EvalAltResult>> {
+    atomic_write(path, value.as_bytes())
+}
+
+fn runtime_atomic_write_bytes(path: &str, value: ScriptBytes) -> Result<(), Box<EvalAltResult>> {
+    atomic_write(path, &value.0)
+}
+
+fn atomic_write(path: &str, value: &[u8]) -> Result<(), Box<EvalAltResult>> {
+    let destination = validate_destructive_path("runtime_atomic_write", path)?;
+    let parent = destination
+        .parent()
+        .ok_or("runtime_atomic_write_broad_target: parent directory required")?;
+    let name = destination
+        .file_name()
+        .ok_or("runtime_atomic_write_broad_target: file name required")?
+        .to_string_lossy();
+    let sequence = ATOMIC_WRITE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let temporary = parent.join(format!(
+        ".{name}.agenterm-atomic-{}-{sequence}",
+        std::process::id()
+    ));
+    let mut cleanup = AtomicWriteCleanup {
+        path: temporary.clone(),
+        armed: true,
+    };
+    let mut output = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary)
+        .map_err(|error| io_error("runtime_atomic_write_create", path, error))?;
+    output
+        .write_all(value)
+        .and_then(|_| output.sync_all())
+        .map_err(|error| io_error("runtime_atomic_write_data", path, error))?;
+    drop(output);
+    replace_file(&temporary, &destination)
+        .map_err(|error| io_error("runtime_atomic_write_promote", path, error))?;
+    cleanup.armed = false;
+    sync_parent(parent).map_err(|error| io_error("runtime_atomic_write_sync", path, error))?;
+    Ok(())
+}
+
+struct AtomicWriteCleanup {
+    path: PathBuf,
+    armed: bool,
+}
+
+impl Drop for AtomicWriteCleanup {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
+
+#[cfg(windows)]
+fn replace_file(source: &Path, destination: &Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+    };
+
+    let source = source
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect::<Vec<_>>();
+    let destination = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect::<Vec<_>>();
+    let result = unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if result == 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(not(windows))]
+fn replace_file(source: &Path, destination: &Path) -> std::io::Result<()> {
+    std::fs::rename(source, destination)
+}
+
+#[cfg(unix)]
+fn sync_parent(parent: &Path) -> std::io::Result<()> {
+    std::fs::File::open(parent)?.sync_all()
+}
+
+#[cfg(not(unix))]
+fn sync_parent(_parent: &Path) -> std::io::Result<()> {
+    Ok(())
+}
+
+fn validate_destructive_path(
+    code: &'static str,
+    value: &str,
+) -> Result<PathBuf, Box<EvalAltResult>> {
+    let path = Path::new(value);
+    let has_normal_component = path
+        .components()
+        .any(|component| matches!(component, Component::Normal(_)));
+    if value.trim().is_empty() || !has_normal_component {
+        return Err(format!("{code}_broad_target: explicit non-root path required").into());
+    }
+    let absolute = std::path::absolute(path).map_err(|error| io_error(code, value, error))?;
+    if absolute.parent().is_none() {
+        return Err(format!("{code}_broad_target: filesystem root is not allowed").into());
+    }
+    let current = std::env::current_dir()
+        .and_then(std::fs::canonicalize)
+        .map_err(|error| io_error(code, value, error))?;
+    let resolved = std::fs::canonicalize(&absolute).unwrap_or_else(|_| absolute.clone());
+    if current == resolved || current.starts_with(&resolved) {
+        return Err(format!(
+            "{code}_broad_target: current workspace or its ancestor is not allowed"
+        )
+        .into());
+    }
+    Ok(absolute)
 }
 
 fn script_dir_entry(entry: DirEntry) -> Result<ScriptDirEntry, Box<EvalAltResult>> {
@@ -411,6 +624,100 @@ mod tests {
         );
         std::fs::remove_file(&file).unwrap();
         std::fs::remove_dir(&directory).unwrap();
+    }
+
+    #[test]
+    fn filesystem_lifecycle_is_typed_and_rejects_broad_cleanup() {
+        let root =
+            std::env::temp_dir().join(format!("agenterm-script-lifecycle-{}", std::process::id()));
+        let nested = root.join("nested");
+        let source = nested.join("source.txt");
+        let copied = nested.join("copied.txt");
+        let renamed = nested.join("renamed.txt");
+        let literal = |path: &Path| path.to_string_lossy().replace('\\', "\\\\");
+        let script = format!(
+            r#"
+                std::fs::create_dir_all("{}");
+                std::fs::write("{}", "hello");
+                let copied = std::fs::copy("{}", "{}");
+                std::fs::rename("{}", "{}");
+                std::fs::remove_file("{}");
+                std::fs::remove_dir_all("{}");
+                copied
+            "#,
+            literal(&nested),
+            literal(&source),
+            literal(&source),
+            literal(&copied),
+            literal(&copied),
+            literal(&renamed),
+            literal(&source),
+            literal(&root),
+        );
+        assert_eq!(local_engine().eval::<rhai::INT>(&script).unwrap(), 5);
+        assert!(!root.exists());
+
+        let current = std::env::current_dir().unwrap();
+        let error = fs_remove_dir_all(&current.to_string_lossy())
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("fs_remove_dir_all_broad_target"));
+        assert!(current.exists());
+    }
+
+    #[test]
+    fn invocation_temp_and_atomic_replace_have_explicit_lifecycle() {
+        let root = std::env::temp_dir().join(format!(
+            "agenterm-script-runtime-{}-{}",
+            std::process::id(),
+            ATOMIC_WRITE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let destination = root.join("result-目录.json");
+        std::fs::write(&destination, "old").unwrap();
+        let literal = |path: &Path| path.to_string_lossy().replace('\\', "\\\\");
+        {
+            let _scope = enter_invocation_temp_root(Some(&root));
+            let source = format!(
+                r#"
+                    let temp = rhai::runtime::temp_dir();
+                    rhai::runtime::atomic_write("{}", `{{"value":"新"}}`);
+                    #{{ temp: temp.display, value: std::fs::read_to_string("{}") }}
+                "#,
+                literal(&destination),
+                literal(&destination),
+            );
+            let result = local_engine()
+                .eval::<rhai::Map>(&source)
+                .expect("owned temp and atomic replacement");
+            assert_eq!(
+                result["temp"].clone().into_string().unwrap(),
+                root.display().to_string()
+            );
+            assert_eq!(
+                result["value"].clone().into_string().unwrap(),
+                r#"{"value":"新"}"#
+            );
+        }
+        let error = local_engine()
+            .eval::<ScriptPath>("rhai::runtime::temp_dir()")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("runtime_temp_unavailable"));
+        assert_eq!(
+            std::fs::read_to_string(&destination).unwrap(),
+            r#"{"value":"新"}"#
+        );
+        assert!(
+            std::fs::read_dir(&root).unwrap().all(|entry| !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .contains("atomic")),
+            "atomic promotion must not leave a sibling staging file"
+        );
+        std::fs::remove_file(destination).unwrap();
+        std::fs::remove_dir(root).unwrap();
     }
 
     #[test]

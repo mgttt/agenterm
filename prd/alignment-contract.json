@@ -335,6 +335,22 @@
       "evidence_ids": ["script.fleet-v2"]
     },
     {
+      "id": "scripting.fs-lifecycle",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "`std::fs` provides explicit-target directory creation, copy, rename, file removal and tree removal while rejecting workspace-wide cleanup",
+      "evidence_ids": ["script.fs-lifecycle"]
+    },
+    {
+      "id": "scripting.runtime-lifecycle",
+      "kind": "architecture",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "`rhai::runtime` exposes an invocation-owned temporary root and same-volume atomic replacement with normal, crash, parent-exit and recovery cleanup evidence",
+      "evidence_ids": ["script.runtime-lifecycle"]
+    },
+    {
       "id": "scripting.rust-host-rhai-language",
       "kind": "decision",
       "status": "accepted",

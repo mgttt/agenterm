@@ -125,6 +125,8 @@
         "script.modules-tasks",
         "script.stream",
         "script.http",
+        "script.fs-lifecycle",
+        "script.runtime-lifecycle",
         "script.supervisor",
         "script.audit"
       ]

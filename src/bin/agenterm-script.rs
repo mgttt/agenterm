@@ -559,6 +559,12 @@ fn execute_inner(
     cancellation: Option<Arc<AtomicBool>>,
     broker: Option<BrokerClient>,
 ) -> Result<(String, Option<serde_json::Value>), ScriptFailure> {
+    let _temp_scope = agenterm::script_stdlib::enter_invocation_temp_root(
+        invocation
+            .invocation_temp_root
+            .as_deref()
+            .map(std::path::Path::new),
+    );
     if invocation.envelope_version != SCRIPT_ENVELOPE_VERSION {
         return Err(protocol_error(
             "unsupported_envelope",
@@ -1237,6 +1243,7 @@ mod tests {
             source_label: "unit".to_owned(),
             source: source.to_owned(),
             project_root: None,
+            invocation_temp_root: None,
             arguments: Vec::new(),
             budgets: ScriptBudgets::default(),
             observation: None,

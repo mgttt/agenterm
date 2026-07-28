@@ -108,9 +108,11 @@ and it is not positioned as a restricted security plugin.
   CLI discovery are not wrapped in artificial namespaces.
 - [ ] `std::fs` covers bounded `read`, `read_to_string`, `write`, directory
   listing/creation, metadata, copy, rename and explicit-target deletion.
-  - [x] first local slice ships blocking `read`, `read_to_string`, text/bytes
-    `write`, and `exists`; directory mutation, metadata and cumulative byte
-    budgets remain open.
+  - [x] blocking `read`, `read_to_string`, text/bytes `write`, `exists`,
+    directory creation, copy, rename and explicit-target file/directory/tree
+    removal ship through the public CLI. Destructive helpers reject empty,
+    root, current-workspace and ancestor targets; metadata, directory listing
+    and cumulative byte budgets remain open.
 - [ ] `std::path` provides a selected `Path`/`PathBuf` object model for Windows
   normalization, composition, relative paths, working directories, Unicode,
   long paths and canonical/reparse-point facts without copying Rust borrowing.
@@ -171,10 +173,15 @@ and it is not positioned as a restricted security plugin.
 - [ ] `rhai::runtime` may expose only safe invocation/API/profile/version/
   limits facts, never private supervisor, HWND, renderer, PTY or broker
   handles.
-- [ ] filesystem and temporary-resource helpers have explicit ownership and
+  - [x] `temp_dir` exposes only the current invocation-owned directory;
+    `atomic_write` and `atomic_write_bytes` publish a complete same-volume
+    replacement without exposing supervisor or OS handles.
+- [x] filesystem and temporary-resource helpers have explicit ownership and
   cleanup behavior. Canonicalization, reparse points, atomic replacement, and
   failure paths cannot silently target a different path than the result
-  reports.
+  reports. Normal completion removes the invocation root immediately; a later
+  invocation prunes roots abandoned by a dead parent, and atomic staging files
+  are removed on both promotion and ordinary failure.
 - [ ] the catalog taxonomy is not copied into the script surface.
   Resource-bearing values use custom-type methods (`Child.wait`,
   `Task.cancel`, `Stream.read`, response/output access), while modules,
