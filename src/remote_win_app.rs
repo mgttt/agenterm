@@ -45,7 +45,7 @@ use crate::{
     client::{ipc_address, ipc_socket_addr},
     commands::tmux_key_bytes,
     settings::{AppConfig, clamp_tabs_width, load_config, save_config},
-    theme::{Rgb, ThemePalette},
+    theme::{Rgb, ThemeId, ThemePalette},
     ui_bridge::{
         UI_TAB_NOTE_MAX_BYTES, UI_TAB_TITLE_MAX_BYTES, UiCellStyle, UiColor, UiScreenSnapshot,
         UiTabBootstrap,
@@ -68,6 +68,13 @@ const TAB_CANCEL_ID: usize = 2108;
 const CLOSE_KEEP_ID: usize = 2109;
 const CLOSE_STOP_ID: usize = 2110;
 const CLOSE_CANCEL_ID: usize = 2111;
+const SETTINGS_ID: usize = 2112;
+const SETTINGS_FONT_ID: usize = 2113;
+const SETTINGS_SIZE_ID: usize = 2114;
+const SETTINGS_DARK_ID: usize = 2115;
+const SETTINGS_LIGHT_ID: usize = 2116;
+const SETTINGS_APPLY_ID: usize = 2117;
+const SETTINGS_CANCEL_ID: usize = 2118;
 const SIDEBAR_ROW_HEIGHT: i32 = 44;
 const TOOLBAR_HEIGHT: i32 = 44;
 const STATUS_HEIGHT: i32 = 26;
@@ -150,6 +157,7 @@ pub(crate) fn run_remote_gui(no_activate: bool) -> Result<()> {
     let send = create_button(window, instance, SEND_ID, "Send");
     let new_tab = create_button(window, instance, NEW_ID, "New");
     let tabs = create_button(window, instance, TABS_ID, "Tabs");
+    let settings = create_button(window, instance, SETTINGS_ID, "Settings");
     let tab_title_edit = create_hidden_edit(window, instance, TAB_TITLE_EDIT_ID);
     let tab_note_edit = create_hidden_edit(window, instance, TAB_NOTE_EDIT_ID);
     let tab_save = create_hidden_button(window, instance, TAB_SAVE_ID, "Save");
@@ -157,10 +165,17 @@ pub(crate) fn run_remote_gui(no_activate: bool) -> Result<()> {
     let close_keep = create_hidden_button(window, instance, CLOSE_KEEP_ID, "Keep Server Running");
     let close_stop = create_hidden_button(window, instance, CLOSE_STOP_ID, "Stop Server && Exit");
     let close_cancel = create_hidden_button(window, instance, CLOSE_CANCEL_ID, "Cancel");
+    let settings_font = create_hidden_edit(window, instance, SETTINGS_FONT_ID);
+    let settings_size = create_hidden_edit(window, instance, SETTINGS_SIZE_ID);
+    let settings_dark = create_hidden_button(window, instance, SETTINGS_DARK_ID, "Dark");
+    let settings_light = create_hidden_button(window, instance, SETTINGS_LIGHT_ID, "Light");
+    let settings_apply = create_hidden_button(window, instance, SETTINGS_APPLY_ID, "Apply");
+    let settings_cancel = create_hidden_button(window, instance, SETTINGS_CANCEL_ID, "Cancel");
     if edit.is_null()
         || send.is_null()
         || new_tab.is_null()
         || tabs.is_null()
+        || settings.is_null()
         || tab_title_edit.is_null()
         || tab_note_edit.is_null()
         || tab_save.is_null()
@@ -168,6 +183,12 @@ pub(crate) fn run_remote_gui(no_activate: bool) -> Result<()> {
         || close_keep.is_null()
         || close_stop.is_null()
         || close_cancel.is_null()
+        || settings_font.is_null()
+        || settings_size.is_null()
+        || settings_dark.is_null()
+        || settings_light.is_null()
+        || settings_apply.is_null()
+        || settings_cancel.is_null()
     {
         unsafe { DestroyWindow(window) };
         anyhow::bail!("failed to create replaceable UI controls");
@@ -180,6 +201,7 @@ pub(crate) fn run_remote_gui(no_activate: bool) -> Result<()> {
             send,
             new_tab,
             tabs_button: tabs,
+            settings,
             tab_title_edit,
             tab_note_edit,
             tab_save,
@@ -187,6 +209,12 @@ pub(crate) fn run_remote_gui(no_activate: bool) -> Result<()> {
             close_keep,
             close_stop,
             close_cancel,
+            settings_font,
+            settings_size,
+            settings_dark,
+            settings_light,
+            settings_apply,
+            settings_cancel,
         },
         client_id,
         client,
@@ -270,6 +298,7 @@ struct RemoteControls {
     send: HWND,
     new_tab: HWND,
     tabs_button: HWND,
+    settings: HWND,
     tab_title_edit: HWND,
     tab_note_edit: HWND,
     tab_save: HWND,
@@ -277,6 +306,12 @@ struct RemoteControls {
     close_keep: HWND,
     close_stop: HWND,
     close_cancel: HWND,
+    settings_font: HWND,
+    settings_size: HWND,
+    settings_dark: HWND,
+    settings_light: HWND,
+    settings_apply: HWND,
+    settings_cancel: HWND,
 }
 
 #[derive(Clone, Copy)]
@@ -292,6 +327,7 @@ struct RemoteWindowState {
     send: HWND,
     new_tab: HWND,
     tabs_button: HWND,
+    settings: HWND,
     tab_title_edit: HWND,
     tab_note_edit: HWND,
     tab_save: HWND,
@@ -299,6 +335,12 @@ struct RemoteWindowState {
     close_keep: HWND,
     close_stop: HWND,
     close_cancel: HWND,
+    settings_font: HWND,
+    settings_size: HWND,
+    settings_dark: HWND,
+    settings_light: HWND,
+    settings_apply: HWND,
+    settings_cancel: HWND,
     client_id: String,
     client: Option<UiClientModel>,
     reconnect_after: Instant,
@@ -313,6 +355,8 @@ struct RemoteWindowState {
     tabs_resize_dragging: bool,
     editing_tab_id: Option<String>,
     window_close_pending: bool,
+    settings_open: bool,
+    settings_theme_draft: ThemeId,
 }
 
 impl RemoteWindowState {
@@ -327,6 +371,7 @@ impl RemoteWindowState {
             send,
             new_tab,
             tabs_button,
+            settings,
             tab_title_edit,
             tab_note_edit,
             tab_save,
@@ -334,8 +379,15 @@ impl RemoteWindowState {
             close_keep,
             close_stop,
             close_cancel,
+            settings_font,
+            settings_size,
+            settings_dark,
+            settings_light,
+            settings_apply,
+            settings_cancel,
         } = controls;
         let config = load_config();
+        let settings_theme_draft = config.color_theme;
         let (font, cell_width, cell_height) = create_terminal_font(window, &config)?;
         let last_active_id = client.snapshot().active_tab_id.clone();
         Ok(Self {
@@ -344,6 +396,7 @@ impl RemoteWindowState {
             send,
             new_tab,
             tabs_button,
+            settings,
             tab_title_edit,
             tab_note_edit,
             tab_save,
@@ -351,6 +404,12 @@ impl RemoteWindowState {
             close_keep,
             close_stop,
             close_cancel,
+            settings_font,
+            settings_size,
+            settings_dark,
+            settings_light,
+            settings_apply,
+            settings_cancel,
             client_id,
             client: Some(client),
             reconnect_after: Instant::now(),
@@ -365,6 +424,8 @@ impl RemoteWindowState {
             tabs_resize_dragging: false,
             editing_tab_id: None,
             window_close_pending: false,
+            settings_open: false,
+            settings_theme_draft,
         })
     }
 
@@ -481,6 +542,14 @@ impl RemoteWindowState {
                 32,
                 1,
             );
+            MoveWindow(
+                self.settings,
+                sidebar.left + 156,
+                toolbar_top + MARGIN,
+                86,
+                32,
+                1,
+            );
             let send_width = 76;
             MoveWindow(
                 self.edit,
@@ -500,7 +569,7 @@ impl RemoteWindowState {
             );
             ShowWindow(
                 self.new_tab,
-                if self.tabs_visible && !self.window_close_pending {
+                if self.tabs_visible && !self.window_close_pending && !self.settings_open {
                     SW_SHOW
                 } else {
                     SW_HIDE
@@ -509,6 +578,7 @@ impl RemoteWindowState {
         }
         self.layout_tab_editor();
         self.layout_close_controls();
+        self.layout_settings_controls();
     }
 
     fn layout_tab_editor(&self) {
@@ -631,6 +701,7 @@ impl RemoteWindowState {
             ShowWindow(self.edit, command);
             ShowWindow(self.send, command);
             ShowWindow(self.tabs_button, command);
+            ShowWindow(self.settings, command);
             ShowWindow(
                 self.new_tab,
                 if visible && self.tabs_visible {
@@ -641,6 +712,94 @@ impl RemoteWindowState {
             );
         }
         self.show_tab_editor(visible && self.tabs_visible && self.editing_tab_id.is_some());
+    }
+
+    fn settings_modal_geometry(&self) -> (RECT, [RECT; 6]) {
+        let mut client: RECT = unsafe { mem::zeroed() };
+        unsafe { GetClientRect(self.window, &mut client) };
+        let width = (client.right - 32).clamp(420, 540);
+        let height = 330;
+        let left = ((client.right - width) / 2).max(0);
+        let top = ((client.bottom - height) / 2).max(0);
+        let modal = RECT {
+            left,
+            top,
+            right: left + width,
+            bottom: top + height,
+        };
+        let font = RECT {
+            left: left + 32,
+            top: top + 92,
+            right: left + width - 126,
+            bottom: top + 124,
+        };
+        let size = RECT {
+            left: left + width - 110,
+            top: top + 92,
+            right: left + width - 32,
+            bottom: top + 124,
+        };
+        let dark = RECT {
+            left: left + 32,
+            top: top + 180,
+            right: left + 178,
+            bottom: top + 214,
+        };
+        let light = RECT {
+            left: left + 190,
+            top: top + 180,
+            right: left + 336,
+            bottom: top + 214,
+        };
+        let apply = RECT {
+            left: left + width - 126,
+            top: top + 266,
+            right: left + width - 32,
+            bottom: top + 302,
+        };
+        let cancel = RECT {
+            left: apply.left - 106,
+            top: top + 266,
+            right: apply.left - 12,
+            bottom: top + 302,
+        };
+        (modal, [font, size, dark, light, apply, cancel])
+    }
+
+    fn layout_settings_controls(&self) {
+        let (_, controls) = self.settings_modal_geometry();
+        for (control, rect) in [
+            (self.settings_font, controls[0]),
+            (self.settings_size, controls[1]),
+            (self.settings_dark, controls[2]),
+            (self.settings_light, controls[3]),
+            (self.settings_apply, controls[4]),
+            (self.settings_cancel, controls[5]),
+        ] {
+            unsafe {
+                MoveWindow(
+                    control,
+                    rect.left,
+                    rect.top,
+                    rect.right - rect.left,
+                    rect.bottom - rect.top,
+                    1,
+                );
+            }
+        }
+        self.show_settings_controls(self.settings_open);
+    }
+
+    fn show_settings_controls(&self, visible: bool) {
+        let command = if visible { SW_SHOW } else { SW_HIDE };
+        unsafe {
+            ShowWindow(self.settings_font, command);
+            ShowWindow(self.settings_size, command);
+            ShowWindow(self.settings_dark, command);
+            ShowWindow(self.settings_light, command);
+            ShowWindow(self.settings_apply, command);
+            ShowWindow(self.settings_cancel, command);
+        }
     }
 
     fn resize_active_terminal(&mut self) {
@@ -874,9 +1033,111 @@ impl RemoteWindowState {
         unsafe { SetFocus(self.window) };
     }
 
+    fn open_settings(&mut self) {
+        if self.settings_open || self.window_close_pending {
+            return;
+        }
+        if let Err(error) = self.sync_composer() {
+            self.last_error = Some(format!("Composer save failed: {error:#}"));
+            return;
+        }
+        self.finish_tab_edit(false);
+        self.settings_open = true;
+        self.settings_theme_draft = self.config.color_theme;
+        unsafe {
+            SetWindowTextW(
+                self.settings_font,
+                wide(&self.config.terminal_font_family).as_ptr(),
+            );
+            SetWindowTextW(
+                self.settings_size,
+                wide(&self.config.terminal_font_size.to_string()).as_ptr(),
+            );
+        }
+        self.refresh_settings_theme_controls();
+        self.show_workspace_controls(false);
+        self.layout_settings_controls();
+        unsafe { SetFocus(self.settings_font) };
+    }
+
+    fn preview_settings_theme(&mut self, theme: ThemeId) {
+        if !self.settings_open {
+            return;
+        }
+        self.settings_theme_draft = theme;
+        self.refresh_settings_theme_controls();
+    }
+
+    fn refresh_settings_theme_controls(&self) {
+        for (theme, control) in [
+            (ThemeId::Dark, self.settings_dark),
+            (ThemeId::Light, self.settings_light),
+        ] {
+            let state = if theme == self.settings_theme_draft {
+                "Selected"
+            } else {
+                "Preview"
+            };
+            unsafe {
+                SetWindowTextW(
+                    control,
+                    wide(&format!("{} · {state}", theme.label())).as_ptr(),
+                );
+            }
+        }
+    }
+
+    fn apply_settings(&mut self) -> Result<()> {
+        let family = window_text(self.settings_font).trim().to_owned();
+        let size = window_text(self.settings_size)
+            .trim()
+            .parse::<u16>()
+            .context("font size must be a number from 8 to 36")?;
+        if family.is_empty() || family.len() > 256 || !(8..=36).contains(&size) {
+            anyhow::bail!("font family is required (maximum 256 bytes) and size must be 8 to 36");
+        }
+        let mut next = self.config.clone();
+        next.terminal_font_family = family;
+        next.terminal_font_size = size;
+        next.color_theme = self.settings_theme_draft;
+        let (font, cell_width, cell_height) = create_terminal_font(self.window, &next)?;
+        if let Err(error) = save_config(&next) {
+            unsafe { DeleteObject(font as HGDIOBJ) };
+            return Err(error).context("could not save settings");
+        }
+        unsafe { DeleteObject(self.font as HGDIOBJ) };
+        self.font = font;
+        self.cell_width = cell_width;
+        self.cell_height = cell_height;
+        self.config = next;
+        self.last_error = None;
+        Ok(())
+    }
+
+    fn finish_settings(&mut self, apply: bool) {
+        if !self.settings_open {
+            return;
+        }
+        if apply && let Err(error) = self.apply_settings() {
+            self.last_error = Some(format!("Settings apply failed: {error:#}"));
+            return;
+        }
+        self.settings_open = false;
+        self.settings_theme_draft = self.config.color_theme;
+        self.show_settings_controls(false);
+        self.show_workspace_controls(true);
+        self.layout();
+        self.load_composer();
+        self.resize_active_terminal();
+        unsafe { SetFocus(self.window) };
+    }
+
     fn request_window_close(&mut self) {
         if self.window_close_pending {
             return;
+        }
+        if self.settings_open {
+            self.finish_settings(false);
         }
         if let Err(error) = self.sync_composer() {
             self.last_error = Some(format!("Composer save failed: {error:#}"));
@@ -1101,7 +1362,11 @@ impl RemoteWindowState {
     }
 
     fn paint(&self) {
-        let palette = self.config.color_theme.palette();
+        let palette = if self.settings_open {
+            self.settings_theme_draft.palette()
+        } else {
+            self.config.color_theme.palette()
+        };
         let mut paint: PAINTSTRUCT = unsafe { mem::zeroed() };
         let device = unsafe { BeginPaint(self.window, &mut paint) };
         if device.is_null() {
@@ -1171,6 +1436,8 @@ impl RemoteWindowState {
         );
         if self.window_close_pending {
             self.paint_window_close(device, palette);
+        } else if self.settings_open {
+            self.paint_settings(device, palette);
         }
         unsafe { EndPaint(self.window, &paint) };
     }
@@ -1210,6 +1477,56 @@ impl RemoteWindowState {
                 bottom: modal.top + 120,
             },
             "Press Enter to keep it running, or Esc to cancel.",
+            palette.muted_text.colorref(),
+        );
+    }
+
+    fn paint_settings(&self, device: HDC, palette: &ThemePalette) {
+        let (modal, _) = self.settings_modal_geometry();
+        fill(device, &modal, palette.modal.colorref());
+        frame(device, &modal, palette.accent.colorref());
+        draw_text(
+            device,
+            RECT {
+                left: modal.left + 28,
+                top: modal.top + 18,
+                right: modal.right - 28,
+                bottom: modal.top + 50,
+            },
+            "Settings",
+            palette.text.colorref(),
+        );
+        draw_text(
+            device,
+            RECT {
+                left: modal.left + 32,
+                top: modal.top + 58,
+                right: modal.right - 126,
+                bottom: modal.top + 88,
+            },
+            "Terminal font family",
+            palette.muted_text.colorref(),
+        );
+        draw_text(
+            device,
+            RECT {
+                left: modal.right - 110,
+                top: modal.top + 58,
+                right: modal.right - 32,
+                bottom: modal.top + 88,
+            },
+            "Size",
+            palette.muted_text.colorref(),
+        );
+        draw_text(
+            device,
+            RECT {
+                left: modal.left + 32,
+                top: modal.top + 144,
+                right: modal.right - 32,
+                bottom: modal.top + 174,
+            },
+            "Color theme · preview is immediate; Apply persists",
             palette.muted_text.colorref(),
         );
     }
@@ -1331,7 +1648,7 @@ unsafe extern "system" fn window_proc(
         }
         WM_LBUTTONDOWN => {
             if let Some(state) = state_mut(window) {
-                if state.window_close_pending {
+                if state.window_close_pending || state.settings_open {
                     return 0;
                 }
                 let x = (lparam as u32 & 0xffff) as i16 as i32;
@@ -1412,6 +1729,12 @@ unsafe extern "system" fn window_proc(
                     }
                     return 0;
                 }
+                if state.settings_open {
+                    if wparam as u32 == u32::from(VK_ESCAPE) {
+                        state.finish_settings(false);
+                    }
+                    return 0;
+                }
                 if unsafe { GetFocus() } == window && state.terminal_key(wparam as u32) {
                     return 0;
                 }
@@ -1420,7 +1743,7 @@ unsafe extern "system" fn window_proc(
         }
         WM_CHAR => {
             if let Some(state) = state_mut(window) {
-                if state.window_close_pending {
+                if state.window_close_pending || state.settings_open {
                     return 0;
                 }
                 if unsafe { GetFocus() } == window {
@@ -1434,6 +1757,7 @@ unsafe extern "system" fn window_proc(
                 match wparam & 0xffff {
                     SEND_ID => state.send_composer(),
                     NEW_ID => state.new_tab(),
+                    SETTINGS_ID => state.open_settings(),
                     TABS_ID => {
                         state.finish_tab_edit(false);
                         state.tabs_visible = !state.tabs_visible;
@@ -1454,6 +1778,10 @@ unsafe extern "system" fn window_proc(
                         state.finish_window_close(RemoteCloseChoice::StopServerAndExit)
                     }
                     CLOSE_CANCEL_ID => state.finish_window_close(RemoteCloseChoice::Cancel),
+                    SETTINGS_DARK_ID => state.preview_settings_theme(ThemeId::Dark),
+                    SETTINGS_LIGHT_ID => state.preview_settings_theme(ThemeId::Light),
+                    SETTINGS_APPLY_ID => state.finish_settings(true),
+                    SETTINGS_CANCEL_ID => state.finish_settings(false),
                     _ => {}
                 }
                 unsafe {

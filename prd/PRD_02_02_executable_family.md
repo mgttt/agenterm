@@ -67,8 +67,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       `Stop Server & Exit`, and `Cancel` choices: the current Composer draft is
       synchronized first, keep releases only the UI lease, stop performs the
       typed workspace-preserving server shutdown, and cancel returns without a
-      server mutation. Ordinary launches, remaining workbench parity and
-      same-server rollback qualification are still pending.
+      server mutation. Client-owned Settings now keeps `Tabs` immediately to
+      its left and provides native font family/size plus Dark/Light controls:
+      theme preview is immediate, Apply validates and persists the shared
+      settings atomically before rebuilding the UI font, and Cancel restores
+      the last applied palette without changing server state. Ordinary
+      launches, remaining workbench parity and same-server rollback
+      qualification are still pending.
   - [ ] compatibility is fail-closed and asymmetric: a new GUI may connect to
     its declared server protocol range; an incompatible server remains alive
     and reports a precise upgrade/restart choice instead of being killed

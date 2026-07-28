@@ -1642,7 +1642,9 @@ S4  [~] server-owned 单活 interactive UI lease 已交付 attach/idempotent
         Edit -> Save/Cancel 的稳定 ID 写回也已进入同一公开旅程。关闭窗口的
         Keep Server Running（默认）/ Stop Server & Exit / Cancel 三分支已由
         非阻塞原生控件交付，并先同步 Composer 草稿；三条路径均有 public
-        GUI/server/lease/orphan 证据。
+        GUI/server/lease/orphan 证据。client-owned Settings 也已恢复字体、
+        字号、Dark/Light 即时预览、Apply 持久化与 Cancel 回滚，[Tabs] 保持
+        在 [Settings] 左侧；该配置不进入稳定 server truth。
         普通启动默认切换、旧工作台完整 parity 与 same-server rollback 待补
 S5  same-server GUI upgrade + rollback black-box
 S6  remove combined-process handoff only after parity gates

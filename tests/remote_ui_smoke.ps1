@@ -344,6 +344,105 @@ try {
         )
     }
 
+    Write-Host 'STEP preview, cancel, and apply client-owned Settings'
+    $replacementComposer = [AgenTermRemoteUiNativeTest]::GetDlgItem(
+        $gui.MainWindowHandle, 2101
+    )
+    $settingsButton = [AgenTermRemoteUiNativeTest]::GetDlgItem(
+        $gui.MainWindowHandle, 2112
+    )
+    $settingsFont = [AgenTermRemoteUiNativeTest]::GetDlgItem(
+        $gui.MainWindowHandle, 2113
+    )
+    $settingsSize = [AgenTermRemoteUiNativeTest]::GetDlgItem(
+        $gui.MainWindowHandle, 2114
+    )
+    $settingsDark = [AgenTermRemoteUiNativeTest]::GetDlgItem(
+        $gui.MainWindowHandle, 2115
+    )
+    $settingsLight = [AgenTermRemoteUiNativeTest]::GetDlgItem(
+        $gui.MainWindowHandle, 2116
+    )
+    $settingsApply = [AgenTermRemoteUiNativeTest]::GetDlgItem(
+        $gui.MainWindowHandle, 2117
+    )
+    $settingsCancel = [AgenTermRemoteUiNativeTest]::GetDlgItem(
+        $gui.MainWindowHandle, 2118
+    )
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $settingsButton, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero
+    ) | Out-Null
+    if (-not [AgenTermRemoteUiNativeTest]::IsWindowVisible($settingsFont) -or
+        -not [AgenTermRemoteUiNativeTest]::IsWindowVisible($settingsLight) -or
+        -not [AgenTermRemoteUiNativeTest]::IsWindowVisible($settingsApply) -or
+        [AgenTermRemoteUiNativeTest]::IsWindowVisible($replacementComposer)) {
+        throw 'Settings did not replace the workbench controls with its native modal'
+    }
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $settingsLight, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero
+    ) | Out-Null
+    if (-not [string]::IsNullOrWhiteSpace($ScreenshotPath)) {
+        $requestedScreenshot = [IO.Path]::GetFullPath($ScreenshotPath)
+        $settingsScreenshot = Join-Path `
+            ([IO.Path]::GetDirectoryName($requestedScreenshot)) `
+            "$([IO.Path]::GetFileNameWithoutExtension($requestedScreenshot))-settings.png"
+        Save-WindowPng -Window $gui.MainWindowHandle -Path $settingsScreenshot
+    }
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $settingsCancel, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero
+    ) | Out-Null
+    if ([AgenTermRemoteUiNativeTest]::IsWindowVisible($settingsFont) -or
+        -not [AgenTermRemoteUiNativeTest]::IsWindowVisible($replacementComposer)) {
+        throw 'Settings Cancel did not restore the workbench'
+    }
+    if (Test-Path -LiteralPath $run.SettingsPath) {
+        $cancelledSettings = Get-Content -LiteralPath $run.SettingsPath -Raw |
+            ConvertFrom-Json
+        if ($cancelledSettings.color_theme -eq 'light') {
+            throw 'Settings Cancel persisted the preview theme'
+        }
+    }
+
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $settingsButton, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero
+    ) | Out-Null
+    [AgenTermRemoteUiNativeTest]::SendMessageText(
+        $settingsFont, 0x000C, [IntPtr]::Zero, 'Consolas'
+    ) | Out-Null
+    [AgenTermRemoteUiNativeTest]::SendMessageText(
+        $settingsSize, 0x000C, [IntPtr]::Zero, '14'
+    ) | Out-Null
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $settingsLight, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero
+    ) | Out-Null
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $settingsApply, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero
+    ) | Out-Null
+    $appliedSettings = Get-Content -LiteralPath $run.SettingsPath -Raw |
+        ConvertFrom-Json
+    if ($appliedSettings.color_theme -ne 'light' -or
+        $appliedSettings.terminal_font_family -ne 'Consolas' -or
+        $appliedSettings.terminal_font_size -ne 14 -or
+        [AgenTermRemoteUiNativeTest]::IsWindowVisible($settingsFont) -or
+        -not [AgenTermRemoteUiNativeTest]::IsWindowVisible($replacementComposer)) {
+        throw 'Settings Apply did not persist theme/font and restore the workbench'
+    }
+
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $settingsButton, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero
+    ) | Out-Null
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $settingsDark, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero
+    ) | Out-Null
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $settingsCancel, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero
+    ) | Out-Null
+    $cancelledDark = Get-Content -LiteralPath $run.SettingsPath -Raw |
+        ConvertFrom-Json
+    if ($cancelledDark.color_theme -ne 'light') {
+        throw 'Settings Cancel did not roll the preview back to the applied theme'
+    }
+
     Write-Host 'STEP resize Tabs locally and scroll the server-owned viewport'
     $activeBeforeResize = @(
         $replacementBootstrap.tabs |
