@@ -33,5 +33,181 @@
       "offline_probe": ["--version"],
       "release_budget_bytes": 3145728
     }
+  ],
+  "platforms": [
+    {
+      "os": "windows",
+      "arch": "x86_64",
+      "package": "zip",
+      "executables": [
+        {
+          "name": "agenterm.exe",
+          "role": "gui",
+          "pe_subsystem": 2,
+          "documentation_role": "GUI application",
+          "offline_probe": [],
+          "release_budget_bytes": 4194304
+        },
+        {
+          "name": "agenterm-cli.exe",
+          "role": "cli",
+          "pe_subsystem": 3,
+          "documentation_role": "native observation and automation client",
+          "offline_probe": ["--version"],
+          "release_budget_bytes": 2097152
+        },
+        {
+          "name": "agenterm-mux.exe",
+          "role": "compatibility-cli",
+          "pe_subsystem": 3,
+          "documentation_role": "tmux/RMUX compatibility frontend",
+          "offline_probe": ["--version"],
+          "release_budget_bytes": 2097152
+        },
+        {
+          "name": "agenterm-script.exe",
+          "role": "scripting-worker",
+          "pe_subsystem": 3,
+          "documentation_role": "bounded Rhai scripting worker",
+          "offline_probe": ["--version"],
+          "release_budget_bytes": 3145728
+        }
+      ]
+    },
+    {
+      "os": "windows",
+      "arch": "aarch64",
+      "package": "zip",
+      "executables": [
+        {
+          "name": "agenterm.exe",
+          "role": "gui",
+          "pe_subsystem": 2,
+          "documentation_role": "GUI application",
+          "offline_probe": []
+        },
+        {
+          "name": "agenterm-cli.exe",
+          "role": "cli",
+          "pe_subsystem": 3,
+          "documentation_role": "native observation and automation client",
+          "offline_probe": ["--version"]
+        },
+        {
+          "name": "agenterm-mux.exe",
+          "role": "compatibility-cli",
+          "pe_subsystem": 3,
+          "documentation_role": "tmux/RMUX compatibility frontend",
+          "offline_probe": ["--version"]
+        },
+        {
+          "name": "agenterm-script.exe",
+          "role": "scripting-worker",
+          "pe_subsystem": 3,
+          "documentation_role": "bounded Rhai scripting worker",
+          "offline_probe": ["--version"]
+        }
+      ]
+    },
+    {
+      "os": "linux",
+      "arch": "x86_64",
+      "package": "tar.gz",
+      "executables": [
+        {
+          "name": "agenterm-cli",
+          "role": "cli",
+          "documentation_role": "native observation and automation client",
+          "offline_probe": ["--version"]
+        },
+        {
+          "name": "agenterm-mux",
+          "role": "compatibility-cli",
+          "documentation_role": "tmux/RMUX compatibility frontend",
+          "offline_probe": ["--version"]
+        },
+        {
+          "name": "agenterm-script",
+          "role": "scripting-worker",
+          "documentation_role": "bounded Rhai scripting worker",
+          "offline_probe": ["--help"]
+        }
+      ]
+    },
+    {
+      "os": "linux",
+      "arch": "aarch64",
+      "package": "tar.gz",
+      "executables": [
+        {
+          "name": "agenterm-cli",
+          "role": "cli",
+          "documentation_role": "native observation and automation client",
+          "offline_probe": ["--version"]
+        },
+        {
+          "name": "agenterm-mux",
+          "role": "compatibility-cli",
+          "documentation_role": "tmux/RMUX compatibility frontend",
+          "offline_probe": ["--version"]
+        },
+        {
+          "name": "agenterm-script",
+          "role": "scripting-worker",
+          "documentation_role": "bounded Rhai scripting worker",
+          "offline_probe": ["--help"]
+        }
+      ]
+    },
+    {
+      "os": "macos",
+      "arch": "aarch64",
+      "package": "tar.gz",
+      "executables": [
+        {
+          "name": "agenterm-cli",
+          "role": "cli",
+          "documentation_role": "native observation and automation client",
+          "offline_probe": ["--version"]
+        },
+        {
+          "name": "agenterm-mux",
+          "role": "compatibility-cli",
+          "documentation_role": "tmux/RMUX compatibility frontend",
+          "offline_probe": ["--version"]
+        },
+        {
+          "name": "agenterm-script",
+          "role": "scripting-worker",
+          "documentation_role": "bounded Rhai scripting worker",
+          "offline_probe": ["--help"]
+        }
+      ]
+    },
+    {
+      "os": "macos",
+      "arch": "x86_64",
+      "package": "tar.gz",
+      "executables": [
+        {
+          "name": "agenterm-cli",
+          "role": "cli",
+          "documentation_role": "native observation and automation client",
+          "offline_probe": ["--version"]
+        },
+        {
+          "name": "agenterm-mux",
+          "role": "compatibility-cli",
+          "documentation_role": "tmux/RMUX compatibility frontend",
+          "offline_probe": ["--version"]
+        },
+        {
+          "name": "agenterm-script",
+          "role": "scripting-worker",
+          "documentation_role": "bounded Rhai scripting worker",
+          "offline_probe": ["--help"]
+        }
+      ]
+    }
   ]
 }
