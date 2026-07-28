@@ -127,8 +127,10 @@ pub const fn current_facts() -> UiBridgeFacts {
 pub const fn headless_server_facts() -> UiBridgeFacts {
     let mut facts = current_facts();
     facts.ownership_mode = UiOwnershipMode::SplitServerClient;
+    facts.replaceable_ui = true;
     facts.server_executable = "agenterm-server.exe";
     facts.interactive_lease = true;
+    facts.reconnect = true;
     facts
 }
 
@@ -739,13 +741,14 @@ mod tests {
     }
 
     #[test]
-    fn headless_server_facts_name_the_actual_authority_without_claiming_a_client() {
+    fn headless_server_facts_publish_the_proven_replaceable_client_contract() {
         let facts = headless_server_facts();
         assert_eq!(facts.ownership_mode, UiOwnershipMode::SplitServerClient);
         assert_eq!(facts.server_executable, "agenterm-server.exe");
-        assert!(!facts.replaceable_ui);
+        assert!(facts.replaceable_ui);
         assert!(facts.interactive_lease);
-        assert!(!facts.reconnect);
+        assert!(facts.reconnect);
+        assert!(!facts.rollback_proven);
         assert!(facts.bootstrap_snapshot);
         assert!(facts.ordered_deltas);
     }

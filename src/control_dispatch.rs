@@ -209,9 +209,16 @@ fn ui_hello_response(
         "full_screen_post_state".to_owned(),
         "epoch_restart_detection".to_owned(),
     ];
-    if host.ui_bridge_facts().interactive_lease {
+    let facts = host.ui_bridge_facts();
+    if facts.interactive_lease {
         capabilities.push("interactive_lease".to_owned());
         capabilities.push("lease_gated_interaction".to_owned());
+    }
+    if facts.replaceable_ui {
+        capabilities.push("replaceable_ui_client".to_owned());
+    }
+    if facts.reconnect {
+        capabilities.push("in_place_reconnect".to_owned());
     }
     let response = UiHelloResponse {
         schema_version: UI_HELLO_SCHEMA_VERSION,

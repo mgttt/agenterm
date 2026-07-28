@@ -40,9 +40,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [x] renderer-neutral UI bootstrap and terminal-screen DTOs publish independent schema versions, causal server epoch/sequence identity, stable tab/tree identity, completeness facts and hard byte/item/dimension limits
     - [x] `ui-bootstrap` projects current combined-server tab/tree/process/composer/working-context/screen truth through those DTOs and public black-box evidence compares its causal position and tab metadata with `ui-snapshot` and `inspect`
     - [x] `ui-hello` negotiates a bounded protocol range and returns the current server PID, epoch, sequence and contract schemas; `ui-deltas` follows that baseline with ordered journal events, affected-tab terminal post-state, active-tab identity, explicit completeness and typed restart, gap and future-sequence recovery
-    - [~] the current combined server now populates and serves hello, bootstrap
-      and bounded delta-poll contracts through public loopback IPC; a dedicated
-      subscription channel and reconnecting GUI consumer remain pending
+    - [~] the current combined and split servers populate and serve hello,
+      bootstrap and bounded delta-poll contracts through public loopback IPC;
+      the replaceable GUI consumes them and reconnects after epoch restart.
+      A dedicated subscription channel remains pending; polling is the shipped
+      bounded transport.
   - [~] one interactive UI lease owns terminal resize/focus/input while future
     read-only observers remain possible; replacing or crashing the GUI releases
     only that lease and never ends PTYs
@@ -52,17 +54,20 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [x] the dedicated `ui-interact` path requires the exact live lease for
       stable-ID active-tab selection, bounded binary terminal input and bounded
       PTY resize; independent typed automation remains a separate control plane
-    - [~] the opt-in replaceable GUI consumer acquires and uses that path;
-      ordinary launches and in-place disconnect recovery are still pending
+    - [~] the opt-in replaceable GUI consumer acquires and uses that path; it
+      reconnects in place with the same GUI PID/HWND after a server epoch
+      restart and adopts the new causal bootstrap/lease identity. Ordinary
+      launches and same-server rollback qualification are still pending.
   - [ ] compatibility is fail-closed and asymmetric: a new GUI may connect to
     its declared server protocol range; an incompatible server remains alive
     and reports a precise upgrade/restart choice instead of being killed
   - [x] S0 protocol discovery publishes a typed UI bridge schema, compatible
      version range, current `combined_gui_server` ownership, target executable
-     and independently truthful capability flags. Bootstrap and ordered delta
-     poll and an opt-in replaceable consumer are now shipped; the default
-     capability facts remain conservative, and default replacement, in-place
-     reconnect and rollback remain false until their own black-box gates pass.
+     and independently truthful capability flags. Bootstrap, ordered delta
+     polling, an opt-in replaceable consumer, and in-place reconnect are now
+     shipped. Combined-host facts remain conservative; split-server facts
+     advertise only the proven replaceable/reconnect pair, while default
+     replacement and rollback remain false until their own black-box gates pass.
   - [ ] black-box upgrade proof keeps server PID, epoch, tab IDs, PTY child
     PIDs, scrollback and continuing output stable while HWND and GUI build
     identity change; rollback to the previous compatible GUI is also proven

@@ -1635,8 +1635,10 @@ S4  [~] server-owned 单活 interactive UI lease 已交付 attach/idempotent
         `ui-interact` 已对 stable-ID select、有界 binary input、PTY resize
         强制 exact-live-lease；opt-in `agenterm.exe --ui-client` 已能启动/
         连接独立 server、渲染 DTO、确认 applied sequence、关闭后保留 PTY，
-        且 replacement GUI 恢复同一 server/tab/terminal marker；普通启动
-        默认切换、旧工作台完整 parity、in-place reconnect 与 rollback 待补
+        且 replacement GUI 恢复同一 server/tab/terminal marker；同一 GUI
+        PID/HWND 也已通过 server epoch 重启、重新 bootstrap/lease 的
+        in-place reconnect 黑盒。普通启动默认切换、旧工作台完整 parity
+        与 same-server rollback 待补
 S5  same-server GUI upgrade + rollback black-box
 S6  remove combined-process handoff only after parity gates
 ```

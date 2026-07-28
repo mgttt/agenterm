@@ -71,9 +71,10 @@ try {
         $protocol.pid -ne $server.Id -or
         $protocol.ui_bridge.ownership_mode -ne 'split_server_client' -or
         $protocol.ui_bridge.server_executable -ne 'agenterm-server.exe' -or
-        $protocol.ui_bridge.replaceable_ui -or
+        -not $protocol.ui_bridge.replaceable_ui -or
         -not $protocol.ui_bridge.interactive_lease -or
-        $protocol.ui_bridge.reconnect) {
+        -not $protocol.ui_bridge.reconnect -or
+        $protocol.ui_bridge.rollback_proven) {
         throw 'headless server did not publish its truthful process/ownership boundary'
     }
 
@@ -198,7 +199,9 @@ try {
         '--client-id', "server-smoke-$($run.RunId)"
     ) | ConvertFrom-Json
     if (-not $hello.capabilities.Contains('interactive_lease') -or
-        -not $hello.capabilities.Contains('lease_gated_interaction')) {
+        -not $hello.capabilities.Contains('lease_gated_interaction') -or
+        -not $hello.capabilities.Contains('replaceable_ui_client') -or
+        -not $hello.capabilities.Contains('in_place_reconnect')) {
         throw 'headless server hello did not discover its interactive contracts'
     }
     $tabId = Invoke-AgenTerm @(

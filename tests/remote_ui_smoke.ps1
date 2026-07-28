@@ -79,6 +79,11 @@ function Save-WindowPng {
 }
 
 $GuiExe = [IO.Path]::GetFullPath($GuiExe)
+$ServerExe = Join-Path ([IO.Path]::GetDirectoryName($GuiExe)) `
+    'agenterm-server.exe'
+if (-not (Test-Path -LiteralPath $ServerExe)) {
+    throw "AgenTerm server executable not found: $ServerExe"
+}
 $run = New-SmokeRunContext -Suite 'remote-ui' -Executable $CliExe `
     -DeclaredEvidence $declaredEvidence -AllowPaneCapture
 $CliExe = $run.Executable
@@ -143,7 +148,10 @@ try {
         $bootstrap.server_pid -eq $gui.Id -or
         $bootstrap.tabs.Count -lt 1 -or
         $protocol.ui_bridge.ownership_mode -ne 'split_server_client' -or
+        -not $protocol.ui_bridge.replaceable_ui -or
         -not $protocol.ui_bridge.interactive_lease -or
+        -not $protocol.ui_bridge.reconnect -or
+        $protocol.ui_bridge.rollback_proven -or
         $guiHandle -eq 0) {
         throw 'replaceable GUI and headless authority roles were not separated'
     }
@@ -252,6 +260,70 @@ try {
             "position=$($replacementBootstrap.position.sequence)"
         )
     }
+
+    Write-Host 'STEP reconnect the same GUI process across a server restart'
+    $reconnectGuiPid = $gui.Id
+    $reconnectGuiHandle = [int64]$gui.MainWindowHandle
+    $oldServerPid = [int]$replacementBootstrap.server_pid
+    $oldServerEpoch = [string]$replacementBootstrap.server_epoch
+    $oldServer = Get-Process -Id $oldServerPid -ErrorAction Stop
+    Invoke-AgenTerm @('shutdown') | Out-Null
+    if (-not $oldServer.WaitForExit(5000)) {
+        throw 'old headless server did not exit after public shutdown'
+    }
+    $restartStderr = Join-Path $run.RunDirectory `
+        'remote-ui-restarted-server-stderr.txt'
+    $restartedServer = Start-Process -FilePath $ServerExe `
+        -ArgumentList @('--address', $run.Address) `
+        -RedirectStandardError $restartStderr `
+        -PassThru -WindowStyle Hidden
+    Register-SmokeOwnedProcess -Context $run -Id $restartedServer.Id `
+        -Kind 'server' -Address $run.Address
+
+    $reconnected = $false
+    $reconnectDeadline = [DateTime]::UtcNow.AddSeconds(15)
+    do {
+        $gui.Refresh()
+        $leaseOutput = @(
+            & $CliExe --address $run.Address ui-lease status 2>&1
+        )
+        if ($LASTEXITCODE -eq 0) {
+            $reconnectedLease = ($leaseOutput -join "`n") |
+                ConvertFrom-Json
+            if ($reconnectedLease.attached -and
+                $reconnectedLease.client_pid -eq $reconnectGuiPid -and
+                $gui.MainWindowHandle -eq $reconnectGuiHandle) {
+                $reconnected = $true
+                break
+            }
+        }
+        Start-Sleep -Milliseconds 50
+    } while ([DateTime]::UtcNow -lt $reconnectDeadline)
+    if (-not $reconnected) {
+        $restartError = Get-Content -LiteralPath $restartStderr -Raw `
+            -ErrorAction SilentlyContinue
+        throw (
+            'replaceable UI did not reconnect in place after server restart: ' +
+            "gui_pid=$reconnectGuiPid hwnd=$reconnectGuiHandle " +
+            "new_server_pid=$($restartedServer.Id)`n$restartError"
+        )
+    }
+    $reconnectedBootstrap = Invoke-AgenTerm @('ui-bootstrap') |
+        ConvertFrom-Json
+    $reconnectedLease = Invoke-AgenTerm @('ui-lease', 'status') |
+        ConvertFrom-Json
+    if ($gui.Id -ne $reconnectGuiPid -or
+        $gui.MainWindowHandle -ne $reconnectGuiHandle -or
+        $reconnectedBootstrap.server_pid -ne $restartedServer.Id -or
+        $reconnectedBootstrap.server_pid -eq $oldServerPid -or
+        $reconnectedBootstrap.server_epoch -eq $oldServerEpoch -or
+        $reconnectedLease.client_pid -ne $reconnectGuiPid -or
+        $reconnectedLease.position.server_epoch -ne
+            $reconnectedBootstrap.server_epoch) {
+        throw 'in-place reconnect did not expose the new causal server identity'
+    }
+    Sync-SmokeOwnedServers -Context $run
+
     if ([string]::IsNullOrWhiteSpace($ScreenshotPath)) {
         $ScreenshotPath = Join-Path $run.RunDirectory 'remote-ui.png'
     } else {
@@ -282,4 +354,7 @@ finally {
 if (-not $runSucceeded) {
     throw $runFailure
 }
-Write-Host 'PASS: replaceable GUI attaches, renders, detaches, and leaves server PTYs alive'
+Write-Host (
+    'PASS: replaceable GUI attaches, renders, detaches, preserves PTYs, ' +
+    'and reconnects in place across server restart'
+)
