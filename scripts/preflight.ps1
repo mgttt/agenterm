@@ -44,6 +44,11 @@ function Get-RedactedRemoteUrl {
     return $Url
 }
 
+function Get-NormalizedTextFile {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    return (Get-Content -LiteralPath $Path -Raw) -replace "\r\n?", "`n"
+}
+
 Invoke-PreflightGate -Id 'branch-main' -Check {
     $branchLines = @(& git -C $repo branch --show-current 2>&1)
     if ($LASTEXITCODE -ne 0) {
@@ -81,7 +86,7 @@ Invoke-PreflightGate -Id 'clean-tree' -Check {
 
 Invoke-PreflightGate -Id 'cargo-package' -Check {
     $cargoPath = Join-Path $repo 'Cargo.toml'
-    $cargo = Get-Content -LiteralPath $cargoPath -Raw
+    $cargo = Get-NormalizedTextFile -Path $cargoPath
     $package = [regex]::Match($cargo, '(?ms)^\[package\](?<body>.*?)(?=^\[|\z)')
     if (-not $package.Success) {
         throw 'Cargo.toml has no [package] table.'
@@ -106,7 +111,7 @@ Invoke-PreflightGate -Id 'cargo-package' -Check {
 }
 
 Invoke-PreflightGate -Id 'cargo-lock' -Check {
-    $lock = Get-Content -LiteralPath (Join-Path $repo 'Cargo.lock') -Raw
+    $lock = Get-NormalizedTextFile -Path (Join-Path $repo 'Cargo.lock')
     if ($lock -notmatch '(?m)^version\s*=\s*4$') {
         throw 'Cargo.lock is not lockfile version 4.'
     }
@@ -135,9 +140,9 @@ Invoke-PreflightGate -Id 'cargo-lock' -Check {
 }
 
 Invoke-PreflightGate -Id 'toolchain' -Check {
-    $toolchain = Get-Content -LiteralPath (
+    $toolchain = Get-NormalizedTextFile -Path (
         Join-Path $repo 'rust-toolchain.toml'
-    ) -Raw
+    )
     $channel = [regex]::Match(
         $toolchain, '(?m)^channel\s*=\s*"(?<v>\d+\.\d+\.\d+)"$'
     )

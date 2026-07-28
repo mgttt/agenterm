@@ -174,10 +174,14 @@ try {
 
     $protocol = Invoke-AgenTerm @('protocol-info') | ConvertFrom-Json
     $operationCatalog = $protocol.operation_catalog
-    if ($operationCatalog.schema_version -ne 1 -or
+    if ($protocol.ui_bridge.schema_version -ne 1 -or
+        $protocol.ui_bridge.ownership_mode -ne 'combined_gui_server' -or
+        $protocol.ui_bridge.replaceable_ui -or
+        $protocol.ui_bridge.target_server_executable -ne 'agenterm-server.exe' -or
+        $operationCatalog.schema_version -ne 1 -or
         -not $operationCatalog.classification_only -or
         $operationCatalog.authorization_policy) {
-        throw 'protocol-info did not expose the classification-only typed operation catalog'
+        throw 'protocol-info did not expose truthful UI ownership and operation facts'
     }
     $expectedOperations = @{
         'protocol.info' = 'observe'

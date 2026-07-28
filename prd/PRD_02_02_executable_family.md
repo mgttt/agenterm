@@ -8,9 +8,37 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   renderer, and IPC server
 - [ ] target architecture separates the replaceable Win32 GUI client from the
   workspace/PTY/server authority so a GUI-only restart can preserve live tabs;
-  v0.1.7 freezes an ownership, version-handshake, bootstrap, reconnect, and
-  rollback decision plus compatibility test plan; an isolated prototype is
-  P1 and the default process model does not change in that internal milestone
+  this is now an accepted v0.1.9 requirement rather than an exploratory
+  ownership question:
+  - [ ] `agenterm-server.exe` is an internal Windows-subsystem process and the
+    stable owner of workspace/tree selection, PTYs and child PIDs, terminal
+    parser/scrollback, composer drafts, working-context facts, operation
+    receipts and the event journal; it has no user-facing HWND and does not own
+    layout, theme, focus, clipboard, menus or rendering
+  - [ ] `agenterm.exe` always runs the current on-disk replaceable GUI client;
+    if no compatible server exists it bootstraps `agenterm-server.exe`, then
+    connects through the same typed loopback control boundary instead of
+    becoming the server itself
+  - [ ] UI bootstrap uses a versioned hello, complete bounded workspace and
+    terminal-screen snapshot, event baseline, then ordered deltas; reconnect
+    detects restart, journal gap and incompatible protocol without silently
+    discarding live server state
+  - [ ] one interactive UI lease owns terminal resize/focus/input while future
+    read-only observers remain possible; replacing or crashing the GUI releases
+    only that lease and never ends PTYs
+  - [ ] compatibility is fail-closed and asymmetric: a new GUI may connect to
+    its declared server protocol range; an incompatible server remains alive
+    and reports a precise upgrade/restart choice instead of being killed
+  - [x] S0 protocol discovery publishes a typed UI bridge schema, compatible
+    version range, current `combined_gui_server` ownership, target executable
+    and false capability flags. Discovery must never claim replaceable UI,
+    bootstrap, reconnect or rollback before their black-box gates pass.
+  - [ ] black-box upgrade proof keeps server PID, epoch, tab IDs, PTY child
+    PIDs, scrollback and continuing output stable while HWND and GUI build
+    identity change; rollback to the previous compatible GUI is also proven
+  - [ ] migration is phased through extracted server state and renderer-neutral
+    screen contracts. The current combined `agenterm.exe` remains truthful
+    until those gates pass; merely hiding its old HWND is not GUI replacement
 - [x] `agenterm.exe` rejects CLI-style or invalid GUI arguments without
   creating a window or information dialog: it writes best-effort
   inherited-stderr guidance and exits nonzero; normal and focus-existing

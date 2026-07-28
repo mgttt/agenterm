@@ -65,6 +65,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] explicit confirmation before closing a live process
 - [x] dead tabs close only by explicit human or CLI action
 - [x] per-tab external composer with independent draft and Send action
+  - [x] compact six-pixel outer spacing gives the native input a three-row
+    target at normal window sizes (at least two useful rows when constrained),
+    with a persistent native vertical scrollbar for longer drafts
   - [x] native editing shortcuts explicitly support `Ctrl+A` select all,
     `Ctrl+C` copy, `Ctrl+V` paste, and `Ctrl+X` cut
   - [x] submit text and Enter as distinct PTY events so interactive TUIs

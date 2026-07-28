@@ -41,7 +41,8 @@ $lockChecksums = [Collections.Generic.Dictionary[string, string]]::new(
     [StringComparer]::Ordinal
 )
 $cargoLockPath = Join-Path $repoRootPath 'Cargo.lock'
-$cargoLockText = Get-Content -LiteralPath $cargoLockPath -Raw
+$cargoLockText = (Get-Content -LiteralPath $cargoLockPath -Raw) -replace
+    "\r\n?", "`n"
 foreach ($packageBlock in [regex]::Matches(
         $cargoLockText,
         '(?ms)^\[\[package\]\]\r?\n(?<body>.*?)(?=^\[\[package\]\]|\z)'

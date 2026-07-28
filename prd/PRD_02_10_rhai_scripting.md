@@ -99,16 +99,22 @@ and it is not positioned as a restricted security plugin.
 
 ## Rust-shaped subset and Rhai-native extensions
 
-- [ ] namespace ownership is explicit: `std::` contains only selected
+- [x] namespace ownership is explicit: `std::` contains only selected
   capabilities with an honest Rust standard-library analogue; `rhai::`
   contains runtime-native higher-level extensions; `fleet` remains a bound
   AgenTerm object; Rhai language primitives, project modules, manifests and
   CLI discovery are not wrapped in artificial namespaces.
 - [ ] `std::fs` covers bounded `read`, `read_to_string`, `write`, directory
   listing/creation, metadata, copy, rename and explicit-target deletion.
+  - [x] first local slice ships blocking `read`, `read_to_string`, text/bytes
+    `write`, and `exists`; directory mutation, metadata and cumulative byte
+    budgets remain open.
 - [ ] `std::path` provides a selected `Path`/`PathBuf` object model for Windows
   normalization, composition, relative paths, working directories, Unicode,
   long paths and canonical/reparse-point facts without copying Rust borrowing.
+  - [x] first local slice ships typed `PathBuf::from`, join, display, file name,
+    extension and absolute-path facts; canonical, UNC/reparse and long-path
+    policy remains open.
 - [ ] `std::env` reads/enumerates worker environment and current-directory
   facts; worker-local mutation and child environment inheritance/overlay/
   replace/remove semantics are explicit and never leak values to diagnostics.
@@ -124,6 +130,8 @@ and it is not positioned as a restricted security plugin.
 - [ ] `rhai::json` plus Rhai-native strings and a typed `Bytes` object provide
   bounded parsing, serialization, Unicode/encoding and explicit conversions
   without duplicating language primitives as fake Rust collections.
+  - [x] first local slice ships JSON parse/compact/pretty serialization and
+    typed UTF-8 `Bytes` conversion/length.
 - [ ] `rhai::http` provides HTTP(S) method, URL, headers, body, timeout,
   status, bounded response streaming, cancellation, proxy/TLS diagnostics and
   credential-safe errors. Rust std has no high-level HTTP client, so

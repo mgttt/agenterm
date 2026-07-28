@@ -80,7 +80,7 @@ agenterm-script
 │  │  ├─ var / vars / current_dir
 │  │  └─ worker-local mutation（记录与 Rust 的语义差异）
 │  ├─ process::
-│  │  ├─ Command::new(...)
+│  │  ├─ command(...)
 │  │  ├─ .arg() / .args() / .current_dir() / .env()
 │  │  ├─ .status() / .output()
 │  │  └─ .spawn() -> Child
@@ -155,7 +155,7 @@ agenterm-script
 
 ```text
 std::fs::read_to_string(...)               Rust-shaped 基础能力
-std::process::Command::new(...).spawn()     Rust-shaped 资源对象
+std::process::command(...).spawn()          Rust-shaped 资源对象
 rhai::http::start(...) -> Task.wait()       Rhai-native 高级并发
 fleet.tabs.active()                         AgenTerm-bound 领域对象
 ```
@@ -207,6 +207,13 @@ v0.1.9  通用 Script Runtime 成型
 │  ├─ task list / show / run
 │  ├─ 无效任务保持可发现并给出 degraded reason
 │  └─ CLI 与未来 GUI command palette 共用一个 catalog
+│
+├─ 横切架构：稳定 server + 可替换 UI client
+│  ├─ agenterm-server.exe 独占 workspace / PTY / scrollback / event truth
+│  ├─ agenterm.exe 只拥有 HWND / layout / render / focus / clipboard
+│  ├─ hello -> bounded bootstrap snapshot -> ordered delta -> reconnect
+│  ├─ UI 更新或崩溃不改变 server PID、tab ID、PTY PID 与输出连续性
+│  └─ 协议不兼容时保留 server，明确提示升级/重启，不自动杀会话
 │
 ├─ 第一优先级：面向组件生态但不提前做市场
 │  ├─ runtime/module/task 具有稳定 identity、version 与 entry point
@@ -464,7 +471,7 @@ AgenTerm-specific atomic replacement 与 owned temp 若没有 Rust std 的直接
 用户心智采用 Rust 的 `Command -> Child/Output`：
 
 ```rhai
-let command = std::process::Command::new("git");
+let command = std::process::command("git");
 command.args(["status", "--short"]);
 command.current_dir(repo);
 command.env("NAME", "value");
@@ -551,32 +558,32 @@ agenterm-script
 │  │  ├─ [x] pure
 │  │  ├─ [x] observe
 │  │  ├─ [x] local foundation（显式选择、base Rhai、无需 server）
-│  │  └─ [ ] local ordinary default（首个可用 std slice 后切换）
+│  │  └─ [x] local ordinary default（首个可用 std slice 已交付）
 │  └─ output
 │     ├─ [x] print / bounded stdout
 │     └─ [ ] typed result / stderr / exit class
 │
 ├─ data
 │  ├─ json
-│  │  ├─ [ ] parse
-│  │  └─ [ ] stringify
+│  │  ├─ [x] parse
+│  │  └─ [x] stringify / stringify_pretty
 │  ├─ text
 │  │  ├─ [ ] UTF-8 length / slice / search / replace
 │  │  └─ [ ] encode / decode
 │  └─ bytes
-│     ├─ [ ] text conversion / slice / concat
+│     ├─ [>] text conversion / length 已交付；slice / concat 待补
 │     ├─ [ ] hex / base64（由真实旅程决定）
 │     └─ [>] hash / crypto（独立需求和供应链边界）
 │
 ├─ system
 │  ├─ fs
-│  │  ├─ [ ] read text / bytes
-│  │  ├─ [ ] write / atomic write
+│  │  ├─ [x] read text / bytes
+│  │  ├─ [>] write text / bytes 已交付；atomic write 待补
 │  │  ├─ [ ] list / metadata
 │  │  ├─ [ ] create / copy / move
 │  │  └─ [ ] remove explicit target
 │  ├─ path
-│  │  ├─ [ ] join / parent / name / extension
+│  │  ├─ [>] PathBuf / join / display / name / extension 已交付；parent 待补
 │  │  ├─ [ ] normalize / relative / canonical facts
 │  │  └─ [ ] Windows drive / UNC / long path
 │  ├─ temp
@@ -685,7 +692,7 @@ let config = rhai::json::parse(
     std::fs::read_to_string("agenterm.local.json")
 );
 
-let command = std::process::Command::new("git");
+let command = std::process::command("git");
 command.args(["status", "--short"]);
 command.current_dir(config.repo);
 
@@ -769,7 +776,7 @@ Rhai 不需要伪装成 JavaScript Promise，也不新增 `async`/`await` 语法
 普通 I/O 使用阻塞脚本调用：
 
 ```rhai
-let command = std::process::Command::new("git");
+let command = std::process::command("git");
 command.arg("status");
 let output = command.output();
 
@@ -781,7 +788,7 @@ let response = rhai::http::request("GET", url, #{});
 可能长时间运行的 API 提供语义不同的 `start`/`spawn`：
 
 ```rhai
-let command = std::process::Command::new("git");
+let command = std::process::command("git");
 command.args(["status", "--short"]);
 command.current_dir(repo);
 
@@ -1442,8 +1449,10 @@ README 增加一个简短 script task 示例；稳定运行时合同由
       nested namespace/signature alignment 随首个 std slice 完成）
 
 提交 2
-  std::fs/path + Path/Bytes + rhai::json
-  Unicode/long-path/atomic/cleanup black-box
+  [x] std::fs/path + PathBuf/Bytes + rhai::json 首个可用切片
+  [x] ordinary default 切换到 local
+  [>] Unicode 基线和 bounded privacy error 已覆盖；
+      long-path/atomic/cleanup 继续扩展
 
 提交 3
   std::env/process/time + Command/Child/Duration
@@ -1473,3 +1482,73 @@ README 增加一个简短 script task 示例；稳定运行时合同由
 
 这一刀完成后，AgenTerm 不只是“内置 Rhai 的终端”，而是拥有一个能被人、
 仓库自动化、MCP 和未来 Agent 共同复用的本地编程运行时。
+
+## 二十一、稳定 Server 与可替换 UI
+
+用户目标不是“把旧窗口重新画一次”，而是：
+
+```text
+agenterm-server.exe（稳定）
+  workspace / tree / active tab
+  ConPTY / child PID / parser / scrollback
+  composer draft / cwd / proxy facts
+  operation receipt / event journal
+              │
+              │ versioned loopback protocol
+              ▼
+agenterm.exe（可替换）
+  HWND / theme / layout / renderer
+  focus / selection gesture / clipboard
+  settings surface / close confirmation
+```
+
+采用独立内部 `agenterm-server.exe`，而不是让 `agenterm.exe --server`
+长期驻留。原因是 Windows 会锁住正在运行的 executable image；若 server
+仍映射 `agenterm.exe`，构建后的新 GUI 仍不能稳定替换同一路径，违背这一
+需求本身。
+
+协议最小闭环：
+
+```text
+GUI ui.hello(build, protocol range, capabilities)
+  -> server compatibility decision + epoch
+  -> ui.bootstrap(workspace, tabs, active, terminal screen, event position)
+  -> ui.subscribe(after position)
+  -> ordered snapshot/delta rendering
+  -> typed commands / receipts / correlated events
+  -> ui.disconnect or reconnect
+```
+
+所有权规则：
+
+- server 是 tab/tree/PTY/scrollback 的唯一事实源；
+- GUI 不复制可变 session truth，只持有带 epoch/sequence 的 projection；
+- HWND、像素布局、主题、焦点、菜单和剪贴板永远不进入 server；
+- tree selection、terminal viewport size 和输入通过单一 interactive lease
+  写回 server，避免两个 GUI 同时改变 PTY 尺寸；
+- server 与 GUI 任一侧发现 epoch restart、journal gap 或协议不兼容时均
+  fail closed，不用“看起来还能画”掩盖状态缺口；
+- UI close 默认只断开 client；关闭 server 仍是独立、明确、可审计动作。
+
+迁移波次：
+
+```text
+S0  [>] ownership inventory + typed discovery/negotiation 已交付；
+        renderer-neutral bootstrap/screen contracts 待补
+S1  extract server-owned workspace/terminal state behind adapters
+S2  add hello/bootstrap/screen snapshot/event delta protocol
+S3  build internal headless agenterm-server.exe
+S4  agenterm.exe becomes replaceable client; reconnect and interactive lease
+S5  same-server GUI upgrade + rollback black-box
+S6  remove combined-process handoff only after parity gates
+```
+
+验收必须同时证明：
+
+- server PID、epoch、tab IDs、PTY child PIDs 不变；
+- 长命令在 UI 退出、更新、重开期间继续输出；
+- 新 GUI 的 HWND 和 build identity 改变，截图出现新布局；
+- scrollback、active tab、draft、cwd/proxy facts 无损；
+- 新 GUI 启动失败或不兼容时，原 server 与 PTY 仍健康；
+- 可回滚到上一兼容 GUI；
+- server 未启动时仍保持一条清晰、无多 server 竞态的 bootstrap 路径。

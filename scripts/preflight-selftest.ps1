@@ -11,7 +11,9 @@ $PSNativeCommandUseErrorActionPreference = $false
 function New-PreflightFixture {
     param(
         [Parameter(Mandatory = $true)][string]$Name,
-        [ValidateSet('clean', 'dirty', 'wrong-branch', 'bad-hash', 'bad-manifest')]
+        [ValidateSet(
+            'clean', 'crlf', 'dirty', 'wrong-branch', 'bad-hash', 'bad-manifest'
+        )]
         [string]$Mode
     )
     $fixture = Join-Path $selfTestRoot $Name
@@ -30,12 +32,24 @@ function New-PreflightFixture {
     }
     @('/target/') | Set-Content -LiteralPath (Join-Path $fixture '.gitignore')
     'fixture' | Set-Content -LiteralPath (Join-Path $fixture 'README.md')
+    if ($Mode -eq 'crlf') {
+        foreach ($path in @(
+            'Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml'
+        )) {
+            $fixturePath = Join-Path $fixture $path
+            $text = [IO.File]::ReadAllText($fixturePath)
+            $text = ($text -replace "\r\n?", "`n") -replace "`n", "`r`n"
+            [IO.File]::WriteAllText(
+                $fixturePath, $text, [Text.UTF8Encoding]::new($false)
+            )
+        }
+    }
     if ($Mode -eq 'bad-hash') {
         $lockPath = Join-Path $fixture 'Cargo.lock'
         $lock = Get-Content -LiteralPath $lockPath -Raw
         $lock = [regex]::Replace(
             $lock,
-            '(?m)^(checksum\s*=\s*")[^"]+(")$',
+            '(?m)^(checksum\s*=\s*")[^"\r\n]+(")',
             '${1}not-a-sha256${2}',
             1
         )
@@ -101,6 +115,7 @@ function Invoke-PreflightFixture {
 try {
     $cases = @(
         @{ name = 'clean'; mode = 'clean'; pass = $true; gate = '' }
+        @{ name = 'crlf'; mode = 'crlf'; pass = $true; gate = '' }
         @{ name = 'dirty'; mode = 'dirty'; pass = $false; gate = 'clean-tree' }
         @{
             name = 'wrong-branch'

@@ -655,8 +655,12 @@ try {
     Invoke-AgenTerm @('set-composer', '-t', $id, '--file', $draftFile) | Out-Null
     $snapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
     $tab = $snapshot.tabs | Where-Object id -eq $id
-    if (-not $tab.draft) {
-        throw 'ui-snapshot did not expose the composer draft'
+    if (-not $tab.draft -or
+        $snapshot.layout.composer.height -lt 104 -or
+        $snapshot.layout.composer.input.bounds.height -lt 60 -or
+        $snapshot.layout.composer.input.target_rows -ne 3 -or
+        -not $snapshot.layout.composer.input.vertical_scrollbar) {
+        throw 'ui-snapshot did not expose the three-row scrollable composer contract'
     }
 
     Write-Host 'STEP semantic focus and composer send'

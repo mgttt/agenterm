@@ -287,7 +287,7 @@ remove MUST 显式可区分。诊断不得记录 secret value。
 规范入口 SHOULD 是 `std::process::Command`：
 
 ```rhai
-let command = std::process::Command::new("git");
+let command = std::process::command("git");
 command.args(["status", "--short"]);
 command.current_dir(repo);
 let output = command.output();
@@ -391,7 +391,7 @@ let response = rhai::http::request("GET", url, #{});
 显式并发 MUST 可见：
 
 ```rhai
-let command = std::process::Command::new("git");
+let command = std::process::command("git");
 command.args(["status", "--short"]);
 
 let child = command.spawn();
@@ -628,7 +628,7 @@ std::fs::write(
 ### 18.2 argv-safe 子进程
 
 ```rhai
-let command = std::process::Command::new("git");
+let command = std::process::command("git");
 command.args(["status", "--short"]);
 command.current_dir(std::env::current_dir());
 
@@ -643,7 +643,7 @@ print(output.stdout_text());
 ### 18.3 并发 HTTP 与进程
 
 ```rhai
-let command = std::process::Command::new("git");
+let command = std::process::command("git");
 command.args(["rev-parse", "HEAD"]);
 
 let git = command.spawn();

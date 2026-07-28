@@ -549,7 +549,7 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
         "script" => (
             "agenterm-cli script api [--json] | check FILE|- [--profile pure|observe|local] | \
              eval EXPRESSION [--profile pure|observe|local] | run FILE|- \
-             [--profile pure|observe|local] [-- ARGS...]",
+             [--profile pure|observe|local] [-- ARGS...] (default profile: local)",
             &["--profile", "--timeout-ms", "--max-operations"][..],
             &["--json"][..],
             false,

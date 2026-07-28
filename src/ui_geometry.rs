@@ -5,6 +5,7 @@ pub(crate) const TAB_RIGHT_MARGIN: i32 = 5;
 pub(crate) const TREE_INDENT: i32 = 12;
 pub(crate) const TREE_ANCHOR_LEFT: i32 = 12;
 pub(crate) const TERMINAL_SCROLLBAR_WIDTH: i32 = 12;
+pub(crate) const COMPOSER_HEIGHT: i32 = 104;
 pub(crate) const TABS_MIN_WIDTH: i32 = 180;
 pub(crate) const TABS_DEFAULT_WIDTH: i32 = 250;
 pub(crate) const TABS_MAX_WIDTH: i32 = 480;
@@ -678,7 +679,7 @@ mod tests {
             client_height: height,
             tabs_visible,
             configured_tabs_width: tabs_width,
-            composer_height: 78,
+            composer_height: COMPOSER_HEIGHT,
             status_height: 26,
         })
     }
@@ -737,8 +738,8 @@ mod tests {
         assert_eq!(geometry.configured_tabs_width, 250);
         assert_eq!(geometry.effective_tabs_width, 250);
         assert_eq!(geometry.sidebar, rect(0, 0, 250, 674));
-        assert_eq!(geometry.terminal, rect(250, 0, 1000, 596));
-        assert_eq!(geometry.composer, rect(250, 596, 1000, 674));
+        assert_eq!(geometry.terminal, rect(250, 0, 1000, 570));
+        assert_eq!(geometry.composer, rect(250, 570, 1000, 674));
         assert_eq!(geometry.status, rect(0, 674, 1000, 700));
         assert_eq!(geometry.resize_grip, Some(rect(244, 0, 250, 674)));
         assert_eq!(
@@ -795,8 +796,8 @@ mod tests {
     fn sidebar_toolbar_uses_compact_and_full_modes_without_moving_workspace_surfaces() {
         let compact = layout(500, 300, true, 250);
         assert_eq!(compact.effective_tabs_width, 180);
-        assert_eq!(compact.terminal, rect(180, 0, 500, 196));
-        assert_eq!(compact.composer, rect(180, 196, 500, 274));
+        assert_eq!(compact.terminal, rect(180, 0, 500, 170));
+        assert_eq!(compact.composer, rect(180, 170, 500, 274));
         assert_eq!(compact.status, rect(0, 274, 500, 300));
         assert_toolbar_valid(compact, SidebarToolbarMode::Compact);
 
@@ -806,8 +807,8 @@ mod tests {
 
         let wide = layout(1000, 700, true, 480);
         assert_eq!(wide.effective_tabs_width, 480);
-        assert_eq!(wide.terminal, rect(480, 0, 1000, 596));
-        assert_eq!(wide.composer, rect(480, 596, 1000, 674));
+        assert_eq!(wide.terminal, rect(480, 0, 1000, 570));
+        assert_eq!(wide.composer, rect(480, 570, 1000, 674));
         assert_eq!(wide.status, rect(0, 674, 1000, 700));
         assert_toolbar_valid(wide, SidebarToolbarMode::Full);
     }
@@ -820,8 +821,8 @@ mod tests {
         assert_eq!(narrow.resize_grip, Some(rect(74, 0, 80, 274)));
         assert_eq!(narrow.sidebar_tree, rect(0, 0, 74, 274));
         assert_eq!(narrow.sidebar_toolbar, None);
-        assert_eq!(narrow.terminal, rect(80, 0, 400, 196));
-        assert_eq!(narrow.composer, rect(80, 196, 400, 274));
+        assert_eq!(narrow.terminal, rect(80, 0, 400, 170));
+        assert_eq!(narrow.composer, rect(80, 170, 400, 274));
         assert_eq!(narrow.status, rect(0, 274, 400, 300));
     }
 
