@@ -139,6 +139,11 @@ pub(crate) trait ControlHost {
     /// Reload the active tab composer into the host UI surface.
     fn load_composer_to_ui(&mut self) {}
 
+    /// Preserve host-owned modal/focus traps before a shared UI action runs.
+    fn admit_ui_action(&mut self, _action: &str) -> Result<(), String> {
+        Ok(())
+    }
+
     #[allow(dead_code)]
     fn focus_surface(&self) -> &str {
         "terminal"
@@ -411,6 +416,9 @@ fn send_composer_at_position(host: &mut dyn ControlHost, position: usize) -> Ipc
 
 fn dispatch_shared_ui_action(host: &mut dyn ControlHost, args: &[String]) -> Option<IpcResponse> {
     let action = args.get(1).map(String::as_str)?;
+    if let Err(error) = host.admit_ui_action(action) {
+        return Some(IpcResponse::failure(error));
+    }
     match action {
         "new-tab" => match host.create_tab(None, Vec::new(), Vec::new(), true, None) {
             Ok(index) => {

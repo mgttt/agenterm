@@ -6359,6 +6359,36 @@ impl ControlHost for AppState {
         self.load_active_composer();
     }
 
+    fn admit_ui_action(&mut self, action: &str) -> Result<(), String> {
+        if self.cwd_edit_target.is_some()
+            && !matches!(
+                action,
+                "cwd-prepare"
+                    | "cwd-prepare-append"
+                    | "cwd-prepare-replace"
+                    | "cwd-send-now"
+                    | "cancel"
+            )
+        {
+            return Err(
+                "CWD editor is a focus trap; prepare, send now, or cancel it first".to_owned(),
+            );
+        }
+        if self.proxy_edit_target.is_some()
+            && !matches!(
+                action,
+                "proxy-reveal-credentials" | "proxy-prepare" | "proxy-send-now" | "cancel"
+            )
+        {
+            self.remask_proxy_credentials();
+            return Err(
+                "Proxy editor is a focus trap; reveal, prepare, send now, or cancel it first"
+                    .to_owned(),
+            );
+        }
+        Ok(())
+    }
+
     fn focus_surface(&self) -> &str {
         self.current_focus_surface().as_str()
     }
