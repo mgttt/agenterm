@@ -19,9 +19,11 @@ schema 后，让 AgenTerm 首次用自己的脚本运行时驱动完整开发生
 v0.1.10 必须完成 Rhai 对仓库自有 PowerShell 自动化的替代，这不是尽力而为
 的候选项，也不能顺延为后续版本：
 
-- 截至 2026-07-29 的滚动基线为 **42 个受 Git 跟踪的 `.ps1`**：根目录
-  3 个、`scripts/` 活跃脚本 17 个、`tests/` 20 个、旧 PowerShell
-  archive 2 个；v0.1.9 收口期间新增并最终纳入 Git 的脚本也必须迁移；
+- 截至 2026-07-29 的滚动快照为 **43 个受 Git 跟踪的 `.ps1`**：根目录
+  3 个、`scripts/` 活跃脚本 17 个、`scripts/archive/powershell/` 2 个、
+  `tests/` 21 个；这只是便于评审的当前快照，v0.1.10 开工时必须由
+  `git ls-files '*.ps1'` 自动生成并冻结真实基线，v0.1.9 收口期间新增并
+  最终纳入 Git 的脚本同样必须迁移；
 - v0.1.10 开工提交冻结最终迁移清单；从该提交起，zero-PS1 漂移门既拒绝
   新增 `.ps1`，也拒绝从清单中遗漏、改名规避或把 PowerShell 藏进字符串；
 - 完成时 `git ls-files '*.ps1'` 必须返回空结果，archive 不作为例外；
@@ -291,7 +293,7 @@ delivery
     -> build.bat/CI 退化为 stage-0 薄入口
 
 波次 C：公共黑盒测试
-  19 个 tests/*.ps1 + 测试 helper/manifest/fixture server
+  当前 21 个 tests/*.ps1（含测试 helper/manifest/fixture server）
     -> 共享 Rhai harness
     -> typed wait、诊断包、资源所有权与清理
     -> 每个 evidence ID 等价或增强后删除原脚本
