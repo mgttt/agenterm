@@ -1637,8 +1637,9 @@ S4  [~] server-owned 单活 interactive UI lease 已交付 attach/idempotent
         连接独立 server、渲染 DTO、确认 applied sequence、关闭后保留 PTY，
         且 replacement GUI 恢复同一 server/tab/terminal marker；同一 GUI
         PID/HWND 也已通过 server epoch 重启、重新 bootstrap/lease 的
-        in-place reconnect 黑盒。普通启动默认切换、旧工作台完整 parity
-        与 same-server rollback 待补
+        in-place reconnect 黑盒；client-owned Tabs 显隐/宽度持久化、拖动
+        PTY resize 与 server-owned 滚轮 viewport 也已进入同一公开旅程。
+        普通启动默认切换、旧工作台完整 parity 与 same-server rollback 待补
 S5  same-server GUI upgrade + rollback black-box
 S6  remove combined-process handoff only after parity gates
 ```

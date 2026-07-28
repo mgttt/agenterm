@@ -34,6 +34,18 @@ public static class AgenTermRemoteUiNativeTest {
     [DllImport("user32.dll")]
     public static extern bool PrintWindow(
         IntPtr window, IntPtr device, uint flags);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr SendMessage(
+        IntPtr window, uint message, IntPtr wparam, IntPtr lparam);
+
+    public static IntPtr MousePoint(int x, int y) {
+        return new IntPtr((y << 16) | (x & 0xffff));
+    }
+
+    public static IntPtr WheelDelta(short delta) {
+        return new IntPtr((long)(ushort)delta << 16);
+    }
 }
 '@
 
@@ -259,6 +271,74 @@ try {
             "observed=$($replacementLease.observed_sequence) " +
             "position=$($replacementBootstrap.position.sequence)"
         )
+    }
+
+    Write-Host 'STEP resize Tabs locally and scroll the server-owned viewport'
+    $activeBeforeResize = @(
+        $replacementBootstrap.tabs |
+            Where-Object id -eq $replacementBootstrap.active_tab_id
+    )[0]
+    $columnsBeforeResize = [int]$activeBeforeResize.screen.columns
+    $resizeY = 200
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, 0x0201, [IntPtr]::Zero,
+        [AgenTermRemoteUiNativeTest]::MousePoint(249, $resizeY)
+    ) | Out-Null
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, 0x0200, [IntPtr]::Zero,
+        [AgenTermRemoteUiNativeTest]::MousePoint(360, $resizeY)
+    ) | Out-Null
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, 0x0202, [IntPtr]::Zero,
+        [AgenTermRemoteUiNativeTest]::MousePoint(360, $resizeY)
+    ) | Out-Null
+    $savedSettings = Get-Content -LiteralPath $run.SettingsPath -Raw |
+        ConvertFrom-Json
+    $resizedBootstrap = Invoke-AgenTerm @('ui-bootstrap') |
+        ConvertFrom-Json
+    $activeAfterResize = @(
+        $resizedBootstrap.tabs |
+            Where-Object id -eq $resizedBootstrap.active_tab_id
+    )[0]
+    if ($savedSettings.tabs_width -ne 360 -or
+        $activeAfterResize.screen.columns -ge $columnsBeforeResize) {
+        throw (
+            'replaceable UI did not persist Tabs drag or resize the PTY: ' +
+            "saved_width=$($savedSettings.tabs_width) " +
+            "before_columns=$columnsBeforeResize " +
+            "after_columns=$($activeAfterResize.screen.columns)"
+        )
+    }
+
+    $scrollMarker = "AGENTERM_REMOTE_SCROLL_$($run.RunId)_"
+    Invoke-AgenTerm @(
+        'send-keys', '-t', $tabId, '-l',
+        "for /L %i in (1,1,80) do @echo $scrollMarker%i"
+    ) | Out-Null
+    Invoke-AgenTerm @('send-keys', '-t', $tabId, 'Enter') | Out-Null
+    Invoke-AgenTerm @(
+        'wait-pane', '-t', $tabId,
+        '--contains', "${scrollMarker}80", '--timeout-ms', '5000'
+    ) | Out-Null
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, 0x020A,
+        [AgenTermRemoteUiNativeTest]::WheelDelta(120),
+        [IntPtr]::Zero
+    ) | Out-Null
+    $scrolled = Invoke-AgenTerm @('inspect', '-t', $tabId) |
+        ConvertFrom-Json
+    if ($scrolled.windows[0].scrollback_offset -le 0) {
+        throw 'replaceable UI mouse wheel did not scroll terminal history'
+    }
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, 0x020A,
+        [AgenTermRemoteUiNativeTest]::WheelDelta(-120),
+        [IntPtr]::Zero
+    ) | Out-Null
+    $returnedLive = Invoke-AgenTerm @('inspect', '-t', $tabId) |
+        ConvertFrom-Json
+    if ($returnedLive.windows[0].scrollback_offset -ne 0) {
+        throw 'replaceable UI mouse wheel did not return to the live viewport'
     }
 
     Write-Host 'STEP reconnect the same GUI process across a server restart'

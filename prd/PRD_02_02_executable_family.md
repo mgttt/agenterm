@@ -56,8 +56,12 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       PTY resize; independent typed automation remains a separate control plane
     - [~] the opt-in replaceable GUI consumer acquires and uses that path; it
       reconnects in place with the same GUI PID/HWND after a server epoch
-      restart and adopts the new causal bootstrap/lease identity. Ordinary
-      launches and same-server rollback qualification are still pending.
+      restart and adopts the new causal bootstrap/lease identity. Tabs
+      visibility and drag width remain client-owned and persist through the
+      shared settings file, while mouse-wheel history navigation mutates the
+      server-owned terminal viewport and PTY resize follows the effective
+      layout. Ordinary launches, full workbench parity and same-server rollback
+      qualification are still pending.
   - [ ] compatibility is fail-closed and asymmetric: a new GUI may connect to
     its declared server protocol range; an incompatible server remains alive
     and reports a precise upgrade/restart choice instead of being killed

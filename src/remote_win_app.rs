@@ -8,31 +8,33 @@ use std::{
 
 use anyhow::{Context as _, Result};
 use windows_sys::Win32::{
-    Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM},
+    Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
     Graphics::Gdi::{
         BeginPaint, CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS, CreateFontW, CreateSolidBrush,
         DEFAULT_CHARSET, DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE, DT_VCENTER, DeleteObject,
         DrawTextW, EndPaint, FF_MODERN, FIXED_PITCH, FW_NORMAL, FillRect, FrameRect, GetDC,
         GetTextMetricsW, HDC, HFONT, HGDIOBJ, LOGPIXELSY, OUT_DEFAULT_PRECIS, PAINTSTRUCT,
-        ReleaseDC, SelectObject, SetBkMode, SetTextColor, TEXTMETRICW, TRANSPARENT, UpdateWindow,
+        ReleaseDC, ScreenToClient, SelectObject, SetBkMode, SetTextColor, TEXTMETRICW, TRANSPARENT,
+        UpdateWindow,
     },
     System::LibraryLoader::GetModuleHandleW,
     UI::{
         Input::KeyboardAndMouse::{
-            GetFocus, GetKeyState, SetFocus, VK_CONTROL, VK_DOWN, VK_END, VK_ESCAPE, VK_F1, VK_F2,
-            VK_F3, VK_F4, VK_F5, VK_F6, VK_F7, VK_F8, VK_F9, VK_F10, VK_F11, VK_F12, VK_HOME,
-            VK_LEFT, VK_NEXT, VK_PRIOR, VK_RIGHT, VK_UP,
+            GetFocus, GetKeyState, ReleaseCapture, SetCapture, SetFocus, VK_CONTROL, VK_DOWN,
+            VK_END, VK_ESCAPE, VK_F1, VK_F2, VK_F3, VK_F4, VK_F5, VK_F6, VK_F7, VK_F8, VK_F9,
+            VK_F10, VK_F11, VK_F12, VK_HOME, VK_LEFT, VK_NEXT, VK_PRIOR, VK_RIGHT, VK_UP,
         },
         WindowsAndMessaging::{
             CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DestroyWindow,
             DispatchMessageW, ES_AUTOVSCROLL, ES_MULTILINE, ES_WANTRETURN, GWLP_USERDATA,
-            GetClientRect, GetForegroundWindow, GetMessageW, GetWindowLongPtrW,
-            GetWindowTextLengthW, GetWindowTextW, IDC_ARROW, LoadCursorW, LoadIconW, MSG,
-            MoveWindow, PostQuitMessage, RegisterClassW, SW_SHOW, SW_SHOWNOACTIVATE,
-            SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW,
+            GetClientRect, GetCursorPos, GetForegroundWindow, GetMessageW, GetWindowLongPtrW,
+            GetWindowTextLengthW, GetWindowTextW, IDC_ARROW, IDC_SIZEWE, LoadCursorW, LoadIconW,
+            MSG, MoveWindow, PostQuitMessage, RegisterClassW, SW_SHOW, SW_SHOWNOACTIVATE,
+            SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SetCursor,
             SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW,
-            ShowWindow, TranslateMessage, WM_CHAR, WM_CLOSE, WM_COMMAND, WM_CREATE, WM_DESTROY,
-            WM_ERASEBKGND, WM_KEYDOWN, WM_LBUTTONDOWN, WM_NCDESTROY, WM_PAINT, WM_SETFOCUS,
+            ShowWindow, TranslateMessage, WM_CAPTURECHANGED, WM_CHAR, WM_CLOSE, WM_COMMAND,
+            WM_CREATE, WM_DESTROY, WM_ERASEBKGND, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP,
+            WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY, WM_PAINT, WM_SETCURSOR, WM_SETFOCUS,
             WM_SIZE, WM_TIMER, WNDCLASSW, WS_BORDER, WS_CHILD, WS_CLIPCHILDREN,
             WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE, WS_VSCROLL,
         },
@@ -42,10 +44,13 @@ use windows_sys::Win32::{
 use crate::{
     client::{ipc_address, ipc_socket_addr},
     commands::tmux_key_bytes,
-    settings::{AppConfig, load_config},
+    settings::{AppConfig, clamp_tabs_width, load_config, save_config},
     theme::{Rgb, ThemePalette},
     ui_bridge::{UiCellStyle, UiColor, UiScreenSnapshot, UiTabBootstrap},
     ui_client::{UiClientModel, tab_by_id},
+    ui_geometry::{
+        PixelRect, WorkspaceLayout, WorkspaceLayoutInput, tabs_width_from_drag, workspace_layout,
+    },
 };
 
 const TIMER_ID: usize = 1;
@@ -53,7 +58,6 @@ const EDIT_ID: usize = 2101;
 const SEND_ID: usize = 2102;
 const NEW_ID: usize = 2103;
 const TABS_ID: usize = 2104;
-const SIDEBAR_WIDTH: i32 = 250;
 const SIDEBAR_ROW_HEIGHT: i32 = 44;
 const TOOLBAR_HEIGHT: i32 = 44;
 const STATUS_HEIGHT: i32 = 26;
@@ -235,6 +239,7 @@ struct RemoteWindowState {
     cell_height: i32,
     pending_high_surrogate: Option<u16>,
     last_active_id: Option<String>,
+    tabs_resize_dragging: bool,
 }
 
 impl RemoteWindowState {
@@ -267,6 +272,7 @@ impl RemoteWindowState {
             cell_height,
             pending_high_surrogate: None,
             last_active_id,
+            tabs_resize_dragging: false,
         })
     }
 
@@ -325,37 +331,26 @@ impl RemoteWindowState {
         tab_by_id(client.snapshot(), active)
     }
 
-    fn layout_rects(&self) -> (RECT, RECT, RECT, RECT) {
+    fn workspace_geometry(&self) -> WorkspaceLayout {
         let mut client: RECT = unsafe { mem::zeroed() };
         unsafe { GetClientRect(self.window, &mut client) };
-        let sidebar = if self.tabs_visible { SIDEBAR_WIDTH } else { 0 };
-        let status_top = client.bottom.saturating_sub(STATUS_HEIGHT);
-        let composer_top = status_top.saturating_sub(COMPOSER_HEIGHT);
+        workspace_layout(WorkspaceLayoutInput {
+            client_width: client.right,
+            client_height: client.bottom,
+            tabs_visible: self.tabs_visible,
+            configured_tabs_width: i32::from(self.config.tabs_width),
+            composer_height: COMPOSER_HEIGHT,
+            status_height: STATUS_HEIGHT,
+        })
+    }
+
+    fn layout_rects(&self) -> (RECT, RECT, RECT, RECT) {
+        let geometry = self.workspace_geometry();
         (
-            RECT {
-                left: 0,
-                top: 0,
-                right: sidebar,
-                bottom: status_top,
-            },
-            RECT {
-                left: sidebar,
-                top: 0,
-                right: client.right,
-                bottom: composer_top,
-            },
-            RECT {
-                left: sidebar,
-                top: composer_top,
-                right: client.right,
-                bottom: status_top,
-            },
-            RECT {
-                left: 0,
-                top: status_top,
-                right: client.right,
-                bottom: client.bottom,
-            },
+            win_rect(geometry.sidebar),
+            win_rect(geometry.terminal),
+            win_rect(geometry.composer),
+            win_rect(geometry.status),
         )
     }
 
@@ -532,6 +527,98 @@ impl RemoteWindowState {
         {
             self.last_error = Some(format!("Terminal input failed: {error:#}"));
         }
+    }
+
+    fn scroll_terminal(&mut self, delta: i32) {
+        let Some(tab_id) = self
+            .client
+            .as_ref()
+            .and_then(|client| client.snapshot().active_tab_id.clone())
+        else {
+            return;
+        };
+        let count = usize::try_from(delta.unsigned_abs())
+            .unwrap_or(120)
+            .div_ceil(120)
+            .saturating_mul(3)
+            .max(1);
+        let action = if delta > 0 { "up" } else { "down" };
+        let result = self
+            .client
+            .as_mut()
+            .context("UI is disconnected")
+            .and_then(|client| {
+                client.run_control(vec![
+                    "scroll-pane".to_owned(),
+                    "-t".to_owned(),
+                    tab_id,
+                    action.to_owned(),
+                    count.to_string(),
+                ])?;
+                client.poll_deltas()?;
+                Ok(())
+            });
+        if let Err(error) = result {
+            self.last_error = Some(format!("Terminal scroll failed: {error:#}"));
+        }
+    }
+
+    fn resize_grip_contains(&self, x: i32, y: i32) -> bool {
+        self.workspace_geometry()
+            .resize_grip
+            .is_some_and(|grip| grip.contains(x, y))
+    }
+
+    fn begin_tabs_resize(&mut self, x: i32, y: i32) -> bool {
+        if !self.resize_grip_contains(x, y) {
+            return false;
+        }
+        self.tabs_resize_dragging = true;
+        unsafe { SetCapture(self.window) };
+        true
+    }
+
+    fn drag_tabs_resize(&mut self, x: i32) {
+        if !self.tabs_resize_dragging {
+            return;
+        }
+        let width = self.workspace_geometry().client.width();
+        self.config.tabs_width = clamp_tabs_width(tabs_width_from_drag(x, width));
+        self.layout();
+        self.resize_active_terminal();
+    }
+
+    fn finish_tabs_resize(&mut self) {
+        if !self.tabs_resize_dragging {
+            return;
+        }
+        self.tabs_resize_dragging = false;
+        unsafe { ReleaseCapture() };
+        if let Err(error) = save_config(&self.config) {
+            self.last_error = Some(format!("Tabs width save failed: {error:#}"));
+        }
+    }
+
+    fn tabs_resize_capture_lost(&mut self) {
+        if !self.tabs_resize_dragging {
+            return;
+        }
+        self.tabs_resize_dragging = false;
+        if let Err(error) = save_config(&self.config) {
+            self.last_error = Some(format!("Tabs width save failed: {error:#}"));
+        }
+    }
+
+    fn set_resize_cursor_if_needed(&self) -> bool {
+        let mut point = POINT { x: 0, y: 0 };
+        if unsafe { GetCursorPos(&mut point) } == 0
+            || unsafe { ScreenToClient(self.window, &mut point) } == 0
+            || !self.resize_grip_contains(point.x, point.y)
+        {
+            return false;
+        }
+        unsafe { SetCursor(LoadCursorW(ptr::null_mut(), IDC_SIZEWE)) };
+        true
     }
 
     fn terminal_char(&mut self, value: u16) {
@@ -780,7 +867,11 @@ unsafe extern "system" fn window_proc(
             if let Some(state) = state_mut(window) {
                 let x = (lparam as u32 & 0xffff) as i16 as i32;
                 let y = ((lparam as u32 >> 16) & 0xffff) as i16 as i32;
-                if state.tabs_visible && x < SIDEBAR_WIDTH {
+                if state.begin_tabs_resize(x, y) {
+                    return 0;
+                }
+                let sidebar = state.layout_rects().0;
+                if state.tabs_visible && x < sidebar.right {
                     state.select_tab_at(y);
                 } else {
                     unsafe { SetFocus(window) };
@@ -790,6 +881,49 @@ unsafe extern "system" fn window_proc(
                 };
             }
             0
+        }
+        WM_MOUSEMOVE => {
+            if let Some(state) = state_mut(window)
+                && state.tabs_resize_dragging
+            {
+                let x = (lparam as u32 & 0xffff) as i16 as i32;
+                state.drag_tabs_resize(x);
+                unsafe {
+                    windows_sys::Win32::Graphics::Gdi::InvalidateRect(window, ptr::null(), 0)
+                };
+            }
+            0
+        }
+        WM_LBUTTONUP => {
+            if let Some(state) = state_mut(window) {
+                state.finish_tabs_resize();
+            }
+            0
+        }
+        WM_CAPTURECHANGED => {
+            if let Some(state) = state_mut(window) {
+                state.tabs_resize_capture_lost();
+            }
+            0
+        }
+        WM_MOUSEWHEEL => {
+            if let Some(state) = state_mut(window) {
+                let delta = ((wparam >> 16) & 0xffff) as u16 as i16 as i32;
+                state.scroll_terminal(delta);
+                unsafe {
+                    windows_sys::Win32::Graphics::Gdi::InvalidateRect(window, ptr::null(), 0)
+                };
+            }
+            0
+        }
+        WM_SETCURSOR => {
+            if let Some(state) = state_ref(window)
+                && state.set_resize_cursor_if_needed()
+            {
+                1
+            } else {
+                unsafe { DefWindowProcW(window, message, wparam, lparam) }
+            }
         }
         WM_KEYDOWN => {
             if let Some(state) = state_mut(window)
@@ -815,6 +949,11 @@ unsafe extern "system" fn window_proc(
                     NEW_ID => state.new_tab(),
                     TABS_ID => {
                         state.tabs_visible = !state.tabs_visible;
+                        state.config.tabs_visible = state.tabs_visible;
+                        if let Err(error) = save_config(&state.config) {
+                            state.last_error =
+                                Some(format!("Tabs visibility save failed: {error:#}"));
+                        }
                         state.layout();
                         state.resize_active_terminal();
                     }
@@ -1053,6 +1192,15 @@ fn draw_text(device: HDC, mut rect: RECT, text: &str, color: COLORREF) {
             &mut rect,
             DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
         );
+    }
+}
+
+fn win_rect(rect: PixelRect) -> RECT {
+    RECT {
+        left: rect.left,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
     }
 }
 
