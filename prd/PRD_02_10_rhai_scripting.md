@@ -364,6 +364,32 @@ Migration ledger:
 | Cargo target inventory | `scripts/rhai/target-report.rhai` | `scripts/archive/powershell/target-report.ps1` | `b9d1906` | public CLI fixture plus live PowerShell/Rhai field parity | retain through the next completed runtime slice |
 | Internal-only version policy | `scripts/rhai/internal-version-policy.rhai` | `scripts/archive/powershell/internal-version-policy.ps1` | `b0010f5` | public CLI `check` plus identical live PowerShell/Rhai PASS result | retain through the task/module slice |
 
+### v0.1.10 completion commitment
+
+- [ ] v0.1.10 completes the replacement of repository-owned PowerShell
+  automation; this is a release completion gate rather than a best-effort
+  migration track.
+- [ ] the dated 2026-07-29 baseline is 41 tracked `.ps1` files: 3 at the
+  repository root, 17 under `scripts/`, 19 under `tests/`, and 2 retained in
+  `scripts/archive/powershell/`.
+- [ ] completion requires `git ls-files '*.ps1'` to return no files. Tests,
+  helpers, and archived implementations are not exceptions; Git history is the
+  permanent archive after each parity and rollback boundary closes.
+- [ ] `agenterm.tasks.json` and shared Rhai modules own build, lint, test,
+  qualification, packaging, release rehearsal, and approved release semantics.
+- [ ] batch files, Unix shell entry points, and CI YAML may bootstrap a pinned
+  Rust toolchain and forward arguments/exit status to the same Rhai task, but
+  must not duplicate task selection, budgets, evidence, packaging, or release
+  policy.
+- [ ] the migration proceeds from low-side-effect rules and reports through
+  build/static quality, public black-box tests, and finally qualification and
+  delivery. Each responsibility must prove normalized parity or stronger public
+  evidence before callers switch and its `.ps1` leaves the tree.
+- [ ] Script Runtime gaps are filled with stable typed APIs or shared Rhai
+  modules. Rhai scripts must never invoke PowerShell as an escape hatch.
+- [ ] a no-PowerShell clean-checkout qualification and a zero-`.ps1` drift gate
+  prevent the old automation layer from returning.
+
 ## Public black-box acceptance
 
 - [x] tests invoke only released `agenterm-cli script` commands and compare the

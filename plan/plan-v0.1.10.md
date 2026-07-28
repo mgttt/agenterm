@@ -1,6 +1,6 @@
 # AgenTerm v0.1.10 公开计划
 
-状态：讨论稿  
+状态：范围已冻结，等待 v0.1.9 收口后实施
 工作主题：**Rhai 自举工具链与可验证的只读 Agent 桥梁**
 版本定位：在 v0.1.9 完善通用 Rhai 运行时、模块任务与机器可读工具
 schema 后，让 AgenTerm 首次用自己的脚本运行时驱动完整开发生命周期，
@@ -9,6 +9,21 @@ schema 后，让 AgenTerm 首次用自己的脚本运行时驱动完整开发生
 本文是版本执行计划与决策记录，不是产品事实，也不得成为实现依赖。
 评审接受的能力、边界和验收条件必须同步进入对应 `PRD.md` 模块；完成后
 保留本文作为交付历史。
+
+### 已冻结的版本决策（2026-07-29）
+
+v0.1.10 必须完成 Rhai 对仓库自有 PowerShell 自动化的替代，这不是尽力而为
+的候选项，也不能顺延为后续版本：
+
+- 版本开始时的基线为 **41 个受 Git 跟踪的 `.ps1`**：根目录 3 个、
+  `scripts/` 17 个、`tests/` 19 个、旧 PowerShell archive 2 个；
+- 完成时 `git ls-files '*.ps1'` 必须返回空结果，archive 不作为例外；
+- 已迁移实现由 Git 历史保存，不在活动工作树维护 PowerShell 影子副本；
+- `.bat`、Unix shell 和 CI YAML 可以作为平台薄入口，但不得包含业务规则；
+- 如果某个迁移暴露 Script Runtime 能力缺口，先补稳定 typed API，再继续
+  迁移；不得从 Rhai 反向调用 PowerShell 绕过缺口；
+- MCP 是本轮并行产品线，但不得以它为理由降低 PowerShell 归零完成门；
+- 若版本时间受限，先缩减 MCP 的非核心表面，不缩减 Rhai 自举与归零目标。
 
 ## 〇、产品判断
 
@@ -250,7 +265,40 @@ delivery
 └─ tag / push / publish 前置验证
 ```
 
-不要求删除 `.bat`、shell 或 CI YAML 这些平台入口，但它们只能：
+基线迁移批次按依赖方向执行：
+
+```text
+波次 A：纯规则与报告（低副作用）
+  2 个 archive + build identity + target/artifact/version/report helpers
+    -> 稳定 fs/env/json/process API
+    -> 规范化结果逐字段对比
+
+波次 B：构建、lint 与静态对齐
+  root lint/check 编排 + scripts build/stage/supply-chain
+    -> Rhai task graph 成为唯一规则源
+    -> build.bat/CI 退化为 stage-0 薄入口
+
+波次 C：公共黑盒测试
+  19 个 tests/*.ps1 + 测试 helper/manifest/fixture server
+    -> 共享 Rhai harness
+    -> typed wait、诊断包、资源所有权与清理
+    -> 每个 evidence ID 等价或增强后删除原脚本
+
+波次 D：资格、打包与发布
+  qualification/package/public-candidate/release
+    -> receipt 绑定 commit、task graph、runtime 与 artifact hash
+    -> package 不重建，release 保留显式用户批准
+
+波次 E：归零与防回流
+  删除最后一个 .ps1
+    -> 文档、AGENTS、CI、Cargo metadata 和所有调用者切换
+    -> zero-ps1 lint gate
+    -> Windows clean checkout 无 PowerShell 资格测试
+```
+
+要求删除所有受跟踪 `.ps1`，包括当前 `scripts/archive/powershell/` 中的历史
+副本；其内容由 Git 历史继续保存。不要求删除 `.bat`、shell 或 CI YAML
+这些平台入口，但它们只能：
 
 1. 定位或安装明确版本的 Rust 工具链；
 2. 构建/定位 `agenterm-script`；
@@ -739,11 +787,13 @@ entry 是集成热点，只允许一个串行 owner 收口。
 
 ### 门零：PowerShell 退出与自举闭环
 
-- `git ls-files '*.ps1'` 中不存在仓库自有可执行脚本；
+- `git ls-files '*.ps1'` 返回空结果，测试、helper 和 archive 均无例外；
 - lint gate 拒绝新增 `.ps1` 和入口脚本中的业务规则回流；
 - 干净 checkout 只经 stage 0 + Rhai task 完成 build/check/qualification；
 - 开发机与 CI 使用同一 task ID、依赖图、预算和 evidence catalog；
 - build、test、qualification、package、release 没有隐式 PowerShell 子进程；
+- 文档、AGENTS、workflow、`.bat`、Cargo metadata 与 task catalog 不再引用
+  已删除脚本；
 - 失败、取消与超时后无 child/temp/GUI/server/locked artifact 残留。
 
 ### 门一：只读真实性
@@ -811,8 +861,8 @@ entry 是集成热点，只允许一个串行 owner 收口。
 建议直接接受以下默认决策：
 
 1. 主题：**Rhai 自举工具链与可验证的只读 Agent 桥梁**。
-2. 仓库自有 PowerShell 业务逻辑在 v0.1.10 完整退出，完成门为可执行
-   `.ps1` 数量归零。
+2. 仓库自有 PowerShell 业务逻辑在 v0.1.10 完整退出，完成门为
+   `git ls-files '*.ps1'` 返回空结果；测试与 archive 不豁免。
 3. `agenterm.tasks.json` 和 Script API catalog 成为开发任务事实源。
 4. stage 0 只解决 Rust/runtime bootstrap，不承载业务规则。
 5. 新二进制：`agenterm-mcp.exe`。
