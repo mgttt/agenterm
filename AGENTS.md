@@ -1,53 +1,34 @@
 # AgenTerm agent guide
 
-This is the operational source of truth for coding agents. Product intent and
-status live in the product set rooted at `PRD.md`; third-level detail lives in
-the linked `prd/PRD_*.md` modules, and machine alignment lives in
-`prd/alignment-contract.json`. Avoid creating additional design documents
-unless the information cannot live here or in that product set.
+This is the operational source of truth for coding agents. Start product and
+repository orientation at `PRD.md`, then follow its links to the owning
+`prd/PRD_*.md` module. Machine alignment lives in
+`prd/alignment-contract.json`, and public version execution plans live in
+`plan/`. Discover current source layout from the checkout instead of maintaining
+a duplicate file map here.
 
-## Repository map
+## Planning and decomposition method
 
-- `src/lib.rs` — Win32 window, terminal/tab state, rendering, and command
-  execution.
-- `src/bin/agenterm.rs` — Windows-subsystem GUI entry point.
-- `src/bin/agenterm-cli.rs` — console-subsystem CLI entry point.
-- `src/bin/agenterm-mux.rs` — tmux/RMUX compatibility CLI entry point.
-- `src/bin/agenterm-script.rs` — one-invocation constrained Rhai worker.
-- `src/commands.rs` — reusable CLI parsing, command catalog, key mapping, and
-  output-path helpers.
-- `src/build_identity.rs` — source/build identity classification shared by
-  runtime and staged-artifact reports.
-- `src/control_contract.rs` — request identity, receipts, typed errors,
-  deadlines, replay, and completion descriptors.
-- `src/event_journal.rs` — bounded observable-event ordering and gap detection.
-- `src/instances.rs` — multi-server registration and discovery records.
-- `src/ipc_transport.rs` — bounded loopback request/response transport.
-- `src/operations.rs` — typed operation catalog, classes, and validation.
-- `src/protocol.rs` — serialized local IPC request/response contract.
-- `src/rmux_status.rs` — RMUX status-line window parsing and click ranges.
-- `src/script_audit.rs` — privacy-bounded script invocation audit records.
-- `src/script_protocol.rs` — versioned host/worker scripting contract.
-- `src/settings.rs` — persistent user settings.
-- `src/tab_tree.rs` — pure hierarchy ordering and cycle detection.
-- `src/terminal_lifecycle.rs` — process/reader/parser lifecycle truth.
-- `src/terminal_observation.rs` — terminal counters and finalization snapshots.
-- `src/terminal_runtime.rs` — ConPTY creation, I/O workers, resize, and bounded
-  worker shutdown.
-- `src/theme.rs` — built-in theme IDs and color palettes.
-- `src/ui_geometry.rs` — pure host-surface layout and sidebar geometry.
-- `src/upgrade_identity.rs` — running/staged compatibility truth.
-- `src/wake_signal.rs` — lossless coalesced GUI-owner wake notification.
-- `src/worker_supervisor.rs` — bounded sidecar lifetime and cancellation.
-- `src/working_context.rs` — CWD/proxy provenance and safe command preparation.
-- `src/workspace.rs` — versioned tab-workspace persistence.
-- `prd/` — modular product requirements and capability/evidence alignment.
-- `tests/` — black-box tests that drive only the public AgenTerm executable.
-- `assets/` — application icon sources.
-- `scripts/` — build metadata tooling.
-- `dist/plan-*.md` — optional ignored discussion drafts for dependencies,
-  milestones, risks, and sequencing; they are temporary and must not become
-  dependencies of the tracked product set.
+Use tree thinking, divergent thinking, and dependency-aware parallel thinking
+as the default planning method:
+
+1. Define one concrete product outcome, then split it into independently
+   verifiable capability branches. Split each branch into behavior, evidence,
+   delivery, and explicit non-goal leaves.
+2. Diverge inside each branch before choosing an implementation: compare
+   alternatives, edge cases, user value, authority risk, reuse, complexity,
+   and evidence cost. Cut ideas that do not serve the version outcome.
+3. Record sequencing, dependencies, risks, and version choices in `plan/`.
+   Converge accepted product scope and capability status into the owning PRD
+   modules and stable catalogs.
+4. Draw the dependency graph, shared prerequisites, hot files, integration
+   points, and final serial validation path before assigning implementation.
+5. Parallelize independent, exclusively owned leaves; integrate at reviewed
+   typed boundaries. Do not confuse a large task list with useful parallelism.
+
+Every shipped leaf must state the user problem, governing invariant or
+authority boundary, observable success evidence, safe failure result, public
+black-box owner, and excluded scope.
 
 ## Parallel execution discipline
 

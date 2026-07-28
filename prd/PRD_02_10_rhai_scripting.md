@@ -4,173 +4,199 @@ Parent: [AgenTerm product tree](../PRD.md#product-tree)
 
 Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
-- [x] pure Rhai run, eval, check, and API discovery execute in a sidecar
-- [x] observe Rhai uses typed bounded workspace, tab, snapshot, capture, and event broker methods
-  and receives no ambient state or direct IPC authority
-- [x] Rhai denies ambient mutation authority and enforces operation budgets
-- [x] value limits, parent-enforced wall time, typed limit classification,
-  cancellation, worker ceilings, and privacy-bounded audit are enforced
-- Product boundary
-  - [x] design choice: Rust (`.rs`) implements the host, capability checks,
-    and stable APIs; Rhai (`.rhai`) is the user scripting language
-  - [x] scripting executes in an optional sidecar/worker; the GUI owns no
-    Rhai engine and communicates only through versioned typed contracts
-  - [x] observe scripts consume reviewed public tab/workspace operations;
-    they receive no direct Win32, PTY, or mutable GUI-state access
-  - [x] execution runs off the window thread and never delays first
-    window display or terminal painting
-  - [x] a script failure is isolated from the GUI, IPC server, terminal
-    readers, and workspace persistence
-- Runtime architecture
-  - [x] scripting lives in `agenterm-script.exe`; the GUI state machine
-    remains independent of Rhai engine types and communicates through
-    versioned protocol, supervisor, broker, operation, and audit boundaries
-  - [x] one engine factory builds each invocation from an immutable
-    capability set, source label, API version, and resource budget
-  - [x] lazy process isolation ensures no engine construction or script
-    directory scan on GUI startup
-  - [ ] bounded compiled-AST cache keyed by source fingerprint, API version,
-    and capability profile
-  - [ ] versioned embedded prelude for shared helpers; module loading stays
-    disabled until real use cases justify its size and resolver surface
-  - [ ] user scripts default to `%LOCALAPPDATA%\AgenTerm\scripts`; one-shot
-    execution also accepts an explicit path or stdin
-  - [ ] source loading and runtime authority are separate: selecting a file
-    never grants filesystem, process, or terminal-write access
-- Capability profiles
-  - [x] `pure`: JSON-compatible values, bounded computation, arguments,
-    and captured stdout with parent hard limits
-  - [x] `observe`: typed workspace, tab list, active tab, UI snapshot,
-    bounded pane capture, and journal read/wait broker calls
-  - [ ] `control`: `observe` plus create/select/rename/reparent/close,
-    composer operations, send keys/mouse, and deterministic waits
-  - [ ] separately scoped `fs.read`, `fs.write`, `env.read`, and
-    `proc.exec`; roots, variable names, and executables are allowlists
-  - [ ] scripts cannot grant themselves capabilities
-  - [ ] destructive actions preserve native live-process confirmation
-    unless an explicit, visible automation policy authorizes them
-- AgenTerm host API
-  - [x] typed maps/arrays and stable error codes; scripts never parse
-    human-facing CLI output
-  - [x] observation: `agent.workspace()`, `agent.tabs()`,
-    `agent.active_tab()`, `agent.ui_snapshot()`,
-    `agent.capture(tab,max_bytes)`, `agent.events_read(...)`, and
-    `agent.events_wait(...)`
-  - [ ] action: `new_tab()`, `select_tab()`, `set_parent()`, `set_name()`,
-    `set_note()`, `set_composer()`, `send_composer()`, `send_keys()`,
-    `close_tab()`, and bounded `wait_*()`
-  - [ ] status providers return structured segments; the status bar owns
-    layout, refresh, truncation, and error presentation
-  - [x] API catalog and version are discoverable without script execution,
-    including exact typed signatures, operation IDs, errors, hard ceilings,
-    profile availability, and versions
-- Resource and security envelope
-  - [x] cap source bytes, operations, call/expression depth, collection and
-    string sizes, output, wall-clock duration, broker requests/returns,
-    capture bytes, event items, wait duration, and concurrent invocations
-  - [x] timeout has a stable error/exit code and never blocks the GUI
-  - [ ] process execution accepts executable plus argv, never an implicit
-    shell string; timeout and output caps are mandatory
-  - [ ] canonical root containment and reparse-point/symlink rejection for
-    scoped Windows file access
-  - [x] audit source fingerprint/label, requested/effective capabilities
-    and budgets, broker operation IDs, duration, result class, and denial
-    reason without recording source, argv, output, content, or secrets
-- Future safe-scripting sidecar contract
-  - Process boundary
-    - [x] one fresh worker process executes one `run`, `eval`, or `check`
-      invocation; the first delivery has no persistent daemon, background
-      handler, module resolver, or cross-invocation mutable state
-    - [x] the launcher places the worker in a kill-on-close Windows Job
-      Object and owns its deadline, cancellation, stdout, stderr, and final
-      exit status; a crashed or killed worker cannot affect the GUI server
-    - [x] a versioned invocation envelope and result envelope travel over
-      inherited anonymous pipes; source text, arguments, capabilities, and
-      secrets are not placed in the process command line
-    - [x] the worker never connects to GUI IPC directly. A host broker
-      validates the profile and supplies only immutable typed inputs over
-      the invocation channel
-  - Initial profiles
-    - [x] `pure` exposes bounded Rhai evaluation, JSON-compatible values,
-      invocation arguments, and captured stdout only; it has no clock,
-      environment, filesystem, process, network, terminal, or fleet access
-    - [x] `observe` adds typed workspace metadata, tab/active-tab views,
-      UI snapshots, bounded pane capture, and bounded Observable Fleet
-      journal reads/waits; baselines carry epoch and sequence
-    - [x] observe callers establish an explicit snapshot/workspace baseline
-      and consume validated event envelopes after that sequence; restart
-      and journal-gap errors remain typed and are never hidden by an
-      implicit resnapshot
-    - [x] `control`, filesystem, environment, process execution, network,
-      package loading, event handlers, and status providers remain outside
-      the first-delivery acceptance gate
-  - Public commands and discovery
-    - [x] `script run FILE.rhai|- [-- ARGS...]` loads a file or stdin and
-      returns script stdout separately from diagnostics
-    - [x] `script eval EXPRESSION` evaluates one explicit expression under
-      the selected profile without loading user modules
-    - [x] `script check FILE.rhai` validates Rhai without execution or a
-      live server, including exact API names, profile/capability access,
-      version, and static limits
-    - [x] `script api --json` reports API/schema versions, profiles,
-      exact functions, typed operation parameters/results/errors, defaults,
-      hard ceilings, and availability without starting a GUI
-    - [x] every command accepts an explicit profile and bounded overrides;
-      unknown API versions, profiles, capabilities, or options fail closed
-      with stable documented exit codes
-  - Budgets, cancellation, and audit
-    - [x] versioned nonzero defaults and immutable hard ceilings cover
-      source bytes, operations, call depth, collection/string size, output
-      bytes, wall time, journal events, wait duration, and worker count;
-      `script api --json` exposes the effective values
-    - [x] exceeding any budget produces a typed limit result and bounded
-      diagnostics; output truncation is explicit and cannot produce a
-      successful status
-    - [x] cancellation first signals the worker cooperatively, then
-      terminates its Job Object after a bounded grace period; CLI
-      interruption, timeout, and parent exit cannot orphan a worker
-    - [x] one append-only audit record captures invocation ID, timestamp,
-      source fingerprint/label, API version, profile, requested/effective
-      budgets, duration, exit class, cancellation, and denials, but not
-      source, arguments, pane contents, environment values, or stdout
-  - Public black-box acceptance
-    - [x] tests invoke only released `agenterm-cli script` commands and
-      validate stdout/stderr separation, JSON discovery, stable exit codes,
-      file/stdin/eval/check behavior, and clean-machine missing-sidecar
-      diagnostics
-    - [x] pure-profile fixtures prove denied filesystem, environment,
-      process, network, fleet, and clock access; observe fixtures prove
-      typed snapshots, ordered events, epoch restart, bounded-history gap,
-      wait timeout, and absence of mutation APIs
-    - [x] adversarial fixtures cover parse/runtime errors, operation and
-      output exhaustion, oversized values, cancellation, worker crash,
-      parent exit, concurrent worker ceiling, malformed envelopes, and
-      unsupported API versions without GUI latency or workspace damage
-    - [x] acceptance records GUI/CLI/worker sizes and first-window timing,
-      verifies no Rhai code loads during normal GUI startup, and leaves no
-      worker or temporary source behind after every result class
-- Extension surfaces
-  - [x] phase 1 one-shot pure/immutable-observe run/eval/check and API
-    discovery shipped with the v0.1.5 minimum sidecar contract
-  - [ ] future candidate: versioned local registry and named commands callable
-    by people, agents, and IPC through one stable ID
-  - [ ] later candidate: read-only status providers with timeout, last-good
-    value, visible degraded state, truncation, backoff, and host-owned layout
-  - [ ] later candidate: opt-in tab/process/workspace event handlers with
-    bounded queues, restart/gap semantics, cancellation, and no re-entrant GUI
-    mutation
-  - [ ] future scope and version ownership are intentionally reassessed after
-    the v0.1.7 internal consolidation rather than inherited as commitments
-  - [ ] no network client, package manager, arbitrary import, or general
-    async runtime without a concrete reviewed product use case
-- Verification and delivery
-  - [x] the shipped pure/observe slice records per-binary size, first-window
-    timing, no-script startup behavior, budgets, public CLI results, typed
-    observation, authority denial, timeout/crash recovery, and worker cleanup
-  - [ ] every future authority or provider slice adds
-    deny/success/scope-boundary and failure-isolation black-box tests before
-    its product status changes
-  - [ ] status-provider delivery additionally covers timeout, invalid result,
-    reload, truncation, last-known-good value, degraded state, and backoff
-  - [ ] every future slice keeps `agenterm.exe` below the 4 MiB release gate; a
-    large dependency or Rhai feature must earn its measured cost
+## Shipped baseline
+
+- [x] `agenterm-script.exe` executes pure Rhai `run`, `eval`, `check`, and API
+  discovery in a fresh sidecar process.
+- [x] the explicit `observe` profile exposes typed, bounded workspace, tab,
+  snapshot, capture, and event broker methods without direct Win32, PTY, or
+  mutable GUI-state access.
+- [x] the explicit `pure` profile provides deterministic JSON-compatible
+  values, arguments, bounded computation, and captured stdout without ambient
+  filesystem, environment, process, network, clock, terminal, or Fleet access.
+- [x] a Rhai-independent supervisor owns a kill-on-close Windows Job Object,
+  parent deadline, cooperative cancellation followed by forced termination,
+  concurrency ceilings, and worker cleanup.
+- [x] a versioned inherited-pipe frame protocol separates invocation, broker
+  request/response, cancellation, and result frames; script stdout cannot
+  corrupt protocol frames.
+- [x] source, value, operation, call/expression depth, collection/string,
+  output, wall-time, broker, capture, event, wait, and concurrency limits have
+  typed failure classes and immutable hard ceilings.
+- [x] privacy-bounded audit records contain identity, source fingerprint and
+  label, API/profile/budget facts, broker operation IDs, duration, result
+  class, denial, cancellation, timeout, and crash, but never source, argv,
+  output, pane content, environment values, clipboard data, or credentials.
+- [x] normal GUI startup constructs no Rhai engine, scans no script directory,
+  and remains independent of Rhai engine types.
+
+## v0.1.8 product position
+
+`agenterm-script.exe` is AgenTerm's general-purpose local scripting runtime,
+with Node.js/Bun-like local-automation usefulness rather than JavaScript,
+Node API, npm, or Bun compatibility. It is not positioned as a restricted
+security plugin.
+
+- an explicit human invocation of ordinary `script run` or `script eval`
+  defaults to `local`, with the authority expected of an ordinary local
+  program launched by that user;
+- `pure` and `observe` remain explicit specialized profiles for deterministic
+  and read-only Fleet use, not the platform capability ceiling;
+- technical budgets, typed errors, cancellation, process isolation, audit
+  privacy, and product data-integrity checks remain mandatory in every mode;
+- agent-specific tool visibility, approval, path/domain/target policy,
+  credentials, quotas, and natural-language intent belong to a future agent
+  layer, not to this runtime;
+- local scripts do not bypass native product invariants: live close
+  confirmation, remain-on-exit, stable IDs, tree-cycle rejection, replay
+  protection, and truthful typed outcomes continue to apply.
+
+## v0.1.8 runtime architecture
+
+- [ ] one invocation still owns one fresh `agenterm-script.exe` sidecar; it is
+  not a persistent system daemon and keeps no mutable state across invocations.
+- [ ] an invocation may own a bounded task scheduler. Asynchronous APIs return
+  typed task handles consumed through `wait` and bounded `stream` operations.
+- [ ] the sidecar remains alive while reachable tasks, timers, child-process
+  I/O, HTTP bodies, or Fleet waits are active, and exits naturally when no
+  foreground task remains.
+- [ ] Ctrl+C, parent exit, timeout, server restart, task cancellation, and
+  worker failure propagate to every owned task and stream without orphaning a
+  child, blocking the GUI, or damaging PTYs or workspace state.
+- [ ] task and stream queues have explicit item/byte/concurrency limits and
+  backpressure; truncation, cancellation, and incomplete output cannot be
+  reported as success.
+- [ ] a bounded compiled-AST cache may be keyed by source fingerprint, API
+  version, runtime version, and profile, but is not required for the first
+  usable local-runtime slice.
+
+## Local standard library
+
+- [ ] `fs` covers bounded file read/write, directory listing and creation,
+  metadata, copy, move, delete, and same-volume atomic replacement.
+- [ ] `path` covers Windows normalization, join/split, relative paths,
+  explicit working directories, Unicode and long paths, and owned temporary
+  paths.
+- [ ] `env` reads, sets, deletes, enumerates, and constructs inherited child
+  environments without writing values to audit or diagnostics.
+- [ ] `process` accepts executable plus argv, cwd, env, stdin, bounded
+  stdout/stderr streams, timeout, cancellation, and typed exit status; it
+  never substitutes an implicit shell command string.
+- [ ] `time` provides wall time, monotonic deadlines, timers, and cancellable
+  waits through the common task model.
+- [ ] `json`, `text`, and `bytes` provide bounded parsing, serialization,
+  Unicode/encoding operations, and explicit conversions.
+- [ ] `http`/`fetch` provides HTTP(S) method, URL, headers, body, timeout,
+  status, bounded response streaming, cancellation, proxy/TLS diagnostics, and
+  credential-safe errors. Low-level sockets are not part of v0.1.8.
+- [ ] filesystem and temporary-resource helpers have explicit ownership and
+  cleanup behavior. Canonicalization, reparse points, atomic replacement, and
+  failure paths cannot silently target a different path than the result
+  reports.
+
+## Local modules, tasks, and named commands
+
+- [ ] local modules resolve from an explicit script/project root using
+  deterministic relative paths; missing modules, root escape, cycles, duplicate
+  identities, incompatible versions, and parse failures are typed.
+- [ ] project tasks use one versioned declarative manifest that maps stable task
+  IDs to a script/module entry point, arguments, working directory, environment
+  construction, and execution profile.
+- [ ] TOML versus reuse of an existing AgenTerm manifest encoding is the one
+  remaining implementation-before-parser decision. It must be recorded before
+  task-manifest parsing begins, but does not block `fs`, `path`, `env`,
+  `process`, `time`, or the task scheduler.
+- [ ] project tasks and user-level named commands are discoverable through one
+  typed catalog. Invalid entries remain visible with a stable degraded reason
+  instead of disappearing.
+- [ ] CLI listing, inspection, and invocation of named tasks is P0 for v0.1.8.
+  A GUI command palette is a P1 consumer of the same catalog and does not own a
+  second registry.
+
+## AgenTerm Fleet API
+
+- [ ] generate the script-facing Fleet API systematically from the public typed
+  operation catalog rather than maintaining a hand-selected parallel list.
+- [ ] every entry exposes stable operation ID, classification, typed
+  parameters/result/errors, resolved target rules, receipt/wait behavior,
+  side-effect facts, version, and availability.
+- [ ] an operation that cannot be represented safely remains discoverable as
+  unsupported/degraded with a typed reason; it is never silently omitted or
+  reported as successful.
+- [ ] observation covers workspace, server, tabs/tree, focus, UI, terminal
+  capture/viewport/lifecycle, and Observable Fleet reads and waits.
+- [ ] explicit mutations cover tab/tree metadata, Composer, terminal input and
+  viewport, workspace, and lifecycle operations as their underlying catalog
+  contracts become complete.
+- [ ] destructive calls use explicit names and arguments, require the native
+  confirmation or documented noninteractive operation contract, carry request
+  identity/deadline/receipt, and preserve remain-on-exit, close, tree, replay,
+  and server-lifecycle invariants.
+- [ ] the control-plane catalog, dispatch, receipt, error, event-correlation,
+  replay, and deterministic-wait prerequisites are owned by
+  [Agent control plane](PRD_02_07_agent_control_plane.md); scripting consumes
+  that authority and never reads private GUI state.
+
+## Discovery and tool schema
+
+- [ ] `script api --json` is the exact versioned runtime catalog and matches
+  the engine, standard library, modules/tasks, profiles, Fleet operations,
+  defaults, hard ceilings, and availability.
+- [ ] each callable entry describes stable ID, signature, result/error schema,
+  filesystem/process/network/Fleet access, mutation and destructive facts,
+  expected duration, cancellation and streaming support, and any dry-run or
+  inspect support.
+- [ ] these are capability facts for people and future tool consumers, not an
+  authorization decision. A future agent layer may filter or constrain the
+  schema without reimplementing the runtime.
+- [ ] `script check` validates imports, task entries, API names, profiles,
+  signatures, versions, static limits, and unavailable/degraded calls without
+  executing user code or requiring a GUI.
+
+## Public black-box acceptance
+
+- [ ] tests invoke only released `agenterm-cli script` commands and compare the
+  offline catalog with actual runtime behavior.
+- [ ] isolated temporary roots cover Unicode and long paths, metadata,
+  directory operations, atomic replacement, interruption, access failure, and
+  cleanup without changing files outside the fixture.
+- [ ] process fixtures cover argv boundaries, spaces, Unicode, cwd, env, stdin,
+  separate stdout/stderr, nonzero exit, timeout, cancellation, parent exit,
+  backpressure, and orphan-free cleanup.
+- [ ] an independent loopback HTTP fixture covers request/response, headers,
+  body, status, bounded streaming, timeout, cancellation, malformed data,
+  connection failure, proxy/TLS-safe diagnostics, and no public-network
+  dependency.
+- [ ] timer and task fixtures prove concurrent progress, deterministic wait and
+  stream results, natural worker exit, cancellation propagation, bounded
+  queues, and recovery on the next invocation.
+- [ ] module/task fixtures cover roots, relative imports, cycles, duplicate and
+  missing modules, manifest version/error handling, named-task discovery,
+  degraded entries, arguments, and working directory.
+- [ ] Fleet conformance compares every operation-catalog entry with its script
+  exposure or explicit degraded reason; mutations verify typed receipts,
+  correlated public post-state/events, no duplicate side effect, and honest
+  close/send/restart failures.
+- [ ] local mode proves the general runtime loop while regression fixtures keep
+  pure deterministic and observe read-only.
+- [ ] script error, worker crash, timeout, cancellation, parent exit, server
+  restart, and unfinished task cleanup leave GUI, PTY, workspace, and the next
+  script invocation healthy.
+- [ ] retained diagnostics and audit fixtures prove that file content,
+  arguments, environment secrets, HTTP credentials/bodies, terminal content,
+  and script stdout do not leak.
+- [ ] every slice records worker/CLI/GUI size, first-window/no-script startup,
+  duration, limits, and orphan cleanup before its status changes to shipped.
+
+## Explicitly deferred
+
+- npm compatibility, a public package registry, third-party package lifecycle,
+  arbitrary remote imports, and Node/Bun binary or API compatibility;
+- a persistent or automatically started script daemon and cross-invocation
+  mutable runtime state;
+- low-level sockets, unsolicited listeners, and a general network sidecar;
+- event handlers, watch mode, REPL, and durable background scheduling unless a
+  later owned slice supplies separate acceptance;
+- agent permission, approval, credential, quota, and natural-language policy;
+- GUI command palette delivery beyond its P1 consumption of the shared named
+  task catalog.

@@ -34,10 +34,10 @@ second-level tree. Linked `prd/PRD_*.md` modules own third-level requirements,
 decisions, status, and acceptance detail. A requirement has exactly one owning
 module; other documents link to it instead of copying it.
 
-Temporary version plans may live under ignored `dist/` while they are being
-discussed. They are execution projections rather than product truth and must
-not become dependencies of the tracked product set. Every accepted product
-scope or status change belongs in its owning PRD module.
+Public version plans live under [`plan/`](plan/). They record sequencing,
+dependencies, risks, decisions, and delivery history, but remain execution
+projections rather than canonical product truth. Every accepted product scope
+or capability-status change also belongs in its owning PRD module.
 
 Machine-readable shipped capability/evidence alignment lives in
 [`prd/alignment-contract.json`](prd/alignment-contract.json).
@@ -90,8 +90,13 @@ Clippy with warnings denied, unit tests, `dist/` artifact generation, CLI smoke,
 and semantic UX smoke all pass. Rendering changes additionally require
 `screenshot` or `screenshot-pane` inspection.
 
-An exact internal candidate uses `.\check.ps1 -Release -IncludeStress` on a
-clean commit and must emit a complete qualification receipt. The independent
-`.\scripts\package-qualified.ps1` step may only copy the byte-identical
-qualified artifacts; it does not rebuild. Version 0.1.7 is internal-only and
-must never produce a tag or public GitHub Release.
+A v0.1.8 public-ready candidate uses
+`.\check.ps1 -Release -IncludeStress` on a clean commit and must emit one
+complete qualification receipt bound to the exact candidate bytes. The
+independent `.\scripts\package-qualified.ps1` step may only copy those
+byte-identical qualified artifacts; it does not rebuild. A non-publishing
+release rehearsal must validate the candidate, receipt, package manifest, and
+remote workflow contract before publication is considered. Creating or
+pushing the `v0.1.8` tag, or creating a public GitHub Release, still requires
+the user's explicit approval. Version 0.1.7 remains an internal-only historical
+baseline and must never produce a tag or public GitHub Release.

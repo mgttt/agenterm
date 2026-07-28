@@ -111,6 +111,29 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   - [ ] Cargo registry, Git sources and compatible build outputs use bounded,
     correctly keyed CI caches; cache miss/corruption cannot alter correctness,
     and developer `target/` cleanup remains explicit
+- v0.1.8 public-ready candidate and non-publishing release rehearsal (P0)
+  - [ ] one repository-native coordinator owns one clean candidate build and
+    its integrated qualification; a candidate SHA can have only one eligible,
+    complete stress-inclusive receipt selected for packaging
+  - [ ] the receipt binds source commit, lock, toolchain/profile, artifact
+    manifest, deterministic SBOM, required gates, emitted evidence, executable
+    hashes, and the exact staged candidate bytes
+  - [ ] `package-qualified.ps1` never invokes Cargo and only copies the
+    byte-identical receipt-qualified inputs; repeated packaging of the same
+    inputs produces the same package manifest and content hashes
+  - [ ] fail-closed self-tests reject dirty or stale source, changed
+    lock/manifest/SBOM/executable bytes, missing or skipped gates, a receipt
+    for another candidate, and package or ZIP tampering before publication
+  - [ ] the candidate records bounded stage and cache timing plus the first
+    actionable failure diagnostic; cache miss or corruption may affect speed
+    but cannot change the required gates, evidence, or candidate bytes
+  - [ ] a non-publishing rehearsal proves the tag/version/commit/receipt
+    relationship, fixed-revision minimum-permission workflow, expected asset
+    inventory, and equality between rehearsed asset hashes and the local
+    qualified package manifest
+  - [ ] public-ready status does not create release authority: creation or
+    push of the `v0.1.8` tag and creation of a public GitHub Release occur only
+    after the user explicitly approves publication
 - [x] artifact manifest schema 2 drives all four executable names, roles,
   PE subsystems, budgets, offline probes, staging metadata, and README checks;
   locked-artifact cleanup enumerates only exact manifest stems
@@ -145,7 +168,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       planned
     - [x] `check.ps1` runs `tests/script_smoke.ps1` before the
       safe-scripting release tag
-- Autonomous human UX dogfood
+- v0.1.8 autonomous public-interface dogfood (P0)
   - Resolved findings retained as regression contracts
     - [x] stable creation output is available through the documented
       `new-window -F '#{window_id}'` format, and a black-box journey reuses
@@ -170,19 +193,31 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   - [ ] drive first start, root/child creation, stable-ID targeting,
     rename/note, switching, composer edit/send, keyboard/Backspace, terminal
     mouse, viewport scroll, resize/minimize/restore, exit retention,
-    dead/live explicit close, normal shutdown/restart recovery, and font
-    settings in one deterministic journey
-  - [ ] after every transition save `ui-snapshot`, relevant
-    pane/workspace/settings JSON, command/exit result, and whole-window or
-    pane PNG under one timestamped evidence directory with build metadata
+    dead/live explicit close, detach/reattach continuity, normal
+    shutdown/restart recovery, and font settings in one deterministic journey
+  - [ ] the same journey invokes one named script task from its owning public
+    catalog; that task performs an isolated local-file operation, a child
+    process operation, and a typed Fleet mutation, then verifies the receipt,
+    public post-state, and cleanup rather than trusting script exit alone
+  - [ ] every journey step records one machine-readable manifest entry with
+    redacted command identity, duration, exit/result class, resolved
+    build/server/tab identity, before/after event position, and references to
+    its bounded evidence; meaningful transitions additionally save
+    `ui-snapshot`, relevant pane/workspace/settings JSON, and a whole-window or
+    pane PNG under the same run identity
   - [ ] post-assert state rather than command success alone: composer text
     executes once, scroll offsets and PNG viewport agree, dead exit code and
     final screen remain, live close exposes confirmation, tree/name/note/
-    active ID survive restart, and settings restore after the test
-  - [ ] always shut down the isolated instance, restore any external state,
-    detect orphan workers/windows, and fail release qualification for any
-    P0/P1 finding; P2/P3 findings require an owned planned leaf and retained
-    reproduction evidence
+    active ID survive restart, detach/reattach preserves PID, epoch, stable tab
+    IDs and PTY continuity, and settings restore after a real stop/restart
+  - [ ] on first failure retain exactly one privacy-bounded run bundle with the
+    original failure, step manifest, bounded diagnostics, and cleanup proof;
+    successful journeys remove their transient run directory
+  - [ ] always stop the isolated instance, restore external environment state,
+    and prove no test-owned PID, HWND, PTY reader/wait worker, script worker,
+    registration, temporary file, or temporary secret remains; any P0/P1
+    finding fails release qualification, while a P2/P3 finding requires an
+    owned planned leaf and retained reproduction evidence
   - [ ] the 2026-07-27 v0.1.3 baseline evidence is under
     `D:\tmp\agenterm-dogfood-v014\`: `01-first`, `02b-tree-corrected`,
     `03/04-composer`, `05/06/07-scroll`, `08/09/10-window-state`,

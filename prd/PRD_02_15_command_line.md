@@ -77,7 +77,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - `wait-ui [--active @id] [--focus surface] [-t target
       --tab-state running|dead] [--modal-kind KIND|none|closed]
       [--modal-target target] [--timeout-ms ms]`
-  - Safe scripting
+  - Shipped scripting baseline
     - `script api [--json]`
     - `script check FILE|- [--profile pure|observe]`
     - `script eval EXPRESSION [--profile pure|observe]`
@@ -108,16 +108,29 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - `get-settings`
     - `set-setting terminal.font-family FAMILY`
     - `set-setting terminal.font-size 8..36`
-  - Planned scripting
-    - `script run [OPTIONS] FILE.rhai|- [--] [ARGS...]`
-    - `script eval [OPTIONS] EXPRESSION`
-    - `script check FILE.rhai`
-    - `script api [--json]`
-    - `script cache clear|info`
-    - options include `--profile pure|observe|control`, repeated `--cap`,
-      scoped resources, `--timeout-ms`, and `--max-output`
-    - exit codes distinguish script failure, configuration/capability
-      error, timeout, and host/API failure
+  - v0.1.8 local runtime and named tasks
+    - [ ] `script run [OPTIONS] FILE.rhai|- [--] [ARGS...]`
+    - [ ] `script eval [OPTIONS] EXPRESSION [--] [ARGS...]`
+    - [ ] `script check [OPTIONS] FILE.rhai|-`
+    - [ ] `script api --json`
+    - [ ] `script task list [--manifest PATH] [--json]`
+    - [ ] `script task show TASK [--manifest PATH] [--json]`
+    - [ ] `script task run TASK [--manifest PATH] [--] [ARGS...]`
+    - [ ] ordinary `run` and `eval` default to `--profile local`;
+      `--profile pure|observe` remains an explicit specialized mode, and
+      `check` validates the selected profile without execution
+    - [ ] runtime options include explicit `--cwd`, bounded timeout/output/
+      task/stream overrides, and machine-readable result selection; local mode
+      does not require per-file, per-process, or per-network capability flags
+    - [ ] task commands discover one versioned declarative project manifest,
+      retain invalid entries in `list` with a typed degraded reason, and use
+      stable task IDs rather than display names as authority
+    - [ ] task listing, inspection, and invocation are P0; a future GUI command
+      palette is a P1 consumer of the same catalog and cannot define a second
+      registry
+    - [ ] exit codes and JSON envelopes distinguish script/runtime failure,
+      invalid manifest or arguments, unavailable/degraded API, resource limit,
+      cancellation/timeout, child-process result, and host/protocol failure
   - AI fleet launch
     - `new-agent [-d] [-n name] [--parent target] [--program executable]
       [-e NAME=VALUE] [--proxy URL] [--no-proxy hosts] [--yolo]

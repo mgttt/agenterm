@@ -336,10 +336,21 @@ track remains planned, but every declared dependency must still pass.
     bounded IPC transport, ConPTY runtime, and lossless wake signaling now
     have owned modules, while the remaining Win32 state-machine decomposition
     is intentionally deferred until a concrete change needs it
-- [ ] M5 next public product version: scope intentionally remains unassigned
-  until the v0.1.7 internal qualification and dogfood review; registry, named
-  commands, providers, Rhai control, and event handlers are candidates rather
-  than inherited commitments
+- [ ] M5 / v0.1.8 Programmable Daily Fleet public-ready candidate
+  - [ ] the professional-selection slice is owned by
+    [Terminal runtime](PRD_02_01_terminal_runtime.md): bounded selection
+    auto-scroll, word and visual-row gestures, complete cancellation, and its
+    public terminal matrix
+  - [ ] the integrated public dogfood and byte-identical candidate,
+    qualification, package, and non-publishing release rehearsal are owned by
+    [Delivery and quality](PRD_02_17_delivery_quality.md)
+  - [ ] every additional v0.1.8 product branch must first enter its own linked
+    PRD module with acceptance evidence and explicit non-goals; neither this
+    roadmap node nor the public version plan grants inherited implementation
+    scope
+  - [ ] public-ready does not authorize publication: creating or pushing the
+    `v0.1.8` tag and creating a public GitHub Release require explicit user
+    approval after the candidate and rehearsal gates pass
 - [ ] M6 later controlled agentic bridge: ship MCP read-only resources,
   then explicit control tools, Rhai control, brain/flow orchestration, and
   agent/token status without weakening close safety

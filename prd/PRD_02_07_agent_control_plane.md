@@ -60,6 +60,28 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     operation-catalog dispatch, alias, result, error, and emitted-event
     contract coverage remains planned
   - [x] public receipt replay proves same-ID same-payload replay and different-payload conflict without repeating a tab-note mutation, and proves retried `new-window`/`kill-window` create and close exactly one stable tab
+- v0.1.8 typed-operation readiness for Fleet consumers (P0 prerequisite)
+  - [ ] every public typed operation has one stable catalog identity,
+    classification, canonical aliases, parameter/result/error schema, target
+    resolution contract, availability, and version
+  - [ ] catalog-to-dispatch conformance proves each entry either reaches its
+    canonical implementation or returns a typed unsupported/degraded reason;
+    no consumer must infer availability from missing commands or help text
+  - [ ] every mutation exposed to another public consumer has resolved
+    server/tab identity, request ID, deadline, replay behavior, truthful
+    receipt outcome, before/after event position, and correlated post-state or
+    an explicit reason that the correlation is unavailable
+  - [ ] destructive operations preserve native confirmation and documented
+    noninteractive lifecycle semantics, remain-on-exit, explicit close,
+    tree-cycle safety, and exactly-once replay behavior
+  - [ ] generated or catalog-driven public black-box coverage checks dispatch,
+    aliases, target resolution, typed results/errors, deadlines, replay,
+    emitted events, unsupported degradation, and restart/target-close failure
+    without private GUI-state access
+  - [ ] this module owns catalog and control correctness. The local runtime,
+    profile, module/task, tool-schema, and script-facing mapping acceptance is
+    owned by [Rust host + Rhai scripting](PRD_02_10_rhai_scripting.md) and is
+    not duplicated here
 - Protocol
   - [x] loopback-only newline-delimited JSON IPC
   - [x] feature discovery through `protocol-info`
