@@ -218,3 +218,9 @@ rustfmt), `cargo-xwin`, LLVM `lld`/`llvm-lib`/`llvm-rc`, a `clang-cl` symlink
  rendering work must be validated on a real Windows host (that is what CI on
  `windows-latest` covers). Treat Linux here as a fast lint/build/unit-test and
  control-plane sanity loop, not a full end-to-end terminal environment.
+- **Native Linux client binaries** (`agenterm-cli`, `agenterm-mux`, `agenterm-script`)
+ build without cross-compilation: `cargo build --target x86_64-unknown-linux-gnu
+ --bin agenterm-cli --bin agenterm-mux --bin agenterm-script`. The GUI binary
+ (`agenterm`) is Windows-only; `agenterm-cli script` hosting is Windows-only for
+ now — on Linux invoke `agenterm-script` directly. Instance discovery uses
+ `~/.local/share/agenterm/instances/` (override with `AGENTERM_INSTANCE_DIR`).

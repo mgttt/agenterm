@@ -1,75 +1,8 @@
-use std::{
-    io::{BufRead as _, Read as _, Write as _},
-    sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-        mpsc::{self, Receiver, Sender, SyncSender},
-    },
-    thread,
-};
+use std::io::{BufRead as _, Read as _, Write as _};
 
 use anyhow::{Context as _, Result};
-use windows_sys::Win32::Foundation::HWND;
 
-use crate::{
-    IPC_TIMEOUT, ipc_socket_addr,
-    protocol::{IpcRequest, IpcResponse},
-    request_gui_wake,
-    wake_signal::WakeSignal,
-};
-
-const IPC_MAX_REQUEST_BYTES: u64 = 256 * 1024;
-const IPC_MAX_CONCURRENT_CONNECTIONS: usize = 32;
-const IPC_MAX_PENDING_REQUESTS: usize = 64;
-
-pub(super) struct IpcEnvelope {
-    pub(super) request: IpcRequest,
-    pub(super) respond_to: Sender<IpcResponse>,
-}
-
-pub(super) fn start_ipc_server(
-    window: HWND,
-    wake_signal: Arc<WakeSignal>,
-) -> Result<Receiver<IpcEnvelope>> {
-    let listener = std::net::TcpListener::bind(ipc_socket_addr()?)
-        .context("another AgenTerm server is already using the local IPC port")?;
-    let (sender, receiver) = mpsc::sync_channel(IPC_MAX_PENDING_REQUESTS);
-    let wake_window = window as isize;
-    thread::spawn(move || {
-        let active_connections = Arc::new(AtomicUsize::new(0));
-        for connection in listener.incoming() {
-            let Ok(connection) = connection else {
-                continue;
-            };
-            let admitted = active_connections
-                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |active| {
-                    (active < IPC_MAX_CONCURRENT_CONNECTIONS).then_some(active + 1)
-                })
-                .is_ok();
-            if !admitted {
-                continue;
-            }
-            let sender = sender.clone();
-            let wake_signal = Arc::clone(&wake_signal);
-            let permit = IpcConnectionPermit(Arc::clone(&active_connections));
-            thread::spawn(move || {
-                let _permit = permit;
-                handle_ipc_connection(connection, &sender, wake_window, &wake_signal);
-            });
-        }
-    });
-    Ok(receiver)
-}
-
-struct IpcConnectionPermit(Arc<AtomicUsize>);
-
-impl Drop for IpcConnectionPermit {
-    fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::Relaxed);
-    }
-}
-
-pub(super) fn read_bounded_ipc_line(
+pub(crate) fn read_bounded_ipc_line(
     reader: &mut impl std::io::BufRead,
     max_bytes: u64,
     label: &str,
@@ -91,17 +24,93 @@ pub(super) fn read_bounded_ipc_line(
     String::from_utf8(bytes).with_context(|| format!("{label} was not valid UTF-8"))
 }
 
-fn handle_ipc_connection(
-    connection: std::net::TcpStream,
-    sender: &SyncSender<IpcEnvelope>,
-    wake_window: isize,
-    wake_signal: &WakeSignal,
-) {
-    let _ = connection.set_read_timeout(Some(IPC_TIMEOUT));
-    let _ = connection.set_write_timeout(Some(IPC_TIMEOUT));
-    let mut reader = std::io::BufReader::new(connection);
-    let response =
-        match read_bounded_ipc_line(&mut reader, IPC_MAX_REQUEST_BYTES, "AgenTerm IPC request") {
+#[cfg(windows)]
+mod server {
+    use std::{
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+            mpsc::{self, Receiver, Sender, SyncSender},
+        },
+        thread,
+    };
+
+    use std::io::Write as _;
+
+    use anyhow::{Context as _, Result};
+
+    use crate::{
+        IPC_TIMEOUT, client, protocol::{IpcRequest, IpcResponse}, request_gui_wake,
+        wake_signal::WakeSignal,
+    };
+
+    use super::read_bounded_ipc_line;
+
+    const IPC_MAX_REQUEST_BYTES: u64 = 256 * 1024;
+    const IPC_MAX_CONCURRENT_CONNECTIONS: usize = 32;
+    const IPC_MAX_PENDING_REQUESTS: usize = 64;
+
+    pub(crate) struct IpcEnvelope {
+        pub(crate) request: IpcRequest,
+        pub(crate) respond_to: Sender<IpcResponse>,
+    }
+
+    pub(crate) fn start_ipc_server(
+        window: isize,
+        wake_signal: Arc<WakeSignal>,
+    ) -> Result<Receiver<IpcEnvelope>> {
+        let listener = std::net::TcpListener::bind(client::ipc_socket_addr()?)
+            .context("another AgenTerm server is already using the local IPC port")?;
+        let (sender, receiver) = mpsc::sync_channel(IPC_MAX_PENDING_REQUESTS);
+        let wake_window = window;
+        thread::spawn(move || {
+            let active_connections = Arc::new(AtomicUsize::new(0));
+            for connection in listener.incoming() {
+                let Ok(connection) = connection else {
+                    continue;
+                };
+                let admitted = active_connections
+                    .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |active| {
+                        (active < IPC_MAX_CONCURRENT_CONNECTIONS).then_some(active + 1)
+                    })
+                    .is_ok();
+                if !admitted {
+                    continue;
+                }
+                let sender = sender.clone();
+                let wake_signal = Arc::clone(&wake_signal);
+                let permit = IpcConnectionPermit(Arc::clone(&active_connections));
+                thread::spawn(move || {
+                    let _permit = permit;
+                    handle_ipc_connection(connection, &sender, wake_window, &wake_signal);
+                });
+            }
+        });
+        Ok(receiver)
+    }
+
+    struct IpcConnectionPermit(Arc<AtomicUsize>);
+
+    impl Drop for IpcConnectionPermit {
+        fn drop(&mut self) {
+            self.0.fetch_sub(1, Ordering::Relaxed);
+        }
+    }
+
+    fn handle_ipc_connection(
+        connection: std::net::TcpStream,
+        sender: &SyncSender<IpcEnvelope>,
+        wake_window: isize,
+        wake_signal: &WakeSignal,
+    ) {
+        let _ = connection.set_read_timeout(Some(IPC_TIMEOUT));
+        let _ = connection.set_write_timeout(Some(IPC_TIMEOUT));
+        let mut reader = std::io::BufReader::new(connection);
+        let response = match read_bounded_ipc_line(
+            &mut reader,
+            IPC_MAX_REQUEST_BYTES,
+            "AgenTerm IPC request",
+        ) {
             Ok(line) => match serde_json::from_str::<IpcRequest>(&line) {
                 Ok(request) => {
                     let (response_sender, response_receiver) = mpsc::channel();
@@ -131,13 +140,17 @@ fn handle_ipc_connection(
             },
             Err(error) => IpcResponse::failure(format!("{error:#}")),
         };
-    if let Ok(serialized) = serde_json::to_string(&response) {
-        let connection = reader.get_mut();
-        let _ = connection.write_all(serialized.as_bytes());
-        let _ = connection.write_all(b"\n");
-        let _ = connection.flush();
+        if let Ok(serialized) = serde_json::to_string(&response) {
+            let connection = reader.get_mut();
+            let _ = connection.write_all(serialized.as_bytes());
+            let _ = connection.write_all(b"\n");
+            let _ = connection.flush();
+        }
     }
 }
+
+#[cfg(windows)]
+pub(crate) use server::{IpcEnvelope, start_ipc_server};
 
 #[cfg(test)]
 mod tests {

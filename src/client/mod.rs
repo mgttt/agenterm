@@ -1,0 +1,2409 @@
+#[cfg(windows)]
+use windows_sys::Win32::{
+    UI::Shell::ShellExecuteW,
+    UI::WindowsAndMessaging::SW_SHOWNORMAL,
+};
+
+#[cfg(windows)]
+fn wide(value: &str) -> Vec<u16> {
+    value.encode_utf16().chain(Some(0)).collect()
+}
+
+use std::{
+    cell::RefCell,
+    env,
+    fs::OpenOptions,
+    io::{Read, Write},
+    sync::mpsc,
+    thread,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+};
+
+use anyhow::{Context as _, Result};
+
+use crate::{
+    build_identity::BuildIdentity,
+    commands::{
+        BACKSPACE_INPUT, COMMAND_CATALOG, COMMAND_CATALOG_SCHEMA_VERSION, MUX_COMMANDS, MuxStatus,
+        canonical_control_command, control_command_requests_help, control_command_usage, has_option,
+        last_positional, mux_command, option_value, parse_new_command, parse_tab_environment,
+        positional_values, screenshot_output_path, snapshot_modal_matches, supported_commands,
+        tmux_key_bytes, validate_control_command,
+    },
+    control_contract::{
+        Admission, ControlError, ControlReceipt, ControlRequest, ErrorCategory,
+        EventPosition as ControlEventPosition, OperationId, PayloadFingerprint, ReceiptOutcome,
+        ReplayWindow, RequestId, RequestIntent, ResolvedTarget, WaitCondition, WaitDescriptor,
+    },
+    event_journal::{EVENT_CATALOG, EVENT_CATALOG_SCHEMA_VERSION, EventJournal, EventKind},
+    instances::{discover_instances, instance_process_is_alive, prune_instance},
+    ipc_transport::read_bounded_ipc_line,
+    operations::{
+        OPERATION_CATALOG, OPERATION_CATALOG_SCHEMA_VERSION, OperationClass, OperationSpec,
+        UI_TABS_HIDE, UI_TABS_SET_WIDTH, UI_TABS_SHOW, UI_TABS_TOGGLE, operation_for_args,
+        validate_operation_args,
+    },
+    protocol::{IpcRequest, IpcResponse},
+    script_protocol::{
+        SCRIPT_API_VERSION, SCRIPT_ENVELOPE_VERSION, ScriptBrokerError, ScriptBrokerRequest,
+        ScriptBrokerResponse, ScriptBudgets, ScriptExitClass, ScriptInvocation, ScriptOperation,
+        ScriptProfile,
+    },
+    settings::{AppConfig, config_path, load_config, save_config},
+    tab_tree::{TabTreeNode, TabTreeRow, tree_rows, would_create_cycle},
+    terminal_observation::TerminalProcessState,
+    terminal_selection::{
+        AutoScrollDirection, AutoScrollStep, SelectionGesture, TerminalPoint, TerminalSelection,
+        autoscroll_step, terminal_selection_text, visible_row_selection, word_selection,
+    },
+    theme::{ThemeId, ThemePalette},
+    ui_bridge,
+    ui_geometry::{
+        COMPOSER_HEIGHT, PixelRect, TAB_HEIGHT, TERMINAL_SCROLLBAR_WIDTH, TerminalScrollbarGeometry,
+        TreeRowActionDensity, TreeRowMode, WorkspaceLayout, WorkspaceLayoutInput, reset_tabs_width,
+        scrollback_for_thumb_top, tabs_width_from_drag, terminal_scrollbar_geometry, tree_connector_x,
+        tree_row_at_y, tree_row_geometry_for_mode, workspace_layout,
+    },
+    upgrade_identity::UpgradeIdentity,
+    working_context::{
+        CwdSource, PROXY_MAX_BYTES, ProxyConfirmationMarker, ProxyState, cwd_command,
+        parse_proxy_editor, proxy_command_with_confirmation, validate_path,
+    },
+    workspace::{SavedTab, SavedWorkspace, load_workspace, save_workspace, workspace_path},
+};
+
+
+
+#[cfg(windows)]
+use crate::script_audit::{
+    AuditBudgets, AuditInvocation, AuditOutcome, AuditSourceKind, ScriptAuditSink,
+    source_fingerprint,
+};
+#[cfg(windows)]
+use crate::worker_supervisor::{SupervisorError, WorkerSupervisor};
+
+
+const IPC_TIMEOUT: Duration = Duration::from_secs(5);
+const IPC_DISCOVERY_TIMEOUT: Duration = Duration::from_millis(500);
+const IPC_AUTOSTART_TIMEOUT: Duration = Duration::from_secs(15);
+const IPC_AUTOSTART_POLL: Duration = Duration::from_millis(100);
+const IPC_MAX_RESPONSE_BYTES: u64 = 8 * 1024 * 1024;
+const CAPTURE_PUBLIC_MAX_BYTES: usize = 1024 * 1024;
+
+thread_local! {
+    static IPC_ADDRESS_OVERRIDE: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+
+pub(crate) fn no_activate_from_environment() -> bool {
+    no_activate_from_value(env::var_os("AGENTERM_NO_ACTIVATE").as_deref())
+}
+
+pub(crate) fn no_activate_from_value(value: Option<&std::ffi::OsStr>) -> bool {
+    value.is_some_and(|value| {
+        let value = value.to_string_lossy();
+        !value.is_empty() && value != "0" && !value.eq_ignore_ascii_case("false")
+    })
+}
+
+#[derive(Default)]
+struct CliControlOptions {
+    request_id: Option<String>,
+    deadline_ms: Option<u64>,
+    receipt_json: bool,
+}
+
+pub fn run_cli_entry() -> i32 {
+    let mut arguments: Vec<String> = env::args().skip(1).collect();
+    let mut control_options = CliControlOptions::default();
+    loop {
+        match arguments.first().map(String::as_str) {
+            Some("--address") => {
+                if arguments.len() < 2 {
+                    eprintln!("agenterm-cli --address requires HOST:PORT");
+                    return 2;
+                }
+                arguments.remove(0);
+                let address = arguments.remove(0);
+                if let Err(error) = parse_loopback_ipc_address(&address) {
+                    eprintln!("{error:#}");
+                    return 2;
+                }
+                IPC_ADDRESS_OVERRIDE.with(|override_address| {
+                    *override_address.borrow_mut() = Some(address);
+                });
+            }
+            Some("--request-id") => {
+                if arguments.len() < 2 {
+                    eprintln!("agenterm-cli --request-id requires an ID");
+                    return 2;
+                }
+                arguments.remove(0);
+                let value = arguments.remove(0);
+                if let Err(error) = RequestId::new(value.clone()) {
+                    eprintln!("{error}");
+                    return 2;
+                }
+                control_options.request_id = Some(value);
+            }
+            Some("--deadline-ms") => {
+                if arguments.len() < 2 {
+                    eprintln!("agenterm-cli --deadline-ms requires milliseconds");
+                    return 2;
+                }
+                arguments.remove(0);
+                let value = arguments.remove(0);
+                match value.parse::<u64>() {
+                    Ok(value) if (1..=60_000).contains(&value) => {
+                        control_options.deadline_ms = Some(value);
+                    }
+                    _ => {
+                        eprintln!("agenterm-cli --deadline-ms must be from 1 to 60000");
+                        return 2;
+                    }
+                }
+            }
+            Some("--receipt-json") => {
+                arguments.remove(0);
+                control_options.receipt_json = true;
+            }
+            _ => break,
+        }
+    }
+    if arguments
+        .first()
+        .is_some_and(|arg| arg == "-V" || arg == "--version")
+    {
+        println!("agenterm-cli {}", env!("CARGO_PKG_VERSION"));
+        return 0;
+    }
+    if arguments.is_empty()
+        || arguments
+            .first()
+            .is_some_and(|arg| arg == "-h" || arg == "--help")
+    {
+        print_help();
+        return 0;
+    }
+    if arguments
+        .first()
+        .is_some_and(|argument| argument.starts_with('-'))
+    {
+        eprintln!(
+            "unknown global option '{}'. To target an AgenTerm instance, use \
+             `agenterm-cli --address HOST:PORT COMMAND` or set AGENTERM_IPC_ADDRESS.",
+            arguments[0]
+        );
+        return 2;
+    }
+    run_cli(arguments, control_options)
+}
+
+pub fn run_mux_entry() -> i32 {
+    let mut arguments: Vec<String> = env::args().skip(1).collect();
+    if arguments
+        .first()
+        .is_some_and(|arg| arg == "-V" || arg == "--version")
+    {
+        println!(
+            "agenterm-mux {} (AgenTerm compatibility frontend)",
+            env!("CARGO_PKG_VERSION")
+        );
+        return 0;
+    }
+    if arguments.is_empty()
+        || arguments
+            .first()
+            .is_some_and(|arg| arg == "-h" || arg == "--help")
+    {
+        print_mux_help();
+        return 0;
+    }
+
+    let mut address = None;
+    let mut session = None;
+    loop {
+        match arguments.first().map(String::as_str) {
+            Some("--address") => {
+                if arguments.len() < 2 {
+                    eprintln!("agenterm-mux --address requires HOST:PORT");
+                    return 2;
+                }
+                arguments.remove(0);
+                let candidate = arguments.remove(0);
+                if let Err(error) = parse_loopback_ipc_address(&candidate) {
+                    eprintln!("{error:#}");
+                    return 2;
+                }
+                address = Some(candidate);
+            }
+            Some("--session") => {
+                if arguments.len() < 2 {
+                    eprintln!("agenterm-mux --session requires a session name");
+                    return 2;
+                }
+                arguments.remove(0);
+                session = Some(arguments.remove(0));
+            }
+            Some("-L" | "-S") => {
+                eprintln!(
+                    "agenterm-mux does not support tmux socket selection; use --address HOST:PORT"
+                );
+                return 2;
+            }
+            _ => break,
+        }
+    }
+    let Some(command) = arguments.first().cloned() else {
+        eprintln!("agenterm-mux requires a command");
+        return 2;
+    };
+
+    if command == "compatibility" {
+        print_mux_compatibility(arguments.iter().any(|argument| argument == "--json"));
+        return 0;
+    }
+    if command == "agenterm" {
+        arguments.remove(0);
+        if arguments.is_empty() {
+            eprintln!("agenterm-mux agenterm requires a native AgenTerm command");
+            return 2;
+        }
+    } else {
+        let Some(specification) = mux_command(&command) else {
+            eprintln!(
+                "{command} is not in the agenterm-mux compatibility surface; \
+                 use `agenterm-mux agenterm {command} ...` for native AgenTerm extensions"
+            );
+            return 2;
+        };
+        if let MuxStatus::Unsupported(reason) = specification.status {
+            eprintln!("{command} is unsupported: {reason}");
+            return 1;
+        }
+        if matches!(command.as_str(), "list-commands" | "lscm") {
+            print_mux_commands();
+            return 0;
+        }
+    }
+
+    if let Some(session) = session
+        && matches!(
+            arguments.first().map(String::as_str),
+            Some("attach" | "attach-session" | "has" | "has-session" | "kill-session")
+        )
+        && !has_option(&arguments, "-t")
+    {
+        arguments.extend(["-t".to_owned(), session]);
+    }
+    IPC_ADDRESS_OVERRIDE.with(|override_address| {
+        *override_address.borrow_mut() = address;
+    });
+    run_cli(arguments, CliControlOptions::default())
+}
+pub(crate) fn ipc_address() -> String {
+    if let Some(address) = IPC_ADDRESS_OVERRIDE.with(|value| value.borrow().clone()) {
+        return address;
+    }
+    if let Ok(address) = env::var("AGENTERM_IPC_ADDRESS")
+        && !address.trim().is_empty()
+    {
+        return address;
+    }
+    let user = env::var("USERNAME")
+        .or_else(|_| env::var("USER"))
+        .unwrap_or_else(|_| "default".to_owned());
+    let hash = user.bytes().fold(2_166_136_261_u32, |hash, byte| {
+        (hash ^ u32::from(byte)).wrapping_mul(16_777_619)
+    });
+    format!("127.0.0.1:{}", 42_000 + hash % 10_000)
+}
+
+fn has_explicit_ipc_address() -> bool {
+    IPC_ADDRESS_OVERRIDE.with(|value| value.borrow().is_some())
+        || env::var("AGENTERM_IPC_ADDRESS").is_ok_and(|address| !address.trim().is_empty())
+}
+
+pub(crate) fn parse_loopback_ipc_address(address: &str) -> Result<std::net::SocketAddr> {
+    if address.contains('\0') {
+        anyhow::bail!("invalid AgenTerm IPC address: NUL is not allowed");
+    }
+    let socket: std::net::SocketAddr = address
+        .parse()
+        .with_context(|| format!("invalid AgenTerm IPC address: {address}"))?;
+    if !socket.ip().is_loopback() {
+        anyhow::bail!(
+            "AgenTerm IPC address must use a loopback IP (127.0.0.0/8 or ::1): {address}"
+        );
+    }
+    Ok(socket)
+}
+
+pub(crate) fn ipc_socket_addr() -> Result<std::net::SocketAddr> {
+    parse_loopback_ipc_address(&ipc_address())
+}
+
+pub(crate) fn unix_time_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .min(u128::from(u64::MAX)) as u64
+}
+
+fn current_upgrade_identity() -> UpgradeIdentity {
+    let build = BuildIdentity::current();
+    let known =
+        |value: &str| (value != "unknown" && !value.trim().is_empty()).then(|| value.to_owned());
+    UpgradeIdentity {
+        protocol_version: Some(1),
+        version: Some(env!("CARGO_PKG_VERSION").to_owned()),
+        git_commit: known(build.git_commit),
+        profile: known(build.profile),
+        cargo_lock_sha256: known(build.cargo_lock_sha256),
+        artifact_manifest_sha256: known(build.artifact_manifest_sha256),
+    }
+}
+
+pub(crate) fn control_request_identity(args: &[String]) -> Result<(OperationId, RequestIntent)> {
+    if let Some(operation) = operation_for_args(args).map_err(anyhow::Error::msg)? {
+        let intent = if operation.class == OperationClass::Observe {
+            RequestIntent::Query
+        } else {
+            RequestIntent::Mutation
+        };
+        return Ok((
+            OperationId::new(operation.id).map_err(anyhow::Error::msg)?,
+            intent,
+        ));
+    }
+    let command = args.first().map(String::as_str).unwrap_or("unknown");
+    let intent = if matches!(
+        canonical_control_command(command),
+        "active-window"
+            | "capture-pane"
+            | "display-message"
+            | "dump-cells"
+            | "get-settings"
+            | "has-session"
+            | "inspect"
+            | "list-panes"
+            | "list-sessions"
+            | "list-tab-tree"
+            | "list-windows"
+            | "read-events"
+            | "show-composer"
+            | "show-options"
+            | "show-tab-note"
+            | "show-tab-parent"
+            | "workspace-info"
+    ) {
+        RequestIntent::Query
+    } else {
+        RequestIntent::Mutation
+    };
+    let identity = format!(
+        "command.{}",
+        canonical_control_command(command).replace('-', ".")
+    );
+    Ok((
+        OperationId::new(identity).map_err(anyhow::Error::msg)?,
+        intent,
+    ))
+}
+
+pub(crate) fn control_payload_fingerprint(args: &[String]) -> Result<PayloadFingerprint> {
+    Ok(PayloadFingerprint::from_bytes(&serde_json::to_vec(args)?))
+}
+
+pub(crate) fn error_category_from_wire(category: &str) -> ErrorCategory {
+    match category {
+        "validation" => ErrorCategory::Validation,
+        "conflict" => ErrorCategory::Conflict,
+        "not_found" => ErrorCategory::NotFound,
+        "precondition" => ErrorCategory::Precondition,
+        "availability" => ErrorCategory::Availability,
+        "timeout" => ErrorCategory::Timeout,
+        "policy" => ErrorCategory::Policy,
+        "unsupported" => ErrorCategory::Unsupported,
+        _ => ErrorCategory::Internal,
+    }
+}
+
+fn build_control_request(
+    args: &[String],
+    request_id: Option<String>,
+    deadline_ms: u64,
+) -> Result<ControlRequest> {
+    static NEXT_REQUEST_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let request_id = request_id.unwrap_or_else(|| {
+        format!(
+            "client:{}:{}:{}",
+            std::process::id(),
+            unix_time_ms(),
+            NEXT_REQUEST_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        )
+    });
+    let (operation_id, intent) = control_request_identity(args)?;
+    Ok(ControlRequest::new(
+        RequestId::new(request_id).map_err(anyhow::Error::msg)?,
+        operation_id,
+        control_payload_fingerprint(args)?,
+        intent,
+        Some(unix_time_ms().saturating_add(deadline_ms)),
+    ))
+}
+
+pub(crate) fn set_ipc_address_override(address: Option<String>) {
+    IPC_ADDRESS_OVERRIDE.with(|value| *value.borrow_mut() = address);
+}
+
+pub(crate) fn send_ipc_request(args: Vec<String>) -> Result<IpcResponse> {
+    let control = build_control_request(&args, None, IPC_TIMEOUT.as_millis() as u64)?;
+    send_ipc_request_to_with_timeout(&ipc_address(), args, Some(control), IPC_TIMEOUT)
+}
+
+fn send_control_request(args: Vec<String>, control: ControlRequest) -> Result<IpcResponse> {
+    send_ipc_request_to_with_timeout(&ipc_address(), args, Some(control), IPC_TIMEOUT)
+}
+
+fn send_ipc_request_to_timeout(
+    address: &str,
+    args: Vec<String>,
+    timeout: Duration,
+) -> Result<IpcResponse> {
+    let control = build_control_request(&args, None, timeout.as_millis() as u64)?;
+    send_ipc_request_to_with_timeout(address, args, Some(control), timeout)
+}
+
+fn send_ipc_request_to_with_timeout(
+    address: &str,
+    args: Vec<String>,
+    control: Option<ControlRequest>,
+    timeout: Duration,
+) -> Result<IpcResponse> {
+    let socket = parse_loopback_ipc_address(address)?;
+    let deadline = Instant::now() + timeout;
+    let remaining = || {
+        let duration = deadline.saturating_duration_since(Instant::now());
+        if duration.is_zero() {
+            anyhow::bail!("AgenTerm IPC request timed out");
+        }
+        Ok(duration)
+    };
+    let connect_timeout = timeout
+        .min(Duration::from_millis(100))
+        .max(Duration::from_millis(1));
+    let mut connection = std::net::TcpStream::connect_timeout(&socket, connect_timeout)
+        .context("AgenTerm server is not running")?;
+    connection.set_write_timeout(Some(remaining()?))?;
+    connection.write_all(serde_json::to_string(&IpcRequest { args, control })?.as_bytes())?;
+    connection.set_write_timeout(Some(remaining()?))?;
+    connection.write_all(b"\n")?;
+    connection.set_write_timeout(Some(remaining()?))?;
+    connection.flush()?;
+    connection.set_read_timeout(Some(remaining()?))?;
+    let mut reader = std::io::BufReader::new(connection);
+    let response =
+        read_bounded_ipc_line(&mut reader, IPC_MAX_RESPONSE_BYTES, "AgenTerm IPC response")?;
+    serde_json::from_str(&response).context("invalid response from AgenTerm server")
+}
+
+fn run_list_instances(arguments: &[String]) -> i32 {
+    let json = arguments.iter().any(|argument| argument == "--json");
+    let prune = arguments.iter().any(|argument| argument == "--prune");
+    let instances = match discover_instances() {
+        Ok(instances) => instances,
+        Err(error) => {
+            eprintln!("failed to discover AgenTerm instances: {error:#}");
+            return 1;
+        }
+    };
+    let mut views = Vec::new();
+    let staged_identity = current_upgrade_identity();
+    for instance in instances {
+        if !instance_process_is_alive(instance.record.pid) {
+            if let Err(error) = prune_instance(&instance) {
+                eprintln!("{error:#}");
+                return 1;
+            }
+            continue;
+        }
+        let response = send_ipc_request_to_timeout(
+            &instance.record.address,
+            vec!["ui-snapshot".to_owned()],
+            IPC_DISCOVERY_TIMEOUT,
+        );
+        let (status, snapshot) = match response {
+            Ok(response) if response.ok => (
+                "running",
+                serde_json::from_str::<serde_json::Value>(&response.output).ok(),
+            ),
+            Ok(_) => ("running", None),
+            Err(_) => ("unreachable", None),
+        };
+        if prune && status == "unreachable" {
+            if let Err(error) = prune_instance(&instance) {
+                eprintln!("{error:#}");
+                return 1;
+            }
+            continue;
+        }
+        let tab_count = snapshot
+            .as_ref()
+            .and_then(|value| value["tabs"].as_array())
+            .map_or(0, Vec::len);
+        let active_tab = snapshot
+            .as_ref()
+            .and_then(|value| value["focus"]["window_id"].as_str())
+            .unwrap_or("-");
+        let window_title = snapshot
+            .as_ref()
+            .and_then(|value| value["window"]["title"].as_str())
+            .unwrap_or("");
+        let window_visible = snapshot
+            .as_ref()
+            .and_then(|value| value["window"]["visible"].as_bool());
+        let window_detached = snapshot
+            .as_ref()
+            .and_then(|value| value["window"]["detached"].as_bool());
+        let window_state = snapshot
+            .as_ref()
+            .and_then(|value| value["window"]["state"].as_str());
+        let modal_kind = snapshot
+            .as_ref()
+            .and_then(|value| value["modal"]["kind"].as_str());
+        let event_epoch = snapshot
+            .as_ref()
+            .and_then(|value| value["event_position"]["epoch"].as_str());
+        let event_sequence = snapshot
+            .as_ref()
+            .and_then(|value| value["event_position"]["sequence"].as_u64());
+        let running_identity = instance.record.upgrade_identity.clone().unwrap_or_default();
+        let upgrade = running_identity.compare_staged(&staged_identity);
+        let upgrade_explanation = upgrade.explanation();
+        views.push(serde_json::json!({
+            "pid": instance.record.pid,
+            "address": instance.record.address,
+            "version": instance.record.version,
+            "status": status,
+            "tab_count": tab_count,
+            "active_tab": active_tab,
+            "session": instance.record.session,
+            "workspace_path": instance.record.workspace_path,
+            "started_at_unix_ms": instance.record.started_at_unix_ms,
+            "window_title": window_title,
+            "window_visible": window_visible,
+            "window_detached": window_detached,
+            "window_state": window_state,
+            "modal_kind": modal_kind,
+            "event_epoch": event_epoch,
+            "event_sequence": event_sequence,
+            "running_identity": running_identity,
+            "staged_identity": staged_identity,
+            "upgrade": upgrade,
+            "upgrade_explanation": upgrade_explanation,
+        }));
+    }
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&views).unwrap_or_else(|_| "[]".to_owned())
+        );
+    } else if views.is_empty() {
+        println!("No registered AgenTerm instances.");
+    } else {
+        println!(
+            "PID\tADDRESS\tVERSION\tSTATUS\tUPGRADE\tWINDOW\tTABS\tACTIVE\tSESSION\tWORKSPACE"
+        );
+        for view in views {
+            let window = match (
+                view["window_visible"].as_bool(),
+                view["window_detached"].as_bool(),
+                view["window_state"].as_str(),
+            ) {
+                (Some(false), Some(true), _) => "detached",
+                (Some(true), _, Some(state)) => state,
+                (Some(false), _, _) => "hidden",
+                _ => "-",
+            };
+            println!(
+                "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                view["pid"].as_u64().unwrap_or_default(),
+                view["address"].as_str().unwrap_or_default(),
+                view["version"].as_str().unwrap_or_default(),
+                view["status"].as_str().unwrap_or_default(),
+                view["upgrade"]["status"].as_str().unwrap_or("unknown"),
+                window,
+                view["tab_count"].as_u64().unwrap_or_default(),
+                view["active_tab"].as_str().unwrap_or("-"),
+                view["session"].as_str().unwrap_or_default(),
+                view["workspace_path"].as_str().unwrap_or_default(),
+            );
+        }
+    }
+    0
+}
+
+fn run_cli(arguments: Vec<String>, control_options: CliControlOptions) -> i32 {
+    let mut arguments = arguments;
+    if control_command_requests_help(&arguments) {
+        let command = arguments.first().map(String::as_str).unwrap_or_default();
+        if let Some(usage) = control_command_usage(command) {
+            println!("Usage: {usage}");
+            return 0;
+        }
+    }
+    if let Err(error) = validate_control_command(&arguments) {
+        eprintln!("{error}");
+        return 2;
+    }
+    if arguments
+        .first()
+        .is_some_and(|command| command == "set-composer")
+    {
+        let content = if let Some(position) = arguments
+            .iter()
+            .take_while(|argument| argument.as_str() != "--")
+            .position(|argument| argument == "--stdin")
+        {
+            arguments.remove(position);
+            let mut content = String::new();
+            if let Err(error) = std::io::stdin().read_to_string(&mut content) {
+                eprintln!("failed to read composer content from stdin: {error}");
+                return 1;
+            }
+            Some(content)
+        } else if let Some(position) = arguments
+            .iter()
+            .take_while(|argument| argument.as_str() != "--")
+            .position(|argument| argument == "--file")
+        {
+            if position + 1 >= arguments.len() {
+                eprintln!("set-composer --file requires a path");
+                return 1;
+            }
+            let path = arguments.remove(position + 1);
+            arguments.remove(position);
+            match std::fs::read_to_string(&path) {
+                Ok(content) => Some(content),
+                Err(error) => {
+                    eprintln!("failed to read composer file {path}: {error}");
+                    return 1;
+                }
+            }
+        } else {
+            None
+        };
+        if let Some(content) = content {
+            arguments.push("--".to_owned());
+            arguments.push(content);
+        }
+    }
+    if arguments
+        .first()
+        .is_some_and(|command| command == "ui-action")
+        && arguments
+            .get(1)
+            .is_some_and(|action| matches!(action.as_str(), "proxy-prepare" | "proxy-send-now"))
+        && let Some(position) = arguments.iter().position(|argument| argument == "--stdin")
+    {
+        arguments.remove(position);
+        let mut content = String::new();
+        if let Err(error) = std::io::stdin()
+            .take(PROXY_MAX_BYTES as u64 + 1)
+            .read_to_string(&mut content)
+        {
+            eprintln!("failed to read proxy values from stdin: {error}");
+            return 1;
+        }
+        if content.len() > PROXY_MAX_BYTES {
+            eprintln!("proxy input exceeds {PROXY_MAX_BYTES} bytes");
+            return 2;
+        }
+        arguments.push("--proxy-input".to_owned());
+        arguments.push(content);
+    }
+    if let Some(command) = arguments.first_mut() {
+        let canonical = canonical_control_command(command);
+        if canonical != command {
+            *command = canonical.to_owned();
+        }
+    }
+    if let Err(error) = validate_operation_args(&arguments) {
+        eprintln!("{error}");
+        return 2;
+    }
+    let command = arguments.first().map(String::as_str).unwrap_or_default();
+    if matches!(command, "list-commands" | "lscm") {
+        print!("{}", supported_commands());
+        return 0;
+    }
+    if command == "protocol-info" && !has_option(&arguments, "--running") {
+        println!("{}", protocol_info_json("client_binary"));
+        return 0;
+    }
+    if matches!(command, "list-instances" | "server-list") {
+        return run_list_instances(&arguments);
+    }
+    if command == "script" {
+        return run_script_command(&arguments);
+    }
+    if !has_explicit_ipc_address() {
+        match select_implicit_control_instance() {
+            Ok(address) => IPC_ADDRESS_OVERRIDE.with(|value| {
+                *value.borrow_mut() = Some(address);
+            }),
+            Err(error) => {
+                eprintln!("{error}");
+                return 2;
+            }
+        }
+    }
+    if command == "wait-ui" {
+        return run_wait_ui(&arguments);
+    }
+    if matches!(command, "wait-pane" | "expect-pane") {
+        return run_wait_pane(&arguments);
+    }
+    if command == "wait-events" {
+        return run_wait_events(&arguments);
+    }
+    let may_start_server = matches!(
+        command,
+        "new-session"
+            | "new"
+            | "new-agent"
+            | "new-window"
+            | "neww"
+            | "attach-session"
+            | "attach"
+            | "start-server"
+    );
+    let control = match build_control_request(
+        &arguments,
+        control_options.request_id,
+        control_options.deadline_ms.unwrap_or(5_000),
+    ) {
+        Ok(control) => control,
+        Err(error) => {
+            eprintln!("{error:#}");
+            return 2;
+        }
+    };
+    let mut response = send_control_request(arguments.clone(), control.clone());
+    #[cfg(windows)]
+    if response.is_err()
+        && may_start_server
+        && let Ok(executable) = gui_executable_path()
+    {
+        let executable = wide(&executable.to_string_lossy());
+        let operation = wide("open");
+        let parameters = if no_activate_from_environment() {
+            wide(&format!("--no-activate --address {}", ipc_address()))
+        } else {
+            wide(&format!("--address {}", ipc_address()))
+        };
+        let launched = unsafe {
+            ShellExecuteW(
+                std::ptr::null_mut(),
+                operation.as_ptr(),
+                executable.as_ptr(),
+                parameters.as_ptr(),
+                std::ptr::null(),
+                SW_SHOWNORMAL,
+            )
+        } as isize;
+        if launched <= 32 {
+            eprintln!("failed to launch AgenTerm GUI through Windows Shell ({launched})");
+        }
+        let deadline = Instant::now() + IPC_AUTOSTART_TIMEOUT;
+        while Instant::now() < deadline {
+            thread::sleep(
+                IPC_AUTOSTART_POLL.min(deadline.saturating_duration_since(Instant::now())),
+            );
+            response = send_control_request(arguments.clone(), control.clone());
+            if response.is_ok() {
+                break;
+            }
+        }
+    }
+    match response {
+        Ok(response) if response.ok => {
+            if control_options.receipt_json {
+                match response.receipt {
+                    Some(receipt) => {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&receipt).unwrap_or_default()
+                        );
+                        return 0;
+                    }
+                    None => {
+                        eprintln!("AgenTerm server did not return a control receipt");
+                        return 1;
+                    }
+                }
+            }
+            if !response.output.is_empty() {
+                print!("{}", response.output);
+                if !response.output.ends_with('\n') {
+                    println!();
+                }
+            }
+            0
+        }
+        Ok(response) => {
+            if control_options.receipt_json {
+                if let Some(receipt) = response.receipt {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&receipt).unwrap_or_default()
+                    );
+                } else {
+                    eprintln!(
+                        "{}",
+                        serde_json::json!({
+                            "error": response.error,
+                            "error_code": response.error_code,
+                            "error_category": response.error_category,
+                            "retryable": response.retryable,
+                        })
+                    );
+                }
+            } else {
+                eprintln!("{}", response.error);
+            }
+            1
+        }
+        Err(error) => {
+            eprintln!("{error:#}");
+            1
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn run_script_command(_arguments: &[String]) -> i32 {
+    eprintln!(
+        "agenterm-cli script hosting is not yet available on this platform; \
+         invoke agenterm-script directly"
+    );
+    2
+}
+
+#[cfg(windows)]
+fn run_script_command(arguments: &[String]) -> i32 {
+    let Some(operation_name) = arguments.get(1).map(String::as_str) else {
+        eprintln!("script requires api, check, eval, or run");
+        return 2;
+    };
+    let operation = match operation_name {
+        "api" => ScriptOperation::Api,
+        "check" => ScriptOperation::Check,
+        "eval" => ScriptOperation::Eval,
+        "run" => ScriptOperation::Run,
+        other => {
+            eprintln!("unknown script operation: {other}");
+            return 2;
+        }
+    };
+    let profile = match option_value(arguments, "--profile").unwrap_or("local") {
+        "pure" => ScriptProfile::Pure,
+        "observe" => ScriptProfile::Observe,
+        "local" => ScriptProfile::Local,
+        other => {
+            eprintln!("unknown script profile: {other}");
+            return 2;
+        }
+    };
+    let mut budgets = ScriptBudgets::default();
+    if let Some(value) = option_value(arguments, "--timeout-ms") {
+        match value.parse::<u64>() {
+            Ok(value) if (1..=10_000).contains(&value) => budgets.wall_time_ms = value,
+            _ => {
+                eprintln!("script --timeout-ms must be from 1 to 10000");
+                return 2;
+            }
+        }
+    }
+    if let Some(value) = option_value(arguments, "--max-operations") {
+        match value.parse::<u64>() {
+            Ok(value) if (1..=10_000_000).contains(&value) => budgets.operations = value,
+            _ => {
+                eprintln!("script --max-operations must be from 1 to 10000000");
+                return 2;
+            }
+        }
+    }
+
+    let operand = script_operand(arguments);
+    let (source_label, source) = match operation {
+        ScriptOperation::Api => ("api".to_owned(), String::new()),
+        ScriptOperation::Eval => {
+            let Some(expression) = operand else {
+                eprintln!("script eval requires an expression");
+                return 2;
+            };
+            ("eval".to_owned(), expression.to_owned())
+        }
+        ScriptOperation::Check | ScriptOperation::Run => {
+            let Some(path) = operand else {
+                eprintln!("script {operation_name} requires a file path or -");
+                return 2;
+            };
+            if path == "-" {
+                match read_script_source(std::io::stdin().lock(), budgets.source_bytes) {
+                    Ok(source) => ("stdin".to_owned(), source),
+                    Err((code, error)) => {
+                        eprintln!("failed to read script from stdin: {error}");
+                        return code;
+                    }
+                }
+            } else {
+                if std::fs::metadata(path)
+                    .is_ok_and(|metadata| metadata.len() > budgets.source_bytes as u64)
+                {
+                    eprintln!(
+                        "script source exceeds the {} byte limit",
+                        budgets.source_bytes
+                    );
+                    return 3;
+                }
+                let file = match std::fs::File::open(path) {
+                    Ok(file) => file,
+                    Err(error) => {
+                        eprintln!("failed to read script {path}: {error}");
+                        return 1;
+                    }
+                };
+                match read_script_source(file, budgets.source_bytes) {
+                    Ok(source) => (path.to_owned(), source),
+                    Err((code, error)) => {
+                        eprintln!("failed to read script {path}: {error}");
+                        return code;
+                    }
+                }
+            }
+        }
+    };
+    if source.len() > budgets.source_bytes {
+        eprintln!(
+            "script source exceeds the {} byte limit",
+            budgets.source_bytes
+        );
+        return 3;
+    }
+
+    let needs_observation = profile == ScriptProfile::Observe
+        && matches!(operation, ScriptOperation::Eval | ScriptOperation::Run);
+    let observation = if needs_observation {
+        if !has_explicit_ipc_address() {
+            match select_implicit_control_instance() {
+                Ok(address) => IPC_ADDRESS_OVERRIDE.with(|value| {
+                    *value.borrow_mut() = Some(address);
+                }),
+                Err(error) => {
+                    eprintln!("{error}");
+                    return 2;
+                }
+            }
+        }
+        None
+    } else {
+        None
+    };
+    let invocation_id = format!(
+        "{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    );
+    let delimiter = arguments.iter().position(|argument| argument == "--");
+    let script_arguments = delimiter
+        .and_then(|position| arguments.get(position + 1..))
+        .unwrap_or_default()
+        .to_vec();
+    let audit_source_kind = match operation {
+        ScriptOperation::Api => AuditSourceKind::Api,
+        ScriptOperation::Eval => AuditSourceKind::Eval,
+        ScriptOperation::Check | ScriptOperation::Run if source_label == "stdin" => {
+            AuditSourceKind::Stdin
+        }
+        ScriptOperation::Check | ScriptOperation::Run => AuditSourceKind::File,
+    };
+    let profile_name = profile.as_str();
+    let capabilities = match profile {
+        ScriptProfile::Pure => Vec::new(),
+        ScriptProfile::Observe => vec!["observe".to_owned()],
+        ScriptProfile::Local => vec!["local".to_owned()],
+    };
+    let mut audit_invocation = AuditInvocation {
+        invocation_id: invocation_id.clone(),
+        source_fingerprint: source_fingerprint(&source),
+        source_kind: audit_source_kind,
+        api_version: SCRIPT_API_VERSION,
+        operation: operation_name.to_owned(),
+        requested_profile: profile_name.to_owned(),
+        effective_profile: profile_name.to_owned(),
+        requested_capabilities: capabilities.clone(),
+        effective_capabilities: capabilities,
+        requested_budgets: audit_budgets(&budgets),
+        effective_budgets: audit_budgets(&budgets),
+        broker_operation_ids: Vec::new(),
+    };
+    let audit_sink = match ScriptAuditSink::discover() {
+        Ok(sink) => sink,
+        Err(error) => return report_audit_error(error),
+    };
+    let audit_started = Instant::now();
+    let invocation = ScriptInvocation {
+        envelope_version: SCRIPT_ENVELOPE_VERSION,
+        invocation_id,
+        api_version: SCRIPT_API_VERSION,
+        operation,
+        profile,
+        source_label,
+        source,
+        arguments: script_arguments,
+        budgets,
+        observation,
+    };
+    let executable = match std::env::current_exe().ok().and_then(|path| {
+        path.parent()
+            .map(|parent| parent.join("agenterm-script.exe"))
+    }) {
+        Some(path) if path.is_file() => path,
+        _ => {
+            let outcome = AuditOutcome {
+                duration_ms: audit_duration_ms(audit_started),
+                result_class: "configuration".to_owned(),
+                failure_code: Some("host_worker_missing".to_owned()),
+                denied: true,
+                cancelled: false,
+                timed_out: false,
+                crashed: false,
+            };
+            if let Err(error) = audit_sink.append(&audit_invocation, &outcome) {
+                return report_audit_error(error);
+            }
+            eprintln!(
+                "agenterm-script.exe is not installed next to agenterm-cli.exe; \
+                 scripting is an optional component"
+            );
+            return 2;
+        }
+    };
+    let expected_invocation_id = invocation.invocation_id.clone();
+    let deadline = Duration::from_millis(invocation.budgets.wall_time_ms);
+    let broker_budgets = invocation.budgets.clone();
+    let (result, cancel_requested) = match WorkerSupervisor::invoke(
+        &executable,
+        invocation,
+        deadline,
+        Duration::from_millis(150),
+        |request, remaining| handle_script_broker(request, &broker_budgets, remaining),
+    ) {
+        Ok(outcome) => {
+            let _worker_pid = outcome.worker_pid;
+            audit_invocation.broker_operation_ids = outcome.broker_operation_ids;
+            (outcome.result, outcome.cancel_requested)
+        }
+        Err(error) => {
+            let audit_outcome = audit_outcome_for_supervisor_error(&error, audit_started);
+            if let Err(audit_error) = audit_sink.append(&audit_invocation, &audit_outcome) {
+                return report_audit_error(audit_error);
+            }
+            return report_supervisor_error(error);
+        }
+    };
+    if result.envelope_version != SCRIPT_ENVELOPE_VERSION
+        || result.api_version != SCRIPT_API_VERSION
+        || result.invocation_id != expected_invocation_id
+        || result.operation != Some(operation)
+        || result.profile != Some(profile)
+    {
+        let audit_outcome = AuditOutcome {
+            duration_ms: audit_duration_ms(audit_started),
+            result_class: "host".to_owned(),
+            failure_code: Some("host_worker_protocol".to_owned()),
+            denied: true,
+            cancelled: cancel_requested,
+            timed_out: false,
+            crashed: false,
+        };
+        if let Err(error) = audit_sink.append(&audit_invocation, &audit_outcome) {
+            return report_audit_error(error);
+        }
+        eprintln!(
+            "agenterm-script.exe returned a mismatched protocol result \
+             (envelope/API/invocation/operation/profile identity)"
+        );
+        return 1;
+    }
+    let result_consistent = if result.ok {
+        result.exit_class == ScriptExitClass::Success && result.failure.is_none()
+    } else {
+        result.exit_class != ScriptExitClass::Success && result.failure.is_some()
+    };
+    if !result_consistent {
+        let audit_outcome = AuditOutcome {
+            duration_ms: audit_duration_ms(audit_started),
+            result_class: "host".to_owned(),
+            failure_code: Some("host_worker_protocol".to_owned()),
+            denied: true,
+            cancelled: cancel_requested,
+            timed_out: false,
+            crashed: false,
+        };
+        if let Err(error) = audit_sink.append(&audit_invocation, &audit_outcome) {
+            return report_audit_error(error);
+        }
+        eprintln!("agenterm-script.exe returned an inconsistent result envelope");
+        return 1;
+    }
+    let audit_outcome = audit_outcome_for_result(&result, audit_started, cancel_requested);
+    if let Err(error) = audit_sink.append(&audit_invocation, &audit_outcome) {
+        return report_audit_error(error);
+    }
+    if arguments.iter().any(|argument| argument == "--json") {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&result).unwrap_or_else(|_| "{}".to_owned())
+        );
+    } else if result.ok {
+        if !result.stdout.is_empty() {
+            print!("{}", result.stdout);
+            if !result.stdout.ends_with('\n') {
+                println!();
+            }
+        }
+        if let Some(value) = result.value {
+            if let Some(value) = value.as_str() {
+                println!("{value}");
+            } else {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&value).unwrap_or_else(|_| value.to_string())
+                );
+            }
+        } else if operation == ScriptOperation::Check {
+            println!("OK");
+        }
+    } else if let Some(failure) = &result.failure {
+        eprintln!(
+            "{}",
+            serde_json::json!({
+                "code": failure.code,
+                "message": failure.message,
+                "invocation_id": result.invocation_id,
+                "exit_class": result.exit_class,
+            })
+        );
+    }
+    if result.ok {
+        0
+    } else {
+        match result.exit_class.as_str() {
+            "configuration" => 2,
+            "limit" => 3,
+            _ => 1,
+        }
+    }
+}
+
+#[cfg(windows)]
+fn report_supervisor_error(error: SupervisorError) -> i32 {
+    let (code, message, exit_class, exit_code) = match error {
+        SupervisorError::ConcurrencyLimit => (
+            "host_concurrency_limit",
+            "script worker concurrency limit reached".to_owned(),
+            "configuration",
+            2,
+        ),
+        SupervisorError::HardTimeout { worker_pid } => (
+            "host_hard_timeout",
+            format!("script worker {worker_pid} exceeded the host deadline and was terminated"),
+            "limit",
+            3,
+        ),
+        SupervisorError::WorkerCrash {
+            worker_pid,
+            exit_code: worker_exit,
+        } => (
+            "host_worker_crash",
+            format!("script worker {worker_pid} exited before a valid result ({worker_exit:?})"),
+            "host",
+            1,
+        ),
+        SupervisorError::Spawn(message) => ("host_worker_spawn", message, "host", 1),
+        SupervisorError::Transport(message) => ("host_worker_transport", message, "host", 1),
+        SupervisorError::Protocol(message) => ("host_worker_protocol", message, "host", 1),
+    };
+    eprintln!(
+        "{}",
+        serde_json::json!({
+            "code": code,
+            "message": message,
+            "exit_class": exit_class,
+        })
+    );
+    exit_code
+}
+
+fn script_broker_error(code: &str, message: impl Into<String>) -> ScriptBrokerResponse {
+    ScriptBrokerResponse {
+        ok: false,
+        value: None,
+        error: Some(ScriptBrokerError {
+            code: code.to_owned(),
+            message: message.into(),
+            details: None,
+        }),
+    }
+}
+
+fn script_broker_ipc(
+    arguments: Vec<String>,
+    timeout: Duration,
+) -> Result<String, ScriptBrokerResponse> {
+    match send_ipc_request_to_timeout(&ipc_address(), arguments, timeout) {
+        Ok(response) if response.ok => Ok(response.output),
+        Ok(response) => {
+            let code = match response.error_code.as_str() {
+                "server_restart" | "journal_gap" | "future_sequence" => {
+                    response.error_code.as_str()
+                }
+                _ => "broker_host_error",
+            };
+            Err(script_broker_error(code, response.error))
+        }
+        Err(error) => Err(script_broker_error(
+            "broker_transport",
+            format!("{error:#}"),
+        )),
+    }
+}
+
+#[cfg(windows)]
+fn handle_script_broker(
+    request: &ScriptBrokerRequest,
+    budgets: &ScriptBudgets,
+    remaining: Duration,
+) -> ScriptBrokerResponse {
+    let started = Instant::now();
+    let parse_json = |output: String| {
+        serde_json::from_str::<serde_json::Value>(&output)
+            .map_err(|error| script_broker_error("broker_invalid_response", error.to_string()))
+    };
+    let value = match request.operation.as_str() {
+        "workspace.info" => script_broker_ipc(vec!["workspace-info".to_owned()], remaining)
+            .and_then(parse_json)
+            .and_then(|mut workspace| {
+                let request_remaining = remaining.saturating_sub(started.elapsed());
+                if request_remaining.is_zero() {
+                    return Err(script_broker_error(
+                        "broker_transport",
+                        "workspace observation exceeded the host deadline",
+                    ));
+                }
+                let snapshot = script_broker_ipc(vec!["ui-snapshot".to_owned()], request_remaining)
+                    .and_then(parse_json)?;
+                workspace["event_position"] = snapshot
+                    .get("event_position")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null);
+                Ok(workspace)
+            }),
+        "ui.snapshot" | "tabs.list" | "tabs.active" => {
+            script_broker_ipc(vec!["ui-snapshot".to_owned()], remaining)
+                .and_then(parse_json)
+                .map(|snapshot| match request.operation.as_str() {
+                    "tabs.list" => snapshot
+                        .get("tabs")
+                        .cloned()
+                        .unwrap_or_else(|| serde_json::json!([])),
+                    "tabs.active" => snapshot
+                        .get("tabs")
+                        .and_then(serde_json::Value::as_array)
+                        .and_then(|tabs| {
+                            tabs.iter().find(|tab| {
+                                tab.get("active").and_then(serde_json::Value::as_bool) == Some(true)
+                            })
+                        })
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Null),
+                    _ => snapshot,
+                })
+        }
+        "pane.capture" => {
+            let tab = request
+                .arguments
+                .get("tab")
+                .and_then(serde_json::Value::as_str);
+            let requested = request
+                .arguments
+                .get("max_bytes")
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|value| usize::try_from(value).ok());
+            match (tab, requested) {
+                (Some(tab), Some(requested))
+                    if tab.starts_with('@') && (1..=budgets.capture_bytes).contains(&requested) =>
+                {
+                    script_broker_ipc(
+                        vec![
+                            "capture-pane".to_owned(),
+                            "-p".to_owned(),
+                            "-t".to_owned(),
+                            tab.to_owned(),
+                            "--max-bytes".to_owned(),
+                            requested.to_string(),
+                            "--json".to_owned(),
+                        ],
+                        remaining,
+                    )
+                    .and_then(parse_json)
+                }
+                _ => Err(script_broker_error(
+                    "broker_invalid_arguments",
+                    "pane.capture requires stable tab @ID and max_bytes within the capture budget",
+                )),
+            }
+        }
+        "events.read" => {
+            let epoch = request
+                .arguments
+                .get("epoch")
+                .and_then(serde_json::Value::as_str);
+            let after = request
+                .arguments
+                .get("after")
+                .and_then(serde_json::Value::as_u64);
+            let limit = request
+                .arguments
+                .get("limit")
+                .and_then(serde_json::Value::as_u64);
+            match (epoch, after, limit) {
+                (Some(epoch), Some(after), Some(limit))
+                    if limit > 0 && limit <= budgets.event_items as u64 =>
+                {
+                    script_broker_ipc(
+                        vec![
+                            "read-events".to_owned(),
+                            "--epoch".to_owned(),
+                            epoch.to_owned(),
+                            "--after".to_owned(),
+                            after.to_string(),
+                            "--limit".to_owned(),
+                            limit.to_string(),
+                        ],
+                        remaining,
+                    )
+                    .and_then(parse_json)
+                }
+                _ => Err(script_broker_error(
+                    "broker_invalid_arguments",
+                    "events.read requires epoch, nonnegative after, and a bounded positive limit",
+                )),
+            }
+        }
+        "events.wait" => script_broker_wait(&request.arguments, budgets, remaining),
+        _ => Err(script_broker_error(
+            "broker_operation_denied",
+            format!(
+                "operation {} is not available to observe scripts",
+                request.operation
+            ),
+        )),
+    };
+    match value {
+        Ok(value) => ScriptBrokerResponse {
+            ok: true,
+            value: Some(value),
+            error: None,
+        },
+        Err(response) => response,
+    }
+}
+
+fn script_broker_wait(
+    arguments: &serde_json::Value,
+    budgets: &ScriptBudgets,
+    remaining: Duration,
+) -> Result<serde_json::Value, ScriptBrokerResponse> {
+    let epoch = arguments
+        .get("epoch")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| script_broker_error("broker_invalid_arguments", "epoch is required"))?;
+    let mut after = arguments
+        .get("after")
+        .and_then(serde_json::Value::as_u64)
+        .ok_or_else(|| script_broker_error("broker_invalid_arguments", "after is required"))?;
+    let kind = arguments
+        .get("kind")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| script_broker_error("broker_invalid_arguments", "kind is required"))?;
+    let timeout_ms = arguments
+        .get("timeout_ms")
+        .and_then(serde_json::Value::as_u64)
+        .ok_or_else(|| script_broker_error("broker_invalid_arguments", "timeout_ms is required"))?;
+    if timeout_ms == 0 || timeout_ms > budgets.wait_time_ms {
+        return Err(script_broker_error(
+            "broker_invalid_arguments",
+            "timeout_ms exceeds the wait budget",
+        ));
+    }
+    let deadline = Instant::now()
+        + Duration::from_millis(timeout_ms)
+            .min(remaining.saturating_sub(Duration::from_millis(10)));
+    loop {
+        let ipc_remaining = deadline.saturating_duration_since(Instant::now());
+        if ipc_remaining.is_zero() {
+            return Err(script_broker_error(
+                "event_wait_timeout",
+                format!("no {kind} event arrived within {timeout_ms} ms"),
+            ));
+        }
+        let output = match script_broker_ipc(
+            vec![
+                "read-events".to_owned(),
+                "--epoch".to_owned(),
+                epoch.to_owned(),
+                "--after".to_owned(),
+                after.to_string(),
+                "--limit".to_owned(),
+                budgets.event_items.min(256).to_string(),
+            ],
+            ipc_remaining,
+        ) {
+            Ok(output) => output,
+            Err(response)
+                if response
+                    .error
+                    .as_ref()
+                    .is_some_and(|error| error.code == "broker_transport")
+                    && Instant::now() >= deadline =>
+            {
+                return Err(script_broker_error(
+                    "event_wait_timeout",
+                    format!("no {kind} event arrived within {timeout_ms} ms"),
+                ));
+            }
+            Err(response) => return Err(response),
+        };
+        let batch: serde_json::Value = serde_json::from_str(&output)
+            .map_err(|error| script_broker_error("broker_invalid_response", error.to_string()))?;
+        if let Some(events) = batch.get("events").and_then(serde_json::Value::as_array) {
+            for event in events {
+                if let Some(sequence) = event.get("sequence").and_then(serde_json::Value::as_u64) {
+                    after = after.max(sequence);
+                }
+                if event.get("kind").and_then(serde_json::Value::as_str) == Some(kind) {
+                    return Ok(event.clone());
+                }
+            }
+        }
+        if Instant::now() >= deadline {
+            return Err(script_broker_error(
+                "event_wait_timeout",
+                format!("no {kind} event arrived within {timeout_ms} ms"),
+            ));
+        }
+        thread::sleep(
+            Duration::from_millis(20).min(deadline.saturating_duration_since(Instant::now())),
+        );
+    }
+}
+
+#[cfg(windows)]
+fn audit_budgets(budgets: &ScriptBudgets) -> AuditBudgets {
+    AuditBudgets {
+        source_bytes: budgets.source_bytes,
+        operations: budgets.operations,
+        call_depth: budgets.call_depth,
+        expression_depth: budgets.expression_depth,
+        collection_items: budgets.collection_items,
+        string_bytes: budgets.string_bytes,
+        output_bytes: budgets.output_bytes,
+        wall_time_ms: budgets.wall_time_ms,
+        broker_requests: budgets.broker_requests,
+        broker_return_bytes: budgets.broker_return_bytes,
+        capture_bytes: budgets.capture_bytes,
+        event_items: budgets.event_items,
+        wait_time_ms: budgets.wait_time_ms,
+    }
+}
+
+#[cfg(windows)]
+fn audit_duration_ms(started: Instant) -> u64 {
+    started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
+}
+
+#[cfg(windows)]
+fn audit_outcome_for_result(
+    result: &crate::script_protocol::ScriptResult,
+    started: Instant,
+    cancel_requested: bool,
+) -> AuditOutcome {
+    let failure_code = result.failure.as_ref().map(|failure| failure.code.clone());
+    let denied = result.exit_class == ScriptExitClass::Configuration
+        || failure_code.as_deref().is_some_and(|code| {
+            matches!(
+                code,
+                "script_api_unknown"
+                    | "script_api_unavailable"
+                    | "configuration_observation"
+                    | "protocol_broker_unavailable"
+            )
+        });
+    let timed_out = failure_code.as_deref() == Some("limit_wall_time");
+    AuditOutcome {
+        duration_ms: audit_duration_ms(started),
+        result_class: result.exit_class.as_str().to_owned(),
+        failure_code,
+        denied,
+        cancelled: cancel_requested,
+        timed_out,
+        crashed: false,
+    }
+}
+
+#[cfg(windows)]
+fn audit_outcome_for_supervisor_error(error: &SupervisorError, started: Instant) -> AuditOutcome {
+    let (result_class, failure_code, denied, cancelled, timed_out, crashed) = match error {
+        SupervisorError::ConcurrencyLimit => (
+            "configuration",
+            "host_concurrency_limit",
+            true,
+            false,
+            false,
+            false,
+        ),
+        SupervisorError::HardTimeout { .. } => {
+            ("limit", "host_hard_timeout", false, true, true, false)
+        }
+        SupervisorError::WorkerCrash { .. } => {
+            ("host", "host_worker_crash", false, false, false, true)
+        }
+        SupervisorError::Spawn(_) => ("host", "host_worker_spawn", true, false, false, false),
+        SupervisorError::Transport(_) => {
+            ("host", "host_worker_transport", false, false, false, false)
+        }
+        SupervisorError::Protocol(_) => ("host", "host_worker_protocol", true, false, false, false),
+    };
+    AuditOutcome {
+        duration_ms: audit_duration_ms(started),
+        result_class: result_class.to_owned(),
+        failure_code: Some(failure_code.to_owned()),
+        denied,
+        cancelled,
+        timed_out,
+        crashed,
+    }
+}
+
+#[cfg(windows)]
+fn report_audit_error(message: String) -> i32 {
+    eprintln!(
+        "{}",
+        serde_json::json!({
+            "code": "host_audit_write",
+            "message": message,
+            "exit_class": "host",
+        })
+    );
+    1
+}
+
+fn read_script_source(
+    reader: impl Read,
+    limit: usize,
+) -> std::result::Result<String, (i32, String)> {
+    let mut bytes = Vec::with_capacity(limit.min(64 * 1024).saturating_add(1));
+    reader
+        .take(limit.saturating_add(1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|error| (1, error.to_string()))?;
+    if bytes.len() > limit {
+        return Err((3, format!("script source exceeds the {limit} byte limit")));
+    }
+    String::from_utf8(bytes).map_err(|error| (1, format!("script source is not UTF-8: {error}")))
+}
+
+fn script_operand(arguments: &[String]) -> Option<&str> {
+    let mut position = 2;
+    while position < arguments.len() {
+        match arguments[position].as_str() {
+            "--" => return None,
+            "--profile" | "--timeout-ms" | "--max-operations" => position += 2,
+            "--json" => position += 1,
+            value => return Some(value),
+        }
+    }
+    None
+}
+
+fn select_implicit_control_instance() -> std::result::Result<String, String> {
+    let instances = discover_instances().map_err(|error| {
+        instance_selection_error(
+            "instance_discovery_failed",
+            "AgenTerm instance discovery failed",
+            &format!("{error:#}"),
+            Vec::new(),
+        )
+    })?;
+    let mut candidates = Vec::new();
+    let mut healthy = Vec::new();
+    for instance in instances {
+        let running = send_ipc_request_to_timeout(
+            &instance.record.address,
+            vec!["protocol-info".to_owned()],
+            IPC_DISCOVERY_TIMEOUT,
+        )
+        .is_ok_and(|response| response.ok);
+        if running {
+            healthy.push(instance.record.address.clone());
+        }
+        candidates.push(serde_json::json!({
+            "pid": instance.record.pid,
+            "address": instance.record.address,
+            "session": instance.record.session,
+            "workspace_path": instance.record.workspace_path,
+            "status": if running { "running" } else { "unreachable" },
+        }));
+    }
+    match healthy.as_slice() {
+        [address] => Ok(address.clone()),
+        [] => Err(instance_selection_error(
+            "no_healthy_instance",
+            "No healthy AgenTerm instance is available",
+            "Start agenterm.exe, or use `agenterm-cli --address HOST:PORT COMMAND` to target and \
+             autostart a specific local server. Inspect registrations with \
+             `agenterm-cli list-instances --json`.",
+            candidates,
+        )),
+        _ => Err(instance_selection_error(
+            "ambiguous_instance",
+            "More than one healthy AgenTerm instance is available",
+            "Choose one with `agenterm-cli --address HOST:PORT COMMAND` or set \
+             AGENTERM_IPC_ADDRESS. Inspect details with `agenterm-cli list-instances --json`.",
+            candidates,
+        )),
+    }
+}
+
+fn instance_selection_error(
+    code: &str,
+    message: &str,
+    hint: &str,
+    candidates: Vec<serde_json::Value>,
+) -> String {
+    serde_json::to_string_pretty(&serde_json::json!({
+        "error": {
+            "code": code,
+            "message": message,
+            "hint": hint,
+            "candidates": candidates,
+        }
+    }))
+    .unwrap_or_else(|_| format!("{message}: {hint}"))
+}
+
+fn run_wait_events(arguments: &[String]) -> i32 {
+    let Some(epoch) = option_value(arguments, "--epoch") else {
+        eprintln!("wait-events requires --epoch");
+        return 2;
+    };
+    let Some(mut after) =
+        option_value(arguments, "--after").and_then(|value| value.parse::<u64>().ok())
+    else {
+        eprintln!("wait-events requires a numeric --after sequence");
+        return 2;
+    };
+    let Some(kind) = option_value(arguments, "--kind") else {
+        eprintln!("wait-events requires --kind");
+        return 2;
+    };
+    let tab_id = option_value(arguments, "--tab")
+        .map(|value| value.trim_start_matches('@'))
+        .and_then(|value| value.parse::<u64>().ok());
+    if option_value(arguments, "--tab").is_some() && tab_id.is_none() {
+        eprintln!("wait-events --tab must be a stable @ID");
+        return 2;
+    }
+    let timeout_ms = option_value(arguments, "--timeout-ms")
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(5_000)
+        .min(60_000);
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    loop {
+        let response = send_ipc_request(vec![
+            "read-events".to_owned(),
+            "--epoch".to_owned(),
+            epoch.to_owned(),
+            "--after".to_owned(),
+            after.to_string(),
+            "--limit".to_owned(),
+            "256".to_owned(),
+        ]);
+        let response = match response {
+            Ok(response) if response.ok => response,
+            Ok(response) => {
+                eprintln!("{}", response.error);
+                return 1;
+            }
+            Err(error) => {
+                eprintln!("{error:#}");
+                return 1;
+            }
+        };
+        let Ok(batch) = serde_json::from_str::<serde_json::Value>(&response.output) else {
+            eprintln!("wait-events received an invalid event batch");
+            return 1;
+        };
+        if let Some(events) = batch["events"].as_array() {
+            for event in events {
+                if let Some(sequence) = event["sequence"].as_u64() {
+                    after = after.max(sequence);
+                }
+                let kind_matches = event["kind"].as_str() == Some(kind);
+                let tab_matches =
+                    tab_id.is_none_or(|requested| event["tab_id"].as_u64() == Some(requested));
+                if kind_matches && tab_matches {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(event).unwrap_or_else(|_| event.to_string())
+                    );
+                    return 0;
+                }
+            }
+        }
+        if Instant::now() >= deadline {
+            eprintln!(
+                "{}",
+                serde_json::json!({
+                    "code": "event_wait_timeout",
+                    "epoch": epoch,
+                    "after": after,
+                    "kind": kind,
+                    "tab_id": tab_id,
+                    "timeout_ms": timeout_ms,
+                })
+            );
+            return 1;
+        }
+        thread::sleep(
+            Duration::from_millis(20).min(deadline.saturating_duration_since(Instant::now())),
+        );
+    }
+}
+
+fn resolve_stable_wait_target(selector: &str) -> Result<String> {
+    let response = send_ipc_request(vec![
+        "display-message".to_owned(),
+        "-p".to_owned(),
+        "-t".to_owned(),
+        selector.to_owned(),
+        "#{window_id}".to_owned(),
+    ])?;
+    if !response.ok || !response.output.trim().starts_with('@') {
+        anyhow::bail!(
+            "wait target could not be resolved to a stable tab ID: {}",
+            response.error
+        );
+    }
+    Ok(response.output.trim().to_owned())
+}
+
+fn fetch_ui_wait_snapshot() -> Result<(String, serde_json::Value)> {
+    let response = send_ipc_request(vec!["ui-snapshot".to_owned()])?;
+    if !response.ok {
+        anyhow::bail!("{}", response.error);
+    }
+    let snapshot = serde_json::from_str::<serde_json::Value>(&response.output)
+        .context("wait-ui received an invalid UI snapshot")?;
+    Ok((response.output, snapshot))
+}
+
+fn run_wait_ui(arguments: &[String]) -> i32 {
+    let timeout_ms = match option_value(arguments, "--timeout-ms") {
+        Some(value) => match value.parse::<u64>() {
+            Ok(value) => value,
+            Err(_) => {
+                eprintln!("wait-ui --timeout-ms must be a non-negative integer");
+                return 2;
+            }
+        },
+        None => 10_000,
+    };
+    let deadline = std::time::Instant::now() + Duration::from_millis(timeout_ms);
+    let requested_active = option_value(arguments, "--active");
+    let expected_focus = option_value(arguments, "--focus");
+    let expected_state = option_value(arguments, "--tab-state");
+    let expected_proxy_state = option_value(arguments, "--proxy-state");
+    let expected_window_state = option_value(arguments, "--window-state");
+    let expected_modal_kind = option_value(arguments, "--modal-kind");
+    let requested_modal_target = option_value(arguments, "--modal-target");
+    let expected_client_width =
+        option_value(arguments, "--client-width").and_then(|value| value.parse::<i64>().ok());
+    let expected_client_height =
+        option_value(arguments, "--client-height").and_then(|value| value.parse::<i64>().ok());
+    let requested_target = option_value(arguments, "-t");
+    if expected_proxy_state.is_some() && requested_target.is_none() {
+        eprintln!("wait-ui --proxy-state requires -t target");
+        return 2;
+    }
+    if expected_modal_kind.is_some_and(|kind| matches!(kind, "none" | "closed"))
+        && requested_modal_target.is_some()
+    {
+        eprintln!("wait-ui --modal-target cannot be combined with --modal-kind none or closed");
+        return 2;
+    }
+    if requested_active.is_none()
+        && expected_focus.is_none()
+        && expected_state.is_none()
+        && expected_proxy_state.is_none()
+        && expected_window_state.is_none()
+        && expected_client_width.is_none()
+        && expected_client_height.is_none()
+        && expected_modal_kind.is_none()
+        && requested_modal_target.is_none()
+    {
+        eprintln!(
+            "wait-ui requires an active, focus, tab-state, proxy-state, window-state, client-size, \
+             modal-kind, or modal-target condition"
+        );
+        return 1;
+    }
+    let expected_active = match requested_active.map(resolve_stable_wait_target).transpose() {
+        Ok(value) => value,
+        Err(error) => {
+            eprintln!("{error:#}");
+            return 1;
+        }
+    };
+    let target = match requested_target.map(resolve_stable_wait_target).transpose() {
+        Ok(value) => value,
+        Err(error) => {
+            eprintln!("{error:#}");
+            return 1;
+        }
+    };
+    let expected_modal_target = match requested_modal_target
+        .map(resolve_stable_wait_target)
+        .transpose()
+    {
+        Ok(value) => value,
+        Err(error) => {
+            eprintln!("{error:#}");
+            return 1;
+        }
+    };
+    let (baseline_output, baseline_snapshot) = match fetch_ui_wait_snapshot() {
+        Ok(value) => value,
+        Err(error) => {
+            eprintln!("{error:#}");
+            return 1;
+        }
+    };
+    let baseline_position = baseline_snapshot["event_position"].clone();
+    let baseline_epoch = baseline_snapshot["event_position"]["epoch"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
+    if baseline_epoch.is_empty() {
+        eprintln!("wait-ui baseline did not contain a server epoch");
+        return 1;
+    }
+    let mut pending_snapshot = Some((baseline_output, baseline_snapshot));
+    loop {
+        match pending_snapshot
+            .take()
+            .map(Ok)
+            .unwrap_or_else(fetch_ui_wait_snapshot)
+        {
+            Ok((output, snapshot)) => {
+                let current_epoch = snapshot["event_position"]["epoch"]
+                    .as_str()
+                    .unwrap_or_default();
+                if current_epoch != baseline_epoch {
+                    eprintln!(
+                        "{}",
+                        serde_json::json!({
+                            "code": "server_restart",
+                            "expected_epoch": baseline_epoch,
+                            "current_epoch": current_epoch,
+                            "baseline_position": baseline_position,
+                            "last_state": snapshot,
+                        })
+                    );
+                    return 1;
+                }
+                let active_matches = expected_active.as_deref().is_none_or(|expected| {
+                    snapshot["focus"]["window_id"].as_str() == Some(expected)
+                });
+                let focus_matches = expected_focus
+                    .is_none_or(|expected| snapshot["focus"]["surface"].as_str() == Some(expected));
+                let state_matches = expected_state.is_none_or(|expected| {
+                    snapshot["tabs"].as_array().is_some_and(|tabs| {
+                        tabs.iter().any(|tab| {
+                            let target_matches = target
+                                .as_deref()
+                                .is_none_or(|selector| tab["id"].as_str() == Some(selector));
+                            target_matches && tab["state"].as_str() == Some(expected)
+                        })
+                    })
+                });
+                let proxy_state_matches = expected_proxy_state.is_none_or(|expected| {
+                    snapshot["tabs"].as_array().is_some_and(|tabs| {
+                        tabs.iter().any(|tab| {
+                            let target_matches = target
+                                .as_deref()
+                                .is_some_and(|selector| tab["id"].as_str() == Some(selector));
+                            target_matches
+                                && tab["working_context"]["proxy"]["application_state"].as_str()
+                                    == Some(expected)
+                        })
+                    })
+                });
+                let window_state_matches = expected_window_state
+                    .is_none_or(|expected| snapshot["window"]["state"].as_str() == Some(expected));
+                let width_matches = expected_client_width.is_none_or(|expected| {
+                    snapshot["window"]["client_width"].as_i64() == Some(expected)
+                });
+                let height_matches = expected_client_height.is_none_or(|expected| {
+                    snapshot["window"]["client_height"].as_i64() == Some(expected)
+                });
+                let modal_matches = snapshot_modal_matches(
+                    &snapshot,
+                    expected_modal_kind,
+                    expected_modal_target.as_deref(),
+                );
+                if active_matches
+                    && focus_matches
+                    && state_matches
+                    && proxy_state_matches
+                    && window_state_matches
+                    && width_matches
+                    && height_matches
+                    && modal_matches
+                {
+                    println!("{output}");
+                    return 0;
+                }
+                let resolved_target_closed = target.as_deref().is_some_and(|resolved| {
+                    !snapshot["tabs"].as_array().is_some_and(|tabs| {
+                        tabs.iter().any(|tab| tab["id"].as_str() == Some(resolved))
+                    })
+                });
+                if resolved_target_closed {
+                    eprintln!(
+                        "{}",
+                        serde_json::json!({
+                            "code": "ui_wait_target_closed",
+                            "target": target,
+                            "baseline_position": baseline_position,
+                            "last_state": snapshot,
+                        })
+                    );
+                    return 1;
+                }
+                if std::time::Instant::now() >= deadline {
+                    eprintln!(
+                        "{}",
+                        serde_json::json!({
+                            "code": "ui_wait_timeout",
+                            "timeout_ms": timeout_ms,
+                            "expected": {
+                                "active": expected_active,
+                                "focus": expected_focus,
+                                "tab_state": expected_state,
+                                "proxy_state": expected_proxy_state,
+                                "target": target,
+                                "window_state": expected_window_state,
+                                "client_width": expected_client_width,
+                                "client_height": expected_client_height,
+                                "modal_kind": expected_modal_kind,
+                                "modal_target": expected_modal_target,
+                            },
+                            "baseline_position": baseline_position,
+                            "last_state": snapshot,
+                        })
+                    );
+                    return 1;
+                }
+            }
+            Err(error) => {
+                eprintln!("{error:#}");
+                return 1;
+            }
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn run_wait_pane(arguments: &[String]) -> i32 {
+    let requested_target = option_value(arguments, "-t").map(str::to_owned);
+    let timeout_ms = option_value(arguments, "--timeout-ms")
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(5_000);
+    let contains = option_value(arguments, "--contains")
+        .map(str::to_owned)
+        .or_else(|| {
+            (arguments
+                .first()
+                .is_some_and(|value| value == "expect-pane"))
+            .then(|| last_positional(arguments, &["-t", "--timeout-ms"]))
+            .flatten()
+            .map(str::to_owned)
+        });
+    let wait_dead = arguments.iter().any(|argument| argument == "--dead");
+    let wait_submit = arguments
+        .iter()
+        .any(|argument| argument == "--submit-complete");
+    let wait_finalized = arguments.iter().any(|argument| argument == "--finalized");
+    if contains.is_none() && !wait_dead && !wait_submit && !wait_finalized {
+        eprintln!(
+            "usage: wait-pane [-t target] \
+             (--contains text | --dead | --submit-complete | --finalized) \
+             [--timeout-ms ms]"
+        );
+        return 2;
+    }
+    let mut resolve_request = vec![
+        "display-message".to_owned(),
+        "-p".to_owned(),
+        "#{window_id}".to_owned(),
+    ];
+    if let Some(target) = &requested_target {
+        resolve_request.extend(["-t".to_owned(), target.clone()]);
+    }
+    let target = match send_ipc_request(resolve_request) {
+        Ok(response) if response.ok && response.output.trim().starts_with('@') => {
+            response.output.trim().to_owned()
+        }
+        Ok(response) => {
+            eprintln!("{}", response.error);
+            return 1;
+        }
+        Err(error) => {
+            eprintln!("{error:#}");
+            return 1;
+        }
+    };
+    let deadline = std::time::Instant::now() + Duration::from_millis(timeout_ms);
+    loop {
+        let mut matched = true;
+        if wait_dead {
+            let mut request = vec![
+                "display-message".to_owned(),
+                "-p".to_owned(),
+                "#{pane_dead}".to_owned(),
+            ];
+            request.extend(["-t".to_owned(), target.clone()]);
+            matched &= send_ipc_request(request)
+                .is_ok_and(|response| response.ok && response.output.trim() == "1");
+        }
+        if let Some(needle) = &contains {
+            let mut request = vec!["capture-pane".to_owned(), "-p".to_owned()];
+            request.extend(["-t".to_owned(), target.clone()]);
+            matched &= send_ipc_request(request)
+                .is_ok_and(|response| response.ok && response.output.contains(needle));
+        }
+        if wait_submit || wait_finalized {
+            let request = vec!["inspect".to_owned(), "-t".to_owned(), target.clone()];
+            matched &= send_ipc_request(request).is_ok_and(|response| {
+                response.ok
+                    && serde_json::from_str::<serde_json::Value>(&response.output)
+                        .ok()
+                        .and_then(|snapshot| snapshot["windows"].as_array().cloned())
+                        .is_some_and(|windows| {
+                            !windows.is_empty()
+                                && windows.iter().all(|window| {
+                                    (!wait_submit
+                                        || !window["submit_pending"].as_bool().unwrap_or(true))
+                                        && (!wait_finalized
+                                            || window["finalized"].as_bool().unwrap_or(false))
+                                })
+                        })
+            });
+        }
+        if matched {
+            return 0;
+        }
+        if std::time::Instant::now() >= deadline {
+            eprintln!(
+                "{}",
+                serde_json::json!({
+                    "code": "pane_wait_timeout",
+                    "timeout_ms": timeout_ms,
+                    "target": target,
+                    "conditions": {
+                        "contains": contains,
+                        "dead": wait_dead,
+                        "submit_complete": wait_submit,
+                        "finalized": wait_finalized,
+                    }
+                })
+            );
+            return 1;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
+#[cfg(windows)]
+fn gui_executable_path() -> Result<std::path::PathBuf> {
+    let current =
+        env::current_exe().context("could not locate the running agenterm-cli executable")?;
+    let gui = current.with_file_name("agenterm.exe");
+    if !gui.is_file() {
+        anyhow::bail!(
+            "AgenTerm GUI executable was not found beside agenterm-cli: {}",
+            gui.display()
+        );
+    }
+    Ok(gui)
+}
+
+fn print_help() {
+    println!(
+        "\
+AgenTerm CLI - control the native tabbed terminal
+
+Usage:
+  agenterm-cli [--address HOST:PORT] [--request-id ID] [--deadline-ms MS]
+                [--receipt-json] command [args...]
+  agenterm-cli list-instances [--json] [--prune]
+  agenterm-cli server-list [--json] [--prune]
+  agenterm-cli new-session [-s name]
+  agenterm-cli new-window [-d] [-n name] [--parent target] [-F format] [-e NAME=VALUE] [command [args...]]
+  agenterm-cli new-agent [-d] [-n name] [--parent target] [--proxy URL] [--yolo] [-- [codex args...]]
+  agenterm-cli list-windows [-F format]
+  agenterm-cli list-tab-tree [-F format]
+  agenterm-cli select-window -t target
+  agenterm-cli rename-window [-t target] name
+  agenterm-cli kill-window -t target
+  agenterm-cli send-keys [-t target] key...
+  agenterm-cli scroll-pane [-t target] up|down|page-up|page-down|top|bottom [rows]
+  agenterm-cli read-events --epoch EPOCH --after SEQUENCE [--limit COUNT]
+  agenterm-cli wait-events --epoch EPOCH --after SEQUENCE --kind KIND [--tab @ID] [--timeout-ms MS]
+  agenterm-cli capture-pane -p [-t target]
+  agenterm-cli capture-pane --raw-escaped [-t target]
+  agenterm-cli dump-cells [-t target] [-r row]
+  agenterm-cli active-window [-F format]
+  agenterm-cli inspect [-t target]
+  agenterm-cli screenshot [-o file.png]
+  agenterm-cli screenshot-pane [-t target] [-o file.png]
+  agenterm-cli show-composer [-t target]
+  agenterm-cli set-composer [-t target] text
+  agenterm-cli set-composer [-t target] --stdin|--file path
+  agenterm-cli send-composer [-t target]
+  agenterm-cli set-tab-note [-t target] text
+  agenterm-cli show-tab-note [-t target]
+  agenterm-cli set-tab-parent -t child --parent parent|root
+  agenterm-cli show-tab-parent [-t target]
+  agenterm-cli save-workspace
+  agenterm-cli workspace-info
+  agenterm-cli shutdown
+  agenterm-cli get-settings
+  agenterm-cli set-setting terminal.font-family FAMILY
+  agenterm-cli set-setting terminal.font-size 8..36
+  agenterm-cli send-mouse [-t target] -x col -y row [--button left] [--action press]
+  agenterm-cli ui-snapshot
+  agenterm-cli ui-action new-tab|new-child|edit-tab|toggle-tree|tabs-show|tabs-hide|tabs-toggle|toggle-tabs|tabs-set-width|select-tab|close-tab|close-window|keep-server-running|stop-server-and-exit|confirm|cancel|composer-send|copy-selection|open-cwd-editor|cwd-prepare|cwd-prepare-append|cwd-prepare-replace|cwd-send-now|open-proxy-editor|proxy-toggle-visibility|proxy-reveal-credentials|proxy-prepare|proxy-send-now
+  agenterm-cli ui-action tabs-set-width --width 180..480
+  agenterm-cli ui-action proxy-prepare|proxy-send-now [-t target] --stdin
+  agenterm-cli focus terminal|composer|tabs [-t target]
+  agenterm-cli wait-pane [-t target] (--contains text|--dead|--submit-complete) [--timeout-ms ms]
+  agenterm-cli wait-ui [--active @id] [--focus surface] [-t target --tab-state state|--proxy-state state] [--modal-kind KIND|none|closed] [--modal-target target]
+  agenterm-cli protocol-info
+  agenterm-cli list-panes [-F format]
+  agenterm-cli list-sessions | has-session | kill-server | server-kill"
+    );
+}
+
+fn print_mux_help() {
+    println!(
+        "\
+agenterm-mux - tmux/RMUX compatibility frontend for AgenTerm
+
+Usage:
+  agenterm-mux [--address HOST:PORT] [--session NAME] COMMAND [ARGS...]
+  agenterm-mux compatibility [--json]
+  agenterm-mux agenterm COMMAND [ARGS...]
+
+The GUI remains the only server and PTY owner. One AgenTerm tab maps to one
+window and one pane. Unsupported tmux operations fail explicitly. Native
+AgenTerm commands are available only through the `agenterm` namespace."
+    );
+}
+
+fn print_mux_commands() {
+    for command in MUX_COMMANDS {
+        match command.status {
+            MuxStatus::Supported => println!("{}", command.name),
+            MuxStatus::Unsupported(reason) => {
+                println!("{} (unsupported: {reason})", command.name);
+            }
+        }
+    }
+}
+
+pub(crate) fn protocol_info_json(identity_scope: &str) -> String {
+    let build_identity = BuildIdentity::current();
+    serde_json::to_string_pretty(&serde_json::json!({
+        "protocol_version": 1,
+        "agenterm_version": env!("CARGO_PKG_VERSION"),
+        "identity_scope": identity_scope,
+        "pid": std::process::id(),
+        "address": ipc_address(),
+        "build_identity": build_identity,
+        "build_identity_complete": build_identity.is_complete(),
+        "upgrade_identity": current_upgrade_identity(),
+        "ui_bridge": ui_bridge::current_facts(),
+        "control_contract": {
+            "schema_version": crate::control_contract::CONTROL_CONTRACT_SCHEMA_VERSION,
+            "request_dedupe": true,
+            "deadline_guard": true,
+            "receipt_outcomes": ["committed", "accepted", "no_op", "outcome_unknown"],
+        },
+        "command_catalog": {
+            "schema_version": COMMAND_CATALOG_SCHEMA_VERSION,
+            "commands": COMMAND_CATALOG,
+        },
+        "operation_catalog": {
+            "schema_version": OPERATION_CATALOG_SCHEMA_VERSION,
+            "classification_only": true,
+            "authorization_policy": false,
+            "operations": OPERATION_CATALOG,
+        },
+        "event_catalog": {
+            "schema_version": EVENT_CATALOG_SCHEMA_VERSION,
+            "events": EVENT_CATALOG,
+        },
+        "compatibility": {
+            "tmux_rmux": [
+                "new-session", "list-sessions", "has-session",
+                "new-window", "list-windows", "select-window",
+                "next-window", "previous-window", "rename-window",
+                "kill-window", "list-panes", "capture-pane",
+                "send-keys", "display-message", "show-options"
+            ],
+            "partial": ["kill-session", "kill-server"],
+            "planned": ["split-window", "layouts"]
+        },
+        "extensions": [
+            "ui-snapshot", "ui-action", "focus", "protocol-info",
+            "inspect", "screenshot", "screenshot-pane", "dump-cells",
+            "wait-pane", "send-mouse", "show-composer",
+            "set-composer", "send-composer", "get-settings",
+            "set-setting", "set-tab-note", "show-tab-note",
+            "list-tab-tree", "set-tab-parent", "show-tab-parent",
+            "save-workspace", "workspace-info", "shutdown",
+            "new-agent", "list-instances", "server-list", "server-kill", "scroll-pane", "read-events",
+            "wait-events"
+        ],
+        "features": {
+            "remain_on_exit": true,
+            "live_close_confirmation": true,
+            "rmux_status_click_bridge": true,
+            "semantic_ui_automation": true,
+            "hierarchical_tabs": true,
+            "persistent_workspace": true,
+            "tab_environment": true,
+            "codex_launcher": true,
+            "mux_frontend": true,
+            "instance_discovery": true,
+            "typed_operations": true,
+            "typed_events": true
+        }
+    }))
+    .unwrap_or_default()
+}
+
+fn print_mux_compatibility(json: bool) {
+    let supported = MUX_COMMANDS
+        .iter()
+        .filter(|command| command.status == MuxStatus::Supported)
+        .map(|command| command.name)
+        .collect::<Vec<_>>();
+    let unsupported = MUX_COMMANDS
+        .iter()
+        .filter_map(|command| match command.status {
+            MuxStatus::Supported => None,
+            MuxStatus::Unsupported(reason) => Some(serde_json::json!({
+                "name": command.name,
+                "reason": reason,
+            })),
+        })
+        .collect::<Vec<_>>();
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "schema_version": 1,
+                "frontend": "agenterm-mux",
+                "agenterm_version": env!("CARGO_PKG_VERSION"),
+                "model": {
+                    "server": "agenterm.exe",
+                    "session": "workspace",
+                    "window": "tab",
+                    "pane": "single-pane-tab"
+                },
+                "differences": {
+                    "workspace_persistence": "normal GUI shutdown saves tabs and restarts their commands on restore",
+                    "process_ownership": "agenterm.exe owns every ConPTY child",
+                    "live_close": "GUI close actions require confirmation; explicit CLI kill commands are authoritative",
+                    "server_lifetime": "kill-server intentionally clears the saved workspace",
+                    "split_panes": false
+                },
+                "supported": supported,
+                "explicitly_unsupported": unsupported,
+                "native_namespace": "agenterm",
+            }))
+            .unwrap_or_default()
+        );
+    } else {
+        println!("agenterm-mux {}", env!("CARGO_PKG_VERSION"));
+        println!("sessions=workspaces windows=tabs panes=single-pane-tabs");
+        println!("supported: {}", supported.join(", "));
+        for entry in unsupported {
+            println!(
+                "unsupported: {} ({})",
+                entry["name"].as_str().unwrap_or_default(),
+                entry["reason"].as_str().unwrap_or_default()
+            );
+        }
+        println!("native AgenTerm extensions: agenterm-mux agenterm COMMAND ...");
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_loopback_ipc_address, run_wait_ui};
+
+    #[test]
+    fn accepts_only_loopback_ipc_addresses() {
+        assert!(parse_loopback_ipc_address("127.0.0.1:42000").is_ok());
+        assert!(parse_loopback_ipc_address("[::1]:42000").is_ok());
+        assert!(parse_loopback_ipc_address("0.0.0.0:42000").is_err());
+        assert!(parse_loopback_ipc_address("192.0.2.1:42000").is_err());
+        assert!(parse_loopback_ipc_address("127.0.0.1:42\0").is_err());
+    }
+
+    #[test]
+    fn wait_ui_rejects_closed_modal_with_a_target_without_polling() {
+        let arguments = vec![
+            "wait-ui".to_owned(),
+            "--modal-kind".to_owned(),
+            "closed".to_owned(),
+            "--modal-target".to_owned(),
+            "@1".to_owned(),
+        ];
+        assert_eq!(run_wait_ui(&arguments), 2);
+    }
+}

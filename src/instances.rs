@@ -6,10 +6,6 @@ use std::{
 
 use anyhow::{Context as _, Result};
 use serde::{Deserialize, Serialize};
-use windows_sys::Win32::{
-    Foundation::{CloseHandle, ERROR_INVALID_PARAMETER, GetLastError, STILL_ACTIVE},
-    System::Threading::{GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION},
-};
 
 use crate::{build_identity::BuildIdentity, upgrade_identity::UpgradeIdentity};
 
@@ -101,11 +97,15 @@ pub(crate) fn prune_instance(instance: &DiscoveredInstance) -> Result<()> {
     }
 }
 
+#[cfg(windows)]
 pub(crate) fn instance_process_is_alive(pid: u32) -> bool {
+    use windows_sys::Win32::{
+        Foundation::{CloseHandle, ERROR_INVALID_PARAMETER, GetLastError, STILL_ACTIVE},
+        System::Threading::{GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION},
+    };
+
     let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
     if process.is_null() {
-        // Access-denied and other indeterminate failures must fail open: only a
-        // PID that Windows positively reports as invalid is safe to auto-prune.
         return unsafe { GetLastError() } != ERROR_INVALID_PARAMETER;
     }
     let mut exit_code = 0;
@@ -116,15 +116,34 @@ pub(crate) fn instance_process_is_alive(pid: u32) -> bool {
     !queried || exit_code == STILL_ACTIVE as u32
 }
 
+#[cfg(unix)]
+pub(crate) fn instance_process_is_alive(pid: u32) -> bool {
+    // kill(pid, 0) returns 0 when the process exists and we may signal it.
+    unsafe { libc::kill(pid as i32, 0) == 0 }
+}
+
 fn instances_dir() -> PathBuf {
     if let Some(path) = env::var_os("AGENTERM_INSTANCE_DIR").filter(|path| !path.is_empty()) {
         return PathBuf::from(path);
     }
-    env::var_os("LOCALAPPDATA")
-        .map(PathBuf::from)
-        .unwrap_or_else(env::temp_dir)
-        .join("AgenTerm")
-        .join("instances")
+    #[cfg(windows)]
+    {
+        return env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(env::temp_dir)
+            .join("AgenTerm")
+            .join("instances");
+    }
+    #[cfg(not(windows))]
+    {
+        return env::var_os("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(env::temp_dir)
+            .join(".local")
+            .join("share")
+            .join("agenterm")
+            .join("instances");
+    }
 }
 
 fn register_instance_in(directory: &Path, record: InstanceRecord) -> Result<InstanceRegistration> {

@@ -13,6 +13,7 @@ name = "agenterm"
 version = "0.1.7"
 dependencies = [
  "anyhow",
+ "libc",
  "png",
  "rhai",
  "rmux-pty",

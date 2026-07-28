@@ -1,4 +1,4 @@
-#![windows_subsystem = "windows"]
+#![cfg_attr(windows, windows_subsystem = "windows")]
 
 fn main() {
     std::process::exit(agenterm::run_gui_entry());
