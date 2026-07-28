@@ -86,10 +86,20 @@ v0.1.8  可编程的日用舰队
 │  ├─ 尽早返回可执行的失败信息
 │  └─ 可靠演练 v0.1.8 标签到 GitHub Release 的完整路径
 │
+├─ 最高优先级：工作区 P0 proxy 正确性
+│  ├─ tab-scoped、ephemeral、永不持久化或泄露 secret
+│  ├─ Prepared → Submitted → Applied|Failed 由真实证据推进
+│  ├─ GUI 可鼠标 Reveal/Re-mask、Prepare、Send Now
+│  ├─ cmd/PowerShell/Bash 环境与真实 child 继承验证
+│  └─ direct TUI/非交互拒绝、无隐式继承、typed receipt 与 orphan 门
+│
 ├─ 第一优先级：工作区视觉和操作层级
 │  ├─ 标签区底部按钮、全局状态条和输入区重新梳理
+│  ├─ 标签名称/注释在本行原地编辑，不借用下方 Composer
+│  ├─ 编辑行把 +/Edit/Close 原位切换为 Save/Cancel
+│  ├─ Tabs 根 inset 和逐层 indent 左移紧凑，paint/hit-test 共用几何
 │  ├─ 选中标签的名称和注释不被操作按钮挤压
-│  ├─ 深层树、长文本、中文和高缩放仍清晰
+│  ├─ 深层树、长文本、中文、180 px 和高缩放仍清晰
 │  ├─ 键盘优先的命令发现和命名命令入口
 │  └─ 整理 Settings 信息架构，为以后自定义保留稳定模型
 │
@@ -99,11 +109,13 @@ v0.1.8  可编程的日用舰队
 │  ├─ 所有 wait 命令统一稳定目标和重启语义
 │  └─ workspace 原子保存并暴露 revision 与 hash
 │
-└─ 明确延后
+└─ 明确延后与未来计划
    ├─ agenterm-agent.exe 的具体实现、审批 UI 和 agent 权限系统
    ├─ 暂名 agenterm-net.exe：curl 兼容网络工具 + libp2p/IPFS 去中心化能力
    ├─ agenterm-mux.exe 完整多路复用终端与 mux|tmux|rmux|agenterm 多后端
    ├─ 探索合并 agenterm.exe 与 agenterm-cli.exe，但不牺牲可靠 CLI 语义
+   ├─ 通用 Rhai 稳定后分阶段自托管仓库辅助脚本，PowerShell 保留到自举与回退通过
+   ├─ 远程 proxy 分发、fleet-wide/global 默认值与持久 proxy profile
    ├─ 自主或破坏性的 MCP 控制
    ├─ npm 兼容、公共包仓库和不受治理的后台系统服务
    ├─ 把 agenterm-bash.exe 设置为默认 shell
@@ -112,6 +124,34 @@ v0.1.8  可编程的日用舰队
    ├─ LLM gateway 或智能 worker
    └─ 声称完整兼容 tmux 或 RMUX
 ```
+
+### 明确延后与未来计划：口径和 Rhai 自托管迁移
+
+- **明确延后**：产品方向已经认可，但明确不进入 v0.1.8 的实现、资格和
+  发布范围。
+- **未来计划**：只保留研究或架构挂钩；仍需独立立项、用户价值证据、
+  威胁与失败模型、依赖门和版本归属，不能由本计划自动变成承诺。
+
+仓库辅助脚本的长期 self-hosting 属于未来计划，不是 v0.1.8 交付项。
+只有当 `agenterm-script.exe` 的通用标准库、进程、文件、JSON、流、
+稳定退出码和 Windows 语义都通过公共资格门后，才按以下顺序迁移：
+
+```text
+低风险辅助脚本
+  PowerShell 与 Rhai 双跑并比较结果
+    -> 测试编排
+       双跑、故障注入、取消与清理一致
+         -> 正式资格 / 打包 / 发布关键路径
+            最后迁移，要求字节身份、receipt 和紧急回退证明
+```
+
+- Rhai 自举尚未证明前，构建和资格不能只依赖待构建的 Rhai runtime。
+- 紧急回退、干净机器和受限 Windows 环境尚未证明前，不删除 `.ps1`
+  实现；双跑阶段 PowerShell 是可恢复的 last-known-good。
+- 迁移必须保持命令退出码、stdout/stderr、路径、编码、流、取消、超时、
+  子进程清理、签名/凭证隔离和无交互执行语义。
+- 该方向不是现在删除 PowerShell，也不是把 Rhai 或
+  `agenterm-bash.exe` 设为默认 shell。
 
 ### 未来挂钩：`agenterm-net.exe`
 
@@ -908,8 +948,9 @@ v0.1.7 让 AgenTerm 的内部状态和交付过程更诚实。v0.1.8 要把这�
 以下三条必须同时成立：
 
 1. 终端交互有可测量的专业化提升，尤其是文本选择、中文宽字符、长输出、缩放和取消行为。
-2. Rhai 不再只是受限 sidecar：它具备文件、环境、进程、网络、模块、任务和 Fleet API 的实用闭环，并输出足够精确的工具描述供未来 `agenterm-agent.exe` 治理。
-3. 一个干净候选完整通过公共日用旅程和资格门，随后打包与 GitHub Release 复用完全相同的合格字节。
+2. tab proxy 不再把 Prepared 或 PTY byte write 冒充 On：只有 shell marker、真实 environment 和 child inheritance 共同证明 Applied。
+3. Rhai 不再只是受限 sidecar：它具备文件、环境、进程、网络、模块、任务和 Fleet API 的实用闭环，并输出足够精确的工具描述供未来 `agenterm-agent.exe` 治理。
+4. 一个干净候选完整通过公共日用旅程和资格门，随后打包与 GitHub Release 复用完全相同的合格字节。
 
 任何一条不成立，都不能靠增加无关功能来“凑成一个版本”。
 
@@ -1251,12 +1292,14 @@ agenterm.exe / agenterm-cli.exe
 3. 创建根节点和子节点，保留稳定 ID。
 4. 重命名、写注释、折叠、展开，并用键盘跨区域导航。
 5. 编辑并且只提交一次 Composer 内容。
-6. 选择、复制终端文本并使用回滚区。
-7. resize、最小化、恢复，并验证 PTY 网格真实状态。
-8. 调用一个命名 Rhai 任务，完成本地文件、子进程和 Fleet API 流程，并验证结果、收据和事后状态。
-9. 保留一个已经退出的标签，再显式关闭它。
-10. detach、reattach，并验证 PID、epoch、标签、PTY 连续性。
-11. 停止独立 server，证明测试拥有的资源全部消失。
+6. 在真实 PowerShell/cmd tab 上依次观察 proxy Prepared、Submitted 和
+   经过 shell/child 验证的 Applied，再证明 Failed、脱敏和新 tab 不继承。
+7. 选择、复制终端文本并使用回滚区。
+8. resize、最小化、恢复，并验证 PTY 网格真实状态。
+9. 调用一个命名 Rhai 任务，完成本地文件、子进程和 Fleet API 流程，并验证结果、收据和事后状态。
+10. 保留一个已经退出的标签，再显式关闭它。
+11. detach、reattach，并验证 PID、epoch、标签、PTY 连续性。
+12. 停止独立 server，证明测试拥有的资源全部消失。
 
 ### 证据策略
 
@@ -1348,7 +1391,186 @@ agenterm.exe / agenterm-cli.exe
 - 在隐藏标签区、窄窗口、长 CWD、Proxy 隐藏、中文和高缩放下仍有确定退化策略。
 - 命令发现优先使用键盘入口，不为了功能数量无限增加永久按钮。
 - 选中标签名称和注释在默认 250 px 宽度下不被三个操作按钮挤成不可读。
+- 标签名称和注释在目标树行原地编辑，Composer 始终只服务当前
+  terminal draft，绝不兼任标签属性编辑器。
 - Settings 只整理信息架构，不在本轮承诺任意主题导入导出。
+
+### P0 bug：tab-scoped proxy 真实状态与应用证明
+
+本项是 v0.1.8 公开候选的 P0 correctness bug，不是未来计划，也不只是
+状态条换文案。proxy 继续是 stable-tab-scoped、ephemeral 的便利能力：
+不得持久化，不得从一个 live shell 的临时修改推导另一个 tab 的环境。
+
+#### 状态机
+
+```text
+Off
+  Prepare
+    -> Prepared
+       只有敏感 Composer draft；不是 On，不写 PTY
+
+Prepared
+  Send / Send Now
+    -> Submitted
+       只证明一次提交已经开始；字节写入不是生效证明
+
+Submitted
+  non-secret marker
+  + shell environment verification
+  + real child inheritance verification
+    -> Applied
+
+Prepared / Submitted / Applied
+  reject / timeout / mismatch / cancel / terminal or process exit
+    -> Failed(reason=redacted typed category)
+```
+
+- `Prepare` 只为目标 tab 生成或替换一个 sensitive Composer draft，状态必须
+  是 `Prepared`；不修改 shell，不创建 child，不显示 `On`。
+- `Send` 与 proxy editor 的 `Send Now` 走同一个 Composer
+  exactly-once submission，进入 `Submitted`；不能以 `WriteFile`/PTY byte
+  write 成功冒充应用成功。
+- `Applied` 同时要求非 secret shell marker、实际 shell environment
+  post-state 和真实 child environment 继承验证。marker 只携带
+  request/operation correlation，不含 URL、credential 或环境值。
+- 拒绝、marker 错误、环境/child 不一致、timeout、cancel、terminal
+  exit 或 process exit 都进入 `Failed`，并保留可操作但不泄密的原因。
+
+#### GUI 与隐私
+
+- proxy editor 必须提供鼠标可达且有 accessible name/tooltip 的
+  `Reveal`/`Re-mask`、`Prepare`、`Send Now`；不能要求用户知道隐藏快捷键。
+- Reveal 只改变当前 editor 的展示，不能改变 persistence、draft、
+  application state、event、receipt 或日志内容。
+- `ui-snapshot` 暴露 stable target、`revealed`、真实
+  `Off|Prepared|Submitted|Applied|Failed`、validation/error category 和
+  editor/action bounds，但不包含 proxy URL、credential、prepared command、
+  secret environment value 或 Composer text。
+- workspace/settings/event/receipt/diagnostic/log 永不保存 proxy secret；
+  receipt 只允许 redacted fingerprint 和非 secret result category。
+
+#### Shell 与创建语义
+
+- `cmd.exe` 与 PowerShell 必须用真实 shell 和真实 child 验证环境继承、
+  marker 顺序、退出/失败与 exactly-once。
+- Bash-compatible 命令同时设置 `HTTP_PROXY`、`HTTPS_PROXY`、
+  `http_proxy`、`https_proxy`，四者值一致并接受同一隐私门。
+- direct TUI 正拥有输入，或 tab 以 non-interactive command 启动时，
+  runtime injection 必须显式拒绝；诊断引导用户新建带 `--proxy` 的 tab，
+  不能把 secret setup 强行写入当前输入流。
+- 新 tab 不继承 active shell 内部临时 `set`/`$env:`/`export` 修改；
+  只有显式 create-time `--proxy` 或同等 tab environment 参数可以注入。
+
+#### Typed 证据与公共黑盒
+
+- 每次状态转换发出 typed event 和 receipt，绑定 request ID、stable
+  server/tab identity、epoch/sequence baseline、redacted fingerprint、
+  result category 与 verified post-state。
+- 黑盒依次证明 Prepared-not-On、Submitted-not-Applied、cmd/PowerShell
+  shell+child Applied、Bash 四变量、exit/failure、direct-TUI 与
+  non-interactive rejection、新 tab 无意外继承、隐私脱敏和 exactly-once。
+- 每个路径证明没有 test-owned shell、child、worker、native editor、
+  window、server 或注册记录残留；失败后下一次普通 Composer 和 proxy
+  操作仍健康。
+- 远程 proxy 分发、fleet-wide/global 默认 proxy、持久 profile、secret
+  同步和 revocation 属于另行规划，需要身份、存储、策略与撤销门。
+
+### Tabs UI 纵切：行内编辑与紧凑树
+
+本纵切先固定产品合同和纯几何，再由拥有 `src/lib.rs` 的宿主分支接入
+HWND、paint、hit-test、snapshot 与黑盒测试。不能只移动绘制坐标，也不能
+在宿主里继续复制 `sidebar_width - 72/-48/-24` 或 `node_x + 24`。
+
+#### 用户状态机
+
+```text
+Normal(@id)
+  Edit / add-child
+    -> Editing(@id, original, draft, validation=clean)
+
+Editing
+  Save / Ctrl+Enter + valid name
+    -> atomic persist(name,note)
+    -> Normal(@id)
+
+Editing
+  Save / Ctrl+Enter + blank name
+    -> Editing(@id, draft retained, validation=blank-name)
+
+Editing
+  Cancel / Esc / target-invalidating transition
+    -> discard draft
+    -> Normal or target transition
+```
+
+- `Editing` 只由稳定 tab ID 识别，不能由当前 index 或可变显示名识别。
+- 行内使用两个单行 native edit overlay，分别覆盖该行的 name 和 note
+  显示矩形；编辑时 `+`/`Edit`/`Close` 切换为 `Save`/`Cancel`。
+- 只有显式 Save 和 `Ctrl+Enter` 提交；`Tab`/`Shift+Tab` 在两字段与
+  Save/Cancel 间移动，`Esc` 取消。
+- 空白 name 的保存是可恢复验证错误：不保存 note、不退出编辑、不清空
+  draft。
+- 切换 tab、隐藏 Tabs、从其他入口关闭目标、workspace reload、窗口
+  detach/stop/close 都先取消 draft，再执行原转换；不允许隐式保存。
+- 普通窗口失焦不提交也不取消；同一行内部的焦点移动也不取消。
+- add-child 先以正常初始值建立真实 child，再立即编辑 child 行；取消只
+  恢复初始值，不删除 child。
+- 任一时刻至多一个 editing row；开始编辑另一行时先取消旧 draft。
+
+#### 纯几何合同
+
+```text
+TreeRowGeometry
+├─ mode: normal | editing
+├─ row / selection
+├─ node anchor / expander / disclosure hit / status lamp
+├─ text
+│  ├─ name
+│  └─ note
+├─ editors?: name + note
+└─ actions
+   ├─ density: full | compact
+   ├─ normal: add-child + Edit + Close
+   └─ editing: Save + Cancel
+```
+
+- 根锚点从 17 左移到 12，标准逐层 indent 从 16 收紧到 12。
+- 响应式连接线锚点和 row 节点使用同一个函数；180 px 时统一压缩每层
+  indent，而不是让深层节点随机重叠或只移动文字。
+- 180 px 使用仍可点击、具有 accessible name/tooltip 的紧凑图标动作；
+  220 px 及以上可使用完整文字动作。
+- 最深受支持层级仍保留至少一个 CJK glyph 加 ellipsis 的文本预算。
+- normal/editing 动作、text、两个 editor 均有界且互不重叠；退化宽度
+  只允许安全折叠，不允许反向矩形或越过 sidebar。
+
+#### 当前纵切状态与依赖
+
+- [x] `PRD_02_06_human_workspace.md` 拥有编辑、取消、键盘、snapshot、
+  黑盒与非目标合同
+- [x] `src/ui_geometry.rs` 提供 normal/editing、name/note/editor/action
+  矩形、full/compact 动作密度、响应式 connector anchor 与定向单测
+- [ ] `src/lib.rs` 同一提交接入编辑状态、两个 native edit HWND、paint、
+  hit-test、connector 与 action label；不允许分批接入坐标
+- [ ] `ui-snapshot` 暴露 stable target、mode、validation、dirty facts、
+  density 和完整几何，不默认泄露未保存 draft
+- [ ] 公共 CLI 黑盒证明 Save/Cancel/blank-name/切 tab/隐藏 Tabs/目标
+  close/窗口 close 的事后状态，并证明 Composer draft 不变
+- [ ] 截图覆盖 180/250 px、深层 CJK、normal/editing 与 validation error
+
+#### 推荐宿主接入顺序
+
+1. 引入单一 `TabInlineEditState`，只保存 stable ID、original、draft 和
+   validation；先实现纯状态转换及 atomic Save。
+2. 将 connector paint、row paint、selection 和 hit-test 一次性切换到
+   `tree_row_geometry_for_mode` / `tree_connector_x`，同时删除旧魔数。
+3. 以 name/note editor rect 创建、移动和销毁两个 native edit HWND；
+   Composer 路径不参与。
+4. 接入 Save/Cancel、`Ctrl+Enter`、`Esc`、Tab focus chain 和
+   blank-name inline error。
+5. 在 tab switch、Tabs hide、target close、workspace reload 和窗口
+   生命周期入口集中调用同一个 cancel-before-transition helper。
+6. 扩展 snapshot 后再写公共黑盒和截图；最后检查无 orphan HWND、无
+   隐式保存且 Composer draft 字节不变。
 
 ### 当前问题树
 
@@ -1459,7 +1681,7 @@ Composer         负责“向当前标签做什么”
 | accessible   | +--------------------------+  +-------------+ |
 | name         |                                               |
 +--------------+-----------------------------------------------+
-| [CWD  D:\dev\age...]            [Proxy: On]                  |
+| [CWD  D:\dev\age...]            [Proxy: Applied]             |
 +--------------------------------------------------------------+
 ```
 
@@ -1624,9 +1846,10 @@ Composer · @ID 名称
 
 - 删除没有信息价值的 `Status` 和 provider 占位文案；没有 provider 时保持安静空白。
 - CWD 以路径为主，来源与 pending 使用短徽标或 tooltip。
-- Proxy 默认只显示 `Off` 或 `On`；仅在用户明确揭示时显示端点，任何时候都不显示凭据。
+- Proxy 显示真实 `Off`、`Prepared`、`Submitted`、`Applied` 或 `Failed`；
+  仅在用户明确 Reveal 时在 editor 内显示端点，任何时候都不显示凭据。
 - 截断顺序：
-  provider 先消失，随后 CWD 省略，最后 Proxy 进入紧凑状态。
+  provider 先消失，随后 CWD 省略，最后 Proxy 保留真实状态的紧凑表示。
 - `Tabs` 恢复和 Proxy 安全状态始终保底。
 - 状态条 segment 必须有明确的可点击表现；不能继续只有鼠标命中却没有视觉或语义可供性。
 
@@ -1703,6 +1926,19 @@ layout.status_bar.segments[]
   display_state
   truncated
 
+proxy
+  stable_tab_id
+  state: Off | Prepared | Submitted | Applied | Failed
+  revealed
+  validation
+  error_category
+  editor_bounds
+  reveal_action
+  remask_action
+  prepare_action
+  send_now_action
+  secret_fingerprint_redacted
+
 window
   dpi
   scale
@@ -1733,7 +1969,8 @@ snapshot 绝不能回显草稿秘密或 Proxy 凭据。
 - 不开放 provider 联网或无限常驻。
 - 不在状态条显示代理凭据。
 - 不做移动端或触屏布局。
-- 不借布局调整重写 Settings、CWD、Proxy modal 的业务逻辑。
+- 不借布局调整重写 Settings 或 CWD 的业务逻辑；Proxy 只修复本节 P0
+  状态、鼠标操作和验证合同，不扩成全局/远程配置系统。
 - 不把完整 UIA 或读屏认证冒充成已经完成；本轮只交付所需语义基础。
 
 ## 八、第一优先级分支己：因果上可以互相比较的证据
@@ -1889,12 +2126,20 @@ v0.1.7 typed operations + receipt
   戊三、CI cache、计时和诊断上传
   戊四、workflow 演练与远端资产核验
 
-己、可选体验
-  己一、下方按钮、状态条和输入区布局
-  己二、选中标签行可读性
-  己三、键盘命令面板
-  己四、因果 render/capture 身份
-  己五、workspace 原子保存和 revision
+己、工作区 P0 proxy
+  己一、tab-scoped ephemeral 状态机和 sensitive Composer draft
+  己二、Reveal/Re-mask、Prepare、Send Now GUI 与 snapshot
+  己三、cmd/PowerShell marker、environment、child post-state 验证
+  己四、Bash upper/lower 四变量和 create-time --proxy
+  己五、direct TUI/non-interactive 拒绝与无隐式继承
+  己六、typed event/receipt、隐私、exactly-once 与 orphan 黑盒门
+
+庚、可选体验
+  庚一、下方按钮、状态条和输入区布局
+  庚二、选中标签行可读性
+  庚三、键盘命令面板
+  庚四、因果 render/capture 身份
+  庚五、workspace 原子保存和 revision
 ```
 
 ## 十二、版本资格门
@@ -1911,6 +2156,23 @@ v0.1.7 typed operations + receipt
 - 中文、换行、宽字符复制证据精确。
 - 长输出和 resize 预算有记录并通过。
 - 取消后没有捕获、输入或 worker 残留。
+
+### 门一-A：工作区 proxy
+
+- proxy 只属于目标 stable tab，ephemeral 且不进入 workspace/settings。
+- Prepare 只产生 sensitive Composer draft 和 `Prepared`；Send 只进入
+  `Submitted`，两者都不显示 `On` 或 `Applied`。
+- `Applied` 有非 secret marker、真实 cmd/PowerShell shell environment
+  和 child inheritance post-state 三重证据；Bash 命令覆盖 upper/lower
+  四变量。
+- exit、failure、timeout、cancel、marker/environment/child mismatch 都
+  得到 `Failed` typed receipt，不把 PTY byte write 当成功。
+- Reveal/Re-mask、Prepare、Send Now 可由鼠标到达；snapshot 暴露
+  `revealed` 和真实状态但不泄露 endpoint、credential、command 或 draft。
+- direct TUI/non-interactive 注入被拒绝并引导 create-time `--proxy`；
+  新 tab 不继承 active shell 临时修改。
+- 公共黑盒证明 event/receipt/post-state、隐私、exactly-once 和无
+  shell/child/worker/editor/window/server orphan。
 
 ### 门二：脚本
 
@@ -2015,11 +2277,13 @@ v0.1.7 typed operations + receipt
   截图因果元数据
   workspace 原子保存
 
-延后
+明确延后与未来计划
   agenterm-agent.exe 的具体实现、审批 UI 和 agent 权限系统
   agenterm-net.exe、libp2p/IPFS 节点、密钥系统和去中心化应用实现
   agenterm-mux.exe 原生 mux server、完整 pane 多路复用和多后端发布
   agenterm.exe 与 agenterm-cli.exe 的单文件合并
+  通用 Rhai 稳定后按辅助脚本双跑 -> 测试编排 -> 资格/打包/发布顺序自托管
+  PowerShell 实现保留到 Rhai 自举、Windows 语义和紧急回退证据通过
   npm 兼容、公共包仓库和第三方生态
   低层 socket 与不受治理的系统服务
   raw mouse 仲裁，除非真实 fixture 阻塞
