@@ -353,15 +353,17 @@ track remains planned, but every declared dependency must still pass.
     approval after the candidate and rehearsal gates pass
 - [ ] M6 / v0.1.9 General Script Runtime
   - [ ] make `local` the ordinary `agenterm-script.exe` execution profile and
-    deliver a usable fs/path/env/process/http/time/json/text/bytes standard
-    library without moving future Agent approval policy into the runtime
+    deliver the Rust-shaped `std::{fs,path,env,process,time}` subset plus
+    `rhai::{task,http,json,bytes,runtime}` extensions without moving future
+    Agent approval policy into the runtime
   - [ ] add bounded task/stream/cancellation, local modules, versioned
     `agenterm.tasks.json`, named task list/show/run, and one machine-readable
     API catalog shared by check, runtime, Fleet tools and future consumers
   - [ ] publish that catalog as a stable three-level capability tree with
     shipped/planned/deferred/degraded facts and reviewed purpose-level
-    Node.js/Bun analogues, then generate the comparison matrix, manual index
-    and implementation coverage from the same source
+    Rust/Node.js/Bun analogues; every entry separates catalog, surface and Rust
+    paths and records semantic differences, then generates the comparison
+    matrix, manual index and implementation coverage from the same source
   - [ ] make runtime/module/task identity package-ready through stable
     version, provenance hooks, requirements, capabilities and entry points,
     without adding remote resolution, installation, signature policy or a

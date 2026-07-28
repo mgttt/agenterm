@@ -60,34 +60,54 @@ surface，不是内部 Rust 模块树，也不是 Node/Bun 兼容表；交付状
 ```text
 agenterm-script
 │
-├─ globals                         最常用、无需前缀
-│  ├─ args                         本次调用参数
-│  └─ print(value)                 有界标准输出
+├─ Rhai language                    语言本身，不伪装 Rust
+│  ├─ args / print(value)
+│  ├─ string / array / map / range
+│  ├─ function / closure
+│  └─ import "relative/module" as m
 │
-├─ static namespaces              无 invocation identity，使用 ::
+├─ std::                            Rust-shaped 精选小集
 │  ├─ fs::
-│  │  ├─ read / write / atomic_write
-│  │  ├─ list / metadata
-│  │  ├─ create / copy / move / remove
-│  │  └─ owned_temp
+│  │  ├─ read / read_to_string / write
+│  │  ├─ metadata / read_dir
+│  │  ├─ create_dir_all / copy / rename
+│  │  └─ remove_file / remove_dir
 │  ├─ path::
-│  │  └─ join / parent / name / extension / normalize / relative
+│  │  ├─ Path / PathBuf
+│  │  └─ join / parent / file_name / extension / canonical facts
 │  ├─ env::
-│  │  └─ get / has / names / set / remove / child
+│  │  ├─ var / vars / current_dir
+│  │  └─ worker-local mutation（记录与 Rust 的语义差异）
 │  ├─ process::
-│  │  ├─ run(...)                  顺序取得 ProcessResult
-│  │  └─ start(...)                立即取得 Task
+│  │  ├─ Command::new(...)
+│  │  ├─ .arg() / .args() / .current_dir() / .env()
+│  │  ├─ .status() / .output()
+│  │  └─ .spawn() -> Child
+│  └─ time::
+│     ├─ Duration
+│     ├─ Instant
+│     └─ SystemTime
+│
+├─ rhai::                           Rhai-native 高级扩展
+│  ├─ task::
+│  │  ├─ sleep / after
+│  │  ├─ wait_all / race / cancel_all
+│  │  └─ bounded Task/Stream composition
 │  ├─ http::
-│  │  ├─ request(...)              顺序取得 HttpResponse
-│  │  └─ start(...)                立即取得 Task
-│  ├─ time::
-│  │  └─ now / deadline / seconds / sleep / timer
+│  │  ├─ request(...) -> HttpResponse
+│  │  └─ start(...) -> Task
 │  ├─ json::
 │  │  └─ parse / stringify
-│  └─ task::
-│     └─ wait_all / race / cancel_all
+│  ├─ bytes::
+│  │  └─ from_text / concat / decode
+│  ├─ runtime::
+│  │  └─ version / profile / limits / cancellation
+│  └─ future
+│     ├─ package::
+│     ├─ test::
+│     └─ additional independently gated modules
 │
-├─ typed objects                  有 identity/lifecycle，使用 .
+├─ typed objects                    有 identity/lifecycle，使用 .
 │  ├─ Task
 │  │  └─ .id / .state / .wait() / .cancel()
 │  ├─ Stream
@@ -98,12 +118,14 @@ agenterm-script
 │  │  └─ .success / .exit_code / .stdout / .stderr
 │  ├─ HttpResponse
 │  │  └─ .status / .headers / .body
+│  ├─ Command / Child / Output
+│  ├─ Duration / Instant / SystemTime
 │  └─ Fleet values
 │     ├─ Workspace / Tab / Terminal
 │     ├─ Receipt / Event / PostState
 │     └─ typed error / degraded reason
 │
-├─ fleet                          绑定当前 server/profile/broker 的 facade
+├─ fleet                            AgenTerm-bound，不冒充 std/rhai module
 │  ├─ .workspace
 │  ├─ .tabs
 │  │  ├─ .list()
@@ -116,14 +138,14 @@ agenterm-script
 │     ├─ .read(...)
 │     └─ .wait(...) / .start_wait(...)
 │
-├─ code composition               使用语言和项目机制，不伪装 namespace
-│  ├─ import "relative/module" as m
+├─ project automation               使用项目机制，不伪装 namespace
 │  ├─ agenterm.tasks.json
 │  └─ script task list / show / run
 │
-└─ discovery & evidence           使用 CLI/catalog，不塞入普通脚本
+└─ discovery & evidence             使用 CLI/catalog，不塞入普通脚本
    ├─ script api [MODULE]
-   ├─ script api --json / --compare
+   ├─ script api --json
+   ├─ script api --compare rust|node|bun|all
    ├─ script check
    └─ limits / audit / typed result / coverage
 ```
@@ -131,15 +153,25 @@ agenterm-script
 最短使用路径：
 
 ```text
-fs::read_text(...)                     直接调用
-process::start(...) -> Task.wait()     显式并发
-fleet.tabs.active()                    Fleet 读取
-fleet.terminal(id).capture(...)        绑定资源对象
+std::fs::read_to_string(...)               Rust-shaped 基础能力
+std::process::Command::new(...).spawn()     Rust-shaped 资源对象
+rhai::http::start(...) -> Task.wait()       Rhai-native 高级并发
+fleet.tabs.active()                         AgenTerm-bound 领域对象
 ```
 
 这张对象树是手册首页与 API discovery 的首屏；后文的产品分类树可以扩散，
 但任何新增能力都必须先找到一个简洁的用户落点，不能把分类层级直接变成
 调用前缀。
+
+可以把整体理解为能力叠加，而不是语言兼容：
+
+```text
+AgenTerm Rhai Environment
+  = Rhai language
+  + Rust-shaped std subset
+  + rhai-native extension set
+  + AgenTerm-bound Fleet domain
+```
 
 ## 一、版本目录树
 
@@ -153,13 +185,12 @@ v0.1.9  通用 Script Runtime 成型
 │  ├─ pure / observe 保持兼容并继续是显式专用 profile
 │  └─ typed result、exit class、timeout、cancel、crash 和 recovery
 │
-├─ 最高优先级：可用的本地标准库
-│  ├─ fs / path
-│  ├─ env
-│  ├─ process
-│  ├─ time / task
-│  ├─ json / text / bytes
-│  ├─ http
+├─ 最高优先级：Rust-shaped std 小集 + Rhai-native 扩展
+│  ├─ std::{fs,path,env,process,time}
+│  ├─ rhai::{task,http,json,bytes,runtime}
+│  ├─ Rust path/name/object 心智优先，签名按 Rhai 适配
+│  ├─ catalog 逐项记录 rust_path 与 semantic differences
+│  ├─ Fleet 保持 invocation-bound object，不塞进 std/rhai
 │  └─ temp / cleanup / atomic replacement
 │
 ├─ 最高优先级：task、stream 与取消模型
@@ -325,7 +356,7 @@ agenterm-script.exe eval [OPTIONS] EXPRESSION [--] [ARGS...]
 agenterm-script.exe check [OPTIONS] FILE.rhai|-
 agenterm-script.exe api [MODULE] [--status STATE]
 agenterm-script.exe api --json
-agenterm-script.exe api --compare node|bun|all
+agenterm-script.exe api --compare rust|node|bun|all
 agenterm-script.exe task list [--manifest PATH] [--json]
 agenterm-script.exe task show TASK [--manifest PATH] [--json]
 agenterm-script.exe task run TASK [--manifest PATH] [--] [ARGS...]
@@ -364,109 +395,140 @@ agenterm-script.exe task run TASK [--manifest PATH] [--] [ARGS...]
 
 文本 message 可改善，但自动化只依赖稳定 class/code/JSON。
 
-## 六、标准库第一版
+## 六、Rust-shaped 小集与 Rhai-native 扩展
 
-### `fs`
+### 命名所有权
+
+API 先判断属于谁，再决定名字：
+
+| Root | 可以进入的能力 | 不能进入的能力 |
+|---|---|---|
+| Rhai language/global | 原生 string/array/map/function/import，`args`、`print` | 大量 host convenience |
+| `std::` | 与 Rust std 有明确、稳定概念对应的精选能力 | HTTP client、executor、Fleet、假 trait/泛型 |
+| `rhai::` | 本运行时自有的高级能力和组合原语 | 冒充 Rust std 或 AgenTerm Fleet |
+| `fleet` | 与当前 AgenTerm server/profile/broker 绑定的领域对象 | 通用文件/网络/进程函数 |
+
+`std::` 不是营销标签。每个 entry 必须有 `rust_path`、mapping level 和
+semantic differences；无法诚实说明对应关系就放入 `rhai::` 或 Fleet。
+
+### `std::fs`
+
+首版候选采用 Rust 熟悉名称：
 
 ```text
-read_text / read_bytes
-write_text / write_bytes
-atomic_write
-list
-metadata
+read / read_to_string
+write
+metadata / read_dir
 create_dir / create_dir_all
-copy / move
+copy / rename
 remove_file / remove_dir
 ```
 
+AgenTerm-specific atomic replacement 与 owned temp 若没有 Rust std 的直接
+表面对应，不伪装成 `std::fs` 原生函数；它们可以返回 typed helper，或在
+证据确认后进入 `rhai::runtime`/独立 extension。
+
 要求：
 
-- 显式 UTF-8/bytes，不猜编码；
+- `read_to_string` 明确 UTF-8，`read` 返回 `Bytes`；
 - 单次与累计 bytes 有界；
 - Windows long path、Unicode、只读、占用、拒绝访问分型；
 - atomic replace 不把失败报告为成功；
 - remove 只作用于明确路径，不接受空/root/未解析 broad target；
 - owned temp helper 记录所有权并在取消/崩溃路径清理。
 
-### `path`
+### `std::path`
 
-- join、parent、file name、extension、relative、normalize；
+- 优先提供 `Path`/`PathBuf` 的 Rust-shaped value/method 心智；
+- join、parent、file_name、extension、relative、normalize 只选择 Rhai
+  中真正有用的 subset，不复制 borrow/OsStr/trait 层；
 - project root 与 cwd 分开；
 - Windows drive、UNC、separator、Unicode、long path 语义明确；
 - canonicalization/reparse point 不静默改变报告的目标；
 - 返回 typed path value 或规范 string，不能依赖显示文本解析。
 
-### `env`
+### `std::env`
 
-- get、has、set、remove、names、construct child env；
-- Windows name 大小写语义正确；
-- 读取和修改仅影响 worker/child，不修改 parent AgenTerm 进程；
+- `var`、`vars`、`current_dir` 优先对应 Rust 名称；
+- worker-local mutation 与 Rust process-global environment 的语义差异必须
+  显式记录；异步任务开始后的环境 snapshot/竞争规则先冻结再暴露；
+- child environment 主要通过 `std::process::Command` 的 `env`、
+  `env_remove`、`env_clear` 构造；
+- 任何修改不影响 parent AgenTerm 进程；
 - audit/diagnostics 记录 name/count，不记录 value；
 - secret value 不进入 error、schema 或 retained bundle。
 
-### `process`
+### `std::process`
 
-```text
-run(program, argv, options)
-spawn(program, argv, options) -> TaskHandle
+用户心智采用 Rust 的 `Command -> Child/Output`：
+
+```rhai
+let command = std::process::Command::new("git");
+command.args(["status", "--short"]);
+command.current_dir(repo);
+command.env("NAME", "value");
+
+let output = command.output();  // 本行取得终态
+let child = command.spawn();    // 立即取得有 identity 的 Child
 ```
 
-options：
+候选对象：
 
-- cwd；
-- explicit env overlay/replace；
-- stdin text/bytes/stream；
-- separate stdout/stderr；
-- timeout；
-- output/stream limits；
-- expected exit policy；
-- Windows creation flags 的有限 typed 选择。
+- `Command`：program、argv、cwd、env overlay/clear、stdin/stdout/stderr、
+  timeout/output ceiling 和有限 Windows creation policy；
+- `Child`：id/state、wait、kill/cancel、bounded stdout/stderr；
+- `Output`：success、exit code、stdout、stderr、complete/truncated facts。
 
-禁止用一个 command string 隐式调用 shell。需要 shell 时用户必须显式启动
-`cmd.exe`、PowerShell 或未来 `agenterm-bash.exe` 并提供 argv。
+不复制 Rust ownership、`Stdio` trait plumbing 或平台内部 handle。禁止一个
+command string 隐式调用 shell；需要 shell 时显式启动 `cmd.exe`、
+PowerShell 或未来 `agenterm-bash.exe` 并提供 argv。
 
-### `http`
+### `std::time`
+
+只承接 Rust-shaped 时间值：
+
+- `Duration`；
+- `Instant`，用于 monotonic elapsed/deadline；
+- `SystemTime`，用于 wall-clock；
+- constructor/method 名尽量对应 Rust，不能混淆 wall clock 与 monotonic。
+
+Rust std 没有高级 executor/timer runtime，因此 `sleep`、cancellable timer、
+race 和 wait composition 不放进假的 `std::task`，归 `rhai::task`。
+
+### `rhai::task`
+
+- `sleep(Duration)` 与 `after(Duration)`；
+- invocation-local Task/Stream identity；
+- wait、wait_all、race、cancel/cancel_all；
+- terminal state、迟到完成、失败传播和自然 worker exit；
+- bounded queue/backpressure，不能把 truncation 报成完整成功。
+
+### `rhai::http`
 
 ```text
-request(method, url, options) -> TaskHandle|Response
+request(method, url, options) -> HttpResponse
+start(method, url, options) -> Task
 ```
 
-首版包含：
-
-- HTTP(S)；
-- headers；
-- text/bytes body；
-- status、response headers；
-- bounded body stream；
-- timeout/cancel；
-- proxy/TLS/connection error 的无 secret 诊断。
-
-不包含：
-
-- raw socket；
-- listener/server；
-- WebSocket；
-- 任意 scheme；
-- 自动远程 module 下载。
-
+首版包含 HTTP(S)、headers、text/bytes body、status、bounded body stream、
+timeout/cancel，以及 proxy/TLS/connection 的无 secret 诊断。不包含 raw
+socket、listener/server、WebSocket、任意 scheme 或自动远程 module 下载。
 资格测试只使用本机 loopback fixture，不依赖公网。
 
-### `time` 与 `task`
+### `rhai::json`、`rhai::bytes` 与 Rhai 原生 text
 
-- wall-clock 与 monotonic deadline 分开；
-- sleep/timer 可取消；
-- task handle 具有 invocation-local stable ID；
-- wait、wait_all、race 的顺序和失败传播明确；
-- task cancel 有终态且迟到完成不能覆盖 cancelled；
-- sidecar 无 reachable foreground task 后自然退出。
-
-### `json`、`text`、`bytes`
-
-- bounded parse/stringify；
-- UTF-8-safe slice/length；
+- `rhai::json` 提供 bounded parse/stringify；
+- Rhai 原生 string 承担常见 UTF-8 text 操作，不重新包装一个平行 String；
+- `Bytes` 是 typed object，`rhai::bytes` 只放 construction/conversion helper；
 - explicit text/bytes conversion；
 - hex/base64 是否进入首版由实际 HTTP/process 旅程决定；
 - 深层 JSON、巨大 collection、无效 UTF-8 返回 typed limit/data error。
+
+### `rhai::runtime`
+
+只提供脚本确实需要读取的当前 invocation facts，例如 runtime/API version、
+profile、有效 limits、source/project identity 与 cancellation state；不把
+内部 supervisor、thread、Win32 handle 或 private broker 暴露成脚本 API。
 
 ### Catalog 能力全景树（不是脚本 namespace）
 
@@ -585,84 +647,55 @@ agenterm-script
 这棵 catalog 树回答“产品覆盖了哪些问题域”，不直接规定用户必须写成
 `system::fs::read_text()`。分类层级可以深，脚本调用表面必须浅。
 
-### 用户脚本表面：浅 namespace + typed object
+### 用户脚本表面：Rust-shaped + Rhai-native + Fleet-bound
 
-推荐把用户真正记忆的表面压缩为：
+用户只需判断能力属于哪一层：
 
 ```text
-全局（只留最常用）
-├─ args
-└─ print(...)
-
-静态 namespace（无 invocation identity）
-├─ fs::       文件、目录、owned temp
-├─ path::     Windows path 运算
-├─ env::      worker/child 环境
-├─ process::  子进程
-├─ http::     HTTP(S) client
-├─ time::     时间、Duration、timer
-├─ json::     parse/stringify
-└─ task::     多 Task 组合
-
-typed object（有状态或有 identity，使用点号）
-├─ Task        .wait() / .cancel() / .state
-├─ Stream      .read() / .close() / .truncated
-├─ Bytes       .len / .slice() / .to_text()
-├─ ProcessResult
-├─ HttpResponse
-└─ Fleet facade
-   ├─ fleet.workspace
-   ├─ fleet.tabs
-   ├─ fleet.events
-   └─ fleet.terminal(tab_id)
-
-语言/CLI 机制（不是 runtime namespace）
-├─ import "relative/module" as m
-├─ agenterm.tasks.json
-└─ script task list / show / run
-
-catalog/diagnostics（不是 runtime namespace）
-├─ script api
-├─ script check
-└─ typed result / audit / limits
+Rust std 有稳定 analogue？
+  ├─ yes -> std::，保留熟悉 path/name/object，记录语义适配
+  └─ no
+      ├─ 通用 Rhai runtime extension？ -> rhai::
+      ├─ 有 identity/lifecycle？        -> typed object method
+      └─ 绑定 AgenTerm server？         -> fleet object
 ```
 
 选择规则：
 
-- namespace 使用 Rhai 原生 `::`，例如 `fs::read_text(path)`；
-- 有资源 identity 或生命周期的值使用方法，例如 `job.wait()`、
+- namespace 使用 Rhai 原生 `::`；
+- `std::` 只放可诚实映射的 Rust std 小集，不追求完整 Rust；
+- `rhai::` 放 HTTP、Task executor、JSON convenience 等自有扩展；
+- 有资源 identity 或生命周期的值使用方法，例如 `child.wait()`、
   `response.body.read()`；
-- 不暴露 `runtime::data::...`、`system::...`、`network::...` 等分类壳；
-- `text` 优先使用 Rhai 原生 string；额外编码能力放进 `Bytes` 或极小的
-  `text::`，不为凑树创建空 namespace；
-- `stream` 主要是 typed object，不要求用户写
-  `stream::read(stream_handle)`；
-- named task 属于 manifest/CLI；不要与并发 `Task` 混成同一注册表；
-- Fleet 是与当前 server、profile 和 broker 绑定的 facade，因此用 `fleet`
-  object 而不是假装无状态的 static namespace；
-- 当前 v1 的 `agent` 名称会与未来 `agenterm-agent.exe` 概念冲突。建议
-  v0.1.9 升 Script API v2，以 `fleet` 为唯一 canonical 名称；`check`
-  针对旧 `agent.*` 给出明确迁移诊断，不长期保留第二别名。
+- 不暴露 `runtime::data::...`、`system::...`、`network::...` 等 catalog 壳；
+- Rhai 原生 string/array/map 不包装成伪 `std::string/vec/collections`；
+- 不实现假的 Rust trait、borrow、generic、`Result/?` 或 Future/Poll 表面；
+- named task 属于 manifest/CLI，不与并发 Task 混成同一注册表；
+- Fleet 与当前 server/profile/broker 绑定，使用 `fleet` object；
+- 当前 v1 的 `agent` 会与未来 `agenterm-agent.exe` 概念冲突。v0.1.9
+  建议升 Script API v2，以 `fleet` 为唯一 canonical 名称；`check` 针对
+  旧 `agent.*` 给出明确迁移诊断，不长期保留第二别名。
 
-普通脚本应当短而直：
+普通脚本应当让 Rust 用户直接猜中主要结构：
 
 ```rhai
-let config = json::parse(fs::read_text("agenterm.local.json"));
-
-let result = process::run(
-    "git",
-    ["status", "--short"],
-    #{ cwd: config.repo, timeout: time::seconds(10) }
+let config = rhai::json::parse(
+    std::fs::read_to_string("agenterm.local.json")
 );
 
-if !result.success {
-    throw result.error;
+let command = std::process::Command::new("git");
+command.args(["status", "--short"]);
+command.current_dir(config.repo);
+
+let output = command.output();
+if !output.success {
+    throw output.error;
 }
 
-print(result.stdout);
+print(output.stdout);
 ```
 
-Fleet 操作也应从用户对象出发，而不是暴露内部 operation ID：
+Fleet 操作从绑定对象出发，不暴露内部 operation ID：
 
 ```rhai
 let active = fleet.tabs.active();
@@ -673,11 +706,31 @@ print(screen.text);
 operation ID、receipt、event 和 post-state 仍存在于 typed result/catalog，
 只是普通路径不要求用户手工拼接它们。
 
-这棵树是范围地图，不表示追求 Node.js/Bun API 兼容。横向比较采用
+每项 API 同时记录四个坐标：
+
+```text
+catalog_path         system / filesystem / read-text
+surface_path         std::fs::read_to_string
+rust_path            std::fs::read_to_string
+semantic_difference  typed Rhai exception instead of Result<T, io::Error>
+```
+
+Rust 是首要的命名与对象心智参照，但仍不是兼容目标：
+
+| AgenTerm surface | Rust analogue | mapping | 必须公开的差异 |
+|---|---|---|---|
+| `std::fs::read_to_string` | 同路径 | adapted | typed Rhai error，不返回 Rust `Result` |
+| `std::process::Command` | 同对象心智 | adapted | 无 ownership/trait/OS handle surface |
+| `std::time::Duration` | 同类型心智 | adapted | Rhai number 与 hard ceiling |
+| `rhai::task` | 无高层 std analogue | native | executor-neutral Task/Stream |
+| `rhai::http` | 无 Rust std HTTP client | native | 有界 client，不影射某个 crate |
+| `fleet` | 无对应物 | AgenTerm-specific | 绑定 server/profile/broker |
+
+Node.js/Bun 继续作为问题域覆盖参照，不表示 API 兼容。横向比较采用
 “用途相似”而不是“函数同名”：
 
 ```text
-Node.js / Bun
+Rust std + Node.js / Bun
   提供问题域、成熟用例和遗漏检查
           |
           v
@@ -702,6 +755,7 @@ AgenTerm-native contract
 | package/tooling | npm/npx | package manager/build/test | 延后给 AgenTerm 组件生态 |
 
 对照基线记录来源和复核日期，不能写成兼容性承诺。初始参照为
+[Rust std](https://doc.rust-lang.org/std/)、
 [Node.js API index](https://nodejs.org/api/) 与
 [Bun API index](https://bun.sh/docs/runtime/bun-apis)（2026-07-28 复核）。
 
@@ -713,8 +767,11 @@ Rhai 不需要伪装成 JavaScript Promise，也不新增 `async`/`await` 语法
 普通 I/O 使用阻塞脚本调用：
 
 ```rhai
-let result = process::run("git", ["status"], #{});
-let response = http::request("GET", url, #{});
+let command = std::process::Command::new("git");
+command.arg("status");
+let output = command.output();
+
+let response = rhai::http::request("GET", url, #{});
 ```
 
 这里“阻塞”的只是本次 `agenterm-script.exe` 的 Rhai evaluation thread，
@@ -722,21 +779,28 @@ let response = http::request("GET", url, #{});
 可能长时间运行的 API 提供语义不同的 `start`/`spawn`：
 
 ```rhai
-let web = http::start("GET", release_url, #{});
-let git = process::start("git", ["status", "--short"], #{ cwd: repo });
+let command = std::process::Command::new("git");
+command.args(["status", "--short"]);
+command.current_dir(repo);
+
+let web = rhai::http::start("GET", release_url, #{});
+let child = command.spawn();
+let timeout = std::time::Duration::from_secs(15);
 
 // 两项已经并行运行；wait 的书写顺序不等于执行顺序。
-let response = web.wait(time::seconds(15));
-let status = git.wait(time::seconds(15));
+let response = web.wait(timeout);
+let output = child.wait_with_output(timeout);
 ```
 
 这不是为每个函数复制 `fooSync/foo/fooAsync` 三套 API。规则是：
 
 - 快速、本地、有界操作只提供直接调用；
-- 外部 I/O/进程/Fleet wait 提供直接调用和显式 `start`；
-- `run/request/wait` 表示本行取得终态；
-- `start` 表示立即返回 `Task`；
-- `Task.wait()`、`Task.cancel()` 是统一组合面；
+- 外部 I/O/进程/Fleet wait 提供直接终态调用和显式 start/spawn；
+- `Command.output`、`http::request`、`wait` 表示本行取得终态；
+- `Command.spawn` 返回 `Child`，`http::start` 返回 `Task`；
+- `Child`、`Task`、`Stream` 共享一致的 state/cancel/deadline 心智，但不
+  为统一而抹掉有价值的 typed object；
+- `rhai::task` 提供跨 waitable 的组合面；
 - v0.1.9 不并行执行任意 Rhai closure，不引入 worker-thread 共享脚本状态。
 
 首版使用显式 typed handle：
@@ -758,11 +822,13 @@ StreamHandle
 候选 API：
 
 ```text
-task.wait(handle, timeout_ms?)
-task.wait_all(handles, timeout_ms?)
-task.cancel(handle)
-stream.read(handle, max_bytes)
-stream.close(handle)
+handle.wait(Duration?)
+handle.cancel()
+stream.read(max_bytes)
+stream.close()
+rhai::task::wait_all(waitables, Duration?)
+rhai::task::race(waitables, Duration?)
+rhai::task::cancel_all(waitables)
 ```
 
 最终命名在 catalog 冻结时确定，但必须满足：
@@ -933,8 +999,12 @@ catalog 是实现、check、文档、MCP/Agent 消费者的同一事实源。
 每个 API entry 至少包含：
 
 - stable ID；
-- hierarchy path（domain/group/name）与稳定排序键；
-- module/function/signature；
+- `catalog_path`（domain/group/name）与稳定排序键；
+- canonical `surface_path`、module/type/function/signature；
+- optional `rust_path`；
+- Rust mapping level：`direct|adapted|inspired|none`；
+- machine-readable `semantic_differences`，至少覆盖 error、type、blocking、
+  cancellation、platform 和 limit 差异；
 - profile availability；
 - input/result/error schema；
 - fs/process/network/Fleet access facts；
@@ -945,7 +1015,7 @@ catalog 是实现、check、文档、MCP/Agent 消费者的同一事实源。
 - runtime/API version；
 - degraded/unavailable reason；
 - secret-bearing input/output facts。
-- `comparison` metadata：`node`/`bun` analogue、关系
+- `comparison` metadata：`rust`/`node`/`bun` analogue、关系
   `similar|agenterm-specific|deferred|not-applicable`、reference/version 与
   last-reviewed；它只用于差距分析和手册，不参与运行时语义。
 
@@ -953,9 +1023,10 @@ catalog 是实现、check、文档、MCP/Agent 消费者的同一事实源。
 
 ```text
 agenterm-script.exe api
-agenterm-script.exe api fs
+agenterm-script.exe api std::fs
+agenterm-script.exe api rhai::task
 agenterm-script.exe api --status planned
-agenterm-script.exe api --compare all
+agenterm-script.exe api --compare rust|node|bun|all
 agenterm-script.exe api --json
 ```
 
@@ -1189,8 +1260,10 @@ agenterm-script.exe
 - build/check/package 仍由现有 PowerShell last-known-good 驱动；
 - clean candidate 仍只构建一次，package 消费同一批字节。
 
-README 增加一个简短 script task 示例；完整 API、manifest 和错误合同由
-`agenterm-script.exe api --json` 与 PRD 承担，避免 README 变成手册。
+README 增加一个简短 script task 示例；稳定运行时合同由
+[`docs/agenterm-script-runtime.md`](../docs/agenterm-script-runtime.md)
+承载，机器事实由 `agenterm-script.exe api --json` 承载，PRD 拥有产品
+状态，避免 README 或计划变成第二份手写手册。
 
 ## 十六、依赖与并行波次
 
@@ -1205,10 +1278,10 @@ README 增加一个简短 script task 示例；完整 API、manifest 和错误�
           |
           v
 波次 1：可并行纯模块
-  A. fs/path/temp
-  B. env/process
-  C. json/text/bytes
-  D. task/stream/time
+  A. std::fs/path + Path/Bytes/temp
+  B. std::env/process/time + Command/Child/Duration
+  C. rhai::json/runtime
+  D. rhai::task/stream
   E. manifest/module/catalog
   F. HTTP loopback fixture与 adapter spike
           |
@@ -1241,10 +1314,9 @@ README 增加一个简短 script task 示例；完整 API、manifest 和错误�
 |---|---|
 | Runtime/contracts | `script_runtime.rs`, `script_catalog.rs` |
 | Task/stream | `script_task.rs`, `script_stream.rs` |
-| Files | `script_std/fs.rs`, `path.rs` |
-| Process/env | `script_std/process.rs`, `env.rs` |
-| Data | `script_std/json.rs`, `text.rs`, `bytes.rs` |
-| HTTP | `script_std/http.rs`, loopback fixture |
+| Rust-shaped std | `script_std/fs.rs`, `path.rs`, `process.rs`, `env.rs`, `time.rs` |
+| Rhai extensions | `script_rhai/task.rs`, `json.rs`, `bytes.rs`, `runtime.rs` |
+| HTTP | `script_rhai/http.rs`, loopback fixture |
 | Modules/tasks | `script_module.rs`, `script_manifest.rs` |
 | Fleet | `script_fleet.rs` |
 | Tests | new script runtime black-box suites |
@@ -1256,7 +1328,9 @@ README 增加一个简短 script task 示例；完整 API、manifest 和错误�
 
 ### 门一：通用 local runtime
 
-- fs/path/env/process/http/time/json/text/bytes 可形成真实纵向任务；
+- `std::{fs,path,env,process,time}` 与
+  `rhai::{task,http,json,bytes,runtime}` 可形成真实纵向任务；
+- catalog/surface/rust paths、mapping 和 semantic differences 可发现；
 - local 默认且不被 agent 权限模型阉割；
 - pure/observe 回归全绿；
 - result/error/exit class 稳定。
@@ -1295,6 +1369,9 @@ README 增加一个简短 script task 示例；完整 API、manifest 和错误�
 | 风险 | 早期信号 | 应对 |
 |---|---|---|
 | “完善”膨胀为复制 Node | 开始追 npm/JS compatibility | 锁定本地自动化纵向闭环 |
+| Rust-shaped 被误写成 Rust-compatible | 开始复制 trait/borrow/Result/Future | 每项 mapping + semantic differences |
+| LLM 因近似名称过度推断 | 生成未支持的 Rust std API | 完整树、unknown节点、check迁移建议 |
+| 自有能力冒充 std | 出现 `std::http`/高层`std::task::spawn` | 无真实 std analogue 就归 `rhai::` |
 | local 又被安全模型阉割 | 每次 fs/process 都要 capability | agent policy 留给未来 agent 层 |
 | 标准库变成一个大文件 | bin/runtime 同时塞 fs/http/task | 按域拆模块，先冻结 typed contracts |
 | Rhai 异步模型难用 | API 假装 Promise 或靠 callback 地狱 | 显式 TaskHandle/StreamHandle |
@@ -1319,7 +1396,9 @@ README 增加一个简短 script task 示例；完整 API、manifest 和错误�
 1. v0.1.9 主线是 `agenterm-script.exe`，MCP 顺延 v0.1.10。
 2. ordinary run/eval 默认 `local`。
 3. pure/observe 保持专用 profile。
-4. 首版标准库锁定 fs/path/env/process/http/time/json/text/bytes。
+4. 首版能力锁定 `std::{fs,path,env,process,time}` 与
+   `rhai::{task,http,json,bytes,runtime}`；Rhai 原生 string/array/map 直接
+   复用。
 5. 异步模型使用显式 TaskHandle/StreamHandle。
 6. manifest 使用 `agenterm.tasks.json` schema v1。
 7. 模块只支持本地 project-root-relative。
@@ -1330,8 +1409,10 @@ README 增加一个简短 script task 示例；完整 API、manifest 和错误�
 12. 自托管只做一个低风险 PowerShell helper 双跑。
 13. v0.1.9 只交付 package-ready identity/provenance hooks，不实现包管理。
 14. `agenterm.tasks.json` 与未来 package manifest 永久保持职责分离。
-15. catalog taxonomy 与脚本 surface 分离；用户只面对浅 namespace。
-16. static namespace 使用 `::`，有 identity 的 typed object 使用点号方法。
+15. catalog taxonomy 与脚本 surface 分离；每项记录 catalog/surface/rust
+    path、mapping level 与 semantic differences。
+16. `std::` 是 Rust-shaped 精选小集，`rhai::` 是 runtime-native 扩展；
+    static namespace 使用 `::`，有 identity 的 typed object 使用点号方法。
 17. canonical Fleet facade 使用 `fleet`；Script API v2 不长期保留 `agent`
     别名，只提供明确迁移诊断。
 18. Rhai 不新增 async/await；直接调用服务顺序脚本，`start` + `Task` 服务
@@ -1358,15 +1439,15 @@ README 增加一个简短 script task 示例；完整 API、manifest 和错误�
   api --json + check alignment
 
 提交 2
-  fs/path/temp + json/text/bytes
+  std::fs/path + Path/Bytes + rhai::json
   Unicode/long-path/atomic/cleanup black-box
 
 提交 3
-  env/process
+  std::env/process/time + Command/Child/Duration
   argv/cwd/stdin/stdout/stderr/timeout/Job cleanup
 
 提交 4
-  task/stream/time
+  rhai::task + Task/Stream
   cancellation/backpressure/natural exit
 
 提交 5
@@ -1374,7 +1455,7 @@ README 增加一个简短 script task 示例；完整 API、manifest 和错误�
   task list/show/run
 
 提交 6
-  loopback HTTP
+  rhai::http + loopback HTTP
   bounded body/timeout/cancel/privacy
 
 提交 7

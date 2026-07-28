@@ -2,6 +2,8 @@
 
 Parent: [AgenTerm product tree](../PRD.md#product-tree)
 
+Runtime contract: [AgenTerm Script Runtime specification](../docs/agenterm-script-runtime.md)
+
 Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
 ## Shipped baseline
@@ -34,11 +36,15 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
 ## v0.1.9 product position
 
-`agenterm-script.exe` is AgenTerm's general-purpose local scripting runtime,
-with Node.js/Bun-like local-automation usefulness rather than JavaScript,
-Node API, npm, or Bun compatibility. It is not positioned as a restricted
-security plugin.
+`agenterm-script.exe` is AgenTerm's general-purpose local scripting runtime:
+Rhai language plus a Rust-shaped selected `std::` subset, Rhai-native
+extensions, and the AgenTerm-bound Fleet domain. This is a capability overlay,
+not Rust, Node.js, Bun, npm, Cargo, or another Rhai host compatibility layer,
+and it is not positioned as a restricted security plugin.
 
+- Rust std is the primary naming and object-model reference where a stable
+  analogue exists, but every mapping declares how Rhai errors, types, blocking,
+  cancellation, limits and Windows behavior differ;
 - Node.js and Bun are coverage and use-case references, not API-shape
   specifications. AgenTerm does not inherit callback/Promise duality,
   sync/async duplication, legacy aliases, module-resolution compatibility, or
@@ -91,35 +97,49 @@ security plugin.
   version, runtime version, and profile, but is not required for the first
   usable local-runtime slice.
 
-## Local standard library
+## Rust-shaped subset and Rhai-native extensions
 
-- [ ] `fs` covers bounded file read/write, directory listing and creation,
-  metadata, copy, move, delete, and same-volume atomic replacement.
-- [ ] `path` covers Windows normalization, join/split, relative paths,
-  explicit working directories, Unicode and long paths, and owned temporary
-  paths.
-- [ ] `env` reads, sets, deletes, enumerates, and constructs inherited child
-  environments without writing values to audit or diagnostics.
-- [ ] `process` accepts executable plus argv, cwd, env, stdin, bounded
-  stdout/stderr streams, timeout, cancellation, and typed exit status; it
-  never substitutes an implicit shell command string.
-- [ ] `time` provides wall time, monotonic deadlines, timers, and cancellable
-  waits through the common task model.
-- [ ] `json`, `text`, and `bytes` provide bounded parsing, serialization,
-  Unicode/encoding operations, and explicit conversions.
-- [ ] `http`/`fetch` provides HTTP(S) method, URL, headers, body, timeout,
-  status, bounded response streaming, cancellation, proxy/TLS diagnostics, and
-  credential-safe errors. Low-level sockets are not part of v0.1.9.
+- [ ] namespace ownership is explicit: `std::` contains only selected
+  capabilities with an honest Rust standard-library analogue; `rhai::`
+  contains runtime-native higher-level extensions; `fleet` remains a bound
+  AgenTerm object; Rhai language primitives, project modules, manifests and
+  CLI discovery are not wrapped in artificial namespaces.
+- [ ] `std::fs` covers bounded `read`, `read_to_string`, `write`, directory
+  listing/creation, metadata, copy, rename and explicit-target deletion.
+- [ ] `std::path` provides a selected `Path`/`PathBuf` object model for Windows
+  normalization, composition, relative paths, working directories, Unicode,
+  long paths and canonical/reparse-point facts without copying Rust borrowing.
+- [ ] `std::env` reads/enumerates worker environment and current-directory
+  facts; worker-local mutation and child environment inheritance/overlay/
+  replace/remove semantics are explicit and never leak values to diagnostics.
+- [ ] `std::process` uses the Rust-shaped `Command -> Child/Output` model with
+  executable plus argv, cwd, env, stdin, bounded stdout/stderr, timeout,
+  cancellation and typed exit state; it never substitutes an implicit shell
+  command string or exposes Rust ownership/trait/OS-handle internals.
+- [ ] `std::time` provides selected `Duration`, `Instant`, and `SystemTime`
+  values while keeping monotonic deadlines and wall time distinct; high-level
+  sleep/timer/task composition is not misrepresented as Rust `std`.
+- [ ] `rhai::task` owns executor-neutral Task/Stream composition, cancellable
+  sleep/timer, wait-all, race, cancel and bounded backpressure.
+- [ ] `rhai::json` plus Rhai-native strings and a typed `Bytes` object provide
+  bounded parsing, serialization, Unicode/encoding and explicit conversions
+  without duplicating language primitives as fake Rust collections.
+- [ ] `rhai::http` provides HTTP(S) method, URL, headers, body, timeout,
+  status, bounded response streaming, cancellation, proxy/TLS diagnostics and
+  credential-safe errors. Rust std has no high-level HTTP client, so
+  `std::http` is forbidden; low-level sockets are outside v0.1.9.
+- [ ] `rhai::runtime` may expose only safe invocation/API/profile/version/
+  limits facts, never private supervisor, HWND, renderer, PTY or broker
+  handles.
 - [ ] filesystem and temporary-resource helpers have explicit ownership and
   cleanup behavior. Canonicalization, reparse points, atomic replacement, and
   failure paths cannot silently target a different path than the result
   reports.
-- [ ] the catalog taxonomy is not copied into the script surface. Static
-  Rhai namespaces are shallow and purpose-named (`fs`, `path`, `env`,
-  `process`, `http`, `time`, `json`, `task`); resource-bearing values use
-  custom-type methods (`Task.wait`, `Stream.read`, response/process result
-  access), while modules, named-task manifests, catalog and diagnostics remain
-  language/CLI mechanisms rather than artificial runtime namespaces.
+- [ ] the catalog taxonomy is not copied into the script surface.
+  Resource-bearing values use custom-type methods (`Child.wait`,
+  `Task.cancel`, `Stream.read`, response/output access), while modules,
+  named-task manifests, catalog and diagnostics remain language/CLI mechanisms
+  rather than artificial runtime namespaces.
 - [ ] globals remain minimal (`args` and `print` baseline). Native Rhai string
   and collection operations are reused instead of wrapping every value under
   `data`; `system`, `network`, `code-and-automation`, and `observability` are
@@ -136,8 +156,8 @@ security plugin.
 - [ ] TOML versus reuse of an existing AgenTerm manifest encoding is the one
   remaining implementation-before-parser decision. v0.1.9 selects a versioned
   `agenterm.tasks.json` format and records the exact schema before
-  task-manifest parsing begins, but does not block `fs`, `path`, `env`,
-  `process`, `time`, or the task scheduler.
+  task-manifest parsing begins, but does not block the selected `std::` or
+  `rhai::task` contracts.
 - [ ] project tasks and user-level named commands are discoverable through one
   typed catalog. Invalid entries remain visible with a stable degraded reason
   instead of disappearing.
@@ -194,6 +214,10 @@ security plugin.
 - [ ] every entry separates `catalog_path` from its shallow `surface_path`, so
   product taxonomy can evolve without forcing nested namespaces into user
   source or silently renaming callable contracts.
+- [ ] every entry also carries nullable `rust_path`, a mapping level
+  (`direct`, `adapted`, `inspired`, or `none`) and machine-readable semantic
+  differences for error, type, blocking, cancellation, platform and limits.
+  An API without an honest Rust std analogue cannot enter `std::`.
 - [ ] optional comparison metadata maps a capability to a reviewed Node.js or
   Bun analogue as `similar`, `agenterm-specific`, `deferred`, or
   `not-applicable`, with source/version and review date. It supports gap
