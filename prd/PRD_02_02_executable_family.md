@@ -71,9 +71,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       its left and provides native font family/size plus Dark/Light controls:
       theme preview is immediate, Apply validates and persists the shared
       settings atomically before rebuilding the UI font, and Cancel restores
-      the last applied palette without changing server state. Ordinary
-      launches, remaining workbench parity and same-server rollback
-      qualification are still pending.
+      the last applied palette without changing server state. Terminal drag
+      selection is client-owned and generation-bound, paints through the
+      selected palette, reconstructs Unicode/wide-cell text from the causal
+      screen DTO, and serves both Ctrl+C/Ctrl+V and native system-menu
+      Copy/Paste; paste remains bounded and enters the PTY only through the
+      interactive lease. Ordinary launches, remaining workbench parity and
+      same-server rollback qualification are still pending.
   - [ ] compatibility is fail-closed and asymmetric: a new GUI may connect to
     its declared server protocol range; an incompatible server remains alive
     and reports a precise upgrade/restart choice instead of being killed

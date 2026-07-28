@@ -32,6 +32,9 @@ public static class AgenTermRemoteUiNativeTest {
     public static extern bool GetWindowRect(IntPtr window, out Rect rect);
 
     [DllImport("user32.dll")]
+    public static extern bool GetClientRect(IntPtr window, out Rect rect);
+
+    [DllImport("user32.dll")]
     public static extern bool PrintWindow(
         IntPtr window, IntPtr device, uint flags);
 
@@ -597,6 +600,103 @@ try {
     if ($returnedLive.windows[0].scrollback_offset -ne 0) {
         throw 'replaceable UI mouse wheel did not return to the live viewport'
     }
+
+    Write-Host 'STEP select terminal text, Copy, and Paste through the UI'
+    $copyMarker = "REMOTE_COPY_$($run.RunId)"
+    Invoke-AgenTerm @(
+        'send-keys', '-t', $tabId, '-l', "echo $copyMarker"
+    ) | Out-Null
+    Invoke-AgenTerm @('send-keys', '-t', $tabId, 'Enter') | Out-Null
+    Invoke-AgenTerm @(
+        'wait-pane', '-t', $tabId,
+        '--contains', $copyMarker, '--timeout-ms', '5000'
+    ) | Out-Null
+    $selectionBootstrap = Invoke-AgenTerm @('ui-bootstrap') |
+        ConvertFrom-Json
+    $selectionTab = @(
+        $selectionBootstrap.tabs | Where-Object id -eq $tabId
+    )[0]
+    $markerRun = @(
+        $selectionTab.screen.runs |
+            Where-Object { $_.text.Contains($copyMarker) }
+    )[-1]
+    if ($null -eq $markerRun) {
+        throw 'terminal screen snapshot did not expose the copy marker run'
+    }
+    $markerColumn = [int]$markerRun.column +
+        $markerRun.text.IndexOf($copyMarker)
+    $clientRect = [AgenTermRemoteUiNativeTest+Rect]::new()
+    if (-not [AgenTermRemoteUiNativeTest]::GetClientRect(
+            $gui.MainWindowHandle, [ref]$clientRect
+        )) {
+        throw 'GetClientRect failed for terminal selection'
+    }
+    $terminalLeft = 360
+    $terminalWidth = $clientRect.Right - $terminalLeft
+    $terminalHeight = $clientRect.Bottom - 26 - 104
+    $cellWidth = [Math]::Max(
+        1, [Math]::Floor($terminalWidth / [int]$selectionTab.screen.columns)
+    )
+    $cellHeight = [Math]::Max(
+        1, [Math]::Floor($terminalHeight / [int]$selectionTab.screen.rows)
+    )
+    $selectionY = [int](
+        ([int]$markerRun.row * $cellHeight) + [Math]::Floor($cellHeight / 2)
+    )
+    $selectionStartX = [int](
+        $terminalLeft + ($markerColumn * $cellWidth) +
+        [Math]::Floor($cellWidth / 2)
+    )
+    $selectionEndX = [int](
+        $terminalLeft +
+        (($markerColumn + $copyMarker.Length - 1) * $cellWidth) +
+        [Math]::Floor($cellWidth / 2)
+    )
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, 0x0201, [IntPtr]::Zero,
+        [AgenTermRemoteUiNativeTest]::MousePoint(
+            $selectionStartX, $selectionY
+        )
+    ) | Out-Null
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, 0x0200, [IntPtr]::Zero,
+        [AgenTermRemoteUiNativeTest]::MousePoint(
+            $selectionEndX, $selectionY
+        )
+    ) | Out-Null
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, 0x0202, [IntPtr]::Zero,
+        [AgenTermRemoteUiNativeTest]::MousePoint(
+            $selectionEndX, $selectionY
+        )
+    ) | Out-Null
+    if (-not [string]::IsNullOrWhiteSpace($ScreenshotPath)) {
+        $requestedScreenshot = [IO.Path]::GetFullPath($ScreenshotPath)
+        $selectionScreenshot = Join-Path `
+            ([IO.Path]::GetDirectoryName($requestedScreenshot)) `
+            "$([IO.Path]::GetFileNameWithoutExtension($requestedScreenshot))-selection.png"
+        Save-WindowPng -Window $gui.MainWindowHandle -Path $selectionScreenshot
+    }
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, 0x0112, [IntPtr]0x1F00, [IntPtr]::Zero
+    ) | Out-Null
+    $copied = (Get-Clipboard -Raw).TrimEnd("`r", "`n")
+    if ($copied -ne $copyMarker) {
+        throw "terminal Copy returned '$copied' instead of '$copyMarker'"
+    }
+
+    $pasteMarker = "REMOTE_PASTE_$($run.RunId)"
+    Set-Clipboard -Value "echo $pasteMarker"
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, 0x0112, [IntPtr]0x1F10, [IntPtr]::Zero
+    ) | Out-Null
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, 0x0102, [IntPtr]13, [IntPtr]::Zero
+    ) | Out-Null
+    Invoke-AgenTerm @(
+        'wait-pane', '-t', $tabId,
+        '--contains', $pasteMarker, '--timeout-ms', '5000'
+    ) | Out-Null
 
     Write-Host 'STEP reconnect the same GUI process across a server restart'
     $reconnectGuiPid = $gui.Id

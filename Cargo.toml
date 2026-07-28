@@ -38,6 +38,7 @@ vt100 = "0.16"
 
 [target.'cfg(windows)'.dependencies]
 rmux-pty = "0.9.1"
+unicode-width = "0.2"
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",

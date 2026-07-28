@@ -2,13 +2,14 @@ use std::{
     ffi::c_void,
     mem,
     process::Command,
-    ptr,
+    ptr, thread,
     time::{Duration, Instant},
 };
 
 use anyhow::{Context as _, Result};
+use unicode_width::UnicodeWidthChar;
 use windows_sys::Win32::{
-    Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
+    Foundation::{COLORREF, GlobalFree, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
     Graphics::Gdi::{
         BeginPaint, CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS, CreateFontW, CreateSolidBrush,
         DEFAULT_CHARSET, DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE, DT_VCENTER, DeleteObject,
@@ -17,7 +18,14 @@ use windows_sys::Win32::{
         ReleaseDC, ScreenToClient, SelectObject, SetBkMode, SetTextColor, TEXTMETRICW, TRANSPARENT,
         UpdateWindow,
     },
-    System::LibraryLoader::GetModuleHandleW,
+    System::{
+        DataExchange::{
+            CloseClipboard, EmptyClipboard, GetClipboardData, IsClipboardFormatAvailable,
+            OpenClipboard, SetClipboardData,
+        },
+        LibraryLoader::GetModuleHandleW,
+        Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock},
+    },
     UI::{
         Input::KeyboardAndMouse::{
             GetFocus, GetKeyState, ReleaseCapture, SetCapture, SetFocus, VK_CONTROL, VK_DOWN,
@@ -26,17 +34,19 @@ use windows_sys::Win32::{
         },
         WindowsAndMessaging::{
             CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DestroyWindow,
-            DispatchMessageW, ES_AUTOVSCROLL, ES_MULTILINE, ES_WANTRETURN, GWLP_USERDATA,
-            GetClientRect, GetCursorPos, GetForegroundWindow, GetMessageW, GetWindowLongPtrW,
-            GetWindowTextLengthW, GetWindowTextW, IDC_ARROW, IDC_SIZEWE, LoadCursorW, LoadIconW,
-            MSG, MoveWindow, PostQuitMessage, RegisterClassW, SW_HIDE, SW_SHOW, SW_SHOWNOACTIVATE,
-            SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SetCursor,
-            SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW,
-            ShowWindow, TranslateMessage, WM_CAPTURECHANGED, WM_CHAR, WM_CLOSE, WM_COMMAND,
-            WM_CREATE, WM_DESTROY, WM_ERASEBKGND, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP,
-            WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY, WM_PAINT, WM_SETCURSOR, WM_SETFOCUS,
-            WM_SIZE, WM_TIMER, WNDCLASSW, WS_BORDER, WS_CHILD, WS_CLIPCHILDREN,
-            WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE, WS_VSCROLL,
+            DispatchMessageW, ES_AUTOVSCROLL, ES_MULTILINE, ES_WANTRETURN, EnableMenuItem,
+            GWLP_USERDATA, GetClientRect, GetCursorPos, GetForegroundWindow, GetMessageW,
+            GetSystemMenu, GetWindowLongPtrW, GetWindowTextLengthW, GetWindowTextW, IDC_ARROW,
+            IDC_SIZEWE, InsertMenuW, LoadCursorW, LoadIconW, MF_BYCOMMAND, MF_ENABLED, MF_GRAYED,
+            MF_SEPARATOR, MF_STRING, MSG, MoveWindow, PostQuitMessage, RegisterClassW, SC_CLOSE,
+            SW_HIDE, SW_SHOW, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+            SWP_NOZORDER, SWP_SHOWWINDOW, SendMessageW, SetCursor, SetForegroundWindow, SetTimer,
+            SetWindowLongPtrW, SetWindowPos, SetWindowTextW, ShowWindow, TranslateMessage,
+            WM_CAPTURECHANGED, WM_CHAR, WM_CLOSE, WM_COMMAND, WM_COPY, WM_CREATE, WM_DESTROY,
+            WM_ERASEBKGND, WM_INITMENUPOPUP, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP,
+            WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY, WM_PAINT, WM_PASTE, WM_SETCURSOR,
+            WM_SETFOCUS, WM_SIZE, WM_SYSCOMMAND, WM_TIMER, WNDCLASSW, WS_BORDER, WS_CHILD,
+            WS_CLIPCHILDREN, WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE, WS_VSCROLL,
         },
     },
 };
@@ -75,6 +85,10 @@ const SETTINGS_DARK_ID: usize = 2115;
 const SETTINGS_LIGHT_ID: usize = 2116;
 const SETTINGS_APPLY_ID: usize = 2117;
 const SETTINGS_CANCEL_ID: usize = 2118;
+const SYSTEM_MENU_COPY_ID: usize = 0x1f00;
+const SYSTEM_MENU_PASTE_ID: usize = 0x1f10;
+const CLIPBOARD_UNICODE_TEXT: u32 = 13;
+const TERMINAL_PASTE_LIMIT_BYTES: usize = 256 * 1024;
 const SIDEBAR_ROW_HEIGHT: i32 = 44;
 const TOOLBAR_HEIGHT: i32 = 44;
 const STATUS_HEIGHT: i32 = 26;
@@ -131,6 +145,7 @@ pub(crate) fn run_remote_gui(no_activate: bool) -> Result<()> {
     if window.is_null() {
         anyhow::bail!("CreateWindowExW failed for replaceable UI");
     }
+    install_system_menu(window)?;
     let edit = unsafe {
         CreateWindowExW(
             0,
@@ -321,6 +336,35 @@ enum RemoteCloseChoice {
     Cancel,
 }
 
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct RemoteTerminalPoint {
+    row: u32,
+    column: u32,
+}
+
+#[derive(Clone, Debug)]
+struct RemoteTerminalSelection {
+    tab_id: String,
+    generation: u64,
+    anchor: RemoteTerminalPoint,
+    active: RemoteTerminalPoint,
+    dragging: bool,
+}
+
+impl RemoteTerminalSelection {
+    fn bounds(&self) -> (RemoteTerminalPoint, RemoteTerminalPoint) {
+        if self.anchor <= self.active {
+            (self.anchor, self.active)
+        } else {
+            (self.active, self.anchor)
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.anchor == self.active
+    }
+}
+
 struct RemoteWindowState {
     window: HWND,
     edit: HWND,
@@ -357,6 +401,7 @@ struct RemoteWindowState {
     window_close_pending: bool,
     settings_open: bool,
     settings_theme_draft: ThemeId,
+    terminal_selection: Option<RemoteTerminalSelection>,
 }
 
 impl RemoteWindowState {
@@ -426,6 +471,7 @@ impl RemoteWindowState {
             window_close_pending: false,
             settings_open: false,
             settings_theme_draft,
+            terminal_selection: None,
         })
     }
 
@@ -442,6 +488,7 @@ impl RemoteWindowState {
         match result {
             Ok(changed) => {
                 self.reconcile_tab_editor();
+                self.reconcile_terminal_selection();
                 let active = self
                     .client
                     .as_ref()
@@ -461,6 +508,7 @@ impl RemoteWindowState {
                         Ok(client) => {
                             self.client = Some(client);
                             self.editing_tab_id = None;
+                            self.terminal_selection = None;
                             self.show_tab_editor(false);
                             self.last_active_id = self
                                 .client
@@ -496,6 +544,17 @@ impl RemoteWindowState {
         if self.editing_tab_id.is_some() && !still_exists {
             self.editing_tab_id = None;
             self.show_tab_editor(false);
+        }
+    }
+
+    fn reconcile_terminal_selection(&mut self) {
+        let still_current = self.terminal_selection.as_ref().is_some_and(|selection| {
+            self.active_tab().is_some_and(|tab| {
+                tab.id == selection.tab_id && tab.screen.generation == selection.generation
+            })
+        });
+        if self.terminal_selection.is_some() && !still_current {
+            self.terminal_selection = None;
         }
     }
 
@@ -893,6 +952,7 @@ impl RemoteWindowState {
     }
 
     fn new_tab(&mut self) {
+        self.cancel_terminal_selection();
         if let Err(error) = self.sync_composer() {
             self.last_error = Some(format!("Composer save failed: {error:#}"));
             return;
@@ -929,6 +989,7 @@ impl RemoteWindowState {
         else {
             return;
         };
+        self.cancel_terminal_selection();
         if let Err(error) = self.sync_composer() {
             self.last_error = Some(format!("Composer save failed: {error:#}"));
             return;
@@ -1037,6 +1098,7 @@ impl RemoteWindowState {
         if self.settings_open || self.window_close_pending {
             return;
         }
+        self.cancel_terminal_selection();
         if let Err(error) = self.sync_composer() {
             self.last_error = Some(format!("Composer save failed: {error:#}"));
             return;
@@ -1136,6 +1198,7 @@ impl RemoteWindowState {
         if self.window_close_pending {
             return;
         }
+        self.cancel_terminal_selection();
         if self.settings_open {
             self.finish_settings(false);
         }
@@ -1188,7 +1251,211 @@ impl RemoteWindowState {
         }
     }
 
+    fn terminal_point(&self, x: i32, y: i32, clamp: bool) -> Option<RemoteTerminalPoint> {
+        let (_, terminal, _, _) = self.layout_rects();
+        let tab = self.active_tab()?;
+        if !clamp
+            && (x < terminal.left
+                || x >= terminal.right
+                || y < terminal.top
+                || y >= terminal.bottom)
+        {
+            return None;
+        }
+        let local_x = (x - terminal.left).clamp(0, (terminal.right - terminal.left - 1).max(0));
+        let local_y = (y - terminal.top).clamp(0, (terminal.bottom - terminal.top - 1).max(0));
+        Some(RemoteTerminalPoint {
+            row: u32::try_from(local_y / self.cell_height)
+                .unwrap_or_default()
+                .min(tab.screen.rows.saturating_sub(1)),
+            column: u32::try_from(local_x / self.cell_width)
+                .unwrap_or_default()
+                .min(tab.screen.columns.saturating_sub(1)),
+        })
+    }
+
+    fn begin_terminal_selection(&mut self, x: i32, y: i32) -> bool {
+        let Some(point) = self.terminal_point(x, y, false) else {
+            return false;
+        };
+        let Some(tab) = self.active_tab() else {
+            return false;
+        };
+        self.terminal_selection = Some(RemoteTerminalSelection {
+            tab_id: tab.id.clone(),
+            generation: tab.screen.generation,
+            anchor: point,
+            active: point,
+            dragging: true,
+        });
+        unsafe {
+            SetFocus(self.window);
+            SetCapture(self.window);
+        }
+        true
+    }
+
+    fn drag_terminal_selection(&mut self, x: i32, y: i32) -> bool {
+        if !self
+            .terminal_selection
+            .as_ref()
+            .is_some_and(|selection| selection.dragging)
+        {
+            return false;
+        }
+        let Some(point) = self.terminal_point(x, y, true) else {
+            return false;
+        };
+        if let Some(selection) = self.terminal_selection.as_mut() {
+            selection.active = point;
+        }
+        true
+    }
+
+    fn finish_terminal_selection(&mut self, x: i32, y: i32) -> bool {
+        if !self.drag_terminal_selection(x, y) {
+            return false;
+        }
+        unsafe { ReleaseCapture() };
+        if let Some(selection) = self.terminal_selection.as_mut() {
+            selection.dragging = false;
+            if selection.is_empty() {
+                self.terminal_selection = None;
+            }
+        }
+        true
+    }
+
+    fn terminal_selection_capture_lost(&mut self) {
+        if let Some(selection) = self.terminal_selection.as_mut()
+            && selection.dragging
+        {
+            selection.dragging = false;
+            if selection.is_empty() {
+                self.terminal_selection = None;
+            }
+        }
+    }
+
+    fn cancel_terminal_selection(&mut self) {
+        if self
+            .terminal_selection
+            .as_ref()
+            .is_some_and(|selection| selection.dragging)
+        {
+            unsafe { ReleaseCapture() };
+        }
+        self.terminal_selection = None;
+    }
+
+    fn copy_terminal_selection(&mut self) -> Result<()> {
+        let selection = self
+            .terminal_selection
+            .as_ref()
+            .context("no terminal selection is active")?;
+        if selection.is_empty() {
+            anyhow::bail!("terminal selection is empty");
+        }
+        let tab = self
+            .active_tab()
+            .filter(|tab| {
+                tab.id == selection.tab_id && tab.screen.generation == selection.generation
+            })
+            .context("terminal selection is stale")?;
+        let text = screen_selection_text(&tab.screen, selection);
+        if text.is_empty() {
+            anyhow::bail!("terminal selection contains no text");
+        }
+        set_clipboard_text(self.window, &text)?;
+        self.last_error = None;
+        Ok(())
+    }
+
+    fn paste_terminal_clipboard(&mut self) -> Result<()> {
+        let text = normalize_terminal_paste(&read_clipboard_text()?);
+        if text.is_empty() {
+            anyhow::bail!("clipboard text contains no pasteable characters");
+        }
+        if text.len() > TERMINAL_PASTE_LIMIT_BYTES {
+            anyhow::bail!(
+                "normalized clipboard text exceeds the {TERMINAL_PASTE_LIMIT_BYTES}-byte limit"
+            );
+        }
+        self.terminal_input(text.as_bytes());
+        self.last_error = None;
+        Ok(())
+    }
+
+    fn is_edit_control(&self, window: HWND) -> bool {
+        [
+            self.edit,
+            self.tab_title_edit,
+            self.tab_note_edit,
+            self.settings_font,
+            self.settings_size,
+        ]
+        .contains(&window)
+    }
+
+    fn system_menu_state(&self) -> (bool, bool) {
+        let focused = unsafe { GetFocus() };
+        if self.is_edit_control(focused) {
+            return (true, clipboard_has_unicode_text());
+        }
+        let terminal_ready = focused == self.window
+            && !self.window_close_pending
+            && !self.settings_open
+            && self.active_tab().is_some_and(|tab| !tab.dead);
+        (
+            terminal_ready
+                && self
+                    .terminal_selection
+                    .as_ref()
+                    .is_some_and(|selection| !selection.is_empty()),
+            terminal_ready && clipboard_has_unicode_text(),
+        )
+    }
+
+    fn refresh_system_menu(&self) {
+        let menu = unsafe { GetSystemMenu(self.window, 0) };
+        if menu.is_null() {
+            return;
+        }
+        let (copy, paste) = self.system_menu_state();
+        unsafe {
+            EnableMenuItem(
+                menu,
+                SYSTEM_MENU_COPY_ID as u32,
+                MF_BYCOMMAND | if copy { MF_ENABLED } else { MF_GRAYED },
+            );
+            EnableMenuItem(
+                menu,
+                SYSTEM_MENU_PASTE_ID as u32,
+                MF_BYCOMMAND | if paste { MF_ENABLED } else { MF_GRAYED },
+            );
+        }
+    }
+
+    fn system_menu_copy(&mut self) {
+        let focused = unsafe { GetFocus() };
+        if self.is_edit_control(focused) {
+            unsafe { SendMessageW(focused, WM_COPY, 0, 0) };
+        } else if let Err(error) = self.copy_terminal_selection() {
+            self.last_error = Some(format!("Copy failed: {error:#}"));
+        }
+    }
+
+    fn system_menu_paste(&mut self) {
+        let focused = unsafe { GetFocus() };
+        if self.is_edit_control(focused) {
+            unsafe { SendMessageW(focused, WM_PASTE, 0, 0) };
+        } else if let Err(error) = self.paste_terminal_clipboard() {
+            self.last_error = Some(format!("Paste failed: {error:#}"));
+        }
+    }
+
     fn terminal_input(&mut self, bytes: &[u8]) {
+        self.cancel_terminal_selection();
         let Some(tab_id) = self
             .client
             .as_ref()
@@ -1204,6 +1471,7 @@ impl RemoteWindowState {
     }
 
     fn scroll_terminal(&mut self, delta: i32) {
+        self.cancel_terminal_selection();
         let Some(tab_id) = self
             .client
             .as_ref()
@@ -1247,6 +1515,7 @@ impl RemoteWindowState {
         if !self.resize_grip_contains(x, y) {
             return false;
         }
+        self.cancel_terminal_selection();
         self.tabs_resize_dragging = true;
         unsafe { SetCapture(self.window) };
         true
@@ -1323,9 +1592,20 @@ impl RemoteWindowState {
 
     fn terminal_key(&mut self, key: u32) -> bool {
         let key = u16::try_from(key).unwrap_or_default();
-        if unsafe { GetKeyState(VK_CONTROL as i32) } < 0
-            && (u16::from(b'A')..=u16::from(b'Z')).contains(&key)
-        {
+        let control = unsafe { GetKeyState(VK_CONTROL as i32) } < 0;
+        if control && key == u16::from(b'C') && self.terminal_selection.is_some() {
+            if let Err(error) = self.copy_terminal_selection() {
+                self.last_error = Some(format!("Copy failed: {error:#}"));
+            }
+            return true;
+        }
+        if control && key == u16::from(b'V') {
+            if let Err(error) = self.paste_terminal_clipboard() {
+                self.last_error = Some(format!("Paste failed: {error:#}"));
+            }
+            return true;
+        }
+        if control && (u16::from(b'A')..=u16::from(b'Z')).contains(&key) {
             self.terminal_input(&[(key as u8) - b'A' + 1]);
             return true;
         }
@@ -1391,6 +1671,7 @@ impl RemoteWindowState {
                 self.cell_height,
                 palette,
             );
+            self.paint_terminal_selection(device, terminal, &tab.screen, palette);
             draw_text(
                 device,
                 RECT {
@@ -1440,6 +1721,79 @@ impl RemoteWindowState {
             self.paint_settings(device, palette);
         }
         unsafe { EndPaint(self.window, &paint) };
+    }
+
+    fn paint_terminal_selection(
+        &self,
+        device: HDC,
+        terminal: RECT,
+        screen: &UiScreenSnapshot,
+        palette: &ThemePalette,
+    ) {
+        let Some(selection) = self.terminal_selection.as_ref().filter(|selection| {
+            selection.tab_id == screen.tab_id && selection.generation == screen.generation
+        }) else {
+            return;
+        };
+        let cells = screen_cells(screen);
+        let (start, end) = selection.bounds();
+        for row in start.row..=end.row.min(screen.rows.saturating_sub(1)) {
+            let first = if row == start.row { start.column } else { 0 };
+            let last = if row == end.row {
+                end.column
+            } else {
+                screen.columns.saturating_sub(1)
+            }
+            .min(screen.columns.saturating_sub(1));
+            fill(
+                device,
+                &RECT {
+                    left: terminal.left
+                        + i32::try_from(first).unwrap_or_default() * self.cell_width,
+                    top: terminal.top + i32::try_from(row).unwrap_or_default() * self.cell_height,
+                    right: terminal.left
+                        + i32::try_from(last.saturating_add(1)).unwrap_or_default()
+                            * self.cell_width,
+                    bottom: terminal.top
+                        + i32::try_from(row.saturating_add(1)).unwrap_or_default()
+                            * self.cell_height,
+                },
+                palette.selection_background.colorref(),
+            );
+            for column in first..=last {
+                let Some(text) = cells
+                    .get(usize::try_from(row).unwrap_or(usize::MAX))
+                    .and_then(|cells| cells.get(usize::try_from(column).unwrap_or(usize::MAX)))
+                    .and_then(Option::as_deref)
+                    .filter(|text| !text.is_empty())
+                else {
+                    continue;
+                };
+                let span = text
+                    .chars()
+                    .map(|character| UnicodeWidthChar::width(character).unwrap_or(1))
+                    .sum::<usize>()
+                    .max(1);
+                draw_text(
+                    device,
+                    RECT {
+                        left: terminal.left
+                            + i32::try_from(column).unwrap_or_default() * self.cell_width,
+                        top: terminal.top
+                            + i32::try_from(row).unwrap_or_default() * self.cell_height,
+                        right: terminal.left
+                            + (i32::try_from(column).unwrap_or_default()
+                                + i32::try_from(span).unwrap_or(1))
+                                * self.cell_width,
+                        bottom: terminal.top
+                            + i32::try_from(row.saturating_add(1)).unwrap_or_default()
+                                * self.cell_height,
+                    },
+                    text,
+                    palette.selection_foreground.colorref(),
+                );
+            }
+        }
     }
 
     fn paint_window_close(&self, device: HDC, palette: &ThemePalette) {
@@ -1666,6 +2020,16 @@ unsafe extern "system" fn window_proc(
                     }
                 } else {
                     state.finish_tab_edit(false);
+                    if state.begin_terminal_selection(x, y) {
+                        unsafe {
+                            windows_sys::Win32::Graphics::Gdi::InvalidateRect(
+                                window,
+                                ptr::null(),
+                                0,
+                            )
+                        };
+                        return 0;
+                    }
                     unsafe { SetFocus(window) };
                 }
                 unsafe {
@@ -1675,26 +2039,40 @@ unsafe extern "system" fn window_proc(
             0
         }
         WM_MOUSEMOVE => {
-            if let Some(state) = state_mut(window)
-                && state.tabs_resize_dragging
-            {
+            if let Some(state) = state_mut(window) {
                 let x = (lparam as u32 & 0xffff) as i16 as i32;
-                state.drag_tabs_resize(x);
-                unsafe {
-                    windows_sys::Win32::Graphics::Gdi::InvalidateRect(window, ptr::null(), 0)
-                };
+                let y = ((lparam as u32 >> 16) & 0xffff) as i16 as i32;
+                if state.tabs_resize_dragging {
+                    state.drag_tabs_resize(x);
+                    unsafe {
+                        windows_sys::Win32::Graphics::Gdi::InvalidateRect(window, ptr::null(), 0)
+                    };
+                } else if state.drag_terminal_selection(x, y) {
+                    unsafe {
+                        windows_sys::Win32::Graphics::Gdi::InvalidateRect(window, ptr::null(), 0)
+                    };
+                }
             }
             0
         }
         WM_LBUTTONUP => {
             if let Some(state) = state_mut(window) {
-                state.finish_tabs_resize();
+                let x = (lparam as u32 & 0xffff) as i16 as i32;
+                let y = ((lparam as u32 >> 16) & 0xffff) as i16 as i32;
+                if state.tabs_resize_dragging {
+                    state.finish_tabs_resize();
+                } else if state.finish_terminal_selection(x, y) {
+                    unsafe {
+                        windows_sys::Win32::Graphics::Gdi::InvalidateRect(window, ptr::null(), 0)
+                    };
+                }
             }
             0
         }
         WM_CAPTURECHANGED => {
             if let Some(state) = state_mut(window) {
                 state.tabs_resize_capture_lost();
+                state.terminal_selection_capture_lost();
             }
             0
         }
@@ -1717,6 +2095,27 @@ unsafe extern "system" fn window_proc(
                 unsafe { DefWindowProcW(window, message, wparam, lparam) }
             }
         }
+        WM_INITMENUPOPUP => {
+            if let Some(state) = state_ref(window) {
+                state.refresh_system_menu();
+            }
+            0
+        }
+        WM_SYSCOMMAND => match wparam & 0xfff0 {
+            SYSTEM_MENU_COPY_ID => {
+                if let Some(state) = state_mut(window) {
+                    state.system_menu_copy();
+                }
+                0
+            }
+            SYSTEM_MENU_PASTE_ID => {
+                if let Some(state) = state_mut(window) {
+                    state.system_menu_paste();
+                }
+                0
+            }
+            _ => unsafe { DefWindowProcW(window, message, wparam, lparam) },
+        },
         WM_KEYDOWN => {
             if let Some(state) = state_mut(window) {
                 if state.window_close_pending {
@@ -1874,6 +2273,209 @@ fn create_hidden_button(window: HWND, instance: HINSTANCE, id: usize, text: &str
             ptr::null(),
         )
     }
+}
+
+fn install_system_menu(window: HWND) -> Result<()> {
+    let menu = unsafe { GetSystemMenu(window, 0) };
+    if menu.is_null() {
+        anyhow::bail!("GetSystemMenu failed");
+    }
+    if unsafe {
+        InsertMenuW(
+            menu,
+            SC_CLOSE,
+            MF_BYCOMMAND | MF_STRING,
+            SYSTEM_MENU_COPY_ID,
+            wide("Copy\tCtrl+C").as_ptr(),
+        )
+    } == 0
+        || unsafe {
+            InsertMenuW(
+                menu,
+                SC_CLOSE,
+                MF_BYCOMMAND | MF_STRING,
+                SYSTEM_MENU_PASTE_ID,
+                wide("Paste\tCtrl+V").as_ptr(),
+            )
+        } == 0
+        || unsafe { InsertMenuW(menu, SC_CLOSE, MF_BYCOMMAND | MF_SEPARATOR, 0, ptr::null()) } == 0
+    {
+        anyhow::bail!("could not add Copy and Paste to the window system menu");
+    }
+    Ok(())
+}
+
+fn set_clipboard_text(window: HWND, text: &str) -> Result<()> {
+    if unsafe { OpenClipboard(window) } == 0 {
+        anyhow::bail!("could not open the Windows clipboard");
+    }
+    if unsafe { EmptyClipboard() } == 0 {
+        unsafe { CloseClipboard() };
+        anyhow::bail!("could not clear the Windows clipboard");
+    }
+    let encoded = text
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let allocation = unsafe { GlobalAlloc(GMEM_MOVEABLE, encoded.len() * mem::size_of::<u16>()) };
+    if allocation.is_null() {
+        unsafe { CloseClipboard() };
+        anyhow::bail!("could not allocate clipboard text");
+    }
+    let destination = unsafe { GlobalLock(allocation) } as *mut u16;
+    if destination.is_null() {
+        unsafe {
+            GlobalFree(allocation);
+            CloseClipboard();
+        }
+        anyhow::bail!("could not lock clipboard text");
+    }
+    unsafe {
+        ptr::copy_nonoverlapping(encoded.as_ptr(), destination, encoded.len());
+        GlobalUnlock(allocation);
+    }
+    if unsafe { SetClipboardData(CLIPBOARD_UNICODE_TEXT, allocation) }.is_null() {
+        unsafe {
+            GlobalFree(allocation);
+            CloseClipboard();
+        }
+        anyhow::bail!("could not publish clipboard text");
+    }
+    unsafe { CloseClipboard() };
+    Ok(())
+}
+
+fn clipboard_has_unicode_text() -> bool {
+    (unsafe { IsClipboardFormatAvailable(CLIPBOARD_UNICODE_TEXT) }) != 0
+}
+
+fn read_clipboard_text() -> Result<String> {
+    let deadline = Instant::now() + Duration::from_millis(500);
+    loop {
+        if unsafe { OpenClipboard(ptr::null_mut()) } != 0 {
+            break;
+        }
+        if Instant::now() >= deadline {
+            anyhow::bail!("could not open the Windows clipboard within 500 ms");
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    let result = (|| {
+        if !clipboard_has_unicode_text() {
+            anyhow::bail!("the clipboard does not contain Unicode text");
+        }
+        let allocation = unsafe { GetClipboardData(CLIPBOARD_UNICODE_TEXT) };
+        if allocation.is_null() {
+            anyhow::bail!("could not read Unicode clipboard data");
+        }
+        let allocation_size = unsafe { GlobalSize(allocation) };
+        if allocation_size == 0 {
+            anyhow::bail!("Unicode clipboard data has no readable allocation");
+        }
+        if allocation_size > (TERMINAL_PASTE_LIMIT_BYTES + 1) * mem::size_of::<u16>() {
+            anyhow::bail!(
+                "clipboard text exceeds the {TERMINAL_PASTE_LIMIT_BYTES}-byte terminal paste limit"
+            );
+        }
+        let source = unsafe { GlobalLock(allocation) } as *const u16;
+        if source.is_null() {
+            anyhow::bail!("could not lock Unicode clipboard data");
+        }
+        let units =
+            unsafe { std::slice::from_raw_parts(source, allocation_size / mem::size_of::<u16>()) };
+        let length = units
+            .iter()
+            .position(|unit| *unit == 0)
+            .unwrap_or(units.len());
+        let decoded = String::from_utf16(&units[..length])
+            .context("Unicode clipboard data is not valid UTF-16");
+        unsafe { GlobalUnlock(allocation) };
+        decoded
+    })();
+    unsafe { CloseClipboard() };
+    result
+}
+
+fn normalize_terminal_paste(text: &str) -> String {
+    let mut normalized = String::with_capacity(text.len());
+    let mut characters = text.chars().peekable();
+    while let Some(character) = characters.next() {
+        match character {
+            '\r' => {
+                if characters.peek() == Some(&'\n') {
+                    characters.next();
+                }
+                normalized.push('\r');
+            }
+            '\n' => normalized.push('\r'),
+            '\t' => normalized.push('\t'),
+            value if !value.is_control() => normalized.push(value),
+            _ => {}
+        }
+    }
+    normalized
+}
+
+fn screen_cells(screen: &UiScreenSnapshot) -> Vec<Vec<Option<String>>> {
+    let rows = usize::try_from(screen.rows).unwrap_or_default();
+    let columns = usize::try_from(screen.columns).unwrap_or_default();
+    let mut cells: Vec<Vec<Option<String>>> = vec![vec![None; columns]; rows];
+    for run in &screen.runs {
+        let Some(row) = cells.get_mut(usize::try_from(run.row).unwrap_or(usize::MAX)) else {
+            continue;
+        };
+        let mut column = usize::try_from(run.column).unwrap_or(usize::MAX);
+        for character in run.text.chars() {
+            let width = UnicodeWidthChar::width(character).unwrap_or(1);
+            if width == 0 {
+                if let Some(Some(previous)) = column
+                    .checked_sub(1)
+                    .and_then(|previous| row.get_mut(previous))
+                {
+                    previous.push(character);
+                }
+                continue;
+            }
+            if column >= row.len() {
+                break;
+            }
+            row[column] = Some(character.to_string());
+            for continuation in 1..width {
+                if let Some(cell) = row.get_mut(column + continuation) {
+                    *cell = Some(String::new());
+                }
+            }
+            column = column.saturating_add(width);
+        }
+    }
+    cells
+}
+
+fn screen_selection_text(screen: &UiScreenSnapshot, selection: &RemoteTerminalSelection) -> String {
+    let cells = screen_cells(screen);
+    let (start, end) = selection.bounds();
+    let mut lines = Vec::new();
+    for row in start.row..=end.row.min(screen.rows.saturating_sub(1)) {
+        let first = if row == start.row { start.column } else { 0 };
+        let last = if row == end.row {
+            end.column
+        } else {
+            screen.columns.saturating_sub(1)
+        }
+        .min(screen.columns.saturating_sub(1));
+        let mut line = String::new();
+        for column in first..=last {
+            match cells
+                .get(usize::try_from(row).unwrap_or(usize::MAX))
+                .and_then(|row| row.get(usize::try_from(column).unwrap_or(usize::MAX)))
+            {
+                Some(Some(text)) => line.push_str(text),
+                Some(None) | None => line.push(' '),
+            }
+        }
+        lines.push(line.trim_end_matches(' ').to_owned());
+    }
+    lines.join("\r\n")
 }
 
 fn create_terminal_font(window: HWND, config: &AppConfig) -> Result<(HFONT, i32, i32)> {
@@ -2134,4 +2736,72 @@ fn wide(value: &str) -> Vec<u16> {
 
 fn wide_without_nul(value: &str) -> Vec<u16> {
     value.encode_utf16().collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui_bridge::{UI_SCREEN_SCHEMA_VERSION, UiCellRun, UiCursorSnapshot};
+
+    fn plain_style() -> UiCellStyle {
+        UiCellStyle {
+            foreground: UiColor::Default,
+            background: UiColor::Default,
+            bold: false,
+            italic: false,
+            underline: false,
+            inverse: false,
+        }
+    }
+
+    #[test]
+    fn selection_text_preserves_wide_cells_and_multiline_bounds() {
+        let screen = UiScreenSnapshot {
+            schema_version: UI_SCREEN_SCHEMA_VERSION,
+            tab_id: "@1".to_owned(),
+            generation: 7,
+            rows: 2,
+            columns: 8,
+            scrollback_offset: 0,
+            cursor: UiCursorSnapshot {
+                row: 1,
+                column: 4,
+                visible: true,
+            },
+            runs: vec![
+                UiCellRun {
+                    row: 0,
+                    column: 0,
+                    columns: 4,
+                    text: "A界B".to_owned(),
+                    style: plain_style(),
+                },
+                UiCellRun {
+                    row: 1,
+                    column: 0,
+                    columns: 4,
+                    text: "tail".to_owned(),
+                    style: plain_style(),
+                },
+            ],
+            complete: true,
+            truncated: false,
+        };
+        let selection = RemoteTerminalSelection {
+            tab_id: "@1".to_owned(),
+            generation: 7,
+            anchor: RemoteTerminalPoint { row: 0, column: 1 },
+            active: RemoteTerminalPoint { row: 1, column: 1 },
+            dragging: false,
+        };
+        assert_eq!(screen_selection_text(&screen, &selection), "界B\r\nta");
+    }
+
+    #[test]
+    fn terminal_paste_normalizes_lines_and_filters_controls() {
+        assert_eq!(
+            normalize_terminal_paste("one\r\ntwo\nthree\rfour\t\u{1b}[31m\0"),
+            "one\rtwo\rthree\rfour\t[31m"
+        );
+    }
 }
