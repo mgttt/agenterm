@@ -547,11 +547,11 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
         ),
         "save-workspace" => ("agenterm-cli save-workspace", &[][..], &[][..], false),
         "script" => (
-            "agenterm-cli script api [--json] | check FILE|- [--profile pure|observe|local] \
-             [--project-root DIR] | eval EXPRESSION [--profile pure|observe|local] | \
-             run FILE|- [--profile pure|observe|local] [--cwd DIR] [--project-root DIR] \
-             [-- ARGS...] | task list|show|run [TASK] [--manifest FILE] [--json] \
-             (default profile: local)",
+            "agenterm-cli script api [MODULE] [--status shipped|planned|all] [--json] | \
+             check FILE|- [--profile pure|observe|local] [--project-root DIR] | \
+             eval EXPRESSION [--profile pure|observe|local] | run FILE|- \
+             [--profile pure|observe|local] [--cwd DIR] [--project-root DIR] [-- ARGS...] | \
+             task list|show|run [TASK] [--manifest FILE] [--json] (default profile: local)",
             &[
                 "--profile",
                 "--timeout-ms",
@@ -559,6 +559,7 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
                 "--cwd",
                 "--project-root",
                 "--manifest",
+                "--status",
             ][..],
             &["--json"][..],
             false,
@@ -1103,6 +1104,16 @@ mod tests {
         assert!(error.contains("unknown option '-a'"));
         assert!(error.contains("--address HOST:PORT"));
         assert!(validate_control_command(&args(&["capture-pane", "-p", "-t", "@1"])).is_ok());
+    }
+
+    #[test]
+    fn script_api_catalog_accepts_module_and_status_options() {
+        assert!(
+            validate_control_command(&args(&[
+                "script", "api", "std::fs", "--status", "shipped", "--json",
+            ]))
+            .is_ok()
+        );
     }
 
     #[test]

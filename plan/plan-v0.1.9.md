@@ -555,7 +555,7 @@ agenterm-script
 │  ├─ entry
 │  │  ├─ [x] run / eval / check
 │  │  ├─ [x] api --json baseline
-│  │  ├─ [ ] api tree / filters / comparison
+│  │  ├─ [~] api tree + module/status filters 已交付；comparison metadata 待补
 │  │  └─ [x] named task list / show / run
 │  ├─ profile
 │  │  ├─ [x] pure

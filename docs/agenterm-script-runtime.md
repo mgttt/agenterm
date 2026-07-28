@@ -363,9 +363,9 @@ agenterm-script
    ├─ script api --json
    │  Emits the machine-readable catalog and runtime limits.
    │  [shipped; stable; designed 2026-07-28]
-   ├─ script api [PATH]
-   │  Renders this tree and optionally expands one node.
-   │  [planned; reserved; designed 2026-07-28]
+   ├─ script api [MODULE] [--status shipped|planned|all]
+   │  Renders a deterministic filtered object tree from stable catalog IDs.
+   │  [shipped; stable; designed 2026-07-28]
    ├─ script check FILE
    │  Validates syntax, profile availability, and known interfaces offline.
    │  [shipped baseline; stable; designed 2026-07-28]
@@ -991,9 +991,17 @@ future MCP adapter
 future Agent tool policy
 ```
 
-Human-facing `api` output SHOULD show the object tree first, then expand the
-selected node. Generated pages include signature, status, stability, design
-date, profile, typed errors, limits, and semantic notes.
+Human-facing `api` output shows the stable-ID object tree and accepts one
+module selector plus `--status shipped|planned|all`. Selectors recognize stable
+IDs, Rhai surface paths, and catalog taxonomy paths; `::`, `/`, and `.` are
+normalized only for selection and do not rename the returned identities.
+Unknown modules and statuses fail with stable configuration codes.
+
+`api --json` retains the ordinary result envelope and exact catalog schema. It
+filters `entries` identically and adds a `view` object containing `module`,
+`status`, and `entry_count`. Ordering is deterministic. Comparison metadata and
+generated comparison/manual pages remain separate work and MUST NOT be inferred
+from the Rust mapping fields alone.
 
 `check` MUST NOT execute user code, access the network, or require a GUI. It
 validates syntax, known qualified paths, profile availability, and statically

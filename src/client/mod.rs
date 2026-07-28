@@ -52,6 +52,10 @@ use crate::{
 use crate::operations::operation_by_id;
 
 #[cfg(windows)]
+use crate::script_api_view::{
+    filter_script_api_catalog, parse_script_api_view, render_script_api_tree,
+};
+#[cfg(windows)]
 use crate::script_audit::{
     AuditBudgets, AuditInvocation, AuditOutcome, AuditSourceKind, ScriptAuditSink,
     source_fingerprint,
@@ -983,6 +987,21 @@ fn run_script_command_with_context(
             return 2;
         }
     };
+    let api_view = if operation == ScriptOperation::Api {
+        match parse_script_api_view(arguments) {
+            Ok(view) => Some(view),
+            Err(error) => {
+                eprintln!("{error}");
+                return 2;
+            }
+        }
+    } else {
+        if has_option(arguments, "--status") {
+            eprintln!("script --status is available only for script api");
+            return 2;
+        }
+        None
+    };
     let profile = match option_value(arguments, "--profile").unwrap_or("local") {
         "pure" => ScriptProfile::Pure,
         "observe" => ScriptProfile::Observe,
@@ -1217,7 +1236,7 @@ fn run_script_command_with_context(
     let deadline = Duration::from_millis(invocation.budgets.wall_time_ms);
     let broker_budgets = invocation.budgets.clone();
     let broker_profile = invocation.profile;
-    let (result, cancel_requested) = match WorkerSupervisor::invoke(
+    let (mut result, cancel_requested) = match WorkerSupervisor::invoke(
         &executable,
         Some(&context.working_directory),
         invocation,
@@ -1285,6 +1304,40 @@ fn run_script_command_with_context(
         eprintln!("agenterm-script.exe returned an inconsistent result envelope");
         return 1;
     }
+    if let Some(view) = api_view.as_ref() {
+        let Some(catalog) = result.value.as_mut() else {
+            let audit_outcome = AuditOutcome {
+                duration_ms: audit_duration_ms(audit_started),
+                result_class: "host".to_owned(),
+                failure_code: Some("host_worker_protocol".to_owned()),
+                denied: true,
+                cancelled: cancel_requested,
+                timed_out: false,
+                crashed: false,
+            };
+            if let Err(error) = audit_sink.append(&audit_invocation, &audit_outcome) {
+                return report_audit_error(error);
+            }
+            eprintln!("agenterm-script.exe returned an API result without a catalog");
+            return 1;
+        };
+        if let Err(error) = filter_script_api_catalog(catalog, view) {
+            let audit_outcome = AuditOutcome {
+                duration_ms: audit_duration_ms(audit_started),
+                result_class: "host".to_owned(),
+                failure_code: Some("host_worker_protocol".to_owned()),
+                denied: true,
+                cancelled: cancel_requested,
+                timed_out: false,
+                crashed: false,
+            };
+            if let Err(audit_error) = audit_sink.append(&audit_invocation, &audit_outcome) {
+                return report_audit_error(audit_error);
+            }
+            eprintln!("agenterm-script.exe returned an invalid API catalog: {error}");
+            return 1;
+        }
+    }
     let audit_outcome = audit_outcome_for_result(&result, audit_started, cancel_requested);
     if let Err(error) = audit_sink.append(&audit_invocation, &audit_outcome) {
         return report_audit_error(error);
@@ -1302,6 +1355,16 @@ fn run_script_command_with_context(
             }
         }
         if let Some(value) = result.value {
+            if operation == ScriptOperation::Api {
+                match render_script_api_tree(&value) {
+                    Ok(tree) => println!("{tree}"),
+                    Err(error) => {
+                        eprintln!("agenterm-script.exe returned an invalid API catalog: {error}");
+                        return 1;
+                    }
+                }
+                return 0;
+            }
             if let Some(value) = value.as_str() {
                 println!("{value}");
             } else {
@@ -3025,7 +3088,7 @@ Usage:
   agenterm-cli get-settings
   agenterm-cli set-setting terminal.font-family FAMILY
   agenterm-cli set-setting terminal.font-size 8..36
-  agenterm-cli script api [--json]
+  agenterm-cli script api [MODULE] [--status shipped|planned|all] [--json]
   agenterm-cli script check|run FILE|- [--profile local|pure|observe] [--project-root DIR] [--cwd DIR]
   agenterm-cli script eval EXPRESSION [--profile local|pure|observe] [--cwd DIR]
   agenterm-cli script task list|show|run [TASK] [--manifest FILE] [--json] [-- ARGS...]

@@ -112,10 +112,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [ ] `script run [OPTIONS] FILE.rhai|- [--] [ARGS...]`
     - [ ] `script eval [OPTIONS] EXPRESSION [--] [ARGS...]`
     - [ ] `script check [OPTIONS] FILE.rhai|-`
-    - [ ] `script api [MODULE] [--status STATE]` renders the hierarchical
-      human catalog, `script api --compare rust|node|bun|all` renders reviewed
-      analogues and semantic differences, and `script api --json` emits their
-      common machine-readable source
+    - [x] `script api [MODULE] [--status shipped|planned|all]` renders the
+      deterministic hierarchical human catalog, while `--json` emits the same
+      filtered versioned source with explicit view metadata
+    - [ ] `script api --compare rust|node|bun|all` renders reviewed analogues
+      and semantic differences from catalog-owned comparison metadata
     - [ ] `script task list [--manifest PATH] [--json]`
     - [ ] `script task show TASK [--manifest PATH] [--json]`
     - [ ] `script task run TASK [--manifest PATH] [--] [ARGS...]`

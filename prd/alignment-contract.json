@@ -279,6 +279,14 @@
       "evidence_ids": ["script.rhai-observe"]
     },
     {
+      "id": "scripting.api-tree",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "`script api [MODULE] [--status shipped|planned|all]` renders a deterministic hierarchical object tree and `--json` returns the same filtered versioned catalog with explicit view metadata",
+      "evidence_ids": ["script.api-tree"]
+    },
+    {
       "id": "scripting.rhai-deny-budget",
       "kind": "behavior",
       "status": "shipped",

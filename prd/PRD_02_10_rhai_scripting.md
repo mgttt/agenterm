@@ -284,10 +284,13 @@ and it is not positioned as a restricted security plugin.
     facts; the English runtime specification opens with the complete
     human-readable object/interface tree carrying node descriptions, status,
     stability, and design dates.
-- [ ] the catalog is hierarchical, using stable
+- [~] the catalog is hierarchical, using stable
   `domain -> capability group -> callable/type` paths and ordering. Human
   `script api [MODULE]` output renders that same tree; unavailable, degraded,
   planned, deferred, and intentionally out-of-scope nodes do not disappear.
+  - [x] `script api [MODULE] [--status shipped|planned|all]` renders a deterministic hierarchical object tree and `--json` returns the same filtered versioned catalog with explicit view metadata.
+  - [ ] deferred and intentionally out-of-scope nodes require catalog status
+    expansion beyond the current shipped/planned schema.
 - [ ] every entry separates `catalog_path` from its shallow `surface_path`, so
   product taxonomy can evolve without forcing nested namespaces into user
   source or silently renaming callable contracts.

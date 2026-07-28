@@ -119,6 +119,7 @@
       "evidence": [
         "script.rhai-pure",
         "script.rhai-observe",
+        "script.api-tree",
         "script.fleet-v2",
         "script.fleet-tabs-set-note",
         "script.direct-entry",

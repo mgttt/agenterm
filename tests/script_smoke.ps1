@@ -8,6 +8,7 @@ $ErrorActionPreference = 'Stop'
 $declaredEvidence = @(
     'script.rhai-pure'
     'script.rhai-observe'
+    'script.api-tree'
     'script.fleet-v2'
     'script.fleet-tabs-set-note'
     'script.direct-entry'
@@ -527,6 +528,38 @@ try {
         }).Count -ne 0) {
         throw 'Script API v2 did not map every typed operation exactly once'
     }
+
+    Write-Host 'STEP filtered scripting API object tree'
+    $apiTree = Invoke-DirectScript @('api', 'std::fs', '--status', 'shipped')
+    if ($apiTree -notlike 'AgenTerm Script API v2*module=std.fs*status=shipped*' -or
+        -not $apiTree.Contains('read-to-string  [shipped]') -or
+        -not $apiTree.Contains('std::fs::read_to_string') -or
+        $apiTree.Contains('[planned]')) {
+        throw "script api did not render the filtered std::fs object tree: $apiTree"
+    }
+    $plannedFleet = (
+        Invoke-Script @(
+            'script', 'api', 'fleet', '--status', 'planned', '--json'
+        ) | ConvertFrom-Json
+    )
+    $plannedFleetEntries = @($plannedFleet.value.entries)
+    if (-not $plannedFleet.ok -or
+        $plannedFleet.value.view.module -ne 'fleet' -or
+        $plannedFleet.value.view.status -ne 'planned' -or
+        $plannedFleet.value.view.entry_count -ne $plannedFleetEntries.Count -or
+        $plannedFleetEntries.Count -eq 0 -or
+        @($plannedFleetEntries | Where-Object {
+            $_.status -ne 'planned' -or -not $_.stable_id.StartsWith('fleet.')
+        }).Count -ne 0) {
+        throw 'script api JSON module/status view did not contain only planned Fleet entries'
+    }
+    $invalidApiStatus = Invoke-ScriptFailure 2 @(
+        'script', 'api', '--status', 'experimental'
+    )
+    if (-not $invalidApiStatus.Contains('script_api_status_invalid')) {
+        throw "script api did not reject an unknown status with a stable code: $invalidApiStatus"
+    }
+    Write-Evidence 'script.api-tree'
 
     Write-Host 'STEP Rhai repository dogfood contract check'
     $catalogFile = Join-Path $runtimeDirectory 'script-catalog.json'
