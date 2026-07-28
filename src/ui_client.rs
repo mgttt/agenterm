@@ -10,6 +10,7 @@ use crate::{
         UiBootstrapSnapshot, UiDeltaBatch, UiHelloRequest, UiHelloResponse, UiLeaseGrant,
         UiProtocolRange, UiTabBootstrap,
     },
+    upgrade_identity::UpgradeIdentity,
 };
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(2);
@@ -26,6 +27,7 @@ pub(crate) struct UiClientModel {
 impl UiClientModel {
     pub(crate) fn connect(client_id: String) -> Result<Self> {
         let client_pid = std::process::id();
+        let client_build = UpgradeIdentity::current(UI_BRIDGE_PROTOCOL_VERSION);
         let hello_request = UiHelloRequest {
             schema_version: UI_HELLO_SCHEMA_VERSION,
             client_id: client_id.clone(),
@@ -33,8 +35,11 @@ impl UiClientModel {
                 minimum: UI_BRIDGE_PROTOCOL_VERSION,
                 maximum: UI_BRIDGE_PROTOCOL_VERSION,
             },
+            client_build: Some(client_build.clone()),
         };
         hello_request.validate().map_err(anyhow::Error::msg)?;
+        let client_build_json =
+            serde_json::to_string(&client_build).context("could not encode UI build identity")?;
         let hello: UiHelloResponse = request_json(vec![
             "ui-hello".to_owned(),
             "--minimum".to_owned(),
@@ -43,9 +48,15 @@ impl UiClientModel {
             UI_BRIDGE_PROTOCOL_VERSION.to_string(),
             "--client-id".to_owned(),
             client_id.clone(),
+            "--client-build-json".to_owned(),
+            client_build_json.clone(),
         ])?;
         hello.validate().map_err(anyhow::Error::msg)?;
         if !hello.accepted
+            || hello
+                .client_build
+                .as_ref()
+                .is_some_and(|echoed| echoed != &client_build)
             || !hello
                 .capabilities
                 .iter()
@@ -65,10 +76,16 @@ impl UiClientModel {
             client_id.clone(),
             "--client-pid".to_owned(),
             client_pid.to_string(),
+            "--client-build-json".to_owned(),
+            client_build_json,
         ])?;
         lease.validate().map_err(anyhow::Error::msg)?;
         if lease.client_id != client_id
             || lease.client_pid != client_pid
+            || lease
+                .client_build
+                .as_ref()
+                .is_some_and(|echoed| echoed != &client_build)
             || lease.server_pid != hello.server_pid
             || lease.position.server_epoch != hello.position.server_epoch
         {

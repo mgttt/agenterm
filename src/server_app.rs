@@ -9,6 +9,7 @@ use std::{
 use anyhow::{Context as _, Result};
 
 use crate::{
+    UpgradeIdentity,
     commands::option_value,
     control_authority::{
         ControlAdmission, ControlAuthority, control_event_position, resolved_control_target,
@@ -24,7 +25,8 @@ use crate::{
     terminal_observation::TerminalProcessState,
     terminal_runtime::{TerminalLaunch, TerminalTab},
     ui_bridge::{
-        UI_INTERACTION_SCHEMA_VERSION, UI_LEASE_SCHEMA_VERSION, UiEventPosition, UiLeaseGrant,
+        UI_BUILD_IDENTITY_MAX_BYTES, UI_INTERACTION_SCHEMA_VERSION, UI_LEASE_SCHEMA_VERSION,
+        UiEventPosition, UiLeaseGrant,
     },
     ui_interaction::{UiInteraction, parse_ui_interaction},
     ui_lease::{UI_LEASE_TTL_MS, UiLeaseAuthority, UiLeaseError, UiLeaseRecord},
@@ -233,6 +235,7 @@ impl ServerState {
                 "state": state,
                 "client_id": record.client_id,
                 "client_pid": record.client_pid,
+                "client_build": record.client_build,
                 "reason": reason,
             }),
         );
@@ -245,6 +248,7 @@ impl ServerState {
             lease_id: record.lease_id,
             client_id: record.client_id,
             client_pid: record.client_pid,
+            client_build: record.client_build,
             server_pid: std::process::id(),
             position: UiEventPosition {
                 server_epoch: position.epoch,
@@ -304,7 +308,34 @@ impl ServerState {
                 if !instance_process_is_alive(client_pid) {
                     return Self::ui_lease_failure(UiLeaseError::InvalidClientPid);
                 }
-                match self.ui_lease.attach(client_id, client_pid, now_unix_ms) {
+                let client_build = match option_value(args, "--client-build-json") {
+                    Some(value) if value.len() > UI_BUILD_IDENTITY_MAX_BYTES => {
+                        return IpcResponse::typed_failure(
+                            "ui-lease attach client build identity exceeds its byte budget",
+                            "ui_lease_client_build_invalid",
+                            "validation",
+                            false,
+                        );
+                    }
+                    Some(value) => match serde_json::from_str::<UpgradeIdentity>(value) {
+                        Ok(identity) => Some(identity),
+                        Err(error) => {
+                            return IpcResponse::typed_failure(
+                                format!(
+                                    "ui-lease attach client build identity is invalid: {error}"
+                                ),
+                                "ui_lease_client_build_invalid",
+                                "validation",
+                                false,
+                            );
+                        }
+                    },
+                    None => None,
+                };
+                match self
+                    .ui_lease
+                    .attach(client_id, client_pid, client_build, now_unix_ms)
+                {
                     Ok((record, created)) => {
                         if created {
                             self.commit_ui_lease_event(&record, "attached", "requested");
@@ -367,6 +398,7 @@ impl ServerState {
                                 "detached": true,
                                 "client_id": record.client_id,
                                 "client_pid": record.client_pid,
+                                "client_build": record.client_build,
                                 "position": {
                                     "server_epoch": position.epoch,
                                     "sequence": position.sequence,
@@ -428,6 +460,7 @@ impl ServerState {
                         "attached": active.is_some(),
                         "client_id": active.map(|record| record.client_id.as_str()),
                         "client_pid": active.map(|record| record.client_pid),
+                        "client_build": active.and_then(|record| record.client_build.as_ref()),
                         "expires_unix_ms": active.map(|record| record.expires_unix_ms),
                         "observed_sequence": active.map(|record| record.observed_sequence),
                         "position": {

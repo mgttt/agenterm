@@ -29,7 +29,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     if no compatible server exists it bootstraps `agenterm-server.exe`, then
     connects through the same typed loopback control boundary instead of
     becoming the server itself
-    - [x] opt-in `agenterm.exe --ui-client` starts or connects to the independent headless authority, acquires the exact interactive lease, renders renderer-neutral tab/screen/composer DTOs, routes stable-ID selection/input/resize through the lease, acknowledges applied event positions, detaches without ending the server or PTY, and a replacement GUI recovers the same server PID, active tab and live terminal marker with PNG and orphan-free public evidence
+    - [x] opt-in `agenterm.exe --ui-client` starts or connects to the independent headless authority, acquires the exact interactive lease with an observable additive client-build identity, renders renderer-neutral tab/screen/composer DTOs, routes stable-ID selection/input/resize through the lease, acknowledges applied event positions, detaches without ending the server or PTY, and a replacement GUI recovers the same server PID, active tab and live terminal marker with PNG and orphan-free public evidence
     - [ ] switch ordinary `agenterm.exe` launches only after the replaceable
       client reaches the accepted workbench, settings, editing, selection,
       clipboard, scrollback, close-dialog and observation parity gates
@@ -39,7 +39,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     discarding live server state
     - [x] renderer-neutral UI bootstrap and terminal-screen DTOs publish independent schema versions, causal server epoch/sequence identity, stable tab/tree identity, completeness facts and hard byte/item/dimension limits
     - [x] `ui-bootstrap` projects current combined-server tab/tree/process/composer/working-context/screen truth through those DTOs and public black-box evidence compares its causal position and tab metadata with `ui-snapshot` and `inspect`
-    - [x] `ui-hello` negotiates a bounded protocol range and returns the current server PID, epoch, sequence and contract schemas; `ui-deltas` follows that baseline with ordered journal events, affected-tab terminal post-state, active-tab identity, explicit completeness and typed restart, gap and future-sequence recovery
+    - [x] `ui-hello` negotiates a bounded protocol range, echoes an additive bounded client-build identity, and returns the server build, PID, epoch, sequence and contract schemas while compatible prior peers may omit the new identities; `ui-deltas` follows that baseline with ordered journal events, affected-tab terminal post-state, active-tab identity, explicit completeness and typed restart, gap and future-sequence recovery
     - [~] the current combined and split servers populate and serve hello,
       bootstrap and bounded delta-poll contracts through public loopback IPC;
       the replaceable GUI consumes them and reconnects after epoch restart.

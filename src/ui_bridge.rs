@@ -2,6 +2,8 @@ use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 
+use crate::upgrade_identity::UpgradeIdentity;
+
 pub const UI_BRIDGE_SCHEMA_VERSION: u32 = 7;
 pub const UI_BRIDGE_PROTOCOL_VERSION: u32 = 1;
 pub const UI_HELLO_SCHEMA_VERSION: u32 = 1;
@@ -21,6 +23,7 @@ pub const UI_TAB_NOTE_MAX_BYTES: usize = 64 * 1024;
 pub const UI_DELTA_MAX_BYTES: usize = 8 * 1024 * 1024;
 pub const UI_DELTA_MAX_EVENTS: usize = 64;
 pub const UI_CLIENT_ID_MAX_BYTES: usize = 128;
+pub const UI_BUILD_IDENTITY_MAX_BYTES: usize = 2048;
 pub const UI_INPUT_MAX_BYTES: usize = 256 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -139,6 +142,8 @@ pub struct UiHelloRequest {
     pub schema_version: u32,
     pub client_id: String,
     pub protocol_range: UiProtocolRange,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_build: Option<UpgradeIdentity>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -153,6 +158,10 @@ pub struct UiHelloResponse {
     pub bootstrap_schema_version: u32,
     pub delta_schema_version: u32,
     pub capabilities: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_build: Option<UpgradeIdentity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_build: Option<UpgradeIdentity>,
 }
 
 impl UiHelloRequest {
@@ -171,6 +180,12 @@ impl UiHelloRequest {
         {
             return Err("ui_hello_protocol_range_invalid".to_owned());
         }
+        if self.client_build.as_ref().is_some_and(|identity| {
+            serde_json::to_vec(identity)
+                .map_or(true, |encoded| encoded.len() > UI_BUILD_IDENTITY_MAX_BYTES)
+        }) {
+            return Err("ui_hello_client_build_invalid".to_owned());
+        }
         Ok(())
     }
 }
@@ -187,6 +202,7 @@ impl UiHelloResponse {
                 minimum: self.protocol_version,
                 maximum: self.protocol_version,
             },
+            client_build: self.client_build.clone(),
         }
         .validate()?;
         if self.position.server_epoch.is_empty()
@@ -205,6 +221,12 @@ impl UiHelloResponse {
                 .any(|capability| !capabilities.insert(capability.as_str()))
         {
             return Err("ui_hello_capabilities_invalid".to_owned());
+        }
+        if self.server_build.as_ref().is_some_and(|identity| {
+            serde_json::to_vec(identity)
+                .map_or(true, |encoded| encoded.len() > UI_BUILD_IDENTITY_MAX_BYTES)
+        }) {
+            return Err("ui_hello_build_identity_invalid".to_owned());
         }
         Ok(())
     }
@@ -347,6 +369,8 @@ pub struct UiLeaseGrant {
     pub lease_id: String,
     pub client_id: String,
     pub client_pid: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_build: Option<UpgradeIdentity>,
     pub server_pid: u32,
     pub position: UiEventPosition,
     pub expires_unix_ms: u64,
@@ -372,6 +396,7 @@ impl UiLeaseGrant {
                 minimum: UI_BRIDGE_PROTOCOL_VERSION,
                 maximum: UI_BRIDGE_PROTOCOL_VERSION,
             },
+            client_build: self.client_build.clone(),
         }
         .validate()?;
         if self.client_pid == 0
@@ -708,6 +733,17 @@ mod tests {
         }
     }
 
+    fn test_build(profile: &str) -> UpgradeIdentity {
+        UpgradeIdentity {
+            protocol_version: Some(UI_BRIDGE_PROTOCOL_VERSION),
+            version: Some("0.1.9".to_owned()),
+            git_commit: Some("a".repeat(40)),
+            profile: Some(profile.to_owned()),
+            cargo_lock_sha256: Some("b".repeat(64)),
+            artifact_manifest_sha256: Some("c".repeat(64)),
+        }
+    }
+
     #[test]
     fn compatibility_is_explicit_in_both_directions() {
         let client = UiProtocolRange {
@@ -771,6 +807,7 @@ mod tests {
             lease_id: "ui-2a-3e8-1".to_owned(),
             client_id: "agenterm-gui:42".to_owned(),
             client_pid: 42,
+            client_build: None,
             server_pid: 7,
             position: UiEventPosition {
                 server_epoch: "epoch-1".to_owned(),
@@ -795,6 +832,7 @@ mod tests {
                 minimum: 1,
                 maximum: 1,
             },
+            client_build: None,
         };
         request.validate().unwrap();
         let response = UiHelloResponse {
@@ -814,6 +852,8 @@ mod tests {
                 "bootstrap_snapshot".to_owned(),
                 "ordered_delta_poll".to_owned(),
             ],
+            client_build: None,
+            server_build: None,
         };
         response.validate().unwrap();
 
@@ -825,6 +865,44 @@ mod tests {
         assert_eq!(
             invalid_request.validate().unwrap_err(),
             "ui_hello_client_id_invalid"
+        );
+    }
+
+    #[test]
+    fn build_identity_is_additive_bounded_and_prior_hello_json_remains_compatible() {
+        let prior_request: UiHelloRequest = serde_json::from_value(serde_json::json!({
+            "schema_version": UI_HELLO_SCHEMA_VERSION,
+            "client_id": "prior-renderer",
+            "protocol_range": {"minimum": 1, "maximum": 1}
+        }))
+        .unwrap();
+        assert!(prior_request.client_build.is_none());
+        prior_request.validate().unwrap();
+
+        let mut response = UiHelloResponse {
+            schema_version: UI_HELLO_SCHEMA_VERSION,
+            accepted: true,
+            compatibility: UiCompatibility::Compatible,
+            client_id: "renderer-next".to_owned(),
+            protocol_version: UI_BRIDGE_PROTOCOL_VERSION,
+            server_pid: 42,
+            position: UiEventPosition {
+                server_epoch: "epoch-1".to_owned(),
+                sequence: 9,
+            },
+            bootstrap_schema_version: UI_BOOTSTRAP_SCHEMA_VERSION,
+            delta_schema_version: UI_DELTA_SCHEMA_VERSION,
+            capabilities: vec!["bootstrap_snapshot".to_owned()],
+            client_build: Some(test_build("dev")),
+            server_build: Some(test_build("release-fast")),
+        };
+        response.validate().unwrap();
+
+        response.server_build.as_mut().unwrap().version =
+            Some("x".repeat(UI_BUILD_IDENTITY_MAX_BYTES));
+        assert_eq!(
+            response.validate().unwrap_err(),
+            "ui_hello_build_identity_invalid"
         );
     }
 

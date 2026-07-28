@@ -217,6 +217,7 @@ fn ui_hello_response(
     request: UiHelloRequest,
 ) -> Result<UiHelloResponse, String> {
     request.validate()?;
+    let client_build = request.client_build.clone();
     let compatibility = negotiate(request.protocol_range, UI_BRIDGE_PROTOCOL_VERSION);
     let position = host.event_journal().position();
     let mut capabilities = vec![
@@ -250,6 +251,10 @@ fn ui_hello_response(
         bootstrap_schema_version: UI_BOOTSTRAP_SCHEMA_VERSION,
         delta_schema_version: UI_DELTA_SCHEMA_VERSION,
         capabilities,
+        client_build,
+        server_build: Some(crate::upgrade_identity::UpgradeIdentity::current(
+            UI_BRIDGE_PROTOCOL_VERSION,
+        )),
     };
     response.validate()?;
     Ok(response)
@@ -949,12 +954,27 @@ pub(crate) fn dispatch_shared_command(
                     false,
                 ));
             };
+            let client_build = match option_value(args, "--client-build-json") {
+                Some(value) => match serde_json::from_str(value) {
+                    Ok(identity) => Some(identity),
+                    Err(error) => {
+                        return Some(IpcResponse::typed_failure(
+                            format!("ui-hello --client-build-json is invalid: {error}"),
+                            "ui_hello_invalid_arguments",
+                            "configuration",
+                            false,
+                        ));
+                    }
+                },
+                None => None,
+            };
             let request = UiHelloRequest {
                 schema_version: UI_HELLO_SCHEMA_VERSION,
                 client_id: option_value(args, "--client-id")
                     .unwrap_or("agenterm-cli")
                     .to_owned(),
                 protocol_range: UiProtocolRange { minimum, maximum },
+                client_build,
             };
             match ui_hello_response(host, request) {
                 Ok(response) => match serde_json::to_string_pretty(&response) {

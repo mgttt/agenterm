@@ -44,6 +44,7 @@ mod ui_interaction;
 #[cfg(any(windows, unix))]
 mod ui_lease;
 mod upgrade_identity;
+pub use upgrade_identity::UpgradeIdentity;
 mod wake_signal;
 mod working_context;
 mod workspace;

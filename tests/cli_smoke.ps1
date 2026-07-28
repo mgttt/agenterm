@@ -180,7 +180,7 @@ try {
 
     $protocol = Invoke-AgenTerm @('protocol-info') | ConvertFrom-Json
     $operationCatalog = $protocol.operation_catalog
-    if ($protocol.ui_bridge.schema_version -ne 6 -or
+    if ($protocol.ui_bridge.schema_version -ne 7 -or
         $protocol.ui_bridge.ownership_mode -ne 'combined_gui_server' -or
         $protocol.ui_bridge.replaceable_ui -or
         $protocol.ui_bridge.interactive_lease -or
@@ -190,7 +190,7 @@ try {
         $protocol.ui_bridge.reconnect -or
         $protocol.ui_bridge.contract_schemas.hello -ne 1 -or
         $protocol.ui_bridge.contract_schemas.bootstrap -ne 2 -or
-        $protocol.ui_bridge.contract_schemas.screen -ne 1 -or
+        $protocol.ui_bridge.contract_schemas.screen -ne 2 -or
         $protocol.ui_bridge.contract_schemas.delta -ne 2 -or
         $protocol.ui_bridge.contract_schemas.lease -ne 2 -or
         $protocol.ui_bridge.contract_schemas.interaction -ne 1 -or
@@ -260,9 +260,19 @@ try {
     Write-Evidence 'cli.ui-bootstrap'
 
     Write-Host 'STEP UI handshake and causal snapshot-follow'
+    $helloClientBuild = @{
+        protocol_version = 1
+        version = 'cli-smoke'
+        git_commit = ('a' * 40)
+        profile = 'black-box'
+        cargo_lock_sha256 = ('b' * 64)
+        artifact_manifest_sha256 = ('c' * 64)
+    }
+    $helloClientBuildJson = $helloClientBuild | ConvertTo-Json -Compress
     $hello = Invoke-AgenTerm @(
         'ui-hello', '--minimum', '1', '--maximum', '1',
-        '--client-id', "cli-smoke-$($run.RunId)"
+        '--client-id', "cli-smoke-$($run.RunId)",
+        '--client-build-json', $helloClientBuildJson
     ) | ConvertFrom-Json
     if ($hello.schema_version -ne 1 -or
         -not $hello.accepted -or
@@ -270,6 +280,10 @@ try {
         $hello.client_id -ne "cli-smoke-$($run.RunId)" -or
         $hello.protocol_version -ne 1 -or
         $hello.server_pid -ne $runningProtocol.pid -or
+        $hello.client_build.profile -ne 'black-box' -or
+        $hello.client_build.git_commit -ne ('a' * 40) -or
+        $hello.server_build.protocol_version -ne 1 -or
+        [string]::IsNullOrWhiteSpace($hello.server_build.version) -or
         $hello.bootstrap_schema_version -ne 2 -or
         $hello.delta_schema_version -ne 2 -or
         @($hello.capabilities) -notcontains 'ordered_delta_poll') {

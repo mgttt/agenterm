@@ -681,8 +681,14 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
             false,
         ),
         "ui-hello" => (
-            "agenterm-cli ui-hello --minimum VERSION --maximum VERSION [--client-id ID]",
-            &["--minimum", "--maximum", "--client-id"][..],
+            "agenterm-cli ui-hello --minimum VERSION --maximum VERSION \
+             [--client-id ID] [--client-build-json JSON]",
+            &[
+                "--minimum",
+                "--maximum",
+                "--client-id",
+                "--client-build-json",
+            ][..],
             &[][..],
             false,
         ),
@@ -705,8 +711,14 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
             "agenterm-cli ui-lease \
              (attach --client-id ID --client-pid PID|heartbeat|\
              acknowledge --sequence N|detach|status) \
-             [--lease-id ID --client-pid PID]",
-            &["--client-id", "--client-pid", "--lease-id", "--sequence"][..],
+             [--lease-id ID --client-pid PID] [--client-build-json JSON]",
+            &[
+                "--client-id",
+                "--client-pid",
+                "--lease-id",
+                "--sequence",
+                "--client-build-json",
+            ][..],
             &[][..],
             false,
         ),

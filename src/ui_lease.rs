@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::ui_bridge::UI_CLIENT_ID_MAX_BYTES;
+use crate::{UpgradeIdentity, ui_bridge::UI_CLIENT_ID_MAX_BYTES};
 
 pub(crate) const UI_LEASE_TTL_MS: u64 = 5_000;
 
@@ -11,6 +11,7 @@ pub(crate) struct UiLeaseRecord {
     pub(crate) lease_id: String,
     pub(crate) client_id: String,
     pub(crate) client_pid: u32,
+    pub(crate) client_build: Option<UpgradeIdentity>,
     pub(crate) expires_unix_ms: u64,
     pub(crate) observed_sequence: u64,
 }
@@ -84,6 +85,7 @@ impl UiLeaseAuthority {
         &mut self,
         client_id: &str,
         client_pid: u32,
+        client_build: Option<UpgradeIdentity>,
         now_unix_ms: u64,
     ) -> Result<(UiLeaseRecord, bool), UiLeaseError> {
         validate_client_id(client_id)?;
@@ -92,6 +94,7 @@ impl UiLeaseAuthority {
         }
         if let Some(active) = self.active.as_mut() {
             if active.client_id == client_id && active.client_pid == client_pid {
+                active.client_build = client_build;
                 active.expires_unix_ms = now_unix_ms.saturating_add(UI_LEASE_TTL_MS);
                 return Ok((active.clone(), false));
             }
@@ -107,6 +110,7 @@ impl UiLeaseAuthority {
             ),
             client_id: client_id.to_owned(),
             client_pid,
+            client_build,
             expires_unix_ms: now_unix_ms.saturating_add(UI_LEASE_TTL_MS),
             observed_sequence: 0,
         };
@@ -210,25 +214,54 @@ fn validate_lease_id(lease_id: &str) -> Result<(), UiLeaseError> {
 mod tests {
     use super::*;
 
+    fn test_build(profile: &str) -> UpgradeIdentity {
+        UpgradeIdentity {
+            protocol_version: Some(1),
+            version: Some("0.1.9".to_owned()),
+            git_commit: Some("a".repeat(40)),
+            profile: Some(profile.to_owned()),
+            cargo_lock_sha256: Some("b".repeat(64)),
+            artifact_manifest_sha256: Some("c".repeat(64)),
+        }
+    }
+
     #[test]
     fn one_live_client_owns_and_idempotently_renews_the_lease() {
         let mut authority = UiLeaseAuthority::default();
-        let (first, created) = authority.attach("gui-a", 42, 1_000).unwrap();
+        let (first, created) = authority.attach("gui-a", 42, None, 1_000).unwrap();
         assert!(created);
-        let (renewed, created) = authority.attach("gui-a", 42, 2_000).unwrap();
+        let (renewed, created) = authority.attach("gui-a", 42, None, 2_000).unwrap();
         assert!(!created);
         assert_eq!(renewed.lease_id, first.lease_id);
         assert!(renewed.expires_unix_ms > first.expires_unix_ms);
         assert_eq!(
-            authority.attach("gui-b", 43, 2_000),
+            authority.attach("gui-b", 43, None, 2_000),
             Err(UiLeaseError::Conflict)
         );
     }
 
     #[test]
+    fn lease_retains_the_actual_build_of_its_current_owner() {
+        let mut authority = UiLeaseAuthority::default();
+        let first_build = test_build("dev");
+        let (first, _) = authority
+            .attach("gui-a", 42, Some(first_build.clone()), 1_000)
+            .unwrap();
+        assert_eq!(first.client_build, Some(first_build));
+
+        let replacement_build = test_build("release-fast");
+        let (renewed, created) = authority
+            .attach("gui-a", 42, Some(replacement_build.clone()), 2_000)
+            .unwrap();
+        assert!(!created);
+        assert_eq!(renewed.lease_id, first.lease_id);
+        assert_eq!(renewed.client_build, Some(replacement_build));
+    }
+
+    #[test]
     fn heartbeat_and_detach_require_the_exact_owner() {
         let mut authority = UiLeaseAuthority::default();
-        let (lease, _) = authority.attach("gui", 42, 1_000).unwrap();
+        let (lease, _) = authority.attach("gui", 42, None, 1_000).unwrap();
         assert_eq!(
             authority.heartbeat(&lease.lease_id, 43, 2_000),
             Err(UiLeaseError::OwnerMismatch)
@@ -246,7 +279,7 @@ mod tests {
     #[test]
     fn observed_sequence_is_monotonic_bounded_and_renews_the_owner() {
         let mut authority = UiLeaseAuthority::default();
-        let (lease, _) = authority.attach("gui", 42, 1_000).unwrap();
+        let (lease, _) = authority.attach("gui", 42, None, 1_000).unwrap();
         let acknowledged = authority
             .acknowledge(&lease.lease_id, 42, 7, 9, 2_000)
             .unwrap();
@@ -265,13 +298,13 @@ mod tests {
     #[test]
     fn expired_or_dead_clients_are_recoverable_without_stealing_a_live_lease() {
         let mut authority = UiLeaseAuthority::default();
-        let (lease, _) = authority.attach("gui", 42, 1_000).unwrap();
+        let (lease, _) = authority.attach("gui", 42, None, 1_000).unwrap();
         assert!(authority.reap_stale(2_000, |_| true).is_none());
         assert_eq!(
             authority.reap_stale(2_000, |_| false),
             Some((lease.clone(), "client_exited"))
         );
-        let (replacement, _) = authority.attach("gui-b", 43, 2_000).unwrap();
+        let (replacement, _) = authority.attach("gui-b", 43, None, 2_000).unwrap();
         assert_eq!(
             authority.reap_stale(replacement.expires_unix_ms, |_| true),
             Some((replacement, "expired"))

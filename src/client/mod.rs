@@ -413,17 +413,7 @@ pub(crate) fn unix_time_ms() -> u64 {
 }
 
 fn current_upgrade_identity() -> UpgradeIdentity {
-    let build = BuildIdentity::current();
-    let known =
-        |value: &str| (value != "unknown" && !value.trim().is_empty()).then(|| value.to_owned());
-    UpgradeIdentity {
-        protocol_version: Some(1),
-        version: Some(env!("CARGO_PKG_VERSION").to_owned()),
-        git_commit: known(build.git_commit),
-        profile: known(build.profile),
-        cargo_lock_sha256: known(build.cargo_lock_sha256),
-        artifact_manifest_sha256: known(build.artifact_manifest_sha256),
-    }
+    UpgradeIdentity::current(1)
 }
 
 pub(crate) fn control_request_identity(args: &[String]) -> Result<(OperationId, RequestIntent)> {

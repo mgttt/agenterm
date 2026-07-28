@@ -1,38 +1,55 @@
 use serde::{Deserialize, Serialize};
 
+use crate::build_identity::BuildIdentity;
+
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-pub(crate) struct UpgradeIdentity {
+pub struct UpgradeIdentity {
     #[serde(
         rename = "protocol_version",
         default,
         skip_serializing_if = "Option::is_none"
     )]
-    pub(crate) protocol_version: Option<u32>,
+    pub protocol_version: Option<u32>,
     #[serde(rename = "version", default, skip_serializing_if = "Option::is_none")]
-    pub(crate) version: Option<String>,
+    pub version: Option<String>,
     #[serde(
         rename = "git_commit",
         default,
         skip_serializing_if = "Option::is_none"
     )]
-    pub(crate) git_commit: Option<String>,
+    pub git_commit: Option<String>,
     #[serde(rename = "profile", default, skip_serializing_if = "Option::is_none")]
-    pub(crate) profile: Option<String>,
+    pub profile: Option<String>,
     #[serde(
         rename = "cargo_lock_sha256",
         default,
         skip_serializing_if = "Option::is_none"
     )]
-    pub(crate) cargo_lock_sha256: Option<String>,
+    pub cargo_lock_sha256: Option<String>,
     #[serde(
         rename = "artifact_manifest_sha256",
         default,
         skip_serializing_if = "Option::is_none"
     )]
-    pub(crate) artifact_manifest_sha256: Option<String>,
+    pub artifact_manifest_sha256: Option<String>,
 }
 
 impl UpgradeIdentity {
+    pub(crate) fn current(protocol_version: u32) -> Self {
+        let build = BuildIdentity::current();
+        let known = |value: &str| {
+            (value != "unknown" && !value.trim().is_empty()).then(|| value.to_owned())
+        };
+        Self {
+            protocol_version: Some(protocol_version),
+            version: Some(env!("CARGO_PKG_VERSION").to_owned()),
+            git_commit: known(build.git_commit),
+            profile: known(build.profile),
+            cargo_lock_sha256: known(build.cargo_lock_sha256),
+            artifact_manifest_sha256: known(build.artifact_manifest_sha256),
+        }
+    }
+
     pub(crate) fn compare_staged(&self, staged: &Self) -> UpgradeIdentityComparison {
         let running_missing = self.missing_fields();
         let staged_missing = staged.missing_fields();

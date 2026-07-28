@@ -173,6 +173,8 @@ try {
     if ($bootstrap.schema_version -ne 2 -or
         $bootstrap.server_pid -eq $gui.Id -or
         $bootstrap.tabs.Count -lt 1 -or
+        $lease.client_build.protocol_version -ne 1 -or
+        [string]::IsNullOrWhiteSpace($lease.client_build.version) -or
         $protocol.ui_bridge.ownership_mode -ne 'split_server_client' -or
         -not $protocol.ui_bridge.replaceable_ui -or
         -not $protocol.ui_bridge.interactive_lease -or
@@ -333,6 +335,10 @@ try {
     } while ([DateTime]::UtcNow -lt $replacementObserveDeadline)
     if ($replacementBootstrap.server_pid -ne $bootstrap.server_pid -or
         $replacementBootstrap.active_tab_id -ne $tabId -or
+        $replacementLease.client_build.protocol_version -ne 1 -or
+        [string]::IsNullOrWhiteSpace(
+            $replacementLease.client_build.version
+        ) -or
         -not $replacementCapture.Contains($marker) -or
         -not $replacementObserved) {
         throw (
