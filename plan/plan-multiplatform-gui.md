@@ -38,8 +38,10 @@ PRD + Cargo deps (primary)
 - [x] F shared `control_dispatch` + Unix wire (`protocol-info`,
   `list-sessions/windows/panes`, `send-keys`, `capture-pane`, `inspect`,
   `kill-server`); evidence: Linux black-box CLI against live GUI
-- [ ] G Win32 `execute_command` 收敛到同一 `ControlHost`（去重）
-- [ ] H Unix tab tree / composer / settings / UI actions
+- [x] G Win32 `execute_command` 收敛到同一 `ControlHost`；共享叶扩展
+  `new-window` / `select-window` / `kill-window` / `active-window` /
+  `display-message` / `rename-session`；Unix 实现 tab lifecycle
+- [ ] H Unix tab tree UI / composer / settings / ui-action / event journal
 
 ## 能力叶
 
