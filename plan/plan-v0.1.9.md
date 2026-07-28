@@ -1541,8 +1541,8 @@ README 增加一个简短 script task 示例；稳定运行时合同由
   [x] north-star dogfood（直接 agenterm-script task list/show/check/run）
   [x] self-host dual-run
   [x] release rehearsal：四个 release 二进制均低于既有预算
-  [>] qualification：完整 no-activate 公共门与 bounded event stress 全绿；
-      clean receipt 等共享 Unix/GUI 暂存工作落库后生成
+  [x] qualification：候选 `5b6c310` 的 clean release + stress 全绿，
+      receipt 绑定四个精确二进制哈希；target 清理后仅余约 7 KiB 证据
 ```
 
 这一刀完成后，AgenTerm 不只是“内置 Rhai 的终端”，而是拥有一个能被人、
