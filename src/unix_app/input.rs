@@ -13,6 +13,75 @@ pub(super) enum ComposerKeyAction {
     Ignored,
 }
 
+/// Result of handling a key in the inline tab name/note editor.
+pub(super) enum TabEditorKeyAction {
+    Edited,
+    Save,
+    Cancel,
+    FocusName,
+    FocusNote,
+    Ignored,
+}
+
+/// Maps a winit key event onto the active single-line tab editor field.
+pub(super) fn tab_editor_key_action(
+    event: &KeyEvent,
+    modifiers: ModifiersState,
+    buffer: &mut String,
+    name_focused: bool,
+) -> TabEditorKeyAction {
+    if event.state != ElementState::Pressed || event.repeat {
+        return TabEditorKeyAction::Ignored;
+    }
+
+    let control = modifiers.control_key();
+    let shift = modifiers.shift_key();
+
+    match &event.logical_key {
+        Key::Named(NamedKey::Escape) => TabEditorKeyAction::Cancel,
+        Key::Named(NamedKey::Enter) if control => TabEditorKeyAction::Save,
+        Key::Named(NamedKey::Tab) if shift => {
+            if name_focused {
+                TabEditorKeyAction::Ignored
+            } else {
+                TabEditorKeyAction::FocusName
+            }
+        }
+        Key::Named(NamedKey::Tab) | Key::Named(NamedKey::Enter) => {
+            if name_focused {
+                TabEditorKeyAction::FocusNote
+            } else {
+                TabEditorKeyAction::Save
+            }
+        }
+        Key::Named(NamedKey::Backspace) => {
+            if buffer.pop().is_some() {
+                TabEditorKeyAction::Edited
+            } else {
+                TabEditorKeyAction::Ignored
+            }
+        }
+        Key::Character(text) if !control => {
+            let mut changed = false;
+            for ch in text.chars() {
+                if ch == '\n' || ch == '\r' {
+                    continue;
+                }
+                if !ch.is_control() {
+                    buffer.push(ch);
+                    changed = true;
+                }
+            }
+            if changed {
+                TabEditorKeyAction::Edited
+            } else {
+                TabEditorKeyAction::Ignored
+            }
+        }
+        _ => TabEditorKeyAction::Ignored,
+    }
+}
+
 /// Maps a winit key event to composer edits when the composer strip has focus.
 pub(super) fn composer_key_action(
     event: &KeyEvent,
@@ -24,7 +93,6 @@ pub(super) fn composer_key_action(
     }
 
     let control = modifiers.control_key();
-    let shift = modifiers.shift_key();
 
     match &event.logical_key {
         Key::Named(NamedKey::Enter) if control => ComposerKeyAction::Submit,
@@ -40,7 +108,7 @@ pub(super) fn composer_key_action(
                 ComposerKeyAction::Ignored
             }
         }
-        Key::Character(text) if !control && !shift => {
+        Key::Character(text) if !control => {
             let mut changed = false;
             for ch in text.chars() {
                 if ch == '\r' {

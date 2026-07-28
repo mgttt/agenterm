@@ -9,7 +9,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   keyboard input, visible VT grid, tab sidebar with New/Tabs/Settings
   toolbar, event journal, shared workspace IPC, composer, settings modal,
   wheel/scrollbar, paste, and word/row/drag selection; status-bar CWD editor,
-  window-close confirm, and tabs resize grip on Unix; Win-only proxy editor
+  window-close confirm, tabs resize grip, and inline tab name/note editor
+  (shared `TreeRowMode::Editing` geometry) on Unix; Win-only proxy editor
   remains a follow-up
 - [x] vertical tabs on the left show the numeric index; the stable `@id` is
   exposed through the control plane

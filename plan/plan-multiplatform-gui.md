@@ -56,6 +56,17 @@ PRD + Cargo deps (primary)
 - [x] K Unix paste / word+row selection / selection autoscroll / sidebar toolbar
 - [x] L Unix close-tab confirm + screenshot PNG IPC
 - [x] M Unix status-bar CWD editor + window-close confirm + tabs resize grip
+- [x] N Unix inline tab name/note editor (shared `TreeRowMode::Editing` geometry,
+  Save/Cancel, blank-name validation, composer path not hijacked)
+
+### N — Unix 行内 tab 名/备注编辑
+- 用户问题：Unix 侧仍把 tab 编辑塞进底部 composer，与 Windows 行内双字段不一致。
+- 不变量：复用 `ui_geometry::tree_row_geometry_for_mode`；Editing 由稳定 tab ID
+  识别；空白 name 不提交、不退出；Composer draft 不参与。
+- 证据：`ui-snapshot` 暴露 `tab_editor.focus/validation` 与 `tabs[].render/actions`；
+  Linux `cargo test --lib unix_app` + clippy `-D warnings`。
+- 安全失败：目标不可见 / Tabs 隐藏 / 切 tab 时取消 draft。
+- 非目标：不接 Win32 native HWND edit；不做像素级外观克隆。
 
 ### A — PTY 后端抽象
 - 用户问题：Windows ConPTY 与 Unix PTY 不能各写一套 runtime。

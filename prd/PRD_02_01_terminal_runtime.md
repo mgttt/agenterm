@@ -9,8 +9,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   `softbuffer` software raster (shared theme/geometry/selection/vt100);
   Linux/macOS share `unix_app`: live POSIX PTY tabs, sidebar toolbar,
   composer, settings, wheel/scrollbar, paste, and word/row/drag selection
-  with edge autoscroll; status-bar CWD editor, window-close confirm, and tabs
-  resize grip on Unix; proxy editor and professional selection remain later
+  with edge autoscroll; status-bar CWD editor, window-close confirm, tabs
+  resize grip, and inline tab name/note editor on Unix; proxy editor and
+  professional selection remain later
 - [x] one ConPTY-backed process per tab through `rmux-pty` on Windows
 - [~] shared PTY backend trait: Windows keeps `rmux-pty`; Unix uses
   POSIX `openpty` + fork/exec; `terminal_runtime` consumes one API

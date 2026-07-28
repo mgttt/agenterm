@@ -1,11 +1,17 @@
-use crate::theme::{Rgb, ThemeId, ThemePalette};
+use crate::{
+    theme::{Rgb, ThemeId, ThemePalette},
+    ui_geometry::{
+        PixelRect, TAB_HEIGHT, TreeRowActionDensity, TreeRowMode, tree_row_at_y,
+        tree_row_geometry_for_mode,
+    },
+};
 
 use super::{
     font::GLYPH_WIDTH,
     layout::{SCROLLBAR_WIDTH, u32_rect},
 };
 
-pub(super) const SIDEBAR_TAB_ROW_HEIGHT: u32 = 20;
+pub(super) const SIDEBAR_TAB_ROW_HEIGHT: u32 = TAB_HEIGHT as u32;
 pub(super) const COMPOSER_HEIGHT: u32 = 48;
 pub(super) const STATUS_HEIGHT: u32 = 26;
 pub(super) const SETTINGS_MODAL_WIDTH: u32 = 360;
@@ -21,9 +27,14 @@ pub(super) struct SidebarTabRow {
     pub(super) id: u64,
     pub(super) depth: usize,
     pub(super) title: String,
+    pub(super) note: String,
     pub(super) active: bool,
+    pub(super) editing: bool,
+    pub(super) editor_focus_name: bool,
+    pub(super) blank_name_error: bool,
     pub(super) collapsed: bool,
     pub(super) has_children: bool,
+    pub(super) actions_visible: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -701,50 +712,217 @@ fn render_sidebar(
         );
     }
 
+    let sidebar_width_i32 = sidebar_width as i32;
     for (index, row) in rows.iter().enumerate() {
-        let top = index as u32 * SIDEBAR_TAB_ROW_HEIGHT;
-        if top >= height {
+        let mode = if row.editing {
+            TreeRowMode::Editing
+        } else {
+            TreeRowMode::Normal
+        };
+        let geometry =
+            tree_row_geometry_for_mode(index, row.depth, sidebar_width_i32, mode);
+        if geometry.row.top >= height as i32 {
             break;
         }
-        let row_height = SIDEBAR_TAB_ROW_HEIGHT.min(height.saturating_sub(top));
-        let indent = 8 + u32::try_from(row.depth).unwrap_or(0).saturating_mul(12);
-        let text_x = indent.min(sidebar_width.saturating_sub(1));
-        let marker = if row.has_children {
-            if row.collapsed { "[+]" } else { "[-]" }
-        } else {
-            "   "
-        };
-        let label = format!("{marker} @{} {}", row.id, row.title);
-        let max_chars =
-            ((sidebar_width.saturating_sub(text_x)) / (GLYPH_WIDTH + 1)).max(1) as usize;
-        let clipped = truncate_chars(&label, max_chars);
-
         if row.active {
-            let active_bg = rgb_to_pixel(palette.active);
-            fill_rect(buffer, stride, 0, top, sidebar_width, row_height, active_bg);
-            draw_text(
+            fill_pixel_rect(buffer, stride, geometry.selection, rgb_to_pixel(palette.active));
+        }
+        let expander = if row.has_children {
+            if row.collapsed { "+" } else { "-" }
+        } else {
+            " "
+        };
+        draw_text_clipped(
+            buffer,
+            stride,
+            width,
+            height,
+            geometry.expander,
+            expander,
+            palette.text,
+        );
+        if row.editing {
+            let name_color = if row.blank_name_error {
+                palette.danger
+            } else {
+                palette.text
+            };
+            fill_pixel_rect(buffer, stride, geometry.name, rgb_to_pixel(palette.control));
+            fill_pixel_rect(buffer, stride, geometry.note, rgb_to_pixel(palette.control));
+            if row.editor_focus_name {
+                stroke_pixel_rect(buffer, stride, geometry.name, rgb_to_pixel(palette.focus_ring));
+            } else {
+                stroke_pixel_rect(buffer, stride, geometry.note, rgb_to_pixel(palette.focus_ring));
+            }
+            let name_label = if row.title.is_empty() {
+                if row.blank_name_error {
+                    "name required"
+                } else {
+                    "name"
+                }
+            } else {
+                row.title.as_str()
+            };
+            draw_text_clipped(
                 buffer,
                 stride,
                 width,
                 height,
-                text_x,
-                top + 4,
-                &clipped,
-                palette.selection_foreground,
+                geometry.name,
+                name_label,
+                if row.title.is_empty() {
+                    palette.muted_text
+                } else {
+                    name_color
+                },
+            );
+            let note_label = if row.note.is_empty() {
+                "note"
+            } else {
+                row.note.as_str()
+            };
+            draw_text_clipped(
+                buffer,
+                stride,
+                width,
+                height,
+                geometry.note,
+                note_label,
+                if row.note.is_empty() {
+                    palette.muted_text
+                } else {
+                    palette.accent
+                },
             );
         } else {
-            draw_text(
+            let title_color = if row.active {
+                palette.selection_foreground
+            } else {
+                palette.text
+            };
+            draw_text_clipped(
                 buffer,
                 stride,
                 width,
                 height,
-                text_x,
-                top + 4,
-                &clipped,
-                palette.text,
+                geometry.name,
+                &row.title,
+                title_color,
+            );
+            let note_color = if row.note.is_empty() {
+                palette.muted_text
+            } else {
+                palette.accent
+            };
+            draw_text_clipped(
+                buffer,
+                stride,
+                width,
+                height,
+                geometry.note,
+                if row.note.is_empty() { " " } else { row.note.as_str() },
+                note_color,
+            );
+        }
+        if row.actions_visible {
+            let compact = geometry.actions.density == TreeRowActionDensity::Compact;
+            if let Some(add_child) = geometry.actions.add_child {
+                draw_text_clipped(
+                    buffer,
+                    stride,
+                    width,
+                    height,
+                    add_child,
+                    if compact { "T+" } else { "Add" },
+                    palette.success,
+                );
+            }
+            let primary = match (mode, compact) {
+                (TreeRowMode::Normal, true) => "E",
+                (TreeRowMode::Normal, false) => "Edit",
+                (TreeRowMode::Editing, _) => "Save",
+            };
+            let secondary = match (mode, compact) {
+                (TreeRowMode::Normal, true) => "X",
+                (TreeRowMode::Normal, false) => "Close",
+                (TreeRowMode::Editing, _) => "Cancel",
+            };
+            draw_text_clipped(
+                buffer,
+                stride,
+                width,
+                height,
+                geometry.actions.primary,
+                primary,
+                palette.accent,
+            );
+            draw_text_clipped(
+                buffer,
+                stride,
+                width,
+                height,
+                geometry.actions.secondary,
+                secondary,
+                palette.muted_text,
             );
         }
     }
+}
+
+fn fill_pixel_rect(buffer: &mut [u32], stride: u32, rect: PixelRect, color: u32) {
+    if rect.width() <= 0 || rect.height() <= 0 {
+        return;
+    }
+    fill_rect(
+        buffer,
+        stride,
+        rect.left.max(0) as u32,
+        rect.top.max(0) as u32,
+        rect.width() as u32,
+        rect.height() as u32,
+        color,
+    );
+}
+
+fn stroke_pixel_rect(buffer: &mut [u32], stride: u32, rect: PixelRect, color: u32) {
+    if rect.width() <= 0 || rect.height() <= 0 {
+        return;
+    }
+    let x = rect.left.max(0) as u32;
+    let y = rect.top.max(0) as u32;
+    let w = rect.width() as u32;
+    let h = rect.height() as u32;
+    fill_rect(buffer, stride, x, y, w, 1, color);
+    fill_rect(buffer, stride, x, y.saturating_add(h.saturating_sub(1)), w, 1, color);
+    fill_rect(buffer, stride, x, y, 1, h, color);
+    fill_rect(
+        buffer,
+        stride,
+        x.saturating_add(w.saturating_sub(1)),
+        y,
+        1,
+        h,
+        color,
+    );
+}
+
+fn draw_text_clipped(
+    buffer: &mut [u32],
+    stride: u32,
+    width: u32,
+    height: u32,
+    rect: PixelRect,
+    text: &str,
+    color: Rgb,
+) {
+    if rect.width() <= 0 || rect.height() <= 0 {
+        return;
+    }
+    let x = rect.left.max(0) as u32;
+    let y = (rect.top + (rect.height() - 8).max(0) / 2).max(0) as u32;
+    let max_chars = ((rect.width().max(0) as u32).saturating_sub(2) / (GLYPH_WIDTH + 1)).max(1) as usize;
+    let clipped = truncate_chars(text, max_chars);
+    draw_text(buffer, stride, width, height, x + 1, y, &clipped, color);
 }
 
 fn render_terminal_grid(
@@ -1165,7 +1343,7 @@ pub(super) fn sidebar_row_at_y(y: u32, tree_height: u32) -> Option<usize> {
     if y >= tree_height {
         return None;
     }
-    Some((y / SIDEBAR_TAB_ROW_HEIGHT) as usize)
+    tree_row_at_y(y as i32)
 }
 
 pub(super) fn scrollbar_view_from_geometry(
@@ -1205,5 +1383,23 @@ mod tests {
         let with = grid_dimensions_for_pixels(800, 480, 200, 48, 26).0;
         assert!(without > with);
         let _ = AppConfig::default();
+    }
+
+    #[test]
+    fn sidebar_row_hit_uses_shared_tab_geometry() {
+        assert_eq!(sidebar_row_at_y(0, 200), None);
+        assert_eq!(sidebar_row_at_y(8, 200), Some(0));
+        assert_eq!(sidebar_row_at_y(51, 200), Some(0));
+        assert_eq!(sidebar_row_at_y(52, 200), Some(1));
+        assert_eq!(SIDEBAR_TAB_ROW_HEIGHT, TAB_HEIGHT as u32);
+    }
+
+    #[test]
+    fn editing_row_exposes_save_cancel_without_add_child() {
+        let geometry = tree_row_geometry_for_mode(0, 0, 250, TreeRowMode::Editing);
+        assert!(geometry.editors.is_some());
+        assert!(geometry.actions.add_child.is_none());
+        assert!(geometry.actions.primary.width() > 0);
+        assert!(geometry.actions.secondary.width() > 0);
     }
 }
