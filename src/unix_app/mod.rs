@@ -5,23 +5,22 @@ mod render;
 use std::{
     env,
     rc::Rc,
-    sync::{
-        Arc,
-        mpsc::{self, Receiver},
-    },
+    sync::{Arc, mpsc::Receiver},
+    time::SystemTime,
 };
 
 use softbuffer::{Context, Surface};
 use winit::{
     application::ApplicationHandler,
     event::WindowEvent,
-    event_loop::{ActiveEventLoop, ControlFlow, EventLoop, OwnedDisplayHandle},
+    event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     window::{Window, WindowAttributes, WindowId},
 };
 
 use crate::{
     client::no_activate_from_environment,
-    gui_wake::install_unix_wake,
+    control_dispatch::{ControlHost, dispatch_shared_command},
+    gui_wake::{UnixWake, install_unix_wake},
     instances::register_instance,
     ipc_transport::{IpcEnvelope, start_ipc_server},
     protocol::IpcResponse,
@@ -100,12 +99,12 @@ fn display_available() -> bool {
 
 fn run_gui(no_activate: bool) -> anyhow::Result<()> {
     let title = format!("{APP_NAME} {}", env!("CARGO_PKG_VERSION"));
-    let event_loop = EventLoop::new()?;
+    let event_loop = EventLoop::<UnixWake>::with_user_event().build()?;
+    let proxy = event_loop.create_proxy();
+    install_unix_wake(proxy);
     let context = Context::new(event_loop.owned_display_handle())
         .map_err(|error| anyhow::anyhow!("{error}"))?;
     let wake_signal = Arc::new(WakeSignal::new());
-    let (wake_tx, wake_rx) = mpsc::sync_channel(64);
-    install_unix_wake(wake_tx);
 
     let ipc_receiver = start_ipc_server(0, Arc::clone(&wake_signal))?;
     let session_name = format!("agenterm-{}", std::process::id());
@@ -116,7 +115,6 @@ fn run_gui(no_activate: bool) -> anyhow::Result<()> {
         no_activate,
         context,
         wake_signal,
-        wake_rx,
         ipc_receiver,
         session_name,
     );
@@ -128,25 +126,26 @@ fn run_gui(no_activate: bool) -> anyhow::Result<()> {
 struct UnixApp {
     title: String,
     no_activate: bool,
-    context: Context<OwnedDisplayHandle>,
+    context: Context<winit::event_loop::OwnedDisplayHandle>,
     wake_signal: Arc<WakeSignal>,
-    wake_rx: Receiver<()>,
     ipc_receiver: Receiver<IpcEnvelope>,
     session_name: String,
+    started_at: SystemTime,
     window: Option<Rc<Window>>,
-    surface: Option<Surface<OwnedDisplayHandle, Rc<Window>>>,
+    surface: Option<Surface<winit::event_loop::OwnedDisplayHandle, Rc<Window>>>,
     grid: Option<TerminalGrid>,
-    tab: Option<TerminalTab>,
+    tabs: Vec<TerminalTab>,
+    active: Option<u64>,
     next_tab_id: u64,
+    close_requested: bool,
 }
 
 impl UnixApp {
     fn new(
         title: String,
         no_activate: bool,
-        context: Context<OwnedDisplayHandle>,
+        context: Context<winit::event_loop::OwnedDisplayHandle>,
         wake_signal: Arc<WakeSignal>,
-        wake_rx: Receiver<()>,
         ipc_receiver: Receiver<IpcEnvelope>,
         session_name: String,
     ) -> Self {
@@ -155,15 +154,22 @@ impl UnixApp {
             no_activate,
             context,
             wake_signal,
-            wake_rx,
             ipc_receiver,
             session_name,
+            started_at: SystemTime::now(),
             window: None,
             surface: None,
             grid: None,
-            tab: None,
+            tabs: Vec::new(),
+            active: None,
             next_tab_id: 1,
+            close_requested: false,
         }
+    }
+
+    fn active_position(&self) -> Option<usize> {
+        let active = self.active?;
+        self.tabs.iter().position(|tab| tab.id == active)
     }
 
     fn ensure_window(&mut self, event_loop: &ActiveEventLoop) -> anyhow::Result<()> {
@@ -202,7 +208,8 @@ impl UnixApp {
         self.window = Some(window);
         self.surface = Some(surface);
         self.grid = Some(grid);
-        self.tab = Some(tab);
+        self.active = Some(id);
+        self.tabs.push(tab);
         Ok(())
     }
 
@@ -215,30 +222,45 @@ impl UnixApp {
         if let Some(grid) = self.grid.as_mut() {
             grid.resize(cols, rows);
         }
-        if let Some(tab) = self.tab.as_mut() {
-            tab.resize(rows, cols);
+        if let Some(position) = self.active_position() {
+            self.tabs[position].resize(rows, cols);
         }
+    }
+
+    fn handle_ipc(&mut self, envelope: IpcEnvelope) {
+        let response = match dispatch_shared_command(self, &envelope.request.args) {
+            Some(response) => response,
+            None => IpcResponse::typed_failure(
+                format!(
+                    "Unix GUI does not implement `{}` yet",
+                    envelope
+                        .request
+                        .args
+                        .first()
+                        .map(String::as_str)
+                        .unwrap_or("<empty>")
+                ),
+                "unix_gui_unsupported",
+                "unsupported",
+                false,
+            ),
+        };
+        let _ = envelope.respond_to.send(response);
     }
 
     fn drain_wake_and_pty(&mut self) -> bool {
         self.wake_signal.begin_drain();
-        while self.wake_rx.try_recv().is_ok() {}
 
         let mut changed = false;
         while let Ok(envelope) = self.ipc_receiver.try_recv() {
             changed = true;
-            let _ = envelope.respond_to.send(IpcResponse::typed_failure(
-                "Unix GUI control plane is still integrating; window and PTY are live",
-                "unix_gui_partial",
-                "availability",
-                true,
-            ));
+            self.handle_ipc(envelope);
         }
 
-        if let Some(tab) = self.tab.as_mut()
-            && tab.poll()
-        {
-            changed = true;
+        for tab in &mut self.tabs {
+            if tab.poll() {
+                changed = true;
+            }
         }
         if changed {
             self.sync_grid_from_tab();
@@ -247,21 +269,21 @@ impl UnixApp {
     }
 
     fn sync_grid_from_tab(&mut self) {
-        let Some(tab) = self.tab.as_ref() else {
+        let Some(position) = self.active_position() else {
             return;
         };
         let Some(grid) = self.grid.as_mut() else {
             return;
         };
-        grid.sync_from_screen(tab.parser.screen());
+        grid.sync_from_screen(self.tabs[position].parser.screen());
     }
 
     fn queue_pty_input(&mut self, bytes: Vec<u8>) {
         if bytes.is_empty() {
             return;
         }
-        if let Some(tab) = self.tab.as_mut() {
-            let _ = tab.send(&bytes);
+        if let Some(position) = self.active_position() {
+            let _ = self.tabs[position].send(&bytes);
         }
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
@@ -302,10 +324,54 @@ impl UnixApp {
     }
 }
 
-impl ApplicationHandler for UnixApp {
+impl ControlHost for UnixApp {
+    fn session_name(&self) -> &str {
+        &self.session_name
+    }
+
+    fn started_at_unix_secs(&self) -> u64 {
+        self.started_at
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|duration| duration.as_secs())
+            .unwrap_or_default()
+    }
+
+    fn tabs(&self) -> &[TerminalTab] {
+        &self.tabs
+    }
+
+    fn tabs_mut(&mut self) -> &mut Vec<TerminalTab> {
+        &mut self.tabs
+    }
+
+    fn active_id(&self) -> Option<u64> {
+        self.active
+    }
+
+    fn set_active_id(&mut self, id: Option<u64>) {
+        self.active = id;
+    }
+
+    fn request_shutdown(&mut self) {
+        self.close_requested = true;
+    }
+}
+
+impl ApplicationHandler<UnixWake> for UnixApp {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if let Err(error) = self.ensure_window(event_loop) {
             eprintln!("AgenTerm GUI failed to create window: {error:#}");
+            event_loop.exit();
+        }
+    }
+
+    fn user_event(&mut self, event_loop: &ActiveEventLoop, _event: UnixWake) {
+        if self.drain_wake_and_pty()
+            && let Some(window) = self.window.as_ref()
+        {
+            window.request_redraw();
+        }
+        if self.close_requested {
             event_loop.exit();
         }
     }
@@ -327,6 +393,9 @@ impl ApplicationHandler for UnixApp {
             WindowEvent::RedrawRequested => {
                 self.drain_wake_and_pty();
                 self.redraw();
+                if self.close_requested {
+                    event_loop.exit();
+                }
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 if let Some(bytes) = input::key_event_to_bytes(&event) {
@@ -337,15 +406,14 @@ impl ApplicationHandler for UnixApp {
         }
     }
 
-    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-        let mut woke = false;
-        while self.wake_rx.try_recv().is_ok() {
-            woke = true;
-        }
-        if (woke || self.drain_wake_and_pty())
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        if self.drain_wake_and_pty()
             && let Some(window) = self.window.as_ref()
         {
             window.request_redraw();
+        }
+        if self.close_requested {
+            event_loop.exit();
         }
     }
 }

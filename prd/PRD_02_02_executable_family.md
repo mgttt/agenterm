@@ -7,9 +7,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] `agenterm.exe`: Windows-subsystem GUI, PTY owner, workspace authority,
   renderer, and IPC server
 - [~] `agenterm` on Linux/macOS: GUI binary builds and packages with
-  POSIX PTY + software-raster window; IPC server listens and registers
-  instances; full control-plane command parity with Win32 GUI remains
-  in progress
+  POSIX PTY + software-raster window; IPC server listens, registers
+  instances, and shares observe/input/kill dispatch (`protocol-info`,
+  `list-*`, `capture-pane`, `send-keys`, `inspect`, `kill-server`);
+  remaining Win32-only UI commands stay unsupported on Unix
 - [ ] target architecture separates the replaceable Win32 GUI client from the
   workspace/PTY/server authority so a GUI-only restart can preserve live tabs;
   this is now an accepted v0.1.9 requirement rather than an exploratory

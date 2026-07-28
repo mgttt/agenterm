@@ -28,6 +28,19 @@ PRD + Cargo deps (primary)
 并行规则：A∥C∥E 可同时开工；B 在 A 的 API 稳定后接入；D 消费 B+C；
 `Cargo.toml` / `src/lib.rs` / `PRD.md` 由 primary 串行集成。
 
+## 进度
+
+- [x] A PTY backend
+- [x] B terminal_runtime unix
+- [x] C unix IPC server + EventLoopProxy wake
+- [x] D unix_app MVP (window + PTY grid + keys)
+- [x] E packaging/CI includes `agenterm`
+- [x] F shared `control_dispatch` + Unix wire (`protocol-info`,
+  `list-sessions/windows/panes`, `send-keys`, `capture-pane`, `inspect`,
+  `kill-server`); evidence: Linux black-box CLI against live GUI
+- [ ] G Win32 `execute_command` 收敛到同一 `ControlHost`（去重）
+- [ ] H Unix tab tree / composer / settings / UI actions
+
 ## 能力叶
 
 ### A — PTY 后端抽象
