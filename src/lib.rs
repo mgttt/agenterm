@@ -68,7 +68,7 @@ use windows_sys::Win32::{
         WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY, WM_PAINT, WM_PASTE,
         WM_QUERYENDSESSION, WM_RBUTTONDOWN, WM_SETCURSOR, WM_SETFOCUS, WM_SIZE, WM_SYSCOMMAND,
         WM_TIMER, WNDCLASSW, WS_BORDER, WS_CHILD, WS_CLIPCHILDREN, WS_OVERLAPPEDWINDOW, WS_TABSTOP,
-        WS_VISIBLE,
+        WS_VISIBLE, WS_VSCROLL,
     },
 };
 
@@ -84,6 +84,7 @@ mod rmux_status;
 mod script_audit;
 pub mod script_catalog;
 pub mod script_protocol;
+pub mod script_stdlib;
 mod settings;
 mod tab_tree;
 mod terminal_lifecycle;
@@ -142,7 +143,7 @@ use terminal_selection::{
 };
 use theme::{ThemeId, ThemePalette};
 use ui_geometry::{
-    PixelRect, TAB_HEIGHT, TERMINAL_SCROLLBAR_WIDTH, TerminalScrollbarGeometry,
+    COMPOSER_HEIGHT, PixelRect, TAB_HEIGHT, TERMINAL_SCROLLBAR_WIDTH, TerminalScrollbarGeometry,
     TreeRowActionDensity, TreeRowMode, WorkspaceLayout, WorkspaceLayoutInput, reset_tabs_width,
     scrollback_for_thumb_top, tabs_width_from_drag, terminal_scrollbar_geometry, tree_connector_x,
     tree_row_at_y, tree_row_geometry_for_mode, workspace_layout,
@@ -160,10 +161,31 @@ const APP_NAME: &str = "AgenTerm";
 const INITIAL_ROWS: u16 = 30;
 const INITIAL_COLS: u16 = 100;
 const SCROLLBACK_LINES: usize = 10_000;
-const COMPOSER_HEIGHT: i32 = 78;
+const COMPOSER_HEADER_HEIGHT: i32 = 26;
+const COMPOSER_MARGIN: i32 = 6;
+const COMPOSER_CONTROL_GAP: i32 = 6;
+const COMPOSER_INPUT_BOTTOM_MARGIN: i32 = 5;
+const COMPOSER_TARGET_ROWS: i32 = 3;
 const STATUS_BAR_HEIGHT: i32 = 26;
 const BUTTON_ID: usize = 1001;
 const EDIT_ID: usize = 1002;
+
+fn composer_input_rect(composer: PixelRect, proxy_editor: bool) -> PixelRect {
+    let proxy_controls_width = if proxy_editor { 166 } else { 0 };
+    let edit_width = (composer.width().max(180)
+        - COMPOSER_MARGIN * 2
+        - COMPOSER_CONTROL_GAP
+        - 74
+        - proxy_controls_width)
+        .max(80);
+    let top = (composer.top + COMPOSER_HEADER_HEIGHT).min(composer.bottom);
+    PixelRect {
+        left: composer.left + COMPOSER_MARGIN,
+        top,
+        right: composer.left + COMPOSER_MARGIN + edit_width,
+        bottom: (composer.bottom - COMPOSER_INPUT_BOTTOM_MARGIN).max(top),
+    }
+}
 const SETTINGS_BUTTON_ID: usize = 1003;
 const SETTINGS_FONT_ID: usize = 1004;
 const SETTINGS_SIZE_ID: usize = 1005;
@@ -781,6 +803,7 @@ fn run_gui(no_activate: bool) -> Result<()> {
                 | WS_VISIBLE
                 | WS_BORDER
                 | WS_TABSTOP
+                | WS_VSCROLL
                 | ES_MULTILINE as u32
                 | ES_AUTOVSCROLL as u32
                 | ES_WANTRETURN as u32,
@@ -2565,12 +2588,9 @@ impl AppState {
         let sidebar_width = layout.effective_tabs_width;
         let content_bottom = layout.status.top;
         let content_width = layout.terminal.width().max(180);
-        let proxy_controls_width = if self.proxy_edit_target.is_some() {
-            166
-        } else {
-            0
-        };
-        let edit_width = (content_width - 104 - proxy_controls_width).max(80);
+        let composer_input = composer_input_rect(layout.composer, self.proxy_edit_target.is_some());
+        let edit_width = composer_input.width();
+        let composer_button_top = composer_input.top + (composer_input.height() - 34).max(0) / 2;
         let button_left = 8;
         let button_gap = 4;
         let tabs_button_width = 52.min((sidebar_width - 16).max(0));
@@ -2643,39 +2663,40 @@ impl AppState {
             );
             MoveWindow(
                 self.edit,
-                layout.composer.left + 10,
-                (layout.composer.top + 30).max(0),
+                composer_input.left,
+                composer_input.top.max(0),
                 edit_width,
-                COMPOSER_HEIGHT - 40,
+                composer_input.height(),
                 1,
             );
             MoveWindow(
                 self.send_button,
                 layout.composer.left
-                    + 20
+                    + COMPOSER_MARGIN
+                    + COMPOSER_CONTROL_GAP
                     + edit_width
                     + if self.proxy_edit_target.is_some() {
                         76
                     } else {
                         0
                     },
-                (layout.composer.top + 32).max(0),
+                composer_button_top.max(0),
                 74,
                 34,
                 1,
             );
             MoveWindow(
                 self.proxy_reveal,
-                layout.composer.left + 20 + edit_width,
-                (layout.composer.top + 32).max(0),
+                layout.composer.left + COMPOSER_MARGIN + COMPOSER_CONTROL_GAP + edit_width,
+                composer_button_top.max(0),
                 70,
                 34,
                 1,
             );
             MoveWindow(
                 self.proxy_send_now,
-                layout.composer.left + 176 + edit_width,
-                (layout.composer.top + 32).max(0),
+                layout.composer.left + COMPOSER_MARGIN + COMPOSER_CONTROL_GAP + 156 + edit_width,
+                composer_button_top.max(0),
                 80,
                 34,
                 1,
@@ -6197,6 +6218,7 @@ impl AppState {
                 })),
             })
         });
+        let composer_input = composer_input_rect(layout.composer, self.proxy_edit_target.is_some());
         serde_json::to_string_pretty(&serde_json::json!({
             "protocol_version": 1,
             "event_position": event_position,
@@ -6261,6 +6283,16 @@ impl AppState {
                     "width": layout.composer.width(),
                     "height": layout.composer.height(),
                     "bounds": pixel_rect_json(layout.composer),
+                    "input": {
+                        "bounds": pixel_rect_json(PixelRect {
+                            left: composer_input.left,
+                            top: composer_input.top,
+                            right: composer_input.right,
+                            bottom: composer_input.bottom,
+                        }),
+                        "target_rows": COMPOSER_TARGET_ROWS,
+                        "vertical_scrollbar": true,
+                    },
                 },
                 "status_bar": {
                     "x": layout.status.left,
@@ -8817,7 +8849,7 @@ fn run_script_command(arguments: &[String]) -> i32 {
             return 2;
         }
     };
-    let profile = match option_value(arguments, "--profile").unwrap_or("pure") {
+    let profile = match option_value(arguments, "--profile").unwrap_or("local") {
         "pure" => ScriptProfile::Pure,
         "observe" => ScriptProfile::Observe,
         "local" => ScriptProfile::Local,
@@ -9373,7 +9405,7 @@ fn script_broker_wait(
                 format!("no {kind} event arrived within {timeout_ms} ms"),
             ));
         }
-        let output = script_broker_ipc(
+        let output = match script_broker_ipc(
             vec![
                 "read-events".to_owned(),
                 "--epoch".to_owned(),
@@ -9384,7 +9416,22 @@ fn script_broker_wait(
                 budgets.event_items.min(256).to_string(),
             ],
             ipc_remaining,
-        )?;
+        ) {
+            Ok(output) => output,
+            Err(response)
+                if response
+                    .error
+                    .as_ref()
+                    .is_some_and(|error| error.code == "broker_transport")
+                    && Instant::now() >= deadline =>
+            {
+                return Err(script_broker_error(
+                    "event_wait_timeout",
+                    format!("no {kind} event arrived within {timeout_ms} ms"),
+                ));
+            }
+            Err(response) => return Err(response),
+        };
         let batch: serde_json::Value = serde_json::from_str(&output)
             .map_err(|error| script_broker_error("broker_invalid_response", error.to_string()))?;
         if let Some(events) = batch.get("events").and_then(serde_json::Value::as_array) {
@@ -10413,10 +10460,11 @@ fn save_window_png(window: HWND, path: &std::path::Path, pane: Option<PixelRect>
 #[cfg(test)]
 mod tests {
     use super::{
-        EditShortcut, FocusSurface, IpcResponse, ThemeId, bounded_utf8_prefix, edit_shortcut,
-        effective_theme, gui_cli_guidance, gui_handoff_succeeded, is_latched_navigation_repeat,
-        no_activate_from_value, normalize_terminal_paste, parse_gui_launch,
-        parse_loopback_ipc_address, run_wait_ui, surface_navigation, terminal_copy_shortcut,
+        COMPOSER_TARGET_ROWS, EditShortcut, FocusSurface, IpcResponse, PixelRect, ThemeId,
+        bounded_utf8_prefix, composer_input_rect, edit_shortcut, effective_theme, gui_cli_guidance,
+        gui_handoff_succeeded, is_latched_navigation_repeat, no_activate_from_value,
+        normalize_terminal_paste, parse_gui_launch, parse_loopback_ipc_address, run_wait_ui,
+        surface_navigation, terminal_copy_shortcut,
     };
 
     #[test]
@@ -10451,6 +10499,25 @@ mod tests {
         assert_eq!(edit_shortcut(true, b'V' as u32), Some(EditShortcut::Paste));
         assert_eq!(edit_shortcut(false, b'A' as u32), None);
         assert_eq!(edit_shortcut(true, b'Z' as u32), None);
+    }
+
+    #[test]
+    fn composer_input_geometry_keeps_three_row_height_and_compact_spacing() {
+        let input = composer_input_rect(
+            PixelRect {
+                left: 250,
+                top: 570,
+                right: 1000,
+                bottom: 674,
+            },
+            false,
+        );
+        assert_eq!(input.left, 256);
+        assert_eq!(input.top, 596);
+        assert_eq!(input.right, 914);
+        assert_eq!(input.bottom, 669);
+        assert_eq!(input.height(), 73);
+        assert!(input.height() >= COMPOSER_TARGET_ROWS * 20);
     }
 
     #[test]

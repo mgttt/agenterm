@@ -352,6 +352,10 @@ track remains planned, but every declared dependency must still pass.
     `v0.1.8` tag and creating a public GitHub Release require explicit user
     approval after the candidate and rehearsal gates pass
 - [ ] M6 / v0.1.9 General Script Runtime
+  - [ ] deliver the cross-cutting stable-server/replaceable-GUI migration:
+    internal `agenterm-server.exe` owns session/PTY truth, current
+    `agenterm.exe` reconnects as a versioned UI client, and upgrade/rollback
+    evidence preserves server/PTY identity and continuing output
   - [x] establish typed script catalog schema v2 independently of the Script
     API protocol version, and add an explicit server-independent `local`
     profile foundation without changing the ordinary default prematurely

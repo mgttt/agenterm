@@ -330,6 +330,7 @@ try {
     if (-not $apiResult.ok -or
         $apiResult.value.api_version -ne 1 -or
         $apiResult.value.schema_version -ne 2 -or
+        $apiResult.value.default_profile -ne 'local' -or
         $apiResult.value.profiles.pure.variables -notcontains 'args' -or
         $apiResult.value.profiles.observe.variables -notcontains 'agent' -or
         $apiResult.value.profiles.local.status -ne 'shipped' -or
@@ -359,7 +360,8 @@ try {
             $_.surface_path -eq 'std::fs::read_to_string' -and
             $_.rust_path -eq 'std::fs::read_to_string' -and
             $_.rust_mapping -eq 'adapted' -and
-            $_.status -eq 'planned'
+            $_.status -eq 'shipped' -and
+            $_.profiles -contains 'local'
         }).Count -ne 1) {
         throw 'script api did not expose the versioned fail-closed capability catalog'
     }
@@ -388,6 +390,48 @@ try {
     if ($localValue -ne 'local-profile') {
         throw "explicit local profile returned unexpected value: $localValue"
     }
+    $localDataFile = Join-Path $runtimeDirectory 'local-data.json'
+    $localDataLiteral = $localDataFile.Replace('`', '``')
+    $localRuntimeExpression = (
+        "std::fs::write(``$localDataLiteral``, ``{`"answer`":42}``); " +
+        "rhai::json::parse(std::fs::read_to_string(``$localDataLiteral``)).answer"
+    )
+    $localRuntime = Invoke-Script @(
+        'script', 'eval', $localRuntimeExpression, '--profile', 'local'
+    )
+    if ($localRuntime -ne '42') {
+        throw "local fs/json runtime returned unexpected value: $localRuntime"
+    }
+    $localPath = Invoke-Script @(
+        'script', 'eval',
+        "std::path::PathBuf::from(``$localDataLiteral``).extension",
+        '--profile', 'local'
+    )
+    if ($localPath -ne 'json') {
+        throw "local typed path returned unexpected extension: $localPath"
+    }
+    $localBytes = Invoke-Script @(
+        'script', 'eval', 'rhai::bytes::from_text("hello").len',
+        '--profile', 'local'
+    )
+    if ($localBytes -ne '5') {
+        throw "local typed bytes returned unexpected length: $localBytes"
+    }
+    [IO.File]::WriteAllText(
+        $sourceFile,
+        "std::fs::read_to_string(``$localDataLiteral``)"
+    )
+    if ((Invoke-Script @(
+        'script', 'check', $sourceFile, '--profile', 'local'
+    )) -ne 'OK') {
+        throw 'local check rejected a shipped qualified std API'
+    }
+    $pureStdDenied = Invoke-ScriptFailure 1 @(
+        'script', 'eval', 'std::fs::exists(".")', '--profile', 'pure'
+    )
+    if (-not $pureStdDenied.Contains('"code":"script_runtime"')) {
+        throw 'pure profile unexpectedly received local filesystem authority'
+    }
     [IO.File]::WriteAllText($sourceFile, 'let = ;')
     $parseError = Invoke-ScriptFailure 1 @('script', 'check', $sourceFile)
     if (-not $parseError.Contains('"code":"script_parse"')) {
@@ -406,7 +450,9 @@ try {
     Write-Evidence 'script.rhai-pure'
 
     Write-Host 'STEP pure authority denial and operation budget'
-    $denied = Invoke-ScriptFailure 1 @('script', 'eval', 'agent.workspace()')
+    $denied = Invoke-ScriptFailure 1 @(
+        'script', 'eval', 'agent.workspace()', '--profile', 'pure'
+    )
     if (-not $denied.Contains('"code":"script_runtime"')) {
         throw 'pure profile unexpectedly received broker authority'
     }
@@ -754,6 +800,10 @@ try {
             $_.effective_profile -eq 'observe' -and
             $_.effective_capabilities -contains 'observe' -and
             $_.broker_operation_ids -contains 'ui.snapshot'
+        }).Count -lt 1 -or
+        @($auditRecords | Where-Object {
+            $_.effective_profile -eq 'local' -and
+            $_.effective_capabilities -contains 'local'
         }).Count -lt 1 -or
         @($auditRecords | Where-Object {
             $_.source_fingerprint -match '^fnv1a128:[0-9a-f]{32}$'
