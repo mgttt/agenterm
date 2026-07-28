@@ -785,6 +785,7 @@ fn shipped_local_entry(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn shipped_local_entry_with_semantics(
     stable_id: &'static str,
     catalog_path: &'static str,
