@@ -132,8 +132,17 @@ try {
             )
         }
         $snapshot = $stdout | ConvertFrom-Json
-        if ($snapshot.protocol_version -lt 1) {
-            throw 'concurrent IPC client returned an invalid UI snapshot'
+        if ($snapshot.schema_version -lt 1 -or
+            $snapshot.projection -notin @(
+                'replaceable_ui_client', 'headless_server'
+            ) -or
+            [string]::IsNullOrWhiteSpace(
+                [string]$snapshot.event_position.epoch
+            )) {
+            throw (
+                'concurrent IPC client returned an invalid versioned ' +
+                "projection: $($snapshot | ConvertTo-Json -Compress -Depth 4)"
+            )
         }
         $client.Process.Dispose()
     }
