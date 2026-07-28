@@ -278,9 +278,13 @@ and it is not positioned as a restricted security plugin.
   classification, diagnostics, cancellation, cleanup, encoding, path behavior,
   and clean-machine recovery; a Rhai failure cannot hide the PowerShell
   last-known-good result.
-- [ ] PowerShell remains the qualification fallback through v0.1.x. No
-  PowerShell implementation is archived before v0.2.0, and reaching v0.2.0
-  does not automatically qualify every script for removal.
+- [ ] once one Rhai responsibility reaches parity and all normal callers switch
+  to it, archive that corresponding PowerShell implementation immediately
+  instead of accumulating a release-wide migration backlog.
+- [ ] every archived item records its old path, replacement path, switching
+  commit, parity evidence, and rollback boundary in this PRD. Archive paths are
+  excluded from normal build/check/release invocation; after their explicit
+  rollback window they may leave the working tree because Git retains history.
 - [ ] build, check, qualification, package, release, credential, and GitHub
   workflow entry points may gain parallel Rhai candidates but do not switch
   their default implementation in v0.1.9.

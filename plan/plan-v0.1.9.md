@@ -1231,8 +1231,8 @@ src/bin/agenterm-script.rs
 ## 十四、自托管与渐进置换
 
 这不是一次性重写 `.ps1`，而是从 v0.1.9 开始平行建设 `.rhai` 脚本集，
-把仓库自身作为运行时的长期真实负载。PowerShell 至少保留到 v0.2.0；
-到时也只是开始归档已经完成长期等价验证的旧实现。
+把仓库自身作为运行时的长期真实负载。迁移和归档以单项能力为单位闭环，
+不设置“统一等到某个版本再整理”的总开关。
 
 ```text
 parallel
@@ -1248,8 +1248,9 @@ default-rhai
   默认入口切到 Rhai，PowerShell 仍可显式回退
         |
         v
-PowerShell archived (not before v0.2.0)
-  只归档已有充分运行证据的单项脚本
+PowerShell archived
+  单项默认入口切换后立即归档对应旧脚本
+  archive 不再被正常 build/check/release 路径引用
 ```
 
 第一项已落地：
@@ -1271,6 +1272,10 @@ scripts/rhai/verify-script-contract.rhai
 - 对比退出分类、duration、错误与 orphan/临时文件清理；
 - Rhai 失败不遮蔽 PowerShell 结果；
 - 未满足 clean machine、取消、路径、编码和 recovery 前不切默认入口。
+- 切换默认调用方后，把对应 `.ps1` 移入明确的 PowerShell archive，
+  并在 PRD 记录旧路径、新路径、切换提交和验证证据；
+- archive 只承担限时回退与历史对照，不得继续被常规入口调用；确认无需
+  回退后可删除工作树副本，完整历史仍由 Git 保留。
 
 v0.1.9 不切换以下关键流程的默认实现，但允许提前编写 Rhai 候选并双跑：
 
