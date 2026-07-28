@@ -51,6 +51,7 @@ PRD + Cargo deps (primary)
   - [x] settings modal UI + `open-settings` / `settings-apply` / `cancel`
   - [x] full shared `ui-action` tabs/layout/tree/editor subset
   - [x] Unix `ui-snapshot` scrollbar/modal/system_menu/tab metadata
+- [x] I Unix mouse-wheel + scrollbar track/thumb (live max offset, event journal)
 
 ### A — PTY 后端抽象
 - 用户问题：Windows ConPTY 与 Unix PTY 不能各写一套 runtime。
