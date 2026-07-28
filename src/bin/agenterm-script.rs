@@ -101,25 +101,16 @@ fn main() -> ExitCode {
 }
 
 fn run() -> anyhow::Result<u8> {
-    let mut arguments = std::env::args().skip(1);
-    match arguments.next().as_deref() {
-        Some("--worker") if arguments.next().is_none() => run_worker(),
-        Some("--framed-worker") if arguments.next().is_none() => run_framed_worker(),
-        Some("--version") if arguments.next().is_none() => {
+    let arguments = std::env::args().skip(1).collect::<Vec<_>>();
+    match arguments.as_slice() {
+        [mode] if mode == "--worker" => run_worker(),
+        [mode] if mode == "--framed-worker" => run_framed_worker(),
+        [mode] if mode == "--version" || mode == "-V" => {
             println!("agenterm-script {}", env!("CARGO_PKG_VERSION"));
             Ok(0)
         }
-        Some("--help") | None => {
-            println!(
-                "AgenTerm scripting worker\n\
-                 Usage: agenterm-script --worker | --framed-worker\n\
-                 Public scripts are invoked through `agenterm-cli script ...`."
-            );
-            Ok(0)
-        }
-        _ => anyhow::bail!(
-            "unknown agenterm-script option; use --help or invoke scripts through agenterm-cli"
-        ),
+        _ => u8::try_from(agenterm::run_script_entry_with_args(arguments))
+            .map_err(|_| anyhow::anyhow!("script entry returned an invalid exit code")),
     }
 }
 

@@ -913,6 +913,10 @@ or network to guess a module.
 The named task manifest is `agenterm.tasks.json`. It describes local task
 execution and is not a package manifest. `task list` and `task show` MUST NOT
 execute user code. Invalid tasks remain discoverable with a degraded reason.
+The public executable is `agenterm-script.exe`; `agenterm-cli.exe script ...`
+is a compatibility route to the same parser, catalog, supervisor, and runtime.
+The reserved `--worker` and `--framed-worker` modes are internal host protocol
+entry points, not alternate user APIs.
 
 Schema v1 is:
 

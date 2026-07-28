@@ -25,8 +25,9 @@ native automation client, and a deliberately bounded tmux/RMUX frontend.
   clipboard.
 - Snapshot-positioned bounded event reads and waits expose explicit restart,
   gap, and timeout results.
-- `agenterm-script.exe` runs bounded one-invocation Rhai `pure` and immutable
-  `observe` profiles without linking the scripting engine into the GUI.
+- `agenterm-script.exe` is the public Rhai CLI for local automation, pure
+  computation, observable Fleet tools, and versioned named tasks without
+  linking the scripting engine into the GUI.
 - `new-agent` launches Codex in a named fleet tab with stable AgenTerm context.
 - Tab-scoped environment and proxy values apply only to the child process and
   are not written to the persistent workspace.
@@ -56,7 +57,7 @@ build metadata under `dist/`:
 - `dist/agenterm-cli.exe` — full native observation and automation client.
 - `dist/agenterm-mux.exe` — tmux/RMUX compatibility frontend over the same IPC
   server.
-- `dist/agenterm-script.exe` — optional bounded Rhai scripting worker.
+- `dist/agenterm-script.exe` — public Rhai CLI and supervised scripting worker.
 - `dist/agenterm.json` — version, UTC build time, Git state, Rust target, size, and
   SHA-256 metadata.
 

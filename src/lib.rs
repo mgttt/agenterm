@@ -51,7 +51,7 @@ mod win_app;
 #[cfg(windows)]
 mod worker_supervisor;
 
-pub use client::{run_cli_entry, run_mux_entry};
+pub use client::{run_cli_entry, run_mux_entry, run_script_entry_with_args};
 
 #[cfg(windows)]
 pub use win_app::run_gui_entry;

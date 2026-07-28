@@ -9,6 +9,7 @@ $declaredEvidence = @(
     'script.rhai-pure'
     'script.rhai-observe'
     'script.fleet-v2'
+    'script.north-star'
     'script.rhai-deny-budget'
     'script.rhai-framed'
     'script.modules-tasks'
@@ -58,6 +59,30 @@ $abandonedTempOwnerPids = [Collections.Generic.List[int]]::new()
 function Invoke-Script {
     param([string[]]$CommandArgs)
     Invoke-SmokeCli -Context $smokeRun -Arguments $CommandArgs
+}
+
+function Invoke-DirectScript {
+    param([string[]]$CommandArgs)
+    $savedPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $outputItems = @(& $workerExe @CommandArgs 2>&1)
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $savedPreference
+    }
+    $output = $outputItems -join "`n"
+    Add-SmokeCommandRecord -Context $smokeRun `
+        -Arguments (@('[agenterm-script]') + $CommandArgs) `
+        -ExitCode $exitCode -ExpectedFailure $false -Output $output
+    if ($exitCode -ne 0) {
+        $safeCommand = (
+            ConvertTo-SmokeSafeArguments -Arguments $CommandArgs
+        ) -join ' '
+        throw "agenterm-script $safeCommand failed:`n$output"
+    }
+    return $output
 }
 
 function Invoke-ScriptFailure {
@@ -1746,6 +1771,149 @@ let receipt = fleet.tabs.set_note($fleetTabIdLiteral, $fleetNoteLiteral);
         throw 'typed tab-note mutation did not restore the isolated fixture'
     }
     Write-Evidence 'script.fleet-v2'
+
+    Write-Host 'STEP direct agenterm-script north-star named task'
+    $northStarSource = Join-Path $repositoryRoot 'examples\script-daily-check'
+    $northStarProject = Join-Path $runtimeDirectory 'north-star-project'
+    New-Item -ItemType Directory -Path $northStarProject -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $northStarSource 'agenterm.tasks.json') `
+        -Destination $northStarProject
+    Copy-Item -LiteralPath (Join-Path $northStarSource 'daily-check.rhai') `
+        -Destination $northStarProject
+    $northStarManifest = Join-Path $northStarProject 'agenterm.tasks.json'
+    $northStarEntry = Join-Path $northStarProject 'daily-check.rhai'
+    $northStarResultPath = Join-Path $runtimeDirectory 'daily-check-result.json'
+    $northStarReadyPath = Join-Path $runtimeDirectory 'north-star-http-ready.json'
+    $northStarLogPath = Join-Path $runtimeDirectory 'north-star-http-log.jsonl'
+    $northStarStopPath = Join-Path $runtimeDirectory 'north-star-http-stop'
+    $northStarHttp = Start-HttpFixture -FixturePath $httpFixtureScript `
+        -ReadyPath $northStarReadyPath -LogPath $northStarLogPath `
+        -StopPath $northStarStopPath
+    try {
+        $northStarReady = Wait-HttpFixtureReady -Process $northStarHttp `
+            -ReadyPath $northStarReadyPath
+        $northStarSnapshot = Invoke-Script @('ui-snapshot') | ConvertFrom-Json
+        $northStarTab = @($northStarSnapshot.tabs | Where-Object active)[0]
+        $northStarOriginalNote = [string]$northStarTab.note
+        $northStarConfig = [ordered]@{
+            schema_version = 1
+            message = 'AgenTerm daily check：目录与终端'
+            child_program = $Exe
+            child_a_args = @('--version')
+            child_b_args = @('list-commands')
+            loopback_url = "$($northStarReady.url)/status"
+            tab_id = [string]$northStarTab.id
+            result_path = $northStarResultPath
+        }
+        [IO.File]::WriteAllText(
+            (Join-Path $northStarProject 'config.json'),
+            ($northStarConfig | ConvertTo-Json -Depth 8),
+            [Text.UTF8Encoding]::new($false)
+        )
+
+        $directHelp = Invoke-DirectScript @('--help')
+        if ($directHelp -notlike '*AgenTerm Script Runtime*' -or
+            $directHelp -notlike '*agenterm-script task run*') {
+            throw 'agenterm-script.exe did not expose its public CLI help'
+        }
+        $directCheck = Invoke-DirectScript @(
+            'check', $northStarEntry, '--profile', 'local',
+            '--project-root', $northStarProject
+        )
+        if ($directCheck -ne 'OK') {
+            throw 'direct agenterm-script check rejected the north-star source'
+        }
+        $northStarCatalog = Invoke-DirectScript @(
+            'task', 'list', '--manifest', $northStarManifest, '--json'
+        ) | ConvertFrom-Json
+        $northStarShow = Invoke-DirectScript @(
+            'task', 'show', 'daily-check',
+            '--manifest', $northStarManifest, '--json'
+        ) | ConvertFrom-Json
+        if ($northStarCatalog.project_id -ne 'agenterm-script-daily-check' -or
+            @($northStarCatalog.tasks).Count -ne 1 -or
+            $northStarCatalog.tasks[0].status -ne 'ready' -or
+            $northStarShow.tasks[0].entry -ne 'daily-check.rhai' -or
+            $northStarShow.tasks[0].profile -ne 'local') {
+            throw 'north-star task list/show lost inspectable manifest facts'
+        }
+
+        $northStarRun = Invoke-DirectScript @(
+            'task', 'run', 'daily-check',
+            '--manifest', $northStarManifest,
+            '--timeout-ms', '10000', '--max-operations', '1000000',
+            '--json', '--', 'smoke-target'
+        ) | ConvertFrom-Json
+        $northStar = $northStarRun.value
+        if (-not $northStarRun.ok -or
+            $northStar.schema_version -ne 1 -or
+            $northStar.target -ne 'smoke-target' -or
+            $northStar.message -ne 'AgenTerm daily check：目录与终端' -or
+            $northStar.child_a.pid -le 0 -or
+            $northStar.child_b.pid -le 0 -or
+            $northStar.child_a.pid -eq $northStar.child_b.pid -or
+            $northStar.child_a.exit_code -ne 0 -or
+            $northStar.child_b.exit_code -ne 0 -or
+            -not $northStar.child_a.complete -or
+            -not $northStar.child_b.complete -or
+            $northStar.child_a.stdout -notlike '*agenterm-cli*' -or
+            $northStar.child_b.stdout -notlike '*list-commands*' -or
+            $northStar.http.status -ne 201 -or
+            $northStar.http.body -ne 'hello' -or
+            $northStar.http.task_state -ne 'completed' -or
+            $northStar.fleet.operation_id -ne 'tabs.set-note' -or
+            $northStar.fleet.event_kind -ne 'tab.note' -or
+            -not $northStar.fleet.verified) {
+            throw 'north-star task did not close its process/HTTP/Fleet result loop'
+        }
+        if (Test-Path -LiteralPath $northStar.temp_root) {
+            throw 'north-star invocation-owned temporary root survived task completion'
+        }
+        if (-not (Test-Path -LiteralPath $northStarResultPath)) {
+            throw 'north-star task did not atomically publish its result'
+        }
+        $northStarPersisted = [IO.File]::ReadAllText($northStarResultPath) |
+            ConvertFrom-Json
+        if ($northStarPersisted.target -ne $northStar.target -or
+            $northStarPersisted.fleet.note -ne $northStar.fleet.note) {
+            throw 'north-star atomic result disagreed with the returned aggregate'
+        }
+        $northStarStaging = @(
+            Get-ChildItem -LiteralPath $runtimeDirectory -Force |
+                Where-Object { $_.Name -like '.daily-check-result*.agenterm-atomic-*' }
+        )
+        if ($northStarStaging.Count -ne 0) {
+            throw 'north-star atomic result left a staging file'
+        }
+        foreach ($childPid in @(
+            [int]$northStar.child_a.pid,
+            [int]$northStar.child_b.pid
+        )) {
+            if (Get-Process -Id $childPid -ErrorAction SilentlyContinue) {
+                throw "north-star child process survived task completion: $childPid"
+            }
+        }
+        $restoreTabLiteral = ConvertTo-Json -Compress ([string]$northStarTab.id)
+        $restoreNoteLiteral = ConvertTo-Json -Compress $northStarOriginalNote
+        $restoreNorthStar = (
+            "fleet.tabs.set_note($restoreTabLiteral, " +
+            "$restoreNoteLiteral).post_state.verified"
+        )
+        if ((Invoke-Script @(
+            'script', 'eval', $restoreNorthStar, '--profile', 'local'
+        )) -ne 'true') {
+            throw 'north-star task did not restore its isolated Fleet fixture'
+        }
+        Write-Evidence 'script.north-star'
+    }
+    finally {
+        [IO.File]::WriteAllText($northStarStopPath, 'stop')
+        if (-not $northStarHttp.WaitForExit(3000)) {
+            $northStarHttp.Kill()
+            $northStarHttp.WaitForExit()
+        }
+        $northStarHttp.Dispose()
+    }
 
     Write-Host 'STEP privacy-bounded reusable script audit'
     [IO.File]::WriteAllText(

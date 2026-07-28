@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "project": {
+    "id": "agenterm-script-daily-check",
+    "version": "1.0.0"
+  },
+  "tasks": [
+    {
+      "id": "daily-check",
+      "description": "Exercise local process, HTTP, Fleet, JSON, atomic output, and cleanup APIs",
+      "entry": "daily-check.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "args": []
+    }
+  ]
+}

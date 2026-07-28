@@ -8,12 +8,18 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
 ## Shipped baseline
 
-- [x] `agenterm-script.exe` executes pure Rhai `run`, `eval`, `check`, and API
-  discovery in a fresh sidecar process.
+- [x] `agenterm-script.exe` is the public `run`, `eval`, `check`, `api`, and
+  named-task CLI while retaining private `--worker`/`--framed-worker` modes;
+  `agenterm-cli.exe script ...` is a thin compatibility route to the same
+  catalog, parser, supervisor, and runtime.
 - [x] the explicit `observe` profile exposes typed, bounded workspace, tab,
   snapshot, capture, and event broker methods without direct Win32, PTY, or
   mutable GUI-state access.
 - [x] Script API v2 maps every current typed operation exactly once to `fleet` and verifies mutation receipts, correlated events, and post-state.
+- [x] the public `examples/script-daily-check` north-star task combines Unicode
+  configuration, invocation-owned temp, two concurrent argv-safe children,
+  loopback HTTP, JSON aggregation, typed Fleet note mutation, atomic result
+  publication, restoration, and orphan-free cleanup in one invocation.
 - [x] the explicit `pure` profile provides deterministic JSON-compatible
   values, arguments, bounded computation, and captured stdout without ambient
   filesystem, environment, process, network, clock, terminal, or Fleet access.

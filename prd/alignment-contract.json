@@ -359,6 +359,22 @@
       "evidence_ids": ["script.runtime-lifecycle"]
     },
     {
+      "id": "scripting.direct-entry",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "`agenterm-script.exe` is the public script and named-task CLI while worker modes remain internal implementation entry points",
+      "evidence_ids": ["script.north-star"]
+    },
+    {
+      "id": "scripting.north-star",
+      "kind": "journey",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "the daily-check named task closes Unicode config, concurrent argv-safe children, loopback HTTP, JSON, Fleet evidence, atomic output and cleanup in one public invocation",
+      "evidence_ids": ["script.north-star"]
+    },
+    {
       "id": "scripting.rust-host-rhai-language",
       "kind": "decision",
       "status": "accepted",

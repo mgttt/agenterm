@@ -120,6 +120,7 @@
         "script.rhai-pure",
         "script.rhai-observe",
         "script.fleet-v2",
+        "script.north-star",
         "script.rhai-deny-budget",
         "script.rhai-framed",
         "script.modules-tasks",

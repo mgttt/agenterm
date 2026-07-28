@@ -223,6 +223,35 @@ pub fn run_cli_entry() -> i32 {
     run_cli(arguments, control_options)
 }
 
+pub fn run_script_entry_with_args(mut arguments: Vec<String>) -> i32 {
+    if arguments.is_empty()
+        || arguments
+            .first()
+            .is_some_and(|argument| argument == "-h" || argument == "--help")
+    {
+        print_script_help();
+        return 0;
+    }
+    arguments.insert(0, "script".to_owned());
+    run_cli(arguments, CliControlOptions::default())
+}
+
+fn print_script_help() {
+    println!(
+        "AgenTerm Script Runtime\n\
+         Usage:\n\
+           agenterm-script api [MODULE] [--status STATE] [--json]\n\
+           agenterm-script check [OPTIONS] FILE.rhai|-\n\
+           agenterm-script eval [OPTIONS] EXPRESSION [--] [ARGS...]\n\
+           agenterm-script run [OPTIONS] FILE.rhai|- [--] [ARGS...]\n\
+           agenterm-script task list [--manifest PATH] [--json]\n\
+           agenterm-script task show TASK [--manifest PATH] [--json]\n\
+           agenterm-script task run TASK [--manifest PATH] [OPTIONS] [--] [ARGS...]\n\
+         Options: --profile local|pure|observe --timeout-ms N \
+         --max-operations N --json"
+    );
+}
+
 pub fn run_mux_entry() -> i32 {
     let mut arguments: Vec<String> = env::args().skip(1).collect();
     if arguments
