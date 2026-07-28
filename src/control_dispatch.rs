@@ -131,8 +131,43 @@ pub(crate) trait ControlHost {
     /// Win: finish note edit / cancel selection; Unix: no-op default.
     fn before_destructive_ui(&mut self) {}
 
-    /// Win: save composer from HWND; Unix: no-op default.
+    /// Win: save composer from HWND; Unix: sync in-memory draft.
     fn sync_composer_from_ui(&mut self) {}
+
+    /// Reload the active tab composer into the host UI surface.
+    fn load_composer_to_ui(&mut self) {}
+
+    fn focus_surface(&self) -> &str {
+        "terminal"
+    }
+
+    fn set_ipc_focus_surface(&mut self, surface: &str) -> Result<(), String> {
+        match surface {
+            "terminal" | "composer" | "tabs" | "sidebar" => Ok(()),
+            other => Err(format!("unknown focus surface: {other}")),
+        }
+    }
+
+    fn settings_json(&self) -> String {
+        "{}".to_owned()
+    }
+
+    /// Win: note-editor `set-composer` override; default writes tab composer draft.
+    fn apply_set_composer(&mut self, position: usize, text: String) -> Result<(), String> {
+        let id = self.tabs()[position].id;
+        self.tabs_mut()[position].composer = text.clone();
+        self.event_journal_mut().commit(
+            EventKind::ComposerDraft,
+            Some(id),
+            serde_json::json!({
+                "length": text.chars().count(),
+            }),
+        );
+        if self.active_id() == Some(id) {
+            self.load_composer_to_ui();
+        }
+        Ok(())
+    }
 
     fn set_session_name(&mut self, name: String);
 
@@ -903,6 +938,120 @@ pub(crate) fn dispatch_shared_command(
             }
         }
         "ui-snapshot" => host.ui_snapshot_json().map(IpcResponse::success),
+        "show-composer" => {
+            host.sync_composer_from_ui();
+            let Some(position) =
+                resolve_target_position(host.tabs(), host.active_id(), option_value(args, "-t"))
+            else {
+                return Some(IpcResponse::failure("can't find window"));
+            };
+            if host.tabs()[position].sensitive_composer.is_some() {
+                return Some(IpcResponse::failure(
+                    "Composer contains a sensitive proxy draft; content is redacted",
+                ));
+            }
+            Some(IpcResponse::success(host.tabs()[position].composer.clone()))
+        }
+        "set-composer" => {
+            let Some(position) =
+                resolve_target_position(host.tabs(), host.active_id(), option_value(args, "-t"))
+            else {
+                return Some(IpcResponse::failure("can't find window"));
+            };
+            if host.tabs()[position].sensitive_composer.is_some() {
+                return Some(IpcResponse::failure(
+                    "Composer contains a sensitive proxy draft; send or discard it first",
+                ));
+            }
+            let text = positional_values(args, &["-t"], &[]).join(" ");
+            match host.apply_set_composer(position, text) {
+                Ok(()) => Some(IpcResponse::success("")),
+                Err(error) => Some(IpcResponse::failure(error)),
+            }
+        }
+        "send-composer" => {
+            host.sync_composer_from_ui();
+            let Some(position) =
+                resolve_target_position(host.tabs(), host.active_id(), option_value(args, "-t"))
+            else {
+                return Some(IpcResponse::failure("can't find window"));
+            };
+            if let Some(secret) = host.tabs_mut()[position].sensitive_composer.take() {
+                let marker = host.tabs_mut()[position].sensitive_proxy_marker.take();
+                if !host.tabs_mut()[position].submit_sensitive(secret.expose()) {
+                    host.tabs_mut()[position].sensitive_composer = Some(secret);
+                    host.tabs_mut()[position].sensitive_proxy_marker = marker;
+                    return Some(IpcResponse::failure(
+                        "a composer submission is already pending",
+                    ));
+                }
+                let Some(marker) = marker else {
+                    host.tabs_mut()[position].proxy.mark_failed().ok();
+                    return Some(IpcResponse::failure(
+                        "sensitive proxy draft lost its confirmation identity",
+                    ));
+                };
+                if let Err(error) = host.tabs_mut()[position].proxy.mark_submitted() {
+                    return Some(IpcResponse::failure(error.to_string()));
+                }
+                let id = host.tabs_mut()[position].id;
+                host.tabs_mut()[position].begin_proxy_confirmation(marker);
+                host.event_journal_mut().commit(
+                    EventKind::WorkingContextProxySubmitted,
+                    Some(id),
+                    serde_json::json!({
+                        "sensitive": true,
+                        "application_state": "submitted",
+                    }),
+                );
+                if host.active_id() == Some(id) {
+                    host.load_composer_to_ui();
+                }
+                return Some(IpcResponse::success(""));
+            }
+            let text = mem::take(&mut host.tabs_mut()[position].composer);
+            if !text.is_empty() && !host.tabs_mut()[position].submit(&text) {
+                host.tabs_mut()[position].composer = text;
+                return Some(IpcResponse::failure(
+                    "a composer submission is already pending",
+                ));
+            }
+            if !text.is_empty() {
+                let id = host.tabs_mut()[position].id;
+                host.event_journal_mut().commit(
+                    EventKind::ComposerSubmitted,
+                    Some(id),
+                    serde_json::json!({
+                        "length": text.chars().count(),
+                    }),
+                );
+            }
+            if host.active_id() == Some(host.tabs()[position].id) {
+                host.load_composer_to_ui();
+            }
+            Some(IpcResponse::success(""))
+        }
+        "get-settings" => Some(IpcResponse::success(host.settings_json())),
+        "focus" => {
+            let surface = args.get(1).map(String::as_str).unwrap_or("terminal");
+            if let Some(position) =
+                resolve_target_position(host.tabs(), host.active_id(), option_value(args, "-t"))
+            {
+                host.sync_composer_from_ui();
+                if let Err(error) = host.select_tab_at(position) {
+                    return Some(IpcResponse::failure(error));
+                }
+            }
+            if let Err(error) = host.set_ipc_focus_surface(surface) {
+                return Some(IpcResponse::failure(error));
+            }
+            match host.ui_snapshot_json() {
+                Some(json) => Some(IpcResponse::success(json)),
+                None => Some(IpcResponse::failure(format!(
+                    "focus surface is unavailable: {surface}"
+                ))),
+            }
+        }
         _ => None,
     }
 }

@@ -14,6 +14,7 @@ use winit::{
     application::ApplicationHandler,
     event::{ElementState, MouseButton, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
+    keyboard::ModifiersState,
     window::{Window, WindowAttributes, WindowId},
 };
 
@@ -26,6 +27,7 @@ use crate::{
     ipc_transport::{IpcEnvelope, start_ipc_server},
     protocol::IpcResponse,
     pty::TerminalSize,
+    settings::{AppConfig, config_path, load_config},
     terminal_runtime::{TerminalLaunch, TerminalTab},
     theme::ThemeId,
     wake_signal::WakeSignal,
@@ -33,13 +35,39 @@ use crate::{
 };
 
 use render::{
-    SIDEBAR_WIDTH, SidebarTabRow, TerminalGrid, grid_dimensions_for_pixels, render_frame,
-    sidebar_row_at_y, theme_palette,
+    COMPOSER_HEIGHT, ComposerView, FrameContent, SIDEBAR_WIDTH, SidebarTabRow, TerminalGrid,
+    grid_dimensions_for_pixels, render_frame, sidebar_row_at_y, theme_palette,
 };
 
 const APP_NAME: &str = "AgenTerm";
 const INITIAL_WIDTH: u32 = 960;
 const INITIAL_HEIGHT: u32 = 600;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum UnixFocusSurface {
+    Terminal,
+    Composer,
+    Sidebar,
+}
+
+impl UnixFocusSurface {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Terminal => "terminal",
+            Self::Composer => "composer",
+            Self::Sidebar => "sidebar",
+        }
+    }
+
+    fn from_ipc(value: &str) -> Result<Self, String> {
+        match value {
+            "terminal" => Ok(Self::Terminal),
+            "composer" => Ok(Self::Composer),
+            "tabs" | "sidebar" => Ok(Self::Sidebar),
+            other => Err(format!("unknown focus surface: {other}")),
+        }
+    }
+}
 
 pub fn run_gui_entry() -> i32 {
     let arguments = env::args().skip(1).collect::<Vec<_>>();
@@ -144,6 +172,10 @@ struct UnixApp {
     next_tab_id: u64,
     close_requested: bool,
     last_cursor: (f64, f64),
+    focus_surface: UnixFocusSurface,
+    composer_buffer: String,
+    config: AppConfig,
+    modifiers: ModifiersState,
 }
 
 impl UnixApp {
@@ -172,7 +204,112 @@ impl UnixApp {
             next_tab_id: 1,
             close_requested: false,
             last_cursor: (0.0, 0.0),
+            focus_surface: UnixFocusSurface::Terminal,
+            composer_buffer: String::new(),
+            config: load_config(),
+            modifiers: ModifiersState::empty(),
         }
+    }
+
+    fn commit_composer_draft(&mut self, position: usize) {
+        let id = self.tabs[position].id;
+        let composer = self.tabs[position].composer.clone();
+        self.event_journal_mut().commit(
+            EventKind::ComposerDraft,
+            Some(id),
+            serde_json::json!({
+                "length": composer.chars().count(),
+            }),
+        );
+    }
+
+    fn sync_composer_buffer_to_tab(&mut self) {
+        let Some(position) = self.active_position() else {
+            return;
+        };
+        if self.tabs[position].sensitive_composer.is_some() {
+            return;
+        }
+        if self.tabs[position].composer != self.composer_buffer {
+            self.tabs[position].composer = self.composer_buffer.clone();
+            self.commit_composer_draft(position);
+        }
+    }
+
+    fn load_composer_buffer_from_tab(&mut self) {
+        self.composer_buffer = self
+            .active_position()
+            .and_then(|position| self.tabs.get(position))
+            .map(|tab| {
+                if tab.sensitive_composer.is_some() {
+                    "<sensitive proxy command · Ctrl+Enter to send>".to_owned()
+                } else {
+                    tab.composer.clone()
+                }
+            })
+            .unwrap_or_default();
+    }
+
+    fn set_focus_surface_internal(&mut self, surface: UnixFocusSurface, cause: &str) {
+        let previous = self.focus_surface;
+        if previous == surface {
+            return;
+        }
+        if previous == UnixFocusSurface::Composer {
+            self.sync_composer_buffer_to_tab();
+        }
+        self.focus_surface = surface;
+        if surface == UnixFocusSurface::Composer {
+            self.load_composer_buffer_from_tab();
+        }
+        let active = self.active;
+        self.event_journal_mut().commit(
+            EventKind::FocusChanged,
+            active,
+            serde_json::json!({
+                "from": previous.as_str(),
+                "to": surface.as_str(),
+                "cause": cause,
+            }),
+        );
+        self.request_redraw();
+    }
+
+    fn send_active_composer(&mut self) -> Result<(), String> {
+        self.sync_composer_buffer_to_tab();
+        let Some(position) = self.active_position() else {
+            return Err("no active window".to_owned());
+        };
+        if self.tabs[position].sensitive_composer.is_some() {
+            return Err(
+                "Composer contains a sensitive proxy draft; use IPC send-composer".to_owned(),
+            );
+        }
+        let text = std::mem::take(&mut self.tabs[position].composer);
+        self.composer_buffer.clear();
+        if text.is_empty() {
+            return Ok(());
+        }
+        if !self.tabs[position].submit(&text) {
+            self.tabs[position].composer = text;
+            self.composer_buffer = self.tabs[position].composer.clone();
+            return Err("a composer submission is already pending".to_owned());
+        }
+        let id = self.tabs[position].id;
+        self.event_journal_mut().commit(
+            EventKind::ComposerSubmitted,
+            Some(id),
+            serde_json::json!({
+                "length": text.chars().count(),
+            }),
+        );
+        self.request_redraw();
+        Ok(())
+    }
+
+    fn composer_region_contains(&self, x: f64, y: f64, window_height: u32) -> bool {
+        x >= f64::from(SIDEBAR_WIDTH)
+            && y >= f64::from(window_height.saturating_sub(COMPOSER_HEIGHT))
     }
 
     fn sidebar_rows(&self) -> Vec<SidebarTabRow> {
@@ -229,7 +366,14 @@ impl UnixApp {
             "session": self.session_name,
             "active_window_id": active.map(|id| format!("@{id}")),
             "tabs_visible": true,
-            "focus_surface": "terminal",
+            "focus": {
+                "surface": self.focus_surface.as_str(),
+                "window_id": active.map(|id| format!("@{id}")),
+            },
+            "composer": {
+                "draft_length": self.composer_buffer.chars().count(),
+                "focused": self.focus_surface == UnixFocusSurface::Composer,
+            },
             "event_position": self.event_journal.position(),
             "tabs": tabs,
         }))
@@ -241,12 +385,26 @@ impl UnixApp {
             return;
         }
         let Some(position) = self.tab_position_for_sidebar_y(y.max(0.0) as u32) else {
+            self.set_focus_surface_internal(UnixFocusSurface::Sidebar, "mouse");
             return;
         };
         if self.active_position() == Some(position) {
+            self.set_focus_surface_internal(UnixFocusSurface::Sidebar, "mouse");
             return;
         }
         let _ = self.select_tab_at(position);
+        self.set_focus_surface_internal(UnixFocusSurface::Sidebar, "mouse");
+    }
+
+    fn handle_content_click(&mut self, x: f64, y: f64, window_height: u32) {
+        if x < f64::from(SIDEBAR_WIDTH) {
+            return;
+        }
+        if self.composer_region_contains(x, y, window_height) {
+            self.set_focus_surface_internal(UnixFocusSurface::Composer, "mouse");
+        } else {
+            self.set_focus_surface_internal(UnixFocusSurface::Terminal, "mouse");
+        }
     }
 
     fn active_position(&self) -> Option<usize> {
@@ -436,7 +594,21 @@ impl UnixApp {
         };
         let width = buffer.width().get();
         let height = buffer.height().get();
-        render_frame(&mut buffer, width, width, height, grid, palette, &sidebar_rows);
+        render_frame(
+            &mut buffer,
+            width,
+            width,
+            height,
+            palette,
+            FrameContent {
+                grid,
+                sidebar_rows: &sidebar_rows,
+                composer: ComposerView {
+                    text: &self.composer_buffer,
+                    focused: self.focus_surface == UnixFocusSurface::Composer,
+                },
+            },
+        );
         let _ = buffer.present();
     }
 }
@@ -460,6 +632,43 @@ impl ControlHost for UnixApp {
 
     fn ui_snapshot_json(&mut self) -> Option<String> {
         Some(self.build_ui_snapshot_json())
+    }
+
+    fn sync_composer_from_ui(&mut self) {
+        self.sync_composer_buffer_to_tab();
+    }
+
+    fn load_composer_to_ui(&mut self) {
+        self.load_composer_buffer_from_tab();
+        self.request_redraw();
+    }
+
+    fn focus_surface(&self) -> &str {
+        self.focus_surface.as_str()
+    }
+
+    fn set_ipc_focus_surface(&mut self, surface: &str) -> Result<(), String> {
+        let surface = UnixFocusSurface::from_ipc(surface)?;
+        if surface == UnixFocusSurface::Composer && self.active.is_none() {
+            return Err(format!("focus surface is unavailable: {}", surface.as_str()));
+        }
+        self.set_focus_surface_internal(surface, "semantic");
+        Ok(())
+    }
+
+    fn settings_json(&self) -> String {
+        serde_json::to_string_pretty(&serde_json::json!({
+            "terminal_font_family": self.config.terminal_font_family,
+            "terminal_font_size": self.config.terminal_font_size,
+            "color_theme": self.config.color_theme,
+            "tabs_visible": self.config.tabs_visible,
+            "tabs_width": self.config.tabs_width,
+            "resolved_font_family": "bitmap-8x8",
+            "config_path": config_path(),
+            "recommended_cjk_font": "Sarasa Fixed SC",
+            "recommended_font_license": "SIL Open Font License 1.1",
+        }))
+        .unwrap_or_default()
     }
 
     fn started_at_unix_secs(&self) -> u64 {
@@ -552,11 +761,15 @@ impl ControlHost for UnixApp {
     }
 
     fn select_tab_at(&mut self, position: usize) -> Result<(), String> {
-        let Some(tab) = self.tabs.get(position) else {
+        if position >= self.tabs.len() {
             return Err("can't find window".to_owned());
-        };
-        let id = tab.id;
+        }
+        if self.focus_surface == UnixFocusSurface::Composer {
+            self.sync_composer_buffer_to_tab();
+        }
+        let id = self.tabs[position].id;
         self.active = Some(id);
+        self.load_composer_buffer_from_tab();
         self.event_journal_mut()
             .commit(EventKind::TabSelected, Some(id), serde_json::json!({}));
         self.sync_grid_from_tab();
@@ -652,7 +865,42 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                     event_loop.exit();
                 }
             }
-            WindowEvent::KeyboardInput { event, .. } => {
+            WindowEvent::ModifiersChanged(new_modifiers) => {
+                self.modifiers = new_modifiers.state();
+            }
+            WindowEvent::KeyboardInput {
+                event,
+                ..
+            } => {
+                if self.focus_surface == UnixFocusSurface::Composer {
+                    match input::composer_key_action(
+                        &event,
+                        self.modifiers,
+                        &mut self.composer_buffer,
+                    ) {
+                        input::ComposerKeyAction::Edited => {
+                            self.sync_composer_buffer_to_tab();
+                            self.request_redraw();
+                        }
+                        input::ComposerKeyAction::Submit => {
+                            if self.send_active_composer().is_ok() {
+                                self.set_focus_surface_internal(
+                                    UnixFocusSurface::Terminal,
+                                    "composer-submit",
+                                );
+                            }
+                        }
+                        input::ComposerKeyAction::Escape => {
+                            self.sync_composer_buffer_to_tab();
+                            self.set_focus_surface_internal(
+                                UnixFocusSurface::Terminal,
+                                "composer-escape",
+                            );
+                        }
+                        input::ComposerKeyAction::Ignored => {}
+                    }
+                    return;
+                }
                 if let Some(bytes) = input::key_event_to_bytes(&event) {
                     self.queue_pty_input(bytes);
                 }
@@ -666,7 +914,16 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                 ..
             } => {
                 let (x, y) = self.last_cursor;
-                self.handle_sidebar_click(x, y);
+                let window_height = self
+                    .window
+                    .as_ref()
+                    .map(|window| window.inner_size().height)
+                    .unwrap_or(INITIAL_HEIGHT);
+                if x < f64::from(SIDEBAR_WIDTH) {
+                    self.handle_sidebar_click(x, y);
+                } else {
+                    self.handle_content_click(x, y, window_height);
+                }
             }
             _ => {}
         }

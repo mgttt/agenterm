@@ -45,7 +45,8 @@ PRD + Cargo deps (primary)
   - [x] event journal + `read-events` on Unix
   - [x] shared workspace commands (`list-tab-tree`, `scroll-pane`, rename/note/parent, `workspace-info`, `dump-cells`, `ui-snapshot` simplified)
   - [x] Unix tab sidebar (select by click)
-  - [ ] composer strip, settings, full `ui-action`, Win-grade `ui-snapshot` geometry
+  - [x] composer strip + `show/set/send-composer`, `focus`, `get-settings` (shared dispatch)
+  - [ ] settings editor / `set-setting`, full `ui-action`, Win-grade `ui-snapshot` geometry
 
 ## 能力叶
 

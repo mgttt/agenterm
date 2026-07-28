@@ -6355,6 +6355,65 @@ impl ControlHost for AppState {
         self.save_active_composer();
     }
 
+    fn load_composer_to_ui(&mut self) {
+        self.load_active_composer();
+    }
+
+    fn focus_surface(&self) -> &str {
+        self.current_focus_surface().as_str()
+    }
+
+    fn set_ipc_focus_surface(&mut self, surface: &str) -> Result<(), String> {
+        let target = match surface {
+            "terminal" => FocusSurface::Terminal,
+            "composer" => FocusSurface::Composer,
+            "tabs" | "sidebar" => FocusSurface::Tabs,
+            other => return Err(format!("unknown focus surface: {other}")),
+        };
+        if self.set_focus_surface(target, "semantic") {
+            Ok(())
+        } else {
+            Err(format!("focus surface is unavailable: {surface}"))
+        }
+    }
+
+    fn settings_json(&self) -> String {
+        serde_json::to_string_pretty(&serde_json::json!({
+            "terminal_font_family": self.config.terminal_font_family,
+            "terminal_font_size": self.config.terminal_font_size,
+            "resolved_font_family": self.resolved_font_family,
+            "config_path": config_path(),
+            "recommended_cjk_font": "Sarasa Fixed SC",
+            "recommended_font_license": "SIL Open Font License 1.1",
+        }))
+        .unwrap_or_default()
+    }
+
+    fn apply_set_composer(&mut self, position: usize, text: String) -> Result<(), String> {
+        let id = self.tabs[position].id;
+        if self.note_edit_target == Some(id) {
+            let normalized = text.replace("\r\n", "\n");
+            let (name, note) = normalized.split_once('\n').unwrap_or((&normalized, ""));
+            unsafe {
+                SetWindowTextW(self.tab_name_edit, wide(name).as_ptr());
+                SetWindowTextW(self.tab_note_edit, wide(note).as_ptr());
+            }
+            return Ok(());
+        }
+        self.tabs[position].composer = text.clone();
+        self.event_journal.commit(
+            EventKind::ComposerDraft,
+            Some(id),
+            serde_json::json!({
+                "length": text.chars().count(),
+            }),
+        );
+        if self.active == Some(id) {
+            unsafe { SetWindowTextW(self.edit, wide(&text).as_ptr()) };
+        }
+        Ok(())
+    }
+
     fn set_session_name(&mut self, name: String) {
         self.session_name = name;
     }
@@ -6550,17 +6609,6 @@ impl AppState {
                     }
                 }
             }
-            "get-settings" => IpcResponse::success(
-                serde_json::to_string_pretty(&serde_json::json!({
-                    "terminal_font_family": self.config.terminal_font_family,
-                    "terminal_font_size": self.config.terminal_font_size,
-                    "resolved_font_family": self.resolved_font_family,
-                    "config_path": config_path(),
-                    "recommended_cjk_font": "Sarasa Fixed SC",
-                    "recommended_font_license": "SIL Open Font License 1.1",
-                }))
-                .unwrap_or_default(),
-            ),
             "set-setting" => {
                 let Some(key) = args.get(1).map(String::as_str) else {
                     return IpcResponse::failure("set-setting requires a key and value");
@@ -6652,39 +6700,6 @@ impl AppState {
                         "terminal mouse input was not accepted because the pane is no longer writable",
                     )
                 }
-            }
-            "focus" => {
-                let surface = args.get(1).map(String::as_str).unwrap_or("terminal");
-                if let Some(position) = self.target_position(option_value(args, "-t")) {
-                    if self.proxy_edit_target.is_some() {
-                        self.close_proxy_editor();
-                    }
-                    self.save_active_composer();
-                    let id = self.tabs[position].id;
-                    self.finish_note_edit(false);
-                    self.cancel_terminal_selection(true);
-                    self.active = Some(id);
-                    self.load_active_composer();
-                    self.event_journal.commit(
-                        EventKind::TabSelected,
-                        Some(id),
-                        serde_json::json!({}),
-                    );
-                }
-                let focused = match surface {
-                    "terminal" => self.set_focus_surface(FocusSurface::Terminal, "semantic"),
-                    "composer" => self.set_focus_surface(FocusSurface::Composer, "semantic"),
-                    "tabs" | "sidebar" => self.set_focus_surface(FocusSurface::Tabs, "semantic"),
-                    other => {
-                        return IpcResponse::failure(format!("unknown focus surface: {other}"));
-                    }
-                };
-                if !focused {
-                    return IpcResponse::failure(format!(
-                        "focus surface is unavailable: {surface}"
-                    ));
-                }
-                IpcResponse::success(self.ui_snapshot())
             }
             "ui-action" => {
                 let Some(action) = args.get(1).map(String::as_str) else {
@@ -7009,107 +7024,6 @@ impl AppState {
                     unsafe { InvalidateRect(self.window, ptr::null(), 0) };
                     IpcResponse::success(self.ui_snapshot())
                 }
-            }
-            "show-composer" => {
-                self.save_active_composer();
-                let Some(position) = self.target_position(option_value(args, "-t")) else {
-                    return IpcResponse::failure("can't find window");
-                };
-                if self.tabs[position].sensitive_composer.is_some() {
-                    return IpcResponse::failure(
-                        "Composer contains a sensitive proxy draft; content is redacted",
-                    );
-                }
-                IpcResponse::success(self.tabs[position].composer.clone())
-            }
-            "set-composer" => {
-                let Some(position) = self.target_position(option_value(args, "-t")) else {
-                    return IpcResponse::failure("can't find window");
-                };
-                if self.tabs[position].sensitive_composer.is_some() {
-                    return IpcResponse::failure(
-                        "Composer contains a sensitive proxy draft; send or discard it first",
-                    );
-                }
-                let text = positional_values(args, &["-t"], &[]).join(" ");
-                let id = self.tabs[position].id;
-                if self.note_edit_target == Some(id) {
-                    let normalized = text.replace("\r\n", "\n");
-                    let (name, note) = normalized.split_once('\n').unwrap_or((&normalized, ""));
-                    unsafe {
-                        SetWindowTextW(self.tab_name_edit, wide(name).as_ptr());
-                        SetWindowTextW(self.tab_note_edit, wide(note).as_ptr());
-                    }
-                    return IpcResponse::success("");
-                }
-                self.tabs[position].composer = text.clone();
-                self.event_journal.commit(
-                    EventKind::ComposerDraft,
-                    Some(id),
-                    serde_json::json!({
-                        "length": text.chars().count(),
-                    }),
-                );
-                if self.active == Some(id) {
-                    unsafe { SetWindowTextW(self.edit, wide(&text).as_ptr()) };
-                }
-                IpcResponse::success("")
-            }
-            "send-composer" => {
-                self.save_active_composer();
-                let Some(position) = self.target_position(option_value(args, "-t")) else {
-                    return IpcResponse::failure("can't find window");
-                };
-                if let Some(secret) = self.tabs[position].sensitive_composer.take() {
-                    let marker = self.tabs[position].sensitive_proxy_marker.take();
-                    if !self.tabs[position].submit_sensitive(secret.expose()) {
-                        self.tabs[position].sensitive_composer = Some(secret);
-                        self.tabs[position].sensitive_proxy_marker = marker;
-                        return IpcResponse::failure("a composer submission is already pending");
-                    }
-                    let Some(marker) = marker else {
-                        self.tabs[position].proxy.mark_failed().ok();
-                        return IpcResponse::failure(
-                            "sensitive proxy draft lost its confirmation identity",
-                        );
-                    };
-                    if let Err(error) = self.tabs[position].proxy.mark_submitted() {
-                        return IpcResponse::failure(error.to_string());
-                    }
-                    let id = self.tabs[position].id;
-                    self.tabs[position].begin_proxy_confirmation(marker);
-                    self.event_journal.commit(
-                        EventKind::WorkingContextProxySubmitted,
-                        Some(id),
-                        serde_json::json!({
-                            "sensitive": true,
-                            "application_state": "submitted",
-                        }),
-                    );
-                    if self.active == Some(id) {
-                        unsafe { SetWindowTextW(self.edit, wide("").as_ptr()) };
-                    }
-                    return IpcResponse::success("");
-                }
-                let text = mem::take(&mut self.tabs[position].composer);
-                if !text.is_empty() && !self.tabs[position].submit(&text) {
-                    self.tabs[position].composer = text;
-                    return IpcResponse::failure("a composer submission is already pending");
-                }
-                if !text.is_empty() {
-                    let id = self.tabs[position].id;
-                    self.event_journal.commit(
-                        EventKind::ComposerSubmitted,
-                        Some(id),
-                        serde_json::json!({
-                            "length": text.chars().count(),
-                        }),
-                    );
-                }
-                if self.active == Some(self.tabs[position].id) {
-                    unsafe { SetWindowTextW(self.edit, wide("").as_ptr()) };
-                }
-                IpcResponse::success("")
             }
             "screenshot" => {
                 unsafe {

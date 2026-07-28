@@ -4,6 +4,7 @@ use super::font::GLYPH_WIDTH;
 
 pub(super) const SIDEBAR_WIDTH: u32 = 200;
 pub(super) const SIDEBAR_TAB_ROW_HEIGHT: u32 = 20;
+pub(super) const COMPOSER_HEIGHT: u32 = 48;
 
 pub(super) const CELL_WIDTH: u32 = 10;
 pub(super) const CELL_HEIGHT: u32 = 16;
@@ -131,9 +132,21 @@ fn color_index(color: vt100::Color, background: bool) -> u8 {
 
 pub(super) fn grid_dimensions_for_pixels(width: u32, height: u32) -> (u16, u16) {
     let terminal_width = width.saturating_sub(SIDEBAR_WIDTH);
+    let terminal_height = height.saturating_sub(COMPOSER_HEIGHT);
     let cols = (terminal_width / CELL_WIDTH).max(1) as u16;
-    let rows = (height / CELL_HEIGHT).max(1) as u16;
+    let rows = (terminal_height / CELL_HEIGHT).max(1) as u16;
     (cols, rows)
+}
+
+pub(super) struct ComposerView<'a> {
+    pub(super) text: &'a str,
+    pub(super) focused: bool,
+}
+
+pub(super) struct FrameContent<'a> {
+    pub(super) grid: &'a TerminalGrid,
+    pub(super) sidebar_rows: &'a [SidebarTabRow],
+    pub(super) composer: ComposerView<'a>,
 }
 
 pub(super) fn render_frame(
@@ -141,24 +154,72 @@ pub(super) fn render_frame(
     stride: u32,
     width: u32,
     height: u32,
-    grid: &TerminalGrid,
     palette: &ThemePalette,
-    sidebar_rows: &[SidebarTabRow],
+    content: FrameContent<'_>,
 ) {
     let background = rgb_to_pixel(palette.terminal_background);
     for pixel in buffer.iter_mut().take((stride * height) as usize) {
         *pixel = background;
     }
 
-    render_sidebar(buffer, stride, width, height, palette, sidebar_rows);
+    let content_height = height.saturating_sub(COMPOSER_HEIGHT);
+    render_sidebar(buffer, stride, width, content_height, palette, content.sidebar_rows);
     render_terminal_grid(
         buffer,
         stride,
         width,
-        height,
-        grid,
+        content_height,
+        content.grid,
         palette,
         SIDEBAR_WIDTH,
+    );
+    render_composer(
+        buffer,
+        stride,
+        width,
+        height,
+        palette,
+        content.composer.text,
+        content.composer.focused,
+    );
+}
+
+fn render_composer(
+    buffer: &mut [u32],
+    stride: u32,
+    width: u32,
+    height: u32,
+    palette: &ThemePalette,
+    text: &str,
+    focused: bool,
+) {
+    let top = height.saturating_sub(COMPOSER_HEIGHT);
+    if top >= height {
+        return;
+    }
+    let composer_bg = rgb_to_pixel(palette.composer);
+    fill_rect(buffer, stride, SIDEBAR_WIDTH, top, width.saturating_sub(SIDEBAR_WIDTH), COMPOSER_HEIGHT, composer_bg);
+    let divider = rgb_to_pixel(palette.divider);
+    fill_rect(buffer, stride, SIDEBAR_WIDTH, top, width.saturating_sub(SIDEBAR_WIDTH), 1, divider);
+    if focused {
+        let ring = rgb_to_pixel(palette.focus_ring);
+        fill_rect(buffer, stride, SIDEBAR_WIDTH, top, width.saturating_sub(SIDEBAR_WIDTH), 2, ring);
+    }
+    let label = if text.is_empty() {
+        "> ".to_owned()
+    } else {
+        format!("> {text}")
+    };
+    let max_chars = ((width.saturating_sub(SIDEBAR_WIDTH).saturating_sub(16)) / (GLYPH_WIDTH + 1)).max(1) as usize;
+    draw_text(
+        buffer,
+        stride,
+        width,
+        height,
+        SIDEBAR_WIDTH + 8,
+        top + 16,
+        &truncate_chars(&label, max_chars),
+        palette.text,
     );
 }
 
@@ -408,8 +469,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn grid_dimensions_account_for_sidebar_width() {
-        assert_eq!(grid_dimensions_for_pixels(800, 480), (60, 30));
+    fn grid_dimensions_account_for_sidebar_and_composer() {
+        assert_eq!(grid_dimensions_for_pixels(800, 480), (60, 27));
     }
 
     #[test]
