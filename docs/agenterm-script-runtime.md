@@ -269,14 +269,20 @@ agenterm-script
 │  │     [shipped; stable; designed 2026-07-28]
 │  │
 │  ├─ Child / Output
-│  │  Child lifecycle and bounded final process output.
+│  │  Child lifecycle, live stdout/stderr Streams, and bounded final output.
 │  │  [shipped; stable; designed 2026-07-28]
 │  ├─ Task
 │  │  Invocation-owned asynchronous state with id/wait/cancel facts.
 │  │  [shipped timer payload; stable; designed 2026-07-28]
 │  ├─ Stream
-│  │  Bounded asynchronous readable/closed/failed stream state.
-│  │  [planned; reserved; designed 2026-07-28]
+│  │  Invocation-owned bytes stream with bounded queue and backpressure.
+│  │  [shipped for child stdout/stderr; stable; designed 2026-07-28]
+│  │  ├─ .id / .kind / .state / .buffered_bytes
+│  │  │  Reports stable identity, bytes kind, lifecycle, and queued bytes.
+│  │  ├─ .read(max_bytes[, timeout]) / .collect(max_bytes[, timeout])
+│  │  │  Reads one bounded chunk or collects the remaining bounded stream.
+│  │  └─ .close() / .truncated / .complete
+│  │     Cancels consumption and distinguishes incomplete capture from EOF.
 │  ├─ HttpResponse
 │  │  Status, headers, body, truncation, and transport facts.
 │  │  [planned; reserved; designed 2026-07-28]
@@ -727,9 +733,27 @@ ordering, `race` returns the winning input index, and `cancel_all` returns the
 number of tasks whose state changed. Composition accepts at most 64 tasks.
 Wait timeouts do not silently cancel a still-pending task.
 
-`Stream` MUST report readable, closed, and failed states; truncation; encoding
-failure; backpressure; and cumulative limits. Truncated data MUST NOT be
-reported as complete.
+The shipped first `Stream` payload is child stdout/stderr. `Child.stdout` and
+`Child.stderr` return invocation-local bytes streams. Each producer has a
+64 KiB queue; a full queue blocks that producer until `read`, `collect`, or
+`wait_with_output` drains space. Each read is limited to 64 KiB. Collect and
+the cumulative final capture are additionally bounded by the invocation's
+capture ceiling (256 KiB hard maximum).
+
+`Stream.state` is `pending`, `readable`, `closed`, `failed`, or `cancelled`.
+`read(max_bytes[, timeout])` returns an empty `Bytes` only after clean EOF.
+`collect(max_bytes[, timeout])` consumes the remaining stream. `close()` wakes
+a backpressured producer, marks the stream cancelled and incomplete, and is
+idempotent. `truncated` and `complete` remain independent facts; truncated or
+consumer-closed data MUST NOT be reported as complete.
+
+`Child.wait_with_output` drains both live queues while retaining one separately
+bounded final capture. Reading a live stream therefore does not remove bytes
+from the final `Output`, and a child producing more than one queue can still
+make progress when the caller chooses the final-output path. Stream-delivery
+truncation and final-capture truncation are distinct: a Stream may deliver the
+whole body and report `complete=true` while the separately bounded `Output`
+reports `truncated=true` and `complete=false`.
 
 The public Task/Stream contract is executor-neutral. Tokio or any other
 executor type MUST NOT enter the Rhai API.

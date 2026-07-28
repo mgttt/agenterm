@@ -25,6 +25,8 @@ pub struct ScriptMetadata(Metadata);
 pub struct ScriptSystemTime(SystemTime);
 
 pub fn register_local(engine: &mut Engine) {
+    crate::script_stream::register(engine);
+
     engine.register_type_with_name::<ScriptPath>("PathBuf");
     engine.register_get("display", |path: &mut ScriptPath| {
         path.0.to_string_lossy().into_owned()

@@ -1,16 +1,22 @@
 use std::{
     collections::BTreeMap,
-    io::{Read, Write},
+    io::Write,
     path::PathBuf,
     process::{Child, Command, ExitStatus, Stdio},
-    sync::{Arc, Mutex, mpsc},
+    sync::{Arc, Mutex},
     thread,
     time::{Duration, Instant},
 };
 
 use rhai::{Array, Engine, EvalAltResult, Module};
 
-use crate::script_stdlib::{ScriptBytes, ScriptPath};
+use crate::{
+    script_stdlib::{ScriptBytes, ScriptPath},
+    script_stream::{
+        CapturedStream, ScriptStream, cancel as cancel_stream, capture_after_close,
+        discard_buffered, from_reader,
+    },
+};
 
 const DEFAULT_TIMEOUT_MS: u64 = 2_000;
 const MAX_TIMEOUT_MS: u64 = 10_000;
@@ -44,8 +50,8 @@ impl std::fmt::Debug for ScriptChild {
 
 struct ChildState {
     child: Option<Child>,
-    stdout: Option<mpsc::Receiver<CapturedPipe>>,
-    stderr: Option<mpsc::Receiver<CapturedPipe>>,
+    stdout: ScriptStream,
+    stderr: ScriptStream,
     deadline: Instant,
     completed: Option<ScriptOutput>,
 }
@@ -56,6 +62,8 @@ impl Drop for ChildState {
             let _ = child.kill();
             let _ = child.wait();
         }
+        cancel_stream(&self.stdout);
+        cancel_stream(&self.stderr);
     }
 }
 
@@ -66,11 +74,6 @@ pub struct ScriptOutput {
     stdout: ScriptBytes,
     stderr: ScriptBytes,
     complete: bool,
-    truncated: bool,
-}
-
-struct CapturedPipe {
-    bytes: Vec<u8>,
     truncated: bool,
 }
 
@@ -109,6 +112,8 @@ fn register_types(engine: &mut Engine) {
     engine.register_type_with_name::<ScriptChild>("Child");
     engine.register_get("id", child_id);
     engine.register_get("state", child_state);
+    engine.register_get("stdout", child_stdout);
+    engine.register_get("stderr", child_stderr);
     engine.register_fn("kill", child_kill);
     engine.register_fn("wait_with_output", child_wait_with_output);
     engine.register_fn("wait_with_output", child_wait_with_output_for);
@@ -327,8 +332,8 @@ fn spawn_owned(command: &ScriptCommand) -> Result<ScriptChild, Box<EvalAltResult
     let stdout = child.stdout.take().ok_or("process_stdout_unavailable")?;
     let stderr = child.stderr.take().ok_or("process_stderr_unavailable")?;
     let limit = command.capture_bytes;
-    let stdout = start_capture(stdout, limit);
-    let stderr = start_capture(stderr, limit);
+    let stdout = from_reader(stdout, "bytes", limit);
+    let stderr = from_reader(stderr, "bytes", limit);
     if let Some(mut stdin) = child.stdin.take() {
         stdin
             .write_all(&command.stdin)
@@ -336,36 +341,11 @@ fn spawn_owned(command: &ScriptCommand) -> Result<ScriptChild, Box<EvalAltResult
     }
     Ok(ScriptChild(Arc::new(Mutex::new(ChildState {
         child: Some(child),
-        stdout: Some(stdout),
-        stderr: Some(stderr),
+        stdout,
+        stderr,
         deadline: Instant::now() + command.timeout,
         completed: None,
     }))))
-}
-
-fn capture_pipe(mut pipe: impl Read, limit: usize) -> CapturedPipe {
-    let mut bytes = Vec::with_capacity(limit.min(8 * 1024));
-    let mut buffer = [0_u8; 8 * 1024];
-    let mut truncated = false;
-    loop {
-        match pipe.read(&mut buffer) {
-            Ok(0) | Err(_) => break,
-            Ok(read) => {
-                let retained = read.min(limit.saturating_sub(bytes.len()));
-                bytes.extend_from_slice(&buffer[..retained]);
-                truncated |= retained < read;
-            }
-        }
-    }
-    CapturedPipe { bytes, truncated }
-}
-
-fn start_capture(pipe: impl Read + Send + 'static, limit: usize) -> mpsc::Receiver<CapturedPipe> {
-    let (sender, receiver) = mpsc::sync_channel(1);
-    thread::spawn(move || {
-        let _ = sender.send(capture_pipe(pipe, limit));
-    });
-    receiver
 }
 
 fn child_id(child: &mut ScriptChild) -> Result<rhai::INT, Box<EvalAltResult>> {
@@ -377,6 +357,24 @@ fn child_id(child: &mut ScriptChild) -> Result<rhai::INT, Box<EvalAltResult>> {
             .map(Child::id)
             .ok_or("process_child_completed")?,
     ))
+}
+
+fn child_stdout(child: &mut ScriptChild) -> Result<ScriptStream, Box<EvalAltResult>> {
+    Ok(child
+        .0
+        .lock()
+        .map_err(|_| "process_child_state_poisoned")?
+        .stdout
+        .clone())
+}
+
+fn child_stderr(child: &mut ScriptChild) -> Result<ScriptStream, Box<EvalAltResult>> {
+    Ok(child
+        .0
+        .lock()
+        .map_err(|_| "process_child_state_poisoned")?
+        .stderr
+        .clone())
 }
 
 fn child_state(child: &mut ScriptChild) -> Result<String, Box<EvalAltResult>> {
@@ -425,6 +423,8 @@ fn wait_for_child(
         if let Some(output) = state.completed.clone() {
             return Ok(output);
         }
+        discard_buffered(&state.stdout)?;
+        discard_buffered(&state.stderr)?;
         let deadline = requested_deadline
             .map(|value| value.min(state.deadline))
             .unwrap_or(state.deadline);
@@ -444,8 +444,8 @@ fn wait_for_child(
                 let _ = process.kill();
                 let _ = process.wait();
             }
-            state.stdout.take();
-            state.stderr.take();
+            cancel_stream(&state.stdout);
+            cancel_stream(&state.stderr);
             state.child.take();
             return Err("process_timeout: child exceeded its deadline".into());
         }
@@ -467,30 +467,16 @@ fn finish_output(
         truncated: stdout.truncated || stderr.truncated,
         stdout: ScriptBytes(stdout.bytes),
         stderr: ScriptBytes(stderr.bytes),
-        complete: true,
+        complete: !stdout.truncated && !stderr.truncated,
     })
 }
 
 fn finish_capture(
     state: &mut ChildState,
     deadline: Instant,
-) -> Result<(CapturedPipe, CapturedPipe), Box<EvalAltResult>> {
-    let stdout = state
-        .stdout
-        .take()
-        .ok_or("process_stdout_already_consumed")?;
-    let stderr = state
-        .stderr
-        .take()
-        .ok_or("process_stderr_already_consumed")?;
-    let remaining = deadline.saturating_duration_since(Instant::now());
-    let stdout = stdout
-        .recv_timeout(remaining)
-        .map_err(|_| "process_timeout: stdout remained open after child exit")?;
-    let remaining = deadline.saturating_duration_since(Instant::now());
-    let stderr = stderr
-        .recv_timeout(remaining)
-        .map_err(|_| "process_timeout: stderr remained open after child exit")?;
+) -> Result<(CapturedStream, CapturedStream), Box<EvalAltResult>> {
+    let stdout = capture_after_close(&state.stdout, deadline)?;
+    let stderr = capture_after_close(&state.stderr, deadline)?;
     Ok((stdout, stderr))
 }
 
@@ -538,15 +524,10 @@ fn bounded(value: rhai::INT, code: &str, maximum: u64) -> Result<u64, Box<EvalAl
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rhai::Shared;
 
     fn engine() -> Engine {
         let mut engine = Engine::new();
-        let mut std_module = Module::new();
-        let mut time = Module::new();
-        register(&mut engine, &mut std_module, &mut time);
-        std_module.set_sub_module("time", time);
-        engine.register_static_module("std", Shared::new(std_module));
+        crate::script_stdlib::register_local(&mut engine);
         engine
     }
 
@@ -622,5 +603,67 @@ mod tests {
                 .to_string()
                 .contains("process_timeout")
         );
+    }
+
+    #[test]
+    fn child_streams_are_live_bounded_and_preserve_final_capture() {
+        let source = if cfg!(windows) {
+            r#"
+                let c = std::process::command("cmd.exe");
+                c.args(["/d", "/s", "/c", "<nul set /p =abcdef"]);
+                let child = c.start();
+                let stream = child.stdout;
+                let first = stream.read(2,
+                    std::time::Duration::from_secs(1)).to_text();
+                let rest = stream.collect(16,
+                    std::time::Duration::from_secs(1)).to_text();
+                let output = child.wait_with_output();
+                #{first: first, rest: rest, final: output.stdout_text(),
+                  stream_complete: stream.complete, output_complete: output.complete}
+            "#
+        } else {
+            r#"
+                let c = std::process::command("/bin/sh");
+                c.args(["-c", "printf abcdef"]);
+                let child = c.start();
+                let stream = child.stdout;
+                let first = stream.read(2,
+                    std::time::Duration::from_secs(1)).to_text();
+                let rest = stream.collect(16,
+                    std::time::Duration::from_secs(1)).to_text();
+                let output = child.wait_with_output();
+                #{first: first, rest: rest, final: output.stdout_text(),
+                  stream_complete: stream.complete, output_complete: output.complete}
+            "#
+        };
+        let result = engine().eval::<rhai::Map>(source).unwrap();
+        assert_eq!(result["first"].clone().into_string().unwrap(), "ab");
+        assert_eq!(result["rest"].clone().into_string().unwrap(), "cdef");
+        assert_eq!(result["final"].clone().into_string().unwrap(), "abcdef");
+        assert!(result["stream_complete"].as_bool().unwrap());
+        assert!(result["output_complete"].as_bool().unwrap());
+    }
+
+    #[test]
+    fn truncated_process_capture_is_not_reported_as_complete() {
+        let source = if cfg!(windows) {
+            r#"
+                let c = std::process::command("cmd.exe");
+                c.args(["/d", "/s", "/c", "<nul set /p =abcdefgh"]);
+                c.capture_limit(4);
+                c.output()
+            "#
+        } else {
+            r#"
+                let c = std::process::command("/bin/sh");
+                c.args(["-c", "printf abcdefgh"]);
+                c.capture_limit(4);
+                c.output()
+            "#
+        };
+        let output = engine().eval::<ScriptOutput>(source).unwrap();
+        assert_eq!(output.stdout.0, b"abcd");
+        assert!(output.truncated);
+        assert!(!output.complete);
     }
 }

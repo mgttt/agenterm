@@ -114,6 +114,7 @@
         "script.rhai-deny-budget",
         "script.rhai-framed",
         "script.modules-tasks",
+        "script.stream",
         "script.supervisor",
         "script.audit"
       ]

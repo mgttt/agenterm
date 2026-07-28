@@ -7,6 +7,7 @@ use crate::{
         SCRIPT_API_VERSION, SCRIPT_FRAME_MAX_BYTES, SCRIPT_FRAME_VERSION,
         SCRIPT_INVOCATION_MAX_BYTES, ScriptBudgets,
     },
+    script_stream::{STREAM_BUFFER_BYTES, STREAM_READ_MAX_BYTES},
 };
 
 pub const SCRIPT_CATALOG_SCHEMA_VERSION: u32 = 2;
@@ -508,11 +509,11 @@ pub fn entries() -> Vec<ScriptApiEntry> {
         shipped_local_entry(
             "std.process.child",
             "system/process/child",
-            "Child.id/state/kill/wait_with_output",
+            "Child.id/state/stdout/stderr/kill/wait_with_output",
             Some("std::process::Child"),
             RustMapping::Adapted,
-            "child.id / child.state / child.kill() / child.wait_with_output([timeout])",
-            (&["bounded_capture", "typed_timeout", "invocation_owned"], &["process_kill", "process_timeout"]),
+            "child.id / child.state / child.stdout / child.stderr / child.kill() / child.wait_with_output([timeout])",
+            (&["live_bounded_streams", "typed_timeout", "invocation_owned"], &["process_kill", "process_timeout"]),
         ),
         shipped_local_entry(
             "std.process.output",
@@ -522,6 +523,28 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             RustMapping::Adapted,
             "output.success / output.exit_code / output.stdout / output.stderr",
             (&["bytes_first_output", "strict_utf8_helpers", "truthful_truncation"], &["process_stdout_not_utf8", "process_stderr_not_utf8"]),
+        ),
+        shipped_local_entry(
+            "rhai.stream.handle",
+            "runtime/stream/handle",
+            "Stream.id/kind/state/buffered_bytes/truncated/complete/read/collect/close",
+            None,
+            RustMapping::None,
+            "stream.id / stream.kind / stream.state / stream.buffered_bytes / stream.truncated / stream.complete / stream.read(max_bytes[, timeout]) / stream.collect(max_bytes[, timeout]) / stream.close()",
+            (
+                &[
+                    "bounded_queue_backpressure",
+                    "bytes_first",
+                    "truthful_truncation",
+                    "invocation_owned",
+                ],
+                &[
+                    "stream_read_timeout",
+                    "stream_read_failed",
+                    "stream_collect_limit",
+                    "stream_closed",
+                ],
+            ),
         ),
         shipped_local_entry(
             "std.time.duration-from-millis",
@@ -752,6 +775,8 @@ pub fn catalog() -> Value {
             "defaults": defaults,
             "hard_maximums": hard_limits,
             "invocation_bytes": SCRIPT_INVOCATION_MAX_BYTES,
+            "stream_buffer_bytes": STREAM_BUFFER_BYTES,
+            "stream_read_max_bytes": STREAM_READ_MAX_BYTES,
         },
         "entries": entries(),
         "failure_categories": ["configuration", "limit", "script", "protocol", "host"],

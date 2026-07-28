@@ -11,6 +11,7 @@ $declaredEvidence = @(
     'script.rhai-deny-budget'
     'script.rhai-framed'
     'script.modules-tasks'
+    'script.stream'
     'script.supervisor'
     'script.audit'
 )
@@ -503,6 +504,118 @@ let output = child.wait_with_output();
         -not $childResult.complete) {
         throw 'local spawned child did not expose a truthful kill/wait lifecycle'
     }
+
+    Write-Host 'STEP bounded child streams, backpressure, and truthful truncation'
+    $streamExpression = @'
+let command = std::process::command("cmd.exe");
+command.args(["/d", "/s", "/c", "<nul set /p =abcdef"]);
+let child = command.start();
+let stream = child.stdout;
+let first = stream.read(2, std::time::Duration::from_secs(1)).to_text();
+let rest = stream.collect(16, std::time::Duration::from_secs(1)).to_text();
+let output = child.wait_with_output();
+let empty = stream.read(1);
+#{
+    id: stream.id,
+    kind: stream.kind,
+    state: stream.state,
+    buffered: stream.buffered_bytes,
+    truncated: stream.truncated,
+    complete: stream.complete,
+    first: first,
+    rest: rest,
+    empty: empty.len,
+    final: output.stdout_text(),
+    output_complete: output.complete
+}
+'@
+    $streamResult = Invoke-Script @(
+        'script', 'eval', $streamExpression, '--profile', 'local',
+        '--timeout-ms', '10000'
+    ) | ConvertFrom-Json
+    if ($streamResult.id -le 0 -or
+        $streamResult.kind -ne 'bytes' -or
+        $streamResult.state -ne 'closed' -or
+        $streamResult.buffered -ne 0 -or
+        $streamResult.truncated -or
+        -not $streamResult.complete -or
+        $streamResult.first -ne 'ab' -or
+        $streamResult.rest -ne 'cdef' -or
+        $streamResult.empty -ne 0 -or
+        $streamResult.final -ne 'abcdef' -or
+        -not $streamResult.output_complete) {
+        throw 'child stdout stream did not preserve bounded live and final output facts'
+    }
+
+    $truncatedExpression = @'
+let command = std::process::command("cmd.exe");
+command.args(["/d", "/s", "/c", "<nul set /p =abcdefgh"]);
+command.capture_limit(4);
+let child = command.start();
+let stream = child.stdout;
+let delivered = stream.collect(16).to_text();
+let output = child.wait_with_output();
+#{
+    stdout: output.stdout_text(),
+    truncated: output.truncated,
+    complete: output.complete,
+    delivered: delivered,
+    stream_truncated: stream.truncated,
+    stream_complete: stream.complete
+}
+'@
+    $truncatedResult = Invoke-Script @(
+        'script', 'eval', $truncatedExpression, '--profile', 'local',
+        '--timeout-ms', '10000'
+    ) | ConvertFrom-Json
+    if ($truncatedResult.stdout -ne 'abcd' -or
+        -not $truncatedResult.truncated -or
+        $truncatedResult.complete -or
+        $truncatedResult.delivered -ne 'abcdefgh' -or
+        $truncatedResult.stream_truncated -or
+        -not $truncatedResult.stream_complete) {
+        throw 'live stream and bounded final capture conflated their completeness'
+    }
+
+    $streamCancelExpression = @'
+let command = std::process::command("cmd.exe");
+command.args(["/d", "/s", "/c", "ping -n 6 127.0.0.1 >nul"]);
+command.timeout(std::time::Duration::from_secs(2));
+let child = command.start();
+let stream = child.stdout;
+let timed_out = false;
+try {
+    stream.read(1, std::time::Duration::from_millis(10));
+} catch (error) {
+    timed_out = error.contains("stream_read_timeout");
+}
+let closed = stream.close();
+child.kill();
+let output = child.wait_with_output();
+#{
+    timed_out: timed_out,
+    closed: closed,
+    state: stream.state,
+    truncated: stream.truncated,
+    complete: stream.complete,
+    output_truncated: output.truncated,
+    output_complete: output.complete
+}
+'@
+    $streamCancelResult = Invoke-Script @(
+        'script', 'eval', $streamCancelExpression, '--profile', 'local',
+        '--timeout-ms', '10000'
+    ) | ConvertFrom-Json
+    if (-not $streamCancelResult.timed_out -or
+        -not $streamCancelResult.closed -or
+        $streamCancelResult.state -ne 'cancelled' -or
+        -not $streamCancelResult.truncated -or
+        $streamCancelResult.complete -or
+        -not $streamCancelResult.output_truncated -or
+        $streamCancelResult.output_complete) {
+        throw 'stream timeout and explicit close did not preserve cancellation facts'
+    }
+    Write-Evidence 'script.stream'
 
     Write-Host 'STEP task timers, deterministic race, cancellation, and wait timeout'
     $taskExpression = @'

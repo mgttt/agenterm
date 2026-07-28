@@ -311,6 +311,14 @@
       "evidence_ids": ["script.modules-tasks"]
     },
     {
+      "id": "scripting.stream",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "child stdout/stderr expose a bytes-first `Stream` with invocation-local",
+      "evidence_ids": ["script.stream"]
+    },
+    {
       "id": "scripting.rust-host-rhai-language",
       "kind": "decision",
       "status": "accepted",

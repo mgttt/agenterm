@@ -114,7 +114,8 @@ agenterm-script
 │  ├─ Task
 │  │  └─ .id / .state / .wait() / .cancel()
 │  ├─ Stream
-│  │  └─ .read() / .close() / .truncated
+│  │  └─ .id / .kind / .state / .buffered_bytes
+│  │     / .read() / .collect() / .close() / .truncated / .complete
 │  ├─ Bytes
 │  │  └─ .len / .slice() / .to_text()
 │  ├─ ProcessResult
@@ -598,7 +599,7 @@ agenterm-script
 │  └─ process
 │     ├─ [x] Command.output executable + argv
 │     ├─ [x] Command.start -> invocation-owned Child
-│     ├─ [>] bounded stdin / captured stdout / stderr 已交付；stream 待补
+│     ├─ [x] bounded stdin / captured + live-stream stdout / stderr
 │     └─ [>] exit / timeout / kill / Job cleanup 已交付；cancel token 待补
 │
 ├─ concurrency
@@ -609,8 +610,8 @@ agenterm-script
 │  │  ├─ [x] timer wait / wait_all / indexed race
 │  │  └─ [>] cancel / terminal state 已交付；typed payload propagation 待补
 │  └─ stream
-│     ├─ [ ] read / bounded collect
-│     └─ [ ] backpressure / truncation / close
+│     ├─ [x] child stdout/stderr read / bounded collect
+│     └─ [x] 64 KiB queue backpressure / truncation / close
 │
 ├─ network
 │  ├─ http client
@@ -825,18 +826,20 @@ TaskHandle
 
 StreamHandle
   id
-  kind = bytes|text|json-lines
-  state
+  kind = bytes（text/json-lines 仅保留未来扩展空间）
+  state = pending|readable|closed|failed|cancelled
   buffered_bytes
   truncated
+  complete
 ```
 
-候选 API：
+已冻结的 child Stream API：
 
 ```text
 handle.wait(Duration?)
 handle.cancel()
-stream.read(max_bytes)
+stream.read(max_bytes, Duration?)
+stream.collect(max_bytes, Duration?)
 stream.close()
 rhai::task::wait_all(waitables, Duration?)
 rhai::task::race(waitables, Duration?)
@@ -1504,16 +1507,17 @@ README 增加一个简短 script task 示例；稳定运行时合同由
 
 提交 3
   [x] std::env/process + Command/Child/Output + Duration
-  [>] argv/cwd/env/stdin/stdout/stderr/timeout/kill/Job cleanup 已交付；
-      Instant、cancel token、streaming 继续进入 task/stream 波次
+  [x] argv/cwd/env/stdin/stdout/stderr/timeout/kill/Job cleanup 已交付
+  [>] Instant 与跨资源 cancel token 继续进入后续波次
 
 提交 4
-  rhai::task + Task/Stream
-  cancellation/backpressure/natural exit
+  [x] rhai::task + timer Task + child-process Stream
+  [x] bounded read/collect、64 KiB queue backpressure、truthful truncation
+  [>] HTTP/Fleet typed Task payload 与跨资源 cancellation 继续扩展
 
 提交 5
-  local modules + agenterm.tasks.json
-  task list/show/run
+  [x] local modules + agenterm.tasks.json
+  [x] task list/show/run
 
 提交 6
   rhai::http + loopback HTTP

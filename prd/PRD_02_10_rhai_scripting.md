@@ -138,7 +138,15 @@ and it is not positioned as a restricted security plugin.
     `after`/`sleep`, wait with optional timeout, idempotent cancellation,
     deterministic `wait_all`, indexed `race`, and `cancel_all`, without moving
     Rhai `Dynamic` or `Engine` across threads.
-  - [ ] typed HTTP/Fleet payloads and bounded Stream/backpressure remain open.
+  - [x] child stdout/stderr expose a bytes-first `Stream` with invocation-local
+    identity, pending/readable/closed/failed/cancelled state, a 64 KiB queue,
+    blocking read and bounded collect with optional timeout, producer
+    backpressure, close, cumulative capture limits and truthful truncation.
+    `Child.wait_with_output` drains live queues while preserving the bounded
+    final capture, so large output cannot deadlock the child and truncation
+    never reports `complete=true`.
+  - [ ] typed HTTP/Fleet Task payloads and cross-resource cancellation remain
+    open.
 - [ ] `rhai::json` plus Rhai-native strings and a typed `Bytes` object provide
   bounded parsing, serialization, Unicode/encoding and explicit conversions
   without duplicating language primitives as fake Rust collections.
@@ -334,6 +342,12 @@ Migration ledger:
     child env overlay, text stdin, separate stdout/stderr, nonzero exit,
     bounded Duration timeout, explicit Child kill/wait, and recovery on the
     immediately following invocation.
+  - [x] the public CLI stream fixture covers live child stdout, bounded
+    chunked read and collect, final capture preservation, clean EOF, queue
+    facts, typed read timeout, explicit close/cancellation, and capture
+    truncation that reports `Output.complete=false` without falsely truncating
+    the fully delivered Stream; unit coverage fills the queue, rejects
+    oversized collect, and proves close wakes a backpressured producer.
 - [ ] an independent loopback HTTP fixture covers request/response, headers,
   body, status, bounded streaming, timeout, cancellation, malformed data,
   connection failure, proxy/TLS-safe diagnostics, and no public-network
@@ -341,6 +355,9 @@ Migration ledger:
 - [ ] timer and task fixtures prove concurrent progress, deterministic wait and
   stream results, natural worker exit, cancellation propagation, bounded
   queues, and recovery on the next invocation.
+  - [x] timer composition and child-process Stream state/backpressure have
+    unit and public-CLI evidence; HTTP/Fleet payload propagation and unified
+    cancellation remain open.
 - [ ] module/task fixtures cover roots, relative imports, cycles, duplicate and
   missing modules, manifest version/error handling, named-task discovery,
   degraded entries, arguments, and working directory.
