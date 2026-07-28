@@ -14,8 +14,10 @@ Copyright and license terms remain with their respective authors.
 | `rmux-pty` | MIT OR Apache-2.0 |
 | `serde` | MIT OR Apache-2.0 |
 | `serde_json` | MIT OR Apache-2.0 |
+| `softbuffer` | MIT OR Apache-2.0 |
 | `vt100` | MIT |
 | `windows-sys` | MIT OR Apache-2.0 |
+| `winit` | Apache-2.0 |
 | `winresource` (build dependency) | MIT |
 
 The corresponding sources and complete license files are available from each

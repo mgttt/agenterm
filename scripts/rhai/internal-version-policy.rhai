@@ -56,7 +56,10 @@ if version != "0.1.7" {
     );
     require(
         release_source.contains("version -eq '0.1.7'") &&
-        workflow_source.contains("expected -eq 'v0.1.7'"),
+        (
+            workflow_source.contains("expected -eq 'v0.1.7'") ||
+            workflow_source.contains("expected == \"v0.1.7\"")
+        ),
         "The local coordinator and tag workflow must both reject v0.1.7."
     );
 

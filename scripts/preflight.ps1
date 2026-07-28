@@ -173,7 +173,8 @@ Invoke-PreflightGate -Id 'internal-version-policy' -Check {
         Join-Path $repo '.github\workflows\release.yml'
     ) -Raw
     if ($release -notmatch "version\s+-eq\s+'0\.1\.7'" -or
-        $workflow -notmatch "expected\s+-eq\s+'v0\.1\.7'") {
+        $workflow -notmatch
+            'expected\s*(?:-eq|==)\s*["'']v0\.1\.7["'']') {
         throw 'Internal v0.1.7 publication rejection policy is missing.'
     }
     'internal-only untagged'
