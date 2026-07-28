@@ -581,12 +581,12 @@ agenterm-script
 │  ├─ fs
 │  │  ├─ [x] read text / bytes
 │  │  ├─ [>] write text / bytes 已交付；atomic write 待补
-│  │  ├─ [ ] list / metadata
+│  │  ├─ [x] typed read_dir / DirEntry / metadata
 │  │  ├─ [ ] create / copy / move
 │  │  └─ [ ] remove explicit target
 │  ├─ path
 │  │  ├─ [>] PathBuf / join / display / name / extension 已交付；parent 待补
-│  │  ├─ [ ] normalize / relative / canonical facts
+│  │  ├─ [>] absolute 已交付；relative / canonical facts 待补
 │  │  └─ [ ] Windows drive / UNC / long path
 │  ├─ temp
 │  │  ├─ [ ] owned file / directory
@@ -1264,8 +1264,11 @@ scripts/rhai/verify-script-contract.rhai
 - 由公开 `agenterm-cli script run --profile local` 在黑盒套件中执行；
 - PowerShell 目前只负责生成测试 fixture 和作 qualification fallback。
 
-下一候选是 `scripts/target-report.ps1` 的平行 Rhai 版本，因为它只读、
-结果可结构化比较，并能推动 fs/path/json/process 能力成熟。每项双跑要求：
+首个既有脚本闭环已经选择 Cargo target inventory：Rhai 版本推动了 typed
+read_dir、metadata、absolute path 和 SystemTime，正常 build/check 调用点切换
+后，旧 `scripts/target-report.ps1` 进入 PowerShell archive。
+
+后续每项双跑要求：
 
 - 同一输入生成结构化结果；
 - 忽略明确的时间性字段后逐字段相等；

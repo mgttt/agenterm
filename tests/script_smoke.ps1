@@ -386,6 +386,53 @@ try {
         throw "Rhai repository dogfood returned unexpected output: $dogfoodResult"
     }
 
+    Write-Host 'STEP Rhai Cargo target inventory migration'
+    $targetReportScript = Join-Path $repositoryRoot 'scripts\rhai\target-report.rhai'
+    $targetFixture = Join-Path $runtimeDirectory 'target'
+    $targetDebugFixture = Join-Path $targetFixture 'debug'
+    $targetDepsFixture = Join-Path $targetDebugFixture 'deps'
+    New-Item -ItemType Directory -Path $targetDepsFixture -Force | Out-Null
+    [IO.File]::WriteAllText(
+        (Join-Path $targetFixture 'root.bin'),
+        'x',
+        [Text.UTF8Encoding]::new($false)
+    )
+    [IO.File]::WriteAllText(
+        (Join-Path $targetDebugFixture 'debug.bin'),
+        'abc',
+        [Text.UTF8Encoding]::new($false)
+    )
+    [IO.File]::WriteAllText(
+        (Join-Path $targetDepsFixture 'dependency.bin'),
+        '12345',
+        [Text.UTF8Encoding]::new($false)
+    )
+    $targetEnvelope = Invoke-Script @(
+        'script', 'run', $targetReportScript, '--profile', 'local',
+        '--timeout-ms', '10000', '--max-operations', '10000000',
+        '--', $runtimeDirectory, 'target', '--json'
+    ) | ConvertFrom-Json
+    $targetReport = $targetEnvelope.stdout | ConvertFrom-Json
+    $rootProfile = @($targetReport.profiles | Where-Object name -eq '(root)')
+    $debugProfile = @($targetReport.profiles | Where-Object name -eq 'debug')
+    if (-not $targetEnvelope.ok -or
+        $targetReport.schema_version -ne 1 -or
+        -not $targetReport.exists -or
+        -not $targetReport.repo_local -or
+        -not $targetReport.cleanup_allowed -or
+        $targetReport.files -ne 3 -or
+        $targetReport.bytes -ne 9 -or
+        [string]::IsNullOrWhiteSpace($targetReport.oldest_write_utc) -or
+        [string]::IsNullOrWhiteSpace($targetReport.newest_write_utc) -or
+        $rootProfile.Count -ne 1 -or
+        $rootProfile[0].files -ne 1 -or
+        $rootProfile[0].bytes -ne 1 -or
+        $debugProfile.Count -ne 1 -or
+        $debugProfile[0].files -ne 2 -or
+        $debugProfile[0].bytes -ne 8) {
+        throw 'Rhai Cargo target inventory did not preserve the report contract'
+    }
+
     Write-Host 'STEP pure eval, file run, arguments, and check'
     $value = Invoke-Script @('script', 'eval', '40 + 2')
     if ($value -ne '42') {

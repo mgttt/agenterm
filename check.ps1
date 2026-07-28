@@ -216,7 +216,10 @@ try {
         & '.\scripts\supply-chain.ps1'
     }
     Invoke-Checked -Id 'target-report' -Label 'Cargo target inventory' {
-        & '.\scripts\target-report.ps1'
+        & '.\dist\agenterm-cli.exe' script run `
+            '.\scripts\rhai\target-report.rhai' `
+            --profile local --timeout-ms 10000 --max-operations 10000000 `
+            -- $PSScriptRoot target
     }
     Invoke-Checked -Id 'internal-version-policy' `
         -Label 'internal version publication policy' {

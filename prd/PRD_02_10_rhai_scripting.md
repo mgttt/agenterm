@@ -218,6 +218,10 @@ and it is not positioned as a restricted security plugin.
   - [x] an explicit `local` profile foundation runs base Rhai without requiring
     a server or inheriting observe authority; the first useful fs/path/bytes/
     JSON slice has shipped and `local` is now the ordinary default.
+  - [x] the second local slice ships typed one-directory enumeration,
+    `DirEntry`, metadata, absolute-path resolution, and wall-clock
+    `SystemTime`; the repository Cargo target inventory is its first migrated
+    production consumer.
 - [ ] each callable entry describes stable ID, signature, result/error schema,
   filesystem/process/network/Fleet access, mutation and destructive facts,
   expected duration, cancellation and streaming support, and any dry-run or
@@ -288,6 +292,12 @@ and it is not positioned as a restricted security plugin.
 - [ ] build, check, qualification, package, release, credential, and GitHub
   workflow entry points may gain parallel Rhai candidates but do not switch
   their default implementation in v0.1.9.
+
+Migration ledger:
+
+| Responsibility | Replacement | Archived source | Switching commit | Evidence | Rollback boundary |
+|---|---|---|---|---|---|
+| Cargo target inventory | `scripts/rhai/target-report.rhai` | `scripts/archive/powershell/target-report.ps1` | pending commit | public CLI fixture plus live PowerShell/Rhai field parity | retain through the next completed runtime slice |
 
 ## Public black-box acceptance
 

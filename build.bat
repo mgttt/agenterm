@@ -73,7 +73,7 @@ if /i "%PROFILE%"=="release" (
     if "%USING_EXTERNAL_CARGO_TARGET%"=="1" (
         echo Skipped Cargo cleanup because CARGO_TARGET_DIR is externally configured.
     ) else (
-        "%POWERSHELL_EXE%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\target-report.ps1" -RepoRoot "%CD%"
+        "%DIST_DIR%\agenterm-cli.exe" script run "%~dp0scripts\rhai\target-report.rhai" --profile local --timeout-ms 10000 --max-operations 10000000 -- "%CD%" "%CARGO_OUTPUT_DIR%"
         if errorlevel 1 (
             echo.
             echo Release artifacts were staged, but the Cargo target report failed.

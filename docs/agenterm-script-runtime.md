@@ -100,9 +100,18 @@ agenterm-script
 │  │  ├─ exists(path)
 │  │  │  Reports whether an explicit path currently exists.
 │  │  │  [shipped; stable; designed 2026-07-28]
-│  │  ├─ metadata(path) / read_dir(path)
-│  │  │  Typed file facts and bounded directory enumeration.
-│  │  │  [planned; reserved; designed 2026-07-28]
+│  │  ├─ metadata(path)
+│  │  │  Returns typed file-kind, length, and modified-time facts.
+│  │  │  [shipped; stable; designed 2026-07-28]
+│  │  ├─ read_dir(path)
+│  │  │  Returns typed entries for one directory without recursive traversal.
+│  │  │  [shipped; stable; designed 2026-07-28]
+│  │  ├─ DirEntry
+│  │  │  Exposes path, file name, file kind, symlink kind, and metadata.
+│  │  │  [shipped; stable; designed 2026-07-28]
+│  │  ├─ Metadata
+│  │  │  Exposes is_file, is_dir, len, and modified wall-clock time.
+│  │  │  [shipped; stable; designed 2026-07-28]
 │  │  ├─ create_dir_all(path) / copy(from, to) / rename(from, to)
 │  │  │  Explicit-target filesystem mutation.
 │  │  │  [planned; reserved; designed 2026-07-28]
@@ -116,8 +125,11 @@ agenterm-script
 │  │  ├─ PathBuf::from(value)
 │  │  │  Creates an owned typed path from a string.
 │  │  │  [shipped; stable; designed 2026-07-28]
-│  │  └─ join(parent, child)
-│  │     Creates a typed path by joining two strings.
+│  │  ├─ join(parent, child)
+│  │  │  Creates a typed path by joining two strings.
+│  │  │  [shipped; stable; designed 2026-07-28]
+│  │  └─ absolute(path)
+│  │     Resolves a path against the worker's current directory.
 │  │     [shipped; stable; designed 2026-07-28]
 │  │
 │  ├─ env::
@@ -143,7 +155,7 @@ agenterm-script
 │  │
 │  └─ time::
 │     Typed duration, monotonic, and wall-clock values.
-│     [planned; reserved; designed 2026-07-28]
+│     [partially shipped; stable namespace; designed 2026-07-28]
 │     ├─ Duration
 │     │  A non-negative span used by deadlines and waits.
 │     │  [planned; reserved; designed 2026-07-28]
@@ -151,8 +163,9 @@ agenterm-script
 │     │  A monotonic runtime timestamp.
 │     │  [planned; reserved; designed 2026-07-28]
 │     └─ SystemTime
-│        A wall-clock timestamp that is never used as a monotonic deadline.
-│        [planned; reserved; designed 2026-07-28]
+│        Wall-clock time with now(), unix_millis, and UTC RFC 3339 rendering;
+│        it is never used as a monotonic deadline.
+│        [partially shipped; stable delivered leaves; designed 2026-07-28]
 │
 ├─ rhai::
 │  High-level extensions owned by AgenTerm Script Runtime.
@@ -547,6 +560,10 @@ Example:
 `std::fs::read` MUST return `Bytes`.
 `std::fs::write` and `write_bytes` MUST target one explicit path and replace
 that file's contents. They do not currently promise atomic replacement.
+`std::fs::read_dir` enumerates exactly one directory and returns typed
+`DirEntry` values; recursion remains explicit script policy. Symlink entries
+are reported as symlinks and are not silently treated as directories.
+`Metadata.len` is a bounded Rhai integer and `.modified` is a `SystemTime`.
 
 Filesystem failures MUST carry a stable error code. Safe diagnostics MAY
 include the final file name but MUST NOT automatically retain a full
@@ -565,6 +582,10 @@ Windows drive, UNC, long-path, separator, canonicalization, and reparse-point
 behavior remain subject to explicit tests before stronger guarantees are
 added.
 
+`std::path::absolute` resolves relative input against the worker current
+directory. It is not a filesystem canonicalization operation and MUST NOT be
+used to claim that a path exists or that symlinks were resolved.
+
 ### 7.3 JSON
 
 JSON conversion MUST accept only Rhai values representable in the documented
@@ -577,9 +598,9 @@ by invocation budgets.
 `Bytes` is an owned byte sequence. `.len` counts bytes. `.to_text()` performs
 strict UTF-8 decoding and throws `bytes_invalid_utf8` on failure.
 
-## 8. Planned process and time semantics
+## 8. Process and time semantics
 
-The canonical process constructor is:
+The canonical planned process constructor is:
 
 ```rhai
 let command = std::process::command("git");
@@ -601,6 +622,11 @@ termination MUST clean the invocation-owned process tree.
 `Duration`, `Instant`, and `SystemTime` keep monotonic deadlines separate from
 wall-clock time. A cancellable timer belongs to `rhai::task`, not to a fake
 cancellable `std::thread::sleep`.
+
+The shipped `SystemTime::now()` returns wall-clock time.
+`.unix_millis` is milliseconds since the Unix epoch and `.rfc3339` is UTC with
+millisecond precision. These values support reporting and serialization; they
+MUST NOT be used as monotonic deadlines.
 
 ## 9. Typed errors
 
