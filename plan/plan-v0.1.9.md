@@ -51,6 +51,96 @@ Node API、npm 或 Bun 二进制兼容。
 语义或包生态兼容层；每项能力只选择最符合 Rhai、typed contracts、
 Windows-first、自反馈、取消与有界资源原则的 AgenTerm-native 设计。
 
+## 〇.一、API 对象树（用户视角）
+
+先看用户最终如何接触运行时，再看版本如何实施。下面是 v0.1.9 目标
+surface，不是内部 Rust 模块树，也不是 Node/Bun 兼容表；交付状态、完整
+函数和 deferred 节点在后文 Catalog 能力树展开。
+
+```text
+agenterm-script
+│
+├─ globals                         最常用、无需前缀
+│  ├─ args                         本次调用参数
+│  └─ print(value)                 有界标准输出
+│
+├─ static namespaces              无 invocation identity，使用 ::
+│  ├─ fs::
+│  │  ├─ read / write / atomic_write
+│  │  ├─ list / metadata
+│  │  ├─ create / copy / move / remove
+│  │  └─ owned_temp
+│  ├─ path::
+│  │  └─ join / parent / name / extension / normalize / relative
+│  ├─ env::
+│  │  └─ get / has / names / set / remove / child
+│  ├─ process::
+│  │  ├─ run(...)                  顺序取得 ProcessResult
+│  │  └─ start(...)                立即取得 Task
+│  ├─ http::
+│  │  ├─ request(...)              顺序取得 HttpResponse
+│  │  └─ start(...)                立即取得 Task
+│  ├─ time::
+│  │  └─ now / deadline / seconds / sleep / timer
+│  ├─ json::
+│  │  └─ parse / stringify
+│  └─ task::
+│     └─ wait_all / race / cancel_all
+│
+├─ typed objects                  有 identity/lifecycle，使用 .
+│  ├─ Task
+│  │  └─ .id / .state / .wait() / .cancel()
+│  ├─ Stream
+│  │  └─ .read() / .close() / .truncated
+│  ├─ Bytes
+│  │  └─ .len / .slice() / .to_text()
+│  ├─ ProcessResult
+│  │  └─ .success / .exit_code / .stdout / .stderr
+│  ├─ HttpResponse
+│  │  └─ .status / .headers / .body
+│  └─ Fleet values
+│     ├─ Workspace / Tab / Terminal
+│     ├─ Receipt / Event / PostState
+│     └─ typed error / degraded reason
+│
+├─ fleet                          绑定当前 server/profile/broker 的 facade
+│  ├─ .workspace
+│  ├─ .tabs
+│  │  ├─ .list()
+│  │  └─ .active()
+│  ├─ .terminal(tab_id)
+│  │  ├─ .capture(max_bytes)
+│  │  ├─ .send(...)
+│  │  └─ viewport/lifecycle
+│  └─ .events
+│     ├─ .read(...)
+│     └─ .wait(...) / .start_wait(...)
+│
+├─ code composition               使用语言和项目机制，不伪装 namespace
+│  ├─ import "relative/module" as m
+│  ├─ agenterm.tasks.json
+│  └─ script task list / show / run
+│
+└─ discovery & evidence           使用 CLI/catalog，不塞入普通脚本
+   ├─ script api [MODULE]
+   ├─ script api --json / --compare
+   ├─ script check
+   └─ limits / audit / typed result / coverage
+```
+
+最短使用路径：
+
+```text
+fs::read_text(...)                     直接调用
+process::start(...) -> Task.wait()     显式并发
+fleet.tabs.active()                    Fleet 读取
+fleet.terminal(id).capture(...)        绑定资源对象
+```
+
+这张对象树是手册首页与 API discovery 的首屏；后文的产品分类树可以扩散，
+但任何新增能力都必须先找到一个简洁的用户落点，不能把分类层级直接变成
+调用前缀。
+
 ## 一、版本目录树
 
 ```text
