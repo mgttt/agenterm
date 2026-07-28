@@ -62,7 +62,9 @@ use crate::{
     },
     ui_client::{UiClientModel, tab_by_id},
     ui_geometry::{
-        PixelRect, WorkspaceLayout, WorkspaceLayoutInput, tabs_width_from_drag, workspace_layout,
+        PixelRect, TERMINAL_SCROLLBAR_WIDTH, TerminalScrollbarGeometry, WorkspaceLayout,
+        WorkspaceLayoutInput, scrollback_for_thumb_top, tabs_width_from_drag,
+        terminal_scrollbar_geometry, workspace_layout,
     },
 };
 
@@ -351,6 +353,11 @@ struct RemoteTerminalSelection {
     dragging: bool,
 }
 
+#[derive(Clone, Copy)]
+struct RemoteScrollDrag {
+    thumb_grab_offset: i32,
+}
+
 impl RemoteTerminalSelection {
     fn bounds(&self) -> (RemoteTerminalPoint, RemoteTerminalPoint) {
         if self.anchor <= self.active {
@@ -402,6 +409,7 @@ struct RemoteWindowState {
     settings_open: bool,
     settings_theme_draft: ThemeId,
     terminal_selection: Option<RemoteTerminalSelection>,
+    scroll_drag: Option<RemoteScrollDrag>,
 }
 
 impl RemoteWindowState {
@@ -472,6 +480,7 @@ impl RemoteWindowState {
             settings_open: false,
             settings_theme_draft,
             terminal_selection: None,
+            scroll_drag: None,
         })
     }
 
@@ -874,7 +883,8 @@ impl RemoteWindowState {
             .clamp(1, 512)
             .try_into()
             .unwrap_or(1);
-        let columns = ((terminal.right - terminal.left) / self.cell_width)
+        let columns = ((terminal.right - terminal.left - TERMINAL_SCROLLBAR_WIDTH)
+            / self.cell_width)
             .clamp(1, 512)
             .try_into()
             .unwrap_or(1);
@@ -1256,13 +1266,16 @@ impl RemoteWindowState {
         let tab = self.active_tab()?;
         if !clamp
             && (x < terminal.left
-                || x >= terminal.right
+                || x >= terminal.right - TERMINAL_SCROLLBAR_WIDTH
                 || y < terminal.top
                 || y >= terminal.bottom)
         {
             return None;
         }
-        let local_x = (x - terminal.left).clamp(0, (terminal.right - terminal.left - 1).max(0));
+        let local_x = (x - terminal.left).clamp(
+            0,
+            (terminal.right - terminal.left - TERMINAL_SCROLLBAR_WIDTH - 1).max(0),
+        );
         let local_y = (y - terminal.top).clamp(0, (terminal.bottom - terminal.top - 1).max(0));
         Some(RemoteTerminalPoint {
             row: u32::try_from(local_y / self.cell_height)
@@ -1505,6 +1518,108 @@ impl RemoteWindowState {
         }
     }
 
+    fn scrollbar_state(&self) -> Option<(TerminalScrollbarGeometry, usize, usize)> {
+        let tab = self.active_tab()?;
+        let geometry = terminal_scrollbar_geometry(
+            self.workspace_geometry().terminal,
+            usize::try_from(tab.screen.rows).unwrap_or_default(),
+            tab.screen.scrollback_offset,
+            tab.screen.max_scrollback,
+        );
+        Some((
+            geometry,
+            tab.screen.scrollback_offset,
+            tab.screen.max_scrollback,
+        ))
+    }
+
+    fn set_scrollback(&mut self, requested: usize) {
+        let Some(tab) = self.active_tab() else {
+            return;
+        };
+        let tab_id = tab.id.clone();
+        let current = tab.screen.scrollback_offset;
+        let target = requested.min(tab.screen.max_scrollback);
+        if target == current {
+            return;
+        }
+        self.cancel_terminal_selection();
+        let action = if target > current { "up" } else { "down" };
+        let count = target.abs_diff(current);
+        let result = self
+            .client
+            .as_mut()
+            .context("UI is disconnected")
+            .and_then(|client| {
+                client.run_control(vec![
+                    "scroll-pane".to_owned(),
+                    "-t".to_owned(),
+                    tab_id,
+                    action.to_owned(),
+                    count.to_string(),
+                ])?;
+                client.poll_deltas()?;
+                Ok(())
+            });
+        if let Err(error) = result {
+            self.last_error = Some(format!("Terminal scrollbar failed: {error:#}"));
+        }
+    }
+
+    fn click_scrollbar(&mut self, x: i32, y: i32) -> bool {
+        let Some((geometry, current, maximum)) = self.scrollbar_state() else {
+            return false;
+        };
+        if !geometry.track.contains(x, y) {
+            return false;
+        }
+        self.cancel_terminal_selection();
+        if maximum == 0 {
+            return true;
+        }
+        if geometry.thumb.contains(x, y) {
+            self.scroll_drag = Some(RemoteScrollDrag {
+                thumb_grab_offset: y - geometry.thumb.top,
+            });
+            unsafe { SetCapture(self.window) };
+        } else {
+            let page = self
+                .active_tab()
+                .map(|tab| usize::try_from(tab.screen.rows).unwrap_or(1))
+                .unwrap_or(1)
+                .max(1);
+            self.set_scrollback(if y < geometry.thumb.top {
+                current.saturating_add(page).min(maximum)
+            } else {
+                current.saturating_sub(page)
+            });
+        }
+        true
+    }
+
+    fn drag_scrollbar(&mut self, y: i32) -> bool {
+        let Some(drag) = self.scroll_drag else {
+            return false;
+        };
+        let Some((geometry, _, maximum)) = self.scrollbar_state() else {
+            self.end_scroll_drag();
+            return false;
+        };
+        let offset = scrollback_for_thumb_top(geometry, y - drag.thumb_grab_offset, maximum);
+        self.set_scrollback(offset);
+        true
+    }
+
+    fn end_scroll_drag(&mut self) {
+        if self.scroll_drag.take().is_some() {
+            unsafe { ReleaseCapture() };
+        }
+    }
+
+    fn scrollbar_capture_lost(&mut self) {
+        self.scroll_drag = None;
+    }
+
     fn resize_grip_contains(&self, x: i32, y: i32) -> bool {
         self.workspace_geometry()
             .resize_grip
@@ -1672,6 +1787,7 @@ impl RemoteWindowState {
                 palette,
             );
             self.paint_terminal_selection(device, terminal, &tab.screen, palette);
+            self.paint_terminal_scrollbar(device, palette);
             draw_text(
                 device,
                 RECT {
@@ -1794,6 +1910,24 @@ impl RemoteWindowState {
                 );
             }
         }
+    }
+
+    fn paint_terminal_scrollbar(&self, device: HDC, palette: &ThemePalette) {
+        let Some((geometry, _, _)) = self.scrollbar_state() else {
+            return;
+        };
+        let track = win_rect(geometry.track);
+        let thumb = win_rect(geometry.thumb);
+        fill(device, &track, palette.scrollbar_track.colorref());
+        fill(
+            device,
+            &thumb,
+            if self.scroll_drag.is_some() {
+                palette.scrollbar_thumb_active.colorref()
+            } else {
+                palette.scrollbar_thumb.colorref()
+            },
+        );
     }
 
     fn paint_window_close(&self, device: HDC, palette: &ThemePalette) {
@@ -2010,6 +2144,12 @@ unsafe extern "system" fn window_proc(
                 if state.begin_tabs_resize(x, y) {
                     return 0;
                 }
+                if state.click_scrollbar(x, y) {
+                    unsafe {
+                        windows_sys::Win32::Graphics::Gdi::InvalidateRect(window, ptr::null(), 0)
+                    };
+                    return 0;
+                }
                 let sidebar = state.layout_rects().0;
                 if state.tabs_visible && x < sidebar.right {
                     if state.tab_edit_action_contains(x, y) {
@@ -2042,7 +2182,17 @@ unsafe extern "system" fn window_proc(
             if let Some(state) = state_mut(window) {
                 let x = (lparam as u32 & 0xffff) as i16 as i32;
                 let y = ((lparam as u32 >> 16) & 0xffff) as i16 as i32;
-                if state.tabs_resize_dragging {
+                if state.scroll_drag.is_some() {
+                    if state.drag_scrollbar(y) {
+                        unsafe {
+                            windows_sys::Win32::Graphics::Gdi::InvalidateRect(
+                                window,
+                                ptr::null(),
+                                0,
+                            )
+                        };
+                    }
+                } else if state.tabs_resize_dragging {
                     state.drag_tabs_resize(x);
                     unsafe {
                         windows_sys::Win32::Graphics::Gdi::InvalidateRect(window, ptr::null(), 0)
@@ -2059,7 +2209,9 @@ unsafe extern "system" fn window_proc(
             if let Some(state) = state_mut(window) {
                 let x = (lparam as u32 & 0xffff) as i16 as i32;
                 let y = ((lparam as u32 >> 16) & 0xffff) as i16 as i32;
-                if state.tabs_resize_dragging {
+                if state.scroll_drag.is_some() {
+                    state.end_scroll_drag();
+                } else if state.tabs_resize_dragging {
                     state.finish_tabs_resize();
                 } else if state.finish_terminal_selection(x, y) {
                     unsafe {
@@ -2072,6 +2224,7 @@ unsafe extern "system" fn window_proc(
         WM_CAPTURECHANGED => {
             if let Some(state) = state_mut(window) {
                 state.tabs_resize_capture_lost();
+                state.scrollbar_capture_lost();
                 state.terminal_selection_capture_lost();
             }
             0
@@ -2763,6 +2916,7 @@ mod tests {
             rows: 2,
             columns: 8,
             scrollback_offset: 0,
+            max_scrollback: 0,
             cursor: UiCursorSnapshot {
                 row: 1,
                 column: 4,

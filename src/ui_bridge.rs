@@ -2,11 +2,11 @@ use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 
-pub const UI_BRIDGE_SCHEMA_VERSION: u32 = 6;
+pub const UI_BRIDGE_SCHEMA_VERSION: u32 = 7;
 pub const UI_BRIDGE_PROTOCOL_VERSION: u32 = 1;
 pub const UI_HELLO_SCHEMA_VERSION: u32 = 1;
 pub const UI_BOOTSTRAP_SCHEMA_VERSION: u32 = 2;
-pub const UI_SCREEN_SCHEMA_VERSION: u32 = 1;
+pub const UI_SCREEN_SCHEMA_VERSION: u32 = 2;
 pub const UI_DELTA_SCHEMA_VERSION: u32 = 2;
 pub const UI_LEASE_SCHEMA_VERSION: u32 = 2;
 pub const UI_INTERACTION_SCHEMA_VERSION: u32 = 1;
@@ -258,6 +258,7 @@ pub struct UiScreenSnapshot {
     pub rows: u32,
     pub columns: u32,
     pub scrollback_offset: usize,
+    pub max_scrollback: usize,
     pub cursor: UiCursorSnapshot,
     pub runs: Vec<UiCellRun>,
     pub complete: bool,
@@ -476,6 +477,9 @@ impl UiScreenSnapshot {
         if self.complete && self.truncated {
             return Err("ui_screen_completeness_invalid".to_owned());
         }
+        if self.scrollback_offset > self.max_scrollback {
+            return Err("ui_screen_scrollback_bounds".to_owned());
+        }
         if self.cursor.row >= self.rows || self.cursor.column >= self.columns {
             return Err("ui_screen_cursor_bounds".to_owned());
         }
@@ -599,6 +603,7 @@ mod tests {
             rows: 24,
             columns: 80,
             scrollback_offset: 0,
+            max_scrollback: 0,
             cursor: UiCursorSnapshot {
                 row: 3,
                 column: 4,
@@ -712,7 +717,7 @@ mod tests {
     #[test]
     fn current_facts_do_not_claim_the_planned_split() {
         let facts = current_facts();
-        assert_eq!(facts.schema_version, 6);
+        assert_eq!(facts.schema_version, 7);
         assert_eq!(facts.ownership_mode, UiOwnershipMode::CombinedGuiServer);
         assert!(!facts.replaceable_ui);
         assert!(!facts.interactive_lease);
@@ -846,6 +851,19 @@ mod tests {
         run_overflow.tabs[0].screen.runs[0].column = 79;
         run_overflow.tabs[0].screen.runs[0].columns = 2;
         assert_eq!(run_overflow.validate().unwrap_err(), "ui_screen_run_bounds");
+    }
+
+    #[test]
+    fn screen_history_position_is_bounded_by_the_published_maximum() {
+        let mut screen = valid_screen("@1");
+        screen.max_scrollback = 12;
+        screen.scrollback_offset = 12;
+        assert!(screen.validate().is_ok());
+        screen.scrollback_offset = 13;
+        assert_eq!(
+            screen.validate(),
+            Err("ui_screen_scrollback_bounds".to_owned())
+        );
     }
 
     #[test]

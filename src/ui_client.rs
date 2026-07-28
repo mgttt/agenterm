@@ -346,6 +346,7 @@ mod tests {
                 rows: 24,
                 columns: 80,
                 scrollback_offset: 0,
+                max_scrollback: 0,
                 cursor: UiCursorSnapshot {
                     row: 0,
                     column: 0,

@@ -58,7 +58,8 @@ fn ui_cell_style(cell: &vt100::Cell) -> UiCellStyle {
     }
 }
 
-fn ui_screen_snapshot(tab: &TerminalTab, generation: u64) -> Result<UiScreenSnapshot, String> {
+fn ui_screen_snapshot(tab: &mut TerminalTab, generation: u64) -> Result<UiScreenSnapshot, String> {
+    let (_, max_scrollback) = tab.scrollback_bounds();
     let screen = tab.parser.screen();
     let (rows, columns) = screen.size();
     let rows = u32::from(rows);
@@ -119,6 +120,7 @@ fn ui_screen_snapshot(tab: &TerminalTab, generation: u64) -> Result<UiScreenSnap
         rows,
         columns,
         scrollback_offset: screen.scrollback(),
+        max_scrollback,
         cursor: UiCursorSnapshot {
             row: u32::from(cursor_row),
             column: u32::from(cursor_column),
@@ -132,7 +134,7 @@ fn ui_screen_snapshot(tab: &TerminalTab, generation: u64) -> Result<UiScreenSnap
     Ok(snapshot)
 }
 
-fn ui_tab_bootstrap(tab: &TerminalTab, generation: u64) -> Result<UiTabBootstrap, String> {
+fn ui_tab_bootstrap(tab: &mut TerminalTab, generation: u64) -> Result<UiTabBootstrap, String> {
     let proxy = tab.proxy.facts();
     let composer = match tab.sensitive_composer.as_ref() {
         Some(secret) => UiComposerSnapshot {
@@ -170,11 +172,13 @@ fn ui_tab_bootstrap(tab: &TerminalTab, generation: u64) -> Result<UiTabBootstrap
     })
 }
 
-pub(crate) fn ui_bootstrap_snapshot(host: &dyn ControlHost) -> Result<UiBootstrapSnapshot, String> {
+pub(crate) fn ui_bootstrap_snapshot(
+    host: &mut dyn ControlHost,
+) -> Result<UiBootstrapSnapshot, String> {
     let position = host.event_journal().position();
     let tabs = host
-        .tabs()
-        .iter()
+        .tabs_mut()
+        .iter_mut()
         .map(|tab| ui_tab_bootstrap(tab, position.sequence))
         .collect::<Result<Vec<_>, String>>()?;
     let truncated = tabs.iter().any(|tab| tab.screen.truncated);
@@ -251,7 +255,7 @@ fn ui_delta_event(event: &EventEnvelope) -> UiDeltaEvent {
 }
 
 fn ui_delta_batch(
-    host: &dyn ControlHost,
+    host: &mut dyn ControlHost,
     after_sequence: u64,
     position: &EventPosition,
     events: &[EventEnvelope],
@@ -269,8 +273,8 @@ fn ui_delta_batch(
             .map(|tab| tab.id)
             .collect::<BTreeSet<_>>();
         let tab_updates = host
-            .tabs()
-            .iter()
+            .tabs_mut()
+            .iter_mut()
             .filter(|tab| affected_ids.contains(&tab.id))
             .map(|tab| ui_tab_bootstrap(tab, position.sequence))
             .collect::<Result<Vec<_>, String>>()?;

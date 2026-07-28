@@ -580,6 +580,82 @@ try {
         'wait-pane', '-t', $tabId,
         '--contains', "${scrollMarker}80", '--timeout-ms', '5000'
     ) | Out-Null
+    $scrollBootstrap = Invoke-AgenTerm @('ui-bootstrap') |
+        ConvertFrom-Json
+    $scrollTab = @(
+        $scrollBootstrap.tabs | Where-Object id -eq $tabId
+    )[0]
+    if ([int]$scrollTab.screen.max_scrollback -le 0) {
+        throw 'screen DTO did not publish the terminal history bound'
+    }
+    $scrollClient = [AgenTermRemoteUiNativeTest+Rect]::new()
+    if (-not [AgenTermRemoteUiNativeTest]::GetClientRect(
+            $gui.MainWindowHandle, [ref]$scrollClient
+        )) {
+        throw 'GetClientRect failed for terminal scrollbar'
+    }
+    $trackHeight = $scrollClient.Bottom - 26 - 104
+    $visibleRows = [int]$scrollTab.screen.rows
+    $maximumScroll = [int]$scrollTab.screen.max_scrollback
+    $thumbHeight = [Math]::Min(
+        $trackHeight,
+        [Math]::Max(
+            24,
+            [Math]::Floor(
+                $trackHeight * $visibleRows /
+                ($visibleRows + $maximumScroll)
+            )
+        )
+    )
+    $scrollbarX = $scrollClient.Right - 6
+    $bottomThumbY = $trackHeight - [Math]::Floor($thumbHeight / 2)
+    $topThumbY = [Math]::Floor($thumbHeight / 2)
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, 0x0201, [IntPtr]::Zero,
+        [AgenTermRemoteUiNativeTest]::MousePoint(
+            $scrollbarX, $bottomThumbY
+        )
+    ) | Out-Null
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, 0x0200, [IntPtr]::Zero,
+        [AgenTermRemoteUiNativeTest]::MousePoint(
+            $scrollbarX, $topThumbY
+        )
+    ) | Out-Null
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, 0x0202, [IntPtr]::Zero,
+        [AgenTermRemoteUiNativeTest]::MousePoint(
+            $scrollbarX, $topThumbY
+        )
+    ) | Out-Null
+    $draggedTop = Invoke-AgenTerm @('inspect', '-t', $tabId) |
+        ConvertFrom-Json
+    if ([int]$draggedTop.windows[0].scrollback_offset -ne $maximumScroll) {
+        throw 'terminal scrollbar drag did not reach the oldest history'
+    }
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, 0x0201, [IntPtr]::Zero,
+        [AgenTermRemoteUiNativeTest]::MousePoint(
+            $scrollbarX, $topThumbY
+        )
+    ) | Out-Null
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, 0x0200, [IntPtr]::Zero,
+        [AgenTermRemoteUiNativeTest]::MousePoint(
+            $scrollbarX, $bottomThumbY
+        )
+    ) | Out-Null
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, 0x0202, [IntPtr]::Zero,
+        [AgenTermRemoteUiNativeTest]::MousePoint(
+            $scrollbarX, $bottomThumbY
+        )
+    ) | Out-Null
+    $draggedLive = Invoke-AgenTerm @('inspect', '-t', $tabId) |
+        ConvertFrom-Json
+    if ([int]$draggedLive.windows[0].scrollback_offset -ne 0) {
+        throw 'terminal scrollbar drag did not return to the live viewport'
+    }
     [AgenTermRemoteUiNativeTest]::SendMessage(
         $gui.MainWindowHandle, 0x020A,
         [AgenTermRemoteUiNativeTest]::WheelDelta(120),
@@ -632,7 +708,7 @@ try {
         throw 'GetClientRect failed for terminal selection'
     }
     $terminalLeft = 360
-    $terminalWidth = $clientRect.Right - $terminalLeft
+    $terminalWidth = $clientRect.Right - $terminalLeft - 12
     $terminalHeight = $clientRect.Bottom - 26 - 104
     $cellWidth = [Math]::Max(
         1, [Math]::Floor($terminalWidth / [int]$selectionTab.screen.columns)

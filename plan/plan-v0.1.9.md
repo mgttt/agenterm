@@ -1647,7 +1647,9 @@ S4  [~] server-owned 单活 interactive UI lease 已交付 attach/idempotent
         在 [Settings] 左侧；该配置不进入稳定 server truth。终端拖选、选区
         着色、Unicode/wide-cell 文本重建、Ctrl+C/Ctrl+V 与窗口系统菜单
         Copy/Paste 已恢复；选区绑定 screen generation，paste 仍经 lease
-        有界写入 PTY。
+        有界写入 PTY。screen schema v2 发布 max scrollback，client 为终端
+        保留可见滚动条，并以 typed server control 支持轨道翻页及 thumb
+        精确拖到历史顶端/实时底端。
         普通启动默认切换、旧工作台完整 parity 与 same-server rollback 待补
 S5  same-server GUI upgrade + rollback black-box
 S6  remove combined-process handoff only after parity gates
