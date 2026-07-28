@@ -36,6 +36,8 @@ mod theme;
 pub mod ui_bridge;
 mod ui_geometry;
 #[cfg(any(windows, unix))]
+mod ui_interaction;
+#[cfg(any(windows, unix))]
 mod ui_lease;
 mod upgrade_identity;
 mod wake_signal;

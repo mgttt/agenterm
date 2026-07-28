@@ -2,13 +2,14 @@ use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 
-pub const UI_BRIDGE_SCHEMA_VERSION: u32 = 3;
+pub const UI_BRIDGE_SCHEMA_VERSION: u32 = 4;
 pub const UI_BRIDGE_PROTOCOL_VERSION: u32 = 1;
 pub const UI_HELLO_SCHEMA_VERSION: u32 = 1;
 pub const UI_BOOTSTRAP_SCHEMA_VERSION: u32 = 1;
 pub const UI_SCREEN_SCHEMA_VERSION: u32 = 1;
 pub const UI_DELTA_SCHEMA_VERSION: u32 = 1;
 pub const UI_LEASE_SCHEMA_VERSION: u32 = 1;
+pub const UI_INTERACTION_SCHEMA_VERSION: u32 = 1;
 pub const UI_BOOTSTRAP_MAX_BYTES: usize = 8 * 1024 * 1024;
 pub const UI_BOOTSTRAP_MAX_TABS: usize = 1024;
 pub const UI_SCREEN_MAX_ROWS: u32 = 512;
@@ -20,6 +21,7 @@ pub const UI_TAB_NOTE_MAX_BYTES: usize = 64 * 1024;
 pub const UI_DELTA_MAX_BYTES: usize = 8 * 1024 * 1024;
 pub const UI_DELTA_MAX_EVENTS: usize = 64;
 pub const UI_CLIENT_ID_MAX_BYTES: usize = 128;
+pub const UI_INPUT_MAX_BYTES: usize = 256 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -67,6 +69,7 @@ pub struct UiContractSchemas {
     pub screen: u32,
     pub delta: u32,
     pub lease: u32,
+    pub interaction: u32,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -79,6 +82,7 @@ pub struct UiContractLimits {
     pub screen_text_bytes: usize,
     pub delta_bytes: usize,
     pub delta_events: usize,
+    pub input_bytes: usize,
 }
 
 pub const fn current_facts() -> UiBridgeFacts {
@@ -104,6 +108,7 @@ pub const fn current_facts() -> UiBridgeFacts {
             screen: UI_SCREEN_SCHEMA_VERSION,
             delta: UI_DELTA_SCHEMA_VERSION,
             lease: UI_LEASE_SCHEMA_VERSION,
+            interaction: UI_INTERACTION_SCHEMA_VERSION,
         },
         hard_limits: UiContractLimits {
             bootstrap_bytes: UI_BOOTSTRAP_MAX_BYTES,
@@ -114,6 +119,7 @@ pub const fn current_facts() -> UiBridgeFacts {
             screen_text_bytes: UI_SCREEN_MAX_TEXT_BYTES,
             delta_bytes: UI_DELTA_MAX_BYTES,
             delta_events: UI_DELTA_MAX_EVENTS,
+            input_bytes: UI_INPUT_MAX_BYTES,
         },
     }
 }
@@ -695,7 +701,7 @@ mod tests {
     #[test]
     fn current_facts_do_not_claim_the_planned_split() {
         let facts = current_facts();
-        assert_eq!(facts.schema_version, 3);
+        assert_eq!(facts.schema_version, 4);
         assert_eq!(facts.ownership_mode, UiOwnershipMode::CombinedGuiServer);
         assert!(!facts.replaceable_ui);
         assert!(!facts.interactive_lease);
@@ -712,9 +718,14 @@ mod tests {
         assert_eq!(facts.contract_schemas.screen, UI_SCREEN_SCHEMA_VERSION);
         assert_eq!(facts.contract_schemas.delta, UI_DELTA_SCHEMA_VERSION);
         assert_eq!(facts.contract_schemas.lease, UI_LEASE_SCHEMA_VERSION);
+        assert_eq!(
+            facts.contract_schemas.interaction,
+            UI_INTERACTION_SCHEMA_VERSION
+        );
         assert_eq!(facts.hard_limits.tabs, UI_BOOTSTRAP_MAX_TABS);
         assert_eq!(facts.hard_limits.bootstrap_bytes, UI_BOOTSTRAP_MAX_BYTES);
         assert_eq!(facts.hard_limits.delta_bytes, UI_DELTA_MAX_BYTES);
+        assert_eq!(facts.hard_limits.input_bytes, UI_INPUT_MAX_BYTES);
         assert_eq!(facts.hard_limits.delta_events, UI_DELTA_MAX_EVENTS);
     }
 

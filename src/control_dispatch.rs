@@ -202,6 +202,16 @@ fn ui_hello_response(
     request.validate()?;
     let compatibility = negotiate(request.protocol_range, UI_BRIDGE_PROTOCOL_VERSION);
     let position = host.event_journal().position();
+    let mut capabilities = vec![
+        "bootstrap_snapshot".to_owned(),
+        "ordered_delta_poll".to_owned(),
+        "full_screen_post_state".to_owned(),
+        "epoch_restart_detection".to_owned(),
+    ];
+    if host.ui_bridge_facts().interactive_lease {
+        capabilities.push("interactive_lease".to_owned());
+        capabilities.push("lease_gated_interaction".to_owned());
+    }
     let response = UiHelloResponse {
         schema_version: UI_HELLO_SCHEMA_VERSION,
         accepted: compatibility == UiCompatibility::Compatible,
@@ -215,12 +225,7 @@ fn ui_hello_response(
         },
         bootstrap_schema_version: UI_BOOTSTRAP_SCHEMA_VERSION,
         delta_schema_version: UI_DELTA_SCHEMA_VERSION,
-        capabilities: vec![
-            "bootstrap_snapshot".to_owned(),
-            "ordered_delta_poll".to_owned(),
-            "full_screen_post_state".to_owned(),
-            "epoch_restart_detection".to_owned(),
-        ],
+        capabilities,
     };
     response.validate()?;
     Ok(response)

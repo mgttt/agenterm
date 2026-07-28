@@ -22,7 +22,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     parser/scrollback, composer drafts, working-context facts, operation
     receipts and the event journal; it has no user-facing HWND and does not own
     layout, theme, focus, clipboard, menus or rendering
-    - [x] the first internal `agenterm-server.exe` is a real headless process that owns workspace persistence, tab/tree selection, ConPTY children, parser/scrollback, the event journal, shared replay/receipt authority outside Win32 `AppState`, and a single live interactive UI lease; public server smoke proves hello/bootstrap/delta, lease attach/idempotent renewal/live-owner conflict/heartbeat/detach, terminal output, stable IDs, committed replay, conflict rejection, asynchronous receipt completion, persistence, graceful shutdown and zero user-facing HWND
+    - [x] the first internal `agenterm-server.exe` is a real headless process that owns workspace persistence, tab/tree selection, ConPTY children, parser/scrollback, the event journal, shared replay/receipt authority outside Win32 `AppState`, and a single live interactive UI lease; public server smoke proves hello/bootstrap/delta, lease attach/idempotent renewal/live-owner conflict/heartbeat/detach, lease-gated stable-ID selection/bounded binary input/PTY resize, terminal output, committed replay, conflict rejection, asynchronous receipt completion, persistence, graceful shutdown and zero user-facing HWND
     - [ ] complete every server-owned command and make this executable the
       default authority before declaring the server role complete
   - [ ] `agenterm.exe` always runs the current on-disk replaceable GUI client;
@@ -45,8 +45,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [x] `ui-lease attach|heartbeat|detach|status` provides single-live-owner
       identity: matching attach renews idempotently, another live PID conflicts,
       and an exited or expired owner can be recovered without ending PTYs
-    - [ ] terminal input, active-tab selection and PTY resize require that
-      lease once the reconnecting GUI consumer becomes the default
+    - [x] the dedicated `ui-interact` path requires the exact live lease for
+      stable-ID active-tab selection, bounded binary terminal input and bounded
+      PTY resize; independent typed automation remains a separate control plane
+    - [ ] the reconnecting GUI consumer acquires and uses that path by default
   - [ ] compatibility is fail-closed and asymmetric: a new GUI may connect to
     its declared server protocol range; an incompatible server remains alive
     and reports a precise upgrade/restart choice instead of being killed

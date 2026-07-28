@@ -70,6 +70,7 @@ pub(crate) const COMMAND_CATALOG: &[CommandIdentity] = &[
     command("ui-bootstrap", &[]),
     command("ui-deltas", &[]),
     command("ui-hello", &[]),
+    command("ui-interact", &[]),
     command("ui-lease", &[]),
     command("ui-snapshot", &[]),
     command("wait-pane", &["expect-pane"]),
@@ -682,6 +683,21 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
         "ui-hello" => (
             "agenterm-cli ui-hello --minimum VERSION --maximum VERSION [--client-id ID]",
             &["--minimum", "--maximum", "--client-id"][..],
+            &[][..],
+            false,
+        ),
+        "ui-interact" => (
+            "agenterm-cli ui-interact (select|input|resize) \
+             --lease-id ID --client-pid PID -t @ID \
+             [--hex HEX|--rows ROWS --columns COLUMNS]",
+            &[
+                "--lease-id",
+                "--client-pid",
+                "-t",
+                "--hex",
+                "--rows",
+                "--columns",
+            ][..],
             &[][..],
             false,
         ),

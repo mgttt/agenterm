@@ -106,6 +106,64 @@ try {
         $heartbeat.client_pid -ne $PID) {
         throw 'headless server did not renew the exact UI lease owner'
     }
+
+    Write-Host 'STEP require the lease for UI select, resize, and binary input'
+    $interactionTab = Invoke-AgenTerm @(
+        'new-window', '-d', '-P', '-F', '#{window_id}',
+        '-n', "interaction-$($run.RunId)",
+        '--', 'cmd.exe', '/d', '/q'
+    )
+    $unauthorized = Invoke-AgenTermExpectedFailure @(
+        'ui-interact', 'select',
+        '--lease-id', 'wrong-lease',
+        '--client-pid', "$PID",
+        '-t', $interactionTab
+    )
+    $selected = Invoke-AgenTerm @(
+        'ui-interact', 'select',
+        '--lease-id', $lease.lease_id,
+        '--client-pid', "$PID",
+        '-t', $interactionTab
+    ) | ConvertFrom-Json
+    $resized = Invoke-AgenTerm @(
+        'ui-interact', 'resize',
+        '--lease-id', $lease.lease_id,
+        '--client-pid', "$PID",
+        '-t', $interactionTab,
+        '--rows', '24', '--columns', '90'
+    ) | ConvertFrom-Json
+    $interactionMarker = "AGENTERM_UI_INPUT_$($run.RunId)"
+    $inputText = "echo $interactionMarker`r"
+    $inputHex = ([BitConverter]::ToString(
+            [Text.Encoding]::UTF8.GetBytes($inputText)
+        )).Replace('-', '').ToLowerInvariant()
+    $input = Invoke-AgenTerm @(
+        'ui-interact', 'input',
+        '--lease-id', $lease.lease_id,
+        '--client-pid', "$PID",
+        '-t', $interactionTab,
+        '--hex', $inputHex
+    ) | ConvertFrom-Json
+    Invoke-AgenTerm @(
+        'wait-pane', '-t', $interactionTab,
+        '--contains', $interactionMarker, '--timeout-ms', '5000'
+    ) | Out-Null
+    $interactionBootstrap = Invoke-AgenTerm @('ui-bootstrap') |
+        ConvertFrom-Json
+    $interactionState = $interactionBootstrap.tabs |
+        Where-Object id -eq $interactionTab |
+        Select-Object -First 1
+    if (-not $unauthorized.Contains('does not match the current owner') -or
+        $selected.action -ne 'select' -or
+        $selected.tab_id -ne $interactionTab -or
+        $resized.rows -ne 24 -or $resized.columns -ne 90 -or
+        $input.input_bytes -ne [Text.Encoding]::UTF8.GetByteCount($inputText) -or
+        $interactionBootstrap.active_tab_id -ne $interactionTab -or
+        $interactionState.screen.rows -ne 24 -or
+        $interactionState.screen.columns -ne 90) {
+        throw 'headless server did not enforce lease-gated UI interaction'
+    }
+
     $detached = Invoke-AgenTerm @(
         'ui-lease', 'detach',
         '--lease-id', $lease.lease_id,
@@ -122,6 +180,10 @@ try {
         'ui-hello', '--minimum', '1', '--maximum', '1',
         '--client-id', "server-smoke-$($run.RunId)"
     ) | ConvertFrom-Json
+    if (-not $hello.capabilities.Contains('interactive_lease') -or
+        -not $hello.capabilities.Contains('lease_gated_interaction')) {
+        throw 'headless server hello did not discover its interactive contracts'
+    }
     $tabId = Invoke-AgenTerm @(
         'new-window', '-d', '-P', '-F', '#{window_id}',
         '-n', "headless-$($run.RunId)",

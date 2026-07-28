@@ -180,7 +180,7 @@ try {
 
     $protocol = Invoke-AgenTerm @('protocol-info') | ConvertFrom-Json
     $operationCatalog = $protocol.operation_catalog
-    if ($protocol.ui_bridge.schema_version -ne 3 -or
+    if ($protocol.ui_bridge.schema_version -ne 4 -or
         $protocol.ui_bridge.ownership_mode -ne 'combined_gui_server' -or
         $protocol.ui_bridge.replaceable_ui -or
         $protocol.ui_bridge.interactive_lease -or
@@ -193,6 +193,7 @@ try {
         $protocol.ui_bridge.contract_schemas.screen -ne 1 -or
         $protocol.ui_bridge.contract_schemas.delta -ne 1 -or
         $protocol.ui_bridge.contract_schemas.lease -ne 1 -or
+        $protocol.ui_bridge.contract_schemas.interaction -ne 1 -or
         $protocol.ui_bridge.hard_limits.bootstrap_bytes -ne 8388608 -or
         $protocol.ui_bridge.hard_limits.tabs -ne 1024 -or
         $protocol.ui_bridge.hard_limits.screen_rows -ne 512 -or
@@ -201,6 +202,7 @@ try {
         $protocol.ui_bridge.hard_limits.screen_text_bytes -ne 4194304 -or
         $protocol.ui_bridge.hard_limits.delta_bytes -ne 8388608 -or
         $protocol.ui_bridge.hard_limits.delta_events -ne 64 -or
+        $protocol.ui_bridge.hard_limits.input_bytes -ne 262144 -or
         $operationCatalog.schema_version -ne 1 -or
         -not $operationCatalog.classification_only -or
         $operationCatalog.authorization_policy) {

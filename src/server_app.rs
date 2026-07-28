@@ -23,7 +23,10 @@ use crate::{
     pty::TerminalSize,
     terminal_observation::TerminalProcessState,
     terminal_runtime::{TerminalLaunch, TerminalTab},
-    ui_bridge::{UI_LEASE_SCHEMA_VERSION, UiEventPosition, UiLeaseGrant},
+    ui_bridge::{
+        UI_INTERACTION_SCHEMA_VERSION, UI_LEASE_SCHEMA_VERSION, UiEventPosition, UiLeaseGrant,
+    },
+    ui_interaction::{UiInteraction, parse_ui_interaction},
     ui_lease::{UI_LEASE_TTL_MS, UiLeaseAuthority, UiLeaseError, UiLeaseRecord},
     wake_signal::WakeSignal,
     workspace::{SavedTab, SavedWorkspace, load_workspace, save_workspace, workspace_path},
@@ -400,6 +403,109 @@ impl ServerState {
         }
     }
 
+    fn execute_ui_interaction_command(&mut self, args: &[String]) -> IpcResponse {
+        let interaction = match parse_ui_interaction(args) {
+            Ok(interaction) => interaction,
+            Err(error) => {
+                return IpcResponse::typed_failure(
+                    error,
+                    "ui_interaction_invalid_arguments",
+                    "validation",
+                    false,
+                );
+            }
+        };
+        let now_unix_ms = crate::client::unix_time_ms();
+        self.reap_stale_ui_lease(now_unix_ms);
+        let (lease_id, client_pid) = interaction.lease_identity();
+        let lease = match self.ui_lease.heartbeat(lease_id, client_pid, now_unix_ms) {
+            Ok(lease) => lease,
+            Err(error) => return Self::ui_lease_failure(error),
+        };
+        let tab_id = interaction.tab_id();
+        let action = interaction.action();
+        let Some(position) = self.tabs.iter().position(|tab| tab.id == tab_id) else {
+            return IpcResponse::typed_failure(
+                format!("can't find UI interaction target: @{tab_id}"),
+                "ui_interaction_target_not_found",
+                "not_found",
+                false,
+            );
+        };
+
+        let (input_bytes, rows, columns) = match interaction {
+            UiInteraction::Select { .. } => {
+                if let Err(error) = self.select_tab_at(position) {
+                    return IpcResponse::typed_failure(
+                        error,
+                        "ui_interaction_select_failed",
+                        "precondition",
+                        false,
+                    );
+                }
+                (None, None, None)
+            }
+            UiInteraction::Input { bytes, .. } => {
+                if self.active != Some(tab_id) {
+                    return IpcResponse::typed_failure(
+                        "UI input target is not the active tab",
+                        "ui_interaction_target_not_active",
+                        "conflict",
+                        true,
+                    );
+                }
+                if self.tabs[position].submission.is_pending() {
+                    return IpcResponse::typed_failure(
+                        "composer submission is pending; UI terminal input is paused",
+                        "ui_interaction_submission_pending",
+                        "conflict",
+                        true,
+                    );
+                }
+                let length = bytes.len();
+                if !self.tabs[position].send(&bytes) {
+                    return IpcResponse::typed_failure(
+                        "terminal input was not accepted because the pane is no longer writable",
+                        "terminal_not_writable",
+                        "precondition",
+                        false,
+                    );
+                }
+                (Some(length), None, None)
+            }
+            UiInteraction::Resize { rows, columns, .. } => {
+                self.tabs[position].resize(rows, columns);
+                self.event_journal.commit(
+                    EventKind::TerminalResized,
+                    Some(tab_id),
+                    serde_json::json!({
+                        "rows": rows,
+                        "columns": columns,
+                        "source": "ui_lease",
+                    }),
+                );
+                (None, Some(rows), Some(columns))
+            }
+        };
+        let event_position = self.event_journal.position();
+        IpcResponse::success(
+            serde_json::json!({
+                "schema_version": UI_INTERACTION_SCHEMA_VERSION,
+                "action": action,
+                "tab_id": format!("@{tab_id}"),
+                "input_bytes": input_bytes,
+                "rows": rows,
+                "columns": columns,
+                "lease_expires_unix_ms": lease.expires_unix_ms,
+                "position": {
+                    "server_epoch": event_position.epoch,
+                    "sequence": event_position.sequence,
+                },
+            })
+            .to_string(),
+        )
+    }
+
     fn execute_command(&mut self, args: &[String]) -> IpcResponse {
         if let Err(error) = validate_operation_args(args) {
             return IpcResponse::typed_failure(
@@ -411,6 +517,9 @@ impl ServerState {
         }
         if args.first().is_some_and(|command| command == "ui-lease") {
             return self.execute_ui_lease_command(args);
+        }
+        if args.first().is_some_and(|command| command == "ui-interact") {
+            return self.execute_ui_interaction_command(args);
         }
         if let Some(response) = dispatch_shared_command(self, args) {
             return response;

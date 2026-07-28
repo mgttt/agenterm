@@ -28,6 +28,7 @@ pub(crate) enum EventKind {
     TabState,
     TerminalOutput,
     TerminalPasted,
+    TerminalResized,
     TerminalViewport,
     UiLease,
     WindowVisibility,
@@ -43,7 +44,7 @@ pub(crate) enum EventKind {
 }
 
 impl EventKind {
-    pub(crate) const ALL: [Self; 27] = [
+    pub(crate) const ALL: [Self; 28] = [
         Self::ComposerDraft,
         Self::ComposerSubmitted,
         Self::ComposerSubmissionFinished,
@@ -59,6 +60,7 @@ impl EventKind {
         Self::TabState,
         Self::TerminalOutput,
         Self::TerminalPasted,
+        Self::TerminalResized,
         Self::TerminalViewport,
         Self::UiLease,
         Self::WindowVisibility,
@@ -90,6 +92,7 @@ impl EventKind {
             Self::TabState => "tab.state",
             Self::TerminalOutput => "terminal.output",
             Self::TerminalPasted => "terminal.pasted",
+            Self::TerminalResized => "terminal.resized",
             Self::TerminalViewport => "terminal.viewport",
             Self::UiLease => "ui.lease",
             Self::WindowVisibility => "window.visibility",
@@ -131,7 +134,7 @@ const fn event_spec(
     }
 }
 
-pub(crate) const EVENT_CATALOG: [EventSpec; 27] = [
+pub(crate) const EVENT_CATALOG: [EventSpec; 28] = [
     event_spec(
         EventKind::ComposerDraft,
         "tabs[].draft",
@@ -236,6 +239,13 @@ pub(crate) const EVENT_CATALOG: [EventSpec; 27] = [
         "{characters:u64,bytes:u64,bracketed:bool,source:string}",
         "tab",
         "0.1.5",
+    ),
+    event_spec(
+        EventKind::TerminalResized,
+        "tabs[].screen",
+        "{rows:u16,columns:u16,source:string}",
+        "tab",
+        "0.1.9",
     ),
     event_spec(
         EventKind::TerminalViewport,
