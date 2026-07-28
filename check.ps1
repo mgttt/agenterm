@@ -211,6 +211,11 @@ try {
         -Label 'manifest-driven README examples' {
         & '.\tests\readme_examples.ps1'
     }
+    Invoke-Checked -Id 'docs-site' -Label 'case-exact static docs assets' {
+        & '.\dist\agenterm-cli.exe' script run `
+            '.\scripts\rhai\verify-docs-site.rhai' `
+            --profile local -- $PSScriptRoot\docs
+    }
     Invoke-Checked -Id 'supply-chain' `
         -Label 'locked dependency licenses and SPDX inventory' {
         & '.\scripts\supply-chain.ps1'
