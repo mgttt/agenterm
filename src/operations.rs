@@ -11,6 +11,8 @@ pub const UI_TABS_SHOW: &str = "ui.tabs.show";
 pub const UI_TABS_HIDE: &str = "ui.tabs.hide";
 pub const UI_TABS_TOGGLE: &str = "ui.tabs.toggle";
 pub const UI_TABS_SET_WIDTH: &str = "ui.tabs.set-width";
+pub const TABS_SET_NOTE: &str = "tabs.set-note";
+pub const TAB_NOTE_MAX_BYTES: usize = 4096;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -125,6 +127,22 @@ const TABS_WIDTH_PARAMETERS: &[OperationParameterSpec] = &[OperationParameterSpe
     minimum: Some(TABS_MIN_WIDTH as i64),
     maximum: Some(TABS_MAX_WIDTH as i64),
 }];
+const TAB_NOTE_PARAMETERS: &[OperationParameterSpec] = &[
+    OperationParameterSpec {
+        name: "tab",
+        value_type: "stable_tab_id",
+        required: true,
+        minimum: None,
+        maximum: None,
+    },
+    OperationParameterSpec {
+        name: "note",
+        value_type: "string",
+        required: true,
+        minimum: Some(0),
+        maximum: Some(TAB_NOTE_MAX_BYTES as i64),
+    },
+];
 const SESSION_TARGET_PARAMETERS: &[OperationParameterSpec] = &[OperationParameterSpec {
     name: "target",
     value_type: "session_name",
@@ -326,6 +344,21 @@ pub const OPERATION_CATALOG: &[OperationSpec] = &[
         since: "0.1.6",
     },
     OperationSpec {
+        id: TABS_SET_NOTE,
+        script_surface: "fleet.tabs.set_note",
+        class: OperationClass::Control,
+        command: "set-tab-note",
+        action: None,
+        aliases: &[],
+        parameters: TAB_NOTE_PARAMETERS,
+        result_type: "tab_snapshot",
+        errors: &["operation_invalid_arguments", "operation_target_not_found"],
+        events: &["tab.note"],
+        destructive: false,
+        available: true,
+        since: "0.1.9",
+    },
+    OperationSpec {
         id: "server.kill",
         script_surface: "fleet.server.kill",
         class: OperationClass::Destructive,
@@ -375,6 +408,9 @@ pub(crate) fn operation_for_args(
         "ui-snapshot" => operation_by_id("ui.snapshot"),
         "read-events" => operation_by_id("events.read"),
         "wait-events" => operation_by_id("events.wait"),
+        "set-tab-note" if option_value(args, "-t").is_some_and(is_stable_tab_id) => {
+            operation_by_id(TABS_SET_NOTE)
+        }
         "kill-server" | "server-kill" => operation_by_id("server.kill"),
         "shutdown" => operation_by_id("workspace.shutdown"),
         "ui-action" => {
@@ -409,7 +445,23 @@ pub(crate) fn validate_operation_args(
     let Some(operation) = operation else {
         return Ok(None);
     };
-    if operation.id == UI_TABS_SET_WIDTH {
+    if operation.id == TABS_SET_NOTE {
+        if args.len() != 4 || args.get(1).map(String::as_str) != Some("-t") {
+            return Err(operation_error(
+                "operation_invalid_arguments",
+                operation.id,
+                "accepts exactly -t @ID NOTE",
+            ));
+        }
+        let note = args.get(3).expect("typed note command length was checked");
+        if note.len() > TAB_NOTE_MAX_BYTES {
+            return Err(operation_error(
+                "operation_invalid_arguments",
+                operation.id,
+                &format!("NOTE must be at most {TAB_NOTE_MAX_BYTES} UTF-8 bytes"),
+            ));
+        }
+    } else if operation.id == UI_TABS_SET_WIDTH {
         if args.len() != 4 {
             return Err(operation_error(
                 "operation_invalid_arguments",
@@ -446,6 +498,12 @@ pub(crate) fn validate_operation_args(
         ));
     }
     Ok(Some(operation))
+}
+
+fn is_stable_tab_id(value: &str) -> bool {
+    value
+        .strip_prefix('@')
+        .is_some_and(|id| !id.is_empty() && id.bytes().all(|byte| byte.is_ascii_digit()))
 }
 
 fn operation_error(code: &str, identity: &str, message: &str) -> String {
@@ -547,6 +605,25 @@ mod tests {
         ]))
         .unwrap_err();
         assert!(error.starts_with("operation_invalid_arguments[ui.tabs.set-width]"));
+    }
+
+    #[test]
+    fn typed_tab_note_requires_stable_target_and_bounded_utf8() {
+        let operation =
+            validate_operation_args(&args(&["set-tab-note", "-t", "@42", "目录 note"])).unwrap();
+        assert_eq!(operation.map(|operation| operation.id), Some(TABS_SET_NOTE));
+        assert_eq!(operation.unwrap().events, ["tab.note"]);
+
+        assert!(
+            validate_operation_args(&args(&["set-tab-note", "-t", "name", "legacy"]))
+                .unwrap()
+                .is_none(),
+            "mutable title targeting remains legacy rather than claiming a typed identity"
+        );
+        let oversized = "x".repeat(TAB_NOTE_MAX_BYTES + 1);
+        let error =
+            validate_operation_args(&args(&["set-tab-note", "-t", "@42", &oversized])).unwrap_err();
+        assert!(error.starts_with("operation_invalid_arguments[tabs.set-note]"));
     }
 
     #[test]

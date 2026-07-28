@@ -484,8 +484,8 @@ try {
         $apiResult.value.entries |
             Where-Object { -not [string]::IsNullOrWhiteSpace($_.operation_id) }
     )
-    if ($fleetEntries.Count -ne 14 -or
-        @($fleetEntries.operation_id | Sort-Object -Unique).Count -ne 14 -or
+    if ($fleetEntries.Count -ne 15 -or
+        @($fleetEntries.operation_id | Sort-Object -Unique).Count -ne 15 -or
         @($fleetEntries | Where-Object {
             $_.surface_path -ne $_.operation.script_surface -or
             $_.operation.id -ne $_.operation_id
@@ -1703,6 +1703,47 @@ let receipt = fleet.ui.tabs.toggle();
     if ($fleetRestore -ne 'true' -or
         [bool]$fleetRestoredSnapshot.layout.sidebar.visible -ne $fleetBaselineVisible) {
         throw 'Fleet mutation fixture did not restore its isolated UI state'
+    }
+    $activeFleetTab = @($fleetRestoredSnapshot.tabs | Where-Object active)[0]
+    $fleetTabIdLiteral = ConvertTo-Json -Compress ([string]$activeFleetTab.id)
+    $fleetNote = "Script API v2 目录 $PID"
+    $fleetNoteLiteral = ConvertTo-Json -Compress $fleetNote
+    $fleetOriginalNoteLiteral = ConvertTo-Json -Compress ([string]$activeFleetTab.note)
+    $fleetNoteExpression = @"
+let receipt = fleet.tabs.set_note($fleetTabIdLiteral, $fleetNoteLiteral);
+#{
+    operation_id: receipt.operation_id,
+    outcome: receipt.outcome,
+    event_count: receipt.events.len(),
+    event_kind: receipt.events[0].kind,
+    verified: receipt.post_state.verified,
+    reason: receipt.post_state.reason,
+    tab: receipt.post_state.value.id,
+    note: receipt.post_state.value.note
+}
+"@
+    $fleetNoteMutation = Invoke-Script @(
+        'script', 'eval', $fleetNoteExpression,
+        '--profile', 'local', '--json'
+    ) | ConvertFrom-Json
+    if (-not $fleetNoteMutation.ok -or
+        $fleetNoteMutation.value.operation_id -ne 'tabs.set-note' -or
+        $fleetNoteMutation.value.outcome -notin @('committed', 'no_op') -or
+        $fleetNoteMutation.value.event_count -lt 1 -or
+        $fleetNoteMutation.value.event_kind -ne 'tab.note' -or
+        -not $fleetNoteMutation.value.verified -or
+        $fleetNoteMutation.value.tab -ne $activeFleetTab.id -or
+        $fleetNoteMutation.value.note -ne $fleetNote) {
+        throw 'typed tab-note mutation lacked receipt, causal event, or verified post-state'
+    }
+    $fleetNoteRestoreExpression = (
+        "fleet.tabs.set_note($fleetTabIdLiteral, " +
+        "$fleetOriginalNoteLiteral).post_state.verified"
+    )
+    if ((Invoke-Script @(
+        'script', 'eval', $fleetNoteRestoreExpression, '--profile', 'local'
+    )) -ne 'true') {
+        throw 'typed tab-note mutation did not restore the isolated fixture'
     }
     Write-Evidence 'script.fleet-v2'
 

@@ -189,6 +189,7 @@ try {
         'ui.tabs.hide' = 'control'
         'ui.tabs.toggle' = 'control'
         'ui.tabs.set-width' = 'control'
+        'tabs.set-note' = 'control'
         'server.kill' = 'destructive'
     }
     $operationIds = @($operationCatalog.operations.id)
@@ -241,6 +242,15 @@ try {
     )[0]
     if (@($toggleOperation.aliases) -notcontains 'toggle-tabs') {
         throw 'typed operation discovery omitted the legacy toggle-tabs alias'
+    }
+    $noteOperation = @(
+        $operationCatalog.operations |
+            Where-Object id -eq 'tabs.set-note'
+    )[0]
+    if ($noteOperation.script_surface -ne 'fleet.tabs.set_note' -or
+        @($noteOperation.parameters).Count -ne 2 -or
+        @($noteOperation.events) -notcontains 'tab.note') {
+        throw 'tabs.set-note discovery did not expose its typed Fleet contract'
     }
 
     $tabsBaseline = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json

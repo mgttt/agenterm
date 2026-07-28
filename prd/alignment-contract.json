@@ -335,6 +335,14 @@
       "evidence_ids": ["script.fleet-v2"]
     },
     {
+      "id": "fleet.tabs-set-note",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "`fleet.tabs.set_note` targets a stable tab ID and returns a native receipt, causal `tab.note` event and verified tab snapshot",
+      "evidence_ids": ["script.fleet-v2"]
+    },
+    {
       "id": "scripting.fs-lifecycle",
       "kind": "behavior",
       "status": "shipped",

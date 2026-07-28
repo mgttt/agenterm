@@ -1863,6 +1863,23 @@ fn validate_fleet_parameters(
                 ),
             ));
         }
+        if spec.value_type == "string"
+            && value.as_str().is_some_and(|text| {
+                spec.minimum
+                    .is_some_and(|minimum| text.len() < minimum.max(0) as usize)
+                    || spec
+                        .maximum
+                        .is_some_and(|maximum| text.len() > maximum.max(0) as usize)
+            })
+        {
+            return Err(script_broker_error(
+                "broker_invalid_arguments",
+                format!(
+                    "{} parameter {} is outside its UTF-8 byte bounds",
+                    operation.id, spec.name
+                ),
+            ));
+        }
         let integer = value
             .as_i64()
             .or_else(|| value.as_u64().and_then(|value| i64::try_from(value).ok()));
@@ -1930,6 +1947,18 @@ fn fleet_mutation_command(
                 .expect("validated Fleet width")
                 .to_string(),
         ],
+        "tabs.set-note" => vec![
+            "set-tab-note".to_owned(),
+            "-t".to_owned(),
+            parameters["tab"]
+                .as_str()
+                .expect("validated Fleet tab target")
+                .to_owned(),
+            parameters["note"]
+                .as_str()
+                .expect("validated Fleet tab note")
+                .to_owned(),
+        ],
         "server.kill" => {
             let mut arguments = vec!["kill-server".to_owned()];
             if let Some(target) = parameters.get("target").and_then(serde_json::Value::as_str) {
@@ -1956,6 +1985,7 @@ fn script_fleet_mutation(
     budgets: &ScriptBudgets,
     remaining: Duration,
 ) -> Result<serde_json::Value, ScriptBrokerResponse> {
+    let started = Instant::now();
     let response = send_ipc_request_to_timeout(&ipc_address(), command, remaining)
         .map_err(|error| script_broker_error("broker_transport", format!("{error:#}")))?;
     let receipt = response.receipt.as_ref().ok_or_else(|| {
@@ -1980,13 +2010,41 @@ fn script_fleet_mutation(
         }
         return Err(error);
     }
-    let output = if response.output.trim().is_empty() {
+    let mut output = if response.output.trim().is_empty() {
         serde_json::Value::Null
     } else {
         serde_json::from_str(&response.output)
             .map_err(|error| script_broker_error("broker_invalid_response", error.to_string()))?
     };
-    let events = collect_fleet_receipt_events(operation, &receipt_json, budgets, remaining);
+    if operation.id == "tabs.set-note" {
+        let request_remaining = remaining.saturating_sub(started.elapsed());
+        let snapshot_text = script_broker_ipc(vec!["ui-snapshot".to_owned()], request_remaining)?;
+        let snapshot: serde_json::Value = serde_json::from_str(&snapshot_text)
+            .map_err(|error| script_broker_error("broker_invalid_response", error.to_string()))?;
+        let target = parameters["tab"]
+            .as_str()
+            .expect("validated Fleet tab target");
+        output = snapshot
+            .get("tabs")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|tabs| {
+                tabs.iter()
+                    .find(|tab| tab.get("id").and_then(serde_json::Value::as_str) == Some(target))
+            })
+            .cloned()
+            .ok_or_else(|| {
+                script_broker_error(
+                    "broker_post_state_missing",
+                    "mutated tab was absent from the post-state snapshot",
+                )
+            })?;
+    }
+    let events = collect_fleet_receipt_events(
+        operation,
+        &receipt_json,
+        budgets,
+        remaining.saturating_sub(started.elapsed()),
+    );
     let (verified, reason) =
         verify_fleet_post_state(operation.id, parameters, &output, &events, &receipt_json);
     Ok(serde_json::json!({
@@ -2046,6 +2104,9 @@ fn collect_fleet_receipt_events(
     let request_id = receipt
         .get("request_id")
         .and_then(serde_json::Value::as_str);
+    let resolved_tab = receipt
+        .pointer("/resolved/tab_id")
+        .and_then(serde_json::Value::as_u64);
     batch
         .get("events")
         .and_then(serde_json::Value::as_array)
@@ -2067,7 +2128,10 @@ fn collect_fleet_receipt_events(
                     || event
                         .pointer("/payload/operation_id")
                         .and_then(serde_json::Value::as_str)
-                        == Some(operation.id))
+                        == Some(operation.id)
+                    || (operation.id == "tabs.set-note"
+                        && resolved_tab.is_some()
+                        && event.get("tab_id").and_then(serde_json::Value::as_u64) == resolved_tab))
         })
         .cloned()
         .collect()
@@ -2119,6 +2183,16 @@ fn verify_fleet_post_state(
                     .and_then(serde_json::Value::as_i64)
                     == parameters.get("width").and_then(serde_json::Value::as_i64),
             "ui_snapshot",
+        ),
+        "tabs.set-note" => (
+            final_receipt
+                && value.get("id").and_then(serde_json::Value::as_str)
+                    == parameters.get("tab").and_then(serde_json::Value::as_str)
+                && value.get("note").and_then(serde_json::Value::as_str)
+                    == parameters.get("note").and_then(serde_json::Value::as_str)
+                && (!events.is_empty()
+                    || receipt.get("outcome").and_then(serde_json::Value::as_str) == Some("no_op")),
+            "tab_snapshot_and_event",
         ),
         _ => (false, "destructive_post_state_unavailable"),
     }

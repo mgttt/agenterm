@@ -391,10 +391,11 @@ Migration ledger:
   exposure or explicit degraded reason; mutations verify typed receipts,
   correlated public post-state/events, no duplicate side effect, and honest
   close/send/restart failures.
-  - [x] Script API v2 maps all 14 current typed operations exactly once; the
+  - [x] Script API v2 maps all 15 current typed operations exactly once; the
     public isolated-server journey proves observe denial plus a reversible
-    local UI mutation with native request/operation identity, receipt,
-    correlated event, verified snapshot, restoration, and audit attribution.
+    local UI mutation and typed tab-note mutation with native request/operation
+    identity, receipt, correlated event, verified snapshot, restoration, and
+    audit attribution.
     Destructive failure/restart and future operation families remain open.
 - [ ] local mode proves the general runtime loop while regression fixtures keep
   pure deterministic and observe read-only.

@@ -318,11 +318,14 @@ agenterm-script
 │  │     Executes the native destructive workspace operation.
 │  │     [shipped local only; stable; designed 2026-07-28]
 │  ├─ .tabs
-│  │  Typed tab discovery from the public operation catalog.
-│  │  [shipped observation slice; stable; designed 2026-07-28]
-│  │  └─ .list() / .active()
+│  │  Typed tab discovery and mutation from the public operation catalog.
+│  │  [shipped; stable; designed 2026-07-28]
+│  │  ├─ .list() / .active()
 │  │     Reads stable tab objects.
 │  │     [shipped; stable; designed 2026-07-28]
+│  │  └─ .set_note(tab_id, note) -> Receipt
+│  │     Mutates one stable tab and verifies its event and post-state.
+│  │     [shipped local only; stable; designed 2026-07-28]
 │  ├─ .ui.snapshot()
 │  │  Reads the bounded semantic UI snapshot.
 │  │  [shipped; stable; designed 2026-07-28]

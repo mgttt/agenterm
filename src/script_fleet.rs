@@ -181,6 +181,22 @@ pub fn register(engine: &mut Engine) {
         },
     );
     engine.register_fn(
+        "set_note",
+        |service: &mut FleetTabs,
+         tab_id: &str,
+         note: &str|
+         -> Result<ScriptFleetReceipt, Box<EvalAltResult>> {
+            validate_tab_id(tab_id)?;
+            service.0.mutate(
+                "tabs.set-note",
+                json!({
+                    "tab": tab_id,
+                    "note": note,
+                }),
+            )
+        },
+    );
+    engine.register_fn(
         "snapshot",
         |service: &mut FleetUi| -> Result<Dynamic, Box<EvalAltResult>> {
             service.0.query_dynamic("ui.snapshot", json!({}))
