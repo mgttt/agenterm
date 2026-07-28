@@ -207,11 +207,71 @@ try {
         throw 'replaceable UI did not acknowledge the rendered Fleet position'
     }
     Write-Host 'STEP close only the GUI and retain server, PTY, and workspace'
-    if (-not $gui.CloseMainWindow()) {
-        throw 'replaceable UI did not expose a closable HWND'
+    $composerEditor = [AgenTermRemoteUiNativeTest]::GetDlgItem(
+        $gui.MainWindowHandle, 2101
+    )
+    $closeKeep = [AgenTermRemoteUiNativeTest]::GetDlgItem(
+        $gui.MainWindowHandle, 2109
+    )
+    $closeStop = [AgenTermRemoteUiNativeTest]::GetDlgItem(
+        $gui.MainWindowHandle, 2110
+    )
+    $closeCancel = [AgenTermRemoteUiNativeTest]::GetDlgItem(
+        $gui.MainWindowHandle, 2111
+    )
+    $draftMarker = "draft-$($run.RunId)"
+    [AgenTermRemoteUiNativeTest]::SendMessageText(
+        $composerEditor, 0x000C, [IntPtr]::Zero, $draftMarker
+    ) | Out-Null
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero
+    ) | Out-Null
+    if ($gui.HasExited -or
+        -not [AgenTermRemoteUiNativeTest]::IsWindowVisible($closeKeep) -or
+        -not [AgenTermRemoteUiNativeTest]::IsWindowVisible($closeStop) -or
+        -not [AgenTermRemoteUiNativeTest]::IsWindowVisible($closeCancel) -or
+        [AgenTermRemoteUiNativeTest]::IsWindowVisible($composerEditor)) {
+        throw 'WM_CLOSE did not open the non-blocking three-choice close surface'
     }
+    Save-WindowPng -Window $gui.MainWindowHandle `
+        -Path (Join-Path $run.RunDirectory 'close-three-choice.png')
+    if (-not [string]::IsNullOrWhiteSpace($ScreenshotPath)) {
+        $requestedScreenshot = [IO.Path]::GetFullPath($ScreenshotPath)
+        $closeScreenshot = Join-Path `
+            ([IO.Path]::GetDirectoryName($requestedScreenshot)) `
+            "$([IO.Path]::GetFileNameWithoutExtension($requestedScreenshot))-close.png"
+        Save-WindowPng -Window $gui.MainWindowHandle -Path $closeScreenshot
+    }
+    $savedDraft = Invoke-AgenTerm @('show-composer', '-t', $tabId)
+    if (($savedDraft -join "`n").TrimEnd() -ne $draftMarker) {
+        throw 'window-close surface did not preserve the current Composer draft'
+    }
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $closeCancel, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero
+    ) | Out-Null
+    if ($gui.HasExited -or
+        [AgenTermRemoteUiNativeTest]::IsWindowVisible($closeKeep) -or
+        -not [AgenTermRemoteUiNativeTest]::IsWindowVisible($composerEditor)) {
+        throw 'Cancel did not return from the close surface without exiting'
+    }
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero
+    ) | Out-Null
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, 0x0100, [IntPtr]0x1B, [IntPtr]::Zero
+    ) | Out-Null
+    if ($gui.HasExited -or
+        [AgenTermRemoteUiNativeTest]::IsWindowVisible($closeKeep)) {
+        throw 'Esc did not perform the same non-mutating close cancellation'
+    }
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero
+    ) | Out-Null
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, 0x0100, [IntPtr]0x0D, [IntPtr]::Zero
+    ) | Out-Null
     if (-not $gui.WaitForExit(5000)) {
-        throw 'replaceable UI did not exit after bounded WM_CLOSE'
+        throw 'Enter did not invoke the default Keep Server Running choice'
     }
     $leaseAfter = Invoke-AgenTerm @('ui-lease', 'status') |
         ConvertFrom-Json
@@ -508,8 +568,17 @@ try {
         $ScreenshotPath = [IO.Path]::GetFullPath($ScreenshotPath)
     }
     Save-WindowPng -Window $gui.MainWindowHandle -Path $ScreenshotPath
-    if (-not $gui.CloseMainWindow() -or -not $gui.WaitForExit(5000)) {
-        throw 'replacement GUI did not release its lease through bounded close'
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero
+    ) | Out-Null
+    $replacementKeep = [AgenTermRemoteUiNativeTest]::GetDlgItem(
+        $gui.MainWindowHandle, 2109
+    )
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $replacementKeep, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero
+    ) | Out-Null
+    if (-not $gui.WaitForExit(5000)) {
+        throw 'replacement GUI did not release its lease through Keep Server Running'
     }
     $replacementLeaseAfter = Invoke-AgenTerm @('ui-lease', 'status') |
         ConvertFrom-Json
@@ -517,8 +586,54 @@ try {
         throw 'replacement GUI left its interactive lease attached'
     }
 
+    Write-Host 'STEP stop the server through the third close choice'
+    $stopStderr = Join-Path $run.RunDirectory 'remote-ui-stop-stderr.txt'
+    $stopGui = Start-Process -FilePath $GuiExe `
+        -ArgumentList @(
+            '--ui-client', '--no-activate', '--address', $run.Address
+        ) `
+        -RedirectStandardError $stopStderr `
+        -PassThru -WindowStyle Normal
+    Register-SmokeOwnedProcess -Context $run -Id $stopGui.Id `
+        -Kind 'gui' -Address $run.Address
+    $stopReady = $false
+    $stopDeadline = [DateTime]::UtcNow.AddSeconds(10)
+    do {
+        $stopGui.Refresh()
+        $stopLease = Invoke-AgenTerm @('ui-lease', 'status') |
+            ConvertFrom-Json
+        if ($stopGui.MainWindowHandle -ne 0 -and
+            $stopLease.attached -and
+            $stopLease.client_pid -eq $stopGui.Id) {
+            $stopReady = $true
+            break
+        }
+        Start-Sleep -Milliseconds 50
+    } while ([DateTime]::UtcNow -lt $stopDeadline)
+    if (-not $stopReady) {
+        throw 'final replaceable UI did not acquire the lease for stop-server proof'
+    }
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $stopGui.MainWindowHandle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero
+    ) | Out-Null
+    $stopButton = [AgenTermRemoteUiNativeTest]::GetDlgItem(
+        $stopGui.MainWindowHandle, 2110
+    )
+    if (-not [AgenTermRemoteUiNativeTest]::IsWindowVisible($stopButton)) {
+        throw 'Stop Server & Exit choice was not visible'
+    }
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $stopButton, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero
+    ) | Out-Null
+    if (-not $stopGui.WaitForExit(5000)) {
+        throw 'Stop Server & Exit did not close its UI'
+    }
+    if (-not $restartedServer.WaitForExit(5000)) {
+        throw 'Stop Server & Exit left the independent server running'
+    }
+    Sync-SmokeOwnedServers -Context $run
+
     Write-Evidence 'ui.replaceable-client'
-    Invoke-AgenTerm @('shutdown') | Out-Null
     $runSucceeded = $true
 }
 catch {

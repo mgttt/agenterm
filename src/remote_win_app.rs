@@ -65,6 +65,9 @@ const TAB_TITLE_EDIT_ID: usize = 2105;
 const TAB_NOTE_EDIT_ID: usize = 2106;
 const TAB_SAVE_ID: usize = 2107;
 const TAB_CANCEL_ID: usize = 2108;
+const CLOSE_KEEP_ID: usize = 2109;
+const CLOSE_STOP_ID: usize = 2110;
+const CLOSE_CANCEL_ID: usize = 2111;
 const SIDEBAR_ROW_HEIGHT: i32 = 44;
 const TOOLBAR_HEIGHT: i32 = 44;
 const STATUS_HEIGHT: i32 = 26;
@@ -151,6 +154,9 @@ pub(crate) fn run_remote_gui(no_activate: bool) -> Result<()> {
     let tab_note_edit = create_hidden_edit(window, instance, TAB_NOTE_EDIT_ID);
     let tab_save = create_hidden_button(window, instance, TAB_SAVE_ID, "Save");
     let tab_cancel = create_hidden_button(window, instance, TAB_CANCEL_ID, "Cancel");
+    let close_keep = create_hidden_button(window, instance, CLOSE_KEEP_ID, "Keep Server Running");
+    let close_stop = create_hidden_button(window, instance, CLOSE_STOP_ID, "Stop Server && Exit");
+    let close_cancel = create_hidden_button(window, instance, CLOSE_CANCEL_ID, "Cancel");
     if edit.is_null()
         || send.is_null()
         || new_tab.is_null()
@@ -159,6 +165,9 @@ pub(crate) fn run_remote_gui(no_activate: bool) -> Result<()> {
         || tab_note_edit.is_null()
         || tab_save.is_null()
         || tab_cancel.is_null()
+        || close_keep.is_null()
+        || close_stop.is_null()
+        || close_cancel.is_null()
     {
         unsafe { DestroyWindow(window) };
         anyhow::bail!("failed to create replaceable UI controls");
@@ -175,6 +184,9 @@ pub(crate) fn run_remote_gui(no_activate: bool) -> Result<()> {
             tab_note_edit,
             tab_save,
             tab_cancel,
+            close_keep,
+            close_stop,
+            close_cancel,
         },
         client_id,
         client,
@@ -262,6 +274,16 @@ struct RemoteControls {
     tab_note_edit: HWND,
     tab_save: HWND,
     tab_cancel: HWND,
+    close_keep: HWND,
+    close_stop: HWND,
+    close_cancel: HWND,
+}
+
+#[derive(Clone, Copy)]
+enum RemoteCloseChoice {
+    KeepServerRunning,
+    StopServerAndExit,
+    Cancel,
 }
 
 struct RemoteWindowState {
@@ -274,6 +296,9 @@ struct RemoteWindowState {
     tab_note_edit: HWND,
     tab_save: HWND,
     tab_cancel: HWND,
+    close_keep: HWND,
+    close_stop: HWND,
+    close_cancel: HWND,
     client_id: String,
     client: Option<UiClientModel>,
     reconnect_after: Instant,
@@ -287,6 +312,7 @@ struct RemoteWindowState {
     last_active_id: Option<String>,
     tabs_resize_dragging: bool,
     editing_tab_id: Option<String>,
+    window_close_pending: bool,
 }
 
 impl RemoteWindowState {
@@ -305,6 +331,9 @@ impl RemoteWindowState {
             tab_note_edit,
             tab_save,
             tab_cancel,
+            close_keep,
+            close_stop,
+            close_cancel,
         } = controls;
         let config = load_config();
         let (font, cell_width, cell_height) = create_terminal_font(window, &config)?;
@@ -319,6 +348,9 @@ impl RemoteWindowState {
             tab_note_edit,
             tab_save,
             tab_cancel,
+            close_keep,
+            close_stop,
+            close_cancel,
             client_id,
             client: Some(client),
             reconnect_after: Instant::now(),
@@ -332,6 +364,7 @@ impl RemoteWindowState {
             last_active_id,
             tabs_resize_dragging: false,
             editing_tab_id: None,
+            window_close_pending: false,
         })
     }
 
@@ -465,9 +498,17 @@ impl RemoteWindowState {
                 34,
                 1,
             );
-            ShowWindow(self.new_tab, if self.tabs_visible { SW_SHOW } else { 0 });
+            ShowWindow(
+                self.new_tab,
+                if self.tabs_visible && !self.window_close_pending {
+                    SW_SHOW
+                } else {
+                    SW_HIDE
+                },
+            );
         }
         self.layout_tab_editor();
+        self.layout_close_controls();
     }
 
     fn layout_tab_editor(&self) {
@@ -502,7 +543,7 @@ impl RemoteWindowState {
             MoveWindow(self.tab_save, left + edit_width + 4, top, 40, 38, 1);
             MoveWindow(self.tab_cancel, left + edit_width + 46, top, 42, 38, 1);
         }
-        self.show_tab_editor(self.tabs_visible);
+        self.show_tab_editor(self.tabs_visible && !self.window_close_pending);
     }
 
     fn show_tab_editor(&self, visible: bool) {
@@ -513,6 +554,93 @@ impl RemoteWindowState {
             ShowWindow(self.tab_save, command);
             ShowWindow(self.tab_cancel, command);
         }
+    }
+
+    fn close_modal_geometry(&self) -> (RECT, [RECT; 3]) {
+        let mut client: RECT = unsafe { mem::zeroed() };
+        unsafe { GetClientRect(self.window, &mut client) };
+        let width = (client.right - 32).clamp(360, 620);
+        let height = 230;
+        let left = ((client.right - width) / 2).max(0);
+        let top = ((client.bottom - height) / 2).max(0);
+        let modal = RECT {
+            left,
+            top,
+            right: left + width,
+            bottom: top + height,
+        };
+        let gap = 8;
+        let button_left = left + 20;
+        let button_width = ((width - 40 - gap * 2) / 3).max(90);
+        let button_top = top + 158;
+        let button_bottom = button_top + 40;
+        let keep = RECT {
+            left: button_left,
+            top: button_top,
+            right: button_left + button_width,
+            bottom: button_bottom,
+        };
+        let stop = RECT {
+            left: keep.right + gap,
+            top: button_top,
+            right: keep.right + gap + button_width,
+            bottom: button_bottom,
+        };
+        let cancel = RECT {
+            left: stop.right + gap,
+            top: button_top,
+            right: stop.right + gap + button_width,
+            bottom: button_bottom,
+        };
+        (modal, [keep, stop, cancel])
+    }
+
+    fn layout_close_controls(&self) {
+        let (_, buttons) = self.close_modal_geometry();
+        for (control, rect) in [
+            (self.close_keep, buttons[0]),
+            (self.close_stop, buttons[1]),
+            (self.close_cancel, buttons[2]),
+        ] {
+            unsafe {
+                MoveWindow(
+                    control,
+                    rect.left,
+                    rect.top,
+                    rect.right - rect.left,
+                    rect.bottom - rect.top,
+                    1,
+                );
+            }
+        }
+        self.show_close_controls(self.window_close_pending);
+    }
+
+    fn show_close_controls(&self, visible: bool) {
+        let command = if visible { SW_SHOW } else { SW_HIDE };
+        unsafe {
+            ShowWindow(self.close_keep, command);
+            ShowWindow(self.close_stop, command);
+            ShowWindow(self.close_cancel, command);
+        }
+    }
+
+    fn show_workspace_controls(&self, visible: bool) {
+        let command = if visible { SW_SHOW } else { SW_HIDE };
+        unsafe {
+            ShowWindow(self.edit, command);
+            ShowWindow(self.send, command);
+            ShowWindow(self.tabs_button, command);
+            ShowWindow(
+                self.new_tab,
+                if visible && self.tabs_visible {
+                    SW_SHOW
+                } else {
+                    SW_HIDE
+                },
+            );
+        }
+        self.show_tab_editor(visible && self.tabs_visible && self.editing_tab_id.is_some());
     }
 
     fn resize_active_terminal(&mut self) {
@@ -545,6 +673,28 @@ impl RemoteWindowState {
             .and_then(|tab| tab.composer.text.as_deref())
             .unwrap_or_default();
         unsafe { SetWindowTextW(self.edit, wide(text).as_ptr()) };
+    }
+
+    fn sync_composer(&mut self) -> Result<()> {
+        let Some(tab_id) = self
+            .client
+            .as_ref()
+            .and_then(|client| client.snapshot().active_tab_id.clone())
+        else {
+            return Ok(());
+        };
+        let text = window_text(self.edit);
+        self.client
+            .as_mut()
+            .context("UI is disconnected")?
+            .run_control(vec![
+                "set-composer".to_owned(),
+                "-t".to_owned(),
+                tab_id,
+                "--".to_owned(),
+                text,
+            ])?;
+        Ok(())
     }
 
     fn send_composer(&mut self) {
@@ -584,6 +734,10 @@ impl RemoteWindowState {
     }
 
     fn new_tab(&mut self) {
+        if let Err(error) = self.sync_composer() {
+            self.last_error = Some(format!("Composer save failed: {error:#}"));
+            return;
+        }
         let result =
             self.client
                 .as_mut()
@@ -616,6 +770,10 @@ impl RemoteWindowState {
         else {
             return;
         };
+        if let Err(error) = self.sync_composer() {
+            self.last_error = Some(format!("Composer save failed: {error:#}"));
+            return;
+        }
         let result = self
             .client
             .as_mut()
@@ -714,6 +872,59 @@ impl RemoteWindowState {
         self.editing_tab_id = None;
         self.show_tab_editor(false);
         unsafe { SetFocus(self.window) };
+    }
+
+    fn request_window_close(&mut self) {
+        if self.window_close_pending {
+            return;
+        }
+        if let Err(error) = self.sync_composer() {
+            self.last_error = Some(format!("Composer save failed: {error:#}"));
+            return;
+        }
+        self.finish_tab_edit(false);
+        self.window_close_pending = true;
+        self.show_workspace_controls(false);
+        self.layout_close_controls();
+        unsafe { SetFocus(self.window) };
+    }
+
+    fn finish_window_close(&mut self, choice: RemoteCloseChoice) {
+        if !self.window_close_pending {
+            return;
+        }
+        match choice {
+            RemoteCloseChoice::KeepServerRunning => {
+                self.window_close_pending = false;
+                unsafe { DestroyWindow(self.window) };
+            }
+            RemoteCloseChoice::StopServerAndExit => {
+                let result =
+                    self.client
+                        .as_mut()
+                        .context("UI is disconnected")
+                        .and_then(|client| {
+                            client.run_control(vec!["shutdown".to_owned()])?;
+                            Ok(())
+                        });
+                if let Err(error) = result {
+                    self.last_error = Some(format!("Server shutdown failed: {error:#}"));
+                    self.window_close_pending = false;
+                    self.show_close_controls(false);
+                    self.show_workspace_controls(true);
+                    unsafe { SetFocus(self.window) };
+                    return;
+                }
+                self.window_close_pending = false;
+                unsafe { DestroyWindow(self.window) };
+            }
+            RemoteCloseChoice::Cancel => {
+                self.window_close_pending = false;
+                self.show_close_controls(false);
+                self.show_workspace_controls(true);
+                unsafe { SetFocus(self.window) };
+            }
+        }
     }
 
     fn terminal_input(&mut self, bytes: &[u8]) {
@@ -958,7 +1169,49 @@ impl RemoteWindowState {
                 palette.muted_text.colorref()
             },
         );
+        if self.window_close_pending {
+            self.paint_window_close(device, palette);
+        }
         unsafe { EndPaint(self.window, &paint) };
+    }
+
+    fn paint_window_close(&self, device: HDC, palette: &ThemePalette) {
+        let (modal, _) = self.close_modal_geometry();
+        fill(device, &modal, palette.modal.colorref());
+        frame(device, &modal, palette.accent.colorref());
+        draw_text(
+            device,
+            RECT {
+                left: modal.left + 24,
+                top: modal.top + 18,
+                right: modal.right - 24,
+                bottom: modal.top + 50,
+            },
+            "Close AgenTerm window?",
+            palette.text.colorref(),
+        );
+        draw_text(
+            device,
+            RECT {
+                left: modal.left + 24,
+                top: modal.top + 56,
+                right: modal.right - 24,
+                bottom: modal.top + 86,
+            },
+            "Keep the server running to preserve live tabs and processes.",
+            palette.muted_text.colorref(),
+        );
+        draw_text(
+            device,
+            RECT {
+                left: modal.left + 24,
+                top: modal.top + 90,
+                right: modal.right - 24,
+                bottom: modal.top + 120,
+            },
+            "Press Enter to keep it running, or Esc to cancel.",
+            palette.muted_text.colorref(),
+        );
     }
 
     fn paint_tabs(&self, device: HDC, sidebar: RECT, palette: &ThemePalette) {
@@ -1078,6 +1331,9 @@ unsafe extern "system" fn window_proc(
         }
         WM_LBUTTONDOWN => {
             if let Some(state) = state_mut(window) {
+                if state.window_close_pending {
+                    return 0;
+                }
                 let x = (lparam as u32 & 0xffff) as i16 as i32;
                 let y = ((lparam as u32 >> 16) & 0xffff) as i16 as i32;
                 if state.begin_tabs_resize(x, y) {
@@ -1145,19 +1401,31 @@ unsafe extern "system" fn window_proc(
             }
         }
         WM_KEYDOWN => {
-            if let Some(state) = state_mut(window)
-                && unsafe { GetFocus() } == window
-                && state.terminal_key(wparam as u32)
-            {
-                return 0;
+            if let Some(state) = state_mut(window) {
+                if state.window_close_pending {
+                    match wparam as u32 {
+                        0x0d => state.finish_window_close(RemoteCloseChoice::KeepServerRunning),
+                        key if key == u32::from(VK_ESCAPE) => {
+                            state.finish_window_close(RemoteCloseChoice::Cancel)
+                        }
+                        _ => {}
+                    }
+                    return 0;
+                }
+                if unsafe { GetFocus() } == window && state.terminal_key(wparam as u32) {
+                    return 0;
+                }
             }
             unsafe { DefWindowProcW(window, message, wparam, lparam) }
         }
         WM_CHAR => {
-            if let Some(state) = state_mut(window)
-                && unsafe { GetFocus() } == window
-            {
-                state.terminal_char(wparam as u16);
+            if let Some(state) = state_mut(window) {
+                if state.window_close_pending {
+                    return 0;
+                }
+                if unsafe { GetFocus() } == window {
+                    state.terminal_char(wparam as u16);
+                }
             }
             0
         }
@@ -1179,6 +1447,13 @@ unsafe extern "system" fn window_proc(
                     }
                     TAB_SAVE_ID => state.finish_tab_edit(true),
                     TAB_CANCEL_ID => state.finish_tab_edit(false),
+                    CLOSE_KEEP_ID => {
+                        state.finish_window_close(RemoteCloseChoice::KeepServerRunning)
+                    }
+                    CLOSE_STOP_ID => {
+                        state.finish_window_close(RemoteCloseChoice::StopServerAndExit)
+                    }
+                    CLOSE_CANCEL_ID => state.finish_window_close(RemoteCloseChoice::Cancel),
                     _ => {}
                 }
                 unsafe {
@@ -1188,7 +1463,14 @@ unsafe extern "system" fn window_proc(
             0
         }
         WM_CLOSE => {
-            unsafe { DestroyWindow(window) };
+            if let Some(state) = state_mut(window) {
+                state.request_window_close();
+                unsafe {
+                    windows_sys::Win32::Graphics::Gdi::InvalidateRect(window, ptr::null(), 0)
+                };
+            } else {
+                unsafe { DestroyWindow(window) };
+            }
             0
         }
         WM_DESTROY => {

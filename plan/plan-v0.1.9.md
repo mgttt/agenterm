@@ -1639,7 +1639,10 @@ S4  [~] server-owned 单活 interactive UI lease 已交付 attach/idempotent
         PID/HWND 也已通过 server epoch 重启、重新 bootstrap/lease 的
         in-place reconnect 黑盒；client-owned Tabs 显隐/宽度持久化、拖动
         PTY resize、server-owned 滚轮 viewport，以及标签行内 title/note
-        Edit -> Save/Cancel 的稳定 ID 写回也已进入同一公开旅程。
+        Edit -> Save/Cancel 的稳定 ID 写回也已进入同一公开旅程。关闭窗口的
+        Keep Server Running（默认）/ Stop Server & Exit / Cancel 三分支已由
+        非阻塞原生控件交付，并先同步 Composer 草稿；三条路径均有 public
+        GUI/server/lease/orphan 证据。
         普通启动默认切换、旧工作台完整 parity 与 same-server rollback 待补
 S5  same-server GUI upgrade + rollback black-box
 S6  remove combined-process handoff only after parity gates
