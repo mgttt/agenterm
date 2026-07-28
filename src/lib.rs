@@ -38,6 +38,8 @@ mod theme;
 pub mod ui_bridge;
 #[cfg(any(windows, unix))]
 mod ui_client;
+#[cfg(any(windows, unix))]
+mod ui_command;
 mod ui_geometry;
 #[cfg(any(windows, unix))]
 mod ui_interaction;

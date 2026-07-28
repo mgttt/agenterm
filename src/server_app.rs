@@ -28,6 +28,10 @@ use crate::{
         UI_BUILD_IDENTITY_MAX_BYTES, UI_CLIENT_STATE_MAX_BYTES, UI_CLIENT_STATE_SCHEMA_VERSION,
         UI_INTERACTION_SCHEMA_VERSION, UI_LEASE_SCHEMA_VERSION, UiEventPosition, UiLeaseGrant,
     },
+    ui_command::{
+        UI_CLIENT_COMMAND_MAX_ARGUMENTS, UI_CLIENT_COMMAND_MAX_BYTES,
+        UI_CLIENT_COMMAND_SCHEMA_VERSION, UiClientCommandQueue, UiClientCommandResult,
+    },
     ui_interaction::{UiInteraction, parse_ui_interaction},
     ui_lease::{UI_LEASE_TTL_MS, UiLeaseAuthority, UiLeaseError, UiLeaseRecord},
     wake_signal::WakeSignal,
@@ -170,6 +174,7 @@ struct ServerState {
     control_authority: ControlAuthority,
     ui_lease: UiLeaseAuthority,
     ui_client_snapshot: Option<UiClientSnapshotRecord>,
+    ui_client_commands: UiClientCommandQueue,
     wake_signal: Arc<WakeSignal>,
     ipc_receiver: Receiver<IpcEnvelope>,
     shutdown_requested: bool,
@@ -195,6 +200,8 @@ impl ServerState {
             .saturating_add(1);
         let instance_registration =
             register_instance(&crate::ipc_address(), &workspace_path(), &session_name)?;
+        let event_journal = EventJournal::new();
+        let command_identity = event_journal.position().epoch;
         let mut state = Self {
             tabs: Vec::new(),
             collapsed_tabs: restored.collapsed_ids.into_iter().collect(),
@@ -202,10 +209,11 @@ impl ServerState {
             next_id,
             session_name,
             started_at: SystemTime::now(),
-            event_journal: EventJournal::new(),
+            event_journal,
             control_authority: ControlAuthority::default(),
             ui_lease: UiLeaseAuthority::default(),
             ui_client_snapshot: None,
+            ui_client_commands: UiClientCommandQueue::new(command_identity),
             wake_signal,
             ipc_receiver,
             shutdown_requested: false,
@@ -297,6 +305,7 @@ impl ServerState {
             .reap_stale(now_unix_ms, instance_process_is_alive)
         {
             self.ui_client_snapshot = None;
+            self.ui_client_commands.clear_active();
             self.commit_ui_lease_event(&record, "detached", reason);
         }
     }
@@ -413,6 +422,7 @@ impl ServerState {
                     Ok((record, created)) => {
                         if created {
                             self.ui_client_snapshot = None;
+                            self.ui_client_commands.clear_active();
                             self.commit_ui_lease_event(&record, "attached", "requested");
                         }
                         self.ui_lease_grant_json(record)
@@ -466,6 +476,7 @@ impl ServerState {
                 match self.ui_lease.detach(lease_id, client_pid) {
                     Ok(record) => {
                         self.ui_client_snapshot = None;
+                        self.ui_client_commands.clear_active();
                         self.commit_ui_lease_event(&record, "detached", "requested");
                         let position = self.event_journal.position();
                         IpcResponse::success(
@@ -628,6 +639,264 @@ impl ServerState {
         )
     }
 
+    fn execute_ui_client_command(&mut self, args: &[String]) -> IpcResponse {
+        let action = args.get(1).map(String::as_str).unwrap_or_default();
+        if action == "result" {
+            let Some(command_id) = option_value(args, "--command-id") else {
+                return IpcResponse::typed_failure(
+                    "ui-client-command result requires --command-id",
+                    "ui_client_command_invalid_arguments",
+                    "validation",
+                    false,
+                );
+            };
+            let value = match self.ui_client_commands.result(command_id) {
+                UiClientCommandResult::Pending => {
+                    serde_json::json!({"state": "pending", "command_id": command_id})
+                }
+                UiClientCommandResult::InFlight => {
+                    serde_json::json!({"state": "in_flight", "command_id": command_id})
+                }
+                UiClientCommandResult::Complete(response_json) => {
+                    let response = serde_json::from_str::<serde_json::Value>(response_json)
+                        .unwrap_or(serde_json::Value::Null);
+                    serde_json::json!({
+                        "state": "complete",
+                        "command_id": command_id,
+                        "response": response,
+                    })
+                }
+                UiClientCommandResult::Unknown => {
+                    return IpcResponse::typed_failure(
+                        "UI client command is unknown or expired",
+                        "ui_client_command_unknown",
+                        "precondition",
+                        false,
+                    );
+                }
+            };
+            return IpcResponse::success(value.to_string());
+        }
+
+        let Some(lease_id) = option_value(args, "--lease-id") else {
+            return IpcResponse::typed_failure(
+                format!("ui-client-command {action} requires --lease-id"),
+                "ui_client_command_invalid_arguments",
+                "validation",
+                false,
+            );
+        };
+        let Some(client_pid) =
+            option_value(args, "--client-pid").and_then(|value| value.parse::<u32>().ok())
+        else {
+            return IpcResponse::typed_failure(
+                format!("ui-client-command {action} requires numeric --client-pid"),
+                "ui_client_command_invalid_arguments",
+                "validation",
+                false,
+            );
+        };
+        if let Err(error) = self.ui_lease.verify_owner(lease_id, client_pid) {
+            return Self::ui_lease_failure(error);
+        }
+
+        match action {
+            "poll" => IpcResponse::success(
+                serde_json::json!({
+                    "schema_version": UI_CLIENT_COMMAND_SCHEMA_VERSION,
+                    "command": self.ui_client_commands.poll(),
+                })
+                .to_string(),
+            ),
+            "apply" => {
+                let Some(command_id) = option_value(args, "--command-id") else {
+                    return IpcResponse::typed_failure(
+                        "ui-client-command apply requires --command-id",
+                        "ui_client_command_invalid_arguments",
+                        "validation",
+                        false,
+                    );
+                };
+                let Some(command) = self.ui_client_commands.in_flight(command_id).cloned() else {
+                    return IpcResponse::typed_failure(
+                        "UI client command is not in flight",
+                        "ui_client_command_not_in_flight",
+                        "precondition",
+                        false,
+                    );
+                };
+                dispatch_shared_command(self, &command.args).unwrap_or_else(|| {
+                    IpcResponse::typed_failure(
+                        "UI client command has no server-owned apply phase",
+                        "ui_client_command_apply_unsupported",
+                        "unsupported",
+                        false,
+                    )
+                })
+            }
+            "invoke" => {
+                let Some(args_json) = option_value(args, "--args-json") else {
+                    return IpcResponse::typed_failure(
+                        "ui-client-command invoke requires --args-json",
+                        "ui_client_command_invalid_arguments",
+                        "validation",
+                        false,
+                    );
+                };
+                if args_json.len() > UI_CLIENT_COMMAND_MAX_BYTES {
+                    return IpcResponse::typed_failure(
+                        "ui-client-command invoke exceeds its byte budget",
+                        "ui_client_command_invalid_arguments",
+                        "validation",
+                        false,
+                    );
+                }
+                let invoked = match serde_json::from_str::<Vec<String>>(args_json) {
+                    Ok(invoked)
+                        if !invoked.is_empty()
+                            && invoked.len() <= UI_CLIENT_COMMAND_MAX_ARGUMENTS
+                            && invoked.first().is_some_and(|value| value == "ui-action") =>
+                    {
+                        invoked
+                    }
+                    _ => {
+                        return IpcResponse::typed_failure(
+                            "ui-client-command invoke requires bounded ui-action arguments",
+                            "ui_client_command_invalid_arguments",
+                            "validation",
+                            false,
+                        );
+                    }
+                };
+                if let Err(error) = validate_operation_args(&invoked) {
+                    return IpcResponse::typed_failure(
+                        error,
+                        "operation_invalid_arguments",
+                        "validation",
+                        false,
+                    );
+                }
+                dispatch_shared_command(self, &invoked).unwrap_or_else(|| {
+                    IpcResponse::typed_failure(
+                        "UI client command has no server-owned invoke phase",
+                        "ui_client_command_invoke_unsupported",
+                        "unsupported",
+                        false,
+                    )
+                })
+            }
+            "complete" => {
+                let Some(command_id) = option_value(args, "--command-id") else {
+                    return IpcResponse::typed_failure(
+                        "ui-client-command complete requires --command-id",
+                        "ui_client_command_invalid_arguments",
+                        "validation",
+                        false,
+                    );
+                };
+                let Some(response_json) = option_value(args, "--response-json") else {
+                    return IpcResponse::typed_failure(
+                        "ui-client-command complete requires --response-json",
+                        "ui_client_command_invalid_arguments",
+                        "validation",
+                        false,
+                    );
+                };
+                let response = match self
+                    .ui_client_commands
+                    .complete(command_id, response_json.to_owned())
+                {
+                    Ok(response) => response,
+                    Err(error) => {
+                        return IpcResponse::typed_failure(
+                            error,
+                            "ui_client_command_completion_invalid",
+                            "validation",
+                            false,
+                        );
+                    }
+                };
+                if response.ok
+                    && serde_json::from_str::<serde_json::Value>(&response.output)
+                        .ok()
+                        .and_then(|value| {
+                            (value["projection"].as_str() == Some("replaceable_ui_client"))
+                                .then_some(value)
+                        })
+                        .is_some()
+                {
+                    let position = self.event_journal.position();
+                    if validate_ui_client_snapshot(
+                        &response.output,
+                        client_pid,
+                        std::process::id(),
+                        &position.epoch,
+                        position.sequence,
+                    )
+                    .is_ok()
+                    {
+                        self.ui_client_snapshot = Some(UiClientSnapshotRecord {
+                            lease_id: lease_id.to_owned(),
+                            client_pid,
+                            json: response.output.clone(),
+                        });
+                    }
+                }
+                IpcResponse::success(
+                    serde_json::json!({
+                        "schema_version": UI_CLIENT_COMMAND_SCHEMA_VERSION,
+                        "completed": true,
+                        "command_id": command_id,
+                    })
+                    .to_string(),
+                )
+            }
+            _ => IpcResponse::typed_failure(
+                "ui-client-command requires poll, apply, invoke, complete, or result",
+                "ui_client_command_invalid_arguments",
+                "validation",
+                false,
+            ),
+        }
+    }
+
+    fn enqueue_ui_client_command(&mut self, args: &[String]) -> IpcResponse {
+        self.reap_stale_ui_lease(crate::client::unix_time_ms());
+        if self.ui_lease.active().is_none() {
+            return IpcResponse::typed_failure(
+                "no interactive GUI client is attached to this server",
+                "ui_client_unavailable",
+                "availability",
+                true,
+            );
+        }
+        let command_id = match self.ui_client_commands.enqueue(args.to_vec()) {
+            Ok(command_id) => command_id,
+            Err(error) => {
+                return IpcResponse::typed_failure(
+                    error,
+                    "ui_client_command_queue_full",
+                    "capacity",
+                    true,
+                );
+            }
+        };
+        let position = self.event_journal.position();
+        IpcResponse::success(
+            serde_json::json!({
+                "schema_version": UI_CLIENT_COMMAND_SCHEMA_VERSION,
+                "relay": "ui_client",
+                "queued": true,
+                "command_id": command_id,
+                "position": {
+                    "server_epoch": position.epoch,
+                    "sequence": position.sequence,
+                },
+            })
+            .to_string(),
+        )
+    }
+
     fn execute_ui_interaction_command(&mut self, args: &[String]) -> IpcResponse {
         let interaction = match parse_ui_interaction(args) {
             Ok(interaction) => interaction,
@@ -748,6 +1017,28 @@ impl ServerState {
             .is_some_and(|command| command == "ui-client-state")
         {
             return self.execute_ui_client_state_command(args);
+        }
+        if args
+            .first()
+            .is_some_and(|command| command == "ui-client-command")
+        {
+            return self.execute_ui_client_command(args);
+        }
+        if args.first().is_some_and(|command| {
+            matches!(
+                command.as_str(),
+                "ui-action"
+                    | "focus"
+                    | "get-settings"
+                    | "set-setting"
+                    | "screenshot"
+                    | "screenshot-pane"
+                    | "screenshot-tab"
+                    | "__focus"
+                    | "__show-no-activate"
+            )
+        }) {
+            return self.enqueue_ui_client_command(args);
         }
         if args.first().is_some_and(|command| command == "ui-interact") {
             return self.execute_ui_interaction_command(args);

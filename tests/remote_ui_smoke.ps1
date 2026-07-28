@@ -197,6 +197,52 @@ try {
         throw 'public UI snapshot did not expose the replaceable GUI projection'
     }
 
+    Write-Host 'STEP relay typed UI actions to the exact live GUI lease'
+    $hiddenSnapshot = Invoke-AgenTerm @('ui-action', 'tabs-hide') |
+        ConvertFrom-Json
+    if ($hiddenSnapshot.projection -ne 'replaceable_ui_client' -or
+        $hiddenSnapshot.client_pid -ne $gui.Id -or
+        $hiddenSnapshot.layout.sidebar.visible -ne $false -or
+        $hiddenSnapshot.layout.status_bar.tabs_recovery.width -le 0) {
+        throw 'relayed Tabs hide did not return the completed GUI snapshot'
+    }
+    $shownSnapshot = Invoke-AgenTerm @('ui-action', 'tabs-show') |
+        ConvertFrom-Json
+    if ($shownSnapshot.layout.sidebar.visible -ne $true -or
+        $shownSnapshot.client_pid -ne $gui.Id) {
+        throw 'relayed Tabs show did not execute in the lease-owned GUI'
+    }
+    $settingsSnapshot = Invoke-AgenTerm @('ui-action', 'open-settings') |
+        ConvertFrom-Json
+    if ($settingsSnapshot.modal.kind -ne 'settings') {
+        throw 'relayed Settings action did not expose its client-owned modal'
+    }
+    $cancelledSnapshot = Invoke-AgenTerm @('ui-action', 'cancel') |
+        ConvertFrom-Json
+    if ($null -ne $cancelledSnapshot.modal) {
+        throw 'relayed Cancel did not close the client-owned Settings modal'
+    }
+    $composerSnapshot = Invoke-AgenTerm @('focus', 'composer') |
+        ConvertFrom-Json
+    if ($composerSnapshot.focus.surface -ne 'composer') {
+        throw 'relayed focus did not reach the native Composer'
+    }
+    Invoke-AgenTerm @('focus', 'terminal') | Out-Null
+    $relayedSettings = Invoke-AgenTerm @('get-settings') | ConvertFrom-Json
+    if ($relayedSettings.terminal_font_size -lt 8 -or
+        $relayedSettings.recommended_cjk_font -ne 'Sarasa Fixed SC') {
+        throw 'relayed Settings discovery did not come from the GUI client'
+    }
+    $relayedPng = Join-Path $run.RunDirectory 'relayed-window.png'
+    $returnedPng = (Invoke-AgenTerm @(
+        'screenshot', '-o', $relayedPng
+    )).Trim()
+    if ([IO.Path]::GetFullPath($returnedPng) -ne
+            [IO.Path]::GetFullPath($relayedPng) -or
+        (Get-Item -LiteralPath $relayedPng).Length -lt 1000) {
+        throw 'relayed screenshot did not return a valid GUI-owned PNG'
+    }
+
     Write-Host 'STEP prove GUI and server are different process roles'
     $bootstrap = Invoke-AgenTerm @('ui-bootstrap') | ConvertFrom-Json
     $protocol = Invoke-AgenTerm @('protocol-info', '--running') |

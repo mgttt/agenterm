@@ -36,11 +36,12 @@ use windows_sys::Win32::{
             CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CheckMenuItem, CreateWindowExW, DefWindowProcW,
             DestroyWindow, DispatchMessageW, ES_AUTOVSCROLL, ES_MULTILINE, ES_WANTRETURN,
             EnableMenuItem, GWLP_USERDATA, GetClientRect, GetCursorPos, GetForegroundWindow,
-            GetMessageW, GetSystemMenu, GetWindowLongPtrW, GetWindowTextLengthW, GetWindowTextW,
-            IDC_ARROW, IDC_SIZEWE, InsertMenuW, IsIconic, IsWindowVisible, IsZoomed, LoadCursorW,
-            LoadIconW, MF_BYCOMMAND, MF_CHECKED, MF_ENABLED, MF_GRAYED, MF_SEPARATOR, MF_STRING,
-            MF_UNCHECKED, MSG, MoveWindow, PostQuitMessage, RegisterClassW, SC_CLOSE, SW_HIDE,
-            SW_SHOW, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+            GetMessageW, GetSystemMenu, GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW,
+            GetWindowTextW, IDC_ARROW, IDC_SIZEWE, InsertMenuW, IsIconic, IsWindowVisible,
+            IsZoomed, LoadCursorW, LoadIconW, MF_BYCOMMAND, MF_CHECKED, MF_ENABLED, MF_GRAYED,
+            MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MSG, MoveWindow, PostQuitMessage,
+            RegisterClassW, SC_CLOSE, SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW,
+            SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
             SWP_SHOWWINDOW, SendMessageW, SetCursor, SetForegroundWindow, SetTimer,
             SetWindowLongPtrW, SetWindowPos, SetWindowTextW, ShowWindow, TranslateMessage,
             WM_CAPTURECHANGED, WM_CHAR, WM_CLOSE, WM_COMMAND, WM_COPY, WM_CREATE, WM_DESTROY,
@@ -54,8 +55,9 @@ use windows_sys::Win32::{
 
 use crate::{
     client::{ipc_address, ipc_socket_addr},
-    commands::tmux_key_bytes,
-    settings::{AppConfig, clamp_tabs_width, load_config, save_config},
+    commands::{option_value, screenshot_output_path, tmux_key_bytes},
+    protocol::IpcResponse,
+    settings::{AppConfig, clamp_tabs_width, config_path, load_config, save_config},
     tab_tree::{TabTreeNode, tree_rows},
     theme::{Rgb, ThemeId, ThemePalette},
     ui_bridge::{
@@ -63,6 +65,7 @@ use crate::{
         UiTabBootstrap,
     },
     ui_client::{UiClientModel, tab_by_id},
+    ui_command::UiClientCommand,
     ui_geometry::{
         PixelRect, TERMINAL_SCROLLBAR_WIDTH, TerminalScrollbarGeometry, TreeRowActionDensity,
         TreeRowMode, WorkspaceLayout, WorkspaceLayoutInput, scrollback_for_thumb_top,
@@ -597,8 +600,16 @@ impl RemoteWindowState {
                     self.load_composer();
                 }
                 self.last_error = None;
+                let command_changed = match self.process_client_command() {
+                    Ok(changed) => changed,
+                    Err(error) => {
+                        self.last_error =
+                            Some(format!("UI client command relay failed: {error:#}"));
+                        true
+                    }
+                };
                 match self.publish_ui_snapshot() {
-                    Ok(published) => changed || published,
+                    Ok(published) => changed || command_changed || published,
                     Err(error) => {
                         self.last_error =
                             Some(format!("UI snapshot publication failed: {error:#}"));
@@ -641,6 +652,442 @@ impl RemoteWindowState {
                 true
             }
         }
+    }
+
+    fn process_client_command(&mut self) -> Result<bool> {
+        let Some(command) = self
+            .client
+            .as_mut()
+            .context("replaceable UI is disconnected")?
+            .poll_client_command()?
+        else {
+            return Ok(false);
+        };
+        let outcome = self.execute_client_command(&command);
+        let response = match outcome {
+            Ok(Some(output)) => IpcResponse::success(output),
+            Ok(None) => IpcResponse::success(self.ui_snapshot_json()?),
+            Err(error) => {
+                let error = format!("{error:#}");
+                self.last_error = Some(error.clone());
+                IpcResponse::typed_failure(error, "ui_client_command_failed", "command", false)
+            }
+        };
+        self.client
+            .as_mut()
+            .context("replaceable UI is disconnected")?
+            .complete_client_command(&command.command_id, &response)?;
+        if response.ok
+            && serde_json::from_str::<serde_json::Value>(&response.output)
+                .ok()
+                .is_some_and(|value| value["projection"].as_str() == Some("replaceable_ui_client"))
+        {
+            self.last_published_snapshot = Some(response.output);
+        }
+        Ok(true)
+    }
+
+    fn execute_client_command(&mut self, command: &UiClientCommand) -> Result<Option<String>> {
+        if command.args.first().map(String::as_str) != Some("ui-action") {
+            return self.execute_client_local_command(command);
+        }
+        let action = command
+            .args
+            .get(1)
+            .map(String::as_str)
+            .context("ui-action requires an action")?;
+        match action {
+            "new-tab" => {
+                self.sync_composer()?;
+                self.apply_client_command(&command.command_id)?;
+                self.last_active_id = self
+                    .client
+                    .as_ref()
+                    .and_then(|client| client.snapshot().active_tab_id.clone());
+                self.load_composer();
+                self.resize_active_terminal();
+            }
+            "new-child" => {
+                self.sync_composer()?;
+                self.apply_client_command(&command.command_id)?;
+                self.last_active_id = self
+                    .client
+                    .as_ref()
+                    .and_then(|client| client.snapshot().active_tab_id.clone());
+                self.load_composer();
+                self.resize_active_terminal();
+                if let Some(tab) = self.active_tab().cloned() {
+                    self.begin_tab_edit(tab);
+                }
+            }
+            "select-tab" => {
+                self.sync_composer()?;
+                self.apply_client_command(&command.command_id)?;
+                self.focus_surface = RemoteFocusSurface::Terminal;
+                self.last_active_id = self
+                    .client
+                    .as_ref()
+                    .and_then(|client| client.snapshot().active_tab_id.clone());
+                self.load_composer();
+                self.resize_active_terminal();
+                unsafe { SetFocus(self.window) };
+            }
+            "toggle-tree" => {
+                self.apply_client_command(&command.command_id)?;
+                self.reconcile_tab_editor();
+            }
+            "composer-send" => {
+                self.sync_composer()?;
+                self.apply_client_command(&command.command_id)?;
+                unsafe { SetWindowTextW(self.edit, wide("").as_ptr()) };
+            }
+            "tabs-show" => self.set_tabs_visible(true),
+            "tabs-hide" => self.set_tabs_visible(false),
+            "tabs-toggle" | "toggle-tabs" => self.toggle_tabs(),
+            "tabs-set-width" => {
+                let width = option_value(&command.args, "--width")
+                    .and_then(|value| value.parse::<i32>().ok())
+                    .context("tabs-set-width requires numeric --width")?;
+                self.config.tabs_width = clamp_tabs_width(width);
+                save_config(&self.config).context("could not save Tabs width")?;
+                self.layout();
+                self.resize_active_terminal();
+            }
+            "edit-tab" => {
+                let tab = self.command_target_tab(&command.args)?;
+                self.begin_tab_edit(tab);
+            }
+            "tab-editor-save" => {
+                if self.editing_tab_id.is_none() {
+                    anyhow::bail!("no tab editor is open");
+                }
+                self.finish_tab_edit(true);
+                if self.editing_tab_id.is_some() {
+                    anyhow::bail!(
+                        "{}",
+                        self.last_error
+                            .clone()
+                            .unwrap_or_else(|| "tab edit could not be saved".to_owned())
+                    );
+                }
+            }
+            "tab-editor-cancel" => {
+                if self.editing_tab_id.is_none() {
+                    anyhow::bail!("no tab editor is open");
+                }
+                self.finish_tab_edit(false);
+            }
+            "open-settings" => {
+                self.open_settings();
+                if !self.settings_open {
+                    anyhow::bail!("Settings could not be opened");
+                }
+            }
+            "settings-apply" => {
+                if !self.settings_open {
+                    anyhow::bail!("Settings is not open");
+                }
+                self.finish_settings(true);
+                if self.settings_open {
+                    anyhow::bail!(
+                        "{}",
+                        self.last_error
+                            .clone()
+                            .unwrap_or_else(|| "Settings could not be applied".to_owned())
+                    );
+                }
+            }
+            "open-cwd-editor" => {
+                if let Some(target) = option_value(&command.args, "-t")
+                    && self.active_tab().is_none_or(|tab| tab.id != target)
+                {
+                    self.client
+                        .as_mut()
+                        .context("UI is disconnected")?
+                        .select_tab(target)?;
+                    self.client
+                        .as_mut()
+                        .context("UI is disconnected")?
+                        .poll_deltas()?;
+                }
+                self.open_cwd_editor();
+                if self.cwd_edit_tab_id.is_none() {
+                    anyhow::bail!("CWD editor could not be opened");
+                }
+            }
+            "cwd-prepare" | "cwd-prepare-append" | "cwd-prepare-replace" | "cwd-send-now" => {
+                let mut direct = vec![action.to_owned()];
+                direct.extend(command.args.iter().skip(2).cloned());
+                self.client
+                    .as_mut()
+                    .context("UI is disconnected")?
+                    .run_control(direct)?;
+                self.client
+                    .as_mut()
+                    .context("UI is disconnected")?
+                    .poll_deltas()?;
+            }
+            "close-tab" => {
+                let tab = self.command_target_tab(&command.args)?;
+                if tab.dead {
+                    if !self.close_tab_now(tab.id) {
+                        anyhow::bail!("dead tab could not be closed");
+                    }
+                } else {
+                    self.sync_composer()?;
+                    self.finish_tab_edit(false);
+                    self.pending_close_tab_id = Some(tab.id);
+                    self.show_workspace_controls(false);
+                    self.layout_tab_close_controls();
+                    unsafe { SetFocus(self.window) };
+                }
+            }
+            "confirm" => {
+                if self.pending_close_tab_id.is_none() {
+                    anyhow::bail!("no confirmation is pending");
+                }
+                self.finish_close_tab(true);
+                if self.pending_close_tab_id.is_some() {
+                    anyhow::bail!("tab close could not be confirmed");
+                }
+            }
+            "cancel" => {
+                if self.window_close_pending {
+                    self.finish_window_close(RemoteCloseChoice::Cancel);
+                } else if self.settings_open {
+                    self.finish_settings(false);
+                } else if self.cwd_edit_tab_id.is_some() {
+                    self.finish_cwd_editor(false);
+                } else if self.pending_close_tab_id.is_some() {
+                    self.finish_close_tab(false);
+                } else if self.editing_tab_id.is_some() {
+                    self.finish_tab_edit(false);
+                } else {
+                    anyhow::bail!("no modal is pending");
+                }
+            }
+            "copy-selection" => self.copy_terminal_selection()?,
+            "close-window" => {
+                self.request_window_close();
+                if !self.window_close_pending {
+                    anyhow::bail!("window-close confirmation could not be opened");
+                }
+            }
+            "window-minimize" => unsafe {
+                ShowWindow(self.window, SW_MINIMIZE);
+            },
+            "window-maximize" => unsafe {
+                ShowWindow(self.window, SW_MAXIMIZE);
+            },
+            "window-restore" => unsafe {
+                ShowWindow(self.window, SW_RESTORE);
+            },
+            "window-resize" => {
+                let width = option_value(&command.args, "--width")
+                    .and_then(|value| value.parse::<i32>().ok())
+                    .filter(|value| *value >= 320)
+                    .context("window-resize requires --width of at least 320")?;
+                let height = option_value(&command.args, "--height")
+                    .and_then(|value| value.parse::<i32>().ok())
+                    .filter(|value| *value >= 240)
+                    .context("window-resize requires --height of at least 240")?;
+                let mut current_client: RECT = unsafe { mem::zeroed() };
+                let mut outer: RECT = unsafe { mem::zeroed() };
+                unsafe {
+                    GetClientRect(self.window, &mut current_client);
+                    GetWindowRect(self.window, &mut outer);
+                    MoveWindow(
+                        self.window,
+                        outer.left,
+                        outer.top,
+                        width + (outer.right - outer.left) - current_client.right,
+                        height + (outer.bottom - outer.top) - current_client.bottom,
+                        1,
+                    );
+                }
+            }
+            "keep-server-running" | "stop-server-and-exit" => {
+                anyhow::bail!("{action} relay is not available until deferred close completion")
+            }
+            action if action.starts_with("proxy-") || action == "open-proxy-editor" => {
+                anyhow::bail!("proxy workbench controls are archived")
+            }
+            other => anyhow::bail!("unknown UI action: {other}"),
+        }
+        unsafe { windows_sys::Win32::Graphics::Gdi::InvalidateRect(self.window, ptr::null(), 0) };
+        Ok(None)
+    }
+
+    fn execute_client_local_command(
+        &mut self,
+        command: &UiClientCommand,
+    ) -> Result<Option<String>> {
+        let name = command
+            .args
+            .first()
+            .map(String::as_str)
+            .context("relayed UI command is empty")?;
+        let mut output = None;
+        match name {
+            "focus" => {
+                self.apply_client_command(&command.command_id)?;
+                let surface = command
+                    .args
+                    .get(1)
+                    .map(String::as_str)
+                    .unwrap_or("terminal");
+                let target = match surface {
+                    "terminal" => RemoteFocusSurface::Terminal,
+                    "composer" => RemoteFocusSurface::Composer,
+                    "tabs" | "sidebar" => RemoteFocusSurface::Tabs,
+                    other => anyhow::bail!("unknown focus surface: {other}"),
+                };
+                if !self.set_focus_surface(target) {
+                    anyhow::bail!("focus surface is unavailable: {surface}");
+                }
+            }
+            "get-settings" => {
+                output = Some(
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "terminal_font_family": self.config.terminal_font_family,
+                        "terminal_font_size": self.config.terminal_font_size,
+                        "resolved_font_family": self.config.terminal_font_family,
+                        "config_path": config_path(),
+                        "recommended_cjk_font": "Sarasa Fixed SC",
+                        "recommended_font_license": "SIL Open Font License 1.1",
+                    }))
+                    .context("could not encode Settings")?,
+                );
+            }
+            "set-setting" => {
+                let key = command
+                    .args
+                    .get(1)
+                    .map(String::as_str)
+                    .context("set-setting requires a key")?;
+                let value = command.args.get(2..).unwrap_or_default().join(" ");
+                let mut next = self.config.clone();
+                match key {
+                    "terminal.font-family" if !value.trim().is_empty() => {
+                        next.terminal_font_family = value;
+                    }
+                    "terminal.font-family" => anyhow::bail!("font family cannot be empty"),
+                    "terminal.font-size" => {
+                        let size = value
+                            .parse::<u16>()
+                            .context("font size must be a number from 8 to 36")?;
+                        if !(8..=36).contains(&size) {
+                            anyhow::bail!("font size must be from 8 to 36");
+                        }
+                        next.terminal_font_size = size;
+                    }
+                    other => anyhow::bail!("unknown setting: {other}"),
+                }
+                let (font, cell_width, cell_height) = create_terminal_font(self.window, &next)?;
+                if let Err(error) = save_config(&next) {
+                    unsafe { DeleteObject(font as HGDIOBJ) };
+                    return Err(error).context("could not save settings");
+                }
+                unsafe { DeleteObject(self.font as HGDIOBJ) };
+                self.font = font;
+                self.cell_width = cell_width;
+                self.cell_height = cell_height;
+                self.config = next;
+                self.layout();
+                self.resize_active_terminal();
+            }
+            "screenshot" => {
+                self.paint();
+                let path = screenshot_output_path(&command.args, "agenterm-window");
+                crate::win_app::save_window_png(self.window, &path, None)?;
+                output = Some(path.display().to_string());
+            }
+            "screenshot-pane" | "screenshot-tab" => {
+                if let Some(target) = option_value(&command.args, "-t") {
+                    let stable = self.resolve_stable_tab_target(target)?;
+                    if self.active_tab().is_none_or(|tab| tab.id != stable) {
+                        self.client
+                            .as_mut()
+                            .context("UI is disconnected")?
+                            .select_tab(&stable)?;
+                        self.client
+                            .as_mut()
+                            .context("UI is disconnected")?
+                            .poll_deltas()?;
+                        self.load_composer();
+                        self.resize_active_terminal();
+                    }
+                }
+                self.paint();
+                let path = screenshot_output_path(&command.args, "agenterm-pane");
+                crate::win_app::save_window_png(
+                    self.window,
+                    &path,
+                    Some(self.workspace_geometry().terminal),
+                )?;
+                output = Some(path.display().to_string());
+            }
+            "__focus" => unsafe {
+                ShowWindow(self.window, SW_RESTORE);
+                SetForegroundWindow(self.window);
+                SetFocus(self.window);
+            },
+            "__show-no-activate" => show_without_activation(self.window),
+            other => anyhow::bail!("unsupported relayed UI command: {other}"),
+        }
+        unsafe { windows_sys::Win32::Graphics::Gdi::InvalidateRect(self.window, ptr::null(), 0) };
+        Ok(output)
+    }
+
+    fn resolve_stable_tab_target(&mut self, target: &str) -> Result<String> {
+        if target.starts_with('@') {
+            return Ok(target.to_owned());
+        }
+        let response = self
+            .client
+            .as_mut()
+            .context("UI is disconnected")?
+            .run_control(vec![
+                "display-message".to_owned(),
+                "-p".to_owned(),
+                "-t".to_owned(),
+                target.to_owned(),
+                "#{window_id}".to_owned(),
+            ])?;
+        let stable = response.output.trim();
+        if !stable.starts_with('@') {
+            anyhow::bail!("can't resolve tab target: {target}");
+        }
+        Ok(stable.to_owned())
+    }
+
+    fn apply_client_command(&mut self, command_id: &str) -> Result<()> {
+        self.client
+            .as_mut()
+            .context("UI is disconnected")?
+            .apply_client_command(command_id)?;
+        self.client
+            .as_mut()
+            .context("UI is disconnected")?
+            .poll_deltas()?;
+        Ok(())
+    }
+
+    fn command_target_tab(&self, args: &[String]) -> Result<UiTabBootstrap> {
+        let client = self
+            .client
+            .as_ref()
+            .context("replaceable UI is disconnected")?;
+        let target = option_value(args, "-t")
+            .or(client.snapshot().active_tab_id.as_deref())
+            .context("no tab is active")?;
+        client
+            .snapshot()
+            .tabs
+            .iter()
+            .find(|tab| tab.id == target)
+            .cloned()
+            .with_context(|| format!("can't find stable tab: {target}"))
     }
 
     fn active_tab(&self) -> Option<&UiTabBootstrap> {
@@ -924,10 +1371,22 @@ impl RemoteWindowState {
             })
         };
         let (copy_enabled, paste_enabled) = self.system_menu_state();
-        let focus = match self.current_focus_surface() {
-            RemoteFocusSurface::Terminal => "terminal",
-            RemoteFocusSurface::Composer => "composer",
-            RemoteFocusSurface::Tabs => "tabs",
+        let focus = if self.window_close_pending {
+            "window-close"
+        } else if self.settings_open {
+            "settings"
+        } else if self.cwd_edit_tab_id.is_some() {
+            "cwd-editor"
+        } else if self.pending_close_tab_id.is_some() {
+            "tab-close"
+        } else if self.editing_tab_id.is_some() {
+            "tab-editor"
+        } else {
+            match self.current_focus_surface() {
+                RemoteFocusSurface::Terminal => "terminal",
+                RemoteFocusSurface::Composer => "composer",
+                RemoteFocusSurface::Tabs => "tabs",
+            }
         };
         serde_json::to_string_pretty(&serde_json::json!({
             "schema_version": crate::ui_bridge::UI_CLIENT_STATE_SCHEMA_VERSION,
@@ -1873,7 +2332,7 @@ impl RemoteWindowState {
             .as_mut()
             .context("UI is disconnected")
             .and_then(|client| {
-                client.run_control(vec![
+                client.invoke_client_action(vec![
                     "ui-action".to_owned(),
                     "toggle-tree".to_owned(),
                     "-t".to_owned(),
@@ -1905,7 +2364,7 @@ impl RemoteWindowState {
             .as_mut()
             .context("UI is disconnected")
             .and_then(|client| {
-                client.run_control(vec![
+                client.invoke_client_action(vec![
                     "ui-action".to_owned(),
                     "new-child".to_owned(),
                     "-t".to_owned(),

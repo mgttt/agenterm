@@ -518,6 +518,51 @@ fn send_control_request(args: Vec<String>, control: ControlRequest) -> Result<Ip
     send_ipc_request_to_with_timeout(&ipc_address(), args, Some(control), IPC_TIMEOUT)
 }
 
+fn await_ui_client_relay(response: IpcResponse, timeout: Duration) -> Result<IpcResponse> {
+    if !response.ok {
+        return Ok(response);
+    }
+    let Ok(queued) = serde_json::from_str::<serde_json::Value>(&response.output) else {
+        return Ok(response);
+    };
+    if queued["relay"].as_str() != Some("ui_client") || queued["queued"].as_bool() != Some(true) {
+        return Ok(response);
+    }
+    let command_id = queued["command_id"]
+        .as_str()
+        .context("UI client relay omitted command_id")?
+        .to_owned();
+    let deadline = Instant::now() + timeout;
+    loop {
+        let result = send_ipc_request(vec![
+            "ui-client-command".to_owned(),
+            "result".to_owned(),
+            "--command-id".to_owned(),
+            command_id.clone(),
+        ])?;
+        if !result.ok {
+            anyhow::bail!(
+                "{} [{}:{}]",
+                result.error,
+                result.error_category,
+                result.error_code
+            );
+        }
+        let value: serde_json::Value =
+            serde_json::from_str(&result.output).context("invalid UI client relay result")?;
+        if value["state"].as_str() == Some("complete") {
+            return serde_json::from_value(value["response"].clone())
+                .context("invalid completed UI client response");
+        }
+        if Instant::now() >= deadline {
+            anyhow::bail!("UI client command {command_id} timed out");
+        }
+        thread::sleep(
+            Duration::from_millis(20).min(deadline.saturating_duration_since(Instant::now())),
+        );
+    }
+}
+
 fn send_ipc_request_to_timeout(
     address: &str,
     args: Vec<String>,
@@ -832,6 +877,12 @@ fn run_cli(arguments: Vec<String>, control_options: CliControlOptions) -> i32 {
             | "attach"
             | "start-server"
     );
+    let relay_timeout = Duration::from_millis(
+        control_options
+            .deadline_ms
+            .unwrap_or(5_000)
+            .clamp(1, 60_000),
+    );
     let control = match build_control_request(
         &arguments,
         control_options.request_id,
@@ -880,6 +931,7 @@ fn run_cli(arguments: Vec<String>, control_options: CliControlOptions) -> i32 {
             }
         }
     }
+    response = response.and_then(|response| await_ui_client_relay(response, relay_timeout));
     match response {
         Ok(response) if response.ok => {
             if control_options.receipt_json {

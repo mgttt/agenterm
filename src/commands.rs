@@ -69,6 +69,7 @@ pub(crate) const COMMAND_CATALOG: &[CommandIdentity] = &[
     command("ui-action", &[]),
     command("ui-bootstrap", &[]),
     command("ui-client-state", &[]),
+    command("ui-client-command", &[]),
     command("ui-deltas", &[]),
     command("ui-hello", &[]),
     command("ui-interact", &[]),
@@ -679,6 +680,20 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
             "agenterm-cli ui-client-state publish --lease-id ID \
              --client-pid PID --snapshot-json JSON",
             &["--lease-id", "--client-pid", "--snapshot-json"][..],
+            &[][..],
+            false,
+        ),
+        "ui-client-command" => (
+            "agenterm-cli ui-client-command poll|apply|complete|result \
+             [--lease-id ID --client-pid PID] [--command-id ID] \
+             [--response-json JSON]",
+            &[
+                "--lease-id",
+                "--client-pid",
+                "--command-id",
+                "--response-json",
+                "--args-json",
+            ][..],
             &[][..],
             false,
         ),

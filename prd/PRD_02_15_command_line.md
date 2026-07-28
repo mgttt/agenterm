@@ -78,6 +78,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       --snapshot-json JSON` is the bounded internal publication arm used by
       the exact interactive lease owner; it preserves public `ui-snapshot`
       observation while keeping client-local UI facts out of server authority
+    - [~] `ui-client-command poll|apply|invoke|complete|result` is the internal
+      exact-lease command/result relay behind synchronous public GUI commands;
+      its bounded queue and final-response path are shipped, while
+      GUI-destroying close choices still require deferred completion
     - `workspace-info`, `save-workspace`, `shutdown`
     - [~] `server-list` and `server-kill` establish a `server-*` lifecycle
       namespace; explore health, start, and graceful-shutdown helpers only

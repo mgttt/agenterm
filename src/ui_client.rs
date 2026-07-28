@@ -10,6 +10,7 @@ use crate::{
         UI_HELLO_SCHEMA_VERSION, UiBootstrapSnapshot, UiDeltaBatch, UiHelloRequest,
         UiHelloResponse, UiLeaseGrant, UiProtocolRange, UiTabBootstrap,
     },
+    ui_command::UiClientCommand,
     upgrade_identity::UpgradeIdentity,
 };
 
@@ -22,6 +23,7 @@ pub(crate) struct UiClientModel {
     lease: UiLeaseGrant,
     snapshot: UiBootstrapSnapshot,
     supports_state_publication: bool,
+    supports_client_commands: bool,
     last_heartbeat: Instant,
 }
 
@@ -111,6 +113,10 @@ impl UiClientModel {
                 .capabilities
                 .iter()
                 .any(|capability| capability == "lease_owned_client_state"),
+            supports_client_commands: hello
+                .capabilities
+                .iter()
+                .any(|capability| capability == "lease_owned_client_commands"),
             last_heartbeat: Instant::now(),
         };
         model.acknowledge_observed()?;
@@ -229,6 +235,81 @@ impl UiClientModel {
                 != Some(self.snapshot.server_epoch.as_str())
         {
             anyhow::bail!("UI client snapshot publication identity changed");
+        }
+        Ok(())
+    }
+
+    pub(crate) fn poll_client_command(&mut self) -> Result<Option<UiClientCommand>> {
+        if !self.supports_client_commands {
+            return Ok(None);
+        }
+        let response: serde_json::Value = request_json(vec![
+            "ui-client-command".to_owned(),
+            "poll".to_owned(),
+            "--lease-id".to_owned(),
+            self.lease.lease_id.clone(),
+            "--client-pid".to_owned(),
+            self.client_pid.to_string(),
+        ])?;
+        match response.get("command") {
+            None | Some(serde_json::Value::Null) => Ok(None),
+            Some(command) => serde_json::from_value(command.clone())
+                .context("invalid UI client command")
+                .map(Some),
+        }
+    }
+
+    pub(crate) fn apply_client_command(&mut self, command_id: &str) -> Result<IpcResponse> {
+        require_success(send_ipc_request(vec![
+            "ui-client-command".to_owned(),
+            "apply".to_owned(),
+            "--lease-id".to_owned(),
+            self.lease.lease_id.clone(),
+            "--client-pid".to_owned(),
+            self.client_pid.to_string(),
+            "--command-id".to_owned(),
+            command_id.to_owned(),
+        ])?)
+    }
+
+    pub(crate) fn invoke_client_action(&mut self, arguments: Vec<String>) -> Result<IpcResponse> {
+        let args_json =
+            serde_json::to_string(&arguments).context("could not encode UI client action")?;
+        require_success(send_ipc_request(vec![
+            "ui-client-command".to_owned(),
+            "invoke".to_owned(),
+            "--lease-id".to_owned(),
+            self.lease.lease_id.clone(),
+            "--client-pid".to_owned(),
+            self.client_pid.to_string(),
+            "--args-json".to_owned(),
+            args_json,
+        ])?)
+    }
+
+    pub(crate) fn complete_client_command(
+        &mut self,
+        command_id: &str,
+        response: &IpcResponse,
+    ) -> Result<()> {
+        let response_json =
+            serde_json::to_string(response).context("could not encode UI client response")?;
+        let completion: serde_json::Value = request_json(vec![
+            "ui-client-command".to_owned(),
+            "complete".to_owned(),
+            "--lease-id".to_owned(),
+            self.lease.lease_id.clone(),
+            "--client-pid".to_owned(),
+            self.client_pid.to_string(),
+            "--command-id".to_owned(),
+            command_id.to_owned(),
+            "--response-json".to_owned(),
+            response_json,
+        ])?;
+        if completion["completed"].as_bool() != Some(true)
+            || completion["command_id"].as_str() != Some(command_id)
+        {
+            anyhow::bail!("UI client command completion identity changed");
         }
         Ok(())
     }

@@ -7114,7 +7114,11 @@ fn create_terminal_font(window: HWND, config: &AppConfig) -> (HFONT, bool, Strin
     (font, owned, resolved)
 }
 
-fn save_window_png(window: HWND, path: &std::path::Path, pane: Option<PixelRect>) -> Result<()> {
+pub(crate) fn save_window_png(
+    window: HWND,
+    path: &std::path::Path,
+    pane: Option<PixelRect>,
+) -> Result<()> {
     let mut client: RECT = unsafe { mem::zeroed() };
     let mut outer: RECT = unsafe { mem::zeroed() };
     unsafe {
