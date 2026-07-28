@@ -6,10 +6,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
 - [x] window title identifies version and live IPC port
 - [~] Linux/macOS human workspace MVP: one window, live POSIX PTY tabs,
-  keyboard input, visible VT grid, tab sidebar, event journal, shared
-  workspace IPC, composer strip, settings modal, wheel/scrollbar
-  scrollback, and basic cell selection/clipboard copy; professional
-  selection gestures and Win-only cwd-proxy editors remain follow-ups
+  keyboard input, visible VT grid, tab sidebar with New/Tabs/Settings
+  toolbar, event journal, shared workspace IPC, composer, settings modal,
+  wheel/scrollbar, paste, and word/row/drag selection; status-bar CWD,
+  close confirm, and Win-only cwd-proxy editors remain follow-ups
 - [x] vertical tabs on the left show the numeric index; the stable `@id` is
   exposed through the control plane
 - [x] tree starts at the top without a redundant logo/header strip

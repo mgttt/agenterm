@@ -3,13 +3,14 @@ mod font;
 mod input;
 mod layout;
 mod render;
+mod screenshot;
 
 use std::{
     collections::HashSet,
     env,
     rc::Rc,
     sync::{Arc, mpsc::Receiver},
-    time::SystemTime,
+    time::{Duration, Instant, SystemTime},
 };
 
 use softbuffer::{Context, Surface};
@@ -23,6 +24,7 @@ use winit::{
 
 use crate::{
     client::no_activate_from_environment,
+    commands::screenshot_output_path,
     control_dispatch::{ControlHost, dispatch_shared_command},
     event_journal::{EventJournal, EventKind},
     gui_wake::{UnixWake, install_unix_wake},
@@ -33,7 +35,8 @@ use crate::{
     settings::{AppConfig, config_path, load_config, save_config},
     terminal_runtime::{TerminalLaunch, TerminalTab},
     terminal_selection::{
-        SelectionGesture, TerminalPoint, TerminalSelection, terminal_selection_text,
+        AutoScrollDirection, AutoScrollStep, SelectionGesture, TerminalPoint, TerminalSelection,
+        autoscroll_step, terminal_selection_text, visible_row_selection, word_selection,
     },
     theme::ThemeId,
     wake_signal::WakeSignal,
@@ -41,9 +44,10 @@ use crate::{
 };
 
 use render::{
-    CELL_HEIGHT, CELL_WIDTH, COMPOSER_HEIGHT, ComposerView, FrameContent, SettingsHit,
-    SettingsModalView, SidebarTabRow, TerminalGrid, TerminalPaint, effective_palette,
-    grid_dimensions_for_pixels, render_frame, scrollbar_view_from_geometry, sidebar_row_at_y,
+    CELL_HEIGHT, CELL_WIDTH, COMPOSER_HEIGHT, ComposerView, ConfirmCloseHit, ConfirmCloseView,
+    FrameContent, SettingsHit, SettingsModalView, SidebarTabRow, SidebarToolbarView, TerminalGrid,
+    TerminalPaint, ToolbarHit, effective_palette, grid_dimensions_for_pixels, render_frame,
+    scrollbar_view_from_geometry, sidebar_row_at_y,
 };
 
 use layout::{
@@ -58,6 +62,22 @@ use crate::ui_geometry::scrollback_for_thumb_top;
 struct ScrollDrag {
     thumb_grab_offset: i32,
 }
+
+#[derive(Clone, Copy, Debug)]
+struct TerminalDoubleClick {
+    tab_id: u64,
+    point: TerminalPoint,
+    expires_at: Instant,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct RecentTerminalClick {
+    tab_id: u64,
+    point: TerminalPoint,
+    at: Instant,
+}
+
+const DOUBLE_CLICK_MS: u64 = 500;
 
 const APP_NAME: &str = "AgenTerm";
 const INITIAL_WIDTH: u32 = 960;
@@ -212,6 +232,12 @@ struct UnixApp {
     scroll_drag: Option<ScrollDrag>,
     terminal_selection: Option<TerminalSelection>,
     terminal_selection_gesture: Option<SelectionGesture>,
+    terminal_selection_pointer: Option<(i32, i32)>,
+    terminal_selection_autoscroll: Option<AutoScrollStep>,
+    terminal_double_click: Option<TerminalDoubleClick>,
+    recent_terminal_click: Option<RecentTerminalClick>,
+    pending_close: Option<u64>,
+    last_frame: Option<(u32, u32, Vec<u32>)>,
 }
 
 impl UnixApp {
@@ -255,6 +281,12 @@ impl UnixApp {
             scroll_drag: None,
             terminal_selection: None,
             terminal_selection_gesture: None,
+            terminal_selection_pointer: None,
+            terminal_selection_autoscroll: None,
+            terminal_double_click: None,
+            recent_terminal_click: None,
+            pending_close: None,
+            last_frame: None,
             config,
             modifiers: ModifiersState::empty(),
         }
@@ -555,8 +587,9 @@ impl UnixApp {
     }
 
     fn tab_position_for_sidebar_y(&self, y: u32) -> Option<usize> {
-        let row_index = sidebar_row_at_y(y)?;
-        let rows = self.all_tree_rows();
+        let tree_height = self.layout().sidebar_tree.height().max(0) as u32;
+        let row_index = sidebar_row_at_y(y, tree_height)?;
+        let rows = self.visible_tree_rows();
         let row_id = rows.get(row_index)?.id;
         self.tabs.iter().position(|tab| tab.id == row_id)
     }
@@ -687,7 +720,12 @@ impl UnixApp {
             } else if self.note_edit_target.is_some() {
                 Some(serde_json::json!({"kind": "tab-editor"}))
             } else {
-                None
+                self.pending_close.map(|id| {
+                    serde_json::json!({
+                        "kind": "confirm-close-live",
+                        "window_id": format!("@{id}"),
+                    })
+                })
             },
             "system_menu": {
                 "toggle_tabs": {
@@ -726,12 +764,24 @@ impl UnixApp {
     }
 
     fn handle_sidebar_click(&mut self, x: f64, y: f64) {
-        let sidebar_width = self.sidebar_width();
+        let layout = self.layout();
+        let sidebar_width = sidebar_width_u32(&layout);
         if x >= f64::from(sidebar_width) {
             return;
         }
+        if let Some(toolbar) = layout.sidebar_toolbar {
+            let view = SidebarToolbarView::from_layout(toolbar);
+            if let Some(hit) = view.hit_test(x, y) {
+                self.handle_toolbar_hit(hit);
+                return;
+            }
+            if y as i32 >= toolbar.bounds.top {
+                return;
+            }
+        }
+        let tree_height = layout.sidebar_tree.height().max(0) as u32;
         if x < 28.0
-            && let Some(row_index) = sidebar_row_at_y(y.max(0.0) as u32)
+            && let Some(row_index) = sidebar_row_at_y(y.max(0.0) as u32, tree_height)
             && let Some(row) = self.visible_tree_rows().get(row_index)
             && self.tabs.iter().any(|tab| tab.parent_id == Some(row.id))
         {
@@ -750,7 +800,37 @@ impl UnixApp {
         self.set_focus_surface_internal(UnixFocusSurface::Sidebar, "mouse");
     }
 
+    fn handle_toolbar_hit(&mut self, hit: ToolbarHit) {
+        match hit {
+            ToolbarHit::NewTab => {
+                let _ = self.create_tab(None, Vec::new(), Vec::new(), true, None);
+            }
+            ToolbarHit::ToggleTabs => {
+                let visible = !self.config.tabs_visible;
+                let _ = self.set_tabs_visible(
+                    visible,
+                    "toolbar",
+                    crate::operations::UI_TABS_TOGGLE,
+                );
+            }
+            ToolbarHit::Settings => {
+                self.open_settings();
+            }
+        }
+        self.request_redraw();
+    }
+
     fn handle_content_click(&mut self, x: f64, y: f64, window_height: u32) {
+        if let Some(id) = self.pending_close {
+            let (width, height) = self.client_size();
+            let modal = ConfirmCloseView::for_client(width, height, id);
+            match modal.hit_test(x, y) {
+                Some(ConfirmCloseHit::Confirm) => self.finish_close_confirmation(true),
+                Some(ConfirmCloseHit::Cancel) => self.finish_close_confirmation(false),
+                None => {}
+            }
+            return;
+        }
         if self.settings_open {
             let (width, height) = self.client_size();
             let modal = SettingsModalView::for_client(
@@ -805,16 +885,80 @@ impl UnixApp {
             return false;
         };
         let tab_id = self.tabs[position].id;
+        let point = TerminalPoint { row, col };
         let (rows, cols) = self.tabs[position].last_size;
-        let Some(gesture) =
-            SelectionGesture::prepare(tab_id, TerminalPoint { row, col }, rows, cols)
-        else {
+        let now = Instant::now();
+
+        if self.terminal_double_click.is_some_and(|click| {
+            click.tab_id == tab_id && click.point == point && now <= click.expires_at
+        }) {
+            self.terminal_double_click = None;
+            self.recent_terminal_click = None;
+            if let Some((start, end)) =
+                visible_row_selection(self.tabs[position].parser.screen(), row)
+            {
+                let _ = self.set_completed_terminal_selection(tab_id, start, end, rows, cols);
+            }
+            self.set_focus_surface_internal(UnixFocusSurface::Terminal, "selection");
+            self.request_redraw();
+            return true;
+        }
+
+        if self.recent_terminal_click.is_some_and(|click| {
+            click.tab_id == tab_id
+                && click.point == point
+                && now.duration_since(click.at) <= Duration::from_millis(DOUBLE_CLICK_MS)
+        }) {
+            self.recent_terminal_click = None;
+            if let Some((start, end)) = word_selection(self.tabs[position].parser.screen(), point)
+            {
+                let _ = self.set_completed_terminal_selection(tab_id, start, end, rows, cols);
+                self.terminal_double_click = now
+                    .checked_add(Duration::from_millis(DOUBLE_CLICK_MS))
+                    .map(|expires_at| TerminalDoubleClick {
+                        tab_id,
+                        point,
+                        expires_at,
+                    });
+                self.set_focus_surface_internal(UnixFocusSurface::Terminal, "selection");
+                self.request_redraw();
+                return true;
+            }
+        }
+
+        self.terminal_double_click = None;
+        self.recent_terminal_click = Some(RecentTerminalClick {
+            tab_id,
+            point,
+            at: now,
+        });
+        let Some(gesture) = SelectionGesture::prepare(tab_id, point, rows, cols) else {
             return false;
         };
         self.terminal_selection = gesture.selection();
         self.terminal_selection_gesture = Some(gesture);
+        self.terminal_selection_pointer = Some((x as i32, y as i32));
+        self.terminal_selection_autoscroll = None;
         self.set_focus_surface_internal(UnixFocusSurface::Terminal, "selection");
         self.request_redraw();
+        true
+    }
+
+    fn set_completed_terminal_selection(
+        &mut self,
+        tab_id: u64,
+        start: TerminalPoint,
+        end: TerminalPoint,
+        rows: u16,
+        cols: u16,
+    ) -> bool {
+        let Some(gesture) = SelectionGesture::completed(tab_id, start, end, rows, cols) else {
+            return false;
+        };
+        self.terminal_selection = gesture.selection();
+        self.terminal_selection_gesture = Some(gesture);
+        self.terminal_selection_pointer = None;
+        self.terminal_selection_autoscroll = None;
         true
     }
 
@@ -846,8 +990,16 @@ impl UnixApp {
             return;
         };
         let updated = gesture.drag_to(TerminalPoint { row, col }, rows, cols);
+        let next_autoscroll = autoscroll_step(
+            y as i32,
+            terminal.top,
+            terminal.bottom,
+            CELL_HEIGHT as i32,
+        );
         self.terminal_selection = updated.selection();
         self.terminal_selection_gesture = Some(updated);
+        self.terminal_selection_pointer = Some((clamped_x, clamped_y));
+        self.terminal_selection_autoscroll = next_autoscroll;
         self.request_redraw();
     }
 
@@ -860,6 +1012,8 @@ impl UnixApp {
             return;
         }
         let completed = gesture.complete();
+        self.terminal_selection_pointer = None;
+        self.terminal_selection_autoscroll = None;
         if let Some(selection) = completed.completed_selection() {
             self.terminal_selection = Some(selection);
             self.terminal_selection_gesture = Some(completed);
@@ -881,10 +1035,61 @@ impl UnixApp {
         if clear_completed && self.terminal_selection.take().is_some() {
             changed = true;
         }
+        self.terminal_selection_pointer = None;
+        self.terminal_selection_autoscroll = None;
+        if clear_completed {
+            self.terminal_double_click = None;
+        }
         if changed {
             self.request_redraw();
         }
         changed
+    }
+
+    fn tick_terminal_selection_autoscroll(&mut self) -> bool {
+        let Some(step) = self.terminal_selection_autoscroll else {
+            return false;
+        };
+        let Some(gesture) = self.terminal_selection_gesture else {
+            return false;
+        };
+        if !gesture.active() || self.active != Some(gesture.tab_id()) {
+            return self.cancel_terminal_selection(true);
+        }
+        let Some(position) = self.active_position() else {
+            return self.cancel_terminal_selection(true);
+        };
+        let before = self.tabs[position].parser.screen().scrollback();
+        let action = match step.direction {
+            AutoScrollDirection::Up => "up",
+            AutoScrollDirection::Down => "down",
+        };
+        let Ok(after) = self.tabs[position].scroll_viewport(action, Some(step.rows)) else {
+            return false;
+        };
+        if let Some((x, y)) = self.terminal_selection_pointer
+            && let Some((col, row)) = terminal_cell_at(
+                terminal_pixel_rect(&self.layout()),
+                x,
+                y,
+                self.tabs[position].last_size.0,
+                self.tabs[position].last_size.1,
+                CELL_WIDTH as i32,
+                CELL_HEIGHT as i32,
+            )
+        {
+            let (rows, cols) = self.tabs[position].last_size;
+            let updated = gesture.drag_to(TerminalPoint { row, col }, rows, cols);
+            self.terminal_selection = updated.selection();
+            self.terminal_selection_gesture = Some(updated);
+        }
+        if after != before {
+            self.on_viewport_scrolled(position, after, "selection-autoscroll");
+            true
+        } else {
+            self.request_redraw();
+            false
+        }
     }
 
     fn copy_terminal_selection(&mut self) -> Result<(), String> {
@@ -901,6 +1106,49 @@ impl UnixApp {
         }
         let text = terminal_selection_text(self.tabs[position].parser.screen(), selection);
         clipboard::set_clipboard_text(&text)?;
+        Ok(())
+    }
+
+    fn paste_clipboard_into_terminal(&mut self) -> Result<(), String> {
+        if self.settings_open || self.note_edit_target.is_some() {
+            return Err("paste is unavailable while a modal is open".to_owned());
+        }
+        if self.focus_surface != UnixFocusSurface::Terminal {
+            return Err("paste requires terminal focus".to_owned());
+        }
+        let Some(position) = self.active_position() else {
+            return Err("no active window".to_owned());
+        };
+        let tab_id = self.tabs[position].id;
+        let raw = clipboard::get_clipboard_text()?;
+        let text = clipboard::normalize_terminal_paste(&raw);
+        if text.is_empty() {
+            return Err("clipboard text contains no pasteable characters".to_owned());
+        }
+        let bracketed = self.tabs[position].parser.screen().bracketed_paste();
+        let mut bytes = Vec::with_capacity(text.len() + if bracketed { 12 } else { 0 });
+        if bracketed {
+            bytes.extend_from_slice(b"\x1b[200~");
+        }
+        bytes.extend_from_slice(text.as_bytes());
+        if bracketed {
+            bytes.extend_from_slice(b"\x1b[201~");
+        }
+        if !self.tabs[position].send(&bytes) {
+            return Err("terminal input was rejected".to_owned());
+        }
+        let _ = self.cancel_terminal_selection(true);
+        self.event_journal_mut().commit(
+            EventKind::TerminalPasted,
+            Some(tab_id),
+            serde_json::json!({
+                "characters": text.chars().count(),
+                "bytes": text.len(),
+                "bracketed": bracketed,
+                "source": "keyboard",
+            }),
+        );
+        self.request_redraw();
         Ok(())
     }
 
@@ -1098,6 +1346,17 @@ impl UnixApp {
         let command = envelope.request.args.first().map(String::as_str);
         let response = match dispatch_shared_command(self, &envelope.request.args) {
             Some(response) => response,
+            None if matches!(
+                command,
+                Some("screenshot") | Some("screenshot-pane") | Some("screenshot-tab")
+            ) =>
+            {
+                let pane_only = !matches!(command, Some("screenshot"));
+                match self.save_screenshot(&envelope.request.args, pane_only) {
+                    Ok(path) => IpcResponse::success(path),
+                    Err(error) => IpcResponse::failure(error),
+                }
+            }
             None if command == Some("ui-action") => {
                 let action = envelope
                     .request
@@ -1225,6 +1484,7 @@ impl UnixApp {
             FrameContent {
                 sidebar_width,
                 content_height,
+                tree_height: layout.sidebar_tree.height().max(0) as u32,
                 terminal: TerminalPaint {
                     grid,
                     selection: self
@@ -1232,15 +1492,75 @@ impl UnixApp {
                         .filter(|selection| self.active == Some(selection.tab_id)),
                 },
                 sidebar_rows: &sidebar_rows,
+                sidebar_toolbar: layout
+                    .sidebar_toolbar
+                    .map(SidebarToolbarView::from_layout),
                 composer: ComposerView {
                     text: &self.composer_buffer,
                     focused: self.focus_surface == UnixFocusSurface::Composer,
                 },
                 scrollbar,
                 settings,
+                confirm_close: self.pending_close.map(|id| {
+                    ConfirmCloseView::for_client(size.width, size.height, id)
+                }),
             },
         );
+        self.last_frame = Some((width, height, buffer.to_vec()));
         let _ = buffer.present();
+    }
+
+    fn request_close_tab(&mut self, id: u64) {
+        let _ = self.cancel_terminal_selection(true);
+        if self.note_edit_target.is_some() {
+            let _ = self.complete_tab_editor(false);
+        }
+        let Some(tab) = self.tabs.iter().find(|tab| tab.id == id) else {
+            return;
+        };
+        if tab.exited.is_some() {
+            let _ = self.close_tab_id(id);
+            return;
+        }
+        self.pending_close = Some(id);
+        self.request_redraw();
+    }
+
+    fn finish_close_confirmation(&mut self, confirm: bool) {
+        let pending = self.pending_close.take();
+        if confirm && let Some(id) = pending {
+            let _ = self.close_tab_id(id);
+        }
+        self.request_redraw();
+    }
+
+    fn save_screenshot(&mut self, args: &[String], pane_only: bool) -> Result<String, String> {
+        self.redraw();
+        let (width, height, pixels) = self
+            .last_frame
+            .clone()
+            .ok_or_else(|| "no rendered frame is available".to_owned())?;
+        let path = screenshot_output_path(
+            args,
+            if pane_only {
+                "agenterm-pane"
+            } else {
+                "agenterm-window"
+            },
+        );
+        let clip = if pane_only {
+            let terminal = terminal_pixel_rect(&self.layout());
+            Some((
+                terminal.left.max(0) as u32,
+                terminal.top.max(0) as u32,
+                terminal.width().max(0) as u32,
+                terminal.height().max(0) as u32,
+            ))
+        } else {
+            None
+        };
+        screenshot::write_xrgb_png(&path, width, height, &pixels, clip)?;
+        Ok(path.display().to_string())
     }
 }
 
@@ -1467,6 +1787,10 @@ impl ControlHost for UnixApp {
     }
 
     fn ui_action_cancel(&mut self) -> Result<bool, String> {
+        if self.pending_close.is_some() {
+            self.finish_close_confirmation(false);
+            return Ok(true);
+        }
         if self.settings_open {
             self.close_settings(false)?;
             return Ok(true);
@@ -1479,6 +1803,22 @@ impl ControlHost for UnixApp {
             return Ok(true);
         }
         Ok(false)
+    }
+
+    fn ui_action_confirm(&mut self) -> Result<bool, String> {
+        if self.pending_close.is_some() {
+            self.finish_close_confirmation(true);
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    fn close_tab_by_ui_action(&mut self, id: u64) -> Result<(), String> {
+        if !self.tabs.iter().any(|tab| tab.id == id) {
+            return Err(format!("can't find tab: @{id}"));
+        }
+        self.request_close_tab(id);
+        Ok(())
     }
 
     fn copy_selection(&mut self) -> Result<(), String> {
@@ -1693,6 +2033,12 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                     }
                     return;
                 }
+                if self.pending_close.is_some() {
+                    if let Key::Named(NamedKey::Escape) = event.logical_key {
+                        self.finish_close_confirmation(false);
+                    }
+                    return;
+                }
                 if matches!(event.logical_key, Key::Named(NamedKey::Escape))
                     && self.cancel_terminal_selection(true)
                 {
@@ -1738,6 +2084,12 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                     })
                 {
                     let _ = self.copy_terminal_selection();
+                    return;
+                }
+                if self.modifiers.control_key()
+                    && matches!(event.logical_key, Key::Character(ref value) if value.eq_ignore_ascii_case("v"))
+                {
+                    let _ = self.paste_clipboard_into_terminal();
                     return;
                 }
                 if let Some(bytes) = input::key_event_to_bytes(&event) {
@@ -1794,9 +2146,18 @@ impl ApplicationHandler<UnixWake> for UnixApp {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        if self.drain_wake_and_pty()
-            && let Some(window) = self.window.as_ref()
+        let mut changed = self.drain_wake_and_pty();
+        if self
+            .terminal_selection_gesture
+            .is_some_and(SelectionGesture::active)
+            && self.terminal_selection_autoscroll.is_some()
         {
+            changed |= self.tick_terminal_selection_autoscroll();
+            event_loop.set_control_flow(ControlFlow::wait_duration(Duration::from_millis(33)));
+        } else {
+            event_loop.set_control_flow(ControlFlow::Wait);
+        }
+        if changed && let Some(window) = self.window.as_ref() {
             window.request_redraw();
         }
         if self.close_requested {

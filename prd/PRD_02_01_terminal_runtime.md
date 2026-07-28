@@ -7,9 +7,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] Win32/GDI window without GPU or OpenGL requirements
 - [~] Linux/macOS GUI window without GPU requirements via `winit` +
   `softbuffer` software raster (shared theme/geometry/selection/vt100);
-  Linux/macOS share `unix_app`: live POSIX PTY tabs, sidebar, composer,
-  settings, wheel/scrollbar scrollback, and basic cell selection/clipboard;
-  professional selection (word/triple-click/autoscroll) remains later
+  Linux/macOS share `unix_app`: live POSIX PTY tabs, sidebar toolbar,
+  composer, settings, wheel/scrollbar, paste, and word/row/drag selection
+  with edge autoscroll; status-bar CWD/proxy, close confirm, and
+  professional selection remain later
 - [x] one ConPTY-backed process per tab through `rmux-pty` on Windows
 - [~] shared PTY backend trait: Windows keeps `rmux-pty`; Unix uses
   POSIX `openpty` + fork/exec; `terminal_runtime` consumes one API
