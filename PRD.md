@@ -19,6 +19,13 @@ integer-grid spacing, solid right-angle connections, strict baseline
 alignment, restrained colors, and explicit boundaries should make the fleet
 feel precisely assembled and dependable.
 
+AgenTerm competes by keeping the visible product simple and practical while
+making the underlying system stable, observable, programmable, and open-ended.
+New UI is justified by lower interaction cost, not feature count: advanced
+power should prefer discoverable commands and programming interfaces, and
+secondary controls should stay contextual or hidden by default when that keeps
+the daily workspace quiet.
+
 Terminal durability comes from deterministic two-dimensional state, not from
 nostalgia. AgenTerm extends that contract from a character grid to the whole
 agent fleet: humans and agents must be able to address, read, wait for, and
