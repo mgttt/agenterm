@@ -3,6 +3,7 @@ mod font;
 mod input;
 mod layout;
 mod render;
+mod screenshot;
 
 use std::{
     collections::HashSet,
@@ -23,6 +24,7 @@ use winit::{
 
 use crate::{
     client::no_activate_from_environment,
+    commands::screenshot_output_path,
     control_dispatch::{ControlHost, dispatch_shared_command},
     event_journal::{EventJournal, EventKind},
     gui_wake::{UnixWake, install_unix_wake},
@@ -42,10 +44,10 @@ use crate::{
 };
 
 use render::{
-    CELL_HEIGHT, CELL_WIDTH, COMPOSER_HEIGHT, ComposerView, FrameContent, SettingsHit,
-    SettingsModalView, SidebarTabRow, SidebarToolbarView, TerminalGrid, TerminalPaint, ToolbarHit,
-    effective_palette, grid_dimensions_for_pixels, render_frame, scrollbar_view_from_geometry,
-    sidebar_row_at_y,
+    CELL_HEIGHT, CELL_WIDTH, COMPOSER_HEIGHT, ComposerView, ConfirmCloseHit, ConfirmCloseView,
+    FrameContent, SettingsHit, SettingsModalView, SidebarTabRow, SidebarToolbarView, TerminalGrid,
+    TerminalPaint, ToolbarHit, effective_palette, grid_dimensions_for_pixels, render_frame,
+    scrollbar_view_from_geometry, sidebar_row_at_y,
 };
 
 use layout::{
@@ -234,6 +236,8 @@ struct UnixApp {
     terminal_selection_autoscroll: Option<AutoScrollStep>,
     terminal_double_click: Option<TerminalDoubleClick>,
     recent_terminal_click: Option<RecentTerminalClick>,
+    pending_close: Option<u64>,
+    last_frame: Option<(u32, u32, Vec<u32>)>,
 }
 
 impl UnixApp {
@@ -281,6 +285,8 @@ impl UnixApp {
             terminal_selection_autoscroll: None,
             terminal_double_click: None,
             recent_terminal_click: None,
+            pending_close: None,
+            last_frame: None,
             config,
             modifiers: ModifiersState::empty(),
         }
@@ -714,7 +720,12 @@ impl UnixApp {
             } else if self.note_edit_target.is_some() {
                 Some(serde_json::json!({"kind": "tab-editor"}))
             } else {
-                None
+                self.pending_close.map(|id| {
+                    serde_json::json!({
+                        "kind": "confirm-close-live",
+                        "window_id": format!("@{id}"),
+                    })
+                })
             },
             "system_menu": {
                 "toggle_tabs": {
@@ -810,6 +821,16 @@ impl UnixApp {
     }
 
     fn handle_content_click(&mut self, x: f64, y: f64, window_height: u32) {
+        if let Some(id) = self.pending_close {
+            let (width, height) = self.client_size();
+            let modal = ConfirmCloseView::for_client(width, height, id);
+            match modal.hit_test(x, y) {
+                Some(ConfirmCloseHit::Confirm) => self.finish_close_confirmation(true),
+                Some(ConfirmCloseHit::Cancel) => self.finish_close_confirmation(false),
+                None => {}
+            }
+            return;
+        }
         if self.settings_open {
             let (width, height) = self.client_size();
             let modal = SettingsModalView::for_client(
@@ -1325,6 +1346,17 @@ impl UnixApp {
         let command = envelope.request.args.first().map(String::as_str);
         let response = match dispatch_shared_command(self, &envelope.request.args) {
             Some(response) => response,
+            None if matches!(
+                command,
+                Some("screenshot") | Some("screenshot-pane") | Some("screenshot-tab")
+            ) =>
+            {
+                let pane_only = !matches!(command, Some("screenshot"));
+                match self.save_screenshot(&envelope.request.args, pane_only) {
+                    Ok(path) => IpcResponse::success(path),
+                    Err(error) => IpcResponse::failure(error),
+                }
+            }
             None if command == Some("ui-action") => {
                 let action = envelope
                     .request
@@ -1469,9 +1501,66 @@ impl UnixApp {
                 },
                 scrollbar,
                 settings,
+                confirm_close: self.pending_close.map(|id| {
+                    ConfirmCloseView::for_client(size.width, size.height, id)
+                }),
             },
         );
+        self.last_frame = Some((width, height, buffer.to_vec()));
         let _ = buffer.present();
+    }
+
+    fn request_close_tab(&mut self, id: u64) {
+        let _ = self.cancel_terminal_selection(true);
+        if self.note_edit_target.is_some() {
+            let _ = self.complete_tab_editor(false);
+        }
+        let Some(tab) = self.tabs.iter().find(|tab| tab.id == id) else {
+            return;
+        };
+        if tab.exited.is_some() {
+            let _ = self.close_tab_id(id);
+            return;
+        }
+        self.pending_close = Some(id);
+        self.request_redraw();
+    }
+
+    fn finish_close_confirmation(&mut self, confirm: bool) {
+        let pending = self.pending_close.take();
+        if confirm && let Some(id) = pending {
+            let _ = self.close_tab_id(id);
+        }
+        self.request_redraw();
+    }
+
+    fn save_screenshot(&mut self, args: &[String], pane_only: bool) -> Result<String, String> {
+        self.redraw();
+        let (width, height, pixels) = self
+            .last_frame
+            .clone()
+            .ok_or_else(|| "no rendered frame is available".to_owned())?;
+        let path = screenshot_output_path(
+            args,
+            if pane_only {
+                "agenterm-pane"
+            } else {
+                "agenterm-window"
+            },
+        );
+        let clip = if pane_only {
+            let terminal = terminal_pixel_rect(&self.layout());
+            Some((
+                terminal.left.max(0) as u32,
+                terminal.top.max(0) as u32,
+                terminal.width().max(0) as u32,
+                terminal.height().max(0) as u32,
+            ))
+        } else {
+            None
+        };
+        screenshot::write_xrgb_png(&path, width, height, &pixels, clip)?;
+        Ok(path.display().to_string())
     }
 }
 
@@ -1698,6 +1787,10 @@ impl ControlHost for UnixApp {
     }
 
     fn ui_action_cancel(&mut self) -> Result<bool, String> {
+        if self.pending_close.is_some() {
+            self.finish_close_confirmation(false);
+            return Ok(true);
+        }
         if self.settings_open {
             self.close_settings(false)?;
             return Ok(true);
@@ -1710,6 +1803,22 @@ impl ControlHost for UnixApp {
             return Ok(true);
         }
         Ok(false)
+    }
+
+    fn ui_action_confirm(&mut self) -> Result<bool, String> {
+        if self.pending_close.is_some() {
+            self.finish_close_confirmation(true);
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    fn close_tab_by_ui_action(&mut self, id: u64) -> Result<(), String> {
+        if !self.tabs.iter().any(|tab| tab.id == id) {
+            return Err(format!("can't find tab: @{id}"));
+        }
+        self.request_close_tab(id);
+        Ok(())
     }
 
     fn copy_selection(&mut self) -> Result<(), String> {
@@ -1921,6 +2030,12 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                 if self.settings_open {
                     if let Key::Named(NamedKey::Escape) = event.logical_key {
                         let _ = self.close_settings(false);
+                    }
+                    return;
+                }
+                if self.pending_close.is_some() {
+                    if let Key::Named(NamedKey::Escape) = event.logical_key {
+                        self.finish_close_confirmation(false);
                     }
                     return;
                 }

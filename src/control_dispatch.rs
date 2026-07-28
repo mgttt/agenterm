@@ -242,6 +242,10 @@ pub(crate) trait ControlHost {
         Ok(false)
     }
 
+    fn ui_action_confirm(&mut self) -> Result<bool, String> {
+        Ok(false)
+    }
+
     fn copy_selection(&mut self) -> Result<(), String> {
         Err("copy-selection is not supported on this host".to_owned())
     }
@@ -582,6 +586,11 @@ fn dispatch_shared_ui_action(host: &mut dyn ControlHost, args: &[String]) -> Opt
         "cancel" => match host.ui_action_cancel() {
             Ok(true) => Some(ui_snapshot_response(host)),
             Ok(false) => Some(IpcResponse::failure("no modal is pending")),
+            Err(error) => Some(IpcResponse::failure(error)),
+        },
+        "confirm" => match host.ui_action_confirm() {
+            Ok(true) => Some(ui_snapshot_response(host)),
+            Ok(false) => Some(IpcResponse::failure("no confirmation is pending")),
             Err(error) => Some(IpcResponse::failure(error)),
         },
         "copy-selection" => match host.copy_selection() {

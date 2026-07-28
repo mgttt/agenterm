@@ -6592,6 +6592,18 @@ impl ControlHost for AppState {
         Ok(false)
     }
 
+    fn ui_action_confirm(&mut self) -> Result<bool, String> {
+        if self.window_close_pending {
+            self.finish_window_close(WindowCloseChoice::KeepServerRunning);
+            return Ok(true);
+        }
+        if self.pending_close.is_some() {
+            self.finish_close_confirmation(true);
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
     fn copy_selection(&mut self) -> Result<(), String> {
         self.copy_terminal_selection()
             .map(|_| ())
@@ -6897,16 +6909,6 @@ impl AppState {
                     return IpcResponse::success(self.ui_snapshot());
                 }
                 let response = match action {
-                    "confirm" => {
-                        if self.window_close_pending {
-                            self.finish_window_close(WindowCloseChoice::KeepServerRunning);
-                        } else if self.pending_close.is_some() {
-                            self.finish_close_confirmation(true);
-                        } else {
-                            return IpcResponse::failure("no confirmation is pending");
-                        }
-                        None
-                    }
                     "close-window" => {
                         self.request_window_close();
                         None

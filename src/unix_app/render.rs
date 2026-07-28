@@ -260,6 +260,48 @@ impl SidebarToolbarView {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ConfirmCloseHit {
+    Confirm,
+    Cancel,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct ConfirmCloseView {
+    pub(super) tab_id: u64,
+    pub(super) bounds: (u32, u32, u32, u32),
+    pub(super) confirm_button: (u32, u32, u32, u32),
+    pub(super) cancel_button: (u32, u32, u32, u32),
+}
+
+impl ConfirmCloseView {
+    pub(super) fn for_client(client_width: u32, client_height: u32, tab_id: u64) -> Self {
+        let width = 360u32;
+        let height = 140u32;
+        let left = client_width.saturating_sub(width) / 2;
+        let top = client_height.saturating_sub(height) / 2;
+        let button_y = top + 90;
+        Self {
+            tab_id,
+            bounds: (left, top, width, height),
+            confirm_button: (left + 40, button_y, 120, 28),
+            cancel_button: (left + 200, button_y, 120, 28),
+        }
+    }
+
+    pub(super) fn hit_test(&self, x: f64, y: f64) -> Option<ConfirmCloseHit> {
+        let x = x as u32;
+        let y = y as u32;
+        if rect_contains(self.confirm_button, x, y) {
+            Some(ConfirmCloseHit::Confirm)
+        } else if rect_contains(self.cancel_button, x, y) {
+            Some(ConfirmCloseHit::Cancel)
+        } else {
+            None
+        }
+    }
+}
+
 pub(super) struct FrameContent<'a> {
     pub(super) sidebar_width: u32,
     pub(super) content_height: u32,
@@ -270,6 +312,7 @@ pub(super) struct FrameContent<'a> {
     pub(super) composer: ComposerView<'a>,
     pub(super) scrollbar: Option<ScrollbarView>,
     pub(super) settings: Option<SettingsModalView<'a>>,
+    pub(super) confirm_close: Option<ConfirmCloseView>,
 }
 
 pub(super) fn render_frame(
@@ -323,6 +366,9 @@ pub(super) fn render_frame(
     );
     if let Some(settings) = content.settings {
         render_settings_modal(buffer, stride, width, height, palette, settings);
+    }
+    if let Some(confirm) = content.confirm_close {
+        render_confirm_close(buffer, stride, width, height, palette, confirm);
     }
 }
 
@@ -555,6 +601,89 @@ fn render_terminal_grid(
                 bg,
             );
         }
+    }
+}
+
+fn render_confirm_close(
+    buffer: &mut [u32],
+    stride: u32,
+    width: u32,
+    height: u32,
+    palette: &ThemePalette,
+    confirm: ConfirmCloseView,
+) {
+    let dim = rgb_to_pixel(Rgb {
+        red: 0,
+        green: 0,
+        blue: 0,
+    });
+    for y in 0..height {
+        for x in 0..width {
+            let index = (y * stride + x) as usize;
+            if let Some(pixel) = buffer.get_mut(index) {
+                let base = *pixel;
+                let r = ((base >> 16) & 0xFF) * 2 / 5;
+                let g = ((base >> 8) & 0xFF) * 2 / 5;
+                let b = (base & 0xFF) * 2 / 5;
+                *pixel = dim & 0xFF00_0000 | (r << 16) | (g << 8) | b;
+            }
+        }
+    }
+    let (mx, my, mw, mh) = confirm.bounds;
+    fill_rect(buffer, stride, mx, my, mw, mh, rgb_to_pixel(palette.modal));
+    fill_rect(
+        buffer,
+        stride,
+        mx,
+        my,
+        mw,
+        2,
+        rgb_to_pixel(palette.focus_ring),
+    );
+    draw_text(
+        buffer,
+        stride,
+        width,
+        height,
+        mx + 16,
+        my + 20,
+        &format!("Close live tab @{}?", confirm.tab_id),
+        palette.text,
+    );
+    draw_text(
+        buffer,
+        stride,
+        width,
+        height,
+        mx + 16,
+        my + 48,
+        "Process is still running.",
+        palette.text,
+    );
+    for (rect, label) in [
+        (confirm.confirm_button, "Close"),
+        (confirm.cancel_button, "Cancel"),
+    ] {
+        let (x, y, w, h) = rect;
+        fill_rect(
+            buffer,
+            stride,
+            x,
+            y,
+            w,
+            h,
+            rgb_to_pixel(palette.composer),
+        );
+        draw_text(
+            buffer,
+            stride,
+            width,
+            height,
+            x + 28,
+            y + 8,
+            label,
+            palette.text,
+        );
     }
 }
 
