@@ -150,14 +150,14 @@ Invoke-PreflightGate -Id 'toolchain' -Check {
         -not $toolchain.Contains('profile = "minimal"') -or
         -not $toolchain.Contains('"clippy"') -or
         -not $toolchain.Contains('"rustfmt"') -or
-        -not $toolchain.Contains('"x86_64-pc-windows-msvc"')) {
+        $toolchain -match '(?m)^\s*targets\s*=') {
         throw 'rust-toolchain.toml is incomplete or invalid.'
     }
     $channelPrefix = $channel.Groups['v'].Value -replace '\.\d+$', ''
     if ($channelPrefix -ne $script:rustVersion) {
         throw 'Cargo rust-version and pinned toolchain channel disagree.'
     }
-    "channel=$($channel.Groups['v'].Value)"
+    "channel=$($channel.Groups['v'].Value) targets=host-only"
 }
 
 Invoke-PreflightGate -Id 'internal-version-policy' -Check {

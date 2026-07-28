@@ -197,8 +197,10 @@ ConPTY, MSVC target). The PowerShell tooling (`build.bat`, `check.ps1`,
 run here — for the authoritative Windows dev loop see the sections above and
 `README.md`. On the Linux VM, build/lint/test Windows targets by cross-compiling
 with `cargo-xwin`. The snapshot already has Rust 1.97.0 (pinned by
-`rust-toolchain.toml`, with all six matrix targets + clippy + rustfmt),
-`cargo-xwin`, LLVM `lld`/`llvm-lib`/`llvm-rc`, a `clang-cl` symlink
+`rust-toolchain.toml`, with clippy + rustfmt). Cross targets are installed
+explicitly by the owning build or CI job so an ordinary host build does not
+download all six matrix standard libraries. The snapshot also has `cargo-xwin`,
+LLVM `lld`/`llvm-lib`/`llvm-rc`, a `clang-cl` symlink
 (`/usr/bin/clang-cl` -> `clang-18`), and Wine.
 
 CI covers all six architecture cells `{x86_64,aarch64} × {win,lnx,osx}`. Local

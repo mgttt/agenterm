@@ -69,6 +69,8 @@ jobs:
           persist-credentials: false
       - name: Install lint components
         run: rustup component add rustfmt clippy
+      - name: Install macOS ARM64 target
+        run: rustup target add aarch64-apple-darwin
       - name: Clippy (macOS client binaries)
         run: >-
           cargo clippy --locked --target aarch64-apple-darwin
@@ -97,7 +99,10 @@ jobs:
       - name: Install lint components
         run: rustup component add rustfmt clippy
       - name: Install aarch64 cross linker
-        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu qemu-user-static libxkbcommon0 libxkbcommon-x11-0
+        run: |
+          rustup target add aarch64-unknown-linux-gnu
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu qemu-user-static libxkbcommon0 libxkbcommon-x11-0
       - name: Clippy (Linux aarch64 client binaries)
         run: >-
           cargo clippy --locked --target aarch64-unknown-linux-gnu
@@ -143,6 +148,8 @@ jobs:
           persist-credentials: false
       - name: Install lint components
         run: rustup component add rustfmt clippy
+      - name: Install macOS x86_64 target
+        run: rustup target add x86_64-apple-darwin
       - name: Clippy (macOS x86_64 client binaries)
         run: >-
           cargo clippy --locked --target x86_64-apple-darwin

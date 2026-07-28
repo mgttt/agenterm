@@ -2,8 +2,8 @@
 # Build all Windows ARM64 binaries via cargo-xwin on Linux/macOS hosts.
 #
 # Rust toolchain: install the aarch64-pc-windows-msvc target (e.g. rustup target
-# add aarch64-pc-windows-msvc). It is not yet pinned in rust-toolchain.toml;
-# add it there when the CI multi-arch matrix lands.
+# add aarch64-pc-windows-msvc). Cross targets are installed by the owning
+# build/CI job rather than globally pinned.
 set -euo pipefail
 
 TARGET="aarch64-pc-windows-msvc"

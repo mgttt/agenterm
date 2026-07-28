@@ -2,8 +2,8 @@
 # Build all Windows binaries via cargo-xwin (x86_64 default, ARCH=arm64 for ARM64).
 #
 # Rust toolchain targets:
-#   x86_64 (default): x86_64-pc-windows-msvc (pinned in rust-toolchain.toml)
-#   arm64:            aarch64-pc-windows-msvc (install manually until CI matrix pins it)
+#   x86_64 (default): x86_64-pc-windows-msvc
+#   arm64:            aarch64-pc-windows-msvc (installed by the owning job)
 set -euo pipefail
 
 ARCH="${ARCH:-x86_64}"

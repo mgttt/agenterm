@@ -225,9 +225,10 @@ jobs:
 
       - name: Build macOS ARM64 clients
         if: matrix.platform_id == 'macos-aarch64'
-        run: >-
-          cargo build --locked --release --target aarch64-apple-darwin
-          --bin agenterm --bin agenterm-cli --bin agenterm-mux --bin agenterm-script
+        run: |
+          rustup target add aarch64-apple-darwin
+          cargo build --locked --release --target aarch64-apple-darwin \
+            --bin agenterm --bin agenterm-cli --bin agenterm-mux --bin agenterm-script
 
       - name: Package macOS ARM64 release
         if: matrix.platform_id == 'macos-aarch64'
