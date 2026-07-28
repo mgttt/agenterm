@@ -6592,6 +6592,12 @@ impl ControlHost for AppState {
         Ok(false)
     }
 
+    fn copy_selection(&mut self) -> Result<(), String> {
+        self.copy_terminal_selection()
+            .map(|_| ())
+            .map_err(|error| format!("{error:#}"))
+    }
+
     fn set_session_name(&mut self, name: String) {
         self.session_name = name;
     }
@@ -6995,10 +7001,6 @@ impl AppState {
                             Err(error) => Some(IpcResponse::failure(format!("{error:#}"))),
                         }
                     }
-                    "copy-selection" => match self.copy_terminal_selection() {
-                        Ok(_) => None,
-                        Err(error) => Some(IpcResponse::failure(format!("{error:#}"))),
-                    },
                     "window-minimize" => {
                         self.remask_proxy_credentials();
                         unsafe { ShowWindow(self.window, SW_MINIMIZE) };

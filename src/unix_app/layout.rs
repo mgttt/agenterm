@@ -78,6 +78,29 @@ pub(super) fn scrollbar_hit_test(
     }
 }
 
+/// Map a client pixel inside the terminal content (excluding scrollbar) to a cell.
+pub(super) fn terminal_cell_at(
+    terminal: PixelRect,
+    x: i32,
+    y: i32,
+    rows: u16,
+    cols: u16,
+    cell_width: i32,
+    cell_height: i32,
+) -> Option<(u16, u16)> {
+    let content_right = (terminal.right - TERMINAL_SCROLLBAR_WIDTH).max(terminal.left);
+    if x < terminal.left || x >= content_right || y < terminal.top || y >= terminal.bottom {
+        return None;
+    }
+    if rows == 0 || cols == 0 || cell_width <= 0 || cell_height <= 0 {
+        return None;
+    }
+    let column =
+        ((x - terminal.left) / cell_width).clamp(0, i32::from(cols.saturating_sub(1))) as u16;
+    let row = ((y - terminal.top) / cell_height).clamp(0, i32::from(rows.saturating_sub(1))) as u16;
+    Some((column, row))
+}
+
 /// Convert a winit wheel notch/pixel delta into Win32-style `WHEEL_DELTA` units.
 pub(super) fn wheel_delta_units(line_or_pixel_y: f64, is_line_delta: bool) -> i32 {
     if is_line_delta {
@@ -170,5 +193,25 @@ mod tests {
         assert_eq!(wheel_delta_units(1.0, true), WHEEL_DELTA);
         assert_eq!(wheel_delta_units(-0.5, true), -WHEEL_DELTA / 2);
         assert_eq!(wheel_delta_units(40.0, false), 40);
+    }
+
+    #[test]
+    fn terminal_cell_at_maps_pixels_inside_content() {
+        let terminal = PixelRect {
+            left: 200,
+            top: 0,
+            right: 800,
+            bottom: 480,
+        };
+        assert_eq!(
+            terminal_cell_at(terminal, 210, 8, 24, 80, 10, 16),
+            Some((1, 0))
+        );
+        assert_eq!(
+            terminal_cell_at(terminal, 790, 8, 24, 80, 10, 16),
+            None,
+            "scrollbar column is excluded"
+        );
+        assert_eq!(terminal_cell_at(terminal, 100, 8, 24, 80, 10, 16), None);
     }
 }

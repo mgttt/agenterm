@@ -1,3 +1,4 @@
+mod clipboard;
 mod font;
 mod input;
 mod layout;
@@ -31,21 +32,24 @@ use crate::{
     pty::TerminalSize,
     settings::{AppConfig, config_path, load_config, save_config},
     terminal_runtime::{TerminalLaunch, TerminalTab},
+    terminal_selection::{
+        SelectionGesture, TerminalPoint, TerminalSelection, terminal_selection_text,
+    },
     theme::ThemeId,
     wake_signal::WakeSignal,
     workspace::workspace_path,
 };
 
 use render::{
-    COMPOSER_HEIGHT, ComposerView, FrameContent, SettingsHit, SettingsModalView, SidebarTabRow,
-    TerminalGrid, effective_palette, grid_dimensions_for_pixels, render_frame,
-    scrollbar_view_from_geometry, sidebar_row_at_y,
+    CELL_HEIGHT, CELL_WIDTH, COMPOSER_HEIGHT, ComposerView, FrameContent, SettingsHit,
+    SettingsModalView, SidebarTabRow, TerminalGrid, TerminalPaint, effective_palette,
+    grid_dimensions_for_pixels, render_frame, scrollbar_view_from_geometry, sidebar_row_at_y,
 };
 
 use layout::{
     ScrollbarHit, WHEEL_DELTA, WHEEL_ROWS_PER_NOTCH, pixel_rect_json, scrollbar_geometry,
-    scrollbar_hit_test, sidebar_width_u32, terminal_pixel_rect, wheel_delta_units,
-    workspace_layout_for,
+    scrollbar_hit_test, sidebar_width_u32, terminal_cell_at, terminal_pixel_rect,
+    wheel_delta_units, workspace_layout_for,
 };
 
 use crate::ui_geometry::scrollback_for_thumb_top;
@@ -206,6 +210,8 @@ struct UnixApp {
     tab_note_draft: String,
     wheel_remainder: i32,
     scroll_drag: Option<ScrollDrag>,
+    terminal_selection: Option<TerminalSelection>,
+    terminal_selection_gesture: Option<SelectionGesture>,
 }
 
 impl UnixApp {
@@ -247,6 +253,8 @@ impl UnixApp {
             tab_note_draft: String::new(),
             wheel_remainder: 0,
             scroll_drag: None,
+            terminal_selection: None,
+            terminal_selection_gesture: None,
             config,
             modifiers: ModifiersState::empty(),
         }
@@ -690,6 +698,21 @@ impl UnixApp {
             "tab_editor": tab_editor,
             "event_position": self.event_journal.position(),
             "tabs": tabs,
+            "selection": self.terminal_selection.map(|selection| {
+                let (start, end) = selection.bounds();
+                serde_json::json!({
+                    "tab_id": format!("@{}", selection.tab_id),
+                    "start": {"row": start.row, "col": start.col},
+                    "end": {"row": end.row, "col": end.col},
+                    "dragging": selection.dragging,
+                })
+            }),
+            "terminal_interaction": {
+                "selection": self
+                    .terminal_selection_gesture
+                    .map(|gesture| gesture.phase().as_str())
+                    .unwrap_or("none"),
+            },
         }))
         .unwrap_or_else(|_| "{}".to_owned())
     }
@@ -748,11 +771,137 @@ impl UnixApp {
         if self.click_scrollbar(x as i32, y as i32) {
             return;
         }
+        if self.begin_terminal_selection(x, y) {
+            return;
+        }
         if self.composer_region_contains(x, y, window_height) {
             self.set_focus_surface_internal(UnixFocusSurface::Composer, "mouse");
         } else {
             self.set_focus_surface_internal(UnixFocusSurface::Terminal, "mouse");
         }
+    }
+
+    fn cell_at_client(&self, x: f64, y: f64) -> Option<(u16, u16)> {
+        let (rows, cols) = self
+            .active_position()
+            .map(|position| self.tabs[position].last_size)
+            .or_else(|| self.grid.as_ref().map(|grid| (grid.rows, grid.cols)))?;
+        terminal_cell_at(
+            terminal_pixel_rect(&self.layout()),
+            x as i32,
+            y as i32,
+            rows,
+            cols,
+            CELL_WIDTH as i32,
+            CELL_HEIGHT as i32,
+        )
+    }
+
+    fn begin_terminal_selection(&mut self, x: f64, y: f64) -> bool {
+        let Some(position) = self.active_position() else {
+            return false;
+        };
+        let Some((col, row)) = self.cell_at_client(x, y) else {
+            return false;
+        };
+        let tab_id = self.tabs[position].id;
+        let (rows, cols) = self.tabs[position].last_size;
+        let Some(gesture) =
+            SelectionGesture::prepare(tab_id, TerminalPoint { row, col }, rows, cols)
+        else {
+            return false;
+        };
+        self.terminal_selection = gesture.selection();
+        self.terminal_selection_gesture = Some(gesture);
+        self.set_focus_surface_internal(UnixFocusSurface::Terminal, "selection");
+        self.request_redraw();
+        true
+    }
+
+    fn drag_terminal_selection(&mut self, x: f64, y: f64) {
+        let Some(gesture) = self.terminal_selection_gesture else {
+            return;
+        };
+        if !gesture.active() {
+            return;
+        }
+        let Some(position) = self.active_position() else {
+            return;
+        };
+        let terminal = terminal_pixel_rect(&self.layout());
+        let max_x = (terminal.right - layout::SCROLLBAR_WIDTH as i32 - 1).max(terminal.left);
+        let max_y = terminal.bottom.saturating_sub(1).max(terminal.top);
+        let clamped_x = (x as i32).clamp(terminal.left, max_x);
+        let clamped_y = (y as i32).clamp(terminal.top, max_y);
+        let (rows, cols) = self.tabs[position].last_size;
+        let Some((col, row)) = terminal_cell_at(
+            terminal,
+            clamped_x,
+            clamped_y,
+            rows,
+            cols,
+            CELL_WIDTH as i32,
+            CELL_HEIGHT as i32,
+        ) else {
+            return;
+        };
+        let updated = gesture.drag_to(TerminalPoint { row, col }, rows, cols);
+        self.terminal_selection = updated.selection();
+        self.terminal_selection_gesture = Some(updated);
+        self.request_redraw();
+    }
+
+    fn complete_terminal_selection(&mut self) {
+        let Some(gesture) = self.terminal_selection_gesture.take() else {
+            return;
+        };
+        if !gesture.active() {
+            self.terminal_selection_gesture = Some(gesture);
+            return;
+        }
+        let completed = gesture.complete();
+        if let Some(selection) = completed.completed_selection() {
+            self.terminal_selection = Some(selection);
+            self.terminal_selection_gesture = Some(completed);
+        } else {
+            self.terminal_selection = None;
+            self.terminal_selection_gesture = None;
+        }
+        self.request_redraw();
+    }
+
+    fn cancel_terminal_selection(&mut self, clear_completed: bool) -> bool {
+        let mut changed = false;
+        if let Some(gesture) = self.terminal_selection_gesture.take() {
+            if gesture.active() {
+                changed = true;
+            }
+            let _ = gesture.cancel();
+        }
+        if clear_completed && self.terminal_selection.take().is_some() {
+            changed = true;
+        }
+        if changed {
+            self.request_redraw();
+        }
+        changed
+    }
+
+    fn copy_terminal_selection(&mut self) -> Result<(), String> {
+        let selection = self
+            .terminal_selection
+            .ok_or_else(|| "no terminal text is selected".to_owned())?;
+        let position = self
+            .tabs
+            .iter()
+            .position(|tab| tab.id == selection.tab_id)
+            .ok_or_else(|| "selected terminal is no longer available".to_owned())?;
+        if self.active != Some(selection.tab_id) {
+            return Err("selected terminal is not active".to_owned());
+        }
+        let text = terminal_selection_text(self.tabs[position].parser.screen(), selection);
+        clipboard::set_clipboard_text(&text)?;
+        Ok(())
     }
 
     fn scrollbar_state(
@@ -1076,7 +1225,12 @@ impl UnixApp {
             FrameContent {
                 sidebar_width,
                 content_height,
-                grid,
+                terminal: TerminalPaint {
+                    grid,
+                    selection: self
+                        .terminal_selection
+                        .filter(|selection| self.active == Some(selection.tab_id)),
+                },
                 sidebar_rows: &sidebar_rows,
                 composer: ComposerView {
                     text: &self.composer_buffer,
@@ -1321,7 +1475,14 @@ impl ControlHost for UnixApp {
             self.complete_tab_editor(false)?;
             return Ok(true);
         }
+        if self.cancel_terminal_selection(true) {
+            return Ok(true);
+        }
         Ok(false)
+    }
+
+    fn copy_selection(&mut self) -> Result<(), String> {
+        self.copy_terminal_selection()
     }
 
     fn started_at_unix_secs(&self) -> u64 {
@@ -1417,6 +1578,7 @@ impl ControlHost for UnixApp {
         if position >= self.tabs.len() {
             return Err("can't find window".to_owned());
         }
+        let _ = self.cancel_terminal_selection(true);
         if self.focus_surface == UnixFocusSurface::Composer {
             self.sync_composer_buffer_to_tab();
         }
@@ -1522,10 +1684,18 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                 self.modifiers = new_modifiers.state();
             }
             WindowEvent::KeyboardInput { event, .. } => {
+                if !event.state.is_pressed() {
+                    return;
+                }
                 if self.settings_open {
                     if let Key::Named(NamedKey::Escape) = event.logical_key {
                         let _ = self.close_settings(false);
                     }
+                    return;
+                }
+                if matches!(event.logical_key, Key::Named(NamedKey::Escape))
+                    && self.cancel_terminal_selection(true)
+                {
                     return;
                 }
                 if self.focus_surface == UnixFocusSurface::Composer {
@@ -1561,7 +1731,17 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                     }
                     return;
                 }
+                if self.modifiers.control_key()
+                    && matches!(event.logical_key, Key::Character(ref value) if value.eq_ignore_ascii_case("c"))
+                    && self.terminal_selection.is_some_and(|selection| {
+                        selection.moved && self.active == Some(selection.tab_id)
+                    })
+                {
+                    let _ = self.copy_terminal_selection();
+                    return;
+                }
                 if let Some(bytes) = input::key_event_to_bytes(&event) {
+                    let _ = self.cancel_terminal_selection(true);
                     self.queue_pty_input(bytes);
                 }
             }
@@ -1569,6 +1749,11 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                 self.last_cursor = (position.x, position.y);
                 if self.scroll_drag.is_some() {
                     self.drag_scrollbar(position.y as i32);
+                } else if self
+                    .terminal_selection_gesture
+                    .is_some_and(|gesture| gesture.active())
+                {
+                    self.drag_terminal_selection(position.x, position.y);
                 }
             }
             WindowEvent::MouseWheel { delta, .. } => {
@@ -1587,6 +1772,7 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                     .map(|window| window.inner_size().height)
                     .unwrap_or(INITIAL_HEIGHT);
                 if x < f64::from(self.sidebar_width()) {
+                    let _ = self.cancel_terminal_selection(true);
                     self.handle_sidebar_click(x, y);
                 } else {
                     self.handle_content_click(x, y, window_height);
@@ -1597,7 +1783,11 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                 button: MouseButton::Left,
                 ..
             } => {
-                self.end_scroll_drag();
+                if self.scroll_drag.is_some() {
+                    self.end_scroll_drag();
+                } else {
+                    self.complete_terminal_selection();
+                }
             }
             _ => {}
         }

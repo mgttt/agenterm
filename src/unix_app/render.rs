@@ -207,10 +207,15 @@ impl SettingsModalView<'_> {
     }
 }
 
+pub(super) struct TerminalPaint<'a> {
+    pub(super) grid: &'a TerminalGrid,
+    pub(super) selection: Option<crate::terminal_selection::TerminalSelection>,
+}
+
 pub(super) struct FrameContent<'a> {
     pub(super) sidebar_width: u32,
     pub(super) content_height: u32,
-    pub(super) grid: &'a TerminalGrid,
+    pub(super) terminal: TerminalPaint<'a>,
     pub(super) sidebar_rows: &'a [SidebarTabRow],
     pub(super) composer: ComposerView<'a>,
     pub(super) scrollbar: Option<ScrollbarView>,
@@ -246,7 +251,7 @@ pub(super) fn render_frame(
         stride,
         width,
         content.content_height,
-        content.grid,
+        content.terminal,
         palette,
         content.sidebar_width,
     );
@@ -417,22 +422,35 @@ fn render_terminal_grid(
     stride: u32,
     width: u32,
     height: u32,
-    grid: &TerminalGrid,
+    terminal: TerminalPaint<'_>,
     palette: &ThemePalette,
     offset_x: u32,
 ) {
     let terminal_width = width
         .saturating_sub(offset_x)
         .saturating_sub(SCROLLBAR_WIDTH);
-    for row in 0..grid.rows {
-        for col in 0..grid.cols {
+    let selection_fg = palette.selection_foreground;
+    let selection_bg = palette.selection_background;
+    for row in 0..terminal.grid.rows {
+        for col in 0..terminal.grid.cols {
             let x = offset_x + u32::from(col) * CELL_WIDTH;
             if x + CELL_WIDTH > offset_x + terminal_width {
                 break;
             }
-            let cell = grid.cell(col, row);
-            let fg = ansi_color(palette, cell.fg);
-            let bg = ansi_color(palette, cell.bg);
+            let cell = terminal.grid.cell(col, row);
+            let selected = terminal
+                .selection
+                .is_some_and(|selection| selection.contains(row, col));
+            let fg = if selected {
+                selection_fg
+            } else {
+                ansi_color(palette, cell.fg)
+            };
+            let bg = if selected {
+                selection_bg
+            } else {
+                ansi_color(palette, cell.bg)
+            };
             draw_cell(
                 buffer,
                 stride,
