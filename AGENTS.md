@@ -205,4 +205,35 @@ behavior.
   native control client, and `agenterm-mux.exe` as the compatibility client.
   All entry points must reuse the library.
 - Do not claim full tmux/RMUX compatibility. One AgenTerm tab is currently one
-  pane, and unsupported commands must fail explicitly.
+ pane, and unsupported commands must fail explicitly.
+
+## Cursor Cloud specific instructions
+
+The cloud VM is **Linux**, but AgenTerm is **Windows-only** (`windows-sys`,
+ConPTY, MSVC target). The PowerShell tooling (`build.bat`, `check.ps1`,
+`release.ps1`, every `tests/*.ps1` smoke test) is Windows-host-only and does not
+run here — for the authoritative Windows dev loop see the sections above and
+`README.md`. On the Linux VM, build/lint/test the real
+`x86_64-pc-windows-msvc` target by cross-compiling. The snapshot already has
+Rust 1.97.0 (pinned by `rust-toolchain.toml`, with the msvc target + clippy +
+rustfmt), `cargo-xwin`, LLVM `lld`/`llvm-lib`/`llvm-rc`, a `clang-cl` symlink
+(`/usr/bin/clang-cl` -> `clang-18`), and Wine.
+
+- Lint: `cargo fmt --check` runs natively; `cargo clippy --target
+ x86_64-pc-windows-msvc --all-targets -- -D warnings` matches CI's gate.
+- Build the four exes: `cargo xwin build --target x86_64-pc-windows-msvc`
+ (`cargo-xwin` supplies the MSVC CRT/SDK and drives `lld-link`). Output lands in
+ `target/x86_64-pc-windows-msvc/debug/`.
+- Unit tests: `cargo xwin test --target x86_64-pc-windows-msvc` compiles for
+ Windows and runs the test exes under Wine (137 lib + 16 script tests pass).
+ Set `WINEPREFIX=$HOME/.wine-agenterm WINEDEBUG=-all` to keep Wine quiet.
+- The compiled console exes run under Wine, e.g.
+ `wine target/x86_64-pc-windows-msvc/debug/agenterm-cli.exe --help`. Launching
+ `agenterm.exe` on `DISPLAY=:1` starts a working IPC server: `server-list`,
+ `ui-snapshot`, `new-window`, `inspect`, `save-workspace`, etc. all round-trip.
+- **Wine cannot sustain an interactive ConPTY shell**: a tab's `cmd.exe` starts
+ and immediately exits `dead`, so live terminal I/O, `capture-pane` output, and
+ the `tests/*.ps1` smoke suites cannot pass on Linux. Interactive-terminal and
+ rendering work must be validated on a real Windows host (that is what CI on
+ `windows-latest` covers). Treat Linux here as a fast lint/build/unit-test and
+ control-plane sanity loop, not a full end-to-end terminal environment.
