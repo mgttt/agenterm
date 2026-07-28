@@ -68,6 +68,16 @@ security plugin.
   not a persistent system daemon and keeps no mutable state across invocations.
 - [ ] an invocation may own a bounded task scheduler. Asynchronous APIs return
   typed task handles consumed through `wait` and bounded `stream` operations.
+- [ ] the Rhai engine and its `Scope` remain on one evaluation thread.
+  Background I/O stores Rust-native typed payloads and bytes in an
+  invocation-owned registry; only the evaluation thread converts completion
+  values into Rhai `Dynamic`, so host concurrency does not require sharing
+  script values or the engine across threads.
+- [ ] the public Task/Stream contract is executor-neutral. A bounded worker/
+  channel implementation and a small Rust async executor are compared by
+  cancellation correctness, streaming simplicity, dependency/binary cost and
+  throughput before selecting an implementation; Tokio is not an inherited
+  requirement.
 - [ ] the sidecar remains alive while reachable tasks, timers, child-process
   I/O, HTTP bodies, or Fleet waits are active, and exits naturally when no
   foreground task remains.
@@ -104,6 +114,16 @@ security plugin.
   cleanup behavior. Canonicalization, reparse points, atomic replacement, and
   failure paths cannot silently target a different path than the result
   reports.
+- [ ] the catalog taxonomy is not copied into the script surface. Static
+  Rhai namespaces are shallow and purpose-named (`fs`, `path`, `env`,
+  `process`, `http`, `time`, `json`, `task`); resource-bearing values use
+  custom-type methods (`Task.wait`, `Stream.read`, response/process result
+  access), while modules, named-task manifests, catalog and diagnostics remain
+  language/CLI mechanisms rather than artificial runtime namespaces.
+- [ ] globals remain minimal (`args` and `print` baseline). Native Rhai string
+  and collection operations are reused instead of wrapping every value under
+  `data`; `system`, `network`, `code-and-automation`, and `observability` are
+  catalog/manual groupings, never mandatory call prefixes.
 
 ## Local modules, tasks, and named commands
 
@@ -127,6 +147,15 @@ security plugin.
 
 ## AgenTerm Fleet API
 
+- [ ] the canonical bound user facade is `fleet`, because it carries selected
+  server, profile and broker identity. It exposes typed workspace, tabs,
+  terminal and events service objects; ordinary calls do not require users to
+  type raw operation IDs even though results and the catalog retain operation,
+  request, receipt, event and post-state identities.
+- [ ] v0.1.9 proposes Script API v2 and removes the ambiguous v1 `agent`
+  facade rather than retaining a permanent alias that conflicts with the
+  future `agenterm-agent.exe`; `check` emits a targeted migration diagnostic
+  for old `agent.*` source.
 - [ ] generate the script-facing Fleet API systematically from the public typed
   operation catalog rather than maintaining a hand-selected parallel list.
 - [ ] every entry exposes stable operation ID, classification, typed
@@ -162,6 +191,9 @@ security plugin.
   `domain -> capability group -> callable/type` paths and ordering. Human
   `script api [MODULE]` output renders that same tree; unavailable, degraded,
   planned, deferred, and intentionally out-of-scope nodes do not disappear.
+- [ ] every entry separates `catalog_path` from its shallow `surface_path`, so
+  product taxonomy can evolve without forcing nested namespaces into user
+  source or silently renaming callable contracts.
 - [ ] optional comparison metadata maps a capability to a reviewed Node.js or
   Bun analogue as `similar`, `agenterm-specific`, `deferred`, or
   `not-applicable`, with source/version and review date. It supports gap

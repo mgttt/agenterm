@@ -378,7 +378,7 @@ request(method, url, options) -> TaskHandle|Response
 - hex/base64 是否进入首版由实际 HTTP/process 旅程决定；
 - 深层 JSON、巨大 collection、无效 UTF-8 返回 typed limit/data error。
 
-### API 能力全景树
+### Catalog 能力全景树（不是脚本 namespace）
 
 API 不使用一张不断变长的平面函数表，而使用稳定的
 `domain -> capability group -> callable/type` 三层树。状态图例：
@@ -492,6 +492,97 @@ agenterm-script
    └─ [ ] docs/manual generation and catalog/runtime conformance
 ```
 
+这棵 catalog 树回答“产品覆盖了哪些问题域”，不直接规定用户必须写成
+`system::fs::read_text()`。分类层级可以深，脚本调用表面必须浅。
+
+### 用户脚本表面：浅 namespace + typed object
+
+推荐把用户真正记忆的表面压缩为：
+
+```text
+全局（只留最常用）
+├─ args
+└─ print(...)
+
+静态 namespace（无 invocation identity）
+├─ fs::       文件、目录、owned temp
+├─ path::     Windows path 运算
+├─ env::      worker/child 环境
+├─ process::  子进程
+├─ http::     HTTP(S) client
+├─ time::     时间、Duration、timer
+├─ json::     parse/stringify
+└─ task::     多 Task 组合
+
+typed object（有状态或有 identity，使用点号）
+├─ Task        .wait() / .cancel() / .state
+├─ Stream      .read() / .close() / .truncated
+├─ Bytes       .len / .slice() / .to_text()
+├─ ProcessResult
+├─ HttpResponse
+└─ Fleet facade
+   ├─ fleet.workspace
+   ├─ fleet.tabs
+   ├─ fleet.events
+   └─ fleet.terminal(tab_id)
+
+语言/CLI 机制（不是 runtime namespace）
+├─ import "relative/module" as m
+├─ agenterm.tasks.json
+└─ script task list / show / run
+
+catalog/diagnostics（不是 runtime namespace）
+├─ script api
+├─ script check
+└─ typed result / audit / limits
+```
+
+选择规则：
+
+- namespace 使用 Rhai 原生 `::`，例如 `fs::read_text(path)`；
+- 有资源 identity 或生命周期的值使用方法，例如 `job.wait()`、
+  `response.body.read()`；
+- 不暴露 `runtime::data::...`、`system::...`、`network::...` 等分类壳；
+- `text` 优先使用 Rhai 原生 string；额外编码能力放进 `Bytes` 或极小的
+  `text::`，不为凑树创建空 namespace；
+- `stream` 主要是 typed object，不要求用户写
+  `stream::read(stream_handle)`；
+- named task 属于 manifest/CLI；不要与并发 `Task` 混成同一注册表；
+- Fleet 是与当前 server、profile 和 broker 绑定的 facade，因此用 `fleet`
+  object 而不是假装无状态的 static namespace；
+- 当前 v1 的 `agent` 名称会与未来 `agenterm-agent.exe` 概念冲突。建议
+  v0.1.9 升 Script API v2，以 `fleet` 为唯一 canonical 名称；`check`
+  针对旧 `agent.*` 给出明确迁移诊断，不长期保留第二别名。
+
+普通脚本应当短而直：
+
+```rhai
+let config = json::parse(fs::read_text("agenterm.local.json"));
+
+let result = process::run(
+    "git",
+    ["status", "--short"],
+    #{ cwd: config.repo, timeout: time::seconds(10) }
+);
+
+if !result.success {
+    throw result.error;
+}
+
+print(result.stdout);
+```
+
+Fleet 操作也应从用户对象出发，而不是暴露内部 operation ID：
+
+```rhai
+let active = fleet.tabs.active();
+let screen = fleet.terminal(active.id).capture(4096);
+print(screen.text);
+```
+
+operation ID、receipt、event 和 post-state 仍存在于 typed result/catalog，
+只是普通路径不要求用户手工拼接它们。
+
 这棵树是范围地图，不表示追求 Node.js/Bun API 兼容。横向比较采用
 “用途相似”而不是“函数同名”：
 
@@ -526,7 +617,39 @@ AgenTerm-native contract
 
 ## 七、Task 与 Stream 模型
 
-Rhai 不需要伪装成 JavaScript Promise。首版使用显式 typed handle：
+### 用户心智：默认顺序执行，需要并行时才显式 start
+
+Rhai 不需要伪装成 JavaScript Promise，也不新增 `async`/`await` 语法。
+普通 I/O 使用阻塞脚本调用：
+
+```rhai
+let result = process::run("git", ["status"], #{});
+let response = http::request("GET", url, #{});
+```
+
+这里“阻塞”的只是本次 `agenterm-script.exe` 的 Rhai evaluation thread，
+不会阻塞 AgenTerm GUI、PTY、server 或其他 invocation。需要并行时，只有
+可能长时间运行的 API 提供语义不同的 `start`/`spawn`：
+
+```rhai
+let web = http::start("GET", release_url, #{});
+let git = process::start("git", ["status", "--short"], #{ cwd: repo });
+
+// 两项已经并行运行；wait 的书写顺序不等于执行顺序。
+let response = web.wait(time::seconds(15));
+let status = git.wait(time::seconds(15));
+```
+
+这不是为每个函数复制 `fooSync/foo/fooAsync` 三套 API。规则是：
+
+- 快速、本地、有界操作只提供直接调用；
+- 外部 I/O/进程/Fleet wait 提供直接调用和显式 `start`；
+- `run/request/wait` 表示本行取得终态；
+- `start` 表示立即返回 `Task`；
+- `Task.wait()`、`Task.cancel()` 是统一组合面；
+- v0.1.9 不并行执行任意 Rhai closure，不引入 worker-thread 共享脚本状态。
+
+首版使用显式 typed handle：
 
 ```text
 TaskHandle
@@ -562,6 +685,53 @@ stream.close(handle)
 - truncation 不能伪装完整；
 - worker crash/parent exit 由 Job Object 与 supervisor 清理 child；
 - task error 包含 stable code，不把任意 body/argv/env 写入 message。
+
+### Rust host 如何实现
+
+Rhai evaluation 本身保持单线程、同步。异步能力属于 Rust host：
+
+```text
+agenterm-cli supervisor
+  ├─ deadline / Ctrl+C / Job Object / forced cleanup
+  └─ framed protocol
+       |
+agenterm-script process
+  ├─ frame loop
+  │    └─ 即使 Rhai 正在 wait，仍能接收 cancel frame
+  ├─ Rhai evaluation thread
+  │    ├─ 执行普通表达式
+  │    ├─ start() 只登记任务并立即返回 Task ID
+  │    └─ wait() 等待 registry condition，不占用 GUI/server
+  └─ invocation-owned task runtime
+       ├─ child process + stdout/stderr pumps
+       ├─ HTTP request/body pump
+       ├─ timer
+       └─ Fleet broker wait
+            |
+            └─ completion/result/stream queue/cancel token
+```
+
+Rust 的 `async fn` 会产生 `Future`，Future 必须由 executor poll 才推进；
+Tokio 是一种 executor/runtime，但不是唯一实现。v0.1.9 不应因为“异步”
+二字就立即加入 Tokio。波次 0 比较两种实现：
+
+1. 小型 fixed worker/thread + channel/condition variable；
+2. 小型 async executor，在 HTTP streaming、timer 与 cancellation 明显更
+   简单且二进制预算可接受时才采用。
+
+用户看到的 `Task` 合同与底层选择无关。后台任务保存 Rust typed payload、
+bytes 和状态；只有 Rhai thread 在 `wait/read` 时把结果转换成 `Dynamic`。
+这样不需要把 `Engine`、`Scope` 或任意 Rhai value 跨线程共享，也不需要
+仅为 I/O 并发开启 Rhai `sync` feature。
+
+取消有三层：
+
+1. frame loop 收到 cancel，设置 invocation cancellation token；
+2. task runtime 取消 HTTP/Fleet wait，终止 child 并唤醒 `Task.wait()`；
+3. Rhai CPU loop 由 `Engine::on_progress` 观察 token；超出 grace 后由
+   supervisor/Job Object 强制清理。
+
+因此“脚本看起来同步”与“系统能够并发、取消、不冻结 GUI”并不矛盾。
 
 ## 八、模块系统
 
@@ -1038,6 +1208,9 @@ README 增加一个简短 script task 示例；完整 API、manifest 和错误�
 | local 又被安全模型阉割 | 每次 fs/process 都要 capability | agent policy 留给未来 agent 层 |
 | 标准库变成一个大文件 | bin/runtime 同时塞 fs/http/task | 按域拆模块，先冻结 typed contracts |
 | Rhai 异步模型难用 | API 假装 Promise 或靠 callback 地狱 | 显式 TaskHandle/StreamHandle |
+| catalog 分类泄漏进用户代码 | 出现 `system::network::http` | catalog_path 与 shallow surface_path 分离 |
+| 为“异步”直接引入大 runtime | 未做 spike 就加入 Tokio | Task 合同与 executor 解耦，按证据选型 |
+| Rhai value 跨线程共享 | worker 持有 Dynamic/Scope/Engine | 后台只存 Rust payload，Rhai 线程转换 |
 | process 存在命令注入 | API 接收一个 shell string | executable + argv，shell 必须显式 |
 | HTTP 拉大依赖 | script binary 明显超预算 | 先做 size spike，限制 feature |
 | Fleet API 再造一套 | 手写几十个函数和帮助 | 从 operation catalog 生成/适配 |
@@ -1067,6 +1240,14 @@ README 增加一个简短 script task 示例；完整 API、manifest 和错误�
 12. 自托管只做一个低风险 PowerShell helper 双跑。
 13. v0.1.9 只交付 package-ready identity/provenance hooks，不实现包管理。
 14. `agenterm.tasks.json` 与未来 package manifest 永久保持职责分离。
+15. catalog taxonomy 与脚本 surface 分离；用户只面对浅 namespace。
+16. static namespace 使用 `::`，有 identity 的 typed object 使用点号方法。
+17. canonical Fleet facade 使用 `fleet`；Script API v2 不长期保留 `agent`
+    别名，只提供明确迁移诊断。
+18. Rhai 不新增 async/await；直接调用服务顺序脚本，`start` + `Task` 服务
+    显式并发。
+19. Task/Stream 合同不绑定 Tokio；executor 由波次 0 的体积、取消和
+    streaming spike 决定。
 
 实施波次 0 仍需用 spike 确认：
 
