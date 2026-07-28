@@ -105,6 +105,27 @@ impl UiClientCommandQueue {
         }
     }
 
+    pub(crate) fn replace_completed(
+        &mut self,
+        command_id: &str,
+        response: &IpcResponse,
+    ) -> Result<(), String> {
+        let encoded = serde_json::to_string(response)
+            .map_err(|error| format!("UI client command response is invalid: {error}"))?;
+        if encoded.len() > UI_CLIENT_COMMAND_RESPONSE_MAX_BYTES {
+            return Err("UI client command response exceeds its byte budget".to_owned());
+        }
+        let Some((_, response_json)) = self
+            .completed
+            .iter_mut()
+            .find(|(candidate, _)| candidate == command_id)
+        else {
+            return Err("UI client command completion is unavailable".to_owned());
+        };
+        *response_json = encoded;
+        Ok(())
+    }
+
     pub(crate) fn clear_active(&mut self) {
         self.pending.clear();
         self.in_flight.clear();

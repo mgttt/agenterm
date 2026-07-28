@@ -40,16 +40,18 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       and `ui-snapshot` falls back to truthful `headless_server` state.
       Public replaceable-UI smoke proves both projection and fallback with
       the same server PID and retained PTY.
-    - [~] a bounded lease-owned command relay preserves synchronous public
+    - [x] a bounded lease-owned command relay preserves synchronous public
       CLI results without making the server call back into the GUI while its
       state loop is blocked: the server queues at most 64 commands, the exact
       GUI lease polls and completes them, and the CLI waits on a typed command
       ID for the final `IpcResponse`. Public black-box evidence now covers
       client-owned Tabs, Settings, focus and PNG screenshot actions plus
       exact-lease server apply/invoke paths; queue arguments are capped at
-      64/256 KiB and responses at 1 MiB. Deferred completion for the two
-      actions that destroy the GUI (`keep-server-running` and
-      `stop-server-and-exit`) remains before ordinary-launch cutover.
+      64/256 KiB and responses at 1 MiB. GUI-destroying
+      `keep-server-running` completes its detached response before releasing
+      the lease, while `stop-server-and-exit` additionally delays server
+      shutdown until the CLI has collected that result; both paths are
+      orphan-free in the public black box.
     - [ ] switch ordinary `agenterm.exe` launches only after the replaceable
       client reaches the accepted workbench, settings, editing, selection,
       clipboard, scrollback, close-dialog and observation parity gates
@@ -125,7 +127,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       Composer command and publish pending working-context plus causal events,
       while Esc or a second segment click restores the prior draft unchanged.
       Same-server GUI upgrade and rollback qualification is shipped. Ordinary
-      launches and the remaining destructive-close relay edge are still
+      launches and the remaining observation-shape parity audit are still
       pending before the split path can become the default.
   - [ ] compatibility is fail-closed and asymmetric: a new GUI may connect to
     its declared server protocol range; an incompatible server remains alive

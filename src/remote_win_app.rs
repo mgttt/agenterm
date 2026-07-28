@@ -493,6 +493,7 @@ struct RemoteWindowState {
     pending_close_tab_id: Option<String>,
     cwd_edit_tab_id: Option<String>,
     last_published_snapshot: Option<String>,
+    relay_close_after_completion: Option<RemoteCloseChoice>,
 }
 
 impl RemoteWindowState {
@@ -572,6 +573,7 @@ impl RemoteWindowState {
             pending_close_tab_id: None,
             cwd_edit_tab_id: None,
             last_published_snapshot: None,
+            relay_close_after_completion: None,
         })
     }
 
@@ -664,8 +666,15 @@ impl RemoteWindowState {
             return Ok(false);
         };
         let outcome = self.execute_client_command(&command);
+        let close_after_completion = outcome
+            .as_ref()
+            .ok()
+            .and_then(|_| self.relay_close_after_completion.take());
         let response = match outcome {
             Ok(Some(output)) => IpcResponse::success(output),
+            Ok(None) if close_after_completion.is_some() => {
+                IpcResponse::success(self.detached_ui_snapshot_json()?)
+            }
             Ok(None) => IpcResponse::success(self.ui_snapshot_json()?),
             Err(error) => {
                 let error = format!("{error:#}");
@@ -676,7 +685,25 @@ impl RemoteWindowState {
         self.client
             .as_mut()
             .context("replaceable UI is disconnected")?
-            .complete_client_command(&command.command_id, &response)?;
+            .complete_client_command(
+                &command.command_id,
+                &response,
+                close_after_completion.is_some(),
+                matches!(
+                    close_after_completion,
+                    Some(RemoteCloseChoice::StopServerAndExit)
+                ),
+            )?;
+        if let Some(choice) = close_after_completion {
+            self.window_close_pending = false;
+            match choice {
+                RemoteCloseChoice::KeepServerRunning | RemoteCloseChoice::StopServerAndExit => unsafe {
+                    DestroyWindow(self.window);
+                },
+                RemoteCloseChoice::Cancel => {}
+            }
+            return Ok(true);
+        }
         if response.ok
             && serde_json::from_str::<serde_json::Value>(&response.output)
                 .ok()
@@ -906,8 +933,17 @@ impl RemoteWindowState {
                     );
                 }
             }
-            "keep-server-running" | "stop-server-and-exit" => {
-                anyhow::bail!("{action} relay is not available until deferred close completion")
+            "keep-server-running" => {
+                if !self.window_close_pending {
+                    anyhow::bail!("no window-close confirmation is pending");
+                }
+                self.relay_close_after_completion = Some(RemoteCloseChoice::KeepServerRunning);
+            }
+            "stop-server-and-exit" => {
+                if !self.window_close_pending {
+                    anyhow::bail!("no window-close confirmation is pending");
+                }
+                self.relay_close_after_completion = Some(RemoteCloseChoice::StopServerAndExit);
             }
             action if action.starts_with("proxy-") || action == "open-proxy-editor" => {
                 anyhow::bail!("proxy workbench controls are archived")
@@ -1071,6 +1107,21 @@ impl RemoteWindowState {
             .context("UI is disconnected")?
             .poll_deltas()?;
         Ok(())
+    }
+
+    fn detached_ui_snapshot_json(&self) -> Result<String> {
+        let mut value: serde_json::Value = serde_json::from_str(&self.ui_snapshot_json()?)
+            .context("could not decode replaceable UI snapshot")?;
+        value["window"]["visible"] = serde_json::Value::Bool(false);
+        value["window"]["detached"] = serde_json::Value::Bool(true);
+        value["layout"]["composer"]["visible"] = serde_json::Value::Bool(false);
+        value["layout"]["composer"]["input_visible"] = serde_json::Value::Bool(false);
+        value["layout"]["composer"]["send_visible"] = serde_json::Value::Bool(false);
+        value["modal"] = serde_json::Value::Null;
+        value["tab_editor"] = serde_json::Value::Null;
+        value["focus"]["surface"] = serde_json::Value::String("terminal".to_owned());
+        serde_json::to_string_pretty(&value)
+            .context("could not encode detached replaceable UI snapshot")
     }
 
     fn command_target_tab(&self, args: &[String]) -> Result<UiTabBootstrap> {

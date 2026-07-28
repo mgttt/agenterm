@@ -291,10 +291,12 @@ impl UiClientModel {
         &mut self,
         command_id: &str,
         response: &IpcResponse,
+        detach: bool,
+        shutdown_after_result: bool,
     ) -> Result<()> {
         let response_json =
             serde_json::to_string(response).context("could not encode UI client response")?;
-        let completion: serde_json::Value = request_json(vec![
+        let mut arguments = vec![
             "ui-client-command".to_owned(),
             "complete".to_owned(),
             "--lease-id".to_owned(),
@@ -305,7 +307,14 @@ impl UiClientModel {
             command_id.to_owned(),
             "--response-json".to_owned(),
             response_json,
-        ])?;
+        ];
+        if detach {
+            arguments.push("--detach".to_owned());
+        }
+        if shutdown_after_result {
+            arguments.push("--shutdown-after-result".to_owned());
+        }
+        let completion: serde_json::Value = request_json(arguments)?;
         if completion["completed"].as_bool() != Some(true)
             || completion["command_id"].as_str() != Some(command_id)
         {

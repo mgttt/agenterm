@@ -694,7 +694,7 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
                 "--response-json",
                 "--args-json",
             ][..],
-            &[][..],
+            &["--detach", "--shutdown-after-result"][..],
             false,
         ),
         "ui-deltas" => (

@@ -1240,15 +1240,19 @@ try {
         $ScreenshotPath = [IO.Path]::GetFullPath($ScreenshotPath)
     }
     Save-WindowPng -Window $gui.MainWindowHandle -Path $ScreenshotPath
-    [AgenTermRemoteUiNativeTest]::SendMessage(
-        $gui.MainWindowHandle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero
-    ) | Out-Null
-    $replacementKeep = [AgenTermRemoteUiNativeTest]::GetDlgItem(
-        $gui.MainWindowHandle, 2109
-    )
-    [AgenTermRemoteUiNativeTest]::SendMessage(
-        $replacementKeep, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero
-    ) | Out-Null
+    $relayClose = Invoke-AgenTerm @('ui-action', 'close-window') |
+        ConvertFrom-Json
+    if ($relayClose.modal.kind -ne 'confirm-window-close') {
+        throw 'relayed close-window did not open the native confirmation'
+    }
+    $relayDetached = Invoke-AgenTerm @(
+        'ui-action', 'keep-server-running'
+    ) | ConvertFrom-Json
+    if ($relayDetached.window.visible -ne $false -or
+        $relayDetached.window.detached -ne $true -or
+        $relayDetached.layout.composer.visible -ne $false) {
+        throw 'relayed Keep Server Running did not return detached UI facts'
+    }
     if (-not $gui.WaitForExit(5000)) {
         throw 'replacement GUI did not release its lease through Keep Server Running'
     }
@@ -1285,18 +1289,12 @@ try {
     if (-not $stopReady) {
         throw 'final replaceable UI did not acquire the lease for stop-server proof'
     }
-    [AgenTermRemoteUiNativeTest]::SendMessage(
-        $stopGui.MainWindowHandle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero
-    ) | Out-Null
-    $stopButton = [AgenTermRemoteUiNativeTest]::GetDlgItem(
-        $stopGui.MainWindowHandle, 2110
-    )
-    if (-not [AgenTermRemoteUiNativeTest]::IsWindowVisible($stopButton)) {
-        throw 'Stop Server & Exit choice was not visible'
+    $stopModal = Invoke-AgenTerm @('ui-action', 'close-window') |
+        ConvertFrom-Json
+    if ($stopModal.modal.kind -ne 'confirm-window-close') {
+        throw 'relayed stop proof did not open the window-close confirmation'
     }
-    [AgenTermRemoteUiNativeTest]::SendMessage(
-        $stopButton, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero
-    ) | Out-Null
+    Invoke-AgenTerm @('ui-action', 'stop-server-and-exit') | Out-Null
     if (-not $stopGui.WaitForExit(5000)) {
         throw 'Stop Server & Exit did not close its UI'
     }

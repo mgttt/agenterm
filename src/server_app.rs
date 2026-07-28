@@ -10,7 +10,7 @@ use anyhow::{Context as _, Result};
 
 use crate::{
     UpgradeIdentity,
-    commands::option_value,
+    commands::{has_option, option_value},
     control_authority::{
         ControlAdmission, ControlAuthority, control_event_position, resolved_control_target,
         submission_wait,
@@ -175,6 +175,7 @@ struct ServerState {
     ui_lease: UiLeaseAuthority,
     ui_client_snapshot: Option<UiClientSnapshotRecord>,
     ui_client_commands: UiClientCommandQueue,
+    shutdown_after_ui_result: Option<String>,
     wake_signal: Arc<WakeSignal>,
     ipc_receiver: Receiver<IpcEnvelope>,
     shutdown_requested: bool,
@@ -214,6 +215,7 @@ impl ServerState {
             ui_lease: UiLeaseAuthority::default(),
             ui_client_snapshot: None,
             ui_client_commands: UiClientCommandQueue::new(command_identity),
+            shutdown_after_ui_result: None,
             wake_signal,
             ipc_receiver,
             shutdown_requested: false,
@@ -307,6 +309,7 @@ impl ServerState {
             self.ui_client_snapshot = None;
             self.ui_client_commands.clear_active();
             self.commit_ui_lease_event(&record, "detached", reason);
+            self.commit_window_visibility(false, true, reason);
         }
     }
 
@@ -319,6 +322,18 @@ impl ServerState {
                 "client_id": record.client_id,
                 "client_pid": record.client_pid,
                 "client_build": record.client_build,
+                "reason": reason,
+            }),
+        );
+    }
+
+    fn commit_window_visibility(&mut self, visible: bool, detached: bool, reason: &str) {
+        self.event_journal.commit(
+            EventKind::WindowVisibility,
+            None,
+            serde_json::json!({
+                "visible": visible,
+                "detached": detached,
                 "reason": reason,
             }),
         );
@@ -424,6 +439,7 @@ impl ServerState {
                             self.ui_client_snapshot = None;
                             self.ui_client_commands.clear_active();
                             self.commit_ui_lease_event(&record, "attached", "requested");
+                            self.commit_window_visibility(true, false, "lease-attached");
                         }
                         self.ui_lease_grant_json(record)
                     }
@@ -478,6 +494,7 @@ impl ServerState {
                         self.ui_client_snapshot = None;
                         self.ui_client_commands.clear_active();
                         self.commit_ui_lease_event(&record, "detached", "requested");
+                        self.commit_window_visibility(false, true, "detach");
                         let position = self.event_journal.position();
                         IpcResponse::success(
                             serde_json::json!({
@@ -650,6 +667,7 @@ impl ServerState {
                     false,
                 );
             };
+            let mut completed = false;
             let value = match self.ui_client_commands.result(command_id) {
                 UiClientCommandResult::Pending => {
                     serde_json::json!({"state": "pending", "command_id": command_id})
@@ -658,6 +676,7 @@ impl ServerState {
                     serde_json::json!({"state": "in_flight", "command_id": command_id})
                 }
                 UiClientCommandResult::Complete(response_json) => {
+                    completed = true;
                     let response = serde_json::from_str::<serde_json::Value>(response_json)
                         .unwrap_or(serde_json::Value::Null);
                     serde_json::json!({
@@ -675,6 +694,10 @@ impl ServerState {
                     );
                 }
             };
+            if completed && self.shutdown_after_ui_result.as_deref() == Some(command_id) {
+                self.shutdown_after_ui_result = None;
+                self.shutdown_requested = true;
+            }
             return IpcResponse::success(value.to_string());
         }
 
@@ -802,7 +825,7 @@ impl ServerState {
                         false,
                     );
                 };
-                let response = match self
+                let mut response = match self
                     .ui_client_commands
                     .complete(command_id, response_json.to_owned())
                 {
@@ -816,6 +839,43 @@ impl ServerState {
                         );
                     }
                 };
+                if has_option(args, "--detach") {
+                    let record = match self.ui_lease.detach(lease_id, client_pid) {
+                        Ok(record) => record,
+                        Err(error) => return Self::ui_lease_failure(error),
+                    };
+                    self.ui_client_snapshot = None;
+                    self.ui_client_commands.clear_active();
+                    self.commit_ui_lease_event(&record, "detached", "requested");
+                    self.commit_window_visibility(false, true, "detach");
+                    let position = self.event_journal.position();
+                    if response.ok
+                        && let Ok(mut value) =
+                            serde_json::from_str::<serde_json::Value>(&response.output)
+                        && value["projection"].as_str() == Some("replaceable_ui_client")
+                    {
+                        value["event_position"]["epoch"] =
+                            serde_json::Value::String(position.epoch);
+                        value["event_position"]["sequence"] =
+                            serde_json::Value::from(position.sequence);
+                        response.output =
+                            serde_json::to_string_pretty(&value).unwrap_or(response.output);
+                    }
+                    if let Err(error) = self
+                        .ui_client_commands
+                        .replace_completed(command_id, &response)
+                    {
+                        return IpcResponse::typed_failure(
+                            error,
+                            "ui_client_command_completion_invalid",
+                            "internal",
+                            false,
+                        );
+                    }
+                }
+                if has_option(args, "--shutdown-after-result") {
+                    self.shutdown_after_ui_result = Some(command_id.to_owned());
+                }
                 if response.ok
                     && serde_json::from_str::<serde_json::Value>(&response.output)
                         .ok()
@@ -1543,6 +1603,25 @@ impl ControlHost for ServerState {
                 "server_pid": std::process::id(),
                 "event_position": position,
                 "active_tab_id": self.active.map(|id| format!("@{id}")),
+                "window": {
+                    "title": serde_json::Value::Null,
+                    "visible": false,
+                    "detached": true,
+                    "minimized": false,
+                    "state": "detached",
+                },
+                "layout": {
+                    "composer": {
+                        "visible": false,
+                        "input_visible": false,
+                        "send_visible": false,
+                    },
+                },
+                "focus": {
+                    "surface": serde_json::Value::Null,
+                    "window_id": self.active.map(|id| format!("@{id}")),
+                },
+                "modal": serde_json::Value::Null,
                 "tabs": self.tabs.iter().map(|tab| serde_json::json!({
                     "id": format!("@{}", tab.id),
                     "index": tab.index,
