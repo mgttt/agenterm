@@ -1,8 +1,35 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "project": {
     "id": "agenterm-script-daily-check",
-    "version": "1.0.0"
+    "version": "1.0.0",
+    "requires": {
+      "script_api": {
+        "minimum": 2,
+        "maximum": 2
+      },
+      "capabilities": [
+        "runtime.project.named-task",
+        "rhai.json.parse",
+        "rhai.json.stringify-pretty",
+        "rhai.runtime.atomic-write",
+        "rhai.runtime.temp-dir",
+        "rhai.http.response",
+        "rhai.http.start",
+        "rhai.stream.handle",
+        "rhai.task.handle",
+        "std.fs.read-to-string",
+        "std.fs.write",
+        "std.path.join",
+        "std.process.child",
+        "std.process.command",
+        "std.process.command-builder",
+        "std.process.command-start",
+        "std.process.output",
+        "std.time.duration-from-secs",
+        "tabs.set-note"
+      ]
+    }
   },
   "tasks": [
     {

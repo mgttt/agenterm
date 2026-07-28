@@ -1131,8 +1131,15 @@ try {
     $degradedTask = @($taskCatalog.tasks | Where-Object id -eq 'missing-entry')
     $unknownFieldTask = @($taskCatalog.tasks | Where-Object id -eq 'unknown-field')
     $noExecuteTask = @($taskCatalog.tasks | Where-Object id -eq 'no-execute')
-    if ($taskCatalog.schema_version -ne 1 -or
+    if ($taskCatalog.schema_version -ne 2 -or
         $taskCatalog.project_id -ne 'script-smoke' -or
+        -not $taskCatalog.compatible -or
+        $null -ne $taskCatalog.compatibility_reason -or
+        $taskCatalog.requirements.script_api.minimum -ne 2 -or
+        $taskCatalog.requirements.script_api.maximum -ne 2 -or
+        @($taskCatalog.requirements.capabilities).Count -ne 4 -or
+        @($taskCatalog.requirements.capabilities) -notcontains
+            'runtime.project.named-task' -or
         $readyTask.Count -ne 1 -or $readyTask[0].status -ne 'ready' -or
         $degradedTask.Count -ne 1 -or $degradedTask[0].status -ne 'degraded' -or
         $degradedTask[0].degraded_reason -notlike 'task_path_missing:*' -or
@@ -1147,9 +1154,20 @@ try {
         '--manifest', $taskManifest, '--json'
     ) | ConvertFrom-Json
     if ($taskShow.project_version -ne '1.0.0' -or
+        -not $taskShow.compatible -or
+        $taskShow.requirements.script_api.minimum -ne 2 -or
+        @($taskShow.requirements.capabilities) -notcontains
+            'runtime.project.module-import' -or
         @($taskShow.tasks).Count -ne 1 -or
         $taskShow.tasks[0].entry -ne 'main.rhai') {
         throw 'named-task inspection lost project or entry identity'
+    }
+    $taskCheck = Invoke-Script @(
+        'script', 'task', 'check', 'daily-check',
+        '--manifest', $taskManifest
+    )
+    if ($taskCheck -ne 'OK') {
+        throw 'named-task check did not validate the compatible task without execution'
     }
     $noExecuteShow = Invoke-Script @(
         'script', 'task', 'show', 'no-execute',
@@ -1164,6 +1182,42 @@ try {
     )
     if ($badVersion -notlike '*task_manifest_version:*') {
         throw 'task manifest version failure was not typed'
+    }
+    $incompatibleManifest = Join-Path $projectFixture 'incompatible.tasks.json'
+    $incompatibleCatalog = Invoke-Script @(
+        'script', 'task', 'list',
+        '--manifest', $incompatibleManifest, '--json'
+    ) | ConvertFrom-Json
+    $incompatibleShow = Invoke-Script @(
+        'script', 'task', 'show', 'must-not-run',
+        '--manifest', $incompatibleManifest, '--json'
+    ) | ConvertFrom-Json
+    if ($incompatibleCatalog.compatible -or
+        $incompatibleCatalog.compatibility_reason -ne
+            'capability_unknown: future.capability' -or
+        $incompatibleCatalog.requirements.script_api.minimum -ne 2 -or
+        @($incompatibleCatalog.requirements.capabilities) -notcontains
+            'future.capability' -or
+        $incompatibleCatalog.tasks[0].status -ne 'ready' -or
+        $incompatibleShow.compatible -or
+        $incompatibleShow.compatibility_reason -ne
+            'capability_unknown: future.capability' -or
+        $incompatibleShow.tasks[0].entry -ne 'compile-only.rhai') {
+        throw 'incompatible project requirements were not inspectable without execution'
+    }
+    $incompatibleCheck = Invoke-ScriptFailure 2 @(
+        'script', 'task', 'check', 'must-not-run',
+        '--manifest', $incompatibleManifest
+    )
+    $incompatibleRun = Invoke-ScriptFailure 2 @(
+        'script', 'task', 'run', 'must-not-run',
+        '--manifest', $incompatibleManifest
+    )
+    if ($incompatibleCheck -notlike
+            '*task_project_incompatible: capability_unknown: future.capability*' -or
+        $incompatibleRun -notlike
+            '*task_project_incompatible: capability_unknown: future.capability*') {
+        throw 'incompatible project requirements did not fail closed before execution'
     }
     $duplicateCatalog = Invoke-Script @(
         'script', 'task', 'list',
@@ -1958,11 +2012,23 @@ let receipt = fleet.tabs.set_note($fleetTabIdLiteral, $fleetNoteLiteral);
             '--manifest', $northStarManifest, '--json'
         ) | ConvertFrom-Json
         if ($northStarCatalog.project_id -ne 'agenterm-script-daily-check' -or
+            $northStarCatalog.schema_version -ne 2 -or
+            -not $northStarCatalog.compatible -or
+            @($northStarCatalog.requirements.capabilities) -notcontains
+                'rhai.http.start' -or
             @($northStarCatalog.tasks).Count -ne 1 -or
             $northStarCatalog.tasks[0].status -ne 'ready' -or
+            -not $northStarShow.compatible -or
             $northStarShow.tasks[0].entry -ne 'daily-check.rhai' -or
             $northStarShow.tasks[0].profile -ne 'local') {
             throw 'north-star task list/show lost inspectable manifest facts'
+        }
+        $northStarTaskCheck = Invoke-DirectScript @(
+            'task', 'check', 'daily-check',
+            '--manifest', $northStarManifest
+        )
+        if ($northStarTaskCheck -ne 'OK') {
+            throw 'agenterm-script task check rejected the compatible north-star task'
         }
         Write-Evidence 'script.direct-entry'
 

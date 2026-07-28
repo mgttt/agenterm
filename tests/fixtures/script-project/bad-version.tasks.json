@@ -2,7 +2,14 @@
   "schema_version": 99,
   "project": {
     "id": "script-smoke",
-    "version": "1.0.0"
+    "version": "1.0.0",
+    "requires": {
+      "script_api": {
+        "minimum": 2,
+        "maximum": 2
+      },
+      "capabilities": []
+    }
   },
   "tasks": []
 }

@@ -631,8 +631,9 @@ agenterm-script
 │  │  ├─ [x] local relative import / explicit project root
 │  │  └─ [>] root escape / missing / cycle 已分型；跨 invocation cache 延后
 │  ├─ task-manifest
-│  │  ├─ [x] agenterm.tasks.json schema v1
-│  │  └─ [x] project identity/version + entry/args/cwd/env names/profile
+│  │  ├─ [x] agenterm.tasks.json schema v2
+│  │  ├─ [x] project identity/version + entry/args/cwd/env names/profile
+│  │  └─ [x] required Script API range + stable capability IDs
 │  ├─ package
 │  │  ├─ [-] npm / Node module compatibility
 │  │  └─ [>] softmgr / signed package and application market
@@ -945,14 +946,21 @@ agenterm.tasks.json
 - schema、error location、machine editing 和工具消费直接；
 - 与 `api --json`、receipt、diagnostic manifest 语言一致。
 
-已交付 schema v1：
+已交付 schema v2：
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "project": {
     "id": "daily-tools",
-    "version": "1.0.0"
+    "version": "1.0.0",
+    "requires": {
+      "script_api": {"minimum": 2, "maximum": 2},
+      "capabilities": [
+        "runtime.project.named-task",
+        "std.process.command"
+      ]
+    }
   },
   "tasks": [
     {
@@ -1470,7 +1478,8 @@ README 增加一个简短 script task 示例；稳定运行时合同由
    `rhai::{task,http,json,bytes,runtime}`；Rhai 原生 string/array/map 直接
    复用。
 5. 异步模型使用显式 TaskHandle/StreamHandle。
-6. manifest 使用 `agenterm.tasks.json` schema v1。
+6. manifest 使用 `agenterm.tasks.json` schema v2，显式声明兼容的 Script
+   API 范围和必需 stable capability IDs。
 7. 模块只支持本地 project-root-relative。
 8. process API 只接受 executable + argv。
 9. HTTP 只做 client，不做 listener/socket/WebSocket。
@@ -1529,7 +1538,8 @@ README 增加一个简短 script task 示例；稳定运行时合同由
 
 提交 5
   [x] local modules + agenterm.tasks.json
-  [x] task list/show/run
+  [x] task list/show/check/run
+  [x] schema v2 API/capability requirements + fail-closed compatibility
 
 提交 6
   [x] rhai::http + independent loopback HTTP

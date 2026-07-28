@@ -253,6 +253,7 @@ fn print_script_help() {
            agenterm-script run [OPTIONS] FILE.rhai|- [--] [ARGS...]\n\
            agenterm-script task list [--manifest PATH] [--json]\n\
            agenterm-script task show TASK [--manifest PATH] [--json]\n\
+           agenterm-script task check [TASK] [--manifest PATH] [--json]\n\
            agenterm-script task run TASK [--manifest PATH] [OPTIONS] [--] [ARGS...]\n\
          Options: --profile local|pure|observe --timeout-ms N \
          --max-operations N --json"
@@ -1453,7 +1454,7 @@ fn canonical_script_directory(base: &Path, value: &str, code: &str) -> Result<Pa
 #[cfg(windows)]
 fn run_script_task_command(arguments: &[String]) -> i32 {
     let Some(action) = arguments.get(2).map(String::as_str) else {
-        eprintln!("script task requires list, show, or run");
+        eprintln!("script task requires list, show, check, or run");
         return 2;
     };
     let manifest = match script_task_manifest(arguments) {
@@ -1498,6 +1499,9 @@ fn run_script_task_command(arguments: &[String]) -> i32 {
                         "project_root": catalog.project_root,
                         "project_id": catalog.project_id,
                         "project_version": catalog.project_version,
+                        "requirements": catalog.requirements,
+                        "compatible": catalog.compatible,
+                        "compatibility_reason": catalog.compatibility_reason,
                         "tasks": matches,
                     }))
                     .unwrap_or_else(|_| "{}".to_owned())
@@ -1506,6 +1510,40 @@ fn run_script_task_command(arguments: &[String]) -> i32 {
                 for task in matches {
                     print_task_entry(task);
                 }
+            }
+            0
+        }
+        "check" => {
+            let id = arguments.get(3).filter(|value| !value.starts_with('-'));
+            let result = match id {
+                Some(id) => resolve_task(&catalog, id).map(|_| ()),
+                None if !catalog.compatible => Err(format!(
+                    "task_project_incompatible: {}",
+                    catalog
+                        .compatibility_reason
+                        .as_deref()
+                        .unwrap_or("project requirements are not satisfied")
+                )),
+                None => catalog
+                    .tasks
+                    .iter()
+                    .find(|task| task.status == ScriptTaskStatus::Degraded)
+                    .map_or(Ok(()), |task| {
+                        Err(format!(
+                            "task_degraded: {}: {}",
+                            task.id,
+                            task.degraded_reason.as_deref().unwrap_or("invalid task")
+                        ))
+                    }),
+            };
+            if let Err(error) = result {
+                eprintln!("{error}");
+                return 2;
+            }
+            if has_option(arguments, "--json") {
+                print_task_catalog(&catalog, true);
+            } else {
+                println!("OK");
             }
             0
         }
@@ -3091,7 +3129,7 @@ Usage:
   agenterm-cli script api [MODULE] [--status shipped|planned|all] [--tree|--json]
   agenterm-cli script check|run FILE|- [--profile local|pure|observe] [--project-root DIR] [--cwd DIR]
   agenterm-cli script eval EXPRESSION [--profile local|pure|observe] [--cwd DIR]
-  agenterm-cli script task list|show|run [TASK] [--manifest FILE] [--json] [-- ARGS...]
+  agenterm-cli script task list|show|check|run [TASK] [--manifest FILE] [--json] [-- ARGS...]
   agenterm-cli send-mouse [-t target] -x col -y row [--button left] [--action press]
   agenterm-cli ui-snapshot
   agenterm-cli ui-hello --minimum VERSION --maximum VERSION [--client-id ID]

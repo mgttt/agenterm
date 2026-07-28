@@ -11,8 +11,13 @@ use rhai::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::{
+    script_catalog::{ScriptApiStatus, entries as script_api_entries},
+    script_protocol::SCRIPT_API_VERSION,
+};
+
 pub const SCRIPT_TASK_MANIFEST: &str = "agenterm.tasks.json";
-pub const SCRIPT_TASK_SCHEMA_VERSION: u32 = 1;
+pub const SCRIPT_TASK_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -27,6 +32,21 @@ struct RawManifest {
 struct RawProject {
     id: String,
     version: String,
+    requires: ScriptProjectRequirements,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScriptProjectRequirements {
+    pub script_api: ScriptApiRequirement,
+    pub capabilities: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScriptApiRequirement {
+    pub minimum: u32,
+    pub maximum: u32,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -53,6 +73,10 @@ pub struct ScriptTaskCatalog {
     pub project_root: String,
     pub project_id: String,
     pub project_version: String,
+    pub requirements: ScriptProjectRequirements,
+    pub compatible: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compatibility_reason: Option<String>,
     pub tasks: Vec<ScriptTaskEntry>,
 }
 
@@ -415,6 +439,7 @@ pub fn load_task_catalog(path: &Path) -> Result<ScriptTaskCatalog, String> {
     }
     validate_identity(&raw.project.id, "task_project_id")?;
     validate_version(&raw.project.version)?;
+    let (compatible, compatibility_reason) = validate_requirements(&raw.project.requires)?;
     if raw.tasks.len() > 256 {
         return Err("task_manifest_tasks: maximum is 256".to_owned());
     }
@@ -444,6 +469,9 @@ pub fn load_task_catalog(path: &Path) -> Result<ScriptTaskCatalog, String> {
         project_root: project_root.display().to_string(),
         project_id: raw.project.id,
         project_version: raw.project.version,
+        requirements: raw.project.requires,
+        compatible,
+        compatibility_reason,
         tasks,
     })
 }
@@ -465,6 +493,15 @@ pub fn resolve_task(catalog: &ScriptTaskCatalog, id: &str) -> Result<ResolvedScr
         return Err(format!(
             "task_degraded: {id}: {}",
             task.degraded_reason.as_deref().unwrap_or("invalid task")
+        ));
+    }
+    if !catalog.compatible {
+        return Err(format!(
+            "task_project_incompatible: {}",
+            catalog
+                .compatibility_reason
+                .as_deref()
+                .unwrap_or("project requirements are not satisfied")
         ));
     }
     let root = PathBuf::from(&catalog.project_root);
@@ -558,6 +595,72 @@ fn validate_version(value: &str) -> Result<(), String> {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'+' | b'-'))
     {
         return Err("task_project_version: invalid version identity".to_owned());
+    }
+    Ok(())
+}
+
+fn validate_requirements(
+    requirements: &ScriptProjectRequirements,
+) -> Result<(bool, Option<String>), String> {
+    let api = &requirements.script_api;
+    if api.minimum == 0 || api.maximum == 0 || api.minimum > api.maximum {
+        return Err(
+            "task_project_script_api: expected a non-zero minimum not greater than maximum"
+                .to_owned(),
+        );
+    }
+    if requirements.capabilities.len() > 128 {
+        return Err("task_project_capabilities: maximum is 128".to_owned());
+    }
+
+    let mut seen = HashSet::new();
+    for capability in &requirements.capabilities {
+        validate_capability_id(capability)?;
+        if !seen.insert(capability.as_str()) {
+            return Err(format!("task_project_capability_duplicate: {capability}"));
+        }
+    }
+
+    if SCRIPT_API_VERSION < api.minimum || SCRIPT_API_VERSION > api.maximum {
+        return Ok((
+            false,
+            Some(format!(
+                "script_api_version: runtime {SCRIPT_API_VERSION}, required {}..{}",
+                api.minimum, api.maximum
+            )),
+        ));
+    }
+
+    let entries = script_api_entries();
+    for capability in &requirements.capabilities {
+        match entries
+            .iter()
+            .find(|entry| entry.stable_id == capability.as_str())
+        {
+            Some(entry) if entry.status == ScriptApiStatus::Shipped => {}
+            Some(_) => {
+                return Ok((false, Some(format!("capability_unavailable: {capability}"))));
+            }
+            None => {
+                return Ok((false, Some(format!("capability_unknown: {capability}"))));
+            }
+        }
+    }
+    Ok((true, None))
+}
+
+fn validate_capability_id(value: &str) -> Result<(), String> {
+    if value.is_empty()
+        || value.len() > 128
+        || !value.bytes().enumerate().all(|(index, byte)| match byte {
+            b'a'..=b'z' | b'0'..=b'9' => true,
+            b'.' | b'_' | b'-' => index > 0,
+            _ => false,
+        })
+    {
+        return Err(format!(
+            "task_project_capability_id: invalid stable ID {value:?}"
+        ));
     }
     Ok(())
 }
@@ -689,8 +792,15 @@ mod tests {
         fs::write(
             &manifest,
             r#"{
-  "schema_version": 1,
-  "project": {"id": "fixture", "version": "1.0.0"},
+  "schema_version": 2,
+  "project": {
+    "id": "fixture",
+    "version": "1.0.0",
+    "requires": {
+      "script_api": {"minimum": 2, "maximum": 2},
+      "capabilities": ["runtime.project.named-task"]
+    }
+  },
   "tasks": [
     {"id": "check", "entry": "scripts/check.rhai", "args": ["default"]},
     {"id": "broken", "entry": "../outside.rhai"},
@@ -711,6 +821,37 @@ mod tests {
         assert_eq!(catalog.tasks[1].status, ScriptTaskStatus::Degraded);
         assert_eq!(catalog.tasks[2].status, ScriptTaskStatus::Degraded);
         assert!(resolve_task(&catalog, "check").is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn incompatible_requirements_remain_visible_but_cannot_resolve() {
+        let (root, manifest) = fixture();
+        let contents = fs::read_to_string(&manifest)
+            .unwrap()
+            .replace(
+                r#""minimum": 2, "maximum": 2"#,
+                r#""minimum": 3, "maximum": 3"#,
+            )
+            .replace(
+                r#"{"id": "check", "entry": "scripts/check.rhai"}"#,
+                r#"{"id": "second", "entry": "scripts/check.rhai"}"#,
+            );
+        fs::write(&manifest, contents).unwrap();
+        let catalog = load_task_catalog(&manifest).unwrap();
+        assert!(!catalog.compatible);
+        assert!(
+            catalog
+                .compatibility_reason
+                .as_deref()
+                .is_some_and(|reason| reason.starts_with("script_api_version:"))
+        );
+        assert_eq!(catalog.tasks[0].status, ScriptTaskStatus::Ready);
+        assert!(
+            resolve_task(&catalog, "check")
+                .unwrap_err()
+                .starts_with("task_project_incompatible:")
+        );
         fs::remove_dir_all(root).unwrap();
     }
 

@@ -357,17 +357,19 @@ track remains planned, but every declared dependency must still pass.
     `rhai::{task,http,json,bytes,runtime}` extensions without moving future
     Agent approval policy into the runtime
   - [ ] add bounded task/stream/cancellation, local modules, versioned
-    `agenterm.tasks.json`, named task list/show/run, and one machine-readable
+    `agenterm.tasks.json`, named task list/show/check/run, and one machine-readable
     API catalog shared by check, runtime, Fleet tools and future consumers
   - [ ] publish that catalog as a stable three-level capability tree with
     shipped/planned/deferred/degraded facts and reviewed purpose-level
     Rust/Node.js/Bun analogues; every entry separates catalog, surface and Rust
     paths and records semantic differences, then generates the comparison
     matrix, manual index and implementation coverage from the same source
-  - [ ] make runtime/module/task identity package-ready through stable
+  - [~] make runtime/module/task identity package-ready through stable
     version, provenance hooks, requirements, capabilities and entry points,
     without adding remote resolution, installation, signature policy or a
-    public registry to the runtime
+    public registry to the runtime; task schema v2 now ships API/capability
+    requirements and fail-closed compatibility, while optional provenance
+    hooks remain open
   - [ ] systematically expose every public typed Fleet operation or a stable
     degraded reason; mutations return request identity, receipt, correlated
     event and verified post-state while pure/observe behavior remains stable

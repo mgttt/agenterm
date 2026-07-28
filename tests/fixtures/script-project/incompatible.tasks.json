@@ -1,0 +1,25 @@
+{
+  "schema_version": 2,
+  "project": {
+    "id": "script-smoke-incompatible",
+    "version": "1.0.0",
+    "requires": {
+      "script_api": {
+        "minimum": 2,
+        "maximum": 2
+      },
+      "capabilities": [
+        "runtime.project.named-task",
+        "future.capability"
+      ]
+    }
+  },
+  "tasks": [
+    {
+      "id": "must-not-run",
+      "description": "Compatibility inspection must reject this task before execution",
+      "entry": "compile-only.rhai",
+      "profile": "local"
+    }
+  ]
+}

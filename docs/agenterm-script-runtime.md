@@ -355,7 +355,7 @@ agenterm-script
 │  │  [shipped; stable; designed 2026-07-28]
 │  └─ agenterm.tasks.json
 │     Versioned local task manifest; not a package manifest.
-│     [shipped schema v1; stable; designed 2026-07-28]
+│     [shipped schema v2; stable; designed 2026-07-28; revised 2026-07-29]
 │
 └─ discovery
    Offline and runtime-aligned interface inspection.
@@ -968,19 +968,30 @@ duplicate identity, and parse failure. It MUST NOT scan the user's home, PATH,
 or network to guess a module.
 
 The named task manifest is `agenterm.tasks.json`. It describes local task
-execution and is not a package manifest. `task list` and `task show` MUST NOT
-execute user code. Invalid tasks remain discoverable with a degraded reason.
+execution and is not a package manifest. `task list`, `task show`, and
+`task check` MUST NOT execute user code. Invalid tasks remain discoverable with
+a degraded reason.
 The public executable is `agenterm-script.exe`; `agenterm-cli.exe script ...`
 is a compatibility route to the same parser, catalog, supervisor, and runtime.
 The reserved `--worker` and `--framed-worker` modes are internal host protocol
 entry points, not alternate user APIs.
 
-Schema v1 is:
+Schema v2 is:
 
 ```json
 {
-  "schema_version": 1,
-  "project": {"id": "daily-tools", "version": "1.0.0"},
+  "schema_version": 2,
+  "project": {
+    "id": "daily-tools",
+    "version": "1.0.0",
+    "requires": {
+      "script_api": {"minimum": 2, "maximum": 2},
+      "capabilities": [
+        "runtime.project.named-task",
+        "std.process.command"
+      ]
+    }
+  },
   "tasks": [
     {
       "id": "daily-check",
@@ -1002,6 +1013,21 @@ copied into the manifest, task catalog, audit, or diagnostics. Entries and
 working directories MUST resolve inside the manifest directory. Discovery
 walks from the current directory to its ancestors unless `--manifest` is
 explicit. Task execution appends caller arguments after manifest defaults.
+
+`requires.script_api` is an inclusive compatibility range for the stable
+AgenTerm Script API, independently of the task-manifest and catalog schema
+versions. `requires.capabilities` contains stable IDs from the Script API
+catalog, not Rhai surface spellings and not an authorization policy. IDs are
+bounded, unique, and must currently be `shipped`; an unknown or planned ID
+makes the project incompatible.
+
+`task list` and `task show` return the declared `requirements`, a boolean
+`compatible`, and a stable `compatibility_reason` when false, while retaining
+the task entries for inspection. `task check [TASK]` validates compatibility
+and task readiness without evaluating source. `task check` and `task run`
+fail closed with `task_project_incompatible` before a task can execute.
+Malformed ranges and duplicate/invalid capability IDs are manifest errors
+rather than compatibility results.
 
 ## 15. Discovery and generated manuals
 

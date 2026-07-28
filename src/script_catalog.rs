@@ -858,18 +858,20 @@ pub fn entries() -> Vec<ScriptApiEntry> {
         shipped_local_entry(
             "runtime.project.named-task",
             "code-and-automation/task-manifest/invoke",
-            "script task list/show/run",
+            "script task list/show/check/run",
             None,
             RustMapping::None,
-            "script task list|show|run [TASK] [--manifest PATH]",
+            "script task list|show|check|run [TASK] [--manifest PATH]",
             (
                 &[
-                    "agenterm_tasks_json_schema_v1",
+                    "agenterm_tasks_json_schema_v2",
+                    "api_and_capability_requirements",
                     "invalid_entries_remain_visible",
                     "environment_names_only",
                 ],
                 &[
                     "task_manifest_version",
+                    "task_project_incompatible",
                     "task_degraded",
                     "task_environment_missing",
                 ],
@@ -930,7 +932,10 @@ pub fn catalog() -> Value {
                 "availability": "first_std_slice",
             },
         },
-        "operations": ["api", "check", "eval", "run", "task-list", "task-show", "task-run"],
+        "operations": [
+            "api", "check", "eval", "run",
+            "task-list", "task-show", "task-check", "task-run"
+        ],
         "framing": {
             "version": SCRIPT_FRAME_VERSION,
             "max_frame_bytes": SCRIPT_FRAME_MAX_BYTES,

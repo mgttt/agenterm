@@ -16,6 +16,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   snapshot, capture, and event broker methods without direct Win32, PTY, or
   mutable GUI-state access.
 - [x] Script API v2 maps every current typed operation exactly once to `fleet` and verifies mutation receipts, correlated events, and post-state.
+- [x] task-manifest schema v2 publishes an inclusive required Script API range
+  and stable capability IDs; list/show preserve incompatible projects for
+  inspection while check/run fail closed before source execution.
 - [x] the public `examples/script-daily-check` north-star task combines Unicode
   configuration, invocation-owned temp, two concurrent argv-safe children,
   loopback HTTP, JSON aggregation, typed Fleet note mutation, atomic result
@@ -215,16 +218,18 @@ and it is not positioned as a restricted security plugin.
   home, PATH, or the network.
 - [x] project tasks use one versioned declarative manifest that maps stable task
   IDs to a script/module entry point, arguments, working directory, environment
-  construction, and execution profile. Schema v1 uses a project identity/
-  version plus an ordered task array with `id`, `description`, `entry`,
-  `profile`, `cwd`, default `args`, and required environment-name `env` fields;
-  it stores no environment values.
+  construction, and execution profile. Schema v2 uses a project identity/
+  version, an inclusive Script API range, required stable capability IDs, and
+  an ordered task array with `id`, `description`, `entry`, `profile`, `cwd`,
+  default `args`, and required environment-name `env` fields; it stores no
+  environment values.
 - [x] v0.1.9 selects versioned JSON at `agenterm.tasks.json`; it is explicitly
   a local task manifest rather than a package/download/signature manifest.
 - [x] project tasks and user-level named commands are discoverable through one
   typed catalog. Invalid entries remain visible with a stable degraded reason
   instead of disappearing.
-- [x] CLI listing, inspection, and invocation of named tasks is P0 for v0.1.9.
+- [x] CLI listing, inspection, no-execution compatibility checking, and
+  invocation of named tasks is P0 for v0.1.9.
   A GUI command palette is a P1 consumer of the same catalog and does not own a
   second registry.
 
@@ -322,7 +327,7 @@ and it is not positioned as a restricted security plugin.
 - [ ] `script check` validates imports, task entries, API names, profiles,
   signatures, versions, static limits, and unavailable/degraded calls without
   executing user code or requiring a GUI.
-- [ ] runtime, module and task identities expose version, origin/provenance
+- [~] runtime, module and task identities expose version, origin/provenance
   hooks, required AgenTerm API/capabilities and stable entry-point metadata so
   future local package tooling can inspect them without executing source.
   This is a package-ready contract, not a registry, downloader, installer,
@@ -330,7 +335,13 @@ and it is not positioned as a restricted security plugin.
   - [x] the module/task slice exposes manifest path, canonical project root,
     project ID/version, stable task ID, entry, profile, cwd, default argv,
     required environment names, readiness and degraded reason without running
-    task source; required API/capability declarations remain open.
+    task source.
+  - [x] schema v2 exposes the inclusive required Script API range and stable
+    capability IDs, reports compatibility through list/show, and makes
+    check/run reject unknown, unavailable, or version-incompatible
+    requirements before source execution.
+  - [ ] optional origin/provenance hooks remain to complete the package-ready
+    identity contract.
 
 ## Repository dogfood and gradual replacement
 
