@@ -584,17 +584,17 @@ agenterm-script
 ├─ system
 │  ├─ fs
 │  │  ├─ [x] read text / bytes
-│  │  ├─ [>] write text / bytes 已交付；atomic write 待补
+│  │  ├─ [x] write text / bytes + same-volume atomic promotion
 │  │  ├─ [x] typed read_dir / DirEntry / metadata
-│  │  ├─ [ ] create / copy / move
-│  │  └─ [ ] remove explicit target
+│  │  ├─ [x] create / copy / rename
+│  │  └─ [x] remove explicit target + broad-target rejection
 │  ├─ path
 │  │  ├─ [>] PathBuf / join / display / name / extension 已交付；parent 待补
 │  │  ├─ [>] absolute 已交付；relative / canonical facts 待补
 │  │  └─ [ ] Windows drive / UNC / long path
 │  ├─ temp
-│  │  ├─ [ ] owned file / directory
-│  │  └─ [ ] cleanup / atomic promotion
+│  │  ├─ [x] invocation-owned temp directory
+│  │  └─ [x] success/failure/crash cleanup + atomic promotion
 │  ├─ env
 │  │  ├─ [x] var / has / names / current_dir
 │  │  ├─ [>] process-global set/remove 明确延后
@@ -646,18 +646,20 @@ agenterm-script
 │  │  ├─ [x] bounded capture
 │  │  └─ [x] events read / bounded wait
 │  ├─ control
-│  │  ├─ [ ] tab/tree metadata and Composer
+│  │  ├─ [~] tab note metadata 已交付；完整 tree/Composer 待补
 │  │  ├─ [ ] terminal input / viewport / workspace
 │  │  └─ [ ] lifecycle / destructive explicit calls
 │  └─ evidence
-│     ├─ [ ] request / receipt / event
-│     └─ [ ] verified post-state / replay / degraded reason
+│     ├─ [~] 当前 mutation 的 request / receipt / event 已交付
+│     └─ [~] 当前 mutation 的 post-state / replay / degraded reason 已交付
 │
 └─ observability
    ├─ [x] budgets / hard ceilings baseline
    ├─ [x] typed error / audit / crash isolation baseline
-   ├─ [ ] API hierarchy / availability / comparison metadata
-   └─ [ ] docs/manual generation and catalog/runtime conformance
+   ├─ [~] catalog hierarchy / availability / Rust comparison metadata 已交付；
+   │  人类可读 tree/filter/comparison CLI 待补
+   └─ [~] 英文 spec 与部分 catalog/runtime conformance 已交付；
+      自动 manual/index 生成待补
 ```
 
 这棵 catalog 树回答“产品覆盖了哪些问题域”，不直接规定用户必须写成

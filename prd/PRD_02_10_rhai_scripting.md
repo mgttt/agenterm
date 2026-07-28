@@ -86,27 +86,27 @@ and it is not positioned as a restricted security plugin.
 
 ## v0.1.9 runtime architecture
 
-- [ ] one invocation still owns one fresh `agenterm-script.exe` sidecar; it is
+- [x] one invocation still owns one fresh `agenterm-script.exe` sidecar; it is
   not a persistent system daemon and keeps no mutable state across invocations.
-- [ ] an invocation may own a bounded task scheduler. Asynchronous APIs return
+- [x] an invocation may own a bounded task scheduler. Asynchronous APIs return
   typed task handles consumed through `wait` and bounded `stream` operations.
-- [ ] the Rhai engine and its `Scope` remain on one evaluation thread.
+- [x] the Rhai engine and its `Scope` remain on one evaluation thread.
   Background I/O stores Rust-native typed payloads and bytes in an
   invocation-owned registry; only the evaluation thread converts completion
   values into Rhai `Dynamic`, so host concurrency does not require sharing
   script values or the engine across threads.
-- [ ] the public Task/Stream contract is executor-neutral. A bounded worker/
+- [x] the public Task/Stream contract is executor-neutral. A bounded worker/
   channel implementation and a small Rust async executor are compared by
   cancellation correctness, streaming simplicity, dependency/binary cost and
   throughput before selecting an implementation; Tokio is not an inherited
   requirement.
-- [ ] the sidecar remains alive while reachable tasks, timers, child-process
+- [x] the sidecar remains alive while reachable tasks, timers, child-process
   I/O, HTTP bodies, or Fleet waits are active, and exits naturally when no
   foreground task remains.
-- [ ] Ctrl+C, parent exit, timeout, server restart, task cancellation, and
+- [~] Ctrl+C, parent exit, timeout, server restart, task cancellation, and
   worker failure propagate to every owned task and stream without orphaning a
   child, blocking the GUI, or damaging PTYs or workspace state.
-- [ ] task and stream queues have explicit item/byte/concurrency limits and
+- [x] task and stream queues have explicit item/byte/concurrency limits and
   backpressure; truncation, cancellation, and incomplete output cannot be
   reported as success.
 - [ ] a bounded compiled-AST cache may be keyed by source fingerprint, API
@@ -120,14 +120,14 @@ and it is not positioned as a restricted security plugin.
   contains runtime-native higher-level extensions; `fleet` remains a bound
   AgenTerm object; Rhai language primitives, project modules, manifests and
   CLI discovery are not wrapped in artificial namespaces.
-- [ ] `std::fs` covers bounded `read`, `read_to_string`, `write`, directory
+- [~] `std::fs` covers bounded `read`, `read_to_string`, `write`, directory
   listing/creation, metadata, copy, rename and explicit-target deletion.
   - [x] blocking `read`, `read_to_string`, text/bytes `write`, `exists`,
     directory creation, copy, rename and explicit-target file/directory/tree
     removal ship through the public CLI. Destructive helpers reject empty,
     root, current-workspace and ancestor targets; metadata, directory listing
     and cumulative byte budgets remain open.
-- [ ] `std::path` provides a selected `Path`/`PathBuf` object model for Windows
+- [~] `std::path` provides a selected `Path`/`PathBuf` object model for Windows
   normalization, composition, relative paths, working directories, Unicode,
   long paths and canonical/reparse-point facts without copying Rust borrowing.
   - [x] first local slice ships typed `PathBuf::from`, join, display, file name,
@@ -144,12 +144,12 @@ and it is not positioned as a restricted security plugin.
   are invocation-owned and inherit supervisor process-tree cleanup.
   `Command.start()` is the script spelling because Rhai reserves `spawn`;
   catalog metadata retains the Rust `Command::spawn` comparison.
-- [ ] `std::time` provides selected `Duration`, `Instant`, and `SystemTime`
+- [~] `std::time` provides selected `Duration`, `Instant`, and `SystemTime`
   values while keeping monotonic deadlines and wall time distinct; high-level
   sleep/timer/task composition is not misrepresented as Rust `std`.
   - [x] bounded `Duration` constructors and wall-clock `SystemTime` reporting
     ship; monotonic `Instant` remains open.
-- [ ] `rhai::task` owns executor-neutral Task/Stream composition, cancellable
+- [~] `rhai::task` owns executor-neutral Task/Stream composition, cancellable
   sleep/timer, wait-all, race, cancel and bounded backpressure.
   - [x] the executor-neutral timer slice ships Task identity/state,
     `after`/`sleep`, wait with optional timeout, idempotent cancellation,
@@ -167,7 +167,7 @@ and it is not positioned as a restricted security plugin.
   - [ ] Fleet Task payloads and prompt in-process transport cancellation remain
     open; the first HTTP adapter bounds blocking transport work to 10 seconds
     and relies on supervisor process cleanup after invocation exit.
-- [ ] `rhai::json` plus Rhai-native strings and a typed `Bytes` object provide
+- [~] `rhai::json` plus Rhai-native strings and a typed `Bytes` object provide
   bounded parsing, serialization, Unicode/encoding and explicit conversions
   without duplicating language primitives as fake Rust collections.
   - [x] first local slice ships JSON parse/compact/pretty serialization and
@@ -184,7 +184,7 @@ and it is not positioned as a restricted security plugin.
   - [x] the clean release `agenterm-script.exe` is 2,359,808 bytes with the
     reviewed native-TLS feature set, below the existing 3 MiB artifact gate;
     the gate was not raised for this slice.
-- [ ] `rhai::runtime` may expose only safe invocation/API/profile/version/
+- [~] `rhai::runtime` may expose only safe invocation/API/profile/version/
   limits facts, never private supervisor, HWND, renderer, PTY or broker
   handles.
   - [x] `temp_dir` exposes only the current invocation-owned directory;
@@ -196,12 +196,12 @@ and it is not positioned as a restricted security plugin.
   reports. Normal completion removes the invocation root immediately; a later
   invocation prunes roots abandoned by a dead parent, and atomic staging files
   are removed on both promotion and ordinary failure.
-- [ ] the catalog taxonomy is not copied into the script surface.
+- [x] the catalog taxonomy is not copied into the script surface.
   Resource-bearing values use custom-type methods (`Child.wait`,
   `Task.cancel`, `Stream.read`, response/output access), while modules,
   named-task manifests, catalog and diagnostics remain language/CLI mechanisms
   rather than artificial runtime namespaces.
-- [ ] globals remain minimal (`args` and `print` baseline). Native Rhai string
+- [x] globals remain minimal (`args` and `print` baseline). Native Rhai string
   and collection operations are reused instead of wrapping every value under
   `data`; `system`, `network`, `code-and-automation`, and `observability` are
   catalog/manual groupings, never mandatory call prefixes.
