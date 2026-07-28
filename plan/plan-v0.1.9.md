@@ -550,7 +550,8 @@ agenterm-script
 │  ├─ profile
 │  │  ├─ [x] pure
 │  │  ├─ [x] observe
-│  │  └─ [ ] local（ordinary default）
+│  │  ├─ [x] local foundation（显式选择、base Rhai、无需 server）
+│  │  └─ [ ] local ordinary default（首个可用 std slice 后切换）
 │  └─ output
 │     ├─ [x] print / bounded stdout
 │     └─ [ ] typed result / stderr / exit class
@@ -1434,10 +1435,11 @@ README 增加一个简短 script task 示例；稳定运行时合同由
 
 ```text
 提交 1
-  script catalog schema
-  local profile
-  typed result/error/exit
-  api --json + check alignment
+  [x] typed script catalog schema v2（保持 Script API v1）
+  [x] explicit local profile foundation
+  [ ] typed result/error/exit expansion
+  [>] api --json + check alignment（v1 agent method 已由 catalog 驱动；
+      nested namespace/signature alignment 随首个 std slice 完成）
 
 提交 2
   std::fs/path + Path/Bytes + rhai::json

@@ -587,7 +587,7 @@ fn execute_inner(
         ));
     }
     if invocation.operation == ScriptOperation::Api {
-        return Ok((String::new(), Some(api_catalog())));
+        return Ok((String::new(), Some(agenterm::script_catalog::catalog())));
     }
 
     let output = Arc::new(Mutex::new(String::new()));
@@ -700,7 +700,7 @@ fn execute_inner(
         .map_err(|error| configuration_error("configuration_arguments", error.to_string()))?;
     scope.push_dynamic("args", arguments);
     match invocation.profile {
-        ScriptProfile::Pure => {}
+        ScriptProfile::Pure | ScriptProfile::Local => {}
         ScriptProfile::Observe => {
             let Some(broker) = broker else {
                 return Err(configuration_error(
@@ -753,115 +753,6 @@ fn execute_inner(
     Ok((stdout, value))
 }
 
-fn api_catalog() -> serde_json::Value {
-    let defaults = ScriptBudgets::default();
-    let hard_limits = ScriptBudgets::hard_limits();
-    serde_json::json!({
-        "schema_version": 1,
-        "api_version": SCRIPT_API_VERSION,
-        "profiles": {
-            "pure": {
-                "variables": ["args"],
-                "ambient_authority": [],
-            },
-            "observe": {
-                "variables": ["args", "agent"],
-                "ambient_authority": [],
-            },
-        },
-        "operations": ["api", "check", "eval", "run"],
-        "framing": {
-            "version": SCRIPT_FRAME_VERSION,
-            "max_frame_bytes": SCRIPT_FRAME_MAX_BYTES,
-            "mode": "--framed-worker",
-            "input_kinds": {
-                "invoke": "available",
-                "cancel": "available",
-                "result": "worker_output_only",
-                "broker_request": "available_worker_to_host",
-                "broker_response": "available_host_to_worker",
-            },
-        },
-        "supervisor": {
-            "transport": "inherited_length_bounded_frames",
-            "job_object": "kill_on_close",
-            "cancel_grace_ms": 150,
-            "per_process_concurrency": 2,
-            "global_concurrency": 4,
-        },
-        "limits": {
-            "defaults": defaults,
-            "hard_maximums": hard_limits,
-            "invocation_bytes": SCRIPT_INVOCATION_MAX_BYTES,
-        },
-        "apis": [
-            {
-                "name": "print",
-                "kind": "rhai_builtin",
-                "profiles": ["pure", "observe"],
-                "available": true,
-            },
-            script_api_spec("agent.workspace", "agent.workspace()", "workspace.info",
-                "workspace_metadata_with_event_position", &["broker_host_error", "broker_transport"]),
-            script_api_spec("agent.tabs", "agent.tabs()", "tabs.list",
-                "tab_list", &["broker_host_error", "broker_transport"]),
-            script_api_spec("agent.active_tab", "agent.active_tab()", "tabs.active",
-                "tab_or_null", &["broker_host_error", "broker_transport"]),
-            script_api_spec("agent.ui_snapshot", "agent.ui_snapshot()", "ui.snapshot",
-                "ui_snapshot", &["broker_host_error", "broker_transport", "broker_return_too_large"]),
-            script_api_spec("agent.capture", "agent.capture(tab, max_bytes)", "pane.capture",
-                "bounded_capture", &["broker_invalid_arguments", "broker_host_error", "broker_return_too_large"]),
-            script_api_spec("agent.events_read", "agent.events_read(epoch, after, limit)", "events.read",
-                "event_batch", &["server_restart", "journal_gap", "future_sequence", "broker_invalid_arguments"]),
-            script_api_spec("agent.events_wait", "agent.events_wait(epoch, after, kind, timeout_ms)", "events.wait",
-                "event", &["server_restart", "journal_gap", "future_sequence", "event_wait_timeout"]),
-            {
-                "name": "new_tab",
-                "kind": "control",
-                "profiles": [],
-                "available": false,
-                "reason": "control capability is deferred",
-            },
-        ],
-        "failure_categories": ["configuration", "limit", "script", "protocol", "host"],
-        "exit_classes": {
-            "success": 0,
-            "script": 1,
-            "protocol": 1,
-            "host": 1,
-            "configuration": 2,
-            "limit": 3,
-        },
-        "deferred_capabilities": [
-            "control", "fs.read", "fs.write", "env.read", "proc.exec", "network"
-        ],
-    })
-}
-
-fn script_api_spec(
-    name: &str,
-    signature: &str,
-    operation_id: &str,
-    result: &str,
-    errors: &[&str],
-) -> serde_json::Value {
-    let operation = agenterm::operations::operation_by_id(operation_id);
-    serde_json::json!({
-        "name": name,
-        "signature": signature,
-        "kind": "brokered_method",
-        "profiles": ["observe"],
-        "available": operation.is_some_and(|operation| operation.available),
-        "api_version": SCRIPT_API_VERSION,
-        "capability": "observe",
-        "operation_id": operation_id,
-        "operation": operation,
-        "arguments": operation.map(|operation| operation.parameters),
-        "result": result,
-        "errors": errors,
-    })
-}
-
 fn validate_budgets(budgets: &ScriptBudgets) -> Result<(), ScriptFailure> {
     let maximums = ScriptBudgets::hard_limits();
     macro_rules! validate {
@@ -900,25 +791,25 @@ fn validate_profile_apis(
     budgets: &ScriptBudgets,
 ) -> Result<(), ScriptFailure> {
     for method in agent_method_calls(source) {
-        if profile == ScriptProfile::Pure {
-            return Err(script_error(
-                "script_api_unavailable",
-                format!("API agent.{method} is unavailable in the pure profile"),
-            ));
-        }
-        if !matches!(
-            method.as_str(),
-            "workspace"
-                | "tabs"
-                | "active_tab"
-                | "ui_snapshot"
-                | "capture"
-                | "events_read"
-                | "events_wait"
-        ) {
+        let surface_path = format!("agent.{method}");
+        let entry = agenterm::script_catalog::entries()
+            .into_iter()
+            .find(|entry| entry.surface_path == surface_path);
+        let Some(entry) = entry else {
             return Err(script_error(
                 "script_api_unknown",
                 format!("unknown shipped scripting API: agent.{method}"),
+            ));
+        };
+        if entry.status != agenterm::script_catalog::ScriptApiStatus::Shipped
+            || !entry.profiles.contains(&profile.as_str())
+        {
+            return Err(script_error(
+                "script_api_unavailable",
+                format!(
+                    "API agent.{method} is unavailable in the {} profile",
+                    profile.as_str()
+                ),
             ));
         }
     }
@@ -1269,18 +1160,19 @@ mod tests {
         );
         assert_eq!(catalog["exit_classes"]["configuration"], 2);
         assert_eq!(catalog["exit_classes"]["limit"], 3);
-        let apis = catalog["apis"].as_array().expect("API entries");
+        assert_eq!(catalog["schema_version"], 2);
+        let apis = catalog["entries"].as_array().expect("API entries");
         let new_tab = apis
             .iter()
-            .find(|api| api["name"] == "new_tab")
+            .find(|api| api["stable_id"] == "fleet.tabs.new")
             .expect("deferred control API");
-        assert_eq!(new_tab["available"], false);
+        assert_eq!(new_tab["status"], "planned");
         let workspace = apis
             .iter()
-            .find(|api| api["name"] == "agent.workspace")
+            .find(|api| api["surface_path"] == "agent.workspace")
             .expect("typed workspace API");
         assert_eq!(workspace["operation_id"], "workspace.info");
-        assert_eq!(workspace["api_version"], SCRIPT_API_VERSION);
+        assert_eq!(workspace["status"], "shipped");
         assert_eq!(
             catalog["limits"]["defaults"]["broker_requests"],
             ScriptBudgets::default().broker_requests
@@ -1324,6 +1216,23 @@ mod tests {
         excessive.profile = ScriptProfile::Observe;
         assert_eq!(failure_code(&execute(excessive)), "script_api_static_limit");
         assert!(agent_method_calls(r#""agent.hidden()"; // agent.comment()"#).is_empty());
+    }
+
+    #[test]
+    fn local_profile_runs_base_rhai_without_observe_authority() {
+        let mut local = invocation(ScriptOperation::Eval, "40 + 2");
+        local.profile = ScriptProfile::Local;
+        let local = execute(local);
+        assert!(local.ok);
+        assert_eq!(local.value, Some(serde_json::json!(42)));
+        assert_eq!(local.profile, Some(ScriptProfile::Local));
+
+        let mut unavailable = invocation(ScriptOperation::Check, "agent.workspace()");
+        unavailable.profile = ScriptProfile::Local;
+        assert_eq!(
+            failure_code(&execute(unavailable)),
+            "script_api_unavailable"
+        );
     }
 
     #[test]

@@ -352,6 +352,9 @@ track remains planned, but every declared dependency must still pass.
     `v0.1.8` tag and creating a public GitHub Release require explicit user
     approval after the candidate and rehearsal gates pass
 - [ ] M6 / v0.1.9 General Script Runtime
+  - [x] establish typed script catalog schema v2 independently of the Script
+    API protocol version, and add an explicit server-independent `local`
+    profile foundation without changing the ordinary default prematurely
   - [ ] make `local` the ordinary `agenterm-script.exe` execution profile and
     deliver the Rust-shaped `std::{fs,path,env,process,time}` subset plus
     `rhai::{task,http,json,bytes,runtime}` extensions without moving future

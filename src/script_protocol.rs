@@ -19,6 +19,17 @@ pub const SCRIPT_FRAME_MAX_BYTES: u32 = 2 * 1024 * 1024;
 pub enum ScriptProfile {
     Pure,
     Observe,
+    Local,
+}
+
+impl ScriptProfile {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Pure => "pure",
+            Self::Observe => "observe",
+            Self::Local => "local",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]

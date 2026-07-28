@@ -82,6 +82,7 @@ pub mod operations;
 mod protocol;
 mod rmux_status;
 mod script_audit;
+pub mod script_catalog;
 pub mod script_protocol;
 mod settings;
 mod tab_tree;
@@ -8819,6 +8820,7 @@ fn run_script_command(arguments: &[String]) -> i32 {
     let profile = match option_value(arguments, "--profile").unwrap_or("pure") {
         "pure" => ScriptProfile::Pure,
         "observe" => ScriptProfile::Observe,
+        "local" => ScriptProfile::Local,
         other => {
             eprintln!("unknown script profile: {other}");
             return 2;
@@ -8941,14 +8943,11 @@ fn run_script_command(arguments: &[String]) -> i32 {
         }
         ScriptOperation::Check | ScriptOperation::Run => AuditSourceKind::File,
     };
-    let profile_name = match profile {
-        ScriptProfile::Pure => "pure",
-        ScriptProfile::Observe => "observe",
-    };
-    let capabilities = if profile == ScriptProfile::Observe {
-        vec!["observe".to_owned()]
-    } else {
-        Vec::new()
+    let profile_name = profile.as_str();
+    let capabilities = match profile {
+        ScriptProfile::Pure => Vec::new(),
+        ScriptProfile::Observe => vec!["observe".to_owned()],
+        ScriptProfile::Local => vec!["local".to_owned()],
     };
     let mut audit_invocation = AuditInvocation {
         invocation_id: invocation_id.clone(),
