@@ -15,8 +15,11 @@ schema 后，让 AgenTerm 首次用自己的脚本运行时驱动完整开发生
 v0.1.10 必须完成 Rhai 对仓库自有 PowerShell 自动化的替代，这不是尽力而为
 的候选项，也不能顺延为后续版本：
 
-- 版本开始时的基线为 **41 个受 Git 跟踪的 `.ps1`**：根目录 3 个、
-  `scripts/` 17 个、`tests/` 19 个、旧 PowerShell archive 2 个；
+- 截至 2026-07-29 的滚动基线为 **42 个受 Git 跟踪的 `.ps1`**：根目录
+  3 个、`scripts/` 活跃脚本 18 个、`tests/` 19 个、旧 PowerShell
+  archive 2 个；相较最初计划新增的 `tests/server_smoke.ps1` 也必须迁移；
+- v0.1.10 开工提交冻结最终迁移清单；从该提交起，zero-PS1 漂移门既拒绝
+  新增 `.ps1`，也拒绝从清单中遗漏、改名规避或把 PowerShell 藏进字符串；
 - 完成时 `git ls-files '*.ps1'` 必须返回空结果，archive 不作为例外；
 - 已迁移实现由 Git 历史保存，不在活动工作树维护 PowerShell 影子副本；
 - `.bat`、Unix shell 和 CI YAML 可以作为平台薄入口，但不得包含业务规则；
@@ -306,6 +309,28 @@ delivery
 
 入口不得包含能力选择、测试清单、预算、制品判断、发布条件或清理策略。
 Git 历史就是已迁移 `.ps1` 的归档，不在活动树保留第二套实现。
+
+### 迁移台账与进度口径
+
+v0.1.10 开工时由公开 Rhai task 从 `git ls-files '*.ps1'` 生成并冻结迁移
+台账。台账不是第二份手写文件清单；它必须记录并校验：
+
+```text
+源脚本路径
+├─ stable migration ID
+├─ 职责与所有调用者
+├─ 输入、输出、副作用、预算与平台条件
+├─ 原 evidence ID / fixture
+├─ 对应 Rhai module / task / typed API
+├─ parity evidence identity
+└─ 状态：inventory -> parity -> cutover -> deleted
+```
+
+进度只按“已经切换全部调用者并删除源 `.ps1`”计算完成；只有 Rhai
+实现、仍保留 PowerShell 主入口的项目不得计入完成率。每完成一个台账项，
+必须在同一小提交中完成调用者切换、等价或更强证据、源文件删除和目录漂移
+校验。若 v0.1.9 在 v0.1.10 开工前继续增加 PowerShell 测试，最终冻结基线
+按真实 Git 清单自动上调，归零目标不变。
 
 ### 迁移方法
 
