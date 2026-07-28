@@ -606,8 +606,8 @@ agenterm-script
 │  │  ├─ [>] Duration / wall clock 已交付；Instant 待补
 │  │  └─ [ ] sleep / cancellable timer
 │  ├─ task
-│  │  ├─ [ ] wait / wait_all / race
-│  │  └─ [ ] cancel / terminal state / failure propagation
+│  │  ├─ [x] timer wait / wait_all / indexed race
+│  │  └─ [>] cancel / terminal state 已交付；typed payload propagation 待补
 │  └─ stream
 │     ├─ [ ] read / bounded collect
 │     └─ [ ] backpressure / truncation / close

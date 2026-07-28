@@ -439,13 +439,18 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             (NO_STRINGS, &["environment_current_dir"]),
         ),
         shipped_local_entry_with_semantics(
-            "std.process.command",
-            "system/process/command",
-            "std::process::command",
-            Some("std::process::Command::new"),
-            RustMapping::Adapted,
-            "std::process::command(program)",
-            (&["new_is_a_rhai_reserved_word", "no_implicit_shell"], &["process_program_empty"]),
+            shipped_local_entry(
+                "std.process.command",
+                "system/process/command",
+                "std::process::command",
+                Some("std::process::Command::new"),
+                RustMapping::Adapted,
+                "std::process::command(program)",
+                (
+                    &["new_is_a_rhai_reserved_word", "no_implicit_shell"],
+                    &["process_program_empty"],
+                ),
+            ),
             &[
                 "Command::new cannot be exposed because new is Rhai-reserved",
                 "the host never inserts an implicit shell",
@@ -471,19 +476,21 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             (&["bounded_capture", "typed_timeout", "job_object_cleanup"], &["process_spawn", "process_timeout"]),
         ),
         shipped_local_entry_with_semantics(
-            "std.process.command-start",
-            "system/process/command/start",
-            "Command.start",
-            Some("std::process::Command::spawn"),
-            RustMapping::Adapted,
-            "command.start()",
-            (
-                &[
-                    "spawn_is_a_rhai_reserved_word",
-                    "invocation_owned",
-                    "job_object_cleanup",
-                ],
-                &["process_spawn"],
+            shipped_local_entry(
+                "std.process.command-start",
+                "system/process/command/start",
+                "Command.start",
+                Some("std::process::Command::spawn"),
+                RustMapping::Adapted,
+                "command.start()",
+                (
+                    &[
+                        "spawn_is_a_rhai_reserved_word",
+                        "invocation_owned",
+                        "job_object_cleanup",
+                    ],
+                    &["process_spawn"],
+                ),
             ),
             &[
                 "Command::spawn is exposed as start because spawn is Rhai-reserved",
@@ -581,14 +588,59 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             "bytes.to_text()",
             (NO_STRINGS, &["bytes_invalid_utf8"]),
         ),
-        planned_entry(
-            "rhai.task.start",
-            "runtime/task/start",
-            "rhai::task::start",
+        shipped_local_entry(
+            "rhai.task.after",
+            "runtime/task/timer/after",
+            "rhai::task::after",
             None,
             RustMapping::None,
-            "rhai::task::start(fn)",
-            "task runtime is not shipped yet",
+            "rhai::task::after(duration)",
+            (&["background_timer", "invocation_owned"], &["task_state_poisoned"]),
+        ),
+        shipped_local_entry(
+            "rhai.task.sleep",
+            "runtime/task/timer/sleep",
+            "rhai::task::sleep",
+            None,
+            RustMapping::None,
+            "rhai::task::sleep(duration)",
+            (&["blocking_wait", "invocation_owned"], &["task_cancelled"]),
+        ),
+        shipped_local_entry(
+            "rhai.task.wait-all",
+            "runtime/task/composition/wait-all",
+            "rhai::task::wait_all",
+            None,
+            RustMapping::None,
+            "rhai::task::wait_all(tasks[, timeout])",
+            (&["deterministic_input_order", "maximum_64_tasks"], &["task_wait_timeout", "task_cancelled"]),
+        ),
+        shipped_local_entry(
+            "rhai.task.race",
+            "runtime/task/composition/race",
+            "rhai::task::race",
+            None,
+            RustMapping::None,
+            "rhai::task::race(tasks[, timeout])",
+            (&["returns_winning_index", "maximum_64_tasks"], &["task_race_empty", "task_wait_timeout"]),
+        ),
+        shipped_local_entry(
+            "rhai.task.cancel-all",
+            "runtime/task/composition/cancel-all",
+            "rhai::task::cancel_all",
+            None,
+            RustMapping::None,
+            "rhai::task::cancel_all(tasks)",
+            (&["idempotent_cancellation", "maximum_64_tasks"], &["task_collection_type"]),
+        ),
+        shipped_local_entry(
+            "rhai.task.handle",
+            "runtime/task/handle",
+            "Task.id/state/done/cancelled/wait/cancel",
+            None,
+            RustMapping::None,
+            "task.id / task.state / task.done / task.cancelled / task.wait([timeout]) / task.cancel()",
+            (&["typed_host_payload_only", "no_rhai_dynamic_cross_thread"], &["task_wait_timeout", "task_cancelled"]),
         ),
         planned_entry(
             "fleet.tabs.new",
@@ -787,24 +839,9 @@ fn shipped_local_entry(
 
 #[allow(clippy::too_many_arguments)]
 fn shipped_local_entry_with_semantics(
-    stable_id: &'static str,
-    catalog_path: &'static str,
-    surface_path: &'static str,
-    rust_path: Option<&'static str>,
-    rust_mapping: RustMapping,
-    signature: &'static str,
-    behavior: (&'static [&'static str], &'static [&'static str]),
+    mut entry: ScriptApiEntry,
     semantic_differences: &'static [&'static str],
 ) -> ScriptApiEntry {
-    let mut entry = shipped_local_entry(
-        stable_id,
-        catalog_path,
-        surface_path,
-        rust_path,
-        rust_mapping,
-        signature,
-        behavior,
-    );
     entry.semantic_differences = semantic_differences;
     entry
 }

@@ -191,16 +191,19 @@ agenterm-script
 │  │
 │  ├─ task::
 │  │  Executor-neutral task composition, waiting, racing, and cancellation.
-│  │  [planned; stable namespace reservation; designed 2026-07-28]
+│  │  [partially shipped; stable delivered leaves; designed 2026-07-28]
+│  │  ├─ after(duration) / sleep(duration)
+│  │  │  Starts an invocation-owned timer or waits sequentially.
+│  │  │  [shipped; stable; designed 2026-07-28]
 │  │  ├─ wait_all(tasks)
 │  │  │  Waits for all tasks with deterministic result ordering.
-│  │  │  [planned; reserved; designed 2026-07-28]
+│  │  │  [shipped; stable; designed 2026-07-28]
 │  │  ├─ race(tasks)
-│  │  │  Returns the first stable terminal outcome.
-│  │  │  [planned; reserved; designed 2026-07-28]
+│  │  │  Returns the stable index of the first completed task.
+│  │  │  [shipped; stable; designed 2026-07-28]
 │  │  └─ cancel_all(tasks)
-│  │     Requests cancellation and reports final cancellation outcomes.
-│  │     [planned; reserved; designed 2026-07-28]
+│  │     Requests cancellation and returns the changed-state count.
+│  │     [shipped; stable; designed 2026-07-28]
 │  │
 │  ├─ http::
 │  │  Bounded, cancellable HTTP(S) client operations.
@@ -268,8 +271,11 @@ agenterm-script
 │  ├─ Child / Output
 │  │  Child lifecycle and bounded final process output.
 │  │  [shipped; stable; designed 2026-07-28]
-│  ├─ Task / Stream
-│  │  Invocation-owned asynchronous completion and bounded stream state.
+│  ├─ Task
+│  │  Invocation-owned asynchronous state with id/wait/cancel facts.
+│  │  [shipped timer payload; stable; designed 2026-07-28]
+│  ├─ Stream
+│  │  Bounded asynchronous readable/closed/failed stream state.
 │  │  [planned; reserved; designed 2026-07-28]
 │  ├─ HttpResponse
 │  │  Status, headers, body, truncation, and transport facts.
@@ -712,6 +718,12 @@ let response = web.wait(std::time::Duration::from_secs(15));
 
 `Task` MUST have an invocation-local stable ID, state, wait, cancel, and stable
 terminal outcome. Late completion MUST NOT overwrite `cancelled`.
+
+The shipped first payload is a timer. `after(Duration)` starts it, while
+`sleep(Duration)` provides the sequential form. `wait_all` preserves input
+ordering, `race` returns the winning input index, and `cancel_all` returns the
+number of tasks whose state changed. Composition accepts at most 64 tasks.
+Wait timeouts do not silently cancel a still-pending task.
 
 `Stream` MUST report readable, closed, and failed states; truncation; encoding
 failure; backpressure; and cumulative limits. Truncated data MUST NOT be

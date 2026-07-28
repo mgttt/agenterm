@@ -16,6 +16,7 @@ pub mod script_catalog;
 pub mod script_process;
 pub mod script_protocol;
 pub mod script_stdlib;
+pub mod script_task;
 mod settings;
 mod tab_tree;
 mod terminal_lifecycle;

@@ -19,7 +19,7 @@ const MAX_CAPTURE_BYTES: usize = 256 * 1024;
 const MAX_STDIN_BYTES: usize = 256 * 1024;
 
 #[derive(Clone, Copy, Debug)]
-pub struct ScriptDuration(Duration);
+pub struct ScriptDuration(pub(crate) Duration);
 
 #[derive(Clone, Debug)]
 pub struct ScriptCommand {

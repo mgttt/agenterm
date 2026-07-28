@@ -134,6 +134,11 @@ and it is not positioned as a restricted security plugin.
     ship; monotonic `Instant` remains open.
 - [ ] `rhai::task` owns executor-neutral Task/Stream composition, cancellable
   sleep/timer, wait-all, race, cancel and bounded backpressure.
+  - [x] the executor-neutral timer slice ships Task identity/state,
+    `after`/`sleep`, wait with optional timeout, idempotent cancellation,
+    deterministic `wait_all`, indexed `race`, and `cancel_all`, without moving
+    Rhai `Dynamic` or `Engine` across threads.
+  - [ ] typed HTTP/Fleet payloads and bounded Stream/backpressure remain open.
 - [ ] `rhai::json` plus Rhai-native strings and a typed `Bytes` object provide
   bounded parsing, serialization, Unicode/encoding and explicit conversions
   without duplicating language primitives as fake Rust collections.

@@ -380,6 +380,12 @@ try {
             $_.semantic_differences -contains
                 'Command::spawn is exposed as start because spawn is Rhai-reserved' -and
             $_.status -eq 'shipped'
+        }).Count -ne 1 -or
+        @($apiResult.value.entries | Where-Object {
+            $_.stable_id -eq 'rhai.task.race' -and
+            $_.surface_path -eq 'rhai::task::race' -and
+            $_.status -eq 'shipped' -and
+            $_.profiles -contains 'local'
         }).Count -ne 1) {
         throw 'script api did not expose the versioned fail-closed capability catalog'
     }
@@ -487,6 +493,55 @@ let output = child.wait_with_output();
         $childResult.state -ne 'exited' -or
         -not $childResult.complete) {
         throw 'local spawned child did not expose a truthful kill/wait lifecycle'
+    }
+
+    Write-Host 'STEP task timers, deterministic race, cancellation, and wait timeout'
+    $taskExpression = @'
+let slow = rhai::task::after(std::time::Duration::from_millis(100));
+let fast = rhai::task::after(std::time::Duration::from_millis(1));
+let winner = rhai::task::race(
+    [slow, fast],
+    std::time::Duration::from_secs(1)
+);
+fast.wait();
+let cancelled = slow.cancel();
+#{
+    winner: winner,
+    fast_state: fast.state,
+    fast_done: fast.done,
+    slow_state: slow.state,
+    slow_cancelled: slow.cancelled,
+    cancel_changed_state: cancelled
+}
+'@
+    $taskResult = Invoke-Script @(
+        'script', 'eval', $taskExpression, '--profile', 'local',
+        '--timeout-ms', '10000'
+    ) | ConvertFrom-Json
+    if ($taskResult.winner -ne 1 -or
+        $taskResult.fast_state -ne 'completed' -or
+        -not $taskResult.fast_done -or
+        $taskResult.slow_state -ne 'cancelled' -or
+        -not $taskResult.slow_cancelled -or
+        -not $taskResult.cancel_changed_state) {
+        throw 'task timer race/cancellation facts were not deterministic'
+    }
+    $taskTimeoutExpression = @'
+let task = rhai::task::after(std::time::Duration::from_secs(1));
+try {
+    task.wait(std::time::Duration::from_millis(1));
+    print("missing-timeout");
+} catch (error) {
+    print(error);
+}
+task.cancel();
+'@
+    $taskTimeout = Invoke-Script @(
+        'script', 'eval', $taskTimeoutExpression, '--profile', 'local',
+        '--timeout-ms', '10000'
+    )
+    if ($taskTimeout -notlike '*task_wait_timeout*') {
+        throw "task wait timeout was not typed: $taskTimeout"
     }
 
     Write-Host 'STEP Rhai Cargo target inventory migration'

@@ -125,6 +125,7 @@ pub fn register_local(engine: &mut Engine) {
     let mut rhai_module = Module::new();
     rhai_module.set_sub_module("json", json);
     rhai_module.set_sub_module("bytes", bytes);
+    crate::script_task::register(engine, &mut rhai_module);
     engine.register_static_module("rhai", Shared::new(rhai_module));
 }
 
