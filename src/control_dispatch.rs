@@ -1,11 +1,16 @@
+use std::mem;
+
 use crate::{
     SCROLLBACK_LINES,
     commands::{
         has_option, last_positional, option_value, parse_new_command, parse_tab_environment,
         positional_values, supported_commands, tmux_key_bytes,
     },
+    event_journal::{EventJournal, EventKind},
     protocol::IpcResponse,
+    tab_tree::{TabTreeNode, TabTreeRow, tree_rows, would_create_cycle},
     terminal_runtime::TerminalTab,
+    workspace::workspace_path,
 };
 
 pub(crate) const CAPTURE_PUBLIC_MAX_BYTES: usize = 1024 * 1024;
@@ -168,6 +173,76 @@ pub(crate) trait ControlHost {
         };
         Ok(Some(self.tabs()[position].id))
     }
+
+    fn event_journal(&self) -> &EventJournal;
+    fn event_journal_mut(&mut self) -> &mut EventJournal;
+
+    fn tree_nodes(&self) -> Vec<TabTreeNode> {
+        self.tabs()
+            .iter()
+            .map(|tab| TabTreeNode {
+                id: tab.id,
+                parent_id: tab.parent_id,
+                sort_key: tab.index,
+            })
+            .collect()
+    }
+
+    fn all_tree_rows(&self) -> Vec<TabTreeRow> {
+        tree_rows(&self.tree_nodes())
+    }
+
+    fn request_ui_redraw(&mut self) {}
+
+    fn on_viewport_scrolled(&mut self, position: usize, offset: usize, source: &str) {
+        let id = self.tabs()[position].id;
+        self.event_journal_mut().commit(
+            EventKind::TerminalViewport,
+            Some(id),
+            serde_json::json!({
+                "scrollback_offset": offset,
+                "source": source,
+            }),
+        );
+        self.request_ui_redraw();
+    }
+
+    /// Simplified UI snapshot JSON for automation; None = host handles ui-snapshot itself.
+    fn ui_snapshot_json(&mut self) -> Option<String> {
+        None
+    }
+}
+
+pub(crate) fn set_tab_parent_on_host(
+    host: &mut dyn ControlHost,
+    child_id: u64,
+    parent_id: Option<u64>,
+) -> Result<(), String> {
+    let nodes = host.tree_nodes();
+    let Some(child_position) = host.tabs().iter().position(|tab| tab.id == child_id) else {
+        return Err(format!("can't find child tab: @{child_id}"));
+    };
+    if let Some(parent_id) = parent_id {
+        if !host.tabs().iter().any(|tab| tab.id == parent_id) {
+            return Err(format!("can't find parent tab: @{parent_id}"));
+        }
+        if would_create_cycle(&nodes, child_id, parent_id) {
+            return Err(format!(
+                "moving @{child_id} under @{parent_id} would create a cycle"
+            ));
+        }
+    }
+    let previous_parent_id = host.tabs()[child_position].parent_id;
+    host.tabs_mut()[child_position].parent_id = parent_id;
+    host.event_journal_mut().commit(
+        EventKind::TabParent,
+        Some(child_id),
+        serde_json::json!({
+            "previous_parent_id": previous_parent_id,
+            "parent_id": parent_id,
+        }),
+    );
+    Ok(())
 }
 
 pub(crate) fn dispatch_shared_command(
@@ -534,7 +609,6 @@ pub(crate) fn dispatch_shared_command(
             }
             host.tabs_mut().clear();
             host.set_active_id(None);
-            // Event journal persistence is host-specific; Unix has none in this slice.
             host.request_shutdown();
             if terminal_shutdown_complete {
                 Some(IpcResponse::success(""))
@@ -545,6 +619,294 @@ pub(crate) fn dispatch_shared_command(
                     "internal",
                     false,
                 ))
+            }
+        }
+        "scroll-pane" => {
+            let Some(position) =
+                resolve_target_position(host.tabs(), host.active_id(), option_value(args, "-t"))
+            else {
+                return Some(IpcResponse::failure("can't find pane"));
+            };
+            let values = positional_values(args, &["-t"], &[]);
+            let Some(action) = values.first().copied() else {
+                return Some(IpcResponse::failure(
+                    "usage: scroll-pane [-t target] \
+                     up|down|page-up|page-down|top|bottom [rows]",
+                ));
+            };
+            if values.len() > 2 {
+                return Some(IpcResponse::failure("scroll-pane accepts at most one row count"));
+            }
+            let count = match values.get(1) {
+                Some(value) => match value.parse::<usize>() {
+                    Ok(count) if count > 0 => Some(count),
+                    _ => {
+                        return Some(IpcResponse::failure(
+                            "scroll-pane row count must be a positive integer",
+                        ));
+                    }
+                },
+                None => None,
+            };
+            match host.tabs_mut()[position].scroll_viewport(action, count) {
+                Ok(offset) => {
+                    host.on_viewport_scrolled(position, offset, "control");
+                    Some(IpcResponse::success(offset.to_string()))
+                }
+                Err(error) => Some(IpcResponse::failure(format!("{error:#}"))),
+            }
+        }
+        "read-events" => {
+            let Some(epoch) = option_value(args, "--epoch") else {
+                return Some(IpcResponse::failure("read-events requires --epoch"));
+            };
+            let Some(after) =
+                option_value(args, "--after").and_then(|value| value.parse::<u64>().ok())
+            else {
+                return Some(IpcResponse::failure(
+                    "read-events requires a numeric --after sequence",
+                ));
+            };
+            let limit = match option_value(args, "--limit") {
+                Some(value) => match value.parse::<usize>() {
+                    Ok(limit) if (1..=1_024).contains(&limit) => limit,
+                    _ => {
+                        return Some(IpcResponse::failure(
+                            "read-events --limit must be from 1 to 1024",
+                        ));
+                    }
+                },
+                None => 256,
+            };
+            match host.event_journal().read_after(epoch, after, limit) {
+                Ok(events) => Some(IpcResponse::success(
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "position": host.event_journal().position(),
+                        "events": events,
+                    }))
+                    .unwrap_or_default(),
+                )),
+                Err(error) => Some(IpcResponse::typed_failure(
+                    error.to_json().to_string(),
+                    error.code(),
+                    "precondition",
+                    false,
+                )),
+            }
+        }
+        "list-tab-tree" => {
+            let format = option_value(args, "-F").unwrap_or("#{window_id}:#{window_name}");
+            let rows = host.all_tree_rows();
+            let session_name = host.session_name().to_owned();
+            let active = host.active_id();
+            let tabs = host.tabs();
+            Some(IpcResponse::success(
+                rows.iter()
+                    .filter_map(|row| {
+                        let tab = tabs.iter().find(|tab| tab.id == row.id)?;
+                        let branch = if row.depth == 0 {
+                            String::new()
+                        } else {
+                            let mut branch = row
+                                .guides
+                                .iter()
+                                .map(|continues| if *continues { "│ " } else { "  " })
+                                .collect::<String>();
+                            branch.push_str(if row.is_last { "└─ " } else { "├─ " });
+                            branch
+                        };
+                        let rendered = render_format(
+                            format,
+                            tab,
+                            &session_name,
+                            active == Some(tab.id),
+                        )
+                        .replace("#{tab_depth}", &row.depth.to_string())
+                        .replace(
+                            "#{tab_has_children}",
+                            if tabs
+                                .iter()
+                                .any(|child| child.parent_id == Some(tab.id))
+                            {
+                                "1"
+                            } else {
+                                "0"
+                            },
+                        );
+                        Some(format!("{branch}{rendered}"))
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            ))
+        }
+        "dump-cells" => {
+            let Some(position) =
+                resolve_target_position(host.tabs(), host.active_id(), option_value(args, "-t"))
+            else {
+                return Some(IpcResponse::failure("can't find pane"));
+            };
+            let requested_row =
+                option_value(args, "-r").and_then(|value| value.parse::<u16>().ok());
+            let tab = &host.tabs()[position];
+            let screen = tab.parser.screen();
+            let mut cells = Vec::new();
+            for row in 0..tab.last_size.0 {
+                if requested_row.is_some_and(|requested| requested != row) {
+                    continue;
+                }
+                for col in 0..tab.last_size.1 {
+                    let Some(cell) = screen.cell(row, col) else {
+                        continue;
+                    };
+                    let foreground = format!("{:?}", cell.fgcolor());
+                    let background = format!("{:?}", cell.bgcolor());
+                    if cell.contents().is_empty()
+                        && foreground == "Default"
+                        && background == "Default"
+                        && !cell.inverse()
+                    {
+                        continue;
+                    }
+                    cells.push(serde_json::json!({
+                        "row": row,
+                        "col": col,
+                        "text": cell.contents(),
+                        "fg": foreground,
+                        "bg": background,
+                        "inverse": cell.inverse(),
+                        "wide_continuation": cell.is_wide_continuation(),
+                    }));
+                }
+            }
+            match serde_json::to_string_pretty(&serde_json::json!({
+                "window_id": format!("@{}", tab.id),
+                "rows": tab.last_size.0,
+                "cols": tab.last_size.1,
+                "cells": cells,
+            })) {
+                Ok(json) => Some(IpcResponse::success(json)),
+                Err(error) => Some(IpcResponse::failure(error.to_string())),
+            }
+        }
+        "workspace-info" => Some(IpcResponse::success(
+            serde_json::to_string_pretty(&serde_json::json!({
+                "path": workspace_path(),
+                "version": 1,
+                "tab_count": host.tabs().len(),
+                "active_id": host.active_id().map(|id| format!("@{id}")),
+                "restore_behavior": "restart-processes",
+            }))
+            .unwrap_or_default(),
+        )),
+        "renamew" | "rename-window" => {
+            let Some(name) = last_positional(args, &["-t"]) else {
+                return Some(IpcResponse::failure(
+                    "usage: rename-window [-t target] new-name",
+                ));
+            };
+            let Some(position) =
+                resolve_target_position(host.tabs(), host.active_id(), option_value(args, "-t"))
+            else {
+                return Some(IpcResponse::failure("can't find window"));
+            };
+            let id = host.tabs()[position].id;
+            let previous_name = host.tabs()[position].title.clone();
+            host.tabs_mut()[position].title = name.to_owned();
+            host.event_journal_mut().commit(
+                EventKind::TabRenamed,
+                Some(id),
+                serde_json::json!({
+                    "previous_name": previous_name,
+                    "name": name,
+                }),
+            );
+            host.request_ui_redraw();
+            Some(IpcResponse::success(""))
+        }
+        "set-tab-note" => {
+            let Some(position) =
+                resolve_target_position(host.tabs(), host.active_id(), option_value(args, "-t"))
+            else {
+                return Some(IpcResponse::failure("can't find tab"));
+            };
+            let note = positional_values(args, &["-t"], &[]).join(" ");
+            let id = host.tabs()[position].id;
+            let previous_note = mem::replace(&mut host.tabs_mut()[position].note, note.clone());
+            host.event_journal_mut().commit(
+                EventKind::TabNote,
+                Some(id),
+                serde_json::json!({
+                    "previous_note": previous_note,
+                    "note": note,
+                }),
+            );
+            host.request_ui_redraw();
+            Some(IpcResponse::success(""))
+        }
+        "show-tab-note" => {
+            let Some(position) =
+                resolve_target_position(host.tabs(), host.active_id(), option_value(args, "-t"))
+            else {
+                return Some(IpcResponse::failure("can't find tab"));
+            };
+            Some(IpcResponse::success(host.tabs()[position].note.clone()))
+        }
+        "set-tab-parent" => {
+            let Some(child_position) =
+                resolve_target_position(host.tabs(), host.active_id(), option_value(args, "-t"))
+            else {
+                return Some(IpcResponse::failure("can't find child tab"));
+            };
+            let Some(parent_target) = option_value(args, "--parent") else {
+                return Some(IpcResponse::failure(
+                    "usage: set-tab-parent -t child --parent parent|root",
+                ));
+            };
+            let parent_id = match host.resolve_parent_id(parent_target) {
+                Ok(parent_id) => parent_id,
+                Err(error) => return Some(IpcResponse::failure(error)),
+            };
+            let child_id = host.tabs()[child_position].id;
+            match set_tab_parent_on_host(host, child_id, parent_id) {
+                Ok(()) => {
+                    host.request_ui_redraw();
+                    Some(IpcResponse::success(""))
+                }
+                Err(error) => Some(IpcResponse::failure(error)),
+            }
+        }
+        "show-tab-parent" => {
+            let Some(position) =
+                resolve_target_position(host.tabs(), host.active_id(), option_value(args, "-t"))
+            else {
+                return Some(IpcResponse::failure("can't find tab"));
+            };
+            Some(IpcResponse::success(
+                host.tabs()[position]
+                    .parent_id
+                    .map(|id| format!("@{id}"))
+                    .unwrap_or_else(|| "root".to_owned()),
+            ))
+        }
+        "next" | "next-window" | "prev" | "previous-window" => {
+            let direction = if matches!(command, "next" | "next-window") {
+                1
+            } else {
+                -1
+            };
+            let Some(position) = host.adjacent_tab_position(direction) else {
+                return Some(IpcResponse::failure("no windows"));
+            };
+            match host.select_tab_at(position) {
+                Ok(()) => Some(IpcResponse::success("")),
+                Err(error) => Some(IpcResponse::failure(error)),
+            }
+        }
+        "ui-snapshot" => {
+            if let Some(json) = host.ui_snapshot_json() {
+                Some(IpcResponse::success(json))
+            } else {
+                None
             }
         }
         _ => None,
