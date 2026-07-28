@@ -116,7 +116,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
      shipped. Combined-host facts remain conservative; split-server facts
      advertise the proven replaceable/reconnect/rollback set, while default
      replacement remains false until its ordinary-launch black-box gate passes.
-  - [x] black-box upgrade proof uses two genuinely different GUI binaries and keeps server PID, epoch, stable tab ID, PTY child PID, Composer/CWD facts, scrollback markers and continuing output stable while HWND and GUI build identity change; competing startup and incompatible hello fail closed without disturbing the server, and rollback restores the prior compatible GUI identity
+  - [x] black-box upgrade proof uses two genuinely different GUI binaries and keeps server PID, epoch, stable tab ID, PTY child PID, Composer/CWD facts, scrollback markers and continuing output stable while HWND and GUI build identity change; competing startup exits nonzero without a blocking dialog, incompatible hello fails closed without disturbing the server, and rollback restores the prior compatible GUI identity
   - [~] migration is phased through extracted server state and renderer-neutral
     screen contracts. The current combined `agenterm.exe` remains truthful
     until those gates pass; merely hiding its old HWND is not GUI replacement

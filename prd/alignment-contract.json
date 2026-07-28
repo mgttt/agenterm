@@ -273,7 +273,7 @@
       "kind": "architecture",
       "status": "shipped",
       "evidence_mode": "black-box",
-      "prd": "black-box upgrade proof uses two genuinely different GUI binaries and keeps server PID, epoch, stable tab ID, PTY child PID, Composer/CWD facts, scrollback markers and continuing output stable while HWND and GUI build identity change; competing startup and incompatible hello fail closed without disturbing the server, and rollback restores the prior compatible GUI identity",
+      "prd": "black-box upgrade proof uses two genuinely different GUI binaries and keeps server PID, epoch, stable tab ID, PTY child PID, Composer/CWD facts, scrollback markers and continuing output stable while HWND and GUI build identity change; competing startup exits nonzero without a blocking dialog, incompatible hello fails closed without disturbing the server, and rollback restores the prior compatible GUI identity",
       "evidence_ids": ["ui.same-server-upgrade-rollback"]
     },
     {

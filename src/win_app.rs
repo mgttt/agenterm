@@ -37,19 +37,18 @@ use windows_sys::Win32::{
         ES_MULTILINE, ES_WANTRETURN, EnableMenuItem, GWLP_USERDATA, GetClientRect, GetCursorPos,
         GetForegroundWindow, GetMessageW, GetSystemMenu, GetWindowLongPtrW, GetWindowRect,
         GetWindowTextLengthW, GetWindowTextW, IDC_ARROW, IDC_SIZEWE, InsertMenuW, IsIconic,
-        IsWindowVisible, IsZoomed, LoadCursorW, LoadIconW, MB_ICONERROR, MB_OK, MF_BYCOMMAND,
-        MF_CHECKED, MF_ENABLED, MF_GRAYED, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MSG, MessageBoxW,
-        MoveWindow, PostMessageW, PostQuitMessage, RegisterClassW, SC_CLOSE, SIZE_MINIMIZED,
-        SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE, SW_SHOW, SW_SHOWMAXIMIZED, SW_SHOWNOACTIVATE,
-        SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW,
-        SendMessageW, SetCursor, SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowPos,
-        SetWindowTextW, ShowWindow, TranslateMessage, WM_ACTIVATEAPP, WM_APP, WM_CAPTURECHANGED,
-        WM_CHAR, WM_CLOSE, WM_COMMAND, WM_COPY, WM_CREATE, WM_CUT, WM_DESTROY, WM_ENDSESSION,
-        WM_ERASEBKGND, WM_INITMENUPOPUP, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN,
-        WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY, WM_PAINT, WM_PASTE,
-        WM_QUERYENDSESSION, WM_RBUTTONDOWN, WM_SETCURSOR, WM_SETFOCUS, WM_SIZE, WM_SYSCOMMAND,
-        WM_TIMER, WNDCLASSW, WS_BORDER, WS_CHILD, WS_CLIPCHILDREN, WS_OVERLAPPEDWINDOW, WS_TABSTOP,
-        WS_VISIBLE, WS_VSCROLL,
+        IsWindowVisible, IsZoomed, LoadCursorW, LoadIconW, MF_BYCOMMAND, MF_CHECKED, MF_ENABLED,
+        MF_GRAYED, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MSG, MoveWindow, PostMessageW,
+        PostQuitMessage, RegisterClassW, SC_CLOSE, SIZE_MINIMIZED, SW_HIDE, SW_MAXIMIZE,
+        SW_MINIMIZE, SW_SHOW, SW_SHOWMAXIMIZED, SW_SHOWNOACTIVATE, SW_SHOWNORMAL, SWP_NOACTIVATE,
+        SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SendMessageW, SetCursor,
+        SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW, ShowWindow,
+        TranslateMessage, WM_ACTIVATEAPP, WM_APP, WM_CAPTURECHANGED, WM_CHAR, WM_CLOSE, WM_COMMAND,
+        WM_COPY, WM_CREATE, WM_CUT, WM_DESTROY, WM_ENDSESSION, WM_ERASEBKGND, WM_INITMENUPOPUP,
+        WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
+        WM_MOUSEWHEEL, WM_NCDESTROY, WM_PAINT, WM_PASTE, WM_QUERYENDSESSION, WM_RBUTTONDOWN,
+        WM_SETCURSOR, WM_SETFOCUS, WM_SIZE, WM_SYSCOMMAND, WM_TIMER, WNDCLASSW, WS_BORDER,
+        WS_CHILD, WS_CLIPCHILDREN, WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE, WS_VSCROLL,
     },
 };
 
@@ -108,7 +107,6 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-const APP_NAME: &str = "AgenTerm";
 const INITIAL_ROWS: u16 = 30;
 const INITIAL_COLS: u16 = 100;
 const COMPOSER_HEADER_HEIGHT: i32 = 26;
@@ -296,7 +294,7 @@ pub fn run_gui_entry() -> i32 {
             "__focus"
         };
         match crate::client::send_ipc_request(vec![handoff.to_owned()]) {
-            Ok(response) if gui_handoff_succeeded(&response) => return 0,
+            Ok(response) if response.ok => return 0,
             Ok(response) => {
                 write_best_effort_stderr(&format!(
                     "The running AgenTerm server rejected the launcher handoff: {}\n\
@@ -326,10 +324,6 @@ fn configure_gui_launch(arguments: &[String]) -> Result<GuiLaunchOptions> {
     let (options, address) = parse_gui_launch(arguments)?;
     crate::client::set_ipc_address_override(address);
     Ok(options)
-}
-
-fn gui_handoff_succeeded(response: &IpcResponse) -> bool {
-    response.ok
 }
 
 fn parse_gui_launch(arguments: &[String]) -> Result<(GuiLaunchOptions, Option<String>)> {
@@ -465,17 +459,9 @@ fn write_best_effort_stderr(message: &str) {
 
 fn show_startup_error(error: &anyhow::Error) {
     let text = format!("AgenTerm failed to start:\n\n{error:#}");
-    let message = wide(&text);
-    unsafe {
-        MessageBoxW(
-            ptr::null_mut(),
-            message.as_ptr(),
-            wide(APP_NAME).as_ptr(),
-            MB_OK | MB_ICONERROR,
-        );
-    }
     write_best_effort_stderr(&text);
 }
+
 fn run_gui(no_activate: bool) -> Result<()> {
     let instance = unsafe { GetModuleHandleW(ptr::null()) };
     if instance.is_null() {
@@ -7234,10 +7220,9 @@ fn save_window_png(window: HWND, path: &std::path::Path, pane: Option<PixelRect>
 #[cfg(test)]
 mod tests {
     use super::{
-        COMPOSER_TARGET_ROWS, EditShortcut, FocusSurface, IpcResponse, PixelRect, ThemeId,
-        composer_input_rect, edit_shortcut, effective_theme, gui_cli_guidance,
-        gui_handoff_succeeded, is_latched_navigation_repeat, normalize_terminal_paste,
-        parse_gui_launch, surface_navigation, terminal_copy_shortcut,
+        COMPOSER_TARGET_ROWS, EditShortcut, FocusSurface, PixelRect, ThemeId, composer_input_rect,
+        edit_shortcut, effective_theme, gui_cli_guidance, is_latched_navigation_repeat,
+        normalize_terminal_paste, parse_gui_launch, surface_navigation, terminal_copy_shortcut,
     };
     use crate::client::run_wait_ui;
     use crate::control_dispatch::bounded_utf8_prefix;
@@ -7436,14 +7421,6 @@ mod tests {
         assert!(crate::client::no_activate_from_value(Some(OsStr::new(
             "true"
         ))));
-    }
-
-    #[test]
-    fn gui_launcher_accepts_only_a_successful_server_handoff() {
-        assert!(gui_handoff_succeeded(&IpcResponse::success("shown")));
-        assert!(!gui_handoff_succeeded(&IpcResponse::failure(
-            "unsupported launcher operation"
-        )));
     }
 
     #[test]

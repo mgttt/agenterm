@@ -219,23 +219,17 @@ try {
         -PassThru -WindowStyle Normal
     Register-SmokeOwnedProcess -Context $run -Id $conflict.Id `
         -Kind 'gui' -Address $run.Address
-    $conflictDeadline = [DateTime]::UtcNow.AddSeconds(2)
-    do {
-        $conflictLease = Invoke-AgenTerm @('ui-lease', 'status') |
-            ConvertFrom-Json
-        if (-not $conflictLease.attached -or
-            $conflictLease.client_pid -ne $priorPid) {
-            throw 'competing GUI stole or released the prior live lease'
-        }
-        if ($conflict.HasExited) {
-            break
-        }
-        Start-Sleep -Milliseconds 25
-        $conflict.Refresh()
-    } while ([DateTime]::UtcNow -lt $conflictDeadline)
-    if (-not $conflict.HasExited) {
-        Stop-Process -Id $conflict.Id -Force
-        $conflict.WaitForExit(5000) | Out-Null
+    if (-not $conflict.WaitForExit(5000) -or $conflict.ExitCode -eq 0) {
+        throw (
+            'competing GUI did not fail non-interactively with a nonzero ' +
+            'exit code while the prior lease was live'
+        )
+    }
+    $conflictLease = Invoke-AgenTerm @('ui-lease', 'status') |
+        ConvertFrom-Json
+    if (-not $conflictLease.attached -or
+        $conflictLease.client_pid -ne $priorPid) {
+        throw 'competing GUI stole or released the prior live lease'
     }
     $healthyAfterConflict = Get-UpgradeState -TabId $tabId
     if ($healthyAfterConflict.Bootstrap.server_pid -ne $serverPid -or
