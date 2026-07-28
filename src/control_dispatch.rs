@@ -525,6 +525,14 @@ pub(crate) trait ControlHost {
         Err("tab tree collapse is not supported on this host".to_owned())
     }
 
+    fn prepare_cwd(&mut self, _tab_id: u64, _path: &str, _mode: &str) -> Result<(), String> {
+        Err("CWD preparation is not supported on this host".to_owned())
+    }
+
+    fn send_cwd_now(&mut self, _tab_id: u64, _path: &str) -> Result<(), String> {
+        Err("CWD submission is not supported on this host".to_owned())
+    }
+
     fn open_settings_modal(&mut self) -> Result<(), String> {
         Err("settings UI is not supported on this host".to_owned())
     }
@@ -1421,6 +1429,46 @@ pub(crate) fn dispatch_shared_command(
                     Some(IpcResponse::success(offset.to_string()))
                 }
                 Err(error) => Some(IpcResponse::failure(format!("{error:#}"))),
+            }
+        }
+        "cwd-prepare" | "cwd-prepare-append" | "cwd-prepare-replace" => {
+            let Some(position) =
+                resolve_target_position(host.tabs(), host.active_id(), option_value(args, "-t"))
+            else {
+                return Some(IpcResponse::failure("can't find tab"));
+            };
+            let Some(path) = option_value(args, "--path") else {
+                return Some(IpcResponse::failure(format!("{command} requires --path")));
+            };
+            let mode = match command {
+                "cwd-prepare-append" => "append",
+                "cwd-prepare-replace" => "replace",
+                _ => option_value(args, "--mode").unwrap_or("empty-only"),
+            };
+            if !matches!(mode, "empty-only" | "append" | "replace") {
+                return Some(IpcResponse::failure(
+                    "CWD composer mode must be empty-only, append, or replace",
+                ));
+            }
+            let id = host.tabs()[position].id;
+            match host.prepare_cwd(id, path, mode) {
+                Ok(()) => Some(ui_snapshot_response(host)),
+                Err(error) => Some(IpcResponse::failure(error)),
+            }
+        }
+        "cwd-send-now" => {
+            let Some(position) =
+                resolve_target_position(host.tabs(), host.active_id(), option_value(args, "-t"))
+            else {
+                return Some(IpcResponse::failure("can't find tab"));
+            };
+            let Some(path) = option_value(args, "--path") else {
+                return Some(IpcResponse::failure("cwd-send-now requires --path"));
+            };
+            let id = host.tabs()[position].id;
+            match host.send_cwd_now(id, path) {
+                Ok(()) => Some(ui_snapshot_response(host)),
+                Err(error) => Some(IpcResponse::failure(error)),
             }
         }
         "read-events" => {

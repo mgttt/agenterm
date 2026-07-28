@@ -506,6 +506,70 @@ try {
         throw 'Settings Cancel did not roll the preview back to the applied theme'
     }
 
+    Write-Host 'STEP edit CWD through the bottom workbench segment'
+    $cwdClient = [AgenTermRemoteUiNativeTest+Rect]::new()
+    if (-not [AgenTermRemoteUiNativeTest]::GetClientRect(
+            $gui.MainWindowHandle, [ref]$cwdClient
+        )) {
+        throw 'GetClientRect failed for the CWD status segment'
+    }
+    $cwdStatusX = $cwdClient.Right - 24
+    $cwdStatusY = $cwdClient.Bottom - 13
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, 0x0201, [IntPtr]::Zero,
+        [AgenTermRemoteUiNativeTest]::MousePoint(
+            $cwdStatusX, $cwdStatusY
+        )
+    ) | Out-Null
+    $cwdPath = Join-Path $run.RunDirectory 'cwd target'
+    [AgenTermRemoteUiNativeTest]::SendMessageText(
+        $replacementComposer, 0x000C, [IntPtr]::Zero, $cwdPath
+    ) | Out-Null
+    $replacementSend = [AgenTermRemoteUiNativeTest]::GetDlgItem(
+        $gui.MainWindowHandle, 2102
+    )
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $replacementSend, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero
+    ) | Out-Null
+    $cwdPrepared = Invoke-AgenTerm @('ui-bootstrap') |
+        ConvertFrom-Json
+    $cwdTab = @(
+        $cwdPrepared.tabs | Where-Object id -eq $tabId
+    )[0]
+    $cwdComposer = (
+        Invoke-AgenTerm @('show-composer', '-t', $tabId) -join "`n"
+    ).TrimEnd()
+    if ($cwdTab.working_context.cwd -ne $cwdPath -or
+        -not $cwdTab.working_context.cwd_request_pending -or
+        $cwdComposer -notlike "*$cwdPath*") {
+        throw (
+            'CWD Prepare did not publish pending context and a shell-safe Composer draft: ' +
+            ($cwdTab | ConvertTo-Json -Depth 8 -Compress)
+        )
+    }
+
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, 0x0201, [IntPtr]::Zero,
+        [AgenTermRemoteUiNativeTest]::MousePoint(
+            $cwdStatusX, $cwdStatusY
+        )
+    ) | Out-Null
+    [AgenTermRemoteUiNativeTest]::SendMessageText(
+        $replacementComposer, 0x000C, [IntPtr]::Zero, 'must-not-prepare'
+    ) | Out-Null
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, 0x0201, [IntPtr]::Zero,
+        [AgenTermRemoteUiNativeTest]::MousePoint(
+            $cwdStatusX, $cwdStatusY
+        )
+    ) | Out-Null
+    $cwdAfterCancel = (
+        Invoke-AgenTerm @('show-composer', '-t', $tabId) -join "`n"
+    ).TrimEnd()
+    if ($cwdAfterCancel -ne $cwdComposer) {
+        throw 'CWD editor Cancel changed the prepared Composer draft'
+    }
+
     Write-Host 'STEP resize Tabs locally and scroll the server-owned viewport'
     $activeBeforeResize = @(
         $replacementBootstrap.tabs |

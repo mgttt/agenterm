@@ -95,6 +95,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       Ctrl+Down/Up moves Terminal↔Composer and Ctrl+Left/Right moves
       Terminal↔Tabs; native arrows and Ctrl+Shift/Ctrl+Alt combinations are not
       intercepted, and the focused surface has a palette focus ring.
+      The bottom workbench now reserves a bounded CWD segment sourced from the
+      active server tab; clicking it enters a client-owned inline editor,
+      `Prepare`/Ctrl+Enter asks the server to generate a shell-safe replacement
+      Composer command and publish pending working-context plus causal events,
+      while Esc or a second segment click restores the prior draft unchanged.
       Ordinary launches, remaining workbench parity and same-server rollback
       qualification are still pending.
   - [ ] compatibility is fail-closed and asymmetric: a new GUI may connect to

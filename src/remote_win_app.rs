@@ -271,7 +271,8 @@ pub(crate) fn run_remote_gui(no_activate: bool) -> Result<()> {
     while unsafe { GetMessageW(&mut message, ptr::null_mut(), 0, 0) } > 0 {
         if message.message == WM_KEYDOWN
             && let Some(state) = state_mut(window)
-            && state.handle_keyboard_navigation(message.wParam as u32)
+            && (state.handle_cwd_editor_keydown(message.wParam as u32)
+                || state.handle_keyboard_navigation(message.wParam as u32))
         {
             unsafe { windows_sys::Win32::Graphics::Gdi::InvalidateRect(window, ptr::null(), 0) };
             continue;
@@ -484,6 +485,7 @@ struct RemoteWindowState {
     scroll_drag: Option<RemoteScrollDrag>,
     focus_surface: RemoteFocusSurface,
     pending_close_tab_id: Option<String>,
+    cwd_edit_tab_id: Option<String>,
 }
 
 impl RemoteWindowState {
@@ -561,6 +563,7 @@ impl RemoteWindowState {
             scroll_drag: None,
             focus_surface: RemoteFocusSurface::Terminal,
             pending_close_tab_id: None,
+            cwd_edit_tab_id: None,
         })
     }
 
@@ -579,6 +582,7 @@ impl RemoteWindowState {
                 self.reconcile_tab_editor();
                 self.reconcile_terminal_selection();
                 self.reconcile_tab_close();
+                self.reconcile_cwd_editor();
                 let active = self
                     .client
                     .as_ref()
@@ -600,8 +604,12 @@ impl RemoteWindowState {
                             self.editing_tab_id = None;
                             self.terminal_selection = None;
                             self.pending_close_tab_id = None;
+                            self.cwd_edit_tab_id = None;
                             self.show_tab_editor(false);
                             self.show_tab_close_controls(false);
+                            unsafe {
+                                SetWindowTextW(self.send, wide("Send").as_ptr());
+                            }
                             self.show_workspace_controls(true);
                             self.last_active_id = self
                                 .client
@@ -664,6 +672,19 @@ impl RemoteWindowState {
         }
     }
 
+    fn reconcile_cwd_editor(&mut self) {
+        let still_active = self.cwd_edit_tab_id.as_ref().is_some_and(|id| {
+            self.client
+                .as_ref()
+                .is_some_and(|client| client.snapshot().active_tab_id.as_ref() == Some(id))
+        });
+        if self.cwd_edit_tab_id.is_some() && !still_active {
+            self.cwd_edit_tab_id = None;
+            unsafe { SetWindowTextW(self.send, wide("Send").as_ptr()) };
+            self.load_composer();
+        }
+    }
+
     fn workspace_geometry(&self) -> WorkspaceLayout {
         let mut client: RECT = unsafe { mem::zeroed() };
         unsafe { GetClientRect(self.window, &mut client) };
@@ -685,6 +706,17 @@ impl RemoteWindowState {
             win_rect(geometry.composer),
             win_rect(geometry.status),
         )
+    }
+
+    fn cwd_status_rect(&self) -> RECT {
+        let status = self.layout_rects().3;
+        let width = (status.right - status.left).clamp(180, 420);
+        RECT {
+            left: status.right - width,
+            top: status.top,
+            right: status.right,
+            bottom: status.bottom,
+        }
     }
 
     fn layout(&mut self) {
@@ -1091,6 +1123,9 @@ impl RemoteWindowState {
     }
 
     fn load_composer(&self) {
+        if self.cwd_edit_tab_id.is_some() {
+            return;
+        }
         let text = self
             .active_tab()
             .and_then(|tab| tab.composer.text.as_deref())
@@ -1099,6 +1134,9 @@ impl RemoteWindowState {
     }
 
     fn sync_composer(&mut self) -> Result<()> {
+        if self.cwd_edit_tab_id.is_some() {
+            return Ok(());
+        }
         let Some(tab_id) = self
             .client
             .as_ref()
@@ -1121,6 +1159,10 @@ impl RemoteWindowState {
     }
 
     fn send_composer(&mut self) {
+        if self.cwd_edit_tab_id.is_some() {
+            self.finish_cwd_editor(true);
+            return;
+        }
         let Some(tab_id) = self
             .client
             .as_ref()
@@ -1154,6 +1196,89 @@ impl RemoteWindowState {
             },
             Err(error) => self.last_error = Some(format!("Composer send failed: {error:#}")),
         }
+    }
+
+    fn open_cwd_editor(&mut self) {
+        if self.cwd_edit_tab_id.is_some()
+            || self.window_close_pending
+            || self.settings_open
+            || self.pending_close_tab_id.is_some()
+            || self.editing_tab_id.is_some()
+        {
+            return;
+        }
+        let Some(tab) = self.active_tab().cloned() else {
+            return;
+        };
+        if let Err(error) = self.sync_composer() {
+            self.last_error = Some(format!("Composer save failed: {error:#}"));
+            return;
+        }
+        self.cancel_terminal_selection();
+        self.cwd_edit_tab_id = Some(tab.id);
+        unsafe {
+            SetWindowTextW(
+                self.edit,
+                wide(tab.working_context.cwd.as_deref().unwrap_or_default()).as_ptr(),
+            );
+            SetWindowTextW(self.send, wide("Prepare").as_ptr());
+            SetFocus(self.edit);
+        }
+        self.focus_surface = RemoteFocusSurface::Composer;
+        self.last_error = None;
+    }
+
+    fn finish_cwd_editor(&mut self, prepare: bool) {
+        let Some(tab_id) = self.cwd_edit_tab_id.clone() else {
+            return;
+        };
+        if prepare {
+            let path = window_text(self.edit).trim().to_owned();
+            if path.is_empty() {
+                self.last_error = Some("CWD path cannot be empty".to_owned());
+                return;
+            }
+            let result = self
+                .client
+                .as_mut()
+                .context("UI is disconnected")
+                .and_then(|client| {
+                    client.run_control(vec![
+                        "cwd-prepare-replace".to_owned(),
+                        "-t".to_owned(),
+                        tab_id,
+                        "--path".to_owned(),
+                        path,
+                    ])?;
+                    client.poll_deltas()?;
+                    Ok(())
+                });
+            if let Err(error) = result {
+                self.last_error = Some(format!("CWD prepare failed: {error:#}"));
+                return;
+            }
+        }
+        self.cwd_edit_tab_id = None;
+        unsafe { SetWindowTextW(self.send, wide("Send").as_ptr()) };
+        self.load_composer();
+        self.focus_surface = RemoteFocusSurface::Composer;
+        unsafe { SetFocus(self.edit) };
+        self.last_error = None;
+    }
+
+    fn handle_cwd_editor_keydown(&mut self, key: u32) -> bool {
+        if self.cwd_edit_tab_id.is_none() || unsafe { GetFocus() } != self.edit {
+            return false;
+        }
+        if key == u32::from(VK_ESCAPE) {
+            self.finish_cwd_editor(false);
+            return true;
+        }
+        if key == 0x0d && unsafe { GetKeyState(VK_CONTROL as i32) } < 0 {
+            self.finish_cwd_editor(true);
+            return true;
+        }
+        false
     }
 
     fn new_tab(&mut self) {
@@ -1592,6 +1717,9 @@ impl RemoteWindowState {
         if self.window_close_pending {
             return;
         }
+        if self.cwd_edit_tab_id.is_some() {
+            self.finish_cwd_editor(false);
+        }
         if self.pending_close_tab_id.is_some() {
             self.finish_close_tab(false);
             return;
@@ -1813,6 +1941,7 @@ impl RemoteWindowState {
             || self.settings_open
             || self.editing_tab_id.is_some()
             || self.pending_close_tab_id.is_some()
+            || self.cwd_edit_tab_id.is_some()
         {
             return false;
         }
@@ -2255,32 +2384,32 @@ impl RemoteWindowState {
                     right: composer.right - MARGIN,
                     bottom: composer.top + 24,
                 },
-                &format!("Input → {}  {}", tab.id, tab.title),
+                &if self.cwd_edit_tab_id.as_deref() == Some(tab.id.as_str()) {
+                    format!("CWD → {}  Ctrl+Enter prepares · Esc cancels", tab.id)
+                } else {
+                    format!("Input → {}  {}", tab.id, tab.title)
+                },
                 palette.muted_text.colorref(),
             );
         }
         let status_text = if let Some(error) = &self.last_error {
             error.clone()
         } else if let Some(client) = &self.client {
-            let cwd = self
-                .active_tab()
-                .and_then(|tab| tab.working_context.cwd.as_deref())
-                .unwrap_or("-");
             format!(
-                "Connected · server PID {} · {} · {}",
+                "Connected · server PID {} · {}",
                 client.server_pid(),
-                client.client_id(),
-                cwd
+                client.client_id()
             )
         } else {
             "Disconnected · reconnecting".to_owned()
         };
+        let cwd_status = self.cwd_status_rect();
         draw_text(
             device,
             RECT {
                 left: status.left + MARGIN,
                 top: status.top,
-                right: status.right - MARGIN,
+                right: cwd_status.left - MARGIN,
                 bottom: status.bottom,
             },
             &status_text,
@@ -2289,6 +2418,22 @@ impl RemoteWindowState {
             } else {
                 palette.muted_text.colorref()
             },
+        );
+        frame(device, &cwd_status, palette.active_border.colorref());
+        let cwd = self
+            .active_tab()
+            .and_then(|tab| tab.working_context.cwd.as_deref())
+            .unwrap_or("-");
+        draw_text(
+            device,
+            RECT {
+                left: cwd_status.left + MARGIN,
+                top: cwd_status.top,
+                right: cwd_status.right - MARGIN,
+                bottom: cwd_status.bottom,
+            },
+            &format!("CWD: {cwd}"),
+            palette.muted_text.colorref(),
         );
         if !self.window_close_pending && !self.settings_open && self.pending_close_tab_id.is_none()
         {
@@ -2684,6 +2829,30 @@ unsafe extern "system" fn window_proc(
                 }
                 let x = (lparam as u32 & 0xffff) as i16 as i32;
                 let y = ((lparam as u32 >> 16) & 0xffff) as i16 as i32;
+                let cwd_status = state.cwd_status_rect();
+                let in_cwd_status = x >= cwd_status.left
+                    && x < cwd_status.right
+                    && y >= cwd_status.top
+                    && y < cwd_status.bottom;
+                if state.cwd_edit_tab_id.is_some() {
+                    state.finish_cwd_editor(false);
+                    if in_cwd_status {
+                        unsafe {
+                            windows_sys::Win32::Graphics::Gdi::InvalidateRect(
+                                window,
+                                ptr::null(),
+                                0,
+                            )
+                        };
+                        return 0;
+                    }
+                } else if in_cwd_status {
+                    state.open_cwd_editor();
+                    unsafe {
+                        windows_sys::Win32::Graphics::Gdi::InvalidateRect(window, ptr::null(), 0)
+                    };
+                    return 0;
+                }
                 if state.begin_tabs_resize(x, y) {
                     return 0;
                 }
@@ -2900,9 +3069,16 @@ unsafe extern "system" fn window_proc(
             if let Some(state) = state_mut(window) {
                 match wparam & 0xffff {
                     SEND_ID => state.send_composer(),
-                    NEW_ID => state.new_tab(),
-                    SETTINGS_ID => state.open_settings(),
+                    NEW_ID => {
+                        state.finish_cwd_editor(false);
+                        state.new_tab();
+                    }
+                    SETTINGS_ID => {
+                        state.finish_cwd_editor(false);
+                        state.open_settings();
+                    }
                     TABS_ID => {
+                        state.finish_cwd_editor(false);
                         state.finish_tab_edit(false);
                         state.tabs_visible = !state.tabs_visible;
                         state.config.tabs_visible = state.tabs_visible;

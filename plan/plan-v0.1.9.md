@@ -1662,6 +1662,11 @@ S4  [~] server-owned 单活 interactive UI lease 已交付 attach/idempotent
         折叠只隐藏后代、不删除 tab 或改变 active stable ID，server 通过
         additive `collapsed` bootstrap fact 与 `layout.tree.collapse` 事件
         提供因果 post-state，旧兼容 server 缺字段时安全解释为展开。
+        底部工作台也已拆出有界 CWD segment；点击后用 client-owned inline
+        editor 修改，Prepare/Ctrl+Enter 由 server 根据真实 shell 生成安全
+        Composer 命令并发布 pending working-context/event，Esc 或再次点击
+        segment 则无变更恢复原 draft。鼠标 Prepare/Cancel、稳定 tab target、
+        pending CWD 与 Composer post-state 已进入公开黑盒。
         普通启动默认切换、旧工作台完整 parity 与 same-server rollback 待补
 S5  same-server GUI upgrade + rollback black-box
 S6  remove combined-process handoff only after parity gates

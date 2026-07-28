@@ -29,6 +29,7 @@ use crate::{
     ui_interaction::{UiInteraction, parse_ui_interaction},
     ui_lease::{UI_LEASE_TTL_MS, UiLeaseAuthority, UiLeaseError, UiLeaseRecord},
     wake_signal::WakeSignal,
+    working_context::{CwdSource, cwd_command, validate_path},
     workspace::{SavedTab, SavedWorkspace, load_workspace, save_workspace, workspace_path},
 };
 
@@ -873,6 +874,79 @@ impl ControlHost for ServerState {
             EventKind::LayoutTreeCollapse,
             Some(tab_id),
             serde_json::json!({ "collapsed": collapsed }),
+        );
+        Ok(())
+    }
+
+    fn prepare_cwd(&mut self, tab_id: u64, path: &str, mode: &str) -> Result<(), String> {
+        validate_path(path).map_err(|error| format!("{error:#}"))?;
+        let Some(position) = self.tabs.iter().position(|tab| tab.id == tab_id) else {
+            return Err(format!("can't find tab: @{tab_id}"));
+        };
+        let command = cwd_command(self.tabs[position].shell_kind, path)
+            .map_err(|error| format!("{error:#}"))?;
+        let previous = self.tabs[position].composer.clone();
+        let next = match mode {
+            "empty-only" if !previous.is_empty() => {
+                return Err(
+                    "Composer already has a draft; explicitly choose append or replace".to_owned(),
+                );
+            }
+            "empty-only" | "replace" => command,
+            "append" if previous.is_empty() => command,
+            "append" => format!("{previous}\r\n{command}"),
+            _ => return Err(format!("unknown CWD composer mode: {mode}")),
+        };
+        self.tabs[position].composer = next;
+        self.tabs[position]
+            .cwd
+            .request(path.to_owned())
+            .map_err(|error| error.to_string())?;
+        self.event_journal.commit(
+            EventKind::WorkingContextCwdRequested,
+            Some(tab_id),
+            serde_json::json!({
+                "path": path,
+                "source": CwdSource::UserRequested.as_str(),
+                "pending": true,
+                "disposition": "prepared",
+                "composer_mode": mode,
+            }),
+        );
+        self.event_journal.commit(
+            EventKind::ComposerDraft,
+            Some(tab_id),
+            serde_json::json!({
+                "length": self.tabs[position].composer.chars().count(),
+            }),
+        );
+        Ok(())
+    }
+
+    fn send_cwd_now(&mut self, tab_id: u64, path: &str) -> Result<(), String> {
+        validate_path(path).map_err(|error| format!("{error:#}"))?;
+        let Some(position) = self.tabs.iter().position(|tab| tab.id == tab_id) else {
+            return Err(format!("can't find tab: @{tab_id}"));
+        };
+        let shell = self.tabs[position].shell_kind;
+        let command = cwd_command(shell, path).map_err(|error| format!("{error:#}"))?;
+        if !self.tabs[position].submit(&command) {
+            return Err("terminal is unavailable or already has a pending submission".to_owned());
+        }
+        self.tabs[position]
+            .cwd
+            .request(path.to_owned())
+            .map_err(|error| error.to_string())?;
+        self.event_journal.commit(
+            EventKind::WorkingContextCwdRequested,
+            Some(tab_id),
+            serde_json::json!({
+                "path": path,
+                "source": CwdSource::UserRequested.as_str(),
+                "pending": true,
+                "disposition": "sent",
+                "shell": shell.as_str(),
+            }),
         );
         Ok(())
     }
