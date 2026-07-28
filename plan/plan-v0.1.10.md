@@ -19,9 +19,9 @@ schema 后，让 AgenTerm 首次用自己的脚本运行时驱动完整开发生
 v0.1.10 必须完成 Rhai 对仓库自有 PowerShell 自动化的替代，这不是尽力而为
 的候选项，也不能顺延为后续版本：
 
-- 截至 2026-07-29 的滚动快照为 **43 个受 Git 跟踪的 `.ps1`**：根目录
+- 截至 2026-07-29 的滚动快照为 **44 个受 Git 跟踪的 `.ps1`**：根目录
   3 个、`scripts/` 活跃脚本 17 个、`scripts/archive/powershell/` 2 个、
-  `tests/` 21 个；这只是便于评审的当前快照，v0.1.10 开工时必须由
+  `tests/` 22 个；这只是便于评审的当前快照，v0.1.10 开工时必须由
   `git ls-files '*.ps1'` 自动生成并冻结真实基线，v0.1.9 收口期间新增并
   最终纳入 Git 的脚本同样必须迁移；
 - v0.1.10 开工提交冻结最终迁移清单；从该提交起，zero-PS1 漂移门既拒绝
@@ -366,6 +366,23 @@ v0.1.10 开工时由公开 Rhai task 从 `git ls-files '*.ps1'` 生成并冻结�
 必须在同一小提交中完成调用者切换、等价或更强证据、源文件删除和目录漂移
 校验。若 v0.1.9 在 v0.1.10 开工前继续增加 PowerShell 测试，最终冻结基线
 按真实 Git 清单自动上调，归零目标不变。
+
+迁移采用“完成一个、归档一个”的短闭环，不等待全部 Rhai 实现完成后再
+集中切换：
+
+```text
+一个可独立验收的脚本或强耦合脚本组
+  -> 冻结原行为与证据
+     -> 补齐共享 typed API / Rhai module
+        -> 对同一 fixture 双跑并比较
+           -> 切换所有调用者
+              -> 删除对应 .ps1
+                 -> 小提交并更新自动台账
+```
+
+这里的“归档”表示从活动工作树删除，由 Git 历史保存；不得移动到新的
+`archive/` 目录继续维护。只有无法独立切换的共享 harness/fixture 才允许
+以一个有明确边界的脚本组迁移，不能用“仍有其他脚本依赖”为理由长期双轨。
 
 ### 迁移方法
 
@@ -963,6 +980,12 @@ entry 是集成热点，只允许一个串行 owner 收口。
   first low-risk task migration
   dual-run normalized evidence
   caller cutover + delete first .ps1
+
+此后每个迁移提交
+  one independently verifiable script or tightly-coupled group
+  parity evidence + all-caller cutover
+  delete migrated .ps1 immediately
+  refresh machine-readable ledger and remaining count
 
 第三提交
   offline mcp catalog
