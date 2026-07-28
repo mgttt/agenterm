@@ -125,6 +125,8 @@ foreach ($suite in @(
     'script_smoke.ps1'
     'theme_smoke.ps1'
     'working_context_smoke.ps1'
+    'proxy_smoke.ps1'
+    'workbench_smoke.ps1'
     'ux_smoke.ps1'
 )) {
     $suitePath = Join-Path $PSScriptRoot $suite

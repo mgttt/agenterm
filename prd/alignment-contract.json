@@ -267,7 +267,7 @@
       "kind": "behavior",
       "status": "shipped",
       "evidence_mode": "black-box",
-      "prd": "pure Rhai run, eval, check, and API discovery execute in a sidecar",
+      "prd": "`agenterm-script.exe` executes pure Rhai",
       "evidence_ids": ["script.rhai-pure"]
     },
     {
@@ -275,7 +275,7 @@
       "kind": "behavior",
       "status": "shipped",
       "evidence_mode": "black-box",
-      "prd": "observe Rhai uses typed bounded workspace, tab, snapshot, capture, and event broker methods",
+      "prd": "explicit `observe` profile exposes typed, bounded workspace",
       "evidence_ids": ["script.rhai-observe"]
     },
     {
@@ -283,7 +283,7 @@
       "kind": "behavior",
       "status": "shipped",
       "evidence_mode": "black-box",
-      "prd": "Rhai denies ambient mutation authority and enforces operation budgets",
+      "prd": "source, value, operation, call/expression depth",
       "evidence_ids": ["script.rhai-deny-budget", "script.rhai-framed"]
     },
     {
@@ -291,7 +291,7 @@
       "kind": "architecture",
       "status": "shipped",
       "evidence_mode": "black-box",
-      "prd": "extract a Rhai-independent worker supervisor with kill-on-close",
+      "prd": "Rhai-independent supervisor owns a kill-on-close Windows Job Object",
       "evidence_ids": ["script.supervisor"]
     },
     {
@@ -299,7 +299,7 @@
       "kind": "behavior",
       "status": "shipped",
       "evidence_mode": "black-box",
-      "prd": "append privacy-bounded audit records for identity/fingerprint",
+      "prd": "privacy-bounded audit records contain identity",
       "evidence_ids": ["script.audit"]
     },
     {
@@ -309,6 +309,51 @@
       "evidence_mode": "decision",
       "prd": "design choice: Rust (`.rs`) implements the host",
       "evidence_ids": []
+    },
+    {
+      "id": "workspace.inline-tab-editing",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "editing is owned by exactly one stable tab ID",
+      "evidence_ids": ["ux.workbench-inline-edit"]
+    },
+    {
+      "id": "workspace.compact-tab-geometry",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "root inset and every depth indent use the shared compact geometry",
+      "evidence_ids": ["ux.workbench-compact-tree"]
+    },
+    {
+      "id": "workspace.proxy-mouse-controls",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "GUI editor provides mouse-reachable `Reveal`/`Re-mask`, `Prepare`",
+      "evidence_ids": ["ux.workbench-proxy-controls"]
+    },
+    {
+      "id": "workspace.proxy-confirmed-application",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "state becomes `Applied` only after a non-secret shell marker is observed",
+      "evidence_ids": [
+        "working-context.proxy-cmd-applied",
+        "working-context.proxy-child-inheritance",
+        "working-context.proxy-clear",
+        "working-context.proxy-powershell-applied"
+      ]
+    },
+    {
+      "id": "workspace.proxy-noninteractive-rejection",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "runtime injection is rejected while a direct TUI owns input",
+      "evidence_ids": ["working-context.proxy-noninteractive-rejected"]
     }
   ]
 }

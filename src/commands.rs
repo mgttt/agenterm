@@ -676,6 +676,7 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
         "wait-ui" => (
             "agenterm-cli wait-ui [--active @id] [--focus surface] \
              [-t target --tab-state state] [--window-state state] \
+             [-t target --proxy-state state] \
              [--client-width PX --client-height PX] \
              [--modal-kind KIND|none|closed] [--modal-target target] \
              [--timeout-ms ms]",
@@ -684,6 +685,7 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
                 "--focus",
                 "-t",
                 "--tab-state",
+                "--proxy-state",
                 "--window-state",
                 "--client-width",
                 "--client-height",

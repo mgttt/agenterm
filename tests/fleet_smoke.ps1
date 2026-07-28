@@ -353,9 +353,9 @@ try {
     }
     $eventCatalog = @($targetedProtocol.event_catalog.events)
     $eventKinds = @($eventCatalog | ForEach-Object kind)
-    if ($targetedProtocol.event_catalog.schema_version -ne 1 -or
+    if ($targetedProtocol.event_catalog.schema_version -ne 2 -or
         -not $targetedProtocol.features.typed_events -or
-        $eventCatalog.Count -ne 25 -or
+        $eventCatalog.Count -ne 26 -or
         @($eventKinds | Sort-Object -Unique).Count -ne $eventCatalog.Count -or
         @($eventCatalog | Where-Object {
                 [string]::IsNullOrWhiteSpace($_.kind) -or

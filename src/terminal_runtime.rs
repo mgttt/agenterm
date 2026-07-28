@@ -20,7 +20,9 @@ use crate::{
     terminal_lifecycle::{BoundedByteRing, SubmissionState, TerminalLifecycle},
     terminal_observation::TerminalObservation,
     wake_signal::WakeSignal,
-    working_context::{CwdTracker, ProxyState, SecretValue, ShellKind, parse_osc7},
+    working_context::{
+        CwdTracker, ProxyConfirmationMarker, ProxyState, SecretValue, ShellKind, parse_osc7,
+    },
     workspace::workspace_path,
 };
 
@@ -29,6 +31,13 @@ const RAW_OUTPUT_LIMIT: usize = 1024 * 1024;
 const PROXY_REDACTION_MAX_NEEDLES: usize = 8;
 const PROXY_REDACTION_MAX_BYTES: usize = 32 * 1024;
 const PROXY_REDACTION_MARKER: &[u8] = b"<redacted-proxy>";
+const PROXY_CONFIRMATION_TIMEOUT: Duration = Duration::from_secs(10);
+
+struct PendingProxyConfirmation {
+    marker: ProxyConfirmationMarker,
+    tail: Vec<u8>,
+    deadline: Instant,
+}
 
 pub(super) enum PtyEvent {
     Output(Vec<u8>),
@@ -78,6 +87,8 @@ pub(super) struct TerminalTab {
     pub(super) proxy: ProxyState,
     pub(super) composer: String,
     pub(super) sensitive_composer: Option<SecretValue>,
+    pub(super) sensitive_proxy_marker: Option<ProxyConfirmationMarker>,
+    pending_proxy_confirmation: Option<PendingProxyConfirmation>,
     pub(super) proxy_redaction_needles: Vec<SecretValue>,
     pub(super) proxy_redaction_pending: Vec<u8>,
     pub(super) parser: vt100::Parser<TerminalCallbacks>,
@@ -201,6 +212,68 @@ impl TerminalTab {
                 .push(SecretValue::new(value.to_owned())?);
         }
         Ok(())
+    }
+
+    pub(super) fn ensure_interactive_proxy_shell(&self) -> Result<()> {
+        let arguments = self
+            .command_line
+            .iter()
+            .skip(1)
+            .map(|argument| argument.to_ascii_lowercase())
+            .collect::<Vec<_>>();
+        let unsupported = match self.shell_kind {
+            ShellKind::Cmd => arguments
+                .iter()
+                .any(|argument| matches!(argument.as_str(), "/c" | "/k")),
+            ShellKind::PowerShell => arguments.iter().any(|argument| {
+                matches!(
+                    argument.as_str(),
+                    "-command" | "-c" | "-encodedcommand" | "-enc" | "-file" | "-f"
+                )
+            }),
+            ShellKind::Bash => {
+                arguments.iter().any(|argument| argument == "-c")
+                    || arguments.iter().any(|argument| !argument.starts_with('-'))
+            }
+            ShellKind::Unknown => true,
+        };
+        if unsupported {
+            anyhow::bail!(
+                "proxy changes require an interactive cmd, PowerShell, or Bash shell; \
+                 direct commands and TUI child programs are not supported; \
+                 create a new tab with --proxy instead"
+            );
+        }
+        Ok(())
+    }
+
+    pub(super) fn begin_proxy_confirmation(&mut self, marker: ProxyConfirmationMarker) {
+        self.pending_proxy_confirmation = Some(PendingProxyConfirmation {
+            marker,
+            tail: Vec::new(),
+            deadline: Instant::now() + PROXY_CONFIRMATION_TIMEOUT,
+        });
+    }
+
+    fn observe_proxy_confirmation(&mut self, bytes: &[u8]) {
+        let Some(pending) = self.pending_proxy_confirmation.as_mut() else {
+            return;
+        };
+        let marker = pending.marker.as_str().as_bytes();
+        pending.tail.extend_from_slice(bytes);
+        if pending
+            .tail
+            .windows(marker.len())
+            .any(|window| window == marker)
+        {
+            self.pending_proxy_confirmation = None;
+            let _ = self.proxy.mark_applied();
+            return;
+        }
+        let retained = marker.len().saturating_sub(1);
+        if pending.tail.len() > retained {
+            pending.tail.drain(..pending.tail.len() - retained);
+        }
     }
 
     fn redact_proxy_output(&mut self, bytes: &[u8], flush: bool) -> Vec<u8> {
@@ -368,6 +441,8 @@ impl TerminalTab {
             proxy,
             composer: String::new(),
             sensitive_composer: None,
+            sensitive_proxy_marker: None,
+            pending_proxy_confirmation: None,
             proxy_redaction_needles,
             proxy_redaction_pending: Vec::new(),
             note: String::new(),
@@ -415,6 +490,7 @@ impl TerminalTab {
                         continue;
                     }
                     let bytes = self.redact_proxy_output(&bytes, false);
+                    self.observe_proxy_confirmation(&bytes);
                     self.output_bytes += bytes.len();
                     self.parser.process(&bytes);
                     if let Some(path) = self.parser.callbacks_mut().pending_cwd.take() {
@@ -439,6 +515,17 @@ impl TerminalTab {
         }
         if self.submission.take_if_due(Instant::now()) {
             self.submission_enter_written = Some(self.send(b"\r"));
+            changed = true;
+        }
+        if self
+            .pending_proxy_confirmation
+            .as_ref()
+            .is_some_and(|pending| {
+                Instant::now() >= pending.deadline || self.exited.is_some() || self.error.is_some()
+            })
+        {
+            self.pending_proxy_confirmation = None;
+            let _ = self.proxy.mark_failed();
             changed = true;
         }
         changed

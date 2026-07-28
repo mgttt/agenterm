@@ -84,6 +84,8 @@ try {
             'script-smoke' = '.\tests\script_smoke.ps1'
             'theme-smoke' = '.\tests\theme_smoke.ps1'
             'working-context-smoke' = '.\tests\working_context_smoke.ps1'
+            'proxy-smoke' = '.\tests\proxy_smoke.ps1'
+            'workbench-smoke' = '.\tests\workbench_smoke.ps1'
             'ux-smoke' = '.\tests\ux_smoke.ps1'
         }
     Invoke-Checked -Id 'preflight-selftest' `
@@ -275,6 +277,14 @@ try {
             Invoke-Checked -Id 'working-context-smoke' `
                 -Label 'working context privacy smoke test' {
                 & '.\tests\working_context_smoke.ps1'
+            }
+            Invoke-Checked -Id 'proxy-smoke' `
+                -Label 'confirmed proxy application smoke test' {
+                & '.\tests\proxy_smoke.ps1'
+            }
+            Invoke-Checked -Id 'workbench-smoke' `
+                -Label 'workbench interaction smoke test' {
+                & '.\tests\workbench_smoke.ps1'
             }
             Invoke-Checked -Id 'ux-smoke' -Label 'semantic UX smoke test' {
                 & '.\tests\ux_smoke.ps1'

@@ -29,6 +29,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   output, pane content, environment values, clipboard data, or credentials.
 - [x] normal GUI startup constructs no Rhai engine, scans no script directory,
   and remains independent of Rhai engine types.
+- [x] Design choice: Rust (`.rs`) implements the host and Rhai (`.rhai`)
+  implements user-authored runtime programs.
 
 ## v0.1.8 product position
 

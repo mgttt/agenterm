@@ -267,6 +267,10 @@ impl ProxyState {
         )
     }
 
+    pub(crate) fn compact_label(&self) -> String {
+        format!("Proxy · {}", self.application_state.label())
+    }
+
     pub(crate) fn editor_text(&self) -> String {
         format!(
             "HTTP_PROXY={}\r\nHTTPS_PROXY={}",
@@ -411,6 +415,7 @@ pub(crate) fn parse_proxy_editor(text: &str) -> Result<(Option<String>, Option<S
     ))
 }
 
+#[cfg(test)]
 pub(crate) fn proxy_command(
     shell: ShellKind,
     http: Option<&str>,
@@ -461,6 +466,7 @@ impl ProxyConfirmationMarker {
         )))
     }
 
+    #[cfg(test)]
     pub(crate) fn parse(marker: &str) -> Result<Self> {
         let nonce = marker
             .strip_prefix(PROXY_CONFIRMATION_PREFIX)
@@ -484,6 +490,7 @@ pub(crate) struct ProxyCommandPlan {
 }
 
 impl ProxyCommandPlan {
+    #[cfg(test)]
     pub(crate) fn command(&self) -> &SecretValue {
         &self.command
     }
@@ -522,11 +529,15 @@ pub(crate) fn proxy_command_with_confirmation(
                     bail!("cmd proxy value contains a character that cannot be quoted safely");
                 }
             }
+            let nonce = &marker.as_str()[PROXY_CONFIRMATION_PREFIX.len()
+                ..marker.as_str().len() - PROXY_CONFIRMATION_SUFFIX.len()];
             format!(
-                "set \"HTTP_PROXY={}\" && set \"HTTPS_PROXY={}\" && echo {}",
+                "set \"HTTP_PROXY={}\" && set \"HTTPS_PROXY={}\" && echo {}^{}{}",
                 http.unwrap_or(""),
                 https.unwrap_or(""),
-                marker.as_str()
+                PROXY_CONFIRMATION_PREFIX,
+                nonce,
+                PROXY_CONFIRMATION_SUFFIX,
             )
         }
         ShellKind::PowerShell => {
@@ -535,10 +546,14 @@ pub(crate) fn proxy_command_with_confirmation(
                 format!("[Environment]::SetEnvironmentVariable('{name}', '{value}', 'Process')")
             };
             format!(
-                "& {{ $ErrorActionPreference = 'Stop'; {}; {}; [Console]::WriteLine('{}') }}",
+                "& {{ $ErrorActionPreference = 'Stop'; {}; {}; \
+                 [Console]::WriteLine('{}' + '{}' + '{}') }}",
                 assignment("HTTP_PROXY", http),
                 assignment("HTTPS_PROXY", https),
-                marker.as_str()
+                PROXY_CONFIRMATION_PREFIX,
+                &marker.as_str()[PROXY_CONFIRMATION_PREFIX.len()
+                    ..marker.as_str().len() - PROXY_CONFIRMATION_SUFFIX.len()],
+                PROXY_CONFIRMATION_SUFFIX,
             )
         }
         ShellKind::Bash => {
@@ -550,10 +565,13 @@ pub(crate) fn proxy_command_with_confirmation(
                 None => format!("unset {upper} {lower}"),
             };
             format!(
-                "{} && {} && printf '%s\\n' '{}'",
+                "{} && {} && printf '%s%s%s\\n' '{}' '{}' '{}'",
                 change("HTTP_PROXY", "http_proxy", http),
                 change("HTTPS_PROXY", "https_proxy", https),
-                marker.as_str()
+                PROXY_CONFIRMATION_PREFIX,
+                &marker.as_str()[PROXY_CONFIRMATION_PREFIX.len()
+                    ..marker.as_str().len() - PROXY_CONFIRMATION_SUFFIX.len()],
+                PROXY_CONFIRMATION_SUFFIX,
             )
         }
         ShellKind::Unknown => bail!("the active shell is unknown"),
@@ -1028,10 +1046,10 @@ mod tests {
         assert_eq!(cmd.marker().as_str(), marker_text);
         assert_eq!(
             cmd.command().expose(),
-            format!(
-                "set \"HTTP_PROXY=http://proxy.example:8080\" && set \"HTTPS_PROXY=\" && echo {marker_text}"
-            )
+            "set \"HTTP_PROXY=http://proxy.example:8080\" && set \"HTTPS_PROXY=\" && \
+             echo __AGENTERM_PROXY_APPLIED_^0123456789abcdef0123456789abcdef__"
         );
+        assert!(!cmd.command().expose().contains(&marker_text));
 
         let powershell = proxy_command_with_confirmation(
             ShellKind::PowerShell,
@@ -1046,11 +1064,11 @@ mod tests {
                 .expose()
                 .contains("$ErrorActionPreference = 'Stop'")
         );
-        assert!(
-            powershell
-                .expose()
-                .ends_with(&format!("[Console]::WriteLine('{marker_text}') }}"))
-        );
+        assert!(powershell.expose().ends_with(
+            "[Console]::WriteLine('__AGENTERM_PROXY_APPLIED_' + \
+             '0123456789abcdef0123456789abcdef' + '__') }"
+        ));
+        assert!(!powershell.expose().contains(&marker_text));
 
         let bash = proxy_command_with_confirmation(
             ShellKind::Bash,
@@ -1066,10 +1084,11 @@ mod tests {
         assert!(bash.expose().contains(
             "export HTTPS_PROXY='https://secure.example' https_proxy='https://secure.example'"
         ));
-        assert!(
-            bash.expose()
-                .ends_with(&format!("&& printf '%s\\n' '{marker_text}'"))
-        );
+        assert!(bash.expose().ends_with(
+            "&& printf '%s%s%s\\n' '__AGENTERM_PROXY_APPLIED_' \
+             '0123456789abcdef0123456789abcdef' '__'"
+        ));
+        assert!(!bash.expose().contains(&marker_text));
     }
 
     #[test]

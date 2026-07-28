@@ -11,11 +11,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] tabs form a visible parent/child tree for agent and program teams
 - [x] tree order is parent-first with indentation and branch connectors
 - [x] closing a parent promotes its children without closing their processes
-- [~] the selected node exposes direct add-child, edit, and close actions;
-  v0.1.8 must move them into the shared row geometry and replace them with
-  Save/Cancel while that row is being edited
-- [~] add-child immediately opens the new node's name/note editor; v0.1.8
-  moves that editor from the Composer into the new child's own row
+- [x] the selected node exposes direct add-child, edit, and close actions in
+  shared row geometry and replaces them with Save/Cancel while that row is
+  being edited
+- [x] add-child immediately opens the new node's name/note editor in the new
+  child's own row without borrowing the Composer
 - [x] collapse/expand with persisted node state
 - [x] compact rows with continuous native tree connectors, grid-aligned
   expand boxes, status lamps, and bordered selection
@@ -24,12 +24,12 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] line 2: user note, otherwise numeric index plus running program;
   terminal-controlled TITLE remains separately observable
 - v0.1.8 inline tab editing
-  - [ ] editing is owned by exactly one stable tab ID and never borrows,
+  - [x] editing is owned by exactly one stable tab ID and never borrows,
     covers, resizes, or changes the active tab's Composer draft
-  - [ ] the target row's persisted name and note display surfaces become two
+  - [x] the target row's persisted name and note display surfaces become two
     bounded native single-line edit overlays in place; the row keeps its
     expander, connectors, status lamp, selection, and stable identity
-  - [ ] normal `+`/`Edit`/`Close` actions become `Save`/`Cancel` for the
+  - [x] normal `+`/`Edit`/`Close` actions become `Save`/`Cancel` for the
     editing row; Save restores normal `Edit`, and Cancel restores the
     persisted name/note without mutation
   - [ ] Save and `Ctrl+Enter` are the only commit paths; `Tab`/`Shift+Tab`
@@ -37,29 +37,29 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   - [ ] a name containing no non-whitespace character fails validation,
     retains both drafts and focus in the row, exposes an inline error, and
     does not partially save the note
-  - [ ] selecting another tab, hiding Tabs, closing the target through another
+  - [x] selecting another tab, hiding Tabs, closing the target through another
     command, reloading the workspace, detaching/stopping/closing the window,
     or otherwise destroying the target row cancels the draft before the
     transition; none of these paths implicitly saves
   - [ ] focus movement inside the same row, including pressing Save or Cancel,
     does not cancel; ordinary window deactivation alone does not commit or
     cancel
-  - [ ] add-child creates the child with its normal initial persisted values
+  - [x] add-child creates the child with its normal initial persisted values
     and immediately enters that child row's inline editor; Cancel keeps the
     child and restores those initial values rather than deleting it
-  - [ ] only one row can edit at once; starting another edit predictably
+  - [x] only one row can edit at once; starting another edit predictably
     cancels the first draft before the second editor appears
 - v0.1.8 compact Tabs tree
-  - [ ] root inset and every depth indent use the shared compact geometry;
+  - [x] root inset and every depth indent use the shared compact geometry;
     paint, connector placement, native editor placement, hit-testing, and
     snapshots consume the same row rectangles
-  - [ ] each row geometry owns selection, expander/disclosure hit target,
+  - [x] each row geometry owns selection, expander/disclosure hit target,
     status lamp, full text, name, note, editors, and normal/editing actions;
     host code contains no `sidebar_width - 72/-48/-24` or `node_x + 24`
     positioning
   - [ ] 180 px Tabs uses accessible compact action glyphs with stable names
     and tooltips; wider Tabs uses full labels
-  - [ ] responsive indentation preserves a distinct connector anchor for
+  - [x] responsive indentation preserves a distinct connector anchor for
     every supported depth and reserves at least one CJK glyph plus ellipsis
     beside bounded, non-overlapping actions
 - [x] explicit confirmation before closing a live process
@@ -94,43 +94,44 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   - [ ] dynamic script/provider segments with timeout and failure isolation
 - [x] embedded AgenTerm icon
 - [ ] configurable shell, colors, working directory, and startup tabs
-- [~] per-tab child environment injection with ephemeral proxy convenience;
+- [x] per-tab child environment injection.
+- [~] Ephemeral per-tab proxy convenience with confirmed shell application;
   values are never persisted to the workspace, and v0.1.8 must repair the
   preparation/application state contract before public release
 
 ## v0.1.8 P0 tab proxy correctness
 
-- [ ] proxy configuration is owned by one stable tab ID, remains ephemeral,
+- [x] proxy configuration is owned by one stable tab ID, remains ephemeral,
   and is never written to workspace persistence, settings, event payloads,
   receipts, snapshots, diagnostics, or logs
-- [ ] `Prepare` creates or replaces a sensitive Composer draft for the target
+- [x] `Prepare` creates a sensitive Composer draft for the target
   tab and sets proxy state to `Prepared`; it does not write terminal bytes,
   mutate a live shell environment, create a child, or report `On`/`Applied`
 - [ ] the prepared draft is visibly sensitive and follows the ordinary
   Composer single-submission contract; unrelated Composer drafts are not
   overwritten without the existing explicit replacement decision
-- [ ] `Send` or the proxy editor's mouse-accessible `Send Now` submits the
+- [x] `Send` or the proxy editor's mouse-accessible `Send Now` submits the
   prepared command exactly once and sets state to `Submitted`; successful
   byte delivery alone never means the proxy is active
-- [ ] state becomes `Applied` only after a non-secret shell marker is observed
+- [x] state becomes `Applied` only after a non-secret shell marker is observed
   and public post-state verifies both the shell environment and a real child
   process inherit the intended proxy variables
 - [ ] command rejection, marker mismatch, environment/child mismatch, terminal
   exit, process exit, timeout, cancellation, or any other failed application
   moves the attempt to `Failed` with a non-secret reason and never claims `On`
-- [ ] the GUI editor provides mouse-reachable `Reveal`/`Re-mask`, `Prepare`,
+- [x] the GUI editor provides mouse-reachable `Reveal`/`Re-mask`, `Prepare`,
   and `Send Now`; revealing changes only presentation, never persistence,
   logging, snapshot content, or application state
 - [ ] `ui-snapshot` truthfully exposes the stable target, `revealed` boolean,
   `Off|Prepared|Submitted|Applied|Failed`, validation/error category, and
   bounded editor/action geometry, but never the proxy URL, credential,
   prepared command, secret environment value, or Composer text
-- [ ] real `cmd.exe` and PowerShell qualification proves marker ordering,
+- [x] real `cmd.exe` and PowerShell qualification proves marker ordering,
   environment application, child inheritance, exit/failure, and no duplicate
   submission
-- [ ] Bash-compatible preparation sets all four variables consistently:
+- [x] Bash-compatible preparation sets all four variables consistently:
   `HTTP_PROXY`, `HTTPS_PROXY`, `http_proxy`, and `https_proxy`
-- [ ] runtime injection is rejected while a direct TUI owns input or when the
+- [x] runtime injection is rejected while a direct TUI owns input or when the
   tab was launched non-interactively; the error directs the user to create a
   new tab with `--proxy` instead of typing secret setup into that terminal
 - [ ] a new tab does not inherit ad-hoc proxy changes made inside the active

@@ -8,7 +8,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 pub(crate) const EVENT_SCHEMA_VERSION: u32 = 1;
-pub(crate) const EVENT_CATALOG_SCHEMA_VERSION: u32 = 1;
+pub(crate) const EVENT_CATALOG_SCHEMA_VERSION: u32 = 2;
 pub(crate) const DEFAULT_EVENT_CAPACITY: usize = 4_096;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -36,12 +36,13 @@ pub(crate) enum EventKind {
     WorkingContextProxyEditor,
     WorkingContextProxyRequested,
     WorkingContextProxySubmitted,
+    WorkingContextProxyResolved,
     WorkspaceSaved,
     WorkspaceShutdown,
 }
 
 impl EventKind {
-    pub(crate) const ALL: [Self; 25] = [
+    pub(crate) const ALL: [Self; 26] = [
         Self::ComposerDraft,
         Self::ComposerSubmitted,
         Self::ComposerSubmissionFinished,
@@ -65,6 +66,7 @@ impl EventKind {
         Self::WorkingContextProxyEditor,
         Self::WorkingContextProxyRequested,
         Self::WorkingContextProxySubmitted,
+        Self::WorkingContextProxyResolved,
         Self::WorkspaceSaved,
         Self::WorkspaceShutdown,
     ];
@@ -94,6 +96,7 @@ impl EventKind {
             Self::WorkingContextProxyEditor => "working-context.proxy.editor",
             Self::WorkingContextProxyRequested => "working-context.proxy.requested",
             Self::WorkingContextProxySubmitted => "working-context.proxy.submitted",
+            Self::WorkingContextProxyResolved => "working-context.proxy.resolved",
             Self::WorkspaceSaved => "workspace.saved",
             Self::WorkspaceShutdown => "workspace.shutdown",
         }
@@ -125,7 +128,7 @@ const fn event_spec(
     }
 }
 
-pub(crate) const EVENT_CATALOG: [EventSpec; 25] = [
+pub(crate) const EVENT_CATALOG: [EventSpec; 26] = [
     event_spec(
         EventKind::ComposerDraft,
         "tabs[].draft",
@@ -286,6 +289,13 @@ pub(crate) const EVENT_CATALOG: [EventSpec; 25] = [
         "{sensitive:bool}",
         "tab",
         "0.1.6",
+    ),
+    event_spec(
+        EventKind::WorkingContextProxyResolved,
+        "tabs[].working_context.proxy",
+        "{configured:bool,source:string,application_state:string,request_pending:bool}",
+        "tab",
+        "0.1.8",
     ),
     event_spec(
         EventKind::WorkspaceSaved,
@@ -615,7 +625,7 @@ mod tests {
             assert!(!spec.state_path.is_empty());
             assert!(!spec.payload.is_empty());
             assert!(matches!(spec.scope, "server" | "tab"));
-            assert!(matches!(spec.since, "0.1.5" | "0.1.6" | "0.1.7"));
+            assert!(matches!(spec.since, "0.1.5" | "0.1.6" | "0.1.7" | "0.1.8"));
         }
     }
 }

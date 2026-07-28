@@ -8,10 +8,11 @@ use std::{
     mem, ptr,
     sync::{
         Arc,
+        atomic::{AtomicU64, Ordering},
         mpsc::{self, Receiver, Sender},
     },
     thread,
-    time::{Duration, Instant, SystemTime},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{Context as _, Result};
@@ -149,8 +150,8 @@ use upgrade_identity::UpgradeIdentity;
 use wake_signal::WakeSignal;
 use worker_supervisor::{SupervisorError, WorkerSupervisor};
 use working_context::{
-    CwdSource, PROXY_MAX_BYTES, ProxyState, cwd_command, parse_proxy_editor, proxy_command,
-    validate_path,
+    CwdSource, PROXY_MAX_BYTES, ProxyConfirmationMarker, ProxyState, cwd_command,
+    parse_proxy_editor, proxy_command_with_confirmation, validate_path,
 };
 use workspace::{SavedTab, SavedWorkspace, load_workspace, save_workspace, workspace_path};
 
@@ -173,6 +174,8 @@ const SETTINGS_CANCEL_ID: usize = 1010;
 const TABS_BUTTON_ID: usize = 1011;
 const TAB_NAME_EDIT_ID: usize = 1012;
 const TAB_NOTE_EDIT_ID: usize = 1013;
+const PROXY_REVEAL_ID: usize = 1014;
+const PROXY_SEND_NOW_ID: usize = 1015;
 const TIMER_ID: usize = 1;
 const WM_APP_WAKE: u32 = WM_APP + 1;
 const WM_APP_AUTOMATION_SHORTCUT: u32 = WM_APP + 2;
@@ -188,6 +191,17 @@ const WINDOW_CLOSE_BUTTON_TEXT_FORMAT: u32 = DT_CENTER | DT_SINGLELINE | DT_VCEN
 const CLIPBOARD_UNICODE_TEXT: u32 = 13;
 const TERMINAL_PASTE_LIMIT_BYTES: usize = 256 * 1024;
 const CAPTURE_PUBLIC_MAX_BYTES: usize = 1024 * 1024;
+static PROXY_NONCE_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+fn new_proxy_confirmation_marker() -> Result<ProxyConfirmationMarker> {
+    let time = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos() as u64;
+    let sequence =
+        PROXY_NONCE_COUNTER.fetch_add(1, Ordering::Relaxed) ^ u64::from(std::process::id());
+    ProxyConfirmationMarker::from_nonce(&format!("{time:016x}{sequence:016x}"))
+}
 
 fn bounded_utf8_prefix(value: &str, maximum: usize) -> &str {
     let mut take = maximum.min(value.len());
@@ -850,6 +864,8 @@ fn run_gui(no_activate: bool) -> Result<()> {
     let settings_cancel = create_hidden_button(window, instance, SETTINGS_CANCEL_ID, "Cancel");
     let tab_name_edit = create_hidden_edit(window, instance, TAB_NAME_EDIT_ID);
     let tab_note_edit = create_hidden_edit(window, instance, TAB_NOTE_EDIT_ID);
+    let proxy_reveal = create_hidden_button(window, instance, PROXY_REVEAL_ID, "Reveal");
+    let proxy_send_now = create_hidden_button(window, instance, PROXY_SEND_NOW_ID, "Send now");
     let settings_apply = unsafe {
         CreateWindowExW(
             0,
@@ -879,6 +895,8 @@ fn run_gui(no_activate: bool) -> Result<()> {
         || settings_apply.is_null()
         || tab_name_edit.is_null()
         || tab_note_edit.is_null()
+        || proxy_reveal.is_null()
+        || proxy_send_now.is_null()
     {
         unsafe { DestroyWindow(window) };
         anyhow::bail!("failed to create native controls");
@@ -900,6 +918,8 @@ fn run_gui(no_activate: bool) -> Result<()> {
             settings_apply,
             tab_name_edit,
             tab_note_edit,
+            proxy_reveal,
+            proxy_send_now,
         },
     )?);
     unsafe {
@@ -1132,6 +1152,8 @@ unsafe extern "system" fn window_proc(
                 && (state.cwd_edit_target.is_some() || state.proxy_edit_target.is_some())
                 && command_id != BUTTON_ID
                 && command_id != EDIT_ID
+                && command_id != PROXY_REVEAL_ID
+                && command_id != PROXY_SEND_NOW_ID
             {
                 unsafe { SetFocus(state.edit) };
                 return 0;
@@ -1153,6 +1175,23 @@ unsafe extern "system" fn window_proc(
                     } else {
                         state.send_composer();
                     }
+                }
+                0
+            } else if command_id == PROXY_REVEAL_ID {
+                if let Some(state) = state_mut(window) {
+                    if state.proxy_credentials_revealed {
+                        state.remask_proxy_credentials();
+                    } else if let Err(error) = state.reveal_proxy_credentials() {
+                        state.last_error = Some(format!("{error:#}"));
+                    }
+                }
+                0
+            } else if command_id == PROXY_SEND_NOW_ID {
+                if let Some(state) = state_mut(window)
+                    && let Err(error) = state.send_proxy_now(None, None)
+                {
+                    state.last_error = Some(format!("{error:#}"));
+                    unsafe { InvalidateRect(window, ptr::null(), 0) };
                 }
                 0
             } else if command_id == TABS_BUTTON_ID {
@@ -1346,6 +1385,8 @@ struct NativeControls {
     settings_apply: HWND,
     tab_name_edit: HWND,
     tab_note_edit: HWND,
+    proxy_reveal: HWND,
+    proxy_send_now: HWND,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1612,6 +1653,8 @@ struct AppState {
     settings_apply: HWND,
     tab_name_edit: HWND,
     tab_note_edit: HWND,
+    proxy_reveal: HWND,
+    proxy_send_now: HWND,
     tabs: Vec<TerminalTab>,
     collapsed_tabs: HashSet<u64>,
     active: Option<u64>,
@@ -1715,6 +1758,8 @@ impl AppState {
             settings_apply: controls.settings_apply,
             tab_name_edit: controls.tab_name_edit,
             tab_note_edit: controls.tab_note_edit,
+            proxy_reveal: controls.proxy_reveal,
+            proxy_send_now: controls.proxy_send_now,
             tabs: Vec::new(),
             collapsed_tabs,
             active: active_id,
@@ -2365,6 +2410,7 @@ impl AppState {
         for tab in &mut self.tabs {
             let observation_before = tab.observation();
             let cwd_before = tab.cwd.clone();
+            let proxy_before = tab.proxy.facts();
             changed |= tab.poll();
             let mut observation_after = tab.observation();
             match observation_before.delta_to(&observation_after) {
@@ -2433,6 +2479,19 @@ impl AppState {
                         "path": tab.cwd.path(),
                         "source": tab.cwd.source().as_str(),
                         "pending": tab.cwd.pending(),
+                    }),
+                ));
+            }
+            let proxy_after = tab.proxy.facts();
+            if proxy_after != proxy_before {
+                polled_events.push((
+                    EventKind::WorkingContextProxyResolved,
+                    tab.id,
+                    serde_json::json!({
+                        "configured": proxy_after.configured,
+                        "source": proxy_after.source.as_str(),
+                        "application_state": proxy_after.application_state.as_str(),
+                        "request_pending": proxy_after.request_pending,
                     }),
                 ));
             }
@@ -2505,7 +2564,12 @@ impl AppState {
         let sidebar_width = layout.effective_tabs_width;
         let content_bottom = layout.status.top;
         let content_width = layout.terminal.width().max(180);
-        let edit_width = (content_width - 104).max(80);
+        let proxy_controls_width = if self.proxy_edit_target.is_some() {
+            166
+        } else {
+            0
+        };
+        let edit_width = (content_width - 104 - proxy_controls_width).max(80);
         let button_left = 8;
         let button_gap = 4;
         let tabs_button_width = 52.min((sidebar_width - 16).max(0));
@@ -2586,9 +2650,32 @@ impl AppState {
             );
             MoveWindow(
                 self.send_button,
-                layout.composer.left + 20 + edit_width,
+                layout.composer.left
+                    + 20
+                    + edit_width
+                    + if self.proxy_edit_target.is_some() {
+                        76
+                    } else {
+                        0
+                    },
                 (layout.composer.top + 32).max(0),
                 74,
+                34,
+                1,
+            );
+            MoveWindow(
+                self.proxy_reveal,
+                layout.composer.left + 20 + edit_width,
+                (layout.composer.top + 32).max(0),
+                70,
+                34,
+                1,
+            );
+            MoveWindow(
+                self.proxy_send_now,
+                layout.composer.left + 176 + edit_width,
+                (layout.composer.top + 32).max(0),
+                80,
                 34,
                 1,
             );
@@ -3545,18 +3632,20 @@ impl AppState {
         self.proxy_edit_target = Some(id);
         self.proxy_credentials_revealed = false;
         self.navigation_latch = None;
-        self.feedback = Some(
-            "Proxy editor: reveal credentials before editing · Ctrl+Enter prepare · Esc cancel"
-                .to_owned(),
-        );
+        self.feedback =
+            Some("Proxy editor: Reveal/Re-mask · Prepare · Send now · Esc cancel".to_owned());
         unsafe {
             SetWindowTextW(
                 self.edit,
                 wide("HTTP_PROXY=<hidden>\r\nHTTPS_PROXY=<hidden>").as_ptr(),
             );
             SetWindowTextW(self.send_button, wide("Prepare").as_ptr());
+            SetWindowTextW(self.proxy_reveal, wide("Reveal").as_ptr());
             ShowWindow(self.edit, SW_SHOW);
             ShowWindow(self.send_button, SW_SHOW);
+            ShowWindow(self.proxy_reveal, SW_SHOW);
+            ShowWindow(self.proxy_send_now, SW_SHOW);
+            self.layout();
             SetFocus(self.edit);
             InvalidateRect(self.window, ptr::null(), 0);
         }
@@ -3581,6 +3670,7 @@ impl AppState {
         let mut text = self.tabs[position].proxy.editor_text();
         unsafe {
             SetWindowTextW(self.edit, wide(&text).as_ptr());
+            SetWindowTextW(self.proxy_reveal, wide("Re-mask").as_ptr());
             SetFocus(self.edit);
             InvalidateRect(self.window, ptr::null(), 0);
             text.as_mut_vec().fill(0);
@@ -3599,6 +3689,7 @@ impl AppState {
                     self.edit,
                     wide("HTTP_PROXY=<hidden>\r\nHTTPS_PROXY=<hidden>").as_ptr(),
                 );
+                SetWindowTextW(self.proxy_reveal, wide("Reveal").as_ptr());
                 InvalidateRect(self.window, ptr::null(), 0);
             }
         }
@@ -3612,7 +3703,10 @@ impl AppState {
         unsafe {
             SetWindowTextW(self.edit, wide("").as_ptr());
             SetWindowTextW(self.send_button, wide(LABEL_SEND).as_ptr());
+            ShowWindow(self.proxy_reveal, SW_HIDE);
+            ShowWindow(self.proxy_send_now, SW_HIDE);
         }
+        self.layout();
         self.load_active_composer();
         self.host_focus_surface = HostFocusSurface::Terminal;
         unsafe {
@@ -3659,12 +3753,19 @@ impl AppState {
                 "Composer already has a normal draft; proxy commands cannot be mixed with it"
             );
         }
+        if self.tabs[position].proxy.request_pending() {
+            anyhow::bail!("a proxy request is already prepared or awaiting confirmation");
+        }
+        self.tabs[position].ensure_interactive_proxy_shell()?;
         let (http, https) = self.proxy_input(provided)?;
-        let command = proxy_command(
+        let plan = proxy_command_with_confirmation(
             self.tabs[position].shell_kind,
             http.as_deref(),
             https.as_deref(),
+            new_proxy_confirmation_marker()?,
         )?;
+        let marker = plan.marker().clone();
+        let command = plan.into_command();
         self.tabs[position].register_proxy_redactions(
             &[http.as_deref(), https.as_deref()]
                 .into_iter()
@@ -3674,14 +3775,17 @@ impl AppState {
         let requested = ProxyState::requested(http, https)?;
         let id = self.tabs[position].id;
         self.tabs[position].sensitive_composer = Some(command);
+        self.tabs[position].sensitive_proxy_marker = Some(marker);
         self.tabs[position].proxy = requested;
+        let facts = self.tabs[position].proxy.facts();
         self.event_journal.commit(
             EventKind::WorkingContextProxyRequested,
             Some(id),
             serde_json::json!({
-                "configured": self.tabs[position].proxy.configured(),
-                "source": self.tabs[position].proxy.source().as_str(),
-                "request_pending": true,
+                "configured": facts.configured,
+                "source": facts.source.as_str(),
+                "application_state": facts.application_state.as_str(),
+                "request_pending": facts.request_pending,
                 "disposition": "prepared",
             }),
         );
@@ -3706,12 +3810,19 @@ impl AppState {
             })
             .or_else(|| self.active_position())
             .context("can't find tab")?;
+        if self.tabs[position].proxy.request_pending() {
+            anyhow::bail!("a proxy request is already prepared or awaiting confirmation");
+        }
+        self.tabs[position].ensure_interactive_proxy_shell()?;
         let (http, https) = self.proxy_input(provided)?;
-        let command = proxy_command(
+        let plan = proxy_command_with_confirmation(
             self.tabs[position].shell_kind,
             http.as_deref(),
             https.as_deref(),
+            new_proxy_confirmation_marker()?,
         )?;
+        let marker = plan.marker().clone();
+        let command = plan.into_command();
         self.tabs[position].register_proxy_redactions(
             &[http.as_deref(), https.as_deref()]
                 .into_iter()
@@ -3721,22 +3832,30 @@ impl AppState {
         if !self.tabs[position].submit_sensitive(command.expose()) {
             anyhow::bail!("terminal is unavailable or already has a pending submission");
         }
-        let requested = ProxyState::requested(http, https)?;
+        let mut requested = ProxyState::requested(http, https)?;
+        requested.mark_submitted()?;
         let id = self.tabs[position].id;
         self.tabs[position].proxy = requested;
+        self.tabs[position].begin_proxy_confirmation(marker);
+        let facts = self.tabs[position].proxy.facts();
         self.event_journal.commit(
             EventKind::WorkingContextProxyRequested,
             Some(id),
             serde_json::json!({
-                "configured": self.tabs[position].proxy.configured(),
-                "source": self.tabs[position].proxy.source().as_str(),
-                "request_pending": true,
+                "configured": facts.configured,
+                "source": facts.source.as_str(),
+                "application_state": facts.application_state.as_str(),
+                "request_pending": facts.request_pending,
                 "disposition": "sent",
             }),
         );
-        self.feedback = Some(
-            "Sent a proxy command; it affects only this shell and future descendants".to_owned(),
+        self.event_journal.commit(
+            EventKind::WorkingContextProxySubmitted,
+            Some(id),
+            serde_json::json!({"sensitive": true}),
         );
+        self.feedback =
+            Some("Submitted a proxy command; waiting for shell confirmation".to_owned());
         if self.proxy_edit_target == Some(id) {
             self.close_proxy_editor();
         }
@@ -4326,13 +4445,24 @@ impl AppState {
                 return true;
             }
             if control && virtual_key == b'R' as u32 {
-                if let Err(error) = self.reveal_proxy_credentials() {
+                let result = if self.proxy_credentials_revealed {
+                    self.remask_proxy_credentials();
+                    Ok(())
+                } else {
+                    self.reveal_proxy_credentials()
+                };
+                if let Err(error) = result {
                     self.last_error = Some(format!("{error:#}"));
                 }
                 return true;
             }
             if control && virtual_key == 0x0d {
-                if let Err(error) = self.prepare_proxy(None, None) {
+                let result = if shift {
+                    self.send_proxy_now(None, None)
+                } else {
+                    self.prepare_proxy(None, None)
+                };
+                if let Err(error) = result {
                     self.last_error = Some(format!("{error:#}"));
                     unsafe { InvalidateRect(self.window, ptr::null(), 0) };
                 }
@@ -4741,24 +4871,41 @@ impl AppState {
             return;
         };
         if let Some(secret) = self.tabs[position].sensitive_composer.take() {
+            let marker = self.tabs[position].sensitive_proxy_marker.take();
             if self.tabs[position].exited.is_some() {
                 self.tabs[position].sensitive_composer = Some(secret);
+                self.tabs[position].sensitive_proxy_marker = marker;
                 return;
             }
             if self.tabs[position].submit_sensitive(secret.expose()) {
                 let id = self.tabs[position].id;
+                let Some(marker) = marker else {
+                    self.tabs[position].proxy.mark_failed().ok();
+                    self.last_error =
+                        Some("Sensitive proxy draft lost its confirmation identity".to_owned());
+                    return;
+                };
+                if let Err(error) = self.tabs[position].proxy.mark_submitted() {
+                    self.last_error = Some(format!("{error:#}"));
+                    return;
+                }
+                self.tabs[position].begin_proxy_confirmation(marker);
                 self.event_journal.commit(
                     EventKind::WorkingContextProxySubmitted,
                     Some(id),
-                    serde_json::json!({"sensitive": true}),
+                    serde_json::json!({
+                        "sensitive": true,
+                        "application_state": "submitted",
+                    }),
                 );
                 self.feedback = Some(
-                    "Sent a sensitive proxy command to the shell; existing descendants are unchanged"
+                    "Submitted a sensitive proxy command; waiting for shell confirmation"
                         .to_owned(),
                 );
                 unsafe { SetWindowTextW(self.edit, wide("").as_ptr()) };
             } else {
                 self.tabs[position].sensitive_composer = Some(secret);
+                self.tabs[position].sensitive_proxy_marker = marker;
                 self.feedback =
                     Some("A submission is already pending; sensitive draft preserved".to_owned());
             }
@@ -5134,10 +5281,8 @@ impl AppState {
                 (
                     if visible {
                         tab.proxy.sanitized_label()
-                    } else if tab.proxy.configured() {
-                        "Proxy · On".to_owned()
                     } else {
-                        "Proxy · Off".to_owned()
+                        tab.proxy.compact_label()
                     },
                     visible,
                 )
@@ -5916,6 +6061,7 @@ impl AppState {
                         "proxy": {
                             "configured": tab.proxy.configured(),
                             "source": tab.proxy.source().as_str(),
+                            "application_state": tab.proxy.application_state().as_str(),
                             "request_pending": tab.proxy.request_pending(),
                             "endpoint_visible": self.proxy_endpoint_visible.contains(&tab.id),
                             "credential_revealed": false,
@@ -6224,9 +6370,10 @@ impl AppState {
                     "kind": "proxy-editor",
                     "window_id": format!("@{id}"),
                     "default_action": "proxy-prepare",
-                    "credential_revealed": false,
+                    "credential_revealed": self.proxy_credentials_revealed,
                     "actions": [
                         "proxy-reveal-credentials",
+                        "proxy-remask-credentials",
                         "proxy-prepare",
                         "proxy-send-now",
                         "cancel"
@@ -7614,15 +7761,30 @@ impl AppState {
                     return IpcResponse::failure("can't find window");
                 };
                 if let Some(secret) = self.tabs[position].sensitive_composer.take() {
+                    let marker = self.tabs[position].sensitive_proxy_marker.take();
                     if !self.tabs[position].submit_sensitive(secret.expose()) {
                         self.tabs[position].sensitive_composer = Some(secret);
+                        self.tabs[position].sensitive_proxy_marker = marker;
                         return IpcResponse::failure("a composer submission is already pending");
                     }
+                    let Some(marker) = marker else {
+                        self.tabs[position].proxy.mark_failed().ok();
+                        return IpcResponse::failure(
+                            "sensitive proxy draft lost its confirmation identity",
+                        );
+                    };
+                    if let Err(error) = self.tabs[position].proxy.mark_submitted() {
+                        return IpcResponse::failure(error.to_string());
+                    }
                     let id = self.tabs[position].id;
+                    self.tabs[position].begin_proxy_confirmation(marker);
                     self.event_journal.commit(
                         EventKind::WorkingContextProxySubmitted,
                         Some(id),
-                        serde_json::json!({"sensitive": true}),
+                        serde_json::json!({
+                            "sensitive": true,
+                            "application_state": "submitted",
+                        }),
                     );
                     if self.active == Some(id) {
                         unsafe { SetWindowTextW(self.edit, wide("").as_ptr()) };
@@ -9568,6 +9730,7 @@ fn run_wait_ui(arguments: &[String]) -> i32 {
     let requested_active = option_value(arguments, "--active");
     let expected_focus = option_value(arguments, "--focus");
     let expected_state = option_value(arguments, "--tab-state");
+    let expected_proxy_state = option_value(arguments, "--proxy-state");
     let expected_window_state = option_value(arguments, "--window-state");
     let expected_modal_kind = option_value(arguments, "--modal-kind");
     let requested_modal_target = option_value(arguments, "--modal-target");
@@ -9576,6 +9739,10 @@ fn run_wait_ui(arguments: &[String]) -> i32 {
     let expected_client_height =
         option_value(arguments, "--client-height").and_then(|value| value.parse::<i64>().ok());
     let requested_target = option_value(arguments, "-t");
+    if expected_proxy_state.is_some() && requested_target.is_none() {
+        eprintln!("wait-ui --proxy-state requires -t target");
+        return 2;
+    }
     if expected_modal_kind.is_some_and(|kind| matches!(kind, "none" | "closed"))
         && requested_modal_target.is_some()
     {
@@ -9585,6 +9752,7 @@ fn run_wait_ui(arguments: &[String]) -> i32 {
     if requested_active.is_none()
         && expected_focus.is_none()
         && expected_state.is_none()
+        && expected_proxy_state.is_none()
         && expected_window_state.is_none()
         && expected_client_width.is_none()
         && expected_client_height.is_none()
@@ -9592,7 +9760,7 @@ fn run_wait_ui(arguments: &[String]) -> i32 {
         && requested_modal_target.is_none()
     {
         eprintln!(
-            "wait-ui requires an active, focus, tab-state, window-state, client-size, \
+            "wait-ui requires an active, focus, tab-state, proxy-state, window-state, client-size, \
              modal-kind, or modal-target condition"
         );
         return 1;
@@ -9676,6 +9844,18 @@ fn run_wait_ui(arguments: &[String]) -> i32 {
                         })
                     })
                 });
+                let proxy_state_matches = expected_proxy_state.is_none_or(|expected| {
+                    snapshot["tabs"].as_array().is_some_and(|tabs| {
+                        tabs.iter().any(|tab| {
+                            let target_matches = target
+                                .as_deref()
+                                .is_some_and(|selector| tab["id"].as_str() == Some(selector));
+                            target_matches
+                                && tab["working_context"]["proxy"]["application_state"].as_str()
+                                    == Some(expected)
+                        })
+                    })
+                });
                 let window_state_matches = expected_window_state
                     .is_none_or(|expected| snapshot["window"]["state"].as_str() == Some(expected));
                 let width_matches = expected_client_width.is_none_or(|expected| {
@@ -9692,6 +9872,7 @@ fn run_wait_ui(arguments: &[String]) -> i32 {
                 if active_matches
                     && focus_matches
                     && state_matches
+                    && proxy_state_matches
                     && window_state_matches
                     && width_matches
                     && height_matches
@@ -9727,6 +9908,7 @@ fn run_wait_ui(arguments: &[String]) -> i32 {
                                 "active": expected_active,
                                 "focus": expected_focus,
                                 "tab_state": expected_state,
+                                "proxy_state": expected_proxy_state,
                                 "target": target,
                                 "window_state": expected_window_state,
                                 "client_width": expected_client_width,
@@ -9923,7 +10105,7 @@ Usage:
   agenterm-cli ui-action proxy-prepare|proxy-send-now [-t target] --stdin
   agenterm-cli focus terminal|composer|tabs [-t target]
   agenterm-cli wait-pane [-t target] (--contains text|--dead|--submit-complete) [--timeout-ms ms]
-  agenterm-cli wait-ui [--active @id] [--focus surface] [-t target --tab-state state] [--modal-kind KIND|none|closed] [--modal-target target]
+  agenterm-cli wait-ui [--active @id] [--focus surface] [-t target --tab-state state|--proxy-state state] [--modal-kind KIND|none|closed] [--modal-target target]
   agenterm-cli protocol-info
   agenterm-cli list-panes [-F format]
   agenterm-cli list-sessions | has-session | kill-server | server-kill"

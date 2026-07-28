@@ -7,10 +7,19 @@ $ErrorActionPreference = 'Stop'
 $declaredEvidence = @(
     'ux.workbench-inline-edit'
     'ux.workbench-compact-tree'
+    'ux.workbench-proxy-controls'
 )
 if ($ListEvidence) {
     $declaredEvidence
     exit 0
+}
+
+function Write-Evidence {
+    param([Parameter(Mandatory = $true)][string]$Id)
+    if ($declaredEvidence -notcontains $Id) {
+        throw "workbench smoke emitted undeclared evidence ID: $Id"
+    }
+    Write-Host "EVIDENCE $Id"
 }
 
 $Exe = [IO.Path]::GetFullPath($Exe)
@@ -91,6 +100,10 @@ public static class WorkbenchNativeTest {
     private static extern IntPtr SendMessageW(
         IntPtr window, uint message, UIntPtr wParam, IntPtr lParam);
 
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr FindWindowExW(
+        IntPtr parent, IntPtr after, string className, string title);
+
     private static IntPtr PointParam(int x, int y) {
         return (IntPtr)(((y & 0xffff) << 16) | (x & 0xffff));
     }
@@ -100,6 +113,14 @@ public static class WorkbenchNativeTest {
         SendMessageW(window, 0x0201, UIntPtr.Zero, point);
         SendMessageW(window, 0x0202, UIntPtr.Zero, point);
     }
+
+    public static void ClickButton(IntPtr window, string label) {
+        IntPtr button = FindWindowExW(window, IntPtr.Zero, "Button", label);
+        if (button == IntPtr.Zero) {
+            throw new InvalidOperationException("button not found: " + label);
+        }
+        SendMessageW(button, 0x00F5, UIntPtr.Zero, IntPtr.Zero);
+    }
 }
 '@
 
@@ -107,10 +128,16 @@ $previousAddress = $env:AGENTERM_IPC_ADDRESS
 $previousWorkspace = $env:AGENTERM_WORKSPACE_PATH
 $previousSettings = $env:AGENTERM_SETTINGS_PATH
 $previousNoActivate = $env:AGENTERM_NO_ACTIVATE
+$previousHttpProxy = $env:HTTP_PROXY
+$previousHttpsProxy = $env:HTTPS_PROXY
+$previousHttpProxyLower = $env:http_proxy
+$previousHttpsProxyLower = $env:https_proxy
 $env:AGENTERM_IPC_ADDRESS = "127.0.0.1:$((52000 + ($PID % 1000)))"
 $env:AGENTERM_WORKSPACE_PATH = Join-Path $env:TEMP "agenterm-workbench-$PID.json"
 $env:AGENTERM_SETTINGS_PATH = Join-Path $env:TEMP "agenterm-workbench-settings-$PID.json"
 $env:AGENTERM_NO_ACTIVATE = '1'
+Remove-Item Env:HTTP_PROXY, Env:HTTPS_PROXY, Env:http_proxy, Env:https_proxy `
+    -ErrorAction SilentlyContinue
 $workspacePath = $env:AGENTERM_WORKSPACE_PATH
 $settingsPath = $env:AGENTERM_SETTINGS_PATH
 
@@ -180,7 +207,39 @@ try {
     if ($rootTab.name -ne "工作台-$PID" -or $rootTab.note -ne 'inline note') {
         throw 'mouse Cancel persisted an inline draft'
     }
-    Write-Host 'EVIDENCE ux.workbench-inline-edit'
+    Write-Evidence 'ux.workbench-inline-edit'
+
+    Write-Host 'STEP proxy credentials have physical Reveal and Re-mask controls'
+    $snapshot = Invoke-AgenTerm @('ui-action', 'open-proxy-editor', '-t', $root) |
+        ConvertFrom-Json
+    if ($snapshot.modal.kind -ne 'proxy-editor' -or
+        $snapshot.modal.credential_revealed) {
+        throw 'proxy editor did not start safely masked'
+    }
+    [WorkbenchNativeTest]::ClickButton($window, 'Reveal')
+    $snapshot = Get-Snapshot
+    if (-not $snapshot.modal.credential_revealed) {
+        throw 'physical Reveal button did not reveal the proxy editor'
+    }
+    [WorkbenchNativeTest]::ClickButton($window, 'Re-mask')
+    $snapshot = Get-Snapshot
+    if ($snapshot.modal.credential_revealed) {
+        throw 'physical Re-mask button did not hide proxy credentials'
+    }
+    [WorkbenchNativeTest]::ClickButton($window, 'Reveal')
+    [WorkbenchNativeTest]::ClickButton($window, 'Send now')
+    Invoke-AgenTerm @(
+        'wait-ui', '-t', $root, '--proxy-state', 'applied',
+        '--modal-kind', 'closed', '--timeout-ms', '10000'
+    ) | Out-Null
+    Invoke-AgenTerm @('ui-action', 'open-proxy-editor', '-t', $root) | Out-Null
+    [WorkbenchNativeTest]::ClickButton($window, 'Reveal')
+    [WorkbenchNativeTest]::ClickButton($window, 'Prepare')
+    Invoke-AgenTerm @(
+        'wait-ui', '-t', $root, '--proxy-state', 'prepared',
+        '--modal-kind', 'closed', '--timeout-ms', '2000'
+    ) | Out-Null
+    Write-Evidence 'ux.workbench-proxy-controls'
 
     Write-Host 'STEP compact and full geometry stay bounded for a deep CJK row'
     $target = $root
@@ -217,7 +276,7 @@ try {
             throw "tree geometry was inconsistent at Tabs width $width"
         }
     }
-    Write-Host 'EVIDENCE ux.workbench-compact-tree'
+    Write-Evidence 'ux.workbench-compact-tree'
     Write-Host 'PASS: inline Tabs editing and compact tree geometry'
 }
 finally {
@@ -232,4 +291,8 @@ finally {
     $env:AGENTERM_WORKSPACE_PATH = $previousWorkspace
     $env:AGENTERM_SETTINGS_PATH = $previousSettings
     $env:AGENTERM_NO_ACTIVATE = $previousNoActivate
+    $env:HTTP_PROXY = $previousHttpProxy
+    $env:HTTPS_PROXY = $previousHttpsProxy
+    $env:http_proxy = $previousHttpProxyLower
+    $env:https_proxy = $previousHttpsProxyLower
 }
