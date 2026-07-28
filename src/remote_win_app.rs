@@ -33,22 +33,23 @@ use windows_sys::Win32::{
             VK_F10, VK_F11, VK_F12, VK_HOME, VK_LEFT, VK_NEXT, VK_PRIOR, VK_RIGHT, VK_UP,
         },
         WindowsAndMessaging::{
-            CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CheckMenuItem, CreateWindowExW, DefWindowProcW,
-            DestroyWindow, DispatchMessageW, ES_AUTOVSCROLL, ES_MULTILINE, ES_WANTRETURN,
-            EnableMenuItem, GWLP_USERDATA, GetClientRect, GetCursorPos, GetForegroundWindow,
-            GetMessageW, GetSystemMenu, GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW,
-            GetWindowTextW, IDC_ARROW, IDC_SIZEWE, InsertMenuW, IsIconic, IsWindowVisible,
-            IsZoomed, LoadCursorW, LoadIconW, MF_BYCOMMAND, MF_CHECKED, MF_ENABLED, MF_GRAYED,
-            MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MSG, MoveWindow, PostQuitMessage,
-            RegisterClassW, SC_CLOSE, SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW,
-            SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
-            SWP_SHOWWINDOW, SendMessageW, SetCursor, SetForegroundWindow, SetTimer,
-            SetWindowLongPtrW, SetWindowPos, SetWindowTextW, ShowWindow, TranslateMessage,
-            WM_CAPTURECHANGED, WM_CHAR, WM_CLOSE, WM_COMMAND, WM_COPY, WM_CREATE, WM_DESTROY,
-            WM_ERASEBKGND, WM_INITMENUPOPUP, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP,
-            WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY, WM_PAINT, WM_PASTE, WM_SETCURSOR,
-            WM_SETFOCUS, WM_SIZE, WM_SYSCOMMAND, WM_TIMER, WNDCLASSW, WS_BORDER, WS_CHILD,
-            WS_CLIPCHILDREN, WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE, WS_VSCROLL,
+            CS_DBLCLKS, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CheckMenuItem, CreateWindowExW,
+            DefWindowProcW, DestroyWindow, DispatchMessageW, ES_AUTOVSCROLL, ES_MULTILINE,
+            ES_WANTRETURN, EnableMenuItem, GWLP_USERDATA, GetClientRect, GetCursorPos,
+            GetForegroundWindow, GetMessageW, GetSystemMenu, GetWindowLongPtrW, GetWindowRect,
+            GetWindowTextLengthW, GetWindowTextW, IDC_ARROW, IDC_SIZEWE, InsertMenuW, IsIconic,
+            IsWindowVisible, IsZoomed, LoadCursorW, LoadIconW, MF_BYCOMMAND, MF_CHECKED,
+            MF_ENABLED, MF_GRAYED, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MSG, MoveWindow,
+            PostQuitMessage, RegisterClassW, SC_CLOSE, SIZE_MINIMIZED, SW_HIDE, SW_MAXIMIZE,
+            SW_MINIMIZE, SW_RESTORE, SW_SHOW, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOMOVE,
+            SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SendMessageW, SetCursor, SetForegroundWindow,
+            SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW, ShowWindow,
+            TranslateMessage, WM_CAPTURECHANGED, WM_CHAR, WM_CLOSE, WM_COMMAND, WM_COPY, WM_CREATE,
+            WM_DESTROY, WM_ERASEBKGND, WM_INITMENUPOPUP, WM_KEYDOWN, WM_LBUTTONDBLCLK,
+            WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY, WM_PAINT,
+            WM_PASTE, WM_SETCURSOR, WM_SETFOCUS, WM_SIZE, WM_SYSCOMMAND, WM_TIMER, WNDCLASSW,
+            WS_BORDER, WS_CHILD, WS_CLIPCHILDREN, WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE,
+            WS_VSCROLL,
         },
     },
 };
@@ -68,8 +69,8 @@ use crate::{
     ui_command::UiClientCommand,
     ui_geometry::{
         PixelRect, TERMINAL_SCROLLBAR_WIDTH, TerminalScrollbarGeometry, TreeRowActionDensity,
-        TreeRowMode, WorkspaceLayout, WorkspaceLayoutInput, scrollback_for_thumb_top,
-        tabs_width_from_drag, terminal_scrollbar_geometry, tree_row_at_y,
+        TreeRowMode, WorkspaceLayout, WorkspaceLayoutInput, reset_tabs_width,
+        scrollback_for_thumb_top, tabs_width_from_drag, terminal_scrollbar_geometry, tree_row_at_y,
         tree_row_geometry_for_mode, workspace_layout,
     },
 };
@@ -123,7 +124,7 @@ pub(crate) fn run_remote_gui(no_activate: bool) -> Result<()> {
     }
     let class_name = wide("AgenTermRemoteUiClass");
     let mut window_class: WNDCLASSW = unsafe { mem::zeroed() };
-    window_class.style = CS_HREDRAW | CS_VREDRAW;
+    window_class.style = CS_DBLCLKS | CS_HREDRAW | CS_VREDRAW;
     window_class.lpfnWndProc = Some(window_proc);
     window_class.hInstance = instance as HINSTANCE;
     window_class.hCursor = unsafe { LoadCursorW(ptr::null_mut(), IDC_ARROW) };
@@ -449,6 +450,19 @@ fn remote_surface_navigation(
     }
 }
 
+fn remote_composer_identity(
+    client: &UiClientModel,
+) -> Option<(String, Option<String>, bool, usize)> {
+    let tab_id = client.snapshot().active_tab_id.clone()?;
+    let composer = &tab_by_id(client.snapshot(), &tab_id)?.composer;
+    Some((
+        tab_id,
+        composer.text.clone(),
+        composer.sensitive,
+        composer.byte_length,
+    ))
+}
+
 struct RemoteWindowState {
     window: HWND,
     edit: HWND,
@@ -474,6 +488,7 @@ struct RemoteWindowState {
     client_id: String,
     client: Option<UiClientModel>,
     reconnect_after: Instant,
+    last_message: Option<String>,
     last_error: Option<String>,
     tabs_visible: bool,
     config: AppConfig,
@@ -482,6 +497,7 @@ struct RemoteWindowState {
     cell_height: i32,
     pending_high_surrogate: Option<u16>,
     last_active_id: Option<String>,
+    last_composer_identity: Option<(String, Option<String>, bool, usize)>,
     tabs_resize_dragging: bool,
     editing_tab_id: Option<String>,
     window_close_pending: bool,
@@ -529,6 +545,7 @@ impl RemoteWindowState {
         let settings_theme_draft = config.color_theme;
         let (font, cell_width, cell_height) = create_terminal_font(window, &config)?;
         let last_active_id = client.snapshot().active_tab_id.clone();
+        let last_composer_identity = remote_composer_identity(&client);
         Ok(Self {
             window,
             edit,
@@ -554,6 +571,7 @@ impl RemoteWindowState {
             client_id,
             client: Some(client),
             reconnect_after: Instant::now(),
+            last_message: None,
             last_error: None,
             tabs_visible: config.tabs_visible,
             config,
@@ -562,6 +580,7 @@ impl RemoteWindowState {
             cell_height,
             pending_high_surrogate: None,
             last_active_id,
+            last_composer_identity,
             tabs_resize_dragging: false,
             editing_tab_id: None,
             window_close_pending: false,
@@ -597,8 +616,10 @@ impl RemoteWindowState {
                     .client
                     .as_ref()
                     .and_then(|client| client.snapshot().active_tab_id.clone());
-                if active != self.last_active_id {
+                let composer = self.client.as_ref().and_then(remote_composer_identity);
+                if active != self.last_active_id || composer != self.last_composer_identity {
                     self.last_active_id = active;
+                    self.last_composer_identity = composer;
                     self.load_composer();
                 }
                 self.last_error = None;
@@ -641,6 +662,8 @@ impl RemoteWindowState {
                                 .client
                                 .as_ref()
                                 .and_then(|client| client.snapshot().active_tab_id.clone());
+                            self.last_composer_identity =
+                                self.client.as_ref().and_then(remote_composer_identity);
                             self.last_error = None;
                             self.load_composer();
                             self.resize_active_terminal();
@@ -1311,6 +1334,7 @@ impl RemoteWindowState {
                     "collapsed": tab.collapsed,
                     "visible": visible_position.is_some(),
                     "name": tab.title,
+                    "terminal_title": tab.screen.terminal_title,
                     "note": tab.note,
                     "active": source.active_tab_id.as_ref() == Some(&tab.id),
                     "pid": tab.process_id,
@@ -1319,10 +1343,12 @@ impl RemoteWindowState {
                     "working_context": {
                         "cwd": {
                             "path": tab.working_context.cwd,
+                            "confirmed_path": tab.working_context.cwd_confirmed_path,
                             "confirmed": tab.working_context.cwd_confirmed,
                             "source": tab.working_context.cwd_source,
                             "pending": tab.working_context.cwd_request_pending,
                         },
+                        "shell": tab.working_context.shell,
                         "proxy": {
                             "configured": tab.working_context.proxy_configured,
                             "source": tab.working_context.proxy_source,
@@ -1422,6 +1448,13 @@ impl RemoteWindowState {
             })
         };
         let (copy_enabled, paste_enabled) = self.system_menu_state();
+        let composer_input = PixelRect {
+            left: layout.composer.left + MARGIN,
+            top: layout.composer.top + 26,
+            right: (layout.composer.right - 76 - MARGIN * 2)
+                .max(layout.composer.left + MARGIN + 80),
+            bottom: (layout.composer.bottom - 8).max(layout.composer.top + 56),
+        };
         let focus = if self.window_close_pending {
             "window-close"
         } else if self.settings_open {
@@ -1501,6 +1534,7 @@ impl RemoteWindowState {
                     "height": layout.composer.height(),
                     "bounds": pixel_rect_json(layout.composer),
                     "input": {
+                        "bounds": pixel_rect_json(composer_input),
                         "target_rows": 3,
                         "vertical_scrollbar": true,
                     },
@@ -1590,7 +1624,7 @@ impl RemoteWindowState {
                 },
             },
             "feedback": {
-                "message": serde_json::Value::Null,
+                "message": self.last_message,
                 "error": self.last_error,
             },
         }))
@@ -2871,8 +2905,18 @@ impl RemoteWindowState {
                 "normalized clipboard text exceeds the {TERMINAL_PASTE_LIMIT_BYTES}-byte limit"
             );
         }
-        self.terminal_input(text.as_bytes());
+        let tab_id = self
+            .client
+            .as_ref()
+            .and_then(|client| client.snapshot().active_tab_id.clone())
+            .context("no active terminal is available for paste")?;
+        let characters = text.chars().count();
         self.last_error = None;
+        self.terminal_input(text.as_bytes());
+        if let Some(error) = self.last_error.take() {
+            anyhow::bail!("{error}");
+        }
+        self.last_message = Some(format!("Pasted {characters} characters into {tab_id}"));
         Ok(())
     }
 
@@ -3205,6 +3249,17 @@ impl RemoteWindowState {
         unsafe { ReleaseCapture() };
         if let Err(error) = save_config(&self.config) {
             self.last_error = Some(format!("Tabs width save failed: {error:#}"));
+        }
+    }
+
+    fn reset_tabs_width(&mut self) {
+        self.tabs_resize_dragging = false;
+        unsafe { ReleaseCapture() };
+        self.config.tabs_width = clamp_tabs_width(reset_tabs_width());
+        self.layout();
+        self.resize_active_terminal();
+        if let Err(error) = save_config(&self.config) {
+            self.last_error = Some(format!("Tabs width reset failed: {error:#}"));
         }
     }
 
@@ -3773,7 +3828,9 @@ unsafe extern "system" fn window_proc(
         WM_SIZE => {
             if let Some(state) = state_mut(window) {
                 state.layout();
-                state.resize_active_terminal();
+                if wparam != SIZE_MINIMIZED as usize {
+                    state.resize_active_terminal();
+                }
                 unsafe {
                     windows_sys::Win32::Graphics::Gdi::InvalidateRect(window, ptr::null(), 0)
                 };
@@ -3794,6 +3851,25 @@ unsafe extern "system" fn window_proc(
                 && unsafe { GetFocus() } != state.edit
             {
                 unsafe { SetFocus(window) };
+            }
+            0
+        }
+        WM_LBUTTONDBLCLK => {
+            if let Some(state) = state_mut(window) {
+                if state.window_close_pending
+                    || state.settings_open
+                    || state.pending_close_tab_id.is_some()
+                {
+                    return 0;
+                }
+                let x = (lparam as u32 & 0xffff) as i16 as i32;
+                let y = ((lparam as u32 >> 16) & 0xffff) as i16 as i32;
+                if state.resize_grip_contains(x, y) {
+                    state.reset_tabs_width();
+                    unsafe {
+                        windows_sys::Win32::Graphics::Gdi::InvalidateRect(window, ptr::null(), 0)
+                    };
+                }
             }
             0
         }
@@ -4226,8 +4302,15 @@ fn install_system_menu(window: HWND) -> Result<()> {
 }
 
 fn set_clipboard_text(window: HWND, text: &str) -> Result<()> {
-    if unsafe { OpenClipboard(window) } == 0 {
-        anyhow::bail!("could not open the Windows clipboard");
+    let deadline = Instant::now() + Duration::from_millis(500);
+    loop {
+        if unsafe { OpenClipboard(window) } != 0 {
+            break;
+        }
+        if Instant::now() >= deadline {
+            anyhow::bail!("could not open the Windows clipboard within 500 ms");
+        }
+        thread::sleep(Duration::from_millis(10));
     }
     if unsafe { EmptyClipboard() } == 0 {
         unsafe { CloseClipboard() };
@@ -4747,6 +4830,7 @@ mod tests {
             schema_version: UI_SCREEN_SCHEMA_VERSION,
             tab_id: "@1".to_owned(),
             generation: 7,
+            terminal_title: "terminal".to_owned(),
             rows: 2,
             columns: 8,
             scrollback_offset: 0,

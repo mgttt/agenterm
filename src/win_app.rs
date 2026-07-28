@@ -295,6 +295,7 @@ pub fn run_gui_entry() -> i32 {
         };
         match crate::client::send_ipc_request(vec![handoff.to_owned()]) {
             Ok(response) if response.ok => return 0,
+            Ok(response) if response.error_code == "ui_client_unavailable" => {}
             Ok(response) => {
                 write_best_effort_stderr(&format!(
                     "The running AgenTerm server rejected the launcher handoff: {}\n\
@@ -307,7 +308,7 @@ pub fn run_gui_entry() -> i32 {
         }
     }
 
-    if let Err(error) = run_gui(no_activate) {
+    if let Err(error) = crate::remote_win_app::run_remote_gui(no_activate) {
         show_startup_error(&error);
         return 1;
     }

@@ -129,6 +129,7 @@ function Invoke-SmokeCli {
     Add-SmokeCommandRecord -Context $Context -Arguments $Arguments `
         -ExitCode $exitCode -ExpectedFailure ([bool]$ExpectFailure) -Output $output
     Sync-SmokeOwnedServers -Context $Context
+    Sync-SmokeOwnedUiClients -Context $Context
     $safeCommand = (ConvertTo-SmokeSafeArguments -Arguments $Arguments) -join ' '
 
     if ($ExpectFailure) {
@@ -231,6 +232,72 @@ function Sync-SmokeOwnedServers {
         }
         catch {
             # A concurrently retiring registration is handled by final cleanup.
+        }
+    }
+}
+
+function Sync-SmokeOwnedUiClients {
+    param([Parameter(Mandatory = $true)]$Context)
+
+    foreach ($address in @($Context.OwnedAddresses)) {
+        $savedPreference = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            $snapshotItems = @(
+                & $Context.Executable --address $address ui-snapshot 2>$null
+            )
+            $exitCode = $LASTEXITCODE
+        }
+        catch {
+            $snapshotItems = @()
+            $exitCode = -1
+        }
+        finally {
+            $ErrorActionPreference = $savedPreference
+        }
+        if ($exitCode -ne 0 -or $snapshotItems.Count -eq 0) {
+            continue
+        }
+        try {
+            $snapshot = ($snapshotItems -join "`n") | ConvertFrom-Json
+            if (
+                [string]$snapshot.projection -ne 'replaceable_ui_client' -or
+                [int]$snapshot.client_pid -le 0
+            ) {
+                continue
+            }
+            $clientPid = [int]$snapshot.client_pid
+            $client = Get-CimInstance Win32_Process `
+                -Filter "ProcessId=$clientPid" -ErrorAction SilentlyContinue
+            if ($null -eq $client) {
+                continue
+            }
+            $expectedGui = [IO.Path]::GetFullPath(
+                (Join-Path (Split-Path $Context.Executable -Parent) 'agenterm.exe')
+            )
+            if (
+                -not [string]::Equals(
+                    [string]$client.ExecutablePath,
+                    $expectedGui,
+                    [StringComparison]::OrdinalIgnoreCase
+                ) -or
+                [string]$client.CommandLine -notmatch
+                    ('(?i)(?:--address\s+|--address=)' +
+                        [regex]::Escape($address) + '(?:\s|$)')
+            ) {
+                throw (
+                    "Refusing to own UI client PID $clientPid because its " +
+                    "executable or address does not match this smoke run."
+                )
+            }
+            Register-SmokeOwnedProcess -Context $Context -Id $clientPid `
+                -Kind 'gui' -Address $address
+        }
+        catch {
+            if ($_.Exception.Message -like 'Refusing to own UI client*') {
+                throw
+            }
+            # A client detaching while its snapshot is read is harmless.
         }
     }
 }
@@ -370,6 +437,9 @@ function Stop-SmokeOwnedResources {
     param([Parameter(Mandatory = $true)]$Context)
 
     Sync-SmokeOwnedServers -Context $Context
+    # Discover replaceable GUI clients before stopping their servers. Once the
+    # server exits, its authoritative UI lease is no longer queryable.
+    Sync-SmokeOwnedUiClients -Context $Context
     $graceful = [Collections.Generic.List[object]]::new()
     foreach ($address in @($Context.OwnedAddresses)) {
         $liveServer = @($Context.OwnedProcesses | Where-Object {

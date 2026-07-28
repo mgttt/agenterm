@@ -280,6 +280,9 @@ pub struct UiScreenSnapshot {
     pub schema_version: u32,
     pub tab_id: String,
     pub generation: u64,
+    /// Additive field. Older compatible servers omit terminal title facts.
+    #[serde(default)]
+    pub terminal_title: String,
     pub rows: u32,
     pub columns: u32,
     pub scrollback_offset: usize,
@@ -319,9 +322,15 @@ pub struct UiComposerSnapshot {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct UiWorkingContextSnapshot {
     pub cwd: Option<String>,
+    /// Last shell-confirmed path, which can differ while a request is pending.
+    #[serde(default)]
+    pub cwd_confirmed_path: Option<String>,
     pub cwd_confirmed: bool,
     pub cwd_source: String,
     pub cwd_request_pending: bool,
+    /// Stable shell classification used by typed CWD preparation.
+    #[serde(default)]
+    pub shell: String,
     pub proxy_configured: bool,
     pub proxy_source: String,
     pub proxy_application_state: String,
@@ -632,6 +641,7 @@ mod tests {
             schema_version: UI_SCREEN_SCHEMA_VERSION,
             tab_id: tab_id.to_owned(),
             generation: 7,
+            terminal_title: "terminal".to_owned(),
             rows: 24,
             columns: 80,
             scrollback_offset: 0,
@@ -693,9 +703,11 @@ mod tests {
                     },
                     working_context: UiWorkingContextSnapshot {
                         cwd: Some("C:\\work".to_owned()),
+                        cwd_confirmed_path: Some("C:\\work".to_owned()),
                         cwd_confirmed: true,
                         cwd_source: "launch".to_owned(),
                         cwd_request_pending: false,
+                        shell: "cmd".to_owned(),
                         proxy_configured: false,
                         proxy_source: "off".to_owned(),
                         proxy_application_state: "off".to_owned(),
@@ -720,9 +732,11 @@ mod tests {
                     },
                     working_context: UiWorkingContextSnapshot {
                         cwd: None,
+                        cwd_confirmed_path: None,
                         cwd_confirmed: false,
                         cwd_source: "unknown".to_owned(),
                         cwd_request_pending: false,
+                        shell: "unknown".to_owned(),
                         proxy_configured: true,
                         proxy_source: "launch".to_owned(),
                         proxy_application_state: "launch_applied".to_owned(),

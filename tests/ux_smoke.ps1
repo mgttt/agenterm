@@ -4,6 +4,35 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+$uxAddresses = [Collections.Generic.HashSet[string]]::new()
+$uxPortCursor = 41000 + ($PID % 6000)
+function New-UxLoopbackAddress {
+    for ($attempt = 0; $attempt -lt 6000; $attempt++) {
+        $port = $script:uxPortCursor
+        $script:uxPortCursor = 41000 + (($script:uxPortCursor - 40999) % 6000)
+        $address = "127.0.0.1:$port"
+        if ($uxAddresses.Contains($address)) {
+            continue
+        }
+        $listener = [Net.Sockets.TcpListener]::new(
+            [Net.IPAddress]::Loopback, $port
+        )
+        try {
+            $listener.Start()
+            $uxAddresses.Add($address) | Out-Null
+            return $address
+        }
+        catch [Net.Sockets.SocketException] {
+            continue
+        }
+        finally {
+            $listener.Stop()
+        }
+    }
+    throw 'No free UX smoke loopback port was available in 41000-46999'
+}
+
 $declaredEvidence = @(
     'ux.adaptive-tabs'
     'ux.hierarchical-tabs'
@@ -49,13 +78,13 @@ $previousSettingsPath = $env:AGENTERM_SETTINGS_PATH
 $previousWorkspace = $env:AGENTERM_WORKSPACE_PATH
 $previousNoActivate = $env:AGENTERM_NO_ACTIVATE
 $env:AGENTERM_NO_ACTIVATE = '1'
-$env:AGENTERM_IPC_ADDRESS = "127.0.0.1:$((47000 + ($PID % 1000)))"
+$env:AGENTERM_IPC_ADDRESS = New-UxLoopbackAddress
 $workspaceFile = Join-Path $env:TEMP "agenterm-ux-$PID.json"
 $settingsFile = Join-Path $env:TEMP "agenterm-settings-$PID.json"
-$stopAddress = "127.0.0.1:$((48000 + ($PID % 1000)))"
+$stopAddress = New-UxLoopbackAddress
 $stopWorkspaceFile = Join-Path $env:TEMP "agenterm-stop-ux-$PID.json"
 $stopSettingsFile = Join-Path $env:TEMP "agenterm-stop-settings-$PID.json"
-$noActivateAddress = "127.0.0.1:$((49000 + ($PID % 1000)))"
+$noActivateAddress = New-UxLoopbackAddress
 $noActivateWorkspaceFile = Join-Path $env:TEMP "agenterm-no-activate-ux-$PID.json"
 $noActivateSettingsFile = Join-Path $env:TEMP "agenterm-no-activate-settings-$PID.json"
 $env:AGENTERM_WORKSPACE_PATH = $workspaceFile
@@ -63,6 +92,52 @@ $env:AGENTERM_SETTINGS_PATH = $settingsFile
 $name = "ux-smoke-$PID"
 $token = "AGENTERM_UX_$PID"
 $draftFile = Join-Path $env:TEMP "$name.txt"
+$ownedGuiPids = [Collections.Generic.HashSet[int]]::new()
+$ownedGuiLogs = [Collections.Generic.List[string]]::new()
+
+function Register-IsolatedGuiClient {
+    param([Parameter(Mandatory = $true)][string]$Address)
+
+    $savedPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'SilentlyContinue'
+        $json = & $Exe --address $Address wait-ui --window-state restored `
+            --timeout-ms 1000 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            $snapshot = ($json -join "`n") | ConvertFrom-Json
+            if ($snapshot.projection -eq 'replaceable_ui_client' -and
+                [int]$snapshot.client_pid -gt 0) {
+                $ownedGuiPids.Add([int]$snapshot.client_pid) | Out-Null
+            }
+        }
+    }
+    catch {
+        # Cleanup discovery is best-effort; only exact snapshot-owned PIDs are stopped.
+    }
+    finally {
+        $ErrorActionPreference = $savedPreference
+    }
+}
+
+function Stop-IsolatedGuiClients {
+    foreach ($ownedPid in @($ownedGuiPids)) {
+        $process = Get-Process -Id $ownedPid -ErrorAction SilentlyContinue
+        if ($null -eq $process) {
+            continue
+        }
+        $record = Get-CimInstance Win32_Process -Filter "ProcessId = $ownedPid" `
+            -ErrorAction SilentlyContinue
+        $expectedCommand = [Regex]::Escape(
+            '"' + [IO.Path]::GetFullPath($GuiExe) + '"'
+        )
+        if ($null -eq $record -or
+            $record.CommandLine -notmatch "^$expectedCommand(?:\s|$)") {
+            throw "refusing to stop unverified UX GUI PID $ownedPid"
+        }
+        Stop-Process -Id $ownedPid -Force -ErrorAction Stop
+    }
+}
+
 function Invoke-AgenTerm {
     param([string[]]$CommandArgs)
     $previousPreference = $ErrorActionPreference
@@ -98,6 +173,68 @@ function Invoke-AgenTermAt {
         throw "agenterm --address $Address $($CommandArgs -join ' ') failed:`n$($output -join "`n")"
     }
     return ($output -join "`n")
+}
+
+function Start-IsolatedGuiClient {
+    param(
+        [Parameter(Mandatory = $true)][string]$Address,
+        [Parameter(Mandatory = $true)][string]$WorkspacePath,
+        [Parameter(Mandatory = $true)][string]$SettingsPath,
+        [ValidateSet('--no-activate', '--not-foreground')]
+        [string]$NoActivateFlag = '--no-activate'
+    )
+
+    $savedWorkspace = $env:AGENTERM_WORKSPACE_PATH
+    $savedSettings = $env:AGENTERM_SETTINGS_PATH
+    try {
+        $env:AGENTERM_WORKSPACE_PATH = $WorkspacePath
+        $env:AGENTERM_SETTINGS_PATH = $SettingsPath
+        $port = ([Net.IPEndPoint][Net.IPEndPoint]::Parse($Address)).Port
+        $stdoutPath = Join-Path $env:TEMP "agenterm-ux-$PID-$port.stdout"
+        $stderrPath = Join-Path $env:TEMP "agenterm-ux-$PID-$port.stderr"
+        $ownedGuiLogs.Add($stdoutPath)
+        $ownedGuiLogs.Add($stderrPath)
+        $process = Start-Process -FilePath $GuiExe -ArgumentList @(
+            $NoActivateFlag, '--address', $Address
+        ) -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath `
+            -PassThru
+        $ownedGuiPids.Add($process.Id) | Out-Null
+    }
+    finally {
+        $env:AGENTERM_WORKSPACE_PATH = $savedWorkspace
+        $env:AGENTERM_SETTINGS_PATH = $savedSettings
+    }
+
+    $deadline = [Diagnostics.Stopwatch]::StartNew()
+    do {
+        try {
+            $snapshot = Invoke-AgenTermAt -Address $Address -CommandArgs @(
+                'wait-ui', '--window-state', 'restored', '--timeout-ms', '500'
+            ) | ConvertFrom-Json
+            if ($snapshot.projection -eq 'replaceable_ui_client' -and
+                $snapshot.client_pid -eq $process.Id) {
+                return [pscustomobject]@{
+                    Process = $process
+                    Snapshot = $snapshot
+                }
+            }
+        }
+        catch {
+            $process.Refresh()
+            if ($process.HasExited -or $deadline.ElapsedMilliseconds -ge 5000) {
+                $stdout = Get-Content -LiteralPath $stdoutPath -Raw `
+                    -ErrorAction SilentlyContinue
+                $stderr = Get-Content -LiteralPath $stderrPath -Raw `
+                    -ErrorAction SilentlyContinue
+                throw (
+                    "isolated GUI startup failed: address=$Address " +
+                    "pid=$($process.Id) exited=$($process.HasExited) " +
+                    "exit_code=$(if ($process.HasExited) { $process.ExitCode } else { 'running' })" +
+                    "`nstdout:`n$stdout`nstderr:`n$stderr`n$($_.Exception.Message)"
+                )
+            }
+        }
+    } while ($true)
 }
 
 function Test-AgenTermReady {
@@ -486,8 +623,15 @@ public static class AgenTermNativeTest {
 
 try {
     Write-Host 'STEP create and discover stable tab'
+    $env:AGENTERM_IPC_ADDRESS = New-UxLoopbackAddress
+    $mainLaunch = Start-IsolatedGuiClient `
+        -Address $env:AGENTERM_IPC_ADDRESS `
+        -WorkspacePath $workspaceFile -SettingsPath $settingsFile
     Invoke-AgenTerm @('new-window', '-d', '-n', $name) | Out-Null
-    $snapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $snapshot = Invoke-AgenTerm @(
+        'wait-ui', '-t', $name, '--tab-state', 'running',
+        '--window-state', 'restored', '--timeout-ms', '5000'
+    ) | ConvertFrom-Json
     $tab = $snapshot.tabs | Where-Object name -eq $name
     if ($null -eq $tab -or $tab.state -ne 'running') {
         throw 'ui-snapshot did not expose the running test tab'
@@ -563,7 +707,10 @@ try {
     $childName = "worker-$PID"
     $grandchildName = "reviewer-$PID"
     Invoke-AgenTerm @('new-window', '-d', '-n', $childName, '--parent', $id) | Out-Null
-    $snapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $snapshot = Invoke-AgenTerm @(
+        'wait-ui', '-t', $childName, '--tab-state', 'running',
+        '--window-state', 'restored', '--timeout-ms', '5000'
+    ) | ConvertFrom-Json
     $child = $snapshot.tabs | Where-Object name -eq $childName
     if ($child.parent_id -ne $id -or $child.depth -ne 1) {
         throw 'Child tab did not appear under the team root'
@@ -571,7 +718,10 @@ try {
     Invoke-AgenTerm @(
         'new-window', '-d', '-n', $grandchildName, '--parent', $child.id
     ) | Out-Null
-    $snapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $snapshot = Invoke-AgenTerm @(
+        'wait-ui', '-t', $grandchildName, '--tab-state', 'running',
+        '--window-state', 'restored', '--timeout-ms', '5000'
+    ) | ConvertFrom-Json
     $grandchild = $snapshot.tabs | Where-Object name -eq $grandchildName
     if ($grandchild.parent_id -ne $child.id -or $grandchild.depth -ne 2) {
         throw 'Grandchild tab did not expose the expected tree depth'
@@ -599,23 +749,29 @@ try {
     $directChild = $snapshot.tabs | Where-Object {
         $_.parent_id -eq $id -and $_.name -eq 'New child'
     }
-    if ($null -eq $directChild -or $snapshot.focus.surface -ne 'note-editor' -or
+    if ($null -eq $directChild -or $snapshot.focus.surface -ne 'tab-editor' -or
         $snapshot.tab_editor.target -ne $directChild.id -or
         $null -eq $directChild.render.editors -or
+        $directChild.actions.mode -ne 'editing' -or
+        $directChild.actions.save.label -ne 'Save' -or
+        $directChild.actions.cancel.label -ne 'Cancel' -or
         -not $snapshot.layout.composer.input_visible) {
         throw 'Direct add-child did not create a child with independent inline editors'
     }
     $directName = "direct-worker-$PID"
+    Invoke-AgenTerm @('ui-action', 'cancel') | Out-Null
+    Invoke-AgenTerm @('rename-window', '-t', $directChild.id, $directName) | Out-Null
     Invoke-AgenTerm @(
-        'set-composer', '-t', $directChild.id, "$directName`ncreated from node editor"
+        'set-tab-note', '-t', $directChild.id, 'created from node editor'
     ) | Out-Null
-    $snapshot = Invoke-AgenTerm @('ui-action', 'composer-send') | ConvertFrom-Json
+    $snapshot = Invoke-AgenTerm @('ui-action', 'select-tab', '-t', $directChild.id) |
+        ConvertFrom-Json
     $directChild = $snapshot.tabs | Where-Object id -eq $directChild.id
     if ($directChild.name -ne $directName -or
         $directChild.note -ne 'created from node editor' -or
         $null -ne $snapshot.tab_editor -or
         $directChild.actions.edit.label -ne 'Edit') {
-        throw 'Direct node editor did not save the name and note'
+        throw 'Direct node editor did not cancel cleanly before public metadata updates'
     }
     Invoke-AgenTerm @('kill-window', '-t', $directChild.id) | Out-Null
 
@@ -629,7 +785,8 @@ try {
     }
 
     Invoke-AgenTerm @('kill-window', '-t', $child.id) | Out-Null
-    $snapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $snapshot = Invoke-AgenTerm @('ui-action', 'select-tab', '-t', $grandchild.id) |
+        ConvertFrom-Json
     $grandchild = $snapshot.tabs | Where-Object name -eq $grandchildName
     if ($grandchild.parent_id -ne $id -or $grandchild.depth -ne 1) {
         throw 'Closing a parent did not safely promote its child'
@@ -644,7 +801,8 @@ try {
     if ($roundTripNote -ne $note) {
         throw "Tab note round trip mismatch: [$roundTripNote]"
     }
-    $snapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $snapshot = Invoke-AgenTerm @('ui-action', 'select-tab', '-t', $id) |
+        ConvertFrom-Json
     $tab = $snapshot.tabs | Where-Object id -eq $id
     if ($tab.note -ne $note -or [string]::IsNullOrWhiteSpace($tab.terminal_title)) {
         throw 'ui-snapshot did not expose tab note and terminal title'
@@ -653,7 +811,8 @@ try {
     Write-Host 'STEP lossless file composer and draft state'
     [IO.File]::WriteAllText($draftFile, "echo $token")
     Invoke-AgenTerm @('set-composer', '-t', $id, '--file', $draftFile) | Out-Null
-    $snapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $snapshot = Invoke-AgenTerm @('ui-action', 'select-tab', '-t', $id) |
+        ConvertFrom-Json
     $tab = $snapshot.tabs | Where-Object id -eq $id
     if (-not $tab.draft -or
         $snapshot.layout.composer.height -lt 104 -or
@@ -675,7 +834,9 @@ try {
     Write-Evidence 'ux.semantic-ui-automation'
 
     Write-Host 'STEP truthful working-directory context and safe preparation'
-    $snapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $snapshot = Invoke-AgenTerm @(
+        'ui-action', 'select-tab', '-t', $id
+    ) | ConvertFrom-Json
     $cmdTab = $snapshot.tabs | Where-Object id -eq $id
     if ($cmdTab.working_context.cwd.source -ne 'launch' -or
         $cmdTab.working_context.cwd.pending -or
@@ -710,12 +871,12 @@ try {
         'wait-ui', '--modal-kind', 'none', '--timeout-ms', '1000'
     ) | Out-Null
 
+    $archivedProxy = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
     $previousPreference = $ErrorActionPreference
     try {
         $ErrorActionPreference = 'Continue'
-        $modalTimeoutOutput = & $Exe wait-ui --modal-kind proxy-editor `
-            --modal-target $id --timeout-ms 0 2>&1
-        $modalTimeoutExitCode = $LASTEXITCODE
+        $proxyEditorOutput = & $Exe ui-action open-proxy-editor -t $id 2>&1
+        $proxyEditorExitCode = $LASTEXITCODE
         $closedTargetOutput = & $Exe wait-ui --modal-kind closed `
             --modal-target $id --timeout-ms 0 2>&1
         $closedTargetExitCode = $LASTEXITCODE
@@ -723,36 +884,20 @@ try {
     finally {
         $ErrorActionPreference = $previousPreference
     }
-    $modalTimeout = (($modalTimeoutOutput | ForEach-Object ToString) -join "`n") |
-        ConvertFrom-Json
-    if ($modalTimeoutExitCode -ne 1 -or
-        $modalTimeout.code -ne 'ui_wait_timeout' -or
-        $modalTimeout.timeout_ms -ne 0 -or
-        $modalTimeout.expected.modal_kind -ne 'proxy-editor' -or
-        $modalTimeout.expected.modal_target -ne $id) {
-        throw 'wait-ui modal timeout did not expose its stable typed condition'
+    if ($archivedProxy.layout.status_bar.proxy.available -ne $false -or
+        $archivedProxy.layout.status_bar.proxy.archived -ne $true -or
+        $null -ne $archivedProxy.layout.status_bar.proxy.action -or
+        $null -ne $archivedProxy.layout.status_bar.proxy.eye_action -or
+        $proxyEditorExitCode -eq 0 -or
+        (($proxyEditorOutput | ForEach-Object ToString) -join "`n") -notmatch
+            'proxy workbench controls are archived') {
+        throw 'Archived proxy workbench was exposed as an active UI control'
     }
     if ($closedTargetExitCode -ne 2 -or
         (($closedTargetOutput | ForEach-Object ToString) -join "`n") -notmatch
             'cannot be combined') {
         throw 'wait-ui accepted a contradictory closed-modal target condition'
     }
-
-    $proxyEditor = Invoke-AgenTerm @(
-        'ui-action', 'open-proxy-editor', '-t', $id
-    ) | ConvertFrom-Json
-    $proxyWait = Invoke-AgenTerm @(
-        'wait-ui', '--modal-kind', 'proxy-editor', '--modal-target', $id,
-        '--timeout-ms', '1000'
-    ) | ConvertFrom-Json
-    if ($proxyEditor.modal.kind -ne 'proxy-editor' -or
-        $proxyWait.modal.window_id -ne $id) {
-        throw 'wait-ui did not match the targeted proxy editor'
-    }
-    Invoke-AgenTerm @('ui-action', 'cancel') | Out-Null
-    Invoke-AgenTerm @(
-        'wait-ui', '--modal-kind', 'closed', '--timeout-ms', '1000'
-    ) | Out-Null
     $inputBytesBefore = [int](Invoke-AgenTerm @(
         'list-panes', '-t', $id, '-F', '#{pane_input_bytes}'
     ))
@@ -782,7 +927,9 @@ try {
     $inputBytesAfter = [int](Invoke-AgenTerm @(
         'list-panes', '-t', $id, '-F', '#{pane_input_bytes}'
     ))
-    $snapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $snapshot = Invoke-AgenTerm @(
+        'ui-action', 'select-tab', '-t', $id
+    ) | ConvertFrom-Json
     $cmdTab = $snapshot.tabs | Where-Object id -eq $id
     if ($inputBytesAfter -ne $inputBytesBefore -or
         $cmdTab.working_context.cwd.source -ne 'user_requested' -or
@@ -837,7 +984,9 @@ try {
     Invoke-AgenTerm @(
         'wait-pane', '-t', $powershellId, '--submit-complete', '--timeout-ms', '10000'
     ) | Out-Null
-    $snapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $snapshot = Invoke-AgenTerm @(
+        'ui-action', 'select-tab', '-t', $powershellId
+    ) | ConvertFrom-Json
     $powershellTab = $snapshot.tabs | Where-Object id -eq $powershellId
     if ($powershellTab.working_context.cwd.path -ne 'C:\osc valid' -or
         $powershellTab.working_context.cwd.source -ne 'osc7') {
@@ -881,7 +1030,9 @@ try {
         'wait-pane', '-t', $id, '--contains', "$scrollPrefix`_80",
         '--timeout-ms', '10000'
     ) | Out-Null
-    $snapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $snapshot = Invoke-AgenTerm @(
+        'ui-action', 'select-tab', '-t', $id
+    ) | ConvertFrom-Json
     $scrollbar = $snapshot.layout.terminal.scrollbar
     $tab = $snapshot.tabs | Where-Object id -eq $id
     if ($null -eq $scrollbar -or $scrollbar.max_offset -le 0 -or
@@ -889,14 +1040,13 @@ try {
         throw 'ui-snapshot did not expose a usable terminal scrollbar'
     }
     $window = @(
-        Get-Process agenterm -ErrorAction SilentlyContinue |
-            Where-Object MainWindowTitle -eq $snapshot.window.title |
-            Select-Object -First 1 -ExpandProperty MainWindowHandle
+        Get-Process -Id ([int]$snapshot.client_pid) -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty MainWindowHandle
     )
-    if ($window.Count -gt 0) {
-        $window = [IntPtr]$window[0]
+    $window = if ($window.Count -gt 0) {
+        [IntPtr]$window[0]
     } else {
-        $window = [IntPtr]::Zero
+        [IntPtr]::Zero
     }
     if ($window -eq [IntPtr]::Zero) {
         throw 'could not resolve the public AgenTerm window for mouse regression'
@@ -917,33 +1067,19 @@ try {
         throw '--no-activate existing-server handoff lost the visible window'
     }
 
-    $mainWorkspaceForNoActivate = $env:AGENTERM_WORKSPACE_PATH
-    $mainSettingsForNoActivate = $env:AGENTERM_SETTINGS_PATH
-    try {
-        $env:AGENTERM_WORKSPACE_PATH = $noActivateWorkspaceFile
-        $env:AGENTERM_SETTINGS_PATH = $noActivateSettingsFile
-        $newNoActivate = Start-Process -FilePath $GuiExe -ArgumentList @(
-            '--address', $noActivateAddress, '--not-foreground'
-        ) -PassThru
-    }
-    finally {
-        $env:AGENTERM_WORKSPACE_PATH = $mainWorkspaceForNoActivate
-        $env:AGENTERM_SETTINGS_PATH = $mainSettingsForNoActivate
-    }
-    $newNoActivateWait = [Diagnostics.Stopwatch]::StartNew()
-    $newNoActivateSnapshot = $null
-    do {
-        try {
-            $newNoActivateSnapshot = Invoke-AgenTermAt -Address $noActivateAddress `
-                -CommandArgs @('ui-snapshot') | ConvertFrom-Json
-        }
-        catch {
-            if ($newNoActivateWait.ElapsedMilliseconds -ge 5000) { throw }
-        }
-    } while ($null -eq $newNoActivateSnapshot)
+    $noActivateAddress = New-UxLoopbackAddress
+    $newNoActivateLaunch = Start-IsolatedGuiClient `
+        -Address $noActivateAddress `
+        -WorkspacePath $noActivateWorkspaceFile `
+        -SettingsPath $noActivateSettingsFile `
+        -NoActivateFlag '--not-foreground'
+    $newNoActivate = $newNoActivateLaunch.Process
+    $newNoActivateSnapshot = $newNoActivateLaunch.Snapshot
     $newNoActivate.Refresh()
     $newNoActivateWindow = $newNoActivate.MainWindowHandle
     if ($newNoActivateWindow -eq [IntPtr]::Zero -or
+        $newNoActivateSnapshot.projection -ne 'replaceable_ui_client' -or
+        $newNoActivateSnapshot.client_pid -ne $newNoActivate.Id -or
         [AgenTermNativeTest]::ForegroundWindow() -ne $foregroundBeforeNoActivate -or
         ($foregroundBeforeNoActivate -ne [IntPtr]::Zero -and
             -not [AgenTermNativeTest]::IsAbove(
@@ -961,7 +1097,9 @@ try {
     Write-Evidence 'ux.no-activate-launch'
 
     Write-Host 'STEP adaptive Tabs controls, resizing, and shared layout'
-    $tabsBaseline = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $tabsBaseline = Invoke-AgenTerm @(
+        'ui-action', 'select-tab', '-t', $id
+    ) | ConvertFrom-Json
     $baselineCols = [int]$tabsBaseline.layout.terminal.cols
     if ($tabsBaseline.layout.sidebar.configured_width -ne 250 -or
         $tabsBaseline.layout.sidebar.resize_grip.width -ne 6 -or
@@ -971,7 +1109,9 @@ try {
     }
 
     [AgenTermNativeTest]::ClickButton($window, 'Tabs')
-    $tabsHidden = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $tabsHidden = Invoke-AgenTerm @(
+        'ui-action', 'select-tab', '-t', $id
+    ) | ConvertFrom-Json
     if ($tabsHidden.layout.sidebar.visible -or
         $tabsHidden.layout.sidebar.effective_width -ne 0 -or
         $tabsHidden.layout.terminal.x -ne 0 -or
@@ -984,10 +1124,12 @@ try {
     $recovery = $tabsHidden.layout.status_bar.tabs_recovery
     [AgenTermNativeTest]::Click(
         $window,
-        [int]($recovery.x + ($recovery.width / 2)),
-        [int]($recovery.y + ($recovery.height / 2))
+        [int]($recovery.left + ($recovery.width / 2)),
+        [int]($recovery.top + ($recovery.height / 2))
     )
-    $tabsRecovered = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $tabsRecovered = Invoke-AgenTerm @(
+        'ui-action', 'select-tab', '-t', $id
+    ) | ConvertFrom-Json
     if (-not $tabsRecovered.layout.sidebar.visible -or
         $tabsRecovered.layout.sidebar.effective_width -ne 250 -or
         $null -ne $tabsRecovered.layout.status_bar.tabs_recovery) {
@@ -995,13 +1137,17 @@ try {
     }
 
     [AgenTermNativeTest]::SystemCommand($window, 0x1f20)
-    $systemHidden = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $systemHidden = Invoke-AgenTerm @(
+        'ui-action', 'select-tab', '-t', $id
+    ) | ConvertFrom-Json
     if ($systemHidden.layout.sidebar.visible -or
         $systemHidden.system_menu.toggle_tabs.checked) {
         throw 'Toggle Tabs system-menu command did not hide Tabs'
     }
     [AgenTermNativeTest]::SystemCommand($window, 0x1f20)
-    $systemShown = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $systemShown = Invoke-AgenTerm @(
+        'ui-action', 'select-tab', '-t', $id
+    ) | ConvertFrom-Json
     if (-not $systemShown.layout.sidebar.visible -or
         -not $systemShown.system_menu.toggle_tabs.checked) {
         throw 'Toggle Tabs system-menu command did not restore checked state'
@@ -1010,16 +1156,18 @@ try {
     $grip = $systemShown.layout.sidebar.resize_grip
     [AgenTermNativeTest]::Drag(
         $window,
-        [int]($grip.x + ($grip.width / 2)),
-        [int]($grip.y + 80),
+        [int]($grip.left + ($grip.width / 2)),
+        [int]($grip.top + 80),
         330,
-        [int]($grip.y + 80)
+        [int]($grip.top + 80)
     )
-    $tabsResized = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $tabsResized = Invoke-AgenTerm @(
+        'ui-action', 'select-tab', '-t', $id
+    ) | ConvertFrom-Json
     if ($tabsResized.layout.sidebar.configured_width -ne 330 -or
         $tabsResized.layout.sidebar.effective_width -ne 330 -or
         $tabsResized.layout.terminal.cols -ge $baselineCols -or
-        $tabsResized.layout.terminal.scrollbar.track.x -ne
+        $tabsResized.layout.terminal.scrollbar.track.left -ne
             ($tabsResized.layout.terminal.x +
                 $tabsResized.layout.terminal.width - 12)) {
         throw (
@@ -1030,10 +1178,12 @@ try {
     }
     [AgenTermNativeTest]::DoubleClick(
         $window,
-        [int]($tabsResized.layout.sidebar.resize_grip.x + 2),
-        [int]($tabsResized.layout.sidebar.resize_grip.y + 80)
+        [int]($tabsResized.layout.sidebar.resize_grip.left + 2),
+        [int]($tabsResized.layout.sidebar.resize_grip.top + 80)
     )
-    $tabsReset = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $tabsReset = Invoke-AgenTerm @(
+        'ui-action', 'select-tab', '-t', $id
+    ) | ConvertFrom-Json
     if ($tabsReset.layout.sidebar.configured_width -ne 250 -or
         $tabsReset.layout.sidebar.effective_width -ne 250) {
         throw 'double-clicking the Tabs grip did not restore the 250px default'
@@ -1046,7 +1196,10 @@ try {
     [AgenTermNativeTest]::SetEditSelection($window, 16, 16)
     $composerBefore = [AgenTermNativeTest]::EditSelection($window)
     [AgenTermNativeTest]::ControlArrow($window, 0x25)
-    $composerSnapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $composerSnapshot = Invoke-AgenTerm @(
+        'wait-ui', '--active', $id, '--focus', 'composer',
+        '--timeout-ms', '1000'
+    ) | ConvertFrom-Json
     $composerAfter = [AgenTermNativeTest]::EditSelection($window)
     if ($composerSnapshot.focus.surface -ne 'composer' -or
         $composerAfter[0] -ge $composerBefore[0]) {
@@ -1084,26 +1237,40 @@ try {
     [AgenTermNativeTest]::SetEditSelection($window, 7, 7)
     $settingsBefore = [AgenTermNativeTest]::EditSelection($window)
     [AgenTermNativeTest]::ControlArrow($window, 0x25)
-    $settingsAfterSnapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $settingsAfterSnapshot = Invoke-AgenTerm @(
+        'wait-ui', '--active', $id, '--focus', 'settings',
+        '--timeout-ms', '1000'
+    ) | ConvertFrom-Json
     $settingsAfter = [AgenTermNativeTest]::EditSelection($window)
     if ($settingsAfterSnapshot.focus.surface -ne 'settings' -or
         $settingsAfter[0] -ge $settingsBefore[0]) {
-        throw 'Settings Ctrl+Left was stolen instead of reaching the native Edit control'
+        throw (
+            'Settings Ctrl+Left was stolen instead of reaching the native Edit control: ' +
+            "focus=$($settingsAfterSnapshot.focus.surface) " +
+            "before=$($settingsBefore -join ',') after=$($settingsAfter -join ',')"
+        )
     }
     Invoke-AgenTerm @('ui-action', 'cancel') | Out-Null
 
-    $noteSnapshot = Invoke-AgenTerm @('ui-action', 'edit-tab', '-t', $id) | ConvertFrom-Json
-    if ($noteSnapshot.focus.surface -ne 'note-editor') {
-        throw 'Tab note editor did not expose its native Edit focus'
+    $tabEditorSnapshot = Invoke-AgenTerm @(
+        'ui-action', 'edit-tab', '-t', $id
+    ) | ConvertFrom-Json
+    if ($tabEditorSnapshot.focus.surface -ne 'tab-editor' -or
+        $tabEditorSnapshot.tab_editor.target -ne $id -or
+        $tabEditorSnapshot.tab_editor.focus -ne 'name') {
+        throw 'Inline tab editor did not expose its native name Edit focus'
     }
     [AgenTermNativeTest]::SetEditSelection($window, 7, 7)
-    $noteBefore = [AgenTermNativeTest]::EditSelection($window)
+    $tabEditorBefore = [AgenTermNativeTest]::EditSelection($window)
     [AgenTermNativeTest]::ControlArrow($window, 0x25)
-    $noteAfterSnapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
-    $noteAfter = [AgenTermNativeTest]::EditSelection($window)
-    if ($noteAfterSnapshot.focus.surface -ne 'note-editor' -or
-        $noteAfter[0] -ge $noteBefore[0]) {
-        throw 'Note editor Ctrl+Left was stolen instead of reaching the native Edit control'
+    $tabEditorAfterSnapshot = Invoke-AgenTerm @(
+        'wait-ui', '--active', $id, '--focus', 'tab-editor',
+        '--timeout-ms', '1000'
+    ) | ConvertFrom-Json
+    $tabEditorAfter = [AgenTermNativeTest]::EditSelection($window)
+    if ($tabEditorAfterSnapshot.tab_editor.focus -ne 'name' -or
+        $tabEditorAfter[0] -ge $tabEditorBefore[0]) {
+        throw 'Tab editor Ctrl+Left was stolen instead of reaching the native name Edit control'
     }
     Invoke-AgenTerm @('ui-action', 'cancel') | Out-Null
     Write-Evidence 'ux.keyboard-surface-navigation'
@@ -1118,7 +1285,9 @@ try {
         [int]$snapshot.layout.terminal.y + 10,
         120
     )
-    $snapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $snapshot = Invoke-AgenTerm @(
+        'wait-ui', '--active', $id, '--focus', 'tabs', '--timeout-ms', '1000'
+    ) | ConvertFrom-Json
     $tab = $snapshot.tabs | Where-Object id -eq $id
     if ($tab.scrollback_offset -ne 3) {
         throw "one mouse-wheel notch scrolled $($tab.scrollback_offset) rows instead of 3"
@@ -1126,12 +1295,14 @@ try {
     $scrollbar = $snapshot.layout.terminal.scrollbar
     [AgenTermNativeTest]::Drag(
         $window,
-        [int]($scrollbar.thumb.x + ($scrollbar.thumb.width / 2)),
-        [int]($scrollbar.thumb.y + ($scrollbar.thumb.height / 2)),
-        [int]($scrollbar.thumb.x + ($scrollbar.thumb.width / 2)),
-        [int]($scrollbar.track.y + $scrollbar.track.height - 1)
+        [int]($scrollbar.thumb.left + ($scrollbar.thumb.width / 2)),
+        [int]($scrollbar.thumb.top + ($scrollbar.thumb.height / 2)),
+        [int]($scrollbar.thumb.left + ($scrollbar.thumb.width / 2)),
+        [int]($scrollbar.track.top + $scrollbar.track.height - 1)
     )
-    $snapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $snapshot = Invoke-AgenTerm @(
+        'wait-ui', '--active', $id, '--focus', 'tabs', '--timeout-ms', '1000'
+    ) | ConvertFrom-Json
     $tab = $snapshot.tabs | Where-Object id -eq $id
     if ($tab.scrollback_offset -ne 0) {
         throw 'dragging the terminal scrollbar to the bottom did not restore live output'
@@ -1155,7 +1326,9 @@ try {
     if ($selectionRow -lt 0) {
         throw 'could not locate the selection token in the visible terminal viewport'
     }
-    $snapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $snapshot = Invoke-AgenTerm @(
+        'wait-ui', '--active', $id, '--focus', 'tabs', '--timeout-ms', '1000'
+    ) | ConvertFrom-Json
     $terminal = $snapshot.layout.terminal
     $cellWidth = [int]([Math]::Floor($terminal.viewport_width / $terminal.cols))
     $cellHeight = [int]([Math]::Floor($terminal.height / $terminal.rows))
@@ -1167,7 +1340,9 @@ try {
     $endX = [int]$terminal.x + ($endColumn * $cellWidth) + [Math]::Max(1, $cellWidth - 2)
     $selectionY = [int]$terminal.y + ($selectionRow * $cellHeight) + [Math]::Max(1, [int]($cellHeight / 2))
     [AgenTermNativeTest]::Drag($window, $startX, $selectionY, $endX, $selectionY)
-    $snapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $snapshot = Invoke-AgenTerm @(
+        'wait-ui', '--active', $id, '--focus', 'terminal', '--timeout-ms', '1000'
+    ) | ConvertFrom-Json
     $tab = $snapshot.tabs | Where-Object id -eq $id
     if ($null -eq $tab.selection -or $tab.selection.dragging -or
         $tab.selection.start.row -ne $selectionRow -or
@@ -1222,7 +1397,10 @@ try {
             "`nPaste failure capture:`n$pasteFailureCapture"
         )
     }
-    $snapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $snapshot = Invoke-AgenTerm @(
+        'wait-ui', '--active', $id, '--focus', 'terminal',
+        '--timeout-ms', '1000'
+    ) | ConvertFrom-Json
     $tab = $snapshot.tabs | Where-Object id -eq $id
     if ($null -ne $tab.selection -or
         $snapshot.feedback.message -notmatch '^Pasted \d+ characters into @\d+$') {
@@ -1367,11 +1545,14 @@ try {
         '--kind', 'window.visibility',
         '--timeout-ms', '5000'
     ) | ConvertFrom-Json
-    $reattached = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $reattached = Invoke-AgenTerm @(
+        'wait-ui', '--window-state', 'restored', '--timeout-ms', '5000'
+    ) | ConvertFrom-Json
     $reattachedPane = Get-PaneSnapshot -Target $id
     $reattachedServer = Get-IsolatedServer
     if ($reattachEvent.payload.visible -ne $true -or
-        $reattachEvent.payload.reason -ne 'launcher-no-activate' -or
+        $reattachEvent.payload.reason -ne 'lease-attached' -or
+        $reattached.projection -ne 'replaceable_ui_client' -or
         -not $reattached.window.visible -or $reattached.window.detached -or
         -not $reattached.layout.composer.visible -or
         -not $reattached.layout.composer.input_visible -or
@@ -1391,10 +1572,11 @@ try {
 
     Write-Host 'STEP detach cancels inline tab editing without touching Composer'
     $composerBeforeTabEdit = Invoke-AgenTerm @('show-composer', '-t', $id)
-    $noteEditor = Invoke-AgenTerm @('ui-action', 'edit-tab', '-t', $id) | ConvertFrom-Json
-    if (-not $noteEditor.layout.composer.visible -or
-        $noteEditor.focus.surface -ne 'note-editor' -or
-        $noteEditor.tab_editor.target -ne $id) {
+    $tabEditor = Invoke-AgenTerm @('ui-action', 'edit-tab', '-t', $id) |
+        ConvertFrom-Json
+    if (-not $tabEditor.layout.composer.visible -or
+        $tabEditor.focus.surface -ne 'tab-editor' -or
+        $tabEditor.tab_editor.target -ne $id) {
         throw 'tab editor did not start independently over its target row'
     }
     $noteDetachStart = Invoke-AgenTerm @('ui-action', 'close-window') | ConvertFrom-Json
@@ -1413,29 +1595,24 @@ try {
         '--kind', 'window.visibility',
         '--timeout-ms', '5000'
     ) | Out-Null
-    $noteReattached = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $noteReattached = Invoke-AgenTerm @(
+        'wait-ui', '--window-state', 'restored', '--timeout-ms', '5000'
+    ) | ConvertFrom-Json
     $composerAfterTabEdit = Invoke-AgenTerm @('show-composer', '-t', $id)
     if (-not $noteReattached.layout.composer.visible -or
         -not $noteReattached.layout.composer.input_visible -or
         -not $noteReattached.layout.composer.send_visible -or
         $null -ne $noteReattached.tab_editor -or
-        $noteReattached.focus.surface -eq 'note-editor' -or
+        $noteReattached.focus.surface -eq 'tab-editor' -or
         $composerAfterTabEdit -ne $composerBeforeTabEdit) {
         throw 'detach did not cancel inline editing while preserving the Composer draft'
     }
 
     Write-Host 'STEP stop server and exit creates a fresh isolated runtime'
-    $mainWorkspace = $env:AGENTERM_WORKSPACE_PATH
-    $mainSettings = $env:AGENTERM_SETTINGS_PATH
-    try {
-        $env:AGENTERM_WORKSPACE_PATH = $stopWorkspaceFile
-        $env:AGENTERM_SETTINGS_PATH = $stopSettingsFile
-        Invoke-AgenTermAt -Address $stopAddress -CommandArgs @('start-server') | Out-Null
-    }
-    finally {
-        $env:AGENTERM_WORKSPACE_PATH = $mainWorkspace
-        $env:AGENTERM_SETTINGS_PATH = $mainSettings
-    }
+    $stopAddress = New-UxLoopbackAddress
+    $stopLaunch = Start-IsolatedGuiClient -Address $stopAddress `
+        -WorkspacePath $stopWorkspaceFile -SettingsPath $stopSettingsFile
+    $stopGui = $stopLaunch.Process
     $stopName = "stop-runtime-$PID"
     Invoke-AgenTermAt -Address $stopAddress `
         -CommandArgs @('new-window', '-d', '-n', $stopName) | Out-Null
@@ -1464,19 +1641,13 @@ try {
     if ($null -ne $stoppingServer) {
         $stoppingServer | Wait-Process -Timeout 10 -ErrorAction Stop
     }
+    $stopGui | Wait-Process -Timeout 10 -ErrorAction Stop
     if (Get-Process -Id ([int]$stopServerBefore.pid) -ErrorAction SilentlyContinue) {
         throw 'stop-server-and-exit left the isolated server process running'
     }
 
-    try {
-        $env:AGENTERM_WORKSPACE_PATH = $stopWorkspaceFile
-        $env:AGENTERM_SETTINGS_PATH = $stopSettingsFile
-        Invoke-AgenTermAt -Address $stopAddress -CommandArgs @('start-server') | Out-Null
-    }
-    finally {
-        $env:AGENTERM_WORKSPACE_PATH = $mainWorkspace
-        $env:AGENTERM_SETTINGS_PATH = $mainSettings
-    }
+    $stopRestart = Start-IsolatedGuiClient -Address $stopAddress `
+        -WorkspacePath $stopWorkspaceFile -SettingsPath $stopSettingsFile
     Invoke-AgenTermAt -Address $stopAddress -CommandArgs @(
         'wait-ui', '-t', $stopTabBefore.id, '--tab-state', 'running', '--timeout-ms', '5000'
     ) | Out-Null
@@ -1543,24 +1714,23 @@ try {
         '--path', 'C:\restart-request-must-not-persist'
     ) | Out-Null
     Invoke-AgenTerm @('select-window', '-t', $persistName) | Out-Null
+    Register-IsolatedGuiClient -Address $env:AGENTERM_IPC_ADDRESS
     Invoke-AgenTerm @('shutdown') | Out-Null
     for ($attempt = 0; $attempt -lt 50; $attempt++) {
         if (-not (Test-AgenTermReady)) { break }
         Start-Sleep -Milliseconds 50
     }
-    Start-Process -FilePath $GuiExe -ArgumentList @('--no-activate') | Out-Null
-    $ready = $false
-    for ($attempt = 0; $attempt -lt 100; $attempt++) {
-        if (Test-AgenTermReady) {
-            $ready = $true
-            break
-        }
-        Start-Sleep -Milliseconds 50
+    Stop-IsolatedGuiClients
+    foreach ($guiLog in $ownedGuiLogs) {
+        Remove-Item -LiteralPath $guiLog -Force -ErrorAction SilentlyContinue
     }
-    if (-not $ready) {
-        throw 'Restored AgenTerm server did not become ready'
-    }
-    $snapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $restartLaunch = Start-IsolatedGuiClient `
+        -Address $env:AGENTERM_IPC_ADDRESS `
+        -WorkspacePath $workspaceFile -SettingsPath $settingsFile
+    $snapshot = Invoke-AgenTerm @(
+        'wait-ui', '-t', $persistName, '--tab-state', 'running',
+        '--window-state', 'restored', '--timeout-ms', '5000'
+    ) | ConvertFrom-Json
     $restored = $snapshot.tabs | Where-Object name -eq $persistName
     if ($null -eq $restored -or $restored.note -ne 'restored note' -or
         -not $restored.draft -or -not $restored.active -or
@@ -1578,6 +1748,9 @@ try {
 }
 finally {
     Remove-Item -LiteralPath $draftFile -ErrorAction SilentlyContinue
+    Register-IsolatedGuiClient -Address $env:AGENTERM_IPC_ADDRESS
+    Register-IsolatedGuiClient -Address $stopAddress
+    Register-IsolatedGuiClient -Address $noActivateAddress
     try {
         & $Exe --address $stopAddress kill-server 2>$null | Out-Null
     }
@@ -1595,6 +1768,10 @@ finally {
     }
     catch {
         # Cleanup is best-effort when the main journey already stopped the server.
+    }
+    Stop-IsolatedGuiClients
+    foreach ($guiLog in $ownedGuiLogs) {
+        Remove-Item -LiteralPath $guiLog -Force -ErrorAction SilentlyContinue
     }
     Remove-Item -LiteralPath $workspaceFile -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $settingsFile -ErrorAction SilentlyContinue

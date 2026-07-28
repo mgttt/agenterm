@@ -19,7 +19,9 @@ use crate::{
     event_journal::{EventJournal, EventKind},
     instances::{InstanceRegistration, instance_process_is_alive, register_instance},
     ipc_transport::{IpcEnvelope, start_ipc_server},
-    operations::validate_operation_args,
+    operations::{
+        UI_TABS_HIDE, UI_TABS_SET_WIDTH, UI_TABS_SHOW, UI_TABS_TOGGLE, validate_operation_args,
+    },
     protocol::{IpcRequest, IpcResponse},
     pty::TerminalSize,
     terminal_observation::TerminalProcessState,
@@ -825,6 +827,7 @@ impl ServerState {
                         false,
                     );
                 };
+                let completed_command = self.ui_client_commands.in_flight(command_id).cloned();
                 let mut response = match self
                     .ui_client_commands
                     .complete(command_id, response_json.to_owned())
@@ -839,6 +842,11 @@ impl ServerState {
                         );
                     }
                 };
+                if response.ok
+                    && let Some(command) = completed_command.as_ref()
+                {
+                    self.commit_client_ui_action_event(command, &response);
+                }
                 if has_option(args, "--detach") {
                     let record = match self.ui_lease.detach(lease_id, client_pid) {
                         Ok(record) => record,
@@ -917,6 +925,67 @@ impl ServerState {
                 "validation",
                 false,
             ),
+        }
+    }
+
+    fn commit_client_ui_action_event(
+        &mut self,
+        command: &crate::ui_command::UiClientCommand,
+        response: &IpcResponse,
+    ) {
+        let Some(action) = command.args.get(1).map(String::as_str) else {
+            return;
+        };
+        let previous = self
+            .ui_client_snapshot
+            .as_ref()
+            .and_then(|snapshot| serde_json::from_str::<serde_json::Value>(&snapshot.json).ok());
+        let Ok(current) = serde_json::from_str::<serde_json::Value>(&response.output) else {
+            return;
+        };
+        match action {
+            "tabs-show" | "tabs-hide" | "tabs-toggle" | "toggle-tabs" => {
+                let visible = current["layout"]["sidebar"]["visible"].as_bool();
+                let previous_visible = previous
+                    .as_ref()
+                    .and_then(|value| value["layout"]["sidebar"]["visible"].as_bool());
+                if visible.is_some() && visible != previous_visible {
+                    let operation_id = match action {
+                        "tabs-show" => UI_TABS_SHOW,
+                        "tabs-hide" => UI_TABS_HIDE,
+                        _ => UI_TABS_TOGGLE,
+                    };
+                    self.event_journal.commit(
+                        EventKind::LayoutTabsVisibility,
+                        None,
+                        serde_json::json!({
+                            "visible": visible,
+                            "cause": "semantic",
+                            "operation_id": operation_id,
+                        }),
+                    );
+                }
+            }
+            "tabs-set-width" => {
+                let width = current["layout"]["sidebar"]["configured_width"].as_u64();
+                let previous_width = previous
+                    .as_ref()
+                    .and_then(|value| value["layout"]["sidebar"]["configured_width"].as_u64());
+                if width.is_some() && width != previous_width {
+                    self.event_journal.commit(
+                        EventKind::LayoutTabsWidth,
+                        None,
+                        serde_json::json!({
+                            "configured_width": width,
+                            "effective_width":
+                                current["layout"]["sidebar"]["effective_width"],
+                            "cause": "semantic",
+                            "operation_id": UI_TABS_SET_WIDTH,
+                        }),
+                    );
+                }
+            }
+            _ => {}
         }
     }
 
@@ -1588,14 +1657,20 @@ impl ControlHost for ServerState {
     }
 
     fn ui_snapshot_json(&mut self) -> Option<String> {
+        let position = self.event_journal.position();
         if let Some(snapshot) = &self.ui_client_snapshot
             && self.ui_lease.active().is_some_and(|lease| {
                 lease.lease_id == snapshot.lease_id && lease.client_pid == snapshot.client_pid
             })
+            && serde_json::from_str::<serde_json::Value>(&snapshot.json)
+                .ok()
+                .is_some_and(|value| {
+                    value["event_position"]["epoch"].as_str() == Some(position.epoch.as_str())
+                        && value["event_position"]["sequence"].as_u64() == Some(position.sequence)
+                })
         {
             return Some(snapshot.json.clone());
         }
-        let position = self.event_journal.position();
         Some(
             serde_json::to_string_pretty(&serde_json::json!({
                 "schema_version": 1,
@@ -1631,6 +1706,7 @@ impl ControlHost for ServerState {
                     "note": tab.note,
                     "active": self.active == Some(tab.id),
                     "pid": tab.process_id,
+                    "state": if tab.exited.is_some() { "dead" } else { "running" },
                     "dead": tab.exited.is_some(),
                     "exit_code": tab.exited,
                     "rows": tab.last_size.0,

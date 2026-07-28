@@ -3222,7 +3222,7 @@ fn print_mux_commands() {
 }
 
 pub(crate) fn protocol_info_json(identity_scope: &str) -> String {
-    protocol_info_json_with_ui_bridge(identity_scope, ui_bridge::current_facts())
+    protocol_info_json_with_ui_bridge(identity_scope, ui_bridge::headless_server_facts())
 }
 
 pub(crate) fn protocol_info_json_with_ui_bridge(

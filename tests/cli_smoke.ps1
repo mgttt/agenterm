@@ -181,13 +181,14 @@ try {
     $protocol = Invoke-AgenTerm @('protocol-info') | ConvertFrom-Json
     $operationCatalog = $protocol.operation_catalog
     if ($protocol.ui_bridge.schema_version -ne 7 -or
-        $protocol.ui_bridge.ownership_mode -ne 'combined_gui_server' -or
-        $protocol.ui_bridge.replaceable_ui -or
-        $protocol.ui_bridge.interactive_lease -or
+        $protocol.ui_bridge.ownership_mode -ne 'split_server_client' -or
+        -not $protocol.ui_bridge.replaceable_ui -or
+        -not $protocol.ui_bridge.interactive_lease -or
         $protocol.ui_bridge.target_server_executable -ne 'agenterm-server.exe' -or
         -not $protocol.ui_bridge.bootstrap_snapshot -or
         -not $protocol.ui_bridge.ordered_deltas -or
-        $protocol.ui_bridge.reconnect -or
+        -not $protocol.ui_bridge.reconnect -or
+        -not $protocol.ui_bridge.rollback_proven -or
         $protocol.ui_bridge.contract_schemas.hello -ne 1 -or
         $protocol.ui_bridge.contract_schemas.bootstrap -ne 2 -or
         $protocol.ui_bridge.contract_schemas.screen -ne 2 -or
