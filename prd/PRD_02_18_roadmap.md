@@ -364,12 +364,12 @@ track remains planned, but every declared dependency must still pass.
     Rust/Node.js/Bun analogues; every entry separates catalog, surface and Rust
     paths and records semantic differences, then generates the comparison
     matrix, manual index and implementation coverage from the same source
-  - [~] make runtime/module/task identity package-ready through stable
+  - [x] make runtime/module/task identity package-ready through stable
     version, provenance hooks, requirements, capabilities and entry points,
     without adding remote resolution, installation, signature policy or a
-    public registry to the runtime; task schema v2 now ships API/capability
-    requirements and fail-closed compatibility, while optional provenance
-    hooks remain open
+    public registry to the runtime; task schema v2 ships runtime/API/catalog
+    identity, API/capability requirements, fail-closed compatibility, and
+    bounded non-trust origin/provenance hooks
   - [ ] systematically expose every public typed Fleet operation or a stable
     degraded reason; mutations return request identity, receipt, correlated
     event and verified post-state while pure/observe behavior remains stable

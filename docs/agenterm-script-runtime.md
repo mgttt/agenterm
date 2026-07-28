@@ -990,6 +990,11 @@ Schema v2 is:
         "runtime.project.named-task",
         "std.process.command"
       ]
+    },
+    "origin": {"kind": "repository", "id": "agenterm"},
+    "provenance": {
+      "producer": "agenterm-example",
+      "revision": "daily-tools-1"
     }
   },
   "tasks": [
@@ -1028,6 +1033,19 @@ and task readiness without evaluating source. `task check` and `task run`
 fail closed with `task_project_incompatible` before a task can execute.
 Malformed ranges and duplicate/invalid capability IDs are manifest errors
 rather than compatibility results.
+
+The catalog also returns `runtime_version`, `script_api_version`, and
+`script_catalog_schema_version`. Optional `origin` and `provenance` objects are
+identity hooks only:
+
+- `origin.kind` is `local` or `repository`, and `origin.id` is a bounded stable
+  identifier;
+- `provenance.producer` and `provenance.revision` are bounded stable
+  identifiers;
+- these fields are not URLs, dependency locators, hashes, signatures, trust
+  decisions, or proof that a source was reviewed;
+- download, file inventory, content hash, signature, dependency and install
+  metadata belong to a future package manifest and package manager.
 
 ## 15. Discovery and generated manuals
 

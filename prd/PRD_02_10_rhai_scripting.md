@@ -327,7 +327,7 @@ and it is not positioned as a restricted security plugin.
 - [ ] `script check` validates imports, task entries, API names, profiles,
   signatures, versions, static limits, and unavailable/degraded calls without
   executing user code or requiring a GUI.
-- [~] runtime, module and task identities expose version, origin/provenance
+- [x] runtime, module and task identities expose version, origin/provenance
   hooks, required AgenTerm API/capabilities and stable entry-point metadata so
   future local package tooling can inspect them without executing source.
   This is a package-ready contract, not a registry, downloader, installer,
@@ -340,8 +340,10 @@ and it is not positioned as a restricted security plugin.
     capability IDs, reports compatibility through list/show, and makes
     check/run reject unknown, unavailable, or version-incompatible
     requirements before source execution.
-  - [ ] optional origin/provenance hooks remain to complete the package-ready
-    identity contract.
+  - [x] optional bounded `local|repository` origin ID and producer/revision
+    provenance hooks complete the package-ready identity contract without
+    accepting URLs, credentials, hashes, signatures, dependency resolution,
+    installation metadata, or trust claims.
 
 ## Repository dogfood and gradual replacement
 

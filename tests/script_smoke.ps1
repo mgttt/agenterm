@@ -1132,7 +1132,14 @@ try {
     $unknownFieldTask = @($taskCatalog.tasks | Where-Object id -eq 'unknown-field')
     $noExecuteTask = @($taskCatalog.tasks | Where-Object id -eq 'no-execute')
     if ($taskCatalog.schema_version -ne 2 -or
+        [string]::IsNullOrWhiteSpace($taskCatalog.runtime_version) -or
+        $taskCatalog.script_api_version -ne 2 -or
+        $taskCatalog.script_catalog_schema_version -ne 3 -or
         $taskCatalog.project_id -ne 'script-smoke' -or
+        $taskCatalog.origin.kind -ne 'repository' -or
+        $taskCatalog.origin.id -ne 'agenterm' -or
+        $taskCatalog.provenance.producer -ne 'agenterm-test' -or
+        $taskCatalog.provenance.revision -ne 'fixture-1' -or
         -not $taskCatalog.compatible -or
         $null -ne $taskCatalog.compatibility_reason -or
         $taskCatalog.requirements.script_api.minimum -ne 2 -or
@@ -1154,6 +1161,10 @@ try {
         '--manifest', $taskManifest, '--json'
     ) | ConvertFrom-Json
     if ($taskShow.project_version -ne '1.0.0' -or
+        $taskShow.script_api_version -ne 2 -or
+        $taskShow.script_catalog_schema_version -ne 3 -or
+        $taskShow.origin.id -ne 'agenterm' -or
+        $taskShow.provenance.revision -ne 'fixture-1' -or
         -not $taskShow.compatible -or
         $taskShow.requirements.script_api.minimum -ne 2 -or
         @($taskShow.requirements.capabilities) -notcontains
@@ -2013,12 +2024,20 @@ let receipt = fleet.tabs.set_note($fleetTabIdLiteral, $fleetNoteLiteral);
         ) | ConvertFrom-Json
         if ($northStarCatalog.project_id -ne 'agenterm-script-daily-check' -or
             $northStarCatalog.schema_version -ne 2 -or
+            $northStarCatalog.script_api_version -ne 2 -or
+            $northStarCatalog.script_catalog_schema_version -ne 3 -or
+            $northStarCatalog.origin.kind -ne 'repository' -or
+            $northStarCatalog.origin.id -ne 'agenterm' -or
+            $northStarCatalog.provenance.producer -ne 'agenterm-example' -or
+            $northStarCatalog.provenance.revision -ne 'daily-check-1' -or
             -not $northStarCatalog.compatible -or
             @($northStarCatalog.requirements.capabilities) -notcontains
                 'rhai.http.start' -or
             @($northStarCatalog.tasks).Count -ne 1 -or
             $northStarCatalog.tasks[0].status -ne 'ready' -or
             -not $northStarShow.compatible -or
+            $northStarShow.origin.id -ne 'agenterm' -or
+            $northStarShow.provenance.revision -ne 'daily-check-1' -or
             $northStarShow.tasks[0].entry -ne 'daily-check.rhai' -or
             $northStarShow.tasks[0].profile -ne 'local') {
             throw 'north-star task list/show lost inspectable manifest facts'

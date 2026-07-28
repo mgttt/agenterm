@@ -29,6 +29,14 @@
         "std.time.duration-from-secs",
         "tabs.set-note"
       ]
+    },
+    "origin": {
+      "kind": "repository",
+      "id": "agenterm"
+    },
+    "provenance": {
+      "producer": "agenterm-example",
+      "revision": "daily-check-1"
     }
   },
   "tasks": [

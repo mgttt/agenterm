@@ -960,6 +960,11 @@ agenterm.tasks.json
         "runtime.project.named-task",
         "std.process.command"
       ]
+    },
+    "origin": {"kind": "repository", "id": "agenterm"},
+    "provenance": {
+      "producer": "agenterm-example",
+      "revision": "daily-tools-1"
     }
   },
   "tasks": [
@@ -1540,6 +1545,7 @@ README 增加一个简短 script task 示例；稳定运行时合同由
   [x] local modules + agenterm.tasks.json
   [x] task list/show/check/run
   [x] schema v2 API/capability requirements + fail-closed compatibility
+  [x] runtime/API/catalog identity + bounded non-trust origin/provenance hooks
 
 提交 6
   [x] rhai::http + independent loopback HTTP

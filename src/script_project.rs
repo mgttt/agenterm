@@ -12,7 +12,9 @@ use rhai::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    script_catalog::{ScriptApiStatus, entries as script_api_entries},
+    script_catalog::{
+        SCRIPT_CATALOG_SCHEMA_VERSION, ScriptApiStatus, entries as script_api_entries,
+    },
     script_protocol::SCRIPT_API_VERSION,
 };
 
@@ -33,6 +35,10 @@ struct RawProject {
     id: String,
     version: String,
     requires: ScriptProjectRequirements,
+    #[serde(default)]
+    origin: Option<ScriptProjectOrigin>,
+    #[serde(default)]
+    provenance: Option<ScriptProjectProvenance>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -47,6 +53,27 @@ pub struct ScriptProjectRequirements {
 pub struct ScriptApiRequirement {
     pub minimum: u32,
     pub maximum: u32,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScriptProjectOrigin {
+    pub kind: ScriptProjectOriginKind,
+    pub id: String,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScriptProjectOriginKind {
+    Local,
+    Repository,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScriptProjectProvenance {
+    pub producer: String,
+    pub revision: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -69,11 +96,18 @@ struct RawTask {
 #[derive(Clone, Debug, Serialize)]
 pub struct ScriptTaskCatalog {
     pub schema_version: u32,
+    pub runtime_version: &'static str,
+    pub script_api_version: u32,
+    pub script_catalog_schema_version: u32,
     pub manifest_path: String,
     pub project_root: String,
     pub project_id: String,
     pub project_version: String,
     pub requirements: ScriptProjectRequirements,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin: Option<ScriptProjectOrigin>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<ScriptProjectProvenance>,
     pub compatible: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub compatibility_reason: Option<String>,
@@ -439,6 +473,8 @@ pub fn load_task_catalog(path: &Path) -> Result<ScriptTaskCatalog, String> {
     }
     validate_identity(&raw.project.id, "task_project_id")?;
     validate_version(&raw.project.version)?;
+    validate_origin(raw.project.origin.as_ref())?;
+    validate_provenance(raw.project.provenance.as_ref())?;
     let (compatible, compatibility_reason) = validate_requirements(&raw.project.requires)?;
     if raw.tasks.len() > 256 {
         return Err("task_manifest_tasks: maximum is 256".to_owned());
@@ -465,11 +501,16 @@ pub fn load_task_catalog(path: &Path) -> Result<ScriptTaskCatalog, String> {
 
     Ok(ScriptTaskCatalog {
         schema_version: SCRIPT_TASK_SCHEMA_VERSION,
+        runtime_version: env!("CARGO_PKG_VERSION"),
+        script_api_version: SCRIPT_API_VERSION,
+        script_catalog_schema_version: SCRIPT_CATALOG_SCHEMA_VERSION,
         manifest_path: manifest_path.display().to_string(),
         project_root: project_root.display().to_string(),
         project_id: raw.project.id,
         project_version: raw.project.version,
         requirements: raw.project.requires,
+        origin: raw.project.origin,
+        provenance: raw.project.provenance,
         compatible,
         compatibility_reason,
         tasks,
@@ -665,6 +706,23 @@ fn validate_capability_id(value: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_origin(origin: Option<&ScriptProjectOrigin>) -> Result<(), String> {
+    if let Some(origin) = origin {
+        validate_identity(&origin.id, "task_project_origin_id")?;
+    }
+    Ok(())
+}
+
+fn validate_provenance(provenance: Option<&ScriptProjectProvenance>) -> Result<(), String> {
+    if let Some(provenance) = provenance {
+        validate_identity(&provenance.producer, "task_project_provenance_producer")?;
+        validate_version(&provenance.revision).map_err(|_| {
+            "task_project_provenance_revision: invalid revision identity".to_owned()
+        })?;
+    }
+    Ok(())
+}
+
 fn validate_description(value: &str) -> Result<(), String> {
     if value.len() > 512 || value.chars().any(char::is_control) {
         return Err("task_description: maximum is 512 non-control UTF-8 characters".to_owned());
@@ -799,7 +857,9 @@ mod tests {
     "requires": {
       "script_api": {"minimum": 2, "maximum": 2},
       "capabilities": ["runtime.project.named-task"]
-    }
+    },
+    "origin": {"kind": "repository", "id": "agenterm"},
+    "provenance": {"producer": "agenterm-test", "revision": "fixture-1"}
   },
   "tasks": [
     {"id": "check", "entry": "scripts/check.rhai", "args": ["default"]},
@@ -817,6 +877,14 @@ mod tests {
         let (root, manifest) = fixture();
         let catalog = load_task_catalog(&manifest).unwrap();
         assert_eq!(catalog.tasks.len(), 3);
+        assert_eq!(catalog.runtime_version, env!("CARGO_PKG_VERSION"));
+        assert_eq!(catalog.script_api_version, SCRIPT_API_VERSION);
+        assert_eq!(
+            catalog.script_catalog_schema_version,
+            SCRIPT_CATALOG_SCHEMA_VERSION
+        );
+        assert!(catalog.origin.is_some());
+        assert!(catalog.provenance.is_some());
         assert_eq!(catalog.tasks[0].status, ScriptTaskStatus::Ready);
         assert_eq!(catalog.tasks[1].status, ScriptTaskStatus::Degraded);
         assert_eq!(catalog.tasks[2].status, ScriptTaskStatus::Degraded);
@@ -851,6 +919,22 @@ mod tests {
             resolve_task(&catalog, "check")
                 .unwrap_err()
                 .starts_with("task_project_incompatible:")
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn provenance_hooks_accept_only_bounded_non_locator_identities() {
+        let (root, manifest) = fixture();
+        let contents = fs::read_to_string(&manifest).unwrap().replace(
+            r#""origin": {"kind": "repository", "id": "agenterm"}"#,
+            r#""origin": {"kind": "repository", "id": "https://token@example"}"#,
+        );
+        fs::write(&manifest, contents).unwrap();
+        assert!(
+            load_task_catalog(&manifest)
+                .unwrap_err()
+                .starts_with("task_project_origin_id:")
         );
         fs::remove_dir_all(root).unwrap();
     }
