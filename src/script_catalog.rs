@@ -20,6 +20,14 @@ pub enum ScriptApiStatus {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
+pub enum ScriptApiStability {
+    Stable,
+    Reserved,
+    Legacy,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum RustMapping {
     Direct,
     Adapted,
@@ -37,6 +45,9 @@ pub struct ScriptApiEntry {
     pub rust_mapping: RustMapping,
     pub semantic_differences: &'static [&'static str],
     pub status: ScriptApiStatus,
+    pub stability: ScriptApiStability,
+    pub designed_on: &'static str,
+    pub since: &'static str,
     pub profiles: &'static [&'static str],
     pub signature: &'static str,
     pub kind: &'static str,
@@ -70,6 +81,9 @@ pub fn entries() -> Vec<ScriptApiEntry> {
         rust_mapping: RustMapping::None,
         semantic_differences: &["output is captured and bounded by the invocation"],
         status: ScriptApiStatus::Shipped,
+        stability: ScriptApiStability::Stable,
+        designed_on: "2026-07-28",
+        since: "script-api-v1",
         profiles: SHIPPED_PROFILES,
         signature: "print(value)",
         kind: "rhai_builtin",
@@ -449,6 +463,9 @@ fn broker_entry(
         } else {
             ScriptApiStatus::Planned
         },
+        stability: ScriptApiStability::Legacy,
+        designed_on: "2026-07-28",
+        since: "script-api-v1",
         profiles: if available {
             OBSERVE_PROFILE
         } else {
@@ -485,6 +502,9 @@ fn planned_entry(
         rust_mapping,
         semantic_differences: &["planned surface; runtime semantics are not frozen"],
         status: ScriptApiStatus::Planned,
+        stability: ScriptApiStability::Reserved,
+        designed_on: "2026-07-28",
+        since: "planned-v0.1.9",
         profiles: LOCAL_PROFILE,
         signature,
         kind: "planned",
@@ -520,6 +540,9 @@ fn shipped_local_entry(
             "errors use stable AgenTerm codes rather than Rust io::Error values",
         ],
         status: ScriptApiStatus::Shipped,
+        stability: ScriptApiStability::Stable,
+        designed_on: "2026-07-28",
+        since: "0.1.9",
         profiles: LOCAL_PROFILE,
         signature,
         kind: "native_function",
@@ -556,8 +579,11 @@ mod tests {
             assert!(!entry.catalog_path.is_empty());
             assert!(!entry.signature.is_empty());
             assert!(!entry.semantic_differences.is_empty());
+            assert_eq!(entry.designed_on, "2026-07-28");
+            assert!(!entry.since.is_empty());
             if entry.status == ScriptApiStatus::Planned {
                 assert!(entry.availability_reason.is_some());
+                assert_eq!(entry.stability, ScriptApiStability::Reserved);
             }
         }
     }
@@ -574,5 +600,20 @@ mod tests {
                 entry.stable_id
             );
         }
+    }
+
+    #[test]
+    fn public_runtime_spec_starts_with_the_english_dated_object_tree() {
+        let specification = include_str!("../docs/agenterm-script-runtime.md");
+        assert!(specification.starts_with("# AgenTerm Script Runtime Specification"));
+        assert!(specification.contains("## 1. Complete public object and interface tree"));
+        assert!(specification.matches("designed 2026-07-28").count() >= 60);
+        assert!(specification.contains("The Rhai surface is the product contract."));
+        assert!(
+            !specification
+                .chars()
+                .any(|character| ('\u{4e00}'..='\u{9fff}').contains(&character)),
+            "the international runtime specification must remain English"
+        );
     }
 }
