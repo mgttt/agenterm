@@ -833,6 +833,18 @@ impl RemoteWindowState {
                     anyhow::bail!("Settings could not be opened");
                 }
             }
+            "settings-theme-dark" => {
+                if !self.settings_open {
+                    anyhow::bail!("Settings is not open");
+                }
+                self.preview_settings_theme(ThemeId::Dark);
+            }
+            "settings-theme-light" => {
+                if !self.settings_open {
+                    anyhow::bail!("Settings is not open");
+                }
+                self.preview_settings_theme(ThemeId::Light);
+            }
             "settings-apply" => {
                 if !self.settings_open {
                     anyhow::bail!("Settings is not open");

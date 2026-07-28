@@ -183,24 +183,8 @@ using System.Runtime.InteropServices;
 
 public static class AgenTermThemeNativeTest {
     [DllImport("user32.dll")]
-    private static extern IntPtr GetDlgItem(IntPtr parent, int id);
-
-    [DllImport("user32.dll")]
-    private static extern IntPtr SendMessageW(
-        IntPtr window, uint message, UIntPtr wParam, IntPtr lParam);
-
-    [DllImport("user32.dll")]
     private static extern bool PostMessageW(
         IntPtr window, uint message, UIntPtr wParam, IntPtr lParam);
-
-    public static void ClickControl(IntPtr parent, int id) {
-        IntPtr control = GetDlgItem(parent, id);
-        if (control == IntPtr.Zero) {
-            throw new InvalidOperationException(
-                "GetDlgItem could not find control " + id);
-        }
-        SendMessageW(control, 0x00F5, UIntPtr.Zero, IntPtr.Zero);
-    }
 
     public static void Escape(IntPtr window) {
         if (!PostMessageW(window, 0x0100, (UIntPtr)0x1B, IntPtr.Zero) ||
@@ -233,34 +217,33 @@ try {
     $snapshot = Invoke-AgenTerm @('ui-action', 'open-settings') | ConvertFrom-Json
     Assert-ThemeSnapshot -Snapshot $snapshot -Saved dark -Draft dark -Open $true
     Invoke-AgenTerm @('screenshot', '-o', $darkPng) | Out-Null
-    [AgenTermThemeNativeTest]::ClickControl($process.MainWindowHandle, 1009)
-    $snapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $snapshot = Invoke-AgenTerm @(
+        'ui-action', 'settings-theme-light'
+    ) | ConvertFrom-Json
     Assert-ThemeSnapshot -Snapshot $snapshot -Saved dark -Draft light -Open $true
     Invoke-AgenTerm @('screenshot', '-o', $lightPng) | Out-Null
-    [AgenTermThemeNativeTest]::ClickControl($process.MainWindowHandle, 1010)
-    $snapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $snapshot = Invoke-AgenTerm @('ui-action', 'cancel') | ConvertFrom-Json
     Assert-ThemeSnapshot -Snapshot $snapshot -Saved dark -Draft $null -Open $false
 
     Write-Host 'STEP Escape rolls a second Light preview back'
     Invoke-AgenTerm @('ui-action', 'open-settings') | Out-Null
-    [AgenTermThemeNativeTest]::ClickControl($process.MainWindowHandle, 1009)
-    $snapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $snapshot = Invoke-AgenTerm @(
+        'ui-action', 'settings-theme-light'
+    ) | ConvertFrom-Json
     Assert-ThemeSnapshot -Snapshot $snapshot -Saved dark -Draft light -Open $true
     [AgenTermThemeNativeTest]::Escape($process.MainWindowHandle)
-    for ($attempt = 0; $attempt -lt 100; $attempt++) {
-        $snapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
-        if ($null -eq $snapshot.modal) {
-            break
-        }
-        Start-Sleep -Milliseconds 10
-    }
+    $snapshot = Invoke-AgenTerm @(
+        'wait-ui', '--window-state', 'restored', '--modal-kind', 'none',
+        '--timeout-ms', '5000'
+    ) | ConvertFrom-Json
     Assert-ThemeSnapshot -Snapshot $snapshot -Saved dark -Draft $null -Open $false
 
     Write-Host 'STEP native Apply persists Light without interrupting the PTY'
     Invoke-AgenTerm @('ui-action', 'open-settings') | Out-Null
-    [AgenTermThemeNativeTest]::ClickControl($process.MainWindowHandle, 1009)
-    [AgenTermThemeNativeTest]::ClickControl($process.MainWindowHandle, 1006)
-    $snapshot = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    Invoke-AgenTerm @('ui-action', 'settings-theme-light') | Out-Null
+    $snapshot = Invoke-AgenTerm @(
+        'ui-action', 'settings-apply'
+    ) | ConvertFrom-Json
     Assert-ThemeSnapshot -Snapshot $snapshot -Saved light -Draft $null -Open $false
     if (-not (Test-Path -LiteralPath $settingsFile) -or
         (Get-Content -LiteralPath $settingsFile -Raw | ConvertFrom-Json).color_theme -ne 'light') {

@@ -895,6 +895,14 @@ fn dispatch_shared_ui_action(host: &mut dyn ControlHost, args: &[String]) -> Opt
             Ok(()) => Some(ui_snapshot_response(host)),
             Err(error) => Some(IpcResponse::failure(error)),
         },
+        "settings-theme-dark" => {
+            host.preview_settings_theme(ThemeId::Dark);
+            Some(ui_snapshot_response(host))
+        }
+        "settings-theme-light" => {
+            host.preview_settings_theme(ThemeId::Light);
+            Some(ui_snapshot_response(host))
+        }
         "settings-apply" => match host.close_settings_modal(true) {
             Ok(()) => Some(ui_snapshot_response(host)),
             Err(error) => Some(IpcResponse::failure(error)),

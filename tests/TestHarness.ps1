@@ -267,6 +267,19 @@ function Sync-SmokeOwnedUiClients {
                 continue
             }
             $clientPid = [int]$snapshot.client_pid
+            $explicitOwner = @(
+                $Context.OwnedProcesses |
+                    Where-Object {
+                        $_.pid -eq $clientPid -and
+                        $_.kind -eq 'gui' -and
+                        $_.address -eq $address
+                    }
+            ) | Select-Object -First 1
+            if ($null -ne $explicitOwner) {
+                Register-SmokeOwnedProcess -Context $Context -Id $clientPid `
+                    -Kind 'gui' -Address $address
+                continue
+            }
             $client = Get-CimInstance Win32_Process `
                 -Filter "ProcessId=$clientPid" -ErrorAction SilentlyContinue
             if ($null -eq $client) {
