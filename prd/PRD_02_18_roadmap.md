@@ -351,12 +351,44 @@ track remains planned, but every declared dependency must still pass.
   - [ ] public-ready does not authorize publication: creating or pushing the
     `v0.1.8` tag and creating a public GitHub Release require explicit user
     approval after the candidate and rehearsal gates pass
-- [ ] M6 later controlled agentic bridge: ship MCP read-only resources,
-  then explicit control tools, Rhai control, brain/flow orchestration, and
-  agent/token status without weakening close safety
-- [ ] M7 evidence-gated optional intelligence: deterministic rules establish
+- [ ] M6 / v0.1.9 General Script Runtime
+  - [ ] make `local` the ordinary `agenterm-script.exe` execution profile and
+    deliver a usable fs/path/env/process/http/time/json/text/bytes standard
+    library without moving future Agent approval policy into the runtime
+  - [ ] add bounded task/stream/cancellation, local modules, versioned
+    `agenterm.tasks.json`, named task list/show/run, and one machine-readable
+    API catalog shared by check, runtime, Fleet tools and future consumers
+  - [ ] systematically expose every public typed Fleet operation or a stable
+    degraded reason; mutations return request identity, receipt, correlated
+    event and verified post-state while pure/observe behavior remains stable
+  - [ ] public file/process/loopback-HTTP/task/module/Fleet/privacy/crash/orphan
+    journeys prove one complete local automation task and one low-risk
+    PowerShell/Rhai self-hosting dual-run without replacing release scripts
+  - [ ] implementation sequencing, budgets, risks and release evidence are
+    owned by [the v0.1.9 public plan](../plan/plan-v0.1.9.md)
+- [ ] M7 / v0.1.10 Verifiable Read-Only Agent Bridge
+  - [ ] ship `agenterm-mcp.exe` as an on-demand stdio sidecar pinned to one
+    stable MCP protocol revision; offline discovery declares exact methods,
+    resources, tools, limits, schemas, and unavailable future roles
+  - [ ] expose only metadata-safe instance, workspace, tab, and causal Fleet
+    snapshot resources sourced from the public typed control plane; pane text,
+    Composer, environment values, proxy values, credentials, and clipboard
+    remain absent
+  - [ ] expose one read-only bounded `agenterm_wait` tool with epoch/sequence,
+    allowlisted predicate, timeout, cancellation, restart, gap, and target-close
+    semantics; no create/send/close/kill or other mutation tool is advertised
+  - [ ] public JSON-RPC lifecycle, same-source resource, wait causality,
+    malformed/oversized peer, crash, privacy, concurrency, restart, and orphan
+    tests preserve GUI/PTY isolation, no-activate, first-window, binary-size,
+    remain-on-exit, and explicit-close gates
+  - [ ] control tools, MCP client/federation, network transport, subscriptions,
+    pane-content resources, Rhai execution, brain/flow, agent permissions, and
+    autonomous scheduling remain later independently approved gates
+  - [ ] implementation sequencing, budgets, risks and release evidence are
+    owned by [the v0.1.10 public plan](../plan/plan-v0.1.10.md)
+- [ ] M8 evidence-gated optional intelligence: deterministic rules establish
   the baseline; any learned worker advances only after a concrete user case
   and portable Windows CPU evidence beat simpler methods
-- [ ] M8 governed LLM gateway hypothesis: local forwarding, routing, quota,
+- [ ] M9 governed LLM gateway hypothesis: local forwarding, routing, quota,
   audit, cost, credential isolation, and redaction remain unassigned until
   scripting, MCP, and event-core gates produce a concrete product need

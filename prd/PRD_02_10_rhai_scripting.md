@@ -32,7 +32,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] Design choice: Rust (`.rs`) implements the host and Rhai (`.rhai`)
   implements user-authored runtime programs.
 
-## v0.1.8 product position
+## v0.1.9 product position
 
 `agenterm-script.exe` is AgenTerm's general-purpose local scripting runtime,
 with Node.js/Bun-like local-automation usefulness rather than JavaScript,
@@ -53,7 +53,7 @@ security plugin.
   confirmation, remain-on-exit, stable IDs, tree-cycle rejection, replay
   protection, and truthful typed outcomes continue to apply.
 
-## v0.1.8 runtime architecture
+## v0.1.9 runtime architecture
 
 - [ ] one invocation still owns one fresh `agenterm-script.exe` sidecar; it is
   not a persistent system daemon and keeps no mutable state across invocations.
@@ -90,7 +90,7 @@ security plugin.
   Unicode/encoding operations, and explicit conversions.
 - [ ] `http`/`fetch` provides HTTP(S) method, URL, headers, body, timeout,
   status, bounded response streaming, cancellation, proxy/TLS diagnostics, and
-  credential-safe errors. Low-level sockets are not part of v0.1.8.
+  credential-safe errors. Low-level sockets are not part of v0.1.9.
 - [ ] filesystem and temporary-resource helpers have explicit ownership and
   cleanup behavior. Canonicalization, reparse points, atomic replacement, and
   failure paths cannot silently target a different path than the result
@@ -105,13 +105,14 @@ security plugin.
   IDs to a script/module entry point, arguments, working directory, environment
   construction, and execution profile.
 - [ ] TOML versus reuse of an existing AgenTerm manifest encoding is the one
-  remaining implementation-before-parser decision. It must be recorded before
+  remaining implementation-before-parser decision. v0.1.9 selects a versioned
+  `agenterm.tasks.json` format and records the exact schema before
   task-manifest parsing begins, but does not block `fs`, `path`, `env`,
   `process`, `time`, or the task scheduler.
 - [ ] project tasks and user-level named commands are discoverable through one
   typed catalog. Invalid entries remain visible with a stable degraded reason
   instead of disappearing.
-- [ ] CLI listing, inspection, and invocation of named tasks is P0 for v0.1.8.
+- [ ] CLI listing, inspection, and invocation of named tasks is P0 for v0.1.9.
   A GUI command palette is a P1 consumer of the same catalog and does not own a
   second registry.
 

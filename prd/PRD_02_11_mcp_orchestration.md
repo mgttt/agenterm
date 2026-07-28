@@ -35,7 +35,16 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   - [ ] begin with read-only inventory/snapshot resources and bounded waits,
     then add explicit control tools, then durable flows; MCP client
     federation and autonomous scheduling remain later gates
-- v0.1.9 first delivery: public read-only surface
+- v0.1.10 first delivery: public read-only surface
+  - Protocol scope
+    - [ ] pin the first delivery to the stable MCP `2025-11-25` revision;
+      protocol upgrades are explicit catalog/schema changes and draft
+      stateless discovery or experimental tasks are not advertised
+    - [ ] support only initialize/initialized, ping, resources list/read,
+      tools list/call for the single wait tool, and cancellation; stdout is
+      newline-delimited UTF-8 JSON-RPC only and bounded diagnostics use stderr
+    - [ ] the ordinary AgenTerm GUI adds no MCP panel, connection animation,
+      approval surface, or startup work in this read-only delivery
   - Executable and discovery
     - [ ] `agenterm-mcp.exe --help`, `--version`, and
       `capabilities --json` work without starting a GUI or model runtime;

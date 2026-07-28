@@ -108,7 +108,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - `get-settings`
     - `set-setting terminal.font-family FAMILY`
     - `set-setting terminal.font-size 8..36`
-  - v0.1.8 local runtime and named tasks
+  - v0.1.9 local runtime and named tasks
     - [ ] `script run [OPTIONS] FILE.rhai|- [--] [ARGS...]`
     - [ ] `script eval [OPTIONS] EXPRESSION [--] [ARGS...]`
     - [ ] `script check [OPTIONS] FILE.rhai|-`
