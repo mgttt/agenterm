@@ -49,6 +49,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [ ] `agenterm-bash.exe`: AgenTerm-owned default Bash entry point
 - Future executable hypotheses, not release commitments:
   - `agenterm-mcp.exe`: MCP server/client and agentic orchestration sidecar
+  - `agenterm-desktop.exe`: optional companion desktop/workspace application;
+    it must coexist with Explorer before any separately approved shell role
+  - `agenterm-shell-host.exe`: possible minimal recovery watchdog for a much
+    later opt-in shell-replacement mode, never the desktop feature process
   - `agenterm-ai.exe`: CPU-first specialized-intelligence sidecar
   - `agenterm-llm-gateway.exe`: governed local LLM forwarding and routing
     sidecar
@@ -59,6 +63,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   - an AgenTerm-owned executable would mean a stable product contract,
     discovery, diagnostics, policy, and fleet integration; it would not imply
     rewriting mature Bash, SSH, HTTP, or SQLite protocol engines
+  - the `agenterm-{role}.exe` family is also the future package/distribution
+    boundary: each optional role remains independently discoverable,
+    versioned, installable, repairable, and removable without turning
+    `agenterm.exe` into a monolith
 - [x] all control frontends reuse shared request/target/format libraries;
   they do not duplicate GUI state or start a second workspace authority
 - [~] each binary has independent release size reporting and an enforced

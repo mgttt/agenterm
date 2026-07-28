@@ -69,6 +69,12 @@ v0.1.10  可验证的只读 Agent 桥梁
 │  ├─ unavailable 能力显式可发现，不静默消失
 │  └─ 为后续 Rhai control 与 agenterm-agent.exe 保留复用边界
 │
+├─ 第一优先级：消费组件事实，不承担组件管理
+│  ├─ 复用 v0.1.9 的 version/capability/availability 描述语言
+│  ├─ capabilities 解释缺失、不兼容和 degraded role
+│  ├─ 不把 package inventory、下载、安装或升级变成 MCP 首发资源
+│  └─ 为未来 softmgr/市场/desktop 工具保留 typed adapter 边界
+│
 ├─ 第一优先级：自反馈与兼容资格
 │  ├─ 原始 JSON-RPC 黑盒覆盖完整生命周期
 │  ├─ MCP resource 与 agenterm-cli 同时读取并逐字段比较
@@ -96,6 +102,8 @@ v0.1.10  可验证的只读 Agent 桥梁
    ├─ agenterm-mux.exe 原生 mux server、完整 pane 与多后端
    ├─ agenterm.exe 与 agenterm-cli.exe 单文件合并
    ├─ agenterm-script.exe 完整 Node/Bun 级标准库的剩余扩展
+   ├─ agenterm-softmgr.exe、签名包/应用市场与联网软件分发
+   ├─ agenterm-desktop.exe companion 与可选 Shell Replacement
    └─ 安装器、自动更新、联网组件安装与未单独批准的公开发布
 ```
 
@@ -363,6 +371,8 @@ src/bin/agenterm-mcp.rs
 - 不通过启动 `agenterm-cli.exe` 子进程并解析 stdout 实现 MCP；
 - 不让 MCP 类型进入 `agenterm.exe` 的 Win32/render/ConPTY 路径；
 - 不为首发一个 wait tool引入常驻 daemon 或通用异步框架；
+- v0.1.10 可以复用 v0.1.9 的 component availability 语言解释自身依赖，
+  但不读取未批准的软件清单，不提供 package resource，也不调用安装器；
 - 如评估第三方 MCP Rust 实现，必须先证明协议 revision 可固定、依赖审计
   可接受、release binary 不超预算、panic/stdio 行为符合本产品合同；
   否则实现经过 golden/conformance 测试的最小 typed subset。
@@ -603,6 +613,7 @@ entry 是集成热点，只允许一个串行 owner 收口。
 | 多实例选择误连 | 无 address 时随机选择 | 复用 zero/one/many fail-closed 规则 |
 | UI 又开始膨胀 | 为 MCP 增加默认面板 | 首发不新增 GUI，能力由 CLI/catalog 发现 |
 | 版本变成 agent 平台大爆炸 | 出现 control、brain、flow、LLM 工作项 | 保持一资源链 + 一 wait 工具纵向闭环 |
+| MCP 偷变软件管理远程入口 | resources/tools 出现 install/update | 首发不公布 package inventory 或 mutation |
 
 ## 十五、第一次评审建议结论
 
@@ -619,6 +630,7 @@ entry 是集成热点，只允许一个串行 owner 收口。
 9. GUI：不增加 MCP 控件和状态动画。
 10. control tools、subscriptions、tasks、HTTP、MCP client、Rhai execution、
     brain/flow、agent 权限全部延后。
+11. v0.1.10 只复用组件 availability 语言，不暴露包清单、市场或安装能力。
 
 仍需在实现波次 0 用 spike 决定：
 

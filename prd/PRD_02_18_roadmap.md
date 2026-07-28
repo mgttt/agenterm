@@ -358,6 +358,10 @@ track remains planned, but every declared dependency must still pass.
   - [ ] add bounded task/stream/cancellation, local modules, versioned
     `agenterm.tasks.json`, named task list/show/run, and one machine-readable
     API catalog shared by check, runtime, Fleet tools and future consumers
+  - [ ] make runtime/module/task identity package-ready through stable
+    version, provenance hooks, requirements, capabilities and entry points,
+    without adding remote resolution, installation, signature policy or a
+    public registry to the runtime
   - [ ] systematically expose every public typed Fleet operation or a stable
     degraded reason; mutations return request identity, receipt, correlated
     event and verified post-state while pure/observe behavior remains stable
@@ -392,3 +396,16 @@ track remains planned, but every declared dependency must still pass.
 - [ ] M9 governed LLM gateway hypothesis: local forwarding, routing, quota,
   audit, cost, credential isolation, and redaction remain unassigned until
   scripting, MCP, and event-core gates produce a concrete product need
+- [ ] Unscheduled optional-application ecosystem
+  - [ ] treat the independently versioned `agenterm-{role}.exe` family as
+    future software-distribution units backed by signed inventory,
+    compatibility, transactional install/update/repair/remove and rollback
+  - [ ] evolve `agenterm-softmgr.exe` only after the local package contract and
+    supply-chain gates are proven; a public package/application market is a
+    later discovery, trust and distribution service, not v0.1.9 or v0.1.10
+    scope
+  - [ ] explore `agenterm-desktop.exe` first as an Explorer-coexisting
+    companion application; any system-shell replacement requires a separately
+    approved minimal watchdog, lease activation, crash rollback and proven
+    Explorer recovery, and development builds never directly persist a
+    Winlogon shell change

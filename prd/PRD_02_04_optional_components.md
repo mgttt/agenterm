@@ -14,10 +14,24 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   - [ ] the GUI consumes only a small installed-component manifest and
     reports missing or incompatible components without silently fetching
     them
+  - [ ] the long-term product may provide an AgenTerm package/application
+    catalog and software-distribution market for runtimes, tools and optional
+    applications; the market is a discovery and transaction layer over this
+    lifecycle, not an authority embedded in GUI startup
+  - [ ] `agenterm-script.exe` supplies automation primitives and typed package
+    tooling contracts, while a future `agenterm-softmgr.exe` exclusively owns
+    trust, signature verification, install transactions, rollback and
+    elevation; untrusted package manifests are data, never executable policy
+  - [ ] optional desktop products begin as Explorer-coexisting companion
+    applications. A future shell-replacement mode is a separate high-risk
+    product gate with an independent minimal watchdog, lease-bounded
+    activation, crash rollback and an always-tested Explorer recovery path
 - Supply chain and transaction
   - [ ] a signed, versioned manifest declares platform, component version,
-    URLs, byte size, SHA-256, signer/key identity, dependencies, and minimum
-    AgenTerm protocol/API version
+    package class (`runtime`, `tool`, `application`, or `shell-integration`),
+    stable role and entry points, URLs, byte size, SHA-256,
+    signer/key identity, dependencies, capabilities, and minimum AgenTerm
+    protocol/API version
   - [ ] downloads use a staging directory, bounded size/time, signature and
     hash verification, and no execution before verification
   - [ ] install and update use same-volume atomic promotion; interrupted or

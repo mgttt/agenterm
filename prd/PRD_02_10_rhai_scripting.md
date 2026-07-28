@@ -155,6 +155,11 @@ security plugin.
 - [ ] `script check` validates imports, task entries, API names, profiles,
   signatures, versions, static limits, and unavailable/degraded calls without
   executing user code or requiring a GUI.
+- [ ] runtime, module and task identities expose version, origin/provenance
+  hooks, required AgenTerm API/capabilities and stable entry-point metadata so
+  future local package tooling can inspect them without executing source.
+  This is a package-ready contract, not a registry, downloader, installer,
+  signature policy or second package manifest in v0.1.9.
 
 ## Public black-box acceptance
 
@@ -193,8 +198,10 @@ security plugin.
 
 ## Explicitly deferred
 
-- npm compatibility, a public package registry, third-party package lifecycle,
-  arbitrary remote imports, and Node/Bun binary or API compatibility;
+- npm compatibility, arbitrary remote imports, third-party package lifecycle,
+  and Node/Bun binary or API compatibility; an AgenTerm-owned signed
+  package/application catalog remains a future optional-component track rather
+  than npm emulation inside the script runtime;
 - a persistent or automatically started script daemon and cross-invocation
   mutable runtime state;
 - low-level sockets, unsolicited listeners, and a general network sidecar;

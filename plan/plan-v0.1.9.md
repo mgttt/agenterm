@@ -28,6 +28,9 @@ agenterm-script.exe
        ├─ 动态状态与用户命令
        ├─ agenterm-mcp.exe 的工具适配
        ├─ agenterm-agent.exe 的执行工具层
+       ├─ agenterm-{script,bash,...}.exe 可选组件族
+       ├─ 未来 agenterm-softmgr.exe 与软件分发市场
+       ├─ 未来 agenterm-desktop.exe companion 应用
        └─ 未来 brain / flow 的可组合节点
 ```
 
@@ -78,6 +81,13 @@ v0.1.9  通用 Script Runtime 成型
 │  ├─ 无效任务保持可发现并给出 degraded reason
 │  └─ CLI 与未来 GUI command palette 共用一个 catalog
 │
+├─ 第一优先级：面向组件生态但不提前做市场
+│  ├─ runtime/module/task 具有稳定 identity、version 与 entry point
+│  ├─ requirements、capability facts 与 provenance hooks 可机器读取
+│  ├─ 未来 agenterm-{script,bash,...}.exe 共用发现语言
+│  ├─ 不远程解析、不下载安装、不决定签名信任
+│  └─ task manifest 与未来 package manifest 保持不同职责
+│
 ├─ 最高优先级：完整 typed Fleet API
 │  ├─ 从 operation catalog 系统映射，不手写第二套 API
 │  ├─ observe / control / destructive facts 可发现
@@ -109,7 +119,9 @@ v0.1.9  通用 Script Runtime 成型
 └─ 明确延后与未来计划
    ├─ v0.1.10 agenterm-mcp.exe 只读 MCP bridge
    ├─ agenterm-agent.exe、审批 UI、agent 权限和自然语言策略
-   ├─ npm 兼容、公共包仓库、远程任意模块和第三方包生命周期
+   ├─ npm 兼容、远程任意模块和第三方包生命周期
+   ├─ agenterm-softmgr.exe、签名包/应用市场与联网软件分发
+   ├─ agenterm-desktop.exe companion 与更远期可选 Shell Replacement
    ├─ persistent script daemon、跨 invocation mutable state
    ├─ REPL、watch mode、durable scheduler 和开机自启任务
    ├─ low-level sockets、监听公网端口和通用网络 sidecar
@@ -532,6 +544,25 @@ catalog 是实现、check、文档、MCP/Agent 消费者的同一事实源。
 - 能静态确认的 hard limit；
 - 不执行用户代码，不连接 GUI，不访问网络。
 
+### 面向未来组件/软件分发的最小接口
+
+v0.1.9 不实现包管理器，却要避免把未来堵死。runtime、module 和 named
+task 的机器可读描述需要包含稳定 identity、schema/runtime version、entry
+point、required API/capabilities，以及可选 origin/provenance hooks。这样
+未来 `agenterm-softmgr.exe` 可以在不执行脚本的情况下完成 inventory 和
+compatibility planning，`agenterm-mcp.exe`/`agenterm-agent.exe` 也能解释
+“已安装、缺失、不兼容或不可用”。
+
+边界必须清楚：
+
+- `agenterm.tasks.json` 描述如何运行本地任务，不承担下载、签名或安装；
+- future package manifest 描述分发单元、文件、hash、签名、依赖和入口；
+- `agenterm-script.exe` 可以提供 hash、文件、HTTP、进程等通用自动化能力，
+  但不能自行成为信任根或绕过 `agenterm-softmgr.exe` 的事务边界；
+- v0.1.9 不扫描全机组件、不访问公共 registry、不安装任何 package；
+- 这层合同服务于整个 `agenterm-{script,bash,mcp,agent,desktop,...}.exe`
+  家族，不只服务 Rhai module。
+
 ## 十二、运行时架构
 
 避免继续把所有逻辑塞进 `src/bin/agenterm-script.rs`：
@@ -839,6 +870,8 @@ README 增加一个简短 script task 示例；完整 API、manifest 和错误�
 | HTTP 拉大依赖 | script binary 明显超预算 | 先做 size spike，限制 feature |
 | Fleet API 再造一套 | 手写几十个函数和帮助 | 从 operation catalog 生成/适配 |
 | 任务清单变第二产品树 | CLI/GUI 各有 registry | 一个 `agenterm.tasks.json` catalog |
+| task manifest 偷长成包管理器 | 出现 URL/signature/install hooks | task 与 future package manifest 分责 |
+| Script 变成供应链信任根 | Rhai 代码决定签名/安装可信性 | softmgr 独占验证与事务 authority |
 | 自托管过早影响发布 | Rhai 失败导致 check/release 不可用 | 只做低风险双跑，PS 保留 |
 | 并行修改冲突 | 大家编辑 bin/Cargo/lib | 先拆模块、明确 owner、串行集成 |
 | 测试依赖公网 | HTTP 测试偶发失败 | 只用 repo-owned loopback fixture |
@@ -860,6 +893,8 @@ README 增加一个简短 script task 示例；完整 API、manifest 和错误�
 10. Fleet API 从 operation catalog 系统映射。
 11. GUI command palette 不是 blocker。
 12. 自托管只做一个低风险 PowerShell helper 双跑。
+13. v0.1.9 只交付 package-ready identity/provenance hooks，不实现包管理。
+14. `agenterm.tasks.json` 与未来 package manifest 永久保持职责分离。
 
 实施波次 0 仍需用 spike 确认：
 
