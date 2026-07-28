@@ -39,8 +39,8 @@ use crate::{
     instances::{discover_instances, instance_process_is_alive, prune_instance},
     ipc_transport::read_bounded_ipc_line,
     operations::{
-        OPERATION_CATALOG, OPERATION_CATALOG_SCHEMA_VERSION, OperationClass, operation_for_args,
-        validate_operation_args,
+        OPERATION_CATALOG, OPERATION_CATALOG_SCHEMA_VERSION, OperationClass, operation_by_id,
+        operation_for_args, validate_operation_args,
     },
     protocol::{IpcRequest, IpcResponse},
     ui_bridge,
@@ -1112,13 +1112,16 @@ fn run_script_command_with_context(
     let expected_invocation_id = invocation.invocation_id.clone();
     let deadline = Duration::from_millis(invocation.budgets.wall_time_ms);
     let broker_budgets = invocation.budgets.clone();
+    let broker_profile = invocation.profile;
     let (result, cancel_requested) = match WorkerSupervisor::invoke(
         &executable,
         Some(&context.working_directory),
         invocation,
         deadline,
         Duration::from_millis(150),
-        |request, remaining| handle_script_broker(request, &broker_budgets, remaining),
+        |request, remaining| {
+            handle_script_broker(request, broker_profile, &broker_budgets, remaining)
+        },
     ) {
         Ok(outcome) => {
             let _worker_pid = outcome.worker_pid;
@@ -1519,15 +1522,29 @@ fn script_broker_ipc(
 #[cfg(windows)]
 fn handle_script_broker(
     request: &ScriptBrokerRequest,
+    profile: ScriptProfile,
     budgets: &ScriptBudgets,
     remaining: Duration,
 ) -> ScriptBrokerResponse {
+    if request.operation == "fleet.call" {
+        return match script_fleet_call(&request.arguments, profile, budgets, remaining) {
+            Ok(value) => ScriptBrokerResponse {
+                ok: true,
+                value: Some(value),
+                error: None,
+            },
+            Err(response) => response,
+        };
+    }
     let started = Instant::now();
     let parse_json = |output: String| {
         serde_json::from_str::<serde_json::Value>(&output)
             .map_err(|error| script_broker_error("broker_invalid_response", error.to_string()))
     };
     let value = match request.operation.as_str() {
+        "protocol.info" => {
+            script_broker_ipc(vec!["protocol-info".to_owned()], remaining).and_then(parse_json)
+        }
         "workspace.info" => script_broker_ipc(vec!["workspace-info".to_owned()], remaining)
             .and_then(parse_json)
             .and_then(|mut workspace| {
@@ -1658,6 +1675,384 @@ fn handle_script_broker(
 }
 
 #[cfg(windows)]
+fn script_fleet_call(
+    arguments: &serde_json::Value,
+    profile: ScriptProfile,
+    budgets: &ScriptBudgets,
+    remaining: Duration,
+) -> Result<serde_json::Value, ScriptBrokerResponse> {
+    let operation_id = arguments
+        .get("operation_id")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            script_broker_error(
+                "broker_invalid_arguments",
+                "fleet.call requires operation_id",
+            )
+        })?;
+    let parameters = arguments
+        .get("parameters")
+        .filter(|value| value.is_object())
+        .cloned()
+        .ok_or_else(|| {
+            script_broker_error(
+                "broker_invalid_arguments",
+                "fleet.call requires an object parameters value",
+            )
+        })?;
+    let operation = operation_by_id(operation_id).ok_or_else(|| {
+        script_broker_error(
+            "broker_operation_unknown",
+            format!("unknown Fleet operation {operation_id}"),
+        )
+    })?;
+    if !operation.available {
+        return Err(script_broker_error(
+            "broker_operation_degraded",
+            format!("Fleet operation {operation_id} is not available"),
+        ));
+    }
+    if profile == ScriptProfile::Pure
+        || (profile == ScriptProfile::Observe && operation.class != OperationClass::Observe)
+    {
+        return Err(script_broker_error(
+            "broker_operation_denied",
+            format!(
+                "Fleet operation {operation_id} is unavailable in the {} profile",
+                profile.as_str()
+            ),
+        ));
+    }
+    validate_fleet_parameters(operation, &parameters, budgets)?;
+
+    if operation.class == OperationClass::Observe {
+        let nested = ScriptBrokerRequest {
+            operation: operation_id.to_owned(),
+            arguments: parameters,
+        };
+        let response = handle_script_broker(&nested, profile, budgets, remaining);
+        return if response.ok {
+            Ok(response.value.unwrap_or(serde_json::Value::Null))
+        } else {
+            Err(response)
+        };
+    }
+
+    let command = fleet_mutation_command(operation_id, &parameters)?;
+    script_fleet_mutation(operation, &parameters, command, budgets, remaining)
+}
+
+#[cfg(windows)]
+fn validate_fleet_parameters(
+    operation: &crate::operations::OperationSpec,
+    parameters: &serde_json::Value,
+    budgets: &ScriptBudgets,
+) -> Result<(), ScriptBrokerResponse> {
+    let object = parameters
+        .as_object()
+        .expect("fleet.call parameters were checked as an object");
+    if let Some(unknown) = object
+        .keys()
+        .find(|name| !operation.parameters.iter().any(|spec| spec.name == *name))
+    {
+        return Err(script_broker_error(
+            "broker_invalid_arguments",
+            format!("{} does not accept parameter {unknown}", operation.id),
+        ));
+    }
+    for spec in operation.parameters {
+        let Some(value) = object.get(spec.name) else {
+            if spec.required {
+                return Err(script_broker_error(
+                    "broker_invalid_arguments",
+                    format!("{} requires parameter {}", operation.id, spec.name),
+                ));
+            }
+            continue;
+        };
+        let valid_type = match spec.value_type {
+            "string" | "session_name" => value.as_str().is_some(),
+            "stable_tab_id" => value.as_str().is_some_and(|tab| {
+                tab.len() <= 32
+                    && tab.strip_prefix('@').is_some_and(|id| {
+                        !id.is_empty() && id.bytes().all(|byte| byte.is_ascii_digit())
+                    })
+            }),
+            "uint32" | "uint64" => value.as_u64().is_some(),
+            "integer" => value.as_i64().is_some(),
+            _ => false,
+        };
+        if !valid_type {
+            return Err(script_broker_error(
+                "broker_invalid_arguments",
+                format!(
+                    "{} parameter {} must be {}",
+                    operation.id, spec.name, spec.value_type
+                ),
+            ));
+        }
+        let integer = value
+            .as_i64()
+            .or_else(|| value.as_u64().and_then(|value| i64::try_from(value).ok()));
+        if integer.is_some_and(|value| {
+            spec.minimum.is_some_and(|minimum| value < minimum)
+                || spec.maximum.is_some_and(|maximum| value > maximum)
+        }) {
+            return Err(script_broker_error(
+                "broker_invalid_arguments",
+                format!(
+                    "{} parameter {} is outside its bounds",
+                    operation.id, spec.name
+                ),
+            ));
+        }
+    }
+    if operation.id == "pane.capture"
+        && parameters["max_bytes"]
+            .as_u64()
+            .is_none_or(|value| value == 0 || value > budgets.capture_bytes as u64)
+    {
+        return Err(script_broker_error(
+            "broker_invalid_arguments",
+            "pane.capture max_bytes exceeds the invocation capture budget",
+        ));
+    }
+    if operation.id == "events.read"
+        && parameters["limit"]
+            .as_u64()
+            .is_none_or(|value| value == 0 || value > budgets.event_items as u64)
+    {
+        return Err(script_broker_error(
+            "broker_invalid_arguments",
+            "events.read limit exceeds the invocation event budget",
+        ));
+    }
+    if operation.id == "events.wait"
+        && parameters["timeout_ms"]
+            .as_u64()
+            .is_none_or(|value| value == 0 || value > budgets.wait_time_ms)
+    {
+        return Err(script_broker_error(
+            "broker_invalid_arguments",
+            "events.wait timeout_ms exceeds the invocation wait budget",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn fleet_mutation_command(
+    operation_id: &str,
+    parameters: &serde_json::Value,
+) -> Result<Vec<String>, ScriptBrokerResponse> {
+    let arguments = match operation_id {
+        "ui.tabs.show" => vec!["ui-action".to_owned(), "tabs-show".to_owned()],
+        "ui.tabs.hide" => vec!["ui-action".to_owned(), "tabs-hide".to_owned()],
+        "ui.tabs.toggle" => vec!["ui-action".to_owned(), "tabs-toggle".to_owned()],
+        "ui.tabs.set-width" => vec![
+            "ui-action".to_owned(),
+            "tabs-set-width".to_owned(),
+            "--width".to_owned(),
+            parameters["width"]
+                .as_i64()
+                .expect("validated Fleet width")
+                .to_string(),
+        ],
+        "server.kill" => {
+            let mut arguments = vec!["kill-server".to_owned()];
+            if let Some(target) = parameters.get("target").and_then(serde_json::Value::as_str) {
+                arguments.extend(["-t".to_owned(), target.to_owned()]);
+            }
+            arguments
+        }
+        "workspace.shutdown" => vec!["shutdown".to_owned()],
+        _ => {
+            return Err(script_broker_error(
+                "broker_operation_unknown",
+                format!("no Fleet adapter exists for {operation_id}"),
+            ));
+        }
+    };
+    Ok(arguments)
+}
+
+#[cfg(windows)]
+fn script_fleet_mutation(
+    operation: &crate::operations::OperationSpec,
+    parameters: &serde_json::Value,
+    command: Vec<String>,
+    budgets: &ScriptBudgets,
+    remaining: Duration,
+) -> Result<serde_json::Value, ScriptBrokerResponse> {
+    let response = send_ipc_request_to_timeout(&ipc_address(), command, remaining)
+        .map_err(|error| script_broker_error("broker_transport", format!("{error:#}")))?;
+    let receipt = response.receipt.as_ref().ok_or_else(|| {
+        script_broker_error(
+            "broker_receipt_missing",
+            format!("{} did not return a native control receipt", operation.id),
+        )
+    })?;
+    let receipt_json = serde_json::to_value(receipt)
+        .map_err(|error| script_broker_error("broker_invalid_receipt", error.to_string()))?;
+    if !response.ok {
+        let mut error = script_broker_error(
+            if response.error_code.is_empty() {
+                "broker_host_error"
+            } else {
+                &response.error_code
+            },
+            response.error,
+        );
+        if let Some(details) = error.error.as_mut() {
+            details.details = Some(serde_json::json!({"receipt": receipt_json}));
+        }
+        return Err(error);
+    }
+    let output = if response.output.trim().is_empty() {
+        serde_json::Value::Null
+    } else {
+        serde_json::from_str(&response.output)
+            .map_err(|error| script_broker_error("broker_invalid_response", error.to_string()))?
+    };
+    let events = collect_fleet_receipt_events(operation, &receipt_json, budgets, remaining);
+    let (verified, reason) =
+        verify_fleet_post_state(operation.id, parameters, &output, &events, &receipt_json);
+    Ok(serde_json::json!({
+        "receipt": receipt_json,
+        "events": events,
+        "post_state": {
+            "verified": verified,
+            "reason": reason,
+            "value": output,
+        }
+    }))
+}
+
+#[cfg(windows)]
+fn collect_fleet_receipt_events(
+    operation: &crate::operations::OperationSpec,
+    receipt: &serde_json::Value,
+    budgets: &ScriptBudgets,
+    remaining: Duration,
+) -> Vec<serde_json::Value> {
+    let Some(before) = receipt.get("before_position") else {
+        return Vec::new();
+    };
+    let Some(epoch) = before.get("epoch").and_then(serde_json::Value::as_str) else {
+        return Vec::new();
+    };
+    let Some(after) = before.get("sequence").and_then(serde_json::Value::as_u64) else {
+        return Vec::new();
+    };
+    let upper = receipt
+        .get("after_position")
+        .and_then(|position| position.get("sequence"))
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(after);
+    if upper <= after || remaining.is_zero() {
+        return Vec::new();
+    }
+    let output = match script_broker_ipc(
+        vec![
+            "read-events".to_owned(),
+            "--epoch".to_owned(),
+            epoch.to_owned(),
+            "--after".to_owned(),
+            after.to_string(),
+            "--limit".to_owned(),
+            budgets.event_items.min(1024).to_string(),
+        ],
+        remaining,
+    ) {
+        Ok(output) => output,
+        Err(_) => return Vec::new(),
+    };
+    let batch: serde_json::Value = match serde_json::from_str(&output) {
+        Ok(batch) => batch,
+        Err(_) => return Vec::new(),
+    };
+    let request_id = receipt
+        .get("request_id")
+        .and_then(serde_json::Value::as_str);
+    batch
+        .get("events")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|event| {
+            event
+                .get("sequence")
+                .and_then(serde_json::Value::as_u64)
+                .is_some_and(|sequence| sequence <= upper)
+                && operation.events.iter().any(|kind| {
+                    event.get("kind").and_then(serde_json::Value::as_str) == Some(*kind)
+                })
+                && (event.get("request_id").and_then(serde_json::Value::as_str) == request_id
+                    || event
+                        .get("operation_id")
+                        .and_then(serde_json::Value::as_str)
+                        == Some(operation.id)
+                    || event
+                        .pointer("/payload/operation_id")
+                        .and_then(serde_json::Value::as_str)
+                        == Some(operation.id))
+        })
+        .cloned()
+        .collect()
+}
+
+#[cfg(windows)]
+fn verify_fleet_post_state(
+    operation_id: &str,
+    parameters: &serde_json::Value,
+    value: &serde_json::Value,
+    events: &[serde_json::Value],
+    receipt: &serde_json::Value,
+) -> (bool, &'static str) {
+    let final_receipt = matches!(
+        receipt.get("outcome").and_then(serde_json::Value::as_str),
+        Some("committed" | "no_op")
+    );
+    match operation_id {
+        "ui.tabs.show" => (
+            final_receipt
+                && value
+                    .pointer("/layout/sidebar/visible")
+                    .and_then(serde_json::Value::as_bool)
+                    == Some(true),
+            "ui_snapshot",
+        ),
+        "ui.tabs.hide" => (
+            final_receipt
+                && value
+                    .pointer("/layout/sidebar/visible")
+                    .and_then(serde_json::Value::as_bool)
+                    == Some(false),
+            "ui_snapshot",
+        ),
+        "ui.tabs.toggle" => (
+            final_receipt
+                && value
+                    .pointer("/layout/sidebar/visible")
+                    .and_then(serde_json::Value::as_bool)
+                    .is_some()
+                && (!events.is_empty()
+                    || receipt.get("outcome").and_then(serde_json::Value::as_str) == Some("no_op")),
+            "ui_snapshot_and_event",
+        ),
+        "ui.tabs.set-width" => (
+            final_receipt
+                && value
+                    .pointer("/layout/sidebar/configured_width")
+                    .and_then(serde_json::Value::as_i64)
+                    == parameters.get("width").and_then(serde_json::Value::as_i64),
+            "ui_snapshot",
+        ),
+        _ => (false, "destructive_post_state_unavailable"),
+    }
+}
+
+#[cfg(windows)]
 fn script_broker_wait(
     arguments: &serde_json::Value,
     budgets: &ScriptBudgets,
@@ -1675,6 +2070,7 @@ fn script_broker_wait(
         .get("kind")
         .and_then(serde_json::Value::as_str)
         .ok_or_else(|| script_broker_error("broker_invalid_arguments", "kind is required"))?;
+    let tab = arguments.get("tab").and_then(serde_json::Value::as_str);
     let timeout_ms = arguments
         .get("timeout_ms")
         .and_then(serde_json::Value::as_u64)
@@ -1730,7 +2126,11 @@ fn script_broker_wait(
                 if let Some(sequence) = event.get("sequence").and_then(serde_json::Value::as_u64) {
                     after = after.max(sequence);
                 }
-                if event.get("kind").and_then(serde_json::Value::as_str) == Some(kind) {
+                if event.get("kind").and_then(serde_json::Value::as_str) == Some(kind)
+                    && tab.is_none_or(|tab| {
+                        event.get("tab_id").and_then(serde_json::Value::as_str) == Some(tab)
+                    })
+                {
                     return Ok(event.clone());
                 }
             }

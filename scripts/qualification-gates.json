@@ -3,6 +3,10 @@
   "receipt_schema_version": 1,
   "required_gates": [
     {
+      "id": "repo-lint",
+      "evidence": []
+    },
+    {
       "id": "rustfmt",
       "evidence": []
     },
@@ -16,6 +20,10 @@
     },
     {
       "id": "artifact-build",
+      "evidence": []
+    },
+    {
+      "id": "rhai-lint",
       "evidence": []
     },
     {
@@ -111,6 +119,7 @@
       "evidence": [
         "script.rhai-pure",
         "script.rhai-observe",
+        "script.fleet-v2",
         "script.rhai-deny-budget",
         "script.rhai-framed",
         "script.modules-tasks",

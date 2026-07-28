@@ -67,6 +67,7 @@ result represents one reproducible source state.
 Use PowerShell from the repository root:
 
 ```powershell
+.\lint.ps1              # fast fail: Rust, PowerShell, JSON, and production Rhai
 .\build.bat             # fast incremental dev build -> .\dist\
 .\build.bat release-fast # optimized incremental local-test build -> .\dist\
 .\check.ps1 -SkipSmoke  # fmt, Clippy, unit tests, dev artifact

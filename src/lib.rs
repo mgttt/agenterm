@@ -13,6 +13,7 @@ pub mod operations;
 mod protocol;
 mod rmux_status;
 pub mod script_catalog;
+pub mod script_fleet;
 pub mod script_http;
 pub mod script_process;
 pub mod script_project;

@@ -1414,6 +1414,8 @@ README 增加一个简短 script task 示例；稳定运行时合同由
 
 ### 门四：自反馈
 
+- `lint.ps1` 在昂贵测试前统一执行 Rust、PowerShell、JSON 和生产 Rhai
+  的 fail-fast 检查，并能输出机器可读结果；
 - 北极星任务完整通过；
 - 首错诊断有界且隐私安全；
 - timeout/crash/cancel/parent exit 后下一次 invocation 健康；
@@ -1496,7 +1498,7 @@ README 增加一个简短 script task 示例；稳定运行时合同由
 
 ```text
 提交 1
-  [x] typed script catalog schema v2（保持 Script API v1）
+  [x] typed script catalog schema v2（现已升为 Script API v2）
   [x] explicit local profile foundation
   [ ] typed result/error/exit expansion
   [>] api --json + check alignment（v1 agent method 已由 catalog 驱动；
@@ -1528,8 +1530,8 @@ README 增加一个简短 script task 示例；稳定运行时合同由
   [x] clean release 2,359,808 bytes；保留既有 3 MiB 门，不再抬高
 
 提交 7
-  generated Fleet API
-  receipt/event/post-state conformance
+  [x] 从全部 14 个现有 typed operations 系统生成 Fleet API
+  [x] observe/local 权限、receipt/event/post-state 与迁移诊断
 
 提交 8
   north-star dogfood

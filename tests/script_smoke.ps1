@@ -8,6 +8,7 @@ $ErrorActionPreference = 'Stop'
 $declaredEvidence = @(
     'script.rhai-pure'
     'script.rhai-observe'
+    'script.fleet-v2'
     'script.rhai-deny-budget'
     'script.rhai-framed'
     'script.modules-tasks'
@@ -140,7 +141,7 @@ function New-FramedInvocation {
         payload = @{
             envelope_version = 2
             invocation_id = $InvocationId
-            api_version = 1
+            api_version = 2
             operation = 'eval'
             profile = 'pure'
             source_label = 'smoke'
@@ -233,7 +234,8 @@ function Start-HttpFixture {
     param(
         [Parameter(Mandatory = $true)][string]$FixturePath,
         [Parameter(Mandatory = $true)][string]$ReadyPath,
-        [Parameter(Mandatory = $true)][string]$LogPath
+        [Parameter(Mandatory = $true)][string]$LogPath,
+        [Parameter(Mandatory = $true)][string]$StopPath
     )
     $hostExe = [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
     $startInfo = [Diagnostics.ProcessStartInfo]::new()
@@ -251,6 +253,8 @@ function Start-HttpFixture {
         $ReadyPath,
         '-LogPath',
         $LogPath,
+        '-StopPath',
+        $StopPath,
         '-MaxRequests',
         '9'
     )) {
@@ -386,11 +390,12 @@ try {
     Write-Host 'STEP offline scripting API discovery'
     $apiResult = Invoke-Script @('script', 'api', '--json') | ConvertFrom-Json
     if (-not $apiResult.ok -or
-        $apiResult.value.api_version -ne 1 -or
+        $apiResult.value.api_version -ne 2 -or
         $apiResult.value.schema_version -ne 2 -or
         $apiResult.value.default_profile -ne 'local' -or
         $apiResult.value.profiles.pure.variables -notcontains 'args' -or
-        $apiResult.value.profiles.observe.variables -notcontains 'agent' -or
+        $apiResult.value.profiles.observe.variables -notcontains 'fleet' -or
+        $apiResult.value.profiles.local.variables -notcontains 'fleet' -or
         $apiResult.value.profiles.local.status -ne 'shipped' -or
         $apiResult.value.limits.defaults.wall_time_ms -ne 2000 -or
         $apiResult.value.limits.hard_maximums.wall_time_ms -ne 10000 -or
@@ -408,9 +413,9 @@ try {
             $_.stable_id -eq 'fleet.tabs.new' -and $_.status -eq 'planned'
         }).Count -ne 1 -or
         @($apiResult.value.entries | Where-Object {
-            $_.surface_path -eq 'agent.workspace' -and
+            $_.surface_path -eq 'fleet.workspace.info' -and
             $_.status -eq 'shipped' -and
-            $_.catalog_path -eq 'fleet/workspace/get' -and
+            $_.catalog_path -eq 'workspace.info' -and
             $_.operation_id -eq 'workspace.info'
         }).Count -ne 1 -or
         @($apiResult.value.entries | Where-Object {
@@ -471,6 +476,18 @@ try {
             $_.status -eq 'shipped'
         }).Count -ne 1) {
         throw 'script api did not expose the versioned fail-closed capability catalog'
+    }
+    $fleetEntries = @(
+        $apiResult.value.entries |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_.operation_id) }
+    )
+    if ($fleetEntries.Count -ne 14 -or
+        @($fleetEntries.operation_id | Sort-Object -Unique).Count -ne 14 -or
+        @($fleetEntries | Where-Object {
+            $_.surface_path -ne $_.operation.script_surface -or
+            $_.operation.id -ne $_.operation_id
+        }).Count -ne 0) {
+        throw 'Script API v2 did not map every typed operation exactly once'
     }
 
     Write-Host 'STEP Rhai repository dogfood contract check'
@@ -743,8 +760,10 @@ task.cancel();
     $httpFixtureScript = Join-Path $repositoryRoot 'tests\script_http_fixture.ps1'
     $httpReadyPath = Join-Path $runtimeDirectory 'http-ready.json'
     $httpLogPath = Join-Path $runtimeDirectory 'http-requests.jsonl'
+    $httpStopPath = Join-Path $runtimeDirectory 'http-stop'
     $httpFixture = Start-HttpFixture -FixturePath $httpFixtureScript `
-        -ReadyPath $httpReadyPath -LogPath $httpLogPath
+        -ReadyPath $httpReadyPath -LogPath $httpLogPath `
+        -StopPath $httpStopPath
     try {
         $httpReady = Wait-HttpFixtureReady -Process $httpFixture `
             -ReadyPath $httpReadyPath
@@ -913,6 +932,7 @@ try {
             }
         }
 
+        [IO.File]::WriteAllText($httpStopPath, 'stop')
         if (-not $httpFixture.WaitForExit(3000)) {
             throw 'loopback HTTP fixture did not exit after its bounded request set'
         }
@@ -925,11 +945,13 @@ try {
         )
         $echoRequest = @($httpRequests | Where-Object path -eq '/echo')
         $tlsRequest = @($httpRequests | Where-Object tls -eq $true)
-        if ($httpRequests.Count -ne 9 -or
+        $cancelRequest = @($httpRequests | Where-Object path -eq '/cancel')
+        if ($httpRequests.Count -notin @(8, 9) -or
             $echoRequest.Count -ne 1 -or
             $echoRequest[0].method -ne 'POST' -or
             $echoRequest[0].body_bytes -ne 7 -or
-            $tlsRequest.Count -ne 1) {
+            $tlsRequest.Count -ne 1 -or
+            $cancelRequest.Count -gt 1) {
             throw 'loopback HTTP fixture did not observe the bounded request matrix'
         }
     }
@@ -1213,11 +1235,19 @@ try {
     if (-not $unknownApi.Contains('"code":"script_api_unknown"')) {
         throw 'script check accepted an API absent from the shipped catalog'
     }
+    [IO.File]::WriteAllText($sourceFile, 'agent.workspace()')
+    $migratedApi = Invoke-ScriptFailure 1 @(
+        'script', 'check', $sourceFile, '--profile', 'observe'
+    )
+    if (-not $migratedApi.Contains('"code":"script_api_migrated"') -or
+        -not $migratedApi.Contains('fleet.workspace.info()')) {
+        throw 'Script API v2 did not provide a targeted agent-to-fleet migration diagnostic'
+    }
     Write-Evidence 'script.rhai-pure'
 
     Write-Host 'STEP pure authority denial and operation budget'
     $denied = Invoke-ScriptFailure 1 @(
-        'script', 'eval', 'agent.workspace()', '--profile', 'pure'
+        'script', 'eval', 'fleet.workspace.info()', '--profile', 'pure'
     )
     if (-not $denied.Contains('"code":"script_runtime"')) {
         throw 'pure profile unexpectedly received broker authority'
@@ -1444,39 +1474,39 @@ try {
         throw 'public bounded capture accepted an invalid byte limit'
     }
     $observed = Invoke-Script @(
-        'script', 'eval', 'agent.ui_snapshot().event_position.sequence',
+        'script', 'eval', 'fleet.ui.snapshot().event_position.sequence',
         '--profile', 'observe'
     )
     if ([uint64]$observed -lt [uint64]$snapshot.event_position.sequence) {
         throw 'observe script did not receive the typed snapshot event position'
     }
     $workspace = Invoke-Script @(
-        'script', 'eval', 'agent.workspace()', '--profile', 'observe', '--json'
+        'script', 'eval', 'fleet.workspace.info()', '--profile', 'observe', '--json'
     ) | ConvertFrom-Json
     if (-not $workspace.ok -or -not $workspace.value.event_position.epoch) {
         throw 'workspace observation did not include the stable event baseline'
     }
     $tabs = Invoke-Script @(
-        'script', 'eval', 'agent.tabs()', '--profile', 'observe', '--json'
+        'script', 'eval', 'fleet.tabs.list()', '--profile', 'observe', '--json'
     ) | ConvertFrom-Json
     if (-not $tabs.ok -or @($tabs.value).Count -lt 1) {
         throw 'typed tabs observation returned no terminal tabs'
     }
     $active = Invoke-Script @(
-        'script', 'eval', 'agent.active_tab()', '--profile', 'observe', '--json'
+        'script', 'eval', 'fleet.tabs.active()', '--profile', 'observe', '--json'
     ) | ConvertFrom-Json
     if (-not $active.ok -or -not $active.value.active) {
         throw 'typed active-tab observation did not identify the active tab'
     }
     $capture = Invoke-Script @(
-        'script', 'eval', 'agent.capture(`@1`, 32)', '--profile', 'observe', '--json'
+        'script', 'eval', 'fleet.terminal(`@1`).capture(32)', '--profile', 'observe', '--json'
     ) | ConvertFrom-Json
     if (-not $capture.ok -or $capture.value.bytes -gt 32 -or
         $capture.value.max_bytes -ne 32) {
         throw 'typed pane capture exceeded its requested byte boundary'
     }
     $eventEpochLiteral = ConvertTo-Json -Compress ([string]$snapshot.event_position.epoch)
-    $eventReadExpression = "agent.events_read($eventEpochLiteral, $($snapshot.event_position.sequence), 16)"
+    $eventReadExpression = "fleet.events.read($eventEpochLiteral, $($snapshot.event_position.sequence), 16)"
     $eventBatch = Invoke-Script @(
         'script', 'eval', $eventReadExpression,
         '--profile', 'observe', '--json'
@@ -1485,14 +1515,14 @@ try {
         throw 'typed event read did not return an observable-fleet position'
     }
     $restart = Invoke-ScriptFailure 1 @(
-        'script', 'eval', 'agent.events_read(`wrong-epoch`, 0, 1)',
+        'script', 'eval', 'fleet.events.read(`wrong-epoch`, 0, 1)',
         '--profile', 'observe'
     )
     if (-not $restart.Contains('server_restart')) {
         throw 'typed event read did not preserve the stable restart error'
     }
     $waitStopwatch = [Diagnostics.Stopwatch]::StartNew()
-    $eventWaitExpression = "agent.events_wait($eventEpochLiteral, $($snapshot.event_position.sequence), ""never.matches"", 50)"
+    $eventWaitExpression = "fleet.events.wait($eventEpochLiteral, $($snapshot.event_position.sequence), ""never.matches"", 50)"
     $waitTimeout = Invoke-ScriptFailure 1 @(
         'script', 'eval', $eventWaitExpression,
         '--profile', 'observe', '--timeout-ms', '200'
@@ -1503,12 +1533,53 @@ try {
         throw 'broker wait did not remain inside the host deadline'
     }
     $mutationDenied = Invoke-ScriptFailure 1 @(
-        'script', 'eval', 'new_tab()', '--profile', 'observe'
+        'script', 'eval', 'fleet.ui.tabs.hide()', '--profile', 'observe'
     )
-    if (-not $mutationDenied.Contains('"code":"script_runtime"')) {
+    if (-not $mutationDenied.Contains('"code":"script_runtime"') -or
+        -not $mutationDenied.Contains('fleet_operation_denied')) {
         throw 'observe profile unexpectedly exposed a mutation API'
     }
     Write-Evidence 'script.rhai-observe'
+
+    Write-Host 'STEP Script API v2 Fleet mutation receipt, event, and post-state'
+    $fleetBaselineVisible = [bool]$snapshot.layout.sidebar.visible
+    $fleetMutationExpression = @'
+let receipt = fleet.ui.tabs.toggle();
+#{
+    request_id: receipt.request_id,
+    operation_id: receipt.operation_id,
+    outcome: receipt.outcome,
+    event_count: receipt.events.len(),
+    event_kind: receipt.events[0].kind,
+    verified: receipt.post_state.verified,
+    reason: receipt.post_state.reason,
+    visible: receipt.post_state.value.layout.sidebar.visible
+}
+'@
+    $fleetMutation = Invoke-Script @(
+        'script', 'eval', $fleetMutationExpression,
+        '--profile', 'local', '--json'
+    ) | ConvertFrom-Json
+    if (-not $fleetMutation.ok -or
+        [string]::IsNullOrWhiteSpace($fleetMutation.value.request_id) -or
+        $fleetMutation.value.operation_id -ne 'ui.tabs.toggle' -or
+        $fleetMutation.value.outcome -notin @('committed', 'no_op') -or
+        $fleetMutation.value.event_count -lt 1 -or
+        $fleetMutation.value.event_kind -ne 'layout.tabs.visibility' -or
+        -not $fleetMutation.value.verified -or
+        [bool]$fleetMutation.value.visible -eq $fleetBaselineVisible) {
+        throw 'Fleet mutation did not expose its receipt, correlated event, and verified post-state'
+    }
+    $fleetRestore = Invoke-Script @(
+        'script', 'eval', 'fleet.ui.tabs.toggle().post_state.verified',
+        '--profile', 'local'
+    )
+    $fleetRestoredSnapshot = Invoke-Script @('ui-snapshot') | ConvertFrom-Json
+    if ($fleetRestore -ne 'true' -or
+        [bool]$fleetRestoredSnapshot.layout.sidebar.visible -ne $fleetBaselineVisible) {
+        throw 'Fleet mutation fixture did not restore its isolated UI state'
+    }
+    Write-Evidence 'script.fleet-v2'
 
     Write-Host 'STEP privacy-bounded reusable script audit'
     [IO.File]::WriteAllText(

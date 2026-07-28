@@ -13,6 +13,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] the explicit `observe` profile exposes typed, bounded workspace, tab,
   snapshot, capture, and event broker methods without direct Win32, PTY, or
   mutable GUI-state access.
+- [x] Script API v2 maps every current typed operation exactly once to `fleet` and verifies mutation receipts, correlated events, and post-state.
 - [x] the explicit `pure` profile provides deterministic JSON-compatible
   values, arguments, bounded computation, and captured stdout without ambient
   filesystem, environment, process, network, clock, terminal, or Fleet access.
@@ -208,16 +209,16 @@ and it is not positioned as a restricted security plugin.
 
 ## AgenTerm Fleet API
 
-- [ ] the canonical bound user facade is `fleet`, because it carries selected
+- [x] the canonical bound user facade is `fleet`, because it carries selected
   server, profile and broker identity. It exposes typed workspace, tabs,
   terminal and events service objects; ordinary calls do not require users to
   type raw operation IDs even though results and the catalog retain operation,
   request, receipt, event and post-state identities.
-- [ ] v0.1.9 proposes Script API v2 and removes the ambiguous v1 `agent`
+- [x] v0.1.9 ships Script API v2 and removes the ambiguous v1 `agent`
   facade rather than retaining a permanent alias that conflicts with the
   future `agenterm-agent.exe`; `check` emits a targeted migration diagnostic
   for old `agent.*` source.
-- [ ] generate the script-facing Fleet API systematically from the public typed
+- [x] generate the script-facing Fleet API systematically from the public typed
   operation catalog rather than maintaining a hand-selected parallel list.
 - [ ] every entry exposes stable operation ID, classification, typed
   parameters/result/errors, resolved target rules, receipt/wait behavior,
@@ -244,9 +245,9 @@ and it is not positioned as a restricted security plugin.
 - [ ] `script api --json` is the exact versioned runtime catalog and matches
   the engine, standard library, modules/tasks, profiles, Fleet operations,
   defaults, hard ceilings, and availability.
-  - [x] catalog schema v2 separates its schema version from Script API v1 and
-    provides one typed source for shipped v1 observations plus explicitly
-    planned v0.1.9 nodes; full engine/module/task conformance remains open.
+  - [x] catalog schema v2 separates its schema version from Script API v2 and
+    provides one typed source for every public typed Fleet operation plus
+    explicitly planned nodes; full engine/module/task conformance remains open.
   - [x] an explicit `local` profile foundation runs base Rhai without requiring
     a server or inheriting observe authority; the first useful fs/path/bytes/
     JSON slice has shipped and `local` is now the ordinary default.
@@ -269,9 +270,9 @@ and it is not positioned as a restricted security plugin.
 - [ ] every entry separates `catalog_path` from its shallow `surface_path`, so
   product taxonomy can evolve without forcing nested namespaces into user
   source or silently renaming callable contracts.
-  - [x] schema v2 entries carry both paths and a stable ID; the current
-    `agent.*` v1 surface is reported honestly while `fleet` migration remains
-    planned.
+  - [x] schema v2 entries carry both paths and a stable ID; Script API v2 maps
+    each typed operation exactly once to `fleet`, and `check` reports a targeted
+    migration diagnostic for removed `agent.*` calls.
 - [ ] every entry also carries nullable `rust_path`, a mapping level
   (`direct`, `adapted`, `inspired`, or `none`) and machine-readable semantic
   differences for error, type, blocking, cancellation, platform and limits.
@@ -341,7 +342,7 @@ Migration ledger:
 
 ## Public black-box acceptance
 
-- [ ] tests invoke only released `agenterm-cli script` commands and compare the
+- [x] tests invoke only released `agenterm-cli script` commands and compare the
   offline catalog with actual runtime behavior.
 - [ ] isolated temporary roots cover Unicode and long paths, metadata,
   directory operations, atomic replacement, interruption, access failure, and
@@ -383,6 +384,11 @@ Migration ledger:
   exposure or explicit degraded reason; mutations verify typed receipts,
   correlated public post-state/events, no duplicate side effect, and honest
   close/send/restart failures.
+  - [x] Script API v2 maps all 14 current typed operations exactly once; the
+    public isolated-server journey proves observe denial plus a reversible
+    local UI mutation with native request/operation identity, receipt,
+    correlated event, verified snapshot, restoration, and audit attribution.
+    Destructive failure/restart and future operation families remain open.
 - [ ] local mode proves the general runtime loop while regression fixtures keep
   pure deterministic and observe read-only.
 - [ ] script error, worker crash, timeout, cancellation, parent exit, server

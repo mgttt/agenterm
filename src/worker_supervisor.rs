@@ -193,7 +193,16 @@ impl WorkerSupervisor {
                             "worker reused a broker request_id".to_owned(),
                         ));
                     }
-                    let operation = request.operation.clone();
+                    let operation = if request.operation == "fleet.call" {
+                        request
+                            .arguments
+                            .get("operation_id")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("fleet.call.invalid")
+                            .to_owned()
+                    } else {
+                        request.operation.clone()
+                    };
                     let remaining = deadline.saturating_sub(started.elapsed());
                     if remaining.is_zero() {
                         continue;

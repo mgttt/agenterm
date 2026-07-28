@@ -2,7 +2,7 @@ use serde::Serialize;
 use serde_json::{Value, json};
 
 use crate::{
-    operations::{OperationSpec, operation_by_id},
+    operations::{OPERATION_CATALOG, OperationClass, OperationSpec},
     script_http::{
         DEFAULT_HTTP_BODY_BYTES, DEFAULT_HTTP_REDIRECTS, DEFAULT_HTTP_TIMEOUT, MAX_HTTP_BODY_BYTES,
         MAX_HTTP_HEADER_BYTES, MAX_HTTP_HEADERS, MAX_HTTP_REDIRECTS, MAX_HTTP_REQUEST_BODY_BYTES,
@@ -74,10 +74,23 @@ pub struct ScriptApiEntry {
 }
 
 const SHIPPED_PROFILES: &[&str] = &["pure", "observe", "local"];
-const OBSERVE_PROFILE: &[&str] = &["observe"];
+const FLEET_READ_PROFILES: &[&str] = &["observe", "local"];
 const LOCAL_PROFILE: &[&str] = &["local"];
 const NO_STRINGS: &[&str] = &[];
-const BROKER_ERRORS: &[&str] = &["broker_host_error", "broker_transport"];
+const FLEET_ERRORS: &[&str] = &[
+    "broker_invalid_arguments",
+    "broker_operation_unknown",
+    "broker_operation_denied",
+    "broker_operation_degraded",
+    "broker_host_error",
+    "broker_transport",
+    "broker_invalid_response",
+    "broker_receipt_missing",
+    "server_restart",
+    "journal_gap",
+    "future_sequence",
+    "event_wait_timeout",
+];
 const HTTP_REQUEST_ERRORS: &[&str] = &[
     "http_method_invalid",
     "http_method_unsupported",
@@ -142,89 +155,7 @@ pub fn entries() -> Vec<ScriptApiEntry> {
         availability_reason: None,
     }];
 
-    entries.extend([
-        broker_entry(
-            "fleet.workspace",
-            "fleet/workspace/get",
-            "agent.workspace",
-            "agent.workspace()",
-            "workspace.info",
-            "workspace_metadata_with_event_position",
-            BROKER_ERRORS,
-        ),
-        broker_entry(
-            "fleet.tabs",
-            "fleet/tabs/list",
-            "agent.tabs",
-            "agent.tabs()",
-            "tabs.list",
-            "tab_list",
-            BROKER_ERRORS,
-        ),
-        broker_entry(
-            "fleet.active-tab",
-            "fleet/tabs/active",
-            "agent.active_tab",
-            "agent.active_tab()",
-            "tabs.active",
-            "tab_or_null",
-            BROKER_ERRORS,
-        ),
-        broker_entry(
-            "fleet.ui-snapshot",
-            "fleet/ui/snapshot",
-            "agent.ui_snapshot",
-            "agent.ui_snapshot()",
-            "ui.snapshot",
-            "ui_snapshot",
-            &[
-                "broker_host_error",
-                "broker_transport",
-                "broker_return_too_large",
-            ],
-        ),
-        broker_entry(
-            "fleet.pane-capture",
-            "fleet/pane/capture",
-            "agent.capture",
-            "agent.capture(tab, max_bytes)",
-            "pane.capture",
-            "bounded_capture",
-            &[
-                "broker_invalid_arguments",
-                "broker_host_error",
-                "broker_return_too_large",
-            ],
-        ),
-        broker_entry(
-            "fleet.events-read",
-            "fleet/events/read",
-            "agent.events_read",
-            "agent.events_read(epoch, after, limit)",
-            "events.read",
-            "event_batch",
-            &[
-                "server_restart",
-                "journal_gap",
-                "future_sequence",
-                "broker_invalid_arguments",
-            ],
-        ),
-        broker_entry(
-            "fleet.events-wait",
-            "fleet/events/wait",
-            "agent.events_wait",
-            "agent.events_wait(epoch, after, kind, timeout_ms)",
-            "events.wait",
-            "event",
-            &[
-                "server_restart",
-                "journal_gap",
-                "future_sequence",
-                "event_wait_timeout",
-            ],
-        ),
-    ]);
+    entries.extend(OPERATION_CATALOG.iter().map(fleet_operation_entry));
 
     entries.extend([
         shipped_local_entry(
@@ -814,12 +745,12 @@ pub fn catalog() -> Value {
             },
             "observe": {
                 "status": "shipped",
-                "variables": ["args", "agent"],
+                "variables": ["args", "fleet"],
                 "ambient_authority": [],
             },
             "local": {
                 "status": "shipped",
-                "variables": ["args"],
+                "variables": ["args", "fleet"],
                 "ambient_authority": ["ordinary_local_program"],
                 "availability": "first_std_slice",
             },
@@ -877,48 +808,70 @@ pub fn catalog() -> Value {
     })
 }
 
-fn broker_entry(
-    stable_id: &'static str,
-    catalog_path: &'static str,
-    surface_path: &'static str,
-    signature: &'static str,
-    operation_id: &'static str,
-    result: &'static str,
-    errors: &'static [&'static str],
-) -> ScriptApiEntry {
-    let operation = operation_by_id(operation_id);
-    let available = operation.is_some_and(|operation| operation.available);
+fn fleet_operation_entry(operation: &'static OperationSpec) -> ScriptApiEntry {
+    let signature = match operation.id {
+        "protocol.info" => "fleet.protocol.info()",
+        "ui.snapshot" => "fleet.ui.snapshot()",
+        "workspace.info" => "fleet.workspace.info()",
+        "tabs.list" => "fleet.tabs.list()",
+        "tabs.active" => "fleet.tabs.active()",
+        "pane.capture" => "fleet.terminal(tab).capture(max_bytes)",
+        "events.read" => "fleet.events.read(epoch, after[, limit])",
+        "events.wait" => "fleet.events.wait(epoch, after, kind[, tab], timeout_ms)",
+        "ui.tabs.show" => "fleet.ui.tabs.show()",
+        "ui.tabs.hide" => "fleet.ui.tabs.hide()",
+        "ui.tabs.toggle" => "fleet.ui.tabs.toggle()",
+        "ui.tabs.set-width" => "fleet.ui.tabs.set_width(width)",
+        "server.kill" => "fleet.server.kill([target])",
+        "workspace.shutdown" => "fleet.workspace.shutdown()",
+        _ => operation.script_surface,
+    };
+    let authority = match operation.class {
+        OperationClass::Observe => "observe",
+        OperationClass::Control => "fleet_control",
+        OperationClass::Destructive => "fleet_destructive",
+    };
     ScriptApiEntry {
-        stable_id,
-        catalog_path,
-        surface_path,
+        stable_id: operation.id,
+        catalog_path: operation.id,
+        surface_path: operation.script_surface,
         rust_path: None,
         rust_mapping: RustMapping::None,
-        semantic_differences: &["AgenTerm-specific brokered observation"],
-        status: if available {
+        semantic_differences: &[
+            "AgenTerm-specific invocation-bound broker object",
+            "typed operations are derived from the public operation catalog",
+            "mutations return native receipt, correlated events, and verified post-state",
+        ],
+        status: if operation.available {
             ScriptApiStatus::Shipped
         } else {
             ScriptApiStatus::Planned
         },
-        stability: ScriptApiStability::Legacy,
-        designed_on: "2026-07-28",
-        since: "script-api-v1",
-        profiles: if available {
-            OBSERVE_PROFILE
+        stability: if operation.available {
+            ScriptApiStability::Stable
         } else {
+            ScriptApiStability::Reserved
+        },
+        designed_on: "2026-07-28",
+        since: "script-api-v2",
+        profiles: if !operation.available {
             NO_STRINGS
+        } else if operation.class == OperationClass::Observe {
+            FLEET_READ_PROFILES
+        } else {
+            LOCAL_PROFILE
         },
         signature,
         kind: "brokered_method",
-        authority: "observe",
-        side_effects: NO_STRINGS,
+        authority,
+        side_effects: operation.events,
         execution: "sync",
         cancellation: "host_deadline_and_broker_wait",
-        errors,
-        result: Some(result),
-        operation_id: Some(operation_id),
-        operation,
-        availability_reason: (!available).then_some("backing operation is unavailable"),
+        errors: FLEET_ERRORS,
+        result: Some(operation.result_type),
+        operation_id: Some(operation.id),
+        operation: Some(operation),
+        availability_reason: (!operation.available).then_some("backing operation is unavailable"),
     }
 }
 
@@ -1081,11 +1034,30 @@ mod tests {
             entry.status == ScriptApiStatus::Shipped && entry.operation_id.is_some()
         }) {
             assert!(
-                operation_by_id(entry.operation_id.unwrap())
+                crate::operations::operation_by_id(entry.operation_id.unwrap())
                     .is_some_and(|operation| operation.available),
                 "{} has no available operation",
                 entry.stable_id
             );
+        }
+    }
+
+    #[test]
+    fn every_typed_operation_has_exactly_one_fleet_surface() {
+        let entries = entries();
+        for operation in OPERATION_CATALOG {
+            let mapped = entries
+                .iter()
+                .filter(|entry| entry.operation_id == Some(operation.id))
+                .collect::<Vec<_>>();
+            assert_eq!(
+                mapped.len(),
+                1,
+                "operation {} must map to exactly one Fleet API",
+                operation.id
+            );
+            assert_eq!(mapped[0].surface_path, operation.script_surface);
+            assert_eq!(mapped[0].operation, Some(operation));
         }
     }
 

@@ -34,6 +34,7 @@ pub struct OperationParameterSpec {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 pub struct OperationSpec {
     pub id: &'static str,
+    pub script_surface: &'static str,
     pub class: OperationClass,
     pub command: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -135,6 +136,7 @@ const SESSION_TARGET_PARAMETERS: &[OperationParameterSpec] = &[OperationParamete
 pub const OPERATION_CATALOG: &[OperationSpec] = &[
     OperationSpec {
         id: "protocol.info",
+        script_surface: "fleet.protocol.info",
         class: OperationClass::Observe,
         command: "protocol-info",
         action: None,
@@ -149,6 +151,7 @@ pub const OPERATION_CATALOG: &[OperationSpec] = &[
     },
     OperationSpec {
         id: "ui.snapshot",
+        script_surface: "fleet.ui.snapshot",
         class: OperationClass::Observe,
         command: "ui-snapshot",
         action: None,
@@ -163,6 +166,7 @@ pub const OPERATION_CATALOG: &[OperationSpec] = &[
     },
     OperationSpec {
         id: "workspace.info",
+        script_surface: "fleet.workspace.info",
         class: OperationClass::Observe,
         command: "workspace-info",
         action: None,
@@ -177,6 +181,7 @@ pub const OPERATION_CATALOG: &[OperationSpec] = &[
     },
     OperationSpec {
         id: "tabs.list",
+        script_surface: "fleet.tabs.list",
         class: OperationClass::Observe,
         command: "ui-snapshot",
         action: None,
@@ -191,6 +196,7 @@ pub const OPERATION_CATALOG: &[OperationSpec] = &[
     },
     OperationSpec {
         id: "tabs.active",
+        script_surface: "fleet.tabs.active",
         class: OperationClass::Observe,
         command: "ui-snapshot",
         action: None,
@@ -205,6 +211,7 @@ pub const OPERATION_CATALOG: &[OperationSpec] = &[
     },
     OperationSpec {
         id: "pane.capture",
+        script_surface: "FleetTerminal.capture",
         class: OperationClass::Observe,
         command: "capture-pane",
         action: None,
@@ -219,6 +226,7 @@ pub const OPERATION_CATALOG: &[OperationSpec] = &[
     },
     OperationSpec {
         id: "events.read",
+        script_surface: "fleet.events.read",
         class: OperationClass::Observe,
         command: "read-events",
         action: None,
@@ -238,6 +246,7 @@ pub const OPERATION_CATALOG: &[OperationSpec] = &[
     },
     OperationSpec {
         id: "events.wait",
+        script_surface: "fleet.events.wait",
         class: OperationClass::Observe,
         command: "wait-events",
         action: None,
@@ -258,6 +267,7 @@ pub const OPERATION_CATALOG: &[OperationSpec] = &[
     },
     OperationSpec {
         id: UI_TABS_SHOW,
+        script_surface: "fleet.ui.tabs.show",
         class: OperationClass::Control,
         command: "ui-action",
         action: Some("tabs-show"),
@@ -272,6 +282,7 @@ pub const OPERATION_CATALOG: &[OperationSpec] = &[
     },
     OperationSpec {
         id: UI_TABS_HIDE,
+        script_surface: "fleet.ui.tabs.hide",
         class: OperationClass::Control,
         command: "ui-action",
         action: Some("tabs-hide"),
@@ -286,6 +297,7 @@ pub const OPERATION_CATALOG: &[OperationSpec] = &[
     },
     OperationSpec {
         id: UI_TABS_TOGGLE,
+        script_surface: "fleet.ui.tabs.toggle",
         class: OperationClass::Control,
         command: "ui-action",
         action: Some("tabs-toggle"),
@@ -300,6 +312,7 @@ pub const OPERATION_CATALOG: &[OperationSpec] = &[
     },
     OperationSpec {
         id: UI_TABS_SET_WIDTH,
+        script_surface: "fleet.ui.tabs.set_width",
         class: OperationClass::Control,
         command: "ui-action",
         action: Some("tabs-set-width"),
@@ -314,6 +327,7 @@ pub const OPERATION_CATALOG: &[OperationSpec] = &[
     },
     OperationSpec {
         id: "server.kill",
+        script_surface: "fleet.server.kill",
         class: OperationClass::Destructive,
         command: "kill-server",
         action: None,
@@ -328,6 +342,7 @@ pub const OPERATION_CATALOG: &[OperationSpec] = &[
     },
     OperationSpec {
         id: "workspace.shutdown",
+        script_surface: "fleet.workspace.shutdown",
         class: OperationClass::Destructive,
         command: "shutdown",
         action: None,

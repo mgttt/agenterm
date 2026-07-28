@@ -101,9 +101,11 @@ tree does not promise a version or implementation strategy.
 
 ## Current acceptance gate
 
-Run `.\check.ps1` for ordinary changes. A change is ready only when formatting,
-Clippy with warnings denied, unit tests, `dist/` artifact generation, CLI smoke,
-and semantic UX smoke all pass. Rendering changes additionally require
+Run `.\lint.ps1` for fast local feedback and `.\check.ps1` for ordinary
+changes. A change is ready only when repository static lint, formatting,
+Clippy with warnings denied, production Rhai checks, unit tests, `dist/`
+artifact generation, CLI smoke, and semantic UX smoke all pass. Rendering
+changes additionally require
 `screenshot` or `screenshot-pane` inspection.
 
 A v0.1.8 public-ready candidate uses

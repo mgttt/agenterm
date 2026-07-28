@@ -327,6 +327,14 @@
       "evidence_ids": ["script.http"]
     },
     {
+      "id": "scripting.fleet-v2",
+      "kind": "architecture",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "Script API v2 maps every current typed operation exactly once to `fleet` and verifies mutation receipts, correlated events, and post-state",
+      "evidence_ids": ["script.fleet-v2"]
+    },
+    {
       "id": "scripting.rust-host-rhai-language",
       "kind": "decision",
       "status": "accepted",

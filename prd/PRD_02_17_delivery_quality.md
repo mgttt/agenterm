@@ -31,6 +31,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   registered evidence
 - [x] CLI and semantic UX smoke tests through public interfaces
 - [x] one-command fmt, Clippy, test, build, and smoke regression
+- [x] `lint.ps1` is the fail-fast developer entry point: dependency-free
+  PowerShell AST, JSON, UTF-8/conflict-marker checks run in about one second,
+  incremental rustfmt/Clippy run before tests, and production Rhai sources are
+  checked against Script API v2 through the built worker
+- [x] lint exposes a versioned JSON result, contains an injected malformed
+  PowerShell/JSON self-test, and is represented by mandatory `repo-lint` and
+  `rhai-lint` qualification gates; no optional analyzer is silently treated as
+  a passed required gate
 - v0.1.7 self-diagnosing test harness (P0)
   - [x] one shared harness assigns a run ID, OS-selected loopback address,
     isolated workspace/settings/instance registry and evidence directories,

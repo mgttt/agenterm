@@ -28,7 +28,7 @@ require(
 
 let catalog = rhai::json::parse(std::fs::read_to_string(args[1]));
 require(catalog.schema_version == 2, "unexpected script catalog schema");
-require(catalog.api_version == 1, "unexpected Script API major");
+require(catalog.api_version == 2, "unexpected Script API major");
 require(catalog.entries.len > 0, "script catalog must not be empty");
 
 let stable_count = 0;
@@ -54,7 +54,7 @@ for entry in catalog.entries {
 
 require(stable_count > 0, "catalog must expose stable entries");
 require(reserved_count > 0, "catalog must expose reserved entries");
-require(legacy_count > 0, "catalog must expose legacy entries");
+require(legacy_count == 0, "Script API v2 must not retain legacy agent aliases");
 
 print(
     "PASS: Rhai verified the Script API contract (" +

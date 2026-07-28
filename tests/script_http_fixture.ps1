@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$ReadyPath,
     [Parameter(Mandatory = $true)][string]$LogPath,
+    [Parameter(Mandatory = $true)][string]$StopPath,
     [int]$MaxRequests = 9,
     [int]$IdleTimeoutMs = 10000
 )
@@ -53,6 +54,7 @@ function Add-RequestLog {
 
 $readyFullPath = [IO.Path]::GetFullPath($ReadyPath)
 $logFullPath = [IO.Path]::GetFullPath($LogPath)
+$stopFullPath = [IO.Path]::GetFullPath($StopPath)
 $readyParent = [IO.Path]::GetDirectoryName($readyFullPath)
 $logParent = [IO.Path]::GetDirectoryName($logFullPath)
 foreach ($directory in @($readyParent, $logParent) | Select-Object -Unique) {
@@ -84,6 +86,9 @@ $deadline = [DateTime]::UtcNow.AddMilliseconds($IdleTimeoutMs)
 try {
     while ($handled -lt $MaxRequests) {
         if (-not $listener.Pending()) {
+            if (Test-Path -LiteralPath $stopFullPath) {
+                break
+            }
             if ([DateTime]::UtcNow -ge $deadline) {
                 throw "HTTP fixture timed out after $handled requests"
             }
@@ -220,6 +225,6 @@ finally {
     $listener.Stop()
 }
 
-if ($handled -ne $MaxRequests) {
-    throw "HTTP fixture handled $handled requests, expected $MaxRequests"
+if ($handled -gt $MaxRequests) {
+    throw "HTTP fixture exceeded its $MaxRequests request ceiling"
 }

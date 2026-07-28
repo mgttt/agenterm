@@ -102,6 +102,13 @@ try {
             & '.\scripts\preflight-benchmark.ps1' -Iterations 5
         }
     }
+    Invoke-Checked -Id 'repo-lint' -Label 'repository static lint' {
+        & '.\lint.ps1' -InternalSelfTest
+        if ($LASTEXITCODE -ne 0) {
+            throw 'repository lint self-test failed'
+        }
+        & '.\lint.ps1' -Mode Static
+    }
     Invoke-Checked -Id 'rustfmt' -Label 'rustfmt' {
         cargo fmt -- --check
     }
@@ -121,6 +128,10 @@ try {
         Invoke-Checked -Id 'artifact-build' -Label 'development artifact' {
             & '.\build.bat'
         }
+    }
+    Invoke-Checked -Id 'rhai-lint' -Label 'production Rhai source lint' {
+        & '.\lint.ps1' -Mode Rhai `
+            -WorkerPath '.\dist\agenterm-script.exe'
     }
 
     Invoke-Checked -Id 'artifact-verification' `

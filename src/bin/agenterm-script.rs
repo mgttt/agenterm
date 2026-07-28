@@ -18,7 +18,7 @@ use agenterm::script_protocol::{
     ScriptFrameTracker, ScriptInvocation, ScriptOperation, ScriptProfile, ScriptResult,
     encode_script_frame, read_script_frame, write_encoded_script_frame,
 };
-use rhai::{Dynamic, Engine, EvalAltResult, Scope};
+use rhai::{Dynamic, Engine, Scope};
 
 type PendingBroker = Option<(String, mpsc::SyncSender<ScriptBrokerResponse>)>;
 
@@ -33,11 +33,11 @@ struct BrokerClient {
 }
 
 impl BrokerClient {
-    fn call(
+    fn call_json(
         &self,
         operation: &str,
         arguments: serde_json::Value,
-    ) -> Result<Dynamic, Box<EvalAltResult>> {
+    ) -> Result<serde_json::Value, String> {
         if self
             .requests_remaining
             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |value| {
@@ -45,7 +45,7 @@ impl BrokerClient {
             })
             .is_err()
         {
-            return Err("broker request budget exceeded".into());
+            return Err("broker_request_budget_exceeded".to_owned());
         }
         let sequence = self.next_request.fetch_add(1, Ordering::Relaxed);
         let request_id = format!("broker-{sequence}");
@@ -53,7 +53,7 @@ impl BrokerClient {
         {
             let mut pending = self.pending.lock().expect("pending broker lock poisoned");
             if pending.is_some() {
-                return Err("only one broker request may be outstanding".into());
+                return Err("broker_request_already_outstanding".to_owned());
             }
             *pending = Some((request_id.clone(), sender));
         }
@@ -74,25 +74,21 @@ impl BrokerClient {
                 .lock()
                 .expect("pending broker lock poisoned")
                 .take();
-            return Err(format!("failed to send broker request: {error}").into());
+            return Err(format!("broker_request_send_failed: {error}"));
         }
         let response = receiver.recv_timeout(self.timeout).map_err(|_| {
             self.pending
                 .lock()
                 .expect("pending broker lock poisoned")
                 .take();
-            Box::<EvalAltResult>::from("broker response timed out")
+            "broker_response_timeout".to_owned()
         })?;
         if let Some(error) = response.error {
-            return Err(format!("{}: {}", error.code, error.message).into());
+            return Err(format!("{}: {}", error.code, error.message));
         }
-        let value = response.value.unwrap_or(serde_json::Value::Null);
-        rhai::serde::to_dynamic(value).map_err(|error| error.to_string().into())
+        Ok(response.value.unwrap_or(serde_json::Value::Null))
     }
 }
-
-#[derive(Clone)]
-struct AgentApi(BrokerClient);
 
 fn main() -> ExitCode {
     match run() {
@@ -208,11 +204,13 @@ fn process_concurrent_framed_worker<R: Read>(
                 let active_for_worker = Arc::clone(&active);
                 let completed_for_worker = Arc::clone(&completed);
                 let pending_for_worker = Arc::clone(&pending_broker);
-                let broker = if invocation.profile == ScriptProfile::Observe
-                    && matches!(
-                        invocation.operation,
-                        ScriptOperation::Eval | ScriptOperation::Run
-                    ) {
+                let broker = if matches!(
+                    invocation.profile,
+                    ScriptProfile::Observe | ScriptProfile::Local
+                ) && matches!(
+                    invocation.operation,
+                    ScriptOperation::Eval | ScriptOperation::Run
+                ) {
                     Some(BrokerClient {
                         invocation_id: invocation_id.clone(),
                         output: Arc::clone(&output),
@@ -644,51 +642,7 @@ fn execute_inner(
     if invocation.profile == ScriptProfile::Local {
         agenterm::script_stdlib::register_local(&mut engine);
     }
-    engine.register_type_with_name::<AgentApi>("Agent");
-    engine.register_fn("workspace", |api: &mut AgentApi| {
-        api.0.call("workspace.info", serde_json::json!({}))
-    });
-    engine.register_fn("tabs", |api: &mut AgentApi| {
-        api.0.call("tabs.list", serde_json::json!({}))
-    });
-    engine.register_fn("active_tab", |api: &mut AgentApi| {
-        api.0.call("tabs.active", serde_json::json!({}))
-    });
-    engine.register_fn("ui_snapshot", |api: &mut AgentApi| {
-        api.0.call("ui.snapshot", serde_json::json!({}))
-    });
-    engine.register_fn(
-        "capture",
-        |api: &mut AgentApi, tab: &str, max_bytes: rhai::INT| {
-            api.0.call(
-                "pane.capture",
-                serde_json::json!({"tab": tab, "max_bytes": max_bytes}),
-            )
-        },
-    );
-    engine.register_fn(
-        "events_read",
-        |api: &mut AgentApi, epoch: &str, after: rhai::INT, limit: rhai::INT| {
-            api.0.call(
-                "events.read",
-                serde_json::json!({"epoch": epoch, "after": after, "limit": limit}),
-            )
-        },
-    );
-    engine.register_fn(
-        "events_wait",
-        |api: &mut AgentApi, epoch: &str, after: rhai::INT, kind: &str, timeout_ms: rhai::INT| {
-            api.0.call(
-                "events.wait",
-                serde_json::json!({
-                    "epoch": epoch,
-                    "after": after,
-                    "kind": kind,
-                    "timeout_ms": timeout_ms,
-                }),
-            )
-        },
-    );
+    agenterm::script_fleet::register(&mut engine);
 
     if invocation.operation == ScriptOperation::Check {
         engine
@@ -725,7 +679,7 @@ fn execute_inner(
         .map_err(|error| configuration_error("configuration_arguments", error.to_string()))?;
     scope.push_dynamic("args", arguments);
     match invocation.profile {
-        ScriptProfile::Pure | ScriptProfile::Local => {}
+        ScriptProfile::Pure => {}
         ScriptProfile::Observe => {
             let Some(broker) = broker else {
                 return Err(configuration_error(
@@ -733,7 +687,18 @@ fn execute_inner(
                     "observe profile requires a host broker",
                 ));
             };
-            scope.push("agent", AgentApi(broker));
+            let call = Arc::new(move |operation: &str, arguments: serde_json::Value| {
+                broker.call_json(operation, arguments)
+            });
+            scope.push("fleet", agenterm::script_fleet::bind(call, false));
+        }
+        ScriptProfile::Local => {
+            if let Some(broker) = broker {
+                let call = Arc::new(move |operation: &str, arguments: serde_json::Value| {
+                    broker.call_json(operation, arguments)
+                });
+                scope.push("fleet", agenterm::script_fleet::bind(call, true));
+            }
         }
     }
     let value = engine
@@ -813,7 +778,7 @@ fn validate_budgets(budgets: &ScriptBudgets) -> Result<(), ScriptFailure> {
 fn validate_profile_apis(
     source: &str,
     profile: ScriptProfile,
-    budgets: &ScriptBudgets,
+    _budgets: &ScriptBudgets,
 ) -> Result<(), ScriptFailure> {
     for surface_path in qualified_function_calls(source) {
         let entry = agenterm::script_catalog::entries()
@@ -837,15 +802,42 @@ fn validate_profile_apis(
             ));
         }
     }
-    for method in agent_method_calls(source) {
-        let surface_path = format!("agent.{method}");
+    if let Some(method) = agent_method_calls(source).into_iter().next() {
+        let replacement = match method.as_str() {
+            "workspace" => "fleet.workspace.info()",
+            "tabs" => "fleet.tabs.list()",
+            "active_tab" => "fleet.tabs.active()",
+            "ui_snapshot" => "fleet.ui.snapshot()",
+            "capture" => "fleet.terminal(tab).capture(max_bytes)",
+            "events_read" => "fleet.events.read(epoch, after, limit)",
+            "events_wait" => "fleet.events.wait(epoch, after, kind, timeout_ms)",
+            _ => "the canonical fleet object",
+        };
+        return Err(script_error(
+            "script_api_migrated",
+            format!("agent.{method} was removed in Script API v2; use {replacement}"),
+        ));
+    }
+    for surface_path in fleet_method_calls(source) {
+        if matches!(surface_path.as_str(), "fleet.terminal" | "fleet.operations") {
+            if profile == ScriptProfile::Pure {
+                return Err(script_error(
+                    "script_api_unavailable",
+                    format!(
+                        "API {surface_path} is unavailable in the {} profile",
+                        profile.as_str()
+                    ),
+                ));
+            }
+            continue;
+        }
         let entry = agenterm::script_catalog::entries()
             .into_iter()
             .find(|entry| entry.surface_path == surface_path);
         let Some(entry) = entry else {
             return Err(script_error(
                 "script_api_unknown",
-                format!("unknown shipped scripting API: agent.{method}"),
+                format!("unknown shipped scripting API: {surface_path}"),
             ));
         };
         if entry.status != agenterm::script_catalog::ScriptApiStatus::Shipped
@@ -854,23 +846,9 @@ fn validate_profile_apis(
             return Err(script_error(
                 "script_api_unavailable",
                 format!(
-                    "API agent.{method} is unavailable in the {} profile",
+                    "API {surface_path} is unavailable in the {} profile",
                     profile.as_str()
                 ),
-            ));
-        }
-    }
-    for (method, maximum) in [
-        ("capture", budgets.capture_bytes as u64),
-        ("events_read", budgets.event_items as u64),
-        ("events_wait", budgets.wait_time_ms),
-    ] {
-        if let Some(value) = agent_last_literal_argument(source, method)
-            && (value == 0 || value > maximum)
-        {
-            return Err(script_error(
-                "script_api_static_limit",
-                format!("agent.{method} literal limit must be from 1 to {maximum}"),
             ));
         }
     }
@@ -953,13 +931,6 @@ fn qualified_function_calls(source: &str) -> Vec<String> {
     calls
 }
 
-fn agent_last_literal_argument(source: &str, method: &str) -> Option<u64> {
-    let needle = format!("agent.{method}(");
-    let start = source.find(&needle)? + needle.len();
-    let end = source[start..].find(')')? + start;
-    source[start..end].rsplit(',').next()?.trim().parse().ok()
-}
-
 fn agent_method_calls(source: &str) -> Vec<String> {
     let bytes = source.as_bytes();
     let mut methods = Vec::new();
@@ -1014,6 +985,65 @@ fn agent_method_calls(source: &str) -> Vec<String> {
         }
     }
     methods
+}
+
+fn fleet_method_calls(source: &str) -> Vec<String> {
+    let bytes = source.as_bytes();
+    let mut paths = Vec::new();
+    let mut index = 0;
+    while index < bytes.len() {
+        if matches!(bytes[index], b'"' | b'\'' | b'`') {
+            let quote = bytes[index];
+            index += 1;
+            while index < bytes.len() {
+                if bytes[index] == b'\\' {
+                    index = (index + 2).min(bytes.len());
+                } else if bytes[index] == quote {
+                    index += 1;
+                    break;
+                } else {
+                    index += 1;
+                }
+            }
+            continue;
+        }
+        if bytes[index] == b'/' && bytes.get(index + 1) == Some(&b'/') {
+            index += 2;
+            while index < bytes.len() && bytes[index] != b'\n' {
+                index += 1;
+            }
+            continue;
+        }
+        if bytes[index] == b'/' && bytes.get(index + 1) == Some(&b'*') {
+            index += 2;
+            while index + 1 < bytes.len() && &bytes[index..index + 2] != b"*/" {
+                index += 1;
+            }
+            index = (index + 2).min(bytes.len());
+            continue;
+        }
+        if source[index..].starts_with("fleet.") {
+            let start = index;
+            index += "fleet.".len();
+            while index < bytes.len()
+                && (bytes[index] == b'_'
+                    || bytes[index] == b'.'
+                    || bytes[index].is_ascii_alphanumeric())
+            {
+                index += 1;
+            }
+            let mut next = index;
+            while next < bytes.len() && bytes[next].is_ascii_whitespace() {
+                next += 1;
+            }
+            if bytes.get(next) == Some(&b'(') {
+                paths.push(source[start..index].to_owned());
+            }
+        } else {
+            index += 1;
+        }
+    }
+    paths
 }
 
 fn external_function_calls(source: &str) -> Vec<String> {
@@ -1289,7 +1319,7 @@ mod tests {
         assert_eq!(new_tab["status"], "planned");
         let workspace = apis
             .iter()
-            .find(|api| api["surface_path"] == "agent.workspace")
+            .find(|api| api["surface_path"] == "fleet.workspace.info")
             .expect("typed workspace API");
         assert_eq!(workspace["operation_id"], "workspace.info");
         assert_eq!(workspace["status"], "shipped");
@@ -1321,25 +1351,43 @@ mod tests {
     }
 
     #[test]
-    fn check_enforces_typed_agent_api_profile_and_exact_names() {
-        let mut observe = invocation(ScriptOperation::Check, "agent.workspace()");
+    fn check_enforces_typed_fleet_api_profile_and_v2_migration() {
+        let mut observe = invocation(ScriptOperation::Check, "fleet.workspace.info()");
         observe.profile = ScriptProfile::Observe;
         assert!(execute(observe).ok);
 
-        let pure = execute(invocation(ScriptOperation::Check, "agent.workspace()"));
+        let pure = execute(invocation(ScriptOperation::Check, "fleet.workspace.info()"));
         assert_eq!(failure_code(&pure), "script_api_unavailable");
 
-        let mut unknown = invocation(ScriptOperation::Check, "agent.not_shipped()");
+        let mut unknown = invocation(ScriptOperation::Check, "fleet.not_shipped()");
         unknown.profile = ScriptProfile::Observe;
         assert_eq!(failure_code(&execute(unknown)), "script_api_unknown");
-        let mut excessive = invocation(ScriptOperation::Check, r#"agent.capture("@1", 999999)"#);
-        excessive.profile = ScriptProfile::Observe;
-        assert_eq!(failure_code(&execute(excessive)), "script_api_static_limit");
+
+        let mut migrated = invocation(ScriptOperation::Check, "agent.workspace()");
+        migrated.profile = ScriptProfile::Observe;
+        let migrated = execute(migrated);
+        assert_eq!(failure_code(&migrated), "script_api_migrated");
+        assert!(
+            migrated
+                .failure
+                .as_ref()
+                .is_some_and(|failure| failure.message.contains("fleet.workspace.info()"))
+        );
         assert!(agent_method_calls(r#""agent.hidden()"; // agent.comment()"#).is_empty());
+        assert_eq!(
+            fleet_method_calls(
+                r#"fleet.workspace.info(); fleet.ui.tabs.set_width(240); fleet.terminal("@1").capture(32)"#
+            ),
+            [
+                "fleet.workspace.info",
+                "fleet.ui.tabs.set_width",
+                "fleet.terminal"
+            ]
+        );
     }
 
     #[test]
-    fn local_profile_runs_base_rhai_without_observe_authority() {
+    fn local_profile_runs_base_rhai_and_accepts_fleet_contract() {
         let mut local = invocation(ScriptOperation::Eval, "40 + 2");
         local.profile = ScriptProfile::Local;
         let local = execute(local);
@@ -1347,12 +1395,9 @@ mod tests {
         assert_eq!(local.value, Some(serde_json::json!(42)));
         assert_eq!(local.profile, Some(ScriptProfile::Local));
 
-        let mut unavailable = invocation(ScriptOperation::Check, "agent.workspace()");
-        unavailable.profile = ScriptProfile::Local;
-        assert_eq!(
-            failure_code(&execute(unavailable)),
-            "script_api_unavailable"
-        );
+        let mut fleet = invocation(ScriptOperation::Check, "fleet.workspace.info()");
+        fleet.profile = ScriptProfile::Local;
+        assert!(execute(fleet).ok);
 
         let mut shipped = invocation(
             ScriptOperation::Check,

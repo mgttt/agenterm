@@ -87,7 +87,7 @@ $r = ".\dist\agenterm-cli.exe"
 # Discover and run the bounded scripting surface.
 & $r script api --json
 & $r script eval "40 + 2"
-& $r script eval "agent.ui_snapshot().event_position.sequence" --profile observe
+& $r script eval "fleet.ui.snapshot().event_position.sequence" --profile observe
 
 # Discover every registered server, then target one explicitly.
 & $r server-list
@@ -112,6 +112,7 @@ Keep `Cargo.toml`'s version current, commit the release state on `main`, then
 run:
 
 ```powershell
+.\lint.ps1
 .\release.ps1
 ```
 

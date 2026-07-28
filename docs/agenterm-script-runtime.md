@@ -288,48 +288,49 @@ agenterm-script
 │  │  [shipped; stable; designed 2026-07-28]
 │  └─ Receipt / Event / PostState
 │     Fleet mutation evidence and verified resulting state.
-│     [planned; reserved; designed 2026-07-28]
-│
-├─ agent
-│  Script API v1 read-only broker facade.
-│  [legacy-v1; legacy; designed 2026-07-28]
-│  ├─ .workspace()
-│  │  Reads workspace metadata and event position.
-│  │  [shipped v1; legacy; designed 2026-07-28]
-│  ├─ .tabs() / .active_tab()
-│  │  Reads the tab list or active tab.
-│  │  [shipped v1; legacy; designed 2026-07-28]
-│  ├─ .ui_snapshot()
-│  │  Reads the bounded semantic UI snapshot.
-│  │  [shipped v1; legacy; designed 2026-07-28]
-│  ├─ .capture(tab, max_bytes)
-│  │  Reads bounded terminal capture.
-│  │  [shipped v1; legacy; designed 2026-07-28]
-│  └─ .events_read(...) / .events_wait(...)
-│     Reads or waits for bounded Fleet events.
-│     [shipped v1; legacy; designed 2026-07-28]
+│     [shipped; stable; designed 2026-07-28]
 │
 ├─ fleet
 │  Canonical Script API v2 object bound to one AgenTerm server and broker.
-│  [planned; stable name reservation; designed 2026-07-28]
+│  [shipped; stable; designed 2026-07-28]
+│  ├─ .protocol.info()
+│  │  Reads protocol, build, command, operation, and event discovery facts.
+│  │  [shipped; stable; designed 2026-07-28]
 │  ├─ .workspace
 │  │  Typed workspace identity and state.
-│  │  [planned; reserved; designed 2026-07-28]
+│  │  [shipped; stable; designed 2026-07-28]
+│  │  ├─ .info()
+│  │  │  Reads workspace metadata with an event position.
+│  │  │  [shipped; stable; designed 2026-07-28]
+│  │  └─ .shutdown() -> Receipt
+│  │     Executes the native destructive workspace operation.
+│  │     [shipped local only; stable; designed 2026-07-28]
 │  ├─ .tabs
-│  │  Typed tab discovery and mutation.
-│  │  [planned; reserved; designed 2026-07-28]
-│  │  ├─ .list() / .active()
-│  │  │  Reads stable tab objects.
-│  │  │  [planned; reserved; designed 2026-07-28]
-│  │  └─ mutation methods -> Receipt
-│  │     Performs typed tab/tree/composer operations.
-│  │     [planned; reserved; designed 2026-07-28]
+│  │  Typed tab discovery from the public operation catalog.
+│  │  [shipped observation slice; stable; designed 2026-07-28]
+│  │  └─ .list() / .active()
+│  │     Reads stable tab objects.
+│  │     [shipped; stable; designed 2026-07-28]
+│  ├─ .ui.snapshot()
+│  │  Reads the bounded semantic UI snapshot.
+│  │  [shipped; stable; designed 2026-07-28]
+│  ├─ .ui.tabs
+│  │  Controls the sidebar through typed native operations.
+│  │  [shipped local only; stable; designed 2026-07-28]
+│  │  ├─ .show() / .hide() / .toggle() -> Receipt
+│  │  └─ .set_width(width) -> Receipt
 │  ├─ .terminal(tab_id)
-│  │  Binds terminal observation, input, viewport, and lifecycle operations.
-│  │  [planned; reserved; designed 2026-07-28]
-│  └─ .events
+│  │  Binds a stable tab ID and exposes .capture(max_bytes).
+│  │  [shipped observation slice; stable; designed 2026-07-28]
+│  ├─ .events
 │     Reads, waits for, or starts waits over the typed event journal.
-│     [planned; reserved; designed 2026-07-28]
+│     [shipped read/wait slice; stable; designed 2026-07-28]
+│  ├─ .server.kill([target]) -> Receipt
+│  │  Executes the native destructive server operation.
+│  │  [shipped local only; stable; designed 2026-07-28]
+│  └─ .operations()
+│     Lists all catalog-derived operations and profile availability.
+│     [shipped; stable; designed 2026-07-28]
 │
 ├─ project composition
 │  Local modules and named task discovery.
@@ -856,10 +857,19 @@ stable unavailable/degraded reason. Mutations use stable targets, request
 identity, receipts, event positions, and verified post-state. Retries MUST NOT
 repeat committed side effects.
 
-Script API v1 currently exposes the legacy `agent` object. Script API v2
-reserves `fleet` as its only canonical facade. The v2 migration MUST provide
-machine-readable replacements and MUST NOT retain two permanent equivalent
-facades.
+Script API v2 exposes `fleet` as its only canonical facade. The former v1
+`agent` object is not registered as an alias; `script check` reports
+`script_api_migrated` with the matching v2 path. Every operation in the public
+typed operation catalog has exactly one Script API entry. Read-only operations
+are available to `observe` and `local`; control and destructive operations are
+available only to `local` and are independently revalidated by the host broker.
+
+Mutation methods return a typed `Receipt`. It carries the native control
+receipt, bounded correlated events, and a `PostState` containing `verified`,
+`reason`, and the resulting public state. A missing native receipt fails
+closed. When a destructive operation makes subsequent observation impossible,
+`verified` remains false with `destructive_post_state_unavailable` rather than
+inventing success evidence.
 
 Operation classification is a tool fact, not Agent authorization. A future
 Agent layer MAY filter these capabilities without redefining Script Runtime.
