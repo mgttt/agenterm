@@ -1,5 +1,65 @@
 use winit::event::{ElementState, KeyEvent};
-use winit::keyboard::{Key, NamedKey, PhysicalKey};
+use winit::keyboard::{Key, ModifiersState, NamedKey, PhysicalKey};
+
+/// Result of handling a key in composer focus.
+pub(super) enum ComposerKeyAction {
+    /// Text changed; redraw only.
+    Edited,
+    /// Submit the draft to the active tab.
+    Submit,
+    /// Return focus to the terminal without submitting.
+    Escape,
+    /// Ignore this key.
+    Ignored,
+}
+
+/// Maps a winit key event to composer edits when the composer strip has focus.
+pub(super) fn composer_key_action(
+    event: &KeyEvent,
+    modifiers: ModifiersState,
+    buffer: &mut String,
+) -> ComposerKeyAction {
+    if event.state != ElementState::Pressed || event.repeat {
+        return ComposerKeyAction::Ignored;
+    }
+
+    let control = modifiers.control_key();
+    let shift = modifiers.shift_key();
+
+    match &event.logical_key {
+        Key::Named(NamedKey::Enter) if control => ComposerKeyAction::Submit,
+        Key::Named(NamedKey::Escape) => ComposerKeyAction::Escape,
+        Key::Named(NamedKey::Enter) => {
+            buffer.push('\n');
+            ComposerKeyAction::Edited
+        }
+        Key::Named(NamedKey::Backspace) => {
+            if buffer.pop().is_some() {
+                ComposerKeyAction::Edited
+            } else {
+                ComposerKeyAction::Ignored
+            }
+        }
+        Key::Character(text) if !control && !shift => {
+            let mut changed = false;
+            for ch in text.chars() {
+                if ch == '\r' {
+                    buffer.push('\n');
+                    changed = true;
+                } else if !ch.is_control() {
+                    buffer.push(ch);
+                    changed = true;
+                }
+            }
+            if changed {
+                ComposerKeyAction::Edited
+            } else {
+                ComposerKeyAction::Ignored
+            }
+        }
+        _ => ComposerKeyAction::Ignored,
+    }
+}
 
 /// Maps a winit key event to bytes suitable for PTY input.
 ///

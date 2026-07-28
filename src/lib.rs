@@ -6,6 +6,8 @@ mod build_identity;
 mod client;
 mod commands;
 mod control_contract;
+#[cfg(any(windows, unix))]
+mod control_dispatch;
 mod event_journal;
 mod instances;
 mod ipc_transport;

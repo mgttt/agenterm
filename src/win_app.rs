@@ -54,15 +54,15 @@ use windows_sys::Win32::{
 };
 
 use crate::commands::{
-    BACKSPACE_INPUT, has_option, last_positional, option_value, parse_new_command,
-    parse_tab_environment, positional_values, screenshot_output_path, supported_commands,
-    tmux_key_bytes,
+    BACKSPACE_INPUT, has_option, option_value, parse_new_command, parse_tab_environment,
+    screenshot_output_path,
 };
 use crate::control_contract::{
     Admission, ControlError, ControlReceipt, ControlRequest, ErrorCategory,
     EventPosition as ControlEventPosition, ReceiptOutcome, ReplayWindow, ResolvedTarget,
     WaitCondition, WaitDescriptor,
 };
+use crate::control_dispatch::{ControlHost, dispatch_shared_command, render_format};
 use crate::event_journal::{EventJournal, EventKind};
 use crate::instances::{InstanceRegistration, register_instance};
 use crate::ipc_transport::{IpcEnvelope, start_ipc_server};
@@ -72,7 +72,7 @@ use crate::operations::{
 };
 use crate::protocol::{IpcRequest, IpcResponse};
 use crate::settings::{AppConfig, config_path, load_config, save_config};
-use crate::tab_tree::{TabTreeNode, TabTreeRow, tree_rows, would_create_cycle};
+use crate::tab_tree::{TabTreeNode, TabTreeRow, tree_rows};
 use crate::terminal_observation::TerminalProcessState;
 use crate::terminal_runtime::{TerminalLaunch, TerminalTab};
 use crate::terminal_selection::{
@@ -112,7 +112,6 @@ use std::{
 const APP_NAME: &str = "AgenTerm";
 const INITIAL_ROWS: u16 = 30;
 const INITIAL_COLS: u16 = 100;
-const SCROLLBACK_LINES: usize = crate::SCROLLBACK_LINES;
 const COMPOSER_HEADER_HEIGHT: i32 = 26;
 const COMPOSER_MARGIN: i32 = 6;
 const COMPOSER_CONTROL_GAP: i32 = 6;
@@ -169,7 +168,6 @@ const SYSTEM_MENU_TOGGLE_TABS_ID: usize = 0x1f20;
 const WINDOW_CLOSE_BUTTON_TEXT_FORMAT: u32 = DT_CENTER | DT_SINGLELINE | DT_VCENTER;
 const CLIPBOARD_UNICODE_TEXT: u32 = 13;
 const TERMINAL_PASTE_LIMIT_BYTES: usize = 256 * 1024;
-const CAPTURE_PUBLIC_MAX_BYTES: usize = 1024 * 1024;
 static PROXY_NONCE_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 fn new_proxy_confirmation_marker() -> Result<ProxyConfirmationMarker> {
@@ -182,13 +180,6 @@ fn new_proxy_confirmation_marker() -> Result<ProxyConfirmationMarker> {
     ProxyConfirmationMarker::from_nonce(&format!("{time:016x}{sequence:016x}"))
 }
 
-fn bounded_utf8_prefix(value: &str, maximum: usize) -> &str {
-    let mut take = maximum.min(value.len());
-    while take > 0 && !value.is_char_boundary(take) {
-        take -= 1;
-    }
-    &value[..take]
-}
 pub(crate) fn request_gui_wake(wake_window: isize, wake_signal: &WakeSignal) {
     if wake_signal.request() {
         unsafe {
@@ -1734,39 +1725,6 @@ impl AppState {
     fn tree_row_position(&self, row: usize) -> Option<usize> {
         let id = self.tree_rows().get(row)?.id;
         self.tabs.iter().position(|tab| tab.id == id)
-    }
-
-    fn tab_depth(&self, id: u64) -> usize {
-        self.all_tree_rows()
-            .iter()
-            .find(|row| row.id == id)
-            .map(|row| row.depth)
-            .unwrap_or(0)
-    }
-
-    fn set_tab_parent(&mut self, child_id: u64, parent_id: Option<u64>) -> Result<()> {
-        let Some(child_position) = self.tabs.iter().position(|tab| tab.id == child_id) else {
-            anyhow::bail!("can't find child tab: @{child_id}");
-        };
-        if let Some(parent_id) = parent_id {
-            if !self.tabs.iter().any(|tab| tab.id == parent_id) {
-                anyhow::bail!("can't find parent tab: @{parent_id}");
-            }
-            if would_create_cycle(&self.tree_nodes(), child_id, parent_id) {
-                anyhow::bail!("moving @{child_id} under @{parent_id} would create a cycle");
-            }
-        }
-        let previous_parent_id = self.tabs[child_position].parent_id;
-        self.tabs[child_position].parent_id = parent_id;
-        self.event_journal.commit(
-            EventKind::TabParent,
-            Some(child_id),
-            serde_json::json!({
-                "previous_parent_id": previous_parent_id,
-                "parent_id": parent_id,
-            }),
-        );
-        Ok(())
     }
 
     fn active_position(&self) -> Option<usize> {
@@ -4369,9 +4327,8 @@ impl AppState {
                 "page-down"
             };
             if let Ok(offset) = self.tabs[position].scroll_viewport(action, None) {
-                self.commit_viewport_event(position, offset, "scrollbar-track");
+                self.on_viewport_scrolled(position, offset, "scrollbar-track");
             }
-            unsafe { InvalidateRect(self.window, ptr::null(), 0) };
         }
         true
     }
@@ -4387,8 +4344,7 @@ impl AppState {
         let offset = scrollback_for_thumb_top(geometry, y - drag.thumb_grab_offset, maximum);
         if let Some(position) = self.active_position() {
             let offset = self.tabs[position].set_scrollback(offset);
-            self.commit_viewport_event(position, offset, "scrollbar-drag");
-            unsafe { InvalidateRect(self.window, ptr::null(), 0) };
+            self.on_viewport_scrolled(position, offset, "scrollbar-drag");
         }
     }
 
@@ -4426,22 +4382,8 @@ impl AppState {
             .scroll_viewport(action, Some(rows))
             .unwrap_or(before);
         if after != before {
-            self.cancel_terminal_selection(true);
-            self.commit_viewport_event(position, after, "mouse-wheel");
-            unsafe { InvalidateRect(self.window, ptr::null(), 0) };
+            self.on_viewport_scrolled(position, after, "mouse-wheel");
         }
-    }
-
-    fn commit_viewport_event(&mut self, position: usize, offset: usize, source: &str) {
-        let id = self.tabs[position].id;
-        self.event_journal.commit(
-            EventKind::TerminalViewport,
-            Some(id),
-            serde_json::json!({
-                "scrollback_offset": offset,
-                "source": source,
-            }),
-        );
     }
 
     fn terminal_cell_at(&self, x: i32, y: i32) -> Option<(u16, u16)> {
@@ -6370,7 +6312,341 @@ impl AppState {
         }
         response.with_receipt(receipt)
     }
+}
 
+impl ControlHost for AppState {
+    fn session_name(&self) -> &str {
+        &self.session_name
+    }
+
+    fn started_at_unix_secs(&self) -> u64 {
+        self.started_at
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|duration| duration.as_secs())
+            .unwrap_or_default()
+    }
+
+    fn tabs(&self) -> &[TerminalTab] {
+        &self.tabs
+    }
+
+    fn tabs_mut(&mut self) -> &mut Vec<TerminalTab> {
+        &mut self.tabs
+    }
+
+    fn active_id(&self) -> Option<u64> {
+        self.active
+    }
+
+    fn set_active_id(&mut self, id: Option<u64>) {
+        self.active = id;
+    }
+
+    fn request_shutdown(&mut self) {
+        self.close_requested = true;
+    }
+
+    fn before_destructive_ui(&mut self) {
+        self.finish_note_edit(false);
+        self.cancel_terminal_selection(true);
+    }
+
+    fn sync_composer_from_ui(&mut self) {
+        self.save_active_composer();
+    }
+
+    fn load_composer_to_ui(&mut self) {
+        self.load_active_composer();
+    }
+
+    fn focus_surface(&self) -> &str {
+        self.current_focus_surface().as_str()
+    }
+
+    fn set_ipc_focus_surface(&mut self, surface: &str) -> Result<(), String> {
+        let target = match surface {
+            "terminal" => FocusSurface::Terminal,
+            "composer" => FocusSurface::Composer,
+            "tabs" | "sidebar" => FocusSurface::Tabs,
+            other => return Err(format!("unknown focus surface: {other}")),
+        };
+        if self.set_focus_surface(target, "semantic") {
+            Ok(())
+        } else {
+            Err(format!("focus surface is unavailable: {surface}"))
+        }
+    }
+
+    fn settings_json(&self) -> String {
+        serde_json::to_string_pretty(&serde_json::json!({
+            "terminal_font_family": self.config.terminal_font_family,
+            "terminal_font_size": self.config.terminal_font_size,
+            "resolved_font_family": self.resolved_font_family,
+            "config_path": config_path(),
+            "recommended_cjk_font": "Sarasa Fixed SC",
+            "recommended_font_license": "SIL Open Font License 1.1",
+        }))
+        .unwrap_or_default()
+    }
+
+    fn apply_set_composer(&mut self, position: usize, text: String) -> Result<(), String> {
+        let id = self.tabs[position].id;
+        if self.note_edit_target == Some(id) {
+            let normalized = text.replace("\r\n", "\n");
+            let (name, note) = normalized.split_once('\n').unwrap_or((&normalized, ""));
+            unsafe {
+                SetWindowTextW(self.tab_name_edit, wide(name).as_ptr());
+                SetWindowTextW(self.tab_note_edit, wide(note).as_ptr());
+            }
+            return Ok(());
+        }
+        self.tabs[position].composer = text.clone();
+        self.event_journal.commit(
+            EventKind::ComposerDraft,
+            Some(id),
+            serde_json::json!({
+                "length": text.chars().count(),
+            }),
+        );
+        if self.active == Some(id) {
+            unsafe { SetWindowTextW(self.edit, wide(&text).as_ptr()) };
+        }
+        Ok(())
+    }
+
+    fn apply_setting(&mut self, key: &str, value: &str) -> Result<(), String> {
+        match key {
+            "terminal.font-family" if !value.trim().is_empty() => {
+                self.config.terminal_font_family = value.to_owned();
+            }
+            "terminal.font-size" => {
+                let Ok(size) = value.parse::<u16>() else {
+                    return Err("font size must be a number from 8 to 36".to_owned());
+                };
+                if !(8..=36).contains(&size) {
+                    return Err("font size must be from 8 to 36".to_owned());
+                }
+                self.config.terminal_font_size = size;
+            }
+            "terminal.font-family" => return Err("font family cannot be empty".to_owned()),
+            other => return Err(format!("unknown setting: {other}")),
+        }
+        self.rebuild_terminal_font();
+        save_config(&self.config).map_err(|error| format!("{error:#}"))
+    }
+
+    fn close_tab_by_ui_action(&mut self, id: u64) -> Result<(), String> {
+        if !self.tabs.iter().any(|tab| tab.id == id) {
+            return Err(format!("can't find tab: @{id}"));
+        }
+        self.request_close_tab(id);
+        Ok(())
+    }
+
+    fn prepare_composer_send(&mut self) -> Result<bool, String> {
+        if self.cwd_edit_target.is_some() || self.proxy_edit_target.is_some() {
+            return Err("CWD editor is active; prepare, send now, or cancel it first".to_owned());
+        }
+        if self.note_edit_target.is_some() {
+            self.finish_note_edit(true);
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    fn after_create_tab(&mut self, id: u64, parent_id: Option<u64>) {
+        if parent_id.is_some() {
+            self.open_tab_editor(id);
+        }
+    }
+
+    fn config_tabs_visible(&self) -> bool {
+        self.config.tabs_visible
+    }
+
+    fn set_tabs_visible(
+        &mut self,
+        visible: bool,
+        cause: &str,
+        operation_id: &str,
+    ) -> Result<(), String> {
+        AppState::set_tabs_visible(self, visible, cause, operation_id);
+        Ok(())
+    }
+
+    fn set_tabs_width(
+        &mut self,
+        width: u16,
+        cause: &str,
+        operation_id: &str,
+    ) -> Result<(), String> {
+        AppState::set_tabs_width(self, width, cause, operation_id);
+        Ok(())
+    }
+
+    fn toggle_tab_collapsed(&mut self, tab_id: u64) -> Result<(), String> {
+        let Some(position) = self.tabs.iter().position(|tab| tab.id == tab_id) else {
+            return Err(format!("can't find tab: @{tab_id}"));
+        };
+        if !self.tabs.iter().any(|tab| tab.parent_id == Some(tab_id)) {
+            return Err("tab has no child nodes".to_owned());
+        }
+        if !self.collapsed_tabs.remove(&tab_id) {
+            self.collapsed_tabs.insert(tab_id);
+        }
+        self.layout();
+        unsafe { InvalidateRect(self.window, ptr::null(), 0) };
+        let _ = position;
+        Ok(())
+    }
+
+    fn open_settings_modal(&mut self) -> Result<(), String> {
+        self.open_settings();
+        Ok(())
+    }
+
+    fn close_settings_modal(&mut self, apply: bool) -> Result<(), String> {
+        if !self.settings_open {
+            return Err("settings are not open".to_owned());
+        }
+        if apply {
+            self.apply_settings_from_controls();
+        } else {
+            self.close_settings();
+        }
+        Ok(())
+    }
+
+    fn preview_settings_theme(&mut self, theme: ThemeId) {
+        self.preview_theme(theme);
+    }
+
+    fn open_tab_editor(&mut self, tab_id: u64) -> Result<(), String> {
+        AppState::open_tab_editor(self, tab_id);
+        Ok(())
+    }
+
+    fn finish_tab_editor(&mut self, save: bool) -> Result<(), String> {
+        if self.note_edit_target.is_none() {
+            return Err("tab editor is not open".to_owned());
+        }
+        self.finish_note_edit(save);
+        Ok(())
+    }
+
+    fn ui_action_cancel(&mut self) -> Result<bool, String> {
+        if self.window_close_pending {
+            self.finish_window_close(WindowCloseChoice::Cancel);
+            return Ok(true);
+        }
+        if self.settings_open {
+            self.close_settings();
+            return Ok(true);
+        }
+        if self.cwd_edit_target.is_some() {
+            self.close_cwd_editor();
+            return Ok(true);
+        }
+        if self.proxy_edit_target.is_some() {
+            self.close_proxy_editor();
+            return Ok(true);
+        }
+        if self.note_edit_target.is_some() {
+            self.finish_note_edit(false);
+            return Ok(true);
+        }
+        if self.pending_close.is_some() {
+            self.finish_close_confirmation(false);
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    fn set_session_name(&mut self, name: String) {
+        self.session_name = name;
+    }
+
+    fn create_tab(
+        &mut self,
+        title: Option<String>,
+        command_line: Vec<String>,
+        tab_environment: Vec<(String, String)>,
+        select: bool,
+        parent_id: Option<u64>,
+    ) -> Result<u32, String> {
+        self.create_tab_with_parent(title, command_line, tab_environment, select, parent_id)
+            .map_err(|error| format!("{error:#}"))
+    }
+
+    fn select_tab_at(&mut self, position: usize) -> Result<(), String> {
+        if position >= self.tabs.len() {
+            return Err("can't find window".to_owned());
+        }
+        if self.proxy_edit_target.is_some() {
+            self.close_proxy_editor();
+        }
+        self.save_active_composer();
+        let id = self.tabs[position].id;
+        self.finish_note_edit(false);
+        self.cancel_terminal_selection(true);
+        self.active = Some(id);
+        self.load_active_composer();
+        self.event_journal
+            .commit(EventKind::TabSelected, Some(id), serde_json::json!({}));
+        self.reattach_window("select-window");
+        Ok(())
+    }
+
+    fn close_tab_id(&mut self, id: u64) -> Result<bool, String> {
+        Ok(self.close_tab(id))
+    }
+
+    fn adjacent_tab_position(&self, direction: i32) -> Option<usize> {
+        self.adjacent_position(direction)
+    }
+
+    fn resolve_parent_id(&self, target: &str) -> Result<Option<u64>, String> {
+        self.parent_id_from_target(target)
+            .map_err(|error| format!("{error:#}"))
+    }
+
+    fn event_journal(&self) -> &EventJournal {
+        &self.event_journal
+    }
+
+    fn event_journal_mut(&mut self) -> &mut EventJournal {
+        &mut self.event_journal
+    }
+
+    fn request_ui_redraw(&mut self) {
+        unsafe { InvalidateRect(self.window, ptr::null(), 0) };
+    }
+
+    fn ui_snapshot_json(&mut self) -> Option<String> {
+        Some(self.ui_snapshot())
+    }
+
+    fn on_viewport_scrolled(&mut self, position: usize, offset: usize, source: &str) {
+        if self
+            .terminal_selection
+            .is_some_and(|selection| selection.tab_id == self.tabs[position].id)
+        {
+            self.cancel_terminal_selection(true);
+        }
+        let id = self.tabs[position].id;
+        self.event_journal_mut().commit(
+            EventKind::TerminalViewport,
+            Some(id),
+            serde_json::json!({
+                "scrollback_offset": offset,
+                "source": source,
+            }),
+        );
+        self.request_ui_redraw();
+    }
+}
+
+impl AppState {
     fn execute_command(
         &mut self,
         args: &[String],
@@ -6379,6 +6655,9 @@ impl AppState {
         let Some(command) = args.first().map(String::as_str) else {
             return IpcResponse::failure("no command specified");
         };
+        if let Some(response) = dispatch_shared_command(self, args) {
+            return response;
+        }
         match command {
             "__show-no-activate" => {
                 self.show_window_no_activate("launcher-no-activate");
@@ -6423,43 +6702,6 @@ impl AppState {
                 }
                 self.reattach_window("new-session");
                 IpcResponse::success("")
-            }
-            "neww" | "new-window" => {
-                let (title, detached, child_command) = parse_new_command(args);
-                let tab_environment = match parse_tab_environment(args) {
-                    Ok(environment) => environment,
-                    Err(error) => return IpcResponse::failure(error),
-                };
-                let parent_id = match option_value(args, "--parent") {
-                    Some(target) => match self.parent_id_from_target(target) {
-                        Ok(parent_id) => parent_id,
-                        Err(error) => return IpcResponse::failure(format!("{error:#}")),
-                    },
-                    None => None,
-                };
-                match self.create_tab_with_parent(
-                    title,
-                    child_command,
-                    tab_environment,
-                    !detached,
-                    parent_id,
-                ) {
-                    Ok(index) => {
-                        let format = option_value(args, "-F").unwrap_or("#{window_index}");
-                        let tab = self
-                            .tabs
-                            .iter()
-                            .find(|tab| tab.index == index)
-                            .expect("newly created tab must remain present");
-                        IpcResponse::success(render_format(
-                            format,
-                            tab,
-                            &self.session_name,
-                            self.active == Some(tab.id),
-                        ))
-                    }
-                    Err(error) => IpcResponse::failure(format!("{error:#}")),
-                }
             }
             "new-agent" => {
                 let (title, detached, agent_arguments) = parse_new_command(args);
@@ -6513,455 +6755,6 @@ impl AppState {
                     Err(error) => {
                         IpcResponse::failure(format!("failed to start Codex agent tab: {error:#}"))
                     }
-                }
-            }
-            "ls" | "list-sessions" => IpcResponse::success(format!(
-                "{}: {} windows (created {}) (attached)",
-                self.session_name,
-                self.tabs.len(),
-                self.started_at
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .map(|duration| duration.as_secs())
-                    .unwrap_or_default()
-            )),
-            "has" | "has-session" => {
-                let requested = option_value(args, "-t");
-                if requested.is_none_or(|name| name == self.session_name) {
-                    IpcResponse::success("")
-                } else {
-                    IpcResponse::failure(format!(
-                        "can't find session: {}",
-                        requested.unwrap_or_default()
-                    ))
-                }
-            }
-            "lsw" | "list-windows" => {
-                let format = option_value(args, "-F").unwrap_or("#I:#W#{?window_active,*,}");
-                IpcResponse::success(
-                    self.tabs
-                        .iter()
-                        .map(|tab| {
-                            render_format(
-                                format,
-                                tab,
-                                &self.session_name,
-                                self.active == Some(tab.id),
-                            )
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n"),
-                )
-            }
-            "lsp" | "list-panes" => {
-                let format = option_value(args, "-F").unwrap_or(
-                    "#{pane_id}: [#{pane_width}x#{pane_height}] #{pane_current_command}",
-                );
-                let all = args.iter().any(|arg| arg == "-a");
-                let tabs: Vec<&TerminalTab> = if all {
-                    self.tabs.iter().collect()
-                } else {
-                    self.target_position(option_value(args, "-t"))
-                        .and_then(|position| self.tabs.get(position))
-                        .into_iter()
-                        .collect()
-                };
-                IpcResponse::success(
-                    tabs.into_iter()
-                        .map(|tab| {
-                            render_format(
-                                format,
-                                tab,
-                                &self.session_name,
-                                self.active == Some(tab.id),
-                            )
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n"),
-                )
-            }
-            "selectw" | "select-window" => {
-                let target = if args.iter().any(|arg| arg == "-n") {
-                    self.adjacent_position(1)
-                } else if args.iter().any(|arg| arg == "-p") {
-                    self.adjacent_position(-1)
-                } else {
-                    self.target_position(option_value(args, "-t"))
-                };
-                let Some(position) = target else {
-                    return IpcResponse::failure("can't find window");
-                };
-                if self.proxy_edit_target.is_some() {
-                    self.close_proxy_editor();
-                }
-                self.save_active_composer();
-                let id = self.tabs[position].id;
-                self.finish_note_edit(false);
-                self.cancel_terminal_selection(true);
-                self.active = Some(id);
-                self.load_active_composer();
-                self.event_journal
-                    .commit(EventKind::TabSelected, Some(id), serde_json::json!({}));
-                self.reattach_window("select-window");
-                IpcResponse::success("")
-            }
-            "next" | "next-window" => self.select_adjacent(1),
-            "prev" | "previous-window" => self.select_adjacent(-1),
-            "renamew" | "rename-window" => {
-                let Some(name) = last_positional(args, &["-t"]) else {
-                    return IpcResponse::failure("usage: rename-window [-t target] new-name");
-                };
-                let Some(position) = self.target_position(option_value(args, "-t")) else {
-                    return IpcResponse::failure("can't find window");
-                };
-                let id = self.tabs[position].id;
-                let previous_name = self.tabs[position].title.clone();
-                self.tabs[position].title = name.to_owned();
-                self.event_journal.commit(
-                    EventKind::TabRenamed,
-                    Some(id),
-                    serde_json::json!({
-                        "previous_name": previous_name,
-                        "name": name,
-                    }),
-                );
-                IpcResponse::success("")
-            }
-            "set-tab-note" => {
-                let Some(position) = self.target_position(option_value(args, "-t")) else {
-                    return IpcResponse::failure("can't find tab");
-                };
-                let note = positional_values(args, &["-t"], &[]).join(" ");
-                let id = self.tabs[position].id;
-                let previous_note = mem::replace(&mut self.tabs[position].note, note.clone());
-                self.event_journal.commit(
-                    EventKind::TabNote,
-                    Some(id),
-                    serde_json::json!({
-                        "previous_note": previous_note,
-                        "note": note,
-                    }),
-                );
-                unsafe { InvalidateRect(self.window, ptr::null(), 0) };
-                IpcResponse::success("")
-            }
-            "show-tab-note" => {
-                let Some(position) = self.target_position(option_value(args, "-t")) else {
-                    return IpcResponse::failure("can't find tab");
-                };
-                IpcResponse::success(self.tabs[position].note.clone())
-            }
-            "set-tab-parent" => {
-                let Some(child_position) = self.target_position(option_value(args, "-t")) else {
-                    return IpcResponse::failure("can't find child tab");
-                };
-                let Some(parent_target) = option_value(args, "--parent") else {
-                    return IpcResponse::failure(
-                        "usage: set-tab-parent -t child --parent parent|root",
-                    );
-                };
-                let parent_id = match self.parent_id_from_target(parent_target) {
-                    Ok(parent_id) => parent_id,
-                    Err(error) => return IpcResponse::failure(format!("{error:#}")),
-                };
-                let child_id = self.tabs[child_position].id;
-                match self.set_tab_parent(child_id, parent_id) {
-                    Ok(()) => {
-                        unsafe { InvalidateRect(self.window, ptr::null(), 0) };
-                        IpcResponse::success("")
-                    }
-                    Err(error) => IpcResponse::failure(format!("{error:#}")),
-                }
-            }
-            "show-tab-parent" => {
-                let Some(position) = self.target_position(option_value(args, "-t")) else {
-                    return IpcResponse::failure("can't find tab");
-                };
-                IpcResponse::success(
-                    self.tabs[position]
-                        .parent_id
-                        .map(|id| format!("@{id}"))
-                        .unwrap_or_else(|| "root".to_owned()),
-                )
-            }
-            "list-tab-tree" => {
-                let format = option_value(args, "-F").unwrap_or("#{window_id}:#{window_name}");
-                let rows = self.all_tree_rows();
-                IpcResponse::success(
-                    rows.iter()
-                        .filter_map(|row| {
-                            let tab = self.tabs.iter().find(|tab| tab.id == row.id)?;
-                            let branch = if row.depth == 0 {
-                                String::new()
-                            } else {
-                                let mut branch = row
-                                    .guides
-                                    .iter()
-                                    .map(|continues| if *continues { "│ " } else { "  " })
-                                    .collect::<String>();
-                                branch.push_str(if row.is_last { "└─ " } else { "├─ " });
-                                branch
-                            };
-                            let rendered = render_format(
-                                format,
-                                tab,
-                                &self.session_name,
-                                self.active == Some(tab.id),
-                            )
-                            .replace("#{tab_depth}", &row.depth.to_string())
-                            .replace(
-                                "#{tab_has_children}",
-                                if self
-                                    .tabs
-                                    .iter()
-                                    .any(|child| child.parent_id == Some(tab.id))
-                                {
-                                    "1"
-                                } else {
-                                    "0"
-                                },
-                            );
-                            Some(format!("{branch}{rendered}"))
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n"),
-                )
-            }
-            "get-settings" => IpcResponse::success(
-                serde_json::to_string_pretty(&serde_json::json!({
-                    "terminal_font_family": self.config.terminal_font_family,
-                    "terminal_font_size": self.config.terminal_font_size,
-                    "resolved_font_family": self.resolved_font_family,
-                    "config_path": config_path(),
-                    "recommended_cjk_font": "Sarasa Fixed SC",
-                    "recommended_font_license": "SIL Open Font License 1.1",
-                }))
-                .unwrap_or_default(),
-            ),
-            "set-setting" => {
-                let Some(key) = args.get(1).map(String::as_str) else {
-                    return IpcResponse::failure("set-setting requires a key and value");
-                };
-                let value = args.get(2..).unwrap_or_default().join(" ");
-                match key {
-                    "terminal.font-family" if !value.trim().is_empty() => {
-                        self.config.terminal_font_family = value;
-                    }
-                    "terminal.font-size" => {
-                        let Ok(size) = value.parse::<u16>() else {
-                            return IpcResponse::failure("font size must be a number from 8 to 36");
-                        };
-                        if !(8..=36).contains(&size) {
-                            return IpcResponse::failure("font size must be from 8 to 36");
-                        }
-                        self.config.terminal_font_size = size;
-                    }
-                    "terminal.font-family" => {
-                        return IpcResponse::failure("font family cannot be empty");
-                    }
-                    other => return IpcResponse::failure(format!("unknown setting: {other}")),
-                }
-                self.rebuild_terminal_font();
-                if let Err(error) = save_config(&self.config) {
-                    return IpcResponse::failure(format!("{error:#}"));
-                }
-                unsafe { InvalidateRect(self.window, ptr::null(), 0) };
-                IpcResponse::success(self.ui_snapshot())
-            }
-            "rename" | "rename-session" => {
-                let Some(name) = last_positional(args, &["-t"]) else {
-                    return IpcResponse::failure("usage: rename-session new-name");
-                };
-                self.session_name = name.to_owned();
-                IpcResponse::success("")
-            }
-            "killw" | "kill-window" => {
-                let Some(position) = self.target_position(option_value(args, "-t")) else {
-                    return IpcResponse::failure("can't find window");
-                };
-                let id = self.tabs[position].id;
-                if self.close_tab(id) {
-                    IpcResponse::success("")
-                } else {
-                    IpcResponse::typed_failure(
-                        "terminal was removed, but its workers did not finish bounded shutdown",
-                        "terminal_shutdown_incomplete",
-                        "internal",
-                        false,
-                    )
-                }
-            }
-            "send" | "send-keys" => {
-                let Some(position) = self.target_position(option_value(args, "-t")) else {
-                    return IpcResponse::typed_failure(
-                        "can't find pane",
-                        "operation_target_not_found",
-                        "not_found",
-                        false,
-                    );
-                };
-                if self.tabs[position].submission.is_pending() {
-                    return IpcResponse::typed_failure(
-                        "composer submission is pending; wait with \
-                         `wait-pane --submit-complete` before sending keys",
-                        "operation_conflict",
-                        "conflict",
-                        true,
-                    );
-                }
-                let literal = args.iter().any(|arg| arg == "-l");
-                for key in positional_values(args, &["-t"], &["-l", "-R", "-X"]) {
-                    let sent = if literal {
-                        self.tabs[position].send(key.as_bytes())
-                    } else if let Some(bytes) = tmux_key_bytes(key) {
-                        self.tabs[position].send(&bytes)
-                    } else {
-                        self.tabs[position].send(key.as_bytes())
-                    };
-                    if !sent {
-                        return IpcResponse::typed_failure(
-                            "terminal input was not accepted because the pane is no longer writable",
-                            "terminal_not_writable",
-                            "precondition",
-                            false,
-                        );
-                    }
-                }
-                IpcResponse::success("")
-            }
-            "scroll-pane" => {
-                let Some(position) = self.target_position(option_value(args, "-t")) else {
-                    return IpcResponse::failure("can't find pane");
-                };
-                let values = positional_values(args, &["-t"], &[]);
-                let Some(action) = values.first().copied() else {
-                    return IpcResponse::failure(
-                        "usage: scroll-pane [-t target] \
-                         up|down|page-up|page-down|top|bottom [rows]",
-                    );
-                };
-                if values.len() > 2 {
-                    return IpcResponse::failure("scroll-pane accepts at most one row count");
-                }
-                let count = match values.get(1) {
-                    Some(value) => match value.parse::<usize>() {
-                        Ok(count) if count > 0 => Some(count),
-                        _ => {
-                            return IpcResponse::failure(
-                                "scroll-pane row count must be a positive integer",
-                            );
-                        }
-                    },
-                    None => None,
-                };
-                match self.tabs[position].scroll_viewport(action, count) {
-                    Ok(offset) => {
-                        self.commit_viewport_event(position, offset, "control");
-                        if self
-                            .terminal_selection
-                            .is_some_and(|selection| selection.tab_id == self.tabs[position].id)
-                        {
-                            self.cancel_terminal_selection(true);
-                        }
-                        unsafe { InvalidateRect(self.window, ptr::null(), 0) };
-                        IpcResponse::success(offset.to_string())
-                    }
-                    Err(error) => IpcResponse::failure(format!("{error:#}")),
-                }
-            }
-            "capturep" | "capture-pane" => {
-                let Some(position) = self.target_position(option_value(args, "-t")) else {
-                    return IpcResponse::typed_failure(
-                        "can't find pane",
-                        "operation_target_not_found",
-                        "not_found",
-                        false,
-                    );
-                };
-                let requested_maximum = match option_value(args, "--max-bytes") {
-                    Some(value) => match value.parse::<usize>() {
-                        Ok(value) if (1..=CAPTURE_PUBLIC_MAX_BYTES).contains(&value) => Some(value),
-                        _ => {
-                            return IpcResponse::failure(format!(
-                                "capture-pane --max-bytes must be from 1 to {CAPTURE_PUBLIC_MAX_BYTES}"
-                            ));
-                        }
-                    },
-                    None => None,
-                };
-                let json = args.iter().any(|argument| argument == "--json");
-                let contents = if args.iter().any(|argument| argument == "--raw-escaped") {
-                    String::from_utf8_lossy(&self.tabs[position].raw_output.to_vec())
-                        .escape_debug()
-                        .to_string()
-                } else {
-                    self.tabs[position].parser.screen().contents()
-                };
-                let original_bytes = contents.len();
-                let maximum = requested_maximum.or(json.then_some(CAPTURE_PUBLIC_MAX_BYTES));
-                let text = maximum.map_or(contents.as_str(), |maximum| {
-                    bounded_utf8_prefix(&contents, maximum)
-                });
-                if json {
-                    IpcResponse::success(
-                        serde_json::to_string_pretty(&serde_json::json!({
-                            "tab_id": format!("@{}", self.tabs[position].id),
-                            "text": text,
-                            "bytes": text.len(),
-                            "original_bytes": original_bytes,
-                            "max_bytes": maximum,
-                            "truncated": text.len() < original_bytes,
-                        }))
-                        .unwrap_or_else(|_| "{}".to_owned()),
-                    )
-                } else {
-                    IpcResponse::success(text.to_owned())
-                }
-            }
-            "dump-cells" => {
-                let Some(position) = self.target_position(option_value(args, "-t")) else {
-                    return IpcResponse::failure("can't find pane");
-                };
-                let requested_row =
-                    option_value(args, "-r").and_then(|value| value.parse::<u16>().ok());
-                let tab = &self.tabs[position];
-                let screen = tab.parser.screen();
-                let mut cells = Vec::new();
-                for row in 0..tab.last_size.0 {
-                    if requested_row.is_some_and(|requested| requested != row) {
-                        continue;
-                    }
-                    for col in 0..tab.last_size.1 {
-                        let Some(cell) = screen.cell(row, col) else {
-                            continue;
-                        };
-                        let foreground = format!("{:?}", cell.fgcolor());
-                        let background = format!("{:?}", cell.bgcolor());
-                        if cell.contents().is_empty()
-                            && foreground == "Default"
-                            && background == "Default"
-                            && !cell.inverse()
-                        {
-                            continue;
-                        }
-                        cells.push(serde_json::json!({
-                            "row": row,
-                            "col": col,
-                            "text": cell.contents(),
-                            "fg": foreground,
-                            "bg": background,
-                            "inverse": cell.inverse(),
-                            "wide_continuation": cell.is_wide_continuation(),
-                        }));
-                    }
-                }
-                match serde_json::to_string_pretty(&serde_json::json!({
-                    "window_id": format!("@{}", tab.id),
-                    "rows": tab.last_size.0,
-                    "cols": tab.last_size.1,
-                    "cells": cells,
-                })) {
-                    Ok(json) => IpcResponse::success(json),
-                    Err(error) => IpcResponse::failure(error.to_string()),
                 }
             }
             "send-mouse" => {
@@ -7026,91 +6819,6 @@ impl AppState {
                     )
                 }
             }
-            "active-window" | "active-tab" => {
-                let Some(position) = self.active_position() else {
-                    return IpcResponse::failure("no active window");
-                };
-                let format = option_value(args, "-F").unwrap_or("#{window_id}:#{window_name}");
-                IpcResponse::success(render_format(
-                    format,
-                    &self.tabs[position],
-                    &self.session_name,
-                    true,
-                ))
-            }
-            "ui-snapshot" => IpcResponse::success(self.ui_snapshot()),
-            "read-events" => {
-                let Some(epoch) = option_value(args, "--epoch") else {
-                    return IpcResponse::failure("read-events requires --epoch");
-                };
-                let Some(after) =
-                    option_value(args, "--after").and_then(|value| value.parse::<u64>().ok())
-                else {
-                    return IpcResponse::failure("read-events requires a numeric --after sequence");
-                };
-                let limit = match option_value(args, "--limit") {
-                    Some(value) => match value.parse::<usize>() {
-                        Ok(limit) if (1..=1_024).contains(&limit) => limit,
-                        _ => {
-                            return IpcResponse::failure(
-                                "read-events --limit must be from 1 to 1024",
-                            );
-                        }
-                    },
-                    None => 256,
-                };
-                match self.event_journal.read_after(epoch, after, limit) {
-                    Ok(events) => IpcResponse::success(
-                        serde_json::to_string_pretty(&serde_json::json!({
-                            "position": self.event_journal.position(),
-                            "events": events,
-                        }))
-                        .unwrap_or_default(),
-                    ),
-                    Err(error) => IpcResponse::typed_failure(
-                        error.to_json().to_string(),
-                        error.code(),
-                        "precondition",
-                        false,
-                    ),
-                }
-            }
-            "protocol-info" => {
-                IpcResponse::success(crate::client::protocol_info_json("running_host"))
-            }
-            "focus" => {
-                let surface = args.get(1).map(String::as_str).unwrap_or("terminal");
-                if let Some(position) = self.target_position(option_value(args, "-t")) {
-                    if self.proxy_edit_target.is_some() {
-                        self.close_proxy_editor();
-                    }
-                    self.save_active_composer();
-                    let id = self.tabs[position].id;
-                    self.finish_note_edit(false);
-                    self.cancel_terminal_selection(true);
-                    self.active = Some(id);
-                    self.load_active_composer();
-                    self.event_journal.commit(
-                        EventKind::TabSelected,
-                        Some(id),
-                        serde_json::json!({}),
-                    );
-                }
-                let focused = match surface {
-                    "terminal" => self.set_focus_surface(FocusSurface::Terminal, "semantic"),
-                    "composer" => self.set_focus_surface(FocusSurface::Composer, "semantic"),
-                    "tabs" | "sidebar" => self.set_focus_surface(FocusSurface::Tabs, "semantic"),
-                    other => {
-                        return IpcResponse::failure(format!("unknown focus surface: {other}"));
-                    }
-                };
-                if !focused {
-                    return IpcResponse::failure(format!(
-                        "focus surface is unavailable: {surface}"
-                    ));
-                }
-                IpcResponse::success(self.ui_snapshot())
-            }
             "ui-action" => {
                 let Some(action) = args.get(1).map(String::as_str) else {
                     return IpcResponse::failure("ui-action requires an action");
@@ -7153,86 +6861,6 @@ impl AppState {
                     return IpcResponse::success(self.ui_snapshot());
                 }
                 let response = match action {
-                    "new-tab" => match self.create_tab(None, Vec::new(), true) {
-                        Ok(_) => None,
-                        Err(error) => Some(IpcResponse::failure(format!("{error:#}"))),
-                    },
-                    "new-child" => {
-                        let parent_position = self
-                            .target_position(option_value(args, "-t"))
-                            .or_else(|| self.active_position());
-                        let Some(parent_position) = parent_position else {
-                            return IpcResponse::failure("can't find parent tab");
-                        };
-                        let parent_id = self.tabs[parent_position].id;
-                        match self.create_tab_with_parent(
-                            Some("New child".to_owned()),
-                            Vec::new(),
-                            Vec::new(),
-                            true,
-                            Some(parent_id),
-                        ) {
-                            Ok(index) => {
-                                if let Some(id) = self
-                                    .tabs
-                                    .iter()
-                                    .find(|tab| tab.index == index)
-                                    .map(|tab| tab.id)
-                                {
-                                    self.open_tab_editor(id);
-                                }
-                                None
-                            }
-                            Err(error) => Some(IpcResponse::failure(format!("{error:#}"))),
-                        }
-                    }
-                    "edit-tab" => {
-                        let Some(position) = self.target_position(option_value(args, "-t")) else {
-                            return IpcResponse::failure("can't find tab");
-                        };
-                        self.open_tab_editor(self.tabs[position].id);
-                        None
-                    }
-                    "toggle-tree" => {
-                        self.finish_note_edit(false);
-                        let Some(position) = self.target_position(option_value(args, "-t")) else {
-                            return IpcResponse::failure("can't find tab");
-                        };
-                        let id = self.tabs[position].id;
-                        if !self.tabs.iter().any(|tab| tab.parent_id == Some(id)) {
-                            return IpcResponse::failure("tab has no child nodes");
-                        }
-                        if !self.collapsed_tabs.remove(&id) {
-                            self.collapsed_tabs.insert(id);
-                        }
-                        self.layout();
-                        None
-                    }
-                    "select-tab" => {
-                        let Some(position) = self.target_position(option_value(args, "-t")) else {
-                            return IpcResponse::failure("can't find tab");
-                        };
-                        self.save_active_composer();
-                        let id = self.tabs[position].id;
-                        self.finish_note_edit(false);
-                        self.cancel_terminal_selection(true);
-                        self.active = Some(id);
-                        self.load_active_composer();
-                        self.event_journal.commit(
-                            EventKind::TabSelected,
-                            Some(id),
-                            serde_json::json!({}),
-                        );
-                        self.set_focus_surface(FocusSurface::Terminal, "semantic");
-                        None
-                    }
-                    "close-tab" => {
-                        let Some(position) = self.target_position(option_value(args, "-t")) else {
-                            return IpcResponse::failure("can't find tab");
-                        };
-                        self.request_close_tab(self.tabs[position].id);
-                        None
-                    }
                     "confirm" => {
                         if self.window_close_pending {
                             self.finish_window_close(WindowCloseChoice::KeepServerRunning);
@@ -7240,25 +6868,6 @@ impl AppState {
                             self.finish_close_confirmation(true);
                         } else {
                             return IpcResponse::failure("no confirmation is pending");
-                        }
-                        None
-                    }
-                    "cancel" => {
-                        if self.window_close_pending {
-                            self.finish_window_close(WindowCloseChoice::Cancel);
-                        } else if self.settings_open {
-                            self.close_settings();
-                        } else if self.cwd_edit_target.is_some() {
-                            self.close_cwd_editor();
-                        } else if self.proxy_edit_target.is_some() {
-                            self.close_proxy_editor();
-                        } else if self.note_edit_target.is_some() {
-                            self.finish_note_edit(false);
-                        } else {
-                            if self.pending_close.is_none() {
-                                return IpcResponse::failure("no modal is pending");
-                            }
-                            self.finish_close_confirmation(false);
                         }
                         None
                     }
@@ -7278,19 +6887,6 @@ impl AppState {
                             return IpcResponse::failure("no window-close confirmation is pending");
                         }
                         self.finish_window_close(WindowCloseChoice::StopServerAndExit);
-                        None
-                    }
-                    "composer-send" => {
-                        if self.cwd_edit_target.is_some() || self.proxy_edit_target.is_some() {
-                            return IpcResponse::failure(
-                                "CWD editor is active; prepare, send now, or cancel it first",
-                            );
-                        }
-                        if self.note_edit_target.is_some() {
-                            self.finish_note_edit(true);
-                        } else {
-                            self.send_composer();
-                        }
                         None
                     }
                     "open-cwd-editor" => match self.open_cwd_editor(option_value(args, "-t")) {
@@ -7373,10 +6969,6 @@ impl AppState {
                         Ok(_) => None,
                         Err(error) => Some(IpcResponse::failure(format!("{error:#}"))),
                     },
-                    "open-settings" => {
-                        self.open_settings();
-                        None
-                    }
                     "window-minimize" => {
                         self.remask_proxy_credentials();
                         unsafe { ShowWindow(self.window, SW_MINIMIZE) };
@@ -7435,166 +7027,6 @@ impl AppState {
                     IpcResponse::success(self.ui_snapshot())
                 }
             }
-            "show-composer" => {
-                self.save_active_composer();
-                let Some(position) = self.target_position(option_value(args, "-t")) else {
-                    return IpcResponse::failure("can't find window");
-                };
-                if self.tabs[position].sensitive_composer.is_some() {
-                    return IpcResponse::failure(
-                        "Composer contains a sensitive proxy draft; content is redacted",
-                    );
-                }
-                IpcResponse::success(self.tabs[position].composer.clone())
-            }
-            "set-composer" => {
-                let Some(position) = self.target_position(option_value(args, "-t")) else {
-                    return IpcResponse::failure("can't find window");
-                };
-                if self.tabs[position].sensitive_composer.is_some() {
-                    return IpcResponse::failure(
-                        "Composer contains a sensitive proxy draft; send or discard it first",
-                    );
-                }
-                let text = positional_values(args, &["-t"], &[]).join(" ");
-                let id = self.tabs[position].id;
-                if self.note_edit_target == Some(id) {
-                    let normalized = text.replace("\r\n", "\n");
-                    let (name, note) = normalized.split_once('\n').unwrap_or((&normalized, ""));
-                    unsafe {
-                        SetWindowTextW(self.tab_name_edit, wide(name).as_ptr());
-                        SetWindowTextW(self.tab_note_edit, wide(note).as_ptr());
-                    }
-                    return IpcResponse::success("");
-                }
-                self.tabs[position].composer = text.clone();
-                self.event_journal.commit(
-                    EventKind::ComposerDraft,
-                    Some(id),
-                    serde_json::json!({
-                        "length": text.chars().count(),
-                    }),
-                );
-                if self.active == Some(id) {
-                    unsafe { SetWindowTextW(self.edit, wide(&text).as_ptr()) };
-                }
-                IpcResponse::success("")
-            }
-            "send-composer" => {
-                self.save_active_composer();
-                let Some(position) = self.target_position(option_value(args, "-t")) else {
-                    return IpcResponse::failure("can't find window");
-                };
-                if let Some(secret) = self.tabs[position].sensitive_composer.take() {
-                    let marker = self.tabs[position].sensitive_proxy_marker.take();
-                    if !self.tabs[position].submit_sensitive(secret.expose()) {
-                        self.tabs[position].sensitive_composer = Some(secret);
-                        self.tabs[position].sensitive_proxy_marker = marker;
-                        return IpcResponse::failure("a composer submission is already pending");
-                    }
-                    let Some(marker) = marker else {
-                        self.tabs[position].proxy.mark_failed().ok();
-                        return IpcResponse::failure(
-                            "sensitive proxy draft lost its confirmation identity",
-                        );
-                    };
-                    if let Err(error) = self.tabs[position].proxy.mark_submitted() {
-                        return IpcResponse::failure(error.to_string());
-                    }
-                    let id = self.tabs[position].id;
-                    self.tabs[position].begin_proxy_confirmation(marker);
-                    self.event_journal.commit(
-                        EventKind::WorkingContextProxySubmitted,
-                        Some(id),
-                        serde_json::json!({
-                            "sensitive": true,
-                            "application_state": "submitted",
-                        }),
-                    );
-                    if self.active == Some(id) {
-                        unsafe { SetWindowTextW(self.edit, wide("").as_ptr()) };
-                    }
-                    return IpcResponse::success("");
-                }
-                let text = mem::take(&mut self.tabs[position].composer);
-                if !text.is_empty() && !self.tabs[position].submit(&text) {
-                    self.tabs[position].composer = text;
-                    return IpcResponse::failure("a composer submission is already pending");
-                }
-                if !text.is_empty() {
-                    let id = self.tabs[position].id;
-                    self.event_journal.commit(
-                        EventKind::ComposerSubmitted,
-                        Some(id),
-                        serde_json::json!({
-                            "length": text.chars().count(),
-                        }),
-                    );
-                }
-                if self.active == Some(self.tabs[position].id) {
-                    unsafe { SetWindowTextW(self.edit, wide("").as_ptr()) };
-                }
-                IpcResponse::success("")
-            }
-            "inspect" | "pane-snapshot" => {
-                self.save_active_composer();
-                let selected: Vec<&TerminalTab> = match option_value(args, "-t") {
-                    Some(target) => {
-                        let Some(position) = self.target_position(Some(target)) else {
-                            return IpcResponse::failure("can't find window");
-                        };
-                        vec![&self.tabs[position]]
-                    }
-                    None => self.tabs.iter().collect(),
-                };
-                let windows = selected
-                    .into_iter()
-                    .map(|tab| {
-                        let observation = tab.observation();
-                        serde_json::json!({
-                            "id": format!("@{}", tab.id),
-                            "index": tab.index,
-                            "parent_id": tab.parent_id.map(|id| format!("@{id}")),
-                            "depth": self.tab_depth(tab.id),
-                            "name": tab.title,
-                            "terminal_title": tab.parser.callbacks().title,
-                            "note": tab.note,
-                            "active": self.active == Some(tab.id),
-                            "dead": observation.exit_code.is_some(),
-                            "exit_code": observation.exit_code,
-                            "pid": observation.process_id,
-                            "command": tab.command_name,
-                            "environment_names": tab.environment_names,
-                            "rows": tab.last_size.0,
-                            "cols": tab.last_size.1,
-                            "input_bytes": observation.input_bytes,
-                            "input_writes": observation.input_writes,
-                            "submit_pending": observation.submit_pending,
-                            "reader_closed": observation.reader_closed,
-                            "parser_drained": observation.parser_drained,
-                            "finalized": observation.finalized,
-                            "scrollback_offset": tab.parser.screen().scrollback(),
-                            "output_bytes": observation.output_bytes,
-                            "composer": if tab.sensitive_composer.is_some() {
-                                "<redacted>"
-                            } else {
-                                tab.composer.as_str()
-                            },
-                            "composer_sensitive": tab.sensitive_composer.is_some(),
-                            "error": observation.error,
-                            "text": tab.parser.screen().contents(),
-                        })
-                    })
-                    .collect::<Vec<_>>();
-                match serde_json::to_string_pretty(&serde_json::json!({
-                    "session": self.session_name,
-                    "active_window_id": self.active.map(|id| format!("@{id}")),
-                    "windows": windows,
-                })) {
-                    Ok(json) => IpcResponse::success(json),
-                    Err(error) => IpcResponse::failure(error.to_string()),
-                }
-            }
             "screenshot" => {
                 unsafe {
                     InvalidateRect(self.window, ptr::null(), 0);
@@ -7635,19 +7067,6 @@ impl AppState {
                     Err(error) => IpcResponse::failure(format!("{error:#}")),
                 }
             }
-            "display" | "display-message" => {
-                let Some(position) = self.target_position(option_value(args, "-t")) else {
-                    return IpcResponse::failure("can't find pane");
-                };
-                let format = last_positional(args, &["-t"])
-                    .unwrap_or("#{session_name}:#{window_index}.#{pane_index}");
-                IpcResponse::success(render_format(
-                    format,
-                    &self.tabs[position],
-                    &self.session_name,
-                    self.active == Some(self.tabs[position].id),
-                ))
-            }
             "show" | "show-options" => IpcResponse::success(
                 [
                     format!("default-shell {}", env::var("COMSPEC").unwrap_or_default()),
@@ -7662,16 +7081,6 @@ impl AppState {
                 Ok(()) => IpcResponse::success(workspace_path().display().to_string()),
                 Err(error) => IpcResponse::failure(format!("{error:#}")),
             },
-            "workspace-info" => IpcResponse::success(
-                serde_json::to_string_pretty(&serde_json::json!({
-                    "path": workspace_path(),
-                    "version": 1,
-                    "tab_count": self.tabs.len(),
-                    "active_id": self.active.map(|id| format!("@{id}")),
-                    "restore_behavior": "restart-processes",
-                }))
-                .unwrap_or_default(),
-            ),
             "shutdown" => {
                 if let Err(error) = self.persist_workspace() {
                     return IpcResponse::failure(format!(
@@ -7686,52 +7095,9 @@ impl AppState {
                 self.close_requested = true;
                 IpcResponse::success("")
             }
-            "lscm" | "list-commands" => IpcResponse::success(supported_commands()),
             "splitw" | "split-window" => IpcResponse::failure(
                 "split-window is not implemented yet; AgenTerm currently maps one ConPTY pane per tab",
             ),
-            "kill-session" | "kill-server" => {
-                if let Some(requested) = option_value(args, "-t")
-                    && requested != self.session_name
-                {
-                    return IpcResponse::failure(if command == "kill-session" {
-                        format!("can't find session: {requested}")
-                    } else {
-                        format!(
-                            "operation_target_not_found[server.kill]: \
-                             can't find session: {requested}"
-                        )
-                    });
-                }
-                let mut terminal_shutdown_complete = true;
-                self.finish_note_edit(false);
-                self.cancel_terminal_selection(true);
-                for tab in &mut self.tabs {
-                    terminal_shutdown_complete &= tab.close_process();
-                }
-                self.tabs.clear();
-                self.active = None;
-                self.event_journal.commit(
-                    EventKind::WorkspaceShutdown,
-                    None,
-                    serde_json::json!({
-                        "saved": false,
-                        "destroyed": true,
-                        "terminal_shutdown_complete": terminal_shutdown_complete,
-                    }),
-                );
-                self.close_requested = true;
-                if terminal_shutdown_complete {
-                    IpcResponse::success("")
-                } else {
-                    IpcResponse::typed_failure(
-                        "server shutdown began, but a terminal worker missed its bounded deadline",
-                        "terminal_shutdown_incomplete",
-                        "internal",
-                        false,
-                    )
-                }
-            }
             _ => IpcResponse::failure(format!("unknown command: {command}")),
         }
     }
@@ -7748,18 +7114,10 @@ impl AppState {
         let Some(position) = self.adjacent_position(direction) else {
             return IpcResponse::failure("no windows");
         };
-        if self.proxy_edit_target.is_some() {
-            self.close_proxy_editor();
+        match self.select_tab_at(position) {
+            Ok(()) => IpcResponse::success(""),
+            Err(error) => IpcResponse::failure(error),
         }
-        self.save_active_composer();
-        let id = self.tabs[position].id;
-        self.finish_note_edit(false);
-        self.cancel_terminal_selection(true);
-        self.active = Some(id);
-        self.load_active_composer();
-        self.event_journal
-            .commit(EventKind::TabSelected, Some(id), serde_json::json!({}));
-        IpcResponse::success("")
     }
 }
 
@@ -7917,47 +7275,6 @@ fn create_terminal_font(window: HWND, config: &AppConfig) -> (HFONT, bool, Strin
     (font, owned, resolved)
 }
 
-fn render_format(format: &str, tab: &TerminalTab, session_name: &str, active: bool) -> String {
-    let dead = tab.exited.is_some();
-    format
-        .replace("#{?pane_dead,dead,}", if dead { "dead" } else { "" })
-        .replace("#{?window_active,*,}", if active { "*" } else { "" })
-        .replace("#{session_name}", session_name)
-        .replace("#{window_index}", &tab.index.to_string())
-        .replace("#{window_id}", &format!("@{}", tab.id))
-        .replace(
-            "#{tab_parent_id}",
-            &tab.parent_id
-                .map(|id| format!("@{id}"))
-                .unwrap_or_else(|| "root".to_owned()),
-        )
-        .replace("#{window_name}", &tab.title)
-        .replace("#{window_note}", &tab.note)
-        .replace("#{terminal_title}", &tab.parser.callbacks().title)
-        .replace("#{window_active}", if active { "1" } else { "0" })
-        .replace("#{pane_index}", "0")
-        .replace("#{pane_id}", &format!("%{}", tab.id))
-        .replace("#{pane_dead}", if dead { "1" } else { "0" })
-        .replace(
-            "#{pane_pid}",
-            &tab.process_id
-                .map(|pid| pid.to_string())
-                .unwrap_or_default(),
-        )
-        .replace("#{pane_current_command}", &tab.command_name)
-        .replace("#{pane_start_command}", &tab.command_name)
-        .replace("#{pane_input_bytes}", &tab.input_bytes.to_string())
-        .replace("#{pane_output_bytes}", &tab.output_bytes.to_string())
-        .replace("#{pane_error}", tab.error.as_deref().unwrap_or(""))
-        .replace("#{pane_width}", &tab.last_size.1.to_string())
-        .replace("#{pane_height}", &tab.last_size.0.to_string())
-        .replace("#{history_limit}", &SCROLLBACK_LINES.to_string())
-        .replace("#I", &tab.index.to_string())
-        .replace("#W", &tab.title)
-        .replace("#S", session_name)
-        .replace("#P", "0")
-}
-
 fn save_window_png(window: HWND, path: &std::path::Path, pane: Option<PixelRect>) -> Result<()> {
     let mut client: RECT = unsafe { mem::zeroed() };
     let mut outer: RECT = unsafe { mem::zeroed() };
@@ -8065,11 +7382,12 @@ fn save_window_png(window: HWND, path: &std::path::Path, pane: Option<PixelRect>
 mod tests {
     use super::{
         COMPOSER_TARGET_ROWS, EditShortcut, FocusSurface, IpcResponse, PixelRect, ThemeId,
-        bounded_utf8_prefix, composer_input_rect, edit_shortcut, effective_theme, gui_cli_guidance,
+        composer_input_rect, edit_shortcut, effective_theme, gui_cli_guidance,
         gui_handoff_succeeded, is_latched_navigation_repeat, normalize_terminal_paste,
         parse_gui_launch, surface_navigation, terminal_copy_shortcut,
     };
     use crate::client::run_wait_ui;
+    use crate::control_dispatch::bounded_utf8_prefix;
 
     #[test]
     fn settings_theme_draft_only_affects_an_open_settings_preview() {

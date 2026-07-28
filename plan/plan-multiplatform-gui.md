@@ -28,7 +28,29 @@ PRD + Cargo deps (primary)
 并行规则：A∥C∥E 可同时开工；B 在 A 的 API 稳定后接入；D 消费 B+C；
 `Cargo.toml` / `src/lib.rs` / `PRD.md` 由 primary 串行集成。
 
-## 能力叶
+## 进度
+
+- [x] A PTY backend
+- [x] B terminal_runtime unix
+- [x] C unix IPC server + EventLoopProxy wake
+- [x] D unix_app MVP (window + PTY grid + keys)
+- [x] E packaging/CI includes `agenterm`
+- [x] F shared `control_dispatch` + Unix wire (`protocol-info`,
+  `list-sessions/windows/panes`, `send-keys`, `capture-pane`, `inspect`,
+  `kill-server`); evidence: Linux black-box CLI against live GUI
+- [x] G Win32 `execute_command` 收敛到同一 `ControlHost`；共享叶扩展
+  `new-window` / `select-window` / `kill-window` / `active-window` /
+  `display-message` / `rename-session`；Unix 实现 tab lifecycle
+- [x] H Unix tab tree UI / composer / settings / ui-action / event journal
+  - [x] event journal + `read-events` on Unix
+  - [x] shared workspace commands (`list-tab-tree`, `scroll-pane`, rename/note/parent, `workspace-info`, `dump-cells`, `ui-snapshot` simplified)
+  - [x] Unix tab sidebar (select by click)
+  - [x] composer strip + `show/set/send-composer`, `focus`, `get-settings` (shared dispatch)
+  - [x] `set-setting` + `ui-action` core subset (`new-tab`, `new-child`, `select-tab`, `close-tab`, `composer-send`)
+  - [x] Unix `ui-snapshot` layout geometry (client + sidebar/terminal/composer bounds)
+  - [x] settings modal UI + `open-settings` / `settings-apply` / `cancel`
+  - [x] full shared `ui-action` tabs/layout/tree/editor subset
+  - [x] Unix `ui-snapshot` scrollbar/modal/system_menu/tab metadata
 
 ### A — PTY 后端抽象
 - 用户问题：Windows ConPTY 与 Unix PTY 不能各写一套 runtime。
