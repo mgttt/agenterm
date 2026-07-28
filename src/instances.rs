@@ -118,8 +118,14 @@ pub(crate) fn instance_process_is_alive(pid: u32) -> bool {
 
 #[cfg(unix)]
 pub(crate) fn instance_process_is_alive(pid: u32) -> bool {
+    let Ok(pid) = i32::try_from(pid) else {
+        return false;
+    };
+    if pid <= 0 {
+        return false;
+    }
     // kill(pid, 0) returns 0 when the process exists and we may signal it.
-    unsafe { libc::kill(pid as i32, 0) == 0 }
+    unsafe { libc::kill(pid, 0) == 0 }
 }
 
 fn instances_dir() -> PathBuf {
@@ -136,13 +142,13 @@ fn instances_dir() -> PathBuf {
     }
     #[cfg(not(windows))]
     {
-        return env::var_os("HOME")
+        env::var_os("HOME")
             .map(PathBuf::from)
             .unwrap_or_else(env::temp_dir)
             .join(".local")
             .join("share")
             .join("agenterm")
-            .join("instances");
+            .join("instances")
     }
 }
 

@@ -31,3 +31,53 @@ jobs:
           ./tests/startup_smoke.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./tests/cli_smoke.ps1
+
+  linux-clients:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
+      - name: Install lint components
+        run: rustup component add rustfmt clippy
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Clippy (Linux client binaries)
+        run: >-
+          cargo clippy --locked --target x86_64-unknown-linux-gnu
+          --bin agenterm-cli --bin agenterm-mux --bin agenterm-script
+          -- -D warnings
+      - name: Build Linux client binaries
+        run: ./scripts/build-linux-clients.sh
+      - name: Unit tests
+        run: cargo test --locked --lib
+      - name: Smoke client entrypoints
+        run: |
+          BIN=target/x86_64-unknown-linux-gnu/debug
+          "$BIN/agenterm-cli" --help | head -3
+          "$BIN/agenterm-mux" --version
+          "$BIN/agenterm-script" --help | head -3
+
+  macos-clients:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
+      - name: Install lint components
+        run: rustup component add rustfmt clippy
+      - name: Clippy (macOS client binaries)
+        run: >-
+          cargo clippy --locked --target aarch64-apple-darwin
+          --bin agenterm-cli --bin agenterm-mux --bin agenterm-script
+          -- -D warnings
+      - name: Build macOS client binaries
+        run: >-
+          cargo build --locked --target aarch64-apple-darwin
+          --bin agenterm-cli --bin agenterm-mux --bin agenterm-script
+      - name: Smoke client entrypoints
+        run: |
+          BIN=target/aarch64-apple-darwin/debug
+          "$BIN/agenterm-cli" --help | head -3
+          "$BIN/agenterm-mux" --version
+          "$BIN/agenterm-script" --help | head -3

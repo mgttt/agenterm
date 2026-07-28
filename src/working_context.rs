@@ -810,13 +810,16 @@ mod tests {
 
     #[test]
     fn shell_detection_uses_the_executable_name() {
-        assert_eq!(
-            ShellKind::from_program(r"C:\Windows\System32\cmd.exe"),
-            ShellKind::Cmd
-        );
-        assert_eq!(ShellKind::from_program("pwsh.exe"), ShellKind::PowerShell);
         assert_eq!(ShellKind::from_program("/usr/bin/bash"), ShellKind::Bash);
         assert_eq!(ShellKind::from_program("nu.exe"), ShellKind::Unknown);
+        #[cfg(windows)]
+        {
+            assert_eq!(
+                ShellKind::from_program(r"C:\Windows\System32\cmd.exe"),
+                ShellKind::Cmd
+            );
+            assert_eq!(ShellKind::from_program("pwsh.exe"), ShellKind::PowerShell);
+        }
     }
 
     #[test]

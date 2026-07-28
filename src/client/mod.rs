@@ -16,6 +16,12 @@ use std::{
 
 use anyhow::{Context as _, Result};
 
+#[cfg(windows)]
+use crate::script_protocol::{
+    SCRIPT_API_VERSION, SCRIPT_ENVELOPE_VERSION, ScriptBrokerError, ScriptBrokerRequest,
+    ScriptBrokerResponse, ScriptBudgets, ScriptExitClass, ScriptInvocation, ScriptOperation,
+    ScriptProfile,
+};
 use crate::{
     build_identity::BuildIdentity,
     commands::{
@@ -35,11 +41,6 @@ use crate::{
         validate_operation_args,
     },
     protocol::{IpcRequest, IpcResponse},
-    script_protocol::{
-        SCRIPT_API_VERSION, SCRIPT_ENVELOPE_VERSION, ScriptBrokerError, ScriptBrokerRequest,
-        ScriptBrokerResponse, ScriptBudgets, ScriptExitClass, ScriptInvocation, ScriptOperation,
-        ScriptProfile,
-    },
     ui_bridge,
     upgrade_identity::UpgradeIdentity,
     working_context::PROXY_MAX_BYTES,
@@ -613,6 +614,7 @@ fn run_list_instances(arguments: &[String]) -> i32 {
     0
 }
 
+#[cfg_attr(not(windows), allow(unused_variables, unused_mut))]
 fn run_cli(arguments: Vec<String>, control_options: CliControlOptions) -> i32 {
     let mut arguments = arguments;
     if control_command_requests_help(&arguments) {
@@ -1221,6 +1223,7 @@ fn report_supervisor_error(error: SupervisorError) -> i32 {
     exit_code
 }
 
+#[cfg(windows)]
 fn script_broker_error(code: &str, message: impl Into<String>) -> ScriptBrokerResponse {
     ScriptBrokerResponse {
         ok: false,
@@ -1233,6 +1236,7 @@ fn script_broker_error(code: &str, message: impl Into<String>) -> ScriptBrokerRe
     }
 }
 
+#[cfg(windows)]
 fn script_broker_ipc(
     arguments: Vec<String>,
     timeout: Duration,
@@ -1396,6 +1400,7 @@ fn handle_script_broker(
     }
 }
 
+#[cfg(windows)]
 fn script_broker_wait(
     arguments: &serde_json::Value,
     budgets: &ScriptBudgets,
@@ -1585,6 +1590,7 @@ fn report_audit_error(message: String) -> i32 {
     1
 }
 
+#[cfg(windows)]
 fn read_script_source(
     reader: impl Read,
     limit: usize,
@@ -1600,6 +1606,7 @@ fn read_script_source(
     String::from_utf8(bytes).map_err(|error| (1, format!("script source is not UTF-8: {error}")))
 }
 
+#[cfg(windows)]
 fn script_operand(arguments: &[String]) -> Option<&str> {
     let mut position = 2;
     while position < arguments.len() {

@@ -182,6 +182,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(windows)]
     fn explicit_settings_path_overrides_the_local_app_data_default() {
         assert_eq!(
             config_path_from(Some(r"D:\isolated\settings.json".into()), None),

@@ -224,3 +224,6 @@ rustfmt), `cargo-xwin`, LLVM `lld`/`llvm-lib`/`llvm-rc`, a `clang-cl` symlink
  (`agenterm`) is Windows-only; `agenterm-cli script` hosting is Windows-only for
  now — on Linux invoke `agenterm-script` directly. Instance discovery uses
  `~/.local/share/agenterm/instances/` (override with `AGENTERM_INSTANCE_DIR`).
+- CI also builds client binaries on `ubuntu-latest` (`linux-clients` job) and
+ `macos-latest` (`macos-clients` job). Local build:
+ `./scripts/build-linux-clients.sh` (or set `AGENTERM_BUILD_PROFILE=release`).
