@@ -150,8 +150,13 @@ fn env_module() -> Module {
 
 fn process_module() -> Module {
     let mut module = Module::new();
+    module.set_native_fn("id", process_id);
     module.set_native_fn("command", process_command);
     module
+}
+
+fn process_id() -> Result<rhai::INT, Box<EvalAltResult>> {
+    Ok(std::process::id().into())
 }
 
 fn duration_module() -> Module {
@@ -617,6 +622,10 @@ mod tests {
                 .eval::<rhai::INT>("std::time::Duration::from_secs(2).millis")
                 .unwrap(),
             2_000
+        );
+        assert_eq!(
+            engine().eval::<rhai::INT>("std::process::id()").unwrap(),
+            rhai::INT::from(std::process::id())
         );
         assert_eq!(
             engine()

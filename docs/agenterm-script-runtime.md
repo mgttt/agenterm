@@ -159,6 +159,9 @@ agenterm-script
 │  ├─ process::
 │  │  Shell-free executable-plus-argv process construction.
 │  │  [shipped; stable namespace; designed 2026-07-28]
+│  │  ├─ id()
+│  │  │  Returns the current supervised worker process ID.
+│  │  │  [shipped; stable; designed 2026-07-29]
 │  │  └─ command(program) -> Command
 │  │     Creates a typed process builder; no implicit shell is inserted.
 │  │     [shipped; stable; designed 2026-07-28]
@@ -738,6 +741,11 @@ for each captured stream. A script MAY lower or raise them through
 `Command.timeout(Duration)` and `capture_limit(bytes)`, up to hard ceilings of
 60,000 ms and 256 KiB. Text stdin is limited to 256 KiB. This process ceiling
 is independent of the HTTP adapter's stricter 10,000 ms deadline.
+
+`std::process::id()` returns the current supervised Script worker PID, matching
+Rust's process-local interpretation. It supports collision-resistant
+owned-resource names and live-owner protocols, but is not a stable invocation
+identity and MUST NOT be persisted as one.
 
 `Output.stdout` and `.stderr` are `Bytes`. `stdout_text()` and `stderr_text()`
 perform strict UTF-8 decoding. `.truncated` MUST become true if either stream

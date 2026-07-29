@@ -474,7 +474,9 @@ try {
     }
     Invoke-Checked -Id 'harness-cleanup-selftest' `
         -Label 'owned-resource cleanup self-test' {
-        & '.\tests\harness_cleanup_selftest.ps1'
+        & '.\dist\agenterm-script.exe' task run harness-cleanup-selftest `
+            --manifest '.\agenterm.tasks.json' `
+            --timeout-ms 10000 --max-operations 10000000
     }
     if (-not $SkipSmoke) {
         # GUI tests must never interrupt the interactive desktop running them.

@@ -235,6 +235,20 @@ fn run_prd_alignment(repo_under_test: &Path) -> Output {
         .expect("run Rhai PRD-alignment task")
 }
 
+#[cfg(windows)]
+fn run_harness_cleanup_selftest() -> Output {
+    let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let manifest = repo.join("agenterm.tasks.json");
+    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+        .current_dir(repo)
+        .args(["task", "run", "harness-cleanup-selftest", "--manifest"])
+        .arg(manifest)
+        .args(["--timeout-ms", "10000", "--max-operations", "10000000"])
+        .output()
+        .expect("run Rhai harness cleanup self-test")
+}
+
 fn run_preflight(repo_under_test: &Path, output_path: &Path) -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -364,6 +378,36 @@ fn copy_fixture_file(repo: &Path, fixture: &Path, relative: &str) {
     fs::create_dir_all(destination.parent().expect("fixture file parent"))
         .expect("create fixture file parent");
     fs::copy(repo.join(relative), destination).expect("copy fixture file");
+}
+
+#[test]
+fn process_id_is_available_through_the_public_local_profile() {
+    let output = Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+        .args(["eval", "std::process::id()", "--profile", "local", "--json"])
+        .output()
+        .expect("evaluate public process ID");
+    assert!(
+        output.status.success(),
+        "process ID evaluation failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let envelope: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("decode process ID envelope");
+    assert_eq!(envelope["ok"], true);
+    assert!(
+        envelope["value"].as_u64().is_some_and(|pid| pid > 0),
+        "process ID was not a positive integer: {envelope}"
+    );
+
+    let denied = Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+        .args(["eval", "std::process::id()", "--profile", "pure", "--json"])
+        .output()
+        .expect("evaluate process ID in pure profile");
+    assert!(!denied.status.success());
+    let denied_envelope: serde_json::Value =
+        serde_json::from_slice(&denied.stdout).expect("decode pure-profile denial");
+    assert_eq!(denied_envelope["ok"], false);
+    assert_eq!(denied_envelope["failure"]["code"], "script_runtime");
 }
 
 #[cfg(windows)]
@@ -1216,6 +1260,22 @@ fn prd_alignment_task_matches_public_catalogs_and_fails_closed() {
         .contains("prd_alignment_contract_schema")
     );
     fs::remove_dir_all(fixture).expect("remove PRD alignment fixture");
+}
+
+#[cfg(windows)]
+#[test]
+fn rhai_harness_cleanup_owns_only_registered_children() {
+    let output = run_harness_cleanup_selftest();
+    assert!(
+        output.status.success(),
+        "Rhai harness cleanup failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "PASS: harness cleanup ownership and orphan proof"
+    );
 }
 
 #[test]

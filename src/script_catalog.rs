@@ -609,6 +609,15 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             ],
         ),
         shipped_local_entry(
+            "std.process.id",
+            "system/process/id",
+            "std::process::id",
+            Some("std::process::id"),
+            RustMapping::Direct,
+            "std::process::id()",
+            (&["current_worker_process"], NO_STRINGS),
+        ),
+        shipped_local_entry(
             "std.process.command-builder",
             "system/process/command/builder",
             "Command.arg/args/current_dir/env/env_remove/env_clear/stdin_text/stdout_file/timeout/capture_limit",

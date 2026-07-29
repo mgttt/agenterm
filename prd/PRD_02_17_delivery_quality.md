@@ -118,8 +118,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   - [x] cleanup grants graceful shutdown only to a server confirmed in this
     run's isolated registry, then uses a bounded PID/start-time-matched forced
     fallback and writes proof that no owned GUI/server/worker, window, or
-    registration remains; an injected self-test proves an unregistered
-    same-name process is not killed and the original failure is preserved
+    registration remains; the first shared Rhai harness self-test proves an
+    unregistered sibling process is not killed, registered Child cleanup is
+    orphan-free, and the original failure is preserved, while the existing
+    PowerShell harness retains PID/start-time/window/registration coverage
+    until each owning smoke journey migrates
   - [x] qualification extracts evidence IDs actually emitted by the current
     gate, rejects duplicates or mismatch with its versioned manifest, and has
     fail-closed tests for failed/skipped gates; a clean, stress-inclusive run

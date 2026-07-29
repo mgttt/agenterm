@@ -31,6 +31,7 @@
         "std.process.command",
         "std.process.command-builder",
         "std.process.command-output",
+        "std.process.id",
         "std.time.system-time-now",
         "std.time.system-time-unix-millis",
         "std.time.system-time-rfc3339",
@@ -71,6 +72,14 @@
       "entry": "scripts/rhai/build-identity.rhai",
       "profile": "local",
       "cwd": "."
+    },
+    {
+      "id": "harness-cleanup-selftest",
+      "description": "Prove exact Rhai smoke-harness child ownership, cleanup evidence, and original-failure retention",
+      "entry": "scripts/rhai/harness-cleanup-selftest.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "args": ["."]
     },
     {
       "id": "migration-audit",
