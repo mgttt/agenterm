@@ -854,6 +854,7 @@ try {
 
     Write-Host 'STEP add and close a child through the replaceable Tabs tree'
     $rootUi = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $addBaseline = $rootUi.event_position
     $rootRow = @($rootUi.tabs | Where-Object id -eq $tabId)[0]
     $addBounds = $rootRow.actions.new_child.bounds
     [AgenTermRemoteUiNativeTest]::SendMessage(
@@ -862,6 +863,17 @@ try {
             [int]($addBounds.left + ($addBounds.width / 2)),
             [int]($addBounds.top + ($addBounds.height / 2))
         )
+    ) | Out-Null
+    $createdEvent = Invoke-AgenTerm @(
+        'wait-events',
+        '--epoch', $addBaseline.epoch,
+        '--after', "$($addBaseline.sequence)",
+        '--kind', 'tab.created',
+        '--timeout-ms', '5000'
+    ) | ConvertFrom-Json
+    $childId = "@$($createdEvent.tab_id)"
+    Invoke-AgenTerm @(
+        'wait-ui', '--active', $childId, '--timeout-ms', '5000'
     ) | Out-Null
     $childBootstrap = Invoke-AgenTerm @('ui-bootstrap') |
         ConvertFrom-Json
@@ -878,7 +890,6 @@ try {
             ($childBootstrap | ConvertTo-Json -Depth 8 -Compress)
         )
     }
-    $childId = $childTab.id
     $childTitleEditor = [AgenTermRemoteUiNativeTest]::GetDlgItem(
         $gui.MainWindowHandle, 2105
     )
