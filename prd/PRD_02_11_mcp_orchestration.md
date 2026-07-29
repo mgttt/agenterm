@@ -14,9 +14,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   - [ ] a worker crash, blocked tool, malformed peer, or script budget
     failure cannot stall terminal rendering, corrupt the workspace, or
     terminate tabs
-  - [ ] server and client roles have separate capability profiles,
-    credentials, connection allowlists, budgets, audit records, and
-    lifecycle controls
+  - [ ] MCP server and client connection roles have separate advertised-tool
+    profiles, credentials, peer/transport policy, budgets, audit records, and
+    lifecycle controls; these MCP boundaries never remove, hide, or deny APIs
+    in the standalone unrestricted Script Runtime
 - Brain/flow model
   - [ ] `brain` owns bounded decision state and chooses declared tools;
     `flow` owns a persisted, inspectable graph of steps, waits, branches,
@@ -26,8 +27,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     without assuming process continuity
   - [ ] MCP tools expose typed AgenTerm operations and return verifiable
     post-state; natural-language output is never the sole success signal
-  - [ ] destructive fleet actions retain AgenTerm confirmation and policy
-    boundaries, including when initiated by an MCP peer or Rhai flow
+  - [ ] destructive fleet actions retain native AgenTerm data-integrity,
+    confirmation, receipt, and lifecycle invariants. Any MCP/Agent
+    authorization is applied to that caller before it invokes Script Runtime;
+    a Rhai flow itself receives the complete unrestricted runtime API
 - Delivery dependency
   - [ ] no event-driven MCP, Rhai handler, or brain/flow runtime ships before
     the Observable Fleet minimum slice passes ordering, gap, restart, wait,

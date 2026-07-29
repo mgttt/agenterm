@@ -8,9 +8,10 @@ This module records safety gates for an unassigned product hypothesis. It does
 not commit the gateway executable or a release version.
 
 - Dependency and isolation
-  - [ ] implementation begins only after Observable Fleet, Rhai capability
-    policy, MCP typed tools, credential isolation, and audit contracts pass
-    their gates
+  - [ ] implementation begins only after Observable Fleet, the stable
+    unrestricted Rhai API/runtime contract, MCP typed tools, credential
+    isolation, and audit contracts pass their gates; the gateway cannot add a
+    permission profile to `agenterm-script.exe`
   - [ ] run as an optional loopback-authenticated sidecar, separate from the
     lightweight specialized-model worker and from GUI startup
   - [ ] keep provider credentials in an OS credential store, outside

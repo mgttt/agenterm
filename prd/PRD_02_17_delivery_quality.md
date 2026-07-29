@@ -243,8 +243,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [~] the public `prd-alignment` Rhai task compares PRD modules, shipped
       capability/evidence declarations, and live CLI/protocol/Mux catalogs;
       exact Rhai API-field comparison remains planned
-    - [x] `check.ps1` runs `tests/script_smoke.ps1` before the
-      safe-scripting release tag
+    - [x] `check.ps1` runs `tests/script_smoke.ps1` before the Script Runtime
+      release gate
 - v0.1.8 autonomous public-interface dogfood (P0)
   - Resolved findings retained as regression contracts
     - [x] stable creation output is available through the documented

@@ -38,7 +38,9 @@ the runtime. Deadlines, memory/output/concurrency budgets, typed failures, and
 owned-resource cleanup are robustness controls, not permission boundaries.
 Raw sockets, listeners, UDP, WebSockets, arbitrary local paths, child processes,
 and Fleet mutation are valid Script Runtime capabilities; do not add target or
-endpoint allowlists while implementing them.
+endpoint allowlists while implementing them. In Script Runtime documentation
+and catalogs, `capability` means API discovery and compatibility metadata only;
+it must never be interpreted as an authorization grant, denial, or sandbox.
 
 ## Parallel execution discipline
 
