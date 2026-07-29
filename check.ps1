@@ -380,11 +380,6 @@ try {
         -Label 'owned-resource cleanup self-test' {
         & '.\tests\harness_cleanup_selftest.ps1'
     }
-    Invoke-Checked -Id 'diagnostic-bundle-selftest' `
-        -Label 'CLI GUI and script diagnostic bundle self-test' {
-        & '.\tests\diagnostic_bundle_selftest.ps1'
-    }
-
     if (-not $SkipSmoke) {
         # GUI tests must never interrupt the interactive desktop running them.
         # The GUI entry point and CLI autostart both honor this inherited flag.
@@ -449,6 +444,15 @@ try {
                 Remove-Item Env:AGENTERM_NO_ACTIVATE -ErrorAction SilentlyContinue
             }
         }
+    }
+
+    # Keep the one-second first-window measurement ahead of the deliberately
+    # failure-heavy diagnostic probes. Those probes create and tear down
+    # several GUI/worker processes and can transiently distort process-launch
+    # latency without exercising the startup path itself.
+    Invoke-Checked -Id 'diagnostic-bundle-selftest' `
+        -Label 'CLI GUI and script diagnostic bundle self-test' {
+        & '.\tests\diagnostic_bundle_selftest.ps1'
     }
 
     if ($SkipSmoke) {
