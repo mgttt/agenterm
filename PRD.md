@@ -112,8 +112,8 @@ changes additionally require
 A v0.1.9-family candidate uses
 `.\check.ps1 -Release -IncludeStress` on a clean commit and must emit one
 complete qualification receipt bound to the exact candidate bytes. The
-independent `.\scripts\package-qualified.ps1` step may only copy those
-byte-identical qualified artifacts; it does not rebuild. A non-publishing
+independent `agenterm-script task run package-qualified` step may only copy
+those byte-identical qualified artifacts; it does not rebuild. A non-publishing
 release rehearsal must validate the candidate, receipt, package manifest, and
 remote workflow contract before publication is considered. Creating or
 pushing a release tag, or creating a public GitHub Release, still requires the

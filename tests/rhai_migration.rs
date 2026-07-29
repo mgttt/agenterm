@@ -308,6 +308,36 @@ fn run_qualification_selftest() -> Output {
 }
 
 #[cfg(windows)]
+fn run_package_qualified_selftest() -> Output {
+    let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+        .current_dir(repo)
+        .args([
+            "run",
+            "scripts/rhai/package-qualified-selftest.rhai",
+            "--profile",
+            "local",
+            "--project-root",
+        ])
+        .arg(repo)
+        .args([
+            "--timeout-ms",
+            "60000",
+            "--max-operations",
+            "10000000",
+            "--max-string-bytes",
+            "8388608",
+            "--max-output-bytes",
+            "1048576",
+            "--",
+        ])
+        .arg(repo)
+        .output()
+        .expect("run Rhai qualified-package self-test")
+}
+
+#[cfg(windows)]
 fn run_working_context_smoke() -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -1651,6 +1681,22 @@ fn rhai_qualification_contract_fails_closed_and_cleans_owned_scratch() {
     assert_eq!(
         String::from_utf8_lossy(&output.stdout).trim(),
         "PASS: qualification fail-closed self-test"
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn rhai_qualified_package_accepts_only_the_exact_receipt_bytes() {
+    let output = run_package_qualified_selftest();
+    assert!(
+        output.status.success(),
+        "Rhai qualified-package self-test failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "PASS: qualified package dry-run self-test"
     );
 }
 

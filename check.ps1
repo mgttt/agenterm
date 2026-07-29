@@ -495,7 +495,11 @@ try {
     }
     Invoke-Checked -Id 'package-boundary-selftest' `
         -Label 'qualified package boundary self-test' {
-        & '.\scripts\package-qualified-selftest.ps1'
+        & '.\dist\agenterm-script.exe' task run `
+            package-qualified-selftest `
+            --manifest '.\agenterm.tasks.json' `
+            --timeout-ms 60000 --max-operations 10000000 `
+            --max-string-bytes 8388608 --max-output-bytes 1048576
     }
     Invoke-Checked -Id 'harness-cleanup-selftest' `
         -Label 'owned-resource cleanup self-test' {

@@ -190,9 +190,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   - [ ] the receipt binds source commit, lock, toolchain/profile, artifact
     manifest, deterministic SBOM, required gates, emitted evidence, executable
     hashes, and the exact staged candidate bytes
-  - [ ] `package-qualified.ps1` never invokes Cargo and only copies the
-    byte-identical receipt-qualified inputs; repeated packaging of the same
-    inputs produces the same package manifest and content hashes
+  - [~] named Rhai task `package-qualified` never invokes Cargo and only copies
+    byte-identical receipt-qualified inputs; its public self-test proves the
+    exact ZIP member set and rejects source/input/artifact drift. Stable ZIP
+    container metadata for byte-identical repeated archives remains open,
+    while package-manifest payload hashes are already deterministic
   - [ ] fail-closed self-tests reject dirty or stale source, changed
     lock/manifest/SBOM/executable bytes, missing or skipped gates, a receipt
     for another candidate, and package or ZIP tampering before publication

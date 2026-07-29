@@ -112,6 +112,22 @@
       "args": [".", "dist/agenterm-cli.exe"]
     },
     {
+      "id": "package-qualified",
+      "description": "Create a byte-qualified offline Windows package dry run",
+      "entry": "scripts/rhai/package-qualified.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "args": [".", "target/qualification/receipt.json", "target/qualification/package-dry-run"]
+    },
+    {
+      "id": "package-qualified-selftest",
+      "description": "Prove the offline package boundary accepts only qualified bytes",
+      "entry": "scripts/rhai/package-qualified-selftest.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "args": ["."]
+    },
+    {
       "id": "working-context-smoke",
       "description": "Prove redacted launch proxy facts, archived controls, and non-persistence through an isolated GUI restart",
       "entry": "scripts/rhai/working-context-smoke.rhai",
