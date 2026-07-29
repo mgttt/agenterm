@@ -780,7 +780,10 @@ let output = child.wait_with_output();
     Write-Host 'STEP bounded child streams, backpressure, and truthful truncation'
     $streamFixtureExpected = (& $Exe --version).Trim()
     if ($LASTEXITCODE -ne 0 -or
-        $streamFixtureExpected -notmatch '^agenterm-cli \d+\.\d+\.\d+$') {
+        $streamFixtureExpected -notmatch (
+            '^agenterm-cli \d+\.\d+\.\d+' +
+            '(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$'
+        )) {
         throw "offline stream fixture version failed: $streamFixtureExpected"
     }
     $streamFixtureLiteral = $Exe.Replace('\', '\\').Replace('"', '\"')

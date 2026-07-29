@@ -108,14 +108,17 @@ artifact generation, CLI smoke, and semantic UX smoke all pass. Rendering
 changes additionally require
 `screenshot` or `screenshot-pane` inspection.
 
-A v0.1.9 candidate uses
+A v0.1.9-family candidate uses
 `.\check.ps1 -Release -IncludeStress` on a clean commit and must emit one
 complete qualification receipt bound to the exact candidate bytes. The
 independent `.\scripts\package-qualified.ps1` step may only copy those
 byte-identical qualified artifacts; it does not rebuild. A non-publishing
 release rehearsal must validate the candidate, receipt, package manifest, and
 remote workflow contract before publication is considered. Creating or
-pushing the `v0.1.9` tag, or creating a public GitHub Release, still requires
-the user's explicit approval. Versions 0.1.7 and 0.1.8 remain historical
+pushing a release tag, or creating a public GitHub Release, still requires the
+user's explicit approval. The deleted v0.1.9 GitHub Release and its retained
+immutable tag must not be overwritten; the server-loss hotfix uses SemVer
+`0.1.9+hotfix.1` and tag `v0.1.9+hotfix.1`, with public release title
+“AgenTerm v0.1.9.1 Hotfix”. Versions 0.1.7 and 0.1.8 remain historical
 baselines; v0.1.7 is internal-only and must never produce a tag or public
 GitHub Release.

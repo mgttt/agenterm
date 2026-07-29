@@ -324,6 +324,13 @@ fn waiter_capacity_recovers_after_cancellation() {
             while !stop.load(Ordering::Acquire) {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
+                        // Windows can inherit the listener's nonblocking mode on
+                        // accepted sockets. The listener polls only so this
+                        // fixture can stop; each request stream must block until
+                        // its complete JSON line arrives.
+                        stream
+                            .set_nonblocking(false)
+                            .expect("make accepted fixture stream blocking");
                         read_backend_request(&stream);
                         let response = json!({
                             "ok": true,

@@ -636,7 +636,10 @@ try {
     if ($null -eq $tab -or $tab.state -ne 'running') {
         throw 'ui-snapshot did not expose the running test tab'
     }
-    if ($snapshot.window.title -notmatch '^AgenTerm-\d+\.\d+\.\d+:\d+$') {
+    if ($snapshot.window.title -notmatch (
+        '^AgenTerm-\d+\.\d+\.\d+' +
+        '(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?:\d+$'
+    )) {
         throw "Window title is not versioned: $($snapshot.window.title)"
     }
     if ($snapshot.layout.status_bar.height -le 0 -or

@@ -341,16 +341,15 @@ try {
     Write-Host 'PASS: inline Tabs editing and compact tree geometry'
 }
 finally {
+    if ($null -ne $guiProcess -and -not $guiProcess.HasExited) {
+        Stop-Process -Id $guiProcess.Id -Force -ErrorAction SilentlyContinue
+        $null = $guiProcess.WaitForExit(3000)
+    }
     try {
         & $Exe kill-server 2>$null | Out-Null
     }
     catch {
         # The isolated server may already have exited after a failed assertion.
-    }
-    if ($null -ne $guiProcess -and -not $guiProcess.HasExited) {
-        if (-not $guiProcess.WaitForExit(3000)) {
-            Stop-Process -Id $guiProcess.Id -Force -ErrorAction SilentlyContinue
-        }
     }
     Remove-Item -LiteralPath $workspacePath, $settingsPath, $stderrPath `
         -ErrorAction SilentlyContinue

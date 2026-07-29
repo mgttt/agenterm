@@ -57,6 +57,7 @@ use windows_sys::Win32::{
 use crate::{
     client::{ipc_address, ipc_socket_addr},
     commands::{option_value, positional_values, screenshot_output_path, tmux_key_bytes},
+    instances::intentional_shutdown_matches,
     protocol::IpcResponse,
     settings::{AppConfig, clamp_tabs_width, config_path, load_config, save_config},
     tab_tree::{TabTreeNode, tree_rows},
@@ -69,9 +70,9 @@ use crate::{
     ui_command::UiClientCommand,
     ui_geometry::{
         PixelRect, TAB_HEIGHT, TAB_TOP, TERMINAL_SCROLLBAR_WIDTH, TerminalScrollbarGeometry,
-        TreeRowActionDensity, TreeRowMode, WorkspaceLayout, WorkspaceLayoutInput, reset_tabs_width,
-        scrollback_for_thumb_top, tabs_width_from_drag, terminal_scrollbar_geometry, tree_row_at_y,
-        tree_row_geometry_for_mode, workspace_layout,
+        TreeRowActionDensity, TreeRowGeometry, TreeRowMode, WorkspaceLayout, WorkspaceLayoutInput,
+        reset_tabs_width, scrollback_for_thumb_top, tabs_width_from_drag,
+        terminal_scrollbar_geometry, tree_row_at_y, tree_row_geometry_for_mode, workspace_layout,
     },
     working_context::parse_proxy_url,
 };
@@ -116,6 +117,7 @@ const STATUS_HEIGHT: i32 = 26;
 const COMPOSER_HEIGHT: i32 = 104;
 const MARGIN: i32 = 6;
 const RECONNECT_INTERVAL: Duration = Duration::from_millis(500);
+const SERVER_RESTART_INTERVAL: Duration = Duration::from_secs(5);
 const START_TIMEOUT: Duration = Duration::from_secs(8);
 const WINDOW_CLOSE_BUTTON_TEXT_FORMAT: u32 = DT_CENTER | DT_SINGLELINE | DT_VCENTER;
 
@@ -328,9 +330,7 @@ fn connect_or_start_server(client_id: &str) -> Result<UiClientModel> {
     match UiClientModel::connect(client_id.to_owned()) {
         Ok(client) => return Ok(client),
         Err(error) => {
-            if std::net::TcpStream::connect_timeout(&ipc_socket_addr()?, Duration::from_millis(100))
-                .is_ok()
-            {
+            if server_endpoint_is_listening() {
                 return Err(error).context("running server rejected replaceable UI");
             }
         }
@@ -347,6 +347,12 @@ fn connect_or_start_server(client_id: &str) -> Result<UiClientModel> {
     }
     Err(last_error.unwrap_or_else(|| anyhow::anyhow!("server did not become ready")))
         .context("could not start independent AgenTerm server")
+}
+
+fn server_endpoint_is_listening() -> bool {
+    ipc_socket_addr().is_ok_and(|address| {
+        std::net::TcpStream::connect_timeout(&address, Duration::from_millis(100)).is_ok()
+    })
 }
 
 fn start_server_process() -> Result<()> {
@@ -558,6 +564,8 @@ struct RemoteWindowState {
     client_id: String,
     client: Option<UiClientModel>,
     reconnect_after: Instant,
+    server_restart_after: Instant,
+    server_restart_suppressed: bool,
     last_message: Option<String>,
     last_error: Option<String>,
     tabs_visible: bool,
@@ -661,6 +669,8 @@ impl RemoteWindowState {
             client_id,
             client: Some(client),
             reconnect_after: Instant::now(),
+            server_restart_after: Instant::now(),
+            server_restart_suppressed: false,
             last_message: None,
             last_error: None,
             tabs_visible: config.tabs_visible,
@@ -735,12 +745,27 @@ impl RemoteWindowState {
                 }
             }
             Err(error) => {
+                let disconnected_server_pid = self.client.as_ref().map(UiClientModel::server_pid);
+                // A failed poll invalidates this causal client projection. Do not
+                // keep rendering it as connected or accept input against stale
+                // server-owned state while recovery is in progress.
+                self.client = None;
+                if disconnected_server_pid
+                    .is_some_and(|pid| intentional_shutdown_matches(&ipc_address(), pid))
+                {
+                    self.server_restart_suppressed = true;
+                }
+                self.show_workspace_controls(false);
+                self.show_tab_editor(false);
+                self.show_tab_close_controls(false);
                 self.last_error = Some(format!("{error:#}"));
                 if Instant::now() >= self.reconnect_after {
                     self.reconnect_after = Instant::now() + RECONNECT_INTERVAL;
                     match UiClientModel::connect(self.client_id.clone()) {
                         Ok(client) => {
                             self.client = Some(client);
+                            self.server_restart_after = Instant::now();
+                            self.server_restart_suppressed = false;
                             self.last_published_snapshot = None;
                             self.editing_tab_id = None;
                             self.terminal_selection = None;
@@ -764,7 +789,27 @@ impl RemoteWindowState {
                             return true;
                         }
                         Err(reconnect_error) => {
-                            self.last_error = Some(format!("Disconnected: {reconnect_error:#}"));
+                            let now = Instant::now();
+                            let recovery = if now >= self.server_restart_after
+                                && !self.server_restart_suppressed
+                                && !server_endpoint_is_listening()
+                            {
+                                self.server_restart_after = now + SERVER_RESTART_INTERVAL;
+                                match start_server_process() {
+                                    Ok(()) => Some(
+                                        "Server disappeared; recovery server started".to_owned(),
+                                    ),
+                                    Err(error) => {
+                                        Some(format!("Server recovery failed: {error:#}"))
+                                    }
+                                }
+                            } else {
+                                None
+                            };
+                            self.last_error =
+                                Some(recovery.unwrap_or_else(|| {
+                                    format!("Disconnected: {reconnect_error:#}")
+                                }));
                         }
                     }
                 }
@@ -1381,9 +1426,18 @@ impl RemoteWindowState {
         self.sidebar_scroll_offset.min(self.sidebar_max_offset())
     }
 
-    fn sidebar_content_width(&self) -> i32 {
-        let tree = self.workspace_geometry().sidebar_tree;
-        (tree.width() - TERMINAL_SCROLLBAR_WIDTH).max(0)
+    fn sidebar_row_geometry(
+        &self,
+        visual_position: usize,
+        depth: usize,
+        mode: TreeRowMode,
+    ) -> TreeRowGeometry {
+        sidebar_tree_row_geometry(
+            self.workspace_geometry().sidebar_tree,
+            visual_position,
+            depth,
+            mode,
+        )
     }
 
     fn sidebar_scrollbar_state(&self) -> Option<(TerminalScrollbarGeometry, usize, usize)> {
@@ -1391,13 +1445,7 @@ impl RemoteWindowState {
             return None;
         }
         let layout = self.workspace_geometry();
-        let track = PixelRect {
-            left: (layout.sidebar_tree.right - TERMINAL_SCROLLBAR_WIDTH)
-                .max(layout.sidebar_tree.left),
-            top: layout.sidebar_tree.top,
-            right: layout.sidebar_tree.right,
-            bottom: layout.sidebar_tree.bottom,
-        };
+        let track = sidebar_scrollbar_track(layout.sidebar_tree);
         let maximum = self.sidebar_max_offset();
         let offset = self.sidebar_offset();
         let track_height = track.height().max(0);
@@ -1465,9 +1513,8 @@ impl RemoteWindowState {
                 } else {
                     TreeRowMode::Normal
                 };
-                let geometry = visible_position.map(|position| {
-                    tree_row_geometry_for_mode(position, depth, self.sidebar_content_width(), mode)
-                });
+                let geometry = visible_position
+                    .map(|position| self.sidebar_row_geometry(position, depth, mode));
                 let selection = self
                     .terminal_selection
                     .as_ref()
@@ -1483,12 +1530,7 @@ impl RemoteWindowState {
                 let actions = visible_position
                     .filter(|_| source.active_tab_id.as_ref() == Some(&tab.id))
                     .map(|position| {
-                        let geometry = tree_row_geometry_for_mode(
-                            position,
-                            depth,
-                            self.sidebar_content_width(),
-                            mode,
-                        );
+                        let geometry = self.sidebar_row_geometry(position, depth, mode);
                         let action = |id: &str, label: &str, bounds: PixelRect| {
                             serde_json::json!({
                                 "id": id,
@@ -2023,12 +2065,8 @@ impl RemoteWindowState {
             self.show_tab_editor(false);
             return;
         };
-        let geometry = tree_row_geometry_for_mode(
-            viewport_position,
-            row.depth,
-            self.sidebar_content_width(),
-            TreeRowMode::Editing,
-        );
+        let geometry =
+            self.sidebar_row_geometry(viewport_position, row.depth, TreeRowMode::Editing);
         let Some(editors) = geometry.editors else {
             self.show_tab_editor(false);
             return;
@@ -2812,12 +2850,7 @@ impl RemoteWindowState {
             return None;
         }
         let viewport_position = row_index.checked_sub(self.sidebar_offset())?;
-        let geometry = tree_row_geometry_for_mode(
-            viewport_position,
-            row.depth,
-            self.sidebar_content_width(),
-            TreeRowMode::Normal,
-        );
+        let geometry = self.sidebar_row_geometry(viewport_position, row.depth, TreeRowMode::Normal);
         if geometry
             .actions
             .add_child
@@ -2843,12 +2876,7 @@ impl RemoteWindowState {
             return None;
         }
         let viewport_position = row_index.checked_sub(self.sidebar_offset())?;
-        let geometry = tree_row_geometry_for_mode(
-            viewport_position,
-            row.depth,
-            self.sidebar_content_width(),
-            TreeRowMode::Normal,
-        );
+        let geometry = self.sidebar_row_geometry(viewport_position, row.depth, TreeRowMode::Normal);
         geometry
             .disclosure_hit
             .contains(x, y)
@@ -3171,9 +3199,10 @@ impl RemoteWindowState {
         if self.new_terminal_open {
             self.finish_new_terminal(false);
         }
-        if let Err(error) = self.sync_composer() {
+        if self.client.is_some()
+            && let Err(error) = self.sync_composer()
+        {
             self.last_error = Some(format!("Composer save failed: {error:#}"));
-            return;
         }
         self.finish_tab_edit(false);
         self.window_close_pending = true;
@@ -4305,12 +4334,8 @@ impl RemoteWindowState {
             .enumerate()
         {
             let tab = &client.snapshot().tabs[tree_row.tab_index];
-            let geometry = tree_row_geometry_for_mode(
-                viewport_position,
-                tree_row.depth,
-                self.sidebar_content_width(),
-                TreeRowMode::Normal,
-            );
+            let geometry =
+                self.sidebar_row_geometry(viewport_position, tree_row.depth, TreeRowMode::Normal);
             let row = win_rect(geometry.selection);
             if row.bottom > sidebar.bottom {
                 break;
@@ -5393,6 +5418,60 @@ fn win_rect(rect: PixelRect) -> RECT {
     }
 }
 
+fn sidebar_tree_row_geometry(
+    sidebar_tree: PixelRect,
+    visual_position: usize,
+    depth: usize,
+    mode: TreeRowMode,
+) -> TreeRowGeometry {
+    let content_left = (sidebar_tree.left + TERMINAL_SCROLLBAR_WIDTH).min(sidebar_tree.right);
+    let content_width = (sidebar_tree.right - content_left).max(0);
+    translate_tree_row_x(
+        tree_row_geometry_for_mode(visual_position, depth, content_width, mode),
+        content_left,
+    )
+}
+
+fn sidebar_scrollbar_track(sidebar_tree: PixelRect) -> PixelRect {
+    PixelRect {
+        left: sidebar_tree.left,
+        top: sidebar_tree.top,
+        right: (sidebar_tree.left + TERMINAL_SCROLLBAR_WIDTH).min(sidebar_tree.right),
+        bottom: sidebar_tree.bottom,
+    }
+}
+
+fn translate_tree_row_x(mut geometry: TreeRowGeometry, delta: i32) -> TreeRowGeometry {
+    fn translate(mut rect: PixelRect, delta: i32) -> PixelRect {
+        rect.left += delta;
+        rect.right += delta;
+        rect
+    }
+
+    geometry.row = translate(geometry.row, delta);
+    geometry.selection = translate(geometry.selection, delta);
+    geometry.node_x += delta;
+    geometry.expander = translate(geometry.expander, delta);
+    geometry.status = translate(geometry.status, delta);
+    geometry.disclosure_hit = translate(geometry.disclosure_hit, delta);
+    geometry.text = translate(geometry.text, delta);
+    geometry.name = translate(geometry.name, delta);
+    geometry.note = translate(geometry.note, delta);
+    geometry.editors = geometry.editors.map(|mut editors| {
+        editors.name = translate(editors.name, delta);
+        editors.note = translate(editors.note, delta);
+        editors
+    });
+    geometry.actions.bounds = translate(geometry.actions.bounds, delta);
+    geometry.actions.add_child = geometry
+        .actions
+        .add_child
+        .map(|bounds| translate(bounds, delta));
+    geometry.actions.primary = translate(geometry.actions.primary, delta);
+    geometry.actions.secondary = translate(geometry.actions.secondary, delta);
+    geometry
+}
+
 fn window_text(window: HWND) -> String {
     let length = unsafe { GetWindowTextLengthW(window) };
     if length <= 0 {
@@ -5554,5 +5633,25 @@ mod tests {
             remote_surface_navigation(RemoteFocusSurface::Terminal, true, false, true, 0x28),
             None
         );
+    }
+
+    #[test]
+    fn sidebar_rows_are_positioned_to_the_right_of_the_left_scrollbar() {
+        let sidebar = PixelRect {
+            left: 0,
+            top: 0,
+            right: 244,
+            bottom: 700,
+        };
+        let geometry = sidebar_tree_row_geometry(sidebar, 0, 2, TreeRowMode::Editing);
+        let track = sidebar_scrollbar_track(sidebar);
+
+        assert_eq!(track.left, sidebar.left);
+        assert_eq!(track.right, TERMINAL_SCROLLBAR_WIDTH);
+        assert_eq!(geometry.row.left, TERMINAL_SCROLLBAR_WIDTH + 2);
+        assert!(geometry.disclosure_hit.left >= track.right);
+        assert!(geometry.actions.bounds.right <= sidebar.right);
+        let editors = geometry.editors.expect("editing geometry has editors");
+        assert!(editors.name.left >= track.right);
     }
 }

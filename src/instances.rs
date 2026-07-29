@@ -12,6 +12,12 @@ use crate::{build_identity::BuildIdentity, upgrade_identity::UpgradeIdentity};
 const INSTANCE_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+struct IntentionalShutdown {
+    pid: u32,
+    address: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct InstanceRecord {
     pub schema_version: u32,
     pub pid: u32,
@@ -36,6 +42,12 @@ pub(crate) struct InstanceRegistration {
     address: String,
 }
 
+impl InstanceRegistration {
+    pub(crate) fn address(&self) -> &str {
+        &self.address
+    }
+}
+
 impl Drop for InstanceRegistration {
     fn drop(&mut self) {
         let matches_registration = fs::read(&self.path)
@@ -54,6 +66,7 @@ pub(crate) fn register_instance(
     session: &str,
 ) -> Result<InstanceRegistration> {
     let build = BuildIdentity::current();
+    let _ = fs::remove_file(intentional_shutdown_path(&instances_dir(), address));
     register_instance_in(
         &instances_dir(),
         InstanceRecord {
@@ -77,6 +90,48 @@ pub(crate) fn register_instance(
             }),
         },
     )
+}
+
+pub(crate) fn mark_intentional_shutdown(address: &str) -> Result<()> {
+    mark_intentional_shutdown_in(&instances_dir(), address, std::process::id())
+}
+
+pub(crate) fn intentional_shutdown_matches(address: &str, pid: u32) -> bool {
+    let path = intentional_shutdown_path(&instances_dir(), address);
+    fs::read(path)
+        .ok()
+        .and_then(|content| serde_json::from_slice::<IntentionalShutdown>(&content).ok())
+        .is_some_and(|marker| marker.pid == pid && marker.address == address)
+}
+
+fn mark_intentional_shutdown_in(directory: &Path, address: &str, pid: u32) -> Result<()> {
+    fs::create_dir_all(directory)
+        .with_context(|| format!("failed to create {}", directory.display()))?;
+    let path = intentional_shutdown_path(directory, address);
+    fs::write(
+        &path,
+        serde_json::to_vec(&IntentionalShutdown {
+            pid,
+            address: address.to_owned(),
+        })?,
+    )
+    .with_context(|| format!("failed to write {}", path.display()))
+}
+
+fn intentional_shutdown_path(directory: &Path, address: &str) -> PathBuf {
+    let safe_address = address
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    // Keep this out of the `*.json` instance-registration namespace consumed
+    // by discovery and orphan accounting.
+    directory.join(format!(".intentional-shutdown-{safe_address}.marker"))
 }
 
 fn known_build_value(value: &str) -> Option<String> {
@@ -244,5 +299,30 @@ mod tests {
     fn process_liveness_only_rejects_a_definitively_dead_pid() {
         assert!(instance_process_is_alive(std::process::id()));
         assert!(!instance_process_is_alive(u32::MAX));
+    }
+
+    #[test]
+    fn intentional_shutdown_marker_is_address_and_pid_scoped() {
+        let directory = env::temp_dir().join(format!(
+            "agenterm-shutdown-marker-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let address = "127.0.0.1:49998";
+        mark_intentional_shutdown_in(&directory, address, 42).unwrap();
+        let marker: IntentionalShutdown = serde_json::from_slice(
+            &fs::read(intentional_shutdown_path(&directory, address)).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(marker.pid, 42);
+        assert_eq!(marker.address, address);
+        assert_ne!(
+            intentional_shutdown_path(&directory, address),
+            intentional_shutdown_path(&directory, "127.0.0.1:49999")
+        );
+        fs::remove_dir_all(directory).unwrap();
     }
 }

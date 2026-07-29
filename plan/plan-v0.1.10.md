@@ -1,10 +1,52 @@
 # AgenTerm v0.1.10 公开计划
 
-状态：实施中；v0.1.9 已发布，首批 3/43 PowerShell 迁移项完成删除
+状态：实施中；原 v0.1.9 Release 因 server-loss 故障撤下，
+`0.1.9+hotfix.1` 是恢复 v0.1.10 主线前的强制稳定性门；
+首批 3/43 PowerShell 迁移项完成删除
 工作主题：**Rhai 完整接替 PowerShell，并建立可验证的只读 Agent 桥梁**
 版本定位：在 v0.1.9 完善通用 Rhai 运行时、模块任务与机器可读工具
 schema 后，让 AgenTerm 首次用自己的脚本运行时驱动完整开发生命周期，
 同时把同一份 Fleet 事实稳定地开放给外部 Agent 客户端。
+
+### v0.1.9.1 紧急稳定性门（2026-07-29）
+
+用户现场出现旧 GUI 仍响应但 server、监听端口和 instance registration
+全部消失的断裂状态。失效的 `UiClientModel` 仍被保留，造成界面继续呈现旧
+终端并接受输入；关闭入口又在打开本地确认前尝试同步 composer，最终表现为
+“终端卡死且窗口无法关闭”。
+
+恢复 v0.1.10 功能开发前必须发布一次窄范围热修复：
+
+```text
+server 消失
+├─ 立即撤销 stale client projection
+├─ 隐藏/禁用 terminal composer 与 server-owned controls
+├─ 显示 Offline / Recovering，不伪装 Connected
+├─ 窗口关闭与 Keep Server Running 始终由 GUI 本地完成
+├─ endpoint 无 listener 时限频启动 replacement server
+├─ endpoint 有 listener 但握手失败时拒绝竞争启动
+└─ 同一 GUI PID/HWND 连接新 server PID/epoch/lease
+```
+
+Cargo 不接受四段核心版本 `0.1.9.1`，因此机器身份、tag、metadata 和制品采用
+严格一致的 SemVer `0.1.9+hotfix.1` / `v0.1.9+hotfix.1`；GitHub Release
+标题使用人类可读的 “AgenTerm v0.1.9.1 Hotfix”。旧 `v0.1.9` tag 保留，
+不得覆盖或复用。
+
+热修复发布门：
+
+- `remote_ui_smoke.ps1` 必须真实停止 server，观察输入 controls 隐藏；
+- 在 server 不可用时通过原生 `WM_CLOSE` 打开并取消本地三选确认；
+- 测试不得手工启动 replacement server，必须由同一 GUI 自动恢复；
+- 新 server PID、epoch、UI lease 必须全部变化且因果一致；
+- cleanup 必须 zero-orphan，测试期间不得新增 WER crash；
+- 运行中 GUI/server 与下一版 staged binaries 的升级/回滚旅程必须通过；
+- 完整 release gate 通过后才能创建热修复 tag/Release。
+- Apple 分发凭据恢复前，macOS 仅允许发布显式
+  `-unsigned-preview` 资产；ZIP 内、独立 Release 文件和页面正文三处都必须
+  标明未签名/未公证、SHA-256/provenance 验证和一次性
+  `Privacy & Security → Open Anyway` 路径，禁止用 stable 文件名或建议全局
+  关闭 Gatekeeper。
 
 本版不可拆分的第一交付目标是 **PowerShell 归零**。MCP 是可并行推进的
 第二产品线；若资源、时间或共享热点发生冲突，先保证 Rhai 自举、迁移与

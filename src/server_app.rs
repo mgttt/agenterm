@@ -17,7 +17,10 @@ use crate::{
     },
     control_dispatch::{ControlHost, dispatch_shared_command, resolve_target_position},
     event_journal::{EventJournal, EventKind},
-    instances::{InstanceRegistration, instance_process_is_alive, register_instance},
+    instances::{
+        InstanceRegistration, instance_process_is_alive, mark_intentional_shutdown,
+        register_instance,
+    },
     ipc_transport::{IpcEnvelope, start_ipc_server},
     operations::{
         UI_TABS_HIDE, UI_TABS_SET_WIDTH, UI_TABS_SHOW, UI_TABS_TOGGLE, validate_operation_args,
@@ -1237,6 +1240,15 @@ impl ServerState {
                         false,
                     );
                 }
+                if let Err(error) = mark_intentional_shutdown(self._instance_registration.address())
+                {
+                    return IpcResponse::typed_failure(
+                        format!("{error:#}"),
+                        "operation_persistence_failed",
+                        "precondition",
+                        false,
+                    );
+                }
                 self.event_journal.commit(
                     EventKind::WorkspaceShutdown,
                     None,
@@ -1492,6 +1504,7 @@ impl ControlHost for ServerState {
     }
 
     fn request_shutdown(&mut self) {
+        let _ = mark_intentional_shutdown(self._instance_registration.address());
         self.shutdown_requested = true;
     }
 

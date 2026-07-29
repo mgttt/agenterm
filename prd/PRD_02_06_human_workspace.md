@@ -26,9 +26,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] high-density two-line rows with compact outer/inner spacing, continuous
   native tree connectors, grid-aligned expand boxes, status lamps, and
   bordered selection; persisted notes remain visible below names
-- [x] the full-height Tabs tree owns a visible draggable vertical scrollbar;
-  mouse-wheel, thumb drag, row paint, inline editors, selection, disclosure
-  and action hit-testing consume the same bounded row offset
+- [x] the full-height Tabs tree owns a visible draggable vertical scrollbar on
+  its outer left edge; row content remains to its right, and mouse-wheel, thumb
+  drag, row paint, inline editors, selection, disclosure and action hit-testing
+  consume the same bounded row offset and translated geometry
 - [ ] drag/drop reparenting and team-level actions
 - [x] line 1: user-defined role/name
 - [x] line 2: user note, otherwise numeric index plus running program;

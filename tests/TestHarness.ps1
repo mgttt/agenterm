@@ -454,6 +454,45 @@ function Stop-SmokeOwnedResources {
     # server exits, its authoritative UI lease is no longer queryable.
     Sync-SmokeOwnedUiClients -Context $Context
     $graceful = [Collections.Generic.List[object]]::new()
+    $forcedPids = [Collections.Generic.List[int]]::new()
+    $forceErrors = [Collections.Generic.List[string]]::new()
+
+    # A live GUI deliberately recovers a missing server. End all test-owned UI
+    # clients before server shutdown so cleanup cannot race the product's
+    # recovery supervisor and create a new orphaned server.
+    foreach ($record in @($Context.OwnedProcesses | Where-Object kind -eq 'gui')) {
+        $process = Get-Process -Id $record.pid -ErrorAction SilentlyContinue
+        if ($null -eq $process -or
+            -not (Test-SmokeOwnedProcessIdentity -Record $record `
+                -Process $process)) {
+            continue
+        }
+        try {
+            Stop-Process -Id $record.pid -Force -ErrorAction Stop
+            $record.forced = $true
+            $forcedPids.Add([int]$record.pid)
+        }
+        catch {
+            $forceErrors.Add(
+                "GUI PID $($record.pid): $(($_ | Out-String).Trim())"
+            )
+        }
+    }
+    $guiDeadline = [DateTime]::UtcNow.AddSeconds(3)
+    do {
+        $liveGui = @($Context.OwnedProcesses | Where-Object kind -eq 'gui' |
+            Where-Object {
+                $candidate = Get-Process -Id $_.pid -ErrorAction SilentlyContinue
+                $null -ne $candidate -and
+                    (Test-SmokeOwnedProcessIdentity -Record $_ -Process $candidate)
+            })
+        if ($liveGui.Count -eq 0) {
+            break
+        }
+        Start-Sleep -Milliseconds 50
+    } while ([DateTime]::UtcNow -lt $guiDeadline)
+
+    Sync-SmokeOwnedServers -Context $Context
     foreach ($address in @($Context.OwnedAddresses)) {
         $liveServer = @($Context.OwnedProcesses | Where-Object {
             $_.address -eq $address -and $_.kind -eq 'server'
@@ -501,8 +540,6 @@ function Stop-SmokeOwnedResources {
         Start-Sleep -Milliseconds 50
     } while ([DateTime]::UtcNow -lt $deadline)
 
-    $forcedPids = [Collections.Generic.List[int]]::new()
-    $forceErrors = [Collections.Generic.List[string]]::new()
     foreach ($record in $Context.OwnedProcesses) {
         $process = Get-Process -Id $record.pid -ErrorAction SilentlyContinue
         if ($null -eq $process -or

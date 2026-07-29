@@ -150,6 +150,12 @@ jobs:
           Compress-Archive `
             -LiteralPath $packageFiles `
             -DestinationPath $zip
+          $sbom = './dist/agenterm-sbom.spdx.json'
+          if (-not (Test-Path -LiteralPath $sbom)) {
+            throw 'Release quality gate did not produce the SPDX dependency inventory.'
+          }
+          Copy-Item -LiteralPath $sbom `
+            -Destination "./dist/agenterm-$version-sbom.spdx.json"
 
       - name: Install Windows ARM64 cross-build tooling
         if: matrix.platform_id == 'windows-aarch64'
@@ -231,7 +237,9 @@ jobs:
             "$VERSION" linux aarch64 target/aarch64-unknown-linux-gnu/release
 
       - name: Import Apple Developer ID credentials
-        if: startsWith(matrix.platform_id, 'macos-')
+        if: >-
+          startsWith(matrix.platform_id, 'macos-') &&
+          vars.ENABLE_SIGNED_MACOS_RELEASE == 'true'
         env:
           APPLE_DEVELOPER_ID_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_P12_BASE64 }}
           APPLE_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
@@ -307,6 +315,14 @@ jobs:
           echo "APPLE_NOTARY_KEY_ID=$APPLE_NOTARY_KEY_ID" >> "$GITHUB_ENV"
           echo "APPLE_NOTARY_ISSUER_ID=$APPLE_NOTARY_ISSUER_ID" >> "$GITHUB_ENV"
 
+      - name: Report macOS unsigned preview channel
+        if: >-
+          startsWith(matrix.platform_id, 'macos-') &&
+          vars.ENABLE_SIGNED_MACOS_RELEASE != 'true'
+        run: |
+          echo "Signed macOS stable publishing is disabled; this job will produce a visibly labeled unsigned preview."
+          echo "Set ENABLE_SIGNED_MACOS_RELEASE=true only after all Developer ID and notarization secrets are configured."
+
       - name: Build macOS ARM64 clients
         if: matrix.platform_id == 'macos-aarch64'
         run: |
@@ -315,20 +331,26 @@ jobs:
             --bin agenterm --bin agenterm-cli --bin agenterm-mux --bin agenterm-script --bin agenterm-mcp
 
       - name: Sign macOS ARM64 clients
-        if: matrix.platform_id == 'macos-aarch64'
+        if: >-
+          matrix.platform_id == 'macos-aarch64' &&
+          vars.ENABLE_SIGNED_MACOS_RELEASE == 'true'
         run: |
           ./scripts/sign-macos-release.sh \
             aarch64 target/aarch64-apple-darwin/release
 
       - name: Package macOS ARM64 release
-        if: matrix.platform_id == 'macos-aarch64'
+        if: >-
+          matrix.platform_id == 'macos-aarch64' &&
+          vars.ENABLE_SIGNED_MACOS_RELEASE == 'true'
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           ./scripts/package-client-release.sh \
             "$VERSION" macos aarch64 target/aarch64-apple-darwin/release
 
       - name: Notarize macOS ARM64 release
-        if: matrix.platform_id == 'macos-aarch64'
+        if: >-
+          matrix.platform_id == 'macos-aarch64' &&
+          vars.ENABLE_SIGNED_MACOS_RELEASE == 'true'
         run: |
           set -euo pipefail
           VERSION="${GITHUB_REF_NAME#v}"
@@ -352,6 +374,61 @@ jobs:
               sys.exit(f"Apple notarization was not accepted: {result}")
           PY
 
+      - name: Package macOS ARM64 unsigned preview
+        if: >-
+          matrix.platform_id == 'macos-aarch64' &&
+          vars.ENABLE_SIGNED_MACOS_RELEASE != 'true'
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          AGENTERM_MACOS_UNSIGNED_PREVIEW=1 \
+            ./scripts/package-client-release.sh \
+            "$VERSION" macos aarch64 target/aarch64-apple-darwin/release
+          STABLE="dist/agenterm-${VERSION}-macos-aarch64.zip"
+          PREVIEW="dist/agenterm-${VERSION}-macos-aarch64-unsigned-preview.zip"
+          mv "$STABLE" "$PREVIEW"
+          cp docs/macos-unsigned-preview.md \
+            dist/MACOS_UNSIGNED_PREVIEW_README.md
+          cp docs/macos-unsigned-preview.zh-Hant.md \
+            dist/MACOS_UNSIGNED_PREVIEW_README.zh-Hant.md
+          SHA256="$(shasum -a 256 "$PREVIEW" | awk '{print $1}')"
+          printf '%s  %s\n' "$SHA256" "$(basename "$PREVIEW")" > "$PREVIEW.sha256"
+          PREVIEW="$PREVIEW" SHA256="$SHA256" ARCH="aarch64" python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import pathlib
+
+          preview = pathlib.Path(os.environ["PREVIEW"])
+          root = pathlib.Path.cwd()
+          provenance = {
+              "schema_version": 1,
+              "channel": "macos-unsigned-preview",
+              "artifact": preview.name,
+              "sha256": os.environ["SHA256"],
+              "source_commit": os.environ["GITHUB_SHA"],
+              "source_tag": os.environ["GITHUB_REF_NAME"],
+              "architecture": os.environ["ARCH"],
+              "signed": False,
+              "notarized": False,
+              "cargo_lock_sha256": hashlib.sha256(
+                  (root / "Cargo.lock").read_bytes()
+              ).hexdigest(),
+              "artifact_manifest_sha256": hashlib.sha256(
+                  (root / "scripts/artifacts.json").read_bytes()
+              ).hexdigest(),
+              "build_log": (
+                  f"{os.environ['GITHUB_SERVER_URL']}/"
+                  f"{os.environ['GITHUB_REPOSITORY']}/actions/runs/"
+                  f"{os.environ['GITHUB_RUN_ID']}"
+              ),
+          }
+          preview.with_suffix(preview.suffix + ".provenance.json").write_text(
+              json.dumps(provenance, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
       - name: Build macOS x86_64 clients
         if: matrix.platform_id == 'macos-x86_64'
         run: |
@@ -360,20 +437,26 @@ jobs:
             --bin agenterm --bin agenterm-cli --bin agenterm-mux --bin agenterm-script --bin agenterm-mcp
 
       - name: Sign macOS x86_64 clients
-        if: matrix.platform_id == 'macos-x86_64'
+        if: >-
+          matrix.platform_id == 'macos-x86_64' &&
+          vars.ENABLE_SIGNED_MACOS_RELEASE == 'true'
         run: |
           ./scripts/sign-macos-release.sh \
             x86_64 target/x86_64-apple-darwin/release
 
       - name: Package macOS x86_64 release
-        if: matrix.platform_id == 'macos-x86_64'
+        if: >-
+          matrix.platform_id == 'macos-x86_64' &&
+          vars.ENABLE_SIGNED_MACOS_RELEASE == 'true'
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           ./scripts/package-client-release.sh \
             "$VERSION" macos x86_64 target/x86_64-apple-darwin/release
 
       - name: Notarize macOS x86_64 release
-        if: matrix.platform_id == 'macos-x86_64'
+        if: >-
+          matrix.platform_id == 'macos-x86_64' &&
+          vars.ENABLE_SIGNED_MACOS_RELEASE == 'true'
         run: |
           set -euo pipefail
           VERSION="${GITHUB_REF_NAME#v}"
@@ -397,12 +480,65 @@ jobs:
               sys.exit(f"Apple notarization was not accepted: {result}")
           PY
 
+      - name: Package macOS x86_64 unsigned preview
+        if: >-
+          matrix.platform_id == 'macos-x86_64' &&
+          vars.ENABLE_SIGNED_MACOS_RELEASE != 'true'
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          AGENTERM_MACOS_UNSIGNED_PREVIEW=1 \
+            ./scripts/package-client-release.sh \
+            "$VERSION" macos x86_64 target/x86_64-apple-darwin/release
+          STABLE="dist/agenterm-${VERSION}-macos-x86_64.zip"
+          PREVIEW="dist/agenterm-${VERSION}-macos-x86_64-unsigned-preview.zip"
+          mv "$STABLE" "$PREVIEW"
+          SHA256="$(shasum -a 256 "$PREVIEW" | awk '{print $1}')"
+          printf '%s  %s\n' "$SHA256" "$(basename "$PREVIEW")" > "$PREVIEW.sha256"
+          PREVIEW="$PREVIEW" SHA256="$SHA256" ARCH="x86_64" python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import pathlib
+
+          preview = pathlib.Path(os.environ["PREVIEW"])
+          root = pathlib.Path.cwd()
+          provenance = {
+              "schema_version": 1,
+              "channel": "macos-unsigned-preview",
+              "artifact": preview.name,
+              "sha256": os.environ["SHA256"],
+              "source_commit": os.environ["GITHUB_SHA"],
+              "source_tag": os.environ["GITHUB_REF_NAME"],
+              "architecture": os.environ["ARCH"],
+              "signed": False,
+              "notarized": False,
+              "cargo_lock_sha256": hashlib.sha256(
+                  (root / "Cargo.lock").read_bytes()
+              ).hexdigest(),
+              "artifact_manifest_sha256": hashlib.sha256(
+                  (root / "scripts/artifacts.json").read_bytes()
+              ).hexdigest(),
+              "build_log": (
+                  f"{os.environ['GITHUB_SERVER_URL']}/"
+                  f"{os.environ['GITHUB_REPOSITORY']}/actions/runs/"
+                  f"{os.environ['GITHUB_RUN_ID']}"
+              ),
+          }
+          preview.with_suffix(preview.suffix + ".provenance.json").write_text(
+              json.dumps(provenance, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
       - name: Upload Windows x86_64 release assets
         if: matrix.platform_id == 'windows-x86_64'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-windows-x86_64
-          path: dist/agenterm-*-windows-x86_64.zip
+          path: |
+            dist/agenterm-*-windows-x86_64.zip
+            dist/agenterm-*-sbom.spdx.json
 
       - name: Upload Windows ARM64 release assets
         if: matrix.platform_id == 'windows-aarch64'
@@ -426,18 +562,42 @@ jobs:
           path: dist/agenterm-*-linux-aarch64.tar.gz
 
       - name: Upload macOS ARM64 release assets
-        if: matrix.platform_id == 'macos-aarch64'
+        if: >-
+          matrix.platform_id == 'macos-aarch64' &&
+          vars.ENABLE_SIGNED_MACOS_RELEASE == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-macos-aarch64
           path: dist/agenterm-*-macos-aarch64.zip
 
       - name: Upload macOS x86_64 release assets
-        if: matrix.platform_id == 'macos-x86_64'
+        if: >-
+          matrix.platform_id == 'macos-x86_64' &&
+          vars.ENABLE_SIGNED_MACOS_RELEASE == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-macos-x86_64
           path: dist/agenterm-*-macos-x86_64.zip
+
+      - name: Upload macOS ARM64 unsigned preview assets
+        if: >-
+          matrix.platform_id == 'macos-aarch64' &&
+          vars.ENABLE_SIGNED_MACOS_RELEASE != 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-macos-aarch64-unsigned-preview
+          path: |
+            dist/agenterm-*-macos-aarch64-unsigned-preview.zip*
+            dist/MACOS_UNSIGNED_PREVIEW_README*.md
+
+      - name: Upload macOS x86_64 unsigned preview assets
+        if: >-
+          matrix.platform_id == 'macos-x86_64' &&
+          vars.ENABLE_SIGNED_MACOS_RELEASE != 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-macos-x86_64-unsigned-preview
+          path: dist/agenterm-*-macos-x86_64-unsigned-preview.zip*
 
   publish:
     needs: build
@@ -465,14 +625,76 @@ jobs:
             echo "No release assets were downloaded." >&2
             exit 1
           fi
+          release_title="AgenTerm $GITHUB_REF_NAME"
+          if [[ "$GITHUB_REF_NAME" == "v0.1.9+hotfix.1" ]]; then
+            release_title="AgenTerm v0.1.9.1 Hotfix"
+          fi
+          preview_notice="$RUNNER_TEMP/macos-unsigned-preview-release-notice.md"
+          has_macos_preview=false
+          if find release-assets -type f \
+              -name '*-macos-*-unsigned-preview.zip' -print -quit |
+              grep -q .
+          then
+            has_macos_preview=true
+            cat >"$preview_notice" <<'EOF'
+          <!-- agenterm-macos-unsigned-preview -->
+          ## macOS unsigned preview — not the stable macOS channel
+
+          Assets whose names end in `-macos-*-unsigned-preview.zip` are **not
+          signed with an Apple Developer ID and are not notarized by Apple**.
+          They are intended for developers and voluntary preview testers.
+
+          Before opening one, download its adjacent `.sha256` and
+          `.provenance.json` files and verify:
+
+          ```sh
+          shasum -a 256 -c agenterm-*-macos-*-unsigned-preview.zip.sha256
+          ```
+
+          The Release also includes a versioned SPDX dependency inventory.
+          After one blocked launch attempt, a user who has verified the source
+          and accepts the risk can use **System Settings → Privacy & Security →
+          Open Anyway**. Read the downloadable
+          `MACOS_UNSIGNED_PREVIEW_README.md` first.
+          A Traditional Chinese copy is available as
+          `MACOS_UNSIGNED_PREVIEW_README.zh-Hant.md`.
+
+          Do not disable Gatekeeper globally, do not run
+          `spctl --master-disable`, and do not recursively remove quarantine
+          attributes. Signed/notarized macOS stable releases remain disabled
+          until the Apple distribution credentials are available.
+          <!-- /agenterm-macos-unsigned-preview -->
+          EOF
+          fi
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
+            if [[ "$has_macos_preview" == true ]]; then
+              existing_body="$(
+                gh release view "$GITHUB_REF_NAME" --json body --jq .body
+              )"
+              if [[ "$existing_body" != *"agenterm-macos-unsigned-preview"* ]]; then
+                {
+                  cat "$preview_notice"
+                  printf '\n%s\n' "$existing_body"
+                } >"$RUNNER_TEMP/release-notes.md"
+                gh release edit "$GITHUB_REF_NAME" \
+                  --notes-file "$RUNNER_TEMP/release-notes.md"
+              fi
+            fi
             gh release edit "$GITHUB_REF_NAME" \
               --draft=false \
-              --title "AgenTerm $GITHUB_REF_NAME"
+              --title "$release_title"
           else
-            gh release create "$GITHUB_REF_NAME" "${files[@]}" \
-              --verify-tag \
-              --generate-notes \
-              --title "AgenTerm $GITHUB_REF_NAME"
+            if [[ "$has_macos_preview" == true ]]; then
+              gh release create "$GITHUB_REF_NAME" "${files[@]}" \
+                --verify-tag \
+                --generate-notes \
+                --notes "$(cat "$preview_notice")" \
+                --title "$release_title"
+            else
+              gh release create "$GITHUB_REF_NAME" "${files[@]}" \
+                --verify-tag \
+                --generate-notes \
+                --title "$release_title"
+            fi
           fi

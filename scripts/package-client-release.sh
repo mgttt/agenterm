@@ -84,6 +84,13 @@ for license_file in LICENSE-APACHE LICENSE-MIT THIRD_PARTY_NOTICES.md; do
   cp "$ROOT/$license_file" "$STAGING/"
 done
 
+if [[ "$OS" == "macos" && "${AGENTERM_MACOS_UNSIGNED_PREVIEW:-0}" == "1" ]]; then
+  cp "$ROOT/docs/macos-unsigned-preview.md" \
+    "$STAGING/MACOS_UNSIGNED_PREVIEW_README.md"
+  cp "$ROOT/docs/macos-unsigned-preview.zh-Hant.md" \
+    "$STAGING/MACOS_UNSIGNED_PREVIEW_README.zh-Hant.md"
+fi
+
 case "$PACKAGE_FORMAT" in
   tar.gz)
     ARCHIVE="$DIST/agenterm-$VERSION-$OS-$ARCH.tar.gz"

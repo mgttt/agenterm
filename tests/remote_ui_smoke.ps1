@@ -831,38 +831,36 @@ try {
     }
 
     Write-Host 'STEP resize Tabs locally and scroll the server-owned viewport'
-    $activeBeforeResize = @(
-        $replacementBootstrap.tabs |
-            Where-Object id -eq $replacementBootstrap.active_tab_id
-    )[0]
-    $columnsBeforeResize = [int]$activeBeforeResize.screen.columns
-    $resizeY = 200
-    [AgenTermRemoteUiNativeTest]::SendMessage(
-        $gui.MainWindowHandle, 0x0201, [IntPtr]::Zero,
-        [AgenTermRemoteUiNativeTest]::MousePoint(249, $resizeY)
-    ) | Out-Null
-    [AgenTermRemoteUiNativeTest]::SendMessage(
-        $gui.MainWindowHandle, 0x0200, [IntPtr]::Zero,
-        [AgenTermRemoteUiNativeTest]::MousePoint(360, $resizeY)
-    ) | Out-Null
-    [AgenTermRemoteUiNativeTest]::SendMessage(
-        $gui.MainWindowHandle, 0x0202, [IntPtr]::Zero,
-        [AgenTermRemoteUiNativeTest]::MousePoint(360, $resizeY)
+    Invoke-AgenTerm @('ui-action', 'tabs-show') | Out-Null
+    $beforeResizeSnapshot = Invoke-AgenTerm @('ui-snapshot') |
+        ConvertFrom-Json
+    $columnsBeforeResize = [int]$beforeResizeSnapshot.layout.terminal.cols
+    $resizeGrip = $beforeResizeSnapshot.layout.sidebar.resize_grip
+    if ($null -eq $resizeGrip) {
+        throw 'visible Tabs sidebar did not expose a resize grip'
+    }
+    Invoke-AgenTerm @(
+        'ui-action', 'tabs-set-width', '--width', '360'
     ) | Out-Null
     $savedSettings = Get-Content -LiteralPath $run.SettingsPath -Raw |
         ConvertFrom-Json
     $resizedBootstrap = Invoke-AgenTerm @('ui-bootstrap') |
+        ConvertFrom-Json
+    $resizedUi = Invoke-AgenTerm @('ui-snapshot') |
         ConvertFrom-Json
     $activeAfterResize = @(
         $resizedBootstrap.tabs |
             Where-Object id -eq $resizedBootstrap.active_tab_id
     )[0]
     if ($savedSettings.tabs_width -ne 360 -or
+        $resizedUi.layout.sidebar.configured_width -ne 360 -or
+        $resizedUi.layout.terminal.cols -ge $columnsBeforeResize -or
         $activeAfterResize.screen.columns -ge $columnsBeforeResize) {
         throw (
-            'replaceable UI did not persist Tabs drag or resize the PTY: ' +
+            'replaceable UI did not persist Tabs resize or resize the PTY: ' +
             "saved_width=$($savedSettings.tabs_width) " +
             "before_columns=$columnsBeforeResize " +
+            "client_columns=$($resizedUi.layout.terminal.cols) " +
             "after_columns=$($activeAfterResize.screen.columns)"
         )
     }
@@ -915,10 +913,8 @@ try {
     ) | Out-Null
 
     Write-Host 'STEP collapse and expand the server-owned tab tree'
-    [AgenTermRemoteUiNativeTest]::SendMessage(
-        $gui.MainWindowHandle, 0x0201, [IntPtr]::Zero,
-        [AgenTermRemoteUiNativeTest]::MousePoint(12, 20)
-    ) | Out-Null
+    Invoke-AgenTerm @('ui-action', 'toggle-tree', '-t', $tabId) |
+        Out-Null
     $collapsedBootstrap = Invoke-AgenTerm @('ui-bootstrap') |
         ConvertFrom-Json
     $collapsedRoot = @(
@@ -932,10 +928,8 @@ try {
             ($collapsedBootstrap | ConvertTo-Json -Depth 8 -Compress)
         )
     }
-    [AgenTermRemoteUiNativeTest]::SendMessage(
-        $gui.MainWindowHandle, 0x0201, [IntPtr]::Zero,
-        [AgenTermRemoteUiNativeTest]::MousePoint(12, 20)
-    ) | Out-Null
+    Invoke-AgenTerm @('ui-action', 'toggle-tree', '-t', $tabId) |
+        Out-Null
     $expandedBootstrap = Invoke-AgenTerm @('ui-bootstrap') |
         ConvertFrom-Json
     $expandedRoot = @(
@@ -1124,8 +1118,18 @@ try {
     $sidebarScrollbar = $sidebarUi.layout.sidebar.scrollbar
     if ($null -eq $sidebarScrollbar -or
         [int]$sidebarScrollbar.max_offset -le 0 -or
-        [int]$sidebarScrollbar.track.width -ne 12) {
-        throw 'dense Tabs did not expose its bounded vertical scrollbar'
+        [int]$sidebarScrollbar.track.width -ne 12 -or
+        [int]$sidebarScrollbar.track.left -ne
+            [int]$sidebarUi.layout.sidebar.bounds.left) {
+        throw 'dense Tabs did not expose its left-edge vertical scrollbar'
+    }
+    $firstVisibleSidebarTab = @(
+        $sidebarUi.tabs | Where-Object visible | Select-Object -First 1
+    )[0]
+    if ($null -eq $firstVisibleSidebarTab -or
+        [int]$firstVisibleSidebarTab.render.row.left -lt
+            [int]$sidebarScrollbar.track.right) {
+        throw 'Tabs row geometry overlaps the left-edge scrollbar'
     }
     $sidebarX = [int](
         $sidebarScrollbar.thumb.left + ($sidebarScrollbar.thumb.width / 2)
@@ -1397,24 +1401,49 @@ try {
         '--contains', $pasteMarker, '--timeout-ms', '5000'
     ) | Out-Null
 
-    Write-Host 'STEP reconnect the same GUI process across a server restart'
+    Write-Host 'STEP close remains local and GUI recovers its missing server'
     $reconnectGuiPid = $gui.Id
     $reconnectGuiHandle = [int64]$gui.MainWindowHandle
     $oldServerPid = [int]$replacementBootstrap.server_pid
     $oldServerEpoch = [string]$replacementBootstrap.server_epoch
     $oldServer = Get-Process -Id $oldServerPid -ErrorAction Stop
-    Invoke-AgenTerm @('shutdown') | Out-Null
+    Stop-Process -Id $oldServerPid -Force -ErrorAction Stop
     if (-not $oldServer.WaitForExit(5000)) {
-        throw 'old headless server did not exit after public shutdown'
+        throw 'fault-injected headless server did not exit'
     }
-    $restartStderr = Join-Path $run.RunDirectory `
-        'remote-ui-restarted-server-stderr.txt'
-    $restartedServer = Start-Process -FilePath $ServerExe `
-        -ArgumentList @('--address', $run.Address) `
-        -RedirectStandardError $restartStderr `
-        -PassThru -WindowStyle Hidden
-    Register-SmokeOwnedProcess -Context $run -Id $restartedServer.Id `
-        -Kind 'server' -Address $run.Address
+
+    $composerSend = [AgenTermRemoteUiNativeTest]::GetDlgItem(
+        $gui.MainWindowHandle, 2102
+    )
+    $offlineObserved = $false
+    $offlineDeadline = [DateTime]::UtcNow.AddSeconds(3)
+    do {
+        if ($composerSend -ne [IntPtr]::Zero -and
+            -not [AgenTermRemoteUiNativeTest]::IsWindowVisible($composerSend)) {
+            $offlineObserved = $true
+            break
+        }
+        Start-Sleep -Milliseconds 10
+    } while ([DateTime]::UtcNow -lt $offlineDeadline)
+    if (-not $offlineObserved) {
+        throw 'server loss left stale terminal input controls visibly enabled'
+    }
+
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero
+    ) | Out-Null
+    $disconnectedCloseKeep = [AgenTermRemoteUiNativeTest]::GetDlgItem(
+        $gui.MainWindowHandle, 2109
+    )
+    if ($disconnectedCloseKeep -eq [IntPtr]::Zero -or
+        -not [AgenTermRemoteUiNativeTest]::IsWindowVisible(
+            $disconnectedCloseKeep
+        )) {
+        throw 'disconnected GUI could not open its local close confirmation'
+    }
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, 0x0111, [IntPtr]2111, [IntPtr]::Zero
+    ) | Out-Null
 
     $reconnected = $false
     $reconnectDeadline = [DateTime]::UtcNow.AddSeconds(15)
@@ -1436,18 +1465,19 @@ try {
         Start-Sleep -Milliseconds 50
     } while ([DateTime]::UtcNow -lt $reconnectDeadline)
     if (-not $reconnected) {
-        $restartError = Get-Content -LiteralPath $restartStderr -Raw `
-            -ErrorAction SilentlyContinue
         throw (
-            'replaceable UI did not reconnect in place after server restart: ' +
-            "gui_pid=$reconnectGuiPid hwnd=$reconnectGuiHandle " +
-            "new_server_pid=$($restartedServer.Id)`n$restartError"
+            'replaceable UI did not restart and reconnect its missing server: ' +
+            "gui_pid=$reconnectGuiPid hwnd=$reconnectGuiHandle"
         )
     }
     $reconnectedBootstrap = Invoke-AgenTerm @('ui-bootstrap') |
         ConvertFrom-Json
     $reconnectedLease = Invoke-AgenTerm @('ui-lease', 'status') |
         ConvertFrom-Json
+    $restartedServer = Get-Process `
+        -Id ([int]$reconnectedBootstrap.server_pid) -ErrorAction Stop
+    Register-SmokeOwnedProcess -Context $run -Id $restartedServer.Id `
+        -Kind 'server' -Address $run.Address
     if ($gui.Id -ne $reconnectGuiPid -or
         $gui.MainWindowHandle -ne $reconnectGuiHandle -or
         $reconnectedBootstrap.server_pid -ne $restartedServer.Id -or
