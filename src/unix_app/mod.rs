@@ -2047,9 +2047,9 @@ impl UnixApp {
         let workspace_toolbar = if modal_active {
             None
         } else {
-            layout.workspace_toolbar.map(|toolbar| {
-                WorkspaceToolbarView::from_layout(toolbar, self.config.tabs_visible)
-            })
+            layout
+                .workspace_toolbar
+                .map(|toolbar| WorkspaceToolbarView::from_layout(toolbar, self.config.tabs_visible))
         };
         let composer_top = layout.composer.top.max(0) as u32;
         let composer_width = size.width.saturating_sub(sidebar_width);
