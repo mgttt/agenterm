@@ -95,6 +95,10 @@ tree does not promise a version or implementation strategy.
 - Tab IDs remain stable for the lifetime of the tab; indexes may change.
 - Agent-facing state is machine-readable and actions can be verified without
   arbitrary sleeps.
+- `agenterm-script` exposes one unrestricted local runtime with the invoking
+  user's operating-system authority. Rhai has no permission tier, approval
+  profile, protected-path/process/endpoint list, or restricted substitute for
+  an unshipped API; Agent policy belongs to the separate Agent/harness layer.
 - tmux/RMUX names are used only where behavior is compatible. Unsupported
   behavior returns an error rather than pretending to succeed.
 - AgenTerm does not silently download or bundle fonts. `Sarasa Fixed SC`

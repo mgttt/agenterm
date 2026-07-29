@@ -21,6 +21,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   endpoints and local paths, child-process control, destructive filesystem
   targets, and Fleet mutation are valid runtime surface; an unshipped adapter
   remains a product gap and must not be replaced by a policy-reduced variant.
+  Allowlist or scoped-capability language retained in MCP, model, gateway, or
+  Agent requirements governs those callers only and cannot alter Script API
+  registration or execution.
 - [x] Script API v2 maps every current typed operation exactly once to `fleet` and verifies mutation receipts, correlated events, and post-state.
 - [x] task-manifest schema v2 publishes an inclusive required Script API range
   and stable capability IDs; list/show preserve incompatible projects for
@@ -313,9 +316,10 @@ and it is not positioned as a restricted security plugin.
 - [ ] every entry exposes stable operation ID, classification, typed
   parameters/result/errors, resolved target rules, receipt/wait behavior,
   side-effect facts, version, and availability.
-- [ ] an operation that cannot be represented safely remains discoverable as
-  unsupported/degraded with a typed reason; it is never silently omitted or
-  reported as successful.
+- [ ] an operation that is not yet represented faithfully with truthful typed
+  outcomes remains discoverable as unimplemented/degraded with a typed reason;
+  it is never silently omitted, reported as successful, or replaced by a
+  policy-filtered variant.
 - [ ] observation covers workspace, server, tabs/tree, focus, UI, terminal
   capture/viewport/lifecycle, and Observable Fleet reads and waits.
 - [ ] explicit mutations cover tab/tree metadata, Composer, terminal input and

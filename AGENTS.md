@@ -45,6 +45,10 @@ it must never be interpreted as an authorization grant, denial, or sandbox.
 An API that has not shipped is a product gap, never permission policy: keep it
 truthfully discoverable as planned or unavailable instead of substituting a
 loopback-only, safe-path, approved-process, or other policy-reduced variant.
+Do not use `safe`, `pure`, `observe`, profiles, or capability tiers as
+euphemisms for a reduced Script API. Name robustness limits, native product
+data-integrity invariants, and upper-layer caller policy explicitly so they
+cannot be mistaken for Rhai authorization.
 Legacy task `profile` fields are inert compatibility data and must not change
 API registration, visibility, arguments, targets, or execution behavior.
 
