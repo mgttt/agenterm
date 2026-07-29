@@ -202,16 +202,13 @@ fn validate_gui_arguments(arguments: &[String]) -> Result<(), String> {
 }
 
 fn display_available() -> bool {
-    if env::var_os("WAYLAND_DISPLAY").is_some() || env::var_os("DISPLAY").is_some() {
-        return true;
-    }
     #[cfg(target_os = "macos")]
     {
-        return true;
+        true
     }
     #[cfg(not(target_os = "macos"))]
     {
-        false
+        env::var_os("WAYLAND_DISPLAY").is_some() || env::var_os("DISPLAY").is_some()
     }
 }
 
