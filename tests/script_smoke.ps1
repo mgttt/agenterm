@@ -778,10 +778,15 @@ let output = child.wait_with_output();
     }
 
     Write-Host 'STEP bounded child streams, backpressure, and truthful truncation'
-    $workerLiteral = $workerExe.Replace('\', '\\').Replace('"', '\"')
+    $streamFixtureExpected = (& $Exe --version).Trim()
+    if ($LASTEXITCODE -ne 0 -or
+        $streamFixtureExpected -notmatch '^agenterm-cli \d+\.\d+\.\d+$') {
+        throw "offline stream fixture version failed: $streamFixtureExpected"
+    }
+    $streamFixtureLiteral = $Exe.Replace('\', '\\').Replace('"', '\"')
     $streamExpression = @'
-let command = std::process::command("__WORKER__");
-command.args(["eval", "\"abcdef\""]);
+let command = std::process::command("__STREAM_FIXTURE__");
+command.arg("--version");
 let child = command.start();
 let stream = child.stdout;
 let first = stream.read(2, std::time::Duration::from_secs(1)).to_text();
@@ -801,7 +806,7 @@ let empty = stream.read(1);
     final: output.stdout_text(),
     output_complete: output.complete
 }
-'@.Replace('__WORKER__', $workerLiteral)
+'@.Replace('__STREAM_FIXTURE__', $streamFixtureLiteral)
     $streamResult = Invoke-Script @(
         'script', 'eval', $streamExpression, '--profile', 'local',
         '--timeout-ms', '10000'
@@ -812,21 +817,21 @@ let empty = stream.read(1);
         $streamResult.buffered -ne 0 -or
         $streamResult.truncated -or
         -not $streamResult.complete -or
-        $streamResult.first -ne 'ab' -or
-        $streamResult.rest.Trim() -ne 'cdef' -or
+        $streamResult.first -ne 'ag' -or
+        $streamResult.rest.Trim() -ne $streamFixtureExpected.Substring(2) -or
         $streamResult.empty -ne 0 -or
-        $streamResult.final.Trim() -ne 'abcdef' -or
+        $streamResult.final.Trim() -ne $streamFixtureExpected -or
         -not $streamResult.output_complete) {
         throw 'child stdout stream did not preserve bounded live and final output facts'
     }
 
     $truncatedExpression = @'
-let command = std::process::command("__WORKER__");
-command.args(["eval", "\"abcdefgh\""]);
+let command = std::process::command("__STREAM_FIXTURE__");
+command.arg("--version");
 command.capture_limit(4);
 let child = command.start();
 let stream = child.stdout;
-let delivered = stream.collect(16).to_text();
+let delivered = stream.collect(64).to_text();
 let output = child.wait_with_output();
 #{
     stdout: output.stdout_text(),
@@ -836,15 +841,15 @@ let output = child.wait_with_output();
     stream_truncated: stream.truncated,
     stream_complete: stream.complete
 }
-'@.Replace('__WORKER__', $workerLiteral)
+'@.Replace('__STREAM_FIXTURE__', $streamFixtureLiteral)
     $truncatedResult = Invoke-Script @(
         'script', 'eval', $truncatedExpression, '--profile', 'local',
         '--timeout-ms', '10000'
     ) | ConvertFrom-Json
-    if ($truncatedResult.stdout -ne 'abcd' -or
+    if ($truncatedResult.stdout -ne 'agen' -or
         -not $truncatedResult.truncated -or
         $truncatedResult.complete -or
-        $truncatedResult.delivered.Trim() -ne 'abcdefgh' -or
+        $truncatedResult.delivered.Trim() -ne $streamFixtureExpected -or
         $truncatedResult.stream_truncated -or
         -not $truncatedResult.stream_complete) {
         throw 'live stream and bounded final capture conflated their completeness'
