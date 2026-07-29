@@ -94,9 +94,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       [--modal-target target] [--timeout-ms ms]`
   - Shipped scripting baseline
     - `script api [--json]`
-    - `script check FILE|- [--profile pure|observe]`
-    - `script eval EXPRESSION [--profile pure|observe]`
-    - `script run FILE|- [--profile pure|observe] [-- ARGS...]`
+    - `script check FILE|-`
+    - `script eval EXPRESSION`
+    - `script run FILE|- [-- ARGS...]`
   - Composer and tab metadata
     - `show-composer [-t target]`
     - `set-composer [-t target] text|--stdin|--file path`
@@ -135,12 +135,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [ ] `script task list [--manifest PATH] [--json]`
     - [ ] `script task show TASK [--manifest PATH] [--json]`
     - [ ] `script task run TASK [--manifest PATH] [--] [ARGS...]`
-    - [ ] ordinary `run` and `eval` default to `--profile local`;
-      `--profile pure|observe` remains an explicit specialized mode, and
-      `check` validates the selected profile without execution
+    - [ ] ordinary `run`, `eval`, `check`, and named tasks use one unrestricted
+      local runtime surface; legacy profile spellings must not remove APIs or
+      make Agent authorization decisions
     - [ ] runtime options include explicit `--cwd`, bounded timeout/output/
-      task/stream overrides, and machine-readable result selection; local mode
-      does not require per-file, per-process, or per-network capability flags
+      task/stream overrides, and machine-readable result selection; Script
+      Runtime does not require per-file, per-process, per-tool, or per-network
+      permission flags
     - [ ] task commands discover one versioned declarative project manifest,
       retain invalid entries in `list` with a typed degraded reason, and use
       stable task IDs rather than display names as authority

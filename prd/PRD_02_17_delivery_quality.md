@@ -226,17 +226,18 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [x] `tests/script_smoke.ps1` drives only public `script check`,
       `script eval`, `script run`, and `script api --json` commands; no test
       links the Rhai host or invokes an internal worker API
-    - [x] fixtures prove deterministic `pure` output, typed `observe`
-      snapshot/journal baselines, denied mutation and ambient authority,
-      stable parse/runtime/limit/host exit classes, timeout, worker crash,
-      cleanup, and subsequent recovery
+    - [~] fixtures prove deterministic output, typed Fleet observation and
+      mutation, ambient local APIs, stable parse/runtime/limit/host exit
+      classes, timeout, worker crash, cleanup, and subsequent recovery;
+      v0.1.10 removes the old permission-denial assertions
     - [ ] every Rhai timeout/crash case includes an independent public GUI,
       PTY, and workspace-health assertion; a sidecar error alone is not
       accepted as isolation evidence
   - PRD-command-test alignment
-    - [x] evidence IDs `script.rhai-pure`, `script.rhai-observe`,
-      `script.rhai-deny-budget`, and `script.rhai-framed` are registered with
-      post-assertion emissions
+    - [~] the registered Script evidence IDs retain legacy names until the
+      v0.1.10 catalog migration atomically renames them; their assertions must
+      describe unrestricted runtime behavior, robustness budgets, and framing,
+      never Rhai permissions
     - [x] changing a shipped script command, capability, API entry, or
       evidence ID must atomically update the public command/API catalog,
       PRD `[x]` leaf, black-box assertion, and alignment contract

@@ -30,6 +30,13 @@ Every shipped leaf must state the user problem, governing invariant or
 authority boundary, observable success evidence, safe failure result, public
 black-box owner, and excluded scope.
 
+`agenterm-script.exe` is an unrestricted general-purpose local runtime. Never
+put Agent permission, approval, path, process, network, credential, or tool
+visibility policy into Rhai profiles, API registration, or the Script broker.
+Those policies belong to the future Agent harness that chooses how to invoke
+the runtime. Deadlines, memory/output/concurrency budgets, typed failures, and
+owned-resource cleanup are robustness controls, not permission boundaries.
+
 ## Parallel execution discipline
 
 Before editing, sketch the task's dependency graph: identify independent work,

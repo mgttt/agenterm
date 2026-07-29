@@ -78,10 +78,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     aliases, target resolution, typed results/errors, deadlines, replay,
     emitted events, unsupported degradation, and restart/target-close failure
     without private GUI-state access
-  - [ ] this module owns catalog and control correctness. The local runtime,
-    profile, module/task, tool-schema, and script-facing mapping acceptance is
+  - [ ] this module owns catalog and control correctness. The unrestricted
+    local runtime, module/task, tool-schema, and script-facing mapping acceptance is
     owned by [Rust host + Rhai scripting](PRD_02_10_rhai_scripting.md) and is
     not duplicated here
+  - [ ] Agent permissions, approvals, credential/path/network policy, and tool
+    visibility are enforced by the future Agent harness before it invokes
+    Script Runtime; they are never implemented by removing or denying Rhai APIs
 - Protocol
   - [x] loopback-only newline-delimited JSON IPC
   - [x] feature discovery through `protocol-info`

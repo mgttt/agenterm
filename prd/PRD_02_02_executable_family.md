@@ -173,10 +173,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   `cmd.exe` and PowerShell
 - [x] `agenterm-mux.exe`: tmux/RMUX-compatible fleet control entry point
 - [~] `agenterm-script.exe`: optional general-purpose local Rhai runtime
-  sidecar; the shipped v0.1.5 baseline executes one bounded pure/observe
-  invocation per fresh worker, while v0.1.9 keeps the one-invocation process
-  boundary and adds a task-lived local scheduler, standard library, modules,
-  named tasks, and typed Fleet APIs without becoming a persistent daemon
+  sidecar; each invocation owns a fresh supervised worker, while v0.1.9 keeps
+  that process boundary and adds a task-lived local scheduler, standard
+  library, modules, named tasks, and typed Fleet APIs without becoming a
+  persistent daemon or an Agent permission layer
 - [ ] `agenterm-bash.exe`: AgenTerm-owned default Bash entry point
 - Future executable hypotheses, not release commitments:
   - `agenterm-mcp.exe`: MCP server/client and agentic orchestration sidecar

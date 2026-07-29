@@ -12,9 +12,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   named-task CLI while retaining private `--worker`/`--framed-worker` modes;
   `agenterm-cli.exe script ...` is a thin compatibility route to the same
   catalog, parser, supervisor, and runtime.
-- [x] the explicit `observe` profile exposes typed, bounded workspace, tab,
-  snapshot, capture, and event broker methods without direct Win32, PTY, or
-  mutable GUI-state access.
+- [~] v0.1.10 removes the early `pure`/`observe` API-gating model so every
+  ordinary invocation receives the same unrestricted local runtime surface;
+  the future Agent harness owns permissions outside this executable.
 - [x] Script API v2 maps every current typed operation exactly once to `fleet` and verifies mutation receipts, correlated events, and post-state.
 - [x] task-manifest schema v2 publishes an inclusive required Script API range
   and stable capability IDs; list/show preserve incompatible projects for
@@ -23,9 +23,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   configuration, invocation-owned temp, two concurrent argv-safe children,
   loopback HTTP, JSON aggregation, typed Fleet note mutation, atomic result
   publication, restoration, and orphan-free cleanup in one invocation.
-- [x] the explicit `pure` profile provides deterministic JSON-compatible
-  values, arguments, bounded computation, and captured stdout without ambient
-  filesystem, environment, process, network, clock, terminal, or Fleet access.
+- [x] deterministic JSON-compatible values, arguments, bounded computation,
+  and captured stdout remain ordinary runtime facilities rather than a
+  permission-restricted execution mode.
 - [x] a Rhai-independent supervisor owns a kill-on-close Windows Job Object,
   parent deadline, cooperative cancellation followed by forced termination,
   concurrency ceilings, and worker cleanup.
@@ -44,8 +44,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   kind, truncation, and optional cause class from the same object used by the
   unhandled CLI result; other public runtime errors migrate incrementally.
 - [x] privacy-bounded audit records contain identity, source fingerprint and
-  label, API/profile/budget facts, broker operation IDs, duration, result
-  class, denial, cancellation, timeout, and crash, but never source, argv,
+  label, API/runtime/budget facts, broker operation IDs, duration, result
+  class, failure, cancellation, timeout, and crash, but never source, argv,
   output, pane content, environment values, clipboard data, or credentials.
 - [x] normal GUI startup constructs no Rhai engine, scans no script directory,
   and remains independent of Rhai engine types.
@@ -74,19 +74,22 @@ and it is not positioned as a restricted security plugin.
   runtime;
 
 - an explicit human invocation of ordinary `script run` or `script eval`
-  defaults to `local`, with the authority expected of an ordinary local
-  program launched by that user;
-- `pure` and `observe` remain explicit specialized profiles for deterministic
-  and read-only Fleet use, not the platform capability ceiling;
+  receives the same unrestricted local-program capabilities expected by that
+  user; Script Runtime does not make Agent authorization decisions;
+- deterministic computation and read-only Fleet access are libraries and use
+  patterns, never profiles that remove filesystem, process, network, terminal,
+  or mutation APIs;
 - technical budgets, typed errors, cancellation, process isolation, audit
-  privacy, and product data-integrity checks remain mandatory in every mode;
+  privacy, and product data-integrity checks are runtime robustness controls,
+  never permissions;
 - [x] explicit local repository tasks may raise their invocation wall-time
   budget to the stable 120-second hard ceiling; child-process deadlines retain
   an independent 60-second ceiling while HTTP retains its stricter 10-second
   ceiling;
 - agent-specific tool visibility, approval, path/domain/target policy,
-  credentials, quotas, and natural-language intent belong to a future agent
-  layer, not to this runtime;
+  credentials, quotas, and natural-language intent belong exclusively to the
+  future Agent harness, which may constrain an Agent before invoking this
+  unrestricted runtime;
 - local scripts do not bypass native product invariants: live close
   confirmation, remain-on-exit, stable IDs, tree-cycle rejection, replay
   protection, and truthful typed outcomes continue to apply.
@@ -117,7 +120,7 @@ and it is not positioned as a restricted security plugin.
   backpressure; truncation, cancellation, and incomplete output cannot be
   reported as success.
 - [ ] a bounded compiled-AST cache may be keyed by source fingerprint, API
-  version, runtime version, and profile, but is not required for the first
+  version, and runtime version, but is not required for the first
   usable local-runtime slice.
 
 ## Rust-shaped subset and Rhai-native extensions
@@ -185,7 +188,9 @@ and it is not positioned as a restricted security plugin.
 - [x] `rhai::http` provides HTTP(S) method, URL, headers, body, timeout,
   status, bounded response streaming, cancellation, proxy/TLS diagnostics and
   credential-safe errors. Rust std has no high-level HTTP client, so
-  `std::http` is forbidden; low-level sockets are outside v0.1.9.
+  the AgenTerm-native high-level client lives under `rhai::http`; typed TCP,
+  UDP, listeners, and WebSockets remain runtime expansion work rather than
+  forbidden authority.
   - [x] `request` and `start` use Windows native TLS and the system root store;
     Unix targets retain Rustls/WebPKI. They also provide
     environment/disabled/explicit proxy selection, bytes-first duplicate
@@ -196,9 +201,9 @@ and it is not positioned as a restricted security plugin.
     v0.1.9 `agenterm-script.exe` is 2,740,224 bytes with the reviewed
     native-TLS feature set, 405,504 bytes below the existing 3 MiB artifact
     gate; the gate was not raised.
-- [~] `rhai::runtime` may expose only safe invocation/API/profile/version/
-  limits facts, never private supervisor, HWND, renderer, PTY or broker
-  handles.
+- [~] `rhai::runtime` exposes stable invocation/API/version/limits facts;
+  unstable implementation handles are not part of the current public object
+  tree, but this is API design rather than a permission boundary.
   - [x] `temp_dir` exposes only the current invocation-owned directory;
     `atomic_write` and `atomic_write_bytes` publish a complete same-volume
     replacement without exposing supervisor or OS handles.
@@ -227,11 +232,12 @@ and it is not positioned as a restricted security plugin.
   home, PATH, or the network.
 - [x] project tasks use one versioned declarative manifest that maps stable task
   IDs to a script/module entry point, arguments, working directory, environment
-  construction, and execution profile. Schema v2 uses a project identity/
+  construction, and a legacy non-authorizing execution label. Schema v2 uses a project identity/
   version, an inclusive Script API range, required stable capability IDs, and
-  an ordered task array with `id`, `description`, `entry`, `profile`, `cwd`,
+  an ordered task array with `id`, `description`, `entry`, legacy `profile`, `cwd`,
   default `args`, and required environment-name `env` fields; it stores no
-  environment values.
+  environment values. v0.1.10 removes that label from the permission model and
+  a later manifest schema may remove the field entirely.
 - [x] v0.1.9 selects versioned JSON at `agenterm.tasks.json`; it is explicitly
   a local task manifest rather than a package/download/signature manifest.
 - [x] project tasks and user-level named commands are discoverable through one
@@ -245,7 +251,7 @@ and it is not positioned as a restricted security plugin.
 ## AgenTerm Fleet API
 
 - [x] the canonical bound user facade is `fleet`, because it carries selected
-  server, profile and broker identity. It exposes typed workspace, tabs,
+  server and broker identity. It exposes typed workspace, tabs,
   terminal and events service objects; ordinary calls do not require users to
   type raw operation IDs even though results and the catalog retain operation,
   request, receipt, event and post-state identities.
@@ -272,21 +278,21 @@ and it is not positioned as a restricted security plugin.
   and server-lifecycle invariants.
 - [ ] the control-plane catalog, dispatch, receipt, error, event-correlation,
   replay, and deterministic-wait prerequisites are owned by
-  [Agent control plane](PRD_02_07_agent_control_plane.md); scripting consumes
-  that authority and never reads private GUI state.
+  [Agent control plane](PRD_02_07_agent_control_plane.md); scripting reuses
+  those typed contracts, while additional low-level runtime adapters may ship
+  independently without turning this catalog into an Agent permission layer.
 
 ## Discovery and tool schema
 
 - [ ] `script api --json` is the exact versioned runtime catalog and matches
-  the engine, standard library, modules/tasks, profiles, Fleet operations,
+  the engine, standard library, modules/tasks, Fleet operations,
   defaults, hard ceilings, and availability.
   - [x] catalog schema v3 separates its schema version from stable Script API
     v2 and provides one typed source for every public typed Fleet operation,
     explicitly planned nodes, and reviewed Node.js/Bun analogue metadata; full
     engine/module/task conformance remains open.
-  - [x] an explicit `local` profile foundation runs base Rhai without requiring
-    a server or inheriting observe authority; the first useful fs/path/bytes/
-    JSON slice has shipped and `local` is now the ordinary default.
+  - [x] the local runtime runs without requiring a server; the first useful
+    fs/path/bytes/JSON slice has shipped.
   - [x] the second local slice ships typed one-directory enumeration,
     `DirEntry`, metadata, absolute-path resolution, and wall-clock
     `SystemTime`; the repository Cargo target inventory is its first migrated
@@ -330,10 +336,10 @@ and it is not positioned as a restricted security plugin.
   from the same catalog entries and `api --json` is the machine matrix;
   generated long-form reference pages and a no-second-callable-list alignment
   gate remain open.
-- [ ] these are capability facts for people and future tool consumers, not an
-  authorization decision. A future agent layer may filter or constrain the
-  schema without reimplementing the runtime.
-- [ ] `script check` validates imports, task entries, API names, profiles,
+- [ ] these are availability and interface facts for people and future tool
+  consumers, not authorization decisions. A future Agent harness may filter
+  what it offers an Agent without changing or reimplementing Script Runtime.
+- [ ] `script check` validates imports, task entries, API names,
   signatures, versions, static limits, and unavailable/degraded calls without
   executing user code or requiring a GUI.
 - [x] runtime, module and task identities expose version, origin/provenance
@@ -342,7 +348,7 @@ and it is not positioned as a restricted security plugin.
   This is a package-ready contract, not a registry, downloader, installer,
   signature policy or second package manifest in v0.1.9.
   - [x] the module/task slice exposes manifest path, canonical project root,
-    project ID/version, stable task ID, entry, profile, cwd, default argv,
+    project ID/version, stable task ID, entry, cwd, default argv,
     required environment names, readiness and degraded reason without running
     task source.
   - [x] schema v2 exposes the inclusive required Script API range and stable
@@ -514,15 +520,16 @@ Migration ledger:
   correlated public post-state/events, no duplicate side effect, and honest
   close/send/restart failures.
   - [x] Script API v2 maps all 18 current typed operations exactly once; the
-    public isolated-server journey proves observe denial plus a reversible
-    local UI mutation and typed tab-note mutation with native request/operation
+    public isolated-server journey proves observation plus a reversible UI
+    mutation and typed tab-note mutation with native request/operation
     identity, receipt, correlated event, verified snapshot, restoration, and
     audit attribution.
   - [x] `fleet.tabs.set_note` returns a receipt, causal `tab.note` event, and
     verified tab snapshot for one stable tab ID.
     Destructive failure/restart and future operation families remain open.
-- [ ] local mode proves the general runtime loop while regression fixtures keep
-  pure deterministic and observe read-only.
+- [ ] the unrestricted local runtime proves deterministic computation,
+  observation, mutation, filesystem, process, and network paths through one
+  consistent API surface.
 - [ ] script error, worker crash, timeout, cancellation, parent exit, server
   restart, and unfinished task cleanup leave GUI, PTY, workspace, and the next
   script invocation healthy.
@@ -543,9 +550,11 @@ Migration ledger:
   than npm emulation inside the script runtime;
 - a persistent or automatically started script daemon and cross-invocation
   mutable runtime state;
-- low-level sockets, unsolicited listeners, and a general network sidecar;
+- typed TCP/UDP sockets, listeners, WebSockets, and higher-level network
+  modules remain planned Script Runtime expansion and are not permission-gated;
 - event handlers, watch mode, REPL, and durable background scheduling unless a
   later owned slice supplies separate acceptance;
-- agent permission, approval, credential, quota, and natural-language policy;
+- Agent permission, approval, credential, quota, and natural-language policy
+  belong to the separate Agent harness;
 - GUI command palette delivery beyond its P1 consumption of the shared named
   task catalog.

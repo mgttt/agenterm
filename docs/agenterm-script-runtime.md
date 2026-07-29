@@ -10,7 +10,7 @@ Catalog schema currently shipped: v3
 
 Initial design date: 2026-07-28
 
-Last reviewed: 2026-07-29
+Last reviewed: 2026-07-30
 Normative language: English
 
 Product authority:
@@ -83,7 +83,7 @@ agenterm-script
 │  Selected, Rust-shaped low-level local capabilities.
 │  [partially shipped; reserved; designed 2026-07-28]
 │  ├─ fs::
-│  │  Blocking filesystem operations owned by the local profile.
+│  │  Blocking filesystem operations available to ordinary scripts.
 │  │  [partially shipped; stable namespace; designed 2026-07-28]
 │  │  ├─ read_to_string(path)
 │  │  │  Reads one UTF-8 file and returns a string.
@@ -354,13 +354,13 @@ agenterm-script
 │  │     [shipped; stable; designed 2026-07-28]
 │  │  └─ .set_note(tab_id, note) -> Receipt
 │  │     Mutates one stable tab and verifies its event and post-state.
-│  │     [shipped local only; stable; designed 2026-07-28]
+│  │     [shipped; stable; designed 2026-07-28]
 │  ├─ .ui.snapshot()
 │  │  Reads the bounded semantic UI snapshot.
 │  │  [shipped; stable; designed 2026-07-28]
 │  ├─ .ui.tabs
 │  │  Controls the sidebar through typed native operations.
-│  │  [shipped local only; stable; designed 2026-07-28]
+│  │  [shipped; stable; designed 2026-07-28]
 │  │  ├─ .show() / .hide() / .toggle() -> Receipt
 │  │  └─ .set_width(width) -> Receipt
 │  ├─ .terminal(tab_id)
@@ -371,9 +371,9 @@ agenterm-script
 │     [shipped read/wait slice; stable; designed 2026-07-28]
 │  ├─ .server.kill([target]) -> Receipt
 │  │  Executes the native destructive server operation.
-│  │  [shipped local only; stable; designed 2026-07-28]
+│  │  [shipped; stable; designed 2026-07-28]
 │  └─ .operations()
-│     Lists all catalog-derived operations and profile availability.
+│     Lists all catalog-derived operations and implementation availability.
 │     [shipped; stable; designed 2026-07-28]
 │
 ├─ project composition
@@ -396,7 +396,7 @@ agenterm-script
    │  Renders a deterministic filtered object tree from stable catalog IDs.
    │  [shipped; stable; designed 2026-07-28]
    ├─ script check FILE
-   │  Validates syntax, profile availability, and known interfaces offline.
+   │  Validates syntax and known interfaces offline.
    │  [shipped baseline; stable; designed 2026-07-28]
    └─ script task list / show / run
       Discovers and invokes named local tasks.
@@ -481,8 +481,7 @@ The runtime does not promise:
   `Result<T, E>` compatibility;
 - JavaScript, TypeScript, Node.js, Bun, npm, or module-resolution
   compatibility;
-- browser APIs, a general socket server, arbitrary remote imports, or a
-  persistent script daemon;
+- browser DOM compatibility or a persistent script daemon;
 - an Agent approval model, package trust root, or operating-system sandbox;
 - multiple historical aliases or duplicate sync/async families for the same
   operation.
@@ -529,7 +528,7 @@ Within one Script API major, a stable node MUST NOT:
 - be silently renamed or moved;
 - change from a property to a function, or vice versa;
 - change a unit, encoding, blocking model, mutation target, or return meaning;
-- broaden authority into another profile without an explicit catalog change;
+- turn an existing callable into a permission-gated or Agent-authorized API;
 - turn complete output into silently truncated output;
 - change a stable error code to a message-only failure.
 
@@ -560,7 +559,7 @@ these APIs exist in upstream Rhai or in another Rhai host.
 ### 5.3 `fleet`
 
 `fleet` is an invocation-bound object, not a static namespace. It represents a
-selected AgenTerm server, broker, profile, and event epoch. Stateful Fleet
+selected AgenTerm server, broker, and event epoch. Stateful Fleet
 resources use typed objects and dot methods.
 
 ### 5.4 Globals
@@ -590,10 +589,9 @@ stability
 designed_on
 since
 deprecated_since / removed_in / replacement
-profiles
 signatures
 input / output / error schemas
-authority and side-effect facts
+resource scope and side-effect facts
 sync / task / stream behavior
 timeout and cancellation behavior
 soft limits and hard ceilings
@@ -624,7 +622,7 @@ Example:
   "status": "shipped",
   "stability": "stable",
   "designed_on": "2026-07-28",
-  "profiles": ["local"],
+  "availability": "shipped",
   "rust_path": "std::fs::read_to_string",
   "rust_mapping": "adapted",
   "semantic_differences": [
@@ -824,7 +822,7 @@ The public result envelope and process exit status use these stable classes:
 | `script` | 1 | Rhai parse, runtime, result conversion, or user failure. |
 | `protocol` | 1 | Worker framing or identity failure. |
 | `host` | 1 | Worker launch, crash, or host invariant failure. |
-| `configuration` | 2 | Invalid arguments, profile, manifest, or unavailable API. |
+| `configuration` | 2 | Invalid arguments, manifest, or unavailable API. |
 | `limit` | 3 | A time, operation, value, output, task, or stream ceiling. |
 | `child` | 4 | Child execution failed, or required child status was nonzero. |
 | `cancelled` | 5 | Explicit cooperative invocation cancellation. |
@@ -970,30 +968,24 @@ Cancellation covers:
 A script wait, panic, or worker crash MUST NOT block or terminate the AgenTerm
 GUI, PTYs, or server.
 
-## 12. Execution profiles
+## 12. Unrestricted local execution
 
-Profiles are runtime execution modes, not Agent approval roles.
+Every ordinary Script invocation exposes the same general-purpose local runtime
+surface. Deterministic computation, filesystem, environment, process, clock,
+network, terminal, Fleet observation, and Fleet mutation are use cases over one
+API tree, not permission profiles.
 
-### 12.1 `local`
+The runtime does not decide whether an Agent is allowed to invoke a callable.
+The future Agent harness owns tool visibility, approval, path/process/network
+policy, credentials, quotas, and sandboxing before or around invocation.
 
-`local` is the ordinary default. It has the authority of a normal local program
-started by the user. It remains subject to typed errors, budgets, cancellation,
-resource ownership, audit privacy, and Fleet public-operation invariants.
+Typed errors, deadlines, byte/collection/concurrency limits, cancellation,
+supervision, audit privacy, and owned-resource cleanup remain mandatory
+robustness contracts. They MUST NOT be described or used as permissions.
 
-### 12.2 `pure`
-
-`pure` has no ambient filesystem, environment, process, network, clock, or
-Fleet authority. It is intended for deterministic computation over bounded
-JSON-compatible input and output.
-
-### 12.3 `observe`
-
-`observe` allows read-only workspace, tab, snapshot, capture, and event
-operations. It does not allow local filesystem/process/network access or Fleet
-mutation.
-
-Every catalog entry MUST state profile availability. `check` SHOULD reject a
-known unavailable call before execution.
+The current wire/task schemas retain a legacy `profile` field during migration.
+All accepted legacy spellings MUST resolve to the same unrestricted runtime and
+MUST NOT remove APIs. A later schema revision SHOULD delete the field.
 
 ## 13. Fleet domain
 
@@ -1009,8 +1001,10 @@ Script API v2 exposes `fleet` as its only canonical facade. The former v1
 `agent` object is not registered as an alias; `script check` reports
 `script_api_migrated` with the matching v2 path. Every operation in the public
 typed operation catalog has exactly one Script API entry. Read-only operations
-are available to `observe` and `local`; control and destructive operations are
-available only to `local` and are independently revalidated by the host broker.
+and control or destructive operations are available through the same
+unrestricted runtime surface. The host broker revalidates native product
+invariants, request identity, receipts, replay safety, and post-state; it MUST
+NOT perform Agent permission checks.
 
 Mutation methods return a typed `Receipt`. It carries the native control
 receipt, bounded correlated events, and a `PostState` containing `verified`,
@@ -1019,8 +1013,9 @@ closed. When a destructive operation makes subsequent observation impossible,
 `verified` remains false with `destructive_post_state_unavailable` rather than
 inventing success evidence.
 
-Operation classification is a tool fact, not Agent authorization. A future
-Agent layer MAY filter these capabilities without redefining Script Runtime.
+Operation classification is a tool fact, not Agent authorization. An Agent
+harness MAY choose which tools it exposes before invoking Script Runtime,
+without redefining or weakening the runtime itself.
 
 ## 14. Modules, projects, and named tasks
 
@@ -1079,8 +1074,9 @@ Schema v2 is:
 }
 ```
 
-Project/task IDs, project version, entry, profile, working directory, default
-arguments, and required environment names are inspectable without execution.
+Project/task IDs, project version, entry, legacy non-authorizing profile label,
+working directory, default arguments, and required environment names are
+inspectable without execution.
 `env` contains names only; values are inherited at invocation and are never
 copied into the manifest, task catalog, audit, or diagnostics. Entries and
 working directories MUST resolve inside the manifest directory. Discovery
@@ -1143,7 +1139,7 @@ generated comparison/manual pages remain separate work and MUST NOT be inferred
 from the Rust mapping fields alone.
 
 `check` MUST NOT execute user code, access the network, or require a GUI. It
-validates syntax, known qualified paths, profile availability, and statically
+validates syntax, known qualified paths, capability availability, and statically
 provable limits.
 
 ## 16. Versioning and migration
@@ -1165,20 +1161,18 @@ Compatibility rules:
 Rust, Node.js, Bun, Rhai-host, crate, or dependency version changes do not
 justify a Rhai breaking change.
 
-## 17. Authority, safety, and privacy
+## 17. Runtime power, robustness, and privacy
 
-The `local` profile is a normal local program capability, not an
-Agent-approved sandbox. Its authority derives from:
+Script Runtime is an unrestricted local program operating with the authority
+of the current OS user. It does not define Agent permissions, approvals,
+path/process/network policy, credential policy, tool visibility, or an
+operating-system sandbox. An Agent harness may apply those policies around an
+invocation, but they MUST NOT be implemented by removing or denying Rhai APIs.
 
-- the current OS user;
-- the selected execution profile;
-- Fleet public typed operations;
-- invocation-owned resources;
-- explicit budgets and cancellation;
-- any future higher Agent or package policy as a separate layer.
-
-The runtime MUST NOT bypass Fleet operations to mutate private GUI, PTY, or
-workspace state. It MUST NOT become a package-signing trust root.
+Fleet adapters preserve AgenTerm's native typed-operation invariants instead of
+mutating private GUI, PTY, or workspace state. This does not prevent scripts
+from using general filesystem, process, network, terminal, or future low-level
+socket APIs. Script Runtime is not a package-signing trust root.
 
 Audit and diagnostics record only required operation IDs, counts,
 classifications, duration, limits, and safe target facts. Secret-bearing fields
@@ -1286,14 +1280,14 @@ print(#{
 A capability becomes `shipped` only when:
 
 1. its catalog entry includes stable identity, surface, status, stability,
-   design date, profiles, schemas, and semantic differences;
-2. pure logic and error behavior have unit coverage;
+   design date, availability, schemas, and semantic differences;
+2. deterministic logic and error behavior have unit coverage;
 3. the public `agenterm-cli script` path has black-box coverage;
 4. success, typed failure, timeout, cancellation, and limits have evidence;
 5. no child, worker, task, stream, pipe, or temporary resource is orphaned;
 6. secret sentinels do not enter output, audit, or diagnostics;
 7. catalog, `check`, runtime registration, and generated manual agree;
-8. profile availability agrees with runtime behavior;
+8. every accepted invocation mode exposes the same shipped runtime APIs;
 9. GUI startup, PTYs, and server health do not regress;
 10. a subsequent invocation succeeds after injected failure.
 
@@ -1301,8 +1295,8 @@ The v0.1.9 suite covers Unicode, explicit-target filesystem lifecycle,
 environment inheritance, executable/argv/cwd/stdin/stdout/stderr, process
 exit, concurrency, backpressure, loopback HTTP, module cycles, root escape,
 Fleet receipts/events/post-state, malformed frames, worker crash, parent
-exit, and orphan-free recovery. Long-path, UNC, reparse-point, and access-
-denial policy remain explicit future qualification slices.
+exit, and orphan-free recovery. Long-path, UNC, reparse-point, and operating-
+system access-error handling remain explicit future qualification slices.
 
 ## 21. Explicitly deferred
 
@@ -1311,12 +1305,15 @@ The following are outside the v0.1.9 stable contract:
 - remote package registry, dependency resolution, signing, and installation;
 - npm, Cargo crate, Node.js, Bun, or complete Rust `std` compatibility;
 - persistent script daemon, durable scheduler, watch mode, and REPL;
-- raw sockets, listeners, WebSockets, and public network servers;
-- arbitrary remote imports;
-- Agent approval and natural-language authorization;
+- complete typed socket, listener, WebSocket, and network-server API coverage;
+- arbitrary remote module resolution and imports;
+- Agent approval and natural-language authorization, which belong to a
+  separate Agent harness;
 - the software marketplace and `agenterm-softmgr.exe`;
-- replacing qualification, packaging, or release-critical scripts with Rhai;
 - exposing executor, Tokio, or Rhai `Dynamic` internals.
+
+These deferred networking and module features are planned capability expansion,
+not permission restrictions.
 
 Deferred nodes MAY remain visible in the catalog so users can distinguish
 "not shipped yet" from "intentionally not part of this runtime."

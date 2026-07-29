@@ -283,7 +283,7 @@ AgenTerm — Local Agent Fleet Work OS
 │
 ├─ [AUTO] Automate & interoperate
 │   ├─ agenterm-cli — observe, act, wait, verify
-│   ├─ agenterm-script — tasks, local profile, catalog
+│   ├─ agenterm-script — unrestricted local runtime, tasks, catalog
 │   ├─ agenterm-mux — bounded tmux/RMUX compatibility
 │   ├─ agenterm-mcp — agent bridge (read-first, then governed tools)
 │   └─ Receipts, replay, typed operations (maturing)

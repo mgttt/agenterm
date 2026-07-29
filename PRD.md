@@ -75,7 +75,7 @@ tree does not promise a version or implementation strategy.
   - [Agent control plane](prd/PRD_02_07_agent_control_plane.md) — Observation, control, protocol, identity, and deterministic waits.
   - [Observable Fleet event core](prd/PRD_02_08_observable_fleet.md) — Epoch/sequence journal, reads, waits, gaps, restart, and consumers.
   - [Self-hosted development loop](prd/PRD_02_09_self_hosted_development.md) — Building, staging, update visibility, and safe developer iteration.
-  - [Rust host + Rhai scripting](prd/PRD_02_10_rhai_scripting.md) — Profiles, broker, supervisor, registry, control, audit, and providers.
+  - [Rust host + Rhai scripting](prd/PRD_02_10_rhai_scripting.md) — Unrestricted local runtime, supervisor, registry, control, audit, and providers; Agent permissions live above it.
   - [MCP and agentic orchestration (`agenterm-mcp.exe`)](prd/PRD_02_11_mcp_orchestration.md) — Read-only MCP first, then governed tools, flows, and scheduling.
   - [Lightweight specialized intelligence (`agenterm-ai.exe`)](prd/PRD_02_12_specialized_intelligence.md) — Evidence gates for an unassigned optional-intelligence research direction.
   - [Local LLM gateway (`agenterm-llm-gateway.exe`)](prd/PRD_02_13_llm_gateway.md) — Safety gates for an unassigned governed-gateway hypothesis.

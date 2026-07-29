@@ -23,8 +23,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   - Shipped bounded automation slice
     - [x] snapshot-positioned bounded event reads and predicate waits expose
       typed epoch/gap/timeout failures
-    - [x] one-invocation Rhai sidecar provides pure and immutable-observe
-      profiles with API discovery and resource limits
+    - [x] one-invocation Rhai sidecar provides API discovery, deterministic
+      computation, Fleet observation, and resource-robustness limits
   - Remaining release work
     - [x] creation output offers a documented stable-ID format and a
       black-box journey reuses that exact ID after mutable indexes shift
@@ -38,9 +38,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       `0.1.5`; the full release gate passes the existing size and one-second
       first-window budgets
   - Explicitly deferred
-    - [ ] event subscriptions, Rhai control authority, MCP, optional
-      component downloads, Bash, intelligence workers, and LLM routing add
-      no authority or binary surface in v0.1.5
+    - [ ] event subscriptions, MCP, optional component downloads, Bash,
+      intelligence workers, and LLM routing add no binary surface in v0.1.5;
+      Agent authorization remains outside Script Runtime
     - [ ] raw application mouse arbitration, selection auto-scroll,
       and word/line/rectangular selection retain the professional-terminal
       follow-up gates above; bounded terminal paste shipped through the
@@ -68,9 +68,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [x] default window close detaches by hiding the HWND and preserving
       server/PTY state; stop-and-exit saves metadata then ends the server;
       Cancel/Esc changes nothing. No tray icon ships in v0.1.6
-    - [x] Script Platform v2 completes supervised pure/typed-observe only;
-      Rhai control remains a post-core candidate and named script/module
-      loading, Bash runtime, and MCP binaries remain outside the release
+    - [x] the first Script Platform slice completed supervised deterministic
+      execution and typed Fleet observation; this described its shipped API
+      breadth, not a permission boundary. Named script/module loading, Bash
+      runtime, and MCP binaries remained outside the release
     - [x] `agenterm-cli ui-action` remains the compatibility entry while
       operations gain stable typed IDs internally; new top-level aliases
       are added only when they improve human discovery without duplicating
@@ -205,9 +206,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       replaces UI-specific branching incrementally, beginning with adaptive
       Tabs operations rather than claiming every legacy command is migrated
     - [x] classify operations as observe, control, or destructive; this is
-      an honest authority boundary for later Rhai/MCP consumers, not yet a
-      policy system that grants autonomous control; discovery labels the
-      catalog classification-only and reports no authorization policy
+      an operation taxonomy for later Rhai/MCP consumers, not an authorization
+      boundary or a policy system; discovery labels the catalog
+      classification-only and reports no authorization policy
     - [x] expose tabs show/hide/toggle and bounded width adjustment through
       typed semantic actions as well as physical UI, with stable snapshot
       fields for visibility, configured/effective width, grip geometry,
@@ -215,8 +216,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       `tabs-toggle`, and `tabs-set-width --width 180..480` use stable
       `ui.tabs.*` IDs while legacy `toggle-tabs` remains an alias
   - Release core: Script Platform v2
-    - [x] repair the shipped v1 contract before adding authority:
-      `script check` rejects unknown/profile-inaccessible APIs, wall-time
+    - [x] repair the shipped v1 contract:
+      `script check` rejects unknown APIs, wall-time
       exhaustion returns the typed limit class, invocation input is bounded,
       and the host validates result envelope/API/invocation identity plus
       stable success/script/configuration/limit/host exit classes
@@ -229,16 +230,17 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       versioned inherited-pipe frame protocol for invoke, broker request/
       response, cancel, and result; script stdout remains captured data and
       can never corrupt protocol frames
-    - [x] keep `pure` ambient-authority-free and upgrade `observe` from one
-      raw snapshot variable to discoverable typed workspace/tab/snapshot/
-      bounded-capture/event-read/event-wait APIs brokered through the host;
-      restart, gap, timeout, truncation, and return limits remain explicit
+    - [x] expose discoverable typed workspace/tab/snapshot/bounded-capture/
+      event-read/event-wait APIs brokered through the host; deterministic
+      computation and Fleet observation are ordinary unrestricted runtime
+      uses, while restart, gap, timeout, truncation, and return limits remain
+      explicit robustness contracts
     - [x] make `script api --json` the exact typed catalog and make
-      `script check` validate API names, profiles, capabilities, versions,
+      `script check` validate API names, capabilities, versions,
       and static limits offline rather than only compiling Rhai syntax
     - [x] append privacy-bounded audit records for identity/fingerprint,
-      requested/effective profile, capabilities and budgets, broker
-      operation IDs, duration, result class, denial, cancellation, timeout,
+      runtime/API facts, capabilities and budgets, broker
+      operation IDs, duration, result class, failure, cancellation, timeout,
       and crash without source, argv, pane content, environment values,
       stdout, clipboard data, or credentials
     - [x] expose the supervisor, capability broker, typed operation adapter,
@@ -247,8 +249,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       their runtime/transport in v0.1.6
     - [x] public adversarial tests cover malformed/oversized/duplicate
       frames, unsupported versions, every budget class, hard timeout,
-      cancel, crash, parent exit, concurrency, restart/gap, authority
-      denial, audit privacy, subsequent recovery, first-window isolation,
+      cancel, crash, parent exit, concurrency, restart/gap, audit privacy,
+      subsequent recovery, first-window isolation,
       binary budgets, and absence of orphan workers or temporary source
   - Quality gate
     - [x] pure geometry tests cover visible/hidden, narrow-window clamps,
@@ -287,16 +289,15 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   - Candidate enhancement lanes after the core is green
     - [x] non-intrusive bounded transcript capture by stable tab ID, with
       visible/scrollback ranges and explicit truncation metadata
-    - [ ] an explicit Rhai `control` preview may expose only individually
-      allowlisted, non-destructive typed operations after broker/capability/
-      audit gates pass; send-keys, close, kill, shutdown, filesystem,
-      process, and network authority remain denied
+    - [ ] expand typed Rhai control, filesystem, process, network, and
+      destructive-operation adapters behind truthful receipts, cancellation,
+      and product-state invariants; Script Runtime does not use allowlists as
+      Agent permissions
     - [ ] terminal selection auto-scroll plus double-click word and
       triple-click visual-line selection; rectangular selection and raw
       application-mouse arbitration remain later work
   - Explicitly outside v0.1.6
-    - [ ] MCP, default/destructive Rhai control authority and event handlers,
-      dynamic status providers, Bash runtime distribution,
+    - [ ] MCP, Rhai event handlers, dynamic status providers, Bash runtime distribution,
       optional-component networking, installer/updater/signing,
       intelligence workers, and LLM routing remain separately gated roadmap
       items
@@ -363,8 +364,8 @@ track remains planned, but every declared dependency must still pass.
   - [x] establish typed script catalog schema v3 independently of the stable
     Script API v2 protocol version, including reviewed Node.js/Bun research
     analogues, and add an explicit server-independent `local`
-    profile foundation without changing the ordinary default prematurely
-  - [x] make `local` the ordinary `agenterm-script.exe` execution profile and
+    unrestricted local-runtime foundation
+  - [x] make unrestricted local execution the ordinary `agenterm-script.exe` behavior and
     deliver the Rust-shaped `std::{fs,path,env,process,time}` subset plus
     `rhai::{task,http,json,bytes,runtime}` extensions without moving future
     Agent approval policy into the runtime
@@ -385,7 +386,7 @@ track remains planned, but every declared dependency must still pass.
     bounded non-trust origin/provenance hooks
   - [x] systematically expose every public typed Fleet operation or a stable
     degraded reason; mutations return request identity, receipt, correlated
-    event and verified post-state while pure/observe behavior remains stable
+    event and verified post-state through the same unrestricted runtime surface
   - [x] public file/process/loopback-HTTP/task/module/Fleet/privacy/crash/orphan
     journeys prove one complete local automation task and one low-risk
     PowerShell/Rhai self-hosting dual-run without replacing release scripts
