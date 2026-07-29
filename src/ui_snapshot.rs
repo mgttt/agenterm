@@ -138,7 +138,7 @@ pub(crate) struct TerminalSelectionSnapshotInput {
 
 pub(crate) fn terminal_interaction_json(
     selection: Option<TerminalSelectionSnapshotInput>,
-    gesture_phase: Option<&str>,
+    autoscroll_active: bool,
 ) -> serde_json::Value {
     serde_json::json!({
         "selection": selection.map(|selection| serde_json::json!({
@@ -148,11 +148,10 @@ pub(crate) fn terminal_interaction_json(
                 "start": {"row": selection.start_row, "col": selection.start_col},
                 "end": {"row": selection.end_row, "col": selection.end_col},
             },
-            "autoscroll": {"active": false},
+            "autoscroll": {"active": autoscroll_active},
         })),
         "raw_mouse_arbitration": false,
         "rectangular_selection": false,
-        "gesture_phase": gesture_phase.unwrap_or("none"),
     })
 }
 
@@ -237,5 +236,83 @@ mod tests {
         assert_eq!(json["minimized"], true);
         assert_eq!(json["state"], "minimized");
         assert_eq!(json["detached"], false);
+    }
+
+    #[test]
+    fn terminal_interaction_json_without_selection_matches_win_shape() {
+        let json = terminal_interaction_json(None, false);
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "selection": null,
+                "raw_mouse_arbitration": false,
+                "rectangular_selection": false,
+            })
+        );
+        assert!(json.get("gesture_phase").is_none());
+    }
+
+    #[test]
+    fn terminal_interaction_json_with_selection_matches_win_shape() {
+        let json = terminal_interaction_json(
+            Some(TerminalSelectionSnapshotInput {
+                tab_id: 1,
+                start_row: 0,
+                start_col: 2,
+                end_row: 1,
+                end_col: 5,
+                dragging: true,
+            }),
+            false,
+        );
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "selection": {
+                    "phase": "dragging",
+                    "tab_id": "@1",
+                    "selection": {
+                        "start": {"row": 0, "col": 2},
+                        "end": {"row": 1, "col": 5},
+                    },
+                    "autoscroll": {"active": false},
+                },
+                "raw_mouse_arbitration": false,
+                "rectangular_selection": false,
+            })
+        );
+        assert!(json.get("gesture_phase").is_none());
+    }
+
+    #[test]
+    fn terminal_interaction_json_reports_autoscroll_active() {
+        let json = terminal_interaction_json(
+            Some(TerminalSelectionSnapshotInput {
+                tab_id: 2,
+                start_row: 3,
+                start_col: 0,
+                end_row: 3,
+                end_col: 4,
+                dragging: true,
+            }),
+            true,
+        );
+        assert_eq!(json["selection"]["autoscroll"]["active"], true);
+    }
+
+    #[test]
+    fn per_tab_selection_json_matches_win_shape() {
+        let selection = serde_json::json!({
+            "start": {"row": 0, "col": 1},
+            "end": {"row": 1, "col": 1},
+            "dragging": false,
+        });
+        assert!(selection.get("phase").is_none());
+        assert!(selection.get("tab_id").is_none());
+        assert_eq!(selection["start"]["row"], 0);
+        assert_eq!(selection["start"]["col"], 1);
+        assert_eq!(selection["end"]["row"], 1);
+        assert_eq!(selection["end"]["col"], 1);
+        assert_eq!(selection["dragging"], false);
     }
 }

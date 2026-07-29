@@ -25,6 +25,10 @@ impl TerminalSelection {
         let (start, end) = self.bounds();
         TerminalPoint { row, col } >= start && TerminalPoint { row, col } <= end
     }
+
+    pub(super) fn is_empty(self) -> bool {
+        self.anchor == self.focus
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -370,6 +374,18 @@ pub(super) fn terminal_selection_text(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn selection_is_empty_when_anchor_matches_focus() {
+        let selection = TerminalSelection {
+            tab_id: 1,
+            anchor: TerminalPoint { row: 2, col: 3 },
+            focus: TerminalPoint { row: 2, col: 3 },
+            dragging: false,
+            moved: false,
+        };
+        assert!(selection.is_empty());
+    }
 
     #[test]
     fn gesture_transitions_are_explicit_and_terminal() {

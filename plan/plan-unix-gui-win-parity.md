@@ -55,8 +55,8 @@ Legend：`[x]` 已对齐，`[~]` 部分，`[ ]` 未做。
 ### P2 — 设置、菜单、选择
 
 - [x] Settings：可编辑字体族；snapshot `settings` + `theme_options`；`settings-cancel`
-- [ ] `system_menu.copy`/`paste` enabled 状态与快捷键语义
-- [ ] 每 tab `selection`；`terminal_interaction` 对象形状与 Win 一致
+- [x] `system_menu.copy`/`paste` enabled 状态与快捷键语义
+- [x] 每 tab `selection`；`terminal_interaction` 对象形状与 Win 一致
 
 ### P3 — 渲染与字体
 

@@ -1387,23 +1387,32 @@ impl UnixApp {
         }
     }
 
-    fn system_menu_clipboard_state(&self) -> (bool, bool) {
-        let modal_free = !self.modal_surface_active();
-        let terminal_alive = self
-            .active_position()
-            .is_some_and(|position| self.tabs[position].exited.is_none());
-        let terminal_ready = modal_free && terminal_alive;
-        let copy = terminal_ready
+    fn is_edit_focus(&self) -> bool {
+        self.focus_surface == UnixFocusSurface::Composer
+            || self.note_edit_target.is_some()
+            || (self.settings_open && self.settings_focus == SettingsFocusView::FontFamily)
+            || self.new_terminal_dialog.is_open()
+    }
+
+    fn terminal_ready_for_system_menu(&self) -> bool {
+        self.focus_surface == UnixFocusSurface::Terminal
+            && !self.window_close_pending
+            && !self.settings_open
+            && !self.new_terminal_dialog.is_open()
             && self
-                .terminal_selection
+                .active_position()
+                .is_some_and(|position| self.tabs[position].exited.is_none())
+    }
+
+    fn system_menu_clipboard_state(&self) -> (bool, bool) {
+        system_menu_clipboard_state_pure(
+            self.is_edit_focus(),
+            self.terminal_ready_for_system_menu(),
+            self.terminal_selection
                 .as_ref()
-                .is_some_and(|selection| selection.bounds().0 != selection.bounds().1);
-        let paste = terminal_ready
-            && matches!(
-                self.focus_surface,
-                UnixFocusSurface::Terminal | UnixFocusSurface::Composer
-            );
-        (copy, paste)
+                .is_some_and(|selection| !selection.is_empty()),
+            clipboard::clipboard_has_unicode_text(),
+        )
     }
 
     fn build_ui_snapshot_json(&mut self) -> String {
@@ -1447,9 +1456,6 @@ impl UnixApp {
                 dragging: selection.dragging,
             }
         });
-        let gesture_phase = self
-            .terminal_selection_gesture
-            .map(|gesture| gesture.phase().as_str());
         let tab_editor = self.note_edit_target.map(|id| {
             serde_json::json!({
                 "target": format!("@{id}"),
@@ -1724,7 +1730,7 @@ impl UnixApp {
             "tabs": tabs,
             "terminal_interaction": terminal_interaction_json(
                 interaction_selection,
-                gesture_phase,
+                self.terminal_selection_autoscroll.is_some(),
             ),
             "settings": settings_json(
                 &self.config,
@@ -1736,15 +1742,6 @@ impl UnixApp {
                 "message": self.status_message,
                 "error": serde_json::Value::Null,
             },
-            "selection": self.terminal_selection.map(|selection| {
-                let (start, end) = selection.bounds();
-                serde_json::json!({
-                    "tab_id": format!("@{}", selection.tab_id),
-                    "start": {"row": start.row, "col": start.col},
-                    "end": {"row": end.row, "col": end.col},
-                    "dragging": selection.dragging,
-                })
-            }),
         }))
         .unwrap_or_else(|_| "{}".to_owned())
     }
@@ -3662,7 +3659,7 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                 if self.modifiers.control_key()
                     && matches!(event.logical_key, Key::Character(ref value) if value.eq_ignore_ascii_case("c"))
                     && self.terminal_selection.is_some_and(|selection| {
-                        selection.moved && self.active == Some(selection.tab_id)
+                        !selection.is_empty() && self.active == Some(selection.tab_id)
                     })
                 {
                     let _ = self.copy_terminal_selection();
@@ -3748,5 +3745,65 @@ impl ApplicationHandler<UnixWake> for UnixApp {
         if self.close_requested {
             event_loop.exit();
         }
+    }
+}
+
+fn system_menu_clipboard_state_pure(
+    edit_focus: bool,
+    terminal_ready: bool,
+    selection_nonempty: bool,
+    clipboard_has_text: bool,
+) -> (bool, bool) {
+    if edit_focus {
+        return (true, clipboard_has_text);
+    }
+    (
+        terminal_ready && selection_nonempty,
+        terminal_ready && clipboard_has_text,
+    )
+}
+
+#[cfg(test)]
+mod system_menu_tests {
+    use super::system_menu_clipboard_state_pure;
+
+    #[test]
+    fn edit_focus_enables_copy_and_paste_follows_clipboard() {
+        assert_eq!(
+            system_menu_clipboard_state_pure(true, false, false, false),
+            (true, false)
+        );
+        assert_eq!(
+            system_menu_clipboard_state_pure(true, false, false, true),
+            (true, true)
+        );
+    }
+
+    #[test]
+    fn terminal_ready_requires_selection_for_copy_and_clipboard_for_paste() {
+        assert_eq!(
+            system_menu_clipboard_state_pure(false, true, false, false),
+            (false, false)
+        );
+        assert_eq!(
+            system_menu_clipboard_state_pure(false, true, true, false),
+            (true, false)
+        );
+        assert_eq!(
+            system_menu_clipboard_state_pure(false, true, false, true),
+            (false, true)
+        );
+        assert_eq!(
+            system_menu_clipboard_state_pure(false, true, true, true),
+            (true, true)
+        );
+    }
+
+    #[test]
+    fn terminal_not_ready_disables_copy_and_paste() {
+        assert_eq!(
+            system_menu_clipboard_state_pure(false, false, true, true),
+            (false, false)
+        );
     }
 }
