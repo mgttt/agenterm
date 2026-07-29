@@ -161,6 +161,21 @@ function Wait-UiProjection {
     throw "UI projection did not become '$Projection' within ${TimeoutMs}ms"
 }
 
+function Wait-TerminalViewportMutation {
+    param(
+        [Parameter(Mandatory = $true)]$Baseline,
+        [Parameter(Mandatory = $true)][string]$TabId
+    )
+    Invoke-AgenTerm @(
+        'wait-events',
+        '--epoch', $Baseline.epoch,
+        '--after', "$($Baseline.sequence)",
+        '--kind', 'terminal.viewport',
+        '--tab', $TabId,
+        '--timeout-ms', '5000'
+    ) | Out-Null
+}
+
 try {
     Write-Host 'STEP start replaceable UI and let it start the independent server'
     $stderrPath = Join-Path $run.RunDirectory 'remote-ui-stderr.txt'
@@ -1202,6 +1217,9 @@ try {
     $scrollbarX = $scrollClient.Right - 6
     $bottomThumbY = $trackHeight - [Math]::Floor($thumbHeight / 2)
     $topThumbY = [Math]::Floor($thumbHeight / 2)
+    $topDragBaseline = (
+        Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    ).event_position
     [AgenTermRemoteUiNativeTest]::SendMessage(
         $gui.MainWindowHandle, 0x0201, [IntPtr]::Zero,
         [AgenTermRemoteUiNativeTest]::MousePoint(
@@ -1220,11 +1238,15 @@ try {
             $scrollbarX, $topThumbY
         )
     ) | Out-Null
+    Wait-TerminalViewportMutation -Baseline $topDragBaseline -TabId $tabId
     $draggedTop = Invoke-AgenTerm @('inspect', '-t', $tabId) |
         ConvertFrom-Json
     if ([int]$draggedTop.windows[0].scrollback_offset -ne $maximumScroll) {
         throw 'terminal scrollbar drag did not reach the oldest history'
     }
+    $liveDragBaseline = (
+        Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    ).event_position
     [AgenTermRemoteUiNativeTest]::SendMessage(
         $gui.MainWindowHandle, 0x0201, [IntPtr]::Zero,
         [AgenTermRemoteUiNativeTest]::MousePoint(
@@ -1243,26 +1265,35 @@ try {
             $scrollbarX, $bottomThumbY
         )
     ) | Out-Null
+    Wait-TerminalViewportMutation -Baseline $liveDragBaseline -TabId $tabId
     $draggedLive = Invoke-AgenTerm @('inspect', '-t', $tabId) |
         ConvertFrom-Json
     if ([int]$draggedLive.windows[0].scrollback_offset -ne 0) {
         throw 'terminal scrollbar drag did not return to the live viewport'
     }
+    $wheelUpBaseline = (
+        Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    ).event_position
     [AgenTermRemoteUiNativeTest]::SendMessage(
         $gui.MainWindowHandle, 0x020A,
         [AgenTermRemoteUiNativeTest]::WheelDelta(120),
         [IntPtr]::Zero
     ) | Out-Null
+    Wait-TerminalViewportMutation -Baseline $wheelUpBaseline -TabId $tabId
     $scrolled = Invoke-AgenTerm @('inspect', '-t', $tabId) |
         ConvertFrom-Json
     if ($scrolled.windows[0].scrollback_offset -le 0) {
         throw 'replaceable UI mouse wheel did not scroll terminal history'
     }
+    $wheelDownBaseline = (
+        Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    ).event_position
     [AgenTermRemoteUiNativeTest]::SendMessage(
         $gui.MainWindowHandle, 0x020A,
         [AgenTermRemoteUiNativeTest]::WheelDelta(-120),
         [IntPtr]::Zero
     ) | Out-Null
+    Wait-TerminalViewportMutation -Baseline $wheelDownBaseline -TabId $tabId
     $returnedLive = Invoke-AgenTerm @('inspect', '-t', $tabId) |
         ConvertFrom-Json
     if ($returnedLive.windows[0].scrollback_offset -ne 0) {
