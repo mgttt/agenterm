@@ -47,7 +47,7 @@ Legend：`[x]` 已对齐，`[~]` 部分，`[ ]` 未做。
 
 ### P1 — 侧栏交互深度
 
-- [ ] 侧栏滚动：`sidebar_scroll_offset`、wheel/drag、`layout.sidebar.scrollbar`
+- [x] 侧栏滚动：`sidebar_scroll_offset`、wheel/drag、`layout.sidebar.scrollbar`
 - [ ] 侧栏内联 tab 编辑：`TreeRowMode::Editing`、`tab_editor.focus`、`tab-editor-save/cancel`（禁止 Composer 借用）
 - [ ] New 终端对话框：`kind: "new-terminal"` + shell/初始命令/proxy + `ui-action` create 路径
 - [ ] `ui-action` 窗口控制：`keep-server-running`、`stop-server-and-exit`、`window-minimize/maximize/restore/resize`

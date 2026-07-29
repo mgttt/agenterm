@@ -44,7 +44,8 @@ use crate::{
     ui_geometry::{
         ScrollbarHit, TERMINAL_SCROLLBAR_WIDTH, TreeRowActionDensity, TreeRowMode, WHEEL_DELTA,
         WHEEL_ROWS_PER_NOTCH, pixel_rect_json, scrollback_for_thumb_top, scrollbar_hit_test,
-        tabs_width_from_drag, terminal_cell_at, tree_row_geometry_for_mode, wheel_delta_units,
+        sidebar_row_capacity, sidebar_scrollbar_geometry, sidebar_scrollbar_track,
+        sidebar_tree_row_geometry, tabs_width_from_drag, terminal_cell_at, wheel_delta_units,
     },
     ui_snapshot::{
         PROJECTION_EMBEDDED_GUI, TerminalSelectionSnapshotInput, archived_proxy_status_json,
@@ -71,6 +72,11 @@ use layout::{
 
 #[derive(Clone, Copy, Debug)]
 struct ScrollDrag {
+    thumb_grab_offset: i32,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct SidebarScrollDrag {
     thumb_grab_offset: i32,
 }
 
@@ -276,6 +282,8 @@ struct UnixApp {
     tab_note_draft: String,
     wheel_remainder: i32,
     scroll_drag: Option<ScrollDrag>,
+    sidebar_scroll_offset: usize,
+    sidebar_scroll_drag: Option<SidebarScrollDrag>,
     terminal_selection: Option<TerminalSelection>,
     terminal_selection_gesture: Option<SelectionGesture>,
     terminal_selection_pointer: Option<(i32, i32)>,
@@ -329,6 +337,8 @@ impl UnixApp {
             tab_note_draft: String::new(),
             wheel_remainder: 0,
             scroll_drag: None,
+            sidebar_scroll_offset: 0,
+            sidebar_scroll_drag: None,
             terminal_selection: None,
             terminal_selection_gesture: None,
             terminal_selection_pointer: None,
@@ -995,9 +1005,55 @@ impl UnixApp {
             .collect()
     }
 
+    fn sidebar_row_capacity(&self) -> usize {
+        sidebar_row_capacity(self.layout().sidebar_tree.height())
+    }
+
+    fn sidebar_row_count(&self) -> usize {
+        self.visible_tree_rows().len()
+    }
+
+    fn sidebar_max_offset(&self) -> usize {
+        self.sidebar_row_count()
+            .saturating_sub(self.sidebar_row_capacity())
+    }
+
+    fn sidebar_offset(&self) -> usize {
+        self.sidebar_scroll_offset.min(self.sidebar_max_offset())
+    }
+
+    fn sidebar_scrollbar_state(
+        &self,
+    ) -> Option<(crate::ui_geometry::TerminalScrollbarGeometry, usize, usize)> {
+        if !self.config.tabs_visible {
+            return None;
+        }
+        let layout = self.layout();
+        let track = sidebar_scrollbar_track(layout.sidebar_tree);
+        let maximum = self.sidebar_max_offset();
+        let offset = self.sidebar_offset();
+        let geometry = sidebar_scrollbar_geometry(
+            track,
+            offset,
+            maximum,
+            self.sidebar_row_capacity(),
+            self.sidebar_row_count(),
+        );
+        Some((geometry, offset, maximum))
+    }
+
+    fn sidebar_viewport_rows(&self) -> Vec<SidebarTabRow> {
+        let offset = self.sidebar_offset();
+        self.sidebar_rows()
+            .into_iter()
+            .skip(offset)
+            .take(self.sidebar_row_capacity())
+            .collect()
+    }
+
     fn sidebar_row_geometry(
         &self,
-        visual_position: usize,
+        viewport_position: usize,
         depth: usize,
         tab_id: u64,
     ) -> crate::ui_geometry::TreeRowGeometry {
@@ -1006,12 +1062,7 @@ impl UnixApp {
         } else {
             TreeRowMode::Normal
         };
-        tree_row_geometry_for_mode(
-            visual_position,
-            depth,
-            self.layout().effective_tabs_width,
-            mode,
-        )
+        sidebar_tree_row_geometry(self.layout().sidebar_tree, viewport_position, depth, mode)
     }
 
     fn tree_action_density_name(density: TreeRowActionDensity) -> &'static str {
@@ -1024,8 +1075,8 @@ impl UnixApp {
     fn tab_position_for_sidebar_y(&self, y: u32) -> Option<usize> {
         let tree_height = self.layout().sidebar_tree.height().max(0) as u32;
         let row_index = sidebar_row_at_y(y, tree_height)?;
-        let rows = self.visible_tree_rows();
-        let row_id = rows.get(row_index)?.id;
+        let source_index = self.sidebar_offset() + row_index;
+        let row_id = self.visible_tree_rows().get(source_index)?.id;
         self.tabs.iter().position(|tab| tab.id == row_id)
     }
 
@@ -1076,6 +1127,9 @@ impl UnixApp {
         });
         let journal_position = self.event_journal.position();
         let (copy_enabled, paste_enabled) = self.system_menu_clipboard_state();
+        let sidebar_scrollbar = self
+            .sidebar_scrollbar_state()
+            .map(|(geometry, offset, maximum)| scrollbar_state_json(&geometry, offset, maximum));
         const COMPOSER_SEND_WIDTH: i32 = 72;
         let composer_send_left = layout.composer.right - COMPOSER_SEND_WIDTH - 8;
         let composer_input = crate::ui_geometry::PixelRect {
@@ -1114,7 +1168,16 @@ impl UnixApp {
                 let visible_position = self
                     .config
                     .tabs_visible
-                    .then(|| visible_rows.iter().position(|visible| visible.id == row.id))
+                    .then(|| {
+                        visible_rows
+                            .iter()
+                            .position(|visible| visible.id == row.id)
+                            .and_then(|source_position| {
+                                source_position
+                                    .checked_sub(self.sidebar_offset())
+                                    .filter(|position| *position < self.sidebar_row_capacity())
+                            })
+                    })
                     .flatten();
                 let geometry = visible_position
                     .map(|position| self.sidebar_row_geometry(position, row.depth, tab.id));
@@ -1248,7 +1311,7 @@ impl UnixApp {
                     "bounds": pixel_rect_json(layout.sidebar),
                     "resize_grip": layout.resize_grip.map(pixel_rect_json),
                     "resizing": self.tabs_resize_drag.is_some(),
-                    "scrollbar": serde_json::Value::Null,
+                    "scrollbar": sidebar_scrollbar,
                 },
                 "toolbar": layout.workspace_toolbar.map(|toolbar| serde_json::json!({
                     "bounds": pixel_rect_json(toolbar.bounds),
@@ -1405,17 +1468,22 @@ impl UnixApp {
         if x >= f64::from(sidebar_width) {
             return;
         }
+        if self.click_sidebar_scrollbar(x as i32, y as i32) {
+            return;
+        }
         let tree_height = layout.sidebar_tree.height().max(0) as u32;
         let click_y = y.max(0.0) as i32;
         let click_x = x as i32;
-        if let Some(row_index) = sidebar_row_at_y(y.max(0.0) as u32, tree_height)
-            && let Some(row) = self.visible_tree_rows().get(row_index)
-            && self.tabs.iter().any(|tab| tab.parent_id == Some(row.id))
-        {
-            let geometry = self.sidebar_row_geometry(row_index, row.depth, row.id);
-            if geometry.disclosure_hit.contains(click_x, click_y) {
-                let _ = self.toggle_collapsed(row.id);
-                return;
+        if let Some(row_index) = sidebar_row_at_y(y.max(0.0) as u32, tree_height) {
+            let source_index = self.sidebar_offset() + row_index;
+            if let Some(row) = self.visible_tree_rows().get(source_index)
+                && self.tabs.iter().any(|tab| tab.parent_id == Some(row.id))
+            {
+                let geometry = self.sidebar_row_geometry(row_index, row.depth, row.id);
+                if geometry.disclosure_hit.contains(click_x, click_y) {
+                    let _ = self.toggle_collapsed(row.id);
+                    return;
+                }
             }
         }
         let Some(position) = self.tab_position_for_sidebar_y(y.max(0.0) as u32) else {
@@ -1870,18 +1938,92 @@ impl UnixApp {
         self.scroll_drag = None;
     }
 
+    fn scroll_sidebar(&mut self, wheel_delta_notches: i32) {
+        let steps = wheel_delta_notches.unsigned_abs() as usize * WHEEL_ROWS_PER_NOTCH;
+        let maximum = self.sidebar_max_offset();
+        self.sidebar_scroll_offset = if wheel_delta_notches > 0 {
+            self.sidebar_offset().saturating_sub(steps)
+        } else {
+            self.sidebar_offset().saturating_add(steps).min(maximum)
+        };
+    }
+
+    fn click_sidebar_scrollbar(&mut self, x: i32, y: i32) -> bool {
+        let Some((geometry, current, maximum)) = self.sidebar_scrollbar_state() else {
+            return false;
+        };
+        if !geometry.track.contains(x, y) {
+            return false;
+        }
+        if maximum == 0 {
+            return true;
+        }
+        if geometry.thumb.contains(x, y) {
+            self.sidebar_scroll_drag = Some(SidebarScrollDrag {
+                thumb_grab_offset: y - geometry.thumb.top,
+            });
+        } else {
+            let page = self.sidebar_row_capacity().max(1);
+            self.sidebar_scroll_offset = if y < geometry.thumb.top {
+                current.saturating_sub(page)
+            } else {
+                current.saturating_add(page).min(maximum)
+            };
+            self.request_redraw();
+        }
+        true
+    }
+
+    fn drag_sidebar_scrollbar(&mut self, y: i32) {
+        let Some(drag) = self.sidebar_scroll_drag else {
+            return;
+        };
+        let Some((geometry, _, maximum)) = self.sidebar_scrollbar_state() else {
+            self.end_sidebar_scroll_drag();
+            return;
+        };
+        let travel = geometry.track.height() - geometry.thumb.height();
+        if maximum == 0 || travel <= 0 {
+            self.sidebar_scroll_offset = 0;
+        } else {
+            let top = (y - drag.thumb_grab_offset).clamp(
+                geometry.track.top,
+                geometry.track.bottom - geometry.thumb.height(),
+            );
+            self.sidebar_scroll_offset = ((i64::from(top - geometry.track.top) * maximum as i64
+                + i64::from(travel) / 2)
+                / i64::from(travel)) as usize;
+        }
+        self.request_redraw();
+    }
+
+    fn end_sidebar_scroll_drag(&mut self) {
+        self.sidebar_scroll_drag = None;
+    }
+
     fn mouse_wheel(&mut self, x: f64, y: f64, delta: MouseScrollDelta) {
         if self.settings_open || self.window_close_pending {
             return;
         }
-        let terminal = terminal_pixel_rect(&self.layout());
-        if !terminal.contains(x as i32, y as i32) {
-            return;
-        }
+        let layout = self.layout();
         let units = match delta {
             MouseScrollDelta::LineDelta(_, lines) => wheel_delta_units(f64::from(lines), true),
             MouseScrollDelta::PixelDelta(pos) => wheel_delta_units(pos.y, false),
         };
+        if self.config.tabs_visible && layout.sidebar_tree.contains(x as i32, y as i32) {
+            self.wheel_remainder += units;
+            let notches = self.wheel_remainder / WHEEL_DELTA;
+            self.wheel_remainder %= WHEEL_DELTA;
+            if notches != 0 {
+                self.scroll_sidebar(notches);
+                self.request_redraw();
+            }
+            return;
+        }
+        let terminal = terminal_pixel_rect(&layout);
+        if !terminal.contains(x as i32, y as i32) {
+            return;
+        }
         self.wheel_remainder += units;
         let notches = self.wheel_remainder / WHEEL_DELTA;
         self.wheel_remainder %= WHEEL_DELTA;
@@ -2193,7 +2335,7 @@ impl UnixApp {
             return;
         }
 
-        let sidebar_rows = self.sidebar_rows();
+        let sidebar_rows = self.sidebar_viewport_rows();
         let palette = self.palette();
         let layout = self.layout();
         let sidebar_width = self.sidebar_width();
@@ -2210,6 +2352,9 @@ impl UnixApp {
             let (offset, maximum) = self.tabs[position].scrollback_bounds();
             scrollbar_view_from_geometry(scrollbar_geometry(&layout, visible_rows, offset, maximum))
         });
+        let sidebar_scrollbar = self
+            .sidebar_scrollbar_state()
+            .map(|geometry| scrollbar_view_from_geometry(geometry.0));
         let settings = self.settings_open.then(|| {
             SettingsModalView::for_client(
                 size.width,
@@ -2303,6 +2448,7 @@ impl UnixApp {
                 terminal_top: layout.terminal.top.max(0) as u32,
                 composer: composer_view,
                 scrollbar,
+                sidebar_scrollbar,
                 settings,
                 confirm_close,
                 window_close,
@@ -2973,6 +3119,8 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                 self.last_cursor = (position.x, position.y);
                 if self.tabs_resize_drag.is_some() {
                     self.drag_tabs_resize(position.x as i32);
+                } else if self.sidebar_scroll_drag.is_some() {
+                    self.drag_sidebar_scrollbar(position.y as i32);
                 } else if self.scroll_drag.is_some() {
                     self.drag_scrollbar(position.y as i32);
                 } else if self
@@ -3008,6 +3156,8 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                     self.finish_tabs_resize(true, "mouse-drag", UI_TABS_SET_WIDTH);
                 } else if self.scroll_drag.is_some() {
                     self.end_scroll_drag();
+                } else if self.sidebar_scroll_drag.is_some() {
+                    self.end_sidebar_scroll_drag();
                 } else {
                     self.complete_terminal_selection();
                 }
