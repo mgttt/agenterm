@@ -214,9 +214,6 @@ try {
         }
         & '.\lint.ps1' -Mode Static
     }
-    Invoke-Checked -Id 'prd-alignment' -Label 'PRD capability alignment' {
-        & '.\tests\prd_alignment.ps1'
-    }
     Invoke-Checked -Id 'rustfmt' -Label 'rustfmt' {
         cargo fmt -- --check
     }
@@ -252,6 +249,9 @@ try {
         else {
             & '.\build.bat'
         }
+    }
+    Invoke-Checked -Id 'prd-alignment' -Label 'PRD capability alignment' {
+        & '.\tests\prd_alignment.ps1'
     }
     Invoke-Checked -Id 'rhai-lint' -Label 'production Rhai source lint' {
         & '.\lint.ps1' -Mode Rhai `
