@@ -104,6 +104,14 @@
       "args": [".", "dist/agenterm-cli.exe", "dist/agenterm-script.exe", "dist/agenterm.exe"]
     },
     {
+      "id": "qualification-selftest",
+      "description": "Prove qualification manifests, results, provenance, and diagnostics fail closed",
+      "entry": "scripts/rhai/qualification-selftest.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "args": [".", "dist/agenterm-cli.exe"]
+    },
+    {
       "id": "working-context-smoke",
       "description": "Prove redacted launch proxy facts, archived controls, and non-persistence through an isolated GUI restart",
       "entry": "scripts/rhai/working-context-smoke.rhai",

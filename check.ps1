@@ -204,7 +204,9 @@ try {
     }
 
     if ($InternalQualificationDryRun) {
-        & '.\scripts\qualification-selftest.ps1'
+        & '.\dist\agenterm-script.exe' task run qualification-selftest `
+            --manifest '.\agenterm.tasks.json' `
+            --timeout-ms 20000 --max-operations 10000000
         return
     }
 
@@ -487,7 +489,9 @@ try {
     }
     Invoke-Checked -Id 'qualification-selftest' `
         -Label 'qualification fail-closed self-test' {
-        & '.\scripts\qualification-selftest.ps1'
+        & '.\dist\agenterm-script.exe' task run qualification-selftest `
+            --manifest '.\agenterm.tasks.json' `
+            --timeout-ms 20000 --max-operations 10000000
     }
     Invoke-Checked -Id 'package-boundary-selftest' `
         -Label 'qualified package boundary self-test' {

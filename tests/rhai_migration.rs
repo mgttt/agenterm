@@ -280,6 +280,34 @@ fn run_diagnostic_bundle_selftest() -> Output {
 }
 
 #[cfg(windows)]
+fn run_qualification_selftest() -> Output {
+    let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+        .current_dir(repo)
+        .args([
+            "run",
+            "scripts/rhai/qualification-selftest.rhai",
+            "--profile",
+            "local",
+            "--project-root",
+        ])
+        .arg(repo)
+        .args([
+            "--timeout-ms",
+            "20000",
+            "--max-operations",
+            "10000000",
+            "--",
+        ])
+        .arg(repo)
+        .arg(env!("CARGO_BIN_EXE_agenterm-cli"))
+        .env("AGENTERM_NO_ACTIVATE", "1")
+        .output()
+        .expect("run Rhai qualification self-test")
+}
+
+#[cfg(windows)]
 fn run_working_context_smoke() -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -1608,6 +1636,22 @@ fn rhai_diagnostic_bundles_are_bounded_private_and_orphan_free() {
             "stderr leaked {forbidden}"
         );
     }
+}
+
+#[cfg(windows)]
+#[test]
+fn rhai_qualification_contract_fails_closed_and_cleans_owned_scratch() {
+    let output = run_qualification_selftest();
+    assert!(
+        output.status.success(),
+        "Rhai qualification self-test failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "PASS: qualification fail-closed self-test"
+    );
 }
 
 #[cfg(windows)]
