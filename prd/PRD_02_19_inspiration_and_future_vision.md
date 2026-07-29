@@ -10,16 +10,29 @@ owning PRD module. Entries here are **not** shipped status, **not**
 implementation scope, and **not** release promises until promoted through the
 workflow below.
 
-Canonical shipped/partial/planned truth remains in owning `prd/PRD_*.md`
-modules, [`PRD_02_18_roadmap.md`](PRD_02_18_roadmap.md), and [`plan/`](../plan/).
+Canonical shipped/partial/planned **capability status** remains in owning
+`prd/PRD_*.md` modules and [`PRD_02_18_roadmap.md`](PRD_02_18_roadmap.md).
+[`plan/`](plan/) holds **version execution projections** for the engineering
+track (for example the active v0.1.10 plan); it is not edited when capturing
+inspiration here.
+
+### Boundary: PRD vs `plan/`
+
+| Document | Owner | Agent editing product vision |
+|----------|-------|------------------------------|
+| `prd/PRD_*.md`, this file | Product tree / inspiration | **Yes** — capture and promote ideas |
+| `plan/plan-v*.md` | Engineering / release track | **No** — unless explicitly tasked with that version plan |
+
+Promotion path: idea in this file → owning PRD module (required) → engineering
+may reflect accepted scope in the **current** `plan/plan-v*.md` separately.
 
 ## How to use this document
 
 1. **Capture** — add a short idea card under the right lane (template below).
 2. **Explore** — link research, sketches, or spikes; keep scope hypothetical.
 3. **Promote** — when an idea has a concrete user case, invariant, and
-   acceptance evidence, move requirements into exactly one owning PRD module
-   and optionally a `plan/plan-v*.md` execution plan.
+   acceptance evidence, move requirements into exactly one owning PRD module.
+   Version sequencing is recorded separately in the engineering `plan/` tree.
 4. **Archive** — mark rejected or superseded cards; do not delete history.
 
 Legend for idea cards:
@@ -405,16 +418,15 @@ Non-goals:
 
 ## Decentralized network (`agenterm-net.exe`)
 
-Prior record: [`plan/plan-v0.1.8.md`](../plan/plan-v0.1.8.md) § **未来挂钩：
-`agenterm-net.exe`** (also referenced in plan v0.1.9 / v0.1.10). Product-owner
-intent: **soon-ish** libp2p/IPFS integration for decentralized networking,
-while preserving **small binaries, low memory, absolute stability**, and room
-for **high-leverage “black tech”** experiments without compromising the core.
+Product-owner intent (captured in this PRD module): **soon-ish** libp2p/IPFS
+integration for decentralized networking, while preserving **small binaries,
+low memory, absolute stability**, and room for **high-leverage “black tech”**
+experiments without compromising the core.
 
 This is **not** W0–W1 infrastructure. It is a **W7–W8** lane until loopback
 control plane and optional-component gates are green.
 
-### Architectural contract (from prior plan; still binding)
+### Architectural contract (product direction)
 
 ```text
 agenterm-script.exe
@@ -579,15 +591,15 @@ Security notes (must be designed before F1 ships):
 
 | ID | Status | Idea | Depends on | Owning module when promoted |
 |----|--------|------|------------|------------------------------|
-| G1 | [explore] | Multi-platform GUI (Linux/macOS) on shared kernel | — | Executable family, plan-multiplatform-gui |
+| G1 | [explore] | Multi-platform GUI (Linux/macOS) on shared kernel | — | Executable family |
 | G2 | [idea] | Portable no-install distribution as default; installer later | — | Delivery and quality |
 | G3 | [promoted] | Strict binary size budgets (4 MiB GUI, 2 MiB sidecars) | — | Delivery and quality, Executable family |
 | G4 | [deferred] | Explorer shell replacement / `agenterm-desktop.exe` | high-risk gate | Optional component lifecycle, roadmap |
 
 ### Lane H — Decentralized network (`agenterm-net` · NET · W7–W8)
 
-Prior plan: [plan-v0.1.8 agenterm-net section](../plan/plan-v0.1.8.md). Lane
-rules: sidecar-only, on-demand, 2 MiB class, isolated from GUI/server.
+Lane rules: sidecar-only, on-demand, 2 MiB class, isolated from GUI/server.
+See § Decentralized network above.
 
 | ID | Status | Idea | Depends on | Owning module when promoted |
 |----|--------|------|------------|------------------------------|
