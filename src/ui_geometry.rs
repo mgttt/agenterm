@@ -394,6 +394,83 @@ pub(crate) fn scrollback_for_thumb_top(
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(not(unix), allow(dead_code))]
+pub(crate) enum ScrollbarHit {
+    Thumb,
+    TrackAbove,
+    TrackBelow,
+}
+
+#[cfg_attr(not(unix), allow(dead_code))]
+pub(crate) const WHEEL_DELTA: i32 = 120;
+#[cfg_attr(not(unix), allow(dead_code))]
+pub(crate) const WHEEL_ROWS_PER_NOTCH: usize = 3;
+
+#[cfg_attr(not(unix), allow(dead_code))]
+pub(crate) fn scrollbar_hit_test(
+    geometry: &TerminalScrollbarGeometry,
+    x: i32,
+    y: i32,
+) -> Option<ScrollbarHit> {
+    if !geometry.track.contains(x, y) {
+        return None;
+    }
+    if geometry.thumb.contains(x, y) {
+        return Some(ScrollbarHit::Thumb);
+    }
+    if y < geometry.thumb.top {
+        Some(ScrollbarHit::TrackAbove)
+    } else {
+        Some(ScrollbarHit::TrackBelow)
+    }
+}
+
+/// Map a client pixel inside the terminal content (excluding scrollbar) to a cell.
+#[cfg_attr(not(unix), allow(dead_code))]
+pub(crate) fn terminal_cell_at(
+    terminal: PixelRect,
+    x: i32,
+    y: i32,
+    rows: u16,
+    cols: u16,
+    cell_width: i32,
+    cell_height: i32,
+) -> Option<(u16, u16)> {
+    let content_right = (terminal.right - TERMINAL_SCROLLBAR_WIDTH).max(terminal.left);
+    if x < terminal.left || x >= content_right || y < terminal.top || y >= terminal.bottom {
+        return None;
+    }
+    if rows == 0 || cols == 0 || cell_width <= 0 || cell_height <= 0 {
+        return None;
+    }
+    let column =
+        ((x - terminal.left) / cell_width).clamp(0, i32::from(cols.saturating_sub(1))) as u16;
+    let row = ((y - terminal.top) / cell_height).clamp(0, i32::from(rows.saturating_sub(1))) as u16;
+    Some((column, row))
+}
+
+/// Convert a wheel notch/pixel delta into Win32-style `WHEEL_DELTA` units.
+#[cfg_attr(not(unix), allow(dead_code))]
+pub(crate) fn wheel_delta_units(line_or_pixel_y: f64, is_line_delta: bool) -> i32 {
+    if is_line_delta {
+        (line_or_pixel_y * f64::from(WHEEL_DELTA)).round() as i32
+    } else {
+        line_or_pixel_y.round() as i32
+    }
+}
+
+pub(crate) fn pixel_rect_json(rect: PixelRect) -> serde_json::Value {
+    serde_json::json!({
+        "left": rect.left,
+        "top": rect.top,
+        "right": rect.right,
+        "bottom": rect.bottom,
+        "width": rect.width(),
+        "height": rect.height(),
+    })
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TreeRowMode {
     Normal,
     Editing,
@@ -1105,5 +1182,71 @@ mod tests {
         assert_eq!(geometry.thumb.top, geometry.track.top);
         assert_eq!(geometry.thumb.bottom, geometry.track.bottom);
         assert_eq!(scrollback_for_thumb_top(geometry, 100, 0), 0);
+    }
+
+    #[test]
+    fn pixel_rect_json_includes_bounds_and_size() {
+        let rect = PixelRect {
+            left: 10,
+            top: 20,
+            right: 110,
+            bottom: 220,
+        };
+        let json = pixel_rect_json(rect);
+        assert_eq!(json["left"], 10);
+        assert_eq!(json["width"], 100);
+        assert_eq!(json["height"], 200);
+    }
+
+    #[test]
+    fn scrollbar_hit_test_distinguishes_thumb_and_track() {
+        let terminal = PixelRect {
+            left: 0,
+            top: 0,
+            right: 800,
+            bottom: 600,
+        };
+        let geometry = terminal_scrollbar_geometry(terminal, 24, 45, 90);
+        let mid_x = (geometry.track.left + geometry.track.right) / 2;
+        assert_eq!(
+            scrollbar_hit_test(&geometry, mid_x, geometry.thumb.top + 1),
+            Some(ScrollbarHit::Thumb)
+        );
+        assert_eq!(
+            scrollbar_hit_test(&geometry, mid_x, geometry.track.top + 1),
+            Some(ScrollbarHit::TrackAbove)
+        );
+        assert_eq!(
+            scrollbar_hit_test(&geometry, mid_x, geometry.track.bottom - 1),
+            Some(ScrollbarHit::TrackBelow)
+        );
+        assert_eq!(scrollbar_hit_test(&geometry, 0, geometry.thumb.top), None);
+    }
+
+    #[test]
+    fn wheel_delta_units_accumulate_like_win32() {
+        assert_eq!(wheel_delta_units(1.0, true), WHEEL_DELTA);
+        assert_eq!(wheel_delta_units(-0.5, true), -WHEEL_DELTA / 2);
+        assert_eq!(wheel_delta_units(40.0, false), 40);
+    }
+
+    #[test]
+    fn terminal_cell_at_maps_pixels_inside_content() {
+        let terminal = PixelRect {
+            left: 200,
+            top: 0,
+            right: 800,
+            bottom: 480,
+        };
+        assert_eq!(
+            terminal_cell_at(terminal, 210, 8, 24, 80, 10, 16),
+            Some((1, 0))
+        );
+        assert_eq!(
+            terminal_cell_at(terminal, 790, 8, 24, 80, 10, 16),
+            None,
+            "scrollbar column is excluded"
+        );
+        assert_eq!(terminal_cell_at(terminal, 100, 8, 24, 80, 10, 16), None);
     }
 }

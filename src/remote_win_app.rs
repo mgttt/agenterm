@@ -67,11 +67,12 @@ use crate::{
         UiTabBootstrap,
     },
     ui_client::{UiClientModel, tab_by_id},
+    ui_clipboard::{TERMINAL_PASTE_LIMIT_BYTES, normalize_terminal_paste},
     ui_command::UiClientCommand,
     ui_geometry::{
         PixelRect, TAB_HEIGHT, TAB_TOP, TERMINAL_SCROLLBAR_WIDTH, TerminalScrollbarGeometry,
         TreeRowActionDensity, TreeRowGeometry, TreeRowMode, WorkspaceLayout, WorkspaceLayoutInput,
-        reset_tabs_width, scrollback_for_thumb_top, tabs_width_from_drag,
+        pixel_rect_json, reset_tabs_width, scrollback_for_thumb_top, tabs_width_from_drag,
         terminal_scrollbar_geometry, tree_row_at_y, tree_row_geometry_for_mode, workspace_layout,
     },
     working_context::parse_proxy_url,
@@ -110,7 +111,6 @@ const SYSTEM_MENU_COPY_ID: usize = 0x1f00;
 const SYSTEM_MENU_PASTE_ID: usize = 0x1f10;
 const SYSTEM_MENU_TOGGLE_TABS_ID: usize = 0x1f20;
 const CLIPBOARD_UNICODE_TEXT: u32 = 13;
-const TERMINAL_PASTE_LIMIT_BYTES: usize = 256 * 1024;
 const WM_APP_AUTOMATION_SHORTCUT: u32 = 0x8000 + 2;
 const WM_APP_FOCUS_QUERY: u32 = 0x8000 + 3;
 const STATUS_HEIGHT: i32 = 26;
@@ -5071,26 +5071,6 @@ fn read_clipboard_text() -> Result<String> {
     result
 }
 
-fn normalize_terminal_paste(text: &str) -> String {
-    let mut normalized = String::with_capacity(text.len());
-    let mut characters = text.chars().peekable();
-    while let Some(character) = characters.next() {
-        match character {
-            '\r' => {
-                if characters.peek() == Some(&'\n') {
-                    characters.next();
-                }
-                normalized.push('\r');
-            }
-            '\n' => normalized.push('\r'),
-            '\t' => normalized.push('\t'),
-            value if !value.is_control() => normalized.push(value),
-            _ => {}
-        }
-    }
-    normalized
-}
-
 fn screen_cells(screen: &UiScreenSnapshot) -> Vec<Vec<Option<String>>> {
     let rows = usize::try_from(screen.rows).unwrap_or_default();
     let columns = usize::try_from(screen.columns).unwrap_or_default();
@@ -5354,17 +5334,6 @@ fn tree_action_density_name(density: TreeRowActionDensity) -> &'static str {
         TreeRowActionDensity::Full => "full",
         TreeRowActionDensity::Compact => "compact",
     }
-}
-
-fn pixel_rect_json(rect: PixelRect) -> serde_json::Value {
-    serde_json::json!({
-        "left": rect.left,
-        "top": rect.top,
-        "right": rect.right,
-        "bottom": rect.bottom,
-        "width": rect.width(),
-        "height": rect.height(),
-    })
 }
 
 fn close_button_snapshot(action: &str, label: &str) -> serde_json::Value {

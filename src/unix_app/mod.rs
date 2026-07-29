@@ -40,7 +40,12 @@ use crate::{
         autoscroll_step, terminal_selection_text, visible_row_selection, word_selection,
     },
     theme::ThemeId,
-    ui_geometry::tabs_width_from_drag,
+    ui_clipboard::{normalize_composer_paste, normalize_terminal_paste},
+    ui_geometry::{
+        ScrollbarHit, TAB_HEIGHT, WHEEL_DELTA, WHEEL_ROWS_PER_NOTCH, pixel_rect_json,
+        scrollback_for_thumb_top, scrollbar_hit_test, tabs_width_from_drag, terminal_cell_at,
+        wheel_delta_units,
+    },
     wake_signal::WakeSignal,
     working_context::{CwdSource, ShellKind, cwd_command, validate_path},
     workspace::workspace_path,
@@ -55,12 +60,8 @@ use render::{
 };
 
 use layout::{
-    ScrollbarHit, WHEEL_DELTA, WHEEL_ROWS_PER_NOTCH, pixel_rect_json, scrollbar_geometry,
-    scrollbar_hit_test, sidebar_width_u32, terminal_cell_at, terminal_pixel_rect, u32_rect,
-    wheel_delta_units, workspace_layout_for,
+    scrollbar_geometry, sidebar_width_u32, terminal_pixel_rect, u32_rect, workspace_layout_for,
 };
-
-use crate::ui_geometry::scrollback_for_thumb_top;
 
 #[derive(Clone, Copy, Debug)]
 struct ScrollDrag {
@@ -357,14 +358,7 @@ impl UnixApp {
     }
 
     fn visible_tree_rows(&self) -> Vec<crate::tab_tree::TabTreeRow> {
-        self.all_tree_rows()
-            .into_iter()
-            .filter(|row| {
-                !row.ancestors
-                    .iter()
-                    .any(|id| self.collapsed_tabs.contains(id))
-            })
-            .collect()
+        crate::tab_tree::visible_tree_rows(&self.all_tree_rows(), &self.collapsed_tabs)
     }
 
     fn commit_composer_draft(&mut self, position: usize) {
@@ -509,7 +503,7 @@ impl UnixApp {
             return Err("paste is unavailable while a modal is open".to_owned());
         }
         let raw = clipboard::get_clipboard_text()?;
-        let text = clipboard::normalize_composer_paste(&raw);
+        let text = normalize_composer_paste(&raw);
         if text.is_empty() {
             return Err("clipboard text contains no pasteable characters".to_owned());
         }
@@ -1069,9 +1063,9 @@ impl UnixApp {
                     "draft": draft,
                     "bounds": visible_position.map(|position| pixel_rect_json(crate::ui_geometry::PixelRect {
                         left: 0,
-                        top: (position as i32) * render::SIDEBAR_TAB_ROW_HEIGHT as i32,
+                        top: position as i32 * TAB_HEIGHT,
                         right: sidebar_width as i32,
-                        bottom: ((position + 1) as i32) * render::SIDEBAR_TAB_ROW_HEIGHT as i32,
+                        bottom: (position + 1) as i32 * TAB_HEIGHT,
                     })),
                 }))
             })
@@ -1594,7 +1588,7 @@ impl UnixApp {
         };
         let tab_id = self.tabs[position].id;
         let raw = clipboard::get_clipboard_text()?;
-        let text = clipboard::normalize_terminal_paste(&raw);
+        let text = normalize_terminal_paste(&raw);
         if text.is_empty() {
             return Err("clipboard text contains no pasteable characters".to_owned());
         }

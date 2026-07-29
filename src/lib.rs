@@ -41,6 +41,7 @@ mod theme;
 pub mod ui_bridge;
 #[cfg(any(windows, unix))]
 mod ui_client;
+mod ui_clipboard;
 #[cfg(any(windows, unix))]
 mod ui_command;
 mod ui_geometry;
