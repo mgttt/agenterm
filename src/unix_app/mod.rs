@@ -45,8 +45,7 @@ use crate::{
         ScrollbarHit, TERMINAL_SCROLLBAR_WIDTH, TreeRowActionDensity, TreeRowMode, WHEEL_DELTA,
         WHEEL_ROWS_PER_NOTCH, pixel_rect_json, scrollback_for_thumb_top, scrollbar_hit_test,
         sidebar_row_capacity, sidebar_scrollbar_geometry, sidebar_scrollbar_track,
-        sidebar_tree_row_geometry, tabs_width_from_drag, terminal_cell_at,
-        wheel_delta_units,
+        sidebar_tree_row_geometry, tabs_width_from_drag, terminal_cell_at, wheel_delta_units,
     },
     ui_snapshot::{
         PROJECTION_EMBEDDED_GUI, TerminalSelectionSnapshotInput, archived_proxy_status_json,
