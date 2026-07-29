@@ -71,15 +71,27 @@ function Start-IsolatedGui {
         "gui-stderr-$($guiProcesses.Count).txt"
     )
     $process = Start-Process -FilePath $GuiExe `
+        -ArgumentList @('--no-activate', '--address', $themeRun.Address) `
         -RedirectStandardError $stderrFile `
         -PassThru
     $guiProcesses.Add($process)
     Register-SmokeOwnedProcess -Context $themeRun -Id $process.Id `
         -Kind 'gui' -Address $themeRun.Address
-    Wait-AgenTermReady
+    if (-not $process.WaitForInputIdle(10000)) {
+        throw 'AgenTerm did not become input-idle within 10 seconds'
+    }
     for ($attempt = 0; $attempt -lt 200; $attempt++) {
         $process.Refresh()
+        if ($process.HasExited) {
+            throw "AgenTerm GUI exited before exposing a window: $($process.ExitCode)"
+        }
         if ($process.MainWindowHandle -ne [IntPtr]::Zero) {
+            $snapshot = Invoke-AgenTerm @(
+                'wait-ui', '--window-state', 'restored', '--timeout-ms', '10000'
+            ) | ConvertFrom-Json
+            if ([int]$snapshot.client_pid -ne $process.Id) {
+                throw 'AgenTerm UI lease belongs to a different GUI process'
+            }
             return $process
         }
         Start-Sleep -Milliseconds 25
@@ -277,7 +289,11 @@ try {
     Write-Host "Light screenshot: $lightPng ($($light.Width)x$($light.Height), luminance $($light.Luminance))"
 
     Write-Host 'STEP saved Light theme survives shutdown and restart'
-    Invoke-AgenTerm @('shutdown') | Out-Null
+    Invoke-AgenTerm @('ui-action', 'close-window') | Out-Null
+    Invoke-AgenTerm @('ui-action', 'stop-server-and-exit') | Out-Null
+    if (-not $process.WaitForExit(5000)) {
+        throw 'First themed GUI did not exit after Stop Server & Exit'
+    }
     Wait-AgenTermReady -Expected $false
     $process = Start-IsolatedGui
     $restored = Get-OnlyTab
