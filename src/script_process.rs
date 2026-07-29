@@ -15,7 +15,7 @@ use crate::{
     script_stdlib::{ScriptBytes, ScriptPath},
     script_stream::{
         CapturedStream, ScriptStream, cancel as cancel_stream, capture_after_close,
-        discard_buffered, from_reader,
+        discard_buffered, from_process_reader, mark_process_exited,
     },
 };
 
@@ -335,8 +335,8 @@ fn spawn_owned(command: &ScriptCommand) -> Result<ScriptChild, Box<EvalAltResult
     let stdout = child.stdout.take().ok_or("process_stdout_unavailable")?;
     let stderr = child.stderr.take().ok_or("process_stderr_unavailable")?;
     let limit = command.capture_bytes;
-    let stdout = from_reader(stdout, "bytes", limit);
-    let stderr = from_reader(stderr, "bytes", limit);
+    let stdout = from_process_reader(stdout, "bytes", limit);
+    let stderr = from_process_reader(stderr, "bytes", limit);
     if let Some(mut stdin) = child.stdin.take() {
         stdin
             .write_all(&command.stdin)
@@ -438,6 +438,8 @@ fn wait_for_child(
             .try_wait()
             .map_err(|error| format!("process_try_wait: {error}"))?;
         if let Some(status) = status {
+            mark_process_exited(&state.stdout);
+            mark_process_exited(&state.stderr);
             let output = finish_output(&mut state, status, deadline)?;
             state.completed = Some(output.clone());
             return Ok(output);

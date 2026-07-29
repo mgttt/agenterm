@@ -3,7 +3,7 @@ use std::{
     io::{self, Read},
     sync::{
         Arc, Condvar, Mutex,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     thread,
     time::{Duration, Instant},
@@ -17,6 +17,11 @@ pub const STREAM_BUFFER_BYTES: usize = 64 * 1024;
 pub const STREAM_READ_MAX_BYTES: usize = 64 * 1024;
 const STREAM_PUMP_CHUNK_BYTES: usize = 8 * 1024;
 static NEXT_STREAM_ID: AtomicU64 = AtomicU64::new(1);
+
+#[cfg(windows)]
+type ProcessPipeHandle = usize;
+#[cfg(not(windows))]
+type ProcessPipeHandle = ();
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum StreamStatus {
@@ -40,6 +45,7 @@ struct StreamState {
 struct StreamInner {
     id: u64,
     kind: &'static str,
+    process_exited: AtomicBool,
     state: Mutex<StreamState>,
     changed: Condvar,
     space: Condvar,
@@ -80,12 +86,13 @@ pub(crate) fn register(engine: &mut Engine) {
     engine.register_fn("close", stream_close);
 }
 
+#[cfg(any(not(windows), test))]
 pub(crate) fn from_reader(
     reader: impl Read + Send + 'static,
     kind: &'static str,
     capture_limit: usize,
 ) -> ScriptStream {
-    from_reader_inner(reader, kind, capture_limit, None)
+    from_reader_inner(reader, kind, capture_limit, None, None)
 }
 
 pub(crate) fn from_bounded_reader(
@@ -94,7 +101,26 @@ pub(crate) fn from_bounded_reader(
     capture_limit: usize,
     delivery_limit: usize,
 ) -> ScriptStream {
-    from_reader_inner(reader, kind, capture_limit, Some(delivery_limit))
+    from_reader_inner(reader, kind, capture_limit, Some(delivery_limit), None)
+}
+
+#[cfg(windows)]
+pub(crate) fn from_process_reader(
+    reader: impl Read + std::os::windows::io::AsRawHandle + Send + 'static,
+    kind: &'static str,
+    capture_limit: usize,
+) -> ScriptStream {
+    let handle = reader.as_raw_handle() as usize;
+    from_reader_inner(reader, kind, capture_limit, None, Some(handle))
+}
+
+#[cfg(not(windows))]
+pub(crate) fn from_process_reader(
+    reader: impl Read + Send + 'static,
+    kind: &'static str,
+    capture_limit: usize,
+) -> ScriptStream {
+    from_reader(reader, kind, capture_limit)
 }
 
 fn from_reader_inner(
@@ -102,10 +128,12 @@ fn from_reader_inner(
     kind: &'static str,
     capture_limit: usize,
     delivery_limit: Option<usize>,
+    #[cfg_attr(not(windows), allow(unused_variables))] process_handle: Option<ProcessPipeHandle>,
 ) -> ScriptStream {
     let inner = Arc::new(StreamInner {
         id: NEXT_STREAM_ID.fetch_add(1, Ordering::Relaxed),
         kind,
+        process_exited: AtomicBool::new(false),
         state: Mutex::new(StreamState {
             status: StreamStatus::Open,
             queue: VecDeque::with_capacity(STREAM_BUFFER_BYTES),
@@ -122,7 +150,8 @@ fn from_reader_inner(
         let mut buffer = [0_u8; STREAM_PUMP_CHUNK_BYTES];
         let mut delivered = 0_usize;
         loop {
-            let read_limit = delivery_limit
+            #[cfg_attr(not(windows), allow(unused_mut))]
+            let mut read_limit = delivery_limit
                 .map(|limit| {
                     limit
                         .saturating_sub(delivered)
@@ -130,6 +159,28 @@ fn from_reader_inner(
                         .min(buffer.len())
                 })
                 .unwrap_or(buffer.len());
+            #[cfg(windows)]
+            if let Some(handle) = process_handle {
+                match process_pipe_available(handle) {
+                    Ok(0) if pump.process_exited.load(Ordering::Acquire) => {
+                        finish_pump(&pump, StreamStatus::Closed);
+                        return;
+                    }
+                    Ok(0) => {
+                        thread::sleep(Duration::from_millis(2));
+                        continue;
+                    }
+                    Ok(available) => read_limit = read_limit.min(available),
+                    Err(true) => {
+                        finish_pump(&pump, StreamStatus::Closed);
+                        return;
+                    }
+                    Err(false) => {
+                        finish_pump(&pump, StreamStatus::Failed);
+                        return;
+                    }
+                }
+            }
             match reader.read(&mut buffer[..read_limit]) {
                 Ok(0) => {
                     finish_pump(&pump, StreamStatus::Closed);
@@ -157,6 +208,35 @@ fn from_reader_inner(
         }
     });
     ScriptStream(inner)
+}
+
+#[cfg(windows)]
+fn process_pipe_available(handle: ProcessPipeHandle) -> Result<usize, bool> {
+    use windows_sys::Win32::{
+        Foundation::{ERROR_BROKEN_PIPE, ERROR_NO_DATA, GetLastError},
+        System::Pipes::PeekNamedPipe,
+    };
+
+    let mut available = 0_u32;
+    let succeeded = unsafe {
+        PeekNamedPipe(
+            handle as windows_sys::Win32::Foundation::HANDLE,
+            std::ptr::null_mut(),
+            0,
+            std::ptr::null_mut(),
+            &mut available,
+            std::ptr::null_mut(),
+        )
+    };
+    if succeeded != 0 {
+        return Ok(available as usize);
+    }
+    let error = unsafe { GetLastError() };
+    Err(error == ERROR_BROKEN_PIPE || error == ERROR_NO_DATA)
+}
+
+pub(crate) fn mark_process_exited(stream: &ScriptStream) {
+    stream.0.process_exited.store(true, Ordering::Release);
 }
 
 fn publish_bytes(stream: &Arc<StreamInner>, bytes: &[u8]) -> bool {
