@@ -40,16 +40,16 @@ use windows_sys::Win32::{
             GetWindowTextLengthW, GetWindowTextW, IDC_ARROW, IDC_SIZEWE, InsertMenuW, IsIconic,
             IsWindowVisible, IsZoomed, LoadCursorW, LoadIconW, MF_BYCOMMAND, MF_CHECKED,
             MF_ENABLED, MF_GRAYED, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MSG, MoveWindow,
-            PostQuitMessage, RegisterClassW, SC_CLOSE, SIZE_MINIMIZED, SW_HIDE, SW_MAXIMIZE,
-            SW_MINIMIZE, SW_RESTORE, SW_SHOW, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOMOVE,
-            SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SendMessageW, SetCursor, SetForegroundWindow,
-            SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW, ShowWindow,
-            TranslateMessage, WM_CAPTURECHANGED, WM_CHAR, WM_CLOSE, WM_COMMAND, WM_COPY, WM_CREATE,
-            WM_DESTROY, WM_ERASEBKGND, WM_INITMENUPOPUP, WM_KEYDOWN, WM_LBUTTONDBLCLK,
-            WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY, WM_PAINT,
-            WM_PASTE, WM_SETCURSOR, WM_SETFOCUS, WM_SIZE, WM_SYSCOMMAND, WM_TIMER, WNDCLASSW,
-            WS_BORDER, WS_CHILD, WS_CLIPCHILDREN, WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE,
-            WS_VSCROLL,
+            PostMessageW, PostQuitMessage, RegisterClassW, SC_CLOSE, SIZE_MINIMIZED, SW_HIDE,
+            SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, SW_SHOWNOACTIVATE, SWP_NOACTIVATE,
+            SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SendMessageW, SetCursor,
+            SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW,
+            ShowWindow, TranslateMessage, WM_CAPTURECHANGED, WM_CHAR, WM_CLOSE, WM_COMMAND,
+            WM_COPY, WM_CREATE, WM_DESTROY, WM_ERASEBKGND, WM_INITMENUPOPUP, WM_KEYDOWN,
+            WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL,
+            WM_NCDESTROY, WM_PAINT, WM_PASTE, WM_SETCURSOR, WM_SETFOCUS, WM_SIZE, WM_SYSCOMMAND,
+            WM_TIMER, WNDCLASSW, WS_BORDER, WS_CHILD, WS_CLIPCHILDREN, WS_OVERLAPPEDWINDOW,
+            WS_TABSTOP, WS_VISIBLE, WS_VSCROLL,
         },
     },
 };
@@ -113,6 +113,7 @@ const SYSTEM_MENU_TOGGLE_TABS_ID: usize = 0x1f20;
 const CLIPBOARD_UNICODE_TEXT: u32 = 13;
 const WM_APP_AUTOMATION_SHORTCUT: u32 = 0x8000 + 2;
 const WM_APP_FOCUS_QUERY: u32 = 0x8000 + 3;
+const WM_APP_DESTROY_WINDOW: u32 = 0x8000 + 4;
 const STATUS_HEIGHT: i32 = 26;
 const COMPOSER_HEIGHT: i32 = 104;
 const MARGIN: i32 = 6;
@@ -859,9 +860,9 @@ impl RemoteWindowState {
         if let Some(choice) = close_after_completion {
             self.window_close_pending = false;
             match choice {
-                RemoteCloseChoice::KeepServerRunning | RemoteCloseChoice::StopServerAndExit => unsafe {
-                    DestroyWindow(self.window);
-                },
+                RemoteCloseChoice::KeepServerRunning | RemoteCloseChoice::StopServerAndExit => {
+                    request_window_destroy(self.window);
+                }
                 RemoteCloseChoice::Cancel => {}
             }
             return Ok(true);
@@ -3218,7 +3219,7 @@ impl RemoteWindowState {
         match choice {
             RemoteCloseChoice::KeepServerRunning => {
                 self.window_close_pending = false;
-                unsafe { DestroyWindow(self.window) };
+                request_window_destroy(self.window);
             }
             RemoteCloseChoice::StopServerAndExit => {
                 let result =
@@ -3238,7 +3239,7 @@ impl RemoteWindowState {
                     return;
                 }
                 self.window_close_pending = false;
-                unsafe { DestroyWindow(self.window) };
+                request_window_destroy(self.window);
             }
             RemoteCloseChoice::Cancel => {
                 self.window_close_pending = false;
@@ -4858,6 +4859,10 @@ unsafe extern "system" fn window_proc(
             }
             0
         }
+        WM_APP_DESTROY_WINDOW => {
+            unsafe { DestroyWindow(window) };
+            0
+        }
         WM_DESTROY => {
             unsafe { PostQuitMessage(0) };
             0
@@ -4873,6 +4878,17 @@ unsafe extern "system" fn window_proc(
             unsafe { DefWindowProcW(window, message, wparam, lparam) }
         }
         _ => unsafe { DefWindowProcW(window, message, wparam, lparam) },
+    }
+}
+
+fn request_window_destroy(window: HWND) {
+    // DestroyWindow synchronously sends WM_DESTROY/WM_NCDESTROY. Calling it
+    // from a method on RemoteWindowState would therefore drop that state while
+    // the method (and, for relayed commands, the timer tick) still has `self`
+    // borrowed. Queue destruction so the current window-procedure invocation
+    // and every state access return before WM_NCDESTROY releases the state.
+    unsafe {
+        PostMessageW(window, WM_APP_DESTROY_WINDOW, 0, 0);
     }
 }
 
