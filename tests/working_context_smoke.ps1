@@ -104,35 +104,6 @@ function Wait-Server {
     throw 'AgenTerm server did not become ready within 10 seconds'
 }
 
-if (-not ('AgenTermProxyNativeTest' -as [type])) {
-    Add-Type -TypeDefinition @'
-using System;
-using System.Runtime.InteropServices;
-using System.Text;
-
-public static class AgenTermProxyNativeTest {
-    [DllImport("user32.dll")]
-    static extern IntPtr GetDlgItem(IntPtr parent, int id);
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    static extern IntPtr FindWindowExW(
-        IntPtr parent, IntPtr after, string className, string windowName);
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    static extern IntPtr SendMessageW(
-        IntPtr window, uint message, UIntPtr wparam, StringBuilder lparam);
-
-    public static string ComposerText(IntPtr parent) {
-        IntPtr edit = GetDlgItem(parent, 1002);
-        if (edit == IntPtr.Zero) {
-            edit = FindWindowExW(parent, IntPtr.Zero, "EDIT", null);
-        }
-        var text = new StringBuilder(32768);
-        SendMessageW(edit, 0x000D, (UIntPtr)text.Capacity, text);
-        return text.ToString();
-    }
-}
-'@
-}
-
 $GuiExe = [IO.Path]::GetFullPath($GuiExe)
 $CliExe = [IO.Path]::GetFullPath($CliExe)
 foreach ($path in @($GuiExe, $CliExe)) {
@@ -194,6 +165,7 @@ try {
     Remove-Item Env:HTTPS_PROXY -ErrorAction SilentlyContinue
 
     Wait-Server $process
+    Invoke-Cli wait-ui --window-state restored --timeout-ms 10000 | Out-Null
     if ($InternalFailureBundleProbe) {
         throw "Injected failure containing fixture secret: $proxyUrl"
     }
@@ -219,69 +191,18 @@ try {
         throw 'Archived Proxy status surface remained visible or actionable'
     }
 
-    $visibleText = Invoke-Cli ui-action proxy-toggle-visibility -t $tabId
-    Assert-NoSecret $visibleText 'visible endpoint snapshot'
-    $visible = $visibleText | ConvertFrom-Json
-    $visibleTab = $visible.tabs | Where-Object id -eq $tabId
-    if (-not $visibleTab.working_context.proxy.endpoint_visible -or
-        $visibleTab.working_context.proxy.credential_revealed) {
-        throw 'Proxy visibility compatibility action changed more than sanitized endpoint state'
+    $archived = Invoke-ExpectedFailure ui-action open-proxy-editor -t $tabId
+    Assert-NoSecret $archived 'archived Proxy action'
+    if ($archived -notmatch 'proxy workbench controls are archived') {
+        throw 'Archived Proxy editor did not return its explicit product status'
     }
-    Invoke-Cli ui-action open-proxy-editor -t $tabId | Out-Null
-    Invoke-Cli ui-action proxy-reveal-credentials | Out-Null
-    $process.Refresh()
-    $revealed = [AgenTermProxyNativeTest]::ComposerText($process.MainWindowHandle)
-    if (-not $revealed.Contains($script:secret)) {
-        throw "Explicit second reveal did not populate the proxy editor (length=$($revealed.Length), http=$($revealed.StartsWith('HTTP_PROXY=')), hwnd=$($process.MainWindowHandle))"
-    }
-    $blocked = Invoke-ExpectedFailure ui-action select-tab -t $tabId
-    Assert-NoSecret $blocked 'focus-trap failure'
-    $remasked = [AgenTermProxyNativeTest]::ComposerText($process.MainWindowHandle)
-    if ($remasked.Contains($script:secret)) {
-        throw 'Proxy credentials remained visible after a focus-trap escape attempt'
-    }
-    Invoke-Cli ui-action cancel | Out-Null
-
-    $proxyInput = "HTTP_PROXY=$proxyUrl`nHTTPS_PROXY=$proxyUrl"
-    $prepareArguments = @(
-        'ui-action', 'proxy-prepare', '-t', $tabId, '--stdin'
-    )
-    $prepareOutput = @(
-        $proxyInput | & $CliExe @prepareArguments 2>&1
-    )
-    $prepareExitCode = $LASTEXITCODE
-    Add-SmokeCommandRecord -Context $context -Arguments $prepareArguments `
-        -ExitCode $prepareExitCode -ExpectedFailure $false `
-        -Output (Remove-FixtureSecrets ($prepareOutput -join "`n"))
-    if ($prepareExitCode -ne 0) {
-        throw "Proxy prepare failed:`n$($prepareOutput -join "`n")"
-    }
-    $prepareText = $prepareOutput -join "`n"
-    Assert-NoSecret $prepareText 'prepare stdout/stderr'
-    $preparedText = Invoke-Cli ui-snapshot
-    Assert-NoSecret $preparedText 'prepared ui-snapshot'
-    $prepared = $preparedText | ConvertFrom-Json
-    $preparedTab = $prepared.tabs | Where-Object id -eq $tabId
-    $preparedPaneText = Invoke-Cli pane-snapshot -t $tabId
-    Assert-NoSecret $preparedPaneText 'prepared pane-snapshot'
-    $preparedPane = $preparedPaneText | ConvertFrom-Json
-    if ($preparedPane.windows[0].input_writes -ne $inputWrites -or
-        -not $preparedTab.draft -or
-        $preparedTab.working_context.proxy.source -ne 'user_requested' -or
-        -not $preparedTab.working_context.proxy.request_pending) {
-        throw 'Prepare was not a pending sensitive Composer operation'
-    }
-
-    $showFailure = Invoke-ExpectedFailure show-composer -t $tabId
-    Assert-NoSecret $showFailure 'show-composer failure'
-    if ($showFailure -notmatch 'sensitive proxy draft') {
-        throw 'show-composer did not return a typed sensitive-draft failure'
-    }
-    $paneText = $preparedPaneText
-    $pane = $preparedPane
-    if (-not $pane.windows[0].composer_sensitive -or
-        $pane.windows[0].composer -ne '<redacted>') {
-        throw 'pane-snapshot did not redact the sensitive Composer draft'
+    $paneText = Invoke-Cli pane-snapshot -t $tabId
+    Assert-NoSecret $paneText 'archived pane-snapshot'
+    $pane = $paneText | ConvertFrom-Json
+    if ($pane.windows[0].input_writes -ne $inputWrites -or
+        $pane.windows[0].composer_sensitive -or
+        $pane.windows[0].composer) {
+        throw 'Archived Proxy controls changed terminal or Composer state'
     }
     Invoke-Cli save-workspace | Out-Null
     $workspaceText = Get-Content -LiteralPath $workspace -Raw
@@ -289,26 +210,18 @@ try {
     $events = Invoke-Cli read-events --epoch $epoch --after 0 --limit 1024
     Assert-NoSecret $events 'observable event journal'
 
-    $sendOutput = Invoke-Cli send-composer -t $tabId
-    Assert-NoSecret $sendOutput 'explicit send response'
-    Invoke-Cli wait-pane -t $tabId --submit-complete --timeout-ms 10000 | Out-Null
-    $sentPane = Invoke-Cli pane-snapshot -t $tabId
-    Assert-NoSecret $sentPane 'post-send pane-snapshot'
-    $sentPaneObject = $sentPane | ConvertFrom-Json
-    if ([int]$sentPaneObject.windows[0].input_bytes -ne ($inputWrites + 17)) {
-        throw 'Sensitive input byte accounting exposed the real command length'
-    }
-    $sentSnapshot = Invoke-Cli ui-snapshot
-    Assert-NoSecret $sentSnapshot 'post-send ui-snapshot'
-
     Invoke-Cli shutdown | Out-Null
-    if (-not $process.WaitForExit(5000)) {
-        throw 'First proxy test server did not stop'
+    if (-not $process.WaitForExit(2000)) {
+        Stop-Process -Id $process.Id -Force
+        if (-not $process.WaitForExit(3000)) {
+            throw 'First replaceable GUI did not stop for the isolated restart'
+        }
     }
     $process = Start-Process -FilePath $GuiExe -RedirectStandardError $stderrFile -PassThru
     Register-SmokeOwnedProcess -Context $context -Id $process.Id `
         -Kind 'gui' -Address $address
     Wait-Server $process
+    Invoke-Cli wait-ui --window-state restored --timeout-ms 10000 | Out-Null
     Invoke-Cli wait-ui -t 0 --tab-state running --timeout-ms 10000 | Out-Null
     $restoredText = Invoke-Cli ui-snapshot
     Assert-NoSecret $restoredText 'restart ui-snapshot'
@@ -320,7 +233,7 @@ try {
     }
     Assert-NoSecret (Get-Content -LiteralPath $stderrFile -Raw) 'GUI stderr'
     Write-Evidence 'ux.working-context-proxy'
-    Write-Host 'PASS: archived Proxy status surface, privacy compatibility, prepare/send, remask, and restart'
+    Write-Host 'PASS: archived Proxy controls retain redacted launch facts without mutation or persistence'
     $succeeded = $true
 }
 catch {

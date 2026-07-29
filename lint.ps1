@@ -136,9 +136,11 @@ function Get-TrackedFiles {
     if ($LASTEXITCODE -ne 0) {
         throw "git ls-files failed: $($files -join [Environment]::NewLine)"
     }
-    return @($files | ForEach-Object {
-        Join-Path $repoRoot ([string]$_)
-    })
+    return @(
+        $files |
+            ForEach-Object { Join-Path $repoRoot ([string]$_) } |
+            Where-Object { Test-Path -LiteralPath $_ -PathType Leaf }
+    )
 }
 
 function Assert-PowerShellSyntax {

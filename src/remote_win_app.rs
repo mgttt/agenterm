@@ -56,7 +56,7 @@ use windows_sys::Win32::{
 
 use crate::{
     client::{ipc_address, ipc_socket_addr},
-    commands::{option_value, screenshot_output_path, tmux_key_bytes},
+    commands::{option_value, positional_values, screenshot_output_path, tmux_key_bytes},
     protocol::IpcResponse,
     settings::{AppConfig, clamp_tabs_width, config_path, load_config, save_config},
     tab_tree::{TabTreeNode, tree_rows},
@@ -1000,6 +1000,24 @@ impl RemoteWindowState {
             .context("relayed UI command is empty")?;
         let mut output = None;
         match name {
+            "set-composer" => {
+                let target = option_value(&command.args, "-t")
+                    .or_else(|| self.active_tab().map(|tab| tab.id.as_str()))
+                    .context("set-composer requires an active tab")?;
+                if self.editing_tab_id.as_deref() != Some(target) {
+                    anyhow::bail!("set-composer target is not open in the inline tab editor");
+                }
+                let text = positional_values(&command.args, &["-t"], &[]).join(" ");
+                let normalized = text.replace("\r\n", "\n");
+                let (title, note) = normalized
+                    .split_once('\n')
+                    .unwrap_or((normalized.as_str(), ""));
+                unsafe {
+                    SetWindowTextW(self.tab_title_edit, wide(title).as_ptr());
+                    SetWindowTextW(self.tab_note_edit, wide(note).as_ptr());
+                    SetFocus(self.tab_title_edit);
+                }
+            }
             "focus" => {
                 self.apply_client_command(&command.command_id)?;
                 let surface = command
@@ -1563,6 +1581,7 @@ impl RemoteWindowState {
                         "action": "open-cwd-editor",
                     },
                     "proxy": {
+                        "bounds": pixel_rect_json(layout.status_segments.proxy),
                         "available": false,
                         "archived": true,
                         "action": serde_json::Value::Null,

@@ -1049,6 +1049,20 @@ impl ServerState {
         )
     }
 
+    fn ui_client_edits_command_target(&self, args: &[String]) -> bool {
+        let Some(position) =
+            resolve_target_position(&self.tabs, self.active, option_value(args, "-t"))
+        else {
+            return false;
+        };
+        let stable_target = format!("@{}", self.tabs[position].id);
+        self.ui_client_snapshot
+            .as_ref()
+            .and_then(|snapshot| serde_json::from_str::<serde_json::Value>(&snapshot.json).ok())
+            .and_then(|snapshot| snapshot["tab_editor"]["target"].as_str().map(str::to_owned))
+            .is_some_and(|target| target == stable_target)
+    }
+
     fn execute_ui_interaction_command(&mut self, args: &[String]) -> IpcResponse {
         let interaction = match parse_ui_interaction(args) {
             Ok(interaction) => interaction,
@@ -1176,20 +1190,26 @@ impl ServerState {
         {
             return self.execute_ui_client_command(args);
         }
-        if args.first().is_some_and(|command| {
-            matches!(
-                command.as_str(),
-                "ui-action"
-                    | "focus"
-                    | "get-settings"
-                    | "set-setting"
-                    | "screenshot"
-                    | "screenshot-pane"
-                    | "screenshot-tab"
-                    | "__focus"
-                    | "__show-no-activate"
-            )
-        }) {
+        let inline_editor_set_composer = args
+            .first()
+            .is_some_and(|command| command == "set-composer")
+            && self.ui_client_edits_command_target(args);
+        if inline_editor_set_composer
+            || args.first().is_some_and(|command| {
+                matches!(
+                    command.as_str(),
+                    "ui-action"
+                        | "focus"
+                        | "get-settings"
+                        | "set-setting"
+                        | "screenshot"
+                        | "screenshot-pane"
+                        | "screenshot-tab"
+                        | "__focus"
+                        | "__show-no-activate"
+                )
+            })
+        {
             return self.enqueue_ui_client_command(args);
         }
         if args.first().is_some_and(|command| command == "ui-interact") {

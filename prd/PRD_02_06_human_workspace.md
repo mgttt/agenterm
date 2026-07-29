@@ -38,6 +38,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   - [x] normal `+`/`Edit`/`Close` actions become `Save`/`Cancel` for the
     editing row; Save restores normal `Edit`, and Cancel restores the
     persisted name/note without mutation
+  - [x] public `set-composer -t @ID "name\nnote"` targets the matching open
+    inline editor draft without overwriting that tab's bottom Composer;
+    outside an open matching editor it retains the ordinary Composer meaning
   - [ ] Save and `Ctrl+Enter` are the only commit paths; `Tab`/`Shift+Tab`
     move between the two editors and row actions, while `Esc` cancels
   - [ ] a name containing no non-whitespace character fails validation,
@@ -107,61 +110,27 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] embedded AgenTerm icon
 - [ ] configurable shell, colors, working directory, and startup tabs
 - [x] per-tab child environment injection.
-- [>] The bottom-bar Proxy convenience is archived. Users configure proxy
-  variables in their terminal; the redacted state/application machinery and
-  public CLI compatibility remain temporarily available but are no longer
-  advertised as GUI workspace controls.
+- [x] The Proxy workbench is archived. Users configure proxy variables in
+  their terminal or pass explicit create-time `--proxy`/tab environment
+  values; no bottom-bar entry, editor, reveal control, Prepare, Send Now, or
+  runtime-injection action is advertised.
 
-## v0.1.8 P0 tab proxy correctness
+## Archived tab proxy workbench
 
-- [x] proxy configuration is owned by one stable tab ID, remains ephemeral,
-  and is never written to workspace persistence, settings, event payloads,
-  receipts, snapshots, diagnostics, or logs
-- [x] `Prepare` creates a sensitive Composer draft for the target
-  tab and sets proxy state to `Prepared`; it does not write terminal bytes,
-  mutate a live shell environment, create a child, or report `On`/`Applied`
-- [ ] the prepared draft is visibly sensitive and follows the ordinary
-  Composer single-submission contract; unrelated Composer drafts are not
-  overwritten without the existing explicit replacement decision
-- [x] `Send` or the proxy editor's mouse-accessible `Send Now` submits the
-  prepared command exactly once and sets state to `Submitted`; successful
-  byte delivery alone never means the proxy is active
-- [x] state becomes `Applied` only after a non-secret shell marker is observed
-  and public post-state verifies both the shell environment and a real child
-  process inherit the intended proxy variables
-- [ ] command rejection, marker mismatch, environment/child mismatch, terminal
-  exit, process exit, timeout, cancellation, or any other failed application
-  moves the attempt to `Failed` with a non-secret reason and never claims `On`
-- [>] the former bottom-bar entry to the GUI Proxy editor is archived; its
-  implementation remains commented/compatibility-addressable for now rather
-  than being deleted in the same change
-- [ ] `ui-snapshot` truthfully exposes the stable target, `revealed` boolean,
-  `Off|Prepared|Submitted|Applied|Failed`, validation/error category, and
-  bounded editor/action geometry, but never the proxy URL, credential,
-  prepared command, secret environment value, or Composer text
-- [x] real `cmd.exe` and PowerShell qualification proves marker ordering,
-  environment application, child inheritance, exit/failure, and no duplicate
-  submission
-- [x] Bash-compatible preparation sets all four variables consistently:
-  `HTTP_PROXY`, `HTTPS_PROXY`, `http_proxy`, and `https_proxy`
-- [x] runtime injection is rejected while a direct TUI owns input or when the
-  tab was launched non-interactively; the error directs the user to create a
-  new tab with `--proxy` instead of typing secret setup into that terminal
-- [ ] a new tab does not inherit ad-hoc proxy changes made inside the active
-  shell; only explicit create-time `--proxy`/tab environment configuration
-  may seed the new tab
-- [ ] every transition emits a typed event and receipt bound to request ID,
-  stable server/tab identity, epoch/sequence baseline, redacted proxy
-  fingerprint, result category, and verified post-state; no transition is
-  inferred only from paint text
-- [ ] public black-box coverage drives only released GUI/CLI surfaces and
-  proves privacy redaction, Prepared-not-On, Submitted-not-Applied, real
-  shell/child application, failure/exit, direct-TUI and non-interactive
-  rejection, no accidental inheritance, exactly-once submission, and no
-  orphan shell, child, worker, native editor, or test-owned server
-- [ ] remote proxy distribution, fleet-wide/global defaults, and persistent
-  proxy profiles require a separate future plan with identity, secret
-  storage, policy, and revocation gates; they are not part of this P0 fix
+- [x] create-time proxy environment belongs to one stable tab ID and remains
+  ephemeral; workspace persistence never stores its endpoint or credentials
+- [x] snapshots expose only bounded redacted launch facts needed for
+  diagnostics; pane, event, command-log, retained failure and GUI-stderr
+  evidence never reveal the endpoint or credentials
+- [x] the former status slot remains zero-width, unavailable and explicitly
+  `archived`; every former Proxy editor/application UI action fails explicitly
+  with `proxy workbench controls are archived` and changes neither Composer nor
+  terminal input
+- [x] restarting without explicit create-time proxy configuration restores no
+  transient proxy value or application claim
+- [ ] any future proxy workbench, remote distribution, fleet/global default or
+  persistent profile requires a separately accepted plan covering secret
+  storage, identity, policy, revocation and public black-box evidence
 
 ## v0.1.8 observation and acceptance
 

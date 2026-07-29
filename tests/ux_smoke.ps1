@@ -687,7 +687,9 @@ try {
     ) | Out-Null
     $resized = Invoke-AgenTerm @(
         'wait-ui', '--client-width', "$resizedWidth",
-        '--client-height', "$resizedHeight", '--timeout-ms', '5000'
+        '--client-height', "$resizedHeight",
+        '--terminal-grid-changed-from', "${originalRows}x${originalCols}",
+        '--timeout-ms', '5000'
     ) | ConvertFrom-Json
     if ($resized.layout.terminal.rows -eq $originalRows -and
         $resized.layout.terminal.cols -eq $originalCols) {

@@ -154,7 +154,7 @@
       "kind": "behavior",
       "status": "shipped",
       "evidence_mode": "black-box",
-      "prd": "tab-scoped HTTP(S) proxy context remains ephemeral and redacted across UI, control, persistence, and terminal evidence",
+      "prd": "create-time tab-scoped HTTP(S) proxy context remains ephemeral and redacted across UI, control, persistence, and terminal evidence",
       "evidence_ids": ["ux.working-context-proxy"]
     },
     {
@@ -468,27 +468,6 @@
       "evidence_mode": "black-box",
       "prd": "former right-aligned Proxy display/editor entry is archived",
       "evidence_ids": ["ux.workbench-proxy-archived"]
-    },
-    {
-      "id": "workspace.proxy-confirmed-application",
-      "kind": "behavior",
-      "status": "shipped",
-      "evidence_mode": "black-box",
-      "prd": "state becomes `Applied` only after a non-secret shell marker is observed",
-      "evidence_ids": [
-        "working-context.proxy-cmd-applied",
-        "working-context.proxy-child-inheritance",
-        "working-context.proxy-clear",
-        "working-context.proxy-powershell-applied"
-      ]
-    },
-    {
-      "id": "workspace.proxy-noninteractive-rejection",
-      "kind": "behavior",
-      "status": "shipped",
-      "evidence_mode": "black-box",
-      "prd": "runtime injection is rejected while a direct TUI owns input",
-      "evidence_ids": ["working-context.proxy-noninteractive-rejected"]
     }
   ]
 }

@@ -1,9 +1,11 @@
 param(
     [string]$Exe = (Join-Path $PSScriptRoot '..\dist\agenterm-cli.exe'),
+    [string]$GuiExe = (Join-Path $PSScriptRoot '..\dist\agenterm.exe'),
     [switch]$ListEvidence
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'TestHarness.ps1')
 $declaredEvidence = @(
     'ux.workbench-inline-edit'
     'ux.workbench-compact-tree'
@@ -23,8 +25,11 @@ function Write-Evidence {
 }
 
 $Exe = [IO.Path]::GetFullPath($Exe)
-if (-not (Test-Path -LiteralPath $Exe)) {
-    throw "AgenTerm executable not found: $Exe"
+$GuiExe = [IO.Path]::GetFullPath($GuiExe)
+foreach ($path in @($Exe, $GuiExe)) {
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        throw "AgenTerm executable not found: $path"
+    }
 }
 
 function Invoke-AgenTerm {
@@ -55,8 +60,8 @@ function Click-Bounds {
     )
     [WorkbenchNativeTest]::Click(
         $Window,
-        [int]($Bounds.x + [Math]::Max(1, $Bounds.width / 2)),
-        [int]($Bounds.y + [Math]::Max(1, $Bounds.height / 2))
+        [int]($Bounds.left + [Math]::Max(1, $Bounds.width / 2)),
+        [int]($Bounds.top + [Math]::Max(1, $Bounds.height / 2))
     )
 }
 
@@ -70,11 +75,40 @@ function Wait-Editor {
         $snapshot = Get-Snapshot
         $matches = $null -ne $snapshot.tab_editor -and
             $snapshot.tab_editor.target -eq $Target
-        if ($matches -eq $Open) {
+        $targetTab = @($snapshot.tabs | Where-Object id -eq $Target)[0]
+        if ($snapshot.projection -eq 'replaceable_ui_client' -and
+            $null -ne $targetTab -and $matches -eq $Open) {
             return $snapshot
         }
     } while ($timer.ElapsedMilliseconds -lt 2000)
-    throw "inline editor state did not become open=$Open for $Target"
+    throw (
+        "inline editor state did not become open=$Open for $Target`: " +
+        "projection=$($snapshot.projection) " +
+        "editor=$($snapshot.tab_editor | ConvertTo-Json -Depth 6 -Compress) " +
+        "row=$($targetTab | ConvertTo-Json -Depth 8 -Compress)"
+    )
+}
+
+function Wait-EditorDraft {
+    param(
+        [Parameter(Mandatory = $true)][string]$Target,
+        [Parameter(Mandatory = $true)][int]$NameLength,
+        [Parameter(Mandatory = $true)][int]$NoteLength
+    )
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    do {
+        $snapshot = Get-Snapshot
+        if ($snapshot.tab_editor.target -eq $Target -and
+            $snapshot.tab_editor.name_length -eq $NameLength -and
+            $snapshot.tab_editor.note_length -eq $NoteLength) {
+            return $snapshot
+        }
+        Start-Sleep -Milliseconds 10
+    } while ($timer.ElapsedMilliseconds -lt 2000)
+    throw (
+        "inline editor draft did not become observable for $Target`: " +
+        ($snapshot.tab_editor | ConvertTo-Json -Depth 6 -Compress)
+    )
 }
 
 function Assert-Inside {
@@ -83,9 +117,9 @@ function Assert-Inside {
         [Parameter(Mandatory = $true)]$Inner,
         [Parameter(Mandatory = $true)][string]$Label
     )
-    if ($Inner.x -lt $Outer.x -or $Inner.y -lt $Outer.y -or
-        ($Inner.x + $Inner.width) -gt ($Outer.x + $Outer.width) -or
-        ($Inner.y + $Inner.height) -gt ($Outer.y + $Outer.height) -or
+    if ($Inner.left -lt $Outer.left -or $Inner.top -lt $Outer.top -or
+        $Inner.right -gt $Outer.right -or
+        $Inner.bottom -gt $Outer.bottom -or
         $Inner.width -lt 0 -or $Inner.height -lt 0) {
         throw "$Label escaped its row: $($Inner | ConvertTo-Json -Compress)"
     }
@@ -96,9 +130,19 @@ using System;
 using System.Runtime.InteropServices;
 
 public static class WorkbenchNativeTest {
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Point {
+        public int X;
+        public int Y;
+    }
+
     [DllImport("user32.dll")]
     private static extern IntPtr SendMessageW(
         IntPtr window, uint message, UIntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr ChildWindowFromPointEx(
+        IntPtr parent, Point point, uint flags);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern IntPtr FindWindowExW(
@@ -109,9 +153,15 @@ public static class WorkbenchNativeTest {
     }
 
     public static void Click(IntPtr window, int x, int y) {
-        IntPtr point = PointParam(x, y);
-        SendMessageW(window, 0x0201, UIntPtr.Zero, point);
-        SendMessageW(window, 0x0202, UIntPtr.Zero, point);
+        Point location = new Point { X = x, Y = y };
+        IntPtr child = ChildWindowFromPointEx(window, location, 0x0001 | 0x0002);
+        if (child != IntPtr.Zero && child != window) {
+            SendMessageW(child, 0x00F5, UIntPtr.Zero, IntPtr.Zero);
+            return;
+        }
+        IntPtr packed = PointParam(x, y);
+        SendMessageW(window, 0x0201, UIntPtr.Zero, packed);
+        SendMessageW(window, 0x0202, UIntPtr.Zero, packed);
     }
 
     public static void ClickButton(IntPtr window, string label) {
@@ -121,6 +171,7 @@ public static class WorkbenchNativeTest {
         }
         SendMessageW(button, 0x00F5, UIntPtr.Zero, IntPtr.Zero);
     }
+
 }
 '@
 
@@ -132,7 +183,7 @@ $previousHttpProxy = $env:HTTP_PROXY
 $previousHttpsProxy = $env:HTTPS_PROXY
 $previousHttpProxyLower = $env:http_proxy
 $previousHttpsProxyLower = $env:https_proxy
-$env:AGENTERM_IPC_ADDRESS = "127.0.0.1:$((52000 + ($PID % 1000)))"
+$env:AGENTERM_IPC_ADDRESS = Get-SmokeLoopbackAddress
 $env:AGENTERM_WORKSPACE_PATH = Join-Path $env:TEMP "agenterm-workbench-$PID.json"
 $env:AGENTERM_SETTINGS_PATH = Join-Path $env:TEMP "agenterm-workbench-settings-$PID.json"
 $env:AGENTERM_NO_ACTIVATE = '1'
@@ -140,30 +191,54 @@ Remove-Item Env:HTTP_PROXY, Env:HTTPS_PROXY, Env:http_proxy, Env:https_proxy `
     -ErrorAction SilentlyContinue
 $workspacePath = $env:AGENTERM_WORKSPACE_PATH
 $settingsPath = $env:AGENTERM_SETTINGS_PATH
+$stderrPath = Join-Path $env:TEMP "agenterm-workbench-stderr-$PID.txt"
+$guiProcess = $null
 
 try {
+    $guiProcess = Start-Process -FilePath $GuiExe -ArgumentList @(
+        '--no-activate', '--address', $env:AGENTERM_IPC_ADDRESS
+    ) -RedirectStandardError $stderrPath -PassThru
+    if (-not $guiProcess.WaitForInputIdle(10000)) {
+        throw 'isolated workbench GUI did not become input-idle within 10 seconds'
+    }
+    Invoke-AgenTerm @(
+        'wait-ui', '--window-state', 'restored', '--timeout-ms', '10000'
+    ) | Out-Null
+
     $root = (
         Invoke-AgenTerm @(
             'new-window', '-d', '-n', "workbench-$PID", '-F', '#{window_id}'
         )
     ).Trim()
     Invoke-AgenTerm @('select-window', '-t', $root) | Out-Null
-    Invoke-AgenTerm @('wait-ui', '--active', $root, '--timeout-ms', '10000') | Out-Null
+    Invoke-AgenTerm @(
+        'wait-ui', '--active', $root, '--window-state', 'restored',
+        '--timeout-ms', '10000'
+    ) | Out-Null
     $snapshot = Get-Snapshot
-    $window = @(
-        Get-Process agenterm -ErrorAction SilentlyContinue |
-            Where-Object MainWindowTitle -eq $snapshot.window.title |
-            Select-Object -First 1 -ExpandProperty MainWindowHandle
-    )
-    if ($window.Count -eq 0 -or [IntPtr]$window[0] -eq [IntPtr]::Zero) {
+    $guiProcess.Refresh()
+    $window = [IntPtr]$guiProcess.MainWindowHandle
+    if ($window -eq [IntPtr]::Zero) {
         throw 'could not resolve the isolated AgenTerm native window'
     }
-    $window = [IntPtr]$window[0]
 
     Write-Host 'STEP mouse Edit opens independent controls and mouse Save restores Edit'
     $rootTab = $snapshot.tabs | Where-Object id -eq $root
     if ($rootTab.actions.edit.label -ne 'Edit') {
-        throw 'active normal row did not expose Edit'
+        $guiProcess.Refresh()
+        $guiState = if ($guiProcess.HasExited) {
+            "exited:$($guiProcess.ExitCode)"
+        } else {
+            "running:$($guiProcess.Id)"
+        }
+        $stderr = Get-Content -LiteralPath $stderrPath -Raw `
+            -ErrorAction SilentlyContinue
+        throw (
+            'active normal row did not expose Edit: ' +
+            "target=$root projection=$($snapshot.projection) gui=$guiState " +
+            "row=$($rootTab | ConvertTo-Json -Depth 8 -Compress) " +
+            "stderr=$stderr"
+        )
     }
     Click-Bounds -Window $window -Bounds $rootTab.actions.edit.bounds
     $snapshot = Wait-Editor -Target $root -Open $true
@@ -171,7 +246,8 @@ try {
     Invoke-AgenTerm @(
         'set-composer', '-t', $root, "工作台-$PID`ninline note"
     ) | Out-Null
-    $draftSnapshot = Get-Snapshot
+    $draftSnapshot = Wait-EditorDraft -Target $root `
+        -NameLength "工作台-$PID".Length -NoteLength 'inline note'.Length
     if ($draftSnapshot.tab_editor.name_length -ne "工作台-$PID".Length -or
         $draftSnapshot.tab_editor.note_length -ne 'inline note'.Length) {
         throw (
@@ -188,9 +264,12 @@ try {
         $rootTab.actions.edit.label -ne 'Edit' -or $composerAfter -ne $composerBefore) {
         throw (
             'mouse Save did not atomically persist the row or preserve Composer: ' +
+            "projection='$($snapshot.projection)' " +
+            "event='$($snapshot.event_position | ConvertTo-Json -Compress)' " +
             "name='$($rootTab.name)' note='$($rootTab.note)' " +
             "action='$($rootTab.actions.edit.label)' " +
-            "composer_before='$composerBefore' composer_after='$composerAfter'"
+            "composer_before='$composerBefore' composer_after='$composerAfter' " +
+            "row='$($rootTab | ConvertTo-Json -Depth 10 -Compress)'"
         )
     }
 
@@ -247,11 +326,15 @@ try {
             -Label "Edit at Tabs width $width"
         Assert-Inside -Outer $tab.bounds -Inner $tab.actions.close.bounds `
             -Label "Close at Tabs width $width"
-        $expectedDensity = if ($width -eq 180) { 'compact' } else { 'full' }
+        $expectedDensity = if ($width -lt 300) { 'compact' } else { 'full' }
         if ($tab.actions.density -ne $expectedDensity -or
-            $tab.render.node.x -lt $tab.bounds.x -or
-            $tab.render.name.x -ge $tab.actions.new_child.bounds.x) {
-            throw "tree geometry was inconsistent at Tabs width $width"
+            $tab.render.node.x -lt $tab.bounds.left -or
+            $tab.render.name.left -ge $tab.actions.new_child.bounds.left) {
+            throw (
+                "tree geometry was inconsistent at Tabs width $width`: " +
+                "expected_density=$expectedDensity " +
+                ($tab | ConvertTo-Json -Depth 10 -Compress)
+            )
         }
     }
     Write-Evidence 'ux.workbench-compact-tree'
@@ -264,7 +347,13 @@ finally {
     catch {
         # The isolated server may already have exited after a failed assertion.
     }
-    Remove-Item -LiteralPath $workspacePath, $settingsPath -ErrorAction SilentlyContinue
+    if ($null -ne $guiProcess -and -not $guiProcess.HasExited) {
+        if (-not $guiProcess.WaitForExit(3000)) {
+            Stop-Process -Id $guiProcess.Id -Force -ErrorAction SilentlyContinue
+        }
+    }
+    Remove-Item -LiteralPath $workspacePath, $settingsPath, $stderrPath `
+        -ErrorAction SilentlyContinue
     $env:AGENTERM_IPC_ADDRESS = $previousAddress
     $env:AGENTERM_WORKSPACE_PATH = $previousWorkspace
     $env:AGENTERM_SETTINGS_PATH = $previousSettings

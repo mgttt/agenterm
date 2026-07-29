@@ -57,8 +57,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [x] the status bar orders host segments as hidden-Tabs recovery,
       last-known CWD, and flexible provider space. The former right-aligned
       Proxy surface is archived and returns its width to providers
-    - [>] the former Proxy eye/editor status entry is archived; users configure
-      proxy variables in their shell while redacted CLI compatibility remains
+    - [x] the former Proxy eye/editor status entry is archived; users configure
+      proxy variables in their shell while only redacted launch-state
+      observation remains
     - [x] default window close detaches by hiding the HWND and preserving
       server/PTY state; stop-and-exit saves metadata then ends the server;
       Cancel/Esc changes nothing. No tray icon ships in v0.1.6
@@ -124,13 +125,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       Prepare performs no PTY write, and a request remains
       `user_requested`/pending until a valid bounded local OSC 7 confirms
       the path; invalid OSC does not replace the last-known value
-    - [x] tab-scoped HTTP(S) proxy context remains ephemeral and redacted across UI, control, persistence, and terminal evidence
-    - [>] the former tab-scoped HTTP(S) Proxy GDI eye/editor status surface is
-      archived; retained compatibility state remains ephemeral and redacted
-    - [x] CWD/proxy editors are keyboard focus traps with typed semantic
-      prepare actions; proxy values and reveal state remain ephemeral,
-      never persist to workspace, and never falsely claim to mutate the
-      environment of already-running arbitrary descendants
+    - [x] create-time tab-scoped HTTP(S) proxy context remains ephemeral and redacted across UI, control, persistence, and terminal evidence
+    - [x] the former tab-scoped HTTP(S) Proxy GDI eye/editor status surface and
+      runtime-application actions are archived and fail explicitly; no proxy
+      value, reveal state or application claim persists to workspace
+    - [x] the CWD editor remains a keyboard focus trap with typed semantic
+      prepare actions; archived Proxy actions do not reuse Composer or mutate
+      already-running descendants
   - Release core: adaptive Tabs workspace
     - [x] Tabs collapse, recovery, and resizing share one persisted workspace geometry
     - [x] place a `Tabs` button immediately left of `Settings`; activating

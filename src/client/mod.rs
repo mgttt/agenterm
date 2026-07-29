@@ -45,7 +45,6 @@ use crate::{
     protocol::{IpcRequest, IpcResponse},
     ui_bridge,
     upgrade_identity::UpgradeIdentity,
-    working_context::PROXY_MAX_BYTES,
 };
 
 #[cfg(windows)]
@@ -837,30 +836,6 @@ fn run_cli(arguments: Vec<String>, control_options: CliControlOptions) -> i32 {
             arguments.push("--".to_owned());
             arguments.push(content);
         }
-    }
-    if arguments
-        .first()
-        .is_some_and(|command| command == "ui-action")
-        && arguments
-            .get(1)
-            .is_some_and(|action| matches!(action.as_str(), "proxy-prepare" | "proxy-send-now"))
-        && let Some(position) = arguments.iter().position(|argument| argument == "--stdin")
-    {
-        arguments.remove(position);
-        let mut content = String::new();
-        if let Err(error) = std::io::stdin()
-            .take(PROXY_MAX_BYTES as u64 + 1)
-            .read_to_string(&mut content)
-        {
-            eprintln!("failed to read proxy values from stdin: {error}");
-            return 1;
-        }
-        if content.len() > PROXY_MAX_BYTES {
-            eprintln!("proxy input exceeds {PROXY_MAX_BYTES} bytes");
-            return 2;
-        }
-        arguments.push("--proxy-input".to_owned());
-        arguments.push(content);
     }
     if let Some(command) = arguments.first_mut() {
         let canonical = canonical_control_command(command);
@@ -2845,6 +2820,13 @@ fn fetch_ui_wait_snapshot() -> Result<(String, serde_json::Value)> {
     Ok((response.output, snapshot))
 }
 
+fn parse_terminal_grid(value: &str) -> Option<(u64, u64)> {
+    let (rows, columns) = value.split_once(['x', 'X'])?;
+    let rows = rows.parse::<u64>().ok().filter(|value| *value > 0)?;
+    let columns = columns.parse::<u64>().ok().filter(|value| *value > 0)?;
+    Some((rows, columns))
+}
+
 pub(crate) fn run_wait_ui(arguments: &[String]) -> i32 {
     let timeout_ms = match option_value(arguments, "--timeout-ms") {
         Some(value) => match value.parse::<u64>() {
@@ -2868,6 +2850,17 @@ pub(crate) fn run_wait_ui(arguments: &[String]) -> i32 {
         option_value(arguments, "--client-width").and_then(|value| value.parse::<i64>().ok());
     let expected_client_height =
         option_value(arguments, "--client-height").and_then(|value| value.parse::<i64>().ok());
+    let terminal_grid_changed_from =
+        match option_value(arguments, "--terminal-grid-changed-from").map(parse_terminal_grid) {
+            Some(Some(value)) => Some(value),
+            Some(None) => {
+                eprintln!(
+                    "wait-ui --terminal-grid-changed-from requires positive ROWSxCOLS dimensions"
+                );
+                return 2;
+            }
+            None => None,
+        };
     let requested_target = option_value(arguments, "-t");
     if expected_proxy_state.is_some() && requested_target.is_none() {
         eprintln!("wait-ui --proxy-state requires -t target");
@@ -2886,12 +2879,13 @@ pub(crate) fn run_wait_ui(arguments: &[String]) -> i32 {
         && expected_window_state.is_none()
         && expected_client_width.is_none()
         && expected_client_height.is_none()
+        && terminal_grid_changed_from.is_none()
         && expected_modal_kind.is_none()
         && requested_modal_target.is_none()
     {
         eprintln!(
             "wait-ui requires an active, focus, tab-state, proxy-state, window-state, client-size, \
-             modal-kind, or modal-target condition"
+             terminal-grid change, modal-kind, or modal-target condition"
         );
         return 1;
     }
@@ -2994,6 +2988,13 @@ pub(crate) fn run_wait_ui(arguments: &[String]) -> i32 {
                 let height_matches = expected_client_height.is_none_or(|expected| {
                     snapshot["window"]["client_height"].as_i64() == Some(expected)
                 });
+                let terminal_grid_matches =
+                    terminal_grid_changed_from.is_none_or(|(previous_rows, previous_columns)| {
+                        let rows = snapshot["layout"]["terminal"]["rows"].as_u64();
+                        let columns = snapshot["layout"]["terminal"]["cols"].as_u64();
+                        rows.zip(columns)
+                            .is_some_and(|current| current != (previous_rows, previous_columns))
+                    });
                 let modal_matches = snapshot_modal_matches(
                     &snapshot,
                     expected_modal_kind,
@@ -3006,6 +3007,7 @@ pub(crate) fn run_wait_ui(arguments: &[String]) -> i32 {
                     && window_state_matches
                     && width_matches
                     && height_matches
+                    && terminal_grid_matches
                     && modal_matches
                 {
                     println!("{output}");
@@ -3254,12 +3256,11 @@ Usage:
   agenterm-cli ui-hello --minimum VERSION --maximum VERSION [--client-id ID]
   agenterm-cli ui-bootstrap
   agenterm-cli ui-deltas --epoch EPOCH --after SEQUENCE [--limit 1..64]
-  agenterm-cli ui-action new-tab|new-child|edit-tab|toggle-tree|tabs-show|tabs-hide|tabs-toggle|toggle-tabs|tabs-set-width|select-tab|close-tab|close-window|keep-server-running|stop-server-and-exit|confirm|cancel|composer-send|copy-selection|open-settings|settings-theme-dark|settings-theme-light|settings-apply|open-cwd-editor|cwd-prepare|cwd-prepare-append|cwd-prepare-replace|cwd-send-now|open-proxy-editor|proxy-toggle-visibility|proxy-reveal-credentials|proxy-prepare|proxy-send-now
+  agenterm-cli ui-action new-tab|new-child|edit-tab|toggle-tree|tabs-show|tabs-hide|tabs-toggle|toggle-tabs|tabs-set-width|select-tab|close-tab|close-window|keep-server-running|stop-server-and-exit|confirm|cancel|composer-send|copy-selection|open-settings|settings-theme-dark|settings-theme-light|settings-apply|open-cwd-editor|cwd-prepare|cwd-prepare-append|cwd-prepare-replace|cwd-send-now
   agenterm-cli ui-action tabs-set-width --width 180..480
-  agenterm-cli ui-action proxy-prepare|proxy-send-now [-t target] --stdin
   agenterm-cli focus terminal|composer|tabs [-t target]
   agenterm-cli wait-pane [-t target] (--contains text|--dead|--submit-complete) [--timeout-ms ms]
-  agenterm-cli wait-ui [--active @id] [--focus surface] [-t target --tab-state state|--proxy-state state] [--modal-kind KIND|none|closed] [--modal-target target]
+  agenterm-cli wait-ui [--active @id] [--focus surface] [-t target --tab-state state|--proxy-state state] [--client-width PX --client-height PX] [--terminal-grid-changed-from ROWSxCOLS] [--modal-kind KIND|none|closed] [--modal-target target]
   agenterm-cli protocol-info
   agenterm-cli list-panes [-F format]
   agenterm-cli list-sessions | has-session | kill-server | server-kill"
@@ -3430,7 +3431,7 @@ fn print_mux_compatibility(json: bool) {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_loopback_ipc_address, run_wait_ui};
+    use super::{parse_loopback_ipc_address, parse_terminal_grid, run_wait_ui};
 
     #[test]
     fn accepts_only_loopback_ipc_addresses() {
@@ -3451,5 +3452,14 @@ mod tests {
             "@1".to_owned(),
         ];
         assert_eq!(run_wait_ui(&arguments), 2);
+    }
+
+    #[test]
+    fn terminal_grid_wait_dimension_is_positive_and_exact() {
+        assert_eq!(parse_terminal_grid("24x80"), Some((24, 80)));
+        assert_eq!(parse_terminal_grid("24X80"), Some((24, 80)));
+        assert_eq!(parse_terminal_grid("0x80"), None);
+        assert_eq!(parse_terminal_grid("24x"), None);
+        assert_eq!(parse_terminal_grid("24x80x2"), None);
     }
 }

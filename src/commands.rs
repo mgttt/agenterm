@@ -765,6 +765,7 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
              [-t target --tab-state state] [--window-state state] \
              [-t target --proxy-state state] \
              [--client-width PX --client-height PX] \
+             [--terminal-grid-changed-from ROWSxCOLS] \
              [--modal-kind KIND|none|closed] [--modal-target target] \
              [--timeout-ms ms]",
             &[
@@ -776,6 +777,7 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
                 "--window-state",
                 "--client-width",
                 "--client-height",
+                "--terminal-grid-changed-from",
                 "--modal-kind",
                 "--modal-target",
                 "--timeout-ms",

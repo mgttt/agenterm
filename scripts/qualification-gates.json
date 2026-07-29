@@ -171,16 +171,6 @@
       ]
     },
     {
-      "id": "proxy-smoke",
-      "evidence": [
-        "working-context.proxy-cmd-applied",
-        "working-context.proxy-child-inheritance",
-        "working-context.proxy-clear",
-        "working-context.proxy-powershell-applied",
-        "working-context.proxy-noninteractive-rejected"
-      ]
-    },
-    {
       "id": "workbench-smoke",
       "evidence": [
         "ux.workbench-inline-edit",

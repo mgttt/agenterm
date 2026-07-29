@@ -186,7 +186,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       from the default `%LOCALAPPDATA%\AgenTerm\settings.json`
     - [x] public semantic actions resize, minimize, maximize, and restore the
       window; `wait-ui` verifies post-state, minimize preserves the last PTY
-      grid, and resize updates the grid
+      grid, and `--terminal-grid-changed-from ROWSxCOLS` proves resize has
+      completed through the published PTY projection rather than merely
+      observing new Win32 client pixels
     - [ ] P2 active-tree readability: the three 24-pixel action targets
       reduce the selected child row's note to `child agent wor...` at the
       default 250-pixel sidebar. Acceptance: screenshot fixtures prove
