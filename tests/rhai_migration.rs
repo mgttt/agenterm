@@ -297,6 +297,7 @@ fn clean_locked_artifacts_task_retains_in_use_file_then_retries() {
     let locked = root.join("agenterm-server.locked-789.exe");
     let handle = OpenOptions::new()
         .create(true)
+        .truncate(false)
         .write(true)
         .share_mode(0)
         .open(&locked)
