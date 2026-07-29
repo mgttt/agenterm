@@ -82,9 +82,9 @@ pub fn capabilities() -> McpCapabilities {
         tool_schema_version: MCP_TOOL_SCHEMA_VERSION,
         transports: vec!["stdio"],
         methods: [
-            ("initialize", McpAvailability::Planned),
-            ("notifications/initialized", McpAvailability::Planned),
-            ("ping", McpAvailability::Planned),
+            ("initialize", McpAvailability::Shipped),
+            ("notifications/initialized", McpAvailability::Shipped),
+            ("ping", McpAvailability::Shipped),
             ("resources/list", McpAvailability::Planned),
             ("resources/read", McpAvailability::Planned),
             ("tools/list", McpAvailability::Planned),
@@ -199,10 +199,16 @@ pub fn run_mcp_entry_with_args(arguments: Vec<String>) -> i32 {
             2
         }
         [command, transport] if command == "serve" && transport == "--stdio" => {
-            eprintln!(
-                "mcp_transport_unavailable: stdio lifecycle is cataloged but not implemented"
-            );
-            2
+            match crate::mcp_stdio::serve_stdio(
+                std::io::BufReader::new(std::io::stdin().lock()),
+                std::io::stdout().lock(),
+            ) {
+                Ok(()) => 0,
+                Err(error) => {
+                    eprintln!("mcp_stdio_failed: {error}");
+                    2
+                }
+            }
         }
         _ => {
             eprintln!("unknown agenterm-mcp command; use --help");
@@ -221,7 +227,8 @@ fn print_help() {
            agenterm-mcp capabilities --json\n\
            agenterm-mcp serve --stdio\n\
          \n\
-         Only offline discovery is shipped in this implementation slice.\n\
+         The stdio lifecycle and ping are shipped in this implementation slice.\n\
+         Fleet resources and the wait tool remain cataloged as planned.\n\
          No network listener or mutation tool is available."
     );
 }
@@ -288,13 +295,17 @@ mod tests {
     }
 
     #[test]
-    fn implementation_slice_does_not_overclaim_protocol_methods() {
+    fn implementation_slice_reports_exact_protocol_method_availability() {
         let catalog = capabilities();
-        assert!(
-            catalog
-                .methods
-                .iter()
-                .all(|method| method.availability == McpAvailability::Planned)
+        let shipped = catalog
+            .methods
+            .iter()
+            .filter(|method| method.availability == McpAvailability::Shipped)
+            .map(|method| method.name)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            shipped,
+            vec!["initialize", "notifications/initialized", "ping"]
         );
         assert!(
             catalog

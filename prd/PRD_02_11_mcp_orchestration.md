@@ -42,9 +42,17 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       stateless discovery or experimental tasks are not advertised; the
       offline Rust catalog now freezes this revision while transport
       negotiation remains pending
-    - [ ] support only initialize/initialized, ping, resources list/read,
+    - [~] support only initialize/initialized, ping, resources list/read,
       tools list/call for the single wait tool, and cancellation; stdout is
       newline-delimited UTF-8 JSON-RPC only and bounded diagnostics use stderr
+      - [x] `initialize`, `notifications/initialized`, and `ping` now enforce
+        the stateful lifecycle; pre-ready non-ping requests, duplicate
+        initialization, malformed JSON, invalid requests, unknown methods,
+        oversized frames, notification response suppression, and EOF shutdown
+        have typed coverage
+      - [ ] resources, tools, wait cancellation, concurrency and backend
+        selection remain unimplemented and therefore absent from negotiated
+        server capabilities
     - [ ] the ordinary AgenTerm GUI adds no MCP panel, connection animation,
       approval surface, or startup work in this read-only delivery
   - Executable and discovery
@@ -56,9 +64,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
         implemented, unit-tested, included in the artifact manifest and
         cross-platform build lists, and deliberately mark protocol methods,
         resources, and `agenterm_wait` as `planned` until their handlers ship
-    - [ ] `agenterm-mcp.exe serve --stdio` is the only first-delivery MCP
+    - [~] `agenterm-mcp.exe serve --stdio` is the only first-delivery MCP
       transport; initialization negotiates a supported protocol version and
       publishes stable server identity without opening a network listener
+      - [x] the executable reads one bounded UTF-8 JSON-RPC message per line,
+        writes only compact JSON-RPC to stdout, flushes each response, permits
+        diagnostics only on stderr, and exits successfully when stdin closes
+      - [x] a public executable black-box test proves initialize → initialized
+        → ping and machine-only stdout
     - [ ] an absent, stale, restarted, or incompatible AgenTerm server
       returns a typed MCP error with address/session diagnostics and never
       causes the sidecar to create a second workspace authority

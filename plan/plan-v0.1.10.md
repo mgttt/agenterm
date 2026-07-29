@@ -1001,9 +1001,9 @@ entry 是集成热点，只允许一个串行 owner 收口。
     still pending
 
 第四提交
-  bounded stdio JSON-RPC
-  initialize / initialized / ping
-  malformed / oversize / EOF tests
+  [done] bounded stdio JSON-RPC
+  [done] initialize / initialized / ping
+  [done] malformed / oversize / EOF tests
 
 第五提交
   instances / workspace / tabs / fleet snapshot resources

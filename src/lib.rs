@@ -14,6 +14,7 @@ mod event_journal;
 mod instances;
 mod ipc_transport;
 pub mod mcp_catalog;
+pub mod mcp_stdio;
 pub mod operations;
 mod protocol;
 #[cfg(windows)]
