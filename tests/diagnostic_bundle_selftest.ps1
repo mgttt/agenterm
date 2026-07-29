@@ -166,13 +166,23 @@ function Assert-BoundedFailureBundle {
         }
     }
     elseif ($Suite -eq 'script') {
-        $commands = Get-Content -LiteralPath $commandLog -Raw
-        if ($commands -notmatch '(?ms)command=.* script <content> <content>.*?output:\s*42') {
+        $commandsText = Get-Content -LiteralPath $commandLog -Raw
+        $commands = @($commandsText | ConvertFrom-Json)
+        $successfulWorker = @(
+            $commands | Where-Object {
+                $_.exit_code -eq 0 -and
+                @($_.arguments) -contains 'script' -and
+                @($_.arguments) -contains 'eval' -and
+                @($_.arguments) -contains '<content>' -and
+                ([string]$_.output).Trim() -eq '42'
+            }
+        )
+        if ($successfulWorker.Count -lt 1) {
             throw 'Script probe did not retain evidence of a successful worker result.'
         }
         $retainedText = @(
             [string]$manifest.failure
-            $commands
+            $commandsText
             $diagnosticNames | ForEach-Object {
                 Get-Content -LiteralPath (
                     Join-Path $failureDirectory ([string]$_)
@@ -321,10 +331,17 @@ try {
             '--', '--internal-failure-bundle-probe'
         ) -Suite 'theme'
     $externalProbes.Add($guiProbe)
-    $scriptProbe = Start-ExternalProbe `
-        -ScriptPath (Join-Path $PSScriptRoot 'script_smoke.ps1') `
-        -Arguments @('-Exe', $CliExe, '-InternalFailureBundleProbe') `
-        -Suite 'script'
+    $scriptProbe = Start-ExternalCommandProbe `
+        -Executable (Join-Path $PSScriptRoot '..\dist\agenterm-script.exe') `
+        -Arguments @(
+            'task', 'run', 'script-smoke',
+            '--manifest', (Join-Path $PSScriptRoot '..\agenterm.tasks.json'),
+            '--timeout-ms', '120000',
+            '--max-operations', '10000000',
+            '--max-string-bytes', '8388608',
+            '--max-output-bytes', '1048576',
+            '--', '--internal-failure-bundle-probe'
+        ) -Suite 'script'
     $externalProbes.Add($scriptProbe)
 
     $guiBundle = Complete-ExternalProbe -Probe $guiProbe

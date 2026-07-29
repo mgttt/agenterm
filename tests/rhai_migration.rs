@@ -371,6 +371,35 @@ fn run_cli_smoke() -> Output {
 }
 
 #[cfg(windows)]
+fn run_script_smoke() -> Output {
+    let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+        .current_dir(repo)
+        .args(["run", "scripts/rhai/script-smoke.rhai"])
+        .args(["--profile", "local", "--project-root"])
+        .arg(repo)
+        .args([
+            "--timeout-ms",
+            "120000",
+            "--max-operations",
+            "10000000",
+            "--max-string-bytes",
+            "8388608",
+            "--max-output-bytes",
+            "1048576",
+            "--",
+        ])
+        .arg(repo)
+        .arg(env!("CARGO_BIN_EXE_agenterm-cli"))
+        .arg(env!("CARGO_BIN_EXE_agenterm-script"))
+        .arg(env!("CARGO_BIN_EXE_agenterm"))
+        .env("AGENTERM_NO_ACTIVATE", "1")
+        .output()
+        .expect("run Rhai Script Runtime smoke")
+}
+
+#[cfg(windows)]
 fn run_theme_smoke() -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -1481,13 +1510,12 @@ fn prd_alignment_task_matches_public_catalogs_and_fails_closed() {
             copy_fixture_file(repo, &fixture, &format!("prd/{name}"));
         }
     }
-    for suite in ["script_smoke.ps1", "ux_smoke.ps1"] {
-        copy_fixture_file(repo, &fixture, &format!("tests/{suite}"));
-    }
+    copy_fixture_file(repo, &fixture, "tests/ux_smoke.ps1");
     copy_fixture_file(repo, &fixture, "scripts/rhai/working-context-smoke.rhai");
     copy_fixture_file(repo, &fixture, "scripts/rhai/server-smoke.rhai");
     copy_fixture_file(repo, &fixture, "scripts/rhai/remote-ui-upgrade-smoke.rhai");
     copy_fixture_file(repo, &fixture, "scripts/rhai/cli-smoke.rhai");
+    copy_fixture_file(repo, &fixture, "scripts/rhai/script-smoke.rhai");
     copy_fixture_file(repo, &fixture, "scripts/rhai/theme-smoke.rhai");
     copy_fixture_file(repo, &fixture, "scripts/rhai/workbench-smoke.rhai");
     copy_fixture_file(repo, &fixture, "scripts/rhai/fleet-smoke.rhai");
@@ -1626,6 +1654,63 @@ fn rhai_cli_smoke_preserves_public_control_ui_bridge_and_pty_contract() {
     assert!(stdout.contains(
         "PASS: typed control, UI bridge, PTY, screenshots, remain-on-exit, and explicit close"
     ));
+}
+
+#[cfg(windows)]
+#[test]
+fn rhai_script_smoke_preserves_unrestricted_runtime_and_supervisor_contract() {
+    let output = run_script_smoke();
+    assert!(
+        output.status.success(),
+        "Rhai Script Runtime smoke failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for evidence in [
+        "script.rhai-runtime",
+        "script.rhai-fleet",
+        "script.api-tree",
+        "script.fleet-v2",
+        "script.fleet-tabs-set-note",
+        "script.direct-entry",
+        "script.north-star",
+        "script.rhai-robustness-budget",
+        "script.rhai-framed",
+        "script.exit-classes",
+        "script.typed-errors",
+        "script.modules-tasks",
+        "script.stream",
+        "script.http",
+        "script.fs-lifecycle",
+        "script.runtime-lifecycle",
+        "script.supervisor",
+        "script.audit",
+    ] {
+        assert!(
+            stdout.contains(&format!("EVIDENCE {evidence}")),
+            "missing {evidence} in:\n{stdout}"
+        );
+    }
+    assert!(
+        stdout
+            .contains("PASS: unrestricted scripting API, supervision, audit privacy, and budgets")
+    );
+    for secret in [
+        "AUDIT_STDOUT_SECRET",
+        "AUDIT_ARG_SECRET",
+        "AUDIT_SOURCE_SECRET",
+        "AUDIT_ENV_SECRET",
+        "HTTP_CREDENTIAL_SECRET",
+        "PRIVATE_PATH_SECRET",
+        "PROXY_CREDENTIAL_SECRET",
+    ] {
+        assert!(!stdout.contains(secret), "stdout leaked {secret}");
+        assert!(
+            !String::from_utf8_lossy(&output.stderr).contains(secret),
+            "stderr leaked {secret}"
+        );
+    }
 }
 
 #[cfg(windows)]

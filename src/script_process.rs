@@ -24,7 +24,7 @@ const MAX_TIMEOUT_MS: u64 = 60_000;
 const OUTPUT_DRAIN_GRACE: Duration = Duration::from_secs(1);
 const DEFAULT_CAPTURE_BYTES: usize = 64 * 1024;
 const MAX_CAPTURE_BYTES: usize = 256 * 1024;
-const MAX_STDIN_BYTES: usize = 256 * 1024;
+const MAX_STDIN_BYTES: usize = 4 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug)]
 pub struct ScriptDuration(pub(crate) Duration);

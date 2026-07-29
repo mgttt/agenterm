@@ -17,6 +17,8 @@
         "std.net.tcp-stream-connect",
         "std.net.tcp-stream-connect-timeout",
         "std.net.tcp-stream",
+        "std.net.tcp-listener-bind",
+        "std.net.tcp-listener",
         "std.fs.exists",
         "std.fs.metadata",
         "std.fs.read-dir",
@@ -45,6 +47,7 @@
         "rhai.json.parse",
         "rhai.json.parse-file",
         "rhai.json.stringify-pretty",
+        "rhai.bytes.from-array",
         "rhai.crypto.sha256-file",
         "rhai.hash.fnv1a64",
         "rhai.image.inspect-png",
@@ -155,6 +158,14 @@
       "profile": "local",
       "cwd": ".",
       "args": [".", "dist/agenterm.exe", "dist/agenterm-cli.exe"]
+    },
+    {
+      "id": "script-smoke",
+      "description": "Prove the unrestricted Script Runtime API, binary framing, supervision, Fleet, named tasks, HTTP, filesystem lifecycle, and audit privacy",
+      "entry": "scripts/rhai/script-smoke.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "args": [".", "dist/agenterm-cli.exe", "dist/agenterm-script.exe", "dist/agenterm.exe"]
     },
     {
       "id": "remote-ui-smoke",

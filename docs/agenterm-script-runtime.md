@@ -851,7 +851,7 @@ is intentionally consumed later through typed file APIs.
 The shipped process defaults are a 2,000 ms child deadline and 64 KiB retained
 for each captured stream. A script MAY lower or raise them through
 `Command.timeout(Duration)` and `capture_limit(bytes)`, up to hard ceilings of
-60,000 ms and 256 KiB. Text or binary stdin is limited to 256 KiB. This process
+60,000 ms and 256 KiB. Text or binary stdin is limited to 4 MiB. This process
 ceiling is independent of the HTTP adapter's stricter 10,000 ms deadline.
 
 `std::process::id()` returns the current supervised Script worker PID, matching

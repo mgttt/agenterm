@@ -325,7 +325,7 @@ try {
             'remote-ui-smoke' = '.\scripts\rhai\remote-ui-smoke.rhai'
             'remote-ui-upgrade-smoke' = '.\scripts\rhai\remote-ui-upgrade-smoke.rhai'
             'fleet-smoke' = '.\scripts\rhai\fleet-smoke.rhai'
-            'script-smoke' = '.\tests\script_smoke.ps1'
+            'script-smoke' = '.\scripts\rhai\script-smoke.rhai'
             'theme-smoke' = '.\scripts\rhai\theme-smoke.rhai'
             'working-context-smoke' = '.\scripts\rhai\working-context-smoke.rhai'
             'workbench-smoke' = '.\scripts\rhai\workbench-smoke.rhai'
@@ -554,8 +554,11 @@ try {
                 }
             }
             Invoke-Checked -Id 'script-smoke' `
-                -Label 'safe scripting smoke test' {
-                & '.\tests\script_smoke.ps1'
+                -Label 'unrestricted scripting smoke test' {
+                & '.\dist\agenterm-script.exe' task run script-smoke `
+                    --manifest '.\agenterm.tasks.json' `
+                    --timeout-ms 120000 --max-operations 10000000 `
+                    --max-string-bytes 8388608 --max-output-bytes 1048576
             }
             Invoke-Checked -Id 'theme-smoke' `
                 -Label 'theme settings smoke test' {

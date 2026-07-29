@@ -223,9 +223,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   development `target/` cache
 - Scripting public-interface evidence gate
   - Rhai black-box evidence
-    - [x] `tests/script_smoke.ps1` drives only public `script check`,
-      `script eval`, `script run`, and `script api --json` commands; no test
-      links the Rhai host or invokes an internal worker API
+    - [x] the named `scripts/rhai/script-smoke.rhai` journey drives only
+      public Script CLI, raw documented worker protocol, and typed runtime
+      objects; no test links the Rhai host or invokes a private Rust worker API
     - [x] fixtures prove deterministic output, typed Fleet observation and
       mutation, ambient local APIs, stable parse/runtime/limit/host exit
       classes, timeout, worker crash, cleanup, and subsequent recovery;
@@ -243,8 +243,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [~] the public `prd-alignment` Rhai task compares PRD modules, shipped
       capability/evidence declarations, and live CLI/protocol/Mux catalogs;
       exact Rhai API-field comparison remains planned
-    - [x] `check.ps1` runs `tests/script_smoke.ps1` before the Script Runtime
-      release gate
+    - [x] `check.ps1` runs the named Rhai `script-smoke` task before the
+      Script Runtime release gate
 - v0.1.8 autonomous public-interface dogfood (P0)
   - Resolved findings retained as regression contracts
     - [x] stable creation output is available through the documented
