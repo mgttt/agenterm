@@ -77,6 +77,16 @@ for name in "${EXEC_NAMES[@]}"; do
     echo "Missing binary: $src" >&2
     exit 1
   fi
+  if [[ "$OS" == "linux" && "$name" == "agenterm" ]]; then
+    cp "$src" "$STAGING/.agenterm.bin"
+    chmod +x "$STAGING/.agenterm.bin"
+    cp "$ROOT/scripts/linux/agenterm-gui-wrapper.sh" "$STAGING/agenterm"
+    chmod +x "$STAGING/agenterm"
+    if [[ -x "$ROOT/scripts/stage-linux-gui-libs.sh" ]]; then
+      "$ROOT/scripts/stage-linux-gui-libs.sh" "$STAGING" "$ARCH"
+    fi
+    continue
+  fi
   cp "$src" "$STAGING/$name"
   chmod +x "$STAGING/$name"
 done

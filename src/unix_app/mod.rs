@@ -47,11 +47,11 @@ use crate::{
 };
 
 use render::{
-    CELL_HEIGHT, CELL_WIDTH, COMPOSER_HEIGHT, ComposerView, ConfirmCloseHit, ConfirmCloseView,
-    FrameContent, STATUS_HEIGHT, SettingsHit, SettingsModalView, SidebarTabRow, StatusBarView,
-    TerminalGrid, TerminalPaint, ToolbarHit, WindowCloseHit, WindowCloseView, WorkspaceToolbarView,
-    effective_palette, grid_dimensions_for_pixels, render_frame, scrollbar_view_from_geometry,
-    sidebar_row_at_y,
+    COMPOSER_HEIGHT, ComposerView, ConfirmCloseHit, ConfirmCloseView, FrameContent,
+    RESOLVED_UNIX_FONT, STATUS_HEIGHT, SettingsHit, SettingsModalView, SidebarTabRow,
+    StatusBarView, TerminalGrid, TerminalPaint, ToolbarHit, WindowCloseHit, WindowCloseView,
+    WorkspaceToolbarView, cell_metrics, effective_palette, grid_dimensions_for_pixels,
+    render_frame, scrollbar_view_from_geometry, sidebar_row_at_y,
 };
 
 use layout::{
@@ -1284,14 +1284,15 @@ impl UnixApp {
             .active_position()
             .map(|position| self.tabs[position].last_size)
             .or_else(|| self.grid.as_ref().map(|grid| (grid.rows, grid.cols)))?;
+        let (cell_width, cell_height) = self.cell_dimensions();
         terminal_cell_at(
             terminal_pixel_rect(&self.layout()),
             x as i32,
             y as i32,
             rows,
             cols,
-            CELL_WIDTH as i32,
-            CELL_HEIGHT as i32,
+            cell_width as i32,
+            cell_height as i32,
         )
     }
 
@@ -1395,20 +1396,21 @@ impl UnixApp {
         let clamped_x = (x as i32).clamp(terminal.left, max_x);
         let clamped_y = (y as i32).clamp(terminal.top, max_y);
         let (rows, cols) = self.tabs[position].last_size;
+        let (cell_width, cell_height) = self.cell_dimensions();
         let Some((col, row)) = terminal_cell_at(
             terminal,
             clamped_x,
             clamped_y,
             rows,
             cols,
-            CELL_WIDTH as i32,
-            CELL_HEIGHT as i32,
+            cell_width as i32,
+            cell_height as i32,
         ) else {
             return;
         };
         let updated = gesture.drag_to(TerminalPoint { row, col }, rows, cols);
         let next_autoscroll =
-            autoscroll_step(y as i32, terminal.top, terminal.bottom, CELL_HEIGHT as i32);
+            autoscroll_step(y as i32, terminal.top, terminal.bottom, cell_height as i32);
         self.terminal_selection = updated.selection();
         self.terminal_selection_gesture = Some(updated);
         self.terminal_selection_pointer = Some((clamped_x, clamped_y));
@@ -1480,21 +1482,22 @@ impl UnixApp {
         let Ok(after) = self.tabs[position].scroll_viewport(action, Some(step.rows)) else {
             return false;
         };
-        if let Some((x, y)) = self.terminal_selection_pointer
-            && let Some((col, row)) = terminal_cell_at(
+        if let Some((x, y)) = self.terminal_selection_pointer {
+            let (cell_width, cell_height) = self.cell_dimensions();
+            if let Some((col, row)) = terminal_cell_at(
                 terminal_pixel_rect(&self.layout()),
                 x,
                 y,
                 self.tabs[position].last_size.0,
                 self.tabs[position].last_size.1,
-                CELL_WIDTH as i32,
-                CELL_HEIGHT as i32,
-            )
-        {
-            let (rows, cols) = self.tabs[position].last_size;
-            let updated = gesture.drag_to(TerminalPoint { row, col }, rows, cols);
-            self.terminal_selection = updated.selection();
-            self.terminal_selection_gesture = Some(updated);
+                cell_width as i32,
+                cell_height as i32,
+            ) {
+                let (rows, cols) = self.tabs[position].last_size;
+                let updated = gesture.drag_to(TerminalPoint { row, col }, rows, cols);
+                self.terminal_selection = updated.selection();
+                self.terminal_selection_gesture = Some(updated);
+            }
         }
         if after != before {
             self.on_viewport_scrolled(position, after, "selection-autoscroll");
@@ -1683,6 +1686,10 @@ impl UnixApp {
             })
     }
 
+    fn cell_dimensions(&self) -> (u32, u32) {
+        cell_metrics(self.config.terminal_font_size)
+    }
+
     fn request_redraw(&self) {
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
@@ -1704,12 +1711,15 @@ impl UnixApp {
             .map_err(|error| anyhow::anyhow!("{error}"))?;
         let size = window.inner_size();
         let sidebar_width = self.sidebar_width();
+        let (cell_width, cell_height) = self.cell_dimensions();
         let (cols, rows) = grid_dimensions_for_pixels(
             size.width,
             size.height,
             sidebar_width,
             COMPOSER_HEIGHT,
             STATUS_HEIGHT,
+            cell_width,
+            cell_height,
         );
         let grid = TerminalGrid::new(cols, rows, self.palette());
 
@@ -1754,12 +1764,15 @@ impl UnixApp {
         };
         let size = window.inner_size();
         let sidebar_width = self.sidebar_width();
+        let (cell_width, cell_height) = self.cell_dimensions();
         let (cols, rows) = grid_dimensions_for_pixels(
             size.width,
             size.height,
             sidebar_width,
             COMPOSER_HEIGHT,
             STATUS_HEIGHT,
+            cell_width,
+            cell_height,
         );
         if let Some(grid) = self.grid.as_mut() {
             grid.resize(cols, rows);
@@ -1949,6 +1962,7 @@ impl UnixApp {
         let palette = self.palette();
         let layout = self.layout();
         let sidebar_width = self.sidebar_width();
+        let (cell_width, cell_height) = self.cell_dimensions();
         let content_height = layout.terminal.bottom.max(0) as u32;
         let cwd_label = self.active_cwd_status_text();
         let composer_label = if self.cwd_edit_target.is_some() {
@@ -2000,6 +2014,8 @@ impl UnixApp {
                 sidebar_width,
                 content_height,
                 tree_height: layout.sidebar_tree.height().max(0) as u32,
+                cell_width,
+                cell_height,
                 terminal: TerminalPaint {
                     grid,
                     selection: self
@@ -2185,7 +2201,7 @@ impl ControlHost for UnixApp {
             "color_theme": self.config.color_theme,
             "tabs_visible": self.config.tabs_visible,
             "tabs_width": self.config.tabs_width,
-            "resolved_font_family": "bitmap-8x8",
+            "resolved_font_family": RESOLVED_UNIX_FONT,
             "config_path": config_path(),
             "recommended_cjk_font": "Sarasa Fixed SC",
             "recommended_font_license": "SIL Open Font License 1.1",
