@@ -170,7 +170,9 @@ try {
             cargo fmt --all -- --check
         }
         Invoke-QuickStep -Label 'PRD capability alignment' {
-            & '.\tests\prd_alignment.ps1'
+            & '.\dist\agenterm-script.exe' task run prd-alignment `
+                --manifest '.\agenterm.tasks.json' `
+                --timeout-ms 10000 --max-operations 10000000 -- '.'
         }
         Invoke-QuickStep -Label 'development build identity' {
             Import-AgenTermDevelopmentBuildIdentity
@@ -278,6 +280,7 @@ try {
             cargo test --quiet --locked --all-features -- `
                 --skip preflight_task_is_fail_closed_and_writes_reports_for_real_git_fixtures `
                 --skip preflight_benchmark_task_measures_clean_public_worker_runs `
+                --skip prd_alignment_task_matches_public_catalogs_and_fails_closed `
                 --skip supply_chain_task_is_deterministic_and_covers_the_resolved_lock_graph
         }
     }
@@ -303,7 +306,9 @@ try {
         }
     }
     Invoke-Checked -Id 'prd-alignment' -Label 'PRD capability alignment' {
-        & '.\tests\prd_alignment.ps1'
+        & '.\dist\agenterm-script.exe' task run prd-alignment `
+            --manifest '.\agenterm.tasks.json' `
+            --timeout-ms 10000 --max-operations 10000000 -- '.'
     }
     Invoke-Checked -Id 'rhai-lint' -Label 'production Rhai source lint' {
         & '.\lint.ps1' -Mode Rhai `

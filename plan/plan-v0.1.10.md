@@ -2,7 +2,7 @@
 
 状态：实施中；原 v0.1.9 Release 因 server-loss 故障撤下，
 `0.1.9+hotfix.1` 是恢复 v0.1.10 主线前的强制稳定性门；
-首批 18/43 PowerShell 迁移项完成删除
+首批 19/43 PowerShell 迁移项完成删除
 工作主题：**Rhai 完整接替 PowerShell，并建立可验证的只读 Agent 桥梁**
 版本定位：在 v0.1.9 完善通用 Rhai 运行时、模块任务与机器可读工具
 schema 后，让 AgenTerm 首次用自己的脚本运行时驱动完整开发生命周期，
@@ -1029,7 +1029,7 @@ entry 是集成热点，只允许一个串行 owner 收口。
     43 stable IDs and responsibility groups frozen; detailed caller and
     input/output/side-effect contracts still need enrichment
   [in progress] stable Rhai task graph
-    repository manifest and first sixteen ready tasks shipped; full graph metadata
+    repository manifest and first seventeen ready tasks shipped; full graph metadata
     and remaining lifecycle tasks still pending
   [done] stage-0 bootstrap identity contract
   [done] no-new-ps1 migration audit gate

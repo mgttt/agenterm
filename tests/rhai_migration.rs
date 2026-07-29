@@ -218,6 +218,23 @@ fn run_migration_audit(repo_under_test: &Path) -> Output {
         .expect("run Rhai migration-audit task")
 }
 
+fn run_prd_alignment(repo_under_test: &Path) -> Output {
+    let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let manifest = repo.join("agenterm.tasks.json");
+    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+        .current_dir(repo)
+        .args(["task", "run", "prd-alignment", "--manifest"])
+        .arg(manifest)
+        .args(["--timeout-ms", "20000", "--max-operations", "10000000"])
+        .arg("--")
+        .arg(repo_under_test)
+        .arg(env!("CARGO_BIN_EXE_agenterm-cli"))
+        .arg(env!("CARGO_BIN_EXE_agenterm-mux"))
+        .output()
+        .expect("run Rhai PRD-alignment task")
+}
+
 fn run_preflight(repo_under_test: &Path, output_path: &Path) -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -1132,6 +1149,73 @@ fn migration_audit_rejects_operational_references_to_deleted_scripts() {
     assert_eq!(report["remaining_count"], expected_remaining);
 
     fs::remove_dir_all(&repo).expect("remove migration fixture");
+}
+
+#[test]
+fn prd_alignment_task_matches_public_catalogs_and_fails_closed() {
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let accepted = run_prd_alignment(repo);
+    assert!(
+        accepted.status.success(),
+        "PRD alignment failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&accepted.stdout),
+        String::from_utf8_lossy(&accepted.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&accepted.stdout).trim(),
+        concat!(
+            "PASS: PRD aligns with 61 catalog entries, 83 public names, ",
+            "11 protocol features, 41 mux commands, 57 capability IDs, ",
+            "and 57 executable evidence IDs"
+        )
+    );
+
+    let fixture = fixture_root("prd-alignment");
+    fs::create_dir_all(fixture.join("prd")).expect("create PRD fixture directory");
+    fs::create_dir_all(fixture.join("scripts")).expect("create script fixture directory");
+    fs::create_dir_all(fixture.join("tests")).expect("create test fixture directory");
+    copy_fixture_file(repo, &fixture, "PRD.md");
+    copy_fixture_file(repo, &fixture, "scripts/qualification-gates.json");
+    for entry in fs::read_dir(repo.join("prd")).expect("read PRD modules") {
+        let entry = entry.expect("read PRD module entry");
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name == "alignment-contract.json" || (name.starts_with("PRD_") && name.ends_with(".md"))
+        {
+            copy_fixture_file(repo, &fixture, &format!("prd/{name}"));
+        }
+    }
+    for suite in [
+        "cli_smoke.ps1",
+        "server_smoke.ps1",
+        "remote_ui_smoke.ps1",
+        "remote_ui_upgrade_smoke.ps1",
+        "fleet_smoke.ps1",
+        "script_smoke.ps1",
+        "theme_smoke.ps1",
+        "working_context_smoke.ps1",
+        "workbench_smoke.ps1",
+        "ux_smoke.ps1",
+    ] {
+        copy_fixture_file(repo, &fixture, &format!("tests/{suite}"));
+    }
+    let contract_path = fixture.join("prd").join("alignment-contract.json");
+    let malformed = fs::read_to_string(&contract_path)
+        .expect("read fixture alignment contract")
+        .replacen("\"schema_version\": 2", "\"schema_version\": 99", 1);
+    fs::write(&contract_path, malformed).expect("corrupt fixture contract schema");
+
+    let rejected = run_prd_alignment(&fixture);
+    assert!(!rejected.status.success());
+    assert!(
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&rejected.stdout),
+            String::from_utf8_lossy(&rejected.stderr)
+        )
+        .contains("prd_alignment_contract_schema")
+    );
+    fs::remove_dir_all(fixture).expect("remove PRD alignment fixture");
 }
 
 #[test]

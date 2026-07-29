@@ -101,6 +101,13 @@
       "cwd": "."
     },
     {
+      "id": "prd-alignment",
+      "description": "Align PRD modules and shipped evidence with the public CLI, protocol, and Mux catalogs",
+      "entry": "scripts/rhai/prd-alignment.rhai",
+      "profile": "local",
+      "cwd": "."
+    },
+    {
       "id": "stage-artifact",
       "description": "Stage one AgenTerm executable while preserving an in-use Windows image",
       "entry": "scripts/rhai/stage-artifact.rhai",

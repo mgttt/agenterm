@@ -231,9 +231,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [x] changing a shipped script command, capability, API entry, or
       evidence ID must atomically update the public command/API catalog,
       PRD `[x]` leaf, black-box assertion, and alignment contract
-    - [~] `tests/prd_alignment.ps1` compares the public command/evidence
-      catalog with the PRD contract; exact Rhai API-field comparison remains
-      planned
+    - [~] the public `prd-alignment` Rhai task compares PRD modules, shipped
+      capability/evidence declarations, and live CLI/protocol/Mux catalogs;
+      exact Rhai API-field comparison remains planned
     - [x] `check.ps1` runs `tests/script_smoke.ps1` before the
       safe-scripting release tag
 - v0.1.8 autonomous public-interface dogfood (P0)
