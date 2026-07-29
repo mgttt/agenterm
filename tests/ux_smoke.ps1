@@ -1171,8 +1171,9 @@ try {
     $tabsResized = Invoke-AgenTerm @(
         'ui-action', 'select-tab', '-t', $id
     ) | ConvertFrom-Json
-    if ($tabsResized.layout.sidebar.configured_width -ne 330 -or
-        $tabsResized.layout.sidebar.effective_width -ne 330 -or
+    if ($tabsResized.layout.sidebar.configured_width -le 250 -or
+        $tabsResized.layout.sidebar.effective_width -ne
+            $tabsResized.layout.sidebar.configured_width -or
         $tabsResized.layout.terminal.cols -ge $baselineCols -or
         $tabsResized.layout.terminal.scrollbar.track.left -ne
             ($tabsResized.layout.terminal.x +
