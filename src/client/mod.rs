@@ -1,5 +1,5 @@
 #[cfg(windows)]
-use windows_sys::Win32::{UI::Shell::ShellExecuteW, UI::WindowsAndMessaging::SW_SHOWNORMAL};
+use windows_sys::Win32::{UI::Shell::ShellExecuteW, UI::WindowsAndMessaging::SW_HIDE};
 
 #[cfg(windows)]
 fn wide(value: &str) -> Vec<u16> {
@@ -939,28 +939,12 @@ fn run_cli(arguments: Vec<String>, control_options: CliControlOptions) -> i32 {
     #[cfg(windows)]
     if response.is_err()
         && may_start_server
-        && let Ok(executable) = gui_executable_path()
+        && let Err(error) = start_server_process()
     {
-        let executable = wide(&executable.to_string_lossy());
-        let operation = wide("open");
-        let parameters = if no_activate_from_environment() {
-            wide(&format!("--no-activate --address {}", ipc_address()))
-        } else {
-            wide(&format!("--address {}", ipc_address()))
-        };
-        let launched = unsafe {
-            ShellExecuteW(
-                std::ptr::null_mut(),
-                operation.as_ptr(),
-                executable.as_ptr(),
-                parameters.as_ptr(),
-                std::ptr::null(),
-                SW_SHOWNORMAL,
-            )
-        } as isize;
-        if launched <= 32 {
-            eprintln!("failed to launch AgenTerm GUI through Windows Shell ({launched})");
-        }
+        eprintln!("{error:#}");
+    }
+    #[cfg(windows)]
+    if response.is_err() && may_start_server {
         let deadline = Instant::now() + IPC_AUTOSTART_TIMEOUT;
         while Instant::now() < deadline {
             thread::sleep(
@@ -3189,17 +3173,33 @@ fn run_wait_pane(arguments: &[String]) -> i32 {
 }
 
 #[cfg(windows)]
-fn gui_executable_path() -> Result<std::path::PathBuf> {
+fn start_server_process() -> Result<()> {
     let current =
         env::current_exe().context("could not locate the running agenterm-cli executable")?;
-    let gui = current.with_file_name("agenterm.exe");
-    if !gui.is_file() {
+    let server = current.with_file_name("agenterm-server.exe");
+    if !server.is_file() {
         anyhow::bail!(
-            "AgenTerm GUI executable was not found beside agenterm-cli: {}",
-            gui.display()
+            "AgenTerm server executable was not found beside agenterm-cli: {}",
+            server.display()
         );
     }
-    Ok(gui)
+    let server = wide(&server.to_string_lossy());
+    let operation = wide("open");
+    let parameters = wide(&format!("--address {}", ipc_address()));
+    let launched = unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            operation.as_ptr(),
+            server.as_ptr(),
+            parameters.as_ptr(),
+            std::ptr::null(),
+            SW_HIDE,
+        )
+    } as isize;
+    if launched <= 32 {
+        anyhow::bail!("failed to launch AgenTerm server through Windows Shell ({launched})");
+    }
+    Ok(())
 }
 
 fn print_help() {

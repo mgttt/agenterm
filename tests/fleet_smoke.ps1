@@ -324,9 +324,9 @@ try {
         $server.status -ne $instance.status -or
         $server.pid -ne $instance.pid -or
         $server.workspace_path -ne $instance.workspace_path -or
-        $server.window_visible -ne $true -or
-        $server.window_detached -ne $false -or
-        $server.window_state -notin @('restored', 'maximized') -or
+        $server.window_visible -ne $false -or
+        $server.window_detached -ne $true -or
+        $server.window_state -ne 'detached' -or
         $null -ne $server.modal_kind -or
         [string]::IsNullOrWhiteSpace($server.event_epoch) -or
         $null -eq $server.event_sequence -or
@@ -337,7 +337,7 @@ try {
         $instance.workspace_path -ne $workspaceFile) {
         throw (
             'list-instances/server-list did not report the same live server with ' +
-            'typed window and event state'
+            'typed detached-window and event state'
         )
     }
     $targetedProtocol = Invoke-CheckedExe $CtlExe @(
@@ -355,7 +355,7 @@ try {
     $eventKinds = @($eventCatalog | ForEach-Object kind)
     if ($targetedProtocol.event_catalog.schema_version -ne 2 -or
         -not $targetedProtocol.features.typed_events -or
-        $eventCatalog.Count -ne 26 -or
+        $eventCatalog.Count -ne 29 -or
         @($eventKinds | Sort-Object -Unique).Count -ne $eventCatalog.Count -or
         @($eventCatalog | Where-Object {
                 [string]::IsNullOrWhiteSpace($_.kind) -or
@@ -369,34 +369,47 @@ try {
     Write-Evidence 'fleet.upgrade-truth'
 
     Write-Host 'STEP server-scoped event transition matches its post-state'
-    $layoutBaseline = Invoke-CheckedExe $CtlExe @('ui-snapshot') | ConvertFrom-Json
-    $layoutBefore = [bool]$layoutBaseline.layout.sidebar.visible
-    Invoke-CheckedExe $CtlExe @('ui-action', 'toggle-tabs') | Out-Null
-    $layoutAfter = Invoke-CheckedExe $CtlExe @('ui-snapshot') | ConvertFrom-Json
-    $layoutEvents = Invoke-CheckedExe $CtlExe @(
+    $noteBaseline = Invoke-CheckedExe $CtlExe @('ui-snapshot') | ConvertFrom-Json
+    $noteTab = @($noteBaseline.tabs |
+        Where-Object name -eq $environmentName)[0]
+    if ($null -eq $noteTab -or -not $noteTab.id.StartsWith('@')) {
+        throw 'server event transition could not resolve its stable tab ID'
+    }
+    $nextNote = "fleet-event-$PID"
+    $numericTabId = [int]$noteTab.id.TrimStart('@')
+    Invoke-CheckedExe $CtlExe @(
+        'set-tab-note', '-t', $noteTab.id, $nextNote
+    ) | Out-Null
+    $noteAfter = Invoke-CheckedExe $CtlExe @('ui-snapshot') | ConvertFrom-Json
+    $committedTab = @($noteAfter.tabs |
+        Where-Object id -eq $noteTab.id)[0]
+    $noteEvents = Invoke-CheckedExe $CtlExe @(
         'read-events',
-        '--epoch', $layoutBaseline.event_position.epoch,
-        '--after', "$($layoutBaseline.event_position.sequence)",
+        '--epoch', $noteBaseline.event_position.epoch,
+        '--after', "$($noteBaseline.event_position.sequence)",
         '--limit', '32'
     ) | ConvertFrom-Json
-    $visibilityEvent = @($layoutEvents.events |
-        Where-Object kind -eq 'layout.tabs.visibility')[-1]
-    if ($null -eq $visibilityEvent -or
-        $visibilityEvent.tab_id -ne $null -or
-        [bool]$visibilityEvent.payload.visible -ne [bool]$layoutAfter.layout.sidebar.visible -or
-        [bool]$layoutAfter.layout.sidebar.visible -eq $layoutBefore) {
-        throw 'server-scoped layout event did not describe its committed snapshot state'
+    $noteEvent = @($noteEvents.events |
+        Where-Object {
+            $_.kind -eq 'tab.note' -and $_.tab_id -eq $numericTabId
+        })[-1]
+    if ($null -eq $noteEvent -or
+        $noteEvent.payload.note -ne $nextNote -or
+        $committedTab.note -ne $nextNote) {
+        throw 'server-scoped tab event did not describe its committed snapshot state'
     }
-    Invoke-CheckedExe $CtlExe @('ui-action', 'toggle-tabs') | Out-Null
     Write-Evidence 'fleet.instance-discovery'
 
     $capture = Invoke-CheckedExe $CtlExe @('capture-pane', '-p', '-t', $environmentName)
     $snapshot = Invoke-CheckedExe $CtlExe @('ui-snapshot') | ConvertFrom-Json
     $tab = $snapshot.tabs | Where-Object name -eq $environmentName
+    $tabInspect = Invoke-CheckedExe $CtlExe @(
+        'inspect', '-t', $tab.id
+    ) | ConvertFrom-Json
     if ($capture -notmatch "FLEET_ROLE=$([regex]::Escape($role))" -or
         $capture -notmatch "AGENTERM_TAB_ID=$([regex]::Escape($tab.id))" -or
         $capture -notmatch 'AGENTERM_SESSION=agenterm' -or
-        $tab.environment_names -notcontains 'FLEET_ROLE') {
+        $tabInspect.windows[0].environment_names -notcontains 'FLEET_ROLE') {
         throw 'The child did not receive its scoped environment and authoritative tab context'
     }
     Write-Evidence 'fleet.tab-environment'
@@ -571,11 +584,14 @@ try {
     $capture = Invoke-CheckedExe $CtlExe @('capture-pane', '-p', '-t', $agentName)
     $snapshot = Invoke-CheckedExe $CtlExe @('ui-snapshot') | ConvertFrom-Json
     $agent = $snapshot.tabs | Where-Object name -eq $agentName
+    $agentInspect = Invoke-CheckedExe $CtlExe @(
+        'inspect', '-t', $agent.id
+    ) | ConvertFrom-Json
     if (-not $capture.Contains('HTTPS_PROXY_PRESENT') -or
         -not $capture.Contains('NO_PROXY=localhost,127.0.0.1') -or
         $capture -notmatch "AGENTERM_TAB_ID=$([regex]::Escape($agent.id))" -or
         $capture.Contains('--dangerously-bypass-approvals-and-sandbox') -or
-        $agent.environment_names -notcontains 'HTTPS_PROXY') {
+        $agentInspect.windows[0].environment_names -notcontains 'HTTPS_PROXY') {
         throw (
             "new-agent default was not safe or missed proxy/tab context`n" +
             "capture=$capture`n" +
@@ -704,9 +720,6 @@ try {
         }
     }
     Invoke-CheckedExe $CtlExe @('start-server') | Out-Null
-    Invoke-CheckedExe $CtlExe @(
-        'wait-ui', '--window-state', 'restored', '--timeout-ms', '10000'
-    ) | Out-Null
     $restartName = "restart-$PID"
     Invoke-CheckedExe $CtlExe @(
         'new-window', '-d', '-n', $restartName,
@@ -728,6 +741,8 @@ try {
         '--after', "$($restartBefore.event_position.sequence)"
     )
     if ($restartAfter.event_position.epoch -eq $restartBefore.event_position.epoch -or
+        $restartAfter.projection -ne 'headless_server' -or
+        $restartAfter.window.state -ne 'detached' -or
         $serverAfterRestart.pid -eq $serverBeforeRestart.pid -or
         -not $restartError.Contains('"code":"server_restart"') -or
         -not $restartError.Contains('"requested_epoch"') -or

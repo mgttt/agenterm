@@ -940,6 +940,7 @@ pub(crate) fn dispatch_shared_command(
     let command = command_name(args)?;
 
     match command {
+        "start-server" => Some(IpcResponse::success("")),
         "protocol-info" => Some(IpcResponse::success(
             crate::client::protocol_info_json_with_ui_bridge(
                 "running_host",
@@ -1293,8 +1294,11 @@ pub(crate) fn dispatch_shared_command(
                 Err(error) => Some(IpcResponse::failure(error.to_string())),
             }
         }
-        "neww" | "new-window" => {
+        "new" | "new-session" | "neww" | "new-window" => {
             let (title, detached, child_command) = parse_new_command(args);
+            let requested_session = matches!(command, "new" | "new-session")
+                .then(|| option_value(args, "-s").map(str::to_owned))
+                .flatten();
             let tab_environment = match parse_tab_environment(args) {
                 Ok(environment) => environment,
                 Err(error) => return Some(IpcResponse::failure(error)),
@@ -1308,6 +1312,9 @@ pub(crate) fn dispatch_shared_command(
             };
             match host.create_tab(title, child_command, tab_environment, !detached, parent_id) {
                 Ok(index) => {
+                    if let Some(session) = requested_session {
+                        host.set_session_name(session);
+                    }
                     let format = option_value(args, "-F").unwrap_or("#{window_index}");
                     let tab = host
                         .tabs()
@@ -1322,6 +1329,60 @@ pub(crate) fn dispatch_shared_command(
                     )))
                 }
                 Err(error) => Some(IpcResponse::failure(error)),
+            }
+        }
+        "new-agent" => {
+            let (title, detached, agent_arguments) = parse_new_command(args);
+            let tab_environment = match parse_tab_environment(args) {
+                Ok(environment) => environment,
+                Err(error) => return Some(IpcResponse::failure(error)),
+            };
+            let parent_id = match option_value(args, "--parent") {
+                Some(target) => match host.resolve_parent_id(target) {
+                    Ok(parent_id) => parent_id,
+                    Err(error) => return Some(IpcResponse::failure(error)),
+                },
+                None => None,
+            };
+            let mut child_command = if let Some(program) = option_value(args, "--program") {
+                vec![program.to_owned()]
+            } else {
+                vec![
+                    std::env::var("COMSPEC")
+                        .unwrap_or_else(|_| r"C:\Windows\System32\cmd.exe".to_owned()),
+                    "/d".to_owned(),
+                    "/c".to_owned(),
+                    "codex".to_owned(),
+                ]
+            };
+            if has_option(args, "--yolo") {
+                child_command.push("--dangerously-bypass-approvals-and-sandbox".to_owned());
+            }
+            child_command.extend(agent_arguments);
+            match host.create_tab(
+                title.or_else(|| Some("Codex".to_owned())),
+                child_command,
+                tab_environment,
+                !detached,
+                parent_id,
+            ) {
+                Ok(index) => {
+                    let format = option_value(args, "-F").unwrap_or("#{window_index}");
+                    let tab = host
+                        .tabs()
+                        .iter()
+                        .find(|tab| tab.index == index)
+                        .expect("newly created agent tab must remain present");
+                    Some(IpcResponse::success(render_format(
+                        format,
+                        tab,
+                        host.session_name(),
+                        host.active_id() == Some(tab.id),
+                    )))
+                }
+                Err(error) => Some(IpcResponse::failure(format!(
+                    "failed to start Codex agent tab: {error}"
+                ))),
             }
         }
         "selectw" | "select-window" => {
