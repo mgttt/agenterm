@@ -37,7 +37,7 @@ require(
     "docs index must publish English and Traditional Chinese discovery"
 );
 require(
-    html.contains("與 Agent 共同打造")
+    html.contains("本機 Agent 艦隊工作 OS")
         && html.contains("Windows 已交付")
         && html.contains("macos-unsigned-preview.md"),
     "docs index must include reviewed Traditional Chinese product copy and preview guidance"
