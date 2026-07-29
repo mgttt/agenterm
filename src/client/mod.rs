@@ -1060,9 +1060,9 @@ fn run_script_command_with_context(
     let mut budgets = ScriptBudgets::default();
     if let Some(value) = option_value(arguments, "--timeout-ms") {
         match value.parse::<u64>() {
-            Ok(value) if (1..=120_000).contains(&value) => budgets.wall_time_ms = value,
+            Ok(value) if (1..=3_600_000).contains(&value) => budgets.wall_time_ms = value,
             _ => {
-                eprintln!("script --timeout-ms must be from 1 to 120000");
+                eprintln!("script --timeout-ms must be from 1 to 3600000");
                 return 2;
             }
         }

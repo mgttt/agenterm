@@ -775,10 +775,10 @@ pub fn entries() -> Vec<ScriptApiEntry> {
         shipped_local_entry(
             "std.process.command-builder",
             "system/process/command/builder",
-            "Command.arg/args/current_dir/env/env_remove/env_clear/stdin_text/stdin_bytes/stdout_file/timeout/capture_limit",
+            "Command.arg/args/current_dir/env/env_remove/env_clear/stdin_text/stdin_bytes/stdout_file/stderr_file/timeout/capture_limit",
             Some("std::process::Command"),
             RustMapping::Adapted,
-            "command.arg(value) / command.args(values) / command.current_dir(path) / command.env(name, value) / command.stdin_text(text) / command.stdin_bytes(bytes) / command.stdout_file(path)",
+            "command.arg(value) / command.args(values) / command.current_dir(path) / command.env(name, value) / command.stdin_text(text) / command.stdin_bytes(bytes) / command.stdout_file(path) / command.stderr_file(path)",
             (&["mutable_builder", "bounded_text_or_binary_stdin", "invocation_owned"], &["process_argument", "environment_name_invalid", "process_stdin_too_large"]),
         ),
         shipped_local_entry(
@@ -1361,7 +1361,7 @@ pub fn catalog() -> Value {
             "job_object": "kill_on_close",
             "cancel_grace_ms": 150,
             "per_process_concurrency": 2,
-            "global_concurrency": 4,
+            "global_concurrency": 8,
         },
         "limits": {
             "defaults": defaults,

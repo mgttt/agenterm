@@ -72,7 +72,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   the remaining shipped leaves still need registered evidence
 - [x] CLI and semantic UX smoke tests through public interfaces
 - [x] one-command fmt, Clippy, test, build, and smoke regression
-- [x] `check.ps1 -Quick` provides a non-qualifying development lane ordered
+- [x] `check.cmd --quick` provides a non-qualifying Rhai development lane ordered
   as static lint, formatting, PRD alignment, all-target Clippy, and library
   tests; compiling every target under Clippy keeps integration-test lint equal
   to CI while it still performs no artifact build, packaging self-test, GUI
@@ -122,9 +122,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     fallback and writes proof that no owned GUI/server/worker, window, or
     registration remains; the first shared Rhai harness self-test proves an
     unregistered sibling process is not killed, registered Child cleanup is
-    orphan-free, and the original failure is preserved, while the existing
-    PowerShell harness retains PID/start-time/window/registration coverage
-    until each owning smoke journey migrates
+    orphan-free, and the original failure is preserved; every owning smoke
+    journey now uses that Rhai harness and its typed process/window facts
   - [x] qualification extracts evidence IDs actually emitted by the current
     gate, rejects duplicates or mismatch with its versioned manifest, and has
     fail-closed tests for failed/skipped gates; executable Rhai declaration
@@ -244,7 +243,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [~] the public `prd-alignment` Rhai task compares PRD modules, shipped
       capability/evidence declarations, and live CLI/protocol/Mux catalogs;
       exact Rhai API-field comparison remains planned
-    - [x] `check.ps1` runs the named Rhai `script-smoke` task before the
+    - [x] `check.cmd` runs the named Rhai `script-smoke` task before the
       Script Runtime release gate
 - v0.1.8 autonomous public-interface dogfood (P0)
   - Resolved findings retained as regression contracts

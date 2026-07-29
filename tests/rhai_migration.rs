@@ -1521,7 +1521,7 @@ fn migration_audit_rejects_operational_references_to_deleted_scripts() {
             fs::write(path, b"# inventory fixture\n").expect("write inventory fixture");
         }
     }
-    for name in ["build.bat", "check.ps1", "lint.cmd", "release.ps1"] {
+    for name in ["build.bat", "check.cmd", "lint.cmd", "release.ps1"] {
         let path = repo.join(name);
         if !path.exists() {
             fs::write(path, b"# operational fixture\n").expect("write operational fixture");

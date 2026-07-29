@@ -128,19 +128,19 @@ expect_rejection(
 );
 
 let check_source = std::fs::read_to_string(
-    std::path::join(repo, "check.ps1").display
+    std::path::join(repo, "scripts/rhai/check.rhai").display
 );
 let artifact_offset = check_source.index_of(
-    "Invoke-Checked -Id 'artifact-build'"
+    `"artifact-build",`
 );
 let catalog_offset = check_source.index_of(
-    "Invoke-Checked -Id 'task-catalog'"
+    `id:"task-catalog"`
 );
 let declaration_offset = check_source.index_of(
-    "Assert-AgenTermQualificationDeclarations -Context"
+    "sequence = assert_declarations("
 );
 let smoke_offset = check_source.index_of(
-    "Invoke-Checked -Id 'startup-smoke'"
+    `let smoke_ids = [`
 );
 require(
     artifact_offset >= 0

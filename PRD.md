@@ -102,7 +102,7 @@ tree does not promise a version or implementation strategy.
 
 ## Current acceptance gate
 
-Run `.\lint.cmd` for fast local feedback and `.\check.ps1` for ordinary
+Run `.\lint.cmd` for fast local feedback and `.\check.cmd` for ordinary
 changes. A change is ready only when repository static lint, formatting,
 Clippy with warnings denied, production Rhai checks, unit tests, `dist/`
 artifact generation, CLI smoke, and semantic UX smoke all pass. Rendering
@@ -110,7 +110,7 @@ changes additionally require
 `screenshot` or `screenshot-pane` inspection.
 
 A v0.1.9-family candidate uses
-`.\check.ps1 -Release -IncludeStress` on a clean commit and must emit one
+`.\check.cmd --release --include-stress` on a clean commit and must emit one
 complete qualification receipt bound to the exact candidate bytes. The
 independent `agenterm-script task run package-qualified` step may only copy
 those byte-identical qualified artifacts; it does not rebuild. A non-publishing

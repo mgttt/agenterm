@@ -88,12 +88,12 @@ Use PowerShell from the repository root:
 .\lint.cmd              # fast fail: Rust, JSON, text hygiene, and production Rhai
 .\build.bat             # fast incremental dev build -> .\dist\
 .\build.bat release-fast # optimized incremental local-test build -> .\dist\
-.\check.ps1 -Quick      # static/PRD/fmt + all-target Clippy + lib tests
-.\check.ps1 -SkipSmoke  # CI-grade fmt, all-target Clippy/tests, dev artifact
-.\check.ps1             # full public-interface regression
-.\check.ps1 -Release    # local release gate; skips event-journal load stress
-.\check.ps1 -Release -IncludeStress # exact candidate qualification + receipt
-.\scripts\package-qualified.ps1     # package only the qualified bytes
+.\check.cmd --quick      # static/PRD/fmt + all-target Clippy + lib tests
+.\check.cmd --skip-smoke # CI-grade fmt, all-target Clippy/tests, dev artifact
+.\check.cmd              # full public-interface regression
+.\check.cmd --release    # local release gate; skips event-journal load stress
+.\check.cmd --release --include-stress # exact qualification + receipt
+.\dist\agenterm-script.exe task run package-qualified --manifest .\agenterm.tasks.json
 .\build.bat release     # distributable release artifact
 .\release.ps1           # public versions only: validate/tag/push for CI
 ```
@@ -108,8 +108,8 @@ the tag workflow reject it. Never create or push `v0.1.7`; qualify it with the
 stress-inclusive command above and use only the ignored dry-run package.
 
 Use a validation ladder instead of running the largest gate after every edit:
-run `check.ps1 -Quick` once after a coherent implementation, then `build.bat`
-plus only the directly owning smoke suite, and reserve `check.ps1 -SkipSmoke`
+run `check.cmd --quick` once after a coherent implementation, then `build.bat`
+plus only the directly owning smoke suite, and reserve `check.cmd --skip-smoke`
 or full qualification for the integrated pre-push/release boundary. Search all
 geometry/protocol consumers before the first black-box run so old assertions
 are migrated in the same patch.
@@ -138,9 +138,8 @@ and retains incremental state. A final `release` build uses the dedicated
 repo-local `target-release/` scratch directory, stages all distributable files
 in `dist/`, and cleans only that scratch directory; it must not erase the
 development `target/` cache. Release-only size optimization belongs in
-`[profile.release]`. The staging path is intentionally one PowerShell process
-and prefers `pwsh` when available; do not split it back into one interpreter
-startup per artifact.
+`[profile.release]`. The staging path is one named Rhai task; do not split it
+back into one interpreter startup per artifact.
 Build-identity freezing first reuses an existing compatible Script worker and
 falls back to bootstrapping one only when it is absent or incompatible. Do not
 restore an unconditional pre-identity worker build: compile-time
@@ -149,7 +148,7 @@ redundant shared-library rebuild to warm loops.
 All smoke tests inherit `AGENTERM_NO_ACTIVATE=1`; GUI launches and CLI
 autostarts must honor it without taking foreground focus. Routine local release
 checks may skip the bounded-journal saturation load. A candidate-bound
-qualification receipt requires `check.ps1 -Release -IncludeStress`; packaging
+qualification receipt requires `check.cmd --release --include-stress`; packaging
 must consume that exact receipt and must not rebuild.
 The release gate enforces explicit budgets of 4 MiB for `agenterm.exe` and
 2 MiB each for `agenterm-cli.exe`, `agenterm-mux.exe`, and
@@ -241,9 +240,9 @@ behavior.
 
 ## Cursor Cloud specific instructions
 
-The cloud VM is **Linux**, but AgenTerm is **Windows-only** (`windows-sys`,
-ConPTY, MSVC target). The remaining Windows orchestration (`build.bat`,
-`check.ps1`, and `release.ps1`) is Windows-host-only and does not run here;
+The cloud VM is **Linux**, but the native Windows GUI/runtime (`windows-sys`,
+ConPTY, MSVC target) and its orchestration (`build.bat`, `check.cmd`, and
+`release.ps1`) do not run there;
 repository lint and all smoke logic are Rhai-owned. For the authoritative
 Windows dev loop see the sections above and `README.md`. On the Linux VM,
 build/lint/test Windows targets by cross-compiling

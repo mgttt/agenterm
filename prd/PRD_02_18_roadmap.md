@@ -275,8 +275,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       impose a cold rebuild on the next edit
     - [x] `build.bat release-fast` provides an optimized incremental local
       loop with LTO disabled and parallel codegen, while consolidated
-      staging uses one PowerShell process (preferring `pwsh`) instead of
-      paying one interpreter startup per artifact
+      staging uses one named Rhai task instead of paying one interpreter
+      startup per artifact
     - [x] every local smoke-test GUI launch and CLI autostart inherits
       `AGENTERM_NO_ACTIVATE=1` and must remain behind the user's foreground
       work; local release qualification skips the 4,128-write bounded-event
@@ -388,8 +388,8 @@ track remains planned, but every declared dependency must still pass.
     degraded reason; mutations return request identity, receipt, correlated
     event and verified post-state through the same unrestricted runtime surface
   - [x] public file/process/loopback-HTTP/task/module/Fleet/privacy/crash/orphan
-    journeys prove one complete local automation task and one low-risk
-    PowerShell/Rhai self-hosting dual-run without replacing release scripts
+    journeys prove one complete local automation task; the former low-risk
+    PowerShell/Rhai dual-run has completed its caller cutover and source removal
   - [x] implementation sequencing, budgets, risks and release evidence are
     owned by [the v0.1.9 public plan](../plan/plan-v0.1.9.md)
 - [ ] M7 / v0.1.10 Rhai Self-Hosting and Verifiable Read-Only Agent Bridge

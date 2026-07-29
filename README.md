@@ -80,13 +80,13 @@ build metadata under `dist/`:
 Run the complete quality gate:
 
 ```powershell
-.\check.ps1
+.\check.cmd
 ```
 
 Smoke tests inherit `AGENTERM_NO_ACTIVATE=1`, so their isolated GUI windows do
-not interrupt the foreground application. `.\check.ps1 -Release` omits the
+not interrupt the foreground application. `.\check.cmd --release` omits the
 4,128-write event-journal load test; the clean GitHub release runner adds
-`-IncludeStress`.
+`--include-stress`.
 
 ### Linux GUI (preview)
 

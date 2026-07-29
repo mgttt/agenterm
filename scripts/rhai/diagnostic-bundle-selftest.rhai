@@ -86,7 +86,7 @@ fn assert_bounded_bundle(path, suite, marker_kind) {
         manifest.schema_version == 1
             && manifest.suite == suite
             && manifest.failure.split(marker).len - 1 == 1,
-        "diagnostic_bundle_identity:" + suite
+        "diagnostic_bundle_identity:" + suite + ":" + manifest.failure
     );
     require(
         manifest.privacy.command_arguments ==
@@ -161,19 +161,24 @@ fn assert_bounded_bundle(path, suite, marker_kind) {
         let commands_text = std::fs::read_to_string(command_log);
         let commands = rhai::json::parse(commands_text);
         let successful_worker = false;
+        let observed_evals = [];
         for command in commands {
             let output = trimmed(command.output);
-            if command.exit_code == 0
-                    && command.arguments.contains("script")
-                    && command.arguments.contains("eval")
-                    && command.arguments.contains("<content>")
-                    && output == "42" {
-                successful_worker = true;
+            if command.arguments.contains("script")
+                    && command.arguments.contains("eval") {
+                observed_evals.push(#{
+                    exit_code: command.exit_code,
+                    output: output
+                });
+                if command.exit_code == 0 && output == "42" {
+                    successful_worker = true;
+                }
             }
         }
         require(
             successful_worker,
-            "diagnostic_script_success_not_retained"
+            "diagnostic_script_success_not_retained:" +
+                rhai::json::stringify(observed_evals)
         );
         let retained =
             manifest.failure + "\n" + commands_text;

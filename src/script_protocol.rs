@@ -109,7 +109,7 @@ impl ScriptBudgets {
             collection_items: 100_000,
             string_bytes: 8 * 1024 * 1024,
             output_bytes: 1024 * 1024,
-            wall_time_ms: 120_000,
+            wall_time_ms: 3_600_000,
             broker_requests: 256,
             broker_return_bytes: 1024 * 1024,
             capture_bytes: 256 * 1024,

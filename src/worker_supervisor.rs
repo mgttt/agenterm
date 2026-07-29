@@ -31,7 +31,7 @@ use crate::script_protocol::{
 };
 
 const PROCESS_CONCURRENCY_LIMIT: usize = 2;
-const GLOBAL_CONCURRENCY_LIMIT: usize = 4;
+const GLOBAL_CONCURRENCY_LIMIT: usize = 8;
 static PROCESS_ACTIVE: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Debug)]

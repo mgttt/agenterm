@@ -16,6 +16,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   surface. No invocation mode, task label, profile, catalog capability, caller,
   or entry point gates API registration or execution; the future Agent harness
   owns Agent permissions outside this executable.
+- [x] the 2026-07-30 `AGENTS.md` and `PRD*.md` policy audit found no Rhai
+  permission tier or capability denial. Raw sockets, listeners, arbitrary
+  endpoints and local paths, child-process control, destructive filesystem
+  targets, and Fleet mutation are valid runtime surface; an unshipped adapter
+  remains a product gap and must not be replaced by a policy-reduced variant.
 - [x] Script API v2 maps every current typed operation exactly once to `fleet` and verifies mutation receipts, correlated events, and post-state.
 - [x] task-manifest schema v2 publishes an inclusive required Script API range
   and stable capability IDs; list/show preserve incompatible projects for
@@ -83,10 +88,11 @@ and it is not positioned as a restricted security plugin.
 - technical budgets, typed errors, cancellation, process isolation, audit
   privacy, and product data-integrity checks are runtime robustness controls,
   never permissions;
-- [x] explicit local repository tasks may raise their invocation wall-time
-  budget to the stable 120-second hard ceiling; child-process deadlines retain
-  an independent 60-second ceiling while HTTP retains its stricter 10-second
-  ceiling;
+- [x] explicit local tasks may raise their invocation wall-time budget to the
+  stable one-hour robustness ceiling so build and qualification orchestration
+  can remain Rhai-owned; the ordinary default remains two seconds,
+  child-process call deadlines may use the same one-hour ceiling, and HTTP
+  retains its stricter 10-second ceiling;
 - agent-specific tool visibility, approval, path/domain/target policy,
   credentials, quotas, and natural-language intent belong exclusively to the
   future Agent harness, which may constrain an Agent before invoking this
@@ -198,9 +204,10 @@ and it is not positioned as a restricted security plugin.
 - [x] `rhai::http` provides HTTP(S) method, URL, headers, body, timeout,
   status, bounded response streaming, cancellation, proxy/TLS diagnostics and
   credential-safe errors. Rust std has no high-level HTTP client, so
-  the AgenTerm-native high-level client lives under `rhai::http`; typed TCP,
-  UDP, listeners, and WebSockets remain runtime expansion work rather than
-  forbidden authority.
+  the AgenTerm-native high-level client lives under `rhai::http`; raw sockets,
+  typed TCP/UDP, listeners, and WebSockets are runtime expansion work rather
+  than forbidden authority and must not acquire address, endpoint, port, path,
+  process, or caller allowlists.
   - [x] `request` and `start` use Windows native TLS and the system root store;
     Unix targets retain Rustls/WebPKI. They also provide
     environment/disabled/explicit proxy selection, bytes-first duplicate
@@ -445,7 +452,7 @@ Migration ledger:
 | Source build identity freeze | `scripts/rhai/build-identity.rhai` | `scripts/build-identity.ps1` | `b082c3b` | public CLI black-box tests prove exact Git-root binding, clean/dirty truth, profile validation, batch-safe fields, and exact SHA-256 build-input identities | deleted; `build.bat` and both check lanes bootstrap the current Script Runtime before invoking the named Rhai task |
 | Staged build provenance | `scripts/rhai/write-build-metadata.rhai` plus shared artifact/metadata modules | `scripts/write-build-metadata.ps1` | current migration change | public CLI black-box tests prove frozen and live identities, executable size/hash capture, clean-source and frozen-input drift rejection; direct old/new field parity excludes only the generation timestamp | deleted; the standalone task and `stage-build.rhai` reuse the same project modules |
 | Built artifact orchestration | `scripts/rhai/stage-build.rhai` plus shared artifact/metadata modules | `scripts/stage-build.ps1` | current migration change | public CLI composition fixture proves cleanup, obsolete removal, staging, metadata and pre-mutation Git-root rejection; actual `build.bat` and direct old/new directory parity cover the six-artifact path | deleted; `build.bat` invokes one bounded Rhai task and no longer launches PowerShell |
-| Read-only release preflight | `scripts/rhai/preflight.rhai` | `scripts/preflight.ps1` and `scripts/preflight-selftest.ps1` | current migration change | public CLI real-Git fixtures prove clean/CRLF success, dirty/wrong-branch/bad-lock/bad-manifest fail-closed reports, nested output creation, and remote credential redaction | deleted; `check.ps1` runs the Rust black-box fixture and invokes the named Rhai task for release preflight |
+| Read-only release preflight | `scripts/rhai/preflight.rhai` | `scripts/preflight.ps1` and `scripts/preflight-selftest.ps1` | current migration change | public CLI real-Git fixtures prove clean/CRLF success, dirty/wrong-branch/bad-lock/bad-manifest fail-closed reports, nested output creation, and remote credential redaction | deleted; `check.cmd` runs the Rust black-box fixture and invokes the named Rhai task for release preflight |
 | Preflight latency benchmark | `scripts/rhai/preflight-benchmark.rhai` | `scripts/preflight-benchmark.ps1` | current migration change | public worker black-box benchmark against a clean Git clone proves five successful preflight subprocesses, p95 target enforcement, durable JSON evidence, and scratch cleanup | deleted; release check invokes the named Rhai task directly |
 | Locked dependency and SPDX inventory | `scripts/rhai/supply-chain.rhai` | `scripts/supply-chain.ps1` | current migration change | public task covers every resolved Cargo.lock package, reviewed licenses, direct-notice alignment, deterministic ordinal ordering, SPDX structure and scratch cleanup; old/new semantic parity differs only in producer identity and ordering | deleted; ordinary and release checks invoke the named Rhai task |
 | Obsolete v0.1.8 public-candidate decision and self-test | Current qualification receipt, byte-qualified package, release preflight, and explicit approval boundaries | `scripts/public-candidate-policy.ps1` and `scripts/public-candidate-policy-selftest.ps1` | current migration change | the legacy self-test passed before removal; `git grep` proves no operational caller, while current qualification/package self-tests own the retained fail-closed invariants | deleted as unreachable version-specific duplication; Git history is the rollback source |
@@ -472,6 +479,8 @@ Migration ledger:
 | Unintegrated professional terminal-selection prototype | Future public Rhai professional-selection journey after the product slice ships | `tests/terminal_selection_smoke.ps1` | current migration change | caller audit finds no check, CI, qualification, or registered evidence consumer; direct execution fails before interaction at zero terminal columns, while the Windows double-click handler does not implement the claimed word/third-click behavior and the product PRD keeps that slice planned | deleted as misleading dead test code; Git history retains the prototype |
 | Semantic UX geometry, interaction, restart, and no-activate journey | `scripts/rhai/remote-ui-smoke.rhai`, `scripts/rhai/startup-smoke.rhai`, and `scripts/rhai/working-context-smoke.rhai` plus typed foreground-window observation | `tests/ux_smoke.ps1` | current migration change | the three named Rhai journeys emit all sixteen former UX evidence IDs and prove semantic minimize/maximize/resize, locale, modal wait, hierarchy cycle rejection and child promotion, adaptive Tabs, physical focus/scroll/selection/clipboard, Settings isolation, safe CWD quoting and OSC 7, close/detach, exact no-activate observation, and persistent tab metadata across restart | deleted; qualification owns the behavior through the three existing journeys without launching a duplicate GUI fleet |
 | Fast repository lint | `scripts/rhai/lint.rhai` plus thin `lint.cmd` bootstrap | `lint.ps1` | current migration change | public task and wrapper pass JSON parsing, strict UTF-8/NUL/conflict-marker hygiene, production Rhai checks, malformed JSON/UTF-8/conflict/Rhai self-tests, and Rust rustfmt/Clippy mode; process inspection confirms no PowerShell child | deleted; check calls the same Rhai task and the batch file owns only Script worker bootstrap and argument forwarding |
+| Integrated quality-gate orchestration | `scripts/rhai/check.rhai`, `scripts/rhai/artifact-verification.rhai`, and thin `check.cmd` bootstrap | `check.ps1` | current migration change | `check.cmd --quick` and `--skip-smoke` pass through the public named task; the latter completes 255 library tests plus integration groups, staged six-artifact verification, declaration discovery, diagnostics, timing, and fail-closed qualification bookkeeping without PowerShell | deleted; CI and release workflow call the same batch bootstrap and Rhai task |
+| Qualification result and receipt production | `scripts/rhai/check.rhai` plus `scripts/rhai/lib/qualification.rhai` | `scripts/qualification.ps1` | current migration change | the named check task validates exact required gates and executable evidence declarations, rejects failed/skipped or missing-stress results, binds artifact metadata to source state, and writes the receipt only for a complete stress-inclusive run | deleted; quality orchestration imports the shared Rhai module directly |
 
 ### v0.1.10 completion commitment
 
@@ -481,7 +490,7 @@ Migration ledger:
 - [x] the dated 2026-07-29 frozen baseline is 43 tracked `.ps1` files: 3 at
   the repository root, 17 under `scripts/`, 21 under `tests/`, and 2 retained in
   `scripts/archive/powershell/`.
-- [~] migration progress is 40/43 deleted and 3/43 remaining; progress is
+- [~] migration progress is 42/43 deleted and 1/43 remaining; progress is
   counted only after parity evidence plus caller cutover, or caller-audited
   functional deletion of obsolete behavior, and source deletion.
 - [x] `scripts/powershell-migration.json` freezes all 43 baseline paths under
@@ -493,7 +502,8 @@ Migration ledger:
   duplicate paths, invalid states, and count drift; ordinary and release
   qualification invoke it as a required gate.
 - [~] the repository-root `agenterm.tasks.json` is now the offline task
-  catalog and ships thirty-four ready tasks (`bootstrap-info`, `build-identity`,
+  catalog and ships thirty-six ready tasks (`check`, `artifact-verification`,
+  `bootstrap-info`, `build-identity`,
   `harness-cleanup-selftest`, `diagnostic-bundle-selftest`,
   `qualification-selftest`, `package-qualified`, `lint`,
   `package-qualified-selftest`, `migration-audit`, `target-report`, `internal-version-policy`,
@@ -611,9 +621,11 @@ Migration ledger:
   than npm emulation inside the script runtime;
 - a persistent or automatically started script daemon and cross-invocation
   mutable runtime state;
-- UDP, WebSockets, and higher-level network modules beyond the shipped
-  unrestricted TCP stream/listener primitives remain planned Script Runtime
-  expansion and are not permission-gated;
+- raw sockets, UDP, WebSockets, and higher-level network modules beyond the
+  shipped unrestricted TCP stream/listener primitives remain planned Script
+  Runtime expansion; when shipped, they expose the operating-system authority
+  of the invoking user without Script-owned permission gates or endpoint
+  allowlists;
 - event handlers, watch mode, REPL, and durable background scheduling unless a
   later owned slice supplies separate acceptance;
 - Agent permission, approval, credential, quota, and natural-language policy

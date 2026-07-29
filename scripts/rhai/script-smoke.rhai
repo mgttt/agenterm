@@ -114,12 +114,12 @@ fn assert_api_contract(context, cli, script, runtime_dir, audit_path) {
     );
     require(
         catalog.limits.defaults.wall_time_ms == 2000
-            && catalog.limits.hard_maximums.wall_time_ms == 120000
+            && catalog.limits.hard_maximums.wall_time_ms == 3600000
             && catalog.limits.invocation_bytes == 2097152
             && catalog.framing.version == 1
             && catalog.framing.max_frame_bytes == 2097152
             && catalog.supervisor.job_object == "kill_on_close"
-            && catalog.supervisor.global_concurrency == 4,
+            && catalog.supervisor.global_concurrency == 8,
         "script_api_runtime_contract_mismatch"
     );
     require(
@@ -2519,22 +2519,25 @@ try {
         "PASS: unrestricted scripting API, supervision, audit privacy, and budgets"
     );
 } catch (error) {
-    failure = if internal_failure_probe {
-        "INTERNAL_FAILURE_BUNDLE_PROBE:script:" + context.run_id +
-            "\nintentional script failure-bundle probe"
+    let safe_error = test_harness::redact_text(
+        error.to_string(),
+        [
+            "AUDIT_STDOUT_SECRET",
+            "AUDIT_ARG_SECRET",
+            "AUDIT_SOURCE_SECRET",
+            "AUDIT_ENV_SECRET",
+            "HTTP_CREDENTIAL_SECRET",
+            "PRIVATE_PATH_SECRET",
+            "PROXY_CREDENTIAL_SECRET"
+        ]
+    );
+    let probe_marker =
+        "INTERNAL_FAILURE_BUNDLE_PROBE:script:" + context.run_id;
+    failure = if internal_failure_probe
+            && safe_error.contains(probe_marker) {
+        probe_marker + "\nintentional script failure-bundle probe"
     } else {
-        test_harness::redact_text(
-            error.to_string(),
-            [
-                "AUDIT_STDOUT_SECRET",
-                "AUDIT_ARG_SECRET",
-                "AUDIT_SOURCE_SECRET",
-                "AUDIT_ENV_SECRET",
-                "HTTP_CREDENTIAL_SECRET",
-                "PRIVATE_PATH_SECRET",
-                "PROXY_CREDENTIAL_SECRET"
-            ]
-        )
+        safe_error
     };
 }
 

@@ -371,6 +371,9 @@ agenterm-script
 │  │  ├─ .stdout_file(path)
 │  │  │  Truncates one explicit file and redirects the child's stdout to it.
 │  │  │  [shipped; stable; designed 2026-07-29]
+│  │  ├─ .stderr_file(path)
+│  │  │  Truncates one explicit file and redirects the child's stderr to it.
+│  │  │  [shipped; stable; designed 2026-07-30]
 │  │  ├─ .output() -> Output
 │  │  │  Runs synchronously with bounded captured output.
 │  │  │  [shipped; stable; designed 2026-07-28]
@@ -842,16 +845,16 @@ script but MUST NOT be copied into retained audit or diagnostics.
 `Command.env`, `env_remove`, and `env_clear` configure only the child; they do
 not mutate the AgenTerm host.
 
-`Command.stdout_file(path)` resolves the explicit path in the worker context,
-opens it with truncate semantics before child launch, and leaves
-`Output.stdout` empty. It does not create parent directories and never inserts
-a shell. This supports bounded orchestration of tools whose structured output
-is intentionally consumed later through typed file APIs.
+`Command.stdout_file(path)` and `stderr_file(path)` resolve explicit paths in
+the worker context, open them with truncate semantics before child launch, and
+leave the corresponding `Output` stream empty. They do not create parent
+directories and never insert a shell. This supports bounded orchestration of
+tools whose output is intentionally consumed later through typed file APIs.
 
 The shipped process defaults are a 2,000 ms child deadline and 64 KiB retained
 for each captured stream. A script MAY lower or raise them through
 `Command.timeout(Duration)` and `capture_limit(bytes)`, up to hard ceilings of
-60,000 ms and 256 KiB. Text or binary stdin is limited to 4 MiB. This process
+one hour and 256 KiB. Text or binary stdin is limited to 4 MiB. This process
 ceiling is independent of the HTTP adapter's stricter 10,000 ms deadline.
 
 `std::process::id()` returns the current supervised Script worker PID, matching
@@ -1176,6 +1179,9 @@ policy, credentials, quotas, and sandboxing before or around invocation.
 Typed errors, deadlines, byte/collection/concurrency limits, cancellation,
 supervision, audit privacy, and owned-resource cleanup remain mandatory
 robustness contracts. They MUST NOT be described or used as permissions.
+The current supervisor admits two simultaneous workers per host process and
+eight across the local machine, which is sufficient for nested self-hosted
+quality orchestration and its parallel failure probes.
 
 The current wire/task schemas retain a legacy `profile` field during migration.
 All accepted legacy spellings MUST resolve to the same unrestricted runtime and
@@ -1389,10 +1395,11 @@ Defaults and hard ceilings are published by `api --json`. Reaching a limit
 returns a typed limit error, cleans owned resources, and leaves the next
 invocation healthy.
 
-The default invocation wall time is 2 seconds. The stable hard ceiling is 120
-seconds so explicit local build and repository tasks can complete without
-escaping to another shell; child-process and HTTP operation deadlines remain
-independently bounded at 10 seconds.
+The default invocation wall time is 2 seconds. The stable hard ceiling is one
+hour so explicit local build and qualification tasks can complete without
+escaping to another shell. Individual child-process calls may use the same
+one-hour deadline ceiling, while HTTP operations retain an independent
+10-second ceiling.
 
 The CLI options `--timeout-ms`, `--max-operations`,
 `--max-collection-items`, and `--max-output-bytes` may select invocation

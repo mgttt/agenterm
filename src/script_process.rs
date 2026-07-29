@@ -20,7 +20,7 @@ use crate::{
 };
 
 const DEFAULT_TIMEOUT_MS: u64 = 2_000;
-const MAX_TIMEOUT_MS: u64 = 60_000;
+const MAX_TIMEOUT_MS: u64 = 3_600_000;
 const OUTPUT_DRAIN_GRACE: Duration = Duration::from_secs(1);
 const DEFAULT_CAPTURE_BYTES: usize = 64 * 1024;
 const MAX_CAPTURE_BYTES: usize = 256 * 1024;
@@ -38,6 +38,7 @@ pub struct ScriptCommand {
     clear_environment: bool,
     stdin: Vec<u8>,
     stdout_file: Option<PathBuf>,
+    stderr_file: Option<PathBuf>,
     timeout: Duration,
     capture_bytes: usize,
 }
@@ -135,6 +136,7 @@ fn register_types(engine: &mut Engine) {
     engine.register_fn("stdin_text", command_stdin_text);
     engine.register_fn("stdin_bytes", command_stdin_bytes);
     engine.register_fn("stdout_file", command_stdout_file);
+    engine.register_fn("stderr_file", command_stderr_file);
     engine.register_fn(
         "timeout",
         |command: &mut ScriptCommand, value: ScriptDuration| {
@@ -631,6 +633,7 @@ fn process_command(program: &str) -> Result<ScriptCommand, Box<EvalAltResult>> {
         clear_environment: false,
         stdin: Vec::new(),
         stdout_file: None,
+        stderr_file: None,
         timeout: Duration::from_millis(DEFAULT_TIMEOUT_MS),
         capture_bytes: DEFAULT_CAPTURE_BYTES,
     })
@@ -718,6 +721,14 @@ fn command_stdout_file(command: &mut ScriptCommand, path: &str) -> Result<(), Bo
     Ok(())
 }
 
+fn command_stderr_file(command: &mut ScriptCommand, path: &str) -> Result<(), Box<EvalAltResult>> {
+    if path.is_empty() {
+        return Err("process_stderr_file_empty".into());
+    }
+    command.stderr_file = Some(PathBuf::from(path));
+    Ok(())
+}
+
 fn command_capture_limit(
     command: &mut ScriptCommand,
     bytes: rhai::INT,
@@ -749,7 +760,13 @@ fn spawn_owned(command: &ScriptCommand) -> Result<ScriptChild, Box<EvalAltResult
     } else {
         process.stdout(Stdio::piped());
     }
-    process.stderr(Stdio::piped());
+    if let Some(path) = command.stderr_file.as_ref() {
+        let file =
+            std::fs::File::create(path).map_err(|error| format!("process_stderr_file: {error}"))?;
+        process.stderr(Stdio::from(file));
+    } else {
+        process.stderr(Stdio::piped());
+    }
     if let Some(current_dir) = command.current_dir.as_ref() {
         process.current_dir(current_dir);
     }
@@ -775,8 +792,15 @@ fn spawn_owned(command: &ScriptCommand) -> Result<ScriptChild, Box<EvalAltResult
             command.capture_bytes,
         )
     };
-    let stderr = child.stderr.take().ok_or("process_stderr_unavailable")?;
-    let stderr = from_process_reader(stderr, "bytes", command.capture_bytes);
+    let stderr = if command.stderr_file.is_some() {
+        from_reader(std::io::empty(), "bytes", 0)
+    } else {
+        from_process_reader(
+            child.stderr.take().ok_or("process_stderr_unavailable")?,
+            "bytes",
+            command.capture_bytes,
+        )
+    };
     if let Some(mut stdin) = child.stdin.take() {
         stdin
             .write_all(&command.stdin)
@@ -1675,12 +1699,12 @@ mod tests {
         );
         assert_eq!(
             engine()
-                .eval::<rhai::INT>("std::time::Duration::from_secs(60).millis")
+                .eval::<rhai::INT>("std::time::Duration::from_secs(3600).millis")
                 .unwrap(),
-            60_000
+            3_600_000
         );
         let error = engine()
-            .eval::<()>("std::time::Duration::from_millis(60001)")
+            .eval::<()>("std::time::Duration::from_millis(3600001)")
             .unwrap_err()
             .to_string();
         assert!(error.contains("duration_millis"));
@@ -1820,7 +1844,43 @@ mod tests {
         let result = engine().eval::<rhai::Map>(&source).unwrap();
         assert!(result["success"].as_bool().unwrap());
         assert_eq!(result["stdout"].clone().into_string().unwrap(), "");
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "redirected");
+        assert_eq!(std::fs::read_to_string(&path).unwrap().trim(), "redirected");
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn command_can_redirect_stderr_to_one_explicit_file() {
+        let path = std::env::temp_dir().join(format!(
+            "agenterm-process-stderr-{}.txt",
+            std::process::id()
+        ));
+        let script_path = path.to_string_lossy().replace('\\', "\\\\");
+        let source = if cfg!(windows) {
+            format!(
+                r#"
+                    let c = std::process::command("cmd.exe");
+                    c.args(["/d", "/s", "/c",
+                        "<nul set /p =redirected 1>&2&exit /b 0"]);
+                    c.stderr_file("{script_path}");
+                    let output = c.output();
+                    #{{ success: output.success, stderr: output.stderr_text() }}
+                "#
+            )
+        } else {
+            format!(
+                r#"
+                    let c = std::process::command("/bin/sh");
+                    c.args(["-c", "printf redirected >&2"]);
+                    c.stderr_file("{script_path}");
+                    let output = c.output();
+                    #{{ success: output.success, stderr: output.stderr_text() }}
+                "#
+            )
+        };
+        let result = engine().eval::<rhai::Map>(&source).unwrap();
+        assert!(result["success"].as_bool().unwrap());
+        assert_eq!(result["stderr"].clone().into_string().unwrap(), "");
+        assert_eq!(std::fs::read_to_string(&path).unwrap().trim(), "redirected");
         std::fs::remove_file(path).unwrap();
     }
 

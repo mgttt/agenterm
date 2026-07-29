@@ -53,7 +53,7 @@ try {
     }
 
     Write-Host "Preparing AgenTerm $version from $branch"
-    & '.\check.ps1' -Release
+    & '.\check.cmd' --release
     if ($LASTEXITCODE -ne 0) {
         throw "Quality gate failed with exit code $LASTEXITCODE"
     }

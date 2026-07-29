@@ -45,7 +45,7 @@ for artifact in manifest.executables {
     );
 }
 
-for example in [".\\build.bat", ".\\check.ps1", ".\\dist\\agenterm.exe"] {
+for example in [".\\build.bat", ".\\check.cmd", ".\\dist\\agenterm.exe"] {
     require(
         readme.contains(example),
         "README is missing required executable example '" + example + "'"
