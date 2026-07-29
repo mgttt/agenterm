@@ -42,9 +42,15 @@ use crate::{
     theme::ThemeId,
     ui_clipboard::{normalize_composer_paste, normalize_terminal_paste},
     ui_geometry::{
-        ScrollbarHit, TreeRowActionDensity, TreeRowMode, WHEEL_DELTA, WHEEL_ROWS_PER_NOTCH,
-        pixel_rect_json, scrollback_for_thumb_top, scrollbar_hit_test, tabs_width_from_drag,
-        terminal_cell_at, tree_row_geometry_for_mode, wheel_delta_units,
+        ScrollbarHit, TERMINAL_SCROLLBAR_WIDTH, TreeRowActionDensity, TreeRowMode, WHEEL_DELTA,
+        WHEEL_ROWS_PER_NOTCH, pixel_rect_json, scrollback_for_thumb_top, scrollbar_hit_test,
+        tabs_width_from_drag, terminal_cell_at, tree_row_geometry_for_mode, wheel_delta_units,
+    },
+    ui_snapshot::{
+        PROJECTION_EMBEDDED_GUI, TerminalSelectionSnapshotInput, archived_proxy_status_json,
+        embedded_window_json, event_position_json, locale_json, schema_version_json,
+        scrollbar_state_json, settings_json, system_menu_json, terminal_interaction_json,
+        working_context_json,
     },
     wake_signal::WakeSignal,
     working_context::{CwdSource, ShellKind, cwd_command, validate_path},
@@ -1033,23 +1039,66 @@ impl UnixApp {
         }
     }
 
+    fn system_menu_clipboard_state(&self) -> (bool, bool) {
+        let modal_free = !self.modal_surface_active();
+        let terminal_alive = self
+            .active_position()
+            .is_some_and(|position| self.tabs[position].exited.is_none());
+        let terminal_ready = modal_free && terminal_alive;
+        let copy = terminal_ready
+            && self
+                .terminal_selection
+                .as_ref()
+                .is_some_and(|selection| selection.bounds().0 != selection.bounds().1);
+        let paste = terminal_ready
+            && matches!(
+                self.focus_surface,
+                UnixFocusSurface::Terminal | UnixFocusSurface::Composer
+            );
+        (copy, paste)
+    }
+
     fn build_ui_snapshot_json(&mut self) -> String {
         let active = self.active;
         let (client_width, client_height) = self.client_size();
         let layout = self.layout();
         let visible_rows = self.visible_tree_rows();
         let all_rows = self.all_tree_rows();
-        let scrollbar = self.active_position().map(|position| {
+        let (terminal_rows, terminal_cols) = self
+            .active_position()
+            .map(|position| self.tabs[position].last_size)
+            .unwrap_or((0, 0));
+        let terminal_scrollbar = self.active_position().map(|position| {
             let visible_rows = usize::from(self.tabs[position].last_size.0);
             let (offset, maximum) = self.tabs[position].scrollback_bounds();
             let geometry = scrollbar_geometry(&layout, visible_rows, offset, maximum);
-            serde_json::json!({
-                "visible": true,
-                "track": pixel_rect_json(geometry.track),
-                "thumb": pixel_rect_json(geometry.thumb),
-                "max_offset": maximum,
-            })
+            scrollbar_state_json(&geometry, offset, maximum)
         });
+        let journal_position = self.event_journal.position();
+        let (copy_enabled, paste_enabled) = self.system_menu_clipboard_state();
+        const COMPOSER_SEND_WIDTH: i32 = 72;
+        let composer_send_left = layout.composer.right - COMPOSER_SEND_WIDTH - 8;
+        let composer_input = crate::ui_geometry::PixelRect {
+            left: layout.composer.left,
+            top: layout.composer.top,
+            right: composer_send_left,
+            bottom: layout.composer.bottom,
+        };
+        let composer_visible = !self.modal_surface_active();
+        let interaction_selection = self.terminal_selection.map(|selection| {
+            let (start, end) = selection.bounds();
+            TerminalSelectionSnapshotInput {
+                tab_id: selection.tab_id,
+                start_row: start.row,
+                start_col: start.col,
+                end_row: end.row,
+                end_col: end.col,
+                dragging: selection.dragging,
+            }
+        });
+        let gesture_phase = self
+            .terminal_selection_gesture
+            .map(|gesture| gesture.phase().as_str());
         let tab_editor = self.note_edit_target.map(|id| {
             serde_json::json!({
                 "target": format!("@{id}"),
@@ -1113,6 +1162,17 @@ impl UnixApp {
                             }),
                         }
                     });
+                let per_tab_selection = self
+                    .terminal_selection
+                    .filter(|selection| selection.tab_id == tab.id)
+                    .map(|selection| {
+                        let (start, end) = selection.bounds();
+                        serde_json::json!({
+                            "start": {"row": start.row, "col": start.col},
+                            "end": {"row": end.row, "col": end.col},
+                            "dragging": selection.dragging,
+                        })
+                    });
                 let draft = if self.active == Some(tab.id) {
                     !self.composer_buffer.is_empty() || tab.sensitive_composer.is_some()
                 } else {
@@ -1127,10 +1187,19 @@ impl UnixApp {
                     "collapsed": self.collapsed_tabs.contains(&tab.id),
                     "visible": visible_position.is_some(),
                     "name": tab.title,
+                    "terminal_title": tab.title,
                     "note": tab.note,
                     "active": active == Some(tab.id),
+                    "pid": tab.process_id,
                     "state": Self::tab_state(tab),
+                    "exit_code": tab.exited,
+                    "working_context": working_context_json(
+                        &tab.cwd,
+                        tab.shell_kind,
+                        &tab.proxy,
+                    ),
                     "scrollback_offset": tab.parser.screen().scrollback(),
+                    "selection": per_tab_selection,
                     "draft": draft,
                     "bounds": geometry.map(|value| pixel_rect_json(value.row)),
                     "render": geometry.map(|value| serde_json::json!({
@@ -1157,18 +1226,16 @@ impl UnixApp {
             })
             .collect::<Vec<_>>();
         serde_json::to_string_pretty(&serde_json::json!({
+            "schema_version": schema_version_json(),
             "protocol_version": 1,
+            "projection": PROJECTION_EMBEDDED_GUI,
+            "client_pid": std::process::id(),
+            "server_pid": std::process::id(),
+            "event_position": event_position_json(&journal_position.epoch, journal_position.sequence),
             "session": self.session_name,
             "active_window_id": active.map(|id| format!("@{id}")),
             "tabs_visible": self.config.tabs_visible,
-            "window": {
-                "client_width": client_width,
-                "client_height": client_height,
-            },
-            "client": {
-                "width": client_width,
-                "height": client_height,
-            },
+            "window": embedded_window_json(self.title.as_str(), client_width, client_height),
             "layout": {
                 "sidebar": {
                     "x": layout.sidebar.left,
@@ -1181,6 +1248,7 @@ impl UnixApp {
                     "bounds": pixel_rect_json(layout.sidebar),
                     "resize_grip": layout.resize_grip.map(pixel_rect_json),
                     "resizing": self.tabs_resize_drag.is_some(),
+                    "scrollbar": serde_json::Value::Null,
                 },
                 "toolbar": layout.workspace_toolbar.map(|toolbar| serde_json::json!({
                     "bounds": pixel_rect_json(toolbar.bounds),
@@ -1192,17 +1260,30 @@ impl UnixApp {
                     "x": layout.terminal.left,
                     "y": layout.terminal.top,
                     "width": layout.terminal.width(),
+                    "viewport_width": (
+                        layout.terminal.width() - TERMINAL_SCROLLBAR_WIDTH
+                    ).max(0),
                     "height": layout.terminal.height(),
                     "bounds": pixel_rect_json(layout.terminal),
+                    "rows": terminal_rows,
+                    "cols": terminal_cols,
+                    "scrollbar": terminal_scrollbar,
                 },
                 "composer": {
+                    "visible": composer_visible,
+                    "input_visible": composer_visible,
+                    "send_visible": composer_visible,
                     "x": layout.composer.left,
                     "y": layout.composer.top,
                     "width": layout.composer.width(),
                     "height": layout.composer.height(),
                     "bounds": pixel_rect_json(layout.composer),
+                    "input": {
+                        "bounds": pixel_rect_json(composer_input),
+                        "target_rows": 3,
+                        "vertical_scrollbar": true,
+                    },
                 },
-                "scrollbar": scrollbar,
                 "status_bar": {
                     "x": layout.status.left,
                     "y": layout.status.top,
@@ -1214,6 +1295,8 @@ impl UnixApp {
                         "bounds": pixel_rect_json(layout.status_segments.cwd),
                         "action": "open-cwd-editor",
                     },
+                    "proxy": archived_proxy_status_json(layout.status_segments.proxy),
+                    "provider": "placeholder",
                 },
             },
             "focus": {
@@ -1236,13 +1319,20 @@ impl UnixApp {
                 }))
             } else if self.settings_open {
                 Some(serde_json::json!({"kind": "settings"}))
-            } else if self.cwd_edit_target.is_some() {
-                self.cwd_edit_target.map(|id| {
-                    serde_json::json!({
-                        "kind": "cwd-editor",
-                        "target": format!("@{id}"),
-                    })
-                })
+            } else if let Some(id) = self.cwd_edit_target {
+                Some(serde_json::json!({
+                    "kind": "cwd-editor",
+                    "target": format!("@{id}"),
+                    "window_id": format!("@{id}"),
+                    "default_action": "cwd-prepare",
+                    "actions": [
+                        "cwd-prepare",
+                        "cwd-prepare-append",
+                        "cwd-prepare-replace",
+                        "cwd-send-now",
+                        "cancel"
+                    ],
+                }))
             } else if self.note_edit_target.is_some() {
                 Some(serde_json::json!({"kind": "tab-editor"}))
             } else {
@@ -1253,15 +1343,27 @@ impl UnixApp {
                     })
                 })
             },
-            "system_menu": {
-                "toggle_tabs": {
-                    "label": "Toggle Tabs",
-                    "checked": self.config.tabs_visible,
-                },
-            },
+            "system_menu": system_menu_json(
+                self.config.tabs_visible,
+                copy_enabled,
+                paste_enabled,
+            ),
             "tab_editor": tab_editor,
-            "event_position": self.event_journal.position(),
             "tabs": tabs,
+            "terminal_interaction": terminal_interaction_json(
+                interaction_selection,
+                gesture_phase,
+            ),
+            "settings": settings_json(
+                &self.config,
+                self.settings_open,
+                Some(self.settings_theme_draft.as_str()),
+            ),
+            "locale": locale_json(),
+            "feedback": {
+                "message": self.status_message,
+                "error": serde_json::Value::Null,
+            },
             "selection": self.terminal_selection.map(|selection| {
                 let (start, end) = selection.bounds();
                 serde_json::json!({
@@ -1271,12 +1373,6 @@ impl UnixApp {
                     "dragging": selection.dragging,
                 })
             }),
-            "terminal_interaction": {
-                "selection": self
-                    .terminal_selection_gesture
-                    .map(|gesture| gesture.phase().as_str())
-                    .unwrap_or("none"),
-            },
         }))
         .unwrap_or_else(|_| "{}".to_owned())
     }
