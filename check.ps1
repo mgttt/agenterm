@@ -324,7 +324,7 @@ try {
             'server-smoke' = '.\scripts\rhai\server-smoke.rhai'
             'remote-ui-smoke' = '.\tests\remote_ui_smoke.ps1'
             'remote-ui-upgrade-smoke' = '.\scripts\rhai\remote-ui-upgrade-smoke.rhai'
-            'fleet-smoke' = '.\tests\fleet_smoke.ps1'
+            'fleet-smoke' = '.\scripts\rhai\fleet-smoke.rhai'
             'script-smoke' = '.\tests\script_smoke.ps1'
             'theme-smoke' = '.\scripts\rhai\theme-smoke.rhai'
             'working-context-smoke' = '.\scripts\rhai\working-context-smoke.rhai'
@@ -540,10 +540,15 @@ try {
             }
             Invoke-Checked -Id 'fleet-smoke' -Label 'AI fleet smoke test' {
                 if (-not $IncludeStress) {
-                    & '.\tests\fleet_smoke.ps1' -SkipEventLoad
+                    & '.\dist\agenterm-script.exe' task run fleet-smoke `
+                        --manifest '.\agenterm.tasks.json' `
+                        --timeout-ms 120000 --max-operations 10000000
                 }
                 else {
-                    & '.\tests\fleet_smoke.ps1'
+                    & '.\dist\agenterm-script.exe' task run fleet-smoke `
+                        --manifest '.\agenterm.tasks.json' `
+                        --timeout-ms 120000 --max-operations 10000000 `
+                        -- --event-load
                 }
             }
             Invoke-Checked -Id 'script-smoke' `

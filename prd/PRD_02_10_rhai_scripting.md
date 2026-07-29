@@ -450,6 +450,7 @@ Migration ledger:
 | Loopback HTTP test fixture | `scripts/rhai/script-http-fixture.rhai` plus unrestricted `std::net::TcpListener` and raw `Bytes` operations | `tests/script_http_fixture.ps1` | current migration change | full public Script smoke preserves status/echo/large/async/slow/cancel/malformed/disconnect/TLS paths, privacy-bounded audit, typed host failures, cleanup, and a delayed-first-byte Windows accepted-socket regression | deleted; the Script smoke launches only the Rhai fixture |
 | Theme preview, persistence, PTY continuity, and rendered differentiation | `scripts/rhai/theme-smoke.rhai` plus typed child-window input, `rhai::image::inspect_png`, and the shared Rhai harness | `tests/theme_smoke.ps1` | current migration change | live old/new parity preserves Dark/Light preview, Cancel and physical Escape rollback, settings persistence, stable PTY PID/output, native PNG luminance separation, restart state, bounded retained failure diagnostics, and orphan-free cleanup | deleted; qualification and diagnostic-bundle probes invoke the named Rhai task |
 | Workbench inline editing, archived Proxy chrome, and compact tree geometry | `scripts/rhai/workbench-smoke.rhai` plus typed child-window click dispatch and the shared Rhai harness | `tests/workbench_smoke.ps1` | current migration change | live old/new parity preserves physical Edit/Save/Cancel, independent name/note drafts, Composer isolation, archived Proxy geometry/actions, a four-level CJK hierarchy, 180/250/480 px density, bounded row geometry, and orphan-free cleanup | deleted; qualification discovery and execution invoke the named Rhai task |
+| Fleet discovery, events, launch context, restart, and Mux safety | `scripts/rhai/fleet-smoke.rhai` plus the shared Rhai harness | `tests/fleet_smoke.ps1` | current migration change | live old/new ordinary and 16×258 concurrent-load parity preserves all six evidence IDs, dead-record pruning, explicit/implicit/ambiguous instance selection, scoped environment and Codex launch, typed event catalog/causality/wait timeout/cancellation/restart/gap, Mux compatibility/destructive safety, and multi-address cleanup; the Rhai stress path completes in about 63 seconds versus 116 seconds for PowerShell | deleted; ordinary qualification skips the explicit load while stress/release appends `--event-load` to the same named task |
 | Unintegrated professional terminal-selection prototype | Future public Rhai professional-selection journey after the product slice ships | `tests/terminal_selection_smoke.ps1` | current migration change | caller audit finds no check, CI, qualification, or registered evidence consumer; direct execution fails before interaction at zero terminal columns, while the Windows double-click handler does not implement the claimed word/third-click behavior and the product PRD keeps that slice planned | deleted as misleading dead test code; Git history retains the prototype |
 
 ### v0.1.10 completion commitment
@@ -460,7 +461,7 @@ Migration ledger:
 - [x] the dated 2026-07-29 frozen baseline is 43 tracked `.ps1` files: 3 at
   the repository root, 17 under `scripts/`, 21 under `tests/`, and 2 retained in
   `scripts/archive/powershell/`.
-- [~] migration progress is 30/43 deleted and 13/43 remaining; progress is
+- [~] migration progress is 31/43 deleted and 12/43 remaining; progress is
   counted only after parity evidence plus caller cutover, or caller-audited
   functional deletion of obsolete behavior, and source deletion.
 - [x] `scripts/powershell-migration.json` freezes all 43 baseline paths under
@@ -472,11 +473,11 @@ Migration ledger:
   duplicate paths, invalid states, and count drift; ordinary and release
   qualification invoke it as a required gate.
 - [~] the repository-root `agenterm.tasks.json` is now the offline task
-  catalog and ships twenty-five ready tasks (`bootstrap-info`, `build-identity`,
+  catalog and ships twenty-six ready tasks (`bootstrap-info`, `build-identity`,
   `harness-cleanup-selftest`, `migration-audit`, `target-report`, `internal-version-policy`,
   `verify-docs-site`, `readme-examples`, `clean-locked-artifacts`,
   `prepare-target-clean`, `preflight`, `preflight-benchmark`, `prd-alignment`,
-  `stage-artifact`, `stage-build`, `supply-chain`, `server-smoke`, `startup-smoke`, `cli-smoke`,
+  `stage-artifact`, `stage-build`, `supply-chain`, `server-smoke`, `startup-smoke`, `cli-smoke`, `fleet-smoke`,
   `working-context-smoke`, `workbench-smoke`, `wake-smoke`, `remote-ui-upgrade-smoke`,
   `validate-artifact-manifest`, and `write-build-metadata`). The existing
   two-input Script contract verifier is
