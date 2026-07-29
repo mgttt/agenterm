@@ -134,10 +134,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       already-running descendants
   - Release core: adaptive Tabs workspace
     - [x] Tabs collapse, recovery, and resizing share one persisted workspace geometry
-    - [x] place `New`, `Tabs`, and `Settings` in a compact toolbar above the
-      terminal; activating `Tabs` collapses only the full-height tab tree so
-      the terminal workbench reclaims the width while the toolbar remains
-      available for recovery
+    - [x] place Tabs then New in the left side of a compact toolbar above the
+      terminal and anchor Settings at the right; `<Tabs` denotes collapse and
+      `>Tabs` denotes reveal, while the terminal workbench reclaims the hidden
+      tree width and keeps the toolbar available for recovery
+    - [~] route New through an extensible creation dialog; Windows selects
+      Default/Command Prompt/PowerShell, accepts an optional initial command
+      and redacted ephemeral HTTP(S) proxy environment, and mutates only on
+      Create, while Unix dialog parity remains follow-up
     - [x] when collapsed, reserve a small host-owned `Tabs` reveal segment
       at the far left of the terminal-column bottom status bar; it is layout
       chrome, not a dynamic provider, and therefore remains available when

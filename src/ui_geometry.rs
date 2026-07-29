@@ -1,9 +1,9 @@
-pub(crate) const TAB_TOP: i32 = 8;
-pub(crate) const TAB_HEIGHT: i32 = 44;
-pub(crate) const TAB_LEFT: i32 = 5;
-pub(crate) const TAB_RIGHT_MARGIN: i32 = 5;
-pub(crate) const TREE_INDENT: i32 = 12;
-pub(crate) const TREE_ANCHOR_LEFT: i32 = 12;
+pub(crate) const TAB_TOP: i32 = 3;
+pub(crate) const TAB_HEIGHT: i32 = 36;
+pub(crate) const TAB_LEFT: i32 = 2;
+pub(crate) const TAB_RIGHT_MARGIN: i32 = 2;
+pub(crate) const TREE_INDENT: i32 = 10;
+pub(crate) const TREE_ANCHOR_LEFT: i32 = 8;
 pub(crate) const TERMINAL_SCROLLBAR_WIDTH: i32 = 12;
 #[cfg(test)]
 pub(crate) const COMPOSER_HEIGHT: i32 = 104;
@@ -16,11 +16,11 @@ pub(crate) const WORKSPACE_TOOLBAR_HEIGHT: i32 = 46;
 
 const MAX_TREE_DEPTH: usize = 10;
 const TREE_MIN_RESPONSIVE_INDENT: i32 = 3;
-const TREE_TEXT_GAP: i32 = 4;
+const TREE_TEXT_GAP: i32 = 2;
 const TREE_MIN_TEXT_WIDTH: i32 = 28;
 const TREE_ACTION_GAP: i32 = 2;
-const TREE_ACTION_INSET: i32 = 4;
-const TREE_ACTION_TOP_INSET: i32 = 6;
+const TREE_ACTION_INSET: i32 = 2;
+const TREE_ACTION_TOP_INSET: i32 = 3;
 const TREE_COMPACT_ACTION_WIDTH: i32 = 24;
 const TREE_ADD_ACTION_WIDTH: i32 = 24;
 const TREE_EDIT_ACTION_WIDTH: i32 = 48;
@@ -30,7 +30,7 @@ const TREE_CANCEL_ACTION_WIDTH: i32 = 48;
 const TREE_COMPACT_SAVE_ACTION_WIDTH: i32 = 34;
 const TREE_COMPACT_CANCEL_ACTION_WIDTH: i32 = 40;
 const TREE_COMPACT_ACTION_THRESHOLD: i32 = 300;
-const NODE_Y_OFFSET: i32 = 13;
+const NODE_Y_OFFSET: i32 = 11;
 const MIN_SCROLLBAR_THUMB_HEIGHT: i32 = 24;
 const WORKSPACE_TOOLBAR_DIVIDER_HEIGHT: i32 = 1;
 const WORKSPACE_TOOLBAR_HORIZONTAL_PADDING: i32 = 8;
@@ -246,22 +246,22 @@ fn workspace_toolbar_region(toolbar: PixelRect, visible: bool) -> Option<Workspa
     };
     let button_top = toolbar.top + (toolbar.height() - WORKSPACE_TOOLBAR_BUTTON_HEIGHT) / 2;
     let button_bottom = button_top + WORKSPACE_TOOLBAR_BUTTON_HEIGHT;
-    let new_tab = rect(
+    let tabs = rect(
         toolbar.left + WORKSPACE_TOOLBAR_HORIZONTAL_PADDING,
         button_top,
-        toolbar.left + WORKSPACE_TOOLBAR_HORIZONTAL_PADDING + new_width,
+        toolbar.left + WORKSPACE_TOOLBAR_HORIZONTAL_PADDING + tabs_width,
         button_bottom,
     );
-    let tabs = rect(
-        new_tab.right + WORKSPACE_TOOLBAR_BUTTON_GAP,
+    let new_tab = rect(
+        tabs.right + WORKSPACE_TOOLBAR_BUTTON_GAP,
         button_top,
-        new_tab.right + WORKSPACE_TOOLBAR_BUTTON_GAP + tabs_width,
+        tabs.right + WORKSPACE_TOOLBAR_BUTTON_GAP + new_width,
         button_bottom,
     );
     let settings = rect(
-        tabs.right + WORKSPACE_TOOLBAR_BUTTON_GAP,
+        toolbar.right - WORKSPACE_TOOLBAR_HORIZONTAL_PADDING - settings_width,
         button_top,
-        tabs.right + WORKSPACE_TOOLBAR_BUTTON_GAP + settings_width,
+        toolbar.right - WORKSPACE_TOOLBAR_HORIZONTAL_PADDING,
         button_bottom,
     );
 
@@ -506,13 +506,13 @@ fn tree_row_geometry_impl(
         bottom: top + TAB_HEIGHT - 1,
     };
     let actions = tree_row_actions(selection, mode);
-    let text_left = (node_x + 20).clamp(selection.left, selection.right);
+    let text_left = (node_x + 17).clamp(selection.left, selection.right);
     let text_right = (actions.bounds.left - TREE_TEXT_GAP).clamp(text_left, selection.right);
-    let text = rect(text_left, top + 3, text_right, selection.bottom - 3);
-    let name = rect(text.left, text.top, text.right, (top + 21).min(text.bottom));
+    let text = rect(text_left, top + 1, text_right, selection.bottom - 1);
+    let name = rect(text.left, text.top, text.right, (top + 18).min(text.bottom));
     let note = rect(
         text.left,
-        (top + 22).min(text.bottom),
+        (top + 18).min(text.bottom),
         text.right,
         text.bottom,
     );
@@ -530,9 +530,9 @@ fn tree_row_geometry_impl(
             bottom: node_y + 6,
         },
         status: PixelRect {
-            left: node_x + 10,
+            left: node_x + 8,
             top: node_y - 4,
-            right: node_x + 19,
+            right: node_x + 16,
             bottom: node_y + 5,
         },
         // Preserve the deliberately forgiving disclosure target used by the
@@ -701,11 +701,8 @@ mod tests {
             assert_eq!(action.height(), WORKSPACE_TOOLBAR_BUTTON_HEIGHT);
             assert!(action.width() > 0);
         }
-        assert!(toolbar.new_tab.right <= toolbar.tabs.left);
-        assert_eq!(
-            toolbar.tabs.right + WORKSPACE_TOOLBAR_BUTTON_GAP,
-            toolbar.settings.left
-        );
+        assert!(toolbar.tabs.right <= toolbar.new_tab.left);
+        assert!(toolbar.new_tab.right <= toolbar.settings.left);
         assert!(toolbar.settings.right <= toolbar.bounds.right);
     }
 
@@ -882,8 +879,8 @@ mod tests {
                 ] {
                     assert_valid_rect(candidate, geometry.client);
                 }
-                assert!(toolbar.new_tab.right <= toolbar.tabs.left);
-                assert!(toolbar.tabs.right <= toolbar.settings.left);
+                assert!(toolbar.tabs.right <= toolbar.new_tab.left);
+                assert!(toolbar.new_tab.right <= toolbar.settings.left);
             }
             if let Some(candidate) = geometry.status_segments.tabs_recovery {
                 assert_valid_rect(candidate, geometry.client);
@@ -906,11 +903,11 @@ mod tests {
             tree_row_geometry(2, 2, 250),
         ];
 
-        assert_eq!(rows[0].node_x, 12);
-        assert_eq!(rows[1].node_x, 12 + 12);
-        assert_eq!(rows[2].node_x, 12 + 12 * 2);
-        assert_eq!(rows[1].row.top - rows[0].row.top, 44);
-        assert_eq!(rows[2].row.top - rows[1].row.top, 44);
+        assert_eq!(rows[0].node_x, TREE_ANCHOR_LEFT);
+        assert_eq!(rows[1].node_x, TREE_ANCHOR_LEFT + TREE_INDENT);
+        assert_eq!(rows[2].node_x, TREE_ANCHOR_LEFT + TREE_INDENT * 2);
+        assert_eq!(rows[1].row.top - rows[0].row.top, TAB_HEIGHT);
+        assert_eq!(rows[2].row.top - rows[1].row.top, TAB_HEIGHT);
         assert_eq!(rows[0].expander.width(), 11);
         assert_eq!(rows[0].expander.height(), 11);
         assert_eq!(rows[0].mode, TreeRowMode::Normal);
@@ -925,19 +922,22 @@ mod tests {
         assert_eq!(
             geometry.selection,
             PixelRect {
-                left: 5,
-                top: 96,
-                right: 245,
-                bottom: 139,
+                left: TAB_LEFT,
+                top: TAB_TOP + TAB_HEIGHT * 2,
+                right: 250 - TAB_RIGHT_MARGIN,
+                bottom: TAB_TOP + TAB_HEIGHT * 3 - 1,
             }
         );
-        assert_eq!(geometry.selection.width(), 240);
-        assert_eq!(geometry.selection.height(), 43);
+        assert_eq!(
+            geometry.selection.width(),
+            250 - TAB_LEFT - TAB_RIGHT_MARGIN
+        );
+        assert_eq!(geometry.selection.height(), TAB_HEIGHT - 1);
     }
 
     #[test]
     fn selection_safely_collapses_for_an_extremely_narrow_sidebar() {
-        for sidebar_width in [0, 5, TAB_LEFT + TAB_RIGHT_MARGIN - 1] {
+        for sidebar_width in [0, TAB_LEFT, TAB_LEFT + TAB_RIGHT_MARGIN - 1] {
             let geometry = tree_row_geometry(0, 0, sidebar_width);
 
             assert_eq!(geometry.selection.left, TAB_LEFT);
@@ -954,9 +954,9 @@ mod tests {
         assert!(geometry.disclosure_hit.contains_x(geometry.node_x));
         assert!(geometry.disclosure_hit.contains_x(geometry.node_x - 6));
         assert!(!geometry.disclosure_hit.contains_x(geometry.node_x + 12));
-        assert_eq!(tree_row_at_y(7), None);
-        assert_eq!(tree_row_at_y(8), Some(0));
-        assert_eq!(tree_row_at_y(52), Some(1));
+        assert_eq!(tree_row_at_y(TAB_TOP - 1), None);
+        assert_eq!(tree_row_at_y(TAB_TOP), Some(0));
+        assert_eq!(tree_row_at_y(TAB_TOP + TAB_HEIGHT), Some(1));
     }
 
     #[test]

@@ -23,8 +23,12 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] add-child immediately opens the new node's name/note editor in the new
   child's own row without borrowing the Composer
 - [x] collapse/expand with persisted node state
-- [x] compact rows with continuous native tree connectors, grid-aligned
-  expand boxes, status lamps, and bordered selection
+- [x] high-density two-line rows with compact outer/inner spacing, continuous
+  native tree connectors, grid-aligned expand boxes, status lamps, and
+  bordered selection; persisted notes remain visible below names
+- [x] the full-height Tabs tree owns a visible draggable vertical scrollbar;
+  mouse-wheel, thumb drag, row paint, inline editors, selection, disclosure
+  and action hit-testing consume the same bounded row offset
 - [ ] drag/drop reparenting and team-level actions
 - [x] line 1: user-defined role/name
 - [x] line 2: user note, otherwise numeric index plus running program;
@@ -90,6 +94,15 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] `New`, `Tabs`, and `Settings` actions are grouped in the compact toolbar
   above the terminal; the toolbar remains available when Tabs are hidden so
   the same `Tabs` control restores the full-height tree
+- [x] toolbar order is Tabs then New, with Settings anchored at the right;
+  Tabs reads `<Tabs` while the tree is visible and `>Tabs` while hidden
+- [~] activating New opens an extensible terminal-creation dialog before
+  mutation: Windows ships Default/Command Prompt/PowerShell selection, an
+  optional initial command, separate optional per-terminal HTTP/HTTPS proxy
+  inputs, and Create/Cancel; Unix parity remains follow-up
+- [x] the creation dialog validates proxy URLs and passes non-empty values only
+  as ephemeral child environment; snapshots expose configured booleans but
+  never command text, proxy endpoints, credentials, or unsaved input values
 - [x] built-in control labels come from one declared English locale;
   semantic snapshots expose the locale and resolved labels
 - [x] settings UI for terminal font family and size

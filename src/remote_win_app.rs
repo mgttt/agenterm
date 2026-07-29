@@ -68,11 +68,12 @@ use crate::{
     ui_client::{UiClientModel, tab_by_id},
     ui_command::UiClientCommand,
     ui_geometry::{
-        PixelRect, TERMINAL_SCROLLBAR_WIDTH, TerminalScrollbarGeometry, TreeRowActionDensity,
-        TreeRowMode, WorkspaceLayout, WorkspaceLayoutInput, reset_tabs_width,
+        PixelRect, TAB_HEIGHT, TAB_TOP, TERMINAL_SCROLLBAR_WIDTH, TerminalScrollbarGeometry,
+        TreeRowActionDensity, TreeRowMode, WorkspaceLayout, WorkspaceLayoutInput, reset_tabs_width,
         scrollback_for_thumb_top, tabs_width_from_drag, terminal_scrollbar_geometry, tree_row_at_y,
         tree_row_geometry_for_mode, workspace_layout,
     },
+    working_context::parse_proxy_url,
 };
 
 const TIMER_ID: usize = 1;
@@ -96,6 +97,14 @@ const SETTINGS_APPLY_ID: usize = 2117;
 const SETTINGS_CANCEL_ID: usize = 2118;
 const TAB_CLOSE_CONFIRM_ID: usize = 2119;
 const TAB_CLOSE_CANCEL_ID: usize = 2120;
+const NEW_DEFAULT_SHELL_ID: usize = 2121;
+const NEW_CMD_SHELL_ID: usize = 2122;
+const NEW_POWERSHELL_ID: usize = 2123;
+const NEW_INITIAL_COMMAND_ID: usize = 2124;
+const NEW_HTTP_PROXY_ID: usize = 2125;
+const NEW_HTTPS_PROXY_ID: usize = 2126;
+const NEW_CREATE_ID: usize = 2127;
+const NEW_CANCEL_ID: usize = 2128;
 const SYSTEM_MENU_COPY_ID: usize = 0x1f00;
 const SYSTEM_MENU_PASTE_ID: usize = 0x1f10;
 const SYSTEM_MENU_TOGGLE_TABS_ID: usize = 0x1f20;
@@ -202,6 +211,14 @@ pub(crate) fn run_remote_gui(no_activate: bool) -> Result<()> {
     let tab_close_confirm =
         create_hidden_button(window, instance, TAB_CLOSE_CONFIRM_ID, "Terminate && Close");
     let tab_close_cancel = create_hidden_button(window, instance, TAB_CLOSE_CANCEL_ID, "Cancel");
+    let new_default_shell = create_hidden_button(window, instance, NEW_DEFAULT_SHELL_ID, "Default");
+    let new_cmd_shell = create_hidden_button(window, instance, NEW_CMD_SHELL_ID, "Command Prompt");
+    let new_powershell = create_hidden_button(window, instance, NEW_POWERSHELL_ID, "PowerShell");
+    let new_initial_command = create_hidden_edit(window, instance, NEW_INITIAL_COMMAND_ID);
+    let new_http_proxy = create_hidden_edit(window, instance, NEW_HTTP_PROXY_ID);
+    let new_https_proxy = create_hidden_edit(window, instance, NEW_HTTPS_PROXY_ID);
+    let new_create = create_hidden_button(window, instance, NEW_CREATE_ID, "Create");
+    let new_cancel = create_hidden_button(window, instance, NEW_CANCEL_ID, "Cancel");
     if edit.is_null()
         || send.is_null()
         || new_tab.is_null()
@@ -222,6 +239,14 @@ pub(crate) fn run_remote_gui(no_activate: bool) -> Result<()> {
         || settings_cancel.is_null()
         || tab_close_confirm.is_null()
         || tab_close_cancel.is_null()
+        || new_default_shell.is_null()
+        || new_cmd_shell.is_null()
+        || new_powershell.is_null()
+        || new_initial_command.is_null()
+        || new_http_proxy.is_null()
+        || new_https_proxy.is_null()
+        || new_create.is_null()
+        || new_cancel.is_null()
     {
         unsafe { DestroyWindow(window) };
         anyhow::bail!("failed to create replaceable UI controls");
@@ -250,6 +275,14 @@ pub(crate) fn run_remote_gui(no_activate: bool) -> Result<()> {
             settings_cancel,
             tab_close_confirm,
             tab_close_cancel,
+            new_default_shell,
+            new_cmd_shell,
+            new_powershell,
+            new_initial_command,
+            new_http_proxy,
+            new_https_proxy,
+            new_create,
+            new_cancel,
         },
         client_id,
         client,
@@ -357,6 +390,14 @@ struct RemoteControls {
     settings_cancel: HWND,
     tab_close_confirm: HWND,
     tab_close_cancel: HWND,
+    new_default_shell: HWND,
+    new_cmd_shell: HWND,
+    new_powershell: HWND,
+    new_initial_command: HWND,
+    new_http_proxy: HWND,
+    new_https_proxy: HWND,
+    new_create: HWND,
+    new_cancel: HWND,
 }
 
 #[derive(Clone, Copy)]
@@ -378,6 +419,23 @@ enum RemoteTabAction {
     AddChild,
     Edit,
     Close,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum NewShellChoice {
+    Default,
+    CommandPrompt,
+    PowerShell,
+}
+
+impl NewShellChoice {
+    const fn id(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::CommandPrompt => "cmd",
+            Self::PowerShell => "powershell",
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -405,6 +463,11 @@ struct RemoteTerminalSelection {
 
 #[derive(Clone, Copy)]
 struct RemoteScrollDrag {
+    thumb_grab_offset: i32,
+}
+
+#[derive(Clone, Copy)]
+struct RemoteSidebarScrollDrag {
     thumb_grab_offset: i32,
 }
 
@@ -484,6 +547,14 @@ struct RemoteWindowState {
     settings_cancel: HWND,
     tab_close_confirm: HWND,
     tab_close_cancel: HWND,
+    new_default_shell: HWND,
+    new_cmd_shell: HWND,
+    new_powershell: HWND,
+    new_initial_command: HWND,
+    new_http_proxy: HWND,
+    new_https_proxy: HWND,
+    new_create: HWND,
+    new_cancel: HWND,
     client_id: String,
     client: Option<UiClientModel>,
     reconnect_after: Instant,
@@ -501,9 +572,13 @@ struct RemoteWindowState {
     editing_tab_id: Option<String>,
     window_close_pending: bool,
     settings_open: bool,
+    new_terminal_open: bool,
+    new_shell_choice: NewShellChoice,
     settings_theme_draft: ThemeId,
     terminal_selection: Option<RemoteTerminalSelection>,
     scroll_drag: Option<RemoteScrollDrag>,
+    sidebar_scroll_offset: usize,
+    sidebar_scroll_drag: Option<RemoteSidebarScrollDrag>,
     focus_surface: RemoteFocusSurface,
     pending_close_tab_id: Option<String>,
     cwd_edit_tab_id: Option<String>,
@@ -539,6 +614,14 @@ impl RemoteWindowState {
             settings_cancel,
             tab_close_confirm,
             tab_close_cancel,
+            new_default_shell,
+            new_cmd_shell,
+            new_powershell,
+            new_initial_command,
+            new_http_proxy,
+            new_https_proxy,
+            new_create,
+            new_cancel,
         } = controls;
         let config = load_config();
         let settings_theme_draft = config.color_theme;
@@ -567,6 +650,14 @@ impl RemoteWindowState {
             settings_cancel,
             tab_close_confirm,
             tab_close_cancel,
+            new_default_shell,
+            new_cmd_shell,
+            new_powershell,
+            new_initial_command,
+            new_http_proxy,
+            new_https_proxy,
+            new_create,
+            new_cancel,
             client_id,
             client: Some(client),
             reconnect_after: Instant::now(),
@@ -584,9 +675,13 @@ impl RemoteWindowState {
             editing_tab_id: None,
             window_close_pending: false,
             settings_open: false,
+            new_terminal_open: false,
+            new_shell_choice: NewShellChoice::Default,
             settings_theme_draft,
             terminal_selection: None,
             scroll_drag: None,
+            sidebar_scroll_offset: 0,
+            sidebar_scroll_drag: None,
             focus_surface: RemoteFocusSurface::Terminal,
             pending_close_tab_id: None,
             cwd_edit_tab_id: None,
@@ -915,6 +1010,8 @@ impl RemoteWindowState {
             "cancel" => {
                 if self.window_close_pending {
                     self.finish_window_close(RemoteCloseChoice::Cancel);
+                } else if self.new_terminal_open {
+                    self.finish_new_terminal(false);
                 } else if self.settings_open {
                     self.finish_settings(false);
                 } else if self.cwd_edit_tab_id.is_some() {
@@ -1261,6 +1358,82 @@ impl RemoteWindowState {
         })
     }
 
+    fn sidebar_row_capacity(&self) -> usize {
+        let height = self.workspace_geometry().sidebar_tree.height();
+        usize::try_from((height - TAB_TOP).max(0) / TAB_HEIGHT)
+            .unwrap_or_default()
+            .max(1)
+    }
+
+    fn sidebar_row_count(&self) -> usize {
+        self.client
+            .as_ref()
+            .map(|client| remote_tree_rows(&client.snapshot().tabs).len())
+            .unwrap_or_default()
+    }
+
+    fn sidebar_max_offset(&self) -> usize {
+        self.sidebar_row_count()
+            .saturating_sub(self.sidebar_row_capacity())
+    }
+
+    fn sidebar_offset(&self) -> usize {
+        self.sidebar_scroll_offset.min(self.sidebar_max_offset())
+    }
+
+    fn sidebar_content_width(&self) -> i32 {
+        let tree = self.workspace_geometry().sidebar_tree;
+        (tree.width() - TERMINAL_SCROLLBAR_WIDTH).max(0)
+    }
+
+    fn sidebar_scrollbar_state(&self) -> Option<(TerminalScrollbarGeometry, usize, usize)> {
+        if !self.tabs_visible {
+            return None;
+        }
+        let layout = self.workspace_geometry();
+        let track = PixelRect {
+            left: (layout.sidebar_tree.right - TERMINAL_SCROLLBAR_WIDTH)
+                .max(layout.sidebar_tree.left),
+            top: layout.sidebar_tree.top,
+            right: layout.sidebar_tree.right,
+            bottom: layout.sidebar_tree.bottom,
+        };
+        let maximum = self.sidebar_max_offset();
+        let offset = self.sidebar_offset();
+        let track_height = track.height().max(0);
+        let total = self.sidebar_row_count().max(1);
+        let visible = self.sidebar_row_capacity().min(total).max(1);
+        let proportional = (i64::from(track_height) * visible as i64 / total as i64) as i32;
+        let thumb_height = if maximum == 0 {
+            track_height
+        } else {
+            proportional.max(24).min(track_height)
+        };
+        let travel = (track_height - thumb_height).max(0);
+        let thumb_top = if maximum == 0 {
+            track.top
+        } else {
+            track.top + (offset as i64 * i64::from(travel) / maximum as i64) as i32
+        };
+        Some((
+            TerminalScrollbarGeometry {
+                track,
+                thumb: PixelRect {
+                    left: track.left + 2,
+                    top: thumb_top,
+                    right: (track.right - 2).max(track.left + 2),
+                    bottom: thumb_top + thumb_height,
+                },
+            },
+            offset,
+            maximum,
+        ))
+    }
+
+    fn sidebar_row_index_at_y(&self, y: i32) -> Option<usize> {
+        tree_row_at_y(y).map(|position| self.sidebar_offset().saturating_add(position))
+    }
+
     fn ui_snapshot_json(&self) -> Result<String> {
         let client = self
             .client
@@ -1278,9 +1451,12 @@ impl RemoteWindowState {
                 let visible_position = self
                     .tabs_visible
                     .then(|| {
-                        visible_rows
+                        let source_position = visible_rows
                             .iter()
-                            .position(|row| source.tabs[row.tab_index].id == tab.id)
+                            .position(|row| source.tabs[row.tab_index].id == tab.id)?;
+                        source_position
+                            .checked_sub(self.sidebar_offset())
+                            .filter(|position| *position < self.sidebar_row_capacity())
                     })
                     .flatten();
                 let depth = remote_tab_depth(&source.tabs, tab);
@@ -1290,7 +1466,7 @@ impl RemoteWindowState {
                     TreeRowMode::Normal
                 };
                 let geometry = visible_position.map(|position| {
-                    tree_row_geometry_for_mode(position, depth, layout.effective_tabs_width, mode)
+                    tree_row_geometry_for_mode(position, depth, self.sidebar_content_width(), mode)
                 });
                 let selection = self
                     .terminal_selection
@@ -1310,7 +1486,7 @@ impl RemoteWindowState {
                         let geometry = tree_row_geometry_for_mode(
                             position,
                             depth,
-                            layout.effective_tabs_width,
+                            self.sidebar_content_width(),
                             mode,
                         );
                         let action = |id: &str, label: &str, bounds: PixelRect| {
@@ -1423,6 +1599,17 @@ impl RemoteWindowState {
                 "max_offset": maximum,
             })
         });
+        let sidebar_scrollbar =
+            self.sidebar_scrollbar_state()
+                .map(|(geometry, offset, maximum)| {
+                    serde_json::json!({
+                        "visible": true,
+                        "track": pixel_rect_json(geometry.track),
+                        "thumb": pixel_rect_json(geometry.thumb),
+                        "offset": offset,
+                        "max_offset": maximum,
+                    })
+                });
         let (rows, columns) = self
             .active_tab()
             .map(|tab| (tab.screen.rows, tab.screen.columns))
@@ -1452,6 +1639,20 @@ impl RemoteWindowState {
                     close_button_snapshot("stop-server-and-exit", "Stop Server & Exit"),
                     close_button_snapshot("cancel", "Cancel"),
                 ],
+            }))
+        } else if self.new_terminal_open {
+            Some(serde_json::json!({
+                "kind": "new-terminal",
+                "shell": self.new_shell_choice.id(),
+                "initial_command_configured":
+                    !window_text(self.new_initial_command).trim().is_empty(),
+                "http_proxy_configured":
+                    !window_text(self.new_http_proxy).trim().is_empty(),
+                "https_proxy_configured":
+                    !window_text(self.new_https_proxy).trim().is_empty(),
+                "proxy_values_exposed": false,
+                "default_action": "create",
+                "actions": ["create", "cancel"],
             }))
         } else if self.settings_open {
             Some(serde_json::json!({"kind": "settings"}))
@@ -1486,6 +1687,8 @@ impl RemoteWindowState {
         };
         let focus = if self.window_close_pending {
             "window-close"
+        } else if self.new_terminal_open {
+            "new-terminal"
         } else if self.settings_open {
             "settings"
         } else if self.cwd_edit_tab_id.is_some() {
@@ -1538,6 +1741,7 @@ impl RemoteWindowState {
                     "bounds": pixel_rect_json(layout.sidebar),
                     "resize_grip": layout.resize_grip.map(pixel_rect_json),
                     "resizing": self.tabs_resize_dragging,
+                    "scrollbar": sidebar_scrollbar,
                 },
                 "toolbar": layout.workspace_toolbar.map(|toolbar| serde_json::json!({
                     "bounds": pixel_rect_json(toolbar.bounds),
@@ -1725,6 +1929,10 @@ impl RemoteWindowState {
         let geometry = self.workspace_geometry();
         let composer = win_rect(geometry.composer);
         unsafe {
+            SetWindowTextW(
+                self.tabs_button,
+                wide(if self.tabs_visible { "<Tabs" } else { ">Tabs" }).as_ptr(),
+            );
             if let Some(toolbar) = geometry.workspace_toolbar {
                 for (window, bounds) in [
                     (self.new_tab, toolbar.new_tab),
@@ -1763,6 +1971,7 @@ impl RemoteWindowState {
                 if geometry.workspace_toolbar.is_some()
                     && !self.window_close_pending
                     && !self.settings_open
+                    && !self.new_terminal_open
                     && self.pending_close_tab_id.is_none()
                 {
                     SW_SHOW
@@ -1773,6 +1982,7 @@ impl RemoteWindowState {
             let workspace_command = if geometry.workspace_toolbar.is_some()
                 && !self.window_close_pending
                 && !self.settings_open
+                && !self.new_terminal_open
             {
                 SW_SHOW
             } else {
@@ -1785,6 +1995,7 @@ impl RemoteWindowState {
         self.layout_close_controls();
         self.layout_settings_controls();
         self.layout_tab_close_controls();
+        self.layout_new_terminal_controls();
     }
 
     fn layout_tab_editor(&self) {
@@ -1805,11 +2016,17 @@ impl RemoteWindowState {
             self.show_tab_editor(false);
             return;
         };
-        let (sidebar, _, _, _) = self.layout_rects();
+        let Some(viewport_position) = position
+            .checked_sub(self.sidebar_offset())
+            .filter(|position| *position < self.sidebar_row_capacity())
+        else {
+            self.show_tab_editor(false);
+            return;
+        };
         let geometry = tree_row_geometry_for_mode(
-            position,
+            viewport_position,
             row.depth,
-            sidebar.right - sidebar.left,
+            self.sidebar_content_width(),
             TreeRowMode::Editing,
         );
         let Some(editors) = geometry.editors else {
@@ -1943,21 +2160,17 @@ impl RemoteWindowState {
         unsafe {
             ShowWindow(self.edit, command);
             ShowWindow(self.send, command);
-            let sidebar_command = if visible && self.tabs_visible {
+            let toolbar_command = if visible
+                && self.workspace_geometry().workspace_toolbar.is_some()
+                && self.pending_close_tab_id.is_none()
+            {
                 SW_SHOW
             } else {
                 SW_HIDE
             };
-            ShowWindow(self.tabs_button, sidebar_command);
-            ShowWindow(self.settings, sidebar_command);
-            ShowWindow(
-                self.new_tab,
-                if visible && self.tabs_visible && self.pending_close_tab_id.is_none() {
-                    SW_SHOW
-                } else {
-                    SW_HIDE
-                },
-            );
+            ShowWindow(self.tabs_button, toolbar_command);
+            ShowWindow(self.settings, toolbar_command);
+            ShowWindow(self.new_tab, toolbar_command);
         }
         self.show_tab_editor(visible && self.tabs_visible && self.editing_tab_id.is_some());
     }
@@ -2047,6 +2260,105 @@ impl RemoteWindowState {
             ShowWindow(self.settings_light, command);
             ShowWindow(self.settings_apply, command);
             ShowWindow(self.settings_cancel, command);
+        }
+    }
+
+    fn new_terminal_modal_geometry(&self) -> (RECT, [RECT; 8]) {
+        let mut client: RECT = unsafe { mem::zeroed() };
+        unsafe { GetClientRect(self.window, &mut client) };
+        let width = (client.right - 32).clamp(480, 620);
+        let height = (client.bottom - 32).clamp(390, 450);
+        let left = ((client.right - width) / 2).max(0);
+        let top = ((client.bottom - height) / 2).max(0);
+        let modal = RECT {
+            left,
+            top,
+            right: left + width,
+            bottom: top + height,
+        };
+        let inner_left = left + 28;
+        let inner_right = left + width - 28;
+        let gap = 8;
+        let shell_width = ((inner_right - inner_left - gap * 2) / 3).max(90);
+        let shell_top = top + 74;
+        let shell = |index: i32| RECT {
+            left: inner_left + index * (shell_width + gap),
+            top: shell_top,
+            right: inner_left + index * (shell_width + gap) + shell_width,
+            bottom: shell_top + 34,
+        };
+        let field = |field_top: i32| RECT {
+            left: inner_left,
+            top: field_top,
+            right: inner_right,
+            bottom: field_top + 30,
+        };
+        let create = RECT {
+            left: inner_right - 96,
+            top: top + height - 52,
+            right: inner_right,
+            bottom: top + height - 18,
+        };
+        let cancel = RECT {
+            left: create.left - 106,
+            top: create.top,
+            right: create.left - 10,
+            bottom: create.bottom,
+        };
+        (
+            modal,
+            [
+                shell(0),
+                shell(1),
+                shell(2),
+                field(top + 142),
+                field(top + 218),
+                field(top + 294),
+                create,
+                cancel,
+            ],
+        )
+    }
+
+    fn layout_new_terminal_controls(&self) {
+        let (_, bounds) = self.new_terminal_modal_geometry();
+        for (control, rect) in [
+            (self.new_default_shell, bounds[0]),
+            (self.new_cmd_shell, bounds[1]),
+            (self.new_powershell, bounds[2]),
+            (self.new_initial_command, bounds[3]),
+            (self.new_http_proxy, bounds[4]),
+            (self.new_https_proxy, bounds[5]),
+            (self.new_create, bounds[6]),
+            (self.new_cancel, bounds[7]),
+        ] {
+            unsafe {
+                MoveWindow(
+                    control,
+                    rect.left,
+                    rect.top,
+                    rect.right - rect.left,
+                    rect.bottom - rect.top,
+                    1,
+                );
+            }
+        }
+        self.show_new_terminal_controls(self.new_terminal_open);
+    }
+
+    fn show_new_terminal_controls(&self, visible: bool) {
+        let command = if visible { SW_SHOW } else { SW_HIDE };
+        for control in [
+            self.new_default_shell,
+            self.new_cmd_shell,
+            self.new_powershell,
+            self.new_initial_command,
+            self.new_http_proxy,
+            self.new_https_proxy,
+            self.new_create,
+            self.new_cancel,
+        ] {
+            unsafe { ShowWindow(control, command) };
         }
     }
 
@@ -2211,6 +2523,7 @@ impl RemoteWindowState {
         if self.cwd_edit_tab_id.is_some()
             || self.window_close_pending
             || self.settings_open
+            || self.new_terminal_open
             || self.pending_close_tab_id.is_some()
             || self.editing_tab_id.is_some()
         {
@@ -2290,36 +2603,154 @@ impl RemoteWindowState {
         false
     }
 
-    fn new_tab(&mut self) {
+    fn open_new_terminal(&mut self) {
+        if self.new_terminal_open
+            || self.settings_open
+            || self.window_close_pending
+            || self.pending_close_tab_id.is_some()
+        {
+            return;
+        }
         self.cancel_terminal_selection();
         if let Err(error) = self.sync_composer() {
             self.last_error = Some(format!("Composer save failed: {error:#}"));
             return;
         }
-        let result =
-            self.client
-                .as_mut()
-                .context("UI is disconnected")
-                .and_then(|client| -> Result<()> {
-                    client.run_control(vec![
-                        "new-window".to_owned(),
-                        "-P".to_owned(),
-                        "-F".to_owned(),
-                        "#{window_id}".to_owned(),
-                    ])?;
+        self.finish_tab_edit(false);
+        self.finish_cwd_editor(false);
+        self.new_terminal_open = true;
+        self.new_shell_choice = NewShellChoice::Default;
+        self.last_error = None;
+        unsafe {
+            SetWindowTextW(self.new_initial_command, wide("").as_ptr());
+            SetWindowTextW(self.new_http_proxy, wide("").as_ptr());
+            SetWindowTextW(self.new_https_proxy, wide("").as_ptr());
+        }
+        self.refresh_new_shell_controls();
+        self.show_workspace_controls(false);
+        self.layout_new_terminal_controls();
+        unsafe { SetFocus(self.new_initial_command) };
+    }
+
+    fn choose_new_shell(&mut self, choice: NewShellChoice) {
+        if !self.new_terminal_open {
+            return;
+        }
+        self.new_shell_choice = choice;
+        self.refresh_new_shell_controls();
+    }
+
+    fn refresh_new_shell_controls(&self) {
+        for (control, choice, label) in [
+            (self.new_default_shell, NewShellChoice::Default, "Default"),
+            (
+                self.new_cmd_shell,
+                NewShellChoice::CommandPrompt,
+                "Command Prompt",
+            ),
+            (
+                self.new_powershell,
+                NewShellChoice::PowerShell,
+                "PowerShell",
+            ),
+        ] {
+            let selected = self.new_shell_choice == choice;
+            unsafe {
+                SetWindowTextW(
+                    control,
+                    wide(&format!("{} {label}", if selected { "●" } else { "○" })).as_ptr(),
+                );
+            }
+        }
+    }
+
+    fn finish_new_terminal(&mut self, create: bool) {
+        if !self.new_terminal_open {
+            return;
+        }
+        if create {
+            let initial = window_text(self.new_initial_command).trim().to_owned();
+            let http_proxy = window_text(self.new_http_proxy).trim().to_owned();
+            let https_proxy = window_text(self.new_https_proxy).trim().to_owned();
+            for (label, value) in [
+                ("HTTP proxy", http_proxy.as_str()),
+                ("HTTPS proxy", https_proxy.as_str()),
+            ] {
+                if !value.is_empty() && parse_proxy_url(value).is_none() {
+                    self.last_error =
+                        Some(format!("{label} must be a valid http:// or https:// URL"));
+                    return;
+                }
+            }
+
+            let mut args = vec![
+                "new-window".to_owned(),
+                "-P".to_owned(),
+                "-F".to_owned(),
+                "#{window_id}".to_owned(),
+            ];
+            for (name, value) in [
+                ("HTTP_PROXY", http_proxy.as_str()),
+                ("HTTPS_PROXY", https_proxy.as_str()),
+            ] {
+                if !value.is_empty() {
+                    args.push("-e".to_owned());
+                    args.push(format!("{name}={value}"));
+                }
+            }
+            let mut child = match self.new_shell_choice {
+                NewShellChoice::Default if initial.is_empty() => Vec::new(),
+                NewShellChoice::Default | NewShellChoice::CommandPrompt => {
+                    let mut child = vec!["cmd.exe".to_owned(), "/d".to_owned()];
+                    if !initial.is_empty() {
+                        child.extend(["/k".to_owned(), initial]);
+                    }
+                    child
+                }
+                NewShellChoice::PowerShell => {
+                    let mut child = vec!["powershell.exe".to_owned(), "-NoLogo".to_owned()];
+                    if !initial.is_empty() {
+                        child.extend(["-NoExit".to_owned(), "-Command".to_owned(), initial]);
+                    }
+                    child
+                }
+            };
+            if !child.is_empty() {
+                args.push("--".to_owned());
+                args.append(&mut child);
+            }
+            let result = self.client.as_mut().context("UI is disconnected").and_then(
+                |client| -> Result<()> {
+                    client.run_control(args)?;
                     client.poll_deltas()?;
                     Ok(())
-                });
-        if let Err(error) = result {
-            self.last_error = Some(format!("New tab failed: {error:#}"));
+                },
+            );
+            if result.is_err() {
+                self.last_error =
+                    Some("New terminal could not be created; check its configuration".to_owned());
+                return;
+            }
         }
+        self.new_terminal_open = false;
+        self.show_new_terminal_controls(false);
+        self.show_workspace_controls(true);
+        self.layout();
+        self.last_active_id = self
+            .client
+            .as_ref()
+            .and_then(|client| client.snapshot().active_tab_id.clone());
+        self.load_composer();
+        self.resize_active_terminal();
+        self.focus_surface = RemoteFocusSurface::Terminal;
+        unsafe { SetFocus(self.window) };
     }
 
     fn select_tab_at(&mut self, y: i32) {
         if !self.tabs_visible {
             return;
         }
-        let Some(row_index) = tree_row_at_y(y) else {
+        let Some(row_index) = self.sidebar_row_index_at_y(y) else {
             return;
         };
         let Some(tab_id) = self
@@ -2362,7 +2793,7 @@ impl RemoteWindowState {
         if !self.tabs_visible || y < 0 {
             return None;
         }
-        let row_index = tree_row_at_y(y)?;
+        let row_index = self.sidebar_row_index_at_y(y)?;
         let client = self.client.as_ref()?;
         let row = remote_tree_rows(&client.snapshot().tabs)
             .get(row_index)
@@ -2371,7 +2802,7 @@ impl RemoteWindowState {
     }
 
     fn tab_action_at(&self, x: i32, y: i32) -> Option<RemoteTabAction> {
-        let row_index = tree_row_at_y(y)?;
+        let row_index = self.sidebar_row_index_at_y(y)?;
         let client = self.client.as_ref()?;
         let row = remote_tree_rows(&client.snapshot().tabs)
             .get(row_index)
@@ -2380,11 +2811,11 @@ impl RemoteWindowState {
         if client.snapshot().active_tab_id.as_deref() != Some(tab.id.as_str()) {
             return None;
         }
-        let sidebar = self.layout_rects().0;
+        let viewport_position = row_index.checked_sub(self.sidebar_offset())?;
         let geometry = tree_row_geometry_for_mode(
-            row_index,
+            viewport_position,
             row.depth,
-            sidebar.right - sidebar.left,
+            self.sidebar_content_width(),
             TreeRowMode::Normal,
         );
         if geometry
@@ -2403,7 +2834,7 @@ impl RemoteWindowState {
     }
 
     fn tab_disclosure_at(&self, x: i32, y: i32) -> Option<String> {
-        let row_index = tree_row_at_y(y)?;
+        let row_index = self.sidebar_row_index_at_y(y)?;
         let client = self.client.as_ref()?;
         let row = remote_tree_rows(&client.snapshot().tabs)
             .get(row_index)
@@ -2411,11 +2842,11 @@ impl RemoteWindowState {
         if !row.has_children {
             return None;
         }
-        let sidebar = self.layout_rects().0;
+        let viewport_position = row_index.checked_sub(self.sidebar_offset())?;
         let geometry = tree_row_geometry_for_mode(
-            row_index,
+            viewport_position,
             row.depth,
-            sidebar.right - sidebar.left,
+            self.sidebar_content_width(),
             TreeRowMode::Normal,
         );
         geometry
@@ -2622,7 +3053,7 @@ impl RemoteWindowState {
     }
 
     fn open_settings(&mut self) {
-        if self.settings_open || self.window_close_pending {
+        if self.settings_open || self.new_terminal_open || self.window_close_pending {
             return;
         }
         self.cancel_terminal_selection();
@@ -2736,6 +3167,9 @@ impl RemoteWindowState {
         self.cancel_terminal_selection();
         if self.settings_open {
             self.finish_settings(false);
+        }
+        if self.new_terminal_open {
+            self.finish_new_terminal(false);
         }
         if let Err(error) = self.sync_composer() {
             self.last_error = Some(format!("Composer save failed: {error:#}"));
@@ -2943,6 +3377,9 @@ impl RemoteWindowState {
             self.tab_note_edit,
             self.settings_font,
             self.settings_size,
+            self.new_initial_command,
+            self.new_http_proxy,
+            self.new_https_proxy,
         ]
         .contains(&window)
     }
@@ -2958,6 +3395,7 @@ impl RemoteWindowState {
     fn set_focus_surface(&mut self, target: RemoteFocusSurface) -> bool {
         if self.window_close_pending
             || self.settings_open
+            || self.new_terminal_open
             || self.editing_tab_id.is_some()
             || self.pending_close_tab_id.is_some()
             || self.cwd_edit_tab_id.is_some()
@@ -3019,6 +3457,7 @@ impl RemoteWindowState {
         let terminal_ready = focused == self.window
             && !self.window_close_pending
             && !self.settings_open
+            && !self.new_terminal_open
             && self.active_tab().is_some_and(|tab| !tab.dead);
         (
             terminal_ready
@@ -3229,6 +3668,78 @@ impl RemoteWindowState {
 
     fn scrollbar_capture_lost(&mut self) {
         self.scroll_drag = None;
+    }
+
+    fn scroll_sidebar(&mut self, wheel_delta: i32) {
+        let steps = (wheel_delta.unsigned_abs() as usize / 120).max(1) * 3;
+        let maximum = self.sidebar_max_offset();
+        self.sidebar_scroll_offset = if wheel_delta > 0 {
+            self.sidebar_offset().saturating_sub(steps)
+        } else {
+            self.sidebar_offset().saturating_add(steps).min(maximum)
+        };
+        self.layout_tab_editor();
+    }
+
+    fn click_sidebar_scrollbar(&mut self, x: i32, y: i32) -> bool {
+        let Some((geometry, current, maximum)) = self.sidebar_scrollbar_state() else {
+            return false;
+        };
+        if !geometry.track.contains(x, y) {
+            return false;
+        }
+        if maximum == 0 {
+            return true;
+        }
+        if geometry.thumb.contains(x, y) {
+            self.sidebar_scroll_drag = Some(RemoteSidebarScrollDrag {
+                thumb_grab_offset: y - geometry.thumb.top,
+            });
+            unsafe { SetCapture(self.window) };
+        } else {
+            let page = self.sidebar_row_capacity().max(1);
+            self.sidebar_scroll_offset = if y < geometry.thumb.top {
+                current.saturating_sub(page)
+            } else {
+                current.saturating_add(page).min(maximum)
+            };
+            self.layout_tab_editor();
+        }
+        true
+    }
+
+    fn drag_sidebar_scrollbar(&mut self, y: i32) -> bool {
+        let Some(drag) = self.sidebar_scroll_drag else {
+            return false;
+        };
+        let Some((geometry, _, maximum)) = self.sidebar_scrollbar_state() else {
+            self.end_sidebar_scroll_drag();
+            return false;
+        };
+        let travel = geometry.track.height() - geometry.thumb.height();
+        if maximum == 0 || travel <= 0 {
+            self.sidebar_scroll_offset = 0;
+        } else {
+            let top = (y - drag.thumb_grab_offset).clamp(
+                geometry.track.top,
+                geometry.track.bottom - geometry.thumb.height(),
+            );
+            self.sidebar_scroll_offset = ((i64::from(top - geometry.track.top) * maximum as i64
+                + i64::from(travel) / 2)
+                / i64::from(travel)) as usize;
+        }
+        self.layout_tab_editor();
+        true
+    }
+
+    fn end_sidebar_scroll_drag(&mut self) {
+        if self.sidebar_scroll_drag.take().is_some() {
+            unsafe { ReleaseCapture() };
+        }
+    }
+
+    fn sidebar_scrollbar_capture_lost(&mut self) {
+        self.sidebar_scroll_drag = None;
     }
 
     fn resize_grip_contains(&self, x: i32, y: i32) -> bool {
@@ -3488,7 +3999,10 @@ impl RemoteWindowState {
             &format!("CWD: {cwd}"),
             palette.muted_text.colorref(),
         );
-        if !self.window_close_pending && !self.settings_open && self.pending_close_tab_id.is_none()
+        if !self.window_close_pending
+            && !self.settings_open
+            && !self.new_terminal_open
+            && self.pending_close_tab_id.is_none()
         {
             let focus = match self.current_focus_surface() {
                 RemoteFocusSurface::Terminal => terminal,
@@ -3501,6 +4015,8 @@ impl RemoteWindowState {
             self.paint_window_close(device, palette);
         } else if self.settings_open {
             self.paint_settings(device, palette);
+        } else if self.new_terminal_open {
+            self.paint_new_terminal(device, palette);
         } else if self.pending_close_tab_id.is_some() {
             self.paint_tab_close(device, palette);
         }
@@ -3687,6 +4203,43 @@ impl RemoteWindowState {
         );
     }
 
+    fn paint_new_terminal(&self, device: HDC, palette: &ThemePalette) {
+        let (modal, _) = self.new_terminal_modal_geometry();
+        fill(device, &modal, palette.modal.colorref());
+        frame(device, &modal, palette.accent.colorref());
+        for (top, text, color) in [
+            (18, "New terminal", palette.text.colorref()),
+            (48, "Shell profile", palette.muted_text.colorref()),
+            (
+                116,
+                "Initial command · optional; leaves the selected shell open",
+                palette.muted_text.colorref(),
+            ),
+            (
+                192,
+                "HTTP proxy · optional, applied only to this terminal",
+                palette.muted_text.colorref(),
+            ),
+            (
+                268,
+                "HTTPS proxy · optional, values are never exposed in snapshots",
+                palette.muted_text.colorref(),
+            ),
+        ] {
+            draw_text(
+                device,
+                RECT {
+                    left: modal.left + 28,
+                    top: modal.top + top,
+                    right: modal.right - 28,
+                    bottom: modal.top + top + 28,
+                },
+                text,
+                color,
+            );
+        }
+    }
+
     fn paint_tab_close(&self, device: HDC, palette: &ThemePalette) {
         let (modal, _) = self.tab_close_modal_geometry();
         fill(device, &modal, palette.modal.colorref());
@@ -3745,15 +4298,17 @@ impl RemoteWindowState {
         let Some(client) = &self.client else {
             return;
         };
-        for (position, tree_row) in remote_tree_rows(&client.snapshot().tabs)
+        for (viewport_position, tree_row) in remote_tree_rows(&client.snapshot().tabs)
             .into_iter()
+            .skip(self.sidebar_offset())
+            .take(self.sidebar_row_capacity())
             .enumerate()
         {
             let tab = &client.snapshot().tabs[tree_row.tab_index];
             let geometry = tree_row_geometry_for_mode(
-                position,
+                viewport_position,
                 tree_row.depth,
-                sidebar.right - sidebar.left,
+                self.sidebar_content_width(),
                 TreeRowMode::Normal,
             );
             let row = win_rect(geometry.selection);
@@ -3801,7 +4356,7 @@ impl RemoteWindowState {
             }
             draw_text(
                 device,
-                win_rect(geometry.text),
+                win_rect(geometry.name),
                 &format!(
                     "{} {}{}",
                     tab.id,
@@ -3812,6 +4367,30 @@ impl RemoteWindowState {
                     palette.muted_text.colorref()
                 } else {
                     palette.text.colorref()
+                },
+            );
+            if !tab.note.is_empty() {
+                draw_text(
+                    device,
+                    win_rect(geometry.note),
+                    &tab.note,
+                    palette.muted_text.colorref(),
+                );
+            }
+        }
+        if let Some((geometry, _, _)) = self.sidebar_scrollbar_state() {
+            fill(
+                device,
+                &win_rect(geometry.track),
+                palette.scrollbar_track.colorref(),
+            );
+            fill(
+                device,
+                &win_rect(geometry.thumb),
+                if self.sidebar_scroll_drag.is_some() {
+                    palette.scrollbar_thumb_active.colorref()
+                } else {
+                    palette.scrollbar_thumb.colorref()
                 },
             );
         }
@@ -3878,6 +4457,7 @@ unsafe extern "system" fn window_proc(
             if let Some(state) = state_mut(window) {
                 if state.window_close_pending
                     || state.settings_open
+                    || state.new_terminal_open
                     || state.pending_close_tab_id.is_some()
                 {
                     return 0;
@@ -3897,6 +4477,7 @@ unsafe extern "system" fn window_proc(
             if let Some(state) = state_mut(window) {
                 if state.window_close_pending
                     || state.settings_open
+                    || state.new_terminal_open
                     || state.pending_close_tab_id.is_some()
                 {
                     return 0;
@@ -3937,6 +4518,12 @@ unsafe extern "system" fn window_proc(
                     return 0;
                 }
                 if state.begin_tabs_resize(x, y) {
+                    return 0;
+                }
+                if state.click_sidebar_scrollbar(x, y) {
+                    unsafe {
+                        windows_sys::Win32::Graphics::Gdi::InvalidateRect(window, ptr::null(), 0)
+                    };
                     return 0;
                 }
                 if state.click_scrollbar(x, y) {
@@ -3985,7 +4572,17 @@ unsafe extern "system" fn window_proc(
             if let Some(state) = state_mut(window) {
                 let x = (lparam as u32 & 0xffff) as i16 as i32;
                 let y = ((lparam as u32 >> 16) & 0xffff) as i16 as i32;
-                if state.scroll_drag.is_some() {
+                if state.sidebar_scroll_drag.is_some() {
+                    if state.drag_sidebar_scrollbar(y) {
+                        unsafe {
+                            windows_sys::Win32::Graphics::Gdi::InvalidateRect(
+                                window,
+                                ptr::null(),
+                                0,
+                            )
+                        };
+                    }
+                } else if state.scroll_drag.is_some() {
                     if state.drag_scrollbar(y) {
                         unsafe {
                             windows_sys::Win32::Graphics::Gdi::InvalidateRect(
@@ -4012,7 +4609,9 @@ unsafe extern "system" fn window_proc(
             if let Some(state) = state_mut(window) {
                 let x = (lparam as u32 & 0xffff) as i16 as i32;
                 let y = ((lparam as u32 >> 16) & 0xffff) as i16 as i32;
-                if state.scroll_drag.is_some() {
+                if state.sidebar_scroll_drag.is_some() {
+                    state.end_sidebar_scroll_drag();
+                } else if state.scroll_drag.is_some() {
                     state.end_scroll_drag();
                 } else if state.tabs_resize_dragging {
                     state.finish_tabs_resize();
@@ -4027,6 +4626,7 @@ unsafe extern "system" fn window_proc(
         WM_CAPTURECHANGED => {
             if let Some(state) = state_mut(window) {
                 state.tabs_resize_capture_lost();
+                state.sidebar_scrollbar_capture_lost();
                 state.scrollbar_capture_lost();
                 state.terminal_selection_capture_lost();
             }
@@ -4036,12 +4636,26 @@ unsafe extern "system" fn window_proc(
             if let Some(state) = state_mut(window) {
                 if state.window_close_pending
                     || state.settings_open
+                    || state.new_terminal_open
                     || state.pending_close_tab_id.is_some()
                 {
                     return 0;
                 }
                 let delta = ((wparam >> 16) & 0xffff) as u16 as i16 as i32;
-                state.scroll_terminal(delta);
+                let mut point = POINT {
+                    x: (lparam as u32 & 0xffff) as i16 as i32,
+                    y: ((lparam as u32 >> 16) & 0xffff) as i16 as i32,
+                };
+                unsafe { ScreenToClient(window, &mut point) };
+                if state
+                    .workspace_geometry()
+                    .sidebar_tree
+                    .contains(point.x, point.y)
+                {
+                    state.scroll_sidebar(delta);
+                } else {
+                    state.scroll_terminal(delta);
+                }
                 unsafe {
                     windows_sys::Win32::Graphics::Gdi::InvalidateRect(window, ptr::null(), 0)
                 };
@@ -4113,6 +4727,14 @@ unsafe extern "system" fn window_proc(
                     }
                     return 0;
                 }
+                if state.new_terminal_open {
+                    if wparam as u32 == u32::from(VK_ESCAPE) {
+                        state.finish_new_terminal(false);
+                    } else if wparam as u32 == 0x0d {
+                        state.finish_new_terminal(true);
+                    }
+                    return 0;
+                }
                 if unsafe { GetFocus() } == window && state.terminal_key(wparam as u32) {
                     return 0;
                 }
@@ -4147,6 +4769,7 @@ unsafe extern "system" fn window_proc(
             if let Some(state) = state_mut(window) {
                 if state.window_close_pending
                     || state.settings_open
+                    || state.new_terminal_open
                     || state.pending_close_tab_id.is_some()
                 {
                     return 0;
@@ -4162,8 +4785,7 @@ unsafe extern "system" fn window_proc(
                 match wparam & 0xffff {
                     SEND_ID => state.send_composer(),
                     NEW_ID => {
-                        state.finish_cwd_editor(false);
-                        state.new_tab();
+                        state.open_new_terminal();
                     }
                     SETTINGS_ID => {
                         state.finish_cwd_editor(false);
@@ -4187,6 +4809,11 @@ unsafe extern "system" fn window_proc(
                     SETTINGS_CANCEL_ID => state.finish_settings(false),
                     TAB_CLOSE_CONFIRM_ID => state.finish_close_tab(true),
                     TAB_CLOSE_CANCEL_ID => state.finish_close_tab(false),
+                    NEW_DEFAULT_SHELL_ID => state.choose_new_shell(NewShellChoice::Default),
+                    NEW_CMD_SHELL_ID => state.choose_new_shell(NewShellChoice::CommandPrompt),
+                    NEW_POWERSHELL_ID => state.choose_new_shell(NewShellChoice::PowerShell),
+                    NEW_CREATE_ID => state.finish_new_terminal(true),
+                    NEW_CANCEL_ID => state.finish_new_terminal(false),
                     _ => {}
                 }
                 unsafe {

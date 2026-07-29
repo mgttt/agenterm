@@ -5,7 +5,7 @@ use super::{
     layout::{SCROLLBAR_WIDTH, u32_rect},
 };
 
-pub(super) const SIDEBAR_TAB_ROW_HEIGHT: u32 = 20;
+pub(super) const SIDEBAR_TAB_ROW_HEIGHT: u32 = 34;
 pub(super) const COMPOSER_HEIGHT: u32 = 48;
 pub(super) const STATUS_HEIGHT: u32 = 26;
 pub(super) const SETTINGS_MODAL_WIDTH: u32 = 360;
@@ -21,6 +21,7 @@ pub(super) struct SidebarTabRow {
     pub(super) id: u64,
     pub(super) depth: usize,
     pub(super) title: String,
+    pub(super) note: String,
     pub(super) active: bool,
     pub(super) collapsed: bool,
     pub(super) has_children: bool,
@@ -232,10 +233,14 @@ pub(super) struct WorkspaceToolbarView {
     pub(super) tabs: (u32, u32, u32, u32),
     pub(super) settings: (u32, u32, u32, u32),
     pub(super) compact: bool,
+    pub(super) tabs_visible: bool,
 }
 
 impl WorkspaceToolbarView {
-    pub(super) fn from_layout(toolbar: crate::ui_geometry::WorkspaceToolbarLayout) -> Self {
+    pub(super) fn from_layout(
+        toolbar: crate::ui_geometry::WorkspaceToolbarLayout,
+        tabs_visible: bool,
+    ) -> Self {
         Self {
             bounds: u32_rect(toolbar.bounds),
             new_tab: u32_rect(toolbar.new_tab),
@@ -245,6 +250,7 @@ impl WorkspaceToolbarView {
                 toolbar.mode,
                 crate::ui_geometry::WorkspaceToolbarMode::Compact
             ),
+            tabs_visible,
         }
     }
 
@@ -661,9 +667,17 @@ fn render_workspace_toolbar(
     fill_rect(buffer, stride, bx, by, bw, 1, divider);
     let button_bg = rgb_to_pixel(palette.composer);
     let labels = if toolbar.compact {
-        ("+", "T", "S")
+        ("+", if toolbar.tabs_visible { "<T" } else { ">T" }, "S")
     } else {
-        ("New", "Tabs", "Settings")
+        (
+            "New",
+            if toolbar.tabs_visible {
+                "<Tabs"
+            } else {
+                ">Tabs"
+            },
+            "Settings",
+        )
     };
     for (rect, label) in [
         (toolbar.new_tab, labels.0),
@@ -738,9 +752,21 @@ fn render_sidebar(
                 width,
                 height,
                 text_x,
-                top + 4,
+                top + 2,
                 &clipped,
                 palette.selection_foreground,
+            );
+            let note_chars =
+                ((sidebar_width.saturating_sub(text_x)) / (GLYPH_WIDTH + 1)).max(1) as usize;
+            draw_text(
+                buffer,
+                stride,
+                width,
+                height,
+                text_x,
+                top + 17,
+                &truncate_chars(&row.note, note_chars),
+                palette.muted_text,
             );
         } else {
             draw_text(
@@ -749,9 +775,21 @@ fn render_sidebar(
                 width,
                 height,
                 text_x,
-                top + 4,
+                top + 2,
                 &clipped,
                 palette.text,
+            );
+            let note_chars =
+                ((sidebar_width.saturating_sub(text_x)) / (GLYPH_WIDTH + 1)).max(1) as usize;
+            draw_text(
+                buffer,
+                stride,
+                width,
+                height,
+                text_x,
+                top + 17,
+                &truncate_chars(&row.note, note_chars),
+                palette.muted_text,
             );
         }
     }

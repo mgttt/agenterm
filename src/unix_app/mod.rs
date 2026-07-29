@@ -941,6 +941,7 @@ impl UnixApp {
                     id: tab.id,
                     depth: row.depth,
                     title: tab.title.clone(),
+                    note: tab.note.clone(),
                     active: self.active == Some(tab.id),
                     collapsed: self.collapsed_tabs.contains(&tab.id),
                     has_children,
@@ -1256,7 +1257,7 @@ impl UnixApp {
         if let Some(toolbar) = layout.workspace_toolbar
             && toolbar.bounds.contains(x as i32, y as i32)
         {
-            let view = WorkspaceToolbarView::from_layout(toolbar);
+            let view = WorkspaceToolbarView::from_layout(toolbar, self.config.tabs_visible);
             if let Some(hit) = view.hit_test(x, y) {
                 self.handle_toolbar_hit(hit);
             }
@@ -2006,9 +2007,9 @@ impl UnixApp {
                         .filter(|selection| self.active == Some(selection.tab_id)),
                 },
                 sidebar_rows: &sidebar_rows,
-                workspace_toolbar: layout
-                    .workspace_toolbar
-                    .map(WorkspaceToolbarView::from_layout),
+                workspace_toolbar: layout.workspace_toolbar.map(|toolbar| {
+                    WorkspaceToolbarView::from_layout(toolbar, self.config.tabs_visible)
+                }),
                 terminal_top: layout.terminal.top.max(0) as u32,
                 composer: ComposerView {
                     text: &self.composer_buffer,

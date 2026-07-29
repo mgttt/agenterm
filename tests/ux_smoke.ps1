@@ -1117,7 +1117,7 @@ try {
         throw 'full-height Tabs and terminal-workbench baseline was not exposed'
     }
 
-    [AgenTermNativeTest]::ClickButton($window, 'Tabs')
+    [AgenTermNativeTest]::ClickButton($window, '<Tabs')
     $tabsHidden = Invoke-AgenTerm @(
         'ui-action', 'select-tab', '-t', $id
     ) | ConvertFrom-Json
@@ -1133,7 +1133,7 @@ try {
         [AgenTermNativeTest]::SystemMenuChecked($window, 0x1f20)) {
         throw 'Tabs button did not hide the tree and release its terminal width'
     }
-    [AgenTermNativeTest]::ClickButton($window, 'Tabs')
+    [AgenTermNativeTest]::ClickButton($window, '>Tabs')
     $tabsRecovered = Invoke-AgenTerm @(
         'ui-action', 'select-tab', '-t', $id
     ) | ConvertFrom-Json

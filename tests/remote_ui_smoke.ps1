@@ -53,6 +53,15 @@ public static class AgenTermRemoteUiNativeTest {
     [DllImport("user32.dll")]
     public static extern bool IsWindowVisible(IntPtr window);
 
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern int GetWindowText(
+        IntPtr window, System.Text.StringBuilder text, int maxCount);
+
+    [DllImport("user32.dll")]
+    public static extern bool SetWindowPos(
+        IntPtr window, IntPtr insertAfter, int x, int y, int width, int height,
+        uint flags);
+
     public static IntPtr MousePoint(int x, int y) {
         return new IntPtr((y << 16) | (x & 0xffff));
     }
@@ -102,6 +111,15 @@ function Save-WindowPng {
     if ((Get-Item -LiteralPath $Path).Length -lt 1000) {
         throw 'replaceable UI PNG evidence is unexpectedly small'
     }
+}
+
+function Get-NativeText {
+    param([Parameter(Mandatory = $true)][IntPtr]$Control)
+    $text = [Text.StringBuilder]::new(128)
+    [AgenTermRemoteUiNativeTest]::GetWindowText(
+        $Control, $text, $text.Capacity
+    ) | Out-Null
+    $text.ToString()
 }
 
 $GuiExe = [IO.Path]::GetFullPath($GuiExe)
@@ -444,11 +462,23 @@ try {
     $settingsButton = [AgenTermRemoteUiNativeTest]::GetDlgItem(
         $gui.MainWindowHandle, 2112
     )
+    $newButton = [AgenTermRemoteUiNativeTest]::GetDlgItem(
+        $gui.MainWindowHandle, 2103
+    )
+    $toolbarUi = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    if ((Get-NativeText $tabsButton) -ne '<Tabs' -or
+        $toolbarUi.layout.toolbar.tabs.left -ge
+            $toolbarUi.layout.toolbar.new.left -or
+        $toolbarUi.layout.toolbar.settings.right -ne
+            ($toolbarUi.layout.toolbar.bounds.right - 8)) {
+        throw 'toolbar order, visible Tabs direction, or Settings alignment is wrong'
+    }
     [AgenTermRemoteUiNativeTest]::SendMessage(
         $tabsButton, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero
     ) | Out-Null
     if (-not [AgenTermRemoteUiNativeTest]::IsWindowVisible($tabsButton) -or
-        -not [AgenTermRemoteUiNativeTest]::IsWindowVisible($settingsButton)) {
+        -not [AgenTermRemoteUiNativeTest]::IsWindowVisible($settingsButton) -or
+        (Get-NativeText $tabsButton) -ne '>Tabs') {
         throw 'hiding Tabs also hid the terminal workbench toolbar'
     }
     [AgenTermRemoteUiNativeTest]::SendMessage(
@@ -488,6 +518,81 @@ try {
     if (-not [AgenTermRemoteUiNativeTest]::IsWindowVisible($tabsButton)) {
         throw 'bottom status Tabs recovery segment did not restore the sidebar'
     }
+
+    Write-Host 'STEP configure a new terminal before creation'
+    $newInitialCommand = [AgenTermRemoteUiNativeTest]::GetDlgItem(
+        $gui.MainWindowHandle, 2124
+    )
+    $newHttpProxy = [AgenTermRemoteUiNativeTest]::GetDlgItem(
+        $gui.MainWindowHandle, 2125
+    )
+    $newHttpsProxy = [AgenTermRemoteUiNativeTest]::GetDlgItem(
+        $gui.MainWindowHandle, 2126
+    )
+    $newCreate = [AgenTermRemoteUiNativeTest]::GetDlgItem(
+        $gui.MainWindowHandle, 2127
+    )
+    $beforeNewTabs = @((Invoke-AgenTerm @('ui-bootstrap') |
+            ConvertFrom-Json).tabs).Count
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $newButton, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero
+    ) | Out-Null
+    Invoke-AgenTerm @(
+        'wait-ui', '--modal-kind', 'new-terminal', '--timeout-ms', '1000'
+    ) | Out-Null
+    if (@((Invoke-AgenTerm @('ui-bootstrap') |
+                ConvertFrom-Json).tabs).Count -ne $beforeNewTabs -or
+        -not [AgenTermRemoteUiNativeTest]::IsWindowVisible($newInitialCommand)) {
+        throw 'New mutated the tab set before Create or did not open its modal'
+    }
+    $newMarker = "AGENTERM_NEW_DIALOG_$($run.RunId)"
+    $proxySecret = 'http://dialog-user:dialog-pass@127.0.0.1:48888'
+    [AgenTermRemoteUiNativeTest]::SendMessageText(
+        $newInitialCommand, 0x000C, [IntPtr]::Zero,
+        "if defined HTTP_PROXY echo $newMarker"
+    ) | Out-Null
+    [AgenTermRemoteUiNativeTest]::SendMessageText(
+        $newHttpProxy, 0x000C, [IntPtr]::Zero, $proxySecret
+    ) | Out-Null
+    [AgenTermRemoteUiNativeTest]::SendMessageText(
+        $newHttpsProxy, 0x000C, [IntPtr]::Zero, $proxySecret
+    ) | Out-Null
+    $modalDeadline = [DateTime]::UtcNow.AddSeconds(2)
+    do {
+        $newModalText = Invoke-AgenTerm @('ui-snapshot')
+        $newModal = $newModalText | ConvertFrom-Json
+        if ($newModal.modal.initial_command_configured -and
+            $newModal.modal.http_proxy_configured -and
+            $newModal.modal.https_proxy_configured) {
+            break
+        }
+    } while ([DateTime]::UtcNow -lt $modalDeadline)
+    if (-not $newModal.modal.initial_command_configured -or
+        -not $newModal.modal.http_proxy_configured -or
+        -not $newModal.modal.https_proxy_configured -or
+        $newModal.modal.proxy_values_exposed -or
+        $newModalText.Contains($proxySecret) -or
+        $newModalText.Contains('dialog-pass')) {
+        throw 'New terminal modal did not expose redacted configured-state facts'
+    }
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $newCreate, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero
+    ) | Out-Null
+    Invoke-AgenTerm @(
+        'wait-pane', '--contains', $newMarker, '--timeout-ms', '5000'
+    ) | Out-Null
+    if (@((Invoke-AgenTerm @('ui-bootstrap') |
+                ConvertFrom-Json).tabs).Count -ne ($beforeNewTabs + 1)) {
+        throw 'Create did not add exactly one configured terminal'
+    }
+    $createdTabId = (Invoke-AgenTerm @('ui-bootstrap') |
+            ConvertFrom-Json).active_tab_id
+    Invoke-AgenTerm @('select-window', '-t', $tabId) | Out-Null
+    Invoke-AgenTerm @('kill-window', '-t', $createdTabId) | Out-Null
+    Invoke-AgenTerm @(
+        'wait-ui', '--active', $tabId, '--focus', 'terminal',
+        '--timeout-ms', '1000'
+    ) | Out-Null
 
     Write-Host 'STEP navigate Terminal, Composer, and Tabs without the mouse'
     $focusMessage = 0x8003
@@ -748,9 +853,15 @@ try {
     }
 
     Write-Host 'STEP add and close a child through the replaceable Tabs tree'
+    $rootUi = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $rootRow = @($rootUi.tabs | Where-Object id -eq $tabId)[0]
+    $addBounds = $rootRow.actions.new_child.bounds
     [AgenTermRemoteUiNativeTest]::SendMessage(
         $gui.MainWindowHandle, 0x0201, [IntPtr]::Zero,
-        [AgenTermRemoteUiNativeTest]::MousePoint(225, 20)
+        [AgenTermRemoteUiNativeTest]::MousePoint(
+            [int]($addBounds.left + ($addBounds.width / 2)),
+            [int]($addBounds.top + ($addBounds.height / 2))
+        )
     ) | Out-Null
     $childBootstrap = Invoke-AgenTerm @('ui-bootstrap') |
         ConvertFrom-Json
@@ -922,8 +1033,12 @@ try {
     ) | Out-Null
     $edited = Invoke-AgenTerm @('inspect', '-t', $tabId) |
         ConvertFrom-Json
+    $editedUi = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+    $editedUiTab = @($editedUi.tabs | Where-Object id -eq $tabId)[0]
     if ($edited.windows[0].name -ne $editedTitle -or
         $edited.windows[0].note -ne $editedNote -or
+        $editedUiTab.note -ne $editedNote -or
+        [int]$editedUiTab.render.note.height -le 0 -or
         [AgenTermRemoteUiNativeTest]::IsWindowVisible($titleEditor)) {
         Save-WindowPng -Window $gui.MainWindowHandle `
             -Path (Join-Path $run.RunDirectory 'inline-edit-failure.png')
@@ -969,6 +1084,74 @@ try {
     if ($cancelled.windows[0].name -ne $editedTitle -or
         [AgenTermRemoteUiNativeTest]::IsWindowVisible($titleEditor)) {
         throw 'inline Cancel changed the server title or left editor controls visible'
+    }
+
+    Write-Host 'STEP scroll a dense Tabs army through its visible scrollbar'
+    $sidebarFixtureIds = @()
+    foreach ($index in 1..8) {
+        $sidebarFixtureIds += (Invoke-AgenTerm @(
+                'new-window', '-d', '-P', '-F', '#{window_id}',
+                '-n', "sidebar-$index", '--', 'cmd.exe', '/c', 'exit'
+            )).Trim()
+    }
+    if (-not [AgenTermRemoteUiNativeTest]::SetWindowPos(
+            $gui.MainWindowHandle, [IntPtr]::Zero, 0, 0, 900, 320,
+            0x0016
+        )) {
+        throw 'SetWindowPos failed for dense Tabs scrollbar fixture'
+    }
+    $sidebarDeadline = [DateTime]::UtcNow.AddSeconds(3)
+    do {
+        $sidebarUi = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+        if ([int]$sidebarUi.layout.sidebar.scrollbar.max_offset -gt 0) {
+            break
+        }
+    } while ([DateTime]::UtcNow -lt $sidebarDeadline)
+    $sidebarScrollbar = $sidebarUi.layout.sidebar.scrollbar
+    if ($null -eq $sidebarScrollbar -or
+        [int]$sidebarScrollbar.max_offset -le 0 -or
+        [int]$sidebarScrollbar.track.width -ne 12) {
+        throw 'dense Tabs did not expose its bounded vertical scrollbar'
+    }
+    $sidebarX = [int](
+        $sidebarScrollbar.thumb.left + ($sidebarScrollbar.thumb.width / 2)
+    )
+    $sidebarThumbY = [int](
+        $sidebarScrollbar.thumb.top + ($sidebarScrollbar.thumb.height / 2)
+    )
+    $sidebarBottomY = [int](
+        $sidebarScrollbar.track.top + $sidebarScrollbar.track.height - 2
+    )
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, 0x0201, [IntPtr]::Zero,
+        [AgenTermRemoteUiNativeTest]::MousePoint($sidebarX, $sidebarThumbY)
+    ) | Out-Null
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, 0x0200, [IntPtr]::Zero,
+        [AgenTermRemoteUiNativeTest]::MousePoint($sidebarX, $sidebarBottomY)
+    ) | Out-Null
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, 0x0202, [IntPtr]::Zero,
+        [AgenTermRemoteUiNativeTest]::MousePoint($sidebarX, $sidebarBottomY)
+    ) | Out-Null
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, 0x0113, [IntPtr]::Zero, [IntPtr]::Zero
+    ) | Out-Null
+    $sidebarScrollDeadline = [DateTime]::UtcNow.AddSeconds(2)
+    do {
+        $sidebarScrolled = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
+        if ([int]$sidebarScrolled.layout.sidebar.scrollbar.offset -gt 0) {
+            break
+        }
+    } while ([DateTime]::UtcNow -lt $sidebarScrollDeadline)
+    if ([int]$sidebarScrolled.layout.sidebar.scrollbar.offset -le 0) {
+        throw 'dragging the Tabs scrollbar did not change its visible row offset'
+    }
+    [AgenTermRemoteUiNativeTest]::SetWindowPos(
+        $gui.MainWindowHandle, [IntPtr]::Zero, 0, 0, 1100, 760, 0x0016
+    ) | Out-Null
+    foreach ($fixtureId in $sidebarFixtureIds) {
+        Invoke-AgenTerm @('kill-window', '-t', $fixtureId) | Out-Null
     }
 
     $scrollMarker = "AGENTERM_REMOTE_SCROLL_$($run.RunId)_"
