@@ -236,14 +236,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       uses, while restart, gap, timeout, truncation, and return limits remain
       explicit robustness contracts
     - [x] make `script api --json` the exact typed catalog and make
-      `script check` validate API names, capabilities, versions,
+      `script check` validate API names, API feature IDs, versions,
       and static limits offline rather than only compiling Rhai syntax
     - [x] append privacy-bounded audit records for identity/fingerprint,
-      runtime/API facts, capabilities and budgets, broker
+      runtime/API facts, available API features and robustness budgets, broker
       operation IDs, duration, result class, failure, cancellation, timeout,
       and crash without source, argv, pane content, environment values,
       stdout, clipboard data, or credentials
-    - [x] expose the supervisor, capability broker, typed operation adapter,
+    - [x] expose the supervisor, runtime service broker, typed operation adapter,
       and audit sink as Rust boundaries reusable by future Bash and MCP
       executables without making either depend on Rhai types or shipping
       their runtime/transport in v0.1.6
@@ -416,8 +416,10 @@ track remains planned, but every declared dependency must still pass.
     tests preserve GUI/PTY isolation, no-activate, first-window, binary-size,
     remain-on-exit, and explicit-close gates
   - [ ] control tools, MCP client/federation, network transport, subscriptions,
-    pane-content resources, Rhai execution, brain/flow, agent permissions, and
-    autonomous scheduling remain later independently approved gates
+    pane-content resources, embedding the unrestricted Rhai runtime into
+    autonomous agent flows, brain/flow, Agent-harness permissions, and
+    autonomous scheduling remain later independently approved integration
+    gates; these gates never reduce standalone `agenterm-script.exe` APIs
   - [ ] implementation sequencing, budgets, risks and release evidence are
     owned by [the v0.1.10 public plan](../plan/plan-v0.1.10.md)
 - [ ] Multi-platform GUI track (independent of v0.1.8–v0.1.10 version gates):
