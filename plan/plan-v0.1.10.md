@@ -2,7 +2,7 @@
 
 状态：实施中；原 v0.1.9 Release 因 server-loss 故障撤下，
 `0.1.9+hotfix.1` 是恢复 v0.1.10 主线前的强制稳定性门；
-当前 31/43 PowerShell 迁移项完成删除
+当前 32/43 PowerShell 迁移项完成删除
 工作主题：**Rhai 完整接替 PowerShell，并建立可验证的只读 Agent 桥梁**
 版本定位：在 v0.1.9 完善通用 Rhai 运行时、模块任务与机器可读工具
 schema 后，让 AgenTerm 首次用自己的脚本运行时驱动完整开发生命周期，
@@ -35,7 +35,7 @@ Cargo 不接受四段核心版本 `0.1.9.1`，因此机器身份、tag、metadat
 
 热修复发布门：
 
-- `remote_ui_smoke.ps1` 必须真实停止 server，观察输入 controls 隐藏；
+- `remote-ui-smoke` Rhai 任务必须真实停止 server，观察输入 controls 隐藏；
 - 在 server 不可用时通过原生 `WM_CLOSE` 打开并取消本地三选确认；
 - 测试不得手工启动 replacement server，必须由同一 GUI 自动恢复；
 - 新 server PID、epoch、UI lease 必须全部变化且因果一致；

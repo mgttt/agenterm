@@ -189,6 +189,7 @@ pub fn register_local(engine: &mut Engine) {
     rhai_module.set_sub_module("crypto", crypto);
     rhai_module.set_sub_module("hash", hash);
     rhai_module.set_sub_module("runtime", runtime);
+    crate::script_clipboard::register(&mut rhai_module);
     crate::script_image::register(engine, &mut rhai_module);
     crate::script_task::register(engine, &mut rhai_module);
     crate::script_http::register(engine, &mut rhai_module);

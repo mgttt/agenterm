@@ -322,7 +322,7 @@ try {
             'cli-smoke' = '.\scripts\rhai\cli-smoke.rhai'
             'wake-smoke' = '.\scripts\rhai\wake-smoke.rhai'
             'server-smoke' = '.\scripts\rhai\server-smoke.rhai'
-            'remote-ui-smoke' = '.\tests\remote_ui_smoke.ps1'
+            'remote-ui-smoke' = '.\scripts\rhai\remote-ui-smoke.rhai'
             'remote-ui-upgrade-smoke' = '.\scripts\rhai\remote-ui-upgrade-smoke.rhai'
             'fleet-smoke' = '.\scripts\rhai\fleet-smoke.rhai'
             'script-smoke' = '.\tests\script_smoke.ps1'
@@ -528,7 +528,9 @@ try {
             }
             Invoke-Checked -Id 'remote-ui-smoke' `
                 -Label 'replaceable UI client smoke test' {
-                & '.\tests\remote_ui_smoke.ps1'
+                & '.\dist\agenterm-script.exe' task run remote-ui-smoke `
+                    --manifest '.\agenterm.tasks.json' `
+                    --timeout-ms 120000 --max-operations 10000000
             }
             Invoke-Checked -Id 'remote-ui-upgrade-smoke' `
                 -Label 'same-server GUI upgrade and rollback smoke test' {

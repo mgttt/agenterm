@@ -37,6 +37,7 @@
         "std.process.child-window-input",
         "std.process.id",
         "std.process.list",
+        "std.process.kill",
         "std.time.system-time-now",
         "std.time.system-time-unix-millis",
         "std.time.system-time-rfc3339",
@@ -47,6 +48,8 @@
         "rhai.crypto.sha256-file",
         "rhai.hash.fnv1a64",
         "rhai.image.inspect-png",
+        "rhai.clipboard.get-text",
+        "rhai.clipboard.set-text",
         "rhai.runtime.atomic-write"
       ]
     },
@@ -149,6 +152,14 @@
       "id": "cli-smoke",
       "description": "Prove public typed control, UI bridge, PTY, screenshots, remain-on-exit, and explicit close",
       "entry": "scripts/rhai/cli-smoke.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "args": [".", "dist/agenterm.exe", "dist/agenterm-cli.exe"]
+    },
+    {
+      "id": "remote-ui-smoke",
+      "description": "Prove replaceable GUI detach, physical workbench behavior, clipboard, server-fault isolation, and in-place reconnect",
+      "entry": "scripts/rhai/remote-ui-smoke.rhai",
       "profile": "local",
       "cwd": ".",
       "args": [".", "dist/agenterm.exe", "dist/agenterm-cli.exe"]

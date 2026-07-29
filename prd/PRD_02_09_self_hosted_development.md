@@ -33,8 +33,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   closable without consulting the missing server, starts a bounded replacement
   server only when the configured endpoint has no listener, and reconnects the
   same GUI PID/HWND through a new causal server epoch
-  - [x] the public `remote_ui_smoke.ps1` journey force-terminates the isolated
-    server as a crash fault,
+  - [x] the public `remote-ui-smoke` Rhai journey force-terminates the isolated
+    server as a crash fault through unrestricted `std::process::kill`,
     observes disabled input, opens and cancels the native close confirmation
     while disconnected, requires GUI-owned automatic recovery rather than
     manually launching a server, verifies the new PID/epoch/lease, and finishes

@@ -140,7 +140,10 @@ fn append_command_record(context, arguments, output, expected_failure, redaction
                 output.stdout_text() + output.stderr_text(),
                 redactions
             ),
-            4096
+            // Preserve every command and outcome while keeping long smoke
+            // journeys below the runtime's ordinary string robustness bound.
+            // Full structured state belongs in explicit retained diagnostics.
+            1024
         )
     });
     rhai::runtime::atomic_write(

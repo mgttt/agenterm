@@ -165,6 +165,9 @@ agenterm-script
 │  │  ├─ list() -> Array<ProcessInfo>
 │  │  │  Returns an unrestricted, PID-sorted operating-system process snapshot.
 │  │  │  [shipped; stable; designed 2026-07-30]
+│  │  ├─ kill(pid)
+│  │  │  Forcefully terminates an arbitrary operating-system process by PID.
+│  │  │  [shipped; stable; designed 2026-07-30]
 │  │  └─ command(program) -> Command
 │  │     Creates a typed process builder; no implicit shell is inserted.
 │  │     [shipped; stable; designed 2026-07-28]
@@ -258,6 +261,16 @@ agenterm-script
 │  │  └─ inspect_png(path) -> PngInfo
 │  │     Returns dimensions, sampled RGB, and luminance for one explicit PNG.
 │  │     [shipped; stable; designed 2026-07-30]
+│  │
+│  ├─ clipboard::
+│  │  Direct Unicode text access to the operating-system clipboard.
+│  │  [shipped on Windows; stable namespace; designed 2026-07-30]
+│  │  ├─ get_text() -> String
+│  │  │  Reads the current Unicode text without content or caller filtering.
+│  │  │  [shipped on Windows; stable; designed 2026-07-30]
+│  │  └─ set_text(text)
+│  │     Replaces the current clipboard contents with Unicode text.
+│  │     [shipped on Windows; stable; designed 2026-07-30]
 │  │
 │  ├─ task::
 │  │  Executor-neutral task composition, waiting, racing, and cancellation.
@@ -366,9 +379,30 @@ agenterm-script
 │  │  ├─ Child.window_key(key)
 │  │  │  Delivers one named native key to the child's current top-level window.
 │  │  │  [shipped on Windows; stable; designed 2026-07-30]
-│  │  └─ Child.window_pointer(action, x, y)
-│  │     Delivers click/down/move/move-held/up/capture-changed pointer input.
+│  │  ├─ Child.window_pointer(action, x, y)
+│  │  │  Delivers click/down/move/move-held/up/capture-changed pointer input.
+│  │  │  [shipped on Windows; stable; designed 2026-07-30]
+│  │  ├─ Child.window_message(message, wparam, lparam)
+│  │  │  Sends an explicit native integer message to the current window.
+│  │  │  [shipped on Windows; stable; designed 2026-07-30]
+│  │  ├─ Child.window_rect() / .window_client_rect()
+│  │  │  Returns typed screen or client geometry.
+│  │  │  [shipped on Windows; stable; designed 2026-07-30]
+│  │  ├─ Child.window_resize(width, height)
+│  │  │  Resizes without moving, reordering, or activating the window.
+│  │  │  [shipped on Windows; stable; designed 2026-07-30]
+│  │  └─ Child.window_control(id) -> WindowControl
+│  │     Creates a child-scoped control reference that re-resolves its HWND.
 │  │     [shipped on Windows; stable; designed 2026-07-30]
+│  ├─ WindowRect
+│  │  Native left/top/right/bottom and derived width/height facts.
+│  │  [shipped on Windows; stable; designed 2026-07-30]
+│  ├─ WindowControl
+│  │  Child-scoped native control identity, visibility, Unicode text, and click.
+│  │  [shipped on Windows; stable; designed 2026-07-30]
+│  │  ├─ .id / .visible / .text
+│  │  ├─ .set_text(text)
+│  │  └─ .click()
 │  ├─ PngInfo
 │  │  Width, height, sample count, average RGB, and luminance facts.
 │  │  [shipped; stable; designed 2026-07-30]
@@ -826,6 +860,13 @@ Agent policy; entries that disappear or become unreadable during the snapshot
 are omitted. Windows uses Tool Help, Linux uses `/proc`, and macOS uses
 `libproc`. This is a point-in-time observation, not a durable process handle.
 
+`std::process::kill(pid)` forcefully terminates the selected operating-system
+process. It accepts every nonzero PID in the platform integer range and applies
+no owner, executable, path, ancestry, or Agent-policy filter. Windows uses
+`PROCESS_TERMINATE`; Unix sends `SIGKILL`. The call reports whether the
+termination request was accepted, while callers use `list()` or their domain
+protocol to observe final disappearance and recovery.
+
 `Child.id` is stable for that typed handle throughout the invocation, including
 after `wait_with_output()` has completed. This lets cleanup manifests retain
 the exact owned PID without reopening or rediscovering a system process.
@@ -844,15 +885,35 @@ pretend that a negative result is an observed desktop fact. This child-scoped
 fact accepts no arbitrary PID; the separate `std::process::list()` API owns the
 general inventory.
 
-`Child.window_key(key)` and `Child.window_pointer(action, x, y)` resolve the
-current top-level window from the invocation-owned child PID on every call.
-They never reinterpret the opaque `top_level_window_id` observation as a
-persisted control handle. Windows supports the documented named keys and
-left-pointer lifecycle. The `click` action performs a native button click when
-the coordinate resolves to a visible enabled child control, and otherwise
-delivers a left-button down/up pair to the top-level window. Other platforms fail explicitly with
+`Child.window_key`, `Child.window_pointer`, `Child.window_message`,
+`Child.window_rect`, `Child.window_client_rect`, `Child.window_resize`, and
+`Child.window_control` resolve the current top-level window from the
+invocation-owned child PID on every call. They never reinterpret the opaque
+`top_level_window_id` observation as a persisted control handle. A
+`WindowControl` stores the owning typed child and integer control ID rather than
+an HWND; `.visible`, `.text`, `.set_text(text)`, and `.click()` re-resolve the
+top-level window and `GetDlgItem` target for every operation. This survives
+ordinary native dialog/control recreation without leaking a process-global
+handle.
+
+Windows supports the documented named keys and left-pointer lifecycle. The
+`click` action performs a native button click when the coordinate resolves to a
+visible enabled child control, and otherwise delivers a left-button down/up
+pair to the top-level window. `window_message` accepts the complete unsigned
+32-bit native message number, an unsigned pointer-width `wparam`, and a signed
+pointer-width `lparam`;
+it does not maintain a message allowlist. `window_resize` preserves position
+and Z order and requests no activation. Other platforms fail explicitly with
 `process_window_input_unsupported` until an equivalent native adapter ships.
 This is a platform-availability boundary, not an Agent authorization layer.
+
+`rhai::clipboard::get_text()` and `set_text(text)` expose direct Unicode text
+access to the operating-system clipboard. On Windows they use
+`CF_UNICODETEXT`, retry transient clipboard ownership for up to two seconds,
+and return typed host failures for unavailable, invalid, or failed data. The
+module does not filter content, callers, source processes, or destinations and
+is not an Agent permission surface. Other platforms report
+`clipboard_unsupported` until their native adapters ship.
 
 `Output.stdout` and `.stderr` are `Bytes`. `stdout_text()` and `stderr_text()`
 perform strict UTF-8 decoding. `.truncated` MUST become true if either stream

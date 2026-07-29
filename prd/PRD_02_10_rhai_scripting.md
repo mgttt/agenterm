@@ -160,6 +160,9 @@ and it is not positioned as a restricted security plugin.
   operating-system process inventory (`ProcessInfo.id` and
   `.executable_name`) on Windows, Linux, and macOS; it is a point-in-time
   observation rather than an Agent allowlist or authorization surface.
+  `std::process::kill(pid)` forcefully terminates any selected operating-system
+  process without owner, executable, path, ancestry, or Agent-policy filtering;
+  the remote-UI recovery journey uses it for real server-fault injection.
   `Command.start()` is the script spelling because Rhai reserves `spawn`;
   catalog metadata retains the Rust `Command::spawn` comparison.
 - [~] `std::time` provides selected `Duration`, `Instant`, and `SystemTime`
@@ -221,9 +224,14 @@ and it is not positioned as a restricted security plugin.
   allowing raw protocol fixtures to remain bytes-first without shell or
   PowerShell escape hatches.
 - [x] invocation-owned `Child` values provide typed native top-level-window
-  key and pointer delivery on Windows. The API re-resolves the child's window
-  from its PID and never turns the opaque observation token into a persisted
-  native handle; theme, selection, workbench, and UX journeys share it.
+  key, pointer, raw message, geometry, nonactivating resize, and child-control
+  text/click operations on Windows. The API re-resolves the child's window and
+  control IDs on every call and never turns the opaque observation token into
+  a persisted native handle; theme, selection, workbench, remote-UI, and UX
+  journeys share it.
+- [x] `rhai::clipboard` provides unrestricted operating-system Unicode text
+  get/set operations on Windows. It filters neither content nor caller and is
+  a general local runtime API rather than an Agent permission boundary.
 - [x] `rhai::image::inspect_png` decodes one explicit PNG into typed
   dimensions, sampled RGB, and luminance facts under a 64 MiB decoded-memory
   robustness bound, removing `System.Drawing` from visual qualification.
@@ -403,7 +411,7 @@ and it is not positioned as a restricted security plugin.
 - [~] migrate one independently testable responsibility at a time through
   `parallel -> parity-proven -> default-rhai -> PowerShell deleted`; obsolete
   unreachable responsibilities may instead cross a caller-audited functional
-  deletion boundary. The first twenty-three completed baseline scripts have left
+  deletion boundary. The first thirty-two completed baseline scripts have left
   the v0.1.10 working tree.
 - [ ] parity evidence compares the same inputs, structured outputs, exit
   classification, diagnostics, cancellation, cleanup, encoding, path behavior,
@@ -412,7 +420,7 @@ and it is not positioned as a restricted security plugin.
 - [~] once one Rhai responsibility reaches parity and all normal callers switch
   to it, or an obsolete responsibility is proven unreachable and superseded,
   delete that PowerShell implementation immediately instead of accumulating a
-  release-wide migration backlog; twenty-six of 43 baseline scripts are deleted.
+  release-wide migration backlog; thirty-two of 43 baseline scripts are deleted.
 - [~] every migrated item records its old path, replacement path, switching
   commit, parity evidence, and deletion state in this PRD. Git history is the
   only archive after the explicit rollback window closes.
@@ -451,6 +459,7 @@ Migration ledger:
 | Theme preview, persistence, PTY continuity, and rendered differentiation | `scripts/rhai/theme-smoke.rhai` plus typed child-window input, `rhai::image::inspect_png`, and the shared Rhai harness | `tests/theme_smoke.ps1` | current migration change | live old/new parity preserves Dark/Light preview, Cancel and physical Escape rollback, settings persistence, stable PTY PID/output, native PNG luminance separation, restart state, bounded retained failure diagnostics, and orphan-free cleanup | deleted; qualification and diagnostic-bundle probes invoke the named Rhai task |
 | Workbench inline editing, archived Proxy chrome, and compact tree geometry | `scripts/rhai/workbench-smoke.rhai` plus typed child-window click dispatch and the shared Rhai harness | `tests/workbench_smoke.ps1` | current migration change | live old/new parity preserves physical Edit/Save/Cancel, independent name/note drafts, Composer isolation, archived Proxy geometry/actions, a four-level CJK hierarchy, 180/250/480 px density, bounded row geometry, and orphan-free cleanup | deleted; qualification discovery and execution invoke the named Rhai task |
 | Fleet discovery, events, launch context, restart, and Mux safety | `scripts/rhai/fleet-smoke.rhai` plus the shared Rhai harness | `tests/fleet_smoke.ps1` | current migration change | live old/new ordinary and 16×258 concurrent-load parity preserves all six evidence IDs, dead-record pruning, explicit/implicit/ambiguous instance selection, scoped environment and Codex launch, typed event catalog/causality/wait timeout/cancellation/restart/gap, Mux compatibility/destructive safety, and multi-address cleanup; the Rhai stress path completes in about 63 seconds versus 116 seconds for PowerShell | deleted; ordinary qualification skips the explicit load while stress/release appends `--event-load` to the same named task |
+| Replaceable GUI, physical workbench, and in-place server-fault recovery | `scripts/rhai/remote-ui-smoke.rhai` plus unrestricted native child-window, operating-system clipboard, arbitrary-process termination, and the shared Rhai harness | `tests/remote_ui_smoke.ps1` | current migration change | live PowerShell last-known-good and named Rhai task both pass the complete journey: split GUI/server roles, detach and same-server PTY continuity, replacement UI, physical toolbar/modal/Settings/CWD/tree/scroll/selection/clipboard behavior, real server force-termination, hidden offline input, local disconnected close, same GUI PID/window identity reconnect to a new PID/epoch/lease, screenshots, stale-registration pruning, and zero owned orphans | deleted; qualification discovery and execution invoke the named Rhai task |
 | Unintegrated professional terminal-selection prototype | Future public Rhai professional-selection journey after the product slice ships | `tests/terminal_selection_smoke.ps1` | current migration change | caller audit finds no check, CI, qualification, or registered evidence consumer; direct execution fails before interaction at zero terminal columns, while the Windows double-click handler does not implement the claimed word/third-click behavior and the product PRD keeps that slice planned | deleted as misleading dead test code; Git history retains the prototype |
 
 ### v0.1.10 completion commitment
@@ -461,7 +470,7 @@ Migration ledger:
 - [x] the dated 2026-07-29 frozen baseline is 43 tracked `.ps1` files: 3 at
   the repository root, 17 under `scripts/`, 21 under `tests/`, and 2 retained in
   `scripts/archive/powershell/`.
-- [~] migration progress is 31/43 deleted and 12/43 remaining; progress is
+- [~] migration progress is 32/43 deleted and 11/43 remaining; progress is
   counted only after parity evidence plus caller cutover, or caller-audited
   functional deletion of obsolete behavior, and source deletion.
 - [x] `scripts/powershell-migration.json` freezes all 43 baseline paths under
@@ -473,12 +482,13 @@ Migration ledger:
   duplicate paths, invalid states, and count drift; ordinary and release
   qualification invoke it as a required gate.
 - [~] the repository-root `agenterm.tasks.json` is now the offline task
-  catalog and ships twenty-six ready tasks (`bootstrap-info`, `build-identity`,
+  catalog and ships twenty-eight ready tasks (`bootstrap-info`, `build-identity`,
   `harness-cleanup-selftest`, `migration-audit`, `target-report`, `internal-version-policy`,
   `verify-docs-site`, `readme-examples`, `clean-locked-artifacts`,
   `prepare-target-clean`, `preflight`, `preflight-benchmark`, `prd-alignment`,
-  `stage-artifact`, `stage-build`, `supply-chain`, `server-smoke`, `startup-smoke`, `cli-smoke`, `fleet-smoke`,
-  `working-context-smoke`, `workbench-smoke`, `wake-smoke`, `remote-ui-upgrade-smoke`,
+  `stage-artifact`, `stage-build`, `supply-chain`, `server-smoke`, `startup-smoke`,
+  `cli-smoke`, `fleet-smoke`, `theme-smoke`, `working-context-smoke`,
+  `workbench-smoke`, `wake-smoke`, `remote-ui-smoke`, `remote-ui-upgrade-smoke`,
   `validate-artifact-manifest`, and `write-build-metadata`). The existing
   two-input Script contract verifier is
   intentionally not advertised as ready until catalog fixture production is

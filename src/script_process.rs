@@ -54,6 +54,20 @@ pub struct ScriptProcessPlatformFacts {
 }
 
 #[derive(Clone, Debug)]
+pub struct ScriptWindowRect {
+    left: i64,
+    top: i64,
+    right: i64,
+    bottom: i64,
+}
+
+#[derive(Clone, Debug)]
+pub struct ScriptWindowControl {
+    child: ScriptChild,
+    id: i32,
+}
+
+#[derive(Clone, Debug)]
 pub struct ScriptProcessInfo {
     id: u32,
     executable_name: String,
@@ -137,6 +151,11 @@ fn register_types(engine: &mut Engine) {
     engine.register_fn("kill", child_kill);
     engine.register_fn("window_key", child_window_key);
     engine.register_fn("window_pointer", child_window_pointer);
+    engine.register_fn("window_message", child_window_message);
+    engine.register_fn("window_rect", child_window_rect);
+    engine.register_fn("window_client_rect", child_window_client_rect);
+    engine.register_fn("window_resize", child_window_resize);
+    engine.register_fn("window_control", child_window_control);
     engine.register_fn("wait_with_output", child_wait_with_output);
     engine.register_fn("wait_with_output", child_wait_with_output_for);
 
@@ -157,6 +176,27 @@ fn register_types(engine: &mut Engine) {
         "top_level_window_title",
         |facts: &mut ScriptProcessPlatformFacts| facts.top_level_window_title.clone(),
     );
+
+    engine.register_type_with_name::<ScriptWindowRect>("WindowRect");
+    engine.register_get("left", |rect: &mut ScriptWindowRect| rect.left);
+    engine.register_get("top", |rect: &mut ScriptWindowRect| rect.top);
+    engine.register_get("right", |rect: &mut ScriptWindowRect| rect.right);
+    engine.register_get("bottom", |rect: &mut ScriptWindowRect| rect.bottom);
+    engine.register_get("width", |rect: &mut ScriptWindowRect| {
+        rect.right - rect.left
+    });
+    engine.register_get("height", |rect: &mut ScriptWindowRect| {
+        rect.bottom - rect.top
+    });
+
+    engine.register_type_with_name::<ScriptWindowControl>("WindowControl");
+    engine.register_get("id", |control: &mut ScriptWindowControl| {
+        rhai::INT::from(control.id)
+    });
+    engine.register_get("visible", window_control_visible);
+    engine.register_get("text", window_control_text);
+    engine.register_fn("set_text", window_control_set_text);
+    engine.register_fn("click", window_control_click);
 
     engine.register_type_with_name::<ScriptProcessInfo>("ProcessInfo");
     engine.register_get("id", |process: &mut ScriptProcessInfo| {
@@ -196,6 +236,7 @@ fn process_module() -> Module {
     let mut module = Module::new();
     module.set_native_fn("id", process_id);
     module.set_native_fn("list", process_list);
+    module.set_native_fn("kill", process_kill);
     module.set_native_fn("command", process_command);
     module
 }
@@ -208,6 +249,116 @@ fn process_list() -> Result<Array, Box<EvalAltResult>> {
     let mut processes = platform_process_list()?;
     processes.sort_by_key(|process| process.id);
     Ok(processes.into_iter().map(rhai::Dynamic::from).collect())
+}
+
+fn process_kill(id: rhai::INT) -> Result<(), Box<EvalAltResult>> {
+    let id = u32::try_from(id).map_err(|_| {
+        runtime_error(
+            "configuration",
+            "process_id_invalid",
+            "std.process.kill",
+            "process ID must be in the unsigned 32-bit range",
+            false,
+            "process",
+            false,
+            Some("integer_range"),
+        )
+    })?;
+    if id == 0 {
+        return Err(runtime_error(
+            "configuration",
+            "process_id_invalid",
+            "std.process.kill",
+            "process ID must be greater than zero",
+            false,
+            "process",
+            false,
+            Some("integer_range"),
+        ));
+    }
+    platform_process_kill(id)
+}
+
+#[cfg(windows)]
+fn platform_process_kill(id: u32) -> Result<(), Box<EvalAltResult>> {
+    use windows_sys::Win32::{
+        Foundation::CloseHandle,
+        System::Threading::{OpenProcess, PROCESS_TERMINATE, TerminateProcess},
+    };
+
+    let process = unsafe { OpenProcess(PROCESS_TERMINATE, 0, id) };
+    if process.is_null() {
+        return Err(runtime_error(
+            "host",
+            "process_kill_open",
+            "std.process.kill",
+            "unable to open the selected operating-system process",
+            false,
+            "process",
+            false,
+            Some("os"),
+        ));
+    }
+    let terminated = unsafe { TerminateProcess(process, 1) };
+    unsafe {
+        CloseHandle(process);
+    }
+    if terminated == 0 {
+        return Err(runtime_error(
+            "host",
+            "process_kill",
+            "std.process.kill",
+            "unable to terminate the selected operating-system process",
+            false,
+            "process",
+            false,
+            Some("os"),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn platform_process_kill(id: u32) -> Result<(), Box<EvalAltResult>> {
+    let id = libc::pid_t::try_from(id).map_err(|_| {
+        runtime_error(
+            "configuration",
+            "process_id_invalid",
+            "std.process.kill",
+            "process ID exceeds the platform range",
+            false,
+            "process",
+            false,
+            Some("integer_range"),
+        )
+    })?;
+    if unsafe { libc::kill(id, libc::SIGKILL) } != 0 {
+        return Err(runtime_error(
+            "host",
+            "process_kill",
+            "std.process.kill",
+            "unable to terminate the selected operating-system process",
+            false,
+            "process",
+            false,
+            Some("os"),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(not(any(windows, unix)))]
+fn platform_process_kill(_id: u32) -> Result<(), Box<EvalAltResult>> {
+    Err(runtime_error(
+        "host",
+        "process_kill_unsupported",
+        "std.process.kill",
+        "operating-system process termination is not supported on this platform",
+        false,
+        "process",
+        false,
+        Some("platform"),
+    ))
 }
 
 #[cfg(windows)]
@@ -916,6 +1067,369 @@ fn child_window_pointer(
     ))
 }
 
+#[cfg(windows)]
+fn resolve_child_window(
+    child: &ScriptChild,
+    operation: &'static str,
+) -> Result<windows_sys::Win32::Foundation::HWND, Box<EvalAltResult>> {
+    let window = find_top_level_window(child_process_id(child)?);
+    if window.is_null() {
+        return Err(process_window_error(
+            "process_window_not_found",
+            operation,
+            "child has no top-level window",
+            Some("not_found"),
+        ));
+    }
+    Ok(window)
+}
+
+#[cfg(windows)]
+fn child_window_message(
+    child: &mut ScriptChild,
+    message: rhai::INT,
+    wparam: rhai::INT,
+    lparam: rhai::INT,
+) -> Result<rhai::INT, Box<EvalAltResult>> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::SendMessageW;
+
+    let message = u32::try_from(message).map_err(|_| {
+        process_window_error(
+            "process_window_message_invalid",
+            "Child.window_message",
+            "window message must fit an unsigned 32-bit integer",
+            Some("invalid_input"),
+        )
+    })?;
+    let wparam = usize::try_from(wparam).map_err(|_| {
+        process_window_error(
+            "process_window_message_parameter_invalid",
+            "Child.window_message",
+            "window wparam must fit a native unsigned integer",
+            Some("invalid_input"),
+        )
+    })?;
+    let lparam = isize::try_from(lparam).map_err(|_| {
+        process_window_error(
+            "process_window_message_parameter_invalid",
+            "Child.window_message",
+            "window lparam must fit a native signed integer",
+            Some("invalid_input"),
+        )
+    })?;
+    let window = resolve_child_window(child, "Child.window_message")?;
+    Ok(unsafe { SendMessageW(window, message, wparam, lparam) } as rhai::INT)
+}
+
+#[cfg(not(windows))]
+fn child_window_message(
+    _child: &mut ScriptChild,
+    _message: rhai::INT,
+    _wparam: rhai::INT,
+    _lparam: rhai::INT,
+) -> Result<rhai::INT, Box<EvalAltResult>> {
+    Err(process_window_error(
+        "process_window_input_unsupported",
+        "Child.window_message",
+        "native child-window messaging is not implemented on this platform",
+        Some("unsupported"),
+    ))
+}
+
+#[cfg(windows)]
+fn native_rect(
+    child: &ScriptChild,
+    client: bool,
+    operation: &'static str,
+) -> Result<ScriptWindowRect, Box<EvalAltResult>> {
+    use windows_sys::Win32::{
+        Foundation::RECT,
+        UI::WindowsAndMessaging::{GetClientRect, GetWindowRect},
+    };
+
+    let window = resolve_child_window(child, operation)?;
+    let mut rect = RECT::default();
+    let succeeded = unsafe {
+        if client {
+            GetClientRect(window, &mut rect)
+        } else {
+            GetWindowRect(window, &mut rect)
+        }
+    };
+    if succeeded == 0 {
+        return Err(process_window_error(
+            "process_window_rect",
+            operation,
+            "native window bounds could not be read",
+            Some("platform_error"),
+        ));
+    }
+    Ok(ScriptWindowRect {
+        left: i64::from(rect.left),
+        top: i64::from(rect.top),
+        right: i64::from(rect.right),
+        bottom: i64::from(rect.bottom),
+    })
+}
+
+#[cfg(windows)]
+fn child_window_rect(child: &mut ScriptChild) -> Result<ScriptWindowRect, Box<EvalAltResult>> {
+    native_rect(child, false, "Child.window_rect")
+}
+
+#[cfg(not(windows))]
+fn child_window_rect(_child: &mut ScriptChild) -> Result<ScriptWindowRect, Box<EvalAltResult>> {
+    Err(process_window_error(
+        "process_window_input_unsupported",
+        "Child.window_rect",
+        "native child-window bounds are not implemented on this platform",
+        Some("unsupported"),
+    ))
+}
+
+#[cfg(windows)]
+fn child_window_client_rect(
+    child: &mut ScriptChild,
+) -> Result<ScriptWindowRect, Box<EvalAltResult>> {
+    native_rect(child, true, "Child.window_client_rect")
+}
+
+#[cfg(not(windows))]
+fn child_window_client_rect(
+    _child: &mut ScriptChild,
+) -> Result<ScriptWindowRect, Box<EvalAltResult>> {
+    Err(process_window_error(
+        "process_window_input_unsupported",
+        "Child.window_client_rect",
+        "native child-window client bounds are not implemented on this platform",
+        Some("unsupported"),
+    ))
+}
+
+#[cfg(windows)]
+fn child_window_resize(
+    child: &mut ScriptChild,
+    width: rhai::INT,
+    height: rhai::INT,
+) -> Result<(), Box<EvalAltResult>> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, SetWindowPos,
+    };
+
+    let width = i32::try_from(width)
+        .ok()
+        .filter(|value| *value > 0)
+        .ok_or_else(|| {
+            process_window_error(
+                "process_window_size_invalid",
+                "Child.window_resize",
+                "window width must be a positive signed 32-bit integer",
+                Some("invalid_input"),
+            )
+        })?;
+    let height = i32::try_from(height)
+        .ok()
+        .filter(|value| *value > 0)
+        .ok_or_else(|| {
+            process_window_error(
+                "process_window_size_invalid",
+                "Child.window_resize",
+                "window height must be a positive signed 32-bit integer",
+                Some("invalid_input"),
+            )
+        })?;
+    let window = resolve_child_window(child, "Child.window_resize")?;
+    let succeeded = unsafe {
+        SetWindowPos(
+            window,
+            std::ptr::null_mut(),
+            0,
+            0,
+            width,
+            height,
+            SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
+        )
+    };
+    if succeeded == 0 {
+        return Err(process_window_error(
+            "process_window_resize",
+            "Child.window_resize",
+            "native window resize failed",
+            Some("platform_error"),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn child_window_resize(
+    _child: &mut ScriptChild,
+    _width: rhai::INT,
+    _height: rhai::INT,
+) -> Result<(), Box<EvalAltResult>> {
+    Err(process_window_error(
+        "process_window_input_unsupported",
+        "Child.window_resize",
+        "native child-window resize is not implemented on this platform",
+        Some("unsupported"),
+    ))
+}
+
+fn child_window_control(
+    child: &mut ScriptChild,
+    id: rhai::INT,
+) -> Result<ScriptWindowControl, Box<EvalAltResult>> {
+    let id = i32::try_from(id).map_err(|_| {
+        process_window_error(
+            "process_window_control_id_invalid",
+            "Child.window_control",
+            "window control ID must fit a signed 32-bit integer",
+            Some("invalid_input"),
+        )
+    })?;
+    let control = ScriptWindowControl {
+        child: child.clone(),
+        id,
+    };
+    #[cfg(windows)]
+    {
+        resolve_window_control(&control, "Child.window_control")?;
+    }
+    Ok(control)
+}
+
+#[cfg(windows)]
+fn resolve_window_control(
+    control: &ScriptWindowControl,
+    operation: &'static str,
+) -> Result<windows_sys::Win32::Foundation::HWND, Box<EvalAltResult>> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem;
+
+    let window = resolve_child_window(&control.child, operation)?;
+    let item = unsafe { GetDlgItem(window, control.id) };
+    if item.is_null() {
+        return Err(process_window_error(
+            "process_window_control_not_found",
+            operation,
+            "native child control was not found",
+            Some("not_found"),
+        ));
+    }
+    Ok(item)
+}
+
+#[cfg(windows)]
+fn window_control_visible(control: &mut ScriptWindowControl) -> Result<bool, Box<EvalAltResult>> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible;
+
+    Ok(unsafe { IsWindowVisible(resolve_window_control(control, "WindowControl.visible")?) != 0 })
+}
+
+#[cfg(not(windows))]
+fn window_control_visible(_control: &mut ScriptWindowControl) -> Result<bool, Box<EvalAltResult>> {
+    Err(process_window_error(
+        "process_window_input_unsupported",
+        "WindowControl.visible",
+        "native child controls are not implemented on this platform",
+        Some("unsupported"),
+    ))
+}
+
+#[cfg(windows)]
+fn window_control_text(control: &mut ScriptWindowControl) -> Result<String, Box<EvalAltResult>> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetWindowTextLengthW, GetWindowTextW};
+
+    let item = resolve_window_control(control, "WindowControl.text")?;
+    let length = unsafe { GetWindowTextLengthW(item) };
+    let mut buffer = vec![0_u16; usize::try_from(length).unwrap_or(0).saturating_add(1)];
+    let copied = unsafe {
+        GetWindowTextW(
+            item,
+            buffer.as_mut_ptr(),
+            i32::try_from(buffer.len()).unwrap_or(i32::MAX),
+        )
+    };
+    if copied < 0 {
+        return Err(process_window_error(
+            "process_window_control_text",
+            "WindowControl.text",
+            "native child control text could not be read",
+            Some("platform_error"),
+        ));
+    }
+    Ok(String::from_utf16_lossy(
+        &buffer[..usize::try_from(copied).unwrap_or(0)],
+    ))
+}
+
+#[cfg(not(windows))]
+fn window_control_text(_control: &mut ScriptWindowControl) -> Result<String, Box<EvalAltResult>> {
+    Err(process_window_error(
+        "process_window_input_unsupported",
+        "WindowControl.text",
+        "native child controls are not implemented on this platform",
+        Some("unsupported"),
+    ))
+}
+
+#[cfg(windows)]
+fn window_control_set_text(
+    control: &mut ScriptWindowControl,
+    text: &str,
+) -> Result<(), Box<EvalAltResult>> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{SendMessageW, WM_SETTEXT};
+
+    let item = resolve_window_control(control, "WindowControl.set_text")?;
+    let wide = std::ffi::OsStr::new(text)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    if unsafe { SendMessageW(item, WM_SETTEXT, 0, wide.as_ptr() as isize) } == 0 {
+        return Err(process_window_error(
+            "process_window_control_text",
+            "WindowControl.set_text",
+            "native child control text could not be written",
+            Some("platform_error"),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn window_control_set_text(
+    _control: &mut ScriptWindowControl,
+    _text: &str,
+) -> Result<(), Box<EvalAltResult>> {
+    Err(process_window_error(
+        "process_window_input_unsupported",
+        "WindowControl.set_text",
+        "native child controls are not implemented on this platform",
+        Some("unsupported"),
+    ))
+}
+
+#[cfg(windows)]
+fn window_control_click(control: &mut ScriptWindowControl) -> Result<(), Box<EvalAltResult>> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{BM_CLICK, SendMessageW};
+
+    let item = resolve_window_control(control, "WindowControl.click")?;
+    unsafe {
+        SendMessageW(item, BM_CLICK, 0, 0);
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn window_control_click(_control: &mut ScriptWindowControl) -> Result<(), Box<EvalAltResult>> {
+    Err(process_window_error(
+        "process_window_input_unsupported",
+        "WindowControl.click",
+        "native child controls are not implemented on this platform",
+        Some("unsupported"),
+    ))
+}
+
 fn process_window_error(
     code: &'static str,
     operation: &'static str,
@@ -1161,6 +1675,42 @@ mod tests {
                 )
                 .unwrap()
         );
+    }
+
+    #[test]
+    #[cfg(any(windows, unix))]
+    fn process_kill_terminates_an_arbitrary_operating_system_process() {
+        let mut child = if cfg!(windows) {
+            let mut command = Command::new("cmd.exe");
+            command.args(["/d", "/s", "/c", "ping -n 30 127.0.0.1 >nul"]);
+            command
+        } else {
+            let mut command = Command::new("/bin/sh");
+            command.args(["-c", "sleep 30"]);
+            command
+        }
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+
+        engine()
+            .eval::<()>(&format!("std::process::kill({})", child.id()))
+            .unwrap();
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            if child.try_wait().unwrap().is_some() {
+                break;
+            }
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("std::process::kill did not terminate PID {}", child.id());
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
     }
 
     #[test]

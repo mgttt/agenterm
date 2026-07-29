@@ -419,6 +419,30 @@ fn run_workbench_smoke() -> Output {
 }
 
 #[cfg(windows)]
+fn run_remote_ui_smoke() -> Output {
+    let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+        .current_dir(repo)
+        .args(["run", "scripts/rhai/remote-ui-smoke.rhai"])
+        .args(["--profile", "local", "--project-root"])
+        .arg(repo)
+        .args([
+            "--timeout-ms",
+            "120000",
+            "--max-operations",
+            "10000000",
+            "--",
+        ])
+        .arg(repo)
+        .arg(env!("CARGO_BIN_EXE_agenterm"))
+        .arg(env!("CARGO_BIN_EXE_agenterm-cli"))
+        .env("AGENTERM_NO_ACTIVATE", "1")
+        .output()
+        .expect("run Rhai remote UI smoke")
+}
+
+#[cfg(windows)]
 fn run_fleet_smoke() -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -1457,7 +1481,7 @@ fn prd_alignment_task_matches_public_catalogs_and_fails_closed() {
             copy_fixture_file(repo, &fixture, &format!("prd/{name}"));
         }
     }
-    for suite in ["remote_ui_smoke.ps1", "script_smoke.ps1", "ux_smoke.ps1"] {
+    for suite in ["script_smoke.ps1", "ux_smoke.ps1"] {
         copy_fixture_file(repo, &fixture, &format!("tests/{suite}"));
     }
     copy_fixture_file(repo, &fixture, "scripts/rhai/working-context-smoke.rhai");
@@ -1467,6 +1491,7 @@ fn prd_alignment_task_matches_public_catalogs_and_fails_closed() {
     copy_fixture_file(repo, &fixture, "scripts/rhai/theme-smoke.rhai");
     copy_fixture_file(repo, &fixture, "scripts/rhai/workbench-smoke.rhai");
     copy_fixture_file(repo, &fixture, "scripts/rhai/fleet-smoke.rhai");
+    copy_fixture_file(repo, &fixture, "scripts/rhai/remote-ui-smoke.rhai");
     let contract_path = fixture.join("prd").join("alignment-contract.json");
     let malformed = fs::read_to_string(&contract_path)
         .expect("read fixture alignment contract")
@@ -1646,6 +1671,25 @@ fn rhai_workbench_smoke_preserves_physical_editing_and_compact_tree_contract() {
     }
     assert!(stdout.contains("STEP mouse Cancel discards both independent drafts"));
     assert!(stdout.contains("PASS: inline Tabs editing and compact tree geometry"));
+}
+
+#[cfg(windows)]
+#[test]
+fn rhai_remote_ui_smoke_preserves_replaceable_client_and_reconnect_contract() {
+    let output = run_remote_ui_smoke();
+    assert!(
+        output.status.success(),
+        "Rhai remote UI smoke failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("EVIDENCE ui.replaceable-client"));
+    assert!(stdout.contains("STEP close remains local and GUI recovers its missing server"));
+    assert!(stdout.contains("STEP select terminal text, Copy, and Paste through the UI"));
+    assert!(stdout.contains(
+        "PASS: replaceable GUI attaches, renders, detaches, preserves PTYs, and reconnects in place across server restart"
+    ));
 }
 
 #[cfg(windows)]

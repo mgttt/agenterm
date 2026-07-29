@@ -22,6 +22,7 @@ mod protocol;
 mod remote_win_app;
 pub mod script_api_view;
 pub mod script_catalog;
+pub mod script_clipboard;
 pub mod script_error;
 pub mod script_fleet;
 pub mod script_http;

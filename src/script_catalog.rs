@@ -754,6 +754,30 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             ),
             "2026-07-30",
         ),
+        shipped_local_entry_with_design(
+            shipped_local_entry(
+                "std.process.kill",
+                "system/process/kill",
+                "std::process::kill",
+                None,
+                RustMapping::None,
+                "std::process::kill(pid)",
+                (
+                    &[
+                        "arbitrary_operating_system_process",
+                        "unrestricted_target_selection",
+                        "forceful_termination",
+                    ],
+                    &[
+                        "process_id_invalid",
+                        "process_kill_open",
+                        "process_kill",
+                        "process_kill_unsupported",
+                    ],
+                ),
+            ),
+            "2026-07-30",
+        ),
         shipped_local_entry(
             "std.process.command-builder",
             "system/process/command/builder",
@@ -819,16 +843,24 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             shipped_local_entry(
                 "std.process.child-window-input",
                 "system/process/child/window-input",
-                "Child.window_key/window_pointer",
+                "Child.window_key/window_pointer/window_message/window_rect/window_client_rect/window_resize/window_control; WindowControl.visible/text/set_text/click",
                 None,
                 RustMapping::None,
-                "child.window_key(key) / child.window_pointer(action, x, y)",
+                "child.window_key(key) / child.window_pointer(action, x, y) / child.window_message(message, wparam, lparam) / child.window_rect() / child.window_client_rect() / child.window_resize(width, height) / child.window_control(id)",
                 (
                     &[
                         "invocation_owned_child",
                         "top_level_window_lookup",
                         "native_key_delivery",
                         "native_pointer_delivery",
+                        "native_message_delivery",
+                        "window_and_client_geometry",
+                        "nonactivating_resize",
+                        "child_control_lookup",
+                        "child_control_visibility",
+                        "unicode_control_text",
+                        "child_control_click",
+                        "control_id_reresolution",
                     ],
                     &[
                         "process_window_not_found",
@@ -837,6 +869,14 @@ pub fn entries() -> Vec<ScriptApiEntry> {
                         "process_window_key_invalid",
                         "process_window_pointer_action_invalid",
                         "process_window_coordinate_invalid",
+                        "process_window_message_invalid",
+                        "process_window_message_parameter_invalid",
+                        "process_window_rect",
+                        "process_window_size_invalid",
+                        "process_window_resize",
+                        "process_window_control_id_invalid",
+                        "process_window_control_not_found",
+                        "process_window_control_text",
                     ],
                 ),
             ),
@@ -1043,6 +1083,59 @@ pub fn entries() -> Vec<ScriptApiEntry> {
                         "image_png_dimensions",
                         "image_png_color",
                         "image_png_size",
+                    ],
+                ),
+            ),
+            "2026-07-30",
+        ),
+        shipped_local_entry_with_design(
+            shipped_local_entry(
+                "rhai.clipboard.get-text",
+                "system/clipboard/text/get",
+                "rhai::clipboard::get_text",
+                None,
+                RustMapping::None,
+                "rhai::clipboard::get_text() -> String",
+                (
+                    &[
+                        "operating_system_clipboard",
+                        "unicode_text",
+                        "unrestricted_local_access",
+                        "get_text",
+                    ],
+                    &[
+                        "clipboard_open",
+                        "clipboard_text_unavailable",
+                        "clipboard_read",
+                        "clipboard_text_invalid",
+                        "clipboard_unsupported",
+                    ],
+                ),
+            ),
+            "2026-07-30",
+        ),
+        shipped_local_entry_with_design(
+            shipped_local_entry(
+                "rhai.clipboard.set-text",
+                "system/clipboard/text/set",
+                "rhai::clipboard::set_text",
+                None,
+                RustMapping::None,
+                "rhai::clipboard::set_text(text)",
+                (
+                    &[
+                        "operating_system_clipboard",
+                        "unicode_text",
+                        "unrestricted_local_access",
+                        "set_text",
+                    ],
+                    &[
+                        "clipboard_open",
+                        "clipboard_text_too_large",
+                        "clipboard_clear",
+                        "clipboard_allocate",
+                        "clipboard_write",
+                        "clipboard_unsupported",
                     ],
                 ),
             ),
@@ -1656,6 +1749,13 @@ fn comparisons_for(stable_id: &str) -> ScriptApiComparisons {
             "AgenTerm exposes a worker snapshot and never audits environment values",
         );
     }
+    if stable_id == "std.process.kill" {
+        return similar_comparisons(
+            "process.kill",
+            "process.kill",
+            "AgenTerm exposes forceful arbitrary-PID termination with typed host failures and no Agent-policy filtering",
+        );
+    }
     if stable_id.starts_with("std.process.") {
         return similar_comparisons(
             "node:child_process",
@@ -1710,6 +1810,11 @@ fn comparisons_for(stable_id: &str) -> ScriptApiComparisons {
             "sharp / pngjs / Canvas image data",
             "sharp / Canvas image data",
             "AgenTerm exposes bounded typed PNG facts without a JavaScript image object graph",
+        );
+    }
+    if stable_id.starts_with("rhai.clipboard.") {
+        return agenterm_specific_comparisons(
+            "Node.js and Bun have no equivalent core operating-system clipboard API; AgenTerm exposes native Unicode text directly",
         );
     }
     if stable_id.starts_with("rhai.stream.") {
