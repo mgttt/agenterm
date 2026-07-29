@@ -136,8 +136,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [ ] `script task show TASK [--manifest PATH] [--json]`
     - [ ] `script task run TASK [--manifest PATH] [--] [ARGS...]`
     - [ ] ordinary `run`, `eval`, `check`, and named tasks use one unrestricted
-      local runtime surface; legacy profile spellings must not remove APIs or
-      make Agent authorization decisions
+      local runtime surface; legacy profile spellings are inert compatibility
+      data and never change API registration, visibility, arguments, targets,
+      or execution behavior
     - [ ] runtime options include explicit `--cwd`, bounded timeout/output/
       task/stream overrides, and machine-readable result selection; Script
       Runtime does not require per-file, per-process, per-tool, or per-network

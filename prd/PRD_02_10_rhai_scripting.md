@@ -12,9 +12,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   named-task CLI while retaining private `--worker`/`--framed-worker` modes;
   `agenterm-cli.exe script ...` is a thin compatibility route to the same
   catalog, parser, supervisor, and runtime.
-- [x] v0.1.10 removes the early `pure`/`observe` API-gating model so every
-  ordinary invocation receives the same unrestricted local runtime surface;
-  the future Agent harness owns permissions outside this executable.
+- [x] every ordinary invocation receives the same unrestricted local runtime
+  surface. No invocation mode, task label, profile, catalog capability, caller,
+  or entry point gates API registration or execution; the future Agent harness
+  owns Agent permissions outside this executable.
 - [x] Script API v2 maps every current typed operation exactly once to `fleet` and verifies mutation receipts, correlated events, and post-state.
 - [x] task-manifest schema v2 publishes an inclusive required Script API range
   and stable capability IDs; list/show preserve incompatible projects for
@@ -24,8 +25,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   loopback HTTP, JSON aggregation, typed Fleet note mutation, atomic result
   publication, restoration, and orphan-free cleanup in one invocation.
 - [x] deterministic JSON-compatible values, arguments, bounded computation,
-  and captured stdout remain ordinary runtime facilities rather than a
-  permission-restricted execution mode.
+  and captured stdout are ordinary facilities in the same complete runtime
+  surface.
 - [x] a Rhai-independent supervisor owns a kill-on-close Windows Job Object,
   parent deadline, cooperative cancellation followed by forced termination,
   concurrency ceilings, and worker cleanup.
@@ -254,15 +255,19 @@ and it is not positioned as a restricted security plugin.
   deterministic relative paths; missing modules, root escape, cycles, duplicate
   identities, incompatible versions, and parse failures are typed. The shipped
   resolver embeds local imports into a self-contained AST and never searches
-  home, PATH, or the network.
+  home, PATH, or the network. This defines deterministic `import` identity only:
+  it does not restrict `std::fs`, `std::process`, `std::net`, `rhai::http`,
+  Fleet mutation, or any other runtime API from accessing user-selected paths,
+  processes, endpoints, or targets.
 - [x] project tasks use one versioned declarative manifest that maps stable task
   IDs to a script/module entry point, arguments, working directory, environment
-  construction, and a legacy non-authorizing execution label. Schema v2 uses a project identity/
-  version, an inclusive Script API range, required stable capability IDs, and
-  an ordered task array with `id`, `description`, `entry`, legacy `profile`, `cwd`,
-  default `args`, and required environment-name `env` fields; it stores no
-  environment values. v0.1.10 removes that label from the permission model and
-  a later manifest schema may remove the field entirely.
+  construction, and inert legacy compatibility data. Schema v2 uses a project
+  identity/version, an inclusive Script API range, required stable capability
+  IDs, and an ordered task array with `id`, `description`, `entry`, legacy
+  `profile`, `cwd`, default `args`, and required environment-name `env` fields;
+  it stores no environment values. The legacy `profile` value is ignored for
+  API registration, visibility, arguments, targets, and execution behavior; a
+  later manifest schema may remove the field entirely.
 - [x] v0.1.9 selects versioned JSON at `agenterm.tasks.json`; it is explicitly
   a local task manifest rather than a package/download/signature manifest.
 - [x] project tasks and user-level named commands are discoverable through one
