@@ -25,14 +25,10 @@ if [[ ! "$USERNAME" =~ ^[A-Za-z0-9-]+$ ]]; then
   exit 2
 fi
 
-cd "$REPO_ROOT"
-if [[ "$(git rev-parse --show-toplevel)" != "$REPO_ROOT" ]]; then
-  echo "Refusing to modify authentication outside the AgenTerm Git root." >&2
-  exit 1
-fi
-
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*)
+    cd "$REPO_ROOT"
+    REPO_ROOT="$(pwd -W)"
     git config --global credential.credentialStore wincredman
     ;;
   *)
@@ -41,6 +37,11 @@ case "$(uname -s)" in
     exit 2
     ;;
 esac
+
+if [[ "$(git rev-parse --show-toplevel)" != "$REPO_ROOT" ]]; then
+  echo "Refusing to modify authentication outside the AgenTerm Git root." >&2
+  exit 1
+fi
 
 git config --global credential.https://github.com.username "$USERNAME"
 git config --global credential.https://github.com.useHttpPath false
