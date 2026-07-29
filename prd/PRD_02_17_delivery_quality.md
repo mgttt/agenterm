@@ -87,6 +87,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   of duplicating them inside the broad parallel Cargo invocation; this avoids
   cold-runner CPU/deadline/cache contention, while Release retains the
   dedicated five-sample preflight benchmark gate
+- [x] Linux x64 CI keeps Clippy, build, library tests, and entrypoint smoke on
+  the same explicit Cargo target tree; unit tests no longer create a second
+  host-default cold build after the client binaries have already compiled
 - [x] `lint.ps1` is the fail-fast developer entry point: dependency-free
   PowerShell AST, JSON, UTF-8/conflict-marker checks run in about one second,
   incremental rustfmt/Clippy run before tests, and production Rhai sources are

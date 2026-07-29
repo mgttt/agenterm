@@ -52,7 +52,7 @@ jobs:
       - name: Build Linux client binaries
         run: ./scripts/build-linux-clients.sh
       - name: Unit tests
-        run: cargo test --locked --lib
+        run: cargo test --locked --target x86_64-unknown-linux-gnu --lib
       - name: Smoke client entrypoints
         run: |
           BIN=target/x86_64-unknown-linux-gnu/debug
