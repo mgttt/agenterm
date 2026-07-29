@@ -367,7 +367,7 @@ and it is not positioned as a restricted security plugin.
 - [~] migrate one independently testable responsibility at a time through
   `parallel -> parity-proven -> default-rhai -> PowerShell deleted`; obsolete
   unreachable responsibilities may instead cross a caller-audited functional
-  deletion boundary. The first twenty completed baseline scripts have left
+  deletion boundary. The first twenty-three completed baseline scripts have left
   the v0.1.10 working tree.
 - [ ] parity evidence compares the same inputs, structured outputs, exit
   classification, diagnostics, cancellation, cleanup, encoding, path behavior,
@@ -376,7 +376,7 @@ and it is not positioned as a restricted security plugin.
 - [~] once one Rhai responsibility reaches parity and all normal callers switch
   to it, or an obsolete responsibility is proven unreachable and superseded,
   delete that PowerShell implementation immediately instead of accumulating a
-  release-wide migration backlog; twenty-two of 43 baseline scripts are deleted.
+  release-wide migration backlog; twenty-three of 43 baseline scripts are deleted.
 - [~] every migrated item records its old path, replacement path, switching
   commit, parity evidence, and deletion state in this PRD. Git history is the
   only archive after the explicit rollback window closes.
@@ -407,6 +407,7 @@ Migration ledger:
 | Owned-child cleanup self-test and first shared Rhai harness foundation | `scripts/rhai/harness-cleanup-selftest.rhai` plus `scripts/rhai/lib/test_harness.rhai` | `tests/harness_cleanup_selftest.ps1` | current migration change | public task and Windows integration prove exact registered-child forced cleanup, survival of an unregistered sibling until explicit cleanup, orphan-free persisted proof, and original-failure retention | deleted; the quality gate invokes the named Rhai task and later smoke migrations extend the same module |
 | Working-context proxy privacy and restart journey | `scripts/rhai/working-context-smoke.rhai` plus the shared Rhai test harness | `tests/working_context_smoke.ps1` | current migration change | named task and Windows public integration prove isolated GUI/server launch, safe proxy facts, archived-control non-mutation, no secret in snapshot/pane/workspace/events/stderr, non-persistence across restart, stable completed-child identity, and orphan-free cleanup | deleted; qualification declaration discovery and execution now use the Rhai journey directly |
 | Headless server authority journey | `scripts/rhai/server-smoke.rhai` plus typed owned-child platform facts and the shared Rhai harness | `tests/server_smoke.ps1` | current migration change | named task and Windows public integration preserve no-top-level-window evidence, exact PID/ownership, lease lifecycle and gated interaction, real PTY, replay/conflict/asynchronous receipts, causal events, workspace persistence, graceful shutdown, and orphan-free cleanup | deleted; qualification discovery and execution use the Rhai journey directly |
+| Same-server real-byte GUI upgrade and rollback journey | `scripts/rhai/remote-ui-upgrade-smoke.rhai` plus typed owned-child opaque window identity and the shared Rhai harness | `tests/remote_ui_upgrade_smoke.ps1` | current migration change | named task preserves distinct GUI hashes/build identities, competing-lease rejection, one stable server/epoch/PTY/draft/CWD/proxy state, output streamed across replacement, incompatible-protocol rejection, rollback scrollback continuity, public close/detach behavior, and orphan-free cleanup | deleted; qualification discovery and execution use the Rhai journey directly |
 
 ### v0.1.10 completion commitment
 
@@ -416,7 +417,7 @@ Migration ledger:
 - [x] the dated 2026-07-29 frozen baseline is 43 tracked `.ps1` files: 3 at
   the repository root, 17 under `scripts/`, 21 under `tests/`, and 2 retained in
   `scripts/archive/powershell/`.
-- [~] migration progress is 22/43 deleted and 21/43 remaining; progress is
+- [~] migration progress is 23/43 deleted and 20/43 remaining; progress is
   counted only after parity evidence plus caller cutover, or caller-audited
   functional deletion of obsolete behavior, and source deletion.
 - [x] `scripts/powershell-migration.json` freezes all 43 baseline paths under
@@ -428,11 +429,12 @@ Migration ledger:
   duplicate paths, invalid states, and count drift; ordinary and release
   qualification invoke it as a required gate.
 - [~] the repository-root `agenterm.tasks.json` is now the offline task
-  catalog and ships eighteen ready tasks (`bootstrap-info`, `build-identity`,
+  catalog and ships twenty-one ready tasks (`bootstrap-info`, `build-identity`,
   `harness-cleanup-selftest`, `migration-audit`, `target-report`, `internal-version-policy`,
   `verify-docs-site`, `readme-examples`, `clean-locked-artifacts`,
   `prepare-target-clean`, `preflight`, `preflight-benchmark`, `prd-alignment`,
-  `stage-artifact`, `stage-build`, `supply-chain`,
+  `stage-artifact`, `stage-build`, `supply-chain`, `server-smoke`,
+  `working-context-smoke`, `remote-ui-upgrade-smoke`,
   `validate-artifact-manifest`, and `write-build-metadata`). The existing
   two-input Script contract verifier is
   intentionally not advertised as ready until catalog fixture production is

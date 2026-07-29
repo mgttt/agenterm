@@ -49,6 +49,7 @@ pub struct ScriptChild(Arc<Mutex<ChildState>>);
 pub struct ScriptProcessPlatformFacts {
     top_level_window_supported: bool,
     top_level_window_present: bool,
+    top_level_window_id: i64,
 }
 
 impl std::fmt::Debug for ScriptChild {
@@ -138,6 +139,10 @@ fn register_types(engine: &mut Engine) {
     engine.register_get(
         "top_level_window_present",
         |facts: &mut ScriptProcessPlatformFacts| facts.top_level_window_present,
+    );
+    engine.register_get(
+        "top_level_window_id",
+        |facts: &mut ScriptProcessPlatformFacts| facts.top_level_window_id,
     );
 
     engine.register_type_with_name::<ScriptOutput>("Output");
@@ -419,7 +424,7 @@ fn process_platform_facts(id: u32) -> ScriptProcessPlatformFacts {
 
     struct Search {
         id: u32,
-        found: bool,
+        window: windows_sys::Win32::Foundation::HWND,
     }
 
     unsafe extern "system" fn visit(
@@ -432,14 +437,17 @@ fn process_platform_facts(id: u32) -> ScriptProcessPlatformFacts {
             GetWindowThreadProcessId(window, &mut owner);
         }
         if owner == search.id {
-            search.found = true;
+            search.window = window;
             0
         } else {
             1
         }
     }
 
-    let mut search = Search { id, found: false };
+    let mut search = Search {
+        id,
+        window: core::ptr::null_mut(),
+    };
     unsafe {
         EnumWindows(
             Some(visit),
@@ -448,7 +456,8 @@ fn process_platform_facts(id: u32) -> ScriptProcessPlatformFacts {
     }
     ScriptProcessPlatformFacts {
         top_level_window_supported: true,
-        top_level_window_present: search.found,
+        top_level_window_present: !search.window.is_null(),
+        top_level_window_id: search.window as isize as i64,
     }
 }
 
@@ -457,6 +466,7 @@ fn process_platform_facts(_id: u32) -> ScriptProcessPlatformFacts {
     ScriptProcessPlatformFacts {
         top_level_window_supported: false,
         top_level_window_present: false,
+        top_level_window_id: 0,
     }
 }
 
@@ -866,7 +876,8 @@ mod tests {
                 let facts = child.platform_facts;
                 #{ before: before, after: child.id, state: child.state,
                    window_supported: facts.top_level_window_supported,
-                   window_present: facts.top_level_window_present }
+                   window_present: facts.top_level_window_present,
+                   window_id: facts.top_level_window_id }
             "#
         } else {
             r#"
@@ -878,7 +889,8 @@ mod tests {
                 let facts = child.platform_facts;
                 #{ before: before, after: child.id, state: child.state,
                    window_supported: facts.top_level_window_supported,
-                   window_present: facts.top_level_window_present }
+                   window_present: facts.top_level_window_present,
+                   window_id: facts.top_level_window_id }
             "#
         };
         let result = engine().eval::<rhai::Map>(source).unwrap();
@@ -890,6 +902,7 @@ mod tests {
         assert_eq!(result["state"].clone().into_string().unwrap(), "exited");
         assert_eq!(result["window_supported"].as_bool().unwrap(), cfg!(windows));
         assert!(!result["window_present"].as_bool().unwrap());
+        assert_eq!(result["window_id"].as_int().unwrap(), 0);
     }
 
     #[test]

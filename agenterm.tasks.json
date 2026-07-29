@@ -99,6 +99,14 @@
       "args": [".", "dist/agenterm-server.exe", "dist/agenterm-cli.exe"]
     },
     {
+      "id": "remote-ui-upgrade-smoke",
+      "description": "Prove real GUI byte upgrade and rollback against one stable server, PTY, lease, and scrollback",
+      "entry": "scripts/rhai/remote-ui-upgrade-smoke.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "args": [".", "dist/agenterm.exe", "target/release-fast/agenterm.exe", "dist/agenterm-cli.exe", "dist/agenterm-server.exe"]
+    },
+    {
       "id": "migration-audit",
       "description": "Enforce the frozen PowerShell migration ledger and reject untracked drift",
       "entry": "scripts/rhai/powershell-migration-audit.rhai",

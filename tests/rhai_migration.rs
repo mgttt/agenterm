@@ -468,7 +468,8 @@ fn child_id_remains_public_after_process_completion() {
              child.wait_with_output();let facts=child.platform_facts;\
              #{before:before,after:child.id,state:child.state,\
                window_supported:facts.top_level_window_supported,\
-               window_present:facts.top_level_window_present}",
+               window_present:facts.top_level_window_present,\
+               window_id:facts.top_level_window_id}",
             "--profile",
             "local",
             "--json",
@@ -490,6 +491,7 @@ fn child_id_remains_public_after_process_completion() {
         serde_json::Value::Bool(cfg!(windows))
     );
     assert_eq!(envelope["value"]["window_present"], false);
+    assert_eq!(envelope["value"]["window_id"], 0);
 }
 
 #[cfg(windows)]
@@ -1314,7 +1316,6 @@ fn prd_alignment_task_matches_public_catalogs_and_fails_closed() {
     for suite in [
         "cli_smoke.ps1",
         "remote_ui_smoke.ps1",
-        "remote_ui_upgrade_smoke.ps1",
         "fleet_smoke.ps1",
         "script_smoke.ps1",
         "theme_smoke.ps1",
@@ -1325,6 +1326,7 @@ fn prd_alignment_task_matches_public_catalogs_and_fails_closed() {
     }
     copy_fixture_file(repo, &fixture, "scripts/rhai/working-context-smoke.rhai");
     copy_fixture_file(repo, &fixture, "scripts/rhai/server-smoke.rhai");
+    copy_fixture_file(repo, &fixture, "scripts/rhai/remote-ui-upgrade-smoke.rhai");
     let contract_path = fixture.join("prd").join("alignment-contract.json");
     let malformed = fs::read_to_string(&contract_path)
         .expect("read fixture alignment contract")

@@ -259,7 +259,9 @@ try {
             --skip preflight_task_is_fail_closed_and_writes_reports_for_real_git_fixtures `
             --skip preflight_benchmark_task_measures_clean_public_worker_runs `
             --skip prd_alignment_task_matches_public_catalogs_and_fails_closed `
-            --skip supply_chain_task_is_deterministic_and_covers_the_resolved_lock_graph
+            --skip supply_chain_task_is_deterministic_and_covers_the_resolved_lock_graph `
+            --skip rhai_working_context_smoke_is_private_ephemeral_and_orphan_free `
+            --skip rhai_server_smoke_preserves_headless_authority_and_cleanup
     }
 
     $upgradeGuiFixture = Join-Path (
@@ -304,7 +306,7 @@ try {
             'cli-smoke' = '.\tests\cli_smoke.ps1'
             'server-smoke' = '.\scripts\rhai\server-smoke.rhai'
             'remote-ui-smoke' = '.\tests\remote_ui_smoke.ps1'
-            'remote-ui-upgrade-smoke' = '.\tests\remote_ui_upgrade_smoke.ps1'
+            'remote-ui-upgrade-smoke' = '.\scripts\rhai\remote-ui-upgrade-smoke.rhai'
             'fleet-smoke' = '.\tests\fleet_smoke.ps1'
             'script-smoke' = '.\tests\script_smoke.ps1'
             'theme-smoke' = '.\tests\theme_smoke.ps1'
@@ -507,8 +509,11 @@ try {
             }
             Invoke-Checked -Id 'remote-ui-upgrade-smoke' `
                 -Label 'same-server GUI upgrade and rollback smoke test' {
-                & '.\tests\remote_ui_upgrade_smoke.ps1' `
-                    -NextGuiExe $upgradeGuiFixture
+                & '.\dist\agenterm-script.exe' task run `
+                    remote-ui-upgrade-smoke `
+                    --manifest '.\agenterm.tasks.json' `
+                    --timeout-ms 60000 --max-operations 10000000 -- `
+                    $upgradeGuiFixture
             }
             Invoke-Checked -Id 'fleet-smoke' -Label 'AI fleet smoke test' {
                 if (-not $IncludeStress) {

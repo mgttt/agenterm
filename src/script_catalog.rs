@@ -672,6 +672,7 @@ pub fn entries() -> Vec<ScriptApiEntry> {
                     "invocation_owned",
                     "id_stable_after_completion",
                     "owned_child_platform_observation",
+                    "opaque_window_identity",
                 ],
                 &["process_kill", "process_timeout"],
             ),

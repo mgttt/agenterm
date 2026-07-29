@@ -96,6 +96,22 @@ or full qualification for the integrated pre-push/release boundary. Search all
 geometry/protocol consumers before the first black-box run so old assertions
 are migrated in the same patch.
 
+Treat build and test latency as a continuously measured product constraint.
+When parallel delegation is authorized, a read-only background observer may
+profile the active development loop while the primary agent keeps shipping; it
+must not edit feature files, contend for the Cargo lock, or launch foreground
+GUI tests. Record cold build, hot incremental build, Quick, SkipSmoke, owning
+smoke, and release timings separately. Accept an optimization only when
+before/after evidence proves the gain and coverage remains owned elsewhere.
+
+Run cheap lint, formatting, JSON/catalog checks, and Rhai `check` before
+expensive compilation or black-box journeys so deterministic mistakes fail
+early and consume less developer time and agent context. Every expensive
+behavior has one authoritative gate: broad test lanes skip wrappers already
+owned by a dedicated smoke or qualification gate. Do not hide GUI, network,
+stress, packaging, or release work inside a lane whose name says it skips that
+work.
+
 The former `.cargo/config.toml` forced `jobs = 1` and made clean builds much
 slower. Do not restore a global job limit. Keep the default dev path
 incremental and let Cargo use the machine's logical CPUs. Use `release-fast`
