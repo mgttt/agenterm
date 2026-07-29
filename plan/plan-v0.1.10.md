@@ -1016,8 +1016,8 @@ entry 是集成热点，只允许一个串行 owner 收口。
   [done] live ping-during-wait evidence against 48815
   [done] isolated public matched-event/post-state causality
   [done] typed restart/gap/future-sequence/target-close IPC fixtures
-  [in progress] public error-path fixtures, waiter-ceiling recovery and
-    orphan evidence
+  [done] public restart/gap/future-sequence and EOF cleanup fixtures
+  [done] waiter-ceiling recovery and force-killed-client orphan evidence
 
 第七提交
   migrate remaining build/test/qualification/package/release tasks

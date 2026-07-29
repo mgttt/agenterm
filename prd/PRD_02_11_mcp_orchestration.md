@@ -108,7 +108,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [x] `tools/list` exposes only one read-only `agenterm_wait` tool in
       the first delivery; no create, send, close, script, process, or
       filesystem tool is advertised
-    - [~] `agenterm_wait` accepts a snapshot epoch/sequence, one allowlisted
+    - [x] `agenterm_wait` accepts a snapshot epoch/sequence, one allowlisted
       predicate, and a bounded `timeout_ms`; success returns the matching
       event and new position, while restart, journal gap, cancellation, and
       deadline expiry remain distinct typed results
@@ -121,15 +121,20 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       - [x] an isolated public-executable fixture proves a matched event
         returns its stable tab ID, new sequence and independently fetched
         post-state while omitting the event payload
-      - [~] restart, journal-gap, future-sequence and target-close remain
-        distinct typed outcomes with direct IPC fixture coverage; the first
-        three still need public-executable black-box coverage
-    - [~] client disconnect, cancellation, or timeout releases capacity
+      - [x] restart, journal-gap and future-sequence remain distinct typed
+        outcomes through the public executable; a filtered tab closing is a
+        distinct `target_closed` outcome and its private event payload is
+        omitted
+    - [x] client disconnect, cancellation, or timeout releases capacity
       within a bounded grace period and cannot block the GUI IPC loop or
       another MCP client
       - [x] cancellation during real bounded IPC polling has deterministic
         unit coverage; EOF cancels and joins all active waiter workers
-      - [ ] waiter-ceiling recovery and killed-client orphan checks remain
+      - [x] the public executable exits within the 1.5-second fixture budget
+        when stdin closes during an accepted backend wait
+      - [x] an eight-waiter public burst fails the ninth request closed,
+        cancellation frees capacity for a replacement, and force-killing the
+        isolated MCP client closes its accepted backend connection
   - Offline catalog invariants
     - [x] catalog schema v1 publishes one `stdio` transport, the stable
       `2025-11-25` protocol revision, four metadata-only resources, exactly one
