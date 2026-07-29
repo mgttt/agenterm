@@ -412,6 +412,7 @@ pub(super) struct FrameContent<'a> {
     pub(super) terminal_top: u32,
     pub(super) composer: ComposerView<'a>,
     pub(super) scrollbar: Option<ScrollbarView>,
+    pub(super) sidebar_scrollbar: Option<ScrollbarView>,
     pub(super) settings: Option<SettingsModalView<'a>>,
     pub(super) confirm_close: Option<ConfirmCloseView>,
     pub(super) window_close: Option<WindowCloseView>,
@@ -452,6 +453,9 @@ pub(super) fn render_frame(
             content.sidebar_width,
             content.editing_tab_id,
         );
+        if let Some(scrollbar) = content.sidebar_scrollbar {
+            render_scrollbar(buffer, stride, palette, scrollbar);
+        }
     }
     if let Some(toolbar) = content.workspace_toolbar {
         render_workspace_toolbar(buffer, stride, width, height, palette, toolbar);

@@ -628,6 +628,107 @@ fn tree_row_geometry_impl(
     }
 }
 
+#[cfg_attr(not(unix), allow(dead_code))]
+pub(crate) fn sidebar_scrollbar_track(sidebar_tree: PixelRect) -> PixelRect {
+    PixelRect {
+        left: sidebar_tree.left,
+        top: sidebar_tree.top,
+        right: (sidebar_tree.left + TERMINAL_SCROLLBAR_WIDTH).min(sidebar_tree.right),
+        bottom: sidebar_tree.bottom,
+    }
+}
+
+#[cfg_attr(not(unix), allow(dead_code))]
+pub(crate) fn sidebar_row_capacity(sidebar_tree_height: i32) -> usize {
+    usize::try_from((sidebar_tree_height - TAB_TOP).max(0) / TAB_HEIGHT)
+        .unwrap_or_default()
+        .max(1)
+}
+
+#[cfg_attr(not(unix), allow(dead_code))]
+pub(crate) fn translate_tree_row_geometry(
+    mut geometry: TreeRowGeometry,
+    delta_x: i32,
+) -> TreeRowGeometry {
+    fn translate(mut rect: PixelRect, delta: i32) -> PixelRect {
+        rect.left += delta;
+        rect.right += delta;
+        rect
+    }
+
+    geometry.row = translate(geometry.row, delta_x);
+    geometry.selection = translate(geometry.selection, delta_x);
+    geometry.node_x += delta_x;
+    geometry.expander = translate(geometry.expander, delta_x);
+    geometry.status = translate(geometry.status, delta_x);
+    geometry.disclosure_hit = translate(geometry.disclosure_hit, delta_x);
+    geometry.text = translate(geometry.text, delta_x);
+    geometry.name = translate(geometry.name, delta_x);
+    geometry.note = translate(geometry.note, delta_x);
+    geometry.editors = geometry.editors.map(|mut editors| {
+        editors.name = translate(editors.name, delta_x);
+        editors.note = translate(editors.note, delta_x);
+        editors
+    });
+    geometry.actions.bounds = translate(geometry.actions.bounds, delta_x);
+    geometry.actions.add_child = geometry
+        .actions
+        .add_child
+        .map(|bounds| translate(bounds, delta_x));
+    geometry.actions.primary = translate(geometry.actions.primary, delta_x);
+    geometry.actions.secondary = translate(geometry.actions.secondary, delta_x);
+    geometry
+}
+
+#[cfg_attr(not(unix), allow(dead_code))]
+pub(crate) fn sidebar_tree_row_geometry(
+    sidebar_tree: PixelRect,
+    viewport_position: usize,
+    depth: usize,
+    mode: TreeRowMode,
+) -> TreeRowGeometry {
+    let content_left = (sidebar_tree.left + TERMINAL_SCROLLBAR_WIDTH).min(sidebar_tree.right);
+    let content_width = (sidebar_tree.right - content_left).max(0);
+    translate_tree_row_geometry(
+        tree_row_geometry_for_mode(viewport_position, depth, content_width, mode),
+        content_left,
+    )
+}
+
+#[cfg_attr(not(unix), allow(dead_code))]
+pub(crate) fn sidebar_scrollbar_geometry(
+    track: PixelRect,
+    offset: usize,
+    maximum: usize,
+    row_capacity: usize,
+    row_count: usize,
+) -> TerminalScrollbarGeometry {
+    let track_height = track.height().max(0);
+    let total = row_count.max(1);
+    let visible = row_capacity.min(total).max(1);
+    let proportional = (i64::from(track_height) * visible as i64 / total as i64) as i32;
+    let thumb_height = if maximum == 0 {
+        track_height
+    } else {
+        proportional.max(24).min(track_height)
+    };
+    let travel = (track_height - thumb_height).max(0);
+    let thumb_top = if maximum == 0 {
+        track.top
+    } else {
+        track.top + (offset as i64 * i64::from(travel) / maximum as i64) as i32
+    };
+    TerminalScrollbarGeometry {
+        track,
+        thumb: PixelRect {
+            left: track.left + 2,
+            top: thumb_top,
+            right: (track.right - 2).max(track.left + 2),
+            bottom: thumb_top + thumb_height,
+        },
+    }
+}
+
 fn responsive_tree_indent(sidebar_width: i32, mode: TreeRowMode) -> i32 {
     let action_width = desired_tree_action_width(sidebar_width, mode);
     let available_anchor_span = (sidebar_width
