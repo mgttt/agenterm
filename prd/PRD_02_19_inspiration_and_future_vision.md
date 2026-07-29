@@ -65,27 +65,65 @@ Positioning sentence:
 
 ### 2. Primary persona and job tree
 
-**Primary persona (v1):** technical operator who runs **multiple agents and
-shells as a fleet** — solo power user, tech lead, or builder automating their
-own machine. They feel pain when tabs flatten, processes vanish, typing fights
-the stream, and scripts sleep instead of wait.
+Product-owner intent: **programmers, sysadmins, content creators, and ordinary
+office workers** should all be able to use AgenTerm to **organize and manage
+daily work** effectively — not only “agent hackers.”
+
+Strategy: **one fleet OS, persona packs** — same tree / Composer / durability /
+control contract; different default trees, templates, and optional chrome
+reduction. Not four separate products.
+
+#### Persona lattice (who · daily work · fleet metaphor)
+
+| Persona | Daily work they organize | Tree as… | Composer as… | AUTO need |
+|---------|--------------------------|----------|--------------|-----------|
+| **Programmer** | repos, agents, builds, reviews | sprint / feature crew | patch prompt, script, command block | high (CLI, script, MCP) |
+| **Sysadmin / SRE** | servers, jobs, logs, incident tabs | rack / service map | runbook steps, remediation draft | high (mux, headless, waits) |
+| **Content creator** | drafts, renders, publish pipelines | production lineup | long-form script, caption, post batch | medium (tasks, feeds) |
+| **Office / general worker** | reports, forms, inbox chores, helpers | today’s task list | email/doc draft before send | low–medium (templates, agent assist) |
+
+Shared job across all personas:
+
+> **Turn messy parallel work into a visible crew I can steer without losing
+> context when something stops or I step away.**
+
+**Primary persona (v1 implementation focus):** technical operator (programmer +
+sysadmin overlap) — fleet, control plane, and headless paths mature here first.
+
+**Horizontal expansion (W1+):** content and office personas via **templates,
+simpler defaults, and optional quiet UI** — not a second codebase.
 
 **Secondary personas (later):** remote operator via mobile connector; feed
-consumer who wants signals routed into the fleet; marketplace publisher of
-optional packages.
+consumer; marketplace publisher; decentralized peer operators (NET).
 
 ```text
-Job tree (JTBD)
-└─ When I run a crew of agents and terminals on my PC
-   ├─ I need to see who is alive, who died, and who owns what  → Organize + Observe
-   ├─ I need to prepare input without fighting live output      → Intervene (Composer)
-   ├─ I need crashes and closes not to erase my map             → Durable lifecycle
-   ├─ I need scripts and tools to use the same truth as me      → Automate
-   ├─ I need multi-step work to survive and coordinate          → Orchestrate (later)
-   ├─ I need optional capabilities without bloating the core    → Extend (later)
-   ├─ I need external signals to become fleet actions           → Inform (later)
-   └─ I need to monitor and nudge while away from the desk      → Reach (later)
+Job tree (JTBD) — universal daily work
+└─ When I juggle several ongoing tasks on my computer
+   ├─ I need a map of what is running, waiting, or finished     → Organize + Observe
+   ├─ I need to prepare the next action without chaos in the stream → Intervene (Composer)
+   ├─ I need finished or crashed work to stay visible             → Durable lifecycle
+   ├─ I need helpers/scripts to respect the same map (if I use them) → Automate
+   ├─ I need multi-step routines to survive interruptions          → Orchestrate (later)
+   ├─ I need extra tools without a heavy app                       → Extend (later)
+   ├─ I need outside news/signals to land as tasks                 → Inform (later)
+   └─ I need to check or nudge from phone                          → Reach (later)
 ```
+
+#### Persona packs (idea — Lane I)
+
+| ID | Status | Idea |
+|----|--------|------|
+| I1 | [idea] | **Workspace templates** — importable tree presets (Dev crew, Server ops, Creator pipeline, Office today) |
+| I2 | [idea] | **Quiet office mode** — hide CLI/mux vocabulary; tree + Composer + status only |
+| I3 | [idea] | **Role-colored notes and icons** — scan tree by job type without reading every title |
+| I4 | [idea] | **Guided first run** — pick persona → seed tree → one Composer send → one wait |
+| I5 | [deferred] | Separate “Office Edition” binary — **rejected**; one binary, persona as data |
+
+Office/general worker non-goals:
+
+- no pretending everyone wants a terminal viewport front and center;
+- no dumbing down server authority or hiding durability semantics;
+- optional **simplified shell** tabs (browser, doc helper) via extensions later, not core bloat.
 
 ### 3. User mind tree (capability tree)
 
@@ -231,6 +269,7 @@ Before adding or promoting an idea, answer:
 | F — Mobile connector | REACH | W6 |
 | G — Platform & ship | DUR, P0 | W0–W1 |
 | H — Decentralized network | NET, federation | W7–W8 |
+| I — Persona & daily work | ORG, INT (templates) | W1–W2 |
 
 ### Mind tree diagram (mermaid)
 
@@ -560,6 +599,20 @@ rules: sidecar-only, on-demand, 2 MiB class, isolated from GUI/server.
 | H6 | [explore] | Black-tech spikes (H-T1…H-T6 in § Decentralized network) | evidence gates | this file until promoted |
 | H7 | [deferred] | Silent always-on p2p node at install | — | **rejected** default; opt-in only |
 
+### Lane I — Persona packs and daily work (ORG · INT · W1–W2)
+
+Make programmers, sysadmins, creators, and office workers share one product
+through **data-driven onboarding**, not forked codebases.
+
+| ID | Status | Idea | Depends on | Owning module when promoted |
+|----|--------|------|------------|------------------------------|
+| I1 | [idea] | Importable workspace templates per persona | workspace persistence | Human workspace |
+| I2 | [idea] | Quiet / office UI mode (reduce terminal chrome) | I1 | Human workspace |
+| I3 | [idea] | Guided first-run: persona → seed tree → Composer → optional wait | I1, AUTO basics | Human workspace, Delivery |
+| I4 | [idea] | Creator pipeline template (draft / render / publish tabs + tasks) | script tasks | Human workspace, Rhai scripting |
+| I5 | [idea] | Office template (report, inbox helper, form filler agents) | MCP/agent bridge | Human workspace, MCP |
+| I6 | [deferred] | Separate SKU or binary per persona | — | **rejected** |
+
 ## Idea card template (copy for new entries)
 
 ```markdown
@@ -568,7 +621,7 @@ rules: sidecar-only, on-demand, 2 MiB class, isolated from GUI/server.
 - Status: [idea]
 - Mind branch: (ORG | OBS | INT | DUR | AUTO | ORCH | EXT | INF | REACH | NET)
 - Wave: (W0–W8)
-- Lane: (A–H)
+- Lane: (A–I)
 - Problem: (user pain in one sentence)
 - Sketch: (what it might look like)
 - Depends on: (capabilities or gates)
@@ -588,4 +641,4 @@ Add uncategorized sparks here; sort into lanes during review.
 
 ---
 
-Last reviewed: 2026-07-29 (agenterm-net / libp2p/IPFS lane added)
+Last reviewed: 2026-07-29 (persona lattice for daily work)
