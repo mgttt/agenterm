@@ -106,16 +106,16 @@ try {
         try {
             std::fs::rename(parked, destination);
         } catch (rollback_error) {
-            throw (
+            let failure =
                 "stage_artifact_copy_and_rollback_failed:" +
                 replacement_error.to_string() + ":" +
-                rollback_error.to_string()
-            );
+                rollback_error.to_string();
+            throw failure;
         }
-        throw (
+        let failure =
             "stage_artifact_copy_after_park_failed:" +
-            replacement_error.to_string()
-        );
+            replacement_error.to_string();
+        throw failure;
     }
 
     print(

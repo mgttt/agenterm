@@ -1106,7 +1106,7 @@ fn external_function_calls(source: &str) -> Vec<String> {
                         previous > 0 && matches!(bytes[previous - 1], b'.' | b':');
                     let is_keyword = matches!(
                         identifier,
-                        "if" | "for" | "while" | "loop" | "switch" | "catch"
+                        "if" | "for" | "while" | "loop" | "switch" | "catch" | "throw"
                     );
                     if !is_method_or_qualified
                         && !is_keyword
@@ -1656,6 +1656,12 @@ mod tests {
     #[test]
     fn api_scanner_accepts_forward_function_declarations() {
         let source = "twice(21); fn twice(value) { value * 2 }";
+        assert!(external_function_calls(source).is_empty());
+    }
+
+    #[test]
+    fn api_scanner_treats_parenthesized_throw_as_a_keyword() {
+        let source = r#"throw ("typed_failure:" + value.to_string());"#;
         assert!(external_function_calls(source).is_empty());
     }
 
