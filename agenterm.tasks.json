@@ -20,6 +20,7 @@
         "std.fs.read-to-string",
         "std.fs.copy",
         "std.fs.create-dir-all",
+        "std.fs.remove-dir-all",
         "std.fs.remove-file",
         "std.fs.rename",
         "std.fs.symlink-metadata",
@@ -88,6 +89,13 @@
       "id": "preflight",
       "description": "Run the read-only repository release preflight and publish its JSON report",
       "entry": "scripts/rhai/preflight.rhai",
+      "profile": "local",
+      "cwd": "."
+    },
+    {
+      "id": "preflight-benchmark",
+      "description": "Measure public preflight worker startup and report p95 latency",
+      "entry": "scripts/rhai/preflight-benchmark.rhai",
       "profile": "local",
       "cwd": "."
     },

@@ -240,8 +240,11 @@ try {
         }
         Invoke-Checked -Id 'preflight-benchmark' `
             -Label 'local preflight p95 benchmark' {
-            & '.\scripts\preflight-benchmark.ps1' -Iterations 5 `
-                -WorkerPath $scriptWorker
+            & $scriptWorker task run preflight-benchmark `
+                --manifest '.\agenterm.tasks.json' `
+                --timeout-ms 10000 --max-operations 10000000 `
+                -- $scriptWorker '.\agenterm.tasks.json' '.' `
+                'target\preflight\benchmark.json' '5'
         }
     }
     Invoke-Checked -Id 'repo-lint' -Label 'repository static lint' {

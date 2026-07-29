@@ -235,6 +235,26 @@ fn run_preflight(repo_under_test: &Path, output_path: &Path) -> Output {
         .expect("run Rhai preflight task")
 }
 
+fn run_preflight_benchmark(repo_under_test: &Path, output_path: &Path) -> Output {
+    let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let manifest = repo.join("agenterm.tasks.json");
+    let worker = Path::new(env!("CARGO_BIN_EXE_agenterm-script"));
+    Command::new(worker)
+        .current_dir(repo)
+        .args(["task", "run", "preflight-benchmark", "--manifest"])
+        .arg(&manifest)
+        .args(["--timeout-ms", "10000", "--max-operations", "10000000"])
+        .arg("--")
+        .arg(worker)
+        .arg(&manifest)
+        .arg(repo_under_test)
+        .arg(output_path)
+        .arg("5")
+        .output()
+        .expect("run Rhai preflight-benchmark task")
+}
+
 fn parse_batch_environment(path: &Path) -> Vec<(String, String)> {
     fs::read_to_string(path)
         .expect("read batch environment")
@@ -1236,6 +1256,56 @@ fn preflight_task_is_fail_closed_and_writes_reports_for_real_git_fixtures() {
             "preflight contains forbidden active operation: {forbidden}"
         );
     }
+}
+
+#[test]
+fn preflight_benchmark_task_measures_clean_public_worker_runs() {
+    let source_repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let fixture = fixture_root("preflight-benchmark");
+    let cloned = Command::new("git")
+        .args(["clone", "--quiet", "--no-hardlinks"])
+        .arg(source_repo)
+        .arg(&fixture)
+        .output()
+        .expect("clone clean preflight benchmark fixture");
+    assert!(
+        cloned.status.success(),
+        "clone benchmark fixture failed: {}",
+        String::from_utf8_lossy(&cloned.stderr)
+    );
+
+    let report_path = fixture.join("target").join("benchmark.json");
+    let output = run_preflight_benchmark(&fixture, &report_path);
+    assert!(
+        output.status.success(),
+        "preflight benchmark failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value =
+        serde_json::from_slice(&fs::read(&report_path).expect("read benchmark report"))
+            .expect("decode benchmark report");
+    assert_eq!(report["kind"], "agenterm-read-only-preflight-benchmark");
+    assert_eq!(report["iterations"], 5);
+    assert_eq!(report["all_preflights_passed"], true);
+    assert_eq!(report["target_met"], true);
+    assert!(
+        report["runs"]
+            .as_array()
+            .expect("benchmark runs")
+            .iter()
+            .all(|run| run["passed"] == true && run["exit_code"] == 0),
+        "benchmark masked a failed preflight: {report}"
+    );
+    assert!(
+        fs::read_dir(fixture.join("target"))
+            .expect("read benchmark output directory")
+            .filter_map(Result::ok)
+            .all(|entry| !entry.file_name().to_string_lossy().starts_with("runs-")),
+        "benchmark retained a scratch directory"
+    );
+
+    fs::remove_dir_all(&fixture).expect("remove benchmark fixture");
 }
 
 #[cfg(windows)]
