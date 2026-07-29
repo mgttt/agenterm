@@ -2,6 +2,11 @@
 
 Parent: [AgenTerm product tree](../PRD.md#product-tree)
 
+Unscheduled inspiration and long-horizon ideas live in
+[Inspiration backlog and future vision](PRD_02_19_inspiration_and_future_vision.md).
+That module captures product-owner intent and future lanes; this roadmap owns
+version gates and milestone acceptance only.
+
 Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
 - v0.1.5 Control, Terminal & Bounded Automation

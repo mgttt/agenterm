@@ -84,6 +84,7 @@ tree does not promise a version or implementation strategy.
   - [tmux/RMUX compatibility](prd/PRD_02_16_tmux_rmux_compatibility.md) — Compatibility matrix, explicit differences, and conformance evidence.
   - [Delivery and quality](prd/PRD_02_17_delivery_quality.md) — Builds, tests, artifacts, release gates, and regression budgets.
   - [Focused product roadmap](prd/PRD_02_18_roadmap.md) — Version ownership, milestone gates, and future product lanes.
+  - [Inspiration backlog and future vision](prd/PRD_02_19_inspiration_and_future_vision.md) — Idea garden, north-star layers, and promotion path into owning modules (not shipped status).
 
 ## Non-negotiable invariants
 
