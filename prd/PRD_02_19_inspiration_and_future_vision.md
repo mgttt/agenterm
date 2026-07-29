@@ -307,6 +307,59 @@ One-sentence north star:
 > Local agent/process **fleet workspace** — tree for organization, terminal as
 > viewport, Composer/CLI as control plane; lightweight, durable, verifiable.
 
+## Market narratives (shadows, not copies)
+
+Popular labels move fast; AgenTerm already overlaps several without adopting
+their UI or business model. Use this table to **steal the job**, not the
+category name, when evaluating inspiration.
+
+| Narrative | User fantasy | AgenTerm shadow | Deliberate difference |
+|-----------|--------------|-----------------|------------------------|
+| Cowork / shared workspace | One room where people and agents work together | Tree + shared snapshots + multi-client on one server | Not cloud-first collab; **local fleet authority** with explicit IPC |
+| Workbuddy / AI sidekick | A partner that helps you execute | Composer, `new-agent`, script/MCP bridge | Buddy is **tab-scoped crew**, not a single chat bubble in the PTY |
+| OPC (one-person company) | One human runs many roles/agents | Hierarchical tree, notes, many long-lived tabs | OPC ops desk, not HR/legal/finance suite |
+| Human work partner | Colleague that stays in context | Remain-on-exit, drafts, CWD/provenance, waits | Partner = **verifiable state**, not persona roleplay |
+| pm2 / process supervisor | Daemons stay up on a server | `agenterm-server` headless, detach, stable server PID | Adds **terminal/agent semantics**, tree, and human GUI — not only restart counters |
+| tmux / RMUX | Sessions survive disconnect; remote control | `agenterm-mux`, bounded command surface, server without GUI | **Honest subset** + native extensions; one tab = one pane today |
+| systemd / Windows Service | OS-level service unit | Explicit lifecycle, kill-server vs detach | User-owned **workspace** model, not system service manager |
+
+Unified OPC operator story:
+
+> One person commands a **local company of processes and agents** — org chart
+> on the left, truth in the viewport, orders through Composer and CLI, proof
+> through events and screenshots.
+
+## Headless and server-side ambition
+
+Product-owner intent: eventually **replace pm2 + tmux/RMUX** as the stable
+long-running application manager on servers, with `agenterm-mux.exe` as the
+compatibility and migration frontend — not a second hidden fleet.
+
+| Target tool | What users hire it for | AgenTerm counter-promise | Gap before promotion |
+|-------------|------------------------|--------------------------|----------------------|
+| **pm2** | Keep Node/worker processes alive, logs, restart policy | Headless server keeps PTY fleet alive; tree + events + script tasks | Restart policy, cluster, log aggregation APIs — **not** product truth yet |
+| **tmux** | Multiplex terminals; session survives SSH drop | Server survives GUI detach/close; mux speaks tmux-like CLI | Split panes, full matrix, remote attach over network |
+| **RMUX** | Rust-native tmux + agent ergonomics | Native extensions namespace, typed waits, agenterm-cli richness | RMUX UI/parser parity items still `[ ]` in compatibility PRD |
+
+Architecture already aligned:
+
+- `agenterm-server` = authority without HWND ([Executable family](PRD_02_02_executable_family.md))
+- `agenterm-mux` = thin console over same IPC ([Fleet multiplexer](PRD_02_05_fleet_multiplexer.md))
+- GUI optional, not required for fleet truth
+
+Promotion gates for “server-grade fleet manager” (future wave, not W0):
+
+1. Linux/macOS headless server as **supported deployment shape**, not only dev GUI
+2. Network attach with auth (B3) for SSH-jump and datacenter operators
+3. Documented **subset matrix** vs tmux/RMUX/pm2 — explicit wins and explicit gaps
+4. Optional: restart/supervisor policies as **typed operations**, not silent pm2 clone
+
+Non-goals:
+
+- replace **systemd** or OS service manager for system daemons;
+- claim **full** tmux/RMUX conformance while single-pane tabs remain shipped;
+- become a **hosted** cowork SaaS.
+
 ## Idea lanes
 
 Lanes map to **mind branches** and **waves** (see §8). Branch IDs: ORG, OBS,
@@ -334,6 +387,8 @@ INT, DUR, AUTO, ORCH, EXT, INF, REACH.
 | B5 | [idea] | Cross-tab broadcast input and synchronized panes | typed op completeness | Agent control plane |
 | B6 | [promoted] | Rhai script runtime and task catalog | — | Rust host + Rhai scripting |
 | B7 | [explore] | MCP read-only bridge then governed tools | v0.1.10 gates | MCP orchestration |
+| B8 | [idea] | Headless server as **server-side fleet manager** (pm2-class uptime + tmux-class sessions) | Linux headless ship, B3 | Executable family, Fleet multiplexer |
+| B9 | [idea] | Supervisor policies (restart on exit, max restarts) as explicit typed ops | B8, receipt model | Agent control plane, Executable family |
 
 ### Lane C — Orchestration and multi-agent collaboration (ORCH · W3)
 
