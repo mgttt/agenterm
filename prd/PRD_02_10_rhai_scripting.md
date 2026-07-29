@@ -462,6 +462,7 @@ Migration ledger:
 | Fleet discovery, events, launch context, restart, and Mux safety | `scripts/rhai/fleet-smoke.rhai` plus the shared Rhai harness | `tests/fleet_smoke.ps1` | current migration change | live old/new ordinary and 16×258 concurrent-load parity preserves all six evidence IDs, dead-record pruning, explicit/implicit/ambiguous instance selection, scoped environment and Codex launch, typed event catalog/causality/wait timeout/cancellation/restart/gap, Mux compatibility/destructive safety, and multi-address cleanup; the Rhai stress path completes in about 63 seconds versus 116 seconds for PowerShell | deleted; ordinary qualification skips the explicit load while stress/release appends `--event-load` to the same named task |
 | Replaceable GUI, physical workbench, and in-place server-fault recovery | `scripts/rhai/remote-ui-smoke.rhai` plus unrestricted native child-window, operating-system clipboard, arbitrary-process termination, and the shared Rhai harness | `tests/remote_ui_smoke.ps1` | current migration change | live PowerShell last-known-good and named Rhai task both pass the complete journey: split GUI/server roles, detach and same-server PTY continuity, replacement UI, physical toolbar/modal/Settings/CWD/tree/scroll/selection/clipboard behavior, real server force-termination, hidden offline input, local disconnected close, same GUI PID/window identity reconnect to a new PID/epoch/lease, screenshots, stale-registration pruning, and zero owned orphans | deleted; qualification discovery and execution invoke the named Rhai task |
 | Unrestricted Script Runtime public regression | `scripts/rhai/script-smoke.rhai` plus `scripts/rhai/lib/script_smoke_helpers.rhai`, arbitrary `Bytes` construction, and binary child stdin | `tests/script_smoke.ps1` | current migration change | the named Rhai task emits all eighteen registered Script evidence IDs and passes API/comparison discovery, process/stream/task/HTTP/filesystem lifecycles, modules and compatible/degraded tasks, raw line/framed worker protocols, timeout/crash/parent-exit/concurrency supervision, typed Fleet observation/mutation, the direct-entry north-star task, audit privacy, recovery, and retained failure diagnostics in about 24 seconds | deleted; qualification and diagnostic-bundle probes invoke the named Rhai task |
+| CLI, GUI, and Script retained failure-bundle self-test | `scripts/rhai/diagnostic-bundle-selftest.rhai` plus the shared Rhai harness | `tests/diagnostic_bundle_selftest.ps1` | current migration change | the named task creates one intentional CLI bundle and concurrently drives real theme and Script failure probes; it verifies exact identity markers, bounded local diagnostics and command logs, GUI/worker success evidence, privacy metadata and source redaction, orphan-free cleanup, and removal of only newly owned bundles | deleted; the full quality gate invokes the named Rhai task directly |
 | Unintegrated professional terminal-selection prototype | Future public Rhai professional-selection journey after the product slice ships | `tests/terminal_selection_smoke.ps1` | current migration change | caller audit finds no check, CI, qualification, or registered evidence consumer; direct execution fails before interaction at zero terminal columns, while the Windows double-click handler does not implement the claimed word/third-click behavior and the product PRD keeps that slice planned | deleted as misleading dead test code; Git history retains the prototype |
 
 ### v0.1.10 completion commitment
@@ -472,7 +473,7 @@ Migration ledger:
 - [x] the dated 2026-07-29 frozen baseline is 43 tracked `.ps1` files: 3 at
   the repository root, 17 under `scripts/`, 21 under `tests/`, and 2 retained in
   `scripts/archive/powershell/`.
-- [~] migration progress is 33/43 deleted and 10/43 remaining; progress is
+- [~] migration progress is 34/43 deleted and 9/43 remaining; progress is
   counted only after parity evidence plus caller cutover, or caller-audited
   functional deletion of obsolete behavior, and source deletion.
 - [x] `scripts/powershell-migration.json` freezes all 43 baseline paths under
@@ -484,8 +485,8 @@ Migration ledger:
   duplicate paths, invalid states, and count drift; ordinary and release
   qualification invoke it as a required gate.
 - [~] the repository-root `agenterm.tasks.json` is now the offline task
-  catalog and ships twenty-nine ready tasks (`bootstrap-info`, `build-identity`,
-  `harness-cleanup-selftest`, `migration-audit`, `target-report`, `internal-version-policy`,
+  catalog and ships thirty ready tasks (`bootstrap-info`, `build-identity`,
+  `harness-cleanup-selftest`, `diagnostic-bundle-selftest`, `migration-audit`, `target-report`, `internal-version-policy`,
   `verify-docs-site`, `readme-examples`, `clean-locked-artifacts`,
   `prepare-target-clean`, `preflight`, `preflight-benchmark`, `prd-alignment`,
   `stage-artifact`, `stage-build`, `supply-chain`, `server-smoke`, `startup-smoke`,

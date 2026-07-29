@@ -250,6 +250,36 @@ fn run_harness_cleanup_selftest() -> Output {
 }
 
 #[cfg(windows)]
+fn run_diagnostic_bundle_selftest() -> Output {
+    let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+        .current_dir(repo)
+        .args([
+            "run",
+            "scripts/rhai/diagnostic-bundle-selftest.rhai",
+            "--profile",
+            "local",
+            "--project-root",
+        ])
+        .arg(repo)
+        .args([
+            "--timeout-ms",
+            "60000",
+            "--max-operations",
+            "10000000",
+            "--",
+        ])
+        .arg(repo)
+        .arg(env!("CARGO_BIN_EXE_agenterm-cli"))
+        .arg(env!("CARGO_BIN_EXE_agenterm-script"))
+        .arg(env!("CARGO_BIN_EXE_agenterm"))
+        .env("AGENTERM_NO_ACTIVATE", "1")
+        .output()
+        .expect("run Rhai diagnostic-bundle self-test")
+}
+
+#[cfg(windows)]
 fn run_working_context_smoke() -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -1553,6 +1583,31 @@ fn rhai_harness_cleanup_owns_only_registered_children() {
         String::from_utf8_lossy(&output.stdout).trim(),
         "PASS: harness cleanup ownership and orphan proof"
     );
+}
+
+#[cfg(windows)]
+#[test]
+fn rhai_diagnostic_bundles_are_bounded_private_and_orphan_free() {
+    let output = run_diagnostic_bundle_selftest();
+    assert!(
+        output.status.success(),
+        "Rhai diagnostic-bundle self-test failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("STEP CLI failure bundle"));
+    assert!(stdout.contains("STEP GUI and script-worker failure bundles in parallel"));
+    assert!(
+        stdout.contains("PASS: CLI, GUI, and script failure bundles are bounded and orphan-free")
+    );
+    for forbidden in ["AUDIT_ENV_SECRET", "40 + 2"] {
+        assert!(!stdout.contains(forbidden), "stdout leaked {forbidden}");
+        assert!(
+            !String::from_utf8_lossy(&output.stderr).contains(forbidden),
+            "stderr leaked {forbidden}"
+        );
+    }
 }
 
 #[cfg(windows)]

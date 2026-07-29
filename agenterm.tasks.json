@@ -96,6 +96,14 @@
       "args": ["."]
     },
     {
+      "id": "diagnostic-bundle-selftest",
+      "description": "Prove retained CLI, GUI, and Script failure bundles are bounded, private, identity-checked, and orphan-free",
+      "entry": "scripts/rhai/diagnostic-bundle-selftest.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "args": [".", "dist/agenterm-cli.exe", "dist/agenterm-script.exe", "dist/agenterm.exe"]
+    },
+    {
       "id": "working-context-smoke",
       "description": "Prove redacted launch proxy facts, archived controls, and non-persistence through an isolated GUI restart",
       "entry": "scripts/rhai/working-context-smoke.rhai",

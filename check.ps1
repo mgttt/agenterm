@@ -598,7 +598,9 @@ try {
     # latency without exercising the startup path itself.
     Invoke-Checked -Id 'diagnostic-bundle-selftest' `
         -Label 'CLI GUI and script diagnostic bundle self-test' {
-        & '.\tests\diagnostic_bundle_selftest.ps1'
+        & '.\dist\agenterm-script.exe' task run diagnostic-bundle-selftest `
+            --manifest '.\agenterm.tasks.json' `
+            --timeout-ms 60000 --max-operations 10000000
     }
 
     if ($SkipSmoke) {
