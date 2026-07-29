@@ -21,6 +21,7 @@ use crate::{
 
 const DEFAULT_TIMEOUT_MS: u64 = 2_000;
 const MAX_TIMEOUT_MS: u64 = 10_000;
+const OUTPUT_DRAIN_GRACE: Duration = Duration::from_secs(1);
 const DEFAULT_CAPTURE_BYTES: usize = 64 * 1024;
 const MAX_CAPTURE_BYTES: usize = 256 * 1024;
 const MAX_STDIN_BYTES: usize = 256 * 1024;
@@ -461,7 +462,7 @@ fn finish_output(
     status: ExitStatus,
     deadline: Instant,
 ) -> Result<ScriptOutput, Box<EvalAltResult>> {
-    let (stdout, stderr) = finish_capture(state, deadline)?;
+    let (stdout, stderr) = finish_capture(state, output_drain_deadline(deadline))?;
     state.child.take();
     Ok(ScriptOutput {
         success: status.success(),
@@ -471,6 +472,13 @@ fn finish_output(
         stderr: ScriptBytes(stderr.bytes),
         complete: !stdout.truncated && !stderr.truncated,
     })
+}
+
+fn output_drain_deadline(process_deadline: Instant) -> Instant {
+    // The child runtime budget ends once its process exits. Pump threads still
+    // need a bounded scheduling window to publish the final bytes and EOF,
+    // especially on loaded Windows runners.
+    process_deadline.max(Instant::now() + OUTPUT_DRAIN_GRACE)
 }
 
 fn finish_capture(
@@ -719,6 +727,16 @@ mod tests {
                 .to_string()
                 .contains("process_timeout")
         );
+    }
+
+    #[test]
+    fn exited_child_receives_a_separate_bounded_output_drain_window() {
+        let before = Instant::now();
+        let expired = before - Duration::from_secs(1);
+        assert!(output_drain_deadline(expired) >= before + OUTPUT_DRAIN_GRACE);
+
+        let future = before + Duration::from_secs(5);
+        assert_eq!(output_drain_deadline(future), future);
     }
 
     #[test]
