@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0b1016">
-  <title>AgenTerm™ — Native terminal and agent fleet workspace</title>
-  <meta name="description" content="AgenTerm is the native terminal and local fleet workspace built with agents, for agents and the people who lead them.">
+  <title>AgenTerm™ — Local agent fleet work OS</title>
+  <meta name="description" content="Organize long-lived agents and shells as a fleet. Tree, viewport, external Composer, and a verifiable control plane—not another tabbed terminal.">
   <link rel="canonical" href="https://agenterm.mega.tech/">
   <link rel="alternate" hreflang="en" href="https://agenterm.mega.tech/?lang=en">
   <link rel="alternate" hreflang="zh-Hant" href="https://agenterm.mega.tech/?lang=zh-Hant">
@@ -15,12 +15,12 @@
   <meta property="og:url" content="https://agenterm.mega.tech/">
   <meta property="og:locale" content="en_US">
   <meta property="og:locale:alternate" content="zh_TW">
-  <meta property="og:title" content="AgenTerm™ — Native terminal and agent fleet workspace">
-  <meta property="og:description" content="Built with agents, for agents—and the people who lead them.">
+  <meta property="og:title" content="AgenTerm™ — Local agent fleet work OS">
+  <meta property="og:description" content="Organize your crew on one machine. Durable tabs, external Composer, verifiable automation.">
   <meta property="og:image" content="https://agenterm.mega.tech/assets/agenterm-workspace.png">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="AgenTerm™ — Native terminal and agent fleet workspace">
-  <meta name="twitter:description" content="Built with agents, for agents—and the people who lead them.">
+  <meta name="twitter:title" content="AgenTerm™ — Local agent fleet work OS">
+  <meta name="twitter:description" content="Organize your crew on one machine. Durable tabs, external Composer, verifiable automation.">
   <meta name="twitter:image" content="https://agenterm.mega.tech/assets/agenterm-workspace.png">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230b1016'/%3E%3Cpath d='M3.5 4.5 7 8l-3.5 3.5M8 12h4.5' stroke='%237ee787' stroke-width='1.8' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
   <style>
@@ -61,6 +61,17 @@
       outline-offset: 3px;
     }
     code { font-family: var(--mono); font-size: .92em; }
+    .visually-hidden {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
     .wrap { width: min(1120px, calc(100% - 40px)); margin-inline: auto; }
     .skip {
       position: fixed;
@@ -178,6 +189,167 @@
       background: var(--green);
     }
     .button.primary:hover { background: #a4f2ab; }
+
+    .spec-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 28px;
+    }
+    .spec-pill {
+      padding: 7px 12px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--muted);
+      background: rgba(17, 24, 33, .72);
+      font: 600 .72rem/1 var(--mono);
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+    .spec-pill strong { color: var(--green); font-weight: 700; }
+
+    .invariant-strip { padding: 0 0 48px; }
+    .invariant-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .invariant {
+      padding: 22px 24px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: linear-gradient(160deg, rgba(30, 44, 58, .5), rgba(17, 24, 33, .85));
+    }
+    .invariant .rule {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--cyan);
+      font: 700 .78rem/1.2 var(--mono);
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+    .invariant p { margin: 0; color: #b7c4cf; font-size: .9rem; }
+
+    .pillar-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .pillar {
+      padding: 28px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface);
+    }
+    .pillar .tag {
+      display: block;
+      margin-bottom: 14px;
+      color: var(--green);
+      font: 700 .72rem/1 var(--mono);
+      letter-spacing: .08em;
+    }
+    .pillar h3 { margin-bottom: 10px; font-size: 1.15rem; }
+    .pillar p { margin: 0; color: var(--muted); font-size: .92rem; }
+
+    .persona-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .persona {
+      padding: 20px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface-2);
+    }
+    .persona strong {
+      display: block;
+      margin-bottom: 6px;
+      font-size: .95rem;
+    }
+    .persona span { color: var(--muted); font-size: .84rem; }
+
+    .compare-panel {
+      padding: 32px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface);
+    }
+    .compare-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 28px;
+      margin-top: 24px;
+    }
+    .compare-col h3 {
+      margin-bottom: 14px;
+      font-size: .88rem;
+      font-family: var(--mono);
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+    .compare-col.them h3 { color: var(--muted); }
+    .compare-col.us h3 { color: var(--green); }
+    .compare-col ul {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+    .compare-col li {
+      position: relative;
+      margin-top: 10px;
+      padding-left: 18px;
+      color: #c5d0d9;
+      font-size: .9rem;
+    }
+    .compare-col.them li::before {
+      position: absolute;
+      left: 0;
+      color: #6b7a88;
+      content: "—";
+    }
+    .compare-col.us li::before {
+      position: absolute;
+      left: 0;
+      color: var(--green);
+      font-family: var(--mono);
+      content: "✓";
+    }
+
+    .stack-block {
+      margin: 0;
+      padding: 28px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: #c8d6e0;
+      background: #080d12;
+      font: .8rem/1.85 var(--mono);
+      box-shadow: inset 3px 0 0 var(--cyan);
+    }
+    .stack-block .hl { color: var(--green); }
+
+    .principle-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .principle-card {
+      padding: 28px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface);
+    }
+    .principle-card strong {
+      display: block;
+      margin-bottom: 10px;
+      font-size: 1.02rem;
+    }
+    .principle-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: .9rem;
+      line-height: 1.55;
+    }
 
     .product-shot { padding: 16px 0 86px; }
     figure {
@@ -324,13 +496,16 @@
       nav a:not(.nav-github) { display: none; }
       nav { gap: 12px; }
       .section-head, .control-grid { grid-template-columns: 1fr; gap: 20px; }
-      .feature-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .feature-grid, .pillar-grid, .invariant-grid, .principle-grid { grid-template-columns: 1fr; }
+      .persona-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .compare-grid { grid-template-columns: 1fr; }
       .links { grid-template-columns: 1fr; }
     }
     @media (max-width: 560px) {
       .wrap { width: min(100% - 28px, 1120px); }
       .site-header .wrap { min-height: 60px; }
       .feature-grid { grid-template-columns: 1fr; }
+      .persona-grid { grid-template-columns: 1fr; }
       .card { min-height: auto; }
       .card .index { margin-bottom: 18px; }
       section.content { padding: 62px 0; }
@@ -349,6 +524,7 @@
     <div class="wrap">
       <a class="brand" href="#"><span>&gt;_</span> AgenTerm™</a>
       <nav aria-label="Primary navigation" data-i18n-aria-label="navLabel">
+        <a href="#why" data-i18n="navWhy">Why</a>
         <a href="#workspace" data-i18n="navWorkspace">Workspace</a>
         <a href="#automation" data-i18n="navAutomation">Automation</a>
         <a href="#docs" data-i18n="navDocs">Docs</a>
@@ -364,18 +540,71 @@
   <main id="main">
     <section class="hero">
       <div class="wrap">
-        <p class="eyebrow" data-i18n="heroEyebrow">Native terminal · active development</p>
-        <h1 data-i18n-html="heroTitle">Built with agents. Made for agents—and <em>the people who lead them.</em></h1>
+        <p class="eyebrow" data-i18n="heroEyebrow">Fleet work OS · Windows shipped · active development</p>
+        <h1 data-i18n-html="heroTitle">Organize your <em>crew</em>—not just another shell window.</h1>
         <p class="lead" data-i18n="heroLead">
-          AgenTerm combines hierarchical ConPTY tabs, a per-tab composer and
-          environment, and a native automation client. Humans and local agents
-          observe and steer the same terminal fleet. Windows is shipped today;
-          Linux and macOS share the protocol, clients, and terminal kernel while
-          their native GUI delivery is actively progressing.
+          AgenTerm is a local agent and process fleet workspace. A team tree on
+          the left, the terminal as viewport, and an external Composer for real
+          input. Programmers, sysadmins, creators, and office workers—and the
+          scripts and agents beside them—share one durable, verifiable control plane.
         </p>
         <div class="actions">
           <a class="button primary" href="https://github.com/mgttt/agenterm/releases" data-i18n="download">Download a public release</a>
           <a class="button" href="https://github.com/mgttt/agenterm#build-and-run" data-i18n="build">Build from source</a>
+        </div>
+        <div class="spec-row" aria-label="Product specs" data-i18n-aria-label="specLabel">
+          <span class="spec-pill" data-i18n-html="specPortable"><strong>Portable</strong> dist</span>
+          <span class="spec-pill" data-i18n-html="specSize"><strong>4 MiB</strong> GUI budget</span>
+          <span class="spec-pill" data-i18n="specServer">Headless server authority</span>
+          <span class="spec-pill" data-i18n="specMux">tmux/RMUX subset via mux</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="invariant-strip" id="why" aria-labelledby="invariant-heading">
+      <div class="wrap">
+        <h2 id="invariant-heading" class="visually-hidden" data-i18n="invariantHeading">Core invariants</h2>
+        <div class="invariant-grid">
+          <article class="invariant">
+            <span class="rule" data-i18n="invariant1Rule">Exit ≠ erase</span>
+            <p data-i18n="invariant1Body">A dead process keeps its final screen in a readable tab until you explicitly close it.</p>
+          </article>
+          <article class="invariant">
+            <span class="rule" data-i18n="invariant2Rule">Close ≠ kill</span>
+            <p data-i18n="invariant2Body">Detach-first window close hides the GUI but preserves the live server, tabs, and PTYs.</p>
+          </article>
+          <article class="invariant">
+            <span class="rule" data-i18n="invariant3Rule">Verify ≠ sleep</span>
+            <p data-i18n="invariant3Body">Automation waits on snapshots, events, and receipts—not arbitrary timers.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="content">
+      <div class="wrap">
+        <div class="section-head">
+          <h2 data-i18n="pillarTitle">Three surfaces. One fleet.</h2>
+          <p data-i18n="pillarLead">
+            Daily work stays quiet; organization, observation, and intervention stay explicit.
+          </p>
+        </div>
+        <div class="pillar-grid">
+          <article class="pillar">
+            <span class="tag" data-i18n="pillar1Tag">ORG · TREE</span>
+            <h3 data-i18n="pillar1Title">Organize the crew</h3>
+            <p data-i18n="pillar1Body">Hierarchical tabs with names, notes, and stable @ids—agents, shells, and long-running jobs in one map.</p>
+          </article>
+          <article class="pillar">
+            <span class="tag" data-i18n="pillar2Tag">OBS · VIEWPORT</span>
+            <h3 data-i18n="pillar2Title">Observe truth</h3>
+            <p data-i18n="pillar2Body">Native terminal scrollback, status context, structured snapshots, and an event journal you can wait on.</p>
+          </article>
+          <article class="pillar">
+            <span class="tag" data-i18n="pillar3Tag">INT · COMPOSER</span>
+            <h3 data-i18n="pillar3Title">Intervene outside the stream</h3>
+            <p data-i18n="pillar3Body">Every tab owns a multiline Composer—prepare commands and prompts without fighting live output.</p>
+          </article>
         </div>
       </div>
     </section>
@@ -431,9 +660,36 @@
             <p data-i18n="feature5Body">Win32/GDI rendering, ConPTY processes, scrollback, a draggable scrollbar, terminal selection, clipboard copy and bounded paste are built in.</p>
           </article>
           <article class="card">
-            <span class="index" data-i18n="feature6Index">06 / CONTEXT</span>
-            <h3 data-i18n="feature6Title">Scoped agent launches</h3>
-            <p data-i18n="feature6Body">Launch Codex into named fleet tabs and inject tab-scoped environment or proxy values without persisting those values into the workspace.</p>
+            <span class="index" data-i18n="feature6Index">06 / DETACH</span>
+            <h3 data-i18n="feature6Title">Close window, keep the fleet</h3>
+            <p data-i18n="feature6Body">Detach-first close hides the GUI while the headless server, live PTYs, scrollback, and drafts keep running.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="content" id="personas">
+      <div class="wrap">
+        <div class="section-head">
+          <h2 data-i18n="personaTitle">One product. Many daily workflows.</h2>
+          <p data-i18n="personaLead">Same fleet OS for the people who juggle parallel work on one machine.</p>
+        </div>
+        <div class="persona-grid">
+          <article class="persona">
+            <strong data-i18n="persona1Title">Developers</strong>
+            <span data-i18n="persona1Body">Feature crews, reviewer agents, builds, and capture-to-verify loops.</span>
+          </article>
+          <article class="persona">
+            <strong data-i18n="persona2Title">Sysadmins</strong>
+            <span data-i18n="persona2Body">Service trees, log tabs, runbooks in Composer, headless server + mux.</span>
+          </article>
+          <article class="persona">
+            <strong data-i18n="persona3Title">Creators</strong>
+            <span data-i18n="persona3Body">Draft, render, and publish pipelines with long-form Composer input.</span>
+          </article>
+          <article class="persona">
+            <strong data-i18n="persona4Title">Office workers</strong>
+            <span data-i18n="persona4Body">Today’s task tree, report drafts, and helpers—without losing context when something stops.</span>
           </article>
         </div>
       </div>
@@ -471,20 +727,63 @@
       </div>
     </section>
 
+    <section class="content" id="compare">
+      <div class="wrap">
+        <div class="compare-panel">
+          <h2 data-i18n="compareTitle">Not another tabbed terminal.</h2>
+          <p data-i18n="compareLead">Tabby, ConEmu, Warp, and OS terminals optimize single sessions or chat-in-buffer. AgenTerm optimizes fleet durability and verifiable control.</p>
+          <div class="compare-grid">
+            <div class="compare-col them">
+              <h3 data-i18n="compareThem">Typical terminals</h3>
+              <ul>
+                <li data-i18n="compareThem1">Flat tabs; context vanishes when a process exits</li>
+                <li data-i18n="compareThem2">Typing competes with streaming output</li>
+                <li data-i18n="compareThem3">Scripts sleep and guess instead of waiting on state</li>
+                <li data-i18n="compareThem4">Close the window, lose the session</li>
+              </ul>
+            </div>
+            <div class="compare-col us">
+              <h3 data-i18n="compareUs">AgenTerm</h3>
+              <ul>
+                <li data-i18n="compareUs1">Team tree for agents, shells, and long-lived jobs</li>
+                <li data-i18n="compareUs2">External Composer per tab for real editing</li>
+                <li data-i18n="compareUs3">CLI, script, mux, MCP on one typed contract</li>
+                <li data-i18n="compareUs4">Detach-first close; headless server keeps running</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <section class="content">
       <div class="wrap">
-        <div class="principle">
-          <p>
-            <strong data-i18n="principle1Title">One authority, several clients.</strong> <span data-i18n-html="principle1Body">The GUI,
-            <code>agenterm-cli.exe</code>, <code>agenterm-mux.exe</code>, and
-            the bounded <code>agenterm-script.exe</code> worker reuse the same
-            public product contract. Unsupported compatibility operations fail
-            explicitly rather than pretending to succeed.</span>
-          </p>
-          <p>
-            <strong data-i18n="principle2Title">Windows shipped, one shared core expanding outward.</strong>
-            <span data-i18n="principle2Body">Windows remains the shipped surface while Linux and macOS GUI delivery advances on the shared protocol, clients, terminal kernel, and test contracts.</span>
-          </p>
+        <div class="section-head">
+          <h2 data-i18n="stackTitle">One authority. Several clients.</h2>
+          <p data-i18n-html="stackLead"><code>agenterm-server</code> owns the fleet; everything else observes and acts through the same public contract.</p>
+        </div>
+        <pre class="stack-block" aria-label="Architecture stack" data-i18n-aria-label="stackLabel"><span class="hl">agenterm-server</span>  tree · PTY · journal · persistence · no HWND
+    ↑ typed IPC · snapshots · waits · receipts
+<span class="hl">clients</span>        agenterm (GUI) · agenterm-cli · agenterm-mux · agenterm-script · agenterm-mcp
+<span class="hl">promise</span>        unsupported ops fail explicitly — no false success</pre>
+      </div>
+    </section>
+
+    <section class="content">
+      <div class="wrap">
+        <div class="principle-grid">
+          <article class="principle-card">
+            <strong data-i18n="principle1Title">Lightweight native core</strong>
+            <p data-i18n="principle1Body">Portable Windows builds with strict binary budgets. Network, marketplace, and heavy runtimes stay optional sidecars—not GUI bloat.</p>
+          </article>
+          <article class="principle-card">
+            <strong data-i18n="principle2Title">Windows shipped, core expanding</strong>
+            <p data-i18n="principle2Body">Windows is the shipped surface today. Linux and macOS share protocol, clients, and terminal kernel while native GUI delivery progresses.</p>
+          </article>
+          <article class="principle-card">
+            <strong data-i18n="principle3Title">Active development, honest scope</strong>
+            <p data-i18n="principle3Body">Shipped, partial, and planned capability are labeled in the product tree. Inspiration and roadmap items are not release promises until promoted.</p>
+          </article>
         </div>
       </div>
     </section>
@@ -507,6 +806,10 @@
           <a class="link-card" href="https://github.com/mgttt/agenterm/blob/main/PRD.md">
             <strong data-i18n="productTitle">Product tree →</strong>
             <span data-i18n="productBody">Canonical requirements, current status, invariants, and links to owning modules.</span>
+          </a>
+          <a class="link-card" href="https://github.com/mgttt/agenterm/blob/main/prd/PRD_02_19_inspiration_and_future_vision.md">
+            <strong data-i18n="visionTitle">Product vision →</strong>
+            <span data-i18n="visionBody">Mind tree, inspiration backlog, and long-horizon direction—separate from version execution plans.</span>
           </a>
           <a class="link-card" href="https://github.com/mgttt/agenterm/blob/main/docs/agenterm-script-runtime.md">
             <strong data-i18n="scriptTitle">Script runtime draft →</strong>
@@ -538,14 +841,23 @@
     (() => {
       const copy = {
         en: {
-          title: "AgenTerm™ — Native terminal and agent fleet workspace",
-          description: "AgenTerm is the native terminal and local fleet workspace built with agents, for agents and the people who lead them.",
+          title: "AgenTerm™ — Local agent fleet work OS",
+          description: "Organize long-lived agents and shells as a fleet. Tree, viewport, external Composer, and a verifiable control plane—not another tabbed terminal.",
           skip: "Skip to content", navLabel: "Primary navigation", languageLabel: "Language",
-          navWorkspace: "Workspace", navAutomation: "Automation", navDocs: "Docs",
-          heroEyebrow: "Native terminal · active development",
-          heroTitle: "Built with agents. Made for agents—and <em>the people who lead them.</em>",
-          heroLead: "AgenTerm combines hierarchical terminal tabs, a per-tab composer and environment, and native automation clients. Humans and local agents observe and steer the same terminal fleet. Windows is shipped today; Linux and macOS share the protocol, clients, and terminal kernel while their native GUI delivery is actively progressing.",
+          navWhy: "Why", navWorkspace: "Workspace", navAutomation: "Automation", navDocs: "Docs",
+          heroEyebrow: "Fleet work OS · Windows shipped · active development",
+          heroTitle: "Organize your <em>crew</em>—not just another shell window.",
+          heroLead: "AgenTerm is a local agent and process fleet workspace. A team tree on the left, the terminal as viewport, and an external Composer for real input. Programmers, sysadmins, creators, and office workers—and the scripts and agents beside them—share one durable, verifiable control plane.",
           download: "Download a public release", build: "Build from source",
+          specLabel: "Product specifications", specPortable: "<strong>Portable</strong> dist", specSize: "<strong>4 MiB</strong> GUI budget", specServer: "Headless server authority", specMux: "tmux/RMUX subset via mux",
+          invariantHeading: "Core invariants",
+          invariant1Rule: "Exit ≠ erase", invariant1Body: "A dead process keeps its final screen in a readable tab until you explicitly close it.",
+          invariant2Rule: "Close ≠ kill", invariant2Body: "Detach-first window close hides the GUI but preserves the live server, tabs, and PTYs.",
+          invariant3Rule: "Verify ≠ sleep", invariant3Body: "Automation waits on snapshots, events, and receipts—not arbitrary timers.",
+          pillarTitle: "Three surfaces. One fleet.", pillarLead: "Daily work stays quiet; organization, observation, and intervention stay explicit.",
+          pillar1Tag: "ORG · TREE", pillar1Title: "Organize the crew", pillar1Body: "Hierarchical tabs with names, notes, and stable @ids—agents, shells, and long-running jobs in one map.",
+          pillar2Tag: "OBS · VIEWPORT", pillar2Title: "Observe truth", pillar2Body: "Native terminal scrollback, status context, structured snapshots, and an event journal you can wait on.",
+          pillar3Tag: "INT · COMPOSER", pillar3Title: "Intervene outside the stream", pillar3Body: "Every tab owns a multiline Composer—prepare commands and prompts without fighting live output.",
           shotAlt: "AgenTerm showing a hierarchical agent tab tree with notes, terminal toolbar, per-tab composer, and terminal status bar",
           shotCaption: "AgenTerm: a compact scrollable team tree at left, terminal toolbar and viewport in the workbench, the selected tab's composer below, and terminal-scoped status at the bottom.",
           workspaceTitle: "A fleet that stays understandable.",
@@ -555,30 +867,50 @@
           feature3Index: "03 / COMPOSER", feature3Title: "Input per workspace", feature3Body: "Every tab owns an independent multiline draft and Send action, keeping prepared instructions attached to the right terminal.",
           feature4Index: "04 / RESTORE", feature4Title: "Workspace continuity", feature4Body: "Normal restarts preserve the tab tree, names, notes, drafts, commands, and active tab. Commands restart honestly as new processes.",
           feature5Index: "05 / TERMINAL", feature5Title: "Native, practical interaction", feature5Body: "Native rendering, platform PTYs, scrollback, a draggable scrollbar, terminal selection, clipboard copy, and bounded paste are built in.",
-          feature6Index: "06 / CONTEXT", feature6Title: "Scoped agent launches", feature6Body: "Launch Codex into named fleet tabs and inject tab-scoped environment or proxy values without persisting those values into the workspace.",
+          feature6Index: "06 / DETACH", feature6Title: "Close window, keep the fleet", feature6Body: "Detach-first close hides the GUI while the headless server, live PTYs, scrollback, and drafts keep running.",
+          personaTitle: "One product. Many daily workflows.", personaLead: "Same fleet OS for the people who juggle parallel work on one machine.",
+          persona1Title: "Developers", persona1Body: "Feature crews, reviewer agents, builds, and capture-to-verify loops.",
+          persona2Title: "Sysadmins", persona2Body: "Service trees, log tabs, runbooks in Composer, headless server + mux.",
+          persona3Title: "Creators", persona3Body: "Draft, render, and publish pipelines with long-form Composer input.",
+          persona4Title: "Office workers", persona4Body: "Today's task tree, report drafts, and helpers—without losing context when something stops.",
           automationEyebrow: "Public control plane", automationTitle: "Observe, act, then verify.",
           automationLead: "<code>agenterm-cli</code> exposes the same fleet through typed local IPC. Stable tab IDs, structured snapshots, event positions, deterministic waits, and PNG evidence make automation inspectable.",
           automation1: "Create, select, rename, nest, capture, and drive tabs", automation2: "Wait for output or UI state without fixed sleeps", automation3: "Target an explicit local AgenTerm server", automation4: "Use a documented single-pane tmux/RMUX subset through <code>agenterm-mux</code>",
           cliLabel: "AgenTerm command line example",
-          principle1Title: "One authority, several clients.", principle1Body: "The GUI, <code>agenterm-cli</code>, <code>agenterm-mux</code>, and the bounded <code>agenterm-script</code> worker reuse the same public product contract. Unsupported compatibility operations fail explicitly rather than pretending to succeed.",
-          principle2Title: "Windows shipped, one shared core expanding outward.", principle2Body: "Windows remains the shipped surface while Linux and macOS GUI delivery advances on the shared protocol, clients, terminal kernel, and test contracts.",
+          compareTitle: "Not another tabbed terminal.", compareLead: "Tabby, ConEmu, Warp, and OS terminals optimize single sessions or chat-in-buffer. AgenTerm optimizes fleet durability and verifiable control.",
+          compareThem: "Typical terminals", compareThem1: "Flat tabs; context vanishes when a process exits", compareThem2: "Typing competes with streaming output", compareThem3: "Scripts sleep and guess instead of waiting on state", compareThem4: "Close the window, lose the session",
+          compareUs: "AgenTerm", compareUs1: "Team tree for agents, shells, and long-running jobs", compareUs2: "External Composer per tab for real editing", compareUs3: "CLI, script, mux, MCP on one typed contract", compareUs4: "Detach-first close; headless server keeps running",
+          stackTitle: "One authority. Several clients.", stackLead: "<code>agenterm-server</code> owns the fleet; everything else observes and acts through the same public contract.", stackLabel: "Architecture stack",
+          principle1Title: "Lightweight native core", principle1Body: "Portable Windows builds with strict binary budgets. Network, marketplace, and heavy runtimes stay optional sidecars—not GUI bloat.",
+          principle2Title: "Windows shipped, core expanding", principle2Body: "Windows is the shipped surface today. Linux and macOS share protocol, clients, and terminal kernel while native GUI delivery progresses.",
+          principle3Title: "Active development, honest scope", principle3Body: "Shipped, partial, and planned capability are labeled in the product tree. Inspiration and roadmap items are not release promises until promoted.",
           docsTitle: "Start with the contract.", docsLead: "AgenTerm is under active development. The product tree distinguishes shipped, partial, and planned capability; consult it before relying on roadmap work.",
           readmeTitle: "README →", readmeBody: "Current highlights, build commands, CLI examples, and release workflow.",
           productTitle: "Product tree →", productBody: "Canonical requirements, current status, invariants, and links to owning modules.",
+          visionTitle: "Product vision →", visionBody: "Mind tree, inspiration backlog, and long-horizon direction—separate from version execution plans.",
           scriptTitle: "Script runtime specification →", scriptBody: "The versioned Rhai runtime contract, including shipped foundations and clearly marked planned work.",
           macPreviewTitle: "macOS preview safety →", macPreviewBody: "Verification and per-app Gatekeeper instructions for the unsigned developer preview.",
-          footerTagline: "AgenTerm · Windows shipped · Linux and macOS in active delivery · MIT OR Apache-2.0",
+          footerTagline: "AgenTerm · Fleet work OS · Windows shipped · MIT OR Apache-2.0",
           footerRepository: "Repository", footerReleases: "Releases", footerNotices: "Notices"
         },
         "zh-Hant": {
-          title: "AgenTerm™ — 原生終端機與 Agent 團隊工作區",
-          description: "AgenTerm 是與 Agent 共同打造的原生終端機與本機團隊工作區，為 Agent，也為帶領它們的人而生。",
+          title: "AgenTerm™ — 本機 Agent 艦隊工作 OS",
+          description: "把長期運行的 Agent 與 Shell 組織成艦隊。樹、視口、外置 Composer 與可驗證控制面——不是又一個分頁終端機。",
           skip: "跳至主要內容", navLabel: "主要導覽", languageLabel: "語言",
-          navWorkspace: "工作區", navAutomation: "自動化", navDocs: "文件",
-          heroEyebrow: "原生終端機 · 積極開發中",
-          heroTitle: "與 Agent 共同打造。為 Agent 而生——也為<em>帶領它們的人。</em>",
-          heroLead: "AgenTerm 結合階層式終端分頁、各分頁獨立的 Composer 與環境，以及原生自動化用戶端。人與本機 Agent 能觀察並操控同一支終端團隊。Windows 版本現已交付；Linux 與 macOS 共用通訊協定、用戶端與終端核心，原生 GUI 正持續推進。",
+          navWhy: "為何不同", navWorkspace: "工作區", navAutomation: "自動化", navDocs: "文件",
+          heroEyebrow: "艦隊工作 OS · Windows 已交付 · 積極開發中",
+          heroTitle: "組織你的<em>艦隊</em>——不只是又一個 Shell 視窗。",
+          heroLead: "AgenTerm 是本機 Agent 與程序艦隊工作區。左側團隊樹、終端作為視口、外置 Composer 負責真正輸入。程式設計師、系統管理員、創作者與辦公族——以及身旁的腳本與 Agent——共用同一套耐久、可驗證的控制面。",
           download: "下載公開版本", build: "從原始碼建置",
+          specLabel: "產品規格", specPortable: "<strong>便攜</strong> 分發", specSize: "<strong>4 MiB</strong> GUI 預算", specServer: "無頭 server 權威", specMux: "mux 提供 tmux/RMUX 子集",
+          invariantHeading: "核心不變量",
+          invariant1Rule: "結束 ≠ 消失", invariant1Body: "程序結束後，最終畫面仍留在可讀分頁中，直到你明確關閉。",
+          invariant2Rule: "關窗 ≠ 殺艦隊", invariant2Body: "Detach-first 關閉會隱藏 GUI，但保留 live server、分頁與 PTY。",
+          invariant3Rule: "驗證 ≠ 睡眠", invariant3Body: "自動化等待快照、事件與 receipt——不靠任意計時器。",
+          pillarTitle: "三個表面，一支艦隊。", pillarLead: "日常介面保持安靜；組織、觀察與干預始終明確。",
+          pillar1Tag: "ORG · 樹", pillar1Title: "組織艦隊", pillar1Body: "階層分頁附名稱、註記與穩定 @id——Agent、Shell 與長跑任務同一張地圖。",
+          pillar2Tag: "OBS · 視口", pillar2Title: "觀察真相", pillar2Body: "原生終端回捲、狀態情境、結構化快照，以及可等待的事件日誌。",
+          pillar3Tag: "INT · COMPOSER", pillar3Title: "在流外干預", pillar3Body: "每個分頁擁有多行 Composer——準備指令與提示詞，不與即時輸出打架。",
           shotAlt: "AgenTerm 畫面，顯示附有註記的階層式 Agent 分頁樹、終端工具列、分頁 Composer 與終端狀態列",
           shotCaption: "AgenTerm：左側是精簡且可捲動的團隊樹；工作台包含終端工具列與檢視區；下方是所選分頁的 Composer，底部則顯示該終端的狀態。",
           workspaceTitle: "讓整支團隊始終清楚可見。",
@@ -588,19 +920,30 @@
           feature3Index: "03 / COMPOSER", feature3Title: "每個工作區都有自己的輸入", feature3Body: "每個分頁都有獨立的多行草稿與傳送動作，讓準備好的指令始終留在正確的終端。",
           feature4Index: "04 / 還原", feature4Title: "工作區延續性", feature4Body: "正常重新啟動會保留分頁樹、名稱、註記、草稿、命令與作用中分頁；命令則會如實以新程序重新啟動。",
           feature5Index: "05 / 終端", feature5Title: "原生而務實的互動", feature5Body: "內建原生繪製、平台 PTY、回捲、可拖曳捲軸、終端選取、剪貼簿複製與有界貼上。",
-          feature6Index: "06 / 情境", feature6Title: "限定範圍的 Agent 啟動", feature6Body: "在具名團隊分頁中啟動 Codex，並注入僅限該分頁的環境或 Proxy 值，不會將這些值持久化至工作區。",
+          feature6Index: "06 / DETACH", feature6Title: "關窗，艦隊繼續跑", feature6Body: "Detach-first 關閉隱藏 GUI，無頭 server、live PTY、回捲與草稿持續運行。",
+          personaTitle: "一個產品，多種日常。", personaLead: "在同一台機器上並行處理很多事的人，共用同一套艦隊 OS。",
+          persona1Title: "程式設計師", persona1Body: "功能艦隊、reviewer Agent、建置與擷取驗證迴圈。",
+          persona2Title: "系統管理員", persona2Body: "服務樹、日誌分頁、Composer 中的 runbook、無頭 server + mux。",
+          persona3Title: "創作者", persona3Body: "草稿、渲染與發布管線，長文 Composer 輸入。",
+          persona4Title: "辦公族", persona4Body: "今日任務樹、報告草稿與助手——事情停下來也不丟上下文。",
           automationEyebrow: "公開控制平面", automationTitle: "觀察、操作，然後驗證。",
-          automationLead: "<code>agenterm-cli</code> 透過具型別的本機 IPC 公開同一支團隊。穩定分頁 ID、結構化快照、事件位置、確定性等待與 PNG 證據，讓自動化過程可以檢查。",
+          automationLead: "<code>agenterm-cli</code> 透過具型別的本機 IPC 公開同一支艦隊。穩定分頁 ID、結構化快照、事件位置、確定性等待與 PNG 證據，讓自動化過程可以檢查。",
           automation1: "建立、選取、重新命名、巢狀組織、擷取並操控分頁", automation2: "等待輸出或 UI 狀態，不依賴固定睡眠", automation3: "明確指定本機 AgenTerm server", automation4: "透過 <code>agenterm-mux</code> 使用已有文件的單窗格 tmux/RMUX 子集",
           cliLabel: "AgenTerm 命令列範例",
-          principle1Title: "單一權威，多個用戶端。", principle1Body: "GUI、<code>agenterm-cli</code>、<code>agenterm-mux</code> 與受限的 <code>agenterm-script</code> worker 共用同一份公開產品契約。不支援的相容操作會明確失敗，不會假裝成功。",
-          principle2Title: "Windows 已交付，共用核心持續向外延伸。", principle2Body: "Windows 仍是已交付的平台；Linux 與 macOS GUI 則建立在共用的通訊協定、用戶端、終端核心與測試契約上持續推進。",
+          compareTitle: "不是又一個分頁終端機。", compareLead: "Tabby、ConEmu、Warp 與系統終端機優化單一會話或緩衝區內聊天。AgenTerm 優化艦隊耐久與可驗證控制。",
+          compareThem: "常見終端機", compareThem1: "扁平分頁；程序一結束上下文就消失", compareThem2: "輸入與串流輸出互相干擾", compareThem3: "腳本靠睡眠猜測，不等待狀態", compareThem4: "關窗即失去會話",
+          compareUs: "AgenTerm", compareUs1: "Agent、Shell 與長跑任務的團隊樹", compareUs2: "每分頁外置 Composer，適合真正編輯", compareUs3: "CLI、script、mux、MCP 共用 typed 契約", compareUs4: "Detach-first 關窗；無頭 server 持續運行",
+          stackTitle: "單一權威，多個用戶端。", stackLead: "<code>agenterm-server</code> 持有艦隊；其餘皆透過同一份公開契約觀察與操作。", stackLabel: "架構堆疊",
+          principle1Title: "輕量原生核心", principle1Body: "便攜 Windows 建置與嚴格二進位預算。網路、市場與重型執行時留在可選 sidecar——不撐胖 GUI。",
+          principle2Title: "Windows 已交付，核心向外延伸", principle2Body: "Windows 是現已交付的平台；Linux 與 macOS 共用通訊協定、用戶端與終端核心，原生 GUI 持續推進。",
+          principle3Title: "積極開發，誠實標示範圍", principle3Body: "產品樹標示已交付、部分完成與規劃中能力。靈感與 roadmap 項目在晋升前不是發布承諾。",
           docsTitle: "從契約開始。", docsLead: "AgenTerm 正在積極開發。產品樹會區分已交付、部分完成與規劃中的能力；依賴 roadmap 功能前，請先查閱產品樹。",
           readmeTitle: "README →", readmeBody: "目前重點、建置命令、CLI 範例與發行流程。",
           productTitle: "產品樹 →", productBody: "正式需求、目前狀態、不變條件，以及各負責模組的連結。",
+          visionTitle: "產品願景 →", visionBody: "思維樹、靈感採集與長期方向——與版本執行計劃分開。",
           scriptTitle: "Script Runtime 規格 →", scriptBody: "具版本的 Rhai Runtime 契約，包含已交付的基礎與明確標示的規劃工作。",
           macPreviewTitle: "macOS 預覽版安全指南 →", macPreviewBody: "未簽署開發者預覽版的檔案驗證與個別 App Gatekeeper 操作說明。",
-          footerTagline: "AgenTerm · Windows 已交付 · Linux 與 macOS 積極開發中 · MIT OR Apache-2.0",
+          footerTagline: "AgenTerm · 艦隊工作 OS · Windows 已交付 · MIT OR Apache-2.0",
           footerRepository: "程式庫", footerReleases: "發行版本", footerNotices: "第三方聲明"
         }
       };
