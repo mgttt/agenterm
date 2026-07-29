@@ -2,7 +2,7 @@ use std::{
     cell::RefCell,
     fs::{DirEntry, FileType, Metadata},
     io::{Read, Write},
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -324,22 +324,18 @@ fn fs_copy(source: &str, destination: &str) -> Result<rhai::INT, Box<EvalAltResu
 }
 
 fn fs_rename(source: &str, destination: &str) -> Result<(), Box<EvalAltResult>> {
-    validate_destructive_path("fs_rename", source)?;
     std::fs::rename(source, destination).map_err(|error| io_error("fs_rename", destination, error))
 }
 
 fn fs_remove_file(path: &str) -> Result<(), Box<EvalAltResult>> {
-    validate_destructive_path("fs_remove_file", path)?;
     std::fs::remove_file(path).map_err(|error| io_error("fs_remove_file", path, error))
 }
 
 fn fs_remove_dir(path: &str) -> Result<(), Box<EvalAltResult>> {
-    validate_destructive_path("fs_remove_dir", path)?;
     std::fs::remove_dir(path).map_err(|error| io_error("fs_remove_dir", path, error))
 }
 
 fn fs_remove_dir_all(path: &str) -> Result<(), Box<EvalAltResult>> {
-    validate_destructive_path("fs_remove_dir_all", path)?;
     std::fs::remove_dir_all(path).map_err(|error| io_error("fs_remove_dir_all", path, error))
 }
 
@@ -360,13 +356,14 @@ fn runtime_atomic_write_bytes(path: &str, value: ScriptBytes) -> Result<(), Box<
 }
 
 fn atomic_write(path: &str, value: &[u8]) -> Result<(), Box<EvalAltResult>> {
-    let destination = validate_destructive_path("runtime_atomic_write", path)?;
+    let destination = std::path::absolute(Path::new(path))
+        .map_err(|error| io_error("runtime_atomic_write", path, error))?;
     let parent = destination
         .parent()
-        .ok_or("runtime_atomic_write_broad_target: parent directory required")?;
+        .ok_or("runtime_atomic_write_invalid_target: parent directory required")?;
     let name = destination
         .file_name()
-        .ok_or("runtime_atomic_write_broad_target: file name required")?
+        .ok_or("runtime_atomic_write_invalid_target: file name required")?
         .to_string_lossy();
     let sequence = ATOMIC_WRITE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     let temporary = parent.join(format!(
@@ -451,34 +448,6 @@ fn sync_parent(parent: &Path) -> std::io::Result<()> {
 #[cfg(not(unix))]
 fn sync_parent(_parent: &Path) -> std::io::Result<()> {
     Ok(())
-}
-
-fn validate_destructive_path(
-    code: &'static str,
-    value: &str,
-) -> Result<PathBuf, Box<EvalAltResult>> {
-    let path = Path::new(value);
-    let has_normal_component = path
-        .components()
-        .any(|component| matches!(component, Component::Normal(_)));
-    if value.trim().is_empty() || !has_normal_component {
-        return Err(format!("{code}_broad_target: explicit non-root path required").into());
-    }
-    let absolute = std::path::absolute(path).map_err(|error| io_error(code, value, error))?;
-    if absolute.parent().is_none() {
-        return Err(format!("{code}_broad_target: filesystem root is not allowed").into());
-    }
-    let current = std::env::current_dir()
-        .and_then(std::fs::canonicalize)
-        .map_err(|error| io_error(code, value, error))?;
-    let resolved = std::fs::canonicalize(&absolute).unwrap_or_else(|_| absolute.clone());
-    if current == resolved || current.starts_with(&resolved) {
-        return Err(format!(
-            "{code}_broad_target: current workspace or its ancestor is not allowed"
-        )
-        .into());
-    }
-    Ok(absolute)
 }
 
 fn script_dir_entry(entry: DirEntry) -> Result<ScriptDirEntry, Box<EvalAltResult>> {
@@ -906,7 +875,7 @@ mod tests {
     }
 
     #[test]
-    fn filesystem_lifecycle_is_typed_and_rejects_broad_cleanup() {
+    fn filesystem_lifecycle_is_typed_and_unrestricted() {
         let root =
             std::env::temp_dir().join(format!("agenterm-script-lifecycle-{}", std::process::id()));
         let nested = root.join("nested");
@@ -935,13 +904,18 @@ mod tests {
         );
         assert_eq!(local_engine().eval::<rhai::INT>(&script).unwrap(), 5);
         assert!(!root.exists());
+    }
 
+    #[test]
+    fn filesystem_root_reaches_the_os_without_a_runtime_policy_filter() {
         let current = std::env::current_dir().unwrap();
-        let error = fs_remove_dir_all(&current.to_string_lossy())
+        let root = current.ancestors().last().unwrap();
+        let error = fs_remove_file(&root.to_string_lossy())
             .unwrap_err()
             .to_string();
-        assert!(error.contains("fs_remove_dir_all_broad_target"));
-        assert!(current.exists());
+        assert!(error.contains("fs_remove_file:"));
+        assert!(!error.contains("broad_target"));
+        assert!(root.exists());
     }
 
     #[test]

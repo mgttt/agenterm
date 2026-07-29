@@ -1183,21 +1183,6 @@ fn assert_runtime_and_framing(
         audit_path
     );
     require(!std::fs::exists(fs_tree), "script_fs_tree_survived");
-    let broad = helper::failure_text(
-        context,
-        cli,
-        [
-            "script", "eval", `std::fs::remove_dir_all(".")`,
-            "--profile", "local"
-        ],
-        1,
-        audit_path
-    );
-    require(
-        broad.contains("fs_remove_dir_all_broad_target")
-            && std::fs::exists(runtime_dir),
-        "script_fs_broad_cleanup_not_fail_closed"
-    );
     let temp_root = script_eval(
         context,
         cli,

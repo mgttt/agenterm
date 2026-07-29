@@ -445,7 +445,8 @@ AgenTerm-specific atomic replacement 与 owned temp 若没有 Rust std 的直接
 - 单次与累计 bytes 有界；
 - Windows long path、Unicode、只读、占用、拒绝访问分型；
 - atomic replace 不把失败报告为成功；
-- remove 只作用于明确路径，不接受空/root/未解析 broad target；
+- remove 接受用户选择的任意路径，不设置 root、workspace、ancestor
+  或 caller 过滤；目标选择责任属于调用者，Agent 权限属于未来 harness；
 - owned temp helper 记录所有权并在取消/崩溃路径清理。
 
 ### `std::path`

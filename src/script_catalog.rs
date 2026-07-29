@@ -299,7 +299,7 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             "std::fs::rename(source, destination)",
             (
                 &["filesystem_write", "platform_overwrite_semantics"],
-                &["fs_rename", "fs_rename_broad_target"],
+                &["fs_rename"],
             ),
         ),
         shipped_local_entry(
@@ -309,10 +309,7 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             Some("std::fs::remove_file"),
             RustMapping::Adapted,
             "std::fs::remove_file(path)",
-            (
-                &["filesystem_delete"],
-                &["fs_remove_file", "fs_remove_file_broad_target"],
-            ),
+            (&["filesystem_delete", "arbitrary_explicit_target"], &["fs_remove_file"]),
         ),
         shipped_local_entry(
             "std.fs.remove-dir",
@@ -321,10 +318,7 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             Some("std::fs::remove_dir"),
             RustMapping::Adapted,
             "std::fs::remove_dir(path)",
-            (
-                &["filesystem_delete"],
-                &["fs_remove_dir", "fs_remove_dir_broad_target"],
-            ),
+            (&["filesystem_delete", "arbitrary_explicit_target"], &["fs_remove_dir"]),
         ),
         shipped_local_entry(
             "std.fs.remove-dir-all",
@@ -334,8 +328,8 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             RustMapping::Adapted,
             "std::fs::remove_dir_all(path)",
             (
-                &["filesystem_recursive_delete", "broad_target_rejected"],
-                &["fs_remove_dir_all", "fs_remove_dir_all_broad_target"],
+                &["filesystem_recursive_delete", "arbitrary_explicit_target"],
+                &["fs_remove_dir_all"],
             ),
         ),
         shipped_runtime_entry(
@@ -354,7 +348,7 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             (
                 &["filesystem_write", "same_volume_atomic_replace"],
                 &[
-                    "runtime_atomic_write_broad_target",
+                    "runtime_atomic_write_invalid_target",
                     "runtime_atomic_write_create",
                     "runtime_atomic_write_data",
                     "runtime_atomic_write_promote",
@@ -371,7 +365,7 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             (
                 &["filesystem_write", "same_volume_atomic_replace"],
                 &[
-                    "runtime_atomic_write_broad_target",
+                    "runtime_atomic_write_invalid_target",
                     "runtime_atomic_write_create",
                     "runtime_atomic_write_data",
                     "runtime_atomic_write_promote",

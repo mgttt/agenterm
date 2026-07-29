@@ -132,12 +132,14 @@ and it is not positioned as a restricted security plugin.
   AgenTerm object; Rhai language primitives, project modules, manifests and
   CLI discovery are not wrapped in artificial namespaces.
 - [~] `std::fs` covers bounded `read`, `read_to_string`, `write`, directory
-  listing/creation, metadata, copy, rename and explicit-target deletion.
+  listing/creation, metadata, copy, rename and arbitrary explicit-target
+  deletion.
   - [x] blocking `read`, `read_to_string`, text/bytes `write`, `exists`,
     directory creation, copy, rename and explicit-target file/directory/tree
-    removal ship through the public CLI. Destructive helpers reject empty,
-    root, current-workspace and ancestor targets; metadata, directory listing
-    and cumulative byte budgets remain open.
+    removal ship through the public CLI. Script Runtime defines no protected
+    path, root/workspace/ancestor filter, or caller allowlist; destructive
+    target selection is the invoking user's responsibility. Metadata,
+    directory listing and cumulative byte budgets remain open.
 - [~] `std::path` provides a selected `Path`/`PathBuf` object model for Windows
   normalization, composition, relative paths, working directories, Unicode,
   long paths and canonical/reparse-point facts without copying Rust borrowing.

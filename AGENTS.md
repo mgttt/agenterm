@@ -36,8 +36,9 @@ visibility policy into Rhai profiles, API registration, or the Script broker.
 Those policies belong to the future Agent harness that chooses how to invoke
 the runtime. Deadlines, memory/output/concurrency budgets, typed failures, and
 owned-resource cleanup are robustness controls, not permission boundaries.
-Raw sockets, listeners, UDP, WebSockets, arbitrary local paths, child processes,
-and Fleet mutation are valid Script Runtime capabilities; do not add target or
+Raw sockets, listeners, UDP, WebSockets, arbitrary local paths (including
+destructive filesystem targets), child processes, and Fleet mutation are valid
+Script Runtime capabilities; do not add protected-path, target, process, or
 endpoint allowlists while implementing them. In Script Runtime documentation
 and catalogs, `capability` means API discovery and compatibility metadata only;
 it must never be interpreted as an authorization grant, denial, or sandbox.
