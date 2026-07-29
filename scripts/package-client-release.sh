@@ -21,7 +21,10 @@ if [[ ! -d "$BIN_DIR" ]]; then
   exit 1
 fi
 
-mapfile -t EXEC_NAMES < <(
+EXEC_NAMES=()
+while IFS= read -r name; do
+  EXEC_NAMES+=("$name")
+done < <(
   python3 - "$MANIFEST" "$OS" "$ARCH" <<'PY'
 import json
 import sys

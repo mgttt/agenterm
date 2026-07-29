@@ -72,6 +72,14 @@ jobs:
         run: |
           $log = Join-Path $env:RUNNER_TEMP 'agenterm-release-check.log'
           try {
+            $actualHead = (git rev-parse HEAD).Trim()
+            if ($actualHead -ne $env:GITHUB_SHA) {
+              throw "Checked-out HEAD $actualHead does not match event SHA $env:GITHUB_SHA."
+            }
+            git switch -C main $env:GITHUB_SHA
+            if ($LASTEXITCODE -ne 0) {
+              throw "Could not attach the tagged commit to the local main branch."
+            }
             ./check.ps1 -Release -IncludeStress *>&1 | Tee-Object -LiteralPath $log
             if ($LASTEXITCODE -ne 0) {
               throw "Release quality gate failed with exit code $LASTEXITCODE."
@@ -79,9 +87,8 @@ jobs:
           }
           catch {
             $errorText = $_ | Out-String
-            $errorText |
-              Tee-Object -LiteralPath $log -Append |
-              Write-Host
+            $errorText | Add-Content -LiteralPath $log
+            Write-Host $errorText
             throw
           }
 

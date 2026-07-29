@@ -382,6 +382,13 @@ pub(super) struct FrameContent<'a> {
     pub(super) resize_grip: Option<(u32, u32, u32, u32)>,
 }
 
+struct TerminalGridLayout {
+    width: u32,
+    height: u32,
+    offset_x: u32,
+    offset_y: u32,
+}
+
 pub(super) fn render_frame(
     buffer: &mut [u32],
     stride: u32,
@@ -412,12 +419,14 @@ pub(super) fn render_frame(
     render_terminal_grid(
         buffer,
         stride,
-        width,
-        content.content_height,
         content.terminal,
         palette,
-        content.sidebar_width,
-        content.terminal_top,
+        TerminalGridLayout {
+            width,
+            height: content.content_height,
+            offset_x: content.sidebar_width,
+            offset_y: content.terminal_top,
+        },
     );
     if let Some(scrollbar) = content.scrollbar {
         render_scrollbar(buffer, stride, palette, scrollbar);
@@ -798,22 +807,20 @@ fn render_sidebar(
 fn render_terminal_grid(
     buffer: &mut [u32],
     stride: u32,
-    width: u32,
-    height: u32,
     terminal: TerminalPaint<'_>,
     palette: &ThemePalette,
-    offset_x: u32,
-    offset_y: u32,
+    layout: TerminalGridLayout,
 ) {
-    let terminal_width = width
-        .saturating_sub(offset_x)
+    let terminal_width = layout
+        .width
+        .saturating_sub(layout.offset_x)
         .saturating_sub(SCROLLBAR_WIDTH);
     let selection_fg = palette.selection_foreground;
     let selection_bg = palette.selection_background;
     for row in 0..terminal.grid.rows {
         for col in 0..terminal.grid.cols {
-            let x = offset_x + u32::from(col) * CELL_WIDTH;
-            if x + CELL_WIDTH > offset_x + terminal_width {
+            let x = layout.offset_x + u32::from(col) * CELL_WIDTH;
+            if x + CELL_WIDTH > layout.offset_x + terminal_width {
                 break;
             }
             let cell = terminal.grid.cell(col, row);
@@ -833,10 +840,10 @@ fn render_terminal_grid(
             draw_cell(
                 buffer,
                 stride,
-                width,
-                height,
+                layout.width,
+                layout.height,
                 x,
-                offset_y + u32::from(row) * CELL_HEIGHT,
+                layout.offset_y + u32::from(row) * CELL_HEIGHT,
                 cell.ch,
                 fg,
                 bg,
