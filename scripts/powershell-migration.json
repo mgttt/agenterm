@@ -22,7 +22,7 @@
     {"id":"ps1-script-candidate-policy","path":"scripts/public-candidate-policy.ps1","group":"qualification","responsibility":"public candidate policy","replacement_task":"qualify-release","status":"inventory"},
     {"id":"ps1-script-qualification-selftest","path":"scripts/qualification-selftest.ps1","group":"qualification","responsibility":"qualification fail-closed self-test","replacement_task":"qualify-release","status":"inventory"},
     {"id":"ps1-script-qualification","path":"scripts/qualification.ps1","group":"qualification","responsibility":"qualification receipt production","replacement_task":"qualify-release","status":"inventory"},
-    {"id":"ps1-script-stage-artifact","path":"scripts/stage-artifact.ps1","group":"build","responsibility":"single artifact staging","replacement_task":"build-dev","status":"inventory"},
+    {"id":"ps1-script-stage-artifact","path":"scripts/stage-artifact.ps1","group":"deleted","responsibility":"single artifact staging","replacement_task":"stage-artifact","replacement":"scripts/rhai/stage-artifact.rhai","evidence":"public CLI black-box coverage in tests/rhai_migration.rs","status":"deleted"},
     {"id":"ps1-script-stage-build","path":"scripts/stage-build.ps1","group":"build","responsibility":"built artifact staging","replacement_task":"build-dev","status":"inventory"},
     {"id":"ps1-script-supply-chain","path":"scripts/supply-chain.ps1","group":"release","responsibility":"license and SBOM production","replacement_task":"package","status":"inventory"},
     {"id":"ps1-script-write-metadata","path":"scripts/write-build-metadata.ps1","group":"build","responsibility":"artifact metadata production","replacement_task":"build-dev","status":"inventory"},

@@ -30,9 +30,15 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 foreach ($artifact in @($artifactManifest.executables)) {
-    & (Join-Path $PSScriptRoot 'stage-artifact.ps1') `
-        -Source (Join-Path $sourceDirectoryPath $artifact.name) `
-        -Destination (Join-Path $destinationDirectoryPath $artifact.name)
+    & $scriptExecutable task run stage-artifact `
+        --manifest $taskManifestPath -- `
+        $sourceDirectoryPath $destinationDirectoryPath $artifact.name
+    if ($LASTEXITCODE -ne 0) {
+        throw (
+            "Rhai staging failed for '$($artifact.name)' with exit code " +
+            $LASTEXITCODE
+        )
+    }
 }
 
 & (Join-Path $PSScriptRoot 'write-build-metadata.ps1') `

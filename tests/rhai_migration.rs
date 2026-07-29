@@ -10,7 +10,29 @@ use std::os::windows::ffi::OsStrExt;
 #[cfg(windows)]
 use std::os::windows::fs::OpenOptionsExt;
 #[cfg(windows)]
+use std::process::{Child, Stdio};
+#[cfg(windows)]
 use windows_sys::Win32::Storage::FileSystem::GetShortPathNameW;
+
+#[cfg(windows)]
+struct RunningFixture(Option<Child>);
+
+#[cfg(windows)]
+impl RunningFixture {
+    fn terminate(&mut self) {
+        if let Some(mut child) = self.0.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for RunningFixture {
+    fn drop(&mut self) {
+        self.terminate();
+    }
+}
 
 fn fixture_root(name: &str) -> PathBuf {
     let nonce = SystemTime::now()
@@ -50,6 +72,21 @@ fn run_prepare_target(repo_under_test: &Path, target: &Path) -> Output {
         .arg(target)
         .output()
         .expect("run Rhai target preparation task")
+}
+
+fn run_stage_artifact(source: &Path, destination: &Path, name: &str) -> Output {
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let manifest = repo.join("agenterm.tasks.json");
+    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+        .current_dir(repo)
+        .args(["task", "run", "stage-artifact", "--manifest"])
+        .arg(manifest)
+        .arg("--")
+        .arg(source)
+        .arg(destination)
+        .arg(name)
+        .output()
+        .expect("run Rhai artifact staging task")
 }
 
 fn init_git_fixture(name: &str) -> PathBuf {
@@ -319,6 +356,110 @@ fn prepare_target_clean_task_rejects_unexpected_target_and_invalid_tag() {
     );
 
     fs::remove_dir_all(&repo).expect("remove fixture");
+}
+
+#[test]
+fn stage_artifact_task_replaces_only_a_valid_named_executable() {
+    let root = fixture_root("stage-artifact");
+    let source = root.join("source");
+    let destination = root.join("destination");
+    fs::create_dir_all(&source).expect("create source fixture");
+    fs::create_dir_all(&destination).expect("create destination fixture");
+    fs::write(source.join("agenterm-cli.exe"), b"new-cli").expect("write source artifact");
+    fs::write(destination.join("agenterm-cli.exe"), b"old-cli")
+        .expect("write destination artifact");
+
+    let staged = run_stage_artifact(&source, &destination, "agenterm-cli.exe");
+    assert!(
+        staged.status.success(),
+        "artifact staging failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&staged.stdout),
+        String::from_utf8_lossy(&staged.stderr)
+    );
+    assert_eq!(
+        fs::read(destination.join("agenterm-cli.exe")).expect("read staged artifact"),
+        b"new-cli"
+    );
+    assert!(
+        fs::read_dir(&destination)
+            .expect("read destination")
+            .all(|entry| !entry
+                .expect("read destination entry")
+                .file_name()
+                .to_string_lossy()
+                .contains(".locked-")),
+        "unlocked replacement unexpectedly parked the old artifact"
+    );
+
+    let rejected = run_stage_artifact(&source, &destination, "..\\outside.exe");
+    assert!(!rejected.status.success());
+    assert!(
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&rejected.stdout),
+            String::from_utf8_lossy(&rejected.stderr)
+        )
+        .contains("stage_artifact_name_invalid")
+    );
+
+    fs::remove_dir_all(&root).expect("remove fixture");
+}
+
+#[cfg(windows)]
+#[test]
+fn stage_artifact_task_parks_a_running_windows_image() {
+    let root = fixture_root("stage-running-artifact");
+    let source = root.join("source");
+    let destination = root.join("destination");
+    fs::create_dir_all(&source).expect("create source fixture");
+    fs::create_dir_all(&destination).expect("create destination fixture");
+    let name = "agenterm-script.exe";
+    fs::write(source.join(name), b"replacement-image").expect("write replacement fixture");
+    fs::copy(
+        env!("CARGO_BIN_EXE_agenterm-script"),
+        destination.join(name),
+    )
+    .expect("copy runnable artifact fixture");
+
+    let running = Command::new(destination.join(name))
+        .arg("--worker")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("start staged worker fixture");
+    let mut running = RunningFixture(Some(running));
+
+    let staged = run_stage_artifact(&source, &destination, name);
+    running.terminate();
+    assert!(
+        staged.status.success(),
+        "running-image staging failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&staged.stdout),
+        String::from_utf8_lossy(&staged.stderr)
+    );
+    assert_eq!(
+        fs::read(destination.join(name)).expect("read replacement image"),
+        b"replacement-image"
+    );
+    let parked = fs::read_dir(&destination)
+        .expect("read destination")
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name().is_some_and(|file_name| {
+                let file_name = file_name.to_string_lossy();
+                file_name.starts_with("agenterm-script.locked-") && file_name.ends_with(".exe")
+            })
+        })
+        .expect("running image was not parked");
+    assert!(
+        String::from_utf8_lossy(&staged.stdout).contains("running copy remains"),
+        "staging did not report the parked image"
+    );
+
+    fs::remove_file(parked).expect("remove parked image");
+    fs::remove_dir_all(&root).expect("remove fixture");
 }
 
 #[cfg(windows)]

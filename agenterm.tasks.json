@@ -15,13 +15,18 @@
         "std.fs.metadata",
         "std.fs.read-dir",
         "std.fs.read-to-string",
+        "std.fs.copy",
+        "std.fs.create-dir-all",
         "std.fs.remove-file",
+        "std.fs.rename",
         "std.fs.symlink-metadata",
         "std.fs.write",
         "std.path.absolute",
         "std.path.join",
         "std.process.command",
         "std.process.command-output",
+        "std.time.system-time-now",
+        "std.time.system-time-unix-millis",
         "rhai.json.parse",
         "rhai.json.stringify-pretty"
       ]
@@ -61,6 +66,13 @@
       "id": "prepare-target-clean",
       "description": "Validate an exact repository-local Cargo target and install its cache tag",
       "entry": "scripts/rhai/prepare-target-clean.rhai",
+      "profile": "local",
+      "cwd": "."
+    },
+    {
+      "id": "stage-artifact",
+      "description": "Stage one AgenTerm executable while preserving an in-use Windows image",
+      "entry": "scripts/rhai/stage-artifact.rhai",
       "profile": "local",
       "cwd": "."
     },
