@@ -95,7 +95,7 @@ fn execute(command_spec, repo, scratch, sequence) {
             && std::time::SystemTime::now().unix_millis - started
                 < command_spec.timeout_ms {
         let now = std::time::SystemTime::now().unix_millis;
-        if last_process_scan == 0 || now - last_process_scan >= 250 {
+        if last_process_scan == 0 || now - last_process_scan >= 1000 {
             for process in powershell_descendants(child.id) {
                 if !observed_powershell.contains(process) {
                     observed_powershell.push(process);

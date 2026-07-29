@@ -81,7 +81,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   runs print the slowest gates; independent preflight fixtures and isolated
   GUI/script diagnostic probes run concurrently without sharing Cargo targets,
   IPC addresses, or cleanup ownership
-- [~] the Rhai check runner polls typed process ancestry for every owned gate
+- [~] the Rhai check runner polls typed process ancestry once per second for
+  every owned gate
   and rejects a `powershell.exe`/`pwsh.exe` automation descendant; the one
   remote-UI PowerShell terminal-compatibility payload is explicitly declared
   and reported separately. Clean-checkout release-rehearsal evidence remains
