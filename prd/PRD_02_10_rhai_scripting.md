@@ -392,7 +392,7 @@ and it is not positioned as a restricted security plugin.
 - [~] once one Rhai responsibility reaches parity and all normal callers switch
   to it, or an obsolete responsibility is proven unreachable and superseded,
   delete that PowerShell implementation immediately instead of accumulating a
-  release-wide migration backlog; twenty-five of 43 baseline scripts are deleted.
+  release-wide migration backlog; twenty-six of 43 baseline scripts are deleted.
 - [~] every migrated item records its old path, replacement path, switching
   commit, parity evidence, and deletion state in this PRD. Git history is the
   only archive after the explicit rollback window closes.
@@ -426,6 +426,7 @@ Migration ledger:
 | Same-server real-byte GUI upgrade and rollback journey | `scripts/rhai/remote-ui-upgrade-smoke.rhai` plus typed owned-child opaque window identity and the shared Rhai harness | `tests/remote_ui_upgrade_smoke.ps1` | current migration change | named task preserves distinct GUI hashes/build identities, competing-lease rejection, one stable server/epoch/PTY/draft/CWD/proxy state, output streamed across replacement, incompatible-protocol rejection, rollback scrollback continuity, public close/detach behavior, and orphan-free cleanup | deleted; qualification discovery and execution use the Rhai journey directly |
 | Coalesced wake, concurrent IPC, PTY output, and expired raw mutation journey | `scripts/rhai/wake-smoke.rhai` plus unrestricted `std::net::TcpStream`, `rhai::hash::fnv1a64`, and the shared Rhai harness | `tests/wake_smoke.ps1` | current migration change | named task and Windows public integration preserve an isolated headless server, 32 concurrent versioned snapshot clients, 80-line PTY progress, raw newline-delimited IPC, typed expired no-op receipt, unchanged tab note, and orphan-free owned-child cleanup | deleted; qualification discovery and execution use the Rhai journey directly |
 | Native first-window and asynchronous terminal startup journey | `scripts/rhai/startup-smoke.rhai` plus unrestricted `std::process::list()` and the shared Rhai harness | `tests/startup_smoke.ps1` | current migration change | named task preserves the one-second native-window budget, public asynchronous terminal-ready wait, exact window title and inherited-stderr guidance, second-launch handoff, nonblocking CLI-style/invalid GUI arguments, absence of a nested Script worker, graceful shutdown, and orphan-free cleanup | deleted; ordinary qualification and Windows CI invoke the named Rhai journey |
+| Public CLI, typed control, UI bridge, and PTY lifecycle journey | `scripts/rhai/cli-smoke.rhai` plus the shared Rhai harness | `tests/cli_smoke.ps1` | current migration change | named task preserves all nine public evidence IDs across receipt replay/conflict, offline validation, operation/UI-bridge discovery, renderer-neutral bootstrap/delta causality, typed Tabs actions/events, Composer/PTY/Backspace/scroll/screenshots, stable creation IDs, remain-on-exit, and explicit close; command evidence is now bounded per record | deleted; ordinary qualification and Windows CI invoke the named Rhai journey |
 
 ### v0.1.10 completion commitment
 
@@ -435,7 +436,7 @@ Migration ledger:
 - [x] the dated 2026-07-29 frozen baseline is 43 tracked `.ps1` files: 3 at
   the repository root, 17 under `scripts/`, 21 under `tests/`, and 2 retained in
   `scripts/archive/powershell/`.
-- [~] migration progress is 25/43 deleted and 18/43 remaining; progress is
+- [~] migration progress is 26/43 deleted and 17/43 remaining; progress is
   counted only after parity evidence plus caller cutover, or caller-audited
   functional deletion of obsolete behavior, and source deletion.
 - [x] `scripts/powershell-migration.json` freezes all 43 baseline paths under
@@ -447,11 +448,11 @@ Migration ledger:
   duplicate paths, invalid states, and count drift; ordinary and release
   qualification invoke it as a required gate.
 - [~] the repository-root `agenterm.tasks.json` is now the offline task
-  catalog and ships twenty-three ready tasks (`bootstrap-info`, `build-identity`,
+  catalog and ships twenty-four ready tasks (`bootstrap-info`, `build-identity`,
   `harness-cleanup-selftest`, `migration-audit`, `target-report`, `internal-version-policy`,
   `verify-docs-site`, `readme-examples`, `clean-locked-artifacts`,
   `prepare-target-clean`, `preflight`, `preflight-benchmark`, `prd-alignment`,
-  `stage-artifact`, `stage-build`, `supply-chain`, `server-smoke`, `startup-smoke`,
+  `stage-artifact`, `stage-build`, `supply-chain`, `server-smoke`, `startup-smoke`, `cli-smoke`,
   `working-context-smoke`, `wake-smoke`, `remote-ui-upgrade-smoke`,
   `validate-artifact-manifest`, and `write-build-metadata`). The existing
   two-input Script contract verifier is

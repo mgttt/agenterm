@@ -37,6 +37,28 @@ let succeeded = false;
 let failure = "";
 
 try {
+    let verbose_command = std::process::command("cmd.exe");
+    verbose_command.args([
+        "/d", "/s", "/c",
+        "for /L %i in (1,1,1000) do @echo diagnostic-line-%i-abcdefghijklmnopqrstuvwxyz"
+    ]);
+    verbose_command.capture_limit(65536);
+    let verbose = verbose_command.output();
+    verbose.require_success("harness_verbose_fixture");
+    test_harness::append_command_record(
+        context,
+        ["verbose-diagnostic-fixture"],
+        verbose,
+        false,
+        []
+    );
+    let command_log = std::fs::read_to_string(context.command_log_path);
+    require(
+        command_log.contains("<agenterm-command-output-truncated>")
+            && std::fs::metadata(context.command_log_path).len < 8192,
+        "harness_command_record_not_bounded"
+    );
+
     let proof = test_harness::complete(
         context,
         [owned],

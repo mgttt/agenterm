@@ -30,7 +30,7 @@ jobs:
         run: |
           ./dist/agenterm-script.exe task run startup-smoke --manifest ./agenterm.tasks.json --timeout-ms 60000 --max-operations 10000000
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          ./tests/cli_smoke.ps1
+          ./dist/agenterm-script.exe task run cli-smoke --manifest ./agenterm.tasks.json --timeout-ms 120000 --max-operations 10000000
 
   linux-clients:
     runs-on: ubuntu-latest

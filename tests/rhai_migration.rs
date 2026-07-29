@@ -346,6 +346,30 @@ fn run_startup_smoke() -> Output {
         .expect("run Rhai startup smoke")
 }
 
+#[cfg(windows)]
+fn run_cli_smoke() -> Output {
+    let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+        .current_dir(repo)
+        .args(["run", "scripts/rhai/cli-smoke.rhai"])
+        .args(["--profile", "local", "--project-root"])
+        .arg(repo)
+        .args([
+            "--timeout-ms",
+            "120000",
+            "--max-operations",
+            "10000000",
+            "--",
+        ])
+        .arg(repo)
+        .arg(env!("CARGO_BIN_EXE_agenterm"))
+        .arg(env!("CARGO_BIN_EXE_agenterm-cli"))
+        .env("AGENTERM_NO_ACTIVATE", "1")
+        .output()
+        .expect("run Rhai CLI smoke")
+}
+
 fn run_preflight(repo_under_test: &Path, output_path: &Path) -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -1361,7 +1385,6 @@ fn prd_alignment_task_matches_public_catalogs_and_fails_closed() {
         }
     }
     for suite in [
-        "cli_smoke.ps1",
         "remote_ui_smoke.ps1",
         "fleet_smoke.ps1",
         "script_smoke.ps1",
@@ -1374,6 +1397,7 @@ fn prd_alignment_task_matches_public_catalogs_and_fails_closed() {
     copy_fixture_file(repo, &fixture, "scripts/rhai/working-context-smoke.rhai");
     copy_fixture_file(repo, &fixture, "scripts/rhai/server-smoke.rhai");
     copy_fixture_file(repo, &fixture, "scripts/rhai/remote-ui-upgrade-smoke.rhai");
+    copy_fixture_file(repo, &fixture, "scripts/rhai/cli-smoke.rhai");
     let contract_path = fixture.join("prd").join("alignment-contract.json");
     let malformed = fs::read_to_string(&contract_path)
         .expect("read fixture alignment contract")
@@ -1476,6 +1500,38 @@ fn rhai_startup_smoke_preserves_first_window_and_async_terminal_contract() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("EVIDENCE startup.first-window-async-ready"));
     assert!(stdout.contains("terminal loaded asynchronously"));
+}
+
+#[cfg(windows)]
+#[test]
+fn rhai_cli_smoke_preserves_public_control_ui_bridge_and_pty_contract() {
+    let output = run_cli_smoke();
+    assert!(
+        output.status.success(),
+        "Rhai CLI smoke failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for evidence in [
+        "cli.control-receipts",
+        "cli.ui-bridge-contracts",
+        "cli.ui-bootstrap",
+        "cli.ui-follow",
+        "cli.typed-tabs-operations",
+        "cli.observable-events",
+        "cli.backspace-del-one",
+        "cli.stable-create-id",
+        "cli.remain-on-exit",
+    ] {
+        assert!(
+            stdout.contains(&format!("EVIDENCE {evidence}")),
+            "missing {evidence} in:\n{stdout}"
+        );
+    }
+    assert!(stdout.contains(
+        "PASS: typed control, UI bridge, PTY, screenshots, remain-on-exit, and explicit close"
+    ));
 }
 
 #[test]

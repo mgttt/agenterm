@@ -276,7 +276,8 @@ try {
             --skip rhai_working_context_smoke_is_private_ephemeral_and_orphan_free `
             --skip rhai_server_smoke_preserves_headless_authority_and_cleanup `
             --skip rhai_wake_smoke_preserves_concurrent_ipc_pty_and_expired_mutation `
-            --skip rhai_startup_smoke_preserves_first_window_and_async_terminal_contract
+            --skip rhai_startup_smoke_preserves_first_window_and_async_terminal_contract `
+            --skip rhai_cli_smoke_preserves_public_control_ui_bridge_and_pty_contract
     }
 
     $upgradeGuiFixture = Join-Path (
@@ -318,7 +319,7 @@ try {
     $declarationWatch = [Diagnostics.Stopwatch]::StartNew()
     Assert-AgenTermQualificationDeclarations -Context $qualification `
         -SuiteScripts @{
-            'cli-smoke' = '.\tests\cli_smoke.ps1'
+            'cli-smoke' = '.\scripts\rhai\cli-smoke.rhai'
             'wake-smoke' = '.\scripts\rhai\wake-smoke.rhai'
             'server-smoke' = '.\scripts\rhai\server-smoke.rhai'
             'remote-ui-smoke' = '.\tests\remote_ui_smoke.ps1'
@@ -515,7 +516,9 @@ try {
                     --timeout-ms 60000 --max-operations 10000000
             }
             Invoke-Checked -Id 'cli-smoke' -Label 'CLI smoke test' {
-                & '.\tests\cli_smoke.ps1'
+                & '.\dist\agenterm-script.exe' task run cli-smoke `
+                    --manifest '.\agenterm.tasks.json' `
+                    --timeout-ms 120000 --max-operations 10000000
             }
             Invoke-Checked -Id 'server-smoke' `
                 -Label 'headless server authority smoke test' {

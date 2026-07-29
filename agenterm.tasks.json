@@ -120,6 +120,14 @@
       "args": [".", "dist/agenterm.exe", "dist/agenterm-cli.exe", "1000"]
     },
     {
+      "id": "cli-smoke",
+      "description": "Prove public typed control, UI bridge, PTY, screenshots, remain-on-exit, and explicit close",
+      "entry": "scripts/rhai/cli-smoke.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "args": [".", "dist/agenterm.exe", "dist/agenterm-cli.exe"]
+    },
+    {
       "id": "remote-ui-upgrade-smoke",
       "description": "Prove real GUI byte upgrade and rollback against one stable server, PTY, lease, and scrollback",
       "entry": "scripts/rhai/remote-ui-upgrade-smoke.rhai",

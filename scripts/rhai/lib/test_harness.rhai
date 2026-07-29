@@ -95,6 +95,14 @@ fn redact_text(source, redactions) {
     safe
 }
 
+fn bounded_record_text(source, maximum_characters) {
+    if source.len <= maximum_characters {
+        return source;
+    }
+    source.sub_string(0, maximum_characters) +
+        "\n<agenterm-command-output-truncated>\n"
+}
+
 fn configured_command(context, program, arguments) {
     let command = std::process::command(program);
     command.args(arguments);
@@ -123,9 +131,12 @@ fn append_command_record(context, arguments, output, expected_failure, redaction
         arguments: safe_arguments,
         expected_failure: expected_failure,
         exit_code: output.exit_code,
-        output: redact_text(
-            output.stdout_text() + output.stderr_text(),
-            redactions
+        output: bounded_record_text(
+            redact_text(
+                output.stdout_text() + output.stderr_text(),
+                redactions
+            ),
+            4096
         )
     });
     rhai::runtime::atomic_write(
