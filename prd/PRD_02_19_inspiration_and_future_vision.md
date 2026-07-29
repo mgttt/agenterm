@@ -77,7 +77,8 @@ AgenTerm optimizes **fleet durability and verifiable control**:
 |-------|----------------|
 | Cowork / workbuddy | Shared **local** fleet + Composer, not cloud cowork room |
 | OPC | One human commands a **tree of roles** on one PC |
-| pm2 / tmux / RMUX | Headless **server + mux** as fleet/process manager — honest subset today |
+| Warp / Tabby | Single-session or chat-in-buffer polish vs **fleet tree + verifiable control plane** |
+| tmux / pm2 | Sessions/daemons without fleet semantics vs **tree + Composer + events/receipts** |
 | Mobile “buddy” | **Connector** to desktop fleet — monitor, push, voice → Composer |
 | dApp / libp2p / IPFS | Optional **`agenterm-net`** sidecar — on-demand, not in GUI |
 
