@@ -116,9 +116,9 @@ jobs:
         run: |
           BIN=target/aarch64-unknown-linux-gnu/debug
           test -x "$BIN/agenterm"
-          qemu-aarch64-static "$BIN/agenterm-cli" --help | head -3
-          qemu-aarch64-static "$BIN/agenterm-mux" --version
-          qemu-aarch64-static "$BIN/agenterm-script" --help | head -3
+          qemu-aarch64-static -L /usr/aarch64-linux-gnu "$BIN/agenterm-cli" --help | head -3
+          qemu-aarch64-static -L /usr/aarch64-linux-gnu "$BIN/agenterm-mux" --version
+          qemu-aarch64-static -L /usr/aarch64-linux-gnu "$BIN/agenterm-script" --help | head -3
 
   windows-arm64:
     runs-on: ubuntu-latest
