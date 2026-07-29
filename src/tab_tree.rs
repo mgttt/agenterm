@@ -102,6 +102,19 @@ pub(crate) fn tree_rows(nodes: &[TabTreeNode]) -> Vec<TabTreeRow> {
     rows
 }
 
+/// Filter preorder tree rows to those visible when ancestor tabs are collapsed.
+#[cfg_attr(not(unix), allow(dead_code))]
+pub(crate) fn visible_tree_rows(
+    all_rows: &[TabTreeRow],
+    collapsed_ids: &HashSet<u64>,
+) -> Vec<TabTreeRow> {
+    all_rows
+        .iter()
+        .filter(|row| !row.ancestors.iter().any(|id| collapsed_ids.contains(id)))
+        .cloned()
+        .collect()
+}
+
 pub(crate) fn would_create_cycle(nodes: &[TabTreeNode], child_id: u64, parent_id: u64) -> bool {
     if child_id == parent_id {
         return true;
@@ -160,6 +173,39 @@ mod tests {
         assert!(rows[2].is_last);
         assert_eq!(rows[2].ancestors, vec![1, 3]);
         assert_eq!(rows[2].guides, vec![false]);
+    }
+
+    #[test]
+    fn visible_tree_rows_hides_descendants_of_collapsed_ancestors() {
+        let rows = vec![
+            TabTreeRow {
+                id: 1,
+                depth: 0,
+                is_last: false,
+                ancestors: vec![],
+                guides: vec![],
+            },
+            TabTreeRow {
+                id: 2,
+                depth: 1,
+                is_last: true,
+                ancestors: vec![1],
+                guides: vec![false],
+            },
+            TabTreeRow {
+                id: 3,
+                depth: 0,
+                is_last: true,
+                ancestors: vec![],
+                guides: vec![],
+            },
+        ];
+        let collapsed = HashSet::from([1]);
+        let visible = visible_tree_rows(&rows, &collapsed);
+        assert_eq!(
+            visible.iter().map(|row| row.id).collect::<Vec<_>>(),
+            vec![1, 3]
+        );
     }
 
     #[test]

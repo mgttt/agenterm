@@ -1,4 +1,5 @@
 use crate::theme::{Rgb, ThemeId, ThemePalette};
+use crate::ui_geometry::TAB_HEIGHT;
 use unicode_width::UnicodeWidthChar;
 
 use super::{
@@ -6,7 +7,6 @@ use super::{
     layout::{SCROLLBAR_WIDTH, u32_rect},
 };
 
-pub(super) const SIDEBAR_TAB_ROW_HEIGHT: u32 = 34;
 pub(super) const COMPOSER_HEIGHT: u32 = 48;
 pub(super) const STATUS_HEIGHT: u32 = 26;
 pub(super) const SETTINGS_MODAL_WIDTH: u32 = 360;
@@ -804,11 +804,11 @@ fn render_sidebar(
     }
 
     for (index, row) in rows.iter().enumerate() {
-        let top = index as u32 * SIDEBAR_TAB_ROW_HEIGHT;
+        let top = index as u32 * TAB_HEIGHT as u32;
         if top >= height {
             break;
         }
-        let row_height = SIDEBAR_TAB_ROW_HEIGHT.min(height.saturating_sub(top));
+        let row_height = (TAB_HEIGHT as u32).min(height.saturating_sub(top));
         let indent = 8 + u32::try_from(row.depth).unwrap_or(0).saturating_mul(12);
         let text_x = indent.min(sidebar_width.saturating_sub(1));
         let marker = if row.has_children {
@@ -1339,7 +1339,7 @@ pub(super) fn sidebar_row_at_y(y: u32, tree_height: u32) -> Option<usize> {
     if y >= tree_height {
         return None;
     }
-    Some((y / SIDEBAR_TAB_ROW_HEIGHT) as usize)
+    Some((y / TAB_HEIGHT as u32) as usize)
 }
 
 pub(super) fn scrollbar_view_from_geometry(
