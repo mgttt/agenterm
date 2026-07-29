@@ -9,8 +9,12 @@ native automation client, and a deliberately bounded tmux/RMUX frontend.
 ## Current highlights
 
 - Native Win32/GDI UI with hierarchical team tabs on the left.
-- Compact tree-first sidebar with adjacent `Settings` and `New` actions.
-- Full-width bottom status surface ready for metrics and agent context providers.
+- Compact, scrollable tree-first sidebar with two-line names/notes and a
+  draggable width boundary.
+- Terminal toolbar keeps `<Tabs`/`>Tabs` and `New` at the left while anchoring
+  `Settings` at the right.
+- Terminal-scoped bottom status surface is ready for metrics and agent context
+  providers without consuming the full-height Tabs column.
 - Branded Windows icon and a persistent terminal font/size settings panel.
 - `cmd.exe` is the default shell.
 - Two-line tabs separate program/terminal TITLE from a user-maintained note.
@@ -19,6 +23,8 @@ native automation client, and a deliberately bounded tmux/RMUX frontend.
   active tab; PTY commands restart as new processes.
 - Exited processes leave a `[dead]` tab until the user explicitly closes it.
 - Every tab owns a composer text box and Send button.
+- `New` opens a configuration surface for shell profile, initial command, and
+  optional ephemeral HTTP(S) proxy environment before creating a terminal.
 - Local CLI can create, select, rename, inspect, capture, and drive tabs.
 - Mouse-wheel history, a draggable scrollbar, and highlighted terminal text
   selection share the same viewport; selected text copies to the Windows
