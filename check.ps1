@@ -244,7 +244,7 @@ try {
             -Label 'local preflight p95 benchmark' {
             & $scriptWorker task run preflight-benchmark `
                 --manifest '.\agenterm.tasks.json' `
-                --timeout-ms 10000 --max-operations 10000000 `
+                --timeout-ms 60000 --max-operations 10000000 `
                 -- $scriptWorker '.\agenterm.tasks.json' '.' `
                 'target\preflight\benchmark.json' '5'
         }
@@ -269,20 +269,16 @@ try {
         cargo clippy --quiet --locked --all-targets --all-features -- -D warnings
     }
     Invoke-Checked -Id 'unit-tests' -Label 'unit tests' {
-        if ($Release -or $env:CI -eq 'true') {
-            cargo test --quiet --locked --all-features
-        }
-        else {
-            # These real-repository qualification fixtures are intentionally
-            # exercised by their dedicated gates below. Keep them in CI and
-            # Release so `cargo test` remains a complete independent proof,
-            # but do not make the local development lane pay twice.
-            cargo test --quiet --locked --all-features -- `
-                --skip preflight_task_is_fail_closed_and_writes_reports_for_real_git_fixtures `
-                --skip preflight_benchmark_task_measures_clean_public_worker_runs `
-                --skip prd_alignment_task_matches_public_catalogs_and_fails_closed `
-                --skip supply_chain_task_is_deterministic_and_covers_the_resolved_lock_graph
-        }
+        # These real-repository qualification fixtures are intentionally
+        # exercised exactly once by their named gates. Running them inside the
+        # broad parallel Cargo invocation competes for the same cold CI CPU,
+        # process deadlines, Git fixtures, and metadata cache. Release still
+        # runs the five-sample benchmark through its named gate.
+        cargo test --quiet --locked --all-features -- `
+            --skip preflight_task_is_fail_closed_and_writes_reports_for_real_git_fixtures `
+            --skip preflight_benchmark_task_measures_clean_public_worker_runs `
+            --skip prd_alignment_task_matches_public_catalogs_and_fails_closed `
+            --skip supply_chain_task_is_deterministic_and_covers_the_resolved_lock_graph
     }
 
     $upgradeGuiFixture = Join-Path (

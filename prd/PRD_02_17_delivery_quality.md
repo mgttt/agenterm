@@ -82,10 +82,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   runs print the slowest gates; independent preflight fixtures and isolated
   GUI/script diagnostic probes run concurrently without sharing Cargo targets,
   IPC addresses, or cleanup ownership
-- [x] the non-Release local lane runs real-repository preflight and
-  supply-chain fixtures only through their named gates instead of duplicating
-  them inside the broad Cargo test invocation; CI and Release still run the
-  complete independent Cargo test suite before those named qualification gates
+- [x] local, CI, and Release lanes run real-repository preflight,
+  supply-chain, and PRD fixtures exactly once through their named gates instead
+  of duplicating them inside the broad parallel Cargo invocation; this avoids
+  cold-runner CPU/deadline/cache contention, while Release retains the
+  dedicated five-sample preflight benchmark gate
 - [x] `lint.ps1` is the fail-fast developer entry point: dependency-free
   PowerShell AST, JSON, UTF-8/conflict-marker checks run in about one second,
   incremental rustfmt/Clippy run before tests, and production Rhai sources are
