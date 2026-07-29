@@ -77,41 +77,85 @@ function New-PreflightFixture {
     return $fixture
 }
 
-function Invoke-PreflightFixture {
+function Start-PreflightFixture {
     param(
         [Parameter(Mandatory = $true)][string]$Fixture,
         [Parameter(Mandatory = $true)][bool]$ShouldPass,
         [string]$ExpectedFailedGate = ''
     )
     $reportPath = Join-Path $Fixture 'target\preflight.json'
-    $items = @(
-        & (Join-Path $PSHOME 'pwsh.exe') -NoProfile -NonInteractive `
-            -File (Join-Path $PSScriptRoot 'preflight.ps1') `
-            -RepoRoot $Fixture -OutputPath $reportPath -Quiet 2>&1
-    )
-    $exitCode = $LASTEXITCODE
-    if (-not (Test-Path -LiteralPath $reportPath)) {
-        throw "Preflight fixture emitted no JSON report: $Fixture"
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = Join-Path $PSHOME 'pwsh.exe'
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    foreach ($argument in @(
+            '-NoProfile', '-NonInteractive',
+            '-File', (Join-Path $PSScriptRoot 'preflight.ps1'),
+            '-RepoRoot', $Fixture,
+            '-OutputPath', $reportPath,
+            '-Quiet'
+        )) {
+        $startInfo.ArgumentList.Add($argument)
     }
-    $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json
-    if ([bool]$report.passed -ne $ShouldPass -or
-        ($ShouldPass -and $exitCode -ne 0) -or
-        (-not $ShouldPass -and $exitCode -eq 0)) {
-        $failures = @($report.gates | Where-Object { -not $_.passed } |
-            ForEach-Object { "$($_.id)=$($_.detail)" })
-        throw (
-            "Unexpected preflight result for $Fixture`: " +
-            "$($failures -join '; ') child=$($items -join ' ')"
-        )
-    }
-    if (-not $ShouldPass -and
-        @($report.gates | Where-Object {
-            $_.id -eq $ExpectedFailedGate -and -not $_.passed
-        }).Count -ne 1) {
-        throw "Expected failed gate '$ExpectedFailedGate' was not reported."
+    $process = [Diagnostics.Process]::Start($startInfo)
+    return [pscustomobject]@{
+        Fixture = $Fixture
+        ShouldPass = $ShouldPass
+        ExpectedFailedGate = $ExpectedFailedGate
+        ReportPath = $reportPath
+        Process = $process
+        Stdout = $process.StandardOutput.ReadToEndAsync()
+        Stderr = $process.StandardError.ReadToEndAsync()
     }
 }
 
+function Complete-PreflightFixture {
+    param([Parameter(Mandatory = $true)]$Probe)
+
+    $process = $Probe.Process
+    try {
+        if (-not $process.WaitForExit(30000)) {
+            $process.Kill($true)
+            throw "Preflight fixture timed out: $($Probe.Fixture)"
+        }
+        $items = @(
+            $Probe.Stdout.GetAwaiter().GetResult()
+            $Probe.Stderr.GetAwaiter().GetResult()
+        ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+        $exitCode = $process.ExitCode
+    }
+    finally {
+        $process.Dispose()
+        $Probe.Process = $null
+    }
+    $reportPath = $Probe.ReportPath
+    if (-not (Test-Path -LiteralPath $reportPath)) {
+        throw "Preflight fixture emitted no JSON report: $($Probe.Fixture)"
+    }
+    $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json
+    if ([bool]$report.passed -ne $Probe.ShouldPass -or
+        ($Probe.ShouldPass -and $exitCode -ne 0) -or
+        (-not $Probe.ShouldPass -and $exitCode -eq 0)) {
+        $failures = @($report.gates | Where-Object { -not $_.passed } |
+            ForEach-Object { "$($_.id)=$($_.detail)" })
+        throw (
+            "Unexpected preflight result for $($Probe.Fixture)`: " +
+            "$($failures -join '; ') child=$($items -join ' ')"
+        )
+    }
+    if (-not $Probe.ShouldPass -and
+        @($report.gates | Where-Object {
+            $_.id -eq $Probe.ExpectedFailedGate -and -not $_.passed
+        }).Count -ne 1) {
+        throw (
+            "Expected failed gate '$($Probe.ExpectedFailedGate)' was not reported."
+        )
+    }
+}
+
+$probes = [Collections.Generic.List[object]]::new()
 try {
     $cases = @(
         @{ name = 'clean'; mode = 'clean'; pass = $true; gate = '' }
@@ -138,8 +182,13 @@ try {
     )
     foreach ($case in $cases) {
         $fixture = New-PreflightFixture -Name $case.name -Mode $case.mode
-        Invoke-PreflightFixture -Fixture $fixture `
-            -ShouldPass $case.pass -ExpectedFailedGate $case.gate
+        $probes.Add((
+            Start-PreflightFixture -Fixture $fixture `
+                -ShouldPass $case.pass -ExpectedFailedGate $case.gate
+        ))
+    }
+    foreach ($probe in $probes) {
+        Complete-PreflightFixture -Probe $probe
     }
     $source = Get-Content -LiteralPath (
         Join-Path $PSScriptRoot 'preflight.ps1'
@@ -160,6 +209,16 @@ try {
     }
 }
 finally {
+    foreach ($probe in $probes) {
+        if ($null -ne $probe.Process) {
+            if (-not $probe.Process.HasExited) {
+                $probe.Process.Kill($true)
+                $probe.Process.WaitForExit(3000) | Out-Null
+            }
+            $probe.Process.Dispose()
+            $probe.Process = $null
+        }
+    }
     $PSNativeCommandUseErrorActionPreference = $previousNativePreference
     $resolved = [IO.Path]::GetFullPath($selfTestRoot)
     $prefix = [IO.Path]::GetFullPath($ownedRoot).TrimEnd(

@@ -31,6 +31,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   registered evidence
 - [x] CLI and semantic UX smoke tests through public interfaces
 - [x] one-command fmt, Clippy, test, build, and smoke regression
+- [x] `check.ps1 -Quick` provides a non-qualifying development lane ordered
+  as static lint, formatting, PRD alignment, library Clippy, and library tests;
+  it performs no artifact build, packaging self-test, GUI launch, or release
+  claim
+- [x] every quality-gate step reports its duration and successful integrated
+  runs print the slowest gates; independent preflight fixtures and isolated
+  GUI/script diagnostic probes run concurrently without sharing Cargo targets,
+  IPC addresses, or cleanup ownership
 - [x] `lint.ps1` is the fail-fast developer entry point: dependency-free
   PowerShell AST, JSON, UTF-8/conflict-marker checks run in about one second,
   incremental rustfmt/Clippy run before tests, and production Rhai sources are
@@ -150,8 +158,12 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   coverage, and emits a deterministic SPDX inventory bound into qualification
   and package hashes
 - [x] Rust 1.97.0 and GitHub Actions revisions are immutable inputs; target
-  reporting exposes resolved path, local/external cleanup authority, bytes,
-  age, and profile totals before repo-local release cleanup
+  reporting exposes resolved path, development/release-scratch/external kind,
+  cleanup authority, bytes, age, and profile totals before repo-local release
+  cleanup
+- [x] distributable builds use and clean the dedicated repo-local
+  `target-release/` scratch directory without deleting the incremental
+  development `target/` cache
 - Scripting public-interface evidence gate
   - Rhai black-box evidence
     - [x] `tests/script_smoke.ps1` drives only public `script check`,

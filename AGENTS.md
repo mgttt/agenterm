@@ -70,7 +70,8 @@ Use PowerShell from the repository root:
 .\lint.ps1              # fast fail: Rust, PowerShell, JSON, and production Rhai
 .\build.bat             # fast incremental dev build -> .\dist\
 .\build.bat release-fast # optimized incremental local-test build -> .\dist\
-.\check.ps1 -SkipSmoke  # fmt, Clippy, unit tests, dev artifact
+.\check.ps1 -Quick      # static/PRD/fmt + library Clippy/tests; no artifact
+.\check.ps1 -SkipSmoke  # CI-grade fmt, all-target Clippy/tests, dev artifact
 .\check.ps1             # full public-interface regression
 .\check.ps1 -Release    # local release gate; skips event-journal load stress
 .\check.ps1 -Release -IncludeStress # exact candidate qualification + receipt
@@ -88,13 +89,21 @@ Version 0.1.7 is an internal qualification baseline: both `release.ps1` and
 the tag workflow reject it. Never create or push `v0.1.7`; qualify it with the
 stress-inclusive command above and use only the ignored dry-run package.
 
+Use a validation ladder instead of running the largest gate after every edit:
+run `check.ps1 -Quick` once after a coherent implementation, then `build.bat`
+plus only the directly owning smoke suite, and reserve `check.ps1 -SkipSmoke`
+or full qualification for the integrated pre-push/release boundary. Search all
+geometry/protocol consumers before the first black-box run so old assertions
+are migrated in the same patch.
+
 The former `.cargo/config.toml` forced `jobs = 1` and made clean builds much
 slower. Do not restore a global job limit. Keep the default dev path
 incremental and let Cargo use the machine's logical CPUs. Use `release-fast`
 for repeated optimized local testing: it disables LTO, uses parallel codegen,
-and retains incremental state. After staging all distributable files in
-`dist/`, the final `release` build deliberately runs `cargo clean` so `target/`
-cannot grow without bound. Release-only size optimization belongs in
+and retains incremental state. A final `release` build uses the dedicated
+repo-local `target-release/` scratch directory, stages all distributable files
+in `dist/`, and cleans only that scratch directory; it must not erase the
+development `target/` cache. Release-only size optimization belongs in
 `[profile.release]`. The staging path is intentionally one PowerShell process
 and prefers `pwsh` when available; do not split it back into one interpreter
 startup per artifact.

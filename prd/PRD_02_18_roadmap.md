@@ -258,9 +258,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       concurrent-reader evidence while preserving the 4 MiB GUI,
       per-sidecar size, one-second first-window, remain-on-exit, and
       explicit-close gates
-    - [x] release builds stage verified artifacts in `dist/` and then run
-      `cargo clean`; development builds retain incremental `target/`
-      caching so disk cleanup does not impose a rebuild on every edit
+    - [x] release builds compile in dedicated `target-release/`, stage verified
+      artifacts in `dist/`, and clean only that scratch target; development
+      builds retain incremental `target/` caching so release cleanup does not
+      impose a cold rebuild on the next edit
     - [x] `build.bat release-fast` provides an optimized incremental local
       loop with LTO disabled and parallel codegen, while consolidated
       staging uses one PowerShell process (preferring `pwsh`) instead of

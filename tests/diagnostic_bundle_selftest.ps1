@@ -39,7 +39,10 @@ function Get-OnlyNewBundle {
     )
 
     $after = @(Get-RetainedBundlePaths)
-    $newBundles = @($after | Where-Object { $Before -notcontains $_ })
+    $newBundles = @($after | Where-Object {
+        $Before -notcontains $_ -and
+        [IO.Path]::GetFileName($_) -like "$ExpectedSuite-*"
+    })
     if ($newBundles.Count -ne 1) {
         throw (
             "$ExpectedSuite probe retained $($newBundles.Count) new bundles; " +
@@ -184,7 +187,7 @@ function Assert-BoundedFailureBundle {
     }
 }
 
-function Invoke-ExternalProbe {
+function Start-ExternalProbe {
     param(
         [Parameter(Mandatory = $true)][string]$ScriptPath,
         [Parameter(Mandatory = $true)][string[]]$Arguments,
@@ -206,29 +209,45 @@ function Invoke-ExternalProbe {
         $startInfo.ArgumentList.Add($argument)
     }
     $process = [Diagnostics.Process]::Start($startInfo)
+    return [pscustomobject]@{
+        Before = $before
+        Suite = $Suite
+        Process = $process
+        Stdout = $process.StandardOutput.ReadToEndAsync()
+        Stderr = $process.StandardError.ReadToEndAsync()
+    }
+}
+
+function Complete-ExternalProbe {
+    param([Parameter(Mandatory = $true)]$Probe)
+
+    $process = $Probe.Process
     try {
-        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
-        $stderrTask = $process.StandardError.ReadToEndAsync()
         if (-not $process.WaitForExit(45000)) {
             $process.Kill($true)
-            throw "$Suite failure-bundle probe exceeded its bounded deadline."
+            throw (
+                "$($Probe.Suite) failure-bundle probe exceeded its bounded deadline."
+            )
         }
-        $stdout = $stdoutTask.GetAwaiter().GetResult()
-        $stderr = $stderrTask.GetAwaiter().GetResult()
+        $stdout = $Probe.Stdout.GetAwaiter().GetResult()
+        $stderr = $Probe.Stderr.GetAwaiter().GetResult()
         if ($process.ExitCode -eq 0) {
-            throw "$Suite failure-bundle probe unexpectedly succeeded."
+            throw "$($Probe.Suite) failure-bundle probe unexpectedly succeeded."
         }
     }
     finally {
         $process.Dispose()
+        $Probe.Process = $null
     }
-    $bundle = Get-OnlyNewBundle -Before $before -ExpectedSuite $Suite
+    $bundle = Get-OnlyNewBundle -Before $Probe.Before `
+        -ExpectedSuite $Probe.Suite
     if ("$stdout`n$stderr" -notmatch '(?m)^FAILURE BUNDLE ') {
-        throw "$Suite probe did not report its retained failure bundle."
+        throw "$($Probe.Suite) probe did not report its retained failure bundle."
     }
     return $bundle
 }
 
+$externalProbes = [Collections.Generic.List[object]]::new()
 try {
     Write-Host 'STEP CLI failure bundle'
     $before = @(Get-RetainedBundlePaths)
@@ -258,21 +277,25 @@ try {
         -Suite 'diagnostic-cli-probe' -MarkerKind 'cli'
     Remove-SelfTestBundle -Path $cliBundle
 
-    Write-Host 'STEP GUI failure bundle'
-    $guiBundle = Invoke-ExternalProbe `
+    Write-Host 'STEP GUI and script-worker failure bundles in parallel'
+    $guiProbe = Start-ExternalProbe `
         -ScriptPath (Join-Path $PSScriptRoot 'theme_smoke.ps1') `
         -Arguments @(
             '-GuiExe', $GuiExe, '-CliExe', $CliExe,
             '-InternalFailureBundleProbe'
         ) -Suite 'theme'
-    Assert-BoundedFailureBundle -Path $guiBundle -Suite 'theme' -MarkerKind 'gui'
-    Remove-SelfTestBundle -Path $guiBundle
-
-    Write-Host 'STEP script-worker failure bundle'
-    $scriptBundle = Invoke-ExternalProbe `
+    $externalProbes.Add($guiProbe)
+    $scriptProbe = Start-ExternalProbe `
         -ScriptPath (Join-Path $PSScriptRoot 'script_smoke.ps1') `
         -Arguments @('-Exe', $CliExe, '-InternalFailureBundleProbe') `
         -Suite 'script'
+    $externalProbes.Add($scriptProbe)
+
+    $guiBundle = Complete-ExternalProbe -Probe $guiProbe
+    Assert-BoundedFailureBundle -Path $guiBundle -Suite 'theme' -MarkerKind 'gui'
+    Remove-SelfTestBundle -Path $guiBundle
+
+    $scriptBundle = Complete-ExternalProbe -Probe $scriptProbe
     Assert-BoundedFailureBundle -Path $scriptBundle `
         -Suite 'script' -MarkerKind 'script'
     Remove-SelfTestBundle -Path $scriptBundle
@@ -280,6 +303,16 @@ try {
     Write-Host 'PASS: CLI, GUI, and script failure bundles are bounded and orphan-free'
 }
 finally {
+    foreach ($probe in $externalProbes) {
+        if ($null -ne $probe.Process) {
+            if (-not $probe.Process.HasExited) {
+                $probe.Process.Kill($true)
+                $probe.Process.WaitForExit(3000) | Out-Null
+            }
+            $probe.Process.Dispose()
+            $probe.Process = $null
+        }
+    }
     foreach ($bundle in $retainedBundles) {
         Remove-SelfTestBundle -Path $bundle
     }

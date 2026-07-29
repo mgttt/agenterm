@@ -1,5 +1,6 @@
 param(
     [switch]$Release,
+    [switch]$Quick,
     [switch]$SkipSmoke,
     [switch]$IncludeStress,
     [switch]$InternalQualificationDryRun,
@@ -41,6 +42,7 @@ function Invoke-Checked {
         Add-AgenTermQualificationResult -Context $qualification `
             -GateId $Id -Status passed -DurationMs $watch.ElapsedMilliseconds `
             -Output $outputItems
+        Write-Host "PASS: $Label ($($watch.ElapsedMilliseconds) ms)"
     }
     catch {
         $failureOutput = @($outputItems) + @($_ | Out-String)
@@ -53,6 +55,66 @@ function Invoke-Checked {
     }
 }
 
+function Invoke-QuickStep {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Label,
+
+        [Parameter(Mandatory = $true)]
+        [scriptblock]$Command
+    )
+
+    Write-Host "`n==> $Label"
+    $watch = [Diagnostics.Stopwatch]::StartNew()
+    $global:LASTEXITCODE = 0
+    & $Command
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Label failed with exit code $LASTEXITCODE"
+    }
+    Write-Host "PASS: $Label ($($watch.ElapsedMilliseconds) ms)"
+}
+
+function Import-AgenTermDevelopmentBuildIdentity {
+    $identityPath = Join-Path (
+        [IO.Path]::GetTempPath()
+    ) "agenterm-check-identity-$PID-$([Guid]::NewGuid().ToString('N')).cmd"
+    $allowed = @(
+        'AGENTERM_BUILD_IDENTITY_VERSION',
+        'AGENTERM_BUILD_GIT_COMMIT',
+        'AGENTERM_BUILD_GIT_DIRTY',
+        'AGENTERM_BUILD_CARGO_LOCK_SHA256',
+        'AGENTERM_BUILD_ARTIFACT_MANIFEST_SHA256',
+        'AGENTERM_BUILD_PROFILE'
+    )
+    try {
+        & '.\scripts\build-identity.ps1' -Profile dev -OutputPath $identityPath
+        $values = [ordered]@{}
+        foreach ($line in Get-Content -LiteralPath $identityPath) {
+            if ($line -notmatch '^set "([A-Z0-9_]+)=(.*)"$') {
+                throw "Malformed development build identity line: $line"
+            }
+            $name = $Matches[1]
+            if ($name -notin $allowed -or $values.Contains($name)) {
+                throw "Unexpected development build identity field: $name"
+            }
+            $values[$name] = $Matches[2]
+        }
+        if ($values.Count -ne $allowed.Count) {
+            throw 'Development build identity omitted required fields.'
+        }
+        foreach ($name in $allowed) {
+            [Environment]::SetEnvironmentVariable(
+                $name, [string]$values[$name], 'Process'
+            )
+        }
+    }
+    finally {
+        if (Test-Path -LiteralPath $identityPath) {
+            Remove-Item -LiteralPath $identityPath -Force
+        }
+    }
+}
+
 function Get-PeSubsystem {
     param([Parameter(Mandatory = $true)][string]$Path)
 
@@ -62,6 +124,40 @@ function Get-PeSubsystem {
 }
 
 try {
+    if ($Quick) {
+        if ($Release -or $SkipSmoke -or $IncludeStress -or
+            $InternalQualificationDryRun) {
+            throw (
+                '-Quick is a standalone development feedback lane; do not ' +
+                'combine it with release, smoke, stress, or qualification options.'
+            )
+        }
+        $quickWatch = [Diagnostics.Stopwatch]::StartNew()
+        Invoke-QuickStep -Label 'repository static lint' {
+            & '.\lint.ps1' -Mode Static
+        }
+        Invoke-QuickStep -Label 'rustfmt' {
+            cargo fmt --all -- --check
+        }
+        Invoke-QuickStep -Label 'PRD capability alignment' {
+            & '.\tests\prd_alignment.ps1'
+        }
+        Invoke-QuickStep -Label 'development build identity' {
+            Import-AgenTermDevelopmentBuildIdentity
+        }
+        Invoke-QuickStep -Label 'library Clippy' {
+            cargo clippy --quiet --locked --lib -- -D warnings
+        }
+        Invoke-QuickStep -Label 'library unit tests' {
+            cargo test --quiet --locked --lib
+        }
+        Write-Host (
+            "`nPASS: AgenTerm quick development gate " +
+            "($($quickWatch.ElapsedMilliseconds) ms)"
+        )
+        return
+    }
+
     if ($InternalQualificationDryRun) {
         & '.\scripts\qualification-selftest.ps1'
         return
@@ -72,11 +168,13 @@ try {
         Remove-Item -LiteralPath $receiptPath -Force
     }
     . '.\scripts\qualification.ps1'
+    $fullCheckWatch = [Diagnostics.Stopwatch]::StartNew()
     $qualificationManifestPath = '.\scripts\qualification-gates.json'
     $qualification = New-AgenTermQualificationContext `
         -ManifestPath $qualificationManifestPath `
         -Release ([bool]$Release) `
         -StressIncluded ([bool]$IncludeStress)
+    $declarationWatch = [Diagnostics.Stopwatch]::StartNew()
     Assert-AgenTermQualificationDeclarations -Context $qualification `
         -SuiteScripts @{
             'cli-smoke' = '.\tests\cli_smoke.ps1'
@@ -90,6 +188,11 @@ try {
             'workbench-smoke' = '.\tests\workbench_smoke.ps1'
             'ux-smoke' = '.\tests\ux_smoke.ps1'
         }
+    $declarationWatch.Stop()
+    Write-Host (
+        "Qualification declaration discovery " +
+        "($($declarationWatch.ElapsedMilliseconds) ms)"
+    )
     Invoke-Checked -Id 'preflight-selftest' `
         -Label 'read-only preflight self-test' {
         & '.\scripts\preflight-selftest.ps1'
@@ -111,14 +214,23 @@ try {
         }
         & '.\lint.ps1' -Mode Static
     }
+    Invoke-Checked -Id 'prd-alignment' -Label 'PRD capability alignment' {
+        & '.\tests\prd_alignment.ps1'
+    }
     Invoke-Checked -Id 'rustfmt' -Label 'rustfmt' {
         cargo fmt -- --check
     }
+    $identityWatch = [Diagnostics.Stopwatch]::StartNew()
+    Import-AgenTermDevelopmentBuildIdentity
+    $identityWatch.Stop()
+    Write-Host (
+        "Development build identity ($($identityWatch.ElapsedMilliseconds) ms)"
+    )
     Invoke-Checked -Id 'clippy' -Label 'Clippy' {
-        cargo clippy --locked --all-targets --all-features -- -D warnings
+        cargo clippy --quiet --locked --all-targets --all-features -- -D warnings
     }
     Invoke-Checked -Id 'unit-tests' -Label 'unit tests' {
-        cargo test --locked --all-features
+        cargo test --quiet --locked --all-features
     }
 
     $upgradeGuiFixture = Join-Path (
@@ -273,10 +385,6 @@ try {
         & '.\tests\diagnostic_bundle_selftest.ps1'
     }
 
-    Invoke-Checked -Id 'prd-alignment' -Label 'PRD capability alignment' {
-        & '.\tests\prd_alignment.ps1'
-    }
-
     if (-not $SkipSmoke) {
         # GUI tests must never interrupt the interactive desktop running them.
         # The GUI entry point and CLI autostart both honor this inherited flag.
@@ -359,6 +467,21 @@ try {
             -OutputPath $receiptPath
         Write-Host "`nQUALIFICATION RECEIPT $writtenReceipt"
     }
+    $fullCheckWatch.Stop()
+    Write-Host "`nSlowest completed gates:"
+    foreach ($result in @(
+            $qualification.Results.Values |
+                Sort-Object -Property duration_ms -Descending |
+                Select-Object -First 8
+        )) {
+        Write-Host (
+            "  $($result.id): $($result.duration_ms) ms"
+        )
+    }
+    Write-Host (
+        "Declaration discovery: $($declarationWatch.ElapsedMilliseconds) ms"
+    )
+    Write-Host "Total quality gate: $($fullCheckWatch.ElapsedMilliseconds) ms"
     Write-Host "`nPASS: AgenTerm quality gate"
 }
 finally {

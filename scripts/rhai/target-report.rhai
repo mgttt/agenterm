@@ -16,6 +16,9 @@ let repo_path = std::path::absolute(args[0]).display;
 let repo_target_path = std::path::absolute(
     std::path::join(repo_path, "target").display
 ).display;
+let repo_release_target_path = std::path::absolute(
+    std::path::join(repo_path, "target-release").display
+).display;
 
 let target_argument = if args.len >= 2 && args[1] != "" {
     args[1]
@@ -31,7 +34,15 @@ let target_path = if target_candidate.is_absolute {
 let json_output = args.len == 3 && args[2] == "--json";
 require(args.len != 3 || json_output, "unknown target-report option");
 
-let repo_local = target_path.to_lower() == repo_target_path.to_lower();
+let repo_local = target_path.to_lower() == repo_target_path.to_lower()
+    || target_path.to_lower() == repo_release_target_path.to_lower();
+let target_kind = if target_path.to_lower() == repo_release_target_path.to_lower() {
+    "release-scratch"
+} else if target_path.to_lower() == repo_target_path.to_lower() {
+    "development"
+} else {
+    "external"
+};
 let exists = std::fs::exists(target_path);
 if exists {
     require(std::fs::metadata(target_path).is_dir, "Cargo target path is not a directory");
@@ -115,6 +126,7 @@ let report = #{
     exists: exists,
     repo_local: repo_local,
     cleanup_allowed: repo_local,
+    target_kind: target_kind,
     files: file_count,
     bytes: total_bytes,
     oldest_write_utc: oldest_text,
@@ -128,6 +140,7 @@ if json_output {
 } else {
     print(
         "Cargo target: " + target_path +
+        "; kind=" + target_kind +
         "; repo_local=" + repo_local +
         "; files=" + file_count +
         "; bytes=" + total_bytes +

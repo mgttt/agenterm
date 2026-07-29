@@ -1,5 +1,6 @@
 param(
-    [string]$RepoRoot = (Join-Path $PSScriptRoot '..')
+    [string]$RepoRoot = (Join-Path $PSScriptRoot '..'),
+    [string]$TargetPath = 'target'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -21,9 +22,20 @@ if (-not $repo.Equals($gitRoot, [StringComparison]::OrdinalIgnoreCase)) {
     throw "Refusing target preparation outside the exact Git root: $repo"
 }
 
-$target = [IO.Path]::GetFullPath((Join-Path $repo 'target'))
-$expected = [IO.Path]::GetFullPath("$repo$([IO.Path]::DirectorySeparatorChar)target")
-if (-not $target.Equals($expected, [StringComparison]::OrdinalIgnoreCase)) {
+$target = if ([IO.Path]::IsPathRooted($TargetPath)) {
+    [IO.Path]::GetFullPath($TargetPath)
+} else {
+    [IO.Path]::GetFullPath((Join-Path $repo $TargetPath))
+}
+$allowedTargets = @(
+    [IO.Path]::GetFullPath((Join-Path $repo 'target')),
+    [IO.Path]::GetFullPath((Join-Path $repo 'target-release'))
+)
+if ((@(
+        $allowedTargets | Where-Object {
+            $target.Equals($_, [StringComparison]::OrdinalIgnoreCase)
+        }
+    )).Count -eq 0) {
     throw "Refusing to prepare an unexpected Cargo target: $target"
 }
 if (-not (Test-Path -LiteralPath $target -PathType Container)) {

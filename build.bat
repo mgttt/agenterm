@@ -19,7 +19,13 @@ if not errorlevel 1 set "POWERSHELL_EXE=pwsh.exe"
 if /i "%~1"=="release" (
     set "PROFILE=release"
     set "CARGO_ARGS=--release"
-    set "CARGO_PROFILE_DIR=%CARGO_OUTPUT_DIR%\release"
+    if "%USING_EXTERNAL_CARGO_TARGET%"=="0" (
+        set "CARGO_OUTPUT_DIR=target-release"
+        set "CARGO_PROFILE_DIR=target-release\release"
+        set "CARGO_TARGET_DIR=%CD%\target-release"
+    ) else (
+        set "CARGO_PROFILE_DIR=%CARGO_OUTPUT_DIR%\release"
+    )
 ) else if /i "%~1"=="release-fast" (
     set "PROFILE=release-fast"
     set "CARGO_ARGS=--profile release-fast"
@@ -80,14 +86,14 @@ if /i "%PROFILE%"=="release" (
             popd
             exit /b 1
         )
-        "%POWERSHELL_EXE%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\prepare-target-clean.ps1" -RepoRoot "%CD%"
+        "%POWERSHELL_EXE%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\prepare-target-clean.ps1" -RepoRoot "%CD%" -TargetPath "%CARGO_OUTPUT_DIR%"
         if errorlevel 1 (
             echo.
             echo Release artifacts were staged, but exact target cleanup preparation failed.
             popd
             exit /b 1
         )
-        cargo clean --target-dir "%CD%\target"
+        cargo clean --target-dir "%CARGO_OUTPUT_DIR%"
         if errorlevel 1 (
             echo.
             echo Release artifacts were staged, but the repository-local Cargo target cleanup failed.
