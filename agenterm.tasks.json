@@ -26,6 +26,7 @@
         "std.fs.write",
         "std.path.absolute",
         "std.path.join",
+        "std.path.parent",
         "std.process.command",
         "std.process.command-builder",
         "std.process.command-output",
@@ -80,6 +81,13 @@
       "id": "prepare-target-clean",
       "description": "Validate an exact repository-local Cargo target and install its cache tag",
       "entry": "scripts/rhai/prepare-target-clean.rhai",
+      "profile": "local",
+      "cwd": "."
+    },
+    {
+      "id": "preflight",
+      "description": "Run the read-only repository release preflight and publish its JSON report",
+      "entry": "scripts/rhai/preflight.rhai",
       "profile": "local",
       "cwd": "."
     },

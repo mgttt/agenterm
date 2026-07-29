@@ -1,11 +1,19 @@
 param(
     [ValidateRange(5, 100)][int]$Iterations = 5,
     [string]$RepoRoot = (Join-Path $PSScriptRoot '..'),
-    [string]$OutputPath = 'target\preflight\benchmark.json'
+    [string]$OutputPath = 'target\preflight\benchmark.json',
+    [string]$WorkerPath = (
+        Join-Path $PSScriptRoot '..\target\debug\agenterm-script.exe'
+    )
 )
 
 $ErrorActionPreference = 'Stop'
 $repo = [IO.Path]::GetFullPath($RepoRoot)
+$worker = [IO.Path]::GetFullPath($WorkerPath)
+if (-not (Test-Path -LiteralPath $worker -PathType Leaf)) {
+    throw "agenterm-script worker not found: $worker"
+}
+$manifest = Join-Path $repo 'agenterm.tasks.json'
 $output = if ([IO.Path]::IsPathRooted($OutputPath)) {
     [IO.Path]::GetFullPath($OutputPath)
 } else {
@@ -25,9 +33,9 @@ try {
             $runReport = Join-Path $runDirectory "$iteration.json"
             $wall = [Diagnostics.Stopwatch]::StartNew()
             $items = @(
-                & (Join-Path $PSHOME 'pwsh.exe') -NoProfile -NonInteractive `
-                    -File (Join-Path $PSScriptRoot 'preflight.ps1') `
-                    -RepoRoot $repo -OutputPath $runReport -Quiet 2>&1
+                & $worker task run preflight --manifest $manifest `
+                    --timeout-ms 10000 --max-operations 10000000 `
+                    -- $repo $runReport --quiet 2>&1
             )
             $exitCode = $LASTEXITCODE
             $wall.Stop()

@@ -126,6 +126,7 @@ pub fn register_local(engine: &mut Engine) {
     path.set_sub_module("PathBuf", path_buf);
     path.set_native_fn("join", path_join);
     path.set_native_fn("absolute", path_absolute);
+    path.set_native_fn("parent", path_parent);
 
     let mut fs = Module::new();
     fs.set_native_fn("read_to_string", fs_read_to_string);
@@ -195,6 +196,18 @@ fn path_absolute(value: &str) -> Result<ScriptPath, Box<EvalAltResult>> {
     std::path::absolute(value)
         .map(ScriptPath)
         .map_err(|error| io_error("path_absolute", value, error))
+}
+
+fn path_parent(value: &str) -> Result<ScriptPath, Box<EvalAltResult>> {
+    PathBuf::from(value)
+        .parent()
+        .map(|parent| ScriptPath(parent.to_path_buf()))
+        .ok_or_else(|| {
+            Box::new(EvalAltResult::ErrorRuntime(
+                format!("path_parent: path has no parent: {value}").into(),
+                rhai::Position::NONE,
+            ))
+        })
 }
 
 fn fs_read_to_string(path: &str) -> Result<String, Box<EvalAltResult>> {
@@ -693,6 +706,7 @@ mod tests {
                     is_symlink: link_metadata.is_symlink,
                     is_reparse_point: link_metadata.is_reparse_point,
                     absolute: std::path::absolute(entry.path.display).is_absolute,
+                    parent: std::path::parent(entry.path.display).display,
                     modified: metadata.modified.unix_millis,
                     modified_text: metadata.modified.rfc3339,
                     now: std::time::SystemTime::now().unix_millis
@@ -712,6 +726,10 @@ mod tests {
         assert!(!result["is_symlink"].as_bool().unwrap());
         assert!(!result["is_reparse_point"].as_bool().unwrap());
         assert!(result["absolute"].as_bool().unwrap());
+        assert_eq!(
+            result["parent"].clone().into_string().unwrap(),
+            directory.to_string_lossy()
+        );
         assert!(result["modified"].as_int().unwrap() > 0);
         assert!(
             result["modified_text"]

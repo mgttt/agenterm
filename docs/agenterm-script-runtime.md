@@ -136,9 +136,12 @@ agenterm-script
 │  │  ├─ join(parent, child)
 │  │  │  Creates a typed path by joining two strings.
 │  │  │  [shipped; stable; designed 2026-07-28]
-│  │  └─ absolute(path)
-│  │     Resolves a path against the worker's current directory.
-│  │     [shipped; stable; designed 2026-07-28]
+│  │  ├─ absolute(path)
+│  │  │  Resolves a path against the worker's current directory.
+│  │  │  [shipped; stable; designed 2026-07-28]
+│  │  └─ parent(path)
+│  │     Returns the typed lexical parent or fails when none exists.
+│  │     [shipped; stable; designed 2026-07-29]
 │  │
 │  ├─ env::
 │  │  Worker environment and current-directory facts.
@@ -663,6 +666,11 @@ added.
 `std::path::absolute` resolves relative input against the worker current
 directory. It is not a filesystem canonicalization operation and MUST NOT be
 used to claim that a path exists or that symlinks were resolved.
+
+`std::path::parent` performs lexical path inspection and returns a typed
+`PathBuf`. It throws `path_parent` when the input has no parent. It does not
+canonicalize the input, inspect the filesystem, or create the returned
+directory.
 
 ### 7.3 JSON
 

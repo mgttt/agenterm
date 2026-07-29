@@ -460,6 +460,15 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             (&["current_directory_resolution"], &["path_absolute"]),
         ),
         shipped_local_entry(
+            "std.path.parent",
+            "data/path/parent",
+            "std::path::parent",
+            Some("std::path::Path::parent"),
+            RustMapping::Adapted,
+            "std::path::parent(path)",
+            (NO_STRINGS, &["path_parent"]),
+        ),
+        shipped_local_entry(
             "std.path.path-buf-join",
             "data/path/path-buf/join",
             "PathBuf.join",

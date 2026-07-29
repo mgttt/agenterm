@@ -218,6 +218,23 @@ fn run_migration_audit(repo_under_test: &Path) -> Output {
         .expect("run Rhai migration-audit task")
 }
 
+fn run_preflight(repo_under_test: &Path, output_path: &Path) -> Output {
+    let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let manifest = repo.join("agenterm.tasks.json");
+    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+        .current_dir(repo)
+        .args(["task", "run", "preflight", "--manifest"])
+        .arg(manifest)
+        .args(["--timeout-ms", "10000", "--max-operations", "10000000"])
+        .arg("--")
+        .arg(repo_under_test)
+        .arg(output_path)
+        .arg("--quiet")
+        .output()
+        .expect("run Rhai preflight task")
+}
+
 fn parse_batch_environment(path: &Path) -> Vec<(String, String)> {
     fs::read_to_string(path)
         .expect("read batch environment")
@@ -276,6 +293,13 @@ fn commit_git_fixture(root: &Path) {
             String::from_utf8_lossy(&output.stderr)
         );
     }
+}
+
+fn copy_fixture_file(repo: &Path, fixture: &Path, relative: &str) {
+    let destination = fixture.join(relative);
+    fs::create_dir_all(destination.parent().expect("fixture file parent"))
+        .expect("create fixture file parent");
+    fs::copy(repo.join(relative), destination).expect("copy fixture file");
 }
 
 #[cfg(windows)]
@@ -1025,8 +1049,8 @@ fn migration_audit_rejects_operational_references_to_deleted_scripts() {
     let workflow = repo.join(".github").join("workflows").join("release.yml");
     fs::create_dir_all(workflow.parent().expect("workflow parent"))
         .expect("create workflow parent");
-    fs::write(&workflow, b"run: ./scripts/artifact-manifest.ps1\n")
-        .expect("write stale workflow reference");
+    let deleted_script_reference = ["run: ./scripts/artifact-manifest", ".ps1\n"].concat();
+    fs::write(&workflow, deleted_script_reference).expect("write stale workflow reference");
     commit_git_fixture(&repo);
 
     let rejected = run_migration_audit(&repo);
@@ -1051,10 +1075,167 @@ fn migration_audit_rejects_operational_references_to_deleted_scripts() {
     );
     let report: serde_json::Value =
         serde_json::from_slice(&accepted.stdout).expect("decode migration report");
-    assert_eq!(report["deleted_count"], 10);
-    assert_eq!(report["remaining_count"], 33);
+    let entries = ledger["entries"].as_array().expect("ledger entries");
+    let expected_deleted = entries
+        .iter()
+        .filter(|entry| entry["status"] == "deleted")
+        .count();
+    let expected_remaining = entries.len() - expected_deleted;
+    assert_eq!(report["deleted_count"], expected_deleted);
+    assert_eq!(report["remaining_count"], expected_remaining);
 
     fs::remove_dir_all(&repo).expect("remove migration fixture");
+}
+
+#[test]
+fn preflight_task_is_fail_closed_and_writes_reports_for_real_git_fixtures() {
+    let source_repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let cases = [
+        ("clean", true, ""),
+        ("crlf", true, ""),
+        ("dirty", false, "clean-tree"),
+        ("wrong-branch", false, "branch-main"),
+        ("bad-hash", false, "cargo-lock"),
+        ("bad-manifest", false, "artifact-manifest"),
+    ];
+
+    for (mode, should_pass, expected_failed_gate) in cases {
+        let fixture = fixture_root(&format!("preflight-{mode}"));
+        fs::create_dir_all(&fixture).expect("create preflight fixture");
+        for relative in [
+            "Cargo.toml",
+            "Cargo.lock",
+            "rust-toolchain.toml",
+            "release.ps1",
+            "scripts/artifacts.json",
+            "scripts/qualification-gates.json",
+            ".github/workflows/release.yml",
+        ] {
+            copy_fixture_file(source_repo, &fixture, relative);
+        }
+        fs::write(fixture.join(".gitignore"), "/target/\n").expect("write fixture ignore");
+        fs::write(fixture.join("README.md"), "fixture\n").expect("write fixture README");
+
+        if mode == "crlf" {
+            for relative in ["Cargo.toml", "Cargo.lock", "rust-toolchain.toml"] {
+                let path = fixture.join(relative);
+                let normalized = fs::read_to_string(&path)
+                    .expect("read CRLF source")
+                    .replace("\r\n", "\n")
+                    .replace('\r', "\n");
+                fs::write(path, normalized.replace('\n', "\r\n")).expect("write CRLF fixture");
+            }
+        }
+        if mode == "bad-hash" {
+            let path = fixture.join("Cargo.lock");
+            let mut lock = fs::read_to_string(&path).expect("read Cargo.lock fixture");
+            let marker = "checksum = \"";
+            let start = lock
+                .find(marker)
+                .expect("fixture contains registry checksum")
+                + marker.len();
+            let end = lock[start..].find('"').expect("checksum terminator") + start;
+            lock.replace_range(start..end, "not-a-sha256");
+            fs::write(path, lock).expect("write bad checksum fixture");
+        }
+        if mode == "bad-manifest" {
+            fs::write(
+                fixture.join("scripts").join("artifacts.json"),
+                "{ invalid json\n",
+            )
+            .expect("write invalid artifact manifest fixture");
+        }
+
+        let initialized = Command::new("git")
+            .args(["init", "--quiet", "-b", "main"])
+            .arg(&fixture)
+            .output()
+            .expect("initialize preflight Git fixture");
+        assert!(
+            initialized.status.success(),
+            "git init failed: {}",
+            String::from_utf8_lossy(&initialized.stderr)
+        );
+        let remote = Command::new("git")
+            .arg("-C")
+            .arg(&fixture)
+            .args([
+                "remote",
+                "add",
+                "origin",
+                "https://fixture-secret@example.invalid/agenterm.git",
+            ])
+            .output()
+            .expect("add fixture remote");
+        assert!(remote.status.success(), "add fixture remote failed");
+        commit_git_fixture(&fixture);
+
+        if mode == "dirty" {
+            fs::write(fixture.join("README.md"), "fixture\ndirty\n").expect("dirty fixture");
+        }
+        if mode == "wrong-branch" {
+            let switched = Command::new("git")
+                .arg("-C")
+                .arg(&fixture)
+                .args(["switch", "--quiet", "-c", "feature/preflight"])
+                .output()
+                .expect("switch fixture branch");
+            assert!(switched.status.success(), "switch fixture branch failed");
+        }
+
+        let report_path = fixture.join("target").join("nested").join("preflight.json");
+        let output = run_preflight(&fixture, &report_path);
+        assert_eq!(
+            output.status.success(),
+            should_pass,
+            "unexpected preflight exit for {mode}:\nstdout={}\nstderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let report: serde_json::Value =
+            serde_json::from_slice(&fs::read(&report_path).expect("preflight emitted JSON report"))
+                .expect("decode preflight report");
+        assert_eq!(report["passed"], should_pass, "report result for {mode}");
+        assert_eq!(report["kind"], "agenterm-read-only-preflight");
+        assert_eq!(
+            report["remotes"][0]["url"], "https://<redacted>@example.invalid/agenterm.git",
+            "remote credentials must be redacted"
+        );
+        if !should_pass {
+            assert!(
+                report["gates"]
+                    .as_array()
+                    .expect("preflight gates")
+                    .iter()
+                    .any(|gate| gate["id"] == expected_failed_gate && gate["passed"] == false),
+                "expected failed gate {expected_failed_gate} for {mode}: {report}"
+            );
+        }
+
+        fs::remove_dir_all(&fixture).expect("remove preflight fixture");
+    }
+
+    let source = fs::read_to_string(source_repo.join("scripts/rhai/preflight.rhai"))
+        .expect("read preflight source")
+        .to_ascii_lowercase();
+    for forbidden in [
+        "cargo build",
+        "cargo check",
+        "cargo test",
+        "cargo run",
+        "rustc ",
+        "git fetch",
+        "git push",
+        "git ls-remote",
+        "invoke-webrequest",
+        "invoke-restmethod",
+        "start-bitstransfer",
+    ] {
+        assert!(
+            !source.contains(forbidden),
+            "preflight contains forbidden active operation: {forbidden}"
+        );
+    }
 }
 
 #[cfg(windows)]

@@ -74,6 +74,18 @@ function Invoke-QuickStep {
     Write-Host "PASS: $Label ($($watch.ElapsedMilliseconds) ms)"
 }
 
+function Get-AgenTermDebugScriptWorker {
+    $target = if ([string]::IsNullOrWhiteSpace(
+            $env:CARGO_TARGET_DIR
+        )) {
+        Join-Path $PSScriptRoot 'target'
+    }
+    else {
+        [IO.Path]::GetFullPath($env:CARGO_TARGET_DIR)
+    }
+    return Join-Path $target 'debug\agenterm-script.exe'
+}
+
 function Import-AgenTermDevelopmentBuildIdentity {
     $identityPath = Join-Path (
         [IO.Path]::GetTempPath()
@@ -213,16 +225,23 @@ try {
     )
     Invoke-Checked -Id 'preflight-selftest' `
         -Label 'read-only preflight self-test' {
-        & '.\scripts\preflight-selftest.ps1'
+        cargo test --quiet --locked --test rhai_migration `
+            preflight_task_is_fail_closed_and_writes_reports_for_real_git_fixtures `
+            -- --nocapture
     }
     if ($Release) {
+        $scriptWorker = Get-AgenTermDebugScriptWorker
         Invoke-Checked -Id 'release-preflight' `
             -Label 'clean internal candidate preflight' {
-            & '.\scripts\preflight.ps1'
+            & $scriptWorker task run preflight `
+                --manifest '.\agenterm.tasks.json' `
+                --timeout-ms 10000 --max-operations 10000000 `
+                -- '.' 'target\preflight\preflight.json'
         }
         Invoke-Checked -Id 'preflight-benchmark' `
             -Label 'local preflight p95 benchmark' {
-            & '.\scripts\preflight-benchmark.ps1' -Iterations 5
+            & '.\scripts\preflight-benchmark.ps1' -Iterations 5 `
+                -WorkerPath $scriptWorker
         }
     }
     Invoke-Checked -Id 'repo-lint' -Label 'repository static lint' {

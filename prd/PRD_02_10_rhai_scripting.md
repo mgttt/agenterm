@@ -359,7 +359,7 @@ and it is not positioned as a restricted security plugin.
     bounded capture, typed exit status, cwd, and repository file reads.
 - [~] migrate one independently testable responsibility at a time through
   `parallel -> parity-proven -> default-rhai -> PowerShell deleted`; the first
-  ten completed responsibilities have crossed their rollback boundaries and
+  twelve completed baseline scripts have crossed their rollback boundaries and
   their PowerShell sources left the v0.1.10 working tree.
 - [ ] parity evidence compares the same inputs, structured outputs, exit
   classification, diagnostics, cancellation, cleanup, encoding, path behavior,
@@ -367,7 +367,7 @@ and it is not positioned as a restricted security plugin.
   last-known-good result.
 - [~] once one Rhai responsibility reaches parity and all normal callers switch
   to it, delete that corresponding PowerShell implementation immediately
-  instead of accumulating a release-wide migration backlog; ten of 43 baseline
+  instead of accumulating a release-wide migration backlog; twelve of 43 baseline
   scripts are deleted.
 - [~] every migrated item records its old path, replacement path, switching
   commit, parity evidence, and deletion state in this PRD. Git history is the
@@ -385,11 +385,12 @@ Migration ledger:
 | README artifact and command alignment | `scripts/rhai/readme-examples.rhai` | `tests/readme_examples.ps1` | `667f6d6` | exact live stdout parity against the six-artifact manifest and offline CLI/Mux catalogs on 2026-07-29; Rhai candidate `a20655a` | deleted; Git history is the rollback source |
 | Locked and obsolete staged-artifact cleanup | `scripts/rhai/clean-locked-artifacts.rhai` | `scripts/clean-locked-artifacts.ps1` | `be9a538` | public `agenterm-script task run` black-box tests prove owned-name cleanup, unrelated-file retention, obsolete-name cleanup, and path-escape rejection | deleted; both normal stage-build callers use the named Rhai task |
 | Cargo target cleanup preparation | `scripts/rhai/prepare-target-clean.rhai` | `scripts/prepare-target-clean.ps1` | `c20acc7` | public CLI black-box tests prove Git-native exact-root binding (including Windows short/long path aliases), allowed target set, idempotent cache-tag creation, and invalid-path/tag rejection | deleted; release build calls the named Rhai task before `cargo clean` |
-| Single executable staging | `scripts/rhai/stage-artifact.rhai` | `scripts/stage-artifact.ps1` | `e087842` | public CLI black-box tests prove normal replacement, invalid-name rejection, and Windows running-image parking before replacement | deleted; `stage-build.ps1` invokes the named Rhai task for each manifest artifact |
+| Single executable staging | `scripts/rhai/stage-artifact.rhai` | `scripts/stage-artifact.ps1` | `e087842` | public CLI black-box tests prove normal replacement, invalid-name rejection, and Windows running-image parking before replacement | deleted; shared Rhai staging orchestration reuses the same module for each manifest artifact |
 | Local executable manifest validation | `scripts/rhai/validate-artifact-manifest.rhai` | `scripts/artifact-manifest.ps1` | `e2276cc` | public CLI black-box tests prove the canonical schema and reject duplicate/invalid names, invalid subsystem/probe contracts, empty roles, and missing size budgets | deleted; build staging, metadata writing, and artifact verification invoke the named Rhai task |
 | Source build identity freeze | `scripts/rhai/build-identity.rhai` | `scripts/build-identity.ps1` | `b082c3b` | public CLI black-box tests prove exact Git-root binding, clean/dirty truth, profile validation, batch-safe fields, and exact SHA-256 build-input identities | deleted; `build.bat` and both check lanes bootstrap the current Script Runtime before invoking the named Rhai task |
 | Staged build provenance | `scripts/rhai/write-build-metadata.rhai` plus shared artifact/metadata modules | `scripts/write-build-metadata.ps1` | current migration change | public CLI black-box tests prove frozen and live identities, executable size/hash capture, clean-source and frozen-input drift rejection; direct old/new field parity excludes only the generation timestamp | deleted; the standalone task and `stage-build.rhai` reuse the same project modules |
 | Built artifact orchestration | `scripts/rhai/stage-build.rhai` plus shared artifact/metadata modules | `scripts/stage-build.ps1` | current migration change | public CLI composition fixture proves cleanup, obsolete removal, staging, metadata and pre-mutation Git-root rejection; actual `build.bat` and direct old/new directory parity cover the six-artifact path | deleted; `build.bat` invokes one bounded Rhai task and no longer launches PowerShell |
+| Read-only release preflight | `scripts/rhai/preflight.rhai` | `scripts/preflight.ps1` and `scripts/preflight-selftest.ps1` | current migration change | public CLI real-Git fixtures prove clean/CRLF success, dirty/wrong-branch/bad-lock/bad-manifest fail-closed reports, nested output creation, and remote credential redaction | deleted; `check.ps1` runs the Rust black-box fixture and invokes the named Rhai task for release preflight |
 
 ### v0.1.10 completion commitment
 
@@ -399,7 +400,7 @@ Migration ledger:
 - [x] the dated 2026-07-29 frozen baseline is 43 tracked `.ps1` files: 3 at
   the repository root, 17 under `scripts/`, 21 under `tests/`, and 2 retained in
   `scripts/archive/powershell/`.
-- [~] migration progress is 10/43 deleted and 33/43 remaining; progress is
+- [~] migration progress is 12/43 deleted and 31/43 remaining; progress is
   counted only after parity evidence, all-caller cutover, and source deletion.
 - [x] `scripts/powershell-migration.json` freezes all 43 baseline paths under
   stable migration IDs with responsibility groups, replacement task IDs, and
@@ -410,10 +411,10 @@ Migration ledger:
   duplicate paths, invalid states, and count drift; ordinary and release
   qualification invoke it as a required gate.
 - [~] the repository-root `agenterm.tasks.json` is now the offline task
-  catalog and ships thirteen ready tasks (`bootstrap-info`, `build-identity`,
+  catalog and ships fourteen ready tasks (`bootstrap-info`, `build-identity`,
   `migration-audit`, `target-report`, `internal-version-policy`,
   `verify-docs-site`, `readme-examples`, `clean-locked-artifacts`,
-  `prepare-target-clean`, `stage-artifact`, `stage-build`,
+  `prepare-target-clean`, `preflight`, `stage-artifact`, `stage-build`,
   `validate-artifact-manifest`, and `write-build-metadata`). The existing
   two-input Script contract verifier is
   intentionally not advertised as ready until catalog fixture production is
