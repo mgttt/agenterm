@@ -14,6 +14,7 @@ mod event_journal;
 mod instances;
 mod ipc_transport;
 pub mod mcp_catalog;
+mod mcp_fleet;
 pub mod mcp_stdio;
 pub mod operations;
 mod protocol;

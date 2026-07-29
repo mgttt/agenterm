@@ -72,21 +72,38 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
         diagnostics only on stderr, and exits successfully when stdin closes
       - [x] a public executable black-box test proves initialize → initialized
         → ping and machine-only stdout
-    - [ ] an absent, stale, restarted, or incompatible AgenTerm server
+    - [~] an absent, stale, restarted, or incompatible AgenTerm server
       returns a typed MCP error with address/session diagnostics and never
       causes the sidecar to create a second workspace authority
+      - [x] resource reads accept explicit `--address`, then
+        `AGENTERM_IPC_ADDRESS`, otherwise use fail-closed zero/one/many live
+        instance selection; discovery never prunes records or starts a server
+      - [x] absent, ambiguous, unreachable, failed, invalid-snapshot, and
+        unknown-resource paths return structured JSON-RPC error data
+      - [ ] epoch restart during a read and incompatible protocol/schema
+        negotiation still need targeted evidence
   - Inventory and snapshots
-    - [ ] `resources/list` advertises versioned read-only resources for
+    - [x] `resources/list` advertises versioned read-only resources for
       instance inventory, workspace inventory, tab inventory, and one fleet
       snapshot; stable resource URIs do not encode mutable tab indexes or
       titles
-    - [ ] `resources/read` returns the same stable IDs and observable state
+    - [~] `resources/read` returns the same stable IDs and observable state
       as the public AgenTerm control plane, plus schema version, server
       epoch, and snapshot sequence so a client can establish a verifiable
       event baseline
-    - [ ] pane text or other content-bearing fields are absent by default;
+      - [x] the MCP adapter invokes the existing typed IPC request path
+        directly rather than launching or parsing `agenterm-cli`; all four
+        resources return versioned JSON text content
+      - [x] a live read against the existing 48815 server returned the same
+        event epoch/sequence and five stable tabs as its public snapshot
+      - [ ] an isolated black-box fixture must perform the automatic
+        field-by-field MCP/CLI same-source comparison
+    - [x] pane text or other content-bearing fields are absent by default;
       any future content snapshot requires an explicit observe capability,
       bounded output, and a resource distinct from metadata inventory
+      - [x] projection tests and a live encoded-result inspection prove
+        terminal title, working context/cwd, proxy, Composer, and pane content
+        keys do not enter MCP resources
   - Bounded wait
     - [ ] `tools/list` exposes only one read-only `agenterm_wait` tool in
       the first delivery; no create, send, close, script, process, or

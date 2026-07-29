@@ -607,7 +607,7 @@ fn await_ui_client_relay_to(
     }
 }
 
-fn send_ipc_request_to_timeout(
+pub(crate) fn send_ipc_request_to_timeout(
     address: &str,
     args: Vec<String>,
     timeout: Duration,

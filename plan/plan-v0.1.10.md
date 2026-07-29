@@ -1006,8 +1006,9 @@ entry 是集成热点，只允许一个串行 owner 收口。
   [done] malformed / oversize / EOF tests
 
 第五提交
-  instances / workspace / tabs / fleet snapshot resources
-  与 CLI 同源对比
+  [done] instances / workspace / tabs / fleet snapshot resources
+  [in progress] live same-epoch/sequence comparison passed; isolated
+    field-by-field CLI/MCP black-box fixture still pending
 
 第六提交
   agenterm_wait

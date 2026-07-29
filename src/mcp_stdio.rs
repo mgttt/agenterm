@@ -2,7 +2,10 @@ use std::io::{self, BufRead, Write};
 
 use serde_json::{Value, json};
 
-use crate::mcp_catalog::{MCP_PROTOCOL_REVISION, capabilities};
+use crate::{
+    mcp_catalog::{MCP_PROTOCOL_REVISION, capabilities},
+    mcp_fleet,
+};
 
 const JSON_RPC_VERSION: &str = "2.0";
 const ERROR_PARSE: i64 = -32700;
@@ -24,7 +27,20 @@ enum BoundedLine {
     Oversized,
 }
 
-pub fn serve_stdio<R: BufRead, W: Write>(mut input: R, mut output: W) -> io::Result<()> {
+#[derive(Clone, Debug, Default)]
+pub struct McpStdioConfig {
+    pub address: Option<String>,
+}
+
+pub fn serve_stdio<R: BufRead, W: Write>(input: R, output: W) -> io::Result<()> {
+    serve_stdio_with_config(input, output, McpStdioConfig::default())
+}
+
+pub fn serve_stdio_with_config<R: BufRead, W: Write>(
+    mut input: R,
+    mut output: W,
+    config: McpStdioConfig,
+) -> io::Result<()> {
     let limit = capabilities().limits.frame_bytes as usize;
     let mut state = SessionState::New;
     loop {
@@ -71,13 +87,17 @@ pub fn serve_stdio<R: BufRead, W: Write>(mut input: R, mut output: W) -> io::Res
                 continue;
             }
         };
-        if let Some(response) = process_message(message, &mut state) {
+        if let Some(response) = process_message(message, &mut state, &config) {
             write_message(&mut output, &response)?;
         }
     }
 }
 
-fn process_message(message: Value, state: &mut SessionState) -> Option<Value> {
+fn process_message(
+    message: Value,
+    state: &mut SessionState,
+    config: &McpStdioConfig,
+) -> Option<Value> {
     let Some(object) = message.as_object() else {
         return Some(error_response(
             Value::Null,
@@ -147,7 +167,12 @@ fn process_message(message: Value, state: &mut SessionState) -> Option<Value> {
                 response_id,
                 json!({
                     "protocolVersion": MCP_PROTOCOL_REVISION,
-                    "capabilities": {},
+                    "capabilities": {
+                        "resources": {
+                            "subscribe": false,
+                            "listChanged": false
+                        }
+                    },
                     "serverInfo": {
                         "name": "agenterm-mcp",
                         "title": "AgenTerm MCP",
@@ -178,12 +203,81 @@ fn process_message(message: Value, state: &mut SessionState) -> Option<Value> {
             "MCP session is not initialized",
             None,
         )),
+        "resources/list" => Some(success_response(
+            response_id,
+            json!({
+                "resources": capabilities()
+                    .resources
+                    .into_iter()
+                    .map(|resource| json!({
+                        "uri": resource.uri,
+                        "name": resource.stable_id,
+                        "title": resource_title(resource.stable_id),
+                        "description": resource_description(resource.stable_id),
+                        "mimeType": "application/json"
+                    }))
+                    .collect::<Vec<_>>()
+            }),
+        )),
+        "resources/read" => {
+            let Some(uri) = params
+                .and_then(Value::as_object)
+                .and_then(|params| params.get("uri"))
+                .and_then(Value::as_str)
+            else {
+                return Some(error_response(
+                    response_id,
+                    ERROR_INVALID_PARAMS,
+                    "resources/read requires a string uri",
+                    None,
+                ));
+            };
+            match mcp_fleet::read_resource(uri, config.address.as_deref()) {
+                Ok(resource) => Some(success_response(
+                    response_id,
+                    json!({
+                        "contents": [{
+                            "uri": uri,
+                            "mimeType": "application/json",
+                            "text": serde_json::to_string(&resource)
+                                .expect("resource projection serializes")
+                        }]
+                    }),
+                )),
+                Err(error) => Some(error_response(
+                    response_id,
+                    error.code,
+                    error.message,
+                    Some(error.data),
+                )),
+            }
+        }
         _ => Some(error_response(
             response_id,
             ERROR_METHOD_NOT_FOUND,
             "Method not found",
             Some(json!({"method": method})),
         )),
+    }
+}
+
+fn resource_title(stable_id: &str) -> &'static str {
+    match stable_id {
+        "fleet.instances" => "AgenTerm Instances",
+        "fleet.workspace" => "AgenTerm Workspace",
+        "fleet.tabs" => "AgenTerm Tabs",
+        "fleet.snapshot" => "AgenTerm Fleet Snapshot",
+        _ => "AgenTerm Resource",
+    }
+}
+
+fn resource_description(stable_id: &str) -> &'static str {
+    match stable_id {
+        "fleet.instances" => "Registered local AgenTerm server metadata",
+        "fleet.workspace" => "Selected workspace identity and event baseline",
+        "fleet.tabs" => "Metadata-only stable tab inventory",
+        "fleet.snapshot" => "One causal metadata-only Fleet snapshot",
+        _ => "AgenTerm metadata",
     }
 }
 
@@ -288,7 +382,10 @@ mod tests {
             responses[0]["result"]["protocolVersion"],
             MCP_PROTOCOL_REVISION
         );
-        assert_eq!(responses[0]["result"]["capabilities"], json!({}));
+        assert_eq!(
+            responses[0]["result"]["capabilities"],
+            json!({"resources": {"subscribe": false, "listChanged": false}})
+        );
         assert_eq!(responses[1], success_response(json!("ping-1"), json!({})));
     }
 
@@ -305,6 +402,27 @@ mod tests {
             MCP_PROTOCOL_REVISION
         );
         assert_eq!(responses[1]["error"]["code"], ERROR_NOT_INITIALIZED);
+    }
+
+    #[test]
+    fn ready_session_lists_exactly_four_metadata_resources() {
+        let responses = exchange(concat!(
+            "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":",
+            "{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{},",
+            "\"clientInfo\":{\"name\":\"fixture\",\"version\":\"1\"}}}\n",
+            "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n",
+            "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"resources/list\"}\n",
+            "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"resources/read\",",
+            "\"params\":{\"uri\":\"agenterm://fleet/unknown\"}}\n"
+        ));
+        assert_eq!(
+            responses[1]["result"]["resources"]
+                .as_array()
+                .unwrap()
+                .len(),
+            4
+        );
+        assert_eq!(responses[2]["error"]["code"], -32002);
     }
 
     #[test]

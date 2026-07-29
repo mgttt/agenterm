@@ -19,7 +19,8 @@ fn public_stdio_lifecycle_keeps_stdout_machine_only() {
         "{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{},",
         "\"clientInfo\":{\"name\":\"black-box\",\"version\":\"1\"}}}\n",
         "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n",
-        "{\"jsonrpc\":\"2.0\",\"id\":\"ping\",\"method\":\"ping\"}\n"
+        "{\"jsonrpc\":\"2.0\",\"id\":\"ping\",\"method\":\"ping\"}\n",
+        "{\"jsonrpc\":\"2.0\",\"id\":\"resources\",\"method\":\"resources/list\"}\n"
     );
     child
         .stdin
@@ -39,13 +40,51 @@ fn public_stdio_lifecycle_keeps_stdout_machine_only() {
         .lines()
         .map(|line| serde_json::from_str::<Value>(line).expect("stdout line is JSON-RPC"))
         .collect::<Vec<_>>();
-    assert_eq!(responses.len(), 2);
+    assert_eq!(responses.len(), 3);
     assert_eq!(responses[0]["jsonrpc"], "2.0");
     assert_eq!(responses[0]["id"], 1);
     assert_eq!(responses[0]["result"]["protocolVersion"], "2025-11-25");
-    assert_eq!(responses[0]["result"]["capabilities"], json!({}));
+    assert_eq!(
+        responses[0]["result"]["capabilities"],
+        json!({"resources": {"subscribe": false, "listChanged": false}})
+    );
     assert_eq!(
         responses[1],
         json!({"jsonrpc": "2.0", "id": "ping", "result": {}})
+    );
+    assert_eq!(
+        responses[2]["result"]["resources"]
+            .as_array()
+            .expect("resource list"),
+        &[
+            json!({
+                "uri": "agenterm://fleet/instances",
+                "name": "fleet.instances",
+                "title": "AgenTerm Instances",
+                "description": "Registered local AgenTerm server metadata",
+                "mimeType": "application/json"
+            }),
+            json!({
+                "uri": "agenterm://fleet/workspace",
+                "name": "fleet.workspace",
+                "title": "AgenTerm Workspace",
+                "description": "Selected workspace identity and event baseline",
+                "mimeType": "application/json"
+            }),
+            json!({
+                "uri": "agenterm://fleet/tabs",
+                "name": "fleet.tabs",
+                "title": "AgenTerm Tabs",
+                "description": "Metadata-only stable tab inventory",
+                "mimeType": "application/json"
+            }),
+            json!({
+                "uri": "agenterm://fleet/snapshot",
+                "name": "fleet.snapshot",
+                "title": "AgenTerm Fleet Snapshot",
+                "description": "One causal metadata-only Fleet snapshot",
+                "mimeType": "application/json"
+            })
+        ]
     );
 }

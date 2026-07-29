@@ -85,8 +85,8 @@ pub fn capabilities() -> McpCapabilities {
             ("initialize", McpAvailability::Shipped),
             ("notifications/initialized", McpAvailability::Shipped),
             ("ping", McpAvailability::Shipped),
-            ("resources/list", McpAvailability::Planned),
-            ("resources/read", McpAvailability::Planned),
+            ("resources/list", McpAvailability::Shipped),
+            ("resources/read", McpAvailability::Shipped),
             ("tools/list", McpAvailability::Planned),
             ("tools/call", McpAvailability::Planned),
             ("notifications/cancelled", McpAvailability::Planned),
@@ -99,28 +99,28 @@ pub fn capabilities() -> McpCapabilities {
                 stable_id: "fleet.instances",
                 uri: "agenterm://fleet/instances",
                 schema_id: "agenterm.mcp.resource.instances.v1",
-                availability: McpAvailability::Planned,
+                availability: McpAvailability::Shipped,
                 content_bearing: false,
             },
             McpResource {
                 stable_id: "fleet.workspace",
                 uri: "agenterm://fleet/workspace",
                 schema_id: "agenterm.mcp.resource.workspace.v1",
-                availability: McpAvailability::Planned,
+                availability: McpAvailability::Shipped,
                 content_bearing: false,
             },
             McpResource {
                 stable_id: "fleet.tabs",
                 uri: "agenterm://fleet/tabs",
                 schema_id: "agenterm.mcp.resource.tabs.v1",
-                availability: McpAvailability::Planned,
+                availability: McpAvailability::Shipped,
                 content_bearing: false,
             },
             McpResource {
                 stable_id: "fleet.snapshot",
                 uri: "agenterm://fleet/snapshot",
                 schema_id: "agenterm.mcp.resource.fleet-snapshot.v1",
-                availability: McpAvailability::Planned,
+                availability: McpAvailability::Shipped,
                 content_bearing: false,
             },
         ],
@@ -199,19 +199,29 @@ pub fn run_mcp_entry_with_args(arguments: Vec<String>) -> i32 {
             2
         }
         [command, transport] if command == "serve" && transport == "--stdio" => {
-            match crate::mcp_stdio::serve_stdio(
-                std::io::BufReader::new(std::io::stdin().lock()),
-                std::io::stdout().lock(),
-            ) {
-                Ok(()) => 0,
-                Err(error) => {
-                    eprintln!("mcp_stdio_failed: {error}");
-                    2
-                }
-            }
+            serve_mcp_stdio(None)
+        }
+        [address_option, address, command, transport]
+            if address_option == "--address" && command == "serve" && transport == "--stdio" =>
+        {
+            serve_mcp_stdio(Some(address.clone()))
         }
         _ => {
             eprintln!("unknown agenterm-mcp command; use --help");
+            2
+        }
+    }
+}
+
+fn serve_mcp_stdio(address: Option<String>) -> i32 {
+    match crate::mcp_stdio::serve_stdio_with_config(
+        std::io::BufReader::new(std::io::stdin().lock()),
+        std::io::stdout().lock(),
+        crate::mcp_stdio::McpStdioConfig { address },
+    ) {
+        Ok(()) => 0,
+        Err(error) => {
+            eprintln!("mcp_stdio_failed: {error}");
             2
         }
     }
@@ -225,7 +235,7 @@ fn print_help() {
            agenterm-mcp --help\n\
            agenterm-mcp --version\n\
            agenterm-mcp capabilities --json\n\
-           agenterm-mcp serve --stdio\n\
+           agenterm-mcp [--address HOST:PORT] serve --stdio\n\
          \n\
          The stdio lifecycle and ping are shipped in this implementation slice.\n\
          Fleet resources and the wait tool remain cataloged as planned.\n\
@@ -305,13 +315,19 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(
             shipped,
-            vec!["initialize", "notifications/initialized", "ping"]
+            vec![
+                "initialize",
+                "notifications/initialized",
+                "ping",
+                "resources/list",
+                "resources/read"
+            ]
         );
         assert!(
             catalog
                 .resources
                 .iter()
-                .all(|resource| resource.availability == McpAvailability::Planned)
+                .all(|resource| resource.availability == McpAvailability::Shipped)
         );
         assert_eq!(catalog.tools[0].availability, McpAvailability::Planned);
         assert!(
