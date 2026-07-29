@@ -188,9 +188,10 @@ duplicate state, redesign or reject.
 | W4 Extension | Install tools without fat GUI | EXT | softmgr + signed packages |
 | W5 Signals | External world → fleet actions | INF | subscriptions + connectors |
 | W6 Reach | Away-from-desk monitor + nudge | REACH | remote auth + push |
-| W7 Federation | Cross-machine fleets (optional) | ORCH + REACH | security model first |
+| W7 Federation | Cross-machine + decentralized net | ORCH, REACH, NET | B3 security + threat model |
+| W8 Decentralized apps (optional) | CID packages, p2p market, dApp workspace | EXT, INF, NET | W7 + softmgr |
 
-Ideas in W3–W7 are valid **inspiration** until their wave gate is green.
+Ideas in W3–W8 are valid **inspiration** until their wave gate is green.
 
 ### 6. Experience principles (design filter)
 
@@ -205,6 +206,8 @@ Derived from product origin; use when judging any new idea.
 6. **Fail explicitly** — unsupported tmux/MCP ops error; no false success.
 7. **Light and local-first** — small binaries, portable dist, bounded journals.
 8. **Extend outward** — market, feeds, and models plug in; core stays small.
+9. **Network is a sidecar** — libp2p/IPFS never bloat GUI or server; on-demand
+   nodes; crash-isolated from PTY fleet.
 
 ### 7. Idea admission checklist
 
@@ -227,6 +230,7 @@ Before adding or promoting an idea, answer:
 | E — Intelligence feeds | INF | W5 |
 | F — Mobile connector | REACH | W6 |
 | G — Platform & ship | DUR, P0 | W0–W1 |
+| H — Decentralized network | NET, federation | W7–W8 |
 
 ### Mind tree diagram (mermaid)
 
@@ -360,6 +364,90 @@ Non-goals:
 - claim **full** tmux/RMUX conformance while single-pane tabs remain shipped;
 - become a **hosted** cowork SaaS.
 
+## Decentralized network (`agenterm-net.exe`)
+
+Prior record: [`plan/plan-v0.1.8.md`](../plan/plan-v0.1.8.md) § **未来挂钩：
+`agenterm-net.exe`** (also referenced in plan v0.1.9 / v0.1.10). Product-owner
+intent: **soon-ish** libp2p/IPFS integration for decentralized networking,
+while preserving **small binaries, low memory, absolute stability**, and room
+for **high-leverage “black tech”** experiments without compromising the core.
+
+This is **not** W0–W1 infrastructure. It is a **W7–W8** lane until loopback
+control plane and optional-component gates are green.
+
+### Architectural contract (from prior plan; still binding)
+
+```text
+agenterm-script.exe
+  ├─ light HTTP in-process for ordinary scripts
+  └─ typed calls to agenterm-net.exe for libp2p / IPFS / heavy transport
+
+agenterm-net.exe (sidecar, optional)
+  ├─ curl-class HTTP + libp2p + IPFS + dApp primitives
+  ├─ NEVER inside agenterm.exe GUI or agenterm-server PTY path
+  ├─ on-demand start (not silent always-on node by default)
+  └─ Observable Fleet receipts/events for network tasks
+
+agenterm-agent.exe (later)
+  └─ policy: which peers, CIDs, budgets, credentials — not raw execution
+```
+
+### Size, memory, and stability guardrails
+
+Any promoted net work must pass the same product-owner constraints as the core:
+
+| Constraint | Rule |
+|------------|------|
+| **Binary budget** | `agenterm-net.exe` obeys sidecar **2 MiB** release gate unless an explicit, reviewed budget change with dependency audit |
+| **GUI/server isolation** | No libp2p/IPFS dependency linked into `agenterm.exe` or `agenterm-server.exe` |
+| **Memory ceiling** | Bounded connections, DHT participation, cache, and pin store; explicit caps in typed protocol |
+| **Stability** | Net sidecar crash/upgrade must not kill tabs, journal, or workspace; kill-on-close job semantics |
+| **Default posture** | **Off until invoked** — no background full node on install |
+| **Enterprise path** | Proxy, firewall, offline, NAT, relay behavior defined before agent tools |
+
+### Long capability tree (inspiration)
+
+Mirrors plan v0.1.8; status here is **not** shipped.
+
+- HTTP/curl-class CLI and structured JSON exits
+- libp2p: identity, multiaddr, discovery, pubsub, relay/NAT, resource budgets
+- IPFS: CID, block/DAG, pin, gateway, verified cache
+- dApp base: content publish, verifiable artifacts, task/result exchange, offline-first sync
+- Fleet integration: script `net/ipfs/p2p` stdlib surface, MCP net backend, status summaries
+
+### “Black tech” exploration (ideas only)
+
+High-leverage experiments to spike **inside `agenterm-net` or optional packages**,
+not in core binaries. Mark `[explore]` until evidence beats simpler paths:
+
+| ID | Status | Sketch |
+|----|--------|--------|
+| H-T1 | [explore] | CID-signed script modules and qualification receipts over IPFS |
+| H-T2 | [explore] | libp2p pubsub for Observable Fleet event fanout between user-owned peers |
+| H-T3 | [explore] | Content-addressed cache for large deps/build artifacts (pin budgets) |
+| H-T4 | [explore] | Minimal embedded Rust IPFS/libp2p subset vs full node — size trade study |
+| H-T5 | [explore] | Verifiable compute / evidence bundles as portable CIDs |
+| H-T6 | [deferred] | Always-on LAN mesh node — conflicts with default-off posture unless opt-in |
+
+Promotion requires: license review, Windows portability proof, threat model,
+interop tests, and **no regression** to first-window / PTY latency gates.
+
+### Product arc (if gates pass)
+
+```text
+local Fleet (W0–W1)
+  -> authenticated remote attach (W6–W7)
+    -> verifiable content exchange (W7, NET)
+      -> cross-node tasks + p2p tool market (W8, EXT)
+        -> local-first dApp workspace (W8)
+```
+
+Non-goals:
+
+- full IPFS desktop node by default;
+- blockchain/token layer as product requirement;
+- bypassing agent policy or softmgr signing with “decentralized” labels.
+
 ## Idea lanes
 
 Lanes map to **mind branches** and **waves** (see §8). Branch IDs: ORG, OBS,
@@ -457,15 +545,30 @@ Security notes (must be designed before F1 ships):
 | G3 | [promoted] | Strict binary size budgets (4 MiB GUI, 2 MiB sidecars) | — | Delivery and quality, Executable family |
 | G4 | [deferred] | Explorer shell replacement / `agenterm-desktop.exe` | high-risk gate | Optional component lifecycle, roadmap |
 
+### Lane H — Decentralized network (`agenterm-net` · NET · W7–W8)
+
+Prior plan: [plan-v0.1.8 agenterm-net section](../plan/plan-v0.1.8.md). Lane
+rules: sidecar-only, on-demand, 2 MiB class, isolated from GUI/server.
+
+| ID | Status | Idea | Depends on | Owning module when promoted |
+|----|--------|------|------------|------------------------------|
+| H1 | [explore] | `agenterm-net.exe` — curl-class HTTP + typed JSON protocol | optional component contract | New PRD or Optional components |
+| H2 | [idea] | libp2p layer (identity, discovery, pubsub, relay, budgets) | H1, threat model | same |
+| H3 | [idea] | IPFS layer (CID, pin, cat/get, cache budgets) | H1, H2 | same |
+| H4 | [idea] | script calls net sidecar; GUI never links p2p/ipfs | H1, Rhai HTTP | Rhai scripting |
+| H5 | [idea] | dApp base: verifiable artifact exchange between user peers | H2, H3, softmgr | Optional components, NET |
+| H6 | [explore] | Black-tech spikes (H-T1…H-T6 in § Decentralized network) | evidence gates | this file until promoted |
+| H7 | [deferred] | Silent always-on p2p node at install | — | **rejected** default; opt-in only |
+
 ## Idea card template (copy for new entries)
 
 ```markdown
 ### IDEA-YYYY-MM-DD-short-name
 
 - Status: [idea]
-- Mind branch: (ORG | OBS | INT | DUR | AUTO | ORCH | EXT | INF | REACH)
-- Wave: (W0–W7)
-- Lane: (A–G)
+- Mind branch: (ORG | OBS | INT | DUR | AUTO | ORCH | EXT | INF | REACH | NET)
+- Wave: (W0–W8)
+- Lane: (A–H)
 - Problem: (user pain in one sentence)
 - Sketch: (what it might look like)
 - Depends on: (capabilities or gates)
@@ -485,4 +588,4 @@ Add uncategorized sparks here; sort into lanes during review.
 
 ---
 
-Last reviewed: 2026-07-29 (product mind tree added)
+Last reviewed: 2026-07-29 (agenterm-net / libp2p/IPFS lane added)
