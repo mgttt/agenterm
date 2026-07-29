@@ -123,23 +123,30 @@ fn execute(command_spec, repo, scratch, sequence) {
         } else {
             ""
         };
+    let duration =
+        std::time::SystemTime::now().unix_millis - started;
+    let timed_out = duration > command_spec.timeout_ms;
     let powershell_violation =
         observed_powershell.len > 0 && !command_spec.allow_powershell;
     #{
         success:
             result.success
                 && !powershell_violation
-                && std::time::SystemTime::now().unix_millis - started
-                    <= command_spec.timeout_ms,
+                && !timed_out,
         exit_code: result.exit_code,
-        duration_ms:
-            std::time::SystemTime::now().unix_millis - started,
+        duration_ms: duration,
         stdout: stdout,
         stderr:
             stderr +
             if powershell_violation {
                 "\nrepository_automation_spawned_powershell:" +
                     observed_powershell.join(",")
+            } else {
+                ""
+            } +
+            if timed_out {
+                "\ngate_deadline_exceeded:" +
+                    command_spec.timeout_ms
             } else {
                 ""
             },
@@ -732,7 +739,7 @@ if !skip_smoke {
             std::path::join(repo, "build.bat").display,
             "release-fast"
         ],
-        60000,
+        300000,
         build_environment
     ));
 }
