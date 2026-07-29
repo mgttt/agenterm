@@ -42,7 +42,7 @@ Legend：`[x]` 已对齐，`[~]` 部分，`[ ]` 未做。
 ### P0 — 快照与树几何（当前循环）
 
 - [x] 侧栏树行几何（paint、disclosure 命中、`tabs[].bounds`/`render`/`actions`）
-- [ ] **ui-snapshot 契约**：`schema_version`、`projection`、`settings`、`layout.terminal` 嵌套 scrollbar、`locale`/`feedback` 等与 `UI_CLIENT_STATE_SCHEMA_VERSION` 一致
+- [x] **ui-snapshot 契约**：`schema_version`、`projection`、`settings`、`layout.terminal` 嵌套 scrollbar、`locale`/`feedback` 等与 Win 形状对齐（`embedded_gui`）
 - [ ] 黑盒：`ui-snapshot` 几何测试覆盖 180/250/480 px 侧栏与 disclosure 命中
 
 ### P1 — 侧栏交互深度

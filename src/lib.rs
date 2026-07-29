@@ -49,6 +49,8 @@ mod ui_geometry;
 mod ui_interaction;
 #[cfg(any(windows, unix))]
 mod ui_lease;
+#[cfg(unix)]
+mod ui_snapshot;
 mod upgrade_identity;
 pub use upgrade_identity::UpgradeIdentity;
 mod wake_signal;
