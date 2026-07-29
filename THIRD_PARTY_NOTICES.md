@@ -14,6 +14,7 @@ Copyright and license terms remain with their respective authors.
 | `rmux-pty` | MIT OR Apache-2.0 |
 | `serde` | MIT OR Apache-2.0 |
 | `serde_json` | MIT OR Apache-2.0 |
+| `sha2` | MIT OR Apache-2.0 |
 | `softbuffer` | MIT OR Apache-2.0 |
 | `ureq` | MIT OR Apache-2.0 |
 | `unicode-width` | MIT OR Apache-2.0 |
