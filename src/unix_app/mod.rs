@@ -42,9 +42,9 @@ use crate::{
     theme::ThemeId,
     ui_clipboard::{normalize_composer_paste, normalize_terminal_paste},
     ui_geometry::{
-        ScrollbarHit, TAB_HEIGHT, WHEEL_DELTA, WHEEL_ROWS_PER_NOTCH, pixel_rect_json,
-        scrollback_for_thumb_top, scrollbar_hit_test, tabs_width_from_drag, terminal_cell_at,
-        wheel_delta_units,
+        ScrollbarHit, TreeRowActionDensity, TreeRowMode, WHEEL_DELTA, WHEEL_ROWS_PER_NOTCH,
+        pixel_rect_json, scrollback_for_thumb_top, scrollbar_hit_test, tabs_width_from_drag,
+        terminal_cell_at, tree_row_geometry_for_mode, wheel_delta_units,
     },
     wake_signal::WakeSignal,
     working_context::{CwdSource, ShellKind, cwd_command, validate_path},
@@ -989,6 +989,32 @@ impl UnixApp {
             .collect()
     }
 
+    fn sidebar_row_geometry(
+        &self,
+        visual_position: usize,
+        depth: usize,
+        tab_id: u64,
+    ) -> crate::ui_geometry::TreeRowGeometry {
+        let mode = if self.note_edit_target == Some(tab_id) {
+            TreeRowMode::Editing
+        } else {
+            TreeRowMode::Normal
+        };
+        tree_row_geometry_for_mode(
+            visual_position,
+            depth,
+            self.layout().effective_tabs_width,
+            mode,
+        )
+    }
+
+    fn tree_action_density_name(density: TreeRowActionDensity) -> &'static str {
+        match density {
+            TreeRowActionDensity::Full => "full",
+            TreeRowActionDensity::Compact => "compact",
+        }
+    }
+
     fn tab_position_for_sidebar_y(&self, y: u32) -> Option<usize> {
         let tree_height = self.layout().sidebar_tree.height().max(0) as u32;
         let row_index = sidebar_row_at_y(y, tree_height)?;
@@ -1011,7 +1037,6 @@ impl UnixApp {
         let active = self.active;
         let (client_width, client_height) = self.client_size();
         let layout = self.layout();
-        let sidebar_width = sidebar_width_u32(&layout);
         let visible_rows = self.visible_tree_rows();
         let all_rows = self.all_tree_rows();
         let scrollbar = self.active_position().map(|position| {
@@ -1042,6 +1067,52 @@ impl UnixApp {
                     .tabs_visible
                     .then(|| visible_rows.iter().position(|visible| visible.id == row.id))
                     .flatten();
+                let geometry = visible_position
+                    .map(|position| self.sidebar_row_geometry(position, row.depth, tab.id));
+                let actions = visible_position
+                    .filter(|_| active == Some(tab.id))
+                    .map(|position| {
+                        let geometry = self.sidebar_row_geometry(position, row.depth, tab.id);
+                        let action =
+                            |id: &str, label: &str, bounds: crate::ui_geometry::PixelRect| {
+                                serde_json::json!({
+                                    "id": id,
+                                    "label": label,
+                                    "bounds": pixel_rect_json(bounds),
+                                    "x": bounds.left,
+                                    "y": bounds.top,
+                                    "width": bounds.width(),
+                                    "height": bounds.height(),
+                                })
+                            };
+                        match geometry.mode {
+                            TreeRowMode::Normal => serde_json::json!({
+                                "mode": "normal",
+                                "density": Self::tree_action_density_name(geometry.actions.density),
+                                "new_child": action(
+                                    "new-child",
+                                    "Add",
+                                    geometry.actions.add_child.expect("normal row has Add"),
+                                ),
+                                "edit": action("edit-tab", "Edit", geometry.actions.primary),
+                                "close": action("close-tab", "Close", geometry.actions.secondary),
+                            }),
+                            TreeRowMode::Editing => serde_json::json!({
+                                "mode": "editing",
+                                "density": Self::tree_action_density_name(geometry.actions.density),
+                                "save": action(
+                                    "tab-editor-save",
+                                    "Save",
+                                    geometry.actions.primary,
+                                ),
+                                "cancel": action(
+                                    "tab-editor-cancel",
+                                    "Cancel",
+                                    geometry.actions.secondary,
+                                ),
+                            }),
+                        }
+                    });
                 let draft = if self.active == Some(tab.id) {
                     !self.composer_buffer.is_empty() || tab.sensitive_composer.is_some()
                 } else {
@@ -1061,12 +1132,27 @@ impl UnixApp {
                     "state": Self::tab_state(tab),
                     "scrollback_offset": tab.parser.screen().scrollback(),
                     "draft": draft,
-                    "bounds": visible_position.map(|position| pixel_rect_json(crate::ui_geometry::PixelRect {
-                        left: 0,
-                        top: position as i32 * TAB_HEIGHT,
-                        right: sidebar_width as i32,
-                        bottom: (position + 1) as i32 * TAB_HEIGHT,
+                    "bounds": geometry.map(|value| pixel_rect_json(value.row)),
+                    "render": geometry.map(|value| serde_json::json!({
+                        "mode": match value.mode {
+                            TreeRowMode::Normal => "normal",
+                            TreeRowMode::Editing => "editing",
+                        },
+                        "row": pixel_rect_json(value.row),
+                        "selection": pixel_rect_json(value.selection),
+                        "node": {"x": value.node_x, "y": value.node_y},
+                        "expander": pixel_rect_json(value.expander),
+                        "status": pixel_rect_json(value.status),
+                        "disclosure_hit": pixel_rect_json(value.disclosure_hit),
+                        "text": pixel_rect_json(value.text),
+                        "name": pixel_rect_json(value.name),
+                        "note": pixel_rect_json(value.note),
+                        "editors": value.editors.map(|editors| serde_json::json!({
+                            "name": pixel_rect_json(editors.name),
+                            "note": pixel_rect_json(editors.note),
+                        })),
                     })),
+                    "actions": actions,
                 }))
             })
             .collect::<Vec<_>>();
@@ -1224,13 +1310,17 @@ impl UnixApp {
             return;
         }
         let tree_height = layout.sidebar_tree.height().max(0) as u32;
-        if x < 28.0
-            && let Some(row_index) = sidebar_row_at_y(y.max(0.0) as u32, tree_height)
+        let click_y = y.max(0.0) as i32;
+        let click_x = x as i32;
+        if let Some(row_index) = sidebar_row_at_y(y.max(0.0) as u32, tree_height)
             && let Some(row) = self.visible_tree_rows().get(row_index)
             && self.tabs.iter().any(|tab| tab.parent_id == Some(row.id))
         {
-            let _ = self.toggle_collapsed(row.id);
-            return;
+            let geometry = self.sidebar_row_geometry(row_index, row.depth, row.id);
+            if geometry.disclosure_hit.contains(click_x, click_y) {
+                let _ = self.toggle_collapsed(row.id);
+                return;
+            }
         }
         let Some(position) = self.tab_position_for_sidebar_y(y.max(0.0) as u32) else {
             self.set_focus_surface_internal(UnixFocusSurface::Sidebar, "mouse");
@@ -2112,6 +2202,7 @@ impl UnixApp {
                     selection: terminal_selection,
                 },
                 sidebar_rows: &sidebar_rows,
+                editing_tab_id: self.note_edit_target,
                 workspace_toolbar,
                 terminal_top: layout.terminal.top.max(0) as u32,
                 composer: composer_view,

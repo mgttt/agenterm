@@ -1,5 +1,5 @@
 use crate::theme::{Rgb, ThemeId, ThemePalette};
-use crate::ui_geometry::TAB_HEIGHT;
+use crate::ui_geometry::{TreeRowMode, tree_row_at_y, tree_row_geometry_for_mode};
 use unicode_width::UnicodeWidthChar;
 
 use super::{
@@ -407,6 +407,7 @@ pub(super) struct FrameContent<'a> {
     pub(super) cell_height: u32,
     pub(super) terminal: TerminalPaint<'a>,
     pub(super) sidebar_rows: &'a [SidebarTabRow],
+    pub(super) editing_tab_id: Option<u64>,
     pub(super) workspace_toolbar: Option<WorkspaceToolbarView>,
     pub(super) terminal_top: u32,
     pub(super) composer: ComposerView<'a>,
@@ -449,6 +450,7 @@ pub(super) fn render_frame(
             palette,
             content.sidebar_rows,
             content.sidebar_width,
+            content.editing_tab_id,
         );
     }
     if let Some(toolbar) = content.workspace_toolbar {
@@ -777,6 +779,7 @@ fn render_workspace_toolbar(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_sidebar(
     buffer: &mut [u32],
     stride: u32,
@@ -785,8 +788,10 @@ fn render_sidebar(
     palette: &ThemePalette,
     rows: &[SidebarTabRow],
     sidebar_width: u32,
+    editing_tab_id: Option<u64>,
 ) {
     let sidebar_width = sidebar_width.min(width);
+    let sidebar_width_i32 = sidebar_width as i32;
     let sidebar_bg = rgb_to_pixel(palette.sidebar);
     fill_rect(buffer, stride, 0, 0, sidebar_width, height, sidebar_bg);
 
@@ -804,72 +809,74 @@ fn render_sidebar(
     }
 
     for (index, row) in rows.iter().enumerate() {
-        let top = index as u32 * TAB_HEIGHT as u32;
+        let mode = if editing_tab_id == Some(row.id) {
+            TreeRowMode::Editing
+        } else {
+            TreeRowMode::Normal
+        };
+        let geometry = tree_row_geometry_for_mode(index, row.depth, sidebar_width_i32, mode);
+        let top = geometry.row.top.max(0) as u32;
         if top >= height {
             break;
         }
-        let row_height = (TAB_HEIGHT as u32).min(height.saturating_sub(top));
-        let indent = 8 + u32::try_from(row.depth).unwrap_or(0).saturating_mul(12);
-        let text_x = indent.min(sidebar_width.saturating_sub(1));
+        let row_bottom = geometry.row.bottom.max(geometry.row.top) as u32;
+        let row_height = row_bottom
+            .saturating_sub(top)
+            .min(height.saturating_sub(top));
+        if row_height == 0 {
+            continue;
+        }
+
+        if row.active {
+            let active_bg = rgb_to_pixel(palette.active);
+            fill_rect(
+                buffer,
+                stride,
+                geometry.selection.left.max(0) as u32,
+                geometry.selection.top.max(0) as u32,
+                geometry.selection.width().max(0) as u32,
+                geometry.selection.height().max(0) as u32,
+                active_bg,
+            );
+        }
+
         let marker = if row.has_children {
             if row.collapsed { "[+]" } else { "[-]" }
         } else {
             "   "
         };
-        let label = format!("{marker} @{} {}", row.id, row.title);
-        let max_chars =
-            ((sidebar_width.saturating_sub(text_x)) / (GLYPH_WIDTH + 1)).max(1) as usize;
-        let clipped = truncate_chars(&label, max_chars);
-
-        if row.active {
-            let active_bg = rgb_to_pixel(palette.active);
-            fill_rect(buffer, stride, 0, top, sidebar_width, row_height, active_bg);
-            draw_text(
-                buffer,
-                stride,
-                width,
-                height,
-                text_x,
-                top + 2,
-                &clipped,
-                palette.selection_foreground,
-            );
-            let note_chars =
-                ((sidebar_width.saturating_sub(text_x)) / (GLYPH_WIDTH + 1)).max(1) as usize;
-            draw_text(
-                buffer,
-                stride,
-                width,
-                height,
-                text_x,
-                top + 17,
-                &truncate_chars(&row.note, note_chars),
-                palette.muted_text,
-            );
+        let marker_x = geometry.node_x.max(0) as u32;
+        let marker_y = geometry.node_y.max(0) as u32;
+        let text_color = if row.active {
+            palette.selection_foreground
         } else {
-            draw_text(
-                buffer,
-                stride,
-                width,
-                height,
-                text_x,
-                top + 2,
-                &clipped,
-                palette.text,
-            );
-            let note_chars =
-                ((sidebar_width.saturating_sub(text_x)) / (GLYPH_WIDTH + 1)).max(1) as usize;
-            draw_text(
-                buffer,
-                stride,
-                width,
-                height,
-                text_x,
-                top + 17,
-                &truncate_chars(&row.note, note_chars),
-                palette.muted_text,
-            );
-        }
+            palette.text
+        };
+        draw_text(
+            buffer, stride, width, height, marker_x, marker_y, marker, text_color,
+        );
+
+        let name_x = geometry.name.left.max(0) as u32;
+        let name_y = geometry.name.top.max(0) as u32;
+        let name_chars = (geometry.name.width().max(0) as u32 / (GLYPH_WIDTH + 1)).max(1) as usize;
+        let title = truncate_chars(&format!("@{} {}", row.id, row.title), name_chars);
+        draw_text(
+            buffer, stride, width, height, name_x, name_y, &title, text_color,
+        );
+
+        let note_x = geometry.note.left.max(0) as u32;
+        let note_y = geometry.note.top.max(0) as u32;
+        let note_chars = (geometry.note.width().max(0) as u32 / (GLYPH_WIDTH + 1)).max(1) as usize;
+        draw_text(
+            buffer,
+            stride,
+            width,
+            height,
+            note_x,
+            note_y,
+            &truncate_chars(&row.note, note_chars),
+            palette.muted_text,
+        );
     }
 }
 
@@ -1339,7 +1346,7 @@ pub(super) fn sidebar_row_at_y(y: u32, tree_height: u32) -> Option<usize> {
     if y >= tree_height {
         return None;
     }
-    Some((y / TAB_HEIGHT as u32) as usize)
+    tree_row_at_y(y as i32)
 }
 
 pub(super) fn scrollbar_view_from_geometry(
