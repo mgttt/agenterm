@@ -431,7 +431,12 @@ try {
     }
     Invoke-Checked -Id 'supply-chain' `
         -Label 'locked dependency licenses and SPDX inventory' {
-        & '.\scripts\supply-chain.ps1'
+        & '.\dist\agenterm-script.exe' task run supply-chain `
+            --manifest '.\agenterm.tasks.json' `
+            --timeout-ms 60000 --max-operations 10000000 `
+            --max-collection-items 100000 --max-string-bytes 8388608 `
+            --max-output-bytes 1048576 `
+            -- '.' 'dist\agenterm-sbom.spdx.json'
     }
     Invoke-Checked -Id 'target-report' -Label 'Cargo target inventory' {
         & '.\dist\agenterm-cli.exe' script run `

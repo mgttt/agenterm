@@ -186,6 +186,9 @@ agenterm-script
 │  │  ├─ parse(text)
 │  │  │  Parses JSON text into a Rhai value.
 │  │  │  [shipped; stable; designed 2026-07-28]
+│  │  ├─ parse_file(path)
+│  │  │  Streams an explicit JSON file up to 8 MiB into a Rhai value.
+│  │  │  [shipped; stable; designed 2026-07-29]
 │  │  ├─ stringify(value)
 │  │  │  Serializes one Rhai-compatible value to compact JSON.
 │  │  │  [shipped; stable; designed 2026-07-28]
@@ -292,6 +295,9 @@ agenterm-script
 │  │  ├─ .current_dir(path) / .env(name, value)
 │  │  │  Configures child launch context.
 │  │  │  [shipped; stable; designed 2026-07-28]
+│  │  ├─ .stdout_file(path)
+│  │  │  Truncates one explicit file and redirects the child's stdout to it.
+│  │  │  [shipped; stable; designed 2026-07-29]
 │  │  ├─ .output() -> Output
 │  │  │  Runs synchronously with bounded captured output.
 │  │  │  [shipped; stable; designed 2026-07-28]
@@ -679,6 +685,12 @@ JSON schema. Invalid JSON or unsupported values MUST fail with a stable code.
 Input size, output size, nesting depth, and collection limits remain governed
 by invocation budgets.
 
+`rhai::json::parse_file(path)` parses one explicit file through a streaming
+host reader, allowing structured tool output to avoid a shell and an
+intermediate Rhai string. Files larger than 8 MiB fail with
+`json_parse_file_too_large`; parsing does not weaken collection, map, depth, or
+wall-time budgets.
+
 ### 7.4 Bytes
 
 `Bytes` is an owned byte sequence. `.len` counts bytes. `.to_text()` performs
@@ -714,6 +726,12 @@ is reserved by the language. Environment values are available to the running
 script but MUST NOT be copied into retained audit or diagnostics.
 `Command.env`, `env_remove`, and `env_clear` configure only the child; they do
 not mutate the AgenTerm host.
+
+`Command.stdout_file(path)` resolves the explicit path in the worker context,
+opens it with truncate semantics before child launch, and leaves
+`Output.stdout` empty. It does not create parent directories and never inserts
+a shell. This supports bounded orchestration of tools whose structured output
+is intentionally consumed later through typed file APIs.
 
 The shipped process defaults are a 2,000 ms child deadline and 64 KiB retained
 for each captured stream. A script MAY lower or raise them through
@@ -1156,6 +1174,19 @@ Every invocation has hard ceilings covering at least:
 Defaults and hard ceilings are published by `api --json`. Reaching a limit
 returns a typed limit error, cleans owned resources, and leaves the next
 invocation healthy.
+
+The default invocation wall time is 2 seconds. The stable hard ceiling is 120
+seconds so explicit local build and repository tasks can complete without
+escaping to another shell; child-process and HTTP operation deadlines remain
+independently bounded at 10 seconds.
+
+The CLI options `--timeout-ms`, `--max-operations`,
+`--max-collection-items`, and `--max-output-bytes` may select invocation
+values within those published hard ceilings. `--max-string-bytes` is also
+available for structured local workloads. Collection items accept 1 through
+100,000, strings accept 1 through 8,388,608 bytes, and output accepts 1
+through 1,048,576 bytes. These options do not raise child-stream capture
+limits or the global framing ceiling.
 
 ## 19. Examples
 

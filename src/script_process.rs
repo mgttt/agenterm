@@ -15,7 +15,7 @@ use crate::{
     script_stdlib::{ScriptBytes, ScriptPath},
     script_stream::{
         CapturedStream, ScriptStream, cancel as cancel_stream, capture_after_close,
-        discard_buffered, from_process_reader, mark_process_exited,
+        discard_buffered, from_process_reader, from_reader, mark_process_exited,
     },
 };
 
@@ -37,6 +37,7 @@ pub struct ScriptCommand {
     environment: BTreeMap<String, Option<String>>,
     clear_environment: bool,
     stdin: Vec<u8>,
+    stdout_file: Option<PathBuf>,
     timeout: Duration,
     capture_bytes: usize,
 }
@@ -101,6 +102,7 @@ fn register_types(engine: &mut Engine) {
         command.clear_environment = true;
     });
     engine.register_fn("stdin_text", command_stdin_text);
+    engine.register_fn("stdout_file", command_stdout_file);
     engine.register_fn(
         "timeout",
         |command: &mut ScriptCommand, value: ScriptDuration| {
@@ -220,6 +222,7 @@ fn process_command(program: &str) -> Result<ScriptCommand, Box<EvalAltResult>> {
         environment: BTreeMap::new(),
         clear_environment: false,
         stdin: Vec::new(),
+        stdout_file: None,
         timeout: Duration::from_millis(DEFAULT_TIMEOUT_MS),
         capture_bytes: DEFAULT_CAPTURE_BYTES,
     })
@@ -288,6 +291,14 @@ fn command_stdin_text(command: &mut ScriptCommand, value: &str) -> Result<(), Bo
     Ok(())
 }
 
+fn command_stdout_file(command: &mut ScriptCommand, path: &str) -> Result<(), Box<EvalAltResult>> {
+    if path.is_empty() {
+        return Err("process_stdout_file_empty".into());
+    }
+    command.stdout_file = Some(PathBuf::from(path));
+    Ok(())
+}
+
 fn command_capture_limit(
     command: &mut ScriptCommand,
     bytes: rhai::INT,
@@ -311,11 +322,15 @@ fn command_start(command: &mut ScriptCommand) -> Result<ScriptChild, Box<EvalAlt
 
 fn spawn_owned(command: &ScriptCommand) -> Result<ScriptChild, Box<EvalAltResult>> {
     let mut process = Command::new(&command.program);
-    process
-        .args(&command.arguments)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+    process.args(&command.arguments).stdin(Stdio::piped());
+    if let Some(path) = command.stdout_file.as_ref() {
+        let file =
+            std::fs::File::create(path).map_err(|error| format!("process_stdout_file: {error}"))?;
+        process.stdout(Stdio::from(file));
+    } else {
+        process.stdout(Stdio::piped());
+    }
+    process.stderr(Stdio::piped());
     if let Some(current_dir) = command.current_dir.as_ref() {
         process.current_dir(current_dir);
     }
@@ -332,11 +347,17 @@ fn spawn_owned(command: &ScriptCommand) -> Result<ScriptChild, Box<EvalAltResult
     let mut child = process
         .spawn()
         .map_err(|error| format!("process_spawn: {error}"))?;
-    let stdout = child.stdout.take().ok_or("process_stdout_unavailable")?;
+    let stdout = if command.stdout_file.is_some() {
+        from_reader(std::io::empty(), "bytes", 0)
+    } else {
+        from_process_reader(
+            child.stdout.take().ok_or("process_stdout_unavailable")?,
+            "bytes",
+            command.capture_bytes,
+        )
+    };
     let stderr = child.stderr.take().ok_or("process_stderr_unavailable")?;
-    let limit = command.capture_bytes;
-    let stdout = from_process_reader(stdout, "bytes", limit);
-    let stderr = from_process_reader(stderr, "bytes", limit);
+    let stderr = from_process_reader(stderr, "bytes", command.capture_bytes);
     if let Some(mut stdin) = child.stdin.take() {
         stdin
             .write_all(&command.stdin)
@@ -629,6 +650,42 @@ mod tests {
         assert_eq!(result["code"].as_int().unwrap(), 7);
         assert_eq!(result["stdout"].clone().into_string().unwrap(), "argv-safe");
         assert_eq!(result["stderr"].clone().into_string().unwrap(), "error");
+    }
+
+    #[test]
+    fn command_can_redirect_stdout_to_one_explicit_file() {
+        let path = std::env::temp_dir().join(format!(
+            "agenterm-process-stdout-{}.txt",
+            std::process::id()
+        ));
+        let script_path = path.to_string_lossy().replace('\\', "\\\\");
+        let source = if cfg!(windows) {
+            format!(
+                r#"
+                    let c = std::process::command("cmd.exe");
+                    c.args(["/d", "/s", "/c",
+                        "<nul set /p =redirected&exit /b 0"]);
+                    c.stdout_file("{script_path}");
+                    let output = c.output();
+                    #{{ success: output.success, stdout: output.stdout_text() }}
+                "#
+            )
+        } else {
+            format!(
+                r#"
+                    let c = std::process::command("/bin/sh");
+                    c.args(["-c", "printf redirected"]);
+                    c.stdout_file("{script_path}");
+                    let output = c.output();
+                    #{{ success: output.success, stdout: output.stdout_text() }}
+                "#
+            )
+        };
+        let result = engine().eval::<rhai::Map>(&source).unwrap();
+        assert!(result["success"].as_bool().unwrap());
+        assert_eq!(result["stdout"].clone().into_string().unwrap(), "");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "redirected");
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]

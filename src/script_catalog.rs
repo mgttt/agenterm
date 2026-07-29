@@ -611,10 +611,10 @@ pub fn entries() -> Vec<ScriptApiEntry> {
         shipped_local_entry(
             "std.process.command-builder",
             "system/process/command/builder",
-            "Command.arg/args/current_dir/env/env_remove/env_clear/stdin_text/timeout/capture_limit",
+            "Command.arg/args/current_dir/env/env_remove/env_clear/stdin_text/stdout_file/timeout/capture_limit",
             Some("std::process::Command"),
             RustMapping::Adapted,
-            "command.arg(value) / command.args(values) / command.current_dir(path) / command.env(name, value)",
+            "command.arg(value) / command.args(values) / command.current_dir(path) / command.env(name, value) / command.stdout_file(path)",
             (&["mutable_builder", "bounded_text_stdin", "invocation_owned"], &["process_argument", "environment_name_invalid"]),
         ),
         shipped_local_entry(
@@ -727,6 +727,18 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             RustMapping::None,
             "rhai::json::parse(text)",
             (NO_STRINGS, &["json_parse", "json_dynamic"]),
+        ),
+        shipped_local_entry(
+            "rhai.json.parse-file",
+            "data/json/parse-file",
+            "rhai::json::parse_file",
+            Some("serde_json::from_reader"),
+            RustMapping::Adapted,
+            "rhai::json::parse_file(path)",
+            (
+                &["typed_file_input", "eight_mebibyte_limit"],
+                &["json_parse_file", "json_parse_file_too_large"],
+            ),
         ),
         shipped_local_entry(
             "rhai.json.stringify",

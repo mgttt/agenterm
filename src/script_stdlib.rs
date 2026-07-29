@@ -159,6 +159,7 @@ pub fn register_local(engine: &mut Engine) {
 
     let mut json = Module::new();
     json.set_native_fn("parse", json_parse);
+    json.set_native_fn("parse_file", json_parse_file);
     json.set_native_fn("stringify", json_stringify);
     json.set_native_fn("stringify_pretty", json_stringify_pretty);
 
@@ -575,6 +576,24 @@ fn json_parse(value: &str) -> Result<Dynamic, Box<EvalAltResult>> {
     rhai::serde::to_dynamic(value).map_err(|error| format!("json_dynamic: {error}").into())
 }
 
+fn json_parse_file(path: &str) -> Result<Dynamic, Box<EvalAltResult>> {
+    const MAX_JSON_FILE_BYTES: u64 = 8 * 1024 * 1024;
+    let file =
+        std::fs::File::open(path).map_err(|error| io_error("json_parse_file", path, error))?;
+    let length = file
+        .metadata()
+        .map_err(|error| io_error("json_parse_file", path, error))?
+        .len();
+    if length > MAX_JSON_FILE_BYTES {
+        return Err(
+            format!("json_parse_file_too_large: maximum is {MAX_JSON_FILE_BYTES} bytes").into(),
+        );
+    }
+    let value: serde_json::Value =
+        serde_json::from_reader(file).map_err(|error| format!("json_parse_file: {error}"))?;
+    rhai::serde::to_dynamic(value).map_err(|error| format!("json_dynamic: {error}").into())
+}
+
 fn json_stringify(value: Dynamic) -> Result<String, Box<EvalAltResult>> {
     let value: serde_json::Value =
         rhai::serde::from_dynamic(&value).map_err(|error| format!("json_value: {error}"))?;
@@ -629,6 +648,29 @@ mod tests {
                 .unwrap(),
             "hello"
         );
+    }
+
+    #[test]
+    fn json_parse_file_streams_a_large_explicit_document() {
+        let path = std::env::temp_dir().join(format!(
+            "agenterm-json-parse-file-{}.json",
+            std::process::id()
+        ));
+        let payload = "x".repeat(300_000);
+        std::fs::write(
+            &path,
+            serde_json::to_vec(&serde_json::json!({ "payload": payload })).unwrap(),
+        )
+        .unwrap();
+        let script_path = path.to_string_lossy().replace('\\', "\\\\");
+        let value = local_engine()
+            .eval::<rhai::Map>(&format!(r#"rhai::json::parse_file("{script_path}")"#))
+            .unwrap();
+        assert_eq!(
+            value["payload"].clone().into_string().unwrap().len(),
+            300_000
+        );
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]

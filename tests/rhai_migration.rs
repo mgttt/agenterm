@@ -255,6 +255,33 @@ fn run_preflight_benchmark(repo_under_test: &Path, output_path: &Path) -> Output
         .expect("run Rhai preflight-benchmark task")
 }
 
+fn run_supply_chain(output_path: &Path) -> Output {
+    let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let manifest = repo.join("agenterm.tasks.json");
+    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+        .current_dir(repo)
+        .args(["task", "run", "supply-chain", "--manifest"])
+        .arg(manifest)
+        .args([
+            "--timeout-ms",
+            "60000",
+            "--max-operations",
+            "10000000",
+            "--max-collection-items",
+            "100000",
+            "--max-string-bytes",
+            "8388608",
+            "--max-output-bytes",
+            "1048576",
+        ])
+        .arg("--")
+        .arg(repo)
+        .arg(output_path)
+        .output()
+        .expect("run Rhai supply-chain task")
+}
+
 fn parse_batch_environment(path: &Path) -> Vec<(String, String)> {
     fs::read_to_string(path)
         .expect("read batch environment")
@@ -1306,6 +1333,89 @@ fn preflight_benchmark_task_measures_clean_public_worker_runs() {
     );
 
     fs::remove_dir_all(&fixture).expect("remove benchmark fixture");
+}
+
+#[test]
+fn supply_chain_task_is_deterministic_and_covers_the_resolved_lock_graph() {
+    let root = fixture_root("supply-chain");
+    fs::create_dir_all(&root).expect("create supply-chain output fixture");
+    let first_path = root.join("first.spdx.json");
+    let first = run_supply_chain(&first_path);
+    assert!(
+        first.status.success(),
+        "first supply-chain run failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&first.stdout),
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let first_bytes = fs::read(&first_path).expect("read first SPDX document");
+    let document: serde_json::Value =
+        serde_json::from_slice(&first_bytes).expect("decode SPDX document");
+    assert_eq!(document["spdxVersion"], "SPDX-2.3");
+    assert_eq!(document["dataLicense"], "CC0-1.0");
+    assert_eq!(
+        document["creationInfo"]["creators"][0],
+        "Tool: agenterm-script task run supply-chain"
+    );
+    let packages = document["packages"].as_array().expect("SPDX packages");
+    let relationships = document["relationships"]
+        .as_array()
+        .expect("SPDX relationships");
+    assert_eq!(relationships.len(), packages.len());
+    assert_eq!(
+        document["documentDescribes"]
+            .as_array()
+            .expect("document describes")
+            .len(),
+        packages.len()
+    );
+    assert!(
+        packages.iter().all(|package| {
+            package["SPDXID"]
+                .as_str()
+                .is_some_and(|id| id.starts_with("SPDXRef-Package-"))
+                && package["licenseDeclared"]
+                    .as_str()
+                    .is_some_and(|license| !license.is_empty())
+                && package["externalRefs"][0]["referenceType"] == "purl"
+        }),
+        "SPDX package contract is incomplete"
+    );
+    assert!(
+        packages.windows(2).all(|pair| {
+            let key = |package: &serde_json::Value| {
+                format!(
+                    "{}\n{}\n{}\n{}",
+                    package["name"].as_str().unwrap_or_default(),
+                    package["versionInfo"].as_str().unwrap_or_default(),
+                    package["comment"].as_str().unwrap_or_default(),
+                    package["SPDXID"].as_str().unwrap_or_default()
+                )
+            };
+            key(&pair[0]) <= key(&pair[1])
+        }),
+        "SPDX packages are not deterministically ordered"
+    );
+
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let lock = fs::read_to_string(repo.join("Cargo.lock")).expect("read Cargo.lock");
+    let expected_packages = lock.matches("[[package]]").count() - 1;
+    assert_eq!(
+        packages.len(),
+        expected_packages,
+        "SPDX inventory omitted or added resolved packages"
+    );
+    assert!(
+        fs::read_dir(&root)
+            .expect("read supply-chain output directory")
+            .filter_map(Result::ok)
+            .all(|entry| !entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("cargo-metadata-")),
+        "supply-chain task retained metadata scratch files"
+    );
+
+    fs::remove_dir_all(&root).expect("remove supply-chain fixture");
 }
 
 #[cfg(windows)]

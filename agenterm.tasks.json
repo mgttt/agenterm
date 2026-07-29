@@ -35,6 +35,7 @@
         "std.time.system-time-unix-millis",
         "std.time.system-time-rfc3339",
         "rhai.json.parse",
+        "rhai.json.parse-file",
         "rhai.json.stringify-pretty",
         "rhai.crypto.sha256-file",
         "rhai.runtime.atomic-write"
@@ -103,6 +104,13 @@
       "id": "stage-artifact",
       "description": "Stage one AgenTerm executable while preserving an in-use Windows image",
       "entry": "scripts/rhai/stage-artifact.rhai",
+      "profile": "local",
+      "cwd": "."
+    },
+    {
+      "id": "supply-chain",
+      "description": "Validate locked Cargo licenses and write deterministic SPDX evidence",
+      "entry": "scripts/rhai/supply-chain.rhai",
       "profile": "local",
       "cwd": "."
     },

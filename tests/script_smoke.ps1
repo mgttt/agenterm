@@ -439,7 +439,7 @@ try {
         $apiResult.value.profiles.local.variables -notcontains 'fleet' -or
         $apiResult.value.profiles.local.status -ne 'shipped' -or
         $apiResult.value.limits.defaults.wall_time_ms -ne 2000 -or
-        $apiResult.value.limits.hard_maximums.wall_time_ms -ne 10000 -or
+        $apiResult.value.limits.hard_maximums.wall_time_ms -ne 120000 -or
         $apiResult.value.limits.invocation_bytes -ne 2097152 -or
         $apiResult.value.framing.version -ne 1 -or
         $apiResult.value.framing.max_frame_bytes -ne 2097152 -or
