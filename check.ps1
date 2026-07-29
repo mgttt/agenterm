@@ -257,6 +257,17 @@ try {
         & '.\lint.ps1' -Mode Rhai `
             -WorkerPath '.\dist\agenterm-script.exe'
     }
+    Invoke-Checked -Id 'task-catalog' `
+        -Label 'repository Rhai task catalog' {
+        & '.\dist\agenterm-script.exe' task check `
+            --manifest '.\agenterm.tasks.json'
+    }
+    Invoke-Checked -Id 'migration-audit' `
+        -Label 'PowerShell migration ledger and no-new-PS1 gate' {
+        & '.\dist\agenterm-script.exe' task run migration-audit `
+            --manifest '.\agenterm.tasks.json' `
+            --timeout-ms 10000 --max-operations 10000000
+    }
 
     Invoke-Checked -Id 'artifact-verification' `
         -Label 'binary roles and metadata' {

@@ -393,6 +393,21 @@ Migration ledger:
   `scripts/archive/powershell/`.
 - [~] migration progress is 2/43 deleted and 41/43 remaining; progress is
   counted only after parity evidence, all-caller cutover, and source deletion.
+- [x] `scripts/powershell-migration.json` freezes all 43 baseline paths under
+  stable migration IDs with responsibility groups, replacement task IDs, and
+  explicit `inventory`/`deleted` state.
+- [x] the public `migration-audit` Rhai task compares the ledger with
+  `git ls-files '*.ps1'`, rejects an unplanned script, a returned deleted
+  script, an unrecorded removal, duplicate paths, invalid states, and count
+  drift; ordinary and release qualification invoke it as a required gate.
+- [~] the repository-root `agenterm.tasks.json` is now the offline task
+  catalog and ships the first five ready tasks (`bootstrap-info`,
+  `migration-audit`, `target-report`, `internal-version-policy`,
+  and `verify-docs-site`). The existing two-input Script contract verifier is
+  intentionally not advertised as ready until catalog fixture production is
+  part of its task. Build, lint, test, qualification, package, rehearsal,
+  release, dependency, platform, side-effect, and evidence metadata remain
+  incomplete.
 - [ ] completion requires `git ls-files '*.ps1'` to return no files. Tests,
   helpers, and archived implementations are not exceptions; Git history is the
   permanent archive after each parity and rollback boundary closes.

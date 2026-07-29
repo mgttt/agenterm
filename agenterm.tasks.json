@@ -1,0 +1,71 @@
+{
+  "schema_version": 2,
+  "project": {
+    "id": "agenterm-development",
+    "version": "0.1.10",
+    "requires": {
+      "script_api": {
+        "minimum": 2,
+        "maximum": 2
+      },
+      "capabilities": [
+        "runtime.project.named-task",
+        "std.env.current-dir",
+        "std.fs.read-to-string",
+        "std.path.join",
+        "std.process.command",
+        "std.process.command-output",
+        "rhai.json.parse",
+        "rhai.json.stringify-pretty"
+      ]
+    },
+    "origin": {
+      "kind": "repository",
+      "id": "agenterm"
+    },
+    "provenance": {
+      "producer": "agenterm-script",
+      "revision": "v0.1.10-wave-0"
+    }
+  },
+  "tasks": [
+    {
+      "id": "bootstrap-info",
+      "description": "Report the repository, Git, Cargo, Rust and Script Runtime bootstrap identity",
+      "entry": "scripts/rhai/bootstrap-info.rhai",
+      "profile": "local",
+      "cwd": "."
+    },
+    {
+      "id": "migration-audit",
+      "description": "Enforce the frozen PowerShell migration ledger and reject untracked drift",
+      "entry": "scripts/rhai/powershell-migration-audit.rhai",
+      "profile": "local",
+      "cwd": "."
+    },
+    {
+      "id": "target-report",
+      "description": "Report bounded Cargo target inventory and cleanup eligibility",
+      "entry": "scripts/rhai/target-report.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "args": ["."]
+    },
+    {
+      "id": "internal-version-policy",
+      "description": "Reject publication of an internal-only product version",
+      "entry": "scripts/rhai/internal-version-policy.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "args": ["."]
+    },
+    {
+      "id": "verify-docs-site",
+      "description": "Verify the static documentation site product and asset contract",
+      "entry": "scripts/rhai/verify-docs-site.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "args": ["docs"]
+    }
+  ]
+}

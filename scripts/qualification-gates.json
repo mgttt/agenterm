@@ -27,6 +27,14 @@
       "evidence": []
     },
     {
+      "id": "task-catalog",
+      "evidence": []
+    },
+    {
+      "id": "migration-audit",
+      "evidence": []
+    },
+    {
       "id": "artifact-verification",
       "evidence": []
     },

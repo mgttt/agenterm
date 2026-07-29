@@ -972,10 +972,14 @@ entry 是集成热点，只允许一个串行 owner 收口。
 
 ```text
 第一提交
-  PowerShell responsibility/caller/evidence inventory
-  stable Rhai task graph
-  stage-0 bootstrap contract
-  no-new-ps1 lint gate
+  [in progress] PowerShell responsibility/caller/evidence inventory
+    43 stable IDs and responsibility groups frozen; detailed caller and
+    input/output/side-effect contracts still need enrichment
+  [in progress] stable Rhai task graph
+    repository manifest and first five ready tasks shipped; full graph metadata
+    and remaining lifecycle tasks still pending
+  [done] stage-0 bootstrap identity contract
+  [done] no-new-ps1 migration audit gate
 
 第二提交
   shared Rhai build/test helpers
