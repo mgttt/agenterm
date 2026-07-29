@@ -736,11 +736,12 @@ pub fn entries() -> Vec<ScriptApiEntry> {
                 "std::process::list",
                 None,
                 RustMapping::None,
-                "std::process::list() -> Array<ProcessInfo>",
+                "std::process::list() -> Array<ProcessInfo{id,parent_id,executable_name}>",
                 (
                     &[
                         "operating_system_process_snapshot",
                         "sorted_by_process_id",
+                        "parent_process_identity",
                         "unrestricted_inventory",
                     ],
                     &["process_list_failed", "process_list_too_large"],

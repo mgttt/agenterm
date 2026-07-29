@@ -73,7 +73,7 @@ for path in deleted_paths {
 let references = std::process::command("git");
 references.args([
     "-C", repo, "grep", "-n", "-F", "-f", "-", "--",
-    ".github", "build.bat", "check.cmd", "lint.cmd", "release.ps1",
+    ".github", "build.bat", "check.cmd", "lint.cmd", "release.cmd",
     "scripts", "tests"
 ]);
 references.stdin_text(deleted_patterns);
@@ -95,6 +95,29 @@ if reference_output.exit_code == 0 {
     }
 }
 
+let automation = std::process::command("git");
+automation.args([
+    "-C", repo, "grep", "-n", "-i",
+    "-e", "shell: pwsh",
+    "-e", "shell: powershell",
+    "-e", "powershell.exe",
+    "-e", "pwsh.exe",
+    "-e", ".ps1",
+    "--",
+    ".github", "build.bat", "check.cmd", "lint.cmd", "release.cmd"
+]);
+automation.timeout(std::time::Duration::from_secs(10));
+let automation_output = automation.output();
+require(
+    automation_output.exit_code == 1,
+    if automation_output.exit_code == 0 {
+        "migration_powershell_automation_reference:" +
+            automation_output.stdout_text()
+    } else {
+        automation_output.error("migration-powershell-automation-scan")
+    }
+);
+
 let report = #{
     schema_version: 1,
     task_id: "migration-audit",
@@ -102,6 +125,7 @@ let report = #{
     deleted_count: deleted,
     remaining_count: current.keys().len,
     expected_remaining_count: ledger.baseline_count - deleted,
+    powershell_automation_references: 0,
     drift: false
 };
 require(

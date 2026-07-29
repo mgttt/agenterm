@@ -307,6 +307,38 @@ try {
         exact_values(expected_names, archive_names),
         "package_selftest_archive_members"
     );
+    let release_directory =
+        package_qualified::build_release_package(
+            fixture,
+            "target/qualification/receipt.json",
+            "target/qualification/package-release"
+        );
+    let release_result = rhai::json::parse_file(
+        std::path::join(
+            release_directory,
+            "release-result.json"
+        ).display
+    );
+    let release_archive =
+        std::path::join(
+            release_directory,
+            release_result.archive
+        ).display;
+    let release_manifest = rhai::json::parse_file(
+        std::path::join(
+            release_directory,
+            "package-manifest.json"
+        ).display
+    );
+    require(
+        !release_result.dry_run
+            && !release_manifest.dry_run
+            && !release_result.archive.contains("dry-run")
+            && std::fs::exists(release_archive)
+            && release_result.archive_sha256 ==
+                rhai::crypto::sha256_file(release_archive),
+        "package_selftest_release_result_incomplete"
+    );
 
     receipt.provenance.cargo_lock_sha256 = zeros(64);
     write_json(receipt_path, receipt);
@@ -372,6 +404,12 @@ try {
                 repo,
                 "scripts/rhai/package-qualified.rhai"
             ).display
+        ) +
+        std::fs::read_to_string(
+            std::path::join(
+                repo,
+                "scripts/rhai/package-release-qualified.rhai"
+            ).display
         );
     for forbidden in [
         "build.bat",
@@ -379,7 +417,8 @@ try {
         "git tag",
         "git push",
         "gh release",
-        "release.ps1"
+        "release.cmd",
+        "scripts/rhai/release.rhai"
     ] {
         require(
             !source.contains(forbidden),
@@ -402,4 +441,4 @@ if std::fs::exists(resolved) {
 if failure != "" {
     throw failure;
 }
-print("PASS: qualified package dry-run self-test");
+print("PASS: qualified dry-run and public package self-test");

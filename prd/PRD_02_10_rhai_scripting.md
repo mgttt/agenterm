@@ -165,9 +165,10 @@ and it is not positioned as a restricted security plugin.
   owned-resource naming and live-owner protocols without treating it as stable
   invocation identity.
   `std::process::list()` exposes an unrestricted PID-sorted typed
-  operating-system process inventory (`ProcessInfo.id` and
-  `.executable_name`) on Windows, Linux, and macOS; it is a point-in-time
-  observation rather than an Agent allowlist or authorization surface.
+  operating-system process inventory (`ProcessInfo.id`, `.parent_id`, and
+  `.executable_name`) on Windows, Linux, and macOS; parent identity is zero
+  where unavailable, and the inventory is a point-in-time observation rather
+  than an Agent allowlist or authorization surface.
   `std::process::kill(pid)` forcefully terminates any selected operating-system
   process without owner, executable, path, ancestry, or Agent-policy filtering;
   the remote-UI recovery journey uses it for real server-fault injection.
@@ -481,6 +482,7 @@ Migration ledger:
 | Fast repository lint | `scripts/rhai/lint.rhai` plus thin `lint.cmd` bootstrap | `lint.ps1` | current migration change | public task and wrapper pass JSON parsing, strict UTF-8/NUL/conflict-marker hygiene, production Rhai checks, malformed JSON/UTF-8/conflict/Rhai self-tests, and Rust rustfmt/Clippy mode; process inspection confirms no PowerShell child | deleted; check calls the same Rhai task and the batch file owns only Script worker bootstrap and argument forwarding |
 | Integrated quality-gate orchestration | `scripts/rhai/check.rhai`, `scripts/rhai/artifact-verification.rhai`, and thin `check.cmd` bootstrap | `check.ps1` | current migration change | `check.cmd --quick` and `--skip-smoke` pass through the public named task; the latter completes 255 library tests plus integration groups, staged six-artifact verification, declaration discovery, diagnostics, timing, and fail-closed qualification bookkeeping without PowerShell | deleted; CI and release workflow call the same batch bootstrap and Rhai task |
 | Qualification result and receipt production | `scripts/rhai/check.rhai` plus `scripts/rhai/lib/qualification.rhai` | `scripts/qualification.ps1` | current migration change | the named check task validates exact required gates and executable evidence declarations, rejects failed/skipped or missing-stress results, binds artifact metadata to source state, and writes the receipt only for a complete stress-inclusive run | deleted; quality orchestration imports the shared Rhai module directly |
+| Approved release coordination and rehearsal | `scripts/rhai/release.rhai`, shared qualified-package module, and thin `release.cmd` bootstrap | `release.ps1` | current migration change | release requires clean `main`, rejects v0.1.7 and an existing tag, runs stress-inclusive qualification, creates a byte-qualified package and durable hash-bound rehearsal report, and exposes a no-mutation rehearsal mode; publish creates an annotated tag and atomically pushes `main` plus tag with local-tag rollback on failure | deleted; `release.cmd` is the sole explicit publication boundary and CI validates the same check task |
 
 ### v0.1.10 completion commitment
 
@@ -490,7 +492,7 @@ Migration ledger:
 - [x] the dated 2026-07-29 frozen baseline is 43 tracked `.ps1` files: 3 at
   the repository root, 17 under `scripts/`, 21 under `tests/`, and 2 retained in
   `scripts/archive/powershell/`.
-- [~] migration progress is 42/43 deleted and 1/43 remaining; progress is
+- [x] migration progress is 43/43 deleted and 0/43 remaining; progress is
   counted only after parity evidence plus caller cutover, or caller-audited
   functional deletion of obsolete behavior, and source deletion.
 - [x] `scripts/powershell-migration.json` freezes all 43 baseline paths under
@@ -502,10 +504,12 @@ Migration ledger:
   duplicate paths, invalid states, and count drift; ordinary and release
   qualification invoke it as a required gate.
 - [~] the repository-root `agenterm.tasks.json` is now the offline task
-  catalog and ships thirty-six ready tasks (`check`, `artifact-verification`,
+  catalog and ships thirty-eight ready tasks (`check`, `release`,
+  `artifact-verification`,
   `bootstrap-info`, `build-identity`,
   `harness-cleanup-selftest`, `diagnostic-bundle-selftest`,
-  `qualification-selftest`, `package-qualified`, `lint`,
+  `qualification-selftest`, `package-qualified`,
+  `package-release-qualified`, `lint`,
   `package-qualified-selftest`, `migration-audit`, `target-report`, `internal-version-policy`,
   `verify-docs-site`, `readme-examples`, `clean-locked-artifacts`,
   `prepare-target-clean`, `preflight`, `preflight-benchmark`, `prd-alignment`,
@@ -518,7 +522,7 @@ Migration ledger:
   part of its task. Build, lint, test, qualification, package, rehearsal,
   release, dependency, platform, side-effect, and evidence metadata remain
   incomplete.
-- [ ] completion requires `git ls-files '*.ps1'` to return no files. Tests,
+- [x] `git ls-files '*.ps1'` returns no files. Tests,
   helpers, and archived implementations are not exceptions; Git history is the
   permanent archive after each parity and rollback boundary closes.
 - [ ] `agenterm.tasks.json` and shared Rhai modules own build, lint, test,
@@ -533,8 +537,9 @@ Migration ledger:
   evidence before callers switch and its `.ps1` leaves the tree.
 - [ ] Script Runtime gaps are filled with stable typed APIs or shared Rhai
   modules. Rhai scripts must never invoke PowerShell as an escape hatch.
-- [ ] a no-PowerShell clean-checkout qualification and a zero-`.ps1` drift gate
-  prevent the old automation layer from returning.
+- [~] the zero-`.ps1` drift gate prevents the old source layer from returning;
+  clean-checkout qualification and rehearsal process-tree evidence is being
+  finalized.
 - [ ] “PowerShell replacement” applies to repository-owned automation and its
   delivery process, not to users launching PowerShell as a terminal shell or
   to terminal-compatibility coverage. Such compatibility tests must be driven
@@ -542,9 +547,11 @@ Migration ledger:
   PowerShell.
 - [ ] completion is measured only after parity evidence, every caller cutover,
   source `.ps1` deletion, and drift-gate coverage. Static zero-file evidence is
-  paired with clean-checkout process-tree evidence proving that bootstrap,
-  build, check, qualification, packaging, and release rehearsal do not spawn
-  `powershell.exe` or `pwsh.exe`.
+  paired with clean-checkout process-tree evidence proving that repository
+  automation under build, check, qualification, packaging, and release
+  rehearsal does not spawn `powershell.exe` or `pwsh.exe`. An explicitly
+  declared PowerShell terminal payload inside the remote-UI compatibility
+  journey is recorded separately and carries no repository automation logic.
 
 ## Public black-box acceptance
 

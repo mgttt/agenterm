@@ -81,6 +81,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   runs print the slowest gates; independent preflight fixtures and isolated
   GUI/script diagnostic probes run concurrently without sharing Cargo targets,
   IPC addresses, or cleanup ownership
+- [~] the Rhai check runner polls typed process ancestry for every owned gate
+  and rejects a `powershell.exe`/`pwsh.exe` automation descendant; the one
+  remote-UI PowerShell terminal-compatibility payload is explicitly declared
+  and reported separately. Clean-checkout release-rehearsal evidence remains
+  to be recorded
 - [x] local, CI, and Release lanes run real-repository preflight,
   supply-chain, and PRD fixtures exactly once through their named gates instead
   of duplicating them inside the broad parallel Cargo invocation; this avoids
@@ -181,7 +186,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   - [ ] Cargo registry, Git sources and compatible build outputs use bounded,
     correctly keyed CI caches; cache miss/corruption cannot alter correctness,
     and developer `target/` cleanup remains explicit
-- v0.1.9-family candidate and non-publishing release rehearsal (P0)
+- v0.1.10 candidate and non-publishing release rehearsal (P0)
   - [ ] one repository-native coordinator owns one clean candidate build and
     its integrated qualification; a candidate SHA can have only one eligible,
     complete stress-inclusive receipt selected for packaging
@@ -193,6 +198,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     exact ZIP member set and rejects source/input/artifact drift. Stable ZIP
     container metadata for byte-identical repeated archives remains open,
     while package-manifest payload hashes are already deterministic
+  - [x] the tag workflow invokes `package-release-qualified`, which reuses the
+    same receipt/hash validation and shared package module, marks the embedded
+    package manifest as public rather than dry-run, and stages the versioned
+    Windows ZIP and SBOM without inline PowerShell packaging logic
   - [ ] fail-closed self-tests reject dirty or stale source, changed
     lock/manifest/SBOM/executable bytes, missing or skipped gates, a receipt
     for another candidate, and package or ZIP tampering before publication

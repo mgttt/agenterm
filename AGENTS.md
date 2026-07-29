@@ -95,15 +95,15 @@ Use PowerShell from the repository root:
 .\check.cmd --release --include-stress # exact qualification + receipt
 .\dist\agenterm-script.exe task run package-qualified --manifest .\agenterm.tasks.json
 .\build.bat release     # distributable release artifact
-.\release.ps1           # public versions only: validate/tag/push for CI
+.\release.cmd           # public versions only: qualify/package/tag/push for CI
 ```
 
-For this repository, `release.ps1` is the authoritative formal-release entry
+For this repository, `release.cmd` is the authoritative formal-release entry
 point. It pushes `main` and the version tag directly through Git/GCM; do not
 create a release PR, require a local `gh` installation, or substitute a generic
 GitHub publishing workflow. The tag-triggered runner owns GitHub Release
 creation and may use its bundled `gh` with `GITHUB_TOKEN`.
-Version 0.1.7 is an internal qualification baseline: both `release.ps1` and
+Version 0.1.7 is an internal qualification baseline: both `release.cmd` and
 the tag workflow reject it. Never create or push `v0.1.7`; qualify it with the
 stress-inclusive command above and use only the ignored dry-run package.
 
@@ -242,7 +242,7 @@ behavior.
 
 The cloud VM is **Linux**, but the native Windows GUI/runtime (`windows-sys`,
 ConPTY, MSVC target) and its orchestration (`build.bat`, `check.cmd`, and
-`release.ps1`) do not run there;
+`release.cmd`) do not run there;
 repository lint and all smoke logic are Rhai-owned. For the authoritative
 Windows dev loop see the sections above and `README.md`. On the Linux VM,
 build/lint/test Windows targets by cross-compiling

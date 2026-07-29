@@ -127,7 +127,12 @@ fn create_zip(staging, archive, members) {
     );
 }
 
-fn build_package(repo_value, receipt_value, output_value) {
+fn build_package_mode(
+    repo_value,
+    receipt_value,
+    output_value,
+    dry_run
+) {
     let repo = std::path::absolute(repo_value).display;
     let receipt_path =
         std::path::join(repo, receipt_value).display;
@@ -334,7 +339,7 @@ fn build_package(repo_value, receipt_value, output_value) {
         }
         let package_manifest = #{
             schema_version: 1,
-            dry_run: true,
+            dry_run: dry_run,
             product: "AgenTerm",
             version: version,
             qualified_head: head,
@@ -355,8 +360,9 @@ fn build_package(repo_value, receipt_value, output_value) {
         members.push("package-manifest.json");
 
         let archive_name =
-            "agenterm-" + version +
-            "-windows-x86_64-dry-run.zip";
+            "agenterm-" + version + "-windows-x86_64" +
+            if dry_run { "-dry-run" } else { "" } +
+            ".zip";
         let archive =
             std::path::join(run_directory, archive_name).display;
         create_zip(staging, archive, members);
@@ -367,7 +373,7 @@ fn build_package(repo_value, receipt_value, output_value) {
         std::fs::copy(staged_manifest, external_manifest);
         let result = #{
             schema_version: 1,
-            dry_run: true,
+            dry_run: dry_run,
             archive: archive_name,
             archive_sha256: sha256(archive),
             package_manifest: "package-manifest.json",
@@ -376,7 +382,11 @@ fn build_package(repo_value, receipt_value, output_value) {
         rhai::runtime::atomic_write(
             std::path::join(
                 run_directory,
-                "dry-run-result.json"
+                if dry_run {
+                    "dry-run-result.json"
+                } else {
+                    "release-result.json"
+                }
             ).display,
             rhai::json::stringify_pretty(result) + "\n"
         );
@@ -390,4 +400,22 @@ fn build_package(repo_value, receipt_value, output_value) {
         throw failure;
     }
     run_directory
+}
+
+fn build_package(repo_value, receipt_value, output_value) {
+    build_package_mode(
+        repo_value,
+        receipt_value,
+        output_value,
+        true
+    )
+}
+
+fn build_release_package(repo_value, receipt_value, output_value) {
+    build_package_mode(
+        repo_value,
+        receipt_value,
+        output_value,
+        false
+    )
 }

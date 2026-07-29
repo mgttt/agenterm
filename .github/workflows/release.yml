@@ -103,59 +103,11 @@ jobs:
 
       - name: Package Windows x86_64 release
         if: matrix.platform_id == 'windows-x86_64'
-        shell: pwsh
-        run: |
-          ./dist/agenterm-script.exe task run validate-artifact-manifest `
-            --manifest ./agenterm.tasks.json -- ./scripts/artifacts.json
-          if ($LASTEXITCODE -ne 0) {
-            throw "Artifact manifest validation failed with exit code $LASTEXITCODE."
-          }
-          $artifactSpec = Get-Content ./scripts/artifacts.json -Raw |
-            ConvertFrom-Json
-          $version = $env:GITHUB_REF_NAME.TrimStart('v')
-          $zip = "./dist/agenterm-$version-windows-x86_64.zip"
-          $metadata = Get-Content ./dist/agenterm.json -Raw |
-            ConvertFrom-Json
-          if ($metadata.version -ne $version) {
-            throw "Build metadata version $($metadata.version) does not match $version."
-          }
-          $expectedNames = @($artifactSpec.executables.name)
-          $metadataNames = @($metadata.executables.name)
-          if (Compare-Object $expectedNames $metadataNames) {
-            throw 'Build metadata does not contain the expected release executable names.'
-          }
-          $artifactManifestHash = (
-            Get-FileHash ./scripts/artifacts.json -Algorithm SHA256
-          ).Hash.ToLowerInvariant()
-          if ($metadata.artifact_manifest_sha256 -ne $artifactManifestHash) {
-            throw 'Build metadata does not match the release artifact manifest.'
-          }
-          foreach ($entry in $metadata.executables) {
-            $path = Join-Path ./dist $entry.name
-            $actualHash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
-            if ($actualHash -ne $entry.sha256) {
-              throw "SHA-256 mismatch for $($entry.name)."
-            }
-          }
-          $packageFiles = @(
-            $artifactSpec.executables |
-              ForEach-Object { Join-Path ./dist $_.name }
-          ) + @(
-            './dist/agenterm.json'
-            './scripts/artifacts.json'
-            './LICENSE-APACHE'
-            './LICENSE-MIT'
-            './THIRD_PARTY_NOTICES.md'
-          )
-          Compress-Archive `
-            -LiteralPath $packageFiles `
-            -DestinationPath $zip
-          $sbom = './dist/agenterm-sbom.spdx.json'
-          if (-not (Test-Path -LiteralPath $sbom)) {
-            throw 'Release quality gate did not produce the SPDX dependency inventory.'
-          }
-          Copy-Item -LiteralPath $sbom `
-            -Destination "./dist/agenterm-$version-sbom.spdx.json"
+        shell: cmd
+        run: >-
+          dist\agenterm-script.exe task run package-release-qualified
+          --manifest agenterm.tasks.json --timeout-ms 120000
+          --max-operations 10000000 --max-string-bytes 8388608
 
       - name: Install Windows ARM64 cross-build tooling
         if: matrix.platform_id == 'windows-aarch64'

@@ -1,8 +1,8 @@
 // First repository dogfood for agenterm-script.
 //
-// PowerShell still prepares the machine catalog fixture and remains the
-// qualification fallback. This script owns the data-oriented contract checks
-// so the Rhai runtime is exercised by AgenTerm's real development loop.
+// This standalone verifier consumes explicit specification and catalog
+// fixtures. It is intentionally outside the ready named-task catalog until a
+// Rhai-owned catalog export supplies its second input.
 
 fn require(condition, message) {
     if !condition {

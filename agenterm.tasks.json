@@ -82,6 +82,13 @@
       "args": ["."]
     },
     {
+      "id": "release",
+      "description": "Validate, qualify, and package an exact candidate, then rehearse or explicitly publish it",
+      "entry": "scripts/rhai/release.rhai",
+      "profile": "local",
+      "cwd": "."
+    },
+    {
       "id": "bootstrap-info",
       "description": "Report the repository, Git, Cargo, Rust and Script Runtime bootstrap identity",
       "entry": "scripts/rhai/bootstrap-info.rhai",
@@ -134,6 +141,14 @@
       "profile": "local",
       "cwd": ".",
       "args": [".", "target/qualification/receipt.json", "target/qualification/package-dry-run"]
+    },
+    {
+      "id": "package-release-qualified",
+      "description": "Stage public Windows release assets from byte-qualified candidate inputs",
+      "entry": "scripts/rhai/package-release-qualified.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "args": [".", "target/qualification/receipt.json", "dist"]
     },
     {
       "id": "package-qualified-selftest",

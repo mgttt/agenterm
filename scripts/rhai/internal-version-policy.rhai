@@ -49,13 +49,13 @@ if version != "0.1.7" {
     );
 
     let release_source = std::fs::read_to_string(
-        std::path::join(repo, "release.ps1").display
+        std::path::join(repo, "scripts/rhai/release.rhai").display
     );
     let workflow_source = std::fs::read_to_string(
         std::path::join(repo, ".github/workflows/release.yml").display
     );
     require(
-        release_source.contains("version -eq '0.1.7'") &&
+        release_source.contains(`version != "0.1.7"`) &&
         (
             workflow_source.contains("expected -eq 'v0.1.7'") ||
             workflow_source.contains("expected == \"v0.1.7\"")

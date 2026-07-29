@@ -111,6 +111,27 @@ fn run_validate_artifact_manifest(path: &Path) -> Output {
         .expect("run Rhai artifact-manifest validation task")
 }
 
+fn run_release_validate(repo_under_test: &Path) -> Output {
+    let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let manifest = repo.join("agenterm.tasks.json");
+    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+        .current_dir(repo)
+        .args(["task", "run", "release", "--manifest"])
+        .arg(manifest)
+        .args([
+            "--timeout-ms",
+            "10000",
+            "--max-operations",
+            "10000000",
+            "--",
+        ])
+        .arg(repo_under_test)
+        .arg("validate")
+        .output()
+        .expect("run Rhai release validation task")
+}
+
 fn run_build_identity(repo_under_test: &Path, profile: &str, output_path: &Path) -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -1521,7 +1542,7 @@ fn migration_audit_rejects_operational_references_to_deleted_scripts() {
             fs::write(path, b"# inventory fixture\n").expect("write inventory fixture");
         }
     }
-    for name in ["build.bat", "check.cmd", "lint.cmd", "release.ps1"] {
+    for name in ["build.bat", "check.cmd", "lint.cmd", "release.cmd"] {
         let path = repo.join(name);
         if !path.exists() {
             fs::write(path, b"# operational fixture\n").expect("write operational fixture");
@@ -1543,6 +1564,19 @@ fn migration_audit_rejects_operational_references_to_deleted_scripts() {
             String::from_utf8_lossy(&rejected.stderr)
         )
         .contains("migration_deleted_ps1_reference:.github/workflows/release.yml")
+    );
+
+    fs::write(&workflow, b"shell: pwsh\nrun: ./check.cmd\n")
+        .expect("write hidden PowerShell workflow");
+    let hidden = run_migration_audit(&repo);
+    assert!(!hidden.status.success());
+    assert!(
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&hidden.stdout),
+            String::from_utf8_lossy(&hidden.stderr)
+        )
+        .contains("migration_powershell_automation_reference:")
     );
 
     fs::write(&workflow, b"run: agenterm-script task run package\n")
@@ -1998,7 +2032,8 @@ fn preflight_task_is_fail_closed_and_writes_reports_for_real_git_fixtures() {
             "Cargo.toml",
             "Cargo.lock",
             "rust-toolchain.toml",
-            "release.ps1",
+            "release.cmd",
+            "scripts/rhai/release.rhai",
             "scripts/artifacts.json",
             "scripts/qualification-gates.json",
             ".github/workflows/release.yml",
@@ -2128,6 +2163,88 @@ fn preflight_task_is_fail_closed_and_writes_reports_for_real_git_fixtures() {
             "preflight contains forbidden active operation: {forbidden}"
         );
     }
+}
+
+#[test]
+fn release_task_validation_is_clean_non_mutating_and_fail_closed() {
+    let fixture = fixture_root("release-validate");
+    fs::create_dir_all(fixture.join(".github").join("workflows"))
+        .expect("create release workflow directory");
+    fs::write(
+        fixture.join("Cargo.toml"),
+        "[package]\nname = \"fixture\"\nversion = \"1.2.3\"\n",
+    )
+    .expect("write release Cargo fixture");
+    fs::write(fixture.join("README.md"), "fixture\n").expect("write release README fixture");
+    fs::write(
+        fixture.join(".github").join("workflows").join("release.yml"),
+        "on:\n  push:\n    tags:\n      - 'v*'\n# check.cmd --release --include-stress\n# expected == \"v0.1.7\"\n",
+    )
+    .expect("write release workflow fixture");
+    let initialized = Command::new("git")
+        .args(["init", "--quiet", "-b", "main"])
+        .arg(&fixture)
+        .output()
+        .expect("initialize release Git fixture");
+    assert!(initialized.status.success(), "initialize release fixture");
+    commit_git_fixture(&fixture);
+
+    let valid = run_release_validate(&fixture);
+    assert!(
+        valid.status.success(),
+        "release validation failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&valid.stdout),
+        String::from_utf8_lossy(&valid.stderr)
+    );
+    assert!(String::from_utf8_lossy(&valid.stdout).contains("VALID RELEASE PLAN"));
+    let tags = Command::new("git")
+        .arg("-C")
+        .arg(&fixture)
+        .args(["tag", "--list"])
+        .output()
+        .expect("list release fixture tags");
+    assert!(tags.status.success() && tags.stdout.is_empty());
+
+    fs::write(fixture.join("README.md"), "dirty\n").expect("dirty release fixture");
+    let dirty = run_release_validate(&fixture);
+    assert!(!dirty.status.success());
+    assert!(String::from_utf8_lossy(&dirty.stderr).contains("release_worktree_not_clean"));
+    let restored = Command::new("git")
+        .arg("-C")
+        .arg(&fixture)
+        .args(["checkout", "--", "README.md"])
+        .output()
+        .expect("restore release fixture");
+    assert!(restored.status.success());
+
+    fs::write(
+        fixture.join("Cargo.toml"),
+        "[package]\nname = \"fixture\"\nversion = \"0.1.7\"\n",
+    )
+    .expect("write internal release version");
+    commit_git_fixture(&fixture);
+    let internal = run_release_validate(&fixture);
+    assert!(!internal.status.success());
+    assert!(String::from_utf8_lossy(&internal.stderr).contains("release_internal_version_0.1.7"));
+
+    fs::write(
+        fixture.join("Cargo.toml"),
+        "[package]\nname = \"fixture\"\nversion = \"1.2.3\"\n",
+    )
+    .expect("restore public release version");
+    commit_git_fixture(&fixture);
+    let tagged = Command::new("git")
+        .arg("-C")
+        .arg(&fixture)
+        .args(["tag", "v1.2.3"])
+        .output()
+        .expect("tag release fixture");
+    assert!(tagged.status.success());
+    let existing = run_release_validate(&fixture);
+    assert!(!existing.status.success());
+    assert!(String::from_utf8_lossy(&existing.stderr).contains("release_tag_exists:v1.2.3"));
+
+    fs::remove_dir_all(&fixture).expect("remove release validation fixture");
 }
 
 #[test]

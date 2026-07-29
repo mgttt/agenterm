@@ -154,13 +154,14 @@ run:
 
 ```powershell
 .\lint.cmd
-.\release.ps1
+.\release.cmd
 ```
 
-The script runs the local release quality gate without the event-journal load
-test, then atomically pushes `main` plus the `v<version>` tag. GitHub Actions
-runs that stress coverage on a clean Windows runner before publishing all five
-EXEs, metadata, ZIP, and generated notes to GitHub Releases.
+The coordinator runs the complete stress-inclusive qualification, creates and
+records a byte-qualified package rehearsal, then atomically pushes `main` plus
+the `v<version>` tag. Use `.\release.cmd --rehearse` to stop before tag
+creation or network mutation. GitHub Actions independently validates the clean
+tag before publishing the platform assets and generated notes.
 
 ## Documentation
 

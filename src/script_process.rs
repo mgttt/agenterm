@@ -73,6 +73,7 @@ pub struct ScriptWindowControl {
 #[derive(Clone, Debug)]
 pub struct ScriptProcessInfo {
     id: u32,
+    parent_id: u32,
     executable_name: String,
 }
 
@@ -214,6 +215,9 @@ fn register_types(engine: &mut Engine) {
     engine.register_type_with_name::<ScriptProcessInfo>("ProcessInfo");
     engine.register_get("id", |process: &mut ScriptProcessInfo| {
         rhai::INT::from(process.id)
+    });
+    engine.register_get("parent_id", |process: &mut ScriptProcessInfo| {
+        rhai::INT::from(process.parent_id)
     });
     engine.register_get("executable_name", |process: &mut ScriptProcessInfo| {
         process.executable_name.clone()
@@ -414,6 +418,7 @@ fn platform_process_list() -> Result<Vec<ScriptProcessInfo>, Box<EvalAltResult>>
         if !executable_name.is_empty() {
             processes.push(ScriptProcessInfo {
                 id: entry.th32ProcessID,
+                parent_id: entry.th32ParentProcessID,
                 executable_name,
             });
         }
@@ -454,8 +459,20 @@ fn platform_process_list() -> Result<Vec<ScriptProcessInfo>, Box<EvalAltResult>>
         let Some(executable_name) = executable.file_name().and_then(|value| value.to_str()) else {
             continue;
         };
+        let parent_id = std::fs::read_to_string(entry.path().join("stat"))
+            .ok()
+            .and_then(|stat| {
+                let end = stat.rfind(')')?;
+                stat.get(end + 1..)?
+                    .split_whitespace()
+                    .nth(1)?
+                    .parse::<u32>()
+                    .ok()
+            })
+            .unwrap_or_default();
         processes.push(ScriptProcessInfo {
             id,
+            parent_id,
             executable_name: executable_name.to_owned(),
         });
     }
@@ -542,6 +559,7 @@ fn platform_process_list() -> Result<Vec<ScriptProcessInfo>, Box<EvalAltResult>>
             };
             processes.push(ScriptProcessInfo {
                 id,
+                parent_id: 0,
                 executable_name,
             });
         }
@@ -560,6 +578,7 @@ fn platform_process_list() -> Result<Vec<ScriptProcessInfo>, Box<EvalAltResult>>
         .unwrap_or_else(|| "current-process".to_owned());
     Ok(vec![ScriptProcessInfo {
         id: std::process::id(),
+        parent_id: 0,
         executable_name,
     }])
 }
@@ -1719,7 +1738,8 @@ mod tests {
                         let found = false;
                         for process in std::process::list() {
                             if process.id == std::process::id()
-                                    && process.executable_name.len > 0 {
+                                    && process.executable_name.len > 0
+                                    && process.parent_id >= 0 {
                                 found = true;
                             }
                         }

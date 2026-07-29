@@ -28,8 +28,41 @@ fn spec(program, arguments, timeout_ms, environment) {
         program: program,
         arguments: arguments,
         timeout_ms: timeout_ms,
-        environment: environment
+        environment: environment,
+        allow_powershell: false
     }
+}
+
+fn powershell_descendants(root_id) {
+    let parents = #{};
+    let names = #{};
+    for process in std::process::list() {
+        let key = process.id.to_string();
+        parents[key] = process.parent_id;
+        names[key] = process.executable_name;
+    }
+    let matches = [];
+    for key in names.keys() {
+        let name = names[key].to_lower();
+        if name != "powershell.exe" && name != "pwsh.exe" {
+            continue;
+        }
+        let current = key;
+        let depth = 0;
+        while depth < 64 && parents.contains(current) {
+            if current == root_id.to_string() {
+                matches.push(name + ":" + key);
+                break;
+            }
+            let parent = parents[current];
+            if parent == 0 {
+                break;
+            }
+            current = parent.to_string();
+            depth += 1;
+        }
+    }
+    matches
 }
 
 fn execute(command_spec, repo, scratch, sequence) {
@@ -54,9 +87,20 @@ fn execute(command_spec, repo, scratch, sequence) {
     command.stderr_file(stderr_path);
     let started = std::time::SystemTime::now().unix_millis;
     let child = command.start();
+    let observed_powershell = [];
+    let last_process_scan = 0;
     while child.state == "running"
             && std::time::SystemTime::now().unix_millis - started
                 < command_spec.timeout_ms {
+        let now = std::time::SystemTime::now().unix_millis;
+        if last_process_scan == 0 || now - last_process_scan >= 250 {
+            for process in powershell_descendants(child.id) {
+                if !observed_powershell.contains(process) {
+                    observed_powershell.push(process);
+                }
+            }
+            last_process_scan = now;
+        }
         rhai::task::sleep(std::time::Duration::from_millis(50));
     }
     if child.state == "running" {
@@ -77,16 +121,27 @@ fn execute(command_spec, repo, scratch, sequence) {
         } else {
             ""
         };
+    let powershell_violation =
+        observed_powershell.len > 0 && !command_spec.allow_powershell;
     #{
         success:
             result.success
+                && !powershell_violation
                 && std::time::SystemTime::now().unix_millis - started
                     <= command_spec.timeout_ms,
         exit_code: result.exit_code,
         duration_ms:
             std::time::SystemTime::now().unix_millis - started,
         stdout: stdout,
-        stderr: stderr
+        stderr:
+            stderr +
+            if powershell_violation {
+                "\nrepository_automation_spawned_powershell:" +
+                    observed_powershell.join(",")
+            } else {
+                ""
+            },
+        observed_powershell: observed_powershell
     }
 }
 
@@ -121,6 +176,13 @@ fn run_gate(context, id, label, specs, repo, scratch, sequence) {
         }
         if result.stderr != "" {
             print(result.stderr);
+        }
+        if result.observed_powershell.len > 0
+                && command_spec.allow_powershell {
+            print(
+                "OBSERVED explicit terminal compatibility payload: " +
+                    result.observed_powershell.join(",")
+            );
         }
         all_output.append(output_lines(result.stdout));
         all_output.append(output_lines(result.stderr));
@@ -866,6 +928,7 @@ if !skip_smoke {
             },
             extra
         );
+        smoke_spec.allow_powershell = id == "remote-ui-smoke";
         smoke_spec.environment = no_activate;
         let completed = run_gate(
             context,

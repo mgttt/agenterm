@@ -24,13 +24,15 @@ jobs:
         shell: cmd
         run: check.cmd --skip-smoke
       - name: Run representative public-interface slice
-        shell: pwsh
+        shell: cmd
         env:
           AGENTERM_NO_ACTIVATE: "1"
         run: |
-          ./dist/agenterm-script.exe task run startup-smoke --manifest ./agenterm.tasks.json --timeout-ms 60000 --max-operations 10000000
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          ./dist/agenterm-script.exe task run cli-smoke --manifest ./agenterm.tasks.json --timeout-ms 120000 --max-operations 10000000
+          @echo off
+          dist\agenterm-script.exe task run startup-smoke --manifest agenterm.tasks.json --timeout-ms 60000 --max-operations 10000000
+          if errorlevel 1 exit /b %ERRORLEVEL%
+          dist\agenterm-script.exe task run cli-smoke --manifest agenterm.tasks.json --timeout-ms 120000 --max-operations 10000000
+          exit /b %ERRORLEVEL%
 
   linux-clients:
     runs-on: ubuntu-latest

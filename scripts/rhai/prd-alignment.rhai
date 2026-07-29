@@ -300,20 +300,11 @@ for gate in gate_manifest.required_gates {
         std::path::join(repo, "scripts/rhai").display,
         rhai_name
     ).display;
-    let suite_name = gate.id;
-    suite_name.replace("-", "_");
-    suite_name += ".ps1";
-    let powershell_path = std::path::join(
-        std::path::join(repo, "tests").display,
-        suite_name
-    ).display;
-    let suite_path =
-        if std::fs::exists(rhai_path) { rhai_path } else { powershell_path };
     require(
-        std::fs::exists(suite_path),
+        std::fs::exists(rhai_path),
         "prd_alignment_evidence_suite_missing:" + gate.id
     );
-    let suite_source = std::fs::read_to_string(suite_path);
+    let suite_source = std::fs::read_to_string(rhai_path);
     for evidence_id in gate.evidence {
         require(
             valid_id(evidence_id),

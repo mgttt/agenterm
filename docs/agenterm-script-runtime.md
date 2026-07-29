@@ -163,7 +163,7 @@ agenterm-script
 │  │  │  Returns the current supervised worker process ID.
 │  │  │  [shipped; stable; designed 2026-07-29]
 │  │  ├─ list() -> Array<ProcessInfo>
-│  │  │  Returns an unrestricted, PID-sorted operating-system process snapshot.
+│  │  │  Returns an unrestricted PID-sorted process snapshot with parent IDs.
 │  │  │  [shipped; stable; designed 2026-07-30]
 │  │  ├─ kill(pid)
 │  │  │  Forcefully terminates an arbitrary operating-system process by PID.
@@ -863,11 +863,13 @@ owned-resource names and live-owner protocols, but is not a stable invocation
 identity and MUST NOT be persisted as one.
 
 `std::process::list()` returns the operating-system process inventory sorted by
-PID. Each typed `ProcessInfo` carries `id` and `executable_name`. The API scans
-all visible processes rather than filtering by owner, executable, path, or
-Agent policy; entries that disappear or become unreadable during the snapshot
-are omitted. Windows uses Tool Help, Linux uses `/proc`, and macOS uses
-`libproc`. This is a point-in-time observation, not a durable process handle.
+PID. Each typed `ProcessInfo` carries `id`, `parent_id`, and
+`executable_name`; `parent_id` is zero where the host cannot expose it. The API
+scans all visible processes rather than filtering by owner, executable, path,
+or Agent policy; entries that disappear or become unreadable during the
+snapshot are omitted. Windows uses Tool Help, Linux uses `/proc`, and macOS
+uses `libproc`. This is a point-in-time observation, not a durable process
+handle.
 
 `std::process::kill(pid)` forcefully terminates the selected operating-system
 process. It accepts every nonzero PID in the platform integer range and applies

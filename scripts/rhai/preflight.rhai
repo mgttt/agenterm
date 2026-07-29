@@ -401,13 +401,13 @@ try {
             "Internal-only v0.1.7 must have no local v0.1.7 tag."
         );
         let release = std::fs::read_to_string(
-            std::path::join(repo, "release.ps1").display
+            std::path::join(repo, "scripts/rhai/release.rhai").display
         );
         let workflow = std::fs::read_to_string(
             std::path::join(repo, ".github/workflows/release.yml").display
         );
         require(
-            release.contains("version -eq '0.1.7'")
+            release.contains(`version != "0.1.7"`)
                 && (workflow.contains("expected -eq 'v0.1.7'")
                     || workflow.contains("expected == \"v0.1.7\"")),
             "Internal v0.1.7 publication rejection policy is missing."
