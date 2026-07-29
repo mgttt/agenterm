@@ -129,7 +129,7 @@
     },
     {
       "id": "working-context-smoke",
-      "description": "Prove redacted launch proxy facts, archived controls, and non-persistence through an isolated GUI restart",
+      "description": "Prove redacted launch proxy facts and persistent workspace metadata through an isolated GUI restart",
       "entry": "scripts/rhai/working-context-smoke.rhai",
       "profile": "local",
       "cwd": ".",
@@ -177,7 +177,7 @@
     },
     {
       "id": "startup-smoke",
-      "description": "Prove the native first-window budget, asynchronous terminal readiness, handoff, and nonblocking GUI guidance",
+      "description": "Prove no-activate native first-window startup, asynchronous terminal readiness, handoff, and nonblocking GUI guidance",
       "entry": "scripts/rhai/startup-smoke.rhai",
       "profile": "local",
       "cwd": ".",

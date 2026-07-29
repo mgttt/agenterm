@@ -9,10 +9,28 @@
 
 import "scripts/rhai/lib/test_harness" as test_harness;
 
-let declared_evidence = ["ui.replaceable-client"];
+let declared_evidence = [
+    "ui.replaceable-client",
+    "ux.adaptive-tabs",
+    "ux.hierarchical-tabs",
+    "ux.detach-first-window-close",
+    "ux.live-close-confirmation",
+    "ux.locale-consistency",
+    "ux.keyboard-surface-navigation",
+    "ux.modal-wait",
+    "ux.mouse-scrollback",
+    "ux.semantic-ui-automation",
+    "ux.semantic-window-control",
+    "ux.settings-isolation",
+    "ux.system-menu-clipboard",
+    "ux.terminal-selection-copy",
+    "ux.working-context-cwd"
+];
 
 if args.len == 1 && args[0] == "--list-evidence" {
-    print("ui.replaceable-client");
+    for id in declared_evidence {
+        print(id);
+    }
     return;
 }
 
@@ -310,6 +328,104 @@ try {
             && ui.tabs.len >= 1,
         "remote_ui_projection_invalid"
     );
+    require(
+        ui.locale.id == "en-US"
+            && ui.locale.controls.send == "Send",
+        "remote_ui_locale_contract_invalid"
+    );
+
+    print("STEP drive semantic window state and client resize");
+    let original_width = ui.window.client_width;
+    let original_height = ui.window.client_height;
+    let original_rows = ui.layout.terminal.rows;
+    let original_columns = ui.layout.terminal.cols;
+    json_cli(context, cli, ["ui-action", "window-minimize"]);
+    let minimized = json_cli(
+        context,
+        cli,
+        [
+            "wait-ui", "--window-state", "minimized",
+            "--timeout-ms", "5000"
+        ]
+    );
+    require(
+        minimized.layout.terminal.rows == original_rows
+            && minimized.layout.terminal.cols == original_columns,
+        "remote_ui_minimize_changed_grid"
+    );
+    json_cli(context, cli, ["ui-action", "window-restore"]);
+    json_cli(
+        context,
+        cli,
+        ["wait-ui", "--window-state", "restored", "--timeout-ms", "5000"]
+    );
+    json_cli(context, cli, ["ui-action", "window-maximize"]);
+    json_cli(
+        context,
+        cli,
+        ["wait-ui", "--window-state", "maximized", "--timeout-ms", "5000"]
+    );
+    json_cli(context, cli, ["ui-action", "window-restore"]);
+    json_cli(
+        context,
+        cli,
+        ["wait-ui", "--window-state", "restored", "--timeout-ms", "5000"]
+    );
+    let resized_width = if original_width > 720 {
+        original_width - 80
+    } else {
+        original_width + 80
+    };
+    let resized_height = if original_height > 540 {
+        original_height - 60
+    } else {
+        original_height + 60
+    };
+    json_cli(
+        context,
+        cli,
+        [
+            "ui-action", "window-resize",
+            "--width", resized_width.to_string(),
+            "--height", resized_height.to_string()
+        ]
+    );
+    let resized_window = json_cli(
+        context,
+        cli,
+        [
+            "wait-ui",
+            "--client-width", resized_width.to_string(),
+            "--client-height", resized_height.to_string(),
+            "--terminal-grid-changed-from",
+                original_rows.to_string() + "x" + original_columns,
+            "--timeout-ms", "5000"
+        ]
+    );
+    require(
+        resized_window.layout.terminal.rows != original_rows
+            || resized_window.layout.terminal.cols != original_columns,
+        "remote_ui_resize_did_not_change_grid"
+    );
+    json_cli(
+        context,
+        cli,
+        [
+            "ui-action", "window-resize",
+            "--width", original_width.to_string(),
+            "--height", original_height.to_string()
+        ]
+    );
+    json_cli(
+        context,
+        cli,
+        [
+            "wait-ui",
+            "--client-width", original_width.to_string(),
+            "--client-height", original_height.to_string(),
+            "--timeout-ms", "5000"
+        ]
+    );
 
     print("STEP relay typed UI actions to the exact live GUI lease");
     let hidden = json_cli(context, cli, ["ui-action", "tabs-hide"]);
@@ -334,8 +450,28 @@ try {
         settings.modal.kind == "settings",
         "remote_ui_settings_relay_invalid"
     );
+    let settings_wait = json_cli(
+        context,
+        cli,
+        [
+            "wait-ui", "--modal-kind", "settings",
+            "--timeout-ms", "1000"
+        ]
+    );
+    require(
+        settings_wait.focus.surface == "settings",
+        "remote_ui_settings_modal_wait_invalid"
+    );
     let cancelled = json_cli(context, cli, ["ui-action", "cancel"]);
     require(cancelled.modal == (), "remote_ui_cancel_relay_invalid");
+    json_cli(
+        context,
+        cli,
+        [
+            "wait-ui", "--modal-kind", "closed",
+            "--timeout-ms", "1000"
+        ]
+    );
     let composer = json_cli(context, cli, ["focus", "composer"]);
     require(
         composer.focus.surface == "composer",
@@ -765,6 +901,241 @@ try {
         "remote_ui_cwd_cancel_changed_draft"
     );
 
+    print("STEP prove CWD modal, safe preparation, and OSC 7 truth");
+    let cwd_editor = json_cli(
+        context,
+        cli,
+        ["ui-action", "open-cwd-editor", "-t", tab_id]
+    );
+    require(
+        cwd_editor.modal.kind == "cwd-editor"
+            && cwd_editor.modal.window_id == tab_id
+            && cwd_editor.focus.surface == "cwd-editor",
+        "remote_ui_cwd_editor_semantics_invalid"
+    );
+    let cwd_target_wait = json_cli(
+        context,
+        cli,
+        [
+            "wait-ui", "--modal-kind", "cwd-editor",
+            "--modal-target", tab_id,
+            "--timeout-ms", "1000"
+        ]
+    );
+    require(
+        cwd_target_wait.modal.window_id == tab_id,
+        "remote_ui_cwd_modal_target_invalid"
+    );
+    json_cli(context, cli, ["ui-action", "cancel"]);
+    json_cli(
+        context,
+        cli,
+        ["wait-ui", "--modal-kind", "none", "--timeout-ms", "1000"]
+    );
+
+    let pane_input_before = text_cli(
+        context,
+        cli,
+        ["list-panes", "-t", tab_id, "-F", "#{pane_input_bytes}"]
+    );
+    pane_input_before.trim();
+    let protected_draft =
+        "echo AGENTERM_CWD_DRAFT_" + context.run_id;
+    text_cli(
+        context,
+        cli,
+        ["set-composer", "-t", tab_id, protected_draft]
+    );
+    let protected_prepare = optional_cli(
+        context,
+        cli,
+        [
+            "ui-action", "cwd-prepare", "-t", tab_id,
+            "--path", "C:\\Program Files"
+        ]
+    );
+    let protected_after = text_cli(
+        context,
+        cli,
+        ["show-composer", "-t", tab_id]
+    );
+    protected_after.trim();
+    require(
+        !protected_prepare.success && protected_after == protected_draft,
+        "remote_ui_cwd_prepare_overwrote_draft"
+    );
+    text_cli(
+        context,
+        cli,
+        [
+            "ui-action", "cwd-prepare-append", "-t", tab_id,
+            "--path", "C:\\Program Files"
+        ]
+    );
+    let prepared_cmd = text_cli(
+        context,
+        cli,
+        ["show-composer", "-t", tab_id]
+    );
+    prepared_cmd.trim();
+    require(
+        prepared_cmd.starts_with(protected_draft)
+            && prepared_cmd.contains("cd /d \"C:\\Program Files\""),
+        "remote_ui_cmd_cwd_quote_invalid:" + prepared_cmd
+    );
+    let pane_input_after = text_cli(
+        context,
+        cli,
+        ["list-panes", "-t", tab_id, "-F", "#{pane_input_bytes}"]
+    );
+    pane_input_after.trim();
+    let requested_snapshot = json_cli(context, cli, ["ui-snapshot"]);
+    let requested_tab = find_tab(requested_snapshot, tab_id);
+    require(
+        pane_input_after == pane_input_before
+            && requested_tab.working_context.cwd.source == "user_requested"
+            && requested_tab.working_context.cwd.pending
+            && requested_tab.working_context.cwd.confirmed_path
+                != requested_tab.working_context.cwd.path,
+        "remote_ui_cwd_prepare_claimed_execution"
+    );
+
+    let powershell_id = text_cli(
+        context,
+        cli,
+        [
+            "new-window", "-d",
+            "-n", "cwd-powershell-" + context.run_id,
+            "-F", "#{window_id}",
+            "--", "powershell.exe", "-NoLogo", "-NoProfile"
+        ]
+    );
+    powershell_id.trim();
+    text_cli(
+        context,
+        cli,
+        [
+            "wait-ui", "-t", powershell_id,
+            "--tab-state", "running",
+            "--timeout-ms", "10000"
+        ]
+    );
+    text_cli(
+        context,
+        cli,
+        [
+            "ui-action", "cwd-prepare-replace", "-t", powershell_id,
+            "--path", "C:\\O'Brien"
+        ]
+    );
+    let prepared_powershell = text_cli(
+        context,
+        cli,
+        ["show-composer", "-t", powershell_id]
+    );
+    prepared_powershell.trim();
+    require(
+        prepared_powershell ==
+            "Set-Location -LiteralPath 'C:\\O''Brien'",
+        "remote_ui_powershell_cwd_quote_invalid:" + prepared_powershell
+    );
+
+    let valid_osc =
+        "[Console]::Write([char]27 + ']7;file:///C:/osc%20valid' + [char]7)";
+    text_cli(
+        context,
+        cli,
+        ["set-composer", "-t", powershell_id, valid_osc]
+    );
+    text_cli(
+        context,
+        cli,
+        ["send-composer", "-t", powershell_id]
+    );
+    text_cli(
+        context,
+        cli,
+        [
+            "wait-pane", "-t", powershell_id,
+            "--submit-complete", "--timeout-ms", "10000"
+        ]
+    );
+    let osc_confirmed = false;
+    for attempt in 0..50 {
+        let osc_tab = find_tab(
+            json_cli(context, cli, ["ui-bootstrap"]),
+            powershell_id
+        );
+        if osc_tab != ()
+                && osc_tab.working_context.cwd_source == "osc7"
+                && osc_tab.working_context.cwd == "C:\\osc valid"
+                && !osc_tab.working_context.cwd_request_pending {
+            osc_confirmed = true;
+            break;
+        }
+        rhai::task::sleep(std::time::Duration::from_millis(50));
+    }
+    require(osc_confirmed, "remote_ui_valid_osc7_not_observed");
+
+    let invalid_osc =
+        "[Console]::Write([char]27 + ']7;file:///C:/bad%0dvalue' + [char]7)";
+    text_cli(
+        context,
+        cli,
+        ["set-composer", "-t", powershell_id, invalid_osc]
+    );
+    text_cli(
+        context,
+        cli,
+        ["send-composer", "-t", powershell_id]
+    );
+    text_cli(
+        context,
+        cli,
+        [
+            "wait-pane", "-t", powershell_id,
+            "--submit-complete", "--timeout-ms", "10000"
+        ]
+    );
+    let invalid_snapshot = json_cli(context, cli, ["ui-bootstrap"]);
+    let invalid_tab = find_tab(invalid_snapshot, powershell_id);
+    require(
+        invalid_tab.working_context.cwd_source == "osc7"
+            && invalid_tab.working_context.cwd == "C:\\osc valid",
+        "remote_ui_invalid_osc7_overwrote_truth"
+    );
+
+    let unknown_shell = std::path::join(
+        std::env::get("SystemRoot"),
+        "System32\\where.exe"
+    ).display;
+    let unknown_id = text_cli(
+        context,
+        cli,
+        [
+            "new-window", "-d",
+            "-n", "cwd-unknown-" + context.run_id,
+            "-F", "#{window_id}",
+            "--", unknown_shell, "cmd"
+        ]
+    );
+    unknown_id.trim();
+    let unknown_send = optional_cli(
+        context,
+        cli,
+        [
+            "ui-action", "cwd-send-now", "-t", unknown_id,
+            "--path", "C:\\Windows"
+        ]
+    );
+    require(
+        !unknown_send.success,
+        "remote_ui_unknown_shell_cwd_send_allowed"
+    );
+    text_cli(context, cli, ["kill-window", "-t", powershell_id]);
+    text_cli(context, cli, ["kill-window", "-t", unknown_id]);
+    text_cli(context, cli, ["set-composer", "-t", tab_id, ""]);
+
     print("STEP resize Tabs locally and resize the server-owned viewport");
     text_cli(context, cli, ["ui-action", "tabs-show"]);
     let before_resize = json_cli(context, cli, ["ui-snapshot"]);
@@ -910,6 +1281,73 @@ try {
             && confirmed_close.active_tab_id == tab_id
             && !tab_close_confirm.visible,
         "remote_ui_tab_close_confirm_invalid"
+    );
+
+    print("STEP reject a hierarchy cycle and promote a closing parent's child");
+    let hierarchy_child_id = text_cli(
+        context,
+        cli,
+        [
+            "new-window", "-d",
+            "-n", "hierarchy-child-" + context.run_id,
+            "--parent", tab_id,
+            "-F", "#{window_id}"
+        ]
+    );
+    hierarchy_child_id.trim();
+    let hierarchy_grandchild_id = text_cli(
+        context,
+        cli,
+        [
+            "new-window", "-d",
+            "-n", "hierarchy-grandchild-" + context.run_id,
+            "--parent", hierarchy_child_id,
+            "-F", "#{window_id}"
+        ]
+    );
+    hierarchy_grandchild_id.trim();
+    let hierarchy = json_cli(context, cli, ["ui-snapshot"]);
+    let hierarchy_child = find_tab(hierarchy, hierarchy_child_id);
+    let hierarchy_grandchild =
+        find_tab(hierarchy, hierarchy_grandchild_id);
+    require(
+        hierarchy_child.parent_id == tab_id
+            && hierarchy_child.depth == 1
+            && hierarchy_grandchild.parent_id == hierarchy_child_id
+            && hierarchy_grandchild.depth == 2,
+        "remote_ui_hierarchy_shape_invalid"
+    );
+    let cycle = optional_cli(
+        context,
+        cli,
+        [
+            "set-tab-parent", "-t", tab_id,
+            "--parent", hierarchy_grandchild_id
+        ]
+    );
+    require(
+        !cycle.success
+            && (cycle.stdout + cycle.stderr).to_lower().contains("cycle"),
+        "remote_ui_hierarchy_cycle_accepted"
+    );
+    text_cli(
+        context,
+        cli,
+        ["kill-window", "-t", hierarchy_child_id]
+    );
+    let promoted = json_cli(context, cli, ["ui-snapshot"]);
+    let promoted_grandchild =
+        find_tab(promoted, hierarchy_grandchild_id);
+    require(
+        promoted_grandchild != ()
+            && promoted_grandchild.parent_id == tab_id
+            && promoted_grandchild.depth == 1,
+        "remote_ui_hierarchy_child_not_promoted"
+    );
+    text_cli(
+        context,
+        cli,
+        ["kill-window", "-t", hierarchy_grandchild_id]
     );
 
     print("STEP edit title and note in place with Save and Cancel");
@@ -1399,11 +1837,9 @@ try {
     text_cli(context, cli, ["server-list", "--prune"]);
     assert_instance_directory_empty(context);
 
-    test_harness::emit_evidence(
-        context,
-        declared_evidence,
-        "ui.replaceable-client"
-    );
+    for id in declared_evidence {
+        test_harness::emit_evidence(context, declared_evidence, id);
+    }
     print(
         "PASS: replaceable GUI attaches, renders, detaches, preserves PTYs, " +
         "and reconnects in place across server restart"

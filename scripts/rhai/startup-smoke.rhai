@@ -7,10 +7,15 @@
 
 import "scripts/rhai/lib/test_harness" as test_harness;
 
-let declared_evidence = ["startup.first-window-async-ready"];
+let declared_evidence = [
+    "startup.first-window-async-ready",
+    "ux.no-activate-launch"
+];
 
 if args.len == 1 && args[0] == "--list-evidence" {
-    print("startup.first-window-async-ready");
+    for id in declared_evidence {
+        print(id);
+    }
     return;
 }
 
@@ -159,6 +164,12 @@ try {
         "startup_first_window_budget:" + window.elapsed_ms +
             "ms>" + maximum_window_ms + "ms"
     );
+    let launch_window_facts = gui.platform_facts;
+    require(
+        launch_window_facts.foreground_window_id == 0
+            || !launch_window_facts.top_level_window_is_foreground,
+        "startup_no_activate_stole_foreground"
+    );
 
     let initial_guidance = read_until(
         gui.stderr,
@@ -305,11 +316,9 @@ try {
     );
     wait_for_exit(gui, 5000, "startup_gui_shutdown_timeout");
 
-    test_harness::emit_evidence(
-        context,
-        declared_evidence,
-        "startup.first-window-async-ready"
-    );
+    for id in declared_evidence {
+        test_harness::emit_evidence(context, declared_evidence, id);
+    }
     print(
         "PASS: first window in " + window.elapsed_ms +
             " ms; terminal loaded asynchronously"

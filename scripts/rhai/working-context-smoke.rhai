@@ -7,10 +7,15 @@
 
 import "scripts/rhai/lib/test_harness" as test_harness;
 
-let declared_evidence = ["ux.working-context-proxy"];
+let declared_evidence = [
+    "ux.working-context-proxy",
+    "ux.persistent-workspace"
+];
 
 if args.len == 1 && args[0] == "--list-evidence" {
-    print("ux.working-context-proxy");
+    for id in declared_evidence {
+        print(id);
+    }
     return;
 }
 
@@ -211,6 +216,77 @@ try {
         "working_context_archived_surface_mutated_terminal"
     );
 
+    print("STEP persist tab metadata while discarding unconfirmed CWD state");
+    let persistent_name = "persistent-" + context.run_id;
+    let persistent_note = "restored note";
+    let persistent_draft = "restored draft";
+    let persistent_id = test_harness::invoke_cli(
+        context,
+        cli,
+        [
+            "new-window", "-d", "-n", persistent_name,
+            "-F", "#{window_id}"
+        ],
+        false,
+        redactions
+    ).stdout;
+    persistent_id.trim();
+    test_harness::invoke_cli(
+        context,
+        cli,
+        [
+            "wait-ui", "-t", persistent_id, "--tab-state", "running",
+            "--timeout-ms", "10000"
+        ],
+        false,
+        redactions
+    );
+    test_harness::invoke_cli(
+        context,
+        cli,
+        ["set-tab-note", "-t", persistent_id, persistent_note],
+        false,
+        redactions
+    );
+    test_harness::invoke_cli(
+        context,
+        cli,
+        ["set-composer", "-t", persistent_id, persistent_draft],
+        false,
+        redactions
+    );
+    test_harness::invoke_cli(
+        context,
+        cli,
+        [
+            "ui-action", "cwd-prepare-append", "-t", persistent_id,
+            "--path", "C:\\restart-request-must-not-persist"
+        ],
+        false,
+        redactions
+    );
+    test_harness::invoke_cli(
+        context,
+        cli,
+        ["ui-action", "tabs-set-width", "--width", "250"],
+        false,
+        redactions
+    );
+    test_harness::invoke_cli(
+        context,
+        cli,
+        ["ui-action", "tabs-show"],
+        false,
+        redactions
+    );
+    test_harness::invoke_cli(
+        context,
+        cli,
+        ["select-window", "-t", persistent_id],
+        false,
+        redactions
+    );
+
     test_harness::invoke_cli(
         context,
         cli,
@@ -260,7 +336,7 @@ try {
     test_harness::invoke_cli(
         context,
         cli,
-        ["wait-ui", "-t", "0", "--tab-state", "running",
+        ["wait-ui", "-t", persistent_name, "--tab-state", "running",
          "--timeout-ms", "10000"],
         false,
         redactions
@@ -273,11 +349,28 @@ try {
         redactions
     ).stdout;
     require_no_secret(restored_text, secret, "restart_ui_snapshot");
-    let restored_tab = active_tab(rhai::json::parse(restored_text));
+    let restored_snapshot = rhai::json::parse(restored_text);
+    let restored_tab = active_tab(restored_snapshot);
     require(
         !restored_tab.working_context.proxy.configured
             && restored_tab.working_context.proxy.source == "off",
         "working_context_proxy_persisted"
+    );
+    require(
+        restored_tab.id == persistent_id
+            && restored_tab.name == persistent_name
+            && restored_tab.note == persistent_note
+            && restored_tab.draft
+            && restored_tab.active
+            && restored_tab.working_context.cwd.source == "launch"
+            && !restored_tab.working_context.cwd.pending
+            && restored_tab.working_context.cwd.path
+                == restored_tab.working_context.cwd.confirmed_path
+            && restored_tab.working_context.cwd.path
+                != "C:\\restart-request-must-not-persist"
+            && restored_snapshot.layout.sidebar.configured_width == 250
+            && restored_snapshot.layout.sidebar.visible,
+        "working_context_workspace_metadata_not_restored"
     );
     test_harness::invoke_cli(
         context,
@@ -296,14 +389,12 @@ try {
         "second_gui_stderr"
     );
 
-    test_harness::emit_evidence(
-        context,
-        declared_evidence,
-        "ux.working-context-proxy"
-    );
+    for id in declared_evidence {
+        test_harness::emit_evidence(context, declared_evidence, id);
+    }
     print(
-        "PASS: archived Proxy controls retain redacted launch facts " +
-        "without mutation or persistence"
+        "PASS: archived Proxy facts remain private while workspace metadata " +
+        "survives restart"
     );
     succeeded = true;
 } catch (error) {

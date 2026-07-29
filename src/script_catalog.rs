@@ -829,6 +829,8 @@ pub fn entries() -> Vec<ScriptApiEntry> {
                     "owned_child_platform_observation",
                     "opaque_window_identity",
                     "top_level_window_title",
+                    "foreground_window_identity",
+                    "top_level_window_is_foreground",
                 ],
                 &["process_kill", "process_timeout"],
             ),

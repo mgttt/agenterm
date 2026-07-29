@@ -289,8 +289,7 @@ let evidence_suites = #{
     "theme-smoke": true,
     "wake-smoke": true,
     "working-context-smoke": true,
-    "workbench-smoke": true,
-    "ux-smoke": true
+    "workbench-smoke": true
 };
 for gate in gate_manifest.required_gates {
     if !evidence_suites.contains(gate.id) {

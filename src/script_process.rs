@@ -51,6 +51,8 @@ pub struct ScriptProcessPlatformFacts {
     top_level_window_present: bool,
     top_level_window_id: i64,
     top_level_window_title: String,
+    foreground_window_id: i64,
+    top_level_window_is_foreground: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -176,6 +178,14 @@ fn register_types(engine: &mut Engine) {
     engine.register_get(
         "top_level_window_title",
         |facts: &mut ScriptProcessPlatformFacts| facts.top_level_window_title.clone(),
+    );
+    engine.register_get(
+        "foreground_window_id",
+        |facts: &mut ScriptProcessPlatformFacts| facts.foreground_window_id,
+    );
+    engine.register_get(
+        "top_level_window_is_foreground",
+        |facts: &mut ScriptProcessPlatformFacts| facts.top_level_window_is_foreground,
     );
 
     engine.register_type_with_name::<ScriptWindowRect>("WindowRect");
@@ -840,9 +850,12 @@ fn find_top_level_window(id: u32) -> windows_sys::Win32::Foundation::HWND {
 
 #[cfg(windows)]
 fn process_platform_facts(id: u32) -> ScriptProcessPlatformFacts {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{GetWindowTextLengthW, GetWindowTextW};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetForegroundWindow, GetWindowTextLengthW, GetWindowTextW,
+    };
 
     let window = find_top_level_window(id);
+    let foreground_window = unsafe { GetForegroundWindow() };
     let top_level_window_title = if window.is_null() {
         String::new()
     } else {
@@ -861,6 +874,8 @@ fn process_platform_facts(id: u32) -> ScriptProcessPlatformFacts {
         top_level_window_present: !window.is_null(),
         top_level_window_id: window as isize as i64,
         top_level_window_title,
+        foreground_window_id: foreground_window as isize as i64,
+        top_level_window_is_foreground: !window.is_null() && window == foreground_window,
     }
 }
 
@@ -871,6 +886,8 @@ fn process_platform_facts(_id: u32) -> ScriptProcessPlatformFacts {
         top_level_window_present: false,
         top_level_window_id: 0,
         top_level_window_title: String::new(),
+        foreground_window_id: 0,
+        top_level_window_is_foreground: false,
     }
 }
 

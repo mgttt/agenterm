@@ -66,11 +66,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] PRD alignment lint keeps the public command registry, protocol feature
   flags, mux compatibility output, and declared evidence synchronized
 - [~] stable capability/evidence ID contract covers protocol features and
-  critical terminal input behavior; startup and working-context suites now
-  declare `startup.first-window-async-ready` and
-  `ux.working-context-proxy` through the qualification manifest, while
-  rendering, CJK, performance, and the remaining shipped leaves still need
-  registered evidence
+  critical terminal input behavior; the Rhai startup, working-context, and
+  remote-UI journeys now own the complete former semantic-UX evidence set
+  through the qualification manifest, while rendering, CJK, performance, and
+  the remaining shipped leaves still need registered evidence
 - [x] CLI and semantic UX smoke tests through public interfaces
 - [x] one-command fmt, Clippy, test, build, and smoke regression
 - [x] `check.ps1 -Quick` provides a non-qualifying development lane ordered

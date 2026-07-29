@@ -885,10 +885,15 @@ whether the child PID owns any native top-level window.
 MAY compare it for equality or change while supervising that child, but MUST
 NOT persist it or use it as a native control handle. It is zero when no window
 was observed. `top_level_window_title` is the current native title for that
-observed child window and is empty when absent. Other platforms currently
-return `top_level_window_supported=false`, a zero ID, an empty title, and never
-pretend that a negative result is an observed desktop fact. This child-scoped
-fact accepts no arbitrary PID; the separate `std::process::list()` API owns the
+observed child window and is empty when absent. `foreground_window_id` is the
+current desktop foreground HWND represented as the same invocation-local opaque
+integer, and `top_level_window_is_foreground` compares it with the child's
+current top-level window. Together they let no-activate tests prove foreground
+preservation without converting an opaque observation into a control handle.
+Other platforms currently return `top_level_window_supported=false`, zero IDs,
+an empty title, and `top_level_window_is_foreground=false`; they never pretend
+that a negative result is an observed desktop fact. This child-scoped fact
+accepts no arbitrary PID; the separate `std::process::list()` API owns the
 general inventory.
 
 `Child.window_key`, `Child.window_pointer`, `Child.window_message`,

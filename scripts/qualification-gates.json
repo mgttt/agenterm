@@ -93,7 +93,8 @@
     {
       "id": "startup-smoke",
       "evidence": [
-        "startup.first-window-async-ready"
+        "startup.first-window-async-ready",
+        "ux.no-activate-launch"
       ]
     },
     {
@@ -125,7 +126,21 @@
     {
       "id": "remote-ui-smoke",
       "evidence": [
-        "ui.replaceable-client"
+        "ui.replaceable-client",
+        "ux.adaptive-tabs",
+        "ux.hierarchical-tabs",
+        "ux.detach-first-window-close",
+        "ux.live-close-confirmation",
+        "ux.locale-consistency",
+        "ux.keyboard-surface-navigation",
+        "ux.modal-wait",
+        "ux.mouse-scrollback",
+        "ux.semantic-ui-automation",
+        "ux.semantic-window-control",
+        "ux.settings-isolation",
+        "ux.system-menu-clipboard",
+        "ux.terminal-selection-copy",
+        "ux.working-context-cwd"
       ]
     },
     {
@@ -177,7 +192,8 @@
     {
       "id": "working-context-smoke",
       "evidence": [
-        "ux.working-context-proxy"
+        "ux.working-context-proxy",
+        "ux.persistent-workspace"
       ]
     },
     {
@@ -186,27 +202,6 @@
         "ux.workbench-inline-edit",
         "ux.workbench-compact-tree",
         "ux.workbench-proxy-archived"
-      ]
-    },
-    {
-      "id": "ux-smoke",
-      "evidence": [
-        "ux.adaptive-tabs",
-        "ux.hierarchical-tabs",
-        "ux.detach-first-window-close",
-        "ux.live-close-confirmation",
-        "ux.locale-consistency",
-        "ux.keyboard-surface-navigation",
-        "ux.modal-wait",
-        "ux.mouse-scrollback",
-        "ux.no-activate-launch",
-        "ux.persistent-workspace",
-        "ux.semantic-ui-automation",
-        "ux.semantic-window-control",
-        "ux.settings-isolation",
-        "ux.system-menu-clipboard",
-        "ux.terminal-selection-copy",
-        "ux.working-context-cwd"
       ]
     }
   ]

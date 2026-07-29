@@ -470,6 +470,7 @@ Migration ledger:
 | Byte-qualified offline Windows packaging | `scripts/rhai/package-qualified.rhai` plus `scripts/rhai/lib/package_qualified.rhai` | `scripts/package-qualified.ps1` | current migration change | named task validates the exact receipt, HEAD, lockfile, manifests, SBOM, metadata, executable hashes, gate set, and static payload before staging a ZIP through `tar.exe`; the module contains no build, tag, push, or release action | deleted; the named task is the production package boundary |
 | Qualified package boundary self-test | `scripts/rhai/package-qualified-selftest.rhai` plus the shared package module | `scripts/package-qualified-selftest.ps1` | current migration change | old and Rhai self-tests pass; named task and Windows public integration prove exact ZIP members and reject Cargo.lock, artifact-manifest, executable-byte, and Git-HEAD drift with exact owned-fixture cleanup | deleted; ordinary qualification invokes the named Rhai task |
 | Unintegrated professional terminal-selection prototype | Future public Rhai professional-selection journey after the product slice ships | `tests/terminal_selection_smoke.ps1` | current migration change | caller audit finds no check, CI, qualification, or registered evidence consumer; direct execution fails before interaction at zero terminal columns, while the Windows double-click handler does not implement the claimed word/third-click behavior and the product PRD keeps that slice planned | deleted as misleading dead test code; Git history retains the prototype |
+| Semantic UX geometry, interaction, restart, and no-activate journey | `scripts/rhai/remote-ui-smoke.rhai`, `scripts/rhai/startup-smoke.rhai`, and `scripts/rhai/working-context-smoke.rhai` plus typed foreground-window observation | `tests/ux_smoke.ps1` | current migration change | the three named Rhai journeys emit all sixteen former UX evidence IDs and prove semantic minimize/maximize/resize, locale, modal wait, hierarchy cycle rejection and child promotion, adaptive Tabs, physical focus/scroll/selection/clipboard, Settings isolation, safe CWD quoting and OSC 7, close/detach, exact no-activate observation, and persistent tab metadata across restart | deleted; qualification owns the behavior through the three existing journeys without launching a duplicate GUI fleet |
 
 ### v0.1.10 completion commitment
 
@@ -479,7 +480,7 @@ Migration ledger:
 - [x] the dated 2026-07-29 frozen baseline is 43 tracked `.ps1` files: 3 at
   the repository root, 17 under `scripts/`, 21 under `tests/`, and 2 retained in
   `scripts/archive/powershell/`.
-- [~] migration progress is 38/43 deleted and 5/43 remaining; progress is
+- [~] migration progress is 39/43 deleted and 4/43 remaining; progress is
   counted only after parity evidence plus caller cutover, or caller-audited
   functional deletion of obsolete behavior, and source deletion.
 - [x] `scripts/powershell-migration.json` freezes all 43 baseline paths under

@@ -331,7 +331,6 @@ try {
             'theme-smoke' = '.\scripts\rhai\theme-smoke.rhai'
             'working-context-smoke' = '.\scripts\rhai\working-context-smoke.rhai'
             'workbench-smoke' = '.\scripts\rhai\workbench-smoke.rhai'
-            'ux-smoke' = '.\tests\ux_smoke.ps1'
         }
     $declarationWatch.Stop()
     Write-Host (
@@ -585,9 +584,6 @@ try {
                 & '.\dist\agenterm-script.exe' task run workbench-smoke `
                     --manifest '.\agenterm.tasks.json' `
                     --timeout-ms 60000 --max-operations 10000000
-            }
-            Invoke-Checked -Id 'ux-smoke' -Label 'semantic UX smoke test' {
-                & '.\tests\ux_smoke.ps1'
             }
         }
         finally {

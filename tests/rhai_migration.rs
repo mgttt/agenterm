@@ -754,7 +754,9 @@ fn child_id_remains_public_after_process_completion() {
              #{before:before,after:child.id,state:child.state,\
                window_supported:facts.top_level_window_supported,\
                window_present:facts.top_level_window_present,\
-               window_id:facts.top_level_window_id}",
+               window_id:facts.top_level_window_id,\
+               foreground_id:facts.foreground_window_id,\
+               is_foreground:facts.top_level_window_is_foreground}",
             "--profile",
             "local",
             "--json",
@@ -777,6 +779,8 @@ fn child_id_remains_public_after_process_completion() {
     );
     assert_eq!(envelope["value"]["window_present"], false);
     assert_eq!(envelope["value"]["window_id"], 0);
+    assert!(envelope["value"]["foreground_id"].is_i64());
+    assert_eq!(envelope["value"]["is_foreground"], false);
 }
 
 #[cfg(windows)]
@@ -1598,7 +1602,6 @@ fn prd_alignment_task_matches_public_catalogs_and_fails_closed() {
             copy_fixture_file(repo, &fixture, &format!("prd/{name}"));
         }
     }
-    copy_fixture_file(repo, &fixture, "tests/ux_smoke.ps1");
     copy_fixture_file(repo, &fixture, "scripts/rhai/working-context-smoke.rhai");
     copy_fixture_file(repo, &fixture, "scripts/rhai/server-smoke.rhai");
     copy_fixture_file(repo, &fixture, "scripts/rhai/remote-ui-upgrade-smoke.rhai");
@@ -1608,6 +1611,7 @@ fn prd_alignment_task_matches_public_catalogs_and_fails_closed() {
     copy_fixture_file(repo, &fixture, "scripts/rhai/workbench-smoke.rhai");
     copy_fixture_file(repo, &fixture, "scripts/rhai/fleet-smoke.rhai");
     copy_fixture_file(repo, &fixture, "scripts/rhai/remote-ui-smoke.rhai");
+    copy_fixture_file(repo, &fixture, "scripts/rhai/startup-smoke.rhai");
     let contract_path = fixture.join("prd").join("alignment-contract.json");
     let malformed = fs::read_to_string(&contract_path)
         .expect("read fixture alignment contract")
@@ -1712,8 +1716,9 @@ fn rhai_working_context_smoke_is_private_ephemeral_and_orphan_free() {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("EVIDENCE ux.working-context-proxy"));
+    assert!(stdout.contains("EVIDENCE ux.persistent-workspace"));
     assert!(stdout.contains(
-        "PASS: archived Proxy controls retain redacted launch facts without mutation or persistence"
+        "PASS: archived Proxy facts remain private while workspace metadata survives restart"
     ));
     assert!(!stdout.contains("credential-"));
     assert!(!String::from_utf8_lossy(&output.stderr).contains("credential-"));
@@ -1766,6 +1771,7 @@ fn rhai_startup_smoke_preserves_first_window_and_async_terminal_contract() {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("EVIDENCE startup.first-window-async-ready"));
+    assert!(stdout.contains("EVIDENCE ux.no-activate-launch"));
     assert!(stdout.contains("terminal loaded asynchronously"));
 }
 
@@ -1914,7 +1920,28 @@ fn rhai_remote_ui_smoke_preserves_replaceable_client_and_reconnect_contract() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("EVIDENCE ui.replaceable-client"));
+    for evidence in [
+        "ui.replaceable-client",
+        "ux.adaptive-tabs",
+        "ux.hierarchical-tabs",
+        "ux.detach-first-window-close",
+        "ux.live-close-confirmation",
+        "ux.locale-consistency",
+        "ux.keyboard-surface-navigation",
+        "ux.modal-wait",
+        "ux.mouse-scrollback",
+        "ux.semantic-ui-automation",
+        "ux.semantic-window-control",
+        "ux.settings-isolation",
+        "ux.system-menu-clipboard",
+        "ux.terminal-selection-copy",
+        "ux.working-context-cwd",
+    ] {
+        assert!(
+            stdout.contains(&format!("EVIDENCE {evidence}")),
+            "missing remote UI evidence {evidence}"
+        );
+    }
     assert!(stdout.contains("STEP close remains local and GUI recovers its missing server"));
     assert!(stdout.contains("STEP select terminal text, Copy, and Paste through the UI"));
     assert!(stdout.contains(
