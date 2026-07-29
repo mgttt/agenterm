@@ -82,6 +82,80 @@ pub(super) fn composer_key_action(
     }
 }
 
+/// Result of handling a key in a single-line sidebar tab editor field.
+pub(super) enum TextFieldKeyAction {
+    Edited,
+    NextField,
+    Submit,
+    Escape,
+    Copy,
+    Cut,
+    Paste,
+    Ignored,
+}
+
+/// Maps a winit key event to inline tab-editor field edits.
+pub(super) fn text_field_key_action(
+    event: &KeyEvent,
+    modifiers: ModifiersState,
+    buffer: &mut String,
+    multiline: bool,
+) -> TextFieldKeyAction {
+    if event.state != ElementState::Pressed || event.repeat {
+        return TextFieldKeyAction::Ignored;
+    }
+
+    let control = modifiers.control_key();
+
+    match &event.logical_key {
+        Key::Named(NamedKey::Enter) if control => TextFieldKeyAction::Submit,
+        Key::Named(NamedKey::Enter) if multiline => {
+            buffer.push('\n');
+            TextFieldKeyAction::Edited
+        }
+        Key::Named(NamedKey::Enter) => TextFieldKeyAction::NextField,
+        Key::Named(NamedKey::Escape) => TextFieldKeyAction::Escape,
+        Key::Character(text) if control => {
+            if text.eq_ignore_ascii_case("c") {
+                TextFieldKeyAction::Copy
+            } else if text.eq_ignore_ascii_case("x") {
+                TextFieldKeyAction::Cut
+            } else if text.eq_ignore_ascii_case("v") {
+                TextFieldKeyAction::Paste
+            } else {
+                TextFieldKeyAction::Ignored
+            }
+        }
+        Key::Named(NamedKey::Backspace) => {
+            if buffer.pop().is_some() {
+                TextFieldKeyAction::Edited
+            } else {
+                TextFieldKeyAction::Ignored
+            }
+        }
+        Key::Character(text) if !control => {
+            let mut changed = false;
+            for ch in text.chars() {
+                if ch == '\r' {
+                    if multiline {
+                        buffer.push('\n');
+                        changed = true;
+                    }
+                } else if !ch.is_control() {
+                    buffer.push(ch);
+                    changed = true;
+                }
+            }
+            if changed {
+                TextFieldKeyAction::Edited
+            } else {
+                TextFieldKeyAction::Ignored
+            }
+        }
+        _ => TextFieldKeyAction::Ignored,
+    }
+}
+
 /// Maps a winit key event to bytes suitable for PTY input.
 ///
 /// Returns `None` for keys that should not be forwarded (modifiers-only, arrows, etc.).

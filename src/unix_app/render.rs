@@ -1,8 +1,9 @@
 use crate::theme::{Rgb, ThemeId, ThemePalette};
-use crate::ui_geometry::{TreeRowMode, tree_row_at_y, tree_row_geometry_for_mode};
+use crate::ui_geometry::{PixelRect, TreeRowMode, sidebar_tree_row_geometry, tree_row_at_y};
 use unicode_width::UnicodeWidthChar;
 
 use super::{
+    font::GLYPH_HEIGHT,
     font::GLYPH_WIDTH,
     layout::{SCROLLBAR_WIDTH, u32_rect},
 };
@@ -29,6 +30,19 @@ pub(super) struct SidebarTabRow {
     pub(super) active: bool,
     pub(super) collapsed: bool,
     pub(super) has_children: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum TabEditorFocusView {
+    Name,
+    Note,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct TabEditorView {
+    pub(super) name_draft: String,
+    pub(super) note_draft: String,
+    pub(super) focus: TabEditorFocusView,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -407,7 +421,9 @@ pub(super) struct FrameContent<'a> {
     pub(super) cell_height: u32,
     pub(super) terminal: TerminalPaint<'a>,
     pub(super) sidebar_rows: &'a [SidebarTabRow],
+    pub(super) sidebar_tree: PixelRect,
     pub(super) editing_tab_id: Option<u64>,
+    pub(super) tab_editor: Option<TabEditorView>,
     pub(super) workspace_toolbar: Option<WorkspaceToolbarView>,
     pub(super) terminal_top: u32,
     pub(super) composer: ComposerView<'a>,
@@ -449,9 +465,10 @@ pub(super) fn render_frame(
             width,
             content.tree_height,
             palette,
+            content.sidebar_tree,
             content.sidebar_rows,
-            content.sidebar_width,
             content.editing_tab_id,
+            content.tab_editor.as_ref(),
         );
         if let Some(scrollbar) = content.sidebar_scrollbar {
             render_scrollbar(buffer, stride, palette, scrollbar);
@@ -790,21 +807,31 @@ fn render_sidebar(
     width: u32,
     height: u32,
     palette: &ThemePalette,
+    sidebar_tree: PixelRect,
     rows: &[SidebarTabRow],
-    sidebar_width: u32,
     editing_tab_id: Option<u64>,
+    tab_editor: Option<&TabEditorView>,
 ) {
-    let sidebar_width = sidebar_width.min(width);
-    let sidebar_width_i32 = sidebar_width as i32;
+    let sidebar_left = sidebar_tree.left.max(0) as u32;
+    let sidebar_width = sidebar_tree.width().max(0) as u32;
     let sidebar_bg = rgb_to_pixel(palette.sidebar);
-    fill_rect(buffer, stride, 0, 0, sidebar_width, height, sidebar_bg);
+    fill_rect(
+        buffer,
+        stride,
+        sidebar_left,
+        0,
+        sidebar_width,
+        height,
+        sidebar_bg,
+    );
 
     let divider = rgb_to_pixel(palette.divider);
-    if sidebar_width > 0 && sidebar_width < width {
+    let sidebar_right = sidebar_left + sidebar_width;
+    if sidebar_width > 0 && sidebar_right < width {
         fill_rect(
             buffer,
             stride,
-            sidebar_width.saturating_sub(1),
+            sidebar_right.saturating_sub(1),
             0,
             1,
             height,
@@ -813,12 +840,13 @@ fn render_sidebar(
     }
 
     for (index, row) in rows.iter().enumerate() {
-        let mode = if editing_tab_id == Some(row.id) {
+        let editing = editing_tab_id == Some(row.id);
+        let mode = if editing {
             TreeRowMode::Editing
         } else {
             TreeRowMode::Normal
         };
-        let geometry = tree_row_geometry_for_mode(index, row.depth, sidebar_width_i32, mode);
+        let geometry = sidebar_tree_row_geometry(sidebar_tree, index, row.depth, mode);
         let top = geometry.row.top.max(0) as u32;
         if top >= height {
             break;
@@ -860,28 +888,221 @@ fn render_sidebar(
             buffer, stride, width, height, marker_x, marker_y, marker, text_color,
         );
 
-        let name_x = geometry.name.left.max(0) as u32;
-        let name_y = geometry.name.top.max(0) as u32;
-        let name_chars = (geometry.name.width().max(0) as u32 / (GLYPH_WIDTH + 1)).max(1) as usize;
-        let title = truncate_chars(&format!("@{} {}", row.id, row.title), name_chars);
-        draw_text(
-            buffer, stride, width, height, name_x, name_y, &title, text_color,
-        );
+        if editing && let Some(editor) = tab_editor {
+            let name_focused = editor.focus == TabEditorFocusView::Name;
+            let note_focused = editor.focus == TabEditorFocusView::Note;
+            if let Some(editors) = geometry.editors {
+                render_inline_field(
+                    buffer,
+                    stride,
+                    width,
+                    height,
+                    palette,
+                    editors.name,
+                    &editor.name_draft,
+                    name_focused,
+                    text_color,
+                );
+                render_inline_field(
+                    buffer,
+                    stride,
+                    width,
+                    height,
+                    palette,
+                    editors.note,
+                    &editor.note_draft,
+                    note_focused,
+                    palette.muted_text,
+                );
+            }
+            render_tree_action_button(
+                buffer,
+                stride,
+                width,
+                height,
+                palette,
+                geometry.actions.primary,
+                "Save",
+                true,
+            );
+            render_tree_action_button(
+                buffer,
+                stride,
+                width,
+                height,
+                palette,
+                geometry.actions.secondary,
+                "Cancel",
+                false,
+            );
+        } else {
+            let name_x = geometry.name.left.max(0) as u32;
+            let name_y = geometry.name.top.max(0) as u32;
+            let name_chars =
+                (geometry.name.width().max(0) as u32 / (GLYPH_WIDTH + 1)).max(1) as usize;
+            let title = truncate_chars(&format!("@{} {}", row.id, row.title), name_chars);
+            draw_text(
+                buffer, stride, width, height, name_x, name_y, &title, text_color,
+            );
 
-        let note_x = geometry.note.left.max(0) as u32;
-        let note_y = geometry.note.top.max(0) as u32;
-        let note_chars = (geometry.note.width().max(0) as u32 / (GLYPH_WIDTH + 1)).max(1) as usize;
-        draw_text(
-            buffer,
-            stride,
-            width,
-            height,
-            note_x,
-            note_y,
-            &truncate_chars(&row.note, note_chars),
-            palette.muted_text,
-        );
+            let note_x = geometry.note.left.max(0) as u32;
+            let note_y = geometry.note.top.max(0) as u32;
+            let note_chars =
+                (geometry.note.width().max(0) as u32 / (GLYPH_WIDTH + 1)).max(1) as usize;
+            draw_text(
+                buffer,
+                stride,
+                width,
+                height,
+                note_x,
+                note_y,
+                &truncate_chars(&row.note, note_chars),
+                palette.muted_text,
+            );
+            if row.active {
+                if let Some(add_child) = geometry.actions.add_child {
+                    render_tree_action_button(
+                        buffer, stride, width, height, palette, add_child, "Add", false,
+                    );
+                }
+                render_tree_action_button(
+                    buffer,
+                    stride,
+                    width,
+                    height,
+                    palette,
+                    geometry.actions.primary,
+                    "Edit",
+                    false,
+                );
+                render_tree_action_button(
+                    buffer,
+                    stride,
+                    width,
+                    height,
+                    palette,
+                    geometry.actions.secondary,
+                    "Close",
+                    false,
+                );
+            }
+        }
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_inline_field(
+    buffer: &mut [u32],
+    stride: u32,
+    width: u32,
+    height: u32,
+    palette: &ThemePalette,
+    bounds: PixelRect,
+    text: &str,
+    focused: bool,
+    text_color: Rgb,
+) {
+    let x = bounds.left.max(0) as u32;
+    let y = bounds.top.max(0) as u32;
+    let w = bounds.width().max(0) as u32;
+    let h = bounds.height().max(0) as u32;
+    if w == 0 || h == 0 {
+        return;
+    }
+    fill_rect(buffer, stride, x, y, w, h, rgb_to_pixel(palette.composer));
+    let border = if focused {
+        rgb_to_pixel(palette.focus_ring)
+    } else {
+        rgb_to_pixel(palette.divider)
+    };
+    fill_rect(buffer, stride, x, y, w, 1, border);
+    fill_rect(
+        buffer,
+        stride,
+        x,
+        y.saturating_add(h.saturating_sub(1)),
+        w,
+        1,
+        border,
+    );
+    fill_rect(buffer, stride, x, y, 1, h, border);
+    fill_rect(
+        buffer,
+        stride,
+        x.saturating_add(w.saturating_sub(1)),
+        y,
+        1,
+        h,
+        border,
+    );
+    let max_chars = (w.saturating_sub(4) / (GLYPH_WIDTH + 1)).max(1) as usize;
+    let label = truncate_chars(text, max_chars);
+    draw_text(
+        buffer,
+        stride,
+        width,
+        height,
+        x + 2,
+        y + 2,
+        &label,
+        text_color,
+    );
+    if focused {
+        let cursor_x = x + 2 + (label.chars().count() as u32 * (GLYPH_WIDTH + 1));
+        if cursor_x + GLYPH_WIDTH < x + w {
+            fill_rect(
+                buffer,
+                stride,
+                cursor_x,
+                y + 2,
+                GLYPH_WIDTH,
+                GLYPH_HEIGHT,
+                rgb_to_pixel(text_color),
+            );
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_tree_action_button(
+    buffer: &mut [u32],
+    stride: u32,
+    width: u32,
+    height: u32,
+    palette: &ThemePalette,
+    bounds: PixelRect,
+    label: &str,
+    primary: bool,
+) {
+    let x = bounds.left.max(0) as u32;
+    let y = bounds.top.max(0) as u32;
+    let w = bounds.width().max(0) as u32;
+    let h = bounds.height().max(0) as u32;
+    if w == 0 || h == 0 {
+        return;
+    }
+    let bg = if primary {
+        rgb_to_pixel(palette.active)
+    } else {
+        rgb_to_pixel(palette.composer)
+    };
+    fill_rect(buffer, stride, x, y, w, h, bg);
+    fill_rect(buffer, stride, x, y, w, 1, rgb_to_pixel(palette.divider));
+    let text_color = if primary {
+        palette.selection_foreground
+    } else {
+        palette.text
+    };
+    draw_text(
+        buffer,
+        stride,
+        width,
+        height,
+        x + 4,
+        y + h.saturating_sub(12) / 2,
+        label,
+        text_color,
+    );
 }
 
 fn render_terminal_grid(

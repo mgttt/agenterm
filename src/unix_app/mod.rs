@@ -61,9 +61,9 @@ use crate::{
 use render::{
     COMPOSER_HEIGHT, ComposerView, ConfirmCloseHit, ConfirmCloseView, FrameContent,
     RESOLVED_UNIX_FONT, STATUS_HEIGHT, SettingsHit, SettingsModalView, SidebarTabRow,
-    StatusBarView, TerminalGrid, TerminalPaint, ToolbarHit, WindowCloseHit, WindowCloseView,
-    WorkspaceToolbarView, cell_metrics, effective_palette, grid_dimensions_for_pixels,
-    render_frame, scrollbar_view_from_geometry, sidebar_row_at_y,
+    StatusBarView, TabEditorFocusView, TabEditorView, TerminalGrid, TerminalPaint, ToolbarHit,
+    WindowCloseHit, WindowCloseView, WorkspaceToolbarView, cell_metrics, effective_palette,
+    grid_dimensions_for_pixels, render_frame, scrollbar_view_from_geometry, sidebar_row_at_y,
 };
 
 use layout::{
@@ -163,6 +163,29 @@ impl UnixFocusSurface {
             "tabs" | "sidebar" => Ok(Self::Sidebar),
             "settings" => Ok(Self::Settings),
             other => Err(format!("unknown focus surface: {other}")),
+        }
+    }
+}
+
+enum SidebarTabAction {
+    AddChild,
+    Edit,
+    Close,
+    Save,
+    Cancel,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TabEditorFocus {
+    Name,
+    Note,
+}
+
+impl TabEditorFocus {
+    const fn snapshot_str(self) -> &'static str {
+        match self {
+            Self::Name => "name",
+            Self::Note => "note",
         }
     }
 }
@@ -280,6 +303,7 @@ struct UnixApp {
     note_edit_target: Option<u64>,
     tab_name_draft: String,
     tab_note_draft: String,
+    tab_editor_focus: TabEditorFocus,
     wheel_remainder: i32,
     scroll_drag: Option<ScrollDrag>,
     sidebar_scroll_offset: usize,
@@ -335,6 +359,7 @@ impl UnixApp {
             note_edit_target: None,
             tab_name_draft: String::new(),
             tab_note_draft: String::new(),
+            tab_editor_focus: TabEditorFocus::Name,
             wheel_remainder: 0,
             scroll_drag: None,
             sidebar_scroll_offset: 0,
@@ -394,13 +419,6 @@ impl UnixApp {
             return;
         };
         let tab_id = self.tabs[position].id;
-        if self.note_edit_target == Some(tab_id) {
-            let normalized = self.composer_buffer.replace("\r\n", "\n");
-            let (name, note) = normalized.split_once('\n').unwrap_or((&normalized, ""));
-            self.tab_name_draft = name.to_owned();
-            self.tab_note_draft = note.to_owned();
-            return;
-        }
         if self.cwd_edit_target == Some(tab_id) {
             return;
         }
@@ -461,9 +479,6 @@ impl UnixApp {
             return self
                 .prepare_cwd(None, None, ComposerWriteMode::EmptyOnly)
                 .map_err(|error| error.to_string());
-        }
-        if self.note_edit_target.is_some() {
-            return self.complete_tab_editor(true);
         }
         let Some(position) = self.active_position() else {
             return Err("no active window".to_owned());
@@ -894,27 +909,58 @@ impl UnixApp {
         self.note_edit_target = Some(tab_id);
         self.tab_name_draft = tab.title.clone();
         self.tab_note_draft = tab.note.clone();
-        self.composer_buffer = if tab.note.is_empty() {
-            tab.title.clone()
-        } else {
-            format!("{}\n{}", tab.title, tab.note)
-        };
-        self.set_focus_surface_internal(UnixFocusSurface::Composer, "tab-editor");
+        self.tab_editor_focus = TabEditorFocus::Name;
+        self.active = Some(tab_id);
+        self.ensure_editing_tab_visible();
+        self.set_focus_surface_internal(UnixFocusSurface::Sidebar, "tab-editor");
         Ok(())
     }
 
+    fn ensure_editing_tab_visible(&mut self) {
+        let Some(tab_id) = self.note_edit_target else {
+            return;
+        };
+        let rows = self.visible_tree_rows();
+        let Some(position) = rows.iter().position(|row| row.id == tab_id) else {
+            return;
+        };
+        let offset = self.sidebar_offset();
+        let capacity = self.sidebar_row_capacity();
+        if position < offset {
+            self.sidebar_scroll_offset = position;
+        } else if position >= offset + capacity {
+            self.sidebar_scroll_offset = position.saturating_sub(capacity.saturating_sub(1));
+        }
+    }
+
     fn complete_tab_editor(&mut self, save: bool) -> Result<(), String> {
-        let Some(tab_id) = self.note_edit_target.take() else {
+        let Some(tab_id) = self.note_edit_target else {
             return Err("tab editor is not open".to_owned());
         };
         if save {
+            let name = self.tab_name_draft.trim();
+            if name.is_empty() {
+                return Err("Tab title cannot be empty".to_owned());
+            }
+            if name.len() > crate::ui_bridge::UI_TAB_TITLE_MAX_BYTES {
+                return Err(format!(
+                    "Tab title exceeds the {}-byte UI limit",
+                    crate::ui_bridge::UI_TAB_TITLE_MAX_BYTES
+                ));
+            }
+            let note = self.tab_note_draft.clone();
+            if note.len() > crate::ui_bridge::UI_TAB_NOTE_MAX_BYTES {
+                return Err(format!(
+                    "Tab note exceeds the {}-byte UI limit",
+                    crate::ui_bridge::UI_TAB_NOTE_MAX_BYTES
+                ));
+            }
             let Some(position) = self.tabs.iter().position(|tab| tab.id == tab_id) else {
                 return Err(format!("can't find tab: @{tab_id}"));
             };
             let previous_name = self.tabs[position].title.clone();
             let previous_note = self.tabs[position].note.clone();
-            let name = self.tab_name_draft.clone();
-            let note = self.tab_note_draft.clone();
+            let name = name.to_owned();
             self.tabs[position].title = name.clone();
             self.tabs[position].note = note.clone();
             if previous_name != name {
@@ -938,11 +984,76 @@ impl UnixApp {
                 );
             }
         }
+        self.note_edit_target = None;
         self.tab_name_draft.clear();
         self.tab_note_draft.clear();
-        self.set_focus_surface_internal(UnixFocusSurface::Terminal, "tab-editor-close");
+        self.tab_editor_focus = TabEditorFocus::Name;
+        self.set_focus_surface_internal(UnixFocusSurface::Sidebar, "tab-editor-close");
         self.request_redraw();
         Ok(())
+    }
+
+    fn tab_editor_draft_mut(&mut self) -> Option<&mut String> {
+        self.note_edit_target?;
+        match self.tab_editor_focus {
+            TabEditorFocus::Name => Some(&mut self.tab_name_draft),
+            TabEditorFocus::Note => Some(&mut self.tab_note_draft),
+        }
+    }
+
+    fn handle_tab_editor_key(&mut self, event: &winit::event::KeyEvent) -> bool {
+        if self.note_edit_target.is_none() {
+            return false;
+        }
+        let multiline = self.tab_editor_focus == TabEditorFocus::Note;
+        let modifiers = self.modifiers;
+        let draft = self.tab_editor_draft_mut().expect("tab editor draft");
+        match input::text_field_key_action(event, modifiers, draft, multiline) {
+            input::TextFieldKeyAction::Edited => {
+                self.request_redraw();
+            }
+            input::TextFieldKeyAction::NextField => {
+                self.tab_editor_focus = TabEditorFocus::Note;
+                self.request_redraw();
+            }
+            input::TextFieldKeyAction::Submit => {
+                let _ = self.complete_tab_editor(true);
+            }
+            input::TextFieldKeyAction::Escape => {
+                let _ = self.complete_tab_editor(false);
+            }
+            input::TextFieldKeyAction::Copy => {
+                if let Some(text) = self.tab_editor_draft_mut()
+                    && clipboard::set_clipboard_text(text).is_ok()
+                {
+                    self.set_status_message("Copied tab editor draft");
+                }
+            }
+            input::TextFieldKeyAction::Cut => {
+                if let Some(text) = self.tab_editor_draft_mut()
+                    && clipboard::set_clipboard_text(text).is_ok()
+                {
+                    text.clear();
+                    self.set_status_message("Cut tab editor draft");
+                    self.request_redraw();
+                }
+            }
+            input::TextFieldKeyAction::Paste => {
+                if let Ok(raw) = clipboard::get_clipboard_text() {
+                    let normalized = raw.replace("\r\n", "\n");
+                    if let Some(text) = self.tab_editor_draft_mut() {
+                        text.push_str(&normalized);
+                        self.set_status_message(format!(
+                            "Pasted {} characters into tab editor",
+                            normalized.len()
+                        ));
+                        self.request_redraw();
+                    }
+                }
+            }
+            input::TextFieldKeyAction::Ignored => {}
+        }
+        true
     }
 
     fn toggle_collapsed(&mut self, tab_id: u64) -> Result<(), String> {
@@ -1158,7 +1269,7 @@ impl UnixApp {
                 "target": format!("@{id}"),
                 "name_length": self.tab_name_draft.chars().count(),
                 "note_length": self.tab_note_draft.chars().count(),
-                "focus": serde_json::Value::Null,
+                "focus": self.tab_editor_focus.snapshot_str(),
             })
         });
         let tabs = all_rows
@@ -1448,6 +1559,77 @@ impl UnixApp {
             .unwrap_or((INITIAL_WIDTH, INITIAL_HEIGHT))
     }
 
+    fn sidebar_tab_action_at(&self, x: i32, y: i32) -> Option<SidebarTabAction> {
+        let tree_height = self.layout().sidebar_tree.height().max(0) as u32;
+        let row_index = sidebar_row_at_y(y as u32, tree_height)?;
+        let source_index = self.sidebar_offset() + row_index;
+        let visible_rows = self.visible_tree_rows();
+        let row = visible_rows.get(source_index)?;
+        let active_id = self.active?;
+        if row.id != active_id {
+            return None;
+        }
+        let mode = if self.note_edit_target == Some(row.id) {
+            TreeRowMode::Editing
+        } else {
+            TreeRowMode::Normal
+        };
+        let geometry =
+            sidebar_tree_row_geometry(self.layout().sidebar_tree, row_index, row.depth, mode);
+        match mode {
+            TreeRowMode::Editing => {
+                if geometry.actions.primary.contains(x, y) {
+                    Some(SidebarTabAction::Save)
+                } else if geometry.actions.secondary.contains(x, y) {
+                    Some(SidebarTabAction::Cancel)
+                } else {
+                    None
+                }
+            }
+            TreeRowMode::Normal => {
+                if geometry
+                    .actions
+                    .add_child
+                    .is_some_and(|bounds| bounds.contains(x, y))
+                {
+                    Some(SidebarTabAction::AddChild)
+                } else if geometry.actions.primary.contains(x, y) {
+                    Some(SidebarTabAction::Edit)
+                } else if geometry.actions.secondary.contains(x, y) {
+                    Some(SidebarTabAction::Close)
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
+    fn sidebar_tab_editor_hit(&self, x: i32, y: i32) -> Option<TabEditorFocus> {
+        self.note_edit_target?;
+        let tree_height = self.layout().sidebar_tree.height().max(0) as u32;
+        let row_index = sidebar_row_at_y(y as u32, tree_height)?;
+        let source_index = self.sidebar_offset() + row_index;
+        let visible_rows = self.visible_tree_rows();
+        let row = visible_rows.get(source_index)?;
+        if self.note_edit_target != Some(row.id) {
+            return None;
+        }
+        let geometry = sidebar_tree_row_geometry(
+            self.layout().sidebar_tree,
+            row_index,
+            row.depth,
+            TreeRowMode::Editing,
+        );
+        let editors = geometry.editors?;
+        if editors.name.contains(x, y) {
+            Some(TabEditorFocus::Name)
+        } else if editors.note.contains(x, y) {
+            Some(TabEditorFocus::Note)
+        } else {
+            None
+        }
+    }
+
     fn handle_sidebar_click(&mut self, x: f64, y: f64) {
         if self.handle_window_close_click(x, y) {
             return;
@@ -1486,14 +1668,63 @@ impl UnixApp {
                 }
             }
         }
+        if let Some(action) = self.sidebar_tab_action_at(click_x, click_y) {
+            match action {
+                SidebarTabAction::AddChild => {
+                    let Some(position) = self.tab_position_for_sidebar_y(y.max(0.0) as u32) else {
+                        return;
+                    };
+                    let parent_id = self.tabs[position].id;
+                    self.sync_composer_buffer_to_tab();
+                    if let Ok(index) = self.create_tab(
+                        Some("New child".to_owned()),
+                        Vec::new(),
+                        Vec::new(),
+                        true,
+                        Some(parent_id),
+                    ) && let Some(id) = self
+                        .tabs
+                        .iter()
+                        .find(|tab| tab.index == index)
+                        .map(|tab| tab.id)
+                    {
+                        self.after_create_tab(id, Some(parent_id));
+                    }
+                }
+                SidebarTabAction::Edit => {
+                    let Some(position) = self.tab_position_for_sidebar_y(y.max(0.0) as u32) else {
+                        return;
+                    };
+                    let id = self.tabs[position].id;
+                    let _ = self.open_tab_editor_for(id);
+                }
+                SidebarTabAction::Close => {
+                    let Some(position) = self.tab_position_for_sidebar_y(y.max(0.0) as u32) else {
+                        return;
+                    };
+                    self.request_close_tab(self.tabs[position].id);
+                }
+                SidebarTabAction::Save => {
+                    let _ = self.complete_tab_editor(true);
+                }
+                SidebarTabAction::Cancel => {
+                    let _ = self.complete_tab_editor(false);
+                }
+            }
+            return;
+        }
+        if let Some(focus) = self.sidebar_tab_editor_hit(click_x, click_y) {
+            self.tab_editor_focus = focus;
+            self.set_focus_surface_internal(UnixFocusSurface::Sidebar, "tab-editor-focus");
+            return;
+        }
+        if self.note_edit_target.is_some() {
+            let _ = self.complete_tab_editor(false);
+        }
         let Some(position) = self.tab_position_for_sidebar_y(y.max(0.0) as u32) else {
             self.set_focus_surface_internal(UnixFocusSurface::Sidebar, "mouse");
             return;
         };
-        if self.active_position() == Some(position) {
-            self.set_focus_surface_internal(UnixFocusSurface::Sidebar, "mouse");
-            return;
-        }
         let _ = self.select_tab_at(position);
         self.set_focus_surface_internal(UnixFocusSurface::Sidebar, "mouse");
     }
@@ -1518,6 +1749,9 @@ impl UnixApp {
     fn handle_content_click(&mut self, x: f64, y: f64) {
         if self.handle_window_close_click(x, y) {
             return;
+        }
+        if self.note_edit_target.is_some() {
+            let _ = self.complete_tab_editor(false);
         }
         if self.handle_status_click(x as i32, y as i32) {
             return;
@@ -2410,6 +2644,14 @@ impl UnixApp {
             .then(|| WindowCloseView::for_client(size.width, size.height));
         let resize_grip = layout.resize_grip.map(u32_rect);
 
+        let tab_editor = self.note_edit_target.map(|_| TabEditorView {
+            name_draft: self.tab_name_draft.clone(),
+            note_draft: self.tab_note_draft.clone(),
+            focus: match self.tab_editor_focus {
+                TabEditorFocus::Name => TabEditorFocusView::Name,
+                TabEditorFocus::Note => TabEditorFocusView::Note,
+            },
+        });
         let Some(surface) = self.surface.as_mut() else {
             return;
         };
@@ -2443,7 +2685,9 @@ impl UnixApp {
                     selection: terminal_selection,
                 },
                 sidebar_rows: &sidebar_rows,
+                sidebar_tree: layout.sidebar_tree,
                 editing_tab_id: self.note_edit_target,
+                tab_editor,
                 workspace_toolbar,
                 terminal_top: layout.terminal.top.max(0) as u32,
                 composer: composer_view,
@@ -2547,11 +2791,6 @@ impl ControlHost for UnixApp {
             self.prepare_cwd(None, None, ComposerWriteMode::EmptyOnly)?;
             return Ok(true);
         }
-        if self.note_edit_target.is_some() {
-            self.sync_composer_buffer_to_tab();
-            self.complete_tab_editor(true)?;
-            return Ok(true);
-        }
         Ok(false)
     }
 
@@ -2562,15 +2801,6 @@ impl ControlHost for UnixApp {
     }
 
     fn load_composer_to_ui(&mut self) {
-        if self.note_edit_target.is_some() {
-            self.composer_buffer = if self.tab_note_draft.is_empty() {
-                self.tab_name_draft.clone()
-            } else {
-                format!("{}\n{}", self.tab_name_draft, self.tab_note_draft)
-            };
-            self.request_redraw();
-            return;
-        }
         self.load_composer_buffer_from_tab();
         self.request_redraw();
     }
@@ -2639,11 +2869,15 @@ impl ControlHost for UnixApp {
 
     fn apply_set_composer(&mut self, position: usize, text: String) -> Result<(), String> {
         let id = self.tabs[position].id;
-        if self.note_edit_target == Some(id) {
+        if let Some(editing_id) = self.note_edit_target {
+            if editing_id != id {
+                return Err("set-composer target is not open in the inline tab editor".to_owned());
+            }
             let normalized = text.replace("\r\n", "\n");
             let (name, note) = normalized.split_once('\n').unwrap_or((&normalized, ""));
             self.tab_name_draft = name.to_owned();
             self.tab_note_draft = note.to_owned();
+            self.request_redraw();
             return Ok(());
         }
         self.tabs_mut()[position].composer = text.clone();
@@ -2891,6 +3125,9 @@ impl ControlHost for UnixApp {
         if self.cwd_edit_target.is_some() {
             self.close_cwd_editor();
         }
+        if self.note_edit_target.is_some() {
+            let _ = self.complete_tab_editor(false);
+        }
         if self.focus_surface == UnixFocusSurface::Composer {
             self.sync_composer_buffer_to_tab();
         }
@@ -3019,6 +3256,10 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                     }
                     return;
                 }
+                if self.note_edit_target.is_some() {
+                    self.handle_tab_editor_key(&event);
+                    return;
+                }
                 if matches!(event.logical_key, Key::Named(NamedKey::Escape))
                     && self.cancel_terminal_selection(true)
                 {
@@ -3064,8 +3305,6 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                         input::ComposerKeyAction::Escape => {
                             if self.cwd_edit_target.is_some() {
                                 self.close_cwd_editor();
-                            } else if self.note_edit_target.is_some() {
-                                let _ = self.complete_tab_editor(false);
                             } else {
                                 self.sync_composer_buffer_to_tab();
                                 self.set_focus_surface_internal(
