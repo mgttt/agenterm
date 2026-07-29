@@ -376,7 +376,7 @@ and it is not positioned as a restricted security plugin.
 - [~] once one Rhai responsibility reaches parity and all normal callers switch
   to it, or an obsolete responsibility is proven unreachable and superseded,
   delete that PowerShell implementation immediately instead of accumulating a
-  release-wide migration backlog; twenty of 43 baseline scripts are deleted.
+  release-wide migration backlog; twenty-one of 43 baseline scripts are deleted.
 - [~] every migrated item records its old path, replacement path, switching
   commit, parity evidence, and deletion state in this PRD. Git history is the
   only archive after the explicit rollback window closes.
@@ -405,6 +405,7 @@ Migration ledger:
 | Unintegrated PowerShell journey-manifest prototype and self-test | Planned shared Rhai smoke harness plus the existing qualification receipt boundary | `tests/JourneyManifest.ps1` and `tests/journey_manifest_selftest.ps1` | current migration change | the prototype self-test passed before removal, but `git grep` proves no smoke, check, CI, qualification, or release caller; delivery PRD already marks the machine-readable step manifest incomplete | deleted rather than preserving a second unused evidence model; Git history is the rollback source |
 | PRD, evidence, CLI/protocol, and Mux catalog alignment | `scripts/rhai/prd-alignment.rhai` | `tests/prd_alignment.ps1` | current migration change | public task reproduces the exact legacy live-catalog PASS result and isolated black-box coverage rejects an unsupported alignment-contract schema | deleted; both quick and full checks invoke the named Rhai task |
 | Owned-child cleanup self-test and first shared Rhai harness foundation | `scripts/rhai/harness-cleanup-selftest.rhai` plus `scripts/rhai/lib/test_harness.rhai` | `tests/harness_cleanup_selftest.ps1` | current migration change | public task and Windows integration prove exact registered-child forced cleanup, survival of an unregistered sibling until explicit cleanup, orphan-free persisted proof, and original-failure retention | deleted; the quality gate invokes the named Rhai task and later smoke migrations extend the same module |
+| Working-context proxy privacy and restart journey | `scripts/rhai/working-context-smoke.rhai` plus the shared Rhai test harness | `tests/working_context_smoke.ps1` | current migration change | named task and Windows public integration prove isolated GUI/server launch, safe proxy facts, archived-control non-mutation, no secret in snapshot/pane/workspace/events/stderr, non-persistence across restart, stable completed-child identity, and orphan-free cleanup | deleted; qualification declaration discovery and execution now use the Rhai journey directly |
 
 ### v0.1.10 completion commitment
 
@@ -414,7 +415,7 @@ Migration ledger:
 - [x] the dated 2026-07-29 frozen baseline is 43 tracked `.ps1` files: 3 at
   the repository root, 17 under `scripts/`, 21 under `tests/`, and 2 retained in
   `scripts/archive/powershell/`.
-- [~] migration progress is 20/43 deleted and 23/43 remaining; progress is
+- [~] migration progress is 21/43 deleted and 22/43 remaining; progress is
   counted only after parity evidence plus caller cutover, or caller-audited
   functional deletion of obsolete behavior, and source deletion.
 - [x] `scripts/powershell-migration.json` freezes all 43 baseline paths under

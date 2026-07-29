@@ -52,6 +52,7 @@ impl std::fmt::Debug for ScriptChild {
 }
 
 struct ChildState {
+    id: u32,
     child: Option<Child>,
     stdout: ScriptStream,
     stderr: ScriptStream,
@@ -368,7 +369,9 @@ fn spawn_owned(command: &ScriptCommand) -> Result<ScriptChild, Box<EvalAltResult
             .write_all(&command.stdin)
             .map_err(|error| format!("process_stdin_write: {error}"))?;
     }
+    let id = child.id();
     Ok(ScriptChild(Arc::new(Mutex::new(ChildState {
+        id,
         child: Some(child),
         stdout,
         stderr,
@@ -379,13 +382,7 @@ fn spawn_owned(command: &ScriptCommand) -> Result<ScriptChild, Box<EvalAltResult
 
 fn child_id(child: &mut ScriptChild) -> Result<rhai::INT, Box<EvalAltResult>> {
     let state = child.0.lock().map_err(|_| "process_child_state_poisoned")?;
-    Ok(i64::from(
-        state
-            .child
-            .as_ref()
-            .map(Child::id)
-            .ok_or("process_child_completed")?,
-    ))
+    Ok(i64::from(state.id))
 }
 
 fn child_stdout(child: &mut ScriptChild) -> Result<ScriptStream, Box<EvalAltResult>> {
@@ -780,6 +777,36 @@ mod tests {
             error["cause_class"].clone().into_string().unwrap(),
             "exit_status"
         );
+    }
+
+    #[test]
+    fn child_id_remains_stable_after_wait() {
+        let source = if cfg!(windows) {
+            r#"
+                let c = std::process::command("cmd.exe");
+                c.args(["/d", "/s", "/c", "exit /b 0"]);
+                let child = c.start();
+                let before = child.id;
+                child.wait_with_output();
+                #{ before: before, after: child.id, state: child.state }
+            "#
+        } else {
+            r#"
+                let c = std::process::command("/bin/sh");
+                c.args(["-c", "exit 0"]);
+                let child = c.start();
+                let before = child.id;
+                child.wait_with_output();
+                #{ before: before, after: child.id, state: child.state }
+            "#
+        };
+        let result = engine().eval::<rhai::Map>(source).unwrap();
+        assert!(result["before"].as_int().unwrap() > 0);
+        assert_eq!(
+            result["before"].as_int().unwrap(),
+            result["after"].as_int().unwrap()
+        );
+        assert_eq!(result["state"].clone().into_string().unwrap(), "exited");
     }
 
     #[test]

@@ -35,6 +35,7 @@
         "std.time.system-time-now",
         "std.time.system-time-unix-millis",
         "std.time.system-time-rfc3339",
+        "rhai.task.sleep",
         "rhai.json.parse",
         "rhai.json.parse-file",
         "rhai.json.stringify-pretty",
@@ -80,6 +81,14 @@
       "profile": "local",
       "cwd": ".",
       "args": ["."]
+    },
+    {
+      "id": "working-context-smoke",
+      "description": "Prove redacted launch proxy facts, archived controls, and non-persistence through an isolated GUI restart",
+      "entry": "scripts/rhai/working-context-smoke.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "args": [".", "dist/agenterm.exe", "dist/agenterm-cli.exe"]
     },
     {
       "id": "migration-audit",

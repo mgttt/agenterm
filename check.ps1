@@ -216,7 +216,7 @@ try {
             'fleet-smoke' = '.\tests\fleet_smoke.ps1'
             'script-smoke' = '.\tests\script_smoke.ps1'
             'theme-smoke' = '.\tests\theme_smoke.ps1'
-            'working-context-smoke' = '.\tests\working_context_smoke.ps1'
+            'working-context-smoke' = '.\scripts\rhai\working-context-smoke.rhai'
             'workbench-smoke' = '.\tests\workbench_smoke.ps1'
             'ux-smoke' = '.\tests\ux_smoke.ps1'
         }
@@ -524,7 +524,9 @@ try {
             }
             Invoke-Checked -Id 'working-context-smoke' `
                 -Label 'working context privacy smoke test' {
-                & '.\tests\working_context_smoke.ps1'
+                & '.\dist\agenterm-script.exe' task run working-context-smoke `
+                    --manifest '.\agenterm.tasks.json' `
+                    --timeout-ms 60000 --max-operations 10000000
             }
             Invoke-Checked -Id 'workbench-smoke' `
                 -Label 'workbench interaction smoke test' {

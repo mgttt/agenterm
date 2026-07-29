@@ -1,0 +1,334 @@
+// Prove that launch proxy facts stay redacted, non-actionable, and ephemeral.
+//
+// Args:
+//   --list-evidence
+// or:
+//   REPO GUI_EXE CLI_EXE
+
+import "scripts/rhai/lib/test_harness" as test_harness;
+
+let declared_evidence = ["ux.working-context-proxy"];
+
+if args.len == 1 && args[0] == "--list-evidence" {
+    print("ux.working-context-proxy");
+    return;
+}
+
+fn require(condition, message) {
+    if !condition {
+        throw message;
+    }
+}
+
+fn require_no_secret(text, secret, location) {
+    require(
+        !text.contains(secret),
+        "working_context_secret_leak:" + location
+    );
+}
+
+fn active_tab(snapshot) {
+    for tab in snapshot.tabs {
+        if tab.active {
+            return tab;
+        }
+    }
+    throw "working_context_active_tab_missing";
+}
+
+fn wait_for_server(context, cli, gui_child, redactions) {
+    for attempt in 0..200 {
+        let probe = test_harness::run_cli(
+            context,
+            cli,
+            ["ui-snapshot"],
+            false,
+            redactions
+        );
+        if probe.success {
+            return probe.stdout;
+        }
+        if gui_child.state == "exited" {
+            let output = gui_child.wait_with_output(
+                std::time::Duration::from_secs(2)
+            );
+            throw "working_context_gui_early_exit:" +
+                test_harness::redact_text(output.stderr_text(), redactions);
+        }
+        rhai::task::sleep(std::time::Duration::from_millis(50));
+    }
+    throw "working_context_server_timeout";
+}
+
+fn wait_for_exit(child, code) {
+    for attempt in 0..40 {
+        if child.state == "exited" {
+            return child.wait_with_output(
+                std::time::Duration::from_secs(2)
+            );
+        }
+        rhai::task::sleep(std::time::Duration::from_millis(50));
+    }
+    if child.state == "running" {
+        child.kill();
+    }
+    try {
+        child.wait_with_output(std::time::Duration::from_secs(3))
+    } catch (error) {
+        throw code + ":" + error.to_string();
+    }
+}
+
+fn start_gui(context, gui, proxy) {
+    let command = test_harness::configured_command(context, gui, []);
+    if proxy == "" {
+        for name in [
+            "HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"
+        ] {
+            command.env_remove(name);
+        }
+    } else {
+        command.env("HTTP_PROXY", proxy);
+        command.env("HTTPS_PROXY", proxy);
+        command.env("http_proxy", proxy);
+        command.env("https_proxy", proxy);
+    }
+    command.start()
+}
+
+require(
+    args.len == 3,
+    "expected: REPO GUI_EXE CLI_EXE"
+);
+let repo = std::path::absolute(args[0]).display;
+let gui = std::path::absolute(args[1]).display;
+let cli = std::path::absolute(args[2]).display;
+require(std::fs::exists(gui), "working_context_gui_missing");
+require(std::fs::exists(cli), "working_context_cli_missing");
+
+let context = test_harness::new_context(repo, "working-context");
+let secret =
+    "credential-" + std::process::id() + "-" +
+    std::time::SystemTime::now().unix_millis + "-sentinel";
+let proxy =
+    "https://alice:" + secret +
+    "@proxy.example:8443/private?token=" + secret + "#fragment";
+let redactions = [proxy, secret];
+let owned_children = [];
+let succeeded = false;
+let failure = "";
+
+try {
+    let first_gui = start_gui(context, gui, proxy);
+    owned_children.push(first_gui);
+    wait_for_server(context, cli, first_gui, redactions);
+    test_harness::invoke_cli(
+        context,
+        cli,
+        ["wait-ui", "--window-state", "restored", "--timeout-ms", "10000"],
+        false,
+        redactions
+    );
+    test_harness::invoke_cli(
+        context,
+        cli,
+        ["wait-ui", "-t", "0", "--tab-state", "running",
+         "--timeout-ms", "10000"],
+        false,
+        redactions
+    );
+
+    let snapshot_text = test_harness::invoke_cli(
+        context,
+        cli,
+        ["ui-snapshot"],
+        false,
+        redactions
+    ).stdout;
+    require_no_secret(snapshot_text, secret, "launch_ui_snapshot");
+    let snapshot = rhai::json::parse(snapshot_text);
+    let tab = active_tab(snapshot);
+    require(
+        tab.working_context.proxy.configured
+            && tab.working_context.proxy.source == "launch"
+            && !tab.working_context.proxy.endpoint_visible
+            && !tab.working_context.proxy.credential_revealed,
+        "working_context_launch_proxy_facts"
+    );
+    let tab_id = tab.id;
+    let epoch = snapshot.event_position.epoch;
+    let launch_pane = rhai::json::parse(
+        test_harness::invoke_cli(
+            context,
+            cli,
+            ["pane-snapshot", "-t", tab_id],
+            false,
+            redactions
+        ).stdout
+    );
+    let input_writes = launch_pane.windows[0].input_writes;
+    let proxy_status = snapshot.layout.status_bar.proxy;
+    require(
+        proxy_status.archived
+            && !proxy_status.available
+            && proxy_status.bounds.width == 0
+            && proxy_status.action == ()
+            && proxy_status.eye_action == (),
+        "working_context_archived_surface_visible"
+    );
+
+    let archived = test_harness::invoke_cli(
+        context,
+        cli,
+        ["ui-action", "open-proxy-editor", "-t", tab_id],
+        true,
+        redactions
+    );
+    require_no_secret(
+        archived.stdout + archived.stderr,
+        secret,
+        "archived_proxy_action"
+    );
+    require(
+        (archived.stdout + archived.stderr).contains(
+            "proxy workbench controls are archived"
+        ),
+        "working_context_archived_status_missing"
+    );
+    let pane_text = test_harness::invoke_cli(
+        context,
+        cli,
+        ["pane-snapshot", "-t", tab_id],
+        false,
+        redactions
+    ).stdout;
+    require_no_secret(pane_text, secret, "archived_pane_snapshot");
+    let pane = rhai::json::parse(pane_text);
+    require(
+        pane.windows[0].input_writes == input_writes
+            && !pane.windows[0].composer_sensitive
+            && pane.windows[0].composer == "",
+        "working_context_archived_surface_mutated_terminal"
+    );
+
+    test_harness::invoke_cli(
+        context,
+        cli,
+        ["save-workspace"],
+        false,
+        redactions
+    );
+    let workspace_text = std::fs::read_to_string(context.workspace_path);
+    require_no_secret(workspace_text, secret, "workspace");
+    let events = test_harness::invoke_cli(
+        context,
+        cli,
+        ["read-events", "--epoch", epoch, "--after", "0",
+         "--limit", "1024"],
+        false,
+        redactions
+    ).stdout;
+    require_no_secret(events, secret, "event_journal");
+
+    test_harness::invoke_cli(
+        context,
+        cli,
+        ["shutdown"],
+        false,
+        redactions
+    );
+    let first_output = wait_for_exit(
+        first_gui,
+        "working_context_first_gui_shutdown_timeout"
+    );
+    require_no_secret(
+        first_output.stderr_text(),
+        secret,
+        "first_gui_stderr"
+    );
+
+    let second_gui = start_gui(context, gui, "");
+    owned_children.push(second_gui);
+    wait_for_server(context, cli, second_gui, redactions);
+    test_harness::invoke_cli(
+        context,
+        cli,
+        ["wait-ui", "--window-state", "restored", "--timeout-ms", "10000"],
+        false,
+        redactions
+    );
+    test_harness::invoke_cli(
+        context,
+        cli,
+        ["wait-ui", "-t", "0", "--tab-state", "running",
+         "--timeout-ms", "10000"],
+        false,
+        redactions
+    );
+    let restored_text = test_harness::invoke_cli(
+        context,
+        cli,
+        ["ui-snapshot"],
+        false,
+        redactions
+    ).stdout;
+    require_no_secret(restored_text, secret, "restart_ui_snapshot");
+    let restored_tab = active_tab(rhai::json::parse(restored_text));
+    require(
+        !restored_tab.working_context.proxy.configured
+            && restored_tab.working_context.proxy.source == "off",
+        "working_context_proxy_persisted"
+    );
+    test_harness::invoke_cli(
+        context,
+        cli,
+        ["shutdown"],
+        false,
+        redactions
+    );
+    let second_output = wait_for_exit(
+        second_gui,
+        "working_context_second_gui_shutdown_timeout"
+    );
+    require_no_secret(
+        second_output.stderr_text(),
+        secret,
+        "second_gui_stderr"
+    );
+
+    test_harness::emit_evidence(
+        context,
+        declared_evidence,
+        "ux.working-context-proxy"
+    );
+    print(
+        "PASS: archived Proxy controls retain redacted launch facts " +
+        "without mutation or persistence"
+    );
+    succeeded = true;
+} catch (error) {
+    failure = test_harness::redact_text(error.to_string(), redactions);
+}
+
+test_harness::scrub_retained_text(context, redactions);
+let completion_failure = "";
+try {
+    test_harness::complete(
+        context,
+        owned_children,
+        succeeded,
+        failure
+    );
+} catch (error) {
+    completion_failure =
+        test_harness::redact_text(error.to_string(), redactions);
+}
+if succeeded && completion_failure == "" {
+    test_harness::remove_run(context);
+}
+if failure != "" {
+    throw failure;
+}
+if completion_failure != "" {
+    throw completion_failure;
+}

@@ -249,6 +249,30 @@ fn run_harness_cleanup_selftest() -> Output {
         .expect("run Rhai harness cleanup self-test")
 }
 
+#[cfg(windows)]
+fn run_working_context_smoke() -> Output {
+    let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+        .current_dir(repo)
+        .args(["run", "scripts/rhai/working-context-smoke.rhai"])
+        .args(["--profile", "local", "--project-root"])
+        .arg(repo)
+        .args([
+            "--timeout-ms",
+            "60000",
+            "--max-operations",
+            "10000000",
+            "--",
+        ])
+        .arg(repo)
+        .arg(env!("CARGO_BIN_EXE_agenterm"))
+        .arg(env!("CARGO_BIN_EXE_agenterm-cli"))
+        .env("AGENTERM_NO_ACTIVATE", "1")
+        .output()
+        .expect("run Rhai working-context smoke")
+}
+
 fn run_preflight(repo_under_test: &Path, output_path: &Path) -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -408,6 +432,32 @@ fn process_id_is_available_through_the_public_local_profile() {
         serde_json::from_slice(&denied.stdout).expect("decode pure-profile denial");
     assert_eq!(denied_envelope["ok"], false);
     assert_eq!(denied_envelope["failure"]["code"], "script_runtime");
+}
+
+#[test]
+fn child_id_remains_public_after_process_completion() {
+    let output = Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+        .args([
+            "eval",
+            "let c=std::process::command(\"rustc\");\
+             c.arg(\"--version\");let child=c.start();let before=child.id;\
+             child.wait_with_output();#{before:before,after:child.id,state:child.state}",
+            "--profile",
+            "local",
+            "--json",
+        ])
+        .output()
+        .expect("evaluate completed child ID");
+    assert!(
+        output.status.success(),
+        "completed child ID evaluation failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let envelope: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("decode completed child ID envelope");
+    assert_eq!(envelope["ok"], true);
+    assert_eq!(envelope["value"]["before"], envelope["value"]["after"]);
+    assert_eq!(envelope["value"]["state"], "exited");
 }
 
 #[cfg(windows)]
@@ -1237,12 +1287,12 @@ fn prd_alignment_task_matches_public_catalogs_and_fails_closed() {
         "fleet_smoke.ps1",
         "script_smoke.ps1",
         "theme_smoke.ps1",
-        "working_context_smoke.ps1",
         "workbench_smoke.ps1",
         "ux_smoke.ps1",
     ] {
         copy_fixture_file(repo, &fixture, &format!("tests/{suite}"));
     }
+    copy_fixture_file(repo, &fixture, "scripts/rhai/working-context-smoke.rhai");
     let contract_path = fixture.join("prd").join("alignment-contract.json");
     let malformed = fs::read_to_string(&contract_path)
         .expect("read fixture alignment contract")
@@ -1276,6 +1326,25 @@ fn rhai_harness_cleanup_owns_only_registered_children() {
         String::from_utf8_lossy(&output.stdout).trim(),
         "PASS: harness cleanup ownership and orphan proof"
     );
+}
+
+#[cfg(windows)]
+#[test]
+fn rhai_working_context_smoke_is_private_ephemeral_and_orphan_free() {
+    let output = run_working_context_smoke();
+    assert!(
+        output.status.success(),
+        "Rhai working-context smoke failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("EVIDENCE ux.working-context-proxy"));
+    assert!(stdout.contains(
+        "PASS: archived Proxy controls retain redacted launch facts without mutation or persistence"
+    ));
+    assert!(!stdout.contains("credential-"));
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("credential-"));
 }
 
 #[test]

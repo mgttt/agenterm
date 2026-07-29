@@ -81,7 +81,17 @@ function Assert-AgenTermQualificationDeclarations {
         if ($gate.Count -ne 1) {
             throw "Evidence suite references undeclared qualification gate: $gateId"
         }
-        $actual = @(& $SuiteScripts[$gateId] -ListEvidence 2>&1)
+        $suitePath = [string]$SuiteScripts[$gateId]
+        if ([IO.Path]::GetExtension($suitePath) -eq '.rhai') {
+            $actual = @(
+                & '.\dist\agenterm-script.exe' run $suitePath `
+                    --profile local --project-root '.' --timeout-ms 10000 `
+                    -- --list-evidence 2>&1
+            )
+        }
+        else {
+            $actual = @(& $suitePath -ListEvidence 2>&1)
+        }
         if ($LASTEXITCODE -ne 0) {
             throw "$gateId -ListEvidence failed: $($actual -join "`n")"
         }

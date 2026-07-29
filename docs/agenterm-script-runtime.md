@@ -747,6 +747,10 @@ Rust's process-local interpretation. It supports collision-resistant
 owned-resource names and live-owner protocols, but is not a stable invocation
 identity and MUST NOT be persisted as one.
 
+`Child.id` is stable for that typed handle throughout the invocation, including
+after `wait_with_output()` has completed. This lets cleanup manifests retain
+the exact owned PID without reopening or rediscovering a system process.
+
 `Output.stdout` and `.stderr` are `Bytes`. `stdout_text()` and `stderr_text()`
 perform strict UTF-8 decoding. `.truncated` MUST become true if either stream
 exceeds its retained capture; readers continue draining discarded bytes so a

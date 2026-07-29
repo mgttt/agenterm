@@ -294,12 +294,20 @@ for gate in gate_manifest.required_gates {
     if !evidence_suites.contains(gate.id) {
         continue;
     }
+    let rhai_name = gate.id + ".rhai";
+    let rhai_path = std::path::join(
+        std::path::join(repo, "scripts/rhai").display,
+        rhai_name
+    ).display;
     let suite_name = gate.id;
     suite_name.replace("-", "_");
     suite_name += ".ps1";
+    let powershell_path = std::path::join(
+        std::path::join(repo, "tests").display,
+        suite_name
+    ).display;
     let suite_path =
-        std::path::join(std::path::join(repo, "tests").display, suite_name)
-            .display;
+        if std::fs::exists(rhai_path) { rhai_path } else { powershell_path };
     require(
         std::fs::exists(suite_path),
         "prd_alignment_evidence_suite_missing:" + gate.id
@@ -315,7 +323,9 @@ for gate in gate_manifest.required_gates {
             "prd_alignment_evidence_duplicate:" + evidence_id
         );
         require(
-            suite_source.contains("Write-Evidence '" + evidence_id + "'"),
+            suite_source.contains("EVIDENCE " + evidence_id)
+                || suite_source.contains("Write-Evidence '" + evidence_id + "'")
+                || suite_source.contains("\"" + evidence_id + "\""),
             "prd_alignment_evidence_not_emitted:" + evidence_id
         );
         registered_evidence[evidence_id] = true;
