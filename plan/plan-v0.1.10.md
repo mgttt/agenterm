@@ -1,6 +1,6 @@
 # AgenTerm v0.1.10 公开计划
 
-状态：实施中；v0.1.9 已发布，首批 2/43 PowerShell 迁移项完成删除
+状态：实施中；v0.1.9 已发布，首批 3/43 PowerShell 迁移项完成删除
 工作主题：**Rhai 完整接替 PowerShell，并建立可验证的只读 Agent 桥梁**
 版本定位：在 v0.1.9 完善通用 Rhai 运行时、模块任务与机器可读工具
 schema 后，让 AgenTerm 首次用自己的脚本运行时驱动完整开发生命周期，
@@ -976,7 +976,7 @@ entry 是集成热点，只允许一个串行 owner 收口。
     43 stable IDs and responsibility groups frozen; detailed caller and
     input/output/side-effect contracts still need enrichment
   [in progress] stable Rhai task graph
-    repository manifest and first five ready tasks shipped; full graph metadata
+    repository manifest and first six ready tasks shipped; full graph metadata
     and remaining lifecycle tasks still pending
   [done] stage-0 bootstrap identity contract
   [done] no-new-ps1 migration audit gate

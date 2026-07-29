@@ -372,7 +372,9 @@ try {
 
     Invoke-Checked -Id 'readme-examples' `
         -Label 'manifest-driven README examples' {
-        & '.\tests\readme_examples.ps1'
+        & '.\dist\agenterm-script.exe' task run readme-examples `
+            --manifest '.\agenterm.tasks.json' `
+            --timeout-ms 10000 --max-operations 10000000
     }
     Invoke-Checked -Id 'docs-site' -Label 'case-exact static docs assets' {
         & '.\dist\agenterm-cli.exe' script run `

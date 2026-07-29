@@ -34,7 +34,7 @@
     {"id":"ps1-test-cleanup","path":"tests/harness_cleanup_selftest.ps1","group":"test","responsibility":"owned-resource cleanup self-test","replacement_task":"test-smoke","status":"inventory"},
     {"id":"ps1-test-journey-selftest","path":"tests/journey_manifest_selftest.ps1","group":"test","responsibility":"journey catalog self-test","replacement_task":"test-smoke","status":"inventory"},
     {"id":"ps1-test-prd-alignment","path":"tests/prd_alignment.ps1","group":"test","responsibility":"PRD and catalog alignment","replacement_task":"lint","status":"inventory"},
-    {"id":"ps1-test-readme","path":"tests/readme_examples.ps1","group":"test","responsibility":"README command and artifact alignment","replacement_task":"lint","status":"inventory"},
+    {"id":"ps1-test-readme","path":"tests/readme_examples.ps1","group":"deleted","responsibility":"README command and artifact alignment","replacement_task":"readme-examples","replacement":"scripts/rhai/readme-examples.rhai","evidence":"a20655a plus exact live stdout parity on 2026-07-29","status":"deleted"},
     {"id":"ps1-test-remote-ui","path":"tests/remote_ui_smoke.ps1","group":"test","responsibility":"remote UI black-box regression","replacement_task":"test-smoke","status":"inventory"},
     {"id":"ps1-test-remote-upgrade","path":"tests/remote_ui_upgrade_smoke.ps1","group":"test","responsibility":"UI/server upgrade regression","replacement_task":"test-smoke","status":"inventory"},
     {"id":"ps1-test-http-fixture","path":"tests/script_http_fixture.ps1","group":"test-fixture","responsibility":"loopback HTTP fixture","replacement_task":"test-smoke","status":"inventory"},
