@@ -25,6 +25,7 @@ pub mod script_catalog;
 pub mod script_error;
 pub mod script_fleet;
 pub mod script_http;
+pub mod script_image;
 pub mod script_net;
 pub mod script_process;
 pub mod script_project;

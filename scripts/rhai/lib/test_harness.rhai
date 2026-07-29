@@ -62,6 +62,10 @@ fn new_context(repo_value, suite) {
             evidence_directory,
             "emitted.txt"
         ).display,
+        failure_directory: std::path::join(
+            run_directory,
+            "failure"
+        ).display,
         command_log_path: std::path::join(
             run_directory,
             "commands.json"
@@ -231,7 +235,13 @@ fn scrub_retained_text(context, redactions) {
     }
 }
 
-fn complete(context, owned_children, succeeded, failure) {
+fn complete_impl(
+    context,
+    owned_children,
+    succeeded,
+    failure,
+    announce_failure
+) {
     assert_owned_run(context);
     let forced = [];
     let completed = [];
@@ -251,15 +261,39 @@ fn complete(context, owned_children, succeeded, failure) {
         owned_count: owned_children.len,
         completed_pids: completed,
         forced_pids: forced,
-        remaining_pids: []
+        remaining_pids: [],
+        remaining_windows: [],
+        remaining_registrations: []
     };
+    let diagnostics = [];
+    if !succeeded {
+        std::fs::create_dir_all(context.failure_directory);
+        for entry in std::fs::read_dir(context.failure_directory) {
+            if entry.is_file {
+                diagnostics.push(entry.file_name);
+            }
+        }
+        diagnostics.sort();
+    }
     let manifest = #{
         schema_version: 1,
         suite: context.suite,
         run_id: context.run_id,
         result_class: if succeeded { "success" } else { "failure" },
         failure: failure,
-        cleanup: cleanup
+        cleanup: cleanup,
+        command_log: std::path::PathBuf::from(
+            context.command_log_path
+        ).file_name,
+        evidence: std::path::PathBuf::from(
+            context.evidence_path
+        ).file_name,
+        diagnostics: diagnostics,
+        privacy: #{
+            command_arguments: "known content-bearing arguments redacted",
+            output_limit_bytes: 65536,
+            pane_capture: "disabled for this suite"
+        }
     };
     rhai::runtime::atomic_write(
         context.cleanup_path,
@@ -269,7 +303,30 @@ fn complete(context, owned_children, succeeded, failure) {
         context.manifest_path,
         rhai::json::stringify_pretty(manifest) + "\n"
     );
+    if !succeeded && announce_failure {
+        print("FAILURE BUNDLE " + context.run_directory);
+    }
     #{ cleanup: cleanup, manifest: manifest }
+}
+
+fn complete(context, owned_children, succeeded, failure) {
+    complete_impl(
+        context,
+        owned_children,
+        succeeded,
+        failure,
+        true
+    )
+}
+
+fn complete_quiet(context, owned_children, succeeded, failure) {
+    complete_impl(
+        context,
+        owned_children,
+        succeeded,
+        failure,
+        false
+    )
 }
 
 fn remove_run(context) {

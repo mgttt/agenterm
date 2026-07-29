@@ -815,6 +815,33 @@ pub fn entries() -> Vec<ScriptApiEntry> {
                 &["process_kill", "process_timeout"],
             ),
         ),
+        shipped_local_entry_with_design(
+            shipped_local_entry(
+                "std.process.child-window-input",
+                "system/process/child/window-input",
+                "Child.window_key/window_pointer",
+                None,
+                RustMapping::None,
+                "child.window_key(key) / child.window_pointer(action, x, y)",
+                (
+                    &[
+                        "invocation_owned_child",
+                        "top_level_window_lookup",
+                        "native_key_delivery",
+                        "native_pointer_delivery",
+                    ],
+                    &[
+                        "process_window_not_found",
+                        "process_window_input",
+                        "process_window_input_unsupported",
+                        "process_window_key_invalid",
+                        "process_window_pointer_action_invalid",
+                        "process_window_coordinate_invalid",
+                    ],
+                ),
+            ),
+            "2026-07-30",
+        ),
         shipped_local_entry(
             "std.process.output",
             "system/process/output",
@@ -991,6 +1018,33 @@ pub fn entries() -> Vec<ScriptApiEntry> {
                 RustMapping::None,
                 "rhai::hash::fnv1a64(bytes)",
                 (&["lowercase_hex", "wrapping_u64", "fnv1a64"], NO_STRINGS),
+            ),
+            "2026-07-30",
+        ),
+        shipped_local_entry_with_design(
+            shipped_local_entry(
+                "rhai.image.inspect-png",
+                "data/image/png/inspect",
+                "rhai::image::inspect_png",
+                None,
+                RustMapping::None,
+                "rhai::image::inspect_png(path) -> PngInfo",
+                (
+                    &[
+                        "typed_dimensions",
+                        "sampled_rgb",
+                        "sampled_luminance",
+                        "bounded_decode",
+                    ],
+                    &[
+                        "image_png_open",
+                        "image_png_header",
+                        "image_png_decode",
+                        "image_png_dimensions",
+                        "image_png_color",
+                        "image_png_size",
+                    ],
+                ),
             ),
             "2026-07-30",
         ),
@@ -1649,6 +1703,13 @@ fn comparisons_for(stable_id: &str) -> ScriptApiComparisons {
             "non-cryptographic userland hash",
             "non-cryptographic userland hash",
             "AgenTerm exposes an exact deterministic wire-compatible FNV-1a 64-bit digest",
+        );
+    }
+    if stable_id.starts_with("rhai.image.") {
+        return similar_comparisons(
+            "sharp / pngjs / Canvas image data",
+            "sharp / Canvas image data",
+            "AgenTerm exposes bounded typed PNG facts without a JavaScript image object graph",
         );
     }
     if stable_id.starts_with("rhai.stream.") {

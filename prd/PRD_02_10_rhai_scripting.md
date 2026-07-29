@@ -219,6 +219,13 @@ and it is not positioned as a restricted security plugin.
 - [x] typed `Bytes` supports unsigned byte lookup, owned slicing, and append,
   allowing raw protocol fixtures to remain bytes-first without shell or
   PowerShell escape hatches.
+- [x] invocation-owned `Child` values provide typed native top-level-window
+  key and pointer delivery on Windows. The API re-resolves the child's window
+  from its PID and never turns the opaque observation token into a persisted
+  native handle; theme, selection, workbench, and UX journeys share it.
+- [x] `rhai::image::inspect_png` decodes one explicit PNG into typed
+  dimensions, sampled RGB, and luminance facts under a 64 MiB decoded-memory
+  robustness bound, removing `System.Drawing` from visual qualification.
 - [~] `rhai::runtime` exposes stable invocation/API/version/limits facts;
   unstable implementation handles are not part of the current public object
   tree, but this is API design rather than a permission boundary.
@@ -436,6 +443,7 @@ Migration ledger:
 | Native first-window and asynchronous terminal startup journey | `scripts/rhai/startup-smoke.rhai` plus unrestricted `std::process::list()` and the shared Rhai harness | `tests/startup_smoke.ps1` | current migration change | named task preserves the one-second native-window budget, public asynchronous terminal-ready wait, exact window title and inherited-stderr guidance, second-launch handoff, nonblocking CLI-style/invalid GUI arguments, absence of a nested Script worker, graceful shutdown, and orphan-free cleanup | deleted; ordinary qualification and Windows CI invoke the named Rhai journey |
 | Public CLI, typed control, UI bridge, and PTY lifecycle journey | `scripts/rhai/cli-smoke.rhai` plus the shared Rhai harness | `tests/cli_smoke.ps1` | current migration change | named task preserves all nine public evidence IDs across receipt replay/conflict, offline validation, operation/UI-bridge discovery, renderer-neutral bootstrap/delta causality, typed Tabs actions/events, Composer/PTY/Backspace/scroll/screenshots, stable creation IDs, remain-on-exit, and explicit close; command evidence is now bounded per record | deleted; ordinary qualification and Windows CI invoke the named Rhai journey |
 | Loopback HTTP test fixture | `scripts/rhai/script-http-fixture.rhai` plus unrestricted `std::net::TcpListener` and raw `Bytes` operations | `tests/script_http_fixture.ps1` | current migration change | full public Script smoke preserves status/echo/large/async/slow/cancel/malformed/disconnect/TLS paths, privacy-bounded audit, typed host failures, cleanup, and a delayed-first-byte Windows accepted-socket regression | deleted; the Script smoke launches only the Rhai fixture |
+| Theme preview, persistence, PTY continuity, and rendered differentiation | `scripts/rhai/theme-smoke.rhai` plus typed child-window input, `rhai::image::inspect_png`, and the shared Rhai harness | `tests/theme_smoke.ps1` | current migration change | live old/new parity preserves Dark/Light preview, Cancel and physical Escape rollback, settings persistence, stable PTY PID/output, native PNG luminance separation, restart state, bounded retained failure diagnostics, and orphan-free cleanup | deleted; qualification and diagnostic-bundle probes invoke the named Rhai task |
 
 ### v0.1.10 completion commitment
 
@@ -445,7 +453,7 @@ Migration ledger:
 - [x] the dated 2026-07-29 frozen baseline is 43 tracked `.ps1` files: 3 at
   the repository root, 17 under `scripts/`, 21 under `tests/`, and 2 retained in
   `scripts/archive/powershell/`.
-- [~] migration progress is 26/43 deleted and 17/43 remaining; progress is
+- [~] migration progress is 28/43 deleted and 15/43 remaining; progress is
   counted only after parity evidence plus caller cutover, or caller-audited
   functional deletion of obsolete behavior, and source deletion.
 - [x] `scripts/powershell-migration.json` freezes all 43 baseline paths under

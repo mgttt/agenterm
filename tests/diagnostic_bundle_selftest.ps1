@@ -215,6 +215,38 @@ function Start-ExternalProbe {
         Process = $process
         Stdout = $process.StandardOutput.ReadToEndAsync()
         Stderr = $process.StandardError.ReadToEndAsync()
+        RequireAnnouncement = $true
+    }
+}
+
+function Start-ExternalCommandProbe {
+    param(
+        [Parameter(Mandatory = $true)][string]$Executable,
+        [Parameter(Mandatory = $true)][string[]]$Arguments,
+        [Parameter(Mandatory = $true)][string]$Suite
+    )
+
+    $before = @(Get-RetainedBundlePaths)
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $Executable
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    foreach ($argument in $Arguments) {
+        $startInfo.ArgumentList.Add($argument)
+    }
+    $process = [Diagnostics.Process]::Start($startInfo)
+    return [pscustomobject]@{
+        Before = $before
+        Suite = $Suite
+        Process = $process
+        Stdout = $process.StandardOutput.ReadToEndAsync()
+        Stderr = $process.StandardError.ReadToEndAsync()
+        # Script Runtime currently returns a typed failure envelope and does
+        # not replay captured print output after a failed invocation. The
+        # independently discovered, identity-checked bundle is authoritative.
+        RequireAnnouncement = $false
     }
 }
 
@@ -241,7 +273,8 @@ function Complete-ExternalProbe {
     }
     $bundle = Get-OnlyNewBundle -Before $Probe.Before `
         -ExpectedSuite $Probe.Suite
-    if ("$stdout`n$stderr" -notmatch '(?m)^FAILURE BUNDLE ') {
+    if ($Probe.RequireAnnouncement -and
+        "$stdout`n$stderr" -notmatch '(?m)^FAILURE BUNDLE ') {
         throw "$($Probe.Suite) probe did not report its retained failure bundle."
     }
     return $bundle
@@ -278,11 +311,14 @@ try {
     Remove-SelfTestBundle -Path $cliBundle
 
     Write-Host 'STEP GUI and script-worker failure bundles in parallel'
-    $guiProbe = Start-ExternalProbe `
-        -ScriptPath (Join-Path $PSScriptRoot 'theme_smoke.ps1') `
+    $guiProbe = Start-ExternalCommandProbe `
+        -Executable (Join-Path $PSScriptRoot '..\dist\agenterm-script.exe') `
         -Arguments @(
-            '-GuiExe', $GuiExe, '-CliExe', $CliExe,
-            '-InternalFailureBundleProbe'
+            'task', 'run', 'theme-smoke',
+            '--manifest', (Join-Path $PSScriptRoot '..\agenterm.tasks.json'),
+            '--timeout-ms', '60000',
+            '--max-operations', '10000000',
+            '--', '--internal-failure-bundle-probe'
         ) -Suite 'theme'
     $externalProbes.Add($guiProbe)
     $scriptProbe = Start-ExternalProbe `

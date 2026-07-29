@@ -252,6 +252,13 @@ agenterm-script
 │  │     Returns `fnv1a64:` plus a fixed 16-digit lowercase wrapping-u64 hash.
 │  │     [shipped; stable; designed 2026-07-30]
 │  │
+│  ├─ image::
+│  │  Typed image observation without an ambient GUI toolkit object graph.
+│  │  [partially shipped; stable namespace; designed 2026-07-30]
+│  │  └─ inspect_png(path) -> PngInfo
+│  │     Returns dimensions, sampled RGB, and luminance for one explicit PNG.
+│  │     [shipped; stable; designed 2026-07-30]
+│  │
 │  ├─ task::
 │  │  Executor-neutral task composition, waiting, racing, and cancellation.
 │  │  [partially shipped; stable delivered leaves; designed 2026-07-28]
@@ -356,6 +363,15 @@ agenterm-script
 │  │  Child lifecycle, typed platform facts, live stdout/stderr Streams, and
 │  │  bounded final output.
 │  │  [shipped; stable; designed 2026-07-28]
+│  │  ├─ Child.window_key(key)
+│  │  │  Delivers one named native key to the child's current top-level window.
+│  │  │  [shipped on Windows; stable; designed 2026-07-30]
+│  │  └─ Child.window_pointer(action, x, y)
+│  │     Delivers down/move/move-held/up/capture-changed pointer input.
+│  │     [shipped on Windows; stable; designed 2026-07-30]
+│  ├─ PngInfo
+│  │  Width, height, sample count, average RGB, and luminance facts.
+│  │  [shipped; stable; designed 2026-07-30]
 │  ├─ Task
 │  │  Invocation-owned timer or HTTP state with id/kind/wait/cancel facts.
 │  │  [shipped timer and HTTP payloads; stable; designed 2026-07-28]
@@ -746,6 +762,15 @@ returns an owned range, and `.append(other)` adds another typed byte sequence.
 Invalid ranges fail with stable typed errors. The 8 MiB value ceiling is a
 memory-robustness bound, not a file, network, or Agent permission boundary.
 
+### 7.5 PNG image facts
+
+`rhai::image::inspect_png(path)` reads one explicit PNG and returns `PngInfo`
+with `width`, `height`, `samples`, average `red`/`green`/`blue`, and perceptual
+`luminance`. Sampling uses at most roughly 64 points per axis while preserving
+the exact dimensions. Decoded pixel memory is capped at 64 MiB as a
+decompression-robustness bound. The API does not depend on System.Drawing or a
+desktop session and does not restrict which explicit file the script selects.
+
 ## 8. Process, network, and time semantics
 
 The canonical process constructor is:
@@ -818,6 +843,14 @@ return `top_level_window_supported=false`, a zero ID, an empty title, and never
 pretend that a negative result is an observed desktop fact. This child-scoped
 fact accepts no arbitrary PID; the separate `std::process::list()` API owns the
 general inventory.
+
+`Child.window_key(key)` and `Child.window_pointer(action, x, y)` resolve the
+current top-level window from the invocation-owned child PID on every call.
+They never reinterpret the opaque `top_level_window_id` observation as a
+persisted control handle. Windows supports the documented named keys and
+left-pointer lifecycle; other platforms fail explicitly with
+`process_window_input_unsupported` until an equivalent native adapter ships.
+This is a platform-availability boundary, not an Agent authorization layer.
 
 `Output.stdout` and `.stderr` are `Bytes`. `stdout_text()` and `stderr_text()`
 perform strict UTF-8 decoding. `.truncated` MUST become true if either stream

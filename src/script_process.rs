@@ -135,6 +135,8 @@ fn register_types(engine: &mut Engine) {
     engine.register_get("stdout", child_stdout);
     engine.register_get("stderr", child_stderr);
     engine.register_fn("kill", child_kill);
+    engine.register_fn("window_key", child_window_key);
+    engine.register_fn("window_pointer", child_window_pointer);
     engine.register_fn("wait_with_output", child_wait_with_output);
     engine.register_fn("wait_with_output", child_wait_with_output_for);
 
@@ -635,10 +637,8 @@ fn child_platform_facts(
 }
 
 #[cfg(windows)]
-fn process_platform_facts(id: u32) -> ScriptProcessPlatformFacts {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        EnumWindows, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId,
-    };
+fn find_top_level_window(id: u32) -> windows_sys::Win32::Foundation::HWND {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowThreadProcessId};
 
     struct Search {
         id: u32,
@@ -672,23 +672,31 @@ fn process_platform_facts(id: u32) -> ScriptProcessPlatformFacts {
             (&mut search as *mut Search).cast::<core::ffi::c_void>() as isize,
         );
     }
-    let top_level_window_title = if search.window.is_null() {
+    search.window
+}
+
+#[cfg(windows)]
+fn process_platform_facts(id: u32) -> ScriptProcessPlatformFacts {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetWindowTextLengthW, GetWindowTextW};
+
+    let window = find_top_level_window(id);
+    let top_level_window_title = if window.is_null() {
         String::new()
     } else {
-        let length = unsafe { GetWindowTextLengthW(search.window) };
+        let length = unsafe { GetWindowTextLengthW(window) };
         if length <= 0 {
             String::new()
         } else {
             let mut buffer = vec![0_u16; length as usize + 1];
             let copied =
-                unsafe { GetWindowTextW(search.window, buffer.as_mut_ptr(), buffer.len() as i32) };
+                unsafe { GetWindowTextW(window, buffer.as_mut_ptr(), buffer.len() as i32) };
             String::from_utf16_lossy(&buffer[..copied.max(0) as usize])
         }
     };
     ScriptProcessPlatformFacts {
         top_level_window_supported: true,
-        top_level_window_present: !search.window.is_null(),
-        top_level_window_id: search.window as isize as i64,
+        top_level_window_present: !window.is_null(),
+        top_level_window_id: window as isize as i64,
         top_level_window_title,
     }
 }
@@ -744,6 +752,168 @@ fn child_kill(child: &mut ScriptChild) -> Result<(), Box<EvalAltResult>> {
             .map_err(|error| format!("process_kill: {error}"))?;
     }
     Ok(())
+}
+
+fn child_process_id(child: &ScriptChild) -> Result<u32, Box<EvalAltResult>> {
+    Ok(child
+        .0
+        .lock()
+        .map_err(|_| "process_child_state_poisoned")?
+        .id)
+}
+
+#[cfg(windows)]
+fn child_window_key(child: &mut ScriptChild, key: &str) -> Result<(), Box<EvalAltResult>> {
+    use windows_sys::Win32::UI::{
+        Input::KeyboardAndMouse::{
+            VK_BACK, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_HOME, VK_LEFT, VK_RETURN, VK_RIGHT,
+            VK_TAB, VK_UP,
+        },
+        WindowsAndMessaging::{PostMessageW, WM_KEYDOWN, WM_KEYUP},
+    };
+
+    let virtual_key = match key {
+        "Backspace" => VK_BACK,
+        "Delete" => VK_DELETE,
+        "Down" => VK_DOWN,
+        "End" => VK_END,
+        "Enter" => VK_RETURN,
+        "Escape" => VK_ESCAPE,
+        "Home" => VK_HOME,
+        "Left" => VK_LEFT,
+        "Right" => VK_RIGHT,
+        "Tab" => VK_TAB,
+        "Up" => VK_UP,
+        _ => {
+            return Err(process_window_error(
+                "process_window_key_invalid",
+                "Child.window_key",
+                "window key must be Backspace, Delete, Down, End, Enter, Escape, Home, Left, Right, Tab, or Up",
+                Some("invalid_input"),
+            ));
+        }
+    };
+    let window = find_top_level_window(child_process_id(child)?);
+    if window.is_null() {
+        return Err(process_window_error(
+            "process_window_not_found",
+            "Child.window_key",
+            "child has no top-level window",
+            Some("not_found"),
+        ));
+    }
+    let pressed = unsafe { PostMessageW(window, WM_KEYDOWN, usize::from(virtual_key), 0) };
+    let released = unsafe { PostMessageW(window, WM_KEYUP, usize::from(virtual_key), 0) };
+    if pressed == 0 || released == 0 {
+        return Err(process_window_error(
+            "process_window_input",
+            "Child.window_key",
+            "native window key delivery failed",
+            Some("platform_error"),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn child_window_key(_child: &mut ScriptChild, _key: &str) -> Result<(), Box<EvalAltResult>> {
+    Err(process_window_error(
+        "process_window_input_unsupported",
+        "Child.window_key",
+        "native child-window input is not implemented on this platform",
+        Some("unsupported"),
+    ))
+}
+
+#[cfg(windows)]
+fn child_window_pointer(
+    child: &mut ScriptChild,
+    action: &str,
+    x: rhai::INT,
+    y: rhai::INT,
+) -> Result<(), Box<EvalAltResult>> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        SendMessageW, WM_CAPTURECHANGED, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
+    };
+
+    let x = i32::try_from(x).map_err(|_| {
+        process_window_error(
+            "process_window_coordinate_invalid",
+            "Child.window_pointer",
+            "window pointer coordinates must fit signed 32-bit integers",
+            Some("invalid_input"),
+        )
+    })?;
+    let y = i32::try_from(y).map_err(|_| {
+        process_window_error(
+            "process_window_coordinate_invalid",
+            "Child.window_pointer",
+            "window pointer coordinates must fit signed 32-bit integers",
+            Some("invalid_input"),
+        )
+    })?;
+    let window = find_top_level_window(child_process_id(child)?);
+    if window.is_null() {
+        return Err(process_window_error(
+            "process_window_not_found",
+            "Child.window_pointer",
+            "child has no top-level window",
+            Some("not_found"),
+        ));
+    }
+    let point = (((y & 0xffff) << 16) | (x & 0xffff)) as isize;
+    let (message, button, parameter) = match action {
+        "down" => (WM_LBUTTONDOWN, 0, point),
+        "move" => (WM_MOUSEMOVE, 0, point),
+        "move-held" => (WM_MOUSEMOVE, 1, point),
+        "up" => (WM_LBUTTONUP, 0, point),
+        "capture-changed" => (WM_CAPTURECHANGED, 0, 0),
+        _ => {
+            return Err(process_window_error(
+                "process_window_pointer_action_invalid",
+                "Child.window_pointer",
+                "window pointer action must be down, move, move-held, up, or capture-changed",
+                Some("invalid_input"),
+            ));
+        }
+    };
+    unsafe {
+        SendMessageW(window, message, button, parameter);
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn child_window_pointer(
+    _child: &mut ScriptChild,
+    _action: &str,
+    _x: rhai::INT,
+    _y: rhai::INT,
+) -> Result<(), Box<EvalAltResult>> {
+    Err(process_window_error(
+        "process_window_input_unsupported",
+        "Child.window_pointer",
+        "native child-window input is not implemented on this platform",
+        Some("unsupported"),
+    ))
+}
+
+fn process_window_error(
+    code: &'static str,
+    operation: &'static str,
+    message: &'static str,
+    cause: Option<&'static str>,
+) -> Box<EvalAltResult> {
+    runtime_error(
+        "process",
+        code,
+        operation,
+        message,
+        false,
+        "child_window",
+        false,
+        cause,
+    )
 }
 
 fn child_wait_with_output(child: &mut ScriptChild) -> Result<ScriptOutput, Box<EvalAltResult>> {

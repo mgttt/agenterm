@@ -34,6 +34,7 @@
         "std.process.command",
         "std.process.command-builder",
         "std.process.command-output",
+        "std.process.child-window-input",
         "std.process.id",
         "std.process.list",
         "std.time.system-time-now",
@@ -45,6 +46,7 @@
         "rhai.json.stringify-pretty",
         "rhai.crypto.sha256-file",
         "rhai.hash.fnv1a64",
+        "rhai.image.inspect-png",
         "rhai.runtime.atomic-write"
       ]
     },
@@ -91,6 +93,14 @@
       "id": "working-context-smoke",
       "description": "Prove redacted launch proxy facts, archived controls, and non-persistence through an isolated GUI restart",
       "entry": "scripts/rhai/working-context-smoke.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "args": [".", "dist/agenterm.exe", "dist/agenterm-cli.exe"]
+    },
+    {
+      "id": "theme-smoke",
+      "description": "Prove theme preview, native-key rollback, persistence, PTY continuity, and visibly distinct rendering",
+      "entry": "scripts/rhai/theme-smoke.rhai",
       "profile": "local",
       "cwd": ".",
       "args": [".", "dist/agenterm.exe", "dist/agenterm-cli.exe"]

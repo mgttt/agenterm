@@ -59,7 +59,7 @@ try {
         "harness_command_record_not_bounded"
     );
 
-    let proof = test_harness::complete(
+    let proof = test_harness::complete_quiet(
         context,
         [owned],
         false,
