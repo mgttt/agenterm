@@ -834,6 +834,7 @@ try {
     Invoke-AgenTerm @('ui-action', 'tabs-show') | Out-Null
     $beforeResizeSnapshot = Invoke-AgenTerm @('ui-snapshot') |
         ConvertFrom-Json
+    $rowsBeforeResize = [int]$beforeResizeSnapshot.layout.terminal.rows
     $columnsBeforeResize = [int]$beforeResizeSnapshot.layout.terminal.cols
     $resizeGrip = $beforeResizeSnapshot.layout.sidebar.resize_grip
     if ($null -eq $resizeGrip) {
@@ -842,11 +843,15 @@ try {
     Invoke-AgenTerm @(
         'ui-action', 'tabs-set-width', '--width', '360'
     ) | Out-Null
+    $resizedUi = Invoke-AgenTerm @(
+        'wait-ui',
+        '--terminal-grid-changed-from',
+        "${rowsBeforeResize}x${columnsBeforeResize}",
+        '--timeout-ms', '5000'
+    ) | ConvertFrom-Json
     $savedSettings = Get-Content -LiteralPath $run.SettingsPath -Raw |
         ConvertFrom-Json
     $resizedBootstrap = Invoke-AgenTerm @('ui-bootstrap') |
-        ConvertFrom-Json
-    $resizedUi = Invoke-AgenTerm @('ui-snapshot') |
         ConvertFrom-Json
     $activeAfterResize = @(
         $resizedBootstrap.tabs |

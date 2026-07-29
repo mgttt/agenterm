@@ -14,7 +14,7 @@ PYTHON="${PYTHON:-python3}"
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MANIFEST="$ROOT/scripts/artifacts.json"
-DIST="$ROOT/dist"
+DIST="${AGENTERM_PACKAGE_DIST:-$ROOT/dist}"
 STAGING="$(mktemp -d)"
 trap 'rm -rf "$STAGING"' EXIT
 
@@ -25,15 +25,8 @@ fi
 
 EXEC_NAMES=()
 PACKAGE_FORMAT=""
-while IFS=$'\t' read -r kind value; do
-  value="${value%$'\r'}"
-  if [[ "$kind" == "package" ]]; then
-    PACKAGE_FORMAT="$value"
-  elif [[ "$kind" == "executable" ]]; then
-    EXEC_NAMES+=("$value")
-  fi
-done < <(
-  "$PYTHON" - "$MANIFEST" "$OS" "$ARCH" <<'PY'
+PLATFORM_ROWS="$STAGING/platform-rows.tsv"
+"$PYTHON" - "$MANIFEST" "$OS" "$ARCH" >"$PLATFORM_ROWS" <<'PY'
 import json
 import sys
 
@@ -61,7 +54,15 @@ for entry in platform.get("executables") or []:
         sys.exit("Platform executable entry is missing name")
     print(f"executable\t{name}")
 PY
-)
+
+while IFS=$'\t' read -r kind value; do
+  value="${value%$'\r'}"
+  if [[ "$kind" == "package" ]]; then
+    PACKAGE_FORMAT="$value"
+  elif [[ "$kind" == "executable" ]]; then
+    EXEC_NAMES+=("$value")
+  fi
+done <"$PLATFORM_ROWS"
 
 if [[ ${#EXEC_NAMES[@]} -eq 0 ]]; then
   echo "No executables listed for platform $OS-$ARCH in $MANIFEST" >&2

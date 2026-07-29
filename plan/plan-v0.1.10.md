@@ -48,6 +48,14 @@ Cargo 不接受四段核心版本 `0.1.9.1`，因此机器身份、tag、metadat
   `Privacy & Security → Open Anyway` 路径，禁止用 stable 文件名或建议全局
   关闭 Gatekeeper。
 
+首次 `v0.1.9+hotfix.1` tag workflow 没有生成 Release：两个 macOS jobs
+暴露 `package-client-release.sh` 的 heredoc/process-substitution 组合在
+runner 上解析失败；Windows release gate 则在设置和 PTY 已完成 resize 时
+读取到一帧旧 client geometry。修正合同为：平台清单先写入显式 staging
+TSV，再由 shell 读取；Tabs resize 旅程使用公开 `wait-ui
+--terminal-grid-changed-from` 有界等待。修正后的源提交和 tag 必须一致，
+不得把失败 tag 的结果冒充为已发布热修复。
+
 本版不可拆分的第一交付目标是 **PowerShell 归零**。MCP 是可并行推进的
 第二产品线；若资源、时间或共享热点发生冲突，先保证 Rhai 自举、迁移与
 归零闭环，缩减 MCP 表面而不是保留 PowerShell 尾巴。

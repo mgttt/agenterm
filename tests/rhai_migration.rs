@@ -65,6 +65,112 @@ fn init_git_fixture(name: &str) -> PathBuf {
     root
 }
 
+#[cfg(windows)]
+fn bash_executable() -> PathBuf {
+    let output = Command::new("where")
+        .arg("git.exe")
+        .output()
+        .expect("locate Git for Windows");
+    assert!(
+        output.status.success(),
+        "Git for Windows is required for packaging tests"
+    );
+    let git = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .find(|line| line.to_ascii_lowercase().ends_with("\\cmd\\git.exe"))
+        .map(PathBuf::from)
+        .expect("locate Git cmd executable");
+    let root = git
+        .parent()
+        .and_then(Path::parent)
+        .expect("derive Git installation root");
+    for candidate in [
+        root.join("bin").join("bash.exe"),
+        root.join("usr").join("bin").join("bash.exe"),
+    ] {
+        if candidate.is_file() {
+            return candidate;
+        }
+    }
+    panic!("Git for Windows Bash executable is missing");
+}
+
+#[cfg(not(windows))]
+fn bash_executable() -> PathBuf {
+    PathBuf::from("bash")
+}
+
+#[cfg(windows)]
+fn python_executable() -> String {
+    let output = Command::new("where")
+        .arg("python.exe")
+        .output()
+        .expect("locate Python");
+    assert!(
+        output.status.success(),
+        "Python is required for packaging tests"
+    );
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .expect("locate Python executable")
+        .replace('\\', "/")
+}
+
+#[cfg(not(windows))]
+fn python_executable() -> String {
+    "python3".to_owned()
+}
+
+#[test]
+fn macos_package_script_reads_both_platform_rows_and_writes_preview_zip() {
+    let root = fixture_root("macos-package");
+    let binaries = root.join("bin");
+    let output_directory = root.join("dist");
+    fs::create_dir_all(&binaries).expect("create binary fixture");
+    for name in [
+        "agenterm",
+        "agenterm-cli",
+        "agenterm-mux",
+        "agenterm-script",
+        "agenterm-mcp",
+    ] {
+        fs::write(binaries.join(name), format!("fixture-{name}")).expect("write fake executable");
+    }
+
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let script = repo.join("scripts").join("package-client-release.sh");
+    for architecture in ["aarch64", "x86_64"] {
+        let output = Command::new(bash_executable())
+            .current_dir(repo)
+            .arg(&script)
+            .args(["test", "macos", architecture])
+            .arg(&binaries)
+            .env("AGENTERM_MACOS_UNSIGNED_PREVIEW", "1")
+            .env("AGENTERM_PACKAGE_DIST", &output_directory)
+            .env("PYTHON", python_executable())
+            .output()
+            .expect("run macOS package script");
+        assert!(
+            output.status.success(),
+            "macOS {architecture} package failed:\nstdout={}\nstderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let archive = output_directory.join(format!("agenterm-test-macos-{architecture}.zip"));
+        assert!(
+            fs::metadata(&archive)
+                .map(|metadata| metadata.len() > 0)
+                .unwrap_or(false),
+            "macOS {architecture} archive is absent or empty"
+        );
+    }
+
+    fs::remove_dir_all(&root).expect("remove fixture");
+}
+
 #[test]
 fn clean_locked_artifacts_task_removes_only_owned_candidates() {
     let root = fixture_root("clean-locked");
