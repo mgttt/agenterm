@@ -39,6 +39,12 @@ Public pitch (reviewed 2026-07-29):
 
 > **AgenTerm — the verifiable fleet OS for local processes and agents.**
 
+Emotional north star (human user, 2026-07-29):
+
+> **Everything on this machine, under your control** — visible in one tree,
+> intervenable through Composer and CLI, nothing silently erased, provable when
+> it matters.
+
 Category in one breath: **local multi-process / agent fleet console** — not a
 terminal shell.
 
