@@ -162,13 +162,21 @@
       letter-spacing: -.055em;
     }
     h1 em { color: var(--green); font-style: normal; }
+    .hero-emotion {
+      max-width: 720px;
+      margin: 0 0 18px;
+      color: var(--cyan);
+      font-size: clamp(1.2rem, 2.4vw, 1.55rem);
+      font-weight: 600;
+      line-height: 1.35;
+    }
     .lead {
       max-width: 760px;
       margin-bottom: 34px;
       color: #b7c4cf;
       font-size: clamp(1.08rem, 2vw, 1.35rem);
     }
-    .actions { display: flex; flex-wrap: wrap; gap: 12px; }
+    .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
     .button {
       display: inline-flex;
       min-height: 46px;
@@ -184,11 +192,56 @@
     }
     .button:hover { border-color: var(--green); color: var(--text); }
     .button.primary {
+      min-height: 52px;
+      padding: 12px 22px;
+      font-size: .95rem;
       border-color: var(--green-strong);
       color: #07100a;
       background: var(--green);
+      box-shadow: 0 0 0 1px rgba(126, 231, 135, .35), 0 12px 40px rgba(73, 199, 96, .22);
     }
     .button.primary:hover { background: #a4f2ab; }
+    .hero-cta-hint {
+      margin: 14px 0 0;
+      color: var(--muted);
+      font-size: .86rem;
+    }
+    .github-proof {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-left: 4px;
+      padding: 10px 14px;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      color: var(--muted);
+      background: var(--surface);
+      font: 600 .82rem/1 var(--mono);
+      text-decoration: none;
+    }
+    .github-proof:hover { border-color: var(--cyan); color: var(--text); }
+    .github-proof strong { color: var(--text); }
+
+    .story-steps {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      counter-reset: story;
+    }
+    .story-step {
+      padding: 24px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface-2);
+    }
+    .story-step p { margin: 0; color: #c5d0d9; font-size: .9rem; }
+      display: block;
+      margin-bottom: 12px;
+      color: var(--green);
+      font: 700 .72rem/1 var(--mono);
+      letter-spacing: .06em;
+    }
+    .story-step p { margin: 0; color: #c5d0d9; font-size: .9rem; }
 
     .spec-row {
       display: flex;
@@ -496,7 +549,7 @@
       nav a:not(.nav-github) { display: none; }
       nav { gap: 12px; }
       .section-head, .control-grid { grid-template-columns: 1fr; gap: 20px; }
-      .feature-grid, .pillar-grid, .invariant-grid, .principle-grid { grid-template-columns: 1fr; }
+      .feature-grid, .pillar-grid, .invariant-grid, .principle-grid, .story-steps { grid-template-columns: 1fr; }
       .persona-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .compare-grid { grid-template-columns: 1fr; }
       .links { grid-template-columns: 1fr; }
@@ -506,6 +559,7 @@
       .site-header .wrap { min-height: 60px; }
       .feature-grid { grid-template-columns: 1fr; }
       .persona-grid { grid-template-columns: 1fr; }
+      .story-steps { grid-template-columns: 1fr; }
       .card { min-height: auto; }
       .card .index { margin-bottom: 18px; }
       section.content { padding: 62px 0; }
@@ -525,6 +579,7 @@
       <a class="brand" href="#"><span>&gt;_</span> AgenTerm™</a>
       <nav aria-label="Primary navigation" data-i18n-aria-label="navLabel">
         <a href="#why" data-i18n="navWhy">Why</a>
+        <a href="#story" data-i18n="navStory">Story</a>
         <a href="#workspace" data-i18n="navWorkspace">Workspace</a>
         <a href="#automation" data-i18n="navAutomation">Automation</a>
         <a href="#docs" data-i18n="navDocs">Docs</a>
@@ -542,6 +597,7 @@
       <div class="wrap">
         <p class="eyebrow" data-i18n="heroEyebrow">Fleet work OS · Windows shipped · active development</p>
         <h1 data-i18n-html="heroTitle">Organize your <em>crew</em>—not just another shell window.</h1>
+        <p class="hero-emotion" data-i18n="heroEmotion">Everything on your machine, under your control.</p>
         <p class="lead" data-i18n="heroLead">
           The verifiable fleet OS for local processes and agents. A team tree on
           the left, the terminal as viewport, and an external Composer for real
@@ -549,9 +605,13 @@
           share the same durable control plane.
         </p>
         <div class="actions">
-          <a class="button primary" href="https://github.com/mgttt/agenterm/releases" data-i18n="download">Download a public release</a>
+          <a class="button primary" href="https://github.com/mgttt/agenterm/releases" data-i18n="download">Download for Windows</a>
           <a class="button" href="https://github.com/mgttt/agenterm#build-and-run" data-i18n="build">Build from source</a>
+          <a class="github-proof" id="github-proof" href="https://github.com/mgttt/agenterm" aria-label="GitHub repository">
+            <span aria-hidden="true">★</span> <strong id="github-stars">—</strong> <span data-i18n="githubStarsLabel">on GitHub</span>
+          </a>
         </div>
+        <p class="hero-cta-hint" data-i18n="heroCtaHint">Portable build · unzip and run · detach close keeps your fleet alive</p>
         <div class="spec-row" aria-label="Product specs" data-i18n-aria-label="specLabel">
           <span class="spec-pill" data-i18n-html="specPortable"><strong>Portable</strong> dist</span>
           <span class="spec-pill" data-i18n-html="specSize"><strong>4 MiB</strong> GUI budget</span>
@@ -621,6 +681,29 @@
             below, and terminal-scoped status at the bottom.
           </figcaption>
         </figure>
+      </div>
+    </section>
+
+    <section class="content" id="story">
+      <div class="wrap">
+        <div class="section-head">
+          <h2 data-i18n="storyTitle">One afternoon, one map.</h2>
+          <p data-i18n="storyLead">How it feels when parallel work stops fighting you.</p>
+        </div>
+        <div class="story-steps">
+          <article class="story-step">
+            <span class="story-index" data-i18n="story1Index">01 · SEE</span>
+            <p data-i18n="story1">Reviewer agent, build, and logs live in one tree—not twenty floating windows. You see who is alive, who finished, who failed.</p>
+          </article>
+          <article class="story-step">
+            <span class="story-index" data-i18n="story2Index">02 · PREPARE</span>
+            <p data-i18n="story2">You write the next command in Composer while output keeps streaming. Long prompts and runbook steps stay editable before Send.</p>
+          </article>
+          <article class="story-step">
+            <span class="story-index" data-i18n="story3Index">03 · PROVE</span>
+            <p data-i18n="story3">Close the window to clear your desktop—the fleet keeps running. Your script waits on output and saves a screenshot as proof, not a guess.</p>
+          </article>
+        </div>
       </div>
     </section>
 
@@ -844,16 +927,23 @@
           title: "AgenTerm™ — Local agent fleet work OS",
           description: "AgenTerm — the verifiable fleet OS for local processes and agents. Tree, viewport, Composer, and one control contract.",
           skip: "Skip to content", navLabel: "Primary navigation", languageLabel: "Language",
-          navWhy: "Why", navWorkspace: "Workspace", navAutomation: "Automation", navDocs: "Docs",
+          navWhy: "Why", navStory: "Story", navWorkspace: "Workspace", navAutomation: "Automation", navDocs: "Docs",
           heroEyebrow: "Fleet work OS · Windows shipped · active development",
           heroTitle: "Organize your <em>crew</em>—not just another shell window.",
+          heroEmotion: "Everything on your machine, under your control.",
           heroLead: "The verifiable fleet OS for local processes and agents. A team tree on the left, the terminal as viewport, and an external Composer for real input—built for programmers and sysadmins first; scripts and agents share the same durable control plane.",
-          download: "Download a public release", build: "Build from source",
+          download: "Download for Windows", build: "Build from source",
+          githubStarsLabel: "on GitHub",
+          heroCtaHint: "Portable build · unzip and run · detach close keeps your fleet alive",
           specLabel: "Product specifications", specPortable: "<strong>Portable</strong> dist", specSize: "<strong>4 MiB</strong> GUI budget", specServer: "Headless server authority", specMux: "tmux/RMUX subset via mux",
           invariantHeading: "Core invariants",
           invariant1Rule: "Exit ≠ erase", invariant1Body: "A dead process keeps its final screen in a readable tab until you explicitly close it.",
           invariant2Rule: "Close ≠ kill", invariant2Body: "Detach-first window close hides the GUI but preserves the live server, tabs, and PTYs.",
           invariant3Rule: "Verify ≠ sleep", invariant3Body: "Automation waits on snapshots, events, and receipts—not arbitrary timers.",
+          storyTitle: "One afternoon, one map.", storyLead: "How it feels when parallel work stops fighting you.",
+          story1Index: "01 · SEE", story1: "Reviewer agent, build, and logs live in one tree—not twenty floating windows. You see who is alive, who finished, who failed.",
+          story2Index: "02 · PREPARE", story2: "You write the next command in Composer while output keeps streaming. Long prompts and runbook steps stay editable before Send.",
+          story3Index: "03 · PROVE", story3: "Close the window to clear your desktop—the fleet keeps running. Your script waits on output and saves a screenshot as proof, not a guess.",
           pillarTitle: "Three surfaces. One fleet.", pillarLead: "Daily work stays quiet; organization, observation, and intervention stay explicit.",
           pillar1Tag: "ORG · TREE", pillar1Title: "Organize the crew", pillar1Body: "Hierarchical tabs with names, notes, and stable @ids—agents, shells, and long-running jobs in one map.",
           pillar2Tag: "OBS · VIEWPORT", pillar2Title: "Observe truth", pillar2Body: "Native terminal scrollback, status context, structured snapshots, and an event journal you can wait on.",
@@ -897,16 +987,23 @@
           title: "AgenTerm™ — 本機 Agent 艦隊工作 OS",
           description: "AgenTerm——本機程序與 Agent 的可驗證艦隊 OS。樹、視口、Composer 與同一控制契約。",
           skip: "跳至主要內容", navLabel: "主要導覽", languageLabel: "語言",
-          navWhy: "為何不同", navWorkspace: "工作區", navAutomation: "自動化", navDocs: "文件",
+          navWhy: "為何不同", navStory: "場景", navWorkspace: "工作區", navAutomation: "自動化", navDocs: "文件",
           heroEyebrow: "艦隊工作 OS · Windows 已交付 · 積極開發中",
           heroTitle: "組織你的<em>艦隊</em>——不只是又一個 Shell 視窗。",
+          heroEmotion: "掌控你機器上的每一條程序與 Agent。",
           heroLead: "本機程序與 Agent 的可驗證艦隊 OS。左側團隊樹、終端作視口、外置 Composer 負責輸入——先服務程式設計師與系統管理員；腳本與 Agent 共用同一耐久控制面。",
-          download: "下載公開版本", build: "從原始碼建置",
+          download: "下載 Windows 版", build: "從原始碼建置",
+          githubStarsLabel: "GitHub 星標",
+          heroCtaHint: "便攜建置 · 解壓即用 · detach 關窗艦隊仍活",
           specLabel: "產品規格", specPortable: "<strong>便攜</strong> 分發", specSize: "<strong>4 MiB</strong> GUI 預算", specServer: "無頭 server 權威", specMux: "mux 提供 tmux/RMUX 子集",
           invariantHeading: "核心不變量",
           invariant1Rule: "結束 ≠ 消失", invariant1Body: "程序結束後，最終畫面仍留在可讀分頁中，直到你明確關閉。",
           invariant2Rule: "關窗 ≠ 殺艦隊", invariant2Body: "Detach-first 關閉會隱藏 GUI，但保留 live server、分頁與 PTY。",
           invariant3Rule: "驗證 ≠ 睡眠", invariant3Body: "自動化等待快照、事件與 receipt——不靠任意計時器。",
+          storyTitle: "一個下午，一張地圖。", storyLead: "並行任務不再跟你搶注意力時，是什麼感覺。",
+          story1Index: "01 · 看見", story1: "Reviewer Agent、建置與日誌在同一棵樹上——不是二十個飄浮視窗。誰活著、誰完成、誰失敗，一眼清楚。",
+          story2Index: "02 · 準備", story2: "輸出仍在刷時，你在 Composer 裡寫下一條指令。長提示詞與 runbook 步驟，Send 前隨時改。",
+          story3Index: "03 · 證明", story3: "關窗清桌面——艦隊繼續跑。腳本等待輸出並存截圖作證，而不是靠 sleep 猜。",
           pillarTitle: "三個表面，一支艦隊。", pillarLead: "日常介面保持安靜；組織、觀察與干預始終明確。",
           pillar1Tag: "ORG · 樹", pillar1Title: "組織艦隊", pillar1Body: "階層分頁附名稱、註記與穩定 @id——Agent、Shell 與長跑任務同一張地圖。",
           pillar2Tag: "OBS · 視口", pillar2Title: "觀察真相", pillar2Body: "原生終端回捲、狀態情境、結構化快照，以及可等待的事件日誌。",
@@ -1002,6 +1099,18 @@
           history.replaceState(null, "", url);
         });
       });
+
+      const starsEl = document.getElementById("github-stars");
+      if (starsEl) {
+        fetch("https://api.github.com/repos/mgttt/agenterm")
+          .then((r) => r.ok ? r.json() : null)
+          .then((data) => {
+            if (data && typeof data.stargazers_count === "number") {
+              starsEl.textContent = String(data.stargazers_count);
+            }
+          })
+          .catch(() => {});
+      }
     })();
   </script>
 </body>
