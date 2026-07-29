@@ -17,11 +17,22 @@ git.args(["-C", repo, "rev-parse", "--show-toplevel"]);
 git.timeout(std::time::Duration::from_secs(10));
 let git_output = git.output();
 require(git_output.success, git_output.error("target-clean-git-root"));
-let git_root = git_output.stdout_text();
-git_root.trim();
-let git_root = std::path::absolute(git_root).display;
+
+// Git resolves Windows 8.3 aliases to a long path for --show-toplevel.
+// Comparing those spellings would reject the same directory on hosted runners.
+// An empty Git-relative prefix proves that -C itself names the repository root.
+let prefix_command = std::process::command("git");
+prefix_command.args(["-C", repo, "rev-parse", "--show-prefix"]);
+prefix_command.timeout(std::time::Duration::from_secs(10));
+let prefix_output = prefix_command.output();
 require(
-    repo.to_lower() == git_root.to_lower(),
+    prefix_output.success,
+    prefix_output.error("target-clean-git-prefix")
+);
+let prefix = prefix_output.stdout_text();
+prefix.trim();
+require(
+    prefix == "",
     "target_clean_repo_not_exact_git_root:" + repo
 );
 

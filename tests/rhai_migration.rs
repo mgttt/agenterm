@@ -6,7 +6,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(windows)]
 use std::fs::OpenOptions;
 #[cfg(windows)]
+use std::os::windows::ffi::OsStrExt;
+#[cfg(windows)]
 use std::os::windows::fs::OpenOptionsExt;
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::GetShortPathNameW;
 
 fn fixture_root(name: &str) -> PathBuf {
     let nonce = SystemTime::now()
@@ -63,6 +67,28 @@ fn init_git_fixture(name: &str) -> PathBuf {
         String::from_utf8_lossy(&output.stderr)
     );
     root
+}
+
+#[cfg(windows)]
+fn windows_short_path(path: &Path) -> PathBuf {
+    let mut input: Vec<u16> = path.as_os_str().encode_wide().collect();
+    input.push(0);
+    let mut output = vec![0_u16; 32_768];
+    // SAFETY: Both buffers are valid for the duration of the call, the input is
+    // NUL-terminated, and the output capacity is supplied exactly.
+    let length = unsafe {
+        GetShortPathNameW(
+            input.as_ptr(),
+            output.as_mut_ptr(),
+            output.len().try_into().expect("short-path buffer fits u32"),
+        )
+    };
+    assert!(
+        length > 0 && (length as usize) < output.len(),
+        "resolve Windows short path for {}",
+        path.display()
+    );
+    PathBuf::from(String::from_utf16(&output[..length as usize]).expect("short path is UTF-16"))
 }
 
 #[cfg(windows)]
@@ -229,7 +255,13 @@ fn prepare_target_clean_task_writes_and_preserves_valid_cache_tag() {
     let target = repo.join("target-release");
     fs::create_dir_all(&target).expect("create target fixture");
 
-    let first = run_prepare_target(&repo, &target);
+    #[cfg(windows)]
+    let repo_argument = windows_short_path(&repo);
+    #[cfg(not(windows))]
+    let repo_argument = repo.clone();
+    let target_argument = repo_argument.join("target-release");
+
+    let first = run_prepare_target(&repo_argument, &target_argument);
     assert!(
         first.status.success(),
         "target preparation failed: {}",
@@ -244,7 +276,7 @@ fn prepare_target_clean_task_writes_and_preserves_valid_cache_tag() {
     );
     assert_eq!(fs::read_to_string(&tag).expect("read cache tag"), expected);
 
-    let second = run_prepare_target(&repo, &target);
+    let second = run_prepare_target(&repo_argument, &target_argument);
     assert!(
         second.status.success(),
         "idempotent target preparation failed: {}",
