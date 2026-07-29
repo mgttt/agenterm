@@ -157,11 +157,14 @@ agenterm-script
 │  │     [partially shipped; stable child overlay; designed 2026-07-28]
 │  │
 │  ├─ process::
-│  │  Shell-free executable-plus-argv process construction.
+│  │  Unrestricted process inventory plus shell-free argv-safe child control.
 │  │  [shipped; stable namespace; designed 2026-07-28]
 │  │  ├─ id()
 │  │  │  Returns the current supervised worker process ID.
 │  │  │  [shipped; stable; designed 2026-07-29]
+│  │  ├─ list() -> Array<ProcessInfo>
+│  │  │  Returns an unrestricted, PID-sorted operating-system process snapshot.
+│  │  │  [shipped; stable; designed 2026-07-30]
 │  │  └─ command(program) -> Command
 │  │     Creates a typed process builder; no implicit shell is inserted.
 │  │     [shipped; stable; designed 2026-07-28]
@@ -769,6 +772,13 @@ Rust's process-local interpretation. It supports collision-resistant
 owned-resource names and live-owner protocols, but is not a stable invocation
 identity and MUST NOT be persisted as one.
 
+`std::process::list()` returns the operating-system process inventory sorted by
+PID. Each typed `ProcessInfo` carries `id` and `executable_name`. The API scans
+all visible processes rather than filtering by owner, executable, path, or
+Agent policy; entries that disappear or become unreadable during the snapshot
+are omitted. Windows uses Tool Help, Linux uses `/proc`, and macOS uses
+`libproc`. This is a point-in-time observation, not a durable process handle.
+
 `Child.id` is stable for that typed handle throughout the invocation, including
 after `wait_with_output()` has completed. This lets cleanup manifests retain
 the exact owned PID without reopening or rediscovering a system process.
@@ -780,10 +790,12 @@ whether the child PID owns any native top-level window.
 `top_level_window_id` is an opaque, process-local observation token: scripts
 MAY compare it for equality or change while supervising that child, but MUST
 NOT persist it or use it as a native control handle. It is zero when no window
-was observed. Other platforms currently return
-`top_level_window_supported=false`, a zero ID, and never pretend that a
-negative result is an observed desktop fact. This is not a general process
-scanner and accepts no arbitrary PID.
+was observed. `top_level_window_title` is the current native title for that
+observed child window and is empty when absent. Other platforms currently
+return `top_level_window_supported=false`, a zero ID, an empty title, and never
+pretend that a negative result is an observed desktop fact. This child-scoped
+fact accepts no arbitrary PID; the separate `std::process::list()` API owns the
+general inventory.
 
 `Output.stdout` and `.stderr` are `Bytes`. `stdout_text()` and `stderr_text()`
 perform strict UTF-8 decoding. `.truncated` MUST become true if either stream

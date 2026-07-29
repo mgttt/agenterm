@@ -274,7 +274,9 @@ try {
             --skip prd_alignment_task_matches_public_catalogs_and_fails_closed `
             --skip supply_chain_task_is_deterministic_and_covers_the_resolved_lock_graph `
             --skip rhai_working_context_smoke_is_private_ephemeral_and_orphan_free `
-            --skip rhai_server_smoke_preserves_headless_authority_and_cleanup
+            --skip rhai_server_smoke_preserves_headless_authority_and_cleanup `
+            --skip rhai_wake_smoke_preserves_concurrent_ipc_pty_and_expired_mutation `
+            --skip rhai_startup_smoke_preserves_first_window_and_async_terminal_contract
     }
 
     $upgradeGuiFixture = Join-Path (
@@ -502,7 +504,9 @@ try {
         $env:AGENTERM_NO_ACTIVATE = '1'
         try {
             Invoke-Checked -Id 'startup-smoke' -Label 'startup smoke test' {
-                & '.\tests\startup_smoke.ps1'
+                & '.\dist\agenterm-script.exe' task run startup-smoke `
+                    --manifest '.\agenterm.tasks.json' `
+                    --timeout-ms 60000 --max-operations 10000000
             }
             Invoke-Checked -Id 'wake-smoke' `
                 -Label 'coalesced runtime wake smoke test' {

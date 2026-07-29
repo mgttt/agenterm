@@ -50,6 +50,13 @@ pub struct ScriptProcessPlatformFacts {
     top_level_window_supported: bool,
     top_level_window_present: bool,
     top_level_window_id: i64,
+    top_level_window_title: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct ScriptProcessInfo {
+    id: u32,
+    executable_name: String,
 }
 
 impl std::fmt::Debug for ScriptChild {
@@ -144,6 +151,18 @@ fn register_types(engine: &mut Engine) {
         "top_level_window_id",
         |facts: &mut ScriptProcessPlatformFacts| facts.top_level_window_id,
     );
+    engine.register_get(
+        "top_level_window_title",
+        |facts: &mut ScriptProcessPlatformFacts| facts.top_level_window_title.clone(),
+    );
+
+    engine.register_type_with_name::<ScriptProcessInfo>("ProcessInfo");
+    engine.register_get("id", |process: &mut ScriptProcessInfo| {
+        rhai::INT::from(process.id)
+    });
+    engine.register_get("executable_name", |process: &mut ScriptProcessInfo| {
+        process.executable_name.clone()
+    });
 
     engine.register_type_with_name::<ScriptOutput>("Output");
     engine.register_get("success", |output: &mut ScriptOutput| output.success);
@@ -174,12 +193,209 @@ fn env_module() -> Module {
 fn process_module() -> Module {
     let mut module = Module::new();
     module.set_native_fn("id", process_id);
+    module.set_native_fn("list", process_list);
     module.set_native_fn("command", process_command);
     module
 }
 
 fn process_id() -> Result<rhai::INT, Box<EvalAltResult>> {
     Ok(std::process::id().into())
+}
+
+fn process_list() -> Result<Array, Box<EvalAltResult>> {
+    let mut processes = platform_process_list()?;
+    processes.sort_by_key(|process| process.id);
+    Ok(processes.into_iter().map(rhai::Dynamic::from).collect())
+}
+
+#[cfg(windows)]
+fn platform_process_list() -> Result<Vec<ScriptProcessInfo>, Box<EvalAltResult>> {
+    use std::mem::size_of;
+    use windows_sys::Win32::{
+        Foundation::{CloseHandle, INVALID_HANDLE_VALUE},
+        System::Diagnostics::ToolHelp::{
+            CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW,
+            TH32CS_SNAPPROCESS,
+        },
+    };
+
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
+    if snapshot == INVALID_HANDLE_VALUE {
+        return Err(runtime_error(
+            "host",
+            "process_list_failed",
+            "std.process.list",
+            "unable to capture the operating-system process inventory",
+            true,
+            "process_inventory",
+            false,
+            Some("os"),
+        ));
+    }
+    let mut entry = PROCESSENTRY32W {
+        dwSize: size_of::<PROCESSENTRY32W>() as u32,
+        ..unsafe { std::mem::zeroed() }
+    };
+    let mut processes = Vec::new();
+    let mut present = unsafe { Process32FirstW(snapshot, &mut entry) } != 0;
+    while present {
+        let length = entry
+            .szExeFile
+            .iter()
+            .position(|character| *character == 0)
+            .unwrap_or(entry.szExeFile.len());
+        let executable_name = String::from_utf16_lossy(&entry.szExeFile[..length]);
+        if !executable_name.is_empty() {
+            processes.push(ScriptProcessInfo {
+                id: entry.th32ProcessID,
+                executable_name,
+            });
+        }
+        present = unsafe { Process32NextW(snapshot, &mut entry) } != 0;
+    }
+    unsafe {
+        CloseHandle(snapshot);
+    }
+    Ok(processes)
+}
+
+#[cfg(target_os = "linux")]
+fn platform_process_list() -> Result<Vec<ScriptProcessInfo>, Box<EvalAltResult>> {
+    let entries = std::fs::read_dir("/proc").map_err(|_| {
+        runtime_error(
+            "host",
+            "process_list_failed",
+            "std.process.list",
+            "unable to read the operating-system process inventory",
+            true,
+            "process_inventory",
+            false,
+            Some("os"),
+        )
+    })?;
+    let mut processes = Vec::new();
+    for entry in entries.flatten() {
+        let Some(id) = entry
+            .file_name()
+            .to_str()
+            .and_then(|value| value.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        let Ok(executable) = std::fs::read_link(entry.path().join("exe")) else {
+            continue;
+        };
+        let Some(executable_name) = executable.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        processes.push(ScriptProcessInfo {
+            id,
+            executable_name: executable_name.to_owned(),
+        });
+    }
+    Ok(processes)
+}
+
+#[cfg(target_os = "macos")]
+fn platform_process_list() -> Result<Vec<ScriptProcessInfo>, Box<EvalAltResult>> {
+    use std::ffi::{CStr, c_char, c_int, c_void};
+
+    const PROC_ALL_PIDS: u32 = 1;
+    const PROC_PIDPATHINFO_MAXSIZE: u32 = 4 * 1024;
+
+    #[link(name = "proc")]
+    unsafe extern "C" {
+        fn proc_listpids(
+            process_type: u32,
+            type_info: u32,
+            buffer: *mut c_void,
+            buffer_size: c_int,
+        ) -> c_int;
+        fn proc_pidpath(pid: c_int, buffer: *mut c_void, buffer_size: u32) -> c_int;
+    }
+
+    let required = unsafe { proc_listpids(PROC_ALL_PIDS, 0, std::ptr::null_mut(), 0) };
+    if required <= 0 {
+        return Err(runtime_error(
+            "host",
+            "process_list_failed",
+            "std.process.list",
+            "unable to size the operating-system process inventory",
+            true,
+            "process_inventory",
+            false,
+            Some("os"),
+        ));
+    }
+    let capacity = usize::try_from(required).unwrap_or_default() / size_of::<c_int>() + 32;
+    let mut ids: Vec<c_int> = vec![0; capacity];
+    let buffer_size = c_int::try_from(ids.len() * size_of::<c_int>()).map_err(|_| {
+        runtime_error(
+            "limit",
+            "process_list_too_large",
+            "std.process.list",
+            "operating-system process inventory exceeds the supported size",
+            false,
+            "process_inventory",
+            false,
+            Some("integer_conversion"),
+        )
+    })?;
+    let bytes = unsafe { proc_listpids(PROC_ALL_PIDS, 0, ids.as_mut_ptr().cast(), buffer_size) };
+    if bytes <= 0 {
+        return Err(runtime_error(
+            "host",
+            "process_list_failed",
+            "std.process.list",
+            "unable to capture the operating-system process inventory",
+            true,
+            "process_inventory",
+            false,
+            Some("os"),
+        ));
+    }
+    ids.truncate(usize::try_from(bytes).unwrap_or_default() / size_of::<c_int>());
+    let mut processes = Vec::new();
+    for id in ids.into_iter().filter(|id| *id > 0) {
+        let mut path: Vec<c_char> =
+            vec![0; usize::try_from(PROC_PIDPATHINFO_MAXSIZE).unwrap_or_default()];
+        let length =
+            unsafe { proc_pidpath(id, path.as_mut_ptr().cast(), PROC_PIDPATHINFO_MAXSIZE) };
+        if length <= 0 {
+            continue;
+        }
+        let full_path = unsafe { CStr::from_ptr(path.as_ptr()) }.to_string_lossy();
+        let executable_name = std::path::Path::new(full_path.as_ref())
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default()
+            .to_owned();
+        if !executable_name.is_empty() {
+            let Ok(id) = u32::try_from(id) else {
+                continue;
+            };
+            processes.push(ScriptProcessInfo {
+                id,
+                executable_name,
+            });
+        }
+    }
+    Ok(processes)
+}
+
+#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
+fn platform_process_list() -> Result<Vec<ScriptProcessInfo>, Box<EvalAltResult>> {
+    let executable_name = std::env::current_exe()
+        .ok()
+        .and_then(|path| {
+            path.file_name()
+                .map(|value| value.to_string_lossy().into_owned())
+        })
+        .unwrap_or_else(|| "current-process".to_owned());
+    Ok(vec![ScriptProcessInfo {
+        id: std::process::id(),
+        executable_name,
+    }])
 }
 
 fn duration_module() -> Module {
@@ -420,7 +636,9 @@ fn child_platform_facts(
 
 #[cfg(windows)]
 fn process_platform_facts(id: u32) -> ScriptProcessPlatformFacts {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowThreadProcessId};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId,
+    };
 
     struct Search {
         id: u32,
@@ -454,10 +672,24 @@ fn process_platform_facts(id: u32) -> ScriptProcessPlatformFacts {
             (&mut search as *mut Search).cast::<core::ffi::c_void>() as isize,
         );
     }
+    let top_level_window_title = if search.window.is_null() {
+        String::new()
+    } else {
+        let length = unsafe { GetWindowTextLengthW(search.window) };
+        if length <= 0 {
+            String::new()
+        } else {
+            let mut buffer = vec![0_u16; length as usize + 1];
+            let copied =
+                unsafe { GetWindowTextW(search.window, buffer.as_mut_ptr(), buffer.len() as i32) };
+            String::from_utf16_lossy(&buffer[..copied.max(0) as usize])
+        }
+    };
     ScriptProcessPlatformFacts {
         top_level_window_supported: true,
         top_level_window_present: !search.window.is_null(),
         top_level_window_id: search.window as isize as i64,
+        top_level_window_title,
     }
 }
 
@@ -467,6 +699,7 @@ fn process_platform_facts(_id: u32) -> ScriptProcessPlatformFacts {
         top_level_window_supported: false,
         top_level_window_present: false,
         top_level_window_id: 0,
+        top_level_window_title: String::new(),
     }
 }
 
@@ -720,6 +953,26 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(error.contains("duration_millis"));
+    }
+
+    #[test]
+    fn process_list_contains_the_current_process_with_a_name() {
+        assert!(
+            engine()
+                .eval::<bool>(
+                    r#"
+                        let found = false;
+                        for process in std::process::list() {
+                            if process.id == std::process::id()
+                                    && process.executable_name.len > 0 {
+                                found = true;
+                            }
+                        }
+                        found
+                    "#,
+                )
+                .unwrap()
+        );
     }
 
     #[test]

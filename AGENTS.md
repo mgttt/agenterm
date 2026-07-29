@@ -167,8 +167,9 @@ fixed sleeps. Rendering investigations should capture both structured state and
 PNG evidence.
 
 The GUI must expose its native window before starting the initial ConPTY.
-`tests/startup_smoke.ps1` guards a one-second local first-window budget and then
-waits through public state until the asynchronous terminal becomes ready.
+`scripts/rhai/startup-smoke.rhai` guards a one-second local first-window budget
+and then waits through public state until the asynchronous terminal becomes
+ready.
 
 ## Terminal interaction engineering
 

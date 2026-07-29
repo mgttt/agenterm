@@ -695,6 +695,25 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             "std::process::id()",
             (&["current_worker_process"], NO_STRINGS),
         ),
+        shipped_local_entry_with_design(
+            shipped_local_entry(
+                "std.process.list",
+                "system/process/list",
+                "std::process::list",
+                None,
+                RustMapping::None,
+                "std::process::list() -> Array<ProcessInfo>",
+                (
+                    &[
+                        "operating_system_process_snapshot",
+                        "sorted_by_process_id",
+                        "unrestricted_inventory",
+                    ],
+                    &["process_list_failed", "process_list_too_large"],
+                ),
+            ),
+            "2026-07-30",
+        ),
         shipped_local_entry(
             "std.process.command-builder",
             "system/process/command/builder",
@@ -751,6 +770,7 @@ pub fn entries() -> Vec<ScriptApiEntry> {
                     "id_stable_after_completion",
                     "owned_child_platform_observation",
                     "opaque_window_identity",
+                    "top_level_window_title",
                 ],
                 &["process_kill", "process_timeout"],
             ),

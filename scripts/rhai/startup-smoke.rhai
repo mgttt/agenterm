@@ -1,0 +1,341 @@
+// Prove the native first-window budget and asynchronous terminal startup.
+//
+// Args:
+//   --list-evidence
+// or:
+//   REPO GUI_EXE CLI_EXE [MAX_WINDOW_MS]
+
+import "scripts/rhai/lib/test_harness" as test_harness;
+
+let declared_evidence = ["startup.first-window-async-ready"];
+
+if args.len == 1 && args[0] == "--list-evidence" {
+    print("startup.first-window-async-ready");
+    return;
+}
+
+fn require(condition, message) {
+    if !condition {
+        throw message;
+    }
+}
+
+fn executable_matches(value, expected) {
+    let normalized = value.to_lower();
+    normalized == expected || normalized == expected + ".exe"
+}
+
+fn script_worker_ids() {
+    let result = [];
+    for process in std::process::list() {
+        if executable_matches(
+            process.executable_name,
+            "agenterm-script"
+        ) {
+            result.push(process.id);
+        }
+    }
+    result
+}
+
+fn wait_for_window(child, started, maximum_discovery_ms) {
+    for attempt in 0..1000 {
+        let facts = child.platform_facts;
+        if facts.top_level_window_supported
+                && facts.top_level_window_present
+                && facts.top_level_window_id != 0 {
+            return #{
+                elapsed_ms:
+                    std::time::SystemTime::now().unix_millis - started,
+                window_id: facts.top_level_window_id
+            };
+        }
+        if child.state == "exited" {
+            let output = child.wait_with_output(
+                std::time::Duration::from_secs(2)
+            );
+            throw "startup_gui_early_exit:" + output.stderr_text();
+        }
+        if std::time::SystemTime::now().unix_millis - started
+                >= maximum_discovery_ms {
+            break;
+        }
+        rhai::task::sleep(std::time::Duration::from_millis(5));
+    }
+    throw "startup_window_discovery_timeout";
+}
+
+fn read_until(stream, needle, timeout_ms) {
+    let started = std::time::SystemTime::now().unix_millis;
+    let text = "";
+    while std::time::SystemTime::now().unix_millis - started < timeout_ms {
+        try {
+            let chunk = stream.read(
+                65536,
+                std::time::Duration::from_millis(100)
+            );
+            if chunk.len > 0 {
+                text += chunk.to_text();
+                if text.contains(needle) {
+                    return text;
+                }
+            }
+        } catch (error) {
+            let message = error.to_string();
+            if !message.contains("stream_read_timeout") {
+                throw message;
+            }
+        }
+    }
+    throw "startup_stream_text_timeout:" + needle;
+}
+
+fn normalized_output(text) {
+    let value = text;
+    value.replace("\r\n", "\n");
+    value.trim();
+    value
+}
+
+fn expected_guidance(pid, address) {
+    "Launcher PID: " + pid +
+        "\nConfigured server address: " + address +
+        "\n\nList running server PID and port: agenterm-cli.exe server-list" +
+        "\nMore CLI commands: agenterm-cli.exe -h"
+}
+
+fn wait_for_exit(child, timeout_ms, code) {
+    try {
+        child.wait_with_output(
+            std::time::Duration::from_millis(timeout_ms)
+        )
+    } catch (error) {
+        throw code + ":" + error.to_string();
+    }
+}
+
+fn cli(context, executable, arguments, expected_failure) {
+    test_harness::invoke_cli(
+        context,
+        executable,
+        arguments,
+        expected_failure,
+        []
+    )
+}
+
+require(
+    args.len == 3 || args.len == 4,
+    "expected: REPO GUI_EXE CLI_EXE [MAX_WINDOW_MS]"
+);
+let repo = std::path::absolute(args[0]).display;
+let gui_exe = std::path::absolute(args[1]).display;
+let cli_exe = std::path::absolute(args[2]).display;
+let maximum_window_ms = if args.len == 4 {
+    args[3].parse_int()
+} else {
+    1000
+};
+require(std::fs::exists(gui_exe), "startup_gui_missing");
+require(std::fs::exists(cli_exe), "startup_cli_missing");
+require(maximum_window_ms > 0, "startup_window_budget_invalid");
+
+let context = test_harness::new_context(repo, "startup");
+let owned_children = [];
+let worker_ids_before = script_worker_ids();
+let succeeded = false;
+let failure = "";
+
+try {
+    print("STEP native window precedes asynchronous terminal startup");
+    let gui_command =
+        test_harness::configured_command(context, gui_exe, []);
+    let launch_started = std::time::SystemTime::now().unix_millis;
+    let gui = gui_command.start();
+    owned_children.push(gui);
+    let window = wait_for_window(gui, launch_started, 5000);
+    require(
+        window.elapsed_ms <= maximum_window_ms,
+        "startup_first_window_budget:" + window.elapsed_ms +
+            "ms>" + maximum_window_ms + "ms"
+    );
+
+    let initial_guidance = read_until(
+        gui.stderr,
+        "More CLI commands: agenterm-cli.exe -h",
+        5000
+    );
+    require(
+        normalized_output(initial_guidance) ==
+            expected_guidance(gui.id, context.address),
+        "startup_inherited_stderr_guidance:" + initial_guidance
+    );
+
+    let version_output = cli(
+        context,
+        cli_exe,
+        ["--version"],
+        false
+    ).stdout;
+    version_output.trim();
+    let version_parts = version_output.split(" ");
+    let version = version_parts[version_parts.len - 1];
+
+    // The latency budget ends at native-window discovery. Terminal readiness
+    // is deliberately awaited through public structured state.
+    cli(
+        context,
+        cli_exe,
+        [
+            "wait-ui", "--window-state", "restored",
+            "--timeout-ms", "10000"
+        ],
+        false
+    );
+    cli(
+        context,
+        cli_exe,
+        [
+            "wait-ui", "-t", "0", "--tab-state", "running",
+            "--timeout-ms", "10000"
+        ],
+        false
+    );
+    let port_parts = context.address.split(":");
+    let port = port_parts[port_parts.len - 1];
+    let live_window = gui.platform_facts;
+    require(
+        live_window.top_level_window_title ==
+            "AgenTerm-" + version + ":" + port,
+        "startup_window_title:" + live_window.top_level_window_title
+    );
+
+    print("STEP repeated GUI launch hands off without blocking");
+    let second_command =
+        test_harness::configured_command(context, gui_exe, []);
+    let second = second_command.start();
+    owned_children.push(second);
+    let second_output = wait_for_exit(
+        second,
+        1000,
+        "startup_second_gui_handoff_timeout"
+    );
+    require(second_output.success, "startup_second_gui_exit");
+    require(
+        normalized_output(second_output.stderr_text()) ==
+            expected_guidance(second.id, context.address),
+        "startup_second_gui_guidance:" + second_output.stderr_text()
+    );
+
+    print("STEP GUI-style CLI arguments return nonblocking guidance");
+    let guidance_command = test_harness::configured_command(
+        context,
+        gui_exe,
+        ["list-windows"]
+    );
+    let guidance = guidance_command.start();
+    owned_children.push(guidance);
+    let guidance_output = wait_for_exit(
+        guidance,
+        1000,
+        "startup_cli_guidance_timeout"
+    );
+    let guidance_stderr = guidance_output.stderr_text();
+    require(
+        !guidance_output.success
+            && guidance_output.stdout_text() == ""
+            && guidance_stderr.contains("No CLI command was executed")
+            && guidance_stderr.contains("agenterm-cli.exe list-windows")
+            && guidance_stderr.contains("agenterm-cli.exe server-list")
+            && guidance_stderr.contains("agenterm-cli.exe -h"),
+        "startup_cli_guidance:" + guidance_stderr
+    );
+
+    let argument_command = test_harness::configured_command(
+        context,
+        gui_exe,
+        ["--address"]
+    );
+    let argument_error = argument_command.start();
+    owned_children.push(argument_error);
+    let argument_output = wait_for_exit(
+        argument_error,
+        1000,
+        "startup_argument_error_timeout"
+    );
+    let argument_stderr = argument_output.stderr_text();
+    require(
+        !argument_output.success
+            && argument_output.stdout_text() == ""
+            && argument_stderr.contains("AgenTerm GUI argument error")
+            && argument_stderr.contains(
+                "agenterm.exe --address requires HOST:PORT"
+            )
+            && argument_stderr.contains("agenterm-cli.exe -h"),
+        "startup_argument_error:" + argument_stderr
+    );
+
+    let worker_ids_after = script_worker_ids();
+    for id in worker_ids_after {
+        require(
+            worker_ids_before.contains(id),
+            "startup_nested_script_worker:" + id
+        );
+    }
+
+    let close_state = rhai::json::parse(
+        cli(
+            context,
+            cli_exe,
+            ["ui-action", "close-window"],
+            false
+        ).stdout
+    );
+    require(
+        close_state.modal.kind == "confirm-window-close"
+            && close_state.modal.default_action == "keep-server-running"
+            && close_state.modal.actions.contains("stop-server-and-exit"),
+        "startup_close_contract"
+    );
+    cli(
+        context,
+        cli_exe,
+        ["ui-action", "stop-server-and-exit"],
+        false
+    );
+    wait_for_exit(gui, 5000, "startup_gui_shutdown_timeout");
+
+    test_harness::emit_evidence(
+        context,
+        declared_evidence,
+        "startup.first-window-async-ready"
+    );
+    print(
+        "PASS: first window in " + window.elapsed_ms +
+            " ms; terminal loaded asynchronously"
+    );
+    succeeded = true;
+} catch (error) {
+    failure = error.to_string();
+}
+
+let completion_failure = "";
+try {
+    test_harness::complete(
+        context,
+        owned_children,
+        succeeded,
+        failure
+    );
+} catch (error) {
+    completion_failure = error.to_string();
+}
+if succeeded && completion_failure == "" {
+    test_harness::remove_run(context);
+}
+if failure != "" {
+    throw failure;
+}
+if completion_failure != "" {
+    throw completion_failure;
+}
