@@ -1,0 +1,119 @@
+// Shared validation for the canonical local Windows executable contract.
+
+fn require(condition, message) {
+    if !condition {
+        throw message;
+    }
+}
+
+fn is_artifact_name(name) {
+    if name == "agenterm.exe" {
+        return true;
+    }
+    if !name.starts_with("agenterm-") || !name.ends_with(".exe") {
+        return false;
+    }
+    if name.contains("/") || name.contains("\\") {
+        return false;
+    }
+    let role = name;
+    role.replace("agenterm-", "");
+    role.replace(".exe", "");
+    if role == "" {
+        return false;
+    }
+    for character in role {
+        if !"abcdefghijklmnopqrstuvwxyz".contains(character.to_string()) {
+            return false;
+        }
+    }
+    true
+}
+
+fn load(path) {
+    let manifest_path = std::path::absolute(path).display;
+    require(
+        std::fs::exists(manifest_path),
+        "artifact_manifest_missing:" + manifest_path
+    );
+    let manifest_metadata = std::fs::symlink_metadata(manifest_path);
+    require(
+        manifest_metadata.is_file
+            && !manifest_metadata.is_symlink
+            && !manifest_metadata.is_reparse_point,
+        "artifact_manifest_path_invalid:" + manifest_path
+    );
+
+    let manifest = rhai::json::parse(std::fs::read_to_string(manifest_path));
+    require(
+        manifest.schema_version == 2,
+        "artifact_manifest_schema_unsupported"
+    );
+    require(
+        type_of(manifest.executables) == "array"
+            && manifest.executables.len > 0,
+        "artifact_manifest_executables_empty"
+    );
+
+    let names = #{};
+    for entry in manifest.executables {
+        let name = entry.name;
+        require(
+            is_artifact_name(name),
+            "artifact_manifest_name_invalid:" + name
+        );
+        require(
+            !names.contains(name),
+            "artifact_manifest_name_duplicate:" + name
+        );
+        names[name] = true;
+
+        let role = entry.role;
+        role.trim();
+        require(role != "", "artifact_manifest_role_empty:" + name);
+
+        let subsystem = entry.pe_subsystem;
+        require(
+            subsystem == 2 || subsystem == 3,
+            "artifact_manifest_pe_subsystem_invalid:" + name
+        );
+
+        let documentation_role = entry.documentation_role;
+        documentation_role.trim();
+        require(
+            documentation_role != "",
+            "artifact_manifest_documentation_role_empty:" + name
+        );
+
+        require(
+            type_of(entry.offline_probe) == "array",
+            "artifact_manifest_offline_probe_invalid:" + name
+        );
+        if subsystem == 2 {
+            require(
+                entry.offline_probe.len == 0,
+                "artifact_manifest_gui_probe_forbidden:" + name
+            );
+        } else {
+            require(
+                entry.offline_probe.len > 0,
+                "artifact_manifest_console_probe_required:" + name
+            );
+        }
+        for argument in entry.offline_probe {
+            let argument = argument;
+            argument.trim();
+            require(
+                argument != "",
+                "artifact_manifest_probe_argument_empty:" + name
+            );
+        }
+
+        require(
+            entry.release_budget_bytes > 0,
+            "artifact_manifest_release_budget_missing:" + name
+        );
+    }
+
+    manifest
+}

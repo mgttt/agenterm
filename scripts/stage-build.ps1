@@ -46,11 +46,17 @@ foreach ($artifact in @($artifactManifest.executables)) {
     }
 }
 
-& (Join-Path $PSScriptRoot 'write-build-metadata.ps1') `
-    -ManifestPath (Join-Path $destinationDirectoryPath 'agenterm.json') `
-    -ArtifactManifestPath $artifactManifestPath `
-    -StagedDirectory $destinationDirectoryPath `
-    -Profile $Profile
+& $scriptExecutable task run write-build-metadata `
+    --manifest $taskManifestPath `
+    --timeout-ms 10000 --max-operations 10000000 -- `
+    (Split-Path -Parent $PSScriptRoot) `
+    (Join-Path $destinationDirectoryPath 'agenterm.json') `
+    $artifactManifestPath `
+    $destinationDirectoryPath `
+    $Profile
+if ($LASTEXITCODE -ne 0) {
+    throw "Rhai build-metadata writing failed with exit code $LASTEXITCODE"
+}
 
 & $scriptExecutable task run clean-locked-artifacts `
     --manifest $taskManifestPath -- `

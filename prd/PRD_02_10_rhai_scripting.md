@@ -359,7 +359,7 @@ and it is not positioned as a restricted security plugin.
     bounded capture, typed exit status, cwd, and repository file reads.
 - [~] migrate one independently testable responsibility at a time through
   `parallel -> parity-proven -> default-rhai -> PowerShell deleted`; the first
-  five completed responsibilities have crossed their rollback boundaries and
+  nine completed responsibilities have crossed their rollback boundaries and
   their PowerShell sources left the v0.1.10 working tree.
 - [ ] parity evidence compares the same inputs, structured outputs, exit
   classification, diagnostics, cancellation, cleanup, encoding, path behavior,
@@ -367,7 +367,7 @@ and it is not positioned as a restricted security plugin.
   last-known-good result.
 - [~] once one Rhai responsibility reaches parity and all normal callers switch
   to it, delete that corresponding PowerShell implementation immediately
-  instead of accumulating a release-wide migration backlog; five of 43 baseline
+  instead of accumulating a release-wide migration backlog; nine of 43 baseline
   scripts are deleted.
 - [~] every migrated item records its old path, replacement path, switching
   commit, parity evidence, and deletion state in this PRD. Git history is the
@@ -387,7 +387,8 @@ Migration ledger:
 | Cargo target cleanup preparation | `scripts/rhai/prepare-target-clean.rhai` | `scripts/prepare-target-clean.ps1` | `c20acc7` | public CLI black-box tests prove Git-native exact-root binding (including Windows short/long path aliases), allowed target set, idempotent cache-tag creation, and invalid-path/tag rejection | deleted; release build calls the named Rhai task before `cargo clean` |
 | Single executable staging | `scripts/rhai/stage-artifact.rhai` | `scripts/stage-artifact.ps1` | `e087842` | public CLI black-box tests prove normal replacement, invalid-name rejection, and Windows running-image parking before replacement | deleted; `stage-build.ps1` invokes the named Rhai task for each manifest artifact |
 | Local executable manifest validation | `scripts/rhai/validate-artifact-manifest.rhai` | `scripts/artifact-manifest.ps1` | `e2276cc` | public CLI black-box tests prove the canonical schema and reject duplicate/invalid names, invalid subsystem/probe contracts, empty roles, and missing size budgets | deleted; build staging, metadata writing, and artifact verification invoke the named Rhai task |
-| Source build identity freeze | `scripts/rhai/build-identity.rhai` | `scripts/build-identity.ps1` | current migration change | public CLI black-box tests prove exact Git-root binding, clean/dirty truth, profile validation, batch-safe fields, and exact SHA-256 build-input identities | deleted; `build.bat` and both check lanes bootstrap the current Script Runtime before invoking the named Rhai task |
+| Source build identity freeze | `scripts/rhai/build-identity.rhai` | `scripts/build-identity.ps1` | `b082c3b` | public CLI black-box tests prove exact Git-root binding, clean/dirty truth, profile validation, batch-safe fields, and exact SHA-256 build-input identities | deleted; `build.bat` and both check lanes bootstrap the current Script Runtime before invoking the named Rhai task |
+| Staged build provenance | `scripts/rhai/write-build-metadata.rhai` plus shared `scripts/rhai/lib/artifact_manifest.rhai` | `scripts/write-build-metadata.ps1` | current migration change | public CLI black-box tests prove frozen and live identities, executable size/hash capture, clean-source and frozen-input drift rejection; direct old/new field parity excludes only the generation timestamp | deleted; `stage-build.ps1` invokes the named Rhai task and manifest validation shares one project module |
 
 ### v0.1.10 completion commitment
 
@@ -397,7 +398,7 @@ Migration ledger:
 - [x] the dated 2026-07-29 frozen baseline is 43 tracked `.ps1` files: 3 at
   the repository root, 17 under `scripts/`, 21 under `tests/`, and 2 retained in
   `scripts/archive/powershell/`.
-- [~] migration progress is 5/43 deleted and 38/43 remaining; progress is
+- [~] migration progress is 9/43 deleted and 34/43 remaining; progress is
   counted only after parity evidence, all-caller cutover, and source deletion.
 - [x] `scripts/powershell-migration.json` freezes all 43 baseline paths under
   stable migration IDs with responsibility groups, replacement task IDs, and
@@ -407,10 +408,11 @@ Migration ledger:
   script, an unrecorded removal, duplicate paths, invalid states, and count
   drift; ordinary and release qualification invoke it as a required gate.
 - [~] the repository-root `agenterm.tasks.json` is now the offline task
-  catalog and ships the first eight ready tasks (`bootstrap-info`,
+  catalog and ships twelve ready tasks (`bootstrap-info`, `build-identity`,
   `migration-audit`, `target-report`, `internal-version-policy`,
-  `verify-docs-site`, `readme-examples`, `clean-locked-artifacts`, and
-  `prepare-target-clean`). The existing two-input Script contract verifier is
+  `verify-docs-site`, `readme-examples`, `clean-locked-artifacts`,
+  `prepare-target-clean`, `stage-artifact`, `validate-artifact-manifest`, and
+  `write-build-metadata`). The existing two-input Script contract verifier is
   intentionally not advertised as ready until catalog fixture production is
   part of its task. Build, lint, test, qualification, package, rehearsal,
   release, dependency, platform, side-effect, and evidence metadata remain

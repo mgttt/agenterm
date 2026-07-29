@@ -4,6 +4,8 @@ use std::process::{Command, Output};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use sha2::{Digest, Sha256};
+
 #[cfg(windows)]
 use std::fs::OpenOptions;
 #[cfg(windows)]
@@ -123,6 +125,69 @@ fn run_build_identity(repo_under_test: &Path, profile: &str, output_path: &Path)
         .arg(output_path)
         .output()
         .expect("run Rhai build-identity task")
+}
+
+fn run_write_build_metadata(
+    repo_under_test: &Path,
+    output_path: &Path,
+    artifact_manifest: &Path,
+    staged_directory: &Path,
+    profile: &str,
+    environment: &[(String, String)],
+) -> Output {
+    const BUILD_IDENTITY_ENVIRONMENT: [&str; 6] = [
+        "AGENTERM_BUILD_IDENTITY_VERSION",
+        "AGENTERM_BUILD_GIT_COMMIT",
+        "AGENTERM_BUILD_GIT_DIRTY",
+        "AGENTERM_BUILD_CARGO_LOCK_SHA256",
+        "AGENTERM_BUILD_ARTIFACT_MANIFEST_SHA256",
+        "AGENTERM_BUILD_PROFILE",
+    ];
+
+    let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let manifest = repo.join("agenterm.tasks.json");
+    let mut command = Command::new(env!("CARGO_BIN_EXE_agenterm-script"));
+    command
+        .current_dir(repo)
+        .args(["task", "run", "write-build-metadata", "--manifest"])
+        .arg(manifest)
+        .args(["--timeout-ms", "10000", "--max-operations", "10000000"])
+        .arg("--")
+        .arg(repo_under_test)
+        .arg(output_path)
+        .arg(artifact_manifest)
+        .arg(staged_directory)
+        .arg(profile);
+    for name in BUILD_IDENTITY_ENVIRONMENT {
+        command.env_remove(name);
+    }
+    for (name, value) in environment {
+        command.env(name, value);
+    }
+    command.output().expect("run Rhai build-metadata task")
+}
+
+fn parse_batch_environment(path: &Path) -> Vec<(String, String)> {
+    fs::read_to_string(path)
+        .expect("read batch environment")
+        .lines()
+        .map(|line| {
+            let assignment = line
+                .strip_prefix("set \"")
+                .and_then(|value| value.strip_suffix('"'))
+                .expect("batch assignment");
+            let (name, value) = assignment.split_once('=').expect("batch name and value");
+            (name.to_owned(), value.to_owned())
+        })
+        .collect()
+}
+
+fn sha256(value: &[u8]) -> String {
+    Sha256::digest(value)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 fn init_git_fixture(name: &str) -> PathBuf {
@@ -628,6 +693,163 @@ fn build_identity_task_freezes_clean_and_dirty_source_inputs() {
     );
 
     fs::remove_dir_all(&repo).expect("remove Git fixture");
+    fs::remove_dir_all(&output_root).expect("remove output fixture");
+}
+
+#[test]
+fn build_metadata_task_preserves_frozen_identity_and_detects_drift() {
+    let repo = init_git_fixture("build-metadata");
+    let scripts = repo.join("scripts");
+    let staged = fixture_root("build-metadata-staged");
+    let output_root = fixture_root("build-metadata-output");
+    fs::create_dir_all(&scripts).expect("create scripts fixture");
+    fs::create_dir_all(&staged).expect("create staged fixture");
+    fs::create_dir_all(&output_root).expect("create output fixture");
+
+    fs::write(
+        repo.join("Cargo.toml"),
+        "[package]\nname = \"fixture\"\nversion = \"9.8.7\"\n",
+    )
+    .expect("write Cargo.toml fixture");
+    fs::write(repo.join("Cargo.lock"), b"locked-input").expect("write Cargo.lock fixture");
+    let artifact_manifest = scripts.join("artifacts.json");
+    fs::write(
+        &artifact_manifest,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": 2,
+            "executables": [{
+                "name": "agenterm-cli.exe",
+                "role": "cli",
+                "pe_subsystem": 3,
+                "documentation_role": "fixture client",
+                "offline_probe": ["--version"],
+                "release_budget_bytes": 1024
+            }]
+        }))
+        .expect("encode artifact manifest"),
+    )
+    .expect("write artifact manifest");
+    let executable = b"fixture-executable";
+    fs::write(staged.join("agenterm-cli.exe"), executable).expect("write staged executable");
+    commit_git_fixture(&repo);
+
+    let frozen_path = output_root.join("identity.cmd");
+    let frozen = run_build_identity(&repo, "release-fast", &frozen_path);
+    assert!(
+        frozen.status.success(),
+        "freeze failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&frozen.stdout),
+        String::from_utf8_lossy(&frozen.stderr)
+    );
+    let frozen_environment = parse_batch_environment(&frozen_path);
+    let clean_path = output_root.join("clean.json");
+    let clean = run_write_build_metadata(
+        &repo,
+        &clean_path,
+        &artifact_manifest,
+        &staged,
+        "release-fast",
+        &frozen_environment,
+    );
+    assert!(
+        clean.status.success(),
+        "clean metadata failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&clean.stdout),
+        String::from_utf8_lossy(&clean.stderr)
+    );
+    let clean: serde_json::Value =
+        serde_json::from_slice(&fs::read(&clean_path).expect("read clean metadata"))
+            .expect("decode clean metadata");
+    let frozen_commit = frozen_environment
+        .iter()
+        .find(|(name, _)| name == "AGENTERM_BUILD_GIT_COMMIT")
+        .map(|(_, value)| value)
+        .expect("frozen commit");
+    assert_eq!(clean["schema_version"], 2);
+    assert_eq!(clean["version"], "9.8.7");
+    assert_eq!(clean["profile"], "release-fast");
+    assert_eq!(clean["git_commit"], frozen_commit.as_str());
+    assert_eq!(clean["git_dirty"], false);
+    assert_eq!(clean["executables"][0]["name"], "agenterm-cli.exe");
+    assert_eq!(clean["executables"][0]["role"], "cli");
+    assert_eq!(clean["executables"][0]["size"], executable.len());
+    assert_eq!(clean["executables"][0]["sha256"], sha256(executable));
+    assert!(
+        clean["build_time_utc"]
+            .as_str()
+            .is_some_and(|value| value.ends_with('Z') && !value.contains('.'))
+    );
+
+    fs::write(repo.join("Cargo.lock"), b"changed-locked-input").expect("change frozen input");
+    let tracked_change = run_write_build_metadata(
+        &repo,
+        &output_root.join("tracked-change.json"),
+        &artifact_manifest,
+        &staged,
+        "release-fast",
+        &frozen_environment,
+    );
+    assert!(!tracked_change.status.success());
+    assert!(
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&tracked_change.stdout),
+            String::from_utf8_lossy(&tracked_change.stderr)
+        )
+        .contains("build_metadata_clean_identity_changed")
+    );
+
+    let mut frozen_dirty = frozen_environment.clone();
+    frozen_dirty
+        .iter_mut()
+        .find(|(name, _)| name == "AGENTERM_BUILD_GIT_DIRTY")
+        .expect("frozen dirty field")
+        .1 = "true".to_owned();
+    let changed_hash = run_write_build_metadata(
+        &repo,
+        &output_root.join("changed-hash.json"),
+        &artifact_manifest,
+        &staged,
+        "release-fast",
+        &frozen_dirty,
+    );
+    assert!(!changed_hash.status.success());
+    assert!(
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&changed_hash.stdout),
+            String::from_utf8_lossy(&changed_hash.stderr)
+        )
+        .contains("build_metadata_frozen_input_hash_changed")
+    );
+
+    let fallback_path = output_root.join("fallback.json");
+    let fallback = run_write_build_metadata(
+        &repo,
+        &fallback_path,
+        &artifact_manifest,
+        &staged,
+        "dev",
+        &[],
+    );
+    assert!(
+        fallback.status.success(),
+        "fallback metadata failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&fallback.stdout),
+        String::from_utf8_lossy(&fallback.stderr)
+    );
+    let fallback: serde_json::Value =
+        serde_json::from_slice(&fs::read(&fallback_path).expect("read fallback metadata"))
+            .expect("decode fallback metadata");
+    assert_eq!(fallback["profile"], "dev");
+    assert_eq!(fallback["git_dirty"], true);
+    assert_eq!(
+        fallback["cargo_lock_sha256"],
+        sha256(b"changed-locked-input")
+    );
+
+    fs::remove_dir_all(&repo).expect("remove Git fixture");
+    fs::remove_dir_all(&staged).expect("remove staged fixture");
     fs::remove_dir_all(&output_root).expect("remove output fixture");
 }
 

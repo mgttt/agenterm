@@ -10,6 +10,9 @@
       },
       "capabilities": [
         "runtime.project.named-task",
+        "runtime.project.module-import",
+        "std.env.get",
+        "std.env.has",
         "std.env.current-dir",
         "std.fs.exists",
         "std.fs.metadata",
@@ -27,6 +30,7 @@
         "std.process.command-output",
         "std.time.system-time-now",
         "std.time.system-time-unix-millis",
+        "std.time.system-time-rfc3339",
         "rhai.json.parse",
         "rhai.json.stringify-pretty",
         "rhai.crypto.sha256-file",
@@ -97,6 +101,13 @@
       "id": "validate-artifact-manifest",
       "description": "Validate the canonical local Windows executable manifest",
       "entry": "scripts/rhai/validate-artifact-manifest.rhai",
+      "profile": "local",
+      "cwd": "."
+    },
+    {
+      "id": "write-build-metadata",
+      "description": "Write staged executable provenance from frozen source and input identities",
+      "entry": "scripts/rhai/write-build-metadata.rhai",
       "profile": "local",
       "cwd": "."
     },
