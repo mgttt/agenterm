@@ -27,28 +27,69 @@ if (-not $versionMatch.Success) {
     throw 'Could not read the package version from Cargo.toml.'
 }
 
-$previousErrorAction = $ErrorActionPreference
-$ErrorActionPreference = 'Continue'
-$commitOutput = & git -C $repoRoot rev-parse HEAD 2>$null
-$commitExitCode = $LASTEXITCODE
-$ErrorActionPreference = $previousErrorAction
-if ($commitExitCode -ne 0) {
-    throw "Could not resolve the source Git commit (exit $commitExitCode)."
+$buildIdentityAvailable =
+    $env:AGENTERM_BUILD_IDENTITY_VERSION -eq '1'
+if ($buildIdentityAvailable) {
+    if ($env:AGENTERM_BUILD_PROFILE -ne $Profile) {
+        throw (
+            'Frozen build profile does not match staging: ' +
+            "$($env:AGENTERM_BUILD_PROFILE) != $Profile"
+        )
+    }
+    $commit = $env:AGENTERM_BUILD_GIT_COMMIT
+    if ($commit -notmatch '^[0-9a-fA-F]{40}$') {
+        throw "Frozen build identity has an invalid Git commit: $commit"
+    }
+    $currentCommit = (& git -C $repoRoot rev-parse --verify HEAD).Trim()
+    if ($LASTEXITCODE -ne 0 -or $currentCommit -ne $commit) {
+        throw 'Git HEAD changed after the build identity was frozen.'
+    }
+    & git -C $repoRoot diff --quiet
+    $worktreeDiffExit = $LASTEXITCODE
+    & git -C $repoRoot diff --cached --quiet
+    $indexDiffExit = $LASTEXITCODE
+    if ($worktreeDiffExit -notin @(0, 1) -or $indexDiffExit -notin @(0, 1)) {
+        throw 'Could not validate tracked source state before staging.'
+    }
+    if ($env:AGENTERM_BUILD_GIT_DIRTY -eq 'false' -and
+        ($worktreeDiffExit -ne 0 -or $indexDiffExit -ne 0)) {
+        throw 'Tracked source changed after the clean build identity was frozen.'
+    }
+    $isDirty = switch ($env:AGENTERM_BUILD_GIT_DIRTY) {
+        'true' { $true }
+        'false' { $false }
+        default {
+            throw (
+                'Frozen build identity has an invalid dirty value: ' +
+                $env:AGENTERM_BUILD_GIT_DIRTY
+            )
+        }
+    }
 }
-$commit = ($commitOutput | Select-Object -First 1).Trim()
-if ($commit -notmatch '^[0-9a-fA-F]{40}$') {
-    throw "Git returned an invalid source commit: $commit"
-}
+else {
+    $previousErrorAction = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $commitOutput = & git -C $repoRoot rev-parse HEAD 2>$null
+    $commitExitCode = $LASTEXITCODE
+    $ErrorActionPreference = $previousErrorAction
+    if ($commitExitCode -ne 0) {
+        throw "Could not resolve the source Git commit (exit $commitExitCode)."
+    }
+    $commit = ($commitOutput | Select-Object -First 1).Trim()
+    if ($commit -notmatch '^[0-9a-fA-F]{40}$') {
+        throw "Git returned an invalid source commit: $commit"
+    }
 
-$previousErrorAction = $ErrorActionPreference
-$ErrorActionPreference = 'Continue'
-$statusOutput = & git -C $repoRoot status --porcelain 2>$null
-$statusExitCode = $LASTEXITCODE
-$ErrorActionPreference = $previousErrorAction
-if ($statusExitCode -ne 0) {
-    throw "Could not inspect source Git status (exit $statusExitCode)."
+    $previousErrorAction = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $statusOutput = & git -C $repoRoot status --porcelain 2>$null
+    $statusExitCode = $LASTEXITCODE
+    $ErrorActionPreference = $previousErrorAction
+    if ($statusExitCode -ne 0) {
+        throw "Could not inspect source Git status (exit $statusExitCode)."
+    }
+    $isDirty = @($statusOutput).Count -gt 0
 }
-$isDirty = @($statusOutput).Count -gt 0
 
 $rustVersionLines = @(& rustc -vV)
 if ($LASTEXITCODE -ne 0) {
@@ -91,6 +132,16 @@ function Get-ExecutableInfo {
 
 $artifactManifestResolvedPath = (Resolve-Path -LiteralPath $ArtifactManifestPath).Path
 $cargoLockPath = Join-Path $repoRoot 'Cargo.lock'
+$cargoLockSha256 = Get-FileSha256 -Path $cargoLockPath
+$artifactManifestSha256 = Get-FileSha256 -Path $artifactManifestResolvedPath
+if ($buildIdentityAvailable) {
+    if ($env:AGENTERM_BUILD_CARGO_LOCK_SHA256 -ne $cargoLockSha256 -or
+        $env:AGENTERM_BUILD_ARTIFACT_MANIFEST_SHA256 -ne
+            $artifactManifestSha256) {
+        throw 'Frozen build input hashes changed before staging.'
+    }
+}
+
 $manifest = [ordered]@{
     schema_version = 2
     product        = 'AgenTerm'
@@ -104,8 +155,8 @@ $manifest = [ordered]@{
     profile        = $Profile
     rust_target    = $hostTarget
     rust_version   = $rustVersion
-    cargo_lock_sha256 = Get-FileSha256 -Path $cargoLockPath
-    artifact_manifest_sha256 = Get-FileSha256 -Path $artifactManifestResolvedPath
+    cargo_lock_sha256 = $cargoLockSha256
+    artifact_manifest_sha256 = $artifactManifestSha256
     features       = @(
         'codex-launcher'
         'hierarchical-tabs'
