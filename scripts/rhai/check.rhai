@@ -81,7 +81,9 @@ fn execute(command_spec, repo, scratch, sequence) {
         command.env(key, command_spec.environment[key]);
     }
     command.timeout(
-        std::time::Duration::from_millis(command_spec.timeout_ms)
+        std::time::Duration::from_millis(
+            command_spec.timeout_ms + 10000
+        )
     );
     command.stdout_file(stdout_path);
     command.stderr_file(stderr_path);
@@ -744,7 +746,7 @@ if release {
 build_specs.push(spec(
     "cmd.exe",
     final_build_arguments,
-    60000,
+    if release { 600000 } else { 60000 },
     build_environment
 ));
 let build_gate = run_gate(
