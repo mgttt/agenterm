@@ -34,6 +34,37 @@ fn run_clean_locked(directory: &Path, extra: &[&str]) -> Output {
     command.args(extra).output().expect("run Rhai cleanup task")
 }
 
+fn run_prepare_target(repo_under_test: &Path, target: &Path) -> Output {
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let manifest = repo.join("agenterm.tasks.json");
+    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+        .current_dir(repo)
+        .args(["task", "run", "prepare-target-clean", "--manifest"])
+        .arg(manifest)
+        .arg("--")
+        .arg(repo_under_test)
+        .arg(target)
+        .output()
+        .expect("run Rhai target preparation task")
+}
+
+fn init_git_fixture(name: &str) -> PathBuf {
+    let root = fixture_root(name);
+    fs::create_dir_all(&root).expect("create Git fixture");
+    let output = Command::new("git")
+        .arg("init")
+        .arg("--quiet")
+        .arg(&root)
+        .output()
+        .expect("initialize Git fixture");
+    assert!(
+        output.status.success(),
+        "git init failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    root
+}
+
 #[test]
 fn clean_locked_artifacts_task_removes_only_owned_candidates() {
     let root = fixture_root("clean-locked");
@@ -84,6 +115,72 @@ fn clean_locked_artifacts_task_rejects_obsolete_path_escape() {
     );
 
     fs::remove_dir_all(&root).expect("remove fixture");
+}
+
+#[test]
+fn prepare_target_clean_task_writes_and_preserves_valid_cache_tag() {
+    let repo = init_git_fixture("prepare-target");
+    let target = repo.join("target-release");
+    fs::create_dir_all(&target).expect("create target fixture");
+
+    let first = run_prepare_target(&repo, &target);
+    assert!(
+        first.status.success(),
+        "target preparation failed: {}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let tag = target.join("CACHEDIR.TAG");
+    let expected = concat!(
+        "Signature: 8a477f597d28d172789f06886806bc55\n",
+        "# This file is a cache directory tag created by cargo.\n",
+        "# For information about cache directory tags see ",
+        "https://bford.info/cachedir/\n"
+    );
+    assert_eq!(fs::read_to_string(&tag).expect("read cache tag"), expected);
+
+    let second = run_prepare_target(&repo, &target);
+    assert!(
+        second.status.success(),
+        "idempotent target preparation failed: {}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    assert_eq!(fs::read_to_string(&tag).expect("read cache tag"), expected);
+
+    fs::remove_dir_all(&repo).expect("remove fixture");
+}
+
+#[test]
+fn prepare_target_clean_task_rejects_unexpected_target_and_invalid_tag() {
+    let repo = init_git_fixture("prepare-target-reject");
+    let unexpected = repo.join("cargo-output");
+    fs::create_dir_all(&unexpected).expect("create unexpected target");
+    let rejected_path = run_prepare_target(&repo, &unexpected);
+    assert!(!rejected_path.status.success());
+    assert!(
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&rejected_path.stdout),
+            String::from_utf8_lossy(&rejected_path.stderr)
+        )
+        .contains("target_clean_path_not_allowed")
+    );
+
+    let target = repo.join("target");
+    fs::create_dir_all(&target).expect("create target fixture");
+    fs::write(target.join("CACHEDIR.TAG"), "not a Cargo cache tag\n")
+        .expect("write invalid cache tag");
+    let rejected_tag = run_prepare_target(&repo, &target);
+    assert!(!rejected_tag.status.success());
+    assert!(
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&rejected_tag.stdout),
+            String::from_utf8_lossy(&rejected_tag.stderr)
+        )
+        .contains("target_clean_cache_tag_invalid")
+    );
+
+    fs::remove_dir_all(&repo).expect("remove fixture");
 }
 
 #[cfg(windows)]

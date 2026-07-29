@@ -86,7 +86,7 @@ if /i "%PROFILE%"=="release" (
             popd
             exit /b 1
         )
-        "%POWERSHELL_EXE%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\prepare-target-clean.ps1" -RepoRoot "%CD%" -TargetPath "%CARGO_OUTPUT_DIR%"
+        "%DIST_DIR%\agenterm-script.exe" task run prepare-target-clean --manifest "%~dp0agenterm.tasks.json" -- "%CD%" "%CARGO_OUTPUT_DIR%"
         if errorlevel 1 (
             echo.
             echo Release artifacts were staged, but exact target cleanup preparation failed.

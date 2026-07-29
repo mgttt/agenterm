@@ -16,6 +16,8 @@
         "std.fs.read-dir",
         "std.fs.read-to-string",
         "std.fs.remove-file",
+        "std.fs.symlink-metadata",
+        "std.fs.write",
         "std.path.absolute",
         "std.path.join",
         "std.process.command",
@@ -52,6 +54,13 @@
       "id": "migration-audit",
       "description": "Enforce the frozen PowerShell migration ledger and reject untracked drift",
       "entry": "scripts/rhai/powershell-migration-audit.rhai",
+      "profile": "local",
+      "cwd": "."
+    },
+    {
+      "id": "prepare-target-clean",
+      "description": "Validate an exact repository-local Cargo target and install its cache tag",
+      "entry": "scripts/rhai/prepare-target-clean.rhai",
       "profile": "local",
       "cwd": "."
     },
