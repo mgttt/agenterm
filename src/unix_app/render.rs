@@ -1,7 +1,5 @@
 use crate::theme::{Rgb, ThemeId, ThemePalette};
-use crate::ui_geometry::{
-    PixelRect, TreeRowMode, sidebar_tree_row_geometry, tree_row_at_y,
-};
+use crate::ui_geometry::{PixelRect, TreeRowMode, sidebar_tree_row_geometry, tree_row_at_y};
 use unicode_width::UnicodeWidthChar;
 
 use super::{

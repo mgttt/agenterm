@@ -1056,24 +1056,6 @@ impl UnixApp {
         true
     }
 
-    fn paste_clipboard_into_tab_editor_field(&mut self) -> Result<(), String> {
-        let raw = clipboard::get_clipboard_text()?;
-        let normalized = raw.replace("\r\n", "\n");
-        if normalized.is_empty() {
-            return Err("clipboard text contains no pasteable characters".to_owned());
-        }
-        let Some(text) = self.tab_editor_draft_mut() else {
-            return Err("tab editor is not open".to_owned());
-        };
-        text.push_str(&normalized);
-        self.set_status_message(format!(
-            "Pasted {} characters into tab editor",
-            normalized.len()
-        ));
-        self.request_redraw();
-        Ok(())
-    }
-
     fn toggle_collapsed(&mut self, tab_id: u64) -> Result<(), String> {
         if !self.tabs.iter().any(|tab| tab.parent_id == Some(tab_id)) {
             return Err("tab has no child nodes".to_owned());
