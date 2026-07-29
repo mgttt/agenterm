@@ -30,6 +30,10 @@ function Write-Evidence {
 $run = New-SmokeRunContext -Suite 'cli' -Executable $Exe `
     -DeclaredEvidence $declaredEvidence -AllowPaneCapture
 $Exe = $run.Executable
+$GuiExe = Join-Path (Split-Path -Parent $Exe) 'agenterm.exe'
+if (-not (Test-Path -LiteralPath $GuiExe -PathType Leaf)) {
+    throw "AgenTerm GUI executable not found: $GuiExe"
+}
 
 function Invoke-AgenTerm {
     param([string[]]$CommandArgs)
@@ -439,6 +443,27 @@ try {
         @($noteOperation.events) -notcontains 'tab.note') {
         throw 'tabs.set-note discovery did not expose its typed Fleet contract'
     }
+
+    $headlessUiError = Invoke-AgenTermExpectedFailure @(
+        'ui-action', 'tabs-hide'
+    )
+    if (-not $headlessUiError.Contains(
+        'no interactive GUI client is attached to this server'
+    )) {
+        throw 'headless server did not reject a GUI-owned action explicitly'
+    }
+    $guiStderr = Join-Path $targetDir 'attached-gui-stderr.txt'
+    $guiProcess = Start-Process -FilePath $GuiExe -ArgumentList @(
+        '--no-activate', '--address', $env:AGENTERM_IPC_ADDRESS
+    ) -RedirectStandardError $guiStderr -PassThru
+    Register-SmokeOwnedProcess -Context $run -Id $guiProcess.Id `
+        -Kind 'gui' -Address $env:AGENTERM_IPC_ADDRESS
+    if (-not $guiProcess.WaitForInputIdle(10000)) {
+        throw 'replaceable GUI did not become input-idle within 10 seconds'
+    }
+    Invoke-AgenTerm @(
+        'wait-ui', '--window-state', 'restored', '--timeout-ms', '10000'
+    ) | Out-Null
 
     $tabsBaseline = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
     $configuredWidth = [int]$tabsBaseline.layout.sidebar.configured_width
