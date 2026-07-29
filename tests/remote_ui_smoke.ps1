@@ -852,18 +852,10 @@ try {
         )
     }
 
-    Write-Host 'STEP add and close a child through the replaceable Tabs tree'
+    Write-Host 'STEP add and close a child through the typed replaceable Tabs tree'
     $rootUi = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
     $addBaseline = $rootUi.event_position
-    $rootRow = @($rootUi.tabs | Where-Object id -eq $tabId)[0]
-    $addBounds = $rootRow.actions.new_child.bounds
-    [AgenTermRemoteUiNativeTest]::SendMessage(
-        $gui.MainWindowHandle, 0x0201, [IntPtr]::Zero,
-        [AgenTermRemoteUiNativeTest]::MousePoint(
-            [int]($addBounds.left + ($addBounds.width / 2)),
-            [int]($addBounds.top + ($addBounds.height / 2))
-        )
-    ) | Out-Null
+    Invoke-AgenTerm @('ui-action', 'new-child', '-t', $tabId) | Out-Null
     $createdEvent = Invoke-AgenTerm @(
         'wait-events',
         '--epoch', $addBaseline.epoch,
