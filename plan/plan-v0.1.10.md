@@ -1,6 +1,6 @@
 # AgenTerm v0.1.10 公开计划
 
-状态：范围已冻结；v0.1.9 发布完成并验证 Release 产物后立即实施
+状态：实施中；v0.1.9 已发布，首批 2/43 PowerShell 迁移项完成删除
 工作主题：**Rhai 完整接替 PowerShell，并建立可验证的只读 Agent 桥梁**
 版本定位：在 v0.1.9 完善通用 Rhai 运行时、模块任务与机器可读工具
 schema 后，让 AgenTerm 首次用自己的脚本运行时驱动完整开发生命周期，
@@ -335,8 +335,9 @@ delivery
     -> Windows clean checkout 无 PowerShell 资格测试
 ```
 
-要求删除所有受跟踪 `.ps1`，包括当前 `scripts/archive/powershell/` 中的历史
-副本；其内容由 Git 历史继续保存。不要求删除 `.bat`、shell 或 CI YAML
+要求删除所有受跟踪 `.ps1`；冻结基线中
+`scripts/archive/powershell/` 的两个历史副本已在首批迁移提交删除，其内容
+只由 Git 历史继续保存。不要求删除 `.bat`、shell 或 CI YAML
 这些平台入口，但它们只能：
 
 1. 定位或安装明确版本的 Rust 工具链；
