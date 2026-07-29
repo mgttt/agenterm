@@ -11,6 +11,14 @@
       "evidence_ids": ["cli.backspace-del-one"]
     },
     {
+      "id": "terminal.first-window-async-ready",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "GUI shell appears before the initial ConPTY/cmd process is ready",
+      "evidence_ids": ["startup.first-window-async-ready"]
+    },
+    {
       "id": "terminal.mouse-scrollback",
       "kind": "behavior",
       "status": "shipped",
@@ -274,6 +282,14 @@
       "evidence_mode": "black-box",
       "prd": "bounded event reads and waits follow a snapshot epoch and sequence",
       "evidence_ids": ["cli.observable-events"]
+    },
+    {
+      "id": "control.wake-coalescing",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "producer notifications share one atomic wake signal",
+      "evidence_ids": ["fleet.wake-coalescing"]
     },
     {
       "id": "control.event-transition-catalog",

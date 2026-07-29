@@ -201,6 +201,12 @@ and it is not positioned as a restricted security plugin.
     v0.1.9 `agenterm-script.exe` is 2,740,224 bytes with the reviewed
     native-TLS feature set, 405,504 bytes below the existing 3 MiB artifact
     gate; the gate was not raised.
+- [x] `std::net::TcpStream` provides unrestricted DNS/IPv4/IPv6 TCP client
+  connections, typed 1..60,000 ms connect/read/write deadlines, typed text or
+  bytes writes, bounded bytes/UTF-8-line reads, address facts, nodelay, flush,
+  and shutdown. Per-call 1 MiB I/O and 32-resolution-result ceilings are
+  robustness bounds, never endpoint permissions; its first repository journey
+  owns raw deadline-expired IPC evidence for the wake-delivery regression.
 - [~] `rhai::runtime` exposes stable invocation/API/version/limits facts;
   unstable implementation handles are not part of the current public object
   tree, but this is API design rather than a permission boundary.
@@ -382,7 +388,7 @@ and it is not positioned as a restricted security plugin.
 - [~] once one Rhai responsibility reaches parity and all normal callers switch
   to it, or an obsolete responsibility is proven unreachable and superseded,
   delete that PowerShell implementation immediately instead of accumulating a
-  release-wide migration backlog; twenty-three of 43 baseline scripts are deleted.
+  release-wide migration backlog; twenty-four of 43 baseline scripts are deleted.
 - [~] every migrated item records its old path, replacement path, switching
   commit, parity evidence, and deletion state in this PRD. Git history is the
   only archive after the explicit rollback window closes.
@@ -414,6 +420,7 @@ Migration ledger:
 | Working-context proxy privacy and restart journey | `scripts/rhai/working-context-smoke.rhai` plus the shared Rhai test harness | `tests/working_context_smoke.ps1` | current migration change | named task and Windows public integration prove isolated GUI/server launch, safe proxy facts, archived-control non-mutation, no secret in snapshot/pane/workspace/events/stderr, non-persistence across restart, stable completed-child identity, and orphan-free cleanup | deleted; qualification declaration discovery and execution now use the Rhai journey directly |
 | Headless server authority journey | `scripts/rhai/server-smoke.rhai` plus typed owned-child platform facts and the shared Rhai harness | `tests/server_smoke.ps1` | current migration change | named task and Windows public integration preserve no-top-level-window evidence, exact PID/ownership, lease lifecycle and gated interaction, real PTY, replay/conflict/asynchronous receipts, causal events, workspace persistence, graceful shutdown, and orphan-free cleanup | deleted; qualification discovery and execution use the Rhai journey directly |
 | Same-server real-byte GUI upgrade and rollback journey | `scripts/rhai/remote-ui-upgrade-smoke.rhai` plus typed owned-child opaque window identity and the shared Rhai harness | `tests/remote_ui_upgrade_smoke.ps1` | current migration change | named task preserves distinct GUI hashes/build identities, competing-lease rejection, one stable server/epoch/PTY/draft/CWD/proxy state, output streamed across replacement, incompatible-protocol rejection, rollback scrollback continuity, public close/detach behavior, and orphan-free cleanup | deleted; qualification discovery and execution use the Rhai journey directly |
+| Coalesced wake, concurrent IPC, PTY output, and expired raw mutation journey | `scripts/rhai/wake-smoke.rhai` plus unrestricted `std::net::TcpStream`, `rhai::hash::fnv1a64`, and the shared Rhai harness | `tests/wake_smoke.ps1` | current migration change | named task and Windows public integration preserve an isolated headless server, 32 concurrent versioned snapshot clients, 80-line PTY progress, raw newline-delimited IPC, typed expired no-op receipt, unchanged tab note, and orphan-free owned-child cleanup | deleted; qualification discovery and execution use the Rhai journey directly |
 
 ### v0.1.10 completion commitment
 
@@ -423,7 +430,7 @@ Migration ledger:
 - [x] the dated 2026-07-29 frozen baseline is 43 tracked `.ps1` files: 3 at
   the repository root, 17 under `scripts/`, 21 under `tests/`, and 2 retained in
   `scripts/archive/powershell/`.
-- [~] migration progress is 23/43 deleted and 20/43 remaining; progress is
+- [~] migration progress is 24/43 deleted and 19/43 remaining; progress is
   counted only after parity evidence plus caller cutover, or caller-audited
   functional deletion of obsolete behavior, and source deletion.
 - [x] `scripts/powershell-migration.json` freezes all 43 baseline paths under
@@ -550,8 +557,9 @@ Migration ledger:
   than npm emulation inside the script runtime;
 - a persistent or automatically started script daemon and cross-invocation
   mutable runtime state;
-- typed TCP/UDP sockets, listeners, WebSockets, and higher-level network
-  modules remain planned Script Runtime expansion and are not permission-gated;
+- TCP listeners, UDP, WebSockets, and higher-level network modules beyond the
+  shipped unrestricted TCP client remain planned Script Runtime expansion and
+  are not permission-gated;
 - event handlers, watch mode, REPL, and durable background scheduling unless a
   later owned slice supplies separate acceptance;
 - Agent permission, approval, credential, quota, and natural-language policy

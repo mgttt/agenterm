@@ -317,6 +317,7 @@ try {
     Assert-AgenTermQualificationDeclarations -Context $qualification `
         -SuiteScripts @{
             'cli-smoke' = '.\tests\cli_smoke.ps1'
+            'wake-smoke' = '.\scripts\rhai\wake-smoke.rhai'
             'server-smoke' = '.\scripts\rhai\server-smoke.rhai'
             'remote-ui-smoke' = '.\tests\remote_ui_smoke.ps1'
             'remote-ui-upgrade-smoke' = '.\scripts\rhai\remote-ui-upgrade-smoke.rhai'
@@ -505,7 +506,9 @@ try {
             }
             Invoke-Checked -Id 'wake-smoke' `
                 -Label 'coalesced runtime wake smoke test' {
-                & '.\tests\wake_smoke.ps1'
+                & '.\dist\agenterm-script.exe' task run wake-smoke `
+                    --manifest '.\agenterm.tasks.json' `
+                    --timeout-ms 60000 --max-operations 10000000
             }
             Invoke-Checked -Id 'cli-smoke' -Label 'CLI smoke test' {
                 & '.\tests\cli_smoke.ps1'

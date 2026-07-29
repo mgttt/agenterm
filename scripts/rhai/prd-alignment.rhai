@@ -285,7 +285,9 @@ let evidence_suites = #{
     "remote-ui-upgrade-smoke": true,
     "fleet-smoke": true,
     "script-smoke": true,
+    "startup-smoke": true,
     "theme-smoke": true,
+    "wake-smoke": true,
     "working-context-smoke": true,
     "workbench-smoke": true,
     "ux-smoke": true
@@ -325,6 +327,7 @@ for gate in gate_manifest.required_gates {
         require(
             suite_source.contains("EVIDENCE " + evidence_id)
                 || suite_source.contains("Write-Evidence '" + evidence_id + "'")
+                || suite_source.contains("'" + evidence_id + "'")
                 || suite_source.contains("\"" + evidence_id + "\""),
             "prd_alignment_evidence_not_emitted:" + evidence_id
         );

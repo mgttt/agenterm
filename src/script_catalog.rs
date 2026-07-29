@@ -540,6 +540,87 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             "time.rfc3339",
             (&["utc_rfc3339_millisecond_precision"], NO_STRINGS),
         ),
+        shipped_local_entry_with_design(
+            shipped_local_entry(
+                "std.net.tcp-stream-connect",
+                "system/network/tcp/connect",
+                "std::net::TcpStream::connect",
+                Some("std::net::TcpStream::connect"),
+                RustMapping::Adapted,
+                "std::net::TcpStream::connect(address)",
+                (
+                    &[
+                        "blocking_dns_and_connect_inside_supervised_worker",
+                        "connect_phase_deadline_after_resolution",
+                        "all_targets_allowed",
+                    ],
+                    &[
+                        "net_address_invalid",
+                        "net_resolve",
+                        "net_resolve_empty",
+                        "net_connect",
+                        "net_connect_timeout",
+                    ],
+                ),
+            ),
+            "2026-07-30",
+        ),
+        shipped_local_entry_with_design(
+            shipped_local_entry(
+                "std.net.tcp-stream-connect-timeout",
+                "system/network/tcp/connect-timeout",
+                "std::net::TcpStream::connect_timeout",
+                Some("std::net::TcpStream::connect_timeout"),
+                RustMapping::Direct,
+                "std::net::TcpStream::connect_timeout(address, timeout)",
+                (
+                    &[
+                        "blocking_dns_and_connect_inside_supervised_worker",
+                        "connect_phase_deadline_after_resolution",
+                        "all_targets_allowed",
+                    ],
+                    &[
+                        "net_address_invalid",
+                        "net_timeout_invalid",
+                        "net_resolve",
+                        "net_resolve_empty",
+                        "net_connect",
+                        "net_connect_timeout",
+                    ],
+                ),
+            ),
+            "2026-07-30",
+        ),
+        shipped_local_entry_with_design(
+            shipped_local_entry(
+                "std.net.tcp-stream",
+                "system/network/tcp/stream",
+                "TcpStream.peer_addr/local_addr/set_read_timeout/set_write_timeout/set_nodelay/write_all/flush/read/read_line/shutdown",
+                Some("std::net::TcpStream"),
+                RustMapping::Adapted,
+                "stream.peer_addr / stream.local_addr / stream.set_read_timeout(timeout) / stream.set_write_timeout(timeout) / stream.set_nodelay(enabled) / stream.write_all(text_or_bytes) / stream.flush() / stream.read(max_bytes) / stream.read_line(max_bytes) / stream.shutdown()",
+                (
+                    &[
+                        "typed_owned_stream",
+                        "bounded_per_call_io",
+                        "read_line_strips_crlf",
+                        "strict_utf8_line",
+                    ],
+                    &[
+                        "net_io_limit_invalid",
+                        "net_read",
+                        "net_read_timeout",
+                        "net_read_limit",
+                        "net_read_not_utf8",
+                        "net_write",
+                        "net_write_timeout",
+                        "net_write_limit",
+                        "net_eof",
+                    ],
+                ),
+            ),
+            "2026-07-30",
+        ),
         shipped_local_entry_with_semantics(
             shipped_local_entry(
             "std.env.get",
@@ -821,6 +902,18 @@ pub fn entries() -> Vec<ScriptApiEntry> {
                 &["streaming_64_kib_chunks", "lowercase_hex", "sha256"],
                 &["crypto_sha256_file"],
             ),
+        ),
+        shipped_local_entry_with_design(
+            shipped_local_entry(
+                "rhai.hash.fnv1a64",
+                "data/hash/fnv1a64",
+                "rhai::hash::fnv1a64",
+                None,
+                RustMapping::None,
+                "rhai::hash::fnv1a64(bytes)",
+                (&["lowercase_hex", "wrapping_u64", "fnv1a64"], NO_STRINGS),
+            ),
+            "2026-07-30",
         ),
         shipped_local_entry(
             "rhai.task.after",
@@ -1312,6 +1405,14 @@ fn shipped_local_entry_with_semantics(
     entry
 }
 
+fn shipped_local_entry_with_design(
+    mut entry: ScriptApiEntry,
+    designed_on: &'static str,
+) -> ScriptApiEntry {
+    entry.designed_on = designed_on;
+    entry
+}
+
 const NODE_DOCUMENTATION: &str = "https://nodejs.org/docs/latest/api/";
 const BUN_DOCUMENTATION: &str = "https://bun.com/docs/runtime/bun-apis";
 
@@ -1436,6 +1537,13 @@ fn comparisons_for(stable_id: &str) -> ScriptApiComparisons {
             "AgenTerm separates wall-clock SystemTime from monotonic Duration and task deadlines",
         );
     }
+    if stable_id.starts_with("std.net.") {
+        return similar_comparisons(
+            "node:net",
+            "node:net / Bun.connect",
+            "AgenTerm exposes blocking Rust-shaped TCP with typed deadlines and bounded per-call I/O",
+        );
+    }
     if stable_id.starts_with("rhai.json.") {
         return similar_comparisons(
             "JSON",
@@ -1455,6 +1563,13 @@ fn comparisons_for(stable_id: &str) -> ScriptApiComparisons {
             "node:crypto",
             "Bun.CryptoHasher",
             "AgenTerm exposes deterministic typed digests without implicit encoding or shell tools",
+        );
+    }
+    if stable_id.starts_with("rhai.hash.") {
+        return similar_comparisons(
+            "non-cryptographic userland hash",
+            "non-cryptographic userland hash",
+            "AgenTerm exposes an exact deterministic wire-compatible FNV-1a 64-bit digest",
         );
     }
     if stable_id.starts_with("rhai.stream.") {
@@ -1534,7 +1649,7 @@ mod tests {
             assert!(!entry.catalog_path.is_empty());
             assert!(!entry.signature.is_empty());
             assert!(!entry.semantic_differences.is_empty());
-            assert_eq!(entry.designed_on, "2026-07-28");
+            assert!(!entry.designed_on.is_empty());
             assert!(!entry.since.is_empty());
             for analogue in [entry.comparisons.nodejs, entry.comparisons.bun] {
                 assert_ne!(
@@ -1569,6 +1684,16 @@ mod tests {
                 "{} has no available operation",
                 entry.stable_id
             );
+        }
+    }
+
+    #[test]
+    fn tcp_catalog_records_its_later_design_slice() {
+        for entry in entries()
+            .into_iter()
+            .filter(|entry| entry.stable_id.starts_with("std.net."))
+        {
+            assert_eq!(entry.designed_on, "2026-07-30");
         }
     }
 

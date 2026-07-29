@@ -98,7 +98,9 @@
     },
     {
       "id": "wake-smoke",
-      "evidence": []
+      "evidence": [
+        "fleet.wake-coalescing"
+      ]
     },
     {
       "id": "cli-smoke",

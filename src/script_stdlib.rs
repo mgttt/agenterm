@@ -154,6 +154,7 @@ pub fn register_local(engine: &mut Engine) {
     std_module.set_sub_module("fs", fs);
     std_module.set_sub_module("path", path);
     crate::script_process::register(engine, &mut std_module, &mut time);
+    crate::script_net::register(engine, &mut std_module);
     std_module.set_sub_module("time", time);
     engine.register_static_module("std", Shared::new(std_module));
 
@@ -170,6 +171,9 @@ pub fn register_local(engine: &mut Engine) {
     crypto.set_native_fn("sha256", crypto_sha256);
     crypto.set_native_fn("sha256_file", crypto_sha256_file);
 
+    let mut hash = Module::new();
+    hash.set_native_fn("fnv1a64", hash_fnv1a64);
+
     let mut runtime = Module::new();
     runtime.set_native_fn("temp_dir", runtime_temp_dir);
     runtime.set_native_fn("atomic_write", runtime_atomic_write);
@@ -179,6 +183,7 @@ pub fn register_local(engine: &mut Engine) {
     rhai_module.set_sub_module("json", json);
     rhai_module.set_sub_module("bytes", bytes);
     rhai_module.set_sub_module("crypto", crypto);
+    rhai_module.set_sub_module("hash", hash);
     rhai_module.set_sub_module("runtime", runtime);
     crate::script_task::register(engine, &mut rhai_module);
     crate::script_http::register(engine, &mut rhai_module);
@@ -248,6 +253,15 @@ fn crypto_sha256_file(path: &str) -> Result<String, Box<EvalAltResult>> {
         digest.update(&buffer[..count]);
     }
     Ok(sha256_hex(digest.finalize()))
+}
+
+fn hash_fnv1a64(value: ScriptBytes) -> Result<String, Box<EvalAltResult>> {
+    let mut hash = 0xcbf29ce484222325_u64;
+    for byte in value.0 {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    Ok(format!("fnv1a64:{hash:016x}"))
 }
 
 fn sha256_hex(bytes: impl AsRef<[u8]>) -> String {
@@ -701,6 +715,16 @@ mod tests {
             expected
         );
         std::fs::remove_file(fixture).unwrap();
+    }
+
+    #[test]
+    fn fnv1a64_hash_is_fixed_width_and_wire_compatible() {
+        assert_eq!(
+            local_engine()
+                .eval::<String>(r#"rhai::hash::fnv1a64(rhai::bytes::from_text("abc"))"#)
+                .unwrap(),
+            "fnv1a64:e71fa2190541574b"
+        );
     }
 
     #[test]

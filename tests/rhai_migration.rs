@@ -297,6 +297,30 @@ fn run_server_smoke() -> Output {
         .expect("run Rhai server smoke")
 }
 
+#[cfg(windows)]
+fn run_wake_smoke() -> Output {
+    let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+        .current_dir(repo)
+        .args(["run", "scripts/rhai/wake-smoke.rhai"])
+        .args(["--profile", "local", "--project-root"])
+        .arg(repo)
+        .args([
+            "--timeout-ms",
+            "60000",
+            "--max-operations",
+            "10000000",
+            "--",
+        ])
+        .arg(repo)
+        .arg(env!("CARGO_BIN_EXE_agenterm-server"))
+        .arg(env!("CARGO_BIN_EXE_agenterm-cli"))
+        .env("AGENTERM_NO_ACTIVATE", "1")
+        .output()
+        .expect("run Rhai wake smoke")
+}
+
 fn run_preflight(repo_under_test: &Path, output_path: &Path) -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -1393,6 +1417,24 @@ fn rhai_server_smoke_preserves_headless_authority_and_cleanup() {
     assert!(stdout.contains("EVIDENCE server.headless-authority"));
     assert!(
         stdout.contains("PASS: headless server owns PTY, parser, workspace, events, and no HWND")
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn rhai_wake_smoke_preserves_concurrent_ipc_pty_and_expired_mutation() {
+    let output = run_wake_smoke();
+    assert!(
+        output.status.success(),
+        "Rhai wake smoke failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("EVIDENCE fleet.wake-coalescing"));
+    assert!(
+        stdout
+            .contains("PASS: coalesced wake delivery preserved IPC, PTY, and mutation correctness")
     );
 }
 

@@ -54,7 +54,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     startup, clipboard, and bounded IPC queues coalesce outstanding Win32
     messages, the GUI owner clears before draining and rearms an exhausted IPC
     budget without losing a concurrent wake; public stress proves PTY and 32
-    IPC clients progress together and an expired mutation remains a typed no-op
+    IPC clients progress together and an expired mutation remains a typed no-op.
+    The v0.1.10 named Rhai journey owns this proof through unrestricted
+    `std::net::TcpStream`, a stable raw-payload FNV-1a fingerprint, exact
+    receipt/post-state assertions, and orphan-free headless-server cleanup
   - [ ] model sequence, render generation, and last-painted event sequence
     make snapshot, bounded capture, cell dump, and PNG evidence causally
     comparable
