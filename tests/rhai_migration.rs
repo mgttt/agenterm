@@ -1,0 +1,127 @@
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+#[cfg(windows)]
+use std::fs::OpenOptions;
+#[cfg(windows)]
+use std::os::windows::fs::OpenOptionsExt;
+
+fn fixture_root(name: &str) -> PathBuf {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock before Unix epoch")
+        .as_nanos();
+    std::env::temp_dir().join(format!(
+        "agenterm-rhai-migration-{name}-{}-{nonce}",
+        std::process::id()
+    ))
+}
+
+fn run_clean_locked(directory: &Path, extra: &[&str]) -> Output {
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let manifest = repo.join("agenterm.tasks.json");
+    let artifacts = repo.join("scripts").join("artifacts.json");
+    let mut command = Command::new(env!("CARGO_BIN_EXE_agenterm-script"));
+    command
+        .current_dir(repo)
+        .args(["task", "run", "clean-locked-artifacts", "--manifest"])
+        .arg(manifest)
+        .arg("--")
+        .arg(directory)
+        .arg(artifacts);
+    command.args(extra).output().expect("run Rhai cleanup task")
+}
+
+#[test]
+fn clean_locked_artifacts_task_removes_only_owned_candidates() {
+    let root = fixture_root("clean-locked");
+    fs::create_dir_all(&root).expect("create fixture");
+    let stale_gui = root.join("agenterm.locked-123.exe");
+    let stale_cli = root.join("agenterm-cli.locked-456.exe");
+    let unrelated = root.join("other.locked-789.exe");
+    let obsolete = root.join("agentermctl.exe");
+    for path in [&stale_gui, &stale_cli, &unrelated, &obsolete] {
+        fs::write(path, b"fixture").expect("write fixture");
+    }
+
+    let output = run_clean_locked(&root, &["agentermctl.exe"]);
+    assert!(
+        output.status.success(),
+        "cleanup failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Removed 2 stale locked artifact(s)"));
+    assert!(stdout.contains("Removed obsolete artifact agentermctl.exe"));
+    assert!(!stale_gui.exists());
+    assert!(!stale_cli.exists());
+    assert!(!obsolete.exists());
+    assert!(unrelated.exists(), "task removed an unowned executable");
+
+    fs::remove_dir_all(&root).expect("remove fixture");
+}
+
+#[test]
+fn clean_locked_artifacts_task_rejects_obsolete_path_escape() {
+    let root = fixture_root("clean-locked-escape");
+    fs::create_dir_all(&root).expect("create fixture");
+
+    let output = run_clean_locked(&root, &["..\\outside.exe"]);
+    assert!(
+        !output.status.success(),
+        "path escape unexpectedly succeeded"
+    );
+    let error = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        error.contains("obsolete_artifact_name_invalid"),
+        "missing typed rejection: {error}"
+    );
+
+    fs::remove_dir_all(&root).expect("remove fixture");
+}
+
+#[cfg(windows)]
+#[test]
+fn clean_locked_artifacts_task_retains_in_use_file_then_retries() {
+    let root = fixture_root("clean-locked-in-use");
+    fs::create_dir_all(&root).expect("create fixture");
+    let locked = root.join("agenterm-server.locked-789.exe");
+    let handle = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .share_mode(0)
+        .open(&locked)
+        .expect("open fixture without delete sharing");
+
+    let retained = run_clean_locked(&root, &[]);
+    assert!(
+        retained.status.success(),
+        "in-use cleanup failed: {}",
+        String::from_utf8_lossy(&retained.stderr)
+    );
+    assert!(locked.exists(), "in-use executable was removed");
+    assert!(
+        String::from_utf8_lossy(&retained.stdout)
+            .contains("Retained 1 locked artifact(s) still in use")
+    );
+
+    drop(handle);
+    let retried = run_clean_locked(&root, &[]);
+    assert!(
+        retried.status.success(),
+        "retry cleanup failed: {}",
+        String::from_utf8_lossy(&retried.stderr)
+    );
+    assert!(!locked.exists(), "released executable was not removed");
+    assert!(
+        String::from_utf8_lossy(&retried.stdout).contains("Removed 1 stale locked artifact(s)")
+    );
+
+    fs::remove_dir_all(&root).expect("remove fixture");
+}

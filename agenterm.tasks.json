@@ -11,7 +11,12 @@
       "capabilities": [
         "runtime.project.named-task",
         "std.env.current-dir",
+        "std.fs.exists",
+        "std.fs.metadata",
+        "std.fs.read-dir",
         "std.fs.read-to-string",
+        "std.fs.remove-file",
+        "std.path.absolute",
         "std.path.join",
         "std.process.command",
         "std.process.command-output",
@@ -29,6 +34,13 @@
     }
   },
   "tasks": [
+    {
+      "id": "clean-locked-artifacts",
+      "description": "Remove stale locked and explicitly obsolete staged executables",
+      "entry": "scripts/rhai/clean-locked-artifacts.rhai",
+      "profile": "local",
+      "cwd": "."
+    },
     {
       "id": "bootstrap-info",
       "description": "Report the repository, Git, Cargo, Rust and Script Runtime bootstrap identity",

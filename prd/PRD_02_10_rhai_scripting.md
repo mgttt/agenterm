@@ -359,7 +359,7 @@ and it is not positioned as a restricted security plugin.
     bounded capture, typed exit status, cwd, and repository file reads.
 - [~] migrate one independently testable responsibility at a time through
   `parallel -> parity-proven -> default-rhai -> PowerShell deleted`; the first
-  three completed responsibilities have crossed their rollback boundaries and
+  four completed responsibilities have crossed their rollback boundaries and
   their PowerShell sources left the v0.1.10 working tree.
 - [ ] parity evidence compares the same inputs, structured outputs, exit
   classification, diagnostics, cancellation, cleanup, encoding, path behavior,
@@ -367,7 +367,7 @@ and it is not positioned as a restricted security plugin.
   last-known-good result.
 - [~] once one Rhai responsibility reaches parity and all normal callers switch
   to it, delete that corresponding PowerShell implementation immediately
-  instead of accumulating a release-wide migration backlog; three of 43 baseline
+  instead of accumulating a release-wide migration backlog; four of 43 baseline
   scripts are deleted.
 - [~] every migrated item records its old path, replacement path, switching
   commit, parity evidence, and deletion state in this PRD. Git history is the
@@ -383,6 +383,7 @@ Migration ledger:
 | Cargo target inventory | `scripts/rhai/target-report.rhai` | `scripts/archive/powershell/target-report.ps1` | `b9d1906` | public CLI fixture plus live PowerShell/Rhai field parity, reconfirmed on 2026-07-29 against an absent target | deleted; Git history is the rollback source |
 | Internal-only version policy | `scripts/rhai/internal-version-policy.rhai` | `scripts/archive/powershell/internal-version-policy.ps1` | `b0010f5` | public CLI `check` plus identical live PowerShell/Rhai PASS result, reconfirmed on 2026-07-29 | deleted; Git history is the rollback source |
 | README artifact and command alignment | `scripts/rhai/readme-examples.rhai` | `tests/readme_examples.ps1` | `667f6d6` | exact live stdout parity against the six-artifact manifest and offline CLI/Mux catalogs on 2026-07-29; Rhai candidate `a20655a` | deleted; Git history is the rollback source |
+| Locked and obsolete staged-artifact cleanup | `scripts/rhai/clean-locked-artifacts.rhai` | `scripts/clean-locked-artifacts.ps1` | current cutover commit | public `agenterm-script task run` black-box tests prove owned-name cleanup, unrelated-file retention, obsolete-name cleanup, and path-escape rejection | deleted; both normal stage-build callers use the named Rhai task |
 
 ### v0.1.10 completion commitment
 
@@ -392,7 +393,7 @@ Migration ledger:
 - [x] the dated 2026-07-29 frozen baseline is 43 tracked `.ps1` files: 3 at
   the repository root, 17 under `scripts/`, 21 under `tests/`, and 2 retained in
   `scripts/archive/powershell/`.
-- [~] migration progress is 3/43 deleted and 40/43 remaining; progress is
+- [~] migration progress is 4/43 deleted and 39/43 remaining; progress is
   counted only after parity evidence, all-caller cutover, and source deletion.
 - [x] `scripts/powershell-migration.json` freezes all 43 baseline paths under
   stable migration IDs with responsibility groups, replacement task IDs, and
@@ -402,9 +403,9 @@ Migration ledger:
   script, an unrecorded removal, duplicate paths, invalid states, and count
   drift; ordinary and release qualification invoke it as a required gate.
 - [~] the repository-root `agenterm.tasks.json` is now the offline task
-  catalog and ships the first six ready tasks (`bootstrap-info`,
+  catalog and ships the first seven ready tasks (`bootstrap-info`,
   `migration-audit`, `target-report`, `internal-version-policy`,
-  `verify-docs-site`, and `readme-examples`). The existing two-input Script contract verifier is
+  `verify-docs-site`, `readme-examples`, and `clean-locked-artifacts`). The existing two-input Script contract verifier is
   intentionally not advertised as ready until catalog fixture production is
   part of its task. Build, lint, test, qualification, package, rehearsal,
   release, dependency, platform, side-effect, and evidence metadata remain

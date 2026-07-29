@@ -16,12 +16,18 @@ $sourceDirectoryPath = [IO.Path]::GetFullPath($SourceDirectory)
 $destinationDirectoryPath = [IO.Path]::GetFullPath($DestinationDirectory)
 [IO.Directory]::CreateDirectory($destinationDirectoryPath) | Out-Null
 $artifactManifestPath = Join-Path $PSScriptRoot 'artifacts.json'
+$taskManifestPath = Join-Path (Split-Path -Parent $PSScriptRoot) `
+    'agenterm.tasks.json'
+$scriptExecutable = Join-Path $sourceDirectoryPath 'agenterm-script.exe'
 . (Join-Path $PSScriptRoot 'artifact-manifest.ps1')
 $artifactManifest = Get-AgenTermArtifactManifest -Path $artifactManifestPath
 
-& (Join-Path $PSScriptRoot 'clean-locked-artifacts.ps1') `
-    -Directory $destinationDirectoryPath `
-    -ObsoleteName 'agentermctl.exe'
+& $scriptExecutable task run clean-locked-artifacts `
+    --manifest $taskManifestPath -- `
+    $destinationDirectoryPath $artifactManifestPath 'agentermctl.exe'
+if ($LASTEXITCODE -ne 0) {
+    throw "Rhai locked-artifact cleanup failed with exit code $LASTEXITCODE"
+}
 
 foreach ($artifact in @($artifactManifest.executables)) {
     & (Join-Path $PSScriptRoot 'stage-artifact.ps1') `
@@ -35,6 +41,9 @@ foreach ($artifact in @($artifactManifest.executables)) {
     -StagedDirectory $destinationDirectoryPath `
     -Profile $Profile
 
-& (Join-Path $PSScriptRoot 'clean-locked-artifacts.ps1') `
-    -Directory $destinationDirectoryPath `
-    -ObsoleteName 'agentermctl.exe'
+& $scriptExecutable task run clean-locked-artifacts `
+    --manifest $taskManifestPath -- `
+    $destinationDirectoryPath $artifactManifestPath 'agentermctl.exe'
+if ($LASTEXITCODE -ne 0) {
+    throw "Rhai locked-artifact cleanup failed with exit code $LASTEXITCODE"
+}

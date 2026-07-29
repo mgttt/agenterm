@@ -11,7 +11,7 @@
     {"id":"ps1-root-release","path":"release.ps1","group":"release","responsibility":"approved release coordination","replacement_task":"release","status":"inventory"},
     {"id":"ps1-script-artifact-manifest","path":"scripts/artifact-manifest.ps1","group":"build","responsibility":"artifact manifest loading and validation","replacement_task":"build-dev","status":"inventory"},
     {"id":"ps1-script-build-identity","path":"scripts/build-identity.ps1","group":"build","responsibility":"source and build identity derivation","replacement_task":"build-dev","status":"inventory"},
-    {"id":"ps1-script-clean-locked","path":"scripts/clean-locked-artifacts.ps1","group":"build","responsibility":"bounded locked-artifact cleanup","replacement_task":"clean","status":"inventory"},
+    {"id":"ps1-script-clean-locked","path":"scripts/clean-locked-artifacts.ps1","group":"deleted","responsibility":"bounded locked-artifact cleanup","replacement_task":"clean-locked-artifacts","replacement":"scripts/rhai/clean-locked-artifacts.rhai","evidence":"public CLI black-box coverage in tests/rhai_migration.rs","status":"deleted"},
     {"id":"ps1-script-package-selftest","path":"scripts/package-qualified-selftest.ps1","group":"qualification","responsibility":"qualified package boundary self-test","replacement_task":"qualify-release","status":"inventory"},
     {"id":"ps1-script-package","path":"scripts/package-qualified.ps1","group":"release","responsibility":"qualified byte packaging","replacement_task":"package","status":"inventory"},
     {"id":"ps1-script-preflight-benchmark","path":"scripts/preflight-benchmark.ps1","group":"quality","responsibility":"preflight latency benchmark","replacement_task":"check","status":"inventory"},
