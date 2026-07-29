@@ -44,6 +44,10 @@ $workerExe = Join-Path ([IO.Path]::GetDirectoryName($Exe)) 'agenterm-script.exe'
 if (-not (Test-Path -LiteralPath $workerExe)) {
     throw "AgenTerm script worker not found: $workerExe"
 }
+$guiExe = Join-Path ([IO.Path]::GetDirectoryName($Exe)) 'agenterm.exe'
+if (-not (Test-Path -LiteralPath $guiExe -PathType Leaf)) {
+    throw "AgenTerm GUI executable not found: $guiExe"
+}
 
 $smokeRun = New-SmokeRunContext -Suite 'script' -Executable $Exe `
     -DeclaredEvidence $declaredEvidence
@@ -1833,6 +1837,15 @@ try {
     Invoke-Script @(
         '--address', $address, 'new-window', '-d', '-n', "script-observe-$PID"
     ) | Out-Null
+    $guiStderr = Join-Path $smokeRun.RunDirectory 'fleet-gui-stderr.txt'
+    $guiProcess = Start-Process -FilePath $guiExe -ArgumentList @(
+        '--no-activate', '--address', $address
+    ) -RedirectStandardError $guiStderr -PassThru
+    Register-SmokeOwnedProcess -Context $smokeRun -Id $guiProcess.Id `
+        -Kind 'gui' -Address $address
+    if (-not $guiProcess.WaitForInputIdle(10000)) {
+        throw 'Fleet observation GUI did not become input-idle within 10 seconds'
+    }
     $snapshot = Invoke-Script @(
         'wait-ui', '--window-state', 'restored', '--timeout-ms', '10000'
     ) | ConvertFrom-Json
