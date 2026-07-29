@@ -108,6 +108,10 @@ pub fn register_local(engine: &mut Engine) {
     engine.register_get("is_dir", |metadata: &mut ScriptMetadata| {
         metadata.0.is_dir()
     });
+    engine.register_get("is_symlink", |metadata: &mut ScriptMetadata| {
+        metadata.0.file_type().is_symlink()
+    });
+    engine.register_get("is_reparse_point", metadata_is_reparse_point);
     engine.register_get("len", metadata_len);
     engine.register_get("modified", metadata_modified);
 
@@ -129,6 +133,7 @@ pub fn register_local(engine: &mut Engine) {
     fs.set_native_fn("write_bytes", fs_write_bytes);
     fs.set_native_fn("exists", fs_exists);
     fs.set_native_fn("metadata", fs_metadata);
+    fs.set_native_fn("symlink_metadata", fs_symlink_metadata);
     fs.set_native_fn("read_dir", fs_read_dir);
     fs.set_native_fn("create_dir", fs_create_dir);
     fs.set_native_fn("create_dir_all", fs_create_dir_all);
@@ -212,6 +217,12 @@ fn fs_metadata(path: &str) -> Result<ScriptMetadata, Box<EvalAltResult>> {
     std::fs::metadata(path)
         .map(ScriptMetadata)
         .map_err(|error| io_error("fs_metadata", path, error))
+}
+
+fn fs_symlink_metadata(path: &str) -> Result<ScriptMetadata, Box<EvalAltResult>> {
+    std::fs::symlink_metadata(path)
+        .map(ScriptMetadata)
+        .map_err(|error| io_error("fs_symlink_metadata", path, error))
 }
 
 fn fs_read_dir(path: &str) -> Result<Array, Box<EvalAltResult>> {
@@ -422,6 +433,24 @@ fn metadata_len(metadata: &mut ScriptMetadata) -> Result<rhai::INT, Box<EvalAltR
         .map_err(|_| "filesystem_metadata_overflow: file length exceeds Rhai integer".into())
 }
 
+#[cfg(windows)]
+fn metadata_is_reparse_point(metadata: &mut ScriptMetadata) -> Result<bool, Box<EvalAltResult>> {
+    use std::os::windows::fs::MetadataExt;
+
+    Ok(windows_attributes_are_reparse(metadata.0.file_attributes()))
+}
+
+#[cfg(windows)]
+fn windows_attributes_are_reparse(attributes: u32) -> bool {
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+    attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0
+}
+
+#[cfg(not(windows))]
+fn metadata_is_reparse_point(metadata: &mut ScriptMetadata) -> Result<bool, Box<EvalAltResult>> {
+    Ok(metadata.0.file_type().is_symlink())
+}
+
 fn metadata_modified(
     metadata: &mut ScriptMetadata,
 ) -> Result<ScriptSystemTime, Box<EvalAltResult>> {
@@ -587,11 +616,14 @@ mod tests {
                 let entries = std::fs::read_dir("{script_directory}");
                 let entry = entries[0];
                 let metadata = std::fs::metadata(entry.path.display);
+                let link_metadata = std::fs::symlink_metadata(entry.path.display);
                 #{{
                     count: entries.len,
                     file_name: entry.file_name,
                     is_file: entry.is_file,
                     bytes: metadata.len,
+                    is_symlink: link_metadata.is_symlink,
+                    is_reparse_point: link_metadata.is_reparse_point,
                     absolute: std::path::absolute(entry.path.display).is_absolute,
                     modified: metadata.modified.unix_millis,
                     modified_text: metadata.modified.rfc3339,
@@ -609,6 +641,8 @@ mod tests {
         );
         assert!(result["is_file"].as_bool().unwrap());
         assert_eq!(result["bytes"].as_int().unwrap(), 5);
+        assert!(!result["is_symlink"].as_bool().unwrap());
+        assert!(!result["is_reparse_point"].as_bool().unwrap());
         assert!(result["absolute"].as_bool().unwrap());
         assert!(result["modified"].as_int().unwrap() > 0);
         assert!(
@@ -624,6 +658,14 @@ mod tests {
         );
         std::fs::remove_file(&file).unwrap();
         std::fs::remove_dir(&directory).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_reparse_attribute_detection_is_exact() {
+        assert!(!windows_attributes_are_reparse(0));
+        assert!(windows_attributes_are_reparse(0x0000_0400));
+        assert!(windows_attributes_are_reparse(0x0000_0400 | 0x10));
     }
 
     #[test]

@@ -103,6 +103,9 @@ agenterm-script
 │  │  ├─ metadata(path)
 │  │  │  Returns typed file-kind, length, and modified-time facts.
 │  │  │  [shipped; stable; designed 2026-07-28]
+│  │  ├─ symlink_metadata(path)
+│  │  │  Returns typed facts without following the final symlink or junction.
+│  │  │  [shipped; stable; designed 2026-07-29]
 │  │  ├─ read_dir(path)
 │  │  │  Returns typed entries for one directory without recursive traversal.
 │  │  │  [shipped; stable; designed 2026-07-28]
@@ -110,8 +113,10 @@ agenterm-script
 │  │  │  Exposes path, file name, file kind, symlink kind, and metadata.
 │  │  │  [shipped; stable; designed 2026-07-28]
 │  │  ├─ Metadata
-│  │  │  Exposes is_file, is_dir, len, and modified wall-clock time.
-│  │  │  [shipped; stable; designed 2026-07-28]
+│  │  │  Exposes is_file, is_dir, is_symlink, is_reparse_point, len, and
+│  │  │  modified wall-clock time. On Windows, is_reparse_point checks the
+│  │  │  native reparse attribute rather than guessing from a resolved path.
+│  │  │  [shipped; stable; designed 2026-07-28; extended 2026-07-29]
 │  │  ├─ create_dir(path) / create_dir_all(path)
 │  │  │  Creates one explicit directory or directory tree.
 │  │  │  [shipped; stable; designed 2026-07-28]

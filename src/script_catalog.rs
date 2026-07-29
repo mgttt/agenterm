@@ -243,6 +243,18 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             (&["filesystem_metadata"], &["fs_metadata"]),
         ),
         shipped_local_entry(
+            "std.fs.symlink-metadata",
+            "system/filesystem/symlink-metadata",
+            "std::fs::symlink_metadata",
+            Some("std::fs::symlink_metadata"),
+            RustMapping::Direct,
+            "std::fs::symlink_metadata(path)",
+            (
+                &["filesystem_metadata", "does_not_follow_final_symlink"],
+                &["fs_symlink_metadata"],
+            ),
+        ),
+        shipped_local_entry(
             "std.fs.read-dir",
             "system/filesystem/read-directory",
             "std::fs::read_dir",
@@ -410,10 +422,11 @@ pub fn entries() -> Vec<ScriptApiEntry> {
         shipped_local_entry(
             "std.fs.metadata-facts",
             "system/filesystem/metadata/facts",
-            "Metadata.is_file/is_dir/len/modified",
+            "Metadata.is_file/is_dir/is_symlink/is_reparse_point/len/modified",
             Some("std::fs::Metadata"),
             RustMapping::Adapted,
-            "metadata.is_file / metadata.is_dir / metadata.len / metadata.modified",
+            "metadata.is_file / metadata.is_dir / metadata.is_symlink / \
+             metadata.is_reparse_point / metadata.len / metadata.modified",
             (
                 &["integer_bounded_length"],
                 &["filesystem_metadata_overflow"],
