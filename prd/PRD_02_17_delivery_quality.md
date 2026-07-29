@@ -17,6 +17,22 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   and ZIP
 - [x] release automation publishes `agenterm-mux.exe` after its acceptance
   gate
+- [~] macOS direct-download releases use Apple distribution trust rather than
+  asking users to bypass Gatekeeper
+  - [x] the tag workflow fails closed without a Developer ID Application
+    certificate and App Store Connect notarization key, signs every declared
+    Mach-O independently with hardened runtime plus a secure timestamp,
+    verifies each signature, packages macOS as a ZIP accepted by `notarytool`,
+    and publishes only after Apple returns `Accepted`
+    - repository Actions secrets are
+      `APPLE_DEVELOPER_ID_P12_BASE64`,
+      `APPLE_DEVELOPER_ID_P12_PASSWORD`, `APPLE_NOTARY_KEY_P8_BASE64`,
+      `APPLE_NOTARY_KEY_ID`, and `APPLE_NOTARY_ISSUER_ID`; certificate and API
+      key files exist only in the ephemeral runner keychain/directory
+  - [ ] the first credentialed ARM64 and x86_64 workflow run must retain the
+    Apple submission IDs/logs and prove a freshly downloaded archive launches
+    under Gatekeeper on a clean macOS account; raw ad-hoc or unsigned archives
+    are not release candidates
 - [ ] `agenterm-bash.exe` remains gated and unpublished
 - [x] release metadata reports version, build time, commit, enabled
   features, and SHA-256 for every executable/runtime component

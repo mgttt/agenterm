@@ -87,6 +87,10 @@ PRD + Cargo deps (primary)
 ### E — 打包矩阵纳入 GUI
 - 用户问题：Release 包必须含 `agenterm`（linux/macos）。
 - 证据：`artifacts.json` platforms 含 GUI；CI 编 `agenterm`；包内有二进制。
+- macOS 信任链：每个 Mach-O 使用 Developer ID Application、hardened
+  runtime 与 secure timestamp 独立签名，ZIP 通过 `notarytool` 获得
+  `Accepted` 后才允许发布；缺少凭据必须失败，不能发布后再要求用户绕过
+  Gatekeeper。首个 credentialed run 和 clean-account launch 证据仍待完成。
 - 非目标：不把完整 `check.ps1` 搬到 Unix。
 
 ## 工具选型（已收敛）

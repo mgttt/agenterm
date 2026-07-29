@@ -232,7 +232,7 @@
     {
       "os": "macos",
       "arch": "aarch64",
-      "package": "tar.gz",
+      "package": "zip",
       "executables": [
         {
           "name": "agenterm",
@@ -269,7 +269,7 @@
     {
       "os": "macos",
       "arch": "x86_64",
-      "package": "tar.gz",
+      "package": "zip",
       "executables": [
         {
           "name": "agenterm",
