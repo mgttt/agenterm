@@ -26,6 +26,95 @@ inspiration here.
 Promotion path: idea in this file → owning PRD module (required) → engineering
 may reflect accepted scope in the **current** `plan/plan-v*.md` separately.
 
+## Executive synthesis (read this first)
+
+One-page orientation distilled from product-owner conversations. Details live
+in the mind tree, lanes, and owning PRD modules below.
+
+### What AgenTerm is
+
+**Local agent and process fleet work OS** — not “another terminal.”
+
+- **Tree** = org chart for parallel daily work (programs, agents, chores).
+- **Terminal viewport** = observe output; not the primary typing surface.
+- **Composer** = external input per tab (draft → Send).
+- **`agenterm-server`** = single authority for tree, PTYs, events, persistence.
+- **Clients** = GUI, CLI, mux, script, MCP, (later) mobile — same contract.
+
+North star:
+
+> Organize many long-lived workers on one machine; intervene without losing
+> context; prove what happened — for programmers, sysadmins, creators, and
+> office workers alike.
+
+### Why it exists
+
+Tabby, ConEmu, Warp, and OS terminals optimize **single-session UX** or
+**chat-in-buffer**. They flatten tabs, erase context on exit, and make
+automation guess with sleeps.
+
+AgenTerm optimizes **fleet durability and verifiable control**:
+
+- process exit does not remove the tab;
+- close window does not kill the fleet (detach-first);
+- stable `@id`, snapshots, waits, receipts — not timer soup;
+- bounded tmux/RMUX via `agenterm-mux` — compatibility, not identity.
+
+### Adjacent hype (shadows, not copies)
+
+| Trend | AgenTerm angle |
+|-------|----------------|
+| Cowork / workbuddy | Shared **local** fleet + Composer, not cloud cowork room |
+| OPC | One human commands a **tree of roles** on one PC |
+| pm2 / tmux / RMUX | Headless **server + mux** as fleet/process manager — honest subset today |
+| Mobile “buddy” | **Connector** to desktop fleet — monitor, push, voice → Composer |
+| dApp / libp2p / IPFS | Optional **`agenterm-net`** sidecar — on-demand, not in GUI |
+
+### Where we are now
+
+**Infrastructure phase (W0 → W1, edging W2):**
+
+- Shipped direction: tree, Composer, remain-on-exit, detach, server/GUI split,
+  CLI/script/mux foundations, Observable Fleet, script runtime v0.1.9 slice.
+- Still hardening: typed operations, receipts, control-plane completeness,
+  MCP read-only bridge (engineering on v0.1.10 plan).
+- **Not** current work: workflow market, mobile store release, libp2p node,
+  plugin marketplace, persona templates — captured as `[idea]` below.
+
+### Roadmap waves (product sequence, not calendar)
+
+```text
+W0  Foundation     tree · Composer · durable tabs · server authority
+W1  Control        CLI · script · mux · waits · receipts
+W2  Agent bridge   MCP read-only → governed tools
+W3  Orchestration  workflows · cross-agent handoff
+W4  Extensions     softmgr · signed packages · plugin market
+W5  Intelligence   feeds (news, supply/demand) → fleet actions
+W6  Reach          mobile connector · push · voice Composer
+W7  Federation     remote attach · security model
+W8  Decentralized  agenterm-net · libp2p/IPFS · verifiable exchange
+```
+
+Horizontal **persona packs** (dev / ops / creator / office) land on W1–W2 via
+templates — one binary, not four products.
+
+### Document roles (do not mix)
+
+| You edit (product vision) | Engineering edits (version execution) |
+|---------------------------|----------------------------------------|
+| `PRD.md`, `prd/PRD_*.md`, this file | `plan/plan-v0.1.10.md` (active track) |
+| Inspiration, mind tree, lanes | Build order, gates, delivery evidence |
+
+### What we refuse to become
+
+- Chat app, media reader, or hosted cowork SaaS.
+- Full tmux clone while single-pane tabs remain shipped truth.
+- Always-on p2p full node by default.
+- Separate Office/Creator SKUs.
+- Silent network downloads from GUI startup.
+
+When lost: return to **ORG → OBS → INT → DUR → AUTO** before adding features.
+
 ## How to use this document
 
 1. **Capture** — add a short idea card under the right lane (template below).
