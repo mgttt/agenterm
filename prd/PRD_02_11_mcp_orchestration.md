@@ -42,7 +42,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       stateless discovery or experimental tasks are not advertised; the
       offline Rust catalog now freezes this revision while transport
       negotiation remains pending
-    - [~] support only initialize/initialized, ping, resources list/read,
+    - [x] support only initialize/initialized, ping, resources list/read,
       tools list/call for the single wait tool, and cancellation; stdout is
       newline-delimited UTF-8 JSON-RPC only and bounded diagnostics use stderr
       - [x] `initialize`, `notifications/initialized`, and `ping` now enforce
@@ -50,9 +50,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
         initialization, malformed JSON, invalid requests, unknown methods,
         oversized frames, notification response suppression, and EOF shutdown
         have typed coverage
-      - [ ] resources, tools, wait cancellation, concurrency and backend
-        selection remain unimplemented and therefore absent from negotiated
-        server capabilities
+      - [x] negotiated capabilities now include the four metadata resources
+        and exactly one tool; tool work runs outside the input loop, has an
+        eight-waiter ceiling, and accepts standard cancellation notifications
     - [ ] the ordinary AgenTerm GUI adds no MCP panel, connection animation,
       approval surface, or startup work in this read-only delivery
   - Executable and discovery
@@ -63,7 +63,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       - [x] the dependency-free Rust entry point and offline catalog are
         implemented, unit-tested, included in the artifact manifest and
         cross-platform build lists, and deliberately mark protocol methods,
-        resources, and `agenterm_wait` as `planned` until their handlers ship
+        resources and `agenterm_wait` with shipped method/tool availability
     - [~] `agenterm-mcp.exe serve --stdio` is the only first-delivery MCP
       transport; initialization negotiates a supported protocol version and
       publishes stable server identity without opening a network listener
@@ -105,24 +105,34 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
         terminal title, working context/cwd, proxy, Composer, and pane content
         keys do not enter MCP resources
   - Bounded wait
-    - [ ] `tools/list` exposes only one read-only `agenterm_wait` tool in
+    - [x] `tools/list` exposes only one read-only `agenterm_wait` tool in
       the first delivery; no create, send, close, script, process, or
       filesystem tool is advertised
-    - [ ] `agenterm_wait` accepts a snapshot epoch/sequence, one allowlisted
+    - [~] `agenterm_wait` accepts a snapshot epoch/sequence, one allowlisted
       predicate, and a bounded `timeout_ms`; success returns the matching
       event and new position, while restart, journal gap, cancellation, and
       deadline expiry remain distinct typed results
-    - [ ] client disconnect, cancellation, or timeout releases capacity
+      - [x] the implementation validates epoch, sequence, stable optional tab
+        ID, event-kind allowlist, timeout, unknown fields, duplicate request
+        IDs, and concurrency before allocating a waiter
+      - [x] live read-only evidence against server 48815 proves a concurrent
+        ping completes before a waiting call, and timeout/cancellation return
+        distinct structured outcomes without stderr diagnostics
+      - [ ] matched-event causality, restart, journal-gap, future-sequence and
+        target-close behavior still need isolated public black-box evidence
+    - [~] client disconnect, cancellation, or timeout releases capacity
       within a bounded grace period and cannot block the GUI IPC loop or
       another MCP client
+      - [x] cancellation during real bounded IPC polling has deterministic
+        unit coverage; EOF cancels and joins all active waiter workers
+      - [ ] waiter-ceiling recovery and killed-client orphan checks remain
   - Offline catalog invariants
     - [x] catalog schema v1 publishes one `stdio` transport, the stable
       `2025-11-25` protocol revision, four metadata-only resources, exactly one
       read-only `agenterm_wait` tool, hard frame/concurrency/wait/error limits,
       and explicit deferred roles
     - [x] unit tests reject duplicate method/resource/tool identities and prove
-      the current implementation slice does not overclaim planned handlers as
-      shipped
+      the current implementation slice reports exact shipped handlers
   - Failure isolation and deferred roles
     - [ ] malformed JSON-RPC, oversized frames, a killed or hung sidecar,
       backend disconnect, and wait exhaustion cannot stall terminal output,

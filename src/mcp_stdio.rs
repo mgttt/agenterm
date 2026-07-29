@@ -1,4 +1,13 @@
-use std::io::{self, BufRead, Write};
+use std::{
+    collections::HashMap,
+    io::{self, BufRead, Write},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
+    thread,
+};
 
 use serde_json::{Value, json};
 
@@ -27,26 +36,66 @@ enum BoundedLine {
     Oversized,
 }
 
+enum ServerEvent {
+    Input(BoundedLine),
+    InputError(io::Error),
+    WaitComplete {
+        key: String,
+        id: Value,
+        result: Result<Value, mcp_fleet::McpFleetError>,
+    },
+}
+
+struct ActiveWait {
+    cancelled: Arc<AtomicBool>,
+    worker: thread::JoinHandle<()>,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct McpStdioConfig {
     pub address: Option<String>,
 }
 
-pub fn serve_stdio<R: BufRead, W: Write>(input: R, output: W) -> io::Result<()> {
+pub fn serve_stdio<R: BufRead + Send + 'static, W: Write>(input: R, output: W) -> io::Result<()> {
     serve_stdio_with_config(input, output, McpStdioConfig::default())
 }
 
-pub fn serve_stdio_with_config<R: BufRead, W: Write>(
-    mut input: R,
+pub fn serve_stdio_with_config<R: BufRead + Send + 'static, W: Write>(
+    input: R,
     mut output: W,
     config: McpStdioConfig,
 ) -> io::Result<()> {
     let limit = capabilities().limits.frame_bytes as usize;
+    let (sender, receiver) = mpsc::channel();
+    let reader = thread::spawn({
+        let sender = sender.clone();
+        move || read_input(input, limit, sender)
+    });
     let mut state = SessionState::New;
+    let mut active = HashMap::<String, ActiveWait>::new();
     loop {
-        let line = match read_bounded_line(&mut input, limit)? {
-            BoundedLine::Eof => return Ok(()),
-            BoundedLine::Oversized => {
+        match receiver.recv() {
+            Ok(ServerEvent::Input(BoundedLine::Eof)) | Err(_) => {
+                for wait in active.values() {
+                    wait.cancelled.store(true, Ordering::Release);
+                }
+                for (_, wait) in active {
+                    let _ = wait.worker.join();
+                }
+                let _ = reader.join();
+                return Ok(());
+            }
+            Ok(ServerEvent::InputError(error)) => {
+                for wait in active.values() {
+                    wait.cancelled.store(true, Ordering::Release);
+                }
+                for (_, wait) in active {
+                    let _ = wait.worker.join();
+                }
+                let _ = reader.join();
+                return Err(error);
+            }
+            Ok(ServerEvent::Input(BoundedLine::Oversized)) => {
                 write_message(
                     &mut output,
                     &error_response(
@@ -56,41 +105,310 @@ pub fn serve_stdio_with_config<R: BufRead, W: Write>(
                         Some(json!({"maximum_bytes": limit})),
                     ),
                 )?;
-                continue;
             }
-            BoundedLine::Line(line) => line,
-        };
-        if line.iter().all(u8::is_ascii_whitespace) {
-            write_message(
-                &mut output,
-                &error_response(
-                    Value::Null,
-                    ERROR_INVALID_REQUEST,
-                    "MCP message must not be empty",
-                    None,
-                ),
-            )?;
-            continue;
-        }
-        let message = match serde_json::from_slice::<Value>(&line) {
-            Ok(message) => message,
-            Err(error) => {
-                write_message(
-                    &mut output,
-                    &error_response(
-                        Value::Null,
-                        ERROR_PARSE,
-                        "Parse error",
-                        Some(json!({"detail": bounded_detail(&error.to_string())})),
-                    ),
-                )?;
-                continue;
+            Ok(ServerEvent::Input(BoundedLine::Line(line))) => {
+                let message = match decode_line(&line) {
+                    Ok(message) => message,
+                    Err(response) => {
+                        write_message(&mut output, &response)?;
+                        continue;
+                    }
+                };
+                if handle_cancel_notification(&message, &active) {
+                    continue;
+                }
+                if state == SessionState::Ready && is_tool_call(&message) {
+                    match start_wait(
+                        &message,
+                        &config,
+                        &sender,
+                        &mut active,
+                        capabilities().limits.waiter_concurrency as usize,
+                    ) {
+                        Ok(()) => {}
+                        Err(response) => write_message(&mut output, &response)?,
+                    }
+                    continue;
+                }
+                if let Some(response) = process_message(message, &mut state, &config) {
+                    write_message(&mut output, &response)?;
+                }
             }
-        };
-        if let Some(response) = process_message(message, &mut state, &config) {
-            write_message(&mut output, &response)?;
+            Ok(ServerEvent::WaitComplete { key, id, result }) => {
+                let Some(wait) = active.remove(&key) else {
+                    continue;
+                };
+                let _ = wait.worker.join();
+                let response = match result {
+                    Ok(result) => {
+                        let is_error = result["outcome"].as_str() != Some("matched");
+                        success_response(
+                            id,
+                            json!({
+                                "content": [{
+                                    "type": "text",
+                                    "text": serde_json::to_string(&result)
+                                        .expect("wait result serializes")
+                                }],
+                                "structuredContent": result,
+                                "isError": is_error
+                            }),
+                        )
+                    }
+                    Err(error) => error_response(id, error.code, error.message, Some(error.data)),
+                };
+                write_message(&mut output, &response)?;
+            }
         }
     }
+}
+
+fn read_input<R: BufRead>(mut input: R, limit: usize, sender: mpsc::Sender<ServerEvent>) {
+    loop {
+        match read_bounded_line(&mut input, limit) {
+            Ok(line) => {
+                let eof = matches!(line, BoundedLine::Eof);
+                if sender.send(ServerEvent::Input(line)).is_err() || eof {
+                    return;
+                }
+            }
+            Err(error) => {
+                let _ = sender.send(ServerEvent::InputError(error));
+                return;
+            }
+        }
+    }
+}
+
+fn decode_line(line: &[u8]) -> Result<Value, Value> {
+    if line.iter().all(u8::is_ascii_whitespace) {
+        return Err(error_response(
+            Value::Null,
+            ERROR_INVALID_REQUEST,
+            "MCP message must not be empty",
+            None,
+        ));
+    }
+    serde_json::from_slice::<Value>(line).map_err(|error| {
+        error_response(
+            Value::Null,
+            ERROR_PARSE,
+            "Parse error",
+            Some(json!({"detail": bounded_detail(&error.to_string())})),
+        )
+    })
+}
+
+fn handle_cancel_notification(message: &Value, active: &HashMap<String, ActiveWait>) -> bool {
+    let Some(object) = message.as_object() else {
+        return false;
+    };
+    if object.get("method").and_then(Value::as_str) != Some("notifications/cancelled")
+        || object.get("id").is_some()
+    {
+        return false;
+    }
+    if let Some(request_id) = object
+        .get("params")
+        .and_then(Value::as_object)
+        .and_then(|params| params.get("requestId"))
+        .filter(|id| valid_request_id(id))
+        && let Some(wait) = active.get(&request_id_key(request_id))
+    {
+        wait.cancelled.store(true, Ordering::Release);
+    }
+    true
+}
+
+fn is_tool_call(message: &Value) -> bool {
+    message
+        .as_object()
+        .and_then(|object| object.get("method"))
+        .and_then(Value::as_str)
+        == Some("tools/call")
+}
+
+fn start_wait(
+    message: &Value,
+    config: &McpStdioConfig,
+    sender: &mpsc::Sender<ServerEvent>,
+    active: &mut HashMap<String, ActiveWait>,
+    maximum_waiters: usize,
+) -> Result<(), Value> {
+    let object = message.as_object().ok_or_else(|| {
+        error_response(
+            Value::Null,
+            ERROR_INVALID_REQUEST,
+            "Invalid JSON-RPC request",
+            None,
+        )
+    })?;
+    let Some(id) = object.get("id").cloned() else {
+        return Ok(());
+    };
+    if object.get("jsonrpc").and_then(Value::as_str) != Some(JSON_RPC_VERSION)
+        || !valid_request_id(&id)
+    {
+        return Err(error_response(
+            Value::Null,
+            ERROR_INVALID_REQUEST,
+            "Invalid JSON-RPC request",
+            None,
+        ));
+    }
+    let key = request_id_key(&id);
+    if active.contains_key(&key) {
+        return Err(error_response(
+            id,
+            ERROR_INVALID_REQUEST,
+            "A request with this id is already active",
+            None,
+        ));
+    }
+    if active.len() >= maximum_waiters {
+        return Err(error_response(
+            id,
+            -32003,
+            "MCP waiter capacity is exhausted",
+            Some(json!({"maximum_waiters": maximum_waiters})),
+        ));
+    }
+    let Some(params) = object.get("params").and_then(Value::as_object) else {
+        return Err(error_response(
+            id,
+            ERROR_INVALID_PARAMS,
+            "tools/call params must be an object",
+            None,
+        ));
+    };
+    if params.get("name").and_then(Value::as_str) != Some("agenterm_wait") {
+        return Err(error_response(
+            id,
+            ERROR_INVALID_PARAMS,
+            "Unknown tool",
+            Some(json!({"name": params.get("name")})),
+        ));
+    }
+    let arguments = params
+        .get("arguments")
+        .and_then(Value::as_object)
+        .ok_or_else(|| {
+            error_response(
+                id.clone(),
+                ERROR_INVALID_PARAMS,
+                "agenterm_wait arguments must be an object",
+                None,
+            )
+        })?;
+    let allowed = [
+        "epoch",
+        "after_sequence",
+        "event_kind",
+        "tab_id",
+        "timeout_ms",
+    ];
+    if arguments.keys().any(|key| !allowed.contains(&key.as_str())) {
+        return Err(error_response(
+            id,
+            ERROR_INVALID_PARAMS,
+            "agenterm_wait contains an unknown argument",
+            None,
+        ));
+    }
+    let epoch = arguments
+        .get("epoch")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty() && value.len() <= 256)
+        .ok_or_else(|| {
+            error_response(
+                id.clone(),
+                ERROR_INVALID_PARAMS,
+                "agenterm_wait requires a bounded epoch",
+                None,
+            )
+        })?;
+    let after_sequence = arguments
+        .get("after_sequence")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| {
+            error_response(
+                id.clone(),
+                ERROR_INVALID_PARAMS,
+                "agenterm_wait requires after_sequence",
+                None,
+            )
+        })?;
+    let event_kind = arguments
+        .get("event_kind")
+        .and_then(Value::as_str)
+        .filter(|kind| mcp_fleet::WAIT_EVENT_KINDS.contains(kind))
+        .ok_or_else(|| {
+            error_response(
+                id.clone(),
+                ERROR_INVALID_PARAMS,
+                "agenterm_wait event_kind is not allowlisted",
+                Some(json!({"allowed": mcp_fleet::WAIT_EVENT_KINDS})),
+            )
+        })?;
+    let tab_id = match arguments.get("tab_id") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(value)) if valid_tab_id(value) => Some(value.clone()),
+        _ => {
+            return Err(error_response(
+                id,
+                ERROR_INVALID_PARAMS,
+                "agenterm_wait tab_id must be a stable @ID",
+                None,
+            ));
+        }
+    };
+    let timeout_ms = arguments
+        .get("timeout_ms")
+        .and_then(Value::as_u64)
+        .filter(|value| {
+            *value >= 1 && *value <= u64::from(capabilities().limits.wait_timeout_ms_maximum)
+        })
+        .ok_or_else(|| {
+            error_response(
+                id.clone(),
+                ERROR_INVALID_PARAMS,
+                "agenterm_wait timeout_ms is outside the published limit",
+                None,
+            )
+        })?;
+    let request = mcp_fleet::McpWaitRequest {
+        epoch: epoch.to_owned(),
+        after_sequence,
+        event_kind: event_kind.to_owned(),
+        tab_id,
+        timeout_ms,
+    };
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let worker_cancelled = Arc::clone(&cancelled);
+    let worker_sender = sender.clone();
+    let worker_key = key.clone();
+    let worker_id = id.clone();
+    let address = config.address.clone();
+    let worker = thread::spawn(move || {
+        let result = mcp_fleet::wait_event(address.as_deref(), request, worker_cancelled);
+        let _ = worker_sender.send(ServerEvent::WaitComplete {
+            key: worker_key,
+            id: worker_id,
+            result,
+        });
+    });
+    active.insert(key, ActiveWait { cancelled, worker });
+    Ok(())
+}
+
+fn request_id_key(id: &Value) -> String {
+    serde_json::to_string(id).expect("valid request id serializes")
+}
+
+fn valid_tab_id(value: &str) -> bool {
+    value.strip_prefix('@').is_some_and(|digits| {
+        !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit())
+    })
 }
 
 fn process_message(
@@ -171,6 +489,9 @@ fn process_message(
                         "resources": {
                             "subscribe": false,
                             "listChanged": false
+                        },
+                        "tools": {
+                            "listChanged": false
                         }
                     },
                     "serverInfo": {
@@ -179,7 +500,7 @@ fn process_message(
                         "version": env!("CARGO_PKG_VERSION"),
                         "description": "Read-only AgenTerm Fleet bridge"
                     },
-                    "instructions": "This implementation slice supports lifecycle and ping only."
+                    "instructions": "Read metadata-safe Fleet resources or use agenterm_wait for one bounded, cancellable event wait."
                 }),
             ))
         }
@@ -252,6 +573,59 @@ fn process_message(
                 )),
             }
         }
+        "tools/list" => Some(success_response(
+            response_id,
+            json!({
+                "tools": [{
+                    "name": "agenterm_wait",
+                    "title": "Wait for an AgenTerm Fleet event",
+                    "description": "Read-only bounded wait from a verified epoch and sequence.",
+                    "inputSchema": {
+                        "$schema": "https://json-schema.org/draft/2020-12/schema",
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                            "epoch": {"type": "string", "minLength": 1, "maxLength": 256},
+                            "after_sequence": {"type": "integer", "minimum": 0},
+                            "event_kind": {
+                                "type": "string",
+                                "enum": mcp_fleet::WAIT_EVENT_KINDS
+                            },
+                            "tab_id": {"type": ["string", "null"], "pattern": "^@[0-9]+$"},
+                            "timeout_ms": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": capabilities().limits.wait_timeout_ms_maximum
+                            }
+                        },
+                        "required": ["epoch", "after_sequence", "event_kind", "timeout_ms"]
+                    },
+                    "outputSchema": {
+                        "$schema": "https://json-schema.org/draft/2020-12/schema",
+                        "type": "object",
+                        "properties": {
+                            "schema_id": {"type": "string"},
+                            "outcome": {
+                                "type": "string",
+                                "enum": [
+                                    "matched", "timeout", "cancelled", "server_restart",
+                                    "journal_gap", "future_sequence", "target_closed",
+                                    "event_read_failed"
+                                ]
+                            },
+                            "position": {"type": "object"}
+                        },
+                        "required": ["schema_id", "outcome", "position"]
+                    },
+                    "annotations": {
+                        "readOnlyHint": true,
+                        "destructiveHint": false,
+                        "idempotentHint": false,
+                        "openWorldHint": false
+                    }
+                }]
+            }),
+        )),
         _ => Some(error_response(
             response_id,
             ERROR_METHOD_NOT_FOUND,
@@ -359,7 +733,11 @@ mod tests {
 
     fn exchange(input: &str) -> Vec<Value> {
         let mut output = Vec::new();
-        serve_stdio(BufReader::new(Cursor::new(input.as_bytes())), &mut output).unwrap();
+        serve_stdio(
+            BufReader::new(Cursor::new(input.as_bytes().to_vec())),
+            &mut output,
+        )
+        .unwrap();
         String::from_utf8(output)
             .unwrap()
             .lines()
@@ -384,7 +762,10 @@ mod tests {
         );
         assert_eq!(
             responses[0]["result"]["capabilities"],
-            json!({"resources": {"subscribe": false, "listChanged": false}})
+            json!({
+                "resources": {"subscribe": false, "listChanged": false},
+                "tools": {"listChanged": false}
+            })
         );
         assert_eq!(responses[1], success_response(json!("ping-1"), json!({})));
     }
@@ -401,6 +782,19 @@ mod tests {
             responses[0]["result"]["protocolVersion"],
             MCP_PROTOCOL_REVISION
         );
+        assert_eq!(responses[1]["error"]["code"], ERROR_NOT_INITIALIZED);
+    }
+
+    #[test]
+    fn wait_tool_cannot_start_before_initialized_notification() {
+        let responses = exchange(concat!(
+            "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":",
+            "{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{},",
+            "\"clientInfo\":{\"name\":\"fixture\",\"version\":\"1\"}}}\n",
+            "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":",
+            "{\"name\":\"agenterm_wait\",\"arguments\":{\"epoch\":\"e\",",
+            "\"after_sequence\":0,\"event_kind\":\"tab.selected\",\"timeout_ms\":10}}}\n"
+        ));
         assert_eq!(responses[1]["error"]["code"], ERROR_NOT_INITIALIZED);
     }
 
@@ -423,6 +817,25 @@ mod tests {
             4
         );
         assert_eq!(responses[2]["error"]["code"], -32002);
+    }
+
+    #[test]
+    fn ready_session_lists_one_bounded_read_only_wait_tool() {
+        let responses = exchange(concat!(
+            "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":",
+            "{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{},",
+            "\"clientInfo\":{\"name\":\"fixture\",\"version\":\"1\"}}}\n",
+            "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n",
+            "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}\n"
+        ));
+        let tools = responses[1]["result"]["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["name"], "agenterm_wait");
+        assert_eq!(tools[0]["annotations"]["readOnlyHint"], true);
+        assert_eq!(
+            tools[0]["inputSchema"]["properties"]["timeout_ms"]["maximum"],
+            capabilities().limits.wait_timeout_ms_maximum
+        );
     }
 
     #[test]

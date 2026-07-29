@@ -20,7 +20,8 @@ fn public_stdio_lifecycle_keeps_stdout_machine_only() {
         "\"clientInfo\":{\"name\":\"black-box\",\"version\":\"1\"}}}\n",
         "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n",
         "{\"jsonrpc\":\"2.0\",\"id\":\"ping\",\"method\":\"ping\"}\n",
-        "{\"jsonrpc\":\"2.0\",\"id\":\"resources\",\"method\":\"resources/list\"}\n"
+        "{\"jsonrpc\":\"2.0\",\"id\":\"resources\",\"method\":\"resources/list\"}\n",
+        "{\"jsonrpc\":\"2.0\",\"id\":\"tools\",\"method\":\"tools/list\"}\n"
     );
     child
         .stdin
@@ -40,13 +41,16 @@ fn public_stdio_lifecycle_keeps_stdout_machine_only() {
         .lines()
         .map(|line| serde_json::from_str::<Value>(line).expect("stdout line is JSON-RPC"))
         .collect::<Vec<_>>();
-    assert_eq!(responses.len(), 3);
+    assert_eq!(responses.len(), 4);
     assert_eq!(responses[0]["jsonrpc"], "2.0");
     assert_eq!(responses[0]["id"], 1);
     assert_eq!(responses[0]["result"]["protocolVersion"], "2025-11-25");
     assert_eq!(
         responses[0]["result"]["capabilities"],
-        json!({"resources": {"subscribe": false, "listChanged": false}})
+        json!({
+            "resources": {"subscribe": false, "listChanged": false},
+            "tools": {"listChanged": false}
+        })
     );
     assert_eq!(
         responses[1],
@@ -87,4 +91,10 @@ fn public_stdio_lifecycle_keeps_stdout_machine_only() {
             })
         ]
     );
+    let tools = responses[3]["result"]["tools"]
+        .as_array()
+        .expect("tool list");
+    assert_eq!(tools.len(), 1);
+    assert_eq!(tools[0]["name"], "agenterm_wait");
+    assert_eq!(tools[0]["annotations"]["readOnlyHint"], true);
 }

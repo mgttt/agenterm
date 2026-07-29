@@ -87,9 +87,9 @@ pub fn capabilities() -> McpCapabilities {
             ("ping", McpAvailability::Shipped),
             ("resources/list", McpAvailability::Shipped),
             ("resources/read", McpAvailability::Shipped),
-            ("tools/list", McpAvailability::Planned),
-            ("tools/call", McpAvailability::Planned),
-            ("notifications/cancelled", McpAvailability::Planned),
+            ("tools/list", McpAvailability::Shipped),
+            ("tools/call", McpAvailability::Shipped),
+            ("notifications/cancelled", McpAvailability::Shipped),
         ]
         .into_iter()
         .map(|(name, availability)| McpMethod { name, availability })
@@ -128,7 +128,7 @@ pub fn capabilities() -> McpCapabilities {
             stable_id: "fleet.wait",
             name: "agenterm_wait",
             schema_id: "agenterm.mcp.tool.wait.v1",
-            availability: McpAvailability::Planned,
+            availability: McpAvailability::Shipped,
             read_only: true,
         }],
         limits: McpLimits {
@@ -215,7 +215,7 @@ pub fn run_mcp_entry_with_args(arguments: Vec<String>) -> i32 {
 
 fn serve_mcp_stdio(address: Option<String>) -> i32 {
     match crate::mcp_stdio::serve_stdio_with_config(
-        std::io::BufReader::new(std::io::stdin().lock()),
+        std::io::BufReader::new(std::io::stdin()),
         std::io::stdout().lock(),
         crate::mcp_stdio::McpStdioConfig { address },
     ) {
@@ -237,8 +237,8 @@ fn print_help() {
            agenterm-mcp capabilities --json\n\
            agenterm-mcp [--address HOST:PORT] serve --stdio\n\
          \n\
-         The stdio lifecycle and ping are shipped in this implementation slice.\n\
-         Fleet resources and the wait tool remain cataloged as planned.\n\
+         The stdio lifecycle, metadata-safe Fleet resources, and one bounded\n\
+         read-only wait tool are shipped in this implementation slice.\n\
          No network listener or mutation tool is available."
     );
 }
@@ -320,7 +320,10 @@ mod tests {
                 "notifications/initialized",
                 "ping",
                 "resources/list",
-                "resources/read"
+                "resources/read",
+                "tools/list",
+                "tools/call",
+                "notifications/cancelled"
             ]
         );
         assert!(
@@ -329,7 +332,7 @@ mod tests {
                 .iter()
                 .all(|resource| resource.availability == McpAvailability::Shipped)
         );
-        assert_eq!(catalog.tools[0].availability, McpAvailability::Planned);
+        assert_eq!(catalog.tools[0].availability, McpAvailability::Shipped);
         assert!(
             catalog
                 .unavailable_roles
