@@ -128,8 +128,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     until each owning smoke journey migrates
   - [x] qualification extracts evidence IDs actually emitted by the current
     gate, rejects duplicates or mismatch with its versioned manifest, and has
-    fail-closed tests for failed/skipped gates; a clean, stress-inclusive run
-    emits the one integrated receipt consumed by packaging
+    fail-closed tests for failed/skipped gates; executable Rhai declaration
+    discovery follows the artifact build on a clean checkout and still
+    precedes every smoke. A clean, stress-inclusive run emits the one
+    integrated receipt consumed by packaging
   - [~] startup and working-context now use the shared harness with dynamic
     isolation, no-activate, owned cleanup, and registered evidence.
     Working-context additionally scrubs fixture proxy credentials from command

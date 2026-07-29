@@ -86,6 +86,34 @@ Assert-Rejected -Pattern 'requires the explicit stress gate' -Action {
     Assert-AgenTermQualificationResults -Context $noStressContext
 }
 
+$checkSource = Get-Content -LiteralPath (Join-Path $root 'check.ps1') -Raw
+$artifactBuildOffset = $checkSource.IndexOf(
+    "Invoke-Checked -Id 'artifact-build'",
+    [StringComparison]::Ordinal
+)
+$taskCatalogOffset = $checkSource.IndexOf(
+    "Invoke-Checked -Id 'task-catalog'",
+    [StringComparison]::Ordinal
+)
+$declarationOffset = $checkSource.IndexOf(
+    'Assert-AgenTermQualificationDeclarations -Context',
+    [StringComparison]::Ordinal
+)
+$firstSmokeOffset = $checkSource.IndexOf(
+    "Invoke-Checked -Id 'startup-smoke'",
+    [StringComparison]::Ordinal
+)
+if ($artifactBuildOffset -lt 0 -or $taskCatalogOffset -lt 0 -or
+    $declarationOffset -lt 0 -or $firstSmokeOffset -lt 0 -or
+    $artifactBuildOffset -ge $declarationOffset -or
+    $taskCatalogOffset -ge $declarationOffset -or
+    $declarationOffset -ge $firstSmokeOffset) {
+    throw (
+        'Executable qualification declaration discovery must follow the ' +
+        'artifact/task build and precede every smoke.'
+    )
+}
+
 $scratch = Join-Path $root (
     'target\qualification\selftest-' + [Guid]::NewGuid().ToString('N')
 )

@@ -206,25 +206,6 @@ try {
         -ManifestPath $qualificationManifestPath `
         -Release ([bool]$Release) `
         -StressIncluded ([bool]$IncludeStress)
-    $declarationWatch = [Diagnostics.Stopwatch]::StartNew()
-    Assert-AgenTermQualificationDeclarations -Context $qualification `
-        -SuiteScripts @{
-            'cli-smoke' = '.\tests\cli_smoke.ps1'
-            'server-smoke' = '.\tests\server_smoke.ps1'
-            'remote-ui-smoke' = '.\tests\remote_ui_smoke.ps1'
-            'remote-ui-upgrade-smoke' = '.\tests\remote_ui_upgrade_smoke.ps1'
-            'fleet-smoke' = '.\tests\fleet_smoke.ps1'
-            'script-smoke' = '.\tests\script_smoke.ps1'
-            'theme-smoke' = '.\tests\theme_smoke.ps1'
-            'working-context-smoke' = '.\scripts\rhai\working-context-smoke.rhai'
-            'workbench-smoke' = '.\tests\workbench_smoke.ps1'
-            'ux-smoke' = '.\tests\ux_smoke.ps1'
-        }
-    $declarationWatch.Stop()
-    Write-Host (
-        "Qualification declaration discovery " +
-        "($($declarationWatch.ElapsedMilliseconds) ms)"
-    )
     Invoke-Checked -Id 'preflight-selftest' `
         -Label 'read-only preflight self-test' {
         cargo test --quiet --locked --test rhai_migration `
@@ -315,6 +296,27 @@ try {
         & '.\dist\agenterm-script.exe' task check `
             --manifest '.\agenterm.tasks.json'
     }
+    # Rhai suites are executable declarations, so discovery must follow the
+    # artifact build on a clean checkout while remaining ahead of every smoke.
+    $declarationWatch = [Diagnostics.Stopwatch]::StartNew()
+    Assert-AgenTermQualificationDeclarations -Context $qualification `
+        -SuiteScripts @{
+            'cli-smoke' = '.\tests\cli_smoke.ps1'
+            'server-smoke' = '.\tests\server_smoke.ps1'
+            'remote-ui-smoke' = '.\tests\remote_ui_smoke.ps1'
+            'remote-ui-upgrade-smoke' = '.\tests\remote_ui_upgrade_smoke.ps1'
+            'fleet-smoke' = '.\tests\fleet_smoke.ps1'
+            'script-smoke' = '.\tests\script_smoke.ps1'
+            'theme-smoke' = '.\tests\theme_smoke.ps1'
+            'working-context-smoke' = '.\scripts\rhai\working-context-smoke.rhai'
+            'workbench-smoke' = '.\tests\workbench_smoke.ps1'
+            'ux-smoke' = '.\tests\ux_smoke.ps1'
+        }
+    $declarationWatch.Stop()
+    Write-Host (
+        "Qualification declaration discovery " +
+        "($($declarationWatch.ElapsedMilliseconds) ms)"
+    )
     Invoke-Checked -Id 'migration-audit' `
         -Label 'PowerShell migration ledger and no-new-PS1 gate' {
         & '.\dist\agenterm-script.exe' task run migration-audit `
