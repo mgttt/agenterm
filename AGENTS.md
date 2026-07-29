@@ -70,7 +70,7 @@ Use PowerShell from the repository root:
 .\lint.ps1              # fast fail: Rust, PowerShell, JSON, and production Rhai
 .\build.bat             # fast incremental dev build -> .\dist\
 .\build.bat release-fast # optimized incremental local-test build -> .\dist\
-.\check.ps1 -Quick      # static/PRD/fmt + library Clippy/tests; no artifact
+.\check.ps1 -Quick      # static/PRD/fmt + all-target Clippy + lib tests
 .\check.ps1 -SkipSmoke  # CI-grade fmt, all-target Clippy/tests, dev artifact
 .\check.ps1             # full public-interface regression
 .\check.ps1 -Release    # local release gate; skips event-journal load stress

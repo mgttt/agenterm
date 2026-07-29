@@ -74,9 +74,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] CLI and semantic UX smoke tests through public interfaces
 - [x] one-command fmt, Clippy, test, build, and smoke regression
 - [x] `check.ps1 -Quick` provides a non-qualifying development lane ordered
-  as static lint, formatting, PRD alignment, library Clippy, and library tests;
-  it performs no artifact build, packaging self-test, GUI launch, or release
-  claim
+  as static lint, formatting, PRD alignment, all-target Clippy, and library
+  tests; compiling every target under Clippy keeps integration-test lint equal
+  to CI while it still performs no artifact build, packaging self-test, GUI
+  launch, or release claim
 - [x] every quality-gate step reports its duration and successful integrated
   runs print the slowest gates; independent preflight fixtures and isolated
   GUI/script diagnostic probes run concurrently without sharing Cargo targets,

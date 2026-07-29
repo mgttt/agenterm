@@ -145,8 +145,8 @@ try {
         Invoke-QuickStep -Label 'development build identity' {
             Import-AgenTermDevelopmentBuildIdentity
         }
-        Invoke-QuickStep -Label 'library Clippy' {
-            cargo clippy --quiet --locked --lib -- -D warnings
+        Invoke-QuickStep -Label 'all-target Clippy' {
+            cargo clippy --quiet --locked --all-targets -- -D warnings
         }
         Invoke-QuickStep -Label 'library unit tests' {
             cargo test --quiet --locked --lib
