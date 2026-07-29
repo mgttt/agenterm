@@ -109,9 +109,13 @@ jobs:
         if: matrix.platform_id == 'windows-x86_64'
         shell: pwsh
         run: |
-          . ./scripts/artifact-manifest.ps1
-          $artifactSpec = Get-AgenTermArtifactManifest `
-            -Path ./scripts/artifacts.json
+          ./dist/agenterm-script.exe task run validate-artifact-manifest `
+            --manifest ./agenterm.tasks.json -- ./scripts/artifacts.json
+          if ($LASTEXITCODE -ne 0) {
+            throw "Artifact manifest validation failed with exit code $LASTEXITCODE."
+          }
+          $artifactSpec = Get-Content ./scripts/artifacts.json -Raw |
+            ConvertFrom-Json
           $version = $env:GITHUB_REF_NAME.TrimStart('v')
           $zip = "./dist/agenterm-$version-windows-x86_64.zip"
           $metadata = Get-Content ./dist/agenterm.json -Raw |

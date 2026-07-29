@@ -406,8 +406,9 @@ Migration ledger:
   explicit `inventory`/`deleted` state.
 - [x] the public `migration-audit` Rhai task compares the ledger with
   `git ls-files '*.ps1'`, rejects an unplanned script, a returned deleted
-  script, an unrecorded removal, duplicate paths, invalid states, and count
-  drift; ordinary and release qualification invoke it as a required gate.
+  script, an operational reference to a deleted script, an unrecorded removal,
+  duplicate paths, invalid states, and count drift; ordinary and release
+  qualification invoke it as a required gate.
 - [~] the repository-root `agenterm.tasks.json` is now the offline task
   catalog and ships thirteen ready tasks (`bootstrap-info`, `build-identity`,
   `migration-audit`, `target-report`, `internal-version-policy`,

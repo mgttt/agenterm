@@ -27,6 +27,7 @@
         "std.path.absolute",
         "std.path.join",
         "std.process.command",
+        "std.process.command-builder",
         "std.process.command-output",
         "std.time.system-time-now",
         "std.time.system-time-unix-millis",

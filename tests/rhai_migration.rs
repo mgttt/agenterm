@@ -203,6 +203,21 @@ fn run_stage_build(
     command.output().expect("run Rhai stage-build task")
 }
 
+fn run_migration_audit(repo_under_test: &Path) -> Output {
+    let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let manifest = repo.join("agenterm.tasks.json");
+    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+        .current_dir(repo)
+        .args(["task", "run", "migration-audit", "--manifest"])
+        .arg(manifest)
+        .args(["--timeout-ms", "10000", "--max-operations", "10000000"])
+        .arg("--")
+        .arg(repo_under_test)
+        .output()
+        .expect("run Rhai migration-audit task")
+}
+
 fn parse_batch_environment(path: &Path) -> Vec<(String, String)> {
     fs::read_to_string(path)
         .expect("read batch environment")
@@ -972,6 +987,74 @@ fn stage_build_task_composes_cleanup_staging_and_metadata() {
     fs::remove_dir_all(&repo).expect("remove Git fixture");
     fs::remove_dir_all(&source).expect("remove source fixture");
     fs::remove_dir_all(&destination).expect("remove destination fixture");
+}
+
+#[test]
+fn migration_audit_rejects_operational_references_to_deleted_scripts() {
+    let repo = init_git_fixture("migration-audit");
+    let source_repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let ledger_text = fs::read_to_string(
+        source_repo
+            .join("scripts")
+            .join("powershell-migration.json"),
+    )
+    .expect("read migration ledger");
+    let ledger: serde_json::Value =
+        serde_json::from_str(&ledger_text).expect("decode migration ledger");
+    fs::create_dir_all(repo.join("scripts")).expect("create fixture scripts");
+    fs::write(
+        repo.join("scripts").join("powershell-migration.json"),
+        ledger_text,
+    )
+    .expect("write fixture ledger");
+
+    for entry in ledger["entries"].as_array().expect("ledger entries") {
+        if entry["status"] == "inventory" {
+            let path = repo.join(entry["path"].as_str().expect("ledger path"));
+            fs::create_dir_all(path.parent().expect("inventory parent"))
+                .expect("create inventory parent");
+            fs::write(path, b"# inventory fixture\n").expect("write inventory fixture");
+        }
+    }
+    for name in ["build.bat", "check.ps1", "lint.ps1", "release.ps1"] {
+        let path = repo.join(name);
+        if !path.exists() {
+            fs::write(path, b"# operational fixture\n").expect("write operational fixture");
+        }
+    }
+    let workflow = repo.join(".github").join("workflows").join("release.yml");
+    fs::create_dir_all(workflow.parent().expect("workflow parent"))
+        .expect("create workflow parent");
+    fs::write(&workflow, b"run: ./scripts/artifact-manifest.ps1\n")
+        .expect("write stale workflow reference");
+    commit_git_fixture(&repo);
+
+    let rejected = run_migration_audit(&repo);
+    assert!(!rejected.status.success());
+    assert!(
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&rejected.stdout),
+            String::from_utf8_lossy(&rejected.stderr)
+        )
+        .contains("migration_deleted_ps1_reference:.github/workflows/release.yml")
+    );
+
+    fs::write(&workflow, b"run: agenterm-script task run package\n")
+        .expect("remove stale workflow reference");
+    let accepted = run_migration_audit(&repo);
+    assert!(
+        accepted.status.success(),
+        "clean fixture failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&accepted.stdout),
+        String::from_utf8_lossy(&accepted.stderr)
+    );
+    let report: serde_json::Value =
+        serde_json::from_slice(&accepted.stdout).expect("decode migration report");
+    assert_eq!(report["deleted_count"], 10);
+    assert_eq!(report["remaining_count"], 33);
+
+    fs::remove_dir_all(&repo).expect("remove migration fixture");
 }
 
 #[cfg(windows)]

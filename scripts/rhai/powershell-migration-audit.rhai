@@ -9,7 +9,12 @@ fn require(condition, message) {
     }
 }
 
-let repo = std::env::current_dir().display;
+require(args.len <= 1, "expected: [REPO]");
+let repo = if args.len == 1 {
+    std::path::absolute(args[0]).display
+} else {
+    std::env::current_dir().display
+};
 let ledger_path = std::path::join(
     repo,
     "scripts/powershell-migration.json"
@@ -21,6 +26,7 @@ require(ledger.entries.len == ledger.baseline_count, "migration_ledger_entry_cou
 
 let known = #{};
 let deleted = 0;
+let deleted_paths = [];
 for entry in ledger.entries {
     require(entry.id != "", "migration_ledger_empty_id");
     require(entry.path.ends_with(".ps1"), "migration_ledger_non_ps1_path");
@@ -32,11 +38,12 @@ for entry in ledger.entries {
     known[entry.path] = entry.status;
     if entry.status == "deleted" {
         deleted += 1;
+        deleted_paths.push(entry.path);
     }
 }
 
 let command = std::process::command("git");
-command.args(["ls-files", "--", "*.ps1"]);
+command.args(["-C", repo, "ls-files", "--", "*.ps1"]);
 command.timeout(std::time::Duration::from_secs(10));
 let output = command.output();
 require(output.success, output.error("migration-git-ls-files"));
@@ -56,6 +63,35 @@ for source_line in source.split("\n") {
 for entry in ledger.entries {
     if entry.status == "inventory" {
         require(current.contains(entry.path), "migration_unrecorded_removal: " + entry.path);
+    }
+}
+
+let deleted_patterns = "";
+for path in deleted_paths {
+    deleted_patterns += path + "\n";
+}
+let references = std::process::command("git");
+references.args([
+    "-C", repo, "grep", "-n", "-F", "-f", "-", "--",
+    ".github", "build.bat", "check.ps1", "lint.ps1", "release.ps1",
+    "scripts", "tests"
+]);
+references.stdin_text(deleted_patterns);
+references.timeout(std::time::Duration::from_secs(10));
+let reference_output = references.output();
+require(
+    reference_output.exit_code == 0 || reference_output.exit_code == 1,
+    reference_output.error("migration-git-grep-deleted-references")
+);
+if reference_output.exit_code == 0 {
+    for source_line in reference_output.stdout_text().split("\n") {
+        let line = source_line;
+        line.trim();
+        if line == ""
+                || line.starts_with("scripts/powershell-migration.json:") {
+            continue;
+        }
+        throw "migration_deleted_ps1_reference:" + line;
     }
 }
 
