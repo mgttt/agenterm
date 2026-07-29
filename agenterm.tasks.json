@@ -66,6 +66,14 @@
       "profile": "local",
       "cwd": ".",
       "args": ["docs"]
+    },
+    {
+      "id": "readme-examples",
+      "description": "Verify README artifact roles and public command examples against offline catalogs",
+      "entry": "scripts/rhai/readme-examples.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "args": ["dist"]
     }
   ]
 }
