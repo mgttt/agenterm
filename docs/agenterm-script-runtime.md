@@ -233,9 +233,12 @@ agenterm-script
 │  ├─ bytes::
 │  │  Construction helpers for the typed `Bytes` value.
 │  │  [partially shipped; stable namespace; designed 2026-07-28]
-│  │  └─ from_text(text)
-│  │     Encodes UTF-8 text into `Bytes`.
-│  │     [shipped; stable; designed 2026-07-28]
+│  │  ├─ from_text(text)
+│  │  │  Encodes UTF-8 text into `Bytes`.
+│  │  │  [shipped; stable; designed 2026-07-28]
+│  │  └─ from_array(values)
+│  │     Constructs arbitrary bytes from integer values in `0..255`.
+│  │     [shipped; stable; designed 2026-07-30]
 │  │
 │  ├─ crypto::
 │  │  Deterministic content digests for typed bytes and explicit files.
@@ -362,6 +365,9 @@ agenterm-script
 │  │  ├─ .current_dir(path) / .env(name, value)
 │  │  │  Configures child launch context.
 │  │  │  [shipped; stable; designed 2026-07-28]
+│  │  ├─ .stdin_text(text) / .stdin_bytes(bytes)
+│  │  │  Supplies UTF-8 or arbitrary binary stdin without shell recoding.
+│  │  │  [shipped; stable; designed 2026-07-28; extended 2026-07-30]
 │  │  ├─ .stdout_file(path)
 │  │  │  Truncates one explicit file and redirects the child's stdout to it.
 │  │  │  [shipped; stable; designed 2026-07-29]
@@ -845,8 +851,8 @@ is intentionally consumed later through typed file APIs.
 The shipped process defaults are a 2,000 ms child deadline and 64 KiB retained
 for each captured stream. A script MAY lower or raise them through
 `Command.timeout(Duration)` and `capture_limit(bytes)`, up to hard ceilings of
-60,000 ms and 256 KiB. Text stdin is limited to 256 KiB. This process ceiling
-is independent of the HTTP adapter's stricter 10,000 ms deadline.
+60,000 ms and 256 KiB. Text or binary stdin is limited to 256 KiB. This process
+ceiling is independent of the HTTP adapter's stricter 10,000 ms deadline.
 
 `std::process::id()` returns the current supervised Script worker PID, matching
 Rust's process-local interpretation. It supports collision-resistant

@@ -131,6 +131,7 @@ fn register_types(engine: &mut Engine) {
         command.clear_environment = true;
     });
     engine.register_fn("stdin_text", command_stdin_text);
+    engine.register_fn("stdin_bytes", command_stdin_bytes);
     engine.register_fn("stdout_file", command_stdout_file);
     engine.register_fn(
         "timeout",
@@ -685,6 +686,17 @@ fn command_stdin_text(command: &mut ScriptCommand, value: &str) -> Result<(), Bo
         return Err(format!("process_stdin_too_large: maximum is {MAX_STDIN_BYTES} bytes").into());
     }
     command.stdin = value.as_bytes().to_vec();
+    Ok(())
+}
+
+fn command_stdin_bytes(
+    command: &mut ScriptCommand,
+    value: ScriptBytes,
+) -> Result<(), Box<EvalAltResult>> {
+    if value.0.len() > MAX_STDIN_BYTES {
+        return Err(format!("process_stdin_too_large: maximum is {MAX_STDIN_BYTES} bytes").into());
+    }
+    command.stdin = value.0;
     Ok(())
 }
 
@@ -1743,6 +1755,20 @@ mod tests {
         assert_eq!(result["code"].as_int().unwrap(), 7);
         assert_eq!(result["stdout"].clone().into_string().unwrap(), "argv-safe");
         assert_eq!(result["stderr"].clone().into_string().unwrap(), "error");
+    }
+
+    #[test]
+    fn command_accepts_arbitrary_binary_stdin() {
+        let mut command = process_command("unused").unwrap();
+        command_stdin_bytes(&mut command, ScriptBytes(vec![0, 127, 128, 255])).unwrap();
+        assert_eq!(command.stdin, vec![0, 127, 128, 255]);
+        let oversized = ScriptBytes(vec![0; MAX_STDIN_BYTES + 1]);
+        assert!(
+            command_stdin_bytes(&mut command, oversized)
+                .unwrap_err()
+                .to_string()
+                .contains("process_stdin_too_large")
+        );
     }
 
     #[test]

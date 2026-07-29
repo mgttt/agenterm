@@ -781,11 +781,11 @@ pub fn entries() -> Vec<ScriptApiEntry> {
         shipped_local_entry(
             "std.process.command-builder",
             "system/process/command/builder",
-            "Command.arg/args/current_dir/env/env_remove/env_clear/stdin_text/stdout_file/timeout/capture_limit",
+            "Command.arg/args/current_dir/env/env_remove/env_clear/stdin_text/stdin_bytes/stdout_file/timeout/capture_limit",
             Some("std::process::Command"),
             RustMapping::Adapted,
-            "command.arg(value) / command.args(values) / command.current_dir(path) / command.env(name, value) / command.stdout_file(path)",
-            (&["mutable_builder", "bounded_text_stdin", "invocation_owned"], &["process_argument", "environment_name_invalid"]),
+            "command.arg(value) / command.args(values) / command.current_dir(path) / command.env(name, value) / command.stdin_text(text) / command.stdin_bytes(bytes) / command.stdout_file(path)",
+            (&["mutable_builder", "bounded_text_or_binary_stdin", "invocation_owned"], &["process_argument", "environment_name_invalid", "process_stdin_too_large"]),
         ),
         shipped_local_entry(
             "std.process.command-output",
@@ -990,6 +990,25 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             RustMapping::None,
             "rhai::bytes::from_text(text)",
             (NO_STRINGS, NO_STRINGS),
+        ),
+        shipped_local_entry_with_design(
+            shipped_local_entry(
+                "rhai.bytes.from-array",
+                "data/bytes/from-array",
+                "rhai::bytes::from_array",
+                None,
+                RustMapping::None,
+                "rhai::bytes::from_array(values)",
+                (
+                    &["arbitrary_byte_construction", "unsigned_byte_values"],
+                    &[
+                        "bytes_value_type",
+                        "bytes_value_range",
+                        "bytes_length_limit",
+                    ],
+                ),
+            ),
+            "2026-07-30",
         ),
         shipped_local_entry(
             "rhai.bytes.length",

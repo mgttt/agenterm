@@ -170,6 +170,7 @@ pub fn register_local(engine: &mut Engine) {
 
     let mut bytes = Module::new();
     bytes.set_native_fn("from_text", bytes_from_text);
+    bytes.set_native_fn("from_array", bytes_from_array);
 
     let mut crypto = Module::new();
     crypto.set_native_fn("sha256", crypto_sha256);
@@ -585,6 +586,20 @@ fn bytes_from_text(value: &str) -> Result<ScriptBytes, Box<EvalAltResult>> {
     Ok(ScriptBytes(value.as_bytes().to_vec()))
 }
 
+fn bytes_from_array(values: Array) -> Result<ScriptBytes, Box<EvalAltResult>> {
+    if values.len() > MAX_BYTES_VALUE_BYTES {
+        return Err(format!("bytes_length_limit: maximum is {MAX_BYTES_VALUE_BYTES} bytes").into());
+    }
+    let mut bytes = Vec::with_capacity(values.len());
+    for value in values {
+        let value = value
+            .try_cast::<rhai::INT>()
+            .ok_or("bytes_value_type: expected integer")?;
+        bytes.push(u8::try_from(value).map_err(|_| "bytes_value_range: expected 0..255")?);
+    }
+    Ok(ScriptBytes(bytes))
+}
+
 fn bytes_get(value: &mut ScriptBytes, index: rhai::INT) -> Result<rhai::INT, Box<EvalAltResult>> {
     let index = usize::try_from(index)
         .ok()
@@ -713,6 +728,24 @@ mod tests {
                 )
                 .unwrap(),
             "104:el:hello!"
+        );
+        assert_eq!(
+            engine
+                .eval::<String>(
+                    r#"
+                        let bytes = rhai::bytes::from_array([0, 127, 128, 255]);
+                        `${bytes.len}:${bytes.get(0)}:${bytes.get(3)}`
+                    "#,
+                )
+                .unwrap(),
+            "4:0:255"
+        );
+        assert!(
+            engine
+                .eval::<Dynamic>("rhai::bytes::from_array([256])")
+                .unwrap_err()
+                .to_string()
+                .contains("bytes_value_range")
         );
     }
 

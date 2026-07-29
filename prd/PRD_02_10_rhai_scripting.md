@@ -220,9 +220,10 @@ and it is not positioned as a restricted security plugin.
   accept deadlines. Accepted streams are restored to blocking I/O on every
   platform; the first repository journey uses it to replace the loopback HTTP
   PowerShell fixture with Rhai.
-- [x] typed `Bytes` supports unsigned byte lookup, owned slicing, and append,
-  allowing raw protocol fixtures to remain bytes-first without shell or
-  PowerShell escape hatches.
+- [x] typed `Bytes` supports construction from arbitrary integer byte arrays,
+  unsigned byte lookup, owned slicing, and append; `Command.stdin_bytes`
+  transmits those bytes without text recoding, allowing raw protocol fixtures
+  to remain bytes-first without shell or PowerShell escape hatches.
 - [x] invocation-owned `Child` values provide typed native top-level-window
   key, pointer, raw message, geometry, nonactivating resize, and child-control
   text/click operations on Windows. The API re-resolves the child's window and
