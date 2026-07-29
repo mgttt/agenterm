@@ -344,7 +344,7 @@ track remains planned, but every declared dependency must still pass.
   - [ ] public-ready does not authorize publication: creating or pushing the
     `v0.1.8` tag and creating a public GitHub Release require explicit user
     approval after the candidate and rehearsal gates pass
-- [~] M6 / v0.1.9 General Script Runtime
+- [x] M6 / v0.1.9 General Script Runtime
   - [x] deliver the cross-cutting stable-server/replaceable-GUI migration:
     internal `agenterm-server.exe` owns session/PTY truth, current
     `agenterm.exe` reconnects as a versioned UI client, and upgrade/rollback

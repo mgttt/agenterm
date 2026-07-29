@@ -123,7 +123,7 @@ run:
 
 The script runs the local release quality gate without the event-journal load
 test, then atomically pushes `main` plus the `v<version>` tag. GitHub Actions
-runs that stress coverage on a clean Windows runner before publishing all four
+runs that stress coverage on a clean Windows runner before publishing all five
 EXEs, metadata, ZIP, and generated notes to GitHub Releases.
 
 ## Documentation

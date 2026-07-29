@@ -13,7 +13,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] startup regression requires a main window within one second locally;
   `startup.first-window-async-ready` is emitted only after the native-window
   budget and the separately awaited asynchronous terminal-ready state pass
-- [x] version-tagged GitHub Release automation for all four EXEs, metadata,
+- [x] version-tagged GitHub Release automation for all five EXEs, metadata,
   and ZIP
 - [x] release automation publishes `agenterm-mux.exe` after its acceptance
   gate
@@ -142,7 +142,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   - [ ] public-ready status does not create release authority: creation or
     push of the `v0.1.9` tag and creation of a public GitHub Release occur only
     after the user explicitly approves publication
-- [x] artifact manifest schema 2 drives all four executable names, roles,
+- [x] artifact manifest schema 2 drives all five executable names, roles,
   PE subsystems, budgets, offline probes, staging metadata, and README checks;
   locked-artifact cleanup enumerates only exact manifest stems
 - [x] locked `cargo metadata` validates every resolved registry checksum and a

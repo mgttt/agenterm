@@ -484,8 +484,7 @@ impl TerminalTab {
 
     pub(super) fn scroll_viewport(&mut self, action: &str, count: Option<usize>) -> Result<usize> {
         let page = usize::from(self.last_size.0.saturating_sub(1)).max(1);
-        let screen = self.parser.screen_mut();
-        let current = screen.scrollback();
+        let current = self.parser.screen().scrollback();
         let requested = match action {
             "up" => current.saturating_add(count.unwrap_or(1)),
             "down" => current.saturating_sub(count.unwrap_or(1)),
@@ -498,8 +497,13 @@ impl TerminalTab {
                 "usage: scroll-pane [-t target] up|down|page-up|page-down|top|bottom [rows]"
             ),
         };
+        Ok(self.set_scrollback(requested))
+    }
+
+    pub(super) fn set_scrollback(&mut self, requested: usize) -> usize {
+        let screen = self.parser.screen_mut();
         screen.set_scrollback(requested);
-        Ok(screen.scrollback())
+        screen.scrollback()
     }
 
     pub(super) fn scrollback_bounds(&mut self) -> (usize, usize) {

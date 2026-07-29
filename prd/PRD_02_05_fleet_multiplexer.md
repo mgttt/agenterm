@@ -5,11 +5,10 @@ Parent: [AgenTerm product tree](../PRD.md#product-tree)
 Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
 - Architecture
-  - [x] thin console frontend over AgenTerm IPC; `agenterm.exe` remains the
-    only server and PTY/workspace owner
-    - [ ] v0.1.9 migration moves that authority to internal
-      `agenterm-server.exe`; mux continues to consume the same typed operations
-      and must not depend on GUI presence
+  - [x] thin console frontend over AgenTerm IPC; internal
+    `agenterm-server.exe` is the PTY/workspace authority, while the replaceable
+    `agenterm.exe` GUI is only a client. Mux consumes the same typed operations
+    and does not depend on GUI presence.
   - [x] automatically discovers the live AgenTerm instance from the tab
     environment, with explicit `--address` and `--session` overrides
   - [x] server bind, inherited addresses, and explicit client overrides are
