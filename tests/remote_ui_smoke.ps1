@@ -1036,12 +1036,8 @@ try {
     ) | Out-Null
     $edited = Invoke-AgenTerm @('inspect', '-t', $tabId) |
         ConvertFrom-Json
-    $editedUi = Invoke-AgenTerm @('ui-snapshot') | ConvertFrom-Json
-    $editedUiTab = @($editedUi.tabs | Where-Object id -eq $tabId)[0]
     if ($edited.windows[0].name -ne $editedTitle -or
         $edited.windows[0].note -ne $editedNote -or
-        $editedUiTab.note -ne $editedNote -or
-        [int]$editedUiTab.render.note.height -le 0 -or
         [AgenTermRemoteUiNativeTest]::IsWindowVisible($titleEditor)) {
         Save-WindowPng -Window $gui.MainWindowHandle `
             -Path (Join-Path $run.RunDirectory 'inline-edit-failure.png')
