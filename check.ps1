@@ -267,7 +267,19 @@ try {
         cargo clippy --quiet --locked --all-targets --all-features -- -D warnings
     }
     Invoke-Checked -Id 'unit-tests' -Label 'unit tests' {
-        cargo test --quiet --locked --all-features
+        if ($Release -or $env:CI -eq 'true') {
+            cargo test --quiet --locked --all-features
+        }
+        else {
+            # These real-repository qualification fixtures are intentionally
+            # exercised by their dedicated gates below. Keep them in CI and
+            # Release so `cargo test` remains a complete independent proof,
+            # but do not make the local development lane pay twice.
+            cargo test --quiet --locked --all-features -- `
+                --skip preflight_task_is_fail_closed_and_writes_reports_for_real_git_fixtures `
+                --skip preflight_benchmark_task_measures_clean_public_worker_runs `
+                --skip supply_chain_task_is_deterministic_and_covers_the_resolved_lock_graph
+        }
     }
 
     $upgradeGuiFixture = Join-Path (
