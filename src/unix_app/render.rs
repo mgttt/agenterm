@@ -1,5 +1,8 @@
 use crate::theme::{Rgb, ThemeId, ThemePalette};
-use crate::ui_geometry::{PixelRect, TreeRowMode, sidebar_tree_row_geometry, tree_row_at_y};
+use crate::ui_geometry::{
+    PixelRect, TERMINAL_SCROLLBAR_WIDTH, TreeRowMode, sidebar_tree_row_geometry, tree_connector_x,
+    tree_row_at_y,
+};
 use unicode_width::UnicodeWidthChar;
 
 use super::{
@@ -10,8 +13,12 @@ use super::{
 
 pub(super) const COMPOSER_HEIGHT: u32 = 48;
 pub(super) const STATUS_HEIGHT: u32 = 26;
-pub(super) const SETTINGS_MODAL_WIDTH: u32 = 360;
-pub(super) const SETTINGS_MODAL_HEIGHT: u32 = 268;
+pub(super) const SETTINGS_MODAL_WIDTH: u32 = 480;
+pub(super) const SETTINGS_MODAL_HEIGHT: u32 = 330;
+pub(super) const NEW_TERMINAL_MODAL_MIN_WIDTH: u32 = 480;
+pub(super) const NEW_TERMINAL_MODAL_MAX_WIDTH: u32 = 620;
+pub(super) const NEW_TERMINAL_MODAL_MIN_HEIGHT: u32 = 390;
+pub(super) const NEW_TERMINAL_MODAL_MAX_HEIGHT: u32 = 450;
 
 /// Unix GUI currently rasterizes with the built-in 8×8 bitmap, not host TTF families.
 pub(super) const RESOLVED_UNIX_FONT: &str = "bitmap-8x8";
@@ -25,6 +32,8 @@ pub(super) const CELL_PADDING_Y: u32 = 4;
 pub(super) struct SidebarTabRow {
     pub(super) id: u64,
     pub(super) depth: usize,
+    pub(super) is_last: bool,
+    pub(super) guides: Vec<bool>,
     pub(super) title: String,
     pub(super) note: String,
     pub(super) active: bool,
@@ -186,7 +195,13 @@ pub(super) struct ScrollbarView {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum SettingsFocusView {
+    FontFamily,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum SettingsHit {
+    FontFamily,
     Dark,
     Light,
     SizeDecrease,
@@ -200,7 +215,9 @@ pub(super) struct SettingsModalView<'a> {
     pub(super) font_family: &'a str,
     pub(super) font_size: u16,
     pub(super) theme_draft: ThemeId,
+    pub(super) focus: SettingsFocusView,
     pub(super) bounds: (u32, u32, u32, u32),
+    pub(super) font_family_field: (u32, u32, u32, u32),
     pub(super) dark_button: (u32, u32, u32, u32),
     pub(super) light_button: (u32, u32, u32, u32),
     pub(super) cancel_button: (u32, u32, u32, u32),
@@ -213,6 +230,9 @@ impl SettingsModalView<'_> {
     pub(super) fn hit_test(&self, x: f64, y: f64) -> Option<SettingsHit> {
         let x = x as u32;
         let y = y as u32;
+        if rect_contains(self.font_family_field, x, y) {
+            return Some(SettingsHit::FontFamily);
+        }
         if rect_contains(self.dark_button, x, y) {
             return Some(SettingsHit::Dark);
         }
@@ -240,22 +260,179 @@ impl SettingsModalView<'_> {
         font_family: &str,
         font_size: u16,
         theme_draft: ThemeId,
+        focus: SettingsFocusView,
     ) -> SettingsModalView<'_> {
-        let left = (client_width.saturating_sub(SETTINGS_MODAL_WIDTH)) / 2;
+        let width = SETTINGS_MODAL_WIDTH.min(client_width.saturating_sub(32).max(1));
+        let left = (client_width.saturating_sub(width)) / 2;
         let top = (client_height.saturating_sub(SETTINGS_MODAL_HEIGHT)) / 2;
-        let theme_row = top + 108;
-        let action_row = top + 148;
+        let font_family_field = (left + 32, top + 92, width.saturating_sub(158), 32);
+        let size_left = left + width.saturating_sub(110);
+        let size_row_top = top + 92;
+        let size_decrease_button = (size_left, size_row_top, 28, 32);
+        let size_increase_button = (size_left + 36, size_row_top, 28, 32);
+        let theme_row = top + 180;
+        let action_row = top + 266;
         SettingsModalView {
             font_family,
             font_size,
             theme_draft,
-            bounds: (left, top, SETTINGS_MODAL_WIDTH, SETTINGS_MODAL_HEIGHT),
-            dark_button: (left + 16, theme_row, 120, 28),
-            light_button: (left + 148, theme_row, 120, 28),
-            cancel_button: (left + 16, action_row, 120, 28),
-            apply_button: (left + 148, action_row, 120, 28),
-            size_decrease_button: (left + 200, top + 62, 28, 28),
-            size_increase_button: (left + 232, top + 62, 28, 28),
+            focus,
+            bounds: (left, top, width, SETTINGS_MODAL_HEIGHT),
+            font_family_field,
+            dark_button: (left + 32, theme_row, 146, 34),
+            light_button: (left + 190, theme_row, 146, 34),
+            cancel_button: (left + width.saturating_sub(238), action_row, 94, 36),
+            apply_button: (left + width.saturating_sub(126), action_row, 94, 36),
+            size_decrease_button,
+            size_increase_button,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum NewShellChoice {
+    Default,
+    CommandPrompt,
+    PowerShell,
+}
+
+impl NewShellChoice {
+    pub(super) const fn label(self) -> &'static str {
+        match self {
+            Self::Default => "Default",
+            Self::CommandPrompt => "Command Prompt",
+            Self::PowerShell => "PowerShell",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum NewTerminalFocusView {
+    InitialCommand,
+    HttpProxy,
+    HttpsProxy,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum NewTerminalHit {
+    DefaultShell,
+    CmdShell,
+    PowerShell,
+    InitialCommand,
+    HttpProxy,
+    HttpsProxy,
+    Create,
+    Cancel,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct NewTerminalModalView<'a> {
+    pub(super) shell_choice: NewShellChoice,
+    pub(super) initial_command: &'a str,
+    pub(super) http_proxy: &'a str,
+    pub(super) https_proxy: &'a str,
+    pub(super) focus: NewTerminalFocusView,
+    pub(super) bounds: (u32, u32, u32, u32),
+    pub(super) default_shell_button: (u32, u32, u32, u32),
+    pub(super) cmd_shell_button: (u32, u32, u32, u32),
+    pub(super) powershell_button: (u32, u32, u32, u32),
+    pub(super) initial_command_field: (u32, u32, u32, u32),
+    pub(super) http_proxy_field: (u32, u32, u32, u32),
+    pub(super) https_proxy_field: (u32, u32, u32, u32),
+    pub(super) create_button: (u32, u32, u32, u32),
+    pub(super) cancel_button: (u32, u32, u32, u32),
+}
+
+impl NewTerminalModalView<'_> {
+    pub(super) fn hit_test(&self, x: f64, y: f64) -> Option<NewTerminalHit> {
+        let x = x as u32;
+        let y = y as u32;
+        if rect_contains(self.default_shell_button, x, y) {
+            return Some(NewTerminalHit::DefaultShell);
+        }
+        if rect_contains(self.cmd_shell_button, x, y) {
+            return Some(NewTerminalHit::CmdShell);
+        }
+        if rect_contains(self.powershell_button, x, y) {
+            return Some(NewTerminalHit::PowerShell);
+        }
+        if rect_contains(self.initial_command_field, x, y) {
+            return Some(NewTerminalHit::InitialCommand);
+        }
+        if rect_contains(self.http_proxy_field, x, y) {
+            return Some(NewTerminalHit::HttpProxy);
+        }
+        if rect_contains(self.https_proxy_field, x, y) {
+            return Some(NewTerminalHit::HttpsProxy);
+        }
+        if rect_contains(self.create_button, x, y) {
+            return Some(NewTerminalHit::Create);
+        }
+        if rect_contains(self.cancel_button, x, y) {
+            return Some(NewTerminalHit::Cancel);
+        }
+        None
+    }
+
+    pub(super) fn for_client<'a>(
+        client_width: u32,
+        client_height: u32,
+        shell_choice: NewShellChoice,
+        initial_command: &'a str,
+        http_proxy: &'a str,
+        https_proxy: &'a str,
+        focus: NewTerminalFocusView,
+    ) -> NewTerminalModalView<'a> {
+        let width = (client_width.saturating_sub(32))
+            .clamp(NEW_TERMINAL_MODAL_MIN_WIDTH, NEW_TERMINAL_MODAL_MAX_WIDTH);
+        let height = (client_height.saturating_sub(32))
+            .clamp(NEW_TERMINAL_MODAL_MIN_HEIGHT, NEW_TERMINAL_MODAL_MAX_HEIGHT);
+        let left = (client_width.saturating_sub(width)) / 2;
+        let top = (client_height.saturating_sub(height)) / 2;
+        let inner_left = left as i32 + 28;
+        let inner_right = left as i32 + width as i32 - 28;
+        let gap = 8i32;
+        let shell_width = ((inner_right - inner_left - gap * 2) / 3).max(90) as u32;
+        let shell_top = top + 74;
+        let shell_button = |index: u32| {
+            let x = inner_left + index as i32 * (shell_width as i32 + gap);
+            (x as u32, shell_top, shell_width, 34)
+        };
+        let field = |field_top: u32| {
+            (
+                inner_left as u32,
+                field_top,
+                (inner_right - inner_left) as u32,
+                30,
+            )
+        };
+        let create_button = (
+            inner_right.saturating_sub(96) as u32,
+            top + height.saturating_sub(52),
+            96,
+            34,
+        );
+        let cancel_button = (
+            create_button.0.saturating_sub(106),
+            create_button.1,
+            96,
+            create_button.3,
+        );
+        NewTerminalModalView {
+            shell_choice,
+            initial_command,
+            http_proxy,
+            https_proxy,
+            focus,
+            bounds: (left, top, width, height),
+            default_shell_button: shell_button(0),
+            cmd_shell_button: shell_button(1),
+            powershell_button: shell_button(2),
+            initial_command_field: field(top + 142),
+            http_proxy_field: field(top + 218),
+            https_proxy_field: field(top + 294),
+            create_button,
+            cancel_button,
         }
     }
 }
@@ -430,6 +607,7 @@ pub(super) struct FrameContent<'a> {
     pub(super) scrollbar: Option<ScrollbarView>,
     pub(super) sidebar_scrollbar: Option<ScrollbarView>,
     pub(super) settings: Option<SettingsModalView<'a>>,
+    pub(super) new_terminal: Option<NewTerminalModalView<'a>>,
     pub(super) confirm_close: Option<ConfirmCloseView>,
     pub(super) window_close: Option<WindowCloseView>,
     pub(super) status: Option<StatusBarView<'a>>,
@@ -521,6 +699,9 @@ pub(super) fn render_frame(
     }
     if let Some(settings) = content.settings {
         render_settings_modal(buffer, stride, width, height, palette, settings);
+    }
+    if let Some(new_terminal) = content.new_terminal {
+        render_new_terminal_modal(buffer, stride, width, height, palette, new_terminal);
     }
     if let Some(confirm) = content.confirm_close {
         render_confirm_close(buffer, stride, width, height, palette, confirm);
@@ -859,6 +1040,18 @@ fn render_sidebar(
             continue;
         }
 
+        render_tree_row_connectors(
+            buffer,
+            stride,
+            palette,
+            sidebar_tree,
+            row,
+            &geometry,
+            top,
+            row_bottom,
+            mode,
+        );
+
         if row.active {
             let active_bg = rgb_to_pixel(palette.active);
             fill_rect(
@@ -987,6 +1180,73 @@ fn render_sidebar(
                 );
             }
         }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_tree_row_connectors(
+    buffer: &mut [u32],
+    stride: u32,
+    palette: &ThemePalette,
+    sidebar_tree: PixelRect,
+    row: &SidebarTabRow,
+    geometry: &crate::ui_geometry::TreeRowGeometry,
+    row_top: u32,
+    row_bottom: u32,
+    mode: TreeRowMode,
+) {
+    let content_left = (sidebar_tree.left + TERMINAL_SCROLLBAR_WIDTH).min(sidebar_tree.right);
+    let content_width = (sidebar_tree.right - content_left).max(0);
+    if content_width <= 0 {
+        return;
+    }
+    let line_color = rgb_to_pixel(palette.divider);
+    let node_y = geometry.node_y.max(0) as u32;
+
+    for (depth, &continues) in row.guides.iter().enumerate() {
+        if continues {
+            let x = (tree_connector_x(depth, content_width, mode) + content_left).max(0) as u32;
+            let height = row_bottom.saturating_sub(row_top);
+            if height > 0 {
+                fill_rect(buffer, stride, x, row_top, 1, height, line_color);
+            }
+        }
+    }
+
+    if row.depth == 0 {
+        return;
+    }
+
+    let parent_depth = row.depth - 1;
+    let parent_x =
+        (tree_connector_x(parent_depth, content_width, mode) + content_left).max(0) as u32;
+    let node_x = geometry.node_x.max(0) as u32;
+    let vert_bottom = if row.is_last {
+        node_y.saturating_add(1)
+    } else {
+        row_bottom
+    };
+    if vert_bottom > row_top {
+        fill_rect(
+            buffer,
+            stride,
+            parent_x,
+            row_top,
+            1,
+            vert_bottom.saturating_sub(row_top),
+            line_color,
+        );
+    }
+    if node_x > parent_x.saturating_add(1) {
+        fill_rect(
+            buffer,
+            stride,
+            parent_x,
+            node_y,
+            node_x - parent_x,
+            1,
+            line_color,
+        );
     }
 }
 
@@ -1245,27 +1505,26 @@ fn render_settings_modal(
     palette: &ThemePalette,
     settings: SettingsModalView<'_>,
 ) {
-    for y in 0..height {
-        for x in 0..width {
-            let index = (y * stride + x) as usize;
-            if let Some(pixel) = buffer.get_mut(index) {
-                *pixel = dim_pixel(*pixel, 2, 5);
-            }
-        }
-    }
+    dim_full_frame(buffer, stride, width, height);
 
     let (mx, my, mw, mh) = settings.bounds;
-    let modal_bg = rgb_to_pixel(palette.modal);
-    fill_rect(buffer, stride, mx, my, mw, mh, modal_bg);
-    let border = rgb_to_pixel(palette.focus_ring);
-    fill_rect(buffer, stride, mx, my, mw, 2, border);
+    fill_rect(buffer, stride, mx, my, mw, mh, rgb_to_pixel(palette.modal));
+    fill_rect(
+        buffer,
+        stride,
+        mx,
+        my,
+        mw,
+        2,
+        rgb_to_pixel(palette.focus_ring),
+    );
     draw_text(
         buffer,
         stride,
         width,
         height,
-        mx + 12,
-        my + 12,
+        mx + 28,
+        my + 18,
         "Settings",
         palette.text,
     );
@@ -1284,9 +1543,9 @@ fn render_settings_modal(
         stride,
         width,
         height,
-        mx + 12,
-        my + 50,
-        &format!("Preferred: {}", truncate_chars(settings.font_family, 24)),
+        mx + 32,
+        my + 58,
+        "Terminal font family",
         palette.muted_text,
     );
     draw_text(
@@ -1294,9 +1553,36 @@ fn render_settings_modal(
         stride,
         width,
         height,
-        mx + 12,
+        mx + mw.saturating_sub(110),
+        my + 58,
+        "Size",
+        palette.muted_text,
+    );
+    let (fx, fy, fw, fh) = settings.font_family_field;
+    render_inline_field(
+        buffer,
+        stride,
+        width,
+        height,
+        palette,
+        PixelRect {
+            left: fx as i32,
+            top: fy as i32,
+            right: (fx + fw) as i32,
+            bottom: (fy + fh) as i32,
+        },
+        settings.font_family,
+        settings.focus == SettingsFocusView::FontFamily,
+        palette.text,
+    );
+    draw_text(
+        buffer,
+        stride,
+        width,
+        height,
+        mx + 32,
         my + 66,
-        &format!("Row pitch: {} px", settings.font_size),
+        &format!("{} px", settings.font_size),
         palette.muted_text,
     );
     render_button(
@@ -1324,10 +1610,10 @@ fn render_settings_modal(
         stride,
         width,
         height,
-        mx + 12,
-        my + 88,
-        "Theme",
-        palette.text,
+        mx + 32,
+        my + 144,
+        "Color theme · preview is immediate; Apply persists",
+        palette.muted_text,
     );
     render_button(
         buffer,
@@ -1377,6 +1663,169 @@ fn render_settings_modal(
         "Apply",
         true,
     );
+}
+
+fn render_new_terminal_modal(
+    buffer: &mut [u32],
+    stride: u32,
+    width: u32,
+    height: u32,
+    palette: &ThemePalette,
+    modal: NewTerminalModalView<'_>,
+) {
+    dim_full_frame(buffer, stride, width, height);
+
+    let (mx, my, mw, mh) = modal.bounds;
+    fill_rect(buffer, stride, mx, my, mw, mh, rgb_to_pixel(palette.modal));
+    fill_rect(
+        buffer,
+        stride,
+        mx,
+        my,
+        mw,
+        2,
+        rgb_to_pixel(palette.focus_ring),
+    );
+    draw_text(
+        buffer,
+        stride,
+        width,
+        height,
+        mx + 28,
+        my + 18,
+        "New terminal",
+        palette.text,
+    );
+    draw_text(
+        buffer,
+        stride,
+        width,
+        height,
+        mx + 28,
+        my + 48,
+        "Shell profile",
+        palette.muted_text,
+    );
+    draw_text(
+        buffer,
+        stride,
+        width,
+        height,
+        mx + 28,
+        my + 116,
+        "Initial command · optional; leaves the selected shell open",
+        palette.muted_text,
+    );
+    draw_text(
+        buffer,
+        stride,
+        width,
+        height,
+        mx + 28,
+        my + 192,
+        "HTTP proxy · optional, applied only to this terminal",
+        palette.muted_text,
+    );
+    draw_text(
+        buffer,
+        stride,
+        width,
+        height,
+        mx + 28,
+        my + 268,
+        "HTTPS proxy · optional, values are never exposed in snapshots",
+        palette.muted_text,
+    );
+
+    for (rect, choice) in [
+        (modal.default_shell_button, NewShellChoice::Default),
+        (modal.cmd_shell_button, NewShellChoice::CommandPrompt),
+        (modal.powershell_button, NewShellChoice::PowerShell),
+    ] {
+        let selected = modal.shell_choice == choice;
+        let prefix = if selected { "● " } else { "○ " };
+        render_button(
+            buffer,
+            stride,
+            width,
+            height,
+            palette,
+            rect,
+            &format!("{prefix}{}", choice.label()),
+            selected,
+        );
+    }
+
+    let pixel_field = |rect: (u32, u32, u32, u32)| PixelRect {
+        left: rect.0 as i32,
+        top: rect.1 as i32,
+        right: (rect.0 + rect.2) as i32,
+        bottom: (rect.1 + rect.3) as i32,
+    };
+    render_inline_field(
+        buffer,
+        stride,
+        width,
+        height,
+        palette,
+        pixel_field(modal.initial_command_field),
+        modal.initial_command,
+        modal.focus == NewTerminalFocusView::InitialCommand,
+        palette.text,
+    );
+    render_inline_field(
+        buffer,
+        stride,
+        width,
+        height,
+        palette,
+        pixel_field(modal.http_proxy_field),
+        modal.http_proxy,
+        modal.focus == NewTerminalFocusView::HttpProxy,
+        palette.text,
+    );
+    render_inline_field(
+        buffer,
+        stride,
+        width,
+        height,
+        palette,
+        pixel_field(modal.https_proxy_field),
+        modal.https_proxy,
+        modal.focus == NewTerminalFocusView::HttpsProxy,
+        palette.text,
+    );
+    render_button(
+        buffer,
+        stride,
+        width,
+        height,
+        palette,
+        modal.create_button,
+        "Create",
+        true,
+    );
+    render_button(
+        buffer,
+        stride,
+        width,
+        height,
+        palette,
+        modal.cancel_button,
+        "Cancel",
+        false,
+    );
+}
+
+fn dim_full_frame(buffer: &mut [u32], stride: u32, width: u32, height: u32) {
+    for y in 0..height {
+        for x in 0..width {
+            let index = (y * stride + x) as usize;
+            if let Some(pixel) = buffer.get_mut(index) {
+                *pixel = dim_pixel(*pixel, 2, 5);
+            }
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1599,13 +2048,54 @@ mod tests {
 
     #[test]
     fn settings_hit_test_maps_buttons() {
-        let modal = SettingsModalView::for_client(800, 600, "Consolas", 12, ThemeId::Dark);
+        let modal = SettingsModalView::for_client(
+            800,
+            600,
+            "Consolas",
+            12,
+            ThemeId::Dark,
+            SettingsFocusView::FontFamily,
+        );
         assert_eq!(
             modal.hit_test(
                 f64::from(modal.apply_button.0 + 4),
                 f64::from(modal.apply_button.1 + 4)
             ),
             Some(SettingsHit::Apply)
+        );
+        assert_eq!(
+            modal.hit_test(
+                f64::from(modal.font_family_field.0 + 2),
+                f64::from(modal.font_family_field.1 + 2)
+            ),
+            Some(SettingsHit::FontFamily)
+        );
+    }
+
+    #[test]
+    fn new_terminal_hit_test_maps_create_and_fields() {
+        let modal = NewTerminalModalView::for_client(
+            800,
+            600,
+            NewShellChoice::Default,
+            "",
+            "",
+            "",
+            NewTerminalFocusView::InitialCommand,
+        );
+        assert_eq!(
+            modal.hit_test(
+                f64::from(modal.create_button.0 + 4),
+                f64::from(modal.create_button.1 + 4)
+            ),
+            Some(NewTerminalHit::Create)
+        );
+        assert_eq!(
+            modal.hit_test(
+                f64::from(modal.default_shell_button.0 + 4),
+                f64::from(modal.default_shell_button.1 + 4)
+            ),
+            Some(NewTerminalHit::DefaultShell)
         );
     }
 

@@ -2,8 +2,10 @@ mod clipboard;
 mod font;
 mod input;
 mod layout;
+mod new_terminal;
 mod render;
 mod screenshot;
+mod window_state;
 
 use std::{
     collections::HashSet,
@@ -58,12 +60,19 @@ use crate::{
     workspace::workspace_path,
 };
 
+use new_terminal::{NewTerminalDialog, ui_action_open};
 use render::{
     COMPOSER_HEIGHT, ComposerView, ConfirmCloseHit, ConfirmCloseView, FrameContent,
-    RESOLVED_UNIX_FONT, STATUS_HEIGHT, SettingsHit, SettingsModalView, SidebarTabRow,
-    StatusBarView, TabEditorFocusView, TabEditorView, TerminalGrid, TerminalPaint, ToolbarHit,
-    WindowCloseHit, WindowCloseView, WorkspaceToolbarView, cell_metrics, effective_palette,
-    grid_dimensions_for_pixels, render_frame, scrollbar_view_from_geometry, sidebar_row_at_y,
+    NewShellChoice as RenderShellChoice, NewTerminalFocusView, NewTerminalHit,
+    NewTerminalModalView, RESOLVED_UNIX_FONT, STATUS_HEIGHT, SettingsFocusView, SettingsHit,
+    SettingsModalView, SidebarTabRow, StatusBarView, TabEditorFocusView, TabEditorView,
+    TerminalGrid, TerminalPaint, ToolbarHit, WindowCloseHit, WindowCloseView, WorkspaceToolbarView,
+    cell_metrics, effective_palette, grid_dimensions_for_pixels, render_frame,
+    scrollbar_view_from_geometry, sidebar_row_at_y,
+};
+use window_state::{
+    WindowStateTracker, WindowUiActionResult, WinitWindowHandle, absorb_window_event,
+    apply_ui_action, window_snapshot_json,
 };
 
 use layout::{
@@ -299,6 +308,10 @@ struct UnixApp {
     settings_theme_draft: ThemeId,
     settings_font_draft: String,
     settings_size_draft: u16,
+    settings_focus: SettingsFocusView,
+    new_terminal_dialog: NewTerminalDialog,
+    new_terminal_focus: NewTerminalFocusView,
+    window_state_tracker: WindowStateTracker,
     collapsed_tabs: HashSet<u64>,
     note_edit_target: Option<u64>,
     tab_name_draft: String,
@@ -355,6 +368,10 @@ impl UnixApp {
             settings_theme_draft: config.color_theme,
             settings_font_draft: config.terminal_font_family.clone(),
             settings_size_draft: config.terminal_font_size,
+            settings_focus: SettingsFocusView::FontFamily,
+            new_terminal_dialog: NewTerminalDialog::new(),
+            new_terminal_focus: NewTerminalFocusView::InitialCommand,
+            window_state_tracker: WindowStateTracker::new(),
             collapsed_tabs: HashSet::new(),
             note_edit_target: None,
             tab_name_draft: String::new(),
@@ -553,8 +570,170 @@ impl UnixApp {
         self.window_close_pending
             || self.pending_close.is_some()
             || self.settings_open
+            || self.new_terminal_dialog.is_open()
             || self.cwd_edit_target.is_some()
             || self.note_edit_target.is_some()
+    }
+
+    fn render_shell_choice(&self) -> RenderShellChoice {
+        match self.new_terminal_dialog.shell_choice() {
+            new_terminal::NewShellChoice::Default => RenderShellChoice::Default,
+            new_terminal::NewShellChoice::CommandPrompt => RenderShellChoice::CommandPrompt,
+            new_terminal::NewShellChoice::PowerShell => RenderShellChoice::PowerShell,
+        }
+    }
+
+    fn open_new_terminal_dialog(&mut self) {
+        if self.settings_open {
+            let _ = self.close_settings(false);
+        }
+        if self.note_edit_target.is_some() {
+            let _ = self.complete_tab_editor(false);
+        }
+        if self.cwd_edit_target.is_some() {
+            self.close_cwd_editor();
+        }
+        let _ = self.cancel_terminal_selection(true);
+        ui_action_open(&mut self.new_terminal_dialog);
+        self.new_terminal_focus = NewTerminalFocusView::InitialCommand;
+        self.request_redraw();
+    }
+
+    fn finish_new_terminal_dialog(&mut self, create: bool) {
+        let result = self.new_terminal_dialog.finish(create);
+        match result {
+            Ok(Some(params)) => {
+                if let Ok(index) = self.create_tab(
+                    None,
+                    params.command_line,
+                    params.tab_environment,
+                    true,
+                    None,
+                ) && let Some(id) = self
+                    .tabs
+                    .iter()
+                    .find(|tab| tab.index == index)
+                    .map(|tab| tab.id)
+                {
+                    self.after_create_tab(id, None);
+                }
+            }
+            Ok(None) => {}
+            Err(error) => self.set_status_message(error),
+        }
+        self.request_redraw();
+    }
+
+    fn handle_new_terminal_click(&mut self, hit: NewTerminalHit) {
+        match hit {
+            NewTerminalHit::DefaultShell => {
+                self.new_terminal_dialog
+                    .choose_shell(new_terminal::NewShellChoice::Default);
+            }
+            NewTerminalHit::CmdShell => {
+                self.new_terminal_dialog
+                    .choose_shell(new_terminal::NewShellChoice::CommandPrompt);
+            }
+            NewTerminalHit::PowerShell => {
+                self.new_terminal_dialog
+                    .choose_shell(new_terminal::NewShellChoice::PowerShell);
+            }
+            NewTerminalHit::InitialCommand => {
+                self.new_terminal_focus = NewTerminalFocusView::InitialCommand;
+            }
+            NewTerminalHit::HttpProxy => {
+                self.new_terminal_focus = NewTerminalFocusView::HttpProxy;
+            }
+            NewTerminalHit::HttpsProxy => {
+                self.new_terminal_focus = NewTerminalFocusView::HttpsProxy;
+            }
+            NewTerminalHit::Create => self.finish_new_terminal_dialog(true),
+            NewTerminalHit::Cancel => self.finish_new_terminal_dialog(false),
+        }
+        self.request_redraw();
+    }
+
+    fn handle_new_terminal_key(&mut self, event: &winit::event::KeyEvent) {
+        if !self.new_terminal_dialog.is_open() {
+            return;
+        }
+        let multiline = self.new_terminal_focus == NewTerminalFocusView::InitialCommand;
+        let modifiers = self.modifiers;
+        let draft = match self.new_terminal_focus {
+            NewTerminalFocusView::InitialCommand => {
+                self.new_terminal_dialog.initial_command_draft_mut()
+            }
+            NewTerminalFocusView::HttpProxy => self.new_terminal_dialog.http_proxy_draft_mut(),
+            NewTerminalFocusView::HttpsProxy => self.new_terminal_dialog.https_proxy_draft_mut(),
+        };
+        match input::text_field_key_action(event, modifiers, draft, multiline) {
+            input::TextFieldKeyAction::Edited => self.request_redraw(),
+            input::TextFieldKeyAction::NextField => {
+                self.new_terminal_focus = match self.new_terminal_focus {
+                    NewTerminalFocusView::InitialCommand => NewTerminalFocusView::HttpProxy,
+                    NewTerminalFocusView::HttpProxy => NewTerminalFocusView::HttpsProxy,
+                    NewTerminalFocusView::HttpsProxy => NewTerminalFocusView::InitialCommand,
+                };
+                self.request_redraw();
+            }
+            input::TextFieldKeyAction::Submit => self.finish_new_terminal_dialog(true),
+            input::TextFieldKeyAction::Escape => self.finish_new_terminal_dialog(false),
+            input::TextFieldKeyAction::Copy => {
+                if clipboard::set_clipboard_text(draft).is_ok() {
+                    self.set_status_message("Copied new-terminal draft");
+                }
+            }
+            input::TextFieldKeyAction::Cut => {
+                if clipboard::set_clipboard_text(draft).is_ok() {
+                    draft.clear();
+                    self.set_status_message("Cut new-terminal draft");
+                    self.request_redraw();
+                }
+            }
+            input::TextFieldKeyAction::Paste => {
+                if let Ok(raw) = clipboard::get_clipboard_text() {
+                    draft.push_str(&raw.replace("\r\n", "\n"));
+                    self.request_redraw();
+                }
+            }
+            input::TextFieldKeyAction::Ignored => {}
+        }
+    }
+
+    fn handle_settings_key(&mut self, event: &winit::event::KeyEvent) {
+        if !self.settings_open || self.settings_focus != SettingsFocusView::FontFamily {
+            return;
+        }
+        let modifiers = self.modifiers;
+        match input::text_field_key_action(event, modifiers, &mut self.settings_font_draft, false) {
+            input::TextFieldKeyAction::Edited => self.request_redraw(),
+            input::TextFieldKeyAction::Escape => {
+                let _ = self.close_settings(false);
+            }
+            input::TextFieldKeyAction::Submit => {
+                let _ = self.close_settings(true);
+            }
+            input::TextFieldKeyAction::Copy => {
+                if clipboard::set_clipboard_text(&self.settings_font_draft).is_ok() {
+                    self.set_status_message("Copied settings font draft");
+                }
+            }
+            input::TextFieldKeyAction::Cut => {
+                if clipboard::set_clipboard_text(&self.settings_font_draft).is_ok() {
+                    self.settings_font_draft.clear();
+                    self.set_status_message("Cut settings font draft");
+                    self.request_redraw();
+                }
+            }
+            input::TextFieldKeyAction::Paste => {
+                if let Ok(raw) = clipboard::get_clipboard_text() {
+                    self.settings_font_draft
+                        .push_str(&raw.replace("\r\n", "\n"));
+                    self.request_redraw();
+                }
+            }
+            input::TextFieldKeyAction::NextField | input::TextFieldKeyAction::Ignored => {}
+        }
     }
 
     fn target_position(&self, target: Option<&str>) -> Option<usize> {
@@ -871,6 +1050,7 @@ impl UnixApp {
         self.settings_theme_draft = self.config.color_theme;
         self.settings_font_draft = self.config.terminal_font_family.clone();
         self.settings_size_draft = self.config.terminal_font_size;
+        self.settings_focus = SettingsFocusView::FontFamily;
         self.set_focus_surface_internal(UnixFocusSurface::Settings, "semantic");
     }
 
@@ -1069,6 +1249,10 @@ impl UnixApp {
 
     fn handle_settings_click(&mut self, hit: SettingsHit) {
         match hit {
+            SettingsHit::FontFamily => {
+                self.settings_focus = SettingsFocusView::FontFamily;
+                self.request_redraw();
+            }
             SettingsHit::Dark => {
                 self.settings_theme_draft = ThemeId::Dark;
                 self.request_redraw();
@@ -1111,6 +1295,8 @@ impl UnixApp {
                     active: self.active == Some(tab.id),
                     collapsed: self.collapsed_tabs.contains(&tab.id),
                     has_children,
+                    is_last: row.is_last,
+                    guides: row.guides.clone(),
                 })
             })
             .collect()
@@ -1409,7 +1595,17 @@ impl UnixApp {
             "session": self.session_name,
             "active_window_id": active.map(|id| format!("@{id}")),
             "tabs_visible": self.config.tabs_visible,
-            "window": embedded_window_json(self.title.as_str(), client_width, client_height),
+            "window": if let Some(window) = self.window.as_ref() {
+                window_snapshot_json(
+                    &WinitWindowHandle {
+                        window,
+                        title: &self.title,
+                    },
+                    &self.window_state_tracker,
+                )
+            } else {
+                embedded_window_json(self.title.as_str(), client_width, client_height)
+            },
             "layout": {
                 "sidebar": {
                     "x": layout.sidebar.left,
@@ -1507,6 +1703,8 @@ impl UnixApp {
                         "cancel"
                     ],
                 }))
+            } else if self.new_terminal_dialog.is_open() {
+                Some(self.new_terminal_dialog.snapshot_modal())
             } else if self.note_edit_target.is_some() {
                 Some(serde_json::json!({"kind": "tab-editor"}))
             } else {
@@ -1732,7 +1930,7 @@ impl UnixApp {
     fn handle_toolbar_hit(&mut self, hit: ToolbarHit) {
         match hit {
             ToolbarHit::NewTab => {
-                let _ = self.create_tab(None, Vec::new(), Vec::new(), true, None);
+                self.open_new_terminal_dialog();
             }
             ToolbarHit::ToggleTabs => {
                 let visible = !self.config.tabs_visible;
@@ -1774,9 +1972,26 @@ impl UnixApp {
                 &self.settings_font_draft,
                 self.settings_size_draft,
                 self.settings_theme_draft,
+                self.settings_focus,
             );
             if let Some(hit) = modal.hit_test(x, y) {
                 self.handle_settings_click(hit);
+            }
+            return;
+        }
+        if self.new_terminal_dialog.is_open() {
+            let (width, height) = self.client_size();
+            let modal = NewTerminalModalView::for_client(
+                width,
+                height,
+                self.render_shell_choice(),
+                self.new_terminal_dialog.initial_command_draft(),
+                self.new_terminal_dialog.http_proxy_draft(),
+                self.new_terminal_dialog.https_proxy_draft(),
+                self.new_terminal_focus,
+            );
+            if let Some(hit) = modal.hit_test(x, y) {
+                self.handle_new_terminal_click(hit);
             }
             return;
         }
@@ -2390,6 +2605,7 @@ impl UnixApp {
         if let Some(position) = self.active_position() {
             self.tabs[position].resize(rows, cols);
         }
+        self.window_state_tracker.sync_from_window(window);
         self.sync_grid_from_tab();
     }
 
@@ -2491,7 +2707,78 @@ impl UnixApp {
                             }
                             None => Some(IpcResponse::failure("cwd-send-now requires --path")),
                         },
-                        other => Some(IpcResponse::failure(format!("unknown UI action: {other}"))),
+                        "open-new-terminal" => {
+                            self.open_new_terminal_dialog();
+                            None
+                        }
+                        other => {
+                            if let Some(window) = self.window.as_ref() {
+                                let handle = WinitWindowHandle {
+                                    window,
+                                    title: &self.title,
+                                };
+                                match apply_ui_action(
+                                    other,
+                                    args,
+                                    &handle,
+                                    &mut self.window_state_tracker,
+                                ) {
+                                    WindowUiActionResult::Applied => None,
+                                    WindowUiActionResult::Invalid(error) => {
+                                        Some(IpcResponse::failure(error))
+                                    }
+                                    WindowUiActionResult::NotHandled => match other {
+                                        "create"
+                                        | "cancel"
+                                        | "shell-default"
+                                        | "shell-cmd"
+                                        | "shell-powershell"
+                                        | "new-terminal-set-initial-command"
+                                        | "new-terminal-set-http-proxy"
+                                        | "new-terminal-set-https-proxy" => {
+                                            let text = args.get(2).map(String::as_str);
+                                            match new_terminal::dispatch_ui_action(
+                                                &mut self.new_terminal_dialog,
+                                                other,
+                                                text,
+                                            ) {
+                                                Ok(Some(params)) => {
+                                                    if let Ok(index) = self.create_tab(
+                                                        None,
+                                                        params.command_line,
+                                                        params.tab_environment,
+                                                        true,
+                                                        None,
+                                                    ) && let Some(id) = self
+                                                        .tabs
+                                                        .iter()
+                                                        .find(|tab| tab.index == index)
+                                                        .map(|tab| tab.id)
+                                                    {
+                                                        self.after_create_tab(id, None);
+                                                    }
+                                                    None
+                                                }
+                                                Ok(None) => self
+                                                    .new_terminal_dialog
+                                                    .last_error()
+                                                    .map(|error| {
+                                                        IpcResponse::failure(error.to_owned())
+                                                    }),
+                                                Err(error) => Some(IpcResponse::failure(error)),
+                                            }
+                                        }
+                                        _ => Some(IpcResponse::failure(format!(
+                                            "unknown UI action: {other}"
+                                        ))),
+                                    },
+                                }
+                            } else {
+                                Some(IpcResponse::failure(
+                                    "window is not available for UI action",
+                                ))
+                            }
+                        }
                     };
                     match response {
                         Some(response) => response,
@@ -2596,8 +2883,23 @@ impl UnixApp {
                 &self.settings_font_draft,
                 self.settings_size_draft,
                 self.settings_theme_draft,
+                self.settings_focus,
             )
         });
+        let new_terminal = if self.new_terminal_dialog.is_open() {
+            let shell = self.render_shell_choice();
+            Some(NewTerminalModalView::for_client(
+                size.width,
+                size.height,
+                shell,
+                self.new_terminal_dialog.initial_command_draft(),
+                self.new_terminal_dialog.http_proxy_draft(),
+                self.new_terminal_dialog.https_proxy_draft(),
+                self.new_terminal_focus,
+            ))
+        } else {
+            None
+        };
         let Some(grid) = self.grid.as_ref() else {
             return;
         };
@@ -2696,6 +2998,7 @@ impl UnixApp {
                 settings,
                 confirm_close,
                 window_close,
+                new_terminal,
                 status: Some(status_view),
                 resize_grip,
             },
@@ -2990,6 +3293,10 @@ impl ControlHost for UnixApp {
             self.close_settings(false)?;
             return Ok(true);
         }
+        if self.new_terminal_dialog.is_open() {
+            self.finish_new_terminal_dialog(false);
+            return Ok(true);
+        }
         if self.cwd_edit_target.is_some() {
             self.close_cwd_editor();
             return Ok(true);
@@ -3216,10 +3523,26 @@ impl ApplicationHandler<UnixWake> for UnixApp {
     ) {
         match event {
             WindowEvent::CloseRequested => self.request_window_close(),
-            WindowEvent::Resized(_) => {
+            WindowEvent::Resized(size) => {
+                if let Some(window) = self.window.as_ref() {
+                    absorb_window_event(
+                        &WindowEvent::Resized(size),
+                        window,
+                        &mut self.window_state_tracker,
+                    );
+                }
                 self.resize_to_window();
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
+                }
+            }
+            WindowEvent::Focused(focused) => {
+                if let Some(window) = self.window.as_ref() {
+                    absorb_window_event(
+                        &WindowEvent::Focused(focused),
+                        window,
+                        &mut self.window_state_tracker,
+                    );
                 }
             }
             WindowEvent::RedrawRequested => {
@@ -3245,9 +3568,11 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                     return;
                 }
                 if self.settings_open {
-                    if let Key::Named(NamedKey::Escape) = event.logical_key {
-                        let _ = self.close_settings(false);
-                    }
+                    self.handle_settings_key(&event);
+                    return;
+                }
+                if self.new_terminal_dialog.is_open() {
+                    self.handle_new_terminal_key(&event);
                     return;
                 }
                 if self.pending_close.is_some() {

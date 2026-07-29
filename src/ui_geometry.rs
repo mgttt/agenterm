@@ -1350,4 +1350,219 @@ mod tests {
         );
         assert_eq!(terminal_cell_at(terminal, 100, 8, 24, 80, 10, 16), None);
     }
+
+    fn sidebar_tree_for_configured_width(tabs_width: i32) -> PixelRect {
+        layout(1000, 700, true, tabs_width).sidebar_tree
+    }
+
+    fn assert_disclosure_hit_region(geometry: &TreeRowGeometry) {
+        assert!(
+            geometry
+                .disclosure_hit
+                .contains(geometry.node_x, geometry.node_y),
+            "{geometry:?}"
+        );
+        assert!(
+            geometry.disclosure_hit.contains_x(geometry.node_x - 6),
+            "{geometry:?}"
+        );
+        assert!(
+            !geometry.disclosure_hit.contains_x(geometry.node_x + 12),
+            "{geometry:?}"
+        );
+        assert_eq!(
+            geometry.disclosure_hit.top, geometry.row.top,
+            "{geometry:?}"
+        );
+        assert_eq!(
+            geometry.disclosure_hit.bottom,
+            geometry.row.top + TAB_HEIGHT,
+            "{geometry:?}"
+        );
+        assert!(
+            geometry
+                .disclosure_hit
+                .contains(geometry.node_x, geometry.row.top + TAB_HEIGHT / 2),
+            "{geometry:?}"
+        );
+    }
+
+    fn assert_sidebar_row_disjoint_from_scrollbar(
+        sidebar_tree: PixelRect,
+        geometry: &TreeRowGeometry,
+    ) {
+        let track = sidebar_scrollbar_track(sidebar_tree);
+        assert_eq!(track.left, sidebar_tree.left);
+        assert_eq!(track.right, sidebar_tree.left + TERMINAL_SCROLLBAR_WIDTH);
+        assert!(
+            geometry.row.left >= track.right,
+            "row overlaps scrollbar track: {geometry:?} track={track:?}"
+        );
+        assert!(
+            geometry.disclosure_hit.left >= track.right,
+            "disclosure overlaps scrollbar track: {geometry:?} track={track:?}"
+        );
+        assert!(
+            geometry.selection.left >= track.right,
+            "selection overlaps scrollbar track: {geometry:?} track={track:?}"
+        );
+        assert!(
+            geometry.text.left >= track.right,
+            "text overlaps scrollbar track: {geometry:?} track={track:?}"
+        );
+        assert!(
+            geometry.actions.bounds.right <= sidebar_tree.right,
+            "actions extend past sidebar tree: {geometry:?} sidebar_tree={sidebar_tree:?}"
+        );
+        if let Some(editors) = geometry.editors {
+            assert!(
+                editors.name.left >= track.right,
+                "editor overlaps scrollbar track: {editors:?} track={track:?}"
+            );
+            assert!(editors.note.left >= track.right);
+        }
+        if let Some(add) = geometry.actions.add_child {
+            assert!(add.left >= track.right);
+        }
+        assert!(geometry.actions.primary.left >= track.right);
+        assert!(geometry.actions.secondary.left >= track.right);
+    }
+
+    fn assert_sidebar_row_partitions_without_overlap(geometry: &TreeRowGeometry) {
+        assert!(geometry.text.right <= geometry.actions.bounds.left);
+        if let Some(add) = geometry.actions.add_child {
+            assert!(add.right <= geometry.actions.primary.left);
+        }
+        assert!(geometry.actions.primary.right <= geometry.actions.secondary.left);
+        assert!(geometry.actions.bounds.right <= geometry.selection.right);
+        assert!(geometry.disclosure_hit.right <= geometry.text.left);
+        assert!(geometry.node_x < geometry.text.left);
+    }
+
+    #[test]
+    fn sidebar_tree_row_geometry_at_minimum_width_normal_and_editing() {
+        let sidebar_tree = sidebar_tree_for_configured_width(TABS_MIN_WIDTH);
+        assert_eq!(sidebar_tree.right, TABS_MIN_WIDTH - TABS_RESIZE_GRIP_WIDTH);
+
+        for mode in [TreeRowMode::Normal, TreeRowMode::Editing] {
+            let shallow = sidebar_tree_row_geometry(sidebar_tree, 0, 0, mode);
+            let deep = sidebar_tree_row_geometry(sidebar_tree, 1, MAX_TREE_DEPTH, mode);
+
+            assert_eq!(shallow.mode, mode);
+            assert_eq!(deep.mode, mode);
+            assert_eq!(shallow.actions.density, TreeRowActionDensity::Compact);
+            assert_eq!(deep.actions.density, TreeRowActionDensity::Compact);
+            assert_disclosure_hit_region(&shallow);
+            assert_disclosure_hit_region(&deep);
+            assert_sidebar_row_disjoint_from_scrollbar(sidebar_tree, &shallow);
+            assert_sidebar_row_disjoint_from_scrollbar(sidebar_tree, &deep);
+            assert_sidebar_row_partitions_without_overlap(&shallow);
+            assert_sidebar_row_partitions_without_overlap(&deep);
+
+            let content_width = sidebar_tree.right - TERMINAL_SCROLLBAR_WIDTH;
+            let untranslated = tree_row_geometry_for_mode(1, MAX_TREE_DEPTH, content_width, mode);
+            assert_eq!(deep.node_x, untranslated.node_x + TERMINAL_SCROLLBAR_WIDTH);
+            assert_eq!(
+                deep.disclosure_hit,
+                translate_tree_row_geometry(untranslated, TERMINAL_SCROLLBAR_WIDTH).disclosure_hit
+            );
+        }
+    }
+
+    #[test]
+    fn sidebar_tree_row_geometry_at_default_width_uses_compact_actions() {
+        let sidebar_tree = sidebar_tree_for_configured_width(TABS_DEFAULT_WIDTH);
+        assert_eq!(
+            sidebar_tree.right,
+            TABS_DEFAULT_WIDTH - TABS_RESIZE_GRIP_WIDTH
+        );
+
+        for mode in [TreeRowMode::Normal, TreeRowMode::Editing] {
+            let geometry = sidebar_tree_row_geometry(sidebar_tree, 2, 1, mode);
+
+            assert_eq!(geometry.mode, mode);
+            assert_eq!(geometry.actions.density, TreeRowActionDensity::Compact);
+            assert_disclosure_hit_region(&geometry);
+            assert_sidebar_row_disjoint_from_scrollbar(sidebar_tree, &geometry);
+            assert_sidebar_row_partitions_without_overlap(&geometry);
+            assert_eq!(geometry.row.left, TERMINAL_SCROLLBAR_WIDTH + TAB_LEFT);
+            assert_eq!(geometry.row.right, sidebar_tree.right - TAB_RIGHT_MARGIN);
+        }
+    }
+
+    #[test]
+    fn sidebar_tree_row_geometry_at_maximum_width_uses_full_actions() {
+        let sidebar_tree = sidebar_tree_for_configured_width(TABS_MAX_WIDTH);
+        assert_eq!(sidebar_tree.right, TABS_MAX_WIDTH - TABS_RESIZE_GRIP_WIDTH);
+
+        let normal = sidebar_tree_row_geometry(sidebar_tree, 0, 2, TreeRowMode::Normal);
+        let editing = sidebar_tree_row_geometry(sidebar_tree, 3, 1, TreeRowMode::Editing);
+
+        assert_eq!(normal.actions.density, TreeRowActionDensity::Full);
+        assert_eq!(editing.actions.density, TreeRowActionDensity::Full);
+        assert_disclosure_hit_region(&normal);
+        assert_disclosure_hit_region(&editing);
+        assert_sidebar_row_disjoint_from_scrollbar(sidebar_tree, &normal);
+        assert_sidebar_row_disjoint_from_scrollbar(sidebar_tree, &editing);
+        assert_sidebar_row_partitions_without_overlap(&normal);
+        assert_sidebar_row_partitions_without_overlap(&editing);
+
+        let add = normal
+            .actions
+            .add_child
+            .expect("full normal row has add-child");
+        assert_eq!(add.width(), TREE_ADD_ACTION_WIDTH);
+        assert_eq!(normal.actions.primary.width(), TREE_EDIT_ACTION_WIDTH);
+        assert_eq!(normal.actions.secondary.width(), TREE_CLOSE_ACTION_WIDTH);
+        assert_eq!(editing.actions.add_child, None);
+        assert_eq!(editing.actions.primary.width(), TREE_SAVE_ACTION_WIDTH);
+        assert_eq!(editing.actions.secondary.width(), TREE_CANCEL_ACTION_WIDTH);
+        assert!(editing.editors.is_some());
+    }
+
+    #[test]
+    fn sidebar_disclosure_hit_is_right_of_scrollbar_at_all_canonical_widths() {
+        for tabs_width in [TABS_MIN_WIDTH, TABS_DEFAULT_WIDTH, TABS_MAX_WIDTH] {
+            let sidebar_tree = sidebar_tree_for_configured_width(tabs_width);
+            let track = sidebar_scrollbar_track(sidebar_tree);
+
+            for (viewport, depth, mode) in [
+                (0, 0, TreeRowMode::Normal),
+                (1, MAX_TREE_DEPTH, TreeRowMode::Normal),
+                (2, 3, TreeRowMode::Editing),
+            ] {
+                let geometry = sidebar_tree_row_geometry(sidebar_tree, viewport, depth, mode);
+                assert_disclosure_hit_region(&geometry);
+                assert!(
+                    geometry.disclosure_hit.left >= track.right,
+                    "width={tabs_width} viewport={viewport} depth={depth} mode={mode:?}"
+                );
+                assert!(
+                    geometry.disclosure_hit.right <= geometry.text.left,
+                    "width={tabs_width} viewport={viewport} depth={depth} mode={mode:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn sidebar_scrollbar_track_and_row_capacity_match_tree_surface() {
+        for tabs_width in [TABS_MIN_WIDTH, TABS_DEFAULT_WIDTH, TABS_MAX_WIDTH] {
+            let sidebar_tree = sidebar_tree_for_configured_width(tabs_width);
+            let track = sidebar_scrollbar_track(sidebar_tree);
+            let capacity = sidebar_row_capacity(sidebar_tree.height());
+            let scrollbar = sidebar_scrollbar_geometry(track, 0, 10, capacity, capacity + 5);
+
+            assert_eq!(track.width(), TERMINAL_SCROLLBAR_WIDTH);
+            assert_eq!(scrollbar.track, track);
+            assert!(scrollbar.thumb.left >= track.left + 2);
+            assert!(scrollbar.thumb.right <= track.right - 2);
+            assert_valid_rect(track, sidebar_tree);
+            assert_valid_rect(scrollbar.thumb, sidebar_tree);
+            assert!(
+                capacity >= 1,
+                "sidebar tree should expose at least one row slot"
+            );
+        }
+    }
 }

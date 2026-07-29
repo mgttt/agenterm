@@ -43,25 +43,25 @@ Legend：`[x]` 已对齐，`[~]` 部分，`[ ]` 未做。
 
 - [x] 侧栏树行几何（paint、disclosure 命中、`tabs[].bounds`/`render`/`actions`）
 - [x] **ui-snapshot 契约**：`schema_version`、`projection`、`settings`、`layout.terminal` 嵌套 scrollbar、`locale`/`feedback` 等与 Win 形状对齐（`embedded_gui`）
-- [ ] 黑盒：`ui-snapshot` 几何测试覆盖 180/250/480 px 侧栏与 disclosure 命中
+- [x] 黑盒：`ui-snapshot` 几何测试覆盖 180/250/480 px 侧栏与 disclosure 命中
 
 ### P1 — 侧栏交互深度
 
 - [x] 侧栏滚动：`sidebar_scroll_offset`、wheel/drag、`layout.sidebar.scrollbar`
 - [x] 侧栏内联 tab 编辑：`TreeRowMode::Editing`、`tab_editor.focus`、`tab-editor-save/cancel`（禁止 Composer 借用）
-- [ ] New 终端对话框：`kind: "new-terminal"` + shell/初始命令/proxy + `ui-action` create 路径
-- [ ] `ui-action` 窗口控制：`keep-server-running`、`stop-server-and-exit`、`window-minimize/maximize/restore/resize`
+- [x] New 终端对话框：`kind: "new-terminal"` + shell/初始命令/proxy + `ui-action` create 路径
+- [x] `ui-action` 窗口控制：`keep-server-running`、`stop-server-and-exit`、`window-minimize/maximize/restore/resize`
 
 ### P2 — 设置、菜单、选择
 
-- [ ] Settings：可编辑字体族；snapshot `settings` + `theme_options`；`settings-cancel`
+- [x] Settings：可编辑字体族；snapshot `settings` + `theme_options`；`settings-cancel`
 - [ ] `system_menu.copy`/`paste` enabled 状态与快捷键语义
 - [ ] 每 tab `selection`；`terminal_interaction` 对象形状与 Win 一致
 
 ### P3 — 渲染与字体
 
 - [ ] TTF/FreeType 路径，使 `terminal_font_family` 影响像素而非仅行距
-- [ ] 树连接器绘制（Win `paint_tabs` 连续分支线）
+- [x] 树连接器绘制（Win `paint_tabs` 连续分支线）
 
 ## 验收证据
 

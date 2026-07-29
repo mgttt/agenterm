@@ -161,14 +161,25 @@ pub(crate) fn embedded_window_json(
     client_width: u32,
     client_height: u32,
 ) -> serde_json::Value {
+    embedded_window_json_with_state(title, client_width, client_height, true, false, "restored")
+}
+
+pub(crate) fn embedded_window_json_with_state(
+    title: &str,
+    client_width: u32,
+    client_height: u32,
+    visible: bool,
+    minimized: bool,
+    state: &str,
+) -> serde_json::Value {
     serde_json::json!({
         "title": title,
         "client_width": client_width,
         "client_height": client_height,
-        "visible": true,
+        "visible": visible,
         "detached": false,
-        "minimized": false,
-        "state": "restored",
+        "minimized": minimized,
+        "state": state,
     })
 }
 
@@ -218,5 +229,13 @@ mod tests {
         assert_eq!(json["toggle_tabs"]["id"], SYSTEM_MENU_TOGGLE_TABS_ID);
         assert_eq!(json["copy"]["enabled"], true);
         assert_eq!(json["paste"]["enabled"], false);
+    }
+
+    #[test]
+    fn embedded_window_json_with_state_matches_win_shape() {
+        let json = embedded_window_json_with_state("AgenTerm", 800, 600, true, true, "minimized");
+        assert_eq!(json["minimized"], true);
+        assert_eq!(json["state"], "minimized");
+        assert_eq!(json["detached"], false);
     }
 }
