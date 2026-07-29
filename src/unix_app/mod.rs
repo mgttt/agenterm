@@ -47,11 +47,11 @@ use crate::{
 };
 
 use render::{
-    COMPOSER_HEIGHT, ComposerView, ConfirmCloseHit, ConfirmCloseView,
-    FrameContent, RESOLVED_UNIX_FONT, STATUS_HEIGHT, SettingsHit, SettingsModalView,
-    SidebarTabRow, StatusBarView, TerminalGrid, TerminalPaint, ToolbarHit, WindowCloseHit,
-    WindowCloseView, WorkspaceToolbarView, cell_metrics, effective_palette,
-    grid_dimensions_for_pixels, render_frame, scrollbar_view_from_geometry, sidebar_row_at_y,
+    COMPOSER_HEIGHT, ComposerView, ConfirmCloseHit, ConfirmCloseView, FrameContent,
+    RESOLVED_UNIX_FONT, STATUS_HEIGHT, SettingsHit, SettingsModalView, SidebarTabRow,
+    StatusBarView, TerminalGrid, TerminalPaint, ToolbarHit, WindowCloseHit, WindowCloseView,
+    WorkspaceToolbarView, cell_metrics, effective_palette, grid_dimensions_for_pixels,
+    render_frame, scrollbar_view_from_geometry, sidebar_row_at_y,
 };
 
 use layout::{

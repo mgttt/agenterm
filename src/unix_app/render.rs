@@ -979,10 +979,7 @@ fn render_settings_modal(
         height,
         mx + 12,
         my + 50,
-        &format!(
-            "Preferred: {}",
-            truncate_chars(settings.font_family, 24)
-        ),
+        &format!("Preferred: {}", truncate_chars(settings.font_family, 24)),
         palette.muted_text,
     );
     draw_text(
@@ -1311,10 +1308,8 @@ mod tests {
         let (large_w, large_h) = cell_metrics(24);
         assert_eq!(cell_w, large_w);
         assert!(large_h > small_h);
-        let small_rows =
-            grid_dimensions_for_pixels(800, 480, 200, 48, 26, cell_w, small_h).1;
-        let large_rows =
-            grid_dimensions_for_pixels(800, 480, 200, 48, 26, large_w, large_h).1;
+        let small_rows = grid_dimensions_for_pixels(800, 480, 200, 48, 26, cell_w, small_h).1;
+        let large_rows = grid_dimensions_for_pixels(800, 480, 200, 48, 26, large_w, large_h).1;
         assert!(small_rows > large_rows);
     }
 }
