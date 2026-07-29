@@ -88,6 +88,30 @@ not interrupt the foreground application. `.\check.ps1 -Release` omits the
 4,128-write event-journal load test; the clean GitHub release runner adds
 `-IncludeStress`.
 
+### Linux GUI (preview)
+
+Native Linux `agenterm` uses winit + softbuffer. Control clients (`agenterm-cli`,
+`agenterm-mux`, `agenterm-script`, `agenterm-mcp`) do not need display libraries.
+
+**Release tarballs** ship a small `lib/` directory plus an `agenterm` launcher that
+sets `LD_LIBRARY_PATH` before starting `.agenterm.bin`, so end users do not need
+`sudo apt install` for X11/Wayland keyboard libraries.
+
+**Building from source** on a minimal host still needs the same libraries available
+to the linker/runtime (CI installs them automatically):
+
+```bash
+sudo apt-get install -y \
+  libxkbcommon0 libxkbcommon-x11-0 libwayland-client0 \
+  libx11-6 libxcb1 libxcb-xkb1
+./scripts/build-linux-clients.sh
+DISPLAY=:1 ./target/x86_64-unknown-linux-gnu/debug/agenterm
+```
+
+The Unix GUI currently rasterizes with the built-in `bitmap-8x8` font; settings
+`terminal.font-size` adjusts row pitch (grid density), while `terminal.font-family`
+is stored for future TTF support and Windows parity.
+
 ## Examples
 
 ```powershell

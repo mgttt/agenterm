@@ -9,7 +9,10 @@ pub(super) const SIDEBAR_TAB_ROW_HEIGHT: u32 = 34;
 pub(super) const COMPOSER_HEIGHT: u32 = 48;
 pub(super) const STATUS_HEIGHT: u32 = 26;
 pub(super) const SETTINGS_MODAL_WIDTH: u32 = 360;
-pub(super) const SETTINGS_MODAL_HEIGHT: u32 = 220;
+pub(super) const SETTINGS_MODAL_HEIGHT: u32 = 268;
+
+/// Unix GUI currently rasterizes with the built-in 8×8 bitmap, not host TTF families.
+pub(super) const RESOLVED_UNIX_FONT: &str = "bitmap-8x8";
 
 pub(super) const CELL_WIDTH: u32 = 10;
 pub(super) const CELL_HEIGHT: u32 = 16;
@@ -121,12 +124,21 @@ fn color_index(color: vt100::Color, background: bool) -> u8 {
     }
 }
 
+pub(super) fn cell_metrics(font_size: u16) -> (u32, u32) {
+    let pitch = u32::from(font_size.clamp(8, 36));
+    let cell_h = pitch.max(8 + CELL_PADDING_Y * 2);
+    let cell_w = GLYPH_WIDTH + CELL_PADDING_X * 2;
+    (cell_w, cell_h)
+}
+
 pub(super) fn grid_dimensions_for_pixels(
     width: u32,
     height: u32,
     sidebar_width: u32,
     composer_height: u32,
     status_height: u32,
+    cell_width: u32,
+    cell_height: u32,
 ) -> (u16, u16) {
     let terminal_width = width
         .saturating_sub(sidebar_width)
@@ -134,8 +146,8 @@ pub(super) fn grid_dimensions_for_pixels(
     let terminal_height = height
         .saturating_sub(composer_height)
         .saturating_sub(status_height);
-    let cols = (terminal_width / CELL_WIDTH).max(1) as u16;
-    let rows = (terminal_height / CELL_HEIGHT).max(1) as u16;
+    let cols = (terminal_width / cell_width.max(1)).max(1) as u16;
+    let rows = (terminal_height / cell_height.max(1)).max(1) as u16;
     (cols, rows)
 }
 
@@ -200,16 +212,17 @@ impl SettingsModalView<'_> {
     ) -> SettingsModalView<'_> {
         let left = (client_width.saturating_sub(SETTINGS_MODAL_WIDTH)) / 2;
         let top = (client_height.saturating_sub(SETTINGS_MODAL_HEIGHT)) / 2;
-        let button_y = top + 150;
+        let theme_row = top + 108;
+        let action_row = top + 148;
         SettingsModalView {
             font_family,
             font_size,
             theme_draft,
             bounds: (left, top, SETTINGS_MODAL_WIDTH, SETTINGS_MODAL_HEIGHT),
-            dark_button: (left + 16, button_y, 120, 28),
-            light_button: (left + 148, button_y, 120, 28),
-            cancel_button: (left + 16, button_y + 40, 120, 28),
-            apply_button: (left + 148, button_y + 40, 120, 28),
+            dark_button: (left + 16, theme_row, 120, 28),
+            light_button: (left + 148, theme_row, 120, 28),
+            cancel_button: (left + 16, action_row, 120, 28),
+            apply_button: (left + 148, action_row, 120, 28),
         }
     }
 }
@@ -369,6 +382,8 @@ pub(super) struct FrameContent<'a> {
     pub(super) sidebar_width: u32,
     pub(super) content_height: u32,
     pub(super) tree_height: u32,
+    pub(super) cell_width: u32,
+    pub(super) cell_height: u32,
     pub(super) terminal: TerminalPaint<'a>,
     pub(super) sidebar_rows: &'a [SidebarTabRow],
     pub(super) workspace_toolbar: Option<WorkspaceToolbarView>,
@@ -387,6 +402,8 @@ struct TerminalGridLayout {
     height: u32,
     offset_x: u32,
     offset_y: u32,
+    cell_width: u32,
+    cell_height: u32,
 }
 
 pub(super) fn render_frame(
@@ -426,6 +443,8 @@ pub(super) fn render_frame(
             height: content.content_height,
             offset_x: content.sidebar_width,
             offset_y: content.terminal_top,
+            cell_width: content.cell_width,
+            cell_height: content.cell_height,
         },
     );
     if let Some(scrollbar) = content.scrollbar {
@@ -593,20 +612,11 @@ fn render_window_close(
     palette: &ThemePalette,
     modal: WindowCloseView,
 ) {
-    let dim = rgb_to_pixel(Rgb {
-        red: 0,
-        green: 0,
-        blue: 0,
-    });
     for y in 0..height {
         for x in 0..width {
             let index = (y * stride + x) as usize;
             if let Some(pixel) = buffer.get_mut(index) {
-                let base = *pixel;
-                let r = ((base >> 16) & 0xFF) * 2 / 5;
-                let g = ((base >> 8) & 0xFF) * 2 / 5;
-                let b = (base & 0xFF) * 2 / 5;
-                *pixel = dim & 0xFF00_0000 | (r << 16) | (g << 8) | b;
+                *pixel = dim_pixel(*pixel, 2, 5);
             }
         }
     }
@@ -819,8 +829,8 @@ fn render_terminal_grid(
     let selection_bg = palette.selection_background;
     for row in 0..terminal.grid.rows {
         for col in 0..terminal.grid.cols {
-            let x = layout.offset_x + u32::from(col) * CELL_WIDTH;
-            if x + CELL_WIDTH > layout.offset_x + terminal_width {
+            let x = layout.offset_x + u32::from(col) * layout.cell_width;
+            if x + layout.cell_width > layout.offset_x + terminal_width {
                 break;
             }
             let cell = terminal.grid.cell(col, row);
@@ -843,7 +853,9 @@ fn render_terminal_grid(
                 layout.width,
                 layout.height,
                 x,
-                layout.offset_y + u32::from(row) * CELL_HEIGHT,
+                layout.offset_y + u32::from(row) * layout.cell_height,
+                layout.cell_width,
+                layout.cell_height,
                 cell.ch,
                 fg,
                 bg,
@@ -860,20 +872,11 @@ fn render_confirm_close(
     palette: &ThemePalette,
     confirm: ConfirmCloseView,
 ) {
-    let dim = rgb_to_pixel(Rgb {
-        red: 0,
-        green: 0,
-        blue: 0,
-    });
     for y in 0..height {
         for x in 0..width {
             let index = (y * stride + x) as usize;
             if let Some(pixel) = buffer.get_mut(index) {
-                let base = *pixel;
-                let r = ((base >> 16) & 0xFF) * 2 / 5;
-                let g = ((base >> 8) & 0xFF) * 2 / 5;
-                let b = (base & 0xFF) * 2 / 5;
-                *pixel = dim & 0xFF00_0000 | (r << 16) | (g << 8) | b;
+                *pixel = dim_pixel(*pixel, 2, 5);
             }
         }
     }
@@ -935,20 +938,11 @@ fn render_settings_modal(
     palette: &ThemePalette,
     settings: SettingsModalView<'_>,
 ) {
-    let overlay = rgb_to_pixel(Rgb {
-        red: 0,
-        green: 0,
-        blue: 0,
-    });
     for y in 0..height {
         for x in 0..width {
             let index = (y * stride + x) as usize;
             if let Some(pixel) = buffer.get_mut(index) {
-                let base = *pixel;
-                let r = ((base >> 16) & 0xFF) * 2 / 5;
-                let g = ((base >> 8) & 0xFF) * 2 / 5;
-                let b = (base & 0xFF) * 2 / 5;
-                *pixel = overlay & 0xFF00_0000 | (r << 16) | (g << 8) | b;
+                *pixel = dim_pixel(*pixel, 2, 5);
             }
         }
     }
@@ -974,8 +968,8 @@ fn render_settings_modal(
         width,
         height,
         mx + 12,
-        my + 36,
-        &format!("Font: {}", settings.font_family),
+        my + 34,
+        &format!("Renderer: {}", RESOLVED_UNIX_FONT),
         palette.muted_text,
     );
     draw_text(
@@ -984,9 +978,32 @@ fn render_settings_modal(
         width,
         height,
         mx + 12,
-        my + 52,
-        &format!("Size: {}", settings.font_size),
+        my + 50,
+        &format!(
+            "Preferred: {}",
+            truncate_chars(settings.font_family, 24)
+        ),
         palette.muted_text,
+    );
+    draw_text(
+        buffer,
+        stride,
+        width,
+        height,
+        mx + 12,
+        my + 66,
+        &format!("Row pitch: {} px", settings.font_size),
+        palette.muted_text,
+    );
+    draw_text(
+        buffer,
+        stride,
+        width,
+        height,
+        mx + 12,
+        my + 88,
+        "Theme",
+        palette.text,
     );
     render_button(
         buffer,
@@ -1080,6 +1097,8 @@ fn draw_cell(
     height: u32,
     origin_x: u32,
     origin_y: u32,
+    cell_width: u32,
+    cell_height: u32,
     ch: char,
     fg: Rgb,
     bg: Rgb,
@@ -1088,8 +1107,8 @@ fn draw_cell(
         return;
     }
 
-    let cell_w = CELL_WIDTH.min(width - origin_x);
-    let cell_h = CELL_HEIGHT.min(height - origin_y);
+    let cell_w = cell_width.min(width - origin_x);
+    let cell_h = cell_height.min(height - origin_y);
     let bg_pixel = rgb_to_pixel(bg);
     fill_rect(buffer, stride, origin_x, origin_y, cell_w, cell_h, bg_pixel);
 
@@ -1202,7 +1221,14 @@ fn ansi_color(palette: &ThemePalette, index: u8) -> Rgb {
 }
 
 fn rgb_to_pixel(rgb: Rgb) -> u32 {
-    0xFF00_0000 | (u32::from(rgb.red) << 16) | (u32::from(rgb.green) << 8) | u32::from(rgb.blue)
+    (u32::from(rgb.red) << 16) | (u32::from(rgb.green) << 8) | u32::from(rgb.blue)
+}
+
+fn dim_pixel(base: u32, numerator: u32, denominator: u32) -> u32 {
+    let r = ((base >> 16) & 0xFF) * numerator / denominator;
+    let g = ((base >> 8) & 0xFF) * numerator / denominator;
+    let b = (base & 0xFF) * numerator / denominator;
+    (r << 16) | (g << 8) | b
 }
 
 pub(super) fn effective_palette(
@@ -1240,7 +1266,11 @@ mod tests {
 
     #[test]
     fn grid_dimensions_account_for_sidebar_scrollbar_and_composer() {
-        assert_eq!(grid_dimensions_for_pixels(800, 480, 200, 48, 26), (58, 25));
+        let (cell_w, cell_h) = cell_metrics(12);
+        assert_eq!(
+            grid_dimensions_for_pixels(800, 480, 200, 48, 26, cell_w, cell_h),
+            (58, 25)
+        );
     }
 
     #[test]
@@ -1257,9 +1287,34 @@ mod tests {
 
     #[test]
     fn hidden_sidebar_yields_wider_terminal_grid() {
-        let without = grid_dimensions_for_pixels(800, 480, 0, 48, 26).0;
-        let with = grid_dimensions_for_pixels(800, 480, 200, 48, 26).0;
+        let (cell_w, cell_h) = cell_metrics(12);
+        let without = grid_dimensions_for_pixels(800, 480, 0, 48, 26, cell_w, cell_h).0;
+        let with = grid_dimensions_for_pixels(800, 480, 200, 48, 26, cell_w, cell_h).0;
         assert!(without > with);
         let _ = AppConfig::default();
+    }
+
+    #[test]
+    fn rgb_to_pixel_uses_softbuffer_zero_rgb_format() {
+        let pixel = rgb_to_pixel(Rgb {
+            red: 12,
+            green: 14,
+            blue: 18,
+        });
+        assert_eq!(pixel, 0x000C0E12);
+        assert_eq!(pixel & 0xFF000000, 0);
+    }
+
+    #[test]
+    fn larger_row_pitch_yields_fewer_terminal_rows() {
+        let (cell_w, small_h) = cell_metrics(12);
+        let (large_w, large_h) = cell_metrics(24);
+        assert_eq!(cell_w, large_w);
+        assert!(large_h > small_h);
+        let small_rows =
+            grid_dimensions_for_pixels(800, 480, 200, 48, 26, cell_w, small_h).1;
+        let large_rows =
+            grid_dimensions_for_pixels(800, 480, 200, 48, 26, large_w, large_h).1;
+        assert!(small_rows > large_rows);
     }
 }

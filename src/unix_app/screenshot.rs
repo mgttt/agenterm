@@ -27,7 +27,7 @@ pub(super) fn write_xrgb_png(
     for row in y0..y0 + h {
         let row_start = (row as usize) * (width as usize);
         for col in x0..x0 + w {
-            let pixel = pixels[row_start + col as usize];
+            let pixel = pixels[row_start + col as usize] & 0x00FF_FFFF;
             let r = ((pixel >> 16) & 0xFF) as u8;
             let g = ((pixel >> 8) & 0xFF) as u8;
             let b = (pixel & 0xFF) as u8;
