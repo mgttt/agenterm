@@ -89,6 +89,19 @@ fn run_stage_artifact(source: &Path, destination: &Path, name: &str) -> Output {
         .expect("run Rhai artifact staging task")
 }
 
+fn run_validate_artifact_manifest(path: &Path) -> Output {
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let manifest = repo.join("agenterm.tasks.json");
+    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+        .current_dir(repo)
+        .args(["task", "run", "validate-artifact-manifest", "--manifest"])
+        .arg(manifest)
+        .arg("--")
+        .arg(path)
+        .output()
+        .expect("run Rhai artifact-manifest validation task")
+}
+
 fn init_git_fixture(name: &str) -> PathBuf {
     let root = fixture_root(name);
     fs::create_dir_all(&root).expect("create Git fixture");
@@ -403,6 +416,106 @@ fn stage_artifact_task_replaces_only_a_valid_named_executable() {
     );
 
     fs::remove_dir_all(&root).expect("remove fixture");
+}
+
+#[test]
+fn artifact_manifest_task_accepts_canonical_contract_and_rejects_invalid_fields() {
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let canonical = run_validate_artifact_manifest(&repo.join("scripts").join("artifacts.json"));
+    assert!(
+        canonical.status.success(),
+        "canonical artifact manifest failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&canonical.stdout),
+        String::from_utf8_lossy(&canonical.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&canonical.stdout)
+            .contains("defines 6 validated Windows executables")
+    );
+
+    let root = fixture_root("artifact-manifest");
+    fs::create_dir_all(&root).expect("create manifest fixture");
+    let valid = serde_json::json!({
+        "schema_version": 2,
+        "executables": [{
+            "name": "agenterm-cli.exe",
+            "role": "cli",
+            "pe_subsystem": 3,
+            "documentation_role": "native control client",
+            "offline_probe": ["--version"],
+            "release_budget_bytes": 1
+        }]
+    });
+    let mut invalid = Vec::new();
+
+    let mut value = valid.clone();
+    value["schema_version"] = serde_json::json!(1);
+    invalid.push(("schema", value, "artifact_manifest_schema_unsupported"));
+
+    let mut value = valid.clone();
+    let duplicate = value["executables"][0].clone();
+    value["executables"]
+        .as_array_mut()
+        .expect("executables array")
+        .push(duplicate);
+    invalid.push(("duplicate", value, "artifact_manifest_name_duplicate"));
+
+    let mut value = valid.clone();
+    value["executables"][0]["name"] = serde_json::json!("outside.exe");
+    invalid.push(("name", value, "artifact_manifest_name_invalid"));
+
+    let mut value = valid.clone();
+    value["executables"][0]["pe_subsystem"] = serde_json::json!(1);
+    invalid.push(("subsystem", value, "artifact_manifest_pe_subsystem_invalid"));
+
+    let mut value = valid.clone();
+    value["executables"][0]["offline_probe"] = serde_json::json!([]);
+    invalid.push((
+        "console-probe",
+        value,
+        "artifact_manifest_console_probe_required",
+    ));
+
+    let mut value = valid.clone();
+    value["executables"][0]["role"] = serde_json::json!(" ");
+    invalid.push(("role", value, "artifact_manifest_role_empty"));
+
+    let mut value = valid.clone();
+    value["executables"][0]["documentation_role"] = serde_json::json!("");
+    invalid.push((
+        "documentation-role",
+        value,
+        "artifact_manifest_documentation_role_empty",
+    ));
+
+    let mut value = valid;
+    value["executables"][0]["release_budget_bytes"] = serde_json::json!(0);
+    invalid.push(("budget", value, "artifact_manifest_release_budget_missing"));
+
+    for (name, value, expected) in invalid {
+        let path = root.join(format!("{name}.json"));
+        fs::write(
+            &path,
+            serde_json::to_vec_pretty(&value).expect("encode invalid fixture"),
+        )
+        .expect("write invalid fixture");
+        let rejected = run_validate_artifact_manifest(&path);
+        assert!(
+            !rejected.status.success(),
+            "invalid {name} manifest unexpectedly passed"
+        );
+        let error = format!(
+            "{}{}",
+            String::from_utf8_lossy(&rejected.stdout),
+            String::from_utf8_lossy(&rejected.stderr)
+        );
+        assert!(
+            error.contains(expected),
+            "invalid {name} manifest returned wrong error: {error}"
+        );
+    }
+
+    fs::remove_dir_all(&root).expect("remove manifest fixture");
 }
 
 #[cfg(windows)]

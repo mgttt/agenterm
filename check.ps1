@@ -276,8 +276,16 @@ try {
         $script = '.\dist\agenterm-script.exe'
         $mcp = '.\dist\agenterm-mcp.exe'
         $artifactManifestPath = '.\scripts\artifacts.json'
-        . '.\scripts\artifact-manifest.ps1'
-        $artifactSpec = Get-AgenTermArtifactManifest -Path $artifactManifestPath
+        & $script task run validate-artifact-manifest `
+            --manifest '.\agenterm.tasks.json' -- $artifactManifestPath
+        if ($LASTEXITCODE -ne 0) {
+            throw (
+                'Rhai artifact-manifest validation failed with exit code ' +
+                $LASTEXITCODE
+            )
+        }
+        $artifactSpec = Get-Content -LiteralPath $artifactManifestPath -Raw |
+            ConvertFrom-Json
         $obsoleteCliArtifacts = @(
             Get-ChildItem -LiteralPath '.\dist' -File -Filter 'agentermctl*.exe'
         )

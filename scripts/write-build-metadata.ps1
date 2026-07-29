@@ -16,8 +16,15 @@ param(
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $stagedDirectoryPath = [IO.Path]::GetFullPath($StagedDirectory)
-. (Join-Path $PSScriptRoot 'artifact-manifest.ps1')
-$artifactManifest = Get-AgenTermArtifactManifest -Path $ArtifactManifestPath
+$taskManifestPath = Join-Path $repoRoot 'agenterm.tasks.json'
+$scriptExecutable = Join-Path $stagedDirectoryPath 'agenterm-script.exe'
+& $scriptExecutable task run validate-artifact-manifest `
+    --manifest $taskManifestPath -- $ArtifactManifestPath
+if ($LASTEXITCODE -ne 0) {
+    throw "Rhai artifact-manifest validation failed with exit code $LASTEXITCODE"
+}
+$artifactManifest = Get-Content -LiteralPath $ArtifactManifestPath -Raw |
+    ConvertFrom-Json
 $cargoToml = Get-Content -LiteralPath (Join-Path $repoRoot 'Cargo.toml') -Raw
 $versionMatch = [regex]::Match(
     $cargoToml,

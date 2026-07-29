@@ -85,6 +85,13 @@
       "args": ["."]
     },
     {
+      "id": "validate-artifact-manifest",
+      "description": "Validate the canonical local Windows executable manifest",
+      "entry": "scripts/rhai/validate-artifact-manifest.rhai",
+      "profile": "local",
+      "cwd": "."
+    },
+    {
       "id": "internal-version-policy",
       "description": "Reject publication of an internal-only product version",
       "entry": "scripts/rhai/internal-version-policy.rhai",

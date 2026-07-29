@@ -386,6 +386,7 @@ Migration ledger:
 | Locked and obsolete staged-artifact cleanup | `scripts/rhai/clean-locked-artifacts.rhai` | `scripts/clean-locked-artifacts.ps1` | `be9a538` | public `agenterm-script task run` black-box tests prove owned-name cleanup, unrelated-file retention, obsolete-name cleanup, and path-escape rejection | deleted; both normal stage-build callers use the named Rhai task |
 | Cargo target cleanup preparation | `scripts/rhai/prepare-target-clean.rhai` | `scripts/prepare-target-clean.ps1` | `c20acc7` | public CLI black-box tests prove Git-native exact-root binding (including Windows short/long path aliases), allowed target set, idempotent cache-tag creation, and invalid-path/tag rejection | deleted; release build calls the named Rhai task before `cargo clean` |
 | Single executable staging | `scripts/rhai/stage-artifact.rhai` | `scripts/stage-artifact.ps1` | `e087842` | public CLI black-box tests prove normal replacement, invalid-name rejection, and Windows running-image parking before replacement | deleted; `stage-build.ps1` invokes the named Rhai task for each manifest artifact |
+| Local executable manifest validation | `scripts/rhai/validate-artifact-manifest.rhai` | `scripts/artifact-manifest.ps1` | pending | public CLI black-box tests prove the canonical schema and reject duplicate/invalid names, invalid subsystem/probe contracts, empty roles, and missing size budgets | deleted; build staging, metadata writing, and artifact verification invoke the named Rhai task |
 
 ### v0.1.10 completion commitment
 

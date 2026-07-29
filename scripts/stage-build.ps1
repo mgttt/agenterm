@@ -19,8 +19,13 @@ $artifactManifestPath = Join-Path $PSScriptRoot 'artifacts.json'
 $taskManifestPath = Join-Path (Split-Path -Parent $PSScriptRoot) `
     'agenterm.tasks.json'
 $scriptExecutable = Join-Path $sourceDirectoryPath 'agenterm-script.exe'
-. (Join-Path $PSScriptRoot 'artifact-manifest.ps1')
-$artifactManifest = Get-AgenTermArtifactManifest -Path $artifactManifestPath
+& $scriptExecutable task run validate-artifact-manifest `
+    --manifest $taskManifestPath -- $artifactManifestPath
+if ($LASTEXITCODE -ne 0) {
+    throw "Rhai artifact-manifest validation failed with exit code $LASTEXITCODE"
+}
+$artifactManifest = Get-Content -LiteralPath $artifactManifestPath -Raw |
+    ConvertFrom-Json
 
 & $scriptExecutable task run clean-locked-artifacts `
     --manifest $taskManifestPath -- `
