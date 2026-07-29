@@ -197,6 +197,17 @@ agenterm-script
 │  │     Encodes UTF-8 text into `Bytes`.
 │  │     [shipped; stable; designed 2026-07-28]
 │  │
+│  ├─ crypto::
+│  │  Deterministic content digests for typed bytes and explicit files.
+│  │  [partially shipped; stable namespace; designed 2026-07-29]
+│  │  ├─ sha256(bytes)
+│  │  │  Returns the lowercase SHA-256 digest of one typed `Bytes` value.
+│  │  │  [shipped; stable; designed 2026-07-29]
+│  │  └─ sha256_file(path)
+│  │     Streams one explicit file in bounded chunks and returns its lowercase
+│  │     SHA-256 digest.
+│  │     [shipped; stable; designed 2026-07-29]
+│  │
 │  ├─ task::
 │  │  Executor-neutral task composition, waiting, racing, and cancellation.
 │  │  [partially shipped; stable delivered leaves; designed 2026-07-28]

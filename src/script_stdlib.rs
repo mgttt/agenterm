@@ -1,13 +1,14 @@
 use std::{
     cell::RefCell,
     fs::{DirEntry, FileType, Metadata},
-    io::Write,
+    io::{Read, Write},
     path::{Component, Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use rhai::{Array, Dynamic, Engine, EvalAltResult, Module, Shared};
+use sha2::{Digest, Sha256};
 
 thread_local! {
     static INVOCATION_TEMP_ROOT: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
@@ -163,6 +164,10 @@ pub fn register_local(engine: &mut Engine) {
     let mut bytes = Module::new();
     bytes.set_native_fn("from_text", bytes_from_text);
 
+    let mut crypto = Module::new();
+    crypto.set_native_fn("sha256", crypto_sha256);
+    crypto.set_native_fn("sha256_file", crypto_sha256_file);
+
     let mut runtime = Module::new();
     runtime.set_native_fn("temp_dir", runtime_temp_dir);
     runtime.set_native_fn("atomic_write", runtime_atomic_write);
@@ -171,6 +176,7 @@ pub fn register_local(engine: &mut Engine) {
     let mut rhai_module = Module::new();
     rhai_module.set_sub_module("json", json);
     rhai_module.set_sub_module("bytes", bytes);
+    rhai_module.set_sub_module("crypto", crypto);
     rhai_module.set_sub_module("runtime", runtime);
     crate::script_task::register(engine, &mut rhai_module);
     crate::script_http::register(engine, &mut rhai_module);
@@ -207,6 +213,38 @@ fn fs_write(path: &str, value: &str) -> Result<(), Box<EvalAltResult>> {
 
 fn fs_write_bytes(path: &str, value: ScriptBytes) -> Result<(), Box<EvalAltResult>> {
     std::fs::write(path, value.0).map_err(|error| io_error("fs_write", path, error))
+}
+
+fn crypto_sha256(value: ScriptBytes) -> Result<String, Box<EvalAltResult>> {
+    Ok(sha256_hex(Sha256::digest(value.0)))
+}
+
+fn crypto_sha256_file(path: &str) -> Result<String, Box<EvalAltResult>> {
+    let mut input =
+        std::fs::File::open(path).map_err(|error| io_error("crypto_sha256_file", path, error))?;
+    let mut digest = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let count = input
+            .read(&mut buffer)
+            .map_err(|error| io_error("crypto_sha256_file", path, error))?;
+        if count == 0 {
+            break;
+        }
+        digest.update(&buffer[..count]);
+    }
+    Ok(sha256_hex(digest.finalize()))
+}
+
+fn sha256_hex(bytes: impl AsRef<[u8]>) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let bytes = bytes.as_ref();
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        output.push(HEX[usize::from(byte >> 4)] as char);
+        output.push(HEX[usize::from(byte & 0x0f)] as char);
+    }
+    output
 }
 
 fn fs_exists(path: &str) -> Result<bool, Box<EvalAltResult>> {
@@ -578,6 +616,36 @@ mod tests {
                 .unwrap(),
             "hello"
         );
+    }
+
+    #[test]
+    fn crypto_sha256_hashes_typed_bytes_and_streamed_files_identically() {
+        let expected = concat!(
+            "ba7816bf8f01cfea414140de5dae2223",
+            "b00361a396177a9cb410ff61f20015ad"
+        );
+        let engine = local_engine();
+        assert_eq!(
+            engine
+                .eval::<String>(r#"rhai::crypto::sha256(rhai::bytes::from_text("abc"))"#)
+                .unwrap(),
+            expected
+        );
+
+        let fixture = std::env::temp_dir().join(format!(
+            "agenterm-script-sha256-{}-{}",
+            std::process::id(),
+            ATOMIC_WRITE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::write(&fixture, b"abc").unwrap();
+        let path = fixture.to_string_lossy().replace('\\', "\\\\");
+        assert_eq!(
+            engine
+                .eval::<String>(&format!(r#"rhai::crypto::sha256_file("{path}")"#))
+                .unwrap(),
+            expected
+        );
+        std::fs::remove_file(fixture).unwrap();
     }
 
     #[test]

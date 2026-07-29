@@ -28,7 +28,9 @@
         "std.time.system-time-now",
         "std.time.system-time-unix-millis",
         "rhai.json.parse",
-        "rhai.json.stringify-pretty"
+        "rhai.json.stringify-pretty",
+        "rhai.crypto.sha256-file",
+        "rhai.runtime.atomic-write"
       ]
     },
     "origin": {
@@ -52,6 +54,13 @@
       "id": "bootstrap-info",
       "description": "Report the repository, Git, Cargo, Rust and Script Runtime bootstrap identity",
       "entry": "scripts/rhai/bootstrap-info.rhai",
+      "profile": "local",
+      "cwd": "."
+    },
+    {
+      "id": "build-identity",
+      "description": "Freeze source revision, dirty state, and build-input hashes into a batch environment",
+      "entry": "scripts/rhai/build-identity.rhai",
       "profile": "local",
       "cwd": "."
     },

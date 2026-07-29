@@ -87,7 +87,25 @@ function Import-AgenTermDevelopmentBuildIdentity {
         'AGENTERM_BUILD_PROFILE'
     )
     try {
-        & '.\scripts\build-identity.ps1' -Profile dev -OutputPath $identityPath
+        $cargoTarget = if ([string]::IsNullOrWhiteSpace(
+                $env:CARGO_TARGET_DIR
+            )) {
+            Join-Path $PSScriptRoot 'target'
+        }
+        else {
+            [IO.Path]::GetFullPath($env:CARGO_TARGET_DIR)
+        }
+        & cargo build --quiet --locked --bin agenterm-script
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Could not bootstrap agenterm-script for build identity.'
+        }
+        $worker = Join-Path $cargoTarget 'debug\agenterm-script.exe'
+        & $worker task run build-identity `
+            --manifest '.\agenterm.tasks.json' -- `
+            $PSScriptRoot dev $identityPath
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Could not freeze the development build identity.'
+        }
         $values = [ordered]@{}
         foreach ($line in Get-Content -LiteralPath $identityPath) {
             if ($line -notmatch '^set "([A-Z0-9_]+)=(.*)"$') {

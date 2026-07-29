@@ -37,9 +37,16 @@ if /i "%~1"=="release" (
 )
 
 set "BUILD_IDENTITY_ENV=%TEMP%\agenterm-build-identity-%RANDOM%-%RANDOM%.cmd"
-"%POWERSHELL_EXE%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\build-identity.ps1" ^
-    -Profile "%PROFILE%" ^
-    -OutputPath "%BUILD_IDENTITY_ENV%"
+cargo build --quiet --locked %CARGO_ARGS% --bin agenterm-script
+if errorlevel 1 (
+    echo.
+    echo Failed to bootstrap agenterm-script for build identity.
+    popd
+    exit /b 1
+)
+"%CARGO_PROFILE_DIR%\agenterm-script.exe" task run build-identity ^
+    --manifest "%~dp0agenterm.tasks.json" -- ^
+    "%CD%" "%PROFILE%" "%BUILD_IDENTITY_ENV%"
 if errorlevel 1 (
     echo.
     echo Failed to determine truthful AgenTerm build identity.

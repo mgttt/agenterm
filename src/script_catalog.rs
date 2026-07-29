@@ -765,6 +765,27 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             (NO_STRINGS, &["bytes_invalid_utf8"]),
         ),
         shipped_local_entry(
+            "rhai.crypto.sha256",
+            "data/crypto/sha256",
+            "rhai::crypto::sha256",
+            Some("sha2::Sha256"),
+            RustMapping::Adapted,
+            "rhai::crypto::sha256(bytes)",
+            (&["lowercase_hex", "sha256"], NO_STRINGS),
+        ),
+        shipped_local_entry(
+            "rhai.crypto.sha256-file",
+            "data/crypto/sha256-file",
+            "rhai::crypto::sha256_file",
+            Some("sha2::Sha256"),
+            RustMapping::Adapted,
+            "rhai::crypto::sha256_file(path)",
+            (
+                &["streaming_64_kib_chunks", "lowercase_hex", "sha256"],
+                &["crypto_sha256_file"],
+            ),
+        ),
+        shipped_local_entry(
             "rhai.task.after",
             "runtime/task/timer/after",
             "rhai::task::after",
@@ -1389,6 +1410,13 @@ fn comparisons_for(stable_id: &str) -> ScriptApiComparisons {
             "Buffer / TextEncoder / TextDecoder",
             "Uint8Array / Buffer / Bun.readableStreamToBytes",
             "AgenTerm Bytes is an owned bounded value with strict UTF-8 conversion",
+        );
+    }
+    if stable_id.starts_with("rhai.crypto.") {
+        return similar_comparisons(
+            "node:crypto",
+            "Bun.CryptoHasher",
+            "AgenTerm exposes deterministic typed digests without implicit encoding or shell tools",
         );
     }
     if stable_id.starts_with("rhai.stream.") {

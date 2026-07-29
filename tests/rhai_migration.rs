@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(windows)]
@@ -13,6 +14,8 @@ use std::os::windows::fs::OpenOptionsExt;
 use std::process::{Child, Stdio};
 #[cfg(windows)]
 use windows_sys::Win32::Storage::FileSystem::GetShortPathNameW;
+
+static SCRIPT_TASK_LOCK: Mutex<()> = Mutex::new(());
 
 #[cfg(windows)]
 struct RunningFixture(Option<Child>);
@@ -46,6 +49,7 @@ fn fixture_root(name: &str) -> PathBuf {
 }
 
 fn run_clean_locked(directory: &Path, extra: &[&str]) -> Output {
+    let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     let manifest = repo.join("agenterm.tasks.json");
     let artifacts = repo.join("scripts").join("artifacts.json");
@@ -61,6 +65,7 @@ fn run_clean_locked(directory: &Path, extra: &[&str]) -> Output {
 }
 
 fn run_prepare_target(repo_under_test: &Path, target: &Path) -> Output {
+    let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     let manifest = repo.join("agenterm.tasks.json");
     Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
@@ -75,6 +80,7 @@ fn run_prepare_target(repo_under_test: &Path, target: &Path) -> Output {
 }
 
 fn run_stage_artifact(source: &Path, destination: &Path, name: &str) -> Output {
+    let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     let manifest = repo.join("agenterm.tasks.json");
     Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
@@ -90,6 +96,7 @@ fn run_stage_artifact(source: &Path, destination: &Path, name: &str) -> Output {
 }
 
 fn run_validate_artifact_manifest(path: &Path) -> Output {
+    let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     let manifest = repo.join("agenterm.tasks.json");
     Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
@@ -100,6 +107,22 @@ fn run_validate_artifact_manifest(path: &Path) -> Output {
         .arg(path)
         .output()
         .expect("run Rhai artifact-manifest validation task")
+}
+
+fn run_build_identity(repo_under_test: &Path, profile: &str, output_path: &Path) -> Output {
+    let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let manifest = repo.join("agenterm.tasks.json");
+    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+        .current_dir(repo)
+        .args(["task", "run", "build-identity", "--manifest"])
+        .arg(manifest)
+        .arg("--")
+        .arg(repo_under_test)
+        .arg(profile)
+        .arg(output_path)
+        .output()
+        .expect("run Rhai build-identity task")
 }
 
 fn init_git_fixture(name: &str) -> PathBuf {
@@ -117,6 +140,27 @@ fn init_git_fixture(name: &str) -> PathBuf {
         String::from_utf8_lossy(&output.stderr)
     );
     root
+}
+
+fn commit_git_fixture(root: &Path) {
+    for arguments in [
+        vec!["config", "user.email", "agenterm-test@example.invalid"],
+        vec!["config", "user.name", "AgenTerm Test"],
+        vec!["add", "."],
+        vec!["commit", "--quiet", "-m", "fixture"],
+    ] {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(arguments)
+            .output()
+            .expect("prepare Git fixture commit");
+        assert!(
+            output.status.success(),
+            "Git fixture command failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 }
 
 #[cfg(windows)]
@@ -516,6 +560,75 @@ fn artifact_manifest_task_accepts_canonical_contract_and_rejects_invalid_fields(
     }
 
     fs::remove_dir_all(&root).expect("remove manifest fixture");
+}
+
+#[test]
+fn build_identity_task_freezes_clean_and_dirty_source_inputs() {
+    let repo = init_git_fixture("build-identity");
+    fs::create_dir_all(repo.join("scripts")).expect("create scripts fixture");
+    fs::write(repo.join("Cargo.lock"), b"abc").expect("write Cargo.lock fixture");
+    fs::write(repo.join("scripts").join("artifacts.json"), b"{}")
+        .expect("write artifact manifest fixture");
+    commit_git_fixture(&repo);
+
+    let output_root = fixture_root("build-identity-output");
+    fs::create_dir_all(&output_root).expect("create build identity output fixture");
+    let clean_path = output_root.join("clean.cmd");
+    let clean = run_build_identity(&repo, "release-fast", &clean_path);
+    assert!(
+        clean.status.success(),
+        "clean build identity failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&clean.stdout),
+        String::from_utf8_lossy(&clean.stderr)
+    );
+    let clean_environment = fs::read_to_string(&clean_path).expect("read clean build identity");
+    let commit = Command::new("git")
+        .arg("-C")
+        .arg(&repo)
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .expect("read fixture commit");
+    let commit = String::from_utf8(commit.stdout)
+        .expect("fixture commit is UTF-8")
+        .trim()
+        .to_owned();
+    assert!(clean_environment.contains(&format!("set \"AGENTERM_BUILD_GIT_COMMIT={commit}\"")));
+    assert!(clean_environment.contains("set \"AGENTERM_BUILD_GIT_DIRTY=false\""));
+    assert!(clean_environment.contains(concat!(
+        "set \"AGENTERM_BUILD_CARGO_LOCK_SHA256=",
+        "ba7816bf8f01cfea414140de5dae2223",
+        "b00361a396177a9cb410ff61f20015ad\""
+    )));
+    assert!(clean_environment.contains(concat!(
+        "set \"AGENTERM_BUILD_ARTIFACT_MANIFEST_SHA256=",
+        "44136fa355b3678a1146ad16f7e8649e",
+        "94fb4fc21fe77e8310c060f61caaff8a\""
+    )));
+    assert!(clean_environment.contains("set \"AGENTERM_BUILD_PROFILE=release-fast\""));
+
+    fs::write(repo.join("Cargo.lock"), b"changed").expect("dirty tracked fixture");
+    let dirty_path = output_root.join("dirty.cmd");
+    let dirty = run_build_identity(&repo, "dev", &dirty_path);
+    assert!(dirty.status.success());
+    assert!(
+        fs::read_to_string(&dirty_path)
+            .expect("read dirty build identity")
+            .contains("set \"AGENTERM_BUILD_GIT_DIRTY=true\"")
+    );
+
+    let invalid = run_build_identity(&repo, "fastest", &output_root.join("invalid.cmd"));
+    assert!(!invalid.status.success());
+    assert!(
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&invalid.stdout),
+            String::from_utf8_lossy(&invalid.stderr)
+        )
+        .contains("build_identity_profile_invalid")
+    );
+
+    fs::remove_dir_all(&repo).expect("remove Git fixture");
+    fs::remove_dir_all(&output_root).expect("remove output fixture");
 }
 
 #[cfg(windows)]
