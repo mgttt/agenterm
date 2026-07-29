@@ -274,6 +274,7 @@ try {
         $cli = '.\dist\agenterm-cli.exe'
         $mux = '.\dist\agenterm-mux.exe'
         $script = '.\dist\agenterm-script.exe'
+        $mcp = '.\dist\agenterm-mcp.exe'
         $artifactManifestPath = '.\scripts\artifacts.json'
         . '.\scripts\artifact-manifest.ps1'
         $artifactSpec = Get-AgenTermArtifactManifest -Path $artifactManifestPath
@@ -338,6 +339,22 @@ try {
         if ($LASTEXITCODE -ne 0 -or
             $scriptVersionOutput -ne "agenterm-script $($metadata.version)") {
             throw 'agenterm-script --version does not match agenterm.json.'
+        }
+        $mcpVersionOutput = & $mcp --version
+        if ($LASTEXITCODE -ne 0 -or
+            $mcpVersionOutput -ne "agenterm-mcp $($metadata.version)") {
+            throw 'agenterm-mcp --version does not match agenterm.json.'
+        }
+        $mcpCapabilities = & $mcp capabilities --json | ConvertFrom-Json
+        if ($LASTEXITCODE -ne 0 -or
+            $mcpCapabilities.protocol_revision -ne '2025-11-25' -or
+            @($mcpCapabilities.transports).Count -ne 1 -or
+            $mcpCapabilities.transports[0] -ne 'stdio' -or
+            @($mcpCapabilities.resources).Count -ne 4 -or
+            @($mcpCapabilities.tools).Count -ne 1 -or
+            $mcpCapabilities.tools[0].name -ne 'agenterm_wait' -or
+            -not $mcpCapabilities.tools[0].read_only) {
+            throw 'agenterm-mcp offline capability catalog is invalid.'
         }
 
         $muxVersionOutput = & $mux --version

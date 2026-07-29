@@ -27,6 +27,10 @@ path = "src/bin/agenterm-script.rs"
 name = "agenterm-server"
 path = "src/bin/agenterm-server.rs"
 
+[[bin]]
+name = "agenterm-mcp"
+path = "src/bin/agenterm-mcp.rs"
+
 [dependencies]
 anyhow = "1"
 png = "0.17"

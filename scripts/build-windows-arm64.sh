@@ -11,7 +11,7 @@ PROFILE="${AGENTERM_BUILD_PROFILE:-debug}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-BINS=(agenterm agenterm-server agenterm-cli agenterm-mux agenterm-script)
+BINS=(agenterm agenterm-server agenterm-cli agenterm-mux agenterm-script agenterm-mcp)
 ARGS=(xwin build --target "$TARGET")
 if [[ $PROFILE == release ]]; then
   ARGS+=(--release)

@@ -13,6 +13,7 @@ mod control_dispatch;
 mod event_journal;
 mod instances;
 mod ipc_transport;
+pub mod mcp_catalog;
 pub mod operations;
 mod protocol;
 #[cfg(windows)]
@@ -71,6 +72,7 @@ mod win_app;
 mod worker_supervisor;
 
 pub use client::{run_cli_entry, run_mux_entry, run_script_entry_with_args};
+pub use mcp_catalog::run_mcp_entry_with_args;
 
 #[cfg(windows)]
 pub use win_app::run_gui_entry;

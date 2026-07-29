@@ -994,10 +994,11 @@ entry 是集成热点，只允许一个串行 owner 收口。
   refresh machine-readable ledger and remaining count
 
 第三提交
-  offline mcp catalog
-  protocol revision + methods + resources + tool + budgets
-  capabilities --json
-  golden schema tests
+  [done] offline mcp catalog
+  [done] protocol revision + methods + resources + tool + budgets
+  [done] capabilities --json
+  [in progress] catalog invariant tests shipped; serialized golden fixture
+    still pending
 
 第四提交
   bounded stdio JSON-RPC

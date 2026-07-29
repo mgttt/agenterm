@@ -40,6 +40,14 @@
       "documentation_role": "public Rhai scripting CLI and worker",
       "offline_probe": ["--version"],
       "release_budget_bytes": 3145728
+    },
+    {
+      "name": "agenterm-mcp.exe",
+      "role": "mcp-sidecar",
+      "pe_subsystem": 3,
+      "documentation_role": "on-demand read-only MCP stdio sidecar",
+      "offline_probe": ["--version"],
+      "release_budget_bytes": 2097152
     }
   ],
   "platforms": [
@@ -87,6 +95,14 @@
           "documentation_role": "public Rhai scripting CLI and worker",
           "offline_probe": ["--version"],
           "release_budget_bytes": 3145728
+        },
+        {
+          "name": "agenterm-mcp.exe",
+          "role": "mcp-sidecar",
+          "pe_subsystem": 3,
+          "documentation_role": "on-demand read-only MCP stdio sidecar",
+          "offline_probe": ["--version"],
+          "release_budget_bytes": 2097152
         }
       ]
     },
@@ -129,6 +145,13 @@
           "pe_subsystem": 3,
           "documentation_role": "public Rhai scripting CLI and worker",
           "offline_probe": ["--version"]
+        },
+        {
+          "name": "agenterm-mcp.exe",
+          "role": "mcp-sidecar",
+          "pe_subsystem": 3,
+          "documentation_role": "on-demand read-only MCP stdio sidecar",
+          "offline_probe": ["--version"]
         }
       ]
     },
@@ -160,6 +183,12 @@
           "role": "scripting-cli",
           "documentation_role": "public Rhai scripting CLI and worker",
           "offline_probe": ["--help"]
+        },
+        {
+          "name": "agenterm-mcp",
+          "role": "mcp-sidecar",
+          "documentation_role": "on-demand read-only MCP stdio sidecar",
+          "offline_probe": ["--version"]
         }
       ]
     },
@@ -191,6 +220,12 @@
           "role": "scripting-cli",
           "documentation_role": "public Rhai scripting CLI and worker",
           "offline_probe": ["--help"]
+        },
+        {
+          "name": "agenterm-mcp",
+          "role": "mcp-sidecar",
+          "documentation_role": "on-demand read-only MCP stdio sidecar",
+          "offline_probe": ["--version"]
         }
       ]
     },
@@ -222,6 +257,12 @@
           "role": "scripting-cli",
           "documentation_role": "public Rhai scripting CLI and worker",
           "offline_probe": ["--help"]
+        },
+        {
+          "name": "agenterm-mcp",
+          "role": "mcp-sidecar",
+          "documentation_role": "on-demand read-only MCP stdio sidecar",
+          "offline_probe": ["--version"]
         }
       ]
     },
@@ -253,6 +294,12 @@
           "role": "scripting-cli",
           "documentation_role": "public Rhai scripting CLI and worker",
           "offline_probe": ["--help"]
+        },
+        {
+          "name": "agenterm-mcp",
+          "role": "mcp-sidecar",
+          "documentation_role": "on-demand read-only MCP stdio sidecar",
+          "offline_probe": ["--version"]
         }
       ]
     }

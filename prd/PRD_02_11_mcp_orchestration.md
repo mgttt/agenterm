@@ -37,19 +37,25 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     federation and autonomous scheduling remain later gates
 - v0.1.10 first delivery: public read-only surface
   - Protocol scope
-    - [ ] pin the first delivery to the stable MCP `2025-11-25` revision;
+    - [~] pin the first delivery to the stable MCP `2025-11-25` revision;
       protocol upgrades are explicit catalog/schema changes and draft
-      stateless discovery or experimental tasks are not advertised
+      stateless discovery or experimental tasks are not advertised; the
+      offline Rust catalog now freezes this revision while transport
+      negotiation remains pending
     - [ ] support only initialize/initialized, ping, resources list/read,
       tools list/call for the single wait tool, and cancellation; stdout is
       newline-delimited UTF-8 JSON-RPC only and bounded diagnostics use stderr
     - [ ] the ordinary AgenTerm GUI adds no MCP panel, connection animation,
       approval surface, or startup work in this read-only delivery
   - Executable and discovery
-    - [ ] `agenterm-mcp.exe --help`, `--version`, and
+    - [~] `agenterm-mcp.exe --help`, `--version`, and
       `capabilities --json` work without starting a GUI or model runtime;
       capability output declares protocol/schema versions, transport,
       resources, tools, limits, and unavailable later-stage roles
+      - [x] the dependency-free Rust entry point and offline catalog are
+        implemented, unit-tested, included in the artifact manifest and
+        cross-platform build lists, and deliberately mark protocol methods,
+        resources, and `agenterm_wait` as `planned` until their handlers ship
     - [ ] `agenterm-mcp.exe serve --stdio` is the only first-delivery MCP
       transport; initialization negotiates a supported protocol version and
       publishes stable server identity without opening a network listener
@@ -79,6 +85,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [ ] client disconnect, cancellation, or timeout releases capacity
       within a bounded grace period and cannot block the GUI IPC loop or
       another MCP client
+  - Offline catalog invariants
+    - [x] catalog schema v1 publishes one `stdio` transport, the stable
+      `2025-11-25` protocol revision, four metadata-only resources, exactly one
+      read-only `agenterm_wait` tool, hard frame/concurrency/wait/error limits,
+      and explicit deferred roles
+    - [x] unit tests reject duplicate method/resource/tool identities and prove
+      the current implementation slice does not overclaim planned handlers as
+      shipped
   - Failure isolation and deferred roles
     - [ ] malformed JSON-RPC, oversized frames, a killed or hung sidecar,
       backend disconnect, and wait exhaustion cannot stall terminal output,

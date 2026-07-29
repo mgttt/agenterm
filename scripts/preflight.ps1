@@ -222,6 +222,7 @@ Invoke-PreflightGate -Id 'artifact-manifest' -Check {
         'agenterm-cli.exe'
         'agenterm-mux.exe'
         'agenterm-script.exe'
+        'agenterm-mcp.exe'
     )
     if ($manifest.schema_version -ne 2 -or
         (Compare-Object $expectedNames $names) -or

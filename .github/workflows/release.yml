@@ -235,7 +235,7 @@ jobs:
         run: |
           rustup target add aarch64-apple-darwin
           cargo build --locked --release --target aarch64-apple-darwin \
-            --bin agenterm --bin agenterm-cli --bin agenterm-mux --bin agenterm-script
+            --bin agenterm --bin agenterm-cli --bin agenterm-mux --bin agenterm-script --bin agenterm-mcp
 
       - name: Package macOS ARM64 release
         if: matrix.platform_id == 'macos-aarch64'
@@ -249,7 +249,7 @@ jobs:
         run: |
           rustup target add x86_64-apple-darwin
           cargo build --locked --release --target x86_64-apple-darwin \
-            --bin agenterm --bin agenterm-cli --bin agenterm-mux --bin agenterm-script
+            --bin agenterm --bin agenterm-cli --bin agenterm-mux --bin agenterm-script --bin agenterm-mcp
 
       - name: Package macOS x86_64 release
         if: matrix.platform_id == 'macos-x86_64'

@@ -109,6 +109,7 @@ echo Server:   %DIST_DIR%\agenterm-server.exe
 echo CLI:      %DIST_DIR%\agenterm-cli.exe
 echo Mux:      %DIST_DIR%\agenterm-mux.exe
 echo Script:   %DIST_DIR%\agenterm-script.exe
+echo MCP:      %DIST_DIR%\agenterm-mcp.exe
 echo Metadata: %DIST_DIR%\agenterm.json
 popd
 exit /b 0

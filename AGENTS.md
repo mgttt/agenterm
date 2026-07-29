@@ -113,7 +113,8 @@ checks may skip the bounded-journal saturation load. A candidate-bound
 qualification receipt requires `check.ps1 -Release -IncludeStress`; packaging
 must consume that exact receipt and must not rebuild.
 The release gate enforces explicit budgets of 4 MiB for `agenterm.exe` and
-2 MiB each for `agenterm-cli.exe` and `agenterm-mux.exe`; investigate dependency
+2 MiB each for `agenterm-cli.exe`, `agenterm-mux.exe`, and
+`agenterm-mcp.exe`; investigate dependency
 or feature growth instead of raising them casually.
 
 ## Runtime control and observation

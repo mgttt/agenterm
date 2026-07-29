@@ -34,6 +34,9 @@ native automation client, and a deliberately bounded tmux/RMUX frontend.
 - `agenterm-script.exe` is the public Rhai CLI for local automation, pure
   computation, observable Fleet tools, and versioned named tasks without
   linking the scripting engine into the GUI.
+- `agenterm-mcp.exe` is the on-demand read-only MCP sidecar. Its first
+  v0.1.10 slice exposes an offline, versioned capability catalog; stdio
+  serving remains unavailable until the protocol lifecycle is complete.
 - An internal, non-default `agenterm-server.exe` now proves the headless
   workspace/PTY/parser/event authority required for replaceable GUI work.
 - `new-agent` launches Codex in a named fleet tab with stable AgenTerm context.
@@ -59,7 +62,7 @@ uses parallel code generation, and retains incremental state. Use
 size-focused profile in an isolated `target-release/` scratch directory,
 stages the finished artifacts in `dist/`, and then clears only that scratch
 cache while preserving the incremental development `target/`. All modes
-produce five ignored executables plus
+produce six ignored executables plus
 build metadata under `dist/`:
 
 - `dist/agenterm.exe` — GUI application; double-clicking does not create a
@@ -70,6 +73,7 @@ build metadata under `dist/`:
 - `dist/agenterm-mux.exe` — tmux/RMUX compatibility frontend over the same IPC
   server.
 - `dist/agenterm-script.exe` — public Rhai scripting CLI and worker.
+- `dist/agenterm-mcp.exe` — on-demand read-only MCP stdio sidecar.
 - `dist/agenterm.json` — version, UTC build time, Git state, Rust target, size, and
   SHA-256 metadata.
 
