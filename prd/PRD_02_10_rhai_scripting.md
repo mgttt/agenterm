@@ -81,8 +81,9 @@ and it is not positioned as a restricted security plugin.
 - technical budgets, typed errors, cancellation, process isolation, audit
   privacy, and product data-integrity checks remain mandatory in every mode;
 - [x] explicit local repository tasks may raise their invocation wall-time
-  budget to the stable 120-second hard ceiling; individual child-process and
-  HTTP deadlines retain independent 10-second ceilings;
+  budget to the stable 120-second hard ceiling; child-process deadlines retain
+  an independent 60-second ceiling while HTTP retains its stricter 10-second
+  ceiling;
 - agent-specific tool visibility, approval, path/domain/target policy,
   credentials, quotas, and natural-language intent belong to a future agent
   layer, not to this runtime;

@@ -152,7 +152,9 @@ command.args([
     "metadata", "--locked", "--format-version", "1",
     "--manifest-path", std::path::join(repo, "Cargo.toml").display
 ]);
-command.timeout(std::time::Duration::from_secs(10));
+// A cold CI worker can need more than ten seconds to resolve complete metadata.
+// Leave headroom inside the task's 60-second outer invocation budget.
+command.timeout(std::time::Duration::from_secs(45));
 command.stdout_file(metadata_path);
 let metadata_output = command.output();
 require(

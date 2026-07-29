@@ -708,7 +708,7 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             Some("std::time::Duration::from_millis"),
             RustMapping::Adapted,
             "std::time::Duration::from_millis(value)",
-            (&["maximum_10000_ms"], &["duration_millis"]),
+            (&["maximum_60000_ms"], &["duration_millis"]),
         ),
         shipped_local_entry(
             "std.time.duration-from-secs",
@@ -717,7 +717,7 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             Some("std::time::Duration::from_secs"),
             RustMapping::Adapted,
             "std::time::Duration::from_secs(value)",
-            (&["maximum_10_seconds"], &["duration_seconds"]),
+            (&["maximum_60_seconds"], &["duration_seconds"]),
         ),
         shipped_local_entry(
             "rhai.json.parse",

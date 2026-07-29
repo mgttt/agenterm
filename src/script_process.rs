@@ -20,7 +20,7 @@ use crate::{
 };
 
 const DEFAULT_TIMEOUT_MS: u64 = 2_000;
-const MAX_TIMEOUT_MS: u64 = 10_000;
+const MAX_TIMEOUT_MS: u64 = 60_000;
 const OUTPUT_DRAIN_GRACE: Duration = Duration::from_secs(1);
 const DEFAULT_CAPTURE_BYTES: usize = 64 * 1024;
 const MAX_CAPTURE_BYTES: usize = 256 * 1024;
@@ -618,6 +618,17 @@ mod tests {
                 .unwrap(),
             2_000
         );
+        assert_eq!(
+            engine()
+                .eval::<rhai::INT>("std::time::Duration::from_secs(60).millis")
+                .unwrap(),
+            60_000
+        );
+        let error = engine()
+            .eval::<()>("std::time::Duration::from_millis(60001)")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("duration_millis"));
     }
 
     #[test]
