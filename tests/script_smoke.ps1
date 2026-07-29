@@ -778,13 +778,14 @@ let output = child.wait_with_output();
     }
 
     Write-Host 'STEP bounded child streams, backpressure, and truthful truncation'
+    $workerLiteral = $workerExe.Replace('\', '\\').Replace('"', '\"')
     $streamExpression = @'
-let command = std::process::command("cmd.exe");
-command.args(["/d", "/s", "/c", "<nul set /p =abcdef"]);
+let command = std::process::command("__WORKER__");
+command.args(["eval", "\"abcdef\""]);
 let child = command.start();
 let stream = child.stdout;
 let first = stream.read(2, std::time::Duration::from_secs(1)).to_text();
-let rest = stream.collect(16, std::time::Duration::from_secs(1)).to_text();
+let rest = stream.collect(64, std::time::Duration::from_secs(1)).to_text();
 let output = child.wait_with_output();
 let empty = stream.read(1);
 #{
@@ -800,7 +801,7 @@ let empty = stream.read(1);
     final: output.stdout_text(),
     output_complete: output.complete
 }
-'@
+'@.Replace('__WORKER__', $workerLiteral)
     $streamResult = Invoke-Script @(
         'script', 'eval', $streamExpression, '--profile', 'local',
         '--timeout-ms', '10000'
@@ -812,16 +813,16 @@ let empty = stream.read(1);
         $streamResult.truncated -or
         -not $streamResult.complete -or
         $streamResult.first -ne 'ab' -or
-        $streamResult.rest -ne 'cdef' -or
+        $streamResult.rest.Trim() -ne 'cdef' -or
         $streamResult.empty -ne 0 -or
-        $streamResult.final -ne 'abcdef' -or
+        $streamResult.final.Trim() -ne 'abcdef' -or
         -not $streamResult.output_complete) {
         throw 'child stdout stream did not preserve bounded live and final output facts'
     }
 
     $truncatedExpression = @'
-let command = std::process::command("cmd.exe");
-command.args(["/d", "/s", "/c", "<nul set /p =abcdefgh"]);
+let command = std::process::command("__WORKER__");
+command.args(["eval", "\"abcdefgh\""]);
 command.capture_limit(4);
 let child = command.start();
 let stream = child.stdout;
@@ -835,7 +836,7 @@ let output = child.wait_with_output();
     stream_truncated: stream.truncated,
     stream_complete: stream.complete
 }
-'@
+'@.Replace('__WORKER__', $workerLiteral)
     $truncatedResult = Invoke-Script @(
         'script', 'eval', $truncatedExpression, '--profile', 'local',
         '--timeout-ms', '10000'
@@ -843,7 +844,7 @@ let output = child.wait_with_output();
     if ($truncatedResult.stdout -ne 'abcd' -or
         -not $truncatedResult.truncated -or
         $truncatedResult.complete -or
-        $truncatedResult.delivered -ne 'abcdefgh' -or
+        $truncatedResult.delivered.Trim() -ne 'abcdefgh' -or
         $truncatedResult.stream_truncated -or
         -not $truncatedResult.stream_complete) {
         throw 'live stream and bounded final capture conflated their completeness'
