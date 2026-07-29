@@ -35,6 +35,17 @@ in the mind tree, lanes, and owning PRD modules below.
 
 **Local agent and process fleet work OS** — not “another terminal.”
 
+Public pitch (reviewed 2026-07-29):
+
+> **AgenTerm — the verifiable fleet OS for local processes and agents.**
+
+Category in one breath: **local multi-process / agent fleet console** — not a
+terminal shell.
+
+Go-to-market (same review): **seed programmers and sysadmins first**; office
+and creator personas via templates later — not a separate SKU or broad
+consumer launch.
+
 - **Tree** = org chart for parallel daily work (programs, agents, chores).
 - **Terminal viewport** = observe output; not the primary typing surface.
 - **Composer** = external input per tab (draft → Send).
