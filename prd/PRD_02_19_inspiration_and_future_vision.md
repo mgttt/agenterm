@@ -44,6 +44,226 @@ Inspiration card (this file)
 
 Do not duplicate normative requirements here after promotion; link to the owner.
 
+## Product mind tree
+
+Professional product-design frame for sorting inspiration. Read this section
+first; lane tables below map to branch IDs.
+
+### 1. Category boundary (what we are / are not)
+
+| We are | We are not |
+|--------|------------|
+| Local **agent & process fleet workspace** | A prettier tabbed terminal (Tabby, ConEmu) |
+| **Work OS** for long-lived crews on one machine | An IDE-embedded terminal or cloud dev box |
+| **Inspectable control plane** for humans and agents | Warp-style “AI inside the shell buffer” |
+| **Portable native runtime** with honest lifecycle | A chat app, team messenger, or feed reader |
+
+Positioning sentence:
+
+> **Organize many long-lived workers on one machine, intervene without losing
+> context, and prove what happened.**
+
+### 2. Primary persona and job tree
+
+**Primary persona (v1):** technical operator who runs **multiple agents and
+shells as a fleet** — solo power user, tech lead, or builder automating their
+own machine. They feel pain when tabs flatten, processes vanish, typing fights
+the stream, and scripts sleep instead of wait.
+
+**Secondary personas (later):** remote operator via mobile connector; feed
+consumer who wants signals routed into the fleet; marketplace publisher of
+optional packages.
+
+```text
+Job tree (JTBD)
+└─ When I run a crew of agents and terminals on my PC
+   ├─ I need to see who is alive, who died, and who owns what  → Organize + Observe
+   ├─ I need to prepare input without fighting live output      → Intervene (Composer)
+   ├─ I need crashes and closes not to erase my map             → Durable lifecycle
+   ├─ I need scripts and tools to use the same truth as me      → Automate
+   ├─ I need multi-step work to survive and coordinate          → Orchestrate (later)
+   ├─ I need optional capabilities without bloating the core    → Extend (later)
+   ├─ I need external signals to become fleet actions           → Inform (later)
+   └─ I need to monitor and nudge while away from the desk      → Reach (later)
+```
+
+### 3. User mind tree (capability tree)
+
+What the user thinks they are buying. Each branch has a **user promise**, a
+**product surface**, and a **platform contract**. Status reflects overall
+product direction, not per-feature shipped truth.
+
+```text
+AgenTerm — Local Agent Fleet Work OS
+│
+├─ [ORG] Organize the fleet
+│   ├─ Hierarchical team tree (agents + programs + roles)
+│   ├─ Names, notes, collapse, resize, search-at-scale (partial / planned)
+│   └─ Stable tab @id for the lifetime of a tab
+│   Surface: Tabs column · PRD: Human workspace
+│
+├─ [OBS] Observe truth
+│   ├─ Terminal viewport (scrollback, selection, screenshot)
+│   ├─ Status segments (CWD provenance, working context)
+│   ├─ Structured snapshots (UI, pane, protocol)
+│   └─ Event journal position (epoch / sequence)
+│   Surface: Terminal + status bar · PRD: Terminal runtime, Observable Fleet
+│
+├─ [INT] Intervene safely
+│   ├─ External Composer per tab (draft → Send, not raw stream typing)
+│   ├─ Explicit close / confirm destructive actions
+│   ├─ Detach GUI without killing the fleet
+│   └─ Scoped launch (env, agent bootstrap, ephemeral proxy)
+│   Surface: Composer · close modal · New dialog · PRD: Human workspace
+│
+├─ [DUR] Stay durable
+│   ├─ Process exit → tab stays readable ([dead] until explicit close)
+│   ├─ Restart → tree + metadata restore; PTY honest restart
+│   ├─ Server/GUI split → replace UI without losing live PTYs
+│   └─ Lightweight binaries and bounded memory posture
+│   Surface: invariants users feel · PRD: Executable family, Delivery
+│
+├─ [AUTO] Automate & interoperate
+│   ├─ agenterm-cli — observe, act, wait, verify
+│   ├─ agenterm-script — tasks, local profile, catalog
+│   ├─ agenterm-mux — bounded tmux/RMUX compatibility
+│   ├─ agenterm-mcp — agent bridge (read-first, then governed tools)
+│   └─ Receipts, replay, typed operations (maturing)
+│   Surface: CLIs · PRD: Command line, Rhai, mux, MCP, Control plane
+│
+├─ [ORCH] Orchestrate work (later)
+│   ├─ Pipelines / workflows (persisted steps, waits, branches)
+│   ├─ Cross-agent handoff inside one fleet
+│   └─ Recovery from snapshot + journal, not “hope process still alive”
+│   Depends on: AUTO maturity · Lane C · PRD: MCP brain/flow
+│
+├─ [EXT] Extend without bloating core (later)
+│   ├─ Optional sidecars (agenterm-{role}.exe)
+│   ├─ Signed install / update / rollback (softmgr)
+│   └─ Plugin / package market (discovery over packages)
+│   Depends on: package contract · Lane D · PRD: Optional components
+│
+├─ [INF] Route intelligence in (later)
+│   ├─ Feed connectors (LLM news, supply/demand, vertical data)
+│   ├─ Filter → predicate → notify → Composer draft
+│   ├─ On-device small models (summarize, triage, suggest)
+│   └─ Governed LLM gateway (optional, evidence-gated)
+│   Depends on: subscriptions · Lane E · not a media app
+│
+└─ [REACH] Reach the fleet remotely (later)
+    ├─ Mobile = connector to desktop server (not mobile terminal)
+    ├─ Monitor tree + bounded summaries
+    ├─ Voice / keyboard → mobile Composer draft → Send
+    └─ Push on urgent fleet predicates
+    Depends on: remote transport + subscriptions · Lane F
+```
+
+### 4. Platform tree (how capabilities are built)
+
+User branches sit on a **single authority** and **multiple clients**. Do not
+build parallel stacks per idea.
+
+```text
+Platform enablers (bottom → top)
+────────────────────────────────
+P4  Experiences     GUI · Mobile connector · Market UI · Feed cards
+P3  Orchestration   Flow runtime · Cross-tab coordination · Push rules
+P2  Public contract Typed ops · IPC · Journal · Waits · Receipts · MCP
+P1  Fleet authority agenterm-server — tree, PTY, parser, events, persistence
+P0  Trust & ship    Size budgets · portable dist · qualification · signing
+```
+
+Rule: a new idea must name which **user branch** (ORG…REACH) it serves and
+which **platform layer** (P0–P4) it touches. If it needs a new authority or
+duplicate state, redesign or reject.
+
+### 5. Sequencing waves (dependency, not calendar)
+
+| Wave | User outcome | Mind branches | Gate |
+|------|--------------|---------------|------|
+| W0 Foundation | Fleet map + Composer + durable tabs | ORG, OBS, INT, DUR | shipped / active |
+| W1 Control | Same truth for human + script + mux | AUTO | typed ops + journal + waits |
+| W2 Agent bridge | External agents read/wait safely | AUTO | MCP read-only + privacy |
+| W3 Orchestration | Multi-step and multi-agent work | ORCH | receipts + flow runtime |
+| W4 Extension | Install tools without fat GUI | EXT | softmgr + signed packages |
+| W5 Signals | External world → fleet actions | INF | subscriptions + connectors |
+| W6 Reach | Away-from-desk monitor + nudge | REACH | remote auth + push |
+| W7 Federation | Cross-machine fleets (optional) | ORCH + REACH | security model first |
+
+Ideas in W3–W7 are valid **inspiration** until their wave gate is green.
+
+### 6. Experience principles (design filter)
+
+Derived from product origin; use when judging any new idea.
+
+1. **Quiet daily surface** — power through commands/API; hide secondary chrome.
+2. **Input ≠ viewport** — long or sensitive typing goes to Composer or API.
+3. **Exit ≠ erase** — death and detach are visible states, not silent cleanup.
+4. **One truth, many clients** — GUI, CLI, script, mux, MCP, mobile read the
+   same contract.
+5. **Verify, don’t sleep** — automation waits on state/events, not timers.
+6. **Fail explicitly** — unsupported tmux/MCP ops error; no false success.
+7. **Light and local-first** — small binaries, portable dist, bounded journals.
+8. **Extend outward** — market, feeds, and models plug in; core stays small.
+
+### 7. Idea admission checklist
+
+Before adding or promoting an idea, answer:
+
+1. Which **mind branch** (ORG–REACH)? If none, reject or defer.
+2. Which **user job** from the job tree?
+3. Does it need **new authority**? If yes, justify or sidecar it.
+4. What is the **verifiable success signal** (snapshot, event, receipt, PNG)?
+5. What is the **non-goal** (what we refuse to become)?
+
+### 8. Lane ↔ mind branch map
+
+| Lane | Mind branches | Wave |
+|------|---------------|------|
+| A — Fleet workspace | ORG, OBS, INT, DUR | W0 |
+| B — Control plane | AUTO | W1–W2 |
+| C — Orchestration | ORCH | W3 |
+| D — Marketplace | EXT | W4 |
+| E — Intelligence feeds | INF | W5 |
+| F — Mobile connector | REACH | W6 |
+| G — Platform & ship | DUR, P0 | W0–W1 |
+
+### Mind tree diagram (mermaid)
+
+```mermaid
+flowchart TB
+  subgraph OS["AgenTerm — Local Agent Fleet Work OS"]
+    ORG[ORG Organize]
+    OBS[OBS Observe]
+    INT[INT Intervene]
+    DUR[DUR Durable]
+    AUTO[AUTO Automate]
+    ORCH[ORCH Orchestrate]
+    EXT[EXT Extend]
+    INF[INF Inform]
+    REACH[REACH Remote]
+  end
+
+  subgraph P["Platform authority"]
+    SRV[agenterm-server]
+    CONTRACT[Typed IPC + journal + waits]
+  end
+
+  ORG --> OBS
+  OBS --> INT
+  INT --> DUR
+  DUR --> AUTO
+  AUTO --> ORCH
+  AUTO --> EXT
+  AUTO --> INF
+  AUTO --> REACH
+  ORCH --> INF
+  INF --> REACH
+
+  SRV --> CONTRACT
+  CONTRACT --> AUTO
+```
+
 ## Platform layers (north star)
 
 Long-term product shape discussed with the product owner. Layers build on the
@@ -51,12 +271,14 @@ same fleet contract (tree, Composer, server authority, typed control plane,
 Observable Fleet) rather than replacing it.
 
 ```text
-L0 Fleet kernel     — tree, Composer, server/GUI split, CLI/script/MCP, mux
-L1 Orchestration    — workflows, cross-agent coordination, subscriptions/waits
-L2 Extensions       — signed packages, plugin market, optional sidecars
-L3 Intelligence feeds — news, supply/demand, vertical data (mostly third-party)
-L4 Mobile connector — phone as remote client, not a second terminal product
+L0 Fleet kernel     — ORG, OBS, INT, DUR + P1 server authority
+L1 Orchestration    — ORCH (workflows, coordination, subscriptions)
+L2 Extensions       — EXT (signed packages, plugin market, sidecars)
+L3 Intelligence feeds — INF (news, supply/demand, on-device assist)
+L4 Mobile connector — REACH (phone as client, not second terminal)
 ```
+
+Layers align with mind branches; see **Product mind tree** above for the full frame.
 
 ## Product origin (why AgenTerm exists)
 
@@ -87,7 +309,10 @@ One-sentence north star:
 
 ## Idea lanes
 
-### Lane A — Fleet workspace and daily UX
+Lanes map to **mind branches** and **waves** (see §8). Branch IDs: ORG, OBS,
+INT, DUR, AUTO, ORCH, EXT, INF, REACH.
+
+### Lane A — Fleet workspace and daily UX (ORG · OBS · INT · DUR · W0)
 
 | ID | Status | Idea | Depends on | Owning module when promoted |
 |----|--------|------|------------|------------------------------|
@@ -98,7 +323,7 @@ One-sentence north star:
 | A5 | [idea] | Scale evidence for 50+ tab trees (scroll, search, focus) | A4 optional | Human workspace |
 | A6 | [deferred] | Global/default proxy workbench in GUI | explicit non-goal in v0.1.6+ | Human workspace |
 
-### Lane B — Control plane, automation, and interoperability
+### Lane B — Control plane, automation, and interoperability (AUTO · W1–W2)
 
 | ID | Status | Idea | Depends on | Owning module when promoted |
 |----|--------|------|------------|------------------------------|
@@ -110,7 +335,7 @@ One-sentence north star:
 | B6 | [promoted] | Rhai script runtime and task catalog | — | Rust host + Rhai scripting |
 | B7 | [explore] | MCP read-only bridge then governed tools | v0.1.10 gates | MCP orchestration |
 
-### Lane C — Orchestration and multi-agent collaboration
+### Lane C — Orchestration and multi-agent collaboration (ORCH · W3)
 
 | ID | Status | Idea | Depends on | Owning module when promoted |
 |----|--------|------|------------|------------------------------|
@@ -125,7 +350,7 @@ Non-goals for this lane:
 - no natural-language success signal without verifiable post-state;
 - no autonomous destructive actions without confirmation and policy.
 
-### Lane D — Extensions and marketplace
+### Lane D — Extensions and marketplace (EXT · W4)
 
 | ID | Status | Idea | Depends on | Owning module when promoted |
 |----|--------|------|------------|------------------------------|
@@ -134,7 +359,7 @@ Non-goals for this lane:
 | D3 | [idea] | GUI never downloads at startup; manifest-only awareness | D1 | Optional component lifecycle, Executable family |
 | D4 | [deferred] | Public registry with remote resolution and signing policy | D1, D2 | Optional component lifecycle, Rhai scripting |
 
-### Lane E — Intelligence feeds and on-device assist
+### Lane E — Intelligence feeds and on-device assist (INF · W5)
 
 | ID | Status | Idea | Depends on | Owning module when promoted |
 |----|--------|------|------------|------------------------------|
@@ -149,7 +374,7 @@ Feeds non-goals:
 - AgenTerm is not a media reader app; it **routes signals into actionable fleet context**;
 - no auto-execution of trades or commitments from feed content without explicit user confirm.
 
-### Lane F — Mobile connector
+### Lane F — Mobile connector (REACH · W6)
 
 Phone as **desktop fleet remote client**, not a standalone mobile terminal.
 
@@ -168,7 +393,7 @@ Security notes (must be designed before F1 ships):
 - LAN-first option; remote requires explicit opt-in;
 - push payloads stay redacted; deep-link to stable tab `@id`.
 
-### Lane G — Platform and distribution
+### Lane G — Platform and distribution (DUR · P0 · W0–W1)
 
 | ID | Status | Idea | Depends on | Owning module when promoted |
 |----|--------|------|------------|------------------------------|
@@ -183,11 +408,14 @@ Security notes (must be designed before F1 ships):
 ### IDEA-YYYY-MM-DD-short-name
 
 - Status: [idea]
+- Mind branch: (ORG | OBS | INT | DUR | AUTO | ORCH | EXT | INF | REACH)
+- Wave: (W0–W7)
 - Lane: (A–G)
 - Problem: (user pain in one sentence)
 - Sketch: (what it might look like)
 - Depends on: (capabilities or gates)
 - Non-goals: (what we will not do)
+- Verifiable signal: (snapshot / event / receipt / PNG)
 - Promotion target: (owning PRD module)
 - Notes: (links, spikes, conversations)
 ```
@@ -202,4 +430,4 @@ Add uncategorized sparks here; sort into lanes during review.
 
 ---
 
-Last reviewed: 2026-07-29
+Last reviewed: 2026-07-29 (product mind tree added)
