@@ -328,7 +328,7 @@ try {
             'script-smoke' = '.\tests\script_smoke.ps1'
             'theme-smoke' = '.\scripts\rhai\theme-smoke.rhai'
             'working-context-smoke' = '.\scripts\rhai\working-context-smoke.rhai'
-            'workbench-smoke' = '.\tests\workbench_smoke.ps1'
+            'workbench-smoke' = '.\scripts\rhai\workbench-smoke.rhai'
             'ux-smoke' = '.\tests\ux_smoke.ps1'
         }
     $declarationWatch.Stop()
@@ -564,7 +564,9 @@ try {
             }
             Invoke-Checked -Id 'workbench-smoke' `
                 -Label 'workbench interaction smoke test' {
-                & '.\tests\workbench_smoke.ps1'
+                & '.\dist\agenterm-script.exe' task run workbench-smoke `
+                    --manifest '.\agenterm.tasks.json' `
+                    --timeout-ms 60000 --max-operations 10000000
             }
             Invoke-Checked -Id 'ux-smoke' -Label 'semantic UX smoke test' {
                 & '.\tests\ux_smoke.ps1'

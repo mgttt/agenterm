@@ -832,8 +832,10 @@ fn child_window_pointer(
     x: rhai::INT,
     y: rhai::INT,
 ) -> Result<(), Box<EvalAltResult>> {
+    use windows_sys::Win32::Foundation::POINT;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        SendMessageW, WM_CAPTURECHANGED, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
+        BM_CLICK, CWP_SKIPDISABLED, CWP_SKIPINVISIBLE, ChildWindowFromPointEx, SendMessageW,
+        WM_CAPTURECHANGED, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
     };
 
     let x = i32::try_from(x).map_err(|_| {
@@ -862,6 +864,22 @@ fn child_window_pointer(
         ));
     }
     let point = (((y & 0xffff) << 16) | (x & 0xffff)) as isize;
+    if action == "click" {
+        let child = unsafe {
+            ChildWindowFromPointEx(window, POINT { x, y }, CWP_SKIPINVISIBLE | CWP_SKIPDISABLED)
+        };
+        if !child.is_null() && child != window {
+            unsafe {
+                SendMessageW(child, BM_CLICK, 0, 0);
+            }
+        } else {
+            unsafe {
+                SendMessageW(window, WM_LBUTTONDOWN, 0, point);
+                SendMessageW(window, WM_LBUTTONUP, 0, point);
+            }
+        }
+        return Ok(());
+    }
     let (message, button, parameter) = match action {
         "down" => (WM_LBUTTONDOWN, 0, point),
         "move" => (WM_MOUSEMOVE, 0, point),
@@ -872,7 +890,7 @@ fn child_window_pointer(
             return Err(process_window_error(
                 "process_window_pointer_action_invalid",
                 "Child.window_pointer",
-                "window pointer action must be down, move, move-held, up, or capture-changed",
+                "window pointer action must be click, down, move, move-held, up, or capture-changed",
                 Some("invalid_input"),
             ));
         }

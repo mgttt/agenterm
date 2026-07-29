@@ -367,7 +367,7 @@ agenterm-script
 │  │  │  Delivers one named native key to the child's current top-level window.
 │  │  │  [shipped on Windows; stable; designed 2026-07-30]
 │  │  └─ Child.window_pointer(action, x, y)
-│  │     Delivers down/move/move-held/up/capture-changed pointer input.
+│  │     Delivers click/down/move/move-held/up/capture-changed pointer input.
 │  │     [shipped on Windows; stable; designed 2026-07-30]
 │  ├─ PngInfo
 │  │  Width, height, sample count, average RGB, and luminance facts.
@@ -848,7 +848,9 @@ general inventory.
 current top-level window from the invocation-owned child PID on every call.
 They never reinterpret the opaque `top_level_window_id` observation as a
 persisted control handle. Windows supports the documented named keys and
-left-pointer lifecycle; other platforms fail explicitly with
+left-pointer lifecycle. The `click` action performs a native button click when
+the coordinate resolves to a visible enabled child control, and otherwise
+delivers a left-button down/up pair to the top-level window. Other platforms fail explicitly with
 `process_window_input_unsupported` until an equivalent native adapter ships.
 This is a platform-availability boundary, not an Agent authorization layer.
 

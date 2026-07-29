@@ -394,6 +394,30 @@ fn run_theme_smoke() -> Output {
         .expect("run Rhai theme smoke")
 }
 
+#[cfg(windows)]
+fn run_workbench_smoke() -> Output {
+    let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+        .current_dir(repo)
+        .args(["run", "scripts/rhai/workbench-smoke.rhai"])
+        .args(["--profile", "local", "--project-root"])
+        .arg(repo)
+        .args([
+            "--timeout-ms",
+            "60000",
+            "--max-operations",
+            "10000000",
+            "--",
+        ])
+        .arg(repo)
+        .arg(env!("CARGO_BIN_EXE_agenterm"))
+        .arg(env!("CARGO_BIN_EXE_agenterm-cli"))
+        .env("AGENTERM_NO_ACTIVATE", "1")
+        .output()
+        .expect("run Rhai workbench smoke")
+}
+
 fn run_preflight(repo_under_test: &Path, output_path: &Path) -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -1412,7 +1436,6 @@ fn prd_alignment_task_matches_public_catalogs_and_fails_closed() {
         "remote_ui_smoke.ps1",
         "fleet_smoke.ps1",
         "script_smoke.ps1",
-        "workbench_smoke.ps1",
         "ux_smoke.ps1",
     ] {
         copy_fixture_file(repo, &fixture, &format!("tests/{suite}"));
@@ -1422,6 +1445,7 @@ fn prd_alignment_task_matches_public_catalogs_and_fails_closed() {
     copy_fixture_file(repo, &fixture, "scripts/rhai/remote-ui-upgrade-smoke.rhai");
     copy_fixture_file(repo, &fixture, "scripts/rhai/cli-smoke.rhai");
     copy_fixture_file(repo, &fixture, "scripts/rhai/theme-smoke.rhai");
+    copy_fixture_file(repo, &fixture, "scripts/rhai/workbench-smoke.rhai");
     let contract_path = fixture.join("prd").join("alignment-contract.json");
     let malformed = fs::read_to_string(&contract_path)
         .expect("read fixture alignment contract")
@@ -1576,6 +1600,31 @@ fn rhai_theme_smoke_preserves_native_rendering_pty_and_restart_contract() {
         stdout
             .contains("PASS: theme preview, rollback, persistence, PTY continuity, and rendering")
     );
+}
+
+#[cfg(windows)]
+#[test]
+fn rhai_workbench_smoke_preserves_physical_editing_and_compact_tree_contract() {
+    let output = run_workbench_smoke();
+    assert!(
+        output.status.success(),
+        "Rhai workbench smoke failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for evidence in [
+        "ux.workbench-inline-edit",
+        "ux.workbench-proxy-archived",
+        "ux.workbench-compact-tree",
+    ] {
+        assert!(
+            stdout.contains(&format!("EVIDENCE {evidence}")),
+            "missing {evidence} in:\n{stdout}"
+        );
+    }
+    assert!(stdout.contains("STEP mouse Cancel discards both independent drafts"));
+    assert!(stdout.contains("PASS: inline Tabs editing and compact tree geometry"));
 }
 
 #[test]

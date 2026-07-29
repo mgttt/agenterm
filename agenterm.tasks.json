@@ -106,6 +106,14 @@
       "args": [".", "dist/agenterm.exe", "dist/agenterm-cli.exe"]
     },
     {
+      "id": "workbench-smoke",
+      "description": "Prove physical inline tab editing, archived Proxy chrome, and compact deep-tree geometry",
+      "entry": "scripts/rhai/workbench-smoke.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "args": [".", "dist/agenterm.exe", "dist/agenterm-cli.exe"]
+    },
+    {
       "id": "server-smoke",
       "description": "Prove split headless server ownership, leases, PTY state, receipts, events, persistence, and native window absence",
       "entry": "scripts/rhai/server-smoke.rhai",
