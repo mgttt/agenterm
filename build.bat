@@ -12,10 +12,6 @@ if defined CARGO_TARGET_DIR (
 )
 set "CARGO_PROFILE_DIR=%CARGO_OUTPUT_DIR%\debug"
 set "DIST_DIR=%~dp0dist"
-set "POWERSHELL_EXE=powershell.exe"
-where pwsh.exe >nul 2>nul
-if not errorlevel 1 set "POWERSHELL_EXE=pwsh.exe"
-
 if /i "%~1"=="release" (
     set "PROFILE=release"
     set "CARGO_ARGS=--release"
@@ -71,10 +67,10 @@ if errorlevel 1 (
     exit /b 1
 )
 
-"%POWERSHELL_EXE%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\stage-build.ps1" ^
-    -SourceDirectory "%CARGO_PROFILE_DIR%" ^
-    -DestinationDirectory "%DIST_DIR%" ^
-    -Profile "%PROFILE%"
+"%CARGO_PROFILE_DIR%\agenterm-script.exe" task run stage-build ^
+    --manifest "%~dp0agenterm.tasks.json" ^
+    --timeout-ms 10000 --max-operations 10000000 -- ^
+    "%CD%" "%CARGO_PROFILE_DIR%" "%DIST_DIR%" "%PROFILE%"
 if errorlevel 1 (
     echo.
     echo Failed to stage AgenTerm artifacts and metadata.

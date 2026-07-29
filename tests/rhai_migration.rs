@@ -168,6 +168,41 @@ fn run_write_build_metadata(
     command.output().expect("run Rhai build-metadata task")
 }
 
+fn run_stage_build(
+    repo_under_test: &Path,
+    source_directory: &Path,
+    destination_directory: &Path,
+    profile: &str,
+) -> Output {
+    const BUILD_IDENTITY_ENVIRONMENT: [&str; 6] = [
+        "AGENTERM_BUILD_IDENTITY_VERSION",
+        "AGENTERM_BUILD_GIT_COMMIT",
+        "AGENTERM_BUILD_GIT_DIRTY",
+        "AGENTERM_BUILD_CARGO_LOCK_SHA256",
+        "AGENTERM_BUILD_ARTIFACT_MANIFEST_SHA256",
+        "AGENTERM_BUILD_PROFILE",
+    ];
+
+    let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let manifest = repo.join("agenterm.tasks.json");
+    let mut command = Command::new(env!("CARGO_BIN_EXE_agenterm-script"));
+    command
+        .current_dir(repo)
+        .args(["task", "run", "stage-build", "--manifest"])
+        .arg(manifest)
+        .args(["--timeout-ms", "10000", "--max-operations", "10000000"])
+        .arg("--")
+        .arg(repo_under_test)
+        .arg(source_directory)
+        .arg(destination_directory)
+        .arg(profile);
+    for name in BUILD_IDENTITY_ENVIRONMENT {
+        command.env_remove(name);
+    }
+    command.output().expect("run Rhai stage-build task")
+}
+
 fn parse_batch_environment(path: &Path) -> Vec<(String, String)> {
     fs::read_to_string(path)
         .expect("read batch environment")
@@ -851,6 +886,92 @@ fn build_metadata_task_preserves_frozen_identity_and_detects_drift() {
     fs::remove_dir_all(&repo).expect("remove Git fixture");
     fs::remove_dir_all(&staged).expect("remove staged fixture");
     fs::remove_dir_all(&output_root).expect("remove output fixture");
+}
+
+#[test]
+fn stage_build_task_composes_cleanup_staging_and_metadata() {
+    let repo = init_git_fixture("stage-build");
+    let scripts = repo.join("scripts");
+    let source = fixture_root("stage-build-source");
+    let destination = fixture_root("stage-build-destination");
+    fs::create_dir_all(&scripts).expect("create scripts fixture");
+    fs::create_dir_all(&source).expect("create source fixture");
+    fs::create_dir_all(&destination).expect("create destination fixture");
+
+    fs::write(
+        repo.join("Cargo.toml"),
+        "[package]\nname = \"fixture\"\nversion = \"1.2.3\"\n",
+    )
+    .expect("write Cargo.toml fixture");
+    fs::write(repo.join("Cargo.lock"), b"stage-build-lock").expect("write Cargo.lock fixture");
+    fs::write(
+        scripts.join("artifacts.json"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": 2,
+            "executables": [{
+                "name": "agenterm-cli.exe",
+                "role": "cli",
+                "pe_subsystem": 3,
+                "documentation_role": "fixture client",
+                "offline_probe": ["--version"],
+                "release_budget_bytes": 1024
+            }]
+        }))
+        .expect("encode artifact manifest"),
+    )
+    .expect("write artifact manifest");
+    fs::write(source.join("agenterm-cli.exe"), b"new-cli").expect("write source artifact");
+    fs::write(destination.join("agenterm-cli.exe"), b"old-cli")
+        .expect("write old destination artifact");
+    fs::write(destination.join("agenterm-cli.locked-1.exe"), b"stale")
+        .expect("write stale artifact");
+    fs::write(destination.join("agentermctl.exe"), b"obsolete").expect("write obsolete artifact");
+    fs::write(destination.join("other.locked-1.exe"), b"unrelated")
+        .expect("write unrelated artifact");
+    commit_git_fixture(&repo);
+
+    let staged = run_stage_build(&repo, &source, &destination, "dev");
+    assert!(
+        staged.status.success(),
+        "stage build failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&staged.stdout),
+        String::from_utf8_lossy(&staged.stderr)
+    );
+    assert_eq!(
+        fs::read(destination.join("agenterm-cli.exe")).expect("read staged executable"),
+        b"new-cli"
+    );
+    assert!(!destination.join("agenterm-cli.locked-1.exe").exists());
+    assert!(!destination.join("agentermctl.exe").exists());
+    assert!(destination.join("other.locked-1.exe").exists());
+    let metadata: serde_json::Value = serde_json::from_slice(
+        &fs::read(destination.join("agenterm.json")).expect("read staged metadata"),
+    )
+    .expect("decode staged metadata");
+    assert_eq!(metadata["version"], "1.2.3");
+    assert_eq!(metadata["profile"], "dev");
+    assert_eq!(metadata["git_dirty"], false);
+    assert_eq!(metadata["executables"][0]["sha256"], sha256(b"new-cli"));
+
+    let rejected_destination = fixture_root("stage-build-rejected");
+    let rejected = run_stage_build(&repo.join("scripts"), &source, &rejected_destination, "dev");
+    assert!(!rejected.status.success());
+    assert!(
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&rejected.stdout),
+            String::from_utf8_lossy(&rejected.stderr)
+        )
+        .contains("stage_build_repo_not_exact_git_root")
+    );
+    assert!(
+        !rejected_destination.exists(),
+        "invalid repository mutated the destination"
+    );
+
+    fs::remove_dir_all(&repo).expect("remove Git fixture");
+    fs::remove_dir_all(&source).expect("remove source fixture");
+    fs::remove_dir_all(&destination).expect("remove destination fixture");
 }
 
 #[cfg(windows)]

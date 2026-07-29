@@ -90,6 +90,13 @@
       "cwd": "."
     },
     {
+      "id": "stage-build",
+      "description": "Stage the validated executable set and publish frozen build provenance",
+      "entry": "scripts/rhai/stage-build.rhai",
+      "profile": "local",
+      "cwd": "."
+    },
+    {
       "id": "target-report",
       "description": "Report bounded Cargo target inventory and cleanup eligibility",
       "entry": "scripts/rhai/target-report.rhai",
