@@ -33,12 +33,12 @@ png = "0.17"
 rhai = { version = "1.22", default-features = false, features = ["std", "serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-ureq = { version = "3.3", default-features = false, features = ["rustls"] }
 vt100 = "0.16"
 
 [target.'cfg(windows)'.dependencies]
 rmux-pty = "0.9.1"
 unicode-width = "0.2"
+ureq = { version = "3.3", default-features = false, features = ["native-tls"] }
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
@@ -58,6 +58,7 @@ windows-sys = { version = "0.61", features = [
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 softbuffer = "0.4"
+ureq = { version = "3.3", default-features = false, features = ["rustls"] }
 winit = { version = "0.30", default-features = true }
 
 [target.'cfg(windows)'.build-dependencies]

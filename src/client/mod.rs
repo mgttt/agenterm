@@ -239,7 +239,11 @@ pub fn run_script_entry_with_args(mut arguments: Vec<String>) -> i32 {
             .map_or_else(|code| code, |()| 0);
     }
     arguments.insert(0, "script".to_owned());
-    run_cli(arguments, CliControlOptions::default())
+    if let Err(error) = validate_control_command(&arguments) {
+        eprintln!("{error}");
+        return 2;
+    }
+    run_script_command(&arguments)
 }
 
 fn script_help_text() -> &'static str {

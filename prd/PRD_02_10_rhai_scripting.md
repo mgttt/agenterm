@@ -179,14 +179,16 @@ and it is not positioned as a restricted security plugin.
   status, bounded response streaming, cancellation, proxy/TLS diagnostics and
   credential-safe errors. Rust std has no high-level HTTP client, so
   `std::http` is forbidden; low-level sockets are outside v0.1.9.
-  - [x] `request` and `start` use native platform TLS/root verification,
+  - [x] `request` and `start` use Windows native TLS and the system root store;
+    Unix targets retain Rustls/WebPKI. They also provide
     environment/disabled/explicit proxy selection, bytes-first duplicate
     headers, 64 KiB default and 256 KiB maximum bodies, a 2-second default and
     10-second hard deadline, stable privacy-safe error codes, and the shared
     bounded `Stream`/`Task` contracts.
-  - [x] the clean release `agenterm-script.exe` is 2,359,808 bytes with the
-    reviewed native-TLS feature set, below the existing 3 MiB artifact gate;
-    the gate was not raised for this slice.
+  - [x] the 2026-07-29 standard Windows release measurement for the complete
+    v0.1.9 `agenterm-script.exe` is 2,740,224 bytes with the reviewed
+    native-TLS feature set, 405,504 bytes below the existing 3 MiB artifact
+    gate; the gate was not raised.
 - [~] `rhai::runtime` may expose only safe invocation/API/profile/version/
   limits facts, never private supervisor, HWND, renderer, PTY or broker
   handles.

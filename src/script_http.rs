@@ -320,6 +320,12 @@ fn parse_proxy(value: Option<Dynamic>) -> Result<ProxySetting, Box<EvalAltResult
 }
 
 fn perform_request(spec: HttpRequestSpec) -> Result<ScriptHttpResponse, String> {
+    #[cfg(windows)]
+    let tls = TlsConfig::builder()
+        .provider(TlsProvider::NativeTls)
+        .root_certs(RootCerts::PlatformVerifier)
+        .build();
+    #[cfg(not(windows))]
     let tls = TlsConfig::builder()
         .provider(TlsProvider::Rustls)
         .root_certs(RootCerts::WebPki)
@@ -435,6 +441,10 @@ fn map_ureq_error(error: UreqError) -> String {
         UreqError::InvalidProxyUrl | UreqError::ConnectProxyFailed(_) => "http_proxy",
         UreqError::BodyExceedsLimit(_) => "http_request_body_limit",
         UreqError::Tls(_) | UreqError::Pem(_) | UreqError::TlsRequired => "http_tls",
+        #[cfg(windows)]
+        UreqError::NativeTls(_) | UreqError::Der(_) => "http_tls",
+        #[cfg(not(windows))]
+        UreqError::Rustls(_) => "http_tls",
         UreqError::RequireHttpsOnly(_) => "http_scheme",
         UreqError::LargeResponseHeader(_, _) => "http_header_limit",
         _ => "http_transport",
@@ -571,7 +581,7 @@ mod tests {
     }
 
     #[test]
-    fn rustls_handshake_failure_is_typed_and_bounded() {
+    fn tls_handshake_failure_is_typed_and_bounded() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         let server = thread::spawn(move || {

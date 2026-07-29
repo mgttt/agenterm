@@ -1332,9 +1332,10 @@ agenterm-script.exe
 
 - `agenterm.exe` 4 MiB 上限不提高；
 - `agenterm-script.exe` 原 2 MiB 建议值经 HTTP/native-TLS spike 复核：
-  clean release 为 2,359,808 bytes；采用系统 TLS/root verifier、关闭 ureq
-  默认 rustls/gzip feature，并保留仓库已经审核的 3 MiB artifact gate，
-  本轮不再抬高；
+  完整 v0.1.9 的 2026-07-29 Windows 标准 release 实测为 2,740,224
+  bytes；Windows 采用系统 TLS/root verifier，Unix 保留 Rustls/WebPKI，
+  关闭 ureq 默认 feature，并保留仓库已经审核的 3 MiB artifact gate，
+  余量 405,504 bytes，本轮不再抬高；
 - 第一窗口 1 秒门不提高；
 - GUI 无 script startup work；
 - local invocation startup、cache hit/miss、peak output/task 数进入报告；
@@ -1550,7 +1551,8 @@ README 增加一个简短 script task 示例；稳定运行时合同由
 提交 6
   [x] rhai::http + independent loopback HTTP
   [x] bounded body/timeout/cancel/privacy + typed HTTP Task payload
-  [x] clean release 2,359,808 bytes；保留既有 3 MiB 门，不再抬高
+  [x] 完整 v0.1.9 Windows 标准 release 2,740,224 bytes；保留既有
+      3 MiB 门，不再抬高
 
 提交 7
   [x] 从全部 15 个现有 typed operations 系统生成 Fleet API
