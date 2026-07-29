@@ -54,6 +54,27 @@ pub(super) fn get_clipboard_text() -> Result<String, String> {
     Err(format!("could not read clipboard ({})", errors.join("; ")))
 }
 
+/// Normalize clipboard text for the composer strip (LF newlines, safe controls only).
+pub(super) fn normalize_composer_paste(text: &str) -> String {
+    let mut normalized = String::with_capacity(text.len());
+    let mut characters = text.chars().peekable();
+    while let Some(character) = characters.next() {
+        match character {
+            '\r' => {
+                if characters.peek() == Some(&'\n') {
+                    characters.next();
+                }
+                normalized.push('\n');
+            }
+            '\n' => normalized.push('\n'),
+            '\t' => normalized.push('\t'),
+            value if !value.is_control() => normalized.push(value),
+            _ => {}
+        }
+    }
+    normalized
+}
+
 /// Match Win32 `normalize_terminal_paste`: CRLF/LF → CR, drop unsafe controls.
 pub(super) fn normalize_terminal_paste(text: &str) -> String {
     let mut normalized = String::with_capacity(text.len());
@@ -133,7 +154,9 @@ fn read_via_command(argv: &[&str]) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_terminal_paste, read_via_command, write_via_command};
+    use super::{
+        normalize_composer_paste, normalize_terminal_paste, read_via_command, write_via_command,
+    };
 
     #[test]
     fn write_via_command_rejects_empty_argv() {
@@ -149,5 +172,10 @@ mod tests {
     fn normalize_terminal_paste_matches_win32_rules() {
         assert_eq!(normalize_terminal_paste("a\r\nb\nc\t\u{7}d"), "a\rb\rc\td");
         assert_eq!(normalize_terminal_paste(""), "");
+    }
+
+    #[test]
+    fn normalize_composer_paste_keeps_newlines() {
+        assert_eq!(normalize_composer_paste("a\r\nb\nc"), "a\nb\nc");
     }
 }
