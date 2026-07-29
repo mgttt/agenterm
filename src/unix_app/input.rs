@@ -9,6 +9,14 @@ pub(super) enum ComposerKeyAction {
     Submit,
     /// Return focus to the terminal without submitting.
     Escape,
+    /// Copy the composer buffer to the clipboard.
+    Copy,
+    /// Cut the composer buffer to the clipboard.
+    Cut,
+    /// Paste clipboard text into the composer buffer.
+    Paste,
+    /// Select all composer text (no visible selection chrome on Unix yet).
+    SelectAll,
     /// Ignore this key.
     Ignored,
 }
@@ -29,6 +37,19 @@ pub(super) fn composer_key_action(
     match &event.logical_key {
         Key::Named(NamedKey::Enter) if control => ComposerKeyAction::Submit,
         Key::Named(NamedKey::Escape) => ComposerKeyAction::Escape,
+        Key::Character(text) if control => {
+            if text.eq_ignore_ascii_case("a") {
+                ComposerKeyAction::SelectAll
+            } else if text.eq_ignore_ascii_case("c") {
+                ComposerKeyAction::Copy
+            } else if text.eq_ignore_ascii_case("x") {
+                ComposerKeyAction::Cut
+            } else if text.eq_ignore_ascii_case("v") {
+                ComposerKeyAction::Paste
+            } else {
+                ComposerKeyAction::Ignored
+            }
+        }
         Key::Named(NamedKey::Enter) => {
             buffer.push('\n');
             ComposerKeyAction::Edited

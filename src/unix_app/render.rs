@@ -1,4 +1,5 @@
 use crate::theme::{Rgb, ThemeId, ThemePalette};
+use unicode_width::UnicodeWidthChar;
 
 use super::{
     font::GLYPH_WIDTH,
@@ -156,6 +157,12 @@ pub(super) struct ComposerView<'a> {
     pub(super) focused: bool,
     pub(super) top: u32,
     pub(super) label: &'a str,
+    pub(super) send_button: (u32, u32, u32, u32),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ComposerHit {
+    Send,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -168,6 +175,8 @@ pub(super) struct ScrollbarView {
 pub(super) enum SettingsHit {
     Dark,
     Light,
+    SizeDecrease,
+    SizeIncrease,
     Cancel,
     Apply,
 }
@@ -182,6 +191,8 @@ pub(super) struct SettingsModalView<'a> {
     pub(super) light_button: (u32, u32, u32, u32),
     pub(super) cancel_button: (u32, u32, u32, u32),
     pub(super) apply_button: (u32, u32, u32, u32),
+    pub(super) size_decrease_button: (u32, u32, u32, u32),
+    pub(super) size_increase_button: (u32, u32, u32, u32),
 }
 
 impl SettingsModalView<'_> {
@@ -193,6 +204,12 @@ impl SettingsModalView<'_> {
         }
         if rect_contains(self.light_button, x, y) {
             return Some(SettingsHit::Light);
+        }
+        if rect_contains(self.size_decrease_button, x, y) {
+            return Some(SettingsHit::SizeDecrease);
+        }
+        if rect_contains(self.size_increase_button, x, y) {
+            return Some(SettingsHit::SizeIncrease);
         }
         if rect_contains(self.cancel_button, x, y) {
             return Some(SettingsHit::Cancel);
@@ -223,6 +240,8 @@ impl SettingsModalView<'_> {
             light_button: (left + 148, theme_row, 120, 28),
             cancel_button: (left + 16, action_row, 120, 28),
             apply_button: (left + 148, action_row, 120, 28),
+            size_decrease_button: (left + 200, top + 62, 28, 28),
+            size_increase_button: (left + 232, top + 62, 28, 28),
         }
     }
 }
@@ -374,8 +393,10 @@ impl WindowCloseView {
 pub(super) struct StatusBarView<'a> {
     pub(super) bounds: (u32, u32, u32, u32),
     pub(super) cwd_bounds: (u32, u32, u32, u32),
+    pub(super) provider_bounds: Option<(u32, u32, u32, u32)>,
     pub(super) tabs_recovery: Option<(u32, u32, u32, u32)>,
     pub(super) cwd_text: &'a str,
+    pub(super) provider_text: &'a str,
 }
 
 pub(super) struct FrameContent<'a> {
@@ -538,6 +559,29 @@ fn render_composer(
         let ring = rgb_to_pixel(palette.focus_ring);
         fill_rect(buffer, stride, sidebar_width, top, composer_width, 2, ring);
     }
+    let (sx, sy, sw, sh) = composer.send_button;
+    render_button(
+        buffer,
+        stride,
+        width,
+        height,
+        palette,
+        (sx, sy, sw, sh),
+        "Send",
+        composer.focused,
+    );
+    let text_right = sx.saturating_sub(8);
+    let text_width = text_right.saturating_sub(sidebar_width + 8);
+    draw_text(
+        buffer,
+        stride,
+        width,
+        height,
+        sidebar_width + 8,
+        top + 6,
+        "Composer",
+        palette.muted_text,
+    );
     let prefix = if composer.label.is_empty() {
         "> "
     } else {
@@ -548,14 +592,14 @@ fn render_composer(
     } else {
         format!("{prefix}{}", composer.text)
     };
-    let max_chars = ((composer_width.saturating_sub(16)) / (GLYPH_WIDTH + 1)).max(1) as usize;
+    let max_chars = (text_width / (GLYPH_WIDTH + 1)).max(1) as usize;
     draw_text(
         buffer,
         stride,
         width,
         height,
         sidebar_width + 8,
-        top + 16,
+        top + 20,
         &truncate_chars(&label, max_chars),
         palette.text,
     );
@@ -602,6 +646,21 @@ fn render_status_bar(
         &truncate_chars(cwd, max_chars),
         palette.text,
     );
+    if let Some((px, py, pw, ph)) = status.provider_bounds
+        && !status.provider_text.is_empty()
+    {
+        let max_provider = (pw.saturating_sub(8) / (GLYPH_WIDTH + 1)).max(1) as usize;
+        draw_text(
+            buffer,
+            stride,
+            width,
+            height,
+            px + 4,
+            py + (ph / 2).saturating_sub(4),
+            &truncate_chars(status.provider_text, max_provider),
+            palette.muted_text,
+        );
+    }
 }
 
 fn render_window_close(
@@ -828,12 +887,19 @@ fn render_terminal_grid(
     let selection_fg = palette.selection_foreground;
     let selection_bg = palette.selection_background;
     for row in 0..terminal.grid.rows {
-        for col in 0..terminal.grid.cols {
+        let mut col = 0;
+        while col < terminal.grid.cols {
             let x = layout.offset_x + u32::from(col) * layout.cell_width;
             if x + layout.cell_width > layout.offset_x + terminal_width {
                 break;
             }
             let cell = terminal.grid.cell(col, row);
+            let wide = cell.ch.width() == Some(2);
+            let cell_w = if wide {
+                layout.cell_width * 2
+            } else {
+                layout.cell_width
+            };
             let selected = terminal
                 .selection
                 .is_some_and(|selection| selection.contains(row, col));
@@ -854,12 +920,21 @@ fn render_terminal_grid(
                 layout.height,
                 x,
                 layout.offset_y + u32::from(row) * layout.cell_height,
-                layout.cell_width,
+                cell_w,
                 layout.cell_height,
-                cell.ch,
+                if wide && cell.ch != ' ' {
+                    if cell.ch.is_ascii() {
+                        cell.ch
+                    } else {
+                        '\u{25A0}'
+                    }
+                } else {
+                    cell.ch
+                },
                 fg,
                 bg,
             );
+            col += if wide { 2 } else { 1 };
         }
     }
 }
@@ -991,6 +1066,26 @@ fn render_settings_modal(
         my + 66,
         &format!("Row pitch: {} px", settings.font_size),
         palette.muted_text,
+    );
+    render_button(
+        buffer,
+        stride,
+        width,
+        height,
+        palette,
+        settings.size_decrease_button,
+        "-",
+        false,
+    );
+    render_button(
+        buffer,
+        stride,
+        width,
+        height,
+        palette,
+        settings.size_increase_button,
+        "+",
+        false,
     );
     draw_text(
         buffer,

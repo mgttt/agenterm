@@ -280,6 +280,7 @@ struct UnixApp {
     cwd_edit_target: Option<u64>,
     tabs_resize_drag: Option<TabsResizeDrag>,
     last_frame: Option<(u32, u32, Vec<u32>)>,
+    status_message: String,
 }
 
 impl UnixApp {
@@ -332,6 +333,7 @@ impl UnixApp {
             cwd_edit_target: None,
             tabs_resize_drag: None,
             last_frame: None,
+            status_message: String::from("Ready"),
             config,
             modifiers: ModifiersState::empty(),
         }
@@ -479,6 +481,41 @@ impl UnixApp {
                 "length": text.chars().count(),
             }),
         );
+        self.request_redraw();
+        Ok(())
+    }
+
+    fn set_status_message(&mut self, message: impl Into<String>) {
+        self.status_message = message.into();
+    }
+
+    fn composer_send_hit(&self, x: f64, y: f64) -> bool {
+        let layout = self.layout();
+        let sidebar_width = self.sidebar_width();
+        let composer_top = layout.composer.top.max(0) as u32;
+        let composer_width = self.client_size().0.saturating_sub(sidebar_width);
+        const SEND_W: u32 = 72;
+        let send_x = sidebar_width + composer_width.saturating_sub(SEND_W + 8);
+        let send_y = composer_top + 7;
+        let send_h = COMPOSER_HEIGHT - 14;
+        x >= f64::from(send_x)
+            && x < f64::from(send_x + SEND_W)
+            && y >= f64::from(send_y)
+            && y < f64::from(send_y + send_h)
+    }
+
+    fn paste_clipboard_into_composer(&mut self) -> Result<(), String> {
+        if self.modal_surface_active() {
+            return Err("paste is unavailable while a modal is open".to_owned());
+        }
+        let raw = clipboard::get_clipboard_text()?;
+        let text = clipboard::normalize_composer_paste(&raw);
+        if text.is_empty() {
+            return Err("clipboard text contains no pasteable characters".to_owned());
+        }
+        self.composer_buffer.push_str(&text);
+        self.sync_composer_buffer_to_tab();
+        self.set_status_message(format!("Pasted {} characters into composer", text.len()));
         self.request_redraw();
         Ok(())
     }
@@ -919,6 +956,14 @@ impl UnixApp {
                 self.settings_theme_draft = ThemeId::Light;
                 self.request_redraw();
             }
+            SettingsHit::SizeDecrease => {
+                self.settings_size_draft = self.settings_size_draft.saturating_sub(1).max(8);
+                self.request_redraw();
+            }
+            SettingsHit::SizeIncrease => {
+                self.settings_size_draft = (self.settings_size_draft + 1).min(36);
+                self.request_redraw();
+            }
             SettingsHit::Cancel => {
                 let _ = self.close_settings(false);
             }
@@ -1253,8 +1298,15 @@ impl UnixApp {
             }
             return;
         }
+        if self.composer_send_hit(x, y) {
+            if self.send_active_composer().is_ok() {
+                self.set_focus_surface_internal(UnixFocusSurface::Terminal, "composer-send");
+            }
+            return;
+        }
         let layout = self.layout();
-        if let Some(toolbar) = layout.workspace_toolbar
+        if !self.modal_surface_active()
+            && let Some(toolbar) = layout.workspace_toolbar
             && toolbar.bounds.contains(x as i32, y as i32)
         {
             let view = WorkspaceToolbarView::from_layout(toolbar, self.config.tabs_visible);
@@ -1522,6 +1574,7 @@ impl UnixApp {
         }
         let text = terminal_selection_text(self.tabs[position].parser.screen(), selection);
         clipboard::set_clipboard_text(&text)?;
+        self.set_status_message(format!("Copied {} characters", text.len()));
         Ok(())
     }
 
@@ -1568,6 +1621,7 @@ impl UnixApp {
                 "source": "keyboard",
             }),
         );
+        self.set_status_message(format!("Pasted {} characters into @{tab_id}", text.len()));
         self.request_redraw();
         Ok(())
     }
@@ -1780,6 +1834,7 @@ impl UnixApp {
         if let Some(position) = self.active_position() {
             self.tabs[position].resize(rows, cols);
         }
+        self.sync_grid_from_tab();
     }
 
     fn handle_ipc(&mut self, envelope: IpcEnvelope) {
@@ -1988,6 +2043,48 @@ impl UnixApp {
             return;
         };
 
+        let modal_active = self.modal_surface_active();
+        let workspace_toolbar = if modal_active {
+            None
+        } else {
+            layout
+                .workspace_toolbar
+                .map(|toolbar| WorkspaceToolbarView::from_layout(toolbar, self.config.tabs_visible))
+        };
+        let composer_top = layout.composer.top.max(0) as u32;
+        let composer_width = size.width.saturating_sub(sidebar_width);
+        const SEND_W: u32 = 72;
+        let send_x = sidebar_width + composer_width.saturating_sub(SEND_W + 8);
+        let composer_view = ComposerView {
+            text: &self.composer_buffer,
+            focused: self.focus_surface == UnixFocusSurface::Composer,
+            top: composer_top,
+            label: composer_label,
+            send_button: (send_x, composer_top + 7, SEND_W, COMPOSER_HEIGHT - 14),
+        };
+        let status_view = StatusBarView {
+            bounds: u32_rect(layout.status),
+            cwd_bounds: u32_rect(layout.status_segments.cwd),
+            provider_bounds: if layout.status_segments.provider.width() > 0 {
+                Some(u32_rect(layout.status_segments.provider))
+            } else {
+                None
+            },
+            tabs_recovery: layout.status_segments.tabs_recovery.map(u32_rect),
+            cwd_text: &cwd_label,
+            provider_text: &self.status_message,
+        };
+        let terminal_selection = self
+            .terminal_selection
+            .filter(|selection| self.active == Some(selection.tab_id));
+        let confirm_close = self
+            .pending_close
+            .map(|id| ConfirmCloseView::for_client(size.width, size.height, id));
+        let window_close = self
+            .window_close_pending
+            .then(|| WindowCloseView::for_client(size.width, size.height));
+        let resize_grip = layout.resize_grip.map(u32_rect);
+
         let Some(surface) = self.surface.as_mut() else {
             return;
         };
@@ -2018,36 +2115,18 @@ impl UnixApp {
                 cell_height,
                 terminal: TerminalPaint {
                     grid,
-                    selection: self
-                        .terminal_selection
-                        .filter(|selection| self.active == Some(selection.tab_id)),
+                    selection: terminal_selection,
                 },
                 sidebar_rows: &sidebar_rows,
-                workspace_toolbar: layout.workspace_toolbar.map(|toolbar| {
-                    WorkspaceToolbarView::from_layout(toolbar, self.config.tabs_visible)
-                }),
+                workspace_toolbar,
                 terminal_top: layout.terminal.top.max(0) as u32,
-                composer: ComposerView {
-                    text: &self.composer_buffer,
-                    focused: self.focus_surface == UnixFocusSurface::Composer,
-                    top: layout.composer.top.max(0) as u32,
-                    label: composer_label,
-                },
+                composer: composer_view,
                 scrollbar,
                 settings,
-                confirm_close: self
-                    .pending_close
-                    .map(|id| ConfirmCloseView::for_client(size.width, size.height, id)),
-                window_close: self
-                    .window_close_pending
-                    .then(|| WindowCloseView::for_client(size.width, size.height)),
-                status: Some(StatusBarView {
-                    bounds: u32_rect(layout.status),
-                    cwd_bounds: u32_rect(layout.status_segments.cwd),
-                    tabs_recovery: layout.status_segments.tabs_recovery.map(u32_rect),
-                    cwd_text: &cwd_label,
-                }),
-                resize_grip: layout.resize_grip.map(u32_rect),
+                confirm_close,
+                window_close,
+                status: Some(status_view),
+                resize_grip,
             },
         );
         self.last_frame = Some((width, height, buffer.to_vec()));
@@ -2668,6 +2747,23 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                                 );
                             }
                         }
+                        input::ComposerKeyAction::Copy => {
+                            if clipboard::set_clipboard_text(&self.composer_buffer).is_ok() {
+                                self.set_status_message("Copied composer draft");
+                            }
+                        }
+                        input::ComposerKeyAction::Cut => {
+                            if clipboard::set_clipboard_text(&self.composer_buffer).is_ok() {
+                                self.composer_buffer.clear();
+                                self.sync_composer_buffer_to_tab();
+                                self.set_status_message("Cut composer draft");
+                                self.request_redraw();
+                            }
+                        }
+                        input::ComposerKeyAction::Paste => {
+                            let _ = self.paste_clipboard_into_composer();
+                        }
+                        input::ComposerKeyAction::SelectAll => {}
                         input::ComposerKeyAction::Ignored => {}
                     }
                     return;
