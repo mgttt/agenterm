@@ -621,6 +621,46 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             ),
             "2026-07-30",
         ),
+        shipped_local_entry_with_design(
+            shipped_local_entry(
+                "std.net.tcp-listener-bind",
+                "system/network/tcp/listener/bind",
+                "std::net::TcpListener::bind",
+                Some("std::net::TcpListener::bind"),
+                RustMapping::Direct,
+                "std::net::TcpListener::bind(address)",
+                (
+                    &["blocking_bind_inside_supervised_worker", "all_bind_targets_allowed"],
+                    &["net_address_invalid", "net_bind"],
+                ),
+            ),
+            "2026-07-30",
+        ),
+        shipped_local_entry_with_design(
+            shipped_local_entry(
+                "std.net.tcp-listener",
+                "system/network/tcp/listener",
+                "TcpListener.local_addr/set_nonblocking/accept/accept_timeout",
+                Some("std::net::TcpListener"),
+                RustMapping::Adapted,
+                "listener.local_addr / listener.set_nonblocking(enabled) / listener.accept() / listener.accept_timeout(timeout)",
+                (
+                    &[
+                        "typed_owned_listener",
+                        "all_peers_allowed",
+                        "accepted_stream_has_complete_tcp_stream_surface",
+                        "bounded_accept_wait_available",
+                    ],
+                    &[
+                        "net_accept",
+                        "net_accept_timeout",
+                        "net_listener_poisoned",
+                        "net_nonblocking_config",
+                    ],
+                ),
+            ),
+            "2026-07-30",
+        ),
         shipped_local_entry_with_semantics(
             shipped_local_entry(
             "std.env.get",
@@ -892,6 +932,25 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             RustMapping::None,
             "bytes.len",
             (NO_STRINGS, NO_STRINGS),
+        ),
+        shipped_local_entry_with_design(
+            shipped_local_entry(
+                "rhai.bytes.raw-operations",
+                "data/bytes/raw-operations",
+                "Bytes.get/slice/append",
+                None,
+                RustMapping::None,
+                "bytes.get(index) / bytes.slice(offset, length) / bytes.append(other)",
+                (
+                    &["unsigned_byte_values", "owned_slice", "bounded_append"],
+                    &[
+                        "bytes_index_out_of_bounds",
+                        "bytes_slice_out_of_bounds",
+                        "bytes_length_limit",
+                    ],
+                ),
+            ),
+            "2026-07-30",
         ),
         shipped_local_entry(
             "rhai.bytes.to-text",

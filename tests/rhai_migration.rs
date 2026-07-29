@@ -1364,8 +1364,8 @@ fn prd_alignment_task_matches_public_catalogs_and_fails_closed() {
         String::from_utf8_lossy(&accepted.stdout).trim(),
         concat!(
             "PASS: PRD aligns with 61 catalog entries, 83 public names, ",
-            "11 protocol features, 41 mux commands, 57 capability IDs, ",
-            "and 57 executable evidence IDs"
+            "11 protocol features, 41 mux commands, 59 capability IDs, ",
+            "and 59 executable evidence IDs"
         )
     );
 

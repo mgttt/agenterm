@@ -15,6 +15,7 @@ thread_local! {
 }
 
 static ATOMIC_WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+const MAX_BYTES_VALUE_BYTES: usize = 8 * 1024 * 1024;
 
 #[derive(Clone, Debug)]
 pub struct ScriptPath(pub(crate) PathBuf);
@@ -78,6 +79,9 @@ pub fn register_local(engine: &mut Engine) {
 
     engine.register_type_with_name::<ScriptBytes>("Bytes");
     engine.register_get("len", |bytes: &mut ScriptBytes| bytes.0.len() as rhai::INT);
+    engine.register_fn("get", bytes_get);
+    engine.register_fn("slice", bytes_slice);
+    engine.register_fn("append", bytes_append);
     engine.register_fn("to_text", bytes_to_text);
 
     engine.register_type_with_name::<ScriptDirEntry>("DirEntry");
@@ -579,6 +583,39 @@ fn bytes_from_text(value: &str) -> Result<ScriptBytes, Box<EvalAltResult>> {
     Ok(ScriptBytes(value.as_bytes().to_vec()))
 }
 
+fn bytes_get(value: &mut ScriptBytes, index: rhai::INT) -> Result<rhai::INT, Box<EvalAltResult>> {
+    let index = usize::try_from(index)
+        .ok()
+        .filter(|index| *index < value.0.len())
+        .ok_or("bytes_index_out_of_bounds")?;
+    Ok(rhai::INT::from(value.0[index]))
+}
+
+fn bytes_slice(
+    value: &mut ScriptBytes,
+    offset: rhai::INT,
+    length: rhai::INT,
+) -> Result<ScriptBytes, Box<EvalAltResult>> {
+    let offset = usize::try_from(offset).map_err(|_| "bytes_slice_out_of_bounds")?;
+    let length = usize::try_from(length).map_err(|_| "bytes_slice_out_of_bounds")?;
+    let end = offset
+        .checked_add(length)
+        .filter(|end| *end <= value.0.len())
+        .ok_or("bytes_slice_out_of_bounds")?;
+    Ok(ScriptBytes(value.0[offset..end].to_vec()))
+}
+
+fn bytes_append(value: &mut ScriptBytes, other: ScriptBytes) -> Result<(), Box<EvalAltResult>> {
+    value
+        .0
+        .len()
+        .checked_add(other.0.len())
+        .filter(|length| *length <= MAX_BYTES_VALUE_BYTES)
+        .ok_or("bytes_length_limit")?;
+    value.0.extend(other.0);
+    Ok(())
+}
+
 fn bytes_to_text(value: &mut ScriptBytes) -> Result<String, Box<EvalAltResult>> {
     String::from_utf8(value.0.clone())
         .map_err(|error| format!("bytes_invalid_utf8: {error}").into())
@@ -661,6 +698,19 @@ mod tests {
                 .eval::<String>(r#"rhai::bytes::from_text("hello").to_text()"#)
                 .unwrap(),
             "hello"
+        );
+        assert_eq!(
+            engine
+                .eval::<String>(
+                    r#"
+                        let bytes = rhai::bytes::from_text("hello");
+                        let tail = bytes.slice(1, 2);
+                        bytes.append(rhai::bytes::from_text("!"));
+                        `${bytes.get(0)}:${tail.to_text()}:${bytes.to_text()}`
+                    "#,
+                )
+                .unwrap(),
+            "104:el:hello!"
         );
     }
 

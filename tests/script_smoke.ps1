@@ -208,6 +208,8 @@ function Invoke-FramedWorker {
     $startInfo.RedirectStandardInput = $true
     $startInfo.RedirectStandardOutput = $true
     $startInfo.RedirectStandardError = $true
+    $startInfo.Environment.Remove('AGENTERM_SCRIPT_AUDIT_PATH') | Out-Null
+    $startInfo.Environment.Remove('AGENTERM_AUDIT_ENV_SECRET') | Out-Null
     $process = [Diagnostics.Process]::Start($startInfo)
     Register-SmokeOwnedProcess -Context $smokeRun -Id $process.Id `
         -Kind 'script-worker'
@@ -274,26 +276,31 @@ function Start-HttpFixture {
         [Parameter(Mandatory = $true)][string]$LogPath,
         [Parameter(Mandatory = $true)][string]$StopPath
     )
-    $hostExe = [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
     $startInfo = [Diagnostics.ProcessStartInfo]::new()
-    $startInfo.FileName = $hostExe
+    $startInfo.FileName = $workerExe
     $startInfo.UseShellExecute = $false
     $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.Environment.Remove('AGENTERM_SCRIPT_AUDIT_PATH') | Out-Null
+    $startInfo.Environment.Remove('AGENTERM_AUDIT_ENV_SECRET') | Out-Null
     foreach ($argument in @(
-        '-NoProfile',
-        '-NonInteractive',
-        '-ExecutionPolicy',
-        'Bypass',
-        '-File',
+        'run',
         $FixturePath,
-        '-ReadyPath',
+        '--profile',
+        'local',
+        '--project-root',
+        $repositoryRoot,
+        '--timeout-ms',
+        '20000',
+        '--max-operations',
+        '10000000',
+        '--',
         $ReadyPath,
-        '-LogPath',
         $LogPath,
-        '-StopPath',
         $StopPath,
-        '-MaxRequests',
-        '9'
+        '9',
+        '10000'
     )) {
         $startInfo.ArgumentList.Add($argument)
     }
@@ -951,7 +958,7 @@ task.cancel();
     }
 
     Write-Host 'STEP bounded loopback HTTP, async task, cancellation, and privacy'
-    $httpFixtureScript = Join-Path $repositoryRoot 'tests\script_http_fixture.ps1'
+    $httpFixtureScript = Join-Path $repositoryRoot 'scripts\rhai\script-http-fixture.rhai'
     $httpReadyPath = Join-Path $runtimeDirectory 'http-ready.json'
     $httpLogPath = Join-Path $runtimeDirectory 'http-requests.jsonl'
     $httpStopPath = Join-Path $runtimeDirectory 'http-stop'
@@ -962,11 +969,13 @@ task.cancel();
         $httpReady = Wait-HttpFixtureReady -Process $httpFixture `
             -ReadyPath $httpReadyPath
         if ($httpReady.schema_version -ne 1 -or
-            $httpReady.pid -ne $httpFixture.Id -or
+            $httpReady.pid -le 0 -or
             $httpReady.url -notlike 'http://127.0.0.1:*' -or
             $httpReady.tls_url -notlike 'https://127.0.0.1:*') {
             throw 'loopback HTTP fixture returned invalid readiness facts'
         }
+        Register-SmokeOwnedProcess -Context $smokeRun -Id $httpReady.pid `
+            -Kind 'script-http-fixture-worker'
 
         $httpSource = Join-Path $runtimeDirectory 'http.rhai'
         [IO.File]::WriteAllText(
@@ -1161,6 +1170,14 @@ try {
             $httpFixture.Kill()
             $httpFixture.WaitForExit()
         }
+        $httpFixtureOutput = (
+            $httpFixture.StandardOutput.ReadToEnd() +
+            $httpFixture.StandardError.ReadToEnd()
+        )
+        Add-SmokeCommandRecord -Context $smokeRun `
+            -Arguments @('[script-http-fixture]') `
+            -ExitCode $httpFixture.ExitCode -ExpectedFailure $false `
+            -Output $httpFixtureOutput
         $httpFixture.Dispose()
     }
     $httpRecovery = Invoke-Script @(
@@ -2303,6 +2320,13 @@ finally {
         catch {
             # A scenario may already have disposed its owned client.
         }
+    }
+    if (-not $runSucceeded -and (Test-Path -LiteralPath $auditFile -PathType Leaf)) {
+        New-Item -ItemType Directory -Path $smokeRun.FailureDirectory -Force |
+            Out-Null
+        Copy-Item -LiteralPath $auditFile `
+            -Destination (Join-Path $smokeRun.FailureDirectory 'script-audit.jsonl') `
+            -Force
     }
     Remove-Item -LiteralPath $sourceFile -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $auditFile -ErrorAction SilentlyContinue

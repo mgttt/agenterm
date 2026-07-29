@@ -1,7 +1,8 @@
 use std::{
     io::{self, Read, Write},
-    net::{Shutdown, TcpStream, ToSocketAddrs},
+    net::{Shutdown, TcpListener, TcpStream, ToSocketAddrs},
     sync::{Arc, Mutex, MutexGuard},
+    thread,
     time::{Duration, Instant},
 };
 
@@ -20,6 +21,9 @@ const MAX_RESOLVED_ADDRESSES: usize = 32;
 #[derive(Clone, Debug)]
 pub struct ScriptTcpStream(Arc<Mutex<TcpStream>>);
 
+#[derive(Clone, Debug)]
+pub struct ScriptTcpListener(Arc<Mutex<TcpListener>>);
+
 pub(crate) fn register(engine: &mut Engine, std_module: &mut Module) {
     engine.register_type_with_name::<ScriptTcpStream>("TcpStream");
     engine.register_get("peer_addr", tcp_peer_addr);
@@ -34,12 +38,22 @@ pub(crate) fn register(engine: &mut Engine, std_module: &mut Module) {
     engine.register_fn("read_line", tcp_read_line);
     engine.register_fn("shutdown", tcp_shutdown);
 
+    engine.register_type_with_name::<ScriptTcpListener>("TcpListener");
+    engine.register_get("local_addr", tcp_listener_local_addr);
+    engine.register_fn("set_nonblocking", tcp_listener_set_nonblocking);
+    engine.register_fn("accept", tcp_listener_accept);
+    engine.register_fn("accept_timeout", tcp_listener_accept_timeout);
+
     let mut tcp_stream = Module::new();
     tcp_stream.set_native_fn("connect", tcp_connect);
     tcp_stream.set_native_fn("connect_timeout", tcp_connect_timeout);
 
+    let mut tcp_listener = Module::new();
+    tcp_listener.set_native_fn("bind", tcp_listener_bind);
+
     let mut net = Module::new();
     net.set_sub_module("TcpStream", tcp_stream);
+    net.set_sub_module("TcpListener", tcp_listener);
     std_module.set_sub_module("net", net);
 }
 
@@ -289,6 +303,126 @@ fn tcp_shutdown(stream: &mut ScriptTcpStream) -> Result<(), Box<EvalAltResult>> 
         .map_err(|error| io_error("net_shutdown", "TcpStream.shutdown", error))
 }
 
+fn tcp_listener_bind(address: &str) -> Result<ScriptTcpListener, Box<EvalAltResult>> {
+    validate_address(address, "std.net.TcpListener.bind")?;
+    TcpListener::bind(address)
+        .map(|listener| ScriptTcpListener(Arc::new(Mutex::new(listener))))
+        .map_err(|error| listener_io_error("net_bind", "std.net.TcpListener.bind", error, false))
+}
+
+fn tcp_listener_local_addr(listener: &mut ScriptTcpListener) -> Result<String, Box<EvalAltResult>> {
+    lock_listener(listener, "TcpListener.local_addr")?
+        .local_addr()
+        .map(|address| address.to_string())
+        .map_err(|error| {
+            listener_io_error("net_local_addr", "TcpListener.local_addr", error, false)
+        })
+}
+
+fn tcp_listener_set_nonblocking(
+    listener: &mut ScriptTcpListener,
+    enabled: bool,
+) -> Result<(), Box<EvalAltResult>> {
+    lock_listener(listener, "TcpListener.set_nonblocking")?
+        .set_nonblocking(enabled)
+        .map_err(|error| {
+            listener_io_error(
+                "net_nonblocking_config",
+                "TcpListener.set_nonblocking",
+                error,
+                false,
+            )
+        })
+}
+
+fn tcp_listener_accept(
+    listener: &mut ScriptTcpListener,
+) -> Result<ScriptTcpStream, Box<EvalAltResult>> {
+    let (stream, _) = lock_listener(listener, "TcpListener.accept")?
+        .accept()
+        .map_err(|error| listener_io_error("net_accept", "TcpListener.accept", error, true))?;
+    stream
+        .set_nonblocking(false)
+        .map_err(|error| io_error("net_nonblocking_config", "TcpListener.accept", error))?;
+    Ok(ScriptTcpStream(Arc::new(Mutex::new(stream))))
+}
+
+fn tcp_listener_accept_timeout(
+    listener: &mut ScriptTcpListener,
+    timeout: ScriptDuration,
+) -> Result<ScriptTcpStream, Box<EvalAltResult>> {
+    let timeout = validate_timeout(timeout, "TcpListener.accept_timeout")?;
+    let listener = lock_listener(listener, "TcpListener.accept_timeout")?;
+    listener.set_nonblocking(true).map_err(|error| {
+        listener_io_error(
+            "net_nonblocking_config",
+            "TcpListener.accept_timeout",
+            error,
+            false,
+        )
+    })?;
+
+    let started = Instant::now();
+    let result = loop {
+        match listener.accept() {
+            Ok((stream, _)) => {
+                stream.set_nonblocking(false).map_err(|error| {
+                    io_error(
+                        "net_nonblocking_config",
+                        "TcpListener.accept_timeout",
+                        error,
+                    )
+                })?;
+                break Ok(ScriptTcpStream(Arc::new(Mutex::new(stream))));
+            }
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                let remaining = timeout.saturating_sub(started.elapsed());
+                if remaining.is_zero() {
+                    break Err(listener_error(
+                        "net_accept_timeout",
+                        "TcpListener.accept_timeout",
+                        "TCP accept exceeded its deadline",
+                        true,
+                        Some("timeout"),
+                    ));
+                }
+                thread::sleep(remaining.min(Duration::from_millis(2)));
+            }
+            Err(error) => {
+                break Err(listener_io_error(
+                    "net_accept",
+                    "TcpListener.accept_timeout",
+                    error,
+                    true,
+                ));
+            }
+        }
+    };
+    listener.set_nonblocking(false).map_err(|error| {
+        listener_io_error(
+            "net_nonblocking_config",
+            "TcpListener.accept_timeout",
+            error,
+            false,
+        )
+    })?;
+    result
+}
+
+fn validate_address(address: &str, operation: &'static str) -> Result<(), Box<EvalAltResult>> {
+    if address.is_empty() || address.len() > MAX_ADDRESS_BYTES {
+        return Err(net_error(
+            "net_address_invalid",
+            operation,
+            "TCP address must be 1..4096 UTF-8 bytes",
+            false,
+            false,
+            Some("invalid_input"),
+        ));
+    }
+    Ok(())
+}
+
 fn validate_timeout(
     timeout: ScriptDuration,
     operation: &'static str,
@@ -341,6 +475,21 @@ fn lock_stream<'a>(
     })
 }
 
+fn lock_listener<'a>(
+    listener: &'a ScriptTcpListener,
+    operation: &'static str,
+) -> Result<MutexGuard<'a, TcpListener>, Box<EvalAltResult>> {
+    listener.0.lock().map_err(|_| {
+        listener_error(
+            "net_listener_poisoned",
+            operation,
+            "TCP listener state is unavailable",
+            false,
+            Some("host_invariant"),
+        )
+    })
+}
+
 fn io_error(code: &'static str, operation: &'static str, error: io::Error) -> Box<EvalAltResult> {
     let timed_out = matches!(
         error.kind(),
@@ -371,6 +520,41 @@ fn io_error(code: &'static str, operation: &'static str, error: io::Error) -> Bo
                     | io::ErrorKind::NotConnected
             ),
         false,
+        Some(io_cause(error.kind())),
+    )
+}
+
+fn listener_io_error(
+    code: &'static str,
+    operation: &'static str,
+    error: io::Error,
+    retryable: bool,
+) -> Box<EvalAltResult> {
+    let timed_out = matches!(
+        error.kind(),
+        io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+    );
+    listener_error(
+        if timed_out {
+            match code {
+                "net_accept" => "net_accept_timeout",
+                other => other,
+            }
+        } else {
+            code
+        },
+        operation,
+        if timed_out {
+            "TCP listener operation exceeded its deadline"
+        } else {
+            "TCP listener operation failed"
+        },
+        retryable
+            || timed_out
+            || matches!(
+                error.kind(),
+                io::ErrorKind::ConnectionAborted | io::ErrorKind::Interrupted
+            ),
         Some(io_cause(error.kind())),
     )
 }
@@ -408,6 +592,25 @@ fn net_error(
         retryable,
         "tcp_stream",
         truncated,
+        cause,
+    )
+}
+
+fn listener_error(
+    code: &'static str,
+    operation: &'static str,
+    message: &'static str,
+    retryable: bool,
+    cause: Option<&'static str>,
+) -> Box<EvalAltResult> {
+    runtime_error(
+        "network",
+        code,
+        operation,
+        message,
+        retryable,
+        "tcp_listener",
+        false,
         cause,
     )
 }
@@ -459,5 +662,34 @@ mod tests {
         assert!(tcp_write_all_text(&mut client, &"x".repeat(MAX_IO_BYTES + 1)).is_err());
         drop(client);
         server.join().unwrap();
+    }
+
+    #[test]
+    fn tcp_listener_bind_accept_timeout_and_stream_round_trip_are_typed() {
+        let mut listener = tcp_listener_bind("127.0.0.1:0").unwrap();
+        let address = tcp_listener_local_addr(&mut listener).unwrap();
+        let client = thread::spawn(move || {
+            let mut stream = TcpStream::connect(address).unwrap();
+            // On Windows an accepted socket can inherit the listener's
+            // temporary nonblocking mode. Delay the first byte so this test
+            // proves the public accepted stream is restored to blocking I/O.
+            thread::sleep(Duration::from_millis(20));
+            stream.write_all(b"hello\n").unwrap();
+            let mut response = String::new();
+            BufReader::new(stream).read_line(&mut response).unwrap();
+            assert_eq!(response, "world\n");
+        });
+
+        let mut stream =
+            tcp_listener_accept_timeout(&mut listener, ScriptDuration(Duration::from_secs(2)))
+                .unwrap();
+        assert_eq!(tcp_read_line(&mut stream, 64).unwrap(), "hello");
+        tcp_write_all_text(&mut stream, "world\n").unwrap();
+        client.join().unwrap();
+
+        let error =
+            tcp_listener_accept_timeout(&mut listener, ScriptDuration(Duration::from_millis(1)))
+                .unwrap_err();
+        assert!(error.to_string().contains("net_accept_timeout"));
     }
 }

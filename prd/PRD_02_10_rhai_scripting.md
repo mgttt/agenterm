@@ -211,6 +211,14 @@ and it is not positioned as a restricted security plugin.
   and shutdown. Per-call 1 MiB I/O and 32-resolution-result ceilings are
   robustness bounds, never endpoint permissions; its first repository journey
   owns raw deadline-expired IPC evidence for the wake-delivery regression.
+- [x] `std::net::TcpListener` provides unrestricted IPv4/IPv6 bind, local
+  address facts, explicit native nonblocking mode, blocking accept, and typed
+  accept deadlines. Accepted streams are restored to blocking I/O on every
+  platform; the first repository journey uses it to replace the loopback HTTP
+  PowerShell fixture with Rhai.
+- [x] typed `Bytes` supports unsigned byte lookup, owned slicing, and append,
+  allowing raw protocol fixtures to remain bytes-first without shell or
+  PowerShell escape hatches.
 - [~] `rhai::runtime` exposes stable invocation/API/version/limits facts;
   unstable implementation handles are not part of the current public object
   tree, but this is API design rather than a permission boundary.
@@ -427,6 +435,7 @@ Migration ledger:
 | Coalesced wake, concurrent IPC, PTY output, and expired raw mutation journey | `scripts/rhai/wake-smoke.rhai` plus unrestricted `std::net::TcpStream`, `rhai::hash::fnv1a64`, and the shared Rhai harness | `tests/wake_smoke.ps1` | current migration change | named task and Windows public integration preserve an isolated headless server, 32 concurrent versioned snapshot clients, 80-line PTY progress, raw newline-delimited IPC, typed expired no-op receipt, unchanged tab note, and orphan-free owned-child cleanup | deleted; qualification discovery and execution use the Rhai journey directly |
 | Native first-window and asynchronous terminal startup journey | `scripts/rhai/startup-smoke.rhai` plus unrestricted `std::process::list()` and the shared Rhai harness | `tests/startup_smoke.ps1` | current migration change | named task preserves the one-second native-window budget, public asynchronous terminal-ready wait, exact window title and inherited-stderr guidance, second-launch handoff, nonblocking CLI-style/invalid GUI arguments, absence of a nested Script worker, graceful shutdown, and orphan-free cleanup | deleted; ordinary qualification and Windows CI invoke the named Rhai journey |
 | Public CLI, typed control, UI bridge, and PTY lifecycle journey | `scripts/rhai/cli-smoke.rhai` plus the shared Rhai harness | `tests/cli_smoke.ps1` | current migration change | named task preserves all nine public evidence IDs across receipt replay/conflict, offline validation, operation/UI-bridge discovery, renderer-neutral bootstrap/delta causality, typed Tabs actions/events, Composer/PTY/Backspace/scroll/screenshots, stable creation IDs, remain-on-exit, and explicit close; command evidence is now bounded per record | deleted; ordinary qualification and Windows CI invoke the named Rhai journey |
+| Loopback HTTP test fixture | `scripts/rhai/script-http-fixture.rhai` plus unrestricted `std::net::TcpListener` and raw `Bytes` operations | `tests/script_http_fixture.ps1` | current migration change | full public Script smoke preserves status/echo/large/async/slow/cancel/malformed/disconnect/TLS paths, privacy-bounded audit, typed host failures, cleanup, and a delayed-first-byte Windows accepted-socket regression | deleted; the Script smoke launches only the Rhai fixture |
 
 ### v0.1.10 completion commitment
 
@@ -563,9 +572,9 @@ Migration ledger:
   than npm emulation inside the script runtime;
 - a persistent or automatically started script daemon and cross-invocation
   mutable runtime state;
-- TCP listeners, UDP, WebSockets, and higher-level network modules beyond the
-  shipped unrestricted TCP client remain planned Script Runtime expansion and
-  are not permission-gated;
+- UDP, WebSockets, and higher-level network modules beyond the shipped
+  unrestricted TCP stream/listener primitives remain planned Script Runtime
+  expansion and are not permission-gated;
 - event handlers, watch mode, REPL, and durable background scheduling unless a
   later owned slice supplies separate acceptance;
 - Agent permission, approval, credential, quota, and natural-language policy

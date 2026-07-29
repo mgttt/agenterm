@@ -172,18 +172,27 @@ agenterm-script
 │  ├─ net::
 │  │  Rust-shaped blocking network primitives for ordinary local scripts.
 │  │  [partially shipped; stable namespace; designed 2026-07-30]
-│  │  └─ TcpStream
-│  │     An owned TCP client stream with unrestricted endpoint selection,
-│  │     typed deadlines, bounded reads/writes, address facts, and shutdown.
+│  │  ├─ TcpStream
+│  │  │  An owned TCP stream with unrestricted endpoint selection,
+│  │  │  typed deadlines, bounded reads/writes, address facts, and shutdown.
+│  │  │  [shipped; stable; designed 2026-07-30]
+│  │  │  ├─ TcpStream::connect(address)
+│  │  │  ├─ TcpStream::connect_timeout(address, Duration)
+│  │  │  ├─ .peer_addr / .local_addr
+│  │  │  ├─ .set_read_timeout(Duration) / .set_write_timeout(Duration)
+│  │  │  ├─ .set_nodelay(enabled)
+│  │  │  ├─ .write_all(text_or_bytes) / .flush()
+│  │  │  ├─ .read(max_bytes) / .read_line(max_bytes)
+│  │  │  └─ .shutdown()
+│  │  └─ TcpListener
+│  │     An owned unrestricted TCP listener for local service and protocol
+│  │     tooling; bind addresses are not filtered by Script Runtime.
 │  │     [shipped; stable; designed 2026-07-30]
-│  │     ├─ TcpStream::connect(address)
-│  │     ├─ TcpStream::connect_timeout(address, Duration)
-│  │     ├─ .peer_addr / .local_addr
-│  │     ├─ .set_read_timeout(Duration) / .set_write_timeout(Duration)
-│  │     ├─ .set_nodelay(enabled)
-│  │     ├─ .write_all(text_or_bytes) / .flush()
-│  │     ├─ .read(max_bytes) / .read_line(max_bytes)
-│  │     └─ .shutdown()
+│  │     ├─ TcpListener::bind(address)
+│  │     ├─ .local_addr
+│  │     ├─ .set_nonblocking(enabled)
+│  │     ├─ .accept()
+│  │     └─ .accept_timeout(Duration)
 │  │
 │  └─ time::
 │     Typed duration, monotonic, and wall-clock values.
@@ -311,6 +320,15 @@ agenterm-script
 │  │  ├─ .len
 │  │  │  Returns the byte length.
 │  │  │  [shipped; stable; designed 2026-07-28]
+│  │  ├─ .get(index)
+│  │  │  Returns one byte as an unsigned integer.
+│  │  │  [shipped; stable; designed 2026-07-30]
+│  │  ├─ .slice(offset, length)
+│  │  │  Returns an owned byte range.
+│  │  │  [shipped; stable; designed 2026-07-30]
+│  │  ├─ .append(other)
+│  │  │  Appends another typed byte sequence.
+│  │  │  [shipped; stable; designed 2026-07-30]
 │  │  └─ .to_text()
 │  │     Decodes strict UTF-8 or throws `bytes_invalid_utf8`.
 │  │     [shipped; stable; designed 2026-07-28]
@@ -723,6 +741,10 @@ wall-time budgets.
 
 `Bytes` is an owned byte sequence. `.len` counts bytes. `.to_text()` performs
 strict UTF-8 decoding and throws `bytes_invalid_utf8` on failure.
+`.get(index)` returns one byte as an unsigned integer, `.slice(offset, length)`
+returns an owned range, and `.append(other)` adds another typed byte sequence.
+Invalid ranges fail with stable typed errors. The 8 MiB value ceiling is a
+memory-robustness bound, not a file, network, or Agent permission boundary.
 
 ## 8. Process, network, and time semantics
 
@@ -814,11 +836,12 @@ No child handle survives an invocation. The outer supervisor Job Object owns
 the worker and its descendants, so timeout, cancellation, crash, parent exit,
 or normal completion cannot intentionally detach a child process tree.
 
-`std::net::TcpStream` is the first low-level networking slice. It is an
-unrestricted client API: DNS names, loopback, LAN, Internet, IPv4, and IPv6
-targets are not filtered by Script Runtime. A surrounding Agent harness may
-decide whether it offers a networking tool to an Agent, but the Rhai API itself
-does not contain a destination permission model.
+`std::net::TcpStream` and `std::net::TcpListener` form the first low-level
+networking slice. They are unrestricted APIs: DNS names, loopback, LAN,
+Internet, IPv4, IPv6, and listener bind addresses are not filtered by Script
+Runtime. A surrounding Agent harness may decide whether it offers a networking
+tool to an Agent, but the Rhai API itself does not contain an endpoint
+permission model.
 
 `TcpStream::connect(address)` uses a 2,000 ms socket-connection deadline after
 host resolution. `connect_timeout(address, Duration)` accepts 1 through 60,000
@@ -833,8 +856,15 @@ policy. `.set_read_timeout` and `.set_write_timeout` accept the same range.
 write call is limited to 1 MiB and fails explicitly on overflow, timeout,
 invalid UTF-8, EOF-before-line, or transport error. `.peer_addr` and
 `.local_addr` expose the connected socket facts. `.shutdown()` closes both
-directions. TCP listeners, UDP, WebSockets, and higher-level network servers
-remain additive future APIs, not prohibited capabilities.
+directions.
+
+`TcpListener::bind(address)` returns an owned listener. `.local_addr` exposes
+the resolved bind address, `.set_nonblocking(enabled)` controls native listener
+mode, `.accept()` blocks, and `.accept_timeout(Duration)` adds a typed deadline.
+Both accept methods return a blocking `TcpStream`, including on Windows where
+an accepted socket may otherwise inherit a listener's temporary nonblocking
+mode. UDP, WebSockets, and higher-level network servers remain additive future
+APIs, not prohibited capabilities.
 
 `Duration`, `Instant`, and `SystemTime` keep monotonic deadlines separate from
 wall-clock time. A cancellable timer belongs to `rhai::task`, not to a fake
@@ -1362,8 +1392,8 @@ The following are outside the v0.1.9 stable contract:
 - remote package registry, dependency resolution, signing, and installation;
 - npm, Cargo crate, Node.js, Bun, or complete Rust `std` compatibility;
 - persistent script daemon, durable scheduler, watch mode, and REPL;
-- TCP listeners, UDP, WebSocket, and network-server API coverage beyond the
-  shipped unrestricted `std::net::TcpStream` client;
+- UDP, WebSocket, and higher-level network-server API coverage beyond the
+  shipped unrestricted TCP stream/listener primitives;
 - arbitrary remote module resolution and imports;
 - Agent approval and natural-language authorization, which belong to a
   separate Agent harness;
