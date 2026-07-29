@@ -45,6 +45,12 @@ pub struct ScriptCommand {
 #[derive(Clone)]
 pub struct ScriptChild(Arc<Mutex<ChildState>>);
 
+#[derive(Clone, Debug)]
+pub struct ScriptProcessPlatformFacts {
+    top_level_window_supported: bool,
+    top_level_window_present: bool,
+}
+
 impl std::fmt::Debug for ScriptChild {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.debug_struct("Child").finish_non_exhaustive()
@@ -117,11 +123,22 @@ fn register_types(engine: &mut Engine) {
     engine.register_type_with_name::<ScriptChild>("Child");
     engine.register_get("id", child_id);
     engine.register_get("state", child_state);
+    engine.register_get("platform_facts", child_platform_facts);
     engine.register_get("stdout", child_stdout);
     engine.register_get("stderr", child_stderr);
     engine.register_fn("kill", child_kill);
     engine.register_fn("wait_with_output", child_wait_with_output);
     engine.register_fn("wait_with_output", child_wait_with_output_for);
+
+    engine.register_type_with_name::<ScriptProcessPlatformFacts>("ProcessPlatformFacts");
+    engine.register_get(
+        "top_level_window_supported",
+        |facts: &mut ScriptProcessPlatformFacts| facts.top_level_window_supported,
+    );
+    engine.register_get(
+        "top_level_window_present",
+        |facts: &mut ScriptProcessPlatformFacts| facts.top_level_window_present,
+    );
 
     engine.register_type_with_name::<ScriptOutput>("Output");
     engine.register_get("success", |output: &mut ScriptOutput| output.success);
@@ -383,6 +400,64 @@ fn spawn_owned(command: &ScriptCommand) -> Result<ScriptChild, Box<EvalAltResult
 fn child_id(child: &mut ScriptChild) -> Result<rhai::INT, Box<EvalAltResult>> {
     let state = child.0.lock().map_err(|_| "process_child_state_poisoned")?;
     Ok(i64::from(state.id))
+}
+
+fn child_platform_facts(
+    child: &mut ScriptChild,
+) -> Result<ScriptProcessPlatformFacts, Box<EvalAltResult>> {
+    let id = child
+        .0
+        .lock()
+        .map_err(|_| "process_child_state_poisoned")?
+        .id;
+    Ok(process_platform_facts(id))
+}
+
+#[cfg(windows)]
+fn process_platform_facts(id: u32) -> ScriptProcessPlatformFacts {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowThreadProcessId};
+
+    struct Search {
+        id: u32,
+        found: bool,
+    }
+
+    unsafe extern "system" fn visit(
+        window: windows_sys::Win32::Foundation::HWND,
+        parameter: windows_sys::Win32::Foundation::LPARAM,
+    ) -> windows_sys::core::BOOL {
+        let search = unsafe { &mut *(parameter as *mut Search) };
+        let mut owner = 0;
+        unsafe {
+            GetWindowThreadProcessId(window, &mut owner);
+        }
+        if owner == search.id {
+            search.found = true;
+            0
+        } else {
+            1
+        }
+    }
+
+    let mut search = Search { id, found: false };
+    unsafe {
+        EnumWindows(
+            Some(visit),
+            (&mut search as *mut Search).cast::<core::ffi::c_void>() as isize,
+        );
+    }
+    ScriptProcessPlatformFacts {
+        top_level_window_supported: true,
+        top_level_window_present: search.found,
+    }
+}
+
+#[cfg(not(windows))]
+fn process_platform_facts(_id: u32) -> ScriptProcessPlatformFacts {
+    ScriptProcessPlatformFacts {
+        top_level_window_supported: false,
+        top_level_window_present: false,
+    }
 }
 
 fn child_stdout(child: &mut ScriptChild) -> Result<ScriptStream, Box<EvalAltResult>> {
@@ -788,7 +863,10 @@ mod tests {
                 let child = c.start();
                 let before = child.id;
                 child.wait_with_output();
-                #{ before: before, after: child.id, state: child.state }
+                let facts = child.platform_facts;
+                #{ before: before, after: child.id, state: child.state,
+                   window_supported: facts.top_level_window_supported,
+                   window_present: facts.top_level_window_present }
             "#
         } else {
             r#"
@@ -797,7 +875,10 @@ mod tests {
                 let child = c.start();
                 let before = child.id;
                 child.wait_with_output();
-                #{ before: before, after: child.id, state: child.state }
+                let facts = child.platform_facts;
+                #{ before: before, after: child.id, state: child.state,
+                   window_supported: facts.top_level_window_supported,
+                   window_present: facts.top_level_window_present }
             "#
         };
         let result = engine().eval::<rhai::Map>(source).unwrap();
@@ -807,6 +888,8 @@ mod tests {
             result["after"].as_int().unwrap()
         );
         assert_eq!(result["state"].clone().into_string().unwrap(), "exited");
+        assert_eq!(result["window_supported"].as_bool().unwrap(), cfg!(windows));
+        assert!(!result["window_present"].as_bool().unwrap());
     }
 
     #[test]

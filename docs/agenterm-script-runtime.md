@@ -309,7 +309,8 @@ agenterm-script
 │  │     [shipped; stable; designed 2026-07-28]
 │  │
 │  ├─ Child / Output
-│  │  Child lifecycle, live stdout/stderr Streams, and bounded final output.
+│  │  Child lifecycle, typed platform facts, live stdout/stderr Streams, and
+│  │  bounded final output.
 │  │  [shipped; stable; designed 2026-07-28]
 │  ├─ Task
 │  │  Invocation-owned timer or HTTP state with id/kind/wait/cancel facts.
@@ -750,6 +751,14 @@ identity and MUST NOT be persisted as one.
 `Child.id` is stable for that typed handle throughout the invocation, including
 after `wait_with_output()` has completed. This lets cleanup manifests retain
 the exact owned PID without reopening or rediscovering a system process.
+
+`Child.platform_facts` returns a typed `ProcessPlatformFacts` value scoped to
+that invocation-owned child. On Windows,
+`top_level_window_supported=true` and `top_level_window_present` reports
+whether the child PID owns any native top-level window. Other platforms
+currently return `top_level_window_supported=false` and never pretend that a
+negative result is an observed desktop fact. This is not a general process
+scanner and accepts no arbitrary PID.
 
 `Output.stdout` and `.stderr` are `Bytes`. `stdout_text()` and `stderr_text()`
 perform strict UTF-8 decoding. `.truncated` MUST become true if either stream

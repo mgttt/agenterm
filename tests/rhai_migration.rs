@@ -273,6 +273,30 @@ fn run_working_context_smoke() -> Output {
         .expect("run Rhai working-context smoke")
 }
 
+#[cfg(windows)]
+fn run_server_smoke() -> Output {
+    let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+        .current_dir(repo)
+        .args(["run", "scripts/rhai/server-smoke.rhai"])
+        .args(["--profile", "local", "--project-root"])
+        .arg(repo)
+        .args([
+            "--timeout-ms",
+            "60000",
+            "--max-operations",
+            "10000000",
+            "--",
+        ])
+        .arg(repo)
+        .arg(env!("CARGO_BIN_EXE_agenterm-server"))
+        .arg(env!("CARGO_BIN_EXE_agenterm-cli"))
+        .env("AGENTERM_NO_ACTIVATE", "1")
+        .output()
+        .expect("run Rhai server smoke")
+}
+
 fn run_preflight(repo_under_test: &Path, output_path: &Path) -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -441,7 +465,10 @@ fn child_id_remains_public_after_process_completion() {
             "eval",
             "let c=std::process::command(\"rustc\");\
              c.arg(\"--version\");let child=c.start();let before=child.id;\
-             child.wait_with_output();#{before:before,after:child.id,state:child.state}",
+             child.wait_with_output();let facts=child.platform_facts;\
+             #{before:before,after:child.id,state:child.state,\
+               window_supported:facts.top_level_window_supported,\
+               window_present:facts.top_level_window_present}",
             "--profile",
             "local",
             "--json",
@@ -458,6 +485,11 @@ fn child_id_remains_public_after_process_completion() {
     assert_eq!(envelope["ok"], true);
     assert_eq!(envelope["value"]["before"], envelope["value"]["after"]);
     assert_eq!(envelope["value"]["state"], "exited");
+    assert_eq!(
+        envelope["value"]["window_supported"],
+        serde_json::Value::Bool(cfg!(windows))
+    );
+    assert_eq!(envelope["value"]["window_present"], false);
 }
 
 #[cfg(windows)]
@@ -1281,7 +1313,6 @@ fn prd_alignment_task_matches_public_catalogs_and_fails_closed() {
     }
     for suite in [
         "cli_smoke.ps1",
-        "server_smoke.ps1",
         "remote_ui_smoke.ps1",
         "remote_ui_upgrade_smoke.ps1",
         "fleet_smoke.ps1",
@@ -1293,6 +1324,7 @@ fn prd_alignment_task_matches_public_catalogs_and_fails_closed() {
         copy_fixture_file(repo, &fixture, &format!("tests/{suite}"));
     }
     copy_fixture_file(repo, &fixture, "scripts/rhai/working-context-smoke.rhai");
+    copy_fixture_file(repo, &fixture, "scripts/rhai/server-smoke.rhai");
     let contract_path = fixture.join("prd").join("alignment-contract.json");
     let malformed = fs::read_to_string(&contract_path)
         .expect("read fixture alignment contract")
@@ -1345,6 +1377,23 @@ fn rhai_working_context_smoke_is_private_ephemeral_and_orphan_free() {
     ));
     assert!(!stdout.contains("credential-"));
     assert!(!String::from_utf8_lossy(&output.stderr).contains("credential-"));
+}
+
+#[cfg(windows)]
+#[test]
+fn rhai_server_smoke_preserves_headless_authority_and_cleanup() {
+    let output = run_server_smoke();
+    assert!(
+        output.status.success(),
+        "Rhai server smoke failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("EVIDENCE server.headless-authority"));
+    assert!(
+        stdout.contains("PASS: headless server owns PTY, parser, workspace, events, and no HWND")
+    );
 }
 
 #[test]

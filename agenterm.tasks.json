@@ -91,6 +91,14 @@
       "args": [".", "dist/agenterm.exe", "dist/agenterm-cli.exe"]
     },
     {
+      "id": "server-smoke",
+      "description": "Prove split headless server ownership, leases, PTY state, receipts, events, persistence, and native window absence",
+      "entry": "scripts/rhai/server-smoke.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "args": [".", "dist/agenterm-server.exe", "dist/agenterm-cli.exe"]
+    },
+    {
       "id": "migration-audit",
       "description": "Enforce the frozen PowerShell migration ledger and reject untracked drift",
       "entry": "scripts/rhai/powershell-migration-audit.rhai",

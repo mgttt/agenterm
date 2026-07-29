@@ -661,16 +661,17 @@ pub fn entries() -> Vec<ScriptApiEntry> {
         shipped_local_entry(
             "std.process.child",
             "system/process/child",
-            "Child.id/state/stdout/stderr/kill/wait_with_output",
+            "Child.id/state/platform_facts/stdout/stderr/kill/wait_with_output",
             Some("std::process::Child"),
             RustMapping::Adapted,
-            "child.id / child.state / child.stdout / child.stderr / child.kill() / child.wait_with_output([timeout])",
+            "child.id / child.state / child.platform_facts / child.stdout / child.stderr / child.kill() / child.wait_with_output([timeout])",
             (
                 &[
                     "live_bounded_streams",
                     "typed_timeout",
                     "invocation_owned",
                     "id_stable_after_completion",
+                    "owned_child_platform_observation",
                 ],
                 &["process_kill", "process_timeout"],
             ),

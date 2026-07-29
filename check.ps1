@@ -302,7 +302,7 @@ try {
     Assert-AgenTermQualificationDeclarations -Context $qualification `
         -SuiteScripts @{
             'cli-smoke' = '.\tests\cli_smoke.ps1'
-            'server-smoke' = '.\tests\server_smoke.ps1'
+            'server-smoke' = '.\scripts\rhai\server-smoke.rhai'
             'remote-ui-smoke' = '.\tests\remote_ui_smoke.ps1'
             'remote-ui-upgrade-smoke' = '.\tests\remote_ui_upgrade_smoke.ps1'
             'fleet-smoke' = '.\tests\fleet_smoke.ps1'
@@ -497,7 +497,9 @@ try {
             }
             Invoke-Checked -Id 'server-smoke' `
                 -Label 'headless server authority smoke test' {
-                & '.\tests\server_smoke.ps1'
+                & '.\dist\agenterm-script.exe' task run server-smoke `
+                    --manifest '.\agenterm.tasks.json' `
+                    --timeout-ms 60000 --max-operations 10000000
             }
             Invoke-Checked -Id 'remote-ui-smoke' `
                 -Label 'replaceable UI client smoke test' {
