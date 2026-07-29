@@ -33,21 +33,34 @@ if /i "%~1"=="release" (
 )
 
 set "BUILD_IDENTITY_ENV=%TEMP%\agenterm-build-identity-%RANDOM%-%RANDOM%.cmd"
-cargo build --quiet --locked %CARGO_ARGS% --bin agenterm-script
-if errorlevel 1 (
-    echo.
-    echo Failed to bootstrap agenterm-script for build identity.
-    popd
-    exit /b 1
+set "BUILD_IDENTITY_READY=0"
+if exist "%CARGO_PROFILE_DIR%\agenterm-script.exe" (
+    "%CARGO_PROFILE_DIR%\agenterm-script.exe" task check build-identity ^
+        --manifest "%~dp0agenterm.tasks.json" >nul 2>nul
+    if not errorlevel 1 (
+        "%CARGO_PROFILE_DIR%\agenterm-script.exe" task run build-identity ^
+            --manifest "%~dp0agenterm.tasks.json" -- ^
+            "%CD%" "%PROFILE%" "%BUILD_IDENTITY_ENV%"
+        if not errorlevel 1 set "BUILD_IDENTITY_READY=1"
+    )
 )
-"%CARGO_PROFILE_DIR%\agenterm-script.exe" task run build-identity ^
-    --manifest "%~dp0agenterm.tasks.json" -- ^
-    "%CD%" "%PROFILE%" "%BUILD_IDENTITY_ENV%"
-if errorlevel 1 (
-    echo.
-    echo Failed to determine truthful AgenTerm build identity.
-    popd
-    exit /b 1
+if "%BUILD_IDENTITY_READY%"=="0" (
+    cargo build --quiet --locked %CARGO_ARGS% --bin agenterm-script
+    if errorlevel 1 (
+        echo.
+        echo Failed to bootstrap agenterm-script for build identity.
+        popd
+        exit /b 1
+    )
+    "%CARGO_PROFILE_DIR%\agenterm-script.exe" task run build-identity ^
+        --manifest "%~dp0agenterm.tasks.json" -- ^
+        "%CD%" "%PROFILE%" "%BUILD_IDENTITY_ENV%"
+    if errorlevel 1 (
+        echo.
+        echo Failed to determine truthful AgenTerm build identity.
+        popd
+        exit /b 1
+    )
 )
 call "%BUILD_IDENTITY_ENV%"
 set "BUILD_IDENTITY_RESULT=%ERRORLEVEL%"

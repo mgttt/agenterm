@@ -107,16 +107,29 @@ function Import-AgenTermDevelopmentBuildIdentity {
         else {
             [IO.Path]::GetFullPath($env:CARGO_TARGET_DIR)
         }
-        & cargo build --quiet --locked --bin agenterm-script
-        if ($LASTEXITCODE -ne 0) {
-            throw 'Could not bootstrap agenterm-script for build identity.'
-        }
         $worker = Join-Path $cargoTarget 'debug\agenterm-script.exe'
-        & $worker task run build-identity `
-            --manifest '.\agenterm.tasks.json' -- `
-            $PSScriptRoot dev $identityPath
-        if ($LASTEXITCODE -ne 0) {
-            throw 'Could not freeze the development build identity.'
+        $identityReady = $false
+        if (Test-Path -LiteralPath $worker -PathType Leaf) {
+            & $worker task check build-identity `
+                --manifest '.\agenterm.tasks.json' *> $null
+            if ($LASTEXITCODE -eq 0) {
+                & $worker task run build-identity `
+                    --manifest '.\agenterm.tasks.json' -- `
+                    $PSScriptRoot dev $identityPath
+                $identityReady = $LASTEXITCODE -eq 0
+            }
+        }
+        if (-not $identityReady) {
+            & cargo build --quiet --locked --bin agenterm-script
+            if ($LASTEXITCODE -ne 0) {
+                throw 'Could not bootstrap agenterm-script for build identity.'
+            }
+            & $worker task run build-identity `
+                --manifest '.\agenterm.tasks.json' -- `
+                $PSScriptRoot dev $identityPath
+            if ($LASTEXITCODE -ne 0) {
+                throw 'Could not freeze the development build identity.'
+            }
         }
         $values = [ordered]@{}
         foreach ($line in Get-Content -LiteralPath $identityPath) {

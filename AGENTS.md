@@ -123,6 +123,11 @@ development `target/` cache. Release-only size optimization belongs in
 `[profile.release]`. The staging path is intentionally one PowerShell process
 and prefers `pwsh` when available; do not split it back into one interpreter
 startup per artifact.
+Build-identity freezing first reuses an existing compatible Script worker and
+falls back to bootstrapping one only when it is absent or incompatible. Do not
+restore an unconditional pre-identity worker build: compile-time
+`AGENTERM_BUILD_*` values otherwise alternate Cargo fingerprints and add a
+redundant shared-library rebuild to warm loops.
 All smoke tests inherit `AGENTERM_NO_ACTIVATE=1`; GUI launches and CLI
 autostarts must honor it without taking foreground focus. Routine local release
 checks may skip the bounded-journal saturation load. A candidate-bound
