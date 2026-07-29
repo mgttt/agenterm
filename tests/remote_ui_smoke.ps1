@@ -437,7 +437,7 @@ try {
         )
     }
 
-    Write-Host 'STEP recover hidden Tabs from the system menu and status bar'
+    Write-Host 'STEP recover hidden Tabs from the persistent toolbar, system menu, and status bar'
     $tabsButton = [AgenTermRemoteUiNativeTest]::GetDlgItem(
         $gui.MainWindowHandle, 2104
     )
@@ -447,9 +447,21 @@ try {
     [AgenTermRemoteUiNativeTest]::SendMessage(
         $tabsButton, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero
     ) | Out-Null
-    if ([AgenTermRemoteUiNativeTest]::IsWindowVisible($tabsButton) -or
-        [AgenTermRemoteUiNativeTest]::IsWindowVisible($settingsButton)) {
-        throw 'hiding Tabs left sidebar toolbar controls visible over the terminal'
+    if (-not [AgenTermRemoteUiNativeTest]::IsWindowVisible($tabsButton) -or
+        -not [AgenTermRemoteUiNativeTest]::IsWindowVisible($settingsButton)) {
+        throw 'hiding Tabs also hid the terminal workbench toolbar'
+    }
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $tabsButton, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero
+    ) | Out-Null
+    if (-not [AgenTermRemoteUiNativeTest]::IsWindowVisible($tabsButton)) {
+        throw 'persistent toolbar Tabs control did not restore the sidebar'
+    }
+    [AgenTermRemoteUiNativeTest]::SendMessage(
+        $gui.MainWindowHandle, 0x0112, [IntPtr]0x1F20, [IntPtr]::Zero
+    ) | Out-Null
+    if (-not [AgenTermRemoteUiNativeTest]::IsWindowVisible($tabsButton)) {
+        throw 'system-menu Toggle Tabs incorrectly hid the terminal toolbar'
     }
     [AgenTermRemoteUiNativeTest]::SendMessage(
         $gui.MainWindowHandle, 0x0112, [IntPtr]0x1F20, [IntPtr]::Zero
@@ -634,14 +646,15 @@ try {
     }
 
     Write-Host 'STEP edit CWD through the bottom workbench segment'
-    $cwdClient = [AgenTermRemoteUiNativeTest+Rect]::new()
-    if (-not [AgenTermRemoteUiNativeTest]::GetClientRect(
-            $gui.MainWindowHandle, [ref]$cwdClient
-        )) {
-        throw 'GetClientRect failed for the CWD status segment'
+    $cwdSnapshot = Wait-UiProjection -Projection 'replaceable_ui_client'
+    $cwdBounds = $cwdSnapshot.layout.status_bar.cwd.bounds
+    $cwdWidth = [int]$cwdBounds.right - [int]$cwdBounds.left
+    $cwdHeight = [int]$cwdBounds.bottom - [int]$cwdBounds.top
+    if ($cwdWidth -le 0 -or $cwdHeight -le 0) {
+        throw 'ui-snapshot did not expose an actionable CWD status segment'
     }
-    $cwdStatusX = $cwdClient.Right - 24
-    $cwdStatusY = $cwdClient.Bottom - 13
+    $cwdStatusX = [int]$cwdBounds.left + [int]($cwdWidth / 2)
+    $cwdStatusY = [int]$cwdBounds.top + [int]($cwdHeight / 2)
     [AgenTermRemoteUiNativeTest]::SendMessage(
         $gui.MainWindowHandle, 0x0201, [IntPtr]::Zero,
         [AgenTermRemoteUiNativeTest]::MousePoint(

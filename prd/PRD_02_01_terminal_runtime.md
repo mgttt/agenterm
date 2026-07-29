@@ -7,7 +7,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] Win32/GDI window without GPU or OpenGL requirements
 - [~] Linux/macOS GUI window without GPU requirements via `winit` +
   `softbuffer` software raster (shared theme/geometry/selection/vt100);
-  Linux/macOS share `unix_app`: live POSIX PTY tabs, sidebar toolbar,
+  Linux/macOS share `unix_app`: live POSIX PTY tabs, terminal workbench toolbar,
   composer, settings, wheel/scrollbar, paste, and word/row/drag selection
   with edge autoscroll; status-bar CWD editor, window-close confirm, and tabs
   resize grip on Unix; proxy editor and professional selection remain later

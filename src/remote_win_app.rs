@@ -103,7 +103,6 @@ const CLIPBOARD_UNICODE_TEXT: u32 = 13;
 const TERMINAL_PASTE_LIMIT_BYTES: usize = 256 * 1024;
 const WM_APP_AUTOMATION_SHORTCUT: u32 = 0x8000 + 2;
 const WM_APP_FOCUS_QUERY: u32 = 0x8000 + 3;
-const TOOLBAR_HEIGHT: i32 = 44;
 const STATUS_HEIGHT: i32 = 26;
 const COMPOSER_HEIGHT: i32 = 104;
 const MARGIN: i32 = 6;
@@ -1540,6 +1539,12 @@ impl RemoteWindowState {
                     "resize_grip": layout.resize_grip.map(pixel_rect_json),
                     "resizing": self.tabs_resize_dragging,
                 },
+                "toolbar": layout.workspace_toolbar.map(|toolbar| serde_json::json!({
+                    "bounds": pixel_rect_json(toolbar.bounds),
+                    "new": pixel_rect_json(toolbar.new_tab),
+                    "tabs": pixel_rect_json(toolbar.tabs),
+                    "settings": pixel_rect_json(toolbar.settings),
+                })),
                 "terminal": {
                     "x": layout.terminal.left,
                     "y": layout.terminal.top,
@@ -1686,28 +1691,14 @@ impl RemoteWindowState {
     }
 
     fn cwd_status_rect(&self) -> RECT {
-        let status = self.layout_rects().3;
-        let recovery_width = if self.tabs_visible { 0 } else { 72 };
-        let width = (status.right - status.left - recovery_width).clamp(0, 420);
-        RECT {
-            left: status.right - width,
-            top: status.top,
-            right: status.right,
-            bottom: status.bottom,
-        }
+        win_rect(self.workspace_geometry().status_segments.cwd)
     }
 
     fn tabs_recovery_rect(&self) -> Option<RECT> {
-        if self.tabs_visible {
-            return None;
-        }
-        let status = self.layout_rects().3;
-        Some(RECT {
-            left: status.left,
-            top: status.top,
-            right: (status.left + 72).min(status.right),
-            bottom: status.bottom,
-        })
+        self.workspace_geometry()
+            .status_segments
+            .tabs_recovery
+            .map(win_rect)
     }
 
     fn set_tabs_visible(&mut self, visible: bool) {
@@ -1731,33 +1722,25 @@ impl RemoteWindowState {
     }
 
     fn layout(&mut self) {
-        let (sidebar, _, composer, _) = self.layout_rects();
-        let toolbar_top = sidebar.bottom.saturating_sub(TOOLBAR_HEIGHT);
+        let geometry = self.workspace_geometry();
+        let composer = win_rect(geometry.composer);
         unsafe {
-            MoveWindow(
-                self.new_tab,
-                sidebar.left + MARGIN,
-                toolbar_top + MARGIN,
-                72,
-                32,
-                1,
-            );
-            MoveWindow(
-                self.tabs_button,
-                sidebar.left + 84,
-                toolbar_top + MARGIN,
-                66,
-                32,
-                1,
-            );
-            MoveWindow(
-                self.settings,
-                sidebar.left + 156,
-                toolbar_top + MARGIN,
-                86,
-                32,
-                1,
-            );
+            if let Some(toolbar) = geometry.workspace_toolbar {
+                for (window, bounds) in [
+                    (self.new_tab, toolbar.new_tab),
+                    (self.tabs_button, toolbar.tabs),
+                    (self.settings, toolbar.settings),
+                ] {
+                    MoveWindow(
+                        window,
+                        bounds.left,
+                        bounds.top,
+                        bounds.width(),
+                        bounds.height(),
+                        1,
+                    );
+                }
+            }
             let send_width = 76;
             MoveWindow(
                 self.edit,
@@ -1777,7 +1760,7 @@ impl RemoteWindowState {
             );
             ShowWindow(
                 self.new_tab,
-                if self.tabs_visible
+                if geometry.workspace_toolbar.is_some()
                     && !self.window_close_pending
                     && !self.settings_open
                     && self.pending_close_tab_id.is_none()
@@ -1787,14 +1770,16 @@ impl RemoteWindowState {
                     SW_HIDE
                 },
             );
-            let sidebar_command =
-                if self.tabs_visible && !self.window_close_pending && !self.settings_open {
-                    SW_SHOW
-                } else {
-                    SW_HIDE
-                };
-            ShowWindow(self.tabs_button, sidebar_command);
-            ShowWindow(self.settings, sidebar_command);
+            let workspace_command = if geometry.workspace_toolbar.is_some()
+                && !self.window_close_pending
+                && !self.settings_open
+            {
+                SW_SHOW
+            } else {
+                SW_HIDE
+            };
+            ShowWindow(self.tabs_button, workspace_command);
+            ShowWindow(self.settings, workspace_command);
         }
         self.layout_tab_editor();
         self.layout_close_controls();
@@ -3406,6 +3391,10 @@ impl RemoteWindowState {
         }
         let (sidebar, terminal, composer, status) = self.layout_rects();
         fill(device, &sidebar, palette.sidebar.colorref());
+        if let Some(toolbar) = self.workspace_geometry().workspace_toolbar {
+            let toolbar = win_rect(toolbar.bounds);
+            fill(device, &toolbar, palette.composer.colorref());
+        }
         fill(device, &terminal, palette.terminal_background.colorref());
         fill(device, &composer, palette.composer.colorref());
         fill(device, &status, palette.status.colorref());
@@ -3768,7 +3757,7 @@ impl RemoteWindowState {
                 TreeRowMode::Normal,
             );
             let row = win_rect(geometry.selection);
-            if row.bottom > sidebar.bottom - TOOLBAR_HEIGHT {
+            if row.bottom > sidebar.bottom {
                 break;
             }
             let active = client.snapshot().active_tab_id.as_deref() == Some(tab.id.as_str());

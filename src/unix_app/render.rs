@@ -226,7 +226,7 @@ pub(super) enum ToolbarHit {
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct SidebarToolbarView {
+pub(super) struct WorkspaceToolbarView {
     pub(super) bounds: (u32, u32, u32, u32),
     pub(super) new_tab: (u32, u32, u32, u32),
     pub(super) tabs: (u32, u32, u32, u32),
@@ -234,8 +234,8 @@ pub(super) struct SidebarToolbarView {
     pub(super) compact: bool,
 }
 
-impl SidebarToolbarView {
-    pub(super) fn from_layout(toolbar: crate::ui_geometry::SidebarToolbarLayout) -> Self {
+impl WorkspaceToolbarView {
+    pub(super) fn from_layout(toolbar: crate::ui_geometry::WorkspaceToolbarLayout) -> Self {
         Self {
             bounds: u32_rect(toolbar.bounds),
             new_tab: u32_rect(toolbar.new_tab),
@@ -243,7 +243,7 @@ impl SidebarToolbarView {
             settings: u32_rect(toolbar.settings),
             compact: matches!(
                 toolbar.mode,
-                crate::ui_geometry::SidebarToolbarMode::Compact
+                crate::ui_geometry::WorkspaceToolbarMode::Compact
             ),
         }
     }
@@ -365,7 +365,8 @@ pub(super) struct FrameContent<'a> {
     pub(super) tree_height: u32,
     pub(super) terminal: TerminalPaint<'a>,
     pub(super) sidebar_rows: &'a [SidebarTabRow],
-    pub(super) sidebar_toolbar: Option<SidebarToolbarView>,
+    pub(super) workspace_toolbar: Option<WorkspaceToolbarView>,
+    pub(super) terminal_top: u32,
     pub(super) composer: ComposerView<'a>,
     pub(super) scrollbar: Option<ScrollbarView>,
     pub(super) settings: Option<SettingsModalView<'a>>,
@@ -398,9 +399,9 @@ pub(super) fn render_frame(
             content.sidebar_rows,
             content.sidebar_width,
         );
-        if let Some(toolbar) = content.sidebar_toolbar {
-            render_sidebar_toolbar(buffer, stride, width, height, palette, toolbar);
-        }
+    }
+    if let Some(toolbar) = content.workspace_toolbar {
+        render_workspace_toolbar(buffer, stride, width, height, palette, toolbar);
     }
     render_terminal_grid(
         buffer,
@@ -410,6 +411,7 @@ pub(super) fn render_frame(
         content.terminal,
         palette,
         content.sidebar_width,
+        content.terminal_top,
     );
     if let Some(scrollbar) = content.scrollbar {
         render_scrollbar(buffer, stride, palette, scrollbar);
@@ -644,13 +646,13 @@ fn render_window_close(
     }
 }
 
-fn render_sidebar_toolbar(
+fn render_workspace_toolbar(
     buffer: &mut [u32],
     stride: u32,
     width: u32,
     height: u32,
     palette: &ThemePalette,
-    toolbar: SidebarToolbarView,
+    toolbar: WorkspaceToolbarView,
 ) {
     let (bx, by, bw, bh) = toolbar.bounds;
     let bg = rgb_to_pixel(palette.sidebar);
@@ -763,6 +765,7 @@ fn render_terminal_grid(
     terminal: TerminalPaint<'_>,
     palette: &ThemePalette,
     offset_x: u32,
+    offset_y: u32,
 ) {
     let terminal_width = width
         .saturating_sub(offset_x)
@@ -795,7 +798,7 @@ fn render_terminal_grid(
                 width,
                 height,
                 x,
-                u32::from(row) * CELL_HEIGHT,
+                offset_y + u32::from(row) * CELL_HEIGHT,
                 cell.ch,
                 fg,
                 bg,

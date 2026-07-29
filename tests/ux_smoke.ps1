@@ -1105,9 +1105,16 @@ try {
     $baselineCols = [int]$tabsBaseline.layout.terminal.cols
     if ($tabsBaseline.layout.sidebar.configured_width -ne 250 -or
         $tabsBaseline.layout.sidebar.resize_grip.width -ne 6 -or
+        $tabsBaseline.layout.sidebar.y -ne 0 -or
+        $tabsBaseline.layout.sidebar.height -ne $tabsBaseline.window.client_height -or
+        $tabsBaseline.layout.toolbar.bounds.left -ne $tabsBaseline.layout.terminal.x -or
+        $tabsBaseline.layout.toolbar.bounds.top -ne 0 -or
+        $tabsBaseline.layout.toolbar.bounds.bottom -ne $tabsBaseline.layout.terminal.y -or
+        $tabsBaseline.layout.status_bar.x -ne $tabsBaseline.layout.terminal.x -or
+        $tabsBaseline.layout.status_bar.bounds.right -ne $tabsBaseline.window.client_width -or
         -not $tabsBaseline.system_menu.toggle_tabs.checked -or
         [AgenTermNativeTest]::SystemMenuLabel($window, 0x1f20) -ne 'Toggle Tabs') {
-        throw 'adaptive Tabs baseline, grip, or system menu was not exposed'
+        throw 'full-height Tabs and terminal-workbench baseline was not exposed'
     }
 
     [AgenTermNativeTest]::ClickButton($window, 'Tabs')
@@ -1117,25 +1124,23 @@ try {
     if ($tabsHidden.layout.sidebar.visible -or
         $tabsHidden.layout.sidebar.effective_width -ne 0 -or
         $tabsHidden.layout.terminal.x -ne 0 -or
+        $tabsHidden.layout.toolbar.tabs.width -le 0 -or
+        $tabsHidden.layout.toolbar.bounds.left -ne 0 -or
+        $tabsHidden.layout.status_bar.x -ne 0 -or
         $null -eq $tabsHidden.layout.status_bar.tabs_recovery -or
         $tabsHidden.layout.terminal.cols -le $baselineCols -or
         $tabsHidden.system_menu.toggle_tabs.checked -or
         [AgenTermNativeTest]::SystemMenuChecked($window, 0x1f20)) {
         throw 'Tabs button did not hide the tree and release its terminal width'
     }
-    $recovery = $tabsHidden.layout.status_bar.tabs_recovery
-    [AgenTermNativeTest]::Click(
-        $window,
-        [int]($recovery.left + ($recovery.width / 2)),
-        [int]($recovery.top + ($recovery.height / 2))
-    )
+    [AgenTermNativeTest]::ClickButton($window, 'Tabs')
     $tabsRecovered = Invoke-AgenTerm @(
         'ui-action', 'select-tab', '-t', $id
     ) | ConvertFrom-Json
     if (-not $tabsRecovered.layout.sidebar.visible -or
         $tabsRecovered.layout.sidebar.effective_width -ne 250 -or
         $null -ne $tabsRecovered.layout.status_bar.tabs_recovery) {
-        throw 'hidden status segment did not restore Tabs'
+        throw 'persistent terminal toolbar did not restore Tabs'
     }
 
     [AgenTermNativeTest]::SystemCommand($window, 0x1f20)

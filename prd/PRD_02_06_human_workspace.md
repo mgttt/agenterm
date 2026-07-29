@@ -86,7 +86,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     transactions
   - [ ] automated interactive-TUI fixture that rejects batched paste+Enter
     without requiring a networked Codex session
-- [x] `Settings` and `New` actions grouped below the tree
+- [x] workspace chrome uses a full-height Tabs column and a terminal workbench column containing the top New/Tabs/Settings toolbar, terminal viewport, Composer, and terminal-scoped status bar
+- [x] `New`, `Tabs`, and `Settings` actions are grouped in the compact toolbar
+  above the terminal; the toolbar remains available when Tabs are hidden so
+  the same `Tabs` control restores the full-height tree
 - [x] built-in control labels come from one declared English locale;
   semantic snapshots expose the locale and resolved labels
 - [x] settings UI for terminal font family and size
@@ -99,7 +102,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   - [x] `kill-server` intentionally destroys the saved session
   - [ ] optional terminal screen-history snapshot
 - Status bar
-  - [x] full-window bottom status surface, independent of the active terminal
+  - [x] bottom status surface spans only the terminal workbench column, leaving
+    the full-height Tabs column visually and structurally independent
   - [x] semantic bounds exposed through `ui-snapshot`
   - [x] the former right-aligned Proxy display/editor entry is archived and
     releases its width to the provider region; its snapshot slot is zero-width,

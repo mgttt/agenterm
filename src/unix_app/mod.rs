@@ -48,8 +48,8 @@ use crate::{
 
 use render::{
     CELL_HEIGHT, CELL_WIDTH, COMPOSER_HEIGHT, ComposerView, ConfirmCloseHit, ConfirmCloseView,
-    FrameContent, STATUS_HEIGHT, SettingsHit, SettingsModalView, SidebarTabRow, SidebarToolbarView,
-    StatusBarView, TerminalGrid, TerminalPaint, ToolbarHit, WindowCloseHit, WindowCloseView,
+    FrameContent, STATUS_HEIGHT, SettingsHit, SettingsModalView, SidebarTabRow, StatusBarView,
+    TerminalGrid, TerminalPaint, ToolbarHit, WindowCloseHit, WindowCloseView, WorkspaceToolbarView,
     effective_palette, grid_dimensions_for_pixels, render_frame, scrollbar_view_from_geometry,
     sidebar_row_at_y,
 };
@@ -1056,6 +1056,12 @@ impl UnixApp {
                     "resize_grip": layout.resize_grip.map(pixel_rect_json),
                     "resizing": self.tabs_resize_drag.is_some(),
                 },
+                "toolbar": layout.workspace_toolbar.map(|toolbar| serde_json::json!({
+                    "bounds": pixel_rect_json(toolbar.bounds),
+                    "new": pixel_rect_json(toolbar.new_tab),
+                    "tabs": pixel_rect_json(toolbar.tabs),
+                    "settings": pixel_rect_json(toolbar.settings),
+                })),
                 "terminal": {
                     "x": layout.terminal.left,
                     "y": layout.terminal.top,
@@ -1177,16 +1183,6 @@ impl UnixApp {
         if x >= f64::from(sidebar_width) {
             return;
         }
-        if let Some(toolbar) = layout.sidebar_toolbar {
-            let view = SidebarToolbarView::from_layout(toolbar);
-            if let Some(hit) = view.hit_test(x, y) {
-                self.handle_toolbar_hit(hit);
-                return;
-            }
-            if y as i32 >= toolbar.bounds.top {
-                return;
-            }
-        }
         let tree_height = layout.sidebar_tree.height().max(0) as u32;
         if x < 28.0
             && let Some(row_index) = sidebar_row_at_y(y.max(0.0) as u32, tree_height)
@@ -1253,6 +1249,16 @@ impl UnixApp {
             );
             if let Some(hit) = modal.hit_test(x, y) {
                 self.handle_settings_click(hit);
+            }
+            return;
+        }
+        let layout = self.layout();
+        if let Some(toolbar) = layout.workspace_toolbar
+            && toolbar.bounds.contains(x as i32, y as i32)
+        {
+            let view = WorkspaceToolbarView::from_layout(toolbar);
+            if let Some(hit) = view.hit_test(x, y) {
+                self.handle_toolbar_hit(hit);
             }
             return;
         }
@@ -2000,7 +2006,10 @@ impl UnixApp {
                         .filter(|selection| self.active == Some(selection.tab_id)),
                 },
                 sidebar_rows: &sidebar_rows,
-                sidebar_toolbar: layout.sidebar_toolbar.map(SidebarToolbarView::from_layout),
+                workspace_toolbar: layout
+                    .workspace_toolbar
+                    .map(WorkspaceToolbarView::from_layout),
+                terminal_top: layout.terminal.top.max(0) as u32,
                 composer: ComposerView {
                     text: &self.composer_buffer,
                     focused: self.focus_surface == UnixFocusSurface::Composer,

@@ -54,7 +54,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       menu recovery is always available. Width defaults to 250 px, clamps
       around 180..480 px while retaining a usable terminal, double-click
       resets it, and visibility plus configured width persist
-    - [x] the status bar orders host segments as hidden-Tabs recovery,
+    - [x] the terminal-column status bar orders host segments as hidden-Tabs recovery,
       last-known CWD, and flexible provider space. The former right-aligned
       Proxy surface is archived and returns its width to providers
     - [x] the former Proxy eye/editor status entry is archived; users configure
@@ -108,7 +108,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       than shell-name based, and the RMUX compatibility CLI adds no second
       in-terminal key layer
   - Release core: working-context status segments
-    - [x] partition the bottom bar into host-owned Tabs recovery,
+    - [x] partition the terminal-column bottom bar into host-owned Tabs recovery,
       last-known CWD, and flexible provider segments; the archived Proxy slot
       remains zero-width and non-actionable in semantic snapshots
     - [x] truthful working-context CWD uses launch and OSC 7 provenance with safe Composer preparation
@@ -134,11 +134,12 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       already-running descendants
   - Release core: adaptive Tabs workspace
     - [x] Tabs collapse, recovery, and resizing share one persisted workspace geometry
-    - [x] place a `Tabs` button immediately left of `Settings`; activating
-      it collapses the complete tab tree and its controls so terminal and
-      composer reclaim the width
+    - [x] place `New`, `Tabs`, and `Settings` in a compact toolbar above the
+      terminal; activating `Tabs` collapses only the full-height tab tree so
+      the terminal workbench reclaims the width while the toolbar remains
+      available for recovery
     - [x] when collapsed, reserve a small host-owned `Tabs` reveal segment
-      at the far left of the existing bottom status bar; it is layout
+      at the far left of the terminal-column bottom status bar; it is layout
       chrome, not a dynamic provider, and therefore remains available when
       future status scripts fail, time out, or have no value
     - [x] add an always-available, checked-state `Toggle Tabs` item to the

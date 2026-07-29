@@ -80,8 +80,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       reconnects in place with the same GUI PID/HWND after a server epoch
       restart and adopts the new causal bootstrap/lease identity. Tabs
       visibility and drag width remain client-owned and persist through the
-      shared settings file; hiding Tabs also hides its toolbar instead of
-      overlaying terminal content, while an always-available checked
+      shared settings file; hiding Tabs collapses only the full-height tree
+      while the terminal-owned top toolbar remains available for direct
+      recovery, and an always-available checked
       `Toggle Tabs` system-menu item and a host-owned bottom status recovery
       segment prevent a persisted hidden state from trapping the user.
       Mouse-wheel history navigation mutates the server-owned terminal

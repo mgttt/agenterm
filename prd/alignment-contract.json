@@ -79,7 +79,7 @@
       "kind": "behavior",
       "status": "shipped",
       "evidence_mode": "black-box",
-      "prd": "Tabs collapse, recovery, and resizing share one persisted workspace geometry",
+      "prd": "workspace chrome uses a full-height Tabs column and a terminal workbench column containing the top New/Tabs/Settings toolbar, terminal viewport, Composer, and terminal-scoped status bar",
       "evidence_ids": ["ux.adaptive-tabs"]
     },
     {
