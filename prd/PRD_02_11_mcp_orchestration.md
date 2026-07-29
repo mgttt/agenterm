@@ -118,8 +118,12 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       - [x] live read-only evidence against server 48815 proves a concurrent
         ping completes before a waiting call, and timeout/cancellation return
         distinct structured outcomes without stderr diagnostics
-      - [ ] matched-event causality, restart, journal-gap, future-sequence and
-        target-close behavior still need isolated public black-box evidence
+      - [x] an isolated public-executable fixture proves a matched event
+        returns its stable tab ID, new sequence and independently fetched
+        post-state while omitting the event payload
+      - [~] restart, journal-gap, future-sequence and target-close remain
+        distinct typed outcomes with direct IPC fixture coverage; the first
+        three still need public-executable black-box coverage
     - [~] client disconnect, cancellation, or timeout releases capacity
       within a bounded grace period and cannot block the GUI IPC loop or
       another MCP client

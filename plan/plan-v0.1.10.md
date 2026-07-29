@@ -1014,8 +1014,10 @@ entry 是集成热点，只允许一个串行 owner 收口。
   [done] tools/list exposes only agenterm_wait
   [done] concurrent bounded event polling, timeout and cancellation
   [done] live ping-during-wait evidence against 48815
-  [in progress] isolated matched/restart/gap/future-sequence/target-close,
-    waiter-ceiling recovery and orphan evidence
+  [done] isolated public matched-event/post-state causality
+  [done] typed restart/gap/future-sequence/target-close IPC fixtures
+  [in progress] public error-path fixtures, waiter-ceiling recovery and
+    orphan evidence
 
 第七提交
   migrate remaining build/test/qualification/package/release tasks

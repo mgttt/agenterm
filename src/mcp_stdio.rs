@@ -839,6 +839,37 @@ mod tests {
     }
 
     #[test]
+    fn waiter_capacity_fails_closed_before_backend_allocation() {
+        let message = json!({
+            "jsonrpc": "2.0",
+            "id": "wait-over-capacity",
+            "method": "tools/call",
+            "params": {
+                "name": "agenterm_wait",
+                "arguments": {
+                    "epoch": "epoch-a",
+                    "after_sequence": 7,
+                    "event_kind": "tab.note",
+                    "timeout_ms": 100
+                }
+            }
+        });
+        let (sender, _receiver) = mpsc::channel();
+        let mut active = HashMap::new();
+        let error = start_wait(
+            &message,
+            &McpStdioConfig::default(),
+            &sender,
+            &mut active,
+            0,
+        )
+        .unwrap_err();
+        assert_eq!(error["error"]["code"], -32003);
+        assert_eq!(error["error"]["data"]["maximum_waiters"], 0);
+        assert!(active.is_empty());
+    }
+
+    #[test]
     fn malformed_unknown_and_duplicate_initialize_are_typed() {
         let responses = exchange(concat!(
             "{bad json}\n",

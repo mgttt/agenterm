@@ -587,6 +587,33 @@ mod tests {
         );
     }
 
+    #[test]
+    fn journal_position_failures_remain_distinct_wait_outcomes() {
+        for expected in ["server_restart", "journal_gap", "future_sequence"] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap().to_string();
+            let server = thread::spawn(move || {
+                let (stream, _) = listener.accept().unwrap();
+                reply_with_failure(stream, expected);
+            });
+            let result = wait_event(
+                Some(&address),
+                McpWaitRequest {
+                    epoch: "epoch-a".to_owned(),
+                    after_sequence: 7,
+                    event_kind: "tab.note".to_owned(),
+                    tab_id: None,
+                    timeout_ms: 1_000,
+                },
+                Arc::new(AtomicBool::new(false)),
+            )
+            .unwrap();
+            server.join().unwrap();
+            assert_eq!(result["outcome"], expected);
+            assert_eq!(result["detail"]["backend_code"], expected);
+        }
+    }
+
     fn reply_with_empty_event_batch(stream: TcpStream) {
         reply_with_event_batch(
             stream,
@@ -609,6 +636,23 @@ mod tests {
             "error": "",
             "error_code": "",
             "error_category": "",
+            "retryable": false
+        });
+        writeln!(stream, "{response}").unwrap();
+    }
+
+    fn reply_with_failure(mut stream: TcpStream, code: &str) {
+        let mut request = String::new();
+        BufReader::new(stream.try_clone().unwrap())
+            .read_line(&mut request)
+            .unwrap();
+        assert!(!request.is_empty());
+        let response = json!({
+            "ok": false,
+            "output": "",
+            "error": "fixture failure",
+            "error_code": code,
+            "error_category": "event_position",
             "retryable": false
         });
         writeln!(stream, "{response}").unwrap();
