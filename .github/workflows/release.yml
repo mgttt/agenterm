@@ -263,17 +263,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-windows-x86_64
-          path: |
-            dist/agenterm.exe
-            dist/agenterm-server.exe
-            dist/agenterm-cli.exe
-            dist/agenterm-mux.exe
-            dist/agenterm-script.exe
-            dist/agenterm.json
-            dist/agenterm-*-windows-x86_64.zip
-            LICENSE-APACHE
-            LICENSE-MIT
-            THIRD_PARTY_NOTICES.md
+          path: dist/agenterm-*-windows-x86_64.zip
 
       - name: Upload Windows ARM64 release assets
         if: matrix.platform_id == 'windows-aarch64'
@@ -331,13 +321,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          shopt -s nullglob
-          files=(release-assets/*)
+          mapfile -d '' files < <(find release-assets -type f -print0 | sort -z)
           if [[ ${#files[@]} -eq 0 ]]; then
             echo "No release assets were downloaded." >&2
             exit 1
           fi
-          gh release create "$GITHUB_REF_NAME" "${files[@]}" \
-            --verify-tag \
-            --generate-notes \
-            --title "AgenTerm $GITHUB_REF_NAME"
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
+            gh release edit "$GITHUB_REF_NAME" \
+              --draft=false \
+              --title "AgenTerm $GITHUB_REF_NAME"
+          else
+            gh release create "$GITHUB_REF_NAME" "${files[@]}" \
+              --verify-tag \
+              --generate-notes \
+              --title "AgenTerm $GITHUB_REF_NAME"
+          fi
