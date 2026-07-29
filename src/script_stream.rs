@@ -86,7 +86,6 @@ pub(crate) fn register(engine: &mut Engine) {
     engine.register_fn("close", stream_close);
 }
 
-#[cfg(any(not(windows), test))]
 pub(crate) fn from_reader(
     reader: impl Read + Send + 'static,
     kind: &'static str,

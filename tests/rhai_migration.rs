@@ -218,6 +218,37 @@ fn run_migration_audit(repo_under_test: &Path) -> Output {
         .expect("run Rhai migration-audit task")
 }
 
+fn run_prd_alignment(repo_under_test: &Path) -> Output {
+    let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let manifest = repo.join("agenterm.tasks.json");
+    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+        .current_dir(repo)
+        .args(["task", "run", "prd-alignment", "--manifest"])
+        .arg(manifest)
+        .args(["--timeout-ms", "20000", "--max-operations", "10000000"])
+        .arg("--")
+        .arg(repo_under_test)
+        .arg(env!("CARGO_BIN_EXE_agenterm-cli"))
+        .arg(env!("CARGO_BIN_EXE_agenterm-mux"))
+        .output()
+        .expect("run Rhai PRD-alignment task")
+}
+
+#[cfg(windows)]
+fn run_harness_cleanup_selftest() -> Output {
+    let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let manifest = repo.join("agenterm.tasks.json");
+    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+        .current_dir(repo)
+        .args(["task", "run", "harness-cleanup-selftest", "--manifest"])
+        .arg(manifest)
+        .args(["--timeout-ms", "10000", "--max-operations", "10000000"])
+        .output()
+        .expect("run Rhai harness cleanup self-test")
+}
+
 fn run_preflight(repo_under_test: &Path, output_path: &Path) -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -233,6 +264,53 @@ fn run_preflight(repo_under_test: &Path, output_path: &Path) -> Output {
         .arg("--quiet")
         .output()
         .expect("run Rhai preflight task")
+}
+
+fn run_preflight_benchmark(repo_under_test: &Path, output_path: &Path) -> Output {
+    let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let manifest = repo.join("agenterm.tasks.json");
+    let worker = Path::new(env!("CARGO_BIN_EXE_agenterm-script"));
+    Command::new(worker)
+        .current_dir(repo)
+        .args(["task", "run", "preflight-benchmark", "--manifest"])
+        .arg(&manifest)
+        .args(["--timeout-ms", "10000", "--max-operations", "10000000"])
+        .arg("--")
+        .arg(worker)
+        .arg(&manifest)
+        .arg(repo_under_test)
+        .arg(output_path)
+        .arg("5")
+        .output()
+        .expect("run Rhai preflight-benchmark task")
+}
+
+fn run_supply_chain(output_path: &Path) -> Output {
+    let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let manifest = repo.join("agenterm.tasks.json");
+    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+        .current_dir(repo)
+        .args(["task", "run", "supply-chain", "--manifest"])
+        .arg(manifest)
+        .args([
+            "--timeout-ms",
+            "60000",
+            "--max-operations",
+            "10000000",
+            "--max-collection-items",
+            "100000",
+            "--max-string-bytes",
+            "8388608",
+            "--max-output-bytes",
+            "1048576",
+        ])
+        .arg("--")
+        .arg(repo)
+        .arg(output_path)
+        .output()
+        .expect("run Rhai supply-chain task")
 }
 
 fn parse_batch_environment(path: &Path) -> Vec<(String, String)> {
@@ -300,6 +378,36 @@ fn copy_fixture_file(repo: &Path, fixture: &Path, relative: &str) {
     fs::create_dir_all(destination.parent().expect("fixture file parent"))
         .expect("create fixture file parent");
     fs::copy(repo.join(relative), destination).expect("copy fixture file");
+}
+
+#[test]
+fn process_id_is_available_through_the_public_local_profile() {
+    let output = Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+        .args(["eval", "std::process::id()", "--profile", "local", "--json"])
+        .output()
+        .expect("evaluate public process ID");
+    assert!(
+        output.status.success(),
+        "process ID evaluation failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let envelope: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("decode process ID envelope");
+    assert_eq!(envelope["ok"], true);
+    assert!(
+        envelope["value"].as_u64().is_some_and(|pid| pid > 0),
+        "process ID was not a positive integer: {envelope}"
+    );
+
+    let denied = Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+        .args(["eval", "std::process::id()", "--profile", "pure", "--json"])
+        .output()
+        .expect("evaluate process ID in pure profile");
+    assert!(!denied.status.success());
+    let denied_envelope: serde_json::Value =
+        serde_json::from_slice(&denied.stdout).expect("decode pure-profile denial");
+    assert_eq!(denied_envelope["ok"], false);
+    assert_eq!(denied_envelope["failure"]["code"], "script_runtime");
 }
 
 #[cfg(windows)]
@@ -1088,6 +1196,89 @@ fn migration_audit_rejects_operational_references_to_deleted_scripts() {
 }
 
 #[test]
+fn prd_alignment_task_matches_public_catalogs_and_fails_closed() {
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let accepted = run_prd_alignment(repo);
+    assert!(
+        accepted.status.success(),
+        "PRD alignment failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&accepted.stdout),
+        String::from_utf8_lossy(&accepted.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&accepted.stdout).trim(),
+        concat!(
+            "PASS: PRD aligns with 61 catalog entries, 83 public names, ",
+            "11 protocol features, 41 mux commands, 57 capability IDs, ",
+            "and 57 executable evidence IDs"
+        )
+    );
+
+    let fixture = fixture_root("prd-alignment");
+    fs::create_dir_all(fixture.join("prd")).expect("create PRD fixture directory");
+    fs::create_dir_all(fixture.join("scripts")).expect("create script fixture directory");
+    fs::create_dir_all(fixture.join("tests")).expect("create test fixture directory");
+    copy_fixture_file(repo, &fixture, "PRD.md");
+    copy_fixture_file(repo, &fixture, "scripts/qualification-gates.json");
+    for entry in fs::read_dir(repo.join("prd")).expect("read PRD modules") {
+        let entry = entry.expect("read PRD module entry");
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name == "alignment-contract.json" || (name.starts_with("PRD_") && name.ends_with(".md"))
+        {
+            copy_fixture_file(repo, &fixture, &format!("prd/{name}"));
+        }
+    }
+    for suite in [
+        "cli_smoke.ps1",
+        "server_smoke.ps1",
+        "remote_ui_smoke.ps1",
+        "remote_ui_upgrade_smoke.ps1",
+        "fleet_smoke.ps1",
+        "script_smoke.ps1",
+        "theme_smoke.ps1",
+        "working_context_smoke.ps1",
+        "workbench_smoke.ps1",
+        "ux_smoke.ps1",
+    ] {
+        copy_fixture_file(repo, &fixture, &format!("tests/{suite}"));
+    }
+    let contract_path = fixture.join("prd").join("alignment-contract.json");
+    let malformed = fs::read_to_string(&contract_path)
+        .expect("read fixture alignment contract")
+        .replacen("\"schema_version\": 2", "\"schema_version\": 99", 1);
+    fs::write(&contract_path, malformed).expect("corrupt fixture contract schema");
+
+    let rejected = run_prd_alignment(&fixture);
+    assert!(!rejected.status.success());
+    assert!(
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&rejected.stdout),
+            String::from_utf8_lossy(&rejected.stderr)
+        )
+        .contains("prd_alignment_contract_schema")
+    );
+    fs::remove_dir_all(fixture).expect("remove PRD alignment fixture");
+}
+
+#[cfg(windows)]
+#[test]
+fn rhai_harness_cleanup_owns_only_registered_children() {
+    let output = run_harness_cleanup_selftest();
+    assert!(
+        output.status.success(),
+        "Rhai harness cleanup failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "PASS: harness cleanup ownership and orphan proof"
+    );
+}
+
+#[test]
 fn preflight_task_is_fail_closed_and_writes_reports_for_real_git_fixtures() {
     let source_repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     let cases = [
@@ -1236,6 +1427,139 @@ fn preflight_task_is_fail_closed_and_writes_reports_for_real_git_fixtures() {
             "preflight contains forbidden active operation: {forbidden}"
         );
     }
+}
+
+#[test]
+fn preflight_benchmark_task_measures_clean_public_worker_runs() {
+    let source_repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let fixture = fixture_root("preflight-benchmark");
+    let cloned = Command::new("git")
+        .args(["clone", "--quiet", "--no-hardlinks"])
+        .arg(source_repo)
+        .arg(&fixture)
+        .output()
+        .expect("clone clean preflight benchmark fixture");
+    assert!(
+        cloned.status.success(),
+        "clone benchmark fixture failed: {}",
+        String::from_utf8_lossy(&cloned.stderr)
+    );
+
+    let report_path = fixture.join("target").join("benchmark.json");
+    let output = run_preflight_benchmark(&fixture, &report_path);
+    assert!(
+        output.status.success(),
+        "preflight benchmark failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value =
+        serde_json::from_slice(&fs::read(&report_path).expect("read benchmark report"))
+            .expect("decode benchmark report");
+    assert_eq!(report["kind"], "agenterm-read-only-preflight-benchmark");
+    assert_eq!(report["iterations"], 5);
+    assert_eq!(report["all_preflights_passed"], true);
+    assert_eq!(report["target_met"], true);
+    assert!(
+        report["runs"]
+            .as_array()
+            .expect("benchmark runs")
+            .iter()
+            .all(|run| run["passed"] == true && run["exit_code"] == 0),
+        "benchmark masked a failed preflight: {report}"
+    );
+    assert!(
+        fs::read_dir(fixture.join("target"))
+            .expect("read benchmark output directory")
+            .filter_map(Result::ok)
+            .all(|entry| !entry.file_name().to_string_lossy().starts_with("runs-")),
+        "benchmark retained a scratch directory"
+    );
+
+    fs::remove_dir_all(&fixture).expect("remove benchmark fixture");
+}
+
+#[test]
+fn supply_chain_task_is_deterministic_and_covers_the_resolved_lock_graph() {
+    let root = fixture_root("supply-chain");
+    fs::create_dir_all(&root).expect("create supply-chain output fixture");
+    let first_path = root.join("first.spdx.json");
+    let first = run_supply_chain(&first_path);
+    assert!(
+        first.status.success(),
+        "first supply-chain run failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&first.stdout),
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let first_bytes = fs::read(&first_path).expect("read first SPDX document");
+    let document: serde_json::Value =
+        serde_json::from_slice(&first_bytes).expect("decode SPDX document");
+    assert_eq!(document["spdxVersion"], "SPDX-2.3");
+    assert_eq!(document["dataLicense"], "CC0-1.0");
+    assert_eq!(
+        document["creationInfo"]["creators"][0],
+        "Tool: agenterm-script task run supply-chain"
+    );
+    let packages = document["packages"].as_array().expect("SPDX packages");
+    let relationships = document["relationships"]
+        .as_array()
+        .expect("SPDX relationships");
+    assert_eq!(relationships.len(), packages.len());
+    assert_eq!(
+        document["documentDescribes"]
+            .as_array()
+            .expect("document describes")
+            .len(),
+        packages.len()
+    );
+    assert!(
+        packages.iter().all(|package| {
+            package["SPDXID"]
+                .as_str()
+                .is_some_and(|id| id.starts_with("SPDXRef-Package-"))
+                && package["licenseDeclared"]
+                    .as_str()
+                    .is_some_and(|license| !license.is_empty())
+                && package["externalRefs"][0]["referenceType"] == "purl"
+        }),
+        "SPDX package contract is incomplete"
+    );
+    assert!(
+        packages.windows(2).all(|pair| {
+            let key = |package: &serde_json::Value| {
+                format!(
+                    "{}\n{}\n{}\n{}",
+                    package["name"].as_str().unwrap_or_default(),
+                    package["versionInfo"].as_str().unwrap_or_default(),
+                    package["comment"].as_str().unwrap_or_default(),
+                    package["SPDXID"].as_str().unwrap_or_default()
+                )
+            };
+            key(&pair[0]) <= key(&pair[1])
+        }),
+        "SPDX packages are not deterministically ordered"
+    );
+
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let lock = fs::read_to_string(repo.join("Cargo.lock")).expect("read Cargo.lock");
+    let expected_packages = lock.matches("[[package]]").count() - 1;
+    assert_eq!(
+        packages.len(),
+        expected_packages,
+        "SPDX inventory omitted or added resolved packages"
+    );
+    assert!(
+        fs::read_dir(&root)
+            .expect("read supply-chain output directory")
+            .filter_map(Result::ok)
+            .all(|entry| !entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("cargo-metadata-")),
+        "supply-chain task retained metadata scratch files"
+    );
+
+    fs::remove_dir_all(&root).expect("remove supply-chain fixture");
 }
 
 #[cfg(windows)]

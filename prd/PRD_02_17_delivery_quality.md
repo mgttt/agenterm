@@ -82,6 +82,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   runs print the slowest gates; independent preflight fixtures and isolated
   GUI/script diagnostic probes run concurrently without sharing Cargo targets,
   IPC addresses, or cleanup ownership
+- [x] local, CI, and Release lanes run real-repository preflight,
+  supply-chain, and PRD fixtures exactly once through their named gates instead
+  of duplicating them inside the broad parallel Cargo invocation; this avoids
+  cold-runner CPU/deadline/cache contention, while Release retains the
+  dedicated five-sample preflight benchmark gate
 - [x] `lint.ps1` is the fail-fast developer entry point: dependency-free
   PowerShell AST, JSON, UTF-8/conflict-marker checks run in about one second,
   incremental rustfmt/Clippy run before tests, and production Rhai sources are
@@ -113,8 +118,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   - [x] cleanup grants graceful shutdown only to a server confirmed in this
     run's isolated registry, then uses a bounded PID/start-time-matched forced
     fallback and writes proof that no owned GUI/server/worker, window, or
-    registration remains; an injected self-test proves an unregistered
-    same-name process is not killed and the original failure is preserved
+    registration remains; the first shared Rhai harness self-test proves an
+    unregistered sibling process is not killed, registered Child cleanup is
+    orphan-free, and the original failure is preserved, while the existing
+    PowerShell harness retains PID/start-time/window/registration coverage
+    until each owning smoke journey migrates
   - [x] qualification extracts evidence IDs actually emitted by the current
     gate, rejects duplicates or mismatch with its versioned manifest, and has
     fail-closed tests for failed/skipped gates; a clean, stress-inclusive run
@@ -227,9 +235,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [x] changing a shipped script command, capability, API entry, or
       evidence ID must atomically update the public command/API catalog,
       PRD `[x]` leaf, black-box assertion, and alignment contract
-    - [~] `tests/prd_alignment.ps1` compares the public command/evidence
-      catalog with the PRD contract; exact Rhai API-field comparison remains
-      planned
+    - [~] the public `prd-alignment` Rhai task compares PRD modules, shipped
+      capability/evidence declarations, and live CLI/protocol/Mux catalogs;
+      exact Rhai API-field comparison remains planned
     - [x] `check.ps1` runs `tests/script_smoke.ps1` before the
       safe-scripting release tag
 - v0.1.8 autonomous public-interface dogfood (P0)

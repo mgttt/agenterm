@@ -609,12 +609,21 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             ],
         ),
         shipped_local_entry(
+            "std.process.id",
+            "system/process/id",
+            "std::process::id",
+            Some("std::process::id"),
+            RustMapping::Direct,
+            "std::process::id()",
+            (&["current_worker_process"], NO_STRINGS),
+        ),
+        shipped_local_entry(
             "std.process.command-builder",
             "system/process/command/builder",
-            "Command.arg/args/current_dir/env/env_remove/env_clear/stdin_text/timeout/capture_limit",
+            "Command.arg/args/current_dir/env/env_remove/env_clear/stdin_text/stdout_file/timeout/capture_limit",
             Some("std::process::Command"),
             RustMapping::Adapted,
-            "command.arg(value) / command.args(values) / command.current_dir(path) / command.env(name, value)",
+            "command.arg(value) / command.args(values) / command.current_dir(path) / command.env(name, value) / command.stdout_file(path)",
             (&["mutable_builder", "bounded_text_stdin", "invocation_owned"], &["process_argument", "environment_name_invalid"]),
         ),
         shipped_local_entry(
@@ -708,7 +717,7 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             Some("std::time::Duration::from_millis"),
             RustMapping::Adapted,
             "std::time::Duration::from_millis(value)",
-            (&["maximum_10000_ms"], &["duration_millis"]),
+            (&["maximum_60000_ms"], &["duration_millis"]),
         ),
         shipped_local_entry(
             "std.time.duration-from-secs",
@@ -717,7 +726,7 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             Some("std::time::Duration::from_secs"),
             RustMapping::Adapted,
             "std::time::Duration::from_secs(value)",
-            (&["maximum_10_seconds"], &["duration_seconds"]),
+            (&["maximum_60_seconds"], &["duration_seconds"]),
         ),
         shipped_local_entry(
             "rhai.json.parse",
@@ -727,6 +736,18 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             RustMapping::None,
             "rhai::json::parse(text)",
             (NO_STRINGS, &["json_parse", "json_dynamic"]),
+        ),
+        shipped_local_entry(
+            "rhai.json.parse-file",
+            "data/json/parse-file",
+            "rhai::json::parse_file",
+            Some("serde_json::from_reader"),
+            RustMapping::Adapted,
+            "rhai::json::parse_file(path)",
+            (
+                &["typed_file_input", "eight_mebibyte_limit"],
+                &["json_parse_file", "json_parse_file_too_large"],
+            ),
         ),
         shipped_local_entry(
             "rhai.json.stringify",

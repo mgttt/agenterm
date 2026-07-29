@@ -80,6 +80,10 @@ and it is not positioned as a restricted security plugin.
   and read-only Fleet use, not the platform capability ceiling;
 - technical budgets, typed errors, cancellation, process isolation, audit
   privacy, and product data-integrity checks remain mandatory in every mode;
+- [x] explicit local repository tasks may raise their invocation wall-time
+  budget to the stable 120-second hard ceiling; child-process deadlines retain
+  an independent 60-second ceiling while HTTP retains its stricter 10-second
+  ceiling;
 - agent-specific tool visibility, approval, path/domain/target policy,
   credentials, quotas, and natural-language intent belong to a future agent
   layer, not to this runtime;
@@ -144,7 +148,10 @@ and it is not positioned as a restricted security plugin.
   executable plus argv, cwd, env, stdin, bounded stdout/stderr, timeout,
   explicit kill and typed exit state; it never substitutes an implicit shell
   command string or exposes Rust ownership/trait/OS-handle internals. Children
-  are invocation-owned and inherit supervisor process-tree cleanup.
+  are invocation-owned and inherit supervisor process-tree cleanup;
+  `std::process::id()` exposes the current supervised worker PID for
+  owned-resource naming and live-owner protocols without treating it as stable
+  invocation identity.
   `Command.start()` is the script spelling because Rhai reserves `spawn`;
   catalog metadata retains the Rust `Command::spawn` comparison.
 - [~] `std::time` provides selected `Duration`, `Instant`, and `SystemTime`
@@ -358,17 +365,18 @@ and it is not positioned as a restricted security plugin.
     production responsibility and exercises argv-safe process execution,
     bounded capture, typed exit status, cwd, and repository file reads.
 - [~] migrate one independently testable responsibility at a time through
-  `parallel -> parity-proven -> default-rhai -> PowerShell deleted`; the first
-  twelve completed baseline scripts have crossed their rollback boundaries and
-  their PowerShell sources left the v0.1.10 working tree.
+  `parallel -> parity-proven -> default-rhai -> PowerShell deleted`; obsolete
+  unreachable responsibilities may instead cross a caller-audited functional
+  deletion boundary. The first twenty completed baseline scripts have left
+  the v0.1.10 working tree.
 - [ ] parity evidence compares the same inputs, structured outputs, exit
   classification, diagnostics, cancellation, cleanup, encoding, path behavior,
   and clean-machine recovery; a Rhai failure cannot hide the PowerShell
   last-known-good result.
 - [~] once one Rhai responsibility reaches parity and all normal callers switch
-  to it, delete that corresponding PowerShell implementation immediately
-  instead of accumulating a release-wide migration backlog; twelve of 43 baseline
-  scripts are deleted.
+  to it, or an obsolete responsibility is proven unreachable and superseded,
+  delete that PowerShell implementation immediately instead of accumulating a
+  release-wide migration backlog; twenty of 43 baseline scripts are deleted.
 - [~] every migrated item records its old path, replacement path, switching
   commit, parity evidence, and deletion state in this PRD. Git history is the
   only archive after the explicit rollback window closes.
@@ -391,6 +399,12 @@ Migration ledger:
 | Staged build provenance | `scripts/rhai/write-build-metadata.rhai` plus shared artifact/metadata modules | `scripts/write-build-metadata.ps1` | current migration change | public CLI black-box tests prove frozen and live identities, executable size/hash capture, clean-source and frozen-input drift rejection; direct old/new field parity excludes only the generation timestamp | deleted; the standalone task and `stage-build.rhai` reuse the same project modules |
 | Built artifact orchestration | `scripts/rhai/stage-build.rhai` plus shared artifact/metadata modules | `scripts/stage-build.ps1` | current migration change | public CLI composition fixture proves cleanup, obsolete removal, staging, metadata and pre-mutation Git-root rejection; actual `build.bat` and direct old/new directory parity cover the six-artifact path | deleted; `build.bat` invokes one bounded Rhai task and no longer launches PowerShell |
 | Read-only release preflight | `scripts/rhai/preflight.rhai` | `scripts/preflight.ps1` and `scripts/preflight-selftest.ps1` | current migration change | public CLI real-Git fixtures prove clean/CRLF success, dirty/wrong-branch/bad-lock/bad-manifest fail-closed reports, nested output creation, and remote credential redaction | deleted; `check.ps1` runs the Rust black-box fixture and invokes the named Rhai task for release preflight |
+| Preflight latency benchmark | `scripts/rhai/preflight-benchmark.rhai` | `scripts/preflight-benchmark.ps1` | current migration change | public worker black-box benchmark against a clean Git clone proves five successful preflight subprocesses, p95 target enforcement, durable JSON evidence, and scratch cleanup | deleted; release check invokes the named Rhai task directly |
+| Locked dependency and SPDX inventory | `scripts/rhai/supply-chain.rhai` | `scripts/supply-chain.ps1` | current migration change | public task covers every resolved Cargo.lock package, reviewed licenses, direct-notice alignment, deterministic ordinal ordering, SPDX structure and scratch cleanup; old/new semantic parity differs only in producer identity and ordering | deleted; ordinary and release checks invoke the named Rhai task |
+| Obsolete v0.1.8 public-candidate decision and self-test | Current qualification receipt, byte-qualified package, release preflight, and explicit approval boundaries | `scripts/public-candidate-policy.ps1` and `scripts/public-candidate-policy-selftest.ps1` | current migration change | the legacy self-test passed before removal; `git grep` proves no operational caller, while current qualification/package self-tests own the retained fail-closed invariants | deleted as unreachable version-specific duplication; Git history is the rollback source |
+| Unintegrated PowerShell journey-manifest prototype and self-test | Planned shared Rhai smoke harness plus the existing qualification receipt boundary | `tests/JourneyManifest.ps1` and `tests/journey_manifest_selftest.ps1` | current migration change | the prototype self-test passed before removal, but `git grep` proves no smoke, check, CI, qualification, or release caller; delivery PRD already marks the machine-readable step manifest incomplete | deleted rather than preserving a second unused evidence model; Git history is the rollback source |
+| PRD, evidence, CLI/protocol, and Mux catalog alignment | `scripts/rhai/prd-alignment.rhai` | `tests/prd_alignment.ps1` | current migration change | public task reproduces the exact legacy live-catalog PASS result and isolated black-box coverage rejects an unsupported alignment-contract schema | deleted; both quick and full checks invoke the named Rhai task |
+| Owned-child cleanup self-test and first shared Rhai harness foundation | `scripts/rhai/harness-cleanup-selftest.rhai` plus `scripts/rhai/lib/test_harness.rhai` | `tests/harness_cleanup_selftest.ps1` | current migration change | public task and Windows integration prove exact registered-child forced cleanup, survival of an unregistered sibling until explicit cleanup, orphan-free persisted proof, and original-failure retention | deleted; the quality gate invokes the named Rhai task and later smoke migrations extend the same module |
 
 ### v0.1.10 completion commitment
 
@@ -400,8 +414,9 @@ Migration ledger:
 - [x] the dated 2026-07-29 frozen baseline is 43 tracked `.ps1` files: 3 at
   the repository root, 17 under `scripts/`, 21 under `tests/`, and 2 retained in
   `scripts/archive/powershell/`.
-- [~] migration progress is 12/43 deleted and 31/43 remaining; progress is
-  counted only after parity evidence, all-caller cutover, and source deletion.
+- [~] migration progress is 20/43 deleted and 23/43 remaining; progress is
+  counted only after parity evidence plus caller cutover, or caller-audited
+  functional deletion of obsolete behavior, and source deletion.
 - [x] `scripts/powershell-migration.json` freezes all 43 baseline paths under
   stable migration IDs with responsibility groups, replacement task IDs, and
   explicit `inventory`/`deleted` state.
@@ -411,10 +426,11 @@ Migration ledger:
   duplicate paths, invalid states, and count drift; ordinary and release
   qualification invoke it as a required gate.
 - [~] the repository-root `agenterm.tasks.json` is now the offline task
-  catalog and ships fourteen ready tasks (`bootstrap-info`, `build-identity`,
-  `migration-audit`, `target-report`, `internal-version-policy`,
+  catalog and ships eighteen ready tasks (`bootstrap-info`, `build-identity`,
+  `harness-cleanup-selftest`, `migration-audit`, `target-report`, `internal-version-policy`,
   `verify-docs-site`, `readme-examples`, `clean-locked-artifacts`,
-  `prepare-target-clean`, `preflight`, `stage-artifact`, `stage-build`,
+  `prepare-target-clean`, `preflight`, `preflight-benchmark`, `prd-alignment`,
+  `stage-artifact`, `stage-build`, `supply-chain`,
   `validate-artifact-manifest`, and `write-build-metadata`). The existing
   two-input Script contract verifier is
   intentionally not advertised as ready until catalog fixture production is
