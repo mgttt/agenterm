@@ -153,7 +153,7 @@ Keep `Cargo.toml`'s version current, commit the release state on `main`, then
 run:
 
 ```powershell
-.\lint.ps1
+.\lint.cmd
 .\release.ps1
 ```
 

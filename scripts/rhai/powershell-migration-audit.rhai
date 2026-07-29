@@ -73,7 +73,7 @@ for path in deleted_paths {
 let references = std::process::command("git");
 references.args([
     "-C", repo, "grep", "-n", "-F", "-f", "-", "--",
-    ".github", "build.bat", "check.ps1", "lint.ps1", "release.ps1",
+    ".github", "build.bat", "check.ps1", "lint.cmd", "release.ps1",
     "scripts", "tests"
 ]);
 references.stdin_text(deleted_patterns);

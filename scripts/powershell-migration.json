@@ -7,7 +7,7 @@
   "status_values": ["inventory", "deleted"],
   "entries": [
     {"id":"ps1-root-check","path":"check.ps1","group":"quality","responsibility":"quality gate orchestration","replacement_task":"check","status":"inventory"},
-    {"id":"ps1-root-lint","path":"lint.ps1","group":"quality","responsibility":"repository static lint","replacement_task":"lint","status":"inventory"},
+    {"id":"ps1-root-lint","path":"lint.ps1","group":"deleted","responsibility":"repository static lint","replacement_task":"lint","replacement":"scripts/rhai/lint.rhai plus the thin lint.cmd Script Runtime bootstrap","evidence":"public lint task and wrapper pass static JSON/strict-UTF8/NUL/conflict-marker checks, production Rhai checks, malformed-input self-test, and Rust rustfmt/Clippy mode without invoking PowerShell","status":"deleted"},
     {"id":"ps1-root-release","path":"release.ps1","group":"release","responsibility":"approved release coordination","replacement_task":"release","status":"inventory"},
     {"id":"ps1-script-artifact-manifest","path":"scripts/artifact-manifest.ps1","group":"deleted","responsibility":"artifact manifest loading and validation","replacement_task":"validate-artifact-manifest","replacement":"scripts/rhai/validate-artifact-manifest.rhai","evidence":"public CLI black-box coverage in tests/rhai_migration.rs","status":"deleted"},
     {"id":"ps1-script-build-identity","path":"scripts/build-identity.ps1","group":"deleted","responsibility":"source and build identity derivation","replacement_task":"build-identity","replacement":"scripts/rhai/build-identity.rhai","evidence":"public CLI black-box coverage in tests/rhai_migration.rs","status":"deleted"},

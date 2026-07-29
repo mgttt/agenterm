@@ -89,12 +89,12 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] Linux x64 CI keeps Clippy, build, library tests, and entrypoint smoke on
   the same explicit Cargo target tree; unit tests no longer create a second
   host-default cold build after the client binaries have already compiled
-- [x] `lint.ps1` is the fail-fast developer entry point: dependency-free
-  PowerShell AST, JSON, UTF-8/conflict-marker checks run in about one second,
-  incremental rustfmt/Clippy run before tests, and production Rhai sources are
-  checked against Script API v2 through the built worker
-- [x] lint exposes a versioned JSON result, contains an injected malformed
-  PowerShell/JSON self-test, and is represented by mandatory `repo-lint` and
+- [x] `lint.cmd` is the fail-fast developer entry point: its thin bootstrap
+  invokes the named Rhai `lint` task for JSON, strict UTF-8/NUL/conflict-marker
+  checks, incremental rustfmt/Clippy, and production Rhai validation against
+  Script API v2 through the built worker
+- [x] lint exposes a versioned JSON result, contains injected malformed
+  JSON/UTF-8/conflict/Rhai self-tests, and is represented by mandatory `repo-lint` and
   `rhai-lint` qualification gates; no optional analyzer is silently treated as
   a passed required gate
 - v0.1.7 self-diagnosing test harness (P0)

@@ -471,6 +471,7 @@ Migration ledger:
 | Qualified package boundary self-test | `scripts/rhai/package-qualified-selftest.rhai` plus the shared package module | `scripts/package-qualified-selftest.ps1` | current migration change | old and Rhai self-tests pass; named task and Windows public integration prove exact ZIP members and reject Cargo.lock, artifact-manifest, executable-byte, and Git-HEAD drift with exact owned-fixture cleanup | deleted; ordinary qualification invokes the named Rhai task |
 | Unintegrated professional terminal-selection prototype | Future public Rhai professional-selection journey after the product slice ships | `tests/terminal_selection_smoke.ps1` | current migration change | caller audit finds no check, CI, qualification, or registered evidence consumer; direct execution fails before interaction at zero terminal columns, while the Windows double-click handler does not implement the claimed word/third-click behavior and the product PRD keeps that slice planned | deleted as misleading dead test code; Git history retains the prototype |
 | Semantic UX geometry, interaction, restart, and no-activate journey | `scripts/rhai/remote-ui-smoke.rhai`, `scripts/rhai/startup-smoke.rhai`, and `scripts/rhai/working-context-smoke.rhai` plus typed foreground-window observation | `tests/ux_smoke.ps1` | current migration change | the three named Rhai journeys emit all sixteen former UX evidence IDs and prove semantic minimize/maximize/resize, locale, modal wait, hierarchy cycle rejection and child promotion, adaptive Tabs, physical focus/scroll/selection/clipboard, Settings isolation, safe CWD quoting and OSC 7, close/detach, exact no-activate observation, and persistent tab metadata across restart | deleted; qualification owns the behavior through the three existing journeys without launching a duplicate GUI fleet |
+| Fast repository lint | `scripts/rhai/lint.rhai` plus thin `lint.cmd` bootstrap | `lint.ps1` | current migration change | public task and wrapper pass JSON parsing, strict UTF-8/NUL/conflict-marker hygiene, production Rhai checks, malformed JSON/UTF-8/conflict/Rhai self-tests, and Rust rustfmt/Clippy mode; process inspection confirms no PowerShell child | deleted; check calls the same Rhai task and the batch file owns only Script worker bootstrap and argument forwarding |
 
 ### v0.1.10 completion commitment
 
@@ -480,7 +481,7 @@ Migration ledger:
 - [x] the dated 2026-07-29 frozen baseline is 43 tracked `.ps1` files: 3 at
   the repository root, 17 under `scripts/`, 21 under `tests/`, and 2 retained in
   `scripts/archive/powershell/`.
-- [~] migration progress is 39/43 deleted and 4/43 remaining; progress is
+- [~] migration progress is 40/43 deleted and 3/43 remaining; progress is
   counted only after parity evidence plus caller cutover, or caller-audited
   functional deletion of obsolete behavior, and source deletion.
 - [x] `scripts/powershell-migration.json` freezes all 43 baseline paths under
@@ -492,9 +493,9 @@ Migration ledger:
   duplicate paths, invalid states, and count drift; ordinary and release
   qualification invoke it as a required gate.
 - [~] the repository-root `agenterm.tasks.json` is now the offline task
-  catalog and ships thirty-three ready tasks (`bootstrap-info`, `build-identity`,
+  catalog and ships thirty-four ready tasks (`bootstrap-info`, `build-identity`,
   `harness-cleanup-selftest`, `diagnostic-bundle-selftest`,
-  `qualification-selftest`, `package-qualified`,
+  `qualification-selftest`, `package-qualified`, `lint`,
   `package-qualified-selftest`, `migration-audit`, `target-report`, `internal-version-policy`,
   `verify-docs-site`, `readme-examples`, `clean-locked-artifacts`,
   `prepare-target-clean`, `preflight`, `preflight-benchmark`, `prd-alignment`,

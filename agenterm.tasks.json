@@ -223,6 +223,14 @@
       "cwd": "."
     },
     {
+      "id": "lint",
+      "description": "Run static, Rust, and production Rhai repository lint without PowerShell",
+      "entry": "scripts/rhai/lint.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "args": ["."]
+    },
+    {
       "id": "prepare-target-clean",
       "description": "Validate an exact repository-local Cargo target and install its cache tag",
       "entry": "scripts/rhai/prepare-target-clean.rhai",

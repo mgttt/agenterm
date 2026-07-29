@@ -85,7 +85,7 @@ result represents one reproducible source state.
 Use PowerShell from the repository root:
 
 ```powershell
-.\lint.ps1              # fast fail: Rust, PowerShell, JSON, and production Rhai
+.\lint.cmd              # fast fail: Rust, JSON, text hygiene, and production Rhai
 .\build.bat             # fast incremental dev build -> .\dist\
 .\build.bat release-fast # optimized incremental local-test build -> .\dist\
 .\check.ps1 -Quick      # static/PRD/fmt + all-target Clippy + lib tests
@@ -242,10 +242,11 @@ behavior.
 ## Cursor Cloud specific instructions
 
 The cloud VM is **Linux**, but AgenTerm is **Windows-only** (`windows-sys`,
-ConPTY, MSVC target). The PowerShell tooling (`build.bat`, `check.ps1`,
-`release.ps1`, every `tests/*.ps1` smoke test) is Windows-host-only and does not
-run here — for the authoritative Windows dev loop see the sections above and
-`README.md`. On the Linux VM, build/lint/test Windows targets by cross-compiling
+ConPTY, MSVC target). The remaining Windows orchestration (`build.bat`,
+`check.ps1`, and `release.ps1`) is Windows-host-only and does not run here;
+repository lint and all smoke logic are Rhai-owned. For the authoritative
+Windows dev loop see the sections above and `README.md`. On the Linux VM,
+build/lint/test Windows targets by cross-compiling
 with `cargo-xwin`. The snapshot already has Rust 1.97.0 (pinned by
 `rust-toolchain.toml`, with clippy + rustfmt). Cross targets are installed
 explicitly by the owning build or CI job so an ordinary host build does not

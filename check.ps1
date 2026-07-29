@@ -177,7 +177,7 @@ try {
         }
         $quickWatch = [Diagnostics.Stopwatch]::StartNew()
         Invoke-QuickStep -Label 'repository static lint' {
-            & '.\lint.ps1' -Mode Static
+            & '.\lint.cmd' static
         }
         Invoke-QuickStep -Label 'rustfmt' {
             cargo fmt --all -- --check
@@ -246,11 +246,11 @@ try {
         }
     }
     Invoke-Checked -Id 'repo-lint' -Label 'repository static lint' {
-        & '.\lint.ps1' -InternalSelfTest
+        & '.\lint.cmd' --self-test
         if ($LASTEXITCODE -ne 0) {
             throw 'repository lint self-test failed'
         }
-        & '.\lint.ps1' -Mode Static
+        & '.\lint.cmd' static
     }
     Invoke-Checked -Id 'rustfmt' -Label 'rustfmt' {
         cargo fmt -- --check
@@ -308,8 +308,10 @@ try {
             --timeout-ms 10000 --max-operations 10000000 -- '.'
     }
     Invoke-Checked -Id 'rhai-lint' -Label 'production Rhai source lint' {
-        & '.\lint.ps1' -Mode Rhai `
-            -WorkerPath '.\dist\agenterm-script.exe'
+        & '.\dist\agenterm-script.exe' task run lint `
+            --manifest '.\agenterm.tasks.json' `
+            --timeout-ms 120000 --max-operations 10000000 -- `
+            '.' '.\dist\agenterm-script.exe' 'rhai'
     }
     Invoke-Checked -Id 'task-catalog' `
         -Label 'repository Rhai task catalog' {
