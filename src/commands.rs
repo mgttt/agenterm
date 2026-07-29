@@ -555,11 +555,12 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
         "save-workspace" => ("agenterm-cli save-workspace", &[][..], &[][..], false),
         "script" => (
             "agenterm-cli script api [MODULE] [--status shipped|planned|all] [--tree|--json] | \
-             check FILE|- [--profile pure|observe|local] [--project-root DIR] | \
-             eval EXPRESSION [--profile pure|observe|local] | run FILE|- \
-             [--profile pure|observe|local] [--cwd DIR] [--project-root DIR] [-- ARGS...] | \
-             task list|show|run [TASK] [--manifest FILE] [--json] (default profile: local)",
+             check FILE|- [--project-root DIR] | eval EXPRESSION | run FILE|- \
+             [--cwd DIR] [--project-root DIR] [-- ARGS...] | \
+            task list|show|run [TASK] [--manifest FILE] [--json]",
             &[
+                // Legacy compatibility label. It is accepted but intentionally
+                // omitted from public usage because it never changes runtime APIs.
                 "--profile",
                 "--timeout-ms",
                 "--max-operations",

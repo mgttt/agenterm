@@ -3,7 +3,7 @@ use std::sync::Arc;
 use rhai::{Array, Dynamic, Engine, EvalAltResult};
 use serde_json::{Value, json};
 
-use crate::operations::{OPERATION_CATALOG, OperationClass, operation_by_id};
+use crate::operations::{OPERATION_CATALOG, operation_by_id};
 
 pub type FleetBrokerCall =
     Arc<dyn Fn(&str, Value) -> Result<Value, String> + Send + Sync + 'static>;
@@ -11,7 +11,6 @@ pub type FleetBrokerCall =
 #[derive(Clone)]
 struct FleetContext {
     call: FleetBrokerCall,
-    allow_mutation: bool,
 }
 
 impl FleetContext {
@@ -20,12 +19,6 @@ impl FleetContext {
             .ok_or_else(|| Box::<EvalAltResult>::from("fleet_operation_unknown"))?;
         if !operation.available {
             return Err(format!("fleet_operation_degraded: {operation_id}").into());
-        }
-        if operation.class != OperationClass::Observe && !self.allow_mutation {
-            return Err(format!(
-                "fleet_operation_denied: {operation_id} requires the local profile"
-            )
-            .into());
         }
         (self.call)(
             "fleet.call",
@@ -103,11 +96,8 @@ pub struct ScriptFleetPostState {
     value: Value,
 }
 
-pub fn bind(call: FleetBrokerCall, allow_mutation: bool) -> ScriptFleet {
-    ScriptFleet(FleetContext {
-        call,
-        allow_mutation,
-    })
+pub fn bind(call: FleetBrokerCall) -> ScriptFleet {
+    ScriptFleet(FleetContext { call })
 }
 
 pub fn register(engine: &mut Engine) {
@@ -466,7 +456,7 @@ fn validate_tab_id(tab_id: &str) -> Result<(), Box<EvalAltResult>> {
     Ok(())
 }
 
-fn fleet_operations(fleet: &mut ScriptFleet) -> Result<Array, Box<EvalAltResult>> {
+fn fleet_operations(_fleet: &mut ScriptFleet) -> Result<Array, Box<EvalAltResult>> {
     OPERATION_CATALOG
         .iter()
         .map(|operation| {
@@ -480,7 +470,7 @@ fn fleet_operations(fleet: &mut ScriptFleet) -> Result<Array, Box<EvalAltResult>
                 "events": operation.events,
                 "destructive": operation.destructive,
                 "available": operation.available,
-                "allowed": operation.class == OperationClass::Observe || fleet.0.allow_mutation,
+                "allowed": true,
                 "since": operation.since,
             }))
             .map_err(|_| Box::<EvalAltResult>::from("fleet_catalog_encode"))
@@ -518,42 +508,39 @@ mod tests {
 
     use super::*;
 
-    fn fake_fleet(allow_mutation: bool, calls: Arc<Mutex<Vec<(String, Value)>>>) -> ScriptFleet {
-        bind(
-            Arc::new(move |operation, arguments| {
-                calls
-                    .lock()
-                    .unwrap()
-                    .push((operation.to_owned(), arguments.clone()));
-                let operation_id = arguments["operation_id"].as_str().unwrap_or_default();
-                if operation_id == "ui.tabs.set-width" {
-                    Ok(json!({
-                        "receipt": {
-                            "schema_version": 1,
-                            "request_id": "script-test",
-                            "operation_id": operation_id,
-                            "outcome": "committed"
-                        },
-                        "events": [{
-                            "schema_version": 1,
-                            "epoch": "epoch",
-                            "sequence": 2,
-                            "kind": "layout.tabs.width",
-                            "operation_id": operation_id,
-                            "payload": {}
-                        }],
-                        "post_state": {
-                            "verified": true,
-                            "reason": "snapshot_and_event",
-                            "value": {"tabs_width": 240}
-                        }
-                    }))
-                } else {
-                    Ok(json!({"operation_id": operation_id}))
-                }
-            }),
-            allow_mutation,
-        )
+    fn fake_fleet(calls: Arc<Mutex<Vec<(String, Value)>>>) -> ScriptFleet {
+        bind(Arc::new(move |operation, arguments| {
+            calls
+                .lock()
+                .unwrap()
+                .push((operation.to_owned(), arguments.clone()));
+            let operation_id = arguments["operation_id"].as_str().unwrap_or_default();
+            if operation_id == "ui.tabs.set-width" {
+                Ok(json!({
+                    "receipt": {
+                        "schema_version": 1,
+                        "request_id": "script-test",
+                        "operation_id": operation_id,
+                        "outcome": "committed"
+                    },
+                    "events": [{
+                        "schema_version": 1,
+                        "epoch": "epoch",
+                        "sequence": 2,
+                        "kind": "layout.tabs.width",
+                        "operation_id": operation_id,
+                        "payload": {}
+                    }],
+                    "post_state": {
+                        "verified": true,
+                        "reason": "snapshot_and_event",
+                        "value": {"tabs_width": 240}
+                    }
+                }))
+            } else {
+                Ok(json!({"operation_id": operation_id}))
+            }
+        }))
     }
 
     #[test]
@@ -562,7 +549,7 @@ mod tests {
         let mut engine = Engine::new();
         register(&mut engine);
         let mut scope = rhai::Scope::new();
-        scope.push("fleet", fake_fleet(true, Arc::clone(&calls)));
+        scope.push("fleet", fake_fleet(Arc::clone(&calls)));
         let result = engine
             .eval_with_scope::<rhai::Map>(
                 &mut scope,
@@ -598,18 +585,18 @@ mod tests {
     }
 
     #[test]
-    fn observe_binding_denies_mutation_before_broker_dispatch() {
+    fn every_binding_dispatches_mutation_through_the_typed_broker() {
         let calls = Arc::new(Mutex::new(Vec::new()));
         let mut engine = Engine::new();
         register(&mut engine);
         let mut scope = rhai::Scope::new();
-        scope.push("fleet", fake_fleet(false, Arc::clone(&calls)));
-        let error = engine
-            .eval_with_scope::<Dynamic>(&mut scope, "fleet.ui.tabs.hide()")
-            .unwrap_err()
-            .to_string();
-        assert!(error.contains("fleet_operation_denied"));
-        assert!(calls.lock().unwrap().is_empty());
+        scope.push("fleet", fake_fleet(Arc::clone(&calls)));
+        let _ = engine
+            .eval_with_scope::<Dynamic>(&mut scope, "fleet.ui.tabs.set_width(240)")
+            .unwrap();
+        let calls = calls.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].1["operation_id"], "ui.tabs.set-width");
     }
 
     #[test]

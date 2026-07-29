@@ -429,33 +429,31 @@ fn copy_fixture_file(repo: &Path, fixture: &Path, relative: &str) {
 }
 
 #[test]
-fn process_id_is_available_through_the_public_local_profile() {
-    let output = Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
-        .args(["eval", "std::process::id()", "--profile", "local", "--json"])
-        .output()
-        .expect("evaluate public process ID");
-    assert!(
-        output.status.success(),
-        "process ID evaluation failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let envelope: serde_json::Value =
-        serde_json::from_slice(&output.stdout).expect("decode process ID envelope");
-    assert_eq!(envelope["ok"], true);
-    assert!(
-        envelope["value"].as_u64().is_some_and(|pid| pid > 0),
-        "process ID was not a positive integer: {envelope}"
-    );
-
-    let denied = Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
-        .args(["eval", "std::process::id()", "--profile", "pure", "--json"])
-        .output()
-        .expect("evaluate process ID in pure profile");
-    assert!(!denied.status.success());
-    let denied_envelope: serde_json::Value =
-        serde_json::from_slice(&denied.stdout).expect("decode pure-profile denial");
-    assert_eq!(denied_envelope["ok"], false);
-    assert_eq!(denied_envelope["failure"]["code"], "script_runtime");
+fn legacy_profile_spellings_share_the_unrestricted_runtime() {
+    for legacy_profile in ["local", "pure", "observe"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+            .args([
+                "eval",
+                "std::process::id()",
+                "--profile",
+                legacy_profile,
+                "--json",
+            ])
+            .output()
+            .expect("evaluate public process ID");
+        assert!(
+            output.status.success(),
+            "{legacy_profile} compatibility label removed a runtime API: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let envelope: serde_json::Value =
+            serde_json::from_slice(&output.stdout).expect("decode process ID envelope");
+        assert_eq!(envelope["ok"], true);
+        assert!(
+            envelope["value"].as_u64().is_some_and(|pid| pid > 0),
+            "process ID was not a positive integer: {envelope}"
+        );
+    }
 }
 
 #[test]

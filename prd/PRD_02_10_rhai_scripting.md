@@ -12,7 +12,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   named-task CLI while retaining private `--worker`/`--framed-worker` modes;
   `agenterm-cli.exe script ...` is a thin compatibility route to the same
   catalog, parser, supervisor, and runtime.
-- [~] v0.1.10 removes the early `pure`/`observe` API-gating model so every
+- [x] v0.1.10 removes the early `pure`/`observe` API-gating model so every
   ordinary invocation receives the same unrestricted local runtime surface;
   the future Agent harness owns permissions outside this executable.
 - [x] Script API v2 maps every current typed operation exactly once to `fleet` and verifies mutation receipts, correlated events, and post-state.

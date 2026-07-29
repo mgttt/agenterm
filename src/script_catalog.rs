@@ -103,13 +103,10 @@ pub struct ScriptApiEntry {
 }
 
 const SHIPPED_PROFILES: &[&str] = &["pure", "observe", "local"];
-const FLEET_READ_PROFILES: &[&str] = &["observe", "local"];
-const LOCAL_PROFILE: &[&str] = &["local"];
 const NO_STRINGS: &[&str] = &[];
 const FLEET_ERRORS: &[&str] = &[
     "broker_invalid_arguments",
     "broker_operation_unknown",
-    "broker_operation_denied",
     "broker_operation_degraded",
     "broker_host_error",
     "broker_transport",
@@ -974,6 +971,7 @@ pub fn catalog() -> Value {
         "schema_version": SCRIPT_CATALOG_SCHEMA_VERSION,
         "api_version": SCRIPT_API_VERSION,
         "default_profile": "local",
+        "execution_model": "unrestricted_local",
         "model": "rhai_language + rust_shaped_std_subset + rhai_native_extensions + agenterm_fleet",
         "comparison": {
             "schema_version": SCRIPT_COMPARISON_SCHEMA_VERSION,
@@ -991,19 +989,21 @@ pub fn catalog() -> Value {
         "profiles": {
             "pure": {
                 "status": "shipped",
-                "variables": ["args"],
-                "ambient_authority": [],
+                "compatibility_label": true,
+                "variables": ["args", "fleet"],
+                "ambient_authority": ["ordinary_local_program"],
             },
             "observe": {
                 "status": "shipped",
+                "compatibility_label": true,
                 "variables": ["args", "fleet"],
-                "ambient_authority": [],
+                "ambient_authority": ["ordinary_local_program"],
             },
             "local": {
                 "status": "shipped",
+                "compatibility_label": true,
                 "variables": ["args", "fleet"],
                 "ambient_authority": ["ordinary_local_program"],
-                "availability": "first_std_slice",
             },
         },
         "operations": [
@@ -1129,12 +1129,10 @@ fn fleet_operation_entry(operation: &'static OperationSpec) -> ScriptApiEntry {
         },
         designed_on: "2026-07-28",
         since: "script-api-v2",
-        profiles: if !operation.available {
-            NO_STRINGS
-        } else if operation.class == OperationClass::Observe {
-            FLEET_READ_PROFILES
+        profiles: if operation.available {
+            SHIPPED_PROFILES
         } else {
-            LOCAL_PROFILE
+            NO_STRINGS
         },
         signature,
         kind: "brokered_method",
@@ -1171,7 +1169,7 @@ fn planned_entry(
         stability: ScriptApiStability::Reserved,
         designed_on: "2026-07-28",
         since: "planned-v0.1.9",
-        profiles: LOCAL_PROFILE,
+        profiles: SHIPPED_PROFILES,
         signature,
         kind: "planned",
         authority: "local",
@@ -1210,7 +1208,7 @@ fn shipped_local_entry(
         stability: ScriptApiStability::Stable,
         designed_on: "2026-07-28",
         since: "0.1.9",
-        profiles: LOCAL_PROFILE,
+        profiles: SHIPPED_PROFILES,
         signature,
         kind: "native_function",
         authority: "local",
@@ -1248,7 +1246,7 @@ fn shipped_runtime_entry(
         stability: ScriptApiStability::Stable,
         designed_on: "2026-07-28",
         since: "0.1.9",
-        profiles: LOCAL_PROFILE,
+        profiles: SHIPPED_PROFILES,
         signature,
         kind: "native_function",
         authority: "local",
@@ -1290,7 +1288,7 @@ fn http_entry(
         stability: ScriptApiStability::Stable,
         designed_on: "2026-07-28",
         since: "0.1.9",
-        profiles: LOCAL_PROFILE,
+        profiles: SHIPPED_PROFILES,
         signature,
         kind: "native_http",
         authority: "network",
@@ -1569,6 +1567,20 @@ mod tests {
                 crate::operations::operation_by_id(entry.operation_id.unwrap())
                     .is_some_and(|operation| operation.available),
                 "{} has no available operation",
+                entry.stable_id
+            );
+        }
+    }
+
+    #[test]
+    fn every_shipped_api_is_available_under_every_legacy_profile_label() {
+        for entry in entries()
+            .into_iter()
+            .filter(|entry| entry.status == ScriptApiStatus::Shipped)
+        {
+            assert_eq!(
+                entry.profiles, SHIPPED_PROFILES,
+                "{} still has profile-dependent availability",
                 entry.stable_id
             );
         }

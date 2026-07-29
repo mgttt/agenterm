@@ -302,20 +302,20 @@
       "evidence_ids": ["cli.control-receipts"]
     },
     {
-      "id": "scripting.rhai-pure",
+      "id": "scripting.rhai-runtime",
       "kind": "behavior",
       "status": "shipped",
       "evidence_mode": "black-box",
-      "prd": "explicit `pure` profile provides deterministic JSON-compatible",
-      "evidence_ids": ["script.rhai-pure"]
+      "prd": "deterministic JSON-compatible values, arguments, bounded computation",
+      "evidence_ids": ["script.rhai-runtime"]
     },
     {
-      "id": "scripting.rhai-observe",
+      "id": "scripting.rhai-fleet",
       "kind": "behavior",
       "status": "shipped",
       "evidence_mode": "black-box",
-      "prd": "explicit `observe` profile exposes typed, bounded workspace",
-      "evidence_ids": ["script.rhai-observe"]
+      "prd": "Script API v2 maps every current typed operation exactly once to `fleet`",
+      "evidence_ids": ["script.rhai-fleet"]
     },
     {
       "id": "scripting.api-tree",
@@ -326,12 +326,12 @@
       "evidence_ids": ["script.api-tree"]
     },
     {
-      "id": "scripting.rhai-deny-budget",
+      "id": "scripting.rhai-robustness-budget",
       "kind": "behavior",
       "status": "shipped",
       "evidence_mode": "black-box",
       "prd": "source, value, operation, call/expression depth",
-      "evidence_ids": ["script.rhai-deny-budget", "script.rhai-framed"]
+      "evidence_ids": ["script.rhai-robustness-budget", "script.rhai-framed"]
     },
     {
       "id": "scripting.supervisor",

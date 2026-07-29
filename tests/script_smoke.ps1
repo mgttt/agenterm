@@ -6,14 +6,14 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $declaredEvidence = @(
-    'script.rhai-pure'
-    'script.rhai-observe'
+    'script.rhai-runtime'
+    'script.rhai-fleet'
     'script.api-tree'
     'script.fleet-v2'
     'script.fleet-tabs-set-note'
     'script.direct-entry'
     'script.north-star'
-    'script.rhai-deny-budget'
+    'script.rhai-robustness-budget'
     'script.rhai-framed'
     'script.exit-classes'
     'script.typed-errors'
@@ -430,12 +430,15 @@ try {
         $apiResult.value.api_version -ne 2 -or
         $apiResult.value.schema_version -ne 3 -or
         $apiResult.value.default_profile -ne 'local' -or
+        $apiResult.value.execution_model -ne 'unrestricted_local' -or
         $apiResult.value.comparison.schema_version -ne 1 -or
         $apiResult.value.comparison.reviewed_on -ne '2026-07-29' -or
         $apiResult.value.comparison.nodejs.reviewed_version -ne '26.5.0' -or
         $apiResult.value.comparison.bun.reviewed_version -ne '1.3.14' -or
-        $apiResult.value.profiles.pure.variables -notcontains 'args' -or
+        $apiResult.value.profiles.pure.variables -notcontains 'fleet' -or
+        $apiResult.value.profiles.pure.ambient_authority -notcontains 'ordinary_local_program' -or
         $apiResult.value.profiles.observe.variables -notcontains 'fleet' -or
+        $apiResult.value.profiles.observe.ambient_authority -notcontains 'ordinary_local_program' -or
         $apiResult.value.profiles.local.variables -notcontains 'fleet' -or
         $apiResult.value.profiles.local.status -ne 'shipped' -or
         $apiResult.value.limits.defaults.wall_time_ms -ne 2000 -or
@@ -1576,11 +1579,11 @@ try {
     )) -ne 'OK') {
         throw 'local check rejected a shipped qualified std API'
     }
-    $pureStdDenied = Invoke-ScriptFailure 1 @(
+    $legacyPureStd = Invoke-Script @(
         'script', 'eval', 'std::fs::exists(".")', '--profile', 'pure'
     )
-    if (-not $pureStdDenied.Contains('"code":"script_runtime"')) {
-        throw 'pure profile unexpectedly received local filesystem authority'
+    if ($legacyPureStd -ne 'true') {
+        throw 'legacy pure spelling removed filesystem APIs from the unrestricted runtime'
     }
     [IO.File]::WriteAllText($sourceFile, 'let = ;')
     $parseError = Invoke-ScriptFailure 1 @('script', 'check', $sourceFile)
@@ -1605,14 +1608,14 @@ try {
         -not $migratedApi.Contains('fleet.workspace.info()')) {
         throw 'Script API v2 did not provide a targeted agent-to-fleet migration diagnostic'
     }
-    Write-Evidence 'script.rhai-pure'
+    Write-Evidence 'script.rhai-runtime'
 
-    Write-Host 'STEP pure authority denial and operation budget'
-    $denied = Invoke-ScriptFailure 1 @(
-        'script', 'eval', 'fleet.workspace.info()', '--profile', 'pure'
+    Write-Host 'STEP unrestricted legacy spellings and operation budget'
+    $legacyProcess = Invoke-Script @(
+        'script', 'eval', 'std::process::id()', '--profile', 'pure'
     )
-    if (-not $denied.Contains('"code":"script_runtime"')) {
-        throw 'pure profile unexpectedly received broker authority'
+    if ([uint32]$legacyProcess -le 0) {
+        throw 'legacy pure spelling removed process APIs from the unrestricted runtime'
     }
     $limited = Invoke-ScriptFailure 3 @(
         'script', 'eval', 'loop {}', '--max-operations', '1000'
@@ -1646,7 +1649,7 @@ try {
     if ($recovered -ne '42') {
         throw 'worker invocation did not recover after malformed protocol inputs'
     }
-    Write-Evidence 'script.rhai-deny-budget'
+    Write-Evidence 'script.rhai-robustness-budget'
 
     Write-Host 'STEP framed worker sequencing, isolation, rejection, and recovery'
     $framedInput = New-Object IO.MemoryStream
@@ -1931,14 +1934,18 @@ try {
         $waitStopwatch.ElapsedMilliseconds -ge 500) {
         throw 'broker wait did not remain inside the host deadline'
     }
-    $mutationDenied = Invoke-ScriptFailure 1 @(
-        'script', 'eval', 'fleet.ui.tabs.hide()', '--profile', 'observe'
+    $legacyMutation = Invoke-Script @(
+        'script', 'eval', 'fleet.ui.tabs.toggle().post_state.verified',
+        '--profile', 'observe'
     )
-    if (-not $mutationDenied.Contains('"code":"script_runtime"') -or
-        -not $mutationDenied.Contains('fleet_operation_denied')) {
-        throw 'observe profile unexpectedly exposed a mutation API'
+    $legacyRestore = Invoke-Script @(
+        'script', 'eval', 'fleet.ui.tabs.toggle().post_state.verified',
+        '--profile', 'observe'
+    )
+    if ($legacyMutation -ne 'true' -or $legacyRestore -ne 'true') {
+        throw 'legacy observe spelling removed Fleet mutation from the unrestricted runtime'
     }
-    Write-Evidence 'script.rhai-observe'
+    Write-Evidence 'script.rhai-fleet'
 
     Write-Host 'STEP Script API v2 Fleet mutation receipt, event, and post-state'
     $fleetBaselineVisible = [bool]$snapshot.layout.sidebar.visible
@@ -2247,13 +2254,15 @@ let receipt = fleet.tabs.set_note($fleetTabIdLiteral, $fleetNoteLiteral);
         @($auditRecords | Where-Object { $_.cancelled -and $_.timed_out }).Count -lt 1 -or
         @($auditRecords | Where-Object { $_.crashed }).Count -lt 1 -or
         @($auditRecords | Where-Object {
-            $_.effective_profile -eq 'observe' -and
-            $_.effective_capabilities -contains 'observe' -and
+            $_.requested_profile -eq 'observe' -and
+            $_.effective_profile -eq 'unrestricted' -and
+            $_.effective_capabilities -contains 'unrestricted_local' -and
             $_.broker_operation_ids -contains 'ui.snapshot'
         }).Count -lt 1 -or
         @($auditRecords | Where-Object {
-            $_.effective_profile -eq 'local' -and
-            $_.effective_capabilities -contains 'local'
+            $_.requested_profile -eq 'pure' -and
+            $_.effective_profile -eq 'unrestricted' -and
+            $_.effective_capabilities -contains 'unrestricted_local'
         }).Count -lt 1 -or
         @($auditRecords | Where-Object {
             $_.source_fingerprint -match '^fnv1a128:[0-9a-f]{32}$'
@@ -2269,7 +2278,7 @@ let receipt = fleet.tabs.set_note($fleetTabIdLiteral, $fleetNoteLiteral);
     Write-Evidence 'script.audit'
 
     $runSucceeded = $true
-    Write-Host 'PASS: safe scripting API, supervision, audit privacy, denial, and budgets'
+    Write-Host 'PASS: unrestricted scripting API, supervision, audit privacy, and budgets'
 }
 catch {
     $runFailure = if ($InternalFailureBundleProbe) {

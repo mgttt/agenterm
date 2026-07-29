@@ -146,14 +146,14 @@
     {
       "id": "script-smoke",
       "evidence": [
-        "script.rhai-pure",
-        "script.rhai-observe",
+        "script.rhai-runtime",
+        "script.rhai-fleet",
         "script.api-tree",
         "script.fleet-v2",
         "script.fleet-tabs-set-note",
         "script.direct-entry",
         "script.north-star",
-        "script.rhai-deny-budget",
+        "script.rhai-robustness-budget",
         "script.rhai-framed",
         "script.exit-classes",
         "script.typed-errors",

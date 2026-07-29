@@ -10,13 +10,15 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(test)]
+use agenterm::script_protocol::ScriptProfile;
 use agenterm::script_protocol::{
     SCRIPT_API_VERSION, SCRIPT_ENVELOPE_VERSION, SCRIPT_FRAME_MAX_BYTES, SCRIPT_FRAME_VERSION,
     SCRIPT_INVOCATION_MAX_BYTES, ScriptBrokerRequest, ScriptBrokerResponse, ScriptBudgets,
     ScriptCancelDisposition, ScriptExitClass, ScriptFailure, ScriptFailureCategory, ScriptFrame,
     ScriptFrameEncodeError, ScriptFramePayload, ScriptFrameRead, ScriptFrameRejection,
-    ScriptFrameTracker, ScriptInvocation, ScriptOperation, ScriptProfile, ScriptResult,
-    encode_script_frame, read_script_frame, write_encoded_script_frame,
+    ScriptFrameTracker, ScriptInvocation, ScriptOperation, ScriptResult, encode_script_frame,
+    read_script_frame, write_encoded_script_frame,
 };
 use rhai::{Dynamic, Engine, EvalAltResult, Scope};
 
@@ -196,9 +198,6 @@ fn process_concurrent_framed_worker<R: Read>(
                 let completed_for_worker = Arc::clone(&completed);
                 let pending_for_worker = Arc::clone(&pending_broker);
                 let broker = if matches!(
-                    invocation.profile,
-                    ScriptProfile::Observe | ScriptProfile::Local
-                ) && matches!(
                     invocation.operation,
                     ScriptOperation::Eval | ScriptOperation::Run
                 ) {
@@ -639,9 +638,7 @@ fn execute_inner(
             None
         }
     });
-    if invocation.profile == ScriptProfile::Local {
-        agenterm::script_stdlib::register_local(&mut engine);
-    }
+    agenterm::script_stdlib::register_local(&mut engine);
     agenterm::script_fleet::register(&mut engine);
 
     if invocation.operation == ScriptOperation::Check {
@@ -656,10 +653,10 @@ fn execute_inner(
             )
             .map_err(classify_compile_error)?;
             for module_source in module_sources {
-                validate_profile_apis(&module_source, invocation.profile, &invocation.budgets)?;
+                validate_available_apis(&module_source, &invocation.budgets)?;
             }
         }
-        validate_profile_apis(&invocation.source, invocation.profile, &invocation.budgets)?;
+        validate_available_apis(&invocation.source, &invocation.budgets)?;
         return Ok((String::new(), None));
     }
 
@@ -678,28 +675,11 @@ fn execute_inner(
     let arguments = rhai::serde::to_dynamic(&invocation.arguments)
         .map_err(|error| configuration_error("configuration_arguments", error.to_string()))?;
     scope.push_dynamic("args", arguments);
-    match invocation.profile {
-        ScriptProfile::Pure => {}
-        ScriptProfile::Observe => {
-            let Some(broker) = broker else {
-                return Err(configuration_error(
-                    "configuration_broker",
-                    "observe profile requires a host broker",
-                ));
-            };
-            let call = Arc::new(move |operation: &str, arguments: serde_json::Value| {
-                broker.call_json(operation, arguments)
-            });
-            scope.push("fleet", agenterm::script_fleet::bind(call, false));
-        }
-        ScriptProfile::Local => {
-            if let Some(broker) = broker {
-                let call = Arc::new(move |operation: &str, arguments: serde_json::Value| {
-                    broker.call_json(operation, arguments)
-                });
-                scope.push("fleet", agenterm::script_fleet::bind(call, true));
-            }
-        }
+    if let Some(broker) = broker {
+        let call = Arc::new(move |operation: &str, arguments: serde_json::Value| {
+            broker.call_json(operation, arguments)
+        });
+        scope.push("fleet", agenterm::script_fleet::bind(call));
     }
     let value = engine
         .eval_ast_with_scope::<Dynamic>(&mut scope, &ast)
@@ -775,11 +755,7 @@ fn validate_budgets(budgets: &ScriptBudgets) -> Result<(), ScriptFailure> {
     Ok(())
 }
 
-fn validate_profile_apis(
-    source: &str,
-    profile: ScriptProfile,
-    _budgets: &ScriptBudgets,
-) -> Result<(), ScriptFailure> {
+fn validate_available_apis(source: &str, _budgets: &ScriptBudgets) -> Result<(), ScriptFailure> {
     for surface_path in qualified_function_calls(source) {
         let entry = agenterm::script_catalog::entries()
             .into_iter()
@@ -790,15 +766,10 @@ fn validate_profile_apis(
                 format!("unknown shipped scripting API: {surface_path}"),
             ));
         };
-        if entry.status != agenterm::script_catalog::ScriptApiStatus::Shipped
-            || !entry.profiles.contains(&profile.as_str())
-        {
+        if entry.status != agenterm::script_catalog::ScriptApiStatus::Shipped {
             return Err(script_error(
                 "script_api_unavailable",
-                format!(
-                    "API {surface_path} is unavailable in the {} profile",
-                    profile.as_str()
-                ),
+                format!("API {surface_path} is not shipped"),
             ));
         }
     }
@@ -820,15 +791,6 @@ fn validate_profile_apis(
     }
     for surface_path in fleet_method_calls(source) {
         if matches!(surface_path.as_str(), "fleet.terminal" | "fleet.operations") {
-            if profile == ScriptProfile::Pure {
-                return Err(script_error(
-                    "script_api_unavailable",
-                    format!(
-                        "API {surface_path} is unavailable in the {} profile",
-                        profile.as_str()
-                    ),
-                ));
-            }
             continue;
         }
         let entry = agenterm::script_catalog::entries()
@@ -840,15 +802,10 @@ fn validate_profile_apis(
                 format!("unknown shipped scripting API: {surface_path}"),
             ));
         };
-        if entry.status != agenterm::script_catalog::ScriptApiStatus::Shipped
-            || !entry.profiles.contains(&profile.as_str())
-        {
+        if entry.status != agenterm::script_catalog::ScriptApiStatus::Shipped {
             return Err(script_error(
                 "script_api_unavailable",
-                format!(
-                    "API {surface_path} is unavailable in the {} profile",
-                    profile.as_str()
-                ),
+                format!("API {surface_path} is not shipped"),
             ));
         }
     }
@@ -859,7 +816,7 @@ fn validate_profile_apis(
             "new_tab" => {
                 return Err(script_error(
                     "script_api_unavailable",
-                    format!("API new_tab is unavailable in the {profile:?} profile"),
+                    "API new_tab is not shipped",
                 ));
             }
             _ => {
@@ -1443,13 +1400,13 @@ mod tests {
     }
 
     #[test]
-    fn check_enforces_typed_fleet_api_profile_and_v2_migration() {
+    fn check_exposes_typed_fleet_api_to_every_legacy_label_and_reports_v2_migration() {
         let mut observe = invocation(ScriptOperation::Check, "fleet.workspace.info()");
         observe.profile = ScriptProfile::Observe;
         assert!(execute(observe).ok);
 
         let pure = execute(invocation(ScriptOperation::Check, "fleet.workspace.info()"));
-        assert_eq!(failure_code(&pure), "script_api_unavailable");
+        assert!(pure.ok);
 
         let mut unknown = invocation(ScriptOperation::Check, "fleet.not_shipped()");
         unknown.profile = ScriptProfile::Observe;
@@ -1571,11 +1528,10 @@ mod tests {
         assert_eq!(script.code, "script_runtime");
         assert_eq!(script.category, ScriptFailureCategory::Script);
 
-        let denied_error: Box<EvalAltResult> =
-            "fleet_operation_denied: observe is read-only (line 1)".into();
-        let denied = classify_runtime_error(&denied_error, denied_error.to_string());
-        assert_eq!(denied.code, "script_runtime");
-        assert_eq!(denied.category, ScriptFailureCategory::Script);
+        let user_error: Box<EvalAltResult> = "user operation failed (line 1)".into();
+        let classified = classify_runtime_error(&user_error, user_error.to_string());
+        assert_eq!(classified.code, "script_runtime");
+        assert_eq!(classified.category, ScriptFailureCategory::Script);
     }
 
     #[test]

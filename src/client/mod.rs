@@ -257,8 +257,7 @@ fn script_help_text() -> &'static str {
            agenterm-script task show TASK [--manifest PATH] [--json]\n\
            agenterm-script task check [TASK] [--manifest PATH] [--json]\n\
            agenterm-script task run TASK [--manifest PATH] [OPTIONS] [--] [ARGS...]\n\
-         Options: --profile local|pure|observe --timeout-ms N \
-         --max-operations N --max-collection-items N \
+         Options: --timeout-ms N --max-operations N --max-collection-items N \
          --max-string-bytes N --max-output-bytes N --json"
 }
 
@@ -1050,10 +1049,9 @@ fn run_script_command_with_context(
         }
         None
     };
-    let profile = match option_value(arguments, "--profile").unwrap_or("local") {
-        "pure" => ScriptProfile::Pure,
-        "observe" => ScriptProfile::Observe,
-        "local" => ScriptProfile::Local,
+    let requested_profile = option_value(arguments, "--profile").unwrap_or("local");
+    let profile = match requested_profile {
+        "pure" | "observe" | "local" => ScriptProfile::Local,
         other => {
             eprintln!("unknown script profile: {other}");
             return 2;
@@ -1187,19 +1185,14 @@ fn run_script_command_with_context(
         },
     };
 
-    let needs_observation = profile == ScriptProfile::Observe
-        && matches!(operation, ScriptOperation::Eval | ScriptOperation::Run);
-    let observation = if needs_observation {
-        if !has_explicit_ipc_address() {
-            match select_implicit_control_instance() {
-                Ok(address) => IPC_ADDRESS_OVERRIDE.with(|value| {
-                    *value.borrow_mut() = Some(address);
-                }),
-                Err(error) => {
-                    eprintln!("{error}");
-                    return 2;
-                }
-            }
+    let may_use_fleet = matches!(operation, ScriptOperation::Eval | ScriptOperation::Run);
+    let observation = if may_use_fleet {
+        if !has_explicit_ipc_address()
+            && let Ok(address) = select_implicit_control_instance()
+        {
+            IPC_ADDRESS_OVERRIDE.with(|value| {
+                *value.borrow_mut() = Some(address);
+            });
         }
         None
     } else {
@@ -1226,20 +1219,15 @@ fn run_script_command_with_context(
         }
         ScriptOperation::Check | ScriptOperation::Run => AuditSourceKind::File,
     };
-    let profile_name = profile.as_str();
-    let capabilities = match profile {
-        ScriptProfile::Pure => Vec::new(),
-        ScriptProfile::Observe => vec!["observe".to_owned()],
-        ScriptProfile::Local => vec!["local".to_owned()],
-    };
+    let capabilities = vec!["unrestricted_local".to_owned()];
     let mut audit_invocation = AuditInvocation {
         invocation_id: invocation_id.clone(),
         source_fingerprint: source_fingerprint(&source),
         source_kind: audit_source_kind,
         api_version: SCRIPT_API_VERSION,
         operation: operation_name.to_owned(),
-        requested_profile: profile_name.to_owned(),
-        effective_profile: profile_name.to_owned(),
+        requested_profile: requested_profile.to_owned(),
+        effective_profile: "unrestricted".to_owned(),
         requested_capabilities: capabilities.clone(),
         effective_capabilities: capabilities,
         requested_budgets: audit_budgets(&budgets),
@@ -1251,28 +1239,24 @@ fn run_script_command_with_context(
         Err(error) => return report_audit_error(error),
     };
     let audit_started = Instant::now();
-    let invocation_temp = if profile == ScriptProfile::Local {
-        match OwnedScriptTemp::create(&invocation_id) {
-            Ok(owned) => Some(owned),
-            Err(error) => {
-                let outcome = AuditOutcome {
-                    duration_ms: audit_duration_ms(audit_started),
-                    result_class: "host".to_owned(),
-                    failure_code: Some("host_temp_create".to_owned()),
-                    denied: false,
-                    cancelled: false,
-                    timed_out: false,
-                    crashed: false,
-                };
-                if let Err(audit_error) = audit_sink.append(&audit_invocation, &outcome) {
-                    return report_audit_error(audit_error);
-                }
-                eprintln!("host_temp_create: invocation temporary root is unavailable: {error}");
-                return 1;
+    let invocation_temp = match OwnedScriptTemp::create(&invocation_id) {
+        Ok(owned) => Some(owned),
+        Err(error) => {
+            let outcome = AuditOutcome {
+                duration_ms: audit_duration_ms(audit_started),
+                result_class: "host".to_owned(),
+                failure_code: Some("host_temp_create".to_owned()),
+                denied: false,
+                cancelled: false,
+                timed_out: false,
+                crashed: false,
+            };
+            if let Err(audit_error) = audit_sink.append(&audit_invocation, &outcome) {
+                return report_audit_error(audit_error);
             }
+            eprintln!("host_temp_create: invocation temporary root is unavailable: {error}");
+            return 1;
         }
-    } else {
-        None
     };
     let invocation = ScriptInvocation {
         envelope_version: SCRIPT_ENVELOPE_VERSION,
@@ -1980,11 +1964,8 @@ fn handle_script_broker(
         }
         "events.wait" => script_broker_wait(&request.arguments, budgets, remaining),
         _ => Err(script_broker_error(
-            "broker_operation_denied",
-            format!(
-                "operation {} is not available to observe scripts",
-                request.operation
-            ),
+            "broker_operation_unknown",
+            format!("unknown broker operation {}", request.operation),
         )),
     };
     match value {
@@ -2033,17 +2014,6 @@ fn script_fleet_call(
         return Err(script_broker_error(
             "broker_operation_degraded",
             format!("Fleet operation {operation_id} is not available"),
-        ));
-    }
-    if profile == ScriptProfile::Pure
-        || (profile == ScriptProfile::Observe && operation.class != OperationClass::Observe)
-    {
-        return Err(script_broker_error(
-            "broker_operation_denied",
-            format!(
-                "Fleet operation {operation_id} is unavailable in the {} profile",
-                profile.as_str()
-            ),
         ));
     }
     validate_fleet_parameters(operation, &parameters, budgets)?;
@@ -3299,8 +3269,8 @@ Usage:
   agenterm-cli set-setting terminal.font-family FAMILY
   agenterm-cli set-setting terminal.font-size 8..36
   agenterm-cli script api [MODULE] [--status shipped|planned|all] [--tree|--json]
-  agenterm-cli script check|run FILE|- [--profile local|pure|observe] [--project-root DIR] [--cwd DIR]
-  agenterm-cli script eval EXPRESSION [--profile local|pure|observe] [--cwd DIR]
+  agenterm-cli script check|run FILE|- [--project-root DIR] [--cwd DIR]
+  agenterm-cli script eval EXPRESSION [--cwd DIR]
   agenterm-cli script task list|show|check|run [TASK] [--manifest FILE] [--json] [-- ARGS...]
   agenterm-cli send-mouse [-t target] -x col -y row [--button left] [--action press]
   agenterm-cli ui-snapshot
