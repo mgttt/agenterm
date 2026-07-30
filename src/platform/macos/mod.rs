@@ -10,6 +10,7 @@
 #![cfg(target_os = "macos")]
 
 pub(crate) mod activation;
+pub(crate) mod clipboard;
 pub(crate) mod input;
 pub(crate) mod scale;
 pub(crate) mod toolbar;
@@ -27,10 +28,10 @@ pub fn capability_status(capability: CapabilityKind) -> CapabilityStatus {
         CapabilityKind::Window
         | CapabilityKind::Input
         | CapabilityKind::Ime
-        | CapabilityKind::Clipboard
         | CapabilityKind::Font
         | CapabilityKind::Screenshot
         | CapabilityKind::Activation => CapabilityStatus::Available,
+        CapabilityKind::Clipboard => clipboard::capability_status(),
         CapabilityKind::Integration => CapabilityStatus::Unsupported {
             reason: "signed-macos-app-bundle-pending",
         },
