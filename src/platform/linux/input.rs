@@ -1,137 +1,103 @@
 //! Linux keyboard text / shortcut separation for platform migration slice 1.
 //!
-//! PRD invariants this adapter must preserve once wired:
-//! - committed Unicode text is not reconstructed from physical key codes when
-//!   the window system supplies text
-//! - shortcuts and text commits remain distinct (Shift punctuation, layouts,
-//!   dead keys, CJK, terminal controls, primary modifiers)
+//! Bridges to shared contract revision 1 types:
+//! [`crate::platform::ModifierState`], [`crate::platform::KeyClassification`],
+//! and [`crate::platform::classify_key_press`].
 //!
-//! Shared normalized event types are primary-owned. This file only holds
-//! Linux-local classification helpers so the first vertical slice can land
-//! without inventing `src/platform/mod.rs` contracts.
+//! Linux primary shortcut policy: Control **or** Super (mapped to `meta`).
+//! Alt alone never forms a product shortcut chord. Committed Unicode from the
+//! native path / IME is preferred over physical-key synthesis.
 
 #![cfg(target_os = "linux")]
 
-/// Linux primary shortcut modifier: Control or Super (not Option/Alt alone).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct LinuxModifiers {
-    pub control: bool,
-    pub shift: bool,
-    pub alt: bool,
-    pub super_key: bool,
-}
+use crate::platform::{KeyClassification, ModifierState, classify_key_press as classify_shared};
 
-impl LinuxModifiers {
-    pub(crate) const fn primary_shortcut(self) -> bool {
-        self.control || self.super_key
+/// Build shared [`ModifierState`] from Linux modifier bits (`Super` → `meta`).
+pub(crate) const fn linux_modifiers(
+    control: bool,
+    shift: bool,
+    alt: bool,
+    super_key: bool,
+) -> ModifierState {
+    ModifierState {
+        control,
+        shift,
+        alt,
+        meta: super_key,
     }
 }
 
-/// Classification of one key press before product surfaces consume it.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum LinuxKeyClass {
-    /// Chord intended as a shortcut (primary modifier held).
-    Shortcut {
-        key: String,
-        modifiers: LinuxModifiers,
-    },
-    /// Committed Unicode text from the native window system / IME.
-    TextCommit(String),
-    /// Named control key without text payload (Enter, Escape, Backspace, …).
-    ControlKey {
-        name: String,
-        modifiers: LinuxModifiers,
-    },
-    /// Ignore (release, repeat policy, or non-input).
-    Ignored,
+/// Linux primary product-shortcut probe (Control or Super).
+pub(crate) const fn primary_shortcut(modifiers: ModifierState) -> bool {
+    modifiers.control_or_meta()
 }
 
-/// Separate shortcut chords from text commits.
+/// Classify a Linux key press using the shared contract helper.
 ///
-/// `committed_text` is whatever the native path already resolved (winit
-/// `text` / IME commit). When present and no primary shortcut modifier is
-/// held, prefer [`LinuxKeyClass::TextCommit`] over physical-key synthesis.
+/// `committed_text` is whatever winit / IME already resolved. When present and
+/// no primary shortcut modifier is held, text commit wins over logical keys.
 pub(crate) fn classify_key_press(
-    modifiers: LinuxModifiers,
+    modifiers: ModifierState,
     logical_character: Option<&str>,
     named_key: Option<&str>,
     committed_text: Option<&str>,
-) -> LinuxKeyClass {
-    if modifiers.primary_shortcut() {
-        if let Some(ch) = logical_character {
-            return LinuxKeyClass::Shortcut {
-                key: ch.to_string(),
-                modifiers,
-            };
-        }
-        if let Some(name) = named_key {
-            return LinuxKeyClass::Shortcut {
-                key: name.to_string(),
-                modifiers,
-            };
-        }
-        return LinuxKeyClass::Ignored;
-    }
-
-    if let Some(text) = committed_text.filter(|t| !t.is_empty()) {
-        return LinuxKeyClass::TextCommit(text.to_string());
-    }
-
-    if let Some(name) = named_key {
-        return LinuxKeyClass::ControlKey {
-            name: name.to_string(),
-            modifiers,
-        };
-    }
-
-    if let Some(ch) = logical_character.filter(|t| !t.is_empty()) {
-        return LinuxKeyClass::TextCommit(ch.to_string());
-    }
-
-    LinuxKeyClass::Ignored
+) -> KeyClassification {
+    classify_shared(modifiers, logical_character, named_key, committed_text)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const NONE: LinuxModifiers = LinuxModifiers {
-        control: false,
-        shift: false,
-        alt: false,
-        super_key: false,
-    };
+    const NONE: ModifierState = ModifierState::empty();
+    const CTRL: ModifierState = linux_modifiers(true, false, false, false);
+    const SUPER: ModifierState = linux_modifiers(false, false, false, true);
+    const SHIFT: ModifierState = linux_modifiers(false, true, false, false);
+    const ALT: ModifierState = linux_modifiers(false, false, true, false);
 
-    const CTRL: LinuxModifiers = LinuxModifiers {
-        control: true,
-        shift: false,
-        alt: false,
-        super_key: false,
-    };
-
-    const SHIFT: LinuxModifiers = LinuxModifiers {
-        control: false,
-        shift: true,
-        alt: false,
-        super_key: false,
-    };
+    #[test]
+    fn control_and_super_are_primary_shortcuts() {
+        assert!(primary_shortcut(CTRL));
+        assert!(primary_shortcut(SUPER));
+        assert!(!primary_shortcut(SHIFT));
+        assert!(!primary_shortcut(ALT));
+        assert!(!primary_shortcut(NONE));
+    }
 
     #[test]
     fn primary_shortcut_stays_distinct_from_text() {
         let class = classify_key_press(CTRL, Some("c"), None, Some("c"));
-        assert!(matches!(class, LinuxKeyClass::Shortcut { .. }));
+        assert_eq!(
+            class,
+            KeyClassification::Shortcut {
+                key: "c".to_string(),
+                modifiers: CTRL,
+            }
+        );
+    }
+
+    #[test]
+    fn super_chord_is_shortcut_not_text() {
+        let class = classify_key_press(SUPER, Some("t"), None, Some("t"));
+        assert_eq!(
+            class,
+            KeyClassification::Shortcut {
+                key: "t".to_string(),
+                modifiers: SUPER,
+            }
+        );
     }
 
     #[test]
     fn shift_punctuation_uses_committed_text_not_shortcut() {
         let class = classify_key_press(SHIFT, Some("!"), None, Some("!"));
-        assert_eq!(class, LinuxKeyClass::TextCommit("!".to_string()));
+        assert_eq!(class, KeyClassification::TextCommit("!".to_string()));
     }
 
     #[test]
     fn space_without_shortcut_is_text_commit() {
         let class = classify_key_press(NONE, None, Some("Space"), Some(" "));
-        assert_eq!(class, LinuxKeyClass::TextCommit(" ".to_string()));
+        assert_eq!(class, KeyClassification::TextCommit(" ".to_string()));
     }
 
     #[test]
@@ -139,7 +105,7 @@ mod tests {
         let class = classify_key_press(NONE, None, Some("Escape"), None);
         assert_eq!(
             class,
-            LinuxKeyClass::ControlKey {
+            KeyClassification::ControlKey {
                 name: "Escape".to_string(),
                 modifiers: NONE,
             }
@@ -149,6 +115,12 @@ mod tests {
     #[test]
     fn prefers_native_committed_text_over_logical_character() {
         let class = classify_key_press(NONE, Some("a"), None, Some("à"));
-        assert_eq!(class, LinuxKeyClass::TextCommit("à".to_string()));
+        assert_eq!(class, KeyClassification::TextCommit("à".to_string()));
+    }
+
+    #[test]
+    fn cjk_ime_commit_is_not_reconstructed_from_logical_key() {
+        let class = classify_key_press(NONE, Some("n"), None, Some("你好"));
+        assert_eq!(class, KeyClassification::TextCommit("你好".to_string()));
     }
 }
