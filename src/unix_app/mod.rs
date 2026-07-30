@@ -683,26 +683,29 @@ impl UnixApp {
                 }
             }
         }
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(target_os = "macos")]
         {
-            match event {
-                Ime::Enabled => {}
-                Ime::Preedit(text, cursor) => {
-                    if self.ime_anchor().is_some() {
-                        self.ime_preedit = text;
-                        self.ime_cursor = cursor;
-                    } else {
-                        self.clear_ime_preedit();
-                    }
+            use crate::platform::macos::ime::{MacosImeAction, MacosImeEvent, classify_ime_event};
+            let macos_event = match event {
+                Ime::Enabled => MacosImeEvent::Enabled,
+                Ime::Preedit(text, cursor) => MacosImeEvent::Preedit { text, cursor },
+                Ime::Commit(text) => MacosImeEvent::Commit(text),
+                Ime::Disabled => MacosImeEvent::Disabled,
+            };
+            match classify_ime_event(macos_event, self.ime_anchor().is_some()) {
+                MacosImeAction::None => {}
+                MacosImeAction::UpdatePreedit { text, cursor } => {
+                    self.ime_preedit = text;
+                    self.ime_cursor = cursor;
                     self.request_redraw();
                 }
-                Ime::Commit(text) => {
+                MacosImeAction::ClearPreedit => {
+                    self.clear_ime_preedit();
+                    self.request_redraw();
+                }
+                MacosImeAction::CommitText(text) => {
                     self.clear_ime_preedit();
                     self.commit_ime_text(&text);
-                }
-                Ime::Disabled => {
-                    self.clear_ime_preedit();
-                    self.request_redraw();
                 }
             }
         }
