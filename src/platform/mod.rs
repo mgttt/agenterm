@@ -1,8 +1,8 @@
 //! Native platform abstraction contracts (`prd/PRD_02_20_native_platform.md`).
 //!
-//! **Contract revision 1** freezes normalized product-action identities, key
-//! classification, capability status, and display-backend facts with
-//! table-driven unit tests. No GUI behavior is moved in this revision.
+//! **Contract revision 2** freezes normalized product-action identities, key
+//! classification, capability status, display-backend facts, and validated
+//! window scale/geometry semantics with table-driven unit tests.
 //!
 //! Ownership (PRD parallel rules):
 //! - primary owns this file, shared semantics, Windows adaptation, and final
@@ -15,7 +15,10 @@
 
 /// Frozen shared-contract revision implemented by this module.
 #[allow(dead_code)]
-pub const CONTRACT_REVISION: u32 = 1;
+pub const CONTRACT_REVISION: u32 = 2;
+
+#[cfg(any(target_os = "linux", target_os = "macos", test))]
+pub(crate) mod scale;
 
 #[cfg(target_os = "windows")]
 pub mod windows;
@@ -247,8 +250,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn contract_revision_is_frozen_at_one() {
-        assert_eq!(CONTRACT_REVISION, 1);
+    fn contract_revision_is_frozen_at_two() {
+        assert_eq!(CONTRACT_REVISION, 2);
     }
 
     #[test]

@@ -1,6 +1,6 @@
 //! Windows native platform adapter (`prd/PRD_02_20_native_platform.md`).
 //!
-//! Contract revision implemented by this adapter: 1.
+//! Contract revision implemented by this adapter: 2.
 
 #![cfg(target_os = "windows")]
 
@@ -13,7 +13,7 @@ pub(crate) mod toolbar;
 use super::{CapabilityKind, CapabilityStatus, PlatformKind};
 
 #[allow(dead_code)]
-pub const IMPLEMENTED_CONTRACT_REVISION: u32 = 1;
+pub const IMPLEMENTED_CONTRACT_REVISION: u32 = 2;
 
 #[allow(dead_code)]
 pub const fn platform_kind() -> PlatformKind {

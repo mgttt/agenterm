@@ -87,6 +87,10 @@ tests or ownership.
   - [x] slice-3 owns bounded GDI full-window and terminal-region PNG capture,
     with RAII resource cleanup, shared strict client-frame clip validation, and
     typed allocation/capture/encoding/`screenshot_invalid_clip` failures
+  - [x] contract-revision-2 freezes shared scale-factor validation, logical /
+    physical extent conversion, window metrics, geometry-event classification,
+    and stable scale error codes; Windows adopts the revision without routing
+    its native DPI messages through a Unix abstraction
   - [~] existing Win32 window, HWND controls, GDI rendering, native clipboard,
     system menu, and remaining input behavior are shipped but remain
     distributed across Windows application modules
@@ -109,6 +113,9 @@ tests or ownership.
     resize, layout, and rendering now consume `platform::macos::scale`; the
     no-activate launch path also configures the macOS event loop before window
     creation
+  - [x] contract-revision-2 removes the duplicated macOS conversion and
+    geometry classifier; the macOS adapter aliases the shared types while
+    retaining Cocoa/winit event extraction
   - [x] clipboard reads/writes now consume `platform::macos::clipboard` with a
     256 KiB byte budget, live bounded reads, supervised stdin writes, and typed
     failures; native macOS verifies the blocked-writer deadline and product
@@ -136,6 +143,9 @@ tests or ownership.
     consume `platform::linux`; dimensions/pixels/path, strict clip bounds, and
     headless failures are typed; X11/Wayland softbuffer paths Available,
     headless Unsupported; native X11 `DISPLAY=:1` evidence recorded below
+  - [x] contract-revision-2 removes the duplicated Linux conversion and
+    geometry classifier; the Linux adapter retains X11/Wayland/headless
+    capability discovery and consumes the shared typed contract
   - [~] winit/softbuffer windowing, X11/Wayland input, system-font fallback,
     clipboard, cursor, scaling, and POSIX PTY interaction are in active delivery
   - [~] expose the remaining Linux behavior through the shared platform
@@ -171,8 +181,9 @@ tests or ownership.
 ## Migration and acceptance
 
 1. [~] freeze normalized event and capability types with table-driven unit
-   tests; no GUI behavior moves in this step
-   (`src/platform/mod.rs` contract revision 1; OS adapters still incremental)
+   tests; contract revision 2 additionally owns scale-factor validation,
+   logical/physical conversion, window metrics, and geometry classification;
+   OS adapters remain incremental
 2. [~] adapt one narrow vertical slice—toolbar labels/actions plus keyboard
    text/shortcut separation—on all three systems
    (Linux hot-path wired through `platform::linux` @ `78f5333`; macOS toolbar,
@@ -186,7 +197,8 @@ tests or ownership.
    screenshot+activation @ `1b454c2`. Windows bounded clipboard,
    activation, and screenshot capture hot paths are adapted. macOS clipboard
    first cut @ `11ce9b8`, bounded screenshot @ `3811bda`, and Cocoa IME
-   preedit/commit @ `91055b6` are adapted)
+   preedit/commit @ `91055b6` are adapted; Linux/macOS scale duplication is
+   replaced by the contract-revision-2 shared implementation)
 4. [ ] remove superseded platform-specific paths only after native black-box
    and screenshot evidence passes on that platform
 
@@ -270,3 +282,13 @@ Cross-platform integration review (2026-07-30):
 - [x] macOS clipboard write timeout covers blocked stdin delivery as well as
   child exit; native macOS executes the blocked-writer deadline test in 0.06
   seconds for the focused four-test suite
+
+Contract-revision-2 local evidence (2026-07-31):
+
+- [x] Windows-hosted shared platform tests pass **24/24**, including shared
+  unit/fractional scale conversion, zero-size resize handling, typed invalid
+  metrics, and all three adapters declaring revision 2
+- [x] Windows warnings-denied library/test Clippy and `git diff --check` pass
+- [~] direct Linux cross-check from Windows reached native dependency
+  compilation but cannot complete without `x86_64-linux-gnu-gcc`; the
+  repository's native Linux/macOS jobs remain the authoritative adapter proof
