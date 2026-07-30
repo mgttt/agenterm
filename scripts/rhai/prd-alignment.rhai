@@ -126,9 +126,10 @@ fn shipped_document_line_present(prd, declaration) {
     false
 }
 
-fn shipped_line_present(documents, declaration) {
+fn shipped_line_present(document_paths, declaration) {
     declaration = declaration.to_lower();
-    for document in documents {
+    for path in document_paths {
+        let document = std::fs::read_to_string(path).to_lower();
         if shipped_document_line_present(document, declaration) {
             return true;
         }
@@ -161,8 +162,9 @@ fn product_document_mentions(product, name) {
     false
 }
 
-fn product_mentions(documents, name) {
-    for document in documents {
+fn product_mentions(document_paths, name) {
+    for path in document_paths {
+        let document = std::fs::read_to_string(path).to_lower();
         if product_document_mentions(document, name) {
             return true;
         }
@@ -213,13 +215,13 @@ for entry in std::fs::read_dir(detail_directory) {
 }
 compare_exact(sorted(actual), sorted(linked), "prd_modules");
 
-let prd_documents = [prd_index.to_lower()];
+// Keep paths, not lowercase copies of the entire PRD tree. Rhai's string
+// budget is deliberately bounded, and retaining every document plus its
+// lowercase copy made the audit depend on allocator/platform details as the
+// product specification grew. Consumers below stream one document at a time.
+let prd_document_paths = [prd_path];
 for name in linked {
-    prd_documents.push(
-        std::fs::read_to_string(
-            std::path::join(detail_directory, name).display
-        ).to_lower()
-    );
+    prd_document_paths.push(std::path::join(detail_directory, name).display);
 }
 let contract = rhai::json::parse_file(contract_path);
 require(contract.schema_version == 2, "prd_alignment_contract_schema");
@@ -269,7 +271,7 @@ for capability in capabilities {
         );
     }
     require(
-        shipped_line_present(prd_documents, capability.prd),
+        shipped_line_present(prd_document_paths, capability.prd),
         "prd_alignment_shipped_line:" + capability.id
     );
 }
@@ -363,7 +365,7 @@ for line in catalog_lines {
 }
 for name in public_names.keys() {
     require(
-        product_mentions(prd_documents, name),
+        product_mentions(prd_document_paths, name),
         "prd_alignment_public_command_missing:" + name
     );
 }
@@ -473,7 +475,7 @@ for command in mux_compatibility.explicitly_unsupported {
 compare_exact(expected_unsupported, unsupported_mux, "mux_unsupported");
 for name in supported_mux + unsupported_mux {
     require(
-        product_mentions(prd_documents, name),
+        product_mentions(prd_document_paths, name),
         "prd_alignment_mux_command_missing:" + name
     );
 }
