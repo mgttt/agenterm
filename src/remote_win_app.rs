@@ -4610,6 +4610,9 @@ impl RemoteWindowState {
     }
 
     fn dispatch_windows_toolbar_action(&mut self, action_id: &str) {
+        if !action::is_toolbar_action_id(action_id) {
+            return;
+        }
         match action_id {
             action::TOGGLE_TABS => self.toggle_tabs(),
             action::NEW_TAB => self.open_new_terminal(),

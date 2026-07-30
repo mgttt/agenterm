@@ -11,10 +11,10 @@ use windows_sys::Win32::{
         DIB_RGB_COLORS, DeleteDC, DeleteObject, GetDC, GetDIBits, GetWindowDC, HBITMAP, HDC,
         HGDIOBJ, ReleaseDC, SRCCOPY, SelectObject,
     },
-    UI::WindowsAndMessaging::GetWindowRect,
+    UI::WindowsAndMessaging::{GetClientRect, GetWindowRect},
 };
 
-use crate::platform::CapabilityStatus;
+use crate::platform::{CapabilityStatus, ScreenshotClipRect, validate_screenshot_clip};
 
 /// Supports an 8K frame while preventing unbounded GDI/heap allocation.
 const MAX_CAPTURE_PIXELS: usize = 33_554_432;
@@ -33,6 +33,7 @@ pub(crate) enum CaptureArea {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ScreenshotError {
     InvalidBounds,
+    InvalidClip,
     TooLarge {
         width: i32,
         height: i32,
@@ -49,6 +50,9 @@ impl fmt::Display for ScreenshotError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidBounds => formatter.write_str("screenshot bounds are invalid"),
+            Self::InvalidClip => {
+                formatter.write_str("screenshot clip is outside the client framebuffer")
+            }
             Self::TooLarge {
                 width,
                 height,
@@ -78,6 +82,7 @@ impl ScreenshotError {
     pub(crate) fn to_capability_status(&self) -> CapabilityStatus {
         let code = match self {
             Self::InvalidBounds => "screenshot_invalid_bounds",
+            Self::InvalidClip => "screenshot_invalid_clip",
             Self::TooLarge { .. } => "screenshot_too_large",
             Self::DeviceContextUnavailable => "screenshot_dc_unavailable",
             Self::ResourceAllocationFailed => "screenshot_allocation_failed",
@@ -151,6 +156,26 @@ fn bgra_to_rgba(bytes: &mut [u8]) {
     }
 }
 
+fn validate_client_area(
+    frame_width: i32,
+    frame_height: i32,
+    left: i32,
+    top: i32,
+    width: i32,
+    height: i32,
+) -> Result<(), ScreenshotError> {
+    let frame_width = u32::try_from(frame_width).map_err(|_| ScreenshotError::InvalidClip)?;
+    let frame_height = u32::try_from(frame_height).map_err(|_| ScreenshotError::InvalidClip)?;
+    let clip = ScreenshotClipRect {
+        x: u32::try_from(left).map_err(|_| ScreenshotError::InvalidClip)?,
+        y: u32::try_from(top).map_err(|_| ScreenshotError::InvalidClip)?,
+        width: u32::try_from(width).map_err(|_| ScreenshotError::InvalidClip)?,
+        height: u32::try_from(height).map_err(|_| ScreenshotError::InvalidClip)?,
+    };
+    validate_screenshot_clip(frame_width, frame_height, clip)
+        .map_err(|_| ScreenshotError::InvalidClip)
+}
+
 fn source_for_area(
     window: HWND,
     area: CaptureArea,
@@ -174,7 +199,21 @@ fn source_for_area(
             top,
             width,
             height,
-        } => (unsafe { GetDC(window) }, left, top, width, height),
+        } => {
+            let mut client: RECT = unsafe { mem::zeroed() };
+            if unsafe { GetClientRect(window, &mut client) } == 0 {
+                return Err(ScreenshotError::InvalidBounds);
+            }
+            validate_client_area(
+                client.right - client.left,
+                client.bottom - client.top,
+                left,
+                top,
+                width,
+                height,
+            )?;
+            (unsafe { GetDC(window) }, left, top, width, height)
+        }
     };
     rgba_buffer_len(width, height)?;
     if device.is_null() {
@@ -294,12 +333,36 @@ mod tests {
     }
 
     #[test]
+    fn client_clip_uses_shared_strict_framebuffer_bounds() {
+        assert_eq!(validate_client_area(950, 594, 10, 20, 900, 500), Ok(()));
+        assert_eq!(
+            validate_client_area(950, 594, 200, 100, 800, 500),
+            Err(ScreenshotError::InvalidClip)
+        );
+        assert_eq!(
+            validate_client_area(950, 594, -1, 0, 10, 10),
+            Err(ScreenshotError::InvalidClip)
+        );
+        assert_eq!(
+            validate_client_area(950, 594, 0, 0, 0, 10),
+            Err(ScreenshotError::InvalidClip)
+        );
+    }
+
+    #[test]
     fn screenshot_failures_have_stable_typed_codes() {
         assert_eq!(
             ScreenshotError::CaptureFailed.to_capability_status(),
             CapabilityStatus::Failed {
                 code: "screenshot_capture_failed",
                 message: "BitBlt/GetDIBits screenshot capture failed".to_string(),
+            }
+        );
+        assert_eq!(
+            ScreenshotError::InvalidClip.to_capability_status(),
+            CapabilityStatus::Failed {
+                code: "screenshot_invalid_clip",
+                message: "screenshot clip is outside the client framebuffer".to_string(),
             }
         );
     }

@@ -85,7 +85,8 @@ tests or ownership.
     show-without-activation behavior; terminal selection, paste, startup, and
     relayed focus hot paths consume the adapter
   - [x] slice-3 owns bounded GDI full-window and terminal-region PNG capture,
-    with RAII resource cleanup and typed allocation/capture/encoding failures
+    with RAII resource cleanup, shared strict client-frame clip validation, and
+    typed allocation/capture/encoding/`screenshot_invalid_clip` failures
   - [~] existing Win32 window, HWND controls, GDI rendering, native clipboard,
     system menu, and remaining input behavior are shipped but remain
     distributed across Windows application modules
@@ -225,12 +226,16 @@ Windows slice-2 evidence (2026-07-30):
 Windows slice-3 evidence (2026-07-30):
 
 - [x] warnings-denied all-target/all-feature Clippy
-- [x] 292 library tests, including 8K pixel-budget boundaries, in-place BGRA
-  conversion, and typed screenshot failures
+- [x] 296 library tests, including the shared toolbar-order contract, strict
+  overflow-without-shrink clip validation, 8K pixel-budget boundaries,
+  in-place BGRA conversion, and typed screenshot failures
 - [x] incremental Windows artifact build
 - [x] `remote-ui-smoke` captures and validates both full-window and
   terminal-region PNG files through public CLI commands, then completes all 15
   replaceable-GUI evidence journeys
+- [x] exact-head native rerun after shared-contract adoption: warnings-denied
+  all-target/all-feature Clippy, 296 library tests, a 562 ms no-activate first
+  window, and the complete replaceable-GUI remote smoke all pass
 
 macOS hot-path evidence (2026-07-30):
 

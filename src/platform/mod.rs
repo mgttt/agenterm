@@ -46,6 +46,11 @@ pub mod action {
         FONT_DECREASE,
         FONT_INCREASE,
     ];
+
+    /// Reject adapter-local or stale identities before product dispatch.
+    pub fn is_toolbar_action_id(action_id: &str) -> bool {
+        TOOLBAR_ACTION_ORDER.contains(&action_id)
+    }
 }
 
 /// Which operating-system adapter identity is speaking.
@@ -274,6 +279,10 @@ mod tests {
                 "font-increase",
             ]
         );
+        for action_id in action::TOOLBAR_ACTION_ORDER {
+            assert!(action::is_toolbar_action_id(action_id));
+        }
+        assert!(!action::is_toolbar_action_id("adapter-local-action"));
     }
 
     #[cfg(target_os = "linux")]
@@ -309,17 +318,19 @@ mod tests {
     #[test]
     fn screenshot_clip_validation_rejects_overflow_without_shrink() {
         let frame = (950_u32, 594_u32);
-        assert!(validate_screenshot_clip(
-            frame.0,
-            frame.1,
-            ScreenshotClipRect {
-                x: 0,
-                y: 0,
-                width: frame.0,
-                height: frame.1,
-            },
-        )
-        .is_ok());
+        assert!(
+            validate_screenshot_clip(
+                frame.0,
+                frame.1,
+                ScreenshotClipRect {
+                    x: 0,
+                    y: 0,
+                    width: frame.0,
+                    height: frame.1,
+                },
+            )
+            .is_ok()
+        );
         assert_eq!(
             validate_screenshot_clip(
                 frame.0,
@@ -334,30 +345,42 @@ mod tests {
             Err(ScreenshotClipError::Overflow)
         );
         assert_eq!(
-            validate_screenshot_clip(0, 10, ScreenshotClipRect {
-                x: 0,
-                y: 0,
-                width: 1,
-                height: 1,
-            }),
+            validate_screenshot_clip(
+                0,
+                10,
+                ScreenshotClipRect {
+                    x: 0,
+                    y: 0,
+                    width: 1,
+                    height: 1,
+                }
+            ),
             Err(ScreenshotClipError::EmptyFrame)
         );
         assert_eq!(
-            validate_screenshot_clip(10, 10, ScreenshotClipRect {
-                x: 0,
-                y: 0,
-                width: 0,
-                height: 5,
-            }),
+            validate_screenshot_clip(
+                10,
+                10,
+                ScreenshotClipRect {
+                    x: 0,
+                    y: 0,
+                    width: 0,
+                    height: 5,
+                }
+            ),
             Err(ScreenshotClipError::ZeroDimension)
         );
         assert_eq!(
-            validate_screenshot_clip(10, 10, ScreenshotClipRect {
-                x: 10,
-                y: 0,
-                width: 1,
-                height: 1,
-            }),
+            validate_screenshot_clip(
+                10,
+                10,
+                ScreenshotClipRect {
+                    x: 10,
+                    y: 0,
+                    width: 1,
+                    height: 1,
+                }
+            ),
             Err(ScreenshotClipError::OriginOutside)
         );
     }

@@ -2335,6 +2335,9 @@ impl UnixApp {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     fn dispatch_toolbar_action(&mut self, action_id: &str) {
         use crate::platform::action;
+        if !action::is_toolbar_action_id(action_id) {
+            return;
+        }
         match action_id {
             action::NEW_TAB => {
                 self.open_new_terminal_dialog();
