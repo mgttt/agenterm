@@ -153,7 +153,12 @@
     "package-qualified-selftest": {
       "inputs": ["package-module", "script-runtime"],
       "outputs": ["package-boundary-proof"],
-      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
+      "budget": {
+        "timeout_ms": 120000,
+        "max_operations": 10000000,
+        "max_output_bytes": 1048576,
+        "max_string_bytes": 8388608
+      },
       "network": [],
       "evidence": ["task.package-qualified-selftest"]
     },
@@ -216,7 +221,12 @@
     "script-smoke": {
       "inputs": ["staged-binaries", "isolated-workspace"],
       "outputs": ["script-evidence"],
-      "budget": {"timeout_ms": 300000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "budget": {
+        "timeout_ms": 300000,
+        "max_operations": 100000000,
+        "max_output_bytes": 1048576,
+        "max_string_bytes": 8388608
+      },
       "network": ["loopback"],
       "evidence": ["task.script-smoke"]
     },
