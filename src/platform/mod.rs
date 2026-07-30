@@ -80,6 +80,32 @@ pub enum CapabilityKind {
     Integration,
 }
 
+impl CapabilityKind {
+    pub const ALL: [Self; 8] = [
+        Self::Window,
+        Self::Input,
+        Self::Ime,
+        Self::Clipboard,
+        Self::Font,
+        Self::Screenshot,
+        Self::Activation,
+        Self::Integration,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Window => "window",
+            Self::Input => "input",
+            Self::Ime => "ime",
+            Self::Clipboard => "clipboard",
+            Self::Font => "font",
+            Self::Screenshot => "screenshot",
+            Self::Activation => "activation",
+            Self::Integration => "integration",
+        }
+    }
+}
+
 /// Explicit availability of a capability. Missing behavior must not be hidden.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[allow(dead_code)]
@@ -87,6 +113,46 @@ pub enum CapabilityStatus {
     Available,
     Unsupported { reason: &'static str },
     Failed { code: &'static str, message: String },
+}
+
+impl CapabilityStatus {
+    fn to_json(&self) -> serde_json::Value {
+        match self {
+            Self::Available => serde_json::json!({"status": "available"}),
+            Self::Unsupported { reason } => {
+                serde_json::json!({"status": "unsupported", "reason": reason})
+            }
+            Self::Failed { code, message } => {
+                serde_json::json!({"status": "failed", "code": code, "message": message})
+            }
+        }
+    }
+}
+
+pub(crate) fn platform_info_json() -> serde_json::Value {
+    #[cfg(target_os = "windows")]
+    let (kind, status): (PlatformKind, fn(CapabilityKind) -> CapabilityStatus) =
+        (windows::platform_kind(), windows::capability_status);
+    #[cfg(target_os = "linux")]
+    let (kind, status): (PlatformKind, fn(CapabilityKind) -> CapabilityStatus) =
+        (linux::platform_kind(), linux::capability_status);
+    #[cfg(target_os = "macos")]
+    let (kind, status): (PlatformKind, fn(CapabilityKind) -> CapabilityStatus) =
+        (macos::platform_kind(), macos::capability_status);
+
+    let capabilities = CapabilityKind::ALL
+        .into_iter()
+        .map(|capability| (capability.as_str().to_owned(), status(capability).to_json()))
+        .collect::<serde_json::Map<_, _>>();
+    serde_json::json!({
+        "contract_revision": CONTRACT_REVISION,
+        "kind": match kind {
+            PlatformKind::Windows => "windows",
+            PlatformKind::Macos => "macos",
+            PlatformKind::Linux => "linux",
+        },
+        "capabilities": capabilities,
+    })
 }
 
 /// Modifier bits carried on normalized key events.
@@ -486,5 +552,18 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn public_platform_info_reports_every_typed_capability() {
+        let info = platform_info_json();
+        assert_eq!(info["contract_revision"], CONTRACT_REVISION);
+        assert_eq!(
+            info["capabilities"].as_object().map(serde_json::Map::len),
+            Some(CapabilityKind::ALL.len())
+        );
+        for capability in CapabilityKind::ALL {
+            assert!(info["capabilities"][capability.as_str()]["status"].is_string());
+        }
     }
 }

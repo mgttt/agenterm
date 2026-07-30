@@ -3451,6 +3451,7 @@ pub(crate) fn protocol_info_json_with_ui_bridge(
         "build_identity": build_identity,
         "build_identity_complete": build_identity.is_complete(),
         "upgrade_identity": current_upgrade_identity(),
+        "platform": crate::platform::platform_info_json(),
         "ui_bridge": ui_bridge_facts,
         "control_contract": {
             "schema_version": crate::control_contract::CONTROL_CONTRACT_SCHEMA_VERSION,

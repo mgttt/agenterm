@@ -60,20 +60,25 @@ tests or ownership.
 - [ ] normalized input distinguishes physical key identity, logical key chord,
   committed text, IME preedit/commit, pointer movement/buttons, wheel motion,
   resize, focus, and scale-factor changes
-- [ ] text input is not reconstructed from physical key codes when the native
+- [x] text input is not reconstructed from physical key codes when the native
   window system provides committed Unicode text
-- [ ] shortcuts and text commits remain distinct so Shift characters, keyboard
+- [x] shortcuts and text commits remain distinct so Shift characters, keyboard
   layouts, dead keys, CJK input, terminal control keys, and platform primary
   modifiers preserve their native meaning
-- [ ] platform services are capability-oriented rather than one global
+- [x] platform services are capability-oriented rather than one global
   `OsLayer` object; an adapter exposes only the window, clipboard, font,
   screenshot, activation, or integration capability it implements
-- [ ] product actions use stable semantic identities such as `toggle-tabs`,
+- [x] product actions use stable semantic identities such as `toggle-tabs`,
   `toggle-locale`, and `font-increase`; Win32 control IDs, winit events, HTML
   elements, and future TUI keys remain adapter details
-- [ ] rendering and `ui-snapshot` consume the same resolved labels, states, and
+- [x] rendering and `ui-snapshot` consume the same resolved labels, states, and
   geometry so semantic evidence cannot claim content different from the
   visible GUI
+
+`agenterm-cli protocol-info` exposes the current adapter kind, contract
+revision, and all eight typed capability statuses. Client-side and
+`--running` server responses use the same schema, so automation can distinguish
+Available, Unsupported, and Failed without reading source or assuming parity.
 
 ## Platform branches
 
@@ -302,6 +307,9 @@ Contract-revision-2 local evidence (2026-07-31):
 - [x] Windows GDI font adapter tests pass **15/15** for the Windows platform
   slice; an incremental six-executable build and public no-activate startup
   smoke pass with a **570 ms** first native window
+- [x] public `agenterm-cli protocol-info` reports contract revision 2 and all
+  eight Windows capability statuses; IME preedit and undeclared shell
+  integration are explicit Unsupported results rather than false availability
 - [~] direct Linux cross-check from Windows reached native dependency
   compilation but cannot complete without `x86_64-linux-gnu-gcc`; the
   repository's native Linux/macOS jobs remain the authoritative adapter proof
