@@ -21,6 +21,9 @@ pub const CONTRACT_REVISION: u32 = 1;
 #[cfg(target_os = "linux")]
 pub mod linux;
 
+#[cfg(target_os = "macos")]
+pub mod macos;
+
 /// Stable product action identities consumed by toolbar / shortcut surfaces.
 ///
 /// Win32 control IDs, winit events, and HTML elements remain adapter details.
