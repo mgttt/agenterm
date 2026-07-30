@@ -40,11 +40,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     federation and autonomous scheduling remain later gates
 - v0.1.10 first delivery: public read-only surface
   - Protocol scope
-    - [~] pin the first delivery to the stable MCP `2025-11-25` revision;
+    - [x] pin the first delivery to the stable MCP `2025-11-25` revision;
       protocol upgrades are explicit catalog/schema changes and draft
       stateless discovery or experimental tasks are not advertised; the
-      offline Rust catalog now freezes this revision while transport
-      negotiation remains pending
+      offline Rust catalog, exact initialize response, and public lifecycle
+      fixture freeze this revision and reject lifecycle drift
     - [x] support only initialize/initialized, ping, resources list/read,
       tools list/call for the single wait tool, and cancellation; stdout is
       newline-delimited UTF-8 JSON-RPC only and bounded diagnostics use stderr
@@ -56,10 +56,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       - [x] negotiated capabilities now include the four metadata resources
         and exactly one tool; tool work runs outside the input loop, has an
         eight-waiter ceiling, and accepts standard cancellation notifications
-    - [ ] the ordinary AgenTerm GUI adds no MCP panel, connection animation,
+    - [x] the ordinary AgenTerm GUI adds no MCP panel, connection animation,
       approval surface, or startup work in this read-only delivery
   - Executable and discovery
-    - [~] `agenterm-mcp.exe --help`, `--version`, and
+    - [x] `agenterm-mcp.exe --help`, `--version`, and
       `capabilities --json` work without starting a GUI or model runtime;
       capability output declares protocol/schema versions, transport,
       resources, tools, limits, and unavailable later-stage roles
@@ -67,7 +67,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
         implemented, unit-tested, included in the artifact manifest and
         cross-platform build lists, and deliberately mark protocol methods,
         resources and `agenterm_wait` with shipped method/tool availability
-    - [~] `agenterm-mcp.exe serve --stdio` is the only first-delivery MCP
+    - [x] `agenterm-mcp.exe serve --stdio` is the only first-delivery MCP
       transport; initialization negotiates a supported protocol version and
       publishes stable server identity without opening a network listener
       - [x] the executable reads one bounded UTF-8 JSON-RPC message per line,
@@ -90,7 +90,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       instance inventory, workspace inventory, tab inventory, and one fleet
       snapshot; stable resource URIs do not encode mutable tab indexes or
       titles
-    - [~] `resources/read` returns the same stable IDs and observable state
+    - [x] `resources/read` returns the same stable IDs and observable state
       as the public AgenTerm control plane, plus schema version, server
       epoch, and snapshot sequence so a client can establish a verifiable
       event baseline
@@ -99,8 +99,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
         resources return versioned JSON text content
       - [x] a live read against the existing 48815 server returned the same
         event epoch/sequence and five stable tabs as its public snapshot
-      - [ ] an isolated black-box fixture must perform the automatic
-        field-by-field MCP/CLI same-source comparison
+      - [x] an isolated public-executable fixture sends the same typed
+        `ui-snapshot` through `agenterm-cli.exe` and `agenterm-mcp.exe`, then
+        compares server identity, epoch/sequence, workspace/window facts and
+        every published tab field while rejecting title, CWD, proxy and
+        Composer sentinels
     - [x] pane text or other content-bearing fields are absent by default;
       any future content snapshot requires an explicit observe capability,
       bounded output, and a resource distinct from metadata inventory
@@ -146,9 +149,15 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [x] unit tests reject duplicate method/resource/tool identities and prove
       the current implementation slice reports exact shipped handlers
   - Failure isolation and deferred roles
-    - [ ] malformed JSON-RPC, oversized frames, a killed or hung sidecar,
+    - [x] malformed JSON-RPC, oversized frames, a killed or hung sidecar,
       backend disconnect, and wait exhaustion cannot stall terminal output,
       mutate workspace state, close tabs, or terminate `agenterm.exe`
+      - [x] the public stdio executable recovers from malformed and four-MiB
+        oversized frames in the same session
+      - [x] a Windows public-executable fixture holds a real bounded wait,
+        receives a concurrent ping, force-kills the sidecar, then proves the
+        isolated GUI and server processes remain live, PTY output remains
+        capturable, and a subsequent typed tab mutation succeeds
     - [ ] sidecar restart reconstructs read-only state from a fresh snapshot
       and epoch/sequence; it never claims uninterrupted subscription or
       process continuity

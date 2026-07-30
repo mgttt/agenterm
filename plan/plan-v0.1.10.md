@@ -1036,7 +1036,7 @@ entry 是集成热点，只允许一个串行 owner 收口。
     43 stable IDs and responsibility groups frozen; detailed caller and
     input/output/side-effect contracts still need enrichment
   [done] stable Rhai task graph
-    repository manifest exposes all thirty-nine ready tasks plus validated
+    repository manifest exposes all forty ready tasks plus validated
     dependency, platform, and side-effect metadata offline
   [done] stage-0 bootstrap identity contract
   [done] no-new-ps1 migration audit gate
@@ -1062,8 +1062,7 @@ entry 是集成热点，只允许一个串行 owner 收口。
   [done] offline mcp catalog
   [done] protocol revision + methods + resources + tool + budgets
   [done] capabilities --json
-  [in progress] catalog invariant tests shipped; serialized golden fixture
-    still pending
+  [done] catalog invariant tests and exact public serialized lifecycle fixture
 
 第四提交
   [done] bounded stdio JSON-RPC
@@ -1072,8 +1071,9 @@ entry 是集成热点，只允许一个串行 owner 收口。
 
 第五提交
   [done] instances / workspace / tabs / fleet snapshot resources
-  [in progress] live same-epoch/sequence comparison passed; isolated
-    field-by-field CLI/MCP black-box fixture still pending
+  [done] isolated public CLI/MCP fixture compares same-source server,
+    epoch/sequence, workspace/window and every published tab field while
+    rejecting private sentinels
 
 第六提交
   [done] tools/list exposes only agenterm_wait
@@ -1090,8 +1090,9 @@ entry 是集成热点，只允许一个串行 owner 收口。
   remove final .ps1 + activate zero-ps1 drift gate
 
 第八提交
-  crash / privacy / load / orphan qualification
-  artifact / SBOM / README / PRD alignment
+  [done] public malformed/oversize recovery, wait load/cancel/orphan, forced
+    sidecar-kill GUI/server/PTY isolation and same-source privacy qualification
+  artifact / SBOM / README / PRD alignment and final clean rehearsal
 ```
 
 这条切法让 AgenTerm 用自己的 Rhai 工具链完成自我构建、验证与交付，同时

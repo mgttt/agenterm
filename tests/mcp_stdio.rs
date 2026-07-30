@@ -1,6 +1,8 @@
 use std::{
+    fs,
     io::{BufRead, BufReader, Read, Write},
     net::{TcpListener, TcpStream},
+    path::Path,
     process::{Command, Stdio},
     sync::{
         Arc,
@@ -8,7 +10,7 @@ use std::{
         mpsc,
     },
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use serde_json::{Value, json};
@@ -105,6 +107,398 @@ fn public_stdio_lifecycle_keeps_stdout_machine_only() {
     assert_eq!(tools.len(), 1);
     assert_eq!(tools[0]["name"], "agenterm_wait");
     assert_eq!(tools[0]["annotations"]["readOnlyHint"], true);
+}
+
+#[test]
+fn public_stdio_recovers_after_malformed_and_oversized_frames() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_agenterm-mcp"))
+        .args(["serve", "--stdio"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("start public agenterm-mcp executable");
+    let mut stdin = child.stdin.take().expect("piped stdin");
+    writeln!(stdin, "{{bad json}}").expect("write malformed frame");
+    writeln!(stdin, "{}", "x".repeat(4 * 1024 * 1024)).expect("write oversized frame");
+    writeln!(
+        stdin,
+        "{}",
+        json!({
+            "jsonrpc": "2.0",
+            "id": "recovered",
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-11-25",
+                "capabilities": {},
+                "clientInfo": {"name": "recovery", "version": "1"}
+            }
+        })
+    )
+    .expect("write recovery initialize");
+    drop(stdin);
+    let output = child.wait_with_output().expect("wait for recovery session");
+    assert!(output.status.success(), "{output:?}");
+    assert!(output.stderr.is_empty(), "{output:?}");
+    let responses = String::from_utf8(output.stdout)
+        .expect("MCP stdout UTF-8")
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).expect("MCP response JSON"))
+        .collect::<Vec<_>>();
+    assert_eq!(responses.len(), 3);
+    assert_eq!(responses[0]["error"]["code"], -32700);
+    assert_eq!(responses[1]["error"]["code"], -32600);
+    assert!(
+        responses[1]["error"]["data"]["maximum_bytes"]
+            .as_u64()
+            .is_some_and(|maximum| maximum < 4 * 1024 * 1024)
+    );
+    assert_eq!(responses[2]["id"], "recovered");
+    assert_eq!(responses[2]["result"]["protocolVersion"], "2025-11-25");
+}
+
+#[test]
+fn public_resource_matches_cli_snapshot_field_for_field() {
+    let snapshot = json!({
+        "server_pid": 4242,
+        "protocol_version": 7,
+        "event_position": {"epoch": "same-source-epoch", "sequence": 91},
+        "focus": {"window_id": "@12"},
+        "window": {
+            "visible": true,
+            "detached": false,
+            "minimized": false,
+            "state": "normal"
+        },
+        "tabs": [{
+            "id": "@12",
+            "parent_id": null,
+            "name": "same-source",
+            "note": "metadata-note",
+            "state": "running",
+            "pid": 5151,
+            "exit_code": null,
+            "active": true,
+            "has_children": false,
+            "collapsed": false,
+            "depth": 0,
+            "terminal_title": "private-title",
+            "composer": "private-draft",
+            "working_context": {
+                "cwd": {"path": "private-cwd"},
+                "proxy": {"endpoint": "private-proxy"}
+            }
+        }]
+    });
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind same-source fixture");
+    let address = listener.local_addr().expect("fixture address").to_string();
+    let fixture_snapshot = snapshot.clone();
+    let fixture = thread::spawn(move || {
+        for _ in 0..2 {
+            let (stream, _) = listener.accept().expect("accept same-source request");
+            reply_snapshot_backend(stream, &fixture_snapshot);
+        }
+    });
+
+    let cli_output = Command::new(env!("CARGO_BIN_EXE_agenterm-cli"))
+        .args(["--address", &address, "ui-snapshot"])
+        .output()
+        .expect("run public CLI snapshot");
+    assert!(cli_output.status.success(), "{cli_output:?}");
+    assert!(cli_output.stderr.is_empty(), "{cli_output:?}");
+    let cli: Value = serde_json::from_slice(&cli_output.stdout).expect("CLI snapshot JSON");
+
+    let mut child = start_mcp(&address);
+    let mut stdin = child.stdin.take().expect("piped stdin");
+    let input = concat!(
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":",
+        "{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{},",
+        "\"clientInfo\":{\"name\":\"same-source\",\"version\":\"1\"}}}\n",
+        "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n",
+        "{\"jsonrpc\":\"2.0\",\"id\":\"snapshot\",\"method\":\"resources/read\",",
+        "\"params\":{\"uri\":\"agenterm://fleet/snapshot\"}}\n"
+    );
+    stdin.write_all(input.as_bytes()).expect("write MCP reads");
+    drop(stdin);
+    let output = child.wait_with_output().expect("wait for MCP snapshot");
+    fixture.join().expect("join same-source fixture");
+    assert!(output.status.success(), "{output:?}");
+    assert!(output.stderr.is_empty(), "{output:?}");
+    let responses = String::from_utf8(output.stdout)
+        .expect("MCP stdout UTF-8")
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).expect("MCP response JSON"))
+        .collect::<Vec<_>>();
+    assert_eq!(responses.len(), 2);
+    let mcp_text = responses[1]["result"]["contents"][0]["text"]
+        .as_str()
+        .expect("MCP resource text");
+    let mcp: Value = serde_json::from_str(mcp_text).expect("MCP resource JSON");
+
+    assert_eq!(mcp["server"]["address"], address);
+    assert_eq!(mcp["server"]["pid"], cli["server_pid"]);
+    assert_eq!(mcp["server"]["protocol_version"], cli["protocol_version"]);
+    assert_eq!(mcp["event_position"], cli["event_position"]);
+    assert_eq!(mcp["workspace"]["active_tab_id"], cli["focus"]["window_id"]);
+    assert_eq!(mcp["workspace"]["tab_count"], 1);
+    assert_eq!(mcp["workspace"]["window_state"], cli["window"]["state"]);
+    assert_eq!(mcp["workspace"]["window_visible"], cli["window"]["visible"]);
+    assert_eq!(
+        mcp["workspace"]["window_detached"],
+        cli["window"]["detached"]
+    );
+    for field in [
+        "id",
+        "parent_id",
+        "name",
+        "note",
+        "state",
+        "pid",
+        "exit_code",
+        "active",
+        "has_children",
+        "collapsed",
+        "depth",
+    ] {
+        assert_eq!(mcp["tabs"][0][field], cli["tabs"][0][field], "{field}");
+    }
+    let encoded = serde_json::to_string(&mcp).expect("encode MCP projection");
+    for private in [
+        "private-title",
+        "private-draft",
+        "private-cwd",
+        "private-proxy",
+    ] {
+        assert!(!encoded.contains(private), "MCP leaked {private}");
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn killed_sidecar_cannot_interrupt_live_gui_server_or_pty() {
+    let root = std::env::temp_dir().join(format!(
+        "agenterm-mcp-isolation-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time")
+            .as_millis()
+    ));
+    fs::create_dir_all(&root).expect("create isolation root");
+    let address = {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("reserve isolation address");
+        listener
+            .local_addr()
+            .expect("isolation address")
+            .to_string()
+    };
+    let workspace = root.join("workspace.json");
+    let settings = root.join("settings.json");
+    let instances = root.join("instances");
+    fs::create_dir_all(&instances).expect("create instance directory");
+
+    let mut server = Some(
+        configured_command(
+            env!("CARGO_BIN_EXE_agenterm-server"),
+            &address,
+            &workspace,
+            &settings,
+            &instances,
+        )
+        .args(["--address", &address])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("start isolated server"),
+    );
+    let mut gui: Option<std::process::Child> = None;
+    let mut mcp: Option<std::process::Child> = None;
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        wait_for_cli(
+            &address,
+            &workspace,
+            &settings,
+            &instances,
+            &["protocol-info", "--running"],
+            Duration::from_secs(5),
+        );
+        gui = Some(
+            configured_command(
+                env!("CARGO_BIN_EXE_agenterm"),
+                &address,
+                &workspace,
+                &settings,
+                &instances,
+            )
+            .arg("--no-activate")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("start replaceable GUI"),
+        );
+        wait_for_cli(
+            &address,
+            &workspace,
+            &settings,
+            &instances,
+            &["ui-lease", "status"],
+            Duration::from_secs(5),
+        );
+
+        let created = run_cli(
+            &address,
+            &workspace,
+            &settings,
+            &instances,
+            &[
+                "new-window",
+                "-d",
+                "-P",
+                "-F",
+                "#{window_id}",
+                "-n",
+                "mcp-isolation",
+                "--",
+                "cmd.exe",
+                "/d",
+                "/c",
+                "echo AGENTERM_MCP_ISOLATION & ping -n 30 127.0.0.1 >nul",
+            ],
+        );
+        assert!(created.status.success(), "{created:?}");
+        let tab_id = String::from_utf8(created.stdout)
+            .expect("tab ID UTF-8")
+            .trim()
+            .to_owned();
+        assert!(tab_id.starts_with('@'), "{tab_id}");
+        let waited = run_cli(
+            &address,
+            &workspace,
+            &settings,
+            &instances,
+            &[
+                "wait-pane",
+                "-t",
+                &tab_id,
+                "--contains",
+                "AGENTERM_MCP_ISOLATION",
+                "--timeout-ms",
+                "5000",
+            ],
+        );
+        assert!(waited.status.success(), "{waited:?}");
+        let snapshot = run_cli(
+            &address,
+            &workspace,
+            &settings,
+            &instances,
+            &["ui-snapshot"],
+        );
+        assert!(snapshot.status.success(), "{snapshot:?}");
+        let snapshot: Value = serde_json::from_slice(&snapshot.stdout).expect("snapshot JSON");
+
+        let mut sidecar = configured_command(
+            env!("CARGO_BIN_EXE_agenterm-mcp"),
+            &address,
+            &workspace,
+            &settings,
+            &instances,
+        )
+        .args(["--address", &address, "serve", "--stdio"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("start isolation sidecar");
+        let stdout = sidecar.stdout.take().expect("sidecar stdout");
+        let (sender, receiver) = mpsc::channel();
+        let reader = spawn_stdout_reader(stdout, sender);
+        let mut stdin = sidecar.stdin.take().expect("sidecar stdin");
+        write_initialize(&mut stdin);
+        writeln!(
+            stdin,
+            "{}",
+            json!({
+                "jsonrpc": "2.0",
+                "id": "isolation-wait",
+                "method": "tools/call",
+                "params": {
+                    "name": "agenterm_wait",
+                    "arguments": {
+                        "epoch": snapshot["event_position"]["epoch"],
+                        "after_sequence": snapshot["event_position"]["sequence"],
+                        "event_kind": "workspace.shutdown",
+                        "timeout_ms": 30_000
+                    }
+                }
+            })
+        )
+        .expect("write isolation wait");
+        writeln!(
+            stdin,
+            "{}",
+            json!({"jsonrpc": "2.0", "id": "live-ping", "method": "ping"})
+        )
+        .expect("write concurrent ping");
+        stdin.flush().expect("flush isolation session");
+        assert_eq!(receive_response(&receiver, &mut sidecar)["id"], 1);
+        assert_eq!(receive_response(&receiver, &mut sidecar)["id"], "live-ping");
+        sidecar.kill().expect("force kill sidecar");
+        let status = sidecar.wait().expect("wait killed sidecar");
+        assert!(!status.success());
+        drop(stdin);
+        reader.join().expect("join sidecar reader");
+        mcp = Some(sidecar);
+
+        assert!(
+            server
+                .as_mut()
+                .expect("server")
+                .try_wait()
+                .expect("poll server")
+                .is_none(),
+            "server exited with sidecar"
+        );
+        assert!(
+            gui.as_mut()
+                .expect("GUI")
+                .try_wait()
+                .expect("poll GUI")
+                .is_none(),
+            "GUI exited with sidecar"
+        );
+        let capture = run_cli(
+            &address,
+            &workspace,
+            &settings,
+            &instances,
+            &["capture-pane", "-p", "-t", &tab_id, "--max-bytes", "16384"],
+        );
+        assert!(capture.status.success(), "{capture:?}");
+        assert!(String::from_utf8_lossy(&capture.stdout).contains("AGENTERM_MCP_ISOLATION"));
+        let note = run_cli(
+            &address,
+            &workspace,
+            &settings,
+            &instances,
+            &["set-tab-note", "-t", &tab_id, "sidecar-isolated"],
+        );
+        assert!(note.status.success(), "{note:?}");
+    }));
+
+    let _ = run_cli(&address, &workspace, &settings, &instances, &["shutdown"]);
+    for child in [&mut mcp, &mut gui, &mut server] {
+        if let Some(child) = child.as_mut() {
+            if child.try_wait().ok().flatten().is_none() {
+                let _ = child.kill();
+            }
+            let _ = child.wait();
+        }
+    }
+    let _ = fs::remove_dir_all(&root);
+    if let Err(payload) = result {
+        std::panic::resume_unwind(payload);
+    }
 }
 
 #[test]
@@ -432,6 +826,65 @@ fn start_mcp(address: &str) -> std::process::Child {
         .expect("start public agenterm-mcp executable")
 }
 
+#[cfg(windows)]
+fn configured_command(
+    program: &str,
+    address: &str,
+    workspace: &Path,
+    settings: &Path,
+    instances: &Path,
+) -> Command {
+    let mut command = Command::new(program);
+    command
+        .env("AGENTERM_IPC_ADDRESS", address)
+        .env("AGENTERM_WORKSPACE_PATH", workspace)
+        .env("AGENTERM_SETTINGS_PATH", settings)
+        .env("AGENTERM_INSTANCE_DIR", instances)
+        .env("AGENTERM_NO_ACTIVATE", "1");
+    command
+}
+
+#[cfg(windows)]
+fn run_cli(
+    address: &str,
+    workspace: &Path,
+    settings: &Path,
+    instances: &Path,
+    arguments: &[&str],
+) -> std::process::Output {
+    configured_command(
+        env!("CARGO_BIN_EXE_agenterm-cli"),
+        address,
+        workspace,
+        settings,
+        instances,
+    )
+    .args(["--address", address])
+    .args(arguments)
+    .output()
+    .expect("run isolated CLI")
+}
+
+#[cfg(windows)]
+fn wait_for_cli(
+    address: &str,
+    workspace: &Path,
+    settings: &Path,
+    instances: &Path,
+    arguments: &[&str],
+    timeout: Duration,
+) -> std::process::Output {
+    let deadline = Instant::now() + timeout;
+    loop {
+        let output = run_cli(address, workspace, settings, instances, arguments);
+        if output.status.success() {
+            return output;
+        }
+        assert!(Instant::now() < deadline, "{output:?}");
+        thread::sleep(Duration::from_millis(25));
+    }
+}
+
 fn spawn_stdout_reader(
     stdout: std::process::ChildStdout,
     sender: mpsc::Sender<Result<String, std::io::Error>>,
@@ -558,6 +1011,23 @@ fn reply_to_backend(mut stream: TcpStream) {
     });
     writeln!(stream, "{response}").expect("write backend response");
     stream.flush().expect("flush backend response");
+    let mut trailing = Vec::new();
+    let _ = stream.read_to_end(&mut trailing);
+}
+
+fn reply_snapshot_backend(mut stream: TcpStream, snapshot: &Value) {
+    let request = read_backend_request(&stream);
+    assert_eq!(request["args"][0], "ui-snapshot");
+    let response = json!({
+        "ok": true,
+        "output": snapshot.to_string(),
+        "error": "",
+        "error_code": "",
+        "error_category": "",
+        "retryable": false
+    });
+    writeln!(stream, "{response}").expect("write snapshot backend response");
+    stream.flush().expect("flush snapshot backend response");
     let mut trailing = Vec::new();
     let _ = stream.read_to_end(&mut trailing);
 }

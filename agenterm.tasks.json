@@ -74,7 +74,7 @@
       "cwd": ".",
       "args": ["."],
       "dependencies": ["build-identity", "stage-build", "target-report", "prepare-target-clean"],
-      "platforms": ["windows", "linux", "macos"],
+      "platforms": ["windows"],
       "side_effects": ["artifact_write", "process_spawn"]
     },
     {
@@ -94,8 +94,8 @@
       "profile": "local",
       "cwd": ".",
       "args": ["."],
-      "dependencies": ["lint", "migration-audit", "prd-alignment", "artifact-verification", "supply-chain", "verify-docs-site", "readme-examples"],
-      "platforms": ["windows", "linux", "macos"],
+      "dependencies": ["lint", "migration-audit", "prd-alignment", "artifact-verification", "mcp-conformance", "supply-chain", "verify-docs-site", "readme-examples"],
+      "platforms": ["windows"],
       "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback"]
     },
     {
@@ -127,7 +127,7 @@
       "cwd": ".",
       "args": ["."],
       "dependencies": ["validate-artifact-manifest"],
-      "platforms": ["windows", "linux", "macos"],
+      "platforms": ["windows"],
       "side_effects": ["process_spawn"]
     },
     {
@@ -302,7 +302,7 @@
       "cwd": ".",
       "args": [".", "dist/agenterm-cli.exe", "dist/agenterm-script.exe", "dist/agenterm.exe"],
       "dependencies": [],
-      "platforms": ["windows", "linux", "macos"],
+      "platforms": ["windows"],
       "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback"]
     },
     {
@@ -328,8 +328,19 @@
       "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback"]
     },
     {
+      "id": "mcp-conformance",
+      "description": "Prove the public MCP lifecycle, same-source projection, bounded wait, fault recovery, privacy, and GUI/server/PTY isolation",
+      "entry": "scripts/rhai/mcp-conformance.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "args": ["."],
+      "dependencies": [],
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback"]
+    },
+    {
       "id": "migration-audit",
-      "description": "Enforce the frozen PowerShell migration ledger and reject untracked drift",
+      "description": "Enforce the frozen PowerShell inventory and reject PowerShell or batch business-logic drift",
       "entry": "scripts/rhai/powershell-migration-audit.rhai",
       "profile": "local",
       "cwd": ".",
@@ -415,7 +426,7 @@
       "profile": "local",
       "cwd": ".",
       "dependencies": ["build-identity", "clean-locked-artifacts", "stage-artifact", "write-build-metadata"],
-      "platforms": ["windows", "linux", "macos"],
+      "platforms": ["windows"],
       "side_effects": ["artifact_write", "process_spawn"]
     },
     {
@@ -479,7 +490,7 @@
       "cwd": ".",
       "args": ["dist"],
       "dependencies": ["artifact-verification"],
-      "platforms": ["windows", "linux", "macos"],
+      "platforms": ["windows"],
       "side_effects": ["process_spawn"]
     }
   ]

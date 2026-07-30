@@ -808,6 +808,13 @@ let ordinary_gates = [
         )]
     },
     #{
+        id:"mcp-conformance",
+        label:"public MCP conformance and isolation",
+        specs:[task(
+            worker, manifest, "mcp-conformance", 60000, []
+        )]
+    },
+    #{
         id:"migration-audit",
         label:"PowerShell migration ledger and no-new-PS1 gate",
         specs:[task(

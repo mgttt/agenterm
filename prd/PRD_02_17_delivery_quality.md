@@ -103,6 +103,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   over one generic stage-0 bootstrap; the named Rhai `build` task now owns
   profile selection, frozen identity, Cargo, staging, target reporting and
   release cleanup, while the migration gate rejects batch business-rule drift
+- [x] the required `mcp-conformance` Rhai gate owns public stdio lifecycle,
+  malformed/oversized recovery, CLI/MCP same-source projection, wait
+  causality/cancellation/capacity, force-kill cleanup, privacy, and live
+  GUI/server/PTY isolation
 - [x] lint exposes a versioned JSON result, contains injected malformed
   JSON/UTF-8/conflict/Rhai self-tests, and is represented by mandatory `repo-lint` and
   `rhai-lint` qualification gates; no optional analyzer is silently treated as

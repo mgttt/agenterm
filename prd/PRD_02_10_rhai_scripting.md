@@ -510,12 +510,12 @@ Migration ledger:
   duplicate paths, invalid states, and count drift; ordinary and release
   qualification invoke it as a required gate.
 - [x] the repository-root `agenterm.tasks.json` is now the offline task
-  catalog and ships thirty-nine ready tasks (`build`, `check`, `release`,
+  catalog and ships forty ready tasks (`build`, `check`, `release`,
   `artifact-verification`,
   `bootstrap-info`, `build-identity`,
   `harness-cleanup-selftest`, `diagnostic-bundle-selftest`,
   `qualification-selftest`, `package-qualified`,
-  `package-release-qualified`, `lint`,
+  `package-release-qualified`, `lint`, `mcp-conformance`,
   `package-qualified-selftest`, `migration-audit`, `target-report`, `internal-version-policy`,
   `verify-docs-site`, `readme-examples`, `clean-locked-artifacts`,
   `prepare-target-clean`, `preflight`, `preflight-benchmark`, `prd-alignment`,
