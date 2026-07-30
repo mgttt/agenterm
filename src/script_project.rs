@@ -15,7 +15,7 @@ use crate::{
     script_catalog::{
         SCRIPT_CATALOG_SCHEMA_VERSION, ScriptApiStatus, entries as script_api_entries,
     },
-    script_protocol::SCRIPT_API_VERSION,
+    script_protocol::{SCRIPT_API_VERSION, ScriptBudgets},
 };
 
 pub const SCRIPT_TASK_MANIFEST: &str = "agenterm.tasks.json";
@@ -731,27 +731,31 @@ fn validate_task_contract(contract: &ScriptTaskContract) -> Result<(), String> {
     validate_contract_ids(&contract.outputs, "task_contract_outputs", false)?;
     validate_contract_ids(&contract.evidence, "task_contract_evidence", false)?;
     validate_unique(&contract.network, "task_contract_network")?;
-    if contract.budget.timeout_ms == 0 || contract.budget.timeout_ms > 86_400_000 {
-        return Err("task_contract_budget_timeout_ms: expected 1..86400000".to_owned());
+    let hard_limits = ScriptBudgets::hard_limits();
+    if contract.budget.timeout_ms == 0 || contract.budget.timeout_ms > hard_limits.wall_time_ms {
+        return Err("task_contract_budget_timeout_ms: expected 1..3600000".to_owned());
     }
-    if contract.budget.max_operations == 0 || contract.budget.max_operations > 1_000_000_000 {
-        return Err("task_contract_budget_max_operations: expected 1..1000000000".to_owned());
-    }
-    if contract.budget.max_output_bytes == 0 || contract.budget.max_output_bytes > 64 * 1024 * 1024
+    if contract.budget.max_operations == 0
+        || contract.budget.max_operations > hard_limits.operations
     {
-        return Err("task_contract_budget_max_output_bytes: expected 1..67108864".to_owned());
+        return Err("task_contract_budget_max_operations: expected 1..100000000".to_owned());
+    }
+    if contract.budget.max_output_bytes == 0
+        || contract.budget.max_output_bytes > hard_limits.output_bytes as u64
+    {
+        return Err("task_contract_budget_max_output_bytes: expected 1..1048576".to_owned());
     }
     if contract
         .budget
         .max_collection_items
-        .is_some_and(|value| value == 0 || value > 100_000)
+        .is_some_and(|value| value == 0 || value > hard_limits.collection_items as u64)
     {
         return Err("task_contract_budget_max_collection_items: expected 1..100000".to_owned());
     }
     if contract
         .budget
         .max_string_bytes
-        .is_some_and(|value| value == 0 || value > 8 * 1024 * 1024)
+        .is_some_and(|value| value == 0 || value > hard_limits.string_bytes as u64)
     {
         return Err("task_contract_budget_max_string_bytes: expected 1..8388608".to_owned());
     }
@@ -1265,6 +1269,46 @@ mod tests {
         assert_eq!(task.status, ScriptTaskStatus::Ready);
         assert!(task.contract.is_none());
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn task_contract_budgets_cannot_exceed_runtime_hard_limits() {
+        for (field, value, expected) in [
+            (
+                "timeout_ms",
+                3_600_001_u64,
+                "task_contract_budget_timeout_ms: expected 1..3600000",
+            ),
+            (
+                "max_operations",
+                100_000_001,
+                "task_contract_budget_max_operations: expected 1..100000000",
+            ),
+            (
+                "max_output_bytes",
+                1_048_577,
+                "task_contract_budget_max_output_bytes: expected 1..1048576",
+            ),
+        ] {
+            let (root, manifest) = fixture();
+            let mut manifest_value: serde_json::Value =
+                serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
+            manifest_value["contracts"]["check"]["budget"][field] = serde_json::json!(value);
+            fs::write(
+                &manifest,
+                serde_json::to_vec_pretty(&manifest_value).unwrap(),
+            )
+            .unwrap();
+            let catalog = load_task_catalog(&manifest).unwrap();
+            let task = catalog
+                .tasks
+                .iter()
+                .find(|task| task.id == "check")
+                .unwrap();
+            assert_eq!(task.status, ScriptTaskStatus::Degraded);
+            assert_eq!(task.degraded_reason.as_deref(), Some(expected));
+            fs::remove_dir_all(root).unwrap();
+        }
     }
 
     #[test]

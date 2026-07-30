@@ -1073,9 +1073,12 @@ fn run_script_command_with_context(
         }
     };
     let mut budgets = ScriptBudgets::default();
+    let hard_limits = ScriptBudgets::hard_limits();
     if let Some(value) = option_value(arguments, "--timeout-ms") {
         match value.parse::<u64>() {
-            Ok(value) if (1..=3_600_000).contains(&value) => budgets.wall_time_ms = value,
+            Ok(value) if (1..=hard_limits.wall_time_ms).contains(&value) => {
+                budgets.wall_time_ms = value;
+            }
             _ => {
                 eprintln!("script --timeout-ms must be from 1 to 3600000");
                 return 2;
@@ -1084,7 +1087,9 @@ fn run_script_command_with_context(
     }
     if let Some(value) = option_value(arguments, "--max-operations") {
         match value.parse::<u64>() {
-            Ok(value) if (1..=100_000_000).contains(&value) => budgets.operations = value,
+            Ok(value) if (1..=hard_limits.operations).contains(&value) => {
+                budgets.operations = value;
+            }
             _ => {
                 eprintln!("script --max-operations must be from 1 to 100000000");
                 return 2;
@@ -1093,7 +1098,7 @@ fn run_script_command_with_context(
     }
     if let Some(value) = option_value(arguments, "--max-output-bytes") {
         match value.parse::<usize>() {
-            Ok(value) if (1..=1_048_576).contains(&value) => {
+            Ok(value) if (1..=hard_limits.output_bytes).contains(&value) => {
                 budgets.output_bytes = value;
             }
             _ => {
@@ -1104,7 +1109,7 @@ fn run_script_command_with_context(
     }
     if let Some(value) = option_value(arguments, "--max-collection-items") {
         match value.parse::<usize>() {
-            Ok(value) if (1..=100_000).contains(&value) => {
+            Ok(value) if (1..=hard_limits.collection_items).contains(&value) => {
                 budgets.collection_items = value;
             }
             _ => {
@@ -1115,7 +1120,7 @@ fn run_script_command_with_context(
     }
     if let Some(value) = option_value(arguments, "--max-string-bytes") {
         match value.parse::<usize>() {
-            Ok(value) if (1..=8_388_608).contains(&value) => {
+            Ok(value) if (1..=hard_limits.string_bytes).contains(&value) => {
                 budgets.string_bytes = value;
             }
             _ => {

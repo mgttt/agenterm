@@ -400,7 +400,7 @@
     "fresh-clone-rehearsal": {
       "inputs": ["clean-main-source", "origin-remote", "release-entrypoint", "qualification-receipt-contract"],
       "outputs": ["fresh-clone-rehearsal-evidence", "qualified-package-facts"],
-      "budget": {"timeout_ms": 3600000, "max_operations": 500000000, "max_output_bytes": 1048576},
+      "budget": {"timeout_ms": 3600000, "max_operations": 100000000, "max_output_bytes": 1048576},
       "network": ["dependency_fetch", "loopback"],
       "evidence": ["task.fresh-clone-rehearsal"]
     }
