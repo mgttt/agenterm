@@ -1676,6 +1676,7 @@ fn minimal_snapshot(epoch: &str, sequence: u64) -> Value {
     })
 }
 
+#[cfg(windows)]
 fn directory_file_bytes(directory: &Path) -> Vec<(String, Vec<u8>)> {
     let mut files = fs::read_dir(directory)
         .expect("read fixture directory")
@@ -1692,6 +1693,7 @@ fn directory_file_bytes(directory: &Path) -> Vec<(String, Vec<u8>)> {
     files
 }
 
+#[cfg(windows)]
 fn directory_entry_names(directory: &Path) -> Vec<String> {
     let mut entries = fs::read_dir(directory)
         .expect("read fixture root")

@@ -53,11 +53,10 @@ pub(super) fn write_xrgb_png(
 #[cfg(test)]
 mod tests {
     use super::write_xrgb_png;
-    use std::path::PathBuf;
 
     #[test]
     fn write_xrgb_png_emits_readable_file() {
-        let path = PathBuf::from(std::env::temp_dir()).join("agenterm-unix-screenshot-test.png");
+        let path = std::env::temp_dir().join("agenterm-unix-screenshot-test.png");
         let pixels = [0x00FF00u32, 0x0000FFu32, 0xFF0000u32, 0xFFFFFFu32];
         write_xrgb_png(&path, 2, 2, &pixels, None).expect("png write");
         let meta = std::fs::metadata(&path).expect("meta");
