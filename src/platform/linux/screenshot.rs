@@ -190,7 +190,7 @@ pub(crate) fn validate_frame(
     Ok(())
 }
 
-/// Resolve an optional clip into inclusive framebuffer bounds.
+/// Resolve an optional clip into strict framebuffer bounds.
 pub(crate) fn resolve_clip(
     frame_width: u32,
     frame_height: u32,
@@ -215,14 +215,27 @@ pub(crate) fn resolve_clip(
             ),
         });
     }
-    let width = clip.width.min(frame_width.saturating_sub(clip.x));
-    let height = clip.height.min(frame_height.saturating_sub(clip.y));
-    if width == 0 || height == 0 {
+    let right = clip
+        .x
+        .checked_add(clip.width)
+        .ok_or_else(|| ScreenshotError::InvalidClip {
+            message: "screenshot clip horizontal bounds overflow".to_string(),
+        })?;
+    let bottom = clip
+        .y
+        .checked_add(clip.height)
+        .ok_or_else(|| ScreenshotError::InvalidClip {
+            message: "screenshot clip vertical bounds overflow".to_string(),
+        })?;
+    if right > frame_width || bottom > frame_height {
         return Err(ScreenshotError::InvalidClip {
-            message: "screenshot clip collapses to an empty rectangle".to_string(),
+            message: format!(
+                "screenshot clip {}x{} at ({},{}) exceeds {}x{} frame",
+                clip.width, clip.height, clip.x, clip.y, frame_width, frame_height
+            ),
         });
     }
-    Ok((clip.x, clip.y, width, height))
+    Ok((clip.x, clip.y, clip.width, clip.height))
 }
 
 /// Encode softbuffer little-endian `0x00RRGGBB` pixels as an RGBA PNG.
@@ -370,7 +383,7 @@ mod tests {
             ),
             Err(ScreenshotError::InvalidClip { .. })
         ));
-        assert_eq!(
+        assert!(matches!(
             resolve_clip(
                 10,
                 10,
@@ -381,8 +394,8 @@ mod tests {
                     height: 4
                 })
             ),
-            Ok((8, 8, 2, 2))
-        );
+            Err(ScreenshotError::InvalidClip { .. })
+        ));
     }
 
     #[test]

@@ -132,9 +132,9 @@ tests or ownership.
     X11/Wayland selection, wall-clock timeouts, live stdout byte budget, typed
     `clipboard_timeout` / `clipboard_too_large` / `clipboard_unavailable`
   - [~] Linux screenshot encode and activation/no-activate (`with_active`)
-    consume `platform::linux`; dimensions/pixels/path and headless failures are
-    typed, but an out-of-frame clip must fail instead of silently shrinking;
-    X11/Wayland softbuffer paths Available, headless Unsupported
+    consume `platform::linux`; dimensions/pixels/path, strict clip bounds, and
+    headless failures are typed; X11/Wayland softbuffer paths Available,
+    headless Unsupported
   - [~] winit/softbuffer windowing, X11/Wayland input, system-font fallback,
     clipboard, cursor, scaling, and POSIX PTY interaction are in active delivery
   - [~] expose the remaining Linux behavior through the shared platform
@@ -255,7 +255,7 @@ macOS hot-path evidence (2026-07-30):
 
 Cross-platform integration review (2026-07-30):
 
-- [ ] Linux screenshot requests that extend outside the framebuffer return
-  typed `screenshot_invalid_clip` rather than a smaller successful PNG
+- [~] Linux screenshot requests that extend outside the framebuffer now return
+  typed `screenshot_invalid_clip`; native Linux verification is pending
 - [ ] macOS clipboard write timeout covers blocked stdin delivery as well as
   child exit
