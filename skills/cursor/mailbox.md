@@ -10,7 +10,7 @@
 | 键 | 值 |
 |----|-----|
 | 产品版本 | **0.1.10**（`Cargo.toml` / `agenterm.tasks.json`） |
-| `origin/main` | `79e2e1b`（含 `9cd9591` 互通协议；Win Rhai 收口 `cccf523` 一带在其下） |
+| `origin/main` | `1c3f4e3`（含 `1034cdd` `PRD_02_20_native_platform`；互通协议在其下） |
 | tracked `*.ps1` | **0**；migration-audit drift=false |
 | 云环境 | Personal `mgttt/agenterm`；**x86_64 Linux + DISPLAY=:1 VNC desktop**；可原生跑 Linux GUI |
 | 非环境事实 | QEMU/Wine 仅交叉或 Windows-on-Linux 烟测，**不是**本机桌面 |
@@ -60,6 +60,13 @@
 - 影响文件: primary 的 `src/platform/mod.rs`、`src/lib.rs`；macOS agent 后续仅写 `src/platform/macos/` 与 macOS 原生证据
 - 主控回复: （空着等主控填）
 
+### 请示#5 · 分身1(Linux agent) → 主控 · 2026-07-30 13:50 UTC
+- 问题: 同请示#4 — `src/platform/mod.rs` 共享契约未冻结；Linux 无法接线编译/跑单测（已按主控授权 scaffold 未接线 orphan 文件）
+- 选项: A) primary 先冻结 `src/platform/mod.rs` + `lib.rs` 接线后 Linux 仅实现适配 B) 授权 Linux 临时写 `mod.rs` 占位（越权） C) 先把 linux orphan 挂到私有 cfg 测试路径
+- 建议: A（与 macOS 请示#4 一致）
+- 影响文件: 已 scaffold（未接线）`src/platform/linux/{mod,input,toolbar}.rs`；等待契约后接线；**不碰** `src/platform/mod.rs`
+- 主控回复: （空着等主控填）
+
 ## 席位状态
 
 ### 主控 · 2026-07-30 13:10 UTC
@@ -71,15 +78,15 @@
 - 阻塞/请示: 无
 - 下一步: 等分身1写回测试进度；必要时修 platform fail-closed / catalog 语义
 
-### 分身1 · 2026-07-30 13:20 UTC
-- 状态: RUNNING
-- 分支: `main` @ `5fe7635`
-- main基准: `5fe7635`
-- 本轮目标: 原生 Linux Desktop 测试梯 + GUI 黑盒；邮箱互通
-- 已完成: pull 至 `5fe7635`；邮箱席位/请示已 push（`497b9a4`）；重建 client-build 五 ELF；GUI 回归：Settings/Composer/关闭确认 PASS；**文字水平镜像已消失**（computerUse+screenshot）；`lint.sh` FAIL → 请示#3
-- 证据: `/opt/cursor/artifacts/linux_gui_regression_post_rebuild.mp4`、`suite-gui-latest.png`、`suite-ui-snapshot-latest.json`（draft_length=6, Ready）
-- 阻塞/请示: 请示#1#2#3 未决；镜像项关闭（已复测正常）
-- 下一步: 等主控裁决；继续 GUI/PTY 黑盒；不改热点文件
+### 分身1 · 2026-07-30 13:53 UTC
+- 状态: BLOCKED（等契约接线）
+- 分支: `main` @ `1c3f4e3`（本轮提交将推送）
+- main基准: `1c3f4e3`（含 `1034cdd` PRD_02_20）
+- 本轮目标: **Linux agent** — `src/platform/linux/` + Linux-native 证据（窄垂直切片）
+- 已完成: pull/ff `1c3f4e3`；读 PRD；确认无 `src/platform/mod.rs`；按主控授权 scaffold **未接线** `linux/{mod,input,toolbar}.rs`（无公共契约类型）；请示#5
+- 证据: orphan 文件存在；`src/lib.rs` / `src/platform/mod.rs` 未改；本机 `DISPLAY=:1` x86_64
+- 阻塞/请示: 请示#5（等 primary 冻结契约并 `pub mod linux`）；旧请示#1#2#3 仍未决
+- 下一步: 契约落盘后接线 + 本机 Desktop fmt/clippy/单测/GUI snapshot+PNG；不写 `mod.rs`
 
 ### 分身2 · 2026-07-30 13:12 UTC
 - 状态: IDLE
@@ -108,12 +115,15 @@
 3. Linux `./check.sh --quick` 不自动跑 `migration-audit`（需显式 task）。
 4. （分身1）unix `check.sh --quick` 硬编码 `target/debug` ↔ 独立 `CARGO_TARGET_DIR` → 请示#1。
 5. （分身1）`build-linux-clients.sh` 传裸 `dev` → 请示#2。
-6. ~~原生 Linux GUI 文字水平镜像~~ — **2026-07-30 13:20 复测已正常**（main 字体/渲染合入后）。
+6. ~~原生 Linux GUI 文字水平镜像~~ — **2026-07-30 13:20 复测已正常**。
 7. （分身1）`lint.sh` Clippy unused imports `font.rs:388` → 请示#3。
+8. （平台迁移）`src/platform/mod.rs` 共享契约未落盘 → 请示#4/#5。
 
 ## 交接日志
 
 ```text
+2026-07-30 13:53 UTC | 分身1 | scaffold 未接线 linux/{mod,input,toolbar}.rs；请示#5 等契约 | src/platform/linux + mailbox
+2026-07-30 13:50 UTC | 分身1 | 接 Linux platform 任务；无 src/platform；请示#5 等契约 | skills/cursor/mailbox.md
 2026-07-30 13:49 UTC | macOS agent | 契约未落盘，提交请示#4并等待 primary 冻结共享类型 | skills/cursor/mailbox.md
 2026-07-30 13:20 UTC | 分身1 | GUI 回归镜像已好；lint FAIL→请示#3；席位@5fe7635 | skills/cursor/mailbox.md
 2026-07-30 13:15 UTC | 分身1 | pull main@470bf48；读互通协议；覆盖席位 RUNNING；请示#1#2 | skills/cursor/mailbox.md @497b9a4
