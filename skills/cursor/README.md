@@ -12,7 +12,9 @@ files are for agents and humans working in Cursor Cloud VMs — not product PRD.
 
 **Agent chat CLI:** `scripts/cursor_agent_chat.sh --from <谁> --to <谁> '正文'`
 silently wraps `<from::…><to::…>` and POSTs to Cursor Cloud Agents API.
-See `--help`. Requires `CURSOR_API` (never logged).
+Defaults to **wait/retry** on `409 agent_busy` (probe latest run + backoff;
+`--no-wait` / `--wait-timeout SEC` to override). See `--help`. Requires
+`CURSOR_API` (never logged).
 
 **Security:** never commit API keys, tokens, or full `CURSOR_*` secret values.
 Skills use placeholders and environment variables only.
