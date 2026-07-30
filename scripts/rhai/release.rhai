@@ -1,6 +1,6 @@
 // Qualify, package, rehearse, and explicitly publish one exact candidate.
 //
-// Args: REPO validate|rehearse|publish
+// Args: REPO [validate|rehearse|publish|--rehearse]
 
 import "scripts/rhai/lib/package_qualified" as package_qualified;
 
@@ -162,11 +162,22 @@ fn run_quality(repo) {
         std::path::join(output_root, "release-check.stdout").display;
     let stderr_path =
         std::path::join(output_root, "release-check.stderr").display;
-    let command = std::process::command("cmd.exe");
+    require(
+        std::env::has("AGENTERM_BOOTSTRAP_WORKER"),
+        "release_bootstrap_worker_missing"
+    );
+    let worker =
+        std::path::absolute(std::env::get("AGENTERM_BOOTSTRAP_WORKER")).display;
+    let command = std::process::command(worker);
     command.args([
-        "/d", "/c",
-        std::path::join(repo, "check.cmd").display,
-        "--release", "--include-stress"
+        "task", "run", "check",
+        "--manifest", std::path::join(repo, "agenterm.tasks.json").display,
+        "--timeout-ms", "3600000",
+        "--max-operations", "100000000",
+        "--max-collection-items", "100000",
+        "--max-string-bytes", "8388608",
+        "--max-output-bytes", "1048576",
+        "--", "--release", "--include-stress"
     ]);
     command.current_dir(repo);
     command.timeout(std::time::Duration::from_secs(3600));
@@ -198,9 +209,15 @@ fn git_mutation(repo, arguments) {
     command_output("git", argv, repo, 120000)
 }
 
-require(args.len == 2, "expected: REPO validate|rehearse|publish");
+require(args.len >= 1 && args.len <= 2, "expected: REPO [--rehearse]");
 let repo = std::path::absolute(args[0]).display;
-let mode = args[1];
+let mode = if args.len == 1 {
+    "publish"
+} else if args[1] == "--rehearse" {
+    "rehearse"
+} else {
+    args[1]
+};
 require(
     mode == "validate" || mode == "rehearse" || mode == "publish",
     "release_mode:" + mode

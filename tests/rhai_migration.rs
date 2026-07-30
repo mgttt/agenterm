@@ -1579,11 +1579,14 @@ fn migration_audit_rejects_operational_references_to_deleted_scripts() {
             fs::write(path, b"# inventory fixture\n").expect("write inventory fixture");
         }
     }
-    for name in ["build.bat", "check.cmd", "lint.cmd", "release.cmd"] {
-        let path = repo.join(name);
-        if !path.exists() {
-            fs::write(path, b"# operational fixture\n").expect("write operational fixture");
-        }
+    for name in [
+        "build.bat",
+        "check.cmd",
+        "lint.cmd",
+        "release.cmd",
+        "scripts/bootstrap.cmd",
+    ] {
+        copy_fixture_file(source_repo, &repo, name);
     }
     let workflow = repo.join(".github").join("workflows").join("release.yml");
     fs::create_dir_all(workflow.parent().expect("workflow parent"))
@@ -1635,6 +1638,9 @@ fn migration_audit_rejects_operational_references_to_deleted_scripts() {
     let expected_remaining = entries.len() - expected_deleted;
     assert_eq!(report["deleted_count"], expected_deleted);
     assert_eq!(report["remaining_count"], expected_remaining);
+    assert_eq!(report["batch_entry_count"], 5);
+    assert_eq!(report["batch_alias_count"], 4);
+    assert_eq!(report["batch_business_logic_references"], 0);
 
     fs::remove_dir_all(&repo).expect("remove migration fixture");
 }

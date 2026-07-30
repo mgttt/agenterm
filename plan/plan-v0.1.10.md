@@ -2,7 +2,7 @@
 
 状态：实施中；原 v0.1.9 Release 因 server-loss 故障撤下，
 `0.1.9+hotfix.1` 是恢复 v0.1.10 主线前的强制稳定性门；
-当前 43/43 PowerShell 迁移项完成删除；Windows batch 业务逻辑迁移实施中
+当前 43/43 PowerShell 迁移项完成删除；Windows batch 业务逻辑迁移完成
 工作主题：**Rhai 完整接替仓库脚本业务逻辑，并建立可验证的只读 Agent 桥梁**
 版本定位：在 v0.1.9 完善通用 Rhai 运行时、模块任务与机器可读工具
 schema 后，让 AgenTerm 首次用自己的脚本运行时驱动完整开发生命周期，
@@ -1036,13 +1036,15 @@ entry 是集成热点，只允许一个串行 owner 收口。
     43 stable IDs and responsibility groups frozen; detailed caller and
     input/output/side-effect contracts still need enrichment
   [done] stable Rhai task graph
-    repository manifest exposes all thirty-eight ready tasks plus validated
+    repository manifest exposes all thirty-nine ready tasks plus validated
     dependency, platform, and side-effect metadata offline
   [done] stage-0 bootstrap identity contract
   [done] no-new-ps1 migration audit gate
-  [in progress] migrate four Windows batch files
-    move build/check/lint/release business rules into Rhai and retain only one
-    generic bootstrap mechanism plus optional one-line launch aliases
+  [done] migrate four Windows root batch entries
+    build/check/lint/release are exact one-line aliases; one generic 32-line
+    stage-0 bootstrap owns worker build/copy/forward/cleanup, while build profile,
+    identity, Cargo, staging, target cleanup, qualification and publication
+    policy live in named Rhai tasks and are enforced by migration-audit
 
 第二提交
   [in progress] shared Rhai build/test helpers

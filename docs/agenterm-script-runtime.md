@@ -1241,6 +1241,15 @@ is a compatibility route to the same parser, catalog, supervisor, and runtime.
 The reserved `--worker` and `--framed-worker` modes are internal host protocol
 entry points, not alternate user APIs.
 
+Repository lifecycle entry points use the same task catalog. On Windows,
+`build.bat`, `check.cmd`, `lint.cmd`, and `release.cmd` are exact one-line
+aliases. They share one generic `scripts/bootstrap.cmd` stage-0 mechanism that
+builds and copies the Script worker, forwards the selected task and caller
+arguments, preserves its exit status, and cleans the owned copy. All profile,
+dependency, build, test, qualification, packaging, cleanup, rehearsal, and
+publication decisions execute in Rhai; the batch layer contains no fallback
+business implementation.
+
 Schema v2 is:
 
 ```json

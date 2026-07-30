@@ -118,6 +118,12 @@ or full qualification for the integrated pre-push/release boundary. Search all
 geometry/protocol consumers before the first black-box run so old assertions
 are migrated in the same patch.
 
+The four root Windows batch files are intentionally one-line human aliases.
+Their only shared implementation is `scripts/bootstrap.cmd`, which performs
+generic stage-0 Script worker build/copy/forward/cleanup. Build profiles,
+testing, qualification, packaging, cleanup and release policy belong to named
+Rhai tasks; do not add task-specific branches or product rules to batch files.
+
 Treat build and test latency as a continuously measured product constraint.
 When parallel delegation is authorized, a read-only background observer may
 profile the active development loop while the primary agent keeps shipping; it

@@ -99,6 +99,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   invokes the named Rhai `lint` task for JSON, strict UTF-8/NUL/conflict-marker
   checks, incremental rustfmt/Clippy, and production Rhai validation against
   Script API v2 through the built worker
+- [x] all four root Windows build/check/lint/release files are one-line aliases
+  over one generic stage-0 bootstrap; the named Rhai `build` task now owns
+  profile selection, frozen identity, Cargo, staging, target reporting and
+  release cleanup, while the migration gate rejects batch business-rule drift
 - [x] lint exposes a versioned JSON result, contains injected malformed
   JSON/UTF-8/conflict/Rhai self-tests, and is represented by mandatory `repo-lint` and
   `rhai-lint` qualification gates; no optional analyzer is silently treated as

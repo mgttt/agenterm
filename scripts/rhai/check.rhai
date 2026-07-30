@@ -395,9 +395,14 @@ fn slowest(results) {
     ordered
 }
 
-require(args.len >= 2, "expected: REPO WORKER [OPTIONS]");
+require(args.len >= 1, "expected: REPO [OPTIONS]");
 let repo = std::path::absolute(args[0]).display;
-let bootstrap_worker = std::path::absolute(args[1]).display;
+require(
+    std::env::has("AGENTERM_BOOTSTRAP_WORKER"),
+    "check_bootstrap_worker_missing"
+);
+let bootstrap_worker =
+    std::path::absolute(std::env::get("AGENTERM_BOOTSTRAP_WORKER")).display;
 let quick = false;
 let release = false;
 let skip_smoke = false;
@@ -405,7 +410,7 @@ let include_stress = false;
 let dry_run = false;
 let receipt_path =
     std::path::join(repo, "target/qualification/receipt.json").display;
-let index = 2;
+let index = 1;
 while index < args.len {
     let value = args[index];
     if value == "--quick" {

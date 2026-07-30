@@ -67,6 +67,17 @@
   },
   "tasks": [
     {
+      "id": "build",
+      "description": "Build and stage AgenTerm through one Rhai-owned lifecycle",
+      "entry": "scripts/rhai/build.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "args": ["."],
+      "dependencies": ["build-identity", "stage-build", "target-report", "prepare-target-clean"],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write", "process_spawn"]
+    },
+    {
       "id": "clean-locked-artifacts",
       "description": "Remove stale locked and explicitly obsolete staged executables",
       "entry": "scripts/rhai/clean-locked-artifacts.rhai",
@@ -93,6 +104,7 @@
       "entry": "scripts/rhai/release.rhai",
       "profile": "local",
       "cwd": ".",
+      "args": ["."],
       "dependencies": ["check", "preflight", "package-release-qualified"],
       "platforms": ["windows"],
       "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback", "git_mutation", "remote_publish"]

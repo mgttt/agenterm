@@ -510,7 +510,7 @@ Migration ledger:
   duplicate paths, invalid states, and count drift; ordinary and release
   qualification invoke it as a required gate.
 - [x] the repository-root `agenterm.tasks.json` is now the offline task
-  catalog and ships thirty-eight ready tasks (`check`, `release`,
+  catalog and ships thirty-nine ready tasks (`build`, `check`, `release`,
   `artifact-verification`,
   `bootstrap-info`, `build-identity`,
   `harness-cleanup-selftest`, `diagnostic-bundle-selftest`,
@@ -536,14 +536,18 @@ Migration ledger:
   permanent archive after each parity and rollback boundary closes.
 - [ ] `agenterm.tasks.json` and shared Rhai modules own build, lint, test,
   qualification, packaging, release rehearsal, and approved release semantics.
-- [~] batch files, Unix shell entry points, and CI YAML may bootstrap a pinned
+- [x] batch files, Unix shell entry points, and CI YAML may bootstrap a pinned
   Rust toolchain and forward arguments/exit status to the same Rhai task, but
   must not duplicate task selection, budgets, evidence, packaging, or release
-  policy. The four tracked Windows batch files are now a frozen migration
-  inventory: their remaining build, cleanup, task-budget, bootstrap-copy, and
-  release-mode mechanics are being consolidated into one generic stage-0
-  bootstrap plus Rhai tasks. Optional root aliases may remain only as one-line
-  human entry points.
+  policy. The four root Windows aliases are exact one-line task selectors;
+  `scripts/bootstrap.cmd` is the sole generic stage-0 implementation and only
+  discovers the repository, builds/copies the Script worker, forwards one task
+  plus argv/exit status, and cleans its owned copy. `scripts/rhai/build.rhai`
+  owns build profile selection, frozen identity, Cargo invocation, staging,
+  target reporting and release-target cleanup; check, lint, release mode and
+  nested qualification remain in their named Rhai tasks. The migration audit
+  freezes all five batch files, exact aliases, the generic bootstrap boundary,
+  and zero known business-rule tokens.
 - [ ] the migration proceeds from low-side-effect rules and reports through
   build/static quality, public black-box tests, and finally qualification and
   delivery. Each responsibility must prove normalized parity or stronger public
