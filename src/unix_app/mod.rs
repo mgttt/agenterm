@@ -3292,6 +3292,7 @@ impl UnixApp {
         let composer_view = ComposerView {
             text: &self.composer_buffer,
             focused: self.focus_surface == UnixFocusSurface::Composer,
+            selected_all: self.composer_select_all,
             top: composer_top,
             label: composer_label,
             send_button: (send_x, composer_top + 7, SEND_W, COMPOSER_HEIGHT - 14),

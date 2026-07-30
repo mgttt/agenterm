@@ -310,6 +310,7 @@ pub(super) fn grid_dimensions_for_pixels(
 pub(super) struct ComposerView<'a> {
     pub(super) text: &'a str,
     pub(super) focused: bool,
+    pub(super) selected_all: bool,
     pub(super) top: u32,
     pub(super) label: &'a str,
     pub(super) send_button: (u32, u32, u32, u32),
@@ -1089,12 +1090,16 @@ fn render_composer(
     } else {
         composer.label
     };
-    let label = if composer.text.is_empty() {
+    let max_chars = (text_width / (GLYPH_WIDTH + 1)).max(1) as usize;
+    let prefix_chars = prefix.chars().count();
+    let visible_prefix = if prefix_chars <= max_chars {
         prefix.to_owned()
     } else {
-        format!("{prefix}{}", composer.text)
+        truncate_chars(prefix, max_chars)
     };
-    let max_chars = (text_width / (GLYPH_WIDTH + 1)).max(1) as usize;
+    let remaining_chars = max_chars.saturating_sub(visible_prefix.chars().count());
+    let visible_text = truncate_chars(composer.text, remaining_chars);
+    let text_x = sidebar_width + 8 + visible_prefix.chars().count() as u32 * (GLYPH_WIDTH + 1);
     draw_text(
         buffer,
         stride,
@@ -1102,8 +1107,34 @@ fn render_composer(
         height,
         sidebar_width + 8,
         top + 20,
-        &truncate_chars(&label, max_chars),
+        &visible_prefix,
         palette.text,
+    );
+    let visible_text_width = visible_text.chars().count() as u32 * (GLYPH_WIDTH + 1);
+    if composer.selected_all && visible_text_width > 0 {
+        fill_rect(
+            buffer,
+            stride,
+            text_x,
+            top + 18,
+            visible_text_width,
+            20_u32.min(height.saturating_sub(top + 18)),
+            rgb_to_pixel(palette.selection_background),
+        );
+    }
+    draw_text(
+        buffer,
+        stride,
+        width,
+        height,
+        text_x,
+        top + 20,
+        &visible_text,
+        if composer.selected_all {
+            palette.selection_foreground
+        } else {
+            palette.text
+        },
     );
 }
 
@@ -2638,6 +2669,39 @@ pub(super) fn scrollbar_view_from_geometry(
 mod tests {
     use super::*;
     use crate::settings::AppConfig;
+
+    #[test]
+    fn composer_select_all_highlights_only_editable_text() {
+        let palette = ThemeId::Dark.palette();
+        let mut buffer = vec![0; 320 * COMPOSER_HEIGHT as usize];
+        render_composer(
+            &mut buffer,
+            320,
+            320,
+            COMPOSER_HEIGHT,
+            palette,
+            20,
+            ComposerView {
+                text: "abc",
+                focused: true,
+                selected_all: true,
+                top: 0,
+                label: "",
+                send_button: (240, 7, 72, 34),
+            },
+        );
+
+        let prefix_x = 28;
+        let text_x = prefix_x + 2 * (GLYPH_WIDTH + 1);
+        assert_eq!(
+            buffer[(18 * 320 + prefix_x) as usize],
+            rgb_to_pixel(palette.composer)
+        );
+        assert_eq!(
+            buffer[(18 * 320 + text_x) as usize],
+            rgb_to_pixel(palette.selection_background)
+        );
+    }
 
     #[test]
     fn selected_inline_field_paints_selection_and_hides_the_cursor() {
