@@ -1,4 +1,5 @@
 mod clipboard;
+mod cursor_blink;
 mod font;
 mod input;
 mod layout;
@@ -66,6 +67,7 @@ use crate::{
     workspace::{SavedTab, SavedWorkspace, save_workspace, workspace_path},
 };
 
+use cursor_blink::CursorBlink;
 use font::resolved_font_name;
 use new_terminal::{NewTerminalDialog, ui_action_open};
 use render::{
@@ -340,6 +342,7 @@ struct UnixApp {
     status_message: String,
     ime_preedit: String,
     ime_cursor: Option<(usize, usize)>,
+    cursor_blink: CursorBlink,
 }
 
 impl UnixApp {
@@ -401,6 +404,7 @@ impl UnixApp {
             status_message: String::from("Ready"),
             ime_preedit: String::new(),
             ime_cursor: None,
+            cursor_blink: CursorBlink::new(Instant::now()),
             config,
             modifiers: ModifiersState::empty(),
         }
@@ -519,6 +523,7 @@ impl UnixApp {
         }
         self.focus_surface = surface;
         self.reset_ime_context();
+        self.cursor_blink.reset(Instant::now());
         if surface == UnixFocusSurface::Composer {
             self.load_composer_buffer_from_tab();
         }
@@ -593,6 +598,7 @@ impl UnixApp {
     }
 
     fn handle_ime(&mut self, event: Ime) {
+        self.cursor_blink.reset(Instant::now());
         match event {
             Ime::Enabled => {}
             Ime::Preedit(text, cursor) => {
@@ -3050,6 +3056,7 @@ impl UnixApp {
         self.wake_signal.begin_drain();
 
         let mut changed = false;
+        let mut terminal_changed = false;
         while let Ok(envelope) = self.ipc_receiver.try_recv() {
             changed = true;
             self.handle_ipc(envelope);
@@ -3058,7 +3065,11 @@ impl UnixApp {
         for tab in &mut self.tabs {
             if tab.poll() {
                 changed = true;
+                terminal_changed = true;
             }
+        }
+        if terminal_changed {
+            self.cursor_blink.reset(Instant::now());
         }
         if changed {
             self.sync_grid_from_tab();
@@ -3083,6 +3094,7 @@ impl UnixApp {
         if let Some(position) = self.active_position() {
             let _ = self.tabs[position].send(&bytes);
         }
+        self.cursor_blink.reset(Instant::now());
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
         }
@@ -3213,8 +3225,9 @@ impl UnixApp {
                 cursor: self.ime_cursor,
                 anchor,
             });
-        let terminal_focused =
-            self.focus_surface == UnixFocusSurface::Terminal && !self.modal_surface_active();
+        let terminal_focused = self.focus_surface == UnixFocusSurface::Terminal
+            && !self.modal_surface_active()
+            && self.cursor_blink.visible();
         let Some(surface) = self.surface.as_mut() else {
             return;
         };
@@ -3307,6 +3320,7 @@ impl UnixApp {
     }
 
     fn save_screenshot(&mut self, args: &[String], pane_only: bool) -> Result<String, String> {
+        self.cursor_blink.reset(Instant::now());
         self.redraw();
         let (width, height, pixels) = self
             .last_frame
@@ -3837,6 +3851,7 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                 if !event.state.is_pressed() {
                     return;
                 }
+                self.cursor_blink.reset(Instant::now());
                 if self.window_close_pending {
                     if let Key::Named(NamedKey::Escape) = event.logical_key {
                         self.finish_window_close(WindowCloseChoice::Cancel);
@@ -3998,6 +4013,7 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                 button: MouseButton::Left,
                 ..
             } => {
+                self.cursor_blink.reset(Instant::now());
                 let (x, y) = self.last_cursor;
                 if x < f64::from(self.sidebar_width()) {
                     let _ = self.cancel_terminal_selection(true);
@@ -4027,16 +4043,33 @@ impl ApplicationHandler<UnixWake> for UnixApp {
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         let mut changed = self.drain_wake_and_pty();
+        let now = Instant::now();
+        let cursor_active =
+            self.focus_surface == UnixFocusSurface::Terminal && !self.modal_surface_active();
+        if cursor_active {
+            changed |= self.cursor_blink.tick(now);
+        } else {
+            changed |= self.cursor_blink.reset(now);
+        }
+        let mut wake_at = cursor_active.then(|| self.cursor_blink.next_toggle());
         if self
             .terminal_selection_gesture
             .is_some_and(SelectionGesture::active)
             && self.terminal_selection_autoscroll.is_some()
         {
             changed |= self.tick_terminal_selection_autoscroll();
-            event_loop.set_control_flow(ControlFlow::wait_duration(Duration::from_millis(33)));
-        } else {
-            event_loop.set_control_flow(ControlFlow::Wait);
+            let autoscroll_at = now + Duration::from_millis(33);
+            wake_at = Some(
+                wake_at
+                    .map(|deadline| deadline.min(autoscroll_at))
+                    .unwrap_or(autoscroll_at),
+            );
         }
+        event_loop.set_control_flow(
+            wake_at
+                .map(ControlFlow::WaitUntil)
+                .unwrap_or(ControlFlow::Wait),
+        );
         if changed && let Some(window) = self.window.as_ref() {
             window.request_redraw();
         }
