@@ -15,7 +15,7 @@
 #![cfg(target_os = "linux")]
 
 use crate::platform::{
-    CapabilityKind, CapabilityStatus, DisplayBackendFacts, PlatformKind, CONTRACT_REVISION,
+    CONTRACT_REVISION, CapabilityKind, CapabilityStatus, DisplayBackendFacts, PlatformKind,
 };
 
 pub(crate) mod clipboard;

@@ -362,8 +362,8 @@ pub(super) fn raster_glyph(ch: char, size: u16) -> Option<Arc<RasterGlyph>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        glyph_rows, raster_glyph, resolved_font_name, row_contains_pixel, GlyphCache, GlyphKey,
-        MAX_CACHED_GLYPHS,
+        GlyphCache, GlyphKey, MAX_CACHED_GLYPHS, glyph_rows, raster_glyph, resolved_font_name,
+        row_contains_pixel,
     };
 
     #[test]
@@ -385,12 +385,14 @@ mod tests {
         }
 
         assert_eq!(cache.values.len(), MAX_CACHED_GLYPHS);
-        assert!(cache
-            .get(&GlyphKey {
-                ch: '\u{1000}',
-                size: 14
-            })
-            .is_none());
+        assert!(
+            cache
+                .get(&GlyphKey {
+                    ch: '\u{1000}',
+                    size: 14
+                })
+                .is_none()
+        );
     }
 
     #[cfg(target_os = "macos")]
