@@ -4,8 +4,7 @@
 //!
 //! Implements shared **contract revision 1** (`crate::platform::CONTRACT_REVISION`):
 //! - slice-1: toolbar action ids + keyboard text/shortcut separation
-//! - slice-2: IME + clipboard + DPI/scale + font discovery/metrics
-//!   (screenshot/activation deferred)
+//! - slice-2: IME + clipboard + DPI/scale + font + screenshot + activation
 //!
 //! Linux `unix_app` hot paths call into this module under
 //! `cfg(target_os = "linux")`. macOS behavior stays on the unbridged path.
@@ -15,14 +14,16 @@
 #![cfg(target_os = "linux")]
 
 use crate::platform::{
-    CONTRACT_REVISION, CapabilityKind, CapabilityStatus, DisplayBackendFacts, PlatformKind,
+    CapabilityKind, CapabilityStatus, DisplayBackendFacts, PlatformKind, CONTRACT_REVISION,
 };
 
+pub(crate) mod activation;
 pub(crate) mod clipboard;
 pub(crate) mod font;
 pub(crate) mod ime;
 pub(crate) mod input;
 pub(crate) mod scale;
+pub(crate) mod screenshot;
 pub(crate) mod toolbar;
 
 /// Contract revision this Linux adapter tree implements.
@@ -83,6 +84,11 @@ pub(crate) fn slice2_font_capability_kinds() -> [CapabilityKind; 1] {
     [CapabilityKind::Font]
 }
 
+/// Slice-2 fourth-cut: screenshot encode + activation / no-activate policy.
+pub(crate) fn slice2_screenshot_activation_capability_kinds() -> [CapabilityKind; 2] {
+    [CapabilityKind::Screenshot, CapabilityKind::Activation]
+}
+
 /// Resolve a capability kind to its current Linux status.
 pub(crate) fn capability_status(kind: CapabilityKind) -> CapabilityStatus {
     let facts = display_facts_from_env();
@@ -100,11 +106,11 @@ pub(crate) fn capability_status(kind: CapabilityKind) -> CapabilityStatus {
         CapabilityKind::Ime => ime::ime_capability_status(facts),
         CapabilityKind::Clipboard => clipboard::clipboard_capability_status_from_env(),
         CapabilityKind::Font => font::font_capability_status(),
-        CapabilityKind::Screenshot | CapabilityKind::Activation | CapabilityKind::Integration => {
-            CapabilityStatus::Unsupported {
-                reason: "deferred-slice",
-            }
-        }
+        CapabilityKind::Screenshot => screenshot::screenshot_capability_status(facts),
+        CapabilityKind::Activation => activation::activation_capability_status(facts),
+        CapabilityKind::Integration => CapabilityStatus::Unsupported {
+            reason: "deferred-slice",
+        },
     }
 }
 
@@ -207,15 +213,48 @@ mod tests {
     }
 
     #[test]
-    fn deferred_capabilities_are_unsupported_not_available() {
-        assert!(matches!(
-            capability_status(CapabilityKind::Screenshot),
+    fn slice2_screenshot_and_activation_are_available_on_desktop() {
+        assert_eq!(
+            slice2_screenshot_activation_capability_kinds(),
+            [CapabilityKind::Screenshot, CapabilityKind::Activation]
+        );
+        let screenshot = capability_status(CapabilityKind::Screenshot);
+        let activation = capability_status(CapabilityKind::Activation);
+        if display_facts_from_env().headless {
+            assert!(matches!(
+                screenshot,
+                CapabilityStatus::Unsupported {
+                    reason: "headless-display"
+                }
+            ));
+            assert!(matches!(
+                activation,
+                CapabilityStatus::Unsupported {
+                    reason: "headless-display"
+                }
+            ));
+        } else {
+            assert_eq!(screenshot, CapabilityStatus::Available);
+            assert_eq!(activation, CapabilityStatus::Available);
+        }
+        assert_ne!(
+            screenshot,
             CapabilityStatus::Unsupported {
                 reason: "deferred-slice"
             }
-        ));
+        );
+        assert_ne!(
+            activation,
+            CapabilityStatus::Unsupported {
+                reason: "deferred-slice"
+            }
+        );
+    }
+
+    #[test]
+    fn deferred_capabilities_are_unsupported_not_available() {
         assert!(matches!(
-            capability_status(CapabilityKind::Activation),
+            capability_status(CapabilityKind::Integration),
             CapabilityStatus::Unsupported {
                 reason: "deferred-slice"
             }

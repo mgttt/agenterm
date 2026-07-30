@@ -130,6 +130,10 @@ tests or ownership.
   - [x] Linux clipboard helpers: read/write probed separately, display-matched
     X11/Wayland selection, wall-clock timeouts, live stdout byte budget, typed
     `clipboard_timeout` / `clipboard_too_large` / `clipboard_unavailable`
+  - [x] Linux screenshot encode (dimension/pixel/clip/path budgets + typed
+    failure) and activation/no-activate (`with_active`) consume
+    `platform::linux`; X11/Wayland softbuffer paths Available, headless
+    Unsupported
   - [~] winit/softbuffer windowing, X11/Wayland input, system-font fallback,
     clipboard, cursor, scaling, and POSIX PTY interaction are in active delivery
   - [~] expose the remaining Linux behavior through the shared platform
@@ -177,10 +181,10 @@ tests or ownership.
    window integration incrementally behind the same boundary
    (Linux IME+clipboard @ `66c54a5`/`b5d54ef`; clipboard helper harden @
    `bf17150`; DPI/scale @ `57958c1`; font discovery/metrics @ `25a45d2`;
-   screenshot/activation still deferred. Windows bounded clipboard and
-   activation hot paths plus bounded screenshot capture are adapted. macOS
-   bounded clipboard @ `11ce9b8`, screenshot @ `3811bda`, and Cocoa IME
-   preedit/commit @ `91055b6` are adapted)
+   screenshot+activation @ `1b454c2`. Windows bounded clipboard,
+   activation, and screenshot capture hot paths are adapted. macOS bounded
+   clipboard @ `11ce9b8`, screenshot @ `3811bda`, and Cocoa IME preedit/commit
+   @ `91055b6` are adapted)
 4. [ ] remove superseded platform-specific paths only after native black-box
    and screenshot evidence passes on that platform
 

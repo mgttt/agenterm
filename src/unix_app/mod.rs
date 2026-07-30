@@ -291,7 +291,11 @@ fn display_available() -> bool {
     {
         true
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
+    {
+        !crate::platform::linux::display_facts_from_env().headless
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
         env::var_os("WAYLAND_DISPLAY").is_some() || env::var_os("DISPLAY").is_some()
     }
@@ -443,7 +447,16 @@ impl UnixApp {
             ime_preedit: String::new(),
             ime_cursor: None,
             cursor_blink: CursorBlink::new(Instant::now()),
-            window_focused: !no_activate,
+            window_focused: {
+                #[cfg(target_os = "linux")]
+                {
+                    crate::platform::linux::activation::initial_window_focused(no_activate)
+                }
+                #[cfg(not(target_os = "linux"))]
+                {
+                    !no_activate
+                }
+            },
             config,
             modifiers: ModifiersState::empty(),
         }
@@ -2985,10 +2998,22 @@ impl UnixApp {
             return Ok(());
         }
 
-        let attributes = WindowAttributes::default()
-            .with_title(self.title.clone())
-            .with_inner_size(winit::dpi::LogicalSize::new(INITIAL_WIDTH, INITIAL_HEIGHT))
-            .with_active(!self.no_activate);
+        let attributes = {
+            let base = WindowAttributes::default()
+                .with_title(self.title.clone())
+                .with_inner_size(winit::dpi::LogicalSize::new(INITIAL_WIDTH, INITIAL_HEIGHT));
+            #[cfg(target_os = "linux")]
+            {
+                crate::platform::linux::activation::configure_window_attributes(
+                    base,
+                    self.no_activate,
+                )
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                base.with_active(!self.no_activate)
+            }
+        };
 
         let window = Rc::new(event_loop.create_window(attributes)?);
         window.set_ime_allowed(true);
