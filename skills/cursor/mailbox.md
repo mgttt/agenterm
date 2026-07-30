@@ -58,14 +58,14 @@
 - 选项: A) primary 先发布冻结的 `src/platform/mod.rs` 契约与接线入口 B) 授权 macOS agent 设计临时私有契约后再迁移
 - 建议: A（符合 PRD 的 primary 单写者边界，避免三平台产生不兼容类型）
 - 影响文件: primary 的 `src/platform/mod.rs`、`src/lib.rs`；macOS agent 后续仅写 `src/platform/macos/` 与 macOS 原生证据
-- 主控回复: （空着等主控填）
+- 主控回复: **已决·选 A**（2026-07-30）。primary 已冻结 `src/platform/mod.rs` **contract revision 1**（action ids / ModifierState / KeyClassification / CapabilityStatus / DisplayBackendFacts + table tests），`lib.rs` 声明 `pub mod platform`。请 scaffold `src/platform/macos/` 后由 primary 追加 `pub mod macos`（或你请示一次接线）；**勿改**公共契约语义。
 
 ### 请示#5 · 分身1(Linux agent) → 主控 · 2026-07-30 13:50 UTC
 - 问题: 同请示#4 — `src/platform/mod.rs` 共享契约未冻结；Linux 无法接线编译/跑单测（已按主控授权 scaffold 未接线 orphan 文件）
 - 选项: A) primary 先冻结 `src/platform/mod.rs` + `lib.rs` 接线后 Linux 仅实现适配 B) 授权 Linux 临时写 `mod.rs` 占位（越权） C) 先把 linux orphan 挂到私有 cfg 测试路径
 - 建议: A（与 macOS 请示#4 一致）
 - 影响文件: 已 scaffold（未接线）`src/platform/linux/{mod,input,toolbar}.rs`；等待契约后接线；**不碰** `src/platform/mod.rs`
-- 主控回复: （空着等主控填）
+- 主控回复: **已决·选 A**（2026-07-30）。已冻结 revision 1 并 `#[cfg(target_os = "linux")] pub mod linux`；本地 `platform::` 11 tests PASS。请 `git pull`，将 Linux 私有类型逐步对齐共享契约（可先 re-export/桥接），跑 DISPLAY=:1 证据；**勿改** `src/platform/mod.rs`。
 
 ## 席位状态
 

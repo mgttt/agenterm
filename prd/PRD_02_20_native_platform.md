@@ -128,8 +128,9 @@ tests or ownership.
 
 ## Migration and acceptance
 
-1. [ ] freeze normalized event and capability types with table-driven unit
+1. [~] freeze normalized event and capability types with table-driven unit
    tests; no GUI behavior moves in this step
+   (`src/platform/mod.rs` contract revision 1; OS adapters still incremental)
 2. [ ] adapt one narrow vertical slice—toolbar labels/actions plus keyboard
    text/shortcut separation—on all three systems
 3. [ ] move IME, clipboard, DPI, font, screenshot, activation, and remaining
