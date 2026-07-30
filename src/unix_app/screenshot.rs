@@ -1,8 +1,25 @@
-use std::{fs::File, io::BufWriter, path::Path};
+use std::path::Path;
+#[cfg(target_os = "linux")]
+use std::{fs::File, io::BufWriter};
 
+#[cfg(target_os = "linux")]
 use png::{BitDepth, ColorType, Encoder};
 
 /// Encode softbuffer `0RGB`/`XRGB` pixels (little-endian `0x00RRGGBB`) as PNG.
+#[cfg(target_os = "macos")]
+pub(super) fn write_xrgb_png(
+    path: &Path,
+    width: u32,
+    height: u32,
+    pixels: &[u32],
+    clip: Option<(u32, u32, u32, u32)>,
+) -> Result<(), String> {
+    crate::platform::macos::screenshot::write_xrgb_png(path, width, height, pixels, clip)
+        .map_err(|error| error.message())
+}
+
+/// Linux encoder retained until its screenshot adapter slice is implemented.
+#[cfg(target_os = "linux")]
 pub(super) fn write_xrgb_png(
     path: &Path,
     width: u32,
@@ -19,11 +36,14 @@ pub(super) fn write_xrgb_png(
         ),
         None => (0, 0, width.max(1), height.max(1)),
     };
+    #[cfg(target_os = "linux")]
     if pixels.len() < (width as usize).saturating_mul(height as usize) {
         return Err("pixel buffer is smaller than the declared dimensions".to_owned());
     }
 
+    #[cfg(target_os = "linux")]
     let mut rgba = Vec::with_capacity((w as usize) * (h as usize) * 4);
+    #[cfg(target_os = "linux")]
     for row in y0..y0 + h {
         let row_start = (row as usize) * (width as usize);
         for col in x0..x0 + w {
@@ -35,18 +55,27 @@ pub(super) fn write_xrgb_png(
         }
     }
 
+    #[cfg(target_os = "linux")]
     let file = File::create(path).map_err(|error| error.to_string())?;
+    #[cfg(target_os = "linux")]
     let mut encoder = Encoder::new(BufWriter::new(file), w, h);
+    #[cfg(target_os = "linux")]
     encoder.set_color(ColorType::Rgba);
+    #[cfg(target_os = "linux")]
     encoder.set_depth(BitDepth::Eight);
+    #[cfg(target_os = "linux")]
     let mut writer = encoder
         .write_header()
         .map_err(|error| error.to_string())?
         .into_stream_writer()
         .map_err(|error| error.to_string())?;
+    #[cfg(target_os = "linux")]
     use std::io::Write;
+    #[cfg(target_os = "linux")]
     writer.write_all(&rgba).map_err(|error| error.to_string())?;
+    #[cfg(target_os = "linux")]
     writer.finish().map_err(|error| error.to_string())?;
+    #[cfg(target_os = "linux")]
     Ok(())
 }
 

@@ -13,6 +13,7 @@ pub(crate) mod activation;
 pub(crate) mod clipboard;
 pub(crate) mod input;
 pub(crate) mod scale;
+pub(crate) mod screenshot;
 pub(crate) mod toolbar;
 
 use super::{CapabilityKind, CapabilityStatus, PlatformKind};
