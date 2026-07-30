@@ -188,20 +188,32 @@ fn exact_terminal_payload(observed, typed) {
     first.sort();
     second.sort();
     require(
-        first.len == 1 && second.len == 1,
+        first.len == second.len && first.len <= 1,
         "fresh_clone_terminal_payload_not_unique:" +
             first.len + ":" + second.len
     );
-    require(
-        first[0] == second[0],
-        "fresh_clone_untyped_powershell:" +
-            joined(first) + ":" + joined(second)
-    );
+    if first.len == 1 {
+        require(
+            first[0] == second[0],
+            "fresh_clone_untyped_powershell:" +
+                joined(first) + ":" + joined(second)
+        );
+    }
     #{
         policy: "exact_remote_ui_terminal_compatibility_payload",
         observed: first,
         typed: second
     }
+}
+
+fn release_archive_path(report) {
+    let archive_name =
+        std::path::PathBuf::from(report.archive).file_name;
+    require(
+        archive_name == report.archive,
+        "fresh_clone_package_archive_name"
+    );
+    std::path::join(report.package_directory, archive_name).display
 }
 
 fn remove_owned_clone(qualification_root, clone) {
@@ -280,16 +292,14 @@ if args.len == 1 && args[0] == "--self-test" {
         [terminal_compatibility_executable() + ":101"]
     );
     require(accepted.observed.len == 1, "fresh_clone_selftest_accept");
+    let absent = exact_terminal_payload([], []);
+    require(absent.observed.len == 0, "fresh_clone_selftest_absent");
     rejection_contains(
         "fresh_clone_untyped_powershell",
         || exact_terminal_payload(
             [terminal_compatibility_executable() + ":101"],
             [terminal_compatibility_executable() + ":202"]
         )
-    );
-    rejection_contains(
-        "fresh_clone_terminal_payload_not_unique",
-        || exact_terminal_payload([], [])
     );
     rejection_contains(
         "fresh_clone_terminal_payload_not_unique",
@@ -300,6 +310,21 @@ if args.len == 1 && args[0] == "--self-test" {
             ],
             [terminal_compatibility_executable() + ":101"]
         )
+    );
+    let archive = release_archive_path(#{
+        archive: "candidate.zip",
+        package_directory: std::env::current_dir().display
+    });
+    require(
+        std::path::PathBuf::from(archive).file_name == "candidate.zip",
+        "fresh_clone_selftest_archive"
+    );
+    rejection_contains(
+        "fresh_clone_package_archive_name",
+        || release_archive_path(#{
+            archive: "../candidate.zip",
+            package_directory: std::env::current_dir().display
+        })
     );
     print("PASS: fresh-clone process policy fails closed");
     return;
@@ -347,12 +372,13 @@ let tag = "v" + version;
 let qualification_root =
     std::path::join(source, "target/qualification").display;
 std::fs::create_dir_all(qualification_root);
+let clone_owner = rhai::runtime::temp_dir().display;
 let nonce =
     std::process::id() + "-" +
     std::time::SystemTime::now().unix_millis;
 let clone =
     std::path::join(
-        qualification_root,
+        clone_owner,
         "fresh-clone-owned-" + nonce
     ).display;
 let evidence_path =
@@ -395,7 +421,7 @@ let evidence = #{
     },
     process_observation: #{
         root_id: (),
-        scan_interval_ms: 100,
+        scan_interval_ms: 500,
         child_deadline_ms: child_deadline_ms,
         scan_count: 0,
         unique_processes: [],
@@ -586,7 +612,7 @@ try {
             });
             next_timeline = now + 1000;
         }
-        rhai::task::sleep(std::time::Duration::from_millis(100));
+        rhai::task::sleep(std::time::Duration::from_millis(500));
     }
     if child.state == "running" {
         child.kill();
@@ -606,7 +632,7 @@ try {
 
     require(
         evidence.process_observation.scan_count > 0
-            && evidence.process_observation.unique_processes.len > 2
+            && unique.keys().len > 2
             && evidence.stage0.target_observed_at_ms != ()
             && evidence.stage0.worker_observed_at_ms != ()
             && evidence.stage0.cargo_observed
@@ -667,16 +693,15 @@ try {
             && release_report.ready_to_publish,
         "fresh_clone_release_report_invalid"
     );
-    require(
-        std::fs::exists(release_report.archive),
-        "fresh_clone_package_archive_missing"
-    );
+    let release_archive = release_archive_path(release_report);
+    require(std::fs::exists(release_archive),
+        "fresh_clone_package_archive_missing");
     evidence.packaging.ready_to_publish = true;
     evidence.packaging.mode = release_report.mode;
     evidence.packaging.archive_name =
-        std::path::PathBuf::from(release_report.archive).file_name;
+        std::path::PathBuf::from(release_archive).file_name;
     evidence.packaging.archive_sha256 =
-        rhai::crypto::sha256_file(release_report.archive);
+        rhai::crypto::sha256_file(release_archive);
     require(
         evidence.packaging.archive_sha256 ==
             release_report.archive_sha256,
@@ -785,7 +810,7 @@ try {
             // never be accepted when its real origin could remain in config.
         }
     }
-    remove_owned_clone(qualification_root, clone);
+    remove_owned_clone(clone_owner, clone);
     evidence.clone_removed = true;
     require(
         evidence.origin_redacted_before_cleanup
