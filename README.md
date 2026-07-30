@@ -116,6 +116,9 @@ both glyphs and grid density, while Retina backing pixels are handled separately
 The configured `terminal.font-family` remains stored for Windows parity; the Unix
 Settings panel reports the resolved system renderer as read-only. New macOS
 profiles default to 14 pt; other platforms retain the 12 pt default.
+macOS and Linux input-method events are enabled explicitly: composed Unicode
+text is committed only after candidate selection, with visible preedit feedback
+anchored to the active terminal or editor field.
 
 ## Examples
 

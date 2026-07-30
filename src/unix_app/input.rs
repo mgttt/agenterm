@@ -23,6 +23,17 @@ pub(super) enum ComposerKeyAction {
     Ignored,
 }
 
+/// Filters platform input-method commits before they reach an editable surface.
+pub(super) fn normalize_ime_commit(text: &str, multiline: bool) -> String {
+    text.replace("\r\n", "\n")
+        .chars()
+        .filter(|ch| {
+            (!ch.is_control() && *ch != '\u{7f}') || (multiline && matches!(ch, '\n' | '\r'))
+        })
+        .map(|ch| if ch == '\r' { '\n' } else { ch })
+        .collect()
+}
+
 pub(super) fn primary_shortcut(modifiers: ModifiersState) -> bool {
     modifiers.control_key() || modifiers.super_key()
 }
@@ -334,8 +345,8 @@ fn physical_code_to_byte(code: winit::keyboard::KeyCode) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        TerminalShortcutAction, logical_key_to_bytes, prepare_composer_edit, primary_shortcut,
-        terminal_shortcut_action,
+        TerminalShortcutAction, logical_key_to_bytes, normalize_ime_commit, prepare_composer_edit,
+        primary_shortcut, terminal_shortcut_action,
     };
     use winit::keyboard::{Key, ModifiersState, NamedKey};
 
@@ -352,6 +363,15 @@ mod tests {
             ),
             Some(b"ab".to_vec())
         );
+    }
+
+    #[test]
+    fn ime_commit_preserves_unicode_and_filters_controls() {
+        assert_eq!(
+            normalize_ime_commit("中文🙂\0\u{7f}\n下一行", false),
+            "中文🙂下一行"
+        );
+        assert_eq!(normalize_ime_commit("中文\r\n下一行", true), "中文\n下一行");
     }
 
     #[test]

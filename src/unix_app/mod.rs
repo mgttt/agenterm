@@ -17,9 +17,11 @@ use std::{
 };
 
 use softbuffer::{Context, Surface};
+use unicode_width::UnicodeWidthStr;
 use winit::{
     application::ApplicationHandler,
-    event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent},
+    dpi::{LogicalPosition, LogicalSize},
+    event::{ElementState, Ime, MouseButton, MouseScrollDelta, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     keyboard::{Key, ModifiersState, NamedKey},
     window::{Window, WindowAttributes, WindowId},
@@ -67,7 +69,7 @@ use crate::{
 use font::resolved_font_name;
 use new_terminal::{NewTerminalDialog, ui_action_open};
 use render::{
-    COMPOSER_HEIGHT, ComposerView, ConfirmCloseHit, ConfirmCloseView, FrameContent,
+    COMPOSER_HEIGHT, ComposerView, ConfirmCloseHit, ConfirmCloseView, FrameContent, ImePreeditView,
     NewShellChoice as RenderShellChoice, NewTerminalFocusView, NewTerminalHit,
     NewTerminalModalView, STATUS_HEIGHT, SettingsHit, SettingsModalView, SidebarTabRow,
     StatusBarView, TabEditorFocusView, TabEditorView, TerminalGrid, TerminalPaint, ToolbarHit,
@@ -336,6 +338,8 @@ struct UnixApp {
     tabs_resize_drag: Option<TabsResizeDrag>,
     last_frame: Option<(u32, u32, Vec<u32>)>,
     status_message: String,
+    ime_preedit: String,
+    ime_cursor: Option<(usize, usize)>,
 }
 
 impl UnixApp {
@@ -395,6 +399,8 @@ impl UnixApp {
             tabs_resize_drag: None,
             last_frame: None,
             status_message: String::from("Ready"),
+            ime_preedit: String::new(),
+            ime_cursor: None,
             config,
             modifiers: ModifiersState::empty(),
         }
@@ -512,6 +518,7 @@ impl UnixApp {
             self.composer_select_all = false;
         }
         self.focus_surface = surface;
+        self.reset_ime_context();
         if surface == UnixFocusSurface::Composer {
             self.load_composer_buffer_from_tab();
         }
@@ -526,6 +533,86 @@ impl UnixApp {
             }),
         );
         self.request_redraw();
+    }
+
+    fn clear_ime_preedit(&mut self) {
+        self.ime_preedit.clear();
+        self.ime_cursor = None;
+    }
+
+    fn reset_ime_context(&mut self) {
+        self.clear_ime_preedit();
+        if let Some(window) = self.window.as_ref() {
+            window.set_ime_allowed(false);
+            window.set_ime_allowed(true);
+        }
+    }
+
+    fn commit_ime_text(&mut self, raw: &str) {
+        if self.window_close_pending || self.pending_close.is_some() || self.settings_open {
+            return;
+        }
+        if self.new_terminal_dialog.is_open() {
+            let multiline = self.new_terminal_focus == NewTerminalFocusView::InitialCommand;
+            let text = input::normalize_ime_commit(raw, multiline);
+            let draft = match self.new_terminal_focus {
+                NewTerminalFocusView::InitialCommand => {
+                    self.new_terminal_dialog.initial_command_draft_mut()
+                }
+                NewTerminalFocusView::HttpProxy => self.new_terminal_dialog.http_proxy_draft_mut(),
+                NewTerminalFocusView::HttpsProxy => {
+                    self.new_terminal_dialog.https_proxy_draft_mut()
+                }
+            };
+            draft.push_str(&text);
+            self.request_redraw();
+            return;
+        }
+        if self.note_edit_target.is_some() {
+            let multiline = self.tab_editor_focus == TabEditorFocus::Note;
+            let text = input::normalize_ime_commit(raw, multiline);
+            if let Some(draft) = self.tab_editor_draft_mut() {
+                draft.push_str(&text);
+            }
+            self.request_redraw();
+            return;
+        }
+        if self.focus_surface == UnixFocusSurface::Composer {
+            let text = input::normalize_ime_commit(raw, true);
+            input::prepare_composer_edit(&mut self.composer_buffer, &mut self.composer_select_all);
+            self.composer_buffer.push_str(&text);
+            self.sync_composer_buffer_to_tab();
+            self.request_redraw();
+            return;
+        }
+        if self.focus_surface == UnixFocusSurface::Terminal {
+            let text = input::normalize_ime_commit(raw, false);
+            let _ = self.cancel_terminal_selection(true);
+            self.queue_pty_input(text.into_bytes());
+        }
+    }
+
+    fn handle_ime(&mut self, event: Ime) {
+        match event {
+            Ime::Enabled => {}
+            Ime::Preedit(text, cursor) => {
+                if self.ime_anchor().is_some() {
+                    self.ime_preedit = text;
+                    self.ime_cursor = cursor;
+                } else {
+                    self.clear_ime_preedit();
+                }
+                self.request_redraw();
+            }
+            Ime::Commit(text) => {
+                self.clear_ime_preedit();
+                self.commit_ime_text(&text);
+            }
+            Ime::Disabled => {
+                self.clear_ime_preedit();
+                self.request_redraw();
+            }
+        }
     }
 
     fn send_active_composer(&mut self) -> Result<(), String> {
@@ -633,12 +720,14 @@ impl UnixApp {
             self.close_cwd_editor();
         }
         let _ = self.cancel_terminal_selection(true);
+        self.reset_ime_context();
         ui_action_open(&mut self.new_terminal_dialog);
         self.new_terminal_focus = NewTerminalFocusView::InitialCommand;
         self.request_redraw();
     }
 
     fn finish_new_terminal_dialog(&mut self, create: bool) {
+        self.reset_ime_context();
         let result = self.new_terminal_dialog.finish(create);
         match result {
             Ok(Some(params)) => {
@@ -664,6 +753,7 @@ impl UnixApp {
     }
 
     fn handle_new_terminal_click(&mut self, hit: NewTerminalHit) {
+        let previous_focus = self.new_terminal_focus;
         match hit {
             NewTerminalHit::DefaultShell => {
                 self.new_terminal_dialog
@@ -689,6 +779,9 @@ impl UnixApp {
             NewTerminalHit::Create => self.finish_new_terminal_dialog(true),
             NewTerminalHit::Cancel => self.finish_new_terminal_dialog(false),
         }
+        if self.new_terminal_focus != previous_focus {
+            self.reset_ime_context();
+        }
         self.request_redraw();
     }
 
@@ -708,6 +801,7 @@ impl UnixApp {
         match input::text_field_key_action(event, modifiers, draft, multiline) {
             input::TextFieldKeyAction::Edited => self.request_redraw(),
             input::TextFieldKeyAction::NextField => {
+                self.reset_ime_context();
                 self.new_terminal_focus = match self.new_terminal_focus {
                     NewTerminalFocusView::InitialCommand => NewTerminalFocusView::HttpProxy,
                     NewTerminalFocusView::HttpProxy => NewTerminalFocusView::HttpsProxy,
@@ -1206,6 +1300,7 @@ impl UnixApp {
                 self.request_redraw();
             }
             input::TextFieldKeyAction::NextField => {
+                self.reset_ime_context();
                 self.tab_editor_focus = TabEditorFocus::Note;
                 self.request_redraw();
             }
@@ -1923,6 +2018,9 @@ impl UnixApp {
             return;
         }
         if let Some(focus) = self.sidebar_tab_editor_hit(click_x, click_y) {
+            if self.tab_editor_focus != focus {
+                self.reset_ime_context();
+            }
             self.tab_editor_focus = focus;
             self.set_focus_surface_internal(UnixFocusSurface::Sidebar, "tab-editor-focus");
             return;
@@ -2531,6 +2629,66 @@ impl UnixApp {
         cell_metrics(self.active_terminal_appearance().terminal_font_size)
     }
 
+    fn ime_anchor(&self) -> Option<(u32, u32, u32, u32)> {
+        if self.window_close_pending || self.pending_close.is_some() || self.settings_open {
+            return None;
+        }
+        let (client_width, client_height) = self.client_size();
+        if self.new_terminal_dialog.is_open() {
+            let modal = NewTerminalModalView::for_client(
+                client_width,
+                client_height,
+                self.render_shell_choice(),
+                self.new_terminal_dialog.initial_command_draft(),
+                self.new_terminal_dialog.http_proxy_draft(),
+                self.new_terminal_dialog.https_proxy_draft(),
+                self.new_terminal_focus,
+            );
+            return Some(match self.new_terminal_focus {
+                NewTerminalFocusView::InitialCommand => modal.initial_command_field,
+                NewTerminalFocusView::HttpProxy => modal.http_proxy_field,
+                NewTerminalFocusView::HttpsProxy => modal.https_proxy_field,
+            });
+        }
+        if let Some(tab_id) = self.note_edit_target {
+            let rows = self.sidebar_viewport_rows();
+            let (viewport_position, row) =
+                rows.iter().enumerate().find(|(_, row)| row.id == tab_id)?;
+            let geometry = self.sidebar_row_geometry(viewport_position, row.depth, tab_id);
+            let editors = geometry.editors?;
+            let field = match self.tab_editor_focus {
+                TabEditorFocus::Name => editors.name,
+                TabEditorFocus::Note => editors.note,
+            };
+            return Some(u32_rect(field));
+        }
+        let layout = self.layout();
+        if self.focus_surface == UnixFocusSurface::Composer {
+            let line_columns = self
+                .composer_buffer
+                .rsplit('\n')
+                .next()
+                .unwrap_or_default()
+                .width() as u32;
+            let left = layout.composer.left.max(0) as u32 + 8;
+            let right = layout.composer.right.max(0) as u32;
+            let x = (left + 2 * 8 + line_columns * 8).min(right.saturating_sub(16));
+            return Some((x, layout.composer.top.max(0) as u32 + 18, 8, 20));
+        }
+        if self.focus_surface == UnixFocusSurface::Terminal {
+            let position = self.active_position()?;
+            let (row, column) = self.tabs[position].parser.screen().cursor_position();
+            let (cell_width, cell_height) = self.cell_dimensions();
+            return Some((
+                layout.terminal.left.max(0) as u32 + u32::from(column) * cell_width,
+                layout.terminal.top.max(0) as u32 + u32::from(row) * cell_height,
+                cell_width,
+                cell_height,
+            ));
+        }
+        None
+    }
+
     fn request_redraw(&self) {
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
@@ -2548,6 +2706,7 @@ impl UnixApp {
             .with_active(!self.no_activate);
 
         let window = Rc::new(event_loop.create_window(attributes)?);
+        window.set_ime_allowed(true);
         let surface = Surface::new(&self.context, Rc::clone(&window))
             .map_err(|error| anyhow::anyhow!("{error}"))?;
         let (width, height) = self.client_size();
@@ -2939,6 +3098,13 @@ impl UnixApp {
         if physical_size.width == 0 || physical_size.height == 0 {
             return;
         }
+        let ime_anchor = self.ime_anchor();
+        if let Some((x, y, w, h)) = ime_anchor {
+            window.set_ime_cursor_area(
+                LogicalPosition::new(x, y),
+                LogicalSize::new(w.max(1), h.max(1)),
+            );
+        }
 
         let sidebar_rows = self.sidebar_viewport_rows();
         let palette = self.palette();
@@ -3040,6 +3206,13 @@ impl UnixApp {
                 TabEditorFocus::Note => TabEditorFocusView::Note,
             },
         });
+        let ime_preedit = ime_anchor
+            .filter(|_| !self.ime_preedit.is_empty())
+            .map(|anchor| ImePreeditView {
+                text: &self.ime_preedit,
+                cursor: self.ime_cursor,
+                anchor,
+            });
         let Some(surface) = self.surface.as_mut() else {
             return;
         };
@@ -3087,6 +3260,7 @@ impl UnixApp {
                 window_close,
                 new_terminal,
                 status: Some(status_view),
+                ime_preedit,
                 resize_grip,
             },
         );
@@ -3655,6 +3829,7 @@ impl ApplicationHandler<UnixWake> for UnixApp {
             WindowEvent::ModifiersChanged(new_modifiers) => {
                 self.modifiers = new_modifiers.state();
             }
+            WindowEvent::Ime(event) => self.handle_ime(event),
             WindowEvent::KeyboardInput { event, .. } => {
                 if !event.state.is_pressed() {
                     return;

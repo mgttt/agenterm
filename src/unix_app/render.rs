@@ -609,6 +609,13 @@ pub(super) struct StatusBarView<'a> {
     pub(super) provider_text: &'a str,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub(super) struct ImePreeditView<'a> {
+    pub(super) text: &'a str,
+    pub(super) cursor: Option<(usize, usize)>,
+    pub(super) anchor: (u32, u32, u32, u32),
+}
+
 pub(super) struct FrameContent<'a> {
     pub(super) sidebar_width: u32,
     pub(super) content_height: u32,
@@ -630,6 +637,7 @@ pub(super) struct FrameContent<'a> {
     pub(super) confirm_close: Option<ConfirmCloseView>,
     pub(super) window_close: Option<WindowCloseView>,
     pub(super) status: Option<StatusBarView<'a>>,
+    pub(super) ime_preedit: Option<ImePreeditView<'a>>,
     pub(super) resize_grip: Option<(u32, u32, u32, u32)>,
 }
 
@@ -727,6 +735,84 @@ pub(super) fn render_frame(
     }
     if let Some(window_close) = content.window_close {
         render_window_close(buffer, stride, width, height, palette, window_close);
+    }
+    if let Some(preedit) = content.ime_preedit {
+        render_ime_preedit(buffer, stride, width, height, palette, preedit);
+    }
+}
+
+fn render_ime_preedit(
+    buffer: &mut [u32],
+    stride: u32,
+    width: u32,
+    height: u32,
+    palette: &ThemePalette,
+    preedit: ImePreeditView<'_>,
+) {
+    let (anchor_x, anchor_y, _, anchor_height) = preedit.anchor;
+    let text_columns = preedit
+        .text
+        .chars()
+        .map(|ch| ch.width().unwrap_or(1).max(1) as u32)
+        .sum::<u32>();
+    let maximum_width = width.saturating_sub(8);
+    let box_width = (text_columns * (GLYPH_WIDTH + 1) + 12)
+        .min(maximum_width)
+        .max(maximum_width.min(28));
+    let box_height = (GLYPH_HEIGHT + 8).max(anchor_height);
+    let x = anchor_x.min(width.saturating_sub(box_width + 4));
+    let below = anchor_y.saturating_add(anchor_height);
+    let y = if below.saturating_add(box_height) <= height {
+        below
+    } else {
+        anchor_y.saturating_sub(box_height)
+    };
+    fill_rect(
+        buffer,
+        stride,
+        x,
+        y,
+        box_width,
+        box_height,
+        rgb_to_pixel(palette.modal),
+    );
+    fill_rect(
+        buffer,
+        stride,
+        x,
+        y.saturating_add(box_height.saturating_sub(2)),
+        box_width,
+        2,
+        rgb_to_pixel(palette.focus_ring),
+    );
+    draw_text(
+        buffer,
+        stride,
+        width,
+        height,
+        x + 6,
+        y + 4,
+        preedit.text,
+        palette.text,
+    );
+    if let Some((cursor, _)) = preedit.cursor
+        && cursor <= preedit.text.len()
+        && preedit.text.is_char_boundary(cursor)
+    {
+        let cursor_columns = preedit.text[..cursor]
+            .chars()
+            .map(|ch| ch.width().unwrap_or(1).max(1) as u32)
+            .sum::<u32>();
+        fill_rect(
+            buffer,
+            stride,
+            (x + 6 + cursor_columns * (GLYPH_WIDTH + 1))
+                .min(x.saturating_add(box_width).saturating_sub(2)),
+            y + 3,
+            1,
+            box_height.saturating_sub(7),
+            rgb_to_pixel(palette.focus_ring),
+        );
     }
 }
 
@@ -2308,6 +2394,35 @@ mod tests {
             buffer
                 .iter()
                 .any(|pixel| *pixel != rgb_to_pixel(background))
+        );
+    }
+
+    #[test]
+    fn ime_preedit_draws_visible_composition_and_cursor() {
+        let width = 180;
+        let height = 80;
+        let palette = ThemeId::Dark.palette();
+        let background = rgb_to_pixel(palette.terminal_background);
+        let mut buffer = vec![background; (width * height) as usize];
+
+        render_ime_preedit(
+            &mut buffer,
+            width,
+            width,
+            height,
+            palette,
+            ImePreeditView {
+                text: "中文",
+                cursor: Some(("中".len(), "中".len())),
+                anchor: (12, 12, 10, 16),
+            },
+        );
+
+        assert!(buffer.iter().any(|pixel| *pixel != background));
+        assert!(
+            buffer
+                .iter()
+                .any(|pixel| *pixel == rgb_to_pixel(palette.focus_ring))
         );
     }
 }
