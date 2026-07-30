@@ -85,6 +85,7 @@ tree does not promise a version or implementation strategy.
   - [Delivery and quality](prd/PRD_02_17_delivery_quality.md) — Builds, tests, artifacts, release gates, and regression budgets.
   - [Focused product roadmap](prd/PRD_02_18_roadmap.md) — Version ownership, milestone gates, and future product lanes.
   - [Inspiration backlog and future vision](prd/PRD_02_19_inspiration_and_future_vision.md) — Idea garden, north-star layers, and promotion path into owning modules (not shipped status).
+  - [Native platform abstraction](prd/PRD_02_20_native_platform.md) — Shared native-window, input, IME, DPI, clipboard, font, and OS-integration contracts with Windows, macOS, and Linux adapters.
 
 ## Non-negotiable invariants
 
