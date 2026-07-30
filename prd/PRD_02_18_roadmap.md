@@ -422,6 +422,30 @@ track remains planned, but every declared dependency must still pass.
     gates; these gates never reduce standalone `agenterm-script.exe` APIs
   - [ ] implementation sequencing, budgets, risks and release evidence are
     owned by [the v0.1.10 public plan](../plan/plan-v0.1.10.md)
+- [ ] M10 / v0.2.0 Fleet Hub
+  - [ ] ship a secondary **Fleet Hub** surface opened from a new toolbar
+    button immediately left of Settings; daily terminal/composer workspace
+    stays quiet; Hub is an explicit overlay (Settings-class modal) on Win and
+    Unix embedded GUI first
+  - [ ] four tabs: **Cockpit** (read-only fleet dashboard), **Workflows**
+    (pipeline entry), **PluginHub** (signed optional-component discovery),
+    and **InfoHub** (feed/subscription routing to Composer drafts, not a
+    media reader)
+  - [ ] Cockpit v0.2.0 scope is read-only: tree summary, tab states, journal
+    position, and typed shortcuts to inspect/select; no second authority
+  - [ ] Workflows, PluginHub, and InfoHub may ship navigation + empty states
+    in v0.2.0 with content bound to script task catalog, softmgr manifests,
+    and subscription connectors in follow-up slices; GUI startup never
+    downloads packages or feed payloads (D3)
+  - [ ] expose Hub chrome through shared `ui_geometry` toolbar layout,
+    `ui-snapshot`, and `ui-action` (`open-fleet-hub`, tab selection) with
+    Win `remote_win_app` and Unix `unix_app` parity
+  - [ ] black-box evidence extends structured snapshot tests and Rhai smoke
+    (Windows `remote-ui-smoke` plus Linux embedded GUI when DISPLAY available)
+  - [ ] sequencing, dependencies, and delivery history are owned by
+    [the v0.2.0 public plan](../plan/plan-v0.2.0.md); inspiration lanes
+    J1–J5 in
+    [Inspiration backlog](PRD_02_19_inspiration_and_future_vision.md)
 - [ ] Multi-platform GUI track (independent of v0.1.8–v0.1.10 version gates):
   shared PTY backend, Unix IPC server, Linux/macOS `winit`+`softbuffer`
   human window MVP, and release packages that include `agenterm` on
