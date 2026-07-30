@@ -1,8 +1,10 @@
 # AgenTerm
 
-AgenTerm is a native Windows terminal and AI fleet controller written in Rust.
-It combines hierarchical ConPTY tabs, per-tab composers and environments, a
-native automation client, and a deliberately bounded tmux/RMUX frontend.
+AgenTerm is a Rust-native terminal and local AI fleet controller. Windows is
+the shipped desktop surface; Linux and macOS native GUIs are active preview
+channels over the same terminal, protocol, and automation core. It combines
+hierarchical tabs, per-tab composers and environments, a native automation
+client, and a deliberately bounded tmux/RMUX frontend.
 
 ![AgenTerm showing a hierarchical terminal workspace, composer, and working-context status bar](assets/screendump0.png)
 
@@ -129,6 +131,17 @@ Smoke tests inherit `AGENTERM_NO_ACTIVATE=1`, so their isolated GUI windows do
 not interrupt the foreground application. `.\check.cmd --release` omits the
 4,128-write event-journal load test; the clean GitHub release runner adds
 `--include-stress`.
+
+The machine-readable platform contract is available without starting a server:
+
+```powershell
+.\dist\agenterm-cli.exe protocol-info
+```
+
+Its `platform` block reports the native adapter, contract revision, and typed
+Window/Input/IME/Clipboard/Font/Screenshot/Activation/Integration status.
+Missing behavior is reported as `unsupported` or `failed`, never silently
+relabeled as available.
 
 ### Linux GUI (preview)
 

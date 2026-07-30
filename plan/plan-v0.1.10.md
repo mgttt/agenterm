@@ -4,10 +4,47 @@
 原 v0.1.9 Release 因 server-loss 故障撤下，
 `0.1.9+hotfix.1` 是恢复 v0.1.10 主线前的强制稳定性门；
 43/43 PowerShell 迁移项完成删除；Windows batch 业务逻辑迁移完成
-工作主题：**Rhai 完整接替仓库脚本业务逻辑，并建立可验证的只读 Agent 桥梁**
+工作主题：**Rhai 完整接替仓库脚本业务逻辑、建立可验证的只读 Agent
+桥梁，并收敛三平台原生适配边界**
 版本定位：在 v0.1.9 完善通用 Rhai 运行时、模块任务与机器可读工具
 schema 后，让 AgenTerm 首次用自己的脚本运行时驱动完整开发生命周期，
 同时把同一份 Fleet 事实稳定地开放给外部 Agent 客户端。
+
+### 三平台发布收口补充（2026-07-31）
+
+v0.1.10 的公开发布不只验证“六个 target 能编译”，还要证明 Windows、
+macOS、Linux 的真实 GUI 热路径消费可观察、可复用、不过度抽象的
+`platform/` 合同：
+
+```text
+platform/ 发布闭环
+├─ 共享产品语义
+│  ├─ action ID 与工具栏顺序
+│  ├─ committed text / shortcut 分类
+│  ├─ window lifecycle 与 client-size 边界
+│  ├─ logical / physical scale 与 geometry
+│  └─ screenshot clip 与 typed capability status
+├─ 三平台原生适配
+│  ├─ Windows：Win32 / GDI / ConPTY
+│  ├─ macOS：Cocoa-winit / Retina / POSIX PTY
+│  └─ Linux：X11-Wayland-winit / headless / POSIX PTY
+├─ 自反馈
+│  ├─ protocol-info 公开 adapter、contract revision、八类 capability
+│  ├─ Unsupported/Failed 不伪装 Available
+│  └─ snapshot 与 PNG 对齐
+└─ 发布门
+   ├─ Windows/Linux/macOS × x86_64/ARM64 CI
+   ├─ Windows 完整公共接口与 no-activate GUI smoke
+   ├─ build identity 对应干净且准确的 commit
+   └─ Windows/Linux stable 与 macOS unsigned preview 清晰分流
+```
+
+共享层只拥有跨投射仍成立的语义、数据、校验和错误合同；Win32、Cocoa、
+X11/Wayland 的句柄、事件循环、渲染和系统调用继续留在各自 adapter。
+不为了目录整齐制造空 trait，不把 server 状态迁入 GUI 平台层，也不以
+“最低共同能力”掩盖某个平台尚未交付的功能。公开 tag 只能在
+`prd/PRD_02_20_native_platform.md` 的完成门、完整本地资格门和最新
+六平台 CI 同时有真实证据后创建。
 
 ### v0.1.9.1 紧急稳定性门（2026-07-29）
 
