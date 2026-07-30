@@ -1,0 +1,112 @@
+name: Release asset integrity
+
+on:
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/release-integrity.yml
+
+concurrency:
+  group: release-asset-integrity
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  audit:
+    if: >-
+      github.event_name == 'push' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Repair and audit adjacent release metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_EVENT: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          set -euo pipefail
+          if [[ "$RELEASE_EVENT" == "workflow_run" ]]; then
+            tag="$RELEASE_TAG"
+            [[ "$tag" == v* ]]
+            version="${tag#v}"
+          else
+            version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n1)"
+            tag="v$version"
+          fi
+          gh release view "$tag" >/dev/null
+
+          scratch="$(mktemp -d)"
+          trap 'rm -rf "$scratch"' EXIT
+          cd "$scratch"
+
+          archive="agenterm-$version-windows-x86_64.zip"
+          gh release download "$tag" --pattern "$archive"
+          archive_sha256="$(sha256sum "$archive" | cut -d' ' -f1)"
+          source_commit="$(git -C "$GITHUB_WORKSPACE" rev-list -n1 "$tag")"
+          artifact_manifest_sha256="$(
+            git -C "$GITHUB_WORKSPACE" show "$tag:scripts/artifacts.json" |
+              sha256sum | cut -d' ' -f1
+          )"
+          cargo_lock_sha256="$(
+            git -C "$GITHUB_WORKSPACE" show "$tag:Cargo.lock" |
+              sha256sum | cut -d' ' -f1
+          )"
+
+          printf '%s  %s\n' "$archive_sha256" "$archive" >"$archive.sha256"
+          jq -n \
+            --arg version "$version" \
+            --arg artifact "$archive" \
+            --arg sha256 "$archive_sha256" \
+            --arg source_commit "$source_commit" \
+            --arg source_tag "$tag" \
+            --arg artifact_manifest_sha256 "$artifact_manifest_sha256" \
+            --arg cargo_lock_sha256 "$cargo_lock_sha256" \
+            --arg build_log "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            '{
+              schema_version: 1,
+              product: "AgenTerm",
+              version: $version,
+              os: "windows",
+              arch: "x86_64",
+              channel: "release",
+              signed: false,
+              notarized: false,
+              artifact: $artifact,
+              sha256: $sha256,
+              source_commit: $source_commit,
+              source_tag: $source_tag,
+              artifact_manifest_sha256: $artifact_manifest_sha256,
+              cargo_lock_sha256: $cargo_lock_sha256,
+              build_log: $build_log
+            }' >"$archive.provenance.json"
+
+          asset_names="$(gh release view "$tag" --json assets --jq '.assets[].name')"
+          for companion in "$archive.sha256" "$archive.provenance.json"; do
+            if ! grep -Fxq "$companion" <<<"$asset_names"; then
+              gh release upload "$tag" "$companion"
+            fi
+          done
+
+          asset_names="$(gh release view "$tag" --json assets --jq '.assets[].name')"
+          mapfile -t archives < <(
+            grep -E '\.(zip|tar\.gz)$' <<<"$asset_names" |
+              grep -v -- '-dry-run\.zip$' |
+              sort
+          )
+          test "${#archives[@]}" -eq 6
+          for item in "${archives[@]}"; do
+            grep -Fxq "$item.sha256" <<<"$asset_names"
+            grep -Fxq "$item.provenance.json" <<<"$asset_names"
+          done
+          grep -Fxq "agenterm-$version-sbom.spdx.json" <<<"$asset_names"
