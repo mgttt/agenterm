@@ -100,17 +100,23 @@ tests or ownership.
     `platform::macos::toolbar` stable action IDs before shared product handlers;
     the visible order remains Toggle Tabs, New, then right-aligned Settings,
     locale, font decrease, and font increase
-  - [x] `unix_app` keyboard and Cocoa IME commit paths now consume
-    `platform::macos::input`; Command remains the product modifier, terminal
-    Control chords remain PTY input, and native committed text wins for
-    Shift/Option/dead-key, Space, and CJK input
+  - [x] `unix_app` keyboard and Cocoa IME preedit/commit paths now consume
+    `platform::macos::input` and `platform::macos::ime`; Command remains the
+    product modifier, terminal Control chords remain PTY input, and native
+    committed text wins for Shift/Option/dead-key, Space, and CJK input
   - [x] physical resize and scale-factor events, logical client sizing, PTY
     resize, layout, and rendering now consume `platform::macos::scale`; the
     no-activate launch path also configures the macOS event loop before window
     creation
+  - [x] clipboard reads/writes now consume `platform::macos::clipboard` with a
+    256 KiB byte budget, 1.5 second helper deadline, live bounded reads, and
+    typed unavailable/oversize/timeout/backend failures
+  - [x] whole-window and pane PNG capture now consume
+    `platform::macos::screenshot` with checked dimensions, clips, framebuffer
+    length, a 64 MiB RGBA budget, and typed validation/I/O/encoding failures
   - [~] winit/softbuffer windowing, native IME events, system-font rasterization,
-    Unicode/color/attribute rendering, clipboard, cursor, DPI, and POSIX PTY
-    interaction are in active delivery
+    Unicode/color/attribute rendering, cursor, and POSIX PTY interaction are in
+    active delivery
   - [~] expose the remaining macOS behavior through the shared platform
     contracts while retaining Apple-native keyboard semantics and scale-factor
     accuracy
@@ -172,7 +178,9 @@ tests or ownership.
    (Linux IME+clipboard @ `66c54a5`/`b5d54ef`; clipboard helper harden @
    `bf17150`; DPI/scale @ `57958c1`; font discovery/metrics @ `25a45d2`;
    screenshot/activation still deferred. Windows bounded clipboard and
-   activation hot paths plus bounded screenshot capture are adapted)
+   activation hot paths plus bounded screenshot capture are adapted. macOS
+   bounded clipboard @ `11ce9b8`, screenshot @ `3811bda`, and Cocoa IME
+   preedit/commit @ `91055b6` are adapted)
 4. [ ] remove superseded platform-specific paths only after native black-box
    and screenshot evidence passes on that platform
 
@@ -222,13 +230,17 @@ Windows slice-3 evidence (2026-07-30):
 macOS hot-path evidence (2026-07-30):
 
 - [x] `cargo fmt --check` and all-target warnings-denied Clippy pass
-- [x] 365 library tests pass; focused macOS adapter tests cover stable toolbar
+- [x] 372 library tests pass; focused macOS adapter tests cover stable toolbar
   order/IDs, Command versus terminal Control, Shift punctuation,
-  Option/dead-key composition, Space, CJK IME commit, invalid scale metrics,
-  and Retina scale-factor changes
+  Option/dead-key composition, Space, CJK IME preedit/commit, clipboard byte
+  and timeout failures, screenshot bounds/failures, invalid scale metrics, and
+  Retina scale-factor changes
 - [x] native Cocoa GUI smoke with `AGENTERM_NO_ACTIVATE=1` produces a structured
   960x600 logical snapshot and a 1920x1200 Retina PNG; toolbar labels/order,
   locale, focus, window state, and layout geometry agree
 - [x] native Accessibility resize produces an 800x468 logical snapshot and a
   1600x936 Retina PNG with zero GUI stderr; the same no-activate probe preserves
   the previously frontmost application
+- [x] native Command-C/Command-V round-trip copies and pastes the exact composer
+  marker through the macOS adapter; public CLI capture produces a 1920x1200
+  whole-window PNG and a 1560x928 pane PNG, both under the adapter budget
