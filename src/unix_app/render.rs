@@ -581,6 +581,11 @@ pub(super) enum TerminalCursorStyle {
     Inactive,
 }
 
+/// Workspace toolbar control hit from geometry hit-testing.
+///
+/// On Linux, clicks are mapped through `platform::linux` action ids (contract
+/// revision 1) before product handlers run. Labels stay in render/locale so
+/// `ui-snapshot` and the visible GUI cannot diverge.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ToolbarHit {
     NewTab,

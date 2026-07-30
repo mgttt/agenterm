@@ -593,6 +593,16 @@ impl UnixApp {
         if self.window_close_pending || self.pending_close.is_some() || self.settings_open {
             return;
         }
+        #[cfg(target_os = "linux")]
+        let raw = {
+            use crate::platform::KeyClassification;
+            match crate::platform::linux::input::classify_ime_commit(raw) {
+                KeyClassification::TextCommit(text) => text,
+                _ => return,
+            }
+        };
+        #[cfg(target_os = "linux")]
+        let raw = raw.as_str();
         if self.new_terminal_dialog.is_open() {
             let multiline = self.new_terminal_focus == NewTerminalFocusView::InitialCommand;
             let text = input::normalize_ime_commit(raw, multiline);
@@ -2149,23 +2159,57 @@ impl UnixApp {
     }
 
     fn handle_toolbar_hit(&mut self, hit: ToolbarHit) {
-        match hit {
-            ToolbarHit::NewTab => {
+        #[cfg(target_os = "linux")]
+        {
+            self.dispatch_linux_toolbar_action(linux_toolbar_action_id(hit));
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            match hit {
+                ToolbarHit::NewTab => {
+                    self.open_new_terminal_dialog();
+                }
+                ToolbarHit::ToggleTabs => {
+                    let visible = !self.config.tabs_visible;
+                    let _ = self.set_tabs_visible(
+                        visible,
+                        "toolbar",
+                        crate::operations::UI_TABS_TOGGLE,
+                    );
+                }
+                ToolbarHit::Settings => {
+                    self.open_settings();
+                }
+                ToolbarHit::ToggleLocale => self.toggle_locale(),
+                ToolbarHit::FontDecrease => self.adjust_active_terminal_font(-1),
+                ToolbarHit::FontIncrease => self.adjust_active_terminal_font(1),
+            }
+        }
+        self.request_redraw();
+    }
+
+    /// Linux hot-path: toolbar hits resolve through `platform::linux` action ids
+    /// (contract revision 1) before product handlers run.
+    #[cfg(target_os = "linux")]
+    fn dispatch_linux_toolbar_action(&mut self, action_id: &str) {
+        use crate::platform::action;
+        match action_id {
+            action::NEW_TAB => {
                 self.open_new_terminal_dialog();
             }
-            ToolbarHit::ToggleTabs => {
+            action::TOGGLE_TABS => {
                 let visible = !self.config.tabs_visible;
                 let _ =
                     self.set_tabs_visible(visible, "toolbar", crate::operations::UI_TABS_TOGGLE);
             }
-            ToolbarHit::Settings => {
+            action::OPEN_SETTINGS => {
                 self.open_settings();
             }
-            ToolbarHit::ToggleLocale => self.toggle_locale(),
-            ToolbarHit::FontDecrease => self.adjust_active_terminal_font(-1),
-            ToolbarHit::FontIncrease => self.adjust_active_terminal_font(1),
+            action::TOGGLE_LOCALE => self.toggle_locale(),
+            action::FONT_DECREASE => self.adjust_active_terminal_font(-1),
+            action::FONT_INCREASE => self.adjust_active_terminal_font(1),
+            _ => {}
         }
-        self.request_redraw();
     }
 
     fn handle_content_click(&mut self, x: f64, y: f64) {
@@ -3508,6 +3552,22 @@ impl UnixApp {
     }
 }
 
+/// Map a Unix toolbar hit through the Linux platform adapter action ids
+/// (contract revision 1). macOS keeps the direct `ToolbarHit` match path.
+#[cfg(target_os = "linux")]
+fn linux_toolbar_action_id(hit: ToolbarHit) -> &'static str {
+    use crate::platform::linux::toolbar::LinuxToolbarHit;
+    let linux_hit = match hit {
+        ToolbarHit::NewTab => LinuxToolbarHit::NewTab,
+        ToolbarHit::ToggleTabs => LinuxToolbarHit::ToggleTabs,
+        ToolbarHit::Settings => LinuxToolbarHit::Settings,
+        ToolbarHit::ToggleLocale => LinuxToolbarHit::ToggleLocale,
+        ToolbarHit::FontDecrease => LinuxToolbarHit::FontDecrease,
+        ToolbarHit::FontIncrease => LinuxToolbarHit::FontIncrease,
+    };
+    linux_hit.action_id()
+}
+
 impl ControlHost for UnixApp {
     fn session_name(&self) -> &str {
         &self.session_name
@@ -4325,6 +4385,8 @@ mod system_menu_tests {
         RenderBuffers, compact_cwd_for_status, scale_frame_nearest, scale_rect_to_frame,
         system_menu_clipboard_state_pure,
     };
+    #[cfg(target_os = "linux")]
+    use super::{ToolbarHit, linux_toolbar_action_id};
     use std::path::Path;
 
     #[test]
@@ -4356,6 +4418,33 @@ mod system_menu_tests {
         assert_eq!(
             destination,
             [1, 1, 2, 2, 1, 1, 2, 2, 3, 3, 4, 4, 3, 3, 4, 4]
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_toolbar_hits_resolve_through_platform_action_ids() {
+        use crate::platform::action;
+        assert_eq!(linux_toolbar_action_id(ToolbarHit::NewTab), action::NEW_TAB);
+        assert_eq!(
+            linux_toolbar_action_id(ToolbarHit::ToggleTabs),
+            action::TOGGLE_TABS
+        );
+        assert_eq!(
+            linux_toolbar_action_id(ToolbarHit::Settings),
+            action::OPEN_SETTINGS
+        );
+        assert_eq!(
+            linux_toolbar_action_id(ToolbarHit::ToggleLocale),
+            action::TOGGLE_LOCALE
+        );
+        assert_eq!(
+            linux_toolbar_action_id(ToolbarHit::FontDecrease),
+            action::FONT_DECREASE
+        );
+        assert_eq!(
+            linux_toolbar_action_id(ToolbarHit::FontIncrease),
+            action::FONT_INCREASE
         );
     }
 

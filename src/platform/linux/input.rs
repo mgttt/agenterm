@@ -45,6 +45,11 @@ pub(crate) fn classify_key_press(
     classify_shared(modifiers, logical_character, named_key, committed_text)
 }
 
+/// Classify an IME commit string as a text commit (empty → ignored).
+pub(crate) fn classify_ime_commit(text: &str) -> KeyClassification {
+    classify_key_press(ModifierState::empty(), None, None, Some(text))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -122,5 +127,14 @@ mod tests {
     fn cjk_ime_commit_is_not_reconstructed_from_logical_key() {
         let class = classify_key_press(NONE, Some("n"), None, Some("你好"));
         assert_eq!(class, KeyClassification::TextCommit("你好".to_string()));
+    }
+
+    #[test]
+    fn ime_commit_helper_classifies_text_only() {
+        assert_eq!(
+            classify_ime_commit("你好"),
+            KeyClassification::TextCommit("你好".to_string())
+        );
+        assert_eq!(classify_ime_commit(""), KeyClassification::Ignored);
     }
 }

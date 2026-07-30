@@ -42,6 +42,19 @@ impl LinuxToolbarHit {
             Self::FontIncrease => action::FONT_INCREASE,
         }
     }
+
+    /// Inverse map used by Linux `unix_app` hot-path wiring (contract rev 1).
+    pub(crate) fn from_action_id(action_id: &str) -> Option<Self> {
+        match action_id {
+            action::NEW_TAB => Some(Self::NewTab),
+            action::TOGGLE_TABS => Some(Self::ToggleTabs),
+            action::OPEN_SETTINGS => Some(Self::Settings),
+            action::TOGGLE_LOCALE => Some(Self::ToggleLocale),
+            action::FONT_DECREASE => Some(Self::FontDecrease),
+            action::FONT_INCREASE => Some(Self::FontIncrease),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -72,5 +85,13 @@ mod tests {
         assert_eq!(LinuxToolbarHit::FontDecrease.action_id(), "font-decrease");
         assert_eq!(LinuxToolbarHit::NewTab.action_id(), "new-tab");
         assert_eq!(LinuxToolbarHit::Settings.action_id(), "open-settings");
+    }
+
+    #[test]
+    fn action_id_round_trips() {
+        for hit in LinuxToolbarHit::ORDER {
+            assert_eq!(LinuxToolbarHit::from_action_id(hit.action_id()), Some(hit));
+        }
+        assert_eq!(LinuxToolbarHit::from_action_id("not-an-action"), None);
     }
 }

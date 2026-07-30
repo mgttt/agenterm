@@ -35,7 +35,14 @@ pub(super) fn normalize_ime_commit(text: &str, multiline: bool) -> String {
 }
 
 pub(super) fn primary_shortcut(modifiers: ModifiersState) -> bool {
-    modifiers.control_key() || modifiers.super_key()
+    #[cfg(target_os = "linux")]
+    {
+        crate::platform::linux::input::primary_shortcut(winit_modifiers_to_platform(modifiers))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        modifiers.control_key() || modifiers.super_key()
+    }
 }
 
 /// Maps a winit key event to composer edits when the composer strip has focus.
@@ -49,7 +56,14 @@ pub(super) fn composer_key_action(
         return ComposerKeyAction::Ignored;
     }
 
-    composer_logical_key_action(&event.logical_key, modifiers, buffer, select_all)
+    #[cfg(target_os = "linux")]
+    {
+        linux_composer_key_action(event, modifiers, buffer, select_all)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        composer_logical_key_action(&event.logical_key, modifiers, buffer, select_all)
+    }
 }
 
 fn composer_logical_key_action(
@@ -152,7 +166,14 @@ pub(super) fn text_field_key_action(
         return TextFieldKeyAction::Ignored;
     }
 
-    text_field_logical_key_action(&event.logical_key, modifiers, buffer, multiline, select_all)
+    #[cfg(target_os = "linux")]
+    {
+        linux_text_field_key_action(event, modifiers, buffer, multiline, select_all)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        text_field_logical_key_action(&event.logical_key, modifiers, buffer, multiline, select_all)
+    }
 }
 
 fn text_field_logical_key_action(
@@ -270,13 +291,20 @@ pub(super) fn key_event_to_bytes(event: &KeyEvent, modifiers: ModifiersState) ->
         return None;
     }
 
-    logical_key_to_bytes(&event.logical_key, modifiers).or_else(|| match &event.logical_key {
-        Key::Unidentified(_) => match event.physical_key {
-            PhysicalKey::Code(code) => physical_code_to_byte(code),
-            PhysicalKey::Unidentified(_) => None,
-        },
-        _ => None,
-    })
+    #[cfg(target_os = "linux")]
+    {
+        linux_key_event_to_bytes(event, modifiers)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        logical_key_to_bytes(&event.logical_key, modifiers).or_else(|| match &event.logical_key {
+            Key::Unidentified(_) => match event.physical_key {
+                PhysicalKey::Code(code) => physical_code_to_byte(code),
+                PhysicalKey::Unidentified(_) => None,
+            },
+            _ => None,
+        })
+    }
 }
 
 fn logical_key_to_bytes(key: &Key, modifiers: ModifiersState) -> Option<Vec<u8>> {
@@ -378,6 +406,244 @@ fn physical_code_to_byte(code: winit::keyboard::KeyCode) -> Option<Vec<u8>> {
         KeyCode::Digit8 => Some(vec![b'8']),
         KeyCode::Digit9 => Some(vec![b'9']),
         _ => None,
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn winit_modifiers_to_platform(modifiers: ModifiersState) -> crate::platform::ModifierState {
+    crate::platform::linux::input::linux_modifiers(
+        modifiers.control_key(),
+        modifiers.shift_key(),
+        modifiers.alt_key(),
+        modifiers.super_key(),
+    )
+}
+
+#[cfg(target_os = "linux")]
+fn logical_key_parts(key: &Key) -> (Option<&str>, Option<&'static str>) {
+    match key {
+        Key::Character(text) => (Some(text.as_str()), None),
+        Key::Named(named) => (None, named_key_name(*named)),
+        Key::Unidentified(_) | Key::Dead(_) => (None, None),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn linux_composer_shortcut(key: &str) -> ComposerKeyAction {
+    if key.eq_ignore_ascii_case("Enter") {
+        ComposerKeyAction::Submit
+    } else if key.eq_ignore_ascii_case("a") {
+        ComposerKeyAction::SelectAll
+    } else if key.eq_ignore_ascii_case("c") {
+        ComposerKeyAction::Copy
+    } else if key.eq_ignore_ascii_case("x") {
+        ComposerKeyAction::Cut
+    } else if key.eq_ignore_ascii_case("v") {
+        ComposerKeyAction::Paste
+    } else {
+        ComposerKeyAction::Ignored
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn push_committed_text(buffer: &mut String, select_all: &mut bool, text: &str) -> bool {
+    let replaced = prepare_composer_edit(buffer, select_all);
+    let mut changed = false;
+    for ch in text.chars() {
+        if ch == '\r' {
+            buffer.push('\n');
+            changed = true;
+        } else if !ch.is_control() {
+            buffer.push(ch);
+            changed = true;
+        }
+    }
+    changed || replaced
+}
+
+#[cfg(target_os = "linux")]
+fn linux_composer_key_action(
+    event: &KeyEvent,
+    modifiers: ModifiersState,
+    buffer: &mut String,
+    select_all: &mut bool,
+) -> ComposerKeyAction {
+    use crate::platform::KeyClassification;
+
+    let mods = winit_modifiers_to_platform(modifiers);
+    let (logical_char, named) = logical_key_parts(&event.logical_key);
+    match crate::platform::linux::input::classify_key_press(
+        mods,
+        logical_char,
+        named,
+        event.text.as_deref(),
+    ) {
+        KeyClassification::Shortcut { key, .. } => linux_composer_shortcut(&key),
+        KeyClassification::TextCommit(text) => {
+            if push_committed_text(buffer, select_all, &text) {
+                ComposerKeyAction::Edited
+            } else {
+                ComposerKeyAction::Ignored
+            }
+        }
+        KeyClassification::ControlKey { name, .. } => match name.as_str() {
+            "Enter" => {
+                prepare_composer_edit(buffer, select_all);
+                buffer.push('\n');
+                ComposerKeyAction::Edited
+            }
+            "Escape" => ComposerKeyAction::Escape,
+            "Backspace" => {
+                if prepare_composer_edit(buffer, select_all) {
+                    return ComposerKeyAction::Edited;
+                }
+                if buffer.pop().is_some() {
+                    ComposerKeyAction::Edited
+                } else {
+                    ComposerKeyAction::Ignored
+                }
+            }
+            "Space" => {
+                prepare_composer_edit(buffer, select_all);
+                buffer.push(' ');
+                ComposerKeyAction::Edited
+            }
+            _ => ComposerKeyAction::Ignored,
+        },
+        KeyClassification::Ignored => ComposerKeyAction::Ignored,
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn linux_text_field_shortcut(key: &str, buffer: &str, select_all: &mut bool) -> TextFieldKeyAction {
+    if key.eq_ignore_ascii_case("Enter") {
+        TextFieldKeyAction::Submit
+    } else if key.eq_ignore_ascii_case("a") {
+        *select_all = !buffer.is_empty();
+        TextFieldKeyAction::SelectAll
+    } else if key.eq_ignore_ascii_case("c") {
+        TextFieldKeyAction::Copy
+    } else if key.eq_ignore_ascii_case("x") {
+        TextFieldKeyAction::Cut
+    } else if key.eq_ignore_ascii_case("v") {
+        TextFieldKeyAction::Paste
+    } else {
+        TextFieldKeyAction::Ignored
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn linux_text_field_key_action(
+    event: &KeyEvent,
+    modifiers: ModifiersState,
+    buffer: &mut String,
+    multiline: bool,
+    select_all: &mut bool,
+) -> TextFieldKeyAction {
+    use crate::platform::KeyClassification;
+
+    let mods = winit_modifiers_to_platform(modifiers);
+    let (logical_char, named) = logical_key_parts(&event.logical_key);
+    match crate::platform::linux::input::classify_key_press(
+        mods,
+        logical_char,
+        named,
+        event.text.as_deref(),
+    ) {
+        KeyClassification::Shortcut { key, .. } => {
+            linux_text_field_shortcut(&key, buffer, select_all)
+        }
+        KeyClassification::TextCommit(text) => {
+            let replaced = prepare_composer_edit(buffer, select_all);
+            let mut changed = false;
+            for ch in text.chars() {
+                if ch == '\r' {
+                    if multiline {
+                        buffer.push('\n');
+                        changed = true;
+                    }
+                } else if !ch.is_control() {
+                    buffer.push(ch);
+                    changed = true;
+                }
+            }
+            if changed || replaced {
+                TextFieldKeyAction::Edited
+            } else {
+                TextFieldKeyAction::Ignored
+            }
+        }
+        KeyClassification::ControlKey { name, .. } => match name.as_str() {
+            "Enter" if multiline => {
+                prepare_composer_edit(buffer, select_all);
+                buffer.push('\n');
+                TextFieldKeyAction::Edited
+            }
+            "Enter" => TextFieldKeyAction::NextField,
+            "Escape" => TextFieldKeyAction::Escape,
+            "Backspace" => {
+                if prepare_composer_edit(buffer, select_all) {
+                    return TextFieldKeyAction::Edited;
+                }
+                if buffer.pop().is_some() {
+                    TextFieldKeyAction::Edited
+                } else {
+                    TextFieldKeyAction::Ignored
+                }
+            }
+            "Space" => {
+                prepare_composer_edit(buffer, select_all);
+                buffer.push(' ');
+                TextFieldKeyAction::Edited
+            }
+            _ => TextFieldKeyAction::Ignored,
+        },
+        KeyClassification::Ignored => TextFieldKeyAction::Ignored,
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn linux_key_event_to_bytes(event: &KeyEvent, modifiers: ModifiersState) -> Option<Vec<u8>> {
+    use crate::platform::KeyClassification;
+
+    let mods = winit_modifiers_to_platform(modifiers);
+    let (logical_char, named) = logical_key_parts(&event.logical_key);
+    match crate::platform::linux::input::classify_key_press(
+        mods,
+        logical_char,
+        named,
+        event.text.as_deref(),
+    ) {
+        KeyClassification::Shortcut {
+            key,
+            modifiers: classified,
+        } => {
+            if !classified.control {
+                return None;
+            }
+            let mut characters = key.chars();
+            let character = characters.next()?;
+            if characters.next().is_some() {
+                return None;
+            }
+            tmux_key_bytes(&format!("C-{character}"))
+        }
+        KeyClassification::TextCommit(text) => {
+            let bytes = text
+                .chars()
+                .filter(|character| !character.is_control())
+                .collect::<String>()
+                .into_bytes();
+            (!bytes.is_empty()).then_some(bytes)
+        }
+        KeyClassification::ControlKey { name, .. } => tmux_key_bytes(&name),
+        KeyClassification::Ignored => match &event.logical_key {
+            Key::Unidentified(_) => match event.physical_key {
+                PhysicalKey::Code(code) => physical_code_to_byte(code),
+                PhysicalKey::Unidentified(_) => None,
+            },
+            _ => None,
+        },
     }
 }
 

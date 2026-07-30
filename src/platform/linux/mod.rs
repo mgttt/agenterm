@@ -8,6 +8,10 @@
 //! - keyboard committed text vs shortcut chord separation via shared
 //!   [`crate::platform::classify_key_press`]
 //!
+//! Linux `unix_app` hot paths (toolbar click + key/IME text-vs-shortcut) call
+//! into this module under `cfg(target_os = "linux")` and then dispatch to the
+//! existing product handlers. macOS behavior stays on the unbridged path.
+//!
 //! Public capability identity stays on the Linux branch. Private reuse of
 //! `crate::unix_app` helpers is allowed without merging macOS/Linux identities.
 
