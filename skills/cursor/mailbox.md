@@ -123,11 +123,12 @@
 5. （分身1）`build-linux-clients.sh` 传裸 `dev` → 请示#2。
 6. ~~原生 Linux GUI 文字水平镜像~~ — **2026-07-30 13:20 复测已正常**。
 7. （分身1）`lint.sh` Clippy unused imports `font.rs:388` → 请示#3。
-8. ~~（平台迁移）`src/platform/mod.rs` 未落盘~~ — **revision 1 已冻结**；Linux bridge+hot-path @`78f5333`；macOS 见请示#6/席位。
+8. ~~（平台迁移）`src/platform/mod.rs` 未落盘~~ — **revision 1 已冻结**；Linux slice-1+slice-2/ime-clipboard @`b5d54ef`；macOS 见请示#6/席位。
 
 ## 交接日志
 
 ```text
+2026-07-30 14:10 UTC | 分身1 | slice-2 IME+clipboard；platform:: 36 PASS；clipboard round-trip；GUI证据 | 66c54a5/b5d54ef
 2026-07-30 14:05 UTC | 分身1 | unix_app hot-path ↔ platform::linux rev1；19 platform PASS；GUI证据 | 78f5333
 2026-07-30 14:00 UTC | macOS agent | rev1正式接线；17 platform/360 lib/Clippy/原生Retina证据全绿 | df5d9c6
 2026-07-30 14:00 UTC | macOS agent | rev1 bridge 与原生证据完成；等请示#6接线跑正式Cargo门 | ac5ea6e/18c19e4/cf28d9a
