@@ -28,6 +28,10 @@ cursor-cloud MCP → list-cloud-agents
 
 ## Create a sibling agent (desensitized template)
 
+When spawning from **主控**, set API `"name"` to `分身1` / `分身2` / … up front — the API
+does not support renaming an existing agent (`PATCH` returns 404). Update
+[session-registry.md](session-registry.md) after each spawn.
+
 **Endpoint:** `POST https://api.cursor.com/v1/agents`
 
 **Auth:** HTTP Basic — username = API key from `CURSOR_API`, password empty:

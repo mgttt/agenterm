@@ -6,6 +6,7 @@ files are for agents and humans working in Cursor Cloud VMs — not product PRD.
 | Skill | When to use |
 |-------|-------------|
 | [spawn-sibling-cloud-agent.md](spawn-sibling-cloud-agent.md) | Owner asks for a second Cloud Agent on cursor.com while the current session continues |
+| [session-registry.md](session-registry.md) | Track 主控 vs 分身1/2… display names, bcIds, and roles (API cannot rename agents) |
 
 **Security:** never commit API keys, tokens, or full `CURSOR_*` secret values.
 Skills use placeholders and environment variables only.
