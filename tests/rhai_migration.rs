@@ -242,13 +242,19 @@ fn run_migration_audit(repo_under_test: &Path) -> Output {
 fn run_prd_alignment(repo_under_test: &Path) -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let manifest = repo.join("agenterm.tasks.json");
     Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
         .current_dir(repo)
-        .args(["task", "run", "prd-alignment", "--manifest"])
-        .arg(manifest)
-        .args(["--timeout-ms", "20000", "--max-operations", "10000000"])
-        .arg("--")
+        .arg("run")
+        .arg(repo.join("scripts/rhai/prd-alignment.rhai"))
+        .args(["--profile", "local", "--project-root"])
+        .arg(repo)
+        .args([
+            "--timeout-ms",
+            "20000",
+            "--max-operations",
+            "10000000",
+            "--",
+        ])
         .arg(repo_under_test)
         .arg(env!("CARGO_BIN_EXE_agenterm-cli"))
         .arg(env!("CARGO_BIN_EXE_agenterm-mux"))

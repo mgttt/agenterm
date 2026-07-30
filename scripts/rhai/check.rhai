@@ -262,6 +262,23 @@ fn task(worker, manifest, id, timeout_ms, extra) {
     spec(worker, arguments, timeout_ms + 10000, #{})
 }
 
+// Task caller arguments append after manifest defaults. Use a direct script
+// invocation when a platform gate must replace platform-specific defaults.
+fn direct_task(worker, repo, id, timeout_ms, arguments) {
+    let command_arguments = [
+        "run",
+        std::path::join(repo, "scripts/rhai/" + id + ".rhai").display,
+        "--profile", "local",
+        "--project-root", repo,
+        "--timeout-ms", timeout_ms.to_string(),
+        "--max-operations", "10000000",
+        "--max-output-bytes", "1048576",
+        "--"
+    ];
+    command_arguments.append(arguments);
+    spec(worker, command_arguments, timeout_ms + 10000, #{})
+}
+
 fn sorted(values) {
     let result = [];
     for value in values {
@@ -475,14 +492,25 @@ if dry_run {
 
 if quick {
     let quick_started = std::time::SystemTime::now().unix_millis;
-    let prd_extra = [repo];
+    let prd_spec = task(
+        bootstrap_worker,
+        manifest,
+        "prd-alignment",
+        10000,
+        []
+    );
     if unix_bootstrap {
         let native_bin = std::path::join(repo, "target/debug").display;
-        prd_extra.push(
-            std::path::join(native_bin, "agenterm-cli").display
-        );
-        prd_extra.push(
-            std::path::join(native_bin, "agenterm-mux").display
+        prd_spec = direct_task(
+            bootstrap_worker,
+            repo,
+            "prd-alignment",
+            10000,
+            [
+                repo,
+                std::path::join(native_bin, "agenterm-cli").display,
+                std::path::join(native_bin, "agenterm-mux").display
+            ]
         );
     }
     sequence = run_step(
@@ -527,13 +555,7 @@ if quick {
     }
     sequence = run_step(
         "PRD capability alignment",
-        [task(
-            bootstrap_worker,
-            manifest,
-            "prd-alignment",
-            10000,
-            prd_extra
-        )],
+        [prd_spec],
         repo,
         scratch,
         sequence
@@ -829,7 +851,7 @@ let ordinary_gates = [
     #{
         id:"prd-alignment",
         label:"PRD capability alignment",
-        specs:[task(worker, manifest, "prd-alignment", 10000, [repo])]
+        specs:[task(worker, manifest, "prd-alignment", 10000, [])]
     },
     #{
         id:"rhai-lint",
