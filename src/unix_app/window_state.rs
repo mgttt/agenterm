@@ -18,8 +18,8 @@
 use winit::{dpi::LogicalSize, event::WindowEvent, window::Window};
 
 use crate::commands::option_value;
+use crate::platform::window::ClientSize;
 pub(crate) use crate::platform::window::WindowSemanticState;
-use crate::platform::window::{ClientSize, ClientSizeError};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WindowStateTracker {
@@ -51,13 +51,10 @@ impl WindowStateTracker {
 
     /// Reconcile tracked semantics with the live winit window when the platform exposes state.
     pub fn sync_from_window(&mut self, window: &Window) {
-        if window.is_minimized().unwrap_or(false) {
-            self.semantic = WindowSemanticState::Minimized;
-        } else if window.is_maximized() {
-            self.semantic = WindowSemanticState::Maximized;
-        } else {
-            self.semantic = WindowSemanticState::Restored;
-        }
+        self.semantic = WindowSemanticState::from_native_flags(
+            window.is_minimized().unwrap_or(false),
+            window.is_maximized(),
+        );
     }
 }
 
@@ -157,15 +154,9 @@ pub fn apply_ui_action(
                     }
                     WindowUiActionResult::Applied
                 }
-                Err(ClientSizeError::InvalidWidth) => WindowUiActionResult::Invalid(
-                    ClientSizeError::InvalidWidth.message().to_owned(),
-                ),
-                Err(ClientSizeError::InvalidHeight) => WindowUiActionResult::Invalid(
-                    ClientSizeError::InvalidHeight.message().to_owned(),
-                ),
-                Err(ClientSizeError::ExtentTooLarge) => WindowUiActionResult::Invalid(
-                    ClientSizeError::ExtentTooLarge.message().to_owned(),
-                ),
+                Err(error) => {
+                    WindowUiActionResult::Invalid(format!("{} ({})", error.message(), error.code()))
+                }
             }
         }
         _ => WindowUiActionResult::NotHandled,
@@ -293,7 +284,7 @@ mod tests {
         assert_eq!(
             result,
             WindowUiActionResult::Invalid(
-                "window-resize requires --width of at least 320".to_string()
+                "window-resize requires --width of at least 320 (window_width_invalid)".to_string()
             )
         );
 
@@ -309,7 +300,8 @@ mod tests {
         assert_eq!(
             result,
             WindowUiActionResult::Invalid(
-                "window-resize requires --height of at least 240".to_string()
+                "window-resize requires --height of at least 240 (window_height_invalid)"
+                    .to_string()
             )
         );
 
