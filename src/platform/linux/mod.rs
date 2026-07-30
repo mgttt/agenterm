@@ -4,8 +4,7 @@
 //!
 //! Implements shared **contract revision 1** (`crate::platform::CONTRACT_REVISION`):
 //! - slice-1: toolbar action ids + keyboard text/shortcut separation
-//! - slice-2 (this cut): IME + clipboard capability bridges with typed
-//!   [`CapabilityStatus`] (DPI/font/screenshot/activation deferred)
+//! - slice-2: IME + clipboard + DPI/scale (font/screenshot/activation deferred)
 //!
 //! Linux `unix_app` hot paths call into this module under
 //! `cfg(target_os = "linux")`. macOS behavior stays on the unbridged path.
@@ -21,6 +20,7 @@ use crate::platform::{
 pub(crate) mod clipboard;
 pub(crate) mod ime;
 pub(crate) mod input;
+pub(crate) mod scale;
 pub(crate) mod toolbar;
 
 /// Contract revision this Linux adapter tree implements.
@@ -71,11 +71,24 @@ pub(crate) fn slice2_ime_clipboard_capability_kinds() -> [CapabilityKind; 2] {
     [CapabilityKind::Ime, CapabilityKind::Clipboard]
 }
 
+/// Slice-2 second-cut: DPI/scale rides Window (facts + typed scale helpers).
+pub(crate) fn slice2_dpi_scale_capability_kinds() -> [CapabilityKind; 1] {
+    [CapabilityKind::Window]
+}
+
 /// Resolve a capability kind to its current Linux status.
 pub(crate) fn capability_status(kind: CapabilityKind) -> CapabilityStatus {
     let facts = display_facts_from_env();
     match kind {
-        CapabilityKind::Window => window_capability_status(facts),
+        CapabilityKind::Window => {
+            // Window includes DPI/scale discovery when a display backend exists.
+            let window = window_capability_status(facts);
+            if matches!(window, CapabilityStatus::Available) {
+                scale::scale_capability_status(facts)
+            } else {
+                window
+            }
+        }
         CapabilityKind::Input => input_capability_status(facts),
         CapabilityKind::Ime => ime::ime_capability_status(facts),
         CapabilityKind::Clipboard => clipboard::clipboard_capability_status_from_env(),
@@ -138,6 +151,29 @@ mod tests {
             slice2_ime_clipboard_capability_kinds(),
             [CapabilityKind::Ime, CapabilityKind::Clipboard]
         );
+    }
+
+    #[test]
+    fn slice2_dpi_scale_rides_window_capability() {
+        assert_eq!(
+            slice2_dpi_scale_capability_kinds(),
+            [CapabilityKind::Window]
+        );
+        let status = capability_status(CapabilityKind::Window);
+        if display_facts_from_env().headless {
+            assert!(matches!(
+                status,
+                CapabilityStatus::Unsupported {
+                    reason: "headless-display"
+                }
+            ));
+        } else {
+            assert_eq!(status, CapabilityStatus::Available);
+            assert_eq!(
+                scale::scale_capability_status_from_env(),
+                CapabilityStatus::Available
+            );
+        }
     }
 
     #[test]

@@ -2007,10 +2007,60 @@ impl UnixApp {
         self.window
             .as_ref()
             .map(|window| {
-                let size = window.inner_size().to_logical::<u32>(window.scale_factor());
-                (size.width.max(1), size.height.max(1))
+                #[cfg(target_os = "linux")]
+                {
+                    let physical = window.inner_size();
+                    match crate::platform::linux::scale::LinuxWindowMetrics::from_physical(
+                        physical.width,
+                        physical.height,
+                        window.scale_factor(),
+                    ) {
+                        Ok((metrics, _)) => {
+                            (metrics.logical_width.max(1), metrics.logical_height.max(1))
+                        }
+                        Err(_) => {
+                            // Typed failure already recorded by scale helpers; fall back
+                            // to a safe 1×1 floor so layout does not claim fake extents.
+                            (1, 1)
+                        }
+                    }
+                }
+                #[cfg(not(target_os = "linux"))]
+                {
+                    let size = window.inner_size().to_logical::<u32>(window.scale_factor());
+                    (size.width.max(1), size.height.max(1))
+                }
             })
             .unwrap_or((INITIAL_WIDTH, INITIAL_HEIGHT))
+    }
+
+    /// Linux hot-path: resize / scale-factor changes go through `platform::linux::scale`
+    /// (contract revision 1) before PTY/layout updates.
+    #[cfg(target_os = "linux")]
+    fn handle_linux_geometry_event(
+        &mut self,
+        event: crate::platform::linux::scale::LinuxGeometryEvent,
+    ) {
+        use crate::platform::linux::scale::{LinuxGeometryAction, classify_geometry_event};
+        match classify_geometry_event(event) {
+            Ok(LinuxGeometryAction::Apply(_metrics)) => {
+                if let Some(window) = self.window.as_ref() {
+                    absorb_window_event(
+                        &WindowEvent::Resized(window.inner_size()),
+                        window,
+                        &mut self.window_state_tracker,
+                    );
+                }
+                self.resize_to_window();
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
+            Ok(LinuxGeometryAction::Ignore) => {}
+            Err(_error) => {
+                // Typed CapabilityStatus::Failed — do not invent extents.
+            }
+        }
     }
 
     fn sidebar_tab_action_at(&self, x: i32, y: i32) -> Option<SidebarTabAction> {
@@ -4057,16 +4107,57 @@ impl ApplicationHandler<UnixWake> for UnixApp {
         match event {
             WindowEvent::CloseRequested => self.request_window_close(),
             WindowEvent::Resized(size) => {
-                if let Some(window) = self.window.as_ref() {
-                    absorb_window_event(
-                        &WindowEvent::Resized(size),
-                        window,
-                        &mut self.window_state_tracker,
+                #[cfg(target_os = "linux")]
+                {
+                    self.handle_linux_geometry_event(
+                        crate::platform::linux::scale::LinuxGeometryEvent::Resized {
+                            physical_width: size.width,
+                            physical_height: size.height,
+                            scale_factor: self
+                                .window
+                                .as_ref()
+                                .map(|window| window.scale_factor())
+                                .unwrap_or(1.0),
+                        },
                     );
                 }
-                self.resize_to_window();
-                if let Some(window) = self.window.as_ref() {
-                    window.request_redraw();
+                #[cfg(not(target_os = "linux"))]
+                {
+                    if let Some(window) = self.window.as_ref() {
+                        absorb_window_event(
+                            &WindowEvent::Resized(size),
+                            window,
+                            &mut self.window_state_tracker,
+                        );
+                    }
+                    self.resize_to_window();
+                    if let Some(window) = self.window.as_ref() {
+                        window.request_redraw();
+                    }
+                }
+            }
+            WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                #[cfg(target_os = "linux")]
+                {
+                    let physical = self
+                        .window
+                        .as_ref()
+                        .map(|window| window.inner_size())
+                        .unwrap_or_default();
+                    self.handle_linux_geometry_event(
+                        crate::platform::linux::scale::LinuxGeometryEvent::ScaleFactorChanged {
+                            scale_factor,
+                            physical_width: physical.width,
+                            physical_height: physical.height,
+                        },
+                    );
+                }
+                #[cfg(not(target_os = "linux"))]
+                {
+                    self.resize_to_window();
+                    if let Some(window) = self.window.as_ref() {
+                        window.request_redraw();
+                    }
                 }
             }
             WindowEvent::Focused(focused) => {
