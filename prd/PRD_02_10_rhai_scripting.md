@@ -548,6 +548,11 @@ Migration ledger:
   nested qualification remain in their named Rhai tasks. The migration audit
   freezes all five batch files, exact aliases, the generic bootstrap boundary,
   and zero known business-rule tokens.
+  Four matching root `.sh` aliases and `scripts/bootstrap.sh` provide the same
+  stage-0 contract on Linux/macOS. Native Unix build compiles the five client
+  roles; default Unix check is the portable Quick lane and default Unix
+  release is validation-only. Full GUI qualification, Windows packaging and
+  publication remain explicitly unavailable rather than silently degraded.
 - [ ] the migration proceeds from low-side-effect rules and reports through
   build/static quality, public black-box tests, and finally qualification and
   delivery. Each responsibility must prove normalized parity or stronger public
@@ -557,6 +562,8 @@ Migration ledger:
 - [~] the zero-`.ps1` drift gate prevents the old source layer from returning;
   clean-checkout qualification and rehearsal process-tree evidence is being
   finalized.
+  The same gate also freezes four Windows aliases, four Unix aliases, both
+  generic bootstraps, and zero batch/shell business-rule drift.
 - [ ] “PowerShell replacement” applies to repository-owned automation and its
   delivery process, not to users launching PowerShell as a terminal shell or
   to terminal-compatibility coverage. Such compatibility tests must be driven

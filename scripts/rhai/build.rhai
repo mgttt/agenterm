@@ -73,6 +73,21 @@ if profile == "release" {
     cargo_args.push("--profile");
     cargo_args.push("release-fast");
 }
+let unix_bootstrap =
+    std::env::has("AGENTERM_BOOTSTRAP_PLATFORM")
+        && std::env::get("AGENTERM_BOOTSTRAP_PLATFORM") == "unix";
+if unix_bootstrap {
+    for binary in [
+        "agenterm",
+        "agenterm-cli",
+        "agenterm-mux",
+        "agenterm-script",
+        "agenterm-mcp"
+    ] {
+        cargo_args.push("--bin");
+        cargo_args.push(binary);
+    }
+}
 run_command(
     "cargo",
     cargo_args,
@@ -81,6 +96,21 @@ run_command(
     3600000,
     "build_cargo"
 );
+
+if unix_bootstrap {
+    print("");
+    print("Built native Unix client artifacts [" + profile + "]:");
+    for binary in [
+        "agenterm",
+        "agenterm-cli",
+        "agenterm-mux",
+        "agenterm-script",
+        "agenterm-mcp"
+    ] {
+        print("  " + std::path::join(profile_directory, binary).display);
+    }
+    return;
+}
 
 run_command(
     worker,

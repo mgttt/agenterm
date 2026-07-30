@@ -230,6 +230,16 @@ if args.len == 1 {
         args[1]
     };
 }
+let unix_bootstrap =
+    std::env::has("AGENTERM_BOOTSTRAP_PLATFORM")
+        && std::env::get("AGENTERM_BOOTSTRAP_PLATFORM") == "unix";
+if unix_bootstrap && args.len == 0 {
+    mode = "validate";
+}
+require(
+    !unix_bootstrap || mode == "validate",
+    "release_package_requires_windows"
+);
 require(
     mode == "validate" || mode == "rehearse" || mode == "publish",
     "release_mode:" + mode

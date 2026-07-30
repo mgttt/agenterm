@@ -436,6 +436,17 @@ require(
     !quick || !(release || skip_smoke || include_stress || dry_run),
     "check_quick_option_conflict"
 );
+let unix_bootstrap =
+    std::env::has("AGENTERM_BOOTSTRAP_PLATFORM")
+        && std::env::get("AGENTERM_BOOTSTRAP_PLATFORM") == "unix";
+if unix_bootstrap && !quick
+        && !release && !skip_smoke && !include_stress && !dry_run {
+    quick = true;
+}
+require(
+    !unix_bootstrap || quick,
+    "check_full_qualification_requires_windows"
+);
 
 let scratch = rhai::runtime::temp_dir().display;
 let manifest = std::path::join(repo, "agenterm.tasks.json").display;

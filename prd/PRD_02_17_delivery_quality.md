@@ -103,6 +103,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   over one generic stage-0 bootstrap; the named Rhai `build` task now owns
   profile selection, frozen identity, Cargo, staging, target reporting and
   release cleanup, while the migration gate rejects batch business-rule drift
+- [x] matching Linux/macOS `.sh` aliases share one generic Unix bootstrap;
+  native client build, portable Quick check and validation-only release are
+  available without pretending Windows qualification/package authority exists
 - [x] the required `mcp-conformance` Rhai gate owns public stdio lifecycle,
   malformed/oversized recovery, CLI/MCP same-source projection, wait
   causality/cancellation/capacity, force-kill cleanup, privacy, and live

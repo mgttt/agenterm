@@ -102,6 +102,12 @@ Use PowerShell from the repository root:
 .\release.cmd           # public versions only: qualify/package/tag/push for CI
 ```
 
+Linux/macOS have matching `./build.sh`, `./check.sh`, `./lint.sh`, and
+`./release.sh` aliases over `scripts/bootstrap.sh`. Native Unix `build` emits
+the five client binaries; default Unix `check` is the portable Quick lane, and
+default Unix `release` is validation-only. Stress qualification, Windows
+packaging, tag, and push remain explicit Windows release-authority operations.
+
 For this repository, `release.cmd` is the authoritative formal-release entry
 point. It pushes `main` and the version tag directly through Git/GCM; do not
 create a release PR, require a local `gh` installation, or substitute a generic
@@ -118,11 +124,11 @@ or full qualification for the integrated pre-push/release boundary. Search all
 geometry/protocol consumers before the first black-box run so old assertions
 are migrated in the same patch.
 
-The four root Windows batch files are intentionally one-line human aliases.
-Their only shared implementation is `scripts/bootstrap.cmd`, which performs
-generic stage-0 Script worker build/copy/forward/cleanup. Build profiles,
-testing, qualification, packaging, cleanup and release policy belong to named
-Rhai tasks; do not add task-specific branches or product rules to batch files.
+The four root Windows batch files and four matching Unix shell files are thin
+human aliases. Their shared platform bootstraps perform only generic stage-0
+Script worker build/copy/forward/cleanup. Build profiles, testing,
+qualification, packaging, cleanup and release policy belong to named Rhai
+tasks; do not add task-specific branches or product rules to entry files.
 
 Treat build and test latency as a continuously measured product constraint.
 When parallel delegation is authorized, a read-only background observer may

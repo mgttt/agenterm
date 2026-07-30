@@ -74,7 +74,7 @@
       "cwd": ".",
       "args": ["."],
       "dependencies": ["build-identity", "stage-build", "target-report", "prepare-target-clean"],
-      "platforms": ["windows"],
+      "platforms": ["windows", "linux", "macos"],
       "side_effects": ["artifact_write", "process_spawn"]
     },
     {

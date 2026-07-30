@@ -1250,6 +1250,13 @@ dependency, build, test, qualification, packaging, cleanup, rehearsal, and
 publication decisions execute in Rhai; the batch layer contains no fallback
 business implementation.
 
+Linux and macOS provide matching `build.sh`, `check.sh`, `lint.sh`, and
+`release.sh` aliases over `scripts/bootstrap.sh`. Native Unix `build` compiles
+the five client roles. A default Unix `check` selects the portable Quick lane,
+and a default Unix `release` performs validation only; full GUI qualification,
+Windows packaging, tagging, and pushing remain explicit Windows-only
+operations until their platform adapters are independently qualified.
+
 Schema v2 is:
 
 ```json

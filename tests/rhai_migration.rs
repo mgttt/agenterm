@@ -1585,6 +1585,11 @@ fn migration_audit_rejects_operational_references_to_deleted_scripts() {
         "lint.cmd",
         "release.cmd",
         "scripts/bootstrap.cmd",
+        "build.sh",
+        "check.sh",
+        "lint.sh",
+        "release.sh",
+        "scripts/bootstrap.sh",
     ] {
         copy_fixture_file(source_repo, &repo, name);
     }
@@ -1641,6 +1646,8 @@ fn migration_audit_rejects_operational_references_to_deleted_scripts() {
     assert_eq!(report["batch_entry_count"], 5);
     assert_eq!(report["batch_alias_count"], 4);
     assert_eq!(report["batch_business_logic_references"], 0);
+    assert_eq!(report["shell_alias_count"], 4);
+    assert_eq!(report["shell_business_logic_references"], 0);
 
     fs::remove_dir_all(&repo).expect("remove migration fixture");
 }

@@ -1045,6 +1045,10 @@ entry 是集成热点，只允许一个串行 owner 收口。
     stage-0 bootstrap owns worker build/copy/forward/cleanup, while build profile,
     identity, Cargo, staging, target cleanup, qualification and publication
     policy live in named Rhai tasks and are enforced by migration-audit
+  [done] provide four matching Linux/macOS shell entries
+    one generic bootstrap forwards build/check/lint/release; native client
+    build, portable Quick check and validation-only release are explicit,
+    while Windows qualification/package/publish remain unavailable on Unix
 
 第二提交
   [in progress] shared Rhai build/test helpers

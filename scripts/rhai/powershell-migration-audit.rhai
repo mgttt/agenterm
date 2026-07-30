@@ -197,6 +197,62 @@ require(
     "migration_batch_bootstrap_size"
 );
 
+let shell_aliases = #{
+    "build.sh": "build",
+    "check.sh": "check",
+    "lint.sh": "lint",
+    "release.sh": "release"
+};
+for path in shell_aliases.keys() {
+    require(
+        std::fs::exists(std::path::join(repo, path).display),
+        "migration_shell_alias_missing:" + path
+    );
+    let source = std::fs::read_to_string(std::path::join(repo, path).display);
+    source.replace("\r\n", "\n");
+    source.trim();
+    let task = shell_aliases[path];
+    let expected =
+        "#!/usr/bin/env sh\n" +
+        "set -eu\n" +
+        "AGENTERM_BOOTSTRAP_TASK=" + task + "\n" +
+        "export AGENTERM_BOOTSTRAP_TASK\n" +
+        `exec "$(dirname "$0")/scripts/bootstrap.sh" "$@"`;
+    require(source == expected, "migration_shell_alias_not_thin:" + path);
+}
+let shell_bootstrap_path =
+    std::path::join(repo, "scripts/bootstrap.sh").display;
+require(
+    std::fs::exists(shell_bootstrap_path),
+    "migration_shell_bootstrap_missing"
+);
+let shell_bootstrap = std::fs::read_to_string(shell_bootstrap_path);
+shell_bootstrap = shell_bootstrap.to_lower();
+for forbidden in [
+    "release-fast",
+    "stage-build",
+    "include-stress",
+    "package-qualified",
+    "cargo clean",
+    "git push",
+    "git tag"
+] {
+    require(
+        !shell_bootstrap.contains(forbidden),
+        "migration_shell_bootstrap_business_rule:" + forbidden
+    );
+}
+require(
+    shell_bootstrap.contains(
+        `task run "$agenterm_bootstrap_task"`
+    )
+        && shell_bootstrap.contains(
+            "cargo build --quiet --locked --bin agenterm-script"
+        )
+        && shell_bootstrap.split("\n").len <= 40,
+    "migration_shell_bootstrap_not_generic"
+);
+
 let report = #{
     schema_version: 1,
     task_id: "migration-audit",
@@ -208,6 +264,8 @@ let report = #{
     batch_entry_count: batch_paths.len,
     batch_alias_count: aliases.keys().len,
     batch_business_logic_references: 0,
+    shell_alias_count: shell_aliases.keys().len,
+    shell_business_logic_references: 0,
     drift: false
 };
 require(
