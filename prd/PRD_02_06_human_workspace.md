@@ -25,8 +25,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   child's own row without borrowing the Composer
 - [x] collapse/expand with persisted node state
 - [x] high-density two-line rows with compact outer/inner spacing, continuous
-  native tree connectors, grid-aligned expand boxes, status lamps, and
-  bordered selection; persisted notes remain visible below names
+  native tree connectors from one renderer-neutral geometry contract on
+  Windows and Unix, grid-aligned expand boxes, status lamps, and bordered
+  selection; persisted notes remain visible below names, and the optional
+  hierarchy-state screenshot in `remote-ui-smoke` captures the connectors
+  before parent-promotion mutations
 - [x] the full-height Tabs tree owns a visible draggable vertical scrollbar on
   its outer left edge; row content remains to its right, and mouse-wheel, thumb
   drag, row paint, inline editors, selection, disclosure and action hit-testing

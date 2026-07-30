@@ -72,8 +72,9 @@ use crate::{
     ui_geometry::{
         PixelRect, TAB_HEIGHT, TAB_TOP, TERMINAL_SCROLLBAR_WIDTH, TerminalScrollbarGeometry,
         TreeRowActionDensity, TreeRowGeometry, TreeRowMode, WorkspaceLayout, WorkspaceLayoutInput,
-        pixel_rect_json, reset_tabs_width, scrollback_for_thumb_top, tabs_width_from_drag,
-        terminal_scrollbar_geometry, tree_row_at_y, tree_row_geometry_for_mode, workspace_layout,
+        pixel_rect_json, reset_tabs_width, scrollback_for_thumb_top, sidebar_scrollbar_track,
+        sidebar_tree_row_geometry, tabs_width_from_drag, terminal_scrollbar_geometry,
+        tree_connector_segments, tree_row_at_y, workspace_layout,
     },
     working_context::parse_proxy_url,
 };
@@ -445,10 +446,12 @@ impl NewShellChoice {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct RemoteTreeRow {
     tab_index: usize,
     depth: usize,
+    is_last: bool,
+    guides: Vec<bool>,
     has_children: bool,
     collapsed: bool,
 }
@@ -2836,7 +2839,7 @@ impl RemoteWindowState {
         let client = self.client.as_ref()?;
         let row = remote_tree_rows(&client.snapshot().tabs)
             .get(row_index)
-            .copied()?;
+            .cloned()?;
         client.snapshot().tabs.get(row.tab_index)
     }
 
@@ -2845,7 +2848,7 @@ impl RemoteWindowState {
         let client = self.client.as_ref()?;
         let row = remote_tree_rows(&client.snapshot().tabs)
             .get(row_index)
-            .copied()?;
+            .cloned()?;
         let tab = client.snapshot().tabs.get(row.tab_index)?;
         if client.snapshot().active_tab_id.as_deref() != Some(tab.id.as_str()) {
             return None;
@@ -2872,7 +2875,7 @@ impl RemoteWindowState {
         let client = self.client.as_ref()?;
         let row = remote_tree_rows(&client.snapshot().tabs)
             .get(row_index)
-            .copied()?;
+            .cloned()?;
         if !row.has_children {
             return None;
         }
@@ -4346,6 +4349,16 @@ impl RemoteWindowState {
                 fill(device, &row, palette.active.colorref());
                 frame(device, &row, palette.active_border.colorref());
             }
+            for segment in tree_connector_segments(
+                self.workspace_geometry().sidebar_tree,
+                &geometry,
+                tree_row.depth,
+                &tree_row.guides,
+                tree_row.is_last,
+                TreeRowMode::Normal,
+            ) {
+                fill(device, &win_rect(segment), palette.divider.colorref());
+            }
             if tree_row.has_children {
                 let expander = win_rect(geometry.expander);
                 frame(device, &expander, palette.active_border.colorref());
@@ -5322,6 +5335,8 @@ fn remote_tree_rows(tabs: &[UiTabBootstrap]) -> Vec<RemoteTreeRow> {
             Some(RemoteTreeRow {
                 tab_index,
                 depth: row.depth,
+                is_last: row.is_last,
+                guides: row.guides,
                 has_children: nodes.iter().any(|node| node.parent_id == Some(row.id)),
                 collapsed: tabs[tab_index].collapsed,
             })
@@ -5401,60 +5416,6 @@ fn win_rect(rect: PixelRect) -> RECT {
         right: rect.right,
         bottom: rect.bottom,
     }
-}
-
-fn sidebar_tree_row_geometry(
-    sidebar_tree: PixelRect,
-    visual_position: usize,
-    depth: usize,
-    mode: TreeRowMode,
-) -> TreeRowGeometry {
-    let content_left = (sidebar_tree.left + TERMINAL_SCROLLBAR_WIDTH).min(sidebar_tree.right);
-    let content_width = (sidebar_tree.right - content_left).max(0);
-    translate_tree_row_x(
-        tree_row_geometry_for_mode(visual_position, depth, content_width, mode),
-        content_left,
-    )
-}
-
-fn sidebar_scrollbar_track(sidebar_tree: PixelRect) -> PixelRect {
-    PixelRect {
-        left: sidebar_tree.left,
-        top: sidebar_tree.top,
-        right: (sidebar_tree.left + TERMINAL_SCROLLBAR_WIDTH).min(sidebar_tree.right),
-        bottom: sidebar_tree.bottom,
-    }
-}
-
-fn translate_tree_row_x(mut geometry: TreeRowGeometry, delta: i32) -> TreeRowGeometry {
-    fn translate(mut rect: PixelRect, delta: i32) -> PixelRect {
-        rect.left += delta;
-        rect.right += delta;
-        rect
-    }
-
-    geometry.row = translate(geometry.row, delta);
-    geometry.selection = translate(geometry.selection, delta);
-    geometry.node_x += delta;
-    geometry.expander = translate(geometry.expander, delta);
-    geometry.status = translate(geometry.status, delta);
-    geometry.disclosure_hit = translate(geometry.disclosure_hit, delta);
-    geometry.text = translate(geometry.text, delta);
-    geometry.name = translate(geometry.name, delta);
-    geometry.note = translate(geometry.note, delta);
-    geometry.editors = geometry.editors.map(|mut editors| {
-        editors.name = translate(editors.name, delta);
-        editors.note = translate(editors.note, delta);
-        editors
-    });
-    geometry.actions.bounds = translate(geometry.actions.bounds, delta);
-    geometry.actions.add_child = geometry
-        .actions
-        .add_child
-        .map(|bounds| translate(bounds, delta));
-    geometry.actions.primary = translate(geometry.actions.primary, delta);
-    geometry.actions.secondary = translate(geometry.actions.secondary, delta);
-    geometry
 }
 
 fn window_text(window: HWND) -> String {

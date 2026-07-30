@@ -1317,6 +1317,9 @@ try {
             && hierarchy_grandchild.depth == 2,
         "remote_ui_hierarchy_shape_invalid"
     );
+    if requested_screenshot != "" {
+        screenshot(context, cli, requested_screenshot);
+    }
     let cycle = optional_cli(
         context,
         cli,
@@ -1785,15 +1788,13 @@ try {
         "remote_ui_in_place_reconnect_identity_invalid"
     );
 
-    let final_screenshot = if requested_screenshot == "" {
-        std::path::join(
+    if requested_screenshot == "" {
+        let final_screenshot = std::path::join(
             std::path::parent(context.evidence_path).display,
             "remote-ui.png"
-        ).display
-    } else {
-        requested_screenshot
-    };
-    screenshot(context, cli, final_screenshot);
+        ).display;
+        screenshot(context, cli, final_screenshot);
+    }
     discard_cli(
         context,
         cli,

@@ -1,7 +1,6 @@
 use crate::theme::{Rgb, ThemeId, ThemePalette};
 use crate::ui_geometry::{
-    PixelRect, TERMINAL_SCROLLBAR_WIDTH, TreeRowMode, sidebar_tree_row_geometry, tree_connector_x,
-    tree_row_at_y,
+    PixelRect, TreeRowMode, sidebar_tree_row_geometry, tree_connector_segments, tree_row_at_y,
 };
 use unicode_width::UnicodeWidthChar;
 
@@ -1195,56 +1194,30 @@ fn render_tree_row_connectors(
     row_bottom: u32,
     mode: TreeRowMode,
 ) {
-    let content_left = (sidebar_tree.left + TERMINAL_SCROLLBAR_WIDTH).min(sidebar_tree.right);
-    let content_width = (sidebar_tree.right - content_left).max(0);
-    if content_width <= 0 {
-        return;
-    }
     let line_color = rgb_to_pixel(palette.divider);
-    let node_y = geometry.node_y.max(0) as u32;
-
-    for (depth, &continues) in row.guides.iter().enumerate() {
-        if continues {
-            let x = (tree_connector_x(depth, content_width, mode) + content_left).max(0) as u32;
-            let height = row_bottom.saturating_sub(row_top);
-            if height > 0 {
-                fill_rect(buffer, stride, x, row_top, 1, height, line_color);
-            }
-        }
-    }
-
-    if row.depth == 0 {
-        return;
-    }
-
-    let parent_depth = row.depth - 1;
-    let parent_x =
-        (tree_connector_x(parent_depth, content_width, mode) + content_left).max(0) as u32;
-    let node_x = geometry.node_x.max(0) as u32;
-    let vert_bottom = if row.is_last {
-        node_y.saturating_add(1)
-    } else {
-        row_bottom
-    };
-    if vert_bottom > row_top {
+    for segment in tree_connector_segments(
+        sidebar_tree,
+        geometry,
+        row.depth,
+        &row.guides,
+        row.is_last,
+        mode,
+    ) {
+        let left = segment.left.max(0) as u32;
+        let top = segment.top.max(row_top as i32).max(0) as u32;
+        let right = segment.right.max(segment.left).max(0) as u32;
+        let bottom = segment
+            .bottom
+            .min(row_bottom as i32)
+            .max(segment.top)
+            .max(0) as u32;
         fill_rect(
             buffer,
             stride,
-            parent_x,
-            row_top,
-            1,
-            vert_bottom.saturating_sub(row_top),
-            line_color,
-        );
-    }
-    if node_x > parent_x.saturating_add(1) {
-        fill_rect(
-            buffer,
-            stride,
-            parent_x,
-            node_y,
-            node_x - parent_x,
-            1,
+            left,
+            top,
+            right.saturating_sub(left),
+            bottom.saturating_sub(top),
             line_color,
         );
     }

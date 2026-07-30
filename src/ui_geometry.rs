@@ -695,6 +695,66 @@ pub(crate) fn sidebar_tree_row_geometry(
     )
 }
 
+/// Return the one-pixel branch segments for one visible tree row.
+///
+/// Keeping this geometry host-independent prevents the Win32 and Unix
+/// renderers from drifting: both hosts paint the same ancestor guides and
+/// child elbow around the same responsive node anchors.
+pub(crate) fn tree_connector_segments(
+    sidebar_tree: PixelRect,
+    geometry: &TreeRowGeometry,
+    depth: usize,
+    guides: &[bool],
+    is_last: bool,
+    mode: TreeRowMode,
+) -> Vec<PixelRect> {
+    let content_left = (sidebar_tree.left + TERMINAL_SCROLLBAR_WIDTH).min(sidebar_tree.right);
+    let content_width = (sidebar_tree.right - content_left).max(0);
+    let row_top = geometry.row.top.max(sidebar_tree.top);
+    let row_bottom = geometry.row.bottom.min(sidebar_tree.bottom);
+    if content_width <= 0 || row_bottom <= row_top {
+        return Vec::new();
+    }
+
+    let mut segments = Vec::with_capacity(guides.len() + 2);
+    for (guide_depth, &continues) in guides.iter().enumerate() {
+        if continues {
+            let x = content_left + tree_connector_x(guide_depth, content_width, mode);
+            segments.push(PixelRect {
+                left: x,
+                top: row_top,
+                right: x + 1,
+                bottom: row_bottom,
+            });
+        }
+    }
+
+    if depth == 0 {
+        return segments;
+    }
+
+    let parent_x = content_left + tree_connector_x(depth - 1, content_width, mode);
+    let node_y = geometry.node_y.clamp(row_top, row_bottom - 1);
+    let vertical_bottom = if is_last { node_y + 1 } else { row_bottom };
+    if vertical_bottom > row_top {
+        segments.push(PixelRect {
+            left: parent_x,
+            top: row_top,
+            right: parent_x + 1,
+            bottom: vertical_bottom,
+        });
+    }
+    if geometry.node_x > parent_x + 1 {
+        segments.push(PixelRect {
+            left: parent_x,
+            top: node_y,
+            right: geometry.node_x,
+            bottom: node_y + 1,
+        });
+    }
+    segments
+}
+
 #[cfg_attr(not(unix), allow(dead_code))]
 pub(crate) fn sidebar_scrollbar_geometry(
     track: PixelRect,
@@ -1219,6 +1279,29 @@ mod tests {
             tree_connector_x(MAX_TREE_DEPTH, 180, TreeRowMode::Normal)
                 < tree_connector_x(MAX_TREE_DEPTH, 480, TreeRowMode::Normal)
         );
+    }
+
+    #[test]
+    fn shared_tree_connectors_include_ancestor_guide_and_last_child_elbow() {
+        let sidebar = PixelRect {
+            left: 0,
+            top: 0,
+            right: 244,
+            bottom: 700,
+        };
+        let geometry = sidebar_tree_row_geometry(sidebar, 1, 2, TreeRowMode::Normal);
+        let segments =
+            tree_connector_segments(sidebar, &geometry, 2, &[true], true, TreeRowMode::Normal);
+
+        assert_eq!(segments.len(), 3);
+        assert_eq!(segments[0].width(), 1);
+        assert_eq!(segments[0].top, geometry.row.top);
+        assert_eq!(segments[0].bottom, geometry.row.bottom);
+        assert_eq!(segments[1].width(), 1);
+        assert_eq!(segments[1].bottom, geometry.node_y + 1);
+        assert_eq!(segments[2].top, geometry.node_y);
+        assert_eq!(segments[2].height(), 1);
+        assert_eq!(segments[2].right, geometry.node_x);
     }
 
     #[test]
