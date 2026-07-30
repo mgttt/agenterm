@@ -78,13 +78,18 @@ tests or ownership.
 ## Platform branches
 
 - Windows
+  - [x] contract-revision-1 Windows adapter owns toolbar action mapping,
+    UTF-16 committed-text decoding, and Control/AltGr shortcut separation; the
+    Win32 `WM_COMMAND`, `WM_CHAR`, and terminal-key hot paths consume it
   - [~] existing Win32 window, HWND controls, GDI rendering, native clipboard,
     system menu, activation, screenshots, and input behavior are shipped but
     remain distributed across Windows application modules
-  - [ ] adapt existing behavior behind the shared contracts without changing
-    the replaceable-GUI/server split or taking ownership of server state
-  - [ ] preserve native Edit behavior, ConPTY input, no-activate, parent-console
-    launcher guidance, and running-image-safe development
+  - [~] adapt the remaining behavior behind the shared contracts without
+    changing the replaceable-GUI/server split or taking ownership of server
+    state
+  - [x] the first slice preserves native Edit behavior, ConPTY input,
+    no-activate, parent-console launcher guidance, and running-image-safe
+    development
 - macOS
   - [~] winit/softbuffer windowing, native IME events, system-font rasterization,
     Unicode/color/attribute rendering, clipboard, cursor, DPI, and POSIX PTY
@@ -134,7 +139,9 @@ tests or ownership.
 2. [~] adapt one narrow vertical slice—toolbar labels/actions plus keyboard
    text/shortcut separation—on all three systems
    (Linux hot-path wired through `platform::linux` @ `78f5333`; macOS adapter
-   bridged; Windows adaptation still pending primary)
+   exists but its Unix GUI hot paths still need explicit adapter routing;
+   Windows hot paths and AltGr-safe UTF-16 input are wired through
+   `platform::windows`)
 3. [ ] move IME, clipboard, DPI, font, screenshot, activation, and remaining
    window integration incrementally behind the same boundary
 4. [ ] remove superseded platform-specific paths only after native black-box
@@ -152,3 +159,13 @@ Completion requires:
   theme, active terminal, modal, and focus state
 - [ ] platform failures are typed and diagnosable, with no hidden fallback that
   reports a capability as available when it did not execute
+
+Windows slice-1 evidence (2026-07-30):
+
+- [x] warnings-denied all-target/all-feature Clippy
+- [x] 286 library tests, including native toolbar-ID mapping, toolbar ordering, Ctrl shortcut, AltGr
+  committed text, BMP Unicode, surrogate pairs, and orphan-surrogate handling
+- [x] incremental Windows artifact build
+- [x] `remote-ui-smoke` native public-interface journey: 15 evidence IDs,
+  including toolbar/tabs, keyboard navigation, locale, Settings, clipboard,
+  scrollback, close/detach, server restart, and replaceable-GUI recovery

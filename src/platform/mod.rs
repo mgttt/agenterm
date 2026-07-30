@@ -13,10 +13,12 @@
 //!
 //! Adapter modules are declared only when the corresponding tree exists.
 
-#![allow(dead_code)]
-
 /// Frozen shared-contract revision implemented by this module.
+#[allow(dead_code)]
 pub const CONTRACT_REVISION: u32 = 1;
+
+#[cfg(target_os = "windows")]
+pub mod windows;
 
 #[cfg(target_os = "linux")]
 pub mod linux;
@@ -38,6 +40,7 @@ pub mod action {
 
 /// Which operating-system adapter identity is speaking.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[allow(dead_code)]
 pub enum PlatformKind {
     Windows,
     Macos,
@@ -47,6 +50,7 @@ pub enum PlatformKind {
 /// Capability surface an adapter may expose (capability-oriented, not one
 /// global `OsLayer` object).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[allow(dead_code)]
 pub enum CapabilityKind {
     Window,
     Input,
@@ -60,6 +64,7 @@ pub enum CapabilityKind {
 
 /// Explicit availability of a capability. Missing behavior must not be hidden.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum CapabilityStatus {
     Available,
     Unsupported { reason: &'static str },
@@ -91,6 +96,7 @@ impl ModifierState {
 
     /// Control or meta held — common primary-chord probe used by slice-1
     /// adapters. Platform-specific primary policy still belongs in the adapter.
+    #[allow(dead_code)]
     pub const fn control_or_meta(self) -> bool {
         self.control || self.meta
     }
@@ -119,6 +125,7 @@ pub enum KeyClassification {
 /// Linux populates X11/Wayland; other platforms leave those flags false and
 /// report headless through their own window capability diagnostics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[allow(dead_code)]
 pub struct DisplayBackendFacts {
     pub x11: bool,
     pub wayland: bool,
@@ -127,16 +134,19 @@ pub struct DisplayBackendFacts {
 
 /// Separate shortcut chords from committed Unicode text.
 ///
+/// `is_shortcut` is decided by the native adapter because Control, Command,
+/// Super, and Windows AltGr layouts do not share one primary-chord policy.
 /// `committed_text` is whatever the native path already resolved. When present
-/// and no control/meta shortcut chord is held, prefer [`KeyClassification::TextCommit`]
-/// over physical-key synthesis.
+/// and `is_shortcut` is false, prefer [`KeyClassification::TextCommit`] over
+/// physical-key synthesis.
 pub fn classify_key_press(
+    is_shortcut: bool,
     modifiers: ModifierState,
     logical_character: Option<&str>,
     named_key: Option<&str>,
     committed_text: Option<&str>,
 ) -> KeyClassification {
-    if modifiers.control_or_meta() {
+    if is_shortcut {
         if let Some(ch) = logical_character {
             return KeyClassification::Shortcut {
                 key: ch.to_string(),
@@ -257,7 +267,13 @@ mod tests {
 
         for (label, modifiers, logical, named, committed, want) in cases {
             assert_eq!(
-                classify_key_press(modifiers, logical, named, committed),
+                classify_key_press(
+                    modifiers.control_or_meta(),
+                    modifiers,
+                    logical,
+                    named,
+                    committed
+                ),
                 want,
                 "{label}"
             );

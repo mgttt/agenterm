@@ -734,6 +734,7 @@
       "entry": "scripts/rhai/prd-alignment.rhai",
       "profile": "local",
       "cwd": ".",
+      "args": [".", "dist/agenterm-cli.exe", "dist/agenterm-mux.exe"],
       "dependencies": [],
       "platforms": ["windows", "linux", "macos"],
       "side_effects": ["process_spawn"]

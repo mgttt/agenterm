@@ -30,7 +30,8 @@ use windows_sys::Win32::{
         Input::KeyboardAndMouse::{
             EnableWindow, GetFocus, GetKeyState, ReleaseCapture, SetCapture, SetFocus, VK_CONTROL,
             VK_DOWN, VK_END, VK_ESCAPE, VK_F1, VK_F2, VK_F3, VK_F4, VK_F5, VK_F6, VK_F7, VK_F8,
-            VK_F9, VK_F10, VK_F11, VK_F12, VK_HOME, VK_LEFT, VK_NEXT, VK_PRIOR, VK_RIGHT, VK_UP,
+            VK_F9, VK_F10, VK_F11, VK_F12, VK_HOME, VK_LEFT, VK_MENU, VK_NEXT, VK_PRIOR, VK_RIGHT,
+            VK_UP,
         },
         WindowsAndMessaging::{
             CS_DBLCLKS, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CheckMenuItem, CreateWindowExW,
@@ -59,6 +60,13 @@ use crate::{
     commands::{option_value, positional_values, screenshot_output_path, tmux_key_bytes},
     instances::intentional_shutdown_matches,
     locale::UiText,
+    platform::{
+        KeyClassification, action,
+        windows::{
+            input::{Utf16TextDecoder, primary_shortcut, windows_modifiers},
+            toolbar::WindowsToolbarHit,
+        },
+    },
     protocol::IpcResponse,
     settings::{
         AppConfig, EffectiveTerminalAppearance, MAX_TERMINAL_FONT_SIZE, MIN_TERMINAL_FONT_SIZE,
@@ -128,6 +136,18 @@ const CLIPBOARD_UNICODE_TEXT: u32 = 13;
 const WM_APP_AUTOMATION_SHORTCUT: u32 = 0x8000 + 2;
 const WM_APP_FOCUS_QUERY: u32 = 0x8000 + 3;
 const WM_APP_DESTROY_WINDOW: u32 = 0x8000 + 4;
+
+const fn windows_toolbar_hit(control_id: usize) -> Option<WindowsToolbarHit> {
+    match control_id {
+        TABS_ID => Some(WindowsToolbarHit::ToggleTabs),
+        NEW_ID => Some(WindowsToolbarHit::NewTab),
+        SETTINGS_ID => Some(WindowsToolbarHit::Settings),
+        LOCALE_ID => Some(WindowsToolbarHit::ToggleLocale),
+        FONT_DECREASE_ID => Some(WindowsToolbarHit::FontDecrease),
+        FONT_INCREASE_ID => Some(WindowsToolbarHit::FontIncrease),
+        _ => None,
+    }
+}
 const STATUS_HEIGHT: i32 = 26;
 const COMPOSER_HEIGHT: i32 = 104;
 const MARGIN: i32 = 6;
@@ -679,7 +699,7 @@ struct RemoteWindowState {
     font: HFONT,
     cell_width: i32,
     cell_height: i32,
-    pending_high_surrogate: Option<u16>,
+    terminal_text_decoder: Utf16TextDecoder,
     last_active_id: Option<String>,
     last_composer_identity: Option<(String, Option<String>, bool, usize)>,
     tabs_resize_dragging: bool,
@@ -813,7 +833,7 @@ impl RemoteWindowState {
             font,
             cell_width,
             cell_height,
-            pending_high_surrogate: None,
+            terminal_text_decoder: Utf16TextDecoder::default(),
             last_active_id,
             last_composer_identity,
             tabs_resize_dragging: false,
@@ -4512,47 +4532,33 @@ impl RemoteWindowState {
     }
 
     fn terminal_char(&mut self, value: u16) {
-        let scalar = if (0xd800..=0xdbff).contains(&value) {
-            self.pending_high_surrogate = Some(value);
-            return;
-        } else if (0xdc00..=0xdfff).contains(&value) {
-            let Some(high) = self.pending_high_surrogate.take() else {
-                return;
-            };
-            0x1_0000 + ((u32::from(high) - 0xd800) << 10) + (u32::from(value) - 0xdc00)
-        } else {
-            self.pending_high_surrogate = None;
-            u32::from(value)
-        };
-        let mut encoded = [0_u8; 4];
-        let bytes = match scalar {
-            8 => b"\x7f".as_slice(),
-            13 => b"\r".as_slice(),
-            _ => char::from_u32(scalar)
-                .map(|character| character.encode_utf8(&mut encoded).as_bytes())
-                .unwrap_or_default(),
-        };
-        if !bytes.is_empty() {
-            self.terminal_input(bytes);
+        if let KeyClassification::TextCommit(text) = self.terminal_text_decoder.push(value) {
+            match text.as_str() {
+                "\u{8}" => self.terminal_input(b"\x7f"),
+                "\r" => self.terminal_input(b"\r"),
+                _ => self.terminal_input(text.as_bytes()),
+            }
         }
     }
 
     fn terminal_key(&mut self, key: u32) -> bool {
         let key = u16::try_from(key).unwrap_or_default();
         let control = unsafe { GetKeyState(VK_CONTROL as i32) } < 0;
-        if control && key == u16::from(b'C') && self.terminal_selection.is_some() {
+        let alt = unsafe { GetKeyState(VK_MENU as i32) } < 0;
+        let primary = primary_shortcut(windows_modifiers(control, false, alt, false));
+        if primary && key == u16::from(b'C') && self.terminal_selection.is_some() {
             if let Err(error) = self.copy_terminal_selection() {
                 self.last_error = Some(format!("Copy failed: {error:#}"));
             }
             return true;
         }
-        if control && key == u16::from(b'V') {
+        if primary && key == u16::from(b'V') {
             if let Err(error) = self.paste_terminal_clipboard() {
                 self.last_error = Some(format!("Paste failed: {error:#}"));
             }
             return true;
         }
-        if control && (u16::from(b'A')..=u16::from(b'Z')).contains(&key) {
+        if primary && (u16::from(b'A')..=u16::from(b'Z')).contains(&key) {
             self.terminal_input(&[(key as u8) - b'A' + 1]);
             return true;
         }
@@ -4585,6 +4591,21 @@ impl RemoteWindowState {
             true
         } else {
             false
+        }
+    }
+
+    fn dispatch_windows_toolbar_action(&mut self, action_id: &str) {
+        match action_id {
+            action::TOGGLE_TABS => self.toggle_tabs(),
+            action::NEW_TAB => self.open_new_terminal(),
+            action::OPEN_SETTINGS => {
+                self.finish_cwd_editor(false);
+                self.open_settings();
+            }
+            action::TOGGLE_LOCALE => self.toggle_locale(),
+            action::FONT_DECREASE => self.adjust_active_terminal_font(-1),
+            action::FONT_INCREASE => self.adjust_active_terminal_font(1),
+            _ => {}
         }
     }
 
@@ -5527,58 +5548,50 @@ unsafe extern "system" fn window_proc(
         }
         WM_COMMAND => {
             if let Some(state) = state_mut(window) {
-                match wparam & 0xffff {
-                    SEND_ID => state.send_composer(),
-                    NEW_ID => {
-                        state.open_new_terminal();
+                let control_id = wparam & 0xffff;
+                if let Some(hit) = windows_toolbar_hit(control_id) {
+                    state.dispatch_windows_toolbar_action(hit.action_id());
+                } else {
+                    match control_id {
+                        SEND_ID => state.send_composer(),
+                        TAB_SAVE_ID => state.finish_tab_edit(true),
+                        TAB_CANCEL_ID => state.finish_tab_edit(false),
+                        CLOSE_KEEP_ID => {
+                            state.finish_window_close(RemoteCloseChoice::KeepServerRunning)
+                        }
+                        CLOSE_STOP_ID => {
+                            state.finish_window_close(RemoteCloseChoice::StopServerAndExit)
+                        }
+                        CLOSE_CANCEL_ID => state.finish_window_close(RemoteCloseChoice::Cancel),
+                        SETTINGS_DARK_ID => state.preview_settings_theme(ThemeId::Dark),
+                        SETTINGS_LIGHT_ID => state.preview_settings_theme(ThemeId::Light),
+                        SETTINGS_DEFAULT_SCOPE_ID => {
+                            state.switch_settings_scope(SettingsScope::Defaults)
+                        }
+                        SETTINGS_CURRENT_SCOPE_ID => {
+                            state.switch_settings_scope(SettingsScope::CurrentTerminal)
+                        }
+                        SETTINGS_FONT_INHERIT_ID => {
+                            state.toggle_settings_inheritance(AppearanceField::FontFamily)
+                        }
+                        SETTINGS_SIZE_INHERIT_ID => {
+                            state.toggle_settings_inheritance(AppearanceField::FontSize)
+                        }
+                        SETTINGS_THEME_INHERIT_ID => {
+                            state.toggle_settings_inheritance(AppearanceField::Theme)
+                        }
+                        SETTINGS_RESET_OVERRIDES_ID => state.reset_settings_overrides(),
+                        SETTINGS_APPLY_ID => state.finish_settings(true),
+                        SETTINGS_CANCEL_ID => state.finish_settings(false),
+                        TAB_CLOSE_CONFIRM_ID => state.finish_close_tab(true),
+                        TAB_CLOSE_CANCEL_ID => state.finish_close_tab(false),
+                        NEW_DEFAULT_SHELL_ID => state.choose_new_shell(NewShellChoice::Default),
+                        NEW_CMD_SHELL_ID => state.choose_new_shell(NewShellChoice::CommandPrompt),
+                        NEW_POWERSHELL_ID => state.choose_new_shell(NewShellChoice::PowerShell),
+                        NEW_CREATE_ID => state.finish_new_terminal(true),
+                        NEW_CANCEL_ID => state.finish_new_terminal(false),
+                        _ => {}
                     }
-                    SETTINGS_ID => {
-                        state.finish_cwd_editor(false);
-                        state.open_settings();
-                    }
-                    TABS_ID => {
-                        state.toggle_tabs();
-                    }
-                    LOCALE_ID => state.toggle_locale(),
-                    FONT_DECREASE_ID => state.adjust_active_terminal_font(-1),
-                    FONT_INCREASE_ID => state.adjust_active_terminal_font(1),
-                    TAB_SAVE_ID => state.finish_tab_edit(true),
-                    TAB_CANCEL_ID => state.finish_tab_edit(false),
-                    CLOSE_KEEP_ID => {
-                        state.finish_window_close(RemoteCloseChoice::KeepServerRunning)
-                    }
-                    CLOSE_STOP_ID => {
-                        state.finish_window_close(RemoteCloseChoice::StopServerAndExit)
-                    }
-                    CLOSE_CANCEL_ID => state.finish_window_close(RemoteCloseChoice::Cancel),
-                    SETTINGS_DARK_ID => state.preview_settings_theme(ThemeId::Dark),
-                    SETTINGS_LIGHT_ID => state.preview_settings_theme(ThemeId::Light),
-                    SETTINGS_DEFAULT_SCOPE_ID => {
-                        state.switch_settings_scope(SettingsScope::Defaults)
-                    }
-                    SETTINGS_CURRENT_SCOPE_ID => {
-                        state.switch_settings_scope(SettingsScope::CurrentTerminal)
-                    }
-                    SETTINGS_FONT_INHERIT_ID => {
-                        state.toggle_settings_inheritance(AppearanceField::FontFamily)
-                    }
-                    SETTINGS_SIZE_INHERIT_ID => {
-                        state.toggle_settings_inheritance(AppearanceField::FontSize)
-                    }
-                    SETTINGS_THEME_INHERIT_ID => {
-                        state.toggle_settings_inheritance(AppearanceField::Theme)
-                    }
-                    SETTINGS_RESET_OVERRIDES_ID => state.reset_settings_overrides(),
-                    SETTINGS_APPLY_ID => state.finish_settings(true),
-                    SETTINGS_CANCEL_ID => state.finish_settings(false),
-                    TAB_CLOSE_CONFIRM_ID => state.finish_close_tab(true),
-                    TAB_CLOSE_CANCEL_ID => state.finish_close_tab(false),
-                    NEW_DEFAULT_SHELL_ID => state.choose_new_shell(NewShellChoice::Default),
-                    NEW_CMD_SHELL_ID => state.choose_new_shell(NewShellChoice::CommandPrompt),
-                    NEW_POWERSHELL_ID => state.choose_new_shell(NewShellChoice::PowerShell),
-                    NEW_CREATE_ID => state.finish_new_terminal(true),
-                    NEW_CANCEL_ID => state.finish_new_terminal(false),
-                    _ => {}
                 }
                 unsafe {
                     windows_sys::Win32::Graphics::Gdi::InvalidateRect(window, ptr::null(), 0)
@@ -6272,6 +6285,25 @@ mod tests {
             normalize_terminal_paste("one\r\ntwo\nthree\rfour\t\u{1b}[31m\0"),
             "one\rtwo\rthree\rfour\t[31m"
         );
+    }
+
+    #[test]
+    fn native_toolbar_ids_resolve_to_stable_product_actions() {
+        let cases = [
+            (TABS_ID, action::TOGGLE_TABS),
+            (NEW_ID, action::NEW_TAB),
+            (SETTINGS_ID, action::OPEN_SETTINGS),
+            (LOCALE_ID, action::TOGGLE_LOCALE),
+            (FONT_DECREASE_ID, action::FONT_DECREASE),
+            (FONT_INCREASE_ID, action::FONT_INCREASE),
+        ];
+        for (control_id, action_id) in cases {
+            assert_eq!(
+                windows_toolbar_hit(control_id).map(WindowsToolbarHit::action_id),
+                Some(action_id)
+            );
+        }
+        assert_eq!(windows_toolbar_hit(SEND_ID), None);
     }
 
     #[test]

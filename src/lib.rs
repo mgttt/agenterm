@@ -74,7 +74,7 @@ mod unix_app;
 ///
 /// Shared contracts are primary-owned. OS adapters live under
 /// `src/platform/{windows,macos,linux}/` and must not edit contract semantics.
-pub mod platform;
+mod platform;
 
 mod script_audit;
 mod worker_supervisor;

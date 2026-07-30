@@ -23,8 +23,8 @@ pub(crate) enum LinuxToolbarHit {
 impl LinuxToolbarHit {
     /// Visible left-to-right order matching the Unix workspace toolbar.
     pub(crate) const ORDER: [Self; 6] = [
-        Self::NewTab,
         Self::ToggleTabs,
+        Self::NewTab,
         Self::Settings,
         Self::ToggleLocale,
         Self::FontDecrease,
@@ -67,8 +67,8 @@ mod tests {
         assert_eq!(
             action_ids,
             [
-                action::NEW_TAB,
                 action::TOGGLE_TABS,
+                action::NEW_TAB,
                 action::OPEN_SETTINGS,
                 action::TOGGLE_LOCALE,
                 action::FONT_DECREASE,

@@ -40,6 +40,7 @@ pub(crate) struct DecscusrTracker {
 }
 
 impl DecscusrTracker {
+    #[cfg_attr(windows, allow(dead_code))]
     pub(crate) const fn appearance(self) -> TerminalCursorAppearance {
         self.appearance
     }

@@ -487,6 +487,7 @@ impl TerminalTab {
         }
     }
 
+    #[cfg_attr(windows, allow(dead_code))]
     pub(crate) const fn cursor_appearance(&self) -> TerminalCursorAppearance {
         self.cursor_tracker.appearance()
     }

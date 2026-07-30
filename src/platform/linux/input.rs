@@ -42,7 +42,13 @@ pub(crate) fn classify_key_press(
     named_key: Option<&str>,
     committed_text: Option<&str>,
 ) -> KeyClassification {
-    classify_shared(modifiers, logical_character, named_key, committed_text)
+    classify_shared(
+        primary_shortcut(modifiers),
+        modifiers,
+        logical_character,
+        named_key,
+        committed_text,
+    )
 }
 
 /// Classify an IME commit string as a text commit (empty → ignored).
