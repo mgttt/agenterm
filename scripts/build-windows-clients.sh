@@ -1,44 +1,10 @@
-#!/usr/bin/env bash
-# Build all Windows binaries via cargo-xwin (x86_64 default, ARCH=arm64 for ARM64).
-#
-# Rust toolchain targets:
-#   x86_64 (default): x86_64-pc-windows-msvc
-#   arm64:            aarch64-pc-windows-msvc (installed by the owning job)
-set -euo pipefail
-
-ARCH="${ARCH:-x86_64}"
-PROFILE="${AGENTERM_BUILD_PROFILE:-debug}"
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-
-case "$ARCH" in
-  x86_64|amd64)
-    TARGET="x86_64-pc-windows-msvc"
-    ;;
-  arm64|aarch64)
-    exec "$ROOT/scripts/build-windows-arm64.sh"
-    ;;
-  *)
-    echo "unsupported ARCH=$ARCH (use x86_64 or arm64)" >&2
-    exit 1
-    ;;
-esac
-
-cd "$ROOT"
-
-BINS=(agenterm agenterm-server agenterm-cli agenterm-mux agenterm-script agenterm-mcp)
-ARGS=(xwin build --target "$TARGET")
-if [[ $PROFILE == release ]]; then
-  ARGS+=(--release)
-fi
-for bin in "${BINS[@]}"; do
-  ARGS+=(--bin "$bin")
-done
-
-echo "==> cargo ${ARGS[*]}"
-cargo "${ARGS[@]}"
-
-OUT="target/$TARGET/$PROFILE"
-echo "==> built:"
-for bin in "${BINS[@]}"; do
-  echo "    $OUT/$bin.exe"
-done
+#!/usr/bin/env sh
+set -eu
+AGENTERM_BOOTSTRAP_TASK=client-build
+export AGENTERM_BOOTSTRAP_TASK
+profile=${AGENTERM_BUILD_PROFILE:-dev}
+[ "$profile" = debug ] && profile=dev
+arch=${ARCH:-x86_64}
+[ "$arch" = arm64 ] && arch=aarch64
+exec "$(dirname "$0")/bootstrap.sh" "$profile" \
+    --target "$arch-pc-windows-msvc" --driver cargo-xwin

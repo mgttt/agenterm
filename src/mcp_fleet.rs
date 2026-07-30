@@ -1,8 +1,8 @@
 use std::{
     env,
     sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     thread,
     time::{Duration, Instant},
@@ -13,6 +13,7 @@ use serde_json::{Value, json};
 use crate::{
     client::send_ipc_request_to_timeout,
     instances::{discover_instances, instance_process_is_alive},
+    mcp_catalog::capabilities,
 };
 
 pub(crate) const RESOURCE_INSTANCES: &str = "agenterm://fleet/instances";
@@ -21,6 +22,7 @@ pub(crate) const RESOURCE_TABS: &str = "agenterm://fleet/tabs";
 pub(crate) const RESOURCE_SNAPSHOT: &str = "agenterm://fleet/snapshot";
 
 const MCP_BACKEND_TIMEOUT: Duration = Duration::from_millis(750);
+const AGENTERM_CONTROL_PROTOCOL_VERSION: u64 = 1;
 pub(crate) const WAIT_EVENT_KINDS: &[&str] = &[
     "focus.changed",
     "layout.tree.collapse",
@@ -50,6 +52,25 @@ pub(crate) struct McpWaitRequest {
     pub timeout_ms: u64,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum InstanceHealth {
+    Healthy,
+    Stale,
+    Unreachable,
+    Incompatible,
+}
+
+impl InstanceHealth {
+    const fn status(self) -> &'static str {
+        match self {
+            Self::Healthy => "healthy",
+            Self::Stale => "stale",
+            Self::Unreachable => "unreachable",
+            Self::Incompatible => "incompatible",
+        }
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct McpFleetError {
     pub code: i64,
@@ -58,11 +79,14 @@ pub(crate) struct McpFleetError {
 }
 
 pub(crate) fn read_resource(uri: &str, address: Option<&str>) -> Result<Value, McpFleetError> {
-    match uri {
+    let resource = match uri {
         RESOURCE_INSTANCES => instance_inventory(),
         RESOURCE_WORKSPACE | RESOURCE_TABS | RESOURCE_SNAPSHOT => {
             let address = select_address(address)?;
             let snapshot = fetch_snapshot(&address)?;
+            if matches!(uri, RESOURCE_TABS | RESOURCE_SNAPSHOT) {
+                ensure_resource_items("tabs", snapshot["tabs"].as_array().map_or(0, Vec::len))?;
+            }
             let value = match uri {
                 RESOURCE_WORKSPACE => workspace_inventory(&address, &snapshot),
                 RESOURCE_TABS => tab_inventory(&address, &snapshot),
@@ -76,7 +100,8 @@ pub(crate) fn read_resource(uri: &str, address: Option<&str>) -> Result<Value, M
             message: "Resource not found",
             data: json!({"uri": uri}),
         }),
-    }
+    }?;
+    ensure_resource_bytes(resource)
 }
 
 pub(crate) fn wait_event(
@@ -203,6 +228,10 @@ pub(crate) fn wait_event(
     }
 }
 
+pub(crate) fn cancelled_wait_outcome(request: &McpWaitRequest) -> Value {
+    wait_outcome("cancelled", request, request.after_sequence, None, None)
+}
+
 fn wait_outcome(
     outcome: &str,
     request: &McpWaitRequest,
@@ -236,16 +265,21 @@ fn instance_inventory() -> Result<Value, McpFleetError> {
         message: "Could not discover AgenTerm instances",
         data: json!({"class": "instance_discovery", "detail": bounded(&error.to_string())}),
     })?;
+    ensure_resource_items("instances", instances.len())?;
+    let health = classify_instance_health(&instances);
     let instances = instances
         .into_iter()
-        .map(|instance| {
+        .zip(health)
+        .map(|(instance, health)| {
             json!({
                 "pid": instance.record.pid,
                 "address": instance.record.address,
                 "version": instance.record.version,
                 "session": instance.record.session,
                 "started_at_unix_ms": instance.record.started_at_unix_ms,
-                "alive": instance_process_is_alive(instance.record.pid)
+                "alive": instance_process_is_alive(instance.record.pid),
+                "status": health.status(),
+                "compatible": health == InstanceHealth::Healthy
             })
         })
         .collect::<Vec<_>>();
@@ -254,6 +288,48 @@ fn instance_inventory() -> Result<Value, McpFleetError> {
         "schema_version": 1,
         "instances": instances
     }))
+}
+
+fn ensure_resource_items(kind: &str, actual: usize) -> Result<(), McpFleetError> {
+    let maximum = capabilities().limits.resource_items as usize;
+    if actual <= maximum {
+        return Ok(());
+    }
+    Err(McpFleetError {
+        code: -32004,
+        message: "AgenTerm resource exceeds the item limit",
+        data: json!({
+            "class": "resource_too_large",
+            "code": "agenterm_response_too_large",
+            "item_kind": kind,
+            "actual_items": actual,
+            "maximum_items": maximum
+        }),
+    })
+}
+
+fn ensure_resource_bytes(resource: Value) -> Result<Value, McpFleetError> {
+    let actual = serde_json::to_vec(&resource)
+        .map_err(|_| McpFleetError {
+            code: -32603,
+            message: "AgenTerm resource could not be encoded",
+            data: json!({"class": "resource_encoding"}),
+        })?
+        .len();
+    let maximum = capabilities().limits.resource_bytes as usize;
+    if actual <= maximum {
+        return Ok(resource);
+    }
+    Err(McpFleetError {
+        code: -32004,
+        message: "AgenTerm resource exceeds the byte limit",
+        data: json!({
+            "class": "resource_too_large",
+            "code": "agenterm_response_too_large",
+            "actual_bytes": actual,
+            "maximum_bytes": maximum
+        }),
+    })
 }
 
 fn select_address(explicit: Option<&str>) -> Result<String, McpFleetError> {
@@ -273,29 +349,35 @@ fn select_address(explicit: Option<&str>) -> Result<String, McpFleetError> {
         message: "Could not discover AgenTerm instances",
         data: json!({"class": "instance_discovery", "detail": bounded(&error.to_string())}),
     })?;
+    let health = classify_instance_health(&instances);
     let candidates = instances
         .into_iter()
-        .filter(|instance| instance_process_is_alive(instance.record.pid))
-        .map(|instance| {
+        .zip(health)
+        .map(|(instance, health)| {
             json!({
                 "pid": instance.record.pid,
                 "address": instance.record.address,
                 "session": instance.record.session,
-                "version": instance.record.version
+                "version": instance.record.version,
+                "status": health.status(),
+                "compatible": health == InstanceHealth::Healthy
             })
         })
         .collect::<Vec<_>>();
-    match candidates.as_slice() {
-        [candidate] => Ok(candidate["address"]
-            .as_str()
-            .expect("candidate address is a string")
-            .to_owned()),
+    let healthy = candidates
+        .iter()
+        .filter(|candidate| candidate["status"].as_str() == Some("healthy"))
+        .filter_map(|candidate| candidate["address"].as_str().map(str::to_owned))
+        .collect::<Vec<_>>();
+    match healthy.as_slice() {
+        [address] => Ok(address.clone()),
         [] => Err(McpFleetError {
             code: -32001,
             message: "No running AgenTerm server is available",
             data: json!({
                 "class": "server_not_found",
-                "hint": "start AgenTerm or pass --address HOST:PORT"
+                "hint": "start AgenTerm or pass --address HOST:PORT",
+                "candidates": candidates
             }),
         }),
         _ => Err(McpFleetError {
@@ -304,6 +386,91 @@ fn select_address(explicit: Option<&str>) -> Result<String, McpFleetError> {
             data: json!({"class": "server_ambiguous", "candidates": candidates}),
         }),
     }
+}
+
+fn classify_instance_health(
+    instances: &[crate::instances::DiscoveredInstance],
+) -> Vec<InstanceHealth> {
+    if instances.is_empty() {
+        return Vec::new();
+    }
+    let limits = capabilities().limits;
+    let deadline =
+        Instant::now() + Duration::from_millis(u64::from(limits.instance_discovery_timeout_ms));
+    let next = AtomicUsize::new(0);
+    let results = Mutex::new(vec![None; instances.len()]);
+    let worker_count = instances
+        .len()
+        .min(usize::from(limits.instance_discovery_concurrency));
+    thread::scope(|scope| {
+        for _ in 0..worker_count {
+            let next = &next;
+            let results = &results;
+            scope.spawn(move || {
+                loop {
+                    let remaining = deadline.saturating_duration_since(Instant::now());
+                    if remaining.is_zero() {
+                        break;
+                    }
+                    let index = next.fetch_add(1, Ordering::AcqRel);
+                    let Some(instance) = instances.get(index) else {
+                        break;
+                    };
+                    let timeout = remaining.min(Duration::from_millis(u64::from(
+                        limits.instance_probe_timeout_ms,
+                    )));
+                    let health = instance_health(instance, timeout);
+                    results
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)[index] = Some(health);
+                }
+            });
+        }
+    });
+    results
+        .into_inner()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .into_iter()
+        .enumerate()
+        .map(|(index, health)| {
+            health.unwrap_or_else(|| {
+                if instance_process_is_alive(instances[index].record.pid) {
+                    InstanceHealth::Unreachable
+                } else {
+                    InstanceHealth::Stale
+                }
+            })
+        })
+        .collect()
+}
+
+fn instance_health(
+    instance: &crate::instances::DiscoveredInstance,
+    timeout: Duration,
+) -> InstanceHealth {
+    if !instance_process_is_alive(instance.record.pid) {
+        return InstanceHealth::Stale;
+    }
+    let response = match send_ipc_request_to_timeout(
+        &instance.record.address,
+        vec!["protocol-info".to_owned()],
+        timeout,
+    ) {
+        Ok(response) if response.ok => response,
+        _ => return InstanceHealth::Unreachable,
+    };
+    let Ok(handshake) = serde_json::from_str::<Value>(&response.output) else {
+        return InstanceHealth::Incompatible;
+    };
+    if handshake["protocol_version"].as_u64() != Some(AGENTERM_CONTROL_PROTOCOL_VERSION) {
+        return InstanceHealth::Incompatible;
+    }
+    if handshake["pid"].as_u64() != Some(u64::from(instance.record.pid))
+        || handshake["address"].as_str() != Some(instance.record.address.as_str())
+    {
+        return InstanceHealth::Stale;
+    }
+    InstanceHealth::Healthy
 }
 
 fn fetch_snapshot(address: &str) -> Result<Value, McpFleetError> {
@@ -469,6 +636,31 @@ mod tests {
         assert!(!encoded.contains("secret draft"));
         assert_eq!(value["event_position"]["epoch"], "epoch-a");
         assert_eq!(value["tabs"][0]["id"], "@2");
+    }
+
+    #[test]
+    fn resource_byte_and_item_limits_fail_closed_with_typed_facts() {
+        let mut oversized = fixture();
+        oversized["tabs"][0]["note"] =
+            Value::String("x".repeat(capabilities().limits.resource_bytes as usize));
+        let error = ensure_resource_bytes(fleet_snapshot("127.0.0.1:48815", &oversized))
+            .expect_err("oversized resource must fail");
+        assert_eq!(error.code, -32004);
+        assert_eq!(error.data["class"], "resource_too_large");
+        assert_eq!(
+            error.data["maximum_bytes"],
+            capabilities().limits.resource_bytes
+        );
+
+        let error =
+            ensure_resource_items("tabs", capabilities().limits.resource_items as usize + 1)
+                .expect_err("oversized inventory must fail");
+        assert_eq!(error.code, -32004);
+        assert_eq!(error.data["item_kind"], "tabs");
+        assert_eq!(
+            error.data["maximum_items"],
+            capabilities().limits.resource_items
+        );
     }
 
     #[test]

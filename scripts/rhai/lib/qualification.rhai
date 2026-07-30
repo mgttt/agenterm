@@ -115,8 +115,49 @@ fn new_context(manifest_path, release, stress_included) {
         release: release,
         stress_included: stress_included,
         started_at_utc: std::time::SystemTime::now().rfc3339,
-        results: #{}
+        results: #{},
+        process_observation: #{
+            owned_commands: 0,
+            process_samples: 0,
+            automation_processes: [],
+            terminal_compatibility_payloads: []
+        }
     }
+}
+
+fn add_process_observation(
+    context,
+    process_samples,
+    observed_powershell,
+    terminal_compatibility
+) {
+    context.process_observation.owned_commands += 1;
+    context.process_observation.process_samples += process_samples;
+    for process in observed_powershell {
+        if terminal_compatibility {
+            if !context.process_observation
+                    .terminal_compatibility_payloads.contains(process) {
+                context.process_observation
+                    .terminal_compatibility_payloads.push(process);
+            }
+        } else if !context.process_observation
+                .automation_processes.contains(process) {
+            context.process_observation.automation_processes.push(process);
+        }
+    }
+    context
+}
+
+fn assert_process_observation(context) {
+    require(
+        context.process_observation.owned_commands > 0
+            && context.process_observation.process_samples > 0,
+        "qualification_process_observation_missing"
+    );
+    require(
+        context.process_observation.automation_processes.len == 0,
+        "qualification_process_observation_powershell"
+    );
 }
 
 fn gate_by_id(manifest, id) {
@@ -321,6 +362,7 @@ fn provenance(
 
 fn write_receipt(context, repo, output_path) {
     assert_results(context);
+    assert_process_observation(context);
     let root = std::path::absolute(repo).display;
     let receipt = #{
         schema_version: context.manifest.receipt_schema_version,
@@ -333,6 +375,7 @@ fn write_receipt(context, repo, output_path) {
             path: "scripts/qualification-gates.json",
             sha256: context.manifest_sha256
         },
+        process_observation: context.process_observation,
         provenance: provenance(
             root,
             std::path::join(root, "dist/agenterm.json").display,

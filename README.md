@@ -35,8 +35,9 @@ native automation client, and a deliberately bounded tmux/RMUX frontend.
   computation, observable Fleet tools, and versioned named tasks without
   linking the scripting engine into the GUI.
 - `agenterm-mcp.exe` is the on-demand read-only MCP sidecar. Its first
-  v0.1.10 slice exposes an offline, versioned capability catalog; stdio
-  serving remains unavailable until the protocol lifecycle is complete.
+  v0.1.10 slice serves four metadata-only Fleet resources and one bounded
+  `agenterm_wait` tool over stdio; it exposes no mutation tool or network
+  listener.
 - An internal, non-default `agenterm-server.exe` now proves the headless
   workspace/PTY/parser/event authority required for replaceable GUI work.
 - `new-agent` launches Codex in a named fleet tab with stable AgenTerm context.

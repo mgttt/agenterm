@@ -24,7 +24,7 @@ Copyright and license terms remain with their respective authors.
 | `winresource` (build dependency) | MIT |
 
 The corresponding sources and complete license files are available from each
-package's entry in the Cargo registry. `scripts/supply-chain.ps1` uses
+package's entry in the Cargo registry. `scripts/rhai/supply-chain.rhai` uses
 `cargo metadata --locked` as the authoritative inventory, requires this table
 to cover every direct dependency, rejects unreviewed license expressions, and
 records every resolved transitive package in the SPDX inventory.

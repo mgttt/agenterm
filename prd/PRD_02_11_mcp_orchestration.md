@@ -146,6 +146,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       `2025-11-25` protocol revision, four metadata-only resources, exactly one
       read-only `agenterm_wait` tool, hard frame/concurrency/wait/error limits,
       and explicit deferred roles
+      - [x] instance health discovery publishes a 250 ms per-probe budget,
+        1.5-second total deadline, and 32-probe concurrency ceiling; a public
+        256-record hanging fixture completes within the deadline envelope and
+        reports every unverified candidate fail-closed as unreachable
     - [x] unit tests reject duplicate method/resource/tool identities and prove
       the current implementation slice reports exact shipped handlers
   - Failure isolation and deferred roles

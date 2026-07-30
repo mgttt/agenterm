@@ -553,6 +553,11 @@ Migration ledger:
   roles; default Unix check is the portable Quick lane and default Unix
   release is validation-only. Full GUI qualification, Windows packaging and
   publication remain explicitly unavailable rather than silently degraded.
+  Every repository-owned `.cmd` or `.bat` must therefore either be replaced by
+  a named Rhai task or have an equivalent checked-in `.sh` entry for
+  Linux/macOS. Matching names alone are insufficient: the cross-platform audit
+  and CI must execute the Unix entry through the native `agenterm-script` task
+  host and verify argument, exit-status, side-effect, and evidence parity.
 - [ ] the migration proceeds from low-side-effect rules and reports through
   build/static quality, public black-box tests, and finally qualification and
   delivery. Each responsibility must prove normalized parity or stronger public

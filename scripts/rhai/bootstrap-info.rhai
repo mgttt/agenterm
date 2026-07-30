@@ -30,7 +30,7 @@ let report = #{
     cargo: checked_output("cargo", ["--version"], "bootstrap-cargo"),
     rustc: checked_output("rustc", ["--version"], "bootstrap-rustc"),
     script_api_version: 2,
-    task_manifest_schema_version: 2
+    task_manifest_schema_version: 3
 };
 
 print(rhai::json::stringify_pretty(report));

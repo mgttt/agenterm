@@ -42,9 +42,13 @@ pub struct McpTool {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct McpLimits {
     pub frame_bytes: u32,
-    pub request_concurrency: u16,
+    pub response_bytes: u32,
+    pub resource_bytes: u32,
+    pub resource_items: u32,
+    pub instance_probe_timeout_ms: u32,
+    pub instance_discovery_timeout_ms: u32,
+    pub instance_discovery_concurrency: u16,
     pub waiter_concurrency: u16,
-    pub wait_timeout_ms_default: u32,
     pub wait_timeout_ms_maximum: u32,
     pub error_detail_bytes: u32,
 }
@@ -133,9 +137,13 @@ pub fn capabilities() -> McpCapabilities {
         }],
         limits: McpLimits {
             frame_bytes: 1_048_576,
-            request_concurrency: 16,
+            response_bytes: 1_048_576,
+            resource_bytes: 786_432,
+            resource_items: 1_024,
+            instance_probe_timeout_ms: 250,
+            instance_discovery_timeout_ms: 1_500,
+            instance_discovery_concurrency: 32,
             waiter_concurrency: 8,
-            wait_timeout_ms_default: 5_000,
             wait_timeout_ms_maximum: 60_000,
             error_detail_bytes: 16_384,
         },
@@ -260,7 +268,15 @@ mod tests {
         assert_eq!(catalog.tools[0].name, "agenterm_wait");
         assert!(catalog.tools[0].read_only);
         assert!(catalog.limits.frame_bytes > 0);
-        assert!(catalog.limits.wait_timeout_ms_default <= catalog.limits.wait_timeout_ms_maximum);
+        assert!(catalog.limits.resource_bytes <= catalog.limits.response_bytes);
+        assert!(catalog.limits.resource_items > 0);
+        assert!(catalog.limits.instance_probe_timeout_ms > 0);
+        assert!(
+            catalog.limits.instance_probe_timeout_ms
+                <= catalog.limits.instance_discovery_timeout_ms
+        );
+        assert!(catalog.limits.instance_discovery_concurrency > 0);
+        assert!(catalog.limits.wait_timeout_ms_maximum > 0);
     }
 
     #[test]

@@ -127,6 +127,33 @@ expect_rejection(
     || qualification::assert_results(no_stress)
 );
 
+let missing_process = qualification::new_context(
+    manifest_path,
+    false,
+    true
+);
+expect_rejection(
+    "qualification_process_observation_missing",
+    || qualification::assert_process_observation(missing_process)
+);
+let observed_process = qualification::add_process_observation(
+    missing_process,
+    1,
+    [],
+    false
+);
+qualification::assert_process_observation(observed_process);
+let forbidden_process = qualification::add_process_observation(
+    observed_process,
+    1,
+    ["pwsh.exe:123"],
+    false
+);
+expect_rejection(
+    "qualification_process_observation_powershell",
+    || qualification::assert_process_observation(forbidden_process)
+);
+
 let check_source = std::fs::read_to_string(
     std::path::join(repo, "scripts/rhai/check.rhai").display
 );

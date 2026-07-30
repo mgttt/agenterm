@@ -91,6 +91,7 @@ fn execute(command_spec, repo, scratch, sequence) {
     let child = command.start();
     let observed_powershell = [];
     let last_process_scan = 0;
+    let process_samples = 0;
     while child.state == "running"
             && std::time::SystemTime::now().unix_millis - started
                 < command_spec.timeout_ms {
@@ -101,6 +102,7 @@ fn execute(command_spec, repo, scratch, sequence) {
                     observed_powershell.push(process);
                 }
             }
+            process_samples += 1;
             last_process_scan = now;
         }
         rhai::task::sleep(std::time::Duration::from_millis(50));
@@ -150,7 +152,8 @@ fn execute(command_spec, repo, scratch, sequence) {
             } else {
                 ""
             },
-        observed_powershell: observed_powershell
+        observed_powershell: observed_powershell,
+        process_samples: process_samples
     }
 }
 
@@ -180,6 +183,12 @@ fn run_gate(context, id, label, specs, repo, scratch, sequence) {
     for command_spec in specs {
         let result = execute(command_spec, repo, scratch, sequence);
         sequence += 1;
+        context = qualification::add_process_observation(
+            context,
+            result.process_samples,
+            result.observed_powershell,
+            command_spec.allow_powershell
+        );
         if result.stdout != "" {
             print(result.stdout);
         }
@@ -243,12 +252,7 @@ fn run_step(label, specs, repo, scratch, sequence) {
 fn task(worker, manifest, id, timeout_ms, extra) {
     let arguments = [
         "task", "run", id,
-        "--manifest", manifest,
-        "--timeout-ms", timeout_ms.to_string(),
-        "--max-operations", "10000000",
-        "--max-collection-items", "100000",
-        "--max-string-bytes", "8388608",
-        "--max-output-bytes", "1048576"
+        "--manifest", manifest
     ];
     if extra.len > 0 {
         arguments.push("--");

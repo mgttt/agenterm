@@ -172,11 +172,6 @@ fn run_quality(repo) {
     command.args([
         "task", "run", "check",
         "--manifest", std::path::join(repo, "agenterm.tasks.json").display,
-        "--timeout-ms", "3600000",
-        "--max-operations", "100000000",
-        "--max-collection-items", "100000",
-        "--max-string-bytes", "8388608",
-        "--max-output-bytes", "1048576",
         "--", "--release", "--include-stress"
     ]);
     command.current_dir(repo);

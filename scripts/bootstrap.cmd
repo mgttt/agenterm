@@ -17,7 +17,7 @@ copy /y "%AGENTERM_BOOTSTRAP_SOURCE%" "%AGENTERM_BOOTSTRAP_DIR%\agenterm-script.
 if errorlevel 1 goto :failed
 set "AGENTERM_BOOTSTRAP_WORKER=%AGENTERM_BOOTSTRAP_DIR%\agenterm-script.exe"
 
-"%AGENTERM_BOOTSTRAP_WORKER%" task run "%AGENTERM_BOOTSTRAP_TASK%" --manifest "%AGENTERM_BOOTSTRAP_REPO%\agenterm.tasks.json" --timeout-ms 3600000 --max-operations 100000000 --max-collection-items 100000 --max-string-bytes 8388608 --max-output-bytes 1048576 -- %*
+"%AGENTERM_BOOTSTRAP_WORKER%" task run "%AGENTERM_BOOTSTRAP_TASK%" --manifest "%AGENTERM_BOOTSTRAP_REPO%\agenterm.tasks.json" -- %*
 if errorlevel 1 goto :failed
 del /q "%AGENTERM_BOOTSTRAP_WORKER%" >nul 2>nul
 rmdir "%AGENTERM_BOOTSTRAP_DIR%" >nul 2>nul

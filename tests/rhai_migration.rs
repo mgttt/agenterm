@@ -863,67 +863,8 @@ fn windows_short_path(path: &Path) -> PathBuf {
     PathBuf::from(String::from_utf16(&output[..length as usize]).expect("short path is UTF-16"))
 }
 
-#[cfg(windows)]
-fn bash_executable() -> PathBuf {
-    let output = Command::new("where")
-        .arg("git.exe")
-        .output()
-        .expect("locate Git for Windows");
-    assert!(
-        output.status.success(),
-        "Git for Windows is required for packaging tests"
-    );
-    let git = String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .map(str::trim)
-        .find(|line| line.to_ascii_lowercase().ends_with("\\cmd\\git.exe"))
-        .map(PathBuf::from)
-        .expect("locate Git cmd executable");
-    let root = git
-        .parent()
-        .and_then(Path::parent)
-        .expect("derive Git installation root");
-    for candidate in [
-        root.join("bin").join("bash.exe"),
-        root.join("usr").join("bin").join("bash.exe"),
-    ] {
-        if candidate.is_file() {
-            return candidate;
-        }
-    }
-    panic!("Git for Windows Bash executable is missing");
-}
-
-#[cfg(not(windows))]
-fn bash_executable() -> PathBuf {
-    PathBuf::from("bash")
-}
-
-#[cfg(windows)]
-fn python_executable() -> String {
-    let output = Command::new("where")
-        .arg("python.exe")
-        .output()
-        .expect("locate Python");
-    assert!(
-        output.status.success(),
-        "Python is required for packaging tests"
-    );
-    String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty())
-        .expect("locate Python executable")
-        .replace('\\', "/")
-}
-
-#[cfg(not(windows))]
-fn python_executable() -> String {
-    "python3".to_owned()
-}
-
 #[test]
-fn macos_package_script_reads_both_platform_rows_and_writes_preview_zip() {
+fn macos_package_task_reads_both_platform_rows_and_writes_preview_zip() {
     let root = fixture_root("macos-package");
     let binaries = root.join("bin");
     let output_directory = root.join("dist");
@@ -939,30 +880,40 @@ fn macos_package_script_reads_both_platform_rows_and_writes_preview_zip() {
     }
 
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let script = repo.join("scripts").join("package-client-release.sh");
     for architecture in ["aarch64", "x86_64"] {
-        let output = Command::new(bash_executable())
+        let output = Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
             .current_dir(repo)
-            .arg(&script)
+            .args(["task", "run", "package-client-release", "--manifest"])
+            .arg(repo.join("agenterm.tasks.json"))
+            .arg("--")
             .args(["test", "macos", architecture])
             .arg(&binaries)
-            .env("AGENTERM_MACOS_UNSIGNED_PREVIEW", "1")
+            .arg("--unsigned-preview")
             .env("AGENTERM_PACKAGE_DIST", &output_directory)
-            .env("PYTHON", python_executable())
             .output()
-            .expect("run macOS package script");
+            .expect("run macOS package task");
         assert!(
             output.status.success(),
             "macOS {architecture} package failed:\nstdout={}\nstderr={}",
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
-        let archive = output_directory.join(format!("agenterm-test-macos-{architecture}.zip"));
+        let archive = output_directory.join(format!(
+            "agenterm-test-macos-{architecture}-unsigned-preview.zip"
+        ));
         assert!(
             fs::metadata(&archive)
                 .map(|metadata| metadata.len() > 0)
                 .unwrap_or(false),
             "macOS {architecture} archive is absent or empty"
+        );
+        assert!(
+            archive.with_extension("zip.sha256").is_file(),
+            "macOS {architecture} checksum is absent"
+        );
+        assert!(
+            archive.with_extension("zip.provenance.json").is_file(),
+            "macOS {architecture} provenance is absent"
         );
     }
 
@@ -1564,10 +1515,28 @@ fn migration_audit_rejects_operational_references_to_deleted_scripts() {
     .expect("read migration ledger");
     let ledger: serde_json::Value =
         serde_json::from_str(&ledger_text).expect("decode migration ledger");
+    assert_eq!(ledger["schema_version"], 2);
+    for entry in ledger["entries"].as_array().expect("ledger entries") {
+        for field in [
+            "callers",
+            "inputs",
+            "outputs",
+            "side_effects",
+            "budgets",
+            "platforms",
+            "parity_evidence",
+        ] {
+            assert!(
+                !entry[field].is_null(),
+                "migration ledger entry {} is missing {field}",
+                entry["id"]
+            );
+        }
+    }
     fs::create_dir_all(repo.join("scripts")).expect("create fixture scripts");
     fs::write(
         repo.join("scripts").join("powershell-migration.json"),
-        ledger_text,
+        &ledger_text,
     )
     .expect("write fixture ledger");
 
@@ -1596,9 +1565,41 @@ fn migration_audit_rejects_operational_references_to_deleted_scripts() {
     let workflow = repo.join(".github").join("workflows").join("release.yml");
     fs::create_dir_all(workflow.parent().expect("workflow parent"))
         .expect("create workflow parent");
+    fs::write(&workflow, b"run: agenterm-script task run package\n").expect("write clean workflow");
+    let generic_shell = repo.join("scripts").join("fixture.sh");
+    fs::write(&generic_shell, b"#!/usr/bin/env sh\nset -eu\n").expect("write clean shell fixture");
+    let generic_rhai = repo.join("scripts").join("fixture.rhai");
+    fs::write(&generic_rhai, b"print(\"fixture\");\n").expect("write clean Rhai fixture");
+    commit_git_fixture(&repo);
+
+    let mut incomplete_ledger = ledger.clone();
+    incomplete_ledger["entries"][0]
+        .as_object_mut()
+        .expect("first ledger entry")
+        .remove("budgets");
+    fs::write(
+        repo.join("scripts").join("powershell-migration.json"),
+        serde_json::to_vec_pretty(&incomplete_ledger).expect("encode incomplete ledger"),
+    )
+    .expect("write incomplete ledger");
+    let incomplete = run_migration_audit(&repo);
+    assert!(!incomplete.status.success());
+    assert!(
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&incomplete.stdout),
+            String::from_utf8_lossy(&incomplete.stderr)
+        )
+        .contains("budgets")
+    );
+    fs::write(
+        repo.join("scripts").join("powershell-migration.json"),
+        &ledger_text,
+    )
+    .expect("restore complete ledger");
+
     let deleted_script_reference = ["run: ./scripts/artifact-manifest", ".ps1\n"].concat();
     fs::write(&workflow, deleted_script_reference).expect("write stale workflow reference");
-    commit_git_fixture(&repo);
 
     let rejected = run_migration_audit(&repo);
     assert!(!rejected.status.success());
@@ -1626,6 +1627,78 @@ fn migration_audit_rejects_operational_references_to_deleted_scripts() {
 
     fs::write(&workflow, b"run: agenterm-script task run package\n")
         .expect("remove stale workflow reference");
+
+    let bootstrap = repo.join("scripts").join("bootstrap.cmd");
+    let bootstrap_source = fs::read_to_string(&bootstrap).expect("read bootstrap fixture");
+    fs::write(
+        &bootstrap,
+        format!("{bootstrap_source}\npwsh -NoProfile -File hidden.ps1\n"),
+    )
+    .expect("write hidden PowerShell batch bootstrap");
+    let hidden_batch = run_migration_audit(&repo);
+    assert!(!hidden_batch.status.success());
+    assert!(
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&hidden_batch.stdout),
+            String::from_utf8_lossy(&hidden_batch.stderr)
+        )
+        .contains("migration_powershell_automation_reference:scripts/bootstrap.cmd")
+    );
+    fs::write(&bootstrap, bootstrap_source).expect("restore batch bootstrap");
+
+    let bootstrap_source = fs::read_to_string(&bootstrap).expect("reread bootstrap fixture");
+    fs::write(
+        &bootstrap,
+        format!("{bootstrap_source}\nrem --timeout-ms 1000\n"),
+    )
+    .expect("write hidden bootstrap budget");
+    let hidden_budget = run_migration_audit(&repo);
+    assert!(!hidden_budget.status.success());
+    assert!(
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&hidden_budget.stdout),
+            String::from_utf8_lossy(&hidden_budget.stderr)
+        )
+        .contains("migration_batch_bootstrap_business_rule:--timeout-ms")
+    );
+    fs::write(&bootstrap, bootstrap_source).expect("restore bootstrap budget fixture");
+
+    fs::write(
+        &generic_shell,
+        b"#!/usr/bin/env sh\npwsh -NoProfile -File hidden.ps1\n",
+    )
+    .expect("write hidden PowerShell shell entry");
+    let hidden_shell = run_migration_audit(&repo);
+    assert!(!hidden_shell.status.success());
+    assert!(
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&hidden_shell.stdout),
+            String::from_utf8_lossy(&hidden_shell.stderr)
+        )
+        .contains("migration_powershell_automation_reference:scripts/fixture.sh")
+    );
+    fs::write(&generic_shell, b"#!/usr/bin/env sh\nset -eu\n").expect("restore shell fixture");
+
+    fs::write(
+        &generic_rhai,
+        b"let program = \"pwsh\";\nstd::process::command(program);\n",
+    )
+    .expect("write hidden PowerShell Rhai entry");
+    let hidden_rhai = run_migration_audit(&repo);
+    assert!(!hidden_rhai.status.success());
+    assert!(
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&hidden_rhai.stdout),
+            String::from_utf8_lossy(&hidden_rhai.stderr)
+        )
+        .contains("migration_powershell_automation_reference:scripts/fixture.rhai")
+    );
+    fs::write(&generic_rhai, b"print(\"fixture\");\n").expect("restore Rhai fixture");
+
     let accepted = run_migration_audit(&repo);
     assert!(
         accepted.status.success(),
@@ -1635,6 +1708,14 @@ fn migration_audit_rejects_operational_references_to_deleted_scripts() {
     );
     let report: serde_json::Value =
         serde_json::from_slice(&accepted.stdout).expect("decode migration report");
+    assert_eq!(report["schema_version"], 2);
+    assert!(
+        report["automation_file_count"]
+            .as_u64()
+            .expect("automation file count")
+            >= 13
+    );
+    assert_eq!(report["powershell_automation_references"], 0);
     let entries = ledger["entries"].as_array().expect("ledger entries");
     let expected_deleted = entries
         .iter()

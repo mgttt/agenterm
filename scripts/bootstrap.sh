@@ -22,14 +22,17 @@ cp -- "$SOURCE" "$WORKER"
 chmod +x -- "$WORKER"
 AGENTERM_BOOTSTRAP_WORKER="$WORKER"
 AGENTERM_BOOTSTRAP_PLATFORM=unix
+case "$(uname -s):$(uname -m)" in
+    Linux:aarch64|Linux:arm64) AGENTERM_HOST_OS=linux; AGENTERM_HOST_ARCH=aarch64 ;;
+    Linux:*) AGENTERM_HOST_OS=linux; AGENTERM_HOST_ARCH=x86_64 ;;
+    Darwin:arm64) AGENTERM_HOST_OS=macos; AGENTERM_HOST_ARCH=aarch64 ;;
+    Darwin:*) AGENTERM_HOST_OS=macos; AGENTERM_HOST_ARCH=x86_64 ;;
+    *) echo "unsupported bootstrap host" >&2; exit 2 ;;
+esac
 export AGENTERM_BOOTSTRAP_WORKER
 export AGENTERM_BOOTSTRAP_PLATFORM
+export AGENTERM_HOST_OS AGENTERM_HOST_ARCH
 
 "$WORKER" task run "$AGENTERM_BOOTSTRAP_TASK" \
     --manifest "$REPO/agenterm.tasks.json" \
-    --timeout-ms 3600000 \
-    --max-operations 100000000 \
-    --max-collection-items 100000 \
-    --max-string-bytes 8388608 \
-    --max-output-bytes 1048576 \
     -- "$@"

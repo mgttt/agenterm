@@ -1,7 +1,10 @@
-// Build and stage AgenTerm through one Rhai-owned lifecycle.
+// Build and optionally stage AgenTerm through one manifest-owned lifecycle.
 //
 // Args:
 //   REPO [release|release-fast]
+//        [--target TRIPLE] [--driver cargo|cargo-xwin]
+//        [--os windows|linux|macos] [--arch x86_64|aarch64]
+//        [--clients-only] [--action build|clippy]
 
 import "scripts/rhai/lib/build_identity" as build_identity;
 
@@ -27,66 +30,202 @@ fn run_command(program, arguments, repo, environment, timeout_ms, code) {
     }
 }
 
-require(args.len >= 1 && args.len <= 2, "expected: REPO [release|release-fast]");
+fn option_value(values, index, name) {
+    require(index + 1 < values.len, "build_option_value_missing:" + name);
+    values[index + 1]
+}
+
+fn target_facts(target) {
+    if target.contains("windows") {
+        return #{
+            os: "windows",
+            arch: if target.starts_with("aarch64") {
+                "aarch64"
+            } else {
+                "x86_64"
+            }
+        };
+    }
+    if target.contains("apple") {
+        return #{
+            os: "macos",
+            arch: if target.starts_with("aarch64") {
+                "aarch64"
+            } else {
+                "x86_64"
+            }
+        };
+    }
+    if target.contains("linux") {
+        return #{
+            os: "linux",
+            arch: if target.starts_with("aarch64") {
+                "aarch64"
+            } else {
+                "x86_64"
+            }
+        };
+    }
+    #{ os: "", arch: "" }
+}
+
+fn platform_executables(repo, os_name, arch) {
+    let manifest = rhai::json::parse_file(
+        std::path::join(repo, "scripts/artifacts.json").display
+    );
+    let matches = [];
+    for platform in manifest.platforms {
+        if platform.os == os_name && platform.arch == arch {
+            matches.push(platform);
+        }
+    }
+    require(
+        matches.len == 1,
+        "build_platform_manifest_match:" + os_name + "-" + arch
+    );
+    matches[0].executables
+}
+
+fn cargo_binary(name) {
+    if name.ends_with(".exe") {
+        return name.sub_string(0, name.len - 4);
+    }
+    name
+}
+
+require(args.len >= 1, "expected: REPO [PROFILE] [OPTIONS]");
 let repo = std::path::absolute(args[0]).display;
-let requested = if args.len == 2 { args[1] } else { "" };
+let profile = "dev";
+let target = "";
+let driver = "cargo";
+let os_name = "";
+let arch = "";
+let clients_only = false;
+let action = "build";
+let index = 1;
+while index < args.len {
+    let value = args[index];
+    if value == "release" || value == "release-fast" {
+        require(profile == "dev", "build_profile_duplicate");
+        profile = value;
+    } else if value == "--target" {
+        target = option_value(args, index, value);
+        index += 1;
+    } else if value == "--driver" {
+        driver = option_value(args, index, value);
+        index += 1;
+    } else if value == "--os" {
+        os_name = option_value(args, index, value);
+        index += 1;
+    } else if value == "--arch" {
+        arch = option_value(args, index, value);
+        index += 1;
+    } else if value == "--action" {
+        action = option_value(args, index, value);
+        index += 1;
+    } else if value == "--clients-only" {
+        clients_only = true;
+    } else {
+        throw "build_unknown_argument:" + value;
+    }
+    index += 1;
+}
+require(driver == "cargo" || driver == "cargo-xwin", "build_driver:" + driver);
+require(action == "build" || action == "clippy", "build_action:" + action);
 require(
-    requested == "" || requested == "release" || requested == "release-fast",
-    "build_profile_argument:" + requested
+    target != "" || driver == "cargo",
+    "build_xwin_requires_target"
 );
-let profile = if requested == "" { "dev" } else { requested };
+if target != "" {
+    let facts = target_facts(target);
+    require(facts.os != "", "build_target_unsupported:" + target);
+    if os_name == "" {
+        os_name = facts.os;
+    }
+    if arch == "" {
+        arch = facts.arch;
+    }
+    require(
+        os_name == facts.os && arch == facts.arch,
+        "build_target_platform_mismatch"
+    );
+}
+if os_name == "" && std::env::has("AGENTERM_HOST_OS") {
+    os_name = std::env::get("AGENTERM_HOST_OS");
+}
+if arch == "" && std::env::has("AGENTERM_HOST_ARCH") {
+    arch = std::env::get("AGENTERM_HOST_ARCH");
+}
+
 require(
     std::env::has("AGENTERM_BOOTSTRAP_WORKER"),
     "build_bootstrap_worker_missing"
 );
 let worker =
     std::path::absolute(std::env::get("AGENTERM_BOOTSTRAP_WORKER")).display;
-let manifest = std::path::join(repo, "agenterm.tasks.json").display;
+let task_manifest = std::path::join(repo, "agenterm.tasks.json").display;
 let dist = std::path::join(repo, "dist").display;
+let cross_client = clients_only || target != "";
+let unix_bootstrap =
+    std::env::has("AGENTERM_BOOTSTRAP_PLATFORM")
+        && std::env::get("AGENTERM_BOOTSTRAP_PLATFORM") == "unix";
+if cross_client || unix_bootstrap {
+    require(os_name != "" && arch != "", "build_platform_missing");
+}
 
 let external_target = std::env::has("CARGO_TARGET_DIR");
 let cargo_output = if external_target {
     std::path::absolute(std::env::get("CARGO_TARGET_DIR")).display
-} else if profile == "release" {
+} else if profile == "release" && !cross_client && !unix_bootstrap {
     std::path::join(repo, "target-release").display
 } else {
     std::path::join(repo, "target").display
 };
-let profile_directory = if profile == "dev" {
-    std::path::join(cargo_output, "debug").display
-} else if profile == "release-fast" {
-    std::path::join(cargo_output, "release-fast").display
-} else {
-    std::path::join(cargo_output, "release").display
-};
+let profile_name = if profile == "dev" { "debug" } else { profile };
+let profile_directory = std::path::join(
+    if target == "" {
+        cargo_output
+    } else {
+        std::path::join(cargo_output, target).display
+    },
+    profile_name
+).display;
 
 let identity = build_identity::facts(repo, profile);
 let environment = build_identity::environment(identity);
-if !external_target && profile == "release" {
+if !external_target && profile == "release"
+        && !cross_client && !unix_bootstrap {
     environment.CARGO_TARGET_DIR = cargo_output;
 }
 
-let cargo_args = ["build", "--locked"];
+let cargo_args = [];
+if driver == "cargo-xwin" {
+    cargo_args.push("xwin");
+}
+cargo_args.push(action);
+cargo_args.push("--locked");
 if profile == "release" {
     cargo_args.push("--release");
 } else if profile == "release-fast" {
     cargo_args.push("--profile");
     cargo_args.push("release-fast");
 }
-let unix_bootstrap =
-    std::env::has("AGENTERM_BOOTSTRAP_PLATFORM")
-        && std::env::get("AGENTERM_BOOTSTRAP_PLATFORM") == "unix";
-if unix_bootstrap {
-    for binary in [
-        "agenterm",
-        "agenterm-cli",
-        "agenterm-mux",
-        "agenterm-script",
-        "agenterm-mcp"
-    ] {
+if target != "" {
+    cargo_args.push("--target");
+    cargo_args.push(target);
+}
+let executable_entries = [];
+if cross_client || unix_bootstrap {
+    executable_entries = platform_executables(repo, os_name, arch);
+    for executable in executable_entries {
         cargo_args.push("--bin");
-        cargo_args.push(binary);
+        cargo_args.push(cargo_binary(executable.name));
     }
+}
+if action == "clippy" {
+    cargo_args.push("--");
+    cargo_args.push("-D");
+    cargo_args.push("warnings");
 }
 run_command(
     "cargo",
@@ -97,17 +236,27 @@ run_command(
     "build_cargo"
 );
 
-if unix_bootstrap {
+if action == "clippy" {
+    print(
+        "PASS client Clippy " + os_name + "-" + arch +
+            if target == "" { "" } else { " (" + target + ")" }
+    );
+    return;
+}
+if cross_client || unix_bootstrap {
     print("");
-    print("Built native Unix client artifacts [" + profile + "]:");
-    for binary in [
-        "agenterm",
-        "agenterm-cli",
-        "agenterm-mux",
-        "agenterm-script",
-        "agenterm-mcp"
-    ] {
-        print("  " + std::path::join(profile_directory, binary).display);
+    print(
+        "Built client artifacts [" + profile + ", " +
+            os_name + "-" + arch + "]:"
+    );
+    for executable in executable_entries {
+        print(
+            "  " +
+                std::path::join(
+                    profile_directory,
+                    executable.name
+                ).display
+        );
     }
     return;
 }
@@ -116,11 +265,8 @@ run_command(
     worker,
     [
         "task", "run", "stage-build",
-        "--manifest", manifest,
-        "--timeout-ms", "10000",
-        "--max-operations", "10000000",
-        "--",
-        repo, profile_directory, dist, profile
+        "--manifest", task_manifest,
+        "--", repo, profile_directory, dist, profile
     ],
     repo,
     environment,
@@ -133,9 +279,7 @@ if profile == "release" && !external_target {
         worker,
         [
             "task", "run", "target-report",
-            "--manifest", manifest,
-            "--timeout-ms", "10000",
-            "--max-operations", "10000000",
+            "--manifest", task_manifest,
             "--", cargo_output
         ],
         repo,
@@ -147,7 +291,7 @@ if profile == "release" && !external_target {
         worker,
         [
             "task", "run", "prepare-target-clean",
-            "--manifest", manifest,
+            "--manifest", task_manifest,
             "--", repo, cargo_output
         ],
         repo,
@@ -166,11 +310,4 @@ if profile == "release" && !external_target {
 }
 
 print("");
-print("Built:    " + std::path::join(dist, "agenterm.exe").display +
-    " [" + profile + "]");
-print("Server:   " + std::path::join(dist, "agenterm-server.exe").display);
-print("CLI:      " + std::path::join(dist, "agenterm-cli.exe").display);
-print("Mux:      " + std::path::join(dist, "agenterm-mux.exe").display);
-print("Script:   " + std::path::join(dist, "agenterm-script.exe").display);
-print("MCP:      " + std::path::join(dist, "agenterm-mcp.exe").display);
-print("Metadata: " + std::path::join(dist, "agenterm.json").display);
+print("Built and staged Windows artifacts [" + profile + "] in " + dist);
