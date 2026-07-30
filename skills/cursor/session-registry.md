@@ -10,7 +10,7 @@ REST API **不能**改 `name`；下面登记表供主控与分身对齐身份与
 | 显示名 | bcId | 来源 | 当前职责 | 注释 |
 |--------|------|------|----------|------|
 | **主控** | `bc-019fadf1-32a1-76ac-8b2c-086f8a4059a1` | mobile | 统筹、合流、开分身、邮箱裁决 | 本对话 |
-| **分身1** | `bc-5a9c83b4-3a39-42e4-9d33-cb705d848f8f` | api | **原生 Linux Desktop** GUI + 测试套件黑盒 | 非 QEMU；computerUse + RecordScreen |
+| **分身1** | `bc-5a9c83b4-3a39-42e4-9d33-cb705d848f8f` | api | **Linux agent**：`src/platform/linux/` + Linux-native 证据 | 基于 `PRD_02_20`；勿改公共 platform 契约 |
 | **分身2** | `bc-26005f17-af78-4f63-bded-328cd1356396` | api | Linux Rhai / 自动化 / CI 跟随 | 与分身1 文件所有权隔离 |
 
 链接：
