@@ -100,7 +100,7 @@ fn valid_version(value) {
     true
 }
 
-fn command_output(program, arguments, cwd, code) {
+fn checked_command_text(program, arguments, cwd, code) {
     let command = std::process::command(program);
     command.args(arguments);
     command.current_dir(cwd);
@@ -119,7 +119,7 @@ fn command_output(program, arguments, cwd, code) {
 fn create_zip(staging, archive, members) {
     let arguments = ["-a", "-c", "-f", archive, "-C", staging];
     arguments.append(members);
-    command_output(
+    checked_command_text(
         "tar.exe",
         arguments,
         staging,
@@ -157,7 +157,7 @@ fn build_package_mode(
         );
     }
 
-    let head = command_output(
+    let head = checked_command_text(
         "git",
         ["rev-parse", "HEAD"],
         repo,
