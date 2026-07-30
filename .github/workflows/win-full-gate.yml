@@ -1,0 +1,63 @@
+name: Windows Full Gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: Qualification profile
+        required: true
+        default: dev-smoke
+        type: choice
+        options:
+          - dev-smoke
+          - release-stress
+
+concurrency:
+  group: win-full-gate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  qualify:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
+
+      - name: Install lint components
+        run: rustup component add rustfmt clippy
+
+      - name: Run full Windows qualification
+        shell: cmd
+        env:
+          AGENTERM_NO_ACTIVATE: "1"
+          GATE_PROFILE: ${{ inputs.profile }}
+        run: |
+          @echo off
+          set "LOG=%RUNNER_TEMP%\agenterm-win-full-gate.log"
+          if /I "%GATE_PROFILE%"=="release-stress" (
+            call check.cmd --release --include-stress >> "%LOG%" 2>&1
+          ) else (
+            call check.cmd >> "%LOG%" 2>&1
+          )
+          set "CHECK_EXIT=%ERRORLEVEL%"
+          type "%LOG%"
+          exit /b %CHECK_EXIT%
+
+      - name: Upload failed gate diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: win-full-gate-failure-${{ github.run_id }}-${{ inputs.profile }}
+          if-no-files-found: warn
+          retention-days: 7
+          path: |
+            ${{ runner.temp }}/agenterm-win-full-gate.log
+            ${{ runner.temp }}/agenterm-theme-*.png
+            ${{ runner.temp }}/agenterm-proxy-eye-*.png
+            target/smoke/*.png
+            target/qualification/receipt.json
