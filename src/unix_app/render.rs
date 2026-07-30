@@ -154,6 +154,10 @@ impl TerminalGrid {
         self.cells[self.index(col, row)]
     }
 
+    pub(super) const fn cursor_visible(&self) -> bool {
+        self.cursor.visible
+    }
+
     pub(super) fn set_cell(&mut self, col: u16, row: u16, cell: TerminalCell) {
         if col < self.cols && row < self.rows {
             let index = usize::from(row) * usize::from(self.cols) + usize::from(col);
@@ -460,7 +464,14 @@ impl NewTerminalModalView<'_> {
 pub(super) struct TerminalPaint<'a> {
     pub(super) grid: &'a TerminalGrid,
     pub(super) selection: Option<crate::terminal_selection::TerminalSelection>,
-    pub(super) focused: bool,
+    pub(super) cursor_style: TerminalCursorStyle,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum TerminalCursorStyle {
+    Hidden,
+    Active,
+    Inactive,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1527,7 +1538,7 @@ fn render_terminal_grid(
             col += if wide { 2 } else { 1 };
         }
     }
-    if terminal.focused && terminal.grid.cursor.visible {
+    if terminal.cursor_style != TerminalCursorStyle::Hidden && terminal.grid.cursor.visible {
         let cursor = terminal.grid.cursor;
         let x = layout.offset_x + u32::from(cursor.col) * layout.cell_width;
         let y = layout.offset_y + u32::from(cursor.row) * layout.cell_height;
@@ -1541,16 +1552,44 @@ fn render_terminal_grid(
                 layout.cell_width
             }
             .min(layout.offset_x + terminal_width - x);
-            let cursor_height = (layout.cell_height / 8).clamp(2, 3);
-            fill_rect(
-                buffer,
-                stride,
-                x,
-                y + layout.cell_height - cursor_height,
-                cursor_width,
-                cursor_height,
-                rgb_to_pixel(palette.focus_ring),
-            );
+            match terminal.cursor_style {
+                TerminalCursorStyle::Active => {
+                    let cursor_height = (layout.cell_height / 8).clamp(2, 3);
+                    fill_rect(
+                        buffer,
+                        stride,
+                        x,
+                        y + layout.cell_height - cursor_height,
+                        cursor_width,
+                        cursor_height,
+                        rgb_to_pixel(palette.focus_ring),
+                    );
+                }
+                TerminalCursorStyle::Inactive => {
+                    let color = rgb_to_pixel(palette.muted_text);
+                    fill_rect(buffer, stride, x, y, cursor_width, 1, color);
+                    fill_rect(
+                        buffer,
+                        stride,
+                        x,
+                        y + layout.cell_height - 1,
+                        cursor_width,
+                        1,
+                        color,
+                    );
+                    fill_rect(buffer, stride, x, y, 1, layout.cell_height, color);
+                    fill_rect(
+                        buffer,
+                        stride,
+                        x + cursor_width - 1,
+                        y,
+                        1,
+                        layout.cell_height,
+                        color,
+                    );
+                }
+                TerminalCursorStyle::Hidden => {}
+            }
         }
     }
 }
@@ -2504,7 +2543,7 @@ mod tests {
             TerminalPaint {
                 grid: &grid,
                 selection: None,
-                focused: true,
+                cursor_style: TerminalCursorStyle::Active,
             },
             palette,
             layout,
@@ -2516,6 +2555,20 @@ mod tests {
             rgb_to_pixel(palette.focus_ring)
         );
 
+        buffer.fill(rgb_to_pixel(palette.terminal_background));
+        render_terminal_grid(
+            &mut buffer,
+            width,
+            TerminalPaint {
+                grid: &grid,
+                selection: None,
+                cursor_style: TerminalCursorStyle::Inactive,
+            },
+            palette,
+            layout,
+        );
+        assert_eq!(buffer[cursor_x as usize], rgb_to_pixel(palette.muted_text));
+
         parser.process(b"\x1b[?25l");
         grid.sync_from_screen(parser.screen());
         buffer.fill(rgb_to_pixel(palette.terminal_background));
@@ -2525,7 +2578,7 @@ mod tests {
             TerminalPaint {
                 grid: &grid,
                 selection: None,
-                focused: true,
+                cursor_style: TerminalCursorStyle::Active,
             },
             palette,
             layout,

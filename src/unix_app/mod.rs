@@ -74,9 +74,10 @@ use render::{
     COMPOSER_HEIGHT, ComposerView, ConfirmCloseHit, ConfirmCloseView, FrameContent, ImePreeditView,
     NewShellChoice as RenderShellChoice, NewTerminalFocusView, NewTerminalHit,
     NewTerminalModalView, STATUS_HEIGHT, SettingsHit, SettingsModalView, SidebarTabRow,
-    StatusBarView, TabEditorFocusView, TabEditorView, TerminalGrid, TerminalPaint, ToolbarHit,
-    WindowCloseHit, WindowCloseView, WorkspaceToolbarView, cell_metrics, effective_palette,
-    grid_dimensions_for_pixels, render_frame, scrollbar_view_from_geometry, sidebar_row_at_y,
+    StatusBarView, TabEditorFocusView, TabEditorView, TerminalCursorStyle, TerminalGrid,
+    TerminalPaint, ToolbarHit, WindowCloseHit, WindowCloseView, WorkspaceToolbarView, cell_metrics,
+    effective_palette, grid_dimensions_for_pixels, render_frame, scrollbar_view_from_geometry,
+    sidebar_row_at_y,
 };
 use window_state::{
     WindowStateTracker, WindowUiActionResult, WinitWindowHandle, absorb_window_event,
@@ -343,6 +344,7 @@ struct UnixApp {
     ime_preedit: String,
     ime_cursor: Option<(usize, usize)>,
     cursor_blink: CursorBlink,
+    window_focused: bool,
 }
 
 impl UnixApp {
@@ -405,6 +407,7 @@ impl UnixApp {
             ime_preedit: String::new(),
             ime_cursor: None,
             cursor_blink: CursorBlink::new(Instant::now()),
+            window_focused: !no_activate,
             config,
             modifiers: ModifiersState::empty(),
         }
@@ -3225,9 +3228,16 @@ impl UnixApp {
                 cursor: self.ime_cursor,
                 anchor,
             });
-        let terminal_focused = self.focus_surface == UnixFocusSurface::Terminal
-            && !self.modal_surface_active()
-            && self.cursor_blink.visible();
+        let cursor_style =
+            if self.focus_surface != UnixFocusSurface::Terminal || self.modal_surface_active() {
+                TerminalCursorStyle::Hidden
+            } else if !self.window_focused {
+                TerminalCursorStyle::Inactive
+            } else if self.cursor_blink.visible() {
+                TerminalCursorStyle::Active
+            } else {
+                TerminalCursorStyle::Hidden
+            };
         let Some(surface) = self.surface.as_mut() else {
             return;
         };
@@ -3260,7 +3270,7 @@ impl UnixApp {
                 terminal: TerminalPaint {
                     grid,
                     selection: terminal_selection,
-                    focused: terminal_focused,
+                    cursor_style,
                 },
                 sidebar_rows: &sidebar_rows,
                 sidebar_tree: layout.sidebar_tree,
@@ -3828,12 +3838,15 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                 }
             }
             WindowEvent::Focused(focused) => {
+                self.window_focused = focused;
+                self.cursor_blink.reset(Instant::now());
                 if let Some(window) = self.window.as_ref() {
                     absorb_window_event(
                         &WindowEvent::Focused(focused),
                         window,
                         &mut self.window_state_tracker,
                     );
+                    window.request_redraw();
                 }
             }
             WindowEvent::RedrawRequested => {
@@ -4044,8 +4057,10 @@ impl ApplicationHandler<UnixWake> for UnixApp {
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         let mut changed = self.drain_wake_and_pty();
         let now = Instant::now();
-        let cursor_active =
-            self.focus_surface == UnixFocusSurface::Terminal && !self.modal_surface_active();
+        let cursor_active = self.window_focused
+            && self.focus_surface == UnixFocusSurface::Terminal
+            && !self.modal_surface_active()
+            && self.grid.as_ref().is_some_and(TerminalGrid::cursor_visible);
         if cursor_active {
             changed |= self.cursor_blink.tick(now);
         } else {
