@@ -4,7 +4,8 @@
 //!
 //! Implements shared **contract revision 1** (`crate::platform::CONTRACT_REVISION`):
 //! - slice-1: toolbar action ids + keyboard text/shortcut separation
-//! - slice-2: IME + clipboard + DPI/scale (font/screenshot/activation deferred)
+//! - slice-2: IME + clipboard + DPI/scale + font discovery/metrics
+//!   (screenshot/activation deferred)
 //!
 //! Linux `unix_app` hot paths call into this module under
 //! `cfg(target_os = "linux")`. macOS behavior stays on the unbridged path.
@@ -14,10 +15,11 @@
 #![cfg(target_os = "linux")]
 
 use crate::platform::{
-    CONTRACT_REVISION, CapabilityKind, CapabilityStatus, DisplayBackendFacts, PlatformKind,
+    CapabilityKind, CapabilityStatus, DisplayBackendFacts, PlatformKind, CONTRACT_REVISION,
 };
 
 pub(crate) mod clipboard;
+pub(crate) mod font;
 pub(crate) mod ime;
 pub(crate) mod input;
 pub(crate) mod scale;
@@ -76,6 +78,11 @@ pub(crate) fn slice2_dpi_scale_capability_kinds() -> [CapabilityKind; 1] {
     [CapabilityKind::Window]
 }
 
+/// Slice-2 third-cut: font discovery / primary metrics.
+pub(crate) fn slice2_font_capability_kinds() -> [CapabilityKind; 1] {
+    [CapabilityKind::Font]
+}
+
 /// Resolve a capability kind to its current Linux status.
 pub(crate) fn capability_status(kind: CapabilityKind) -> CapabilityStatus {
     let facts = display_facts_from_env();
@@ -92,12 +99,12 @@ pub(crate) fn capability_status(kind: CapabilityKind) -> CapabilityStatus {
         CapabilityKind::Input => input_capability_status(facts),
         CapabilityKind::Ime => ime::ime_capability_status(facts),
         CapabilityKind::Clipboard => clipboard::clipboard_capability_status_from_env(),
-        CapabilityKind::Font
-        | CapabilityKind::Screenshot
-        | CapabilityKind::Activation
-        | CapabilityKind::Integration => CapabilityStatus::Unsupported {
-            reason: "deferred-slice",
-        },
+        CapabilityKind::Font => font::font_capability_status(),
+        CapabilityKind::Screenshot | CapabilityKind::Activation | CapabilityKind::Integration => {
+            CapabilityStatus::Unsupported {
+                reason: "deferred-slice",
+            }
+        }
     }
 }
 
@@ -177,15 +184,38 @@ mod tests {
     }
 
     #[test]
+    fn slice2_font_exposes_font_capability() {
+        assert_eq!(slice2_font_capability_kinds(), [CapabilityKind::Font]);
+        let status = capability_status(CapabilityKind::Font);
+        assert!(
+            matches!(
+                status,
+                CapabilityStatus::Available
+                    | CapabilityStatus::Failed {
+                        code: "font_unavailable" | "font_metrics_failed",
+                        ..
+                    }
+            ),
+            "font must be Available or typed Failed, got {status:?}"
+        );
+        assert_ne!(
+            status,
+            CapabilityStatus::Unsupported {
+                reason: "deferred-slice"
+            }
+        );
+    }
+
+    #[test]
     fn deferred_capabilities_are_unsupported_not_available() {
         assert!(matches!(
-            capability_status(CapabilityKind::Font),
+            capability_status(CapabilityKind::Screenshot),
             CapabilityStatus::Unsupported {
                 reason: "deferred-slice"
             }
         ));
         assert!(matches!(
-            capability_status(CapabilityKind::Screenshot),
+            capability_status(CapabilityKind::Activation),
             CapabilityStatus::Unsupported {
                 reason: "deferred-slice"
             }

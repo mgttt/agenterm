@@ -188,8 +188,24 @@ struct SystemFonts {
 impl SystemFonts {
     fn load() -> Self {
         let mut faces = Vec::new();
-        for candidate in font_candidates() {
-            load_candidate_faces(candidate, &mut faces);
+        #[cfg(target_os = "linux")]
+        {
+            // Candidate table lives in platform::linux::font (slice-2 cut-3).
+            for candidate in crate::platform::linux::font::candidates() {
+                load_candidate_faces(
+                    &FontCandidate {
+                        name: candidate.name,
+                        components: candidate.components,
+                    },
+                    &mut faces,
+                );
+            }
+        }
+        #[cfg(target_os = "macos")]
+        {
+            for candidate in font_candidates() {
+                load_candidate_faces(candidate, &mut faces);
+            }
         }
         Self {
             faces,
@@ -298,45 +314,6 @@ fn font_candidates() -> &'static [FontCandidate] {
     ]
 }
 
-#[cfg(not(target_os = "macos"))]
-fn font_candidates() -> &'static [FontCandidate] {
-    &[
-        FontCandidate {
-            name: "DejaVu Sans Mono",
-            components: &[
-                "usr",
-                "share",
-                "fonts",
-                "truetype",
-                "dejavu",
-                "DejaVuSansMono.ttf",
-            ],
-        },
-        FontCandidate {
-            name: "Liberation Mono",
-            components: &[
-                "usr",
-                "share",
-                "fonts",
-                "truetype",
-                "liberation2",
-                "LiberationMono-Regular.ttf",
-            ],
-        },
-        FontCandidate {
-            name: "Noto Sans Mono CJK",
-            components: &[
-                "usr",
-                "share",
-                "fonts",
-                "opentype",
-                "noto",
-                "NotoSansCJK-Regular.ttc",
-            ],
-        },
-    ]
-}
-
 fn rooted_path(components: &[&str]) -> PathBuf {
     components.iter().fold(
         PathBuf::from(std::path::MAIN_SEPARATOR_STR),
@@ -385,8 +362,8 @@ pub(super) fn raster_glyph(ch: char, size: u16) -> Option<Arc<RasterGlyph>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        GlyphCache, GlyphKey, MAX_CACHED_GLYPHS, glyph_rows, raster_glyph, resolved_font_name,
-        row_contains_pixel,
+        glyph_rows, raster_glyph, resolved_font_name, row_contains_pixel, GlyphCache, GlyphKey,
+        MAX_CACHED_GLYPHS,
     };
 
     #[test]
@@ -408,14 +385,12 @@ mod tests {
         }
 
         assert_eq!(cache.values.len(), MAX_CACHED_GLYPHS);
-        assert!(
-            cache
-                .get(&GlyphKey {
-                    ch: '\u{1000}',
-                    size: 14
-                })
-                .is_none()
-        );
+        assert!(cache
+            .get(&GlyphKey {
+                ch: '\u{1000}',
+                size: 14
+            })
+            .is_none());
     }
 
     #[cfg(target_os = "macos")]
@@ -424,6 +399,20 @@ mod tests {
         assert_eq!(resolved_font_name(), "SF Mono");
         for ch in ['A', '繁'] {
             let glyph = raster_glyph(ch, 14).expect("system glyph");
+            assert!(glyph.width > 0);
+            assert!(glyph.height > 0);
+            assert!(glyph.alpha.iter().any(|alpha| *alpha > 0));
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_resolved_font_matches_platform_primary() {
+        let platform_primary =
+            crate::platform::linux::font::primary_family_name().unwrap_or("bitmap-8x8");
+        assert_eq!(resolved_font_name(), platform_primary);
+        if platform_primary != "bitmap-8x8" {
+            let glyph = raster_glyph('A', 14).expect("system glyph");
             assert!(glyph.width > 0);
             assert!(glyph.height > 0);
             assert!(glyph.alpha.iter().any(|alpha| *alpha > 0));
