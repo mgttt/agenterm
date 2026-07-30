@@ -160,7 +160,7 @@ for path in aliases.keys() {
     source.replace("\r\n", "\n");
     source.trim();
     let expected =
-        `@set "AGENTERM_BOOTSTRAP_TASK=` + aliases[path] +
+        `@setlocal && set "AGENTERM_BOOTSTRAP_TASK=` + aliases[path] +
         `" && call "%~dp0scripts\bootstrap.cmd" %*`;
     require(source == expected, "migration_batch_alias_not_thin:" + path);
 }

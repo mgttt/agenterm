@@ -106,7 +106,7 @@ if profile == "release" && !external_target {
             "--manifest", manifest,
             "--timeout-ms", "10000",
             "--max-operations", "10000000",
-            "--", repo, cargo_output
+            "--", cargo_output
         ],
         repo,
         environment,
