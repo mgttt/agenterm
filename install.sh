@@ -1,0 +1,280 @@
+#!/usr/bin/env bash
+#
+# Install AgenTerm from the latest mgttt/agenterm GitHub Release.
+#
+# Usage:
+#   curl -fsSL https://raw.githubusercontent.com/mgttt/agenterm/main/install.sh | bash
+#
+# Optional environment:
+#   AGENTERM_VERSION=v0.1.10
+#   AGENTERM_INSTALL_DIR=$HOME/.local/share/agenterm
+#   AGENTERM_BIN_DIR=$HOME/.local/bin
+#   AGENTERM_NO_LAUNCH=1
+#   AGENTERM_ALLOW_UNSIGNED_PREVIEW=1
+
+set -euo pipefail
+
+REPOSITORY="mgttt/agenterm"
+GITHUB_URL="https://github.com"
+INSTALL_ROOT="${AGENTERM_INSTALL_DIR:-${HOME:?HOME is not set}/.local/share/agenterm}"
+BIN_DIR="${AGENTERM_BIN_DIR:-${HOME}/.local/bin}"
+APPLICATIONS_DIR="${AGENTERM_APPLICATIONS_DIR:-${HOME}/Applications}"
+NO_LAUNCH="${AGENTERM_NO_LAUNCH:-0}"
+ALLOW_UNSIGNED_PREVIEW="${AGENTERM_ALLOW_UNSIGNED_PREVIEW:-0}"
+DOWNLOAD_BASE="${AGENTERM_DOWNLOAD_BASE:-}"
+TMP_DIR=""
+
+say() {
+  printf '==> %s\n' "$*"
+}
+
+fail() {
+  printf 'error: %s\n' "$*" >&2
+  exit 1
+}
+
+cleanup() {
+  if [[ -n "$TMP_DIR" && -d "$TMP_DIR" ]]; then
+    rm -rf "$TMP_DIR"
+  fi
+}
+
+trap cleanup EXIT HUP INT TERM
+
+usage() {
+  cat <<'EOF'
+Install AgenTerm from GitHub Releases.
+
+Environment variables:
+  AGENTERM_VERSION                  Install a specific tag, for example v0.1.10
+  AGENTERM_INSTALL_DIR              Payload root (default: ~/.local/share/agenterm)
+  AGENTERM_BIN_DIR                  Command symlink directory (default: ~/.local/bin)
+  AGENTERM_APPLICATIONS_DIR         macOS app directory (default: ~/Applications)
+  AGENTERM_NO_LAUNCH=1              Install without starting the GUI
+  AGENTERM_ALLOW_UNSIGNED_PREVIEW=1 Permit a labeled macOS unsigned preview
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+  usage
+  exit 0
+fi
+if [[ $# -ne 0 ]]; then
+  fail "unexpected argument: $1"
+fi
+
+command -v curl >/dev/null 2>&1 || fail "curl is required"
+command -v mktemp >/dev/null 2>&1 || fail "mktemp is required"
+
+case "$(uname -s)" in
+  Darwin)
+    OS="macos"
+    ARCHIVE_EXTENSION="zip"
+    ;;
+  Linux)
+    OS="linux"
+    ARCHIVE_EXTENSION="tar.gz"
+    ;;
+  *)
+    fail "unsupported operating system: $(uname -s)"
+    ;;
+esac
+
+case "$(uname -m)" in
+  arm64 | aarch64)
+    ARCH="aarch64"
+    ;;
+  x86_64 | amd64)
+    ARCH="x86_64"
+    ;;
+  *)
+    fail "unsupported CPU architecture: $(uname -m)"
+    ;;
+esac
+
+download() {
+  local url="$1"
+  local destination="$2"
+  local -a options=(--fail --silent --show-error --location --retry 3)
+  if [[ "$url" == https://* ]]; then
+    options+=(--proto '=https' --tlsv1.2)
+  fi
+  curl "${options[@]}" --output "$destination" "$url"
+}
+
+replace_symlink() {
+  local target="$1"
+  local link_path="$2"
+  local next_link="${link_path}.next.$$"
+  if [[ -e "$link_path" && ! -L "$link_path" ]]; then
+    fail "refusing to replace a non-symlink path: $link_path"
+  fi
+  ln -s "$target" "$next_link"
+  if [[ "$OS" == "macos" ]]; then
+    mv -fh "$next_link" "$link_path"
+  else
+    mv -Tf "$next_link" "$link_path"
+  fi
+}
+
+resolve_version() {
+  local effective_url
+  if [[ -n "${AGENTERM_VERSION:-}" ]]; then
+    printf '%s\n' "$AGENTERM_VERSION"
+    return
+  fi
+  effective_url="$(
+    curl --fail --silent --show-error --location \
+      --proto '=https' --tlsv1.2 \
+      --output /dev/null --write-out '%{url_effective}' \
+      "$GITHUB_URL/$REPOSITORY/releases/latest"
+  )"
+  [[ "$effective_url" == */tag/* ]] ||
+    fail "GitHub did not resolve a latest release"
+  printf '%s\n' "${effective_url##*/}"
+}
+
+VERSION="$(resolve_version)"
+[[ "$VERSION" =~ ^v[0-9A-Za-z.+_-]+$ ]] ||
+  fail "invalid release tag: $VERSION"
+RELEASE_VERSION="${VERSION#v}"
+
+if [[ -z "$DOWNLOAD_BASE" ]]; then
+  DOWNLOAD_BASE="$GITHUB_URL/$REPOSITORY/releases/download/$VERSION"
+fi
+
+PACKAGE_STEM="agenterm-${RELEASE_VERSION}-${OS}-${ARCH}"
+if [[ "$OS" == "macos" && "$ALLOW_UNSIGNED_PREVIEW" == "1" ]]; then
+  PACKAGE_STEM="${PACKAGE_STEM}-unsigned-preview"
+fi
+ARCHIVE_NAME="${PACKAGE_STEM}.${ARCHIVE_EXTENSION}"
+ARCHIVE_URL="${DOWNLOAD_BASE%/}/$ARCHIVE_NAME"
+CHECKSUM_URL="${ARCHIVE_URL}.sha256"
+
+TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/agenterm-install.XXXXXXXX")"
+ARCHIVE_PATH="$TMP_DIR/$ARCHIVE_NAME"
+CHECKSUM_PATH="$ARCHIVE_PATH.sha256"
+STAGING_DIR="$TMP_DIR/payload"
+mkdir -p "$STAGING_DIR"
+
+say "Downloading AgenTerm $VERSION for $OS-$ARCH"
+if ! download "$ARCHIVE_URL" "$ARCHIVE_PATH"; then
+  if [[ "$OS" == "macos" && "$ALLOW_UNSIGNED_PREVIEW" != "1" ]]; then
+    fail "signed macOS asset is unavailable; set AGENTERM_ALLOW_UNSIGNED_PREVIEW=1 only if you accept the developer-preview trust model"
+  fi
+  fail "release asset is unavailable: $ARCHIVE_URL"
+fi
+download "$CHECKSUM_URL" "$CHECKSUM_PATH" ||
+  fail "release checksum is unavailable: $CHECKSUM_URL"
+
+EXPECTED_SHA256="$(awk 'NR == 1 { print $1 }' "$CHECKSUM_PATH")"
+[[ "$EXPECTED_SHA256" =~ ^[0-9a-fA-F]{64}$ ]] ||
+  fail "release checksum has an invalid format"
+if command -v sha256sum >/dev/null 2>&1; then
+  ACTUAL_SHA256="$(sha256sum "$ARCHIVE_PATH" | awk '{ print $1 }')"
+elif command -v shasum >/dev/null 2>&1; then
+  ACTUAL_SHA256="$(shasum -a 256 "$ARCHIVE_PATH" | awk '{ print $1 }')"
+else
+  fail "sha256sum or shasum is required"
+fi
+NORMALIZED_ACTUAL_SHA256="$(printf '%s' "$ACTUAL_SHA256" | tr '[:upper:]' '[:lower:]')"
+NORMALIZED_EXPECTED_SHA256="$(printf '%s' "$EXPECTED_SHA256" | tr '[:upper:]' '[:lower:]')"
+[[ "$NORMALIZED_ACTUAL_SHA256" == "$NORMALIZED_EXPECTED_SHA256" ]] ||
+  fail "SHA-256 verification failed for $ARCHIVE_NAME"
+say "Verified SHA-256: $NORMALIZED_ACTUAL_SHA256"
+
+if [[ "$OS" == "macos" ]]; then
+  command -v ditto >/dev/null 2>&1 || fail "ditto is required on macOS"
+  ditto -x -k "$ARCHIVE_PATH" "$STAGING_DIR"
+else
+  command -v tar >/dev/null 2>&1 || fail "tar is required on Linux"
+  tar -xzf "$ARCHIVE_PATH" -C "$STAGING_DIR"
+fi
+
+REQUIRED_EXECUTABLES=(
+  agenterm
+  agenterm-cli
+  agenterm-mux
+  agenterm-script
+  agenterm-mcp
+)
+for executable in "${REQUIRED_EXECUTABLES[@]}"; do
+  [[ -f "$STAGING_DIR/$executable" && ! -L "$STAGING_DIR/$executable" ]] ||
+    fail "release payload is missing $executable"
+  chmod +x "$STAGING_DIR/$executable"
+done
+
+if [[ "$OS" == "macos" && "$ALLOW_UNSIGNED_PREVIEW" != "1" ]]; then
+  command -v codesign >/dev/null 2>&1 || fail "codesign is required on macOS"
+  for executable in "${REQUIRED_EXECUTABLES[@]}"; do
+    codesign --verify --strict "$STAGING_DIR/$executable" >/dev/null 2>&1 ||
+      fail "Apple code-signature verification failed for $executable"
+    SIGNATURE_INFO="$(codesign --display --verbose=4 "$STAGING_DIR/$executable" 2>&1)"
+    [[ "$SIGNATURE_INFO" == *"Authority=Developer ID Application:"* ]] ||
+      fail "$executable is not signed with an Apple Developer ID Application identity"
+  done
+fi
+
+RELEASES_DIR="$INSTALL_ROOT/releases"
+RELEASE_DIR="$RELEASES_DIR/$RELEASE_VERSION-$OS-$ARCH"
+mkdir -p "$RELEASES_DIR" "$BIN_DIR"
+if [[ -e "$RELEASE_DIR" || -L "$RELEASE_DIR" ]]; then
+  rm -rf "$RELEASE_DIR"
+fi
+mv "$STAGING_DIR" "$RELEASE_DIR"
+
+CURRENT_LINK="$INSTALL_ROOT/current"
+replace_symlink "$RELEASE_DIR" "$CURRENT_LINK"
+
+for executable in "${REQUIRED_EXECUTABLES[@]}"; do
+  LINK_PATH="$BIN_DIR/$executable"
+  replace_symlink "$CURRENT_LINK/$executable" "$LINK_PATH"
+done
+
+if [[ "$OS" == "macos" ]]; then
+  APP_DIR="$APPLICATIONS_DIR/AgenTerm.app"
+  APP_CONTENTS="$APP_DIR/Contents"
+  mkdir -p "$APP_CONTENTS/MacOS" "$APP_CONTENTS/Resources"
+  rm -f "$APP_CONTENTS/MacOS/AgenTerm"
+  ln -s "$CURRENT_LINK/agenterm" "$APP_CONTENTS/MacOS/AgenTerm"
+  cat >"$APP_CONTENTS/Info.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDisplayName</key>
+  <string>AgenTerm</string>
+  <key>CFBundleExecutable</key>
+  <string>AgenTerm</string>
+  <key>CFBundleIdentifier</key>
+  <string>tech.mega.agenterm</string>
+  <key>CFBundleName</key>
+  <string>AgenTerm</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>$RELEASE_VERSION</string>
+</dict>
+</plist>
+EOF
+  GUI_PATH="$APP_DIR"
+else
+  GUI_PATH="$CURRENT_LINK/agenterm"
+fi
+
+say "Installed AgenTerm $VERSION to $RELEASE_DIR"
+say "Commands are available in $BIN_DIR"
+if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
+  say "Add $BIN_DIR to PATH to use agenterm-cli, agenterm-mux, and agenterm-script"
+fi
+
+if [[ "$NO_LAUNCH" != "1" ]]; then
+  say "Launching AgenTerm"
+  if [[ "$OS" == "macos" ]]; then
+    open "$GUI_PATH"
+  elif [[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then
+    nohup "$GUI_PATH" >/dev/null 2>&1 &
+  else
+    say "No graphical session detected; launch $GUI_PATH from your desktop session"
+  fi
+fi
