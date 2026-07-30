@@ -2,7 +2,7 @@
 //!
 //! Ownership: Linux agent only. Do not edit shared contracts here.
 //!
-//! Implements shared **contract revision 2** (`crate::platform::CONTRACT_REVISION`):
+//! Implements shared **contract revision 3** (`crate::platform::CONTRACT_REVISION`):
 //! - slice-1: toolbar action ids + keyboard text/shortcut separation
 //! - slice-2: IME + clipboard + DPI/scale + font + screenshot + activation
 //!
@@ -119,8 +119,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn implements_contract_revision_2() {
-        assert_eq!(IMPLEMENTED_CONTRACT_REVISION, 2);
+    fn implements_contract_revision_3() {
+        assert_eq!(IMPLEMENTED_CONTRACT_REVISION, 3);
         assert_eq!(IMPLEMENTED_CONTRACT_REVISION, CONTRACT_REVISION);
         assert_eq!(platform_kind(), PlatformKind::Linux);
     }

@@ -51,6 +51,7 @@ use crate::{
     locale::UiText,
     platform::{
         CapabilityStatus, KeyClassification, action,
+        window::{ClientSize, WindowSemanticState},
         windows::{
             activation, clipboard, font,
             input::{Utf16TextDecoder, primary_shortcut, windows_modifiers},
@@ -1289,14 +1290,13 @@ impl RemoteWindowState {
                 ShowWindow(self.window, SW_RESTORE);
             },
             "window-resize" => {
-                let width = option_value(&command.args, "--width")
-                    .and_then(|value| value.parse::<i32>().ok())
-                    .filter(|value| *value >= 320)
-                    .context("window-resize requires --width of at least 320")?;
-                let height = option_value(&command.args, "--height")
-                    .and_then(|value| value.parse::<i32>().ok())
-                    .filter(|value| *value >= 240)
-                    .context("window-resize requires --height of at least 240")?;
+                let size = ClientSize::parse(
+                    option_value(&command.args, "--width"),
+                    option_value(&command.args, "--height"),
+                )
+                .map_err(|error| anyhow::anyhow!("{} ({})", error.message(), error.code()))?;
+                let width = i32::try_from(size.width).expect("validated native width");
+                let height = i32::try_from(size.height).expect("validated native height");
                 let mut current_client: RECT = unsafe { mem::zeroed() };
                 let mut outer: RECT = unsafe { mem::zeroed() };
                 unsafe {
@@ -2005,6 +2005,10 @@ impl RemoteWindowState {
                 RemoteFocusSurface::Tabs => "tabs",
             }
         };
+        let window_state = WindowSemanticState::from_native_flags(
+            unsafe { IsIconic(self.window) } != 0,
+            unsafe { IsZoomed(self.window) } != 0,
+        );
         serde_json::to_string_pretty(&serde_json::json!({
             "schema_version": crate::ui_bridge::UI_CLIENT_STATE_SCHEMA_VERSION,
             "protocol_version": 1,
@@ -2021,14 +2025,8 @@ impl RemoteWindowState {
                 "client_height": client_rect.bottom,
                 "visible": unsafe { IsWindowVisible(self.window) } != 0,
                 "detached": false,
-                "minimized": unsafe { IsIconic(self.window) } != 0,
-                "state": if unsafe { IsIconic(self.window) } != 0 {
-                    "minimized"
-                } else if unsafe { IsZoomed(self.window) } != 0 {
-                    "maximized"
-                } else {
-                    "restored"
-                },
+                "minimized": window_state.is_minimized(),
+                "state": window_state.as_str(),
             },
             "layout": {
                 "sidebar": {

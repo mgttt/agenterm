@@ -1,8 +1,8 @@
 //! Native platform abstraction contracts (`prd/PRD_02_20_native_platform.md`).
 //!
-//! **Contract revision 2** freezes normalized product-action identities, key
+//! **Contract revision 3** freezes normalized product-action identities, key
 //! classification, capability status, display-backend facts, and validated
-//! window scale/geometry semantics with table-driven unit tests.
+//! window lifecycle/scale/geometry semantics with table-driven unit tests.
 //!
 //! Ownership (PRD parallel rules):
 //! - primary owns this file, shared semantics, Windows adaptation, and final
@@ -15,10 +15,11 @@
 
 /// Frozen shared-contract revision implemented by this module.
 #[allow(dead_code)]
-pub const CONTRACT_REVISION: u32 = 2;
+pub const CONTRACT_REVISION: u32 = 3;
 
 #[cfg(any(target_os = "linux", target_os = "macos", test))]
 pub(crate) mod scale;
+pub(crate) mod window;
 
 #[cfg(target_os = "windows")]
 pub mod windows;
@@ -316,8 +317,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn contract_revision_is_frozen_at_two() {
-        assert_eq!(CONTRACT_REVISION, 2);
+    fn contract_revision_is_frozen_at_three() {
+        assert_eq!(CONTRACT_REVISION, 3);
     }
 
     #[test]

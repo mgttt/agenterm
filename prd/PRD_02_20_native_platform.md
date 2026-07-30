@@ -103,6 +103,9 @@ Available, Unsupported, and Failed without reading source or assuming parity.
   - [x] Windows capability reporting no longer claims full IME support:
     committed UTF-16 text is shipped, while unadapted IME preedit reports
     explicit `ime-preedit-not-yet-adapted`
+  - [x] contract-revision-3 makes native minimize/maximize/restore snapshot
+    state and bounded client resize consume the shared window lifecycle
+    contract; Win32 retains HWND sizing and non-client-frame arithmetic
   - [~] existing Win32 window, HWND controls, GDI rendering, native clipboard,
     system menu, and remaining input behavior are shipped but remain
     distributed across Windows application modules
@@ -131,6 +134,8 @@ Available, Unsupported, and Failed without reading source or assuming parity.
   - [x] ordered macOS system-font candidates and availability probing now live
     in `platform::macos::font`; the shared Unix renderer consumes that adapter
     metadata and no longer owns Apple font paths
+  - [x] contract-revision-3 shares window semantic state and strict client-size
+    validation with Windows while the winit adapter retains Cocoa calls
   - [x] clipboard reads/writes now consume `platform::macos::clipboard` with a
     256 KiB byte budget, live bounded reads, supervised stdin writes, and typed
     failures; native macOS verifies the blocked-writer deadline and product
@@ -161,6 +166,8 @@ Available, Unsupported, and Failed without reading source or assuming parity.
   - [x] contract-revision-2 removes the duplicated Linux conversion and
     geometry classifier; the Linux adapter retains X11/Wayland/headless
     capability discovery and consumes the shared typed contract
+  - [x] contract-revision-3 shares window semantic state and strict client-size
+    validation with Windows while the winit adapter retains X11/Wayland calls
   - [~] winit/softbuffer windowing, X11/Wayland input, system-font fallback,
     clipboard, cursor, scaling, and POSIX PTY interaction are in active delivery
   - [~] expose the remaining Linux behavior through the shared platform
@@ -171,35 +178,36 @@ Available, Unsupported, and Failed without reading source or assuming parity.
 
 ## Boundary and non-goals
 
-- [ ] the initial migration does not relocate or redesign PTY, process,
+- [x] the initial migration does not relocate or redesign PTY, process,
   filesystem, network, Script Runtime, Fleet authority, or IPC modules
-- [ ] the platform layer does not contain product labels, Settings policy,
+- [x] the platform layer does not contain product labels, Settings policy,
   tab-tree behavior, Hub navigation, or terminal lifecycle decisions
-- [ ] `arch/` remains absent until CPU-specific code exists, such as explicit
+- [x] `arch/` remains absent until CPU-specific code exists, such as explicit
   x86-64/AArch64 SIMD, assembly, ABI, or atomic implementations; operating
   systems never appear under `arch/`
-- [ ] no large flag-day rewrite: old paths remain until their replacement
+- [x] no large flag-day rewrite: old paths remain until their replacement
   passes the same public behavior and rendered-evidence gates
 
 ## Parallel implementation rules
 
-- [ ] the primary agent owns `src/platform/mod.rs`, shared event/capability
+- [x] the primary agent owns `src/platform/mod.rs`, shared event/capability
   contracts, Windows adaptation, PRD alignment, and final integration
-- [ ] the macOS agent owns the macOS adapter and macOS-native evidence
-- [ ] the Linux agent owns the Linux adapter and Linux-native evidence
-- [ ] platform agents consume the shared contract and must request a contract
+- [x] the macOS agent owns the macOS adapter and macOS-native evidence
+- [x] the Linux agent owns the Linux adapter and Linux-native evidence
+- [x] platform agents consume the shared contract and must request a contract
   change instead of independently editing its semantics
-- [ ] commits remain small and merge to `main` early; every adapter commit
+- [x] commits remain small and merge to `main` early; every adapter commit
   states the contract revision it implements and keeps unrelated product work
   out of the platform migration
 
 ## Migration and acceptance
 
 1. [~] freeze normalized event and capability types with table-driven unit
-   tests; contract revision 2 additionally owns scale-factor validation,
-   logical/physical conversion, window metrics, and geometry classification;
-   OS adapters remain incremental
-2. [~] adapt one narrow vertical slice—toolbar labels/actions plus keyboard
+   tests; contract revision 2 owns scale-factor validation, logical/physical
+   conversion, window metrics, and geometry classification; revision 3 owns
+   window semantic state and bounded client resize; OS adapters remain
+   incremental
+2. [x] adapt one narrow vertical slice—toolbar labels/actions plus keyboard
    text/shortcut separation—on all three systems
    (Linux hot-path wired through `platform::linux` @ `78f5333`; macOS toolbar,
    keyboard, and committed-text hot paths wired @ `4aadcb0`/`1e6b09c`;
@@ -214,7 +222,7 @@ Available, Unsupported, and Failed without reading source or assuming parity.
    first cut @ `11ce9b8`, bounded screenshot @ `3811bda`, and Cocoa IME
    preedit/commit @ `91055b6` are adapted; Linux/macOS scale duplication is
    replaced by the contract-revision-2 shared implementation)
-4. [ ] remove superseded platform-specific paths only after native black-box
+4. [~] remove superseded platform-specific paths only after native black-box
    and screenshot evidence passes on that platform
 
 Completion requires:
@@ -307,9 +315,19 @@ Contract-revision-2 local evidence (2026-07-31):
 - [x] Windows GDI font adapter tests pass **15/15** for the Windows platform
   slice; an incremental six-executable build and public no-activate startup
   smoke pass with a **570 ms** first native window
-- [x] public `agenterm-cli protocol-info` reports contract revision 2 and all
+- [x] public `agenterm-cli protocol-info` reports the current contract revision and all
   eight Windows capability statuses; IME preedit and undeclared shell
   integration are explicit Unsupported results rather than false availability
+
+Contract-revision-3 local evidence (2026-07-31):
+
+- [x] shared window tests prove native-state precedence and strict
+  320×240-to-`i32::MAX` client-size bounds; Windows and Unix `window-resize`
+  hot paths consume the same typed validation
+- [x] Windows Quick Gate passes repository lint, formatting, PRD alignment,
+  warnings-denied all-target Clippy, and **303** library tests
+- [~] six-platform CI and native Unix evidence remain required before the
+  contract-revision-3 slice can become release-qualified
 - [~] direct Linux cross-check from Windows reached native dependency
   compilation but cannot complete without `x86_64-linux-gnu-gcc`; the
   repository's native Linux/macOS jobs remain the authoritative adapter proof

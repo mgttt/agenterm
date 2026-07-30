@@ -5,7 +5,7 @@
 //! The private helpers below preserve Apple-native behavior while returning
 //! primary-owned shared event and capability types.
 //!
-//! Contract revision implemented by this adapter: 2.
+//! Contract revision implemented by this adapter: 3.
 
 #![cfg(target_os = "macos")]
 
@@ -20,7 +20,7 @@ pub(crate) mod toolbar;
 
 use super::{CapabilityKind, CapabilityStatus, PlatformKind};
 
-pub const IMPLEMENTED_CONTRACT_REVISION: u32 = 2;
+pub const IMPLEMENTED_CONTRACT_REVISION: u32 = 3;
 
 pub const fn platform_kind() -> PlatformKind {
     PlatformKind::Macos

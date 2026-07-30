@@ -18,30 +18,8 @@
 use winit::{dpi::LogicalSize, event::WindowEvent, window::Window};
 
 use crate::commands::option_value;
-
-pub const MIN_CLIENT_WIDTH: u32 = 320;
-pub const MIN_CLIENT_HEIGHT: u32 = 240;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum WindowSemanticState {
-    Minimized,
-    Maximized,
-    Restored,
-}
-
-impl WindowSemanticState {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Minimized => "minimized",
-            Self::Maximized => "maximized",
-            Self::Restored => "restored",
-        }
-    }
-
-    pub const fn is_minimized(self) -> bool {
-        matches!(self, Self::Minimized)
-    }
-}
+pub(crate) use crate::platform::window::WindowSemanticState;
+use crate::platform::window::{ClientSize, ClientSizeError};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WindowStateTracker {
@@ -168,25 +146,25 @@ pub fn apply_ui_action(
             WindowUiActionResult::Applied
         }
         "window-resize" => {
-            let width = option_value(args, "--width")
-                .and_then(|value| value.parse::<u32>().ok())
-                .filter(|value| *value >= MIN_CLIENT_WIDTH);
-            let height = option_value(args, "--height")
-                .and_then(|value| value.parse::<u32>().ok())
-                .filter(|value| *value >= MIN_CLIENT_HEIGHT);
-            match (width, height) {
-                (Some(width), Some(height)) => {
-                    handle.resize_client(width, height);
+            match ClientSize::parse(
+                option_value(args, "--width"),
+                option_value(args, "--height"),
+            ) {
+                Ok(size) => {
+                    handle.resize_client(size.width, size.height);
                     if tracker.semantic_state() != WindowSemanticState::Minimized {
                         tracker.set_semantic_state(WindowSemanticState::Restored);
                     }
                     WindowUiActionResult::Applied
                 }
-                (None, _) => WindowUiActionResult::Invalid(
-                    "window-resize requires --width of at least 320".to_string(),
+                Err(ClientSizeError::InvalidWidth) => WindowUiActionResult::Invalid(
+                    ClientSizeError::InvalidWidth.message().to_owned(),
                 ),
-                (_, None) => WindowUiActionResult::Invalid(
-                    "window-resize requires --height of at least 240".to_string(),
+                Err(ClientSizeError::InvalidHeight) => WindowUiActionResult::Invalid(
+                    ClientSizeError::InvalidHeight.message().to_owned(),
+                ),
+                Err(ClientSizeError::ExtentTooLarge) => WindowUiActionResult::Invalid(
+                    ClientSizeError::ExtentTooLarge.message().to_owned(),
                 ),
             }
         }

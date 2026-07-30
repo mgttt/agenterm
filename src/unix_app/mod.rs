@@ -2072,7 +2072,7 @@ impl UnixApp {
     }
 
     /// Linux hot-path: resize / scale-factor changes go through `platform::linux::scale`
-    /// (contract revision 1) before PTY/layout updates.
+    /// (contract revision 3) before PTY/layout updates.
     #[cfg(target_os = "linux")]
     fn handle_linux_geometry_event(
         &mut self,
