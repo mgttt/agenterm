@@ -103,6 +103,7 @@ pub(super) struct TerminalCell {
     text: TerminalCellText,
     fg: TerminalColor,
     bg: TerminalColor,
+    attributes: TerminalAttributes,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -112,12 +113,48 @@ enum TerminalColor {
     TrueColor(Rgb),
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct TerminalAttributes(u8);
+
+impl TerminalAttributes {
+    const BOLD: u8 = 1 << 0;
+    const DIM: u8 = 1 << 1;
+    const ITALIC: u8 = 1 << 2;
+    const UNDERLINE: u8 = 1 << 3;
+
+    fn from_cell(cell: &vt100::Cell) -> Self {
+        let mut value = 0;
+        value |= u8::from(cell.bold()) * Self::BOLD;
+        value |= u8::from(cell.dim()) * Self::DIM;
+        value |= u8::from(cell.italic()) * Self::ITALIC;
+        value |= u8::from(cell.underline()) * Self::UNDERLINE;
+        Self(value)
+    }
+
+    const fn bold(self) -> bool {
+        self.0 & Self::BOLD != 0
+    }
+
+    const fn dim(self) -> bool {
+        self.0 & Self::DIM != 0
+    }
+
+    const fn italic(self) -> bool {
+        self.0 & Self::ITALIC != 0
+    }
+
+    const fn underline(self) -> bool {
+        self.0 & Self::UNDERLINE != 0
+    }
+}
+
 impl TerminalCell {
     pub(super) const fn blank() -> Self {
         Self {
             text: TerminalCellText::blank(),
             fg: TerminalColor::Default,
             bg: TerminalColor::Default,
+            attributes: TerminalAttributes(0),
         }
     }
 
@@ -195,6 +232,7 @@ impl TerminalGrid {
                             text: TerminalCellText::from_str(cell.contents()),
                             fg,
                             bg,
+                            attributes: TerminalAttributes::from_cell(cell),
                         }
                     });
                 self.set_cell(col, row, cell);
@@ -1592,6 +1630,7 @@ fn render_terminal_grid(
                 cell.text(),
                 fg,
                 bg,
+                cell.attributes,
             );
             col += if wide { 2 } else { 1 };
         }
@@ -1624,6 +1663,7 @@ fn render_terminal_grid(
                         cell.text(),
                         palette.terminal_background,
                         palette.focus_ring,
+                        cell.attributes,
                     ),
                     TerminalCursorShape::Underline => {
                         let cursor_height = (layout.cell_height / 8).clamp(2, 3);
@@ -2114,8 +2154,9 @@ fn draw_cell(
     cell_width: u32,
     cell_height: u32,
     text: &str,
-    fg: Rgb,
+    mut fg: Rgb,
     bg: Rgb,
+    attributes: TerminalAttributes,
 ) {
     if origin_x >= width || origin_y >= height {
         return;
@@ -2125,6 +2166,21 @@ fn draw_cell(
     let cell_h = cell_height.min(height - origin_y);
     let bg_pixel = rgb_to_pixel(bg);
     fill_rect(buffer, stride, origin_x, origin_y, cell_w, cell_h, bg_pixel);
+    if attributes.dim() {
+        fg = mix_rgb(fg, bg, 2, 3);
+    }
+    if attributes.underline() && cell_w > 0 && cell_h > 0 {
+        let underline_height = (cell_h / 16).max(1);
+        fill_rect(
+            buffer,
+            stride,
+            origin_x,
+            origin_y + cell_h - underline_height,
+            cell_w,
+            underline_height,
+            rgb_to_pixel(fg),
+        );
+    }
 
     let glyph_y = origin_y + CELL_PADDING_Y;
     let glyph_h = cell_h.saturating_sub(CELL_PADDING_Y * 2);
@@ -2141,7 +2197,7 @@ fn draw_cell(
     {
         let centered_x = origin_x as f32 + (cell_w as f32 - glyph.advance).max(0.0) / 2.0;
         let baseline_y = glyph_y as f32 + ascent;
-        draw_raster_glyph(
+        draw_raster_glyph_styled(
             buffer,
             stride,
             width,
@@ -2151,10 +2207,12 @@ fn draw_cell(
             baseline_y,
             fg,
             (origin_x, origin_y, cell_w, cell_h),
+            attributes.bold(),
+            attributes.italic(),
         );
         for combining in chars {
             if let Some(glyph) = raster_glyph(combining, raster_size) {
-                draw_raster_glyph(
+                draw_raster_glyph_styled(
                     buffer,
                     stride,
                     width,
@@ -2164,6 +2222,8 @@ fn draw_cell(
                     baseline_y,
                     fg,
                     (origin_x, origin_y, cell_w, cell_h),
+                    attributes.bold(),
+                    attributes.italic(),
                 );
             }
         }
@@ -2190,9 +2250,14 @@ fn draw_cell(
             if !super::font::row_contains_pixel(row_bits, source_x) {
                 continue;
             }
-            let x = glyph_x + target_x;
+            let italic_shift =
+                u32::from(attributes.italic()) * glyph_h.saturating_sub(target_y + 1).div_ceil(6);
+            let x = glyph_x + target_x + italic_shift;
             if x < origin_x + cell_w && x < width {
                 put_pixel(buffer, stride, x, y, fg_pixel);
+                if attributes.bold() && x + 1 < origin_x + cell_w && x + 1 < width {
+                    put_pixel(buffer, stride, x + 1, y, fg_pixel);
+                }
             }
         }
     }
@@ -2274,6 +2339,26 @@ fn draw_raster_glyph(
     foreground: Rgb,
     clip: (u32, u32, u32, u32),
 ) {
+    draw_raster_glyph_styled(
+        buffer, stride, width, height, glyph, baseline_x, baseline_y, foreground, clip, false,
+        false,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_raster_glyph_styled(
+    buffer: &mut [u32],
+    stride: u32,
+    width: u32,
+    height: u32,
+    glyph: &RasterGlyph,
+    baseline_x: f32,
+    baseline_y: f32,
+    foreground: Rgb,
+    clip: (u32, u32, u32, u32),
+    bold: bool,
+    italic: bool,
+) {
     let origin_x = baseline_x.round() as i32 + glyph.offset_x;
     let origin_y = baseline_y.round() as i32 + glyph.offset_y;
     let clip_right = clip.0.saturating_add(clip.2).min(width);
@@ -2284,7 +2369,9 @@ fn draw_raster_glyph(
             continue;
         }
         for x in 0..glyph.width {
-            let target_x = origin_x + x as i32;
+            let italic_shift = i32::from(italic)
+                * i32::try_from(glyph.height.saturating_sub(y + 1).div_ceil(6)).unwrap_or(i32::MAX);
+            let target_x = origin_x + x as i32 + italic_shift;
             if target_x < clip.0 as i32 || target_x >= clip_right as i32 {
                 continue;
             }
@@ -2300,8 +2387,31 @@ fn draw_raster_glyph(
                 foreground,
                 alpha,
             );
+            if bold && target_x + 1 < clip_right as i32 {
+                blend_pixel(
+                    buffer,
+                    stride,
+                    (target_x + 1) as u32,
+                    target_y as u32,
+                    foreground,
+                    alpha,
+                );
+            }
         }
     }
+}
+
+fn mix_rgb(foreground: Rgb, background: Rgb, numerator: u16, denominator: u16) -> Rgb {
+    let mix = |front: u8, back: u8| {
+        let front = u16::from(front) * numerator;
+        let back = u16::from(back) * (denominator - numerator);
+        ((front + back + denominator / 2) / denominator) as u8
+    };
+    Rgb::new(
+        mix(foreground.red, background.red),
+        mix(foreground.green, background.green),
+        mix(foreground.blue, background.blue),
+    )
 }
 
 fn truncate_chars(text: &str, max_chars: usize) -> String {
@@ -2568,6 +2678,71 @@ mod tests {
     }
 
     #[test]
+    fn terminal_grid_keeps_parser_text_attributes() {
+        let palette = ThemeId::Dark.palette();
+        let mut parser = vt100::Parser::new(1, 4, 0);
+        parser.process(b"\x1b[1mB\x1b[0m\x1b[2mD\x1b[0m\x1b[3mI\x1b[0m\x1b[4mU\x1b[0m");
+        let mut grid = TerminalGrid::new(4, 1, palette);
+
+        grid.sync_from_screen(parser.screen());
+
+        assert!(grid.cell(0, 0).attributes.bold());
+        assert!(grid.cell(1, 0).attributes.dim());
+        assert!(grid.cell(2, 0).attributes.italic());
+        assert!(grid.cell(3, 0).attributes.underline());
+        assert!(std::mem::size_of::<TerminalCell>() <= 32);
+    }
+
+    #[test]
+    fn terminal_cell_renders_bold_dim_italic_and_underline() {
+        let foreground = Rgb::new(240, 240, 240);
+        let background = Rgb::new(12, 12, 12);
+        let (width, height) = cell_metrics(18);
+        let render = |attributes| {
+            let mut buffer = vec![rgb_to_pixel(background); (width * height) as usize];
+            draw_cell(
+                &mut buffer,
+                width,
+                width,
+                height,
+                0,
+                0,
+                width,
+                height,
+                "M",
+                foreground,
+                background,
+                attributes,
+            );
+            buffer
+        };
+        let foreground_count = |buffer: &[u32]| {
+            buffer
+                .iter()
+                .filter(|pixel| **pixel == rgb_to_pixel(foreground))
+                .count()
+        };
+
+        let regular = render(TerminalAttributes::default());
+        let bold = render(TerminalAttributes(TerminalAttributes::BOLD));
+        let dim = render(TerminalAttributes(TerminalAttributes::DIM));
+        let italic = render(TerminalAttributes(TerminalAttributes::ITALIC));
+        let underline = render(TerminalAttributes(TerminalAttributes::UNDERLINE));
+
+        assert!(foreground_count(&bold) > foreground_count(&regular));
+        assert_ne!(italic, regular);
+        assert!(
+            dim.iter()
+                .any(|pixel| { *pixel == rgb_to_pixel(mix_rgb(foreground, background, 2, 3)) })
+        );
+        assert!(
+            underline[((height - 1) * width) as usize..(height * width) as usize]
+                .iter()
+                .all(|pixel| *pixel == rgb_to_pixel(foreground))
+        );
+    }
+
+    #[test]
     fn terminal_cell_keeps_vt100_combining_sequences_inline() {
         let palette = ThemeId::Dark.palette();
         let mut parser = vt100::Parser::new(1, 4, 0);
@@ -2609,6 +2784,7 @@ mod tests {
                 text,
                 foreground,
                 background,
+                TerminalAttributes::default(),
             );
             buffer
         };
@@ -2643,6 +2819,7 @@ mod tests {
             "\u{10ffff}",
             foreground,
             background,
+            TerminalAttributes::default(),
         );
 
         assert!(
@@ -2692,6 +2869,7 @@ mod tests {
                 "M",
                 foreground,
                 background,
+                TerminalAttributes::default(),
             );
             buffer
                 .into_iter()
@@ -2730,6 +2908,7 @@ mod tests {
             "繁",
             foreground,
             background,
+            TerminalAttributes::default(),
         );
 
         assert!(
