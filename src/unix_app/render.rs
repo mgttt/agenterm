@@ -14,7 +14,9 @@ use super::{
     layout::{SCROLLBAR_WIDTH, u32_rect},
 };
 
-pub(super) const COMPOSER_HEIGHT: u32 = 48;
+pub(super) const COMPOSER_HEIGHT: u32 = 64;
+const COMPOSER_VISIBLE_LINES: usize = 2;
+const COMPOSER_LINE_HEIGHT: u32 = 16;
 pub(super) const STATUS_HEIGHT: u32 = 26;
 pub(super) const SETTINGS_MODAL_WIDTH: u32 = 480;
 pub(super) const SETTINGS_MODAL_HEIGHT: u32 = 330;
@@ -1091,51 +1093,64 @@ fn render_composer(
         composer.label
     };
     let max_chars = (text_width / (GLYPH_WIDTH + 1)).max(1) as usize;
-    let prefix_chars = prefix.chars().count();
-    let visible_prefix = if prefix_chars <= max_chars {
-        prefix.to_owned()
+    let mut reverse_lines = composer.text.rsplit('\n');
+    let last_line = reverse_lines.next().unwrap_or_default();
+    let previous_line = reverse_lines.next();
+    let earlier_lines_hidden = reverse_lines.next().is_some();
+    let visible_lines = [previous_line.unwrap_or(last_line), last_line];
+    let visible_line_count = if previous_line.is_some() {
+        COMPOSER_VISIBLE_LINES
     } else {
-        truncate_chars(prefix, max_chars)
+        1
     };
-    let remaining_chars = max_chars.saturating_sub(visible_prefix.chars().count());
-    let visible_text = truncate_chars(composer.text, remaining_chars);
-    let text_x = sidebar_width + 8 + visible_prefix.chars().count() as u32 * (GLYPH_WIDTH + 1);
-    draw_text(
-        buffer,
-        stride,
-        width,
-        height,
-        sidebar_width + 8,
-        top + 20,
-        &visible_prefix,
-        palette.text,
-    );
-    let visible_text_width = visible_text.chars().count() as u32 * (GLYPH_WIDTH + 1);
-    if composer.selected_all && visible_text_width > 0 {
-        fill_rect(
+    for (row, line) in visible_lines[..visible_line_count].iter().enumerate() {
+        let row_prefix = if row == 0 {
+            if earlier_lines_hidden { "… " } else { prefix }
+        } else {
+            "  "
+        };
+        let visible_prefix = truncate_chars(row_prefix, max_chars);
+        let remaining_chars = max_chars.saturating_sub(visible_prefix.chars().count());
+        let visible_text = truncate_tail_chars(line, remaining_chars);
+        let row_y = top + 20 + row as u32 * COMPOSER_LINE_HEIGHT;
+        let text_x = sidebar_width + 8 + visible_prefix.chars().count() as u32 * (GLYPH_WIDTH + 1);
+        draw_text(
             buffer,
             stride,
+            width,
+            height,
+            sidebar_width + 8,
+            row_y,
+            &visible_prefix,
+            palette.text,
+        );
+        let visible_text_width = visible_text.chars().count() as u32 * (GLYPH_WIDTH + 1);
+        if composer.selected_all && visible_text_width > 0 {
+            fill_rect(
+                buffer,
+                stride,
+                text_x,
+                row_y.saturating_sub(2),
+                visible_text_width,
+                COMPOSER_LINE_HEIGHT.min(height.saturating_sub(row_y.saturating_sub(2))),
+                rgb_to_pixel(palette.selection_background),
+            );
+        }
+        draw_text(
+            buffer,
+            stride,
+            width,
+            height,
             text_x,
-            top + 18,
-            visible_text_width,
-            20_u32.min(height.saturating_sub(top + 18)),
-            rgb_to_pixel(palette.selection_background),
+            row_y,
+            &visible_text,
+            if composer.selected_all {
+                palette.selection_foreground
+            } else {
+                palette.text
+            },
         );
     }
-    draw_text(
-        buffer,
-        stride,
-        width,
-        height,
-        text_x,
-        top + 20,
-        &visible_text,
-        if composer.selected_all {
-            palette.selection_foreground
-        } else {
-            palette.text
-        },
-    );
 }
 
 fn render_status_bar(
@@ -2555,6 +2570,26 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
     format!("{}…", text.chars().take(keep).collect::<String>())
 }
 
+fn truncate_tail_chars(text: &str, max_chars: usize) -> String {
+    if max_chars == 0 {
+        return String::new();
+    }
+    let count = text.chars().count();
+    if count <= max_chars {
+        return text.to_owned();
+    }
+    if max_chars <= 1 {
+        return "…".to_owned();
+    }
+    let keep = max_chars - 1;
+    format!(
+        "…{}",
+        text.chars()
+            .skip(count.saturating_sub(keep))
+            .collect::<String>()
+    )
+}
+
 fn tab_row_title(id: u64, title: &str, max_chars: usize) -> String {
     let identified = format!("@{id} {title}");
     if identified.chars().count() <= max_chars || title.is_empty() {
@@ -2670,6 +2705,17 @@ mod tests {
     use super::*;
     use crate::settings::AppConfig;
 
+    fn composer_test_view(text: &str, selected_all: bool) -> ComposerView<'_> {
+        ComposerView {
+            text,
+            focused: true,
+            selected_all,
+            top: 0,
+            label: "",
+            send_button: (240, 7, 72, COMPOSER_HEIGHT - 14),
+        }
+    }
+
     #[test]
     fn composer_select_all_highlights_only_editable_text() {
         let palette = ThemeId::Dark.palette();
@@ -2681,14 +2727,7 @@ mod tests {
             COMPOSER_HEIGHT,
             palette,
             20,
-            ComposerView {
-                text: "abc",
-                focused: true,
-                selected_all: true,
-                top: 0,
-                label: "",
-                send_button: (240, 7, 72, 34),
-            },
+            composer_test_view("abc\ndef", true),
         );
 
         let prefix_x = 28;
@@ -2701,6 +2740,43 @@ mod tests {
             buffer[(18 * 320 + text_x) as usize],
             rgb_to_pixel(palette.selection_background)
         );
+        assert_eq!(
+            buffer[(34 * 320 + text_x) as usize],
+            rgb_to_pixel(palette.selection_background)
+        );
+    }
+
+    #[test]
+    fn composer_renders_newline_on_a_second_visible_row() {
+        let palette = ThemeId::Dark.palette();
+        let mut single_line = vec![0; 320 * COMPOSER_HEIGHT as usize];
+        let mut multiline = single_line.clone();
+        for (buffer, text) in [
+            (&mut single_line, "first"),
+            (&mut multiline, "first\nsecond"),
+        ] {
+            render_composer(
+                buffer,
+                320,
+                320,
+                COMPOSER_HEIGHT,
+                palette,
+                20,
+                composer_test_view(text, false),
+            );
+        }
+
+        assert!(
+            (34..52)
+                .any(|y| { (28..200).any(|x| multiline[y * 320 + x] != single_line[y * 320 + x]) })
+        );
+    }
+
+    #[test]
+    fn composer_long_line_keeps_the_editing_tail_visible() {
+        assert_eq!(truncate_tail_chars("abcdefgh", 5), "…efgh");
+        assert_eq!(truncate_tail_chars("中文输入", 3), "…输入");
+        assert_eq!(truncate_tail_chars("abc", 5), "abc");
     }
 
     #[test]

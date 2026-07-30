@@ -17,7 +17,7 @@ pub(super) enum ComposerKeyAction {
     Cut,
     /// Paste clipboard text into the composer buffer.
     Paste,
-    /// Select all composer text (no visible selection chrome on Unix yet).
+    /// Select all composer text.
     SelectAll,
     /// Ignore this key.
     Ignored,

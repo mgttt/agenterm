@@ -6,7 +6,7 @@ use crate::{
     },
 };
 
-pub(super) const UNIX_COMPOSER_HEIGHT: i32 = 48;
+pub(super) const UNIX_COMPOSER_HEIGHT: i32 = 64;
 pub(super) const UNIX_STATUS_HEIGHT: i32 = 26;
 pub(super) const SCROLLBAR_WIDTH: u32 = TERMINAL_SCROLLBAR_WIDTH as u32;
 
@@ -74,6 +74,13 @@ mod tests {
         let layout = workspace_layout_for(800, 600, &config);
         assert_eq!(sidebar_width_u32(&layout), 0);
         assert_eq!(layout.effective_tabs_width, 0);
+    }
+
+    #[test]
+    fn composer_layout_reserves_two_input_lines() {
+        let layout = workspace_layout_for(800, 600, &AppConfig::default());
+        assert_eq!(layout.composer.height(), UNIX_COMPOSER_HEIGHT);
+        assert_eq!(UNIX_COMPOSER_HEIGHT, 64);
     }
 
     #[test]
