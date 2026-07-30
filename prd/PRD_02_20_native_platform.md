@@ -227,7 +227,7 @@ Available, Unsupported, and Failed without reading source or assuming parity.
 
 Completion requires:
 
-- [ ] formatting and warnings-denied Clippy on every target
+- [x] formatting and warnings-denied Clippy on every target
 - [ ] the same toolbar action identities, ordering, locale, and Settings
   default/terminal-override semantics on Windows, macOS, and Linux
 - [ ] uppercase/Shift punctuation, Space, control keys, CJK IME, pointer,
@@ -326,8 +326,12 @@ Contract-revision-3 local evidence (2026-07-31):
   hot paths consume the same typed validation
 - [x] Windows Quick Gate passes repository lint, formatting, PRD alignment,
   warnings-denied all-target Clippy, and **303** library tests
-- [~] six-platform CI and native Unix evidence remain required before the
-  contract-revision-3 slice can become release-qualified
-- [~] direct Linux cross-check from Windows reached native dependency
-  compilation but cannot complete without `x86_64-linux-gnu-gcc`; the
-  repository's native Linux/macOS jobs remain the authoritative adapter proof
+- [x] CI run
+  [`30565063423`](https://github.com/mgttt/agenterm/actions/runs/30565063423)
+  passes Windows, Linux, and macOS on x86-64 and ARM64. The Linux x86-64 job
+  also passes the portable Quick Gate, cross-platform automation audit,
+  manifest client build/probe, and public Script CLI test; Windows passes its
+  public startup/CLI slice
+- [x] contract revision 3 is release-qualified for v0.1.10. Broader normalized
+  pointer/wheel/IME ownership and the remaining adapter migrations above stay
+  explicitly partial instead of being relabeled as shipped
