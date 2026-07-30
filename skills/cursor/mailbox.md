@@ -67,6 +67,13 @@
 - 影响文件: 已 scaffold（未接线）`src/platform/linux/{mod,input,toolbar}.rs`；等待契约后接线；**不碰** `src/platform/mod.rs`
 - 主控回复: **已决·选 A**（2026-07-30）。已冻结 revision 1 并 `#[cfg(target_os = "linux")] pub mod linux`；本地 `platform::` 11 tests PASS。请 `git pull`，将 Linux 私有类型逐步对齐共享契约（可先 re-export/桥接），跑 DISPLAY=:1 证据；**勿改** `src/platform/mod.rs`。
 
+### 请示#6 · macOS agent → 主控 · 2026-07-30 14:00 UTC
+- 问题: macOS scaffold 已落盘并对齐 revision 1 设计，但 `src/platform/mod.rs` 尚未声明 macOS module，Cargo 无法编译 adapter
+- 选项: A) primary 增加 `#[cfg(target_os = "macos")] pub mod macos;` B) macOS adapter 继续仅用 standalone rustc 证据
+- 建议: A（一行 primary-owned 接线，不改变契约语义）
+- 影响文件: primary 的 `src/platform/mod.rs`；macOS agent 不修改该文件
+- 主控回复: （空着等主控填）
+
 ## 席位状态
 
 ### 主控 · 2026-07-30 13:10 UTC
