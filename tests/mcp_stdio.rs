@@ -1,8 +1,6 @@
 use std::{
-    fs,
     io::{BufRead, BufReader, Read, Write},
     net::{TcpListener, TcpStream},
-    path::Path,
     process::{Command, Stdio},
     sync::{
         Arc,
@@ -10,10 +8,17 @@ use std::{
         mpsc,
     },
     thread,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant},
 };
 
 use serde_json::{Value, json};
+
+#[cfg(windows)]
+use std::{
+    fs,
+    path::Path,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 #[test]
 fn public_stdio_lifecycle_keeps_stdout_machine_only() {

@@ -67,8 +67,10 @@ mod tests {
 
     #[test]
     fn hidden_tabs_zero_sidebar_width() {
-        let mut config = AppConfig::default();
-        config.tabs_visible = false;
+        let config = AppConfig {
+            tabs_visible: false,
+            ..AppConfig::default()
+        };
         let layout = workspace_layout_for(800, 600, &config);
         assert_eq!(sidebar_width_u32(&layout), 0);
         assert_eq!(layout.effective_tabs_width, 0);

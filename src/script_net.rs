@@ -298,9 +298,11 @@ fn tcp_read_line(
 }
 
 fn tcp_shutdown(stream: &mut ScriptTcpStream) -> Result<(), Box<EvalAltResult>> {
-    lock_stream(stream, "TcpStream.shutdown")?
-        .shutdown(Shutdown::Both)
-        .map_err(|error| io_error("net_shutdown", "TcpStream.shutdown", error))
+    match lock_stream(stream, "TcpStream.shutdown")?.shutdown(Shutdown::Both) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotConnected => Ok(()),
+        Err(error) => Err(io_error("net_shutdown", "TcpStream.shutdown", error)),
+    }
 }
 
 fn tcp_listener_bind(address: &str) -> Result<ScriptTcpListener, Box<EvalAltResult>> {
@@ -645,6 +647,7 @@ mod tests {
         tcp_write_all_text(&mut client, "hello\n").unwrap();
         tcp_flush(&mut client).unwrap();
         assert_eq!(tcp_read_line(&mut client, 64).unwrap(), "world");
+        tcp_shutdown(&mut client).unwrap();
         tcp_shutdown(&mut client).unwrap();
         server.join().unwrap();
     }

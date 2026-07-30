@@ -30,7 +30,7 @@ use crate::{
     control_dispatch::{ControlHost, dispatch_shared_command, resolve_target_position},
     event_journal::{EventJournal, EventKind},
     gui_wake::{UnixWake, install_unix_wake},
-    instances::register_instance,
+    instances::{mark_intentional_shutdown, register_instance},
     ipc_transport::{IpcEnvelope, start_ipc_server},
     operations::{UI_TABS_SET_WIDTH, UI_TABS_SHOW},
     protocol::IpcResponse,
@@ -57,7 +57,7 @@ use crate::{
     },
     wake_signal::WakeSignal,
     working_context::{CwdSource, ShellKind, cwd_command, validate_path},
-    workspace::workspace_path,
+    workspace::{SavedTab, SavedWorkspace, save_workspace, workspace_path},
 };
 
 use new_terminal::{NewTerminalDialog, ui_action_open};
@@ -2606,10 +2606,73 @@ impl UnixApp {
         self.sync_grid_from_tab();
     }
 
+    fn saved_workspace(&self) -> SavedWorkspace {
+        SavedWorkspace {
+            version: 1,
+            session_name: self.session_name.clone(),
+            active_id: self.active,
+            collapsed_ids: self.collapsed_tabs.iter().copied().collect(),
+            tabs: self
+                .tabs
+                .iter()
+                .map(|tab| SavedTab {
+                    id: tab.id,
+                    index: tab.index,
+                    parent_id: tab.parent_id,
+                    title: tab.title.clone(),
+                    note: tab.note.clone(),
+                    composer: tab.composer.clone(),
+                    command_line: tab.command_line.clone(),
+                })
+                .collect(),
+        }
+    }
+
+    fn persist_workspace(&mut self) -> anyhow::Result<()> {
+        save_workspace(&self.saved_workspace())?;
+        self.event_journal
+            .commit(EventKind::WorkspaceSaved, None, serde_json::json!({}));
+        Ok(())
+    }
+
     fn handle_ipc(&mut self, envelope: IpcEnvelope) {
         let command = envelope.request.args.first().map(String::as_str);
         let response = match dispatch_shared_command(self, &envelope.request.args) {
             Some(response) => response,
+            None if command == Some("save-workspace") => match self.persist_workspace() {
+                Ok(()) => IpcResponse::success(workspace_path().display().to_string()),
+                Err(error) => IpcResponse::typed_failure(
+                    format!("{error:#}"),
+                    "operation_persistence_failed",
+                    "precondition",
+                    false,
+                ),
+            },
+            None if command == Some("shutdown") => {
+                if let Err(error) = self.persist_workspace() {
+                    IpcResponse::typed_failure(
+                        format!("{error:#}"),
+                        "operation_persistence_failed",
+                        "precondition",
+                        false,
+                    )
+                } else if let Err(error) = mark_intentional_shutdown(&crate::ipc_address()) {
+                    IpcResponse::typed_failure(
+                        format!("{error:#}"),
+                        "operation_persistence_failed",
+                        "precondition",
+                        false,
+                    )
+                } else {
+                    self.event_journal.commit(
+                        EventKind::WorkspaceShutdown,
+                        None,
+                        serde_json::json!({"saved": true}),
+                    );
+                    self.close_requested = true;
+                    IpcResponse::success("")
+                }
+            }
             None if matches!(
                 command,
                 Some("screenshot") | Some("screenshot-pane") | Some("screenshot-tab")

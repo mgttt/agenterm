@@ -19,7 +19,7 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 mkdir -p -- "$BOOTSTRAP_DIR"
 cp -- "$SOURCE" "$WORKER"
-chmod +x -- "$WORKER"
+chmod +x "$WORKER"
 AGENTERM_BOOTSTRAP_WORKER="$WORKER"
 AGENTERM_BOOTSTRAP_PLATFORM=unix
 export AGENTERM_BOOTSTRAP_WORKER
