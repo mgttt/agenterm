@@ -4,9 +4,8 @@
 //! owns the cross-platform validation and conversion semantics consumed by the
 //! Linux and macOS GUI hot paths.
 
-use super::CapabilityStatus;
 #[cfg(target_os = "linux")]
-use super::DisplayBackendFacts;
+use super::{CapabilityStatus, DisplayBackendFacts};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct ScaleFactor(f64);
@@ -20,10 +19,8 @@ impl ScaleFactor {
         }
     }
 
-    pub(crate) const fn get(self) -> f64 {
-        self.0
-    }
-
+    /// Frozen forward conversion for adapters that receive logical extents.
+    #[allow(dead_code)]
     pub(crate) fn physical_pixels(self, logical_points: f64) -> Result<u32, ScaleError> {
         if !logical_points.is_finite() || logical_points < 0.0 {
             return Err(ScaleError::InvalidLogicalExtent);
@@ -66,20 +63,17 @@ impl ScaleError {
             Self::LogicalExtentOverflow => "logical_extent_overflow",
         }
     }
-
-    pub(crate) fn to_capability_status(self) -> CapabilityStatus {
-        CapabilityStatus::Failed {
-            code: self.code(),
-            message: self.code().replace('_', " "),
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct WindowMetrics {
     pub logical_width: u32,
     pub logical_height: u32,
+    /// Retained in the normalized contract for framebuffer/screenshot consumers.
+    #[allow(dead_code)]
     pub physical_width: u32,
+    /// Retained in the normalized contract for framebuffer/screenshot consumers.
+    #[allow(dead_code)]
     pub physical_height: u32,
 }
 
@@ -163,7 +157,6 @@ mod tests {
     #[test]
     fn unit_and_fractional_scale_are_deterministic() {
         let unit = ScaleFactor::new(1.0).expect("unit scale");
-        assert_eq!(unit.get(), 1.0);
         assert_eq!(unit.physical_pixels(960.0), Ok(960));
         assert_eq!(unit.logical_points(960), Ok(960));
 
@@ -188,13 +181,10 @@ mod tests {
             scale.physical_pixels(f64::MAX),
             Err(ScaleError::PhysicalExtentOverflow)
         );
-        assert!(matches!(
-            ScaleError::InvalidScaleFactor.to_capability_status(),
-            CapabilityStatus::Failed {
-                code: "invalid_scale_factor",
-                ..
-            }
-        ));
+        assert_eq!(
+            ScaleError::InvalidScaleFactor.code(),
+            "invalid_scale_factor"
+        );
     }
 
     #[test]

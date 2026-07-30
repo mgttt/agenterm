@@ -2094,8 +2094,9 @@ impl UnixApp {
                 }
             }
             Ok(LinuxGeometryAction::Ignore) => {}
-            Err(_error) => {
-                // Typed CapabilityStatus::Failed — do not invent extents.
+            Err(error) => {
+                self.status_message =
+                    format!("Window geometry failed: {}", error.code().replace('_', " "));
             }
         }
     }
@@ -2122,7 +2123,11 @@ impl UnixApp {
                     window.request_redraw();
                 }
             }
-            Ok(MacosGeometryAction::Ignore) | Err(_) => {}
+            Ok(MacosGeometryAction::Ignore) => {}
+            Err(error) => {
+                self.status_message =
+                    format!("Window geometry failed: {}", error.code().replace('_', " "));
+            }
         }
     }
 

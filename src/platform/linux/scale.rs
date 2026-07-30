@@ -11,7 +11,6 @@ use super::display_facts_from_env;
 
 pub(crate) use crate::platform::scale::{
     GeometryAction as LinuxGeometryAction, GeometryEvent as LinuxGeometryEvent,
-    ScaleError as LinuxScaleError, ScaleFactor as LinuxScaleFactor,
     WindowMetrics as LinuxWindowMetrics, classify_geometry_event,
 };
 
@@ -26,10 +25,11 @@ pub(crate) fn scale_capability_status_from_env() -> CapabilityStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::platform::scale::{ScaleError, ScaleFactor};
 
     #[test]
     fn linux_aliases_consume_shared_geometry_contract() {
-        let scale = LinuxScaleFactor::new(1.5).expect("valid fractional scale");
+        let scale = ScaleFactor::new(1.5).expect("valid fractional scale");
         assert_eq!(scale.physical_pixels(101.0), Ok(152));
         assert_eq!(scale.logical_points(152), Ok(101));
         assert_eq!(
@@ -45,13 +45,10 @@ mod tests {
                 physical_height: 1200,
             }))
         );
-        assert!(matches!(
-            LinuxScaleError::InvalidScaleFactor.to_capability_status(),
-            CapabilityStatus::Failed {
-                code: "invalid_scale_factor",
-                ..
-            }
-        ));
+        assert_eq!(
+            ScaleError::InvalidScaleFactor.code(),
+            "invalid_scale_factor"
+        );
     }
 
     #[test]
