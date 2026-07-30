@@ -131,8 +131,10 @@ tests or ownership.
 1. [~] freeze normalized event and capability types with table-driven unit
    tests; no GUI behavior moves in this step
    (`src/platform/mod.rs` contract revision 1; OS adapters still incremental)
-2. [ ] adapt one narrow vertical slice—toolbar labels/actions plus keyboard
+2. [~] adapt one narrow vertical slice—toolbar labels/actions plus keyboard
    text/shortcut separation—on all three systems
+   (Linux/macOS adapters bridged to revision 1; Linux `unix_app` hot-path
+   wiring authorized next; Windows adaptation still pending)
 3. [ ] move IME, clipboard, DPI, font, screenshot, activation, and remaining
    window integration incrementally behind the same boundary
 4. [ ] remove superseded platform-specific paths only after native black-box
