@@ -104,15 +104,15 @@
 - 阻塞/请示: 无（`cursor/linux-automation-regression-59a1` 合入 `main` 待主控授权；与分身1 无文件冲突）
 - 下一步: 主控派活或授权合入 Linux quick gate 修复；可接手 `check.sh`/Rhai CI/`agenterm.tasks.json` platform fail-closed、migration-audit 进 quick 路径等待办
 
-### macOS agent · 2026-07-30 13:49 UTC
+### macOS agent · 2026-07-30 14:00 UTC
 - 状态: BLOCKED
-- 分支: `main` @ `1034cdd`
-- main基准: `1034cdd`
+- 分支: `main` @ `99b08cf`
+- main基准: `e747d0b`（contract revision 1）
 - 本轮目标: 实现 `src/platform/macos/` adapter 与 macOS 原生证据
-- 已完成: 阅读原生平台 PRD；盘点 winit 输入/IME、Retina、clipboard、font、screenshot 现有实现
-- 证据: `src/platform/` 尚不存在；请示#4
-- 阻塞/请示: 等 primary 发布共享契约；不越权修改公共 platform 类型
-- 下一步: 契约落盘后立即实现 Command/Control 分离、IME commit、scale-factor 与原生能力事实
+- 已完成: Command/Control/Shift/Option/IME 分类、稳定 toolbar action、Retina scale typed failure、能力事实已桥接 revision 1；三个小提交均已推送
+- 证据: `ac5ea6e`、`18c19e4`、`cf28d9a`；临时完整 contract+adapter 17 tests PASS；本机 GUI `ui-snapshot` schema=1、Retina PNG=1920x1200、GUI 日志 0 bytes；输入/IME 10 tests 与 screenshot 1 test PASS
+- 阻塞/请示: 请示#6，等 primary 在 `src/platform/mod.rs` 声明 macOS module 后跑正式 Cargo gate
+- 下一步: 接线提交到达后立即跑 `cargo fmt`、macOS platform tests、warnings-denied Clippy 和原生 GUI snapshot/PNG复验
 
 ## 已知缺口（主控 review，供分身验证）
 
@@ -128,6 +128,7 @@
 ## 交接日志
 
 ```text
+2026-07-30 14:00 UTC | macOS agent | rev1 bridge 与原生证据完成；等请示#6接线跑正式Cargo门 | ac5ea6e/18c19e4/cf28d9a
 2026-07-30 13:58 UTC | 分身1 | rev1 bridge 完成；platform:: 17 PASS；GUI snapshot/PNG | b25dfad + artifacts
 2026-07-30 13:53 UTC | 分身1 | scaffold 未接线 linux/{mod,input,toolbar}.rs；请示#5 等契约 | src/platform/linux + mailbox
 2026-07-30 13:50 UTC | 分身1 | 接 Linux platform 任务；无 src/platform；请示#5 等契约 | skills/cursor/mailbox.md
