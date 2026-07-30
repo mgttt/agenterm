@@ -96,11 +96,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   - [ ] automated interactive-TUI fixture that rejects batched paste+Enter
     without requiring a networked Codex session
 - [x] workspace chrome uses a full-height Tabs column and a terminal workbench column containing the top New/Tabs/Settings toolbar, terminal viewport, Composer, and terminal-scoped status bar
-- [x] `New`, `Tabs`, and `Settings` actions are grouped in the compact toolbar
+- [x] `New`, `Tabs`, `Settings`, language, and terminal font-size actions are
+  grouped in the compact toolbar
   above the terminal; the toolbar remains available when Tabs are hidden so
   the same `Tabs` control restores the full-height tree
-- [x] toolbar order is Tabs then New, with Settings anchored at the right;
-  Tabs reads `<Tabs` while the tree is visible and `>Tabs` while hidden
+- [x] toolbar order is Tabs then New, with `[Settings] [En|繁] [z|Z]` anchored
+  at the right; Tabs reads `<Tabs` while the tree is visible and `>Tabs` while
+  hidden
 - [~] activating New opens an extensible terminal-creation dialog before
   mutation: Windows ships Default/Command Prompt/PowerShell selection, an
   optional initial command, separate optional per-terminal HTTP/HTTPS proxy
@@ -108,9 +110,18 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] the creation dialog validates proxy URLs and passes non-empty values only
   as ephemeral child environment; snapshots expose configured booleans but
   never command text, proxy endpoints, credentials, or unsaved input values
-- [x] built-in control labels come from one declared English locale;
-  semantic snapshots expose the locale and resolved labels
-- [x] settings UI for terminal font family and size
+- [~] built-in control labels come from one declared locale source; English and
+  Traditional Chinese can be switched at runtime and persist across UI
+  restarts. Semantic snapshots expose the locale and resolved labels. Windows
+  replaceable-UI controls are complete; Unix/macOS modal-copy parity remains.
+- [x] Windows replaceable-UI labels use one locale source with persistent English and Traditional Chinese switching
+- [~] Settings separates persisted default appearance from current-terminal
+  overrides for font family, size, and color theme. Every override field can
+  independently return to inheritance; `[z|Z]` creates or adjusts only the
+  active terminal's size override. Overrides are client-owned and keyed by
+  server address plus stable tab ID so the server remains UI-neutral. Windows
+  UI and the shared settings model are complete; Unix/macOS modal parity
+  remains.
 - [x] `AGENTERM_SETTINGS_PATH` provides explicit settings isolation while
   the default remains `%LOCALAPPDATA%\AgenTerm\settings.json`
 - Persistent workspace

@@ -13,6 +13,7 @@ mod control_dispatch;
 mod event_journal;
 mod instances;
 mod ipc_transport;
+mod locale;
 pub mod mcp_catalog;
 mod mcp_fleet;
 pub mod mcp_stdio;

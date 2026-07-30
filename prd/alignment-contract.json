@@ -71,7 +71,7 @@
       "kind": "behavior",
       "status": "shipped",
       "evidence_mode": "black-box",
-      "prd": "built-in control labels come from one declared English locale",
+      "prd": "Windows replaceable-UI labels use one locale source with persistent English and Traditional Chinese switching",
       "evidence_ids": ["ux.locale-consistency"]
     },
     {

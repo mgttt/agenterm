@@ -1,5 +1,6 @@
 //! Shared `ui-snapshot` / UI client state JSON fragments for GUI hosts.
 use crate::{
+    locale::{LocaleId, UiText},
     settings::AppConfig,
     theme::ThemeId,
     ui_bridge::UI_CLIENT_STATE_SCHEMA_VERSION,
@@ -35,15 +36,16 @@ pub(crate) fn scrollbar_state_json(
     })
 }
 
-pub(crate) fn locale_json() -> serde_json::Value {
+pub(crate) fn locale_json(locale: LocaleId) -> serde_json::Value {
     serde_json::json!({
-        "id": "en-US",
+        "id": locale.as_str(),
+        "toolbar_label": locale.toolbar_label(),
         "controls": {
-            "send": "Send",
-            "settings": "Settings",
-            "new": "New",
-            "apply": "Apply",
-            "save": "Save",
+            "send": locale.text(UiText::Send),
+            "settings": locale.text(UiText::Settings),
+            "new": locale.text(UiText::New),
+            "apply": locale.text(UiText::Apply),
+            "save": locale.text(UiText::Save),
         },
     })
 }
@@ -52,11 +54,22 @@ pub(crate) fn settings_json(
     config: &AppConfig,
     settings_open: bool,
     theme_draft: Option<&str>,
+    address: &str,
+    active_tab_id: Option<&str>,
 ) -> serde_json::Value {
+    let terminal_override =
+        active_tab_id.and_then(|tab_id| config.terminal_override_entry(address, tab_id).cloned());
+    let effective = config.effective_terminal_appearance(address, active_tab_id);
     serde_json::json!({
         "terminal_font_family": config.terminal_font_family,
         "terminal_font_size": config.terminal_font_size,
         "color_theme": config.color_theme.as_str(),
+        "current_terminal_override": terminal_override,
+        "effective": {
+            "terminal_font_family": effective.terminal_font_family,
+            "terminal_font_size": effective.terminal_font_size,
+            "color_theme": effective.color_theme.as_str(),
+        },
         "theme_draft": settings_open.then(|| theme_draft.unwrap_or(config.color_theme.as_str())),
         "theme_options": ThemeId::ALL.map(|theme| serde_json::json!({
             "id": theme.as_str(),
@@ -194,13 +207,13 @@ mod tests {
     #[test]
     fn locale_and_settings_blocks_match_win_shape() {
         let config = AppConfig::default();
-        let settings = settings_json(&config, true, Some("dark"));
+        let settings = settings_json(&config, true, Some("dark"), "local", Some("@1"));
         assert_eq!(
             settings["terminal_font_family"],
             config.terminal_font_family
         );
         assert!(settings["theme_options"].is_array());
-        assert_eq!(locale_json()["controls"]["send"], "Send");
+        assert_eq!(locale_json(LocaleId::English)["controls"]["send"], "Send");
     }
 
     #[test]

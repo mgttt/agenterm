@@ -33,14 +33,18 @@ const TREE_COMPACT_ACTION_THRESHOLD: i32 = 300;
 const NODE_Y_OFFSET: i32 = 11;
 const MIN_SCROLLBAR_THUMB_HEIGHT: i32 = 24;
 const WORKSPACE_TOOLBAR_DIVIDER_HEIGHT: i32 = 1;
-const WORKSPACE_TOOLBAR_HORIZONTAL_PADDING: i32 = 8;
-const WORKSPACE_TOOLBAR_BUTTON_GAP: i32 = 6;
+const WORKSPACE_TOOLBAR_HORIZONTAL_PADDING: i32 = 4;
+const WORKSPACE_TOOLBAR_BUTTON_GAP: i32 = 4;
 const WORKSPACE_TOOLBAR_BUTTON_HEIGHT: i32 = 34;
 const WORKSPACE_NEW_BUTTON_WIDTH: i32 = 66;
 const WORKSPACE_TABS_BUTTON_WIDTH: i32 = 52;
 const WORKSPACE_SETTINGS_BUTTON_WIDTH: i32 = 78;
-const WORKSPACE_COMPACT_NEW_BUTTON_WIDTH: i32 = 64;
-const WORKSPACE_COMPACT_ACTION_BUTTON_WIDTH: i32 = 36;
+const WORKSPACE_LOCALE_BUTTON_WIDTH: i32 = 58;
+const WORKSPACE_FONT_BUTTON_WIDTH: i32 = 34;
+const WORKSPACE_COMPACT_NEW_BUTTON_WIDTH: i32 = 32;
+const WORKSPACE_COMPACT_ACTION_BUTTON_WIDTH: i32 = 32;
+const WORKSPACE_COMPACT_LOCALE_BUTTON_WIDTH: i32 = 36;
+const WORKSPACE_COMPACT_FONT_BUTTON_WIDTH: i32 = 22;
 const STATUS_TABS_WIDTH: i32 = 72;
 const STATUS_CWD_WIDTH: i32 = 260;
 
@@ -106,6 +110,9 @@ pub(crate) struct WorkspaceToolbarLayout {
     pub(crate) new_tab: PixelRect,
     pub(crate) tabs: PixelRect,
     pub(crate) settings: PixelRect,
+    pub(crate) locale: PixelRect,
+    pub(crate) font_decrease: PixelRect,
+    pub(crate) font_increase: PixelRect,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -232,16 +239,20 @@ fn workspace_toolbar_region(toolbar: PixelRect, visible: bool) -> Option<Workspa
     } else {
         WorkspaceToolbarMode::Compact
     };
-    let (new_width, tabs_width, settings_width) = match mode {
+    let (new_width, tabs_width, settings_width, locale_width, font_width) = match mode {
         WorkspaceToolbarMode::Full => (
             WORKSPACE_NEW_BUTTON_WIDTH,
             WORKSPACE_TABS_BUTTON_WIDTH,
             WORKSPACE_SETTINGS_BUTTON_WIDTH,
+            WORKSPACE_LOCALE_BUTTON_WIDTH,
+            WORKSPACE_FONT_BUTTON_WIDTH,
         ),
         WorkspaceToolbarMode::Compact => (
             WORKSPACE_COMPACT_NEW_BUTTON_WIDTH,
             WORKSPACE_COMPACT_ACTION_BUTTON_WIDTH,
             WORKSPACE_COMPACT_ACTION_BUTTON_WIDTH,
+            WORKSPACE_COMPACT_LOCALE_BUTTON_WIDTH,
+            WORKSPACE_COMPACT_FONT_BUTTON_WIDTH,
         ),
     };
     let button_top = toolbar.top + (toolbar.height() - WORKSPACE_TOOLBAR_BUTTON_HEIGHT) / 2;
@@ -258,10 +269,28 @@ fn workspace_toolbar_region(toolbar: PixelRect, visible: bool) -> Option<Workspa
         tabs.right + WORKSPACE_TOOLBAR_BUTTON_GAP + new_width,
         button_bottom,
     );
-    let settings = rect(
-        toolbar.right - WORKSPACE_TOOLBAR_HORIZONTAL_PADDING - settings_width,
+    let font_increase = rect(
+        toolbar.right - WORKSPACE_TOOLBAR_HORIZONTAL_PADDING - font_width,
         button_top,
         toolbar.right - WORKSPACE_TOOLBAR_HORIZONTAL_PADDING,
+        button_bottom,
+    );
+    let font_decrease = rect(
+        font_increase.left - font_width,
+        button_top,
+        font_increase.left,
+        button_bottom,
+    );
+    let locale = rect(
+        font_decrease.left - WORKSPACE_TOOLBAR_BUTTON_GAP - locale_width,
+        button_top,
+        font_decrease.left - WORKSPACE_TOOLBAR_BUTTON_GAP,
+        button_bottom,
+    );
+    let settings = rect(
+        locale.left - WORKSPACE_TOOLBAR_BUTTON_GAP - settings_width,
+        button_top,
+        locale.left - WORKSPACE_TOOLBAR_BUTTON_GAP,
         button_bottom,
     );
 
@@ -272,6 +301,9 @@ fn workspace_toolbar_region(toolbar: PixelRect, visible: bool) -> Option<Workspa
         new_tab,
         tabs,
         settings,
+        locale,
+        font_decrease,
+        font_increase,
     })
 }
 
@@ -280,14 +312,18 @@ const fn full_toolbar_required_width() -> i32 {
         + WORKSPACE_NEW_BUTTON_WIDTH
         + WORKSPACE_TABS_BUTTON_WIDTH
         + WORKSPACE_SETTINGS_BUTTON_WIDTH
-        + WORKSPACE_TOOLBAR_BUTTON_GAP * 2
+        + WORKSPACE_LOCALE_BUTTON_WIDTH
+        + WORKSPACE_FONT_BUTTON_WIDTH * 2
+        + WORKSPACE_TOOLBAR_BUTTON_GAP * 4
 }
 
 const fn compact_toolbar_required_width() -> i32 {
     WORKSPACE_TOOLBAR_HORIZONTAL_PADDING * 2
         + WORKSPACE_COMPACT_NEW_BUTTON_WIDTH
         + WORKSPACE_COMPACT_ACTION_BUTTON_WIDTH * 2
-        + WORKSPACE_TOOLBAR_BUTTON_GAP * 2
+        + WORKSPACE_COMPACT_LOCALE_BUTTON_WIDTH
+        + WORKSPACE_COMPACT_FONT_BUTTON_WIDTH * 2
+        + WORKSPACE_TOOLBAR_BUTTON_GAP * 4
 }
 
 fn status_segment_layout(status: PixelRect, tabs_visible: bool) -> StatusSegmentLayout {
@@ -934,14 +970,24 @@ mod tests {
             toolbar.bounds.bottom - WORKSPACE_TOOLBAR_DIVIDER_HEIGHT
         );
         assert_eq!(toolbar.divider.bottom, toolbar.bounds.bottom);
-        for action in [toolbar.new_tab, toolbar.tabs, toolbar.settings] {
+        for action in [
+            toolbar.new_tab,
+            toolbar.tabs,
+            toolbar.settings,
+            toolbar.locale,
+            toolbar.font_decrease,
+            toolbar.font_increase,
+        ] {
             assert_valid_rect(action, toolbar.bounds);
             assert_eq!(action.height(), WORKSPACE_TOOLBAR_BUTTON_HEIGHT);
             assert!(action.width() > 0);
         }
         assert!(toolbar.tabs.right <= toolbar.new_tab.left);
         assert!(toolbar.new_tab.right <= toolbar.settings.left);
-        assert!(toolbar.settings.right <= toolbar.bounds.right);
+        assert!(toolbar.settings.right <= toolbar.locale.left);
+        assert!(toolbar.locale.right <= toolbar.font_decrease.left);
+        assert_eq!(toolbar.font_decrease.right, toolbar.font_increase.left);
+        assert!(toolbar.font_increase.right <= toolbar.bounds.right);
     }
 
     #[test]
@@ -1022,7 +1068,7 @@ mod tests {
         assert_eq!(compact.terminal, rect(180, 46, 500, 170));
         assert_eq!(compact.composer, rect(180, 170, 500, 274));
         assert_eq!(compact.status, rect(180, 274, 500, 300));
-        assert_toolbar_valid(compact, WorkspaceToolbarMode::Full);
+        assert_toolbar_valid(compact, WorkspaceToolbarMode::Compact);
 
         let default = layout(1000, 700, true, 250);
         assert_eq!(default.effective_tabs_width, 250);
@@ -1114,11 +1160,17 @@ mod tests {
                     toolbar.new_tab,
                     toolbar.tabs,
                     toolbar.settings,
+                    toolbar.locale,
+                    toolbar.font_decrease,
+                    toolbar.font_increase,
                 ] {
                     assert_valid_rect(candidate, geometry.client);
                 }
                 assert!(toolbar.tabs.right <= toolbar.new_tab.left);
                 assert!(toolbar.new_tab.right <= toolbar.settings.left);
+                assert!(toolbar.settings.right <= toolbar.locale.left);
+                assert!(toolbar.locale.right <= toolbar.font_decrease.left);
+                assert_eq!(toolbar.font_decrease.right, toolbar.font_increase.left);
             }
             if let Some(candidate) = geometry.status_segments.tabs_recovery {
                 assert_valid_rect(candidate, geometry.client);

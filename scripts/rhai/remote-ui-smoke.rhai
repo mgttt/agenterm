@@ -196,6 +196,33 @@ fn wait_observed(context, cli, sequence) {
     throw "remote_ui_observed_sequence_timeout";
 }
 
+fn wait_locale(context, cli, locale_id) {
+    for attempt in 0..200 {
+        let snapshot = json_cli(context, cli, ["ui-snapshot"]);
+        if snapshot.locale.id == locale_id {
+            return snapshot;
+        }
+        rhai::task::sleep(std::time::Duration::from_millis(25));
+    }
+    throw "remote_ui_locale_timeout:" + locale_id;
+}
+
+fn wait_effective_font_size(context, cli, size, overridden) {
+    for attempt in 0..200 {
+        let snapshot = json_cli(context, cli, ["ui-snapshot"]);
+        if snapshot.settings != () && snapshot.settings.effective != () {
+            let terminal_override = snapshot.settings.current_terminal_override;
+            if snapshot.settings.effective.terminal_font_size == size
+                && ((overridden && terminal_override != ())
+                    || (!overridden && terminal_override == ())) {
+                return snapshot;
+            }
+        }
+        rhai::task::sleep(std::time::Duration::from_millis(25));
+    }
+    throw "remote_ui_effective_font_timeout:" + size;
+}
+
 fn wait_viewport_mutation(context, cli, baseline, tab_id) {
     text_cli(
         context,
@@ -646,14 +673,42 @@ try {
     let tabs_button = gui.window_control(2104);
     let settings_button = gui.window_control(2112);
     let new_button = gui.window_control(2103);
+    let locale_button = gui.window_control(2129);
+    let font_decrease_button = gui.window_control(2130);
+    let font_increase_button = gui.window_control(2131);
     let toolbar = json_cli(context, cli, ["ui-snapshot"]);
     require(
         tabs_button.text == "<Tabs"
             && toolbar.layout.toolbar.tabs.left
                 < toolbar.layout.toolbar["new"].left
             && toolbar.layout.toolbar.settings.right
-                == toolbar.layout.toolbar.bounds.right - 8,
+                <= toolbar.layout.toolbar.locale.left
+            && toolbar.layout.toolbar.locale.right
+                <= toolbar.layout.toolbar.font_decrease.left
+            && toolbar.layout.toolbar.font_decrease.right
+                <= toolbar.layout.toolbar.font_increase.left
+            && toolbar.layout.toolbar.font_increase.right
+                == toolbar.layout.toolbar.bounds.right - 4,
         "remote_ui_toolbar_geometry_invalid"
+    );
+    require(
+        locale_button.text == "En|繁"
+            && font_decrease_button.text == "z"
+            && font_increase_button.text == "Z",
+        "remote_ui_toolbar_new_controls_invalid"
+    );
+    locale_button.click();
+    let traditional = wait_locale(context, cli, "zh-Hant");
+    require(
+        traditional.locale.id == "zh-Hant"
+            && locale_button.text == "繁|En"
+            && settings_button.text == "設定",
+        "remote_ui_locale_toggle_invalid"
+    );
+    locale_button.click();
+    require(
+        wait_locale(context, cli, "en-US").locale.id == "en-US",
+        "remote_ui_locale_restore_invalid"
     );
     tabs_button.click();
     require(
@@ -847,6 +902,26 @@ try {
     require(
         cancelled_dark.color_theme == "light",
         "remote_ui_settings_cancel_rollback_invalid"
+    );
+    font_increase_button.click();
+    let overridden_font = wait_effective_font_size(context, cli, 15, true);
+    require(
+        overridden_font.settings.terminal_font_size == 14
+            && overridden_font.settings.current_terminal_override.terminal_font_size == 15
+            && overridden_font.settings.effective.terminal_font_size == 15,
+        "remote_ui_terminal_font_override_invalid"
+    );
+    let settings_current_scope = gui.window_control(2133);
+    let settings_reset_overrides = gui.window_control(2137);
+    settings_button.click();
+    settings_current_scope.click();
+    settings_reset_overrides.click();
+    settings_apply.click();
+    let inherited_font = wait_effective_font_size(context, cli, 14, false);
+    require(
+        inherited_font.settings.current_terminal_override == ()
+            && inherited_font.settings.effective.terminal_font_size == 14,
+        "remote_ui_terminal_font_inheritance_invalid"
     );
 
     print("STEP edit CWD through the bottom workbench segment");

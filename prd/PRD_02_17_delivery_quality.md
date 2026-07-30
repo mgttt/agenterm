@@ -284,9 +284,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       default 250-pixel sidebar. Acceptance: screenshot fixtures prove
       name/note and actions remain distinguishable at default width, deep
       nesting, long CJK text, and 125%/150% display scaling
-    - [x] one declared English locale selects all built-in visible labels;
-      semantic snapshots and black-box assertions reject unintended
-      mixed-language controls
+    - [~] one declared locale source selects all built-in visible labels;
+      English and Traditional Chinese switch and persist without unintended
+      mixed-language controls. Windows replaceable-UI evidence is required
+      before completion, followed by Unix/macOS modal-copy parity.
   - [ ] add a public-interface dogfood gate that starts the release artifact
     with isolated IPC, workspace, settings, session, and evidence paths;
     fixed sleeps and private state hooks are forbidden

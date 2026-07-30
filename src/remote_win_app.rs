@@ -28,9 +28,9 @@ use windows_sys::Win32::{
     },
     UI::{
         Input::KeyboardAndMouse::{
-            GetFocus, GetKeyState, ReleaseCapture, SetCapture, SetFocus, VK_CONTROL, VK_DOWN,
-            VK_END, VK_ESCAPE, VK_F1, VK_F2, VK_F3, VK_F4, VK_F5, VK_F6, VK_F7, VK_F8, VK_F9,
-            VK_F10, VK_F11, VK_F12, VK_HOME, VK_LEFT, VK_NEXT, VK_PRIOR, VK_RIGHT, VK_UP,
+            EnableWindow, GetFocus, GetKeyState, ReleaseCapture, SetCapture, SetFocus, VK_CONTROL,
+            VK_DOWN, VK_END, VK_ESCAPE, VK_F1, VK_F2, VK_F3, VK_F4, VK_F5, VK_F6, VK_F7, VK_F8,
+            VK_F9, VK_F10, VK_F11, VK_F12, VK_HOME, VK_LEFT, VK_NEXT, VK_PRIOR, VK_RIGHT, VK_UP,
         },
         WindowsAndMessaging::{
             CS_DBLCLKS, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CheckMenuItem, CreateWindowExW,
@@ -39,17 +39,17 @@ use windows_sys::Win32::{
             GetForegroundWindow, GetMessageW, GetSystemMenu, GetWindowLongPtrW, GetWindowRect,
             GetWindowTextLengthW, GetWindowTextW, IDC_ARROW, IDC_SIZEWE, InsertMenuW, IsIconic,
             IsWindowVisible, IsZoomed, LoadCursorW, LoadIconW, MF_BYCOMMAND, MF_CHECKED,
-            MF_ENABLED, MF_GRAYED, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MSG, MoveWindow,
-            PostMessageW, PostQuitMessage, RegisterClassW, SC_CLOSE, SIZE_MINIMIZED, SW_HIDE,
-            SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, SW_SHOWNOACTIVATE, SWP_NOACTIVATE,
-            SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SendMessageW, SetCursor,
-            SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW,
-            ShowWindow, TranslateMessage, WM_CAPTURECHANGED, WM_CHAR, WM_CLOSE, WM_COMMAND,
-            WM_COPY, WM_CREATE, WM_DESTROY, WM_ERASEBKGND, WM_INITMENUPOPUP, WM_KEYDOWN,
-            WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL,
-            WM_NCDESTROY, WM_PAINT, WM_PASTE, WM_SETCURSOR, WM_SETFOCUS, WM_SIZE, WM_SYSCOMMAND,
-            WM_TIMER, WNDCLASSW, WS_BORDER, WS_CHILD, WS_CLIPCHILDREN, WS_OVERLAPPEDWINDOW,
-            WS_TABSTOP, WS_VISIBLE, WS_VSCROLL,
+            MF_ENABLED, MF_GRAYED, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MSG, ModifyMenuW,
+            MoveWindow, PostMessageW, PostQuitMessage, RegisterClassW, SC_CLOSE, SIZE_MINIMIZED,
+            SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, SW_SHOWNOACTIVATE,
+            SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SendMessageW,
+            SetCursor, SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowPos,
+            SetWindowTextW, ShowWindow, TranslateMessage, WM_CAPTURECHANGED, WM_CHAR, WM_CLOSE,
+            WM_COMMAND, WM_COPY, WM_CREATE, WM_DESTROY, WM_ERASEBKGND, WM_INITMENUPOPUP,
+            WM_KEYDOWN, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
+            WM_MOUSEWHEEL, WM_NCDESTROY, WM_PAINT, WM_PASTE, WM_SETCURSOR, WM_SETFOCUS, WM_SIZE,
+            WM_SYSCOMMAND, WM_TIMER, WNDCLASSW, WS_BORDER, WS_CHILD, WS_CLIPCHILDREN,
+            WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE, WS_VSCROLL,
         },
     },
 };
@@ -58,8 +58,12 @@ use crate::{
     client::{ipc_address, ipc_socket_addr},
     commands::{option_value, positional_values, screenshot_output_path, tmux_key_bytes},
     instances::intentional_shutdown_matches,
+    locale::UiText,
     protocol::IpcResponse,
-    settings::{AppConfig, clamp_tabs_width, config_path, load_config, save_config},
+    settings::{
+        AppConfig, EffectiveTerminalAppearance, MAX_TERMINAL_FONT_SIZE, MIN_TERMINAL_FONT_SIZE,
+        TerminalAppearanceOverride, clamp_tabs_width, config_path, load_config, save_config,
+    },
     tab_tree::{TabTreeNode, tree_rows},
     theme::{Rgb, ThemeId, ThemePalette},
     ui_bridge::{
@@ -108,6 +112,15 @@ const NEW_HTTP_PROXY_ID: usize = 2125;
 const NEW_HTTPS_PROXY_ID: usize = 2126;
 const NEW_CREATE_ID: usize = 2127;
 const NEW_CANCEL_ID: usize = 2128;
+const LOCALE_ID: usize = 2129;
+const FONT_DECREASE_ID: usize = 2130;
+const FONT_INCREASE_ID: usize = 2131;
+const SETTINGS_DEFAULT_SCOPE_ID: usize = 2132;
+const SETTINGS_CURRENT_SCOPE_ID: usize = 2133;
+const SETTINGS_FONT_INHERIT_ID: usize = 2134;
+const SETTINGS_SIZE_INHERIT_ID: usize = 2135;
+const SETTINGS_THEME_INHERIT_ID: usize = 2136;
+const SETTINGS_RESET_OVERRIDES_ID: usize = 2137;
 const SYSTEM_MENU_COPY_ID: usize = 0x1f00;
 const SYSTEM_MENU_PASTE_ID: usize = 0x1f10;
 const SYSTEM_MENU_TOGGLE_TABS_ID: usize = 0x1f20;
@@ -199,6 +212,9 @@ pub(crate) fn run_remote_gui(no_activate: bool) -> Result<()> {
     let new_tab = create_button(window, instance, NEW_ID, "New");
     let tabs = create_button(window, instance, TABS_ID, "Tabs");
     let settings = create_button(window, instance, SETTINGS_ID, "Settings");
+    let locale = create_button(window, instance, LOCALE_ID, "En|繁");
+    let font_decrease = create_button(window, instance, FONT_DECREASE_ID, "z");
+    let font_increase = create_button(window, instance, FONT_INCREASE_ID, "Z");
     let tab_title_edit = create_hidden_edit(window, instance, TAB_TITLE_EDIT_ID);
     let tab_note_edit = create_hidden_edit(window, instance, TAB_NOTE_EDIT_ID);
     let tab_save = create_hidden_button(window, instance, TAB_SAVE_ID, "Save");
@@ -212,6 +228,42 @@ pub(crate) fn run_remote_gui(no_activate: bool) -> Result<()> {
     let settings_light = create_hidden_button(window, instance, SETTINGS_LIGHT_ID, "Light");
     let settings_apply = create_hidden_button(window, instance, SETTINGS_APPLY_ID, "Apply");
     let settings_cancel = create_hidden_button(window, instance, SETTINGS_CANCEL_ID, "Cancel");
+    let settings_default_scope = create_hidden_button(
+        window,
+        instance,
+        SETTINGS_DEFAULT_SCOPE_ID,
+        "Default values",
+    );
+    let settings_current_scope = create_hidden_button(
+        window,
+        instance,
+        SETTINGS_CURRENT_SCOPE_ID,
+        "Current terminal",
+    );
+    let settings_font_inherit = create_hidden_button(
+        window,
+        instance,
+        SETTINGS_FONT_INHERIT_ID,
+        "Inherit default",
+    );
+    let settings_size_inherit = create_hidden_button(
+        window,
+        instance,
+        SETTINGS_SIZE_INHERIT_ID,
+        "Inherit default",
+    );
+    let settings_theme_inherit = create_hidden_button(
+        window,
+        instance,
+        SETTINGS_THEME_INHERIT_ID,
+        "Inherit default",
+    );
+    let settings_reset_overrides = create_hidden_button(
+        window,
+        instance,
+        SETTINGS_RESET_OVERRIDES_ID,
+        "Reset overrides",
+    );
     let tab_close_confirm =
         create_hidden_button(window, instance, TAB_CLOSE_CONFIRM_ID, "Terminate && Close");
     let tab_close_cancel = create_hidden_button(window, instance, TAB_CLOSE_CANCEL_ID, "Cancel");
@@ -228,6 +280,9 @@ pub(crate) fn run_remote_gui(no_activate: bool) -> Result<()> {
         || new_tab.is_null()
         || tabs.is_null()
         || settings.is_null()
+        || locale.is_null()
+        || font_decrease.is_null()
+        || font_increase.is_null()
         || tab_title_edit.is_null()
         || tab_note_edit.is_null()
         || tab_save.is_null()
@@ -241,6 +296,12 @@ pub(crate) fn run_remote_gui(no_activate: bool) -> Result<()> {
         || settings_light.is_null()
         || settings_apply.is_null()
         || settings_cancel.is_null()
+        || settings_default_scope.is_null()
+        || settings_current_scope.is_null()
+        || settings_font_inherit.is_null()
+        || settings_size_inherit.is_null()
+        || settings_theme_inherit.is_null()
+        || settings_reset_overrides.is_null()
         || tab_close_confirm.is_null()
         || tab_close_cancel.is_null()
         || new_default_shell.is_null()
@@ -264,6 +325,9 @@ pub(crate) fn run_remote_gui(no_activate: bool) -> Result<()> {
             new_tab,
             tabs_button: tabs,
             settings,
+            locale,
+            font_decrease,
+            font_increase,
             tab_title_edit,
             tab_note_edit,
             tab_save,
@@ -277,6 +341,12 @@ pub(crate) fn run_remote_gui(no_activate: bool) -> Result<()> {
             settings_light,
             settings_apply,
             settings_cancel,
+            settings_default_scope,
+            settings_current_scope,
+            settings_font_inherit,
+            settings_size_inherit,
+            settings_theme_inherit,
+            settings_reset_overrides,
             tab_close_confirm,
             tab_close_cancel,
             new_default_shell,
@@ -296,6 +366,7 @@ pub(crate) fn run_remote_gui(no_activate: bool) -> Result<()> {
         SetTimer(window, TIMER_ID, 100, None);
     }
     if let Some(state) = state_mut(window) {
+        state.apply_locale();
         state.layout();
         state.load_composer();
         state.resize_active_terminal();
@@ -383,6 +454,9 @@ struct RemoteControls {
     new_tab: HWND,
     tabs_button: HWND,
     settings: HWND,
+    locale: HWND,
+    font_decrease: HWND,
+    font_increase: HWND,
     tab_title_edit: HWND,
     tab_note_edit: HWND,
     tab_save: HWND,
@@ -396,6 +470,12 @@ struct RemoteControls {
     settings_light: HWND,
     settings_apply: HWND,
     settings_cancel: HWND,
+    settings_default_scope: HWND,
+    settings_current_scope: HWND,
+    settings_font_inherit: HWND,
+    settings_size_inherit: HWND,
+    settings_theme_inherit: HWND,
+    settings_reset_overrides: HWND,
     tab_close_confirm: HWND,
     tab_close_cancel: HWND,
     new_default_shell: HWND,
@@ -427,6 +507,19 @@ enum RemoteTabAction {
     AddChild,
     Edit,
     Close,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SettingsScope {
+    Defaults,
+    CurrentTerminal,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AppearanceField {
+    FontFamily,
+    FontSize,
+    Theme,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -542,6 +635,9 @@ struct RemoteWindowState {
     new_tab: HWND,
     tabs_button: HWND,
     settings: HWND,
+    locale: HWND,
+    font_decrease: HWND,
+    font_increase: HWND,
     tab_title_edit: HWND,
     tab_note_edit: HWND,
     tab_save: HWND,
@@ -555,6 +651,12 @@ struct RemoteWindowState {
     settings_light: HWND,
     settings_apply: HWND,
     settings_cancel: HWND,
+    settings_default_scope: HWND,
+    settings_current_scope: HWND,
+    settings_font_inherit: HWND,
+    settings_size_inherit: HWND,
+    settings_theme_inherit: HWND,
+    settings_reset_overrides: HWND,
     tab_close_confirm: HWND,
     tab_close_cancel: HWND,
     new_default_shell: HWND,
@@ -587,6 +689,10 @@ struct RemoteWindowState {
     new_terminal_open: bool,
     new_shell_choice: NewShellChoice,
     settings_theme_draft: ThemeId,
+    settings_scope: SettingsScope,
+    settings_default_draft: EffectiveTerminalAppearance,
+    settings_override_draft: TerminalAppearanceOverride,
+    settings_target_tab_id: Option<String>,
     terminal_selection: Option<RemoteTerminalSelection>,
     scroll_drag: Option<RemoteScrollDrag>,
     sidebar_scroll_offset: usize,
@@ -611,6 +717,9 @@ impl RemoteWindowState {
             new_tab,
             tabs_button,
             settings,
+            locale,
+            font_decrease,
+            font_increase,
             tab_title_edit,
             tab_note_edit,
             tab_save,
@@ -624,6 +733,12 @@ impl RemoteWindowState {
             settings_light,
             settings_apply,
             settings_cancel,
+            settings_default_scope,
+            settings_current_scope,
+            settings_font_inherit,
+            settings_size_inherit,
+            settings_theme_inherit,
+            settings_reset_overrides,
             tab_close_confirm,
             tab_close_cancel,
             new_default_shell,
@@ -637,8 +752,15 @@ impl RemoteWindowState {
         } = controls;
         let config = load_config();
         let settings_theme_draft = config.color_theme;
-        let (font, cell_width, cell_height) = create_terminal_font(window, &config)?;
+        let settings_default_draft = config.effective_terminal_appearance(&ipc_address(), None);
         let last_active_id = client.snapshot().active_tab_id.clone();
+        let appearance =
+            config.effective_terminal_appearance(&ipc_address(), last_active_id.as_deref());
+        let (font, cell_width, cell_height) = create_terminal_font(
+            window,
+            &appearance.terminal_font_family,
+            appearance.terminal_font_size,
+        )?;
         let last_composer_identity = remote_composer_identity(&client);
         Ok(Self {
             window,
@@ -647,6 +769,9 @@ impl RemoteWindowState {
             new_tab,
             tabs_button,
             settings,
+            locale,
+            font_decrease,
+            font_increase,
             tab_title_edit,
             tab_note_edit,
             tab_save,
@@ -660,6 +785,12 @@ impl RemoteWindowState {
             settings_light,
             settings_apply,
             settings_cancel,
+            settings_default_scope,
+            settings_current_scope,
+            settings_font_inherit,
+            settings_size_inherit,
+            settings_theme_inherit,
+            settings_reset_overrides,
             tab_close_confirm,
             tab_close_cancel,
             new_default_shell,
@@ -692,6 +823,10 @@ impl RemoteWindowState {
             new_terminal_open: false,
             new_shell_choice: NewShellChoice::Default,
             settings_theme_draft,
+            settings_scope: SettingsScope::Defaults,
+            settings_default_draft,
+            settings_override_draft: TerminalAppearanceOverride::default(),
+            settings_target_tab_id: None,
             terminal_selection: None,
             scroll_drag: None,
             sidebar_scroll_offset: 0,
@@ -728,6 +863,9 @@ impl RemoteWindowState {
                 if active != self.last_active_id || composer != self.last_composer_identity {
                     self.last_active_id = active;
                     self.last_composer_identity = composer;
+                    if let Err(error) = self.apply_effective_terminal_font() {
+                        self.last_error = Some(format!("Terminal font update failed: {error:#}"));
+                    }
                     self.load_composer();
                 }
                 self.last_error = None;
@@ -777,9 +915,7 @@ impl RemoteWindowState {
                             self.cwd_edit_tab_id = None;
                             self.show_tab_editor(false);
                             self.show_tab_close_controls(false);
-                            unsafe {
-                                SetWindowTextW(self.send, wide("Send").as_ptr());
-                            }
+                            self.apply_locale();
                             self.show_workspace_controls(true);
                             self.last_active_id = self
                                 .client
@@ -788,6 +924,10 @@ impl RemoteWindowState {
                             self.last_composer_identity =
                                 self.client.as_ref().and_then(remote_composer_identity);
                             self.last_error = None;
+                            if let Err(error) = self.apply_effective_terminal_font() {
+                                self.last_error =
+                                    Some(format!("Terminal font update failed: {error:#}"));
+                            }
                             self.load_composer();
                             self.resize_active_terminal();
                             return true;
@@ -975,6 +1115,45 @@ impl RemoteWindowState {
                 if !self.settings_open {
                     anyhow::bail!("Settings could not be opened");
                 }
+            }
+            "toggle-locale" => self.toggle_locale(),
+            "font-decrease" => self.adjust_active_terminal_font(-1),
+            "font-increase" => self.adjust_active_terminal_font(1),
+            "settings-defaults" => {
+                if !self.settings_open {
+                    anyhow::bail!("Settings is not open");
+                }
+                self.switch_settings_scope(SettingsScope::Defaults);
+            }
+            "settings-current" => {
+                if !self.settings_open {
+                    anyhow::bail!("Settings is not open");
+                }
+                self.switch_settings_scope(SettingsScope::CurrentTerminal);
+            }
+            "settings-font-toggle" => {
+                if !self.settings_open {
+                    anyhow::bail!("Settings is not open");
+                }
+                self.toggle_settings_inheritance(AppearanceField::FontFamily);
+            }
+            "settings-size-toggle" => {
+                if !self.settings_open {
+                    anyhow::bail!("Settings is not open");
+                }
+                self.toggle_settings_inheritance(AppearanceField::FontSize);
+            }
+            "settings-theme-toggle" => {
+                if !self.settings_open {
+                    anyhow::bail!("Settings is not open");
+                }
+                self.toggle_settings_inheritance(AppearanceField::Theme);
+            }
+            "settings-reset-overrides" => {
+                if !self.settings_open {
+                    anyhow::bail!("Settings is not open");
+                }
+                self.reset_settings_overrides();
             }
             "settings-theme-dark" => {
                 if !self.settings_open {
@@ -1181,11 +1360,32 @@ impl RemoteWindowState {
                 }
             }
             "get-settings" => {
+                let active_tab_id = self
+                    .client
+                    .as_ref()
+                    .and_then(|client| client.snapshot().active_tab_id.as_deref());
+                let terminal_override = active_tab_id.and_then(|tab_id| {
+                    self.config
+                        .terminal_override_entry(&ipc_address(), tab_id)
+                        .cloned()
+                });
+                let effective = self
+                    .config
+                    .effective_terminal_appearance(&ipc_address(), active_tab_id);
                 output = Some(
                     serde_json::to_string_pretty(&serde_json::json!({
                         "terminal_font_family": self.config.terminal_font_family,
                         "terminal_font_size": self.config.terminal_font_size,
-                        "resolved_font_family": self.config.terminal_font_family,
+                        "color_theme": self.config.color_theme.as_str(),
+                        "locale": self.config.locale.as_str(),
+                        "active_tab_id": active_tab_id,
+                        "current_terminal_override": terminal_override,
+                        "effective": {
+                            "terminal_font_family": effective.terminal_font_family,
+                            "terminal_font_size": effective.terminal_font_size,
+                            "color_theme": effective.color_theme.as_str(),
+                        },
+                        "resolved_font_family": effective.terminal_font_family,
                         "config_path": config_path(),
                         "recommended_cjk_font": "Sarasa Fixed SC",
                         "recommended_font_license": "SIL Open Font License 1.1",
@@ -1217,7 +1417,17 @@ impl RemoteWindowState {
                     }
                     other => anyhow::bail!("unknown setting: {other}"),
                 }
-                let (font, cell_width, cell_height) = create_terminal_font(self.window, &next)?;
+                let appearance = next.effective_terminal_appearance(
+                    &ipc_address(),
+                    self.client
+                        .as_ref()
+                        .and_then(|client| client.snapshot().active_tab_id.as_deref()),
+                );
+                let (font, cell_width, cell_height) = create_terminal_font(
+                    self.window,
+                    &appearance.terminal_font_family,
+                    appearance.terminal_font_size,
+                )?;
                 if let Err(error) = save_config(&next) {
                     unsafe { DeleteObject(font as HGDIOBJ) };
                     return Err(error).context("could not save settings");
@@ -1492,6 +1702,14 @@ impl RemoteWindowState {
             .as_ref()
             .context("replaceable UI is disconnected")?;
         let source = client.snapshot();
+        let active_override = source.active_tab_id.as_deref().and_then(|tab_id| {
+            self.config
+                .terminal_override_entry(&ipc_address(), tab_id)
+                .cloned()
+        });
+        let effective = self
+            .config
+            .effective_terminal_appearance(&ipc_address(), source.active_tab_id.as_deref());
         let mut client_rect: RECT = unsafe { mem::zeroed() };
         unsafe { GetClientRect(self.window, &mut client_rect) };
         let layout = self.workspace_geometry();
@@ -1552,23 +1770,31 @@ impl RemoteWindowState {
                                 "density": tree_action_density_name(geometry.actions.density),
                                 "new_child": action(
                                     "new-child",
-                                    "Add",
+                                    self.config.locale.text(UiText::Add),
                                     geometry.actions.add_child.expect("normal row has Add"),
                                 ),
-                                "edit": action("edit-tab", "Edit", geometry.actions.primary),
-                                "close": action("close-tab", "Close", geometry.actions.secondary),
+                                "edit": action(
+                                    "edit-tab",
+                                    self.config.locale.text(UiText::Edit),
+                                    geometry.actions.primary,
+                                ),
+                                "close": action(
+                                    "close-tab",
+                                    self.config.locale.text(UiText::Close),
+                                    geometry.actions.secondary,
+                                ),
                             }),
                             TreeRowMode::Editing => serde_json::json!({
                                 "mode": "editing",
                                 "density": tree_action_density_name(geometry.actions.density),
                                 "save": action(
                                     "tab-editor-save",
-                                    "Save",
+                                    self.config.locale.text(UiText::Save),
                                     geometry.actions.primary,
                                 ),
                                 "cancel": action(
                                     "tab-editor-cancel",
-                                    "Cancel",
+                                    self.config.locale.text(UiText::Cancel),
                                     geometry.actions.secondary,
                                 ),
                             }),
@@ -1794,6 +2020,9 @@ impl RemoteWindowState {
                     "new": pixel_rect_json(toolbar.new_tab),
                     "tabs": pixel_rect_json(toolbar.tabs),
                     "settings": pixel_rect_json(toolbar.settings),
+                    "locale": pixel_rect_json(toolbar.locale),
+                    "font_decrease": pixel_rect_json(toolbar.font_decrease),
+                    "font_increase": pixel_rect_json(toolbar.font_increase),
                 })),
                 "terminal": {
                     "x": layout.terminal.left,
@@ -1852,17 +2081,17 @@ impl RemoteWindowState {
             "system_menu": {
                 "toggle_tabs": {
                     "id": SYSTEM_MENU_TOGGLE_TABS_ID,
-                    "label": "Toggle Tabs",
+                    "label": self.config.locale.text(UiText::ToggleTabs),
                     "checked": self.tabs_visible,
                 },
                 "copy": {
                     "id": SYSTEM_MENU_COPY_ID,
-                    "label": "Copy",
+                    "label": self.config.locale.text(UiText::Copy),
                     "enabled": copy_enabled,
                 },
                 "paste": {
                     "id": SYSTEM_MENU_PASTE_ID,
-                    "label": "Paste",
+                    "label": self.config.locale.text(UiText::Paste),
                     "enabled": paste_enabled,
                 },
             },
@@ -1889,6 +2118,17 @@ impl RemoteWindowState {
                 "terminal_font_family": self.config.terminal_font_family,
                 "terminal_font_size": self.config.terminal_font_size,
                 "color_theme": self.config.color_theme.as_str(),
+                "scope": match self.settings_scope {
+                    SettingsScope::Defaults => "defaults",
+                    SettingsScope::CurrentTerminal => "current-terminal",
+                },
+                "target_tab_id": self.settings_target_tab_id,
+                "current_terminal_override": active_override,
+                "effective": {
+                    "terminal_font_family": effective.terminal_font_family,
+                    "terminal_font_size": effective.terminal_font_size,
+                    "color_theme": effective.color_theme.as_str(),
+                },
                 "theme_draft": self.settings_open.then(
                     || self.settings_theme_draft.as_str()
                 ),
@@ -1900,13 +2140,13 @@ impl RemoteWindowState {
                 "tabs_width": self.config.tabs_width,
             },
             "locale": {
-                "id": "en-US",
+                "id": self.config.locale.as_str(),
                 "controls": {
-                    "send": "Send",
-                    "settings": "Settings",
-                    "new": "New",
-                    "apply": "Apply",
-                    "save": "Save",
+                    "send": self.config.locale.text(UiText::Send),
+                    "settings": self.config.locale.text(UiText::Settings),
+                    "new": self.config.locale.text(UiText::New),
+                    "apply": self.config.locale.text(UiText::Apply),
+                    "save": self.config.locale.text(UiText::Save),
                 },
             },
             "feedback": {
@@ -1971,19 +2211,147 @@ impl RemoteWindowState {
         self.set_tabs_visible(!self.tabs_visible);
     }
 
+    fn active_terminal_appearance(&self) -> EffectiveTerminalAppearance {
+        let active = self
+            .client
+            .as_ref()
+            .and_then(|client| client.snapshot().active_tab_id.as_deref());
+        self.config
+            .effective_terminal_appearance(&ipc_address(), active)
+    }
+
+    fn apply_effective_terminal_font(&mut self) -> Result<()> {
+        let appearance = self.active_terminal_appearance();
+        let (font, cell_width, cell_height) = create_terminal_font(
+            self.window,
+            &appearance.terminal_font_family,
+            appearance.terminal_font_size,
+        )?;
+        unsafe { DeleteObject(self.font as HGDIOBJ) };
+        self.font = font;
+        self.cell_width = cell_width;
+        self.cell_height = cell_height;
+        self.layout();
+        self.resize_active_terminal();
+        Ok(())
+    }
+
+    fn adjust_active_terminal_font(&mut self, delta: i16) {
+        let Some(tab_id) = self
+            .client
+            .as_ref()
+            .and_then(|client| client.snapshot().active_tab_id.clone())
+        else {
+            return;
+        };
+        let current = self.active_terminal_appearance().terminal_font_size;
+        let next = i32::from(current).saturating_add(i32::from(delta)).clamp(
+            i32::from(MIN_TERMINAL_FONT_SIZE),
+            i32::from(MAX_TERMINAL_FONT_SIZE),
+        ) as u16;
+        if next == current {
+            return;
+        }
+        let mut terminal_override = self.config.terminal_override(&ipc_address(), &tab_id);
+        terminal_override.terminal_font_size = Some(next);
+        self.config
+            .set_terminal_override(&ipc_address(), &tab_id, terminal_override);
+        if let Err(error) = save_config(&self.config) {
+            self.last_error = Some(format!("Terminal font override save failed: {error:#}"));
+            return;
+        }
+        if let Err(error) = self.apply_effective_terminal_font() {
+            self.last_error = Some(format!("Terminal font update failed: {error:#}"));
+        }
+    }
+
+    fn toggle_locale(&mut self) {
+        self.config.locale = self.config.locale.toggled();
+        if let Err(error) = save_config(&self.config) {
+            self.last_error = Some(format!("Locale save failed: {error:#}"));
+            return;
+        }
+        self.apply_locale();
+        self.layout();
+    }
+
+    fn apply_locale(&self) {
+        let locale = self.config.locale;
+        let set = |control: HWND, text: &str| unsafe {
+            SetWindowTextW(control, wide(text).as_ptr());
+        };
+        set(self.send, locale.text(UiText::Send));
+        set(self.new_tab, locale.text(UiText::New));
+        set(self.settings, locale.text(UiText::Settings));
+        set(self.locale, locale.toolbar_label());
+        set(self.tab_save, locale.text(UiText::Save));
+        set(self.tab_cancel, locale.text(UiText::Cancel));
+        set(self.close_keep, locale.text(UiText::KeepServerRunning));
+        set(self.close_stop, locale.text(UiText::StopServerAndExit));
+        set(self.close_cancel, locale.text(UiText::Cancel));
+        set(self.settings_apply, locale.text(UiText::Apply));
+        set(self.settings_cancel, locale.text(UiText::Cancel));
+        set(
+            self.settings_default_scope,
+            locale.text(UiText::DefaultValues),
+        );
+        set(
+            self.settings_current_scope,
+            locale.text(UiText::CurrentTerminal),
+        );
+        set(
+            self.settings_reset_overrides,
+            locale.text(UiText::ResetOverrides),
+        );
+        set(
+            self.tab_close_confirm,
+            locale.text(UiText::TerminateAndClose),
+        );
+        set(self.tab_close_cancel, locale.text(UiText::Cancel));
+        set(self.new_create, locale.text(UiText::Create));
+        set(self.new_cancel, locale.text(UiText::Cancel));
+        set(self.new_default_shell, locale.text(UiText::Default));
+        let menu = unsafe { GetSystemMenu(self.window, 0) };
+        if !menu.is_null() {
+            for (id, label) in [
+                (SYSTEM_MENU_COPY_ID, locale.text(UiText::Copy)),
+                (SYSTEM_MENU_PASTE_ID, locale.text(UiText::Paste)),
+                (SYSTEM_MENU_TOGGLE_TABS_ID, locale.text(UiText::ToggleTabs)),
+            ] {
+                unsafe {
+                    ModifyMenuW(
+                        menu,
+                        id as u32,
+                        MF_BYCOMMAND | MF_STRING,
+                        id,
+                        wide(label).as_ptr(),
+                    );
+                }
+            }
+        }
+    }
+
     fn layout(&mut self) {
         let geometry = self.workspace_geometry();
         let composer = win_rect(geometry.composer);
         unsafe {
             SetWindowTextW(
                 self.tabs_button,
-                wide(if self.tabs_visible { "<Tabs" } else { ">Tabs" }).as_ptr(),
+                wide(&format!(
+                    "{}{}",
+                    if self.tabs_visible { '<' } else { '>' },
+                    self.config.locale.text(UiText::Tabs)
+                ))
+                .as_ptr(),
             );
             if let Some(toolbar) = geometry.workspace_toolbar {
                 for (window, bounds) in [
                     (self.new_tab, toolbar.new_tab),
                     (self.tabs_button, toolbar.tabs),
                     (self.settings, toolbar.settings),
+                    (self.locale, toolbar.locale),
+                    (self.font_decrease, toolbar.font_decrease),
+                    (self.font_increase, toolbar.font_increase),
                 ] {
                     MoveWindow(
                         window,
@@ -2036,6 +2404,9 @@ impl RemoteWindowState {
             };
             ShowWindow(self.tabs_button, workspace_command);
             ShowWindow(self.settings, workspace_command);
+            ShowWindow(self.locale, workspace_command);
+            ShowWindow(self.font_decrease, workspace_command);
+            ShowWindow(self.font_increase, workspace_command);
         }
         self.layout_tab_editor();
         self.layout_close_controls();
@@ -2212,16 +2583,19 @@ impl RemoteWindowState {
             };
             ShowWindow(self.tabs_button, toolbar_command);
             ShowWindow(self.settings, toolbar_command);
+            ShowWindow(self.locale, toolbar_command);
+            ShowWindow(self.font_decrease, toolbar_command);
+            ShowWindow(self.font_increase, toolbar_command);
             ShowWindow(self.new_tab, toolbar_command);
         }
         self.show_tab_editor(visible && self.tabs_visible && self.editing_tab_id.is_some());
     }
 
-    fn settings_modal_geometry(&self) -> (RECT, [RECT; 6]) {
+    fn settings_modal_geometry(&self) -> (RECT, [RECT; 12]) {
         let mut client: RECT = unsafe { mem::zeroed() };
         unsafe { GetClientRect(self.window, &mut client) };
-        let width = (client.right - 32).clamp(420, 540);
-        let height = 330;
+        let width = (client.right - 32).clamp(520, 680);
+        let height = (client.bottom - 32).clamp(390, 430);
         let left = ((client.right - width) / 2).max(0);
         let top = ((client.bottom - height) / 2).max(0);
         let modal = RECT {
@@ -2230,54 +2604,112 @@ impl RemoteWindowState {
             right: left + width,
             bottom: top + height,
         };
+        let default_scope = RECT {
+            left: left + 32,
+            top: top + 54,
+            right: left + 210,
+            bottom: top + 88,
+        };
+        let current_scope = RECT {
+            left: default_scope.right + 8,
+            top: default_scope.top,
+            right: (default_scope.right + 228).min(left + width - 32),
+            bottom: default_scope.bottom,
+        };
         let font = RECT {
             left: left + 32,
-            top: top + 92,
-            right: left + width - 126,
-            bottom: top + 124,
+            top: top + 132,
+            right: left + width - 174,
+            bottom: top + 164,
+        };
+        let font_inherit = RECT {
+            left: left + width - 158,
+            top: font.top,
+            right: left + width - 32,
+            bottom: font.bottom,
         };
         let size = RECT {
-            left: left + width - 110,
-            top: top + 92,
+            left: left + 32,
+            top: top + 204,
+            right: left + 164,
+            bottom: top + 236,
+        };
+        let size_inherit = RECT {
+            left: left + width - 158,
+            top: size.top,
             right: left + width - 32,
-            bottom: top + 124,
+            bottom: size.bottom,
         };
         let dark = RECT {
             left: left + 32,
-            top: top + 180,
+            top: top + 276,
             right: left + 178,
-            bottom: top + 214,
+            bottom: top + 310,
         };
         let light = RECT {
             left: left + 190,
-            top: top + 180,
+            top: dark.top,
             right: left + 336,
-            bottom: top + 214,
+            bottom: dark.bottom,
+        };
+        let theme_inherit = RECT {
+            left: left + width - 158,
+            top: dark.top,
+            right: left + width - 32,
+            bottom: dark.bottom,
+        };
+        let reset = RECT {
+            left: left + 32,
+            top: top + height - 54,
+            right: left + 174,
+            bottom: top + height - 18,
         };
         let apply = RECT {
             left: left + width - 126,
-            top: top + 266,
+            top: top + height - 54,
             right: left + width - 32,
-            bottom: top + 302,
+            bottom: top + height - 18,
         };
         let cancel = RECT {
             left: apply.left - 106,
-            top: top + 266,
+            top: apply.top,
             right: apply.left - 12,
-            bottom: top + 302,
+            bottom: apply.bottom,
         };
-        (modal, [font, size, dark, light, apply, cancel])
+        (
+            modal,
+            [
+                default_scope,
+                current_scope,
+                font,
+                font_inherit,
+                size,
+                size_inherit,
+                dark,
+                light,
+                theme_inherit,
+                reset,
+                apply,
+                cancel,
+            ],
+        )
     }
 
     fn layout_settings_controls(&self) {
         let (_, controls) = self.settings_modal_geometry();
         for (control, rect) in [
-            (self.settings_font, controls[0]),
-            (self.settings_size, controls[1]),
-            (self.settings_dark, controls[2]),
-            (self.settings_light, controls[3]),
-            (self.settings_apply, controls[4]),
-            (self.settings_cancel, controls[5]),
+            (self.settings_default_scope, controls[0]),
+            (self.settings_current_scope, controls[1]),
+            (self.settings_font, controls[2]),
+            (self.settings_font_inherit, controls[3]),
+            (self.settings_size, controls[4]),
+            (self.settings_size_inherit, controls[5]),
+            (self.settings_dark, controls[6]),
+            (self.settings_light, controls[7]),
+            (self.settings_theme_inherit, controls[8]),
+            (self.settings_reset_overrides, controls[9]),
+            (self.settings_apply, controls[10]),
+            (self.settings_cancel, controls[11]),
         ] {
             unsafe {
                 MoveWindow(
@@ -2302,6 +2734,18 @@ impl RemoteWindowState {
             ShowWindow(self.settings_light, command);
             ShowWindow(self.settings_apply, command);
             ShowWindow(self.settings_cancel, command);
+            ShowWindow(self.settings_default_scope, command);
+            ShowWindow(self.settings_current_scope, command);
+            let override_command =
+                if visible && self.settings_scope == SettingsScope::CurrentTerminal {
+                    SW_SHOW
+                } else {
+                    SW_HIDE
+                };
+            ShowWindow(self.settings_font_inherit, override_command);
+            ShowWindow(self.settings_size_inherit, override_command);
+            ShowWindow(self.settings_theme_inherit, override_command);
+            ShowWindow(self.settings_reset_overrides, override_command);
         }
     }
 
@@ -3095,25 +3539,230 @@ impl RemoteWindowState {
         }
         self.finish_tab_edit(false);
         self.settings_open = true;
-        self.settings_theme_draft = self.config.color_theme;
-        unsafe {
-            SetWindowTextW(
-                self.settings_font,
-                wide(&self.config.terminal_font_family).as_ptr(),
-            );
-            SetWindowTextW(
-                self.settings_size,
-                wide(&self.config.terminal_font_size.to_string()).as_ptr(),
-            );
-        }
-        self.refresh_settings_theme_controls();
+        self.settings_scope = SettingsScope::Defaults;
+        self.settings_default_draft = self
+            .config
+            .effective_terminal_appearance(&ipc_address(), None);
+        self.settings_target_tab_id = self
+            .client
+            .as_ref()
+            .and_then(|client| client.snapshot().active_tab_id.clone());
+        self.settings_override_draft = self
+            .settings_target_tab_id
+            .as_deref()
+            .map(|tab_id| self.config.terminal_override(&ipc_address(), tab_id))
+            .unwrap_or_default();
+        self.load_settings_scope_controls();
         self.show_workspace_controls(false);
         self.layout_settings_controls();
         unsafe { SetFocus(self.settings_font) };
     }
 
+    fn capture_settings_scope(&mut self) -> Result<()> {
+        let family = window_text(self.settings_font).trim().to_owned();
+        let size = window_text(self.settings_size)
+            .trim()
+            .parse::<u16>()
+            .context("font size must be a number from 8 to 36")?;
+        if family.is_empty()
+            || family.len() > 256
+            || !(MIN_TERMINAL_FONT_SIZE..=MAX_TERMINAL_FONT_SIZE).contains(&size)
+        {
+            anyhow::bail!("font family is required (maximum 256 bytes) and size must be 8 to 36");
+        }
+        match self.settings_scope {
+            SettingsScope::Defaults => {
+                self.settings_default_draft.terminal_font_family = family;
+                self.settings_default_draft.terminal_font_size = size;
+                self.settings_default_draft.color_theme = self.settings_theme_draft;
+            }
+            SettingsScope::CurrentTerminal => {
+                if self.settings_override_draft.terminal_font_family.is_some() {
+                    self.settings_override_draft.terminal_font_family = Some(family);
+                }
+                if self.settings_override_draft.terminal_font_size.is_some() {
+                    self.settings_override_draft.terminal_font_size = Some(size);
+                }
+                if self.settings_override_draft.color_theme.is_some() {
+                    self.settings_override_draft.color_theme = Some(self.settings_theme_draft);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn switch_settings_scope(&mut self, scope: SettingsScope) {
+        if !self.settings_open
+            || scope == self.settings_scope
+            || (scope == SettingsScope::CurrentTerminal && self.settings_target_tab_id.is_none())
+        {
+            return;
+        }
+        if let Err(error) = self.capture_settings_scope() {
+            self.last_error = Some(format!("Settings draft invalid: {error:#}"));
+            return;
+        }
+        self.settings_scope = scope;
+        self.load_settings_scope_controls();
+        self.layout_settings_controls();
+    }
+
+    fn load_settings_scope_controls(&mut self) {
+        let locale = self.config.locale;
+        let (family, size, theme) = match self.settings_scope {
+            SettingsScope::Defaults => (
+                self.settings_default_draft.terminal_font_family.clone(),
+                self.settings_default_draft.terminal_font_size,
+                self.settings_default_draft.color_theme,
+            ),
+            SettingsScope::CurrentTerminal => (
+                self.settings_override_draft
+                    .terminal_font_family
+                    .clone()
+                    .unwrap_or_else(|| self.settings_default_draft.terminal_font_family.clone()),
+                self.settings_override_draft
+                    .terminal_font_size
+                    .unwrap_or(self.settings_default_draft.terminal_font_size),
+                self.settings_override_draft
+                    .color_theme
+                    .unwrap_or(self.settings_default_draft.color_theme),
+            ),
+        };
+        self.settings_theme_draft = theme;
+        unsafe {
+            SetWindowTextW(self.settings_font, wide(&family).as_ptr());
+            SetWindowTextW(self.settings_size, wide(&size.to_string()).as_ptr());
+            EnableWindow(
+                self.settings_current_scope,
+                self.settings_target_tab_id.is_some().into(),
+            );
+            let current = self.settings_scope == SettingsScope::CurrentTerminal;
+            EnableWindow(
+                self.settings_font,
+                (!current || self.settings_override_draft.terminal_font_family.is_some()).into(),
+            );
+            EnableWindow(
+                self.settings_size,
+                (!current || self.settings_override_draft.terminal_font_size.is_some()).into(),
+            );
+            EnableWindow(
+                self.settings_dark,
+                (!current || self.settings_override_draft.color_theme.is_some()).into(),
+            );
+            EnableWindow(
+                self.settings_light,
+                (!current || self.settings_override_draft.color_theme.is_some()).into(),
+            );
+        }
+        for (control, overridden) in [
+            (
+                self.settings_font_inherit,
+                self.settings_override_draft.terminal_font_family.is_some(),
+            ),
+            (
+                self.settings_size_inherit,
+                self.settings_override_draft.terminal_font_size.is_some(),
+            ),
+            (
+                self.settings_theme_inherit,
+                self.settings_override_draft.color_theme.is_some(),
+            ),
+        ] {
+            unsafe {
+                SetWindowTextW(
+                    control,
+                    wide(locale.text(if overridden {
+                        UiText::InheritDefault
+                    } else {
+                        UiText::Override
+                    }))
+                    .as_ptr(),
+                );
+            }
+        }
+        unsafe {
+            SetWindowTextW(
+                self.settings_default_scope,
+                wide(&format!(
+                    "{}{}",
+                    locale.text(UiText::DefaultValues),
+                    if self.settings_scope == SettingsScope::Defaults {
+                        " · ✓"
+                    } else {
+                        ""
+                    }
+                ))
+                .as_ptr(),
+            );
+            SetWindowTextW(
+                self.settings_current_scope,
+                wide(&format!(
+                    "{}{}",
+                    locale.text(UiText::CurrentTerminal),
+                    if self.settings_scope == SettingsScope::CurrentTerminal {
+                        " · ✓"
+                    } else {
+                        ""
+                    }
+                ))
+                .as_ptr(),
+            );
+        }
+        self.refresh_settings_theme_controls();
+    }
+
+    fn toggle_settings_inheritance(&mut self, field: AppearanceField) {
+        if self.settings_scope != SettingsScope::CurrentTerminal {
+            return;
+        }
+        if let Err(error) = self.capture_settings_scope() {
+            self.last_error = Some(format!("Settings draft invalid: {error:#}"));
+            return;
+        }
+        match field {
+            AppearanceField::FontFamily => {
+                self.settings_override_draft.terminal_font_family = self
+                    .settings_override_draft
+                    .terminal_font_family
+                    .take()
+                    .is_none()
+                    .then(|| self.settings_default_draft.terminal_font_family.clone());
+            }
+            AppearanceField::FontSize => {
+                self.settings_override_draft.terminal_font_size = self
+                    .settings_override_draft
+                    .terminal_font_size
+                    .take()
+                    .is_none()
+                    .then_some(self.settings_default_draft.terminal_font_size);
+            }
+            AppearanceField::Theme => {
+                self.settings_override_draft.color_theme = self
+                    .settings_override_draft
+                    .color_theme
+                    .take()
+                    .is_none()
+                    .then_some(self.settings_default_draft.color_theme);
+            }
+        }
+        self.load_settings_scope_controls();
+    }
+
+    fn reset_settings_overrides(&mut self) {
+        if self.settings_scope != SettingsScope::CurrentTerminal {
+            return;
+        }
+        self.settings_override_draft = TerminalAppearanceOverride::default();
+        self.load_settings_scope_controls();
+    }
+
     fn preview_settings_theme(&mut self, theme: ThemeId) {
         if !self.settings_open {
+            return;
+        }
+        if self.settings_scope == SettingsScope::CurrentTerminal
+            && self.settings_override_draft.color_theme.is_none()
+        {
             return;
         }
         self.settings_theme_draft = theme;
@@ -3126,33 +3775,49 @@ impl RemoteWindowState {
             (ThemeId::Light, self.settings_light),
         ] {
             let state = if theme == self.settings_theme_draft {
-                "Selected"
+                self.config.locale.text(UiText::Selected)
             } else {
-                "Preview"
+                self.config.locale.text(UiText::Preview)
             };
             unsafe {
                 SetWindowTextW(
                     control,
-                    wide(&format!("{} · {state}", theme.label())).as_ptr(),
+                    wide(&format!(
+                        "{} · {state}",
+                        self.config.locale.text(match theme {
+                            ThemeId::Dark => UiText::ThemeDark,
+                            ThemeId::Light => UiText::Light,
+                        })
+                    ))
+                    .as_ptr(),
                 );
             }
         }
     }
 
     fn apply_settings(&mut self) -> Result<()> {
-        let family = window_text(self.settings_font).trim().to_owned();
-        let size = window_text(self.settings_size)
-            .trim()
-            .parse::<u16>()
-            .context("font size must be a number from 8 to 36")?;
-        if family.is_empty() || family.len() > 256 || !(8..=36).contains(&size) {
-            anyhow::bail!("font family is required (maximum 256 bytes) and size must be 8 to 36");
-        }
+        self.capture_settings_scope()?;
         let mut next = self.config.clone();
-        next.terminal_font_family = family;
-        next.terminal_font_size = size;
-        next.color_theme = self.settings_theme_draft;
-        let (font, cell_width, cell_height) = create_terminal_font(self.window, &next)?;
+        next.terminal_font_family = self.settings_default_draft.terminal_font_family.clone();
+        next.terminal_font_size = self.settings_default_draft.terminal_font_size;
+        next.color_theme = self.settings_default_draft.color_theme;
+        if let Some(tab_id) = self.settings_target_tab_id.as_deref() {
+            next.set_terminal_override(
+                &ipc_address(),
+                tab_id,
+                self.settings_override_draft.clone(),
+            );
+        }
+        let active = self
+            .client
+            .as_ref()
+            .and_then(|client| client.snapshot().active_tab_id.as_deref());
+        let appearance = next.effective_terminal_appearance(&ipc_address(), active);
+        let (font, cell_width, cell_height) = create_terminal_font(
+            self.window,
+            &appearance.terminal_font_family,
+            appearance.terminal_font_size,
+        )?;
         if let Err(error) = save_config(&next) {
             unsafe { DeleteObject(font as HGDIOBJ) };
             return Err(error).context("could not save settings");
@@ -3175,7 +3840,8 @@ impl RemoteWindowState {
             return;
         }
         self.settings_open = false;
-        self.settings_theme_draft = self.config.color_theme;
+        self.settings_theme_draft = self.active_terminal_appearance().color_theme;
+        self.settings_target_tab_id = None;
         self.show_settings_controls(false);
         self.show_workspace_controls(true);
         self.focus_surface = RemoteFocusSurface::Terminal;
@@ -3926,7 +4592,7 @@ impl RemoteWindowState {
         let palette = if self.settings_open {
             self.settings_theme_draft.palette()
         } else {
-            self.config.color_theme.palette()
+            self.active_terminal_appearance().color_theme.palette()
         };
         let mut paint: PAINTSTRUCT = unsafe { mem::zeroed() };
         let device = unsafe { BeginPaint(self.window, &mut paint) };
@@ -3969,7 +4635,12 @@ impl RemoteWindowState {
                 &if self.cwd_edit_tab_id.as_deref() == Some(tab.id.as_str()) {
                     format!("CWD → {}  Ctrl+Enter prepares · Esc cancels", tab.id)
                 } else {
-                    format!("Input → {}  {}", tab.id, tab.title)
+                    format!(
+                        "{} → {}  {}",
+                        self.config.locale.text(UiText::Input),
+                        tab.id,
+                        tab.title
+                    )
                 },
                 palette.muted_text.colorref(),
             );
@@ -4188,6 +4859,7 @@ impl RemoteWindowState {
 
     fn paint_settings(&self, device: HDC, palette: &ThemePalette) {
         let (modal, _) = self.settings_modal_geometry();
+        let locale = self.config.locale;
         fill(device, &modal, palette.modal.colorref());
         frame(device, &modal, palette.accent.colorref());
         draw_text(
@@ -4198,42 +4870,56 @@ impl RemoteWindowState {
                 right: modal.right - 28,
                 bottom: modal.top + 50,
             },
-            "Settings",
+            locale.text(UiText::Settings),
             palette.text.colorref(),
         );
         draw_text(
             device,
             RECT {
                 left: modal.left + 32,
-                top: modal.top + 58,
-                right: modal.right - 126,
-                bottom: modal.top + 88,
-            },
-            "Terminal font family",
-            palette.muted_text.colorref(),
-        );
-        draw_text(
-            device,
-            RECT {
-                left: modal.right - 110,
-                top: modal.top + 58,
+                top: modal.top + 96,
                 right: modal.right - 32,
-                bottom: modal.top + 88,
+                bottom: modal.top + 126,
             },
-            "Size",
+            locale.text(UiText::FontFamily),
             palette.muted_text.colorref(),
         );
         draw_text(
             device,
             RECT {
                 left: modal.left + 32,
-                top: modal.top + 144,
+                top: modal.top + 168,
                 right: modal.right - 32,
-                bottom: modal.top + 174,
+                bottom: modal.top + 198,
             },
-            "Color theme · preview is immediate; Apply persists",
+            locale.text(UiText::Size),
             palette.muted_text.colorref(),
         );
+        draw_text(
+            device,
+            RECT {
+                left: modal.left + 32,
+                top: modal.top + 240,
+                right: modal.right - 32,
+                bottom: modal.top + 270,
+            },
+            locale.text(UiText::ColorTheme),
+            palette.muted_text.colorref(),
+        );
+        if self.settings_scope == SettingsScope::CurrentTerminal {
+            let target = self.settings_target_tab_id.as_deref().unwrap_or("-");
+            draw_text(
+                device,
+                RECT {
+                    left: modal.left + 454,
+                    top: modal.top + 18,
+                    right: modal.right - 28,
+                    bottom: modal.top + 50,
+                },
+                target,
+                palette.muted_text.colorref(),
+            );
+        }
     }
 
     fn paint_new_terminal(&self, device: HDC, palette: &ThemePalette) {
@@ -4241,8 +4927,16 @@ impl RemoteWindowState {
         fill(device, &modal, palette.modal.colorref());
         frame(device, &modal, palette.accent.colorref());
         for (top, text, color) in [
-            (18, "New terminal", palette.text.colorref()),
-            (48, "Shell profile", palette.muted_text.colorref()),
+            (
+                18,
+                self.config.locale.text(UiText::NewTerminal),
+                palette.text.colorref(),
+            ),
+            (
+                48,
+                self.config.locale.text(UiText::ShellProfile),
+                palette.muted_text.colorref(),
+            ),
             (
                 116,
                 "Initial command · optional; leaves the selected shell open",
@@ -4374,6 +5068,7 @@ impl RemoteWindowState {
             }
             if active {
                 let compact = geometry.actions.density == TreeRowActionDensity::Compact;
+                let locale = self.config.locale;
                 for (bounds, label) in [
                     (
                         geometry
@@ -4382,10 +5077,21 @@ impl RemoteWindowState {
                             .expect("normal tab rows expose Add"),
                         "+",
                     ),
-                    (geometry.actions.primary, if compact { "E" } else { "Edit" }),
+                    (
+                        geometry.actions.primary,
+                        if compact {
+                            "E"
+                        } else {
+                            locale.text(UiText::Edit)
+                        },
+                    ),
                     (
                         geometry.actions.secondary,
-                        if compact { "X" } else { "Close" },
+                        if compact {
+                            "X"
+                        } else {
+                            locale.text(UiText::Close)
+                        },
                     ),
                 ] {
                     let bounds = win_rect(bounds);
@@ -4833,6 +5539,9 @@ unsafe extern "system" fn window_proc(
                     TABS_ID => {
                         state.toggle_tabs();
                     }
+                    LOCALE_ID => state.toggle_locale(),
+                    FONT_DECREASE_ID => state.adjust_active_terminal_font(-1),
+                    FONT_INCREASE_ID => state.adjust_active_terminal_font(1),
                     TAB_SAVE_ID => state.finish_tab_edit(true),
                     TAB_CANCEL_ID => state.finish_tab_edit(false),
                     CLOSE_KEEP_ID => {
@@ -4844,6 +5553,22 @@ unsafe extern "system" fn window_proc(
                     CLOSE_CANCEL_ID => state.finish_window_close(RemoteCloseChoice::Cancel),
                     SETTINGS_DARK_ID => state.preview_settings_theme(ThemeId::Dark),
                     SETTINGS_LIGHT_ID => state.preview_settings_theme(ThemeId::Light),
+                    SETTINGS_DEFAULT_SCOPE_ID => {
+                        state.switch_settings_scope(SettingsScope::Defaults)
+                    }
+                    SETTINGS_CURRENT_SCOPE_ID => {
+                        state.switch_settings_scope(SettingsScope::CurrentTerminal)
+                    }
+                    SETTINGS_FONT_INHERIT_ID => {
+                        state.toggle_settings_inheritance(AppearanceField::FontFamily)
+                    }
+                    SETTINGS_SIZE_INHERIT_ID => {
+                        state.toggle_settings_inheritance(AppearanceField::FontSize)
+                    }
+                    SETTINGS_THEME_INHERIT_ID => {
+                        state.toggle_settings_inheritance(AppearanceField::Theme)
+                    }
+                    SETTINGS_RESET_OVERRIDES_ID => state.reset_settings_overrides(),
                     SETTINGS_APPLY_ID => state.finish_settings(true),
                     SETTINGS_CANCEL_ID => state.finish_settings(false),
                     TAB_CLOSE_CONFIRM_ID => state.finish_close_tab(true),
@@ -5162,7 +5887,7 @@ fn screen_selection_text(screen: &UiScreenSnapshot, selection: &RemoteTerminalSe
     lines.join("\r\n")
 }
 
-fn create_terminal_font(window: HWND, config: &AppConfig) -> Result<(HFONT, i32, i32)> {
+fn create_terminal_font(window: HWND, family: &str, size: u16) -> Result<(HFONT, i32, i32)> {
     let device = unsafe { GetDC(window) };
     if device.is_null() {
         anyhow::bail!("GetDC failed");
@@ -5173,7 +5898,7 @@ fn create_terminal_font(window: HWND, config: &AppConfig) -> Result<(HFONT, i32,
             i32::try_from(LOGPIXELSY).unwrap_or(90),
         )
     };
-    let height = -((i32::from(config.terminal_font_size) * dpi) / 72).max(1);
+    let height = -((i32::from(size) * dpi) / 72).max(1);
     let font = unsafe {
         CreateFontW(
             height,
@@ -5189,7 +5914,7 @@ fn create_terminal_font(window: HWND, config: &AppConfig) -> Result<(HFONT, i32,
             u32::from(CLIP_DEFAULT_PRECIS),
             u32::from(CLEARTYPE_QUALITY),
             u32::from(FIXED_PITCH | FF_MODERN),
-            wide(&config.terminal_font_family).as_ptr(),
+            wide(family).as_ptr(),
         )
     };
     if font.is_null() {

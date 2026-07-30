@@ -35,7 +35,10 @@ use crate::{
     operations::{UI_TABS_SET_WIDTH, UI_TABS_SHOW},
     protocol::IpcResponse,
     pty::TerminalSize,
-    settings::{AppConfig, config_path, load_config, save_config},
+    settings::{
+        AppConfig, MAX_TERMINAL_FONT_SIZE, MIN_TERMINAL_FONT_SIZE, config_path, load_config,
+        save_config,
+    },
     terminal_runtime::{TerminalLaunch, TerminalTab},
     terminal_selection::{
         AutoScrollDirection, AutoScrollStep, SelectionGesture, TerminalPoint, TerminalSelection,
@@ -399,11 +402,45 @@ impl UnixApp {
     }
 
     fn palette(&self) -> &'static crate::theme::ThemePalette {
-        effective_palette(
-            self.config.color_theme,
-            self.settings_theme_draft,
-            self.settings_open,
-        )
+        let configured = self.active_terminal_appearance().color_theme;
+        effective_palette(configured, self.settings_theme_draft, self.settings_open)
+    }
+
+    fn active_terminal_appearance(&self) -> crate::settings::EffectiveTerminalAppearance {
+        let tab_id = self
+            .active_position()
+            .map(|position| format!("@{}", self.tabs[position].id));
+        self.config
+            .effective_terminal_appearance(&crate::ipc_address(), tab_id.as_deref())
+    }
+
+    fn adjust_active_terminal_font(&mut self, delta: i16) {
+        let Some(position) = self.active_position() else {
+            return;
+        };
+        let tab_id = format!("@{}", self.tabs[position].id);
+        let effective = self.active_terminal_appearance();
+        let size = (i32::from(effective.terminal_font_size) + i32::from(delta)).clamp(
+            i32::from(MIN_TERMINAL_FONT_SIZE),
+            i32::from(MAX_TERMINAL_FONT_SIZE),
+        ) as u16;
+        let mut terminal_override = self
+            .config
+            .terminal_override(&crate::ipc_address(), &tab_id);
+        terminal_override.terminal_font_size = Some(size);
+        self.config
+            .set_terminal_override(&crate::ipc_address(), &tab_id, terminal_override);
+        if let Err(error) = save_config(&self.config) {
+            self.set_status_message(format!("Could not save terminal font size: {error:#}"));
+        }
+        self.resize_to_window();
+    }
+
+    fn toggle_locale(&mut self) {
+        self.config.locale = self.config.locale.toggled();
+        if let Err(error) = save_config(&self.config) {
+            self.set_status_message(format!("Could not save locale: {error:#}"));
+        }
     }
 
     fn layout(&self) -> crate::ui_geometry::WorkspaceLayout {
@@ -1736,8 +1773,12 @@ impl UnixApp {
                 &self.config,
                 self.settings_open,
                 Some(self.settings_theme_draft.as_str()),
+                &crate::ipc_address(),
+                self.active_position()
+                    .map(|position| format!("@{}", self.tabs[position].id))
+                    .as_deref(),
             ),
-            "locale": locale_json(),
+            "locale": locale_json(self.config.locale),
             "feedback": {
                 "message": self.status_message,
                 "error": serde_json::Value::Null,
@@ -1937,6 +1978,9 @@ impl UnixApp {
             ToolbarHit::Settings => {
                 self.open_settings();
             }
+            ToolbarHit::ToggleLocale => self.toggle_locale(),
+            ToolbarHit::FontDecrease => self.adjust_active_terminal_font(-1),
+            ToolbarHit::FontIncrease => self.adjust_active_terminal_font(1),
         }
         self.request_redraw();
     }
@@ -2003,7 +2047,11 @@ impl UnixApp {
             && let Some(toolbar) = layout.workspace_toolbar
             && toolbar.bounds.contains(x as i32, y as i32)
         {
-            let view = WorkspaceToolbarView::from_layout(toolbar, self.config.tabs_visible);
+            let view = WorkspaceToolbarView::from_layout(
+                toolbar,
+                self.config.tabs_visible,
+                self.config.locale,
+            );
             if let Some(hit) = view.hit_test(x, y) {
                 self.handle_toolbar_hit(hit);
             }
@@ -2509,7 +2557,7 @@ impl UnixApp {
     }
 
     fn cell_dimensions(&self) -> (u32, u32) {
-        cell_metrics(self.config.terminal_font_size)
+        cell_metrics(self.active_terminal_appearance().terminal_font_size)
     }
 
     fn request_redraw(&self) {
@@ -2905,9 +2953,13 @@ impl UnixApp {
         let workspace_toolbar = if modal_active {
             None
         } else {
-            layout
-                .workspace_toolbar
-                .map(|toolbar| WorkspaceToolbarView::from_layout(toolbar, self.config.tabs_visible))
+            layout.workspace_toolbar.map(|toolbar| {
+                WorkspaceToolbarView::from_layout(
+                    toolbar,
+                    self.config.tabs_visible,
+                    self.config.locale,
+                )
+            })
         };
         let composer_top = layout.composer.top.max(0) as u32;
         let composer_width = size.width.saturating_sub(sidebar_width);

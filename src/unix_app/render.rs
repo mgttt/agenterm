@@ -446,6 +446,9 @@ pub(super) enum ToolbarHit {
     NewTab,
     ToggleTabs,
     Settings,
+    ToggleLocale,
+    FontDecrease,
+    FontIncrease,
 }
 
 #[derive(Clone, Debug)]
@@ -454,25 +457,34 @@ pub(super) struct WorkspaceToolbarView {
     pub(super) new_tab: (u32, u32, u32, u32),
     pub(super) tabs: (u32, u32, u32, u32),
     pub(super) settings: (u32, u32, u32, u32),
+    pub(super) locale: (u32, u32, u32, u32),
+    pub(super) font_decrease: (u32, u32, u32, u32),
+    pub(super) font_increase: (u32, u32, u32, u32),
     pub(super) compact: bool,
     pub(super) tabs_visible: bool,
+    pub(super) locale_id: crate::locale::LocaleId,
 }
 
 impl WorkspaceToolbarView {
     pub(super) fn from_layout(
         toolbar: crate::ui_geometry::WorkspaceToolbarLayout,
         tabs_visible: bool,
+        locale_id: crate::locale::LocaleId,
     ) -> Self {
         Self {
             bounds: u32_rect(toolbar.bounds),
             new_tab: u32_rect(toolbar.new_tab),
             tabs: u32_rect(toolbar.tabs),
             settings: u32_rect(toolbar.settings),
+            locale: u32_rect(toolbar.locale),
+            font_decrease: u32_rect(toolbar.font_decrease),
+            font_increase: u32_rect(toolbar.font_increase),
             compact: matches!(
                 toolbar.mode,
                 crate::ui_geometry::WorkspaceToolbarMode::Compact
             ),
             tabs_visible,
+            locale_id,
         }
     }
 
@@ -487,6 +499,15 @@ impl WorkspaceToolbarView {
         }
         if rect_contains(self.settings, x, y) {
             return Some(ToolbarHit::Settings);
+        }
+        if rect_contains(self.locale, x, y) {
+            return Some(ToolbarHit::ToggleLocale);
+        }
+        if rect_contains(self.font_decrease, x, y) {
+            return Some(ToolbarHit::FontDecrease);
+        }
+        if rect_contains(self.font_increase, x, y) {
+            return Some(ToolbarHit::FontIncrease);
         }
         None
     }
@@ -964,6 +985,9 @@ fn render_workspace_toolbar(
         (toolbar.new_tab, labels.0),
         (toolbar.tabs, labels.1),
         (toolbar.settings, labels.2),
+        (toolbar.locale, toolbar.locale_id.toolbar_label()),
+        (toolbar.font_decrease, "z"),
+        (toolbar.font_increase, "Z"),
     ] {
         let (x, y, w, h) = rect;
         fill_rect(buffer, stride, x, y, w, h, button_bg);
