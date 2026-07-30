@@ -1,111 +1,71 @@
+#[cfg(not(target_os = "linux"))]
 use std::io::{Read, Write};
+#[cfg(not(target_os = "linux"))]
 use std::process::{Command, Stdio};
 
+#[cfg(not(target_os = "linux"))]
 use crate::ui_clipboard::TERMINAL_PASTE_LIMIT_BYTES;
 
 /// Best-effort Unicode clipboard write for Unix hosts without a GUI clipboard crate.
 pub(super) fn set_clipboard_text(text: &str) -> Result<(), String> {
-    let attempts: &[(&[&str], &str)] = if cfg!(target_os = "macos") {
-        &[(&["pbcopy"], "pbcopy")]
-    } else {
-        &[
-            (&["wl-copy"], "wl-copy"),
-            (&["xclip", "-selection", "clipboard"], "xclip"),
-            (&["xsel", "--clipboard", "--input"], "xsel"),
-        ]
-    };
-
-    let mut errors = Vec::new();
-    for (argv, label) in attempts {
-        match write_via_command(argv, text) {
-            Ok(()) => return Ok(()),
-            Err(error) => errors.push(format!("{label}: {error}")),
-        }
+    #[cfg(target_os = "linux")]
+    {
+        crate::platform::linux::clipboard::set_text(text).map_err(|error| error.message())
     }
-    Err(format!("could not write clipboard ({})", errors.join("; ")))
+    #[cfg(not(target_os = "linux"))]
+    {
+        let attempts: &[(&[&str], &str)] = &[(&["pbcopy"], "pbcopy")];
+        let mut errors = Vec::new();
+        for (argv, label) in attempts {
+            match write_via_command(argv, text) {
+                Ok(()) => return Ok(()),
+                Err(error) => errors.push(format!("{label}: {error}")),
+            }
+        }
+        Err(format!("could not write clipboard ({})", errors.join("; ")))
+    }
 }
 
 /// Best-effort Unicode clipboard read for terminal paste.
 pub(super) fn get_clipboard_text() -> Result<String, String> {
-    let attempts: &[(&[&str], &str)] = if cfg!(target_os = "macos") {
-        &[(&["pbpaste"], "pbpaste")]
-    } else {
-        &[
-            (&["wl-paste", "--no-newline"], "wl-paste"),
-            (&["xclip", "-selection", "clipboard", "-o"], "xclip"),
-            (&["xsel", "--clipboard", "--output"], "xsel"),
-        ]
-    };
-
-    let mut errors = Vec::new();
-    for (argv, label) in attempts {
-        match read_via_command(argv) {
-            Ok(text) => {
-                if text.len() > TERMINAL_PASTE_LIMIT_BYTES {
-                    return Err(format!(
-                        "clipboard text exceeds the {TERMINAL_PASTE_LIMIT_BYTES} byte terminal paste limit"
-                    ));
-                }
-                return Ok(text);
-            }
-            Err(error) => errors.push(format!("{label}: {error}")),
-        }
+    #[cfg(target_os = "linux")]
+    {
+        crate::platform::linux::clipboard::get_text().map_err(|error| error.message())
     }
-    Err(format!("could not read clipboard ({})", errors.join("; ")))
+    #[cfg(not(target_os = "linux"))]
+    {
+        let attempts: &[(&[&str], &str)] = &[(&["pbpaste"], "pbpaste")];
+        let mut errors = Vec::new();
+        for (argv, label) in attempts {
+            match read_via_command(argv) {
+                Ok(text) => {
+                    if text.len() > TERMINAL_PASTE_LIMIT_BYTES {
+                        return Err(format!(
+                            "clipboard text exceeds the {TERMINAL_PASTE_LIMIT_BYTES} byte terminal paste limit"
+                        ));
+                    }
+                    return Ok(text);
+                }
+                Err(error) => errors.push(format!("{label}: {error}")),
+            }
+        }
+        Err(format!("could not read clipboard ({})", errors.join("; ")))
+    }
 }
 
 /// Fast probe for Unicode clipboard text without reading the full payload when possible.
 pub(super) fn clipboard_has_unicode_text() -> bool {
-    if cfg!(target_os = "macos") {
-        return probe_command_stdout_has_byte(&["pbpaste"]);
+    #[cfg(target_os = "linux")]
+    {
+        crate::platform::linux::clipboard::has_unicode_text()
     }
-
-    if probe_wl_clipboard_has_text() || probe_xclip_has_text() || probe_xsel_has_text() {
-        return true;
-    }
-
-    match get_clipboard_text() {
-        Ok(text) => !text.is_empty(),
-        Err(_) => false,
+    #[cfg(not(target_os = "linux"))]
+    {
+        probe_command_stdout_has_byte(&["pbpaste"])
     }
 }
 
-fn probe_wl_clipboard_has_text() -> bool {
-    match read_via_command(&["wl-paste", "--list-types"]) {
-        Ok(types) => clipboard_types_indicate_unicode_text(&types),
-        Err(_) => false,
-    }
-}
-
-fn probe_xclip_has_text() -> bool {
-    match read_via_command(&["xclip", "-selection", "clipboard", "-t", "TARGETS", "-o"]) {
-        Ok(types) => clipboard_types_indicate_unicode_text(&types),
-        Err(_) => false,
-    }
-}
-
-fn probe_xsel_has_text() -> bool {
-    match read_via_command(&["xsel", "--clipboard", "--targets"]) {
-        Ok(types) => clipboard_types_indicate_unicode_text(&types),
-        Err(_) => false,
-    }
-}
-
-fn clipboard_types_indicate_unicode_text(types: &str) -> bool {
-    types.lines().any(|line| {
-        let line = line.trim();
-        if line.is_empty() {
-            return false;
-        }
-        let lower = line.to_ascii_lowercase();
-        lower.starts_with("text/")
-            || matches!(
-                lower.as_str(),
-                "utf8_string" | "string" | "text" | "compound_text" | "text/plain"
-            )
-    })
-}
-
+#[cfg(not(target_os = "linux"))]
 fn probe_command_stdout_has_byte(argv: &[&str]) -> bool {
     let program = argv.first().copied().unwrap_or_default();
     let mut child = match Command::new(program)
@@ -131,6 +91,7 @@ fn probe_command_stdout_has_byte(argv: &[&str]) -> bool {
     read_ok
 }
 
+#[cfg(not(target_os = "linux"))]
 fn write_via_command(argv: &[&str], text: &str) -> Result<(), String> {
     let program = argv
         .first()
@@ -160,6 +121,7 @@ fn write_via_command(argv: &[&str], text: &str) -> Result<(), String> {
     }
 }
 
+#[cfg(not(target_os = "linux"))]
 fn read_via_command(argv: &[&str]) -> Result<String, String> {
     let program = argv
         .first()
@@ -189,27 +151,36 @@ fn read_via_command(argv: &[&str]) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{clipboard_types_indicate_unicode_text, read_via_command, write_via_command};
+    #[cfg(not(target_os = "linux"))]
+    use super::{read_via_command, write_via_command};
 
+    #[cfg(not(target_os = "linux"))]
     #[test]
     fn write_via_command_rejects_empty_argv() {
         assert!(write_via_command(&[], "hi").is_err());
     }
 
+    #[cfg(not(target_os = "linux"))]
     #[test]
     fn read_via_command_rejects_empty_argv() {
         assert!(read_via_command(&[]).is_err());
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
-    fn clipboard_types_indicate_unicode_text_recognizes_common_targets() {
-        let types = "UTF8_STRING\nSTRING\nTIMESTAMP\n";
-        assert!(clipboard_types_indicate_unicode_text(types));
-
-        let wl_types = "text/plain;charset=utf-8\n";
-        assert!(clipboard_types_indicate_unicode_text(wl_types));
-
-        assert!(!clipboard_types_indicate_unicode_text("TIMESTAMP\n"));
-        assert!(!clipboard_types_indicate_unicode_text(""));
+    fn linux_clipboard_delegates_to_platform_capability_boundary() {
+        use crate::platform::{CapabilityKind, CapabilityStatus};
+        let status = crate::platform::linux::capability_status(CapabilityKind::Clipboard);
+        assert!(matches!(
+            status,
+            CapabilityStatus::Available
+                | CapabilityStatus::Failed {
+                    code: "clipboard_unavailable",
+                    ..
+                }
+                | CapabilityStatus::Unsupported {
+                    reason: "headless-display"
+                }
+        ));
     }
 }

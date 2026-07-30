@@ -2,18 +2,15 @@
 //!
 //! Ownership: Linux agent only. Do not edit shared contracts here.
 //!
-//! Implements shared **contract revision 1** (`crate::platform::CONTRACT_REVISION`)
-//! for migration slice 1:
-//! - toolbar hits → stable [`crate::platform::action`] identities
-//! - keyboard committed text vs shortcut chord separation via shared
-//!   [`crate::platform::classify_key_press`]
+//! Implements shared **contract revision 1** (`crate::platform::CONTRACT_REVISION`):
+//! - slice-1: toolbar action ids + keyboard text/shortcut separation
+//! - slice-2 (this cut): IME + clipboard capability bridges with typed
+//!   [`CapabilityStatus`] (DPI/font/screenshot/activation deferred)
 //!
-//! Linux `unix_app` hot paths (toolbar click + key/IME text-vs-shortcut) call
-//! into this module under `cfg(target_os = "linux")` and then dispatch to the
-//! existing product handlers. macOS behavior stays on the unbridged path.
+//! Linux `unix_app` hot paths call into this module under
+//! `cfg(target_os = "linux")`. macOS behavior stays on the unbridged path.
 //!
-//! Public capability identity stays on the Linux branch. Private reuse of
-//! `crate::unix_app` helpers is allowed without merging macOS/Linux identities.
+//! Public capability identity stays on the Linux branch.
 
 #![cfg(target_os = "linux")]
 
@@ -21,6 +18,8 @@ use crate::platform::{
     CONTRACT_REVISION, CapabilityKind, CapabilityStatus, DisplayBackendFacts, PlatformKind,
 };
 
+pub(crate) mod clipboard;
+pub(crate) mod ime;
 pub(crate) mod input;
 pub(crate) mod toolbar;
 
@@ -62,9 +61,31 @@ pub(crate) fn input_capability_status(facts: DisplayBackendFacts) -> CapabilityS
     window_capability_status(facts)
 }
 
-/// Slice-1 capabilities this adapter currently speaks for.
+/// Slice-1 capabilities this adapter speaks for.
 pub(crate) fn slice1_capability_kinds() -> [CapabilityKind; 2] {
     [CapabilityKind::Window, CapabilityKind::Input]
+}
+
+/// Slice-2 first-cut capabilities (IME + clipboard) in addition to slice-1.
+pub(crate) fn slice2_ime_clipboard_capability_kinds() -> [CapabilityKind; 2] {
+    [CapabilityKind::Ime, CapabilityKind::Clipboard]
+}
+
+/// Resolve a capability kind to its current Linux status.
+pub(crate) fn capability_status(kind: CapabilityKind) -> CapabilityStatus {
+    let facts = display_facts_from_env();
+    match kind {
+        CapabilityKind::Window => window_capability_status(facts),
+        CapabilityKind::Input => input_capability_status(facts),
+        CapabilityKind::Ime => ime::ime_capability_status(facts),
+        CapabilityKind::Clipboard => clipboard::clipboard_capability_status_from_env(),
+        CapabilityKind::Font
+        | CapabilityKind::Screenshot
+        | CapabilityKind::Activation
+        | CapabilityKind::Integration => CapabilityStatus::Unsupported {
+            reason: "deferred-slice",
+        },
+    }
 }
 
 #[cfg(test)]
@@ -109,5 +130,61 @@ mod tests {
             slice1_capability_kinds(),
             [CapabilityKind::Window, CapabilityKind::Input]
         );
+    }
+
+    #[test]
+    fn slice2_first_cut_exposes_ime_and_clipboard_kinds() {
+        assert_eq!(
+            slice2_ime_clipboard_capability_kinds(),
+            [CapabilityKind::Ime, CapabilityKind::Clipboard]
+        );
+    }
+
+    #[test]
+    fn deferred_capabilities_are_unsupported_not_available() {
+        assert!(matches!(
+            capability_status(CapabilityKind::Font),
+            CapabilityStatus::Unsupported {
+                reason: "deferred-slice"
+            }
+        ));
+        assert!(matches!(
+            capability_status(CapabilityKind::Screenshot),
+            CapabilityStatus::Unsupported {
+                reason: "deferred-slice"
+            }
+        ));
+    }
+
+    #[test]
+    fn ime_and_clipboard_statuses_are_typed_on_desktop() {
+        let ime = capability_status(CapabilityKind::Ime);
+        let clipboard = capability_status(CapabilityKind::Clipboard);
+        // Never silently Available when headless; on DISPLAY=:1 expect Available
+        // or an explicit Failed if helpers are missing.
+        if display_facts_from_env().headless {
+            assert!(matches!(
+                ime,
+                CapabilityStatus::Unsupported {
+                    reason: "headless-display"
+                }
+            ));
+            assert!(matches!(
+                clipboard,
+                CapabilityStatus::Unsupported {
+                    reason: "headless-display"
+                }
+            ));
+        } else {
+            assert_eq!(ime, CapabilityStatus::Available);
+            assert!(matches!(
+                clipboard,
+                CapabilityStatus::Available
+                    | CapabilityStatus::Failed {
+                        code: "clipboard_unavailable",
+                        ..
+                    }
+            ));
+        }
     }
 }

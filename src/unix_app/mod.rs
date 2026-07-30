@@ -650,24 +650,53 @@ impl UnixApp {
 
     fn handle_ime(&mut self, event: Ime) {
         self.cursor_blink.reset(Instant::now());
-        match event {
-            Ime::Enabled => {}
-            Ime::Preedit(text, cursor) => {
-                if self.ime_anchor().is_some() {
+        #[cfg(target_os = "linux")]
+        {
+            use crate::platform::linux::ime::{LinuxImeAction, LinuxImeEvent, classify_ime_event};
+            let linux_event = match event {
+                Ime::Enabled => LinuxImeEvent::Enabled,
+                Ime::Preedit(text, cursor) => LinuxImeEvent::Preedit { text, cursor },
+                Ime::Commit(text) => LinuxImeEvent::Commit(text),
+                Ime::Disabled => LinuxImeEvent::Disabled,
+            };
+            match classify_ime_event(linux_event, self.ime_anchor().is_some()) {
+                LinuxImeAction::None => {}
+                LinuxImeAction::UpdatePreedit { text, cursor } => {
                     self.ime_preedit = text;
                     self.ime_cursor = cursor;
-                } else {
-                    self.clear_ime_preedit();
+                    self.request_redraw();
                 }
-                self.request_redraw();
+                LinuxImeAction::ClearPreedit => {
+                    self.clear_ime_preedit();
+                    self.request_redraw();
+                }
+                LinuxImeAction::CommitText(text) => {
+                    self.clear_ime_preedit();
+                    self.commit_ime_text(&text);
+                }
             }
-            Ime::Commit(text) => {
-                self.clear_ime_preedit();
-                self.commit_ime_text(&text);
-            }
-            Ime::Disabled => {
-                self.clear_ime_preedit();
-                self.request_redraw();
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            match event {
+                Ime::Enabled => {}
+                Ime::Preedit(text, cursor) => {
+                    if self.ime_anchor().is_some() {
+                        self.ime_preedit = text;
+                        self.ime_cursor = cursor;
+                    } else {
+                        self.clear_ime_preedit();
+                    }
+                    self.request_redraw();
+                }
+                Ime::Commit(text) => {
+                    self.clear_ime_preedit();
+                    self.commit_ime_text(&text);
+                }
+                Ime::Disabled => {
+                    self.clear_ime_preedit();
+                    self.request_redraw();
+                }
             }
         }
     }
