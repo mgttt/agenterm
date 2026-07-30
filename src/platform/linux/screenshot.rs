@@ -15,7 +15,10 @@ use std::path::Path;
 
 use png::{BitDepth, ColorType, Encoder};
 
-use crate::platform::{CapabilityStatus, DisplayBackendFacts};
+use crate::platform::{
+    CapabilityStatus, DisplayBackendFacts, ScreenshotClipError, ScreenshotClipRect,
+    validate_screenshot_clip,
+};
 
 use super::display_facts_from_env;
 
@@ -202,39 +205,29 @@ pub(crate) fn resolve_clip(
     let Some(clip) = clip else {
         return Ok((0, 0, frame_width, frame_height));
     };
-    if clip.width == 0 || clip.height == 0 {
-        return Err(ScreenshotError::InvalidClip {
-            message: "screenshot clip width/height must be non-zero".to_string(),
-        });
-    }
-    if clip.x >= frame_width || clip.y >= frame_height {
-        return Err(ScreenshotError::InvalidClip {
-            message: format!(
+    let shared_clip = ScreenshotClipRect {
+        x: clip.x,
+        y: clip.y,
+        width: clip.width,
+        height: clip.height,
+    };
+    validate_screenshot_clip(frame_width, frame_height, shared_clip).map_err(|error| {
+        let message = match error {
+            ScreenshotClipError::EmptyFrame => "no rendered frame is available".to_string(),
+            ScreenshotClipError::ZeroDimension => {
+                "screenshot clip width/height must be non-zero".to_string()
+            }
+            ScreenshotClipError::OriginOutside => format!(
                 "screenshot clip origin ({},{}) is outside {}x{} frame",
                 clip.x, clip.y, frame_width, frame_height
             ),
-        });
-    }
-    let right = clip
-        .x
-        .checked_add(clip.width)
-        .ok_or_else(|| ScreenshotError::InvalidClip {
-            message: "screenshot clip horizontal bounds overflow".to_string(),
-        })?;
-    let bottom = clip
-        .y
-        .checked_add(clip.height)
-        .ok_or_else(|| ScreenshotError::InvalidClip {
-            message: "screenshot clip vertical bounds overflow".to_string(),
-        })?;
-    if right > frame_width || bottom > frame_height {
-        return Err(ScreenshotError::InvalidClip {
-            message: format!(
+            ScreenshotClipError::Overflow => format!(
                 "screenshot clip {}x{} at ({},{}) exceeds {}x{} frame",
                 clip.width, clip.height, clip.x, clip.y, frame_width, frame_height
             ),
-        });
-    }
+        };
+        ScreenshotError::InvalidClip { message }
+    })?;
     Ok((clip.x, clip.y, clip.width, clip.height))
 }
 

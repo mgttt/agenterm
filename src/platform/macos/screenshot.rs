@@ -6,7 +6,7 @@ use std::{fs::File, io::BufWriter, path::Path};
 
 use png::{BitDepth, ColorType, Encoder};
 
-use crate::platform::CapabilityStatus;
+use crate::platform::{CapabilityStatus, ScreenshotClipRect, validate_screenshot_clip};
 
 pub(crate) const MAX_RGBA_BYTES: usize = 64 * 1024 * 1024;
 const MAX_PIXELS: usize = MAX_RGBA_BYTES / 4;
@@ -130,21 +130,17 @@ fn checked_clip(
     let Some((x, y, clip_width, clip_height)) = clip else {
         return Ok((0, 0, width, height));
     };
-    let right = x
-        .checked_add(clip_width)
-        .ok_or(ScreenshotError::InvalidClip)?;
-    let bottom = y
-        .checked_add(clip_height)
-        .ok_or(ScreenshotError::InvalidClip)?;
-    if clip_width == 0
-        || clip_height == 0
-        || x >= width
-        || y >= height
-        || right > width
-        || bottom > height
-    {
-        return Err(ScreenshotError::InvalidClip);
-    }
+    validate_screenshot_clip(
+        width,
+        height,
+        ScreenshotClipRect {
+            x,
+            y,
+            width: clip_width,
+            height: clip_height,
+        },
+    )
+    .map_err(|_| ScreenshotError::InvalidClip)?;
     Ok((x, y, clip_width, clip_height))
 }
 
