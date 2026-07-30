@@ -5,7 +5,7 @@ const FIRST_CHAR: u8 = 32;
 const LAST_CHAR: u8 = 126;
 const GLYPH_COUNT: usize = (LAST_CHAR - FIRST_CHAR + 1) as usize;
 
-/// Each glyph row uses the high bit as the leftmost pixel.
+/// Each glyph row uses the low bit as the leftmost pixel.
 static GLYPHS: [[u8; GLYPH_ROWS]; GLYPH_COUNT] = [
     [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00], // space
     [0x18, 0x3C, 0x3C, 0x18, 0x18, 0x00, 0x18, 0x00], // !
@@ -113,5 +113,24 @@ pub(super) fn glyph_rows(ch: char) -> Option<&'static [u8; GLYPH_ROWS]> {
     Some(&GLYPHS[index])
 }
 
+pub(super) fn row_contains_pixel(row: u8, column: u32) -> bool {
+    column < GLYPH_WIDTH && row & (1 << column) != 0
+}
+
 pub(super) const GLYPH_WIDTH: u32 = 8;
 pub(super) const GLYPH_HEIGHT: u32 = 8;
+
+#[cfg(test)]
+mod tests {
+    use super::{glyph_rows, row_contains_pixel};
+
+    #[test]
+    fn asymmetric_glyph_rows_are_low_bit_first() {
+        let slash = glyph_rows('/').expect("ASCII slash glyph");
+
+        assert!(row_contains_pixel(slash[0], 6));
+        assert!(!row_contains_pixel(slash[0], 1));
+        assert!(row_contains_pixel(slash[6], 0));
+        assert!(!row_contains_pixel(slash[6], 7));
+    }
+}

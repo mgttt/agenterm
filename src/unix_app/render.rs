@@ -1895,7 +1895,7 @@ fn draw_cell(
             break;
         }
         for bit in 0..GLYPH_WIDTH {
-            if row_bits & (0x80 >> bit) == 0 {
+            if !super::font::row_contains_pixel(*row_bits, bit) {
                 continue;
             }
             let x = glyph_x + bit;
@@ -1933,7 +1933,7 @@ fn draw_text(
                 break;
             }
             for bit in 0..GLYPH_WIDTH {
-                if row_bits & (0x80 >> bit) == 0 {
+                if !super::font::row_contains_pixel(*row_bits, bit) {
                     continue;
                 }
                 let pixel_x = x + bit;
