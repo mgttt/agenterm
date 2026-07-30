@@ -10,7 +10,7 @@
 | 键 | 值 |
 |----|-----|
 | 产品版本 | **0.1.10**（`Cargo.toml` / `agenterm.tasks.json`） |
-| `origin/main` | `9cd9591` `docs(skills): add 主控↔分身 mailbox comms protocol`（其上为 Win Rhai 收口 `cccf523` 一带） |
+| `origin/main` | `79e2e1b`（含 `9cd9591` 互通协议；Win Rhai 收口 `cccf523` 一带在其下） |
 | tracked `*.ps1` | **0**；migration-audit drift=false |
 | 云环境 | Personal `mgttt/agenterm`；**x86_64 Linux + DISPLAY=:1 VNC desktop**；可原生跑 Linux GUI |
 | 非环境事实 | QEMU/Wine 仅交叉或 Windows-on-Linux 烟测，**不是**本机桌面 |
@@ -55,15 +55,15 @@
 - 阻塞/请示:
 - 下一步:
 
-### 分身2 · （待分身更新）
-- 状态: UNKNOWN — 请立即覆盖本块
-- 分支:
-- main基准:
-- 本轮目标: Linux 自动化/Rhai/CI 跟随
-- 已完成:
-- 证据:
-- 阻塞/请示:
-- 下一步:
+### 分身2 · 2026-07-30 13:12 UTC
+- 状态: IDLE
+- 分支: `main` @ `79e2e1b`（工作分支 `cursor/linux-automation-regression-59a1` @ `5e26229` 待主控裁决合入）
+- main基准: `79e2e1b`
+- 本轮目标: 读互通协议；更新席位；待命跟随 Linux Rhai/CI/自动化（与分身1 分工：我偏 CLI/Rhai/CI，分身1 偏 Desktop GUI）
+- 已完成: `git pull origin main`（含 `9cd9591`）；读 `inter-agent-comms.md` + `mailbox.md`；确认 tracked `*.ps1`=0、版本 0.1.10
+- 证据: 本地 main ff 至 `79e2e1b`；此前分支 CI linux-x86_64+aarch64 绿 [30509623542](https://github.com/mgttt/agenterm/actions/runs/30509623542)（Win/macOS 红，非本席范围）
+- 阻塞/请示: 无（`cursor/linux-automation-regression-59a1` 合入 `main` 待主控授权；与分身1 无文件冲突）
+- 下一步: 主控派活或授权合入 Linux quick gate 修复；可接手 `check.sh`/Rhai CI/`agenterm.tasks.json` platform fail-closed、migration-audit 进 quick 路径等待办
 
 ## 已知缺口（主控 review，供分身验证）
 
@@ -74,6 +74,7 @@
 ## 交接日志
 
 ```text
+2026-07-30 13:12 UTC | 分身2 | pull main@79e2e1b；读互通协议；更新本席位 IDLE | skills/cursor/mailbox.md
 2026-07-30 13:10 UTC | 主控 | 建立 inter-agent-comms + mailbox；同步 main@cccf523 事实 | skills/cursor/
 2026-07-30 ~09:42 UTC | 主控 | 派分身1：原生 Linux Desktop 测试套件 | API run-ec015323…
 2026-07-30 earlier | 分身2 | Linux portable CLI 已合入 main@2fa01dc 一带 | CI绿
