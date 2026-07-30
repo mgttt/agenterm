@@ -1,5 +1,14 @@
 //! Minimal 8×8 monospace bitmap for ASCII 32–126 (inclusive).
 
+use std::{
+    collections::{HashMap, VecDeque},
+    fs,
+    path::PathBuf,
+    sync::{Arc, Mutex, OnceLock},
+};
+
+use ab_glyph::{Font, FontArc, FontRef, GlyphId, PxScale, ScaleFont};
+
 const GLYPH_ROWS: usize = 8;
 const FIRST_CHAR: u8 = 32;
 const LAST_CHAR: u8 = 126;
@@ -120,9 +129,261 @@ pub(super) fn row_contains_pixel(row: u8, column: u32) -> bool {
 pub(super) const GLYPH_WIDTH: u32 = 8;
 pub(super) const GLYPH_HEIGHT: u32 = 8;
 
+const MAX_COLLECTION_FACES: u32 = 32;
+const MAX_CACHED_GLYPHS: usize = 4096;
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+struct GlyphKey {
+    ch: char,
+    size: u16,
+}
+
+#[derive(Debug)]
+pub(super) struct RasterGlyph {
+    pub(super) alpha: Vec<u8>,
+    pub(super) width: u32,
+    pub(super) height: u32,
+    pub(super) offset_x: i32,
+    pub(super) offset_y: i32,
+    pub(super) advance: f32,
+}
+
+struct LoadedFace {
+    name: &'static str,
+    font: FontArc,
+}
+
+#[derive(Default)]
+struct GlyphCache {
+    values: HashMap<GlyphKey, Option<Arc<RasterGlyph>>>,
+    insertion_order: VecDeque<GlyphKey>,
+}
+
+impl GlyphCache {
+    fn get(&self, key: &GlyphKey) -> Option<Option<Arc<RasterGlyph>>> {
+        self.values.get(key).cloned()
+    }
+
+    fn insert(&mut self, key: GlyphKey, value: Option<Arc<RasterGlyph>>) {
+        if let Some(existing) = self.values.get_mut(&key) {
+            *existing = value;
+            return;
+        }
+        while self.values.len() >= MAX_CACHED_GLYPHS {
+            let Some(oldest) = self.insertion_order.pop_front() else {
+                break;
+            };
+            self.values.remove(&oldest);
+        }
+        self.insertion_order.push_back(key);
+        self.values.insert(key, value);
+    }
+}
+
+struct SystemFonts {
+    faces: Vec<LoadedFace>,
+    glyphs: Mutex<GlyphCache>,
+}
+
+impl SystemFonts {
+    fn load() -> Self {
+        let mut faces = Vec::new();
+        for candidate in font_candidates() {
+            load_candidate_faces(candidate, &mut faces);
+        }
+        Self {
+            faces,
+            glyphs: Mutex::new(GlyphCache::default()),
+        }
+    }
+
+    fn resolved_name(&self) -> &'static str {
+        self.faces
+            .first()
+            .map(|face| face.name)
+            .unwrap_or("bitmap-8x8")
+    }
+
+    fn primary_ascent(&self, size: u16) -> Option<f32> {
+        self.faces
+            .first()
+            .map(|face| face.font.as_scaled(f32::from(size)).ascent())
+    }
+
+    fn primary_advance(&self, size: u16) -> Option<f32> {
+        self.faces.first().map(|face| {
+            let scaled = face.font.as_scaled(f32::from(size));
+            scaled.h_advance(scaled.glyph_id('M'))
+        })
+    }
+
+    fn raster_glyph(&self, ch: char, size: u16) -> Option<Arc<RasterGlyph>> {
+        let key = GlyphKey {
+            ch,
+            size: size.clamp(8, 72),
+        };
+        let mut cache = self
+            .glyphs
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(cached) = cache.get(&key) {
+            return cached;
+        }
+        let raster = self.raster_glyph_uncached(key);
+        cache.insert(key, raster.clone());
+        raster
+    }
+
+    fn raster_glyph_uncached(&self, key: GlyphKey) -> Option<Arc<RasterGlyph>> {
+        let face = self
+            .faces
+            .iter()
+            .find(|face| face.font.glyph_id(key.ch) != GlyphId(0))?;
+        let scaled = face.font.as_scaled(f32::from(key.size));
+        let glyph_id = scaled.glyph_id(key.ch);
+        let advance = scaled.h_advance(glyph_id);
+        let Some(outlined) =
+            scaled.outline_glyph(glyph_id.with_scale(PxScale::from(f32::from(key.size))))
+        else {
+            return Some(Arc::new(RasterGlyph {
+                alpha: Vec::new(),
+                width: 0,
+                height: 0,
+                offset_x: 0,
+                offset_y: 0,
+                advance,
+            }));
+        };
+        let bounds = outlined.px_bounds();
+        let width = bounds.width().max(0.0) as u32;
+        let height = bounds.height().max(0.0) as u32;
+        let mut alpha = vec![0; (width * height) as usize];
+        outlined.draw(|x, y, coverage| {
+            if x < width && y < height {
+                alpha[(y * width + x) as usize] = (coverage.clamp(0.0, 1.0) * 255.0).round() as u8;
+            }
+        });
+        Some(Arc::new(RasterGlyph {
+            alpha,
+            width,
+            height,
+            offset_x: bounds.min.x as i32,
+            offset_y: bounds.min.y as i32,
+            advance,
+        }))
+    }
+}
+
+#[derive(Clone, Copy)]
+struct FontCandidate {
+    name: &'static str,
+    components: &'static [&'static str],
+}
+
+#[cfg(target_os = "macos")]
+fn font_candidates() -> &'static [FontCandidate] {
+    &[
+        FontCandidate {
+            name: "SF Mono",
+            components: &["System", "Library", "Fonts", "SFNSMono.ttf"],
+        },
+        FontCandidate {
+            name: "Hiragino Sans GB",
+            components: &["System", "Library", "Fonts", "Hiragino Sans GB.ttc"],
+        },
+    ]
+}
+
+#[cfg(not(target_os = "macos"))]
+fn font_candidates() -> &'static [FontCandidate] {
+    &[
+        FontCandidate {
+            name: "DejaVu Sans Mono",
+            components: &[
+                "usr",
+                "share",
+                "fonts",
+                "truetype",
+                "dejavu",
+                "DejaVuSansMono.ttf",
+            ],
+        },
+        FontCandidate {
+            name: "Liberation Mono",
+            components: &[
+                "usr",
+                "share",
+                "fonts",
+                "truetype",
+                "liberation2",
+                "LiberationMono-Regular.ttf",
+            ],
+        },
+        FontCandidate {
+            name: "Noto Sans Mono CJK",
+            components: &[
+                "usr",
+                "share",
+                "fonts",
+                "opentype",
+                "noto",
+                "NotoSansCJK-Regular.ttc",
+            ],
+        },
+    ]
+}
+
+fn rooted_path(components: &[&str]) -> PathBuf {
+    components.iter().fold(
+        PathBuf::from(std::path::MAIN_SEPARATOR_STR),
+        |path, part| path.join(part),
+    )
+}
+
+fn load_candidate_faces(candidate: &FontCandidate, faces: &mut Vec<LoadedFace>) {
+    let path = rooted_path(candidate.components);
+    let Ok(data) = fs::read(&path) else {
+        return;
+    };
+    let leaked: &'static [u8] = Box::leak(data.into_boxed_slice());
+    for index in 0..MAX_COLLECTION_FACES {
+        match FontRef::try_from_slice_and_index(leaked, index) {
+            Ok(font) => faces.push(LoadedFace {
+                name: candidate.name,
+                font: FontArc::from(font),
+            }),
+            Err(_) => break,
+        }
+    }
+}
+
+fn system_fonts() -> &'static SystemFonts {
+    static FONTS: OnceLock<SystemFonts> = OnceLock::new();
+    FONTS.get_or_init(SystemFonts::load)
+}
+
+pub(super) fn resolved_font_name() -> &'static str {
+    system_fonts().resolved_name()
+}
+
+pub(super) fn primary_ascent(size: u16) -> Option<f32> {
+    system_fonts().primary_ascent(size)
+}
+
+pub(super) fn primary_advance(size: u16) -> Option<f32> {
+    system_fonts().primary_advance(size)
+}
+
+pub(super) fn raster_glyph(ch: char, size: u16) -> Option<Arc<RasterGlyph>> {
+    system_fonts().raster_glyph(ch, size)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{glyph_rows, row_contains_pixel};
+    use super::{
+        GlyphCache, GlyphKey, MAX_CACHED_GLYPHS, glyph_rows, raster_glyph, resolved_font_name,
+        row_contains_pixel,
+    };
 
     #[test]
     fn asymmetric_glyph_rows_are_low_bit_first() {
@@ -132,5 +393,36 @@ mod tests {
         assert!(!row_contains_pixel(slash[0], 1));
         assert!(row_contains_pixel(slash[6], 0));
         assert!(!row_contains_pixel(slash[6], 7));
+    }
+
+    #[test]
+    fn glyph_cache_evicts_oldest_entry_at_capacity() {
+        let mut cache = GlyphCache::default();
+        for codepoint in 0..=MAX_CACHED_GLYPHS {
+            let ch = char::from_u32(0x1000 + codepoint as u32).expect("valid test character");
+            cache.insert(GlyphKey { ch, size: 14 }, None);
+        }
+
+        assert_eq!(cache.values.len(), MAX_CACHED_GLYPHS);
+        assert!(
+            cache
+                .get(&GlyphKey {
+                    ch: '\u{1000}',
+                    size: 14
+                })
+                .is_none()
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_system_fonts_cover_latin_and_cjk() {
+        assert_eq!(resolved_font_name(), "SF Mono");
+        for ch in ['A', '繁'] {
+            let glyph = raster_glyph(ch, 14).expect("system glyph");
+            assert!(glyph.width > 0);
+            assert!(glyph.height > 0);
+            assert!(glyph.alpha.iter().any(|alpha| *alpha > 0));
+        }
     }
 }

@@ -21,7 +21,9 @@ const TREE_MIN_TEXT_WIDTH: i32 = 28;
 const TREE_ACTION_GAP: i32 = 2;
 const TREE_ACTION_INSET: i32 = 2;
 const TREE_ACTION_TOP_INSET: i32 = 3;
-const TREE_COMPACT_ACTION_WIDTH: i32 = 24;
+const TREE_COMPACT_ADD_ACTION_WIDTH: i32 = 24;
+const TREE_COMPACT_EDIT_ACTION_WIDTH: i32 = 34;
+const TREE_COMPACT_CLOSE_ACTION_WIDTH: i32 = 24;
 const TREE_ADD_ACTION_WIDTH: i32 = 24;
 const TREE_EDIT_ACTION_WIDTH: i32 = 48;
 const TREE_CLOSE_ACTION_WIDTH: i32 = 62;
@@ -842,7 +844,12 @@ fn responsive_tree_indent(sidebar_width: i32, mode: TreeRowMode) -> i32 {
 fn desired_tree_action_width(sidebar_width: i32, mode: TreeRowMode) -> i32 {
     let compact = sidebar_width < TREE_COMPACT_ACTION_THRESHOLD;
     match (mode, compact) {
-        (TreeRowMode::Normal, true) => TREE_COMPACT_ACTION_WIDTH * 3 + TREE_ACTION_GAP * 2,
+        (TreeRowMode::Normal, true) => {
+            TREE_COMPACT_ADD_ACTION_WIDTH
+                + TREE_COMPACT_EDIT_ACTION_WIDTH
+                + TREE_COMPACT_CLOSE_ACTION_WIDTH
+                + TREE_ACTION_GAP * 2
+        }
         (TreeRowMode::Normal, false) => {
             TREE_ADD_ACTION_WIDTH
                 + TREE_EDIT_ACTION_WIDTH
@@ -873,7 +880,14 @@ fn tree_row_actions(row: PixelRect, mode: TreeRowMode) -> TreeRowActionGeometry 
             ],
             3_usize,
         ),
-        (TreeRowMode::Normal, TreeRowActionDensity::Compact) => ([TREE_COMPACT_ACTION_WIDTH; 3], 3),
+        (TreeRowMode::Normal, TreeRowActionDensity::Compact) => (
+            [
+                TREE_COMPACT_ADD_ACTION_WIDTH,
+                TREE_COMPACT_EDIT_ACTION_WIDTH,
+                TREE_COMPACT_CLOSE_ACTION_WIDTH,
+            ],
+            3,
+        ),
         (TreeRowMode::Editing, TreeRowActionDensity::Full) => {
             ([TREE_SAVE_ACTION_WIDTH, TREE_CANCEL_ACTION_WIDTH, 0], 2)
         }
@@ -1623,6 +1637,26 @@ mod tests {
             assert_eq!(geometry.row.left, TERMINAL_SCROLLBAR_WIDTH + TAB_LEFT);
             assert_eq!(geometry.row.right, sidebar_tree.right - TAB_RIGHT_MARGIN);
         }
+    }
+
+    #[test]
+    fn default_tabs_width_gives_compact_edit_label_more_room() {
+        let geometry = tree_row_geometry_for_mode(0, 0, TABS_DEFAULT_WIDTH, TreeRowMode::Normal);
+        let add = geometry
+            .actions
+            .add_child
+            .expect("normal mode has add-child");
+
+        assert_eq!(geometry.actions.density, TreeRowActionDensity::Compact);
+        assert_eq!(add.width(), TREE_COMPACT_ADD_ACTION_WIDTH);
+        assert_eq!(
+            geometry.actions.primary.width(),
+            TREE_COMPACT_EDIT_ACTION_WIDTH
+        );
+        assert_eq!(
+            geometry.actions.secondary.width(),
+            TREE_COMPACT_CLOSE_ACTION_WIDTH
+        );
     }
 
     #[test]

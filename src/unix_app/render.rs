@@ -1,12 +1,15 @@
 use crate::theme::{Rgb, ThemeId, ThemePalette};
 use crate::ui_geometry::{
-    PixelRect, TreeRowMode, sidebar_tree_row_geometry, tree_connector_segments, tree_row_at_y,
+    PixelRect, TreeRowActionDensity, TreeRowMode, sidebar_tree_row_geometry,
+    tree_connector_segments, tree_row_at_y,
 };
 use unicode_width::UnicodeWidthChar;
 
 use super::{
-    font::GLYPH_HEIGHT,
-    font::GLYPH_WIDTH,
+    font::{
+        GLYPH_HEIGHT, GLYPH_WIDTH, RasterGlyph, primary_advance, primary_ascent, raster_glyph,
+        resolved_font_name,
+    },
     layout::{SCROLLBAR_WIDTH, u32_rect},
 };
 
@@ -19,13 +22,10 @@ pub(super) const NEW_TERMINAL_MODAL_MAX_WIDTH: u32 = 620;
 pub(super) const NEW_TERMINAL_MODAL_MIN_HEIGHT: u32 = 390;
 pub(super) const NEW_TERMINAL_MODAL_MAX_HEIGHT: u32 = 450;
 
-/// Unix GUI currently rasterizes with the built-in 8×8 bitmap, not host TTF families.
-pub(super) const RESOLVED_UNIX_FONT: &str = "bitmap-8x8";
-
 pub(super) const CELL_WIDTH: u32 = 10;
 pub(super) const CELL_HEIGHT: u32 = 16;
 pub(super) const CELL_PADDING_X: u32 = 1;
-pub(super) const CELL_PADDING_Y: u32 = 4;
+pub(super) const CELL_PADDING_Y: u32 = 2;
 
 #[derive(Clone, Debug)]
 pub(super) struct SidebarTabRow {
@@ -60,17 +60,23 @@ pub(super) struct TerminalCell {
     pub(super) bg: u8,
 }
 
+const DEFAULT_TERMINAL_FOREGROUND: u8 = 16;
+const DEFAULT_TERMINAL_BACKGROUND: u8 = 17;
+
 impl TerminalCell {
     pub(super) const fn blank() -> Self {
         Self {
             ch: ' ',
-            fg: 7,
-            bg: 0,
+            fg: DEFAULT_TERMINAL_FOREGROUND,
+            bg: DEFAULT_TERMINAL_BACKGROUND,
         }
     }
 
     pub(super) fn with_defaults(ch: char, _palette: &ThemePalette) -> Self {
-        Self { ch, fg: 7, bg: 0 }
+        Self {
+            ch,
+            ..Self::blank()
+        }
     }
 }
 
@@ -140,17 +146,22 @@ impl TerminalGrid {
 
 fn color_index(color: vt100::Color, background: bool) -> u8 {
     match color {
-        vt100::Color::Default if background => 0,
-        vt100::Color::Default => 7,
+        vt100::Color::Default if background => DEFAULT_TERMINAL_BACKGROUND,
+        vt100::Color::Default => DEFAULT_TERMINAL_FOREGROUND,
         vt100::Color::Idx(index) => index,
         vt100::Color::Rgb(_, _, _) => 7,
     }
 }
 
 pub(super) fn cell_metrics(font_size: u16) -> (u32, u32) {
-    let pitch = u32::from(font_size.clamp(8, 36));
-    let cell_h = pitch.max(8 + CELL_PADDING_Y * 2);
-    let cell_w = GLYPH_WIDTH + CELL_PADDING_X * 2;
+    let glyph_h = u32::from(font_size.clamp(8, 36));
+    let cell_h = glyph_h + CELL_PADDING_Y * 2;
+    let cell_w = primary_advance(font_size)
+        .map(|advance| advance.ceil().max(1.0) as u32)
+        .unwrap_or_else(|| {
+            let glyph_w = (glyph_h * 2).div_ceil(3).max(GLYPH_WIDTH);
+            glyph_w + CELL_PADDING_X * 2
+        });
     (cell_w, cell_h)
 }
 
@@ -194,13 +205,7 @@ pub(super) struct ScrollbarView {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum SettingsFocusView {
-    FontFamily,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum SettingsHit {
-    FontFamily,
     Dark,
     Light,
     SizeDecrease,
@@ -210,11 +215,9 @@ pub(super) enum SettingsHit {
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct SettingsModalView<'a> {
-    pub(super) font_family: &'a str,
+pub(super) struct SettingsModalView {
     pub(super) font_size: u16,
     pub(super) theme_draft: ThemeId,
-    pub(super) focus: SettingsFocusView,
     pub(super) bounds: (u32, u32, u32, u32),
     pub(super) font_family_field: (u32, u32, u32, u32),
     pub(super) dark_button: (u32, u32, u32, u32),
@@ -225,13 +228,10 @@ pub(super) struct SettingsModalView<'a> {
     pub(super) size_increase_button: (u32, u32, u32, u32),
 }
 
-impl SettingsModalView<'_> {
+impl SettingsModalView {
     pub(super) fn hit_test(&self, x: f64, y: f64) -> Option<SettingsHit> {
         let x = x as u32;
         let y = y as u32;
-        if rect_contains(self.font_family_field, x, y) {
-            return Some(SettingsHit::FontFamily);
-        }
         if rect_contains(self.dark_button, x, y) {
             return Some(SettingsHit::Dark);
         }
@@ -256,11 +256,9 @@ impl SettingsModalView<'_> {
     pub(super) fn for_client(
         client_width: u32,
         client_height: u32,
-        font_family: &str,
         font_size: u16,
         theme_draft: ThemeId,
-        focus: SettingsFocusView,
-    ) -> SettingsModalView<'_> {
+    ) -> SettingsModalView {
         let width = SETTINGS_MODAL_WIDTH.min(client_width.saturating_sub(32).max(1));
         let left = (client_width.saturating_sub(width)) / 2;
         let top = (client_height.saturating_sub(SETTINGS_MODAL_HEIGHT)) / 2;
@@ -272,10 +270,8 @@ impl SettingsModalView<'_> {
         let theme_row = top + 180;
         let action_row = top + 266;
         SettingsModalView {
-            font_family,
             font_size,
             theme_draft,
-            focus,
             bounds: (left, top, width, SETTINGS_MODAL_HEIGHT),
             font_family_field,
             dark_button: (left + 32, theme_row, 146, 34),
@@ -291,16 +287,19 @@ impl SettingsModalView<'_> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum NewShellChoice {
     Default,
-    CommandPrompt,
-    PowerShell,
+    Primary,
+    Bash,
 }
 
 impl NewShellChoice {
     pub(super) const fn label(self) -> &'static str {
         match self {
             Self::Default => "Default",
-            Self::CommandPrompt => "Command Prompt",
-            Self::PowerShell => "PowerShell",
+            #[cfg(target_os = "macos")]
+            Self::Primary => "zsh",
+            #[cfg(not(target_os = "macos"))]
+            Self::Primary => "sh",
+            Self::Bash => "bash",
         }
     }
 }
@@ -315,8 +314,8 @@ pub(super) enum NewTerminalFocusView {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum NewTerminalHit {
     DefaultShell,
-    CmdShell,
-    PowerShell,
+    PrimaryShell,
+    BashShell,
     InitialCommand,
     HttpProxy,
     HttpsProxy,
@@ -333,8 +332,8 @@ pub(super) struct NewTerminalModalView<'a> {
     pub(super) focus: NewTerminalFocusView,
     pub(super) bounds: (u32, u32, u32, u32),
     pub(super) default_shell_button: (u32, u32, u32, u32),
-    pub(super) cmd_shell_button: (u32, u32, u32, u32),
-    pub(super) powershell_button: (u32, u32, u32, u32),
+    pub(super) primary_shell_button: (u32, u32, u32, u32),
+    pub(super) bash_shell_button: (u32, u32, u32, u32),
     pub(super) initial_command_field: (u32, u32, u32, u32),
     pub(super) http_proxy_field: (u32, u32, u32, u32),
     pub(super) https_proxy_field: (u32, u32, u32, u32),
@@ -349,11 +348,11 @@ impl NewTerminalModalView<'_> {
         if rect_contains(self.default_shell_button, x, y) {
             return Some(NewTerminalHit::DefaultShell);
         }
-        if rect_contains(self.cmd_shell_button, x, y) {
-            return Some(NewTerminalHit::CmdShell);
+        if rect_contains(self.primary_shell_button, x, y) {
+            return Some(NewTerminalHit::PrimaryShell);
         }
-        if rect_contains(self.powershell_button, x, y) {
-            return Some(NewTerminalHit::PowerShell);
+        if rect_contains(self.bash_shell_button, x, y) {
+            return Some(NewTerminalHit::BashShell);
         }
         if rect_contains(self.initial_command_field, x, y) {
             return Some(NewTerminalHit::InitialCommand);
@@ -425,8 +424,8 @@ impl NewTerminalModalView<'_> {
             focus,
             bounds: (left, top, width, height),
             default_shell_button: shell_button(0),
-            cmd_shell_button: shell_button(1),
-            powershell_button: shell_button(2),
+            primary_shell_button: shell_button(1),
+            bash_shell_button: shell_button(2),
             initial_command_field: field(top + 142),
             http_proxy_field: field(top + 218),
             https_proxy_field: field(top + 294),
@@ -626,7 +625,7 @@ pub(super) struct FrameContent<'a> {
     pub(super) composer: ComposerView<'a>,
     pub(super) scrollbar: Option<ScrollbarView>,
     pub(super) sidebar_scrollbar: Option<ScrollbarView>,
-    pub(super) settings: Option<SettingsModalView<'a>>,
+    pub(super) settings: Option<SettingsModalView>,
     pub(super) new_terminal: Option<NewTerminalModalView<'a>>,
     pub(super) confirm_close: Option<ConfirmCloseView>,
     pub(super) window_close: Option<WindowCloseView>,
@@ -850,7 +849,7 @@ fn render_status_bar(
             rx + 8,
             ry + 6,
             "Tabs",
-            palette.selection_foreground,
+            palette.text,
         );
     }
     let (cx, cy, cw, _ch) = status.cwd_bounds;
@@ -986,8 +985,8 @@ fn render_workspace_toolbar(
         (toolbar.tabs, labels.1),
         (toolbar.settings, labels.2),
         (toolbar.locale, toolbar.locale_id.toolbar_label()),
-        (toolbar.font_decrease, "z"),
-        (toolbar.font_increase, "Z"),
+        (toolbar.font_decrease, "A-"),
+        (toolbar.font_increase, "A+"),
     ] {
         let (x, y, w, h) = rect;
         fill_rect(buffer, stride, x, y, w, h, button_bg);
@@ -1095,16 +1094,16 @@ fn render_sidebar(
         };
         let marker_x = geometry.node_x.max(0) as u32;
         let marker_y = geometry.node_y.max(0) as u32;
-        let text_color = if row.active {
-            palette.selection_foreground
-        } else {
-            palette.text
-        };
+        let text_color = palette.text;
         draw_text(
             buffer, stride, width, height, marker_x, marker_y, marker, text_color,
         );
 
         if editing && let Some(editor) = tab_editor {
+            let (save_label, cancel_label) = match geometry.actions.density {
+                TreeRowActionDensity::Full => ("Save", "Cancel"),
+                TreeRowActionDensity::Compact => ("Save", "x"),
+            };
             let name_focused = editor.focus == TabEditorFocusView::Name;
             let note_focused = editor.focus == TabEditorFocusView::Note;
             if let Some(editors) = geometry.editors {
@@ -1138,7 +1137,7 @@ fn render_sidebar(
                 height,
                 palette,
                 geometry.actions.primary,
-                "Save",
+                save_label,
                 true,
             );
             render_tree_action_button(
@@ -1148,7 +1147,7 @@ fn render_sidebar(
                 height,
                 palette,
                 geometry.actions.secondary,
-                "Cancel",
+                cancel_label,
                 false,
             );
         } else {
@@ -1176,9 +1175,13 @@ fn render_sidebar(
                 palette.muted_text,
             );
             if row.active {
+                let (add_label, edit_label, close_label) = match geometry.actions.density {
+                    TreeRowActionDensity::Full => ("Add", "Edit", "Close"),
+                    TreeRowActionDensity::Compact => ("+", "Edit", "x"),
+                };
                 if let Some(add_child) = geometry.actions.add_child {
                     render_tree_action_button(
-                        buffer, stride, width, height, palette, add_child, "Add", false,
+                        buffer, stride, width, height, palette, add_child, add_label, false,
                     );
                 }
                 render_tree_action_button(
@@ -1188,7 +1191,7 @@ fn render_sidebar(
                     height,
                     palette,
                     geometry.actions.primary,
-                    "Edit",
+                    edit_label,
                     false,
                 );
                 render_tree_action_button(
@@ -1198,7 +1201,7 @@ fn render_sidebar(
                     height,
                     palette,
                     geometry.actions.secondary,
-                    "Close",
+                    close_label,
                     false,
                 );
             }
@@ -1345,11 +1348,7 @@ fn render_tree_action_button(
     };
     fill_rect(buffer, stride, x, y, w, h, bg);
     fill_rect(buffer, stride, x, y, w, 1, rgb_to_pixel(palette.divider));
-    let text_color = if primary {
-        palette.selection_foreground
-    } else {
-        palette.text
-    };
+    let text_color = palette.text;
     draw_text(
         buffer,
         stride,
@@ -1395,12 +1394,12 @@ fn render_terminal_grid(
             let fg = if selected {
                 selection_fg
             } else {
-                ansi_color(palette, cell.fg)
+                terminal_color(palette, cell.fg)
             };
             let bg = if selected {
                 selection_bg
             } else {
-                ansi_color(palette, cell.bg)
+                terminal_color(palette, cell.bg)
             };
             draw_cell(
                 buffer,
@@ -1411,15 +1410,7 @@ fn render_terminal_grid(
                 layout.offset_y + u32::from(row) * layout.cell_height,
                 cell_w,
                 layout.cell_height,
-                if wide && cell.ch != ' ' {
-                    if cell.ch.is_ascii() {
-                        cell.ch
-                    } else {
-                        '\u{25A0}'
-                    }
-                } else {
-                    cell.ch
-                },
+                cell.ch,
                 fg,
                 bg,
             );
@@ -1500,7 +1491,7 @@ fn render_settings_modal(
     width: u32,
     height: u32,
     palette: &ThemePalette,
-    settings: SettingsModalView<'_>,
+    settings: SettingsModalView,
 ) {
     dim_full_frame(buffer, stride, width, height);
 
@@ -1532,7 +1523,7 @@ fn render_settings_modal(
         height,
         mx + 12,
         my + 34,
-        &format!("Renderer: {}", RESOLVED_UNIX_FONT),
+        &format!("Renderer: {}", resolved_font_name()),
         palette.muted_text,
     );
     draw_text(
@@ -1542,7 +1533,7 @@ fn render_settings_modal(
         height,
         mx + 32,
         my + 58,
-        "Terminal font family",
+        "Terminal renderer (system)",
         palette.muted_text,
     );
     draw_text(
@@ -1552,34 +1543,27 @@ fn render_settings_modal(
         height,
         mx + mw.saturating_sub(110),
         my + 58,
-        "Size",
+        &format!("Size {} pt", settings.font_size),
         palette.muted_text,
     );
     let (fx, fy, fw, fh) = settings.font_family_field;
-    render_inline_field(
+    fill_rect(
         buffer,
         stride,
-        width,
-        height,
-        palette,
-        PixelRect {
-            left: fx as i32,
-            top: fy as i32,
-            right: (fx + fw) as i32,
-            bottom: (fy + fh) as i32,
-        },
-        settings.font_family,
-        settings.focus == SettingsFocusView::FontFamily,
-        palette.text,
+        fx,
+        fy,
+        fw,
+        fh,
+        rgb_to_pixel(palette.composer),
     );
     draw_text(
         buffer,
         stride,
         width,
         height,
-        mx + 32,
-        my + 66,
-        &format!("{} px", settings.font_size),
+        fx + 10,
+        fy + fh.saturating_sub(GLYPH_HEIGHT) / 2,
+        &format!("System {}", resolved_font_name()),
         palette.muted_text,
     );
     render_button(
@@ -1736,8 +1720,8 @@ fn render_new_terminal_modal(
 
     for (rect, choice) in [
         (modal.default_shell_button, NewShellChoice::Default),
-        (modal.cmd_shell_button, NewShellChoice::CommandPrompt),
-        (modal.powershell_button, NewShellChoice::PowerShell),
+        (modal.primary_shell_button, NewShellChoice::Primary),
+        (modal.bash_shell_button, NewShellChoice::Bash),
     ] {
         let selected = modal.shell_choice == choice;
         let prefix = if selected { "● " } else { "○ " };
@@ -1882,24 +1866,50 @@ fn draw_cell(
     let bg_pixel = rgb_to_pixel(bg);
     fill_rect(buffer, stride, origin_x, origin_y, cell_w, cell_h, bg_pixel);
 
+    let glyph_y = origin_y + CELL_PADDING_Y;
+    let glyph_h = cell_h.saturating_sub(CELL_PADDING_Y * 2);
+    if cell_w == 0 || glyph_h == 0 {
+        return;
+    }
+    let raster_size = glyph_h.min(u32::from(u16::MAX)) as u16;
+    if let (Some(glyph), Some(ascent)) =
+        (raster_glyph(ch, raster_size), primary_ascent(raster_size))
+    {
+        let centered_x = origin_x as f32 + (cell_w as f32 - glyph.advance).max(0.0) / 2.0;
+        let baseline_y = glyph_y as f32 + ascent;
+        draw_raster_glyph(
+            buffer,
+            stride,
+            width,
+            height,
+            &glyph,
+            centered_x,
+            baseline_y,
+            fg,
+            (origin_x, origin_y, cell_w, cell_h),
+        );
+        return;
+    }
     let Some(glyph) = super::font::glyph_rows(ch) else {
         return;
     };
-
     let glyph_x = origin_x + CELL_PADDING_X;
-    let glyph_y = origin_y + CELL_PADDING_Y;
+    let glyph_w = cell_w.saturating_sub(CELL_PADDING_X * 2);
+    if glyph_w == 0 {
+        return;
+    }
     let fg_pixel = rgb_to_pixel(fg);
-    for (row_index, row_bits) in glyph.iter().enumerate() {
-        let y = glyph_y + row_index as u32;
-        if y >= origin_y + cell_h {
-            break;
-        }
-        for bit in 0..GLYPH_WIDTH {
-            if !super::font::row_contains_pixel(*row_bits, bit) {
+    for target_y in 0..glyph_h {
+        let source_y = (target_y * GLYPH_HEIGHT / glyph_h) as usize;
+        let y = glyph_y + target_y;
+        let row_bits = glyph[source_y.min(glyph.len() - 1)];
+        for target_x in 0..glyph_w {
+            let source_x = target_x * GLYPH_WIDTH / glyph_w;
+            if !super::font::row_contains_pixel(row_bits, source_x) {
                 continue;
             }
-            let x = glyph_x + bit;
-            if x < width {
+            let x = glyph_x + target_x;
+            if x < origin_x + cell_w && x < width {
                 put_pixel(buffer, stride, x, y, fg_pixel);
             }
         }
@@ -1917,11 +1927,32 @@ fn draw_text(
     text: &str,
     fg: Rgb,
 ) {
+    const UI_FONT_SIZE: u16 = 12;
+
     let fg_pixel = rgb_to_pixel(fg);
-    let mut x = origin_x;
+    let mut x = origin_x as f32;
+    let baseline_y = primary_ascent(UI_FONT_SIZE).map(|ascent| origin_y as f32 + ascent);
     for ch in text.chars() {
+        if let (Some(glyph), Some(baseline_y)) = (raster_glyph(ch, UI_FONT_SIZE), baseline_y) {
+            draw_raster_glyph(
+                buffer,
+                stride,
+                width,
+                height,
+                &glyph,
+                x,
+                baseline_y,
+                fg,
+                (0, 0, width, height),
+            );
+            x += glyph.advance.ceil().max(1.0);
+            if x >= width as f32 {
+                break;
+            }
+            continue;
+        }
         let Some(glyph) = super::font::glyph_rows(ch) else {
-            x = x.saturating_add(GLYPH_WIDTH + 1);
+            x += (GLYPH_WIDTH + 1) as f32;
             continue;
         };
         if origin_y >= height {
@@ -1936,15 +1967,57 @@ fn draw_text(
                 if !super::font::row_contains_pixel(*row_bits, bit) {
                     continue;
                 }
-                let pixel_x = x + bit;
+                let pixel_x = x as u32 + bit;
                 if pixel_x < width {
                     put_pixel(buffer, stride, pixel_x, y, fg_pixel);
                 }
             }
         }
-        x = x.saturating_add(GLYPH_WIDTH + 1);
-        if x >= width {
+        x += (GLYPH_WIDTH + 1) as f32;
+        if x >= width as f32 {
             break;
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_raster_glyph(
+    buffer: &mut [u32],
+    stride: u32,
+    width: u32,
+    height: u32,
+    glyph: &RasterGlyph,
+    baseline_x: f32,
+    baseline_y: f32,
+    foreground: Rgb,
+    clip: (u32, u32, u32, u32),
+) {
+    let origin_x = baseline_x.round() as i32 + glyph.offset_x;
+    let origin_y = baseline_y.round() as i32 + glyph.offset_y;
+    let clip_right = clip.0.saturating_add(clip.2).min(width);
+    let clip_bottom = clip.1.saturating_add(clip.3).min(height);
+    for y in 0..glyph.height {
+        let target_y = origin_y + y as i32;
+        if target_y < clip.1 as i32 || target_y >= clip_bottom as i32 {
+            continue;
+        }
+        for x in 0..glyph.width {
+            let target_x = origin_x + x as i32;
+            if target_x < clip.0 as i32 || target_x >= clip_right as i32 {
+                continue;
+            }
+            let alpha = glyph.alpha[(y * glyph.width + x) as usize];
+            if alpha == 0 {
+                continue;
+            }
+            blend_pixel(
+                buffer,
+                stride,
+                target_x as u32,
+                target_y as u32,
+                foreground,
+                alpha,
+            );
         }
     }
 }
@@ -1981,6 +2054,20 @@ fn put_pixel(buffer: &mut [u32], stride: u32, x: u32, y: u32, color: u32) {
     }
 }
 
+fn blend_pixel(buffer: &mut [u32], stride: u32, x: u32, y: u32, foreground: Rgb, alpha: u8) {
+    let index = (y * stride + x) as usize;
+    let Some(background) = buffer.get_mut(index) else {
+        return;
+    };
+    let alpha = u32::from(alpha);
+    let inverse = 255 - alpha;
+    let blend = |front: u8, back: u32| (u32::from(front) * alpha + back * inverse + 127) / 255;
+    let red = blend(foreground.red, (*background >> 16) & 0xFF);
+    let green = blend(foreground.green, (*background >> 8) & 0xFF);
+    let blue = blend(foreground.blue, *background & 0xFF);
+    *background = (red << 16) | (green << 8) | blue;
+}
+
 fn rect_contains(rect: (u32, u32, u32, u32), x: u32, y: u32) -> bool {
     let (left, top, width, height) = rect;
     x >= left && y >= top && x < left + width && y < top + height
@@ -1988,6 +2075,14 @@ fn rect_contains(rect: (u32, u32, u32, u32), x: u32, y: u32) -> bool {
 
 fn ansi_color(palette: &ThemePalette, index: u8) -> Rgb {
     palette.ansi[(index & 0x0F) as usize]
+}
+
+fn terminal_color(palette: &ThemePalette, index: u8) -> Rgb {
+    match index {
+        DEFAULT_TERMINAL_FOREGROUND => palette.terminal_foreground,
+        DEFAULT_TERMINAL_BACKGROUND => palette.terminal_background,
+        _ => ansi_color(palette, index),
+    }
 }
 
 fn rgb_to_pixel(rgb: Rgb) -> u32 {
@@ -2039,20 +2134,16 @@ mod tests {
         let (cell_w, cell_h) = cell_metrics(12);
         assert_eq!(
             grid_dimensions_for_pixels(800, 480, 200, 48, 26, cell_w, cell_h),
-            (58, 25)
+            (
+                ((800 - 200 - SCROLLBAR_WIDTH) / cell_w) as u16,
+                ((480 - 48 - 26) / cell_h) as u16
+            )
         );
     }
 
     #[test]
     fn settings_hit_test_maps_buttons() {
-        let modal = SettingsModalView::for_client(
-            800,
-            600,
-            "Consolas",
-            12,
-            ThemeId::Dark,
-            SettingsFocusView::FontFamily,
-        );
+        let modal = SettingsModalView::for_client(800, 600, 12, ThemeId::Dark);
         assert_eq!(
             modal.hit_test(
                 f64::from(modal.apply_button.0 + 4),
@@ -2065,7 +2156,7 @@ mod tests {
                 f64::from(modal.font_family_field.0 + 2),
                 f64::from(modal.font_family_field.1 + 2)
             ),
-            Some(SettingsHit::FontFamily)
+            None
         );
     }
 
@@ -2117,13 +2208,106 @@ mod tests {
     }
 
     #[test]
+    fn terminal_defaults_follow_theme_instead_of_ansi_slots() {
+        let blank = TerminalCell::blank();
+        assert_eq!(
+            terminal_color(ThemeId::Dark.palette(), blank.fg),
+            ThemeId::Dark.palette().terminal_foreground
+        );
+        assert_eq!(
+            terminal_color(ThemeId::Light.palette(), blank.bg),
+            ThemeId::Light.palette().terminal_background
+        );
+        assert_eq!(
+            terminal_color(ThemeId::Light.palette(), 0),
+            ThemeId::Light.palette().ansi[0]
+        );
+    }
+
+    #[test]
     fn larger_row_pitch_yields_fewer_terminal_rows() {
         let (cell_w, small_h) = cell_metrics(12);
         let (large_w, large_h) = cell_metrics(24);
-        assert_eq!(cell_w, large_w);
+        assert!(cell_w > 0);
+        assert_eq!(small_h, 16);
+        assert!(large_w > cell_w);
         assert!(large_h > small_h);
         let small_rows = grid_dimensions_for_pixels(800, 480, 200, 48, 26, cell_w, small_h).1;
         let large_rows = grid_dimensions_for_pixels(800, 480, 200, 48, 26, large_w, large_h).1;
         assert!(small_rows > large_rows);
+    }
+
+    #[test]
+    fn terminal_glyph_scales_with_logical_point_size() {
+        let foreground = Rgb {
+            red: 240,
+            green: 240,
+            blue: 240,
+        };
+        let background = Rgb {
+            red: 10,
+            green: 10,
+            blue: 10,
+        };
+        let count_foreground = |font_size| {
+            let (width, height) = cell_metrics(font_size);
+            let mut buffer = vec![0; (width * height) as usize];
+            draw_cell(
+                &mut buffer,
+                width,
+                width,
+                height,
+                0,
+                0,
+                width,
+                height,
+                'M',
+                foreground,
+                background,
+            );
+            buffer
+                .into_iter()
+                .filter(|pixel| *pixel == rgb_to_pixel(foreground))
+                .count()
+        };
+
+        assert!(count_foreground(24) > count_foreground(12));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn terminal_cell_renders_cjk_system_fallback() {
+        let foreground = Rgb {
+            red: 240,
+            green: 240,
+            blue: 240,
+        };
+        let background = Rgb {
+            red: 10,
+            green: 10,
+            blue: 10,
+        };
+        let (cell_width, cell_height) = cell_metrics(12);
+        let width = cell_width * 2;
+        let mut buffer = vec![rgb_to_pixel(background); (width * cell_height) as usize];
+        draw_cell(
+            &mut buffer,
+            width,
+            width,
+            cell_height,
+            0,
+            0,
+            width,
+            cell_height,
+            '繁',
+            foreground,
+            background,
+        );
+
+        assert!(
+            buffer
+                .iter()
+                .any(|pixel| *pixel != rgb_to_pixel(background))
+        );
     }
 }

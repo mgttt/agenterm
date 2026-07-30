@@ -10,6 +10,7 @@ mod window_state;
 use std::{
     collections::HashSet,
     env,
+    path::Path,
     rc::Rc,
     sync::{Arc, mpsc::Receiver},
     time::{Duration, Instant, SystemTime},
@@ -63,15 +64,15 @@ use crate::{
     workspace::{SavedTab, SavedWorkspace, save_workspace, workspace_path},
 };
 
+use font::resolved_font_name;
 use new_terminal::{NewTerminalDialog, ui_action_open};
 use render::{
     COMPOSER_HEIGHT, ComposerView, ConfirmCloseHit, ConfirmCloseView, FrameContent,
     NewShellChoice as RenderShellChoice, NewTerminalFocusView, NewTerminalHit,
-    NewTerminalModalView, RESOLVED_UNIX_FONT, STATUS_HEIGHT, SettingsFocusView, SettingsHit,
-    SettingsModalView, SidebarTabRow, StatusBarView, TabEditorFocusView, TabEditorView,
-    TerminalGrid, TerminalPaint, ToolbarHit, WindowCloseHit, WindowCloseView, WorkspaceToolbarView,
-    cell_metrics, effective_palette, grid_dimensions_for_pixels, render_frame,
-    scrollbar_view_from_geometry, sidebar_row_at_y,
+    NewTerminalModalView, STATUS_HEIGHT, SettingsHit, SettingsModalView, SidebarTabRow,
+    StatusBarView, TabEditorFocusView, TabEditorView, TerminalGrid, TerminalPaint, ToolbarHit,
+    WindowCloseHit, WindowCloseView, WorkspaceToolbarView, cell_metrics, effective_palette,
+    grid_dimensions_for_pixels, render_frame, scrollbar_view_from_geometry, sidebar_row_at_y,
 };
 use window_state::{
     WindowStateTracker, WindowUiActionResult, WinitWindowHandle, absorb_window_event,
@@ -305,13 +306,12 @@ struct UnixApp {
     last_cursor: (f64, f64),
     focus_surface: UnixFocusSurface,
     composer_buffer: String,
+    composer_select_all: bool,
     config: AppConfig,
     modifiers: ModifiersState,
     settings_open: bool,
     settings_theme_draft: ThemeId,
-    settings_font_draft: String,
     settings_size_draft: u16,
-    settings_focus: SettingsFocusView,
     new_terminal_dialog: NewTerminalDialog,
     new_terminal_focus: NewTerminalFocusView,
     window_state_tracker: WindowStateTracker,
@@ -367,11 +367,10 @@ impl UnixApp {
             last_cursor: (0.0, 0.0),
             focus_surface: UnixFocusSurface::Terminal,
             composer_buffer: String::new(),
+            composer_select_all: false,
             settings_open: false,
             settings_theme_draft: config.color_theme,
-            settings_font_draft: config.terminal_font_family.clone(),
             settings_size_draft: config.terminal_font_size,
-            settings_focus: SettingsFocusView::FontFamily,
             new_terminal_dialog: NewTerminalDialog::new(),
             new_terminal_focus: NewTerminalFocusView::InitialCommand,
             window_state_tracker: WindowStateTracker::new(),
@@ -486,6 +485,7 @@ impl UnixApp {
     }
 
     fn load_composer_buffer_from_tab(&mut self) {
+        self.composer_select_all = false;
         if self.cwd_edit_target.is_some() {
             return;
         }
@@ -509,6 +509,7 @@ impl UnixApp {
         }
         if previous == UnixFocusSurface::Composer {
             self.sync_composer_buffer_to_tab();
+            self.composer_select_all = false;
         }
         self.focus_surface = surface;
         if surface == UnixFocusSurface::Composer {
@@ -592,6 +593,7 @@ impl UnixApp {
         if text.is_empty() {
             return Err("clipboard text contains no pasteable characters".to_owned());
         }
+        input::prepare_composer_edit(&mut self.composer_buffer, &mut self.composer_select_all);
         self.composer_buffer.push_str(&text);
         self.sync_composer_buffer_to_tab();
         self.set_status_message(format!("Pasted {} characters into composer", text.len()));
@@ -615,8 +617,8 @@ impl UnixApp {
     fn render_shell_choice(&self) -> RenderShellChoice {
         match self.new_terminal_dialog.shell_choice() {
             new_terminal::NewShellChoice::Default => RenderShellChoice::Default,
-            new_terminal::NewShellChoice::CommandPrompt => RenderShellChoice::CommandPrompt,
-            new_terminal::NewShellChoice::PowerShell => RenderShellChoice::PowerShell,
+            new_terminal::NewShellChoice::Primary => RenderShellChoice::Primary,
+            new_terminal::NewShellChoice::Bash => RenderShellChoice::Bash,
         }
     }
 
@@ -667,13 +669,13 @@ impl UnixApp {
                 self.new_terminal_dialog
                     .choose_shell(new_terminal::NewShellChoice::Default);
             }
-            NewTerminalHit::CmdShell => {
+            NewTerminalHit::PrimaryShell => {
                 self.new_terminal_dialog
-                    .choose_shell(new_terminal::NewShellChoice::CommandPrompt);
+                    .choose_shell(new_terminal::NewShellChoice::Primary);
             }
-            NewTerminalHit::PowerShell => {
+            NewTerminalHit::BashShell => {
                 self.new_terminal_dialog
-                    .choose_shell(new_terminal::NewShellChoice::PowerShell);
+                    .choose_shell(new_terminal::NewShellChoice::Bash);
             }
             NewTerminalHit::InitialCommand => {
                 self.new_terminal_focus = NewTerminalFocusView::InitialCommand;
@@ -738,38 +740,17 @@ impl UnixApp {
     }
 
     fn handle_settings_key(&mut self, event: &winit::event::KeyEvent) {
-        if !self.settings_open || self.settings_focus != SettingsFocusView::FontFamily {
+        if !self.settings_open {
             return;
         }
-        let modifiers = self.modifiers;
-        match input::text_field_key_action(event, modifiers, &mut self.settings_font_draft, false) {
-            input::TextFieldKeyAction::Edited => self.request_redraw(),
-            input::TextFieldKeyAction::Escape => {
+        match event.logical_key {
+            Key::Named(NamedKey::Escape) => {
                 let _ = self.close_settings(false);
             }
-            input::TextFieldKeyAction::Submit => {
+            Key::Named(NamedKey::Enter) => {
                 let _ = self.close_settings(true);
             }
-            input::TextFieldKeyAction::Copy => {
-                if clipboard::set_clipboard_text(&self.settings_font_draft).is_ok() {
-                    self.set_status_message("Copied settings font draft");
-                }
-            }
-            input::TextFieldKeyAction::Cut => {
-                if clipboard::set_clipboard_text(&self.settings_font_draft).is_ok() {
-                    self.settings_font_draft.clear();
-                    self.set_status_message("Cut settings font draft");
-                    self.request_redraw();
-                }
-            }
-            input::TextFieldKeyAction::Paste => {
-                if let Ok(raw) = clipboard::get_clipboard_text() {
-                    self.settings_font_draft
-                        .push_str(&raw.replace("\r\n", "\n"));
-                    self.request_redraw();
-                }
-            }
-            input::TextFieldKeyAction::NextField | input::TextFieldKeyAction::Ignored => {}
+            _ => {}
         }
     }
 
@@ -782,6 +763,8 @@ impl UnixApp {
             .and_then(|position| self.tabs.get(position))
             .map(|tab| {
                 let path = tab.cwd.path().unwrap_or("unknown");
+                let home_dir = env::var_os("HOME");
+                let path = compact_cwd_for_status(path, home_dir.as_deref().map(Path::new));
                 if tab.cwd.pending() {
                     format!("CWD · {path} · pending")
                 } else {
@@ -1085,9 +1068,7 @@ impl UnixApp {
         self.sync_composer_buffer_to_tab();
         self.settings_open = true;
         self.settings_theme_draft = self.config.color_theme;
-        self.settings_font_draft = self.config.terminal_font_family.clone();
         self.settings_size_draft = self.config.terminal_font_size;
-        self.settings_focus = SettingsFocusView::FontFamily;
         self.set_focus_surface_internal(UnixFocusSurface::Settings, "semantic");
     }
 
@@ -1096,19 +1077,14 @@ impl UnixApp {
             return Err("settings are not open".to_owned());
         }
         if apply {
-            if self.settings_font_draft.trim().is_empty() {
-                return Err("font family cannot be empty".to_owned());
-            }
             if !(8..=36).contains(&self.settings_size_draft) {
                 return Err("font size must be from 8 to 36".to_owned());
             }
-            self.config.terminal_font_family = self.settings_font_draft.clone();
             self.config.terminal_font_size = self.settings_size_draft;
             self.config.color_theme = self.settings_theme_draft;
             save_config(&self.config).map_err(|error| format!("{error:#}"))?;
         } else {
             self.settings_theme_draft = self.config.color_theme;
-            self.settings_font_draft = self.config.terminal_font_family.clone();
             self.settings_size_draft = self.config.terminal_font_size;
         }
         self.settings_open = false;
@@ -1286,10 +1262,6 @@ impl UnixApp {
 
     fn handle_settings_click(&mut self, hit: SettingsHit) {
         match hit {
-            SettingsHit::FontFamily => {
-                self.settings_focus = SettingsFocusView::FontFamily;
-                self.request_redraw();
-            }
             SettingsHit::Dark => {
                 self.settings_theme_draft = ThemeId::Dark;
                 self.request_redraw();
@@ -1427,7 +1399,6 @@ impl UnixApp {
     fn is_edit_focus(&self) -> bool {
         self.focus_surface == UnixFocusSurface::Composer
             || self.note_edit_target.is_some()
-            || (self.settings_open && self.settings_focus == SettingsFocusView::FontFamily)
             || self.new_terminal_dialog.is_open()
     }
 
@@ -1790,8 +1761,10 @@ impl UnixApp {
     fn client_size(&self) -> (u32, u32) {
         self.window
             .as_ref()
-            .map(|window| window.inner_size())
-            .map(|size| (size.width, size.height))
+            .map(|window| {
+                let size = window.inner_size().to_logical::<u32>(window.scale_factor());
+                (size.width.max(1), size.height.max(1))
+            })
             .unwrap_or((INITIAL_WIDTH, INITIAL_HEIGHT))
     }
 
@@ -2010,10 +1983,8 @@ impl UnixApp {
             let modal = SettingsModalView::for_client(
                 width,
                 height,
-                &self.settings_font_draft,
                 self.settings_size_draft,
                 self.settings_theme_draft,
-                self.settings_focus,
             );
             if let Some(hit) = modal.hit_test(x, y) {
                 self.handle_settings_click(hit);
@@ -2579,12 +2550,12 @@ impl UnixApp {
         let window = Rc::new(event_loop.create_window(attributes)?);
         let surface = Surface::new(&self.context, Rc::clone(&window))
             .map_err(|error| anyhow::anyhow!("{error}"))?;
-        let size = window.inner_size();
+        let (width, height) = self.client_size();
         let sidebar_width = self.sidebar_width();
         let (cell_width, cell_height) = self.cell_dimensions();
         let (cols, rows) = grid_dimensions_for_pixels(
-            size.width,
-            size.height,
+            width,
+            height,
             sidebar_width,
             COMPOSER_HEIGHT,
             STATUS_HEIGHT,
@@ -2632,12 +2603,12 @@ impl UnixApp {
         let Some(window) = self.window.as_ref() else {
             return;
         };
-        let size = window.inner_size();
+        let (width, height) = self.client_size();
         let sidebar_width = self.sidebar_width();
         let (cell_width, cell_height) = self.cell_dimensions();
         let (cols, rows) = grid_dimensions_for_pixels(
-            size.width,
-            size.height,
+            width,
+            height,
             sidebar_width,
             COMPOSER_HEIGHT,
             STATUS_HEIGHT,
@@ -2839,6 +2810,10 @@ impl UnixApp {
                                         "create"
                                         | "cancel"
                                         | "shell-default"
+                                        | "shell-primary"
+                                        | "shell-zsh"
+                                        | "shell-sh"
+                                        | "shell-bash"
                                         | "shell-cmd"
                                         | "shell-powershell"
                                         | "new-terminal-set-initial-command"
@@ -2959,8 +2934,9 @@ impl UnixApp {
         let Some(window) = self.window.as_ref() else {
             return;
         };
-        let size = window.inner_size();
-        if size.width == 0 || size.height == 0 {
+        let physical_size = window.inner_size();
+        let (logical_width, logical_height) = self.client_size();
+        if physical_size.width == 0 || physical_size.height == 0 {
             return;
         }
 
@@ -2986,19 +2962,17 @@ impl UnixApp {
             .map(|geometry| scrollbar_view_from_geometry(geometry.0));
         let settings = self.settings_open.then(|| {
             SettingsModalView::for_client(
-                size.width,
-                size.height,
-                &self.settings_font_draft,
+                logical_width,
+                logical_height,
                 self.settings_size_draft,
                 self.settings_theme_draft,
-                self.settings_focus,
             )
         });
         let new_terminal = if self.new_terminal_dialog.is_open() {
             let shell = self.render_shell_choice();
             Some(NewTerminalModalView::for_client(
-                size.width,
-                size.height,
+                logical_width,
+                logical_height,
                 shell,
                 self.new_terminal_dialog.initial_command_draft(),
                 self.new_terminal_dialog.http_proxy_draft(),
@@ -3025,7 +2999,7 @@ impl UnixApp {
             })
         };
         let composer_top = layout.composer.top.max(0) as u32;
-        let composer_width = size.width.saturating_sub(sidebar_width);
+        let composer_width = logical_width.saturating_sub(sidebar_width);
         const SEND_W: u32 = 72;
         let send_x = sidebar_width + composer_width.saturating_sub(SEND_W + 8);
         let composer_view = ComposerView {
@@ -3052,10 +3026,10 @@ impl UnixApp {
             .filter(|selection| self.active == Some(selection.tab_id));
         let confirm_close = self
             .pending_close
-            .map(|id| ConfirmCloseView::for_client(size.width, size.height, id));
+            .map(|id| ConfirmCloseView::for_client(logical_width, logical_height, id));
         let window_close = self
             .window_close_pending
-            .then(|| WindowCloseView::for_client(size.width, size.height));
+            .then(|| WindowCloseView::for_client(logical_width, logical_height));
         let resize_grip = layout.resize_grip.map(u32_rect);
 
         let tab_editor = self.note_edit_target.map(|_| TabEditorView {
@@ -3071,8 +3045,8 @@ impl UnixApp {
         };
 
         if let (Some(width), Some(height)) = (
-            std::num::NonZeroU32::new(size.width),
-            std::num::NonZeroU32::new(size.height),
+            std::num::NonZeroU32::new(physical_size.width),
+            std::num::NonZeroU32::new(physical_size.height),
         ) {
             let _ = surface.resize(width, height);
         }
@@ -3082,11 +3056,12 @@ impl UnixApp {
         };
         let width = buffer.width().get();
         let height = buffer.height().get();
+        let mut logical_pixels = vec![0_u32; (logical_width * logical_height) as usize];
         render_frame(
-            &mut buffer,
-            width,
-            width,
-            height,
+            &mut logical_pixels,
+            logical_width,
+            logical_width,
+            logical_height,
             palette,
             FrameContent {
                 sidebar_width,
@@ -3114,6 +3089,14 @@ impl UnixApp {
                 status: Some(status_view),
                 resize_grip,
             },
+        );
+        scale_frame_nearest(
+            &logical_pixels,
+            logical_width,
+            logical_height,
+            &mut buffer,
+            width,
+            height,
         );
         self.last_frame = Some((width, height, buffer.to_vec()));
         let _ = buffer.present();
@@ -3162,11 +3145,16 @@ impl UnixApp {
         );
         let clip = if pane_only {
             let terminal = terminal_pixel_rect(&self.layout());
-            Some((
-                terminal.left.max(0) as u32,
-                terminal.top.max(0) as u32,
-                terminal.width().max(0) as u32,
-                terminal.height().max(0) as u32,
+            let logical_size = self.client_size();
+            Some(scale_rect_to_frame(
+                (
+                    terminal.left.max(0) as u32,
+                    terminal.top.max(0) as u32,
+                    terminal.width().max(0) as u32,
+                    terminal.height().max(0) as u32,
+                ),
+                logical_size,
+                (width, height),
             ))
         } else {
             None
@@ -3252,7 +3240,7 @@ impl ControlHost for UnixApp {
             "color_theme": self.config.color_theme,
             "tabs_visible": self.config.tabs_visible,
             "tabs_width": self.config.tabs_width,
-            "resolved_font_family": RESOLVED_UNIX_FONT,
+            "resolved_font_family": resolved_font_name(),
             "config_path": config_path(),
             "recommended_cjk_font": "Sarasa Fixed SC",
             "recommended_font_license": "SIL Open Font License 1.1",
@@ -3708,7 +3696,7 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                             self.close_cwd_editor();
                             return;
                         }
-                        if self.modifiers.control_key()
+                        if input::primary_shortcut(self.modifiers)
                             && matches!(event.logical_key, Key::Named(NamedKey::Enter))
                         {
                             let mode = if self.modifiers.shift_key() {
@@ -3726,6 +3714,7 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                         &event,
                         self.modifiers,
                         &mut self.composer_buffer,
+                        &mut self.composer_select_all,
                     ) {
                         input::ComposerKeyAction::Edited => {
                             self.sync_composer_buffer_to_tab();
@@ -3758,6 +3747,7 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                         input::ComposerKeyAction::Cut => {
                             if clipboard::set_clipboard_text(&self.composer_buffer).is_ok() {
                                 self.composer_buffer.clear();
+                                self.composer_select_all = false;
                                 self.sync_composer_buffer_to_tab();
                                 self.set_status_message("Cut composer draft");
                                 self.request_redraw();
@@ -3766,44 +3756,59 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                         input::ComposerKeyAction::Paste => {
                             let _ = self.paste_clipboard_into_composer();
                         }
-                        input::ComposerKeyAction::SelectAll => {}
+                        input::ComposerKeyAction::SelectAll => {
+                            self.composer_select_all = !self.composer_buffer.is_empty();
+                            self.request_redraw();
+                        }
                         input::ComposerKeyAction::Ignored => {}
                     }
                     return;
                 }
-                if self.modifiers.control_key()
-                    && matches!(event.logical_key, Key::Character(ref value) if value.eq_ignore_ascii_case("c"))
-                    && self.terminal_selection.is_some_and(|selection| {
-                        !selection.is_empty() && self.active == Some(selection.tab_id)
-                    })
-                {
-                    let _ = self.copy_terminal_selection();
-                    return;
+                let has_selection = self.terminal_selection.is_some_and(|selection| {
+                    !selection.is_empty() && self.active == Some(selection.tab_id)
+                });
+                match input::terminal_shortcut_action(
+                    &event.logical_key,
+                    self.modifiers,
+                    has_selection,
+                ) {
+                    input::TerminalShortcutAction::Copy => {
+                        let _ = self.copy_terminal_selection();
+                        return;
+                    }
+                    input::TerminalShortcutAction::Paste => {
+                        let _ = self.paste_clipboard_into_terminal();
+                        return;
+                    }
+                    input::TerminalShortcutAction::Suppress => return,
+                    input::TerminalShortcutAction::Forward => {}
                 }
-                if self.modifiers.control_key()
-                    && matches!(event.logical_key, Key::Character(ref value) if value.eq_ignore_ascii_case("v"))
-                {
-                    let _ = self.paste_clipboard_into_terminal();
-                    return;
-                }
-                if let Some(bytes) = input::key_event_to_bytes(&event) {
+                if let Some(bytes) = input::key_event_to_bytes(&event, self.modifiers) {
                     let _ = self.cancel_terminal_selection(true);
                     self.queue_pty_input(bytes);
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
-                self.last_cursor = (position.x, position.y);
+                let (x, y) = self
+                    .window
+                    .as_ref()
+                    .map(|window| {
+                        let logical = position.to_logical::<f64>(window.scale_factor());
+                        (logical.x, logical.y)
+                    })
+                    .unwrap_or((position.x, position.y));
+                self.last_cursor = (x, y);
                 if self.tabs_resize_drag.is_some() {
-                    self.drag_tabs_resize(position.x as i32);
+                    self.drag_tabs_resize(x as i32);
                 } else if self.sidebar_scroll_drag.is_some() {
-                    self.drag_sidebar_scrollbar(position.y as i32);
+                    self.drag_sidebar_scrollbar(y as i32);
                 } else if self.scroll_drag.is_some() {
-                    self.drag_scrollbar(position.y as i32);
+                    self.drag_scrollbar(y as i32);
                 } else if self
                     .terminal_selection_gesture
                     .is_some_and(|gesture| gesture.active())
                 {
-                    self.drag_terminal_selection(position.x, position.y);
+                    self.drag_terminal_selection(x, y);
                 }
             }
             WindowEvent::MouseWheel { delta, .. } => {
@@ -3863,6 +3868,70 @@ impl ApplicationHandler<UnixWake> for UnixApp {
     }
 }
 
+fn scale_frame_nearest(
+    source: &[u32],
+    source_width: u32,
+    source_height: u32,
+    destination: &mut [u32],
+    destination_width: u32,
+    destination_height: u32,
+) {
+    if source_width == 0 || source_height == 0 || destination_width == 0 || destination_height == 0
+    {
+        return;
+    }
+    for y in 0..destination_height {
+        let source_y =
+            (u64::from(y) * u64::from(source_height) / u64::from(destination_height)) as u32;
+        for x in 0..destination_width {
+            let source_x =
+                (u64::from(x) * u64::from(source_width) / u64::from(destination_width)) as u32;
+            destination[(y * destination_width + x) as usize] =
+                source[(source_y * source_width + source_x) as usize];
+        }
+    }
+}
+
+fn scale_rect_to_frame(
+    rect: (u32, u32, u32, u32),
+    logical_size: (u32, u32),
+    frame_size: (u32, u32),
+) -> (u32, u32, u32, u32) {
+    let scale_axis = |value: u32, logical: u32, physical: u32| {
+        if logical == 0 {
+            0
+        } else {
+            (u64::from(value) * u64::from(physical) / u64::from(logical)) as u32
+        }
+    };
+    (
+        scale_axis(rect.0, logical_size.0, frame_size.0),
+        scale_axis(rect.1, logical_size.1, frame_size.1),
+        scale_axis(rect.2, logical_size.0, frame_size.0),
+        scale_axis(rect.3, logical_size.1, frame_size.1),
+    )
+}
+
+fn compact_cwd_for_status(path: &str, home_dir: Option<&Path>) -> String {
+    let path = Path::new(path);
+    if let Some(home_dir) = home_dir
+        && let Ok(relative) = path.strip_prefix(home_dir)
+    {
+        return if relative.as_os_str().is_empty() {
+            "~".to_owned()
+        } else {
+            format!("~/{}", relative.to_string_lossy())
+        };
+    }
+    if path.is_absolute() {
+        return path
+            .file_name()
+            .map(|name| format!(".../{}", name.to_string_lossy()))
+            .unwrap_or_else(|| std::path::MAIN_SEPARATOR_STR.to_owned());
+    }
+    path.to_string_lossy().into_owned()
+}
+
 fn system_menu_clipboard_state_pure(
     edit_focus: bool,
     terminal_ready: bool,
@@ -3880,7 +3949,51 @@ fn system_menu_clipboard_state_pure(
 
 #[cfg(test)]
 mod system_menu_tests {
-    use super::system_menu_clipboard_state_pure;
+    use super::{
+        compact_cwd_for_status, scale_frame_nearest, scale_rect_to_frame,
+        system_menu_clipboard_state_pure,
+    };
+    use std::path::Path;
+
+    #[test]
+    fn visual_cwd_compacts_home_and_other_absolute_paths() {
+        let root = Path::new(std::path::MAIN_SEPARATOR_STR);
+        let home = root.join("users").join("example");
+        let home_project = home.join("repos").join("agenterm");
+        let temporary_project = root.join("var").join("tmp").join("agenterm-review");
+
+        assert_eq!(
+            compact_cwd_for_status(&home_project.to_string_lossy(), Some(&home)),
+            "~/repos/agenterm"
+        );
+        assert_eq!(
+            compact_cwd_for_status(&temporary_project.to_string_lossy(), Some(&home)),
+            ".../agenterm-review"
+        );
+        assert_eq!(
+            compact_cwd_for_status("workspace/subdir", Some(&home)),
+            "workspace/subdir"
+        );
+    }
+
+    #[test]
+    fn nearest_scaling_expands_logical_pixels_to_retina_framebuffer() {
+        let source = [1, 2, 3, 4];
+        let mut destination = [0; 16];
+        scale_frame_nearest(&source, 2, 2, &mut destination, 4, 4);
+        assert_eq!(
+            destination,
+            [1, 1, 2, 2, 1, 1, 2, 2, 3, 3, 4, 4, 3, 3, 4, 4]
+        );
+    }
+
+    #[test]
+    fn screenshot_clip_maps_logical_rect_to_retina_framebuffer() {
+        assert_eq!(
+            scale_rect_to_frame((250, 46, 710, 480), (960, 600), (1920, 1200)),
+            (500, 92, 1420, 960)
+        );
+    }
 
     #[test]
     fn edit_focus_enables_copy_and_paste_follows_clipboard() {

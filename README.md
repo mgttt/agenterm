@@ -109,9 +109,13 @@ sudo apt-get install -y \
 DISPLAY=:1 ./target/x86_64-unknown-linux-gnu/debug/agenterm
 ```
 
-The Unix GUI currently rasterizes with the built-in `bitmap-8x8` font; settings
-`terminal.font-size` adjusts row pitch (grid density), while `terminal.font-family`
-is stored for future TTF support and Windows parity.
+The Unix GUI rasterizes a platform system monospace font with anti-aliasing and
+uses a system CJK fallback when available; the built-in `bitmap-8x8` remains a
+startup-safe fallback. `terminal.font-size` is a logical point size that scales
+both glyphs and grid density, while Retina backing pixels are handled separately.
+The configured `terminal.font-family` remains stored for Windows parity; the Unix
+Settings panel reports the resolved system renderer as read-only. New macOS
+profiles default to 14 pt; other platforms retain the 12 pt default.
 
 ## Examples
 

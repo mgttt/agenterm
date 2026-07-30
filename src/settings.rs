@@ -12,6 +12,7 @@ use crate::{
 pub(crate) const DEFAULT_TABS_WIDTH: u16 = TABS_DEFAULT_WIDTH as u16;
 pub(crate) const MIN_TERMINAL_FONT_SIZE: u16 = 8;
 pub(crate) const MAX_TERMINAL_FONT_SIZE: u16 = 36;
+pub(crate) const DEFAULT_TERMINAL_FONT_SIZE: u16 = if cfg!(target_os = "macos") { 14 } else { 12 };
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -64,7 +65,7 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             terminal_font_family: "Consolas".to_owned(),
-            terminal_font_size: 12,
+            terminal_font_size: DEFAULT_TERMINAL_FONT_SIZE,
             color_theme: ThemeId::Dark,
             locale: LocaleId::English,
             terminal_overrides: BTreeMap::new(),
@@ -216,7 +217,7 @@ mod tests {
     fn missing_fields_receive_stable_defaults() {
         let config: AppConfig = serde_json::from_str("{}").unwrap();
         assert_eq!(config.terminal_font_family, "Consolas");
-        assert_eq!(config.terminal_font_size, 12);
+        assert_eq!(config.terminal_font_size, DEFAULT_TERMINAL_FONT_SIZE);
         assert_eq!(config.color_theme, ThemeId::Dark);
         assert_eq!(config.locale, LocaleId::English);
         assert!(config.terminal_overrides.is_empty());

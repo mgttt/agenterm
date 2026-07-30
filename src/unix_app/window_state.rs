@@ -15,7 +15,7 @@
 //! `window.minimized`, `window.state` (`minimized` | `maximized` | `restored`), plus
 //! `visible`, `detached`, `client_width`, `client_height`, and `title`.
 
-use winit::{dpi::PhysicalSize, event::WindowEvent, window::Window};
+use winit::{dpi::LogicalSize, event::WindowEvent, window::Window};
 
 use crate::commands::option_value;
 
@@ -116,12 +116,15 @@ impl UnixAppWindowHandle for WinitWindowHandle<'_> {
     fn resize_client(&self, width: u32, height: u32) {
         let _ = self
             .window
-            .request_inner_size(PhysicalSize::new(width, height));
+            .request_inner_size(LogicalSize::new(width, height));
     }
 
     fn client_size(&self) -> (u32, u32) {
-        let size = self.window.inner_size();
-        (size.width, size.height)
+        let size = self
+            .window
+            .inner_size()
+            .to_logical::<u32>(self.window.scale_factor());
+        (size.width.max(1), size.height.max(1))
     }
 
     fn is_visible(&self) -> bool {

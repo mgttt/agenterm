@@ -63,6 +63,7 @@ windows-sys = { version = "0.61", features = [
 ] }
 
 [target.'cfg(unix)'.dependencies]
+ab_glyph = "0.2.32"
 libc = "0.2"
 softbuffer = "0.4"
 unicode-width = "0.2"

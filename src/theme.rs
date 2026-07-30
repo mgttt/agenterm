@@ -270,6 +270,7 @@ mod tests {
             assert_ne!(palette.selection_foreground, palette.selection_background);
             assert_ne!(palette.focus_ring, palette.sidebar);
             assert_eq!(palette.ansi.len(), 16);
+            assert!(contrast(palette.text, palette.active) >= 4.5);
         }
     }
 

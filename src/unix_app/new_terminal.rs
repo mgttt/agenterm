@@ -6,36 +6,62 @@ use crate::working_context::parse_proxy_url;
 pub(super) enum NewShellChoice {
     #[default]
     Default,
-    CommandPrompt,
-    PowerShell,
+    Primary,
+    Bash,
 }
 
 impl NewShellChoice {
     pub(super) const fn id(self) -> &'static str {
         match self {
             Self::Default => "default",
-            Self::CommandPrompt => "cmd",
-            Self::PowerShell => "powershell",
+            Self::Primary => primary_shell_id(),
+            Self::Bash => "bash",
         }
     }
 
     pub(super) const fn label(self) -> &'static str {
         match self {
             Self::Default => "Default",
-            Self::CommandPrompt => "Command Prompt",
-            Self::PowerShell => "PowerShell",
+            Self::Primary => primary_shell_label(),
+            Self::Bash => "bash",
         }
     }
 
     pub(super) fn from_action_id(action: &str) -> Option<Self> {
         match action {
             "shell-default" => Some(Self::Default),
-            "shell-cmd" => Some(Self::CommandPrompt),
-            "shell-powershell" => Some(Self::PowerShell),
+            "shell-primary" | "shell-zsh" | "shell-sh" | "shell-cmd" => Some(Self::Primary),
+            "shell-bash" | "shell-powershell" => Some(Self::Bash),
             _ => None,
         }
     }
 }
+
+#[cfg(target_os = "macos")]
+const fn primary_shell_id() -> &'static str {
+    "zsh"
+}
+
+#[cfg(not(target_os = "macos"))]
+const fn primary_shell_id() -> &'static str {
+    "sh"
+}
+
+#[cfg(target_os = "macos")]
+const fn primary_shell_label() -> &'static str {
+    "zsh"
+}
+
+#[cfg(not(target_os = "macos"))]
+const fn primary_shell_label() -> &'static str {
+    "sh"
+}
+
+#[cfg(target_os = "macos")]
+const PRIMARY_SHELL_PROGRAM: &str = "/bin/zsh";
+
+#[cfg(not(target_os = "macos"))]
+const PRIMARY_SHELL_PROGRAM: &str = "/bin/sh";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct CreateParams {
@@ -199,21 +225,20 @@ impl NewTerminalDialog {
 fn build_command_line(choice: NewShellChoice, initial: &str) -> Vec<String> {
     match choice {
         NewShellChoice::Default if initial.is_empty() => Vec::new(),
-        NewShellChoice::Default | NewShellChoice::CommandPrompt => {
-            let mut child = vec!["/bin/sh".to_owned()];
+        NewShellChoice::Default | NewShellChoice::Primary => {
+            let mut child = vec![PRIMARY_SHELL_PROGRAM.to_owned()];
             if !initial.is_empty() {
-                child.extend(["-c".to_owned(), format!("{initial}; exec /bin/sh -i")]);
+                child.extend([
+                    "-c".to_owned(),
+                    format!("{initial}; exec {PRIMARY_SHELL_PROGRAM} -i"),
+                ]);
             }
             child
         }
-        NewShellChoice::PowerShell => {
-            let mut child = vec!["pwsh".to_owned(), "-NoLogo".to_owned()];
+        NewShellChoice::Bash => {
+            let mut child = vec!["/bin/bash".to_owned()];
             if !initial.is_empty() {
-                child.extend([
-                    "-NoExit".to_owned(),
-                    "-Command".to_owned(),
-                    initial.to_owned(),
-                ]);
+                child.extend(["-c".to_owned(), format!("{initial}; exec /bin/bash -i")]);
             }
             child
         }
@@ -300,12 +325,12 @@ pub(super) fn dispatch_ui_action(
             ui_action_choose_shell(dialog, NewShellChoice::Default);
             Ok(None)
         }
-        "shell-cmd" => {
-            ui_action_choose_shell(dialog, NewShellChoice::CommandPrompt);
+        "shell-primary" | "shell-zsh" | "shell-sh" | "shell-cmd" => {
+            ui_action_choose_shell(dialog, NewShellChoice::Primary);
             Ok(None)
         }
-        "shell-powershell" => {
-            ui_action_choose_shell(dialog, NewShellChoice::PowerShell);
+        "shell-bash" | "shell-powershell" => {
+            ui_action_choose_shell(dialog, NewShellChoice::Bash);
             Ok(None)
         }
         "new-terminal-set-initial-command" => {
@@ -337,7 +362,7 @@ mod tests {
         dialog.open();
         dialog.set_initial_command_draft("echo hi".to_owned());
         dialog.set_http_proxy_draft("http://proxy.test".to_owned());
-        dialog.choose_shell(NewShellChoice::PowerShell);
+        dialog.choose_shell(NewShellChoice::Bash);
 
         dialog.open();
         assert!(dialog.is_open());
@@ -358,32 +383,31 @@ mod tests {
     }
 
     #[test]
-    fn finish_create_cmd_with_initial() {
+    fn finish_create_primary_shell_with_initial() {
         let mut dialog = NewTerminalDialog::new();
         dialog.open();
-        dialog.choose_shell(NewShellChoice::CommandPrompt);
+        dialog.choose_shell(NewShellChoice::Primary);
         dialog.set_initial_command_draft("echo marker".to_owned());
         let params = dialog.finish(true).unwrap().expect("create params");
-        assert_eq!(params.command_line[0], "/bin/sh");
+        assert_eq!(params.command_line[0], PRIMARY_SHELL_PROGRAM);
         assert_eq!(params.command_line[1], "-c");
         assert!(params.command_line[2].contains("echo marker"));
+        assert!(params.command_line[2].contains(PRIMARY_SHELL_PROGRAM));
     }
 
     #[test]
-    fn finish_create_powershell() {
+    fn finish_create_bash() {
         let mut dialog = NewTerminalDialog::new();
         dialog.open();
-        dialog.choose_shell(NewShellChoice::PowerShell);
-        dialog.set_initial_command_draft("Write-Host hi".to_owned());
+        dialog.choose_shell(NewShellChoice::Bash);
+        dialog.set_initial_command_draft("echo hi".to_owned());
         let params = dialog.finish(true).unwrap().expect("create params");
         assert_eq!(
             params.command_line,
             vec![
-                "pwsh".to_owned(),
-                "-NoLogo".to_owned(),
-                "-NoExit".to_owned(),
-                "-Command".to_owned(),
-                "Write-Host hi".to_owned(),
+                "/bin/bash".to_owned(),
+                "-c".to_owned(),
+                "echo hi; exec /bin/bash -i".to_owned(),
             ]
         );
     }
@@ -453,7 +477,7 @@ mod tests {
         let params = dispatch_ui_action(&mut dialog, "create", None)
             .expect("create")
             .expect("params");
-        assert_eq!(params.command_line[0], "/bin/sh");
+        assert_eq!(params.command_line[0], PRIMARY_SHELL_PROGRAM);
         assert!(!dialog.is_open());
     }
 
@@ -465,11 +489,19 @@ mod tests {
         );
         assert_eq!(
             NewShellChoice::from_action_id("shell-cmd"),
-            Some(NewShellChoice::CommandPrompt)
+            Some(NewShellChoice::Primary)
         );
         assert_eq!(
             NewShellChoice::from_action_id("shell-powershell"),
-            Some(NewShellChoice::PowerShell)
+            Some(NewShellChoice::Bash)
+        );
+        assert_eq!(
+            NewShellChoice::from_action_id("shell-primary"),
+            Some(NewShellChoice::Primary)
+        );
+        assert_eq!(
+            NewShellChoice::from_action_id("shell-bash"),
+            Some(NewShellChoice::Bash)
         );
     }
 }
