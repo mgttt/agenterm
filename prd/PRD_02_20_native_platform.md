@@ -142,8 +142,10 @@ tests or ownership.
    exists but its Unix GUI hot paths still need explicit adapter routing;
    Windows hot paths and AltGr-safe UTF-16 input are wired through
    `platform::windows`)
-3. [ ] move IME, clipboard, DPI, font, screenshot, activation, and remaining
+3. [~] move IME, clipboard, DPI, font, screenshot, activation, and remaining
    window integration incrementally behind the same boundary
+   (Linux IME+clipboard first cut @ `66c54a5`/`b5d54ef`; DPI/scale next;
+   font/screenshot/activation still deferred)
 4. [ ] remove superseded platform-specific paths only after native black-box
    and screenshot evidence passes on that platform
 
