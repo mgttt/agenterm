@@ -100,10 +100,14 @@ tests or ownership.
     application bundle; an installer must not replace it with an unsigned
     locally assembled wrapper
 - Linux
+  - [x] contract-revision-1 toolbar and keyboard hot paths, plus IME and
+    clipboard slice-2 bridges, consume `platform::linux` with explicit
+    headless/backend failures
   - [~] winit/softbuffer windowing, X11/Wayland input, system-font fallback,
     clipboard, cursor, scaling, and POSIX PTY interaction are in active delivery
-  - [ ] expose Linux behavior through the shared platform contracts with
-    explicit X11/Wayland capability facts and headless failure diagnostics
+  - [~] expose the remaining Linux behavior through the shared platform
+    contracts with explicit X11/Wayland capability facts and headless failure
+    diagnostics
   - [ ] packaged launch retains its declared dynamic-library adapter and does
     not require system-wide installation for bundled runtime dependencies
 

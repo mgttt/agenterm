@@ -154,7 +154,7 @@ mod tests {
         use crate::platform::{ModifierState, classify_key_press};
         assert_eq!(
             classify_ime_commit("a"),
-            classify_key_press(ModifierState::empty(), None, None, Some("a"))
+            classify_key_press(false, ModifierState::empty(), None, None, Some("a"))
         );
     }
 }
