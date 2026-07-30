@@ -1330,6 +1330,9 @@ Schema-v3 `contracts` is keyed by the exact task ID. Every task must declare at
 least one stable input ID, output ID, and evidence ID; unknown or missing
 contract entries fail closed during discovery. The bounded `budget` declares
 the task's maximum wall time, Rhai operations, and captured output bytes.
+Tasks that intentionally parse or construct larger structured data may also
+declare maximum collection items and string bytes; these dimensions remain
+subject to the runtime hard ceiling.
 `task run` applies these declared values when the caller omits an override and
 rejects an override that would loosen the contract. A caller may only tighten
 the limits.

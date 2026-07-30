@@ -1805,18 +1805,19 @@ fn run_resolved_script_task(arguments: &[String], task: ResolvedScriptTask) -> i
         "--profile".to_owned(),
         task.profile,
     ];
-    for option in ["--max-collection-items", "--max-string-bytes"] {
-        if let Some(value) = option_value(arguments, option) {
-            translated.push(option.to_owned());
-            translated.push(value.to_owned());
-        }
-    }
     if let Some(budget) = task.budget {
-        for (option, declared) in [
+        let mut declared_options = vec![
             ("--timeout-ms", budget.timeout_ms),
             ("--max-operations", budget.max_operations),
             ("--max-output-bytes", budget.max_output_bytes),
-        ] {
+        ];
+        if let Some(value) = budget.max_collection_items {
+            declared_options.push(("--max-collection-items", value));
+        }
+        if let Some(value) = budget.max_string_bytes {
+            declared_options.push(("--max-string-bytes", value));
+        }
+        for (option, declared) in declared_options {
             let selected = match option_value(arguments, option) {
                 Some(value) => match value.parse::<u64>() {
                     Ok(value) if value > 0 && value <= declared => value,
@@ -1837,8 +1838,27 @@ fn run_resolved_script_task(arguments: &[String], task: ResolvedScriptTask) -> i
             translated.push(option.to_owned());
             translated.push(selected.to_string());
         }
+        for option in ["--max-collection-items", "--max-string-bytes"] {
+            let declared = match option {
+                "--max-collection-items" => budget.max_collection_items,
+                "--max-string-bytes" => budget.max_string_bytes,
+                _ => unreachable!(),
+            };
+            if declared.is_none()
+                && let Some(value) = option_value(arguments, option)
+            {
+                translated.push(option.to_owned());
+                translated.push(value.to_owned());
+            }
+        }
     } else {
-        for option in ["--timeout-ms", "--max-operations", "--max-output-bytes"] {
+        for option in [
+            "--timeout-ms",
+            "--max-operations",
+            "--max-output-bytes",
+            "--max-collection-items",
+            "--max-string-bytes",
+        ] {
             if let Some(value) = option_value(arguments, option) {
                 translated.push(option.to_owned());
                 translated.push(value.to_owned());

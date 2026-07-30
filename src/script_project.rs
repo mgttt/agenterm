@@ -117,6 +117,10 @@ pub struct ScriptTaskBudget {
     pub timeout_ms: u64,
     pub max_operations: u64,
     pub max_output_bytes: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_collection_items: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_string_bytes: Option<u64>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -737,6 +741,20 @@ fn validate_task_contract(contract: &ScriptTaskContract) -> Result<(), String> {
     {
         return Err("task_contract_budget_max_output_bytes: expected 1..67108864".to_owned());
     }
+    if contract
+        .budget
+        .max_collection_items
+        .is_some_and(|value| value == 0 || value > 100_000)
+    {
+        return Err("task_contract_budget_max_collection_items: expected 1..100000".to_owned());
+    }
+    if contract
+        .budget
+        .max_string_bytes
+        .is_some_and(|value| value == 0 || value > 8 * 1024 * 1024)
+    {
+        return Err("task_contract_budget_max_string_bytes: expected 1..8388608".to_owned());
+    }
     Ok(())
 }
 
@@ -1132,7 +1150,9 @@ mod tests {
       "budget": {
         "timeout_ms": 10000,
         "max_operations": 1000000,
-        "max_output_bytes": 65536
+        "max_output_bytes": 65536,
+        "max_collection_items": 20000,
+        "max_string_bytes": 524288
       },
       "network": [],
       "evidence": ["task.check"]
@@ -1202,6 +1222,8 @@ mod tests {
         assert_eq!(contract.budget.timeout_ms, 10_000);
         assert_eq!(contract.budget.max_operations, 1_000_000);
         assert_eq!(contract.budget.max_output_bytes, 65_536);
+        assert_eq!(contract.budget.max_collection_items, Some(20_000));
+        assert_eq!(contract.budget.max_string_bytes, Some(524_288));
         assert!(contract.network.is_empty());
         assert_eq!(contract.evidence, ["task.check"]);
         assert_eq!(catalog.tasks[1].status, ScriptTaskStatus::Degraded);
