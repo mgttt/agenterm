@@ -1,20 +1,15 @@
-use std::{env, fs::OpenOptions, io::Write, mem};
+use std::{env, fs::OpenOptions, io::Write};
 
 use anyhow::{Context as _, Result};
 use windows_sys::Win32::{
-    Foundation::{HWND, INVALID_HANDLE_VALUE, RECT},
-    Graphics::Gdi::{
-        BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC,
-        DIB_RGB_COLORS, DeleteDC, DeleteObject, GetDC, GetDIBits, GetWindowDC, HGDIOBJ, ReleaseDC,
-        SRCCOPY, SelectObject,
-    },
+    Foundation::{HWND, INVALID_HANDLE_VALUE},
     System::Console::{
         ATTACH_PARENT_PROCESS, AttachConsole, FreeConsole, GetStdHandle, STD_ERROR_HANDLE,
     },
-    UI::WindowsAndMessaging::{GetClientRect, GetWindowRect, PostMessageW, WM_APP},
+    UI::WindowsAndMessaging::{PostMessageW, WM_APP},
 };
 
-use crate::{ui_geometry::PixelRect, wake_signal::WakeSignal};
+use crate::wake_signal::WakeSignal;
 
 const WM_APP_WAKE: u32 = WM_APP + 1;
 
@@ -203,113 +198,6 @@ fn write_best_effort_stderr(message: &str) {
 
 fn show_startup_error(error: &anyhow::Error) {
     write_best_effort_stderr(&format!("AgenTerm failed to start:\n\n{error:#}"));
-}
-
-pub(crate) fn save_window_png(
-    window: HWND,
-    path: &std::path::Path,
-    pane: Option<PixelRect>,
-) -> Result<()> {
-    let mut client: RECT = unsafe { mem::zeroed() };
-    let mut outer: RECT = unsafe { mem::zeroed() };
-    unsafe {
-        GetClientRect(window, &mut client);
-        GetWindowRect(window, &mut outer);
-    }
-    let (source, source_x, source_y, width, height) = if let Some(pane) = pane {
-        (
-            unsafe { GetDC(window) },
-            pane.left,
-            pane.top,
-            pane.width().max(1),
-            pane.height().max(1),
-        )
-    } else {
-        (
-            unsafe { GetWindowDC(window) },
-            0,
-            0,
-            (outer.right - outer.left).max(1),
-            (outer.bottom - outer.top).max(1),
-        )
-    };
-    if source.is_null() {
-        anyhow::bail!("failed to acquire window device context");
-    }
-    let memory_dc = unsafe { CreateCompatibleDC(source) };
-    let bitmap = unsafe { CreateCompatibleBitmap(source, width, height) };
-    if memory_dc.is_null() || bitmap.is_null() {
-        if !memory_dc.is_null() {
-            unsafe { DeleteDC(memory_dc) };
-        }
-        unsafe { ReleaseDC(window, source) };
-        anyhow::bail!("failed to allocate screenshot bitmap");
-    }
-
-    let previous = unsafe { SelectObject(memory_dc, bitmap as HGDIOBJ) };
-    let copied = unsafe {
-        BitBlt(
-            memory_dc, 0, 0, width, height, source, source_x, source_y, SRCCOPY,
-        )
-    };
-    let mut info: BITMAPINFO = unsafe { mem::zeroed() };
-    info.bmiHeader = BITMAPINFOHEADER {
-        biSize: mem::size_of::<BITMAPINFOHEADER>() as u32,
-        biWidth: width,
-        biHeight: -height,
-        biPlanes: 1,
-        biBitCount: 32,
-        biCompression: BI_RGB,
-        ..unsafe { mem::zeroed() }
-    };
-    let mut bgra = vec![0_u8; width as usize * height as usize * 4];
-    let scanlines = if copied != 0 {
-        unsafe {
-            GetDIBits(
-                memory_dc,
-                bitmap,
-                0,
-                height as u32,
-                bgra.as_mut_ptr().cast(),
-                &mut info,
-                DIB_RGB_COLORS,
-            )
-        }
-    } else {
-        0
-    };
-    unsafe {
-        SelectObject(memory_dc, previous);
-        DeleteObject(bitmap as HGDIOBJ);
-        DeleteDC(memory_dc);
-        ReleaseDC(window, source);
-    }
-    if copied == 0 || scanlines == 0 {
-        anyhow::bail!("BitBlt/GetDIBits failed while capturing the window");
-    }
-
-    let mut rgba = Vec::with_capacity(bgra.len());
-    for pixel in bgra.chunks_exact(4) {
-        rgba.extend_from_slice(&[pixel[2], pixel[1], pixel[0], 255]);
-    }
-    if let Some(parent) = path.parent()
-        && !parent.as_os_str().is_empty()
-    {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
-    }
-    let file = std::fs::File::create(path)
-        .with_context(|| format!("failed to create {}", path.display()))?;
-    let mut encoder = png::Encoder::new(file, width as u32, height as u32);
-    encoder.set_color(png::ColorType::Rgba);
-    encoder.set_depth(png::BitDepth::Eight);
-    let mut writer = encoder
-        .write_header()
-        .context("failed to start PNG encoder")?;
-    writer
-        .write_image_data(&rgba)
-        .context("failed to write PNG pixels")?;
-    Ok(())
 }
 
 #[cfg(test)]

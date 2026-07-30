@@ -56,6 +56,7 @@ use crate::{
         windows::{
             activation, clipboard,
             input::{Utf16TextDecoder, primary_shortcut, windows_modifiers},
+            screenshot::{self, CaptureArea},
             toolbar::WindowsToolbarHit,
         },
     },
@@ -1464,7 +1465,8 @@ impl RemoteWindowState {
             "screenshot" => {
                 self.paint();
                 let path = screenshot_output_path(&command.args, "agenterm-window");
-                crate::win_app::save_window_png(self.window, &path, None)?;
+                screenshot::save_png(self.window, &path, CaptureArea::Window)
+                    .map_err(|error| platform_capability_error(error.to_capability_status()))?;
                 output = Some(path.display().to_string());
             }
             "screenshot-pane" | "screenshot-tab" => {
@@ -1485,11 +1487,18 @@ impl RemoteWindowState {
                 }
                 self.paint();
                 let path = screenshot_output_path(&command.args, "agenterm-pane");
-                crate::win_app::save_window_png(
+                let terminal = self.workspace_geometry().terminal;
+                screenshot::save_png(
                     self.window,
                     &path,
-                    Some(self.workspace_geometry().terminal),
-                )?;
+                    CaptureArea::Client {
+                        left: terminal.left,
+                        top: terminal.top,
+                        width: terminal.width(),
+                        height: terminal.height(),
+                    },
+                )
+                .map_err(|error| platform_capability_error(error.to_capability_status()))?;
                 output = Some(path.display().to_string());
             }
             "__focus" => {
