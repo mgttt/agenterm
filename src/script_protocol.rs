@@ -103,7 +103,7 @@ impl ScriptBudgets {
     pub fn hard_limits() -> Self {
         Self {
             source_bytes: 256 * 1024,
-            operations: 10_000_000,
+            operations: 100_000_000,
             call_depth: 128,
             expression_depth: 128,
             collection_items: 100_000,

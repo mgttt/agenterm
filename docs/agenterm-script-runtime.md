@@ -1406,9 +1406,12 @@ one-hour deadline ceiling, while HTTP operations retain an independent
 The CLI options `--timeout-ms`, `--max-operations`,
 `--max-collection-items`, and `--max-output-bytes` may select invocation
 values within those published hard ceilings. `--max-string-bytes` is also
-available for structured local workloads. Collection items accept 1 through
-100,000, strings accept 1 through 8,388,608 bytes, and output accepts 1
-through 1,048,576 bytes. These options do not raise child-stream capture
+available for structured local workloads. Operations accept 1 through
+100,000,000 so one explicit hour-long build or qualification coordinator does
+not exhaust its computation counter merely while supervising bounded child
+tasks. Collection items accept 1 through 100,000, strings accept 1 through
+8,388,608 bytes, and output accepts 1 through 1,048,576 bytes. These options do
+not raise child-stream capture
 limits or the global framing ceiling.
 
 ## 19. Examples

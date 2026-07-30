@@ -20,7 +20,7 @@ set "AGENTERM_RELEASE_BOOTSTRAP=%AGENTERM_RELEASE_TARGET%\release-bootstrap-%RAN
 mkdir "%AGENTERM_RELEASE_BOOTSTRAP%" >nul 2>nul
 copy /y "%AGENTERM_RELEASE_WORKER%" "%AGENTERM_RELEASE_BOOTSTRAP%\agenterm-script.exe" >nul
 if errorlevel 1 goto :failed
-"%AGENTERM_RELEASE_BOOTSTRAP%\agenterm-script.exe" task run release --manifest "agenterm.tasks.json" --timeout-ms 3600000 --max-operations 10000000 --max-collection-items 100000 --max-string-bytes 8388608 --max-output-bytes 1048576 -- "%CD%" "%AGENTERM_RELEASE_MODE%"
+"%AGENTERM_RELEASE_BOOTSTRAP%\agenterm-script.exe" task run release --manifest "agenterm.tasks.json" --timeout-ms 3600000 --max-operations 100000000 --max-collection-items 100000 --max-string-bytes 8388608 --max-output-bytes 1048576 -- "%CD%" "%AGENTERM_RELEASE_MODE%"
 if errorlevel 1 goto :failed
 del /q "%AGENTERM_RELEASE_BOOTSTRAP%\agenterm-script.exe" >nul 2>nul
 rmdir "%AGENTERM_RELEASE_BOOTSTRAP%" >nul 2>nul

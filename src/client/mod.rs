@@ -1069,9 +1069,9 @@ fn run_script_command_with_context(
     }
     if let Some(value) = option_value(arguments, "--max-operations") {
         match value.parse::<u64>() {
-            Ok(value) if (1..=10_000_000).contains(&value) => budgets.operations = value,
+            Ok(value) if (1..=100_000_000).contains(&value) => budgets.operations = value,
             _ => {
-                eprintln!("script --max-operations must be from 1 to 10000000");
+                eprintln!("script --max-operations must be from 1 to 100000000");
                 return 2;
             }
         }

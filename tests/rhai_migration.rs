@@ -765,6 +765,31 @@ fn legacy_profile_spellings_share_the_unrestricted_runtime() {
 }
 
 #[test]
+fn public_operation_budget_supports_long_orchestration() {
+    let accepted = Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+        .args(["eval", "1", "--max-operations", "100000000", "--json"])
+        .output()
+        .expect("evaluate with maximum operation budget");
+    assert!(
+        accepted.status.success(),
+        "maximum operation budget was rejected: {}",
+        String::from_utf8_lossy(&accepted.stderr)
+    );
+
+    let rejected = Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+        .args(["eval", "1", "--max-operations", "100000001", "--json"])
+        .output()
+        .expect("reject excessive operation budget");
+    assert_eq!(rejected.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&rejected.stderr)
+            .contains("script --max-operations must be from 1 to 100000000"),
+        "unexpected excessive-budget diagnostic: {}",
+        String::from_utf8_lossy(&rejected.stderr)
+    );
+}
+
+#[test]
 fn child_id_remains_public_after_process_completion() {
     let output = Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
         .args([

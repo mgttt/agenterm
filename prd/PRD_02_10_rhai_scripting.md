@@ -95,7 +95,9 @@ and it is not positioned as a restricted security plugin.
   stable one-hour robustness ceiling so build and qualification orchestration
   can remain Rhai-owned; the ordinary default remains two seconds,
   child-process call deadlines may use the same one-hour ceiling, and HTTP
-  retains its stricter 10-second ceiling;
+  retains its stricter 10-second ceiling. The explicit operation ceiling is
+  100,000,000 so the coordinator's bounded process observation and wait loops
+  can cover a complete stress-inclusive release rehearsal;
 - agent-specific tool visibility, approval, path/domain/target policy,
   credentials, quotas, and natural-language intent belong exclusively to the
   future Agent harness, which may constrain an Agent before invoking this
