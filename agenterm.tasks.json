@@ -104,7 +104,6 @@
       "entry": "scripts/rhai/release.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": ["."],
       "dependencies": ["check", "preflight", "package-release-qualified"],
       "platforms": ["windows"],
       "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback", "git_mutation", "remote_publish"]

@@ -1,6 +1,6 @@
 // Qualify, package, rehearse, and explicitly publish one exact candidate.
 //
-// Args: REPO [validate|rehearse|publish|--rehearse]
+// Args: [REPO] [validate|rehearse|publish|--rehearse]
 
 import "scripts/rhai/lib/package_qualified" as package_qualified;
 
@@ -209,15 +209,27 @@ fn git_mutation(repo, arguments) {
     command_output("git", argv, repo, 120000)
 }
 
-require(args.len >= 1 && args.len <= 2, "expected: REPO [--rehearse]");
-let repo = std::path::absolute(args[0]).display;
-let mode = if args.len == 1 {
-    "publish"
-} else if args[1] == "--rehearse" {
-    "rehearse"
-} else {
-    args[1]
-};
+require(args.len <= 2, "expected: [REPO] [--rehearse]");
+let repo = std::env::current_dir().display;
+let mode = "publish";
+if args.len == 1 {
+    if args[0] == "--rehearse" {
+        mode = "rehearse";
+    } else if args[0] == "validate"
+            || args[0] == "rehearse"
+            || args[0] == "publish" {
+        mode = args[0];
+    } else {
+        repo = std::path::absolute(args[0]).display;
+    }
+} else if args.len == 2 {
+    repo = std::path::absolute(args[0]).display;
+    mode = if args[1] == "--rehearse" {
+        "rehearse"
+    } else {
+        args[1]
+    };
+}
 require(
     mode == "validate" || mode == "rehearse" || mode == "publish",
     "release_mode:" + mode
