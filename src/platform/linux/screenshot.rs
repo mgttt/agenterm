@@ -119,9 +119,7 @@ impl ScreenshotError {
                 width,
                 height,
                 pixels,
-            } => format!(
-                "pixel buffer length {pixels} is smaller than declared {width}x{height}"
-            ),
+            } => format!("pixel buffer length {pixels} is smaller than declared {width}x{height}"),
             Self::FrameTooLarge {
                 width,
                 height,
