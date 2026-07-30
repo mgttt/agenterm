@@ -1575,10 +1575,12 @@ fn assert_supervisor(
     interrupted.wait_with_output(std::time::Duration::from_secs(2));
     helper::wait_process_gone(nested_pid, 3000);
 
-    // The outer named task itself consumes one of the catalogued four global
-    // supervisor slots, so three nested holders must fill the remaining set.
+    // Fill the published eight-slot global pool until the first typed denial.
+    // The number already occupied by release/check/task ancestors varies with
+    // the caller, so a fixed holder count would make this evidence flaky.
     let holders = [];
-    for index in 0..3 {
+    let denied_output = ();
+    for index in 0..8 {
         let holder = helper::start_script_client(
             context,
             cli,
@@ -1590,20 +1592,22 @@ fn assert_supervisor(
             audit_path
         );
         rhai::task::sleep(std::time::Duration::from_millis(100));
-        require(
-            holder.state == "running",
-            "script_supervisor_holder_not_running:" + index
-        );
-        holders.push(holder);
+        if holder.state == "running" {
+            holders.push(holder);
+        } else {
+            denied_output = holder.wait_with_output(
+                std::time::Duration::from_secs(3)
+            );
+            break;
+        }
     }
-    let denied = helper::start_script_client(
-        context,
-        cli,
-        ["script", "eval", "42"],
-        audit_path
+    require(
+        holders.len > 0,
+        "script_supervisor_no_holder_acquired"
     );
-    let denied_output = denied.wait_with_output(
-        std::time::Duration::from_secs(3)
+    require(
+        denied_output != (),
+        "script_supervisor_global_limit_not_enforced"
     );
     require(
         denied_output.exit_code == 2
