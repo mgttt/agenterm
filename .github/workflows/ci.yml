@@ -72,7 +72,7 @@ jobs:
         run: |
           BIN=target/x86_64-unknown-linux-gnu/debug
           "$BIN/agenterm-script" task run migration-audit --manifest agenterm.tasks.json \
-            --timeout-ms 60000 --max-operations 10000000 -- -- .
+            --timeout-ms 60000 --max-operations 10000000
       - name: Portable Rhai gate (lint static)
         run: |
           BIN=target/x86_64-unknown-linux-gnu/debug

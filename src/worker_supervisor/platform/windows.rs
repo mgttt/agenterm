@@ -1,9 +1,7 @@
 use std::{
     ffi::c_void,
-    fs::{File, OpenOptions},
     mem,
     os::windows::io::AsRawHandle,
-    path::PathBuf,
     process::{Child, Command},
     ptr,
     sync::atomic::Ordering,
@@ -25,7 +23,7 @@ use crate::worker_supervisor::{
     GLOBAL_CONCURRENCY_LIMIT, PROCESS_ACTIVE, PROCESS_CONCURRENCY_LIMIT, SupervisorError,
 };
 
-pub(crate) struct ProcessTreeGuard(HANDLE);
+pub(crate) struct ProcessTreeGuard(Job);
 
 pub(crate) fn configure_worker_command(_command: &mut Command) {}
 
@@ -33,11 +31,11 @@ impl ProcessTreeGuard {
     pub(crate) fn attach(child: &mut Child) -> Result<Self, String> {
         let job = Job::new()?;
         job.assign(child)?;
-        Ok(Self(job.0))
+        Ok(Self(job))
     }
 
     pub(crate) fn terminate(&self, exit_code: u32) -> Result<(), String> {
-        Job(self.0).terminate(exit_code)
+        self.0.terminate(exit_code)
     }
 }
 
