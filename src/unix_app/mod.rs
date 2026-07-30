@@ -76,8 +76,8 @@ use render::{
     NewTerminalModalView, STATUS_HEIGHT, SettingsHit, SettingsModalView, SidebarTabRow,
     StatusBarView, TabEditorFocusView, TabEditorView, TerminalCursorStyle, TerminalGrid,
     TerminalPaint, ToolbarHit, WindowCloseHit, WindowCloseView, WorkspaceToolbarView, cell_metrics,
-    effective_palette, grid_dimensions_for_pixels, render_frame, scrollbar_view_from_geometry,
-    sidebar_row_at_y,
+    effective_palette, grid_dimensions_for_pixels, render_frame, render_terminal_grid_hidpi,
+    scrollbar_view_from_geometry, sidebar_row_at_y,
 };
 use window_state::{
     WindowStateTracker, WindowUiActionResult, WinitWindowHandle, absorb_window_event,
@@ -3242,6 +3242,7 @@ impl UnixApp {
             } else {
                 TerminalCursorStyle::Hidden
             };
+        let hidpi_terminal_visible = !modal_active && ime_preedit.is_none();
         let Some(surface) = self.surface.as_mut() else {
             return;
         };
@@ -3258,6 +3259,8 @@ impl UnixApp {
         };
         let width = buffer.width().get();
         let height = buffer.height().get();
+        let hidpi_terminal_active =
+            hidpi_terminal_visible && (width != logical_width || height != logical_height);
         let mut logical_pixels = vec![0_u32; (logical_width * logical_height) as usize];
         render_frame(
             &mut logical_pixels,
@@ -3277,6 +3280,7 @@ impl UnixApp {
                     cursor_style,
                     cursor_shape: cursor_appearance.shape,
                 },
+                terminal_at_logical_resolution: !hidpi_terminal_active,
                 sidebar_rows: &sidebar_rows,
                 sidebar_tree: layout.sidebar_tree,
                 editing_tab_id: self.note_edit_target,
@@ -3303,6 +3307,28 @@ impl UnixApp {
             width,
             height,
         );
+        if hidpi_terminal_active {
+            render_terminal_grid_hidpi(
+                &mut buffer,
+                width,
+                width,
+                height,
+                logical_width,
+                logical_height,
+                content_height,
+                sidebar_width,
+                layout.terminal.top.max(0) as u32,
+                cell_width,
+                cell_height,
+                TerminalPaint {
+                    grid,
+                    selection: terminal_selection,
+                    cursor_style,
+                    cursor_shape: cursor_appearance.shape,
+                },
+                palette,
+            );
+        }
         self.last_frame = Some((width, height, buffer.to_vec()));
         let _ = buffer.present();
     }

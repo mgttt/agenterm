@@ -113,6 +113,8 @@ The Unix GUI rasterizes a platform system monospace font with anti-aliasing and
 uses a system CJK fallback when available; the built-in `bitmap-8x8` remains a
 startup-safe fallback. `terminal.font-size` is a logical point size that scales
 both glyphs and grid density, while Retina backing pixels are handled separately.
+On HiDPI displays the terminal content layer is rasterized again at the native
+framebuffer resolution instead of enlarging 1× glyph pixels.
 The configured `terminal.font-family` remains stored for Windows parity; the Unix
 Settings panel reports the resolved system renderer as read-only. New macOS
 profiles default to 14 pt; other platforms retain the 12 pt default.

@@ -753,6 +753,7 @@ pub(super) struct FrameContent<'a> {
     pub(super) cell_width: u32,
     pub(super) cell_height: u32,
     pub(super) terminal: TerminalPaint<'a>,
+    pub(super) terminal_at_logical_resolution: bool,
     pub(super) sidebar_rows: &'a [SidebarTabRow],
     pub(super) sidebar_tree: PixelRect,
     pub(super) editing_tab_id: Option<u64>,
@@ -779,6 +780,9 @@ struct TerminalGridLayout {
     offset_y: u32,
     cell_width: u32,
     cell_height: u32,
+    padding_x: u32,
+    padding_y: u32,
+    scrollbar_width: u32,
 }
 
 pub(super) fn render_frame(
@@ -813,20 +817,25 @@ pub(super) fn render_frame(
     if let Some(toolbar) = content.workspace_toolbar {
         render_workspace_toolbar(buffer, stride, width, height, palette, toolbar);
     }
-    render_terminal_grid(
-        buffer,
-        stride,
-        content.terminal,
-        palette,
-        TerminalGridLayout {
-            width,
-            height: content.content_height,
-            offset_x: content.sidebar_width,
-            offset_y: content.terminal_top,
-            cell_width: content.cell_width,
-            cell_height: content.cell_height,
-        },
-    );
+    if content.terminal_at_logical_resolution {
+        render_terminal_grid(
+            buffer,
+            stride,
+            content.terminal,
+            palette,
+            TerminalGridLayout {
+                width,
+                height: content.content_height,
+                offset_x: content.sidebar_width,
+                offset_y: content.terminal_top,
+                cell_width: content.cell_width,
+                cell_height: content.cell_height,
+                padding_x: CELL_PADDING_X,
+                padding_y: CELL_PADDING_Y,
+                scrollbar_width: SCROLLBAR_WIDTH,
+            },
+        );
+    }
     if let Some(scrollbar) = content.scrollbar {
         render_scrollbar(buffer, stride, palette, scrollbar);
     }
@@ -870,6 +879,51 @@ pub(super) fn render_frame(
     if let Some(preedit) = content.ime_preedit {
         render_ime_preedit(buffer, stride, width, height, palette, preedit);
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn render_terminal_grid_hidpi(
+    buffer: &mut [u32],
+    stride: u32,
+    physical_width: u32,
+    physical_height: u32,
+    logical_width: u32,
+    logical_height: u32,
+    logical_content_height: u32,
+    logical_offset_x: u32,
+    logical_offset_y: u32,
+    logical_cell_width: u32,
+    logical_cell_height: u32,
+    terminal: TerminalPaint<'_>,
+    palette: &ThemePalette,
+) {
+    if physical_width == logical_width && physical_height == logical_height {
+        return;
+    }
+    let scale = |value: u32, logical: u32, physical: u32| {
+        if logical == 0 {
+            0
+        } else {
+            (u64::from(value) * u64::from(physical) / u64::from(logical)) as u32
+        }
+    };
+    render_terminal_grid(
+        buffer,
+        stride,
+        terminal,
+        palette,
+        TerminalGridLayout {
+            width: physical_width,
+            height: scale(logical_content_height, logical_height, physical_height),
+            offset_x: scale(logical_offset_x, logical_width, physical_width),
+            offset_y: scale(logical_offset_y, logical_height, physical_height),
+            cell_width: scale(logical_cell_width, logical_width, physical_width).max(1),
+            cell_height: scale(logical_cell_height, logical_height, physical_height).max(1),
+            padding_x: scale(CELL_PADDING_X, logical_width, physical_width).max(1),
+            padding_y: scale(CELL_PADDING_Y, logical_height, physical_height).max(1),
+            scrollbar_width: scale(SCROLLBAR_WIDTH, logical_width, physical_width).max(1),
+        },
+    );
 }
 
 fn render_ime_preedit(
@@ -1588,7 +1642,7 @@ fn render_terminal_grid(
     let terminal_width = layout
         .width
         .saturating_sub(layout.offset_x)
-        .saturating_sub(SCROLLBAR_WIDTH);
+        .saturating_sub(layout.scrollbar_width);
     let selection_fg = palette.selection_foreground;
     let selection_bg = palette.selection_background;
     for row in 0..terminal.grid.rows {
@@ -1631,6 +1685,8 @@ fn render_terminal_grid(
                 fg,
                 bg,
                 cell.attributes,
+                layout.padding_x,
+                layout.padding_y,
             );
             col += if wide { 2 } else { 1 };
         }
@@ -1664,9 +1720,12 @@ fn render_terminal_grid(
                         palette.terminal_background,
                         palette.focus_ring,
                         cell.attributes,
+                        layout.padding_x,
+                        layout.padding_y,
                     ),
                     TerminalCursorShape::Underline => {
-                        let cursor_height = (layout.cell_height / 8).clamp(2, 3);
+                        let cursor_height = (layout.cell_height / 8)
+                            .clamp(layout.padding_y, layout.padding_y + layout.padding_y / 2);
                         fill_rect(
                             buffer,
                             stride,
@@ -1678,7 +1737,8 @@ fn render_terminal_grid(
                         );
                     }
                     TerminalCursorShape::Bar => {
-                        let bar_width = (layout.cell_width / 5).clamp(2, 3);
+                        let bar_width = (layout.cell_width / 5)
+                            .clamp(layout.padding_x * 2, layout.padding_x * 3);
                         fill_rect(
                             buffer,
                             stride,
@@ -1692,23 +1752,25 @@ fn render_terminal_grid(
                 },
                 TerminalCursorStyle::Inactive => {
                     let color = rgb_to_pixel(palette.muted_text);
-                    fill_rect(buffer, stride, x, y, cursor_width, 1, color);
+                    let border_x = layout.padding_x.max(1);
+                    let border_y = layout.padding_y.div_ceil(2).max(1);
+                    fill_rect(buffer, stride, x, y, cursor_width, border_y, color);
                     fill_rect(
                         buffer,
                         stride,
                         x,
-                        y + layout.cell_height - 1,
+                        y + layout.cell_height - border_y,
                         cursor_width,
-                        1,
+                        border_y,
                         color,
                     );
-                    fill_rect(buffer, stride, x, y, 1, layout.cell_height, color);
+                    fill_rect(buffer, stride, x, y, border_x, layout.cell_height, color);
                     fill_rect(
                         buffer,
                         stride,
-                        x + cursor_width - 1,
+                        x + cursor_width - border_x,
                         y,
-                        1,
+                        border_x,
                         layout.cell_height,
                         color,
                     );
@@ -2157,6 +2219,8 @@ fn draw_cell(
     mut fg: Rgb,
     bg: Rgb,
     attributes: TerminalAttributes,
+    padding_x: u32,
+    padding_y: u32,
 ) {
     if origin_x >= width || origin_y >= height {
         return;
@@ -2182,8 +2246,8 @@ fn draw_cell(
         );
     }
 
-    let glyph_y = origin_y + CELL_PADDING_Y;
-    let glyph_h = cell_h.saturating_sub(CELL_PADDING_Y * 2);
+    let glyph_y = origin_y + padding_y;
+    let glyph_h = cell_h.saturating_sub(padding_y * 2);
     if cell_w == 0 || glyph_h == 0 {
         return;
     }
@@ -2235,8 +2299,8 @@ fn draw_cell(
             .flatten()
     });
     let Some(glyph) = glyph else { return };
-    let glyph_x = origin_x + CELL_PADDING_X;
-    let glyph_w = cell_w.saturating_sub(CELL_PADDING_X * 2);
+    let glyph_x = origin_x + padding_x;
+    let glyph_w = cell_w.saturating_sub(padding_x * 2);
     if glyph_w == 0 {
         return;
     }
@@ -2713,6 +2777,8 @@ mod tests {
                 foreground,
                 background,
                 attributes,
+                CELL_PADDING_X,
+                CELL_PADDING_Y,
             );
             buffer
         };
@@ -2785,6 +2851,8 @@ mod tests {
                 foreground,
                 background,
                 TerminalAttributes::default(),
+                CELL_PADDING_X,
+                CELL_PADDING_Y,
             );
             buffer
         };
@@ -2820,6 +2888,8 @@ mod tests {
             foreground,
             background,
             TerminalAttributes::default(),
+            CELL_PADDING_X,
+            CELL_PADDING_Y,
         );
 
         assert!(
@@ -2870,6 +2940,8 @@ mod tests {
                 foreground,
                 background,
                 TerminalAttributes::default(),
+                CELL_PADDING_X,
+                CELL_PADDING_Y,
             );
             buffer
                 .into_iter()
@@ -2878,6 +2950,79 @@ mod tests {
         };
 
         assert!(count_foreground(24) > count_foreground(12));
+    }
+
+    #[test]
+    fn hidpi_terminal_grid_rasterizes_at_physical_resolution() {
+        let palette = ThemeId::Dark.palette();
+        let (cell_width, cell_height) = cell_metrics(14);
+        let logical_width = cell_width + SCROLLBAR_WIDTH;
+        let logical_height = cell_height;
+        let mut parser = vt100::Parser::new(1, 1, 0);
+        parser.process(b"M\x1b[?25l");
+        let mut grid = TerminalGrid::new(1, 1, palette);
+        grid.sync_from_screen(parser.screen());
+        let paint = || TerminalPaint {
+            grid: &grid,
+            selection: None,
+            cursor_style: TerminalCursorStyle::Hidden,
+            cursor_shape: TerminalCursorShape::Block,
+        };
+        let mut logical = vec![
+            rgb_to_pixel(palette.terminal_background);
+            (logical_width * logical_height) as usize
+        ];
+        render_terminal_grid(
+            &mut logical,
+            logical_width,
+            paint(),
+            palette,
+            TerminalGridLayout {
+                width: logical_width,
+                height: logical_height,
+                offset_x: 0,
+                offset_y: 0,
+                cell_width,
+                cell_height,
+                padding_x: CELL_PADDING_X,
+                padding_y: CELL_PADDING_Y,
+                scrollbar_width: SCROLLBAR_WIDTH,
+            },
+        );
+
+        let physical_width = logical_width * 2;
+        let physical_height = logical_height * 2;
+        let mut physical = vec![0; (physical_width * physical_height) as usize];
+        for y in 0..physical_height {
+            for x in 0..physical_width {
+                physical[(y * physical_width + x) as usize] =
+                    logical[((y / 2) * logical_width + x / 2) as usize];
+            }
+        }
+        let nearest = physical.clone();
+
+        render_terminal_grid_hidpi(
+            &mut physical,
+            physical_width,
+            physical_width,
+            physical_height,
+            logical_width,
+            logical_height,
+            logical_height,
+            0,
+            0,
+            cell_width,
+            cell_height,
+            paint(),
+            palette,
+        );
+
+        assert_ne!(physical, nearest);
+        for row in 0..physical_height {
+            let start = (row * physical_width + cell_width * 2) as usize;
+            let end = ((row + 1) * physical_width) as usize;
+            assert_eq!(&physical[start..end], &nearest[start..end]);
+        }
     }
 
     #[cfg(target_os = "macos")]
@@ -2909,6 +3054,8 @@ mod tests {
             foreground,
             background,
             TerminalAttributes::default(),
+            CELL_PADDING_X,
+            CELL_PADDING_Y,
         );
 
         assert!(
@@ -2967,6 +3114,9 @@ mod tests {
             offset_y: 0,
             cell_width,
             cell_height,
+            padding_x: CELL_PADDING_X,
+            padding_y: CELL_PADDING_Y,
+            scrollbar_width: SCROLLBAR_WIDTH,
         };
 
         render_terminal_grid(
@@ -3039,6 +3189,9 @@ mod tests {
             offset_y: 0,
             cell_width,
             cell_height,
+            padding_x: CELL_PADDING_X,
+            padding_y: CELL_PADDING_Y,
+            scrollbar_width: SCROLLBAR_WIDTH,
         };
         let background = rgb_to_pixel(palette.terminal_background);
         let accent = rgb_to_pixel(palette.focus_ring);
