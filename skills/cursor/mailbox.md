@@ -3,14 +3,14 @@
 协议：[inter-agent-comms.md](inter-agent-comms.md)  
 登记表：[session-registry.md](session-registry.md)
 
-最后由**主控**刷新：2026-07-30 ~13:10 UTC
+最后由**主控**刷新：2026-07-30 ~13:15 UTC
 
 ## 共享事实
 
 | 键 | 值 |
 |----|-----|
 | 产品版本 | **0.1.10**（`Cargo.toml` / `agenterm.tasks.json`） |
-| `origin/main` | `cccf523` `docs(v0.1.10): close final delivery evidence` |
+| `origin/main` | `9cd9591` `docs(skills): add 主控↔分身 mailbox comms protocol`（其上为 Win Rhai 收口 `cccf523` 一带） |
 | tracked `*.ps1` | **0**；migration-audit drift=false |
 | 云环境 | Personal `mgttt/agenterm`；**x86_64 Linux + DISPLAY=:1 VNC desktop**；可原生跑 Linux GUI |
 | 非环境事实 | QEMU/Wine 仅交叉或 Windows-on-Linux 烟测，**不是**本机桌面 |
