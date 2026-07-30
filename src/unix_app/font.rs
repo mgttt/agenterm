@@ -291,6 +291,10 @@ fn font_candidates() -> &'static [FontCandidate] {
             name: "Hiragino Sans GB",
             components: &["System", "Library", "Fonts", "Hiragino Sans GB.ttc"],
         },
+        FontCandidate {
+            name: "Apple Symbols",
+            components: &["System", "Library", "Fonts", "Apple Symbols.ttf"],
+        },
     ]
 }
 

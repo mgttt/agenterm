@@ -54,9 +54,53 @@ pub(super) struct TabEditorView {
     pub(super) focus: TabEditorFocusView,
 }
 
+const TERMINAL_CELL_TEXT_BYTES: usize = 22;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct TerminalCellText {
+    bytes: [u8; TERMINAL_CELL_TEXT_BYTES],
+    len: u8,
+}
+
+impl TerminalCellText {
+    const fn blank() -> Self {
+        let mut bytes = [0; TERMINAL_CELL_TEXT_BYTES];
+        bytes[0] = b' ';
+        Self { bytes, len: 1 }
+    }
+
+    fn from_str(text: &str) -> Self {
+        assert!(
+            text.len() <= TERMINAL_CELL_TEXT_BYTES,
+            "vt100 cell contents exceed the mirrored inline capacity"
+        );
+        let mut bytes = [0; TERMINAL_CELL_TEXT_BYTES];
+        let normalized = if text.is_empty() { " " } else { text };
+        bytes[..normalized.len()].copy_from_slice(normalized.as_bytes());
+        Self {
+            bytes,
+            len: normalized.len() as u8,
+        }
+    }
+
+    fn from_char(ch: char) -> Self {
+        let mut encoded = [0; 4];
+        Self::from_str(ch.encode_utf8(&mut encoded))
+    }
+
+    fn as_str(&self) -> &str {
+        std::str::from_utf8(&self.bytes[..usize::from(self.len)])
+            .expect("terminal cell text is constructed from valid UTF-8")
+    }
+
+    fn base_char(&self) -> char {
+        self.as_str().chars().next().unwrap_or(' ')
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct TerminalCell {
-    pub(super) ch: char,
+    text: TerminalCellText,
     pub(super) fg: u8,
     pub(super) bg: u8,
 }
@@ -67,7 +111,7 @@ const DEFAULT_TERMINAL_BACKGROUND: u8 = 17;
 impl TerminalCell {
     pub(super) const fn blank() -> Self {
         Self {
-            ch: ' ',
+            text: TerminalCellText::blank(),
             fg: DEFAULT_TERMINAL_FOREGROUND,
             bg: DEFAULT_TERMINAL_BACKGROUND,
         }
@@ -75,9 +119,17 @@ impl TerminalCell {
 
     pub(super) fn with_defaults(ch: char, _palette: &ThemePalette) -> Self {
         Self {
-            ch,
+            text: TerminalCellText::from_char(ch),
             ..Self::blank()
         }
+    }
+
+    fn text(&self) -> &str {
+        self.text.as_str()
+    }
+
+    fn base_char(&self) -> char {
+        self.text.base_char()
     }
 }
 
@@ -130,15 +182,16 @@ impl TerminalGrid {
                         if cell.is_wide_continuation() {
                             return TerminalCell::blank();
                         }
-                        let text = cell.contents();
-                        let ch = text.chars().next().unwrap_or(' ');
-                        let ch = if text.is_empty() { ' ' } else { ch };
                         let mut fg = color_index(cell.fgcolor(), false);
                         let mut bg = color_index(cell.bgcolor(), true);
                         if cell.inverse() {
                             std::mem::swap(&mut fg, &mut bg);
                         }
-                        TerminalCell { ch, fg, bg }
+                        TerminalCell {
+                            text: TerminalCellText::from_str(cell.contents()),
+                            fg,
+                            bg,
+                        }
                     });
                 self.set_cell(col, row, cell);
             }
@@ -1505,7 +1558,7 @@ fn render_terminal_grid(
                 break;
             }
             let cell = terminal.grid.cell(col, row);
-            let wide = cell.ch.width() == Some(2);
+            let wide = cell.base_char().width() == Some(2);
             let cell_w = if wide {
                 layout.cell_width * 2
             } else {
@@ -1533,7 +1586,7 @@ fn render_terminal_grid(
                 layout.offset_y + u32::from(row) * layout.cell_height,
                 cell_w,
                 layout.cell_height,
-                cell.ch,
+                cell.text(),
                 fg,
                 bg,
             );
@@ -1548,7 +1601,7 @@ fn render_terminal_grid(
             && y + layout.cell_height <= layout.height
         {
             let cell = terminal.grid.cell(cursor.col, cursor.row);
-            let cursor_width = if cell.ch.width() == Some(2) {
+            let cursor_width = if cell.base_char().width() == Some(2) {
                 layout.cell_width * 2
             } else {
                 layout.cell_width
@@ -1565,7 +1618,7 @@ fn render_terminal_grid(
                         y,
                         cursor_width,
                         layout.cell_height,
-                        cell.ch,
+                        cell.text(),
                         palette.terminal_background,
                         palette.focus_ring,
                     ),
@@ -2057,7 +2110,7 @@ fn draw_cell(
     origin_y: u32,
     cell_width: u32,
     cell_height: u32,
-    ch: char,
+    text: &str,
     fg: Rgb,
     bg: Rgb,
 ) {
@@ -2076,8 +2129,12 @@ fn draw_cell(
         return;
     }
     let raster_size = glyph_h.min(u32::from(u16::MAX)) as u16;
+    let mut chars = text.chars();
+    let Some(base) = chars.next() else {
+        return;
+    };
     if let (Some(glyph), Some(ascent)) =
-        (raster_glyph(ch, raster_size), primary_ascent(raster_size))
+        (raster_glyph(base, raster_size), primary_ascent(raster_size))
     {
         let centered_x = origin_x as f32 + (cell_w as f32 - glyph.advance).max(0.0) / 2.0;
         let baseline_y = glyph_y as f32 + ascent;
@@ -2092,11 +2149,29 @@ fn draw_cell(
             fg,
             (origin_x, origin_y, cell_w, cell_h),
         );
+        for combining in chars {
+            if let Some(glyph) = raster_glyph(combining, raster_size) {
+                draw_raster_glyph(
+                    buffer,
+                    stride,
+                    width,
+                    height,
+                    &glyph,
+                    centered_x,
+                    baseline_y,
+                    fg,
+                    (origin_x, origin_y, cell_w, cell_h),
+                );
+            }
+        }
         return;
     }
-    let Some(glyph) = super::font::glyph_rows(ch) else {
-        return;
-    };
+    let glyph = super::font::glyph_rows(base).or_else(|| {
+        (!base.is_whitespace())
+            .then(|| super::font::glyph_rows('?'))
+            .flatten()
+    });
+    let Some(glyph) = glyph else { return };
     let glyph_x = origin_x + CELL_PADDING_X;
     let glyph_w = cell_w.saturating_sub(CELL_PADDING_X * 2);
     if glyph_w == 0 {
@@ -2414,6 +2489,7 @@ mod tests {
     #[test]
     fn terminal_defaults_follow_theme_instead_of_ansi_slots() {
         let blank = TerminalCell::blank();
+        assert_eq!(blank.text(), " ");
         assert_eq!(
             terminal_color(ThemeId::Dark.palette(), blank.fg),
             ThemeId::Dark.palette().terminal_foreground
@@ -2425,6 +2501,91 @@ mod tests {
         assert_eq!(
             terminal_color(ThemeId::Light.palette(), 0),
             ThemeId::Light.palette().ansi[0]
+        );
+    }
+
+    #[test]
+    fn terminal_cell_keeps_vt100_combining_sequences_inline() {
+        let palette = ThemeId::Dark.palette();
+        let mut parser = vt100::Parser::new(1, 4, 0);
+        parser.process("e\u{301} ♥\u{fe0f}".as_bytes());
+        let mut grid = TerminalGrid::new(4, 1, palette);
+
+        grid.sync_from_screen(parser.screen());
+
+        assert_eq!(grid.cell(0, 0).text(), "e\u{301}");
+        assert_eq!(grid.cell(2, 0).text(), "♥\u{fe0f}");
+        assert!(std::mem::size_of::<TerminalCell>() <= 32);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn terminal_cell_renders_combining_marks() {
+        let foreground = Rgb {
+            red: 240,
+            green: 240,
+            blue: 240,
+        };
+        let background = Rgb {
+            red: 10,
+            green: 10,
+            blue: 10,
+        };
+        let (width, height) = cell_metrics(18);
+        let render = |text| {
+            let mut buffer = vec![rgb_to_pixel(background); (width * height) as usize];
+            draw_cell(
+                &mut buffer,
+                width,
+                width,
+                height,
+                0,
+                0,
+                width,
+                height,
+                text,
+                foreground,
+                background,
+            );
+            buffer
+        };
+
+        assert_ne!(render("e"), render("e\u{301}"));
+    }
+
+    #[test]
+    fn terminal_cell_draws_replacement_for_missing_base_glyph() {
+        let foreground = Rgb {
+            red: 240,
+            green: 240,
+            blue: 240,
+        };
+        let background = Rgb {
+            red: 10,
+            green: 10,
+            blue: 10,
+        };
+        let (width, height) = cell_metrics(12);
+        let mut buffer = vec![rgb_to_pixel(background); (width * height) as usize];
+
+        draw_cell(
+            &mut buffer,
+            width,
+            width,
+            height,
+            0,
+            0,
+            width,
+            height,
+            "\u{10ffff}",
+            foreground,
+            background,
+        );
+
+        assert!(
+            buffer
+                .iter()
+                .any(|pixel| *pixel != rgb_to_pixel(background))
         );
     }
 
@@ -2465,7 +2626,7 @@ mod tests {
                 0,
                 width,
                 height,
-                'M',
+                "M",
                 foreground,
                 background,
             );
@@ -2503,7 +2664,7 @@ mod tests {
             0,
             width,
             cell_height,
-            '繁',
+            "繁",
             foreground,
             background,
         );
