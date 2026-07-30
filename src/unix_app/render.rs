@@ -52,6 +52,7 @@ pub(super) struct TabEditorView {
     pub(super) name_draft: String,
     pub(super) note_draft: String,
     pub(super) focus: TabEditorFocusView,
+    pub(super) selected_all: bool,
 }
 
 const TERMINAL_CELL_TEXT_BYTES: usize = 22;
@@ -451,6 +452,7 @@ pub(super) struct NewTerminalModalView<'a> {
     pub(super) http_proxy: &'a str,
     pub(super) https_proxy: &'a str,
     pub(super) focus: NewTerminalFocusView,
+    pub(super) selected_all: bool,
     pub(super) bounds: (u32, u32, u32, u32),
     pub(super) default_shell_button: (u32, u32, u32, u32),
     pub(super) primary_shell_button: (u32, u32, u32, u32),
@@ -543,6 +545,7 @@ impl NewTerminalModalView<'_> {
             http_proxy,
             https_proxy,
             focus,
+            selected_all: false,
             bounds: (left, top, width, height),
             default_shell_button: shell_button(0),
             primary_shell_button: shell_button(1),
@@ -553,6 +556,11 @@ impl NewTerminalModalView<'_> {
             create_button,
             cancel_button,
         }
+    }
+
+    pub(super) fn with_selected_all(mut self, selected_all: bool) -> Self {
+        self.selected_all = selected_all;
+        self
     }
 }
 
@@ -1387,6 +1395,7 @@ fn render_sidebar(
                     editors.name,
                     &editor.name_draft,
                     name_focused,
+                    editor.selected_all && name_focused,
                     text_color,
                 );
                 render_inline_field(
@@ -1398,6 +1407,7 @@ fn render_sidebar(
                     editors.note,
                     &editor.note_draft,
                     note_focused,
+                    editor.selected_all && note_focused,
                     palette.muted_text,
                 );
             }
@@ -1531,6 +1541,7 @@ fn render_inline_field(
     bounds: PixelRect,
     text: &str,
     focused: bool,
+    selected_all: bool,
     text_color: Rgb,
 ) {
     let x = bounds.left.max(0) as u32;
@@ -1568,6 +1579,19 @@ fn render_inline_field(
     );
     let max_chars = (w.saturating_sub(4) / (GLYPH_WIDTH + 1)).max(1) as usize;
     let label = truncate_chars(text, max_chars);
+    let visible_text_width =
+        (label.chars().count() as u32 * (GLYPH_WIDTH + 1)).min(w.saturating_sub(4));
+    if selected_all && visible_text_width > 0 {
+        fill_rect(
+            buffer,
+            stride,
+            x + 2,
+            y + 2,
+            visible_text_width,
+            h.saturating_sub(4),
+            rgb_to_pixel(palette.selection_background),
+        );
+    }
     draw_text(
         buffer,
         stride,
@@ -1576,9 +1600,13 @@ fn render_inline_field(
         x + 2,
         y + 2,
         &label,
-        text_color,
+        if selected_all {
+            palette.selection_foreground
+        } else {
+            text_color
+        },
     );
-    if focused {
+    if focused && !selected_all {
         let cursor_x = x + 2 + (label.chars().count() as u32 * (GLYPH_WIDTH + 1));
         if cursor_x + GLYPH_WIDTH < x + w {
             fill_rect(
@@ -2114,6 +2142,7 @@ fn render_new_terminal_modal(
         pixel_field(modal.initial_command_field),
         modal.initial_command,
         modal.focus == NewTerminalFocusView::InitialCommand,
+        modal.selected_all && modal.focus == NewTerminalFocusView::InitialCommand,
         palette.text,
     );
     render_inline_field(
@@ -2125,6 +2154,7 @@ fn render_new_terminal_modal(
         pixel_field(modal.http_proxy_field),
         modal.http_proxy,
         modal.focus == NewTerminalFocusView::HttpProxy,
+        modal.selected_all && modal.focus == NewTerminalFocusView::HttpProxy,
         palette.text,
     );
     render_inline_field(
@@ -2136,6 +2166,7 @@ fn render_new_terminal_modal(
         pixel_field(modal.https_proxy_field),
         modal.https_proxy,
         modal.focus == NewTerminalFocusView::HttpsProxy,
+        modal.selected_all && modal.focus == NewTerminalFocusView::HttpsProxy,
         palette.text,
     );
     render_button(
@@ -2607,6 +2638,58 @@ pub(super) fn scrollbar_view_from_geometry(
 mod tests {
     use super::*;
     use crate::settings::AppConfig;
+
+    #[test]
+    fn selected_inline_field_paints_selection_and_hides_the_cursor() {
+        let palette = ThemeId::Dark.palette();
+        let bounds = PixelRect {
+            left: 0,
+            top: 0,
+            right: 100,
+            bottom: 24,
+        };
+        let mut selected = vec![0; 100 * 24];
+        render_inline_field(
+            &mut selected,
+            100,
+            100,
+            24,
+            palette,
+            bounds,
+            "abc",
+            true,
+            true,
+            palette.text,
+        );
+        assert!(
+            selected
+                .iter()
+                .any(|pixel| *pixel == rgb_to_pixel(palette.selection_background))
+        );
+        let cursor_x = 2 + 3 * (GLYPH_WIDTH + 1);
+        assert_eq!(
+            selected[(2 * 100 + cursor_x) as usize],
+            rgb_to_pixel(palette.composer)
+        );
+
+        let mut unselected = vec![0; 100 * 24];
+        render_inline_field(
+            &mut unselected,
+            100,
+            100,
+            24,
+            palette,
+            bounds,
+            "abc",
+            true,
+            false,
+            palette.text,
+        );
+        assert_eq!(
+            unselected[(2 * 100 + cursor_x) as usize],
+            rgb_to_pixel(palette.text)
+        );
+    }
 
     #[test]
     fn narrow_tab_rows_prioritize_the_terminal_title_over_the_id() {

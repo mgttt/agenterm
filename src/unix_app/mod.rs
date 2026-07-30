@@ -3254,15 +3254,18 @@ impl UnixApp {
         });
         let new_terminal = if self.new_terminal_dialog.is_open() {
             let shell = self.render_shell_choice();
-            Some(NewTerminalModalView::for_client(
-                logical_width,
-                logical_height,
-                shell,
-                self.new_terminal_dialog.initial_command_draft(),
-                self.new_terminal_dialog.http_proxy_draft(),
-                self.new_terminal_dialog.https_proxy_draft(),
-                self.new_terminal_focus,
-            ))
+            Some(
+                NewTerminalModalView::for_client(
+                    logical_width,
+                    logical_height,
+                    shell,
+                    self.new_terminal_dialog.initial_command_draft(),
+                    self.new_terminal_dialog.http_proxy_draft(),
+                    self.new_terminal_dialog.https_proxy_draft(),
+                    self.new_terminal_focus,
+                )
+                .with_selected_all(self.text_field_select_all),
+            )
         } else {
             None
         };
@@ -3323,6 +3326,7 @@ impl UnixApp {
                 TabEditorFocus::Name => TabEditorFocusView::Name,
                 TabEditorFocus::Note => TabEditorFocusView::Note,
             },
+            selected_all: self.text_field_select_all,
         });
         let ime_preedit = ime_anchor
             .filter(|_| !self.ime_preedit.is_empty())
