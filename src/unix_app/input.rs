@@ -83,6 +83,11 @@ pub(super) fn composer_key_action(
                 ComposerKeyAction::Ignored
             }
         }
+        Key::Named(NamedKey::Space) if !shortcut => {
+            prepare_composer_edit(buffer, select_all);
+            buffer.push(' ');
+            ComposerKeyAction::Edited
+        }
         Key::Character(text) if !shortcut && !shift => {
             let replaced = prepare_composer_edit(buffer, select_all);
             let mut changed = false;
@@ -164,6 +169,10 @@ pub(super) fn text_field_key_action(
             } else {
                 TextFieldKeyAction::Ignored
             }
+        }
+        Key::Named(NamedKey::Space) if !shortcut => {
+            buffer.push(' ');
+            TextFieldKeyAction::Edited
         }
         Key::Character(text) if !shortcut => {
             let mut changed = false;
@@ -269,6 +278,7 @@ fn named_key_name(key: NamedKey) -> Option<&'static str> {
         NamedKey::Enter => Some("Enter"),
         NamedKey::Escape => Some("Escape"),
         NamedKey::Backspace => Some("Backspace"),
+        NamedKey::Space => Some("Space"),
         NamedKey::Tab => Some("Tab"),
         NamedKey::ArrowUp => Some("Up"),
         NamedKey::ArrowDown => Some("Down"),
@@ -345,10 +355,10 @@ fn physical_code_to_byte(code: winit::keyboard::KeyCode) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        TerminalShortcutAction, logical_key_to_bytes, normalize_ime_commit, prepare_composer_edit,
-        primary_shortcut, terminal_shortcut_action,
+        TerminalShortcutAction, logical_key_to_bytes, normalize_ime_commit, physical_code_to_byte,
+        prepare_composer_edit, primary_shortcut, terminal_shortcut_action,
     };
-    use winit::keyboard::{Key, ModifiersState, NamedKey};
+    use winit::keyboard::{Key, KeyCode, ModifiersState, NamedKey};
 
     #[test]
     fn terminal_text_is_forwarded_as_utf8() {
@@ -363,6 +373,15 @@ mod tests {
             ),
             Some(b"ab".to_vec())
         );
+    }
+
+    #[test]
+    fn space_is_forwarded_for_named_and_physical_key_forms() {
+        assert_eq!(
+            logical_key_to_bytes(&Key::Named(NamedKey::Space), ModifiersState::empty()),
+            Some(vec![b' '])
+        );
+        assert_eq!(physical_code_to_byte(KeyCode::Space), Some(vec![b' ']));
     }
 
     #[test]
