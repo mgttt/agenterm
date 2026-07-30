@@ -10,7 +10,7 @@
 | 键 | 值 |
 |----|-----|
 | 产品版本 | **0.1.10**（`Cargo.toml` / `agenterm.tasks.json`） |
-| `origin/main` | `1c3f4e3`（含 `1034cdd` `PRD_02_20_native_platform`；互通协议在其下） |
+| `origin/main` | `b25dfad`（platform contract rev1 + Linux bridge；含 `1034cdd` PRD_02_20） |
 | tracked `*.ps1` | **0**；migration-audit drift=false |
 | 云环境 | Personal `mgttt/agenterm`；**x86_64 Linux + DISPLAY=:1 VNC desktop**；可原生跑 Linux GUI |
 | 非环境事实 | QEMU/Wine 仅交叉或 Windows-on-Linux 烟测，**不是**本机桌面 |
@@ -19,11 +19,10 @@
 
 ## 主控指令（未消化则分身不得另起炉灶）
 
-### → 分身1（Linux Desktop GUI + 测试套件）
-1. 已派：在**原生** x86_64 Linux Desktop 熟悉并跑 Rhai/`check.sh` 测试梯 + GUI 黑盒（computerUse + RecordScreen + public CLI）。
-2. 禁止：用 QEMU/Wine 代替原生 Linux；勿 apt 装 xterm/scrot；勿发明入口。
-3. 先测后改；失败先写「请示」再动热点文件。
-4. **本轮先做**：`git pull` 最新 main → 更新本席位状态块（即使尚未跑完也写进度）→ push 邮箱。
+### → 分身1（Linux agent / platform）
+1. **已决请示#5·选 A**：契约 revision 1 已冻结并接线 `pub mod linux`。
+2. 本轮：桥接 Linux 私有类型到共享契约；本机 DISPLAY=:1 证据；小提交推 main；**勿改** `src/platform/mod.rs`。
+3. 旧请示#1#2#3 仍待裁决；禁止 QEMU 冒充本机桌面。
 
 ### → 分身2（Linux 自动化 / Rhai / CI）
 1. 待命跟随 `main` 上 Win/跨平台自动化合入；与分身1分工：你偏 CLI/Rhai/CI，分身1 偏 Desktop GUI。
@@ -85,15 +84,15 @@
 - 阻塞/请示: 无
 - 下一步: 等分身1写回测试进度；必要时修 platform fail-closed / catalog 语义
 
-### 分身1 · 2026-07-30 13:53 UTC
-- 状态: BLOCKED（等契约接线）
-- 分支: `main` @ `1c3f4e3`（本轮提交将推送）
-- main基准: `1c3f4e3`（含 `1034cdd` PRD_02_20）
-- 本轮目标: **Linux agent** — `src/platform/linux/` + Linux-native 证据（窄垂直切片）
-- 已完成: pull/ff `1c3f4e3`；读 PRD；确认无 `src/platform/mod.rs`；按主控授权 scaffold **未接线** `linux/{mod,input,toolbar}.rs`（无公共契约类型）；请示#5
-- 证据: orphan 文件存在；`src/lib.rs` / `src/platform/mod.rs` 未改；本机 `DISPLAY=:1` x86_64
-- 阻塞/请示: 请示#5（等 primary 冻结契约并 `pub mod linux`）；旧请示#1#2#3 仍未决
-- 下一步: 契约落盘后接线 + 本机 Desktop fmt/clippy/单测/GUI snapshot+PNG；不写 `mod.rs`
+### 分身1 · 2026-07-30 13:58 UTC
+- 状态: RUNNING（slice-1 bridge 完成，等下一步派活）
+- 分支: `main` @ `b25dfad`
+- main基准: `b25dfad`
+- 本轮目标: Linux adapter 对齐 contract revision 1 + 本机 Desktop 证据
+- 已完成: pull；桥接 `linux/{mod,input,toolbar}` → `platform::{action,ModifierState,KeyClassification,classify_key_press,DisplayBackendFacts,CapabilityStatus}`；去掉重复 action_id/label/`LinuxKeyClass`；clippy `-D warnings` lib PASS；`cargo test --lib platform::` **17 passed**；GUI `ui-action toggle-tabs/open-settings` + snapshot/PNG
+- 证据: `/opt/cursor/artifacts/linux-platform-rev1{,-ui-snapshot.json,-after-toggle-tabs,-settings}.{png,json}`；commit `b25dfad`
+- 阻塞/请示: 请示#5 已决；旧#1#2#3 未决（未动热点脚本/`font.rs`）
+- 下一步: 等主控派 slice-2（IME/clipboard/DPI…）或授权把 unix_app 热路径接到 platform::linux
 
 ### 分身2 · 2026-07-30 13:12 UTC
 - 状态: IDLE
@@ -124,11 +123,12 @@
 5. （分身1）`build-linux-clients.sh` 传裸 `dev` → 请示#2。
 6. ~~原生 Linux GUI 文字水平镜像~~ — **2026-07-30 13:20 复测已正常**。
 7. （分身1）`lint.sh` Clippy unused imports `font.rs:388` → 请示#3。
-8. （平台迁移）`src/platform/mod.rs` 共享契约未落盘 → 请示#4/#5。
+8. ~~（平台迁移）`src/platform/mod.rs` 未落盘~~ — **revision 1 已冻结**；Linux 已桥接 @`b25dfad`；macOS 接线见请示#6。
 
 ## 交接日志
 
 ```text
+2026-07-30 13:58 UTC | 分身1 | rev1 bridge 完成；platform:: 17 PASS；GUI snapshot/PNG | b25dfad + artifacts
 2026-07-30 13:53 UTC | 分身1 | scaffold 未接线 linux/{mod,input,toolbar}.rs；请示#5 等契约 | src/platform/linux + mailbox
 2026-07-30 13:50 UTC | 分身1 | 接 Linux platform 任务；无 src/platform；请示#5 等契约 | skills/cursor/mailbox.md
 2026-07-30 13:49 UTC | macOS agent | 契约未落盘，提交请示#4并等待 primary 冻结共享类型 | skills/cursor/mailbox.md
