@@ -1426,7 +1426,7 @@ fn render_sidebar(
             let name_y = geometry.name.top.max(0) as u32;
             let name_chars =
                 (geometry.name.width().max(0) as u32 / (GLYPH_WIDTH + 1)).max(1) as usize;
-            let title = truncate_chars(&format!("@{} {}", row.id, row.title), name_chars);
+            let title = tab_row_title(row.id, &row.title, name_chars);
             draw_text(
                 buffer, stride, width, height, name_x, name_y, &title, text_color,
             );
@@ -2493,6 +2493,15 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
     format!("{}…", text.chars().take(keep).collect::<String>())
 }
 
+fn tab_row_title(id: u64, title: &str, max_chars: usize) -> String {
+    let identified = format!("@{id} {title}");
+    if identified.chars().count() <= max_chars || title.is_empty() {
+        truncate_chars(&identified, max_chars)
+    } else {
+        truncate_chars(title, max_chars)
+    }
+}
+
 fn fill_rect(buffer: &mut [u32], stride: u32, x: u32, y: u32, width: u32, height: u32, color: u32) {
     for row in y..y + height {
         let start = (row * stride + x) as usize;
@@ -2598,6 +2607,14 @@ pub(super) fn scrollbar_view_from_geometry(
 mod tests {
     use super::*;
     use crate::settings::AppConfig;
+
+    #[test]
+    fn narrow_tab_rows_prioritize_the_terminal_title_over_the_id() {
+        assert_eq!(tab_row_title(1, "bash", 7), "@1 bash");
+        assert_eq!(tab_row_title(1, "bash", 5), "bash");
+        assert_eq!(tab_row_title(42, "开发终端", 3), "开发…");
+        assert_eq!(tab_row_title(42, "", 3), "@4…");
+    }
 
     #[test]
     fn grid_dimensions_account_for_sidebar_scrollbar_and_composer() {
