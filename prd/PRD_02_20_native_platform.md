@@ -234,7 +234,7 @@ Windows slice-3 evidence (2026-07-30):
   terminal-region PNG files through public CLI commands, then completes all 15
   replaceable-GUI evidence journeys
 - [x] exact-head native rerun after shared-contract adoption: warnings-denied
-  all-target/all-feature Clippy, 296 library tests, a 562 ms no-activate first
+  all-target/all-feature Clippy, 296 library tests, a 537 ms no-activate first
   window, and the complete replaceable-GUI remote smoke all pass
 
 macOS hot-path evidence (2026-07-30):
