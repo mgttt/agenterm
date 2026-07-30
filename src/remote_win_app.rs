@@ -2,14 +2,14 @@ use std::{
     ffi::c_void,
     mem,
     process::Command,
-    ptr, thread,
+    ptr,
     time::{Duration, Instant},
 };
 
 use anyhow::{Context as _, Result};
 use unicode_width::UnicodeWidthChar;
 use windows_sys::Win32::{
-    Foundation::{COLORREF, GlobalFree, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
+    Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
     Graphics::Gdi::{
         BeginPaint, CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS, CreateFontW, CreateSolidBrush,
         DEFAULT_CHARSET, DT_CENTER, DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE, DT_VCENTER,
@@ -18,14 +18,7 @@ use windows_sys::Win32::{
         ReleaseDC, ScreenToClient, SelectObject, SetBkMode, SetTextColor, TEXTMETRICW, TRANSPARENT,
         UpdateWindow,
     },
-    System::{
-        DataExchange::{
-            CloseClipboard, EmptyClipboard, GetClipboardData, IsClipboardFormatAvailable,
-            OpenClipboard, SetClipboardData,
-        },
-        LibraryLoader::GetModuleHandleW,
-        Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock},
-    },
+    System::LibraryLoader::GetModuleHandleW,
     UI::{
         Input::KeyboardAndMouse::{
             EnableWindow, GetFocus, GetKeyState, ReleaseCapture, SetCapture, SetFocus, VK_CONTROL,
@@ -36,15 +29,13 @@ use windows_sys::Win32::{
         WindowsAndMessaging::{
             CS_DBLCLKS, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CheckMenuItem, CreateWindowExW,
             DefWindowProcW, DestroyWindow, DispatchMessageW, ES_AUTOVSCROLL, ES_MULTILINE,
-            ES_WANTRETURN, EnableMenuItem, GWLP_USERDATA, GetClientRect, GetCursorPos,
-            GetForegroundWindow, GetMessageW, GetSystemMenu, GetWindowLongPtrW, GetWindowRect,
-            GetWindowTextLengthW, GetWindowTextW, IDC_ARROW, IDC_SIZEWE, InsertMenuW, IsIconic,
-            IsWindowVisible, IsZoomed, LoadCursorW, LoadIconW, MF_BYCOMMAND, MF_CHECKED,
-            MF_ENABLED, MF_GRAYED, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MSG, ModifyMenuW,
-            MoveWindow, PostMessageW, PostQuitMessage, RegisterClassW, SC_CLOSE, SIZE_MINIMIZED,
-            SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, SW_SHOWNOACTIVATE,
-            SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SendMessageW,
-            SetCursor, SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowPos,
+            ES_WANTRETURN, EnableMenuItem, GWLP_USERDATA, GetClientRect, GetCursorPos, GetMessageW,
+            GetSystemMenu, GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW,
+            IDC_ARROW, IDC_SIZEWE, InsertMenuW, IsIconic, IsWindowVisible, IsZoomed, LoadCursorW,
+            LoadIconW, MF_BYCOMMAND, MF_CHECKED, MF_ENABLED, MF_GRAYED, MF_SEPARATOR, MF_STRING,
+            MF_UNCHECKED, MSG, ModifyMenuW, MoveWindow, PostMessageW, PostQuitMessage,
+            RegisterClassW, SC_CLOSE, SIZE_MINIMIZED, SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE,
+            SW_RESTORE, SW_SHOW, SendMessageW, SetCursor, SetTimer, SetWindowLongPtrW,
             SetWindowTextW, ShowWindow, TranslateMessage, WM_CAPTURECHANGED, WM_CHAR, WM_CLOSE,
             WM_COMMAND, WM_COPY, WM_CREATE, WM_DESTROY, WM_ERASEBKGND, WM_INITMENUPOPUP,
             WM_KEYDOWN, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
@@ -61,8 +52,9 @@ use crate::{
     instances::intentional_shutdown_matches,
     locale::UiText,
     platform::{
-        KeyClassification, action,
+        CapabilityStatus, KeyClassification, action,
         windows::{
+            activation, clipboard,
             input::{Utf16TextDecoder, primary_shortcut, windows_modifiers},
             toolbar::WindowsToolbarHit,
         },
@@ -132,7 +124,6 @@ const SETTINGS_RESET_OVERRIDES_ID: usize = 2137;
 const SYSTEM_MENU_COPY_ID: usize = 0x1f00;
 const SYSTEM_MENU_PASTE_ID: usize = 0x1f10;
 const SYSTEM_MENU_TOGGLE_TABS_ID: usize = 0x1f20;
-const CLIPBOARD_UNICODE_TEXT: u32 = 13;
 const WM_APP_AUTOMATION_SHORTCUT: u32 = 0x8000 + 2;
 const WM_APP_FOCUS_QUERY: u32 = 0x8000 + 3;
 const WM_APP_DESTROY_WINDOW: u32 = 0x8000 + 4;
@@ -146,6 +137,18 @@ const fn windows_toolbar_hit(control_id: usize) -> Option<WindowsToolbarHit> {
         FONT_DECREASE_ID => Some(WindowsToolbarHit::FontDecrease),
         FONT_INCREASE_ID => Some(WindowsToolbarHit::FontIncrease),
         _ => None,
+    }
+}
+
+fn platform_capability_error(status: CapabilityStatus) -> anyhow::Error {
+    match status {
+        CapabilityStatus::Failed { code, message } => anyhow::anyhow!("{code}: {message}"),
+        CapabilityStatus::Unsupported { reason } => {
+            anyhow::anyhow!("platform capability is unsupported: {reason}")
+        }
+        CapabilityStatus::Available => {
+            anyhow::anyhow!("platform capability failed without a typed diagnostic")
+        }
     }
 }
 const STATUS_HEIGHT: i32 = 26;
@@ -391,15 +394,13 @@ pub(crate) fn run_remote_gui(no_activate: bool) -> Result<()> {
         state.load_composer();
         state.resize_active_terminal();
     }
-    unsafe {
-        if no_activate {
-            show_without_activation(window);
-        } else {
-            ShowWindow(window, SW_SHOW);
-            SetForegroundWindow(window);
-        }
-        UpdateWindow(window);
+    if no_activate {
+        activation::show_without_activation(window)
+            .map_err(|error| platform_capability_error(error.to_capability_status()))?;
+    } else {
+        activation::show_new_and_request_activation(window);
     }
+    unsafe { UpdateWindow(window) };
 
     let mut message: MSG = unsafe { mem::zeroed() };
     while unsafe { GetMessageW(&mut message, ptr::null_mut(), 0, 0) } > 0 {
@@ -1491,12 +1492,13 @@ impl RemoteWindowState {
                 )?;
                 output = Some(path.display().to_string());
             }
-            "__focus" => unsafe {
-                ShowWindow(self.window, SW_RESTORE);
-                SetForegroundWindow(self.window);
-                SetFocus(self.window);
-            },
-            "__show-no-activate" => show_without_activation(self.window),
+            "__focus" => {
+                activation::restore_and_activate(self.window)
+                    .map_err(|error| platform_capability_error(error.to_capability_status()))?;
+                unsafe { SetFocus(self.window) };
+            }
+            "__show-no-activate" => activation::show_without_activation(self.window)
+                .map_err(|error| platform_capability_error(error.to_capability_status()))?,
             other => anyhow::bail!("unsupported relayed UI command: {other}"),
         }
         unsafe { windows_sys::Win32::Graphics::Gdi::InvalidateRect(self.window, ptr::null(), 0) };
@@ -4059,13 +4061,17 @@ impl RemoteWindowState {
         if text.is_empty() {
             anyhow::bail!("terminal selection contains no text");
         }
-        set_clipboard_text(self.window, &text)?;
+        clipboard::set_text(self.window, &text)
+            .map_err(|error| platform_capability_error(error.to_capability_status()))?;
         self.last_error = None;
         Ok(())
     }
 
     fn paste_terminal_clipboard(&mut self) -> Result<()> {
-        let text = normalize_terminal_paste(&read_clipboard_text()?);
+        let text = normalize_terminal_paste(
+            &clipboard::get_text(TERMINAL_PASTE_LIMIT_BYTES)
+                .map_err(|error| platform_capability_error(error.to_capability_status()))?,
+        );
         if text.is_empty() {
             anyhow::bail!("clipboard text contains no pasteable characters");
         }
@@ -4171,7 +4177,7 @@ impl RemoteWindowState {
     fn system_menu_state(&self) -> (bool, bool) {
         let focused = unsafe { GetFocus() };
         if self.is_edit_control(focused) {
-            return (true, clipboard_has_unicode_text());
+            return (true, clipboard::has_unicode_text());
         }
         let terminal_ready = focused == self.window
             && !self.window_close_pending
@@ -4184,7 +4190,7 @@ impl RemoteWindowState {
                     .terminal_selection
                     .as_ref()
                     .is_some_and(|selection| !selection.is_empty()),
-            terminal_ready && clipboard_has_unicode_text(),
+            terminal_ready && clipboard::has_unicode_text(),
         )
     }
 
@@ -5740,104 +5746,6 @@ fn install_system_menu(window: HWND) -> Result<()> {
     Ok(())
 }
 
-fn set_clipboard_text(window: HWND, text: &str) -> Result<()> {
-    let deadline = Instant::now() + Duration::from_millis(500);
-    loop {
-        if unsafe { OpenClipboard(window) } != 0 {
-            break;
-        }
-        if Instant::now() >= deadline {
-            anyhow::bail!("could not open the Windows clipboard within 500 ms");
-        }
-        thread::sleep(Duration::from_millis(10));
-    }
-    if unsafe { EmptyClipboard() } == 0 {
-        unsafe { CloseClipboard() };
-        anyhow::bail!("could not clear the Windows clipboard");
-    }
-    let encoded = text
-        .encode_utf16()
-        .chain(std::iter::once(0))
-        .collect::<Vec<_>>();
-    let allocation = unsafe { GlobalAlloc(GMEM_MOVEABLE, encoded.len() * mem::size_of::<u16>()) };
-    if allocation.is_null() {
-        unsafe { CloseClipboard() };
-        anyhow::bail!("could not allocate clipboard text");
-    }
-    let destination = unsafe { GlobalLock(allocation) } as *mut u16;
-    if destination.is_null() {
-        unsafe {
-            GlobalFree(allocation);
-            CloseClipboard();
-        }
-        anyhow::bail!("could not lock clipboard text");
-    }
-    unsafe {
-        ptr::copy_nonoverlapping(encoded.as_ptr(), destination, encoded.len());
-        GlobalUnlock(allocation);
-    }
-    if unsafe { SetClipboardData(CLIPBOARD_UNICODE_TEXT, allocation) }.is_null() {
-        unsafe {
-            GlobalFree(allocation);
-            CloseClipboard();
-        }
-        anyhow::bail!("could not publish clipboard text");
-    }
-    unsafe { CloseClipboard() };
-    Ok(())
-}
-
-fn clipboard_has_unicode_text() -> bool {
-    (unsafe { IsClipboardFormatAvailable(CLIPBOARD_UNICODE_TEXT) }) != 0
-}
-
-fn read_clipboard_text() -> Result<String> {
-    let deadline = Instant::now() + Duration::from_millis(500);
-    loop {
-        if unsafe { OpenClipboard(ptr::null_mut()) } != 0 {
-            break;
-        }
-        if Instant::now() >= deadline {
-            anyhow::bail!("could not open the Windows clipboard within 500 ms");
-        }
-        thread::sleep(Duration::from_millis(10));
-    }
-    let result = (|| {
-        if !clipboard_has_unicode_text() {
-            anyhow::bail!("the clipboard does not contain Unicode text");
-        }
-        let allocation = unsafe { GetClipboardData(CLIPBOARD_UNICODE_TEXT) };
-        if allocation.is_null() {
-            anyhow::bail!("could not read Unicode clipboard data");
-        }
-        let allocation_size = unsafe { GlobalSize(allocation) };
-        if allocation_size == 0 {
-            anyhow::bail!("Unicode clipboard data has no readable allocation");
-        }
-        if allocation_size > (TERMINAL_PASTE_LIMIT_BYTES + 1) * mem::size_of::<u16>() {
-            anyhow::bail!(
-                "clipboard text exceeds the {TERMINAL_PASTE_LIMIT_BYTES}-byte terminal paste limit"
-            );
-        }
-        let source = unsafe { GlobalLock(allocation) } as *const u16;
-        if source.is_null() {
-            anyhow::bail!("could not lock Unicode clipboard data");
-        }
-        let units =
-            unsafe { std::slice::from_raw_parts(source, allocation_size / mem::size_of::<u16>()) };
-        let length = units
-            .iter()
-            .position(|unit| *unit == 0)
-            .unwrap_or(units.len());
-        let decoded = String::from_utf16(&units[..length])
-            .context("Unicode clipboard data is not valid UTF-16");
-        unsafe { GlobalUnlock(allocation) };
-        decoded
-    })();
-    unsafe { CloseClipboard() };
-    result
-}
-
 fn screen_cells(screen: &UiScreenSnapshot) -> Vec<Vec<Option<String>>> {
     let rows = usize::try_from(screen.rows).unwrap_or_default();
     let columns = usize::try_from(screen.columns).unwrap_or_default();
@@ -6170,34 +6078,6 @@ fn window_text(window: HWND) -> String {
         )
     };
     String::from_utf16_lossy(&buffer[..usize::try_from(copied).unwrap_or(0)])
-}
-
-fn show_without_activation(window: HWND) {
-    unsafe {
-        let foreground = GetForegroundWindow();
-        if !foreground.is_null() && foreground != window {
-            SetWindowPos(
-                window,
-                foreground,
-                0,
-                0,
-                0,
-                0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
-            );
-        } else {
-            SetWindowPos(
-                window,
-                ptr::null_mut(),
-                0,
-                0,
-                0,
-                0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW,
-            );
-        }
-        ShowWindow(window, SW_SHOWNOACTIVATE);
-    }
 }
 
 fn state_mut(window: HWND) -> Option<&'static mut RemoteWindowState> {

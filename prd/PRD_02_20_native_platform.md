@@ -81,8 +81,11 @@ tests or ownership.
   - [x] contract-revision-1 Windows adapter owns toolbar action mapping,
     UTF-16 committed-text decoding, and Control/AltGr shortcut separation; the
     Win32 `WM_COMMAND`, `WM_CHAR`, and terminal-key hot paths consume it
+  - [x] slice-2 owns bounded Unicode clipboard access and typed activation /
+    show-without-activation behavior; terminal selection, paste, startup, and
+    relayed focus hot paths consume the adapter
   - [~] existing Win32 window, HWND controls, GDI rendering, native clipboard,
-    system menu, activation, screenshots, and input behavior are shipped but
+    system menu, screenshots, and remaining input behavior are shipped but
     remain distributed across Windows application modules
   - [~] adapt the remaining behavior behind the shared contracts without
     changing the replaceable-GUI/server split or taking ownership of server
@@ -91,11 +94,14 @@ tests or ownership.
     no-activate, parent-console launcher guidance, and running-image-safe
     development
 - macOS
+  - [x] contract-revision-1 keyboard, toolbar, Retina scale, and
+    show-without-activation hot paths consume `platform::macos`
   - [~] winit/softbuffer windowing, native IME events, system-font rasterization,
     Unicode/color/attribute rendering, clipboard, cursor, DPI, and POSIX PTY
     interaction are in active delivery
-  - [ ] expose macOS behavior through the shared platform contracts while
-    retaining Apple-native keyboard semantics and scale-factor accuracy
+  - [~] expose the remaining macOS behavior through the shared platform
+    contracts while retaining Apple-native keyboard semantics and scale-factor
+    accuracy
   - [ ] signed stable distribution installs a complete signed and notarized
     application bundle; an installer must not replace it with an unsigned
     locally assembled wrapper
@@ -145,15 +151,15 @@ tests or ownership.
    (`src/platform/mod.rs` contract revision 1; OS adapters still incremental)
 2. [~] adapt one narrow vertical slice—toolbar labels/actions plus keyboard
    text/shortcut separation—on all three systems
-   (Linux hot-path wired through `platform::linux` @ `78f5333`; macOS adapter
-   exists but its Unix GUI hot paths still need explicit adapter routing;
-   Windows hot paths and AltGr-safe UTF-16 input are wired through
-   `platform::windows`)
+   (Linux hot-path wired through `platform::linux` @ `78f5333`; macOS hot paths
+   wired @ `4aadcb0`; Windows hot paths and AltGr-safe UTF-16 input are wired
+   through `platform::windows`)
 3. [~] move IME, clipboard, DPI, font, screenshot, activation, and remaining
    window integration incrementally behind the same boundary
    (Linux IME+clipboard @ `66c54a5`/`b5d54ef`; clipboard helper harden @
    `bf17150`; DPI/scale @ `57958c1`; font discovery/metrics @ `25a45d2`;
-   screenshot/activation still deferred)
+   screenshot/activation still deferred. Windows bounded clipboard and
+   activation hot paths are adapted; screenshot remains deferred)
 4. [ ] remove superseded platform-specific paths only after native black-box
    and screenshot evidence passes on that platform
 
@@ -179,3 +185,13 @@ Windows slice-1 evidence (2026-07-30):
 - [x] `remote-ui-smoke` native public-interface journey: 15 evidence IDs,
   including toolbar/tabs, keyboard navigation, locale, Settings, clipboard,
   scrollback, close/detach, server restart, and replaceable-GUI recovery
+
+Windows slice-2 evidence (2026-07-30):
+
+- [x] warnings-denied all-target/all-feature Clippy
+- [x] 289 library tests, including typed clipboard/activation diagnostics and
+  UTF-16 allocation bounds
+- [x] incremental Windows artifact build
+- [x] `remote-ui-smoke` proves terminal selection, bounded clipboard copy/paste,
+  system-menu behavior, and replaceable-GUI recovery through native interfaces
+- [x] `startup-smoke` proves `--no-activate` and a 535 ms first native window
