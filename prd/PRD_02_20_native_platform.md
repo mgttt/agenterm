@@ -108,10 +108,10 @@ tests or ownership.
     resize, layout, and rendering now consume `platform::macos::scale`; the
     no-activate launch path also configures the macOS event loop before window
     creation
-  - [~] clipboard reads/writes now consume `platform::macos::clipboard` with a
+  - [x] clipboard reads/writes now consume `platform::macos::clipboard` with a
     256 KiB byte budget, live bounded reads, supervised stdin writes, and typed
-    failures; native macOS verification of the blocked-writer deadline is
-    pending
+    failures; native macOS verifies the blocked-writer deadline and product
+    Command-C/Command-V round-trip
   - [x] whole-window and pane PNG capture now consume
     `platform::macos::screenshot` with checked dimensions, clips, framebuffer
     length, a 64 MiB RGBA budget, and typed validation/I/O/encoding failures
@@ -235,7 +235,7 @@ Windows slice-3 evidence (2026-07-30):
 macOS hot-path evidence (2026-07-30):
 
 - [x] `cargo fmt --check` and all-target warnings-denied Clippy pass
-- [x] 372 library tests pass; focused macOS adapter tests cover stable toolbar
+- [x] 373 library tests pass; focused macOS adapter tests cover stable toolbar
   order/IDs, Command versus terminal Control, Shift punctuation,
   Option/dead-key composition, Space, CJK IME preedit/commit, clipboard byte
   and timeout failures, screenshot bounds/failures, invalid scale metrics, and
@@ -249,12 +249,13 @@ macOS hot-path evidence (2026-07-30):
 - [x] native Command-C/Command-V round-trip copies and pastes the exact composer
   marker through the macOS adapter; public CLI capture produces a 1920x1200
   whole-window PNG and a 1560x928 pane PNG, both under the adapter budget
-- [~] the macOS clipboard writer is supervised in source with a blocked-pipe
-  regression test; native macOS execution evidence is pending
+- [x] the macOS clipboard writer is supervised in source; the blocked-pipe
+  regression test and native Command-C/Command-V smoke pass on macOS
 
 Cross-platform integration review (2026-07-30):
 
 - [~] Linux screenshot requests that extend outside the framebuffer now return
   typed `screenshot_invalid_clip`; native Linux verification is pending
-- [~] macOS clipboard write timeout covers blocked stdin delivery as well as
-  child exit in source; native macOS verification is pending
+- [x] macOS clipboard write timeout covers blocked stdin delivery as well as
+  child exit; native macOS executes the blocked-writer deadline test in 0.06
+  seconds for the focused four-test suite
