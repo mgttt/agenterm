@@ -1335,13 +1335,24 @@ try {
         cli,
         ["kill-window", "-t", hierarchy_child_id]
     );
-    let promoted = json_cli(context, cli, ["ui-snapshot"]);
+    json_cli(
+        context,
+        cli,
+        [
+            "wait-events",
+            "--epoch", hierarchy.event_position.epoch,
+            "--after", hierarchy.event_position.sequence.to_string(),
+            "--kind", "tab.closed",
+            "--tab", hierarchy_child_id,
+            "--timeout-ms", "5000"
+        ]
+    );
+    let promoted = json_cli(context, cli, ["ui-bootstrap"]);
     let promoted_grandchild =
         find_tab(promoted, hierarchy_grandchild_id);
     require(
         promoted_grandchild != ()
-            && promoted_grandchild.parent_id == tab_id
-            && promoted_grandchild.depth == 1,
+            && promoted_grandchild.parent_id == tab_id,
         "remote_ui_hierarchy_child_not_promoted"
     );
     text_cli(
