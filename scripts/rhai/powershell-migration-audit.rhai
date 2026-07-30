@@ -368,6 +368,14 @@ require(
 );
 let shell_bootstrap = std::fs::read_to_string(shell_bootstrap_path);
 shell_bootstrap = shell_bootstrap.to_lower();
+let shell_bootstrap_operational_lines = 0;
+for source_line in shell_bootstrap.split("\n") {
+    let line = source_line;
+    line.trim();
+    if line != "" && (!line.starts_with("#") || line.starts_with("#!")) {
+        shell_bootstrap_operational_lines += 1;
+    }
+}
 for forbidden in [
     "release-fast",
     "stage-build",
@@ -394,7 +402,7 @@ require(
         && shell_bootstrap.contains(
             "cargo build --quiet --locked --bin agenterm-script"
         )
-        && shell_bootstrap.split("\n").len <= 40,
+        && shell_bootstrap_operational_lines <= 40,
     "migration_shell_bootstrap_not_generic"
 );
 

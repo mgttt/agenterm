@@ -1706,6 +1706,42 @@ fn migration_audit_rejects_operational_references_to_deleted_scripts() {
         String::from_utf8_lossy(&accepted.stdout),
         String::from_utf8_lossy(&accepted.stderr)
     );
+    let shell_bootstrap = repo.join("scripts").join("bootstrap.sh");
+    let shell_bootstrap_source =
+        fs::read_to_string(&shell_bootstrap).expect("read shell bootstrap fixture");
+    fs::write(
+        &shell_bootstrap,
+        format!(
+            "{shell_bootstrap_source}\n{}",
+            (0..64)
+                .map(|index| format!("# portability note {index}\n"))
+                .collect::<String>()
+        ),
+    )
+    .expect("write documented shell bootstrap");
+    let documented = run_migration_audit(&repo);
+    assert!(
+        documented.status.success(),
+        "comments inflated bootstrap complexity:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&documented.stdout),
+        String::from_utf8_lossy(&documented.stderr)
+    );
+    fs::write(
+        &shell_bootstrap,
+        format!("{shell_bootstrap_source}\n{}", ":\n".repeat(41)),
+    )
+    .expect("write operationally bloated shell bootstrap");
+    let bloated = run_migration_audit(&repo);
+    assert!(!bloated.status.success());
+    assert!(
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&bloated.stdout),
+            String::from_utf8_lossy(&bloated.stderr)
+        )
+        .contains("migration_shell_bootstrap_not_generic")
+    );
+    fs::write(&shell_bootstrap, shell_bootstrap_source).expect("restore shell bootstrap fixture");
     let report: serde_json::Value =
         serde_json::from_slice(&accepted.stdout).expect("decode migration report");
     assert_eq!(report["schema_version"], 2);
