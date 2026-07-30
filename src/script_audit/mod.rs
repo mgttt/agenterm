@@ -3,16 +3,13 @@ use std::{
     fs::{self, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
-    ptr,
     sync::Mutex,
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use serde::Serialize;
-use windows_sys::Win32::{
-    Foundation::{CloseHandle, HANDLE, WAIT_ABANDONED, WAIT_OBJECT_0},
-    System::Threading::{CreateMutexW, INFINITE, ReleaseMutex, WaitForSingleObject},
-};
+
+mod platform;
 
 const AUDIT_SCHEMA_VERSION: u32 = 1;
 const MAX_RECORD_BYTES: usize = 16 * 1024;
@@ -106,12 +103,7 @@ impl ScriptAuditSink {
     pub(crate) fn discover() -> Result<Self, String> {
         let path = match env::var_os("AGENTERM_SCRIPT_AUDIT_PATH") {
             Some(path) if !path.is_empty() => PathBuf::from(path),
-            _ => {
-                let base = env::var_os("LOCALAPPDATA")
-                    .map(PathBuf::from)
-                    .unwrap_or_else(env::temp_dir);
-                base.join("AgenTerm").join("script-audit.jsonl")
-            }
+            _ => default_audit_path(),
         };
         let path = if path.is_absolute() {
             path
@@ -176,7 +168,7 @@ impl ScriptAuditSink {
         let _process_guard = PROCESS_AUDIT_LOCK
             .lock()
             .map_err(|_| "script audit process lock is poisoned".to_owned())?;
-        let _global_guard = NamedAuditLock::acquire(&self.path)?;
+        let _global_guard = platform::NamedAuditLock::acquire(&self.path)?;
         let current_bytes = fs::metadata(&self.path)
             .map(|metadata| metadata.len())
             .unwrap_or(0);
@@ -214,6 +206,33 @@ pub(crate) fn source_fingerprint(source: &str) -> String {
     format!("fnv1a128:{first:016x}{second:016x}")
 }
 
+fn default_audit_path() -> PathBuf {
+    #[cfg(windows)]
+    {
+        env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(env::temp_dir)
+            .join("AgenTerm")
+            .join("script-audit.jsonl")
+    }
+    #[cfg(unix)]
+    {
+        if let Some(path) = env::var_os("XDG_DATA_HOME") {
+            PathBuf::from(path)
+                .join("agenterm")
+                .join("script-audit.jsonl")
+        } else if let Some(home) = env::var_os("HOME") {
+            PathBuf::from(home)
+                .join(".local")
+                .join("share")
+                .join("agenterm")
+                .join("script-audit.jsonl")
+        } else {
+            env::temp_dir().join("agenterm-script-audit.jsonl")
+        }
+    }
+}
+
 fn fnv1a64(bytes: &[u8], seed: u64) -> u64 {
     bytes.iter().fold(seed, |hash, byte| {
         (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3)
@@ -224,40 +243,6 @@ fn backup_path(path: &Path) -> PathBuf {
     let mut value = path.as_os_str().to_os_string();
     value.push(".1");
     PathBuf::from(value)
-}
-
-struct NamedAuditLock(HANDLE);
-
-impl NamedAuditLock {
-    fn acquire(path: &Path) -> Result<Self, String> {
-        let identity = source_fingerprint(&path.to_string_lossy().to_ascii_lowercase());
-        let mut name: Vec<u16> = format!("Local\\AgenTermScriptAudit-{}", &identity[9..])
-            .encode_utf16()
-            .collect();
-        name.push(0);
-        let handle = unsafe { CreateMutexW(ptr::null(), 0, name.as_ptr()) };
-        if handle.is_null() {
-            return Err(format!(
-                "CreateMutexW for script audit failed: {}",
-                std::io::Error::last_os_error()
-            ));
-        }
-        let wait = unsafe { WaitForSingleObject(handle, INFINITE) };
-        if wait != WAIT_OBJECT_0 && wait != WAIT_ABANDONED {
-            unsafe { CloseHandle(handle) };
-            return Err(format!("script audit mutex wait failed: {wait}"));
-        }
-        Ok(Self(handle))
-    }
-}
-
-impl Drop for NamedAuditLock {
-    fn drop(&mut self) {
-        unsafe {
-            ReleaseMutex(self.0);
-            CloseHandle(self.0);
-        }
-    }
 }
 
 #[cfg(test)]

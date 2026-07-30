@@ -68,16 +68,15 @@ mod gui_wake;
 #[cfg(unix)]
 mod unix_app;
 
-#[cfg(windows)]
 mod script_audit;
+mod worker_supervisor;
+
 #[cfg(windows)]
 mod server_app;
 #[cfg(any(windows, unix))]
 mod terminal_runtime;
 #[cfg(windows)]
 mod win_app;
-#[cfg(windows)]
-mod worker_supervisor;
 
 pub use client::{run_cli_entry, run_mux_entry, run_script_entry_with_args};
 pub use mcp_catalog::run_mcp_entry_with_args;

@@ -1,27 +1,11 @@
 use std::{
-    ffi::c_void,
     io::{Read, Write},
-    mem,
-    os::windows::io::AsRawHandle,
     path::Path,
-    process::{Child, Command, Stdio},
-    ptr,
-    sync::atomic::{AtomicUsize, Ordering},
+    process::{Command, Stdio},
+    sync::atomic::AtomicUsize,
     sync::mpsc,
     thread,
     time::{Duration, Instant},
-};
-
-use windows_sys::Win32::{
-    Foundation::{CloseHandle, HANDLE, WAIT_ABANDONED, WAIT_OBJECT_0},
-    System::{
-        JobObjects::{
-            AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-            JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
-            SetInformationJobObject, TerminateJobObject,
-        },
-        Threading::{CreateMutexW, ReleaseMutex, WaitForSingleObject},
-    },
 };
 
 use crate::script_protocol::{
@@ -30,9 +14,13 @@ use crate::script_protocol::{
     ScriptResult,
 };
 
-const PROCESS_CONCURRENCY_LIMIT: usize = 2;
-const GLOBAL_CONCURRENCY_LIMIT: usize = 8;
-static PROCESS_ACTIVE: AtomicUsize = AtomicUsize::new(0);
+mod platform;
+#[cfg(test)]
+use platform::ConcurrencyPermit;
+
+pub(crate) const PROCESS_CONCURRENCY_LIMIT: usize = 2;
+pub(crate) const GLOBAL_CONCURRENCY_LIMIT: usize = 8;
+pub(crate) static PROCESS_ACTIVE: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Debug)]
 pub(crate) enum SupervisorError {
@@ -71,13 +59,14 @@ impl WorkerSupervisor {
     where
         F: FnMut(&ScriptBrokerRequest, Duration) -> ScriptBrokerResponse,
     {
-        let _permit = ConcurrencyPermit::try_acquire()?;
+        let _permit = platform::ConcurrencyPermit::try_acquire()?;
         let mut command = Command::new(executable);
         command
             .arg("--framed-worker")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
+        platform::configure_worker_command(&mut command);
         if let Some(working_directory) = working_directory {
             command.current_dir(working_directory);
         }
@@ -85,16 +74,10 @@ impl WorkerSupervisor {
             .spawn()
             .map_err(|error| SupervisorError::Spawn(error.to_string()))?;
         let worker_pid = child.id();
-        let job = Job::new().map_err(|error| {
-            let _ = child.kill();
-            let _ = child.wait();
+        let tree = platform::ProcessTreeGuard::attach(&mut child).map_err(|error| {
+            platform::terminate_worker(&mut child, worker_pid);
             SupervisorError::Spawn(error)
         })?;
-        if let Err(error) = job.assign(&child) {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(SupervisorError::Spawn(error));
-        }
 
         let mut stdin = child.stdin.take().ok_or_else(|| {
             SupervisorError::Transport("worker stdin pipe is unavailable".to_owned())
@@ -138,8 +121,7 @@ impl WorkerSupervisor {
                 Ok(response) => response,
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
                     let status = child.try_wait().ok().flatten();
-                    drop(stdin);
-                    let _ = child.wait();
+                    platform::terminate_worker(&mut child, worker_pid);
                     let _ = reader.join();
                     return Err(SupervisorError::WorkerCrash {
                         worker_pid,
@@ -159,9 +141,8 @@ impl WorkerSupervisor {
                     match receiver.recv_timeout(cancel_grace) {
                         Ok(response) => break response,
                         Err(_) => {
-                            let _ = job.terminate(124);
-                            drop(stdin);
-                            let _ = child.wait();
+                            let _ = tree.terminate(124);
+                            platform::terminate_worker(&mut child, worker_pid);
                             let _ = reader.join();
                             return Err(SupervisorError::HardTimeout { worker_pid });
                         }
@@ -343,110 +324,6 @@ fn read_frame(mut input: impl Read) -> Result<ScriptFrame, SupervisorError> {
         )));
     }
     Ok(frame)
-}
-
-struct Job(HANDLE);
-
-impl Job {
-    fn new() -> Result<Self, String> {
-        let handle = unsafe { CreateJobObjectW(ptr::null(), ptr::null()) };
-        if handle.is_null() {
-            return Err(format!(
-                "CreateJobObjectW failed: {}",
-                std::io::Error::last_os_error()
-            ));
-        }
-        let mut information: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { mem::zeroed() };
-        information.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-        let configured = unsafe {
-            SetInformationJobObject(
-                handle,
-                JobObjectExtendedLimitInformation,
-                (&information as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast::<c_void>(),
-                mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-            )
-        };
-        if configured == 0 {
-            unsafe { CloseHandle(handle) };
-            return Err(format!(
-                "SetInformationJobObject failed: {}",
-                std::io::Error::last_os_error()
-            ));
-        }
-        Ok(Self(handle))
-    }
-
-    fn assign(&self, child: &Child) -> Result<(), String> {
-        let process = child.as_raw_handle() as HANDLE;
-        if unsafe { AssignProcessToJobObject(self.0, process) } == 0 {
-            return Err(format!(
-                "AssignProcessToJobObject failed: {}",
-                std::io::Error::last_os_error()
-            ));
-        }
-        Ok(())
-    }
-
-    fn terminate(&self, exit_code: u32) -> Result<(), String> {
-        if unsafe { TerminateJobObject(self.0, exit_code) } == 0 {
-            return Err(format!(
-                "TerminateJobObject failed: {}",
-                std::io::Error::last_os_error()
-            ));
-        }
-        Ok(())
-    }
-}
-
-impl Drop for Job {
-    fn drop(&mut self) {
-        unsafe { CloseHandle(self.0) };
-    }
-}
-
-struct ConcurrencyPermit {
-    mutex: HANDLE,
-}
-
-impl ConcurrencyPermit {
-    fn try_acquire() -> Result<Self, SupervisorError> {
-        let previous = PROCESS_ACTIVE.fetch_add(1, Ordering::AcqRel);
-        if previous >= PROCESS_CONCURRENCY_LIMIT {
-            PROCESS_ACTIVE.fetch_sub(1, Ordering::AcqRel);
-            return Err(SupervisorError::ConcurrencyLimit);
-        }
-        for slot in 0..GLOBAL_CONCURRENCY_LIMIT {
-            let mut name: Vec<u16> = format!("Local\\AgenTermScriptSupervisorV1Slot{slot}")
-                .encode_utf16()
-                .collect();
-            name.push(0);
-            let mutex = unsafe { CreateMutexW(ptr::null(), 0, name.as_ptr()) };
-            if mutex.is_null() {
-                PROCESS_ACTIVE.fetch_sub(1, Ordering::AcqRel);
-                return Err(SupervisorError::Spawn(format!(
-                    "CreateMutexW failed: {}",
-                    std::io::Error::last_os_error()
-                )));
-            }
-            let wait = unsafe { WaitForSingleObject(mutex, 0) };
-            if wait == WAIT_OBJECT_0 || wait == WAIT_ABANDONED {
-                return Ok(Self { mutex });
-            }
-            unsafe { CloseHandle(mutex) };
-        }
-        PROCESS_ACTIVE.fetch_sub(1, Ordering::AcqRel);
-        Err(SupervisorError::ConcurrencyLimit)
-    }
-}
-
-impl Drop for ConcurrencyPermit {
-    fn drop(&mut self) {
-        unsafe {
-            ReleaseMutex(self.mutex);
-            CloseHandle(self.mutex);
-        }
-        PROCESS_ACTIVE.fetch_sub(1, Ordering::AcqRel);
-    }
 }
 
 #[cfg(test)]

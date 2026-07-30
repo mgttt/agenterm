@@ -62,6 +62,22 @@ jobs:
           "$BIN/agenterm-cli" --help | head -3
           "$BIN/agenterm-mux" --version
           "$BIN/agenterm-script" --help | head -3
+      - name: Build script integration tests
+        run: cargo test --locked --target x86_64-unknown-linux-gnu --test linux_script_cli
+      - name: Portable Rhai gate (task check)
+        run: |
+          BIN=target/x86_64-unknown-linux-gnu/debug
+          "$BIN/agenterm-script" task check --manifest agenterm.tasks.json
+      - name: Portable Rhai gate (migration-audit)
+        run: |
+          BIN=target/x86_64-unknown-linux-gnu/debug
+          "$BIN/agenterm-script" task run migration-audit --manifest agenterm.tasks.json \
+            --timeout-ms 60000 --max-operations 10000000
+      - name: Portable Rhai gate (lint static)
+        run: |
+          BIN=target/x86_64-unknown-linux-gnu/debug
+          "$BIN/agenterm-script" task run lint --manifest agenterm.tasks.json \
+            --timeout-ms 120000 --max-operations 10000000 -- . "$BIN/agenterm-script" static
 
   macos-clients:
     runs-on: macos-latest
