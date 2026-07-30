@@ -215,7 +215,7 @@ mod tests {
     fn candidates_include_dejavu_and_liberation() {
         let names: Vec<_> = candidates().iter().map(|c| c.name).collect();
         assert!(names.contains(&"DejaVu Sans Mono"));
-        assert!(names.iter().any(|name| *name == "Liberation Mono"));
+        assert!(names.contains(&"Liberation Mono"));
     }
 
     #[test]

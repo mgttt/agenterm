@@ -436,6 +436,33 @@ mod tests {
     }
 
     #[test]
+    fn write_xrgb_png_rejects_overflow_clip_without_writing() {
+        if display_facts_from_env().headless {
+            return;
+        }
+        let path = std::env::temp_dir().join("agenterm-linux-screenshot-invalid-clip.png");
+        let _ = std::fs::remove_file(&path);
+        let err = write_xrgb_png(
+            &path,
+            4,
+            4,
+            &[0; 16],
+            Some(ScreenshotClip {
+                x: 2,
+                y: 2,
+                width: 4,
+                height: 4,
+            }),
+        )
+        .expect_err("overflow clip must fail");
+        assert_eq!(err.code(), "screenshot_invalid_clip");
+        assert!(
+            !path.exists(),
+            "invalid clip must not silently write a shrunk PNG"
+        );
+    }
+
+    #[test]
     fn empty_output_path_is_typed_failure() {
         if display_facts_from_env().headless {
             return;

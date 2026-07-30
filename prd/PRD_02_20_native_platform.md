@@ -131,10 +131,10 @@ tests or ownership.
   - [x] Linux clipboard helpers: read/write probed separately, display-matched
     X11/Wayland selection, wall-clock timeouts, live stdout byte budget, typed
     `clipboard_timeout` / `clipboard_too_large` / `clipboard_unavailable`
-  - [~] Linux screenshot encode and activation/no-activate (`with_active`)
+  - [x] Linux screenshot encode and activation/no-activate (`with_active`)
     consume `platform::linux`; dimensions/pixels/path, strict clip bounds, and
     headless failures are typed; X11/Wayland softbuffer paths Available,
-    headless Unsupported
+    headless Unsupported; native X11 `DISPLAY=:1` evidence recorded below
   - [~] winit/softbuffer windowing, X11/Wayland input, system-font fallback,
     clipboard, cursor, scaling, and POSIX PTY interaction are in active delivery
   - [~] expose the remaining Linux behavior through the shared platform
@@ -254,8 +254,14 @@ macOS hot-path evidence (2026-07-30):
 
 Cross-platform integration review (2026-07-30):
 
-- [~] Linux screenshot requests that extend outside the framebuffer now return
-  typed `screenshot_invalid_clip`; native Linux verification is pending
+- [x] Linux screenshot requests that extend outside the framebuffer return typed
+  `screenshot_invalid_clip` and do not write a silently shrunk PNG. Native
+  Linux verification (2026-07-30): `cargo fmt --check`; warnings-denied
+  all-target/all-feature Clippy; **8** `platform::linux::screenshot` unit tests
+  (including overflow-clip reject-without-write); X11 Available / Wayland
+  Available / headless Unsupported capability statuses plus activation
+  `--no-activate` / `AGENTERM_NO_ACTIVATE=1` on native `DISPLAY=:1`; public CLI
+  whole-window PNG **950×594** and pane PNG **702×459**
 - [x] macOS clipboard write timeout covers blocked stdin delivery as well as
   child exit; native macOS executes the blocked-writer deadline test in 0.06
   seconds for the focused four-test suite
