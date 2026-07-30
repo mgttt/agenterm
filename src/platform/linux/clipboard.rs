@@ -386,4 +386,24 @@ mod tests {
     fn read_via_command_rejects_empty_argv() {
         assert!(read_via_command(&[]).is_err());
     }
+
+    #[test]
+    fn desktop_clipboard_round_trip_when_available() {
+        let status = clipboard_capability_status_from_env();
+        if !matches!(status, CapabilityStatus::Available) {
+            // Typed non-Available is success for this probe; skip IO round-trip.
+            return;
+        }
+        let marker = format!(
+            "agenterm-linux-clipboard-rt-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis())
+                .unwrap_or(0)
+        );
+        set_text(&marker).expect("clipboard set_text");
+        let got = get_text().expect("clipboard get_text");
+        assert_eq!(got, marker);
+        assert!(has_unicode_text());
+    }
 }
