@@ -236,7 +236,8 @@ fn run_step(label, specs, repo, scratch, sequence) {
         }
         require(
             result.success,
-            label + " failed with exit code " + result.exit_code
+            label + " failed with exit code " + result.exit_code +
+                "\n" + tail(result.stdout + result.stderr, 16384)
         );
     }
     print(
