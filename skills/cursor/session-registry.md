@@ -9,11 +9,13 @@ REST API **不能**改 `name`；下面登记表供主控与分身对齐身份与
 |--------|------|------|------|------|
 | **主控** | `bc-019fadf1-32a1-76ac-8b2c-086f8a4059a1` | mobile | 统筹、合 `main`、开分身、v0.2.0 规划 | 本对话；不抢 Win 全门禁实现 |
 | **分身1** | `bc-5a9c83b4-3a39-42e4-9d33-cb705d848f8f` | api | v0.1.10 Windows 全门禁 | `check.cmd` 含 smoke；分支 `cursor/v0-1-10-win-full-gate-b30f`；`autoCreatePR` 关闭 |
+| **分身2** | `bc-26005f17-af78-4f63-bded-328cd1356396` | api | Linux Rhai 测试套件 review + 跑顺 | 分支 `cursor/linux-rhai-test-suite-59a1`；`autoCreatePR` 关闭 |
 
 链接：
 
 - 主控：https://cursor.com/agents/bc-019fadf1-32a1-76ac-8b2c-086f8a4059a1
 - 分身1：https://cursor.com/agents/bc-5a9c83b4-3a39-42e4-9d33-cb705d848f8f
+- 分身2：https://cursor.com/agents/bc-26005f17-af78-4f63-bded-328cd1356396
 
 ## 命名约定
 
