@@ -41,7 +41,22 @@ mod tests {
     #[test]
     fn write_xrgb_png_emits_readable_file() {
         let path = std::env::temp_dir().join("agenterm-unix-screenshot-test.png");
+        let _ = std::fs::remove_file(&path);
         let pixels = [0x00FF00u32, 0x0000FFu32, 0xFF0000u32, 0xFFFFFFu32];
+        #[cfg(target_os = "linux")]
+        if matches!(
+            crate::platform::linux::capability_status(crate::platform::CapabilityKind::Screenshot),
+            crate::platform::CapabilityStatus::Unsupported {
+                reason: "headless-display"
+            }
+        ) {
+            assert_eq!(
+                write_xrgb_png(&path, 2, 2, &pixels, None),
+                Err("screenshot unavailable without a graphical display".to_string())
+            );
+            assert!(!path.exists(), "headless capture must not write a PNG");
+            return;
+        }
         write_xrgb_png(&path, 2, 2, &pixels, None).expect("png write");
         let meta = std::fs::metadata(&path).expect("meta");
         assert!(meta.len() > 32);

@@ -289,7 +289,12 @@
     "prd-alignment": {
       "inputs": ["prd-tree", "alignment-contract", "public-catalogs"],
       "outputs": ["prd-alignment-report"],
-      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
+      "budget": {
+        "timeout_ms": 120000,
+        "max_operations": 10000000,
+        "max_output_bytes": 1048576,
+        "max_string_bytes": 1048576
+      },
       "network": [],
       "evidence": ["task.prd-alignment"]
     },
