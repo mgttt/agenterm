@@ -42,9 +42,14 @@ Options:
   --list             List agents visible to CURSOR_API (name, id, status)
   --dry-run          Build envelope + JSON; do not call the API
   --stdin            Read message body from stdin
-  --registry PATH    Optional local name→bcId hints (default:
-                     skills/cursor/session-registry.md if present)
+  --registry PATH    Fallback name→bcId hints only if live API miss
+                     (default: skills/cursor/session-registry.md)
   -h, --help         Show this help
+
+Resolution (adaptive):
+  1) If argument is bc-…, use it (optionally confirmed via live list)
+  2) Else resolve display name via live GET /v1/agents (prefer non-archived)
+  3) Else fall back to --registry table (may be stale — last resort)
 
 Envelope (prepended silently to the prompt text):
   <from::SENDER><to::RECIPIENT>
@@ -53,6 +58,7 @@ Desensitize:
   - Never prints CURSOR_API or Authorization material
   - Redacts bearer/token-looking substrings in API error bodies
   - Logs only name, bcId prefix, run id, and HTTP status
+  - Set CURSOR_AGENT_CHAT_VERBOSE=1 to log resolve source (api|registry)
 EOF
 }
 
@@ -149,13 +155,36 @@ import json, sys
 want = sys.argv[1]
 data = json.load(sys.stdin)
 items = data.get("items") or data.get("agents") or []
-for item in items:
+
+def status_rank(status: str) -> int:
+    s = (status or "").upper()
+    # Prefer live sessions; archived/expired are last-resort only.
+    order = {
+        "RUNNING": 0,
+        "ACTIVE": 0,
+        "IDLE": 1,
+        "WAITING_FOR_BACKGROUND_WORK": 2,
+        "NOT_YET_STARTED": 3,
+        "ERROR": 4,
+        "EXPIRED": 8,
+        "ARCHIVED": 9,
+    }
+    return order.get(s, 5)
+
+matches = []
+for index, item in enumerate(items):
     name = item.get("name") or ""
     agent_id = item.get("id") or item.get("agentId") or ""
-    if want in (name, agent_id):
-        print(agent_id)
-        raise SystemExit(0)
-raise SystemExit(1)
+    status = item.get("status") or item.get("agentStatus") or ""
+    if want == agent_id or want == name:
+        matches.append((status_rank(status), index, agent_id, name, status))
+
+if not matches:
+    raise SystemExit(1)
+
+# API list is typically newest-first; keep that as the tie-breaker via index.
+matches.sort(key=lambda row: (row[0], row[1]))
+print(matches[0][2])
 ' "$want"
 }
 
@@ -163,20 +192,32 @@ resolve_agent() {
   local label="$1"
   local role="$2"
   local id=""
+  local source=""
 
   if is_bc_id "$label"; then
+    # Explicit bcId: still verify via live list when possible; keep as-is if offline.
+    if id=$(api_resolve_name "$label" 2>/dev/null); then
+      printf '%s' "$id"
+      return 0
+    fi
     printf '%s' "$label"
     return 0
   fi
 
-  if [ -n "$REGISTRY" ]; then
+  # Adaptive: live Cloud Agents API by display name wins over a stale registry bcId.
+  if id=$(api_resolve_name "$label" 2>/dev/null); then
+    source=api
+  elif [ -n "$REGISTRY" ]; then
     id=$(registry_lookup "$label" "$REGISTRY" || true)
+    [ -n "$id" ] && source=registry
   fi
+
   if [ -z "$id" ]; then
-    id=$(api_resolve_name "$label" || true)
+    die "cannot resolve ${role} '${label}' to a live bcId (try --list; registry is fallback only)"
   fi
-  if [ -z "$id" ]; then
-    die "cannot resolve ${role} '${label}' to a bcId (update --registry or use live --list)"
+
+  if [ "${CURSOR_AGENT_CHAT_VERBOSE:-0}" != "0" ]; then
+    printf 'resolve %s=%s via %s -> %s\n' "$role" "$label" "$source" "$(bc_prefix "$id")" >&2
   fi
   printf '%s' "$id"
 }
