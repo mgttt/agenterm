@@ -1,6 +1,8 @@
 use std::{
+    fs,
     io::{BufRead, BufReader, Read, Write},
     net::{TcpListener, TcpStream},
+    path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::{
         Arc,
@@ -8,21 +10,14 @@ use std::{
         mpsc,
     },
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use serde_json::{Value, json};
 
-#[cfg(windows)]
-use std::{
-    fs,
-    path::Path,
-    time::{SystemTime, UNIX_EPOCH},
-};
-
 #[test]
 fn public_stdio_lifecycle_keeps_stdout_machine_only() {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_agenterm-mcp"))
+    let mut child = Command::new(mcp_executable())
         .args(["serve", "--stdio"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -115,8 +110,54 @@ fn public_stdio_lifecycle_keeps_stdout_machine_only() {
 }
 
 #[test]
+fn public_stdio_rejects_an_unsupported_revision_and_recovers() {
+    let mut child = Command::new(mcp_executable())
+        .args(["serve", "--stdio"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("start public agenterm-mcp executable");
+    let input = concat!(
+        "{\"jsonrpc\":\"2.0\",\"id\":\"future\",\"method\":\"initialize\",\"params\":",
+        "{\"protocolVersion\":\"future\",\"capabilities\":{},",
+        "\"clientInfo\":{\"name\":\"black-box\",\"version\":\"1\"}}}\n",
+        "{\"jsonrpc\":\"2.0\",\"id\":\"supported\",\"method\":\"initialize\",\"params\":",
+        "{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{},",
+        "\"clientInfo\":{\"name\":\"black-box\",\"version\":\"1\"}}}\n"
+    );
+    child
+        .stdin
+        .take()
+        .expect("piped stdin")
+        .write_all(input.as_bytes())
+        .expect("write MCP revision negotiation");
+    let output = child.wait_with_output().expect("wait for EOF shutdown");
+    assert!(output.status.success(), "{output:?}");
+    assert!(output.stderr.is_empty(), "{output:?}");
+    let responses = String::from_utf8(output.stdout)
+        .expect("stdout is UTF-8")
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).expect("stdout line is JSON-RPC"))
+        .collect::<Vec<_>>();
+    assert_eq!(responses.len(), 2);
+    assert_eq!(responses[0]["id"], "future");
+    assert_eq!(responses[0]["error"]["code"], -32005);
+    assert_eq!(
+        responses[0]["error"]["data"]["code"],
+        "mcp_protocol_version"
+    );
+    assert_eq!(
+        responses[0]["error"]["data"]["supported"],
+        json!(["2025-11-25"])
+    );
+    assert_eq!(responses[1]["id"], "supported");
+    assert_eq!(responses[1]["result"]["protocolVersion"], "2025-11-25");
+}
+
+#[test]
 fn public_stdio_recovers_after_malformed_and_oversized_frames() {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_agenterm-mcp"))
+    let mut child = Command::new(mcp_executable())
         .args(["serve", "--stdio"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -192,7 +233,14 @@ fn public_resource_matches_cli_snapshot_field_for_field() {
             "working_context": {
                 "cwd": {"path": "private-cwd"},
                 "proxy": {"endpoint": "private-proxy"}
-            }
+            },
+            "pane_text": "private-pane",
+            "selection_text": "private-selection",
+            "environment": {"SECRET": "private-environment"},
+            "clipboard": "private-clipboard",
+            "credential": "private-credential",
+            "pat": "private-pat",
+            "ipc_secret": "private-ipc-secret"
         }]
     });
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind same-source fixture");
@@ -229,6 +277,29 @@ fn public_resource_matches_cli_snapshot_field_for_field() {
     fixture.join().expect("join same-source fixture");
     assert!(output.status.success(), "{output:?}");
     assert!(output.stderr.is_empty(), "{output:?}");
+    let complete_output = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    for private in [
+        "private-title",
+        "private-draft",
+        "private-cwd",
+        "private-proxy",
+        "private-pane",
+        "private-selection",
+        "private-environment",
+        "private-clipboard",
+        "private-credential",
+        "private-pat",
+        "private-ipc-secret",
+    ] {
+        assert!(
+            !complete_output.contains(private),
+            "MCP output leaked {private}"
+        );
+    }
     let responses = String::from_utf8(output.stdout)
         .expect("MCP stdout UTF-8")
         .lines()
@@ -276,6 +347,573 @@ fn public_resource_matches_cli_snapshot_field_for_field() {
     ] {
         assert!(!encoded.contains(private), "MCP leaked {private}");
     }
+}
+
+#[test]
+fn backend_error_diagnostics_do_not_echo_private_values() {
+    let private_values = [
+        "error-private-pane",
+        "error-private-selection",
+        "error-private-environment",
+        "error-private-clipboard",
+        "error-private-credential",
+        "error-private-pat",
+        "error-private-ipc-secret",
+    ];
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind private-error fixture");
+    let address = listener.local_addr().expect("fixture address").to_string();
+    let backend_error = private_values.join("|");
+    let fixture = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept private-error request");
+        let request = read_backend_request(&stream);
+        assert_eq!(request["args"][0], "ui-snapshot");
+        let response = json!({
+            "ok": false,
+            "output": "",
+            "error": backend_error,
+            "error_code": "snapshot_private_failure",
+            "error_category": "fixture",
+            "retryable": false
+        });
+        writeln!(stream, "{response}").expect("write private backend error");
+    });
+    let mut child = start_mcp(&address);
+    let mut stdin = child.stdin.take().expect("piped stdin");
+    write_initialize(&mut stdin);
+    writeln!(
+        stdin,
+        "{}",
+        json!({
+            "jsonrpc": "2.0",
+            "id": "private-error",
+            "method": "resources/read",
+            "params": {"uri": "agenterm://fleet/snapshot"}
+        })
+    )
+    .expect("write private-error read");
+    drop(stdin);
+    let output = child
+        .wait_with_output()
+        .expect("wait private-error session");
+    fixture.join().expect("join private-error fixture");
+    assert!(output.status.success(), "{output:?}");
+    let complete_output = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    for private in private_values {
+        assert!(
+            !complete_output.contains(private),
+            "MCP diagnostics leaked {private}"
+        );
+    }
+    let responses = String::from_utf8(output.stdout)
+        .expect("MCP stdout UTF-8")
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).expect("MCP response JSON"))
+        .collect::<Vec<_>>();
+    let error = response_by_id(&responses, "private-error");
+    assert_eq!(error["error"]["data"]["class"], "snapshot_failed");
+    assert_eq!(
+        error["error"]["data"]["backend_code"],
+        "snapshot_private_failure"
+    );
+}
+
+#[test]
+fn public_workspace_tabs_and_snapshot_preserve_detached_tree_and_dead_shapes() {
+    let snapshot = json!({
+        "server_pid": 4242,
+        "protocol_version": 1,
+        "event_position": {"epoch": "shape-epoch", "sequence": 44},
+        "focus": {"window_id": "@3"},
+        "window": {
+            "visible": false,
+            "detached": true,
+            "minimized": false,
+            "state": "detached"
+        },
+        "tabs": [
+            {
+                "id": "@1", "parent_id": null, "name": "renamed-root",
+                "note": "leader", "state": "running", "pid": 5101,
+                "exit_code": null, "active": false, "has_children": true,
+                "collapsed": true, "depth": 0
+            },
+            {
+                "id": "@2", "parent_id": "@1", "name": "tree-child",
+                "note": "worker", "state": "dead", "pid": null,
+                "exit_code": 17, "active": false, "has_children": false,
+                "collapsed": false, "depth": 1
+            },
+            {
+                "id": "@3", "parent_id": null, "name": "active-peer",
+                "note": "", "state": "running", "pid": 5103,
+                "exit_code": null, "active": true, "has_children": false,
+                "collapsed": false, "depth": 0
+            }
+        ]
+    });
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind resource-shape fixture");
+    let address = listener.local_addr().expect("fixture address").to_string();
+    let fixture_snapshot = snapshot.clone();
+    let fixture = thread::spawn(move || {
+        for _ in 0..3 {
+            let (stream, _) = listener.accept().expect("accept resource-shape request");
+            reply_snapshot_backend(stream, &fixture_snapshot);
+        }
+    });
+
+    let mut child = start_mcp(&address);
+    let mut stdin = child.stdin.take().expect("piped stdin");
+    write_initialize(&mut stdin);
+    for (id, uri) in [
+        ("workspace", "agenterm://fleet/workspace"),
+        ("tabs", "agenterm://fleet/tabs"),
+        ("snapshot", "agenterm://fleet/snapshot"),
+    ] {
+        writeln!(
+            stdin,
+            "{}",
+            json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "method": "resources/read",
+                "params": {"uri": uri}
+            })
+        )
+        .expect("write resource-shape read");
+    }
+    drop(stdin);
+    let output = child
+        .wait_with_output()
+        .expect("wait resource-shape session");
+    fixture.join().expect("join resource-shape fixture");
+    assert!(output.status.success(), "{output:?}");
+    assert!(output.stderr.is_empty(), "{output:?}");
+    let responses = String::from_utf8(output.stdout)
+        .expect("MCP stdout UTF-8")
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).expect("MCP response JSON"))
+        .collect::<Vec<_>>();
+    assert_eq!(responses.len(), 4);
+    let resource = |id: &str| {
+        let response = responses
+            .iter()
+            .find(|response| response["id"] == id)
+            .expect("resource response");
+        serde_json::from_str::<Value>(
+            response["result"]["contents"][0]["text"]
+                .as_str()
+                .expect("resource text"),
+        )
+        .expect("resource JSON")
+    };
+    let workspace = resource("workspace");
+    assert_eq!(workspace["event_position"], snapshot["event_position"]);
+    assert_eq!(workspace["active_tab_id"], "@3");
+    assert_eq!(workspace["tab_count"], 3);
+    assert_eq!(workspace["window"]["detached"], true);
+    assert_eq!(workspace["window"]["state"], "detached");
+
+    let tabs = resource("tabs");
+    assert_eq!(tabs["event_position"], snapshot["event_position"]);
+    assert_eq!(tabs["tabs"].as_array().map(Vec::len), Some(3));
+    assert_eq!(tabs["tabs"][0]["name"], "renamed-root");
+    assert_eq!(tabs["tabs"][1]["parent_id"], "@1");
+    assert_eq!(tabs["tabs"][1]["state"], "dead");
+    assert_eq!(tabs["tabs"][1]["exit_code"], 17);
+
+    let fleet = resource("snapshot");
+    assert_eq!(fleet["event_position"], snapshot["event_position"]);
+    assert_eq!(fleet["workspace"]["window_detached"], true);
+    assert_eq!(fleet["workspace"]["active_tab_id"], "@3");
+    assert_eq!(fleet["tabs"], tabs["tabs"]);
+}
+
+#[test]
+fn public_workspace_tabs_and_snapshot_limits_fail_closed_with_typed_budget_facts() {
+    let snapshot = json!({
+        "server_pid": 4242,
+        "protocol_version": 7,
+        "event_position": {"epoch": "resource-limit-epoch", "sequence": 1},
+        "focus": {"window_id": "@1"},
+        "window": {
+            "visible": true,
+            "detached": false,
+            "minimized": false,
+            "state": "x".repeat(786_432)
+        },
+        "tabs": [{
+            "id": "@1",
+            "parent_id": null,
+            "name": "resource-limit",
+            "note": "x".repeat(786_432),
+            "state": "running",
+            "pid": 5151,
+            "exit_code": null,
+            "active": true,
+            "has_children": false,
+            "collapsed": false,
+            "depth": 0
+        }]
+    });
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind resource-limit fixture");
+    let address = listener.local_addr().expect("fixture address").to_string();
+    let fixture = thread::spawn(move || {
+        for _ in 0..3 {
+            let (stream, _) = listener.accept().expect("accept resource-limit request");
+            reply_snapshot_backend(stream, &snapshot);
+        }
+    });
+
+    let mut child = start_mcp(&address);
+    let mut stdin = child.stdin.take().expect("piped stdin");
+    stdin
+        .write_all(
+            concat!(
+                "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":",
+                "{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{},",
+                "\"clientInfo\":{\"name\":\"resource-limit\",\"version\":\"1\"}}}\n",
+                "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n",
+                "{\"jsonrpc\":\"2.0\",\"id\":\"workspace\",\"method\":\"resources/read\",",
+                "\"params\":{\"uri\":\"agenterm://fleet/workspace\"}}\n",
+                "{\"jsonrpc\":\"2.0\",\"id\":\"tabs\",\"method\":\"resources/read\",",
+                "\"params\":{\"uri\":\"agenterm://fleet/tabs\"}}\n",
+                "{\"jsonrpc\":\"2.0\",\"id\":\"snapshot\",\"method\":\"resources/read\",",
+                "\"params\":{\"uri\":\"agenterm://fleet/snapshot\"}}\n"
+            )
+            .as_bytes(),
+        )
+        .expect("write resource-limit session");
+    drop(stdin);
+    let output = child
+        .wait_with_output()
+        .expect("wait resource-limit session");
+    fixture.join().expect("join resource-limit fixture");
+    assert!(output.status.success(), "{output:?}");
+    assert!(output.stderr.is_empty(), "{output:?}");
+    let responses = String::from_utf8(output.stdout)
+        .expect("MCP stdout UTF-8")
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).expect("MCP response JSON"))
+        .collect::<Vec<_>>();
+    assert_eq!(responses.len(), 4);
+    for id in ["workspace", "tabs", "snapshot"] {
+        let response = response_by_id(&responses, id);
+        assert_eq!(response["error"]["code"], -32004);
+        assert_eq!(
+            response["error"]["data"]["code"],
+            "agenterm_response_too_large"
+        );
+        assert_eq!(response["error"]["data"]["maximum_bytes"], 786_432);
+    }
+}
+
+#[test]
+fn public_instances_resource_reports_healthy_and_dead_registrations() {
+    let root = unique_test_root("mcp-instance-resource");
+    let instances = root.join("instances");
+    fs::create_dir_all(&instances).expect("create instance fixture directory");
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind healthy instance fixture");
+    let address = listener.local_addr().expect("fixture address").to_string();
+    write_instance_registration(
+        &instances,
+        "healthy.json",
+        std::process::id(),
+        &address,
+        "healthy-session",
+    );
+    write_instance_registration(
+        &instances,
+        "dead.json",
+        u32::MAX,
+        "127.0.0.1:1",
+        "dead-session",
+    );
+    let handshake_address = address.clone();
+    let fixture = thread::spawn(move || {
+        let (stream, _) = listener.accept().expect("accept healthy handshake");
+        reply_protocol_backend(stream, std::process::id(), &handshake_address, 1);
+    });
+
+    let responses = run_discovery_resource(&instances, "agenterm://fleet/instances");
+    fixture.join().expect("join healthy handshake");
+    let body = resource_body(&responses, "resource");
+    let inventory = body["instances"].as_array().expect("instance inventory");
+    assert_eq!(inventory.len(), 2);
+    let healthy = inventory
+        .iter()
+        .find(|instance| instance["session"] == "healthy-session")
+        .expect("healthy instance");
+    assert_eq!(healthy["address"], address);
+    assert_eq!(healthy["status"], "healthy");
+    assert_eq!(healthy["compatible"], true);
+    let dead = inventory
+        .iter()
+        .find(|instance| instance["session"] == "dead-session")
+        .expect("dead instance");
+    assert_eq!(dead["status"], "stale");
+    assert_eq!(dead["compatible"], false);
+
+    fs::remove_dir_all(&root).expect("remove instance fixture root");
+}
+
+#[test]
+fn public_instances_item_limit_fails_before_health_allocation() {
+    let root = unique_test_root("mcp-instance-limit");
+    let instances = root.join("instances");
+    fs::create_dir_all(&instances).expect("create instance-limit directory");
+    for index in 0..1_025 {
+        write_instance_registration(
+            &instances,
+            &format!("{index:04}.json"),
+            u32::MAX,
+            "127.0.0.1:1",
+            &format!("limit-{index}"),
+        );
+    }
+    let responses = run_discovery_resource(&instances, "agenterm://fleet/instances");
+    let error = response_by_id(&responses, "resource");
+    assert_eq!(error["error"]["code"], -32004);
+    assert_eq!(error["error"]["data"]["item_kind"], "instances");
+    assert_eq!(error["error"]["data"]["actual_items"], 1_025);
+    assert_eq!(error["error"]["data"]["maximum_items"], 1_024);
+    fs::remove_dir_all(&root).expect("remove instance-limit root");
+}
+
+#[test]
+fn implicit_discovery_selects_exactly_one_typed_healthy_instance() {
+    let root = unique_test_root("mcp-selection-one");
+    let instances = root.join("instances");
+    fs::create_dir_all(&instances).expect("create selection fixture directory");
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind selection fixture");
+    let address = listener.local_addr().expect("fixture address").to_string();
+    write_instance_registration(
+        &instances,
+        "one.json",
+        std::process::id(),
+        &address,
+        "one-session",
+    );
+    let fixture_address = address.clone();
+    let fixture = thread::spawn(move || {
+        let (stream, _) = listener.accept().expect("accept selection handshake");
+        reply_protocol_backend(stream, std::process::id(), &fixture_address, 1);
+        let (stream, _) = listener.accept().expect("accept selected snapshot");
+        reply_snapshot_backend(stream, &minimal_snapshot("selection-one", 1));
+    });
+
+    let responses = run_discovery_resource(&instances, "agenterm://fleet/workspace");
+    fixture.join().expect("join selection fixture");
+    let body = resource_body(&responses, "resource");
+    assert_eq!(body["server"]["address"], address);
+    assert_eq!(body["event_position"]["epoch"], "selection-one");
+    fs::remove_dir_all(&root).expect("remove selection fixture root");
+}
+
+#[test]
+fn implicit_discovery_fails_closed_for_zero_or_many_healthy_instances() {
+    let zero_root = unique_test_root("mcp-selection-zero");
+    let zero_instances = zero_root.join("instances");
+    fs::create_dir_all(&zero_instances).expect("create empty instance directory");
+    let zero = run_discovery_resource(&zero_instances, "agenterm://fleet/workspace");
+    let zero_error = response_by_id(&zero, "resource");
+    assert_eq!(zero_error["error"]["data"]["class"], "server_not_found");
+    assert_eq!(
+        zero_error["error"]["data"]["candidates"]
+            .as_array()
+            .map(Vec::len),
+        Some(0)
+    );
+    fs::remove_dir_all(&zero_root).expect("remove zero fixture root");
+
+    let many_root = unique_test_root("mcp-selection-many");
+    let many_instances = many_root.join("instances");
+    fs::create_dir_all(&many_instances).expect("create many instance directory");
+    let first = TcpListener::bind("127.0.0.1:0").expect("bind first healthy fixture");
+    let second = TcpListener::bind("127.0.0.1:0").expect("bind second healthy fixture");
+    let first_address = first.local_addr().expect("first address").to_string();
+    let second_address = second.local_addr().expect("second address").to_string();
+    write_instance_registration(
+        &many_instances,
+        "first.json",
+        std::process::id(),
+        &first_address,
+        "first-session",
+    );
+    write_instance_registration(
+        &many_instances,
+        "second.json",
+        std::process::id(),
+        &second_address,
+        "second-session",
+    );
+    let first_fixture_address = first_address.clone();
+    let second_fixture_address = second_address.clone();
+    let first_fixture = thread::spawn(move || {
+        let (stream, _) = first.accept().expect("accept first healthy handshake");
+        reply_protocol_backend(stream, std::process::id(), &first_fixture_address, 1);
+    });
+    let second_fixture = thread::spawn(move || {
+        let (stream, _) = second.accept().expect("accept second healthy handshake");
+        reply_protocol_backend(stream, std::process::id(), &second_fixture_address, 1);
+    });
+    let many = run_discovery_resource(&many_instances, "agenterm://fleet/workspace");
+    first_fixture.join().expect("join first healthy fixture");
+    second_fixture.join().expect("join second healthy fixture");
+    let many_error = response_by_id(&many, "resource");
+    assert_eq!(many_error["error"]["data"]["class"], "server_ambiguous");
+    let candidates = many_error["error"]["data"]["candidates"]
+        .as_array()
+        .expect("ambiguous candidates");
+    assert_eq!(candidates.len(), 2);
+    assert!(candidates.iter().all(|item| item["status"] == "healthy"));
+    fs::remove_dir_all(&many_root).expect("remove many fixture root");
+}
+
+#[test]
+fn implicit_discovery_reports_stale_unreachable_and_incompatible_candidates() {
+    let root = unique_test_root("mcp-selection-unhealthy");
+    let instances = root.join("instances");
+    fs::create_dir_all(&instances).expect("create unhealthy instance directory");
+    let stale = TcpListener::bind("127.0.0.1:0").expect("bind stale fixture");
+    let incompatible = TcpListener::bind("127.0.0.1:0").expect("bind incompatible fixture");
+    let reserved = TcpListener::bind("127.0.0.1:0").expect("reserve unreachable address");
+    let stale_address = stale.local_addr().expect("stale address").to_string();
+    let incompatible_address = incompatible
+        .local_addr()
+        .expect("incompatible address")
+        .to_string();
+    let unreachable_address = reserved
+        .local_addr()
+        .expect("unreachable address")
+        .to_string();
+    drop(reserved);
+    write_instance_registration(
+        &instances,
+        "stale.json",
+        std::process::id(),
+        &stale_address,
+        "stale-session",
+    );
+    write_instance_registration(
+        &instances,
+        "incompatible.json",
+        std::process::id(),
+        &incompatible_address,
+        "incompatible-session",
+    );
+    write_instance_registration(
+        &instances,
+        "unreachable.json",
+        std::process::id(),
+        &unreachable_address,
+        "unreachable-session",
+    );
+    let stale_fixture_address = stale_address.clone();
+    let incompatible_fixture_address = incompatible_address.clone();
+    let stale_fixture = thread::spawn(move || {
+        let (stream, _) = stale.accept().expect("accept stale handshake");
+        reply_protocol_backend(
+            stream,
+            std::process::id().saturating_add(1),
+            &stale_fixture_address,
+            1,
+        );
+    });
+    let incompatible_fixture = thread::spawn(move || {
+        let (stream, _) = incompatible
+            .accept()
+            .expect("accept incompatible handshake");
+        reply_protocol_backend(
+            stream,
+            std::process::id(),
+            &incompatible_fixture_address,
+            999,
+        );
+    });
+    let responses = run_discovery_resource(&instances, "agenterm://fleet/workspace");
+    stale_fixture.join().expect("join stale fixture");
+    incompatible_fixture
+        .join()
+        .expect("join incompatible fixture");
+    let error = response_by_id(&responses, "resource");
+    assert_eq!(error["error"]["data"]["class"], "server_not_found");
+    let candidates = error["error"]["data"]["candidates"]
+        .as_array()
+        .expect("unhealthy candidates");
+    for (session, status) in [
+        ("stale-session", "stale"),
+        ("incompatible-session", "incompatible"),
+        ("unreachable-session", "unreachable"),
+    ] {
+        assert_eq!(
+            candidates
+                .iter()
+                .find(|candidate| candidate["session"] == session)
+                .expect("classified candidate")["status"],
+            status
+        );
+    }
+    fs::remove_dir_all(&root).expect("remove unhealthy fixture root");
+}
+
+#[test]
+fn instance_discovery_has_one_total_deadline_for_many_hanging_records() {
+    let root = unique_test_root("mcp-discovery-deadline");
+    let instances = root.join("instances");
+    fs::create_dir_all(&instances).expect("create deadline fixture directory");
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind hanging fixture");
+    listener
+        .set_nonblocking(true)
+        .expect("set hanging fixture nonblocking");
+    let address = listener.local_addr().expect("hanging address").to_string();
+    for index in 0..256 {
+        write_instance_registration(
+            &instances,
+            &format!("hanging-{index}.json"),
+            std::process::id(),
+            &address,
+            &format!("hanging-{index}"),
+        );
+    }
+    let stop = Arc::new(AtomicBool::new(false));
+    let fixture = thread::spawn({
+        let stop = Arc::clone(&stop);
+        move || {
+            let mut held = Vec::new();
+            while !stop.load(Ordering::Acquire) {
+                match listener.accept() {
+                    Ok((stream, _)) => held.push(stream),
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(2));
+                    }
+                    Err(error) => panic!("accept hanging fixture: {error}"),
+                }
+            }
+        }
+    });
+    let started = Instant::now();
+    let responses = run_discovery_resource(&instances, "agenterm://fleet/instances");
+    let elapsed = started.elapsed();
+    stop.store(true, Ordering::Release);
+    fixture.join().expect("join hanging fixture");
+    let inventory = resource_body(&responses, "resource");
+    assert_eq!(inventory["instances"].as_array().map(Vec::len), Some(256));
+    assert!(
+        elapsed < Duration::from_secs(4),
+        "discovery exceeded its published total deadline: {elapsed:?}"
+    );
+    assert!(
+        inventory["instances"]
+            .as_array()
+            .expect("instance inventory")
+            .iter()
+            .all(|instance| instance["status"] == "unreachable")
+    );
+    fs::remove_dir_all(&root).expect("remove deadline fixture root");
 }
 
 #[cfg(windows)]
@@ -401,9 +1039,12 @@ fn killed_sidecar_cannot_interrupt_live_gui_server_or_pty() {
         );
         assert!(snapshot.status.success(), "{snapshot:?}");
         let snapshot: Value = serde_json::from_slice(&snapshot.stdout).expect("snapshot JSON");
+        let instance_files_before = directory_file_bytes(&instances);
+        let root_entries_before = directory_entry_names(&root);
+        let settings_before = fs::read(&settings).ok();
 
         let mut sidecar = configured_command(
-            env!("CARGO_BIN_EXE_agenterm-mcp"),
+            mcp_executable(),
             &address,
             &workspace,
             &settings,
@@ -454,6 +1095,54 @@ fn killed_sidecar_cannot_interrupt_live_gui_server_or_pty() {
         drop(stdin);
         reader.join().expect("join sidecar reader");
         mcp = Some(sidecar);
+
+        let post_kill_snapshot = run_cli(
+            &address,
+            &workspace,
+            &settings,
+            &instances,
+            &["ui-snapshot"],
+        );
+        assert!(
+            post_kill_snapshot.status.success(),
+            "{post_kill_snapshot:?}"
+        );
+        let post_kill_snapshot: Value =
+            serde_json::from_slice(&post_kill_snapshot.stdout).expect("post-kill snapshot JSON");
+        assert_eq!(
+            post_kill_snapshot["server_pid"], snapshot["server_pid"],
+            "sidecar kill replaced the server authority"
+        );
+        assert_eq!(
+            post_kill_snapshot["tabs"]
+                .as_array()
+                .expect("post-kill tabs")
+                .iter()
+                .map(|tab| (&tab["id"], &tab["pid"]))
+                .collect::<Vec<_>>(),
+            snapshot["tabs"]
+                .as_array()
+                .expect("pre-kill tabs")
+                .iter()
+                .map(|tab| (&tab["id"], &tab["pid"]))
+                .collect::<Vec<_>>(),
+            "sidecar lifecycle changed PTY ownership"
+        );
+        assert_eq!(
+            directory_file_bytes(&instances),
+            instance_files_before,
+            "sidecar lifecycle changed instance registrations"
+        );
+        assert_eq!(
+            directory_entry_names(&root),
+            root_entries_before,
+            "sidecar lifecycle left a temp/settings artifact"
+        );
+        assert_eq!(
+            fs::read(&settings).ok(),
+            settings_before,
+            "sidecar lifecycle changed settings"
+        );
 
         assert!(
             server
@@ -516,7 +1205,7 @@ fn public_wait_returns_one_projected_event_and_verified_post_state() {
             reply_to_backend(stream);
         }
     });
-    let mut child = Command::new(env!("CARGO_BIN_EXE_agenterm-mcp"))
+    let mut child = Command::new(mcp_executable())
         .args(["--address", &address, "serve", "--stdio"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -650,6 +1339,72 @@ fn public_disconnect_cancels_an_active_wait_within_bounded_grace() {
         elapsed < Duration::from_millis(1_500),
         "disconnect cleanup took {elapsed:?}"
     );
+}
+
+#[test]
+fn cancellation_wins_over_a_late_backend_completion() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind cancellation-race fixture");
+    let address = listener.local_addr().expect("fixture address").to_string();
+    let (accepted_sender, accepted_receiver) = mpsc::channel();
+    let (release_sender, release_receiver) = mpsc::channel();
+    let fixture = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept cancellation-race request");
+        read_backend_request(&stream);
+        accepted_sender
+            .send(())
+            .expect("report cancellation-race request");
+        release_receiver
+            .recv_timeout(Duration::from_secs(3))
+            .expect("release late backend completion");
+        let response = json!({
+            "ok": false,
+            "output": "",
+            "error": "late fixture completion",
+            "error_code": "server_restart",
+            "error_category": "event_position",
+            "retryable": false
+        });
+        writeln!(stream, "{response}").expect("write late backend completion");
+    });
+
+    let mut child = start_mcp(&address);
+    let stdout = child.stdout.take().expect("piped stdout");
+    let (sender, receiver) = mpsc::channel();
+    let reader = spawn_stdout_reader(stdout, sender);
+    let mut stdin = child.stdin.take().expect("piped stdin");
+    write_wait_session(&mut stdin, "tab.note", None, 5_000);
+    assert_eq!(receive_response(&receiver, &mut child)["id"], 1);
+    accepted_receiver
+        .recv_timeout(Duration::from_secs(3))
+        .expect("wait became active");
+    write_cancel(&mut stdin, "wait");
+    writeln!(
+        stdin,
+        "{}",
+        json!({"jsonrpc": "2.0", "id": "cancel-barrier", "method": "ping"})
+    )
+    .expect("write cancellation barrier");
+    stdin.flush().expect("flush cancellation barrier");
+    assert_eq!(
+        receive_response(&receiver, &mut child)["id"],
+        "cancel-barrier"
+    );
+    release_sender
+        .send(())
+        .expect("release late backend completion");
+    let cancelled = receive_response(&receiver, &mut child);
+    assert_eq!(cancelled["id"], "wait");
+    assert_eq!(
+        cancelled["result"]["structuredContent"]["outcome"],
+        "cancelled"
+    );
+
+    drop(stdin);
+    let output = child.wait_with_output().expect("wait race session");
+    reader.join().expect("join race reader");
+    fixture.join().expect("join cancellation-race fixture");
+    assert!(output.status.success(), "{output:?}");
+    assert!(output.stderr.is_empty(), "{output:?}");
 }
 
 #[test]
@@ -821,8 +1576,136 @@ fn run_public_wait(
     )
 }
 
+fn run_discovery_resource(instances: &Path, uri: &str) -> Vec<Value> {
+    let mut child = Command::new(mcp_executable())
+        .args(["serve", "--stdio"])
+        .env("AGENTERM_INSTANCE_DIR", instances)
+        .env_remove("AGENTERM_IPC_ADDRESS")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("start discovery MCP sidecar");
+    let mut stdin = child.stdin.take().expect("piped stdin");
+    write_initialize(&mut stdin);
+    writeln!(
+        stdin,
+        "{}",
+        json!({
+            "jsonrpc": "2.0",
+            "id": "resource",
+            "method": "resources/read",
+            "params": {"uri": uri}
+        })
+    )
+    .expect("write discovery resource read");
+    drop(stdin);
+    let output = child.wait_with_output().expect("wait discovery session");
+    assert!(output.status.success(), "{output:?}");
+    assert!(output.stderr.is_empty(), "{output:?}");
+    String::from_utf8(output.stdout)
+        .expect("MCP stdout UTF-8")
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).expect("MCP response JSON"))
+        .collect()
+}
+
+fn response_by_id<'a>(responses: &'a [Value], id: &str) -> &'a Value {
+    responses
+        .iter()
+        .find(|response| response["id"] == id)
+        .expect("MCP response ID")
+}
+
+fn resource_body(responses: &[Value], id: &str) -> Value {
+    serde_json::from_str(
+        response_by_id(responses, id)["result"]["contents"][0]["text"]
+            .as_str()
+            .expect("resource text"),
+    )
+    .expect("resource JSON")
+}
+
+fn unique_test_root(prefix: &str) -> PathBuf {
+    std::env::temp_dir().join(format!(
+        "{prefix}-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos()
+    ))
+}
+
+fn write_instance_registration(
+    directory: &Path,
+    file_name: &str,
+    pid: u32,
+    address: &str,
+    session: &str,
+) {
+    let record = json!({
+        "schema_version": 1,
+        "pid": pid,
+        "address": address,
+        "version": "0.1.10",
+        "session": session,
+        "workspace_path": format!("{session}-workspace.json"),
+        "started_at_unix_ms": 1
+    });
+    fs::write(
+        directory.join(file_name),
+        serde_json::to_vec(&record).expect("registration JSON"),
+    )
+    .expect("write instance registration");
+}
+
+fn minimal_snapshot(epoch: &str, sequence: u64) -> Value {
+    json!({
+        "server_pid": std::process::id(),
+        "protocol_version": 1,
+        "event_position": {"epoch": epoch, "sequence": sequence},
+        "focus": {"window_id": null},
+        "window": {
+            "visible": false,
+            "detached": true,
+            "minimized": false,
+            "state": "detached"
+        },
+        "tabs": []
+    })
+}
+
+#[cfg(windows)]
+fn directory_file_bytes(directory: &Path) -> Vec<(String, Vec<u8>)> {
+    let mut files = fs::read_dir(directory)
+        .expect("read fixture directory")
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_file()))
+        .map(|entry| {
+            (
+                entry.file_name().to_string_lossy().into_owned(),
+                fs::read(entry.path()).expect("read fixture file"),
+            )
+        })
+        .collect::<Vec<_>>();
+    files.sort_by(|left, right| left.0.cmp(&right.0));
+    files
+}
+
+#[cfg(windows)]
+fn directory_entry_names(directory: &Path) -> Vec<String> {
+    let mut entries = fs::read_dir(directory)
+        .expect("read fixture root")
+        .filter_map(Result::ok)
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    entries.sort();
+    entries
+}
+
 fn start_mcp(address: &str) -> std::process::Child {
-    Command::new(env!("CARGO_BIN_EXE_agenterm-mcp"))
+    Command::new(mcp_executable())
         .args(["--address", address, "serve", "--stdio"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -833,7 +1716,7 @@ fn start_mcp(address: &str) -> std::process::Child {
 
 #[cfg(windows)]
 fn configured_command(
-    program: &str,
+    program: impl AsRef<std::ffi::OsStr>,
     address: &str,
     workspace: &Path,
     settings: &Path,
@@ -847,6 +1730,12 @@ fn configured_command(
         .env("AGENTERM_INSTANCE_DIR", instances)
         .env("AGENTERM_NO_ACTIVATE", "1");
     command
+}
+
+fn mcp_executable() -> PathBuf {
+    std::env::var_os("AGENTERM_MCP_EXE")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_BIN_EXE_agenterm-mcp")))
 }
 
 #[cfg(windows)]
@@ -1035,6 +1924,29 @@ fn reply_snapshot_backend(mut stream: TcpStream, snapshot: &Value) {
     stream.flush().expect("flush snapshot backend response");
     let mut trailing = Vec::new();
     let _ = stream.read_to_end(&mut trailing);
+}
+
+fn reply_protocol_backend(mut stream: TcpStream, pid: u32, address: &str, protocol_version: u64) {
+    let request = read_backend_request(&stream);
+    assert_eq!(request["args"][0], "protocol-info");
+    let response = json!({
+        "ok": true,
+        "output": json!({
+            "protocol_version": protocol_version,
+            "agenterm_version": "0.1.10",
+            "identity_scope": "fixture",
+            "pid": pid,
+            "address": address,
+            "build_identity": {},
+            "build_identity_complete": false
+        }).to_string(),
+        "error": "",
+        "error_code": "",
+        "error_category": "",
+        "retryable": false
+    });
+    writeln!(stream, "{response}").expect("write protocol response");
+    stream.flush().expect("flush protocol response");
 }
 
 fn read_backend_request(stream: &TcpStream) -> Value {

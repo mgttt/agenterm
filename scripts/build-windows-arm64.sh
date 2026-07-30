@@ -1,30 +1,8 @@
-#!/usr/bin/env bash
-# Build all Windows ARM64 binaries via cargo-xwin on Linux/macOS hosts.
-#
-# Rust toolchain: install the aarch64-pc-windows-msvc target (e.g. rustup target
-# add aarch64-pc-windows-msvc). Cross targets are installed by the owning
-# build/CI job rather than globally pinned.
-set -euo pipefail
-
-TARGET="aarch64-pc-windows-msvc"
-PROFILE="${AGENTERM_BUILD_PROFILE:-debug}"
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$ROOT"
-
-BINS=(agenterm agenterm-server agenterm-cli agenterm-mux agenterm-script agenterm-mcp)
-ARGS=(xwin build --target "$TARGET")
-if [[ $PROFILE == release ]]; then
-  ARGS+=(--release)
-fi
-for bin in "${BINS[@]}"; do
-  ARGS+=(--bin "$bin")
-done
-
-echo "==> cargo ${ARGS[*]}"
-cargo "${ARGS[@]}"
-
-OUT="target/$TARGET/$PROFILE"
-echo "==> built:"
-for bin in "${BINS[@]}"; do
-  echo "    $OUT/$bin.exe"
-done
+#!/usr/bin/env sh
+set -eu
+AGENTERM_BOOTSTRAP_TASK=client-build
+export AGENTERM_BOOTSTRAP_TASK
+profile=${AGENTERM_BUILD_PROFILE:-dev}
+[ "$profile" = debug ] && profile=dev
+exec "$(dirname "$0")/bootstrap.sh" "$profile" \
+    --target aarch64-pc-windows-msvc --driver cargo-xwin

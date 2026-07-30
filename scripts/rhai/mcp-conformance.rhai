@@ -15,6 +15,11 @@ let repo = if args.len == 1 {
 } else {
     std::env::current_dir().display
 };
+let candidate = std::path::join(repo, "dist/agenterm-mcp.exe").display;
+require(
+    std::fs::exists(candidate) && std::fs::metadata(candidate).is_file,
+    "mcp_candidate_missing:" + candidate
+);
 let command = std::process::command("cargo");
 command.args([
     "test", "--quiet", "--locked",
@@ -22,6 +27,7 @@ command.args([
 ]);
 command.current_dir(repo);
 command.env("AGENTERM_NO_ACTIVATE", "1");
+command.env("AGENTERM_MCP_EXE", candidate);
 command.timeout(std::time::Duration::from_secs(60));
 let output = command.output();
 require(output.success, output.error("mcp-conformance"));
@@ -30,5 +36,5 @@ if stdout != "" {
     print(stdout);
 }
 print(
-    "PASS: public MCP lifecycle, same-source, wait, fault, privacy, and isolation"
+    "PASS: candidate-bound public MCP lifecycle, same-source, wait, fault, privacy, and isolation"
 );

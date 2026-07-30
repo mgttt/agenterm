@@ -487,7 +487,8 @@ agenterm-script
 │  │  [shipped; stable; designed 2026-07-28]
 │  └─ agenterm.tasks.json
 │     Versioned local task manifest; not a package manifest.
-│     [shipped schema v2; stable; designed 2026-07-28; revised 2026-07-29]
+│     [shipped schema v3; v2 readable; stable; designed 2026-07-28;
+│      revised 2026-07-30]
 │
 └─ discovery
    Offline and runtime-aligned interface inspection.
@@ -1257,11 +1258,12 @@ and a default Unix `release` performs validation only; full GUI qualification,
 Windows packaging, tagging, and pushing remain explicit Windows-only
 operations until their platform adapters are independently qualified.
 
-Schema v2 is:
+Schema v3 adds a required execution contract for every task. Schema v2 remains
+readable for existing projects, but it does not claim the v3 contract facts.
 
 ```json
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "project": {
     "id": "daily-tools",
     "version": "1.0.0",
@@ -1276,6 +1278,19 @@ Schema v2 is:
     "provenance": {
       "producer": "agenterm-example",
       "revision": "daily-tools-1"
+    }
+  },
+  "contracts": {
+    "daily-check": {
+      "inputs": ["source-tree"],
+      "outputs": ["daily-report"],
+      "budget": {
+        "timeout_ms": 120000,
+        "max_operations": 10000000,
+        "max_output_bytes": 1048576
+      },
+      "network": ["loopback"],
+      "evidence": ["task.daily-check"]
     }
   },
   "tasks": [
@@ -1310,6 +1325,22 @@ offline graph. Unknown, self, duplicate, or cyclic edges degrade the affected
 task before any source is evaluated. Dependencies are orchestration facts, not
 an implicit request to execute prerequisites: a task runner or CI coordinator
 chooses and records the actual order.
+
+Schema-v3 `contracts` is keyed by the exact task ID. Every task must declare at
+least one stable input ID, output ID, and evidence ID; unknown or missing
+contract entries fail closed during discovery. The bounded `budget` declares
+the task's maximum wall time, Rhai operations, and captured output bytes.
+Tasks that intentionally parse or construct larger structured data may also
+declare maximum collection items and string bytes; these dimensions remain
+subject to the runtime hard ceiling.
+`task run` applies these declared values when the caller omits an override and
+rejects an override that would loosen the contract. A caller may only tighten
+the limits.
+
+`network` is an explicit, deduplicated list using `dependency_fetch`,
+`loopback`, and `remote_publish`; an empty list means the task declares no
+network use. These are observable execution facts, not Script Runtime
+permissions. The unrestricted runtime itself remains unchanged.
 
 `platforms` uses the closed values `windows`, `linux`, and `macos`; omitting it
 means all three for schema-v2 compatibility. `side_effects` uses the closed

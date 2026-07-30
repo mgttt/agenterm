@@ -29,84 +29,42 @@ jobs:
           AGENTERM_NO_ACTIVATE: "1"
         run: |
           @echo off
-          dist\agenterm-script.exe task run startup-smoke --manifest agenterm.tasks.json --timeout-ms 60000 --max-operations 10000000
+          dist\agenterm-script.exe task run startup-smoke --manifest agenterm.tasks.json
           if errorlevel 1 exit /b %ERRORLEVEL%
-          dist\agenterm-script.exe task run cli-smoke --manifest agenterm.tasks.json --timeout-ms 120000 --max-operations 10000000
+          dist\agenterm-script.exe task run cli-smoke --manifest agenterm.tasks.json
           exit /b %ERRORLEVEL%
 
-  linux-clients:
+  linux-x86_64:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
           persist-credentials: false
-      - name: Install GUI system libraries
-        run: sudo apt-get update && sudo apt-get install -y libxkbcommon0 libxkbcommon-x11-0 libwayland-client0
-      - name: Install lint components
-        run: rustup component add rustfmt clippy
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-      - name: Clippy (Linux client binaries)
-        run: >-
-          cargo clippy --locked --target x86_64-unknown-linux-gnu
-          --bin agenterm --bin agenterm-cli --bin agenterm-mux --bin agenterm-script --bin agenterm-mcp
-          -- -D warnings
-      - name: Build Linux client binaries
-        run: ./scripts/build-linux-clients.sh
-      - name: Unit tests
-        run: cargo test --locked --target x86_64-unknown-linux-gnu --lib
-      - name: Smoke client entrypoints
+      - name: Install host dependencies
         run: |
-          BIN=target/x86_64-unknown-linux-gnu/debug
-          test -x "$BIN/agenterm"
-          "$BIN/agenterm-cli" --help | head -3
-          "$BIN/agenterm-mux" --version
-          "$BIN/agenterm-script" --help | head -3
-      - name: Build script integration tests
+          rustup component add rustfmt clippy
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon0 libxkbcommon-x11-0 libwayland-client0
+      - name: Run portable quality gate
+        run: ./check.sh --quick
+      - name: Audit cross-platform automation ownership
+        env:
+          AGENTERM_BOOTSTRAP_TASK: cross-platform-automation-audit
+        run: ./scripts/bootstrap.sh
+      - name: Build manifest client set
+        env:
+          AGENTERM_BOOTSTRAP_TASK: client-build
+        run: ./scripts/bootstrap.sh --target x86_64-unknown-linux-gnu
+      - name: Probe manifest client set
+        env:
+          AGENTERM_BOOTSTRAP_TASK: client-smoke
+        run: >-
+          ./scripts/bootstrap.sh linux x86_64
+          target/x86_64-unknown-linux-gnu/debug
+      - name: Exercise public Linux Script CLI
         run: cargo test --locked --target x86_64-unknown-linux-gnu --test linux_script_cli
-      - name: Portable Rhai gate (task check)
-        run: |
-          BIN=target/x86_64-unknown-linux-gnu/debug
-          "$BIN/agenterm-script" task check --manifest agenterm.tasks.json
-      - name: Portable Rhai gate (migration-audit)
-        run: |
-          BIN=target/x86_64-unknown-linux-gnu/debug
-          "$BIN/agenterm-script" task run migration-audit --manifest agenterm.tasks.json \
-            --timeout-ms 60000 --max-operations 10000000
-      - name: Portable Rhai gate (lint static)
-        run: |
-          BIN=target/x86_64-unknown-linux-gnu/debug
-          "$BIN/agenterm-script" task run lint --manifest agenterm.tasks.json \
-            --timeout-ms 120000 --max-operations 10000000 -- . "$BIN/agenterm-script" static
 
-  macos-clients:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
-        with:
-          persist-credentials: false
-      - name: Install lint components
-        run: rustup component add rustfmt clippy
-      - name: Install macOS ARM64 target
-        run: rustup target add aarch64-apple-darwin
-      - name: Clippy (macOS client binaries)
-        run: >-
-          cargo clippy --locked --target aarch64-apple-darwin
-          --bin agenterm --bin agenterm-cli --bin agenterm-mux --bin agenterm-script --bin agenterm-mcp
-          -- -D warnings
-      - name: Build macOS client binaries
-        run: >-
-          cargo build --locked --target aarch64-apple-darwin
-          --bin agenterm --bin agenterm-cli --bin agenterm-mux --bin agenterm-script --bin agenterm-mcp
-      - name: Smoke client entrypoints
-        run: |
-          BIN=target/aarch64-apple-darwin/debug
-          test -x "$BIN/agenterm"
-          "$BIN/agenterm-cli" --help | head -3
-          "$BIN/agenterm-mux" --version
-          "$BIN/agenterm-script" --help | head -3
-
-  linux-aarch64-clients:
+  linux-aarch64:
     runs-on: ubuntu-latest
     env:
       CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
@@ -114,75 +72,85 @@ jobs:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
           persist-credentials: false
-      - name: Install lint components
-        run: rustup component add rustfmt clippy
-      - name: Install aarch64 cross linker
+      - name: Install target dependencies
         run: |
+          rustup component add clippy
           rustup target add aarch64-unknown-linux-gnu
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu qemu-user-static libxkbcommon0 libxkbcommon-x11-0
-      - name: Clippy (Linux aarch64 client binaries)
+          sudo apt-get install -y gcc-aarch64-linux-gnu libxkbcommon0 libxkbcommon-x11-0
+      - name: Clippy manifest client set
+        env:
+          AGENTERM_BOOTSTRAP_TASK: client-clippy
+        run: ./scripts/bootstrap.sh --target aarch64-unknown-linux-gnu
+      - name: Build manifest client set
+        env:
+          AGENTERM_BOOTSTRAP_TASK: client-build
+        run: ./scripts/bootstrap.sh --target aarch64-unknown-linux-gnu
+      - name: Verify manifest client set exists
+        env:
+          AGENTERM_BOOTSTRAP_TASK: client-smoke
         run: >-
-          cargo clippy --locked --target aarch64-unknown-linux-gnu
-          --bin agenterm --bin agenterm-cli --bin agenterm-mux --bin agenterm-script --bin agenterm-mcp
-          -- -D warnings
-      - name: Build Linux aarch64 client binaries
-        run: >-
-          cargo build --locked --target aarch64-unknown-linux-gnu
-          --bin agenterm --bin agenterm-cli --bin agenterm-mux --bin agenterm-script --bin agenterm-mcp
-      - name: Smoke client entrypoints
-        run: |
-          BIN=target/aarch64-unknown-linux-gnu/debug
-          test -x "$BIN/agenterm"
-          qemu-aarch64-static -L /usr/aarch64-linux-gnu "$BIN/agenterm-cli" --help | head -3
-          qemu-aarch64-static -L /usr/aarch64-linux-gnu "$BIN/agenterm-mux" --version
-          qemu-aarch64-static -L /usr/aarch64-linux-gnu "$BIN/agenterm-script" --help | head -3
+          ./scripts/bootstrap.sh linux aarch64
+          target/aarch64-unknown-linux-gnu/debug --existence-only
 
-  windows-arm64:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
-        with:
-          persist-credentials: false
-      - name: Install lint components
-        run: rustup component add rustfmt clippy
-      - name: Install Windows ARM64 target
-        run: rustup target add aarch64-pc-windows-msvc
-      - name: Install cargo-xwin
-        run: cargo install cargo-xwin --locked
-      - name: Clippy (Windows ARM64 client binaries)
-        run: >-
-          cargo xwin clippy --locked --target aarch64-pc-windows-msvc
-          --bin agenterm-cli --bin agenterm-mux --bin agenterm-script --bin agenterm-mcp
-          -- -D warnings
-      - name: Build Windows ARM64 binaries
-        run: >-
-          cargo xwin build --locked --target aarch64-pc-windows-msvc
-          --bin agenterm --bin agenterm-cli --bin agenterm-mux --bin agenterm-script --bin agenterm-mcp
-
-  macos-x86_64-clients:
+  macos:
+    strategy:
+      matrix:
+        include:
+          - arch: aarch64
+            target: aarch64-apple-darwin
+          - arch: x86_64
+            target: x86_64-apple-darwin
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
           persist-credentials: false
-      - name: Install lint components
-        run: rustup component add rustfmt clippy
-      - name: Install macOS x86_64 target
-        run: rustup target add x86_64-apple-darwin
-      - name: Clippy (macOS x86_64 client binaries)
-        run: >-
-          cargo clippy --locked --target x86_64-apple-darwin
-          --bin agenterm --bin agenterm-cli --bin agenterm-mux --bin agenterm-script --bin agenterm-mcp
-          -- -D warnings
-      - name: Build macOS x86_64 client binaries
-        run: >-
-          cargo build --locked --target x86_64-apple-darwin
-          --bin agenterm --bin agenterm-cli --bin agenterm-mux --bin agenterm-script --bin agenterm-mcp
-      - name: Smoke client entrypoints
+      - name: Install target
         run: |
-          BIN=target/x86_64-apple-darwin/debug
-          test -x "$BIN/agenterm"
-          "$BIN/agenterm-cli" --help | head -3
-          "$BIN/agenterm-mux" --version
-          "$BIN/agenterm-script" --help | head -3
+          rustup component add clippy
+          rustup target add ${{ matrix.target }}
+      - name: Clippy manifest client set
+        env:
+          AGENTERM_BOOTSTRAP_TASK: client-clippy
+        run: ./scripts/bootstrap.sh --target ${{ matrix.target }}
+      - name: Build manifest client set
+        env:
+          AGENTERM_BOOTSTRAP_TASK: client-build
+        run: ./scripts/bootstrap.sh --target ${{ matrix.target }}
+      - name: Verify manifest client set
+        env:
+          AGENTERM_BOOTSTRAP_TASK: client-smoke
+        run: >-
+          ./scripts/bootstrap.sh macos ${{ matrix.arch }}
+          target/${{ matrix.target }}/debug --existence-only
+
+  windows-aarch64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
+      - name: Install cross tooling
+        run: |
+          rustup component add clippy
+          rustup target add aarch64-pc-windows-msvc
+          cargo install cargo-xwin --locked
+      - name: Clippy manifest client set
+        env:
+          AGENTERM_BOOTSTRAP_TASK: client-clippy
+        run: >-
+          ./scripts/bootstrap.sh --target aarch64-pc-windows-msvc
+          --driver cargo-xwin
+      - name: Build manifest client set
+        env:
+          AGENTERM_BOOTSTRAP_TASK: client-build
+        run: >-
+          ./scripts/bootstrap.sh --target aarch64-pc-windows-msvc
+          --driver cargo-xwin
+      - name: Verify manifest client set exists
+        env:
+          AGENTERM_BOOTSTRAP_TASK: client-smoke
+        run: >-
+          ./scripts/bootstrap.sh windows aarch64
+          target/aarch64-pc-windows-msvc/debug --existence-only

@@ -411,6 +411,21 @@ fn replace_file(source: &Path, destination: &Path) -> std::io::Result<()> {
         MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
     };
 
+    // Rust's filesystem APIs opt into verbatim paths internally, but this
+    // direct Win32 call must do so explicitly. Canonicalizing the existing
+    // source and destination parent produces `\\?\` paths and keeps atomic
+    // promotion working beyond the legacy MAX_PATH boundary.
+    let source = std::fs::canonicalize(source)?;
+    let destination = std::fs::canonicalize(
+        destination
+            .parent()
+            .ok_or_else(|| std::io::Error::other("destination parent required"))?,
+    )?
+    .join(
+        destination
+            .file_name()
+            .ok_or_else(|| std::io::Error::other("destination name required"))?,
+    );
     let source = source
         .as_os_str()
         .encode_wide()
@@ -971,6 +986,26 @@ mod tests {
         );
         std::fs::remove_file(destination).unwrap();
         std::fs::remove_dir(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn atomic_replace_supports_verbatim_paths_beyond_max_path() {
+        let root = std::env::temp_dir().join(format!(
+            "agenterm-script-long-atomic-{}-{}",
+            std::process::id(),
+            ATOMIC_WRITE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        let mut deep = root.clone();
+        while deep.as_os_str().len() < 280 {
+            deep.push("qualified-package-boundary-segment");
+        }
+        std::fs::create_dir_all(&deep).unwrap();
+        let destination = deep.join("package-manifest.json");
+        atomic_write(&destination.to_string_lossy(), b"first").unwrap();
+        atomic_write(&destination.to_string_lossy(), b"second").unwrap();
+        assert_eq!(std::fs::read(&destination).unwrap(), b"second");
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

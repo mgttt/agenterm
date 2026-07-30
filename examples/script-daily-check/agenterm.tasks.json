@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "project": {
     "id": "agenterm-script-daily-check",
     "version": "1.0.0",
@@ -37,6 +37,19 @@
     "provenance": {
       "producer": "agenterm-example",
       "revision": "daily-check-1"
+    }
+  },
+  "contracts": {
+    "daily-check": {
+      "inputs": ["fleet-snapshot", "local-process", "loopback-http"],
+      "outputs": ["daily-report", "tab-note"],
+      "budget": {
+        "timeout_ms": 120000,
+        "max_operations": 10000000,
+        "max_output_bytes": 1048576
+      },
+      "network": ["loopback"],
+      "evidence": ["task.daily-check"]
     }
   },
   "tasks": [

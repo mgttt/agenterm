@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "project": {
     "id": "agenterm-development",
     "version": "0.1.10",
@@ -65,6 +65,346 @@
       "revision": "v0.1.10-wave-0"
     }
   },
+  "contracts": {
+    "build": {
+      "inputs": ["source-tree", "cargo-lock", "artifact-manifest"],
+      "outputs": ["native-binaries", "build-metadata"],
+      "budget": {"timeout_ms": 3600000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": ["dependency_fetch"],
+      "evidence": ["task.build"]
+    },
+    "clean-locked-artifacts": {
+      "inputs": ["artifact-manifest", "staging-directory"],
+      "outputs": ["clean-staging-directory"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
+      "network": [],
+      "evidence": ["task.clean-locked-artifacts"]
+    },
+    "check": {
+      "inputs": ["source-tree", "task-manifest", "qualification-gate-manifest"],
+      "outputs": ["gate-results", "qualification-receipt"],
+      "budget": {"timeout_ms": 3600000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": ["dependency_fetch", "loopback"],
+      "evidence": ["task.check"]
+    },
+    "release": {
+      "inputs": ["clean-source", "qualification-receipt", "release-workflow"],
+      "outputs": ["release-rehearsal", "release-tag", "remote-release"],
+      "budget": {"timeout_ms": 3600000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": ["dependency_fetch", "loopback", "remote_publish"],
+      "evidence": ["task.release"]
+    },
+    "bootstrap-info": {
+      "inputs": ["source-tree", "toolchain"],
+      "outputs": ["bootstrap-facts"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
+      "network": [],
+      "evidence": ["task.bootstrap-info"]
+    },
+    "artifact-verification": {
+      "inputs": ["staged-binaries", "build-metadata", "artifact-manifest"],
+      "outputs": ["artifact-verification-report"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
+      "network": [],
+      "evidence": ["task.artifact-verification"]
+    },
+    "build-identity": {
+      "inputs": ["source-tree", "cargo-lock", "artifact-manifest"],
+      "outputs": ["build-identity"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
+      "network": [],
+      "evidence": ["task.build-identity"]
+    },
+    "harness-cleanup-selftest": {
+      "inputs": ["script-runtime"],
+      "outputs": ["cleanup-proof"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
+      "network": [],
+      "evidence": ["task.harness-cleanup-selftest"]
+    },
+    "diagnostic-bundle-selftest": {
+      "inputs": ["staged-binaries", "script-runtime"],
+      "outputs": ["diagnostic-proof"],
+      "budget": {"timeout_ms": 300000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": ["loopback"],
+      "evidence": ["task.diagnostic-bundle-selftest"]
+    },
+    "qualification-selftest": {
+      "inputs": ["qualification-gate-manifest", "script-runtime"],
+      "outputs": ["qualification-boundary-proof"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
+      "network": [],
+      "evidence": ["task.qualification-selftest"]
+    },
+    "package-qualified": {
+      "inputs": ["qualification-receipt", "qualified-binaries", "sbom"],
+      "outputs": ["dry-run-archive", "package-manifest"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
+      "network": [],
+      "evidence": ["task.package-qualified"]
+    },
+    "package-release-qualified": {
+      "inputs": ["qualification-receipt", "qualified-binaries", "sbom"],
+      "outputs": ["release-archive", "package-manifest"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
+      "network": [],
+      "evidence": ["task.package-release-qualified"]
+    },
+    "package-qualified-selftest": {
+      "inputs": ["package-module", "script-runtime"],
+      "outputs": ["package-boundary-proof"],
+      "budget": {
+        "timeout_ms": 120000,
+        "max_operations": 10000000,
+        "max_output_bytes": 1048576,
+        "max_string_bytes": 8388608
+      },
+      "network": [],
+      "evidence": ["task.package-qualified-selftest"]
+    },
+    "working-context-smoke": {
+      "inputs": ["staged-binaries", "isolated-workspace"],
+      "outputs": ["working-context-evidence"],
+      "budget": {"timeout_ms": 300000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": ["loopback"],
+      "evidence": ["task.working-context-smoke"]
+    },
+    "theme-smoke": {
+      "inputs": ["staged-binaries", "isolated-workspace"],
+      "outputs": ["theme-evidence", "png-evidence"],
+      "budget": {"timeout_ms": 300000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": ["loopback"],
+      "evidence": ["task.theme-smoke"]
+    },
+    "workbench-smoke": {
+      "inputs": ["staged-binaries", "isolated-workspace"],
+      "outputs": ["workbench-evidence"],
+      "budget": {"timeout_ms": 300000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": ["loopback"],
+      "evidence": ["task.workbench-smoke"]
+    },
+    "fleet-smoke": {
+      "inputs": ["staged-binaries", "isolated-workspace"],
+      "outputs": ["fleet-evidence"],
+      "budget": {"timeout_ms": 300000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": ["loopback"],
+      "evidence": ["task.fleet-smoke"]
+    },
+    "server-smoke": {
+      "inputs": ["staged-binaries", "isolated-workspace"],
+      "outputs": ["server-evidence"],
+      "budget": {"timeout_ms": 300000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": ["loopback"],
+      "evidence": ["task.server-smoke"]
+    },
+    "wake-smoke": {
+      "inputs": ["staged-binaries", "isolated-workspace"],
+      "outputs": ["wake-evidence"],
+      "budget": {"timeout_ms": 300000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": ["loopback"],
+      "evidence": ["task.wake-smoke"]
+    },
+    "startup-smoke": {
+      "inputs": ["staged-binaries", "isolated-workspace"],
+      "outputs": ["startup-evidence"],
+      "budget": {"timeout_ms": 300000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": ["loopback"],
+      "evidence": ["task.startup-smoke"]
+    },
+    "cli-smoke": {
+      "inputs": ["staged-binaries", "isolated-workspace"],
+      "outputs": ["cli-evidence"],
+      "budget": {"timeout_ms": 300000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": ["loopback"],
+      "evidence": ["task.cli-smoke"]
+    },
+    "script-smoke": {
+      "inputs": ["staged-binaries", "isolated-workspace"],
+      "outputs": ["script-evidence"],
+      "budget": {
+        "timeout_ms": 300000,
+        "max_operations": 100000000,
+        "max_output_bytes": 1048576,
+        "max_string_bytes": 8388608
+      },
+      "network": ["loopback"],
+      "evidence": ["task.script-smoke"]
+    },
+    "remote-ui-smoke": {
+      "inputs": ["staged-binaries", "isolated-workspace"],
+      "outputs": ["remote-ui-evidence", "png-evidence"],
+      "budget": {"timeout_ms": 300000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": ["loopback"],
+      "evidence": ["task.remote-ui-smoke"]
+    },
+    "remote-ui-upgrade-smoke": {
+      "inputs": ["current-gui", "alternate-gui", "isolated-workspace"],
+      "outputs": ["upgrade-evidence", "png-evidence"],
+      "budget": {"timeout_ms": 300000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": ["loopback"],
+      "evidence": ["task.remote-ui-upgrade-smoke"]
+    },
+    "mcp-conformance": {
+      "inputs": ["candidate-mcp", "staged-binaries", "isolated-workspace"],
+      "outputs": ["mcp-conformance-evidence"],
+      "budget": {"timeout_ms": 300000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": ["loopback"],
+      "evidence": ["task.mcp-conformance"]
+    },
+    "migration-audit": {
+      "inputs": ["source-tree", "migration-ledger"],
+      "outputs": ["migration-audit-report"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
+      "network": [],
+      "evidence": ["task.migration-audit"]
+    },
+    "lint": {
+      "inputs": ["source-tree", "task-manifest"],
+      "outputs": ["lint-results"],
+      "budget": {"timeout_ms": 600000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": ["dependency_fetch"],
+      "evidence": ["task.lint"]
+    },
+    "prepare-target-clean": {
+      "inputs": ["source-tree", "cargo-target"],
+      "outputs": ["cleanup-authorization"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
+      "network": [],
+      "evidence": ["task.prepare-target-clean"]
+    },
+    "preflight": {
+      "inputs": ["source-tree", "release-remote", "release-workflow"],
+      "outputs": ["preflight-report"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
+      "network": [],
+      "evidence": ["task.preflight"]
+    },
+    "preflight-benchmark": {
+      "inputs": ["source-tree", "preflight-task"],
+      "outputs": ["preflight-benchmark-report"],
+      "budget": {"timeout_ms": 300000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": [],
+      "evidence": ["task.preflight-benchmark"]
+    },
+    "prd-alignment": {
+      "inputs": ["prd-tree", "alignment-contract", "public-catalogs"],
+      "outputs": ["prd-alignment-report"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
+      "network": [],
+      "evidence": ["task.prd-alignment"]
+    },
+    "stage-artifact": {
+      "inputs": ["source-artifact", "staging-directory"],
+      "outputs": ["staged-artifact"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
+      "network": [],
+      "evidence": ["task.stage-artifact"]
+    },
+    "supply-chain": {
+      "inputs": ["cargo-lock", "cargo-metadata", "license-policy"],
+      "outputs": ["sbom", "supply-chain-report"],
+      "budget": {
+        "timeout_ms": 300000,
+        "max_operations": 100000000,
+        "max_output_bytes": 1048576,
+        "max_collection_items": 100000,
+        "max_string_bytes": 8388608
+      },
+      "network": ["dependency_fetch"],
+      "evidence": ["task.supply-chain"]
+    },
+    "stage-build": {
+      "inputs": ["built-binaries", "build-identity", "artifact-manifest"],
+      "outputs": ["staged-binaries", "build-metadata"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
+      "network": [],
+      "evidence": ["task.stage-build"]
+    },
+    "target-report": {
+      "inputs": ["cargo-target"],
+      "outputs": ["target-report"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
+      "network": [],
+      "evidence": ["task.target-report"]
+    },
+    "validate-artifact-manifest": {
+      "inputs": ["artifact-manifest"],
+      "outputs": ["manifest-validation"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
+      "network": [],
+      "evidence": ["task.validate-artifact-manifest"]
+    },
+    "write-build-metadata": {
+      "inputs": ["build-identity", "staged-binaries", "artifact-manifest"],
+      "outputs": ["build-metadata"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
+      "network": [],
+      "evidence": ["task.write-build-metadata"]
+    },
+    "internal-version-policy": {
+      "inputs": ["source-tree", "release-version"],
+      "outputs": ["version-policy-result"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
+      "network": [],
+      "evidence": ["task.internal-version-policy"]
+    },
+    "verify-docs-site": {
+      "inputs": ["docs-site", "product-metadata"],
+      "outputs": ["docs-site-report"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
+      "network": [],
+      "evidence": ["task.verify-docs-site"]
+    },
+    "readme-examples": {
+      "inputs": ["readme", "staged-binaries", "artifact-manifest"],
+      "outputs": ["readme-example-report"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
+      "network": [],
+      "evidence": ["task.readme-examples"]
+    },
+    "client-build": {
+      "inputs": ["source-tree", "cargo-lock", "artifact-manifest", "target-triple"],
+      "outputs": ["target-client-binaries"],
+      "budget": {"timeout_ms": 3600000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": ["dependency_fetch"],
+      "evidence": ["task.client-build"]
+    },
+    "client-clippy": {
+      "inputs": ["source-tree", "cargo-lock", "artifact-manifest", "target-triple"],
+      "outputs": ["target-clippy-result"],
+      "budget": {"timeout_ms": 3600000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": ["dependency_fetch"],
+      "evidence": ["task.client-clippy"]
+    },
+    "client-smoke": {
+      "inputs": ["target-client-binaries", "artifact-manifest"],
+      "outputs": ["client-entrypoint-evidence"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
+      "network": [],
+      "evidence": ["task.client-smoke"]
+    },
+    "package-client-release": {
+      "inputs": ["target-client-binaries", "artifact-manifest", "platform-adapters"],
+      "outputs": ["platform-release-archive", "archive-provenance", "archive-checksum"],
+      "budget": {"timeout_ms": 600000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": [],
+      "evidence": ["task.package-client-release"]
+    },
+    "cross-platform-automation-audit": {
+      "inputs": ["workflow-sources", "shell-adapters", "artifact-manifest"],
+      "outputs": ["automation-ownership-report"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
+      "network": [],
+      "evidence": ["task.cross-platform-automation-audit"]
+    },
+    "fresh-clone-rehearsal": {
+      "inputs": ["clean-main-source", "origin-remote", "release-entrypoint", "qualification-receipt-contract"],
+      "outputs": ["fresh-clone-rehearsal-evidence", "qualified-package-facts"],
+      "budget": {"timeout_ms": 3600000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": ["dependency_fetch", "loopback"],
+      "evidence": ["task.fresh-clone-rehearsal"]
+    }
+  },
   "tasks": [
     {
       "id": "build",
@@ -95,7 +435,7 @@
       "cwd": ".",
       "args": ["."],
       "dependencies": ["lint", "migration-audit", "prd-alignment", "artifact-verification", "mcp-conformance", "supply-chain", "verify-docs-site", "readme-examples"],
-      "platforms": ["windows"],
+      "platforms": ["windows", "linux", "macos"],
       "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback"]
     },
     {
@@ -491,6 +831,72 @@
       "dependencies": ["artifact-verification"],
       "platforms": ["windows"],
       "side_effects": ["process_spawn"]
+    },
+    {
+      "id": "client-build",
+      "description": "Build one manifest-defined cross-platform client set with Cargo or cargo-xwin",
+      "entry": "scripts/rhai/build.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "args": [".", "--clients-only"],
+      "dependencies": ["build-identity", "validate-artifact-manifest"],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write", "process_spawn"]
+    },
+    {
+      "id": "client-clippy",
+      "description": "Clippy one manifest-defined cross-platform client set with Cargo or cargo-xwin",
+      "entry": "scripts/rhai/build.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "args": [".", "--clients-only", "--action", "clippy"],
+      "dependencies": ["validate-artifact-manifest"],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write", "process_spawn"]
+    },
+    {
+      "id": "client-smoke",
+      "description": "Probe manifest-defined offline client entrypoints for one platform",
+      "entry": "scripts/rhai/client-smoke.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "args": ["."],
+      "dependencies": ["client-build"],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["process_spawn"]
+    },
+    {
+      "id": "package-client-release",
+      "description": "Package one manifest-defined cross-platform client release with provenance",
+      "entry": "scripts/rhai/package-client-release.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "args": ["."],
+      "dependencies": ["client-build", "supply-chain"],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write", "process_spawn"]
+    },
+    {
+      "id": "cross-platform-automation-audit",
+      "description": "Reject duplicated Cargo executable lists and package rules in shell and workflows",
+      "entry": "scripts/rhai/cross-platform-automation-audit.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "args": ["."],
+      "dependencies": [],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["process_spawn"]
+    },
+    {
+      "id": "fresh-clone-rehearsal",
+      "description": "Rehearse the exact release candidate from an artifact-free owned clone and retain process-tree evidence",
+      "entry": "scripts/rhai/fresh-clone-rehearsal.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "args": ["."],
+      "dependencies": [],
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback", "git_mutation"]
     }
   ]
 }

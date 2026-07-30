@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fs,
     path::{Component, Path, PathBuf},
     sync::Mutex,
@@ -15,17 +15,19 @@ use crate::{
     script_catalog::{
         SCRIPT_CATALOG_SCHEMA_VERSION, ScriptApiStatus, entries as script_api_entries,
     },
-    script_protocol::SCRIPT_API_VERSION,
+    script_protocol::{SCRIPT_API_VERSION, ScriptBudgets},
 };
 
 pub const SCRIPT_TASK_MANIFEST: &str = "agenterm.tasks.json";
-pub const SCRIPT_TASK_SCHEMA_VERSION: u32 = 2;
+pub const SCRIPT_TASK_SCHEMA_VERSION: u32 = 3;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawManifest {
     schema_version: u32,
     project: RawProject,
+    #[serde(default)]
+    contracts: HashMap<String, ScriptTaskContract>,
     tasks: Vec<serde_json::Value>,
 }
 
@@ -99,6 +101,28 @@ struct RawTask {
     side_effects: Vec<ScriptTaskSideEffect>,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScriptTaskContract {
+    pub inputs: Vec<String>,
+    pub outputs: Vec<String>,
+    pub budget: ScriptTaskBudget,
+    pub network: Vec<ScriptTaskNetwork>,
+    pub evidence: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScriptTaskBudget {
+    pub timeout_ms: u64,
+    pub max_operations: u64,
+    pub max_output_bytes: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_collection_items: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_string_bytes: Option<u64>,
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct ScriptTaskCatalog {
     pub schema_version: u32,
@@ -138,6 +162,8 @@ pub struct ScriptTaskEntry {
     pub dependencies: Vec<String>,
     pub platforms: Vec<ScriptTaskPlatform>,
     pub side_effects: Vec<ScriptTaskSideEffect>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub contract: Option<ScriptTaskContract>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
@@ -160,6 +186,14 @@ pub enum ScriptTaskSideEffect {
     RemotePublish,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScriptTaskNetwork {
+    DependencyFetch,
+    Loopback,
+    RemotePublish,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ScriptTaskStatus {
@@ -176,6 +210,7 @@ pub struct ResolvedScriptTask {
     pub cwd: PathBuf,
     pub args: Vec<String>,
     pub env: Vec<String>,
+    pub budget: Option<ScriptTaskBudget>,
 }
 
 pub struct ProjectModuleResolver {
@@ -494,12 +529,13 @@ pub fn load_task_catalog(path: &Path) -> Result<ScriptTaskCatalog, String> {
     }
     let raw: RawManifest =
         serde_json::from_slice(&bytes).map_err(|error| format!("task_manifest_json: {error}"))?;
-    if raw.schema_version != SCRIPT_TASK_SCHEMA_VERSION {
+    if !(2..=SCRIPT_TASK_SCHEMA_VERSION).contains(&raw.schema_version) {
         return Err(format!(
-            "task_manifest_version: supported {}, requested {}",
+            "task_manifest_version: supported 2..={}, requested {}",
             SCRIPT_TASK_SCHEMA_VERSION, raw.schema_version
         ));
     }
+    let manifest_schema_version = raw.schema_version;
     validate_identity(&raw.project.id, "task_project_id")?;
     validate_version(&raw.project.version)?;
     validate_origin(raw.project.origin.as_ref())?;
@@ -507,6 +543,19 @@ pub fn load_task_catalog(path: &Path) -> Result<ScriptTaskCatalog, String> {
     let (compatible, compatibility_reason) = validate_requirements(&raw.project.requires)?;
     if raw.tasks.len() > 256 {
         return Err("task_manifest_tasks: maximum is 256".to_owned());
+    }
+    if raw.contracts.len() > 256 {
+        return Err("task_manifest_contracts: maximum is 256".to_owned());
+    }
+    for id in raw.contracts.keys() {
+        validate_identity(id, "task_contract_id")?;
+        if !raw
+            .tasks
+            .iter()
+            .any(|task| task.get("id").and_then(serde_json::Value::as_str) == Some(id))
+        {
+            return Err(format!("task_contract_unknown: {id}"));
+        }
     }
 
     let mut seen = HashSet::new();
@@ -519,7 +568,16 @@ pub fn load_task_catalog(path: &Path) -> Result<ScriptTaskCatalog, String> {
             .unwrap_or_else(|| format!("#{index}"));
         let parsed = serde_json::from_value::<RawTask>(value);
         let entry = match parsed {
-            Ok(task) => catalog_task(&project_root, task, &mut seen),
+            Ok(task) => {
+                let contract = raw.contracts.get(&task.id).cloned();
+                catalog_task(
+                    &project_root,
+                    task,
+                    contract,
+                    manifest_schema_version >= 3,
+                    &mut seen,
+                )
+            }
             Err(error) => degraded_task(
                 fallback_id,
                 format!("task_manifest_entry: index {index}: {error}"),
@@ -530,7 +588,7 @@ pub fn load_task_catalog(path: &Path) -> Result<ScriptTaskCatalog, String> {
     validate_task_graph(&mut tasks);
 
     Ok(ScriptTaskCatalog {
-        schema_version: SCRIPT_TASK_SCHEMA_VERSION,
+        schema_version: manifest_schema_version,
         runtime_version: env!("CARGO_PKG_VERSION"),
         script_api_version: SCRIPT_API_VERSION,
         script_catalog_schema_version: SCRIPT_CATALOG_SCHEMA_VERSION,
@@ -591,10 +649,20 @@ pub fn resolve_task(catalog: &ScriptTaskCatalog, id: &str) -> Result<ResolvedScr
         cwd,
         args: task.args.clone(),
         env: task.env.clone(),
+        budget: task
+            .contract
+            .as_ref()
+            .map(|contract| contract.budget.clone()),
     })
 }
 
-fn catalog_task(root: &Path, task: RawTask, seen: &mut HashSet<String>) -> ScriptTaskEntry {
+fn catalog_task(
+    root: &Path,
+    task: RawTask,
+    contract: Option<ScriptTaskContract>,
+    require_contract: bool,
+    seen: &mut HashSet<String>,
+) -> ScriptTaskEntry {
     let validation = validate_identity(&task.id, "task_id")
         .and_then(|_| {
             if seen.insert(task.id.clone()) {
@@ -613,7 +681,12 @@ fn catalog_task(root: &Path, task: RawTask, seen: &mut HashSet<String>) -> Scrip
         .and_then(|_| validate_env(&task.env))
         .and_then(|_| validate_dependencies(&task.dependencies))
         .and_then(|_| validate_nonempty_unique(&task.platforms, "task_platforms"))
-        .and_then(|_| validate_unique(&task.side_effects, "task_side_effects"));
+        .and_then(|_| validate_unique(&task.side_effects, "task_side_effects"))
+        .and_then(|_| match contract.as_ref() {
+            Some(contract) => validate_task_contract(contract),
+            None if require_contract => Err(format!("task_contract_missing: {}", task.id)),
+            None => Ok(()),
+        });
 
     if let Err(reason) = validation {
         return degraded_task(task.id, reason);
@@ -631,6 +704,7 @@ fn catalog_task(root: &Path, task: RawTask, seen: &mut HashSet<String>) -> Scrip
         dependencies: task.dependencies,
         platforms: task.platforms,
         side_effects: task.side_effects,
+        contract,
     }
 }
 
@@ -648,7 +722,61 @@ fn degraded_task(id: String, reason: String) -> ScriptTaskEntry {
         dependencies: Vec::new(),
         platforms: Vec::new(),
         side_effects: Vec::new(),
+        contract: None,
     }
+}
+
+fn validate_task_contract(contract: &ScriptTaskContract) -> Result<(), String> {
+    validate_contract_ids(&contract.inputs, "task_contract_inputs", false)?;
+    validate_contract_ids(&contract.outputs, "task_contract_outputs", false)?;
+    validate_contract_ids(&contract.evidence, "task_contract_evidence", false)?;
+    validate_unique(&contract.network, "task_contract_network")?;
+    let hard_limits = ScriptBudgets::hard_limits();
+    if contract.budget.timeout_ms == 0 || contract.budget.timeout_ms > hard_limits.wall_time_ms {
+        return Err("task_contract_budget_timeout_ms: expected 1..3600000".to_owned());
+    }
+    if contract.budget.max_operations == 0
+        || contract.budget.max_operations > hard_limits.operations
+    {
+        return Err("task_contract_budget_max_operations: expected 1..100000000".to_owned());
+    }
+    if contract.budget.max_output_bytes == 0
+        || contract.budget.max_output_bytes > hard_limits.output_bytes as u64
+    {
+        return Err("task_contract_budget_max_output_bytes: expected 1..1048576".to_owned());
+    }
+    if contract
+        .budget
+        .max_collection_items
+        .is_some_and(|value| value == 0 || value > hard_limits.collection_items as u64)
+    {
+        return Err("task_contract_budget_max_collection_items: expected 1..100000".to_owned());
+    }
+    if contract
+        .budget
+        .max_string_bytes
+        .is_some_and(|value| value == 0 || value > hard_limits.string_bytes as u64)
+    {
+        return Err("task_contract_budget_max_string_bytes: expected 1..8388608".to_owned());
+    }
+    Ok(())
+}
+
+fn validate_contract_ids(values: &[String], field: &str, allow_empty: bool) -> Result<(), String> {
+    if !allow_empty && values.is_empty() {
+        return Err(format!("{field}: at least one stable ID is required"));
+    }
+    if values.len() > 64 {
+        return Err(format!("{field}: maximum is 64"));
+    }
+    let mut seen = HashSet::new();
+    for value in values {
+        validate_identity(value, field)?;
+        if !seen.insert(value.as_str()) {
+            return Err(format!("{field}: duplicate {value}"));
+        }
+    }
+    Ok(())
 }
 
 fn validate_dependencies(values: &[String]) -> Result<(), String> {
@@ -1008,7 +1136,7 @@ mod tests {
         fs::write(
             &manifest,
             r#"{
-  "schema_version": 2,
+  "schema_version": 3,
   "project": {
     "id": "fixture",
     "version": "1.0.0",
@@ -1018,6 +1146,32 @@ mod tests {
     },
     "origin": {"kind": "repository", "id": "agenterm"},
     "provenance": {"producer": "agenterm-test", "revision": "fixture-1"}
+  },
+  "contracts": {
+    "check": {
+      "inputs": ["source-tree"],
+      "outputs": ["check-result"],
+      "budget": {
+        "timeout_ms": 10000,
+        "max_operations": 1000000,
+        "max_output_bytes": 65536,
+        "max_collection_items": 20000,
+        "max_string_bytes": 524288
+      },
+      "network": [],
+      "evidence": ["task.check"]
+    },
+    "broken": {
+      "inputs": ["source-tree"],
+      "outputs": ["broken-result"],
+      "budget": {
+        "timeout_ms": 10000,
+        "max_operations": 1000000,
+        "max_output_bytes": 65536
+      },
+      "network": [],
+      "evidence": ["task.broken"]
+    }
   },
   "tasks": [
     {
@@ -1066,10 +1220,95 @@ mod tests {
                 ScriptTaskSideEffect::ProcessSpawn
             ]
         );
+        let contract = catalog.tasks[0].contract.as_ref().unwrap();
+        assert_eq!(contract.inputs, ["source-tree"]);
+        assert_eq!(contract.outputs, ["check-result"]);
+        assert_eq!(contract.budget.timeout_ms, 10_000);
+        assert_eq!(contract.budget.max_operations, 1_000_000);
+        assert_eq!(contract.budget.max_output_bytes, 65_536);
+        assert_eq!(contract.budget.max_collection_items, Some(20_000));
+        assert_eq!(contract.budget.max_string_bytes, Some(524_288));
+        assert!(contract.network.is_empty());
+        assert_eq!(contract.evidence, ["task.check"]);
         assert_eq!(catalog.tasks[1].status, ScriptTaskStatus::Degraded);
         assert_eq!(catalog.tasks[2].status, ScriptTaskStatus::Degraded);
         assert!(resolve_task(&catalog, "check").is_err());
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn schema_three_requires_contracts_while_schema_two_remains_readable() {
+        let (root, manifest) = fixture();
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
+        value["tasks"].as_array_mut().unwrap().pop();
+        value["contracts"].as_object_mut().unwrap().remove("check");
+        fs::write(&manifest, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
+        let catalog = load_task_catalog(&manifest).unwrap();
+        let task = catalog
+            .tasks
+            .iter()
+            .find(|task| task.id == "check")
+            .unwrap();
+        assert_eq!(task.status, ScriptTaskStatus::Degraded);
+        assert_eq!(
+            task.degraded_reason.as_deref(),
+            Some("task_contract_missing: check")
+        );
+
+        value["schema_version"] = serde_json::json!(2);
+        value.as_object_mut().unwrap().remove("contracts");
+        fs::write(&manifest, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
+        let catalog = load_task_catalog(&manifest).unwrap();
+        assert_eq!(catalog.schema_version, 2);
+        let task = catalog
+            .tasks
+            .iter()
+            .find(|task| task.id == "check")
+            .unwrap();
+        assert_eq!(task.status, ScriptTaskStatus::Ready);
+        assert!(task.contract.is_none());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn task_contract_budgets_cannot_exceed_runtime_hard_limits() {
+        for (field, value, expected) in [
+            (
+                "timeout_ms",
+                3_600_001_u64,
+                "task_contract_budget_timeout_ms: expected 1..3600000",
+            ),
+            (
+                "max_operations",
+                100_000_001,
+                "task_contract_budget_max_operations: expected 1..100000000",
+            ),
+            (
+                "max_output_bytes",
+                1_048_577,
+                "task_contract_budget_max_output_bytes: expected 1..1048576",
+            ),
+        ] {
+            let (root, manifest) = fixture();
+            let mut manifest_value: serde_json::Value =
+                serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
+            manifest_value["contracts"]["check"]["budget"][field] = serde_json::json!(value);
+            fs::write(
+                &manifest,
+                serde_json::to_vec_pretty(&manifest_value).unwrap(),
+            )
+            .unwrap();
+            let catalog = load_task_catalog(&manifest).unwrap();
+            let task = catalog
+                .tasks
+                .iter()
+                .find(|task| task.id == "check")
+                .unwrap();
+            assert_eq!(task.status, ScriptTaskStatus::Degraded);
+            assert_eq!(task.degraded_reason.as_deref(), Some(expected));
+            fs::remove_dir_all(root).unwrap();
+        }
     }
 
     #[test]
@@ -1134,6 +1373,34 @@ mod tests {
         let (root, manifest) = fixture();
         let contents = fs::read_to_string(&manifest)
             .unwrap()
+            .replace(r#""broken": {"#, r#""unknown": {"#)
+            .replace(
+                "  },\n  \"tasks\": [",
+                r#"    ,
+    "self": {
+      "inputs": ["source-tree"],
+      "outputs": ["self-result"],
+      "budget": {"timeout_ms": 10000, "max_operations": 1000000, "max_output_bytes": 65536},
+      "network": [],
+      "evidence": ["task.self"]
+    },
+    "cycle-a": {
+      "inputs": ["source-tree"],
+      "outputs": ["cycle-a-result"],
+      "budget": {"timeout_ms": 10000, "max_operations": 1000000, "max_output_bytes": 65536},
+      "network": [],
+      "evidence": ["task.cycle-a"]
+    },
+    "cycle-b": {
+      "inputs": ["source-tree"],
+      "outputs": ["cycle-b-result"],
+      "budget": {"timeout_ms": 10000, "max_operations": 1000000, "max_output_bytes": 65536},
+      "network": [],
+      "evidence": ["task.cycle-b"]
+    }
+  },
+  "tasks": ["#,
+            )
             .replace(
                 r#"{"id": "broken", "entry": "../outside.rhai"}"#,
                 r#"{"id": "unknown", "entry": "scripts/check.rhai", "dependencies": ["missing"]}"#,

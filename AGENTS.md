@@ -107,6 +107,9 @@ Linux/macOS have matching `./build.sh`, `./check.sh`, `./lint.sh`, and
 the five client binaries; default Unix `check` is the portable Quick lane, and
 default Unix `release` is validation-only. Stress qualification, Windows
 packaging, tag, and push remain explicit Windows release-authority operations.
+Do not add an unmatched `.cmd` or `.bat`: prefer a named Rhai task, and when a
+Windows bootstrap remains necessary, add the equivalent `.sh` entry and cover
+the pair in the cross-platform automation audit and Linux/macOS CI.
 
 For this repository, `release.cmd` is the authoritative formal-release entry
 point. It pushes `main` and the version tag directly through Git/GCM; do not

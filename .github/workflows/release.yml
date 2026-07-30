@@ -106,8 +106,7 @@ jobs:
         shell: cmd
         run: >-
           dist\agenterm-script.exe task run package-release-qualified
-          --manifest agenterm.tasks.json --timeout-ms 120000
-          --max-operations 10000000 --max-string-bytes 8388608
+          --manifest agenterm.tasks.json
 
       - name: Install Windows ARM64 cross-build tooling
         if: matrix.platform_id == 'windows-aarch64'
@@ -118,54 +117,36 @@ jobs:
       - name: Build Windows ARM64 release
         if: matrix.platform_id == 'windows-aarch64'
         env:
-          AGENTERM_BUILD_PROFILE: release
-        run: ./scripts/build-windows-arm64.sh
+          AGENTERM_BOOTSTRAP_TASK: client-build
+        run: >-
+          ./scripts/bootstrap.sh release
+          --target aarch64-pc-windows-msvc --driver cargo-xwin
 
       - name: Package Windows ARM64 release
         if: matrix.platform_id == 'windows-aarch64'
-        shell: bash
+        env:
+          AGENTERM_BOOTSTRAP_TASK: package-client-release
         run: |
-          set -euo pipefail
           VERSION="${GITHUB_REF_NAME#v}"
-          BIN_DIR="target/aarch64-pc-windows-msvc/release"
-          STAGING="$(mktemp -d)"
-          mkdir -p dist
-          mapfile -t EXEC_NAMES < <(
-            python3 - ./scripts/artifacts.json <<'PY'
-          import json
-          import sys
-
-          with open(sys.argv[1], encoding="utf-8") as handle:
-              manifest = json.load(handle)
-          platform = next(
-              entry
-              for entry in manifest["platforms"]
-              if entry["os"] == "windows" and entry["arch"] == "aarch64"
-          )
-          for executable in platform["executables"]:
-              print(executable["name"])
-          PY
-          )
-          for name in "${EXEC_NAMES[@]}"; do
-            cp "$BIN_DIR/$name" "$STAGING/$name"
-          done
-          cp LICENSE-APACHE LICENSE-MIT THIRD_PARTY_NOTICES.md ./scripts/artifacts.json "$STAGING/"
-          (cd "$STAGING" && zip -r "$GITHUB_WORKSPACE/dist/agenterm-${VERSION}-windows-aarch64.zip" .)
+          ./scripts/bootstrap.sh "$VERSION" windows aarch64 \
+            target/aarch64-pc-windows-msvc/release
 
       - name: Build Linux x86_64 clients
         if: matrix.platform_id == 'linux-x86_64'
-        env:
-          AGENTERM_BUILD_PROFILE: release
         run: |
           sudo apt-get update
           sudo apt-get install -y libxkbcommon0 libxkbcommon-x11-0 libwayland-client0
-          ./scripts/build-linux-clients.sh
+          AGENTERM_BOOTSTRAP_TASK=client-build \
+            ./scripts/bootstrap.sh release \
+            --target x86_64-unknown-linux-gnu
 
       - name: Package Linux x86_64 release
         if: matrix.platform_id == 'linux-x86_64'
+        env:
+          AGENTERM_BOOTSTRAP_TASK: package-client-release
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          ./scripts/package-client-release.sh \
+          ./scripts/bootstrap.sh \
             "$VERSION" linux x86_64 target/x86_64-unknown-linux-gnu/release
 
       - name: Install Linux ARM64 cross linker
@@ -178,14 +159,18 @@ jobs:
       - name: Build Linux ARM64 clients
         if: matrix.platform_id == 'linux-aarch64'
         env:
-          AGENTERM_BUILD_PROFILE: release
-        run: ./scripts/build-linux-aarch64-clients.sh
+          AGENTERM_BOOTSTRAP_TASK: client-build
+        run: >-
+          ./scripts/bootstrap.sh release
+          --target aarch64-unknown-linux-gnu
 
       - name: Package Linux ARM64 release
         if: matrix.platform_id == 'linux-aarch64'
+        env:
+          AGENTERM_BOOTSTRAP_TASK: package-client-release
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          ./scripts/package-client-release.sh \
+          ./scripts/bootstrap.sh \
             "$VERSION" linux aarch64 target/aarch64-unknown-linux-gnu/release
 
       - name: Import Apple Developer ID credentials
@@ -279,8 +264,8 @@ jobs:
         if: matrix.platform_id == 'macos-aarch64'
         run: |
           rustup target add aarch64-apple-darwin
-          cargo build --locked --release --target aarch64-apple-darwin \
-            --bin agenterm --bin agenterm-cli --bin agenterm-mux --bin agenterm-script --bin agenterm-mcp
+          AGENTERM_BOOTSTRAP_TASK=client-build \
+            ./scripts/bootstrap.sh release --target aarch64-apple-darwin
 
       - name: Sign macOS ARM64 clients
         if: >-
@@ -294,10 +279,12 @@ jobs:
         if: >-
           matrix.platform_id == 'macos-aarch64' &&
           vars.ENABLE_SIGNED_MACOS_RELEASE == 'true'
+        env:
+          AGENTERM_BOOTSTRAP_TASK: package-client-release
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          ./scripts/package-client-release.sh \
-            "$VERSION" macos aarch64 target/aarch64-apple-darwin/release
+          ./scripts/bootstrap.sh \
+            "$VERSION" macos aarch64 target/aarch64-apple-darwin/release --signed
 
       - name: Notarize macOS ARM64 release
         if: >-
@@ -330,63 +317,19 @@ jobs:
         if: >-
           matrix.platform_id == 'macos-aarch64' &&
           vars.ENABLE_SIGNED_MACOS_RELEASE != 'true'
+        env:
+          AGENTERM_BOOTSTRAP_TASK: package-client-release
         run: |
-          set -euo pipefail
           VERSION="${GITHUB_REF_NAME#v}"
-          AGENTERM_MACOS_UNSIGNED_PREVIEW=1 \
-            ./scripts/package-client-release.sh \
-            "$VERSION" macos aarch64 target/aarch64-apple-darwin/release
-          STABLE="dist/agenterm-${VERSION}-macos-aarch64.zip"
-          PREVIEW="dist/agenterm-${VERSION}-macos-aarch64-unsigned-preview.zip"
-          mv "$STABLE" "$PREVIEW"
-          cp docs/macos-unsigned-preview.md \
-            dist/MACOS_UNSIGNED_PREVIEW_README.md
-          cp docs/macos-unsigned-preview.zh-Hant.md \
-            dist/MACOS_UNSIGNED_PREVIEW_README.zh-Hant.md
-          SHA256="$(shasum -a 256 "$PREVIEW" | awk '{print $1}')"
-          printf '%s  %s\n' "$SHA256" "$(basename "$PREVIEW")" > "$PREVIEW.sha256"
-          PREVIEW="$PREVIEW" SHA256="$SHA256" ARCH="aarch64" python3 - <<'PY'
-          import hashlib
-          import json
-          import os
-          import pathlib
-
-          preview = pathlib.Path(os.environ["PREVIEW"])
-          root = pathlib.Path.cwd()
-          provenance = {
-              "schema_version": 1,
-              "channel": "macos-unsigned-preview",
-              "artifact": preview.name,
-              "sha256": os.environ["SHA256"],
-              "source_commit": os.environ["GITHUB_SHA"],
-              "source_tag": os.environ["GITHUB_REF_NAME"],
-              "architecture": os.environ["ARCH"],
-              "signed": False,
-              "notarized": False,
-              "cargo_lock_sha256": hashlib.sha256(
-                  (root / "Cargo.lock").read_bytes()
-              ).hexdigest(),
-              "artifact_manifest_sha256": hashlib.sha256(
-                  (root / "scripts/artifacts.json").read_bytes()
-              ).hexdigest(),
-              "build_log": (
-                  f"{os.environ['GITHUB_SERVER_URL']}/"
-                  f"{os.environ['GITHUB_REPOSITORY']}/actions/runs/"
-                  f"{os.environ['GITHUB_RUN_ID']}"
-              ),
-          }
-          preview.with_suffix(preview.suffix + ".provenance.json").write_text(
-              json.dumps(provenance, indent=2) + "\n",
-              encoding="utf-8",
-          )
-          PY
+          ./scripts/bootstrap.sh "$VERSION" macos aarch64 \
+            target/aarch64-apple-darwin/release --unsigned-preview
 
       - name: Build macOS x86_64 clients
         if: matrix.platform_id == 'macos-x86_64'
         run: |
           rustup target add x86_64-apple-darwin
-          cargo build --locked --release --target x86_64-apple-darwin \
-            --bin agenterm --bin agenterm-cli --bin agenterm-mux --bin agenterm-script --bin agenterm-mcp
+          AGENTERM_BOOTSTRAP_TASK=client-build \
+            ./scripts/bootstrap.sh release --target x86_64-apple-darwin
 
       - name: Sign macOS x86_64 clients
         if: >-
@@ -400,10 +343,12 @@ jobs:
         if: >-
           matrix.platform_id == 'macos-x86_64' &&
           vars.ENABLE_SIGNED_MACOS_RELEASE == 'true'
+        env:
+          AGENTERM_BOOTSTRAP_TASK: package-client-release
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          ./scripts/package-client-release.sh \
-            "$VERSION" macos x86_64 target/x86_64-apple-darwin/release
+          ./scripts/bootstrap.sh \
+            "$VERSION" macos x86_64 target/x86_64-apple-darwin/release --signed
 
       - name: Notarize macOS x86_64 release
         if: >-
@@ -436,52 +381,12 @@ jobs:
         if: >-
           matrix.platform_id == 'macos-x86_64' &&
           vars.ENABLE_SIGNED_MACOS_RELEASE != 'true'
+        env:
+          AGENTERM_BOOTSTRAP_TASK: package-client-release
         run: |
-          set -euo pipefail
           VERSION="${GITHUB_REF_NAME#v}"
-          AGENTERM_MACOS_UNSIGNED_PREVIEW=1 \
-            ./scripts/package-client-release.sh \
-            "$VERSION" macos x86_64 target/x86_64-apple-darwin/release
-          STABLE="dist/agenterm-${VERSION}-macos-x86_64.zip"
-          PREVIEW="dist/agenterm-${VERSION}-macos-x86_64-unsigned-preview.zip"
-          mv "$STABLE" "$PREVIEW"
-          SHA256="$(shasum -a 256 "$PREVIEW" | awk '{print $1}')"
-          printf '%s  %s\n' "$SHA256" "$(basename "$PREVIEW")" > "$PREVIEW.sha256"
-          PREVIEW="$PREVIEW" SHA256="$SHA256" ARCH="x86_64" python3 - <<'PY'
-          import hashlib
-          import json
-          import os
-          import pathlib
-
-          preview = pathlib.Path(os.environ["PREVIEW"])
-          root = pathlib.Path.cwd()
-          provenance = {
-              "schema_version": 1,
-              "channel": "macos-unsigned-preview",
-              "artifact": preview.name,
-              "sha256": os.environ["SHA256"],
-              "source_commit": os.environ["GITHUB_SHA"],
-              "source_tag": os.environ["GITHUB_REF_NAME"],
-              "architecture": os.environ["ARCH"],
-              "signed": False,
-              "notarized": False,
-              "cargo_lock_sha256": hashlib.sha256(
-                  (root / "Cargo.lock").read_bytes()
-              ).hexdigest(),
-              "artifact_manifest_sha256": hashlib.sha256(
-                  (root / "scripts/artifacts.json").read_bytes()
-              ).hexdigest(),
-              "build_log": (
-                  f"{os.environ['GITHUB_SERVER_URL']}/"
-                  f"{os.environ['GITHUB_REPOSITORY']}/actions/runs/"
-                  f"{os.environ['GITHUB_RUN_ID']}"
-              ),
-          }
-          preview.with_suffix(preview.suffix + ".provenance.json").write_text(
-              json.dumps(provenance, indent=2) + "\n",
-              encoding="utf-8",
-          )
-          PY
+          ./scripts/bootstrap.sh "$VERSION" macos x86_64 \
+            target/x86_64-apple-darwin/release --unsigned-preview
 
       - name: Upload Windows x86_64 release assets
         if: matrix.platform_id == 'windows-x86_64'
@@ -497,21 +402,21 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-windows-aarch64
-          path: dist/agenterm-*-windows-aarch64.zip
+          path: dist/agenterm-*-windows-aarch64.zip*
 
       - name: Upload Linux x86_64 release assets
         if: matrix.platform_id == 'linux-x86_64'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-linux-x86_64
-          path: dist/agenterm-*-linux-x86_64.tar.gz
+          path: dist/agenterm-*-linux-x86_64.tar.gz*
 
       - name: Upload Linux ARM64 release assets
         if: matrix.platform_id == 'linux-aarch64'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-linux-aarch64
-          path: dist/agenterm-*-linux-aarch64.tar.gz
+          path: dist/agenterm-*-linux-aarch64.tar.gz*
 
       - name: Upload macOS ARM64 release assets
         if: >-
@@ -520,7 +425,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-macos-aarch64
-          path: dist/agenterm-*-macos-aarch64.zip
+          path: dist/agenterm-*-macos-aarch64.zip*
 
       - name: Upload macOS x86_64 release assets
         if: >-
@@ -529,7 +434,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-macos-x86_64
-          path: dist/agenterm-*-macos-x86_64.zip
+          path: dist/agenterm-*-macos-x86_64.zip*
 
       - name: Upload macOS ARM64 unsigned preview assets
         if: >-

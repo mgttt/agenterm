@@ -1073,9 +1073,12 @@ fn run_script_command_with_context(
         }
     };
     let mut budgets = ScriptBudgets::default();
+    let hard_limits = ScriptBudgets::hard_limits();
     if let Some(value) = option_value(arguments, "--timeout-ms") {
         match value.parse::<u64>() {
-            Ok(value) if (1..=3_600_000).contains(&value) => budgets.wall_time_ms = value,
+            Ok(value) if (1..=hard_limits.wall_time_ms).contains(&value) => {
+                budgets.wall_time_ms = value;
+            }
             _ => {
                 eprintln!("script --timeout-ms must be from 1 to 3600000");
                 return 2;
@@ -1084,7 +1087,9 @@ fn run_script_command_with_context(
     }
     if let Some(value) = option_value(arguments, "--max-operations") {
         match value.parse::<u64>() {
-            Ok(value) if (1..=100_000_000).contains(&value) => budgets.operations = value,
+            Ok(value) if (1..=hard_limits.operations).contains(&value) => {
+                budgets.operations = value;
+            }
             _ => {
                 eprintln!("script --max-operations must be from 1 to 100000000");
                 return 2;
@@ -1093,7 +1098,7 @@ fn run_script_command_with_context(
     }
     if let Some(value) = option_value(arguments, "--max-output-bytes") {
         match value.parse::<usize>() {
-            Ok(value) if (1..=1_048_576).contains(&value) => {
+            Ok(value) if (1..=hard_limits.output_bytes).contains(&value) => {
                 budgets.output_bytes = value;
             }
             _ => {
@@ -1104,7 +1109,7 @@ fn run_script_command_with_context(
     }
     if let Some(value) = option_value(arguments, "--max-collection-items") {
         match value.parse::<usize>() {
-            Ok(value) if (1..=100_000).contains(&value) => {
+            Ok(value) if (1..=hard_limits.collection_items).contains(&value) => {
                 budgets.collection_items = value;
             }
             _ => {
@@ -1115,7 +1120,7 @@ fn run_script_command_with_context(
     }
     if let Some(value) = option_value(arguments, "--max-string-bytes") {
         match value.parse::<usize>() {
-            Ok(value) if (1..=8_388_608).contains(&value) => {
+            Ok(value) if (1..=hard_limits.string_bytes).contains(&value) => {
                 budgets.string_bytes = value;
             }
             _ => {
@@ -1352,7 +1357,7 @@ fn run_script_command_with_context(
             return report_audit_error(error);
         }
         eprintln!(
-            "agenterm-script.exe returned a mismatched protocol result \
+            "agenterm-script returned a mismatched protocol result \
              (envelope/API/invocation/operation/profile identity)"
         );
         return 1;
@@ -1375,7 +1380,7 @@ fn run_script_command_with_context(
         if let Err(error) = audit_sink.append(&audit_invocation, &audit_outcome) {
             return report_audit_error(error);
         }
-        eprintln!("agenterm-script.exe returned an inconsistent result envelope");
+        eprintln!("agenterm-script returned an inconsistent result envelope");
         return 1;
     }
     if let Some(view) = api_view.as_ref() {
@@ -1392,7 +1397,7 @@ fn run_script_command_with_context(
             if let Err(error) = audit_sink.append(&audit_invocation, &audit_outcome) {
                 return report_audit_error(error);
             }
-            eprintln!("agenterm-script.exe returned an API result without a catalog");
+            eprintln!("agenterm-script returned an API result without a catalog");
             return 1;
         };
         if let Err(error) = filter_script_api_catalog(catalog, view) {
@@ -1408,7 +1413,7 @@ fn run_script_command_with_context(
             if let Err(audit_error) = audit_sink.append(&audit_invocation, &audit_outcome) {
                 return report_audit_error(audit_error);
             }
-            eprintln!("agenterm-script.exe returned an invalid API catalog: {error}");
+            eprintln!("agenterm-script returned an invalid API catalog: {error}");
             return 1;
         }
     }
@@ -1437,7 +1442,7 @@ fn run_script_command_with_context(
                         output.push('\n');
                     }
                     Err(error) => {
-                        eprintln!("agenterm-script.exe returned an invalid API catalog: {error}");
+                        eprintln!("agenterm-script returned an invalid API catalog: {error}");
                         return 1;
                     }
                 }
@@ -1731,9 +1736,55 @@ fn task_entry_text(task: &crate::script_project::ScriptTaskEntry) -> String {
             .collect::<Vec<_>>()
             .join(",")
     };
+    let contract = task.contract.as_ref();
+    let inputs = contract
+        .map(|value| value.inputs.join(","))
+        .unwrap_or_else(|| "-".to_owned());
+    let outputs = contract
+        .map(|value| value.outputs.join(","))
+        .unwrap_or_else(|| "-".to_owned());
+    let evidence = contract
+        .map(|value| value.evidence.join(","))
+        .unwrap_or_else(|| "-".to_owned());
+    let network = contract
+        .map(|value| {
+            if value.network.is_empty() {
+                return "none".to_owned();
+            }
+            value
+                .network
+                .iter()
+                .map(|policy| match policy {
+                    crate::script_project::ScriptTaskNetwork::DependencyFetch => "dependency_fetch",
+                    crate::script_project::ScriptTaskNetwork::Loopback => "loopback",
+                    crate::script_project::ScriptTaskNetwork::RemotePublish => "remote_publish",
+                })
+                .collect::<Vec<_>>()
+                .join(",")
+        })
+        .unwrap_or_else(|| "-".to_owned());
+    let budget = contract
+        .map(|value| {
+            format!(
+                "{}/{}/{}",
+                value.budget.timeout_ms, value.budget.max_operations, value.budget.max_output_bytes
+            )
+        })
+        .unwrap_or_else(|| "-".to_owned());
     format!(
-        "{}\t{}\tplatforms={}\tdependencies={}\tside_effects={}\t{}",
-        task.id, status, platforms, dependencies, side_effects, detail
+        "{}\t{}\tplatforms={}\tdependencies={}\tinputs={}\toutputs={}\t\
+         side_effects={}\tnetwork={}\tbudget={}\tevidence={}\t{}",
+        task.id,
+        status,
+        platforms,
+        dependencies,
+        inputs,
+        outputs,
+        side_effects,
+        network,
+        budget,
+        evidence,
+        detail
     )
 }
 
@@ -1759,16 +1810,64 @@ fn run_resolved_script_task(arguments: &[String], task: ResolvedScriptTask) -> i
         "--profile".to_owned(),
         task.profile,
     ];
-    for option in [
-        "--timeout-ms",
-        "--max-operations",
-        "--max-collection-items",
-        "--max-string-bytes",
-        "--max-output-bytes",
-    ] {
-        if let Some(value) = option_value(arguments, option) {
+    if let Some(budget) = task.budget {
+        let mut declared_options = vec![
+            ("--timeout-ms", budget.timeout_ms),
+            ("--max-operations", budget.max_operations),
+            ("--max-output-bytes", budget.max_output_bytes),
+        ];
+        if let Some(value) = budget.max_collection_items {
+            declared_options.push(("--max-collection-items", value));
+        }
+        if let Some(value) = budget.max_string_bytes {
+            declared_options.push(("--max-string-bytes", value));
+        }
+        for (option, declared) in declared_options {
+            let selected = match option_value(arguments, option) {
+                Some(value) => match value.parse::<u64>() {
+                    Ok(value) if value > 0 && value <= declared => value,
+                    Ok(value) => {
+                        eprintln!(
+                            "task_budget_exceeded: {} {} requested {}, declared {}",
+                            task.id, option, value, declared
+                        );
+                        return 2;
+                    }
+                    Err(error) => {
+                        eprintln!("task_budget_invalid: {} {}: {}", task.id, option, error);
+                        return 2;
+                    }
+                },
+                None => declared,
+            };
             translated.push(option.to_owned());
-            translated.push(value.to_owned());
+            translated.push(selected.to_string());
+        }
+        for option in ["--max-collection-items", "--max-string-bytes"] {
+            let declared = match option {
+                "--max-collection-items" => budget.max_collection_items,
+                "--max-string-bytes" => budget.max_string_bytes,
+                _ => unreachable!(),
+            };
+            if declared.is_none()
+                && let Some(value) = option_value(arguments, option)
+            {
+                translated.push(option.to_owned());
+                translated.push(value.to_owned());
+            }
+        }
+    } else {
+        for option in [
+            "--timeout-ms",
+            "--max-operations",
+            "--max-output-bytes",
+            "--max-collection-items",
+            "--max-string-bytes",
+        ] {
+            if let Some(value) = option_value(arguments, option) {
+                translated.push(option.to_owned());
+                translated.push(value.to_owned());
+            }
         }
     }
     if has_option(arguments, "--json") {

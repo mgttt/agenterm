@@ -3,7 +3,7 @@ use std::{
     io::{self, BufRead, Write},
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU8, Ordering},
         mpsc,
     },
     thread,
@@ -22,6 +22,11 @@ const ERROR_INVALID_REQUEST: i64 = -32600;
 const ERROR_METHOD_NOT_FOUND: i64 = -32601;
 const ERROR_INVALID_PARAMS: i64 = -32602;
 const ERROR_NOT_INITIALIZED: i64 = -32002;
+const ERROR_PROTOCOL_VERSION: i64 = -32005;
+const ERROR_RESPONSE_TOO_LARGE: i64 = -32004;
+const WAIT_PENDING: u8 = 0;
+const WAIT_CANCELLED: u8 = 1;
+const WAIT_COMPLETED: u8 = 2;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum SessionState {
@@ -48,6 +53,7 @@ enum ServerEvent {
 
 struct ActiveWait {
     cancelled: Arc<AtomicBool>,
+    terminal: Arc<AtomicU8>,
     worker: thread::JoinHandle<()>,
 }
 
@@ -77,6 +83,12 @@ pub fn serve_stdio_with_config<R: BufRead + Send + 'static, W: Write>(
         match receiver.recv() {
             Ok(ServerEvent::Input(BoundedLine::Eof)) | Err(_) => {
                 for wait in active.values() {
+                    let _ = wait.terminal.compare_exchange(
+                        WAIT_PENDING,
+                        WAIT_CANCELLED,
+                        Ordering::AcqRel,
+                        Ordering::Acquire,
+                    );
                     wait.cancelled.store(true, Ordering::Release);
                 }
                 for (_, wait) in active {
@@ -87,6 +99,12 @@ pub fn serve_stdio_with_config<R: BufRead + Send + 'static, W: Write>(
             }
             Ok(ServerEvent::InputError(error)) => {
                 for wait in active.values() {
+                    let _ = wait.terminal.compare_exchange(
+                        WAIT_PENDING,
+                        WAIT_CANCELLED,
+                        Ordering::AcqRel,
+                        Ordering::Acquire,
+                    );
                     wait.cancelled.store(true, Ordering::Release);
                 }
                 for (_, wait) in active {
@@ -214,6 +232,15 @@ fn handle_cancel_notification(message: &Value, active: &HashMap<String, ActiveWa
         .and_then(|params| params.get("requestId"))
         .filter(|id| valid_request_id(id))
         && let Some(wait) = active.get(&request_id_key(request_id))
+        && wait
+            .terminal
+            .compare_exchange(
+                WAIT_PENDING,
+                WAIT_CANCELLED,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_ok()
     {
         wait.cancelled.store(true, Ordering::Release);
     }
@@ -384,20 +411,42 @@ fn start_wait(
         timeout_ms,
     };
     let cancelled = Arc::new(AtomicBool::new(false));
+    let terminal = Arc::new(AtomicU8::new(WAIT_PENDING));
     let worker_cancelled = Arc::clone(&cancelled);
+    let worker_terminal = Arc::clone(&terminal);
     let worker_sender = sender.clone();
     let worker_key = key.clone();
     let worker_id = id.clone();
     let address = config.address.clone();
+    let cancellation_request = request.clone();
     let worker = thread::spawn(move || {
-        let result = mcp_fleet::wait_event(address.as_deref(), request, worker_cancelled);
+        let mut result = mcp_fleet::wait_event(address.as_deref(), request, worker_cancelled);
+        match worker_terminal.compare_exchange(
+            WAIT_PENDING,
+            WAIT_COMPLETED,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            Ok(_) => {}
+            Err(WAIT_CANCELLED) => {
+                result = Ok(mcp_fleet::cancelled_wait_outcome(&cancellation_request));
+            }
+            Err(_) => return,
+        }
         let _ = worker_sender.send(ServerEvent::WaitComplete {
             key: worker_key,
             id: worker_id,
             result,
         });
     });
-    active.insert(key, ActiveWait { cancelled, worker });
+    active.insert(
+        key,
+        ActiveWait {
+            cancelled,
+            terminal,
+            worker,
+        },
+    );
     Ok(())
 }
 
@@ -478,6 +527,18 @@ fn process_message(
                     ERROR_INVALID_PARAMS,
                     "initialize requires protocolVersion, capabilities, and clientInfo",
                     Some(json!({"supported": [MCP_PROTOCOL_REVISION]})),
+                ));
+            }
+            if requested != Some(MCP_PROTOCOL_REVISION) {
+                return Some(error_response(
+                    response_id,
+                    ERROR_PROTOCOL_VERSION,
+                    "Unsupported MCP protocol version",
+                    Some(json!({
+                        "code": "mcp_protocol_version",
+                        "requested": requested,
+                        "supported": [MCP_PROTOCOL_REVISION]
+                    })),
                 ));
             }
             *state = SessionState::InitializeResponded;
@@ -680,7 +741,27 @@ fn bounded_detail(detail: &str) -> String {
 }
 
 fn write_message<W: Write>(output: &mut W, message: &Value) -> io::Result<()> {
-    serde_json::to_writer(&mut *output, message)?;
+    let maximum = capabilities().limits.response_bytes as usize;
+    let mut encoded = serde_json::to_vec(message).map_err(io::Error::other)?;
+    if encoded.len() > maximum {
+        encoded = serde_json::to_vec(&error_response(
+            Value::Null,
+            ERROR_RESPONSE_TOO_LARGE,
+            "MCP response exceeds the byte limit",
+            Some(json!({
+                "class": "response_too_large",
+                "code": "agenterm_response_too_large",
+                "maximum_bytes": maximum
+            })),
+        ))
+        .map_err(io::Error::other)?;
+        if encoded.len() > maximum {
+            return Err(io::Error::other(
+                "bounded MCP response exceeds its own published limit",
+            ));
+        }
+    }
+    output.write_all(&encoded)?;
     output.write_all(b"\n")?;
     output.flush()
 }
@@ -774,7 +855,7 @@ mod tests {
     fn non_ping_request_is_rejected_before_initialized_notification() {
         let responses = exchange(concat!(
             "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":",
-            "{\"protocolVersion\":\"future\",\"capabilities\":{},",
+            "{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{},",
             "\"clientInfo\":{\"name\":\"fixture\",\"version\":\"1\"}}}\n",
             "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"resources/list\"}\n"
         ));
@@ -783,6 +864,32 @@ mod tests {
             MCP_PROTOCOL_REVISION
         );
         assert_eq!(responses[1]["error"]["code"], ERROR_NOT_INITIALIZED);
+    }
+
+    #[test]
+    fn unsupported_revision_is_typed_and_does_not_advance_the_lifecycle() {
+        let responses = exchange(concat!(
+            "{\"jsonrpc\":\"2.0\",\"id\":\"future\",\"method\":\"initialize\",\"params\":",
+            "{\"protocolVersion\":\"future\",\"capabilities\":{},",
+            "\"clientInfo\":{\"name\":\"fixture\",\"version\":\"1\"}}}\n",
+            "{\"jsonrpc\":\"2.0\",\"id\":\"supported\",\"method\":\"initialize\",\"params\":",
+            "{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{},",
+            "\"clientInfo\":{\"name\":\"fixture\",\"version\":\"1\"}}}\n"
+        ));
+        assert_eq!(responses[0]["id"], "future");
+        assert_eq!(responses[0]["error"]["code"], ERROR_PROTOCOL_VERSION);
+        assert_eq!(
+            responses[0]["error"]["data"]["code"],
+            "mcp_protocol_version"
+        );
+        assert_eq!(
+            responses[0]["error"]["data"]["supported"],
+            json!([MCP_PROTOCOL_REVISION])
+        );
+        assert_eq!(
+            responses[1]["result"]["protocolVersion"],
+            MCP_PROTOCOL_REVISION
+        );
     }
 
     #[test]
@@ -899,6 +1006,23 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(responses[0]["error"]["code"], ERROR_INVALID_REQUEST);
         assert_eq!(responses[1], success_response(json!(7), json!({})));
+    }
+
+    #[test]
+    fn oversized_response_is_replaced_by_a_bounded_typed_error() {
+        let maximum = capabilities().limits.response_bytes as usize;
+        let message = success_response(json!("oversized"), json!({"text": "x".repeat(maximum)}));
+        let mut output = Vec::new();
+        write_message(&mut output, &message).unwrap();
+        assert!(output.len() <= maximum + 1);
+        let response: Value = serde_json::from_slice(&output).unwrap();
+        assert_eq!(response["id"], Value::Null);
+        assert_eq!(response["error"]["code"], ERROR_RESPONSE_TOO_LARGE);
+        assert_eq!(
+            response["error"]["data"]["code"],
+            "agenterm_response_too_large"
+        );
+        assert_eq!(response["error"]["data"]["maximum_bytes"], maximum);
     }
 
     #[test]

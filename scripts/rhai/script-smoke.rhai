@@ -2121,10 +2121,13 @@ let receipt=fleet.tabs.set_note(
         require(
             direct_catalog.project_id ==
                 "agenterm-script-daily-check"
-                && direct_catalog.schema_version == 2
+                && direct_catalog.schema_version == 3
                 && direct_catalog.compatible
                 && direct_catalog.tasks.len == 1
                 && direct_catalog.tasks[0].status == "ready"
+                && direct_catalog.tasks[0].contract.inputs.len == 3
+                && direct_catalog.tasks[0].contract.evidence ==
+                    ["task.daily-check"]
                 && direct_show.compatible
                 && direct_show.tasks[0].entry == "daily-check.rhai",
             "script_north_star_catalog_mismatch"
