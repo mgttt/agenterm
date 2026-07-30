@@ -109,9 +109,9 @@ tests or ownership.
     no-activate launch path also configures the macOS event loop before window
     creation
   - [~] clipboard reads/writes now consume `platform::macos::clipboard` with a
-    256 KiB byte budget, live bounded reads, and typed failures; the `pbcopy`
-    stdin writer must still move under the 1.5 second supervisor so a helper
-    that stops reading cannot block before the deadline loop
+    256 KiB byte budget, live bounded reads, supervised stdin writes, and typed
+    failures; native macOS verification of the blocked-writer deadline is
+    pending
   - [x] whole-window and pane PNG capture now consume
     `platform::macos::screenshot` with checked dimensions, clips, framebuffer
     length, a 64 MiB RGBA budget, and typed validation/I/O/encoding failures
@@ -249,13 +249,12 @@ macOS hot-path evidence (2026-07-30):
 - [x] native Command-C/Command-V round-trip copies and pastes the exact composer
   marker through the macOS adapter; public CLI capture produces a 1920x1200
   whole-window PNG and a 1560x928 pane PNG, both under the adapter budget
-- [ ] supervise the macOS clipboard writer itself; current native success
-  evidence does not cover a `pbcopy` process that accepts spawn but stops
-  consuming stdin
+- [~] the macOS clipboard writer is supervised in source with a blocked-pipe
+  regression test; native macOS execution evidence is pending
 
 Cross-platform integration review (2026-07-30):
 
 - [~] Linux screenshot requests that extend outside the framebuffer now return
   typed `screenshot_invalid_clip`; native Linux verification is pending
-- [ ] macOS clipboard write timeout covers blocked stdin delivery as well as
-  child exit
+- [~] macOS clipboard write timeout covers blocked stdin delivery as well as
+  child exit in source; native macOS verification is pending

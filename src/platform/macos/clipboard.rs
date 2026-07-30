@@ -100,13 +100,45 @@ fn write_via_command(program: &str, text: &str, timeout: Duration) -> Result<(),
     let mut stdin = child.stdin.take().ok_or_else(|| ClipboardError::Backend {
         message: "clipboard helper stdin is unavailable".to_owned(),
     })?;
-    stdin
-        .write_all(text.as_bytes())
-        .map_err(|error| ClipboardError::Backend {
-            message: error.to_string(),
-        })?;
-    drop(stdin);
-    wait_child(&mut child, timeout)
+    let text = text.as_bytes().to_vec();
+    let writer = thread::spawn(move || {
+        let result = stdin
+            .write_all(&text)
+            .map_err(|error| ClipboardError::Backend {
+                message: error.to_string(),
+            });
+        drop(stdin);
+        result
+    });
+    let deadline = Instant::now() + timeout;
+    while !writer.is_finished() {
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = writer.join();
+            return Err(ClipboardError::Timeout);
+        }
+        thread::sleep(Duration::from_millis(5));
+    }
+    match writer.join() {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(error);
+        }
+        Err(_) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(ClipboardError::Backend {
+                message: "clipboard writer thread panicked".to_owned(),
+            });
+        }
+    }
+    wait_child(
+        &mut child,
+        deadline.saturating_duration_since(Instant::now()),
+    )
 }
 
 fn read_via_command(
@@ -216,6 +248,7 @@ fn unavailable_or_backend(program: &str, error: std::io::Error) -> ClipboardErro
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::fs::PermissionsExt;
 
     #[test]
     fn failures_have_stable_typed_codes() {
@@ -253,5 +286,31 @@ mod tests {
                 limit: TERMINAL_PASTE_LIMIT_BYTES,
             })
         );
+    }
+
+    #[test]
+    fn blocked_writer_is_terminated_by_the_helper_deadline() {
+        let path = std::env::temp_dir().join(format!(
+            "agenterm-macos-blocked-clipboard-{}.sh",
+            std::process::id()
+        ));
+        std::fs::write(&path, "#!/bin/sh\nexec sleep 5\n").expect("write helper");
+        let mut permissions = std::fs::metadata(&path)
+            .expect("helper metadata")
+            .permissions();
+        permissions.set_mode(0o700);
+        std::fs::set_permissions(&path, permissions).expect("make helper executable");
+
+        let text = "x".repeat(2 * 1024 * 1024);
+        let started = Instant::now();
+        let result = write_via_command(
+            path.to_str().expect("UTF-8 helper path"),
+            &text,
+            Duration::from_millis(50),
+        );
+        let _ = std::fs::remove_file(path);
+
+        assert_eq!(result, Err(ClipboardError::Timeout));
+        assert!(started.elapsed() < Duration::from_secs(2));
     }
 }
