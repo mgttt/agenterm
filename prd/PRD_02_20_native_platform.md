@@ -148,8 +148,8 @@ tests or ownership.
    `platform::windows`)
 3. [~] move IME, clipboard, DPI, font, screenshot, activation, and remaining
    window integration incrementally behind the same boundary
-   (Linux IME+clipboard first cut @ `66c54a5`/`b5d54ef`; DPI/scale next;
-   font/screenshot/activation still deferred)
+   (Linux IME+clipboard @ `66c54a5`/`b5d54ef`; DPI/scale @ `57958c1`;
+   font next; screenshot/activation still deferred)
 4. [ ] remove superseded platform-specific paths only after native black-box
    and screenshot evidence passes on that platform
 
