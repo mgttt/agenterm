@@ -1,3 +1,4 @@
+use crate::terminal_cursor::TerminalCursorShape;
 use crate::theme::{Rgb, ThemeId, ThemePalette};
 use crate::ui_geometry::{
     PixelRect, TreeRowActionDensity, TreeRowMode, sidebar_tree_row_geometry,
@@ -465,6 +466,7 @@ pub(super) struct TerminalPaint<'a> {
     pub(super) grid: &'a TerminalGrid,
     pub(super) selection: Option<crate::terminal_selection::TerminalSelection>,
     pub(super) cursor_style: TerminalCursorStyle,
+    pub(super) cursor_shape: TerminalCursorShape,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1553,18 +1555,45 @@ fn render_terminal_grid(
             }
             .min(layout.offset_x + terminal_width - x);
             match terminal.cursor_style {
-                TerminalCursorStyle::Active => {
-                    let cursor_height = (layout.cell_height / 8).clamp(2, 3);
-                    fill_rect(
+                TerminalCursorStyle::Active => match terminal.cursor_shape {
+                    TerminalCursorShape::Block => draw_cell(
                         buffer,
                         stride,
+                        layout.width,
+                        layout.height,
                         x,
-                        y + layout.cell_height - cursor_height,
+                        y,
                         cursor_width,
-                        cursor_height,
-                        rgb_to_pixel(palette.focus_ring),
-                    );
-                }
+                        layout.cell_height,
+                        cell.ch,
+                        palette.terminal_background,
+                        palette.focus_ring,
+                    ),
+                    TerminalCursorShape::Underline => {
+                        let cursor_height = (layout.cell_height / 8).clamp(2, 3);
+                        fill_rect(
+                            buffer,
+                            stride,
+                            x,
+                            y + layout.cell_height - cursor_height,
+                            cursor_width,
+                            cursor_height,
+                            rgb_to_pixel(palette.focus_ring),
+                        );
+                    }
+                    TerminalCursorShape::Bar => {
+                        let bar_width = (layout.cell_width / 5).clamp(2, 3);
+                        fill_rect(
+                            buffer,
+                            stride,
+                            x,
+                            y,
+                            bar_width,
+                            layout.cell_height,
+                            rgb_to_pixel(palette.focus_ring),
+                        );
+                    }
+                },
                 TerminalCursorStyle::Inactive => {
                     let color = rgb_to_pixel(palette.muted_text);
                     fill_rect(buffer, stride, x, y, cursor_width, 1, color);
@@ -2544,6 +2573,7 @@ mod tests {
                 grid: &grid,
                 selection: None,
                 cursor_style: TerminalCursorStyle::Active,
+                cursor_shape: TerminalCursorShape::Underline,
             },
             palette,
             layout,
@@ -2563,6 +2593,7 @@ mod tests {
                 grid: &grid,
                 selection: None,
                 cursor_style: TerminalCursorStyle::Inactive,
+                cursor_shape: TerminalCursorShape::Block,
             },
             palette,
             layout,
@@ -2579,6 +2610,7 @@ mod tests {
                 grid: &grid,
                 selection: None,
                 cursor_style: TerminalCursorStyle::Active,
+                cursor_shape: TerminalCursorShape::Underline,
             },
             palette,
             layout,
@@ -2587,5 +2619,55 @@ mod tests {
             buffer[(cursor_y * width + cursor_x) as usize],
             rgb_to_pixel(palette.focus_ring)
         );
+    }
+
+    #[test]
+    fn terminal_cursor_renders_block_underline_and_bar_shapes() {
+        let palette = ThemeId::Dark.palette();
+        let (cell_width, cell_height) = cell_metrics(12);
+        let width = cell_width + SCROLLBAR_WIDTH;
+        let parser = vt100::Parser::new(1, 1, 0);
+        let mut grid = TerminalGrid::new(1, 1, palette);
+        grid.sync_from_screen(parser.screen());
+        let layout = TerminalGridLayout {
+            width,
+            height: cell_height,
+            offset_x: 0,
+            offset_y: 0,
+            cell_width,
+            cell_height,
+        };
+        let background = rgb_to_pixel(palette.terminal_background);
+        let accent = rgb_to_pixel(palette.focus_ring);
+        let render_shape = |shape| {
+            let mut buffer = vec![background; (width * cell_height) as usize];
+            render_terminal_grid(
+                &mut buffer,
+                width,
+                TerminalPaint {
+                    grid: &grid,
+                    selection: None,
+                    cursor_style: TerminalCursorStyle::Active,
+                    cursor_shape: shape,
+                },
+                palette,
+                layout,
+            );
+            buffer
+        };
+
+        let block = render_shape(TerminalCursorShape::Block);
+        assert_eq!(
+            block[(cell_height / 2 * width + cell_width / 2) as usize],
+            accent
+        );
+
+        let underline = render_shape(TerminalCursorShape::Underline);
+        assert_eq!(underline[((cell_height - 2) * width) as usize], accent);
+        assert_eq!(underline[(cell_height / 2 * width) as usize], background);
+
+        let bar = render_shape(TerminalCursorShape::Bar);
+        assert_eq!(bar[(cell_height / 2 * width) as usize], accent);
+        assert_eq!(bar[(cell_height / 2 * width + 4) as usize], background);
     }
 }

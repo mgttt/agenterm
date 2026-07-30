@@ -14,6 +14,7 @@ use crate::pty::{ChildCommand, PtyChild, PtyMaster, TerminalSize};
 
 use crate::{
     SCROLLBACK_LINES, ipc_address, request_gui_wake,
+    terminal_cursor::{DecscusrTracker, TerminalCursorAppearance},
     terminal_lifecycle::{BoundedByteRing, SubmissionState, TerminalLifecycle},
     terminal_observation::TerminalObservation,
     wake_signal::WakeSignal,
@@ -87,6 +88,7 @@ pub(crate) struct TerminalTab {
     pub(super) proxy_redaction_needles: Vec<SecretValue>,
     pub(super) proxy_redaction_pending: Vec<u8>,
     pub(crate) parser: vt100::Parser<TerminalCallbacks>,
+    cursor_tracker: DecscusrTracker,
     pub(super) receiver: Receiver<PtyEvent>,
     worker_completion_receiver: Receiver<TerminalWorkerCompletion>,
     reader_thread: Option<JoinHandle<()>>,
@@ -222,6 +224,7 @@ impl TerminalTab {
         }
         let tail = self.redact_proxy_output(&[], true);
         self.output_bytes += tail.len();
+        self.cursor_tracker.feed(&tail);
         self.parser.process(&tail);
         self.raw_output.extend(&tail);
         self.lifecycle.close_reader_after_parser_drain();
@@ -395,6 +398,7 @@ impl TerminalTab {
                     ..TerminalCallbacks::default()
                 },
             ),
+            cursor_tracker: DecscusrTracker::default(),
             receiver,
             worker_completion_receiver,
             reader_thread: Some(reader_thread),
@@ -432,6 +436,7 @@ impl TerminalTab {
                     let bytes = self.redact_proxy_output(&bytes, false);
                     self.observe_proxy_confirmation(&bytes);
                     self.output_bytes += bytes.len();
+                    self.cursor_tracker.feed(&bytes);
                     self.parser.process(&bytes);
                     if let Some(path) = self.parser.callbacks_mut().pending_cwd.take() {
                         self.cwd.confirm_osc7(path);
@@ -480,6 +485,10 @@ impl TerminalTab {
         if let Err(error) = self.master.resize(TerminalSize { rows, cols }) {
             self.error = Some(format!("resize failed: {error}"));
         }
+    }
+
+    pub(crate) const fn cursor_appearance(&self) -> TerminalCursorAppearance {
+        self.cursor_tracker.appearance()
     }
 
     pub(super) fn scroll_viewport(&mut self, action: &str, count: Option<usize>) -> Result<usize> {

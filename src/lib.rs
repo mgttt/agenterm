@@ -37,6 +37,7 @@ pub mod script_stream;
 pub mod script_task;
 mod settings;
 mod tab_tree;
+mod terminal_cursor;
 mod terminal_lifecycle;
 mod terminal_observation;
 #[cfg(unix)]

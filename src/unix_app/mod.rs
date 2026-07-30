@@ -3228,6 +3228,10 @@ impl UnixApp {
                 cursor: self.ime_cursor,
                 anchor,
             });
+        let cursor_appearance = self
+            .active_position()
+            .map(|position| self.tabs[position].cursor_appearance())
+            .unwrap_or_default();
         let cursor_style =
             if self.focus_surface != UnixFocusSurface::Terminal || self.modal_surface_active() {
                 TerminalCursorStyle::Hidden
@@ -3271,6 +3275,7 @@ impl UnixApp {
                     grid,
                     selection: terminal_selection,
                     cursor_style,
+                    cursor_shape: cursor_appearance.shape,
                 },
                 sidebar_rows: &sidebar_rows,
                 sidebar_tree: layout.sidebar_tree,
@@ -4060,7 +4065,10 @@ impl ApplicationHandler<UnixWake> for UnixApp {
         let cursor_active = self.window_focused
             && self.focus_surface == UnixFocusSurface::Terminal
             && !self.modal_surface_active()
-            && self.grid.as_ref().is_some_and(TerminalGrid::cursor_visible);
+            && self.grid.as_ref().is_some_and(TerminalGrid::cursor_visible)
+            && self
+                .active_position()
+                .is_some_and(|position| self.tabs[position].cursor_appearance().blinking);
         if cursor_active {
             changed |= self.cursor_blink.tick(now);
         } else {
