@@ -102,6 +102,9 @@ Align branch naming with cloud agent policy: `cursor/<descriptive-name>-<suffix>
    you need events/transcripts (large transcripts: use subagents, not raw read).
 3. Do **not** assume the sibling shares this chat context — put full handoff
    in the API `prompt.text`.
+4. Ongoing 主控↔分身 chat: use the desensitized helper
+   `scripts/cursor_agent_chat.sh --from 主控 --to 分身N '…'`
+   (auto envelope `<from::…><to::…>`; never prints `CURSOR_API`).
 
 ## Example handoff text (copy pattern, customize)
 

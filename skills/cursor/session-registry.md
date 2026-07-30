@@ -25,17 +25,16 @@ REST API **不能**改 `name`；下面登记表供主控与分身对齐身份与
 - **分身N**：API 或 UI 创建的执行会话；创建时 `name` 尽量用 `分身N`。
 - 新开分身：递增 N，更新本表 **并** 在邮箱加席位块（勿写 API 密钥）。
 
-## 通道优先级
+## Agent 间通信（推荐）
 
-1. **邮箱（git）** — 相互可见的状态与请示（SSOT）
-2. **REST 推送** — 仅分身 IDLE 时唤醒；`409` 则只写邮箱
-3. **MCP 观测** — 主控只读监控，不替代分身写状态
+用仓库脚本发带信封的 Cloud Agent 消息（脱敏，不打印 `CURSOR_API`）：
 
 ```bash
-# 唤醒（分身须 IDLE）
-curl -sS -X POST \
-  --url "https://api.cursor.com/v1/agents/<bcId>/runs" \
-  -u "${CURSOR_API}:" \
-  -H 'Content-Type: application/json' \
-  -d '{"prompt":{"text":"主控：先 git pull，读 skills/cursor/mailbox.md，按协议更新席位后再执行：…"}}'
+scripts/cursor_agent_chat.sh --list
+scripts/cursor_agent_chat.sh --from 主控 --to 分身1 '指令正文'
+scripts/cursor_agent_chat.sh --from 分身1 --to 主控 --stdin <<'EOF'
+回报：…
+EOF
 ```
+
+静默前缀：`<from::主控><to::分身1>`。收件人 `RUNNING` 时 API 可能 `409`；`--dry-run` 可预览信封。
