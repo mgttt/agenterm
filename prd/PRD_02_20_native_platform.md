@@ -108,9 +108,10 @@ tests or ownership.
     resize, layout, and rendering now consume `platform::macos::scale`; the
     no-activate launch path also configures the macOS event loop before window
     creation
-  - [x] clipboard reads/writes now consume `platform::macos::clipboard` with a
-    256 KiB byte budget, 1.5 second helper deadline, live bounded reads, and
-    typed unavailable/oversize/timeout/backend failures
+  - [~] clipboard reads/writes now consume `platform::macos::clipboard` with a
+    256 KiB byte budget, live bounded reads, and typed failures; the `pbcopy`
+    stdin writer must still move under the 1.5 second supervisor so a helper
+    that stops reading cannot block before the deadline loop
   - [x] whole-window and pane PNG capture now consume
     `platform::macos::screenshot` with checked dimensions, clips, framebuffer
     length, a 64 MiB RGBA budget, and typed validation/I/O/encoding failures
@@ -130,10 +131,10 @@ tests or ownership.
   - [x] Linux clipboard helpers: read/write probed separately, display-matched
     X11/Wayland selection, wall-clock timeouts, live stdout byte budget, typed
     `clipboard_timeout` / `clipboard_too_large` / `clipboard_unavailable`
-  - [x] Linux screenshot encode (dimension/pixel/clip/path budgets + typed
-    failure) and activation/no-activate (`with_active`) consume
-    `platform::linux`; X11/Wayland softbuffer paths Available, headless
-    Unsupported
+  - [~] Linux screenshot encode and activation/no-activate (`with_active`)
+    consume `platform::linux`; dimensions/pixels/path and headless failures are
+    typed, but an out-of-frame clip must fail instead of silently shrinking;
+    X11/Wayland softbuffer paths Available, headless Unsupported
   - [~] winit/softbuffer windowing, X11/Wayland input, system-font fallback,
     clipboard, cursor, scaling, and POSIX PTY interaction are in active delivery
   - [~] expose the remaining Linux behavior through the shared platform
@@ -182,9 +183,9 @@ tests or ownership.
    (Linux IME+clipboard @ `66c54a5`/`b5d54ef`; clipboard helper harden @
    `bf17150`; DPI/scale @ `57958c1`; font discovery/metrics @ `25a45d2`;
    screenshot+activation @ `1b454c2`. Windows bounded clipboard,
-   activation, and screenshot capture hot paths are adapted. macOS bounded
-   clipboard @ `11ce9b8`, screenshot @ `3811bda`, and Cocoa IME preedit/commit
-   @ `91055b6` are adapted)
+   activation, and screenshot capture hot paths are adapted. macOS clipboard
+   first cut @ `11ce9b8`, bounded screenshot @ `3811bda`, and Cocoa IME
+   preedit/commit @ `91055b6` are adapted)
 4. [ ] remove superseded platform-specific paths only after native black-box
    and screenshot evidence passes on that platform
 
@@ -248,3 +249,13 @@ macOS hot-path evidence (2026-07-30):
 - [x] native Command-C/Command-V round-trip copies and pastes the exact composer
   marker through the macOS adapter; public CLI capture produces a 1920x1200
   whole-window PNG and a 1560x928 pane PNG, both under the adapter budget
+- [ ] supervise the macOS clipboard writer itself; current native success
+  evidence does not cover a `pbcopy` process that accepts spawn but stops
+  consuming stdin
+
+Cross-platform integration review (2026-07-30):
+
+- [ ] Linux screenshot requests that extend outside the framebuffer return
+  typed `screenshot_invalid_clip` rather than a smaller successful PNG
+- [ ] macOS clipboard write timeout covers blocked stdin delivery as well as
+  child exit
