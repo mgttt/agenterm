@@ -7,6 +7,7 @@ Copyright and license terms remain with their respective authors.
 
 | Package | Declared license |
 | --- | --- |
+| `ab_glyph` | Apache-2.0 |
 | `anyhow` | MIT OR Apache-2.0 |
 | `libc` | MIT OR Apache-2.0 |
 | `png` | MIT OR Apache-2.0 |
