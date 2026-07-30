@@ -105,6 +105,37 @@ struct TerminalDoubleClick {
     expires_at: Instant,
 }
 
+#[derive(Default)]
+struct RenderBuffers {
+    logical: Vec<u32>,
+    captured: Option<(u32, u32, Vec<u32>)>,
+    capture_next: bool,
+}
+
+impl RenderBuffers {
+    fn logical_frame(&mut self, width: u32, height: u32) -> &mut [u32] {
+        self.logical.resize(width as usize * height as usize, 0);
+        &mut self.logical
+    }
+
+    fn request_capture(&mut self) {
+        self.captured = None;
+        self.capture_next = true;
+    }
+
+    fn capture_if_requested(&mut self, width: u32, height: u32, pixels: &[u32]) {
+        if self.capture_next {
+            self.capture_next = false;
+            self.captured = Some((width, height, pixels.to_vec()));
+        }
+    }
+
+    fn take_capture(&mut self) -> Option<(u32, u32, Vec<u32>)> {
+        self.capture_next = false;
+        self.captured.take()
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 struct RecentTerminalClick {
     tab_id: u64,
@@ -339,7 +370,7 @@ struct UnixApp {
     window_close_pending: bool,
     cwd_edit_target: Option<u64>,
     tabs_resize_drag: Option<TabsResizeDrag>,
-    last_frame: Option<(u32, u32, Vec<u32>)>,
+    render_buffers: RenderBuffers,
     status_message: String,
     ime_preedit: String,
     ime_cursor: Option<(usize, usize)>,
@@ -402,7 +433,7 @@ impl UnixApp {
             window_close_pending: false,
             cwd_edit_target: None,
             tabs_resize_drag: None,
-            last_frame: None,
+            render_buffers: RenderBuffers::default(),
             status_message: String::from("Ready"),
             ime_preedit: String::new(),
             ime_cursor: None,
@@ -3261,9 +3292,11 @@ impl UnixApp {
         let height = buffer.height().get();
         let hidpi_terminal_active =
             hidpi_terminal_visible && (width != logical_width || height != logical_height);
-        let mut logical_pixels = vec![0_u32; (logical_width * logical_height) as usize];
+        let logical_pixels = self
+            .render_buffers
+            .logical_frame(logical_width, logical_height);
         render_frame(
-            &mut logical_pixels,
+            logical_pixels,
             logical_width,
             logical_width,
             logical_height,
@@ -3300,7 +3333,7 @@ impl UnixApp {
             },
         );
         scale_frame_nearest(
-            &logical_pixels,
+            logical_pixels,
             logical_width,
             logical_height,
             &mut buffer,
@@ -3329,7 +3362,8 @@ impl UnixApp {
                 palette,
             );
         }
-        self.last_frame = Some((width, height, buffer.to_vec()));
+        self.render_buffers
+            .capture_if_requested(width, height, &buffer);
         let _ = buffer.present();
     }
 
@@ -3362,10 +3396,11 @@ impl UnixApp {
 
     fn save_screenshot(&mut self, args: &[String], pane_only: bool) -> Result<String, String> {
         self.cursor_blink.reset(Instant::now());
+        self.render_buffers.request_capture();
         self.redraw();
         let (width, height, pixels) = self
-            .last_frame
-            .clone()
+            .render_buffers
+            .take_capture()
             .ok_or_else(|| "no rendered frame is available".to_owned())?;
         let path = screenshot_output_path(
             args,
@@ -4210,7 +4245,7 @@ fn system_menu_clipboard_state_pure(
 #[cfg(test)]
 mod system_menu_tests {
     use super::{
-        compact_cwd_for_status, scale_frame_nearest, scale_rect_to_frame,
+        RenderBuffers, compact_cwd_for_status, scale_frame_nearest, scale_rect_to_frame,
         system_menu_clipboard_state_pure,
     };
     use std::path::Path;
@@ -4245,6 +4280,26 @@ mod system_menu_tests {
             destination,
             [1, 1, 2, 2, 1, 1, 2, 2, 3, 3, 4, 4, 3, 3, 4, 4]
         );
+    }
+
+    #[test]
+    fn render_buffers_reuse_logical_allocation_and_capture_only_on_request() {
+        let mut buffers = RenderBuffers::default();
+        buffers.logical_frame(100, 60).fill(7);
+        let capacity = buffers.logical.capacity();
+
+        assert_eq!(buffers.logical_frame(80, 40).len(), 3_200);
+        assert_eq!(buffers.logical.capacity(), capacity);
+        assert_eq!(buffers.take_capture(), None);
+
+        buffers.capture_if_requested(2, 1, &[1, 2]);
+        assert_eq!(buffers.take_capture(), None);
+        buffers.request_capture();
+        buffers.capture_if_requested(2, 1, &[1, 2]);
+        assert_eq!(buffers.take_capture(), Some((2, 1, vec![1, 2])));
+
+        buffers.capture_if_requested(1, 1, &[3]);
+        assert_eq!(buffers.take_capture(), None);
     }
 
     #[test]
