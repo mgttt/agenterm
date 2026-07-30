@@ -1,8 +1,9 @@
 # AgenTerm v0.1.10 公开计划
 
-状态：实施中；原 v0.1.9 Release 因 server-loss 故障撤下，
+状态：已完成内部交付与候选演练；未创建 v0.1.10 tag 或公开 Release；
+原 v0.1.9 Release 因 server-loss 故障撤下，
 `0.1.9+hotfix.1` 是恢复 v0.1.10 主线前的强制稳定性门；
-当前 43/43 PowerShell 迁移项完成删除；Windows batch 业务逻辑迁移完成
+43/43 PowerShell 迁移项完成删除；Windows batch 业务逻辑迁移完成
 工作主题：**Rhai 完整接替仓库脚本业务逻辑，并建立可验证的只读 Agent 桥梁**
 版本定位：在 v0.1.9 完善通用 Rhai 运行时、模块任务与机器可读工具
 schema 后，让 AgenTerm 首次用自己的脚本运行时驱动完整开发生命周期，
@@ -1098,9 +1099,10 @@ entry 是集成热点，只允许一个串行 owner 收口。
     sidecar-kill GUI/server/PTY isolation and same-source privacy qualification
   [done] artifact / SBOM / README / PRD alignment
   [done] final clean rehearsal
-    a 2026-07-30 artifact-free clone of `2d4b435` completed 34/34
+    a 2026-07-30 artifact-free clone of `7c88ff0` completed 34/34
     stress-inclusive qualification, package rehearsal, process-tree
-    observation, remote-ref immutability, and owned-clone cleanup
+    observation with zero PowerShell processes, remote-ref immutability,
+    and owned-clone cleanup
 ```
 
 这条切法让 AgenTerm 用自己的 Rhai 工具链完成自我构建、验证与交付，同时

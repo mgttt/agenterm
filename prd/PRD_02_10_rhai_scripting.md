@@ -571,10 +571,11 @@ Migration ledger:
   rehearsal does not spawn `powershell.exe` or `pwsh.exe`. An explicitly
   declared PowerShell terminal payload inside the remote-UI compatibility
   journey is recorded separately and carries no repository automation logic.
-  A 2026-07-30 artifact-free clone of commit `2d4b435` completed all 34
+  A 2026-07-30 artifact-free clone of commit `7c88ff0` completed all 34
   stress-inclusive gates, produced a qualified rehearsal package, observed no
-  PowerShell automation or undeclared terminal payload, left remote refs
-  unchanged, and removed its owned process tree and clone.
+  PowerShell automation or undeclared terminal payload across 728 process-tree
+  scans, left remote refs and local tags unchanged, and removed its owned
+  process tree and clone.
 
 ## Public black-box acceptance
 
