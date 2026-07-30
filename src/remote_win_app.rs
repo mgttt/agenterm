@@ -11,11 +11,9 @@ use unicode_width::UnicodeWidthChar;
 use windows_sys::Win32::{
     Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
     Graphics::Gdi::{
-        BeginPaint, CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS, CreateFontW, CreateSolidBrush,
-        DEFAULT_CHARSET, DT_CENTER, DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE, DT_VCENTER,
-        DeleteObject, DrawTextW, EndPaint, FF_MODERN, FIXED_PITCH, FW_NORMAL, FillRect, FrameRect,
-        GetDC, GetTextMetricsW, HDC, HFONT, HGDIOBJ, LOGPIXELSY, OUT_DEFAULT_PRECIS, PAINTSTRUCT,
-        ReleaseDC, ScreenToClient, SelectObject, SetBkMode, SetTextColor, TEXTMETRICW, TRANSPARENT,
+        BeginPaint, CreateSolidBrush, DT_CENTER, DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE,
+        DT_VCENTER, DeleteObject, DrawTextW, EndPaint, FillRect, FrameRect, HDC, HFONT, HGDIOBJ,
+        PAINTSTRUCT, ScreenToClient, SelectObject, SetBkMode, SetTextColor, TRANSPARENT,
         UpdateWindow,
     },
     System::LibraryLoader::GetModuleHandleW,
@@ -54,7 +52,7 @@ use crate::{
     platform::{
         CapabilityStatus, KeyClassification, action,
         windows::{
-            activation, clipboard,
+            activation, clipboard, font,
             input::{Utf16TextDecoder, primary_shortcut, windows_modifiers},
             screenshot::{self, CaptureArea},
             toolbar::WindowsToolbarHit,
@@ -5821,51 +5819,8 @@ fn screen_selection_text(screen: &UiScreenSnapshot, selection: &RemoteTerminalSe
 }
 
 fn create_terminal_font(window: HWND, family: &str, size: u16) -> Result<(HFONT, i32, i32)> {
-    let device = unsafe { GetDC(window) };
-    if device.is_null() {
-        anyhow::bail!("GetDC failed");
-    }
-    let dpi = unsafe {
-        windows_sys::Win32::Graphics::Gdi::GetDeviceCaps(
-            device,
-            i32::try_from(LOGPIXELSY).unwrap_or(90),
-        )
-    };
-    let height = -((i32::from(size) * dpi) / 72).max(1);
-    let font = unsafe {
-        CreateFontW(
-            height,
-            0,
-            0,
-            0,
-            FW_NORMAL as i32,
-            0,
-            0,
-            0,
-            u32::from(DEFAULT_CHARSET),
-            u32::from(OUT_DEFAULT_PRECIS),
-            u32::from(CLIP_DEFAULT_PRECIS),
-            u32::from(CLEARTYPE_QUALITY),
-            u32::from(FIXED_PITCH | FF_MODERN),
-            wide(family).as_ptr(),
-        )
-    };
-    if font.is_null() {
-        unsafe { ReleaseDC(window, device) };
-        anyhow::bail!("CreateFontW failed");
-    }
-    let previous = unsafe { SelectObject(device, font as HGDIOBJ) };
-    let mut metrics: TEXTMETRICW = unsafe { mem::zeroed() };
-    let measured = unsafe { GetTextMetricsW(device, &mut metrics) };
-    unsafe {
-        SelectObject(device, previous);
-        ReleaseDC(window, device);
-    }
-    if measured == 0 {
-        unsafe { DeleteObject(font as HGDIOBJ) };
-        anyhow::bail!("GetTextMetricsW failed");
-    }
-    Ok((font, metrics.tmAveCharWidth.max(1), metrics.tmHeight.max(1)))
+    font::create_terminal_font(window, family, size)
+        .map_err(|error| platform_capability_error(error.to_capability_status()))
 }
 
 fn paint_screen(

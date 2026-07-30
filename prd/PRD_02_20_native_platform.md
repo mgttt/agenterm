@@ -91,6 +91,13 @@ tests or ownership.
     physical extent conversion, window metrics, geometry-event classification,
     and stable scale error codes; Windows adopts the revision without routing
     its native DPI messages through a Unix abstraction
+  - [x] GDI terminal-font creation and metric measurement now execute through
+    `platform::windows::font`; device-context, font-creation, and metric
+    failures have stable typed diagnostics, while the application retains
+    ownership of the live font handle and rendering lifecycle
+  - [x] Windows capability reporting no longer claims full IME support:
+    committed UTF-16 text is shipped, while unadapted IME preedit reports
+    explicit `ime-preedit-not-yet-adapted`
   - [~] existing Win32 window, HWND controls, GDI rendering, native clipboard,
     system menu, and remaining input behavior are shipped but remain
     distributed across Windows application modules
@@ -289,6 +296,9 @@ Contract-revision-2 local evidence (2026-07-31):
   unit/fractional scale conversion, zero-size resize handling, typed invalid
   metrics, and all three adapters declaring revision 2
 - [x] Windows warnings-denied library/test Clippy and `git diff --check` pass
+- [x] Windows GDI font adapter tests pass **15/15** for the Windows platform
+  slice; an incremental six-executable build and public no-activate startup
+  smoke pass with a **570 ms** first native window
 - [~] direct Linux cross-check from Windows reached native dependency
   compilation but cannot complete without `x86_64-linux-gnu-gcc`; the
   repository's native Linux/macOS jobs remain the authoritative adapter proof
