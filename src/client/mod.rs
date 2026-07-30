@@ -6,7 +6,6 @@ fn wide(value: &str) -> Vec<u16> {
     value.encode_utf16().chain(Some(0)).collect()
 }
 
-#[cfg(windows)]
 use std::path::{Path, PathBuf};
 use std::{
     cell::RefCell,
@@ -18,7 +17,6 @@ use std::{
 
 use anyhow::{Context as _, Result};
 
-#[cfg(windows)]
 use crate::script_protocol::{
     SCRIPT_API_VERSION, SCRIPT_ENVELOPE_VERSION, ScriptBrokerError, ScriptBrokerRequest,
     ScriptBrokerResponse, ScriptBudgets, ScriptExitClass, ScriptInvocation, ScriptOperation,
@@ -47,24 +45,19 @@ use crate::{
     upgrade_identity::UpgradeIdentity,
 };
 
-#[cfg(windows)]
 use crate::operations::operation_by_id;
 
-#[cfg(windows)]
 use crate::script_api_view::{
     filter_script_api_catalog, parse_script_api_view, render_script_api_tree,
 };
-#[cfg(windows)]
 use crate::script_audit::{
     AuditBudgets, AuditInvocation, AuditOutcome, AuditSourceKind, ScriptAuditSink,
     source_fingerprint,
 };
-#[cfg(windows)]
 use crate::script_project::{
     ResolvedScriptTask, ScriptTaskCatalog, ScriptTaskStatus, discover_task_manifest,
     load_task_catalog, resolve_task,
 };
-#[cfg(windows)]
 use crate::worker_supervisor::{SupervisorError, WorkerSupervisor};
 
 const IPC_TIMEOUT: Duration = Duration::from_secs(5);
@@ -77,12 +70,10 @@ thread_local! {
     static IPC_ADDRESS_OVERRIDE: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
-#[cfg(windows)]
 struct OwnedScriptTemp {
     root: PathBuf,
 }
 
-#[cfg(windows)]
 impl OwnedScriptTemp {
     fn create(invocation_id: &str) -> std::io::Result<Self> {
         let parent = env::temp_dir().join("AgenTerm").join("script-invocations");
@@ -118,7 +109,6 @@ impl OwnedScriptTemp {
     }
 }
 
-#[cfg(windows)]
 impl Drop for OwnedScriptTemp {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.root);
@@ -243,7 +233,7 @@ pub fn run_script_entry_with_args(mut arguments: Vec<String>) -> i32 {
         eprintln!("{error}");
         return 2;
     }
-    run_script_command(&arguments)
+    run_script_command_direct(&arguments)
 }
 
 fn script_help_text() -> &'static str {
@@ -864,7 +854,7 @@ fn run_cli(arguments: Vec<String>, control_options: CliControlOptions) -> i32 {
         return run_list_instances(&arguments);
     }
     if command == "script" {
-        return run_script_command(&arguments);
+        return run_script_command_hosted(&arguments);
     }
     if !has_explicit_ipc_address() {
         match select_implicit_control_instance() {
@@ -915,14 +905,12 @@ fn run_cli(arguments: Vec<String>, control_options: CliControlOptions) -> i32 {
         }
     };
     let mut response = send_control_request(arguments.clone(), control.clone());
-    #[cfg(windows)]
-    if response.is_err()
-        && may_start_server
-        && let Err(error) = start_server_process()
-    {
-        eprintln!("{error:#}");
+    if response.is_err() && may_start_server {
+        #[cfg(windows)]
+        if let Err(error) = start_server_process() {
+            eprintln!("{error:#}");
+        }
     }
-    #[cfg(windows)]
     if response.is_err() && may_start_server {
         let deadline = Instant::now() + IPC_AUTOSTART_TIMEOUT;
         while Instant::now() < deadline {
@@ -992,7 +980,7 @@ fn run_cli(arguments: Vec<String>, control_options: CliControlOptions) -> i32 {
 }
 
 #[cfg(not(windows))]
-fn run_script_command(_arguments: &[String]) -> i32 {
+fn run_script_command_hosted(_arguments: &[String]) -> i32 {
     eprintln!(
         "agenterm-cli script hosting is not yet available on this platform; \
          invoke agenterm-script directly"
@@ -1001,21 +989,48 @@ fn run_script_command(_arguments: &[String]) -> i32 {
 }
 
 #[cfg(windows)]
-fn run_script_command(arguments: &[String]) -> i32 {
+fn run_script_command_hosted(arguments: &[String]) -> i32 {
+    run_script_command_direct(arguments)
+}
+
+fn run_script_command_direct(arguments: &[String]) -> i32 {
     if arguments.get(1).is_some_and(|value| value == "task") {
         return run_script_task_command(arguments);
     }
     run_script_command_with_context(arguments, None)
 }
 
-#[cfg(windows)]
 #[derive(Clone, Debug)]
 struct ScriptExecutionContext {
     project_root: PathBuf,
     working_directory: PathBuf,
 }
 
-#[cfg(windows)]
+fn script_worker_executable() -> Result<PathBuf, String> {
+    let current = std::env::current_exe().map_err(|error| {
+        format!("host_worker_missing: could not locate current executable: {error}")
+    })?;
+    let parent = current.parent().ok_or_else(|| {
+        "host_worker_missing: agenterm-script is not installed next to the invoking executable"
+            .to_owned()
+    })?;
+    #[cfg(windows)]
+    let candidates = ["agenterm-script.exe"];
+    #[cfg(not(windows))]
+    let candidates = ["agenterm-script", "agenterm-script.exe"];
+    for name in candidates {
+        let path = parent.join(name);
+        if path.is_file() {
+            return Ok(path);
+        }
+    }
+    Err(format!(
+        "host_worker_missing: agenterm-script is not installed next to {}; \
+         scripting is an optional component",
+        current.display()
+    ))
+}
+
 fn run_script_command_with_context(
     arguments: &[String],
     context: Option<ScriptExecutionContext>,
@@ -1272,12 +1287,9 @@ fn run_script_command_with_context(
         budgets,
         observation,
     };
-    let executable = match std::env::current_exe().ok().and_then(|path| {
-        path.parent()
-            .map(|parent| parent.join("agenterm-script.exe"))
-    }) {
-        Some(path) if path.is_file() => path,
-        _ => {
+    let executable = match script_worker_executable() {
+        Ok(path) => path,
+        Err(message) => {
             let outcome = AuditOutcome {
                 duration_ms: audit_duration_ms(audit_started),
                 result_class: "configuration".to_owned(),
@@ -1290,10 +1302,7 @@ fn run_script_command_with_context(
             if let Err(error) = audit_sink.append(&audit_invocation, &outcome) {
                 return report_audit_error(error);
             }
-            eprintln!(
-                "agenterm-script.exe is not installed next to agenterm-cli.exe; \
-                 scripting is an optional component"
-            );
+            eprintln!("{message}");
             return 2;
         }
     };
@@ -1478,7 +1487,6 @@ fn run_script_command_with_context(
     }
 }
 
-#[cfg(windows)]
 fn direct_script_context(
     arguments: &[String],
     source_label: &str,
@@ -1509,7 +1517,6 @@ fn direct_script_context(
     })
 }
 
-#[cfg(windows)]
 fn canonical_script_directory(base: &Path, value: &str, code: &str) -> Result<PathBuf, String> {
     let candidate = if Path::new(value).is_absolute() {
         PathBuf::from(value)
@@ -1527,7 +1534,6 @@ fn canonical_script_directory(base: &Path, value: &str, code: &str) -> Result<Pa
     Ok(canonical)
 }
 
-#[cfg(windows)]
 fn run_script_task_command(arguments: &[String]) -> i32 {
     let Some(action) = arguments.get(2).map(String::as_str) else {
         eprintln!("script task requires list, show, check, or run");
@@ -1659,7 +1665,6 @@ fn run_script_task_command(arguments: &[String]) -> i32 {
     }
 }
 
-#[cfg(windows)]
 fn script_task_manifest(arguments: &[String]) -> Result<PathBuf, String> {
     if let Some(path) = option_value(arguments, "--manifest") {
         return Ok(PathBuf::from(path));
@@ -1669,7 +1674,6 @@ fn script_task_manifest(arguments: &[String]) -> Result<PathBuf, String> {
     discover_task_manifest(&current)
 }
 
-#[cfg(windows)]
 fn print_task_catalog(catalog: &ScriptTaskCatalog, json: bool) -> std::result::Result<(), i32> {
     if json {
         return write_script_stdout(&format!(
@@ -1685,7 +1689,6 @@ fn print_task_catalog(catalog: &ScriptTaskCatalog, json: bool) -> std::result::R
     write_script_stdout(&output)
 }
 
-#[cfg(windows)]
 fn task_entry_text(task: &crate::script_project::ScriptTaskEntry) -> String {
     let status = match task.status {
         ScriptTaskStatus::Ready => "ready",
@@ -1734,7 +1737,6 @@ fn task_entry_text(task: &crate::script_project::ScriptTaskEntry) -> String {
     )
 }
 
-#[cfg(windows)]
 fn run_resolved_script_task(arguments: &[String], task: ResolvedScriptTask) -> i32 {
     let missing = task
         .env
@@ -1786,7 +1788,6 @@ fn run_resolved_script_task(arguments: &[String], task: ResolvedScriptTask) -> i
     )
 }
 
-#[cfg(windows)]
 fn report_supervisor_error(error: SupervisorError) -> i32 {
     let (code, message, exit_class, exit_code) = match error {
         SupervisorError::ConcurrencyLimit => (
@@ -1825,7 +1826,6 @@ fn report_supervisor_error(error: SupervisorError) -> i32 {
     exit_code
 }
 
-#[cfg(windows)]
 fn script_broker_error(code: &str, message: impl Into<String>) -> ScriptBrokerResponse {
     ScriptBrokerResponse {
         ok: false,
@@ -1838,7 +1838,6 @@ fn script_broker_error(code: &str, message: impl Into<String>) -> ScriptBrokerRe
     }
 }
 
-#[cfg(windows)]
 fn script_broker_ipc(
     arguments: Vec<String>,
     timeout: Duration,
@@ -1861,7 +1860,6 @@ fn script_broker_ipc(
     }
 }
 
-#[cfg(windows)]
 fn handle_script_broker(
     request: &ScriptBrokerRequest,
     profile: ScriptProfile,
@@ -2013,7 +2011,6 @@ fn handle_script_broker(
     }
 }
 
-#[cfg(windows)]
 fn script_fleet_call(
     arguments: &serde_json::Value,
     profile: ScriptProfile,
@@ -2070,7 +2067,6 @@ fn script_fleet_call(
     script_fleet_mutation(operation, &parameters, command, budgets, remaining)
 }
 
-#[cfg(windows)]
 fn validate_fleet_parameters(
     operation: &crate::operations::OperationSpec,
     parameters: &serde_json::Value,
@@ -2185,7 +2181,6 @@ fn validate_fleet_parameters(
     Ok(())
 }
 
-#[cfg(windows)]
 fn fleet_mutation_command(
     operation_id: &str,
     parameters: &serde_json::Value,
@@ -2233,7 +2228,6 @@ fn fleet_mutation_command(
     Ok(arguments)
 }
 
-#[cfg(windows)]
 fn script_fleet_mutation(
     operation: &crate::operations::OperationSpec,
     parameters: &serde_json::Value,
@@ -2321,7 +2315,6 @@ fn script_fleet_mutation(
     }))
 }
 
-#[cfg(windows)]
 fn collect_fleet_receipt_events(
     operation: &crate::operations::OperationSpec,
     receipt: &serde_json::Value,
@@ -2400,7 +2393,6 @@ fn collect_fleet_receipt_events(
         .collect()
 }
 
-#[cfg(windows)]
 fn verify_fleet_post_state(
     operation_id: &str,
     parameters: &serde_json::Value,
@@ -2461,7 +2453,6 @@ fn verify_fleet_post_state(
     }
 }
 
-#[cfg(windows)]
 fn script_broker_wait(
     arguments: &serde_json::Value,
     budgets: &ScriptBudgets,
@@ -2556,7 +2547,6 @@ fn script_broker_wait(
     }
 }
 
-#[cfg(windows)]
 fn audit_budgets(budgets: &ScriptBudgets) -> AuditBudgets {
     AuditBudgets {
         source_bytes: budgets.source_bytes,
@@ -2575,12 +2565,10 @@ fn audit_budgets(budgets: &ScriptBudgets) -> AuditBudgets {
     }
 }
 
-#[cfg(windows)]
 fn audit_duration_ms(started: Instant) -> u64 {
     started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
 }
 
-#[cfg(windows)]
 fn audit_outcome_for_result(
     result: &crate::script_protocol::ScriptResult,
     started: Instant,
@@ -2609,7 +2597,6 @@ fn audit_outcome_for_result(
     }
 }
 
-#[cfg(windows)]
 fn audit_outcome_for_supervisor_error(error: &SupervisorError, started: Instant) -> AuditOutcome {
     let (result_class, failure_code, denied, cancelled, timed_out, crashed) = match error {
         SupervisorError::ConcurrencyLimit => (
@@ -2643,7 +2630,6 @@ fn audit_outcome_for_supervisor_error(error: &SupervisorError, started: Instant)
     }
 }
 
-#[cfg(windows)]
 fn report_audit_error(message: String) -> i32 {
     eprintln!(
         "{}",
@@ -2656,7 +2642,6 @@ fn report_audit_error(message: String) -> i32 {
     1
 }
 
-#[cfg(windows)]
 fn read_script_source(
     reader: impl Read,
     limit: usize,
@@ -2672,7 +2657,6 @@ fn read_script_source(
     String::from_utf8(bytes).map_err(|error| (1, format!("script source is not UTF-8: {error}")))
 }
 
-#[cfg(windows)]
 fn script_operand(arguments: &[String]) -> Option<&str> {
     let mut position = 2;
     while position < arguments.len() {
