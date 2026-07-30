@@ -736,23 +736,31 @@ fn copy_fixture_file(repo: &Path, fixture: &Path, relative: &str) {
     fs::copy(repo.join(relative), destination).expect("copy fixture file");
 }
 
+fn run_script_eval(expression: &str, profile: &str) -> Output {
+    let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
+    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+        .args(["eval", expression, "--profile", profile, "--json"])
+        .output()
+        .expect("run agenterm-script eval")
+}
+
+fn format_script_output(output: &Output) -> String {
+    format!(
+        "status={:?} stdout={} stderr={}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    )
+}
+
 #[test]
 fn legacy_profile_spellings_share_the_unrestricted_runtime() {
     for legacy_profile in ["local", "pure", "observe"] {
-        let output = Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
-            .args([
-                "eval",
-                "std::process::id()",
-                "--profile",
-                legacy_profile,
-                "--json",
-            ])
-            .output()
-            .expect("evaluate public process ID");
+        let output = run_script_eval("std::process::id()", legacy_profile);
         assert!(
             output.status.success(),
             "{legacy_profile} compatibility label removed a runtime API: {}",
-            String::from_utf8_lossy(&output.stderr)
+            format_script_output(&output)
         );
         let envelope: serde_json::Value =
             serde_json::from_slice(&output.stdout).expect("decode process ID envelope");
@@ -791,28 +799,32 @@ fn public_operation_budget_supports_long_orchestration() {
 
 #[test]
 fn child_id_remains_public_after_process_completion() {
-    let output = Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
-        .args([
-            "eval",
-            "let c=std::process::command(\"rustc\");\
-             c.arg(\"--version\");let child=c.start();let before=child.id;\
-             child.wait_with_output();let facts=child.platform_facts;\
-             #{before:before,after:child.id,state:child.state,\
-               window_supported:facts.top_level_window_supported,\
-               window_present:facts.top_level_window_present,\
-               window_id:facts.top_level_window_id,\
-               foreground_id:facts.foreground_window_id,\
-               is_foreground:facts.top_level_window_is_foreground}",
-            "--profile",
-            "local",
-            "--json",
-        ])
-        .output()
-        .expect("evaluate completed child ID");
+    let expression = if cfg!(windows) {
+        "let c=std::process::command(\"cmd.exe\");\
+         c.args([\"/d\",\"/s\",\"/c\",\"exit /b 0\"]);let child=c.start();let before=child.id;\
+         child.wait_with_output();let facts=child.platform_facts;\
+         #{before:before,after:child.id,state:child.state,\
+           window_supported:facts.top_level_window_supported,\
+           window_present:facts.top_level_window_present,\
+           window_id:facts.top_level_window_id,\
+           foreground_id:facts.foreground_window_id,\
+           is_foreground:facts.top_level_window_is_foreground}"
+    } else {
+        "let c=std::process::command(\"/bin/sh\");\
+         c.args([\"-c\",\"exit 0\"]);let child=c.start();let before=child.id;\
+         child.wait_with_output();let facts=child.platform_facts;\
+         #{before:before,after:child.id,state:child.state,\
+           window_supported:facts.top_level_window_supported,\
+           window_present:facts.top_level_window_present,\
+           window_id:facts.top_level_window_id,\
+           foreground_id:facts.foreground_window_id,\
+           is_foreground:facts.top_level_window_is_foreground}"
+    };
+    let output = run_script_eval(expression, "local");
     assert!(
         output.status.success(),
         "completed child ID evaluation failed: {}",
-        String::from_utf8_lossy(&output.stderr)
+        format_script_output(&output)
     );
     let envelope: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("decode completed child ID envelope");
