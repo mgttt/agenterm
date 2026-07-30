@@ -133,6 +133,7 @@ pub(super) enum TextFieldKeyAction {
     NextField,
     Submit,
     Escape,
+    SelectAll,
     Copy,
     Cut,
     Paste,
@@ -145,23 +146,38 @@ pub(super) fn text_field_key_action(
     modifiers: ModifiersState,
     buffer: &mut String,
     multiline: bool,
+    select_all: &mut bool,
 ) -> TextFieldKeyAction {
     if event.state != ElementState::Pressed || event.repeat {
         return TextFieldKeyAction::Ignored;
     }
 
+    text_field_logical_key_action(&event.logical_key, modifiers, buffer, multiline, select_all)
+}
+
+fn text_field_logical_key_action(
+    logical_key: &Key,
+    modifiers: ModifiersState,
+    buffer: &mut String,
+    multiline: bool,
+    select_all: &mut bool,
+) -> TextFieldKeyAction {
     let shortcut = primary_shortcut(modifiers);
 
-    match &event.logical_key {
+    match logical_key {
         Key::Named(NamedKey::Enter) if shortcut => TextFieldKeyAction::Submit,
         Key::Named(NamedKey::Enter) if multiline => {
+            prepare_composer_edit(buffer, select_all);
             buffer.push('\n');
             TextFieldKeyAction::Edited
         }
         Key::Named(NamedKey::Enter) => TextFieldKeyAction::NextField,
         Key::Named(NamedKey::Escape) => TextFieldKeyAction::Escape,
         Key::Character(text) if shortcut => {
-            if text.eq_ignore_ascii_case("c") {
+            if text.eq_ignore_ascii_case("a") {
+                *select_all = !buffer.is_empty();
+                TextFieldKeyAction::SelectAll
+            } else if text.eq_ignore_ascii_case("c") {
                 TextFieldKeyAction::Copy
             } else if text.eq_ignore_ascii_case("x") {
                 TextFieldKeyAction::Cut
@@ -172,6 +188,9 @@ pub(super) fn text_field_key_action(
             }
         }
         Key::Named(NamedKey::Backspace) => {
+            if prepare_composer_edit(buffer, select_all) {
+                return TextFieldKeyAction::Edited;
+            }
             if buffer.pop().is_some() {
                 TextFieldKeyAction::Edited
             } else {
@@ -179,10 +198,12 @@ pub(super) fn text_field_key_action(
             }
         }
         Key::Named(NamedKey::Space) if !shortcut => {
+            prepare_composer_edit(buffer, select_all);
             buffer.push(' ');
             TextFieldKeyAction::Edited
         }
         Key::Character(text) if !shortcut => {
+            let replaced = prepare_composer_edit(buffer, select_all);
             let mut changed = false;
             for ch in text.chars() {
                 if ch == '\r' {
@@ -195,7 +216,7 @@ pub(super) fn text_field_key_action(
                     changed = true;
                 }
             }
-            if changed {
+            if changed || replaced {
                 TextFieldKeyAction::Edited
             } else {
                 TextFieldKeyAction::Ignored
@@ -365,7 +386,7 @@ mod tests {
     use super::{
         ComposerKeyAction, TerminalShortcutAction, composer_logical_key_action,
         logical_key_to_bytes, normalize_ime_commit, physical_code_to_byte, prepare_composer_edit,
-        primary_shortcut, terminal_shortcut_action,
+        primary_shortcut, terminal_shortcut_action, text_field_logical_key_action,
     };
     use winit::keyboard::{Key, KeyCode, ModifiersState, NamedKey};
 
@@ -417,6 +438,48 @@ mod tests {
             ComposerKeyAction::Edited
         ));
         assert_eq!(buffer, "A!");
+    }
+
+    #[test]
+    fn text_field_select_all_replaces_the_next_edit_once() {
+        let mut buffer = String::from("existing");
+        let mut select_all = false;
+
+        assert!(matches!(
+            text_field_logical_key_action(
+                &Key::Character("a".into()),
+                ModifiersState::SUPER,
+                &mut buffer,
+                false,
+                &mut select_all,
+            ),
+            super::TextFieldKeyAction::SelectAll
+        ));
+        assert!(select_all);
+        assert!(matches!(
+            text_field_logical_key_action(
+                &Key::Character("N".into()),
+                ModifiersState::SHIFT,
+                &mut buffer,
+                false,
+                &mut select_all,
+            ),
+            super::TextFieldKeyAction::Edited
+        ));
+        assert_eq!(buffer, "N");
+        assert!(!select_all);
+
+        assert!(matches!(
+            text_field_logical_key_action(
+                &Key::Named(NamedKey::Space),
+                ModifiersState::empty(),
+                &mut buffer,
+                false,
+                &mut select_all,
+            ),
+            super::TextFieldKeyAction::Edited
+        ));
+        assert_eq!(buffer, "N ");
     }
 
     #[test]

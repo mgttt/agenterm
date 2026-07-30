@@ -343,6 +343,7 @@ struct UnixApp {
     focus_surface: UnixFocusSurface,
     composer_buffer: String,
     composer_select_all: bool,
+    text_field_select_all: bool,
     config: AppConfig,
     modifiers: ModifiersState,
     settings_open: bool,
@@ -408,6 +409,7 @@ impl UnixApp {
             focus_surface: UnixFocusSurface::Terminal,
             composer_buffer: String::new(),
             composer_select_all: false,
+            text_field_select_all: false,
             settings_open: false,
             settings_theme_draft: config.color_theme,
             settings_size_draft: config.terminal_font_size,
@@ -603,6 +605,7 @@ impl UnixApp {
                     self.new_terminal_dialog.https_proxy_draft_mut()
                 }
             };
+            input::prepare_composer_edit(draft, &mut self.text_field_select_all);
             draft.push_str(&text);
             self.request_redraw();
             return;
@@ -610,9 +613,13 @@ impl UnixApp {
         if self.note_edit_target.is_some() {
             let multiline = self.tab_editor_focus == TabEditorFocus::Note;
             let text = input::normalize_ime_commit(raw, multiline);
-            if let Some(draft) = self.tab_editor_draft_mut() {
-                draft.push_str(&text);
-            }
+            let select_all = &mut self.text_field_select_all;
+            let draft = match self.tab_editor_focus {
+                TabEditorFocus::Name => &mut self.tab_name_draft,
+                TabEditorFocus::Note => &mut self.tab_note_draft,
+            };
+            input::prepare_composer_edit(draft, select_all);
+            draft.push_str(&text);
             self.request_redraw();
             return;
         }
@@ -763,11 +770,13 @@ impl UnixApp {
         self.reset_ime_context();
         ui_action_open(&mut self.new_terminal_dialog);
         self.new_terminal_focus = NewTerminalFocusView::InitialCommand;
+        self.text_field_select_all = false;
         self.request_redraw();
     }
 
     fn finish_new_terminal_dialog(&mut self, create: bool) {
         self.reset_ime_context();
+        self.text_field_select_all = false;
         let result = self.new_terminal_dialog.finish(create);
         match result {
             Ok(Some(params)) => {
@@ -820,6 +829,7 @@ impl UnixApp {
             NewTerminalHit::Cancel => self.finish_new_terminal_dialog(false),
         }
         if self.new_terminal_focus != previous_focus {
+            self.text_field_select_all = false;
             self.reset_ime_context();
         }
         self.request_redraw();
@@ -831,16 +841,23 @@ impl UnixApp {
         }
         let multiline = self.new_terminal_focus == NewTerminalFocusView::InitialCommand;
         let modifiers = self.modifiers;
-        let draft = match self.new_terminal_focus {
-            NewTerminalFocusView::InitialCommand => {
-                self.new_terminal_dialog.initial_command_draft_mut()
-            }
-            NewTerminalFocusView::HttpProxy => self.new_terminal_dialog.http_proxy_draft_mut(),
-            NewTerminalFocusView::HttpsProxy => self.new_terminal_dialog.https_proxy_draft_mut(),
+        let action = {
+            let select_all = &mut self.text_field_select_all;
+            let draft = match self.new_terminal_focus {
+                NewTerminalFocusView::InitialCommand => {
+                    self.new_terminal_dialog.initial_command_draft_mut()
+                }
+                NewTerminalFocusView::HttpProxy => self.new_terminal_dialog.http_proxy_draft_mut(),
+                NewTerminalFocusView::HttpsProxy => {
+                    self.new_terminal_dialog.https_proxy_draft_mut()
+                }
+            };
+            input::text_field_key_action(event, modifiers, draft, multiline, select_all)
         };
-        match input::text_field_key_action(event, modifiers, draft, multiline) {
+        match action {
             input::TextFieldKeyAction::Edited => self.request_redraw(),
             input::TextFieldKeyAction::NextField => {
+                self.text_field_select_all = false;
                 self.reset_ime_context();
                 self.new_terminal_focus = match self.new_terminal_focus {
                     NewTerminalFocusView::InitialCommand => NewTerminalFocusView::HttpProxy,
@@ -851,20 +868,54 @@ impl UnixApp {
             }
             input::TextFieldKeyAction::Submit => self.finish_new_terminal_dialog(true),
             input::TextFieldKeyAction::Escape => self.finish_new_terminal_dialog(false),
+            input::TextFieldKeyAction::SelectAll => self.request_redraw(),
             input::TextFieldKeyAction::Copy => {
+                let draft = match self.new_terminal_focus {
+                    NewTerminalFocusView::InitialCommand => {
+                        self.new_terminal_dialog.initial_command_draft()
+                    }
+                    NewTerminalFocusView::HttpProxy => self.new_terminal_dialog.http_proxy_draft(),
+                    NewTerminalFocusView::HttpsProxy => {
+                        self.new_terminal_dialog.https_proxy_draft()
+                    }
+                };
                 if clipboard::set_clipboard_text(draft).is_ok() {
                     self.set_status_message("Copied new-terminal draft");
                 }
             }
             input::TextFieldKeyAction::Cut => {
+                let draft = match self.new_terminal_focus {
+                    NewTerminalFocusView::InitialCommand => {
+                        self.new_terminal_dialog.initial_command_draft_mut()
+                    }
+                    NewTerminalFocusView::HttpProxy => {
+                        self.new_terminal_dialog.http_proxy_draft_mut()
+                    }
+                    NewTerminalFocusView::HttpsProxy => {
+                        self.new_terminal_dialog.https_proxy_draft_mut()
+                    }
+                };
                 if clipboard::set_clipboard_text(draft).is_ok() {
                     draft.clear();
+                    self.text_field_select_all = false;
                     self.set_status_message("Cut new-terminal draft");
                     self.request_redraw();
                 }
             }
             input::TextFieldKeyAction::Paste => {
                 if let Ok(raw) = clipboard::get_clipboard_text() {
+                    let draft = match self.new_terminal_focus {
+                        NewTerminalFocusView::InitialCommand => {
+                            self.new_terminal_dialog.initial_command_draft_mut()
+                        }
+                        NewTerminalFocusView::HttpProxy => {
+                            self.new_terminal_dialog.http_proxy_draft_mut()
+                        }
+                        NewTerminalFocusView::HttpsProxy => {
+                            self.new_terminal_dialog.https_proxy_draft_mut()
+                        }
+                    };
+                    input::prepare_composer_edit(draft, &mut self.text_field_select_all);
                     draft.push_str(&raw.replace("\r\n", "\n"));
                     self.request_redraw();
                 }
@@ -1237,6 +1288,7 @@ impl UnixApp {
         self.tab_name_draft = tab.title.clone();
         self.tab_note_draft = tab.note.clone();
         self.tab_editor_focus = TabEditorFocus::Name;
+        self.text_field_select_all = false;
         self.active = Some(tab_id);
         self.ensure_editing_tab_visible();
         self.set_focus_surface_internal(UnixFocusSurface::Sidebar, "tab-editor");
@@ -1315,6 +1367,7 @@ impl UnixApp {
         self.tab_name_draft.clear();
         self.tab_note_draft.clear();
         self.tab_editor_focus = TabEditorFocus::Name;
+        self.text_field_select_all = false;
         self.set_focus_surface_internal(UnixFocusSurface::Sidebar, "tab-editor-close");
         self.request_redraw();
         Ok(())
@@ -1334,12 +1387,20 @@ impl UnixApp {
         }
         let multiline = self.tab_editor_focus == TabEditorFocus::Note;
         let modifiers = self.modifiers;
-        let draft = self.tab_editor_draft_mut().expect("tab editor draft");
-        match input::text_field_key_action(event, modifiers, draft, multiline) {
+        let action = {
+            let select_all = &mut self.text_field_select_all;
+            let draft = match self.tab_editor_focus {
+                TabEditorFocus::Name => &mut self.tab_name_draft,
+                TabEditorFocus::Note => &mut self.tab_note_draft,
+            };
+            input::text_field_key_action(event, modifiers, draft, multiline, select_all)
+        };
+        match action {
             input::TextFieldKeyAction::Edited => {
                 self.request_redraw();
             }
             input::TextFieldKeyAction::NextField => {
+                self.text_field_select_all = false;
                 self.reset_ime_context();
                 self.tab_editor_focus = TabEditorFocus::Note;
                 self.request_redraw();
@@ -1349,6 +1410,9 @@ impl UnixApp {
             }
             input::TextFieldKeyAction::Escape => {
                 let _ = self.complete_tab_editor(false);
+            }
+            input::TextFieldKeyAction::SelectAll => {
+                self.request_redraw();
             }
             input::TextFieldKeyAction::Copy => {
                 if let Some(text) = self.tab_editor_draft_mut()
@@ -1362,6 +1426,7 @@ impl UnixApp {
                     && clipboard::set_clipboard_text(text).is_ok()
                 {
                     text.clear();
+                    self.text_field_select_all = false;
                     self.set_status_message("Cut tab editor draft");
                     self.request_redraw();
                 }
@@ -1369,7 +1434,13 @@ impl UnixApp {
             input::TextFieldKeyAction::Paste => {
                 if let Ok(raw) = clipboard::get_clipboard_text() {
                     let normalized = raw.replace("\r\n", "\n");
-                    if let Some(text) = self.tab_editor_draft_mut() {
+                    let select_all = &mut self.text_field_select_all;
+                    let text = match self.tab_editor_focus {
+                        TabEditorFocus::Name => &mut self.tab_name_draft,
+                        TabEditorFocus::Note => &mut self.tab_note_draft,
+                    };
+                    if self.note_edit_target.is_some() {
+                        input::prepare_composer_edit(text, select_all);
                         text.push_str(&normalized);
                         self.set_status_message(format!(
                             "Pasted {} characters into tab editor",
@@ -2059,6 +2130,7 @@ impl UnixApp {
         }
         if let Some(focus) = self.sidebar_tab_editor_hit(click_x, click_y) {
             if self.tab_editor_focus != focus {
+                self.text_field_select_all = false;
                 self.reset_ime_context();
             }
             self.tab_editor_focus = focus;
