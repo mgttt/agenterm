@@ -10,7 +10,7 @@
 | 键 | 值 |
 |----|-----|
 | 产品版本 | **0.1.10**（`Cargo.toml` / `agenterm.tasks.json`） |
-| `origin/main` | `25a45d2`（Linux slice-2 font；含 IME+clipboard+DPI） |
+| `origin/main` | `bf17150`（Linux clipboard harden；含 font/DPI/IME） |
 | tracked `*.ps1` | **0**；migration-audit drift=false |
 | 云环境 | Personal `mgttt/agenterm`；**x86_64 Linux + DISPLAY=:1 VNC desktop**；可原生跑 Linux GUI |
 | 非环境事实 | QEMU/Wine 仅交叉或 Windows-on-Linux 烟测，**不是**本机桌面 |
@@ -20,7 +20,7 @@
 ## 主控指令（未消化则分身不得另起炉灶）
 
 ### → 分身1（Linux agent / platform）
-1. slice-2/DPI-scale 已验收；**已授权第三刀 font**（rev1；screenshot/activation 暂缓）。
+1. slice-2/font 已验收；**先不要做 screenshot/activation**；优先加固 `clipboard.rs`。
 2. 仅 `cfg(linux)` + `src/platform/linux/**`；勿改公共契约；旧#1#2#3 不动。
 3. 失败须 typed `CapabilityStatus`；禁止 QEMU 冒充桌面。
 
@@ -84,15 +84,15 @@
 - 阻塞/请示: 无
 - 下一步: 等分身1写回测试进度；必要时修 platform fail-closed / catalog 语义
 
-### 分身1 · 2026-07-30 14:35 UTC
-- 状态: RUNNING（slice-2/font 完成，等主控验收）
-- 分支: `main` @ `25a45d2`
-- main基准: `25a45d2`
-- 本轮目标: slice-2 font 经 `platform::linux`（contract rev 1）
-- 已完成: 新增 `linux/font.rs`（发现+度量+typed Failed）；`unix_app` Linux cfg 候选表接线；clippy lib PASS；`platform::` **50 passed**；GUI `get-settings.resolved_font_family=DejaVu Sans Mono` 与 Settings「Renderer: DejaVu Sans Mono」一致
-- 证据: `/opt/cursor/artifacts/linux-slice2-font{,-settings}{,-ui-snapshot.json,-get-settings.json}.{png,json}`；commit `25a45d2`
-- 阻塞/请示: **无契约扩展**（`CapabilityKind::Font` 已有）；旧#1#2#3 未动；screenshot/activation 未开工
-- 下一步: 等主控验收；等派 screenshot/activation
+### 分身1 · 2026-07-30 14:40 UTC
+- 状态: RUNNING（clipboard harden 完成，等主控验收）
+- 分支: `main` @ `bf17150`
+- main基准: `bf17150`
+- 本轮目标: 加固 `platform::linux::clipboard`（读写分判/超时/边读限长）
+- 已完成: wl-copy/wl-paste 分判；X11/Wayland 匹配；1.5s timeout；live byte budget；typed timeout/too_large/unavailable；clippy PASS；clipboard 17 + platform **59** PASS；GUI smoke + round-trip/timeout/limit 证据
+- 证据: `/opt/cursor/artifacts/linux-clipboard-harden*`；commit `bf17150`
+- 阻塞/请示: 无契约扩展；旧#1#2#3 未动；**未开工** screenshot/activation
+- 下一步: 等主控验收
 
 ### 分身2 · 2026-07-30 13:12 UTC
 - 状态: IDLE
@@ -123,11 +123,12 @@
 5. （分身1）`build-linux-clients.sh` 传裸 `dev` → 请示#2。
 6. ~~原生 Linux GUI 文字水平镜像~~ — **2026-07-30 13:20 复测已正常**。
 7. （分身1）`lint.sh` Clippy unused imports `font.rs:388` → 请示#3。
-8. ~~（平台迁移）`src/platform/mod.rs` 未落盘~~ — **revision 1 已冻结**；Linux slice-1+slice-2(ime/clipboard/dpi/font) @`25a45d2`；macOS 见请示#6/席位。
+8. ~~（平台迁移）`src/platform/mod.rs` 未落盘~~ — **revision 1 已冻结**；Linux slice-1+slice-2(ime/clipboard-harden/dpi/font) @`bf17150`；macOS 见请示#6/席位。
 
 ## 交接日志
 
 ```text
+2026-07-30 14:40 UTC | 分身1 | clipboard harden；platform:: 59 PASS；timeout/limit/round-trip 证据 | bf17150
 2026-07-30 14:35 UTC | 分身1 | slice-2 font；platform:: 50 PASS；DejaVu Renderer 证据 | 25a45d2
 2026-07-30 14:26 UTC | 分身1 | slice-2 DPI/scale；platform:: 45 PASS；resize GUI证据 | 57958c1
 2026-07-30 14:10 UTC | 分身1 | slice-2 IME+clipboard；platform:: 36 PASS；clipboard round-trip；GUI证据 | 66c54a5/b5d54ef

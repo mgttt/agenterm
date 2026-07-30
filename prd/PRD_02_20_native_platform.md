@@ -115,6 +115,9 @@ tests or ownership.
   - [x] contract-revision-1 toolbar and keyboard hot paths, plus IME and
     clipboard slice-2 bridges, consume `platform::linux` with explicit
     headless/backend failures
+  - [x] Linux clipboard helpers: read/write probed separately, display-matched
+    X11/Wayland selection, wall-clock timeouts, live stdout byte budget, typed
+    `clipboard_timeout` / `clipboard_too_large` / `clipboard_unavailable`
   - [~] winit/softbuffer windowing, X11/Wayland input, system-font fallback,
     clipboard, cursor, scaling, and POSIX PTY interaction are in active delivery
   - [~] expose the remaining Linux behavior through the shared platform
@@ -160,8 +163,9 @@ tests or ownership.
    `platform::windows`)
 3. [~] move IME, clipboard, DPI, font, screenshot, activation, and remaining
    window integration incrementally behind the same boundary
-   (Linux IME+clipboard @ `66c54a5`/`b5d54ef`; DPI/scale @ `57958c1`;
-   font discovery/metrics @ `25a45d2`; screenshot/activation still deferred)
+   (Linux IME+clipboard @ `66c54a5`/`b5d54ef`; clipboard helper harden @
+   `bf17150`; DPI/scale @ `57958c1`; font discovery/metrics @ `25a45d2`;
+   screenshot/activation still deferred)
 4. [ ] remove superseded platform-specific paths only after native black-box
    and screenshot evidence passes on that platform
 
