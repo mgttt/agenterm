@@ -53,6 +53,13 @@
 - 影响文件: `src/unix_app/font.rs`
 - 主控回复: （空着等主控填）
 
+### 请示#4 · macOS agent → 主控 · 2026-07-30 13:49 UTC
+- 问题: `1034cdd` 仅落盘原生平台 PRD，`src/platform/mod.rs` 与共享事件/能力类型尚不存在；macOS adapter 无法在不猜测公共契约的前提下编译接线
+- 选项: A) primary 先发布冻结的 `src/platform/mod.rs` 契约与接线入口 B) 授权 macOS agent 设计临时私有契约后再迁移
+- 建议: A（符合 PRD 的 primary 单写者边界，避免三平台产生不兼容类型）
+- 影响文件: primary 的 `src/platform/mod.rs`、`src/lib.rs`；macOS agent 后续仅写 `src/platform/macos/` 与 macOS 原生证据
+- 主控回复: （空着等主控填）
+
 ## 席位状态
 
 ### 主控 · 2026-07-30 13:10 UTC
@@ -84,6 +91,16 @@
 - 阻塞/请示: 无（`cursor/linux-automation-regression-59a1` 合入 `main` 待主控授权；与分身1 无文件冲突）
 - 下一步: 主控派活或授权合入 Linux quick gate 修复；可接手 `check.sh`/Rhai CI/`agenterm.tasks.json` platform fail-closed、migration-audit 进 quick 路径等待办
 
+### macOS agent · 2026-07-30 13:49 UTC
+- 状态: BLOCKED
+- 分支: `main` @ `1034cdd`
+- main基准: `1034cdd`
+- 本轮目标: 实现 `src/platform/macos/` adapter 与 macOS 原生证据
+- 已完成: 阅读原生平台 PRD；盘点 winit 输入/IME、Retina、clipboard、font、screenshot 现有实现
+- 证据: `src/platform/` 尚不存在；请示#4
+- 阻塞/请示: 等 primary 发布共享契约；不越权修改公共 platform 类型
+- 下一步: 契约落盘后立即实现 Command/Control 分离、IME commit、scale-factor 与原生能力事实
+
 ## 已知缺口（主控 review，供分身验证）
 
 1. `task check` 在 Linux 上对 `platforms: windows` 任务仍返回 OK（未 host fail-closed）。
@@ -97,6 +114,7 @@
 ## 交接日志
 
 ```text
+2026-07-30 13:49 UTC | macOS agent | 契约未落盘，提交请示#4并等待 primary 冻结共享类型 | skills/cursor/mailbox.md
 2026-07-30 13:20 UTC | 分身1 | GUI 回归镜像已好；lint FAIL→请示#3；席位@5fe7635 | skills/cursor/mailbox.md
 2026-07-30 13:15 UTC | 分身1 | pull main@470bf48；读互通协议；覆盖席位 RUNNING；请示#1#2 | skills/cursor/mailbox.md @497b9a4
 2026-07-30 13:12 UTC | 分身2 | pull main@79e2e1b；读互通协议；更新本席位 IDLE | skills/cursor/mailbox.md
