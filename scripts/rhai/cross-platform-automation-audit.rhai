@@ -135,8 +135,23 @@ require(
     )
         && unix_bootstrap.contains(
             `task run "$AGENTERM_BOOTSTRAP_TASK"`
-        ),
+    ),
     "cross_platform_bootstrap_pair"
+);
+require(
+    unix_bootstrap.contains(`chmod +x "$WORKER"`)
+        && !unix_bootstrap.contains(`chmod +x -- "$WORKER"`),
+    "cross_platform_macos_bsd_chmod"
+);
+let check_source = std::fs::read_to_string(
+    std::path::join(repo, "scripts/rhai/check.rhai").display
+);
+require(
+    check_source.contains(`"native public catalog clients"`)
+        && check_source.contains(`"client-build"`)
+        && check_source.contains(`"agenterm-cli"`)
+        && check_source.contains(`"agenterm-mux"`),
+    "cross_platform_unix_prd_catalog_bootstrap"
 );
 let manifest = rhai::json::parse_file(
     std::path::join(repo, "agenterm.tasks.json").display

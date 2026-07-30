@@ -474,6 +474,16 @@ if dry_run {
 
 if quick {
     let quick_started = std::time::SystemTime::now().unix_millis;
+    let prd_extra = [repo];
+    if unix_bootstrap {
+        let native_bin = std::path::join(repo, "target/debug").display;
+        prd_extra.push(
+            std::path::join(native_bin, "agenterm-cli").display
+        );
+        prd_extra.push(
+            std::path::join(native_bin, "agenterm-mux").display
+        );
+    }
     sequence = run_step(
         "repository static lint",
         [task(
@@ -499,6 +509,21 @@ if quick {
         scratch,
         sequence
     );
+    if unix_bootstrap {
+        sequence = run_step(
+            "native public catalog clients",
+            [task(
+                bootstrap_worker,
+                manifest,
+                "client-build",
+                600000,
+                []
+            )],
+            repo,
+            scratch,
+            sequence
+        );
+    }
     sequence = run_step(
         "PRD capability alignment",
         [task(
@@ -506,7 +531,7 @@ if quick {
             manifest,
             "prd-alignment",
             10000,
-            [repo]
+            prd_extra
         )],
         repo,
         scratch,

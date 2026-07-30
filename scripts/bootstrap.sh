@@ -19,7 +19,9 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 mkdir -p -- "$BOOTSTRAP_DIR"
 cp -- "$SOURCE" "$WORKER"
-chmod +x -- "$WORKER"
+# macOS uses BSD chmod, whose option parser does not accept a standalone `--`.
+# WORKER is rooted under target/ and cannot begin with an option.
+chmod +x "$WORKER"
 AGENTERM_BOOTSTRAP_WORKER="$WORKER"
 AGENTERM_BOOTSTRAP_PLATFORM=unix
 case "$(uname -s):$(uname -m)" in
