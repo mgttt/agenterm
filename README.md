@@ -48,6 +48,47 @@ native automation client, and a deliberately bounded tmux/RMUX frontend.
 - Whole-window and per-pane PNG screenshots support visual feedback testing.
 - PTY process management uses `rmux-pty`.
 
+## Install
+
+On macOS or Linux (`aarch64` and `x86_64`), install the matching package from
+the latest GitHub Release:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mgttt/agenterm/main/install.sh | bash
+```
+
+The installer does not require `sudo`. It verifies the release SHA-256 before
+extraction, checks Apple Developer ID signatures for stable macOS packages,
+keeps versioned payloads under `~/.local/share/agenterm`, links commands into
+`~/.local/bin`, and starts the GUI. On macOS it also creates
+`~/Applications/AgenTerm.app`.
+
+Pin a release or install without launching the GUI:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mgttt/agenterm/main/install.sh \
+  | AGENTERM_VERSION=v0.1.10 AGENTERM_NO_LAUNCH=1 bash
+```
+
+If a release only provides the explicitly labeled macOS unsigned preview, it
+is never selected silently. Read the
+[unsigned-preview security notes](docs/macos-unsigned-preview.md), then opt in:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mgttt/agenterm/main/install.sh \
+  | AGENTERM_ALLOW_UNSIGNED_PREVIEW=1 bash
+```
+
+The installer exits without changing the active installation when the selected
+release has no package for the current platform. Windows users can download the
+signed package from [GitHub Releases](https://github.com/mgttt/agenterm/releases).
+List all installer overrides with:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mgttt/agenterm/main/install.sh \
+  | bash -s -- --help
+```
+
 ## Build and run
 
 ```powershell
