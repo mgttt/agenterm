@@ -10,7 +10,7 @@
 | 键 | 值 |
 |----|-----|
 | 产品版本 | **0.1.10**（`Cargo.toml` / `agenterm.tasks.json`） |
-| `origin/main` | `78f5333`（Linux unix_app hot-path ↔ platform::linux rev1；含 PRD_02_20） |
+| `origin/main` | `b5d54ef`（Linux slice-2 IME+clipboard @`66c54a5`+round-trip；含 PRD_02_20） |
 | tracked `*.ps1` | **0**；migration-audit drift=false |
 | 云环境 | Personal `mgttt/agenterm`；**x86_64 Linux + DISPLAY=:1 VNC desktop**；可原生跑 Linux GUI |
 | 非环境事实 | QEMU/Wine 仅交叉或 Windows-on-Linux 烟测，**不是**本机桌面 |
@@ -20,9 +20,9 @@
 ## 主控指令（未消化则分身不得另起炉灶）
 
 ### → 分身1（Linux agent / platform）
-1. 请示#5 已关闭；**已授权**把 Linux `unix_app` 热路径接到 `platform::linux`（完成 slice-1，先不做 slice-2）。
-2. 仅 `cfg(linux)`；勿改 `src/platform/mod.rs`；旧请示#1#2#3 仍不动。
-3. 禁止 QEMU 冒充本机桌面。
+1. slice-1 已验收；**已授权 slice-2 第一刀：IME + clipboard**（rev1，不升版除非请示）。
+2. 仅 `cfg(linux)` + `src/platform/linux/**`；勿改 `mod.rs` 语义；旧#1#2#3 不动。
+3. 失败须 typed `CapabilityStatus`；禁止 QEMU 冒充桌面。
 
 ### → 分身2（Linux 自动化 / Rhai / CI）
 1. 待命跟随 `main` 上 Win/跨平台自动化合入；与分身1分工：你偏 CLI/Rhai/CI，分身1 偏 Desktop GUI。
@@ -84,15 +84,15 @@
 - 阻塞/请示: 无
 - 下一步: 等分身1写回测试进度；必要时修 platform fail-closed / catalog 语义
 
-### 分身1 · 2026-07-30 14:05 UTC
-- 状态: RUNNING（slice-1 hot-path 完成）
-- 分支: `main` @ `78f5333`
-- main基准: `78f5333`
-- 本轮目标: Linux `unix_app` toolbar/key·IME 热路径 → `platform::linux`（contract rev 1）
-- 已完成: toolbar hit→action id→product handlers；composer/text_field/PTY/IME 经 `classify_key_press`；clippy lib `-D warnings` PASS；`platform::` **19 passed**；GUI toggle-tabs/open-settings snapshot+PNG
-- 证据: `/opt/cursor/artifacts/linux-hotpath-rev1{,-ui-snapshot.json,-tabs-hidden,-settings}.{png,json}`；commit `78f5333`
-- 阻塞/请示: 无新请示；旧#1#2#3 未决（未动）
-- 下一步: 等主控验收 slice-1 / 派 slice-2；不抢 macOS/Win
+### 分身1 · 2026-07-30 14:10 UTC
+- 状态: RUNNING（slice-2/ime-clipboard 第一刀完成）
+- 分支: `main` @ `b5d54ef`
+- main基准: `b5d54ef`
+- 本轮目标: slice-2 IME+clipboard 经 `platform::linux`（contract rev 1）
+- 已完成: 新增 `linux/{ime,clipboard}.rs`；unix_app `handle_ime`+clipboard cfg 接线；typed CapabilityStatus；clippy PASS；`platform::` **36 passed**（含 desktop clipboard round-trip）；GUI snapshot/PNG
+- 证据: `/opt/cursor/artifacts/linux-slice2-ime-clipboard{,-ui-snapshot.json}.{png,json}`；commits `66c54a5` `b5d54ef`
+- 阻塞/请示: **无契约扩展请示**（用现有 CapabilityKind/Status）；旧#1#2#3 未动
+- 下一步: 等主控验收；DPI/font/screenshot 另提交
 
 ### 分身2 · 2026-07-30 13:12 UTC
 - 状态: IDLE
