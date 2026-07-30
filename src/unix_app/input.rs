@@ -49,10 +49,18 @@ pub(super) fn composer_key_action(
         return ComposerKeyAction::Ignored;
     }
 
-    let shortcut = primary_shortcut(modifiers);
-    let shift = modifiers.shift_key();
+    composer_logical_key_action(&event.logical_key, modifiers, buffer, select_all)
+}
 
-    match &event.logical_key {
+fn composer_logical_key_action(
+    logical_key: &Key,
+    modifiers: ModifiersState,
+    buffer: &mut String,
+    select_all: &mut bool,
+) -> ComposerKeyAction {
+    let shortcut = primary_shortcut(modifiers);
+
+    match logical_key {
         Key::Named(NamedKey::Enter) if shortcut => ComposerKeyAction::Submit,
         Key::Named(NamedKey::Escape) => ComposerKeyAction::Escape,
         Key::Character(text) if shortcut => {
@@ -88,7 +96,7 @@ pub(super) fn composer_key_action(
             buffer.push(' ');
             ComposerKeyAction::Edited
         }
-        Key::Character(text) if !shortcut && !shift => {
+        Key::Character(text) if !shortcut => {
             let replaced = prepare_composer_edit(buffer, select_all);
             let mut changed = false;
             for ch in text.chars() {
@@ -355,8 +363,9 @@ fn physical_code_to_byte(code: winit::keyboard::KeyCode) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        TerminalShortcutAction, logical_key_to_bytes, normalize_ime_commit, physical_code_to_byte,
-        prepare_composer_edit, primary_shortcut, terminal_shortcut_action,
+        ComposerKeyAction, TerminalShortcutAction, composer_logical_key_action,
+        logical_key_to_bytes, normalize_ime_commit, physical_code_to_byte, prepare_composer_edit,
+        primary_shortcut, terminal_shortcut_action,
     };
     use winit::keyboard::{Key, KeyCode, ModifiersState, NamedKey};
 
@@ -382,6 +391,32 @@ mod tests {
             Some(vec![b' '])
         );
         assert_eq!(physical_code_to_byte(KeyCode::Space), Some(vec![b' ']));
+    }
+
+    #[test]
+    fn composer_accepts_shifted_characters() {
+        let mut buffer = String::new();
+        let mut select_all = false;
+
+        assert!(matches!(
+            composer_logical_key_action(
+                &Key::Character("A".into()),
+                ModifiersState::SHIFT,
+                &mut buffer,
+                &mut select_all,
+            ),
+            ComposerKeyAction::Edited
+        ));
+        assert!(matches!(
+            composer_logical_key_action(
+                &Key::Character("!".into()),
+                ModifiersState::SHIFT,
+                &mut buffer,
+                &mut select_all,
+            ),
+            ComposerKeyAction::Edited
+        ));
+        assert_eq!(buffer, "A!");
     }
 
     #[test]
