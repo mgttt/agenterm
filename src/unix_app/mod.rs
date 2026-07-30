@@ -299,7 +299,10 @@ fn display_available() -> bool {
 
 fn run_gui(no_activate: bool) -> anyhow::Result<()> {
     let title = format!("{APP_NAME} {}", env!("CARGO_PKG_VERSION"));
-    let event_loop = EventLoop::<UnixWake>::with_user_event().build()?;
+    let mut event_loop_builder = EventLoop::<UnixWake>::with_user_event();
+    #[cfg(target_os = "macos")]
+    crate::platform::macos::activation::configure_event_loop(&mut event_loop_builder, no_activate);
+    let event_loop = event_loop_builder.build()?;
     let proxy = event_loop.create_proxy();
     install_unix_wake(proxy);
     let context = Context::new(event_loop.owned_display_handle())
@@ -593,15 +596,19 @@ impl UnixApp {
         if self.window_close_pending || self.pending_close.is_some() || self.settings_open {
             return;
         }
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         let raw = {
             use crate::platform::KeyClassification;
-            match crate::platform::linux::input::classify_ime_commit(raw) {
+            #[cfg(target_os = "linux")]
+            let classified = crate::platform::linux::input::classify_ime_commit(raw);
+            #[cfg(target_os = "macos")]
+            let classified = crate::platform::macos::input::classify_ime_commit(raw);
+            match classified {
                 KeyClassification::TextCommit(text) => text,
                 _ => return,
             }
         };
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         let raw = raw.as_str();
         if self.new_terminal_dialog.is_open() {
             let multiline = self.new_terminal_focus == NewTerminalFocusView::InitialCommand;

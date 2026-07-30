@@ -9,6 +9,7 @@
 
 #![cfg(target_os = "macos")]
 
+pub(crate) mod activation;
 pub(crate) mod input;
 pub(crate) mod scale;
 pub(crate) mod toolbar;
