@@ -199,10 +199,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     correctly keyed CI caches; cache miss/corruption cannot alter correctness,
     and developer `target/` cleanup remains explicit
 - v0.1.10 candidate and non-publishing release rehearsal (P0)
-  - [ ] one repository-native coordinator owns one clean candidate build and
+  - [x] one repository-native coordinator owns one clean candidate build and
     its integrated qualification; a candidate SHA can have only one eligible,
     complete stress-inclusive receipt selected for packaging
-  - [ ] the receipt binds source commit, lock, toolchain/profile, artifact
+  - [x] the receipt binds source commit, lock, toolchain/profile, artifact
     manifest, deterministic SBOM, required gates, emitted evidence, executable
     hashes, and the exact staged candidate bytes
   - [~] named Rhai task `package-qualified` never invokes Cargo and only copies
@@ -214,21 +214,21 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     same receipt/hash validation and shared package module, marks the embedded
     package manifest as public rather than dry-run, and stages the versioned
     Windows ZIP and SBOM without inline PowerShell packaging logic
-  - [ ] fail-closed self-tests reject dirty or stale source, changed
+  - [x] fail-closed self-tests reject dirty or stale source, changed
     lock/manifest/SBOM/executable bytes, missing or skipped gates, a receipt
     for another candidate, and package or ZIP tampering before publication
-  - [ ] the candidate records bounded stage and cache timing plus the first
+  - [~] the candidate records bounded stage and cache timing plus the first
     actionable failure diagnostic; cache miss or corruption may affect speed
     but cannot change the required gates, evidence, or candidate bytes
-  - [ ] a non-publishing rehearsal proves the tag/version/commit/receipt
+  - [x] a non-publishing rehearsal proves the tag/version/commit/receipt
     relationship, fixed-revision minimum-permission workflow, expected asset
     inventory, and equality between rehearsed asset hashes and the local
     qualified package manifest
-  - [ ] public-ready status does not create release authority: creation or
+  - [x] public-ready status does not create release authority: creation or
     push of a release tag and creation of a public GitHub Release occur only
     after the user explicitly approves publication; the retained `v0.1.9` tag
     is immutable and the emergency successor is `v0.1.9+hotfix.1`
-- [x] artifact manifest schema 2 drives all five executable names, roles,
+- [x] artifact manifest schema 2 drives all six executable names, roles,
   PE subsystems, budgets, offline probes, staging metadata, and README checks;
   locked-artifact cleanup enumerates only exact manifest stems
 - [x] locked `cargo metadata` validates every resolved registry checksum and a

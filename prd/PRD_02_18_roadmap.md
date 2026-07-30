@@ -392,35 +392,35 @@ track remains planned, but every declared dependency must still pass.
     PowerShell/Rhai dual-run has completed its caller cutover and source removal
   - [x] implementation sequencing, budgets, risks and release evidence are
     owned by [the v0.1.9 public plan](../plan/plan-v0.1.9.md)
-- [ ] M7 / v0.1.10 Rhai Self-Hosting and Verifiable Read-Only Agent Bridge
-  - [ ] complete the evidence-gated replacement of all repository-owned
+- [x] M7 / v0.1.10 Rhai Self-Hosting and Verifiable Read-Only Agent Bridge
+  - [x] complete the evidence-gated replacement of all repository-owned
     PowerShell automation: no tracked `.ps1`, no hidden PowerShell business
     logic in bootstrap/CI, and no PowerShell process in the clean build,
     check, qualification, package, or release-rehearsal process tree
-  - [ ] use the stable Rhai task catalog and shared modules as the sole source
+  - [x] use the stable Rhai task catalog and shared modules as the sole source
     of build, quality, black-box, qualification, packaging, and approved
     release semantics; platform entry points only bootstrap and forward
     arguments/exit status
-  - [ ] ship `agenterm-mcp.exe` as an on-demand stdio sidecar pinned to one
+  - [x] ship `agenterm-mcp.exe` as an on-demand stdio sidecar pinned to one
     stable MCP protocol revision; offline discovery declares exact methods,
     resources, tools, limits, schemas, and unavailable future roles
-  - [ ] expose only metadata-safe instance, workspace, tab, and causal Fleet
+  - [x] expose only metadata-safe instance, workspace, tab, and causal Fleet
     snapshot resources sourced from the public typed control plane; pane text,
     Composer, environment values, proxy values, credentials, and clipboard
     remain absent
-  - [ ] expose one read-only bounded `agenterm_wait` tool with epoch/sequence,
+  - [x] expose one read-only bounded `agenterm_wait` tool with epoch/sequence,
     allowlisted predicate, timeout, cancellation, restart, gap, and target-close
     semantics; no create/send/close/kill or other mutation tool is advertised
-  - [ ] public JSON-RPC lifecycle, same-source resource, wait causality,
+  - [x] public JSON-RPC lifecycle, same-source resource, wait causality,
     malformed/oversized peer, crash, privacy, concurrency, restart, and orphan
     tests preserve GUI/PTY isolation, no-activate, first-window, binary-size,
     remain-on-exit, and explicit-close gates
-  - [ ] control tools, MCP client/federation, network transport, subscriptions,
+  - [x] control tools, MCP client/federation, network transport, subscriptions,
     pane-content resources, embedding the unrestricted Rhai runtime into
     autonomous agent flows, brain/flow, Agent-harness permissions, and
     autonomous scheduling remain later independently approved integration
     gates; these gates never reduce standalone `agenterm-script.exe` APIs
-  - [ ] implementation sequencing, budgets, risks and release evidence are
+  - [x] implementation sequencing, budgets, risks and release evidence are
     owned by [the v0.1.10 public plan](../plan/plan-v0.1.10.md)
 - [ ] M10 / v0.2.0 Fleet Hub
   - [ ] ship a secondary **Fleet Hub** surface opened from a new toolbar

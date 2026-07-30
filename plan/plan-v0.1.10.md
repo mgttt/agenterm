@@ -1032,12 +1032,12 @@ entry 是集成热点，只允许一个串行 owner 收口。
 
 ```text
 第一提交
-  [in progress] PowerShell responsibility/caller/evidence inventory
-    43 stable IDs and responsibility groups frozen; detailed caller and
-    input/output/side-effect contracts still need enrichment
+  [done] PowerShell responsibility/caller/evidence inventory
+    43 stable IDs and responsibility groups are frozen with caller,
+    input/output, side-effect, budget, platform, parity, and deletion evidence
   [done] stable Rhai task graph
-    repository manifest exposes all forty ready tasks plus validated
-    dependency, platform, and side-effect metadata offline
+    repository manifest exposes all forty-six ready tasks plus validated
+    dependency, platform, side-effect, and schema-v3 execution contracts
   [done] stage-0 bootstrap identity contract
   [done] no-new-ps1 migration audit gate
   [done] migrate four Windows root batch entries
@@ -1051,7 +1051,7 @@ entry 是集成热点，只允许一个串行 owner 收口。
     while Windows qualification/package/publish remain unavailable on Unix
 
 第二提交
-  [in progress] shared Rhai build/test helpers
+  [done] shared Rhai build/test helpers
   [done] first low-risk build task migration: clean-locked-artifacts
   [done] public black-box behavioral evidence
   [done] caller cutover + delete fourth .ps1
@@ -1089,14 +1089,18 @@ entry 是集成热点，只允许一个串行 owner 收口。
   [done] waiter-ceiling recovery and force-killed-client orphan evidence
 
 第七提交
-  migrate remaining build/test/qualification/package/release tasks
-  clean bootstrap parity
-  remove final .ps1 + activate zero-ps1 drift gate
+  [done] migrate remaining build/test/qualification/package/release tasks
+  [done] clean Windows/Unix bootstrap parity
+  [done] remove final .ps1 + activate zero-ps1 drift gate
 
 第八提交
   [done] public malformed/oversize recovery, wait load/cancel/orphan, forced
     sidecar-kill GUI/server/PTY isolation and same-source privacy qualification
-  artifact / SBOM / README / PRD alignment and final clean rehearsal
+  [done] artifact / SBOM / README / PRD alignment
+  [done] final clean rehearsal
+    a 2026-07-30 artifact-free clone of `2d4b435` completed 34/34
+    stress-inclusive qualification, package rehearsal, process-tree
+    observation, remote-ref immutability, and owned-clone cleanup
 ```
 
 这条切法让 AgenTerm 用自己的 Rhai 工具链完成自我构建、验证与交付，同时

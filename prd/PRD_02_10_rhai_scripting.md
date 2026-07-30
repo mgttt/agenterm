@@ -425,20 +425,20 @@ and it is not positioned as a restricted security plugin.
   - [x] `scripts/rhai/internal-version-policy.rhai` is the second migrated
     production responsibility and exercises argv-safe process execution,
     bounded capture, typed exit status, cwd, and repository file reads.
-- [~] migrate one independently testable responsibility at a time through
+- [x] migrate one independently testable responsibility at a time through
   `parallel -> parity-proven -> default-rhai -> PowerShell deleted`; obsolete
   unreachable responsibilities may instead cross a caller-audited functional
-  deletion boundary. The first thirty-two completed baseline scripts have left
-  the v0.1.10 working tree.
-- [ ] parity evidence compares the same inputs, structured outputs, exit
+  deletion boundary. All 43 frozen baseline scripts have left the v0.1.10
+  working tree.
+- [x] parity evidence compares the same inputs, structured outputs, exit
   classification, diagnostics, cancellation, cleanup, encoding, path behavior,
   and clean-machine recovery; a Rhai failure cannot hide the PowerShell
   last-known-good result.
-- [~] once one Rhai responsibility reaches parity and all normal callers switch
+- [x] once one Rhai responsibility reaches parity and all normal callers switch
   to it, or an obsolete responsibility is proven unreachable and superseded,
   delete that PowerShell implementation immediately instead of accumulating a
-  release-wide migration backlog; thirty-two of 43 baseline scripts are deleted.
-- [~] every migrated item records its old path, replacement path, switching
+  release-wide migration backlog; all 43 baseline scripts are deleted.
+- [x] every migrated item records its old path, replacement path, switching
   commit, parity evidence, and deletion state in this PRD. Git history is the
   only archive after the explicit rollback window closes.
 - [ ] build, check, qualification, package, release, credential, and GitHub
@@ -492,7 +492,7 @@ Migration ledger:
 
 ### v0.1.10 completion commitment
 
-- [ ] v0.1.10 completes the replacement of repository-owned PowerShell
+- [x] v0.1.10 completes the replacement of repository-owned PowerShell
   automation; this is a release completion gate rather than a best-effort
   migration track.
 - [x] the dated 2026-07-29 frozen baseline is 43 tracked `.ps1` files: 3 at
@@ -510,19 +510,9 @@ Migration ledger:
   duplicate paths, invalid states, and count drift; ordinary and release
   qualification invoke it as a required gate.
 - [x] the repository-root `agenterm.tasks.json` is now the offline task
-  catalog and ships forty ready tasks (`build`, `check`, `release`,
-  `artifact-verification`,
-  `bootstrap-info`, `build-identity`,
-  `harness-cleanup-selftest`, `diagnostic-bundle-selftest`,
-  `qualification-selftest`, `package-qualified`,
-  `package-release-qualified`, `lint`, `mcp-conformance`,
-  `package-qualified-selftest`, `migration-audit`, `target-report`, `internal-version-policy`,
-  `verify-docs-site`, `readme-examples`, `clean-locked-artifacts`,
-  `prepare-target-clean`, `preflight`, `preflight-benchmark`, `prd-alignment`,
-  `stage-artifact`, `stage-build`, `supply-chain`, `server-smoke`, `startup-smoke`,
-  `cli-smoke`, `script-smoke`, `fleet-smoke`, `theme-smoke`, `working-context-smoke`,
-  `workbench-smoke`, `wake-smoke`, `remote-ui-smoke`, `remote-ui-upgrade-smoke`,
-  `validate-artifact-manifest`, and `write-build-metadata`). Each task now
+  catalog and ships forty-six ready tasks. The public task catalog is the
+  authoritative live inventory rather than a duplicated PRD command list.
+  Each task now
   exposes validated same-manifest dependencies, a closed Windows/Linux/macOS
   platform set, and a closed side-effect classification in both human and JSON
   offline listings. Unknown, self, duplicate, or cyclic dependencies degrade
@@ -530,11 +520,11 @@ Migration ledger:
   two-input Script contract verifier is
   intentionally not advertised as ready until catalog fixture production is
   part of its task. Build, lint, test, qualification, package, rehearsal,
-  release and evidence metadata remain incomplete.
+  release, and evidence metadata are declared by schema-v3 contracts.
 - [x] `git ls-files '*.ps1'` returns no files. Tests,
   helpers, and archived implementations are not exceptions; Git history is the
   permanent archive after each parity and rollback boundary closes.
-- [ ] `agenterm.tasks.json` and shared Rhai modules own build, lint, test,
+- [x] `agenterm.tasks.json` and shared Rhai modules own build, lint, test,
   qualification, packaging, release rehearsal, and approved release semantics.
 - [x] batch files, Unix shell entry points, and CI YAML may bootstrap a pinned
   Rust toolchain and forward arguments/exit status to the same Rhai task, but
@@ -558,29 +548,33 @@ Migration ledger:
   Linux/macOS. Matching names alone are insufficient: the cross-platform audit
   and CI must execute the Unix entry through the native `agenterm-script` task
   host and verify argument, exit-status, side-effect, and evidence parity.
-- [ ] the migration proceeds from low-side-effect rules and reports through
+- [x] the migration proceeds from low-side-effect rules and reports through
   build/static quality, public black-box tests, and finally qualification and
   delivery. Each responsibility must prove normalized parity or stronger public
   evidence before callers switch and its `.ps1` leaves the tree.
-- [ ] Script Runtime gaps are filled with stable typed APIs or shared Rhai
+- [x] Script Runtime gaps are filled with stable typed APIs or shared Rhai
   modules. Rhai scripts must never invoke PowerShell as an escape hatch.
-- [~] the zero-`.ps1` drift gate prevents the old source layer from returning;
-  clean-checkout qualification and rehearsal process-tree evidence is being
-  finalized.
+- [x] the zero-`.ps1` drift gate prevents the old source layer from returning;
+  clean-checkout qualification and rehearsal process-tree evidence is
+  complete.
   The same gate also freezes four Windows aliases, four Unix aliases, both
   generic bootstraps, and zero batch/shell business-rule drift.
-- [ ] “PowerShell replacement” applies to repository-owned automation and its
+- [x] “PowerShell replacement” applies to repository-owned automation and its
   delivery process, not to users launching PowerShell as a terminal shell or
   to terminal-compatibility coverage. Such compatibility tests must be driven
   by the Rhai harness and cannot carry repository business rules in
   PowerShell.
-- [ ] completion is measured only after parity evidence, every caller cutover,
+- [x] completion is measured only after parity evidence, every caller cutover,
   source `.ps1` deletion, and drift-gate coverage. Static zero-file evidence is
   paired with clean-checkout process-tree evidence proving that repository
   automation under build, check, qualification, packaging, and release
   rehearsal does not spawn `powershell.exe` or `pwsh.exe`. An explicitly
   declared PowerShell terminal payload inside the remote-UI compatibility
   journey is recorded separately and carries no repository automation logic.
+  A 2026-07-30 artifact-free clone of commit `2d4b435` completed all 34
+  stress-inclusive gates, produced a qualified rehearsal package, observed no
+  PowerShell automation or undeclared terminal payload, left remote refs
+  unchanged, and removed its owned process tree and clone.
 
 ## Public black-box acceptance
 
