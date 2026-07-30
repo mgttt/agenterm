@@ -101,19 +101,23 @@ impl TerminalCellText {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct TerminalCell {
     text: TerminalCellText,
-    pub(super) fg: u8,
-    pub(super) bg: u8,
+    fg: TerminalColor,
+    bg: TerminalColor,
 }
 
-const DEFAULT_TERMINAL_FOREGROUND: u8 = 16;
-const DEFAULT_TERMINAL_BACKGROUND: u8 = 17;
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TerminalColor {
+    Default,
+    Indexed(u8),
+    TrueColor(Rgb),
+}
 
 impl TerminalCell {
     pub(super) const fn blank() -> Self {
         Self {
             text: TerminalCellText::blank(),
-            fg: DEFAULT_TERMINAL_FOREGROUND,
-            bg: DEFAULT_TERMINAL_BACKGROUND,
+            fg: TerminalColor::Default,
+            bg: TerminalColor::Default,
         }
     }
 
@@ -182,8 +186,8 @@ impl TerminalGrid {
                         if cell.is_wide_continuation() {
                             return TerminalCell::blank();
                         }
-                        let mut fg = color_index(cell.fgcolor(), false);
-                        let mut bg = color_index(cell.bgcolor(), true);
+                        let mut fg = terminal_cell_color(cell.fgcolor());
+                        let mut bg = terminal_cell_color(cell.bgcolor());
                         if cell.inverse() {
                             std::mem::swap(&mut fg, &mut bg);
                         }
@@ -224,12 +228,11 @@ impl TerminalGrid {
     }
 }
 
-fn color_index(color: vt100::Color, background: bool) -> u8 {
+fn terminal_cell_color(color: vt100::Color) -> TerminalColor {
     match color {
-        vt100::Color::Default if background => DEFAULT_TERMINAL_BACKGROUND,
-        vt100::Color::Default => DEFAULT_TERMINAL_FOREGROUND,
-        vt100::Color::Idx(index) => index,
-        vt100::Color::Rgb(_, _, _) => 7,
+        vt100::Color::Default => TerminalColor::Default,
+        vt100::Color::Idx(index) => TerminalColor::Indexed(index),
+        vt100::Color::Rgb(red, green, blue) => TerminalColor::TrueColor(Rgb::new(red, green, blue)),
     }
 }
 
@@ -1570,12 +1573,12 @@ fn render_terminal_grid(
             let fg = if selected {
                 selection_fg
             } else {
-                terminal_color(palette, cell.fg)
+                terminal_color(palette, cell.fg, false)
             };
             let bg = if selected {
                 selection_bg
             } else {
-                terminal_color(palette, cell.bg)
+                terminal_color(palette, cell.bg, true)
             };
             draw_cell(
                 buffer,
@@ -2356,11 +2359,25 @@ fn ansi_color(palette: &ThemePalette, index: u8) -> Rgb {
     palette.ansi[(index & 0x0F) as usize]
 }
 
-fn terminal_color(palette: &ThemePalette, index: u8) -> Rgb {
-    match index {
-        DEFAULT_TERMINAL_FOREGROUND => palette.terminal_foreground,
-        DEFAULT_TERMINAL_BACKGROUND => palette.terminal_background,
-        _ => ansi_color(palette, index),
+fn terminal_color(palette: &ThemePalette, color: TerminalColor, background: bool) -> Rgb {
+    match color {
+        TerminalColor::Default if background => palette.terminal_background,
+        TerminalColor::Default => palette.terminal_foreground,
+        TerminalColor::Indexed(index @ 0..=15) => ansi_color(palette, index),
+        TerminalColor::Indexed(index @ 16..=231) => {
+            let cube = index - 16;
+            let component = |value: u8| if value == 0 { 0 } else { 55 + value * 40 };
+            Rgb::new(
+                component(cube / 36),
+                component((cube / 6) % 6),
+                component(cube % 6),
+            )
+        }
+        TerminalColor::Indexed(index) => {
+            let value = 8 + (index - 232) * 10;
+            Rgb::new(value, value, value)
+        }
+        TerminalColor::TrueColor(rgb) => rgb,
     }
 }
 
@@ -2491,17 +2508,63 @@ mod tests {
         let blank = TerminalCell::blank();
         assert_eq!(blank.text(), " ");
         assert_eq!(
-            terminal_color(ThemeId::Dark.palette(), blank.fg),
+            terminal_color(ThemeId::Dark.palette(), blank.fg, false),
             ThemeId::Dark.palette().terminal_foreground
         );
         assert_eq!(
-            terminal_color(ThemeId::Light.palette(), blank.bg),
+            terminal_color(ThemeId::Light.palette(), blank.bg, true),
             ThemeId::Light.palette().terminal_background
         );
         assert_eq!(
-            terminal_color(ThemeId::Light.palette(), 0),
+            terminal_color(ThemeId::Light.palette(), TerminalColor::Indexed(0), false),
             ThemeId::Light.palette().ansi[0]
         );
+    }
+
+    #[test]
+    fn terminal_colors_preserve_truecolor_and_xterm_256_palette() {
+        let palette = ThemeId::Dark.palette();
+        assert_eq!(
+            terminal_color(
+                palette,
+                TerminalColor::TrueColor(Rgb::new(12, 34, 56)),
+                false
+            ),
+            Rgb::new(12, 34, 56)
+        );
+        assert_eq!(
+            terminal_color(palette, TerminalColor::Indexed(16), false),
+            Rgb::new(0, 0, 0)
+        );
+        assert_eq!(
+            terminal_color(palette, TerminalColor::Indexed(202), false),
+            Rgb::new(255, 95, 0)
+        );
+        assert_eq!(
+            terminal_color(palette, TerminalColor::Indexed(232), false),
+            Rgb::new(8, 8, 8)
+        );
+        assert_eq!(
+            terminal_color(palette, TerminalColor::Indexed(255), false),
+            Rgb::new(238, 238, 238)
+        );
+    }
+
+    #[test]
+    fn terminal_grid_keeps_parser_rgb_and_indexed_colors() {
+        let palette = ThemeId::Dark.palette();
+        let mut parser = vt100::Parser::new(1, 2, 0);
+        parser.process(b"\x1b[38;2;12;34;56mR\x1b[48;5;202mX");
+        let mut grid = TerminalGrid::new(2, 1, palette);
+
+        grid.sync_from_screen(parser.screen());
+
+        assert_eq!(
+            grid.cell(0, 0).fg,
+            TerminalColor::TrueColor(Rgb::new(12, 34, 56))
+        );
+        assert_eq!(grid.cell(1, 0).bg, TerminalColor::Indexed(202));
+        assert!(std::mem::size_of::<TerminalCell>() <= 32);
     }
 
     #[test]

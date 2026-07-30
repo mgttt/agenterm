@@ -121,6 +121,8 @@ text is committed only after candidate selection, with visible preedit feedback
 anchored to the active terminal or editor field.
 The Unix renderer also honors DECSCUSR cursor shape and blink requests for
 block, underline, and bar cursors, including steady variants.
+Terminal colors preserve theme-aware defaults, all 256 indexed xterm colors,
+and 24-bit SGR foreground/background values.
 
 ## Examples
 
