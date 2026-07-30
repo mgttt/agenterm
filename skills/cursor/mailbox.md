@@ -32,7 +32,19 @@
 
 ## 请示队列
 
-（当前无未决请示。分身追加时用 请示#1、#2…）
+### 请示#1 · 分身1 → 主控 · 2026-07-30 13:15 UTC
+- 问题: `CARGO_TARGET_DIR` 独立目录时 `./check.sh --quick` 失败：`prd_alignment_input_missing`
+- 选项: A) 修 `check.rhai` unix quick 路径尊重 `CARGO_TARGET_DIR` B) 规定 Linux quick 必须用默认 `target/` C) 分身2 接手脚本契约
+- 建议: A（与独立 target 纪律一致）
+- 影响文件: `scripts/rhai/check.rhai`（可能 `scripts/bootstrap.sh`）
+- 主控回复: （空着等主控填）
+
+### 请示#2 · 分身1 → 主控 · 2026-07-30 13:15 UTC
+- 问题: `./scripts/build-linux-clients.sh` 默认传入裸参数 `dev` → `build_unknown_argument:dev`；CI 等价 `bootstrap.sh --target …` 可过
+- 选项: A) 修薄入口不传 `dev` B) `build.rhai` 接受 `dev` C) 文档改 CI 等价命令为正式入口
+- 建议: A（薄入口与 `build.rhai` 合同对齐）
+- 影响文件: `scripts/build-linux-clients.sh`（可能 `scripts/build-linux-aarch64-clients.sh`）
+- 主控回复: （空着等主控填）
 
 ## 席位状态
 
@@ -45,15 +57,15 @@
 - 阻塞/请示: 无
 - 下一步: 等分身1写回测试进度；必要时修 platform fail-closed / catalog 语义
 
-### 分身1 · （待分身更新）
-- 状态: UNKNOWN — 请立即覆盖本块
-- 分支:
-- main基准:
-- 本轮目标: 原生 Linux Desktop 测试套件 + GUI
-- 已完成:
-- 证据:
-- 阻塞/请示:
-- 下一步:
+### 分身1 · 2026-07-30 13:15 UTC
+- 状态: RUNNING
+- 分支: `main` @ `470bf48`
+- main基准: `470bf48`
+- 本轮目标: 原生 x86_64 Linux Desktop 测试梯 + GUI 黑盒（computerUse/RecordScreen/public CLI）；邮箱互通
+- 已完成: pull/ff 至 `470bf48`（含 `9cd9591`）；读 inter-agent-comms + mailbox；梯 A–E 首轮：`lint.sh` PASS；`check.sh --quick` FAIL（请示#1）；`build-linux-clients.sh` FAIL（请示#2）；CI 等价 client-build 五 ELF PASS；`task check`/`migration-audit`/`cross-platform-automation-audit`/`client-smoke` PASS；mcp-conformance+fresh-clone-rehearsal Win-only SKIP；Rust `linux_script_cli`/`fresh_clone_rehearsal`/`mcp_stdio`/rhai 子集 PASS；原生 GUI 起窗+Settings/Composer/关闭确认可测
+- 证据: `CARGO_TARGET_DIR=target-linux-desktop-suite`；artifacts：`/opt/cursor/artifacts/linux_native_gui_suite_demo.mp4`、`suite-gui-*.png`、`suite-ui-snapshot*.json`；GUI P0：文字水平镜像
+- 阻塞/请示: 见请示#1、#2；镜像渲染待主控分配修复文件
+- 下一步: 等请示裁决；继续 GUI 回归（侧栏/Settings/Composer/关闭重启）与复测；不抢分身2 热点文件
 
 ### 分身2 · 2026-07-30 13:12 UTC
 - 状态: IDLE
@@ -70,10 +82,14 @@
 1. `task check` 在 Linux 上对 `platforms: windows` 任务仍返回 OK（未 host fail-closed）。
 2. `agenterm-script api` 在 Linux 仍报告 `job_object: kill_on_close`（与 Unix process group 不符）。
 3. Linux `./check.sh --quick` 不自动跑 `migration-audit`（需显式 task）。
+4. （分身1 实测）unix `check.sh --quick` 硬编码 `target/debug`，与独立 `CARGO_TARGET_DIR` 冲突 → 请示#1。
+5. （分身1 实测）`build-linux-clients.sh` 传裸 `dev` 被 `build.rhai` 拒绝 → 请示#2。
+6. （分身1 实测）原生 Linux GUI 文字水平镜像（screenshot/computerUse 一致）— 待分配修复 owner。
 
 ## 交接日志
 
 ```text
+2026-07-30 13:15 UTC | 分身1 | pull main@470bf48；读互通协议；覆盖席位 RUNNING；请示#1#2 | skills/cursor/mailbox.md
 2026-07-30 13:12 UTC | 分身2 | pull main@79e2e1b；读互通协议；更新本席位 IDLE | skills/cursor/mailbox.md
 2026-07-30 13:10 UTC | 主控 | 建立 inter-agent-comms + mailbox；同步 main@cccf523 事实 | skills/cursor/
 2026-07-30 ~09:42 UTC | 主控 | 派分身1：原生 Linux Desktop 测试套件 | API run-ec015323…
