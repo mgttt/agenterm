@@ -1,9 +1,4 @@
 use std::path::Path;
-#[cfg(target_os = "linux")]
-use std::{fs::File, io::BufWriter};
-
-#[cfg(target_os = "linux")]
-use png::{BitDepth, ColorType, Encoder};
 
 /// Encode softbuffer `0RGB`/`XRGB` pixels (little-endian `0x00RRGGBB`) as PNG.
 #[cfg(target_os = "macos")]
@@ -18,7 +13,7 @@ pub(super) fn write_xrgb_png(
         .map_err(|error| error.message())
 }
 
-/// Linux encoder retained until its screenshot adapter slice is implemented.
+/// Encode softbuffer `0RGB`/`XRGB` pixels (little-endian `0x00RRGGBB`) as PNG.
 #[cfg(target_os = "linux")]
 pub(super) fn write_xrgb_png(
     path: &Path,
@@ -27,56 +22,16 @@ pub(super) fn write_xrgb_png(
     pixels: &[u32],
     clip: Option<(u32, u32, u32, u32)>,
 ) -> Result<(), String> {
-    let (x0, y0, w, h) = match clip {
-        Some((x, y, w, h)) => (
-            x.min(width.saturating_sub(1)),
-            y.min(height.saturating_sub(1)),
-            w.min(width.saturating_sub(x)).max(1),
-            h.min(height.saturating_sub(y)).max(1),
-        ),
-        None => (0, 0, width.max(1), height.max(1)),
-    };
-    #[cfg(target_os = "linux")]
-    if pixels.len() < (width as usize).saturating_mul(height as usize) {
-        return Err("pixel buffer is smaller than the declared dimensions".to_owned());
-    }
-
-    #[cfg(target_os = "linux")]
-    let mut rgba = Vec::with_capacity((w as usize) * (h as usize) * 4);
-    #[cfg(target_os = "linux")]
-    for row in y0..y0 + h {
-        let row_start = (row as usize) * (width as usize);
-        for col in x0..x0 + w {
-            let pixel = pixels[row_start + col as usize] & 0x00FF_FFFF;
-            let r = ((pixel >> 16) & 0xFF) as u8;
-            let g = ((pixel >> 8) & 0xFF) as u8;
-            let b = (pixel & 0xFF) as u8;
-            rgba.extend_from_slice(&[r, g, b, 255]);
-        }
-    }
-
-    #[cfg(target_os = "linux")]
-    let file = File::create(path).map_err(|error| error.to_string())?;
-    #[cfg(target_os = "linux")]
-    let mut encoder = Encoder::new(BufWriter::new(file), w, h);
-    #[cfg(target_os = "linux")]
-    encoder.set_color(ColorType::Rgba);
-    #[cfg(target_os = "linux")]
-    encoder.set_depth(BitDepth::Eight);
-    #[cfg(target_os = "linux")]
-    let mut writer = encoder
-        .write_header()
-        .map_err(|error| error.to_string())?
-        .into_stream_writer()
-        .map_err(|error| error.to_string())?;
-    #[cfg(target_os = "linux")]
-    use std::io::Write;
-    #[cfg(target_os = "linux")]
-    writer.write_all(&rgba).map_err(|error| error.to_string())?;
-    #[cfg(target_os = "linux")]
-    writer.finish().map_err(|error| error.to_string())?;
-    #[cfg(target_os = "linux")]
-    Ok(())
+    use crate::platform::linux::screenshot::{ScreenshotClip, write_xrgb_png as write_linux};
+    let clip = clip.map(|(x, y, width, height)| ScreenshotClip {
+        x,
+        y,
+        width,
+        height,
+    });
+    write_linux(path, width, height, pixels, clip)
+        .map(|_| ())
+        .map_err(|error| error.message())
 }
 
 #[cfg(test)]
@@ -91,5 +46,19 @@ mod tests {
         let meta = std::fs::metadata(&path).expect("meta");
         assert!(meta.len() > 32);
         let _ = std::fs::remove_file(path);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_screenshot_delegates_to_platform_capability_boundary() {
+        use crate::platform::{CapabilityKind, CapabilityStatus};
+        let status = crate::platform::linux::capability_status(CapabilityKind::Screenshot);
+        assert!(matches!(
+            status,
+            CapabilityStatus::Available
+                | CapabilityStatus::Unsupported {
+                    reason: "headless-display"
+                }
+        ));
     }
 }
