@@ -40,6 +40,7 @@ fn fresh_clone_rehearsal_policy_is_public_and_fail_closed() {
         "fresh_clone_owned_processes_remained",
         "remaining_after_cleanup",
         "child_deadline_ms",
+        "command.capture_limit(262144)",
         "receipt.gates.len == 34",
         "receipt.provenance.git_head == head",
         "!receipt.provenance.source_dirty",

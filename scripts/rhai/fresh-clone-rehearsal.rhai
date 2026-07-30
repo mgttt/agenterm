@@ -36,7 +36,7 @@ fn checked_output(program, arguments, cwd, timeout_ms, code) {
     command.env("GCM_INTERACTIVE", "Never");
     command.env("GIT_TERMINAL_PROMPT", "0");
     command.timeout(std::time::Duration::from_millis(timeout_ms));
-    command.capture_limit(1048576);
+    command.capture_limit(262144);
     let output = command.output();
     require(
         output.success,
