@@ -509,7 +509,7 @@ Migration ledger:
   script, an operational reference to a deleted script, an unrecorded removal,
   duplicate paths, invalid states, and count drift; ordinary and release
   qualification invoke it as a required gate.
-- [~] the repository-root `agenterm.tasks.json` is now the offline task
+- [x] the repository-root `agenterm.tasks.json` is now the offline task
   catalog and ships thirty-eight ready tasks (`check`, `release`,
   `artifact-verification`,
   `bootstrap-info`, `build-identity`,
@@ -522,21 +522,28 @@ Migration ledger:
   `stage-artifact`, `stage-build`, `supply-chain`, `server-smoke`, `startup-smoke`,
   `cli-smoke`, `script-smoke`, `fleet-smoke`, `theme-smoke`, `working-context-smoke`,
   `workbench-smoke`, `wake-smoke`, `remote-ui-smoke`, `remote-ui-upgrade-smoke`,
-  `validate-artifact-manifest`, and `write-build-metadata`). The existing
+  `validate-artifact-manifest`, and `write-build-metadata`). Each task now
+  exposes validated same-manifest dependencies, a closed Windows/Linux/macOS
+  platform set, and a closed side-effect classification in both human and JSON
+  offline listings. Unknown, self, duplicate, or cyclic dependencies degrade
+  before execution. The existing
   two-input Script contract verifier is
   intentionally not advertised as ready until catalog fixture production is
   part of its task. Build, lint, test, qualification, package, rehearsal,
-  release, dependency, platform, side-effect, and evidence metadata remain
-  incomplete.
+  release and evidence metadata remain incomplete.
 - [x] `git ls-files '*.ps1'` returns no files. Tests,
   helpers, and archived implementations are not exceptions; Git history is the
   permanent archive after each parity and rollback boundary closes.
 - [ ] `agenterm.tasks.json` and shared Rhai modules own build, lint, test,
   qualification, packaging, release rehearsal, and approved release semantics.
-- [ ] batch files, Unix shell entry points, and CI YAML may bootstrap a pinned
+- [~] batch files, Unix shell entry points, and CI YAML may bootstrap a pinned
   Rust toolchain and forward arguments/exit status to the same Rhai task, but
   must not duplicate task selection, budgets, evidence, packaging, or release
-  policy.
+  policy. The four tracked Windows batch files are now a frozen migration
+  inventory: their remaining build, cleanup, task-budget, bootstrap-copy, and
+  release-mode mechanics are being consolidated into one generic stage-0
+  bootstrap plus Rhai tasks. Optional root aliases may remain only as one-line
+  human entry points.
 - [ ] the migration proceeds from low-side-effect rules and reports through
   build/static quality, public black-box tests, and finally qualification and
   delivery. Each responsibility must prove normalized parity or stronger public

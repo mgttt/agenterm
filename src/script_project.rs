@@ -91,6 +91,12 @@ struct RawTask {
     args: Vec<String>,
     #[serde(default)]
     env: Vec<String>,
+    #[serde(default)]
+    dependencies: Vec<String>,
+    #[serde(default = "default_platforms")]
+    platforms: Vec<ScriptTaskPlatform>,
+    #[serde(default)]
+    side_effects: Vec<ScriptTaskSideEffect>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -129,6 +135,29 @@ pub struct ScriptTaskEntry {
     pub cwd: Option<String>,
     pub args: Vec<String>,
     pub env: Vec<String>,
+    pub dependencies: Vec<String>,
+    pub platforms: Vec<ScriptTaskPlatform>,
+    pub side_effects: Vec<ScriptTaskSideEffect>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScriptTaskPlatform {
+    Windows,
+    Linux,
+    Macos,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScriptTaskSideEffect {
+    RepositoryWrite,
+    ArtifactWrite,
+    ProcessSpawn,
+    GuiSpawn,
+    NetworkLoopback,
+    GitMutation,
+    RemotePublish,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -498,6 +527,7 @@ pub fn load_task_catalog(path: &Path) -> Result<ScriptTaskCatalog, String> {
         };
         tasks.push(entry);
     }
+    validate_task_graph(&mut tasks);
 
     Ok(ScriptTaskCatalog {
         schema_version: SCRIPT_TASK_SCHEMA_VERSION,
@@ -580,7 +610,10 @@ fn catalog_task(root: &Path, task: RawTask, seen: &mut HashSet<String>) -> Scrip
             validate_relative_path(root, task.cwd.as_deref().unwrap_or("."), false).map(|_| ())
         })
         .and_then(|_| validate_args(&task.args))
-        .and_then(|_| validate_env(&task.env));
+        .and_then(|_| validate_env(&task.env))
+        .and_then(|_| validate_dependencies(&task.dependencies))
+        .and_then(|_| validate_nonempty_unique(&task.platforms, "task_platforms"))
+        .and_then(|_| validate_unique(&task.side_effects, "task_side_effects"));
 
     if let Err(reason) = validation {
         return degraded_task(task.id, reason);
@@ -595,6 +628,9 @@ fn catalog_task(root: &Path, task: RawTask, seen: &mut HashSet<String>) -> Scrip
         cwd: task.cwd.map(|path| normalize_relative(&path)),
         args: task.args,
         env: task.env,
+        dependencies: task.dependencies,
+        platforms: task.platforms,
+        side_effects: task.side_effects,
     }
 }
 
@@ -609,7 +645,129 @@ fn degraded_task(id: String, reason: String) -> ScriptTaskEntry {
         cwd: None,
         args: Vec::new(),
         env: Vec::new(),
+        dependencies: Vec::new(),
+        platforms: Vec::new(),
+        side_effects: Vec::new(),
     }
+}
+
+fn validate_dependencies(values: &[String]) -> Result<(), String> {
+    if values.len() > 64 {
+        return Err("task_dependencies: maximum is 64".to_owned());
+    }
+    let mut seen = HashSet::new();
+    for value in values {
+        validate_identity(value, "task_dependency")?;
+        if !seen.insert(value.as_str()) {
+            return Err(format!("task_dependency_duplicate: {value}"));
+        }
+    }
+    Ok(())
+}
+
+fn validate_nonempty_unique<T>(values: &[T], field: &str) -> Result<(), String>
+where
+    T: Eq + std::hash::Hash,
+{
+    if values.is_empty() {
+        return Err(format!("{field}: at least one value is required"));
+    }
+    if values.len() > 16 {
+        return Err(format!("{field}: maximum is 16"));
+    }
+    let mut seen = HashSet::new();
+    if values.iter().any(|value| !seen.insert(value)) {
+        return Err(format!("{field}: duplicate value"));
+    }
+    Ok(())
+}
+
+fn validate_unique<T>(values: &[T], field: &str) -> Result<(), String>
+where
+    T: Eq + std::hash::Hash,
+{
+    if values.len() > 16 {
+        return Err(format!("{field}: maximum is 16"));
+    }
+    let mut seen = HashSet::new();
+    if values.iter().any(|value| !seen.insert(value)) {
+        return Err(format!("{field}: duplicate value"));
+    }
+    Ok(())
+}
+
+fn default_platforms() -> Vec<ScriptTaskPlatform> {
+    vec![
+        ScriptTaskPlatform::Windows,
+        ScriptTaskPlatform::Linux,
+        ScriptTaskPlatform::Macos,
+    ]
+}
+
+fn validate_task_graph(tasks: &mut [ScriptTaskEntry]) {
+    let ready_ids = tasks
+        .iter()
+        .filter(|task| task.status == ScriptTaskStatus::Ready)
+        .map(|task| task.id.clone())
+        .collect::<HashSet<_>>();
+    for task in tasks
+        .iter_mut()
+        .filter(|task| task.status == ScriptTaskStatus::Ready)
+    {
+        if task
+            .dependencies
+            .iter()
+            .any(|dependency| dependency == &task.id)
+        {
+            task.status = ScriptTaskStatus::Degraded;
+            task.degraded_reason = Some(format!("task_dependency_self: {}", task.id));
+        } else if let Some(dependency) = task
+            .dependencies
+            .iter()
+            .find(|dependency| !ready_ids.contains(*dependency))
+        {
+            task.status = ScriptTaskStatus::Degraded;
+            task.degraded_reason = Some(format!("task_dependency_unknown: {dependency}"));
+        }
+    }
+
+    let graph = tasks
+        .iter()
+        .filter(|task| task.status == ScriptTaskStatus::Ready)
+        .map(|task| (task.id.clone(), task.dependencies.clone()))
+        .collect::<std::collections::HashMap<_, _>>();
+    let cyclic = graph
+        .keys()
+        .filter(|id| task_dependency_cycle(id, &graph, &mut HashSet::new(), &mut HashSet::new()))
+        .cloned()
+        .collect::<HashSet<_>>();
+    for task in tasks.iter_mut().filter(|task| cyclic.contains(&task.id)) {
+        task.status = ScriptTaskStatus::Degraded;
+        task.degraded_reason = Some(format!("task_dependency_cycle: {}", task.id));
+    }
+}
+
+fn task_dependency_cycle(
+    id: &str,
+    graph: &std::collections::HashMap<String, Vec<String>>,
+    visiting: &mut HashSet<String>,
+    visited: &mut HashSet<String>,
+) -> bool {
+    if visiting.contains(id) {
+        return true;
+    }
+    if visited.contains(id) {
+        return false;
+    }
+    visiting.insert(id.to_owned());
+    let cyclic = graph.get(id).is_some_and(|dependencies| {
+        dependencies
+            .iter()
+            .any(|dependency| task_dependency_cycle(dependency, graph, visiting, visited))
+    });
+    visiting.remove(id);
+    visited.insert(id.to_owned());
+    cyclic
 }
 
 fn validate_identity(value: &str, field: &str) -> Result<(), String> {
@@ -862,7 +1020,14 @@ mod tests {
     "provenance": {"producer": "agenterm-test", "revision": "fixture-1"}
   },
   "tasks": [
-    {"id": "check", "entry": "scripts/check.rhai", "args": ["default"]},
+    {
+      "id": "check",
+      "entry": "scripts/check.rhai",
+      "args": ["default"],
+      "dependencies": [],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write", "process_spawn"]
+    },
     {"id": "broken", "entry": "../outside.rhai"},
     {"id": "check", "entry": "scripts/check.rhai"}
   ]
@@ -886,6 +1051,21 @@ mod tests {
         assert!(catalog.origin.is_some());
         assert!(catalog.provenance.is_some());
         assert_eq!(catalog.tasks[0].status, ScriptTaskStatus::Ready);
+        assert_eq!(
+            catalog.tasks[0].platforms,
+            [
+                ScriptTaskPlatform::Windows,
+                ScriptTaskPlatform::Linux,
+                ScriptTaskPlatform::Macos
+            ]
+        );
+        assert_eq!(
+            catalog.tasks[0].side_effects,
+            [
+                ScriptTaskSideEffect::ArtifactWrite,
+                ScriptTaskSideEffect::ProcessSpawn
+            ]
+        );
         assert_eq!(catalog.tasks[1].status, ScriptTaskStatus::Degraded);
         assert_eq!(catalog.tasks[2].status, ScriptTaskStatus::Degraded);
         assert!(resolve_task(&catalog, "check").is_err());
@@ -946,6 +1126,36 @@ mod tests {
             discover_task_manifest(&root.join("scripts")).unwrap(),
             manifest
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn task_graph_rejects_unknown_self_and_cyclic_dependencies() {
+        let (root, manifest) = fixture();
+        let contents = fs::read_to_string(&manifest)
+            .unwrap()
+            .replace(
+                r#"{"id": "broken", "entry": "../outside.rhai"}"#,
+                r#"{"id": "unknown", "entry": "scripts/check.rhai", "dependencies": ["missing"]}"#,
+            )
+            .replace(
+                r#"{"id": "check", "entry": "scripts/check.rhai"}"#,
+                r#"{"id": "self", "entry": "scripts/check.rhai", "dependencies": ["self"]},
+    {"id": "cycle-a", "entry": "scripts/check.rhai", "dependencies": ["cycle-b"]},
+    {"id": "cycle-b", "entry": "scripts/check.rhai", "dependencies": ["cycle-a"]}"#,
+            );
+        fs::write(&manifest, contents).unwrap();
+        let catalog = load_task_catalog(&manifest).unwrap();
+        for (id, reason) in [
+            ("unknown", "task_dependency_unknown: missing"),
+            ("self", "task_dependency_self: self"),
+            ("cycle-a", "task_dependency_cycle: cycle-a"),
+            ("cycle-b", "task_dependency_cycle: cycle-b"),
+        ] {
+            let task = catalog.tasks.iter().find(|task| task.id == id).unwrap();
+            assert_eq!(task.status, ScriptTaskStatus::Degraded);
+            assert_eq!(task.degraded_reason.as_deref(), Some(reason));
+        }
         fs::remove_dir_all(root).unwrap();
     }
 

@@ -1696,7 +1696,42 @@ fn task_entry_text(task: &crate::script_project::ScriptTaskEntry) -> String {
         .as_deref()
         .filter(|value| !value.is_empty())
         .unwrap_or(task.description.as_str());
-    format!("{}\t{}\t{}", task.id, status, detail)
+    let platforms = task
+        .platforms
+        .iter()
+        .map(|platform| match platform {
+            crate::script_project::ScriptTaskPlatform::Windows => "windows",
+            crate::script_project::ScriptTaskPlatform::Linux => "linux",
+            crate::script_project::ScriptTaskPlatform::Macos => "macos",
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let dependencies = if task.dependencies.is_empty() {
+        "-".to_owned()
+    } else {
+        task.dependencies.join(",")
+    };
+    let side_effects = if task.side_effects.is_empty() {
+        "none".to_owned()
+    } else {
+        task.side_effects
+            .iter()
+            .map(|effect| match effect {
+                crate::script_project::ScriptTaskSideEffect::RepositoryWrite => "repository_write",
+                crate::script_project::ScriptTaskSideEffect::ArtifactWrite => "artifact_write",
+                crate::script_project::ScriptTaskSideEffect::ProcessSpawn => "process_spawn",
+                crate::script_project::ScriptTaskSideEffect::GuiSpawn => "gui_spawn",
+                crate::script_project::ScriptTaskSideEffect::NetworkLoopback => "network_loopback",
+                crate::script_project::ScriptTaskSideEffect::GitMutation => "git_mutation",
+                crate::script_project::ScriptTaskSideEffect::RemotePublish => "remote_publish",
+            })
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+    format!(
+        "{}\t{}\tplatforms={}\tdependencies={}\tside_effects={}\t{}",
+        task.id, status, platforms, dependencies, side_effects, detail
+    )
 }
 
 #[cfg(windows)]

@@ -2,8 +2,8 @@
 
 状态：实施中；原 v0.1.9 Release 因 server-loss 故障撤下，
 `0.1.9+hotfix.1` 是恢复 v0.1.10 主线前的强制稳定性门；
-当前 32/43 PowerShell 迁移项完成删除
-工作主题：**Rhai 完整接替 PowerShell，并建立可验证的只读 Agent 桥梁**
+当前 43/43 PowerShell 迁移项完成删除；Windows batch 业务逻辑迁移实施中
+工作主题：**Rhai 完整接替仓库脚本业务逻辑，并建立可验证的只读 Agent 桥梁**
 版本定位：在 v0.1.9 完善通用 Rhai 运行时、模块任务与机器可读工具
 schema 后，让 AgenTerm 首次用自己的脚本运行时驱动完整开发生命周期，
 同时把同一份 Fleet 事实稳定地开放给外部 Agent 客户端。
@@ -82,7 +82,10 @@ v0.1.10 必须完成 Rhai 对仓库自有 PowerShell 自动化的替代，这不
   `powershell.exe` / `pwsh.exe`，也不得通过命令字符串、临时脚本或下载
   脚本变相保留 PowerShell 业务逻辑；
 - 已迁移实现由 Git 历史保存，不在活动工作树维护 PowerShell 影子副本；
-- `.bat`、Unix shell 和 CI YAML 可以作为平台薄入口，但不得包含业务规则；
+- `.bat/.cmd`、Unix shell 和 CI YAML 可以作为平台薄入口，但不得包含业务
+  规则；v0.1.10 进一步把现有四个 Windows batch 入口的构建、清理、测试、
+  资格与发布编排迁入 Rhai，只保留一个通用 stage-0 bootstrap 机制和可选的
+  一行式人类入口；
 - 如果某个迁移暴露 Script Runtime 能力缺口，先补稳定 typed API，再继续
   迁移；不得从 Rhai 反向调用 PowerShell 绕过缺口；
 - MCP 是本轮并行产品线，但不得以它为理由降低 PowerShell 归零完成门；
@@ -390,7 +393,10 @@ delivery
 
 要求删除所有受跟踪 `.ps1`；冻结基线中
 `scripts/archive/powershell/` 的两个历史副本已在首批迁移提交删除，其内容
-只由 Git 历史继续保存。不要求删除 `.bat`、shell 或 CI YAML
+只由 Git 历史继续保存。不机械要求删除 `.bat/.cmd`、shell 或 CI YAML，
+但它们不得保留任务选择、依赖、预算、构建、清理、测试、打包或发布规则；
+可删除的入口应删除，必须保留的 Windows 入口只能透明启动同一个通用
+stage-0 bootstrap
 这些平台入口，但它们只能：
 
 1. 定位或安装明确版本的 Rust 工具链；
@@ -924,7 +930,8 @@ entry 是集成热点，只允许一个串行 owner 收口。
   `pwsh.exe`，Rhai、`.bat` 和 workflow 均无反向调用；
 - lint gate 拒绝新增 `.ps1` 和入口脚本中的业务规则回流；
 - 干净 checkout 只经 stage 0 + Rhai task 完成 build/check/qualification；
-- 开发机与 CI 使用同一 task ID、依赖图、预算和 evidence catalog；
+- 开发机与 CI 使用同一 task ID、依赖图、平台、副作用、预算和 evidence
+  catalog；
 - build、test、qualification、package、release 没有隐式 PowerShell 子进程；
 - 文档、AGENTS、workflow、`.bat`、Cargo metadata 与 task catalog 不再引用
   已删除脚本；
@@ -1028,11 +1035,14 @@ entry 是集成热点，只允许一个串行 owner 收口。
   [in progress] PowerShell responsibility/caller/evidence inventory
     43 stable IDs and responsibility groups frozen; detailed caller and
     input/output/side-effect contracts still need enrichment
-  [in progress] stable Rhai task graph
-    repository manifest and first eighteen ready tasks shipped; full graph metadata
-    and remaining lifecycle tasks still pending
+  [done] stable Rhai task graph
+    repository manifest exposes all thirty-eight ready tasks plus validated
+    dependency, platform, and side-effect metadata offline
   [done] stage-0 bootstrap identity contract
   [done] no-new-ps1 migration audit gate
+  [in progress] migrate four Windows batch files
+    move build/check/lint/release business rules into Rhai and retain only one
+    generic bootstrap mechanism plus optional one-line launch aliases
 
 第二提交
   [in progress] shared Rhai build/test helpers

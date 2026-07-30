@@ -71,7 +71,10 @@
       "description": "Remove stale locked and explicitly obsolete staged executables",
       "entry": "scripts/rhai/clean-locked-artifacts.rhai",
       "profile": "local",
-      "cwd": "."
+      "cwd": ".",
+      "dependencies": [],
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write"]
     },
     {
       "id": "check",
@@ -79,21 +82,30 @@
       "entry": "scripts/rhai/check.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": ["."]
+      "args": ["."],
+      "dependencies": ["lint", "migration-audit", "prd-alignment", "artifact-verification", "supply-chain", "verify-docs-site", "readme-examples"],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback"]
     },
     {
       "id": "release",
       "description": "Validate, qualify, and package an exact candidate, then rehearse or explicitly publish it",
       "entry": "scripts/rhai/release.rhai",
       "profile": "local",
-      "cwd": "."
+      "cwd": ".",
+      "dependencies": ["check", "preflight", "package-release-qualified"],
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback", "git_mutation", "remote_publish"]
     },
     {
       "id": "bootstrap-info",
       "description": "Report the repository, Git, Cargo, Rust and Script Runtime bootstrap identity",
       "entry": "scripts/rhai/bootstrap-info.rhai",
       "profile": "local",
-      "cwd": "."
+      "cwd": ".",
+      "dependencies": [],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["process_spawn"]
     },
     {
       "id": "artifact-verification",
@@ -101,14 +113,20 @@
       "entry": "scripts/rhai/artifact-verification.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": ["."]
+      "args": ["."],
+      "dependencies": ["validate-artifact-manifest"],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["process_spawn"]
     },
     {
       "id": "build-identity",
       "description": "Freeze source revision, dirty state, and build-input hashes into a batch environment",
       "entry": "scripts/rhai/build-identity.rhai",
       "profile": "local",
-      "cwd": "."
+      "cwd": ".",
+      "dependencies": [],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write", "process_spawn"]
     },
     {
       "id": "harness-cleanup-selftest",
@@ -116,7 +134,10 @@
       "entry": "scripts/rhai/harness-cleanup-selftest.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": ["."]
+      "args": ["."],
+      "dependencies": [],
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn"]
     },
     {
       "id": "diagnostic-bundle-selftest",
@@ -124,7 +145,10 @@
       "entry": "scripts/rhai/diagnostic-bundle-selftest.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [".", "dist/agenterm-cli.exe", "dist/agenterm-script.exe", "dist/agenterm.exe"]
+      "args": [".", "dist/agenterm-cli.exe", "dist/agenterm-script.exe", "dist/agenterm.exe"],
+      "dependencies": ["theme-smoke", "script-smoke"],
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback"]
     },
     {
       "id": "qualification-selftest",
@@ -132,7 +156,10 @@
       "entry": "scripts/rhai/qualification-selftest.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [".", "dist/agenterm-cli.exe"]
+      "args": [".", "dist/agenterm-cli.exe"],
+      "dependencies": [],
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn"]
     },
     {
       "id": "package-qualified",
@@ -140,7 +167,10 @@
       "entry": "scripts/rhai/package-qualified.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [".", "target/qualification/receipt.json", "target/qualification/package-dry-run"]
+      "args": [".", "target/qualification/receipt.json", "target/qualification/package-dry-run"],
+      "dependencies": ["check"],
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn"]
     },
     {
       "id": "package-release-qualified",
@@ -148,7 +178,10 @@
       "entry": "scripts/rhai/package-release-qualified.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [".", "target/qualification/receipt.json", "dist"]
+      "args": [".", "target/qualification/receipt.json", "dist"],
+      "dependencies": ["check"],
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn"]
     },
     {
       "id": "package-qualified-selftest",
@@ -156,7 +189,10 @@
       "entry": "scripts/rhai/package-qualified-selftest.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": ["."]
+      "args": ["."],
+      "dependencies": [],
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn"]
     },
     {
       "id": "working-context-smoke",
@@ -164,7 +200,10 @@
       "entry": "scripts/rhai/working-context-smoke.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [".", "dist/agenterm.exe", "dist/agenterm-cli.exe"]
+      "args": [".", "dist/agenterm.exe", "dist/agenterm-cli.exe"],
+      "dependencies": [],
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback"]
     },
     {
       "id": "theme-smoke",
@@ -172,7 +211,10 @@
       "entry": "scripts/rhai/theme-smoke.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [".", "dist/agenterm.exe", "dist/agenterm-cli.exe"]
+      "args": [".", "dist/agenterm.exe", "dist/agenterm-cli.exe"],
+      "dependencies": [],
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback"]
     },
     {
       "id": "workbench-smoke",
@@ -180,7 +222,10 @@
       "entry": "scripts/rhai/workbench-smoke.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [".", "dist/agenterm.exe", "dist/agenterm-cli.exe"]
+      "args": [".", "dist/agenterm.exe", "dist/agenterm-cli.exe"],
+      "dependencies": [],
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback"]
     },
     {
       "id": "fleet-smoke",
@@ -188,7 +233,10 @@
       "entry": "scripts/rhai/fleet-smoke.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [".", "dist/agenterm-cli.exe", "dist/agenterm-mux.exe", "--skip-event-load"]
+      "args": [".", "dist/agenterm-cli.exe", "dist/agenterm-mux.exe", "--skip-event-load"],
+      "dependencies": [],
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn", "network_loopback"]
     },
     {
       "id": "server-smoke",
@@ -196,7 +244,10 @@
       "entry": "scripts/rhai/server-smoke.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [".", "dist/agenterm-server.exe", "dist/agenterm-cli.exe"]
+      "args": [".", "dist/agenterm-server.exe", "dist/agenterm-cli.exe"],
+      "dependencies": [],
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn", "network_loopback"]
     },
     {
       "id": "wake-smoke",
@@ -204,7 +255,10 @@
       "entry": "scripts/rhai/wake-smoke.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [".", "dist/agenterm-server.exe", "dist/agenterm-cli.exe"]
+      "args": [".", "dist/agenterm-server.exe", "dist/agenterm-cli.exe"],
+      "dependencies": [],
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn", "network_loopback"]
     },
     {
       "id": "startup-smoke",
@@ -212,7 +266,10 @@
       "entry": "scripts/rhai/startup-smoke.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [".", "dist/agenterm.exe", "dist/agenterm-cli.exe", "1000"]
+      "args": [".", "dist/agenterm.exe", "dist/agenterm-cli.exe", "1000"],
+      "dependencies": [],
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback"]
     },
     {
       "id": "cli-smoke",
@@ -220,7 +277,10 @@
       "entry": "scripts/rhai/cli-smoke.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [".", "dist/agenterm.exe", "dist/agenterm-cli.exe"]
+      "args": [".", "dist/agenterm.exe", "dist/agenterm-cli.exe"],
+      "dependencies": [],
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback"]
     },
     {
       "id": "script-smoke",
@@ -228,7 +288,10 @@
       "entry": "scripts/rhai/script-smoke.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [".", "dist/agenterm-cli.exe", "dist/agenterm-script.exe", "dist/agenterm.exe"]
+      "args": [".", "dist/agenterm-cli.exe", "dist/agenterm-script.exe", "dist/agenterm.exe"],
+      "dependencies": [],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback"]
     },
     {
       "id": "remote-ui-smoke",
@@ -236,7 +299,10 @@
       "entry": "scripts/rhai/remote-ui-smoke.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [".", "dist/agenterm.exe", "dist/agenterm-cli.exe"]
+      "args": [".", "dist/agenterm.exe", "dist/agenterm-cli.exe"],
+      "dependencies": [],
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback"]
     },
     {
       "id": "remote-ui-upgrade-smoke",
@@ -244,14 +310,20 @@
       "entry": "scripts/rhai/remote-ui-upgrade-smoke.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": [".", "dist/agenterm.exe", "target/release-fast/agenterm.exe", "dist/agenterm-cli.exe", "dist/agenterm-server.exe"]
+      "args": [".", "dist/agenterm.exe", "target/release-fast/agenterm.exe", "dist/agenterm-cli.exe", "dist/agenterm-server.exe"],
+      "dependencies": [],
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback"]
     },
     {
       "id": "migration-audit",
       "description": "Enforce the frozen PowerShell migration ledger and reject untracked drift",
       "entry": "scripts/rhai/powershell-migration-audit.rhai",
       "profile": "local",
-      "cwd": "."
+      "cwd": ".",
+      "dependencies": [],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["process_spawn"]
     },
     {
       "id": "lint",
@@ -259,56 +331,80 @@
       "entry": "scripts/rhai/lint.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": ["."]
+      "args": ["."],
+      "dependencies": ["migration-audit"],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write", "process_spawn"]
     },
     {
       "id": "prepare-target-clean",
       "description": "Validate an exact repository-local Cargo target and install its cache tag",
       "entry": "scripts/rhai/prepare-target-clean.rhai",
       "profile": "local",
-      "cwd": "."
+      "cwd": ".",
+      "dependencies": [],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write"]
     },
     {
       "id": "preflight",
       "description": "Run the read-only repository release preflight and publish its JSON report",
       "entry": "scripts/rhai/preflight.rhai",
       "profile": "local",
-      "cwd": "."
+      "cwd": ".",
+      "dependencies": ["migration-audit", "validate-artifact-manifest"],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write", "process_spawn"]
     },
     {
       "id": "preflight-benchmark",
       "description": "Measure public preflight worker startup and report p95 latency",
       "entry": "scripts/rhai/preflight-benchmark.rhai",
       "profile": "local",
-      "cwd": "."
+      "cwd": ".",
+      "dependencies": ["preflight"],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write", "process_spawn"]
     },
     {
       "id": "prd-alignment",
       "description": "Align PRD modules and shipped evidence with the public CLI, protocol, and Mux catalogs",
       "entry": "scripts/rhai/prd-alignment.rhai",
       "profile": "local",
-      "cwd": "."
+      "cwd": ".",
+      "dependencies": [],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["process_spawn"]
     },
     {
       "id": "stage-artifact",
       "description": "Stage one AgenTerm executable while preserving an in-use Windows image",
       "entry": "scripts/rhai/stage-artifact.rhai",
       "profile": "local",
-      "cwd": "."
+      "cwd": ".",
+      "dependencies": [],
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write"]
     },
     {
       "id": "supply-chain",
       "description": "Validate locked Cargo licenses and write deterministic SPDX evidence",
       "entry": "scripts/rhai/supply-chain.rhai",
       "profile": "local",
-      "cwd": "."
+      "cwd": ".",
+      "dependencies": [],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write", "process_spawn"]
     },
     {
       "id": "stage-build",
       "description": "Stage the validated executable set and publish frozen build provenance",
       "entry": "scripts/rhai/stage-build.rhai",
       "profile": "local",
-      "cwd": "."
+      "cwd": ".",
+      "dependencies": ["build-identity", "clean-locked-artifacts", "stage-artifact", "write-build-metadata"],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write", "process_spawn"]
     },
     {
       "id": "target-report",
@@ -316,21 +412,30 @@
       "entry": "scripts/rhai/target-report.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": ["."]
+      "args": ["."],
+      "dependencies": [],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write"]
     },
     {
       "id": "validate-artifact-manifest",
       "description": "Validate the canonical local Windows executable manifest",
       "entry": "scripts/rhai/validate-artifact-manifest.rhai",
       "profile": "local",
-      "cwd": "."
+      "cwd": ".",
+      "dependencies": [],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": []
     },
     {
       "id": "write-build-metadata",
       "description": "Write staged executable provenance from frozen source and input identities",
       "entry": "scripts/rhai/write-build-metadata.rhai",
       "profile": "local",
-      "cwd": "."
+      "cwd": ".",
+      "dependencies": ["build-identity", "validate-artifact-manifest"],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write", "process_spawn"]
     },
     {
       "id": "internal-version-policy",
@@ -338,7 +443,10 @@
       "entry": "scripts/rhai/internal-version-policy.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": ["."]
+      "args": ["."],
+      "dependencies": [],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": []
     },
     {
       "id": "verify-docs-site",
@@ -346,7 +454,10 @@
       "entry": "scripts/rhai/verify-docs-site.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": ["docs"]
+      "args": ["docs"],
+      "dependencies": [],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": []
     },
     {
       "id": "readme-examples",
@@ -354,7 +465,10 @@
       "entry": "scripts/rhai/readme-examples.rhai",
       "profile": "local",
       "cwd": ".",
-      "args": ["dist"]
+      "args": ["dist"],
+      "dependencies": ["artifact-verification"],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["process_spawn"]
     }
   ]
 }

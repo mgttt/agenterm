@@ -1270,20 +1270,37 @@ Schema v2 is:
       "profile": "local",
       "cwd": ".",
       "args": [],
-      "env": ["REQUIRED_ENV_NAME"]
+      "env": ["REQUIRED_ENV_NAME"],
+      "dependencies": [],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write", "process_spawn"]
     }
   ]
 }
 ```
 
 Project/task IDs, project version, entry, legacy non-authorizing profile label,
-working directory, default arguments, and required environment names are
-inspectable without execution.
+working directory, default arguments, required environment names, declarative
+dependencies, supported platforms, and side-effect classes are inspectable
+without execution. Human and JSON task listings expose all of these facts.
 `env` contains names only; values are inherited at invocation and are never
 copied into the manifest, task catalog, audit, or diagnostics. Entries and
 working directories MUST resolve inside the manifest directory. Discovery
 walks from the current directory to its ancestors unless `--manifest` is
 explicit. Task execution appends caller arguments after manifest defaults.
+
+`dependencies` contains task IDs from the same manifest and forms an acyclic
+offline graph. Unknown, self, duplicate, or cyclic edges degrade the affected
+task before any source is evaluated. Dependencies are orchestration facts, not
+an implicit request to execute prerequisites: a task runner or CI coordinator
+chooses and records the actual order.
+
+`platforms` uses the closed values `windows`, `linux`, and `macos`; omitting it
+means all three for schema-v2 compatibility. `side_effects` uses the closed
+classes `repository_write`, `artifact_write`, `process_spawn`, `gui_spawn`,
+`network_loopback`, `git_mutation`, and `remote_publish`; an empty array means
+no declared side effect. These are planning and audit facts, not Agent
+permissions and not a sandbox.
 
 `requires.script_api` is an inclusive compatibility range for the stable
 AgenTerm Script API, independently of the task-manifest and catalog schema
