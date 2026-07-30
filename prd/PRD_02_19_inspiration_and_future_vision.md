@@ -96,8 +96,9 @@ AgenTerm optimizes **fleet durability and verifiable control**:
   CLI/script/mux foundations, Observable Fleet, script runtime v0.1.9 slice.
 - Still hardening: typed operations, receipts, control-plane completeness,
   MCP read-only bridge (engineering on v0.1.10 plan).
-- **Not** current work: workflow market, mobile store release, libp2p node,
-  plugin marketplace, persona templates — captured as `[idea]` below.
+- **Not** current work: mobile store release, libp2p node,
+  persona templates — captured as `[idea]` below. Workflow pipelines,
+  PluginHub, and InfoHub are **promoted** for v0.2.0 Fleet Hub (see Lane J).
 
 ### Roadmap waves (product sequence, not calendar)
 
@@ -106,7 +107,7 @@ W0  Foundation     tree · Composer · durable tabs · server authority
 W1  Control        CLI · script · mux · waits · receipts
 W2  Agent bridge   MCP read-only → governed tools
 W3  Orchestration  workflows · cross-agent handoff
-W4  Extensions     softmgr · signed packages · plugin market
+W4  Extensions     softmgr · signed packages · PluginHub
 W5  Intelligence   feeds (news, supply/demand) → fleet actions
 W6  Reach          mobile connector · push · voice Composer
 W7  Federation     remote attach · security model
@@ -298,11 +299,11 @@ AgenTerm — Local Agent Fleet Work OS
 ├─ [EXT] Extend without bloating core (later)
 │   ├─ Optional sidecars (agenterm-{role}.exe)
 │   ├─ Signed install / update / rollback (softmgr)
-│   └─ Plugin / package market (discovery over packages)
+│   └─ PluginHub (optional sidecar discovery over softmgr)
 │   Depends on: package contract · Lane D · PRD: Optional components
 │
 ├─ [INF] Route intelligence in (later)
-│   ├─ Feed connectors (LLM news, supply/demand, vertical data)
+│   ├─ InfoHub feed connectors (LLM news, vertical data)
 │   ├─ Filter → predicate → notify → Composer draft
 │   ├─ On-device small models (summarize, triage, suggest)
 │   └─ Governed LLM gateway (optional, evidence-gated)
@@ -436,7 +437,7 @@ Observable Fleet) rather than replacing it.
 ```text
 L0 Fleet kernel     — ORG, OBS, INT, DUR + P1 server authority
 L1 Orchestration    — ORCH (workflows, coordination, subscriptions)
-L2 Extensions       — EXT (signed packages, plugin market, sidecars)
+L2 Extensions       — EXT (signed packages, PluginHub, sidecars)
 L3 Intelligence feeds — INF (news, supply/demand, on-device assist)
 L4 Mobile connector — REACH (phone as client, not second terminal)
 ```
@@ -640,7 +641,7 @@ INT, DUR, AUTO, ORCH, EXT, INF, REACH.
 
 | ID | Status | Idea | Depends on | Owning module when promoted |
 |----|--------|------|------------|------------------------------|
-| C1 | [explore] | Persisted **workflow/pipeline** graph (steps, waits, branches, retry, cancel) | receipt, journal, typed mutations | MCP orchestration (brain/flow) |
+| C1 | [promoted] | Persisted **workflow/pipeline** graph (steps, waits, branches, retry, cancel); **Fleet Hub Workflows** tab is the human entry | receipt, journal, typed mutations | MCP orchestration (brain/flow), Human workspace |
 | C2 | [idea] | Cross-agent **team coordination** inside one fleet (delegate task, shared templates, handoff) | C1 partial, stable IDs | Agent control plane, MCP orchestration |
 | C3 | [idea] | Workflow recovery from snapshot + journal without assuming process continuity | Observable Fleet | Observable Fleet, MCP orchestration |
 | C4 | [deferred] | Federation across machines/users (not chat-first) | B3, security model | Agent control plane |
@@ -651,12 +652,12 @@ Non-goals for this lane:
 - no natural-language success signal without verifiable post-state;
 - no autonomous destructive actions without confirmation and policy.
 
-### Lane D — Extensions and marketplace (EXT · W4)
+### Lane D — Extensions and PluginHub (EXT · W4)
 
 | ID | Status | Idea | Depends on | Owning module when promoted |
 |----|--------|------|------------|------------------------------|
 | D1 | [explore] | Signed optional components as `agenterm-{role}.exe` sidecars | package contract | Optional component lifecycle |
-| D2 | [idea] | **Plugin / package market** as discovery + transaction over softmgr | D1, supply-chain gates | Optional component lifecycle |
+| D2 | [promoted] | **PluginHub** — discovery and install paths over softmgr (not a separate commerce product) | D1, supply-chain gates | Optional component lifecycle, Human workspace |
 | D3 | [idea] | GUI never downloads at startup; manifest-only awareness | D1 | Optional component lifecycle, Executable family |
 | D4 | [deferred] | Public registry with remote resolution and signing policy | D1, D2 | Optional component lifecycle, Rhai scripting |
 
@@ -664,8 +665,8 @@ Non-goals for this lane:
 
 | ID | Status | Idea | Depends on | Owning module when promoted |
 |----|--------|------|------------|------------------------------|
-| E1 | [idea] | **LLM / AI news subscription** — ingest feeds, filter, surface in fleet | HTTP sidecar, notification predicates | New feed connector PRD or Rhai scripting |
-| E2 | [idea] | **Supply/demand information services** — same pipeline as E1, different sources | E1 framework | same as E1 |
+| E1 | [promoted] | **InfoHub** — ingest feeds, filter, surface in fleet via Composer drafts | HTTP sidecar, notification predicates | Human workspace, Rhai scripting |
+| E2 | [promoted] | InfoHub **vertical catalogs** (e.g. supply/demand sources) share the E1 pipeline | E1 framework | Human workspace, Rhai scripting |
 | E3 | [explore] | On-device **small models** for summarize, triage, suggest Composer text | evidence gates | Specialized intelligence |
 | E4 | [deferred] | Governed **LLM gateway** (routing, quota, audit, redaction) | scripting, MCP, event core | LLM gateway |
 | E5 | [deferred] | Upload full pane/scrollback to cloud by default | — | **rejected** privacy boundary |
@@ -732,6 +733,26 @@ through **data-driven onboarding**, not forked codebases.
 | I5 | [idea] | Office template (report, inbox helper, form filler agents) | MCP/agent bridge | Human workspace, MCP |
 | I6 | [deferred] | Separate SKU or binary per persona | — | **rejected** |
 
+### Lane J — Fleet Hub (P4 experience · v0.2.0)
+
+Secondary hub window: toolbar **Hub** button left of Settings; overlay-first;
+four tabs bind to OBS / ORCH / EXT / INF without duplicating server authority.
+
+| ID | Status | Idea | Depends on | Owning module when promoted |
+|----|--------|------|------------|------------------------------|
+| J1 | [promoted] | **Fleet Hub** shell — entry button, overlay focus, snapshot + `ui-action` | Unix GUI Win parity, toolbar geometry | Human workspace |
+| J2 | [promoted] | **Cockpit** tab — read-only fleet dashboard (tree, states, journal, shortcuts) | J1, public CLI reads | Human workspace, Observable Fleet |
+| J3 | [promoted] | **Workflows** tab — human entry for pipelines (C1) | J1, C1 partial | Human workspace, MCP orchestration |
+| J4 | [promoted] | **PluginHub** tab — sidecar/package discovery UI (D2) | J1, D1 manifest | Human workspace, Optional components |
+| J5 | [promoted] | **InfoHub** tab — subscription and signal routing UI (E1) | J1, E1 framework | Human workspace, Observable Fleet |
+
+Hub non-goals:
+
+- no second PTY fleet or Hub-owned server state;
+- PluginHub and InfoHub are discovery and routing surfaces, not trading or
+  silent-install products;
+- primary daily surface remains terminal + Composer.
+
 ## Idea card template (copy for new entries)
 
 ```markdown
@@ -740,7 +761,7 @@ through **data-driven onboarding**, not forked codebases.
 - Status: [idea]
 - Mind branch: (ORG | OBS | INT | DUR | AUTO | ORCH | EXT | INF | REACH | NET)
 - Wave: (W0–W8)
-- Lane: (A–I)
+- Lane: (A–J)
 - Problem: (user pain in one sentence)
 - Sketch: (what it might look like)
 - Depends on: (capabilities or gates)
@@ -760,4 +781,4 @@ Add uncategorized sparks here; sort into lanes during review.
 
 ---
 
-Last reviewed: 2026-07-29 (persona lattice for daily work)
+Last reviewed: 2026-07-30 (Fleet Hub v0.2.0 lanes; PluginHub / InfoHub naming)
