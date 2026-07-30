@@ -2025,7 +2025,21 @@ impl UnixApp {
                         }
                     }
                 }
-                #[cfg(not(target_os = "linux"))]
+                #[cfg(target_os = "macos")]
+                {
+                    let physical = window.inner_size();
+                    match crate::platform::macos::scale::MacosWindowMetrics::from_physical(
+                        physical.width,
+                        physical.height,
+                        window.scale_factor(),
+                    ) {
+                        Ok((metrics, _)) => {
+                            (metrics.logical_width.max(1), metrics.logical_height.max(1))
+                        }
+                        Err(_) => (1, 1),
+                    }
+                }
+                #[cfg(not(any(target_os = "linux", target_os = "macos")))]
                 {
                     let size = window.inner_size().to_logical::<u32>(window.scale_factor());
                     (size.width.max(1), size.height.max(1))
@@ -2060,6 +2074,32 @@ impl UnixApp {
             Err(_error) => {
                 // Typed CapabilityStatus::Failed — do not invent extents.
             }
+        }
+    }
+
+    /// macOS hot-path: Retina resize / scale changes are validated by the
+    /// platform adapter before PTY, layout, and rendering updates.
+    #[cfg(target_os = "macos")]
+    fn handle_macos_geometry_event(
+        &mut self,
+        event: crate::platform::macos::scale::MacosGeometryEvent,
+    ) {
+        use crate::platform::macos::scale::{MacosGeometryAction, classify_geometry_event};
+        match classify_geometry_event(event) {
+            Ok(MacosGeometryAction::Apply(_metrics)) => {
+                if let Some(window) = self.window.as_ref() {
+                    absorb_window_event(
+                        &WindowEvent::Resized(window.inner_size()),
+                        window,
+                        &mut self.window_state_tracker,
+                    );
+                }
+                self.resize_to_window();
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
+            Ok(MacosGeometryAction::Ignore) | Err(_) => {}
         }
     }
 
@@ -2238,11 +2278,11 @@ impl UnixApp {
     }
 
     fn handle_toolbar_hit(&mut self, hit: ToolbarHit) {
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         {
-            self.dispatch_linux_toolbar_action(linux_toolbar_action_id(hit));
+            self.dispatch_toolbar_action(platform_toolbar_action_id(hit));
         }
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
         {
             match hit {
                 ToolbarHit::NewTab => {
@@ -2267,10 +2307,10 @@ impl UnixApp {
         self.request_redraw();
     }
 
-    /// Linux hot-path: toolbar hits resolve through `platform::linux` action ids
-    /// (contract revision 1) before product handlers run.
-    #[cfg(target_os = "linux")]
-    fn dispatch_linux_toolbar_action(&mut self, action_id: &str) {
+    /// Platform hot-path: toolbar hits resolve through stable adapter action ids
+    /// before shared product handlers run.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn dispatch_toolbar_action(&mut self, action_id: &str) {
         use crate::platform::action;
         match action_id {
             action::NEW_TAB => {
@@ -3631,10 +3671,9 @@ impl UnixApp {
     }
 }
 
-/// Map a Unix toolbar hit through the Linux platform adapter action ids
-/// (contract revision 1). macOS keeps the direct `ToolbarHit` match path.
+/// Map a Unix toolbar hit through the active platform adapter action ids.
 #[cfg(target_os = "linux")]
-fn linux_toolbar_action_id(hit: ToolbarHit) -> &'static str {
+fn platform_toolbar_action_id(hit: ToolbarHit) -> &'static str {
     use crate::platform::linux::toolbar::LinuxToolbarHit;
     let linux_hit = match hit {
         ToolbarHit::NewTab => LinuxToolbarHit::NewTab,
@@ -3645,6 +3684,20 @@ fn linux_toolbar_action_id(hit: ToolbarHit) -> &'static str {
         ToolbarHit::FontIncrease => LinuxToolbarHit::FontIncrease,
     };
     linux_hit.action_id()
+}
+
+#[cfg(target_os = "macos")]
+fn platform_toolbar_action_id(hit: ToolbarHit) -> &'static str {
+    use crate::platform::macos::toolbar::MacosToolbarHit;
+    let macos_hit = match hit {
+        ToolbarHit::NewTab => MacosToolbarHit::NewTab,
+        ToolbarHit::ToggleTabs => MacosToolbarHit::ToggleTabs,
+        ToolbarHit::Settings => MacosToolbarHit::Settings,
+        ToolbarHit::ToggleLocale => MacosToolbarHit::ToggleLocale,
+        ToolbarHit::FontDecrease => MacosToolbarHit::FontDecrease,
+        ToolbarHit::FontIncrease => MacosToolbarHit::FontIncrease,
+    };
+    macos_hit.action_id()
 }
 
 impl ControlHost for UnixApp {
@@ -4121,7 +4174,21 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                         },
                     );
                 }
-                #[cfg(not(target_os = "linux"))]
+                #[cfg(target_os = "macos")]
+                {
+                    self.handle_macos_geometry_event(
+                        crate::platform::macos::scale::MacosGeometryEvent::Resized {
+                            physical_width: size.width,
+                            physical_height: size.height,
+                            scale_factor: self
+                                .window
+                                .as_ref()
+                                .map(|window| window.scale_factor())
+                                .unwrap_or(1.0),
+                        },
+                    );
+                }
+                #[cfg(not(any(target_os = "linux", target_os = "macos")))]
                 {
                     if let Some(window) = self.window.as_ref() {
                         absorb_window_event(
@@ -4152,7 +4219,22 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                         },
                     );
                 }
-                #[cfg(not(target_os = "linux"))]
+                #[cfg(target_os = "macos")]
+                {
+                    let physical = self
+                        .window
+                        .as_ref()
+                        .map(|window| window.inner_size())
+                        .unwrap_or_default();
+                    self.handle_macos_geometry_event(
+                        crate::platform::macos::scale::MacosGeometryEvent::ScaleFactorChanged {
+                            scale_factor,
+                            physical_width: physical.width,
+                            physical_height: physical.height,
+                        },
+                    );
+                }
+                #[cfg(not(any(target_os = "linux", target_os = "macos")))]
                 {
                     self.resize_to_window();
                     if let Some(window) = self.window.as_ref() {
@@ -4505,8 +4587,8 @@ mod system_menu_tests {
         RenderBuffers, compact_cwd_for_status, scale_frame_nearest, scale_rect_to_frame,
         system_menu_clipboard_state_pure,
     };
-    #[cfg(target_os = "linux")]
-    use super::{ToolbarHit, linux_toolbar_action_id};
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    use super::{ToolbarHit, platform_toolbar_action_id};
     use std::path::Path;
 
     #[test]
@@ -4541,29 +4623,32 @@ mod system_menu_tests {
         );
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
-    fn linux_toolbar_hits_resolve_through_platform_action_ids() {
+    fn toolbar_hits_resolve_through_platform_action_ids() {
         use crate::platform::action;
-        assert_eq!(linux_toolbar_action_id(ToolbarHit::NewTab), action::NEW_TAB);
         assert_eq!(
-            linux_toolbar_action_id(ToolbarHit::ToggleTabs),
+            platform_toolbar_action_id(ToolbarHit::NewTab),
+            action::NEW_TAB
+        );
+        assert_eq!(
+            platform_toolbar_action_id(ToolbarHit::ToggleTabs),
             action::TOGGLE_TABS
         );
         assert_eq!(
-            linux_toolbar_action_id(ToolbarHit::Settings),
+            platform_toolbar_action_id(ToolbarHit::Settings),
             action::OPEN_SETTINGS
         );
         assert_eq!(
-            linux_toolbar_action_id(ToolbarHit::ToggleLocale),
+            platform_toolbar_action_id(ToolbarHit::ToggleLocale),
             action::TOGGLE_LOCALE
         );
         assert_eq!(
-            linux_toolbar_action_id(ToolbarHit::FontDecrease),
+            platform_toolbar_action_id(ToolbarHit::FontDecrease),
             action::FONT_DECREASE
         );
         assert_eq!(
-            linux_toolbar_action_id(ToolbarHit::FontIncrease),
+            platform_toolbar_action_id(ToolbarHit::FontIncrease),
             action::FONT_INCREASE
         );
     }

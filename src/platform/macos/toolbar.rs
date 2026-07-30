@@ -40,6 +40,12 @@ impl MacosToolbarHit {
             Self::FontIncrease => action::FONT_INCREASE,
         }
     }
+
+    pub(crate) fn from_action_id(action_id: &str) -> Option<Self> {
+        Self::ORDER
+            .into_iter()
+            .find(|hit| hit.action_id() == action_id)
+    }
 }
 
 #[cfg(test)]
@@ -66,5 +72,13 @@ mod tests {
     fn adapter_does_not_translate_product_labels() {
         assert_eq!(MacosToolbarHit::ToggleLocale.action_id(), "toggle-locale");
         assert_eq!(MacosToolbarHit::FontIncrease.action_id(), "font-increase");
+    }
+
+    #[test]
+    fn stable_action_ids_round_trip() {
+        for hit in MacosToolbarHit::ORDER {
+            assert_eq!(MacosToolbarHit::from_action_id(hit.action_id()), Some(hit));
+        }
+        assert_eq!(MacosToolbarHit::from_action_id("unknown"), None);
     }
 }

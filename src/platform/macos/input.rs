@@ -6,7 +6,21 @@
 
 #![cfg(target_os = "macos")]
 
-use crate::platform::{KeyClassification, ModifierState};
+use crate::platform::{KeyClassification, ModifierState, classify_key_press as classify_shared};
+
+pub(crate) const fn macos_modifiers(
+    control: bool,
+    shift: bool,
+    option: bool,
+    command: bool,
+) -> ModifierState {
+    ModifierState {
+        control,
+        shift,
+        alt: option,
+        meta: command,
+    }
+}
 
 pub(crate) const fn is_product_shortcut(modifiers: ModifierState) -> bool {
     modifiers.meta
@@ -23,34 +37,17 @@ pub(crate) fn classify_key_press(
     named_key: Option<&str>,
     committed_text: Option<&str>,
 ) -> KeyClassification {
-    if is_product_shortcut(modifiers) || modifiers.control {
-        return shortcut_key(logical_character, named_key)
-            .map(|key| KeyClassification::Shortcut { key, modifiers })
-            .unwrap_or(KeyClassification::Ignored);
-    }
-
-    if let Some(text) = committed_text.filter(|text| !text.is_empty()) {
-        return KeyClassification::TextCommit(text.to_string());
-    }
-
-    if let Some(name) = named_key {
-        return KeyClassification::ControlKey {
-            name: name.to_string(),
-            modifiers,
-        };
-    }
-
-    logical_character
-        .filter(|text| !text.is_empty())
-        .map(|text| KeyClassification::TextCommit(text.to_string()))
-        .unwrap_or(KeyClassification::Ignored)
+    classify_shared(
+        is_product_shortcut(modifiers) || modifiers.control,
+        modifiers,
+        logical_character,
+        named_key,
+        committed_text,
+    )
 }
 
-fn shortcut_key(logical_character: Option<&str>, named_key: Option<&str>) -> Option<String> {
-    logical_character
-        .filter(|text| !text.is_empty())
-        .or(named_key)
-        .map(ToOwned::to_owned)
+pub(crate) fn classify_ime_commit(text: &str) -> KeyClassification {
+    classify_key_press(ModifierState::empty(), None, None, Some(text))
 }
 
 #[cfg(test)]
@@ -88,6 +85,19 @@ mod tests {
     }
 
     #[test]
+    fn modifier_bridge_preserves_cocoa_semantics() {
+        assert_eq!(
+            macos_modifiers(true, true, true, true),
+            ModifierState {
+                control: true,
+                shift: true,
+                alt: true,
+                meta: true,
+            }
+        );
+    }
+
+    #[test]
     fn control_chords_stay_available_to_terminal_apps() {
         assert_eq!(
             classify_key_press(CONTROL, Some("c"), None, Some("c")),
@@ -120,6 +130,15 @@ mod tests {
             classify_key_press(NONE, Some("n"), None, Some("你好")),
             KeyClassification::TextCommit("你好".to_owned())
         );
+    }
+
+    #[test]
+    fn ime_commit_helper_uses_committed_unicode() {
+        assert_eq!(
+            classify_ime_commit("你好"),
+            KeyClassification::TextCommit("你好".to_owned())
+        );
+        assert_eq!(classify_ime_commit(""), KeyClassification::Ignored);
     }
 
     #[test]

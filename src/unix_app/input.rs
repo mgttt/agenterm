@@ -39,7 +39,11 @@ pub(super) fn primary_shortcut(modifiers: ModifiersState) -> bool {
     {
         crate::platform::linux::input::primary_shortcut(winit_modifiers_to_platform(modifiers))
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "macos")]
+    {
+        crate::platform::macos::input::is_product_shortcut(winit_modifiers_to_platform(modifiers))
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
         modifiers.control_key() || modifiers.super_key()
     }
@@ -56,11 +60,11 @@ pub(super) fn composer_key_action(
         return ComposerKeyAction::Ignored;
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
-        linux_composer_key_action(event, modifiers, buffer, select_all)
+        platform_composer_key_action(event, modifiers, buffer, select_all)
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
         composer_logical_key_action(&event.logical_key, modifiers, buffer, select_all)
     }
@@ -166,11 +170,11 @@ pub(super) fn text_field_key_action(
         return TextFieldKeyAction::Ignored;
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
-        linux_text_field_key_action(event, modifiers, buffer, multiline, select_all)
+        platform_text_field_key_action(event, modifiers, buffer, multiline, select_all)
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
         text_field_logical_key_action(&event.logical_key, modifiers, buffer, multiline, select_all)
     }
@@ -291,11 +295,11 @@ pub(super) fn key_event_to_bytes(event: &KeyEvent, modifiers: ModifiersState) ->
         return None;
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
-        linux_key_event_to_bytes(event, modifiers)
+        platform_key_event_to_bytes(event, modifiers)
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
         logical_key_to_bytes(&event.logical_key, modifiers).or_else(|| match &event.logical_key {
             Key::Unidentified(_) => match event.physical_key {
@@ -419,7 +423,17 @@ fn winit_modifiers_to_platform(modifiers: ModifiersState) -> crate::platform::Mo
     )
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(target_os = "macos")]
+fn winit_modifiers_to_platform(modifiers: ModifiersState) -> crate::platform::ModifierState {
+    crate::platform::macos::input::macos_modifiers(
+        modifiers.control_key(),
+        modifiers.shift_key(),
+        modifiers.alt_key(),
+        modifiers.super_key(),
+    )
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn logical_key_parts(key: &Key) -> (Option<&str>, Option<&'static str>) {
     match key {
         Key::Character(text) => (Some(text.as_str()), None),
@@ -428,8 +442,47 @@ fn logical_key_parts(key: &Key) -> (Option<&str>, Option<&'static str>) {
     }
 }
 
-#[cfg(target_os = "linux")]
-fn linux_composer_shortcut(key: &str) -> ComposerKeyAction {
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn platform_classify_key_press(
+    event: &KeyEvent,
+    modifiers: ModifiersState,
+) -> crate::platform::KeyClassification {
+    let modifiers = winit_modifiers_to_platform(modifiers);
+    let (logical_character, named_key) = logical_key_parts(&event.logical_key);
+    #[cfg(target_os = "linux")]
+    {
+        crate::platform::linux::input::classify_key_press(
+            modifiers,
+            logical_character,
+            named_key,
+            event.text.as_deref(),
+        )
+    }
+    #[cfg(target_os = "macos")]
+    {
+        crate::platform::macos::input::classify_key_press(
+            modifiers,
+            logical_character,
+            named_key,
+            event.text.as_deref(),
+        )
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn classified_product_shortcut(modifiers: crate::platform::ModifierState) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        crate::platform::linux::input::primary_shortcut(modifiers)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        crate::platform::macos::input::is_product_shortcut(modifiers)
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn platform_composer_shortcut(key: &str) -> ComposerKeyAction {
     if key.eq_ignore_ascii_case("Enter") {
         ComposerKeyAction::Submit
     } else if key.eq_ignore_ascii_case("a") {
@@ -445,7 +498,7 @@ fn linux_composer_shortcut(key: &str) -> ComposerKeyAction {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn push_committed_text(buffer: &mut String, select_all: &mut bool, text: &str) -> bool {
     let replaced = prepare_composer_edit(buffer, select_all);
     let mut changed = false;
@@ -461,8 +514,8 @@ fn push_committed_text(buffer: &mut String, select_all: &mut bool, text: &str) -
     changed || replaced
 }
 
-#[cfg(target_os = "linux")]
-fn linux_composer_key_action(
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn platform_composer_key_action(
     event: &KeyEvent,
     modifiers: ModifiersState,
     buffer: &mut String,
@@ -470,15 +523,12 @@ fn linux_composer_key_action(
 ) -> ComposerKeyAction {
     use crate::platform::KeyClassification;
 
-    let mods = winit_modifiers_to_platform(modifiers);
-    let (logical_char, named) = logical_key_parts(&event.logical_key);
-    match crate::platform::linux::input::classify_key_press(
-        mods,
-        logical_char,
-        named,
-        event.text.as_deref(),
-    ) {
-        KeyClassification::Shortcut { key, .. } => linux_composer_shortcut(&key),
+    match platform_classify_key_press(event, modifiers) {
+        KeyClassification::Shortcut {
+            key,
+            modifiers: classified,
+        } if classified_product_shortcut(classified) => platform_composer_shortcut(&key),
+        KeyClassification::Shortcut { .. } => ComposerKeyAction::Ignored,
         KeyClassification::TextCommit(text) => {
             if push_committed_text(buffer, select_all, &text) {
                 ComposerKeyAction::Edited
@@ -514,8 +564,12 @@ fn linux_composer_key_action(
     }
 }
 
-#[cfg(target_os = "linux")]
-fn linux_text_field_shortcut(key: &str, buffer: &str, select_all: &mut bool) -> TextFieldKeyAction {
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn platform_text_field_shortcut(
+    key: &str,
+    buffer: &str,
+    select_all: &mut bool,
+) -> TextFieldKeyAction {
     if key.eq_ignore_ascii_case("Enter") {
         TextFieldKeyAction::Submit
     } else if key.eq_ignore_ascii_case("a") {
@@ -532,8 +586,8 @@ fn linux_text_field_shortcut(key: &str, buffer: &str, select_all: &mut bool) -> 
     }
 }
 
-#[cfg(target_os = "linux")]
-fn linux_text_field_key_action(
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn platform_text_field_key_action(
     event: &KeyEvent,
     modifiers: ModifiersState,
     buffer: &mut String,
@@ -542,17 +596,14 @@ fn linux_text_field_key_action(
 ) -> TextFieldKeyAction {
     use crate::platform::KeyClassification;
 
-    let mods = winit_modifiers_to_platform(modifiers);
-    let (logical_char, named) = logical_key_parts(&event.logical_key);
-    match crate::platform::linux::input::classify_key_press(
-        mods,
-        logical_char,
-        named,
-        event.text.as_deref(),
-    ) {
-        KeyClassification::Shortcut { key, .. } => {
-            linux_text_field_shortcut(&key, buffer, select_all)
+    match platform_classify_key_press(event, modifiers) {
+        KeyClassification::Shortcut {
+            key,
+            modifiers: classified,
+        } if classified_product_shortcut(classified) => {
+            platform_text_field_shortcut(&key, buffer, select_all)
         }
+        KeyClassification::Shortcut { .. } => TextFieldKeyAction::Ignored,
         KeyClassification::TextCommit(text) => {
             let replaced = prepare_composer_edit(buffer, select_all);
             let mut changed = false;
@@ -602,18 +653,11 @@ fn linux_text_field_key_action(
     }
 }
 
-#[cfg(target_os = "linux")]
-fn linux_key_event_to_bytes(event: &KeyEvent, modifiers: ModifiersState) -> Option<Vec<u8>> {
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn platform_key_event_to_bytes(event: &KeyEvent, modifiers: ModifiersState) -> Option<Vec<u8>> {
     use crate::platform::KeyClassification;
 
-    let mods = winit_modifiers_to_platform(modifiers);
-    let (logical_char, named) = logical_key_parts(&event.logical_key);
-    match crate::platform::linux::input::classify_key_press(
-        mods,
-        logical_char,
-        named,
-        event.text.as_deref(),
-    ) {
+    match platform_classify_key_press(event, modifiers) {
         KeyClassification::Shortcut {
             key,
             modifiers: classified,
@@ -774,8 +818,11 @@ mod tests {
     }
 
     #[test]
-    fn primary_shortcut_accepts_control_and_command() {
+    fn primary_shortcut_uses_platform_policy() {
+        #[cfg(target_os = "linux")]
         assert!(primary_shortcut(ModifiersState::CONTROL));
+        #[cfg(target_os = "macos")]
+        assert!(!primary_shortcut(ModifiersState::CONTROL));
         assert!(primary_shortcut(ModifiersState::SUPER));
         assert!(!primary_shortcut(ModifiersState::ALT));
     }
@@ -801,9 +848,15 @@ mod tests {
             terminal_shortcut_action(&c, ModifiersState::CONTROL, false),
             TerminalShortcutAction::Forward
         );
+        #[cfg(target_os = "linux")]
         assert_eq!(
             terminal_shortcut_action(&c, ModifiersState::CONTROL, true),
             TerminalShortcutAction::Copy
+        );
+        #[cfg(target_os = "macos")]
+        assert_eq!(
+            terminal_shortcut_action(&c, ModifiersState::CONTROL, true),
+            TerminalShortcutAction::Forward
         );
         assert_eq!(
             terminal_shortcut_action(&c, ModifiersState::SUPER, false),
