@@ -8,10 +8,20 @@
 #
 # Auth: CURSOR_API (HTTP Basic user, empty password). Never printed or committed.
 #
+# Robustness (default):
+#   - On HTTP 409 agent_busy, wait + exponential backoff + jitter until IDLE
+#     (latest run FINISHED/ERROR/…) or --wait-timeout, then retry POST
+#   - Adaptive re-resolve of display names during wait (stale bcId foresight)
+#   - Curl connect/max timeouts; transient 5xx/429 retry; fatal 4xx fail-fast
+#   - Payload via temp file (no ARG_MAX); message byte budget
+#
+# Exit codes:
+#   0 ok | 1 busy/timeout | 2 usage | 3 auth | 4 network | 5 api error
+#
 # Usage:
 #   scripts/cursor_agent_chat.sh --list
 #   scripts/cursor_agent_chat.sh --from 主控 --to 分身1 '请继续 Linux GUI 黑盒'
-#   scripts/cursor_agent_chat.sh --from 主控 --to bc-5a9c83b4-3a39-42e4-9d33-cb705d848f8f --dry-run 'ping'
+#   scripts/cursor_agent_chat.sh --from 主控 --to 分身1 --no-wait 'ping'
 #   echo '正文' | scripts/cursor_agent_chat.sh --from 分身1 --to 主控 --stdin
 set -euo pipefail
 
@@ -24,42 +34,98 @@ USE_STDIN=0
 REGISTRY=""
 MESSAGE=""
 
+# Wait policy: default ON (robust). Override with --no-wait or env.
+WAIT="${CURSOR_AGENT_CHAT_WAIT:-1}"
+WAIT_TIMEOUT="${CURSOR_AGENT_CHAT_WAIT_TIMEOUT:-600}"
+MAX_BYTES="${CURSOR_AGENT_CHAT_MAX_BYTES:-100000}"
+CONNECT_TIMEOUT="${CURSOR_AGENT_CHAT_CONNECT_TIMEOUT:-15}"
+CURL_MAX_TIME="${CURSOR_AGENT_CHAT_CURL_MAX_TIME:-60}"
+BACKOFF_INITIAL="${CURSOR_AGENT_CHAT_BACKOFF_INITIAL:-2}"
+BACKOFF_MAX="${CURSOR_AGENT_CHAT_BACKOFF_MAX:-45}"
+RE_RESOLVE_EVERY="${CURSOR_AGENT_CHAT_RE_RESOLVE_EVERY:-3}"
+PRECHECK="${CURSOR_AGENT_CHAT_PRECHECK:-1}"
+
+# shellcheck disable=SC2034
+EXIT_OK=0
+EXIT_BUSY=1
+EXIT_USAGE=2
+EXIT_AUTH=3
+EXIT_NETWORK=4
+EXIT_API=5
+
+TMP_FILES=()
+cleanup() {
+  local f
+  for f in "${TMP_FILES[@]:-}"; do
+    rm -f "$f" 2>/dev/null || true
+  done
+}
+trap cleanup EXIT
+
+mktemp_tracked() {
+  local f
+  f=$(mktemp)
+  TMP_FILES+=("$f")
+  printf '%s' "$f"
+}
+
 die() {
-  printf '%s\n' "$*" >&2
-  exit 2
+  local code="${2:-$EXIT_USAGE}"
+  printf '%s\n' "$1" >&2
+  exit "$code"
 }
 
 usage() {
   cat <<'EOF'
 Usage:
   scripts/cursor_agent_chat.sh --list
-  scripts/cursor_agent_chat.sh --from <name|bcId> --to <name|bcId> [--dry-run] [--] MESSAGE...
+  scripts/cursor_agent_chat.sh --from <name|bcId> --to <name|bcId> [options] [--] MESSAGE...
   scripts/cursor_agent_chat.sh --from <name|bcId> --to <name|bcId> --stdin
 
 Options:
-  --from NAME|bcId   Sender display name or bc-… id (required to send)
-  --to NAME|bcId     Recipient display name or bc-… id (required to send)
-  --list             List agents visible to CURSOR_API (name, id, status)
-  --dry-run          Build envelope + JSON; do not call the API
-  --stdin            Read message body from stdin
-  --registry PATH    Fallback name→bcId hints only if live API miss
-                     (default: skills/cursor/session-registry.md)
-  -h, --help         Show this help
+  --from NAME|bcId     Sender display name or bc-… id (required to send)
+  --to NAME|bcId       Recipient display name or bc-… id (required to send)
+  --list               List agents visible to CURSOR_API (name, id, status, latestRun)
+  --dry-run            Build envelope + JSON; do not call the API
+  --stdin              Read message body from stdin
+  --wait               Wait/retry on 409 agent_busy (default)
+  --no-wait            Fail immediately on 409 (exit 1)
+  --wait-timeout SEC   Max seconds to wait for recipient (default 600;
+                       env CURSOR_AGENT_CHAT_WAIT_TIMEOUT)
+  --registry PATH      Fallback name→bcId hints only if live API miss
+                       (default: skills/cursor/session-registry.md)
+  -h, --help           Show this help
 
 Resolution (adaptive):
   1) If argument is bc-…, use it (optionally confirmed via live list)
   2) Else resolve display name via live GET /v1/agents (prefer non-archived)
   3) Else fall back to --registry table (may be stale — last resort)
+  During --wait, display names are re-resolved every few attempts.
+
+Busy foresight:
+  Agent list status ACTIVE ≠ free for a new run. Free when latest run is
+  FINISHED / ERROR / FAILED / CANCELLED (or missing). Otherwise POST yields
+  409 agent_busy. This script probes GET /agents/{id} + GET …/runs/{latestRunId}
+  before/between POSTs when waiting.
 
 Envelope (prepended silently to the prompt text):
   <from::SENDER><to::RECIPIENT>
+
+Exit codes:
+  0 ok | 1 busy/timeout | 2 usage | 3 auth | 4 network | 5 api error
 
 Desensitize:
   - Never prints CURSOR_API or Authorization material
   - Redacts bearer/token-looking substrings in API error bodies
   - Logs only name, bcId prefix, run id, and HTTP status
-  - Set CURSOR_AGENT_CHAT_VERBOSE=1 to log resolve source (api|registry)
+  - Set CURSOR_AGENT_CHAT_VERBOSE=1 to log resolve source / wait probes
 EOF
+}
+
+logv() {
+  if [ "${CURSOR_AGENT_CHAT_VERBOSE:-0}" != "0" ]; then
+    printf '%s\n' "$*" >&2
+  fi
 }
 
 redact() {
@@ -73,9 +139,14 @@ redact() {
     -e 's/"token"[[:space:]]*:[[:space:]]*"[^"]+"/"token":"<redacted>"/g'
 }
 
+require_tools() {
+  command -v curl >/dev/null 2>&1 || die "curl is required" "$EXIT_USAGE"
+  command -v python3 >/dev/null 2>&1 || die "python3 is required" "$EXIT_USAGE"
+}
+
 require_api() {
   if [ -z "${CURSOR_API:-}" ]; then
-    die "CURSOR_API is unset; inject the Cloud Agent API key into the environment (never commit it)"
+    die "CURSOR_API is unset; inject the Cloud Agent API key into the environment (never commit it)" "$EXIT_AUTH"
   fi
 }
 
@@ -90,6 +161,49 @@ bc_prefix() {
 
 is_bc_id() {
   [[ "$1" =~ ^bc-[0-9a-fA-F-]{8,}$ ]]
+}
+
+now_epoch() {
+  date +%s
+}
+
+# Sleep SEC, or less if remaining budget is smaller. Returns 1 if budget exhausted.
+sleep_budget() {
+  local want="$1"
+  local deadline="$2"
+  local now rem
+  now=$(now_epoch)
+  rem=$((deadline - now))
+  if [ "$rem" -le 0 ]; then
+    return 1
+  fi
+  if [ "$want" -gt "$rem" ]; then
+    want=$rem
+  fi
+  # shellcheck disable=SC2034
+  sleep "$want" || true
+  return 0
+}
+
+# Exponential backoff with ±25% jitter; capped by BACKOFF_MAX.
+next_backoff() {
+  local current="$1"
+  local next jitter
+  next=$((current * 2))
+  if [ "$next" -gt "$BACKOFF_MAX" ]; then
+    next=$BACKOFF_MAX
+  fi
+  # jitter in 0..current/4 (bash $RANDOM)
+  jitter=$((RANDOM % (current / 4 + 1)))
+  if ((RANDOM % 2)); then
+    next=$((next + jitter))
+  else
+    next=$((next - jitter))
+  fi
+  if [ "$next" -lt 1 ]; then
+    next=1
+  fi
+  printf '%s' "$next"
 }
 
 repo_root() {
@@ -130,27 +244,87 @@ registry_lookup() {
   ' "$file"
 }
 
-api_list_json() {
+# Generic curl: sets globals CURL_HTTP_CODE and CURL_BODY_FILE.
+# Args: METHOD URL [data_file_for_POST]
+# Returns 0 on HTTP exchange completed (any code); 1 on transport failure.
+curl_api() {
+  local method="$1"
+  local url="$2"
+  local data_file="${3:-}"
   require_api
-  local url="${API_BASE}/agents?limit=100"
-  local body code
-  body=$(mktemp)
-  code=$(curl -sS -o "$body" -w '%{http_code}' \
-    -u "${CURSOR_API}:" \
-    --url "$url" || true)
-  if [ "$code" != "200" ]; then
-    printf 'list agents failed HTTP %s\n' "$code" >&2
-    redact <"$body" >&2 || true
-    rm -f "$body"
+  CURL_BODY_FILE=$(mktemp_tracked)
+  local code curl_rc=0
+  local -a args
+  args=(-sS -o "$CURL_BODY_FILE" -w '%{http_code}'
+    --connect-timeout "$CONNECT_TIMEOUT"
+    --max-time "$CURL_MAX_TIME"
+    -u "${CURSOR_API}:"
+    --url "$url")
+  case "$method" in
+    GET) ;;
+    POST)
+      args+=(-X POST --header 'Content-Type: application/json')
+      if [ -n "$data_file" ]; then
+        args+=(--data-binary @"$data_file")
+      else
+        args+=(--data '{}')
+      fi
+      ;;
+    *)
+      die "internal: unsupported method $method" "$EXIT_USAGE"
+      ;;
+  esac
+  code=$(curl "${args[@]}" || curl_rc=$?)
+  CURL_HTTP_CODE="$code"
+  if [ "$curl_rc" -ne 0 ]; then
+    logv "curl transport failure rc=$curl_rc url=$(printf '%s' "$url" | sed -E 's#[0-9a-fA-F-]{20,}#…#g')"
     return 1
   fi
-  cat "$body"
-  rm -f "$body"
+  return 0
+}
+
+classify_http() {
+  # stdout: ok | busy | auth | not_found | rate | transient | fatal
+  local code="$1"
+  case "$code" in
+    200|201|202) printf 'ok' ;;
+    409) printf 'busy' ;;
+    401|403) printf 'auth' ;;
+    404) printf 'not_found' ;;
+    408|425|429) printf 'rate' ;;
+    500|502|503|504) printf 'transient' ;;
+    "") printf 'transient' ;;
+    *) printf 'fatal' ;;
+  esac
+}
+
+api_list_json() {
+  if ! curl_api GET "${API_BASE}/agents?limit=100"; then
+    return 1
+  fi
+  case "$(classify_http "$CURL_HTTP_CODE")" in
+    ok)
+      cat "$CURL_BODY_FILE"
+      return 0
+      ;;
+    auth)
+      printf 'list agents failed HTTP %s (auth)\n' "$CURL_HTTP_CODE" >&2
+      redact <"$CURL_BODY_FILE" >&2 || true
+      return 3
+      ;;
+    *)
+      printf 'list agents failed HTTP %s\n' "$CURL_HTTP_CODE" >&2
+      redact <"$CURL_BODY_FILE" >&2 || true
+      return 1
+      ;;
+  esac
 }
 
 api_resolve_name() {
   local want="$1"
-  api_list_json | python3 -c '
+  local json
+  json=$(api_list_json) || return 1
+  printf '%s' "$json" | python3 -c '
 import json, sys
 want = sys.argv[1]
 data = json.load(sys.stdin)
@@ -213,29 +387,98 @@ resolve_agent() {
   fi
 
   if [ -z "$id" ]; then
-    die "cannot resolve ${role} '${label}' to a live bcId (try --list; registry is fallback only)"
+    die "cannot resolve ${role} '${label}' to a live bcId (try --list; registry is fallback only)" "$EXIT_USAGE"
   fi
 
-  if [ "${CURSOR_AGENT_CHAT_VERBOSE:-0}" != "0" ]; then
-    printf 'resolve %s=%s via %s -> %s\n' "$role" "$label" "$source" "$(bc_prefix "$id")" >&2
-  fi
+  logv "resolve ${role}=${label} via ${source} -> $(bc_prefix "$id")"
   printf '%s' "$id"
+}
+
+# Print: agentStatus|latestRunId|runStatus  (runStatus may be empty/"?")
+probe_recipient() {
+  local agent_id="$1"
+  if ! curl_api GET "${API_BASE}/agents/${agent_id}"; then
+    printf 'NETWORK||'
+    return 1
+  fi
+  local kind
+  kind=$(classify_http "$CURL_HTTP_CODE")
+  if [ "$kind" != "ok" ]; then
+    printf 'HTTP%s||' "$CURL_HTTP_CODE"
+    return 1
+  fi
+  local agent_status latest_run
+  # API may return bare agent object or {"agent":{...}}
+  read -r agent_status latest_run < <(python3 -c '
+import json,sys
+d=json.load(open(sys.argv[1]))
+a=d.get("agent") if isinstance(d.get("agent"), dict) else d
+print((a.get("status") or a.get("agentStatus") or "?") + " " + (a.get("latestRunId") or ""))
+' "$CURL_BODY_FILE")
+
+  local run_status=""
+  if [ -n "${latest_run:-}" ]; then
+    if curl_api GET "${API_BASE}/agents/${agent_id}/runs/${latest_run}"; then
+      if [ "$(classify_http "$CURL_HTTP_CODE")" = "ok" ]; then
+        run_status=$(python3 -c '
+import json,sys
+d=json.load(open(sys.argv[1]))
+r=d.get("run") if isinstance(d.get("run"), dict) else d
+print(r.get("status") or "?")
+' "$CURL_BODY_FILE")
+      else
+        run_status="?"
+      fi
+    else
+      run_status="?"
+    fi
+  fi
+  printf '%s|%s|%s' "${agent_status:-?}" "${latest_run:-}" "${run_status:-}"
+  return 0
+}
+
+# 0 = free to accept a new run; 1 = busy; 2 = unknown (probe failed)
+recipient_is_free() {
+  local probe="$1"
+  local agent_status run_status
+  agent_status=$(printf '%s' "$probe" | awk -F'|' '{print $1}')
+  run_status=$(printf '%s' "$probe" | awk -F'|' '{print $3}')
+  case "$agent_status" in
+    NETWORK*|HTTP*|'')
+      return 2
+      ;;
+  esac
+  case "$(printf '%s' "$run_status" | tr '[:lower:]' '[:upper:]')" in
+    ""|FINISHED|ERROR|FAILED|CANCELLED|CANCELED|EXPIRED|COMPLETED|SUCCESS)
+      return 0
+      ;;
+    "?")
+      return 2
+      ;;
+    *)
+      return 1
+      ;;
+  esac
 }
 
 list_agents() {
   require_api
-  api_list_json | python3 -c "
+  local json
+  json=$(api_list_json) || exit $?
+  printf '%s' "$json" | python3 -c "
 import json, sys
 data = json.load(sys.stdin)
 items = data.get('items') or data.get('agents') or []
-print(f\"{'name':<12} {'id':<40} {'status':<10} url\")
-print('-' * 100)
+print(f\"{'name':<12} {'id':<40} {'status':<10} {'latestRun':<12} url\")
+print('-' * 110)
 for item in items:
     name = item.get('name') or ''
     agent_id = item.get('id') or item.get('agentId') or ''
     status = item.get('status') or item.get('agentStatus') or ''
+    lr = item.get('latestRunId') or ''
+    lr_short = (lr[:12] + '…') if len(lr) > 12 else lr
     url = item.get('url') or (f'https://cursor.com/agents/{agent_id}' if agent_id else '')
-    print(f'{name:<12} {agent_id:<40} {status:<10} {url}')
+    print(f'{name:<12} {agent_id:<40} {status:<10} {lr_short:<12} {url}')
 "
 }
 
@@ -246,60 +489,217 @@ build_envelope_message() {
   printf '<from::%s><to::%s>\n%s' "$from_label" "$to_label" "$body"
 }
 
-json_payload() {
-  local text="$1"
+# Write JSON payload to file path $1 from text in env/file to avoid ARG_MAX.
+json_payload_to_file() {
+  local out="$1"
+  local text="$2"
   PROMPT_TEXT="$text" python3 -c '
-import json, os
-print(json.dumps({"prompt": {"text": os.environ["PROMPT_TEXT"]}}, ensure_ascii=False))
-'
+import json, os, sys
+path = sys.argv[1]
+payload = {"prompt": {"text": os.environ["PROMPT_TEXT"]}}
+with open(path, "w", encoding="utf-8") as f:
+    json.dump(payload, f, ensure_ascii=False)
+' "$out"
 }
 
-send_run() {
-  local to_id="$1"
-  local payload="$2"
-  require_api
-  local body code
-  body=$(mktemp)
-  code=$(curl -sS -o "$body" -w '%{http_code}' \
-    -X POST \
-    -u "${CURSOR_API}:" \
-    --header 'Content-Type: application/json' \
-    --url "${API_BASE}/agents/${to_id}/runs" \
-    --data "$payload" || true)
-
-  local redacted
-  redacted=$(redact <"$body" || true)
-  rm -f "$body"
-
-  case "$code" in
-    200|201|202)
-      printf 'ok http=%s to=%s run=%s\n' \
-        "$code" \
-        "$(bc_prefix "$to_id")" \
-        "$(printf '%s' "$redacted" | python3 -c 'import json,sys
+parse_run_id() {
+  local body_file="$1"
+  python3 -c '
+import json,sys
 try:
- d=json.load(sys.stdin)
- run=(d.get("run") or {})
- print(run.get("id") or d.get("id") or "unknown")
+    d=json.load(open(sys.argv[1]))
+    run=(d.get("run") or {})
+    print(run.get("id") or d.get("id") or "unknown")
 except Exception:
- print("unknown")' 2>/dev/null || echo unknown)"
+    print("unknown")
+' "$body_file" 2>/dev/null || echo unknown
+}
+
+# POST once. Sets LAST_HTTP_CODE / LAST_CLASS. Returns 0 on success.
+send_run_once() {
+  local to_id="$1"
+  local payload_file="$2"
+  LAST_HTTP_CODE=""
+  LAST_CLASS=""
+  if ! curl_api POST "${API_BASE}/agents/${to_id}/runs" "$payload_file"; then
+    LAST_HTTP_CODE=""
+    LAST_CLASS=network
+    return 1
+  fi
+  LAST_HTTP_CODE="$CURL_HTTP_CODE"
+  LAST_CLASS=$(classify_http "$CURL_HTTP_CODE")
+  case "$LAST_CLASS" in
+    ok)
+      printf 'ok http=%s to=%s run=%s\n' \
+        "$CURL_HTTP_CODE" \
+        "$(bc_prefix "$to_id")" \
+        "$(parse_run_id "$CURL_BODY_FILE")"
       return 0
       ;;
-    409)
-      printf 'busy http=409 to=%s (recipient has an active run; retry when IDLE)\n' \
-        "$(bc_prefix "$to_id")" >&2
-      printf '%s\n' "$redacted" >&2
-      return 1
-      ;;
     *)
-      printf 'error http=%s to=%s\n' "$code" "$(bc_prefix "$to_id")" >&2
-      printf '%s\n' "$redacted" >&2
       return 1
       ;;
   esac
 }
 
+send_run_resilient() {
+  local to_label="$1"
+  local to_id="$2"
+  local payload_file="$3"
+  local deadline attempt=0 backoff="$BACKOFF_INITIAL"
+  local probe class
+
+  deadline=$(( $(now_epoch) + WAIT_TIMEOUT ))
+
+  # Foresight: if waiting, avoid burning a 409 when latest run is clearly active.
+  if [ "$WAIT" -eq 1 ] && [ "$PRECHECK" -eq 1 ]; then
+    probe=$(probe_recipient "$to_id" || true)
+    logv "precheck to=$(bc_prefix "$to_id") probe=$probe"
+    local free_rc=0
+    recipient_is_free "$probe" || free_rc=$?
+    if [ "$free_rc" -eq 1 ]; then
+      printf 'wait to=%s probe=%s (recipient busy; polling up to %ss)\n' \
+        "$(bc_prefix "$to_id")" "$probe" "$WAIT_TIMEOUT" >&2
+      while true; do
+        now=$(now_epoch)
+        if [ "$now" -ge "$deadline" ]; then
+          printf 'timeout http=409 to=%s waited=%ss (still busy: %s)\n' \
+            "$(bc_prefix "$to_id")" "$WAIT_TIMEOUT" "$probe" >&2
+          return "$EXIT_BUSY"
+        fi
+        sleep_budget "$backoff" "$deadline" || {
+          printf 'timeout http=409 to=%s waited=%ss\n' \
+            "$(bc_prefix "$to_id")" "$WAIT_TIMEOUT" >&2
+          return "$EXIT_BUSY"
+        }
+        backoff=$(next_backoff "$backoff")
+        # Adaptive re-resolve by display name (not raw bcId arg).
+        if ! is_bc_id "$to_label"; then
+          attempt=$((attempt + 1))
+          if [ $((attempt % RE_RESOLVE_EVERY)) -eq 0 ]; then
+            local new_id
+            if new_id=$(api_resolve_name "$to_label" 2>/dev/null); then
+              if [ "$new_id" != "$to_id" ]; then
+                printf 're-resolve to=%s -> %s (was %s)\n' \
+                  "$to_label" "$(bc_prefix "$new_id")" "$(bc_prefix "$to_id")" >&2
+                to_id=$new_id
+              fi
+            fi
+          fi
+        fi
+        probe=$(probe_recipient "$to_id" || true)
+        logv "poll probe=$probe backoff=${backoff}s"
+        free_rc=0
+        recipient_is_free "$probe" || free_rc=$?
+        if [ "$free_rc" -eq 0 ]; then
+          printf 'ready to=%s probe=%s\n' "$(bc_prefix "$to_id")" "$probe" >&2
+          break
+        fi
+        # free_rc=2 (unknown): keep polling rather than hammering POST.
+      done
+      backoff=$BACKOFF_INITIAL
+    fi
+  fi
+
+  attempt=0
+  while true; do
+    attempt=$((attempt + 1))
+    if send_run_once "$to_id" "$payload_file"; then
+      return 0
+    fi
+    class="${LAST_CLASS:-fatal}"
+    case "$class" in
+      busy)
+        if [ "$WAIT" -ne 1 ]; then
+          printf 'busy http=409 to=%s (recipient has an active run; use --wait or retry when free)\n' \
+            "$(bc_prefix "$to_id")" >&2
+          redact <"$CURL_BODY_FILE" >&2 || true
+          return "$EXIT_BUSY"
+        fi
+        now=$(now_epoch)
+        if [ "$now" -ge "$deadline" ]; then
+          printf 'timeout http=409 to=%s waited=%ss after %s attempts\n' \
+            "$(bc_prefix "$to_id")" "$WAIT_TIMEOUT" "$attempt" >&2
+          redact <"$CURL_BODY_FILE" >&2 || true
+          return "$EXIT_BUSY"
+        fi
+        printf 'busy http=409 to=%s attempt=%s; sleep %ss (deadline in %ss)\n' \
+          "$(bc_prefix "$to_id")" "$attempt" "$backoff" "$((deadline - now))" >&2
+        sleep_budget "$backoff" "$deadline" || {
+          printf 'timeout http=409 to=%s\n' "$(bc_prefix "$to_id")" >&2
+          return "$EXIT_BUSY"
+        }
+        backoff=$(next_backoff "$backoff")
+        if ! is_bc_id "$to_label" && [ $((attempt % RE_RESOLVE_EVERY)) -eq 0 ]; then
+          local new_id
+          if new_id=$(api_resolve_name "$to_label" 2>/dev/null); then
+            if [ "$new_id" != "$to_id" ]; then
+              printf 're-resolve to=%s -> %s\n' "$to_label" "$(bc_prefix "$new_id")" >&2
+              to_id=$new_id
+            fi
+          fi
+        fi
+        # Opportunistic probe to skip useless POSTs.
+        probe=$(probe_recipient "$to_id" || true)
+        logv "post-409 probe=$probe"
+        ;;
+      auth)
+        printf 'error http=%s to=%s (auth)\n' "${LAST_HTTP_CODE:-?}" "$(bc_prefix "$to_id")" >&2
+        redact <"${CURL_BODY_FILE:-/dev/null}" >&2 || true
+        return "$EXIT_AUTH"
+        ;;
+      not_found)
+        # Maybe stale id — one adaptive re-resolve then retry once-ish inside loop.
+        printf 'error http=404 to=%s (not found; re-resolving)\n' "$(bc_prefix "$to_id")" >&2
+        if ! is_bc_id "$to_label"; then
+          local new_id
+          if new_id=$(api_resolve_name "$to_label" 2>/dev/null) && [ -n "$new_id" ]; then
+            to_id=$new_id
+            printf 're-resolve after 404 -> %s\n' "$(bc_prefix "$to_id")" >&2
+            if [ "$WAIT" -eq 1 ]; then
+              now=$(now_epoch)
+              [ "$now" -lt "$deadline" ] || return "$EXIT_API"
+              sleep_budget 1 "$deadline" || true
+              continue
+            fi
+          fi
+        fi
+        redact <"${CURL_BODY_FILE:-/dev/null}" >&2 || true
+        return "$EXIT_API"
+        ;;
+      rate|transient|network)
+        if [ "$WAIT" -ne 1 ]; then
+          printf 'error http=%s to=%s class=%s (transient; pass --wait to retry)\n' \
+            "${LAST_HTTP_CODE:-?}" "$(bc_prefix "$to_id")" "$class" >&2
+          redact <"${CURL_BODY_FILE:-/dev/null}" >&2 || true
+          if [ "$class" = "network" ]; then
+            return "$EXIT_NETWORK"
+          fi
+          return "$EXIT_API"
+        fi
+        now=$(now_epoch)
+        if [ "$now" -ge "$deadline" ]; then
+          printf 'timeout http=%s to=%s class=%s after %ss\n' \
+            "${LAST_HTTP_CODE:-?}" "$(bc_prefix "$to_id")" "$class" "$WAIT_TIMEOUT" >&2
+          return "$EXIT_NETWORK"
+        fi
+        printf 'retry http=%s to=%s class=%s attempt=%s; sleep %ss\n' \
+          "${LAST_HTTP_CODE:-?}" "$(bc_prefix "$to_id")" "$class" "$attempt" "$backoff" >&2
+        sleep_budget "$backoff" "$deadline" || return "$EXIT_NETWORK"
+        backoff=$(next_backoff "$backoff")
+        ;;
+      *)
+        printf 'error http=%s to=%s\n' "${LAST_HTTP_CODE:-?}" "$(bc_prefix "$to_id")" >&2
+        redact <"${CURL_BODY_FILE:-/dev/null}" >&2 || true
+        return "$EXIT_API"
+        ;;
+    esac
+  done
+}
+
 # ---- argv ----
+require_tools
+
 while [ $# -gt 0 ]; do
   case "$1" in
     --from)
@@ -315,6 +715,19 @@ while [ $# -gt 0 ]; do
     --registry)
       [ $# -ge 2 ] || die "--registry needs a path"
       REGISTRY=$2
+      shift 2
+      ;;
+    --wait)
+      WAIT=1
+      shift
+      ;;
+    --no-wait)
+      WAIT=0
+      shift
+      ;;
+    --wait-timeout)
+      [ $# -ge 2 ] || die "--wait-timeout needs seconds"
+      WAIT_TIMEOUT=$2
       shift 2
       ;;
     --list)
@@ -346,6 +759,14 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# Validate numeric knobs early.
+case "$WAIT_TIMEOUT" in
+  ''|*[!0-9]*) die "--wait-timeout must be a non-negative integer" ;;
+esac
+case "$MAX_BYTES" in
+  ''|*[!0-9]*) die "CURSOR_AGENT_CHAT_MAX_BYTES must be a non-negative integer" ;;
+esac
+
 if [ -z "$REGISTRY" ]; then
   REGISTRY=$(default_registry || true)
 fi
@@ -368,17 +789,25 @@ fi
 
 [ -n "${MESSAGE//[[:space:]]/}" ] || die "message body is empty"
 
+ENVELOPED=$(build_envelope_message "$FROM_NAME" "$TO_NAME" "$MESSAGE")
+BYTE_LEN=$(printf '%s' "$ENVELOPED" | wc -c | tr -d ' ')
+if [ "$BYTE_LEN" -gt "$MAX_BYTES" ]; then
+  die "message too large: ${BYTE_LEN} bytes (budget ${MAX_BYTES}; set CURSOR_AGENT_CHAT_MAX_BYTES to raise)" "$EXIT_USAGE"
+fi
+
 FROM_ID=$(resolve_agent "$FROM_NAME" from)
 TO_ID=$(resolve_agent "$TO_NAME" to)
 
-ENVELOPED=$(build_envelope_message "$FROM_NAME" "$TO_NAME" "$MESSAGE")
-PAYLOAD=$(json_payload "$ENVELOPED")
+PAYLOAD_FILE=$(mktemp_tracked)
+json_payload_to_file "$PAYLOAD_FILE" "$ENVELOPED"
 
 if [ "$DRY_RUN" -eq 1 ]; then
-  printf 'dry-run from=%s(%s) to=%s(%s) bytes=%s\n' \
+  printf 'dry-run from=%s(%s) to=%s(%s) bytes=%s wait=%s wait_timeout=%s\n' \
     "$FROM_NAME" "$(bc_prefix "$FROM_ID")" \
     "$TO_NAME" "$(bc_prefix "$TO_ID")" \
-    "$(printf '%s' "$ENVELOPED" | wc -c | tr -d ' ')"
+    "$BYTE_LEN" \
+    "$WAIT" \
+    "$WAIT_TIMEOUT"
   printf 'envelope:\n'
   printf '%s\n' "$ENVELOPED" | head -n 2
   if [ "$(printf '%s' "$ENVELOPED" | wc -l | tr -d ' ')" -gt 2 ]; then
@@ -388,4 +817,5 @@ if [ "$DRY_RUN" -eq 1 ]; then
   exit 0
 fi
 
-send_run "$TO_ID" "$PAYLOAD"
+send_run_resilient "$TO_NAME" "$TO_ID" "$PAYLOAD_FILE"
+exit $?
