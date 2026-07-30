@@ -300,6 +300,22 @@ fn screenshot(context, cli, path) {
     require(metadata.len > 1000, "remote_ui_screenshot_too_small");
 }
 
+fn pane_screenshot(context, cli, path) {
+    let returned = text_cli(
+        context,
+        cli,
+        ["screenshot-pane", "-o", path]
+    );
+    returned.trim();
+    require(
+        std::path::absolute(returned).display.to_lower()
+            == std::path::absolute(path).display.to_lower(),
+        "remote_ui_pane_screenshot_path_mismatch"
+    );
+    let metadata = std::fs::metadata(path);
+    require(metadata.len > 1000, "remote_ui_pane_screenshot_too_small");
+}
+
 fn assert_instance_directory_empty(context) {
     for attempt in 0..200 {
         let files = std::fs::read_dir(context.instance_directory);
@@ -517,6 +533,14 @@ try {
         std::path::join(
             std::path::parent(context.evidence_path).display,
             "relayed-window.png"
+        ).display
+    );
+    pane_screenshot(
+        context,
+        cli,
+        std::path::join(
+            std::path::parent(context.evidence_path).display,
+            "relayed-pane.png"
         ).display
     );
 

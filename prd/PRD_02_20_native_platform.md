@@ -84,9 +84,11 @@ tests or ownership.
   - [x] slice-2 owns bounded Unicode clipboard access and typed activation /
     show-without-activation behavior; terminal selection, paste, startup, and
     relayed focus hot paths consume the adapter
+  - [x] slice-3 owns bounded GDI full-window and terminal-region PNG capture,
+    with RAII resource cleanup and typed allocation/capture/encoding failures
   - [~] existing Win32 window, HWND controls, GDI rendering, native clipboard,
-    system menu, screenshots, and remaining input behavior are shipped but
-    remain distributed across Windows application modules
+    system menu, and remaining input behavior are shipped but remain
+    distributed across Windows application modules
   - [~] adapt the remaining behavior behind the shared contracts without
     changing the replaceable-GUI/server split or taking ownership of server
     state
@@ -170,7 +172,7 @@ tests or ownership.
    (Linux IME+clipboard @ `66c54a5`/`b5d54ef`; clipboard helper harden @
    `bf17150`; DPI/scale @ `57958c1`; font discovery/metrics @ `25a45d2`;
    screenshot/activation still deferred. Windows bounded clipboard and
-   activation hot paths are adapted; screenshot remains deferred)
+   activation hot paths plus bounded screenshot capture are adapted)
 4. [ ] remove superseded platform-specific paths only after native black-box
    and screenshot evidence passes on that platform
 
@@ -206,6 +208,16 @@ Windows slice-2 evidence (2026-07-30):
 - [x] `remote-ui-smoke` proves terminal selection, bounded clipboard copy/paste,
   system-menu behavior, and replaceable-GUI recovery through native interfaces
 - [x] `startup-smoke` proves `--no-activate` and a 535 ms first native window
+
+Windows slice-3 evidence (2026-07-30):
+
+- [x] warnings-denied all-target/all-feature Clippy
+- [x] 292 library tests, including 8K pixel-budget boundaries, in-place BGRA
+  conversion, and typed screenshot failures
+- [x] incremental Windows artifact build
+- [x] `remote-ui-smoke` captures and validates both full-window and
+  terminal-region PNG files through public CLI commands, then completes all 15
+  replaceable-GUI evidence journeys
 
 macOS hot-path evidence (2026-07-30):
 
