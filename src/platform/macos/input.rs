@@ -6,36 +6,10 @@
 
 #![cfg(target_os = "macos")]
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) struct MacosModifiers {
-    pub command: bool,
-    pub control: bool,
-    pub option: bool,
-    pub shift: bool,
-}
+use crate::platform::{KeyClassification, ModifierState};
 
-impl MacosModifiers {
-    pub(crate) const fn primary_shortcut(self) -> bool {
-        self.command
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum MacosKeyClass {
-    ProductShortcut {
-        key: String,
-        modifiers: MacosModifiers,
-    },
-    TerminalControlChord {
-        key: String,
-        modifiers: MacosModifiers,
-    },
-    TextCommit(String),
-    ControlKey {
-        name: String,
-        modifiers: MacosModifiers,
-    },
-    Ignored,
+pub(crate) const fn is_product_shortcut(modifiers: ModifierState) -> bool {
+    modifiers.meta
 }
 
 /// Classify a pressed macOS key without reconstructing text from physical keys.
@@ -44,45 +18,32 @@ pub(crate) enum MacosKeyClass {
 /// layout, dead-key, and IME composition. Command and Control chords are
 /// classified before text so they cannot accidentally type their key label.
 pub(crate) fn classify_key_press(
-    modifiers: MacosModifiers,
+    modifiers: ModifierState,
     logical_character: Option<&str>,
     named_key: Option<&str>,
     committed_text: Option<&str>,
-) -> MacosKeyClass {
-    if modifiers.primary_shortcut() {
+) -> KeyClassification {
+    if is_product_shortcut(modifiers) || modifiers.control {
         return shortcut_key(logical_character, named_key)
-            .map(|key| MacosKeyClass::ProductShortcut { key, modifiers })
-            .unwrap_or(MacosKeyClass::Ignored);
-    }
-
-    if modifiers.control {
-        if let Some(key) = logical_character.filter(|text| !text.is_empty()) {
-            return MacosKeyClass::TerminalControlChord {
-                key: key.to_string(),
-                modifiers,
-            };
-        }
-        if let Some(name) = named_key {
-            return MacosKeyClass::ControlKey {
-                name: name.to_string(),
-                modifiers,
-            };
-        }
-        return MacosKeyClass::Ignored;
+            .map(|key| KeyClassification::Shortcut { key, modifiers })
+            .unwrap_or(KeyClassification::Ignored);
     }
 
     if let Some(text) = committed_text.filter(|text| !text.is_empty()) {
-        return MacosKeyClass::TextCommit(text.to_string());
+        return KeyClassification::TextCommit(text.to_string());
     }
 
     if let Some(name) = named_key {
-        return MacosKeyClass::ControlKey {
+        return KeyClassification::ControlKey {
             name: name.to_string(),
             modifiers,
         };
     }
 
-    MacosKeyClass::Ignored
+    logical_character
+        .filter(|text| !text.is_empty())
+        .map(|text| KeyClassification::TextCommit(text.to_string()))
+        .unwrap_or(KeyClassification::Ignored)
 }
 
 fn shortcut_key(logical_character: Option<&str>, named_key: Option<&str>) -> Option<String> {
@@ -96,36 +57,30 @@ fn shortcut_key(logical_character: Option<&str>, named_key: Option<&str>) -> Opt
 mod tests {
     use super::*;
 
-    const NONE: MacosModifiers = MacosModifiers {
-        command: false,
+    const NONE: ModifierState = ModifierState {
         control: false,
-        option: false,
         shift: false,
+        alt: false,
+        meta: false,
     };
-    const COMMAND: MacosModifiers = MacosModifiers {
-        command: true,
-        ..NONE
-    };
-    const CONTROL: MacosModifiers = MacosModifiers {
+    const COMMAND: ModifierState = ModifierState { meta: true, ..NONE };
+    const CONTROL: ModifierState = ModifierState {
         control: true,
         ..NONE
     };
-    const SHIFT: MacosModifiers = MacosModifiers {
+    const SHIFT: ModifierState = ModifierState {
         shift: true,
         ..NONE
     };
-    const OPTION: MacosModifiers = MacosModifiers {
-        option: true,
-        ..NONE
-    };
+    const OPTION: ModifierState = ModifierState { alt: true, ..NONE };
 
     #[test]
     fn command_is_the_product_shortcut_modifier() {
-        assert!(COMMAND.primary_shortcut());
-        assert!(!CONTROL.primary_shortcut());
+        assert!(is_product_shortcut(COMMAND));
+        assert!(!is_product_shortcut(CONTROL));
         assert_eq!(
             classify_key_press(COMMAND, Some("c"), None, Some("c")),
-            MacosKeyClass::ProductShortcut {
+            KeyClassification::Shortcut {
                 key: "c".to_owned(),
                 modifiers: COMMAND,
             }
@@ -136,7 +91,7 @@ mod tests {
     fn control_chords_stay_available_to_terminal_apps() {
         assert_eq!(
             classify_key_press(CONTROL, Some("c"), None, Some("c")),
-            MacosKeyClass::TerminalControlChord {
+            KeyClassification::Shortcut {
                 key: "c".to_owned(),
                 modifiers: CONTROL,
             }
@@ -147,7 +102,7 @@ mod tests {
     fn shifted_punctuation_uses_committed_text() {
         assert_eq!(
             classify_key_press(SHIFT, Some("1"), None, Some("!")),
-            MacosKeyClass::TextCommit("!".to_owned())
+            KeyClassification::TextCommit("!".to_owned())
         );
     }
 
@@ -155,7 +110,7 @@ mod tests {
     fn option_dead_keys_use_composed_commit() {
         assert_eq!(
             classify_key_press(OPTION, Some("e"), None, Some("é")),
-            MacosKeyClass::TextCommit("é".to_owned())
+            KeyClassification::TextCommit("é".to_owned())
         );
     }
 
@@ -163,7 +118,7 @@ mod tests {
     fn ime_commit_is_not_reconstructed_from_logical_key() {
         assert_eq!(
             classify_key_press(NONE, Some("n"), None, Some("你好")),
-            MacosKeyClass::TextCommit("你好".to_owned())
+            KeyClassification::TextCommit("你好".to_owned())
         );
     }
 
@@ -171,11 +126,11 @@ mod tests {
     fn space_and_named_controls_remain_distinct() {
         assert_eq!(
             classify_key_press(NONE, None, Some("Space"), Some(" ")),
-            MacosKeyClass::TextCommit(" ".to_owned())
+            KeyClassification::TextCommit(" ".to_owned())
         );
         assert_eq!(
             classify_key_press(NONE, None, Some("Escape"), None),
-            MacosKeyClass::ControlKey {
+            KeyClassification::ControlKey {
                 name: "Escape".to_owned(),
                 modifiers: NONE,
             }

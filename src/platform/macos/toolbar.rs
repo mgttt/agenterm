@@ -6,14 +6,7 @@
 
 #![cfg(target_os = "macos")]
 
-pub(crate) mod action_id {
-    pub const NEW_TAB: &str = "new-tab";
-    pub const TOGGLE_TABS: &str = "toggle-tabs";
-    pub const OPEN_SETTINGS: &str = "open-settings";
-    pub const TOGGLE_LOCALE: &str = "toggle-locale";
-    pub const FONT_DECREASE: &str = "font-decrease";
-    pub const FONT_INCREASE: &str = "font-increase";
-}
+use crate::platform::action;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum MacosToolbarHit {
@@ -39,12 +32,12 @@ impl MacosToolbarHit {
 
     pub(crate) const fn action_id(self) -> &'static str {
         match self {
-            Self::ToggleTabs => action_id::TOGGLE_TABS,
-            Self::NewTab => action_id::NEW_TAB,
-            Self::Settings => action_id::OPEN_SETTINGS,
-            Self::ToggleLocale => action_id::TOGGLE_LOCALE,
-            Self::FontDecrease => action_id::FONT_DECREASE,
-            Self::FontIncrease => action_id::FONT_INCREASE,
+            Self::ToggleTabs => action::TOGGLE_TABS,
+            Self::NewTab => action::NEW_TAB,
+            Self::Settings => action::OPEN_SETTINGS,
+            Self::ToggleLocale => action::TOGGLE_LOCALE,
+            Self::FontDecrease => action::FONT_DECREASE,
+            Self::FontIncrease => action::FONT_INCREASE,
         }
     }
 }
