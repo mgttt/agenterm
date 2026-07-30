@@ -11,6 +11,7 @@
 
 pub(crate) mod activation;
 pub(crate) mod clipboard;
+pub(crate) mod font;
 pub(crate) mod ime;
 pub(crate) mod input;
 pub(crate) mod scale;
@@ -30,10 +31,10 @@ pub fn capability_status(capability: CapabilityKind) -> CapabilityStatus {
         CapabilityKind::Window
         | CapabilityKind::Input
         | CapabilityKind::Ime
-        | CapabilityKind::Font
         | CapabilityKind::Screenshot
         | CapabilityKind::Activation => CapabilityStatus::Available,
         CapabilityKind::Clipboard => clipboard::capability_status(),
+        CapabilityKind::Font => font::capability_status(),
         CapabilityKind::Integration => CapabilityStatus::Unsupported {
             reason: "signed-macos-app-bundle-pending",
         },

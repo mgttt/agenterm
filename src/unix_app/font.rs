@@ -203,8 +203,14 @@ impl SystemFonts {
         }
         #[cfg(target_os = "macos")]
         {
-            for candidate in font_candidates() {
-                load_candidate_faces(candidate, &mut faces);
+            for candidate in crate::platform::macos::font::candidates() {
+                load_candidate_faces(
+                    &FontCandidate {
+                        name: candidate.name,
+                        components: candidate.components,
+                    },
+                    &mut faces,
+                );
             }
         }
         Self {
@@ -294,24 +300,6 @@ impl SystemFonts {
 struct FontCandidate {
     name: &'static str,
     components: &'static [&'static str],
-}
-
-#[cfg(target_os = "macos")]
-fn font_candidates() -> &'static [FontCandidate] {
-    &[
-        FontCandidate {
-            name: "SF Mono",
-            components: &["System", "Library", "Fonts", "SFNSMono.ttf"],
-        },
-        FontCandidate {
-            name: "Hiragino Sans GB",
-            components: &["System", "Library", "Fonts", "Hiragino Sans GB.ttc"],
-        },
-        FontCandidate {
-            name: "Apple Symbols",
-            components: &["System", "Library", "Fonts", "Apple Symbols.ttf"],
-        },
-    ]
 }
 
 fn rooted_path(components: &[&str]) -> PathBuf {

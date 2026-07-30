@@ -123,6 +123,9 @@ tests or ownership.
   - [x] contract-revision-2 removes the duplicated macOS conversion and
     geometry classifier; the macOS adapter aliases the shared types while
     retaining Cocoa/winit event extraction
+  - [x] ordered macOS system-font candidates and availability probing now live
+    in `platform::macos::font`; the shared Unix renderer consumes that adapter
+    metadata and no longer owns Apple font paths
   - [x] clipboard reads/writes now consume `platform::macos::clipboard` with a
     256 KiB byte budget, live bounded reads, supervised stdin writes, and typed
     failures; native macOS verifies the blocked-writer deadline and product
