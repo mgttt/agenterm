@@ -3213,6 +3213,8 @@ impl UnixApp {
                 cursor: self.ime_cursor,
                 anchor,
             });
+        let terminal_focused =
+            self.focus_surface == UnixFocusSurface::Terminal && !self.modal_surface_active();
         let Some(surface) = self.surface.as_mut() else {
             return;
         };
@@ -3245,6 +3247,7 @@ impl UnixApp {
                 terminal: TerminalPaint {
                     grid,
                     selection: terminal_selection,
+                    focused: terminal_focused,
                 },
                 sidebar_rows: &sidebar_rows,
                 sidebar_tree: layout.sidebar_tree,

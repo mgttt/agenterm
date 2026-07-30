@@ -84,7 +84,15 @@ pub(super) struct TerminalGrid {
     pub(super) cols: u16,
     pub(super) rows: u16,
     cells: Vec<TerminalCell>,
+    cursor: TerminalCursor,
     palette: &'static ThemePalette,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct TerminalCursor {
+    row: u16,
+    col: u16,
+    visible: bool,
 }
 
 impl TerminalGrid {
@@ -93,6 +101,11 @@ impl TerminalGrid {
             cols,
             rows,
             cells: vec![TerminalCell::blank(); usize::from(cols) * usize::from(rows)],
+            cursor: TerminalCursor {
+                row: 0,
+                col: 0,
+                visible: cols > 0 && rows > 0,
+            },
             palette,
         }
     }
@@ -102,6 +115,9 @@ impl TerminalGrid {
         self.rows = rows;
         self.cells
             .resize(usize::from(cols) * usize::from(rows), TerminalCell::blank());
+        self.cursor.row = self.cursor.row.min(rows.saturating_sub(1));
+        self.cursor.col = self.cursor.col.min(cols.saturating_sub(1));
+        self.cursor.visible &= cols > 0 && rows > 0;
     }
 
     pub(super) fn sync_from_screen(&mut self, screen: &vt100::Screen) {
@@ -126,6 +142,12 @@ impl TerminalGrid {
                 self.set_cell(col, row, cell);
             }
         }
+        let (row, col) = screen.cursor_position();
+        self.cursor = TerminalCursor {
+            row: row.min(self.rows.saturating_sub(1)),
+            col: col.min(self.cols.saturating_sub(1)),
+            visible: !screen.hide_cursor() && self.cols > 0 && self.rows > 0,
+        };
     }
 
     pub(super) fn cell(&self, col: u16, row: u16) -> TerminalCell {
@@ -438,6 +460,7 @@ impl NewTerminalModalView<'_> {
 pub(super) struct TerminalPaint<'a> {
     pub(super) grid: &'a TerminalGrid,
     pub(super) selection: Option<crate::terminal_selection::TerminalSelection>,
+    pub(super) focused: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -641,6 +664,7 @@ pub(super) struct FrameContent<'a> {
     pub(super) resize_grip: Option<(u32, u32, u32, u32)>,
 }
 
+#[derive(Clone, Copy, Debug)]
 struct TerminalGridLayout {
     width: u32,
     height: u32,
@@ -1501,6 +1525,32 @@ fn render_terminal_grid(
                 bg,
             );
             col += if wide { 2 } else { 1 };
+        }
+    }
+    if terminal.focused && terminal.grid.cursor.visible {
+        let cursor = terminal.grid.cursor;
+        let x = layout.offset_x + u32::from(cursor.col) * layout.cell_width;
+        let y = layout.offset_y + u32::from(cursor.row) * layout.cell_height;
+        if x + layout.cell_width <= layout.offset_x + terminal_width
+            && y + layout.cell_height <= layout.height
+        {
+            let cell = terminal.grid.cell(cursor.col, cursor.row);
+            let cursor_width = if cell.ch.width() == Some(2) {
+                layout.cell_width * 2
+            } else {
+                layout.cell_width
+            }
+            .min(layout.offset_x + terminal_width - x);
+            let cursor_height = (layout.cell_height / 8).clamp(2, 3);
+            fill_rect(
+                buffer,
+                stride,
+                x,
+                y + layout.cell_height - cursor_height,
+                cursor_width,
+                cursor_height,
+                rgb_to_pixel(palette.focus_ring),
+            );
         }
     }
 }
@@ -2423,6 +2473,66 @@ mod tests {
             buffer
                 .iter()
                 .any(|pixel| *pixel == rgb_to_pixel(palette.focus_ring))
+        );
+    }
+
+    #[test]
+    fn terminal_cursor_tracks_parser_position_and_hide_mode() {
+        let palette = ThemeId::Dark.palette();
+        let (cell_width, cell_height) = cell_metrics(12);
+        let cols = 4;
+        let rows = 2;
+        let width = u32::from(cols) * cell_width + SCROLLBAR_WIDTH;
+        let height = u32::from(rows) * cell_height;
+        let mut parser = vt100::Parser::new(rows, cols, 0);
+        parser.process(b"ab");
+        let mut grid = TerminalGrid::new(cols, rows, palette);
+        grid.sync_from_screen(parser.screen());
+        let mut buffer = vec![rgb_to_pixel(palette.terminal_background); (width * height) as usize];
+        let layout = TerminalGridLayout {
+            width,
+            height,
+            offset_x: 0,
+            offset_y: 0,
+            cell_width,
+            cell_height,
+        };
+
+        render_terminal_grid(
+            &mut buffer,
+            width,
+            TerminalPaint {
+                grid: &grid,
+                selection: None,
+                focused: true,
+            },
+            palette,
+            layout,
+        );
+        let cursor_x = 2 * cell_width;
+        let cursor_y = cell_height - 2;
+        assert_eq!(
+            buffer[(cursor_y * width + cursor_x) as usize],
+            rgb_to_pixel(palette.focus_ring)
+        );
+
+        parser.process(b"\x1b[?25l");
+        grid.sync_from_screen(parser.screen());
+        buffer.fill(rgb_to_pixel(palette.terminal_background));
+        render_terminal_grid(
+            &mut buffer,
+            width,
+            TerminalPaint {
+                grid: &grid,
+                selection: None,
+                focused: true,
+            },
+            palette,
+            layout,
+        );
+        assert_ne!(
+            buffer[(cursor_y * width + cursor_x) as usize],
+            rgb_to_pixel(palette.focus_ring)
         );
     }
 }
