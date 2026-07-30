@@ -10,7 +10,7 @@
 | 键 | 值 |
 |----|-----|
 | 产品版本 | **0.1.10**（`Cargo.toml` / `agenterm.tasks.json`） |
-| `origin/main` | `bf17150`（Linux clipboard harden；含 font/DPI/IME） |
+| `origin/main` | tip `495b5dd`；clipboard harden 代码 `bf17150`（**勿用**作废 `1f2091f`） |
 | tracked `*.ps1` | **0**；migration-audit drift=false |
 | 云环境 | Personal `mgttt/agenterm`；**x86_64 Linux + DISPLAY=:1 VNC desktop**；可原生跑 Linux GUI |
 | 非环境事实 | QEMU/Wine 仅交叉或 Windows-on-Linux 烟测，**不是**本机桌面 |
