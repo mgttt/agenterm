@@ -133,8 +133,8 @@ tests or ownership.
    (`src/platform/mod.rs` contract revision 1; OS adapters still incremental)
 2. [~] adapt one narrow vertical slice—toolbar labels/actions plus keyboard
    text/shortcut separation—on all three systems
-   (Linux/macOS adapters bridged to revision 1; Linux `unix_app` hot-path
-   wiring authorized next; Windows adaptation still pending)
+   (Linux hot-path wired through `platform::linux` @ `78f5333`; macOS adapter
+   bridged; Windows adaptation still pending primary)
 3. [ ] move IME, clipboard, DPI, font, screenshot, activation, and remaining
    window integration incrementally behind the same boundary
 4. [ ] remove superseded platform-specific paths only after native black-box
