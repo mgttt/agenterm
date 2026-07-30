@@ -91,11 +91,23 @@ tests or ownership.
     no-activate, parent-console launcher guidance, and running-image-safe
     development
 - macOS
+  - [x] contract-revision-1 toolbar hits now resolve through
+    `platform::macos::toolbar` stable action IDs before shared product handlers;
+    the visible order remains Toggle Tabs, New, then right-aligned Settings,
+    locale, font decrease, and font increase
+  - [x] `unix_app` keyboard and Cocoa IME commit paths now consume
+    `platform::macos::input`; Command remains the product modifier, terminal
+    Control chords remain PTY input, and native committed text wins for
+    Shift/Option/dead-key, Space, and CJK input
+  - [x] physical resize and scale-factor events, logical client sizing, PTY
+    resize, layout, and rendering now consume `platform::macos::scale`; the
+    no-activate launch path also configures the macOS event loop before window
+    creation
   - [~] winit/softbuffer windowing, native IME events, system-font rasterization,
     Unicode/color/attribute rendering, clipboard, cursor, DPI, and POSIX PTY
     interaction are in active delivery
-  - [ ] expose macOS behavior through the shared platform contracts while
-    retaining Apple-native keyboard semantics and scale-factor accuracy
+  - [~] expose the remaining macOS behavior through the shared platform
+    contracts while retaining Apple-native semantics
   - [ ] signed stable distribution installs a complete signed and notarized
     application bundle; an installer must not replace it with an unsigned
     locally assembled wrapper
@@ -142,8 +154,8 @@ tests or ownership.
    (`src/platform/mod.rs` contract revision 1; OS adapters still incremental)
 2. [~] adapt one narrow vertical slice—toolbar labels/actions plus keyboard
    text/shortcut separation—on all three systems
-   (Linux hot-path wired through `platform::linux` @ `78f5333`; macOS adapter
-   exists but its Unix GUI hot paths still need explicit adapter routing;
+   (Linux hot-path wired through `platform::linux` @ `78f5333`; macOS toolbar,
+   keyboard, and committed-text hot paths wired @ `4aadcb0`/`1e6b09c`;
    Windows hot paths and AltGr-safe UTF-16 input are wired through
    `platform::windows`)
 3. [~] move IME, clipboard, DPI, font, screenshot, activation, and remaining
@@ -175,3 +187,17 @@ Windows slice-1 evidence (2026-07-30):
 - [x] `remote-ui-smoke` native public-interface journey: 15 evidence IDs,
   including toolbar/tabs, keyboard navigation, locale, Settings, clipboard,
   scrollback, close/detach, server restart, and replaceable-GUI recovery
+
+macOS hot-path evidence (2026-07-30):
+
+- [x] `cargo fmt --check` and all-target warnings-denied Clippy pass
+- [x] 365 library tests pass; focused macOS adapter tests cover stable toolbar
+  order/IDs, Command versus terminal Control, Shift punctuation,
+  Option/dead-key composition, Space, CJK IME commit, invalid scale metrics,
+  and Retina scale-factor changes
+- [x] native Cocoa GUI smoke with `AGENTERM_NO_ACTIVATE=1` produces a structured
+  960x600 logical snapshot and a 1920x1200 Retina PNG; toolbar labels/order,
+  locale, focus, window state, and layout geometry agree
+- [x] native Accessibility resize produces an 800x468 logical snapshot and a
+  1600x936 Retina PNG with zero GUI stderr; the same no-activate probe preserves
+  the previously frontmost application
