@@ -246,6 +246,13 @@
       "network": ["loopback"],
       "evidence": ["task.native-ipc-smoke"]
     },
+    "native-ipc-compat-smoke": {
+      "inputs": ["staged-binaries", "published-release-hash-catalog", "isolated-workspace", "isolated-instance-directory"],
+      "outputs": ["published-native-ipc-compatibility-evidence"],
+      "budget": {"timeout_ms": 360000, "max_operations": 10000000, "max_output_bytes": 1048576},
+      "network": ["dependency_fetch", "loopback"],
+      "evidence": ["task.native-ipc-compat-smoke"]
+    },
     "wake-smoke": {
       "inputs": ["staged-binaries", "isolated-workspace"],
       "outputs": ["wake-evidence"],
@@ -724,6 +731,17 @@
       "profile": "local",
       "cwd": ".",
       "args": [".", "dist/agenterm-server.exe", "dist/agenterm-cli.exe"],
+      "dependencies": [],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write", "process_spawn", "network_loopback"]
+    },
+    {
+      "id": "native-ipc-compat-smoke",
+      "description": "Download exact published v0.1.10/v0.1.11 bytes and prove TCP migration plus native IPC upgrade and rollback against staged HEAD",
+      "entry": "scripts/rhai/native-ipc-compat-smoke.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "args": ["."],
       "dependencies": [],
       "platforms": ["windows", "linux", "macos"],
       "side_effects": ["artifact_write", "process_spawn", "network_loopback"]

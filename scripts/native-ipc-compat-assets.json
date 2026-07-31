@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "repository": "mgttt/agenterm",
+  "purpose": "Exact published archives used by the native IPC compatibility smoke; binaries are downloaded into the invocation-owned run and are never checked in.",
+  "releases": [
+    {
+      "version": "0.1.10",
+      "tag": "v0.1.10",
+      "commit": "79ef87829acda0f491ce447ec39a0d7f1d110c13",
+      "native_server_platforms": ["windows"],
+      "assets": [
+        {
+          "os": "windows",
+          "arch": "x86_64",
+          "name": "agenterm-0.1.10-windows-x86_64.zip",
+          "size": 3492997,
+          "sha256": "8a684098e25acd9c5dff1e2c99ba7ccaa3a21500684e862c1da9ba3ae6ac9e5a"
+        },
+        {
+          "os": "windows",
+          "arch": "aarch64",
+          "name": "agenterm-0.1.10-windows-aarch64.zip",
+          "size": 2930113,
+          "sha256": "26af9dba15d128afe32177df6a519357fa0ad83f30d9e5894d95c01827be9f44"
+        },
+        {
+          "os": "linux",
+          "arch": "x86_64",
+          "name": "agenterm-0.1.10-linux-x86_64.tar.gz",
+          "size": 6870107,
+          "sha256": "a2771021b29b672bb712287459d15d11569f8ef0692f0e21064a797f7b98fbe1"
+        },
+        {
+          "os": "linux",
+          "arch": "aarch64",
+          "name": "agenterm-0.1.10-linux-aarch64.tar.gz",
+          "size": 6743934,
+          "sha256": "beed72f5288c5488434ed4e5547708d23230531d58e80b822ed69d2a1e202090"
+        },
+        {
+          "os": "macos",
+          "arch": "x86_64",
+          "name": "agenterm-0.1.10-macos-x86_64-unsigned-preview.zip",
+          "size": 3703401,
+          "sha256": "8f99e41014879db0856d24a6618de2d91708bb3bc2cd7c888280a3a4be4337c8"
+        },
+        {
+          "os": "macos",
+          "arch": "aarch64",
+          "name": "agenterm-0.1.10-macos-aarch64-unsigned-preview.zip",
+          "size": 3596369,
+          "sha256": "4398b451e993bb535c7ac1cabbfef2949354926ddcc2e907974bac1881c21af5"
+        }
+      ]
+    },
+    {
+      "version": "0.1.11",
+      "tag": "v0.1.11",
+      "commit": "53f3036a1450e12429e5be12b8f4d3db237a943d",
+      "native_server_platforms": ["windows", "linux", "macos"],
+      "assets": [
+        {
+          "os": "windows",
+          "arch": "x86_64",
+          "name": "agenterm-0.1.11-windows-x86_64.zip",
+          "size": 4005143,
+          "sha256": "31b6eea1cd2d3173edaa4ce5394c835f93d3b988fadd474d8c949c4e875ce7cf"
+        },
+        {
+          "os": "windows",
+          "arch": "aarch64",
+          "name": "agenterm-0.1.11-windows-aarch64.zip",
+          "size": 3359593,
+          "sha256": "93ae01c7d482b1938f2e2ca4531bfd000825012fbf187ee7fab4d086a2ee35f7"
+        },
+        {
+          "os": "linux",
+          "arch": "x86_64",
+          "name": "agenterm-0.1.11-linux-x86_64.tar.gz",
+          "size": 8764722,
+          "sha256": "49c2587e07883959e8f5f153605edced2e19b81a81875175c57813d1c0dc9a44"
+        },
+        {
+          "os": "linux",
+          "arch": "aarch64",
+          "name": "agenterm-0.1.11-linux-aarch64.tar.gz",
+          "size": 8593872,
+          "sha256": "64f4be54207d997c16f760dc8c158856cef6836a754faea47c378624dc37f259"
+        },
+        {
+          "os": "macos",
+          "arch": "x86_64",
+          "name": "agenterm-0.1.11-macos-x86_64-unsigned-preview.zip",
+          "size": 4907929,
+          "sha256": "90ccbdd4c7a9b784631c59e922d06f97d70fc19322052b0494b7a8bb79ec988b"
+        },
+        {
+          "os": "macos",
+          "arch": "aarch64",
+          "name": "agenterm-0.1.11-macos-aarch64-unsigned-preview.zip",
+          "size": 4746334,
+          "sha256": "1eb46fd4312ec060c82fa758cda1fa21c6d5eee6c9744fb48398340026e39722"
+        }
+      ]
+    }
+  ]
+}
