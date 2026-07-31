@@ -22,6 +22,8 @@ use crate::ipc_endpoint::{EndpointSelectorArgs, IpcEndpoint, resolve_ipc_endpoin
 
 const SCHEMA_VERSION: u32 = 1;
 const REGISTRY_SCHEMA_VERSION: u32 = 2;
+const REGISTRY_INCOMPATIBLE_LIVE: &str = "control_center_registry_incompatible_live";
+const REGISTRY_UNPARSEABLE: &str = "control_center_registry_unparseable";
 const PUBLIC_UI_ACTION: &str = "open-control-center";
 const TYPED_OPERATION: &str = "control-center.open";
 const HELP: &str = "\
@@ -272,6 +274,14 @@ impl Drop for RegistryOwner {
 enum RegistryClaim {
     Owner(RegistryOwner),
     Existing(RegistryRecord),
+}
+
+enum RegistryInspection {
+    Missing,
+    Publishing,
+    Compatible(RegistryRecord),
+    Incompatible(RegistryRecord),
+    Unparseable,
 }
 
 struct ShellProjection {
@@ -1102,7 +1112,11 @@ fn write_context(path: &Path, context: &ServerContext) -> Result<()> {
 }
 
 fn read_persisted_context() -> Option<ServerContext> {
-    read_regular_file(&context_path(&registry_path()))
+    read_context(&registry_path())
+}
+
+fn read_context(registry: &Path) -> Option<ServerContext> {
+    read_regular_file(&context_path(registry))
         .ok()
         .and_then(|content| serde_json::from_slice::<ServerContext>(&content).ok())
         .filter(|context| validate_context_value("server endpoint", &context.endpoint).is_ok())
@@ -1201,24 +1215,64 @@ fn replace_file(source: &Path, destination: &Path) -> Result<()> {
 }
 
 fn status_document() -> StatusDocument {
-    let record = read_registry(&registry_path()).filter(registry_process_matches);
+    status_document_at(&registry_path())
+}
+
+fn status_document_at(path: &Path) -> StatusDocument {
+    let (state, record) = match inspect_registry(path) {
+        RegistryInspection::Compatible(record) if registry_process_matches(&record) => {
+            ("running", Some(record))
+        }
+        RegistryInspection::Incompatible(record) if registry_process_matches(&record) => {
+            ("registry_incompatible", Some(record))
+        }
+        RegistryInspection::Publishing => ("starting", None),
+        RegistryInspection::Unparseable => ("registry_unparseable", None),
+        RegistryInspection::Missing
+        | RegistryInspection::Compatible(_)
+        | RegistryInspection::Incompatible(_) => ("not_running", None),
+    };
+    let pid = record.as_ref().map(|record| record.pid);
+    let context = if state == "running" {
+        read_context(path)
+    } else {
+        None
+    };
     StatusDocument {
         schema_version: SCHEMA_VERSION,
         executable: "agenterm-cc",
-        state: if record.is_some() {
-            "running"
-        } else {
-            "not_running"
-        },
-        pid: record.as_ref().map(|record| record.pid),
-        context: record.and_then(|_| read_persisted_context()),
+        state,
+        pid,
+        context,
     }
 }
 
 fn close_control_center() -> CloseDocument {
     let path = registry_path();
-    let Some(record) = read_registry(&path) else {
-        if registry_is_fresh(&path) {
+    close_control_center_at(&path)
+}
+
+fn close_control_center_at(path: &Path) -> CloseDocument {
+    let record = match inspect_registry(path) {
+        RegistryInspection::Compatible(record) => record,
+        RegistryInspection::Incompatible(record) if registry_process_matches(&record) => {
+            return CloseDocument {
+                schema_version: SCHEMA_VERSION,
+                executable: "agenterm-cc",
+                state: "registry_incompatible",
+                pid: Some(record.pid),
+            };
+        }
+        RegistryInspection::Incompatible(record) => {
+            recover_stale_registry(path);
+            return CloseDocument {
+                schema_version: SCHEMA_VERSION,
+                executable: "agenterm-cc",
+                state: "stale_recovered",
+                pid: Some(record.pid),
+            };
+        }
+        RegistryInspection::Publishing => {
             return CloseDocument {
                 schema_version: SCHEMA_VERSION,
                 executable: "agenterm-cc",
@@ -1226,16 +1280,26 @@ fn close_control_center() -> CloseDocument {
                 pid: None,
             };
         }
-        recover_stale_registry(&path);
-        return CloseDocument {
-            schema_version: SCHEMA_VERSION,
-            executable: "agenterm-cc",
-            state: "not_running",
-            pid: None,
-        };
+        RegistryInspection::Unparseable => {
+            return CloseDocument {
+                schema_version: SCHEMA_VERSION,
+                executable: "agenterm-cc",
+                state: "registry_unparseable",
+                pid: None,
+            };
+        }
+        RegistryInspection::Missing => {
+            recover_stale_registry(path);
+            return CloseDocument {
+                schema_version: SCHEMA_VERSION,
+                executable: "agenterm-cc",
+                state: "not_running",
+                pid: None,
+            };
+        }
     };
     if !registry_process_matches(&record) {
-        recover_stale_registry(&path);
+        recover_stale_registry(path);
         return CloseDocument {
             schema_version: SCHEMA_VERSION,
             executable: "agenterm-cc",
@@ -1244,7 +1308,7 @@ fn close_control_center() -> CloseDocument {
         };
     }
     if write_private_atomic(
-        &close_request_path(&path),
+        &close_request_path(path),
         &serde_json::to_vec(&record).unwrap_or_default(),
     )
     .is_err()
@@ -1259,7 +1323,7 @@ fn close_control_center() -> CloseDocument {
 
     let deadline = std::time::Instant::now() + Duration::from_millis(750);
     while std::time::Instant::now() < deadline {
-        if !read_registry(&path).is_some_and(|current| {
+        if !read_registry(path).is_some_and(|current| {
             current.pid == record.pid
                 && current.process_start_identity == record.process_start_identity
                 && registry_process_matches(&current)
@@ -1541,23 +1605,40 @@ fn claim_registry(path: &Path) -> Result<RegistryClaim> {
                 }));
             }
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-                if let Some(record) = read_registry(path) {
-                    if registry_process_matches(&record) {
-                        return Ok(RegistryClaim::Existing(record));
+                match inspect_registry(path) {
+                    RegistryInspection::Compatible(record) => {
+                        if registry_process_matches(&record) {
+                            return Ok(RegistryClaim::Existing(record));
+                        }
+                        recover_stale_registry(path);
                     }
-                } else if registry_is_fresh(path)
-                    && fs::metadata(path).is_ok_and(|metadata| metadata.len() == 0)
-                {
-                    // Another process may still be publishing its create-new
-                    // record. Treat a fresh unreadable file as claimed instead
-                    // of deleting a live owner's lock.
-                    return Ok(RegistryClaim::Existing(RegistryRecord {
-                        schema_version: REGISTRY_SCHEMA_VERSION,
-                        pid: 0,
-                        process_start_identity: String::new(),
-                    }));
+                    RegistryInspection::Incompatible(record) => {
+                        if registry_process_matches(&record) {
+                            anyhow::bail!(
+                                "{REGISTRY_INCOMPATIBLE_LIVE}: schema_version={} owner_pid={}",
+                                record.schema_version,
+                                record.pid
+                            );
+                        }
+                        recover_stale_registry(path);
+                    }
+                    RegistryInspection::Publishing => {
+                        // Another process is still publishing its create-new
+                        // record. Reuse the claim without launching a second
+                        // process; the focus request is safe to retry.
+                        return Ok(RegistryClaim::Existing(RegistryRecord {
+                            schema_version: REGISTRY_SCHEMA_VERSION,
+                            pid: 0,
+                            process_start_identity: String::new(),
+                        }));
+                    }
+                    RegistryInspection::Unparseable => {
+                        anyhow::bail!(
+                            "{REGISTRY_UNPARSEABLE}: refusing to replace an owner whose identity cannot be verified"
+                        );
+                    }
+                    RegistryInspection::Missing => {}
                 }
-                recover_stale_registry(path);
                 continue;
             }
             Err(error) => return Err(error.into()),
@@ -1575,10 +1656,33 @@ fn registry_is_fresh(path: &Path) -> bool {
 }
 
 fn read_registry(path: &Path) -> Option<RegistryRecord> {
-    read_regular_file(path)
-        .ok()
-        .and_then(|content| serde_json::from_slice(&content).ok())
-        .filter(|record: &RegistryRecord| record.schema_version == REGISTRY_SCHEMA_VERSION)
+    match inspect_registry(path) {
+        RegistryInspection::Compatible(record) => Some(record),
+        RegistryInspection::Missing
+        | RegistryInspection::Publishing
+        | RegistryInspection::Incompatible(_)
+        | RegistryInspection::Unparseable => None,
+    }
+}
+
+fn inspect_registry(path: &Path) -> RegistryInspection {
+    let content = match read_regular_file(path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return RegistryInspection::Missing;
+        }
+        Err(_) => return RegistryInspection::Unparseable,
+    };
+    if content.is_empty() && registry_is_fresh(path) {
+        return RegistryInspection::Publishing;
+    }
+    match serde_json::from_slice::<RegistryRecord>(&content) {
+        Ok(record) if record.schema_version == REGISTRY_SCHEMA_VERSION => {
+            RegistryInspection::Compatible(record)
+        }
+        Ok(record) => RegistryInspection::Incompatible(record),
+        Err(_) => RegistryInspection::Unparseable,
+    }
 }
 
 fn native_window_path(path: &Path) -> PathBuf {
@@ -2532,7 +2636,7 @@ mod tests {
     }
 
     #[test]
-    fn corrupt_registry_is_recovered_without_signaling_a_process() {
+    fn unparseable_registry_fails_closed_without_replacing_or_deleting_it() {
         let path = env::temp_dir().join(format!(
             "agenterm-cc-corrupt-registry-test-{}-{}.json",
             std::process::id(),
@@ -2542,10 +2646,79 @@ mod tests {
                 .as_nanos()
         ));
         fs::write(&path, b"{corrupt").expect("write corrupt registry");
-        let owner = match claim_registry(&path).expect("recover corrupt registry") {
-            RegistryClaim::Owner(owner) => owner,
-            RegistryClaim::Existing(_) => panic!("corrupt registry must not be reused"),
+        let error = match claim_registry(&path) {
+            Err(error) => error,
+            Ok(_) => panic!("unparseable registry must fail closed"),
         };
+        assert!(error.to_string().contains(REGISTRY_UNPARSEABLE));
+        assert_eq!(fs::read(&path).expect("preserved registry"), b"{corrupt");
+        assert_eq!(status_document_at(&path).state, "registry_unparseable");
+        assert_eq!(close_control_center_at(&path).state, "registry_unparseable");
+        assert_eq!(fs::read(&path).expect("registry after close"), b"{corrupt");
+        fs::remove_file(&path).expect("remove test registry");
+    }
+
+    #[test]
+    fn live_incompatible_registry_fails_closed_and_close_preserves_it() {
+        let path = env::temp_dir().join(format!(
+            "agenterm-cc-incompatible-registry-test-{}-{}.json",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time after epoch")
+                .as_nanos()
+        ));
+        let incompatible = RegistryRecord {
+            schema_version: REGISTRY_SCHEMA_VERSION + 1,
+            pid: std::process::id(),
+            process_start_identity: process_start_identity(std::process::id())
+                .expect("current process identity"),
+        };
+        let bytes = serde_json::to_vec(&incompatible).expect("registry JSON");
+        fs::write(&path, &bytes).expect("write incompatible registry");
+
+        let error = match claim_registry(&path) {
+            Err(error) => error,
+            Ok(_) => panic!("live incompatible registry must fail closed"),
+        };
+        assert!(error.to_string().contains(REGISTRY_INCOMPATIBLE_LIVE));
+        assert_eq!(fs::read(&path).expect("preserved registry"), bytes);
+
+        assert_eq!(status_document_at(&path).state, "registry_incompatible");
+        let close = close_control_center_at(&path);
+        assert_eq!(close.state, "registry_incompatible");
+        assert_eq!(fs::read(&path).expect("registry after close"), bytes);
+        fs::remove_file(&path).expect("remove test registry");
+    }
+
+    #[test]
+    fn stale_incompatible_registry_is_recovered() {
+        let path = env::temp_dir().join(format!(
+            "agenterm-cc-stale-incompatible-registry-test-{}-{}.json",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time after epoch")
+                .as_nanos()
+        ));
+        let incompatible = RegistryRecord {
+            schema_version: REGISTRY_SCHEMA_VERSION + 1,
+            pid: std::process::id(),
+            process_start_identity: "foreign-start-identity".to_owned(),
+        };
+        fs::write(
+            &path,
+            serde_json::to_vec(&incompatible).expect("registry JSON"),
+        )
+        .expect("write incompatible registry");
+        let owner = match claim_registry(&path).expect("recover stale incompatible registry") {
+            RegistryClaim::Owner(owner) => owner,
+            RegistryClaim::Existing(_) => panic!("stale incompatible registry was reused"),
+        };
+        assert_ne!(
+            owner.process_start_identity,
+            incompatible.process_start_identity
+        );
         drop(owner);
     }
 

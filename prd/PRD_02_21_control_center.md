@@ -114,7 +114,13 @@ Control Center is the product name; the executable family uses
   black-box covered by an isolated copy of `agenterm-cli` with no sibling
   Control Center: the request fails boundedly with
   `control_center_unavailable`, creates no registry, and starts no server.
-  Protocol-incompatible-binary coverage remains open.
+  A live incompatible registry now fails closed with
+  `control_center_registry_incompatible_live`; an unparseable registry fails
+  closed with `control_center_registry_unparseable`. `open`, `status`, and
+  `close` preserve those records rather than deleting an owner that cannot be
+  verified and accidentally launching a second process. Identity-mismatched
+  stale compatible/incompatible records remain recoverable. Frozen older
+  binary protocol coverage remains open.
 
 ## Information architecture
 
