@@ -134,17 +134,30 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     fails with a typed result instead of killing it or falling back to another
     instance
   - [~] Unix local endpoint contract:
-    - choose a trusted per-UID runtime base, create the AgenTerm instance
+    - [x] choose a trusted per-UID runtime base, create the AgenTerm instance
       directory with mode `0700`, and create the socket with mode `0600`
-    - validate owner, type, permissions, path length, and symlink-free
+    - [x] validate owner, type, permissions, path length, and symlink-free
       components before bind; use a fixed-length derived key rather than a
       truncated username when the platform `sun_path` budget is tight
-    - recover a stale socket only under the same instance lock after a bounded
+    - [x] hold a per-endpoint `0600` no-follow regular-file lease under a
+      nonblocking exclusive OS lock for the complete listener lifetime; the
+      lease records PID plus Linux `/proc` start ticks or macOS
+      `proc_pidinfo` start time, so a same-instance concurrent authority fails
+      atomically rather than racing the socket probe
+    - [x] recover a stale socket only under the same instance lock after a bounded
       connect proves it dead and PID/start identity or lease evidence proves
       the former owner is gone; never unlink a symlink, regular file,
-      directory, foreign-owned node, permission failure, or timeout
-    - where the OS exposes peer credentials, verify the peer UID against
-      `ServerScopeId`; ownership uncertainty fails closed with a typed error
+      directory, foreign-owned node, permission failure, timeout, or
+      pre-lease socket without a valid predecessor identity
+    - [x] Linux `SO_PEERCRED` and macOS `getpeereid` verify both accepted
+      clients and connected servers against the effective UID that owns
+      `ServerScopeId`; credential lookup failure or mismatch fails closed with
+      a typed unsafe-endpoint error
+    - [ ] retain six-target CI plus public native-IPC black-box evidence for
+      concurrent process launch, abrupt owner death/stale recovery, and a
+      deliberately different-UID peer; cfg-gated unit evidence owns the local
+      same-UID, duplicate-lease, unidentified-stale-node, owner/mode and
+      symlink invariants in the interim
   - [~] Windows local endpoint contract:
     - create the named pipe with an explicit DACL scoped to the current user
       SID and only separately justified system principals; do not inherit a

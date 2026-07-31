@@ -234,6 +234,10 @@ impl IpcStream {
         endpoint: &IpcEndpoint,
         timeout: Duration,
     ) -> TransportResult<Self> {
+        // Validate both accepted clients and connected servers. The same
+        // constructor owns both paths, preventing a future caller from
+        // accidentally bypassing the OS peer-credential boundary.
+        verify_unix_peer_uid(&stream, endpoint)?;
         stream
             .set_nonblocking(false)
             .and_then(|()| stream.set_read_timeout(Some(timeout)))
@@ -377,6 +381,9 @@ struct UnixListener {
     owned_path: std::path::PathBuf,
     device: u64,
     inode: u64,
+    // Keep the advisory lock alive until after `Drop` has removed the exact
+    // socket inode owned by this listener.
+    instance_lease: UnixInstanceLease,
 }
 
 #[cfg(unix)]
@@ -412,6 +419,7 @@ impl UnixListener {
                 )
             })?;
         ensure_private_unix_directory(parent, endpoint)?;
+        let mut instance_lease = UnixInstanceLease::acquire(&path, endpoint)?;
 
         match std::fs::symlink_metadata(&path) {
             Ok(metadata) => {
@@ -443,6 +451,24 @@ impl UnixListener {
                             io::ErrorKind::ConnectionRefused | io::ErrorKind::NotFound
                         ) =>
                     {
+                        if !instance_lease.has_predecessor_identity {
+                            return Err(unsafe_endpoint(
+                                endpoint,
+                                "stale Unix socket has no prior PID/start lease identity",
+                            ));
+                        }
+                        let current = std::fs::symlink_metadata(&path)
+                            .map_err(|error| transport_io(endpoint, error))?;
+                        if !current.file_type().is_socket()
+                            || current.uid() != unsafe { libc::geteuid() }
+                            || current.dev() != metadata.dev()
+                            || current.ino() != metadata.ino()
+                        {
+                            return Err(unsafe_endpoint(
+                                endpoint,
+                                "stale Unix socket identity changed during recovery",
+                            ));
+                        }
                         std::fs::remove_file(&path)
                             .map_err(|error| transport_io(endpoint, error))?;
                     }
@@ -462,11 +488,13 @@ impl UnixListener {
             .map_err(|error| transport_io(endpoint, error))?;
         let metadata =
             std::fs::symlink_metadata(&path).map_err(|error| transport_io(endpoint, error))?;
+        instance_lease.retain();
         Ok(Self {
             listener,
             owned_path: path,
             device: metadata.dev(),
             inode: metadata.ino(),
+            instance_lease,
         })
     }
 }
@@ -480,10 +508,304 @@ impl Drop for UnixListener {
             && metadata.dev() == self.device
             && metadata.ino() == self.inode
             && metadata.uid() == unsafe { libc::geteuid() }
+            && std::fs::remove_file(&self.owned_path).is_ok()
+        {
+            self.instance_lease.remove_on_drop = true;
+        }
+    }
+}
+
+#[cfg(unix)]
+struct UnixInstanceLease {
+    file: std::fs::File,
+    has_predecessor_identity: bool,
+    owned_path: std::path::PathBuf,
+    device: u64,
+    inode: u64,
+    remove_on_drop: bool,
+}
+
+#[cfg(unix)]
+impl UnixInstanceLease {
+    fn acquire(path: &std::path::Path, endpoint: &IpcEndpoint) -> TransportResult<Self> {
+        use std::{
+            io::{Read as _, Seek as _, SeekFrom, Write as _},
+            os::{
+                fd::{AsRawFd as _, FromRawFd as _, OwnedFd},
+                unix::ffi::OsStrExt as _,
+            },
+        };
+
+        const LEASE_MAX_BYTES: u64 = 256;
+        let mut lock_name = path.as_os_str().to_os_string();
+        lock_name.push(".lock");
+        let lock_path = std::path::PathBuf::from(lock_name);
+        let c_path = std::ffi::CString::new(lock_path.as_os_str().as_bytes()).map_err(|_| {
+            IpcTransportError::new(
+                IpcTransportErrorCode::InvalidEndpoint,
+                endpoint.to_string(),
+                io::Error::new(io::ErrorKind::InvalidInput, "Unix lock path contains NUL"),
+            )
+        })?;
+
+        let create_flags =
+            libc::O_CREAT | libc::O_EXCL | libc::O_RDWR | libc::O_CLOEXEC | libc::O_NOFOLLOW;
+        let mut created = true;
+        let mut raw = unsafe { libc::open(c_path.as_ptr(), create_flags, 0o600) };
+        if raw < 0 && io::Error::last_os_error().kind() == io::ErrorKind::AlreadyExists {
+            created = false;
+            raw = unsafe {
+                libc::open(
+                    c_path.as_ptr(),
+                    libc::O_RDWR | libc::O_CLOEXEC | libc::O_NOFOLLOW,
+                )
+            };
+        }
+        if raw < 0 {
+            return Err(unsafe_endpoint(
+                endpoint,
+                &format!(
+                    "cannot securely open Unix instance lock: {}",
+                    io::Error::last_os_error()
+                ),
+            ));
+        }
+        let owned = unsafe { OwnedFd::from_raw_fd(raw) };
+        let mut stat = unsafe { std::mem::zeroed::<libc::stat>() };
+        if unsafe { libc::fstat(raw, &mut stat) } != 0 {
+            return Err(transport_io(endpoint, io::Error::last_os_error()));
+        }
+        if (stat.st_mode & libc::S_IFMT) != libc::S_IFREG
+            || stat.st_uid != unsafe { libc::geteuid() }
+            || stat.st_nlink != 1
+            || stat.st_mode & 0o077 != 0
+        {
+            return Err(unsafe_endpoint(
+                endpoint,
+                "Unix instance lock is not a private, owned regular file",
+            ));
+        }
+        if created && unsafe { libc::fchmod(raw, 0o600) } != 0 {
+            return Err(transport_io(endpoint, io::Error::last_os_error()));
+        }
+        if unsafe { libc::flock(raw, libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+            let error = io::Error::last_os_error();
+            let code = if matches!(
+                error.raw_os_error(),
+                Some(value) if value == libc::EWOULDBLOCK || value == libc::EAGAIN
+            ) {
+                IpcTransportErrorCode::EndpointInUse
+            } else {
+                IpcTransportErrorCode::Io
+            };
+            return Err(IpcTransportError::new(code, endpoint.to_string(), error));
+        }
+
+        let mut file = std::fs::File::from(owned);
+        let has_predecessor_identity = if created {
+            false
+        } else {
+            let metadata = file
+                .metadata()
+                .map_err(|error| transport_io(endpoint, error))?;
+            if metadata.len() > LEASE_MAX_BYTES {
+                return Err(unsafe_endpoint(
+                    endpoint,
+                    "Unix instance lock identity is oversized",
+                ));
+            }
+            let mut prior = String::new();
+            file.read_to_string(&mut prior)
+                .map_err(|error| transport_io(endpoint, error))?;
+            if !valid_unix_lease_identity(prior.trim()) {
+                return Err(unsafe_endpoint(
+                    endpoint,
+                    "Unix instance lock has no valid PID/start identity",
+                ));
+            }
+            true
+        };
+
+        let identity = current_unix_process_identity(endpoint)?;
+        file.set_len(0)
+            .and_then(|()| file.seek(SeekFrom::Start(0)).map(|_| ()))
+            .and_then(|()| file.write_all(identity.as_bytes()))
+            .and_then(|()| file.sync_data())
+            .map_err(|error| transport_io(endpoint, error))?;
+
+        Ok(Self {
+            file,
+            has_predecessor_identity,
+            owned_path: lock_path,
+            device: stat.st_dev as u64,
+            inode: stat.st_ino as u64,
+            remove_on_drop: created,
+        })
+    }
+
+    fn retain(&mut self) {
+        self.remove_on_drop = false;
+    }
+}
+
+#[cfg(unix)]
+impl Drop for UnixInstanceLease {
+    fn drop(&mut self) {
+        use std::os::{fd::AsRawFd as _, unix::fs::MetadataExt as _};
+
+        if !self.remove_on_drop {
+            return;
+        }
+        // The descriptor remains locked while this exact no-follow identity
+        // check and cleanup run. Never remove a replacement path.
+        if let Ok(metadata) = std::fs::symlink_metadata(&self.owned_path)
+            && metadata.file_type().is_file()
+            && metadata.dev() == self.device
+            && metadata.ino() == self.inode
+            && metadata.uid() == unsafe { libc::geteuid() }
         {
             let _ = std::fs::remove_file(&self.owned_path);
         }
+        let _ = unsafe { libc::flock(self.file.as_raw_fd(), libc::LOCK_UN) };
     }
+}
+
+#[cfg(unix)]
+fn valid_unix_lease_identity(value: &str) -> bool {
+    let Some(rest) = value.strip_prefix("v1 pid=") else {
+        return false;
+    };
+    let Some((pid, start)) = rest.split_once(" start=") else {
+        return false;
+    };
+    !pid.is_empty()
+        && pid.bytes().all(|byte| byte.is_ascii_digit())
+        && !start.is_empty()
+        && start
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+}
+
+#[cfg(target_os = "linux")]
+fn current_unix_process_identity(endpoint: &IpcEndpoint) -> TransportResult<String> {
+    let stat = std::fs::read_to_string("/proc/self/stat")
+        .map_err(|error| transport_io(endpoint, error))?;
+    // The command name is parenthesized and may contain spaces or `)`, so
+    // locate its final delimiter before indexing field 22 (starttime).
+    let suffix = stat
+        .rsplit_once(") ")
+        .map(|(_, suffix)| suffix)
+        .ok_or_else(|| unsafe_endpoint(endpoint, "cannot parse Linux process start identity"))?;
+    let start = suffix
+        .split_whitespace()
+        .nth(19)
+        .filter(|value| value.bytes().all(|byte| byte.is_ascii_digit()))
+        .ok_or_else(|| unsafe_endpoint(endpoint, "cannot parse Linux process start identity"))?;
+    Ok(format!("v1 pid={} start={start}", std::process::id()))
+}
+
+#[cfg(target_os = "macos")]
+fn current_unix_process_identity(endpoint: &IpcEndpoint) -> TransportResult<String> {
+    let mut info = unsafe { std::mem::zeroed::<libc::proc_bsdinfo>() };
+    let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+    let read = unsafe {
+        libc::proc_pidinfo(
+            std::process::id() as libc::c_int,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            (&raw mut info).cast(),
+            size,
+        )
+    };
+    if read != size {
+        return Err(unsafe_endpoint(
+            endpoint,
+            "cannot read macOS process start identity",
+        ));
+    }
+    Ok(format!(
+        "v1 pid={} start={}.{}",
+        std::process::id(),
+        info.pbi_start_tvsec,
+        info.pbi_start_tvusec
+    ))
+}
+
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
+fn current_unix_process_identity(endpoint: &IpcEndpoint) -> TransportResult<String> {
+    Err(unsupported(
+        endpoint,
+        "native Unix IPC identity is supported on Linux and macOS",
+    ))
+}
+
+#[cfg(target_os = "linux")]
+fn verify_unix_peer_uid(
+    stream: &std::os::unix::net::UnixStream,
+    endpoint: &IpcEndpoint,
+) -> TransportResult<()> {
+    use std::os::fd::AsRawFd as _;
+
+    let mut credentials = unsafe { std::mem::zeroed::<libc::ucred>() };
+    let mut length = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+    if unsafe {
+        libc::getsockopt(
+            stream.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_PEERCRED,
+            (&raw mut credentials).cast(),
+            &mut length,
+        )
+    } != 0
+        || length as usize != std::mem::size_of::<libc::ucred>()
+    {
+        return Err(unsafe_endpoint(
+            endpoint,
+            "cannot verify Linux Unix-socket peer credentials",
+        ));
+    }
+    if credentials.uid != unsafe { libc::geteuid() } {
+        return Err(unsafe_endpoint(
+            endpoint,
+            "Unix-socket peer effective UID does not match the server scope",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn verify_unix_peer_uid(
+    stream: &std::os::unix::net::UnixStream,
+    endpoint: &IpcEndpoint,
+) -> TransportResult<()> {
+    use std::os::fd::AsRawFd as _;
+
+    let mut uid = 0;
+    let mut gid = 0;
+    if unsafe { libc::getpeereid(stream.as_raw_fd(), &mut uid, &mut gid) } != 0 {
+        return Err(unsafe_endpoint(
+            endpoint,
+            "cannot verify macOS Unix-socket peer credentials",
+        ));
+    }
+    if uid != unsafe { libc::geteuid() } {
+        return Err(unsafe_endpoint(
+            endpoint,
+            "Unix-socket peer effective UID does not match the server scope",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
+fn verify_unix_peer_uid(
+    _stream: &std::os::unix::net::UnixStream,
+    endpoint: &IpcEndpoint,
+) -> TransportResult<()> {
+    Err(unsupported(
+        endpoint,
+        "Unix peer identity is supported on Linux and macOS",
+    ))
 }
 
 #[cfg(unix)]
@@ -1391,6 +1713,16 @@ mod tests {
         std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700)).unwrap();
         let path = directory.join("server.sock");
         std::os::unix::net::UnixListener::bind(&path).unwrap();
+        std::fs::write(
+            path.with_file_name("server.sock.lock"),
+            "v1 pid=999999 start=12345",
+        )
+        .unwrap();
+        std::fs::set_permissions(
+            path.with_file_name("server.sock.lock"),
+            std::fs::Permissions::from_mode(0o600),
+        )
+        .unwrap();
 
         let endpoint = IpcEndpoint::UnixSocket(path.to_string_lossy().into_owned());
         let listener = IpcListener::bind(&endpoint).unwrap();
@@ -1399,6 +1731,59 @@ mod tests {
         assert_eq!(metadata.uid(), unsafe { libc::geteuid() });
         drop(listener);
         assert!(!path.exists());
+        assert!(!path.with_file_name("server.sock.lock").exists());
+        std::fs::remove_dir(directory).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_adapter_rejects_unidentified_stale_socket_and_duplicate_authority() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let directory = unique_temp_directory("lease");
+        std::fs::create_dir(&directory).unwrap();
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let path = directory.join("server.sock");
+        std::os::unix::net::UnixListener::bind(&path).unwrap();
+        let endpoint = IpcEndpoint::UnixSocket(path.to_string_lossy().into_owned());
+        let unidentified = IpcListener::bind(&endpoint)
+            .err()
+            .expect("a pre-lease stale socket must fail closed");
+        assert_eq!(unidentified.code, IpcTransportErrorCode::UnsafeEndpoint);
+
+        std::fs::remove_file(&path).unwrap();
+        let listener = IpcListener::bind(&endpoint).unwrap();
+        let duplicate = IpcListener::bind(&endpoint)
+            .err()
+            .expect("the held same-instance lease must reject a duplicate authority");
+        assert_eq!(duplicate.code, IpcTransportErrorCode::EndpointInUse);
+        drop(listener);
+        assert!(!path.with_file_name("server.sock.lock").exists());
+        std::fs::remove_dir(directory).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_adapter_accepts_a_same_uid_peer() {
+        use std::io::{Read as _, Write as _};
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let directory = unique_temp_directory("peer");
+        std::fs::create_dir(&directory).unwrap();
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let path = directory.join("server.sock");
+        let endpoint = IpcEndpoint::UnixSocket(path.to_string_lossy().into_owned());
+        let mut listener = IpcListener::bind(&endpoint).unwrap();
+        let server = std::thread::spawn(move || {
+            let mut stream = listener.accept(Duration::from_secs(2)).unwrap();
+            let mut byte = [0; 1];
+            stream.read_exact(&mut byte).unwrap();
+            assert_eq!(byte, [7]);
+        });
+        let mut client = IpcStream::connect(&endpoint, Duration::from_secs(2)).unwrap();
+        client.write_all(&[7]).unwrap();
+        server.join().unwrap();
+        assert!(!path.with_file_name("server.sock.lock").exists());
         std::fs::remove_dir(directory).unwrap();
     }
 
