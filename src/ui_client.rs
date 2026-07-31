@@ -314,13 +314,22 @@ impl UiClientModel {
         if shutdown_after_result {
             arguments.push("--shutdown-after-result".to_owned());
         }
-        let completion: serde_json::Value = request_json(arguments)?;
-        if completion["completed"].as_bool() != Some(true)
-            || completion["command_id"].as_str() != Some(command_id)
-        {
-            anyhow::bail!("UI client command completion identity changed");
+        let mut last_error = None;
+        for _ in 0..3 {
+            match request_json::<serde_json::Value>(arguments.clone()) {
+                Ok(completion)
+                    if completion["completed"].as_bool() == Some(true)
+                        && completion["command_id"].as_str() == Some(command_id) =>
+                {
+                    return Ok(());
+                }
+                Ok(_) => anyhow::bail!("UI client command completion identity changed"),
+                Err(error) => last_error = Some(error),
+            }
         }
-        Ok(())
+        Err(last_error
+            .unwrap_or_else(|| anyhow::anyhow!("UI client command completion failed"))
+            .context("could not acknowledge UI client command completion"))
     }
 
     fn interact(&mut self, action: &str, tab_id: &str, tail: Vec<String>) -> Result<()> {

@@ -22,7 +22,9 @@ pub(crate) struct UiClientCommandQueue {
     next_id: u64,
     pending: VecDeque<UiClientCommand>,
     in_flight: HashMap<String, UiClientCommand>,
+    preapplied: HashMap<String, String>,
     completed: VecDeque<(String, String)>,
+    completion_inputs: HashMap<String, String>,
 }
 
 impl UiClientCommandQueue {
@@ -32,7 +34,9 @@ impl UiClientCommandQueue {
             next_id: 1,
             pending: VecDeque::new(),
             in_flight: HashMap::new(),
+            preapplied: HashMap::new(),
             completed: VecDeque::new(),
+            completion_inputs: HashMap::new(),
         }
     }
 
@@ -62,6 +66,50 @@ impl UiClientCommandQueue {
         self.in_flight.get(command_id)
     }
 
+    pub(crate) fn record_preapplied(
+        &mut self,
+        command_id: &str,
+        response: &IpcResponse,
+    ) -> Result<(), String> {
+        if !self
+            .pending
+            .iter()
+            .any(|command| command.command_id == command_id)
+        {
+            return Err("UI client command is not pending".to_owned());
+        }
+        let encoded = serde_json::to_string(response)
+            .map_err(|error| format!("UI client preapply response is invalid: {error}"))?;
+        if encoded.len() > UI_CLIENT_COMMAND_RESPONSE_MAX_BYTES {
+            return Err("UI client preapply response exceeds its byte budget".to_owned());
+        }
+        self.preapplied.insert(command_id.to_owned(), encoded);
+        Ok(())
+    }
+
+    pub(crate) fn discard_pending(&mut self, command_id: &str) -> bool {
+        let Some(position) = self
+            .pending
+            .iter()
+            .position(|command| command.command_id == command_id)
+        else {
+            return false;
+        };
+        self.pending.remove(position);
+        self.preapplied.remove(command_id);
+        true
+    }
+
+    pub(crate) fn preapplied(&self, command_id: &str) -> Result<Option<IpcResponse>, String> {
+        self.preapplied
+            .get(command_id)
+            .map(|encoded| {
+                serde_json::from_str(encoded)
+                    .map_err(|error| format!("UI client preapply response is invalid: {error}"))
+            })
+            .transpose()
+    }
+
     pub(crate) fn complete(
         &mut self,
         command_id: &str,
@@ -74,13 +122,30 @@ impl UiClientCommandQueue {
         }
         let response = serde_json::from_str::<IpcResponse>(&response_json)
             .map_err(|error| format!("UI client command response is invalid: {error}"))?;
+        if let Some(previous_input) = self.completion_inputs.get(command_id) {
+            if previous_input != &response_json {
+                return Err("UI client command completion replay changed its response".to_owned());
+            }
+            let completed = self
+                .completed
+                .iter()
+                .find(|(candidate, _)| candidate == command_id)
+                .ok_or_else(|| "UI client command completion replay expired".to_owned())?;
+            return serde_json::from_str::<IpcResponse>(&completed.1)
+                .map_err(|error| format!("UI client command response is invalid: {error}"));
+        }
         if self.in_flight.remove(command_id).is_none() {
             return Err("UI client command is not in flight".to_owned());
         }
+        self.preapplied.remove(command_id);
+        self.completion_inputs
+            .insert(command_id.to_owned(), response_json.clone());
         self.completed
             .push_back((command_id.to_owned(), response_json));
         while self.completed.len() > UI_CLIENT_COMMAND_QUEUE_LIMIT {
-            self.completed.pop_front();
+            if let Some((expired_id, _)) = self.completed.pop_front() {
+                self.completion_inputs.remove(&expired_id);
+            }
         }
         Ok(response)
     }
@@ -129,6 +194,7 @@ impl UiClientCommandQueue {
     pub(crate) fn clear_active(&mut self) {
         self.pending.clear();
         self.in_flight.clear();
+        self.preapplied.clear();
     }
 }
 
@@ -171,13 +237,41 @@ mod tests {
         let command = queue.poll().unwrap();
         assert_eq!(command.command_id, id);
         assert!(matches!(queue.result(&id), UiClientCommandResult::InFlight));
+        queue
+            .record_preapplied(&id, &IpcResponse::success("preapplied"))
+            .unwrap_err();
         let response_json = serde_json::to_string(&IpcResponse::success("{}")).unwrap();
-        let response = queue.complete(&id, response_json).unwrap();
+        let response = queue.complete(&id, response_json.clone()).unwrap();
         assert!(response.ok);
+        assert!(queue.complete(&id, response_json).unwrap().ok);
+        assert!(
+            queue
+                .complete(
+                    &id,
+                    serde_json::to_string(&IpcResponse::success("changed")).unwrap()
+                )
+                .is_err()
+        );
         assert!(matches!(
             queue.result(&id),
             UiClientCommandResult::Complete(_)
         ));
+    }
+
+    #[test]
+    fn queue_retains_bounded_preapply_until_completion() {
+        let mut queue = UiClientCommandQueue::new("epoch".to_owned());
+        let id = queue
+            .enqueue(vec!["focus".to_owned(), "tabs".to_owned()])
+            .unwrap();
+        queue
+            .record_preapplied(&id, &IpcResponse::success("preapplied"))
+            .unwrap();
+        assert_eq!(queue.preapplied(&id).unwrap().unwrap().output, "preapplied");
+        queue.poll().unwrap();
+        let response_json = serde_json::to_string(&IpcResponse::success("{}")).unwrap();
+        queue.complete(&id, response_json).unwrap();
+        assert!(queue.preapplied(&id).unwrap().is_none());
     }
 
     #[test]

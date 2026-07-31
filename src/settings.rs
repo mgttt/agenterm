@@ -167,12 +167,25 @@ where
 }
 
 pub(crate) fn config_path() -> PathBuf {
-    config_path_from(
-        env::var_os("AGENTERM_SETTINGS_PATH"),
-        env::var_os("LOCALAPPDATA"),
-    )
+    #[cfg(windows)]
+    {
+        config_path_from(
+            env::var_os("AGENTERM_SETTINGS_PATH"),
+            env::var_os("LOCALAPPDATA"),
+        )
+    }
+    #[cfg(unix)]
+    {
+        config_path_from(
+            env::var_os("AGENTERM_SETTINGS_PATH"),
+            env::var_os("XDG_CONFIG_HOME"),
+            env::var_os("HOME"),
+            env::temp_dir(),
+        )
+    }
 }
 
+#[cfg(windows)]
 fn config_path_from(
     override_path: Option<std::ffi::OsString>,
     local_app_data: Option<std::ffi::OsString>,
@@ -187,6 +200,36 @@ fn config_path_from(
         .unwrap_or_else(|| PathBuf::from("."))
         .join("AgenTerm")
         .join("settings.json")
+}
+
+#[cfg(unix)]
+fn config_path_from(
+    override_path: Option<std::ffi::OsString>,
+    xdg_config_home: Option<std::ffi::OsString>,
+    home: Option<std::ffi::OsString>,
+    temp_dir: PathBuf,
+) -> PathBuf {
+    if let Some(path) = override_path
+        && !path.is_empty()
+    {
+        return PathBuf::from(path);
+    }
+    let config_home = xdg_config_home
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .or_else(|| {
+            home.map(PathBuf::from)
+                .filter(|path| path.is_absolute())
+                .map(|path| path.join(".config"))
+        })
+        .unwrap_or_else(|| {
+            if temp_dir.is_absolute() {
+                temp_dir
+            } else {
+                PathBuf::from("/tmp")
+            }
+        });
+    config_home.join("agenterm").join("settings.json")
 }
 
 pub(crate) fn load_config() -> AppConfig {
@@ -349,6 +392,42 @@ mod tests {
         assert_eq!(
             config_path_from(Some("".into()), Some(r"D:\profile".into())),
             PathBuf::from(r"D:\profile\AgenTerm\settings.json")
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn unix_settings_path_prefers_absolute_xdg_then_home_without_using_cwd() {
+        assert_eq!(
+            config_path_from(
+                Some("/isolated/settings.json".into()),
+                None,
+                None,
+                PathBuf::from("/var/tmp"),
+            ),
+            PathBuf::from("/isolated/settings.json")
+        );
+        assert_eq!(
+            config_path_from(
+                None,
+                Some("/srv/profile-config".into()),
+                Some("/home/example".into()),
+                PathBuf::from("/var/tmp"),
+            ),
+            PathBuf::from("/srv/profile-config/agenterm/settings.json")
+        );
+        assert_eq!(
+            config_path_from(
+                None,
+                Some("relative-config".into()),
+                Some("/home/example".into()),
+                PathBuf::from("/var/tmp"),
+            ),
+            PathBuf::from("/home/example/.config/agenterm/settings.json")
+        );
+        assert_eq!(
+            config_path_from(None, None, None, PathBuf::from("relative-tmp")),
+            PathBuf::from("/tmp/agenterm/settings.json")
         );
     }
 }

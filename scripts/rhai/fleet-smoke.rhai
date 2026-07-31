@@ -352,7 +352,7 @@ try {
         "fleet_option_error_not_fast_or_actionable"
     );
 
-    print("STEP zero-instance live control reports structured candidates");
+    print("STEP zero-instance live control reports the native main endpoint");
     let dead_record = std::path::join(
         context.instance_directory,
         "4294967295.json"
@@ -385,9 +385,10 @@ try {
     );
     let empty_text = empty_error.stdout + empty_error.stderr;
     require(
-        empty_text.contains("\"code\": \"no_healthy_instance\"")
-            && empty_text.contains("\"candidates\": []")
-            && empty_text.contains("list-instances --json"),
+        empty_text.contains("AgenTerm server is not running")
+            && empty_text.contains("IPC transport")
+            && empty_text.contains("pipe:")
+            && !empty_text.contains("tcp:127.0.0.1"),
         "fleet_zero_instance_error"
     );
 
@@ -857,18 +858,21 @@ try {
         "fleet_cancel_disturbed_server"
     );
 
-    print("STEP one healthy instance is selected without an explicit address");
-    let implicit_windows = run_without_address(
+    print("STEP a legacy TCP registration never hijacks native main");
+    let implicit_failure = fail_without_address(
         context,
         cli,
         ["list-windows", "-F", "#{window_name}"]
-    ).stdout;
+    );
+    let implicit_text =
+        implicit_failure.stdout + implicit_failure.stderr;
     require(
-        implicit_windows.contains(environment_name),
-        "fleet_implicit_single_instance"
+        implicit_text.contains("pipe:")
+            && !implicit_text.contains(context.address),
+        "fleet_legacy_tcp_hijacked_native_main"
     );
 
-    print("STEP multiple healthy instances require an explicit target");
+    print("STEP multiple legacy TCP servers still require explicit targeting");
     run_program(
         context,
         cli,
@@ -881,17 +885,18 @@ try {
         true,
         second_workspace
     );
-    let ambiguous = fail_without_address(
+    let native_default = fail_without_address(
         context,
         cli,
         ["list-windows"]
     );
-    let ambiguous_text = ambiguous.stdout + ambiguous.stderr;
+    let native_default_text =
+        native_default.stdout + native_default.stderr;
     require(
-        ambiguous_text.contains("\"code\": \"ambiguous_instance\"")
-            && ambiguous_text.contains(context.address)
-            && ambiguous_text.contains(second_address),
-        "fleet_ambiguous_candidates"
+        native_default_text.contains("pipe:")
+            && !native_default_text.contains(context.address)
+            && !native_default_text.contains(second_address),
+        "fleet_legacy_tcp_changed_native_default"
     );
     let explicit_windows = text(
         context,

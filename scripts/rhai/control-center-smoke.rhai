@@ -1,17 +1,16 @@
 // Prove the isolated Control Center's offline contract, live Cockpit
 // projection, process reuse, context refresh, no-activate behavior,
-// stale-owner recovery, and server/PTY isolation.
+// missing-binary failure, stale-owner recovery, server loss/new-epoch refresh,
+// renderer-owned PNG evidence, and server/PTY isolation.
 //
 // Args:
 //   --list-evidence
 // or:
 //   REPO CONTROL_CENTER_EXE
 //
-// The Control Center does not yet expose a public screenshot command. This
-// suite therefore refuses to manufacture PNG evidence: it observes the live
-// native title through the owned Child handle and pairs that rendering fact
-// with the typed semantic snapshot. The main-workspace toolbar PNG remains
-// owned by workbench-smoke.
+// The renderer-owned screenshot command targets the exact registry owner. The
+// successful Cockpit PNG is copied out of scratch into dist/evidence so the
+// visual proof survives successful harness cleanup.
 
 import "scripts/rhai/lib/test_harness" as test_harness;
 
@@ -20,6 +19,8 @@ let declared_evidence = [
     "control-center.live-cockpit",
     "control-center.process-reuse",
     "control-center.context-refresh",
+    "control-center.launch-failure",
+    "control-center.server-recovery",
     "control-center.no-activate",
     "control-center.typed-close",
     "control-center.process-isolation"
@@ -285,11 +286,48 @@ let registry = std::path::join(
     context.run_directory,
     "control-center-registry.json"
 ).display;
+let cockpit_png = std::path::join(
+    std::path::parent(context.evidence_path).display,
+    "control-center-live-cockpit.png"
+).display;
+let durable_evidence_directory = std::path::join(
+    repo,
+    "dist/evidence"
+).display;
+let durable_cockpit_png = std::path::join(
+    durable_evidence_directory,
+    "control-center-live-cockpit.png"
+).display;
 let owned_children = [];
 let succeeded = false;
 let failure = "";
 
 try {
+    print("STEP a launcher with no sibling Control Center fails closed");
+    let missing_cc_directory = std::path::join(
+        context.run_directory,
+        "missing-control-center"
+    ).display;
+    std::fs::create_dir_all(missing_cc_directory);
+    let isolated_cli = std::path::join(
+        missing_cc_directory,
+        "agenterm-cli.exe"
+    ).display;
+    std::fs::copy(cli_executable, isolated_cli);
+    let missing_cc = cli(
+        context,
+        isolated_cli,
+        ["control-center", "open", "--no-activate"],
+        true
+    );
+    require(
+        missing_cc.exit_code != 0
+            && (missing_cc.stderr + missing_cc.stdout)
+                .contains("control_center_unavailable")
+            && !std::fs::exists(registry),
+        "control_center_missing_binary_failure"
+    );
+
     print("STEP informational commands are offline and side-effect free");
     let help = offline(
         context, control_center, registry, ["--help"],
@@ -299,6 +337,7 @@ try {
         context, control_center, registry, ["--version"],
         "control_center_version"
     );
+    version.trim();
     let capabilities = rhai::json::parse(offline(
         context, control_center, registry,
         ["capabilities", "--json"],
@@ -312,7 +351,7 @@ try {
     require(
         help.contains("AgenTerm Control Center")
             && help.contains("agenterm-cc snapshot")
-            && version.trim().starts_with("agenterm-cc ")
+            && version.starts_with("agenterm-cc ")
             && capabilities.schema_version == 1
             && capabilities.executable == "agenterm-cc"
             && capabilities.role == "isolated_projection"
@@ -340,6 +379,11 @@ try {
         context,
         declared_evidence,
         "control-center.offline-contract"
+    );
+    test_harness::emit_evidence(
+        context,
+        declared_evidence,
+        "control-center.launch-failure"
     );
 
     print("STEP start an isolated explicit-loopback server and real PTY");
@@ -379,10 +423,11 @@ try {
         "control_center_live_snapshot"
     ));
     let live_server = live_snapshot.connected_server;
+    let typed_endpoint = "tcp:" + context.address;
     require(
         live_snapshot.server_state == "connected"
             && live_snapshot.server_reason == ()
-            && live_server.endpoint == context.address
+            && live_server.endpoint == typed_endpoint
             && live_server.logical_instance == "main"
             && live_server.pid == server.id
             && live_server.pid == bootstrap.server_pid
@@ -441,7 +486,7 @@ try {
     require(
         running.state == "running"
             && running.pid == first.id
-            && running.context.endpoint == context.address
+            && running.context.endpoint == typed_endpoint
             && running.context.logical_instance == "main",
         "control_center_live_window_context"
     );
@@ -449,6 +494,50 @@ try {
         context,
         declared_evidence,
         "control-center.live-cockpit"
+    );
+
+    print("STEP capture the exact live native Cockpit without activation");
+    let capture = rhai::json::parse(offline(
+        context,
+        control_center,
+        registry,
+        ["screenshot", "--output", cockpit_png, "--json"],
+        "control_center_cockpit_screenshot"
+    ));
+    let rendered = rhai::image::inspect_png(cockpit_png);
+    require(
+        capture.schema_version == 1
+            && capture.executable == "agenterm-cc"
+            && capture.state == "captured"
+            && capture.renderer == "native"
+            && capture.owner_pid == first.id
+            && capture.output == cockpit_png
+            && capture.width == rendered.width
+            && capture.height == rendered.height
+            && capture.width >= 500
+            && capture.height >= 300
+            && capture.bytes >= 1000
+            && capture.sha256.len == 64
+            && rendered.samples > 0
+            && rendered.luminance > 1.0
+            && rendered.luminance < 254.9
+            && (
+                first.platform_facts.foreground_window_id == 0
+                    || !first.platform_facts.top_level_window_is_foreground
+            ),
+        "control_center_cockpit_png_truth:" +
+            rhai::json::stringify(capture)
+    );
+    std::fs::create_dir_all(durable_evidence_directory);
+    std::fs::copy(cockpit_png, durable_cockpit_png);
+    require(
+        std::fs::metadata(durable_cockpit_png).len == capture.bytes,
+        "control_center_durable_png_copy"
+    );
+    print(
+        "Control Center screenshot: " + capture.width + "x" +
+            capture.height + ", " + capture.bytes + " bytes, " +
+            durable_cockpit_png
     );
 
     print("STEP reuse keeps PID and refreshes away from and back to live context");
@@ -552,6 +641,114 @@ try {
         "control-center.context-refresh"
     );
 
+    print("STEP server loss is explicit and a new epoch refreshes in place");
+    cli_text(context, cli_executable, ["save-workspace"]);
+    let prior_server_pid = server.id;
+    let prior_server_epoch = live_server.epoch;
+    cli_text(context, cli_executable, ["shutdown"]);
+    let prior_server_output = wait_for_exit(
+        server,
+        "control_center_prior_server_shutdown_timeout"
+    );
+    require(
+        prior_server_output.success,
+        "control_center_prior_server_exit_failure:" +
+            prior_server_output.stderr_text()
+    );
+    wait_process_gone(
+        prior_server_pid,
+        "control_center_prior_server_process_orphan"
+    );
+    offline(
+        context,
+        control_center,
+        registry,
+        [
+            "open", "--no-activate",
+            "--server-endpoint", context.address,
+            "--logical-instance", "main"
+        ],
+        "control_center_server_loss_refresh"
+    );
+    let loss_window = wait_for_window_title(
+        first,
+        ["server_unreachable"],
+        "control_center_server_loss"
+    );
+    let lost = rhai::json::parse(offline(
+        context,
+        control_center,
+        registry,
+        ["snapshot", "--json"],
+        "control_center_server_loss_snapshot"
+    ));
+    require(
+        first.state == "running"
+            && (
+                loss_window.foreground_window_id == 0
+                    || !loss_window.top_level_window_is_foreground
+            )
+            && lost.server_state == "unavailable"
+            && lost.server_reason == "server_unreachable"
+            && lost.connected_server == (),
+        "control_center_server_loss_truth"
+    );
+
+    let restarted_server_command = test_harness::configured_command(
+        context,
+        server_executable,
+        ["--address", context.address]
+    );
+    let restarted_server = restarted_server_command.start();
+    owned_children.push(restarted_server);
+    let restarted_protocol = wait_for_server(
+        context,
+        cli_executable,
+        restarted_server
+    );
+    offline(
+        context,
+        control_center,
+        registry,
+        [
+            "open", "--no-activate",
+            "--server-endpoint", context.address,
+            "--logical-instance", "main"
+        ],
+        "control_center_server_restart_refresh"
+    );
+    let restart_window = wait_for_window_title(
+        first,
+        [context.address],
+        "control_center_server_restart"
+    );
+    let restarted = rhai::json::parse(offline(
+        context,
+        control_center,
+        registry,
+        ["snapshot", "--json"],
+        "control_center_server_restart_snapshot"
+    ));
+    require(
+        first.state == "running"
+            && (
+                restart_window.foreground_window_id == 0
+                    || !restart_window.top_level_window_is_foreground
+            )
+            && restarted.server_state == "connected"
+            && restarted.connected_server.pid == restarted_server.id
+            && restarted_protocol.pid == restarted_server.id
+            && restarted.connected_server.epoch
+                != prior_server_epoch,
+        "control_center_server_restart_identity"
+    );
+    prove_pty(context, cli_executable, "after-restart");
+    test_harness::emit_evidence(
+        context,
+        declared_evidence,
+        "control-center.server-recovery"
+    );
+
     print("STEP typed close targets only the exact reused projection owner");
     let first_pid = first.id;
     let close = rhai::json::parse(offline(
@@ -578,12 +775,12 @@ try {
         "control-center.typed-close"
     );
     require(
-        process_present(server.id)
+        process_present(restarted_server.id)
             && cli_json(
                 context,
                 cli_executable,
                 ["protocol-info", "--running"]
-            ).pid == server.id,
+            ).pid == restarted_server.id,
         "control_center_close_affected_server"
     );
     prove_pty(context, cli_executable, "after-close");
@@ -631,12 +828,12 @@ try {
         "control_center_replacement_process_orphan"
     );
     require(
-        process_present(server.id)
+        process_present(restarted_server.id)
             && cli_json(
                 context,
                 cli_executable,
                 ["protocol-info", "--running"]
-            ).pid == server.id,
+            ).pid == restarted_server.id,
         "control_center_kill_affected_server"
     );
     prove_pty(context, cli_executable, "after-kill");
@@ -704,7 +901,7 @@ try {
     );
     cli_text(context, cli_executable, ["shutdown"]);
     let server_output = wait_for_exit(
-        server,
+        restarted_server,
         "control_center_server_shutdown_timeout"
     );
     require(
@@ -713,12 +910,13 @@ try {
             server_output.stderr_text()
     );
     wait_process_gone(
-        server.id,
+        restarted_server.id,
         "control_center_server_process_orphan"
     );
     print(
-        "PASS: Control Center live Cockpit facts, context refresh, " +
-            "no-activate reuse, failure isolation, and orphan-free cleanup"
+        "PASS: Control Center launch failure, live Cockpit facts, " +
+            "no-activate reuse, server loss/new-epoch recovery, " +
+            "failure isolation, and orphan-free cleanup"
     );
     succeeded = true;
 } catch (error) {

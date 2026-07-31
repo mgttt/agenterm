@@ -626,10 +626,15 @@ fn await_ui_client_relay_to(
         .to_owned();
     let relay_receipt = response.receipt;
     let deadline = Instant::now() + timeout;
+    // Give the 100 ms native UI timer one uncontested turn before opening a
+    // result connection. This avoids phase-locking the waiter with the exact
+    // UI owner on transports that schedule short-lived connections unfairly.
+    thread::sleep(Duration::from_millis(125).min(timeout));
+    let mut last_state = "queued".to_owned();
     loop {
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
-            anyhow::bail!("UI client command {command_id} timed out");
+            anyhow::bail!("UI client command {command_id} timed out in relay state {last_state}");
         }
         let result = send_ipc_request_to_timeout(
             address,
@@ -651,6 +656,7 @@ fn await_ui_client_relay_to(
         }
         let value: serde_json::Value =
             serde_json::from_str(&result.output).context("invalid UI client relay result")?;
+        last_state = value["state"].as_str().unwrap_or("invalid").to_owned();
         if value["state"].as_str() == Some("complete") {
             let mut completed: IpcResponse = serde_json::from_value(value["response"].clone())
                 .context("invalid completed UI client response")?;
@@ -669,8 +675,11 @@ fn await_ui_client_relay_to(
             }
             return Ok(completed);
         }
+        // Polling faster than the native UI timer cannot reduce completion
+        // latency and creates enough short-lived Windows IPC connections to
+        // contend with the UI owner's apply/complete requests.
         thread::sleep(
-            Duration::from_millis(20).min(deadline.saturating_duration_since(Instant::now())),
+            Duration::from_millis(100).min(deadline.saturating_duration_since(Instant::now())),
         );
     }
 }
@@ -819,6 +828,7 @@ fn run_list_instances(arguments: &[String]) -> i32 {
             "transport": endpoint.transport_name(),
             "instance": logical_instance.to_string(),
             "instance_label": logical_instance.display_label(&username),
+            "server_scope_id": instance.record.server_scope_id.as_ref().map(|scope| scope.as_str()),
             "registration_schema_version": instance.record.schema_version,
             "legacy_client_compatibility": instance.record.legacy_client_compatibility(),
             "version": instance.record.version,
@@ -3180,15 +3190,24 @@ pub(crate) fn run_wait_ui(arguments: &[String]) -> i32 {
                 );
                 let tab_editor_matches = expected_tab_editor_state.is_none_or(|state| {
                     let editor = &snapshot["tab_editor"];
-                    match state {
-                        "open" => {
-                            editor.is_object() && editor["target"].as_str() == target.as_deref()
+                    let replaceable_projection =
+                        snapshot["projection"].as_str() == Some("replaceable_ui_client");
+                    let target_present = target.as_deref().is_some_and(|expected| {
+                        snapshot["tabs"].as_array().is_some_and(|tabs| {
+                            tabs.iter().any(|tab| tab["id"].as_str() == Some(expected))
+                        })
+                    });
+                    replaceable_projection
+                        && target_present
+                        && match state {
+                            "open" => {
+                                editor.is_object() && editor["target"].as_str() == target.as_deref()
+                            }
+                            "closed" => {
+                                editor.is_null() || editor["target"].as_str() != target.as_deref()
+                            }
+                            _ => false,
                         }
-                        "closed" => {
-                            editor.is_null() || editor["target"].as_str() != target.as_deref()
-                        }
-                        _ => false,
-                    }
                 });
                 if active_matches
                     && focus_matches

@@ -40,6 +40,11 @@ fn require(condition, message) {
     }
 }
 
+fn double_click_point(gui_child, x, y) {
+    gui_child.window_pointer("click", x, y);
+    gui_child.window_message(0x0203, 0, y * 65536 + x);
+}
+
 fn json_cli(context, cli, arguments) {
     rhai::json::parse(
         test_harness::invoke_cli(
@@ -245,6 +250,22 @@ fn find_tab(snapshot, id) {
         }
     }
     ()
+}
+
+fn double_click_tab_text(context, cli, gui_child, id) {
+    let snapshot = json_cli(context, cli, ["ui-snapshot"]);
+    let tab = find_tab(snapshot, id);
+    require(
+        tab != ()
+            && tab.render.text.width > 0
+            && tab.render.text.height > 0,
+        "remote_ui_tab_text_geometry_missing"
+    );
+    double_click_point(
+        gui_child,
+        tab.render.text.left + tab.render.text.width / 2,
+        tab.render.text.top + tab.render.text.height / 2
+    );
 }
 
 fn find_last_run(screen, marker) {
@@ -1472,7 +1493,7 @@ try {
     print("STEP edit title and note in place with Save and Cancel");
     let edited_title = "remote-edited-" + context.run_id;
     let edited_note = "note-" + context.run_id;
-    gui.window_pointer("click", 260, 20);
+    double_click_tab_text(context, cli, gui, tab_id);
     let title_editor = gui.window_control(2105);
     let note_editor = gui.window_control(2106);
     let save_button = gui.window_control(2107);
@@ -1495,7 +1516,7 @@ try {
             && !title_editor.visible,
         "remote_ui_inline_save_invalid"
     );
-    gui.window_pointer("click", 260, 20);
+    double_click_tab_text(context, cli, gui, tab_id);
     title_editor.set_text(repeat_text("x", 4097));
     save_button.click();
     let rejected = json_cli(
@@ -1509,7 +1530,7 @@ try {
         "remote_ui_inline_oversize_not_rejected"
     );
     cancel_button.click();
-    gui.window_pointer("click", 260, 20);
+    double_click_tab_text(context, cli, gui, tab_id);
     title_editor.set_text("must-not-save");
     cancel_button.click();
     let edit_cancelled = json_cli(

@@ -13,7 +13,7 @@ use std::{
     env,
     path::Path,
     rc::Rc,
-    sync::{Arc, mpsc::Receiver},
+    sync::Arc,
     time::{Duration, Instant, SystemTime},
 };
 
@@ -36,7 +36,7 @@ use crate::{
     gui_wake::{UnixWake, install_unix_wake},
     instances::{mark_intentional_shutdown, register_instance},
     ipc_endpoint::EndpointSelectorArgs,
-    ipc_transport::{IpcEnvelope, start_ipc_server},
+    ipc_transport::{IpcEnvelope, IpcServer, start_ipc_server},
     operations::{UI_TABS_SET_WIDTH, UI_TABS_SHOW},
     protocol::IpcResponse,
     pty::TerminalSize,
@@ -397,7 +397,7 @@ fn run_gui(no_activate: bool) -> anyhow::Result<()> {
         .map_err(|error| anyhow::anyhow!("{error}"))?;
     let wake_signal = Arc::new(WakeSignal::new());
 
-    let ipc_receiver = start_ipc_server(0, Arc::clone(&wake_signal))?;
+    let ipc_server = start_ipc_server(0, Arc::clone(&wake_signal))?;
     let session_name = format!("agenterm-{}", std::process::id());
     let _instance = register_instance(&crate::ipc_address(), &workspace_path(), &session_name)?;
 
@@ -406,7 +406,7 @@ fn run_gui(no_activate: bool) -> anyhow::Result<()> {
         no_activate,
         context,
         wake_signal,
-        ipc_receiver,
+        ipc_server,
         session_name,
     );
     event_loop.set_control_flow(ControlFlow::Wait);
@@ -419,7 +419,7 @@ struct UnixApp {
     no_activate: bool,
     context: Context<winit::event_loop::OwnedDisplayHandle>,
     wake_signal: Arc<WakeSignal>,
-    ipc_receiver: Receiver<IpcEnvelope>,
+    ipc_server: IpcServer,
     session_name: String,
     started_at: SystemTime,
     event_journal: EventJournal,
@@ -483,7 +483,7 @@ impl UnixApp {
         no_activate: bool,
         context: Context<winit::event_loop::OwnedDisplayHandle>,
         wake_signal: Arc<WakeSignal>,
-        ipc_receiver: Receiver<IpcEnvelope>,
+        ipc_server: IpcServer,
         session_name: String,
     ) -> Self {
         let config = load_config();
@@ -492,7 +492,7 @@ impl UnixApp {
             no_activate,
             context,
             wake_signal,
-            ipc_receiver,
+            ipc_server,
             session_name,
             started_at: SystemTime::now(),
             event_journal: EventJournal::new(),
@@ -3525,7 +3525,7 @@ impl UnixApp {
 
         let mut changed = false;
         let mut terminal_changed = false;
-        while let Ok(envelope) = self.ipc_receiver.try_recv() {
+        while let Ok(envelope) = self.ipc_server.try_recv() {
             changed = true;
             self.handle_ipc(envelope);
         }

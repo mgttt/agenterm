@@ -248,7 +248,7 @@ fn public_resource_matches_cli_snapshot_field_for_field() {
     let fixture_snapshot = snapshot.clone();
     let fixture = thread::spawn(move || {
         for _ in 0..2 {
-            let (stream, _) = listener.accept().expect("accept same-source request");
+            let stream = accept_fixture(&listener, "same-source request");
             reply_snapshot_backend(stream, &fixture_snapshot);
         }
     });
@@ -311,7 +311,7 @@ fn public_resource_matches_cli_snapshot_field_for_field() {
         .expect("MCP resource text");
     let mcp: Value = serde_json::from_str(mcp_text).expect("MCP resource JSON");
 
-    assert_eq!(mcp["server"]["address"], address);
+    assert_eq!(mcp["server"]["address"], format!("tcp:{address}"));
     assert_eq!(mcp["server"]["pid"], cli["server_pid"]);
     assert_eq!(mcp["server"]["protocol_version"], cli["protocol_version"]);
     assert_eq!(mcp["event_position"], cli["event_position"]);
@@ -364,7 +364,7 @@ fn backend_error_diagnostics_do_not_echo_private_values() {
     let address = listener.local_addr().expect("fixture address").to_string();
     let backend_error = private_values.join("|");
     let fixture = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().expect("accept private-error request");
+        let mut stream = accept_fixture(&listener, "private-error request");
         let request = read_backend_request(&stream);
         assert_eq!(request["args"][0], "ui-snapshot");
         let response = json!({
@@ -460,7 +460,7 @@ fn public_workspace_tabs_and_snapshot_preserve_detached_tree_and_dead_shapes() {
     let fixture_snapshot = snapshot.clone();
     let fixture = thread::spawn(move || {
         for _ in 0..3 {
-            let (stream, _) = listener.accept().expect("accept resource-shape request");
+            let stream = accept_fixture(&listener, "resource-shape request");
             reply_snapshot_backend(stream, &fixture_snapshot);
         }
     });
@@ -563,7 +563,7 @@ fn public_workspace_tabs_and_snapshot_limits_fail_closed_with_typed_budget_facts
     let address = listener.local_addr().expect("fixture address").to_string();
     let fixture = thread::spawn(move || {
         for _ in 0..3 {
-            let (stream, _) = listener.accept().expect("accept resource-limit request");
+            let stream = accept_fixture(&listener, "resource-limit request");
             reply_snapshot_backend(stream, &snapshot);
         }
     });
@@ -634,8 +634,13 @@ fn public_instances_resource_reports_healthy_and_dead_registrations() {
     );
     let handshake_address = address.clone();
     let fixture = thread::spawn(move || {
-        let (stream, _) = listener.accept().expect("accept healthy handshake");
-        reply_protocol_backend(stream, std::process::id(), &handshake_address, 1);
+        let stream = accept_fixture(&listener, "healthy handshake");
+        reply_protocol_backend(
+            stream,
+            std::process::id(),
+            &format!("tcp:{handshake_address}"),
+            1,
+        );
     });
 
     let responses = run_discovery_resource(&instances, "agenterm://fleet/instances");
@@ -684,7 +689,7 @@ fn public_instances_item_limit_fails_before_health_allocation() {
 }
 
 #[test]
-fn implicit_discovery_selects_exactly_one_typed_healthy_instance() {
+fn explicit_legacy_address_selects_the_requested_server() {
     let root = unique_test_root("mcp-selection-one");
     let instances = root.join("instances");
     fs::create_dir_all(&instances).expect("create selection fixture directory");
@@ -697,38 +702,25 @@ fn implicit_discovery_selects_exactly_one_typed_healthy_instance() {
         &address,
         "one-session",
     );
-    let fixture_address = address.clone();
     let fixture = thread::spawn(move || {
-        let (stream, _) = listener.accept().expect("accept selection handshake");
-        reply_protocol_backend(stream, std::process::id(), &fixture_address, 1);
-        let (stream, _) = listener.accept().expect("accept selected snapshot");
+        let stream = accept_fixture(&listener, "explicit selected snapshot");
         reply_snapshot_backend(stream, &minimal_snapshot("selection-one", 1));
     });
 
-    let responses = run_discovery_resource(&instances, "agenterm://fleet/workspace");
+    let responses = run_selected_resource(
+        &instances,
+        &["--address", &address],
+        "agenterm://fleet/workspace",
+    );
     fixture.join().expect("join selection fixture");
     let body = resource_body(&responses, "resource");
-    assert_eq!(body["server"]["address"], address);
+    assert_eq!(body["server"]["address"], format!("tcp:{address}"));
     assert_eq!(body["event_position"]["epoch"], "selection-one");
     fs::remove_dir_all(&root).expect("remove selection fixture root");
 }
 
 #[test]
-fn implicit_discovery_fails_closed_for_zero_or_many_healthy_instances() {
-    let zero_root = unique_test_root("mcp-selection-zero");
-    let zero_instances = zero_root.join("instances");
-    fs::create_dir_all(&zero_instances).expect("create empty instance directory");
-    let zero = run_discovery_resource(&zero_instances, "agenterm://fleet/workspace");
-    let zero_error = response_by_id(&zero, "resource");
-    assert_eq!(zero_error["error"]["data"]["class"], "server_not_found");
-    assert_eq!(
-        zero_error["error"]["data"]["candidates"]
-            .as_array()
-            .map(Vec::len),
-        Some(0)
-    );
-    fs::remove_dir_all(&zero_root).expect("remove zero fixture root");
-
+fn default_main_uses_native_endpoint_and_ignores_random_tcp_inventory() {
     let many_root = unique_test_root("mcp-selection-many");
     let many_instances = many_root.join("instances");
     fs::create_dir_all(&many_instances).expect("create many instance directory");
@@ -750,113 +742,45 @@ fn implicit_discovery_fails_closed_for_zero_or_many_healthy_instances() {
         &second_address,
         "second-session",
     );
-    let first_fixture_address = first_address.clone();
-    let second_fixture_address = second_address.clone();
-    let first_fixture = thread::spawn(move || {
-        let (stream, _) = first.accept().expect("accept first healthy handshake");
-        reply_protocol_backend(stream, std::process::id(), &first_fixture_address, 1);
-    });
-    let second_fixture = thread::spawn(move || {
-        let (stream, _) = second.accept().expect("accept second healthy handshake");
-        reply_protocol_backend(stream, std::process::id(), &second_fixture_address, 1);
-    });
     let many = run_discovery_resource(&many_instances, "agenterm://fleet/workspace");
-    first_fixture.join().expect("join first healthy fixture");
-    second_fixture.join().expect("join second healthy fixture");
-    let many_error = response_by_id(&many, "resource");
-    assert_eq!(many_error["error"]["data"]["class"], "server_ambiguous");
-    let candidates = many_error["error"]["data"]["candidates"]
-        .as_array()
-        .expect("ambiguous candidates");
-    assert_eq!(candidates.len(), 2);
-    assert!(candidates.iter().all(|item| item["status"] == "healthy"));
+    let selected = selected_resource_endpoint(&many);
+    assert_ne!(selected, first_address);
+    assert_ne!(selected, second_address);
+    #[cfg(windows)]
+    assert!(selected.starts_with(r"pipe:\\.\pipe\agenterm-"));
+    #[cfg(unix)]
+    assert!(selected.starts_with("unix:"));
+    drop(first);
+    drop(second);
     fs::remove_dir_all(&many_root).expect("remove many fixture root");
 }
 
 #[test]
-fn implicit_discovery_reports_stale_unreachable_and_incompatible_candidates() {
+fn explicit_instance_dev_selects_a_distinct_native_endpoint() {
     let root = unique_test_root("mcp-selection-unhealthy");
     let instances = root.join("instances");
     fs::create_dir_all(&instances).expect("create unhealthy instance directory");
-    let stale = TcpListener::bind("127.0.0.1:0").expect("bind stale fixture");
-    let incompatible = TcpListener::bind("127.0.0.1:0").expect("bind incompatible fixture");
-    let reserved = TcpListener::bind("127.0.0.1:0").expect("reserve unreachable address");
-    let stale_address = stale.local_addr().expect("stale address").to_string();
-    let incompatible_address = incompatible
-        .local_addr()
-        .expect("incompatible address")
-        .to_string();
-    let unreachable_address = reserved
-        .local_addr()
-        .expect("unreachable address")
-        .to_string();
-    drop(reserved);
-    write_instance_registration(
+    let main = run_selected_resource(
         &instances,
-        "stale.json",
-        std::process::id(),
-        &stale_address,
-        "stale-session",
+        &["--instance", "main"],
+        "agenterm://fleet/workspace",
     );
-    write_instance_registration(
+    let dev = run_selected_resource(
         &instances,
-        "incompatible.json",
-        std::process::id(),
-        &incompatible_address,
-        "incompatible-session",
+        &["--instance", "dev"],
+        "agenterm://fleet/workspace",
     );
-    write_instance_registration(
-        &instances,
-        "unreachable.json",
-        std::process::id(),
-        &unreachable_address,
-        "unreachable-session",
-    );
-    let stale_fixture_address = stale_address.clone();
-    let incompatible_fixture_address = incompatible_address.clone();
-    let stale_fixture = thread::spawn(move || {
-        let (stream, _) = stale.accept().expect("accept stale handshake");
-        reply_protocol_backend(
-            stream,
-            std::process::id().saturating_add(1),
-            &stale_fixture_address,
-            1,
-        );
-    });
-    let incompatible_fixture = thread::spawn(move || {
-        let (stream, _) = incompatible
-            .accept()
-            .expect("accept incompatible handshake");
-        reply_protocol_backend(
-            stream,
-            std::process::id(),
-            &incompatible_fixture_address,
-            999,
-        );
-    });
-    let responses = run_discovery_resource(&instances, "agenterm://fleet/workspace");
-    stale_fixture.join().expect("join stale fixture");
-    incompatible_fixture
-        .join()
-        .expect("join incompatible fixture");
-    let error = response_by_id(&responses, "resource");
-    assert_eq!(error["error"]["data"]["class"], "server_not_found");
-    let candidates = error["error"]["data"]["candidates"]
-        .as_array()
-        .expect("unhealthy candidates");
-    for (session, status) in [
-        ("stale-session", "stale"),
-        ("incompatible-session", "incompatible"),
-        ("unreachable-session", "unreachable"),
-    ] {
-        assert_eq!(
-            candidates
-                .iter()
-                .find(|candidate| candidate["session"] == session)
-                .expect("classified candidate")["status"],
-            status
-        );
-    }
+    let main_endpoint = selected_resource_endpoint(&main);
+    let dev_endpoint = selected_resource_endpoint(&dev);
+    assert_ne!(main_endpoint, dev_endpoint);
+    #[cfg(windows)]
+    assert!(main_endpoint.starts_with(r"pipe:\\.\pipe\agenterm-"));
+    #[cfg(windows)]
+    assert!(dev_endpoint.starts_with(r"pipe:\\.\pipe\agenterm-"));
+    #[cfg(unix)]
+    assert!(main_endpoint.starts_with("unix:"));
+    #[cfg(unix)]
+    assert!(dev_endpoint.starts_with("unix:"));
     fs::remove_dir_all(&root).expect("remove unhealthy fixture root");
 }
 
@@ -1201,7 +1125,7 @@ fn public_wait_returns_one_projected_event_and_verified_post_state() {
     let address = listener.local_addr().expect("fixture address").to_string();
     let fixture = thread::spawn(move || {
         for _ in 0..2 {
-            let (stream, _) = listener.accept().expect("accept MCP backend request");
+            let stream = accept_fixture(&listener, "MCP backend request");
             reply_to_backend(stream);
         }
     });
@@ -1284,7 +1208,7 @@ fn public_wait_preserves_journal_position_failure_classes() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind isolated IPC fixture");
         let address = listener.local_addr().expect("fixture address").to_string();
         let fixture = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().expect("accept MCP backend request");
+            let mut stream = accept_fixture(&listener, "MCP backend request");
             read_backend_request(&stream);
             let response = json!({
                 "ok": false,
@@ -1310,7 +1234,7 @@ fn public_disconnect_cancels_an_active_wait_within_bounded_grace() {
     let address = listener.local_addr().expect("fixture address").to_string();
     let (accepted_sender, accepted_receiver) = mpsc::channel();
     let fixture = thread::spawn(move || {
-        let (stream, _) = listener.accept().expect("accept MCP backend request");
+        let stream = accept_fixture(&listener, "MCP backend request");
         read_backend_request(&stream);
         accepted_sender
             .send(())
@@ -1348,7 +1272,7 @@ fn cancellation_wins_over_a_late_backend_completion() {
     let (accepted_sender, accepted_receiver) = mpsc::channel();
     let (release_sender, release_receiver) = mpsc::channel();
     let fixture = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().expect("accept cancellation-race request");
+        let mut stream = accept_fixture(&listener, "cancellation-race request");
         read_backend_request(&stream);
         accepted_sender
             .send(())
@@ -1414,7 +1338,7 @@ fn force_killed_client_closes_its_active_backend_wait() {
     let (accepted_sender, accepted_receiver) = mpsc::channel();
     let (closed_sender, closed_receiver) = mpsc::channel();
     let fixture = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().expect("accept MCP backend request");
+        let mut stream = accept_fixture(&listener, "MCP backend request");
         read_backend_request(&stream);
         accepted_sender
             .send(())
@@ -1577,10 +1501,18 @@ fn run_public_wait(
 }
 
 fn run_discovery_resource(instances: &Path, uri: &str) -> Vec<Value> {
+    run_selected_resource(instances, &[], uri)
+}
+
+fn run_selected_resource(instances: &Path, selectors: &[&str], uri: &str) -> Vec<Value> {
     let mut child = Command::new(mcp_executable())
+        .args(selectors)
         .args(["serve", "--stdio"])
         .env("AGENTERM_INSTANCE_DIR", instances)
+        .env("AGENTERM_NO_ACTIVATE", "1")
+        .env_remove("AGENTERM_IPC_ENDPOINT")
         .env_remove("AGENTERM_IPC_ADDRESS")
+        .env_remove("AGENTERM_INSTANCE")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -1610,6 +1542,31 @@ fn run_discovery_resource(instances: &Path, uri: &str) -> Vec<Value> {
         .collect()
 }
 
+fn accept_fixture(listener: &TcpListener, context: &str) -> TcpStream {
+    listener
+        .set_nonblocking(true)
+        .expect("set fixture listener nonblocking");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match listener.accept() {
+            Ok((stream, _)) => {
+                stream
+                    .set_nonblocking(false)
+                    .expect("restore fixture stream blocking mode");
+                return stream;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                assert!(
+                    Instant::now() < deadline,
+                    "{context} was not contacted before the fixture deadline"
+                );
+                thread::sleep(Duration::from_millis(2));
+            }
+            Err(error) => panic!("{context} accept failed: {error}"),
+        }
+    }
+}
+
 fn response_by_id<'a>(responses: &'a [Value], id: &str) -> &'a Value {
     responses
         .iter()
@@ -1624,6 +1581,17 @@ fn resource_body(responses: &[Value], id: &str) -> Value {
             .expect("resource text"),
     )
     .expect("resource JSON")
+}
+
+fn selected_resource_endpoint(responses: &[Value]) -> String {
+    let response = response_by_id(responses, "resource");
+    if let Some(endpoint) = response["error"]["data"]["address"].as_str() {
+        return endpoint.to_owned();
+    }
+    resource_body(responses, "resource")["server"]["address"]
+        .as_str()
+        .expect("resource server endpoint")
+        .to_owned()
 }
 
 fn unique_test_root(prefix: &str) -> PathBuf {

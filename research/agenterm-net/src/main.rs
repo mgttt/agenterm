@@ -76,13 +76,23 @@ struct Ready {
     pid: u32,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 struct WorkerResult {
     event: String,
     peer_id: String,
     remote_peer_id: String,
     rtt_us: u128,
     pid: u32,
+    resources: ProcessResourceSample,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+struct ProcessResourceSample {
+    peak_rss_bytes: Option<u64>,
+    thread_count: Option<u32>,
+    source: String,
+    scope: String,
+    limitation: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -106,6 +116,8 @@ struct ProcessEvidence {
     bounded_ping: bool,
     child_exit_clean: bool,
     orphan_cleanup_armed: bool,
+    forced_cleanup_pid: u32,
+    forced_cleanup_reaped: bool,
 }
 
 #[derive(Serialize)]
@@ -113,6 +125,10 @@ struct ResourceFacts {
     elapsed_ms: u128,
     executable_bytes: Option<u64>,
     child_processes: usize,
+    peak_child_rss_bytes: Option<u64>,
+    max_observed_child_threads: Option<u32>,
+    measurement_complete: bool,
+    process_samples: Vec<ProcessResourceSample>,
     max_block_bytes: usize,
     transport: &'static str,
     security: &'static str,
@@ -162,6 +178,22 @@ impl ChildGuard {
     fn finish(mut self) -> Result<bool, String> {
         let status = self.child.wait().map_err(|error| error.to_string())?;
         Ok(status.success())
+    }
+
+    fn cancel_and_reap(mut self) -> Result<bool, String> {
+        let was_running = self
+            .child
+            .try_wait()
+            .map_err(|error| error.to_string())?
+            .is_none();
+        if !was_running {
+            return Ok(false);
+        }
+        self.child.kill().map_err(|error| error.to_string())?;
+        self.child
+            .wait()
+            .map(|_| true)
+            .map_err(|error| error.to_string())
     }
 }
 
@@ -360,6 +392,7 @@ async fn run_listener(deadline_ms: u64) -> Result<(), String> {
                         remote_peer_id: event.peer.to_string(),
                         rtt_us: event.result.unwrap_or_default().as_micros(),
                         pid: std::process::id(),
+                        resources: sample_process_resources(),
                     };
                     println!("{}", serde_json::to_string(&result).map_err(|e| e.to_string())?);
                     return Ok(());
@@ -395,6 +428,7 @@ async fn run_connector(address: &str, expected_peer: &str, deadline_ms: u64) -> 
                         remote_peer_id: event.peer.to_string(),
                         rtt_us: event.result.unwrap_or_default().as_micros(),
                         pid: std::process::id(),
+                        resources: sample_process_resources(),
                     };
                     println!("{}", serde_json::to_string(&result).map_err(|e| e.to_string())?);
                     return Ok(());
@@ -462,8 +496,25 @@ fn run_self_test(deadline_ms: u64) -> Result<SelfTestResult, String> {
     {
         return Err("cross-process identity or ping receipt mismatch".to_string());
     }
+    let process_samples = vec![
+        listener_result.resources.clone(),
+        connector_result.resources.clone(),
+    ];
+    let peak_child_rss_bytes = process_samples
+        .iter()
+        .filter_map(|sample| sample.peak_rss_bytes)
+        .max();
+    let max_observed_child_threads = process_samples
+        .iter()
+        .filter_map(|sample| sample.thread_count)
+        .max();
+    let measurement_complete = process_samples
+        .iter()
+        .all(|sample| sample.peak_rss_bytes.is_some() && sample.thread_count.is_some());
     let connector_clean = connector.finish()?;
     let listener_clean = listener.finish()?;
+    let (forced_cleanup_pid, forced_cleanup_reaped) =
+        forced_cleanup_self_test(&executable, deadline_ms, deadline)?;
     let block = block_self_test()?;
     let executable_bytes = fs::metadata(&executable)
         .ok()
@@ -480,12 +531,18 @@ fn run_self_test(deadline_ms: u64) -> Result<SelfTestResult, String> {
             bounded_ping: true,
             child_exit_clean: listener_clean && connector_clean,
             orphan_cleanup_armed: true,
+            forced_cleanup_pid,
+            forced_cleanup_reaped,
         },
         block,
         resources: ResourceFacts {
             elapsed_ms: started.elapsed().as_millis(),
             executable_bytes,
-            child_processes: 2,
+            child_processes: 3,
+            peak_child_rss_bytes,
+            max_observed_child_threads,
+            measurement_complete,
+            process_samples,
             max_block_bytes: MAX_BLOCK_BYTES,
             transport: "libp2p TCP loopback",
             security: "Noise",
@@ -498,6 +555,177 @@ fn run_self_test(deadline_ms: u64) -> Result<SelfTestResult, String> {
             "not a stable or release-packaged capability",
         ],
     })
+}
+
+fn forced_cleanup_self_test(
+    executable: &Path,
+    deadline_ms: u64,
+    deadline: Duration,
+) -> Result<(u32, bool), String> {
+    let child = Command::new(executable)
+        .arg("__listen")
+        .arg(deadline_ms.to_string())
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .map_err(|error| format!("spawn cleanup probe: {error}"))?;
+    let mut child = ChildGuard::new(child);
+    let pid = child.pid();
+    let receiver = capture_lines(
+        child
+            .child
+            .stdout
+            .take()
+            .ok_or_else(|| "cleanup probe stdout unavailable".to_string())?,
+    );
+    let ready: Ready = receive_json(&receiver, deadline, "cleanup probe ready")?;
+    if ready.event != "ready" || ready.pid != pid {
+        return Err("cleanup probe ready receipt did not match child".to_string());
+    }
+    Ok((pid, child.cancel_and_reap()?))
+}
+
+#[cfg(target_os = "linux")]
+fn sample_process_resources() -> ProcessResourceSample {
+    let status = fs::read_to_string("/proc/self/status");
+    let mut peak_rss_bytes = None;
+    let mut thread_count = None;
+    let mut limitation = None;
+    match status {
+        Ok(status) => {
+            for line in status.lines() {
+                if let Some(value) = line.strip_prefix("VmHWM:") {
+                    peak_rss_bytes = value
+                        .split_whitespace()
+                        .next()
+                        .and_then(|value| value.parse::<u64>().ok())
+                        .and_then(|kib| kib.checked_mul(1024));
+                } else if let Some(value) = line.strip_prefix("Threads:") {
+                    thread_count = value.trim().parse::<u32>().ok();
+                }
+            }
+            if peak_rss_bytes.is_none() || thread_count.is_none() {
+                limitation = Some("/proc/self/status omitted VmHWM or Threads".to_string());
+            }
+        }
+        Err(error) => limitation = Some(format!("read /proc/self/status: {error}")),
+    }
+    ProcessResourceSample {
+        peak_rss_bytes,
+        thread_count,
+        source: "linux:/proc/self/status".to_string(),
+        scope: "per worker at successful ping; RSS is OS high-water mark, threads are observed"
+            .to_string(),
+        limitation,
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn sample_process_resources() -> ProcessResourceSample {
+    let mut usage = std::mem::MaybeUninit::<libc::rusage>::zeroed();
+    // SAFETY: getrusage initializes the provided rusage structure for the
+    // current process when it returns zero.
+    let peak_rss_bytes = if unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) } == 0 {
+        // macOS reports ru_maxrss in bytes.
+        Some(unsafe { usage.assume_init() }.ru_maxrss as u64)
+    } else {
+        None
+    };
+    let thread_count = Command::new("ps")
+        .args(["-o", "thcount=", "-p", &std::process::id().to_string()])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .and_then(|value| value.trim().parse::<u32>().ok());
+    let limitation = (peak_rss_bytes.is_none() || thread_count.is_none())
+        .then(|| "getrusage(RUSAGE_SELF) or macOS ps thcount was unavailable".to_string());
+    ProcessResourceSample {
+        peak_rss_bytes,
+        thread_count,
+        source: "macos:getrusage+ps-thcount".to_string(),
+        scope: "per worker at successful ping; RSS is OS high-water mark, threads are observed"
+            .to_string(),
+        limitation,
+    }
+}
+
+#[cfg(windows)]
+fn sample_process_resources() -> ProcessResourceSample {
+    use std::mem::{size_of, zeroed};
+    use windows_sys::Win32::{
+        Foundation::{CloseHandle, INVALID_HANDLE_VALUE},
+        System::{
+            Diagnostics::ToolHelp::{
+                CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First,
+                Thread32Next,
+            },
+            ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS},
+            Threading::GetCurrentProcess,
+        },
+    };
+
+    let mut counters: PROCESS_MEMORY_COUNTERS = unsafe { zeroed() };
+    counters.cb = size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
+    // SAFETY: counters is initialized with the documented size and the
+    // pseudo-handle is valid for querying the current process.
+    let peak_rss_bytes = (unsafe {
+        GetProcessMemoryInfo(
+            GetCurrentProcess(),
+            &mut counters,
+            size_of::<PROCESS_MEMORY_COUNTERS>() as u32,
+        )
+    } != 0)
+        .then_some(counters.PeakWorkingSetSize as u64);
+
+    let pid = std::process::id();
+    let mut thread_count = None;
+    // SAFETY: the returned snapshot is checked and closed exactly once; the
+    // THREADENTRY32 size is initialized as required by Toolhelp.
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
+    if snapshot != INVALID_HANDLE_VALUE {
+        let mut entry: THREADENTRY32 = unsafe { zeroed() };
+        entry.dwSize = size_of::<THREADENTRY32>() as u32;
+        let mut count = 0_u32;
+        if unsafe { Thread32First(snapshot, &mut entry) } != 0 {
+            loop {
+                if entry.th32OwnerProcessID == pid {
+                    count = count.saturating_add(1);
+                }
+                if unsafe { Thread32Next(snapshot, &mut entry) } == 0 {
+                    break;
+                }
+            }
+            thread_count = Some(count);
+        }
+        unsafe {
+            CloseHandle(snapshot);
+        }
+    }
+    let limitation = (peak_rss_bytes.is_none() || thread_count.is_none())
+        .then(|| "GetProcessMemoryInfo or Toolhelp thread snapshot was unavailable".to_string());
+    ProcessResourceSample {
+        peak_rss_bytes,
+        thread_count,
+        source: "windows:ProcessMemoryCounters+Toolhelp".to_string(),
+        scope: "per worker at successful ping; RSS is OS high-water mark, threads are observed"
+            .to_string(),
+        limitation,
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+fn sample_process_resources() -> ProcessResourceSample {
+    ProcessResourceSample {
+        peak_rss_bytes: None,
+        thread_count: None,
+        source: "unsupported-platform".to_string(),
+        scope: "per worker at successful ping".to_string(),
+        limitation: Some("resource sampler is not implemented on this target".to_string()),
+    }
 }
 
 fn capture_lines<R: io::Read + Send + 'static>(reader: R) -> Receiver<ChildMessage> {

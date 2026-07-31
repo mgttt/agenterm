@@ -87,6 +87,10 @@
       "evidence": []
     },
     {
+      "id": "agenterm-net-research",
+      "evidence": []
+    },
+    {
       "id": "preflight-benchmark",
       "evidence": []
     },
@@ -125,6 +129,12 @@
       "id": "server-smoke",
       "evidence": [
         "server.headless-authority"
+      ]
+    },
+    {
+      "id": "native-ipc-smoke",
+      "evidence": [
+        "control.native-local-ipc"
       ]
     },
     {
@@ -215,6 +225,8 @@
         "control-center.live-cockpit",
         "control-center.process-reuse",
         "control-center.context-refresh",
+        "control-center.launch-failure",
+        "control-center.server-recovery",
         "control-center.no-activate",
         "control-center.typed-close",
         "control-center.process-isolation"

@@ -929,9 +929,13 @@ impl RemoteWindowState {
                     }
                     self.load_composer();
                 }
-                self.last_error = None;
                 let command_changed = match self.process_client_command() {
-                    Ok(changed) => changed,
+                    Ok(changed) => {
+                        if changed {
+                            self.last_error = None;
+                        }
+                        changed
+                    }
                     Err(error) => {
                         self.last_error =
                             Some(format!("UI client command relay failed: {error:#}"));

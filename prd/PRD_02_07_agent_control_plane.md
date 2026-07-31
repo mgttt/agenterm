@@ -134,17 +134,41 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     fails with a typed result instead of killing it or falling back to another
     instance
   - [~] Unix local endpoint contract:
-    - choose a trusted per-UID runtime base, create the AgenTerm instance
+    - [x] choose a trusted per-UID runtime base, create the AgenTerm instance
       directory with mode `0700`, and create the socket with mode `0600`
-    - validate owner, type, permissions, path length, and symlink-free
+    - [x] validate owner, type, permissions, path length, and symlink-free
       components before bind; use a fixed-length derived key rather than a
       truncated username when the platform `sun_path` budget is tight
-    - recover a stale socket only under the same instance lock after a bounded
+    - [x] hold a per-endpoint `0600` no-follow regular-file lease under a
+      nonblocking exclusive OS lock for the complete listener lifetime; the
+      lease records PID plus Linux `/proc` start ticks or macOS
+      `proc_pidinfo` start time, so a same-instance concurrent authority fails
+      atomically rather than racing the socket probe
+    - [x] recover a stale socket only under the same instance lock after a bounded
       connect proves it dead and PID/start identity or lease evidence proves
       the former owner is gone; never unlink a symlink, regular file,
-      directory, foreign-owned node, permission failure, or timeout
-    - where the OS exposes peer credentials, verify the peer UID against
-      `ServerScopeId`; ownership uncertainty fails closed with a typed error
+      directory, foreign-owned node, permission failure, timeout, or
+      pre-lease socket without a valid predecessor identity
+    - [x] Linux `SO_PEERCRED` and macOS `getpeereid` verify both accepted
+      clients and connected servers against the effective UID that owns
+      `ServerScopeId`; credential lookup failure or mismatch fails closed with
+      a typed unsafe-endpoint error
+    - [~] six-target CI retains every manifest artifact and native Linux/macOS
+      cells now run the public Rhai IPC journey against isolated settings,
+      workspace, registration directory, `main` and `dev` Unix authorities.
+      Linux/macOS manifests include the standalone `agenterm-server` authority
+      consumed by that journey and by transport-neutral clients; it is a
+      product artifact rather than a CI-only server substitute.
+      The journey proves `0700` runtime-directory and `0600` socket modes,
+      typed `server-list` rows, selector separation, bounded duplicate-authority
+      rejection, legacy TCP migration, graceful cleanup, and no residual owned
+      process. Cross-built cells retain existence proof without attempting to
+      execute a foreign architecture.
+    - [ ] add destructive black-box coverage for abrupt owner death/stale
+      recovery and a deliberately different-UID peer; cfg-gated unit evidence
+      continues to own unidentified-stale-node, owner/mode, symlink, and
+      different-credential invariants until a suitable isolated CI fixture
+      exists
   - [~] Windows local endpoint contract:
     - create the named pipe with an explicit DACL scoped to the current user
       SID and only separately justified system principals; do not inherit a
@@ -197,3 +221,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     upgrade/rollback; explicit TCP compatibility; and truthful structured
     snapshot/diagnostic output without leaking raw SID, home path, or
     credentials
+    - [x] public native-IPC smoke proves isolated named-pipe and Unix-socket derivation plus native main/dev authority separation
+      together with CLI-over-environment selector precedence, typed selector
+      conflicts, schema-v1/v2 mixed discovery with v2 deduplication, truthful
+      server-list endpoint facts, explicit typed TCP, and legacy `--address`
+      compatibility

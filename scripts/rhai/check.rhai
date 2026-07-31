@@ -664,7 +664,7 @@ if release {
         "agenterm-net-research",
         "isolated agenterm-net research",
         [task(
-            worker,
+            bootstrap_worker,
             manifest,
             "agenterm-net-research",
             600000,
@@ -1003,6 +1003,7 @@ if !skip_smoke {
     let no_activate = #{"AGENTERM_NO_ACTIVATE":"1"};
     let smoke_ids = [
         "startup-smoke", "wake-smoke", "cli-smoke", "server-smoke",
+        "native-ipc-smoke",
         "remote-ui-smoke", "remote-ui-upgrade-smoke", "fleet-smoke",
         "script-smoke", "theme-smoke", "working-context-smoke",
         "workbench-smoke", "control-center-smoke"

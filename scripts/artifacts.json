@@ -198,6 +198,12 @@
           "release_budget_bytes": 4194304
         },
         {
+          "name": "agenterm-server",
+          "role": "internal-server",
+          "documentation_role": "internal headless workspace, PTY, parser, and event authority",
+          "offline_probe": []
+        },
+        {
           "name": "agenterm-cli",
           "role": "cli",
           "documentation_role": "native observation and automation client",
@@ -242,6 +248,12 @@
           "release_budget_bytes": 4194304
         },
         {
+          "name": "agenterm-server",
+          "role": "internal-server",
+          "documentation_role": "internal headless workspace, PTY, parser, and event authority",
+          "offline_probe": []
+        },
+        {
           "name": "agenterm-cli",
           "role": "cli",
           "documentation_role": "native observation and automation client",
@@ -286,6 +298,12 @@
           "release_budget_bytes": 4194304
         },
         {
+          "name": "agenterm-server",
+          "role": "internal-server",
+          "documentation_role": "internal headless workspace, PTY, parser, and event authority",
+          "offline_probe": []
+        },
+        {
           "name": "agenterm-cli",
           "role": "cli",
           "documentation_role": "native observation and automation client",
@@ -328,6 +346,12 @@
           "documentation_role": "isolated Control Center projection",
           "offline_probe": ["--version"],
           "release_budget_bytes": 4194304
+        },
+        {
+          "name": "agenterm-server",
+          "role": "internal-server",
+          "documentation_role": "internal headless workspace, PTY, parser, and event authority",
+          "offline_probe": []
         },
         {
           "name": "agenterm-cli",

@@ -28,13 +28,38 @@ pub(crate) struct SavedTab {
 pub(crate) fn workspace_path() -> PathBuf {
     env::var_os("AGENTERM_WORKSPACE_PATH")
         .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            env::var_os("LOCALAPPDATA")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join("AgenTerm")
-                .join("workspace.json")
-        })
+        .unwrap_or_else(default_workspace_path)
+}
+
+fn default_workspace_path() -> PathBuf {
+    #[cfg(windows)]
+    {
+        env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("AgenTerm")
+            .join("workspace.json")
+    }
+    #[cfg(unix)]
+    {
+        use crate::ipc_endpoint::{LogicalInstance, ServerScopeId};
+
+        let instance = env::var("AGENTERM_INSTANCE")
+            .ok()
+            .and_then(|value| value.parse::<LogicalInstance>().ok())
+            .unwrap_or_default();
+        ServerScopeId::current(&instance)
+            .map(|scope| crate::ipc_endpoint::default_workspace_path(&scope))
+            .unwrap_or_else(|_| {
+                crate::ipc_endpoint::unix_data_root_from(
+                    env::var_os("XDG_DATA_HOME"),
+                    env::var_os("HOME"),
+                    env::temp_dir(),
+                )
+                .join("workspaces")
+                .join("main.json")
+            })
+    }
 }
 
 pub(crate) fn load_workspace() -> Option<SavedWorkspace> {
@@ -64,5 +89,16 @@ mod tests {
         assert_eq!(old.version, 0);
         let empty: SavedWorkspace = serde_json::from_str(r#"{"version":1}"#).unwrap();
         assert!(empty.tabs.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_default_workspace_is_absolute_and_not_cwd_relative() {
+        assert!(default_workspace_path().is_absolute());
+        assert!(
+            default_workspace_path()
+                .components()
+                .any(|component| component.as_os_str() == "workspaces")
+        );
     }
 }

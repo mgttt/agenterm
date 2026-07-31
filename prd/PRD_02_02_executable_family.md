@@ -48,7 +48,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       ID for the final `IpcResponse`. Public black-box evidence now covers
       client-owned Tabs, Settings, focus and PNG screenshot actions plus
       exact-lease server apply/invoke paths; queue arguments are capped at
-      64/256 KiB and responses at 1 MiB. GUI-destroying
+      64/256 KiB and responses at 1 MiB. The local transport retains a
+      separate 4 MiB frame ceiling because completion embeds and JSON-escapes
+      that bounded response inside its request; this is not an increase to
+      the public operation-argument budget. GUI-destroying
       `keep-server-running` completes its detached response before releasing
       the lease, while `stop-server-and-exit` additionally delays server
       shutdown until the CLI has collected that result; both paths are

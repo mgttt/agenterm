@@ -147,8 +147,12 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   override keys with the stable server scope defined by the
   [Agent control plane](PRD_02_07_agent_control_plane.md), so changing a
   socket path or transport does not orphan terminal UI preferences
-- [x] `AGENTERM_SETTINGS_PATH` provides explicit settings isolation while
-  the default remains `%LOCALAPPDATA%\AgenTerm\settings.json`
+- [x] `AGENTERM_SETTINGS_PATH` provides explicit settings isolation; Windows
+  retains `%LOCALAPPDATA%\AgenTerm\settings.json`, while Unix uses the stable
+  `XDG_CONFIG_HOME/agenterm/settings.json` (or `HOME/.config`) user path
+- [x] Unix `main` and `dev` workspaces use stable user-scoped XDG data paths
+  instead of inheriting the launcher's current directory; Windows `main`
+  retains its legacy `%LOCALAPPDATA%\AgenTerm\workspace.json` migration path
 - Persistent workspace
   - [x] normal application close preserves the tab tree and active tab
   - [x] names, notes, composer drafts, and original commands are restored

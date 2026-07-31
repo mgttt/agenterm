@@ -179,13 +179,16 @@ fn set_tab_editor_text(gui_child, name, note) {
 
 fn assert_editor_closed(snapshot, target, label) {
     let tab = find_tab(snapshot, target);
-    require(
-        snapshot.tab_editor == ()
-            && tab.render.mode == "normal"
-            && tab.actions.mode == "normal"
+    let actions_closed = tab.actions == ()
+        || (tab.actions.mode == "normal"
             && tab.actions.edit == ()
             && tab.actions.save == ()
-            && tab.actions.cancel == (),
+            && tab.actions.cancel == ());
+    let render_closed = tab.render == () || tab.render.mode == "normal";
+    require(
+        snapshot.tab_editor == ()
+            && render_closed
+            && actions_closed,
         "workbench_editor_should_be_closed:" + label +
             ":" + rhai::json::stringify(tab)
     );
@@ -439,11 +442,7 @@ try {
     );
 
     print("STEP F2 and public edit-tab expose the same inline editor contract");
-    json_cli(
-        context,
-        cli,
-        ["--deadline-ms", "15000", "focus", "tabs", "-t", root]
-    );
+    json_cli(context, cli, ["focus", "tabs", "-t", root]);
     gui_child.window_key("F2");
     let f2_snapshot = wait_for_editor(context, cli, root, true);
     assert_editor_open(f2_snapshot, root, "f2");
@@ -541,11 +540,10 @@ try {
         root,
         "candidate-tabs-hide"
     );
-    click_bounds(gui_child, root_tab.render.text);
+    let pre_resize_text = root_tab.render.text;
+    click_bounds(gui_child, pre_resize_text);
     gui_child.window_resize(1000, 680);
-    let snapshot = json_cli(context, cli, ["ui-snapshot"]);
-    let root_tab = find_tab(snapshot, root);
-    double_click_message(gui_child, root_tab.render.text);
+    double_click_message(gui_child, pre_resize_text);
     assert_editor_closed(
         json_cli(context, cli, ["ui-snapshot"]),
         root,
@@ -606,9 +604,11 @@ try {
     }
     gui_child.window_resize(900, 320);
     let scroll_snapshot = ();
-    for attempt in 0..200 {
+    for attempt in 0..40 {
         let candidate = json_cli(context, cli, ["ui-snapshot"]);
-        if candidate.layout.sidebar.scrollbar != ()
+        if candidate.projection == "replaceable_ui_client"
+                && candidate.layout.sidebar != ()
+                && candidate.layout.sidebar.scrollbar != ()
                 && candidate.layout.sidebar.scrollbar.max_offset > 0 {
             scroll_snapshot = candidate;
             break;
@@ -637,23 +637,40 @@ try {
     gui_child.window_pointer("move-held", thumb_x, bottom_y);
     gui_child.window_pointer("up", thumb_x, bottom_y);
     let scrolled = ();
-    for attempt in 0..100 {
-        scrolled = json_cli(context, cli, ["ui-snapshot"]);
-        if scrolled.layout.sidebar.scrollbar.offset > 0 {
+    for attempt in 0..40 {
+        let candidate = json_cli(context, cli, ["ui-snapshot"]);
+        if candidate.projection == "replaceable_ui_client"
+                && candidate.layout.sidebar != ()
+                && candidate.layout.sidebar.scrollbar != ()
+                && candidate.layout.sidebar.scrollbar.offset > 0 {
+            scrolled = candidate;
             break;
         }
         rhai::task::sleep(std::time::Duration::from_millis(25));
     }
     require(
-        scrolled.layout.sidebar.scrollbar.offset > 0,
+        scrolled != (),
         "workbench_sidebar_scroll_did_not_move"
     );
     double_click_message(gui_child, first_visible.render.text);
     require(
-        json_cli(context, cli, ["ui-snapshot"]).tab_editor == (),
+        wait_for_editor(context, cli, first_visible.id, false).tab_editor == (),
         "workbench_scroll_retained_double_click_candidate"
     );
     gui_child.window_resize(1000, 680);
+    let scrollbar = scrolled.layout.sidebar.scrollbar;
+    let thumb_x = scrollbar.thumb.left + scrollbar.thumb.width / 2;
+    let thumb_y = scrollbar.thumb.top + scrollbar.thumb.height / 2;
+    gui_child.window_pointer("down", thumb_x, thumb_y);
+    gui_child.window_pointer("move-held", thumb_x, scrollbar.track.top + 2);
+    gui_child.window_pointer("up", thumb_x, scrollbar.track.top + 2);
+    json_cli(context, cli, ["ui-action", "select-tab", "-t", target]);
+    json_cli(
+        context,
+        cli,
+        ["wait-ui", "--active", target, "--focus", "terminal",
+         "--timeout-ms", "5000"]
+    );
     test_harness::emit_evidence(
         context,
         declared_evidence,

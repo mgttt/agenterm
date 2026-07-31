@@ -2,7 +2,7 @@
   "schema_version": 3,
   "project": {
     "id": "agenterm-development",
-    "version": "0.1.10",
+    "version": "0.1.11",
     "requires": {
       "script_api": {
         "minimum": 2,
@@ -62,7 +62,7 @@
     },
     "provenance": {
       "producer": "agenterm-script",
-      "revision": "v0.1.10-wave-0"
+      "revision": "v0.1.11-rc-unpublished"
     }
   },
   "contracts": {
@@ -210,6 +210,13 @@
       "budget": {"timeout_ms": 300000, "max_operations": 100000000, "max_output_bytes": 1048576},
       "network": ["loopback"],
       "evidence": ["task.server-smoke"]
+    },
+    "native-ipc-smoke": {
+      "inputs": ["staged-binaries", "isolated-workspace", "isolated-instance-directory"],
+      "outputs": ["native-ipc-evidence"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
+      "network": ["loopback"],
+      "evidence": ["task.native-ipc-smoke"]
     },
     "wake-smoke": {
       "inputs": ["staged-binaries", "isolated-workspace"],
@@ -642,6 +649,17 @@
       "side_effects": ["artifact_write", "process_spawn", "network_loopback"]
     },
     {
+      "id": "native-ipc-smoke",
+      "description": "Prove isolated native named-pipe or Unix-socket selection, selector precedence, mixed schema discovery, typed server-list rows, and explicit legacy TCP compatibility",
+      "entry": "scripts/rhai/native-ipc-smoke.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "args": [".", "dist/agenterm-server.exe", "dist/agenterm-cli.exe"],
+      "dependencies": [],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write", "process_spawn", "network_loopback"]
+    },
+    {
       "id": "wake-smoke",
       "description": "Prove coalesced server wake delivery across concurrent IPC, PTY output, and an expired raw mutation",
       "entry": "scripts/rhai/wake-smoke.rhai",
@@ -827,6 +845,7 @@
       "entry": "scripts/rhai/validate-artifact-manifest.rhai",
       "profile": "local",
       "cwd": ".",
+      "args": ["scripts/artifacts.json"],
       "dependencies": [],
       "platforms": ["windows", "linux", "macos"],
       "side_effects": []

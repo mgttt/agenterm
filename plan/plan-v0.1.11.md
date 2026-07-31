@@ -1,6 +1,6 @@
 # AgenTerm v0.1.11 公开计划
 
-状态：规划中
+状态：实现收敛与发布候选验证中（不授权 tag / GitHub Release）
 工作主题：**Control Center 基础、本地 IPC 原生化、安静工作台微调与
 去中心化基建首个独立闭环**
 版本定位：在不扩大日常终端主界面、不把新 UI 或网络职责塞入稳定 server
@@ -17,61 +17,61 @@
 v0.1.11  Control Center 基础与下一阶段平台入口
 │
 ├─ P0：保持主工作台安静、紧凑、易操作
-│  ├─ [ ] 保留右侧语言按钮的用户改名结果：En|Zh
-│  ├─ [ ] 普通标签行移除 Edit 按钮，回收密集树宽度
-│  ├─ [ ] 单击正文选择；双击正文进入原地编辑
-│  ├─ [ ] disclosure、树线、状态灯和动作区双击不误触编辑
-│  ├─ [ ] 编辑态只显示 Save / Cancel；保存或取消后恢复普通态
-│  └─ [ ] F2 与稳定 ui-action 提供键盘和自动化等价入口
+│  ├─ [x] 保留右侧语言按钮的用户改名结果：En|Zh
+│  ├─ [x] 普通标签行移除 Edit 按钮，回收密集树宽度
+│  ├─ [x] 单击正文选择；双击正文进入原地编辑
+│  ├─ [x] disclosure、树线、状态灯和动作区双击不误触编辑
+│  ├─ [x] 编辑态只显示 Save / Cancel；保存或取消后恢复普通态
+│  └─ [x] F2 与稳定 ui-action 提供键盘和自动化等价入口
 │
 ├─ P0：Control Center 独立客户端基础
-│  ├─ [ ] 终端上方工具栏中央增加 [Control Center]
-│  ├─ [ ] 用户入口与机器入口共享一个稳定 action identity
-│  ├─ [ ] 首选独立进程 agenterm-cc，而不是扩大 agenterm.exe
-│  ├─ [ ] 只通过公开 typed control plane 连接同一 server
-│  ├─ [ ] 关闭/崩溃/升级 Control Center 不影响 GUI、PTY 或 workspace
-│  ├─ [ ] 本轮交付壳层、导航、只读事实和明确空状态
-│  └─ [ ] 不在 Control Center 内复制第二份 Fleet authority
+│  ├─ [x] 终端上方工具栏中央增加 [Control Center]
+│  ├─ [x] 用户入口与机器入口共享一个稳定 action identity
+│  ├─ [x] 首选独立进程 agenterm-cc，而不是扩大 agenterm.exe
+│  ├─ [x] 只通过公开 typed control plane 连接同一 server
+│  ├─ [x] 关闭/崩溃/升级 Control Center 不影响 GUI、PTY 或 workspace
+│  ├─ [x] 本轮交付壳层、导航、只读事实和明确空状态
+│  └─ [x] 不在 Control Center 内复制第二份 Fleet authority
 │
 ├─ P0：本地 IPC 原生 transport 与逻辑实例
-│  ├─ [ ] 先冻结 endpoint/instance/discovery/security 合同，再迁移默认值
-│  ├─ [ ] Windows 默认 named pipe；Linux/macOS 默认 Unix domain socket
-│  ├─ [ ] 用户可见逻辑实例为 {username}_main 与 {username}_dev
-│  ├─ [ ] 底层 pipe/path 使用 OS user scope + app namespace + 安全派生键
-│  ├─ [ ] CLI 支持 --instance main|dev；显式 endpoint 优先且冲突报错
-│  ├─ [ ] main/dev 可同时存在、严格隔离且各自保持单例
-│  ├─ [ ] server-list 同时发现新 transport 与旧 TCP registration
-│  ├─ [ ] stale socket、ACL/权限、路径长度、字符和 owner recovery 可验证
-│  └─ [ ] 显式 TCP host:port 保留为兼容、诊断及未来远程 transport
+│  ├─ [x] 先冻结 endpoint/instance/discovery/security 合同，再迁移默认值
+│  ├─ [x] Windows 默认 named pipe；Linux/macOS 默认 Unix domain socket
+│  ├─ [x] 用户可见逻辑实例为 {username}_main 与 {username}_dev
+│  ├─ [x] 底层 pipe/path 使用 OS user scope + app namespace + 安全派生键
+│  ├─ [x] CLI 支持 --instance main|dev；显式 endpoint 优先且冲突报错
+│  ├─ [~] main/dev 可同时存在、严格隔离且各自保持单例
+│  ├─ [x] server-list 同时发现新 transport 与旧 TCP registration
+│  ├─ [~] stale socket、ACL/权限、路径长度、字符和 owner recovery 可验证
+│  └─ [x] 显式 TCP host:port 保留为兼容、诊断及未来远程 transport
 │
 ├─ P0：Control Center 产品树耦合推演
-│  ├─ [ ] Cockpit：同一 Fleet 的只读驾驶舱
-│  ├─ [ ] Workflow / Pipeline：工作流定义、运行与可验证恢复入口
-│  ├─ [ ] PluginHub：运行时、工具、sidecar 和插件包目录
-│  ├─ [ ] AppHub：基于脚本/插件组合出的用户应用目录
-│  └─ [ ] InfoHub：外部信息、订阅和去中心化内容的聚集与路由入口
+│  ├─ [x] Cockpit：同一 Fleet 的只读驾驶舱
+│  ├─ [x] Workflow / Pipeline：真实空状态与未来工作流入口
+│  ├─ [x] PluginHub：真实空状态与未来组件目录入口
+│  ├─ [x] AppHub：真实空状态与未来应用目录入口
+│  └─ [x] InfoHub：真实空状态与未来信息路由入口
 │
 ├─ P1：libp2p / IPFS 独立基础实验
-│  ├─ [ ] 依赖、许可、体积、内存、线程与跨平台可行性门
-│  ├─ [ ] agenterm-net 独立进程原型，不链接 GUI/server
-│  ├─ [ ] 两个本地测试节点完成身份、握手、ping 与有界退出
-│  ├─ [ ] CID 生成/校验与临时块存储 put/get 闭环
-│  ├─ [ ] typed JSON 结果、预算、诊断和 orphan 清理
-│  └─ [ ] 成熟前不接入 server 常驻服务、不冒充稳定发布能力
+│  ├─ [~] 依赖、许可、体积、内存、线程与跨平台可行性门
+│  ├─ [x] agenterm-net 独立进程原型，不链接 GUI/server
+│  ├─ [x] 两个本地测试节点完成身份、握手、ping 与有界退出
+│  ├─ [x] CID 生成/校验与临时块存储 put/get 闭环
+│  ├─ [x] typed JSON 结果、预算、诊断和 orphan 清理
+│  └─ [x] 成熟前不接入 server 常驻服务、不冒充稳定发布能力
 │
 ├─ P1：系统 WebView host 方向
-│  ├─ [ ] 借鉴 Tauri 的“Rust host + 系统 WebView”思想，不承诺兼容 Tauri
-│  ├─ [ ] 比较原生 API、轻量封装和现有 Rust WebView 方案
-│  ├─ [ ] 冻结本地资源、消息桥、窗口生命周期和 capability 合同
-│  ├─ [ ] Windows / macOS / Linux 真实可用性与失败状态可发现
-│  └─ [ ] 本轮不强制 Control Center 改用 WebView
+│  ├─ [x] 借鉴 Tauri 的“Rust host + 系统 WebView”思想，不承诺兼容 Tauri
+│  ├─ [x] 比较原生 API、轻量封装和现有 Rust WebView 方案
+│  ├─ [x] 冻结本地资源、消息桥、窗口生命周期和 capability 合同
+│  ├─ [x] Windows / macOS / Linux 真实可用性与失败状态可发现
+│  └─ [x] 本轮不强制 Control Center 改用 WebView
 │
 ├─ P0：自反馈与交付
-│  ├─ [ ] snapshot/action 覆盖工具栏、标签手势和 Control Center 生命周期
-│  ├─ [ ] PNG 与结构化状态一致
-│  ├─ [ ] 独立进程 crash、missing、incompatible、restart 故障矩阵
-│  ├─ [ ] Windows/Linux/macOS × x86_64/ARM64 构建与能力事实
-│  └─ [ ] release gate 继续消费同一批 byte-qualified artifacts
+│  ├─ [x] snapshot/action 覆盖工具栏、标签手势和 Control Center 生命周期
+│  ├─ [~] PNG 与结构化状态一致
+│  ├─ [~] 独立进程 crash、missing、incompatible、restart 故障矩阵
+│  ├─ [~] Windows/Linux/macOS × x86_64/ARM64 构建与能力事实
+│  └─ [x] release gate 继续消费同一批 byte-qualified artifacts
 │
 └─ 明确延后与未来计划
    ├─ 完整可视化工作流图编辑器、调度器和跨机恢复
@@ -85,6 +85,17 @@ v0.1.11  Control Center 基础与下一阶段平台入口
    ├─ 在跨版本门未通过前移除旧 TCP registration/连接能力
    └─ Agent 权限、审批、凭据和策略；这些属于未来 Agent harness
 ```
+
+当前收敛说明（2026-07-31）：
+
+- `[x]` 表示实现与 owning evidence 已进入 `main`，不是发布授权；
+- `[~]` 主要剩余项是原生 Unix CI 的最终运行结果、Control Center 扩展
+  故障矩阵、跨平台 PNG 边界和 exact-HEAD 候选 qualification；
+- `agenterm-net` 与 WebView 仍保持研究/host-spike 身份，完成本轮合同不等于
+  晋升为稳定常驻服务或生产 renderer；
+- 只有六目标 CI、完整 qualification receipt 和 release rehearsal 对同一
+  clean commit 全部通过后，才可称为 release candidate；仍须用户另行批准
+  才能创建 tag 或 GitHub Release。
 
 ## 二、用户问题与版本 outcome
 

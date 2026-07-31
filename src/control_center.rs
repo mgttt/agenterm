@@ -18,6 +18,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
+use crate::ipc_endpoint::{EndpointSelectorArgs, IpcEndpoint, resolve_ipc_endpoint};
+
 const SCHEMA_VERSION: u32 = 1;
 const REGISTRY_SCHEMA_VERSION: u32 = 2;
 const PUBLIC_UI_ACTION: &str = "open-control-center";
@@ -26,13 +28,18 @@ const HELP: &str = "\
 AgenTerm Control Center
 
 Usage:
-  agenterm-cc [open] [--no-activate] [--server-endpoint ENDPOINT]
+  agenterm-cc [open] [--no-activate] [--instance NAME | --endpoint ENDPOINT]
   agenterm-cc status [--json]
   agenterm-cc close [--json]
-  agenterm-cc snapshot [--json] [--server-endpoint ENDPOINT]
+  agenterm-cc snapshot [--json] [--instance NAME | --endpoint ENDPOINT]
+  agenterm-cc screenshot --output PATH [--json]
   agenterm-cc capabilities [--json]
   agenterm-cc --help
   agenterm-cc --version
+
+ENDPOINT is transport-qualified: unix:<path>, pipe:<name>, or tcp:<host>:<port>.
+The legacy --server-endpoint and --logical-instance spellings remain migration
+aliases. Endpoint and instance selectors are mutually exclusive.
 
 The Control Center is an isolated projection process. It never owns terminal,
 PTY, workspace, server, or workflow state.
@@ -59,6 +66,10 @@ enum EntryCommand {
         json: bool,
         context: Option<ServerContext>,
     },
+    Screenshot {
+        json: bool,
+        output: PathBuf,
+    },
 }
 
 #[derive(Debug, Serialize)]
@@ -73,7 +84,22 @@ struct CapabilityDocument {
     owns_terminal_authority: bool,
     process_reuse: bool,
     no_activate: bool,
+    screenshot: &'static str,
     views: [&'static str; 4],
+}
+
+#[derive(Debug, Serialize)]
+struct ScreenshotDocument {
+    schema_version: u32,
+    executable: &'static str,
+    state: &'static str,
+    renderer: &'static str,
+    owner_pid: u32,
+    output: String,
+    width: u32,
+    height: u32,
+    bytes: u64,
+    sha256: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -309,22 +335,16 @@ impl ShellProjection {
 
 /// Start or reuse the isolated Control Center without blocking the GUI thread.
 pub(crate) fn open_control_center(no_activate: bool, server_endpoint: &str) -> Result<()> {
-    validate_context_value("server endpoint", server_endpoint)?;
     let executable = control_center_executable()?;
     let mut command = Command::new(&executable);
-    command
-        .arg("open")
-        .arg("--server-endpoint")
-        .arg(server_endpoint);
-    if let Ok(instance) = env::var("AGENTERM_INSTANCE")
-        && !instance.trim().is_empty()
-    {
-        validate_context_value("logical instance", &instance)?;
-        command.arg("--logical-instance").arg(instance);
-    }
-    if no_activate {
-        command.arg("--no-activate");
-    }
+    let instance = env::var("AGENTERM_INSTANCE")
+        .ok()
+        .filter(|instance| !instance.trim().is_empty());
+    command.args(control_center_launch_arguments(
+        no_activate,
+        server_endpoint,
+        instance.as_deref(),
+    )?);
     command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -333,6 +353,28 @@ pub(crate) fn open_control_center(no_activate: bool, server_endpoint: &str) -> R
         .spawn()
         .with_context(|| format!("failed to launch {}", executable.display()))?;
     Ok(())
+}
+
+fn control_center_launch_arguments(
+    no_activate: bool,
+    server_endpoint: &str,
+    logical_instance: Option<&str>,
+) -> Result<Vec<OsString>> {
+    let server_endpoint = canonical_endpoint(server_endpoint)?;
+    let mut arguments = vec![
+        OsString::from("open"),
+        OsString::from("--server-endpoint"),
+        OsString::from(server_endpoint.to_string()),
+    ];
+    if let Some(instance) = logical_instance {
+        validate_context_value("logical instance", instance)?;
+        arguments.push(OsString::from("--logical-instance"));
+        arguments.push(OsString::from(instance));
+    }
+    if no_activate {
+        arguments.push(OsString::from("--no-activate"));
+    }
+    Ok(arguments)
 }
 
 /// Local CLI surface. It never starts a server and always emits one JSON document.
@@ -445,8 +487,11 @@ fn parse_entry(args: &[OsString]) -> std::result::Result<EntryCommand, String> {
                 value.as_ref(),
                 "--no-activate"
                     | "--json"
+                    | "--endpoint"
+                    | "--instance"
                     | "--server-endpoint"
                     | "--logical-instance"
+                    | "--output"
                     | "--help"
                     | "-h"
                     | "--version"
@@ -459,22 +504,71 @@ fn parse_entry(args: &[OsString]) -> std::result::Result<EntryCommand, String> {
     let no_activate = explicit_no_activate || crate::client::no_activate_from_environment();
     let json = values.iter().any(|value| value == "--json");
     let mut positional = Vec::new();
-    let mut endpoint = None;
-    let mut logical_instance = None;
+    let mut selectors = EndpointSelectorArgs::default();
+    let mut migration_endpoint = None;
+    let mut migration_instance = None;
+    let mut screenshot_output = None;
     let mut position = 0;
     while position < values.len() {
         match values[position].as_ref() {
-            "--server-endpoint" | "--logical-instance" => {
+            "--endpoint" | "--instance" | "--server-endpoint" | "--logical-instance"
+            | "--output" => {
                 let option = values[position].as_ref();
                 let Some(value) = values.get(position + 1) else {
                     return Err(format!("{option} requires a value"));
                 };
+                if option == "--output" {
+                    if value.is_empty() {
+                        return Err("--output requires a non-empty path".to_owned());
+                    }
+                    if screenshot_output
+                        .replace(PathBuf::from(value.as_ref()))
+                        .is_some()
+                    {
+                        return Err("--output may be specified only once".to_owned());
+                    }
+                    position += 2;
+                    continue;
+                }
                 validate_context_value(option.trim_start_matches('-'), value)
                     .map_err(|error| error.to_string())?;
-                if option == "--server-endpoint" {
-                    endpoint = Some(value.to_string());
-                } else {
-                    logical_instance = Some(value.to_string());
+                match option {
+                    "--endpoint" => {
+                        if selectors.endpoint.replace(value.to_string()).is_some() {
+                            return Err(
+                                "endpoint_selector_conflict: an endpoint selector may be specified only once"
+                                    .to_owned(),
+                            );
+                        }
+                    }
+                    "--instance" => {
+                        if selectors.instance.replace(value.to_string()).is_some() {
+                            return Err(
+                                "endpoint_selector_conflict: an instance selector may be specified only once"
+                                    .to_owned(),
+                            );
+                        }
+                    }
+                    "--server-endpoint" => {
+                        let value = canonical_endpoint(value)
+                            .map_err(|error| format!("invalid {option}: {error:#}"))?
+                            .to_string();
+                        if migration_endpoint.replace(value).is_some() {
+                            return Err(
+                                "endpoint_selector_conflict: --server-endpoint may be specified only once"
+                                    .to_owned(),
+                            );
+                        }
+                    }
+                    "--logical-instance" => {
+                        if migration_instance.replace(value.to_string()).is_some() {
+                            return Err(
+                                "endpoint_selector_conflict: --logical-instance may be specified only once"
+                                    .to_owned(),
+                            );
+                        }
+                    }
+                    _ => unreachable!("selector option was matched above"),
                 }
                 position += 2;
             }
@@ -485,10 +579,29 @@ fn parse_entry(args: &[OsString]) -> std::result::Result<EntryCommand, String> {
             _ => position += 1,
         }
     }
-    let context = endpoint.map(|endpoint| ServerContext {
-        endpoint,
-        logical_instance,
-    });
+    let has_canonical_selector = selectors.endpoint.is_some() || selectors.instance.is_some();
+    let has_migration_selector = migration_endpoint.is_some() || migration_instance.is_some();
+    if has_canonical_selector && has_migration_selector {
+        return Err(
+            "endpoint_selector_conflict: canonical --endpoint/--instance selectors cannot be mixed with migration aliases"
+                .to_owned(),
+        );
+    }
+    let context = if let Some(endpoint) = migration_endpoint {
+        Some(ServerContext {
+            endpoint,
+            logical_instance: migration_instance,
+        })
+    } else if let Some(instance) = migration_instance {
+        resolve_selector_context(EndpointSelectorArgs {
+            instance: Some(instance),
+            ..EndpointSelectorArgs::default()
+        })?
+    } else if has_canonical_selector {
+        resolve_selector_context(selectors)?
+    } else {
+        None
+    };
 
     let help = values
         .iter()
@@ -511,6 +624,9 @@ fn parse_entry(args: &[OsString]) -> std::result::Result<EntryCommand, String> {
     if version {
         return Ok(EntryCommand::Version);
     }
+    if screenshot_output.is_some() && positional.as_slice() != ["screenshot"] {
+        return Err("--output is valid only for screenshot".to_owned());
+    }
     match positional.as_slice() {
         [] | ["open"] if !json => Ok(EntryCommand::Open {
             no_activate,
@@ -524,12 +640,55 @@ fn parse_entry(args: &[OsString]) -> std::result::Result<EntryCommand, String> {
         }
         ["close"] if !explicit_no_activate && context.is_none() => Ok(EntryCommand::Close { json }),
         ["snapshot"] if !explicit_no_activate => Ok(EntryCommand::Snapshot { json, context }),
-        [] | ["open"] => Err("--json is valid only for capabilities or snapshot".to_owned()),
+        ["screenshot"]
+            if !explicit_no_activate && context.is_none() && screenshot_output.is_some() =>
+        {
+            Ok(EntryCommand::Screenshot {
+                json,
+                output: screenshot_output.expect("guarded above"),
+            })
+        }
+        ["screenshot"] if screenshot_output.is_none() => {
+            Err("screenshot requires --output PATH".to_owned())
+        }
+        ["screenshot"] if context.is_some() => {
+            Err("screenshot targets the exact live Control Center registry owner; endpoint selectors are not valid".to_owned())
+        }
+        ["screenshot"] => Err("--no-activate is valid only for open".to_owned()),
+        [] | ["open"] => {
+            Err("--json is valid only for capabilities, snapshot, or screenshot".to_owned())
+        }
         ["capabilities"] | ["status"] | ["snapshot"] | ["close"] => {
             Err("--no-activate is valid only for open".to_owned())
         }
         [other, ..] => Err(format!("unknown command: {other}")),
     }
+}
+
+fn resolve_selector_context(
+    selectors: EndpointSelectorArgs,
+) -> std::result::Result<Option<ServerContext>, String> {
+    resolve_ipc_endpoint(&selectors)
+        .map(|resolved| {
+            Some(ServerContext {
+                endpoint: resolved.endpoint.to_string(),
+                logical_instance: Some(resolved.logical_instance.canonical_name()),
+            })
+        })
+        .map_err(|error| format!("endpoint_selector_error: {error}"))
+}
+
+fn canonical_endpoint(value: &str) -> Result<IpcEndpoint> {
+    let endpoint = value
+        .parse::<IpcEndpoint>()
+        .or_else(|_| IpcEndpoint::from_legacy_address(value))
+        .map_err(anyhow::Error::new)
+        .context("server endpoint must be unix:<path>, pipe:<name>, tcp:<host>:<port>, or a legacy loopback HOST:PORT")?;
+    endpoint
+        .validate_local()
+        .map_err(anyhow::Error::new)
+        .context("server endpoint must identify a local IPC transport")?;
+    Ok(endpoint)
 }
 
 fn run_entry(command: EntryCommand) -> Result<()> {
@@ -583,6 +742,14 @@ fn run_entry(command: EntryCommand) -> Result<()> {
                 }
             }
         }
+        EntryCommand::Screenshot { json, output } => {
+            let document = capture_control_center_screenshot(&output)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&document)?);
+            } else {
+                println!("{}", document.output);
+            }
+        }
         EntryCommand::Open {
             no_activate,
             context,
@@ -603,8 +770,95 @@ fn capabilities() -> CapabilityDocument {
         owns_terminal_authority: false,
         process_reuse: true,
         no_activate: true,
+        screenshot: if cfg!(windows) {
+            "available"
+        } else {
+            "unavailable"
+        },
         views: ["cockpit", "workflows", "extensions", "info_hub"],
     }
+}
+
+fn png_dimensions(bytes: &[u8]) -> Result<(u32, u32)> {
+    const PNG_SIGNATURE: &[u8; 8] = b"\x89PNG\r\n\x1a\n";
+    if bytes.len() < 24 || &bytes[..8] != PNG_SIGNATURE || &bytes[12..16] != b"IHDR" {
+        anyhow::bail!("control_center_screenshot_invalid_png");
+    }
+    let width = u32::from_be_bytes(bytes[16..20].try_into().expect("four-byte PNG width"));
+    let height = u32::from_be_bytes(bytes[20..24].try_into().expect("four-byte PNG height"));
+    if width == 0 || height == 0 {
+        anyhow::bail!("control_center_screenshot_invalid_dimensions");
+    }
+    Ok((width, height))
+}
+
+#[cfg(windows)]
+fn capture_control_center_screenshot(output: &Path) -> Result<ScreenshotDocument> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::IsWindow;
+
+    let registry = registry_path();
+    let owner = read_registry(&registry)
+        .filter(registry_process_matches)
+        .context("control_center_screenshot_not_running")?;
+    let native_window = read_regular_file(&native_window_path(&registry))
+        .context("control_center_screenshot_window_unavailable")?;
+    let native_window = String::from_utf8(native_window)
+        .ok()
+        .and_then(|value| value.parse::<i64>().ok())
+        .context("control_center_screenshot_window_invalid")?;
+    let window = native_window as isize as *mut std::ffi::c_void;
+    if window.is_null() || unsafe { IsWindow(window) } == 0 {
+        anyhow::bail!("control_center_screenshot_window_unavailable");
+    }
+
+    let output = if output.is_absolute() {
+        output.to_owned()
+    } else {
+        env::current_dir()
+            .context("control_center_screenshot_current_directory_unavailable")?
+            .join(output)
+    };
+    crate::platform::windows::screenshot::save_png(
+        window,
+        &output,
+        crate::platform::windows::screenshot::CaptureArea::Window,
+    )
+    .map_err(|error| anyhow::anyhow!("control_center_screenshot_capture_failed: {error}"))?;
+
+    let still_exact_owner = read_registry(&registry).is_some_and(|current| {
+        current.pid == owner.pid
+            && current.process_start_identity == owner.process_start_identity
+            && registry_process_matches(&current)
+    });
+    if !still_exact_owner {
+        let _ = fs::remove_file(&output);
+        anyhow::bail!("control_center_screenshot_owner_changed");
+    }
+    let bytes = fs::read(&output).context("control_center_screenshot_readback_failed")?;
+    let (width, height) = png_dimensions(&bytes)?;
+    let sha256 = Sha256::digest(&bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    Ok(ScreenshotDocument {
+        schema_version: SCHEMA_VERSION,
+        executable: "agenterm-cc",
+        state: "captured",
+        renderer: "native",
+        owner_pid: owner.pid,
+        output: output.to_string_lossy().into_owned(),
+        width,
+        height,
+        bytes: u64::try_from(bytes.len()).unwrap_or(u64::MAX),
+        sha256,
+    })
+}
+
+#[cfg(not(windows))]
+fn capture_control_center_screenshot(_output: &Path) -> Result<ScreenshotDocument> {
+    anyhow::bail!(
+        "control_center_screenshot_unsupported: native Control Center screenshot capture is unavailable on this platform"
+    )
 }
 
 fn disconnected_snapshot() -> SnapshotDocument {
@@ -1770,6 +2024,119 @@ mod tests {
     }
 
     #[test]
+    fn canonical_instance_selector_resolves_a_typed_server_context() {
+        let command = parse_entry(&[
+            OsString::from("snapshot"),
+            OsString::from("--instance"),
+            OsString::from("dev"),
+            OsString::from("--json"),
+        ])
+        .expect("resolve dev instance");
+        let EntryCommand::Snapshot {
+            context: Some(context),
+            ..
+        } = command
+        else {
+            panic!("instance selector must produce a snapshot server context");
+        };
+        assert_eq!(context.logical_instance.as_deref(), Some("dev"));
+        assert!(
+            context.endpoint.starts_with("pipe:")
+                || context.endpoint.starts_with("unix:")
+                || context.endpoint.starts_with("tcp:"),
+            "resolved endpoint must retain its typed transport: {}",
+            context.endpoint
+        );
+    }
+
+    #[test]
+    fn endpoint_selectors_reject_conflicts_and_duplicates_before_opening() {
+        let conflict = parse_entry(&[
+            OsString::from("snapshot"),
+            OsString::from("--endpoint"),
+            OsString::from("tcp:127.0.0.1:42001"),
+            OsString::from("--instance"),
+            OsString::from("dev"),
+        ])
+        .expect_err("endpoint and instance are mutually exclusive");
+        assert!(conflict.contains("endpoint_selector_error"));
+        assert!(conflict.contains("ConflictingCliSelectors"));
+
+        let duplicate = parse_entry(&[
+            OsString::from("snapshot"),
+            OsString::from("--instance"),
+            OsString::from("main"),
+            OsString::from("--logical-instance"),
+            OsString::from("dev"),
+        ])
+        .expect_err("canonical and migration spellings are one selector");
+        assert!(duplicate.contains("endpoint_selector_conflict"));
+    }
+
+    #[test]
+    fn migration_endpoint_alias_normalizes_legacy_loopback_addresses() {
+        let command = parse_entry(&[
+            OsString::from("snapshot"),
+            OsString::from("--server-endpoint"),
+            OsString::from("127.0.0.1:42002"),
+            OsString::from("--logical-instance"),
+            OsString::from("dev"),
+        ])
+        .expect("resolve migration endpoint alias");
+        let EntryCommand::Snapshot {
+            context: Some(context),
+            ..
+        } = command
+        else {
+            panic!("endpoint alias must produce a snapshot server context");
+        };
+        assert_eq!(context.endpoint, "tcp:127.0.0.1:42002");
+        assert_eq!(context.logical_instance.as_deref(), Some("dev"));
+    }
+
+    #[test]
+    fn toolbar_launch_preserves_exact_endpoint_and_inherited_dev_context() {
+        let arguments = control_center_launch_arguments(true, "127.0.0.1:42004", Some("dev"))
+            .expect("build toolbar launch arguments");
+        assert_eq!(
+            arguments,
+            [
+                "open",
+                "--server-endpoint",
+                "tcp:127.0.0.1:42004",
+                "--logical-instance",
+                "dev",
+                "--no-activate",
+            ]
+            .map(OsString::from)
+        );
+        let parsed = parse_entry(&arguments).expect("parse toolbar launch arguments");
+        let EntryCommand::Open {
+            no_activate: true,
+            context: Some(context),
+        } = parsed
+        else {
+            panic!("toolbar launch must remain a no-activate connected context");
+        };
+        assert_eq!(context.endpoint, "tcp:127.0.0.1:42004");
+        assert_eq!(context.logical_instance.as_deref(), Some("dev"));
+    }
+
+    #[test]
+    fn canonical_and_migration_selector_groups_cannot_be_mixed() {
+        let error = parse_entry(&[
+            OsString::from("snapshot"),
+            OsString::from("--endpoint"),
+            OsString::from("tcp:127.0.0.1:42003"),
+            OsString::from("--logical-instance"),
+            OsString::from("dev"),
+        ])
+        .expect_err("public endpoint and migration context must not mix");
+        assert!(error.contains("endpoint_selector_conflict"));
+        assert!(error.contains("cannot be mixed"));
+    }
+
+    #[test]
     fn informational_commands_do_not_map_to_open() {
         assert_eq!(
             parse_entry(&[OsString::from("capabilities"), OsString::from("--json")]).unwrap(),
@@ -1782,6 +2149,60 @@ mod tests {
                 context: None,
             }
         );
+    }
+
+    #[test]
+    fn screenshot_requires_one_output_and_rejects_authority_selectors() {
+        let command = parse_entry(&[
+            OsString::from("screenshot"),
+            OsString::from("--output"),
+            OsString::from("cockpit.png"),
+            OsString::from("--json"),
+        ])
+        .expect("parse screenshot command");
+        assert_eq!(
+            command,
+            EntryCommand::Screenshot {
+                json: true,
+                output: PathBuf::from("cockpit.png"),
+            }
+        );
+        assert!(
+            parse_entry(&[OsString::from("screenshot")])
+                .expect_err("missing output must fail")
+                .contains("requires --output")
+        );
+        assert!(
+            parse_entry(&[
+                OsString::from("screenshot"),
+                OsString::from("--output"),
+                OsString::from("cockpit.png"),
+                OsString::from("--instance"),
+                OsString::from("main"),
+            ])
+            .expect_err("screenshot must target the registry owner")
+            .contains("exact live Control Center registry owner")
+        );
+        assert!(
+            parse_entry(&[
+                OsString::from("status"),
+                OsString::from("--output"),
+                OsString::from("ignored.png"),
+            ])
+            .expect_err("output is screenshot-only")
+            .contains("valid only for screenshot")
+        );
+    }
+
+    #[test]
+    fn screenshot_png_header_dimensions_are_strict() {
+        let mut header = Vec::from(b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".as_slice());
+        header.extend_from_slice(&760_u32.to_be_bytes());
+        header.extend_from_slice(&480_u32.to_be_bytes());
+        assert_eq!(png_dimensions(&header).unwrap(), (760, 480));
+        assert!(png_dimensions(b"not a png").is_err());
+        header[16..20].copy_from_slice(&0_u32.to_be_bytes());
+        assert!(png_dimensions(&header).is_err());
     }
 
     #[test]
