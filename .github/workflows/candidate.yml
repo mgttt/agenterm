@@ -760,10 +760,14 @@ jobs:
                   return 0
               return max(0, done - start)
 
-          def classify_stages(name, ms):
+          def classify_stages(name):
               key = (name or "").lower()
               if "restore" in key or "cache" in key:
                   return "cache_ms"
+              if "checkout" in key:
+                  return "checkout_ms"
+              if "rustup" in key or "install " in key or "toolchain" in key:
+                  return "toolchain_ms"
               if "package" in key:
                   return "package_ms"
               if "upload" in key or "download" in key:
@@ -774,9 +778,13 @@ jobs:
                   return "compile_ms"
               if "aggregate" in key:
                   return "aggregate_ms"
+              if "create" in key and "release" in key:
+                  return "aggregate_ms"
               return None
 
           stage_ms = {
+              "checkout_ms": 0,
+              "toolchain_ms": 0,
               "cache_ms": 0,
               "compile_ms": 0,
               "package_ms": 0,
@@ -787,10 +795,11 @@ jobs:
           for job in jobs_document.get("jobs", []):
               steps = job.get("steps") or []
               for step in steps:
-                  target = classify_stages(step.get("name", ""), step_ms(step))
+                  target = classify_stages(step.get("name", ""))
                   if target is None:
                       continue
-                  stage_ms[target] += step_ms(step)
+                  ms = step_ms(step)
+                  stage_ms[target] += ms
 
           jobs = []
           for job in jobs_document.get("jobs", []):

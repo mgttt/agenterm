@@ -69,6 +69,31 @@ jobs:
                   return None
               return int((end_value - start_value).total_seconds() * 1000)
 
+          def step_ms(step):
+              return duration_ms(step.get("started_at"), step.get("completed_at"))
+
+          def classify_stage(name):
+              key = (name or "").lower()
+              if "restore" in key or "cache" in key:
+                  return "cache_ms"
+              if "checkout" in key:
+                  return "checkout_ms"
+              if "rustup" in key or "install " in key or "toolchain" in key:
+                  return "toolchain_ms"
+              if "build" in key or "bootstrap" in key or "clippy" in key:
+                  return "compile_ms"
+              if "test" in key or "smoke" in key or "verify" in key:
+                  return "test_ms"
+              if "package" in key:
+                  return "package_ms"
+              if "upload" in key or "download" in key:
+                  return "artifact_transfer_ms"
+              if "publish" in key or "promote" in key or "draft" in key:
+                  return "promotion_ms"
+              if "aggregate" in key or "report" in key or "summary" in key:
+                  return "aggregate_ms"
+              return None
+
           def get_json(path):
               request = urllib.request.Request(
                   api_url + path,
@@ -140,6 +165,26 @@ jobs:
                   }
               )
 
+          stage_duration_ms = {
+              "checkout_ms": 0,
+              "toolchain_ms": 0,
+              "cache_ms": 0,
+              "compile_ms": 0,
+              "package_ms": 0,
+              "test_ms": 0,
+              "artifact_transfer_ms": 0,
+              "promotion_ms": 0,
+              "aggregate_ms": 0,
+          }
+          for job in jobs:
+              for step in job.get("steps") or []:
+                  stage = classify_stage(step.get("name", ""))
+                  if stage is None:
+                      continue
+                  ms = step_ms(step)
+                  if ms is not None:
+                      stage_duration_ms[stage] += ms
+
           workflow_name = bounded_text(run.get("name"))
           run_duration = duration_ms(run.get("run_started_at"), run.get("updated_at"))
           threshold = SLO_THRESHOLDS_MS.get(workflow_name)
@@ -178,6 +223,7 @@ jobs:
                       run.get("created_at"), run.get("run_started_at")
                   ),
                   "run_duration_ms": run_duration,
+                  "stage_duration_ms": stage_duration_ms,
               },
               "slo": slo,
               "pagination": {

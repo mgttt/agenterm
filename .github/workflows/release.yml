@@ -416,6 +416,7 @@ jobs:
           PROMOTION_RUN_ID: ${{ github.run_id }}
           CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
           SOURCE_SHA: ${{ needs.verify.outputs.source_sha }}
+          TAG: ${{ needs.verify.outputs.tag }}
         if: always()
         run: |
           set -euo pipefail
@@ -424,6 +425,7 @@ jobs:
           candidate_json="$(mktemp)"
           promotion_json="$(mktemp)"
           promotion_jobs_json="$(mktemp)"
+          release_json="$(mktemp)"
           curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
             -H "Accept: application/vnd.github+json" \
             "$api_url/repos/$GH_REPO/actions/runs/$CANDIDATE_RUN_ID" > "$candidate_json"
@@ -433,9 +435,12 @@ jobs:
           curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
             -H "Accept: application/vnd.github+json" \
             "$api_url/repos/$GH_REPO/actions/runs/$PROMOTION_RUN_ID" > "$promotion_json"
+          if ! gh api "repos/$GH_REPO/releases/tags/$TAG" > "$release_json" 2>/dev/null; then
+            echo '{}' > "$release_json"
+          fi
 
-          python3 - "$candidate_json" "$promotion_json" "$promotion_jobs_json" \
-            "$CANDIDATE_RUN_ID" "$PROMOTION_RUN_ID" "$SOURCE_SHA" <<'PY'
+          python3 - "$candidate_json" "$promotion_json" "$promotion_jobs_json" "$release_json" \
+            "$CANDIDATE_RUN_ID" "$PROMOTION_RUN_ID" "$SOURCE_SHA" "$TAG" <<'PY'
           import datetime
           import json
           import os
@@ -458,6 +463,10 @@ jobs:
               key = (name or "").lower()
               if "restore" in key or "cache" in key:
                   return "cache_ms"
+              if "checkout" in key:
+                  return "checkout_ms"
+              if "rustup" in key or "install " in key or "toolchain" in key:
+                  return "toolchain_ms"
               if "build" in key or "bootstrap" in key or "clippy" in key:
                   return "compile_ms"
               if "test" in key or "smoke" in key or "verify" in key:
@@ -466,14 +475,18 @@ jobs:
                   return "package_ms"
               if "upload" in key or "download" in key:
                   return "artifact_transfer_ms"
+              if "promote" in key or "publish" in key or "draft" in key:
+                  return "promotion_ms"
               return None
 
           candidate = json.load(open(sys.argv[1], encoding="utf-8"))
           promotion = json.load(open(sys.argv[2], encoding="utf-8"))
+          release_obj = json.load(open(sys.argv[4], encoding="utf-8"))
           promotion_jobs = json.load(open(sys.argv[3], encoding="utf-8")).get("jobs", [])
-          candidate_run_id = int(sys.argv[4])
-          promotion_run_id = int(sys.argv[5])
-          source_sha = sys.argv[6]
+          candidate_run_id = int(sys.argv[5])
+          promotion_run_id = int(sys.argv[6])
+          source_sha = sys.argv[7]
+          tag = sys.argv[8]
 
           candidate_updated_ms = to_ms(candidate.get("updated_at"))
           promotion_started_ms = to_ms(promotion.get("run_started_at")) or to_ms(promotion.get("created_at"))
@@ -484,17 +497,27 @@ jobs:
               candidate_to_publish_ms = max(0, promotion_started_ms - candidate_updated_ms)
 
           queue_ms = None
+          if promotion.get("created_at") is not None and promotion_started_ms is not None:
+              queue_ms = max(0, promotion_started_ms - to_ms(promotion.get("created_at")))
+          candidate_to_promotion_ms = None
           if candidate.get("created_at") is not None and promotion_started_ms is not None:
-              created_ms = to_ms(candidate.get("created_at"))
-              if created_ms is not None:
-                  queue_ms = max(0, promotion_started_ms - created_ms)
+              candidate_created = to_ms(candidate.get("created_at"))
+              if candidate_created is not None:
+                  candidate_to_promotion_ms = max(0, promotion_started_ms - candidate_created)
+          release_published_ms = to_ms(release_obj.get("published_at"))
+          tag_to_public_ms = None
+          if release_published_ms is not None and promotion_started_ms is not None:
+              tag_to_public_ms = max(0, release_published_ms - promotion_started_ms)
 
           stage_duration_ms = {
+              "checkout_ms": 0,
+              "toolchain_ms": 0,
               "cache_ms": 0,
               "compile_ms": 0,
               "package_ms": 0,
               "test_ms": 0,
               "artifact_transfer_ms": 0,
+              "promotion_ms": 0,
           }
           job_reports = []
           run_started_ms = to_ms(promotion.get("run_started_at"))
@@ -533,7 +556,11 @@ jobs:
               "promotion_started_ms": promotion_started_ms,
               "published_ms": published_ms,
               "candidate_to_publish_ms": candidate_to_publish_ms,
+              "candidate_to_promotion_ms": candidate_to_promotion_ms,
               "queue_duration_ms": queue_ms,
+              "tag": tag,
+              "release_published_ms": release_published_ms,
+              "tag_to_public_ms": tag_to_public_ms,
               "run_duration_ms": run_duration_ms,
               "stage_duration_ms": stage_duration_ms,
               "jobs": job_reports,
@@ -542,7 +569,7 @@ jobs:
               json.dump(report, f, indent=2, sort_keys=True)
           PY
 
-          rm -f "$candidate_json" "$promotion_json" "$promotion_jobs_json"
+          rm -f "$candidate_json" "$promotion_json" "$promotion_jobs_json" "$release_json"
 
       - name: Upload promotion timing evidence
         if: always()

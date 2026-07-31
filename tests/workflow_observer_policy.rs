@@ -73,6 +73,7 @@ fn observer_schema_contains_only_metadata_durations_and_slos() {
         "\"schema_version\"",
         "\"generated_at\"",
         "\"run\"",
+        "\"stage_duration_ms\"",
         "\"id\"",
         "\"attempt\"",
         "\"workflow_id\"",
@@ -110,6 +111,14 @@ fn observer_schema_contains_only_metadata_durations_and_slos() {
     assert!(WORKFLOW.contains("\"Release\": 3 * 60 * 1000"));
     assert!(WORKFLOW.contains("\"candidate\""));
     assert!(WORKFLOW.contains("\"promotion\""));
+    assert!(WORKFLOW.contains("checkout_ms"));
+    assert!(WORKFLOW.contains("toolchain_ms"));
+    assert!(WORKFLOW.contains("compile_ms"));
+    assert!(WORKFLOW.contains("test_ms"));
+    assert!(WORKFLOW.contains("package_ms"));
+    assert!(WORKFLOW.contains("artifact_transfer_ms"));
+    assert!(WORKFLOW.contains("promotion_ms"));
+    assert!(WORKFLOW.contains("aggregate_ms"));
 }
 
 #[test]

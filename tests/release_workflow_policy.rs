@@ -151,6 +151,24 @@ fn promotion_collects_delivery_timing_evidence() {
     assert!(PROMOTION.contains("delivery-timing/release-delivery-timing.json"));
     assert!(PROMOTION.contains("release-delivery-timing-${{ github.run_id }}"));
     assert!(PROMOTION.contains("agenterm-release-timing"));
+    assert!(PROMOTION.contains("\"checkout_ms\""));
+    assert!(PROMOTION.contains("\"toolchain_ms\""));
+    assert!(PROMOTION.contains("\"promotion_ms\""));
+    assert!(PROMOTION.contains("\"tag_to_public_ms\""));
+    assert!(PROMOTION.contains("\"release_published_ms\""));
+    assert!(PROMOTION.contains("\"candidate_to_promotion_ms\""));
+}
+
+#[test]
+fn candidate_timing_collects_checkout_and_toolchain_stages() {
+    assert!(CANDIDATE.contains("\"checkout_ms\""));
+    assert!(CANDIDATE.contains("\"toolchain_ms\""));
+    assert!(CANDIDATE.contains("\"cache_ms\""));
+    assert!(CANDIDATE.contains("\"compile_ms\""));
+    assert!(CANDIDATE.contains("\"test_ms\""));
+    assert!(CANDIDATE.contains("\"package_ms\""));
+    assert!(CANDIDATE.contains("\"artifact_transfer_ms\""));
+    assert!(CANDIDATE.contains("\"aggregate_ms\""));
 }
 
 #[test]
