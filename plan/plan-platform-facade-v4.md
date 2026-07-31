@@ -107,11 +107,11 @@ this state does not yet satisfy the static source-boundary gate.
    and macOS entries. Shared UI-state normalization remains open.
 4. Remove compatibility-only legacy native paths after each owning public
    smoke has passed.
-5. Add the static production source boundary test only after no product native
-   escape hatches remain. It rejects OS cfg/native API imports outside the
-   approved platform adapters, required bin entry points, and tests. The manual
-   production scan is now clean; implementing this failing gate is the next
-   serial leaf.
+5. The static production source boundary test now rejects OS cfg/native API
+   imports outside the approved platform tree. It scans every Rust source,
+   structurally masks test items/comments/strings, and allows only the three
+   exact Windows-subsystem entry attributes; its rejection fixture and clean
+   repository scan pass locally.
 6. Run serial integrated `fmt`, Clippy, unit tests, owning public CLI smoke,
    boundary scan, then the applicable Windows qualification lane. No Candidate,
    tag, or public release is implied by this plan.

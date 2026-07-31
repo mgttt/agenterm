@@ -25,6 +25,8 @@ pub(crate) mod window;
 // their selected OS implementations stay private to this boundary.
 // Several services are staged ahead of their final product-caller migration;
 // keeping their typed contracts compiled on every target is intentional.
+#[cfg(test)]
+mod boundary_tests;
 pub(crate) mod contract;
 #[allow(dead_code)]
 pub(crate) mod control_center;

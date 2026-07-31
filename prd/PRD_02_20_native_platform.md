@@ -88,11 +88,13 @@ The migration is complete only when all of the following are true:
   adapter-owned implementation details while shared UI state remains platform
   neutral; physical ownership is complete, while further state normalization
   remains open
-- [~] manual source scanning now finds no production OS-selection cfg or native
-  API import outside `src/platform/**`; only necessary binary subsystem attrs
-  and test fixtures remain. The repository-enforced failing boundary test is
-  still required before closure.
-- [ ] a repository boundary test fails when a new non-platform production
+- [x] manual and repository-enforced source scanning finds no production
+  OS-selection cfg or native API import outside `src/platform/**`; only
+  necessary binary subsystem attrs and structurally excluded test fixtures
+  remain. The gate scans every Rust source, allows only three exact subsystem
+  attributes, and its fixture proves product markers are rejected while
+  comments and test items are ignored.
+- [x] a repository boundary test fails when a new non-platform production
   source file imports OS-native crates or contains an OS-selection `cfg`
 - [ ] all three platform adapters satisfy the same facade contract tests; a
   missing capability remains a typed unsupported result, never an implicit
