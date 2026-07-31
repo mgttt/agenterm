@@ -60,7 +60,7 @@ fn configured(
     }
     command.env(
         "XDG_RUNTIME_DIR",
-        std::path::join(context.run_directory, "runtime").display
+        context.native_runtime_directory
     );
     command
 }
@@ -314,6 +314,17 @@ require(std::fs::exists(server_exe), "native_ipc_server_missing");
 require(std::fs::exists(cli), "native_ipc_cli_missing");
 
 let context = test_harness::new_context(repo, "native-ipc");
+let unix_bootstrap =
+    std::env::has("AGENTERM_BOOTSTRAP_PLATFORM")
+        && std::env::get("AGENTERM_BOOTSTRAP_PLATFORM") == "unix";
+context.native_runtime_directory = if unix_bootstrap {
+    "/tmp/agt-" + std::process::id() + "-" +
+        std::time::SystemTime::now().unix_millis
+} else {
+    std::path::join(context.run_directory, "runtime").display
+};
+context.native_runtime_external = unix_bootstrap;
+std::fs::create_dir_all(context.native_runtime_directory);
 let native_workspace = std::path::join(
     context.run_directory,
     "workspace/native-workspace.json"
@@ -698,6 +709,10 @@ let result = test_harness::complete(
     succeeded,
     failure
 );
+if context.native_runtime_external
+        && std::fs::exists(context.native_runtime_directory) {
+    std::fs::remove_dir_all(context.native_runtime_directory);
+}
 if succeeded {
     require(result.cleanup.orphan_free, "native_ipc_orphan_cleanup");
     test_harness::remove_run(context);
