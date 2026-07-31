@@ -19,6 +19,7 @@ let declared_evidence = [
     "control-center.live-cockpit",
     "control-center.process-reuse",
     "control-center.context-refresh",
+    "control-center.causal-projection-refresh",
     "control-center.launch-failure",
     "control-center.server-recovery",
     "control-center.no-activate",
@@ -99,6 +100,130 @@ fn wait_for_server(context, cli_executable, server) {
         rhai::task::sleep(std::time::Duration::from_millis(25));
     }
     throw "control_center_server_ready_timeout";
+}
+
+fn wait_for_server_causal(context, cli_executable, server, code) {
+    let deadline = std::time::SystemTime::now().unix_millis + 10000;
+    let last = "";
+    for attempt in 0..128 {
+        if std::time::SystemTime::now().unix_millis >= deadline {
+            break;
+        }
+        let probe = test_harness::run_cli(
+            context,
+            cli_executable,
+            ["protocol-info", "--running"],
+            false,
+            []
+        );
+        last = probe.stdout + probe.stderr;
+        if probe.success {
+            return rhai::json::parse(probe.stdout);
+        }
+        if server.state == "exited" {
+            let output = server.wait_with_output(
+                std::time::Duration::from_secs(2)
+            );
+            throw code + "_early_exit:" + output.stderr_text();
+        }
+    }
+    throw code + "_timeout:" + last;
+}
+
+fn wait_for_rendered_projection(
+        context, executable, registry, output_path, child,
+        expected_state, expected_reason, required_title, code) {
+    let deadline = std::time::SystemTime::now().unix_millis + 10000;
+    let last = "";
+    for attempt in 0..64 {
+        if std::time::SystemTime::now().unix_millis >= deadline {
+            break;
+        }
+        let command = configured(
+            context,
+            executable,
+            registry,
+            ["screenshot", "--output", output_path, "--json"]
+        );
+        command.timeout(std::time::Duration::from_secs(2));
+        let captured = command.output();
+        last = captured.stdout_text() + captured.stderr_text();
+        if captured.success {
+            try {
+                let document = rhai::json::parse(captured.stdout_text());
+                let facts = child.platform_facts;
+                let observed_state = if facts.top_level_window_title.contains(
+                    "server_unreachable"
+                ) {
+                    "unavailable"
+                } else {
+                    "connected"
+                };
+                let observed_reason = if observed_state == "unavailable" {
+                    "server_unreachable"
+                } else {
+                    ""
+                };
+                let observed_title = facts.top_level_window_title;
+                if document.contains("rendered_snapshot") {
+                    let rendered = document.rendered_snapshot;
+                    observed_state = rendered.server_state;
+                    observed_reason = if rendered.contains("server_reason") {
+                        rendered.server_reason
+                    } else {
+                        ""
+                    };
+                    observed_title = rendered.window_title;
+                }
+                let reason_matches = expected_reason == ""
+                    || observed_reason == expected_reason;
+                let title_matches = facts.top_level_window_present;
+                for token in required_title {
+                    if !observed_title.contains(token) {
+                        title_matches = false;
+                    }
+                }
+                if observed_state == expected_state
+                        && reason_matches && title_matches {
+                    document.projection = #{
+                        server_state: observed_state,
+                        server_reason: observed_reason,
+                        window_title: observed_title
+                    };
+                    return document;
+                }
+            } catch (error) {
+                last = last + ":" + error.to_string();
+            }
+        }
+        if child.state == "exited" {
+            throw code + "_renderer_exit:" + last;
+        }
+    }
+    throw code + "_timeout:" + last;
+}
+
+fn state_file_facts(path, code) {
+    require(std::fs::exists(path), code + "_missing");
+    let metadata = std::fs::metadata(path);
+    #{
+        sha256: rhai::crypto::sha256_file(path),
+        modified_unix_ms: metadata.modified.unix_millis,
+        len: metadata.len
+    }
+}
+
+fn require_state_file_unchanged(path, baseline, code) {
+    let current = state_file_facts(path, code);
+    require(
+        current.sha256 == baseline.sha256
+            && current.modified_unix_ms == baseline.modified_unix_ms
+            && current.len == baseline.len,
+        code + ":" + rhai::json::stringify(#{
+            baseline: baseline,
+            current: current
+        })
+    );
 }
 
 fn wait_for_registry(path, expected_pid, child, code) {
@@ -290,6 +415,13 @@ let cockpit_png = std::path::join(
     std::path::parent(context.evidence_path).display,
     "control-center-live-cockpit.png"
 ).display;
+let causal_png = std::path::join(
+    std::path::parent(context.evidence_path).display,
+    "control-center-causal-refresh.png"
+).display;
+let registry_stem = registry.sub_string(0, registry.len - 5);
+let context_state_path = registry_stem + ".context.json";
+let focus_state_path = registry_stem + ".focus";
 let durable_evidence_directory = std::path::join(
     repo,
     "dist/evidence"
@@ -641,57 +773,107 @@ try {
         "control-center.context-refresh"
     );
 
-    print("STEP server loss is explicit and a new epoch refreshes in place");
+    print("STEP tab mutation refreshes the renderer without focus/context change");
+    let context_state = state_file_facts(
+        context_state_path,
+        "control_center_causal_context"
+    );
+    let focus_state = state_file_facts(
+        focus_state_path,
+        "control_center_causal_focus"
+    );
+    let causal_tab_count = refreshed.connected_server.tabs.len + 1;
+    let causal_tab = prove_pty(
+        context,
+        cli_executable,
+        "causal-refresh"
+    );
+    let causal_capture = wait_for_rendered_projection(
+        context,
+        control_center,
+        registry,
+        causal_png,
+        first,
+        "connected",
+        "",
+        [context.address, "" + causal_tab_count + " tabs"],
+        "control_center_causal_tab_refresh"
+    );
+    let causal_bootstrap = cli_json(
+        context,
+        cli_executable,
+        ["ui-bootstrap"]
+    );
+    require(
+        causal_tab.starts_with("@")
+            && causal_bootstrap.tabs.len == causal_tab_count
+            && causal_capture.owner_pid == first.id
+            && causal_capture.projection.server_state == "connected"
+            && causal_capture.projection.window_title.contains(
+                "" + causal_tab_count + " tabs"
+            )
+            && first.state == "running"
+            && (
+                first.platform_facts.foreground_window_id == 0
+                    || !first.platform_facts.top_level_window_is_foreground
+            ),
+        "control_center_causal_tab_projection"
+    );
+    require_state_file_unchanged(
+        context_state_path,
+        context_state,
+        "control_center_causal_context_after_tab"
+    );
+    require_state_file_unchanged(
+        focus_state_path,
+        focus_state,
+        "control_center_causal_focus_after_tab"
+    );
+
+    print("STEP server loss/new epoch refreshes without focus/context change");
     cli_text(context, cli_executable, ["save-workspace"]);
     let prior_server_pid = server.id;
     let prior_server_epoch = live_server.epoch;
     cli_text(context, cli_executable, ["shutdown"]);
-    let prior_server_output = wait_for_exit(
-        server,
-        "control_center_prior_server_shutdown_timeout"
+    let prior_server_output = server.wait_with_output(
+        std::time::Duration::from_secs(5)
     );
     require(
-        prior_server_output.success,
+        prior_server_output.success && !process_present(prior_server_pid),
         "control_center_prior_server_exit_failure:" +
             prior_server_output.stderr_text()
     );
-    wait_process_gone(
-        prior_server_pid,
-        "control_center_prior_server_process_orphan"
-    );
-    offline(
+    let loss_capture = wait_for_rendered_projection(
         context,
         control_center,
         registry,
-        [
-            "open", "--no-activate",
-            "--server-endpoint", context.address,
-            "--logical-instance", "main"
-        ],
-        "control_center_server_loss_refresh"
-    );
-    let loss_window = wait_for_window_title(
+        causal_png,
         first,
+        "unavailable",
+        "server_unreachable",
         ["server_unreachable"],
-        "control_center_server_loss"
+        "control_center_causal_server_loss"
     );
-    let lost = rhai::json::parse(offline(
-        context,
-        control_center,
-        registry,
-        ["snapshot", "--json"],
-        "control_center_server_loss_snapshot"
-    ));
     require(
         first.state == "running"
+            && loss_capture.owner_pid == first.id
+            && loss_capture.projection.server_state == "unavailable"
+            && loss_capture.projection.server_reason == "server_unreachable"
             && (
-                loss_window.foreground_window_id == 0
-                    || !loss_window.top_level_window_is_foreground
-            )
-            && lost.server_state == "unavailable"
-            && lost.server_reason == "server_unreachable"
-            && lost.connected_server == (),
+                first.platform_facts.foreground_window_id == 0
+                    || !first.platform_facts.top_level_window_is_foreground
+            ),
         "control_center_server_loss_truth"
+    );
+    require_state_file_unchanged(
+        context_state_path,
+        context_state,
+        "control_center_causal_context_after_loss"
+    );
+    require_state_file_unchanged(
+        focus_state_path,
+        focus_state,
+        "control_center_causal_focus_after_loss"
     );
 
     let restarted_server_command = test_harness::configured_command(
@@ -701,48 +883,60 @@ try {
     );
     let restarted_server = restarted_server_command.start();
     owned_children.push(restarted_server);
-    let restarted_protocol = wait_for_server(
+    let restarted_protocol = wait_for_server_causal(
         context,
         cli_executable,
-        restarted_server
+        restarted_server,
+        "control_center_causal_restart_ready"
     );
-    offline(
+    let restarted_bootstrap = cli_json(
+        context,
+        cli_executable,
+        ["ui-bootstrap"]
+    );
+    let restart_capture = wait_for_rendered_projection(
         context,
         control_center,
         registry,
-        [
-            "open", "--no-activate",
-            "--server-endpoint", context.address,
-            "--logical-instance", "main"
-        ],
-        "control_center_server_restart_refresh"
-    );
-    let restart_window = wait_for_window_title(
+        causal_png,
         first,
+        "connected",
+        "",
         [context.address],
-        "control_center_server_restart"
+        "control_center_causal_server_restart"
     );
-    let restarted = rhai::json::parse(offline(
-        context,
-        control_center,
-        registry,
-        ["snapshot", "--json"],
-        "control_center_server_restart_snapshot"
-    ));
     require(
         first.state == "running"
-            && (
-                restart_window.foreground_window_id == 0
-                    || !restart_window.top_level_window_is_foreground
-            )
-            && restarted.server_state == "connected"
-            && restarted.connected_server.pid == restarted_server.id
+            && restarted_bootstrap.server_pid == restarted_server.id
+            && restarted_bootstrap.server_epoch != prior_server_epoch
             && restarted_protocol.pid == restarted_server.id
-            && restarted.connected_server.epoch
-                != prior_server_epoch,
+            && restart_capture.owner_pid == first.id
+            && restart_capture.projection.server_state == "connected"
+            && restart_capture.projection.window_title.contains(
+                context.address
+            )
+            && (
+                first.platform_facts.foreground_window_id == 0
+                    || !first.platform_facts.top_level_window_is_foreground
+            ),
         "control_center_server_restart_identity"
     );
+    require_state_file_unchanged(
+        context_state_path,
+        context_state,
+        "control_center_causal_context_after_restart"
+    );
+    require_state_file_unchanged(
+        focus_state_path,
+        focus_state,
+        "control_center_causal_focus_after_restart"
+    );
     prove_pty(context, cli_executable, "after-restart");
+    test_harness::emit_evidence(
+        context,
+        declared_evidence,
+        "control-center.causal-projection-refresh"
+    );
     test_harness::emit_evidence(
         context,
         declared_evidence,
@@ -915,7 +1109,7 @@ try {
     );
     print(
         "PASS: Control Center launch failure, live Cockpit facts, " +
-            "no-activate reuse, server loss/new-epoch recovery, " +
+            "no-activate reuse, causal tab/new-epoch refresh, " +
             "failure isolation, and orphan-free cleanup"
     );
     succeeded = true;

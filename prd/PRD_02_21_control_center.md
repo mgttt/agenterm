@@ -105,8 +105,10 @@ Control Center is the product name; the executable family uses
   late state and avoid fixed sleep polling. Events, journal gaps, restart and
   offline results refresh the projection; worker failure becomes typed
   `projection_worker_unavailable` without affecting the server or PTYs. The
-  focused unit contract is covered; a live tab-change/restart black-box remains
-  required before this is complete evidence.
+  focused unit contract and the public no-activate causal journey are covered:
+  a real tab mutation plus server loss/new epoch refresh the same CC PID without
+  an `open` request or `.context.json`/`.focus` change, while preserving PTY and
+  orphan-free cleanup. Broader three-platform renderer evidence remains open.
 
 ## Main-workspace entry
 
