@@ -333,7 +333,7 @@ require(
     "migration_batch_bootstrap_worker_build"
 );
 require(
-    bootstrap_source.split("\n").len <= 70,
+    bootstrap_source.split("\n").len <= 175,
     "migration_batch_bootstrap_size"
 );
 
@@ -402,7 +402,7 @@ require(
         && shell_bootstrap.contains(
             "cargo build --quiet --locked --bin agenterm-script"
         )
-        && shell_bootstrap_operational_lines <= 80,
+        && shell_bootstrap_operational_lines <= 160,
     "migration_shell_bootstrap_not_generic"
 );
 for timing_fact in [
@@ -413,7 +413,16 @@ for timing_fact in [
     "agenterm_bootstrap_other_setup_ms",
     "agenterm_bootstrap_clock_resolution_ms",
     "agenterm_bootstrap_lock_wait_state",
-    "included_not_separable"
+    "agenterm_bootstrap_worker_state",
+    "agenterm_bootstrap_fingerprint",
+    "included_not_separable",
+    "not_applicable",
+    "compatibility.stamp",
+    "git hash-object",
+    "rustc -vv",
+    "cargo -vv",
+    "cargo.lock",
+    "agenterm.tasks.json"
 ] {
     require(
         bootstrap_source.contains(timing_fact)

@@ -58,10 +58,26 @@ if report.bootstrap.state == "measured" {
             && report.bootstrap.worker_copy_ms >= 0
             && report.bootstrap.other_setup_ms >= 0
             && report.bootstrap.clock_resolution_ms > 0
-            && report.bootstrap.cargo_lock_wait.state ==
-                "included_not_separable"
-            && report.bootstrap.cargo_lock_wait.included_in ==
-                "cargo_build_ms",
+            && ["rebuilt", "reused"].contains(
+                report.bootstrap.worker.state
+            )
+            && report.bootstrap.worker.compatibility_fingerprint.len >= 40
+            && (
+                (
+                    report.bootstrap.worker.state == "rebuilt"
+                        && report.bootstrap.cargo_lock_wait.state ==
+                            "included_not_separable"
+                        && report.bootstrap.cargo_lock_wait.included_in ==
+                            "cargo_build_ms"
+                )
+                || (
+                    report.bootstrap.worker.state == "reused"
+                        && report.bootstrap.cargo_build_ms == 0
+                        && report.bootstrap.cargo_lock_wait.state ==
+                            "not_applicable"
+                        && report.bootstrap.cargo_lock_wait.included_in == ()
+                )
+            ),
         "quality_timing_summary_bootstrap_measured"
     );
 }
@@ -118,7 +134,8 @@ let markdown =
         " ms** (`" + report.wall_time.state + "`)\n" +
     "- Bootstrap: `" + report.bootstrap.state + "`" +
         if report.bootstrap.state == "measured" {
-            " — Cargo " + report.bootstrap.cargo_build_ms + " ms, copy " +
+            " — worker " + report.bootstrap.worker.state + ", Cargo " +
+                report.bootstrap.cargo_build_ms + " ms, copy " +
                 report.bootstrap.worker_copy_ms + " ms, other setup " +
                 report.bootstrap.other_setup_ms + " ms; Cargo lock wait " +
                 report.bootstrap.cargo_lock_wait.state

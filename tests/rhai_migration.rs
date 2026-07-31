@@ -703,6 +703,11 @@ fn run_quality_timing_fixture(
             "AGENTERM_BOOTSTRAP_LOCK_WAIT_STATE",
             "included_not_separable",
         )
+        .env("AGENTERM_BOOTSTRAP_WORKER_STATE", "rebuilt")
+        .env(
+            "AGENTERM_BOOTSTRAP_FINGERPRINT",
+            "0123456789abcdef0123456789abcdef01234567",
+        )
         .output()
         .expect("run quality timing fixture")
 }
@@ -2950,6 +2955,7 @@ qualification::timing_finish(failed, "failed");
     assert_eq!(passed["bootstrap"]["cargo_build_ms"], 900);
     assert_eq!(passed["bootstrap"]["worker_copy_ms"], 100);
     assert_eq!(passed["bootstrap"]["other_setup_ms"], 200);
+    assert_eq!(passed["bootstrap"]["worker"]["state"], "rebuilt");
     assert_eq!(
         passed["bootstrap"]["cargo_lock_wait"]["state"],
         "included_not_separable"

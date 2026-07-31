@@ -49,6 +49,11 @@ fn write_timing(path: &Path, total_wall_ms: u64, fingerprint: &str) {
             "worker_copy_ms": 100,
             "other_setup_ms": 200,
             "clock_resolution_ms": 10,
+            "worker": {
+                "state": "rebuilt",
+                "compatibility_fingerprint":
+                    "0123456789abcdef0123456789abcdef01234567"
+            },
             "cargo_lock_wait": {
                 "state": "included_not_separable",
                 "duration_ms": null,

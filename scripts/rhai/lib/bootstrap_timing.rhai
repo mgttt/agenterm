@@ -11,6 +11,10 @@ fn unavailable(reason) {
         worker_copy_ms: (),
         other_setup_ms: (),
         clock_resolution_ms: (),
+        worker: #{
+            state: "unavailable",
+            compatibility_fingerprint: ()
+        },
         cargo_lock_wait: #{
             state: "unavailable",
             duration_ms: (),
@@ -28,6 +32,18 @@ fn duration(name) {
         throw "bootstrap_timing_negative:" + name;
     }
     value
+}
+
+fn is_hex(value) {
+    if value.len != 40 && value.len != 64 {
+        return false;
+    }
+    for character in value {
+        if !"0123456789abcdef".contains(character.to_string()) {
+            return false;
+        }
+    }
+    true
 }
 
 fn facts() {
@@ -48,7 +64,16 @@ fn facts() {
             throw "bootstrap_timing_phase_sum";
         }
         let lock_state = std::env::get("AGENTERM_BOOTSTRAP_LOCK_WAIT_STATE");
-        if lock_state != "included_not_separable" {
+        let worker_state = std::env::get("AGENTERM_BOOTSTRAP_WORKER_STATE");
+        let fingerprint = std::env::get("AGENTERM_BOOTSTRAP_FINGERPRINT");
+        if !["rebuilt", "reused"].contains(worker_state)
+                || !is_hex(fingerprint) {
+            throw "bootstrap_timing_worker";
+        }
+        if (worker_state == "rebuilt"
+                    && lock_state != "included_not_separable")
+                || (worker_state == "reused"
+                    && (lock_state != "not_applicable" || cargo_build_ms != 0)) {
             throw "bootstrap_timing_lock_state";
         }
         return #{
@@ -61,10 +86,18 @@ fn facts() {
             worker_copy_ms: worker_copy_ms,
             other_setup_ms: other_setup_ms,
             clock_resolution_ms: resolution_ms,
+            worker: #{
+                state: worker_state,
+                compatibility_fingerprint: fingerprint
+            },
             cargo_lock_wait: #{
                 state: lock_state,
                 duration_ms: (),
-                included_in: "cargo_build_ms"
+                included_in: if lock_state == "included_not_separable" {
+                    "cargo_build_ms"
+                } else {
+                    ()
+                }
             }
         };
     } catch (error) {
