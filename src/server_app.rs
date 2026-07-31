@@ -50,6 +50,17 @@ const INITIAL_COLUMNS: u16 = 100;
 const IPC_REQUESTS_PER_TICK: usize = 16;
 const SERVER_TICK: Duration = Duration::from_millis(5);
 
+fn ui_client_command_requires_server_preapply(args: &[String]) -> bool {
+    match args.first().map(String::as_str) {
+        Some("focus") => true,
+        Some("ui-action") => matches!(
+            args.get(1).map(String::as_str),
+            Some("new-tab" | "new-child" | "select-tab" | "toggle-tree" | "composer-send")
+        ),
+        _ => false,
+    }
+}
+
 fn validate_ui_client_snapshot(
     json: &str,
     client_pid: u32,
@@ -784,6 +795,18 @@ impl ServerState {
                         false,
                     );
                 };
+                match self.ui_client_commands.preapplied(command_id) {
+                    Ok(Some(response)) => return response,
+                    Ok(None) => {}
+                    Err(error) => {
+                        return IpcResponse::typed_failure(
+                            error,
+                            "ui_client_command_preapply_invalid",
+                            "internal",
+                            false,
+                        );
+                    }
+                }
                 dispatch_shared_command(self, &command.args).unwrap_or_else(|| {
                     IpcResponse::typed_failure(
                         "UI client command has no server-owned apply phase",
@@ -1067,6 +1090,33 @@ impl ServerState {
                 );
             }
         };
+        if ui_client_command_requires_server_preapply(args) {
+            let Some(response) = dispatch_shared_command(self, args) else {
+                self.ui_client_commands.discard_pending(&command_id);
+                return IpcResponse::typed_failure(
+                    "UI client command has no server-owned preapply phase",
+                    "ui_client_command_apply_unsupported",
+                    "unsupported",
+                    false,
+                );
+            };
+            if !response.ok {
+                self.ui_client_commands.discard_pending(&command_id);
+                return response;
+            }
+            if let Err(error) = self
+                .ui_client_commands
+                .record_preapplied(&command_id, &response)
+            {
+                self.ui_client_commands.discard_pending(&command_id);
+                return IpcResponse::typed_failure(
+                    error,
+                    "ui_client_command_preapply_invalid",
+                    "internal",
+                    false,
+                );
+            }
+        }
         let position = self.event_journal.position();
         IpcResponse::success(
             serde_json::json!({

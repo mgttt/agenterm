@@ -211,6 +211,13 @@
       "network": ["loopback"],
       "evidence": ["task.server-smoke"]
     },
+    "native-ipc-smoke": {
+      "inputs": ["staged-binaries", "isolated-workspace", "isolated-instance-directory"],
+      "outputs": ["native-ipc-evidence"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
+      "network": ["loopback"],
+      "evidence": ["task.native-ipc-smoke"]
+    },
     "wake-smoke": {
       "inputs": ["staged-binaries", "isolated-workspace"],
       "outputs": ["wake-evidence"],
@@ -634,6 +641,17 @@
       "id": "server-smoke",
       "description": "Prove split headless server ownership, leases, PTY state, receipts, events, persistence, and native window absence",
       "entry": "scripts/rhai/server-smoke.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "args": [".", "dist/agenterm-server.exe", "dist/agenterm-cli.exe"],
+      "dependencies": [],
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn", "network_loopback"]
+    },
+    {
+      "id": "native-ipc-smoke",
+      "description": "Prove isolated native named-pipe selection, selector precedence, mixed schema discovery, typed server-list rows, and explicit legacy TCP compatibility",
+      "entry": "scripts/rhai/native-ipc-smoke.rhai",
       "profile": "local",
       "cwd": ".",
       "args": [".", "dist/agenterm-server.exe", "dist/agenterm-cli.exe"],

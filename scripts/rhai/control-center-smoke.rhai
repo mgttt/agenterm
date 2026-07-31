@@ -299,6 +299,7 @@ try {
         context, control_center, registry, ["--version"],
         "control_center_version"
     );
+    version.trim();
     let capabilities = rhai::json::parse(offline(
         context, control_center, registry,
         ["capabilities", "--json"],
@@ -312,7 +313,7 @@ try {
     require(
         help.contains("AgenTerm Control Center")
             && help.contains("agenterm-cc snapshot")
-            && version.trim().starts_with("agenterm-cc ")
+            && version.starts_with("agenterm-cc ")
             && capabilities.schema_version == 1
             && capabilities.executable == "agenterm-cc"
             && capabilities.role == "isolated_projection"

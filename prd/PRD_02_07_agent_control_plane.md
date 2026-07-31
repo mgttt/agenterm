@@ -197,3 +197,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     upgrade/rollback; explicit TCP compatibility; and truthful structured
     snapshot/diagnostic output without leaking raw SID, home path, or
     credentials
+    - [x] public native-IPC smoke proves isolated custom-instance named-pipe derivation,
+      CLI-over-environment selector precedence, typed selector
+      conflicts, schema-v1/v2 mixed discovery with v2 deduplication, truthful
+      server-list endpoint facts, explicit typed TCP, and legacy `--address`
+      compatibility

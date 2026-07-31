@@ -1003,6 +1003,7 @@ if !skip_smoke {
     let no_activate = #{"AGENTERM_NO_ACTIVATE":"1"};
     let smoke_ids = [
         "startup-smoke", "wake-smoke", "cli-smoke", "server-smoke",
+        "native-ipc-smoke",
         "remote-ui-smoke", "remote-ui-upgrade-smoke", "fleet-smoke",
         "script-smoke", "theme-smoke", "working-context-smoke",
         "workbench-smoke", "control-center-smoke"

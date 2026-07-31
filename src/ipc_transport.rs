@@ -9,7 +9,11 @@ use anyhow::{Context as _, Result};
 
 use crate::ipc_endpoint::IpcEndpoint;
 
-pub(crate) const IPC_REQUEST_MAX_BYTES: u64 = 256 * 1024;
+// UI command completion embeds a bounded 1 MiB `IpcResponse` JSON document
+// inside the outer request string. JSON re-escaping can approach 2x, so the
+// transport frame must be larger than the operation-argument budget while
+// remaining explicitly bounded.
+pub(crate) const IPC_REQUEST_MAX_BYTES: u64 = 4 * 1024 * 1024;
 pub(crate) const IPC_RESPONSE_MAX_BYTES: u64 = 8 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -210,7 +214,12 @@ impl IpcStream {
         timeout: Duration,
     ) -> TransportResult<Self> {
         stream
-            .set_read_timeout(Some(timeout))
+            // Windows accepted sockets inherit the listener's nonblocking
+            // mode. Return every connected stream to blocking mode before
+            // applying bounded read/write timeouts, otherwise an ordinary
+            // scheduling gap surfaces as WSAEWOULDBLOCK.
+            .set_nonblocking(false)
+            .and_then(|()| stream.set_read_timeout(Some(timeout)))
             .and_then(|()| stream.set_write_timeout(Some(timeout)))
             .map_err(|error| transport_io(endpoint, error))?;
         Ok(Self {
@@ -226,7 +235,8 @@ impl IpcStream {
         timeout: Duration,
     ) -> TransportResult<Self> {
         stream
-            .set_read_timeout(Some(timeout))
+            .set_nonblocking(false)
+            .and_then(|()| stream.set_read_timeout(Some(timeout)))
             .and_then(|()| stream.set_write_timeout(Some(timeout)))
             .map_err(|error| transport_io(endpoint, error))?;
         Ok(Self {
@@ -1337,6 +1347,9 @@ mod tests {
             stream.write_all(b"pong\n").unwrap();
         });
         let mut client = IpcStream::connect(&endpoint, Duration::from_secs(2)).unwrap();
+        // The accepted side must block within its configured deadline instead
+        // of inheriting the listener's nonblocking flag and failing early.
+        std::thread::sleep(Duration::from_millis(25));
         client.write_all(b"ping\n").unwrap();
         let mut response = [0; 5];
         client.read_exact(&mut response).unwrap();
@@ -1360,8 +1373,12 @@ mod tests {
     }
 
     #[test]
-    fn transport_keeps_the_existing_request_frame_budget() {
-        assert_eq!(IPC_REQUEST_MAX_BYTES, 256 * 1024);
+    fn transport_frame_covers_bounded_embedded_ui_completion() {
+        assert_eq!(IPC_REQUEST_MAX_BYTES, 4 * 1024 * 1024);
+        assert!(
+            IPC_REQUEST_MAX_BYTES
+                >= (crate::ui_command::UI_CLIENT_COMMAND_RESPONSE_MAX_BYTES as u64) * 2
+        );
     }
 
     #[cfg(unix)]
