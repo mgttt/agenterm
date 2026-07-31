@@ -2,7 +2,7 @@
 //
 // Args:
 //   REPO WORKER [--quick] [--release] [--skip-smoke] [--include-stress]
-//     [--internal-qualification-dry-run] [--receipt PATH]
+//     [--internal-qualification-dry-run] [--receipt PATH] [--target TARGET]
 
 import "scripts/rhai/lib/qualification" as qualification;
 
@@ -492,6 +492,7 @@ let release = false;
 let skip_smoke = false;
 let include_stress = false;
 let dry_run = false;
+let quick_target = "";
 let receipt_path =
     std::path::join(repo, "target/qualification/receipt.json").display;
 let timing_path =
@@ -513,6 +514,10 @@ while index < args.len {
         require(index + 1 < args.len, "check_receipt_value_missing");
         receipt_path = std::path::absolute(args[index + 1]).display;
         index += 1;
+    } else if value == "--target" {
+        require(index + 1 < args.len, "check_target_value_missing");
+        quick_target = args[index + 1];
+        index += 1;
     } else if value == "--timing" {
         require(index + 1 < args.len, "check_timing_value_missing");
         timing_path = std::path::absolute(args[index + 1]).display;
@@ -522,6 +527,10 @@ while index < args.len {
     }
     index += 1;
 }
+require(
+    quick_target.is_empty() || quick,
+    "check_target_only_for_quick"
+);
 require(
     !quick || !(release || skip_smoke || include_stress || dry_run),
     "check_quick_option_conflict"
@@ -564,6 +573,23 @@ if std::fs::exists(timing_path) {
 
 if quick {
     let quick_started = std::time::SystemTime::now().unix_millis;
+    let quick_native_bin_root = std::path::join(repo, "target").display;
+    if quick_target != "" {
+        quick_native_bin_root = std::path::join(repo, quick_target).display;
+    }
+    let clippy_arguments = [
+        "clippy", "--quiet", "--locked", "--all-targets", "--", "-D", "warnings"
+    ];
+    let unit_arguments = ["test", "--quiet", "--locked", "--lib"];
+    let quick_client_build_args = [];
+    if quick_target != "" {
+        clippy_arguments.push("--target");
+        clippy_arguments.push(quick_target);
+        unit_arguments.push("--target");
+        unit_arguments.push(quick_target);
+        quick_client_build_args.push("--target");
+        quick_client_build_args.push(quick_target);
+    }
     let quick_gate_ids = [
         "repo-lint",
         "rustfmt",
@@ -594,7 +620,10 @@ if quick {
         []
     );
     if unix_bootstrap {
-        let native_bin = std::path::join(repo, "target/debug").display;
+        let quick_native_bin = std::path::join(
+            quick_native_bin_root,
+            "agenterm-cli"
+        ).display;
         prd_spec = direct_task(
             bootstrap_worker,
             repo,
@@ -602,8 +631,8 @@ if quick {
             10000,
             [
                 repo,
-                std::path::join(native_bin, "agenterm-cli").display,
-                std::path::join(native_bin, "agenterm-mux").display
+                quick_native_bin,
+                std::path::join(quick_native_bin_root, "agenterm-mux").display
             ]
         );
     }
@@ -650,7 +679,7 @@ if quick {
                 manifest,
                 "client-build",
                 600000,
-                []
+                quick_client_build_args
             )],
             repo,
             scratch,
@@ -691,13 +720,7 @@ if quick {
         timing,
         "clippy",
         "all-target Clippy",
-        [spec(
-            "cargo",
-            ["clippy", "--quiet", "--locked", "--all-targets",
-             "--", "-D", "warnings"],
-            60000,
-            identity.environment
-        )],
+        [spec("cargo", clippy_arguments, 60000, identity.environment)],
         repo,
         scratch,
         sequence
@@ -708,12 +731,7 @@ if quick {
         timing,
         "unit-tests",
         "library unit tests",
-        [spec(
-            "cargo",
-            ["test", "--quiet", "--locked", "--lib"],
-            60000,
-            identity.environment
-        )],
+        [spec("cargo", unit_arguments, 60000, identity.environment)],
         repo,
         scratch,
         sequence

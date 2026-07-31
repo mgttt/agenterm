@@ -133,15 +133,12 @@ jobs:
       - name: Run portable quality gate
         run: >-
           ./check.sh --quick
+          --target x86_64-unknown-linux-gnu
           --timing target/qualification/timing.json
       - name: Audit cross-platform automation ownership
         env:
           AGENTERM_BOOTSTRAP_TASK: cross-platform-automation-audit
         run: ./scripts/bootstrap.sh
-      - name: Build manifest client set
-        env:
-          AGENTERM_BOOTSTRAP_TASK: client-build
-        run: ./scripts/bootstrap.sh --target x86_64-unknown-linux-gnu
       - name: Probe manifest client set
         env:
           AGENTERM_BOOTSTRAP_TASK: client-smoke
