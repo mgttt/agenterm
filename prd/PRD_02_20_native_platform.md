@@ -338,6 +338,11 @@ Revision-4 migration evidence (2026-07-31, partial):
   availability, size, timeout, and backend diagnostics to one typed contract.
   The frontend remains a temporary string-result compatibility projection;
   broader frontend event-loop ownership is still pending.
+- [~] Unix softbuffer XRGB screenshot encoding now traverses
+  `services::ui_screenshot → selected → adapters/{linux,macos}`. Adapter
+  validation and encoder errors retain explicit typed Unsupported/Failed
+  results before the legacy frontend string projection; frontend renderer
+  ownership itself remains pending.
 - [x] Linux display capability classification now calls the selected Linux
   scale adapter. The shared geometry contract no longer branches on a display
   target; headless remains typed Unsupported and a usable display Available.

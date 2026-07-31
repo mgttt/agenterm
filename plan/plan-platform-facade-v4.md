@@ -94,8 +94,8 @@ this state does not yet satisfy the static source-boundary gate.
    The first frontend leaf is complete: runtime-primary shell descriptors now
    select in adapters, so the Unix new-terminal dialog contains no macOS/Linux
    conditional or shell-path constant. Unix frontend clipboard selection also
-   now consumes a typed facade service; renderer/input/event-loop migration is
-   still pending.
+   now consumes a typed facade service, as does XRGB screenshot encoding;
+   renderer/input/event-loop migration is still pending.
 4. Remove compatibility-only legacy native paths after each owning public
    smoke has passed.
 5. Add the static production source boundary test only after no product native
