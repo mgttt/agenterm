@@ -13,6 +13,7 @@ static GIT_ATTRIBUTES: LazyLock<String> =
 const CHECKOUT_SHA: &str = "08eba0b27e820071cde6df949e0beb9ba4906955";
 const UPLOAD_SHA: &str = "ea165f8d65b6e75b540449e92b4886f43607fa02";
 const DOWNLOAD_SHA: &str = "fa0a91b85d4f404e444e00e005971372dc801d16";
+const CACHE_SHA: &str = "0400d5f644dc74513175e3cd8d07132dd4860809";
 
 #[test]
 fn candidate_is_manual_exact_sha_and_has_no_publish_authority() {
@@ -63,6 +64,53 @@ fn candidate_runs_one_full_gate_and_seals_six_platform_parts() {
     assert!(!CANDIDATE.contains(".agenterm-script.bin"));
     assert!(CANDIDATE.contains("name: release-candidate-${{ github.run_id }}"));
     assert!(CANDIDATE.contains("retention-days: 14"));
+}
+
+#[test]
+fn candidate_cargo_home_caches_are_platform_isolated_and_revision_reusable() {
+    let input_hash = "${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}";
+    let generic_key = format!(
+        "cargo-home-candidate-v2-${{{{ matrix.platform_id }}}}-${{{{ runner.os }}}}-${{{{ runner.arch }}}}-rust1.97-{input_hash}"
+    );
+    let windows_arm64_key = format!(
+        "cargo-home-candidate-v2-windows-aarch64-${{{{ runner.os }}}}-${{{{ runner.arch }}}}-rust1.97-{input_hash}"
+    );
+
+    assert_eq!(CANDIDATE.matches(&format!("key: {generic_key}")).count(), 2);
+    assert_eq!(
+        CANDIDATE
+            .matches(&format!("key: {windows_arm64_key}"))
+            .count(),
+        2
+    );
+    assert!(!CANDIDATE.contains("cargo-home-candidate-${{ runner.os }}"));
+    assert!(!CANDIDATE.contains("cargo-home-v3-windows-aarch64"));
+
+    for step_name in [
+        "Restore candidate Cargo cache",
+        "Save candidate Cargo cache",
+        "Restore Windows ARM64 cargo cache",
+        "Save Windows ARM64 cargo cache",
+    ] {
+        let step = CANDIDATE
+            .split("      - name:")
+            .find(|step| step.contains(step_name))
+            .expect("candidate Cargo-home cache step");
+        assert!(step.contains(CACHE_SHA));
+        assert!(!step.contains("inputs.source_sha"));
+        assert!(!step.contains("restore-keys:"));
+    }
+
+    for step_name in [
+        "Restore candidate Cargo cache",
+        "Save candidate Cargo cache",
+    ] {
+        let step = CANDIDATE
+            .split("      - name:")
+            .find(|step| step.contains(step_name))
+            .expect("generic candidate Cargo-home cache step");
+        assert!(step.contains("matrix.platform_id != 'windows-aarch64'"));
+    }
 }
 
 #[test]
