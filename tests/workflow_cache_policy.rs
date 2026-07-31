@@ -181,9 +181,9 @@ fn cache_keys_separate_downloads_targets_cells_and_source_revisions() {
     );
 
     let windows_aarch64_download =
-        "cargo-home-ci-windows-aarch64-${{ runner.os }}-${{ runner.arch }}-rust1.97-";
+        "cargo-home-v2-ci-windows-aarch64-${{ runner.os }}-${{ runner.arch }}-rust1.97-cargo-xwin0.23.0-";
     let windows_aarch64_target =
-        "cargo-target-v2-windows-aarch64-ci-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-";
+        "cargo-target-v3-windows-aarch64-ci-${{ runner.os }}-${{ runner.arch }}-rust1.97-cargo-xwin0.23.0-debug-";
     assert!(
         windows_aarch64.contains(&format!("key: {windows_aarch64_download}{INPUT_HASH}")),
         "missing dependency-identity cargo-home key for windows-aarch64"
