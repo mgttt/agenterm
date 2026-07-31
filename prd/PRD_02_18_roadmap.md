@@ -422,18 +422,18 @@ track remains planned, but every declared dependency must still pass.
     gates; these gates never reduce standalone `agenterm-script.exe` APIs
   - [x] implementation sequencing, budgets, risks and release evidence are
     owned by [the v0.1.10 public plan](../plan/plan-v0.1.10.md)
-- [ ] M10 / v0.1.11 Control Center and native local-IPC foundation
-  - [ ] simplify ordinary tab rows by removing the visible Edit action;
+- [x] M10 / v0.1.11 Control Center and native local-IPC foundation
+  - [x] simplify ordinary tab rows by removing the visible Edit action;
     double-clicking the row text enters the existing stable-ID inline editor,
     while F2 and the public UI action preserve keyboard and automation access
-  - [ ] add a centered responsive `Control Center` toolbar action and an
+  - [x] add a centered responsive `Control Center` toolbar action and an
     independent `agenterm-cc` client; it reuses or focuses one process per
     user configuration domain and never owns PTYs, workspace truth, package
     transactions, workflow runs or decentralized-network state
-  - [ ] ship truthful navigation and empty/degraded states for Cockpit,
+  - [x] ship truthful navigation and empty/degraded states for Cockpit,
     Workflows, Extensions (PluginHub/AppHub), and InfoHub; the first accepted
     content slice is read-only Fleet facts over existing typed contracts
-  - [ ] introduce logical `main` and `dev` instances and a transport-neutral
+  - [x] introduce logical `main` and `dev` instances and a transport-neutral
     endpoint contract; migrate in compatibility stages toward Unix domain
     sockets on Linux/macOS and named pipes on Windows while keeping explicit
     loopback TCP and mixed-version discovery
@@ -443,12 +443,36 @@ track remains planned, but every declared dependency must still pass.
   - [~] define and measure a Tauri-like system-WebView host contract, with
     native Control Center fallback and no WebView dependency in the terminal
     GUI/server hot path
-  - [ ] sequencing, parallel waves, risks and acceptance evidence are owned by
+  - [x] sequencing, parallel waves, risks and acceptance evidence are owned by
     [the v0.1.11 public plan](../plan/plan-v0.1.11.md), with canonical product
     boundaries in [Control Center](PRD_02_21_control_center.md),
     [Agent control plane](PRD_02_07_agent_control_plane.md), and
     [Decentralized network foundation](PRD_02_22_decentralized_network.md)
-- [ ] M11 / v0.2.0 Control Center content maturity
+- [ ] M11 / v0.1.12 Convergence and fast candidate promotion
+  - [ ] converge the v0.1.11 native IPC foundation across Windows named pipes
+    and Linux/macOS Unix sockets: logical main/dev isolation, stale authority
+    recovery, mixed-schema discovery and one shared resolver remain truthful
+    under upgrade and rollback
+  - [ ] deepen the independent Control Center only through a useful read-only
+    Cockpit and complete platform evidence; Unix renderer-owned screenshots,
+    incompatible/renderer-failure cases and caller-instance selection close
+    before richer Workflow, Extensions or InfoHub content is promoted
+  - [ ] split fast feedback, exact-SHA candidate qualification and release
+    promotion so a complete stress-inclusive qualification executes once per
+    eligible candidate; tag publication verifies and promotes the previously
+    qualified six-platform bytes without rebuilding or rerunning the complete
+    desktop suite
+  - [ ] bind promotion to an exact commit, receipt, platform matrix, artifact
+    hashes, SBOM and provenance; missing, stale or tampered candidate artifacts
+    fail closed before a GitHub Release exists
+  - [ ] measure queue, cache, compile, test, package, upload and promotion
+    stages; correctly keyed Cargo/sccache experiments and optional paid runners
+    may change latency but never eligibility, evidence or artifact identity
+  - [ ] sequencing, runner experiments, release SLOs, risks and delivery
+    history are owned by
+    [the v0.1.12 public plan](../plan/plan-v0.1.12.md), with canonical delivery
+    requirements in [Delivery and quality](PRD_02_17_delivery_quality.md)
+- [ ] M12 / v0.2.0 Control Center content maturity
   - [ ] deepen the independent Control Center beyond its v0.1.11 shell:
     Cockpit operational views, versioned Workflow definitions/runs,
     Extensions catalog backed by softmgr, and InfoHub source/provenance/routes

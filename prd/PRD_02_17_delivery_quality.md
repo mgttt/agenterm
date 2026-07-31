@@ -159,6 +159,34 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     after tagging
 - [x] release CI runs the isolated public CLI and fleet smoke suites before
   packaging, even when the redundant GUI smoke suites are skipped
+- v0.1.12 exact-SHA candidate promotion (P0)
+  - [ ] ordinary feedback CI, complete candidate qualification and tag
+    promotion are separate contracts; the same eligible commit does not rerun
+    the full stress-inclusive desktop qualification locally, in CI and again
+    after tagging
+  - [ ] before release approval, one candidate workflow produces the complete
+    Windows qualification receipt and all six platform archives, hashes, SBOM
+    and provenance for one exact commit; package-member, executable-permission
+    and launcher defects are therefore observable before a release tag exists
+  - [ ] after explicit approval, the tag workflow verifies tag/version/commit,
+    downloads the exact candidate artifacts, revalidates every receipt and
+    hash, and promotes those bytes without Cargo compilation or a second full
+    GUI/stress suite
+  - [ ] candidate selection fails closed for branch-only identity, a merely
+    recent successful run, missing/expired artifacts, an incomplete platform
+    matrix, receipt drift or tampered bytes; fallback means producing a new
+    candidate, not silently rebuilding during promotion
+  - [ ] queue, checkout/toolchain, cache restore, compile, test, package,
+    artifact transfer, promotion and tag-to-public-Release durations are
+    machine-readable; initial targets are hot-cache candidate p50 <= 8 minutes
+    and exact-candidate tag-to-Release p50 <= 3 minutes
+  - [ ] Cargo registry/git and compatible compilation caches use OS,
+    architecture, toolchain, lock, target, feature/profile and versioned-salt
+    identity. Cache miss, corruption or vendor outage affects speed only
+  - [ ] optional larger/third-party/self-hosted runner trials use the exact
+    AgenTerm cold/warm workload, pinned actions, least privilege and a
+    one-change fallback to standard GitHub-hosted runners; untrusted pull
+    requests never receive release credentials or trusted self-hosted capacity
 - v0.1.7 internal delivery rehearsal (no tag or public GitHub Release)
   - [x] the repository-native coordinator completes a read-only local
     clean-tree/version/HEAD/lock/remote/auth preflight or dry-run in p95 <= 15
