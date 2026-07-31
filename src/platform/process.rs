@@ -5,6 +5,10 @@
 
 use std::process::{Child, Command};
 
+pub(crate) use crate::platform::contract::process::{
+    ProcessError, ProcessErrorKind, ProcessInfo, ProcessObservation,
+};
+
 /// Start the independently owned local server for a CLI client when that is a
 /// host capability. `false` means the host deliberately does not provide this
 /// autostart path; callers retain their normal connection retry behavior.
@@ -45,45 +49,6 @@ fn autostart_server_native(parameter_name: &str, parameter_value: &str) -> std::
 #[cfg(not(windows))]
 fn autostart_server_native(_parameter_name: &str, _parameter_value: &str) -> std::io::Result<bool> {
     Ok(false)
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum ProcessObservation {
-    Live { start_identity: Option<String> },
-    Dead { reason: String },
-    Unknown { reason: String },
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct ProcessInfo {
-    pub(crate) id: u32,
-    pub(crate) parent_id: u32,
-    pub(crate) executable_name: String,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum ProcessErrorKind {
-    IdOutOfRange,
-    Inventory,
-    InventoryTooLarge,
-    KillOpen,
-    Kill,
-    Unsupported,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct ProcessError {
-    pub(crate) kind: ProcessErrorKind,
-    pub(crate) detail: String,
-}
-
-impl ProcessError {
-    fn new(kind: ProcessErrorKind, detail: impl Into<String>) -> Self {
-        Self {
-            kind,
-            detail: detail.into(),
-        }
-    }
 }
 
 pub(crate) fn observe(pid: u32) -> ProcessObservation {
