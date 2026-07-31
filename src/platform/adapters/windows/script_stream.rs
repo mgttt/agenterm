@@ -1,4 +1,7 @@
-use std::{os::windows::io::AsRawHandle, process::{ChildStderr, ChildStdout}};
+use std::{
+    os::windows::io::AsRawHandle,
+    process::{ChildStderr, ChildStdout},
+};
 
 pub(crate) fn stdout_probe_token(reader: &ChildStdout) -> Option<usize> {
     Some(reader.as_raw_handle() as usize)
@@ -24,7 +27,8 @@ pub(crate) fn pipe_available(token: usize) -> Result<usize, bool> {
             &mut available,
             std::ptr::null_mut(),
         )
-    } != 0 {
+    } != 0
+    {
         return Ok(available as usize);
     }
     let error = unsafe { GetLastError() };

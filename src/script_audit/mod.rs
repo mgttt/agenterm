@@ -9,7 +9,7 @@ use std::{
 
 use serde::Serialize;
 
-mod platform;
+use crate::platform::services::supervisor_audit as platform;
 
 const AUDIT_SCHEMA_VERSION: u32 = 1;
 const MAX_RECORD_BYTES: usize = 16 * 1024;
@@ -168,7 +168,8 @@ impl ScriptAuditSink {
         let _process_guard = PROCESS_AUDIT_LOCK
             .lock()
             .map_err(|_| "script audit process lock is poisoned".to_owned())?;
-        let _global_guard = platform::NamedAuditLock::acquire(&self.path)?;
+        let _global_guard =
+            platform::NamedAuditLock::acquire(&self.path).map_err(|error| error.message)?;
         let current_bytes = fs::metadata(&self.path)
             .map(|metadata| metadata.len())
             .unwrap_or(0);
@@ -207,30 +208,7 @@ pub(crate) fn source_fingerprint(source: &str) -> String {
 }
 
 fn default_audit_path() -> PathBuf {
-    #[cfg(windows)]
-    {
-        env::var_os("LOCALAPPDATA")
-            .map(PathBuf::from)
-            .unwrap_or_else(env::temp_dir)
-            .join("AgenTerm")
-            .join("script-audit.jsonl")
-    }
-    #[cfg(unix)]
-    {
-        if let Some(path) = env::var_os("XDG_DATA_HOME") {
-            PathBuf::from(path)
-                .join("agenterm")
-                .join("script-audit.jsonl")
-        } else if let Some(home) = env::var_os("HOME") {
-            PathBuf::from(home)
-                .join(".local")
-                .join("share")
-                .join("agenterm")
-                .join("script-audit.jsonl")
-        } else {
-            env::temp_dir().join("agenterm-script-audit.jsonl")
-        }
-    }
+    platform::default_audit_path()
 }
 
 fn fnv1a64(bytes: &[u8], seed: u64) -> u64 {

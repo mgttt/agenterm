@@ -4,3 +4,4 @@ pub(crate) mod ipc;
 pub(crate) mod process;
 pub(crate) mod script_clipboard;
 pub(crate) mod script_window;
+pub(crate) mod supervisor_audit;

@@ -12,8 +12,7 @@ use std::{
 use rhai::{Engine, EvalAltResult};
 
 use crate::{
-    platform::services::script_stream as platform_stream,
-    script_process::ScriptDuration,
+    platform::services::script_stream as platform_stream, script_process::ScriptDuration,
     script_stdlib::ScriptBytes,
 };
 

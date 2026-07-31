@@ -14,8 +14,7 @@ use crate::script_protocol::{
     ScriptResult,
 };
 
-mod platform;
-#[cfg(test)]
+use crate::platform::services::supervisor_audit as platform;
 use platform::ConcurrencyPermit;
 
 pub(crate) const PROCESS_CONCURRENCY_LIMIT: usize = 2;
@@ -59,14 +58,15 @@ impl WorkerSupervisor {
     where
         F: FnMut(&ScriptBrokerRequest, Duration) -> ScriptBrokerResponse,
     {
-        let _permit = platform::ConcurrencyPermit::try_acquire()?;
+        let _permit = try_acquire_permit()?;
         let mut command = Command::new(executable);
         command
             .arg("--framed-worker")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
-        platform::configure_worker_command(&mut command);
+        platform::configure_worker_command(&mut command)
+            .map_err(|error| SupervisorError::Spawn(error.message))?;
         if let Some(working_directory) = working_directory {
             command.current_dir(working_directory);
         }
@@ -74,9 +74,9 @@ impl WorkerSupervisor {
             .spawn()
             .map_err(|error| SupervisorError::Spawn(error.to_string()))?;
         let worker_pid = child.id();
-        let tree = platform::ProcessTreeGuard::attach(&mut child).map_err(|error| {
+        let mut tree = platform::ProcessTreeGuard::attach(&child).map_err(|error| {
             platform::terminate_worker(&mut child, worker_pid);
-            SupervisorError::Spawn(error)
+            SupervisorError::Spawn(error.message)
         })?;
 
         let mut stdin = child.stdin.take().ok_or_else(|| {
@@ -285,6 +285,20 @@ impl WorkerSupervisor {
     }
 }
 
+fn try_acquire_permit() -> Result<ConcurrencyPermit, SupervisorError> {
+    platform::ConcurrencyPermit::try_acquire(
+        &PROCESS_ACTIVE,
+        PROCESS_CONCURRENCY_LIMIT,
+        GLOBAL_CONCURRENCY_LIMIT,
+    )
+    .map_err(|error| match error.kind {
+        crate::platform::contract::supervisor_audit::SupervisorAuditErrorKind::LockWait => {
+            SupervisorError::ConcurrencyLimit
+        }
+        _ => SupervisorError::Spawn(error.message),
+    })
+}
+
 fn write_frame(output: &mut impl Write, frame: &ScriptFrame) -> Result<(), SupervisorError> {
     let bytes = serde_json::to_vec(frame)
         .map_err(|error| SupervisorError::Transport(format!("failed to encode frame: {error}")))?;
@@ -332,14 +346,14 @@ mod tests {
 
     #[test]
     fn per_process_concurrency_is_bounded_without_spawning() {
-        let first = ConcurrencyPermit::try_acquire().expect("first permit");
-        let second = ConcurrencyPermit::try_acquire().expect("second permit");
+        let first = try_acquire_permit().expect("first permit");
+        let second = try_acquire_permit().expect("second permit");
         assert!(matches!(
-            ConcurrencyPermit::try_acquire(),
+            try_acquire_permit(),
             Err(SupervisorError::ConcurrencyLimit)
         ));
         drop(first);
-        assert!(ConcurrencyPermit::try_acquire().is_ok());
+        assert!(try_acquire_permit().is_ok());
         drop(second);
     }
 }

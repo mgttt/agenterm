@@ -314,6 +314,11 @@ Revision-4 migration evidence (2026-07-31, partial):
   `services::script_stream → selected → adapters`. The Windows exited-child
   drain behavior remains bounded; Linux/macOS deliberately supply no native
   probe token, so the portable blocking-reader path remains explicit.
+- [x] Script worker supervision and audit serialization now call
+  `services::supervisor_audit → selected → adapters`; their former product
+  `platform/{windows,unix}` subtrees have been deleted. Adapter-owned Job
+  Objects/process groups, global slot locks, and named audit locks retain the
+  existing bounded cleanup and cross-process serialization semantics.
 
 - [~] `settings`, instance PID/start-identity checks, terminal default-shell
   selection, Control Center atomic-file/focus/capture routing, and passive

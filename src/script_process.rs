@@ -15,7 +15,8 @@ use crate::{
     script_stdlib::{ScriptBytes, ScriptPath},
     script_stream::{
         CapturedStream, ScriptStream, cancel as cancel_stream, capture_after_close,
-        discard_buffered, from_process_stderr, from_process_stdout, from_reader, mark_process_exited,
+        discard_buffered, from_process_stderr, from_process_stdout, from_reader,
+        mark_process_exited,
     },
 };
 
