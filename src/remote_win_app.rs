@@ -1,7 +1,7 @@
 use std::{
     ffi::c_void,
     mem,
-    process::Command,
+    process::{Command, Stdio},
     ptr,
     time::{Duration, Instant},
 };
@@ -475,6 +475,14 @@ fn start_server_process() -> Result<()> {
         command.arg("--endpoint").arg(endpoint.to_string());
     }
     command
+        // agenterm.exe is a Windows-subsystem process.  When it is launched
+        // from some shells its inherited standard handles can be invalid;
+        // passing one to CreateProcess makes server startup fail with
+        // ERROR_INVALID_HANDLE (6).  The server is independent and does not
+        // use its stdio, so give it known-valid null handles instead.
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .creation_flags(CREATE_NO_WINDOW)
         .spawn()
         .context("failed to launch independent AgenTerm server")?;
@@ -4025,7 +4033,16 @@ impl RemoteWindowState {
         self.window_close_pending = true;
         self.show_workspace_controls(false);
         self.layout_close_controls();
-        unsafe { SetFocus(self.window) };
+        // A close request can arrive from the taskbar while this window is
+        // minimized.  The confirmation choices are native child controls, so
+        // leaving the parent iconic would make the required decision
+        // unreachable and look like a failed close.
+        unsafe {
+            if IsIconic(self.window) != 0 {
+                ShowWindow(self.window, SW_RESTORE);
+            }
+            SetFocus(self.window);
+        };
     }
 
     fn finish_window_close(&mut self, choice: RemoteCloseChoice) {
