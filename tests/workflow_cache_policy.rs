@@ -69,17 +69,14 @@ fn cache_keys_separate_downloads_targets_cells_and_source_revisions() {
     let linux = job("linux-x86_64", "linux-aarch64");
 
     for (pilot, cell) in [(windows, "windows-x86_64-native"), (linux, "linux-x86_64")] {
-        let download_prefix = format!(
-            "cargo-home-v2-{cell}-${{{{ runner.os }}}}-${{{{ runner.arch }}}}-rust1.97-"
-        );
+        let download_prefix =
+            format!("cargo-home-v2-{cell}-${{{{ runner.os }}}}-${{{{ runner.arch }}}}-rust1.97-");
         assert!(
             pilot.contains(&format!("key: {download_prefix}{INPUT_HASH}")),
             "missing dependency-identity cargo-home key for {cell}"
         );
         assert!(
-            pilot.contains(&format!(
-                "restore-keys: |\n            {download_prefix}"
-            )),
+            pilot.contains(&format!("restore-keys: |\n            {download_prefix}")),
             "missing compatible cargo-home restore prefix for {cell}"
         );
         assert!(
