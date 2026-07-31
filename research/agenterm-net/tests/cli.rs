@@ -109,6 +109,55 @@ fn private_mesh_proves_dht_pubsub_and_relay_without_public_authority() {
 }
 
 #[test]
+fn remote_fleet_attach_is_explicit_paired_and_read_only() {
+    let (capability_status, capabilities) = json_output(&["capabilities", "--json"]);
+    assert!(capability_status.success(), "{capabilities}");
+    let advertised = capabilities["result"]["capabilities"]
+        .as_array()
+        .expect("capability list")
+        .iter()
+        .find(|capability| capability["name"] == "remote-fleet.read-only-attach")
+        .expect("Remote Fleet attach capability");
+    assert_eq!(advertised["state"], "prototype");
+
+    let started = Instant::now();
+    let (status, value) = json_output(&["attach-self-test", "--json"]);
+    assert!(status.success(), "{value}");
+    assert!(started.elapsed() < Duration::from_secs(5));
+    let result = &value["result"];
+    assert_eq!(result["status"], "prototype-proven");
+    assert_eq!(result["authenticated_peer_identity"], true);
+    assert_eq!(result["accepted"]["state"], "complete");
+    assert!(result["accepted"]["snapshot_bytes"].as_u64().unwrap() <= 16 * 1024);
+    assert!(result["accepted"]["server_count"].as_u64().unwrap() <= 8);
+    assert!(result["accepted"]["event_digest_count"].as_u64().unwrap() <= 16);
+    assert_eq!(
+        result["accepted"]["event_digest_sha256"]
+            .as_str()
+            .unwrap()
+            .len(),
+        64
+    );
+    assert_eq!(result["rejections"]["replay"], "replay");
+    assert_eq!(result["rejections"]["wrong_peer"], "wrong_peer");
+    assert_eq!(result["rejections"]["expired"], "expired");
+    assert_eq!(result["authority"]["read_only_projection"], true);
+    for excluded in [
+        "shell",
+        "command_execution",
+        "pty_control",
+        "terminal_input",
+        "server_control",
+    ] {
+        assert_eq!(result["authority"][excluded], false, "{excluded}");
+    }
+    assert_eq!(result["public_bootstrap"], false);
+    assert_eq!(result["nat_traversal"], false);
+    assert_eq!(result["relay_serving_default"], false);
+    assert_eq!(value["receipt"]["schema"], "agenterm-net/receipt/v1");
+}
+
+#[test]
 fn peer_loss_is_typed_and_bounded() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("reserve loopback port");
     let port = listener.local_addr().unwrap().port();

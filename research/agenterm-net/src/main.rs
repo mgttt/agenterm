@@ -7,6 +7,7 @@ use libp2p::{
     tcp, yamux,
 };
 
+mod attach;
 mod identity;
 mod mesh;
 mod node;
@@ -302,8 +303,8 @@ async fn run() -> Result<(), (String, &'static str, String)> {
                     },
                     Capability {
                         name: "remote-fleet.read-only-attach",
-                        state: "unavailable",
-                        note: "no remote authority or control surface is implemented",
+                        state: "prototype",
+                        note: "explicit paired read-only memory fixture; no product attach endpoint or control authority",
                     },
                 ],
             };
@@ -329,6 +330,20 @@ async fn run() -> Result<(), (String, &'static str, String)> {
             let result = mesh::prove_private_mesh(Duration::from_millis(DEFAULT_DEADLINE_MS))
                 .await
                 .map_err(|message| (request_id.clone(), "private_mesh_failed", message))?;
+            print_envelope(&request_id, DEFAULT_DEADLINE_MS, result);
+            Ok(())
+        }
+        [command, flag] if command == "attach-self-test" && flag == "--json" => {
+            let result =
+                attach::prove_read_only_attach(Duration::from_millis(DEFAULT_DEADLINE_MS))
+                    .await
+                    .map_err(|message| {
+                        (
+                            request_id.clone(),
+                            "remote_fleet_attach_failed",
+                            message,
+                        )
+                    })?;
             print_envelope(&request_id, DEFAULT_DEADLINE_MS, result);
             Ok(())
         }
@@ -478,7 +493,7 @@ async fn run() -> Result<(), (String, &'static str, String)> {
         _ => Err((
             request_id,
             "usage",
-            "usage: agenterm-net capabilities --json | peer-id | self-test --json | mesh-self-test --json | node start|status|stop ... --json | store put|get|pin|unpin|gc|status ... --json".to_string(),
+            "usage: agenterm-net capabilities --json | peer-id | self-test --json | mesh-self-test --json | attach-self-test --json | node start|status|stop ... --json | store put|get|pin|unpin|gc|status ... --json".to_string(),
         )),
     }
 }
