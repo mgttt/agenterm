@@ -96,9 +96,11 @@ AgenTerm optimizes **fleet durability and verifiable control**:
   CLI/script/mux foundations, Observable Fleet, script runtime v0.1.9 slice.
 - Still hardening: typed operations, receipts, control-plane completeness,
   MCP read-only bridge (engineering on v0.1.10 plan).
-- **Not** current work: mobile store release, libp2p node,
-  persona templates — captured as `[idea]` below. Workflow pipelines,
-  PluginHub, and InfoHub are **promoted** for v0.2.0 Fleet Hub (see Lane J).
+- **Not** current work: mobile store release or persona templates. The
+  v0.1.11 plan promotes an isolated libp2p/CID research proof and the
+  independent Control Center foundation; Workflow pipelines, PluginHub,
+  AppHub and InfoHub content then mature through later accepted slices
+  (see Lane J).
 
 ### Roadmap waves (product sequence, not calendar)
 
@@ -641,7 +643,7 @@ INT, DUR, AUTO, ORCH, EXT, INF, REACH.
 
 | ID | Status | Idea | Depends on | Owning module when promoted |
 |----|--------|------|------------|------------------------------|
-| C1 | [promoted] | Persisted **workflow/pipeline** graph (steps, waits, branches, retry, cancel); **Fleet Hub Workflows** tab is the human entry | receipt, journal, typed mutations | MCP orchestration (brain/flow), Human workspace |
+| C1 | [promoted] | Persisted **workflow/pipeline** graph (steps, waits, branches, retry, cancel); **Control Center Workflows** is the human entry | receipt, journal, typed mutations | MCP orchestration (brain/flow), Control Center |
 | C2 | [idea] | Cross-agent **team coordination** inside one fleet (delegate task, shared templates, handoff) | C1 partial, stable IDs | Agent control plane, MCP orchestration |
 | C3 | [idea] | Workflow recovery from snapshot + journal without assuming process continuity | Observable Fleet | Observable Fleet, MCP orchestration |
 | C4 | [deferred] | Federation across machines/users (not chat-first) | B3, security model | Agent control plane |
@@ -733,22 +735,25 @@ through **data-driven onboarding**, not forked codebases.
 | I5 | [idea] | Office template (report, inbox helper, form filler agents) | MCP/agent bridge | Human workspace, MCP |
 | I6 | [deferred] | Separate SKU or binary per persona | — | **rejected** |
 
-### Lane J — Fleet Hub (P4 experience · v0.2.0)
+### Lane J — Control Center (P4 experience · v0.1.11 foundation)
 
-Secondary hub window: toolbar **Hub** button left of Settings; overlay-first;
-four tabs bind to OBS / ORCH / EXT / INF without duplicating server authority.
+Independent **AgenTerm Control Center** client: a centered, responsive toolbar
+entry opens or focuses `agenterm-cc`; Cockpit, Workflows, Extensions and
+InfoHub bind to existing OBS / ORCH / EXT / INF authorities without
+duplicating them. This supersedes the earlier “Fleet Hub overlay” hypothesis;
+Cockpit preserves the useful fleet-dashboard concept.
 
 | ID | Status | Idea | Depends on | Owning module when promoted |
 |----|--------|------|------------|------------------------------|
-| J1 | [promoted] | **Fleet Hub** shell — entry button, overlay focus, snapshot + `ui-action` | Unix GUI Win parity, toolbar geometry | Human workspace |
-| J2 | [promoted] | **Cockpit** tab — read-only fleet dashboard (tree, states, journal, shortcuts) | J1, public CLI reads | Human workspace, Observable Fleet |
-| J3 | [promoted] | **Workflows** tab — human entry for pipelines (C1) | J1, C1 partial | Human workspace, MCP orchestration |
-| J4 | [promoted] | **PluginHub** tab — sidecar/package discovery UI (D2) | J1, D1 manifest | Human workspace, Optional components |
-| J5 | [promoted] | **InfoHub** tab — subscription and signal routing UI (E1) | J1, E1 framework | Human workspace, Observable Fleet |
+| J1 | [promoted] | **Control Center** process shell — centered entry, process reuse/focus, snapshot + typed actions | Unix GUI Win parity, toolbar geometry, public control plane | Control Center |
+| J2 | [promoted] | **Cockpit** — read-only Fleet dashboard (tree, states, journal, shortcuts) | J1, public CLI reads | Control Center, Observable Fleet |
+| J3 | [promoted] | **Workflows** — definitions, runs and pipeline projection (C1) | J1, C1 partial | Control Center, MCP orchestration |
+| J4 | [promoted] | **Extensions** — PluginHub/AppHub views over shared catalog and softmgr substrate (D2) | J1, D1 manifest | Control Center, Optional components |
+| J5 | [promoted] | **InfoHub** — source, provenance, subscription and signal routing (E1) | J1, E1 framework | Control Center, Observable Fleet |
 
-Hub non-goals:
+Control Center non-goals:
 
-- no second PTY fleet or Hub-owned server state;
+- no second PTY fleet or Control-Center-owned server state;
 - PluginHub and InfoHub are discovery and routing surfaces, not trading or
   silent-install products;
 - primary daily surface remains terminal + Composer.
@@ -781,4 +786,5 @@ Add uncategorized sparks here; sort into lanes during review.
 
 ---
 
-Last reviewed: 2026-07-30 (Fleet Hub v0.2.0 lanes; PluginHub / InfoHub naming)
+Last reviewed: 2026-07-31 (Control Center supersedes Fleet Hub overlay;
+PluginHub / AppHub / InfoHub product boundaries)

@@ -172,11 +172,22 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   synchronous pipeline behavior, and child exit-code propagation in both
   `cmd.exe` and PowerShell
 - [x] `agenterm-mux.exe`: tmux/RMUX-compatible fleet control entry point
+- [ ] `agenterm-cc.exe` / `agenterm-cc`: independent AgenTerm Control Center
+  client. It owns only its window, navigation and uncommitted display state;
+  it observes and controls existing authorities through public typed
+  contracts, and its absence, crash, renderer failure or upgrade never ends a
+  server, PTY or terminal GUI. Detailed product scope belongs to
+  [Control Center](PRD_02_21_control_center.md).
 - [~] `agenterm-script.exe`: optional general-purpose local Rhai runtime
   sidecar; each invocation owns a fresh supervised worker, while v0.1.9 keeps
   that process boundary and adds a task-lived local scheduler, standard
   library, modules, named tasks, and typed Fleet APIs without becoming a
   persistent daemon or an Agent permission layer
+- [ ] `agenterm-net` is an independent research executable and future optional
+  service for libp2p/IPFS transport and content primitives. It is not linked
+  into `agenterm.exe` or `agenterm-server`, is not a stable release asset until
+  its own gates pass, and is owned by
+  [Decentralized network foundation](PRD_02_22_decentralized_network.md).
 - [ ] `agenterm-bash.exe`: AgenTerm-owned default Bash entry point
 - Future executable hypotheses, not release commitments:
   - `agenterm-mcp.exe`: MCP server/client and agentic orchestration sidecar

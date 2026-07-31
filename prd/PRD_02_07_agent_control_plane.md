@@ -104,4 +104,86 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     versioned receipt while preserving legacy fields; many command branches
     still originate human error text and ordinary CLI mode does not yet render
     every message from one canonical typed envelope
-  - [ ] named-pipe transport and stable event subscription
+  - [ ] stable event subscription
+- v0.1.11 native-local IPC and logical instances
+  - [ ] this module is the single product owner for local transport,
+    endpoint resolution, instance identity, registration migration, peer
+    isolation, and stale-endpoint recovery; CLI and executable modules consume
+    these contracts instead of defining parallel transport rules
+  - [ ] freeze three separate typed identities:
+    - `LogicalInstance`: the user-facing role and lifecycle class
+      `main | dev | ephemeral | custom`; v0.1.11 defaults ordinary launches to
+      `main`, reserves `dev` for isolated development, and keeps
+      `ephemeral/custom` explicit rather than silently allocating random ports
+    - `IpcEndpoint`: a versioned transport value
+      `unix:<path> | pipe:<name> | tcp:<host>:<port>`; Linux/macOS derive a
+      Unix domain socket for ordinary local instances, Windows derives a named
+      pipe, and explicit loopback TCP remains a compatibility/diagnostic
+      transport
+    - `ServerScopeId`: a stable, opaque identity derived from the trusted OS
+      user scope, logical instance, and namespace version; registration,
+      connection handshake, singleton ownership, workspace defaults, epoch,
+      and receipts must agree on it
+  - [ ] the human labels `{username}_main` and `{username}_dev` are display
+    values only. Raw usernames never become socket paths, pipe names, lock
+    authority, or security identities; Windows derives scope from the user SID
+    and Unix derives it from the effective UID, using a bounded versioned key
+  - [ ] one OS-user scope may run `main` and `dev` concurrently, but each
+    logical instance has at most one live authority. A same-scope launch reuses
+    a compatible authority; an incompatible or ambiguously owned endpoint
+    fails with a typed result instead of killing it or falling back to another
+    instance
+  - [ ] Unix local endpoint contract:
+    - choose a trusted per-UID runtime base, create the AgenTerm instance
+      directory with mode `0700`, and create the socket with mode `0600`
+    - validate owner, type, permissions, path length, and symlink-free
+      components before bind; use a fixed-length derived key rather than a
+      truncated username when the platform `sun_path` budget is tight
+    - recover a stale socket only under the same instance lock after a bounded
+      connect proves it dead and PID/start identity or lease evidence proves
+      the former owner is gone; never unlink a symlink, regular file,
+      directory, foreign-owned node, permission failure, or timeout
+    - where the OS exposes peer credentials, verify the peer UID against
+      `ServerScopeId`; ownership uncertainty fails closed with a typed error
+  - [ ] Windows local endpoint contract:
+    - create the named pipe with an explicit DACL scoped to the current user
+      SID and only separately justified system principals; do not inherit a
+      broadly writable ACL
+    - set `PIPE_REJECT_REMOTE_CLIENTS`, use overlapped bounded connect/read/
+      write operations, and make cancellation and owner shutdown release every
+      pending operation without blocking the GUI
+    - use `FILE_FLAG_FIRST_PIPE_INSTANCE` or an equivalent atomic first-owner
+      primitive so concurrent launches cannot create two authorities for the
+      same `ServerScopeId`
+    - validate the connected server identity against registration and
+      handshake facts; stale registration, PID reuse, access denial, timeout,
+      and namespace mismatch remain distinguishable typed outcomes
+  - [ ] registration schema v2 stores the logical instance,
+    `ServerScopeId`, typed endpoint, namespace/schema version, PID plus process
+    start identity or lease nonce, server epoch, and existing diagnostic facts.
+    Discovery reads v2 native-local records and legacy TCP/address records in
+    one bounded pass, deduplicates the same authority, preserves reachable,
+    unreachable, incompatible, and owner-unknown states, and never treats
+    filename presence as proof of a live server
+  - [ ] migration is staged rather than flag-day:
+    - first ship the common resolver, schema-v2 writer/reader, mixed discovery,
+      and explicit native endpoint support while the shipped TCP default
+      remains usable
+    - then make named pipe/Unix socket the ordinary `main` and `dev` defaults
+      only after new-client/old-server and old-client/new-server compatibility,
+      upgrade, rollback, stale recovery, and concurrent-start evidence passes
+    - retain explicit loopback TCP and the legacy registration reader through
+      a documented compatibility window; non-loopback TCP remains outside this
+      local-transport change and requires its own authenticated remote-control
+      threat model
+    - treat `AGENTERM_IPC_ADDRESS` as a legacy explicit TCP selector during
+      transition, add `AGENTERM_IPC_ENDPOINT` and `AGENTERM_INSTANCE` as the
+      typed endpoint/instance environment representation, and keep all GUI,
+      CLI, Control Center, Script, MCP, and mux consumers on one resolver
+  - [ ] public black-box evidence covers `main/dev` isolation and singleton
+    races; Unix permission, length, character, symlink, stale, and owner
+    failures; Windows DACL, remote-client rejection, first-instance,
+    cancellation, and bounded-I/O failures; schema-v1/v2 mixed discovery;
+    upgrade/rollback; explicit TCP compatibility; and truthful structured
+    snapshot/diagnostic output without leaking raw SID, home path, or
+    credentials

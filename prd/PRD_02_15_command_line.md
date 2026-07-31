@@ -53,7 +53,36 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [x] `server-kill` is a client-side alias that canonicalizes to the
       existing `kill-server` operation before IPC dispatch; it preserves
       the same destructive workspace and process-lifecycle semantics
-    - global `--address HOST:PORT` targets a discovered server explicitly
+    - [x] global `--address HOST:PORT` targets a discovered loopback TCP
+      server explicitly
+    - [ ] v0.1.11 adds global selectors `--instance main|dev` and
+      `--endpoint unix:<path>|pipe:<name>|tcp:<host>:<port>`; future explicit
+      `ephemeral/custom` instance forms must reuse the same resolver and must
+      not be invented independently by individual commands
+    - [ ] selector precedence is an explicit CLI selector, then
+      `AGENTERM_IPC_ENDPOINT`, then legacy `AGENTERM_IPC_ADDRESS`, then
+      `AGENTERM_INSTANCE`, then the platform-derived `main` default. A CLI
+      selector overrides inherited environment selectors; conflicting typed
+      environment selectors fail unless a CLI selector intentionally replaces
+      them. `--address` remains the compatibility spelling for an explicit TCP
+      endpoint; any two CLI selectors (`--instance`, `--endpoint`, or
+      `--address`) conflict and fail with a typed error rather than silently
+      overriding or falling back
+    - [ ] selector parsing, platform endpoint derivation, user scoping,
+      singleton ownership, peer validation, stale recovery, and migration are
+      owned by
+      [Agent control plane](PRD_02_07_agent_control_plane.md);
+      every CLI command consumes that shared resolver
+    - [ ] `server-list` human output replaces the TCP-specific `ADDRESS`
+      assumption with typed `INSTANCE`, `TRANSPORT`, and `ENDPOINT` facts while
+      retaining PID/version/status/window/tab/session/workspace diagnostics;
+      endpoint rendering is bounded and safe for terminals
+    - [ ] `server-list --json` emits registration schema-v2 logical-instance,
+      server-scope, and typed-endpoint fields while preserving legacy JSON
+      fields during the compatibility window. Legacy TCP rows remain visible,
+      mixed v1/v2 discovery is deterministic, and an unavailable native
+      endpoint is reported as unreachable/incompatible/owner-unknown rather
+      than omitted or auto-started
     - `active-window|active-tab [-F format]`
     - `inspect|pane-snapshot [-t target]`
     - `dump-cells [-t target] [-r row]`
@@ -159,9 +188,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - `new-window` and `new-session` also accept repeated `-e NAME=VALUE`
     - injected values live only for the child process; snapshots expose
       names, and workspace persistence stores neither names nor values
-    - every child receives reserved `AGENTERM_IPC_ADDRESS`,
+    - every child currently receives reserved `AGENTERM_IPC_ADDRESS`,
       `AGENTERM_TAB_ID`, `AGENTERM_SESSION`, and
       `AGENTERM_WORKSPACE_PATH`
+    - [ ] during native-local IPC migration, children also receive the shared
+      resolver's typed endpoint and logical-instance representation;
+      `AGENTERM_IPC_ADDRESS` remains populated only as the legacy TCP
+      compatibility form and is not fabricated for Unix sockets or named pipes
     - the default launcher uses the system `codex` command through
       `cmd.exe` so standard npm `.cmd` installations work in ConPTY;
       `--program` is the explicit direct-executable override

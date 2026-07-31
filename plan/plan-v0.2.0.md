@@ -1,9 +1,12 @@
-# AgenTerm v0.2.0 公开计划（骨架）
+# AgenTerm v0.2.0 公开计划（重定向骨架）
 
 状态：规划中  
-前置：**v0.1.10 Rhai 自举收尾**、**Unix GUI ↔ Win 对齐合入 `main`**（含 PR #15）、主工作区 UI 调顺  
-工作主题：**Fleet Hub** — 工具栏 Settings 左侧新入口打开的二级枢纽窗口  
-版本定位：在安静主界面之上，集中呈现舰队驾驶舱、工作流、PluginHub、InfoHub 四条能力线，全部绑定同一 server 权威与公开控制面，不在 Hub 内复制舰队状态。
+前置：**v0.1.11 Control Center / native IPC foundation** 完成并通过跨平台证据门
+
+工作主题：**Control Center 内容成熟** — 深化独立 `agenterm-cc`，而不是回到主 GUI overlay
+版本定位：在 v0.1.11 已建立的安静主界面入口、独立进程和 typed bridge
+之上，让舰队驾驶舱、工作流、Extensions 与 InfoHub 形成首批真实纵向能力；
+全部复用既有权威，不在 Control Center 内复制状态、调度器、安装器或网络节点。
 
 本文是版本执行计划与决策记录，不是产品事实。接受的产品范围同步进 owning `prd/PRD_*.md`；
 灵感条目见 [`PRD_02_19_inspiration_and_future_vision.md`](prd/PRD_02_19_inspiration_and_future_vision.md)。
@@ -11,25 +14,25 @@
 ## 产品 outcome（一棵树）
 
 ```text
-Fleet Hub（二级窗口 / overlay，工具栏 Hub 按钮，Settings 左侧）
-├─ [ ] 壳层：入口、焦点、模态契约、ui-snapshot / ui-action、Win + Unix 几何
-├─ [ ] Cockpit（驾驶舱）— 只读舰队仪表盘
-├─ [ ] Workflows — 工作流与管道入口（持久化图编排后挂）
-├─ [ ] PluginHub — 可选组件 / sidecar 发现（安装走 softmgr，GUI 启动不下载）
-└─ [ ] InfoHub — 外部信号订阅与路由（Composer 草稿，不自动执行）
+Control Center（独立 agenterm-cc；v0.1.11 壳层之上的内容成熟）
+├─ [ ] Cockpit — Fleet 状态、事件、异常与 typed shortcuts
+├─ [ ] Workflows — definitions / runs / pipeline view / evidence
+├─ [ ] Extensions — PluginHub 与 AppHub 共用 catalog / source / softmgr 底座
+├─ [ ] InfoHub — source / provenance / route / Composer 或 workflow 输入
+├─ [ ] renderer — native shell 与通过资格门的系统 WebView 投射
+└─ [ ] diagnostics — 组件能力、版本、连接、失败与支持包
 ```
 
 ## 依赖与集成边界
 
 ```text
-ui_geometry toolbar + ui_bridge snapshot
+v0.1.11 Control Center process + typed bridge
         │
-        ├─► Hub 按钮几何（New 与 Settings 之间）与 compact 模式
-        ├─► Hub overlay / 第二窗口投影（首选 overlay，见 PRD）
-        ├─► Cockpit ← list-windows / journal / ui-snapshot / inspect（只读）
-        ├─► Workflows ← script task catalog + 未来 flow runtime（C1）
-        ├─► PluginHub ← softmgr + 签名包清单（D1/D2）
-        └─► InfoHub ← 订阅连接器 + 谓词（E1，非媒体 App）
+        ├─► Cockpit ← list-windows / journal / snapshots / receipts
+        ├─► Workflows ← versioned flow authority（不是 CC 自己执行）
+        ├─► Extensions ← shared catalog + softmgr transaction authority
+        ├─► InfoHub ← sources + provenance + routes
+        └─► optional WebView ← renderer-neutral state + typed local bridge
 ```
 
 Unix Win 对齐地图：[`plan-unix-gui-win-parity.md`](plan-unix-gui-win-parity.md)  
@@ -37,42 +40,51 @@ Unix Win 对齐地图：[`plan-unix-gui-win-parity.md`](plan-unix-gui-win-parity
 
 ## v0.2.0 建议分期
 
-### Phase A — 壳 + Cockpit（本版最小可发布）
+### Phase A — Cockpit 首个可操作纵切
 
-- [ ] 工具栏 **Hub** 按钮（Settings 左侧）；模态时隐藏主工具栏
-- [ ] Hub overlay 框架：四 tab 导航 + 空状态占位
-- [ ] **Cockpit**：活跃/ dead 摘要、journal epoch/sequence、快捷 inspect / select-tab
-- [ ] `ui-snapshot`：`modal.kind: "fleet-hub"`（或等价）+ `fleet_hub.active_tab`
-- [ ] `ui-action`：`open-fleet-hub`、`close-fleet-hub`、`fleet-hub-tab`（cockpit|workflows|plugin-hub|info-hub）
-- [ ] Rhai smoke：打开 Hub、切 tab、Cockpit 字段黑盒（扩 `remote-ui-smoke` 或嵌入式等价）
+- [ ] 在 v0.1.11 read-only Cockpit 上增加健康、异常、运行与证据下钻
+- [ ] 操作只调用已存在的 typed authority，并通过 receipt/post-state 验证
+- [ ] server restart/epoch gap/多 server 切换有明确重建基线体验
+- [ ] native/WebView 投射使用相同语义 snapshot 和 action IDs
+- [ ] 独立 CC 进程复用、崩溃恢复和 terminal/server 隔离持续通过
 
-### Phase B — 三条 Hub 内容（可拉伸进 v0.2.0 或 v0.2.1）
+### Phase B — Workflows 与 Extensions
 
-- [ ] **Workflows**：已注册 Rhai task / 未来 MCP flow 只读目录；图编排 UI 占位
-- [ ] **PluginHub**：manifest 浏览、「通过 softmgr 安装」占位；遵守 D3（启动不下载）
-- [ ] **InfoHub**：订阅源注册 UI；过滤 → 通知 → Composer 草稿路径
+- [ ] **Workflows**：定义、运行、取消、恢复和 evidence 视图；durable
+  authority 仍在 flow worker/MCP orchestration
+- [ ] **Extensions**：PluginHub/AppHub 分视图，共用 sources、provenance、
+  compatibility、install plan 与 softmgr 事务
+- [ ] 不静默下载、安装、更新或提升权限；所有 mutation 先展示计划并产生
+  machine-readable result
+
+### Phase C — InfoHub 与可选 WebView
+
+- [ ] **InfoHub**：显式 source、provenance/CID、过滤与路由到 Composer
+  draft、workflow input 或通知
+- [ ] 若 WebView 六目标 availability、bridge isolation、offline、crash 与
+  size 门已通过，可成为 CC 的生产 renderer；否则继续使用 native shell
 
 ### 明确非目标（v0.2.0）
 
-- 像素级第二窗口多屏方案（可 v0.2.x 后期）
-- PluginHub / InfoHub 的远程交易、自动下单、静默安装
-- Hub 内第二套 PTY 或独立 server 状态
-- TTF/FreeType（留在 Unix parity P3 或 v0.2.x 并行）
+- PluginHub/AppHub 的公共交易、自动下单、静默安装
+- Control Center 内第二套 PTY、server、workflow、softmgr 或 net authority
+- 未通过独立可靠性门即把 libp2p/IPFS 嵌入稳定 server
+- 加载任意远程网页并授予 privileged host bridge
 
 ## 验收证据
 
 | 能力 | 证据 |
 |------|------|
-| 入口与几何 | `ui_geometry` 单元测试 + `layout.toolbar.hub` snapshot |
+| 入口与几何 | v0.1.11 Control Center toolbar/process qualification 持续通过 |
 | Cockpit | CLI `ui-snapshot` 字段 + PNG |
-| 交互 | `ui-action` 黑盒 + Windows CI smoke |
+| 交互 | typed action + receipt/post-state 黑盒 + 六目标 smoke |
 | 不回退 | 主工作区 terminal/composer 旅程仍绿 |
 
 ## 风险与门
 
-- **共享热点**：`ui_geometry.rs`、`remote_win_app`、`unix_app/mod.rs` — Hub 几何与 Win 对齐同一补丁序列化
-- **命名**：对外统一 **PluginHub** / **InfoHub**（不用「市场」作为主称谓）
-- **quiet surface**：Hub 为显式二级入口，不增加日常工具栏噪音
+- **authority**：CC 只投射和发起 typed 请求，不成为第二份产品真相
+- **命名**：对外统一 **Control Center**；Fleet Hub 仅为被替代的历史假设
+- **quiet surface**：主界面只保留 v0.1.11 已验证入口，不把内容塞回终端
 
 ## 决策记录
 
@@ -80,3 +92,5 @@ Unix Win 对齐地图：[`plan-unix-gui-win-parity.md`](plan-unix-gui-win-parity
 |------|------|
 | 2026-07-30 | v0.2.0 主题定为 Fleet Hub 四 tab；插件与信息面称 PluginHub / InfoHub |
 | 2026-07-30 | 第一刀采用 overlay（对齐 Settings），非独立 HWND，除非证据要求第二窗口 |
+| 2026-07-31 | 新产品推演以独立 `agenterm-cc` Control Center 取代 Fleet Hub overlay；Cockpit 保留为其默认 Fleet 视图 |
+| 2026-07-31 | v0.1.11 前置壳层、进程边界、本地 IPC 与研究基建；v0.2.0 重定向为内容成熟，不重复实现入口 |

@@ -21,6 +21,12 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] the selected node exposes direct add-child, edit, and close actions in
   shared row geometry and replaces them with Save/Cancel while that row is
   being edited
+- [ ] v0.1.11 removes the ordinary-row `Edit` action from visible geometry:
+  one click on the row body selects, while a double-click on the name/note
+  body enters the same stable-ID inline editor. Disclosure controls, branch
+  lines, status lamps, scrollbars and the remaining action area never trigger
+  editing. `F2` and the public `edit-tab` UI action remain equivalent
+  keyboard/automation entry points.
 - [x] add-child immediately opens the new node's name/note editor in the new
   child's own row without borrowing the Composer
 - [x] collapse/expand with persisted node state
@@ -45,8 +51,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     bounded native single-line edit overlays in place; the row keeps its
     expander, connectors, status lamp, selection, and stable identity
   - [x] normal `+`/`Edit`/`Close` actions become `Save`/`Cancel` for the
-    editing row; Save restores normal `Edit`, and Cancel restores the
-    persisted name/note without mutation
+    editing row; Cancel restores the persisted name/note without mutation
+  - [ ] after the v0.1.11 gesture change, ordinary rows expose only the
+    contextual add-child and close actions; editing rows expose Save/Cancel,
+    and either exit path returns to that simpler ordinary geometry
   - [x] public `set-composer -t @ID "name\nnote"` targets the matching open
     inline editor draft without overwriting that tab's bottom Composer;
     outside an open matching editor it retains the ordinary Composer meaning
@@ -103,6 +111,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] toolbar order is Tabs then New, with `[Settings] [En|Zh] [z|Z]` anchored
   at the right; Tabs reads `<Tabs` while the tree is visible and `>Tabs` while
   hidden
+- [ ] v0.1.11 adds a responsive `Control Center` entry centered within the
+  terminal workbench column between the left Tabs/New group and the right
+  Settings/En|Zh/z|Z group. It contracts to `CC` before overlapping either
+  group, but retains the same accessible name, tooltip, action identity and
+  snapshot semantics. The action opens or focuses the independent Control
+  Center client owned by
+  [the Control Center module](PRD_02_21_control_center.md).
 - [~] activating New opens an extensible terminal-creation dialog before
   mutation: Windows ships Default/Command Prompt/PowerShell selection, an
   optional initial command, separate optional per-terminal HTTP/HTTPS proxy
@@ -122,6 +137,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   server address plus stable tab ID so the server remains UI-neutral. Windows
   UI and the shared settings model are complete; Unix/macOS modal parity
   remains.
+- [ ] the local-IPC migration replaces server-address-derived appearance
+  override keys with the stable server scope defined by the
+  [Agent control plane](PRD_02_07_agent_control_plane.md), so changing a
+  socket path or transport does not orphan terminal UI preferences
 - [x] `AGENTERM_SETTINGS_PATH` provides explicit settings isolation while
   the default remains `%LOCALAPPDATA%\AgenTerm\settings.json`
 - Persistent workspace

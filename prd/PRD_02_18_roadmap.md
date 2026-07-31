@@ -422,29 +422,48 @@ track remains planned, but every declared dependency must still pass.
     gates; these gates never reduce standalone `agenterm-script.exe` APIs
   - [x] implementation sequencing, budgets, risks and release evidence are
     owned by [the v0.1.10 public plan](../plan/plan-v0.1.10.md)
-- [ ] M10 / v0.2.0 Fleet Hub
-  - [ ] ship a secondary **Fleet Hub** surface opened from a new toolbar
-    button immediately left of Settings; daily terminal/composer workspace
-    stays quiet; Hub is an explicit overlay (Settings-class modal) on Win and
-    Unix embedded GUI first
-  - [ ] four tabs: **Cockpit** (read-only fleet dashboard), **Workflows**
-    (pipeline entry), **PluginHub** (signed optional-component discovery),
-    and **InfoHub** (feed/subscription routing to Composer drafts, not a
-    media reader)
-  - [ ] Cockpit v0.2.0 scope is read-only: tree summary, tab states, journal
-    position, and typed shortcuts to inspect/select; no second authority
-  - [ ] Workflows, PluginHub, and InfoHub may ship navigation + empty states
-    in v0.2.0 with content bound to script task catalog, softmgr manifests,
-    and subscription connectors in follow-up slices; GUI startup never
-    downloads packages or feed payloads (D3)
-  - [ ] expose Hub chrome through shared `ui_geometry` toolbar layout,
-    `ui-snapshot`, and `ui-action` (`open-fleet-hub`, tab selection) with
-    Win `remote_win_app` and Unix `unix_app` parity
-  - [ ] black-box evidence extends structured snapshot tests and Rhai smoke
-    (Windows `remote-ui-smoke` plus Linux embedded GUI when DISPLAY available)
-  - [ ] sequencing, dependencies, and delivery history are owned by
-    [the v0.2.0 public plan](../plan/plan-v0.2.0.md); inspiration lanes
-    J1–J5 in
+- [ ] M10 / v0.1.11 Control Center and native local-IPC foundation
+  - [ ] simplify ordinary tab rows by removing the visible Edit action;
+    double-clicking the row text enters the existing stable-ID inline editor,
+    while F2 and the public UI action preserve keyboard and automation access
+  - [ ] add a centered responsive `Control Center` toolbar action and an
+    independent `agenterm-cc` client; it reuses or focuses one process per
+    user configuration domain and never owns PTYs, workspace truth, package
+    transactions, workflow runs or decentralized-network state
+  - [ ] ship truthful navigation and empty/degraded states for Cockpit,
+    Workflows, Extensions (PluginHub/AppHub), and InfoHub; the first accepted
+    content slice is read-only Fleet facts over existing typed contracts
+  - [ ] introduce logical `main` and `dev` instances and a transport-neutral
+    endpoint contract; migrate in compatibility stages toward Unix domain
+    sockets on Linux/macOS and named pipes on Windows while keeping explicit
+    loopback TCP and mixed-version discovery
+  - [ ] prove an isolated `agenterm-net` libp2p/CID/block-store research loop
+    without linking it into the stable server or claiming a stable release
+    component
+  - [ ] define and measure a Tauri-like system-WebView host contract, with
+    native Control Center fallback and no WebView dependency in the terminal
+    GUI/server hot path
+  - [ ] sequencing, parallel waves, risks and acceptance evidence are owned by
+    [the v0.1.11 public plan](../plan/plan-v0.1.11.md), with canonical product
+    boundaries in [Control Center](PRD_02_21_control_center.md),
+    [Agent control plane](PRD_02_07_agent_control_plane.md), and
+    [Decentralized network foundation](PRD_02_22_decentralized_network.md)
+- [ ] M11 / v0.2.0 Control Center content maturity
+  - [ ] deepen the independent Control Center beyond its v0.1.11 shell:
+    Cockpit operational views, versioned Workflow definitions/runs,
+    Extensions catalog backed by softmgr, and InfoHub source/provenance/routes
+  - [ ] PluginHub and AppHub remain separate product-class views over one
+    catalog/source/install/update/rollback substrate; they do not become two
+    incompatible package systems
+  - [ ] WebView becomes a production Control Center renderer only after
+    platform availability, bridge isolation, offline startup, crash recovery,
+    binary-size and six-target evidence pass
+  - [ ] durable scheduling, public marketplace transactions and stable
+    decentralized service integration remain separately gated even if their
+    navigation exists
+  - [ ] sequencing and delivery history are owned by
+    [the redirected v0.2.0 public plan](../plan/plan-v0.2.0.md); inspiration
+    lanes J1–J5 remain in
     [Inspiration backlog](PRD_02_19_inspiration_and_future_vision.md)
 - [ ] Multi-platform GUI track (independent of v0.1.8–v0.1.10 version gates):
   shared PTY backend, Unix IPC server, Linux/macOS `winit`+`softbuffer`

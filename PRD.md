@@ -86,6 +86,8 @@ tree does not promise a version or implementation strategy.
   - [Focused product roadmap](prd/PRD_02_18_roadmap.md) — Version ownership, milestone gates, and future product lanes.
   - [Inspiration backlog and future vision](prd/PRD_02_19_inspiration_and_future_vision.md) — Idea garden, north-star layers, and promotion path into owning modules (not shipped status).
   - [Native platform abstraction](prd/PRD_02_20_native_platform.md) — Shared native-window, input, IME, DPI, clipboard, font, and OS-integration contracts with Windows, macOS, and Linux adapters.
+  - [Control Center (`agenterm-cc`)](prd/PRD_02_21_control_center.md) — Independent secondary workspace for Fleet cockpit, workflow, extension, application, and information projections.
+  - [Decentralized network (`agenterm-net`)](prd/PRD_02_22_decentralized_network.md) — Independently matured libp2p identity, IPFS content-addressing, storage, transport, and service-integration contracts.
 
 ## Non-negotiable invariants
 
