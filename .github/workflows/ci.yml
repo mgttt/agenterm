@@ -18,6 +18,29 @@ jobs:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
           persist-credentials: false
+      - name: Restore Cargo downloads
+        id: restore-cargo-home-windows-x86_64
+        continue-on-error: true
+        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: cargo-home-v2-windows-x86_64-native-${{ runner.os }}-${{ runner.arch }}-rust1.97-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}
+          restore-keys: |
+            cargo-home-v2-windows-x86_64-native-${{ runner.os }}-${{ runner.arch }}-rust1.97-
+      - name: Restore Windows x86_64 build target
+        id: restore-target-windows-x86_64
+        continue-on-error: true
+        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: |
+            target/debug/
+            target/.rustc_info.json
+          key: cargo-target-v2-windows-x86_64-native-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}-${{ github.sha }}
+          restore-keys: |
+            cargo-target-v2-windows-x86_64-native-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}-
       - name: Install lint components
         run: rustup component add rustfmt clippy
       - name: Run quality gate
@@ -33,6 +56,25 @@ jobs:
           if errorlevel 1 exit /b %ERRORLEVEL%
           dist\agenterm-script.exe task run cli-smoke --manifest agenterm.tasks.json
           exit /b %ERRORLEVEL%
+      - name: Save Windows x86_64 build target
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        continue-on-error: true
+        uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: |
+            target/debug/
+            target/.rustc_info.json
+          key: cargo-target-v2-windows-x86_64-native-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}-${{ github.sha }}
+      - name: Save Cargo downloads
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        continue-on-error: true
+        uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: cargo-home-v2-windows-x86_64-native-${{ runner.os }}-${{ runner.arch }}-rust1.97-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}
 
   linux-x86_64:
     runs-on: ubuntu-latest
@@ -40,6 +82,30 @@ jobs:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
           persist-credentials: false
+      - name: Restore Cargo downloads
+        id: restore-cargo-home-linux-x86_64
+        continue-on-error: true
+        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: cargo-home-v2-linux-x86_64-${{ runner.os }}-${{ runner.arch }}-rust1.97-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}
+          restore-keys: |
+            cargo-home-v2-linux-x86_64-${{ runner.os }}-${{ runner.arch }}-rust1.97-
+      - name: Restore Linux x86_64 build targets
+        id: restore-target-linux-x86_64
+        continue-on-error: true
+        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: |
+            target/debug/
+            target/x86_64-unknown-linux-gnu/debug/
+            target/.rustc_info.json
+          key: cargo-target-v2-linux-x86_64-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}-${{ github.sha }}
+          restore-keys: |
+            cargo-target-v2-linux-x86_64-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}-
       - name: Install host dependencies
         run: |
           rustup component add rustfmt clippy
@@ -75,6 +141,26 @@ jobs:
         env:
           AGENTERM_BOOTSTRAP_TASK: agenterm-net-research
         run: ./scripts/bootstrap.sh
+      - name: Save Linux x86_64 build targets
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        continue-on-error: true
+        uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: |
+            target/debug/
+            target/x86_64-unknown-linux-gnu/debug/
+            target/.rustc_info.json
+          key: cargo-target-v2-linux-x86_64-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}-${{ github.sha }}
+      - name: Save Cargo downloads
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        continue-on-error: true
+        uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: cargo-home-v2-linux-x86_64-${{ runner.os }}-${{ runner.arch }}-rust1.97-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}
 
   linux-aarch64:
     runs-on: ubuntu-latest
