@@ -122,8 +122,8 @@ build metadata under `dist/`:
 - `dist/agenterm-cli.exe` — full native observation and automation client.
 - `dist/agenterm-mux.exe` — tmux/RMUX compatibility frontend over the same IPC
   server.
-- `dist/agenterm-script.exe` — public Rhai scripting CLI, persistent REPL, and
-  one-shot worker.
+- `dist/agenterm-script.exe` — public Rhai scripting CLI and worker, including
+  persistent REPL and one-shot execution modes.
 - `dist/agenterm-mcp.exe` — on-demand read-only MCP stdio sidecar.
 - `dist/agenterm.json` — version, UTC build time, Git state, Rust target, size, and
   SHA-256 metadata.
