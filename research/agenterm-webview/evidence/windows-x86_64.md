@@ -33,8 +33,16 @@ stable active renderer at native.
 The ignored machine-readable source receipt is reproduced by:
 
 ```powershell
+.\tools\measure.ps1 -SelfCheck # journal/fold/collision validation; no Cargo
 .\tools\measure.ps1
 ```
+
+The measurement writes a uniquely named append-only JSONL journal and
+atomically refreshes its folded JSON receipt after every terminal phase. A
+truncated final JSONL line is ignored during salvage, but schema or sequence
+corruption in any earlier line fails closed. Per-process deadlines kill only
+the process tree created for that phase; an uncontrolled outer termination
+cannot erase already flushed build durations or smoke/archive receipts.
 
 ## Tauri comparison follow-up
 

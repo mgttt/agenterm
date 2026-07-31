@@ -78,6 +78,21 @@ typed unavailable receipt with exit code 69.
 Run `tools/measure.ps1` on a real Windows desktop to build both layers and write
 a local JSON receipt containing build times, binary sizes, runtime probe,
 event-driven load time, elapsed smoke time and peak launcher-host working set.
+Every completed phase first appends and flushes an independently parseable JSONL
+event, then atomically refreshes the folded partial receipt. A hard outer timeout
+can therefore lose only the current phase; prior duration and receipt facts
+remain under `evidence/local/`. Run IDs and journal paths fail closed on
+collision rather than reusing target caches.
+
+Build, metadata, probe, smoke and archive work have explicit recorded
+deadlines. A controlled deadline terminates only the process tree launched for
+that phase, writes `status=timed_out`, folds an incomplete receipt and stops the
+run. Validate journal folding without building anything with:
+
+```powershell
+.\tools\measure.ps1 -SelfCheck
+```
+
 The result goes under ignored `evidence/local/` unless an operator explicitly
 promotes it as a named, reviewed machine baseline.
 
