@@ -48,6 +48,10 @@ pub(crate) mod paths;
 pub(crate) mod control_center;
 
 #[cfg(windows)]
+#[path = "adapters/windows/runtime.rs"]
+pub(crate) mod runtime;
+
+#[cfg(windows)]
 #[path = "adapters/windows/webview.rs"]
 pub(crate) mod webview;
 
@@ -96,6 +100,10 @@ pub(crate) mod paths;
 pub(crate) mod control_center;
 
 #[cfg(target_os = "linux")]
+#[path = "adapters/linux/runtime.rs"]
+pub(crate) mod runtime;
+
+#[cfg(target_os = "linux")]
 #[path = "adapters/linux/webview.rs"]
 pub(crate) mod webview;
 
@@ -142,6 +150,10 @@ pub(crate) mod paths;
 #[cfg(target_os = "macos")]
 #[path = "adapters/macos/control_center.rs"]
 pub(crate) mod control_center;
+
+#[cfg(target_os = "macos")]
+#[path = "adapters/macos/runtime.rs"]
+pub(crate) mod runtime;
 
 #[cfg(target_os = "macos")]
 #[path = "adapters/macos/webview.rs"]

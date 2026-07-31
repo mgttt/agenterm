@@ -4,6 +4,7 @@ pub(crate) mod control_center;
 pub(crate) mod ipc;
 pub(crate) mod paths;
 pub(crate) mod process;
+pub(crate) mod runtime;
 pub(crate) mod script_clipboard;
 pub(crate) mod script_files;
 pub(crate) mod script_host;
