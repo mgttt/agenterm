@@ -10,7 +10,7 @@ Catalog schema currently shipped: v3
 
 Initial design date: 2026-07-28
 
-Last reviewed: 2026-07-30
+Last reviewed: 2026-07-31
 Normative language: English
 
 Product authority:
@@ -78,6 +78,25 @@ agenterm-script
 │  └─ print(value)
 │     Writes one bounded line to captured script standard output.
 │     [shipped; stable; designed 2026-07-28]
+│
+├─ execution surfaces
+│  Thin adapters over one shared Engine/API construction policy.
+│  [shipped; stable; designed 2026-07-31]
+│  ├─ run / eval / check / api / task
+│  │  Fresh supervised one-shot execution.
+│  │  [shipped; stable; designed 2026-07-28]
+│  └─ repl
+│     Explicit foreground session with persistent variables and functions.
+│     [shipped; stable; designed 2026-07-31]
+│     ├─ ReplSession
+│     │  UI-neutral state/evaluation core reusable by multiple adapters.
+│     │  [shipped; stable; designed 2026-07-31]
+│     ├─ cells
+│     │  Multiline input, per-cell limits, typed result, commit-on-success.
+│     │  [shipped; stable; designed 2026-07-31]
+│     └─ meta
+│        help/quit/reset/history/vars/functions/limits/api/load/json.
+│        [shipped; stable; designed 2026-07-31]
 │
 ├─ std::
 │  Selected, Rust-shaped low-level local capabilities.
@@ -1545,6 +1564,71 @@ print(#{
 });
 ```
 
+## 19.1 Persistent REPL contract
+
+`agenterm-script repl [OPTIONS] [--] [ARGS...]` MUST create one explicit
+foreground session. It MUST NOT implement persistence by repeatedly invoking
+the one-shot `eval` command.
+
+The reusable session core owns an `Engine`, visible `Scope`, functions-only
+AST, per-cell control state, and memory-only history. It owns no console or
+terminal rendering. Every Engine execution surface MUST use the same shared
+limit and API-registration function.
+
+For each cell the runtime:
+
+1. clones the current visible Scope;
+2. compiles the cell and merges it after the saved functions-only AST;
+3. evaluates only the current cell statements while exposing earlier
+   functions;
+4. commits the candidate Scope and functions-only AST only on success.
+
+`state_committed: false` means only Rhai variable bindings and script function
+definitions were not committed. Files, processes, sockets, Fleet mutations,
+and mutations behind shared native handles cannot be rolled back and MUST NOT
+be represented otherwise.
+
+Piped stdin MUST emit no banner, prompt, or color. With `--json`, stdout is
+NDJSON: each non-empty line is one complete cell or meta-command result.
+Interactive prompts are written separately from result stdout. A failed cell
+does not end the session by default, but the process eventually returns
+nonzero; `--fail-fast` ends after the first failed cell.
+
+The stable meta-command set is:
+
+```text
+:help
+:quit | :exit
+:reset
+:history
+:vars
+:functions
+:limits
+:api [MODULE]
+:load FILE
+:json on | off
+```
+
+History is session-memory-only. `:vars` returns names and type names, never
+values. `:reset` removes user variables and functions while restoring `args`
+and `fleet`. EOF with an empty buffer succeeds; EOF with structurally
+incomplete input returns `script_incomplete`.
+
+Per-cell source, operation, call/expression depth, collection, string, output,
+and wall-time limits reset for each cell. Variable, function, module, history
+item, and history-byte ceilings bound retained session growth. These are
+runtime robustness limits, never permission or capability restrictions.
+
+The initial stable adapter uses standard terminal line input. Ctrl+C recovery
+for a non-cooperative blocking native call, arrow-key history, durable history,
+and kill/restart of a long-lived session worker remain hardening work. Because
+the REPL is its own OS process, termination cannot damage GUI, server, PTY, or
+workspace state, but it does discard that process-local session.
+
+The 2026-07-31 Windows x86_64 size-optimized build is 3,092,480 bytes against
+the unchanged 3,145,728-byte Script artifact budget. A future line-editor
+dependency therefore requires a measured size spike before adoption.
+
 ## 20. Conformance
 
 A capability becomes `shipped` only when:
@@ -1574,7 +1658,10 @@ The following are outside the v0.1.9 stable contract:
 
 - remote package registry, dependency resolution, signing, and installation;
 - npm, Cargo crate, Node.js, Bun, or complete Rust `std` compatibility;
-- persistent script daemon, durable scheduler, watch mode, and REPL;
+- persistent script daemon, durable scheduler, and watch mode;
+- durable REPL state, implicit daemon startup, on-disk history, concurrent
+  evaluation of one Scope, and transparent session restoration after a
+  non-cooperative host call is terminated;
 - UDP, WebSocket, and higher-level network-server API coverage beyond the
   shipped unrestricted TCP stream/listener primitives;
 - arbitrary remote module resolution and imports;

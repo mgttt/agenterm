@@ -562,7 +562,8 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
         "save-workspace" => ("agenterm-cli save-workspace", &[][..], &[][..], false),
         "script" => (
             "agenterm-cli script api [MODULE] [--status shipped|planned|all] [--tree|--json] | \
-             check FILE|- [--project-root DIR] | eval EXPRESSION | run FILE|- \
+             check FILE|- [--project-root DIR] | eval EXPRESSION | \
+             repl [--fail-fast] [--json] | run FILE|- \
              [--cwd DIR] [--project-root DIR] [-- ARGS...] | \
             task list|show|run [TASK] [--manifest FILE] [--json]",
             &[
@@ -579,7 +580,7 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
                 "--manifest",
                 "--status",
             ][..],
-            &["--tree", "--json"][..],
+            &["--tree", "--json", "--fail-fast"][..],
             false,
         ),
         "read-events" => (

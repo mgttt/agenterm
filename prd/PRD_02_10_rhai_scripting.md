@@ -8,8 +8,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
 ## Shipped baseline
 
-- [x] `agenterm-script.exe` is the public `run`, `eval`, `check`, `api`, and
-  named-task CLI while retaining private `--worker`/`--framed-worker` modes;
+- [x] `agenterm-script.exe` is the public `run`, `eval`, `repl`, `check`,
+  `api`, and named-task CLI while retaining private
+  `--worker`/`--framed-worker` modes;
   `agenterm-cli.exe script ...` is a thin compatibility route to the same
   catalog, parser, supervisor, and runtime.
 - [ ] v0.1.12 naming investigation may make `agenterm-rhai.exe` the canonical
@@ -71,6 +72,49 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] Design choice: Rust (`.rs`) implements the host and Rhai (`.rhai`)
   implements user-authored runtime programs.
 
+## Persistent REPL slice (designed 2026-07-31)
+
+- [x] `agenterm-script repl [OPTIONS] [--] [ARGS...]` starts a true
+  process-local Rhai session. Variables and script-defined functions survive
+  from one successful cell to the next; it does not loop over the one-shot
+  `eval` command.
+- [x] the reusable `ReplSession` core owns language state but no terminal UI.
+  The CLI adapter, black-box tests, and future Control Center or Agent adapters
+  may drive the same session contract without duplicating Engine construction,
+  API registration, state-commit, value, or failure semantics.
+- [x] ordinary workers and REPL sessions use one shared Engine configuration
+  function, so the unrestricted local `std::`, `rhai::`, and bound `fleet`
+  surface cannot drift between execution modes.
+- [x] each cell evaluates against a visible Scope clone plus a functions-only
+  AST. Success atomically commits the candidate Scope and function table;
+  compile, runtime, timeout, operation, or output-limit failure commits neither
+  language binding. Filesystem, child-process, network, Fleet, and shared
+  handle effects that already reached the outside world are real effects and
+  are never described as rolled back.
+- [x] TTY input has a banner, primary/continuation prompts, multiline
+  structural assembly, EOF handling, and session-local history. Piped input
+  emits no prompt or banner, supports the same multiline cells, and `--json`
+  emits one JSON object per cell or meta result.
+- [x] the stable initial meta surface is `:help`, `:quit`/`:exit`, `:reset`,
+  `:history`, `:vars`, `:functions`, `:limits`, `:api [MODULE]`, `:load FILE`,
+  and `:json on|off`. History is memory-only and `:vars` exposes names and
+  types, not values.
+- [x] failures are recoverable by default and make the final process status
+  nonzero; `--fail-fast` stops after the first failed cell. EOF with an
+  incomplete cell is a typed failure. Unit and public cross-platform
+  pipe/NDJSON tests prove persistence, multiline functions, rollback, reset,
+  failure recovery, fail-fast, no prompts in pipes, and incomplete EOF.
+- [x] the Windows x86_64 size-optimized release built on 2026-07-31 is
+  3,092,480 bytes, within the unchanged 3,145,728-byte Script artifact budget.
+  The remaining 53,248 bytes is narrow headroom and must be remeasured for
+  future editor/history dependencies rather than silently raising the budget.
+- [~] Ctrl+C during a blocking cell, arrow-key history, and a kill-and-restart
+  long-lived worker protocol remain an owned hardening slice. The current
+  REPL is already isolated in its own `agenterm-script` OS process, but a
+  non-cooperative host call may require terminating that REPL process and
+  therefore loses its in-memory session. No GUI, server, PTY, or workspace
+  process shares that state.
+
 ## v0.1.9 product position
 
 `agenterm-script.exe` is AgenTerm's general-purpose local scripting runtime:
@@ -118,8 +162,10 @@ and it is not positioned as a restricted security plugin.
 
 ## v0.1.9 runtime architecture
 
-- [x] one invocation still owns one fresh `agenterm-script.exe` sidecar; it is
-  not a persistent system daemon and keeps no mutable state across invocations.
+- [x] one-shot `run`, `eval`, `check`, `api`, and task invocations still own
+  one fresh `agenterm-script.exe` sidecar. `repl` owns one explicit,
+  foreground, process-local session; neither form creates a persistent system
+  daemon or mutable state that survives its public process.
 - [x] an invocation may own a bounded task scheduler. Asynchronous APIs return
   typed task handles consumed through `wait` and bounded `stream` operations.
 - [x] the Rhai engine and its `Scope` remain on one evaluation thread.
@@ -667,8 +713,9 @@ Migration ledger:
   Runtime expansion; when shipped, they expose the operating-system authority
   of the invoking user without Script-owned permission gates or endpoint
   allowlists;
-- event handlers, watch mode, REPL, and durable background scheduling unless a
-  later owned slice supplies separate acceptance;
+- event handlers, watch mode, and durable background scheduling;
+- durable REPL state, implicit REPL daemon startup, on-disk command history,
+  and concurrent evaluation of one REPL Scope;
 - Agent permission, approval, credential, quota, and natural-language policy
   belong to the separate Agent harness;
 - GUI command palette delivery beyond its P1 consumption of the shared named

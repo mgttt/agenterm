@@ -602,15 +602,7 @@ fn execute_inner(
     let wall_time_for_progress = Arc::clone(&wall_time_exceeded);
     let cancellation_for_progress = Arc::clone(&cancellation);
     let mut engine = Engine::new();
-    engine.set_max_operations(invocation.budgets.operations);
-    engine.set_max_call_levels(invocation.budgets.call_depth);
-    engine.set_max_expr_depths(
-        invocation.budgets.expression_depth,
-        invocation.budgets.expression_depth,
-    );
-    engine.set_max_array_size(invocation.budgets.collection_items);
-    engine.set_max_map_size(invocation.budgets.collection_items);
-    engine.set_max_string_size(invocation.budgets.string_bytes);
+    agenterm::script_runtime::configure_engine(&mut engine, &invocation.budgets);
     engine.on_print(move |text| {
         let mut output = output_for_print
             .lock()
@@ -638,9 +630,6 @@ fn execute_inner(
             None
         }
     });
-    agenterm::script_stdlib::register_local(&mut engine);
-    agenterm::script_fleet::register(&mut engine);
-
     if invocation.operation == ScriptOperation::Check {
         engine
             .compile(&invocation.source)

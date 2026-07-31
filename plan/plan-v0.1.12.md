@@ -53,6 +53,12 @@ v0.1.12  Convergence & Fast Promotion
 │  └─ 只有端到端收益显著且可回退时才切换默认 runner
 │
 ├─ P1：脚本与二级产品继续准备
+│  ├─ agenterm-script 交付真正的持久 REPL
+│  │  ├─ ReplSession 会话内核与 CLI 输入适配解耦，可供 CC/Agent 复用
+│  │  ├─ 变量、函数、多行单元、错误恢复、reset 和内存 history
+│  │  ├─ TTY 提示与 pipe/NDJSON 自动化输出分离
+│  │  ├─ 单元失败不提交语言状态，外部真实副作用不伪装回滚
+│  │  └─ 普通 worker 与 REPL 复用同一 Engine/API 配置
 │  ├─ 评估把 canonical Rhai 入口从 agenterm-script 重命名为 agenterm-rhai
 │  │  ├─ 名字直接表达语言/runtime 身份，不再暗示抽象的通用脚本沙箱
 │  │  ├─ 先冻结 CLI、task、worker、包名、文档和第三方调用者影响清单

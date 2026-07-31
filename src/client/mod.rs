@@ -10,7 +10,8 @@ use std::path::{Path, PathBuf};
 use std::{
     cell::RefCell,
     env,
-    io::{Read, Write},
+    io::{BufRead, IsTerminal, Read, Write},
+    sync::Arc,
     thread,
     time::{Duration, Instant, SystemTime},
 };
@@ -61,6 +62,10 @@ use crate::script_audit::{
 use crate::script_project::{
     ResolvedScriptTask, ScriptTaskCatalog, ScriptTaskStatus, discover_task_manifest,
     load_task_catalog, resolve_task,
+};
+use crate::script_repl::{
+    ReplCellFailure, ReplCellResult, ReplInputState, ReplSession, ReplSessionConfig,
+    canonical_project_root,
 };
 use crate::worker_supervisor::{SupervisorError, WorkerSupervisor};
 
@@ -273,13 +278,16 @@ fn script_help_text() -> &'static str {
            agenterm-script api [MODULE] [--status STATE] [--tree|--json]\n\
            agenterm-script check [OPTIONS] FILE.rhai|-\n\
            agenterm-script eval [OPTIONS] EXPRESSION [--] [ARGS...]\n\
+           agenterm-script repl [OPTIONS] [--] [ARGS...]\n\
            agenterm-script run [OPTIONS] FILE.rhai|- [--] [ARGS...]\n\
            agenterm-script task list [--manifest PATH] [--json]\n\
            agenterm-script task show TASK [--manifest PATH] [--json]\n\
            agenterm-script task check [TASK] [--manifest PATH] [--json]\n\
            agenterm-script task run TASK [--manifest PATH] [OPTIONS] [--] [ARGS...]\n\
+         REPL commands: :help :quit :reset :history :vars :functions :limits \
+         :api [MODULE] :load FILE :json on|off\n\
          Options: --timeout-ms N --max-operations N --max-collection-items N \
-         --max-string-bytes N --max-output-bytes N --json"
+         --max-string-bytes N --max-output-bytes N --project-root DIR --json"
 }
 
 fn write_script_stdout(text: &str) -> std::result::Result<(), i32> {
@@ -295,6 +303,480 @@ fn write_script_stdout(text: &str) -> std::result::Result<(), i32> {
             Err(1)
         }
     }
+}
+
+fn run_script_repl(arguments: &[String]) -> i32 {
+    let budgets = match parse_repl_budgets(arguments) {
+        Ok(budgets) => budgets,
+        Err(error) => {
+            eprintln!("{error}");
+            return 2;
+        }
+    };
+    if let Err(error) = validate_repl_options(arguments) {
+        eprintln!("{error}");
+        return 2;
+    }
+    let project_root = match canonical_project_root(option_value(arguments, "--project-root")) {
+        Ok(root) => root,
+        Err(error) => {
+            eprintln!("{error}");
+            return 2;
+        }
+    };
+    let delimiter = arguments.iter().position(|argument| argument == "--");
+    let script_arguments = delimiter
+        .and_then(|position| arguments.get(position + 1..))
+        .unwrap_or_default()
+        .to_vec();
+    let session_id = format!(
+        "repl-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    );
+    let invocation_temp = match OwnedScriptTemp::create(&session_id) {
+        Ok(owned) => owned,
+        Err(error) => {
+            eprintln!("host_temp_create: REPL temporary root is unavailable: {error}");
+            return 1;
+        }
+    };
+    let broker_budgets = budgets.clone();
+    let fleet = Arc::new(move |operation: &str, arguments: serde_json::Value| {
+        let response = handle_script_broker(
+            &ScriptBrokerRequest {
+                operation: operation.to_owned(),
+                arguments,
+            },
+            ScriptProfile::Local,
+            &broker_budgets,
+            Duration::from_millis(broker_budgets.wait_time_ms),
+        );
+        if response.ok {
+            Ok(response.value.unwrap_or(serde_json::Value::Null))
+        } else {
+            let error = response
+                .error
+                .map(|error| format!("{}: {}", error.code, error.message))
+                .unwrap_or_else(|| "broker_unknown_failure".to_owned());
+            Err(error)
+        }
+    });
+    let mut session = match ReplSession::new(ReplSessionConfig {
+        budgets,
+        arguments: script_arguments,
+        project_root,
+        invocation_temp_root: Some(invocation_temp.root.clone()),
+        fleet: Some(fleet),
+    }) {
+        Ok(session) => session,
+        Err(error) => {
+            eprintln!("{error}");
+            return 2;
+        }
+    };
+
+    let interactive = std::io::stdin().is_terminal();
+    let mut json = has_option(arguments, "--json");
+    let fail_fast = has_option(arguments, "--fail-fast");
+    if interactive {
+        eprintln!(
+            "AgenTerm Rhai REPL {} — :help for commands, Ctrl-D or :quit to exit",
+            env!("CARGO_PKG_VERSION")
+        );
+    }
+    let stdin = std::io::stdin();
+    let mut input = stdin.lock();
+    let mut line = String::new();
+    let mut buffer = String::new();
+    let mut had_failure = false;
+
+    loop {
+        if interactive {
+            eprint!(
+                "{}",
+                if buffer.is_empty() {
+                    "rhai> "
+                } else {
+                    "....> "
+                }
+            );
+            let _ = std::io::stderr().flush();
+        }
+        line.clear();
+        let read = match input.read_line(&mut line) {
+            Ok(read) => read,
+            Err(error) => {
+                eprintln!("repl_stdin: {error}");
+                return 1;
+            }
+        };
+        if read == 0 {
+            if !buffer.trim().is_empty() {
+                let result = incomplete_eof_result(&mut session, &buffer);
+                had_failure |= !result.ok;
+                if render_repl_result(&result, json).is_err() {
+                    return 1;
+                }
+            }
+            break;
+        }
+        let line_without_eol = line.trim_end_matches(['\r', '\n']);
+        if buffer.is_empty() && line_without_eol.trim_start().starts_with(':') {
+            match run_repl_meta(
+                line_without_eol.trim(),
+                &mut session,
+                &mut json,
+                interactive,
+            ) {
+                ReplMetaOutcome::Continue => {}
+                ReplMetaOutcome::Quit => break,
+                ReplMetaOutcome::Failure => {
+                    had_failure = true;
+                    if fail_fast {
+                        break;
+                    }
+                }
+            }
+            continue;
+        }
+        if buffer.is_empty() && line_without_eol.trim().is_empty() {
+            continue;
+        }
+        buffer.push_str(&line);
+        match session.inspect_input(&buffer) {
+            ReplInputState::Incomplete => continue,
+            ReplInputState::Invalid(failure) => {
+                let result = session.evaluate_cell(&buffer);
+                debug_assert_eq!(result.failure.as_ref(), Some(&failure));
+                had_failure = true;
+                if render_repl_result(&result, json).is_err() {
+                    return 1;
+                }
+                buffer.clear();
+                if fail_fast {
+                    break;
+                }
+            }
+            ReplInputState::Complete => {
+                let result = session.evaluate_cell(&buffer);
+                had_failure |= !result.ok;
+                if render_repl_result(&result, json).is_err() {
+                    return 1;
+                }
+                buffer.clear();
+                if !result.ok && fail_fast {
+                    break;
+                }
+            }
+        }
+    }
+    i32::from(had_failure)
+}
+
+enum ReplMetaOutcome {
+    Continue,
+    Quit,
+    Failure,
+}
+
+fn run_repl_meta(
+    command: &str,
+    session: &mut ReplSession,
+    json: &mut bool,
+    interactive: bool,
+) -> ReplMetaOutcome {
+    let (name, argument) = command
+        .split_once(char::is_whitespace)
+        .map_or((command, ""), |(name, argument)| (name, argument.trim()));
+    match name {
+        ":quit" | ":exit" => ReplMetaOutcome::Quit,
+        ":help" => {
+            let help = ":help                 show this command list\n\
+                 :quit | :exit          leave the session\n\
+                 :reset                clear user variables and functions\n\
+                 :history              list in-memory successful cells\n\
+                 :vars                 list variable names and types\n\
+                 :functions            list session-defined functions\n\
+                 :limits               show per-cell and session robustness limits\n\
+                 :api [MODULE]         inspect the runtime API catalog\n\
+                 :load FILE            evaluate a Rhai file as one cell\n\
+                 :json on|off          toggle NDJSON cell results";
+            render_repl_meta("help", serde_json::Value::String(help.to_owned()), *json);
+            ReplMetaOutcome::Continue
+        }
+        ":reset" => {
+            session.reset();
+            if *json {
+                render_repl_meta("reset", serde_json::json!({"reset": true}), true);
+            } else if interactive {
+                eprintln!("session reset");
+            }
+            ReplMetaOutcome::Continue
+        }
+        ":history" => {
+            if *json {
+                render_repl_meta("history", serde_json::json!(session.history()), true);
+            } else {
+                for (index, source) in session.history().iter().enumerate() {
+                    println!("{}  {}", index + 1, source.trim_end().replace('\n', "\\n"));
+                }
+            }
+            ReplMetaOutcome::Continue
+        }
+        ":vars" => {
+            let variables = session.variables();
+            if *json {
+                render_repl_meta("vars", serde_json::json!(variables), true);
+            } else {
+                for (name, type_name) in variables {
+                    println!("{name}: {type_name}");
+                }
+            }
+            ReplMetaOutcome::Continue
+        }
+        ":functions" => {
+            let functions = session.functions();
+            if *json {
+                render_repl_meta("functions", serde_json::json!(functions), true);
+            } else {
+                for function in functions {
+                    println!("{function}");
+                }
+            }
+            ReplMetaOutcome::Continue
+        }
+        ":limits" => {
+            let budgets = session.budgets();
+            if *json {
+                render_repl_meta(
+                    "limits",
+                    serde_json::json!({
+                        "source_bytes": budgets.source_bytes,
+                        "operations": budgets.operations,
+                        "call_depth": budgets.call_depth,
+                        "expression_depth": budgets.expression_depth,
+                        "collection_items": budgets.collection_items,
+                        "string_bytes": budgets.string_bytes,
+                        "output_bytes": budgets.output_bytes,
+                        "wall_time_ms": budgets.wall_time_ms,
+                    }),
+                    true,
+                );
+            } else {
+                println!(
+                    "source_bytes={} operations={} call_depth={} expression_depth={} \
+                     collection_items={} string_bytes={} output_bytes={} wall_time_ms={}",
+                    budgets.source_bytes,
+                    budgets.operations,
+                    budgets.call_depth,
+                    budgets.expression_depth,
+                    budgets.collection_items,
+                    budgets.string_bytes,
+                    budgets.output_bytes,
+                    budgets.wall_time_ms
+                );
+            }
+            ReplMetaOutcome::Continue
+        }
+        ":api" => {
+            let mut view_arguments = vec!["script".to_owned(), "api".to_owned()];
+            if !argument.is_empty() {
+                view_arguments.push(argument.to_owned());
+            }
+            match parse_script_api_view(&view_arguments).and_then(|view| {
+                let mut catalog = crate::script_catalog::catalog();
+                filter_script_api_catalog(&mut catalog, &view)
+                    .map_err(|error| error.to_string())?;
+                render_script_api_tree(&catalog).map_err(|error| error.to_string())
+            }) {
+                Ok(tree) => {
+                    if *json {
+                        render_repl_meta("api", serde_json::Value::String(tree), true);
+                    } else {
+                        println!("{tree}");
+                    }
+                }
+                Err(error) => {
+                    eprintln!("repl_api: {error}");
+                    return ReplMetaOutcome::Failure;
+                }
+            }
+            ReplMetaOutcome::Continue
+        }
+        ":load" => {
+            if argument.is_empty() {
+                eprintln!("repl_load: :load requires a Rhai file path");
+                return ReplMetaOutcome::Failure;
+            }
+            let source = match std::fs::read_to_string(argument) {
+                Ok(source) => source,
+                Err(error) => {
+                    eprintln!("repl_load: {argument}: {error}");
+                    return ReplMetaOutcome::Failure;
+                }
+            };
+            let result = session.evaluate_cell(&source);
+            if render_repl_result(&result, *json).is_err() || !result.ok {
+                ReplMetaOutcome::Failure
+            } else {
+                ReplMetaOutcome::Continue
+            }
+        }
+        ":json" => match argument {
+            "on" => {
+                *json = true;
+                ReplMetaOutcome::Continue
+            }
+            "off" => {
+                *json = false;
+                ReplMetaOutcome::Continue
+            }
+            _ => {
+                eprintln!("repl_json: expected :json on or :json off");
+                ReplMetaOutcome::Failure
+            }
+        },
+        _ => {
+            eprintln!("repl_meta_unknown: {name}; use :help");
+            ReplMetaOutcome::Failure
+        }
+    }
+}
+
+fn incomplete_eof_result(session: &mut ReplSession, source: &str) -> ReplCellResult {
+    match session.inspect_input(source) {
+        ReplInputState::Complete => session.evaluate_cell(source),
+        ReplInputState::Incomplete => ReplCellResult {
+            sequence: 0,
+            ok: false,
+            stdout: String::new(),
+            value: None,
+            failure: Some(ReplCellFailure {
+                code: "script_incomplete".to_owned(),
+                category: "script".to_owned(),
+                message: "end of input reached while the REPL cell was incomplete".to_owned(),
+            }),
+            state_committed: false,
+            duration_ms: 0,
+        },
+        ReplInputState::Invalid(failure) => ReplCellResult {
+            sequence: 0,
+            ok: false,
+            stdout: String::new(),
+            value: None,
+            failure: Some(failure),
+            state_committed: false,
+            duration_ms: 0,
+        },
+    }
+}
+
+fn render_repl_meta(command: &str, value: serde_json::Value, json: bool) {
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "kind": "meta",
+                "command": command,
+                "ok": true,
+                "value": value,
+            })
+        );
+    } else if let Some(text) = value.as_str() {
+        println!("{text}");
+    }
+}
+
+fn render_repl_result(result: &ReplCellResult, json: bool) -> std::io::Result<()> {
+    if json {
+        serde_json::to_writer(std::io::stdout().lock(), result)?;
+        println!();
+        return Ok(());
+    }
+    if !result.stdout.is_empty() {
+        print!("{}", result.stdout);
+        if !result.stdout.ends_with('\n') {
+            println!();
+        }
+    }
+    if result.ok {
+        if let Some(value) = result.value.as_ref() {
+            if let Some(serialized) = value.value.as_ref() {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(serialized).unwrap_or_else(|_| "null".to_owned())
+                );
+            } else {
+                println!("<{}>", value.type_name);
+            }
+        }
+    } else if let Some(failure) = result.failure.as_ref() {
+        eprintln!("{}: {}", failure.code, failure.message);
+    }
+    std::io::stdout().flush()
+}
+
+fn validate_repl_options(arguments: &[String]) -> Result<(), String> {
+    let mut index = 2;
+    while index < arguments.len() {
+        let argument = &arguments[index];
+        if argument == "--" {
+            return Ok(());
+        }
+        match argument.as_str() {
+            "--json" | "--fail-fast" => index += 1,
+            "--timeout-ms"
+            | "--max-operations"
+            | "--max-output-bytes"
+            | "--max-collection-items"
+            | "--max-string-bytes"
+            | "--project-root" => {
+                if arguments.get(index + 1).is_none() {
+                    return Err(format!("script repl {argument} requires a value"));
+                }
+                index += 2;
+            }
+            other => return Err(format!("unknown script repl option: {other}")),
+        }
+    }
+    Ok(())
+}
+
+fn parse_repl_budgets(arguments: &[String]) -> Result<ScriptBudgets, String> {
+    let mut budgets = ScriptBudgets::default();
+    let hard = ScriptBudgets::hard_limits();
+    if let Some(value) = option_value(arguments, "--timeout-ms") {
+        budgets.wall_time_ms = parse_repl_limit(value, 1, hard.wall_time_ms, "--timeout-ms")?;
+    }
+    if let Some(value) = option_value(arguments, "--max-operations") {
+        budgets.operations = parse_repl_limit(value, 1, hard.operations, "--max-operations")?;
+    }
+    if let Some(value) = option_value(arguments, "--max-output-bytes") {
+        budgets.output_bytes = parse_repl_limit(value, 1, hard.output_bytes, "--max-output-bytes")?;
+    }
+    if let Some(value) = option_value(arguments, "--max-collection-items") {
+        budgets.collection_items =
+            parse_repl_limit(value, 1, hard.collection_items, "--max-collection-items")?;
+    }
+    if let Some(value) = option_value(arguments, "--max-string-bytes") {
+        budgets.string_bytes = parse_repl_limit(value, 1, hard.string_bytes, "--max-string-bytes")?;
+    }
+    Ok(budgets)
+}
+
+fn parse_repl_limit<T>(value: &str, minimum: T, maximum: T, option: &str) -> Result<T, String>
+where
+    T: std::str::FromStr + Ord + Copy + std::fmt::Display,
+{
+    value
+        .parse::<T>()
+        .ok()
+        .filter(|value| *value >= minimum && *value <= maximum)
+        .ok_or_else(|| format!("script repl {option} must be from {minimum} to {maximum}"))
 }
 
 pub fn run_mux_entry() -> i32 {
@@ -1113,6 +1595,9 @@ fn run_script_command_hosted(arguments: &[String]) -> i32 {
 fn run_script_command_direct(arguments: &[String]) -> i32 {
     if arguments.get(1).is_some_and(|value| value == "task") {
         return run_script_task_command(arguments);
+    }
+    if arguments.get(1).is_some_and(|value| value == "repl") {
+        return run_script_repl(arguments);
     }
     run_script_command_with_context(arguments, None)
 }

@@ -450,7 +450,7 @@
       "kind": "behavior",
       "status": "shipped",
       "evidence_mode": "black-box",
-      "prd": "`agenterm-script.exe` is the public `run`, `eval`, `check`, `api`, and",
+      "prd": "`agenterm-script.exe` is the public `run`, `eval`, `repl`, `check`,",
       "evidence_ids": ["script.direct-entry"]
     },
     {

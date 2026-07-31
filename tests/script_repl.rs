@@ -1,0 +1,122 @@
+use std::{
+    io::Write,
+    process::{Command, Stdio},
+};
+
+fn run_repl(input: &str, arguments: &[&str]) -> std::process::Output {
+    run_repl_with(env!("CARGO_BIN_EXE_agenterm-script"), input, arguments)
+}
+
+fn run_repl_with(executable: &str, input: &str, arguments: &[&str]) -> std::process::Output {
+    let mut command = Command::new(executable);
+    command
+        .arg("repl")
+        .args(arguments)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command.spawn().expect("spawn agenterm-script repl");
+    child
+        .stdin
+        .take()
+        .expect("REPL stdin")
+        .write_all(input.as_bytes())
+        .expect("write REPL input");
+    child.wait_with_output().expect("wait for REPL")
+}
+
+#[cfg(windows)]
+#[test]
+fn native_cli_compatibility_route_reuses_the_same_session_contract() {
+    let mut arguments = vec!["script", "repl"];
+    arguments.push("--json");
+    let mut command = Command::new(env!("CARGO_BIN_EXE_agenterm-cli"));
+    command
+        .args(arguments)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command.spawn().expect("spawn agenterm-cli script repl");
+    child
+        .stdin
+        .take()
+        .expect("CLI REPL stdin")
+        .write_all(b"let x = 40;\nx + 2\n:quit\n")
+        .expect("write CLI REPL input");
+    let output = child.wait_with_output().expect("wait for CLI REPL");
+    assert!(output.status.success(), "{output:?}");
+    let records = String::from_utf8(output.stdout)
+        .expect("UTF-8 stdout")
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("NDJSON record"))
+        .collect::<Vec<_>>();
+    assert_eq!(records[1]["value"]["value"], 42);
+}
+
+#[test]
+fn piped_json_repl_persists_variables_functions_and_multiline_cells() {
+    let output = run_repl(
+        "let x = 40;\nfn add(n) {\n    n + 2\n}\nadd(x)\n:vars\n:functions\n:quit\n",
+        &["--json"],
+    );
+    assert!(output.status.success(), "{output:?}");
+    let stdout = String::from_utf8(output.stdout).expect("UTF-8 stdout");
+    assert!(!stdout.contains("rhai>"));
+    let records = stdout
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("NDJSON record"))
+        .collect::<Vec<_>>();
+    assert_eq!(records[2]["value"]["value"], 42);
+    assert_eq!(records[3]["kind"], "meta");
+    assert_eq!(records[3]["command"], "vars");
+    assert!(records[3]["value"].as_array().is_some_and(|variables| {
+        variables
+            .iter()
+            .any(|entry| entry.as_array().is_some_and(|entry| entry[0] == "x"))
+    }));
+    assert_eq!(records[4]["command"], "functions");
+    assert!(
+        records[4]["value"]
+            .as_array()
+            .is_some_and(|functions| functions.iter().any(|entry| entry == "add(n)"))
+    );
+}
+
+#[test]
+fn repl_recovers_after_runtime_failure_and_reset_removes_state() {
+    let output = run_repl(
+        "let x = 1;\nx = 9; throw \"rollback\";\nx\n:reset\nx\n40 + 2\n:quit\n",
+        &["--json"],
+    );
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    let stdout = String::from_utf8(output.stdout).expect("UTF-8 stdout");
+    let records = stdout
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("NDJSON record"))
+        .collect::<Vec<_>>();
+    assert_eq!(records[1]["ok"], false);
+    assert_eq!(records[1]["state_committed"], false);
+    assert_eq!(records[2]["value"]["value"], 1);
+    assert_eq!(records[3]["command"], "reset");
+    assert_eq!(records[4]["ok"], false);
+    assert_eq!(records[5]["value"]["value"], 42);
+}
+
+#[test]
+fn fail_fast_stops_after_first_bad_cell() {
+    let output = run_repl("throw \"stop\";\n40 + 2\n", &["--json", "--fail-fast"]);
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    let stdout = String::from_utf8(output.stdout).expect("UTF-8 stdout");
+    assert_eq!(stdout.lines().count(), 1);
+}
+
+#[test]
+fn eof_reports_an_incomplete_cell_without_a_prompt() {
+    let output = run_repl("fn unfinished() {\n", &["--json"]);
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    let stdout = String::from_utf8(output.stdout).expect("UTF-8 stdout");
+    assert!(!stdout.contains("rhai>"));
+    let result: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("typed incomplete result");
+    assert_eq!(result["failure"]["code"], "script_incomplete");
+}
