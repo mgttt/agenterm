@@ -1,4 +1,5 @@
 //! macOS system-font discovery used by the Unix renderer.
+//! Adapter-private native mechanism selected only by platform::selected.
 
 #![cfg(target_os = "macos")]
 

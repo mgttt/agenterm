@@ -1,4 +1,5 @@
 //! Windows native platform adapter (`prd/PRD_02_20_native_platform.md`).
+//! Adapter-private native mechanism selected only by platform::selected.
 //!
 //! Contract revision implemented by this adapter: 3.
 
@@ -11,7 +12,7 @@ pub(crate) mod input;
 pub(crate) mod screenshot;
 pub(crate) mod toolbar;
 
-use super::{CapabilityKind, CapabilityStatus, PlatformKind};
+use crate::platform::{CapabilityKind, CapabilityStatus, PlatformKind};
 
 #[allow(dead_code)]
 pub const IMPLEMENTED_CONTRACT_REVISION: u32 = 3;

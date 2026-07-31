@@ -1,4 +1,5 @@
 //! Win32 activation and show-without-activation capability.
+//! Adapter-private native mechanism selected only by platform::selected.
 
 #![cfg(target_os = "windows")]
 

@@ -1,4 +1,5 @@
 //! macOS Cocoa IME preedit and committed-text classification.
+//! Adapter-private native mechanism selected only by platform::selected.
 
 #![cfg(target_os = "macos")]
 

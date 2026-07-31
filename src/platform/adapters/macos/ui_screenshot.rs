@@ -6,7 +6,7 @@ pub(crate) fn write_xrgb_png(frame: XrgbFrame<'_>) -> Result<(), UiScreenshotErr
     let clip = frame
         .clip
         .map(|clip| (clip.x, clip.y, clip.width, clip.height));
-    crate::platform::macos::screenshot::write_xrgb_png(
+    crate::platform::selected::native::screenshot::write_xrgb_png(
         frame.path,
         frame.width,
         frame.height,
@@ -19,8 +19,10 @@ pub(crate) fn write_xrgb_png(frame: XrgbFrame<'_>) -> Result<(), UiScreenshotErr
     })
 }
 
-fn error_code(error: &crate::platform::macos::screenshot::ScreenshotError) -> &'static str {
-    use crate::platform::macos::screenshot::ScreenshotError;
+fn error_code(
+    error: &crate::platform::selected::native::screenshot::ScreenshotError,
+) -> &'static str {
+    use crate::platform::selected::native::screenshot::ScreenshotError;
     match error {
         ScreenshotError::InvalidDimensions => "screenshot_invalid_dimensions",
         ScreenshotError::TooLarge { .. } => "screenshot_too_large",

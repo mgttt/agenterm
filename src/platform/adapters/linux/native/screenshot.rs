@@ -1,4 +1,5 @@
 //! Linux screenshot capability bridge for platform migration slice-2
+//! Adapter-private native mechanism selected only by platform::selected.
 //! (contract revision 1).
 //!
 //! Captures the softbuffer framebuffer already rendered by `unix_app` (not a

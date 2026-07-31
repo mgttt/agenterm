@@ -10,6 +10,9 @@ pub(crate) mod frontend;
 #[path = "adapters/windows/ipc.rs"]
 pub(crate) mod ipc;
 #[cfg(windows)]
+#[path = "adapters/windows/native/mod.rs"]
+pub(crate) mod native;
+#[cfg(windows)]
 #[path = "adapters/windows/pty.rs"]
 pub(crate) mod pty;
 #[cfg(windows)]
@@ -84,8 +87,14 @@ pub(crate) mod frontend;
 #[path = "adapters/linux/ipc.rs"]
 pub(crate) mod ipc;
 #[cfg(target_os = "linux")]
+#[path = "adapters/linux/native/mod.rs"]
+pub(crate) mod native;
+#[cfg(target_os = "linux")]
 #[path = "adapters/linux/pty.rs"]
 pub(crate) mod pty;
+#[cfg(target_os = "linux")]
+#[path = "scale.rs"]
+pub(crate) mod scale_contract;
 
 #[cfg(target_os = "linux")]
 #[path = "adapters/linux/script_http.rs"]
@@ -159,8 +168,14 @@ pub(crate) mod frontend;
 #[path = "adapters/macos/ipc.rs"]
 pub(crate) mod ipc;
 #[cfg(target_os = "macos")]
+#[path = "adapters/macos/native/mod.rs"]
+pub(crate) mod native;
+#[cfg(target_os = "macos")]
 #[path = "adapters/macos/pty.rs"]
 pub(crate) mod pty;
+#[cfg(target_os = "macos")]
+#[path = "scale.rs"]
+pub(crate) mod scale_contract;
 
 #[cfg(target_os = "macos")]
 #[path = "adapters/macos/script_http.rs"]

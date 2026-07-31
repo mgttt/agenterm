@@ -1,4 +1,5 @@
 //! Apple-native keyboard text and shortcut separation.
+//! Adapter-private native mechanism selected only by platform::selected.
 //!
 //! Command drives product shortcuts. Control remains available to terminal
 //! applications, while Shift, Option/dead-key composition, and IME output use

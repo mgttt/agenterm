@@ -39,11 +39,15 @@ pub(super) fn normalize_ime_commit(text: &str, multiline: bool) -> String {
 pub(super) fn primary_shortcut(modifiers: ModifiersState) -> bool {
     #[cfg(target_os = "linux")]
     {
-        crate::platform::linux::input::primary_shortcut(winit_modifiers_to_platform(modifiers))
+        crate::platform::selected::native::input::primary_shortcut(winit_modifiers_to_platform(
+            modifiers,
+        ))
     }
     #[cfg(target_os = "macos")]
     {
-        crate::platform::macos::input::is_product_shortcut(winit_modifiers_to_platform(modifiers))
+        crate::platform::selected::native::input::is_product_shortcut(winit_modifiers_to_platform(
+            modifiers,
+        ))
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
@@ -417,7 +421,7 @@ fn physical_code_to_byte(code: winit::keyboard::KeyCode) -> Option<Vec<u8>> {
 
 #[cfg(target_os = "linux")]
 fn winit_modifiers_to_platform(modifiers: ModifiersState) -> crate::platform::ModifierState {
-    crate::platform::linux::input::linux_modifiers(
+    crate::platform::selected::native::input::linux_modifiers(
         modifiers.control_key(),
         modifiers.shift_key(),
         modifiers.alt_key(),
@@ -427,7 +431,7 @@ fn winit_modifiers_to_platform(modifiers: ModifiersState) -> crate::platform::Mo
 
 #[cfg(target_os = "macos")]
 fn winit_modifiers_to_platform(modifiers: ModifiersState) -> crate::platform::ModifierState {
-    crate::platform::macos::input::macos_modifiers(
+    crate::platform::selected::native::input::macos_modifiers(
         modifiers.control_key(),
         modifiers.shift_key(),
         modifiers.alt_key(),
@@ -453,7 +457,7 @@ fn platform_classify_key_press(
     let (logical_character, named_key) = logical_key_parts(&event.logical_key);
     #[cfg(target_os = "linux")]
     {
-        crate::platform::linux::input::classify_key_press(
+        crate::platform::selected::native::input::classify_key_press(
             modifiers,
             logical_character,
             named_key,
@@ -462,7 +466,7 @@ fn platform_classify_key_press(
     }
     #[cfg(target_os = "macos")]
     {
-        crate::platform::macos::input::classify_key_press(
+        crate::platform::selected::native::input::classify_key_press(
             modifiers,
             logical_character,
             named_key,
@@ -475,11 +479,11 @@ fn platform_classify_key_press(
 fn classified_product_shortcut(modifiers: crate::platform::ModifierState) -> bool {
     #[cfg(target_os = "linux")]
     {
-        crate::platform::linux::input::primary_shortcut(modifiers)
+        crate::platform::selected::native::input::primary_shortcut(modifiers)
     }
     #[cfg(target_os = "macos")]
     {
-        crate::platform::macos::input::is_product_shortcut(modifiers)
+        crate::platform::selected::native::input::is_product_shortcut(modifiers)
     }
 }
 

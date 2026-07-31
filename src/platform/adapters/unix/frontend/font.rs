@@ -383,7 +383,7 @@ mod tests {
     #[test]
     fn linux_resolved_font_matches_platform_primary() {
         let platform_primary =
-            crate::platform::linux::font::primary_family_name().unwrap_or("bitmap-8x8");
+            crate::platform::selected::native::font::primary_family_name().unwrap_or("bitmap-8x8");
         assert_eq!(resolved_font_name(), platform_primary);
         if platform_primary != "bitmap-8x8" {
             let glyph = raster_glyph('A', 14).expect("system glyph");

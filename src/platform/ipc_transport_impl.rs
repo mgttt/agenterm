@@ -291,7 +291,7 @@ mod server {
             self.receiver.try_iter()
         }
 
-        #[cfg(unix)]
+        #[allow(dead_code)]
         pub(crate) fn try_recv(&self) -> Result<IpcEnvelope, mpsc::TryRecvError> {
             self.receiver.try_recv()
         }
@@ -418,7 +418,7 @@ mod server {
     }
 }
 
-#[cfg(unix)]
+#[allow(unused_imports)]
 pub(crate) use server::IpcEnvelope;
 pub(crate) use server::{IpcServer, start_ipc_server};
 

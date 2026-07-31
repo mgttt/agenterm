@@ -1,4 +1,5 @@
 //! Linux clipboard capability bridge for platform migration slice-2
+//! Adapter-private native mechanism selected only by platform::selected.
 //! (contract revision 1).
 //!
 //! Uses process helpers (`wl-clipboard` / `xclip` / `xsel`). Failures are typed

@@ -1,4 +1,5 @@
 //! Windows keyboard and UTF-16 text adaptation.
+//! Adapter-private native mechanism selected only by platform::selected.
 
 #![cfg(target_os = "windows")]
 

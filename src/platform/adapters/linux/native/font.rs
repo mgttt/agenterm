@@ -1,4 +1,5 @@
 //! Linux font discovery / capability bridge for platform migration slice-2
+//! Adapter-private native mechanism selected only by platform::selected.
 //! (contract revision 1).
 //!
 //! Owns Linux monospace candidate paths, primary cell metrics, and typed

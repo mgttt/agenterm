@@ -1,11 +1,12 @@
 //! macOS logical-point / backing-pixel adapter.
+//! Adapter-private native mechanism selected only by platform::selected.
 //!
 //! Cocoa/winit event extraction stays macOS-owned; conversion, validation,
 //! metrics, and event classification consume the shared platform contract.
 
 #![cfg(target_os = "macos")]
 
-pub(crate) use crate::platform::scale::{
+pub(crate) use crate::platform::selected::scale_contract::{
     GeometryAction as MacosGeometryAction, GeometryEvent as MacosGeometryEvent,
     WindowMetrics as MacosWindowMetrics, classify_geometry_event,
 };
@@ -13,7 +14,7 @@ pub(crate) use crate::platform::scale::{
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::platform::scale::{ScaleError, ScaleFactor};
+    use crate::platform::selected::scale_contract::{ScaleError, ScaleFactor};
 
     #[test]
     fn macos_aliases_consume_shared_geometry_contract() {

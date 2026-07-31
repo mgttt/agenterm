@@ -1,4 +1,5 @@
 //! Linux toolbar hits mapped to stable product action identities.
+//! Adapter-private native mechanism selected only by platform::selected.
 //!
 //! Bridges to shared contract revision 1 [`crate::platform::action`].
 //! Labels remain shared product/render state (`unix_app` / locale); this

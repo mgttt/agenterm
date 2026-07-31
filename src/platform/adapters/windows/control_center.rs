@@ -70,10 +70,10 @@ pub(crate) fn capture_native_window_png(raw_handle: i64, output: &Path) -> io::R
             "control_center_screenshot_window_unavailable",
         ));
     }
-    crate::platform::windows::screenshot::save_png(
+    crate::platform::selected::native::screenshot::save_png(
         window,
         output,
-        crate::platform::windows::screenshot::CaptureArea::Window,
+        crate::platform::selected::native::screenshot::CaptureArea::Window,
     )
     .map_err(|error| io::Error::other(error.to_string()))
 }

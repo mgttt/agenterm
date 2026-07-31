@@ -1,4 +1,5 @@
 //! macOS native toolbar hits mapped to stable product action identities.
+//! Adapter-private native mechanism selected only by platform::selected.
 //!
 //! Labels remain shared product state. This adapter deliberately does not
 //! duplicate them; rendering and `ui-snapshot` must consume the same resolved

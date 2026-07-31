@@ -1,4 +1,5 @@
 //! Bounded Win32 Unicode clipboard capability.
+//! Adapter-private native mechanism selected only by platform::selected.
 
 #![cfg(target_os = "windows")]
 

@@ -1,4 +1,5 @@
 //! Linux keyboard text / shortcut separation for platform migration slice 1.
+//! Adapter-private native mechanism selected only by platform::selected.
 //!
 //! Bridges to shared contract revision 1 types:
 //! [`crate::platform::ModifierState`], [`crate::platform::KeyClassification`],

@@ -1,4 +1,5 @@
 //! Linux DPI / scale-factor adapter.
+//! Adapter-private native mechanism selected only by platform::selected.
 //!
 //! X11/Wayland event extraction stays Linux-owned; conversion, validation,
 //! metrics, and event classification consume the shared platform contract.
@@ -9,7 +10,7 @@ use crate::platform::{CapabilityStatus, DisplayBackendFacts};
 
 use super::display_facts_from_env;
 
-pub(crate) use crate::platform::scale::{
+pub(crate) use crate::platform::selected::scale_contract::{
     GeometryAction as LinuxGeometryAction, GeometryEvent as LinuxGeometryEvent,
     WindowMetrics as LinuxWindowMetrics, classify_geometry_event,
 };
@@ -25,7 +26,7 @@ pub(crate) fn scale_capability_status_from_env() -> CapabilityStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::platform::scale::{ScaleError, ScaleFactor};
+    use crate::platform::selected::scale_contract::{ScaleError, ScaleFactor};
 
     #[test]
     fn linux_aliases_consume_shared_geometry_contract() {

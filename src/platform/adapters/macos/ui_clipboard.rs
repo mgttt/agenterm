@@ -3,19 +3,21 @@
 use crate::platform::contract::ui_clipboard::UiClipboardError;
 
 pub(crate) fn set_text(text: &str) -> Result<(), UiClipboardError> {
-    crate::platform::macos::clipboard::set_text(text).map_err(map_error)
+    crate::platform::selected::native::clipboard::set_text(text).map_err(map_error)
 }
 
 pub(crate) fn get_text() -> Result<String, UiClipboardError> {
-    crate::platform::macos::clipboard::get_text().map_err(map_error)
+    crate::platform::selected::native::clipboard::get_text().map_err(map_error)
 }
 
 pub(crate) fn has_unicode_text() -> bool {
-    crate::platform::macos::clipboard::has_unicode_text()
+    crate::platform::selected::native::clipboard::has_unicode_text()
 }
 
-fn map_error(error: crate::platform::macos::clipboard::ClipboardError) -> UiClipboardError {
-    use crate::platform::macos::clipboard::ClipboardError;
+fn map_error(
+    error: crate::platform::selected::native::clipboard::ClipboardError,
+) -> UiClipboardError {
+    use crate::platform::selected::native::clipboard::ClipboardError;
 
     let code = match &error {
         ClipboardError::Unavailable { .. } => "clipboard_unavailable",

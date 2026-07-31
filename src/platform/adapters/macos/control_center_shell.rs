@@ -17,7 +17,10 @@ pub(crate) fn run_native_shell(
         "macos",
         |attributes, no_activate| attributes.with_active(!no_activate),
         |builder, no_activate| {
-            crate::platform::macos::activation::configure_event_loop(builder, no_activate);
+            crate::platform::selected::native::activation::configure_event_loop(
+                builder,
+                no_activate,
+            );
         },
     )
 }

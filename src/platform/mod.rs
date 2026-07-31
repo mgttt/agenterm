@@ -17,8 +17,6 @@
 #[allow(dead_code)]
 pub const CONTRACT_REVISION: u32 = 3;
 
-#[cfg(any(target_os = "linux", target_os = "macos", test))]
-pub(crate) mod scale;
 pub(crate) mod window;
 
 // Platform Facade services. Product modules consume these typed services;
@@ -46,15 +44,6 @@ pub(crate) mod selected;
 pub(crate) mod services;
 #[allow(dead_code)]
 pub(crate) mod webview;
-
-#[cfg(target_os = "windows")]
-pub mod windows;
-
-#[cfg(target_os = "linux")]
-pub mod linux;
-
-#[cfg(target_os = "macos")]
-pub mod macos;
 
 /// Stable product action identities consumed by toolbar / shortcut surfaces.
 ///
@@ -159,15 +148,8 @@ impl CapabilityStatus {
 }
 
 pub(crate) fn platform_info_json() -> serde_json::Value {
-    #[cfg(target_os = "windows")]
-    let (kind, status): (PlatformKind, fn(CapabilityKind) -> CapabilityStatus) =
-        (windows::platform_kind(), windows::capability_status);
-    #[cfg(target_os = "linux")]
-    let (kind, status): (PlatformKind, fn(CapabilityKind) -> CapabilityStatus) =
-        (linux::platform_kind(), linux::capability_status);
-    #[cfg(target_os = "macos")]
-    let (kind, status): (PlatformKind, fn(CapabilityKind) -> CapabilityStatus) =
-        (macos::platform_kind(), macos::capability_status);
+    let kind = selected::native::platform_kind();
+    let status = selected::native::capability_status;
 
     let capabilities = CapabilityKind::ALL
         .into_iter()
@@ -388,7 +370,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn linux_toolbar_order_matches_contract() {
-        use crate::platform::linux::toolbar::LinuxToolbarHit;
+        use crate::platform::selected::native::toolbar::LinuxToolbarHit;
         assert_eq!(
             LinuxToolbarHit::ORDER.map(LinuxToolbarHit::action_id),
             action::TOOLBAR_ACTION_ORDER
@@ -398,7 +380,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn macos_toolbar_order_matches_contract() {
-        use crate::platform::macos::toolbar::MacosToolbarHit;
+        use crate::platform::selected::native::toolbar::MacosToolbarHit;
         assert_eq!(
             MacosToolbarHit::ORDER.map(MacosToolbarHit::action_id),
             action::TOOLBAR_ACTION_ORDER
@@ -408,7 +390,7 @@ mod tests {
     #[cfg(target_os = "windows")]
     #[test]
     fn windows_toolbar_order_matches_contract() {
-        use crate::platform::windows::toolbar::WindowsToolbarHit;
+        use crate::platform::selected::native::toolbar::WindowsToolbarHit;
         assert_eq!(
             WindowsToolbarHit::ORDER.map(WindowsToolbarHit::action_id),
             action::TOOLBAR_ACTION_ORDER

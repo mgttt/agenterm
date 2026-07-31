@@ -53,13 +53,13 @@ use crate::{
     locale::UiText,
     platform::{
         CapabilityStatus, KeyClassification, action,
-        window::{ClientSize, WindowSemanticState},
-        windows::{
+        selected::native::{
             activation, clipboard, font,
             input::{Utf16TextDecoder, primary_shortcut, windows_modifiers},
             screenshot::{self, CaptureArea},
             toolbar::WindowsToolbarHit,
         },
+        window::{ClientSize, WindowSemanticState},
     },
     protocol::IpcResponse,
     settings::{

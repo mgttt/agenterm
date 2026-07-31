@@ -388,7 +388,7 @@ fn display_available() -> bool {
     }
     #[cfg(target_os = "linux")]
     {
-        !crate::platform::linux::display_facts_from_env().headless
+        !crate::platform::selected::native::display_facts_from_env().headless
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
@@ -400,7 +400,10 @@ fn run_gui(no_activate: bool) -> anyhow::Result<()> {
     let title = format!("{APP_NAME} {}", env!("CARGO_PKG_VERSION"));
     let mut event_loop_builder = EventLoop::<UnixWake>::with_user_event();
     #[cfg(target_os = "macos")]
-    crate::platform::macos::activation::configure_event_loop(&mut event_loop_builder, no_activate);
+    crate::platform::selected::native::activation::configure_event_loop(
+        &mut event_loop_builder,
+        no_activate,
+    );
     let event_loop = event_loop_builder.build()?;
     let proxy = event_loop.create_proxy();
     install_unix_wake(proxy);
@@ -554,7 +557,9 @@ impl UnixApp {
             window_focused: {
                 #[cfg(target_os = "linux")]
                 {
-                    crate::platform::linux::activation::initial_window_focused(no_activate)
+                    crate::platform::selected::native::activation::initial_window_focused(
+                        no_activate,
+                    )
                 }
                 #[cfg(not(target_os = "linux"))]
                 {
@@ -717,9 +722,9 @@ impl UnixApp {
         let raw = {
             use crate::platform::KeyClassification;
             #[cfg(target_os = "linux")]
-            let classified = crate::platform::linux::input::classify_ime_commit(raw);
+            let classified = crate::platform::selected::native::input::classify_ime_commit(raw);
             #[cfg(target_os = "macos")]
-            let classified = crate::platform::macos::input::classify_ime_commit(raw);
+            let classified = crate::platform::selected::native::input::classify_ime_commit(raw);
             match classified {
                 KeyClassification::TextCommit(text) => text,
                 _ => return,
@@ -776,7 +781,9 @@ impl UnixApp {
         self.cursor_blink.reset(Instant::now());
         #[cfg(target_os = "linux")]
         {
-            use crate::platform::linux::ime::{LinuxImeAction, LinuxImeEvent, classify_ime_event};
+            use crate::platform::selected::native::ime::{
+                LinuxImeAction, LinuxImeEvent, classify_ime_event,
+            };
             let linux_event = match event {
                 Ime::Enabled => LinuxImeEvent::Enabled,
                 Ime::Preedit(text, cursor) => LinuxImeEvent::Preedit { text, cursor },
@@ -802,7 +809,9 @@ impl UnixApp {
         }
         #[cfg(target_os = "macos")]
         {
-            use crate::platform::macos::ime::{MacosImeAction, MacosImeEvent, classify_ime_event};
+            use crate::platform::selected::native::ime::{
+                MacosImeAction, MacosImeEvent, classify_ime_event,
+            };
             let macos_event = match event {
                 Ime::Enabled => MacosImeEvent::Enabled,
                 Ime::Preedit(text, cursor) => MacosImeEvent::Preedit { text, cursor },
@@ -2132,7 +2141,7 @@ impl UnixApp {
                 #[cfg(target_os = "linux")]
                 {
                     let physical = window.inner_size();
-                    match crate::platform::linux::scale::LinuxWindowMetrics::from_physical(
+                    match crate::platform::selected::native::scale::LinuxWindowMetrics::from_physical(
                         physical.width,
                         physical.height,
                         window.scale_factor(),
@@ -2150,7 +2159,7 @@ impl UnixApp {
                 #[cfg(target_os = "macos")]
                 {
                     let physical = window.inner_size();
-                    match crate::platform::macos::scale::MacosWindowMetrics::from_physical(
+                    match crate::platform::selected::native::scale::MacosWindowMetrics::from_physical(
                         physical.width,
                         physical.height,
                         window.scale_factor(),
@@ -2175,9 +2184,11 @@ impl UnixApp {
     #[cfg(target_os = "linux")]
     fn handle_linux_geometry_event(
         &mut self,
-        event: crate::platform::linux::scale::LinuxGeometryEvent,
+        event: crate::platform::selected::native::scale::LinuxGeometryEvent,
     ) {
-        use crate::platform::linux::scale::{LinuxGeometryAction, classify_geometry_event};
+        use crate::platform::selected::native::scale::{
+            LinuxGeometryAction, classify_geometry_event,
+        };
         match classify_geometry_event(event) {
             Ok(LinuxGeometryAction::Apply(_metrics)) => {
                 if let Some(window) = self.window.as_ref() {
@@ -2205,9 +2216,11 @@ impl UnixApp {
     #[cfg(target_os = "macos")]
     fn handle_macos_geometry_event(
         &mut self,
-        event: crate::platform::macos::scale::MacosGeometryEvent,
+        event: crate::platform::selected::native::scale::MacosGeometryEvent,
     ) {
-        use crate::platform::macos::scale::{MacosGeometryAction, classify_geometry_event};
+        use crate::platform::selected::native::scale::{
+            MacosGeometryAction, classify_geometry_event,
+        };
         match classify_geometry_event(event) {
             Ok(MacosGeometryAction::Apply(_metrics)) => {
                 if let Some(window) = self.window.as_ref() {
@@ -3161,7 +3174,7 @@ impl UnixApp {
                 .with_inner_size(winit::dpi::LogicalSize::new(INITIAL_WIDTH, INITIAL_HEIGHT));
             #[cfg(target_os = "linux")]
             {
-                crate::platform::linux::activation::configure_window_attributes(
+                crate::platform::selected::native::activation::configure_window_attributes(
                     base,
                     self.no_activate,
                 )
@@ -3884,7 +3897,7 @@ impl UnixApp {
 /// Map a Unix toolbar hit through the active platform adapter action ids.
 #[cfg(target_os = "linux")]
 fn platform_toolbar_action_id(hit: ToolbarHit) -> &'static str {
-    use crate::platform::linux::toolbar::LinuxToolbarHit;
+    use crate::platform::selected::native::toolbar::LinuxToolbarHit;
     let linux_hit = match hit {
         ToolbarHit::NewTab => LinuxToolbarHit::NewTab,
         ToolbarHit::ToggleTabs => LinuxToolbarHit::ToggleTabs,
@@ -3899,7 +3912,7 @@ fn platform_toolbar_action_id(hit: ToolbarHit) -> &'static str {
 
 #[cfg(target_os = "macos")]
 fn platform_toolbar_action_id(hit: ToolbarHit) -> &'static str {
-    use crate::platform::macos::toolbar::MacosToolbarHit;
+    use crate::platform::selected::native::toolbar::MacosToolbarHit;
     let macos_hit = match hit {
         ToolbarHit::NewTab => MacosToolbarHit::NewTab,
         ToolbarHit::ToggleTabs => MacosToolbarHit::ToggleTabs,
@@ -4382,7 +4395,7 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                 #[cfg(target_os = "linux")]
                 {
                     self.handle_linux_geometry_event(
-                        crate::platform::linux::scale::LinuxGeometryEvent::Resized {
+                        crate::platform::selected::native::scale::LinuxGeometryEvent::Resized {
                             physical_width: size.width,
                             physical_height: size.height,
                             scale_factor: self
@@ -4396,7 +4409,7 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                 #[cfg(target_os = "macos")]
                 {
                     self.handle_macos_geometry_event(
-                        crate::platform::macos::scale::MacosGeometryEvent::Resized {
+                        crate::platform::selected::native::scale::MacosGeometryEvent::Resized {
                             physical_width: size.width,
                             physical_height: size.height,
                             scale_factor: self
@@ -4431,7 +4444,7 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                         .map(|window| window.inner_size())
                         .unwrap_or_default();
                     self.handle_linux_geometry_event(
-                        crate::platform::linux::scale::LinuxGeometryEvent::ScaleFactorChanged {
+                        crate::platform::selected::native::scale::LinuxGeometryEvent::ScaleFactorChanged {
                             scale_factor,
                             physical_width: physical.width,
                             physical_height: physical.height,
@@ -4446,7 +4459,7 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                         .map(|window| window.inner_size())
                         .unwrap_or_default();
                     self.handle_macos_geometry_event(
-                        crate::platform::macos::scale::MacosGeometryEvent::ScaleFactorChanged {
+                        crate::platform::selected::native::scale::MacosGeometryEvent::ScaleFactorChanged {
                             scale_factor,
                             physical_width: physical.width,
                             physical_height: physical.height,

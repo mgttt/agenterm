@@ -27,6 +27,17 @@ const SUBSYSTEM_ENTRYPOINTS: &[&str] = &[
 ];
 const WINDOWS_SUBSYSTEM_ATTRIBUTE: &str = "#![cfg_attr(windows, windows_subsystem = \"windows\")]";
 
+const OS_SELECTION_MARKERS: &[&str] = &[
+    "#[cfg(windows",
+    "#[cfg(unix",
+    "#[cfg_attr(windows",
+    "#[cfg_attr(unix",
+    "cfg!(windows",
+    "cfg!(unix",
+    "target_os",
+    "target_family",
+];
+
 #[test]
 fn production_sources_use_platform_as_the_only_native_boundary() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -68,6 +79,48 @@ fn production_sources_use_platform_as_the_only_native_boundary() {
     assert!(
         violations.is_empty(),
         "production OS boundaries must stay in src/platform/**:\n{}",
+        violations.join("\n")
+    );
+}
+
+#[test]
+fn production_os_selection_stays_in_selected_and_adapters() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let platform_root = root.join("src/platform");
+    let mut sources = Vec::new();
+    collect_rust_sources(&platform_root, &mut sources);
+    sources.sort();
+
+    let mut violations = Vec::new();
+    for path in sources {
+        let relative = path
+            .strip_prefix(&root)
+            .expect("source is below manifest root")
+            .to_string_lossy()
+            .replace('\\', "/");
+        if relative == "src/platform/selected.rs" || relative.starts_with("src/platform/adapters/")
+        {
+            continue;
+        }
+        let source = fs::read_to_string(&path).expect("read Rust source");
+        let production = mask_test_items(&mask_comments_and_strings(&source));
+        for marker in OS_SELECTION_MARKERS {
+            if let Some(position) = production.find(marker) {
+                let line = production[..position]
+                    .bytes()
+                    .filter(|byte| *byte == b'\n')
+                    .count()
+                    + 1;
+                violations.push(format!(
+                    "{relative}:{line}: OS selection marker `{marker}` must stay in selected.rs or adapters"
+                ));
+            }
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "platform OS selection has more than one assembly point:\n{}",
         violations.join("\n")
     );
 }

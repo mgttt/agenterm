@@ -27,6 +27,13 @@ handles, and contract tests that do not depend on a live GUI. Hot files
 (`src/lib.rs`, `src/platform/mod.rs`, Cargo metadata and PRDs) are serialized;
 each product module moves only after its facade service has an owned contract.
 
+The production module graph now has one assembly point: `selected.rs` chooses
+the target and mounts both service adapters and their private `native/`
+mechanisms. The former top-level `platform/{windows,linux,macos}` trees are
+physically folded into `adapters/{windows,linux,macos}/native`; shared
+`platform/mod.rs` performs no production OS selection. A second static gate
+enforces that platform-internal OS cfg remains in `selected.rs` or adapters.
+
 IPC implementation state: endpoint identity and selection are in
 `contract::ipc`; transport failure codes and their endpoint-preserving error
 carrier are in `contract::ipc_transport`. `services::ipc` and every native

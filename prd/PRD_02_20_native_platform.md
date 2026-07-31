@@ -100,6 +100,10 @@ The migration is complete only when all of the following are true:
   comments and test items are ignored.
 - [x] a repository boundary test fails when a new non-platform production
   source file imports OS-native crates or contains an OS-selection `cfg`
+- [x] `selected.rs` is the sole production adapter assembly point; the former
+  top-level Windows/Linux/macOS module trees are adapter-private `native/`
+  mechanisms, `platform/mod.rs` contains no production OS selection, and an
+  internal gate rejects selection cfg elsewhere in contracts or services
 - [ ] all three platform adapters satisfy the same facade contract tests; a
   missing capability remains a typed unsupported result, never an implicit
   fallback

@@ -21,7 +21,10 @@ pub(crate) fn run_native_shell(
         no_activate,
         "linux",
         |attributes, no_activate| {
-            crate::platform::linux::activation::configure_window_attributes(attributes, no_activate)
+            crate::platform::selected::native::activation::configure_window_attributes(
+                attributes,
+                no_activate,
+            )
         },
         |_builder, _no_activate| {},
     )

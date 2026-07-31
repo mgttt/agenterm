@@ -1,4 +1,5 @@
 //! Win32 toolbar hits mapped to stable product action identities.
+//! Adapter-private native mechanism selected only by platform::selected.
 
 #![cfg(target_os = "windows")]
 

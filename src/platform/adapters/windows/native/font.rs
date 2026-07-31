@@ -1,4 +1,5 @@
 //! Windows GDI terminal-font creation and metric measurement.
+//! Adapter-private native mechanism selected only by platform::selected.
 
 #![cfg(target_os = "windows")]
 

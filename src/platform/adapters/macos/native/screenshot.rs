@@ -1,4 +1,5 @@
 //! Bounded Retina screenshot encoding for the macOS GUI.
+//! Adapter-private native mechanism selected only by platform::selected.
 
 #![cfg(target_os = "macos")]
 

@@ -1,4 +1,5 @@
 //! Linux native platform adapter (`prd/PRD_02_20_native_platform.md`).
+//! Adapter-private native mechanism selected only by platform::selected.
 //!
 //! Ownership: Linux agent only. Do not edit shared contracts here.
 //!

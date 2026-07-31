@@ -2,7 +2,7 @@
 
 use crate::platform::{
     contract::ui_screenshot::{UiScreenshotError, XrgbFrame},
-    linux::screenshot::{ScreenshotClip, ScreenshotError},
+    selected::native::screenshot::{ScreenshotClip, ScreenshotError},
 };
 
 pub(crate) fn write_xrgb_png(frame: XrgbFrame<'_>) -> Result<(), UiScreenshotError> {
@@ -12,7 +12,7 @@ pub(crate) fn write_xrgb_png(frame: XrgbFrame<'_>) -> Result<(), UiScreenshotErr
         width: clip.width,
         height: clip.height,
     });
-    crate::platform::linux::screenshot::write_xrgb_png(
+    crate::platform::selected::native::screenshot::write_xrgb_png(
         frame.path,
         frame.width,
         frame.height,

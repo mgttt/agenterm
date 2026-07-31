@@ -1,4 +1,5 @@
 //! macOS application activation policy for foreground-safe automation.
+//! Adapter-private native mechanism selected only by platform::selected.
 
 #![cfg(target_os = "macos")]
 

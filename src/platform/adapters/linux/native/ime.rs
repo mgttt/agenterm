@@ -1,4 +1,5 @@
 //! Linux IME capability bridge for platform migration slice-2 (contract rev 1).
+//! Adapter-private native mechanism selected only by platform::selected.
 //!
 //! Preedit / commit event shapes stay Linux-private. Shared contract already
 //! provides [`CapabilityKind::Ime`], [`CapabilityStatus`], and text-commit

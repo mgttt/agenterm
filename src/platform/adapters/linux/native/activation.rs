@@ -1,4 +1,5 @@
 //! Linux window activation / no-activate policy for platform migration
+//! Adapter-private native mechanism selected only by platform::selected.
 //! slice-2 (contract revision 1).
 //!
 //! Unlike macOS (`EventLoopBuilderExtMacOS::with_activate_ignoring_other_apps`)
