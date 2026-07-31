@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 use crate::{
     client::send_ipc_request_to_timeout,
     instances::{discover_instances, instance_process_is_alive},
-    ipc_endpoint::{EndpointSelectorArgs, IpcEndpoint, resolve_ipc_endpoint},
+    ipc_endpoint::{EndpointSelectorArgs, resolve_ipc_endpoint},
     mcp_catalog::capabilities,
 };
 
@@ -333,85 +333,23 @@ fn ensure_resource_bytes(resource: Value) -> Result<Value, McpFleetError> {
 }
 
 fn select_address(explicit: Option<&str>) -> Result<String, McpFleetError> {
-    if let Some(endpoint) = explicit.filter(|endpoint| !endpoint.trim().is_empty()) {
-        let typed = endpoint.parse::<IpcEndpoint>().is_ok();
-        let selectors = if typed {
-            EndpointSelectorArgs {
-                endpoint: Some(endpoint.to_owned()),
-                ..EndpointSelectorArgs::default()
-            }
-        } else {
-            EndpointSelectorArgs {
-                address: Some(endpoint.to_owned()),
-                ..EndpointSelectorArgs::default()
-            }
-        };
-        return resolve_ipc_endpoint(&selectors)
-            .map(|resolved| {
-                if typed {
-                    resolved.endpoint.to_string()
-                } else {
-                    resolved
-                        .endpoint
-                        .legacy_address()
-                        .unwrap_or_else(|| resolved.endpoint.to_string())
-                }
-            })
-            .map_err(|error| McpFleetError {
-                code: -32001,
-                message: "Could not resolve the AgenTerm server endpoint",
-                data: json!({
-                    "class": "endpoint_selection",
-                    "detail": bounded(&error.to_string()),
-                    "hint": "use --endpoint ENDPOINT, legacy --address HOST:PORT, or --instance NAME"
-                }),
-            });
-    }
-
-    let instances = discover_instances().map_err(|error| McpFleetError {
-        code: -32603,
-        message: "Could not discover AgenTerm instances",
-        data: json!({"class": "instance_discovery", "detail": bounded(&error.to_string())}),
-    })?;
-    let health = classify_instance_health(&instances);
-    let mut candidates = Vec::with_capacity(instances.len());
-    let mut healthy = Vec::new();
-    for (instance, health) in instances.into_iter().zip(health) {
-        let selected_authority = instance
-            .record
-            .endpoint
-            .as_ref()
-            .map(|endpoint| endpoint.to_string())
-            .unwrap_or_else(|| instance.record.address.clone());
-        if health == InstanceHealth::Healthy {
-            healthy.push(selected_authority);
-        }
-        candidates.push(json!({
-            "pid": instance.record.pid,
-            "address": instance.record.address,
-            "session": instance.record.session,
-            "version": instance.record.version,
-            "status": health.status(),
-            "compatible": health == InstanceHealth::Healthy
-        }));
-    }
-    match healthy.as_slice() {
-        [endpoint] => Ok(endpoint.clone()),
-        [] => Err(McpFleetError {
+    let selectors = EndpointSelectorArgs {
+        endpoint: explicit
+            .filter(|endpoint| !endpoint.trim().is_empty())
+            .map(str::to_owned),
+        ..EndpointSelectorArgs::default()
+    };
+    resolve_ipc_endpoint(&selectors)
+        .map(|resolved| resolved.endpoint.to_string())
+        .map_err(|error| McpFleetError {
             code: -32001,
-            message: "No running AgenTerm server is available",
+            message: "Could not resolve the AgenTerm server endpoint",
             data: json!({
-                "class": "server_not_found",
-                "hint": "start AgenTerm or select an endpoint explicitly",
-                "candidates": candidates
+                "class": "endpoint_selection",
+                "detail": bounded(&error.to_string()),
+                "hint": "use --endpoint ENDPOINT, legacy --address HOST:PORT, or --instance NAME"
             }),
-        }),
-        _ => Err(McpFleetError {
-            code: -32001,
-            message: "Multiple AgenTerm servers require explicit selection",
-            data: json!({"class": "server_ambiguous", "candidates": candidates}),
-        }),
-    }
+        })
 }
 
 fn classify_instance_health(
@@ -482,12 +420,6 @@ fn instance_health(
         .resolved_endpoint()
         .map(|endpoint| endpoint.to_string())
         .unwrap_or_else(|| instance.record.address.clone());
-    let expected_handshake_address = instance
-        .record
-        .endpoint
-        .as_ref()
-        .map(ToString::to_string)
-        .unwrap_or_else(|| instance.record.address.clone());
     let response =
         match send_ipc_request_to_timeout(&endpoint, vec!["protocol-info".to_owned()], timeout) {
             Ok(response) if response.ok => response,
@@ -500,7 +432,7 @@ fn instance_health(
         return InstanceHealth::Incompatible;
     }
     if handshake["pid"].as_u64() != Some(u64::from(instance.record.pid))
-        || handshake["address"].as_str() != Some(expected_handshake_address.as_str())
+        || handshake["address"].as_str() != Some(endpoint.as_str())
     {
         return InstanceHealth::Stale;
     }
