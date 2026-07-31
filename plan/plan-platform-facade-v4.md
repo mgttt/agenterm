@@ -27,6 +27,13 @@ handles, and contract tests that do not depend on a live GUI. Hot files
 (`src/lib.rs`, `src/platform/mod.rs`, Cargo metadata and PRDs) are serialized;
 each product module moves only after its facade service has an owned contract.
 
+IPC implementation state: endpoint identity and selection are in
+`contract::ipc`; transport failure codes and their endpoint-preserving error
+carrier are now in `contract::ipc_transport`. `services::ipc` and every native
+adapter consume that shared contract. The compatibility `ipc_transport` stream
+still projects the legacy TCP framing and is the next deletion/migration leaf;
+this state does not yet satisfy the static source-boundary gate.
+
 ## Shipped leaf: Script Runtime process inventory and termination
 
 - User problem: scripts need to list and terminate operating-system processes

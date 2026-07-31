@@ -1,5 +1,4 @@
 use std::{
-    fmt,
     io::{self, BufRead as _, Read, Write},
     net::{SocketAddr, TcpListener, TcpStream},
     time::{Duration, Instant},
@@ -8,6 +7,10 @@ use std::{
 use anyhow::{Context as _, Result};
 
 use crate::platform::contract::ipc::IpcEndpoint;
+pub(crate) use crate::platform::contract::ipc_transport::{
+    IpcTransportError, IpcTransportErrorCode, TransportResult, map_bind_error, timeout_error,
+    transport_io,
+};
 
 // UI command completion embeds a bounded 1 MiB `IpcResponse` JSON document
 // inside the outer request string. JSON re-escaping can approach 2x, so the
@@ -15,62 +18,6 @@ use crate::platform::contract::ipc::IpcEndpoint;
 // remaining explicitly bounded.
 pub(crate) const IPC_REQUEST_MAX_BYTES: u64 = 4 * 1024 * 1024;
 pub(crate) const IPC_RESPONSE_MAX_BYTES: u64 = 8 * 1024 * 1024;
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum IpcTransportErrorCode {
-    UnsupportedEndpoint,
-    InvalidEndpoint,
-    EndpointInUse,
-    #[allow(dead_code)]
-    UnsafeEndpoint,
-    ConnectTimeout,
-    AcceptTimeout,
-    Io,
-}
-
-#[derive(Debug)]
-pub(crate) struct IpcTransportError {
-    pub(crate) code: IpcTransportErrorCode,
-    pub(crate) endpoint: String,
-    source: io::Error,
-}
-
-impl IpcTransportError {
-    pub(crate) fn new(
-        code: IpcTransportErrorCode,
-        endpoint: impl Into<String>,
-        source: impl Into<io::Error>,
-    ) -> Self {
-        Self {
-            code,
-            endpoint: endpoint.into(),
-            source: source.into(),
-        }
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn io_kind(&self) -> io::ErrorKind {
-        self.source.kind()
-    }
-}
-
-impl fmt::Display for IpcTransportError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            formatter,
-            "IPC transport {:?} for {}: {}",
-            self.code, self.endpoint, self.source
-        )
-    }
-}
-
-impl std::error::Error for IpcTransportError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(&self.source)
-    }
-}
-
-pub(crate) type TransportResult<T> = std::result::Result<T, IpcTransportError>;
 
 /// A transport-neutral local IPC listener. This adapter is intentionally
 /// staged before the caller migration so TCP and native endpoints can coexist.
@@ -277,38 +224,6 @@ fn poll_accept<T>(
             Err(error) => return Err(transport_io(endpoint, error)),
         }
     }
-}
-
-pub(crate) fn transport_io(endpoint: &IpcEndpoint, error: io::Error) -> IpcTransportError {
-    IpcTransportError::new(IpcTransportErrorCode::Io, endpoint.to_string(), error)
-}
-
-pub(crate) fn map_bind_error(endpoint: &IpcEndpoint, error: io::Error) -> IpcTransportError {
-    let code = if error.kind() == io::ErrorKind::AddrInUse {
-        IpcTransportErrorCode::EndpointInUse
-    } else {
-        IpcTransportErrorCode::Io
-    };
-    IpcTransportError::new(code, endpoint.to_string(), error)
-}
-
-pub(crate) fn timeout_error(
-    code: IpcTransportErrorCode,
-    endpoint: &IpcEndpoint,
-) -> IpcTransportError {
-    IpcTransportError::new(
-        code,
-        endpoint.to_string(),
-        io::Error::new(io::ErrorKind::TimedOut, "bounded IPC operation timed out"),
-    )
-}
-
-pub(crate) fn unsupported(endpoint: &IpcEndpoint, message: &str) -> IpcTransportError {
-    IpcTransportError::new(
-        IpcTransportErrorCode::UnsupportedEndpoint,
-        endpoint.to_string(),
-        io::Error::new(io::ErrorKind::Unsupported, message),
-    )
 }
 
 #[cfg(unix)]

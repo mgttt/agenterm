@@ -40,10 +40,10 @@ use windows_sys::Win32::{
 };
 
 use crate::{
-    ipc_transport::{
+    platform::contract::ipc::{IpcEndpoint, ServerScopeId},
+    platform::contract::ipc_transport::{
         IpcTransportError, IpcTransportErrorCode, TransportResult, timeout_error, transport_io,
     },
-    platform::contract::ipc::{IpcEndpoint, ServerScopeId},
 };
 
 use crate::platform::services::ipc::TrustedUserIdentity;

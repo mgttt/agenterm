@@ -369,6 +369,12 @@ Revision-4 migration evidence (2026-07-31, partial):
   `platform::contract::ipc`; `src/ipc_endpoint.rs` is compatibility-only.
   The contract's 11 focused tests retain main/dev separation, opaque identity,
   selector priority, legacy TCP parsing, and serialization evidence.
+- [~] Typed IPC transport errors (`UnsupportedEndpoint`, endpoint validation /
+  collision, bounded connect / accept timeout, and I/O) now live in
+  `platform::contract::ipc_transport`. TCP compatibility framing and all three
+  native adapter implementations consume that one error contract; the legacy
+  `ipc_transport` module remains a compatibility projection pending removal of
+  its platform-private implementation.
 - [~] IPC adapter implementations are now physically selected from
   `platform::adapters/{windows,linux,macos}/ipc.rs`; macOS reuses the private
   Unix mechanism while keeping its own adapter identity. `selected.rs` is the

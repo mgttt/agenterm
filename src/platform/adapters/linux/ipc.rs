@@ -9,11 +9,11 @@ use std::{
 };
 
 use crate::{
-    ipc_transport::{
+    platform::contract::ipc::{IpcEndpoint, ServerScopeId},
+    platform::contract::ipc_transport::{
         IpcTransportError, IpcTransportErrorCode, TransportResult, map_bind_error, timeout_error,
         transport_io,
     },
-    platform::contract::ipc::{IpcEndpoint, ServerScopeId},
 };
 
 use crate::platform::services::ipc::TrustedUserIdentity;

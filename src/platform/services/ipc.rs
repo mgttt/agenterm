@@ -10,9 +10,9 @@ use std::{
     time::Duration,
 };
 
-use crate::{
-    ipc_transport::{IpcTransportError, TransportResult},
-    platform::contract::ipc::{IpcEndpoint, ServerScopeId},
+use crate::platform::contract::{
+    ipc::{IpcEndpoint, ServerScopeId},
+    ipc_transport::{IpcTransportError, TransportResult, unsupported},
 };
 
 use crate::platform::selected::ipc as adapter;
@@ -115,5 +115,5 @@ pub(crate) fn unsupported_native_endpoint(
     endpoint: &IpcEndpoint,
     message: &'static str,
 ) -> IpcTransportError {
-    crate::ipc_transport::unsupported(endpoint, message)
+    unsupported(endpoint, message)
 }
