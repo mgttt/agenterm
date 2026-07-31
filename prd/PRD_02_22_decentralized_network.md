@@ -81,10 +81,15 @@ N2-M1
   has a 4 MiB per-block, 32 MiB/1024-block store budget with pin/unpin/GC,
   stored-versus-verified accounting and corruption rejection. Cross-platform
   load, interrupted-mutation and repair evidence remain open.
-- [ ] Kademlia DHT, GossipSub and relay have individual capability IDs,
-  listener/peer/message/bandwidth/task budgets, bounded I/O, receipts and
-  Unsupported results. Public bootstrap, NAT traversal and relay serving are
-  off unless the user explicitly configures them.
+- [~] Kademlia DHT, GossipSub and circuit-relay-v2 now each have an explicit
+  `research/agenterm-net mesh-self-test --json` deterministic private-memory
+  proof and individual prototype capability records: DHT provider/hub/seeker
+  discovery with zero public bootstrap attempts, signed strict-validation
+  GossipSub under a 16 KiB transmit ceiling, and relay reservation/circuit
+  acceptance. Normal nodes keep public bootstrap, NAT traversal, relay serving
+  and remote control false. Cross-process TCP, reconnect, rate/queue/bandwidth
+  exhaustion, resource load and three-platform evidence remain required before
+  these can be a stable node capability.
 - [ ] Remote Fleet attach is pair-created and read-only: an expiring invite
   binds expected peer identity, nonce and scope; the projection contains only
   bounded snapshot/event-digest data. It cannot send terminal input, execute a
