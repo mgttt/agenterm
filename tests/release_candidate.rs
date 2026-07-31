@@ -159,7 +159,12 @@ fn fixture(name: &str) -> Fixture {
                 "source_commit": SOURCE_SHA,
                 "source_tag": format!("v{VERSION}"),
                 "artifact_manifest_sha256": artifact_hash,
-                "cargo_lock_sha256": cargo_hash
+                "cargo_lock_sha256": cargo_hash,
+                "sbom_sha256": if os == "macos" {
+                    sbom_hash.clone()
+                } else {
+                    String::new()
+                }
             }),
         );
     }
@@ -401,6 +406,21 @@ fn candidate_rejects_provenance_lies_and_missing_unsigned_preview_notice() {
         let rejected = aggregate(&fixture);
         assert!(!rejected.status.success());
         assert!(output_text(&rejected).contains("candidate_provenance_cargo_lock"));
+    }
+
+    {
+        let fixture = fixture("provenance-macos-sbom");
+        let provenance_path = fixture.assets.join(format!(
+            "agenterm-{VERSION}-macos-x86_64-unsigned-preview.zip.provenance.json"
+        ));
+        let mut provenance: Value =
+            serde_json::from_slice(&fs::read(&provenance_path).expect("read provenance"))
+                .expect("parse provenance");
+        provenance["sbom_sha256"] = json!("f".repeat(64));
+        write_json(&provenance_path, &provenance);
+        let rejected = aggregate(&fixture);
+        assert!(!rejected.status.success());
+        assert!(output_text(&rejected).contains("candidate_provenance_sbom"));
     }
 
     let fixture = fixture("preview-notice");

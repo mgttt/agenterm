@@ -59,6 +59,10 @@ request a precise human action.
 
 Do not make every `main` push run a six-platform Candidate. Candidate creation
 requires explicit intent even when its mechanical dispatch is automated.
+The current Candidate input must equal the dispatch-time `main` HEAD; it is not
+a selector for an older ancestor. Supporting historical commits would require
+separately sealing and verifying the workflow-controller commit as well as the
+payload source commit.
 
 ## Bounded observation
 

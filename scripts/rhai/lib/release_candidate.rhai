@@ -347,7 +347,8 @@ fn validate_provenance(
     os_name,
     arch,
     cargo_hash,
-    artifact_hash
+    artifact_hash,
+    sbom_hash
 ) {
     require(
         provenance.schema_version == 1
@@ -378,6 +379,10 @@ fn validate_provenance(
         "candidate_provenance_platform:" + name
     );
     if os_name == "macos" {
+        require(
+            provenance.sbom_sha256 == sbom_hash,
+            "candidate_provenance_sbom:" + name
+        );
         require(
             (
                 provenance.channel == "release"
@@ -568,7 +573,8 @@ fn validate_manifest(source_root_value, manifest, asset_root_value, now_ms) {
             spec.os,
             spec.arch,
             cargo_hash,
-            artifact_hash
+            artifact_hash,
+            sbom_hash
         );
         require(
             asset.channel == provenance.channel
@@ -681,6 +687,7 @@ fn build_manifest(
     let cargo_hash = file_hash(cargo_path, "candidate_cargo_lock_missing");
     let artifact_hash =
         file_hash(artifact_path, "candidate_artifact_manifest_missing");
+    let sbom_hash = file_hash(sbom_path, "candidate_sbom_missing");
 
     let assets = [];
     let mac_channel = "";
@@ -706,7 +713,8 @@ fn build_manifest(
             spec.os,
             spec.arch,
             cargo_hash,
-            artifact_hash
+            artifact_hash,
+            sbom_hash
         );
         if spec.os == "macos" {
             if mac_channel == "" {

@@ -117,8 +117,9 @@ read `skills/agenterm-release/SKILL.md` and its authentication reference.
 `Release Candidate` performs the one stress-inclusive Windows qualification
 and builds/seals all six platform artifacts before a tag exists. `Release`
 accepts an exact Candidate run plus explicit `publish-vX.Y.Z` confirmation,
-revalidates the sealed bytes, atomically creates the tag, and promotes without
-Cargo, tests, packaging, signing, notarization, or overwrite. `release.cmd`
+revalidates the sealed bytes, creates only the exact tag, and promotes through
+a recoverable unpublished draft without Cargo, tests, packaging, signing,
+notarization, or overwrite. `release.cmd`
 validates or rehearses only and intentionally refuses local publication.
 Candidate dispatch is a mechanical action that may be automated after an
 explicit exact-SHA request; public Promotion is the human release-authority

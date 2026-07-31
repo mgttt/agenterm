@@ -99,6 +99,7 @@ jobs:
       - name: Verify candidate identity and every byte
         id: bundle
         env:
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
           CONFIRMATION: ${{ inputs.confirmation }}
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -126,15 +127,47 @@ jobs:
             sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n1
           )"
           [[ "$version" == "$cargo_version" ]]
-          if git ls-remote --exit-code --tags origin "refs/tags/$tag" \
-              >/dev/null 2>&1
-          then
-            echo "Release tag already exists: $tag" >&2
+          "$RUNNER_TEMP/agenterm-promotion-tool/agenterm-script" \
+            run scripts/rhai/promotion-identity.rhai --project-root . -- \
+            "$manifest" "$CANDIDATE_RUN_ID" "$source_sha" \
+            candidate/promotion-identity.json >/dev/null
+          identity="candidate/promotion-identity.json"
+          marker="$(jq -r .marker "$identity")"
+          release_body="$(jq -r .body "$identity")"
+          find_release_by_tag() {
+            local wanted="$1"
+            gh api --paginate --slurp \
+              "repos/$GITHUB_REPOSITORY/releases?per_page=100" |
+              jq -cr --arg wanted "$wanted" '
+                [.[][] | select(.tag_name == $wanted)] |
+                if length == 0 then null
+                elif length == 1 then .[0]
+                else error("duplicate releases for tag")
+                end
+              '
+          }
+          tag_sha="$(
+            git ls-remote --refs --tags origin "refs/tags/$tag" |
+              awk 'NR == 1 {print $1}'
+          )"
+          if [[ -n "$tag_sha" && "$tag_sha" != "$source_sha" ]]; then
+            echo "Release tag $tag points to unexpected SHA $tag_sha." >&2
             exit 1
           fi
-          if gh release view "$tag" >/dev/null 2>&1; then
-            echo "GitHub Release already exists: $tag" >&2
-            exit 1
+          release="$(find_release_by_tag "$tag")"
+          if [[ "$release" != "null" ]]; then
+            if [[ "$(jq -r .draft <<<"$release")" != "true" ]]; then
+              echo "Published GitHub Release already exists: $tag" >&2
+              exit 1
+            fi
+            [[ "$(jq -r .tag_name <<<"$release")" == "$tag" ]]
+            [[ "$(jq -r .name <<<"$release")" == "AgenTerm $tag" ]]
+            [[ "$(jq -r .body <<<"$release")" == "$release_body" ]]
+            if [[ -z "$tag_sha" ]]; then
+              [[ "$(jq -r .target_commitish <<<"$release")" == \
+                "$source_sha" ]]
+            fi
+            echo "Recovering exact unpublished draft for $tag."
           fi
           echo "version=$version" >>"$GITHUB_OUTPUT"
           echo "tag=$tag" >>"$GITHUB_OUTPUT"
@@ -185,6 +218,7 @@ jobs:
 
       - name: Create draft and publish immutable Release
         env:
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
           GH_TOKEN: ${{ github.token }}
           SOURCE_SHA: ${{ needs.verify.outputs.source_sha }}
           TAG: ${{ needs.verify.outputs.tag }}
@@ -196,6 +230,28 @@ jobs:
               -name 'agenterm-*-candidate-manifest.json' -print -quit
           )"
           test -n "$manifest"
+          identity="candidate/promotion-identity.json"
+          test -f "$identity"
+          [[ "$(jq -r .schema_version "$identity")" == "1" ]]
+          [[ "$(jq -r .kind "$identity")" == \
+            "agenterm-promotion-identity" ]]
+          [[ "$(jq -r .candidate_run_id "$identity")" == \
+            "$CANDIDATE_RUN_ID" ]]
+          [[ "$(jq -r .source_sha "$identity")" == "$SOURCE_SHA" ]]
+          [[ "$(jq -r .version "$identity")" == "$VERSION" ]]
+          [[ "$(jq -r .tag "$identity")" == "$TAG" ]]
+          manifest_sha256="$(sha256sum "$manifest" | cut -d' ' -f1)"
+          [[ "$(jq -r .manifest_sha256 "$identity")" == \
+            "$manifest_sha256" ]]
+          marker="$(jq -r .marker "$identity")"
+          release_body="$(jq -r .body "$identity")"
+          body_sha256="$(
+            printf '%s' "$release_body" | sha256sum | cut -d' ' -f1
+          )"
+          [[ "$(jq -r .body_sha256 "$identity")" == "$body_sha256" ]]
+          identity_mac_channel="$(jq -r .mac_channel "$identity")"
+          expected_marker="<!-- agenterm-promotion:v1 candidate_run_id=$CANDIDATE_RUN_ID source_sha=$SOURCE_SHA manifest_sha256=$manifest_sha256 mac_channel=$identity_mac_channel -->"
+          [[ "$marker" == "$expected_marker" ]]
           mac_channel="$(
             jq -er '
               [.assets[] | select(.os == "macos") | .channel] |
@@ -205,19 +261,10 @@ jobs:
               end
             ' "$manifest"
           )"
-          preview_notice="$RUNNER_TEMP/macos-unsigned-preview-release-notice.md"
+          [[ "$identity_mac_channel" == "$mac_channel" ]]
           if [[ "$mac_channel" == "macos-unsigned-preview" ]]; then
-            cat >"$preview_notice" <<'EOF'
-          <!-- agenterm-macos-unsigned-preview -->
-          ## macOS unsigned preview — not the stable macOS channel
-
-          Assets whose names end in `-macos-*-unsigned-preview.zip` are not
-          signed with an Apple Developer ID and are not notarized by Apple.
-          Verify the adjacent SHA-256 and provenance files, then read the
-          downloadable `MACOS_UNSIGNED_PREVIEW_README.md` before opening.
-          Do not disable Gatekeeper globally or recursively remove quarantine.
-          <!-- /agenterm-macos-unsigned-preview -->
-          EOF
+            [[ "$release_body" == *"macOS unsigned preview"* ]]
+            [[ "$release_body" == *"MACOS_UNSIGNED_PREVIEW_README.md"* ]]
           elif [[ "$mac_channel" != "release" ]]; then
             echo "Unexpected macOS Candidate channel: $mac_channel" >&2
             exit 1
@@ -230,29 +277,124 @@ jobs:
             } | sort -z
           )
           test "${#files[@]}" -gt 0
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Refusing to overwrite existing Release $TAG." >&2
-            exit 1
+          find_release_by_tag() {
+            local wanted="$1"
+            gh api --paginate --slurp \
+              "repos/$GITHUB_REPOSITORY/releases?per_page=100" |
+              jq -cr --arg wanted "$wanted" '
+                [.[][] | select(.tag_name == $wanted)] |
+                if length == 0 then null
+                elif length == 1 then .[0]
+                else error("duplicate releases for tag")
+                end
+              '
+          }
+          if actual_tag_sha="$(
+              gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" \
+                --jq .object.sha 2>/dev/null
+            )"
+          then
+            [[ "$actual_tag_sha" == "$SOURCE_SHA" ]]
+          else
+            gh api --method POST \
+              "repos/$GITHUB_REPOSITORY/git/refs" \
+              -f ref="refs/tags/$TAG" \
+              -f sha="$SOURCE_SHA" >/dev/null
+            actual_tag_sha="$(
+              gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" \
+                --jq .object.sha
+            )"
           fi
-          gh api --method POST \
-            "repos/$GITHUB_REPOSITORY/git/refs" \
-            -f ref="refs/tags/$TAG" \
-            -f sha="$SOURCE_SHA" >/dev/null
-          actual_tag_sha="$(
-            gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" \
-              --jq .object.sha
-          )"
           [[ "$actual_tag_sha" == "$SOURCE_SHA" ]]
+
           release_args=(
             --draft \
             --title "AgenTerm $TAG" \
-            --generate-notes
             --verify-tag
+            --notes "$release_body"
           )
-          if [[ "$mac_channel" == "macos-unsigned-preview" ]]; then
-            release_args+=(--notes "$(cat "$preview_notice")")
+
+          release="$(find_release_by_tag "$TAG")"
+          if [[ "$release" != "null" ]]; then
+            [[ "$(jq -r .draft <<<"$release")" == "true" ]]
+            [[ "$(jq -r .tag_name <<<"$release")" == "$TAG" ]]
+            [[ "$(jq -r .name <<<"$release")" == "AgenTerm $TAG" ]]
+            [[ "$(jq -r .body <<<"$release")" == "$release_body" ]]
+          else
+            gh release create "$TAG" "${release_args[@]}"
+            release="$(find_release_by_tag "$TAG")"
+            [[ "$release" != "null" ]]
+            [[ "$(jq -r .draft <<<"$release")" == "true" ]]
+            [[ "$(jq -r .name <<<"$release")" == "AgenTerm $TAG" ]]
+            [[ "$(jq -r .body <<<"$release")" == "$release_body" ]]
           fi
-          gh release create "$TAG" "${files[@]}" "${release_args[@]}"
+
+          find_local_asset() {
+            local wanted="$1"
+            local candidate
+            LOCAL_ASSET=""
+            for candidate in "${files[@]}"; do
+              if [[ "$(basename "$candidate")" == "$wanted" ]]; then
+                [[ -z "$LOCAL_ASSET" ]]
+                LOCAL_ASSET="$candidate"
+              fi
+            done
+            [[ -n "$LOCAL_ASSET" ]]
+          }
+
+          verify_remote_assets() {
+            local release_json="$1"
+            local id name size digest local_size local_hash remote_hash
+            local remote_file
+            local count=0
+            while IFS=$'\t' read -r id name size digest; do
+              [[ -n "$id" ]]
+              find_local_asset "$name"
+              local_size="$(stat -c %s "$LOCAL_ASSET")"
+              [[ "$size" == "$local_size" ]]
+              local_hash="$(sha256sum "$LOCAL_ASSET" | cut -d' ' -f1)"
+              remote_hash="${digest#sha256:}"
+              if [[ ! "$remote_hash" =~ ^[0-9a-f]{64}$ ]]; then
+                remote_file="$RUNNER_TEMP/release-asset-$id"
+                gh api \
+                  -H "Accept: application/octet-stream" \
+                  "repos/$GITHUB_REPOSITORY/releases/assets/$id" \
+                  >"$remote_file"
+                remote_hash="$(
+                  sha256sum "$remote_file" | cut -d' ' -f1
+                )"
+                rm -f "$remote_file"
+              fi
+              [[ "$remote_hash" == "$local_hash" ]]
+              count=$((count + 1))
+            done < <(
+              jq -r '
+                .assets[] |
+                [.id, .name, .size, (.digest // "")] |
+                @tsv
+              ' <<<"$release_json"
+            )
+            REMOTE_ASSET_COUNT="$count"
+          }
+
+          verify_remote_assets "$release"
+          for file in "${files[@]}"; do
+            name="$(basename "$file")"
+            if ! jq -e --arg name "$name" \
+                '.assets[] | select(.name == $name)' \
+                <<<"$release" >/dev/null
+            then
+              gh release upload "$TAG" "$file"
+            fi
+          done
+
+          release="$(find_release_by_tag "$TAG")"
+          [[ "$release" != "null" ]]
+          [[ "$(jq -r .draft <<<"$release")" == "true" ]]
+          [[ "$(jq -r .name <<<"$release")" == "AgenTerm $TAG" ]]
+          [[ "$(jq -r .body <<<"$release")" == "$release_body" ]]
+          verify_remote_assets "$release"
+          [[ "$REMOTE_ASSET_COUNT" == "${#files[@]}" ]]
           gh release edit "$TAG" --draft=false
 
       - name: Report promotion latency

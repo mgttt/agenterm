@@ -179,10 +179,26 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     hash, and promotes those bytes without Cargo compilation, packaging or a
     second full GUI/stress suite; static policy tests pass, while the first
     non-publishing remote rehearsal remains to be recorded
+  - [x] Promotion is recoverable after a tag-only or partially uploaded draft
+    interruption: an existing tag is accepted only when it resolves to the
+    exact Candidate SHA, only an unpublished matching draft may resume, every
+    existing remote asset must match an allowlisted Candidate name, size and
+    SHA-256, missing assets upload without overwrite, and the exact asset set
+    is reverified before the draft becomes public
+  - [x] the unpublished draft title and complete body are bound to a typed
+    Promotion identity containing Candidate run ID, source SHA, Candidate
+    manifest hash and macOS channel. Recovery requires exact title/body
+    equality and the body hash; an arbitrary same-tag draft or edited release
+    note cannot acquire authority merely by retaining the right asset names
   - [x] candidate selection fails closed for branch-only identity, a merely
     recent successful run, missing/expired artifacts, an incomplete platform
     matrix, receipt drift or tampered bytes; fallback means producing a new
     candidate, not silently rebuilding during promotion
+  - [x] Candidate currently binds the requested source to dispatch-time
+    `main` HEAD as well as the checked-out payload. Historical ancestors are
+    rejected until controller-workflow identity can be sealed separately from
+    payload-source identity; an input SHA must not imply support for that
+    ambiguous two-commit model
   - [x] Candidate dispatch is a mechanical, non-publishing action that may be
     automated after an explicit exact-SHA candidate request; public Promotion
     remains the human authority boundary and requires a separate approval.
@@ -199,6 +215,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     and a read-only post-run observer records bounded queue/run/job/step
     durations plus Candidate/Promotion SLO results. Cross-run percentile and
     cache-byte aggregation remain planned
+  - [x] Candidate aggregation binds the single deterministic SPDX document to
+    the Windows qualification receipt and independently verifies both macOS
+    archive provenance records carry that same SBOM SHA-256; a platform
+    provenance cannot substitute an unrelated inventory
   - [~] Cargo registry/git and compatible compilation caches use OS,
     architecture, toolchain, lock, target, feature/profile and versioned-salt
     identity. Cache miss, corruption or vendor outage affects speed only;
@@ -208,10 +228,15 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     AgenTerm cold/warm workload, pinned actions, least privilege and a
     one-change fallback to standard GitHub-hosted runners; untrusted pull
     requests never receive release credentials or trusted self-hosted capacity.
-    A manual three-sample Windows Quick experiment now compares isolated
-    target, sccache and no-cache strategies on the standard runner or one
-    explicitly configured trial label; paid runner provisioning and measured
-    A/B evidence remain human-controlled
+    A manual Windows Quick experiment now runs ordered cold-to-warm samples on
+    one standard runner or one explicitly configured trial label, isolates
+    target/sccache/no-cache semantics, gives sccache each workflow run a unique
+    remote namespace, and emits separate cold and warm-median/range facts plus
+    typed hit/miss/error counters and hashes of the raw cache statistics.
+    Quick evidence may optimize ordinary feedback but cannot alone justify a
+    Candidate runner purchase; that decision also requires real
+    release/stress timing. Paid provisioning and measured A/B evidence remain
+    human-controlled
 - v0.1.7 internal delivery rehearsal (no tag or public GitHub Release)
   - [x] the repository-native coordinator completes a read-only local
     clean-tree/version/HEAD/lock/remote/auth preflight or dry-run in p95 <= 15

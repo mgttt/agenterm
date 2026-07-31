@@ -18,7 +18,8 @@ fn experiment_is_manual_read_only_and_exact_source_bound() {
 
 #[test]
 fn experiment_uses_three_equal_samples_and_one_configured_trial_switch() {
-    assert!(WORKFLOW.contains("sample: [1, 2, 3]"));
+    assert!(WORKFLOW.contains("foreach ($sample in 1..3)"));
+    assert!(!WORKFLOW.contains("matrix:\n        sample:"));
     assert!(WORKFLOW.contains("vars.AGENTERM_WINDOWS_EXPERIMENT_RUNNER"));
     assert!(WORKFLOW.contains("test -n \"$TRIAL_RUNNER\""));
     assert!(WORKFLOW.contains("'windows-latest'"));
@@ -37,10 +38,21 @@ fn cache_strategies_are_isolated_fail_safe_and_observable() {
     );
     assert!(WORKFLOW.contains("CARGO_INCREMENTAL:"));
     assert!(WORKFLOW.contains("RUSTC_WRAPPER:"));
+    assert!(WORKFLOW.contains("cargo clean"));
+    assert!(WORKFLOW.contains("sccache --zero-stats"));
     assert!(WORKFLOW.contains("sccache --show-stats --stats-format json"));
-    assert_eq!(WORKFLOW.matches("uses: actions/cache/").count(), 2);
-    assert_eq!(WORKFLOW.matches("continue-on-error: true").count(), 3);
-    assert!(!WORKFLOW.contains("cache-hit"));
+    assert!(
+        WORKFLOW
+            .contains("SCCACHE_GHA_VERSION: perf-${{ github.run_id }}-${{ github.run_attempt }}")
+    );
+    assert!(!WORKFLOW.contains("uses: actions/cache/"));
+    assert!(WORKFLOW.contains("performance-summary.rhai"));
+    assert!(WORKFLOW.contains("performance-summary.json"));
+    assert!(WORKFLOW.contains("performance-evidence\\performance-$sample.json"));
+    assert!(WORKFLOW.contains("sccache-1.json"));
+    assert!(WORKFLOW.contains("sccache-2.json"));
+    assert!(WORKFLOW.contains("sccache-3.json"));
+    assert!(!WORKFLOW.contains("target\\qualification\\performance-"));
 }
 
 #[test]
@@ -60,6 +72,7 @@ fn experiment_runs_quick_only_and_cannot_publish_or_claim_qualification() {
             "forbidden experiment behavior: {forbidden}"
         );
     }
+    assert!(WORKFLOW.contains("Aggregate typed experiment evidence"));
     assert!(WORKFLOW.contains("retention-days: 14"));
     assert!(WORKFLOW.contains("if-no-files-found: warn"));
 }

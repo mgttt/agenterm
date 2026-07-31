@@ -49,6 +49,34 @@ fn environment_or_empty(name) {
     }
 }
 
+fn valid_source_sha(value) {
+    if value.len != 40 {
+        return false;
+    }
+    for character in value {
+        if !"0123456789abcdef".contains(character.to_string()) {
+            return false;
+        }
+    }
+    true
+}
+
+fn git_head(repo) {
+    let command = std::process::command("git");
+    command.args(["rev-parse", "HEAD"]);
+    command.current_dir(repo);
+    command.timeout(std::time::Duration::from_secs(10));
+    let output = command.output();
+    require(output.success, output.error("package_client_git_head"));
+    let head = output.stdout_text();
+    head.trim();
+    require(
+        valid_source_sha(head),
+        "package_client_git_head_invalid"
+    );
+    head
+}
+
 fn package_version(repo) {
     let cargo = std::fs::read_to_string(
         std::path::join(repo, "Cargo.toml").display
@@ -313,6 +341,23 @@ try {
         );
     }
     let archive_hash = rhai::crypto::sha256_file(archive);
+    let source_commit =
+        if std::env::has("AGENTERM_CANDIDATE_SOURCE_SHA") {
+            let value = std::env::get("AGENTERM_CANDIDATE_SOURCE_SHA");
+            require(
+                valid_source_sha(value),
+                "package_client_candidate_source"
+            );
+            require(
+                value == git_head(repo),
+                "package_client_candidate_source_mismatch"
+            );
+            value
+        } else if std::env::has("GITHUB_SHA") {
+            std::env::get("GITHUB_SHA")
+        } else {
+            ""
+        };
     let package_manifest = #{
         schema_version: 1,
         product: "AgenTerm",
@@ -328,11 +373,7 @@ try {
         notarized: false,
         artifact: archive_name,
         sha256: archive_hash,
-        source_commit: if std::env::has("GITHUB_SHA") {
-            std::env::get("GITHUB_SHA")
-        } else {
-            ""
-        },
+        source_commit: source_commit,
         source_tag: "v" + version,
         artifact_manifest_sha256:
             rhai::crypto::sha256_file(artifact_manifest_path),

@@ -26,8 +26,10 @@ delivery topology from an older release or from Git push behavior.
 
 1. Synchronize and inspect `origin/main`; preserve other platform agents'
    commits.
-2. Require one exact lowercase 40-character source SHA on `main` and a
-   successful ordinary CI run for that SHA.
+2. Require the exact lowercase 40-character current `origin/main` HEAD and a
+   successful ordinary CI run for that SHA. Candidate currently rejects a
+   historical main ancestor because `workflow_dispatch` controller identity,
+   provenance, and Promotion must remain one unambiguous commit.
 3. Run local lint and only the owning policy/fixture tests before dispatch.
 4. Dispatch `candidate.yml` for that exact SHA through an actually available,
    authenticated Actions capability.
@@ -63,9 +65,13 @@ Promotion is a separate human authority boundary.
 3. Require the configured `release` environment approval when available.
 4. Verify that Promotion performs no Cargo build, test, package, signing,
    notarization, or overwrite.
-5. Verify the tag points to the Candidate SHA, the Release contains the exact
-   allowlisted bytes, and `Release asset integrity` succeeds.
-6. Report remaining risk and links; never claim success from a draft,
+5. A retry may resume only an exact-SHA tag and unpublished matching draft.
+   Verify its Candidate marker, exact title/body/body hash, and every retained
+   asset by allowlisted name, size, and SHA-256; upload only missing assets
+   without overwrite.
+6. Verify the tag points to the Candidate SHA, the published Release contains
+   the exact allowlisted bytes, and `Release asset integrity` succeeds.
+7. Report remaining risk and links; never claim success from a draft,
    incomplete matrix, or merely green tag-independent CI.
 
 Without explicit public-release approval, stop after Candidate verification.

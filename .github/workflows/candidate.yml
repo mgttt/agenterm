@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       source_sha:
-        description: Exact 40-character main commit to qualify
+        description: Exact 40-character current main HEAD to qualify
         required: true
         type: string
 
@@ -50,6 +50,8 @@ jobs:
 
   build:
     needs: preflight
+    env:
+      AGENTERM_CANDIDATE_SOURCE_SHA: ${{ inputs.source_sha }}
     strategy:
       fail-fast: false
       matrix:
@@ -84,7 +86,6 @@ jobs:
         shell: bash
         run: |
           python3 <<'PY'
-          import os
           import re
           import sys
 
@@ -98,12 +99,7 @@ jobs:
           expected = f"v{match.group('version')}"
           if expected == "v0.1.7":
               sys.exit("v0.1.7 is an internal-only baseline and cannot become a candidate.")
-          source = os.environ["SOURCE_SHA"]
-          if os.environ["GITHUB_SHA"] != source:
-              sys.exit("Candidate input does not match the workflow source SHA.")
           PY
-        env:
-          SOURCE_SHA: ${{ inputs.source_sha }}
 
       - name: Install lint components
         if: matrix.platform_id == 'windows-x86_64'
@@ -112,16 +108,18 @@ jobs:
       - name: Run release quality gate
         if: matrix.platform_id == 'windows-x86_64'
         shell: cmd
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
         run: |
           @echo off
           set "LOG=%RUNNER_TEMP%\agenterm-release-check.log"
           for /f "delims=" %%H in ('git rev-parse HEAD') do set "ACTUAL_HEAD=%%H"
-          if /I not "%ACTUAL_HEAD%"=="%GITHUB_SHA%" (
-            echo Checked-out HEAD %ACTUAL_HEAD% does not match event SHA %GITHUB_SHA%. > "%LOG%"
+          if /I not "%ACTUAL_HEAD%"=="%SOURCE_SHA%" (
+            echo Checked-out HEAD %ACTUAL_HEAD% does not match Candidate SHA %SOURCE_SHA%. > "%LOG%"
             type "%LOG%"
             exit /b 1
           )
-          git switch -C main "%GITHUB_SHA%" > "%LOG%" 2>&1
+          git switch -C main "%SOURCE_SHA%" > "%LOG%" 2>&1
           if errorlevel 1 (
             type "%LOG%"
             exit /b 1

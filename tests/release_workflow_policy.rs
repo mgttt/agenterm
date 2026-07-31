@@ -27,6 +27,8 @@ fn candidate_is_manual_exact_sha_and_has_no_publish_authority() {
     assert!(CANDIDATE.contains("git merge-base --is-ancestor"));
     assert!(CANDIDATE.contains("workflows/ci.yml/runs?head_sha=$SOURCE_SHA&status=success"));
     assert!(CANDIDATE.contains("ref: ${{ inputs.source_sha }}"));
+    assert!(CANDIDATE.contains("AGENTERM_CANDIDATE_SOURCE_SHA: ${{ inputs.source_sha }}"));
+    assert!(CANDIDATE.contains("git switch -C main \"%SOURCE_SHA%\""));
 }
 
 #[test]
@@ -79,6 +81,19 @@ fn promotion_is_manual_candidate_bound_and_performs_no_build_or_overwrite() {
     assert!(PROMOTION.contains("contents: write"));
     assert!(PROMOTION.contains("repos/$GITHUB_REPOSITORY/git/refs"));
     assert!(PROMOTION.contains("--verify-tag"));
+    assert!(PROMOTION.contains("Recovering exact unpublished draft"));
+    assert!(PROMOTION.contains("agenterm-promotion-identity"));
+    assert!(PROMOTION.contains("scripts/rhai/promotion-identity.rhai"));
+    assert!(PROMOTION.contains("agenterm-promotion:v1 candidate_run_id="));
+    assert!(PROMOTION.contains("body_sha256"));
+    assert!(PROMOTION.contains("[[ \"$(jq -r .body <<<\"$release\")\" == \"$release_body\" ]]"));
+    assert!(PROMOTION.contains("[[ \"$(jq -r .name <<<\"$release\")\" == \"AgenTerm $TAG\" ]]"));
+    assert!(!PROMOTION.contains("--generate-notes"));
+    assert!(PROMOTION.contains("gh api --paginate --slurp"));
+    assert!(PROMOTION.contains("select(.tag_name == $wanted)"));
+    assert!(PROMOTION.contains("verify_remote_assets"));
+    assert!(PROMOTION.contains("gh release upload \"$TAG\" \"$file\""));
+    assert!(PROMOTION.contains("sha256sum \"$remote_file\""));
     assert!(PROMOTION.contains("path: candidate/"));
     assert!(!PROMOTION.contains(".agenterm-script.bin"));
     for forbidden in [

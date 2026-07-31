@@ -1027,6 +1027,21 @@ fn macos_package_task_reads_both_platform_rows_and_writes_preview_zip() {
     } else {
         "windows"
     };
+    let candidate_source = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .expect("read package source commit");
+    assert!(
+        candidate_source.status.success(),
+        "git rev-parse failed: {}",
+        String::from_utf8_lossy(&candidate_source.stderr)
+    );
+    let candidate_source = String::from_utf8(candidate_source.stdout)
+        .expect("source commit is UTF-8")
+        .trim()
+        .to_owned();
     for architecture in ["aarch64", "x86_64"] {
         let output = Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
             .current_dir(repo)
@@ -1040,6 +1055,7 @@ fn macos_package_task_reads_both_platform_rows_and_writes_preview_zip() {
             .env("AGENTERM_PACKAGE_SBOM", &sbom)
             .env("AGENTERM_HOST_OS", host_os)
             .env("AGENTERM_HOST_ARCH", host_arch)
+            .env("AGENTERM_CANDIDATE_SOURCE_SHA", &candidate_source)
             .output()
             .expect("run macOS package task");
         assert!(
@@ -1085,6 +1101,7 @@ fn macos_package_task_reads_both_platform_rows_and_writes_preview_zip() {
         assert_eq!(provenance["signed"], false);
         assert_eq!(provenance["notarized"], false);
         assert_eq!(provenance["sha256"], archive_hash);
+        assert_eq!(provenance["source_commit"], candidate_source.as_str());
         assert_eq!(
             provenance["sbom_sha256"],
             sha256(&fs::read(&sbom).expect("read SBOM"))
