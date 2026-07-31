@@ -225,6 +225,8 @@
         "control-center.live-cockpit",
         "control-center.process-reuse",
         "control-center.context-refresh",
+        "control-center.launch-failure",
+        "control-center.server-recovery",
         "control-center.no-activate",
         "control-center.typed-close",
         "control-center.process-isolation"

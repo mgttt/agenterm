@@ -55,6 +55,20 @@ for executable in matches[0].executables {
                 let capability = rhai::json::parse(
                     output.stdout_text() + output.stderr_text()
                 );
+                let expected_webview_backend = "";
+                if os_name == "windows" {
+                    expected_webview_backend = "webview2";
+                } else if os_name == "macos" {
+                    expected_webview_backend = "wkwebview";
+                } else if os_name == "linux" {
+                    expected_webview_backend = "webkitgtk";
+                }
+                require(
+                    expected_webview_backend.len > 0,
+                    "client_smoke_webview_platform:" + os_name
+                );
+                let runtime_presence =
+                    capability.webview_host.runtime_presence;
                 require(
                     capability.schema_version == 1
                         && capability.executable == "agenterm-cc"
@@ -64,6 +78,21 @@ for executable in matches[0].executables {
                         && capability.no_activate
                         && capability.views.len == 4,
                     "client_smoke_control_center_capabilities"
+                );
+                require(
+                    capability.renderer == "native"
+                        && capability.webview_host.backend
+                            == expected_webview_backend
+                        && capability.webview_host.host_state
+                            == "unimplemented"
+                        && capability.webview_host.active_renderer == "native"
+                        && capability.webview_host.bridge_version == 1
+                        && (
+                            runtime_presence == "detected"
+                                || runtime_presence == "missing"
+                                || runtime_presence == "failed"
+                        ),
+                    "client_smoke_webview_host_contract"
                 );
             }
         }

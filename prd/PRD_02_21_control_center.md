@@ -91,9 +91,13 @@ Control Center is the product name; the executable family uses
   servers, while an open request from a terminal focuses the existing window
   and selects that caller's logical instance/server context. `--no-activate`
   ensures existence and context selection without stealing foreground focus.
-- [ ] loss or restart of the selected server produces explicit Offline,
+- [x] loss or restart of the selected server produces explicit Offline,
   Recovering, Restarted, or Incompatible state. A new epoch requires a fresh
-  baseline; stale projection data is never displayed as live continuity.
+  baseline; stale projection data is never displayed as live continuity. The
+  v0.1.11 public smoke removes the selected authority, observes explicit
+  `server_unreachable` without terminating Control Center, starts a replacement
+  at the same endpoint, and requires the same projection PID to adopt the new
+  authority identity and epoch before showing connected facts.
 
 ## Main-workspace entry
 
@@ -104,9 +108,13 @@ Control Center is the product name; the executable family uses
 - [ ] the toolbar, CLI, Script automation, and future platform surfaces invoke
   the same action identity and authority resolver rather than constructing
   process arguments or local endpoints independently.
-- [ ] a missing, incompatible, or failed `agenterm-cc` reports a non-blocking
+- [~] a missing, incompatible, or failed `agenterm-cc` reports a non-blocking
   typed result. It does not show a modal dialog, start another Fleet authority,
-  or make the terminal workspace unavailable.
+  or make the terminal workspace unavailable. Missing-binary launch is
+  black-box covered by an isolated copy of `agenterm-cli` with no sibling
+  Control Center: the request fails boundedly with
+  `control_center_unavailable`, creates no registry, and starts no server.
+  Protocol-incompatible-binary coverage remains open.
 
 ## Information architecture
 
@@ -185,32 +193,49 @@ Control Center is the product name; the executable family uses
 The v0.1.11 spike reports passive `runtime_presence` separately from
 `host_state`. A detected runtime never implies a working host:
 `host_state=unimplemented` and `active_renderer=native` remain truthful on
-all platforms. The renderer-neutral bridge v1 binds the exact packaged
+all platforms. The native client smoke on each executable host queries
+`agenterm-cc capabilities --json` without opening a window and requires the
+platform backend (`webview2`, `wkwebview`, or `webkitgtk`), the stable bridge
+version, the native active renderer, and the unimplemented host state
+independently of whether runtime presence is detected, missing, or failed.
+The renderer-neutral bridge v1 binds the exact packaged
 origin, main frame, per-document nonce, request ID and deadline; enforces a
 64 KiB message and eight-request concurrency bound; and exposes only
 `host.ready`, `host.facts`, and read-only `fleet.snapshot`. It has no generic
 eval, shell, process, network, navigation, listener, or download escape
 hatch. Actual host loading, packaged-resource integrity, startup/reload
-measurement, accessibility, and six-target runtime proof remain future
-promotion gates.
+measurement, accessibility, and renderer-owned Unix window evidence remain
+future promotion gates.
 
 ## v0.1.11 delivery gate
 
-- [ ] `agenterm-cc --help`, `--version`, and `capabilities --json` are
+- [~] `agenterm-cc --help`, `--version`, and `capabilities --json` are
   side-effect free and truthful on all six platform/architecture release
-  cells.
-- [ ] the main-workspace entry launches or focuses the matching Control Center;
+  cells. Native client probes validate the platform WebView backend,
+  renderer/host separation, bridge version, and runtime-presence vocabulary;
+  cross-built cells remain build/existence evidence rather than executable
+  runtime evidence.
+- [~] the main-workspace entry launches or focuses the matching Control Center;
   explicit no-activate preserves the prior foreground application, and a
   missing or incompatible binary fails without disturbing the terminal.
+  Process reuse, no-activate, and missing-sibling failure are black-box proven;
+  an incompatible sibling binary remains an open fault-injection case.
 - [ ] Control Center selects the same logical instance as its caller, consumes
   the shared endpoint resolver, and does not start a server or choose
   arbitrarily among multiple authorities.
 - [ ] Cockpit presents a causally identified snapshot and terminal-independent
   component availability; Workflows, Extensions, and InfoHub have stable
   navigation and truthful empty/unavailable states.
-- [ ] close, force-kill, renderer failure, server restart, server loss,
+- [~] close, force-kill, renderer failure, server restart, server loss,
   incompatible protocol, repeated open, and GUI-with-server-retained journeys
   prove process reuse, bounded cleanup, recovery, and PTY/workspace isolation.
+  The Windows public smoke now proves typed close, repeated-open PID reuse,
+  force-kill/stale-owner replacement, missing-binary failure, live server loss,
+  same-endpoint/new-epoch recovery in the existing Control Center PID, PTY
+  availability after recovery, and exact orphan cleanup. Renderer failure,
+  incompatible protocol, and the cross-process GUI-detached/server-retained
+  combination remain explicit open leaves; the Human GUI's detach and server
+  retention are independently owned by `remote-ui-smoke`.
 - [~] structured snapshot/action evidence and PNG evidence agree on selected
   view, connection state, labels, availability, and geometry. The Windows
   Control Center smoke now pairs the connected Cockpit snapshot/window title
