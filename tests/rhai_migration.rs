@@ -189,7 +189,11 @@ fn run_write_build_metadata(
         .current_dir(repo)
         .args(["task", "run", "write-build-metadata", "--manifest"])
         .arg(manifest)
-        .args(["--timeout-ms", "10000", "--max-operations", "10000000"])
+        // Cold hosted Windows runners can spend close to ten seconds in the
+        // bounded rustc/git metadata probes alone. Keep this fixture bounded,
+        // but leave enough headroom for a cold VM instead of testing scheduler
+        // jitter.
+        .args(["--timeout-ms", "30000", "--max-operations", "10000000"])
         .arg("--")
         .arg(repo_under_test)
         .arg(output_path)
