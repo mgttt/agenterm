@@ -380,10 +380,11 @@ try {
         "control_center_live_snapshot"
     ));
     let live_server = live_snapshot.connected_server;
+    let typed_endpoint = "tcp:" + context.address;
     require(
         live_snapshot.server_state == "connected"
             && live_snapshot.server_reason == ()
-            && live_server.endpoint == context.address
+            && live_server.endpoint == typed_endpoint
             && live_server.logical_instance == "main"
             && live_server.pid == server.id
             && live_server.pid == bootstrap.server_pid
@@ -442,7 +443,7 @@ try {
     require(
         running.state == "running"
             && running.pid == first.id
-            && running.context.endpoint == context.address
+            && running.context.endpoint == typed_endpoint
             && running.context.logical_instance == "main",
         "control_center_live_window_context"
     );
