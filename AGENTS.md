@@ -206,6 +206,13 @@ owned by a dedicated smoke or qualification gate. Do not hide GUI, network,
 stress, packaging, or release work inside a lane whose name says it skips that
 work.
 
+For repository-wide Rhai syntax validation, use the bounded `agenterm-script
+check-many --manifest` path owned by `scripts/rhai/lint.rhai`, rather than
+spawning one Script process per file. It retains a fresh Engine and typed
+result for each input, while bounding the manifest, file count, source bytes,
+and aggregate deadline. Keep the direct single-file `check` command as the
+diagnostic and black-box parity baseline.
+
 The former `.cargo/config.toml` forced `jobs = 1` and made clean builds much
 slower. Do not restore a global job limit. Keep the default dev path
 incremental and let Cargo use the machine's logical CPUs. Use `release-fast`
