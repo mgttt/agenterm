@@ -91,6 +91,9 @@ this state does not yet satisfy the static source-boundary gate.
    POSIX `openpty`/fork/session/exec/poll and Windows ConPTY/job mechanics stay
    below the selected adapter, preserving the existing reader/wait concurrency
    and terminate-to-EOF ordering.
+   POSIX mechanics are now physically adapter-owned; Windows wrapper type
+   conversion remains the blocking leaf before `src/pty` can lose its final
+   compatibility projection.
    The first frontend leaf is complete: runtime-primary shell descriptors now
    select in adapters, so the Unix new-terminal dialog contains no macOS/Linux
    conditional or shell-path constant. Unix frontend clipboard selection also

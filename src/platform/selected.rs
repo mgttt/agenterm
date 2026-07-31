@@ -6,6 +6,9 @@
 #[cfg(windows)]
 #[path = "adapters/windows/ipc.rs"]
 pub(crate) mod ipc;
+#[cfg(windows)]
+#[path = "adapters/windows/pty.rs"]
+pub(crate) mod pty;
 
 #[cfg(windows)]
 #[path = "adapters/windows/script_http.rs"]
@@ -68,6 +71,9 @@ pub(crate) mod ui_screenshot;
 #[cfg(target_os = "linux")]
 #[path = "adapters/linux/ipc.rs"]
 pub(crate) mod ipc;
+#[cfg(target_os = "linux")]
+#[path = "adapters/linux/pty.rs"]
+pub(crate) mod pty;
 
 #[cfg(target_os = "linux")]
 #[path = "adapters/linux/script_http.rs"]
@@ -134,6 +140,9 @@ pub(crate) mod ui_screenshot;
 #[cfg(target_os = "macos")]
 #[path = "adapters/macos/ipc.rs"]
 pub(crate) mod ipc;
+#[cfg(target_os = "macos")]
+#[path = "adapters/macos/pty.rs"]
+pub(crate) mod pty;
 
 #[cfg(target_os = "macos")]
 #[path = "adapters/macos/script_http.rs"]
