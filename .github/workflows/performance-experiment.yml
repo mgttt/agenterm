@@ -89,40 +89,21 @@ jobs:
       - name: Install lint components
         run: rustup component add rustfmt clippy
 
+      - name: Build isolated Rhai experiment driver
+        shell: cmd
+        run: |
+          @cargo build --quiet --locked --bin agenterm-script
+          @if errorlevel 1 exit /b 1
+          @copy /y target\debug\agenterm-script.exe "%RUNNER_TEMP%\agenterm-perf-tool.exe" >nul
+          @if errorlevel 1 exit /b 1
+
       - name: Run ordered cold-to-warm Quick samples
-        shell: pwsh
+        shell: cmd
         env:
           CACHE_STRATEGY: ${{ inputs.compiler_cache }}
         run: |
-          $ErrorActionPreference = "Stop"
-          New-Item -ItemType Directory -Force `
-            -Path performance-evidence | Out-Null
-          foreach ($sample in 1..3) {
-            if ($env:CACHE_STRATEGY -ne "target") {
-              cargo clean
-              if ($LASTEXITCODE -ne 0) {
-                throw "cargo clean failed before sample $sample"
-              }
-            }
-            if ($env:CACHE_STRATEGY -eq "sccache") {
-              sccache --zero-stats | Out-Null
-              if ($LASTEXITCODE -ne 0) {
-                throw "sccache reset failed before sample $sample"
-              }
-            }
-            & .\check.cmd --quick --timing `
-              "performance-evidence\performance-$sample.json"
-            if ($LASTEXITCODE -ne 0) {
-              throw "Quick sample $sample failed"
-            }
-            if ($env:CACHE_STRATEGY -eq "sccache") {
-              sccache --show-stats --stats-format json |
-                Set-Content -Encoding utf8NoBOM "sccache-$sample.json"
-              if ($LASTEXITCODE -ne 0) {
-                throw "sccache statistics failed after sample $sample"
-              }
-            }
-          }
+          @"%RUNNER_TEMP%\agenterm-perf-tool.exe" run scripts\rhai\performance-samples.rhai --project-root . -- "%CACHE_STRATEGY%" performance-evidence
+          @if errorlevel 1 exit /b 1
 
       - name: Aggregate typed experiment evidence
         shell: cmd

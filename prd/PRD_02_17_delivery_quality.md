@@ -232,7 +232,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     one standard runner or one explicitly configured trial label, isolates
     target/sccache/no-cache semantics, gives sccache each workflow run a unique
     remote namespace, and emits separate cold and warm-median/range facts plus
-    typed hit/miss/error counters and hashes of the raw cache statistics.
+    typed hit/miss/error counters and hashes of the raw cache statistics. Its
+    sample semantics and process supervision are owned by a checked Rhai
+    program; the workflow and `cmd.exe` remain thin platform adapters only.
     Quick evidence may optimize ordinary feedback but cannot alone justify a
     Candidate runner purchase; that decision also requires real
     release/stress timing. Paid provisioning and measured A/B evidence remain
