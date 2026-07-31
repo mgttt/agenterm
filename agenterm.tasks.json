@@ -845,6 +845,7 @@
       "entry": "scripts/rhai/validate-artifact-manifest.rhai",
       "profile": "local",
       "cwd": ".",
+      "args": ["scripts/artifacts.json"],
       "dependencies": [],
       "platforms": ["windows", "linux", "macos"],
       "side_effects": []
