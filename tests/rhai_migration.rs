@@ -97,7 +97,7 @@ fn run_stage_artifact(source: &Path, destination: &Path, name: &str) -> Output {
         .expect("run Rhai artifact staging task")
 }
 
-fn run_validate_artifact_manifest(path: &Path) -> Output {
+fn run_validate_artifact_manifest() -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     let manifest = repo.join("agenterm.tasks.json");
@@ -105,10 +105,25 @@ fn run_validate_artifact_manifest(path: &Path) -> Output {
         .current_dir(repo)
         .args(["task", "run", "validate-artifact-manifest", "--manifest"])
         .arg(manifest)
+        .output()
+        .expect("run Rhai artifact-manifest validation task")
+}
+
+fn run_validate_artifact_manifest_fixture(path: &Path) -> Output {
+    let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+        .current_dir(repo)
+        .args([
+            "run",
+            "scripts/rhai/validate-artifact-manifest.rhai",
+            "--project-root",
+        ])
+        .arg(repo)
         .arg("--")
         .arg(path)
         .output()
-        .expect("run Rhai artifact-manifest validation task")
+        .expect("run Rhai artifact-manifest fixture validation")
 }
 
 fn run_release_validate(repo_under_test: &Path) -> Output {
@@ -878,6 +893,7 @@ fn macos_package_task_reads_both_platform_rows_and_writes_preview_zip() {
     for name in [
         "agenterm",
         "agenterm-cc",
+        "agenterm-server",
         "agenterm-cli",
         "agenterm-mux",
         "agenterm-script",
@@ -1100,8 +1116,7 @@ fn stage_artifact_task_replaces_only_a_valid_named_executable() {
 
 #[test]
 fn artifact_manifest_task_accepts_canonical_contract_and_rejects_invalid_fields() {
-    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let canonical = run_validate_artifact_manifest(&repo.join("scripts").join("artifacts.json"));
+    let canonical = run_validate_artifact_manifest();
     assert!(
         canonical.status.success(),
         "canonical artifact manifest failed:\nstdout={}\nstderr={}",
@@ -1179,7 +1194,7 @@ fn artifact_manifest_task_accepts_canonical_contract_and_rejects_invalid_fields(
             serde_json::to_vec_pretty(&value).expect("encode invalid fixture"),
         )
         .expect("write invalid fixture");
-        let rejected = run_validate_artifact_manifest(&path);
+        let rejected = run_validate_artifact_manifest_fixture(&path);
         assert!(
             !rejected.status.success(),
             "invalid {name} manifest unexpectedly passed"
@@ -1908,7 +1923,7 @@ fn rhai_qualified_package_accepts_only_the_exact_receipt_bytes() {
     );
     assert_eq!(
         String::from_utf8_lossy(&output.stdout).trim(),
-        "PASS: qualified package dry-run self-test"
+        "PASS: qualified dry-run and public package self-test"
     );
 }
 
