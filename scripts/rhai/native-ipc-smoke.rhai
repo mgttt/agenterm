@@ -1120,6 +1120,161 @@ try {
         registration_count(context.instance_directory) == 0,
         "native_ipc_registration_leak"
     );
+    if native_protocol.transport == "named_pipe" {
+        print("STEP killed Windows authority recovers its exact stale registration");
+        let stale_command = configured(
+            context,
+            server_exe,
+            ["--instance", custom_instance],
+            dead_endpoint,
+            context.address,
+            "main",
+            native_workspace
+        );
+        let stale_server = stale_command.start();
+        owned_children.push(stale_server);
+        let stale_protocol = wait_protocol(
+            context,
+            cli,
+            ["--instance", custom_instance],
+            dead_endpoint,
+            context.address,
+            "main",
+            native_workspace,
+            stale_server
+        );
+        let stale_registration = registration_by_endpoint(
+            context.instance_directory,
+            stale_protocol.endpoint,
+            "native_ipc_windows_live_registration_missing"
+        );
+        let stale_nonce = stale_registration.record.lease_nonce;
+        let stale_epoch = stale_registration.record.server_epoch;
+        require(
+            stale_registration.record.pid == stale_protocol.pid
+                && stale_nonce != ""
+                && stale_epoch != ""
+                && std::fs::exists(stale_registration.path),
+            "native_ipc_windows_live_registration_identity"
+        );
+
+        stale_server.kill();
+        let stale_exit = wait_exit(
+            stale_server,
+            "native_ipc_windows_authority_kill_timeout"
+        );
+        let dead_rows = invoke_json(
+            context,
+            cli,
+            ["server-list", "--json"],
+            "",
+            "",
+            "",
+            native_workspace
+        );
+        let dead_row = find_by_nonce(
+            dead_rows,
+            stale_nonce,
+            "native_ipc_windows_stale_registration_missing"
+        );
+        require(
+            !stale_exit.success
+                && dead_row.classification == "stale"
+                && dead_row.cleanup_eligible
+                && dead_row.server_epoch == stale_epoch
+                && std::fs::exists(stale_registration.path)
+                && registration_count(context.instance_directory) == 1,
+            "native_ipc_windows_real_stale_registration"
+        );
+
+        let replacement_command = configured(
+            context,
+            server_exe,
+            ["--instance", custom_instance],
+            dead_endpoint,
+            context.address,
+            "main",
+            native_workspace
+        );
+        let replacement = replacement_command.start();
+        owned_children.push(replacement);
+        let replacement_protocol = wait_protocol(
+            context,
+            cli,
+            ["--instance", custom_instance],
+            dead_endpoint,
+            context.address,
+            "main",
+            native_workspace,
+            replacement
+        );
+        let replacement_registration = registration_by_endpoint(
+            context.instance_directory,
+            replacement_protocol.endpoint,
+            "native_ipc_windows_replacement_registration_missing"
+        );
+        let replacement_rows = invoke_json(
+            context,
+            cli,
+            ["server-list", "--json"],
+            "",
+            "",
+            "",
+            native_workspace
+        );
+        let replacement_row = find_by_nonce(
+            replacement_rows,
+            replacement_registration.record.lease_nonce,
+            "native_ipc_windows_replacement_row_missing"
+        );
+        require(
+            replacement_protocol.endpoint == stale_protocol.endpoint
+                && replacement_protocol.server_scope_id
+                    == stale_protocol.server_scope_id
+                && replacement_protocol.pid != stale_protocol.pid
+                && replacement_registration.record.pid
+                    == replacement_protocol.pid
+                && replacement_registration.record.lease_nonce
+                    != stale_nonce
+                && replacement_registration.record.server_epoch
+                    != stale_epoch
+                && replacement_row.classification == "live"
+                && replacement_row.server_epoch
+                    == replacement_row.event_epoch
+                && !std::fs::exists(stale_registration.path)
+                && registration_count(context.instance_directory) == 1,
+            "native_ipc_windows_stale_authority_not_recovered"
+        );
+        invoke(
+            context,
+            cli,
+            ["--instance", custom_instance, "shutdown"],
+            false,
+            dead_endpoint,
+            context.address,
+            "main",
+            native_workspace
+        );
+        let replacement_exit = wait_exit(
+            replacement,
+            "native_ipc_windows_replacement_shutdown_timeout"
+        );
+        let stopped = probe(
+            context,
+            cli,
+            ["--instance", custom_instance, "protocol-info", "--running"],
+            dead_endpoint,
+            context.address,
+            "main",
+            native_workspace
+        );
+        require(
+            replacement_exit.success
+                && !stopped.success
+                && registration_count(context.instance_directory) == 0,
+            "native_ipc_windows_stale_recovery_cleanup"
+        );
+    }
     if native_protocol.transport == "unix" {
         let native_socket = native_protocol.endpoint.sub_string(5);
         require(

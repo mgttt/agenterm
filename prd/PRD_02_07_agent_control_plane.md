@@ -247,3 +247,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       registration generation; it never kills the PID-reusing live process.
       Unknown ownership remains retained. The retained Fleet journey proves
       legacy TCP cannot hijack a native main authority
+    - [x] the same Windows journey force-kills an owned named-pipe authority,
+      observes its exact nonce-qualified registration as `stale`, then proves
+      a same-role replacement keeps endpoint and scope while receiving a new
+      PID, nonce, and epoch. It verifies the old generation is removed only
+      after replacement and ends with no registration or owned-process residue
