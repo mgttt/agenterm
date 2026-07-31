@@ -21,8 +21,6 @@ mod mcp_fleet;
 pub mod mcp_stdio;
 pub mod operations;
 mod protocol;
-#[cfg(windows)]
-mod remote_win_app;
 pub mod script_api_view;
 pub mod script_catalog;
 pub mod script_clipboard;
@@ -88,30 +86,19 @@ mod worker_supervisor;
 mod server_app;
 #[cfg(any(windows, unix))]
 mod terminal_runtime;
-#[cfg(windows)]
-mod win_app;
-
 pub use client::{run_cli_entry, run_mux_entry, run_script_entry_with_args};
 pub use control_center::run_control_center_entry_with_args;
 pub use mcp_catalog::run_mcp_entry_with_args;
 
-#[cfg(windows)]
-pub use win_app::run_gui_entry;
+pub use platform::services::frontend::run_gui_entry;
 
 #[cfg(any(windows, unix))]
 pub use server_app::run_server_entry;
 
-#[cfg(unix)]
-pub use unix_app::run_gui_entry;
-
 pub(crate) const IPC_TIMEOUT: Duration = Duration::from_secs(5);
 pub(crate) const SCROLLBACK_LINES: usize = 10_000;
 
-#[cfg(windows)]
-pub(crate) use win_app::request_gui_wake;
-
-#[cfg(not(windows))]
-pub(crate) use gui_wake::request_gui_wake;
+pub(crate) use platform::services::frontend::request_gui_wake;
 
 pub(crate) fn ipc_address() -> String {
     client::ipc_address()

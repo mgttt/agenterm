@@ -1,3 +1,5 @@
+//! Windows native replaceable GUI projection.
+
 use std::{
     ffi::c_void,
     mem,

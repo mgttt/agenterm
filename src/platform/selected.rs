@@ -4,11 +4,17 @@
 //! product modules never import an OS-specific implementation.
 
 #[cfg(windows)]
+#[path = "adapters/windows/frontend.rs"]
+pub(crate) mod frontend;
+#[cfg(windows)]
 #[path = "adapters/windows/ipc.rs"]
 pub(crate) mod ipc;
 #[cfg(windows)]
 #[path = "adapters/windows/pty.rs"]
 pub(crate) mod pty;
+#[cfg(windows)]
+#[path = "adapters/windows/remote_frontend.rs"]
+pub(crate) mod remote_frontend;
 
 #[cfg(windows)]
 #[path = "adapters/windows/script_http.rs"]
@@ -71,6 +77,9 @@ pub(crate) mod ui_font;
 #[path = "adapters/windows/ui_screenshot.rs"]
 pub(crate) mod ui_screenshot;
 
+#[cfg(target_os = "linux")]
+#[path = "adapters/linux/frontend.rs"]
+pub(crate) mod frontend;
 #[cfg(target_os = "linux")]
 #[path = "adapters/linux/ipc.rs"]
 pub(crate) mod ipc;
@@ -143,6 +152,9 @@ pub(crate) mod ui_font;
 #[path = "adapters/linux/ui_screenshot.rs"]
 pub(crate) mod ui_screenshot;
 
+#[cfg(target_os = "macos")]
+#[path = "adapters/macos/frontend.rs"]
+pub(crate) mod frontend;
 #[cfg(target_os = "macos")]
 #[path = "adapters/macos/ipc.rs"]
 pub(crate) mod ipc;

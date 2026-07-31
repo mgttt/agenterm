@@ -74,7 +74,7 @@ pub fn run_gui_entry() -> i32 {
         }
     }
 
-    if let Err(error) = crate::remote_win_app::run_remote_gui(no_activate) {
+    if let Err(error) = crate::platform::selected::remote_frontend::run_remote_gui(no_activate) {
         show_startup_error(&error);
         return 1;
     }

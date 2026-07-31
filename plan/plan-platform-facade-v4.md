@@ -100,7 +100,10 @@ this state does not yet satisfy the static source-boundary gate.
    conditional or shell-path constant. Unix frontend clipboard selection also
    now consumes a typed facade service, as does XRGB screenshot encoding;
    font candidate selection is likewise adapter-owned; renderer/input/event-
-   loop migration is still pending.
+   loop migration is still pending. The Windows launcher and replaceable native
+   GUI projection are now physically adapter-owned and selected through the
+   frontend service; Linux/macOS adapter entries still project the legacy
+   `unix_app` tree until its event loop, input, and renderer move together.
 4. Remove compatibility-only legacy native paths after each owning public
    smoke has passed.
 5. Add the static production source boundary test only after no product native

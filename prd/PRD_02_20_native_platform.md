@@ -144,9 +144,13 @@ Available, Unsupported, and Failed without reading source or assuming parity.
   - [x] contract-revision-3 makes native minimize/maximize/restore snapshot
     state and bounded client resize consume the shared window lifecycle
     contract; Win32 retains HWND sizing and non-client-frame arithmetic
-  - [~] existing Win32 window, HWND controls, GDI rendering, native clipboard,
-    system menu, and remaining input behavior are shipped but remain
-    distributed across Windows application modules
+  - [x] the Windows-subsystem launcher and replaceable Win32 GUI projection now
+    physically reside in the Windows adapter; `lib.rs` reaches them only through
+    `services::frontend → selected`, and no longer selects or declares Windows
+    application modules itself
+  - [~] existing HWND controls, GDI rendering, system menu, and remaining input
+    behavior are shipped inside the adapter but still need narrower normalized
+    contracts around product-neutral state
   - [~] adapt the remaining behavior behind the shared contracts without
     changing the replaceable-GUI/server split or taking ownership of server
     state
