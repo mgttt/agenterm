@@ -376,11 +376,15 @@ Revision-4 migration evidence (2026-07-31, partial):
   session/reader/wait operations only. POSIX `openpty`/fork/session/exec/poll
   and Windows ConPTY/job mechanics will move below selected adapters while
   retaining concurrent reader/wait and terminate-to-EOF ordering.
-- [~] POSIX PTY allocation, fork/session/exec, resize, polling, and child
+- [x] POSIX PTY allocation, fork/session/exec, resize, polling, and child
   lifecycle code now physically resides in `adapters/linux/pty.rs`; macOS has
-  an explicit adapter entry over that private POSIX mechanism. `src/pty` is
-  reduced to a temporary type projection while the Windows ConPTY wrapper is
-  completed, so the final static boundary remains deliberately unmarked.
+  an explicit adapter entry over that private POSIX mechanism. The Windows
+  adapter wraps `rmux-pty` and converts the neutral terminal size and process
+  identity at its boundary. `src/pty` is now an OS-neutral compatibility
+  projection over `services::pty → selected → adapter`; reader/wait concurrency,
+  exit-triggered pseudoconsole close, and force-terminate ordering remain in
+  the existing runtime path. Typed PTY operation errors and the final static
+  boundary remain incomplete.
 - [~] native IPC identity, default endpoint/workspace derivation, listener /
   stream framing, named-pipe and Unix-socket mechanics, permissions, peer
   identity, and stale recovery now reside beneath `src/platform/`; the

@@ -18,7 +18,7 @@ contract + selected adapters
 │  └─ worker supervision / audit             [adapter-owned]
 ├─ Control Center shell                       [partial]
 ├─ passive WebView runtime probe              [adapter-owned]
-└─ frontend + PTY native lifecycle           [pending]
+└─ frontend + PTY native lifecycle           [partial]
     └─ static source boundary gate           [depends on all above]
 ```
 
@@ -91,9 +91,10 @@ this state does not yet satisfy the static source-boundary gate.
    POSIX `openpty`/fork/session/exec/poll and Windows ConPTY/job mechanics stay
    below the selected adapter, preserving the existing reader/wait concurrency
    and terminate-to-EOF ordering.
-   POSIX mechanics are now physically adapter-owned; Windows wrapper type
-   conversion remains the blocking leaf before `src/pty` can lose its final
-   compatibility projection.
+   POSIX mechanics are now physically adapter-owned; the Windows adapter owns
+   `rmux-pty` and converts neutral size/process identities. `src/pty` contains
+   no target selection and projects only `services::pty`; typed PTY operation
+   failures and frontend event-loop migration remain open.
    The first frontend leaf is complete: runtime-primary shell descriptors now
    select in adapters, so the Unix new-terminal dialog contains no macOS/Linux
    conditional or shell-path constant. Unix frontend clipboard selection also

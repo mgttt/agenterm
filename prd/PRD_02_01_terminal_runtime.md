@@ -12,7 +12,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   with edge autoscroll; status-bar CWD editor, window-close confirm, and tabs
   resize grip on Unix; proxy editor and professional selection remain later
 - [x] one ConPTY-backed process per tab through `rmux-pty` on Windows
-- [~] shared PTY backend trait: Windows keeps `rmux-pty`; Unix uses
+- [x] shared PTY backend facade: Windows keeps adapter-private `rmux-pty`; Unix uses
   POSIX `openpty` + fork/exec; `terminal_runtime` consumes one API
 - [x] VT100 parsing, ANSI colors, scrollback, resize, keyboard and mouse
 - [x] Backspace emits ConPTY VT `DEL` and deletes exactly one input
