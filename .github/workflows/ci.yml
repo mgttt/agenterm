@@ -61,6 +61,14 @@ jobs:
         run: >-
           ./scripts/bootstrap.sh linux x86_64
           target/x86_64-unknown-linux-gnu/debug
+      - name: Prove native Unix IPC authorities
+        env:
+          AGENTERM_BOOTSTRAP_TASK: native-ipc-smoke
+        run: >-
+          ./scripts/bootstrap.sh
+          --server target/x86_64-unknown-linux-gnu/debug/agenterm-server
+          --cli target/x86_64-unknown-linux-gnu/debug/agenterm-cli
+          --ci-main-dev
       - name: Exercise public Linux Script CLI
         run: cargo test --locked --target x86_64-unknown-linux-gnu --test linux_script_cli
       - name: Validate isolated agenterm-net research loop
@@ -125,9 +133,30 @@ jobs:
       - name: Verify manifest client set
         env:
           AGENTERM_BOOTSTRAP_TASK: client-smoke
-        run: >-
-          ./scripts/bootstrap.sh macos ${{ matrix.arch }}
-          target/${{ matrix.target }}/debug --existence-only
+        run: |
+          host_arch="$(uname -m)"
+          [ "$host_arch" = "arm64" ] && host_arch="aarch64"
+          if [ "$host_arch" = "${{ matrix.arch }}" ]; then
+            ./scripts/bootstrap.sh macos "${{ matrix.arch }}" \
+              "target/${{ matrix.target }}/debug"
+          else
+            ./scripts/bootstrap.sh macos "${{ matrix.arch }}" \
+              "target/${{ matrix.target }}/debug" --existence-only
+          fi
+      - name: Prove native Unix IPC authorities
+        env:
+          AGENTERM_BOOTSTRAP_TASK: native-ipc-smoke
+        run: |
+          host_arch="$(uname -m)"
+          [ "$host_arch" = "arm64" ] && host_arch="aarch64"
+          if [ "$host_arch" != "${{ matrix.arch }}" ]; then
+            echo "Skipping execution-only IPC proof for cross-built ${{ matrix.target }}"
+            exit 0
+          fi
+          ./scripts/bootstrap.sh \
+            --server "target/${{ matrix.target }}/debug/agenterm-server" \
+            --cli "target/${{ matrix.target }}/debug/agenterm-cli" \
+            --ci-main-dev
 
   windows-aarch64:
     runs-on: ubuntu-latest

@@ -650,13 +650,13 @@
     },
     {
       "id": "native-ipc-smoke",
-      "description": "Prove isolated native named-pipe selection, selector precedence, mixed schema discovery, typed server-list rows, and explicit legacy TCP compatibility",
+      "description": "Prove isolated native named-pipe or Unix-socket selection, selector precedence, mixed schema discovery, typed server-list rows, and explicit legacy TCP compatibility",
       "entry": "scripts/rhai/native-ipc-smoke.rhai",
       "profile": "local",
       "cwd": ".",
       "args": [".", "dist/agenterm-server.exe", "dist/agenterm-cli.exe"],
       "dependencies": [],
-      "platforms": ["windows"],
+      "platforms": ["windows", "linux", "macos"],
       "side_effects": ["artifact_write", "process_spawn", "network_loopback"]
     },
     {

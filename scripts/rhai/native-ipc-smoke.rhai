@@ -5,6 +5,8 @@
 //   --list-evidence
 // or:
 //   REPO SERVER_EXE CLI_EXE
+// Optional task-run overrides appended after the manifest defaults:
+//   --server PATH --cli PATH [--ci-main-dev]
 
 import "scripts/rhai/lib/test_harness" as test_harness;
 
@@ -56,6 +58,10 @@ fn configured(
     if workspace != "" {
         command.env("AGENTERM_WORKSPACE_PATH", workspace);
     }
+    command.env(
+        "XDG_RUNTIME_DIR",
+        std::path::join(context.run_directory, "runtime").display
+    );
     command
 }
 
@@ -250,10 +256,60 @@ fn registration_count(directory) {
     count
 }
 
-require(args.len == 3, "expected: REPO SERVER_EXE CLI_EXE");
+fn unix_mode(context, path) {
+    let probes = [
+        ["-c", "%a", path],
+        ["-f", "%Lp", path]
+    ];
+    for arguments in probes {
+        let command = std::process::command("stat");
+        command.args(arguments);
+        command.timeout(std::time::Duration::from_secs(2));
+        let output = command.output();
+        test_harness::append_command_record(
+            context,
+            arguments,
+            output,
+            !output.success,
+            []
+        );
+        if output.success {
+            let text = output.stdout_text();
+            text.trim();
+            return text;
+        }
+    }
+    throw "native_ipc_unix_stat_unavailable";
+}
+
+require(args.len >= 3, "expected: REPO SERVER_EXE CLI_EXE");
 let repo = std::path::absolute(args[0]).display;
-let server_exe = std::path::absolute(args[1]).display;
-let cli = std::path::absolute(args[2]).display;
+let server_exe = args[1];
+let cli = args[2];
+let ci_main_dev = false;
+let option_index = 3;
+while option_index < args.len {
+    let option = args[option_index];
+    if option == "--server" || option == "--cli" {
+        require(
+            option_index + 1 < args.len,
+            "native_ipc_option_value_missing:" + option
+        );
+        if option == "--server" {
+            server_exe = args[option_index + 1];
+        } else {
+            cli = args[option_index + 1];
+        }
+        option_index += 1;
+    } else if option == "--ci-main-dev" {
+        ci_main_dev = true;
+    } else {
+        throw "native_ipc_unknown_option:" + option;
+    }
+    option_index += 1;
+}
+server_exe = std::path::absolute(server_exe).display;
+cli = std::path::absolute(cli).display;
 require(std::fs::exists(server_exe), "native_ipc_server_missing");
 require(std::fs::exists(cli), "native_ipc_cli_missing");
 
@@ -266,9 +322,12 @@ let tcp_workspace = std::path::join(
     context.run_directory,
     "workspace/tcp-workspace.json"
 ).display;
-let custom_instance =
+let custom_instance = if ci_main_dev {
+    "main"
+} else {
     "custom:smoke-" + std::process::id() + "-" +
-    std::time::SystemTime::now().unix_millis;
+        std::time::SystemTime::now().unix_millis
+};
 let dead_endpoint = "tcp:127.0.0.1:1";
 let tcp_endpoint = "tcp:" + context.address;
 let owned_children = [];
@@ -303,7 +362,7 @@ try {
         "native_ipc_selector_conflict_not_typed_or_bounded"
     );
 
-    print("STEP isolated custom instance derives the default named pipe");
+    print("STEP isolated logical instance derives its native endpoint");
     let native_command = configured(
         context,
         server_exe,
@@ -325,18 +384,97 @@ try {
         native_workspace,
         native_server
     );
+    let native_endpoint_shape = if native_protocol.transport == "named_pipe" {
+        native_protocol.endpoint.starts_with(
+            `pipe:\\.\pipe\agenterm-agt-v1-`
+        )
+    } else if native_protocol.transport == "unix" {
+        native_protocol.endpoint.starts_with("unix:/")
+            && native_protocol.endpoint.ends_with(".sock")
+    } else {
+        false
+    };
     require(
         native_protocol.pid == native_server.id
             && native_protocol.instance == custom_instance
-            && native_protocol.transport == "named_pipe"
-            && native_protocol.endpoint.starts_with(
-                `pipe:\\.\pipe\agenterm-agt-v1-`
-            )
+            && native_endpoint_shape
             && native_protocol.server_scope_id.starts_with("agt-v1-")
             && native_protocol.server_scope_id.len == 39
             && !native_protocol.endpoint.contains(custom_instance),
-        "native_ipc_custom_named_pipe_contract"
+        "native_ipc_custom_native_contract"
     );
+    if native_protocol.transport == "unix" {
+        let socket_path = native_protocol.endpoint.sub_string(5);
+        let socket_parent = std::path::parent(socket_path).display;
+        require(
+            unix_mode(context, socket_path) == "600"
+                && unix_mode(context, socket_parent) == "700",
+            "native_ipc_unix_permissions"
+        );
+    }
+
+    let dev_server = ();
+    let dev_protocol = ();
+    if ci_main_dev {
+        print("STEP main and dev are distinct native authorities");
+        let dev_workspace = std::path::join(
+            context.run_directory,
+            "workspace/dev-workspace.json"
+        ).display;
+        let dev_command = configured(
+            context,
+            server_exe,
+            ["--instance", "dev"],
+            dead_endpoint,
+            context.address,
+            "main",
+            dev_workspace
+        );
+        dev_server = dev_command.start();
+        owned_children.push(dev_server);
+        dev_protocol = wait_protocol(
+            context,
+            cli,
+            ["--instance", "dev"],
+            dead_endpoint,
+            context.address,
+            "main",
+            dev_workspace,
+            dev_server
+        );
+        require(
+            dev_protocol.instance == "dev"
+                && dev_protocol.transport == native_protocol.transport
+                && dev_protocol.endpoint != native_protocol.endpoint
+                && dev_protocol.server_scope_id
+                    != native_protocol.server_scope_id,
+            "native_ipc_main_dev_authority_separation"
+        );
+
+        print("STEP duplicate instance authority fails closed and bounded");
+        let duplicate_started =
+            std::time::SystemTime::now().unix_millis;
+        let duplicate = configured(
+            context,
+            server_exe,
+            ["--instance", custom_instance],
+            dead_endpoint,
+            context.address,
+            "main",
+            native_workspace
+        ).start();
+        owned_children.push(duplicate);
+        let duplicate_exit = wait_exit(
+            duplicate,
+            "native_ipc_duplicate_authority_timeout"
+        );
+        require(
+            !duplicate_exit.success
+                && std::time::SystemTime::now().unix_millis
+                    - duplicate_started < 5000,
+            "native_ipc_duplicate_authority_not_rejected"
+        );
+    }
 
     print("STEP explicit loopback TCP remains a live compatibility route");
     let tcp_command = configured(
@@ -403,7 +541,8 @@ try {
         context.instance_directory
     );
     require(
-        schemas.v1 == 1 && schemas.v2 == 2,
+        schemas.v1 == 1
+            && schemas.v2 == (if ci_main_dev { 3 } else { 2 }),
         "native_ipc_mixed_registration_fixture"
     );
     let rows = invoke_json(
@@ -415,7 +554,10 @@ try {
         "",
         native_workspace
     );
-    require(rows.len == 2, "native_ipc_discovery_not_deduplicated");
+    require(
+        rows.len == (if ci_main_dev { 3 } else { 2 }),
+        "native_ipc_discovery_not_deduplicated"
+    );
     let native_row = find_by_endpoint(
         rows,
         native_protocol.endpoint,
@@ -426,11 +568,26 @@ try {
         tcp_endpoint,
         "native_ipc_tcp_row_missing"
     );
+    let dev_row_ok = if ci_main_dev {
+        let dev_row = find_by_endpoint(
+            rows,
+            dev_protocol.endpoint,
+            "native_ipc_dev_row_missing"
+        );
+        dev_row.schema_version == 2
+            && dev_row.registration_schema_version == 2
+            && dev_row.instance == "dev"
+            && dev_row.transport == dev_protocol.transport
+            && dev_row.server_scope_id == dev_protocol.server_scope_id
+            && dev_row.status == "running"
+    } else {
+        true
+    };
     let typed_schema_ok =
         native_row.schema_version == 2
             && native_row.registration_schema_version == 2
             && native_row.instance == custom_instance
-            && native_row.transport == "named_pipe"
+            && native_row.transport == native_protocol.transport
             && native_row.server_scope_id
                 == native_protocol.server_scope_id
             && native_row.status == "running"
@@ -442,7 +599,8 @@ try {
             && tcp_row.endpoint == tcp_endpoint
             && tcp_row.status == "running"
             && tcp_row.legacy_client_compatibility
-                == "same_tcp_endpoint";
+                == "same_tcp_endpoint"
+            && dev_row_ok;
 
     print("STEP each authority shuts down through its selected endpoint");
     invoke(
@@ -455,6 +613,18 @@ try {
         "main",
         native_workspace
     );
+    if ci_main_dev {
+        invoke(
+            context,
+            cli,
+            ["--instance", "dev", "shutdown"],
+            false,
+            dead_endpoint,
+            context.address,
+            "main",
+            native_workspace
+        );
+    }
     invoke(
         context,
         cli,
@@ -473,14 +643,40 @@ try {
         tcp_server,
         "native_ipc_tcp_shutdown_timeout"
     );
+    let dev_exit = if ci_main_dev {
+        wait_exit(
+            dev_server,
+            "native_ipc_dev_shutdown_timeout"
+        )
+    } else {
+        ()
+    };
     require(
-        native_exit.success && tcp_exit.success,
+        native_exit.success
+            && tcp_exit.success
+            && (!ci_main_dev || dev_exit.success),
         "native_ipc_server_shutdown_failure"
     );
     require(
         registration_count(context.instance_directory) == 0,
         "native_ipc_registration_leak"
     );
+    if native_protocol.transport == "unix" {
+        let native_socket = native_protocol.endpoint.sub_string(5);
+        require(
+            !std::fs::exists(native_socket)
+                && !std::fs::exists(native_socket + ".lock"),
+            "native_ipc_unix_native_endpoint_leak"
+        );
+        if ci_main_dev {
+            let dev_socket = dev_protocol.endpoint.sub_string(5);
+            require(
+                !std::fs::exists(dev_socket)
+                    && !std::fs::exists(dev_socket + ".lock"),
+                "native_ipc_unix_dev_endpoint_leak"
+            );
+        }
+    }
     require(
         typed_schema_ok,
         "native_ipc_server_list_typed_schema"
