@@ -90,13 +90,17 @@ N2-M1
   and remote control false. Cross-process TCP, reconnect, rate/queue/bandwidth
   exhaustion, resource load and three-platform evidence remain required before
   these can be a stable node capability.
-- [ ] Remote Fleet attach is pair-created and read-only: an expiring invite
-  binds expected peer identity, nonce and scope; the projection contains only
-  bounded snapshot/event-digest data. It cannot send terminal input, execute a
-  command, or become an authority over the remote `agenterm-server`.
-- [ ] pairing, transport encryption, replay/wrong-peer/expired-invite failure,
-  reconnect and sidecar crash must be observable with typed results. Future
-  remote control belongs to the Agent/harness approval and credential layer.
+- [~] `research/agenterm-net attach-self-test --json` proves an in-memory,
+  Noise+Yamux+bounded-CBOR paired attach: issuer-signed invite binds target
+  PeerId, expiry, one-time nonce, exact read scope and snapshot/digest bounds;
+  requester signature binds invite digest, PeerId and request ID. The only
+  successful payload is a bounded Fleet summary/event digest; replay,
+  wrong-peer and expired requests return typed rejections. It has no terminal
+  input, shell, command, PTY or `agenterm-server` authority path.
+- [ ] persistent invite/replay state, real-clock expiry, reconnect, crash
+  recovery, rate exhaustion, cross-process transport and three-platform
+  evidence remain required. Future remote control belongs to the Agent/harness
+  approval and credential layer; it must not be promoted from this attach proof.
 - [ ] N2-M1 tests use a deterministic private mesh and isolated stores; they
   must not require public bootstrap reachability or leave listeners/processes.
 
