@@ -21,7 +21,7 @@ fn informational_commands_are_machine_readable_without_opening_the_shell() {
     assert_eq!(document["owns_terminal_authority"], false);
     assert_eq!(
         document["screenshot"],
-        if cfg!(windows) {
+        if cfg!(any(windows, target_os = "macos")) {
             "available"
         } else {
             "unavailable"

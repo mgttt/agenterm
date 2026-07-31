@@ -100,6 +100,49 @@ struct ScreenshotDocument {
     height: u32,
     bytes: u64,
     sha256: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    rendered_snapshot: Option<RendererSnapshot>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct RendererSnapshot {
+    schema_version: u32,
+    owner_pid: u32,
+    renderer: String,
+    selected_view: String,
+    server_state: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    server_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    server_endpoint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    logical_instance: Option<String>,
+    window_title: String,
+    physical_width: u32,
+    physical_height: u32,
+    scale_factor: f64,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct ScreenshotRequest {
+    schema_version: u32,
+    owner_pid: u32,
+    process_start_identity: String,
+    request_id: String,
+    output: PathBuf,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct RendererCaptureResult {
+    schema_version: u32,
+    owner_pid: u32,
+    process_start_identity: String,
+    request_id: String,
+    output: PathBuf,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    snapshot: Option<RendererSnapshot>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -218,6 +261,8 @@ impl Drop for RegistryOwner {
             let _ = fs::remove_file(focus_request_path(&self.path));
             let _ = fs::remove_file(context_path(&self.path));
             let _ = fs::remove_file(close_request_path(&self.path));
+            let _ = fs::remove_file(screenshot_request_path(&self.path));
+            let _ = fs::remove_file(screenshot_result_path(&self.path));
         }
     }
 }
@@ -314,9 +359,10 @@ impl ShellProjection {
             ),
         ];
         if let Some(server) = self.snapshot.connected_server.as_ref() {
+            let authority = server.logical_instance.as_deref().unwrap_or("explicit");
             lines.push(format!(
-                "Server      {} · PID {} · sequence {}",
-                server.endpoint, server.pid, server.sequence
+                "Server      {authority} · PID {} · sequence {}",
+                server.pid, server.sequence
             ));
             lines.push(format!(
                 "Fleet       {} tabs · active {}",
@@ -770,7 +816,7 @@ fn capabilities() -> CapabilityDocument {
         owns_terminal_authority: false,
         process_reuse: true,
         no_activate: true,
-        screenshot: if cfg!(windows) {
+        screenshot: if cfg!(any(windows, target_os = "macos")) {
             "available"
         } else {
             "unavailable"
@@ -851,10 +897,111 @@ fn capture_control_center_screenshot(output: &Path) -> Result<ScreenshotDocument
         height,
         bytes: u64::try_from(bytes.len()).unwrap_or(u64::MAX),
         sha256,
+        rendered_snapshot: None,
     })
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
+fn capture_control_center_screenshot(output: &Path) -> Result<ScreenshotDocument> {
+    let registry = registry_path();
+    let owner = read_registry(&registry)
+        .filter(registry_process_matches)
+        .context("control_center_screenshot_not_running")?;
+    let output = if output.is_absolute() {
+        output.to_owned()
+    } else {
+        env::current_dir()
+            .context("control_center_screenshot_current_directory_unavailable")?
+            .join(output)
+    };
+    if fs::symlink_metadata(&output).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
+        anyhow::bail!("control_center_screenshot_output_symlink");
+    }
+    let request_id = format!(
+        "{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default()
+    );
+    let request = ScreenshotRequest {
+        schema_version: SCHEMA_VERSION,
+        owner_pid: owner.pid,
+        process_start_identity: owner.process_start_identity.clone(),
+        request_id: request_id.clone(),
+        output: output.clone(),
+    };
+    let request_path = screenshot_request_path(&registry);
+    let result_path = screenshot_result_path(&registry);
+    let _ = fs::remove_file(&result_path);
+    write_private_atomic(&request_path, &serde_json::to_vec_pretty(&request)?)?;
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    let result = loop {
+        if !read_registry(&registry).is_some_and(|current| {
+            current.pid == owner.pid
+                && current.process_start_identity == owner.process_start_identity
+                && registry_process_matches(&current)
+        }) {
+            let _ = fs::remove_file(&request_path);
+            let _ = fs::remove_file(&output);
+            anyhow::bail!("control_center_screenshot_owner_changed");
+        }
+        if let Ok(bytes) = read_regular_file(&result_path)
+            && let Ok(result) = serde_json::from_slice::<RendererCaptureResult>(&bytes)
+            && result.owner_pid == owner.pid
+            && result.process_start_identity == owner.process_start_identity
+            && result.request_id == request_id
+        {
+            break result;
+        }
+        if std::time::Instant::now() >= deadline {
+            let _ = fs::remove_file(&request_path);
+            let _ = fs::remove_file(&output);
+            anyhow::bail!("control_center_screenshot_renderer_timeout");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    let _ = fs::remove_file(&request_path);
+    let _ = fs::remove_file(&result_path);
+    if let Some(error) = result.error {
+        let _ = fs::remove_file(&output);
+        anyhow::bail!("control_center_screenshot_capture_failed: {error}");
+    }
+    if result.output != output {
+        let _ = fs::remove_file(&output);
+        anyhow::bail!("control_center_screenshot_result_mismatch");
+    }
+    let snapshot = result
+        .snapshot
+        .context("control_center_screenshot_snapshot_missing")?;
+    let bytes = fs::read(&output).context("control_center_screenshot_readback_failed")?;
+    let (width, height) = png_dimensions(&bytes)?;
+    if width != snapshot.physical_width || height != snapshot.physical_height {
+        let _ = fs::remove_file(&output);
+        anyhow::bail!("control_center_screenshot_dimensions_mismatch");
+    }
+    let sha256 = Sha256::digest(&bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    Ok(ScreenshotDocument {
+        schema_version: SCHEMA_VERSION,
+        executable: "agenterm-cc",
+        state: "captured",
+        renderer: "native",
+        owner_pid: owner.pid,
+        output: output.to_string_lossy().into_owned(),
+        width,
+        height,
+        bytes: u64::try_from(bytes.len()).unwrap_or(u64::MAX),
+        sha256,
+        rendered_snapshot: Some(snapshot),
+    })
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
 fn capture_control_center_screenshot(_output: &Path) -> Result<ScreenshotDocument> {
     anyhow::bail!(
         "control_center_screenshot_unsupported: native Control Center screenshot capture is unavailable on this platform"
@@ -1138,6 +1285,8 @@ fn recover_stale_registry(path: &Path) {
     let _ = fs::remove_file(focus_request_path(path));
     let _ = fs::remove_file(context_path(path));
     let _ = fs::remove_file(close_request_path(path));
+    let _ = fs::remove_file(screenshot_request_path(path));
+    let _ = fs::remove_file(screenshot_result_path(path));
 }
 
 fn snapshot_for_context(context: Option<ServerContext>) -> SnapshotDocument {
@@ -1181,6 +1330,7 @@ fn snapshot_for_context(context: Option<ServerContext>) -> SnapshotDocument {
 fn server_failure_reason(detail: &str) -> &'static str {
     if detail.contains("incompatible")
         || detail.contains("omitted")
+        || detail.contains("invalid response")
         || detail.contains("authority PID changed")
     {
         "server_incompatible"
@@ -1371,6 +1521,8 @@ fn claim_registry(path: &Path) -> Result<RegistryClaim> {
                 let _ = fs::remove_file(native_window_path(path));
                 let _ = fs::remove_file(focus_request_path(path));
                 let _ = fs::remove_file(close_request_path(path));
+                let _ = fs::remove_file(screenshot_request_path(path));
+                let _ = fs::remove_file(screenshot_result_path(path));
                 let process_start_identity = process_start_identity(std::process::id())
                     .context("control_center_process_start_identity_unavailable")?;
                 let record = RegistryRecord {
@@ -1437,6 +1589,14 @@ fn focus_request_path(path: &Path) -> PathBuf {
 
 fn close_request_path(path: &Path) -> PathBuf {
     path.with_extension("close")
+}
+
+fn screenshot_request_path(path: &Path) -> PathBuf {
+    path.with_extension("screenshot-request.json")
+}
+
+fn screenshot_result_path(path: &Path) -> PathBuf {
+    path.with_extension("screenshot-result.json")
 }
 
 fn request_projection_refresh(registry_path: &Path, no_activate: bool) {
@@ -1685,6 +1845,13 @@ fn unix_shell(owner: RegistryOwner, no_activate: bool) -> Result<()> {
         surface: Option<Surface<winit::event_loop::OwnedDisplayHandle, Rc<winit::window::Window>>>,
         focus_request: PathBuf,
         last_focus_request: Option<String>,
+        screenshot_request: PathBuf,
+        screenshot_result: PathBuf,
+        last_screenshot_request: Option<String>,
+        frame: Vec<u32>,
+        frame_width: u32,
+        frame_height: u32,
+        scale_factor: f64,
         projection: ShellProjection,
         _owner: RegistryOwner,
     }
@@ -1724,7 +1891,66 @@ fn unix_shell(owner: RegistryOwner, no_activate: bool) -> Result<()> {
                 buffer_height,
                 &self.projection.lines(),
             );
+            self.frame.clear();
+            self.frame.extend_from_slice(&buffer);
+            self.frame_width = buffer_width;
+            self.frame_height = buffer_height;
+            self.scale_factor = window.scale_factor();
             let _ = buffer.present();
+        }
+
+        fn capture_requested_screenshot(&mut self) {
+            let Ok(bytes) = read_regular_file(&self.screenshot_request) else {
+                return;
+            };
+            let Ok(request) = serde_json::from_slice::<ScreenshotRequest>(&bytes) else {
+                return;
+            };
+            if self.last_screenshot_request.as_deref() == Some(request.request_id.as_str())
+                || request.schema_version != SCHEMA_VERSION
+                || request.owner_pid != self._owner.pid
+                || request.process_start_identity != self._owner.process_start_identity
+                || self.frame.is_empty()
+            {
+                return;
+            }
+            self.last_screenshot_request = Some(request.request_id.clone());
+            let server = self.projection.snapshot.connected_server.as_ref();
+            let snapshot = RendererSnapshot {
+                schema_version: SCHEMA_VERSION,
+                owner_pid: self._owner.pid,
+                renderer: "native".to_owned(),
+                selected_view: "cockpit".to_owned(),
+                server_state: self.projection.snapshot.server_state.to_owned(),
+                server_reason: self.projection.snapshot.server_reason.clone(),
+                server_endpoint: server.map(|server| server.endpoint.clone()),
+                logical_instance: server.and_then(|server| server.logical_instance.clone()),
+                window_title: self.projection.title(),
+                physical_width: self.frame_width,
+                physical_height: self.frame_height,
+                scale_factor: self.scale_factor,
+            };
+            let error = crate::unix_app::write_xrgb_png(
+                &request.output,
+                self.frame_width,
+                self.frame_height,
+                &self.frame,
+                None,
+            )
+            .err();
+            let result = RendererCaptureResult {
+                schema_version: SCHEMA_VERSION,
+                owner_pid: self._owner.pid,
+                process_start_identity: self._owner.process_start_identity.clone(),
+                request_id: request.request_id,
+                output: request.output,
+                snapshot: error.is_none().then_some(snapshot),
+                error,
+            };
+            let _ = write_private_atomic(
+                &self.screenshot_result,
+                &serde_json::to_vec_pretty(&result).unwrap_or_default(),
+            );
         }
     }
 
@@ -1792,6 +2018,7 @@ fn unix_shell(owner: RegistryOwner, no_activate: bool) -> Result<()> {
                 window.set_title(&self.projection.title());
                 window.request_redraw();
             }
+            self.capture_requested_screenshot();
             let request = read_regular_file(&self.focus_request)
                 .ok()
                 .and_then(|value| String::from_utf8(value).ok());
@@ -1814,7 +2041,10 @@ fn unix_shell(owner: RegistryOwner, no_activate: bool) -> Result<()> {
         }
     }
 
-    let event_loop = EventLoop::new()?;
+    let mut event_loop_builder = EventLoop::<()>::builder();
+    #[cfg(target_os = "macos")]
+    crate::platform::macos::activation::configure_event_loop(&mut event_loop_builder, no_activate);
+    let event_loop = event_loop_builder.build()?;
     let context = Context::new(event_loop.owned_display_handle())
         .map_err(|error| anyhow::anyhow!("{error}"))?;
     let projection = ShellProjection::new(&owner.path);
@@ -1825,6 +2055,13 @@ fn unix_shell(owner: RegistryOwner, no_activate: bool) -> Result<()> {
         surface: None,
         focus_request: focus_request_path(&owner.path),
         last_focus_request: None,
+        screenshot_request: screenshot_request_path(&owner.path),
+        screenshot_result: screenshot_result_path(&owner.path),
+        last_screenshot_request: None,
+        frame: Vec::new(),
+        frame_width: 0,
+        frame_height: 0,
+        scale_factor: 1.0,
         projection,
         _owner: owner,
     };
@@ -2326,6 +2563,16 @@ mod tests {
         assert_eq!(snapshot.views[1].state, "unavailable");
         assert_eq!(snapshot.views[2].state, "unavailable");
         assert_eq!(snapshot.views[3].state, "unavailable");
+    }
+
+    #[test]
+    fn malformed_sibling_protocol_is_incompatible_not_unreachable() {
+        assert_eq!(
+            server_failure_reason(
+                "server bootstrap unavailable: invalid response from AgenTerm server"
+            ),
+            "server_incompatible"
+        );
     }
 
     #[test]

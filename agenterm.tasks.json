@@ -190,6 +190,13 @@
       "network": [],
       "evidence": ["task.control-center-smoke"]
     },
+    "control-center-macos-smoke": {
+      "inputs": ["staged-control-center", "isolated-settings", "isolated-native-ipc"],
+      "outputs": ["control-center-macos-evidence", "retina-png-evidence"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
+      "network": [],
+      "evidence": ["task.control-center-macos-smoke"]
+    },
     "agenterm-net-research": {
       "inputs": ["research-source", "research-cargo-lock"],
       "outputs": ["libp2p-cid-block-store-evidence"],
@@ -613,6 +620,17 @@
       "args": [".", "dist/agenterm-cc.exe"],
       "dependencies": [],
       "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn", "gui_spawn"]
+    },
+    {
+      "id": "control-center-macos-smoke",
+      "description": "Prove caller-selected native IPC, renderer-owned Retina evidence, no-activate/focus reuse, server epochs, and process isolation on macOS",
+      "entry": "scripts/rhai/control-center-macos-smoke.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "args": [".", "dist/agenterm-cc", "dist/agenterm-server", "dist/agenterm-cli"],
+      "dependencies": [],
+      "platforms": ["macos"],
       "side_effects": ["artifact_write", "process_spawn", "gui_spawn"]
     },
     {

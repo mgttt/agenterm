@@ -2,7 +2,7 @@ use std::path::Path;
 
 /// Encode softbuffer `0RGB`/`XRGB` pixels (little-endian `0x00RRGGBB`) as PNG.
 #[cfg(target_os = "macos")]
-pub(super) fn write_xrgb_png(
+pub(crate) fn write_xrgb_png(
     path: &Path,
     width: u32,
     height: u32,
@@ -15,7 +15,7 @@ pub(super) fn write_xrgb_png(
 
 /// Encode softbuffer `0RGB`/`XRGB` pixels (little-endian `0x00RRGGBB`) as PNG.
 #[cfg(target_os = "linux")]
-pub(super) fn write_xrgb_png(
+pub(crate) fn write_xrgb_png(
     path: &Path,
     width: u32,
     height: u32,

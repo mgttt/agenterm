@@ -186,9 +186,12 @@ Control Center is the product name; the executable family uses
   registry without focusing or activating it. Windows reuses the bounded
   platform GDI/PNG encoder and returns dimensions, byte length and SHA-256;
   owner replacement during capture fails closed and removes the ambiguous
-  output. Linux/macOS report the capability and command as unavailable until
-  their renderer-owned capture path is connected rather than manufacturing
-  substitute evidence.
+  output. macOS now serves the exact last-presented softbuffer frame through
+  an owner-PID/start-identity-bound request/result channel; its structured
+  renderer snapshot carries selected view, server state/reason/context,
+  physical dimensions, scale factor, and title beside the PNG digest. Linux
+  remains unavailable until its renderer-owned capture path is connected
+  rather than manufacturing substitute evidence.
 
 The v0.1.11 spike reports passive `runtime_presence` separately from
 `host_state`. A detected runtime never implies a working host:
@@ -241,11 +244,34 @@ future promotion gates.
   Control Center smoke now pairs the connected Cockpit snapshot/window title
   with a nonempty, decoded native-window PNG, verifies its typed owner PID,
   dimensions, byte length and digest, and retains the successful image at
-  `dist/evidence/control-center-live-cockpit.png`; equivalent Unix renderer
-  evidence remains open.
+  `dist/evidence/control-center-live-cockpit.png`. Native macOS now retains
+  equivalent renderer-owned structured/Retina evidence; Linux remains open.
 - [ ] any distributed executable has its own size budget, hash, SBOM,
   provenance, startup measurement, capability catalog, and public black-box
   owner; it does not inflate `agenterm.exe`.
+
+## v0.1.12 macOS convergence evidence
+
+- [~] native macOS 26.5 arm64 public task
+  `control-center-macos-smoke` passes in 5.01 seconds with isolated settings,
+  workspace, instance registry, native runtime, logical `dev` authority, and
+  typed cleanup. It proves the caller-selected Unix socket and exact server
+  PID/epoch/context without starting a second server.
+- [~] one native Control Center PID survives repeated open, explicit focus,
+  no-activate, server kill, typed `server_unreachable`, malformed sibling
+  `server_incompatible`, and same-scope replacement with a new PID/epoch.
+  Typed close and forced renderer-process kill preserve the server and PTY;
+  stale owner recovery creates one replacement projection and leaves no owned
+  process, socket, registration, or request/result file.
+- [~] renderer-owned structured evidence and its retained Retina PNG agree at
+  1520x960 physical pixels and scale factor 2.0 for the 760x480 logical
+  Cockpit. They bind the same owner PID, logical `dev` context, connected
+  state, selected view, title/tab count, dimensions, byte count, and SHA-256.
+  The visible framebuffer displays the logical authority rather than an
+  absolute socket path.
+- [ ] native Linux renderer capture, six-cell lifecycle reruns, and packaged
+  executable evidence remain open; this macOS result does not promote the
+  cross-platform delivery gate.
 
 ## Explicit v0.1.11 non-goals
 

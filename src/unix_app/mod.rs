@@ -8,6 +8,8 @@ mod render;
 mod screenshot;
 mod window_state;
 
+pub(crate) use screenshot::write_xrgb_png;
+
 use std::{
     collections::HashSet,
     env,
