@@ -53,9 +53,10 @@ use crate::{
     ui_clipboard::{normalize_composer_paste, normalize_terminal_paste},
     ui_geometry::{
         ScrollbarHit, TERMINAL_SCROLLBAR_WIDTH, TreeRowActionDensity, TreeRowMode, WHEEL_DELTA,
-        WHEEL_ROWS_PER_NOTCH, pixel_rect_json, scrollback_for_thumb_top, scrollbar_hit_test,
-        sidebar_row_capacity, sidebar_scrollbar_geometry, sidebar_scrollbar_track,
-        sidebar_tree_row_geometry, tabs_width_from_drag, terminal_cell_at, wheel_delta_units,
+        WHEEL_ROWS_PER_NOTCH, WorkspaceToolbarLayout, pixel_rect_json, scrollback_for_thumb_top,
+        scrollbar_hit_test, sidebar_row_capacity, sidebar_scrollbar_geometry,
+        sidebar_scrollbar_track, sidebar_tree_row_geometry, tabs_width_from_drag, terminal_cell_at,
+        wheel_delta_units,
     },
     ui_snapshot::{
         PROJECTION_EMBEDDED_GUI, TerminalSelectionSnapshotInput, archived_proxy_status_json,
@@ -1994,13 +1995,7 @@ impl UnixApp {
                     "resizing": self.tabs_resize_drag.is_some(),
                     "scrollbar": sidebar_scrollbar,
                 },
-                "toolbar": layout.workspace_toolbar.map(|toolbar| serde_json::json!({
-                    "bounds": pixel_rect_json(toolbar.bounds),
-                    "new": pixel_rect_json(toolbar.new_tab),
-                    "tabs": pixel_rect_json(toolbar.tabs),
-                    "control_center": pixel_rect_json(toolbar.control_center),
-                    "settings": pixel_rect_json(toolbar.settings),
-                })),
+                "toolbar": layout.workspace_toolbar.map(workspace_toolbar_snapshot_json),
                 "terminal": {
                     "x": layout.terminal.left,
                     "y": layout.terminal.top,
@@ -4803,11 +4798,25 @@ fn system_menu_clipboard_state_pure(
     )
 }
 
+fn workspace_toolbar_snapshot_json(toolbar: WorkspaceToolbarLayout) -> serde_json::Value {
+    serde_json::json!({
+        "bounds": pixel_rect_json(toolbar.bounds),
+        "new": pixel_rect_json(toolbar.new_tab),
+        "tabs": pixel_rect_json(toolbar.tabs),
+        "control_center": pixel_rect_json(toolbar.control_center),
+        "settings": pixel_rect_json(toolbar.settings),
+        "locale": pixel_rect_json(toolbar.locale),
+        "font_decrease": pixel_rect_json(toolbar.font_decrease),
+        "font_increase": pixel_rect_json(toolbar.font_increase),
+    })
+}
+
 #[cfg(test)]
 mod system_menu_tests {
     use super::{
         RecentSidebarTextClick, RenderBuffers, compact_cwd_for_status, parse_gui_launch,
         scale_frame_nearest, scale_rect_to_frame, system_menu_clipboard_state_pure,
+        workspace_toolbar_snapshot_json,
     };
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     use super::{ToolbarHit, platform_toolbar_action_id};
@@ -4934,6 +4943,34 @@ mod system_menu_tests {
             platform_toolbar_action_id(ToolbarHit::FontIncrease),
             action::FONT_INCREASE
         );
+    }
+
+    #[test]
+    fn toolbar_snapshot_matches_all_rendered_native_controls() {
+        let layout = super::workspace_layout_for(960, 600, &crate::settings::AppConfig::default());
+        let toolbar = layout
+            .workspace_toolbar
+            .expect("workspace toolbar should be visible");
+        let snapshot = workspace_toolbar_snapshot_json(toolbar);
+
+        assert_eq!(
+            snapshot["bounds"],
+            crate::ui_geometry::pixel_rect_json(toolbar.bounds)
+        );
+        for field in [
+            "new",
+            "tabs",
+            "control_center",
+            "settings",
+            "locale",
+            "font_decrease",
+            "font_increase",
+        ] {
+            assert!(
+                snapshot[field].is_object(),
+                "missing toolbar field: {field}"
+            );
+        }
     }
 
     #[test]

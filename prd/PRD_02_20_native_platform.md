@@ -275,14 +275,16 @@ Windows slice-3 evidence (2026-07-30):
 macOS hot-path evidence (2026-07-30):
 
 - [x] `cargo fmt --check` and all-target warnings-denied Clippy pass
-- [x] 373 library tests pass; focused macOS adapter tests cover stable toolbar
+- [x] 381 library tests pass; focused macOS adapter tests cover stable toolbar
   order/IDs, Command versus terminal Control, Shift punctuation,
   Option/dead-key composition, Space, CJK IME preedit/commit, clipboard byte
   and timeout failures, screenshot bounds/failures, invalid scale metrics, and
   Retina scale-factor changes
 - [x] native Cocoa GUI smoke with `AGENTERM_NO_ACTIVATE=1` produces a structured
   960x600 logical snapshot and a 1920x1200 Retina PNG; toolbar labels/order,
-  locale, focus, window state, and layout geometry agree
+  locale, focus, window state, and layout geometry agree; the Unix/macOS
+  snapshot publishes bounds for all six rendered toolbar controls, matching
+  the Windows snapshot shape
 - [x] native Accessibility resize produces an 800x468 logical snapshot and a
   1600x936 Retina PNG with zero GUI stderr; the same no-activate probe preserves
   the previously frontmost application
