@@ -137,6 +137,23 @@ fn workflow_actions_are_immutable_and_post_release_integrity_is_read_only() {
 }
 
 #[test]
+fn candidate_collects_delivery_timing_evidence() {
+    assert!(CANDIDATE.contains("Publish candidate delivery timing evidence"));
+    assert!(CANDIDATE.contains("Upload candidate delivery timing"));
+    assert!(CANDIDATE.contains("delivery-timing/candidate-delivery-timing.json"));
+    assert!(CANDIDATE.contains("candidate-delivery-timing-${{ github.run_id }}"));
+}
+
+#[test]
+fn promotion_collects_delivery_timing_evidence() {
+    assert!(PROMOTION.contains("Publish promotion timing evidence"));
+    assert!(PROMOTION.contains("Upload promotion timing evidence"));
+    assert!(PROMOTION.contains("delivery-timing/release-delivery-timing.json"));
+    assert!(PROMOTION.contains("release-delivery-timing-${{ github.run_id }}"));
+    assert!(PROMOTION.contains("agenterm-release-timing"));
+}
+
+#[test]
 fn release_identity_inputs_have_platform_stable_line_endings() {
     for path in [
         "Cargo.lock",

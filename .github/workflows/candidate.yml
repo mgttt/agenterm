@@ -701,3 +701,132 @@ jobs:
             echo "- Artifact digest: \`$ARTIFACT_DIGEST\`"
             echo "- Retention: 14 days"
           } >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Publish candidate delivery timing evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          CANDIDATE_RUN_ID: ${{ github.run_id }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p delivery-timing
+
+          run_id="${CANDIDATE_RUN_ID}"
+          workflow_name="Release Candidate"
+          api_url="${GITHUB_API_URL%/}"
+          run_json="$(mktemp)"
+          jobs_json="$(mktemp)"
+
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "$api_url/repos/$GH_REPO/actions/runs/$run_id" > "$run_json"
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "$api_url/repos/$GH_REPO/actions/runs/$run_id/jobs?filter=all&per_page=200" \
+            > "$jobs_json"
+
+          python3 - "$run_json" "$jobs_json" "$workflow_name" "$run_id" "$GH_REPO" "$SOURCE_SHA" <<'PY'
+          import datetime
+          import json
+          import os
+          import sys
+
+          def to_ms(value):
+              if not value:
+                  return None
+              dt = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+              return int(dt.timestamp() * 1000)
+
+          run = json.load(open(sys.argv[1], encoding="utf-8"))
+          jobs_document = json.load(open(sys.argv[2], encoding="utf-8"))
+          workflow_name = sys.argv[3]
+          run_id = int(sys.argv[4])
+          repository = sys.argv[5]
+          source_sha = sys.argv[6]
+
+          run_start = to_ms(run.get("run_started_at"))
+          run_end = to_ms(run.get("updated_at"))
+          queue_ms = None
+          if run.get("created_at") and run_start is not None:
+              queue_ms = max(0, run_start - to_ms(run.get("created_at")))
+          run_ms = None if run_start is None or run_end is None else max(0, run_end - run_start)
+
+          def step_ms(step):
+              start = to_ms(step.get("started_at"))
+              done = to_ms(step.get("completed_at"))
+              if start is None or done is None or done < start:
+                  return 0
+              return max(0, done - start)
+
+          def classify_stages(name, ms):
+              key = (name or "").lower()
+              if "restore" in key or "cache" in key:
+                  return "cache_ms"
+              if "package" in key:
+                  return "package_ms"
+              if "upload" in key or "download" in key:
+                  return "artifact_transfer_ms"
+              if "quality gate" in key or "smoke" in key or "test" in key or "verify" in key:
+                  return "test_ms"
+              if "build" in key or "bootstrap" in key or "clippy" in key:
+                  return "compile_ms"
+              if "aggregate" in key:
+                  return "aggregate_ms"
+              return None
+
+          stage_ms = {
+              "cache_ms": 0,
+              "compile_ms": 0,
+              "package_ms": 0,
+              "test_ms": 0,
+              "artifact_transfer_ms": 0,
+              "aggregate_ms": 0,
+          }
+          for job in jobs_document.get("jobs", []):
+              steps = job.get("steps") or []
+              for step in steps:
+                  target = classify_stages(step.get("name", ""), step_ms(step))
+                  if target is None:
+                      continue
+                  stage_ms[target] += step_ms(step)
+
+          jobs = []
+          for job in jobs_document.get("jobs", []):
+              j_start = to_ms(job.get("started_at"))
+              j_end = to_ms(job.get("completed_at"))
+              j_ms = None if j_start is None or j_end is None or j_end < j_start else max(0, j_end - j_start)
+              jobs.append({
+                  "id": job.get("id"),
+                  "name": job.get("name"),
+                  "status": job.get("status"),
+                  "conclusion": job.get("conclusion"),
+                  "duration_ms": j_ms,
+              })
+
+          report = {
+              "schema_version": 1,
+              "kind": "agenterm-delivery-timing",
+              "workflow": workflow_name,
+              "repository": repository,
+              "run_id": run_id,
+              "source_sha": source_sha,
+              "queue_duration_ms": queue_ms,
+              "run_duration_ms": run_ms,
+              "stage_duration_ms": stage_ms,
+              "jobs": jobs,
+          }
+          with open("delivery-timing/candidate-delivery-timing.json", "w", encoding="utf-8") as f:
+              json.dump(report, f, indent=2, sort_keys=True)
+          PY
+
+          rm -f "$run_json" "$jobs_json"
+
+      - name: Upload candidate delivery timing
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: candidate-delivery-timing-${{ github.run_id }}
+          path: delivery-timing/
+          if-no-files-found: error
+          retention-days: 14

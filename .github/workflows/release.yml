@@ -408,3 +408,147 @@ jobs:
             echo "- Promotion performs no Cargo build, test, package, signing,"
             echo "  notarization, or asset overwrite."
           } >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Publish promotion timing evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PROMOTION_RUN_ID: ${{ github.run_id }}
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          SOURCE_SHA: ${{ needs.verify.outputs.source_sha }}
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p delivery-timing
+          api_url="${GITHUB_API_URL%/}"
+          candidate_json="$(mktemp)"
+          promotion_json="$(mktemp)"
+          promotion_jobs_json="$(mktemp)"
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "$api_url/repos/$GH_REPO/actions/runs/$CANDIDATE_RUN_ID" > "$candidate_json"
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "$api_url/repos/$GH_REPO/actions/runs/$PROMOTION_RUN_ID/jobs?filter=all&per_page=200" > "$promotion_jobs_json"
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "$api_url/repos/$GH_REPO/actions/runs/$PROMOTION_RUN_ID" > "$promotion_json"
+
+          python3 - "$candidate_json" "$promotion_json" "$promotion_jobs_json" \
+            "$CANDIDATE_RUN_ID" "$PROMOTION_RUN_ID" "$SOURCE_SHA" <<'PY'
+          import datetime
+          import json
+          import os
+          import sys
+
+          def to_ms(value):
+              if not value:
+                  return None
+              dt = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+              return int(dt.timestamp() * 1000)
+
+          def step_ms(step):
+              start = to_ms(step.get("started_at"))
+              done = to_ms(step.get("completed_at"))
+              if start is None or done is None or done < start:
+                  return None
+              return max(0, done - start)
+
+          def classify_stage(name):
+              key = (name or "").lower()
+              if "restore" in key or "cache" in key:
+                  return "cache_ms"
+              if "build" in key or "bootstrap" in key or "clippy" in key:
+                  return "compile_ms"
+              if "test" in key or "smoke" in key or "verify" in key:
+                  return "test_ms"
+              if "package" in key:
+                  return "package_ms"
+              if "upload" in key or "download" in key:
+                  return "artifact_transfer_ms"
+              return None
+
+          candidate = json.load(open(sys.argv[1], encoding="utf-8"))
+          promotion = json.load(open(sys.argv[2], encoding="utf-8"))
+          promotion_jobs = json.load(open(sys.argv[3], encoding="utf-8")).get("jobs", [])
+          candidate_run_id = int(sys.argv[4])
+          promotion_run_id = int(sys.argv[5])
+          source_sha = sys.argv[6]
+
+          candidate_updated_ms = to_ms(candidate.get("updated_at"))
+          promotion_started_ms = to_ms(promotion.get("run_started_at")) or to_ms(promotion.get("created_at"))
+          published_ms = to_ms(promotion.get("updated_at")) \
+            or int(datetime.datetime.now(datetime.timezone.utc).timestamp() * 1000)
+          candidate_to_publish_ms = 0
+          if candidate_updated_ms is not None and promotion_started_ms is not None:
+              candidate_to_publish_ms = max(0, promotion_started_ms - candidate_updated_ms)
+
+          queue_ms = None
+          if candidate.get("created_at") is not None and promotion_started_ms is not None:
+              created_ms = to_ms(candidate.get("created_at"))
+              if created_ms is not None:
+                  queue_ms = max(0, promotion_started_ms - created_ms)
+
+          stage_duration_ms = {
+              "cache_ms": 0,
+              "compile_ms": 0,
+              "package_ms": 0,
+              "test_ms": 0,
+              "artifact_transfer_ms": 0,
+          }
+          job_reports = []
+          run_started_ms = to_ms(promotion.get("run_started_at"))
+          run_finished_ms = to_ms(promotion.get("updated_at"))
+          run_duration_ms = None if run_started_ms is None or run_finished_ms is None else max(0, run_finished_ms - run_started_ms)
+
+          for job in promotion_jobs:
+              job_start = to_ms(job.get("started_at"))
+              job_end = to_ms(job.get("completed_at"))
+              job_duration = None if job_start is None or job_end is None else max(0, job_end - job_start)
+              job_reports.append({
+                  "id": job.get("id"),
+                  "name": job.get("name"),
+                  "status": job.get("status"),
+                  "conclusion": job.get("conclusion"),
+                  "duration_ms": job_duration,
+              })
+              for step in (job.get("steps") or []):
+                  stage = classify_stage(step.get("name", ""))
+                  if stage is None:
+                      continue
+                  ms = step_ms(step)
+                  if ms is None:
+                      continue
+                  stage_duration_ms[stage] += ms
+
+          report = {
+              "schema_version": 1,
+              "kind": "agenterm-release-timing",
+              "workflow": "Release",
+              "repository": "{:s}".format(os.environ["GH_REPO"]),
+              "candidate_run_id": candidate_run_id,
+              "promotion_run_id": promotion_run_id,
+              "source_sha": source_sha,
+              "candidate_updated_ms": candidate_updated_ms,
+              "promotion_started_ms": promotion_started_ms,
+              "published_ms": published_ms,
+              "candidate_to_publish_ms": candidate_to_publish_ms,
+              "queue_duration_ms": queue_ms,
+              "run_duration_ms": run_duration_ms,
+              "stage_duration_ms": stage_duration_ms,
+              "jobs": job_reports,
+          }
+          with open("delivery-timing/release-delivery-timing.json", "w", encoding="utf-8") as f:
+              json.dump(report, f, indent=2, sort_keys=True)
+          PY
+
+          rm -f "$candidate_json" "$promotion_json" "$promotion_jobs_json"
+
+      - name: Upload promotion timing evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-delivery-timing-${{ github.run_id }}
+          path: delivery-timing/
+          if-no-files-found: error
+          retention-days: 14
