@@ -1071,8 +1071,8 @@ fn apply_resolved_environment(resolved: &ResolvedIpcEndpoint) {
             );
         }
     }
-    let settings_path_is_derived = env::var_os(DERIVED_SETTINGS_MARKER).as_deref()
-        == Some(std::ffi::OsStr::new("1"));
+    let settings_path_is_derived =
+        env::var_os(DERIVED_SETTINGS_MARKER).as_deref() == Some(std::ffi::OsStr::new("1"));
     if env::var_os("AGENTERM_SETTINGS_PATH").is_none() || settings_path_is_derived {
         unsafe {
             if resolved.logical_instance == crate::ipc_endpoint::LogicalInstance::Main {
