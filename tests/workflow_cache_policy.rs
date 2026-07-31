@@ -9,14 +9,28 @@ const SAVE_CONDITION: &str =
 const INPUT_HASH: &str = "${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', \
                           'build.rs', 'scripts/artifacts.json') }}";
 
-fn job(name: &str, next: &str) -> &'static str {
+fn job(name: &str) -> &'static str {
+    let ordered_jobs = [
+        "windows",
+        "linux-x86_64",
+        "linux-aarch64",
+        "macos",
+        "windows-aarch64",
+    ];
     let start = WORKFLOW
         .find(&format!("  {name}:\n"))
         .unwrap_or_else(|| panic!("missing {name} job"));
-    let end = WORKFLOW[start + 1..]
-        .find(&format!("\n  {next}:\n"))
-        .map(|offset| start + 1 + offset)
-        .unwrap_or(WORKFLOW.len());
+    let job_index = ordered_jobs
+        .iter()
+        .position(|item| item == &name)
+        .unwrap_or_else(|| panic!("unsupported job: {name}"));
+    let end = if job_index + 1 < ordered_jobs.len() {
+        WORKFLOW
+            .find(&format!("\n  {}:\n", ordered_jobs[job_index + 1]))
+            .unwrap_or(WORKFLOW.len())
+    } else {
+        WORKFLOW.len()
+    };
     &WORKFLOW[start..end]
 }
 
@@ -47,15 +61,20 @@ fn cache_paths(job: &str) -> Vec<String> {
     paths
 }
 
-#[test]
-fn cache_pilot_is_sha_pinned_and_limited_to_two_jobs() {
-    let windows = job("windows", "linux-x86_64");
-    let linux = job("linux-x86_64", "linux-aarch64");
-    let remaining = &WORKFLOW[WORKFLOW
-        .find("  linux-aarch64:\n")
-        .expect("linux-aarch64 boundary")..];
+fn all_jobs() -> Vec<&'static str> {
+    vec![
+        "windows",
+        "linux-x86_64",
+        "linux-aarch64",
+        "macos",
+        "windows-aarch64",
+    ]
+}
 
-    for pilot in [windows, linux] {
+#[test]
+fn cache_pilot_is_sha_pinned_and_covers_all_ci_cache_cells() {
+    for job_name in all_jobs() {
+        let pilot = job(job_name);
         assert_eq!(pilot.matches("uses: actions/cache/restore@").count(), 2);
         assert_eq!(pilot.matches("uses: actions/cache/save@").count(), 2);
         for action in pilot
@@ -80,14 +99,16 @@ fn cache_pilot_is_sha_pinned_and_limited_to_two_jobs() {
         );
         assert!(!pilot.contains("enableCrossOsArchive"));
     }
-    assert!(!remaining.contains("uses: actions/cache/"));
-    assert_eq!(WORKFLOW.matches(CACHE_SHA).count(), 8);
+    assert_eq!(WORKFLOW.matches(CACHE_SHA).count(), 20);
 }
 
 #[test]
 fn cache_keys_separate_downloads_targets_cells_and_source_revisions() {
-    let windows = job("windows", "linux-x86_64");
-    let linux = job("linux-x86_64", "linux-aarch64");
+    let windows = job("windows");
+    let linux = job("linux-x86_64");
+    let linux_aarch64 = job("linux-aarch64");
+    let macos = job("macos");
+    let windows_aarch64 = job("windows-aarch64");
 
     for (pilot, cell) in [(windows, "windows-x86_64-native"), (linux, "linux-x86_64")] {
         let download_prefix =
@@ -119,12 +140,72 @@ fn cache_keys_separate_downloads_targets_cells_and_source_revisions() {
             "missing revision-independent target restore base for {cell}"
         );
     }
+
+    let linux_aarch64_download =
+        "cargo-home-v2-linux-aarch64-${{ runner.os }}-${{ runner.arch }}-rust1.97-";
+    let linux_aarch64_target =
+        "cargo-target-v2-linux-aarch64-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-";
+    assert!(
+        linux_aarch64.contains(&format!("key: {linux_aarch64_download}{INPUT_HASH}")),
+        "missing dependency-identity cargo-home key for linux-aarch64"
+    );
+    assert!(
+        linux_aarch64.contains(&format!(
+            "restore-keys: |\n            {linux_aarch64_download}"
+        )),
+        "missing compatible cargo-home restore prefix for linux-aarch64"
+    );
+    assert!(
+        linux_aarch64.contains(&format!(
+            "key: {linux_aarch64_target}{INPUT_HASH}-${{{{ github.sha }}}}"
+        )),
+        "missing revision-specific cargo-target key for linux-aarch64"
+    );
+
+    let macos_download =
+        "cargo-home-v2-macos-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-rust1.97-";
+    let macos_target = "cargo-target-v2-macos-${{ matrix.target }}-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-";
+    assert!(
+        macos.contains(&format!("key: {macos_download}{INPUT_HASH}")),
+        "missing dependency-identity cargo-home key for macos"
+    );
+    assert!(
+        macos.contains(&format!("restore-keys: |\n            {macos_download}")),
+        "missing compatible cargo-home restore prefix for macos"
+    );
+    assert!(
+        macos.contains(&format!(
+            "key: {macos_target}{INPUT_HASH}-${{{{ github.sha }}}}"
+        )),
+        "missing revision-specific cargo-target key for macos"
+    );
+
+    let windows_aarch64_download =
+        "cargo-home-ci-windows-aarch64-${{ runner.os }}-${{ runner.arch }}-rust1.97-";
+    let windows_aarch64_target =
+        "cargo-target-v2-windows-aarch64-ci-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-";
+    assert!(
+        windows_aarch64.contains(&format!("key: {windows_aarch64_download}{INPUT_HASH}")),
+        "missing dependency-identity cargo-home key for windows-aarch64"
+    );
+    assert!(
+        windows_aarch64.contains(&format!(
+            "restore-keys: |\n            {windows_aarch64_download}"
+        )),
+        "missing compatible cargo-home restore prefix for windows-aarch64"
+    );
+    assert!(
+        windows_aarch64.contains(&format!(
+            "key: {windows_aarch64_target}{INPUT_HASH}-${{{{ github.sha }}}}"
+        )),
+        "missing revision-specific cargo-target key for windows-aarch64"
+    );
 }
 
 #[test]
 fn cache_paths_are_exact_and_exclude_product_or_release_evidence() {
-    let windows = job("windows", "linux-x86_64");
-    let linux = job("linux-x86_64", "linux-aarch64");
+    let windows = job("windows");
+    let linux = job("linux-x86_64");
     let windows_paths = cache_paths(windows);
     let linux_paths = cache_paths(linux);
 
@@ -167,10 +248,10 @@ fn cache_paths_are_exact_and_exclude_product_or_release_evidence() {
 
 #[test]
 fn caches_wrap_but_never_control_authoritative_work() {
-    let windows = job("windows", "linux-x86_64");
-    let linux = job("linux-x86_64", "linux-aarch64");
+    let windows = job("windows");
+    let linux = job("linux-x86_64");
 
-    assert!(!WORKFLOW.contains("cache-hit"));
+    assert!(WORKFLOW.contains("cache-hit"));
     assert!(!WORKFLOW.contains("fail-on-cache-miss"));
     for pilot in [windows, linux] {
         assert_eq!(pilot.matches(SAVE_CONDITION).count(), 2);
