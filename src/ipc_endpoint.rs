@@ -588,10 +588,19 @@ fn default_native_endpoint(scope: &ServerScopeId) -> IpcEndpoint {
             .map(PathBuf::from)
             .filter(|path| path.is_absolute())
             .unwrap_or_else(|| {
-                env::temp_dir().join(format!("agenterm-{}", unsafe { libc::geteuid() }))
+                fallback_unix_runtime_base()
+                    .join(format!("agenterm-{}", unsafe { libc::geteuid() }))
             });
         IpcEndpoint::default_unix_socket(&runtime, scope)
     }
+}
+
+#[cfg(unix)]
+pub(crate) fn fallback_unix_runtime_base() -> PathBuf {
+    let short_system_temp = Path::new(std::path::MAIN_SEPARATOR_STR).join("tmp");
+    std::fs::canonicalize(&short_system_temp)
+        .or_else(|_| std::fs::canonicalize(env::temp_dir()))
+        .unwrap_or(short_system_temp)
 }
 
 fn nonempty_env(name: &str) -> Option<String> {

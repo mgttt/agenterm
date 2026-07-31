@@ -275,7 +275,7 @@ Windows slice-3 evidence (2026-07-30):
 macOS hot-path evidence (2026-07-30):
 
 - [x] `cargo fmt --check` and all-target warnings-denied Clippy pass
-- [x] 381 library tests pass; focused macOS adapter tests cover stable toolbar
+- [x] 425 library tests pass; focused macOS adapter tests cover stable toolbar
   order/IDs, Command versus terminal Control, Shift punctuation,
   Option/dead-key composition, Space, CJK IME preedit/commit, clipboard byte
   and timeout failures, screenshot bounds/failures, invalid scale metrics, and

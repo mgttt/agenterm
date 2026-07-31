@@ -253,19 +253,43 @@ fn parse_endpoint_selectors(arguments: &[String]) -> Result<EndpointSelectorArgs
 }
 
 fn serve_mcp_stdio(selectors: EndpointSelectorArgs) -> i32 {
-    let endpoint = match resolve_ipc_endpoint(&selectors) {
-        Ok(resolved) => resolved.endpoint.to_string(),
-        Err(error) => {
-            eprintln!("mcp_endpoint_selection_failed: {error}");
-            return 2;
+    let has_cli_selector =
+        selectors.endpoint.is_some() || selectors.address.is_some() || selectors.instance.is_some();
+    let environment_endpoint = std::env::var("AGENTERM_IPC_ENDPOINT")
+        .ok()
+        .filter(|value| !value.trim().is_empty());
+    let environment_address = std::env::var("AGENTERM_IPC_ADDRESS")
+        .ok()
+        .filter(|value| !value.trim().is_empty());
+    let has_selector = has_cli_selector
+        || environment_endpoint.is_some()
+        || environment_address.is_some()
+        || ["AGENTERM_INSTANCE"]
+            .into_iter()
+            .any(|name| std::env::var(name).is_ok_and(|value| !value.trim().is_empty()));
+    let legacy_address_selected = selectors.address.is_some()
+        || (!has_cli_selector && environment_endpoint.is_none() && environment_address.is_some());
+    let endpoint = if has_selector {
+        match resolve_ipc_endpoint(&selectors) {
+            Ok(resolved) if legacy_address_selected => Some(
+                resolved
+                    .endpoint
+                    .legacy_address()
+                    .unwrap_or_else(|| resolved.endpoint.to_string()),
+            ),
+            Ok(resolved) => Some(resolved.endpoint.to_string()),
+            Err(error) => {
+                eprintln!("mcp_endpoint_selection_failed: {error}");
+                return 2;
+            }
         }
+    } else {
+        None
     };
     match crate::mcp_stdio::serve_stdio_with_config(
         std::io::BufReader::new(std::io::stdin()),
         std::io::stdout().lock(),
-        crate::mcp_stdio::McpStdioConfig {
-            address: Some(endpoint),
-        },
+        crate::mcp_stdio::McpStdioConfig { address: endpoint },
     ) {
         Ok(()) => 0,
         Err(error) => {

@@ -877,6 +877,7 @@ fn macos_package_task_reads_both_platform_rows_and_writes_preview_zip() {
     fs::create_dir_all(&binaries).expect("create binary fixture");
     for name in [
         "agenterm",
+        "agenterm-cc",
         "agenterm-cli",
         "agenterm-mux",
         "agenterm-script",
@@ -1109,7 +1110,7 @@ fn artifact_manifest_task_accepts_canonical_contract_and_rejects_invalid_fields(
     );
     assert!(
         String::from_utf8_lossy(&canonical.stdout)
-            .contains("defines 6 validated Windows executables")
+            .contains("defines 7 validated Windows executables")
     );
 
     let root = fixture_root("artifact-manifest");
@@ -1788,7 +1789,7 @@ fn prd_alignment_task_matches_public_catalogs_and_fails_closed() {
     assert_eq!(
         String::from_utf8_lossy(&accepted.stdout).trim(),
         concat!(
-            "PASS: PRD aligns with 61 catalog entries, 83 public names, ",
+            "PASS: PRD aligns with 62 catalog entries, 84 public names, ",
             "11 protocol features, 41 mux commands, 59 capability IDs, ",
             "and 59 executable evidence IDs"
         )

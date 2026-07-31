@@ -226,7 +226,8 @@ impl IpcStream {
         timeout: Duration,
     ) -> TransportResult<Self> {
         stream
-            .set_read_timeout(Some(timeout))
+            .set_nonblocking(false)
+            .and_then(|()| stream.set_read_timeout(Some(timeout)))
             .and_then(|()| stream.set_write_timeout(Some(timeout)))
             .map_err(|error| transport_io(endpoint, error))?;
         Ok(Self {
@@ -1186,7 +1187,7 @@ mod server {
         let endpoint = client::ipc_endpoint()?;
         let mut listener = super::IpcListener::bind(&endpoint)
             .map_err(anyhow::Error::new)
-            .context("another AgenTerm server is already using the selected IPC endpoint")?;
+            .context("failed to bind the selected AgenTerm IPC endpoint")?;
         let (sender, receiver) = mpsc::sync_channel(IPC_MAX_PENDING_REQUESTS);
         let wake_window = window;
         thread::spawn(move || {
@@ -1387,6 +1388,35 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn unix_adapter_completes_a_large_response_after_socket_backpressure() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let directory = unique_temp_directory("backpressure");
+        std::fs::create_dir(&directory).unwrap();
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let path = directory.join("server.sock");
+        let endpoint = IpcEndpoint::UnixSocket(path.to_string_lossy().into_owned());
+        let mut listener = IpcListener::bind(&endpoint).unwrap();
+        let mut expected = vec![b'x'; 2 * 1024 * 1024];
+        expected.push(b'\n');
+        let response = expected.clone();
+        let server = std::thread::spawn(move || {
+            let mut stream = listener.accept(Duration::from_secs(2)).unwrap();
+            stream.write_all(&response).unwrap();
+        });
+
+        let mut client = IpcStream::connect(&endpoint, Duration::from_secs(2)).unwrap();
+        std::thread::sleep(Duration::from_millis(50));
+        let mut actual = Vec::new();
+        client.read_to_end(&mut actual).unwrap();
+        server.join().unwrap();
+        assert_eq!(actual, expected);
+
+        std::fs::remove_dir(directory).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn unix_adapter_rejects_a_symlink_runtime_directory() {
         let directory = unique_temp_directory("symlink");
         let target = directory.with_extension("target");
@@ -1495,7 +1525,11 @@ mod tests {
 
     #[cfg(unix)]
     fn unique_temp_directory(label: &str) -> std::path::PathBuf {
-        std::env::temp_dir().join(format!(
+        #[cfg(unix)]
+        let base = crate::ipc_endpoint::fallback_unix_runtime_base();
+        #[cfg(not(unix))]
+        let base = std::env::temp_dir();
+        base.join(format!(
             "agenterm-ipc-{label}-{}-{}",
             std::process::id(),
             unique_counter()
