@@ -1738,23 +1738,7 @@ fn query_server(context: &ServerContext) -> Result<ConnectedServer> {
 }
 
 fn default_settings_path() -> PathBuf {
-    #[cfg(windows)]
-    {
-        env::var_os("LOCALAPPDATA")
-            .map(PathBuf::from)
-            .unwrap_or_else(env::temp_dir)
-            .join("AgenTerm")
-            .join("settings.json")
-    }
-    #[cfg(unix)]
-    {
-        env::var_os("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
-            .unwrap_or_else(env::temp_dir)
-            .join("agenterm")
-            .join("settings.json")
-    }
+    crate::platform::paths::settings_path(None)
 }
 
 fn process_start_identity(pid: u32) -> Option<String> {
