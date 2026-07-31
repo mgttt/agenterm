@@ -70,6 +70,10 @@ then hand control of those files back to the primary agent. The primary agent
 owns cross-cutting decisions, reviews every handoff, resolves integration
 issues, and commits only small coherent increments.
 
+Subagents leave handoff files **unstaged** in the shared checkout. The primary
+agent stages exact reviewed paths immediately before committing; early or broad
+staging can accidentally include another active agent's unfinished work.
+
 All agents share one checkout and see edits immediately. Never concurrently
 edit a hot/shared file such as `src/lib.rs`, `PRD.md`, `Cargo.toml`, build
 scripts, or this guide. Split work at stable file boundaries where possible; if
