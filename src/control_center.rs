@@ -1932,585 +1932,159 @@ fn focus_existing(_record: &RegistryRecord, registry_path: &Path, no_activate: b
     crate::platform::control_center::focus_existing_window(native_window, no_activate);
 }
 
-#[cfg(windows)]
-fn platform_shell(owner: RegistryOwner, no_activate: bool) -> Result<()> {
-    windows_shell(owner, no_activate)
+struct ProductShellHost {
+    owner: RegistryOwner,
+    projection: ShellProjection,
+    focus_request: PathBuf,
+    last_focus_request: Option<String>,
+    screenshot_request: PathBuf,
+    screenshot_result: PathBuf,
+    last_screenshot_request: Option<String>,
 }
 
-#[cfg(unix)]
-fn platform_shell(owner: RegistryOwner, no_activate: bool) -> Result<()> {
-    unix_shell(owner, no_activate)
+impl ProductShellHost {
+    fn new(owner: RegistryOwner) -> Self {
+        Self {
+            projection: ShellProjection::new(&owner.path),
+            focus_request: focus_request_path(&owner.path),
+            last_focus_request: None,
+            screenshot_request: screenshot_request_path(&owner.path),
+            screenshot_result: screenshot_result_path(&owner.path),
+            last_screenshot_request: None,
+            owner,
+        }
+    }
 }
 
-#[cfg(windows)]
-static WINDOWS_PROJECTION: std::sync::OnceLock<std::sync::Mutex<ShellProjection>> =
-    std::sync::OnceLock::new();
+impl crate::platform::services::control_center_shell::ControlCenterShellHost for ProductShellHost {
+    fn title(&self) -> String {
+        self.projection.title()
+    }
+    fn lines(&self) -> Vec<String> {
+        self.projection.lines()
+    }
+    fn poll(&mut self) -> bool {
+        self.projection.poll()
+    }
+    fn close_requested(&self) -> bool {
+        self.projection.close_requested()
+    }
 
-#[cfg(windows)]
-fn windows_shell(owner: RegistryOwner, no_activate: bool) -> Result<()> {
-    use std::{mem, ptr};
-    use windows_sys::Win32::{
-        Foundation::{HWND, LPARAM, LRESULT, WPARAM},
-        Graphics::Gdi::{
-            BeginPaint, EndPaint, GetStockObject, InvalidateRect, PAINTSTRUCT, TextOutW,
-            WHITE_BRUSH,
-        },
-        System::LibraryLoader::GetModuleHandleW,
-        UI::WindowsAndMessaging::{
-            CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreateWindowExW, DefWindowProcW,
-            DispatchMessageW, GetMessageW, IDC_ARROW, KillTimer, LoadCursorW, MSG, PostMessageW,
-            PostQuitMessage, RegisterClassW, SW_SHOW, SW_SHOWNOACTIVATE, SetTimer, SetWindowTextW,
-            ShowWindow, TranslateMessage, WM_CLOSE, WM_DESTROY, WM_PAINT, WM_TIMER, WNDCLASSW,
-            WS_OVERLAPPEDWINDOW,
-        },
-    };
+    fn publish_native_window(
+        &mut self,
+        raw_handle: i64,
+    ) -> crate::platform::services::control_center_shell::ControlCenterShellResult<()> {
+        self.owner
+            .publish_native_window(raw_handle)
+            .map_err(|error| {
+                crate::platform::services::control_center_shell::ControlCenterShellError::failed(
+                    "control_center_native_window_publish_failed",
+                    error,
+                )
+            })
+    }
 
-    unsafe extern "system" fn window_proc(
-        window: HWND,
-        message: u32,
-        wparam: WPARAM,
-        lparam: LPARAM,
-    ) -> LRESULT {
-        match message {
-            WM_PAINT => {
-                let mut paint: PAINTSTRUCT = unsafe { mem::zeroed() };
-                let device = unsafe { BeginPaint(window, &mut paint) };
-                let lines = WINDOWS_PROJECTION
-                    .get()
-                    .and_then(|projection| projection.lock().ok())
-                    .map(|projection| projection.lines())
-                    .unwrap_or_else(|| {
-                        vec!["AgenTerm Control Center · state unavailable".to_owned()]
-                    });
-                for (index, line) in lines.iter().enumerate() {
-                    let wide = line.encode_utf16().collect::<Vec<_>>();
-                    unsafe {
-                        TextOutW(
-                            device,
-                            24,
-                            24 + i32::try_from(index).unwrap_or(0) * 28,
-                            wide.as_ptr(),
-                            i32::try_from(wide.len()).unwrap_or(0),
-                        );
-                    }
-                }
-                unsafe { EndPaint(window, &paint) };
-                0
-            }
-            WM_TIMER => {
-                if let Some(projection) = WINDOWS_PROJECTION.get()
-                    && let Ok(mut projection) = projection.lock()
-                {
-                    if projection.close_requested() {
-                        unsafe { PostMessageW(window, WM_CLOSE, 0, 0) };
-                    } else if projection.poll() {
-                        let title = wide_null(&projection.title());
-                        unsafe {
-                            SetWindowTextW(window, title.as_ptr());
-                            InvalidateRect(window, ptr::null(), 1);
-                        }
-                    }
-                }
-                0
-            }
-            WM_DESTROY => {
-                unsafe {
-                    KillTimer(window, 1);
-                    PostQuitMessage(0);
-                }
-                0
-            }
-            _ => unsafe { DefWindowProcW(window, message, wparam, lparam) },
+    fn take_focus_request(
+        &mut self,
+    ) -> Option<crate::platform::services::control_center_shell::ControlCenterFocusRequest> {
+        let request = read_regular_file(&self.focus_request)
+            .ok()
+            .and_then(|value| String::from_utf8(value).ok());
+        if request.is_none() || request == self.last_focus_request {
+            return None;
+        }
+        self.last_focus_request = request;
+        if self
+            .last_focus_request
+            .as_deref()
+            .is_some_and(|request| request.starts_with("no-activate:"))
+        {
+            Some(crate::platform::services::control_center_shell::ControlCenterFocusRequest::NoActivate)
+        } else {
+            Some(crate::platform::services::control_center_shell::ControlCenterFocusRequest::Activate)
         }
     }
 
-    let instance = unsafe { GetModuleHandleW(ptr::null()) };
-    let class = wide_null("AgenTermControlCenterWindow");
-    let projection = ShellProjection::new(&owner.path);
-    let title = wide_null(&projection.title());
-    WINDOWS_PROJECTION
-        .set(std::sync::Mutex::new(projection))
-        .map_err(|_| anyhow::anyhow!("control_center_projection_already_initialized"))?;
-    let window_class = WNDCLASSW {
-        style: CS_HREDRAW | CS_VREDRAW,
-        lpfnWndProc: Some(window_proc),
-        hInstance: instance,
-        hCursor: unsafe { LoadCursorW(ptr::null_mut(), IDC_ARROW) },
-        hbrBackground: unsafe { GetStockObject(WHITE_BRUSH) } as _,
-        lpszClassName: class.as_ptr(),
-        ..unsafe { mem::zeroed() }
-    };
-    unsafe { RegisterClassW(&window_class) };
-    let window = unsafe {
-        CreateWindowExW(
-            0,
-            class.as_ptr(),
-            title.as_ptr(),
-            WS_OVERLAPPEDWINDOW,
-            CW_USEDEFAULT,
-            CW_USEDEFAULT,
-            760,
-            480,
-            ptr::null_mut(),
-            ptr::null_mut(),
-            instance,
-            ptr::null_mut(),
-        )
-    };
-    if window.is_null() {
-        anyhow::bail!("control_center_window_create_failed");
-    }
-    owner.publish_native_window(window as isize as i64)?;
-    unsafe {
-        SetTimer(window, 1, 200, None);
-        ShowWindow(
-            window,
-            if no_activate {
-                SW_SHOWNOACTIVATE
-            } else {
-                SW_SHOW
+    fn capture_requested_screenshot(
+        &mut self,
+        frame: Option<crate::platform::services::control_center_shell::ControlCenterFrame<'_>>,
+    ) -> crate::platform::services::control_center_shell::ControlCenterShellResult<()> {
+        let Ok(bytes) = read_regular_file(&self.screenshot_request) else {
+            return Ok(());
+        };
+        let Ok(request) = serde_json::from_slice::<ScreenshotRequest>(&bytes) else {
+            return Ok(());
+        };
+        let Some(frame) = frame.filter(|frame| !frame.pixels.is_empty()) else {
+            return Ok(());
+        };
+        if self.last_screenshot_request.as_deref() == Some(request.request_id.as_str())
+            || request.schema_version != SCHEMA_VERSION
+            || request.owner_pid != self.owner.pid
+            || request.process_start_identity != self.owner.process_start_identity
+        {
+            return Ok(());
+        }
+        self.last_screenshot_request = Some(request.request_id.clone());
+
+        let server = self.projection.snapshot.connected_server.as_ref();
+        let snapshot = RendererSnapshot {
+            schema_version: SCHEMA_VERSION,
+            owner_pid: self.owner.pid,
+            renderer: "native".to_owned(),
+            selected_view: "cockpit".to_owned(),
+            server_state: self.projection.snapshot.server_state.to_owned(),
+            server_reason: self.projection.snapshot.server_reason.clone(),
+            server_endpoint: server.map(|server| server.endpoint.clone()),
+            logical_instance: server.and_then(|server| server.logical_instance.clone()),
+            window_title: self.projection.title(),
+            physical_width: frame.width,
+            physical_height: frame.height,
+            scale_factor: frame.scale_factor,
+        };
+        let error = crate::platform::services::ui_screenshot::write_xrgb_png(
+            crate::platform::contract::ui_screenshot::XrgbFrame {
+                path: &request.output,
+                width: frame.width,
+                height: frame.height,
+                pixels: frame.pixels,
+                clip: None,
             },
-        );
-    }
-    let mut message: MSG = unsafe { mem::zeroed() };
-    while unsafe { GetMessageW(&mut message, ptr::null_mut(), 0, 0) } > 0 {
-        unsafe {
-            TranslateMessage(&message);
-            DispatchMessageW(&message);
-        }
-    }
-    drop(owner);
-    Ok(())
-}
-
-#[cfg(windows)]
-fn wide_null(value: &str) -> Vec<u16> {
-    value.encode_utf16().chain(std::iter::once(0)).collect()
-}
-
-#[cfg(unix)]
-fn unix_shell(owner: RegistryOwner, no_activate: bool) -> Result<()> {
-    use std::{num::NonZeroU32, rc::Rc};
-
-    use softbuffer::{Context, Surface};
-    use winit::{
-        application::ApplicationHandler,
-        dpi::LogicalSize,
-        event::WindowEvent,
-        event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
-        window::{UserAttentionType, Window, WindowAttributes, WindowId},
-    };
-
-    struct App {
-        no_activate: bool,
-        context: Context<winit::event_loop::OwnedDisplayHandle>,
-        window: Option<Rc<Window>>,
-        surface: Option<Surface<winit::event_loop::OwnedDisplayHandle, Rc<winit::window::Window>>>,
-        focus_request: PathBuf,
-        last_focus_request: Option<String>,
-        screenshot_request: PathBuf,
-        screenshot_result: PathBuf,
-        last_screenshot_request: Option<String>,
-        frame: Vec<u32>,
-        frame_width: u32,
-        frame_height: u32,
-        scale_factor: f64,
-        projection: ShellProjection,
-        _owner: RegistryOwner,
-    }
-
-    impl App {
-        fn request_redraw(&self) {
-            if let Some(window) = self.window.as_ref() {
-                window.request_redraw();
-            }
-        }
-
-        fn redraw(&mut self) {
-            let Some(window) = self.window.as_ref() else {
-                return;
-            };
-            let physical_size = window.inner_size();
-            let (Some(width), Some(height)) = (
-                NonZeroU32::new(physical_size.width),
-                NonZeroU32::new(physical_size.height),
-            ) else {
-                return;
-            };
-            let Some(surface) = self.surface.as_mut() else {
-                return;
-            };
-            if surface.resize(width, height).is_err() {
-                return;
-            }
-            let Ok(mut buffer) = surface.buffer_mut() else {
-                return;
-            };
-            let buffer_width = buffer.width().get();
-            let buffer_height = buffer.height().get();
-            render_unix_shell(
-                &mut buffer,
-                buffer_width,
-                buffer_height,
-                &self.projection.lines(),
-            );
-            self.frame.clear();
-            self.frame.extend_from_slice(&buffer);
-            self.frame_width = buffer_width;
-            self.frame_height = buffer_height;
-            self.scale_factor = window.scale_factor();
-            let _ = buffer.present();
-        }
-
-        fn capture_requested_screenshot(&mut self) {
-            let Ok(bytes) = read_regular_file(&self.screenshot_request) else {
-                return;
-            };
-            let Ok(request) = serde_json::from_slice::<ScreenshotRequest>(&bytes) else {
-                return;
-            };
-            if self.last_screenshot_request.as_deref() == Some(request.request_id.as_str())
-                || request.schema_version != SCHEMA_VERSION
-                || request.owner_pid != self._owner.pid
-                || request.process_start_identity != self._owner.process_start_identity
-                || self.frame.is_empty()
-            {
-                return;
-            }
-            self.last_screenshot_request = Some(request.request_id.clone());
-            let server = self.projection.snapshot.connected_server.as_ref();
-            let snapshot = RendererSnapshot {
-                schema_version: SCHEMA_VERSION,
-                owner_pid: self._owner.pid,
-                renderer: "native".to_owned(),
-                selected_view: "cockpit".to_owned(),
-                server_state: self.projection.snapshot.server_state.to_owned(),
-                server_reason: self.projection.snapshot.server_reason.clone(),
-                server_endpoint: server.map(|server| server.endpoint.clone()),
-                logical_instance: server.and_then(|server| server.logical_instance.clone()),
-                window_title: self.projection.title(),
-                physical_width: self.frame_width,
-                physical_height: self.frame_height,
-                scale_factor: self.scale_factor,
-            };
-            let error = crate::unix_app::write_xrgb_png(
-                &request.output,
-                self.frame_width,
-                self.frame_height,
-                &self.frame,
-                None,
-            )
-            .err();
-            let result = RendererCaptureResult {
-                schema_version: SCHEMA_VERSION,
-                owner_pid: self._owner.pid,
-                process_start_identity: self._owner.process_start_identity.clone(),
-                request_id: request.request_id,
-                output: request.output,
-                snapshot: error.is_none().then_some(snapshot),
+        )
+        .err()
+        .map(|error| error.message());
+        let result = RendererCaptureResult {
+            schema_version: SCHEMA_VERSION,
+            owner_pid: self.owner.pid,
+            process_start_identity: self.owner.process_start_identity.clone(),
+            request_id: request.request_id,
+            output: request.output,
+            snapshot: error.is_none().then_some(snapshot),
+            error,
+        };
+        write_private_atomic(
+            &self.screenshot_result,
+            &serde_json::to_vec_pretty(&result).unwrap_or_default(),
+        )
+        .map_err(|error| {
+            crate::platform::services::control_center_shell::ControlCenterShellError::failed(
+                "control_center_screenshot_result_write_failed",
                 error,
-            };
-            let _ = write_private_atomic(
-                &self.screenshot_result,
-                &serde_json::to_vec_pretty(&result).unwrap_or_default(),
-            );
-        }
+            )
+        })
     }
+}
 
-    impl ApplicationHandler for App {
-        fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-            if self.window.is_some() {
-                return;
-            }
-            let base = WindowAttributes::default()
-                .with_title(self.projection.title())
-                .with_inner_size(LogicalSize::new(760, 480));
-            #[cfg(target_os = "linux")]
-            let attributes = crate::platform::linux::activation::configure_window_attributes(
-                base,
-                self.no_activate,
-            );
-            #[cfg(not(target_os = "linux"))]
-            let attributes = base.with_active(!self.no_activate);
-            match event_loop.create_window(attributes) {
-                Ok(window) => {
-                    let window = Rc::new(window);
-                    match Surface::new(&self.context, Rc::clone(&window)) {
-                        Ok(surface) => {
-                            self.surface = Some(surface);
-                            self.window = Some(window);
-                            self.request_redraw();
-                        }
-                        Err(error) => {
-                            eprintln!("agenterm-cc: {error}");
-                            event_loop.exit();
-                        }
-                    }
-                }
-                Err(error) => {
-                    eprintln!("agenterm-cc: {error}");
-                    event_loop.exit();
-                }
-            }
-        }
-
-        fn window_event(
-            &mut self,
-            event_loop: &ActiveEventLoop,
-            _window_id: WindowId,
-            event: WindowEvent,
-        ) {
-            match event {
-                WindowEvent::CloseRequested => event_loop.exit(),
-                WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
-                    self.request_redraw();
-                }
-                WindowEvent::RedrawRequested => self.redraw(),
-                _ => {}
-            }
-        }
-
-        fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-            if self.projection.close_requested() {
-                event_loop.exit();
-                return;
-            }
-            if self.projection.poll()
-                && let Some(window) = self.window.as_ref()
-            {
-                window.set_title(&self.projection.title());
-                window.request_redraw();
-            }
-            self.capture_requested_screenshot();
-            let request = read_regular_file(&self.focus_request)
-                .ok()
-                .and_then(|value| String::from_utf8(value).ok());
-            if request.is_some() && request != self.last_focus_request {
-                self.last_focus_request = request;
-                if let Some(window) = self.window.as_ref()
-                    && !self
-                        .last_focus_request
-                        .as_deref()
-                        .is_some_and(|request| request.starts_with("no-activate:"))
-                {
-                    window.set_minimized(false);
-                    window.request_user_attention(Some(UserAttentionType::Informational));
-                    window.focus_window();
-                }
-            }
-            event_loop.set_control_flow(ControlFlow::WaitUntil(
-                std::time::Instant::now() + std::time::Duration::from_millis(200),
-            ));
-        }
-    }
-
-    let mut event_loop_builder = EventLoop::<()>::builder();
-    #[cfg(target_os = "macos")]
-    crate::platform::macos::activation::configure_event_loop(&mut event_loop_builder, no_activate);
-    let event_loop = event_loop_builder.build()?;
-    let context = Context::new(event_loop.owned_display_handle())
-        .map_err(|error| anyhow::anyhow!("{error}"))?;
-    let projection = ShellProjection::new(&owner.path);
-    let mut app = App {
+fn platform_shell(owner: RegistryOwner, no_activate: bool) -> Result<()> {
+    crate::platform::services::control_center_shell::run_native_shell(
+        Box::new(ProductShellHost::new(owner)),
         no_activate,
-        context,
-        window: None,
-        surface: None,
-        focus_request: focus_request_path(&owner.path),
-        last_focus_request: None,
-        screenshot_request: screenshot_request_path(&owner.path),
-        screenshot_result: screenshot_result_path(&owner.path),
-        last_screenshot_request: None,
-        frame: Vec::new(),
-        frame_width: 0,
-        frame_height: 0,
-        scale_factor: 1.0,
-        projection,
-        _owner: owner,
-    };
-    event_loop.run_app(&mut app)?;
-    Ok(())
+    )
+    .map_err(anyhow::Error::new)
 }
-
-#[cfg(unix)]
-fn render_unix_shell(pixels: &mut [u32], width: u32, height: u32, lines: &[String]) {
-    const BACKGROUND: u32 = 0x00F4_F6F8;
-    const HEADER: u32 = 0x001B_2533;
-    const TITLE: u32 = 0x00F8_FAFC;
-    const BODY: u32 = 0x0020_2937;
-    const DIVIDER: u32 = 0x00D9_DFE7;
-
-    pixels.fill(BACKGROUND);
-    fill_unix_rect(pixels, width, height, 0, 0, width, 64, HEADER);
-    fill_unix_rect(pixels, width, height, 0, 64, width, 1, DIVIDER);
-
-    let body_scale = if width >= 640 { 2 } else { 1 };
-    let title_scale = if width >= 420 { 2 } else { 1 };
-    if let Some(title) = lines.first() {
-        draw_unix_text(
-            pixels,
-            width,
-            height,
-            24,
-            if title_scale == 2 { 24 } else { 28 },
-            title_scale,
-            TITLE,
-            title,
-        );
-    }
-    let line_height = crate::unix_app::font::GLYPH_HEIGHT * body_scale + 12;
-    for (index, line) in lines.iter().skip(1).enumerate() {
-        let y = 88_u32.saturating_add(
-            u32::try_from(index)
-                .unwrap_or(u32::MAX)
-                .saturating_mul(line_height),
-        );
-        if y >= height {
-            break;
-        }
-        draw_unix_text(pixels, width, height, 24, y, body_scale, BODY, line);
-    }
-}
-
-#[cfg(unix)]
-#[allow(clippy::too_many_arguments)]
-fn fill_unix_rect(
-    pixels: &mut [u32],
-    stride: u32,
-    height: u32,
-    x: u32,
-    y: u32,
-    width: u32,
-    rect_height: u32,
-    color: u32,
-) {
-    let right = x.saturating_add(width).min(stride);
-    let bottom = y.saturating_add(rect_height).min(height);
-    for row in y.min(height)..bottom {
-        let start = (row.saturating_mul(stride).saturating_add(x.min(stride))) as usize;
-        let end = (row.saturating_mul(stride).saturating_add(right)) as usize;
-        if let Some(slice) = pixels.get_mut(start..end) {
-            slice.fill(color);
-        }
-    }
-}
-
-#[cfg(unix)]
-#[allow(clippy::too_many_arguments)]
-fn draw_unix_text(
-    pixels: &mut [u32],
-    width: u32,
-    height: u32,
-    x: u32,
-    y: u32,
-    scale: u32,
-    color: u32,
-    text: &str,
-) {
-    let advance = (crate::unix_app::font::GLYPH_WIDTH + 1).saturating_mul(scale);
-    let mut cursor_x = x;
-    for character in text.chars() {
-        if cursor_x >= width {
-            break;
-        }
-        draw_unix_glyph(
-            pixels,
-            width,
-            height,
-            cursor_x,
-            y,
-            scale,
-            color,
-            unix_display_character(character),
-        );
-        cursor_x = cursor_x.saturating_add(advance);
-    }
-}
-
-#[cfg(unix)]
-fn unix_display_character(character: char) -> char {
-    match character {
-        '—' | '–' => '-',
-        '·' | '•' => '*',
-        character if character.is_ascii() && !character.is_ascii_control() => character,
-        _ => '?',
-    }
-}
-
-#[cfg(unix)]
-#[allow(clippy::too_many_arguments)]
-fn draw_unix_glyph(
-    pixels: &mut [u32],
-    width: u32,
-    height: u32,
-    x: u32,
-    y: u32,
-    scale: u32,
-    color: u32,
-    character: char,
-) {
-    let Some(rows) = crate::unix_app::font::glyph_rows(character)
-        .or_else(|| crate::unix_app::font::glyph_rows('?'))
-    else {
-        return;
-    };
-    for (row, bits) in rows.iter().copied().enumerate() {
-        for column in 0..crate::unix_app::font::GLYPH_WIDTH {
-            if !crate::unix_app::font::row_contains_pixel(bits, column) {
-                continue;
-            }
-            fill_unix_rect(
-                pixels,
-                width,
-                height,
-                x.saturating_add(column.saturating_mul(scale)),
-                y.saturating_add(u32::try_from(row).unwrap_or(u32::MAX).saturating_mul(scale)),
-                scale,
-                scale,
-                color,
-            );
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[cfg(unix)]
-    #[test]
-    fn unix_shell_renderer_paints_projection_text_and_respects_small_surfaces() {
-        const WIDTH: u32 = 760;
-        const HEIGHT: u32 = 200;
-        let mut pixels = vec![0; (WIDTH * HEIGHT) as usize];
-        render_unix_shell(
-            &mut pixels,
-            WIDTH,
-            HEIGHT,
-            &[
-                "AgenTerm Control Center".to_owned(),
-                "Cockpit     available (read_only)".to_owned(),
-                "Workflows   unavailable (not_implemented)".to_owned(),
-            ],
-        );
-        assert!(pixels.contains(&0x001B_2533), "header background");
-        assert!(pixels.contains(&0x00F8_FAFC), "header text");
-        assert!(pixels.contains(&0x0020_2937), "projection body text");
-
-        let mut tiny = vec![0; 7 * 5];
-        render_unix_shell(&mut tiny, 7, 5, &["AgenTerm Control Center".to_owned()]);
-        assert_eq!(tiny.len(), 35);
-        assert!(tiny.iter().all(|pixel| *pixel == 0x001B_2533));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn unix_shell_renderer_uses_visible_ascii_fallbacks_for_projection_punctuation() {
-        assert_eq!(unix_display_character('—'), '-');
-        assert_eq!(unix_display_character('·'), '*');
-        assert_eq!(unix_display_character('中'), '?');
-        assert_eq!(unix_display_character('a'), 'a');
-    }
 
     #[test]
     fn default_command_opens_and_accepts_no_activate() {

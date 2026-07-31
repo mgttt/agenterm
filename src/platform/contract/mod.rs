@@ -1,5 +1,6 @@
 //! OS-neutral facade contracts and typed failures.
 
+pub(crate) mod control_center_shell;
 pub(crate) mod ipc;
 pub(crate) mod ipc_transport;
 pub(crate) mod process;

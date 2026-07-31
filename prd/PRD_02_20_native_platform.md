@@ -367,11 +367,13 @@ Revision-4 migration evidence (2026-07-31, partial):
   control_center,webview}` services. Script Runtime's owned child-tree call
   path now uses `platform::process`; it retains its existing typed receipts.
   Control Center sidecar executable naming and registry PID/start-identity
-  matching also now consume `platform::{paths,process}`; its native shell and
-  renderer extraction remain explicitly incomplete. The approved next boundary
-  keeps projection/registry/IPC receipts in the product layer and passes a
-  narrow typed projection host to selected adapter shell drivers; native event
-  loops, rendering, no-activate, and capture remain adapter-owned.
+  matching also now consume `platform::{paths,process}`. Control Center's
+  projection/registry/IPC receipts remain in the product layer behind a typed
+  host, while selected Windows/Linux/macOS shell adapters own native event
+  loops, rendering, no-activate behavior, focus, window identity, and frame
+  capture. Windows public no-activate evidence opens the adapter-owned shell,
+  captures a 760×480 native PNG, closes it, and observes `not_running` with no
+  residual owner.
 - [~] The approved PTY boundary exposes normalized spawn, size, exit, and
   session/reader/wait operations only. POSIX `openpty`/fork/session/exec/poll
   and Windows ConPTY/job mechanics will move below selected adapters while

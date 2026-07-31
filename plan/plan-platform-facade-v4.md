@@ -16,7 +16,7 @@ contract + selected adapters
 │  ├─ clipboard / atomic files               [adapter-owned]
 │  ├─ stream-handle probing                  [adapter-owned]
 │  └─ worker supervision / audit             [adapter-owned]
-├─ Control Center shell                       [partial]
+├─ Control Center shell                       [adapter-owned]
 ├─ passive WebView runtime probe              [adapter-owned]
 └─ frontend + PTY native lifecycle           [partial]
     └─ static source boundary gate           [depends on all above]
@@ -77,13 +77,13 @@ this state does not yet satisfy the static source-boundary gate.
 
 1. Define typed Script-window, Script-clipboard, stream-probe, and atomic-file
    service contracts before moving each native implementation.
-2. Move Control Center shell/focus/capture and WebView host internals behind
-   their services, retaining bounded deadlines and typed failures. The shell
-   split keeps registry, IPC projection, and receipts in `control_center`; a
-   narrow projection-host contract supplies title, lines, polling, close,
-   native-window publication, focus requests, and typed capture requests to
-   the selected adapter driver. It must not duplicate snapshot or registry
-   identity logic in an OS adapter.
+2. Control Center shell/focus/capture and WebView host internals now sit behind
+   their services with bounded deadlines and typed failures. The shell split
+   keeps registry, IPC projection, screenshot receipts, and snapshot identity
+   in `control_center`; a narrow projection-host contract supplies title,
+   lines, polling, close, native-window publication, focus requests, and typed
+   capture requests to selected adapter drivers. Windows no-activate open,
+   760×480 native capture, public close, and orphan-free status pass locally.
 3. Split PTY/frontends into adapter-owned event-loop and native-terminal
    lifecycle implementations; product state stays platform-neutral. The PTY
    contract exposes terminal size, spawn specification, typed exit/failure,
