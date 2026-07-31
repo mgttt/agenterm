@@ -2,3 +2,4 @@
 
 pub(crate) mod ipc;
 pub(crate) mod process;
+pub(crate) mod script_clipboard;

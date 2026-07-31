@@ -290,6 +290,11 @@ Revision-4 migration evidence (2026-07-31, partial):
   implementation owner. The product module preserves its existing typed Rhai
   receipts; its former Win32 snapshot/terminate, Linux `/proc`/`kill`, macOS
   `libproc`, Job Object, and Unix process-group copies have been deleted.
+- [x] Script Runtime clipboard bindings now call
+  `services::script_clipboard → selected → adapters`. Windows retains its
+  two-second Unicode clipboard, UTF-16, and transferable-allocation contract;
+  Linux/macOS retain the existing typed Unsupported result rather than silently
+  inheriting GUI clipboard timeout or paste-policy semantics.
 
 - [~] `settings`, instance PID/start-identity checks, terminal default-shell
   selection, Control Center atomic-file/focus/capture routing, and passive

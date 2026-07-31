@@ -14,6 +14,7 @@ pub(crate) struct ProcessInfo {
     pub(crate) executable_name: String,
 }
 
+#[allow(dead_code)] // A target builds the full three-adapter error contract.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ProcessErrorKind {
     IdOutOfRange,
