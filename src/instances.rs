@@ -13,6 +13,10 @@ use crate::{
     build_identity::BuildIdentity,
     ipc_endpoint::{IpcEndpoint, LogicalInstance, ServerScopeId},
     ipc_transport::{IPC_RESPONSE_MAX_BYTES, IpcStream, read_bounded_ipc_line},
+    platform::{
+        paths,
+        process::{self, ProcessObservation},
+    },
     protocol::{IpcRequest, IpcResponse},
     upgrade_identity::UpgradeIdentity,
 };
@@ -437,17 +441,7 @@ fn new_lease_nonce() -> String {
 }
 
 fn current_process_start_identity() -> Result<String> {
-    match observe_process(std::process::id()) {
-        ProcessObservation::Live {
-            start_identity: Some(identity),
-        } => Ok(identity),
-        ProcessObservation::Live {
-            start_identity: None,
-        } => anyhow::bail!("process is live but its start identity is unavailable"),
-        ProcessObservation::Dead { reason } | ProcessObservation::Unknown { reason } => {
-            anyhow::bail!("{reason}")
-        }
-    }
+    process::start_identity(std::process::id()).map_err(anyhow::Error::msg)
 }
 
 pub(crate) fn discover_instances() -> Result<Vec<DiscoveredInstance>> {
@@ -515,7 +509,7 @@ fn legacy_protocol_probe(endpoint: &IpcEndpoint, timeout: Duration) -> bool {
 }
 
 pub(crate) fn registration_owner_state(record: &InstanceRecord) -> RegistrationOwnerState {
-    match observe_process(record.pid) {
+    match process::observe(record.pid) {
         ProcessObservation::Dead { reason } => RegistrationOwnerState::Dead { reason },
         ProcessObservation::Unknown { reason } => RegistrationOwnerState::OwnerUnknown {
             reason,
@@ -689,197 +683,11 @@ fn same_registration_generation(left: &InstanceRecord, right: &InstanceRecord) -
 }
 
 pub(crate) fn instance_process_is_alive(pid: u32) -> bool {
-    !matches!(observe_process(pid), ProcessObservation::Dead { .. })
-}
-
-enum ProcessObservation {
-    Live { start_identity: Option<String> },
-    Dead { reason: String },
-    Unknown { reason: String },
-}
-
-#[cfg(windows)]
-fn observe_process(pid: u32) -> ProcessObservation {
-    use windows_sys::Win32::{
-        Foundation::{
-            CloseHandle, ERROR_ACCESS_DENIED, ERROR_INVALID_PARAMETER, FILETIME, GetLastError,
-            STILL_ACTIVE,
-        },
-        System::Threading::{
-            GetExitCodeProcess, GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
-        },
-    };
-
-    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
-    if process.is_null() {
-        let error = unsafe { GetLastError() };
-        return if error == ERROR_INVALID_PARAMETER {
-            ProcessObservation::Dead {
-                reason: "process_not_found".to_owned(),
-            }
-        } else if error == ERROR_ACCESS_DENIED {
-            ProcessObservation::Unknown {
-                reason: "process_access_denied".to_owned(),
-            }
-        } else {
-            ProcessObservation::Unknown {
-                reason: format!("process_open_failed:{error}"),
-            }
-        };
-    }
-    let mut exit_code = 0;
-    if unsafe { GetExitCodeProcess(process, &mut exit_code) } == 0 {
-        unsafe { CloseHandle(process) };
-        return ProcessObservation::Unknown {
-            reason: "process_exit_query_failed".to_owned(),
-        };
-    }
-    if exit_code != STILL_ACTIVE as u32 {
-        unsafe { CloseHandle(process) };
-        return ProcessObservation::Dead {
-            reason: "process_exited".to_owned(),
-        };
-    }
-    let mut creation: FILETIME = unsafe { std::mem::zeroed() };
-    let mut exit: FILETIME = unsafe { std::mem::zeroed() };
-    let mut kernel: FILETIME = unsafe { std::mem::zeroed() };
-    let mut user: FILETIME = unsafe { std::mem::zeroed() };
-    let queried =
-        unsafe { GetProcessTimes(process, &mut creation, &mut exit, &mut kernel, &mut user) } != 0;
-    unsafe { CloseHandle(process) };
-    if !queried {
-        return ProcessObservation::Unknown {
-            reason: "process_start_identity_query_failed".to_owned(),
-        };
-    }
-    let ticks = (u64::from(creation.dwHighDateTime) << 32) | u64::from(creation.dwLowDateTime);
-    ProcessObservation::Live {
-        start_identity: Some(format!("windows-filetime:{ticks}")),
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn observe_process(pid: u32) -> ProcessObservation {
-    let stat = match fs::read_to_string(format!("/proc/{pid}/stat")) {
-        Ok(stat) => stat,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return ProcessObservation::Dead {
-                reason: "process_not_found".to_owned(),
-            };
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
-            return ProcessObservation::Unknown {
-                reason: "process_access_denied".to_owned(),
-            };
-        }
-        Err(error) => {
-            return ProcessObservation::Unknown {
-                reason: format!("process_identity_read_failed:{error}"),
-            };
-        }
-    };
-    let Some(start_ticks) = stat
-        .rsplit_once(") ")
-        .map(|(_, fields)| fields)
-        .and_then(|fields| fields.split_whitespace().nth(19))
-        .filter(|value| value.bytes().all(|byte| byte.is_ascii_digit()))
-    else {
-        return ProcessObservation::Unknown {
-            reason: "process_identity_parse_failed".to_owned(),
-        };
-    };
-    ProcessObservation::Live {
-        start_identity: Some(format!("proc-start-ticks:{start_ticks}")),
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn observe_process(pid: u32) -> ProcessObservation {
-    let Ok(pid) = i32::try_from(pid) else {
-        return ProcessObservation::Dead {
-            reason: "process_id_out_of_range".to_owned(),
-        };
-    };
-    let mut info = unsafe { std::mem::zeroed::<libc::proc_bsdinfo>() };
-    let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
-    let read =
-        unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 0, (&raw mut info).cast(), size) };
-    if read != size {
-        let error = std::io::Error::last_os_error();
-        return match error.raw_os_error() {
-            Some(libc::ESRCH) => ProcessObservation::Dead {
-                reason: "process_not_found".to_owned(),
-            },
-            Some(libc::EPERM) | Some(libc::EACCES) => ProcessObservation::Unknown {
-                reason: "process_access_denied".to_owned(),
-            },
-            _ => ProcessObservation::Unknown {
-                reason: format!("process_identity_read_failed:{error}"),
-            },
-        };
-    }
-    ProcessObservation::Live {
-        start_identity: Some(format!(
-            "macos-start-time:{}.{}",
-            info.pbi_start_tvsec, info.pbi_start_tvusec
-        )),
-    }
-}
-
-#[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
-fn observe_process(pid: u32) -> ProcessObservation {
-    let Ok(pid) = i32::try_from(pid) else {
-        return ProcessObservation::Dead {
-            reason: "process_id_out_of_range".to_owned(),
-        };
-    };
-    if pid <= 0 {
-        return ProcessObservation::Dead {
-            reason: "process_id_out_of_range".to_owned(),
-        };
-    }
-    if unsafe { libc::kill(pid, 0) } == 0 {
-        ProcessObservation::Live {
-            start_identity: None,
-        }
-    } else {
-        let error = std::io::Error::last_os_error();
-        match error.raw_os_error() {
-            Some(libc::ESRCH) => ProcessObservation::Dead {
-                reason: "process_not_found".to_owned(),
-            },
-            Some(libc::EPERM) => ProcessObservation::Unknown {
-                reason: "process_access_denied".to_owned(),
-            },
-            _ => ProcessObservation::Unknown {
-                reason: format!("process_probe_failed:{error}"),
-            },
-        }
-    }
+    !matches!(process::observe(pid), ProcessObservation::Dead { .. })
 }
 
 fn instances_dir() -> PathBuf {
-    if let Some(path) = env::var_os("AGENTERM_INSTANCE_DIR").filter(|path| !path.is_empty()) {
-        return PathBuf::from(path);
-    }
-    #[cfg(windows)]
-    {
-        env::var_os("LOCALAPPDATA")
-            .map(PathBuf::from)
-            .unwrap_or_else(env::temp_dir)
-            .join("AgenTerm")
-            .join("instances")
-    }
-    #[cfg(not(windows))]
-    {
-        env::var_os("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(env::temp_dir)
-            .join(".local")
-            .join("share")
-            .join("agenterm")
-            .join("instances")
-    }
+    paths::instance_registry_dir(env::var_os("AGENTERM_INSTANCE_DIR"))
 }
 
 fn register_instance_in(directory: &Path, record: InstanceRecord) -> Result<InstanceRegistration> {

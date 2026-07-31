@@ -6,8 +6,6 @@
 //! keeps the native renderer active on every platform.
 
 use std::{
-    fs,
-    path::PathBuf,
     sync::atomic::{AtomicU64, AtomicUsize, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -47,178 +45,18 @@ pub struct WebViewHostFacts {
 
 /// Inspect the platform WebView without initializing it.
 pub fn probe() -> WebViewHostFacts {
-    let mut facts = platform_probe();
-    facts.host_state = WebViewHostState::Unimplemented;
-    facts.host_reason = "system_webview_host_not_implemented";
-    facts.active_renderer = "native";
-    facts.bridge_version = BRIDGE_VERSION;
-    facts
-}
-
-#[cfg(windows)]
-fn platform_probe() -> WebViewHostFacts {
-    let mut roots = Vec::new();
-    for variable in ["LOCALAPPDATA", "PROGRAMFILES", "PROGRAMFILES(X86)"] {
-        if let Some(root) = std::env::var_os(variable) {
-            roots.push(
-                PathBuf::from(root)
-                    .join("Microsoft")
-                    .join("EdgeWebView")
-                    .join("Application"),
-            );
-        }
-    }
-    probe_version_directories("webview2", roots, "webview2_runtime_not_found")
-}
-
-#[cfg(target_os = "macos")]
-fn platform_probe() -> WebViewHostFacts {
-    probe_files(
-        "wkwebview",
-        [PathBuf::from(
-            "/System/Library/Frameworks/WebKit.framework/WebKit",
-        )],
-        "system_framework",
-        "webkit_framework_not_found",
-    )
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-fn platform_probe() -> WebViewHostFacts {
-    let directories = [
-        "/usr/lib",
-        "/usr/lib64",
-        "/usr/lib/x86_64-linux-gnu",
-        "/usr/lib/aarch64-linux-gnu",
-        "/lib",
-        "/lib64",
-    ];
-    let names = [
-        "libwebkit2gtk-4.1.so.0",
-        "libwebkit2gtk-4.0.so.37",
-        "libwebkit2gtk-4.0.so.0",
-    ];
-    let paths = directories
-        .into_iter()
-        .flat_map(|directory| {
-            names
-                .iter()
-                .map(move |name| PathBuf::from(directory).join(name))
-        })
-        .collect::<Vec<_>>();
-    probe_files(
-        "webkitgtk",
-        paths,
-        "system_library",
-        "webkitgtk_runtime_not_found",
-    )
-}
-
-#[cfg(not(any(windows, unix)))]
-fn platform_probe() -> WebViewHostFacts {
+    let platform = crate::platform::webview::probe_system_webview();
     WebViewHostFacts {
-        runtime_presence: WebViewRuntimePresence::Missing,
-        host_state: WebViewHostState::Unimplemented,
-        backend: "none",
-        version: None,
-        source: None,
-        runtime_reason: Some("platform_backend_not_defined".to_owned()),
-        host_reason: "system_webview_host_not_implemented",
-        active_renderer: "native",
-        bridge_version: BRIDGE_VERSION,
-    }
-}
-
-#[cfg(windows)]
-fn probe_version_directories(
-    backend: &'static str,
-    roots: Vec<PathBuf>,
-    missing_reason: &'static str,
-) -> WebViewHostFacts {
-    let mut failure = None;
-    for root in roots {
-        match fs::read_dir(&root) {
-            Ok(entries) => {
-                let newest = entries
-                    .filter_map(Result::ok)
-                    .filter(|entry| entry.path().is_dir())
-                    .max_by_key(|entry| entry.file_name());
-                if let Some(entry) = newest {
-                    return WebViewHostFacts {
-                        runtime_presence: WebViewRuntimePresence::Detected,
-                        host_state: WebViewHostState::Unimplemented,
-                        backend,
-                        version: Some(entry.file_name().to_string_lossy().into_owned()),
-                        source: Some(entry.path().display().to_string()),
-                        runtime_reason: None,
-                        host_reason: "system_webview_host_not_implemented",
-                        active_renderer: "native",
-                        bridge_version: BRIDGE_VERSION,
-                    };
-                }
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => failure = Some(format!("probe_failed:{error}")),
-        }
-    }
-    unavailable_or_failed(backend, missing_reason, failure)
-}
-
-#[cfg(unix)]
-fn probe_files(
-    backend: &'static str,
-    paths: impl IntoIterator<Item = PathBuf>,
-    source_kind: &'static str,
-    missing_reason: &'static str,
-) -> WebViewHostFacts {
-    let mut failure = None;
-    for path in paths {
-        match fs::metadata(&path) {
-            Ok(metadata) if metadata.is_file() => {
-                return WebViewHostFacts {
-                    runtime_presence: WebViewRuntimePresence::Detected,
-                    host_state: WebViewHostState::Unimplemented,
-                    backend,
-                    version: version_from_path(&path),
-                    source: Some(format!("{source_kind}:{}", path.display())),
-                    runtime_reason: None,
-                    host_reason: "system_webview_host_not_implemented",
-                    active_renderer: "native",
-                    bridge_version: BRIDGE_VERSION,
-                };
-            }
-            Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => failure = Some(format!("probe_failed:{error}")),
-        }
-    }
-    unavailable_or_failed(backend, missing_reason, failure)
-}
-
-#[cfg(unix)]
-fn version_from_path(path: &std::path::Path) -> Option<String> {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .and_then(|name| name.split(".so.").nth(1))
-        .map(str::to_owned)
-}
-
-fn unavailable_or_failed(
-    backend: &'static str,
-    missing_reason: &'static str,
-    failure: Option<String>,
-) -> WebViewHostFacts {
-    WebViewHostFacts {
-        runtime_presence: if failure.is_some() {
-            WebViewRuntimePresence::Failed
-        } else {
-            WebViewRuntimePresence::Missing
+        runtime_presence: match platform.presence {
+            crate::platform::webview::RuntimePresence::Detected => WebViewRuntimePresence::Detected,
+            crate::platform::webview::RuntimePresence::Missing => WebViewRuntimePresence::Missing,
+            crate::platform::webview::RuntimePresence::Failed => WebViewRuntimePresence::Failed,
         },
         host_state: WebViewHostState::Unimplemented,
-        backend,
-        version: None,
-        source: None,
-        runtime_reason: failure.or_else(|| Some(missing_reason.to_owned())),
+        backend: platform.backend,
+        version: platform.version,
+        source: platform.source,
+        runtime_reason: platform.reason,
         host_reason: "system_webview_host_not_implemented",
         active_renderer: "native",
         bridge_version: BRIDGE_VERSION,

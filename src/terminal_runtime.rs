@@ -243,16 +243,10 @@ impl TerminalTab {
             wake_signal,
             initial_size,
         } = launch;
-        let program = command_line.first().cloned().unwrap_or_else(|| {
-            #[cfg(windows)]
-            {
-                env::var("COMSPEC").unwrap_or_else(|_| r"C:\Windows\System32\cmd.exe".to_owned())
-            }
-            #[cfg(unix)]
-            {
-                env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into())
-            }
-        });
+        let program = command_line
+            .first()
+            .cloned()
+            .unwrap_or_else(crate::platform::runtime::default_terminal_shell);
         let persisted_command_line = if command_line.is_empty() {
             vec![program.clone()]
         } else {

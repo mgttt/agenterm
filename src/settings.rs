@@ -6,6 +6,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use crate::{
     ipc_endpoint::{LogicalInstance, ResolvedIpcEndpoint, ServerScopeId},
     locale::LocaleId,
+    platform::paths,
     theme::ThemeId,
     ui_geometry::{TABS_DEFAULT_WIDTH, clamp_configured_tabs_width},
 };
@@ -13,7 +14,9 @@ use crate::{
 pub(crate) const DEFAULT_TABS_WIDTH: u16 = TABS_DEFAULT_WIDTH as u16;
 pub(crate) const MIN_TERMINAL_FONT_SIZE: u16 = 8;
 pub(crate) const MAX_TERMINAL_FONT_SIZE: u16 = 36;
-pub(crate) const DEFAULT_TERMINAL_FONT_SIZE: u16 = if cfg!(target_os = "macos") { 14 } else { 12 };
+pub(crate) fn default_terminal_font_size() -> u16 {
+    paths::terminal_default_font_size()
+}
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -66,7 +69,7 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             terminal_font_family: "Consolas".to_owned(),
-            terminal_font_size: DEFAULT_TERMINAL_FONT_SIZE,
+            terminal_font_size: default_terminal_font_size(),
             color_theme: ThemeId::Dark,
             locale: LocaleId::English,
             terminal_overrides: BTreeMap::new(),
@@ -168,22 +171,7 @@ where
 }
 
 pub(crate) fn config_path() -> PathBuf {
-    #[cfg(windows)]
-    {
-        config_path_from(
-            env::var_os("AGENTERM_SETTINGS_PATH"),
-            env::var_os("LOCALAPPDATA"),
-        )
-    }
-    #[cfg(unix)]
-    {
-        config_path_from(
-            env::var_os("AGENTERM_SETTINGS_PATH"),
-            env::var_os("XDG_CONFIG_HOME"),
-            env::var_os("HOME"),
-            env::temp_dir(),
-        )
-    }
+    paths::settings_path(env::var_os("AGENTERM_SETTINGS_PATH"))
 }
 
 pub(crate) fn default_settings_path_for(resolved: &ResolvedIpcEndpoint) -> PathBuf {
@@ -195,19 +183,7 @@ pub(crate) fn default_settings_path_for(resolved: &ResolvedIpcEndpoint) -> PathB
 }
 
 fn default_config_path() -> PathBuf {
-    #[cfg(windows)]
-    {
-        config_path_from(None, env::var_os("LOCALAPPDATA"))
-    }
-    #[cfg(unix)]
-    {
-        config_path_from(
-            None,
-            env::var_os("XDG_CONFIG_HOME"),
-            env::var_os("HOME"),
-            env::temp_dir(),
-        )
-    }
+    paths::settings_path(None)
 }
 
 fn scoped_settings_path_from(
@@ -224,53 +200,6 @@ fn scoped_settings_path_from(
         .unwrap_or_else(|| PathBuf::from("."))
         .join("settings")
         .join(format!("{}.json", server_scope_id.as_str()))
-}
-
-#[cfg(windows)]
-fn config_path_from(
-    override_path: Option<std::ffi::OsString>,
-    local_app_data: Option<std::ffi::OsString>,
-) -> PathBuf {
-    if let Some(path) = override_path
-        && !path.is_empty()
-    {
-        return PathBuf::from(path);
-    }
-    local_app_data
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("AgenTerm")
-        .join("settings.json")
-}
-
-#[cfg(unix)]
-fn config_path_from(
-    override_path: Option<std::ffi::OsString>,
-    xdg_config_home: Option<std::ffi::OsString>,
-    home: Option<std::ffi::OsString>,
-    temp_dir: PathBuf,
-) -> PathBuf {
-    if let Some(path) = override_path
-        && !path.is_empty()
-    {
-        return PathBuf::from(path);
-    }
-    let config_home = xdg_config_home
-        .map(PathBuf::from)
-        .filter(|path| path.is_absolute())
-        .or_else(|| {
-            home.map(PathBuf::from)
-                .filter(|path| path.is_absolute())
-                .map(|path| path.join(".config"))
-        })
-        .unwrap_or_else(|| {
-            if temp_dir.is_absolute() {
-                temp_dir
-            } else {
-                PathBuf::from("/tmp")
-            }
-        });
-    config_home.join("agenterm").join("settings.json")
 }
 
 pub(crate) fn load_config() -> AppConfig {
@@ -301,7 +230,7 @@ mod tests {
     fn missing_fields_receive_stable_defaults() {
         let config: AppConfig = serde_json::from_str("{}").unwrap();
         assert_eq!(config.terminal_font_family, "Consolas");
-        assert_eq!(config.terminal_font_size, DEFAULT_TERMINAL_FONT_SIZE);
+        assert_eq!(config.terminal_font_size, default_terminal_font_size());
         assert_eq!(config.color_theme, ThemeId::Dark);
         assert_eq!(config.locale, LocaleId::English);
         assert!(config.terminal_overrides.is_empty());
@@ -452,54 +381,5 @@ mod tests {
                 .join(format!("{}.json", dev_scope.as_str()))
         );
         assert_ne!(dev_path, custom_path);
-    }
-
-    #[test]
-    #[cfg(windows)]
-    fn explicit_settings_path_overrides_the_local_app_data_default() {
-        assert_eq!(
-            config_path_from(Some(r"D:\isolated\settings.json".into()), None),
-            PathBuf::from(r"D:\isolated\settings.json")
-        );
-        assert_eq!(
-            config_path_from(Some("".into()), Some(r"D:\profile".into())),
-            PathBuf::from(r"D:\profile\AgenTerm\settings.json")
-        );
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn unix_settings_path_prefers_absolute_xdg_then_home_without_using_cwd() {
-        assert_eq!(
-            config_path_from(
-                Some("/isolated/settings.json".into()),
-                None,
-                None,
-                PathBuf::from("/var/tmp"),
-            ),
-            PathBuf::from("/isolated/settings.json")
-        );
-        assert_eq!(
-            config_path_from(
-                None,
-                Some("/srv/profile-config".into()),
-                Some("/home/example".into()),
-                PathBuf::from("/var/tmp"),
-            ),
-            PathBuf::from("/srv/profile-config/agenterm/settings.json")
-        );
-        assert_eq!(
-            config_path_from(
-                None,
-                Some("relative-config".into()),
-                Some("/home/example".into()),
-                PathBuf::from("/var/tmp"),
-            ),
-            PathBuf::from("/home/example/.config/agenterm/settings.json")
-        );
-        assert_eq!(
-            config_path_from(None, None, None, PathBuf::from("relative-tmp")),
-            PathBuf::from("/tmp/agenterm/settings.json")
-        );
     }
 }

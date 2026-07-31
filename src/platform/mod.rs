@@ -21,6 +21,30 @@ pub const CONTRACT_REVISION: u32 = 3;
 pub(crate) mod scale;
 pub(crate) mod window;
 
+// Platform Facade services. Product modules consume these typed services;
+// their selected OS implementations stay private to this boundary.
+// Several services are staged ahead of their final product-caller migration;
+// keeping their typed contracts compiled on every target is intentional.
+pub(crate) mod contract;
+#[allow(dead_code)]
+pub(crate) mod control_center;
+#[allow(dead_code)]
+pub(crate) mod ipc;
+#[allow(dead_code)]
+pub(crate) mod paths;
+#[allow(dead_code)]
+pub(crate) mod process;
+#[allow(dead_code)]
+pub(crate) mod runtime;
+#[allow(dead_code)]
+pub(crate) mod script_http;
+#[allow(dead_code)]
+pub(crate) mod selected;
+#[allow(dead_code)]
+pub(crate) mod services;
+#[allow(dead_code)]
+pub(crate) mod webview;
+
 #[cfg(target_os = "windows")]
 pub mod windows;
 

@@ -25,22 +25,26 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
 ```text
 src/platform/
-├─ mod.rs                 shared capability contracts and normalized events
-├─ windows/
+├─ mod.rs                 the only product-facing Platform Facade
+├─ contract/              OS-neutral types, typed errors, and capability ports
+├─ services/              facade operations: ipc, process, paths, ui-host, webview
+├─ selected.rs            private compile-time adapter selection only
+└─ adapters/
+   ├─ windows/
 │  ├─ window
 │  ├─ input
 │  ├─ ime
 │  ├─ clipboard
 │  ├─ font
 │  └─ integration
-├─ macos/
+   ├─ macos/
 │  ├─ window
 │  ├─ input
 │  ├─ ime
 │  ├─ clipboard
 │  ├─ font
 │  └─ integration
-└─ linux/
+   └─ linux/
    ├─ window
    ├─ input
    ├─ ime
@@ -54,6 +58,40 @@ leaf. macOS and Linux may reuse private Unix implementations without merging
 their public capability identities. The first implementation should stay
 small and split files only when a stable responsibility needs independent
 tests or ownership.
+
+### Platform Facade closure rule (revision 4, 2026-07-31)
+
+`platform` is not merely a collection of GUI helpers. It is the required
+middle layer between product code and an operating system. Product/domain
+modules call typed `platform::{ipc, process, paths, ui_host, webview, ...}`
+facade services; they do **not** branch on Windows, macOS, Linux, Unix, native
+handles, or OS path/identity conventions. `selected.rs` and
+`adapters/{windows,macos,linux}` are the only production implementation sites
+that may select an OS with `cfg`.
+
+This preserves necessary native implementations without allowing OS conditionals
+to spread through Fleet, IPC contracts, Script Runtime, Settings, Control
+Center, or terminal product state. The facade owns common typed inputs,
+outputs, capability facts, and errors; adapters own only OS mechanisms. A
+future Web/TUI/agentic projection may consume the same facade contracts without
+being forced through an OS widget API.
+
+The migration is complete only when all of the following are true:
+
+- [ ] production `#[cfg(windows|unix|target_os|target_family)]` selection is
+  confined to `src/platform/**` and unavoidable binary-entry bootstrap code;
+  test-only fixtures are excluded from this count
+- [ ] `ipc_endpoint`, `ipc_transport`, process identity/tree control, standard
+  paths, native activation/clipboard/screenshot, Control Center shell hosting,
+  and WebView runtime probing call facade services rather than OS APIs directly
+- [ ] top-level `win_app`, `unix_app`, and other native frontend modules become
+  adapter-owned implementation details while shared UI state remains platform
+  neutral
+- [ ] a repository boundary test fails when a new non-platform production
+  source file imports OS-native crates or contains an OS-selection `cfg`
+- [ ] all three platform adapters satisfy the same facade contract tests; a
+  missing capability remains a typed unsupported result, never an implicit
+  fallback
 
 ## Shared contract
 
@@ -178,8 +216,10 @@ Available, Unsupported, and Failed without reading source or assuming parity.
 
 ## Boundary and non-goals
 
-- [x] the initial migration does not relocate or redesign PTY, process,
-  filesystem, network, Script Runtime, Fleet authority, or IPC modules
+- [~] the initial GUI-only boundary did not relocate process, filesystem,
+  Script Runtime, Fleet authority, or IPC modules. That limit is superseded by
+  revision 4: their OS-specific mechanisms now migrate behind the Platform
+  Facade while their product semantics and public contracts stay unchanged.
 - [x] the platform layer does not contain product labels, Settings policy,
   tab-tree behavior, Hub navigation, or terminal lifecycle decisions
 - [x] `arch/` remains absent until CPU-specific code exists, such as explicit
@@ -237,6 +277,46 @@ Completion requires:
   theme, active terminal, modal, and focus state
 - [ ] platform failures are typed and diagnosable, with no hidden fallback that
   reports a capability as available when it did not execute
+
+Revision-4 migration evidence (2026-07-31, partial):
+
+- [~] `settings`, instance PID/start-identity checks, terminal default-shell
+  selection, Control Center atomic-file/focus/capture routing, and passive
+  WebView runtime probing now call typed `platform::{paths,process,runtime,
+  control_center,webview}` services. Script Runtime's owned child-tree call
+  path now uses `platform::process`; it retains its existing typed receipts.
+- [~] native IPC identity, default endpoint/workspace derivation, listener /
+  stream framing, named-pipe and Unix-socket mechanics, permissions, peer
+  identity, and stale recovery now reside beneath `src/platform/`; the
+  product-facing `ipc_transport` is an OS-neutral shim. Legacy TCP and the
+  v1/v2 instance schema remain unchanged. The final adapter split and the
+  repository-wide static closure gate remain deliberately unmarked.
+- [~] `LogicalInstance`, `ServerScopeId`, typed `IpcEndpoint`, endpoint
+  selector, and legacy migration contract now live in
+  `platform::contract::ipc`; `src/ipc_endpoint.rs` is compatibility-only.
+  The contract's 11 focused tests retain main/dev separation, opaque identity,
+  selector priority, legacy TCP parsing, and serialization evidence.
+- [~] IPC adapter implementations are now physically selected from
+  `platform::adapters/{windows,linux,macos}/ipc.rs`; macOS reuses the private
+  Unix mechanism while keeping its own adapter identity. `selected.rs` is the
+  only IPC target selector. Native endpoint bind/connect/accept and stream
+  I/O now traverse `services::ipc → selected → adapter`; the former native
+  transport implementation remains platform-private deletion debt, not a
+  product execution path.
+- [~] Script Runtime HTTP TLS provider/root-store selection and
+  platform-specific TLS-error classification now traverse
+  `services::script_http → selected → adapters`; the Rhai HTTP surface keeps
+  its existing bounded timeout, proxy, response, and typed-error behavior.
+- [~] CLI server autostart now calls `platform::process`; Windows Job
+  breakaway, executable discovery, and null-stdio child creation are adapter
+  mechanics, while unsupported hosts preserve the former no-autostart retry
+  behavior.
+- [~] Script worker sidecar executable-name conventions now resolve through
+  `platform::paths`; client discovery no longer branches on `.exe` naming.
+- [x] Windows-hosted `cargo fmt`, `cargo clippy --lib -- -D warnings`, focused
+  process-facade and Script Runtime tests, plus `agenterm-cli --help` pass for
+  this partial slice. Full boundary scanning and cross-platform adapter
+  contract evidence remain required before completion.
 
 Windows slice-1 evidence (2026-07-30):
 

@@ -6,7 +6,7 @@
 use std::{
     env,
     ffi::OsString,
-    fs::{self, OpenOptions},
+    fs,
     io::{self, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -129,7 +129,6 @@ struct RendererSnapshot {
     scale_factor: f64,
 }
 
-#[cfg(unix)]
 #[derive(Debug, Deserialize, Serialize)]
 struct ScreenshotRequest {
     schema_version: u32,
@@ -139,7 +138,6 @@ struct ScreenshotRequest {
     output: PathBuf,
 }
 
-#[cfg(unix)]
 #[derive(Debug, Deserialize, Serialize)]
 struct RendererCaptureResult {
     schema_version: u32,
@@ -1137,11 +1135,7 @@ fn capabilities() -> CapabilityDocument {
         owns_terminal_authority: false,
         process_reuse: true,
         no_activate: true,
-        screenshot: if cfg!(any(windows, target_os = "macos")) {
-            "available"
-        } else {
-            "unavailable"
-        },
+        screenshot: crate::platform::control_center::screenshot_capability(),
         views: ["cockpit", "workflows", "extensions", "info_hub"],
     }
 }
@@ -1159,10 +1153,21 @@ fn png_dimensions(bytes: &[u8]) -> Result<(u32, u32)> {
     Ok((width, height))
 }
 
-#[cfg(windows)]
 fn capture_control_center_screenshot(output: &Path) -> Result<ScreenshotDocument> {
-    use windows_sys::Win32::UI::WindowsAndMessaging::IsWindow;
+    match crate::platform::control_center::screenshot_strategy() {
+        crate::platform::control_center::ScreenshotStrategy::DirectNativeWindow => {
+            capture_direct_native_screenshot(output)
+        }
+        crate::platform::control_center::ScreenshotStrategy::RendererRequest => {
+            capture_renderer_requested_screenshot(output)
+        }
+        crate::platform::control_center::ScreenshotStrategy::Unsupported => anyhow::bail!(
+            "control_center_screenshot_unsupported: native Control Center screenshot capture is unavailable on this platform"
+        ),
+    }
+}
 
+fn capture_direct_native_screenshot(output: &Path) -> Result<ScreenshotDocument> {
     let registry = registry_path();
     let owner = read_registry(&registry)
         .filter(registry_process_matches)
@@ -1173,11 +1178,6 @@ fn capture_control_center_screenshot(output: &Path) -> Result<ScreenshotDocument
         .ok()
         .and_then(|value| value.parse::<i64>().ok())
         .context("control_center_screenshot_window_invalid")?;
-    let window = native_window as isize as *mut std::ffi::c_void;
-    if window.is_null() || unsafe { IsWindow(window) } == 0 {
-        anyhow::bail!("control_center_screenshot_window_unavailable");
-    }
-
     let output = if output.is_absolute() {
         output.to_owned()
     } else {
@@ -1185,12 +1185,8 @@ fn capture_control_center_screenshot(output: &Path) -> Result<ScreenshotDocument
             .context("control_center_screenshot_current_directory_unavailable")?
             .join(output)
     };
-    crate::platform::windows::screenshot::save_png(
-        window,
-        &output,
-        crate::platform::windows::screenshot::CaptureArea::Window,
-    )
-    .map_err(|error| anyhow::anyhow!("control_center_screenshot_capture_failed: {error}"))?;
+    crate::platform::control_center::capture_native_window_png(native_window, &output)
+        .map_err(|error| anyhow::anyhow!("control_center_screenshot_capture_failed: {error}"))?;
 
     let still_exact_owner = read_registry(&registry).is_some_and(|current| {
         current.pid == owner.pid
@@ -1222,8 +1218,7 @@ fn capture_control_center_screenshot(output: &Path) -> Result<ScreenshotDocument
     })
 }
 
-#[cfg(target_os = "macos")]
-fn capture_control_center_screenshot(output: &Path) -> Result<ScreenshotDocument> {
+fn capture_renderer_requested_screenshot(output: &Path) -> Result<ScreenshotDocument> {
     let registry = registry_path();
     let owner = read_registry(&registry)
         .filter(registry_process_matches)
@@ -1320,13 +1315,6 @@ fn capture_control_center_screenshot(output: &Path) -> Result<ScreenshotDocument
         sha256,
         rendered_snapshot: Some(snapshot),
     })
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-fn capture_control_center_screenshot(_output: &Path) -> Result<ScreenshotDocument> {
-    anyhow::bail!(
-        "control_center_screenshot_unsupported: native Control Center screenshot capture is unavailable on this platform"
-    )
 }
 
 fn disconnected_snapshot() -> SnapshotDocument {
@@ -1462,13 +1450,7 @@ fn write_private_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
             ".agenterm-cc-{}-{nonce}-{attempt}.tmp",
             std::process::id()
         ));
-        let mut options = OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
+        let options = crate::platform::control_center::private_create_new_options();
         match options.open(&candidate) {
             Ok(mut file) => {
                 file.write_all(bytes)?;
@@ -1481,46 +1463,12 @@ fn write_private_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
         }
     }
     let temporary = temporary.context("control_center_temporary_file_collision")?;
-    let result = replace_file(&temporary, path);
+    let result = crate::platform::control_center::replace_file(&temporary, path)
+        .map_err(anyhow::Error::from);
     if result.is_err() {
         let _ = fs::remove_file(&temporary);
     }
     result
-}
-
-#[cfg(unix)]
-fn replace_file(source: &Path, destination: &Path) -> Result<()> {
-    fs::rename(source, destination)?;
-    Ok(())
-}
-
-#[cfg(windows)]
-fn replace_file(source: &Path, destination: &Path) -> Result<()> {
-    use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::Storage::FileSystem::{
-        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
-    };
-    let source = source
-        .as_os_str()
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect::<Vec<_>>();
-    let destination = destination
-        .as_os_str()
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect::<Vec<_>>();
-    if unsafe {
-        MoveFileExW(
-            source.as_ptr(),
-            destination.as_ptr(),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-        )
-    } == 0
-    {
-        return Err(io::Error::last_os_error().into());
-    }
-    Ok(())
 }
 
 fn status_document() -> StatusDocument {
@@ -1874,23 +1822,15 @@ fn claim_registry(path: &Path) -> Result<RegistryClaim> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("failed to create {}", parent.display()))?;
-        #[cfg(unix)]
         if parent
             .file_name()
             .is_some_and(|name| name == "control-center")
         {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
+            crate::platform::control_center::protect_state_directory(parent)?;
         }
     }
     for _ in 0..2 {
-        let mut options = OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
+        let options = crate::platform::control_center::private_create_new_options();
         match options.open(path) {
             Ok(mut file) => {
                 let _ = fs::remove_file(native_window_path(path));
@@ -2049,39 +1989,14 @@ fn run_shell(no_activate: bool, context: Option<ServerContext>) -> Result<()> {
     }
 }
 
-#[cfg(windows)]
 fn focus_existing(_record: &RegistryRecord, registry_path: &Path, no_activate: bool) {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        IsWindow, SW_RESTORE, SW_SHOWNOACTIVATE, SetForegroundWindow, ShowWindowAsync,
-    };
     let native_window = read_regular_file(&native_window_path(registry_path))
         .ok()
         .and_then(|value| String::from_utf8(value).ok())
         .and_then(|value| value.parse::<i64>().ok())
         .unwrap_or_default();
     request_projection_refresh(registry_path, no_activate);
-    let window = native_window as isize as *mut std::ffi::c_void;
-    if window.is_null() || unsafe { IsWindow(window) } == 0 {
-        return;
-    }
-    unsafe {
-        ShowWindowAsync(
-            window,
-            if no_activate {
-                SW_SHOWNOACTIVATE
-            } else {
-                SW_RESTORE
-            },
-        );
-        if !no_activate {
-            SetForegroundWindow(window);
-        }
-    }
-}
-
-#[cfg(unix)]
-fn focus_existing(_record: &RegistryRecord, registry_path: &Path, no_activate: bool) {
-    request_projection_refresh(registry_path, no_activate);
+    crate::platform::control_center::focus_existing_window(native_window, no_activate);
 }
 
 #[cfg(windows)]

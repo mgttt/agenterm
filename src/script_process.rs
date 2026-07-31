@@ -26,8 +26,9 @@ const DEFAULT_CAPTURE_BYTES: usize = 64 * 1024;
 const MAX_CAPTURE_BYTES: usize = 256 * 1024;
 const MAX_STDIN_BYTES: usize = 4 * 1024 * 1024;
 
-#[cfg(windows)]
-mod child_process_tree {
+#[allow(dead_code)]
+#[cfg(any(windows, unix))]
+mod legacy_child_process_tree {
     use std::{
         ffi::c_void,
         mem,
@@ -124,8 +125,9 @@ mod child_process_tree {
     }
 }
 
+#[allow(dead_code)]
 #[cfg(unix)]
-mod child_process_tree {
+mod legacy_child_process_tree_unix {
     use std::{os::unix::process::CommandExt, process::Command};
 
     pub(super) struct ProcessTreeGuard {
@@ -174,6 +176,10 @@ mod child_process_tree {
         }
     }
 }
+
+// Script Runtime owns policy and receipts; the facade owns native process
+// tree mechanics (Job Objects / process groups).
+use crate::platform::process as child_process_tree;
 
 #[derive(Clone, Copy, Debug)]
 pub struct ScriptDuration(pub(crate) Duration);

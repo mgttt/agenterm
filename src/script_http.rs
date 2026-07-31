@@ -4,7 +4,6 @@ use rhai::{Array, Dynamic, Engine, EvalAltResult, Map, Module};
 use ureq::{
     Agent, Error as UreqError, Proxy,
     http::{HeaderName, HeaderValue, Method, Request, Uri, Version},
-    tls::{RootCerts, TlsConfig, TlsProvider},
 };
 
 use crate::{
@@ -320,16 +319,7 @@ fn parse_proxy(value: Option<Dynamic>) -> Result<ProxySetting, Box<EvalAltResult
 }
 
 fn perform_request(spec: HttpRequestSpec) -> Result<ScriptHttpResponse, String> {
-    #[cfg(windows)]
-    let tls = TlsConfig::builder()
-        .provider(TlsProvider::NativeTls)
-        .root_certs(RootCerts::PlatformVerifier)
-        .build();
-    #[cfg(not(windows))]
-    let tls = TlsConfig::builder()
-        .provider(TlsProvider::Rustls)
-        .root_certs(RootCerts::WebPki)
-        .build();
+    let tls = crate::platform::script_http::tls_config();
     let mut config = Agent::config_builder()
         .http_status_as_error(false)
         .timeout_global(Some(spec.timeout))
@@ -421,6 +411,9 @@ fn version_name(version: Version) -> &'static str {
 }
 
 fn map_ureq_error(error: UreqError) -> String {
+    if crate::platform::script_http::is_platform_tls_error(&error) {
+        return "http_tls".to_owned();
+    }
     let code = match error {
         UreqError::StatusCode(_) => "http_status",
         UreqError::Http(_) | UreqError::BadUri(_) => "http_request_invalid",
@@ -441,10 +434,6 @@ fn map_ureq_error(error: UreqError) -> String {
         UreqError::InvalidProxyUrl | UreqError::ConnectProxyFailed(_) => "http_proxy",
         UreqError::BodyExceedsLimit(_) => "http_request_body_limit",
         UreqError::Tls(_) | UreqError::Pem(_) | UreqError::TlsRequired => "http_tls",
-        #[cfg(windows)]
-        UreqError::NativeTls(_) | UreqError::Der(_) => "http_tls",
-        #[cfg(not(windows))]
-        UreqError::Rustls(_) => "http_tls",
         UreqError::RequireHttpsOnly(_) => "http_scheme",
         UreqError::LargeResponseHeader(_, _) => "http_header_limit",
         _ => "http_transport",

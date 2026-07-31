@@ -1,12 +1,3 @@
-#[cfg(windows)]
-use std::{
-    os::windows::process::CommandExt as _,
-    process::{Command, Stdio},
-};
-
-#[cfg(windows)]
-use windows_sys::Win32::System::Threading::CREATE_BREAKAWAY_FROM_JOB;
-
 use std::path::{Path, PathBuf};
 use std::{
     cell::RefCell,
@@ -1649,11 +1640,11 @@ fn run_cli(arguments: Vec<String>, control_options: CliControlOptions) -> i32 {
         }
     };
     let mut response = send_control_request(arguments.clone(), control.clone());
-    if response.is_err() && may_start_server {
-        #[cfg(windows)]
-        if let Err(error) = start_server_process() {
-            eprintln!("{error:#}");
-        }
+    if response.is_err()
+        && may_start_server
+        && let Err(error) = start_server_process()
+    {
+        eprintln!("{error:#}");
     }
     if response.is_err() && may_start_server {
         let deadline = Instant::now() + IPC_AUTOSTART_TIMEOUT;
@@ -1800,11 +1791,7 @@ fn script_worker_executable() -> Result<PathBuf, String> {
         "host_worker_missing: agenterm-script is not installed next to the invoking executable"
             .to_owned()
     })?;
-    #[cfg(windows)]
-    let candidates = ["agenterm-script.exe"];
-    #[cfg(not(windows))]
-    let candidates = ["agenterm-script", "agenterm-script.exe"];
-    for name in candidates {
+    for name in crate::platform::paths::script_worker_executable_names() {
         let path = parent.join(name);
         if path.is_file() {
             return Ok(path);
@@ -4065,37 +4052,15 @@ fn run_wait_pane(arguments: &[String]) -> i32 {
     }
 }
 
-#[cfg(windows)]
-fn start_server_process() -> Result<()> {
-    let current =
-        env::current_exe().context("could not locate the running agenterm-cli executable")?;
-    let server = current.with_file_name("agenterm-server.exe");
-    if !server.is_file() {
-        anyhow::bail!(
-            "AgenTerm server executable was not found beside agenterm-cli: {}",
-            server.display()
-        );
-    }
+fn start_server_process() -> Result<bool> {
     let endpoint = ipc_endpoint()?;
     let parameter = if let Some(address) = endpoint.legacy_address() {
         ("--address", address)
     } else {
         ("--endpoint", endpoint.to_string())
     };
-    // Rhai-owned test commands are placed in a kill-on-close Windows Job. The
-    // server is an independently-owned authority, not a CLI descendant, so it
-    // must explicitly leave that Job. Its stdio is null to avoid retaining the
-    // invoking CLI's captured pipes after the CLI exits.
-    Command::new(server)
-        .arg(parameter.0)
-        .arg(parameter.1)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .creation_flags(CREATE_BREAKAWAY_FROM_JOB)
-        .spawn()
-        .context("failed to launch independent AgenTerm server")?;
-    Ok(())
+    crate::platform::process::autostart_server(parameter.0, &parameter.1)
+        .context("failed to launch independent AgenTerm server")
 }
 
 fn print_help() {
