@@ -1256,17 +1256,28 @@ let diagnostic = task(
     []
 );
 diagnostic.environment = #{"AGENTERM_NO_ACTIVATE":"1"};
-let diagnostic_gate = run_gate(
-    context,
-    "diagnostic-bundle-selftest",
-    "CLI GUI and script diagnostic bundle self-test",
-    [diagnostic],
-    repo,
-    scratch,
-    sequence
-);
-context = diagnostic_gate.context;
-sequence = diagnostic_gate.sequence;
+if skip_smoke {
+    context.timing = qualification::timing_set_gate(
+        context.timing,
+        "diagnostic-bundle-selftest",
+        "skipped",
+        0,
+        0,
+        false
+    );
+} else {
+    let diagnostic_gate = run_gate(
+        context,
+        "diagnostic-bundle-selftest",
+        "CLI GUI and script diagnostic bundle self-test",
+        [diagnostic],
+        repo,
+        scratch,
+        sequence
+    );
+    context = diagnostic_gate.context;
+    sequence = diagnostic_gate.sequence;
+}
 if skip_smoke {
     print("\nQUALIFICATION RECEIPT NOT WRITTEN: smoke gates were skipped.");
 } else if !include_stress {
