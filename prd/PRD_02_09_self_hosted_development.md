@@ -6,6 +6,12 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
 - [x] a running AgenTerm can build and stage the next AgenTerm binaries
   without first terminating the development fleet
+- [x] a successfully staged local `build.bat release` records both
+  repository-local Cargo target inventories and reclaims `target-release/` and
+  `target/` only after artifacts reach `dist/`. Its content-validated Script
+  bootstrap worker executes outside Cargo output, so the Windows cleanup cannot
+  be blocked by an in-target executable; dev and `release-fast` retain their
+  incremental targets.
 - [~] v0.1.7 build inputs embed commit, dirty state, Cargo lock hash, artifact
   manifest hash, and profile without fabricating missing values; protocol and
   instance discovery expose running versus staged identity with

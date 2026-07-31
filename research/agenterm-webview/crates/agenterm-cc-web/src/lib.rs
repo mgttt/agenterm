@@ -56,6 +56,7 @@ pub struct LauncherReceipt {
     pub implementation: &'static str,
     pub status: &'static str,
     pub reason: String,
+    pub requested_implementation: &'static str,
     pub host_path: PathBuf,
     pub host_exit_code: Option<i32>,
     pub host_receipt: Option<serde_json::Value>,
@@ -102,11 +103,19 @@ pub fn is_allowed_navigation(url: &str) -> bool {
 }
 
 pub fn direct_host_path(current_exe: &Path) -> PathBuf {
+    host_path(current_exe, "agenterm-cc-web-direct-wry")
+}
+
+pub fn tauri_host_path(current_exe: &Path) -> PathBuf {
+    host_path(current_exe, "agenterm-cc-web-tauri")
+}
+
+fn host_path(current_exe: &Path, stem: &str) -> PathBuf {
     let suffix = current_exe.extension().and_then(|value| value.to_str());
     let name = if suffix.is_some_and(|value| value.eq_ignore_ascii_case("exe")) {
-        "agenterm-cc-web-direct-wry.exe"
+        format!("{stem}.exe")
     } else {
-        "agenterm-cc-web-direct-wry"
+        stem.to_string()
     };
     current_exe.with_file_name(name)
 }
@@ -195,5 +204,18 @@ mod tests {
         ] {
             assert!(!script.contains(forbidden), "script contains {forbidden}");
         }
+    }
+
+    #[test]
+    fn fallback_hosts_are_explicit_sibling_processes() {
+        let launcher = Path::new("/tmp/agenterm-cc-web");
+        assert_eq!(
+            direct_host_path(launcher),
+            Path::new("/tmp/agenterm-cc-web-direct-wry")
+        );
+        assert_eq!(
+            tauri_host_path(launcher),
+            Path::new("/tmp/agenterm-cc-web-tauri")
+        );
     }
 }

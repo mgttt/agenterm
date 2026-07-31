@@ -1,4 +1,6 @@
-use agenterm_cc_web::{CONTRACT_VERSION, LauncherReceipt, asset_manifest, direct_host_path};
+use agenterm_cc_web::{
+    CONTRACT_VERSION, LauncherReceipt, asset_manifest, direct_host_path, tauri_host_path,
+};
 use std::env;
 use std::process::{Command, ExitCode};
 
@@ -9,29 +11,40 @@ fn main() -> ExitCode {
     }
     if args.iter().any(|arg| arg == "--help" || arg == "-h") {
         println!(
-            "agenterm-cc-web (experimental)\n\nUSAGE:\n  agenterm-cc-web --probe\n  agenterm-cc-web --asset-manifest\n  agenterm-cc-web [--smoke] [--no-activate]\n\nThis fallback-safe launcher never links a browser runtime. It delegates only to the sibling direct-WRY experiment."
+            "agenterm-cc-web (experimental)\n\nUSAGE:\n  agenterm-cc-web --asset-manifest\n  agenterm-cc-web [--implementation direct-wry|tauri] --probe\n  agenterm-cc-web [--implementation direct-wry|tauri] [--smoke] [--no-activate]\n\nThis fallback-safe launcher never links a browser runtime. It delegates only to an explicit sibling experiment."
         );
         return ExitCode::SUCCESS;
     }
-    if args
-        .iter()
-        .any(|arg| !matches!(arg.as_str(), "--probe" | "--smoke" | "--no-activate"))
-    {
-        eprintln!("unsupported argument; use --help");
-        return ExitCode::from(64);
-    }
+    let (implementation, forwarded) = match parse_arguments(&args) {
+        Ok(parsed) => parsed,
+        Err(message) => {
+            eprintln!("{message}; use --help");
+            return ExitCode::from(64);
+        }
+    };
 
     let current_exe = match env::current_exe() {
         Ok(path) => path,
         Err(error) => {
-            return unavailable("current_exe_failed", None, None, error.to_string(), None);
+            return unavailable(
+                implementation,
+                "current_exe_failed",
+                None,
+                None,
+                error.to_string(),
+                None,
+            );
         }
     };
-    let host_path = direct_host_path(&current_exe);
+    let host_path = match implementation {
+        "direct-wry" => direct_host_path(&current_exe),
+        "tauri" => tauri_host_path(&current_exe),
+        _ => unreachable!("argument parser restricts implementation"),
+    };
     let mut command = Command::new(&host_path);
-    command.args(&args);
+    command.args(&forwarded);
     if env::var_os("AGENTERM_NO_ACTIVATE").is_some()
-        && !args.iter().any(|arg| arg == "--no-activate")
+        && !forwarded.iter().any(|arg| arg == "--no-activate")
     {
         command.arg("--no-activate");
     }
@@ -39,6 +52,7 @@ fn main() -> ExitCode {
         Ok(output) => output,
         Err(error) => {
             return unavailable(
+                implementation,
                 "host_unavailable",
                 Some(host_path),
                 None,
@@ -68,6 +82,7 @@ fn main() -> ExitCode {
         .trim()
         .to_owned();
     unavailable(
+        implementation,
         "runtime_or_host_unavailable",
         Some(host_path),
         output.status.code(),
@@ -77,6 +92,7 @@ fn main() -> ExitCode {
 }
 
 fn unavailable(
+    implementation: &'static str,
     reason: &str,
     host_path: Option<std::path::PathBuf>,
     code: Option<i32>,
@@ -88,12 +104,40 @@ fn unavailable(
         implementation: "fallback-launcher",
         status: "unavailable",
         reason: format!("{reason}: {detail}"),
+        requested_implementation: implementation,
         host_path: host_path.unwrap_or_default(),
         host_exit_code: code,
         host_receipt,
         active_renderer: "native",
     };
     print_json(&receipt, ExitCode::from(69))
+}
+
+fn parse_arguments(arguments: &[String]) -> Result<(&'static str, Vec<String>), String> {
+    let mut implementation = "direct-wry";
+    let mut forwarded = Vec::new();
+    let mut index = 0;
+    while index < arguments.len() {
+        match arguments[index].as_str() {
+            "--implementation" => {
+                let value = arguments
+                    .get(index + 1)
+                    .ok_or_else(|| "--implementation requires a value".to_string())?;
+                implementation = match value.as_str() {
+                    "direct-wry" => "direct-wry",
+                    "tauri" => "tauri",
+                    _ => return Err(format!("unsupported implementation {value}")),
+                };
+                index += 2;
+            }
+            "--probe" | "--smoke" | "--no-activate" => {
+                forwarded.push(arguments[index].clone());
+                index += 1;
+            }
+            value => return Err(format!("unsupported argument {value}")),
+        }
+    }
+    Ok((implementation, forwarded))
 }
 
 fn print_json(value: &impl serde::Serialize, code: ExitCode) -> ExitCode {
