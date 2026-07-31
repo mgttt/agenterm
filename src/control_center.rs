@@ -1363,11 +1363,7 @@ fn available(id: &'static str, label: &'static str, data: Value) -> ViewSnapshot
 
 fn control_center_executable() -> Result<PathBuf> {
     let current = env::current_exe().context("current executable is unavailable")?;
-    let mut executable = current.with_file_name("agenterm-cc");
-    if cfg!(windows) {
-        executable.set_extension("exe");
-    }
-    Ok(executable)
+    Ok(current.with_file_name(crate::platform::paths::control_center_executable_name()))
 }
 
 fn registry_path() -> PathBuf {
@@ -1761,55 +1757,8 @@ fn default_settings_path() -> PathBuf {
     }
 }
 
-#[cfg(windows)]
 fn process_start_identity(pid: u32) -> Option<String> {
-    use windows_sys::Win32::{
-        Foundation::{CloseHandle, FILETIME},
-        System::Threading::{GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION},
-    };
-
-    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
-    if process.is_null() {
-        return None;
-    }
-    let mut creation: FILETIME = unsafe { std::mem::zeroed() };
-    let mut exit: FILETIME = unsafe { std::mem::zeroed() };
-    let mut kernel: FILETIME = unsafe { std::mem::zeroed() };
-    let mut user: FILETIME = unsafe { std::mem::zeroed() };
-    let queried =
-        unsafe { GetProcessTimes(process, &mut creation, &mut exit, &mut kernel, &mut user) } != 0;
-    unsafe { CloseHandle(process) };
-    queried.then(|| {
-        let ticks = (u64::from(creation.dwHighDateTime) << 32) | u64::from(creation.dwLowDateTime);
-        format!("windows-filetime:{ticks}")
-    })
-}
-
-#[cfg(unix)]
-fn process_start_identity(pid: u32) -> Option<String> {
-    // Linux exposes an unambiguous kernel start tick in field 22.  Keep the
-    // full command name grouping intact because it may contain spaces.
-    if let Ok(stat) = fs::read_to_string(format!("/proc/{pid}/stat"))
-        && let Some(after_name) = stat.rsplit_once(") ").map(|(_, fields)| fields)
-        && let Some(start_ticks) = after_name.split_whitespace().nth(19)
-    {
-        return Some(format!("proc-start-ticks:{start_ticks}"));
-    }
-
-    // macOS and other supported Unix hosts have `ps`; elapsed seconds changes
-    // over time, so use the stable textual process start timestamp.
-    let output = Command::new("ps")
-        .args(["-p", &pid.to_string(), "-o", "lstart="])
-        .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let started = String::from_utf8(output.stdout).ok()?;
-    let started = started.trim();
-    (!started.is_empty()).then(|| format!("ps-lstart:{started}"))
+    crate::platform::process::start_identity(pid).ok()
 }
 
 fn registry_process_matches(record: &RegistryRecord) -> bool {

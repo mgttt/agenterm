@@ -21,6 +21,19 @@ pub(crate) fn script_worker_executable_names() -> &'static [&'static str] {
     }
 }
 
+/// Native sidecar name for the Control Center shell, without exposing an
+/// executable-extension convention to its product projection.
+pub(crate) fn control_center_executable_name() -> &'static str {
+    #[cfg(windows)]
+    {
+        "agenterm-cc.exe"
+    }
+    #[cfg(not(windows))]
+    {
+        "agenterm-cc"
+    }
+}
+
 /// Resolve the default persisted workspace path for the current logical
 /// instance. Product persistence consumes this path without selecting an OS.
 pub(crate) fn default_workspace_path() -> PathBuf {

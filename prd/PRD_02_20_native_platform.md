@@ -325,6 +325,9 @@ Revision-4 migration evidence (2026-07-31, partial):
   WebView runtime probing now call typed `platform::{paths,process,runtime,
   control_center,webview}` services. Script Runtime's owned child-tree call
   path now uses `platform::process`; it retains its existing typed receipts.
+  Control Center sidecar executable naming and registry PID/start-identity
+  matching also now consume `platform::{paths,process}`; its native shell and
+  renderer extraction remain explicitly incomplete.
 - [~] native IPC identity, default endpoint/workspace derivation, listener /
   stream framing, named-pipe and Unix-socket mechanics, permissions, peer
   identity, and stale recovery now reside beneath `src/platform/`; the
