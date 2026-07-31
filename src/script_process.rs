@@ -15,7 +15,7 @@ use crate::{
     script_stdlib::{ScriptBytes, ScriptPath},
     script_stream::{
         CapturedStream, ScriptStream, cancel as cancel_stream, capture_after_close,
-        discard_buffered, from_process_reader, from_reader, mark_process_exited,
+        discard_buffered, from_process_stderr, from_process_stdout, from_reader, mark_process_exited,
     },
 };
 
@@ -638,7 +638,7 @@ fn spawn_owned(command: &ScriptCommand) -> Result<ScriptChild, Box<EvalAltResult
     let stdout = if command.stdout_file.is_some() {
         from_reader(std::io::empty(), "bytes", 0)
     } else {
-        from_process_reader(
+        from_process_stdout(
             child.stdout.take().ok_or("process_stdout_unavailable")?,
             "bytes",
             command.capture_bytes,
@@ -647,7 +647,7 @@ fn spawn_owned(command: &ScriptCommand) -> Result<ScriptChild, Box<EvalAltResult
     let stderr = if command.stderr_file.is_some() {
         from_reader(std::io::empty(), "bytes", 0)
     } else {
-        from_process_reader(
+        from_process_stderr(
             child.stderr.take().ok_or("process_stderr_unavailable")?,
             "bytes",
             command.capture_bytes,

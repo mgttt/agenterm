@@ -13,7 +13,7 @@ contract + selected adapters
 │  ├─ owned child tree                      [adapter-owned]
 │  ├─ window interaction                    [adapter-owned]
 │  ├─ clipboard / atomic files               [adapter-owned]
-│  ├─ stream-handle probing                  [pending]
+│  ├─ stream-handle probing                  [adapter-owned]
 │  └─ worker supervision / audit             [pending]
 ├─ Control Center / WebView shell            [partial]
 └─ frontend + PTY native lifecycle           [pending]

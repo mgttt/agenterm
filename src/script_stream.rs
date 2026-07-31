@@ -11,17 +11,16 @@ use std::{
 
 use rhai::{Engine, EvalAltResult};
 
-use crate::{script_process::ScriptDuration, script_stdlib::ScriptBytes};
+use crate::{
+    platform::services::script_stream as platform_stream,
+    script_process::ScriptDuration,
+    script_stdlib::ScriptBytes,
+};
 
 pub const STREAM_BUFFER_BYTES: usize = 64 * 1024;
 pub const STREAM_READ_MAX_BYTES: usize = 64 * 1024;
 const STREAM_PUMP_CHUNK_BYTES: usize = 8 * 1024;
 static NEXT_STREAM_ID: AtomicU64 = AtomicU64::new(1);
-
-#[cfg(windows)]
-type ProcessPipeHandle = usize;
-#[cfg(not(windows))]
-type ProcessPipeHandle = ();
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum StreamStatus {
@@ -103,23 +102,22 @@ pub(crate) fn from_bounded_reader(
     from_reader_inner(reader, kind, capture_limit, Some(delivery_limit), None)
 }
 
-#[cfg(windows)]
-pub(crate) fn from_process_reader(
-    reader: impl Read + std::os::windows::io::AsRawHandle + Send + 'static,
+pub(crate) fn from_process_stdout(
+    reader: std::process::ChildStdout,
     kind: &'static str,
     capture_limit: usize,
 ) -> ScriptStream {
-    let handle = reader.as_raw_handle() as usize;
-    from_reader_inner(reader, kind, capture_limit, None, Some(handle))
+    let token = platform_stream::stdout_probe_token(&reader);
+    from_reader_inner(reader, kind, capture_limit, None, token)
 }
 
-#[cfg(not(windows))]
-pub(crate) fn from_process_reader(
-    reader: impl Read + Send + 'static,
+pub(crate) fn from_process_stderr(
+    reader: std::process::ChildStderr,
     kind: &'static str,
     capture_limit: usize,
 ) -> ScriptStream {
-    from_reader(reader, kind, capture_limit)
+    let token = platform_stream::stderr_probe_token(&reader);
+    from_reader_inner(reader, kind, capture_limit, None, token)
 }
 
 fn from_reader_inner(
@@ -127,7 +125,7 @@ fn from_reader_inner(
     kind: &'static str,
     capture_limit: usize,
     delivery_limit: Option<usize>,
-    #[cfg_attr(not(windows), allow(unused_variables))] process_handle: Option<ProcessPipeHandle>,
+    process_handle: Option<usize>,
 ) -> ScriptStream {
     let inner = Arc::new(StreamInner {
         id: NEXT_STREAM_ID.fetch_add(1, Ordering::Relaxed),
@@ -149,7 +147,6 @@ fn from_reader_inner(
         let mut buffer = [0_u8; STREAM_PUMP_CHUNK_BYTES];
         let mut delivered = 0_usize;
         loop {
-            #[cfg_attr(not(windows), allow(unused_mut))]
             let mut read_limit = delivery_limit
                 .map(|limit| {
                     limit
@@ -158,9 +155,8 @@ fn from_reader_inner(
                         .min(buffer.len())
                 })
                 .unwrap_or(buffer.len());
-            #[cfg(windows)]
             if let Some(handle) = process_handle {
-                match process_pipe_available(handle) {
+                match platform_stream::pipe_available(handle) {
                     Ok(0) if pump.process_exited.load(Ordering::Acquire) => {
                         finish_pump(&pump, StreamStatus::Closed);
                         return;
@@ -207,31 +203,6 @@ fn from_reader_inner(
         }
     });
     ScriptStream(inner)
-}
-
-#[cfg(windows)]
-fn process_pipe_available(handle: ProcessPipeHandle) -> Result<usize, bool> {
-    use windows_sys::Win32::{
-        Foundation::{ERROR_BROKEN_PIPE, ERROR_NO_DATA, GetLastError},
-        System::Pipes::PeekNamedPipe,
-    };
-
-    let mut available = 0_u32;
-    let succeeded = unsafe {
-        PeekNamedPipe(
-            handle as windows_sys::Win32::Foundation::HANDLE,
-            std::ptr::null_mut(),
-            0,
-            std::ptr::null_mut(),
-            &mut available,
-            std::ptr::null_mut(),
-        )
-    };
-    if succeeded != 0 {
-        return Ok(available as usize);
-    }
-    let error = unsafe { GetLastError() };
-    Err(error == ERROR_BROKEN_PIPE || error == ERROR_NO_DATA)
 }
 
 pub(crate) fn mark_process_exited(stream: &ScriptStream) {

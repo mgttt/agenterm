@@ -309,6 +309,11 @@ Revision-4 migration evidence (2026-07-31, partial):
   adapters`. Windows retains verbatim-path `MoveFileExW` promotion; Unix
   retains parent-directory `fsync`; product code keeps its unrestricted-path
   API and existing typed error receipts.
+- [x] Script Runtime child stdout/stderr pump now obtains native pipe probe
+  tokens and `PeekNamedPipe` availability only through
+  `services::script_stream → selected → adapters`. The Windows exited-child
+  drain behavior remains bounded; Linux/macOS deliberately supply no native
+  probe token, so the portable blocking-reader path remains explicit.
 
 - [~] `settings`, instance PID/start-identity checks, terminal default-shell
   selection, Control Center atomic-file/focus/capture routing, and passive
