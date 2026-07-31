@@ -65,8 +65,17 @@ v0.1.12  Convergence & Fast Promotion
 │  │  ├─ 若本轮实施，agenterm-script 作为有期限的兼容转发入口，不复制 runtime
 │  │  └─ 构建、测试、Candidate、Promotion 必须在 canonical 名切换后保持自举
 │  ├─ Control Center 的 Workflows/Extensions/InfoHub 保持真实空状态
-│  ├─ agenterm-net 继续独立研究，不进入稳定 server 热路径
-│  └─ WebView host 继续 renderer-neutral，不因“界面丰富”仓促替换原生壳
+│  ├─ agenterm-net 启动 N2 受控纵切（独立常驻 full node）
+│  │  ├─ 显式 start/status/stop；持久身份、block store 与可观测资源账本
+│  │  ├─ DHT、pubsub、relay 各自 capability / budget / 失败语义，不以编译成功冒充可用
+│  │  ├─ 仅用户拥有节点间、显式配对的 read-only Remote Fleet attach
+│  │  ├─ GUI / server / PTY 不链接 libp2p；网络 node 崩溃不得影响本地 Fleet
+│  │  └─ 先证明本机与两节点闭环，再讨论公网默认、远程控制或稳定发布
+│  └─ system-WebView / Tauri-compatible host spike 启动
+│     ├─ 首个本地打包、只读 Cockpit Web UI；native CC 仍是可靠 fallback
+│     ├─ Windows WebView2 / macOS WKWebView / Linux WebKitGTK 分别实测
+│     ├─ 量化 EXE、archive、runtime 依赖、冷启动、RSS、DPI、截图与崩溃恢复
+│     └─ bridge 只允许 versioned facts / fleet snapshot；无 eval、shell、网络逃逸
 │
 └─ 明确延后与未来计划
    ├─ executable consolidation 决策树
@@ -77,7 +86,7 @@ v0.1.12  Convergence & Fast Promotion
    ├─ 完整 Workflow/Pipeline 设计器、调度器与跨机恢复
    ├─ PluginHub/AppHub 公共市场、交易、静默安装与自动更新
    ├─ InfoHub 自动执行外部信号
-   ├─ libp2p/IPFS 常驻 full node、DHT/pubsub/relay 与远程 Fleet attach
+   ├─ 未经 N2 跨平台、恢复与资源证据即把 agenterm-net 宣称为 stable full node
    ├─ 未经生产证据即把系统 WebView 设为唯一 Control Center renderer
    ├─ 未经认证/加密/威胁模型即开放公网远程控制
    └─ Agent harness 的权限、审批、凭据与策略
@@ -276,7 +285,78 @@ Cockpit
 - Workflows、Extensions、InfoHub 可以改进解释与导航，但没有 owning backend
   前继续显示真实 empty/unavailable，不造假数据。
 
-## 八、并行实施波次
+## 八、`agenterm-net` N2 受控纵切
+
+本版不把网络愿景继续停留在“研究”字样，但也不把一个能连网的二进制误称为
+可公开运行的 IPFS 节点。交付对象是独立 `agenterm-net`：用户显式启动、显式
+停止、可检查、可清理；它可以常驻，但安装、打开 GUI 或启动 server 均不会隐式
+启动它。`agenterm.exe`、`agenterm-server`、`agenterm-cc` 不链接 libp2p。
+
+```text
+N2-M1：可控 full-node foundation
+├─ identity / store
+│  ├─ ephemeral 与 durable 身份显式二选一；备份/轮换/丢失诊断留痕
+│  ├─ 有界 persistent block store：put/get/verify、pin、GC、损坏隔离
+│  └─ node state、listener、peer、disk/RSS/连接数均为 typed snapshot
+├─ mesh capabilities
+│  ├─ Kademlia DHT：bootstrap / provide / find-provider（默认关闭公网 bootstrap）
+│  ├─ GossipSub：具名 topic、消息大小/速率/队列上限、receipt
+│  └─ relay：client 与受控 relay role 分离；不自动替用户公开 relay
+├─ remote Fleet attach（只读）
+│  ├─ 用户显式创建 pairing invite，绑定 peer identity、expiry、scope 与 nonce
+│  ├─ 远端只投射 bounded Fleet snapshot / event digest；没有 shell、PTY 输入或控制动作
+│  ├─ 双端签名/加密与 replay / wrong-peer / expired-invite 拒绝
+│  └─ attach 断线、重连、node crash 的结果真实且不影响任一 local server
+└─ evidence
+   ├─ 两进程、两持久身份、DHT/pubsub/relay/attach 的 deterministic private-mesh fixture
+   ├─ 无固定 sleep；超时、取消、kill、corrupt store、budget exhaust 均有 typed receipt
+   ├─ Windows/Linux/macOS 的独立启动、停止、残留 listener/child 检查
+   └─ package / SBOM / licence / binary and resource delta 先测量再决定稳定资产资格
+```
+
+边界：N2-M1 允许私有测试网和用户明确配置的监听地址；不默认连公共 bootstrap，
+不自动 NAT 打洞，不承诺 Kubo API 兼容，不开放公网 Fleet control。真正“远程控制”
+须另有 Agent/harness 的审批与凭据模型，不能借由网络 attach 绕过。
+
+## 九、系统 WebView / Tauri-compatible spike
+
+先以一个独立的 `agenterm-cc-web` 实验宿主验证系统 WebView，而不是把 Tauri
+塞进主 GUI；它也不替换既有 native `agenterm-cc`。它是未来独立应用
+（Control Center 的可选扩展视图、PluginHub、InfoHub、Workflow 等）可复用的
+宿主技术储备，加载仓库内打包的静态 HTML/CSS/JS，首页只读展示 Cockpit。主产品
+模型、Fleet authority 和业务逻辑仍在 Rust 侧，Web UI 只是并列投射。
+
+```text
+Web host M1
+├─ implementation choice
+│  ├─ 先做最小 Tauri v2 spike，并记录其 Rust/JS toolchain、lockfile 与 build-time 影响
+│  ├─ 同时保留 direct-WRY 作为可比较备选，不预设 Tauri 必然胜出
+│  └─ 不把 Node、前端 framework 或网络页面引入 core build path
+├─ local-only surface
+│  ├─ versioned packaged asset manifest + integrity hash + custom local origin
+│  ├─ host.ready / host.facts / fleet.snapshot 三个 bounded typed bridge call
+│  ├─ origin / main-frame / nonce / request-id / deadline 严格匹配
+│  └─ no eval / shell / process / arbitrary navigation / download / network bridge
+├─ platform evidence
+│  ├─ Windows: installed WebView2 与 missing-runtime fallback；不 bundling fixed runtime
+│  ├─ macOS: WKWebView local asset, Retina screenshot, crash/reload/fallback
+│  └─ Linux: WebKitGTK availability/package diagnostic, renderer PNG or explicit unavailable
+└─ size and performance decision
+   ├─ measure: binary, archive, installer/runtime dependency, cold/warm startup, RSS and first paint
+   ├─ compare: native CC baseline vs direct-WRY vs Tauri experiment on each native platform
+   ├─ publish machine-readable receipt and threshold decision
+   └─ promote only if fallback/isolation/security and six-target packaging all stay truthful
+```
+
+Tauri’s own model validates the system-WebView premise: it uses WebView2 on
+Windows, WKWebView on macOS and WebKitGTK on Linux, dynamically linking the
+system engine rather than embedding it in the executable. But packaging policy
+matters: a Windows fixed WebView2 runtime alone can add about 180 MiB, so this
+spike explicitly measures **installed-runtime / fallback** first and does not
+bundle a browser. [Tauri process model](https://v2.tauri.app/concept/process-model/),
+[Tauri Windows runtime options](https://v2.tauri.app/distribute/windows-installer/).
+
+## 十、并行实施波次
 
 ```text
 Wave A（共享合同，可并行）
@@ -284,6 +364,18 @@ Wave A（共享合同，可并行）
 ├─ A2：candidate/promotion schema 与 threat model
 ├─ A3：native IPC mixed-version/stale matrix
 └─ A4：Control Center/GUI parity gap matrix
+
+Wave N（网络纵切，与 UI/IPC 实现并行）
+├─ N1：N2 node lifecycle、identity/store 和 typed local protocol
+├─ N2：DHT/pubsub/relay private-mesh capability fixtures
+├─ N3：只读 Remote Fleet attach pairing/snapshot contract
+└─ N4：跨平台 resource/fault/isolation evidence 与 package decision
+
+Wave W（Web host，与 network/IPC 实现并行）
+├─ W1：Tauri v2 / direct-WRY dependency、toolchain、license 与 baseline measurement
+├─ W2：local packaged Cockpit + bounded bridge + native fallback
+├─ W3：three-platform runtime/PNG/crash/activation evidence
+└─ W4：binary/archive/runtime/startup/RSS receipt 与 adopt/defer decision
 
 Wave B（实现，可并行）
 ├─ B1：Fast CI 与 Candidate workflow 拆分
@@ -311,7 +403,7 @@ Wave D（候选）
 共享文件。每个小而完整的进展 review 后尽快进入 `main`，让其他平台及时
 rebase 和验证。
 
-## 九、完成定义
+## 十一、完成定义
 
 - `plan` 中接受的能力均已同步 owning PRD，状态不靠版本号猜测；
 - `main` clean、已推送，普通 CI 六目标通过；
@@ -321,6 +413,12 @@ rebase 和验证。
   和不完整 matrix 全部 fail closed；
 - Linux/macOS/Windows 的 native IPC 与 Control Center 关键 journey 有各自
   原生证据；
+- `agenterm-net` 的 N2-M1 如在本版本宣称完成，必须有私有两节点 DHT/pubsub/
+  relay/只读 attach、持久身份/store、资源与故障隔离的跨平台证据；未达此门则保持
+  experimental，不能进入 stable asset 或远程控制面；
+- system-WebView spike 必须给出 native CC、direct-WRY 与 Tauri 的可复核体积及
+  启动/RSS 对比、三平台 runtime/fallback 证据和 bridge isolation 测试；否则只保留
+  renderer-neutral 合同，不把 Web UI 宣称为 production renderer；
 - 没有新增窗口风暴、固定 sleep、测试残留 server/socket/pipe 或隐式
   foreground activation；
 - 付费 runner 即使试验失败，也可通过一处 label/config 回退，不影响免费

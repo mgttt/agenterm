@@ -210,6 +210,30 @@ hatch. Actual host loading, packaged-resource integrity, startup/reload
 measurement, accessibility, and renderer-owned Unix window evidence remain
 future promotion gates.
 
+## v0.1.12 system-WebView host spike
+
+- [ ] ship an isolated `agenterm-cc-web` experiment with a local packaged,
+  read-only Cockpit page. It is a reusable host experiment for future
+  independent applications (optional Control Center views, PluginHub,
+  InfoHub, Workflow) and does not replace the existing native `agenterm-cc`.
+  `agenterm.exe` and `agenterm-server` never acquire a WebView dependency.
+- [ ] compare a minimal Tauri v2 host with a direct-WRY host before selecting
+  a production implementation. The comparison records exact dependency and
+  licence inventory, Rust/JS toolchain impact, binary/archive size, required
+  system runtime, cold/warm startup, first paint and RSS.
+- [ ] Windows tests distinguish installed WebView2, missing runtime and
+  fallback; they do not silently bundle a fixed browser runtime. macOS proves
+  WKWebView local-assets, Retina capture, reload/crash fallback; Linux reports
+  WebKitGTK availability or a typed unavailable result and never fakes a PNG.
+- [ ] the experiment loads only integrity-identified local assets and exposes
+  bridge v1 (`host.ready`, `host.facts`, `fleet.snapshot`) with exact origin,
+  top-frame, nonce, request-id, deadline, 64 KiB and eight-in-flight bounds.
+  It has no generic eval, shell, process, arbitrary navigation, download, or
+  network bridge.
+- [ ] adoption requires independent package and runtime evidence on each
+  native platform plus crash/reload/no-activate/fallback black boxes. Until
+  then `active_renderer=native` is the truthful stable state.
+
 ## v0.1.11 delivery gate
 
 - [~] `agenterm-cc --help`, `--version`, and `capabilities --json` are

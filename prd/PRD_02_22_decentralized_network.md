@@ -14,7 +14,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
 - [~] AgenTerm gains a portable, observable libp2p/IPFS foundation that can
   prove identity, peer connectivity, content integrity, bounded storage, and
-  cleanup independently before any stable product depends on it.
+  cleanup independently before any stable product depends on it. v0.1.12
+  starts the N2-M1 controlled full-node vertical slice; it remains
+  experimental until its cross-platform evidence gates pass.
 - [~] `agenterm-net` remains a separate optional process with its own
   dependency, binary-size, memory, task, connection, disk, packaging, and
   lifecycle evidence; its failure cannot stall the terminal, destroy a tab, or
@@ -56,6 +58,39 @@ Decentralized network
 Maturity states are monotonic evidence gates, not release marketing. An N1 lab
 binary or test fixture remains experimental until the N2 public process,
 protocol, recovery, and packaging contracts pass.
+
+## v0.1.12 N2-M1 controlled full-node slice
+
+The accepted v0.1.12 direction is an **independent, explicit, private-mesh
+vertical slice**, not an implicit public IPFS service:
+
+```text
+N2-M1
+├─ node lifecycle: explicit start / status / stop / repair; no install or GUI autostart
+├─ durable state: opt-in identity and bounded verified block store / pin / GC
+├─ mesh: separately advertised Kademlia DHT, GossipSub and relay capabilities
+├─ remote Fleet attach: paired peer-to-peer, bounded read-only snapshot/event projection
+└─ evidence: private two-node fixtures; budget/fault/crash/isolation evidence per platform
+```
+
+- [ ] durable identities use an explicit local storage, backup, loss, rotation,
+  and migration contract; ephemeral identities remain available for fixtures.
+- [ ] a persistent block store verifies CIDs on every read, has explicit size,
+  pin and GC budgets, and quarantines/rejects corruption without reporting a
+  verified result.
+- [ ] Kademlia DHT, GossipSub and relay have individual capability IDs,
+  listener/peer/message/bandwidth/task budgets, bounded I/O, receipts and
+  Unsupported results. Public bootstrap, NAT traversal and relay serving are
+  off unless the user explicitly configures them.
+- [ ] Remote Fleet attach is pair-created and read-only: an expiring invite
+  binds expected peer identity, nonce and scope; the projection contains only
+  bounded snapshot/event-digest data. It cannot send terminal input, execute a
+  command, or become an authority over the remote `agenterm-server`.
+- [ ] pairing, transport encryption, replay/wrong-peer/expired-invite failure,
+  reconnect and sidecar crash must be observable with typed results. Future
+  remote control belongs to the Agent/harness approval and credential layer.
+- [ ] N2-M1 tests use a deterministic private mesh and isolated stores; they
+  must not require public bootstrap reachability or leave listeners/processes.
 
 ## Process and integration boundary
 
