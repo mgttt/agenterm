@@ -1,17 +1,15 @@
 // Prove the isolated Control Center's offline contract, live Cockpit
 // projection, process reuse, context refresh, no-activate behavior,
-// stale-owner recovery, and server/PTY isolation.
+// stale-owner recovery, renderer-owned PNG evidence, and server/PTY isolation.
 //
 // Args:
 //   --list-evidence
 // or:
 //   REPO CONTROL_CENTER_EXE
 //
-// The Control Center does not yet expose a public screenshot command. This
-// suite therefore refuses to manufacture PNG evidence: it observes the live
-// native title through the owned Child handle and pairs that rendering fact
-// with the typed semantic snapshot. The main-workspace toolbar PNG remains
-// owned by workbench-smoke.
+// The renderer-owned screenshot command targets the exact registry owner. The
+// successful Cockpit PNG is copied out of scratch into dist/evidence so the
+// visual proof survives successful harness cleanup.
 
 import "scripts/rhai/lib/test_harness" as test_harness;
 
@@ -285,6 +283,18 @@ let registry = std::path::join(
     context.run_directory,
     "control-center-registry.json"
 ).display;
+let cockpit_png = std::path::join(
+    std::path::parent(context.evidence_path).display,
+    "control-center-live-cockpit.png"
+).display;
+let durable_evidence_directory = std::path::join(
+    repo,
+    "dist/evidence"
+).display;
+let durable_cockpit_png = std::path::join(
+    durable_evidence_directory,
+    "control-center-live-cockpit.png"
+).display;
 let owned_children = [];
 let succeeded = false;
 let failure = "";
@@ -451,6 +461,50 @@ try {
         context,
         declared_evidence,
         "control-center.live-cockpit"
+    );
+
+    print("STEP capture the exact live native Cockpit without activation");
+    let capture = rhai::json::parse(offline(
+        context,
+        control_center,
+        registry,
+        ["screenshot", "--output", cockpit_png, "--json"],
+        "control_center_cockpit_screenshot"
+    ));
+    let rendered = rhai::image::inspect_png(cockpit_png);
+    require(
+        capture.schema_version == 1
+            && capture.executable == "agenterm-cc"
+            && capture.state == "captured"
+            && capture.renderer == "native"
+            && capture.owner_pid == first.id
+            && capture.output == cockpit_png
+            && capture.width == rendered.width
+            && capture.height == rendered.height
+            && capture.width >= 500
+            && capture.height >= 300
+            && capture.bytes >= 1000
+            && capture.sha256.len == 64
+            && rendered.samples > 0
+            && rendered.luminance > 1.0
+            && rendered.luminance < 254.9
+            && (
+                first.platform_facts.foreground_window_id == 0
+                    || !first.platform_facts.top_level_window_is_foreground
+            ),
+        "control_center_cockpit_png_truth:" +
+            rhai::json::stringify(capture)
+    );
+    std::fs::create_dir_all(durable_evidence_directory);
+    std::fs::copy(cockpit_png, durable_cockpit_png);
+    require(
+        std::fs::metadata(durable_cockpit_png).len == capture.bytes,
+        "control_center_durable_png_copy"
+    );
+    print(
+        "Control Center screenshot: " + capture.width + "x" +
+            capture.height + ", " + capture.bytes + " bytes, " +
+            durable_cockpit_png
     );
 
     print("STEP reuse keeps PID and refreshes away from and back to live context");

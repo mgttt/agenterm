@@ -32,6 +32,7 @@ Usage:
   agenterm-cc status [--json]
   agenterm-cc close [--json]
   agenterm-cc snapshot [--json] [--instance NAME | --endpoint ENDPOINT]
+  agenterm-cc screenshot --output PATH [--json]
   agenterm-cc capabilities [--json]
   agenterm-cc --help
   agenterm-cc --version
@@ -65,6 +66,10 @@ enum EntryCommand {
         json: bool,
         context: Option<ServerContext>,
     },
+    Screenshot {
+        json: bool,
+        output: PathBuf,
+    },
 }
 
 #[derive(Debug, Serialize)]
@@ -79,7 +84,22 @@ struct CapabilityDocument {
     owns_terminal_authority: bool,
     process_reuse: bool,
     no_activate: bool,
+    screenshot: &'static str,
     views: [&'static str; 4],
+}
+
+#[derive(Debug, Serialize)]
+struct ScreenshotDocument {
+    schema_version: u32,
+    executable: &'static str,
+    state: &'static str,
+    renderer: &'static str,
+    owner_pid: u32,
+    output: String,
+    width: u32,
+    height: u32,
+    bytes: u64,
+    sha256: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -471,6 +491,7 @@ fn parse_entry(args: &[OsString]) -> std::result::Result<EntryCommand, String> {
                     | "--instance"
                     | "--server-endpoint"
                     | "--logical-instance"
+                    | "--output"
                     | "--help"
                     | "-h"
                     | "--version"
@@ -486,14 +507,29 @@ fn parse_entry(args: &[OsString]) -> std::result::Result<EntryCommand, String> {
     let mut selectors = EndpointSelectorArgs::default();
     let mut migration_endpoint = None;
     let mut migration_instance = None;
+    let mut screenshot_output = None;
     let mut position = 0;
     while position < values.len() {
         match values[position].as_ref() {
-            "--endpoint" | "--instance" | "--server-endpoint" | "--logical-instance" => {
+            "--endpoint" | "--instance" | "--server-endpoint" | "--logical-instance"
+            | "--output" => {
                 let option = values[position].as_ref();
                 let Some(value) = values.get(position + 1) else {
                     return Err(format!("{option} requires a value"));
                 };
+                if option == "--output" {
+                    if value.is_empty() {
+                        return Err("--output requires a non-empty path".to_owned());
+                    }
+                    if screenshot_output
+                        .replace(PathBuf::from(value.as_ref()))
+                        .is_some()
+                    {
+                        return Err("--output may be specified only once".to_owned());
+                    }
+                    position += 2;
+                    continue;
+                }
                 validate_context_value(option.trim_start_matches('-'), value)
                     .map_err(|error| error.to_string())?;
                 match option {
@@ -588,6 +624,9 @@ fn parse_entry(args: &[OsString]) -> std::result::Result<EntryCommand, String> {
     if version {
         return Ok(EntryCommand::Version);
     }
+    if screenshot_output.is_some() && positional.as_slice() != ["screenshot"] {
+        return Err("--output is valid only for screenshot".to_owned());
+    }
     match positional.as_slice() {
         [] | ["open"] if !json => Ok(EntryCommand::Open {
             no_activate,
@@ -601,7 +640,24 @@ fn parse_entry(args: &[OsString]) -> std::result::Result<EntryCommand, String> {
         }
         ["close"] if !explicit_no_activate && context.is_none() => Ok(EntryCommand::Close { json }),
         ["snapshot"] if !explicit_no_activate => Ok(EntryCommand::Snapshot { json, context }),
-        [] | ["open"] => Err("--json is valid only for capabilities or snapshot".to_owned()),
+        ["screenshot"]
+            if !explicit_no_activate && context.is_none() && screenshot_output.is_some() =>
+        {
+            Ok(EntryCommand::Screenshot {
+                json,
+                output: screenshot_output.expect("guarded above"),
+            })
+        }
+        ["screenshot"] if screenshot_output.is_none() => {
+            Err("screenshot requires --output PATH".to_owned())
+        }
+        ["screenshot"] if context.is_some() => {
+            Err("screenshot targets the exact live Control Center registry owner; endpoint selectors are not valid".to_owned())
+        }
+        ["screenshot"] => Err("--no-activate is valid only for open".to_owned()),
+        [] | ["open"] => {
+            Err("--json is valid only for capabilities, snapshot, or screenshot".to_owned())
+        }
         ["capabilities"] | ["status"] | ["snapshot"] | ["close"] => {
             Err("--no-activate is valid only for open".to_owned())
         }
@@ -686,6 +742,14 @@ fn run_entry(command: EntryCommand) -> Result<()> {
                 }
             }
         }
+        EntryCommand::Screenshot { json, output } => {
+            let document = capture_control_center_screenshot(&output)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&document)?);
+            } else {
+                println!("{}", document.output);
+            }
+        }
         EntryCommand::Open {
             no_activate,
             context,
@@ -706,8 +770,95 @@ fn capabilities() -> CapabilityDocument {
         owns_terminal_authority: false,
         process_reuse: true,
         no_activate: true,
+        screenshot: if cfg!(windows) {
+            "available"
+        } else {
+            "unavailable"
+        },
         views: ["cockpit", "workflows", "extensions", "info_hub"],
     }
+}
+
+fn png_dimensions(bytes: &[u8]) -> Result<(u32, u32)> {
+    const PNG_SIGNATURE: &[u8; 8] = b"\x89PNG\r\n\x1a\n";
+    if bytes.len() < 24 || &bytes[..8] != PNG_SIGNATURE || &bytes[12..16] != b"IHDR" {
+        anyhow::bail!("control_center_screenshot_invalid_png");
+    }
+    let width = u32::from_be_bytes(bytes[16..20].try_into().expect("four-byte PNG width"));
+    let height = u32::from_be_bytes(bytes[20..24].try_into().expect("four-byte PNG height"));
+    if width == 0 || height == 0 {
+        anyhow::bail!("control_center_screenshot_invalid_dimensions");
+    }
+    Ok((width, height))
+}
+
+#[cfg(windows)]
+fn capture_control_center_screenshot(output: &Path) -> Result<ScreenshotDocument> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::IsWindow;
+
+    let registry = registry_path();
+    let owner = read_registry(&registry)
+        .filter(registry_process_matches)
+        .context("control_center_screenshot_not_running")?;
+    let native_window = read_regular_file(&native_window_path(&registry))
+        .context("control_center_screenshot_window_unavailable")?;
+    let native_window = String::from_utf8(native_window)
+        .ok()
+        .and_then(|value| value.parse::<i64>().ok())
+        .context("control_center_screenshot_window_invalid")?;
+    let window = native_window as isize as *mut std::ffi::c_void;
+    if window.is_null() || unsafe { IsWindow(window) } == 0 {
+        anyhow::bail!("control_center_screenshot_window_unavailable");
+    }
+
+    let output = if output.is_absolute() {
+        output.to_owned()
+    } else {
+        env::current_dir()
+            .context("control_center_screenshot_current_directory_unavailable")?
+            .join(output)
+    };
+    crate::platform::windows::screenshot::save_png(
+        window,
+        &output,
+        crate::platform::windows::screenshot::CaptureArea::Window,
+    )
+    .map_err(|error| anyhow::anyhow!("control_center_screenshot_capture_failed: {error}"))?;
+
+    let still_exact_owner = read_registry(&registry).is_some_and(|current| {
+        current.pid == owner.pid
+            && current.process_start_identity == owner.process_start_identity
+            && registry_process_matches(&current)
+    });
+    if !still_exact_owner {
+        let _ = fs::remove_file(&output);
+        anyhow::bail!("control_center_screenshot_owner_changed");
+    }
+    let bytes = fs::read(&output).context("control_center_screenshot_readback_failed")?;
+    let (width, height) = png_dimensions(&bytes)?;
+    let sha256 = Sha256::digest(&bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    Ok(ScreenshotDocument {
+        schema_version: SCHEMA_VERSION,
+        executable: "agenterm-cc",
+        state: "captured",
+        renderer: "native",
+        owner_pid: owner.pid,
+        output: output.to_string_lossy().into_owned(),
+        width,
+        height,
+        bytes: u64::try_from(bytes.len()).unwrap_or(u64::MAX),
+        sha256,
+    })
+}
+
+#[cfg(not(windows))]
+fn capture_control_center_screenshot(_output: &Path) -> Result<ScreenshotDocument> {
+    anyhow::bail!(
+        "control_center_screenshot_unsupported: native Control Center screenshot capture is unavailable on this platform"
+    )
 }
 
 fn disconnected_snapshot() -> SnapshotDocument {
@@ -1998,6 +2149,60 @@ mod tests {
                 context: None,
             }
         );
+    }
+
+    #[test]
+    fn screenshot_requires_one_output_and_rejects_authority_selectors() {
+        let command = parse_entry(&[
+            OsString::from("screenshot"),
+            OsString::from("--output"),
+            OsString::from("cockpit.png"),
+            OsString::from("--json"),
+        ])
+        .expect("parse screenshot command");
+        assert_eq!(
+            command,
+            EntryCommand::Screenshot {
+                json: true,
+                output: PathBuf::from("cockpit.png"),
+            }
+        );
+        assert!(
+            parse_entry(&[OsString::from("screenshot")])
+                .expect_err("missing output must fail")
+                .contains("requires --output")
+        );
+        assert!(
+            parse_entry(&[
+                OsString::from("screenshot"),
+                OsString::from("--output"),
+                OsString::from("cockpit.png"),
+                OsString::from("--instance"),
+                OsString::from("main"),
+            ])
+            .expect_err("screenshot must target the registry owner")
+            .contains("exact live Control Center registry owner")
+        );
+        assert!(
+            parse_entry(&[
+                OsString::from("status"),
+                OsString::from("--output"),
+                OsString::from("ignored.png"),
+            ])
+            .expect_err("output is screenshot-only")
+            .contains("valid only for screenshot")
+        );
+    }
+
+    #[test]
+    fn screenshot_png_header_dimensions_are_strict() {
+        let mut header = Vec::from(b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".as_slice());
+        header.extend_from_slice(&760_u32.to_be_bytes());
+        header.extend_from_slice(&480_u32.to_be_bytes());
+        assert_eq!(png_dimensions(&header).unwrap(), (760, 480));
+        assert!(png_dimensions(b"not a png").is_err());
+        header[16..20].copy_from_slice(&0_u32.to_be_bytes());
+        assert!(png_dimensions(&header).is_err());
     }
 
     #[test]

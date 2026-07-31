@@ -52,7 +52,8 @@ AgenTerm Control Center
 └─ diagnostics
    ├─ component availability
    ├─ connection / renderer state
-   └─ bounded evidence and failures
+   ├─ bounded evidence and failures
+   └─ exact-owner native PNG capture
 ```
 
 `Fleet Hub` is a historical planning name for part of this product. It does
@@ -172,6 +173,14 @@ Control Center is the product name; the executable family uses
 - [x] using a WebView does not move product authority into JavaScript, load
   Control Center code directly from the network, or justify rewriting the
   terminal renderer, Tabs, Composer, or Settings.
+- [~] `agenterm-cc screenshot --output PATH [--json]` captures the actual
+  native window owned by the live, PID/start-identity-matched Control Center
+  registry without focusing or activating it. Windows reuses the bounded
+  platform GDI/PNG encoder and returns dimensions, byte length and SHA-256;
+  owner replacement during capture fails closed and removes the ambiguous
+  output. Linux/macOS report the capability and command as unavailable until
+  their renderer-owned capture path is connected rather than manufacturing
+  substitute evidence.
 
 The v0.1.11 spike reports passive `runtime_presence` separately from
 `host_state`. A detected runtime never implies a working host:
@@ -202,8 +211,13 @@ promotion gates.
 - [ ] close, force-kill, renderer failure, server restart, server loss,
   incompatible protocol, repeated open, and GUI-with-server-retained journeys
   prove process reuse, bounded cleanup, recovery, and PTY/workspace isolation.
-- [ ] structured snapshot/action evidence and PNG evidence agree on selected
-  view, connection state, labels, availability, and geometry.
+- [~] structured snapshot/action evidence and PNG evidence agree on selected
+  view, connection state, labels, availability, and geometry. The Windows
+  Control Center smoke now pairs the connected Cockpit snapshot/window title
+  with a nonempty, decoded native-window PNG, verifies its typed owner PID,
+  dimensions, byte length and digest, and retains the successful image at
+  `dist/evidence/control-center-live-cockpit.png`; equivalent Unix renderer
+  evidence remains open.
 - [ ] any distributed executable has its own size budget, hash, SBOM,
   provenance, startup measurement, capability catalog, and public black-box
   owner; it does not inflate `agenterm.exe`.
