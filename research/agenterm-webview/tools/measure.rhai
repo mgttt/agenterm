@@ -1,0 +1,1017 @@
+// Append-safe Windows system-WebView comparison measurement.
+//
+// Usage:
+//   agenterm-script run [RUNTIME LIMITS] measure.rhai -- REPO [OPTIONS]
+//
+// Options:
+//   --self-check
+//   --output PATH
+//   --native-cc PATH
+//   --samples N
+//   --run-id ID
+//   --build-deadline-ms N
+//   --metadata-deadline-ms N
+//   --probe-deadline-ms N
+//   --smoke-deadline-ms N
+//   --archive-deadline-ms N
+
+fn require(condition, message) {
+    if !condition {
+        throw message;
+    }
+}
+
+fn tail(text, maximum) {
+    if text.len <= maximum {
+        return text;
+    }
+    text.sub_string(text.len - maximum, maximum)
+}
+
+fn host_os() {
+    if std::fs::exists("/System/Library/CoreServices") {
+        "macos"
+    } else if std::fs::exists("/proc") {
+        "linux"
+    } else {
+        "windows"
+    }
+}
+
+fn valid_run_id(value) {
+    if value.len < 1 || value.len > 80 {
+        return false;
+    }
+    for character in value {
+        if !"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-"
+                .contains(character.to_string()) {
+            return false;
+        }
+    }
+    true
+}
+
+fn read_if_present(path) {
+    if std::fs::exists(path) {
+        std::fs::read_to_string(path)
+    } else {
+        ""
+    }
+}
+
+fn source_facts(repo) {
+    let head_command = std::process::command("git");
+    head_command.args(["rev-parse", "HEAD"]);
+    head_command.current_dir(repo);
+    head_command.timeout(std::time::Duration::from_secs(10));
+    let head_output = head_command.output();
+    let commit = if head_output.success {
+        let value = head_output.stdout_text();
+        value.trim();
+        value
+    } else {
+        "unavailable"
+    };
+
+    let status_command = std::process::command("git");
+    status_command.args(["status", "--porcelain", "--untracked-files=normal"]);
+    status_command.current_dir(repo);
+    status_command.timeout(std::time::Duration::from_secs(10));
+    let status_output = status_command.output();
+    #{
+        commit: commit,
+        dirty: if status_output.success {
+            let value = status_output.stdout_text();
+            value.trim();
+            value != ""
+        } else {
+            ()
+        }
+    }
+}
+
+fn new_context(journal_path, output_path, run_root, run_id, platform, source) {
+    #{
+        schema: "agenterm.webview-measurement-event/1",
+        receipt_schema: "agenterm.webview-comparison/1",
+        journal_path: journal_path,
+        output_path: output_path,
+        run_root: run_root,
+        run_id: run_id,
+        platform: platform,
+        source_commit: source.commit,
+        source_tree_dirty: source.dirty,
+        sequence: 0,
+        events: []
+    }
+}
+
+fn write_event(context, phase, implementation, status, facts) {
+    context.sequence += 1;
+    let record = #{
+        schema: context.schema,
+        run_id: context.run_id,
+        sequence: context.sequence,
+        observed_at_utc: std::time::SystemTime::now().rfc3339,
+        source_commit: context.source_commit,
+        source_tree_dirty: context.source_tree_dirty,
+        platform: context.platform,
+        phase: phase,
+        implementation: implementation,
+        status: status,
+        facts: facts
+    };
+    rhai::runtime::append_sync(
+        context.journal_path,
+        rhai::json::stringify(record) + "\n"
+    );
+    context.events.push(record);
+    context
+}
+
+fn fold_context(context) {
+    require(context.events.len > 0, "webview_measure_fold_empty");
+    let terminal = [];
+    let failed = [];
+    let causal_failed = [];
+    let finalize = ();
+    for event in context.events {
+        if event.status != "started" {
+            terminal.push(event);
+            if event.status == "failed" || event.status == "timed_out" {
+                failed.push(event);
+                if event.phase != "finalize" {
+                    causal_failed.push(event);
+                }
+            }
+            if event.phase == "finalize" {
+                finalize = event;
+            }
+        }
+    }
+    let status = if finalize != () && finalize.status == "completed" {
+        "complete"
+    } else if failed.len > 0 {
+        "incomplete"
+    } else {
+        "in_progress"
+    };
+    let reason = if status == "complete" {
+        "all_measurement_phases_completed"
+    } else if causal_failed.len > 0 {
+        let event = causal_failed[causal_failed.len - 1];
+        event.phase + "_" + event.status
+    } else if failed.len > 0 {
+        "finalize_" + failed[failed.len - 1].status
+    } else {
+        "run_interrupted_without_terminal_event"
+    };
+    let last = context.events[context.events.len - 1];
+    #{
+        schema: context.receipt_schema,
+        status: status,
+        reason: reason,
+        observed_at_utc: std::time::SystemTime::now().rfc3339,
+        run_id: context.run_id,
+        platform: context.platform,
+        source_commit: context.source_commit,
+        source_tree_dirty: context.source_tree_dirty,
+        active_renderer: "native",
+        journal_path: context.journal_path,
+        last_valid_sequence: last.sequence,
+        in_progress_phase: if last.status == "started" { last.phase } else { () },
+        phase_receipts: terminal,
+        limitations: [
+            "empty-target build is a Rust target-cache measurement, not a cold OS or registry-download measurement",
+            "load-complete is not first paint",
+            "root-process peak working set is unavailable through the current public Rhai Child facts",
+            "native Control Center startup/RSS remains owned by its isolated public journey",
+            "licence expressions are metadata inventory and not a completed legal/SBOM review",
+            "this Windows reference does not provide macOS or Linux renderer evidence"
+        ]
+    }
+}
+
+fn checkpoint(context) {
+    rhai::runtime::atomic_write(
+        context.output_path,
+        rhai::json::stringify_pretty(fold_context(context)) + "\n"
+    );
+}
+
+fn terminal_event(context, phase, implementation, status, facts) {
+    context = write_event(context, phase, implementation, status, facts);
+    checkpoint(context);
+    context
+}
+
+fn started_event(context, phase, implementation, deadline_ms) {
+    write_event(
+        context,
+        phase,
+        implementation,
+        "started",
+        #{ deadline_ms: deadline_ms }
+    )
+}
+
+fn read_journal(path) {
+    let text = std::fs::read_to_string(path);
+    let complete_tail = text.ends_with("\n");
+    let lines = text.split("\n");
+    let events = [];
+    for index in 0..lines.len {
+        let line = lines[index];
+        line.trim();
+        if line == "" {
+            continue;
+        }
+        let event = ();
+        let failure = "";
+        try {
+            event = rhai::json::parse(line);
+        } catch (error) {
+            failure = error.to_string();
+        }
+        if failure != "" {
+            if index == lines.len - 1 && !complete_tail {
+                break;
+            }
+            throw "webview_measure_journal_json:" + (index + 1) + ":" + failure;
+        }
+        require(
+            event.schema == "agenterm.webview-measurement-event/1",
+            "webview_measure_journal_schema:" + (index + 1)
+        );
+        require(
+            event.sequence == events.len + 1,
+            "webview_measure_journal_sequence:" + (index + 1)
+        );
+        events.push(event);
+    }
+    events
+}
+
+fn file_facts(path) {
+    #{
+        bytes: std::fs::metadata(path).len,
+        sha256: rhai::crypto::sha256_file(path)
+    }
+}
+
+fn inventory_facts(text) {
+    let metadata = rhai::json::parse(text);
+    let package_count = 0;
+    let missing_license_count = 0;
+    let license_expressions = [];
+    for dependency in metadata.packages {
+        package_count += 1;
+        let license = if dependency.license == () {
+            ""
+        } else {
+            dependency.license.to_string()
+        };
+        license.trim();
+        if license == "" {
+            missing_license_count += 1;
+        } else if !license_expressions.contains(license) {
+            license_expressions.push(license);
+        }
+    }
+    license_expressions.sort();
+    #{
+        package_count: package_count,
+        missing_license_count: missing_license_count,
+        license_expressions: license_expressions
+    }
+}
+
+fn process_facts(kind, detail, output, stdout, stderr, duration_ms) {
+    let facts = #{
+        duration_ms: duration_ms,
+        exit_code: output.exit_code,
+        stderr_tail: tail(stderr, 4096)
+    };
+    if kind == "build" {
+        facts.build_ms = duration_ms;
+        facts.cache_state = detail.cache_state;
+    } else if kind == "version" {
+        let value = stdout;
+        value.trim();
+        facts.version = value;
+    } else if kind == "json" {
+        facts.receipt = rhai::json::parse(stdout);
+    } else if kind == "smoke" {
+        facts.wall_ms = duration_ms;
+        facts.root_process_peak_working_set_bytes = ();
+        facts.receipt = rhai::json::parse(stdout);
+    } else if kind == "metadata" {
+        let inventory = inventory_facts(stdout);
+        for key in inventory.keys() {
+            facts[key] = inventory[key];
+        }
+        facts.lock_sha256 = detail.lock_sha256;
+    } else if kind == "archive" {
+        let archive = file_facts(detail.archive_path);
+        facts.bytes = archive.bytes;
+        facts.sha256 = archive.sha256;
+        facts.contents = detail.contents;
+    }
+    facts
+}
+
+fn run_process_phase(
+    context,
+    phase,
+    implementation,
+    program,
+    arguments,
+    cwd,
+    deadline_ms,
+    kind,
+    detail
+) {
+    context = started_event(context, phase, implementation, deadline_ms);
+    let stdout_path = std::path::join(
+        context.run_root,
+        "phase-" + context.sequence + ".stdout"
+    ).display;
+    let stderr_path = std::path::join(
+        context.run_root,
+        "phase-" + context.sequence + ".stderr"
+    ).display;
+    let command = std::process::command(program);
+    command.args(arguments);
+    command.current_dir(cwd);
+    command.env("AGENTERM_NO_ACTIVATE", "1");
+    command.timeout(std::time::Duration::from_millis(deadline_ms));
+    command.stdout_file(stdout_path);
+    command.stderr_file(stderr_path);
+    let started = std::time::SystemTime::now().unix_millis;
+    let output = ();
+    let failure = "";
+    try {
+        output = command.output();
+    } catch (error) {
+        failure = error.to_string();
+    }
+    let duration_ms = std::time::SystemTime::now().unix_millis - started;
+    let stdout = read_if_present(stdout_path);
+    let stderr = read_if_present(stderr_path);
+    if failure != "" {
+        let timed_out = failure.contains("process_timeout");
+        context = terminal_event(
+            context,
+            phase,
+            implementation,
+            if timed_out { "timed_out" } else { "failed" },
+            #{
+                deadline_ms: deadline_ms,
+                duration_ms: duration_ms,
+                stdout_tail: tail(stdout, 4096),
+                stderr_tail: tail(stderr, 4096),
+                reason: failure
+            }
+        );
+        throw failure;
+    }
+    if !output.success {
+        context = terminal_event(
+            context,
+            phase,
+            implementation,
+            "failed",
+            #{
+                duration_ms: duration_ms,
+                exit_code: output.exit_code,
+                stdout_tail: tail(stdout, 4096),
+                stderr_tail: tail(stderr, 4096)
+            }
+        );
+        throw "webview_measure_phase_failed:" + phase + ":" + output.exit_code;
+    }
+    let facts = ();
+    let parse_failure = "";
+    try {
+        facts = process_facts(kind, detail, output, stdout, stderr, duration_ms);
+    } catch (error) {
+        parse_failure = error.to_string();
+    }
+    if parse_failure != "" {
+        context = terminal_event(
+            context,
+            phase,
+            implementation,
+            "failed",
+            #{ duration_ms: duration_ms, reason: parse_failure }
+        );
+        throw parse_failure;
+    }
+    context = terminal_event(
+        context,
+        phase,
+        implementation,
+        "completed",
+        facts
+    );
+    #{ context: context, stdout: stdout, stderr: stderr, facts: facts }
+}
+
+fn record_file_phase(context, phase, implementation, path) {
+    context = started_event(context, phase, implementation, 120000);
+    let started = std::time::SystemTime::now().unix_millis;
+    let facts = file_facts(path);
+    facts.duration_ms = std::time::SystemTime::now().unix_millis - started;
+    terminal_event(context, phase, implementation, "completed", facts)
+}
+
+fn stage_archive(context, phase, implementation, stage, files) {
+    context = started_event(context, phase, implementation, 120000);
+    let started = std::time::SystemTime::now().unix_millis;
+    std::fs::create_dir(stage);
+    let contents = [];
+    for path in files {
+        let name = std::path::PathBuf::from(path).file_name;
+        std::fs::copy(path, std::path::join(stage, name).display);
+        contents.push(name);
+    }
+    contents.sort();
+    context = terminal_event(
+        context,
+        phase,
+        implementation,
+        "completed",
+        #{
+            duration_ms: std::time::SystemTime::now().unix_millis - started,
+            contents: contents
+        }
+    );
+    #{ context: context, contents: contents }
+}
+
+fn parse_options(repo, arguments) {
+    let workspace = std::path::join(repo, "research/agenterm-webview").display;
+    let options = #{
+        self_check: false,
+        output: std::path::join(
+            workspace,
+            "evidence/local/windows-comparison.json"
+        ).display,
+        native_cc: std::path::join(repo, "dist/agenterm-cc.exe").display,
+        samples: 3,
+        run_id: "",
+        build_deadline_ms: 1200000,
+        metadata_deadline_ms: 120000,
+        probe_deadline_ms: 30000,
+        smoke_deadline_ms: 30000,
+        archive_deadline_ms: 120000
+    };
+    let index = 1;
+    while index < arguments.len {
+        let option = arguments[index];
+        if option == "--self-check" {
+            options.self_check = true;
+            index += 1;
+            continue;
+        }
+        require(index + 1 < arguments.len, "webview_measure_option_value:" + option);
+        let value = arguments[index + 1];
+        if option == "--output" {
+            options.output = std::path::absolute(value).display;
+        } else if option == "--native-cc" {
+            options.native_cc = std::path::absolute(value).display;
+        } else if option == "--samples" {
+            options.samples = value.parse_int();
+        } else if option == "--run-id" {
+            options.run_id = value;
+        } else if option == "--build-deadline-ms" {
+            options.build_deadline_ms = value.parse_int();
+        } else if option == "--metadata-deadline-ms" {
+            options.metadata_deadline_ms = value.parse_int();
+        } else if option == "--probe-deadline-ms" {
+            options.probe_deadline_ms = value.parse_int();
+        } else if option == "--smoke-deadline-ms" {
+            options.smoke_deadline_ms = value.parse_int();
+        } else if option == "--archive-deadline-ms" {
+            options.archive_deadline_ms = value.parse_int();
+        } else {
+            throw "webview_measure_unknown_option:" + option;
+        }
+        index += 2;
+    }
+    require(options.samples >= 1 && options.samples <= 10, "webview_measure_samples");
+    require(options.build_deadline_ms >= 30000, "webview_measure_build_deadline");
+    require(options.metadata_deadline_ms >= 10000, "webview_measure_metadata_deadline");
+    require(options.probe_deadline_ms >= 5000, "webview_measure_probe_deadline");
+    require(options.smoke_deadline_ms >= 5000, "webview_measure_smoke_deadline");
+    require(options.archive_deadline_ms >= 5000, "webview_measure_archive_deadline");
+    options
+}
+
+fn assert_check(condition, code) {
+    require(condition, "webview_measure_self_check:" + code)
+}
+
+fn self_check(repo) {
+    let root = std::path::join(
+        rhai::runtime::temp_dir().display,
+        "webview-measure-self-check"
+    ).display;
+    std::fs::create_dir(root);
+    let source = #{ commit: "self-check", dirty: false };
+    let journal = std::path::join(root, "valid.events.jsonl").display;
+    let output = std::path::join(root, "valid.json").display;
+    let context = new_context(
+        journal,
+        output,
+        root,
+        "self-check-run",
+        "windows-x86_64",
+        source
+    );
+
+    let collision = std::path::join(root, "claimed-run").display;
+    std::fs::create_dir(collision);
+    let collision_failed = false;
+    try {
+        std::fs::create_dir(collision);
+    } catch (error) {
+        collision_failed = true;
+    }
+    assert_check(collision_failed, "run_id_collision_fail_closed");
+
+    context = terminal_event(
+        context,
+        "initialize",
+        "shared",
+        "completed",
+        #{ deadline_model: "self-check" }
+    );
+    context = write_event(
+        context,
+        "direct.clean_release_build",
+        "direct-wry",
+        "started",
+        #{ deadline_ms: 1200000 }
+    );
+    context = terminal_event(
+        context,
+        "direct.clean_release_build",
+        "direct-wry",
+        "completed",
+        #{ duration_ms: 123 }
+    );
+    context = write_event(
+        context,
+        "direct.smoke.0",
+        "direct-wry",
+        "started",
+        #{ deadline_ms: 30000 }
+    );
+    context = terminal_event(
+        context,
+        "direct.smoke.0",
+        "direct-wry",
+        "completed",
+        #{ duration_ms: 17, receipt: #{ status: "loaded", no_activate: true } }
+    );
+    rhai::runtime::append_sync(journal, "{\"schema\":");
+    let events = read_journal(journal);
+    assert_check(events.len == 5, "truncated_final_line_tolerated");
+    let folded = fold_context(context);
+    let preserved = false;
+    for event in folded.phase_receipts {
+        if event.phase == "direct.clean_release_build"
+                && event.facts.duration_ms == 123 {
+            preserved = true;
+        }
+    }
+    assert_check(preserved, "completed_duration_folded");
+    let persisted = rhai::json::parse_file(output);
+    let persisted_duration = false;
+    for event in persisted.phase_receipts {
+        if event.phase == "direct.clean_release_build"
+                && event.facts.duration_ms == 123 {
+            persisted_duration = true;
+        }
+    }
+    assert_check(persisted_duration, "atomic_checkpoint_valid");
+
+    let bad = std::path::join(root, "bad-order.events.jsonl").display;
+    rhai::runtime::append_sync(
+        bad,
+        rhai::json::stringify(#{
+            schema: context.schema,
+            run_id: "bad",
+            sequence: 1,
+            phase: "one",
+            status: "completed"
+        }) + "\n"
+    );
+    rhai::runtime::append_sync(
+        bad,
+        rhai::json::stringify(#{
+            schema: context.schema,
+            run_id: "bad",
+            sequence: 3,
+            phase: "three",
+            status: "completed"
+        }) + "\n"
+    );
+    let ordering_failed = false;
+    try {
+        read_journal(bad);
+    } catch (error) {
+        ordering_failed = true;
+    }
+    assert_check(ordering_failed, "event_ordering_fail_closed");
+
+    let failure_root = std::path::join(root, "failure-run").display;
+    std::fs::create_dir(failure_root);
+    let failure_context = new_context(
+        std::path::join(failure_root, "events.jsonl").display,
+        std::path::join(failure_root, "receipt.json").display,
+        failure_root,
+        "failure-run",
+        "windows-x86_64",
+        source
+    );
+    failure_context = terminal_event(
+        failure_context,
+        "initialize",
+        "shared",
+        "completed",
+        #{}
+    );
+    failure_context = terminal_event(
+        failure_context,
+        "tauri.clean_release_build",
+        "tauri-v2-reference",
+        "timed_out",
+        #{ duration_ms: 1200000 }
+    );
+    failure_context = terminal_event(
+        failure_context,
+        "finalize",
+        "shared",
+        "failed",
+        #{ reason: "phase timeout" }
+    );
+    let failure_fold = fold_context(failure_context);
+    assert_check(
+        failure_fold.status == "incomplete"
+            && failure_fold.reason == "tauri.clean_release_build_timed_out",
+        "causal_timeout_folded"
+    );
+
+    let windows = host_os() == "windows";
+    let unrelated_command = std::process::command(if windows { "cmd.exe" } else { "/bin/sh" });
+    unrelated_command.args(if windows {
+        ["/d", "/s", "/c", "ping.exe -n 30 127.0.0.1 >nul"]
+    } else {
+        ["-c", "sleep 30"]
+    });
+    unrelated_command.timeout(std::time::Duration::from_secs(30));
+    let unrelated = unrelated_command.start();
+    let timeout_command = std::process::command(if windows { "cmd.exe" } else { "/bin/sh" });
+    timeout_command.args(if windows {
+        ["/d", "/s", "/c", "ping.exe -n 30 127.0.0.1 >nul"]
+    } else {
+        ["-c", "sleep 30"]
+    });
+    timeout_command.timeout(std::time::Duration::from_millis(10));
+    let timeout_failed = false;
+    try {
+        timeout_command.output();
+    } catch (error) {
+        timeout_failed = error.to_string().contains("process_timeout");
+    }
+    assert_check(timeout_failed, "owned_process_tree_timeout");
+    assert_check(unrelated.state == "running", "timeout_preserved_unrelated_process");
+    unrelated.kill_tree();
+    try {
+        unrelated.wait_with_output(std::time::Duration::from_secs(2));
+    } catch (error) {
+        // The kill is the expected outcome; Drop retains the same tree cleanup.
+    }
+
+    print(rhai::json::stringify_pretty(#{
+        schema: "agenterm.webview-measurement-self-check/1",
+        status: "passed",
+        checks: [
+            "run_id_collision_fail_closed",
+            "durable_append_record_order",
+            "truncated_final_line_tolerated",
+            "completed_duration_folded",
+            "atomic_checkpoint_valid",
+            "event_ordering_fail_closed",
+            "causal_timeout_folded",
+            "owned_process_tree_timeout",
+            "timeout_preserved_unrelated_process"
+        ]
+    }));
+}
+
+fn measure(repo, options) {
+    require(host_os() == "windows", "webview_measure_windows_only");
+    let workspace = std::path::join(repo, "research/agenterm-webview").display;
+    let tauri_workspace = std::path::join(workspace, "tauri-reference").display;
+    let run_id = if options.run_id == "" {
+        "run-" + std::time::SystemTime::now().unix_millis + "-" + std::process::id()
+    } else {
+        options.run_id
+    };
+    require(valid_run_id(run_id), "webview_measure_run_id");
+    let local_root = std::path::join(workspace, "evidence/local").display;
+    let runs_root = std::path::join(local_root, "runs").display;
+    std::fs::create_dir_all(runs_root);
+    let run_root = std::path::join(runs_root, run_id).display;
+    std::fs::create_dir(run_root);
+    std::fs::create_dir_all(std::path::parent(options.output).display);
+    let journal = std::path::join(run_root, "measurement.events.jsonl").display;
+    let source = source_facts(repo);
+    let context = new_context(
+        journal,
+        options.output,
+        run_root,
+        run_id,
+        "windows-x86_64",
+        source
+    );
+    let direct_target = std::path::join(run_root, "target-direct-wry").display;
+    let tauri_target = std::path::join(run_root, "target-tauri").display;
+    let launcher = std::path::join(
+        direct_target,
+        "release/agenterm-cc-web.exe"
+    ).display;
+    let direct_host = std::path::join(
+        direct_target,
+        "release/agenterm-cc-web-direct-wry.exe"
+    ).display;
+    let tauri_host = std::path::join(
+        tauri_target,
+        "release/agenterm-cc-web-tauri.exe"
+    ).display;
+    let primary_manifest = std::path::join(workspace, "Cargo.toml").display;
+    let tauri_manifest = std::path::join(tauri_workspace, "Cargo.toml").display;
+
+    let completed = false;
+    let failure = "";
+    try {
+        context = terminal_event(
+            context,
+            "initialize",
+            "shared",
+            "completed",
+            #{
+                run_root: run_root,
+                repeated_startup_samples: options.samples,
+                deadlines_ms: #{
+                    build: options.build_deadline_ms,
+                    metadata: options.metadata_deadline_ms,
+                    probe: options.probe_deadline_ms,
+                    smoke: options.smoke_deadline_ms,
+                    archive: options.archive_deadline_ms
+                },
+                runtime_policy: #{
+                    system_runtime_only: true,
+                    runtime_download: false,
+                    fixed_runtime_bundled: false
+                }
+            }
+        );
+
+        let phase = run_process_phase(
+            context, "toolchain.rustc", "shared", "rustc", ["--version"],
+            workspace, options.probe_deadline_ms, "version", #{}
+        );
+        context = phase.context;
+        phase = run_process_phase(
+            context, "toolchain.cargo", "shared", "cargo", ["--version"],
+            workspace, options.probe_deadline_ms, "version", #{}
+        );
+        context = phase.context;
+
+        let direct_build = [
+            "build", "--release", "--locked", "--manifest-path", primary_manifest,
+            "--target-dir", direct_target, "-p", "agenterm-cc-web-direct-wry"
+        ];
+        phase = run_process_phase(
+            context, "direct.clean_release_build", "direct-wry", "cargo",
+            direct_build, workspace, options.build_deadline_ms, "build",
+            #{ cache_state: "empty_target" }
+        );
+        context = phase.context;
+        phase = run_process_phase(
+            context, "direct.warm_release_build", "direct-wry", "cargo",
+            direct_build, workspace, options.build_deadline_ms, "build",
+            #{ cache_state: "warm_unchanged" }
+        );
+        context = phase.context;
+        phase = run_process_phase(
+            context, "launcher.release_build", "shared", "cargo",
+            [
+                "build", "--release", "--locked", "--manifest-path", primary_manifest,
+                "--target-dir", direct_target, "-p", "agenterm-cc-web"
+            ],
+            workspace, options.build_deadline_ms, "build",
+            #{ cache_state: "shared_target" }
+        );
+        context = phase.context;
+
+        let tauri_build = [
+            "build", "--release", "--locked", "--manifest-path", tauri_manifest,
+            "--target-dir", tauri_target, "-p", "agenterm-cc-web-tauri"
+        ];
+        phase = run_process_phase(
+            context, "tauri.clean_release_build", "tauri-v2-reference", "cargo",
+            tauri_build, tauri_workspace, options.build_deadline_ms, "build",
+            #{ cache_state: "empty_target" }
+        );
+        context = phase.context;
+        phase = run_process_phase(
+            context, "tauri.warm_release_build", "tauri-v2-reference", "cargo",
+            tauri_build, tauri_workspace, options.build_deadline_ms, "build",
+            #{ cache_state: "warm_unchanged" }
+        );
+        context = phase.context;
+
+        context = started_event(
+            context,
+            "tauri.stage_fallback_sibling",
+            "tauri-v2-reference",
+            options.archive_deadline_ms
+        );
+        let stage_started = std::time::SystemTime::now().unix_millis;
+        let tauri_sibling = std::path::join(
+            direct_target,
+            "release/agenterm-cc-web-tauri.exe"
+        ).display;
+        std::fs::copy(tauri_host, tauri_sibling);
+        context = terminal_event(
+            context,
+            "tauri.stage_fallback_sibling",
+            "tauri-v2-reference",
+            "completed",
+            #{ duration_ms: std::time::SystemTime::now().unix_millis - stage_started }
+        );
+        context = record_file_phase(context, "direct.artifact", "direct-wry", direct_host);
+        context = record_file_phase(context, "launcher.artifact", "shared", launcher);
+        context = record_file_phase(context, "tauri.artifact", "tauri-v2-reference", tauri_host);
+
+        phase = run_process_phase(
+            context, "direct.probe", "direct-wry", launcher,
+            ["--implementation", "direct-wry", "--probe", "--no-activate"],
+            direct_target, options.probe_deadline_ms, "json", #{}
+        );
+        context = phase.context;
+        phase = run_process_phase(
+            context, "tauri.probe", "tauri-v2-reference", launcher,
+            ["--implementation", "tauri", "--probe", "--no-activate"],
+            direct_target, options.probe_deadline_ms, "json", #{}
+        );
+        context = phase.context;
+        phase = run_process_phase(
+            context, "asset_manifest", "shared", launcher,
+            ["--asset-manifest"], direct_target,
+            options.probe_deadline_ms, "json", #{}
+        );
+        context = phase.context;
+
+        for index in 0..(options.samples + 1) {
+            phase = run_process_phase(
+                context, "direct.smoke." + index, "direct-wry", direct_host,
+                ["--smoke", "--no-activate"], direct_target,
+                options.smoke_deadline_ms, "smoke", #{}
+            );
+            context = phase.context;
+            phase = run_process_phase(
+                context, "tauri.smoke." + index, "tauri-v2-reference", tauri_host,
+                ["--smoke", "--no-activate"], tauri_target,
+                options.smoke_deadline_ms, "smoke", #{}
+            );
+            context = phase.context;
+        }
+
+        let direct_stage = std::path::join(run_root, "stage-direct-wry").display;
+        let staged = stage_archive(
+            context, "direct.archive_stage", "direct-wry", direct_stage,
+            [launcher, direct_host]
+        );
+        context = staged.context;
+        let direct_archive = std::path::join(run_root, "direct-wry.zip").display;
+        phase = run_process_phase(
+            context, "direct.archive", "direct-wry", "tar",
+            ["-a", "-c", "-f", direct_archive, "-C", direct_stage, "."],
+            workspace, options.archive_deadline_ms, "archive",
+            #{ archive_path: direct_archive, contents: staged.contents }
+        );
+        context = phase.context;
+
+        let tauri_stage = std::path::join(run_root, "stage-tauri-v2").display;
+        staged = stage_archive(
+            context, "tauri.archive_stage", "tauri-v2-reference", tauri_stage,
+            [launcher, tauri_host]
+        );
+        context = staged.context;
+        let tauri_archive = std::path::join(run_root, "tauri-v2.zip").display;
+        phase = run_process_phase(
+            context, "tauri.archive", "tauri-v2-reference", "tar",
+            ["-a", "-c", "-f", tauri_archive, "-C", tauri_stage, "."],
+            workspace, options.archive_deadline_ms, "archive",
+            #{ archive_path: tauri_archive, contents: staged.contents }
+        );
+        context = phase.context;
+
+        if std::fs::exists(options.native_cc) {
+            let native_stage = std::path::join(run_root, "stage-native-cc").display;
+            staged = stage_archive(
+                context, "native.archive_stage", "native-control-center", native_stage,
+                [options.native_cc]
+            );
+            context = staged.context;
+            let native_archive = std::path::join(run_root, "native-cc.zip").display;
+            phase = run_process_phase(
+                context, "native.archive", "native-control-center", "tar",
+                ["-a", "-c", "-f", native_archive, "-C", native_stage, "."],
+                workspace, options.archive_deadline_ms, "archive",
+                #{ archive_path: native_archive, contents: staged.contents }
+            );
+            context = phase.context;
+            context = record_file_phase(
+                context,
+                "native.artifact",
+                "native-control-center",
+                options.native_cc
+            );
+        } else {
+            context = terminal_event(
+                context,
+                "native.archive",
+                "native-control-center",
+                "completed",
+                #{
+                    status: "unavailable",
+                    reason: "native Control Center artifact was not found; startup/RSS were not inferred"
+                }
+            );
+        }
+
+        phase = run_process_phase(
+            context, "primary.inventory", "direct-wry", "cargo",
+            ["metadata", "--locked", "--format-version", "1", "--manifest-path", primary_manifest],
+            workspace, options.metadata_deadline_ms, "metadata",
+            #{ lock_sha256: rhai::crypto::sha256_file(std::path::join(workspace, "Cargo.lock").display) }
+        );
+        context = phase.context;
+        phase = run_process_phase(
+            context, "tauri.inventory", "tauri-v2-reference", "cargo",
+            ["metadata", "--locked", "--format-version", "1", "--manifest-path", tauri_manifest],
+            tauri_workspace, options.metadata_deadline_ms, "metadata",
+            #{ lock_sha256: rhai::crypto::sha256_file(std::path::join(tauri_workspace, "Cargo.lock").display) }
+        );
+        context = phase.context;
+        context = terminal_event(
+            context,
+            "finalize",
+            "shared",
+            "completed",
+            #{
+                decision: "defer",
+                active_renderer: "native",
+                reason: "three-platform stability, isolation, rendering and resource evidence remain required"
+            }
+        );
+        completed = true;
+    } catch (error) {
+        failure = error.to_string();
+    }
+    if !completed {
+        let has_finalize = false;
+        for event in context.events {
+            if event.phase == "finalize" {
+                has_finalize = true;
+            }
+        }
+        if !has_finalize {
+            context = terminal_event(
+                context,
+                "finalize",
+                "shared",
+                "failed",
+                #{ reason: failure }
+            );
+        }
+        throw failure;
+    }
+    print(options.output);
+}
+
+require(args.len >= 1, "expected: REPO [OPTIONS]");
+let repo = std::path::absolute(args[0]).display;
+let options = parse_options(repo, args);
+if options.self_check {
+    self_check(repo);
+} else {
+    measure(repo, options);
+}
