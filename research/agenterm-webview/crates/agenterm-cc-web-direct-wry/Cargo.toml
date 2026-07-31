@@ -1,0 +1,15 @@
+[package]
+name = "agenterm-cc-web-direct-wry"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Isolated direct-WRY system-WebView experiment for AgenTerm"
+
+[dependencies]
+agenterm-cc-web = { path = "../agenterm-cc-web" }
+serde.workspace = true
+serde_json.workspace = true
+tao = { version = "0.36.0", default-features = false, features = ["rwh_06"] }
+wry = { version = "0.56.0", default-features = false, features = ["os-webview"] }
