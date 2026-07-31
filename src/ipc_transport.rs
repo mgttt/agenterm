@@ -531,7 +531,7 @@ impl UnixInstanceLease {
         use std::{
             io::{Read as _, Seek as _, SeekFrom, Write as _},
             os::{
-                fd::{AsRawFd as _, FromRawFd as _, OwnedFd},
+                fd::{FromRawFd as _, OwnedFd},
                 unix::ffi::OsStrExt as _,
             },
         };
