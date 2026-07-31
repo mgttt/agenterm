@@ -45,7 +45,10 @@ fn windows_ci_uses_fail_fast_non_powershell_steps_with_millisecond_outputs() {
     assert!(!windows.contains("shell: powershell"));
 
     for (name, command) in [
-        ("Install lint components", "rustup component add rustfmt clippy"),
+        (
+            "Install lint components",
+            "rustup component add rustfmt clippy",
+        ),
         (
             "Run quality gate",
             "./check.cmd --skip-smoke --timing target/qualification/timing.json",
