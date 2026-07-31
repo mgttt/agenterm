@@ -72,11 +72,7 @@ let provenance = #{
     artifact: archive_name,
     sha256: archive_hash,
     source_commit: receipt.provenance.git_head,
-    source_tag: if std::env::has("GITHUB_REF_NAME") {
-        std::env::get("GITHUB_REF_NAME")
-    } else {
-        ""
-    },
+    source_tag: "v" + metadata.version,
     artifact_manifest_sha256:
         receipt.provenance.artifact_manifest_sha256,
     cargo_lock_sha256: receipt.provenance.cargo_lock_sha256,

@@ -82,17 +82,38 @@
     },
     "check": {
       "inputs": ["source-tree", "task-manifest", "qualification-gate-manifest"],
-      "outputs": ["gate-results", "qualification-receipt"],
+      "outputs": ["gate-results", "quality-timing", "qualification-receipt"],
       "budget": {"timeout_ms": 3600000, "max_operations": 100000000, "max_output_bytes": 1048576},
       "network": ["dependency_fetch", "loopback"],
       "evidence": ["task.check"]
     },
+    "timing-summary": {
+      "inputs": ["quality-timing"],
+      "outputs": ["quality-timing-markdown"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
+      "network": [],
+      "evidence": ["task.timing-summary"]
+    },
     "release": {
-      "inputs": ["clean-source", "qualification-receipt", "release-workflow"],
-      "outputs": ["release-rehearsal", "release-tag", "remote-release"],
+      "inputs": ["clean-source", "qualification-receipt", "candidate-workflow", "promotion-workflow"],
+      "outputs": ["release-rehearsal", "promotion-instructions"],
       "budget": {"timeout_ms": 3600000, "max_operations": 100000000, "max_output_bytes": 1048576},
-      "network": ["dependency_fetch", "loopback", "remote_publish"],
+      "network": ["dependency_fetch", "loopback"],
       "evidence": ["task.release"]
+    },
+    "candidate-aggregate": {
+      "inputs": ["exact-source", "candidate-metadata", "six-platform-assets", "qualification-receipt"],
+      "outputs": ["candidate-manifest"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
+      "network": [],
+      "evidence": ["task.candidate-aggregate"]
+    },
+    "candidate-verify": {
+      "inputs": ["exact-source", "candidate-manifest", "sealed-candidate-assets"],
+      "outputs": ["verified-candidate-identity"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
+      "network": [],
+      "evidence": ["task.candidate-verify"]
     },
     "bootstrap-info": {
       "inputs": ["source-tree", "toolchain"],
@@ -472,14 +493,44 @@
       "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback"]
     },
     {
+      "id": "timing-summary",
+      "description": "Validate one quality-timing report and append a bounded Markdown job summary",
+      "entry": "scripts/rhai/timing-summary.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "dependencies": [],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write"]
+    },
+    {
       "id": "release",
-      "description": "Validate, qualify, and package an exact candidate, then rehearse or explicitly publish it",
+      "description": "Validate or locally rehearse an exact candidate and direct publication through the candidate-bound Promotion workflow",
       "entry": "scripts/rhai/release.rhai",
       "profile": "local",
       "cwd": ".",
       "dependencies": ["check", "preflight", "package-release-qualified"],
       "platforms": ["windows"],
-      "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback", "git_mutation", "remote_publish"]
+      "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback"]
+    },
+    {
+      "id": "candidate-aggregate",
+      "description": "Seal one exact-SHA six-platform release Candidate manifest from a closed payload",
+      "entry": "scripts/rhai/candidate-aggregate.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "dependencies": ["supply-chain"],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write"]
+    },
+    {
+      "id": "candidate-verify",
+      "description": "Verify one exact-SHA Candidate manifest, qualification receipt, and every payload byte",
+      "entry": "scripts/rhai/candidate-verify.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "dependencies": [],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": []
     },
     {
       "id": "bootstrap-info",

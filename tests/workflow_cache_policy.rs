@@ -55,8 +55,26 @@ fn cache_pilot_is_sha_pinned_and_limited_to_two_jobs() {
     for pilot in [windows, linux] {
         assert_eq!(pilot.matches("uses: actions/cache/restore@").count(), 2);
         assert_eq!(pilot.matches("uses: actions/cache/save@").count(), 2);
-        assert_eq!(pilot.matches(CACHE_SHA).count(), 4);
-        assert_eq!(pilot.matches("continue-on-error: true").count(), 4);
+        for action in pilot
+            .lines()
+            .filter(|line| line.contains("uses: actions/cache/"))
+        {
+            assert!(
+                action.contains(CACHE_SHA),
+                "cache action is not pinned to the approved SHA: {action}"
+            );
+        }
+        let cache_steps = pilot
+            .split("      - name:")
+            .filter(|step| step.contains("uses: actions/cache/"))
+            .collect::<Vec<_>>();
+        assert_eq!(cache_steps.len(), 4);
+        assert!(
+            cache_steps
+                .iter()
+                .all(|step| step.contains("continue-on-error: true")),
+            "every cache step must remain fail-safe"
+        );
         assert!(!pilot.contains("enableCrossOsArchive"));
     }
     assert!(!remaining.contains("uses: actions/cache/"));

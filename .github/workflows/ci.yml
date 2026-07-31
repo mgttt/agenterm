@@ -45,7 +45,7 @@ jobs:
         run: rustup component add rustfmt clippy
       - name: Run quality gate
         shell: cmd
-        run: check.cmd --skip-smoke
+        run: check.cmd --skip-smoke --timing target/qualification/timing.json
       - name: Run representative public-interface slice
         shell: cmd
         env:
@@ -56,6 +56,25 @@ jobs:
           if errorlevel 1 exit /b %ERRORLEVEL%
           dist\agenterm-script.exe task run cli-smoke --manifest agenterm.tasks.json
           exit /b %ERRORLEVEL%
+      - name: Publish Windows quality timing summary
+        if: always()
+        continue-on-error: true
+        shell: cmd
+        run: |
+          @if not exist target\qualification\timing.json exit /b 0
+          @if exist dist\agenterm-script.exe (
+            dist\agenterm-script.exe task run timing-summary --manifest agenterm.tasks.json -- target\qualification\timing.json
+          ) else (
+            target\debug\agenterm-script.exe task run timing-summary --manifest agenterm.tasks.json -- target\qualification\timing.json
+          )
+      - name: Upload Windows quality timing
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: quality-timing-windows-x86_64-${{ github.run_id }}
+          path: target/qualification/timing.json
+          if-no-files-found: warn
+          retention-days: 14
       - name: Save Windows x86_64 build target
         if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
         continue-on-error: true
@@ -112,7 +131,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libxkbcommon0 libxkbcommon-x11-0 libwayland-client0
       - name: Run portable quality gate
-        run: ./check.sh --quick
+        run: >-
+          ./check.sh --quick
+          --timing target/qualification/timing.json
       - name: Audit cross-platform automation ownership
         env:
           AGENTERM_BOOTSTRAP_TASK: cross-platform-automation-audit
@@ -141,6 +162,22 @@ jobs:
         env:
           AGENTERM_BOOTSTRAP_TASK: agenterm-net-research
         run: ./scripts/bootstrap.sh
+      - name: Publish Linux quality timing summary
+        if: always()
+        continue-on-error: true
+        run: |
+          test ! -f target/qualification/timing.json ||
+            target/debug/agenterm-script task run timing-summary \
+              --manifest agenterm.tasks.json -- \
+              target/qualification/timing.json
+      - name: Upload Linux quality timing
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: quality-timing-linux-x86_64-${{ github.run_id }}
+          path: target/qualification/timing.json
+          if-no-files-found: warn
+          retention-days: 14
       - name: Save Linux x86_64 build targets
         if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
         continue-on-error: true

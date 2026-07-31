@@ -138,20 +138,35 @@ fn assert_clean_main(repo) {
 }
 
 fn assert_workflow(repo) {
-    let workflow_path =
+    let promotion_path =
         std::path::join(repo, ".github/workflows/release.yml").display;
-    let workflow = std::fs::read_to_string(workflow_path);
+    let candidate_path =
+        std::path::join(repo, ".github/workflows/candidate.yml").display;
+    let promotion = std::fs::read_to_string(promotion_path);
+    let candidate = std::fs::read_to_string(candidate_path);
     require(
-        workflow.contains("tags:")
-            && (
-                workflow.contains("- 'v*'")
-                    || workflow.contains(`- "v*"`)
-            )
-            && workflow.contains("check.cmd --release --include-stress")
-            && workflow.contains("expected == \"v0.1.7\""),
+        candidate.contains("workflow_dispatch:")
+            && candidate.contains("source_sha:")
+            && candidate.contains("check.cmd --release --include-stress")
+            && candidate.contains("expected == \"v0.1.7\"")
+            && candidate.contains("release-candidate-${{ github.run_id }}"),
+        "release_candidate_workflow_contract"
+    );
+    require(
+        promotion.contains("workflow_dispatch:")
+            && promotion.contains("candidate_run_id:")
+            && promotion.contains("confirmation:")
+            && promotion.contains("environment: release")
+            && promotion.contains("contents: write")
+            && !promotion.contains("--clobber")
+            && !promotion.contains("cargo build")
+            && !promotion.contains("check.cmd --release"),
         "release_workflow_contract"
     );
-    workflow_path
+    #{
+        candidate_path: candidate_path,
+        promotion_path: promotion_path
+    }
 }
 
 fn run_quality(repo) {
@@ -196,12 +211,6 @@ fn run_quality(repo) {
     if std::fs::exists(stdout_path) {
         print(tail(std::fs::read_to_string(stdout_path), 4096));
     }
-}
-
-fn git_mutation(repo, arguments) {
-    let argv = ["-C", repo];
-    argv.append(arguments);
-    command_output("git", argv, repo, 120000)
 }
 
 require(args.len <= 2, "expected: [REPO] [--rehearse]");
@@ -251,7 +260,7 @@ require(
     git_output(repo, ["tag", "--list", tag], "release_git_tags") == "",
     "release_tag_exists:" + tag
 );
-let workflow_path = assert_workflow(repo);
+let workflows = assert_workflow(repo);
 let head = git_output(repo, ["rev-parse", "HEAD"], "release_git_head");
 if mode == "validate" {
     print(
@@ -260,12 +269,20 @@ if mode == "validate" {
                 version: version,
                 tag: tag,
                 source_commit: head,
-                workflow_sha256:
-                    rhai::crypto::sha256_file(workflow_path),
+                candidate_workflow_sha256:
+                    rhai::crypto::sha256_file(workflows.candidate_path),
+                promotion_workflow_sha256:
+                    rhai::crypto::sha256_file(workflows.promotion_path),
                 mutation: false
             })
     );
     return;
+}
+if mode == "publish" {
+    throw "release_promotion_requires_github_workflow:" +
+        "run Release Candidate for " + head +
+        ", review it, then run Release with candidate_run_id and publish-" +
+        tag;
 }
 
 print("QUALIFY AgenTerm " + version + " from main@" + head);
@@ -298,7 +315,10 @@ let report = #{
     version: version,
     tag: tag,
     source_commit: head,
-    workflow_sha256: rhai::crypto::sha256_file(workflow_path),
+    candidate_workflow_sha256:
+        rhai::crypto::sha256_file(workflows.candidate_path),
+    promotion_workflow_sha256:
+        rhai::crypto::sha256_file(workflows.promotion_path),
     qualification_receipt: receipt_path,
     qualification_receipt_sha256:
         rhai::crypto::sha256_file(receipt_path),
@@ -317,22 +337,4 @@ rhai::runtime::atomic_write(
 );
 print("RELEASE REHEARSAL " + report_path);
 
-if mode == "rehearse" {
-    print("PASS: candidate is qualified and packaged; no tag or push occurred");
-    return;
-}
-
-let tagged = git_mutation(
-    repo,
-    ["tag", "-a", tag, "-m", "AgenTerm " + version]
-);
-require(tagged.success, "release_tag_create_failed");
-let pushed = git_mutation(
-    repo,
-    ["push", "--atomic", "origin", "main", tag]
-);
-if !pushed.success {
-    git_mutation(repo, ["tag", "-d", tag]);
-    throw "release_atomic_push_failed";
-}
-print("PUBLISHED " + tag + "; GitHub Actions owns Release creation");
+print("PASS: local rehearsal completed; no tag, push, or Release occurred");

@@ -404,7 +404,7 @@ try {
             std::path::join(repo, "scripts/rhai/release.rhai").display
         );
         let workflow = std::fs::read_to_string(
-            std::path::join(repo, ".github/workflows/release.yml").display
+            std::path::join(repo, ".github/workflows/candidate.yml").display
         );
         require(
             release.contains(`version != "0.1.7"`)

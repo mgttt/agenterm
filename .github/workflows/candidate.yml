@@ -1,0 +1,618 @@
+name: Release Candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact 40-character main commit to qualify
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: release-candidate-${{ inputs.source_sha }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ inputs.source_sha }}
+
+      - name: Verify exact main source and successful CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$(git rev-parse HEAD)" == "$SOURCE_SHA" ]]
+          [[ "$GITHUB_SHA" == "$SOURCE_SHA" ]]
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$SOURCE_SHA" origin/main
+          success_count="$(
+            gh api \
+              "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$SOURCE_SHA&status=success&per_page=20" \
+              --jq '.workflow_runs | length'
+          )"
+          if [[ "$success_count" -lt 1 ]]; then
+            echo "No successful CI run exists for exact SHA $SOURCE_SHA." >&2
+            exit 1
+          fi
+
+  build:
+    needs: preflight
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform_id: windows-x86_64
+            runner: windows-latest
+            timeout_minutes: 45
+          - platform_id: windows-aarch64
+            runner: ubuntu-latest
+            timeout_minutes: 45
+          - platform_id: linux-x86_64
+            runner: ubuntu-latest
+            timeout_minutes: 30
+          - platform_id: linux-aarch64
+            runner: ubuntu-latest
+            timeout_minutes: 30
+          - platform_id: macos-aarch64
+            runner: macos-latest
+            timeout_minutes: 30
+          - platform_id: macos-x86_64
+            runner: macos-latest
+            timeout_minutes: 30
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: ${{ matrix.timeout_minutes }}
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.source_sha }}
+
+      - name: Verify tag matches Cargo version
+        shell: bash
+        run: |
+          python3 <<'PY'
+          import os
+          import re
+          import sys
+
+          cargo = open("Cargo.toml", encoding="utf-8").read()
+          match = re.search(
+              r'(?ms)^\[package\].*?^version\s*=\s*"(?P<version>[^"]+)"',
+              cargo,
+          )
+          if not match:
+              sys.exit("Could not read Cargo.toml package version.")
+          expected = f"v{match.group('version')}"
+          if expected == "v0.1.7":
+              sys.exit("v0.1.7 is an internal-only baseline and cannot become a candidate.")
+          source = os.environ["SOURCE_SHA"]
+          if os.environ["GITHUB_SHA"] != source:
+              sys.exit("Candidate input does not match the workflow source SHA.")
+          PY
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+
+      - name: Install lint components
+        if: matrix.platform_id == 'windows-x86_64'
+        run: rustup component add rustfmt clippy
+
+      - name: Run release quality gate
+        if: matrix.platform_id == 'windows-x86_64'
+        shell: cmd
+        run: |
+          @echo off
+          set "LOG=%RUNNER_TEMP%\agenterm-release-check.log"
+          for /f "delims=" %%H in ('git rev-parse HEAD') do set "ACTUAL_HEAD=%%H"
+          if /I not "%ACTUAL_HEAD%"=="%GITHUB_SHA%" (
+            echo Checked-out HEAD %ACTUAL_HEAD% does not match event SHA %GITHUB_SHA%. > "%LOG%"
+            type "%LOG%"
+            exit /b 1
+          )
+          git switch -C main "%GITHUB_SHA%" > "%LOG%" 2>&1
+          if errorlevel 1 (
+            type "%LOG%"
+            exit /b 1
+          )
+          call check.cmd --release --include-stress --timing target/qualification/timing.json >> "%LOG%" 2>&1
+          set "CHECK_EXIT=%ERRORLEVEL%"
+          type "%LOG%"
+          exit /b %CHECK_EXIT%
+
+      - name: Upload failed quality-gate diagnostics
+        if: failure() && matrix.platform_id == 'windows-x86_64'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-quality-gate-failure-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 7
+          path: |
+            ${{ runner.temp }}/agenterm-release-check.log
+            ${{ runner.temp }}/agenterm-theme-*.png
+            ${{ runner.temp }}/agenterm-proxy-eye-*.png
+            target/smoke/*.png
+
+      - name: Publish Candidate quality timing summary
+        if: always() && matrix.platform_id == 'windows-x86_64'
+        continue-on-error: true
+        shell: cmd
+        run: |
+          @if not exist target\qualification\timing.json exit /b 0
+          @if exist dist\agenterm-script.exe (
+            dist\agenterm-script.exe task run timing-summary --manifest agenterm.tasks.json -- target\qualification\timing.json
+          ) else (
+            target\debug\agenterm-script.exe task run timing-summary --manifest agenterm.tasks.json -- target\qualification\timing.json
+          )
+
+      - name: Upload Candidate quality timing
+        if: always() && matrix.platform_id == 'windows-x86_64'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: candidate-quality-timing-${{ github.run_id }}
+          path: target/qualification/timing.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Package Windows x86_64 release
+        if: matrix.platform_id == 'windows-x86_64'
+        shell: cmd
+        run: >-
+          dist\agenterm-script.exe task run package-release-qualified
+          --manifest agenterm.tasks.json
+
+      - name: Install Windows ARM64 cross-build tooling
+        if: matrix.platform_id == 'windows-aarch64'
+        run: |
+          rustup target add aarch64-pc-windows-msvc
+          cargo install cargo-xwin --locked
+
+      - name: Build Windows ARM64 release
+        if: matrix.platform_id == 'windows-aarch64'
+        env:
+          AGENTERM_BOOTSTRAP_TASK: client-build
+        run: >-
+          ./scripts/bootstrap.sh release
+          --target aarch64-pc-windows-msvc --driver cargo-xwin
+
+      - name: Package Windows ARM64 release
+        if: matrix.platform_id == 'windows-aarch64'
+        env:
+          AGENTERM_BOOTSTRAP_TASK: package-client-release
+        run: |
+          VERSION="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n1)"
+          ./scripts/bootstrap.sh "$VERSION" windows aarch64 \
+            target/aarch64-pc-windows-msvc/release
+
+      - name: Build Linux x86_64 clients
+        if: matrix.platform_id == 'linux-x86_64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon0 libxkbcommon-x11-0 libwayland-client0
+          AGENTERM_BOOTSTRAP_TASK=client-build \
+            ./scripts/bootstrap.sh release \
+            --target x86_64-unknown-linux-gnu
+
+      - name: Package Linux x86_64 release
+        if: matrix.platform_id == 'linux-x86_64'
+        env:
+          AGENTERM_BOOTSTRAP_TASK: package-client-release
+        run: |
+          VERSION="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n1)"
+          ./scripts/bootstrap.sh \
+            "$VERSION" linux x86_64 target/x86_64-unknown-linux-gnu/release
+
+      - name: Install Linux ARM64 cross linker
+        if: matrix.platform_id == 'linux-aarch64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu libxkbcommon0 libxkbcommon-x11-0
+          rustup target add aarch64-unknown-linux-gnu
+
+      - name: Build Linux ARM64 clients
+        if: matrix.platform_id == 'linux-aarch64'
+        env:
+          AGENTERM_BOOTSTRAP_TASK: client-build
+        run: >-
+          ./scripts/bootstrap.sh release
+          --target aarch64-unknown-linux-gnu
+
+      - name: Package Linux ARM64 release
+        if: matrix.platform_id == 'linux-aarch64'
+        env:
+          AGENTERM_BOOTSTRAP_TASK: package-client-release
+        run: |
+          VERSION="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n1)"
+          ./scripts/bootstrap.sh \
+            "$VERSION" linux aarch64 target/aarch64-unknown-linux-gnu/release
+
+      - name: Import Apple Developer ID credentials
+        if: >-
+          startsWith(matrix.platform_id, 'macos-') &&
+          vars.ENABLE_SIGNED_MACOS_RELEASE == 'true'
+        env:
+          APPLE_DEVELOPER_ID_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_P12_BASE64 }}
+          APPLE_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+          APPLE_NOTARY_KEY_P8_BASE64: ${{ secrets.APPLE_NOTARY_KEY_P8_BASE64 }}
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          for name in \
+            APPLE_DEVELOPER_ID_P12_BASE64 \
+            APPLE_DEVELOPER_ID_P12_PASSWORD \
+            APPLE_NOTARY_KEY_P8_BASE64 \
+            APPLE_NOTARY_KEY_ID \
+            APPLE_NOTARY_ISSUER_ID
+          do
+            if [[ -z "${!name:-}" ]]; then
+              echo "Required macOS release secret is missing: $name" >&2
+              exit 1
+            fi
+          done
+
+          CERTIFICATE_PATH="$RUNNER_TEMP/agenterm-developer-id.p12"
+          NOTARY_KEY_PATH="$RUNNER_TEMP/AuthKey_${APPLE_NOTARY_KEY_ID}.p8"
+          python3 - "$CERTIFICATE_PATH" "$NOTARY_KEY_PATH" <<'PY'
+          import base64
+          import os
+          import pathlib
+          import sys
+
+          certificate_path, notary_key_path = map(pathlib.Path, sys.argv[1:3])
+          certificate_path.write_bytes(
+              base64.b64decode(
+                  "".join(os.environ["APPLE_DEVELOPER_ID_P12_BASE64"].split()),
+                  validate=True,
+              )
+          )
+          notary_key_path.write_bytes(
+              base64.b64decode(
+                  "".join(os.environ["APPLE_NOTARY_KEY_P8_BASE64"].split()),
+                  validate=True,
+              )
+          )
+          PY
+
+          KEYCHAIN_PATH="$RUNNER_TEMP/agenterm-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          echo "::add-mask::$KEYCHAIN_PASSWORD"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" \
+            -k "$KEYCHAIN_PATH" \
+            -P "$APPLE_DEVELOPER_ID_P12_PASSWORD" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/security
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s \
+            -k "$KEYCHAIN_PASSWORD" \
+            "$KEYCHAIN_PATH"
+          security default-keychain -s "$KEYCHAIN_PATH"
+          IDENTITY="$(
+            security find-identity -v -p codesigning "$KEYCHAIN_PATH" |
+              sed -n 's/.*"\(Developer ID Application:.*\)"/\1/p' |
+              head -n 1
+          )"
+          if [[ -z "$IDENTITY" ]]; then
+            echo "Imported certificate is not a Developer ID Application identity." >&2
+            exit 1
+          fi
+          echo "APPLE_SIGNING_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+          echo "APPLE_NOTARY_KEY_PATH=$NOTARY_KEY_PATH" >> "$GITHUB_ENV"
+          echo "APPLE_NOTARY_KEY_ID=$APPLE_NOTARY_KEY_ID" >> "$GITHUB_ENV"
+          echo "APPLE_NOTARY_ISSUER_ID=$APPLE_NOTARY_ISSUER_ID" >> "$GITHUB_ENV"
+
+      - name: Report macOS unsigned preview channel
+        if: >-
+          startsWith(matrix.platform_id, 'macos-') &&
+          vars.ENABLE_SIGNED_MACOS_RELEASE != 'true'
+        run: |
+          echo "Signed macOS stable publishing is disabled; this job will produce a visibly labeled unsigned preview."
+          echo "Set ENABLE_SIGNED_MACOS_RELEASE=true only after all Developer ID and notarization secrets are configured."
+
+      - name: Generate deterministic macOS SPDX inventory
+        if: startsWith(matrix.platform_id, 'macos-')
+        env:
+          AGENTERM_BOOTSTRAP_TASK: supply-chain
+        run: ./scripts/bootstrap.sh . dist/agenterm-sbom.spdx.json
+
+      - name: Build macOS ARM64 clients
+        if: matrix.platform_id == 'macos-aarch64'
+        run: |
+          rustup target add aarch64-apple-darwin
+          AGENTERM_BOOTSTRAP_TASK=client-build \
+            ./scripts/bootstrap.sh release --target aarch64-apple-darwin
+
+      - name: Sign macOS ARM64 clients
+        if: >-
+          matrix.platform_id == 'macos-aarch64' &&
+          vars.ENABLE_SIGNED_MACOS_RELEASE == 'true'
+        run: |
+          ./scripts/sign-macos-release.sh \
+            aarch64 target/aarch64-apple-darwin/release
+
+      - name: Package macOS ARM64 release
+        if: >-
+          matrix.platform_id == 'macos-aarch64' &&
+          vars.ENABLE_SIGNED_MACOS_RELEASE == 'true'
+        env:
+          AGENTERM_BOOTSTRAP_TASK: package-client-release
+        run: |
+          VERSION="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n1)"
+          ./scripts/bootstrap.sh \
+            "$VERSION" macos aarch64 target/aarch64-apple-darwin/release --signed
+
+      - name: Notarize macOS ARM64 release
+        if: >-
+          matrix.platform_id == 'macos-aarch64' &&
+          vars.ENABLE_SIGNED_MACOS_RELEASE == 'true'
+        run: |
+          set -euo pipefail
+          VERSION="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n1)"
+          ARCHIVE="dist/agenterm-${VERSION}-macos-aarch64.zip"
+          RESULT="$(
+            xcrun notarytool submit "$ARCHIVE" \
+              --key "$APPLE_NOTARY_KEY_PATH" \
+              --key-id "$APPLE_NOTARY_KEY_ID" \
+              --issuer "$APPLE_NOTARY_ISSUER_ID" \
+              --wait \
+              --output-format json
+          )"
+          echo "$RESULT"
+          RESULT="$RESULT" python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          result = json.loads(os.environ["RESULT"])
+          if result.get("status") != "Accepted":
+              sys.exit(f"Apple notarization was not accepted: {result}")
+          PY
+          target/aarch64-apple-darwin/release/agenterm-script \
+            run scripts/rhai/finalize-macos-provenance.rhai -- \
+            "$ARCHIVE" "$ARCHIVE.provenance.json"
+
+      - name: Package macOS ARM64 unsigned preview
+        if: >-
+          matrix.platform_id == 'macos-aarch64' &&
+          vars.ENABLE_SIGNED_MACOS_RELEASE != 'true'
+        env:
+          AGENTERM_BOOTSTRAP_TASK: package-client-release
+        run: |
+          VERSION="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n1)"
+          ./scripts/bootstrap.sh "$VERSION" macos aarch64 \
+            target/aarch64-apple-darwin/release --unsigned-preview
+
+      - name: Build macOS x86_64 clients
+        if: matrix.platform_id == 'macos-x86_64'
+        run: |
+          rustup target add x86_64-apple-darwin
+          AGENTERM_BOOTSTRAP_TASK=client-build \
+            ./scripts/bootstrap.sh release --target x86_64-apple-darwin
+
+      - name: Sign macOS x86_64 clients
+        if: >-
+          matrix.platform_id == 'macos-x86_64' &&
+          vars.ENABLE_SIGNED_MACOS_RELEASE == 'true'
+        run: |
+          ./scripts/sign-macos-release.sh \
+            x86_64 target/x86_64-apple-darwin/release
+
+      - name: Package macOS x86_64 release
+        if: >-
+          matrix.platform_id == 'macos-x86_64' &&
+          vars.ENABLE_SIGNED_MACOS_RELEASE == 'true'
+        env:
+          AGENTERM_BOOTSTRAP_TASK: package-client-release
+        run: |
+          VERSION="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n1)"
+          ./scripts/bootstrap.sh \
+            "$VERSION" macos x86_64 target/x86_64-apple-darwin/release --signed
+
+      - name: Notarize macOS x86_64 release
+        if: >-
+          matrix.platform_id == 'macos-x86_64' &&
+          vars.ENABLE_SIGNED_MACOS_RELEASE == 'true'
+        run: |
+          set -euo pipefail
+          VERSION="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n1)"
+          ARCHIVE="dist/agenterm-${VERSION}-macos-x86_64.zip"
+          RESULT="$(
+            xcrun notarytool submit "$ARCHIVE" \
+              --key "$APPLE_NOTARY_KEY_PATH" \
+              --key-id "$APPLE_NOTARY_KEY_ID" \
+              --issuer "$APPLE_NOTARY_ISSUER_ID" \
+              --wait \
+              --output-format json
+          )"
+          echo "$RESULT"
+          RESULT="$RESULT" python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          result = json.loads(os.environ["RESULT"])
+          if result.get("status") != "Accepted":
+              sys.exit(f"Apple notarization was not accepted: {result}")
+          PY
+          target/x86_64-apple-darwin/release/agenterm-script \
+            run scripts/rhai/finalize-macos-provenance.rhai -- \
+            "$ARCHIVE" "$ARCHIVE.provenance.json"
+
+      - name: Package macOS x86_64 unsigned preview
+        if: >-
+          matrix.platform_id == 'macos-x86_64' &&
+          vars.ENABLE_SIGNED_MACOS_RELEASE != 'true'
+        env:
+          AGENTERM_BOOTSTRAP_TASK: package-client-release
+        run: |
+          VERSION="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n1)"
+          ./scripts/bootstrap.sh "$VERSION" macos x86_64 \
+            target/x86_64-apple-darwin/release --unsigned-preview
+
+      - name: Stage flat candidate part
+        shell: bash
+        env:
+          PLATFORM_ID: ${{ matrix.platform_id }}
+          SIGNED_MACOS: ${{ vars.ENABLE_SIGNED_MACOS_RELEASE }}
+        run: |
+          set -euo pipefail
+          version="$(
+            sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n1
+          )"
+          stage="candidate-part"
+          mkdir -p "$stage"
+          case "$PLATFORM_ID" in
+            windows-x86_64)
+              archive="dist/agenterm-$version-windows-x86_64.zip"
+              cp target/qualification/receipt.json \
+                "$stage/qualification-receipt.json"
+              cp "dist/agenterm-$version-sbom.spdx.json" "$stage/"
+              ;;
+            windows-aarch64)
+              archive="dist/agenterm-$version-windows-aarch64.zip"
+              ;;
+            linux-x86_64)
+              archive="dist/agenterm-$version-linux-x86_64.tar.gz"
+              ;;
+            linux-aarch64)
+              archive="dist/agenterm-$version-linux-aarch64.tar.gz"
+              ;;
+            macos-aarch64|macos-x86_64)
+              arch="${PLATFORM_ID#macos-}"
+              if [[ "$SIGNED_MACOS" == "true" ]]; then
+                archive="dist/agenterm-$version-macos-$arch.zip"
+              else
+                archive="dist/agenterm-$version-macos-$arch-unsigned-preview.zip"
+                if [[ "$PLATFORM_ID" == "macos-aarch64" ]]; then
+                  cp dist/MACOS_UNSIGNED_PREVIEW_README.md "$stage/"
+                  cp dist/MACOS_UNSIGNED_PREVIEW_README.zh-Hant.md "$stage/"
+                fi
+              fi
+              ;;
+            *)
+              echo "Unknown candidate platform: $PLATFORM_ID" >&2
+              exit 1
+              ;;
+          esac
+          test -f "$archive"
+          test -f "$archive.sha256"
+          test -f "$archive.provenance.json"
+          cp "$archive" "$archive.sha256" "$archive.provenance.json" "$stage/"
+
+      - name: Upload flat candidate part
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: candidate-part-${{ matrix.platform_id }}
+          path: candidate-part/
+          if-no-files-found: error
+          retention-days: 2
+
+  aggregate:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.source_sha }}
+
+      - name: Download candidate parts
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          pattern: candidate-part-*
+          merge-multiple: true
+          path: candidate-input
+
+      - name: Write candidate workflow metadata
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          workflow_sha256="$(sha256sum .github/workflows/candidate.yml | cut -d' ' -f1)"
+          version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n1)"
+          created_at_unix_ms="$(( $(date -u +%s) * 1000 ))"
+          expires_at_unix_ms="$(( created_at_unix_ms + 1209600000 ))"
+          jq -n \
+            --arg source_sha "$SOURCE_SHA" \
+            --arg version "$version" \
+            --arg workflow_sha256 "$workflow_sha256" \
+            --argjson run_id "$GITHUB_RUN_ID" \
+            --argjson run_attempt "$GITHUB_RUN_ATTEMPT" \
+            --argjson created_at_unix_ms "$created_at_unix_ms" \
+            --argjson expires_at_unix_ms "$expires_at_unix_ms" \
+            '{
+              schema_version: 1,
+              source_sha: $source_sha,
+              version: $version,
+              expected_tag: ("v" + $version),
+              workflow_path: ".github/workflows/candidate.yml",
+              workflow_sha256: $workflow_sha256,
+              run_id: $run_id,
+              run_attempt: $run_attempt,
+              run_event: env.GITHUB_EVENT_NAME,
+              created_at_unix_ms: $created_at_unix_ms,
+              expires_at_unix_ms: $expires_at_unix_ms
+            }' >candidate-metadata.json
+
+      - name: Extract candidate Script Runtime
+        run: |
+          set -euo pipefail
+          archive="$(find candidate-input -maxdepth 1 -type f \
+            -name 'agenterm-*-linux-x86_64.tar.gz' -print -quit)"
+          test -n "$archive"
+          mkdir -p "$RUNNER_TEMP/agenterm-candidate-tool"
+          tar -xzf "$archive" -C "$RUNNER_TEMP/agenterm-candidate-tool"
+          chmod +x "$RUNNER_TEMP/agenterm-candidate-tool/agenterm-script"
+
+      - name: Seal exact candidate bundle
+        run: |
+          set -euo pipefail
+          version="$(jq -r .version candidate-metadata.json)"
+          test -f candidate-input/qualification-receipt.json
+          mkdir -p candidate-output/payload
+          cp candidate-input/* candidate-output/payload/
+          "$RUNNER_TEMP/agenterm-candidate-tool/agenterm-script" \
+            run scripts/rhai/candidate-aggregate.rhai --project-root . -- \
+            . candidate-metadata.json candidate-output/payload \
+            "candidate-output/agenterm-$version-candidate-manifest.json"
+
+      - name: Upload sealed candidate
+        id: candidate-upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-candidate-${{ github.run_id }}
+          path: candidate-output/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Report candidate identity
+        env:
+          ARTIFACT_DIGEST: ${{ steps.candidate-upload.outputs.artifact-digest }}
+          ARTIFACT_ID: ${{ steps.candidate-upload.outputs.artifact-id }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          {
+            echo "## AgenTerm release candidate"
+            echo
+            echo "- Source: \`$SOURCE_SHA\`"
+            echo "- Run: \`$GITHUB_RUN_ID\` attempt \`$GITHUB_RUN_ATTEMPT\`"
+            echo "- Artifact ID: \`$ARTIFACT_ID\`"
+            echo "- Artifact digest: \`$ARTIFACT_DIGEST\`"
+            echo "- Retention: 14 days"
+          } >>"$GITHUB_STEP_SUMMARY"

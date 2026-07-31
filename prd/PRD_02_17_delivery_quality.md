@@ -160,29 +160,37 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] release CI runs the isolated public CLI and fleet smoke suites before
   packaging, even when the redundant GUI smoke suites are skipped
 - v0.1.12 exact-SHA candidate promotion (P0)
-  - [ ] ordinary feedback CI, complete candidate qualification and tag
+  - [x] ordinary feedback CI, complete candidate qualification and tag
     promotion are separate contracts; the same eligible commit does not rerun
     the full stress-inclusive desktop qualification locally, in CI and again
     after tagging
-  - [ ] before release approval, one candidate workflow produces the complete
+  - [~] before release approval, one candidate workflow produces the complete
     Windows qualification receipt and all six platform archives, hashes, SBOM
     and provenance for one exact commit; package-member, executable-permission
-    and launcher defects are therefore observable before a release tag exists
-  - [ ] after explicit approval, the tag workflow verifies tag/version/commit,
+    and launcher defects are therefore observable before a release tag exists;
+    the contract and fail-closed fixtures are implemented, while the first
+    six-runner GitHub execution remains to be recorded
+  - [~] after explicit approval, the promotion workflow verifies
+    tag/version/commit,
     downloads the exact candidate artifacts, revalidates every receipt and
-    hash, and promotes those bytes without Cargo compilation or a second full
-    GUI/stress suite
-  - [ ] candidate selection fails closed for branch-only identity, a merely
+    hash, and promotes those bytes without Cargo compilation, packaging or a
+    second full GUI/stress suite; static policy tests pass, while the first
+    non-publishing remote rehearsal remains to be recorded
+  - [x] candidate selection fails closed for branch-only identity, a merely
     recent successful run, missing/expired artifacts, an incomplete platform
     matrix, receipt drift or tampered bytes; fallback means producing a new
     candidate, not silently rebuilding during promotion
-  - [ ] queue, checkout/toolchain, cache restore, compile, test, package,
+  - [~] queue, checkout/toolchain, cache restore, compile, test, package,
     artifact transfer, promotion and tag-to-public-Release durations are
     machine-readable; initial targets are hot-cache candidate p50 <= 8 minutes
-    and exact-candidate tag-to-Release p50 <= 3 minutes
-  - [ ] Cargo registry/git and compatible compilation caches use OS,
+    and exact-candidate tag-to-Release p50 <= 3 minutes; qualification now
+    emits a private, machine-readable timing schema on success and failure,
+    with cross-run queue/cache/transfer aggregation still planned
+  - [~] Cargo registry/git and compatible compilation caches use OS,
     architecture, toolchain, lock, target, feature/profile and versioned-salt
-    identity. Cache miss, corruption or vendor outage affects speed only
+    identity. Cache miss, corruption or vendor outage affects speed only;
+    fail-safe Windows x64 and Linux x64 Cargo-home/target pilots are active,
+    while sccache and measured expansion remain pending
   - [ ] optional larger/third-party/self-hosted runner trials use the exact
     AgenTerm cold/warm workload, pinned actions, least privilege and a
     one-change fallback to standard GitHub-hosted runners; untrusted pull
@@ -295,6 +303,20 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     candidates. Native x86_64 execution, Developer ID signing, notarization,
     Gatekeeper download/install, candidate-receipt binding, and user-approved
     publication remain open
+- v0.1.12 macOS segmented timing baseline (2026-07-31)
+  - [x] on the native arm64 host, cached Rust target confirmation takes 0.11
+    seconds; the first target-specific release compiles take 71.93 seconds for
+    aarch64 and 63.87 seconds for x86_64, with no restored CI compilation cache
+  - [x] native UDS smoke takes 1.50 seconds, native Control Center smoke 5.01
+    seconds, the two-architecture package fixture 0.41 seconds, and the full
+    Rhai migration suite 28.15 seconds
+  - [x] deterministic SPDX generation takes 3.84 seconds; local archive writes
+    take 0.70 seconds for aarch64 and 0.75 seconds for x86_64
+  - [~] GitHub queue, cache restore, artifact upload and cross-job download are
+    workflow facts and cannot be measured by a local macOS run. Candidate
+    qualification records quality-gate timing, but the first remote candidate
+    run must still capture those orchestration segments before setting a p50
+    baseline
 - Scripting public-interface evidence gate
   - Rhai black-box evidence
     - [x] the named `scripts/rhai/script-smoke.rhai` journey drives only

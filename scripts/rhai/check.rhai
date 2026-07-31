@@ -205,6 +205,18 @@ fn run_gate(context, id, label, specs, repo, scratch, sequence) {
         all_output.append(output_lines(result.stdout));
         all_output.append(output_lines(result.stderr));
         if !result.success {
+            let duration =
+                std::time::SystemTime::now().unix_millis - started;
+            context.timing = qualification::timing_set_gate(
+                context.timing,
+                id,
+                "failed",
+                duration,
+                result.exit_code,
+                result.stderr.contains("gate_deadline_exceeded:")
+            );
+            context.timing =
+                qualification::timing_finish(context.timing, "failed");
             throw label + " failed with exit code " + result.exit_code +
                 "\n" + tail(result.stdout + result.stderr, 16384);
         }
@@ -218,8 +230,58 @@ fn run_gate(context, id, label, specs, repo, scratch, sequence) {
         duration,
         all_output
     );
+    context.timing = qualification::timing_set_gate(
+        context.timing,
+        id,
+        "passed",
+        duration,
+        0,
+        false
+    );
     print("PASS: " + label + " (" + duration + " ms)");
     #{context:context,sequence:sequence}
+}
+
+fn run_quick_gate(timing, id, label, specs, repo, scratch, sequence) {
+    print("\n==> " + label);
+    let started = std::time::SystemTime::now().unix_millis;
+    for command_spec in specs {
+        let result = execute(command_spec, repo, scratch, sequence);
+        sequence += 1;
+        if result.stdout != "" {
+            print(result.stdout);
+        }
+        if result.stderr != "" {
+            print(result.stderr);
+        }
+        if !result.success {
+            let duration =
+                std::time::SystemTime::now().unix_millis - started;
+            timing = qualification::timing_set_gate(
+                timing,
+                id,
+                "failed",
+                duration,
+                result.exit_code,
+                result.stderr.contains("gate_deadline_exceeded:")
+            );
+            timing = qualification::timing_finish(timing, "failed");
+            throw label + " failed with exit code " + result.exit_code +
+                "\n" + tail(result.stdout + result.stderr, 16384);
+        }
+    }
+    let duration =
+        std::time::SystemTime::now().unix_millis - started;
+    timing = qualification::timing_set_gate(
+        timing,
+        id,
+        "passed",
+        duration,
+        0,
+        false
+    );
+    print("PASS: " + label + " (" + duration + " ms)");
+    #{timing:timing,sequence:sequence}
 }
 
 fn run_step(label, specs, repo, scratch, sequence) {
@@ -432,6 +494,8 @@ let include_stress = false;
 let dry_run = false;
 let receipt_path =
     std::path::join(repo, "target/qualification/receipt.json").display;
+let timing_path =
+    std::path::join(repo, "target/qualification/timing.json").display;
 let index = 1;
 while index < args.len {
     let value = args[index];
@@ -448,6 +512,10 @@ while index < args.len {
     } else if value == "--receipt" {
         require(index + 1 < args.len, "check_receipt_value_missing");
         receipt_path = std::path::absolute(args[index + 1]).display;
+        index += 1;
+    } else if value == "--timing" {
+        require(index + 1 < args.len, "check_timing_value_missing");
+        timing_path = std::path::absolute(args[index + 1]).display;
         index += 1;
     } else {
         throw "check_unknown_argument:" + value;
@@ -490,8 +558,34 @@ if dry_run {
     return;
 }
 
+if std::fs::exists(timing_path) {
+    std::fs::remove_file(timing_path);
+}
+
 if quick {
     let quick_started = std::time::SystemTime::now().unix_millis;
+    let quick_gate_ids = [
+        "repo-lint",
+        "rustfmt",
+        "prd-alignment",
+        "clippy",
+        "unit-tests"
+    ];
+    if unix_bootstrap {
+        quick_gate_ids.insert(2, "native-public-catalog-clients");
+    }
+    let timing = qualification::new_timing(
+        repo,
+        std::path::join(
+            repo,
+            "scripts/qualification-gates.json"
+        ).display,
+        timing_path,
+        "quick",
+        "quick",
+        #{unix_bootstrap:unix_bootstrap},
+        quick_gate_ids
+    );
     let prd_spec = task(
         bootstrap_worker,
         manifest,
@@ -513,7 +607,9 @@ if quick {
             ]
         );
     }
-    sequence = run_step(
+    let quick_gate = run_quick_gate(
+        timing,
+        "repo-lint",
         "repository static lint",
         [task(
             bootstrap_worker,
@@ -526,7 +622,11 @@ if quick {
         scratch,
         sequence
     );
-    sequence = run_step(
+    timing = quick_gate.timing;
+    sequence = quick_gate.sequence;
+    let quick_gate = run_quick_gate(
+        timing,
+        "rustfmt",
         "rustfmt",
         [spec(
             "cargo",
@@ -538,8 +638,12 @@ if quick {
         scratch,
         sequence
     );
+    timing = quick_gate.timing;
+    sequence = quick_gate.sequence;
     if unix_bootstrap {
-        sequence = run_step(
+        let quick_gate = run_quick_gate(
+            timing,
+            "native-public-catalog-clients",
             "native public catalog clients",
             [task(
                 bootstrap_worker,
@@ -552,23 +656,40 @@ if quick {
             scratch,
             sequence
         );
+        timing = quick_gate.timing;
+        sequence = quick_gate.sequence;
     }
-    sequence = run_step(
+    let quick_gate = run_quick_gate(
+        timing,
+        "prd-alignment",
         "PRD capability alignment",
         [prd_spec],
         repo,
         scratch,
         sequence
     );
-    let identity = freeze_identity(
-        bootstrap_worker,
-        manifest,
-        repo,
-        scratch,
-        sequence
-    );
+    timing = quick_gate.timing;
+    sequence = quick_gate.sequence;
+    let identity = ();
+    try {
+        identity = freeze_identity(
+            bootstrap_worker,
+            manifest,
+            repo,
+            scratch,
+            sequence
+        );
+    } catch (error) {
+        timing = qualification::timing_fail_stage(
+            timing,
+            "build-identity"
+        );
+        throw error;
+    }
     sequence = identity.sequence;
-    sequence = run_step(
+    let quick_gate = run_quick_gate(
+        timing,
+        "clippy",
         "all-target Clippy",
         [spec(
             "cargo",
@@ -581,7 +702,11 @@ if quick {
         scratch,
         sequence
     );
-    sequence = run_step(
+    timing = quick_gate.timing;
+    sequence = quick_gate.sequence;
+    let quick_gate = run_quick_gate(
+        timing,
+        "unit-tests",
         "library unit tests",
         [spec(
             "cargo",
@@ -593,6 +718,9 @@ if quick {
         scratch,
         sequence
     );
+    timing = quick_gate.timing;
+    sequence = quick_gate.sequence;
+    timing = qualification::timing_finish(timing, "passed");
     print(
         "\nPASS: AgenTerm quick development gate (" +
             (
@@ -615,6 +743,55 @@ let context = qualification::new_context(
     release,
     include_stress
 );
+let timing_gate_ids = [];
+for declared in context.manifest.required_gates {
+    timing_gate_ids.push(declared.id);
+}
+let timing_profile =
+    if release && include_stress {
+        "release-stress"
+    } else if skip_smoke {
+        "skip-smoke"
+    } else {
+        "full"
+    };
+context.timing = qualification::new_timing(
+    repo,
+    context.manifest_path,
+    timing_path,
+    if release { "candidate" } else { "ordinary" },
+    timing_profile,
+    #{
+        release: release,
+        stress_included: include_stress,
+        smoke_included: !skip_smoke
+    },
+    timing_gate_ids
+);
+if !release {
+    for id in [
+        "release-preflight",
+        "agenterm-net-research",
+        "preflight-benchmark"
+    ] {
+        context.timing = qualification::timing_set_gate(
+            context.timing, id, "skipped", 0, 0, false
+        );
+    }
+}
+if skip_smoke {
+    for id in [
+        "startup-smoke", "wake-smoke", "cli-smoke", "server-smoke",
+        "native-ipc-smoke", "remote-ui-smoke",
+        "remote-ui-upgrade-smoke", "fleet-smoke", "script-smoke",
+        "theme-smoke", "working-context-smoke", "workbench-smoke",
+        "control-center-smoke"
+    ] {
+        context.timing = qualification::timing_set_gate(
+            context.timing, id, "skipped", 0, 0, false
+        );
+    }
+}
 let full_started = std::time::SystemTime::now().unix_millis;
 let gate = run_gate(
     context,
@@ -747,13 +924,22 @@ let rustfmt_gate = run_gate(
 context = rustfmt_gate.context;
 sequence = rustfmt_gate.sequence;
 
-let identity = freeze_identity(
-    bootstrap_worker,
-    manifest,
-    repo,
-    scratch,
-    sequence
-);
+let identity = ();
+try {
+    identity = freeze_identity(
+        bootstrap_worker,
+        manifest,
+        repo,
+        scratch,
+        sequence
+    );
+} catch (error) {
+    context.timing = qualification::timing_fail_stage(
+        context.timing,
+        "build-identity"
+    );
+    throw error;
+}
 let build_environment = identity.environment;
 sequence = identity.sequence;
 let clippy_gate = run_gate(
@@ -853,13 +1039,21 @@ let build_gate = run_gate(
 context = build_gate.context;
 sequence = build_gate.sequence;
 if !skip_smoke {
-    std::fs::copy(
-        std::path::join(
-            repo,
-            "target/release-fast/agenterm.exe"
-        ).display,
-        upgrade_fixture
-    );
+    try {
+        std::fs::copy(
+            std::path::join(
+                repo,
+                "target/release-fast/agenterm.exe"
+            ).display,
+            upgrade_fixture
+        );
+    } catch (error) {
+        context.timing = qualification::timing_fail_stage(
+            context.timing,
+            "upgrade-fixture"
+        );
+        throw error;
+    }
 }
 let worker =
     std::path::join(repo, "dist/agenterm-script.exe").display;
@@ -991,13 +1185,21 @@ for definition in ordinary_gates {
     sequence = completed.sequence;
 }
 
-sequence = assert_declarations(
-    context,
-    worker,
-    repo,
-    scratch,
-    sequence
-);
+try {
+    sequence = assert_declarations(
+        context,
+        worker,
+        repo,
+        scratch,
+        sequence
+    );
+} catch (error) {
+    context.timing = qualification::timing_fail_stage(
+        context.timing,
+        "evidence-declarations"
+    );
+    throw error;
+}
 
 if !skip_smoke {
     let no_activate = #{"AGENTERM_NO_ACTIVATE":"1"};
@@ -1065,7 +1267,6 @@ let diagnostic_gate = run_gate(
 );
 context = diagnostic_gate.context;
 sequence = diagnostic_gate.sequence;
-
 if skip_smoke {
     print("\nQUALIFICATION RECEIPT NOT WRITTEN: smoke gates were skipped.");
 } else if !include_stress {
@@ -1073,10 +1274,22 @@ if skip_smoke {
         "\nQUALIFICATION RECEIPT NOT WRITTEN: explicit stress gate was not included."
     );
 } else {
-    let written =
-        qualification::write_receipt(context, repo, receipt_path);
-    print("\nQUALIFICATION RECEIPT " + written);
+    try {
+        let written =
+            qualification::write_receipt(context, repo, receipt_path);
+        print("\nQUALIFICATION RECEIPT " + written);
+    } catch (error) {
+        context.timing = qualification::timing_fail_stage(
+            context.timing,
+            "qualification-receipt"
+        );
+        throw error;
+    }
 }
+context.timing = qualification::timing_finish(
+    context.timing,
+    "passed"
+);
 print("\nSlowest completed gates:");
 let ordered = slowest(context.results);
 let count = if ordered.len < 8 { ordered.len } else { 8 };

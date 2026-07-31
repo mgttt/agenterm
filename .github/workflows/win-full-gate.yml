@@ -40,9 +40,9 @@ jobs:
           @echo off
           set "LOG=%RUNNER_TEMP%\agenterm-win-full-gate.log"
           if /I "%GATE_PROFILE%"=="release-stress" (
-            call check.cmd --release --include-stress >> "%LOG%" 2>&1
+            call check.cmd --release --include-stress --timing target/qualification/timing.json >> "%LOG%" 2>&1
           ) else (
-            call check.cmd >> "%LOG%" 2>&1
+            call check.cmd --timing target/qualification/timing.json >> "%LOG%" 2>&1
           )
           set "CHECK_EXIT=%ERRORLEVEL%"
           type "%LOG%"
@@ -61,3 +61,24 @@ jobs:
             ${{ runner.temp }}/agenterm-proxy-eye-*.png
             target/smoke/*.png
             target/qualification/receipt.json
+
+      - name: Publish quality timing summary
+        if: always()
+        continue-on-error: true
+        shell: cmd
+        run: |
+          @if not exist target\qualification\timing.json exit /b 0
+          @if exist dist\agenterm-script.exe (
+            dist\agenterm-script.exe task run timing-summary --manifest agenterm.tasks.json -- target\qualification\timing.json
+          ) else (
+            target\debug\agenterm-script.exe task run timing-summary --manifest agenterm.tasks.json -- target\qualification\timing.json
+          )
+
+      - name: Upload quality timing
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: win-full-gate-timing-${{ github.run_id }}-${{ inputs.profile }}
+          path: target/qualification/timing.json
+          if-no-files-found: warn
+          retention-days: 14

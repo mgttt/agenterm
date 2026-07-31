@@ -49,6 +49,28 @@ fn environment_or_empty(name) {
     }
 }
 
+fn package_version(repo) {
+    let cargo = std::fs::read_to_string(
+        std::path::join(repo, "Cargo.toml").display
+    );
+    let in_package = false;
+    for source_line in cargo.split("\n") {
+        let line = source_line;
+        line.trim();
+        if line.starts_with("[") {
+            in_package = line == "[package]";
+            continue;
+        }
+        if in_package && line.starts_with("version") {
+            let parts = line.split("\"");
+            if parts.len >= 2 {
+                return parts[1];
+            }
+        }
+    }
+    ""
+}
+
 require(args.len == 5 || args.len == 6, "package_client_arguments");
 let repo = std::path::absolute(args[0]).display;
 let version = args[1];
@@ -75,10 +97,22 @@ let host_os = if std::env::has("AGENTERM_HOST_OS") {
 } else {
     "windows"
 };
-let host_arch = environment_or_empty("AGENTERM_HOST_ARCH");
+let host_arch = if std::env::has("AGENTERM_HOST_ARCH") {
+    std::env::get("AGENTERM_HOST_ARCH")
+} else if environment_or_empty("RUNNER_ARCH") == "ARM64" {
+    "aarch64"
+} else if environment_or_empty("RUNNER_ARCH") == "X64" {
+    "x86_64"
+} else {
+    ""
+};
 require(
     !version.contains("/") && !version.contains("\\") && version != "",
     "package_client_version"
+);
+require(
+    version == package_version(repo),
+    "package_client_version_source_mismatch"
 );
 require(
     std::fs::exists(binary_directory),
@@ -299,11 +333,7 @@ try {
         } else {
             ""
         },
-        source_tag: if std::env::has("GITHUB_REF_NAME") {
-            std::env::get("GITHUB_REF_NAME")
-        } else {
-            ""
-        },
+        source_tag: "v" + version,
         artifact_manifest_sha256:
             rhai::crypto::sha256_file(artifact_manifest_path),
         cargo_lock_sha256: rhai::crypto::sha256_file(
