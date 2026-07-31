@@ -375,7 +375,41 @@ pub(crate) fn prune_instance(instance: &DiscoveredInstance) -> Result<()> {
         Err(error) => {
             Err(error).with_context(|| format!("failed to prune {}", instance.path.display()))
         }
+    }?;
+    if instance.record.schema_version == INSTANCE_SCHEMA_VERSION
+        && instance
+            .record
+            .resolved_endpoint()
+            .is_some_and(|endpoint| endpoint.legacy_address().is_some())
+        && let Some(directory) = instance.path.parent()
+    {
+        let alias = directory.join(format!("{}-v1.json", instance.record.pid));
+        let matches_alias = fs::read(&alias)
+            .ok()
+            .and_then(|content| serde_json::from_slice::<InstanceRecord>(&content).ok())
+            .is_some_and(|record| {
+                record.schema_version == LEGACY_INSTANCE_SCHEMA_VERSION
+                    && same_registered_authority(&instance.record, &record)
+            });
+        if matches_alias {
+            match fs::remove_file(&alias) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(error)
+                        .with_context(|| format!("failed to prune {}", alias.display()));
+                }
+            }
+        }
     }
+    if let Some(directory) = instance.path.parent() {
+        remove_intentional_shutdown_markers(
+            directory,
+            &instance.record.address,
+            instance.record.server_scope_id.as_ref(),
+        );
+    }
+    Ok(())
 }
 
 #[cfg(windows)]
@@ -584,6 +618,55 @@ mod tests {
         drop(registration);
         assert!(discover_instances_in(&directory).unwrap().is_empty());
         fs::remove_dir(&directory).unwrap();
+    }
+
+    #[test]
+    fn pruning_a_typed_tcp_registration_removes_its_matching_legacy_alias() {
+        let directory = env::temp_dir().join(format!(
+            "agenterm-instance-prune-alias-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let address = "127.0.0.1:49994";
+        let record = InstanceRecord {
+            schema_version: INSTANCE_SCHEMA_VERSION,
+            pid: std::process::id(),
+            address: address.to_owned(),
+            endpoint: Some(IpcEndpoint::from_legacy_address(address).unwrap()),
+            logical_instance: Some(LogicalInstance::Main),
+            server_scope_id: Some(ServerScopeId::current(&LogicalInstance::Main).unwrap()),
+            version: "test".to_owned(),
+            session: "fleet".to_owned(),
+            workspace_path: "workspace.json".to_owned(),
+            started_at_unix_ms: 1,
+            upgrade_identity: None,
+        };
+        let registration = register_instance_in(&directory, record).unwrap();
+        let records = discover_instances_in(&directory).unwrap();
+        assert_eq!(records.len(), 1);
+        assert!(
+            directory
+                .join(format!("{}-v1.json", std::process::id()))
+                .exists()
+        );
+
+        prune_instance(&records[0]).unwrap();
+
+        assert!(
+            !directory
+                .join(format!("{}.json", std::process::id()))
+                .exists()
+        );
+        assert!(
+            !directory
+                .join(format!("{}-v1.json", std::process::id()))
+                .exists()
+        );
+        drop(registration);
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
