@@ -889,7 +889,13 @@ fn macos_package_task_reads_both_platform_rows_and_writes_preview_zip() {
     let root = fixture_root("macos-package");
     let binaries = root.join("bin");
     let output_directory = root.join("dist");
+    let sbom = root.join("agenterm-sbom.spdx.json");
     fs::create_dir_all(&binaries).expect("create binary fixture");
+    fs::write(
+        &sbom,
+        br#"{"spdxVersion":"SPDX-2.3","SPDXID":"SPDXRef-DOCUMENT"}"#,
+    )
+    .expect("write SBOM fixture");
     for name in [
         "agenterm",
         "agenterm-cc",
@@ -903,6 +909,34 @@ fn macos_package_task_reads_both_platform_rows_and_writes_preview_zip() {
     }
 
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let release_workflow =
+        fs::read_to_string(repo.join(".github/workflows/release.yml")).expect("read workflow");
+    let sbom_step = release_workflow
+        .find("Generate deterministic macOS SPDX inventory")
+        .expect("macOS SBOM step");
+    assert!(
+        sbom_step
+            < release_workflow
+                .find("Package macOS ARM64 release")
+                .expect("ARM64 package step")
+            && sbom_step
+                < release_workflow
+                    .find("Package macOS x86_64 release")
+                    .expect("x86_64 package step"),
+        "each macOS package lane must generate its SPDX inventory before packaging"
+    );
+    let host_arch = if cfg!(target_arch = "aarch64") {
+        "aarch64"
+    } else {
+        "x86_64"
+    };
+    let host_os = if cfg!(target_os = "macos") {
+        "macos"
+    } else if cfg!(target_os = "linux") {
+        "linux"
+    } else {
+        "windows"
+    };
     for architecture in ["aarch64", "x86_64"] {
         let output = Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
             .current_dir(repo)
@@ -913,6 +947,9 @@ fn macos_package_task_reads_both_platform_rows_and_writes_preview_zip() {
             .arg(&binaries)
             .arg("--unsigned-preview")
             .env("AGENTERM_PACKAGE_DIST", &output_directory)
+            .env("AGENTERM_PACKAGE_SBOM", &sbom)
+            .env("AGENTERM_HOST_OS", host_os)
+            .env("AGENTERM_HOST_ARCH", host_arch)
             .output()
             .expect("run macOS package task");
         assert!(
@@ -938,6 +975,123 @@ fn macos_package_task_reads_both_platform_rows_and_writes_preview_zip() {
             archive.with_extension("zip.provenance.json").is_file(),
             "macOS {architecture} provenance is absent"
         );
+        let archive_bytes = fs::read(&archive).expect("read macOS archive");
+        let archive_hash = sha256(&archive_bytes);
+        let checksum =
+            fs::read_to_string(archive.with_extension("zip.sha256")).expect("read checksum");
+        assert_eq!(
+            checksum,
+            format!("{archive_hash}  agenterm-test-macos-{architecture}-unsigned-preview.zip\n")
+        );
+        let provenance: serde_json::Value = serde_json::from_slice(
+            &fs::read(archive.with_extension("zip.provenance.json")).expect("read provenance"),
+        )
+        .expect("parse provenance");
+        assert_eq!(provenance["os"], "macos");
+        assert_eq!(provenance["arch"], architecture);
+        assert_eq!(provenance["channel"], "macos-unsigned-preview");
+        assert_eq!(provenance["signed"], false);
+        assert_eq!(provenance["notarized"], false);
+        assert_eq!(provenance["sha256"], archive_hash);
+        assert_eq!(
+            provenance["sbom_sha256"],
+            sha256(&fs::read(&sbom).expect("read SBOM"))
+        );
+        assert_eq!(
+            provenance["execution_evidence"],
+            if host_os == "macos" && architecture == host_arch {
+                "native_execution_eligible"
+            } else {
+                "cross_build_existence_only"
+            }
+        );
+
+        let extracted = root.join(format!("extract-{architecture}"));
+        fs::create_dir_all(&extracted).expect("create extraction directory");
+        let extraction = Command::new("tar")
+            .args(["-xf"])
+            .arg(&archive)
+            .args(["-C"])
+            .arg(&extracted)
+            .output()
+            .expect("extract macOS archive");
+        assert!(
+            extraction.status.success(),
+            "extract macOS {architecture} archive: {extraction:?}"
+        );
+        let mut members = fs::read_dir(&extracted)
+            .expect("read extracted archive")
+            .map(|entry| {
+                entry
+                    .expect("archive member")
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect::<Vec<_>>();
+        members.sort();
+        let mut expected = vec![
+            "LICENSE-APACHE",
+            "LICENSE-MIT",
+            "MACOS_UNSIGNED_PREVIEW_README.md",
+            "MACOS_UNSIGNED_PREVIEW_README.zh-Hant.md",
+            "THIRD_PARTY_NOTICES.md",
+            "agenterm",
+            "agenterm-cc",
+            "agenterm-cli",
+            "agenterm-mcp",
+            "agenterm-mux",
+            "agenterm-sbom.spdx.json",
+            "agenterm-script",
+            "agenterm-server",
+            "artifacts.json",
+        ];
+        expected.sort();
+        assert_eq!(members, expected, "macOS archive member inventory");
+        assert!(
+            !members
+                .iter()
+                .any(|name| name.starts_with(".agenterm") && name.ends_with(".bin")),
+            "macOS native launchers must not gain Linux hidden-binary companions"
+        );
+        assert_eq!(
+            fs::read(extracted.join("agenterm-sbom.spdx.json")).expect("embedded SBOM"),
+            fs::read(&sbom).expect("source SBOM")
+        );
+        assert_eq!(
+            fs::read(extracted.join("MACOS_UNSIGNED_PREVIEW_README.md"))
+                .expect("English preview README"),
+            fs::read(repo.join("docs/macos-unsigned-preview.md")).expect("source English README")
+        );
+        assert_eq!(
+            fs::read(extracted.join("MACOS_UNSIGNED_PREVIEW_README.zh-Hant.md"))
+                .expect("Traditional Chinese preview README"),
+            fs::read(repo.join("docs/macos-unsigned-preview.zh-Hant.md"))
+                .expect("source Traditional Chinese README")
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            for executable in [
+                "agenterm",
+                "agenterm-cc",
+                "agenterm-server",
+                "agenterm-cli",
+                "agenterm-mux",
+                "agenterm-script",
+                "agenterm-mcp",
+            ] {
+                assert_ne!(
+                    fs::metadata(extracted.join(executable))
+                        .expect("executable metadata")
+                        .permissions()
+                        .mode()
+                        & 0o111,
+                    0,
+                    "macOS archive member {executable} is not executable"
+                );
+            }
+        }
     }
 
     fs::remove_dir_all(&root).expect("remove fixture");

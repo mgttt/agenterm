@@ -260,6 +260,12 @@ jobs:
           echo "Signed macOS stable publishing is disabled; this job will produce a visibly labeled unsigned preview."
           echo "Set ENABLE_SIGNED_MACOS_RELEASE=true only after all Developer ID and notarization secrets are configured."
 
+      - name: Generate deterministic macOS SPDX inventory
+        if: startsWith(matrix.platform_id, 'macos-')
+        env:
+          AGENTERM_BOOTSTRAP_TASK: supply-chain
+        run: ./scripts/bootstrap.sh . dist/agenterm-sbom.spdx.json
+
       - name: Build macOS ARM64 clients
         if: matrix.platform_id == 'macos-aarch64'
         run: |

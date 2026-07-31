@@ -270,6 +270,31 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] distributable builds use and clean the dedicated repo-local
   `target-release/` scratch directory without deleting the incremental
   development `target/` cache
+- v0.1.12 macOS pre-tag package evidence (2026-07-31)
+  - [x] the two-architecture unsigned-preview fixture now asserts the exact
+    14-member inventory, all seven executable permission bits, absence of
+    Linux-only hidden-binary companions, byte-identical English and
+    Traditional Chinese notices, archive SHA-256, provenance fields, embedded
+    SPDX bytes/hash, and native-versus-cross evidence classification
+  - [x] the macOS release workflow generates the deterministic SPDX inventory
+    before either architecture packages; `package-client-release` fails closed
+    when the macOS SBOM is missing and binds its hash into provenance
+  - [x] native macOS 26.5 arm64 builds all seven release executables in 71.93
+    seconds and executes the manifest probes in 0.62 seconds. The resulting
+    Mach-O arm64 preview archive has seven executable members, 14 total
+    members, SHA-256
+    `c67a66b62451dc695b2cb4e92cbf3e03d6c18aebc0e53d98d70fc5f14f5dd415`,
+    and an embedded 275-package SPDX inventory
+  - [~] the same host cross-builds seven Mach-O x86_64 executables in 63.87
+    seconds and passes existence-only probes in 0.25 seconds. Its archive
+    SHA-256 is
+    `ea3f309228d71b43d99e37fc42d99289e57b99f469eb4d84d44ea1a3994cfcb2`;
+    provenance explicitly says `cross_build_existence_only`, not native
+    execution
+  - [ ] these local unsigned archives are evidence fixtures, not release
+    candidates. Native x86_64 execution, Developer ID signing, notarization,
+    Gatekeeper download/install, candidate-receipt binding, and user-approved
+    publication remain open
 - Scripting public-interface evidence gate
   - Rhai black-box evidence
     - [x] the named `scripts/rhai/script-smoke.rhai` journey drives only

@@ -68,9 +68,14 @@ let unsigned_preview = mode == "--unsigned-preview";
 let signed = mode == "--signed";
 let host_os = if std::env::has("AGENTERM_HOST_OS") {
     std::env::get("AGENTERM_HOST_OS")
+} else if std::fs::exists("/System/Library/CoreServices") {
+    "macos"
+} else if std::fs::exists("/proc") {
+    "linux"
 } else {
     "windows"
 };
+let host_arch = environment_or_empty("AGENTERM_HOST_ARCH");
 require(
     !version.contains("/") && !version.contains("\\") && version != "",
     "package_client_version"
@@ -187,6 +192,21 @@ try {
         std::path::join(staging, "artifacts.json").display,
         "package_client_manifest_missing"
     );
+    let sbom_source = if std::env::has("AGENTERM_PACKAGE_SBOM") {
+        std::path::absolute(std::env::get("AGENTERM_PACKAGE_SBOM")).display
+    } else {
+        std::path::join(repo, "dist/agenterm-sbom.spdx.json").display
+    };
+    if os_name == "macos" {
+        copy_required(
+            sbom_source,
+            std::path::join(
+                staging,
+                "agenterm-sbom.spdx.json"
+            ).display,
+            "package_client_sbom_missing"
+        );
+    }
     if unsigned_preview {
         copy_required(
             std::path::join(repo, "docs/macos-unsigned-preview.md").display,
@@ -289,6 +309,16 @@ try {
         cargo_lock_sha256: rhai::crypto::sha256_file(
             std::path::join(repo, "Cargo.lock").display
         ),
+        sbom_sha256: if os_name == "macos" {
+            rhai::crypto::sha256_file(sbom_source)
+        } else {
+            ""
+        },
+        execution_evidence: if host_os == os_name && host_arch == arch {
+            "native_execution_eligible"
+        } else {
+            "cross_build_existence_only"
+        },
         build_log:
             environment_or_empty("GITHUB_SERVER_URL") + "/" +
             environment_or_empty("GITHUB_REPOSITORY") + "/actions/runs/" +
