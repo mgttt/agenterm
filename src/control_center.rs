@@ -123,6 +123,7 @@ struct RendererSnapshot {
     scale_factor: f64,
 }
 
+#[cfg(unix)]
 #[derive(Debug, Deserialize, Serialize)]
 struct ScreenshotRequest {
     schema_version: u32,
@@ -132,6 +133,7 @@ struct ScreenshotRequest {
     output: PathBuf,
 }
 
+#[cfg(unix)]
 #[derive(Debug, Deserialize, Serialize)]
 struct RendererCaptureResult {
     schema_version: u32,
