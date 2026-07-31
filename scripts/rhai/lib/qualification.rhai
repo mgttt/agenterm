@@ -213,6 +213,171 @@ fn add_result(context, gate_id, status, duration_ms, output) {
     context
 }
 
+fn timing_source(repo) {
+    let head = command_output(
+        "git",
+        ["rev-parse", "HEAD"],
+        repo,
+        "quality_timing_git_head"
+    ).to_lower();
+    require(head.len == 40, "quality_timing_git_head_invalid");
+    let status = command_output(
+        "git",
+        ["status", "--porcelain", "--untracked-files=normal"],
+        repo,
+        "quality_timing_git_status"
+    );
+    #{
+        commit: head,
+        dirty: status != "",
+        cargo_lock_sha256: sha256(
+            std::path::join(repo, "Cargo.lock").display
+        )
+    }
+}
+
+fn new_timing(
+    repo,
+    manifest_path,
+    output_path,
+    lane,
+    profile,
+    workload,
+    gate_ids
+) {
+    require(
+        ["quick", "ordinary", "candidate"].contains(lane),
+        "quality_timing_lane"
+    );
+    require(profile != "", "quality_timing_profile");
+    require(gate_ids.len > 0, "quality_timing_gates_empty");
+    let root = std::path::absolute(repo).display;
+    let manifest = std::path::absolute(manifest_path).display;
+    let ids = #{};
+    let gates = [];
+    for id in gate_ids {
+        require(
+            valid_id(id, false) && !ids.contains(id),
+            "quality_timing_gate_id:" + id
+        );
+        ids[id] = true;
+        gates.push(#{
+            id: id,
+            status: "not_run",
+            duration_ms: 0
+        });
+    }
+    let workload_identity = #{
+        lane: lane,
+        profile: profile,
+        parameters: workload,
+        gate_manifest_sha256: sha256(manifest)
+    };
+    #{
+        schema_version: 1,
+        kind: "agenterm-quality-timing",
+        output_path: std::path::absolute(output_path).display,
+        started_at_utc: std::time::SystemTime::now().rfc3339,
+        started_at_unix_ms:
+            std::time::SystemTime::now().unix_millis,
+        completed_at_utc: (),
+        status: "running",
+        total_wall_ms: 0,
+        lane: lane,
+        profile: profile,
+        source: timing_source(root),
+        gate_manifest: #{
+            path: "scripts/qualification-gates.json",
+            sha256: workload_identity.gate_manifest_sha256
+        },
+        workload: #{
+            identity: workload_identity,
+            fingerprint: rhai::hash::fnv1a64(
+                rhai::bytes::from_text(
+                    rhai::json::stringify(workload_identity)
+                )
+            )
+        },
+        first_failure: (),
+        gates: gates
+    }
+}
+
+fn timing_set_gate(timing, gate_id, status, duration_ms, exit_code, timed_out) {
+    require(
+        ["passed", "failed", "skipped", "not_run"].contains(status),
+        "quality_timing_gate_status:" + status
+    );
+    require(duration_ms >= 0, "quality_timing_gate_duration");
+    let found = false;
+    for index in 0..timing.gates.len {
+        if timing.gates[index].id == gate_id {
+            require(!found, "quality_timing_gate_duplicate:" + gate_id);
+            require(
+                timing.gates[index].status == "not_run",
+                "quality_timing_gate_transition:" + gate_id
+            );
+            timing.gates[index].status = status;
+            timing.gates[index].duration_ms = duration_ms;
+            found = true;
+        }
+    }
+    require(found, "quality_timing_gate_undeclared:" + gate_id);
+    if status == "failed" && timing.first_failure == () {
+        timing.first_failure = #{
+            kind: "gate",
+            gate_id: gate_id,
+            elapsed_ms:
+                std::time::SystemTime::now().unix_millis
+                    - timing.started_at_unix_ms,
+            exit_code: exit_code,
+            timed_out: timed_out
+        };
+    }
+    timing
+}
+
+fn timing_fail_stage(timing, stage_id) {
+    require(
+        valid_id(stage_id, false),
+        "quality_timing_failure_stage:" + stage_id
+    );
+    if timing.first_failure == () {
+        timing.first_failure = #{
+            kind: "stage",
+            stage_id: stage_id,
+            elapsed_ms:
+                std::time::SystemTime::now().unix_millis
+                    - timing.started_at_unix_ms
+        };
+    }
+    timing_finish(timing, "failed")
+}
+
+fn timing_finish(timing, status) {
+    require(
+        status == "passed" || status == "failed",
+        "quality_timing_run_status:" + status
+    );
+    timing.status = status;
+    timing.completed_at_utc = std::time::SystemTime::now().rfc3339;
+    timing.total_wall_ms =
+        std::time::SystemTime::now().unix_millis
+            - timing.started_at_unix_ms;
+    let output_path = timing.output_path;
+    let report = timing;
+    report.remove("output_path");
+    report.remove("started_at_unix_ms");
+    std::fs::create_dir_all(
+        std::path::parent(output_path).display
+    );
+    rhai::runtime::atomic_write(
+        output_path,
+        rhai::json::stringify_pretty(report) + "\n"
+    );
+    timing
+}
+
 fn assert_results(context) {
     for gate in context.manifest.required_gates {
         require(

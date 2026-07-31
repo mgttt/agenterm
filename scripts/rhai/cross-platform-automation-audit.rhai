@@ -185,7 +185,7 @@ for evidence in [
     );
 }
 let release_source = std::fs::read_to_string(
-    std::path::join(repo, ".github/workflows/release.yml").display
+    std::path::join(repo, ".github/workflows/candidate.yml").display
 );
 require(
     release_source.contains(

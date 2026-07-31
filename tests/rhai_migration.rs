@@ -70,7 +70,8 @@ fn run_prepare_target(repo_under_test: &Path, target: &Path) -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     let manifest = repo.join("agenterm.tasks.json");
-    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_agenterm-script"));
+    command
         .current_dir(repo)
         .args(["task", "run", "prepare-target-clean", "--manifest"])
         .arg(manifest)
@@ -663,6 +664,90 @@ fn run_preflight_benchmark(repo_under_test: &Path, output_path: &Path) -> Output
         .expect("run Rhai preflight-benchmark task")
 }
 
+fn run_quality_timing_fixture(
+    fixture_script: &Path,
+    passed_path: &Path,
+    failed_path: &Path,
+) -> Output {
+    let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+        .current_dir(repo)
+        .arg("run")
+        .arg(fixture_script)
+        .args(["--profile", "local", "--project-root"])
+        .arg(repo)
+        .args([
+            "--timeout-ms",
+            "10000",
+            "--max-operations",
+            "10000000",
+            "--",
+        ])
+        .arg(repo)
+        .arg(repo.join("scripts").join("qualification-gates.json"))
+        .arg(passed_path)
+        .arg(failed_path)
+        .env("QUALITY_TIMING_SECRET", "must-not-appear-in-timing")
+        .output()
+        .expect("run quality timing fixture")
+}
+
+fn run_timing_summary(report: &Path, summary: Option<&Path>) -> Output {
+    let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_agenterm-script"));
+    command
+        .current_dir(repo)
+        .arg("run")
+        .arg(repo.join("scripts/rhai/timing-summary.rhai"))
+        .args(["--profile", "local", "--project-root"])
+        .arg(repo)
+        .args([
+            "--timeout-ms",
+            "10000",
+            "--max-operations",
+            "10000000",
+            "--",
+        ])
+        .arg(report)
+        .env_remove("GITHUB_STEP_SUMMARY");
+    if let Some(path) = summary {
+        command.env("GITHUB_STEP_SUMMARY", path);
+    }
+    command.output().expect("run quality timing summary")
+}
+
+fn run_failing_check_timing(report: &Path, options: &[&str]) -> Output {
+    let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let failing_worker = PathBuf::from(env!("CARGO_BIN_EXE_agenterm-cli"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_agenterm-script"));
+    command
+        .current_dir(repo)
+        .arg("run")
+        .arg(repo.join("scripts/rhai/check.rhai"))
+        .args(["--profile", "local", "--project-root"])
+        .arg(repo)
+        .args([
+            "--timeout-ms",
+            "20000",
+            "--max-operations",
+            "10000000",
+            "--",
+        ])
+        .arg(repo);
+    command
+        .args(options)
+        .arg("--timing")
+        .arg(report)
+        .env("AGENTERM_BOOTSTRAP_WORKER", failing_worker)
+        .env_remove("AGENTERM_BOOTSTRAP_PLATFORM")
+        .env("QUALITY_TIMING_SECRET", "must-not-appear-in-timing")
+        .output()
+        .expect("run intentionally failing quick timing")
+}
+
 fn run_supply_chain(output_path: &Path) -> Output {
     let _guard = SCRIPT_TASK_LOCK.lock().expect("script task lock");
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -903,13 +988,14 @@ fn macos_package_task_reads_both_platform_rows_and_writes_preview_zip() {
     }
 
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let version = env!("CARGO_PKG_VERSION");
     for architecture in ["aarch64", "x86_64"] {
         let output = Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
             .current_dir(repo)
             .args(["task", "run", "package-client-release", "--manifest"])
             .arg(repo.join("agenterm.tasks.json"))
             .arg("--")
-            .args(["test", "macos", architecture])
+            .args([version, "macos", architecture])
             .arg(&binaries)
             .arg("--unsigned-preview")
             .env("AGENTERM_PACKAGE_DIST", &output_directory)
@@ -922,7 +1008,7 @@ fn macos_package_task_reads_both_platform_rows_and_writes_preview_zip() {
             String::from_utf8_lossy(&output.stderr)
         );
         let archive = output_directory.join(format!(
-            "agenterm-test-macos-{architecture}-unsigned-preview.zip"
+            "agenterm-{version}-macos-{architecture}-unsigned-preview.zip"
         ));
         assert!(
             fs::metadata(&archive)
@@ -962,6 +1048,7 @@ fn linux_package_task_wraps_each_gui_entrypoint_and_keeps_its_native_binary() {
     }
 
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let version = env!("CARGO_PKG_VERSION");
     let host_os = if cfg!(target_os = "linux") {
         "linux"
     } else if cfg!(target_os = "macos") {
@@ -974,7 +1061,7 @@ fn linux_package_task_wraps_each_gui_entrypoint_and_keeps_its_native_binary() {
         .args(["task", "run", "package-client-release", "--manifest"])
         .arg(repo.join("agenterm.tasks.json"))
         .arg("--")
-        .args(["test", "linux", "x86_64"])
+        .args([version, "linux", "x86_64"])
         .arg(&binaries)
         .env("AGENTERM_HOST_OS", host_os)
         .env("AGENTERM_PACKAGE_DIST", &output_directory)
@@ -986,7 +1073,7 @@ fn linux_package_task_wraps_each_gui_entrypoint_and_keeps_its_native_binary() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    let archive = output_directory.join("agenterm-test-linux-x86_64.tar.gz");
+    let archive = output_directory.join(format!("agenterm-{version}-linux-x86_64.tar.gz"));
     let listing = Command::new("tar")
         .args(["-tzf"])
         .arg(&archive)
@@ -2318,6 +2405,7 @@ fn preflight_task_is_fail_closed_and_writes_reports_for_real_git_fixtures() {
             "scripts/rhai/release.rhai",
             "scripts/artifacts.json",
             "scripts/qualification-gates.json",
+            ".github/workflows/candidate.yml",
             ".github/workflows/release.yml",
         ] {
             copy_fixture_file(source_repo, &fixture, relative);
@@ -2459,8 +2547,25 @@ fn release_task_validation_is_clean_non_mutating_and_fail_closed() {
     .expect("write release Cargo fixture");
     fs::write(fixture.join("README.md"), "fixture\n").expect("write release README fixture");
     fs::write(
-        fixture.join(".github").join("workflows").join("release.yml"),
-        "on:\n  push:\n    tags:\n      - 'v*'\n# check.cmd --release --include-stress\n# expected == \"v0.1.7\"\n",
+        fixture
+            .join(".github")
+            .join("workflows")
+            .join("candidate.yml"),
+        "name: Release Candidate\non:\n  workflow_dispatch:\n    inputs:\n      source_sha:\n\
+         # check.cmd --release --include-stress\n\
+         # expected == \"v0.1.7\"\n\
+         # release-candidate-${{ github.run_id }}\n",
+    )
+    .expect("write candidate workflow fixture");
+    fs::write(
+        fixture
+            .join(".github")
+            .join("workflows")
+            .join("release.yml"),
+        "name: Release\non:\n  workflow_dispatch:\n    inputs:\n      candidate_run_id:\n\
+         confirmation:\n\
+         environment: release\n\
+         contents: write\n",
     )
     .expect("write release workflow fixture");
     let initialized = Command::new("git")
@@ -2577,6 +2682,222 @@ fn preflight_benchmark_task_measures_clean_public_worker_runs() {
     );
 
     fs::remove_dir_all(&fixture).expect("remove benchmark fixture");
+}
+
+#[test]
+fn quality_timing_is_complete_on_success_and_failure_and_renders_markdown() {
+    let fixture = fixture_root("quality-timing");
+    fs::create_dir_all(&fixture).expect("create quality timing fixture");
+    let fixture_script = fixture.join("quality-timing-fixture.rhai");
+    fs::write(
+        &fixture_script,
+        r#"
+import "scripts/rhai/lib/qualification" as qualification;
+
+let repo = args[0];
+let manifest = args[1];
+let passed_path = args[2];
+let failed_path = args[3];
+let ids = ["static", "compile", "smoke"];
+
+let passed = qualification::new_timing(
+    repo,
+    manifest,
+    passed_path,
+    "ordinary",
+    "fixture",
+    #{smoke_included:true},
+    ids
+);
+passed = qualification::timing_set_gate(
+    passed, "static", "passed", 7, 0, false
+);
+passed = qualification::timing_set_gate(
+    passed, "compile", "skipped", 0, 0, false
+);
+passed = qualification::timing_set_gate(
+    passed, "smoke", "passed", 11, 0, false
+);
+qualification::timing_finish(passed, "passed");
+
+let failed = qualification::new_timing(
+    repo,
+    manifest,
+    failed_path,
+    "candidate",
+    "release-stress",
+    #{smoke_included:true,stress_included:true},
+    ids
+);
+failed = qualification::timing_set_gate(
+    failed, "static", "passed", 5, 0, false
+);
+failed = qualification::timing_set_gate(
+    failed, "compile", "failed", 13, 9, false
+);
+qualification::timing_finish(failed, "failed");
+"#,
+    )
+    .expect("write quality timing fixture");
+    let passed_path = fixture.join("passed.json");
+    let failed_path = fixture.join("failed.json");
+    let output = run_quality_timing_fixture(&fixture_script, &passed_path, &failed_path);
+    assert!(
+        output.status.success(),
+        "quality timing fixture failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let passed_bytes = fs::read(&passed_path).expect("read passed timing");
+    let passed: serde_json::Value =
+        serde_json::from_slice(&passed_bytes).expect("decode passed timing");
+    assert_eq!(passed["schema_version"], 1);
+    assert_eq!(passed["kind"], "agenterm-quality-timing");
+    assert_eq!(passed["status"], "passed");
+    assert_eq!(passed["lane"], "ordinary");
+    assert_eq!(passed["profile"], "fixture");
+    assert_eq!(passed["first_failure"], serde_json::Value::Null);
+    assert_eq!(passed["gates"][0]["status"], "passed");
+    assert_eq!(passed["gates"][1]["status"], "skipped");
+    assert_eq!(passed["gates"][2]["status"], "passed");
+    assert_eq!(passed["source"]["commit"].as_str().unwrap().len(), 40);
+    assert_eq!(
+        passed["source"]["cargo_lock_sha256"]
+            .as_str()
+            .unwrap()
+            .len(),
+        64
+    );
+    assert_eq!(
+        passed["gate_manifest"]["sha256"].as_str().unwrap().len(),
+        64
+    );
+    assert!(!String::from_utf8_lossy(&passed_bytes).contains("must-not-appear-in-timing"));
+
+    let failed_bytes = fs::read(&failed_path).expect("read failed timing");
+    let failed: serde_json::Value =
+        serde_json::from_slice(&failed_bytes).expect("decode failed timing");
+    assert_eq!(failed["status"], "failed");
+    assert_eq!(failed["gates"][0]["status"], "passed");
+    assert_eq!(failed["gates"][1]["status"], "failed");
+    assert_eq!(failed["gates"][2]["status"], "not_run");
+    assert_eq!(failed["first_failure"]["gate_id"], "compile");
+    assert_eq!(failed["first_failure"]["exit_code"], 9);
+    assert_eq!(failed["first_failure"]["timed_out"], false);
+    assert!(!String::from_utf8_lossy(&failed_bytes).contains("must-not-appear-in-timing"));
+
+    let stdout_summary = run_timing_summary(&passed_path, None);
+    assert!(
+        stdout_summary.status.success(),
+        "stdout timing summary failed: {}",
+        String::from_utf8_lossy(&stdout_summary.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&stdout_summary.stdout);
+    assert!(stdout.contains("## AgenTerm quality timing"));
+    assert!(stdout.contains("| `compile` | skipped | 0 |"));
+
+    let github_summary = fixture.join("github-summary.md");
+    fs::write(&github_summary, "# Existing summary\n\n").expect("seed GitHub summary");
+    let appended_summary = run_timing_summary(&failed_path, Some(&github_summary));
+    assert!(
+        appended_summary.status.success(),
+        "GitHub timing summary failed: {}",
+        String::from_utf8_lossy(&appended_summary.stderr)
+    );
+    assert!(
+        appended_summary.stdout.is_empty(),
+        "GitHub summary should append instead of writing stdout"
+    );
+    let markdown = fs::read_to_string(&github_summary).expect("read GitHub summary");
+    assert!(markdown.starts_with("# Existing summary\n\n"));
+    assert!(markdown.contains("Status: **failed**"));
+    assert!(markdown.contains("First failure: `compile`"));
+
+    let oversized_summary = fixture.join("oversized-github-summary.md");
+    fs::write(&oversized_summary, vec![b'x'; 1_048_577]).expect("seed oversized summary");
+    let rejected_oversized = run_timing_summary(&passed_path, Some(&oversized_summary));
+    assert!(!rejected_oversized.status.success());
+    assert!(
+        String::from_utf8_lossy(&rejected_oversized.stderr)
+            .contains("quality_timing_summary_previous_too_large")
+    );
+
+    let invalid_path = fixture.join("invalid.json");
+    let mut invalid = passed.clone();
+    invalid["schema_version"] = serde_json::json!(2);
+    fs::write(
+        &invalid_path,
+        serde_json::to_vec_pretty(&invalid).expect("encode invalid timing"),
+    )
+    .expect("write invalid timing");
+    let rejected_summary = run_timing_summary(&invalid_path, None);
+    assert!(!rejected_summary.status.success());
+    assert!(
+        String::from_utf8_lossy(&rejected_summary.stderr).contains("quality_timing_summary_schema")
+    );
+
+    let integrated_failure_path = fixture.join("quick-failure.json");
+    let integrated_failure = run_failing_check_timing(&integrated_failure_path, &["--quick"]);
+    assert!(
+        !integrated_failure.status.success(),
+        "intentionally invalid Quick worker must fail"
+    );
+    let integrated_bytes = fs::read(&integrated_failure_path).expect("read failed Quick timing");
+    let integrated: serde_json::Value =
+        serde_json::from_slice(&integrated_bytes).expect("decode failed Quick timing");
+    assert_eq!(integrated["status"], "failed");
+    assert_eq!(integrated["lane"], "quick");
+    assert_eq!(integrated["gates"][0]["id"], "repo-lint");
+    assert_eq!(integrated["gates"][0]["status"], "failed");
+    assert!(
+        integrated["gates"]
+            .as_array()
+            .expect("Quick gates")
+            .iter()
+            .skip(1)
+            .all(|gate| gate["status"] == "not_run")
+    );
+    assert_eq!(integrated["first_failure"]["gate_id"], "repo-lint");
+    assert!(!String::from_utf8_lossy(&integrated_bytes).contains("must-not-appear-in-timing"));
+
+    for (name, options, lane, first_failure) in [
+        (
+            "ordinary-failure.json",
+            Vec::<&str>::new(),
+            "ordinary",
+            "repo-lint",
+        ),
+        (
+            "candidate-failure.json",
+            vec!["--release", "--include-stress"],
+            "candidate",
+            "release-preflight",
+        ),
+    ] {
+        let path = fixture.join(name);
+        let output = run_failing_check_timing(&path, &options);
+        assert!(!output.status.success(), "{lane} fixture must fail");
+        let bytes = fs::read(&path).expect("read lane failure timing");
+        let report: serde_json::Value =
+            serde_json::from_slice(&bytes).expect("decode lane failure timing");
+        assert_eq!(report["lane"], lane);
+        assert_eq!(report["status"], "failed");
+        assert_eq!(report["first_failure"]["kind"], "gate");
+        assert_eq!(report["first_failure"]["gate_id"], first_failure);
+        assert_eq!(
+            report["gates"]
+                .as_array()
+                .expect("lane gates")
+                .iter()
+                .find(|gate| gate["id"] == first_failure)
+                .expect("failed gate")["status"],
+            "failed"
+        );
+        assert!(!String::from_utf8_lossy(&bytes).contains("must-not-appear-in-timing"));
+    }
+
+    fs::remove_dir_all(&fixture).expect("remove quality timing fixture");
 }
 
 #[test]
