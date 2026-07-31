@@ -23,6 +23,10 @@ pub(crate) mod script_files;
 #[path = "adapters/windows/process.rs"]
 pub(crate) mod process;
 
+#[cfg(windows)]
+#[path = "adapters/windows/script_window.rs"]
+pub(crate) mod script_window;
+
 #[cfg(target_os = "linux")]
 #[path = "adapters/linux/ipc.rs"]
 pub(crate) mod ipc;
@@ -43,6 +47,10 @@ pub(crate) mod script_files;
 #[path = "adapters/linux/process.rs"]
 pub(crate) mod process;
 
+#[cfg(target_os = "linux")]
+#[path = "adapters/linux/script_window.rs"]
+pub(crate) mod script_window;
+
 #[cfg(target_os = "macos")]
 #[path = "adapters/macos/ipc.rs"]
 pub(crate) mod ipc;
@@ -62,3 +70,7 @@ pub(crate) mod script_files;
 #[cfg(target_os = "macos")]
 #[path = "adapters/macos/process.rs"]
 pub(crate) mod process;
+
+#[cfg(target_os = "macos")]
+#[path = "adapters/macos/script_window.rs"]
+pub(crate) mod script_window;

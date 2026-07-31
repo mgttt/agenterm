@@ -5,3 +5,4 @@ pub(crate) mod process;
 pub(crate) mod script_clipboard;
 pub(crate) mod script_files;
 pub(crate) mod script_http;
+pub(crate) mod script_window;

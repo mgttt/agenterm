@@ -299,6 +299,11 @@ Revision-4 migration evidence (2026-07-31, partial):
   two-second Unicode clipboard, UTF-16, and transferable-allocation contract;
   Linux/macOS retain the existing typed Unsupported result rather than silently
   inheriting GUI clipboard timeout or paste-policy semantics.
+- [x] Script Runtime child-window facts, keyboard/pointer delivery, native
+  messages, bounds, resize, and dialog-control operations now call
+  `services::script_window → selected → adapters`. Win32 handles and messages
+  no longer appear in `script_process`; Linux/macOS retain the public typed
+  Unsupported receipts rather than a silent compatibility fallback.
 - [x] Script Runtime atomic promotion, append parent-directory durability, and
   reparse-point metadata now call `services::script_files → selected →
   adapters`. Windows retains verbatim-path `MoveFileExW` promotion; Unix

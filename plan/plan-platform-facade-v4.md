@@ -11,9 +11,10 @@ contract + selected adapters
 ├─ Script Runtime
 │  ├─ process inventory + termination       [adapter-owned]
 │  ├─ owned child tree                      [adapter-owned]
-│  ├─ window interaction                    [pending]
-│  ├─ clipboard / stream / atomic files     [pending]
-│  └─ worker supervision / audit            [pending]
+│  ├─ window interaction                    [adapter-owned]
+│  ├─ clipboard / atomic files               [adapter-owned]
+│  ├─ stream-handle probing                  [pending]
+│  └─ worker supervision / audit             [pending]
 ├─ Control Center / WebView shell            [partial]
 └─ frontend + PTY native lifecycle           [pending]
     └─ static source boundary gate           [depends on all above]

@@ -686,85 +686,15 @@ fn child_platform_facts(
     Ok(process_platform_facts(id))
 }
 
-#[cfg(windows)]
-fn find_top_level_window(id: u32) -> windows_sys::Win32::Foundation::HWND {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowThreadProcessId};
-
-    struct Search {
-        id: u32,
-        window: windows_sys::Win32::Foundation::HWND,
-    }
-
-    unsafe extern "system" fn visit(
-        window: windows_sys::Win32::Foundation::HWND,
-        parameter: windows_sys::Win32::Foundation::LPARAM,
-    ) -> windows_sys::core::BOOL {
-        let search = unsafe { &mut *(parameter as *mut Search) };
-        let mut owner = 0;
-        unsafe {
-            GetWindowThreadProcessId(window, &mut owner);
-        }
-        if owner == search.id {
-            search.window = window;
-            0
-        } else {
-            1
-        }
-    }
-
-    let mut search = Search {
-        id,
-        window: core::ptr::null_mut(),
-    };
-    unsafe {
-        EnumWindows(
-            Some(visit),
-            (&mut search as *mut Search).cast::<core::ffi::c_void>() as isize,
-        );
-    }
-    search.window
-}
-
-#[cfg(windows)]
 fn process_platform_facts(id: u32) -> ScriptProcessPlatformFacts {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GetForegroundWindow, GetWindowTextLengthW, GetWindowTextW,
-    };
-
-    let window = find_top_level_window(id);
-    let foreground_window = unsafe { GetForegroundWindow() };
-    let top_level_window_title = if window.is_null() {
-        String::new()
-    } else {
-        let length = unsafe { GetWindowTextLengthW(window) };
-        if length <= 0 {
-            String::new()
-        } else {
-            let mut buffer = vec![0_u16; length as usize + 1];
-            let copied =
-                unsafe { GetWindowTextW(window, buffer.as_mut_ptr(), buffer.len() as i32) };
-            String::from_utf16_lossy(&buffer[..copied.max(0) as usize])
-        }
-    };
+    let facts = crate::platform::services::script_window::facts(id);
     ScriptProcessPlatformFacts {
-        top_level_window_supported: true,
-        top_level_window_present: !window.is_null(),
-        top_level_window_id: window as isize as i64,
-        top_level_window_title,
-        foreground_window_id: foreground_window as isize as i64,
-        top_level_window_is_foreground: !window.is_null() && window == foreground_window,
-    }
-}
-
-#[cfg(not(windows))]
-fn process_platform_facts(_id: u32) -> ScriptProcessPlatformFacts {
-    ScriptProcessPlatformFacts {
-        top_level_window_supported: false,
-        top_level_window_present: false,
-        top_level_window_id: 0,
-        top_level_window_title: String::new(),
-        foreground_window_id: 0,
-        top_level_window_is_foreground: false,
+        top_level_window_supported: facts.supported,
+        top_level_window_present: facts.present,
+        top_level_window_id: facts.window_id,
+        top_level_window_title: facts.title,
+        foreground_window_id: facts.foreground_window_id,
+        top_level_window_is_foreground: facts.is_foreground,
     }
 }
 
@@ -843,29 +773,21 @@ fn child_process_id(child: &ScriptChild) -> Result<u32, Box<EvalAltResult>> {
         .id)
 }
 
-#[cfg(windows)]
 fn child_window_key(child: &mut ScriptChild, key: &str) -> Result<(), Box<EvalAltResult>> {
-    use windows_sys::Win32::UI::{
-        Input::KeyboardAndMouse::{
-            VK_BACK, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_F2, VK_HOME, VK_LEFT, VK_RETURN,
-            VK_RIGHT, VK_TAB, VK_UP,
-        },
-        WindowsAndMessaging::{PostMessageW, WM_KEYDOWN, WM_KEYUP},
-    };
-
-    let virtual_key = match key {
-        "Backspace" => VK_BACK,
-        "Delete" => VK_DELETE,
-        "Down" => VK_DOWN,
-        "End" => VK_END,
-        "Enter" => VK_RETURN,
-        "Escape" => VK_ESCAPE,
-        "F2" => VK_F2,
-        "Home" => VK_HOME,
-        "Left" => VK_LEFT,
-        "Right" => VK_RIGHT,
-        "Tab" => VK_TAB,
-        "Up" => VK_UP,
+    use crate::platform::contract::script_window::ScriptWindowKey;
+    let key = match key {
+        "Backspace" => ScriptWindowKey::Backspace,
+        "Delete" => ScriptWindowKey::Delete,
+        "Down" => ScriptWindowKey::Down,
+        "End" => ScriptWindowKey::End,
+        "Enter" => ScriptWindowKey::Enter,
+        "Escape" => ScriptWindowKey::Escape,
+        "F2" => ScriptWindowKey::F2,
+        "Home" => ScriptWindowKey::Home,
+        "Left" => ScriptWindowKey::Left,
+        "Right" => ScriptWindowKey::Right,
+        "Tab" => ScriptWindowKey::Tab,
+        "Up" => ScriptWindowKey::Up,
         _ => {
             return Err(process_window_error(
                 "process_window_key_invalid",
@@ -875,50 +797,19 @@ fn child_window_key(child: &mut ScriptChild, key: &str) -> Result<(), Box<EvalAl
             ));
         }
     };
-    let window = find_top_level_window(child_process_id(child)?);
-    if window.is_null() {
-        return Err(process_window_error(
-            "process_window_not_found",
-            "Child.window_key",
-            "child has no top-level window",
-            Some("not_found"),
-        ));
-    }
-    let pressed = unsafe { PostMessageW(window, WM_KEYDOWN, usize::from(virtual_key), 0) };
-    let released = unsafe { PostMessageW(window, WM_KEYUP, usize::from(virtual_key), 0) };
-    if pressed == 0 || released == 0 {
-        return Err(process_window_error(
-            "process_window_input",
-            "Child.window_key",
-            "native window key delivery failed",
-            Some("platform_error"),
-        ));
-    }
-    Ok(())
-}
-
-#[cfg(not(windows))]
-fn child_window_key(_child: &mut ScriptChild, _key: &str) -> Result<(), Box<EvalAltResult>> {
-    Err(process_window_error(
-        "process_window_input_unsupported",
+    window_result(
         "Child.window_key",
-        "native child-window input is not implemented on this platform",
-        Some("unsupported"),
-    ))
+        crate::platform::services::script_window::key(child_process_id(child)?, key),
+    )
 }
 
-#[cfg(windows)]
 fn child_window_pointer(
     child: &mut ScriptChild,
     action: &str,
     x: rhai::INT,
     y: rhai::INT,
 ) -> Result<(), Box<EvalAltResult>> {
-    use windows_sys::Win32::Foundation::POINT;
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        BM_CLICK, CWP_SKIPDISABLED, CWP_SKIPINVISIBLE, ChildWindowFromPointEx, SendMessageW,
-        WM_CAPTURECHANGED, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
-    };
+    use crate::platform::contract::script_window::ScriptWindowPointerAction;
 
     let x = i32::try_from(x).map_err(|_| {
         process_window_error(
@@ -936,38 +827,13 @@ fn child_window_pointer(
             Some("invalid_input"),
         )
     })?;
-    let window = find_top_level_window(child_process_id(child)?);
-    if window.is_null() {
-        return Err(process_window_error(
-            "process_window_not_found",
-            "Child.window_pointer",
-            "child has no top-level window",
-            Some("not_found"),
-        ));
-    }
-    let point = (((y & 0xffff) << 16) | (x & 0xffff)) as isize;
-    if action == "click" {
-        let child = unsafe {
-            ChildWindowFromPointEx(window, POINT { x, y }, CWP_SKIPINVISIBLE | CWP_SKIPDISABLED)
-        };
-        if !child.is_null() && child != window {
-            unsafe {
-                SendMessageW(child, BM_CLICK, 0, 0);
-            }
-        } else {
-            unsafe {
-                SendMessageW(window, WM_LBUTTONDOWN, 0, point);
-                SendMessageW(window, WM_LBUTTONUP, 0, point);
-            }
-        }
-        return Ok(());
-    }
-    let (message, button, parameter) = match action {
-        "down" => (WM_LBUTTONDOWN, 0, point),
-        "move" => (WM_MOUSEMOVE, 0, point),
-        "move-held" => (WM_MOUSEMOVE, 1, point),
-        "up" => (WM_LBUTTONUP, 0, point),
-        "capture-changed" => (WM_CAPTURECHANGED, 0, 0),
+    let action = match action {
+        "click" => ScriptWindowPointerAction::Click,
+        "down" => ScriptWindowPointerAction::Down,
+        "move" => ScriptWindowPointerAction::Move,
+        "move-held" => ScriptWindowPointerAction::MoveHeld,
+        "up" => ScriptWindowPointerAction::Up,
+        "capture-changed" => ScriptWindowPointerAction::CaptureChanged,
         _ => {
             return Err(process_window_error(
                 "process_window_pointer_action_invalid",
@@ -977,52 +843,19 @@ fn child_window_pointer(
             ));
         }
     };
-    unsafe {
-        SendMessageW(window, message, button, parameter);
-    }
-    Ok(())
-}
-
-#[cfg(not(windows))]
-fn child_window_pointer(
-    _child: &mut ScriptChild,
-    _action: &str,
-    _x: rhai::INT,
-    _y: rhai::INT,
-) -> Result<(), Box<EvalAltResult>> {
-    Err(process_window_error(
-        "process_window_input_unsupported",
+    window_result(
         "Child.window_pointer",
-        "native child-window input is not implemented on this platform",
-        Some("unsupported"),
-    ))
+        crate::platform::services::script_window::pointer(child_process_id(child)?, action, x, y),
+    )
 }
 
-#[cfg(windows)]
-fn resolve_child_window(
-    child: &ScriptChild,
-    operation: &'static str,
-) -> Result<windows_sys::Win32::Foundation::HWND, Box<EvalAltResult>> {
-    let window = find_top_level_window(child_process_id(child)?);
-    if window.is_null() {
-        return Err(process_window_error(
-            "process_window_not_found",
-            operation,
-            "child has no top-level window",
-            Some("not_found"),
-        ));
-    }
-    Ok(window)
-}
-
-#[cfg(windows)]
 fn child_window_message(
     child: &mut ScriptChild,
     message: rhai::INT,
     wparam: rhai::INT,
     lparam: rhai::INT,
 ) -> Result<rhai::INT, Box<EvalAltResult>> {
-    use windows_sys::Win32::UI::WindowsAndMessaging::SendMessageW;
+    use crate::platform::contract::script_window::ScriptWindowMessage;
 
     let message = u32::try_from(message).map_err(|_| {
         process_window_error(
@@ -1048,105 +881,41 @@ fn child_window_message(
             Some("invalid_input"),
         )
     })?;
-    let window = resolve_child_window(child, "Child.window_message")?;
-    Ok(unsafe { SendMessageW(window, message, wparam, lparam) } as rhai::INT)
-}
-
-#[cfg(not(windows))]
-fn child_window_message(
-    _child: &mut ScriptChild,
-    _message: rhai::INT,
-    _wparam: rhai::INT,
-    _lparam: rhai::INT,
-) -> Result<rhai::INT, Box<EvalAltResult>> {
-    Err(process_window_error(
-        "process_window_input_unsupported",
+    window_result(
         "Child.window_message",
-        "native child-window messaging is not implemented on this platform",
-        Some("unsupported"),
-    ))
+        crate::platform::services::script_window::message(
+            child_process_id(child)?,
+            ScriptWindowMessage {
+                message,
+                wparam,
+                lparam,
+            },
+        ),
+    )
+    .map(|value| value as rhai::INT)
 }
 
-#[cfg(windows)]
-fn native_rect(
-    child: &ScriptChild,
-    client: bool,
-    operation: &'static str,
-) -> Result<ScriptWindowRect, Box<EvalAltResult>> {
-    use windows_sys::Win32::{
-        Foundation::RECT,
-        UI::WindowsAndMessaging::{GetClientRect, GetWindowRect},
-    };
-
-    let window = resolve_child_window(child, operation)?;
-    let mut rect = RECT::default();
-    let succeeded = unsafe {
-        if client {
-            GetClientRect(window, &mut rect)
-        } else {
-            GetWindowRect(window, &mut rect)
-        }
-    };
-    if succeeded == 0 {
-        return Err(process_window_error(
-            "process_window_rect",
-            operation,
-            "native window bounds could not be read",
-            Some("platform_error"),
-        ));
-    }
-    Ok(ScriptWindowRect {
-        left: i64::from(rect.left),
-        top: i64::from(rect.top),
-        right: i64::from(rect.right),
-        bottom: i64::from(rect.bottom),
-    })
-}
-
-#[cfg(windows)]
 fn child_window_rect(child: &mut ScriptChild) -> Result<ScriptWindowRect, Box<EvalAltResult>> {
-    native_rect(child, false, "Child.window_rect")
-}
-
-#[cfg(not(windows))]
-fn child_window_rect(_child: &mut ScriptChild) -> Result<ScriptWindowRect, Box<EvalAltResult>> {
-    Err(process_window_error(
-        "process_window_input_unsupported",
+    window_rect_result(
         "Child.window_rect",
-        "native child-window bounds are not implemented on this platform",
-        Some("unsupported"),
-    ))
+        crate::platform::services::script_window::rect(child_process_id(child)?, false),
+    )
 }
 
-#[cfg(windows)]
 fn child_window_client_rect(
     child: &mut ScriptChild,
 ) -> Result<ScriptWindowRect, Box<EvalAltResult>> {
-    native_rect(child, true, "Child.window_client_rect")
-}
-
-#[cfg(not(windows))]
-fn child_window_client_rect(
-    _child: &mut ScriptChild,
-) -> Result<ScriptWindowRect, Box<EvalAltResult>> {
-    Err(process_window_error(
-        "process_window_input_unsupported",
+    window_rect_result(
         "Child.window_client_rect",
-        "native child-window client bounds are not implemented on this platform",
-        Some("unsupported"),
-    ))
+        crate::platform::services::script_window::rect(child_process_id(child)?, true),
+    )
 }
 
-#[cfg(windows)]
 fn child_window_resize(
     child: &mut ScriptChild,
     width: rhai::INT,
     height: rhai::INT,
 ) -> Result<(), Box<EvalAltResult>> {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, SetWindowPos,
-    };
-
     let width = i32::try_from(width)
         .ok()
         .filter(|value| *value > 0)
@@ -1169,41 +938,10 @@ fn child_window_resize(
                 Some("invalid_input"),
             )
         })?;
-    let window = resolve_child_window(child, "Child.window_resize")?;
-    let succeeded = unsafe {
-        SetWindowPos(
-            window,
-            std::ptr::null_mut(),
-            0,
-            0,
-            width,
-            height,
-            SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
-        )
-    };
-    if succeeded == 0 {
-        return Err(process_window_error(
-            "process_window_resize",
-            "Child.window_resize",
-            "native window resize failed",
-            Some("platform_error"),
-        ));
-    }
-    Ok(())
-}
-
-#[cfg(not(windows))]
-fn child_window_resize(
-    _child: &mut ScriptChild,
-    _width: rhai::INT,
-    _height: rhai::INT,
-) -> Result<(), Box<EvalAltResult>> {
-    Err(process_window_error(
-        "process_window_input_unsupported",
+    window_result(
         "Child.window_resize",
-        "native child-window resize is not implemented on this platform",
-        Some("unsupported"),
-    ))
+        crate::platform::services::script_window::resize(child_process_id(child)?, width, height),
+    )
 }
 
 fn child_window_control(
@@ -1222,143 +960,77 @@ fn child_window_control(
         child: child.clone(),
         id,
     };
-    #[cfg(windows)]
-    {
-        resolve_window_control(&control, "Child.window_control")?;
-    }
+    window_result(
+        "Child.window_control",
+        crate::platform::services::script_window::control_exists(child_process_id(child)?, id),
+    )?;
     Ok(control)
 }
 
-#[cfg(windows)]
-fn resolve_window_control(
-    control: &ScriptWindowControl,
-    operation: &'static str,
-) -> Result<windows_sys::Win32::Foundation::HWND, Box<EvalAltResult>> {
-    use windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem;
-
-    let window = resolve_child_window(&control.child, operation)?;
-    let item = unsafe { GetDlgItem(window, control.id) };
-    if item.is_null() {
-        return Err(process_window_error(
-            "process_window_control_not_found",
-            operation,
-            "native child control was not found",
-            Some("not_found"),
-        ));
-    }
-    Ok(item)
-}
-
-#[cfg(windows)]
 fn window_control_visible(control: &mut ScriptWindowControl) -> Result<bool, Box<EvalAltResult>> {
-    use windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible;
-
-    Ok(unsafe { IsWindowVisible(resolve_window_control(control, "WindowControl.visible")?) != 0 })
-}
-
-#[cfg(not(windows))]
-fn window_control_visible(_control: &mut ScriptWindowControl) -> Result<bool, Box<EvalAltResult>> {
-    Err(process_window_error(
-        "process_window_input_unsupported",
+    window_result(
         "WindowControl.visible",
-        "native child controls are not implemented on this platform",
-        Some("unsupported"),
-    ))
+        crate::platform::services::script_window::control_visible(
+            child_process_id(&control.child)?,
+            control.id,
+        ),
+    )
 }
 
-#[cfg(windows)]
 fn window_control_text(control: &mut ScriptWindowControl) -> Result<String, Box<EvalAltResult>> {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{GetWindowTextLengthW, GetWindowTextW};
-
-    let item = resolve_window_control(control, "WindowControl.text")?;
-    let length = unsafe { GetWindowTextLengthW(item) };
-    let mut buffer = vec![0_u16; usize::try_from(length).unwrap_or(0).saturating_add(1)];
-    let copied = unsafe {
-        GetWindowTextW(
-            item,
-            buffer.as_mut_ptr(),
-            i32::try_from(buffer.len()).unwrap_or(i32::MAX),
-        )
-    };
-    if copied < 0 {
-        return Err(process_window_error(
-            "process_window_control_text",
-            "WindowControl.text",
-            "native child control text could not be read",
-            Some("platform_error"),
-        ));
-    }
-    Ok(String::from_utf16_lossy(
-        &buffer[..usize::try_from(copied).unwrap_or(0)],
-    ))
-}
-
-#[cfg(not(windows))]
-fn window_control_text(_control: &mut ScriptWindowControl) -> Result<String, Box<EvalAltResult>> {
-    Err(process_window_error(
-        "process_window_input_unsupported",
+    window_result(
         "WindowControl.text",
-        "native child controls are not implemented on this platform",
-        Some("unsupported"),
-    ))
+        crate::platform::services::script_window::control_text(
+            child_process_id(&control.child)?,
+            control.id,
+        ),
+    )
 }
 
-#[cfg(windows)]
 fn window_control_set_text(
     control: &mut ScriptWindowControl,
     text: &str,
 ) -> Result<(), Box<EvalAltResult>> {
-    use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::UI::WindowsAndMessaging::{SendMessageW, WM_SETTEXT};
-
-    let item = resolve_window_control(control, "WindowControl.set_text")?;
-    let wide = std::ffi::OsStr::new(text)
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect::<Vec<_>>();
-    if unsafe { SendMessageW(item, WM_SETTEXT, 0, wide.as_ptr() as isize) } == 0 {
-        return Err(process_window_error(
-            "process_window_control_text",
-            "WindowControl.set_text",
-            "native child control text could not be written",
-            Some("platform_error"),
-        ));
-    }
-    Ok(())
-}
-
-#[cfg(not(windows))]
-fn window_control_set_text(
-    _control: &mut ScriptWindowControl,
-    _text: &str,
-) -> Result<(), Box<EvalAltResult>> {
-    Err(process_window_error(
-        "process_window_input_unsupported",
+    window_result(
         "WindowControl.set_text",
-        "native child controls are not implemented on this platform",
-        Some("unsupported"),
-    ))
+        crate::platform::services::script_window::control_set_text(
+            child_process_id(&control.child)?,
+            control.id,
+            text,
+        ),
+    )
 }
 
-#[cfg(windows)]
 fn window_control_click(control: &mut ScriptWindowControl) -> Result<(), Box<EvalAltResult>> {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{BM_CLICK, SendMessageW};
-
-    let item = resolve_window_control(control, "WindowControl.click")?;
-    unsafe {
-        SendMessageW(item, BM_CLICK, 0, 0);
-    }
-    Ok(())
+    window_result(
+        "WindowControl.click",
+        crate::platform::services::script_window::control_click(
+            child_process_id(&control.child)?,
+            control.id,
+        ),
+    )
 }
 
-#[cfg(not(windows))]
-fn window_control_click(_control: &mut ScriptWindowControl) -> Result<(), Box<EvalAltResult>> {
-    Err(process_window_error(
-        "process_window_input_unsupported",
-        "WindowControl.click",
-        "native child controls are not implemented on this platform",
-        Some("unsupported"),
-    ))
+fn window_result<T>(
+    operation: &'static str,
+    result: Result<T, crate::platform::contract::script_window::ScriptWindowError>,
+) -> Result<T, Box<EvalAltResult>> {
+    result.map_err(|error| process_window_error(error.code, operation, error.message, error.cause))
+}
+
+fn window_rect_result(
+    operation: &'static str,
+    result: Result<
+        crate::platform::contract::script_window::ScriptWindowRect,
+        crate::platform::contract::script_window::ScriptWindowError,
+    >,
+) -> Result<ScriptWindowRect, Box<EvalAltResult>> {
+    window_result(operation, result).map(|rect| ScriptWindowRect {
+        left: rect.left,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+    })
 }
 
 fn process_window_error(
