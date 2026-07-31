@@ -243,5 +243,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [x] v0.1.12 Windows no-activate smoke additionally proves main/dev/custom
       settings isolation and explicit override, live owner/epoch facts, visible
       stale test-fixture retention, receipt-based cleanup, and PID-reuse
-      protection; the retained Fleet journey proves legacy TCP cannot hijack a
-      native main authority
+      protection. A verified process-start mismatch may remove only the stale
+      registration generation; it never kills the PID-reusing live process.
+      Unknown ownership remains retained. The retained Fleet journey proves
+      legacy TCP cannot hijack a native main authority
