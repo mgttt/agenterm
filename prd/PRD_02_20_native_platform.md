@@ -290,6 +290,10 @@ Revision-4 migration evidence (2026-07-31, partial):
   implementation owner. The product module preserves its existing typed Rhai
   receipts; its former Win32 snapshot/terminate, Linux `/proc`/`kill`, macOS
   `libproc`, Job Object, and Unix process-group copies have been deleted.
+  `platform::process` is now a compatibility-only facade over
+  `services::process → selected → adapters/{windows,linux,macos}`; process
+  observation, inventory, termination, child-tree, and CLI autostart native
+  mechanics have no remaining root-service implementation copy.
 - [x] Script Runtime clipboard bindings now call
   `services::script_clipboard → selected → adapters`. Windows retains its
   two-second Unicode clipboard, UTF-16, and transferable-allocation contract;

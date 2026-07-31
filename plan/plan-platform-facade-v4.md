@@ -9,8 +9,8 @@
 contract + selected adapters
 ├─ IPC / endpoint / stream                  [partial]
 ├─ Script Runtime
-│  ├─ process inventory + termination       [complete slice]
-│  ├─ owned child tree                      [complete slice]
+│  ├─ process inventory + termination       [adapter-owned]
+│  ├─ owned child tree                      [adapter-owned]
 │  ├─ window interaction                    [pending]
 │  ├─ clipboard / stream / atomic files     [pending]
 │  └─ worker supervision / audit            [pending]
