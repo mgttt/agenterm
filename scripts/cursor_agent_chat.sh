@@ -63,16 +63,43 @@ cleanup() {
 trap cleanup EXIT
 
 mktemp_tracked() {
+  local destination="$1"
   local f
+  # Command substitutions do not inherit the parent shell's EXIT trap.
+  trap cleanup EXIT
   f=$(mktemp)
   TMP_FILES+=("$f")
-  printf '%s' "$f"
+  printf -v "$destination" '%s' "$f"
 }
 
 die() {
   local code="${2:-$EXIT_USAGE}"
   printf '%s\n' "$1" >&2
   exit "$code"
+}
+
+require_non_negative_integer() {
+  local name="$1"
+  local value="$2"
+  case "$value" in
+    ''|*[!0-9]*) die "$name must be a non-negative integer" ;;
+  esac
+}
+
+require_positive_integer() {
+  local name="$1"
+  local value="$2"
+  require_non_negative_integer "$name" "$value"
+  [ "$value" -gt 0 ] || die "$name must be greater than zero"
+}
+
+require_binary_flag() {
+  local name="$1"
+  local value="$2"
+  case "$value" in
+    0|1) ;;
+    *) die "$name must be 0 or 1" ;;
+  esac
 }
 
 usage() {
@@ -252,7 +279,7 @@ curl_api() {
   local url="$2"
   local data_file="${3:-}"
   require_api
-  CURL_BODY_FILE=$(mktemp_tracked)
+  mktemp_tracked CURL_BODY_FILE
   local code curl_rc=0
   local -a args
   args=(-sS -o "$CURL_BODY_FILE" -w '%{http_code}'
@@ -759,13 +786,14 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-# Validate numeric knobs early.
-case "$WAIT_TIMEOUT" in
-  ''|*[!0-9]*) die "--wait-timeout must be a non-negative integer" ;;
-esac
-case "$MAX_BYTES" in
-  ''|*[!0-9]*) die "CURSOR_AGENT_CHAT_MAX_BYTES must be a non-negative integer" ;;
-esac
+# Validate arithmetic knobs before they reach tests, comparisons, or modulo.
+require_binary_flag "CURSOR_AGENT_CHAT_WAIT" "$WAIT"
+require_binary_flag "CURSOR_AGENT_CHAT_PRECHECK" "$PRECHECK"
+require_non_negative_integer "--wait-timeout" "$WAIT_TIMEOUT"
+require_non_negative_integer "CURSOR_AGENT_CHAT_MAX_BYTES" "$MAX_BYTES"
+require_positive_integer "CURSOR_AGENT_CHAT_BACKOFF_INITIAL" "$BACKOFF_INITIAL"
+require_positive_integer "CURSOR_AGENT_CHAT_BACKOFF_MAX" "$BACKOFF_MAX"
+require_positive_integer "CURSOR_AGENT_CHAT_RE_RESOLVE_EVERY" "$RE_RESOLVE_EVERY"
 
 if [ -z "$REGISTRY" ]; then
   REGISTRY=$(default_registry || true)
@@ -798,7 +826,7 @@ fi
 FROM_ID=$(resolve_agent "$FROM_NAME" from)
 TO_ID=$(resolve_agent "$TO_NAME" to)
 
-PAYLOAD_FILE=$(mktemp_tracked)
+mktemp_tracked PAYLOAD_FILE
 json_payload_to_file "$PAYLOAD_FILE" "$ENVELOPED"
 
 if [ "$DRY_RUN" -eq 1 ]; then
