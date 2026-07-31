@@ -171,7 +171,7 @@ fn assert_api_contract(context, cli, script, runtime_dir, audit_path) {
         );
     }
     require(
-        operation_entries == 18 && operation_ids.keys().len == 18,
+        operation_entries == 22 && operation_ids.keys().len == 22,
         "script_api_operation_mapping_not_bijective"
     );
 
