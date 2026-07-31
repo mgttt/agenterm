@@ -521,12 +521,13 @@ jobs:
         uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
           path: |
+            ~/.cargo/bin/cargo-xwin
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-          key: cargo-home-ci-windows-aarch64-${{ runner.os }}-${{ runner.arch }}-rust1.97-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}
+          key: cargo-home-v2-ci-windows-aarch64-${{ runner.os }}-${{ runner.arch }}-rust1.97-cargo-xwin0.23.0-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}
           restore-keys: |
-            cargo-home-ci-windows-aarch64-${{ runner.os }}-${{ runner.arch }}-rust1.97-
+            cargo-home-v2-ci-windows-aarch64-${{ runner.os }}-${{ runner.arch }}-rust1.97-cargo-xwin0.23.0-
       - name: Restore Windows ARM64 build target
         id: restore-target-windows-aarch64-ci
         continue-on-error: true
@@ -535,19 +536,37 @@ jobs:
           path: |
             target/aarch64-pc-windows-msvc/
             ~/.cache/cargo-xwin/
-          key: cargo-target-v2-windows-aarch64-ci-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}-${{ github.sha }}
+          key: cargo-target-v3-windows-aarch64-ci-${{ runner.os }}-${{ runner.arch }}-rust1.97-cargo-xwin0.23.0-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}-${{ github.sha }}
           restore-keys: |
-            cargo-target-v2-windows-aarch64-ci-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}-
+            cargo-target-v3-windows-aarch64-ci-${{ runner.os }}-${{ runner.arch }}-rust1.97-cargo-xwin0.23.0-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}-
       - name: Install cross tooling
         id: install-cross-tooling
         run: |
           start_ms=$(date +%s%3N)
           rustup component add clippy
           rustup target add aarch64-pc-windows-msvc
-          cargo install cargo-xwin --locked
+          CARGO_XWIN_VERSION="0.23.0"
+          CARGO_XWIN_BIN="$HOME/.cargo/bin/cargo-xwin"
+          cargo_xwin_state="reused"
+          cargo_xwin_actual=""
+          if [ -x "$CARGO_XWIN_BIN" ]; then
+            cargo_xwin_actual="$("$CARGO_XWIN_BIN" --version 2>/dev/null || true)"
+          fi
+          if [ "$cargo_xwin_actual" != "cargo-xwin $CARGO_XWIN_VERSION" ]; then
+            cargo install cargo-xwin --locked \
+              --version "=$CARGO_XWIN_VERSION" --force
+            cargo_xwin_state="installed"
+          fi
+          cargo_xwin_actual="$("$CARGO_XWIN_BIN" --version)"
+          if [ "$cargo_xwin_actual" != "cargo-xwin $CARGO_XWIN_VERSION" ]; then
+            echo "cargo-xwin version mismatch: expected cargo-xwin $CARGO_XWIN_VERSION, got $cargo_xwin_actual" >&2
+            exit 1
+          fi
           end_ms=$(date +%s%3N)
           duration_ms=$((end_ms - start_ms))
           echo "duration_ms=$duration_ms" >> "$GITHUB_OUTPUT"
+          echo "cargo_xwin_state=$cargo_xwin_state" >> "$GITHUB_OUTPUT"
+          echo "cargo_xwin_version=$CARGO_XWIN_VERSION" >> "$GITHUB_OUTPUT"
       - name: Clippy manifest client set
         id: client-clippy
         env:
@@ -597,6 +616,8 @@ jobs:
           {
             echo "### CI phase timing (windows-aarch64)"
             echo "windows_aarch64_install_cross_tooling_ms: ${{ steps.install-cross-tooling.outputs.duration_ms || 'n/a' }}"
+            echo "windows_aarch64_cargo_xwin_state: ${{ steps.install-cross-tooling.outputs.cargo_xwin_state || 'n/a' }}"
+            echo "windows_aarch64_cargo_xwin_version: ${{ steps.install-cross-tooling.outputs.cargo_xwin_version || 'n/a' }}"
             echo "windows_aarch64_client_clippy_ms: ${{ steps.client-clippy.outputs.duration_ms || 'n/a' }}"
             echo "windows_aarch64_client_build_ms: ${{ steps.client-build.outputs.duration_ms || 'n/a' }}"
             echo "windows_aarch64_client_smoke_ms: ${{ steps.client-smoke.outputs.duration_ms || 'n/a' }}"
@@ -609,14 +630,15 @@ jobs:
           path: |
             target/aarch64-pc-windows-msvc/
             ~/.cache/cargo-xwin/
-          key: cargo-target-v2-windows-aarch64-ci-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}-${{ github.sha }}
+          key: cargo-target-v3-windows-aarch64-ci-${{ runner.os }}-${{ runner.arch }}-rust1.97-cargo-xwin0.23.0-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}-${{ github.sha }}
       - name: Save Windows ARM64 Cargo downloads
         if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
         continue-on-error: true
         uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
           path: |
+            ~/.cargo/bin/cargo-xwin
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-          key: cargo-home-ci-windows-aarch64-${{ runner.os }}-${{ runner.arch }}-rust1.97-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}
+          key: cargo-home-v2-ci-windows-aarch64-${{ runner.os }}-${{ runner.arch }}-rust1.97-cargo-xwin0.23.0-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}

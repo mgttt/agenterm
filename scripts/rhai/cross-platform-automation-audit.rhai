@@ -184,6 +184,22 @@ for evidence in [
         "cross_platform_ci_evidence:" + evidence
     );
 }
+for evidence in [
+    `~/.cargo/bin/cargo-xwin`,
+    `cargo-home-v2-ci-windows-aarch64-`,
+    `cargo-target-v3-windows-aarch64-ci-`,
+    `cargo-xwin0.23.0-`,
+    `CARGO_XWIN_VERSION="0.23.0"`,
+    `cargo install cargo-xwin --locked`,
+    `--version "=$CARGO_XWIN_VERSION" --force`,
+    `cargo_xwin_state="reused"`,
+    `windows_aarch64_cargo_xwin_state`
+] {
+    require(
+        ci_source.contains(evidence),
+        "cross_platform_ci_cargo_xwin_cache:" + evidence
+    );
+}
 let release_source = std::fs::read_to_string(
     std::path::join(repo, ".github/workflows/candidate.yml").display
 );
