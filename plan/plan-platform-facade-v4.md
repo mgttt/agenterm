@@ -93,8 +93,9 @@ this state does not yet satisfy the static source-boundary gate.
    and terminate-to-EOF ordering.
    POSIX mechanics are now physically adapter-owned; the Windows adapter owns
    `rmux-pty` and converts neutral size/process identities. `src/pty` contains
-   no target selection and projects only `services::pty`; typed PTY operation
-   failures remain open.
+   no target selection and projects only `services::pty`; lifecycle operations
+   now distinguish typed Unsupported from stable-code Failed results while
+   byte-stream I/O remains standard I/O.
    The first frontend leaf is complete: runtime-primary shell descriptors now
    select in adapters, so the Unix new-terminal dialog contains no macOS/Linux
    conditional or shell-path constant. Unix frontend clipboard selection also

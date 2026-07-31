@@ -5,7 +5,7 @@ use std::io;
 use std::path::PathBuf;
 use std::process::ExitStatus;
 
-use crate::platform::contract::pty::{ProcessId, TerminalSize};
+use crate::platform::contract::pty::{ProcessId, PtyError, PtyResult, TerminalSize};
 
 #[derive(Clone, Debug)]
 pub(crate) struct ChildCommand(rmux_pty::ChildCommand);
@@ -36,8 +36,12 @@ impl ChildCommand {
         Self(self.0.size(native_size(size)))
     }
 
-    pub(crate) fn spawn(self) -> io::Result<SpawnedPty> {
-        let (master, child) = self.0.spawn().map_err(pty_error)?.into_parts();
+    pub(crate) fn spawn(self) -> PtyResult<SpawnedPty> {
+        let (master, child) = self
+            .0
+            .spawn()
+            .map_err(|error| pty_error("spawn", "pty_spawn_failed", error))?
+            .into_parts();
         Ok(SpawnedPty {
             master: PtyMaster(master),
             child: PtyChild(child),
@@ -71,15 +75,17 @@ impl PtyIo<'_> {
 pub(crate) struct PtyMaster(rmux_pty::PtyMaster);
 
 impl PtyMaster {
-    pub(crate) fn resize(&self, size: TerminalSize) -> io::Result<()> {
-        self.0.resize(native_size(size)).map_err(pty_error)
+    pub(crate) fn resize(&self, size: TerminalSize) -> PtyResult<()> {
+        self.0
+            .resize(native_size(size))
+            .map_err(|error| pty_error("resize", "pty_resize_failed", error))
     }
 
-    pub(crate) fn try_clone_for_startup_reader(&mut self) -> io::Result<Self> {
+    pub(crate) fn try_clone_for_startup_reader(&mut self) -> PtyResult<Self> {
         self.0
             .try_clone_for_startup_reader()
             .map(Self)
-            .map_err(pty_error)
+            .map_err(|error| pty_error("clone reader", "pty_reader_clone_failed", error))
     }
 
     #[must_use]
@@ -102,20 +108,27 @@ impl PtyChild {
             .expect("rmux-pty returned a previously validated process id")
     }
 
-    pub(crate) fn wait(&mut self) -> io::Result<ExitStatus> {
-        self.0.wait().map_err(pty_error)
+    pub(crate) fn wait(&mut self) -> PtyResult<ExitStatus> {
+        self.0
+            .wait()
+            .map_err(|error| pty_error("wait", "pty_wait_failed", error))
     }
 
-    pub(crate) fn try_clone_for_wait(&self) -> io::Result<Self> {
-        self.0.try_clone_for_wait().map(Self).map_err(pty_error)
+    pub(crate) fn try_clone_for_wait(&self) -> PtyResult<Self> {
+        self.0
+            .try_clone_for_wait()
+            .map(Self)
+            .map_err(|error| pty_error("clone wait handle", "pty_wait_clone_failed", error))
     }
 
     pub(crate) fn close_pseudoconsole(&self) {
         self.0.close_pseudoconsole();
     }
 
-    pub(crate) fn terminate_forcefully(&self) -> io::Result<()> {
-        self.0.terminate_forcefully().map_err(pty_error)
+    pub(crate) fn terminate_forcefully(&self) -> PtyResult<()> {
+        self.0
+            .terminate_forcefully()
+            .map_err(|error| pty_error("terminate", "pty_terminate_failed", error))
     }
 }
 
@@ -126,8 +139,11 @@ const fn native_size(size: TerminalSize) -> rmux_pty::TerminalSize {
     }
 }
 
-fn pty_error(error: rmux_pty::PtyError) -> io::Error {
-    io::Error::other(error)
+fn pty_error(operation: &'static str, code: &'static str, error: rmux_pty::PtyError) -> PtyError {
+    match error {
+        rmux_pty::PtyError::Unsupported(reason) => PtyError::unsupported(operation, reason),
+        error => PtyError::failed(operation, code, error),
+    }
 }
 
 #[cfg(test)]

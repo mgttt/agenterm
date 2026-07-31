@@ -10,7 +10,9 @@ use std::time::Duration;
 
 use libc::{self, c_int, pid_t};
 
-use crate::platform::contract::pty::{InvalidProcessId, ProcessId, TerminalSize};
+use crate::platform::contract::pty::{
+    InvalidProcessId, ProcessId, PtyError, PtyResult, TerminalSize,
+};
 
 const PTY_WRITE_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -60,8 +62,8 @@ impl ChildCommand {
         self
     }
 
-    pub fn spawn(self) -> io::Result<SpawnedPty> {
-        spawn_child(self)
+    pub fn spawn(self) -> PtyResult<SpawnedPty> {
+        spawn_child(self).map_err(|error| PtyError::failed("spawn", "pty_spawn_failed", error))
     }
 }
 
@@ -105,16 +107,19 @@ impl PtyMaster {
         })
     }
 
-    pub fn resize(&self, size: TerminalSize) -> io::Result<()> {
+    pub fn resize(&self, size: TerminalSize) -> PtyResult<()> {
         apply_winsize(self.io.fd.as_raw_fd(), size)
+            .map_err(|error| PtyError::failed("resize", "pty_resize_failed", error))
     }
 
-    pub fn try_clone(&self) -> io::Result<Self> {
-        let fd = dup_fd(self.io.fd.as_raw_fd())?;
+    pub fn try_clone(&self) -> PtyResult<Self> {
+        let fd = dup_fd(self.io.fd.as_raw_fd())
+            .map_err(|error| PtyError::failed("clone reader", "pty_reader_clone_failed", error))?;
         Self::from_fd(fd)
+            .map_err(|error| PtyError::failed("clone reader", "pty_reader_clone_failed", error))
     }
 
-    pub fn try_clone_for_startup_reader(&mut self) -> io::Result<Self> {
+    pub fn try_clone_for_startup_reader(&mut self) -> PtyResult<Self> {
         self.try_clone()
     }
 
@@ -140,7 +145,7 @@ impl PtyChild {
         self.pid
     }
 
-    pub fn wait(&mut self) -> io::Result<ExitStatus> {
+    pub fn wait(&mut self) -> PtyResult<ExitStatus> {
         let mut status: c_int = 0;
         loop {
             let result = unsafe { libc::waitpid(self.pid.as_u32() as pid_t, &mut status, 0) };
@@ -149,7 +154,7 @@ impl PtyChild {
                 if error.kind() == io::ErrorKind::Interrupted {
                     continue;
                 }
-                return Err(error);
+                return Err(PtyError::failed("wait", "pty_wait_failed", error));
             }
             if result == self.pid.as_u32() as pid_t {
                 return Ok(ExitStatus::from_raw(status));
@@ -157,16 +162,20 @@ impl PtyChild {
         }
     }
 
-    pub fn try_clone_for_wait(&self) -> io::Result<Self> {
+    pub fn try_clone_for_wait(&self) -> PtyResult<Self> {
         Ok(Self { pid: self.pid })
     }
 
     pub fn close_pseudoconsole(&self) {}
 
-    pub fn terminate_forcefully(&self) -> io::Result<()> {
+    pub fn terminate_forcefully(&self) -> PtyResult<()> {
         let result = unsafe { libc::kill(self.pid.as_u32() as pid_t, libc::SIGKILL) };
         if result == -1 {
-            return Err(io::Error::last_os_error());
+            return Err(PtyError::failed(
+                "terminate",
+                "pty_terminate_failed",
+                io::Error::last_os_error(),
+            ));
         }
         Ok(())
     }

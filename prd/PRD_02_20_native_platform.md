@@ -387,7 +387,7 @@ Revision-4 migration evidence (2026-07-31, partial):
   residual owner.
 - [~] The approved PTY boundary exposes normalized spawn, size, exit, and
   session/reader/wait operations only. POSIX `openpty`/fork/session/exec/poll
-  and Windows ConPTY/job mechanics will move below selected adapters while
+  and Windows ConPTY/job mechanics reside below selected adapters while
   retaining concurrent reader/wait and terminate-to-EOF ordering.
 - [x] POSIX PTY allocation, fork/session/exec, resize, polling, and child
   lifecycle code now physically resides in `adapters/linux/pty.rs`; macOS has
@@ -396,8 +396,10 @@ Revision-4 migration evidence (2026-07-31, partial):
   identity at its boundary. `src/pty` is now an OS-neutral compatibility
   projection over `services::pty → selected → adapter`; reader/wait concurrency,
   exit-triggered pseudoconsole close, and force-terminate ordering remain in
-  the existing runtime path. Typed PTY operation errors and the final static
-  boundary remain incomplete.
+  the existing runtime path. Spawn, resize, reader/wait handle cloning, wait,
+  and force-terminate now return the shared typed `Unsupported`/`Failed`
+  lifecycle contract with stable failure codes; byte reads/writes retain their
+  standard I/O semantics.
 - [~] native IPC identity, default endpoint/workspace derivation, listener /
   stream framing, named-pipe and Unix-socket mechanics, permissions, peer
   identity, and stale recovery now reside beneath `src/platform/`; the
