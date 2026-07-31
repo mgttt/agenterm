@@ -664,7 +664,7 @@ if release {
         "agenterm-net-research",
         "isolated agenterm-net research",
         [task(
-            worker,
+            bootstrap_worker,
             manifest,
             "agenterm-net-research",
             600000,
