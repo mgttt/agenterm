@@ -563,6 +563,7 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
         "script" => (
             "agenterm-cli script api [MODULE] [--status shipped|planned|all] [--tree|--json] | \
              check FILE|- [--project-root DIR] | eval EXPRESSION | \
+             check-many --manifest FILE [--project-root DIR] | \
              repl [--fail-fast] [--json] | run FILE|- \
              [--cwd DIR] [--project-root DIR] [-- ARGS...] | \
             task list|show|run [TASK] [--manifest FILE] [--json]",

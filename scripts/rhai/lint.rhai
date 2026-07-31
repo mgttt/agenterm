@@ -120,30 +120,38 @@ fn assert_rhai(worker, paths, repo) {
         std::fs::exists(worker) && std::fs::metadata(worker).is_file,
         "lint_worker_missing:" + worker
     );
-    let problems = [];
+    require(paths.len > 0, "lint_rhai_files_empty");
+    let files = [];
     for path in paths {
-        let command = std::process::command(worker);
-        command.args([
-            "check", path,
-            "--profile", "local",
-            "--project-root", repo,
-            "--timeout-ms", "10000",
-            "--max-operations", "1000000"
-        ]);
-        command.current_dir(repo);
-        command.timeout(std::time::Duration::from_secs(15));
-        command.capture_limit(262144);
-        let output = command.output();
-        if !output.success {
-            problems.push(
-                relative(repo, path) + ": " +
-                    output.stdout_text() + output.stderr_text()
-            );
-        }
+        files.push(relative(repo, path));
     }
+    let manifest_path = std::path::join(
+        rhai::runtime::temp_dir().display,
+        "check-many.json"
+    ).display;
+    rhai::runtime::atomic_write(
+        manifest_path,
+        rhai::json::stringify_pretty(#{
+            schema_version: 1,
+            kind: "agenterm-script-check-manifest",
+            files: files
+        }) + "\n"
+    );
+    let command = std::process::command(worker);
+    command.args([
+        "check-many", "--manifest", manifest_path,
+        "--profile", "local",
+        "--project-root", repo,
+        "--timeout-ms", "10000",
+        "--max-operations", "1000000"
+    ]);
+    command.current_dir(repo);
+    command.timeout(std::time::Duration::from_secs(60));
+    command.capture_limit(262144);
+    let output = command.output();
     require(
-        problems.len == 0,
-        "Rhai lint errors:\n" + joined_lines(problems)
+        output.success,
+        "Rhai lint errors:\n" + output.stdout_text() + output.stderr_text()
     );
 }
 

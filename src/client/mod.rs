@@ -277,6 +277,7 @@ fn script_help_text() -> &'static str {
          Usage:\n\
            agenterm-script api [MODULE] [--status STATE] [--tree|--json]\n\
            agenterm-script check [OPTIONS] FILE.rhai|-\n\
+           agenterm-script check-many --manifest FILE [OPTIONS]\n\
            agenterm-script eval [OPTIONS] EXPRESSION [--] [ARGS...]\n\
            agenterm-script repl [OPTIONS] [--] [ARGS...]\n\
            agenterm-script run [OPTIONS] FILE.rhai|- [--] [ARGS...]\n\
@@ -287,7 +288,8 @@ fn script_help_text() -> &'static str {
          REPL commands: :help :quit :reset :history :vars :functions :limits \
          :api [MODULE] :load FILE :json on|off\n\
          Options: --timeout-ms N --max-operations N --max-collection-items N \
-         --max-string-bytes N --max-output-bytes N --project-root DIR --json"
+         --max-string-bytes N --max-output-bytes N --project-root DIR \
+         --manifest FILE --json"
 }
 
 fn write_script_stdout(text: &str) -> std::result::Result<(), i32> {
@@ -1589,7 +1591,10 @@ fn run_script_command_hosted(_arguments: &[String]) -> i32 {
 
 #[cfg(windows)]
 fn run_script_command_hosted(arguments: &[String]) -> i32 {
-    if !arguments.get(1).is_some_and(|value| value == "repl") {
+    if !arguments
+        .get(1)
+        .is_some_and(|value| value == "repl" || value == "check-many")
+    {
         if arguments.get(1).is_some_and(|value| value == "task") {
             return run_script_task_command(arguments);
         }
