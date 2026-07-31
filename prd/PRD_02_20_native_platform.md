@@ -330,6 +330,11 @@ Revision-4 migration evidence (2026-07-31, partial):
   call `services::control_center → selected → adapters/{windows,linux,macos}`.
   The root facade retains only the typed strategy projection; shell rendering
   itself remains a separate incomplete extraction.
+- [x] Passive system-WebView runtime discovery now calls
+  `services::webview → selected → adapters/{windows,linux,macos}`. The root
+  facade and shared facts contain no target selection; WebView2, WebKitGTK,
+  and WKWebView filesystem probes remain passive and preserve their existing
+  Detected/Missing/Failed facts. AgenTerm continues to use its native renderer.
 
 - [~] `settings`, instance PID/start-identity checks, terminal default-shell
   selection, Control Center atomic-file/focus/capture routing, and passive

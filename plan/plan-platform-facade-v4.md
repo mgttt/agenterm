@@ -16,7 +16,8 @@ contract + selected adapters
 │  ├─ clipboard / atomic files               [adapter-owned]
 │  ├─ stream-handle probing                  [adapter-owned]
 │  └─ worker supervision / audit             [adapter-owned]
-├─ Control Center / WebView shell            [partial]
+├─ Control Center shell                       [partial]
+├─ passive WebView runtime probe              [adapter-owned]
 └─ frontend + PTY native lifecycle           [pending]
     └─ static source boundary gate           [depends on all above]
 ```
