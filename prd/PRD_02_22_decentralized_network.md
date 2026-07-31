@@ -165,9 +165,15 @@ raw/SHA-256 content checks, a 4 MiB temporary block-store bound, corruption
 rejection, typed peer-loss, bounded output/deadlines, cancellation, and
 orphan-free cleanup. The measured Windows release executable is 1,406,976
 bytes; cold/hot release builds were 88.271/25.766 seconds. Peak RSS/thread
-measurement, six-target runtime evidence, complete malformed-CID coverage,
-and a live stable-server/PTY isolation journey remain open, so this evidence
-does not promote the research executable into the stable artifact manifest.
+evidence is now reported per communicating worker: Windows uses process-memory
+counters plus Toolhelp, Linux uses `/proc/self/status`, and macOS uses
+`getrusage` plus `ps thcount`. RSS is the OS high-water mark; threads are
+observed at successful ping. The self-test also starts a third live listener
+and intentionally cancels and reaps it, so forced cleanup is receipt-owned
+rather than inferred from a guard being armed. Six-target runtime evidence,
+accepted load ceilings, complete malformed-CID coverage, and a live
+stable-server/PTY isolation journey remain open, so this evidence does not
+promote the research executable into the stable artifact manifest.
 
 ## Gates before stable service integration
 

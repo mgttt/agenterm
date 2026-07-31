@@ -29,6 +29,14 @@ fn public_self_test_uses_distinct_processes_and_verifies_blocks() {
     assert_eq!(process["handshake"], true);
     assert_eq!(process["bounded_ping"], true);
     assert_eq!(process["child_exit_clean"], true);
+    assert_eq!(process["orphan_cleanup_armed"], true);
+    assert_eq!(process["forced_cleanup_reaped"], true);
+    assert!(process["forced_cleanup_pid"].as_u64().unwrap() > 0);
+    let resources = &value["result"]["resources"];
+    assert_eq!(resources["measurement_complete"], true);
+    assert!(resources["peak_child_rss_bytes"].as_u64().unwrap() > 0);
+    assert!(resources["max_observed_child_threads"].as_u64().unwrap() > 0);
+    assert_eq!(resources["process_samples"].as_array().unwrap().len(), 2);
     assert_eq!(value["result"]["block"]["round_trip_verified"], true);
     assert_eq!(value["result"]["block"]["corruption_rejected"], true);
     assert_eq!(value["result"]["block"]["store_removed"], true);

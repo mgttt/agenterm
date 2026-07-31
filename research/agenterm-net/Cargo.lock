@@ -42,12 +42,14 @@ name = "agenterm-net"
 version = "0.0.1"
 dependencies = [
  "cid",
+ "libc",
  "libp2p",
  "multihash-codetable",
  "serde",
  "serde_json",
  "sha2 0.10.9",
  "tokio",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

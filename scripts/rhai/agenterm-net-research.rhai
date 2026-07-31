@@ -58,8 +58,18 @@ require(
 );
 require(
     receipt.result.process.child_exit_clean
+        && receipt.result.process.orphan_cleanup_armed
+        && receipt.result.process.forced_cleanup_reaped
+        && receipt.result.process.forced_cleanup_pid > 0
         && receipt.result.process.listener_pid != receipt.result.process.connector_pid,
     "agenterm_net_process_isolation"
+);
+require(
+    receipt.result.resources.measurement_complete
+        && receipt.result.resources.peak_child_rss_bytes > 0
+        && receipt.result.resources.max_observed_child_threads > 0
+        && receipt.result.resources.process_samples.len == 2,
+    "agenterm_net_resource_evidence"
 );
 require(
     receipt.result.block.round_trip_verified

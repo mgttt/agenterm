@@ -16,7 +16,8 @@ agenterm-net (research-only; designed 2026-07-31)
 ├─ process isolation
 │  ├─ self-test starts listener and connector as separate OS processes
 │  ├─ stdout JSON is the ready/result protocol
-│  └─ deadline failure kills and reaps owned children
+│  ├─ per-worker peak RSS and observed thread-count evidence
+│  └─ intentional live-listener cancellation kills and reaps the owned child
 └─ content addressing
    ├─ CID v1 / raw codec / SHA-256 multihash
    └─ temporary bounded put/get with read-time corruption rejection
@@ -36,7 +37,12 @@ cargo run -- self-test --json
 
 Every public result has a schema, request ID, state, deadline and SHA-256
 receipt. `self-test` also reports child PIDs, endpoint, peer identities, elapsed
-time, executable size, transport facts, block evidence, and cleanup state.
+time, executable size, transport facts, per-worker peak RSS/current thread
+samples, block evidence, and graceful plus forced-cleanup state. Linux samples
+`VmHWM` and `Threads` from `/proc/self/status`; macOS combines
+`getrusage(RUSAGE_SELF)` with `ps thcount`; Windows uses process-memory
+counters and a Toolhelp thread snapshot. RSS is an operating-system high-water
+mark, while thread count is a point-in-time observation at successful ping.
 
 ## Evidence
 
@@ -56,14 +62,17 @@ Measured on Windows x86_64 with Rust 1.97.0 on 2026-07-31:
   compile took 40.6 seconds after dependencies had been checked.
 - Cold release-profile build of this package: 88.271 seconds.
 - Stripped release executable: 1,406,976 bytes.
-- Release `self-test`: 54 milliseconds, two owned child processes, both reaped.
+- The original release `self-test`: 54 milliseconds and two graceful children.
+  The current contract additionally launches one live listener solely to prove
+  forced cancellation and reaping, and reports the measured duration.
 - The resolved lock inventory contains 352 packages across supported targets;
   the current Windows normal dependency graph has 229 unique package/version
   lines. This is a significant compile/inventory cost despite the small binary.
-- Runtime memory and thread maxima are not instrumented in this spike. JSON
-  reports process count, elapsed wall time, executable bytes and explicit data
-  bounds; a later maturity gate must add cross-platform peak RSS/thread
-  measurements before considering server integration.
+- Runtime JSON now reports each worker's OS peak-RSS high-water mark and
+  observed thread count plus maxima across the two communicating workers.
+  These are small-fixture measurements, not production budgets or load
+  qualification; stable integration still requires platform load evidence and
+  accepted ceilings.
 
 ## Dependency and licence note
 
