@@ -73,11 +73,14 @@ N2-M1
 └─ evidence: private two-node fixtures; budget/fault/crash/isolation evidence per platform
 ```
 
-- [ ] durable identities use an explicit local storage, backup, loss, rotation,
-  and migration contract; ephemeral identities remain available for fixtures.
-- [ ] a persistent block store verifies CIDs on every read, has explicit size,
-  pin and GC budgets, and quarantines/rejects corruption without reporting a
-  verified result.
+- [~] `research/agenterm-net` now proves explicit deadline-bounded
+  `node start/status/stop`, durable-or-ephemeral Ed25519 identity and
+  node-resource snapshots. Durable key backup, loss, rotation and migration
+  contracts remain open before this identity can be called stable.
+- [~] its experimental persistent block store verifies CIDs on every read and
+  has a 4 MiB per-block, 32 MiB/1024-block store budget with pin/unpin/GC,
+  stored-versus-verified accounting and corruption rejection. Cross-platform
+  load, interrupted-mutation and repair evidence remain open.
 - [ ] Kademlia DHT, GossipSub and relay have individual capability IDs,
   listener/peer/message/bandwidth/task budgets, bounded I/O, receipts and
   Unsupported results. Public bootstrap, NAT traversal and relay serving are
