@@ -156,6 +156,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [~] six-target CI retains every manifest artifact and native Linux/macOS
       cells now run the public Rhai IPC journey against isolated settings,
       workspace, registration directory, `main` and `dev` Unix authorities.
+      Linux/macOS manifests include the standalone `agenterm-server` authority
+      consumed by that journey and by transport-neutral clients; it is a
+      product artifact rather than a CI-only server substitute.
       The journey proves `0700` runtime-directory and `0600` socket modes,
       typed `server-list` rows, selector separation, bounded duplicate-authority
       rejection, legacy TCP migration, graceful cleanup, and no residual owned

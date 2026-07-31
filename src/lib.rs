@@ -82,7 +82,7 @@ mod platform;
 mod script_audit;
 mod worker_supervisor;
 
-#[cfg(windows)]
+#[cfg(any(windows, unix))]
 mod server_app;
 #[cfg(any(windows, unix))]
 mod terminal_runtime;
@@ -96,7 +96,7 @@ pub use mcp_catalog::run_mcp_entry_with_args;
 #[cfg(windows)]
 pub use win_app::run_gui_entry;
 
-#[cfg(windows)]
+#[cfg(any(windows, unix))]
 pub use server_app::run_server_entry;
 
 #[cfg(unix)]
