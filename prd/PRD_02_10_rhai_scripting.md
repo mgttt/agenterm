@@ -224,7 +224,11 @@ and it is not positioned as a restricted security plugin.
   executable plus argv, cwd, env, stdin, bounded stdout/stderr, timeout,
   explicit kill and typed exit state; it never substitutes an implicit shell
   command string or exposes Rust ownership/trait/OS-handle internals. Children
-  are invocation-owned and inherit supervisor process-tree cleanup;
+  are invocation-owned and inherit supervisor process-tree cleanup. v0.1.12
+  also gives each `Child` its own Windows kill-on-close Job Object or Unix
+  process group: `Child.kill_tree()` and deadline/Drop cleanup terminate only
+  that owned tree, are idempotent after disarm, and preserve unrelated
+  processes;
   `std::process::id()` exposes the current supervised worker PID for
   owned-resource naming and live-owner protocols without treating it as stable
   invocation identity.
@@ -316,6 +320,11 @@ and it is not positioned as a restricted security plugin.
   - [x] `temp_dir` exposes only the current invocation-owned directory;
     `atomic_write` and `atomic_write_bytes` publish a complete same-volume
     replacement without exposing supervisor or OS handles.
+  - [x] `append_sync` and `append_sync_bytes` append one bounded record without
+    truncation, `sync_all` it, and sync a newly-created parent directory. They
+    provide the durable JSONL journal primitive used by the isolated system-
+    WebView measurement migration; write/open/sync phases remain typed runtime
+    failures rather than an Agent permission boundary.
 - [x] filesystem and temporary-resource helpers have explicit ownership and
   cleanup behavior. Canonicalization, reparse points, atomic replacement, and
   failure paths cannot silently target a different path than the result

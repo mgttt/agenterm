@@ -183,6 +183,8 @@ pub fn register_local(engine: &mut Engine) {
     runtime.set_native_fn("temp_dir", runtime_temp_dir);
     runtime.set_native_fn("atomic_write", runtime_atomic_write);
     runtime.set_native_fn("atomic_write_bytes", runtime_atomic_write_bytes);
+    runtime.set_native_fn("append_sync", runtime_append_sync);
+    runtime.set_native_fn("append_sync_bytes", runtime_append_sync_bytes);
 
     let mut rhai_module = Module::new();
     rhai_module.set_sub_module("json", json);
@@ -353,6 +355,50 @@ fn runtime_atomic_write(path: &str, value: &str) -> Result<(), Box<EvalAltResult
 
 fn runtime_atomic_write_bytes(path: &str, value: ScriptBytes) -> Result<(), Box<EvalAltResult>> {
     atomic_write(path, &value.0)
+}
+
+fn runtime_append_sync(path: &str, value: &str) -> Result<(), Box<EvalAltResult>> {
+    append_sync(path, value.as_bytes())
+}
+
+fn runtime_append_sync_bytes(path: &str, value: ScriptBytes) -> Result<(), Box<EvalAltResult>> {
+    append_sync(path, &value.0)
+}
+
+fn append_sync(path: &str, value: &[u8]) -> Result<(), Box<EvalAltResult>> {
+    if value.len() > MAX_BYTES_VALUE_BYTES {
+        return Err(
+            format!("runtime_append_too_large: maximum is {MAX_BYTES_VALUE_BYTES} bytes").into(),
+        );
+    }
+
+    let destination = std::path::absolute(Path::new(path))
+        .map_err(|error| io_error("runtime_append_open", path, error))?;
+    let parent = destination
+        .parent()
+        .ok_or("runtime_append_invalid_target: parent directory required")?;
+    let (mut output, created) = match std::fs::OpenOptions::new().append(true).open(&destination) {
+        Ok(output) => (output, false),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => (
+            std::fs::OpenOptions::new()
+                .append(true)
+                .create(true)
+                .open(&destination)
+                .map_err(|error| io_error("runtime_append_open", path, error))?,
+            true,
+        ),
+        Err(error) => return Err(io_error("runtime_append_open", path, error)),
+    };
+    output
+        .write_all(value)
+        .map_err(|error| io_error("runtime_append_write", path, error))?;
+    output
+        .sync_all()
+        .map_err(|error| io_error("runtime_append_sync", path, error))?;
+    if created {
+        sync_parent(parent).map_err(|error| io_error("runtime_append_parent_sync", path, error))?;
+    }
+    Ok(())
 }
 
 fn atomic_write(path: &str, value: &[u8]) -> Result<(), Box<EvalAltResult>> {
@@ -985,6 +1031,102 @@ mod tests {
             "atomic promotion must not leave a sibling staging file"
         );
         std::fs::remove_file(destination).unwrap();
+        std::fs::remove_dir(root).unwrap();
+    }
+
+    #[test]
+    fn runtime_append_sync_preserves_existing_content_and_record_order() {
+        let root = std::env::temp_dir().join(format!(
+            "agenterm-script-append-order-{}-{}",
+            std::process::id(),
+            ATOMIC_WRITE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let destination = root.join("records.bin");
+        std::fs::write(&destination, b"existing:").unwrap();
+        let path = destination.to_string_lossy().replace('\\', "\\\\");
+        let source = format!(
+            r#"
+                rhai::runtime::append_sync("{path}", "text-界");
+                rhai::runtime::append_sync_bytes(
+                    "{path}",
+                    rhai::bytes::from_array([0, 255, 10])
+                );
+                rhai::runtime::append_sync("{path}", "tail");
+            "#
+        );
+        local_engine().run(&source).unwrap();
+
+        let mut expected = "existing:text-界".as_bytes().to_vec();
+        expected.extend_from_slice(&[0, 255, 10]);
+        expected.extend_from_slice(b"tail");
+        assert_eq!(std::fs::read(&destination).unwrap(), expected);
+        std::fs::remove_file(destination).unwrap();
+        std::fs::remove_dir(root).unwrap();
+    }
+
+    #[test]
+    fn runtime_append_sync_durably_creates_a_missing_file() {
+        let root = std::env::temp_dir().join(format!(
+            "agenterm-script-append-create-{}-{}",
+            std::process::id(),
+            ATOMIC_WRITE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let destination = root.join("created.log");
+        let path = destination.to_string_lossy().replace('\\', "\\\\");
+        {
+            let engine = local_engine();
+            engine
+                .run(&format!(
+                    r#"rhai::runtime::append_sync("{path}", "first");"#
+                ))
+                .unwrap();
+        }
+
+        assert_eq!(std::fs::read(&destination).unwrap(), b"first");
+        runtime_append_sync_bytes(&destination.to_string_lossy(), ScriptBytes(vec![0, 1, 2]))
+            .unwrap();
+        assert_eq!(std::fs::read(&destination).unwrap(), b"first\0\x01\x02");
+        std::fs::remove_file(destination).unwrap();
+        std::fs::remove_dir(root).unwrap();
+    }
+
+    #[test]
+    fn runtime_append_sync_bounds_records_and_reports_path_failures() {
+        let root = std::env::temp_dir().join(format!(
+            "agenterm-script-append-errors-{}-{}",
+            std::process::id(),
+            ATOMIC_WRITE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        let destination = root.join("missing-parent").join("record.log");
+        let path = destination.to_string_lossy().replace('\\', "\\\\");
+        let error = local_engine()
+            .run(&format!(r#"rhai::runtime::append_sync("{path}", "x");"#))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("runtime_append_open"));
+        assert!(error.contains("record.log"));
+
+        let oversized = vec![0; MAX_BYTES_VALUE_BYTES + 1];
+        let error = runtime_append_sync_bytes(&path, ScriptBytes(oversized))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("runtime_append_too_large"));
+        assert!(!root.exists(), "a rejected record must not create its path");
+
+        let oversized_text = "界".repeat(MAX_BYTES_VALUE_BYTES / 3 + 1);
+        let error = runtime_append_sync(&path, &oversized_text)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("runtime_append_too_large"));
+        assert!(!root.exists(), "a rejected record must not create its path");
+
+        std::fs::create_dir(&root).unwrap();
+        let error = runtime_append_sync(&root.to_string_lossy(), "x")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("runtime_append_open"));
         std::fs::remove_dir(root).unwrap();
     }
 

@@ -26,6 +26,150 @@ const DEFAULT_CAPTURE_BYTES: usize = 64 * 1024;
 const MAX_CAPTURE_BYTES: usize = 256 * 1024;
 const MAX_STDIN_BYTES: usize = 4 * 1024 * 1024;
 
+#[cfg(windows)]
+mod child_process_tree {
+    use std::{
+        ffi::c_void,
+        mem,
+        os::windows::io::AsRawHandle,
+        process::{Child, Command},
+        ptr,
+    };
+
+    use windows_sys::Win32::{
+        Foundation::{CloseHandle, HANDLE},
+        System::JobObjects::{
+            AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+            JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
+            SetInformationJobObject, TerminateJobObject,
+        },
+    };
+
+    pub(super) struct ProcessTreeGuard {
+        handle: HANDLE,
+        active: bool,
+    }
+
+    // A job handle is an owned kernel handle and may move with ChildState.
+    unsafe impl Send for ProcessTreeGuard {}
+
+    pub(super) fn configure_command(_command: &mut Command) -> Result<(), String> {
+        Ok(())
+    }
+
+    impl ProcessTreeGuard {
+        pub(super) fn attach(child: &Child) -> Result<Self, String> {
+            let handle = unsafe { CreateJobObjectW(ptr::null(), ptr::null()) };
+            if handle.is_null() {
+                return Err(format!(
+                    "CreateJobObjectW failed: {}",
+                    std::io::Error::last_os_error()
+                ));
+            }
+            let guard = Self {
+                handle,
+                active: true,
+            };
+            let mut information: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { mem::zeroed() };
+            information.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            let configured = unsafe {
+                SetInformationJobObject(
+                    guard.handle,
+                    JobObjectExtendedLimitInformation,
+                    (&information as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast::<c_void>(),
+                    mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+                )
+            };
+            if configured == 0 {
+                return Err(format!(
+                    "SetInformationJobObject failed: {}",
+                    std::io::Error::last_os_error()
+                ));
+            }
+            if unsafe { AssignProcessToJobObject(guard.handle, child.as_raw_handle() as HANDLE) }
+                == 0
+            {
+                return Err(format!(
+                    "AssignProcessToJobObject failed: {}",
+                    std::io::Error::last_os_error()
+                ));
+            }
+            Ok(guard)
+        }
+
+        pub(super) fn terminate(&mut self) -> Result<(), String> {
+            if !self.active {
+                return Ok(());
+            }
+            if unsafe { TerminateJobObject(self.handle, 1) } == 0 {
+                return Err(format!(
+                    "TerminateJobObject failed: {}",
+                    std::io::Error::last_os_error()
+                ));
+            }
+            self.active = false;
+            Ok(())
+        }
+    }
+
+    impl Drop for ProcessTreeGuard {
+        fn drop(&mut self) {
+            unsafe { CloseHandle(self.handle) };
+        }
+    }
+}
+
+#[cfg(unix)]
+mod child_process_tree {
+    use std::{os::unix::process::CommandExt, process::Command};
+
+    pub(super) struct ProcessTreeGuard {
+        process_group: libc::pid_t,
+        active: bool,
+    }
+
+    pub(super) fn configure_command(command: &mut Command) -> Result<(), String> {
+        unsafe {
+            command.pre_exec(|| {
+                if libc::setpgid(0, 0) == 0 {
+                    Ok(())
+                } else {
+                    Err(std::io::Error::last_os_error())
+                }
+            });
+        }
+        Ok(())
+    }
+
+    impl ProcessTreeGuard {
+        pub(super) fn attach(child: &std::process::Child) -> Result<Self, String> {
+            let process_group = libc::pid_t::try_from(child.id())
+                .map_err(|_| "child process ID exceeds pid_t".to_owned())?;
+            Ok(Self {
+                process_group,
+                active: true,
+            })
+        }
+
+        pub(super) fn terminate(&mut self) -> Result<(), String> {
+            if !self.active {
+                return Ok(());
+            }
+            if unsafe { libc::killpg(self.process_group, libc::SIGKILL) } == 0 {
+                self.active = false;
+                return Ok(());
+            }
+            let error = std::io::Error::last_os_error();
+            if error.raw_os_error() == Some(libc::ESRCH) {
+                self.active = false;
+                Ok(())
+            } else {
+                Err(format!("killpg failed: {error}"))
+            }
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct ScriptDuration(pub(crate) Duration);
 
@@ -86,6 +230,7 @@ impl std::fmt::Debug for ScriptChild {
 struct ChildState {
     id: u32,
     child: Option<Child>,
+    process_tree: child_process_tree::ProcessTreeGuard,
     stdout: ScriptStream,
     stderr: ScriptStream,
     deadline: Instant,
@@ -94,6 +239,7 @@ struct ChildState {
 
 impl Drop for ChildState {
     fn drop(&mut self) {
+        let _ = self.process_tree.terminate();
         if let Some(child) = self.child.as_mut() {
             let _ = child.kill();
             let _ = child.wait();
@@ -155,6 +301,7 @@ fn register_types(engine: &mut Engine) {
     engine.register_get("stdout", child_stdout);
     engine.register_get("stderr", child_stderr);
     engine.register_fn("kill", child_kill);
+    engine.register_fn("kill_tree", child_kill_tree);
     engine.register_fn("window_key", child_window_key);
     engine.register_fn("window_pointer", child_window_pointer);
     engine.register_fn("window_message", child_window_message);
@@ -772,6 +919,8 @@ fn command_start(command: &mut ScriptCommand) -> Result<ScriptChild, Box<EvalAlt
 fn spawn_owned(command: &ScriptCommand) -> Result<ScriptChild, Box<EvalAltResult>> {
     let mut process = Command::new(&command.program);
     process.args(&command.arguments).stdin(Stdio::piped());
+    child_process_tree::configure_command(&mut process)
+        .map_err(|error| format!("process_tree_configure: {error}"))?;
     if let Some(path) = command.stdout_file.as_ref() {
         let file =
             std::fs::File::create(path).map_err(|error| format!("process_stdout_file: {error}"))?;
@@ -802,6 +951,14 @@ fn spawn_owned(command: &ScriptCommand) -> Result<ScriptChild, Box<EvalAltResult
     let mut child = process
         .spawn()
         .map_err(|error| format!("process_spawn: {error}"))?;
+    let process_tree = match child_process_tree::ProcessTreeGuard::attach(&child) {
+        Ok(process_tree) => process_tree,
+        Err(error) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!("process_tree_attach: {error}").into());
+        }
+    };
     let stdout = if command.stdout_file.is_some() {
         from_reader(std::io::empty(), "bytes", 0)
     } else {
@@ -829,6 +986,7 @@ fn spawn_owned(command: &ScriptCommand) -> Result<ScriptChild, Box<EvalAltResult
     Ok(ScriptChild(Arc::new(Mutex::new(ChildState {
         id,
         child: Some(child),
+        process_tree,
         stdout,
         stderr,
         deadline: Instant::now() + command.timeout,
@@ -975,6 +1133,30 @@ fn child_kill(child: &mut ScriptChild) -> Result<(), Box<EvalAltResult>> {
             .map_err(|error| format!("process_kill: {error}"))?;
     }
     Ok(())
+}
+
+fn child_kill_tree(child: &mut ScriptChild) -> Result<(), Box<EvalAltResult>> {
+    let mut state = child.0.lock().map_err(|_| "process_child_state_poisoned")?;
+    terminate_child_tree(&mut state).map_err(|error| {
+        runtime_error(
+            "host",
+            "process_kill_tree",
+            "std.process.Child.kill_tree",
+            &error,
+            false,
+            "child_process_tree",
+            false,
+            Some("os"),
+        )
+    })
+}
+
+fn terminate_child_tree(state: &mut ChildState) -> Result<(), String> {
+    let tree_result = state.process_tree.terminate();
+    if let Some(process) = state.child.as_mut() {
+        let _ = process.kill();
+    }
+    tree_result
 }
 
 fn child_process_id(child: &ScriptChild) -> Result<u32, Box<EvalAltResult>> {
@@ -1561,14 +1743,17 @@ fn wait_for_child(
             return Ok(output);
         }
         if Instant::now() >= deadline {
+            let tree_error = terminate_child_tree(&mut state).err();
             if let Some(process) = state.child.as_mut() {
-                let _ = process.kill();
                 let _ = process.wait();
             }
             cancel_stream(&state.stdout);
             cancel_stream(&state.stderr);
             state.child.take();
-            return Err("process_timeout: child exceeded its deadline".into());
+            let detail = tree_error
+                .map(|error| format!("; process_tree_kill: {error}"))
+                .unwrap_or_default();
+            return Err(format!("process_timeout: child exceeded its deadline{detail}").into());
         }
         drop(state);
         thread::sleep(Duration::from_millis(5));
@@ -1580,8 +1765,10 @@ fn finish_output(
     status: ExitStatus,
     deadline: Instant,
 ) -> Result<ScriptOutput, Box<EvalAltResult>> {
+    let tree_result = state.process_tree.terminate();
     let (stdout, stderr) = finish_capture(state, output_drain_deadline(deadline))?;
     state.child.take();
+    tree_result.map_err(|error| format!("process_tree_kill: {error}"))?;
     Ok(ScriptOutput {
         success: status.success(),
         exit_code: i64::from(status.code().unwrap_or(-1)),
@@ -1693,10 +1880,118 @@ fn bounded(value: rhai::INT, code: &str, maximum: u64) -> Result<u64, Box<EvalAl
 mod tests {
     use super::*;
 
+    struct KillOnDrop(Child);
+
+    impl Drop for KillOnDrop {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
     fn engine() -> Engine {
         let mut engine = Engine::new();
         crate::script_stdlib::register_local(&mut engine);
         engine
+    }
+
+    #[cfg(any(windows, unix))]
+    fn spawn_owned_tree_fixture() -> ScriptChild {
+        let mut command = process_command(if cfg!(windows) { "cmd.exe" } else { "/bin/sh" })
+            .expect("fixture command");
+        command.arguments = if cfg!(windows) {
+            vec![
+                "/d".to_owned(),
+                "/s".to_owned(),
+                "/c".to_owned(),
+                "ping.exe -n 30 127.0.0.1 >nul".to_owned(),
+            ]
+        } else {
+            vec!["-c".to_owned(), "sleep 30".to_owned()]
+        };
+        command.timeout = Duration::from_secs(30);
+        spawn_owned(&command).expect("spawn owned process tree")
+    }
+
+    #[cfg(any(windows, unix))]
+    fn spawn_unrelated_fixture() -> KillOnDrop {
+        let mut command = if cfg!(windows) {
+            let mut command = Command::new("cmd.exe");
+            command.args(["/d", "/s", "/c", "ping.exe -n 30 127.0.0.1 >nul"]);
+            command
+        } else {
+            let mut command = Command::new("/bin/sh");
+            command.args(["-c", "sleep 30"]);
+            command
+        };
+        command
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        KillOnDrop(command.spawn().expect("spawn unrelated process"))
+    }
+
+    #[cfg(any(windows, unix))]
+    fn descendant_ids(root_id: u32) -> Vec<u32> {
+        let processes = platform_process_list().expect("process inventory");
+        let parents = processes
+            .iter()
+            .map(|process| (process.id, process.parent_id))
+            .collect::<BTreeMap<_, _>>();
+        processes
+            .iter()
+            .filter_map(|process| {
+                let candidate = process.id;
+                let mut current = candidate;
+                for _ in 0..64 {
+                    let parent = *parents.get(&current)?;
+                    if parent == root_id {
+                        return Some(candidate);
+                    }
+                    if parent == 0 || parent == current {
+                        break;
+                    }
+                    current = parent;
+                }
+                None
+            })
+            .collect()
+    }
+
+    #[cfg(any(windows, unix))]
+    fn wait_for_descendants(root_id: u32) -> Vec<u32> {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            let descendants = descendant_ids(root_id);
+            if !descendants.is_empty() {
+                return descendants;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "owned process {root_id} did not create a descendant"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[cfg(any(windows, unix))]
+    fn wait_for_processes_to_disappear(process_ids: &[u32]) {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            let live = platform_process_list()
+                .expect("process inventory")
+                .into_iter()
+                .map(|process| process.id)
+                .collect::<std::collections::BTreeSet<_>>();
+            if process_ids.iter().all(|id| !live.contains(id)) {
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "owned descendants survived cleanup: {process_ids:?}"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
     }
 
     #[test]
@@ -2043,6 +2338,50 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("process_timeout")
+        );
+    }
+
+    #[test]
+    #[cfg(any(windows, unix))]
+    fn child_kill_tree_reaps_descendants_without_touching_unrelated_processes() {
+        let mut owned = spawn_owned_tree_fixture();
+        let owned_id = u32::try_from(child_id(&mut owned).unwrap()).unwrap();
+        let descendants = wait_for_descendants(owned_id);
+        let mut unrelated = spawn_unrelated_fixture();
+
+        let mut scope = rhai::Scope::new();
+        scope.push("owned", owned.clone());
+        engine()
+            .eval_with_scope::<()>(&mut scope, "owned.kill_tree()")
+            .expect("public Child.kill_tree API");
+        let output = child_wait_with_output_for(&mut owned, ScriptDuration(Duration::from_secs(2)))
+            .expect("reap killed root process");
+        assert!(!output.success);
+        wait_for_processes_to_disappear(&descendants);
+        assert!(
+            unrelated.0.try_wait().unwrap().is_none(),
+            "owned tree cleanup killed an unrelated process"
+        );
+    }
+
+    #[test]
+    #[cfg(any(windows, unix))]
+    fn child_wait_timeout_reaps_descendants_without_touching_unrelated_processes() {
+        let mut owned = spawn_owned_tree_fixture();
+        let owned_id = u32::try_from(child_id(&mut owned).unwrap()).unwrap();
+        let descendants = wait_for_descendants(owned_id);
+        let mut unrelated = spawn_unrelated_fixture();
+
+        let error =
+            child_wait_with_output_for(&mut owned, ScriptDuration(Duration::from_millis(10)))
+                .unwrap_err()
+                .to_string();
+        assert!(error.contains("process_timeout"));
+        assert!(owned.0.lock().unwrap().child.is_none());
+        wait_for_processes_to_disappear(&descendants);
+        assert!(
+            unrelated.0.try_wait().unwrap().is_none(),
+            "timeout cleanup killed an unrelated process"
         );
     }
 

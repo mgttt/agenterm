@@ -374,6 +374,52 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             ),
             None,
         ),
+        shipped_runtime_entry(
+            "rhai.runtime.append-sync",
+            "system/filesystem/durable-append-text",
+            "rhai::runtime::append_sync",
+            "rhai::runtime::append_sync(path, text)",
+            (
+                &[
+                    "filesystem_append",
+                    "record_sync",
+                    "parent_sync_on_create",
+                    "maximum_8_mib_record",
+                ],
+                &[
+                    "runtime_append_too_large",
+                    "runtime_append_invalid_target",
+                    "runtime_append_open",
+                    "runtime_append_write",
+                    "runtime_append_sync",
+                    "runtime_append_parent_sync",
+                ],
+            ),
+            None,
+        ),
+        shipped_runtime_entry(
+            "rhai.runtime.append-sync-bytes",
+            "system/filesystem/durable-append-bytes",
+            "rhai::runtime::append_sync_bytes",
+            "rhai::runtime::append_sync_bytes(path, bytes)",
+            (
+                &[
+                    "filesystem_append",
+                    "record_sync",
+                    "parent_sync_on_create",
+                    "maximum_8_mib_record",
+                ],
+                &[
+                    "runtime_append_too_large",
+                    "runtime_append_invalid_target",
+                    "runtime_append_open",
+                    "runtime_append_write",
+                    "runtime_append_sync",
+                    "runtime_append_parent_sync",
+                ],
+            ),
+            None,
+        ),
         shipped_local_entry(
             "std.fs.dir-entry-path",
             "system/filesystem/dir-entry/path",
@@ -817,10 +863,10 @@ pub fn entries() -> Vec<ScriptApiEntry> {
         shipped_local_entry(
             "std.process.child",
             "system/process/child",
-            "Child.id/state/platform_facts/stdout/stderr/kill/wait_with_output",
+            "Child.id/state/platform_facts/stdout/stderr/kill/kill_tree/wait_with_output",
             Some("std::process::Child"),
             RustMapping::Adapted,
-            "child.id / child.state / child.platform_facts / child.stdout / child.stderr / child.kill() / child.wait_with_output([timeout])",
+            "child.id / child.state / child.platform_facts / child.stdout / child.stderr / child.kill() / child.kill_tree() / child.wait_with_output([timeout])",
             (
                 &[
                     "live_bounded_streams",
@@ -832,8 +878,9 @@ pub fn entries() -> Vec<ScriptApiEntry> {
                     "top_level_window_title",
                     "foreground_window_identity",
                     "top_level_window_is_foreground",
+                    "owned_process_tree_cleanup",
                 ],
-                &["process_kill", "process_timeout"],
+                &["process_kill", "process_kill_tree", "process_timeout"],
             ),
         ),
         shipped_local_entry_with_design(

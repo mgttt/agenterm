@@ -329,9 +329,15 @@ agenterm-script
 │  │  ├─ atomic_write(path, text)
 │  │  │  Publishes UTF-8 text through same-volume atomic replacement.
 │  │  │  [shipped; stable; designed 2026-07-28]
-│  │  └─ atomic_write_bytes(path, bytes)
-│  │     Publishes typed bytes through same-volume atomic replacement.
-│  │     [shipped; stable; designed 2026-07-28]
+│  │  ├─ atomic_write_bytes(path, bytes)
+│  │  │  Publishes typed bytes through same-volume atomic replacement.
+│  │  │  [shipped; stable; designed 2026-07-28]
+│  │  ├─ append_sync(path, text)
+│  │  │  Appends one UTF-8 record, flushes it durably, and never truncates.
+│  │  │  [shipped; stable; designed 2026-07-31]
+│  │  └─ append_sync_bytes(path, bytes)
+│  │     Appends one typed byte record with the same durable contract.
+│  │     [shipped; stable; designed 2026-07-31]
 │  │
 │  └─ package::
 │     Future package-facing capability namespace; no v0.1.9 API promise.
@@ -419,6 +425,9 @@ agenterm-script
 │  │  ├─ Child.window_resize(width, height)
 │  │  │  Resizes without moving, reordering, or activating the window.
 │  │  │  [shipped on Windows; stable; designed 2026-07-30]
+│  │  ├─ Child.kill_tree()
+│  │  │  Terminates only this invocation-owned child process tree.
+│  │  │  [shipped; stable; designed 2026-07-31]
 │  │  └─ Child.window_control(id) -> WindowControl
 │  │     Creates a child-scoped control reference that re-resolves its HWND.
 │  │     [shipped on Windows; stable; designed 2026-07-30]
@@ -772,6 +781,12 @@ owning client process died before normal cleanup.
 write and sync a unique sibling staging file before a same-volume atomic
 replacement. Failed publication removes the staging file and never reports a
 partial target as success.
+
+`append_sync(path, text)` and `append_sync_bytes(path, bytes)` append one
+bounded (8 MiB) record without truncating an existing file, `sync_all` the
+record, and sync the parent directory when creating a new file. They are for
+append-only journals, not atomic replacement; open, write, sync, and parent
+sync failures remain distinct runtime errors.
 `std::fs::read_dir` enumerates exactly one directory and returns typed
 `DirEntry` values; recursion remains explicit script policy. Symlink entries
 are reported as symlinks and are not silently treated as directories.
@@ -963,7 +978,7 @@ periods, underscores, or hyphens. Scripts that accept nonzero status inspect
 `Output.success` and `exit_code` directly instead.
 
 `Command.start()` returns an invocation-owned `Child`. `id`, `state`, `kill`,
-and `wait_with_output([Duration])` are observable in the same invocation.
+`kill_tree`, and `wait_with_output([Duration])` are observable in the same invocation.
 No child handle survives an invocation. The outer supervisor Job Object owns
 the worker and its descendants, so timeout, cancellation, crash, parent exit,
 or normal completion cannot intentionally detach a child process tree.
