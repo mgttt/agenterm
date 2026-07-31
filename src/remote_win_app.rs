@@ -45,7 +45,7 @@ use windows_sys::Win32::{
 };
 
 use crate::{
-    client::{ipc_address, ipc_socket_addr},
+    client::{ipc_address, ipc_endpoint, resolved_ipc_endpoint},
     commands::{option_value, positional_values, screenshot_output_path, tmux_key_bytes},
     instances::intentional_shutdown_matches,
     locale::UiText,
@@ -121,6 +121,7 @@ const SETTINGS_FONT_INHERIT_ID: usize = 2134;
 const SETTINGS_SIZE_INHERIT_ID: usize = 2135;
 const SETTINGS_THEME_INHERIT_ID: usize = 2136;
 const SETTINGS_RESET_OVERRIDES_ID: usize = 2137;
+const CONTROL_CENTER_ID: usize = 2138;
 const SYSTEM_MENU_COPY_ID: usize = 0x1f00;
 const SYSTEM_MENU_PASTE_ID: usize = 0x1f10;
 const SYSTEM_MENU_TOGGLE_TABS_ID: usize = 0x1f20;
@@ -132,6 +133,7 @@ const fn windows_toolbar_hit(control_id: usize) -> Option<WindowsToolbarHit> {
     match control_id {
         TABS_ID => Some(WindowsToolbarHit::ToggleTabs),
         NEW_ID => Some(WindowsToolbarHit::NewTab),
+        CONTROL_CENTER_ID => Some(WindowsToolbarHit::ControlCenter),
         SETTINGS_ID => Some(WindowsToolbarHit::Settings),
         LOCALE_ID => Some(WindowsToolbarHit::ToggleLocale),
         FONT_DECREASE_ID => Some(WindowsToolbarHit::FontDecrease),
@@ -186,7 +188,7 @@ pub(crate) fn run_remote_gui(no_activate: bool) -> Result<()> {
     let title = wide(&format!(
         "AgenTerm-{}:{}",
         env!("CARGO_PKG_VERSION"),
-        ipc_socket_addr()?.port()
+        resolved_ipc_endpoint()?.logical_instance
     ));
     let window = unsafe {
         CreateWindowExW(
@@ -234,6 +236,7 @@ pub(crate) fn run_remote_gui(no_activate: bool) -> Result<()> {
     let send = create_button(window, instance, SEND_ID, "Send");
     let new_tab = create_button(window, instance, NEW_ID, "New");
     let tabs = create_button(window, instance, TABS_ID, "Tabs");
+    let control_center = create_button(window, instance, CONTROL_CENTER_ID, "Control Center");
     let settings = create_button(window, instance, SETTINGS_ID, "Settings");
     let locale = create_button(window, instance, LOCALE_ID, "En|Zh");
     let font_decrease = create_button(window, instance, FONT_DECREASE_ID, "z");
@@ -335,6 +338,7 @@ pub(crate) fn run_remote_gui(no_activate: bool) -> Result<()> {
         || new_https_proxy.is_null()
         || new_create.is_null()
         || new_cancel.is_null()
+        || control_center.is_null()
     {
         unsafe { DestroyWindow(window) };
         anyhow::bail!("failed to create replaceable UI controls");
@@ -347,6 +351,7 @@ pub(crate) fn run_remote_gui(no_activate: bool) -> Result<()> {
             send,
             new_tab,
             tabs_button: tabs,
+            control_center,
             settings,
             locale,
             font_decrease,
@@ -383,6 +388,7 @@ pub(crate) fn run_remote_gui(no_activate: bool) -> Result<()> {
         },
         client_id,
         client,
+        no_activate,
     )?);
     unsafe {
         SetWindowLongPtrW(window, GWLP_USERDATA, Box::into_raw(state) as isize);
@@ -406,7 +412,8 @@ pub(crate) fn run_remote_gui(no_activate: bool) -> Result<()> {
     while unsafe { GetMessageW(&mut message, ptr::null_mut(), 0, 0) } > 0 {
         if message.message == WM_KEYDOWN
             && let Some(state) = state_mut(window)
-            && (state.handle_cwd_editor_keydown(message.wParam as u32)
+            && (state.handle_tab_editor_keydown(message.wParam as u32)
+                || state.handle_cwd_editor_keydown(message.wParam as u32)
                 || state.handle_keyboard_navigation(message.wParam as u32))
         {
             unsafe { windows_sys::Win32::Graphics::Gdi::InvalidateRect(window, ptr::null(), 0) };
@@ -444,8 +451,8 @@ fn connect_or_start_server(client_id: &str) -> Result<UiClientModel> {
 }
 
 fn server_endpoint_is_listening() -> bool {
-    ipc_socket_addr().is_ok_and(|address| {
-        std::net::TcpStream::connect_timeout(&address, Duration::from_millis(100)).is_ok()
+    ipc_endpoint().is_ok_and(|endpoint| {
+        crate::ipc_transport::IpcStream::connect(&endpoint, Duration::from_millis(100)).is_ok()
     })
 }
 
@@ -460,9 +467,14 @@ fn start_server_process() -> Result<()> {
     }
     use std::os::windows::process::CommandExt as _;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    Command::new(server)
-        .arg("--address")
-        .arg(ipc_address())
+    let endpoint = ipc_endpoint()?;
+    let mut command = Command::new(server);
+    if let Some(address) = endpoint.legacy_address() {
+        command.arg("--address").arg(address);
+    } else {
+        command.arg("--endpoint").arg(endpoint.to_string());
+    }
+    command
         .creation_flags(CREATE_NO_WINDOW)
         .spawn()
         .context("failed to launch independent AgenTerm server")?;
@@ -474,6 +486,7 @@ struct RemoteControls {
     send: HWND,
     new_tab: HWND,
     tabs_button: HWND,
+    control_center: HWND,
     settings: HWND,
     locale: HWND,
     font_decrease: HWND,
@@ -526,7 +539,6 @@ enum RemoteFocusSurface {
 #[derive(Clone, Copy)]
 enum RemoteTabAction {
     AddChild,
-    Edit,
     Close,
 }
 
@@ -595,6 +607,18 @@ struct RemoteSidebarScrollDrag {
     thumb_grab_offset: i32,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct RemoteSidebarTextClick {
+    tab_id: String,
+    geometry_generation: u64,
+}
+
+impl RemoteSidebarTextClick {
+    fn matches(&self, tab_id: &str, geometry_generation: u64) -> bool {
+        self.tab_id == tab_id && self.geometry_generation == geometry_generation
+    }
+}
+
 impl RemoteTerminalSelection {
     fn bounds(&self) -> (RemoteTerminalPoint, RemoteTerminalPoint) {
         if self.anchor <= self.active {
@@ -655,6 +679,7 @@ struct RemoteWindowState {
     send: HWND,
     new_tab: HWND,
     tabs_button: HWND,
+    control_center: HWND,
     settings: HWND,
     locale: HWND,
     font_decrease: HWND,
@@ -718,11 +743,14 @@ struct RemoteWindowState {
     scroll_drag: Option<RemoteScrollDrag>,
     sidebar_scroll_offset: usize,
     sidebar_scroll_drag: Option<RemoteSidebarScrollDrag>,
+    sidebar_geometry_generation: u64,
+    recent_sidebar_text_click: Option<RemoteSidebarTextClick>,
     focus_surface: RemoteFocusSurface,
     pending_close_tab_id: Option<String>,
     cwd_edit_tab_id: Option<String>,
     last_published_snapshot: Option<String>,
     relay_close_after_completion: Option<RemoteCloseChoice>,
+    no_activate: bool,
 }
 
 impl RemoteWindowState {
@@ -731,12 +759,14 @@ impl RemoteWindowState {
         controls: RemoteControls,
         client_id: String,
         client: UiClientModel,
+        no_activate: bool,
     ) -> Result<Self> {
         let RemoteControls {
             edit,
             send,
             new_tab,
             tabs_button,
+            control_center,
             settings,
             locale,
             font_decrease,
@@ -789,6 +819,7 @@ impl RemoteWindowState {
             send,
             new_tab,
             tabs_button,
+            control_center,
             settings,
             locale,
             font_decrease,
@@ -852,11 +883,14 @@ impl RemoteWindowState {
             scroll_drag: None,
             sidebar_scroll_offset: 0,
             sidebar_scroll_drag: None,
+            sidebar_geometry_generation: 0,
+            recent_sidebar_text_click: None,
             focus_surface: RemoteFocusSurface::Terminal,
             pending_close_tab_id: None,
             cwd_edit_tab_id: None,
             last_published_snapshot: None,
             relay_close_after_completion: None,
+            no_activate,
         })
     }
 
@@ -881,6 +915,12 @@ impl RemoteWindowState {
                     .as_ref()
                     .and_then(|client| client.snapshot().active_tab_id.clone());
                 let composer = self.client.as_ref().and_then(remote_composer_identity);
+                if active != self.last_active_id {
+                    self.invalidate_sidebar_text_click();
+                    if self.editing_tab_id.as_ref() != active.as_ref() {
+                        self.finish_tab_edit(false);
+                    }
+                }
                 if active != self.last_active_id || composer != self.last_composer_identity {
                     self.last_active_id = active;
                     self.last_composer_identity = composer;
@@ -1074,7 +1114,16 @@ impl RemoteWindowState {
                     self.begin_tab_edit(tab);
                 }
             }
+            "open-control-center" => {
+                crate::control_center::open_control_center(
+                    self.no_activate,
+                    &crate::client::ipc_address(),
+                )?;
+                self.last_message = Some("Control Center opened".to_owned());
+            }
             "select-tab" => {
+                self.invalidate_sidebar_text_click();
+                self.finish_tab_edit(false);
                 self.sync_composer()?;
                 self.apply_client_command(&command.command_id)?;
                 self.focus_surface = RemoteFocusSurface::Terminal;
@@ -1802,11 +1851,6 @@ impl RemoteWindowState {
                                     self.config.locale.text(UiText::Add),
                                     geometry.actions.add_child.expect("normal row has Add"),
                                 ),
-                                "edit": action(
-                                    "edit-tab",
-                                    self.config.locale.text(UiText::Edit),
-                                    geometry.actions.primary,
-                                ),
                                 "close": action(
                                     "close-tab",
                                     self.config.locale.text(UiText::Close),
@@ -2046,6 +2090,7 @@ impl RemoteWindowState {
                     "bounds": pixel_rect_json(toolbar.bounds),
                     "new": pixel_rect_json(toolbar.new_tab),
                     "tabs": pixel_rect_json(toolbar.tabs),
+                    "control_center": pixel_rect_json(toolbar.control_center),
                     "settings": pixel_rect_json(toolbar.settings),
                     "locale": pixel_rect_json(toolbar.locale),
                     "font_decrease": pixel_rect_json(toolbar.font_decrease),
@@ -2219,6 +2264,7 @@ impl RemoteWindowState {
     }
 
     fn set_tabs_visible(&mut self, visible: bool) {
+        self.invalidate_sidebar_text_click();
         self.finish_cwd_editor(false);
         self.finish_tab_edit(false);
         self.tabs_visible = visible;
@@ -2359,6 +2405,7 @@ impl RemoteWindowState {
     }
 
     fn layout(&mut self) {
+        self.invalidate_sidebar_text_click();
         let geometry = self.workspace_geometry();
         let composer = win_rect(geometry.composer);
         unsafe {
@@ -2375,6 +2422,7 @@ impl RemoteWindowState {
                 for (window, bounds) in [
                     (self.new_tab, toolbar.new_tab),
                     (self.tabs_button, toolbar.tabs),
+                    (self.control_center, toolbar.control_center),
                     (self.settings, toolbar.settings),
                     (self.locale, toolbar.locale),
                     (self.font_decrease, toolbar.font_decrease),
@@ -2430,6 +2478,7 @@ impl RemoteWindowState {
                 SW_HIDE
             };
             ShowWindow(self.tabs_button, workspace_command);
+            ShowWindow(self.control_center, workspace_command);
             ShowWindow(self.settings, workspace_command);
             ShowWindow(self.locale, workspace_command);
             ShowWindow(self.font_decrease, workspace_command);
@@ -2609,6 +2658,7 @@ impl RemoteWindowState {
                 SW_HIDE
             };
             ShowWindow(self.tabs_button, toolbar_command);
+            ShowWindow(self.control_center, toolbar_command);
             ShowWindow(self.settings, toolbar_command);
             ShowWindow(self.locale, toolbar_command);
             ShowWindow(self.font_decrease, toolbar_command);
@@ -3116,6 +3166,25 @@ impl RemoteWindowState {
         false
     }
 
+    fn handle_tab_editor_keydown(&mut self, key: u32) -> bool {
+        if self.editing_tab_id.is_none() {
+            return false;
+        }
+        let focused = unsafe { GetFocus() };
+        if focused != self.tab_title_edit && focused != self.tab_note_edit {
+            return false;
+        }
+        if key == u32::from(VK_ESCAPE) {
+            self.finish_tab_edit(false);
+            return true;
+        }
+        if key == 0x0d && unsafe { GetKeyState(VK_CONTROL as i32) } < 0 {
+            self.finish_tab_edit(true);
+            return true;
+        }
+        false
+    }
+
     fn open_new_terminal(&mut self) {
         if self.new_terminal_open
             || self.settings_open
@@ -3278,6 +3347,14 @@ impl RemoteWindowState {
         else {
             return;
         };
+        if self
+            .client
+            .as_ref()
+            .and_then(|client| client.snapshot().active_tab_id.as_deref())
+            != Some(tab_id.as_str())
+        {
+            self.invalidate_sidebar_text_click();
+        }
         self.cancel_terminal_selection();
         if let Err(error) = self.sync_composer() {
             self.last_error = Some(format!("Composer save failed: {error:#}"));
@@ -3332,12 +3409,57 @@ impl RemoteWindowState {
             .is_some_and(|bounds| bounds.contains(x, y))
         {
             Some(RemoteTabAction::AddChild)
-        } else if geometry.actions.primary.contains(x, y) {
-            Some(RemoteTabAction::Edit)
         } else if geometry.actions.secondary.contains(x, y) {
             Some(RemoteTabAction::Close)
         } else {
             None
+        }
+    }
+
+    fn tab_text_id_at(&self, x: i32, y: i32) -> Option<String> {
+        let row_index = self.sidebar_row_index_at_y(y)?;
+        let client = self.client.as_ref()?;
+        let row = remote_tree_rows(&client.snapshot().tabs)
+            .get(row_index)
+            .cloned()?;
+        let viewport_position = row_index.checked_sub(self.sidebar_offset())?;
+        self.sidebar_row_geometry(viewport_position, row.depth, TreeRowMode::Normal)
+            .text
+            .contains(x, y)
+            .then(|| client.snapshot().tabs[row.tab_index].id.clone())
+    }
+
+    fn record_sidebar_text_click(&mut self, tab_id: String) {
+        self.recent_sidebar_text_click = Some(RemoteSidebarTextClick {
+            tab_id,
+            geometry_generation: self.sidebar_geometry_generation,
+        });
+    }
+
+    fn invalidate_sidebar_text_click(&mut self) {
+        self.sidebar_geometry_generation = self.sidebar_geometry_generation.wrapping_add(1);
+        self.recent_sidebar_text_click = None;
+    }
+
+    fn take_matching_sidebar_text_click(&mut self, x: i32, y: i32) -> Option<String> {
+        let candidate = self.recent_sidebar_text_click.take()?;
+        let tab_id = self.tab_text_id_at(x, y)?;
+        candidate
+            .matches(&tab_id, self.sidebar_geometry_generation)
+            .then_some(tab_id)
+    }
+
+    fn begin_tab_edit_id(&mut self, tab_id: &str) {
+        let tab = self.client.as_ref().and_then(|client| {
+            client
+                .snapshot()
+                .tabs
+                .iter()
+                .find(|tab| tab.id == tab_id)
+                .cloned()
+        });
+        if let Some(tab) = tab {
+            self.begin_tab_edit(tab);
         }
     }
 
@@ -3362,6 +3484,7 @@ impl RemoteWindowState {
         let Some(tab_id) = self.tab_disclosure_at(x, y) else {
             return false;
         };
+        self.invalidate_sidebar_text_click();
         let result = self
             .client
             .as_mut()
@@ -3481,13 +3604,6 @@ impl RemoteWindowState {
         self.show_workspace_controls(true);
         self.focus_surface = RemoteFocusSurface::Tabs;
         unsafe { SetFocus(self.window) };
-    }
-
-    fn begin_tab_edit_at(&mut self, y: i32) {
-        let Some(tab) = self.tab_at_y(y).cloned() else {
-            return;
-        };
-        self.begin_tab_edit(tab);
     }
 
     fn begin_tab_edit(&mut self, tab: UiTabBootstrap) {
@@ -4401,6 +4517,7 @@ impl RemoteWindowState {
     }
 
     fn scroll_sidebar(&mut self, wheel_delta: i32) {
+        self.invalidate_sidebar_text_click();
         let steps = (wheel_delta.unsigned_abs() as usize / 120).max(1) * 3;
         let maximum = self.sidebar_max_offset();
         self.sidebar_scroll_offset = if wheel_delta > 0 {
@@ -4418,6 +4535,7 @@ impl RemoteWindowState {
         if !geometry.track.contains(x, y) {
             return false;
         }
+        self.invalidate_sidebar_text_click();
         if maximum == 0 {
             return true;
         }
@@ -4446,6 +4564,7 @@ impl RemoteWindowState {
             self.end_sidebar_scroll_drag();
             return false;
         };
+        self.invalidate_sidebar_text_click();
         let travel = geometry.track.height() - geometry.thumb.height();
         if maximum == 0 || travel <= 0 {
             self.sidebar_scroll_offset = 0;
@@ -4482,6 +4601,7 @@ impl RemoteWindowState {
         if !self.resize_grip_contains(x, y) {
             return false;
         }
+        self.invalidate_sidebar_text_click();
         self.cancel_terminal_selection();
         self.tabs_resize_dragging = true;
         unsafe { SetCapture(self.window) };
@@ -4612,6 +4732,16 @@ impl RemoteWindowState {
         match action_id {
             action::TOGGLE_TABS => self.toggle_tabs(),
             action::NEW_TAB => self.open_new_terminal(),
+            action::OPEN_CONTROL_CENTER => {
+                if let Err(error) = crate::control_center::open_control_center(
+                    self.no_activate,
+                    &crate::client::ipc_address(),
+                ) {
+                    self.last_error = Some(format!("Control Center unavailable: {error:#}"));
+                } else {
+                    self.last_message = Some("Control Center opened".to_owned());
+                }
+            }
             action::OPEN_SETTINGS => {
                 self.finish_cwd_editor(false);
                 self.open_settings();
@@ -5113,14 +5243,6 @@ impl RemoteWindowState {
                         "+",
                     ),
                     (
-                        geometry.actions.primary,
-                        if compact {
-                            "E"
-                        } else {
-                            locale.text(UiText::Edit)
-                        },
-                    ),
-                    (
                         geometry.actions.secondary,
                         if compact {
                             "X"
@@ -5244,8 +5366,14 @@ unsafe extern "system" fn window_proc(
                 }
                 let x = (lparam as u32 & 0xffff) as i16 as i32;
                 let y = ((lparam as u32 >> 16) & 0xffff) as i16 as i32;
+                let text_tab = state.take_matching_sidebar_text_click(x, y);
                 if state.resize_grip_contains(x, y) {
                     state.reset_tabs_width();
+                    unsafe {
+                        windows_sys::Win32::Graphics::Gdi::InvalidateRect(window, ptr::null(), 0)
+                    };
+                } else if let Some(tab_id) = text_tab {
+                    state.begin_tab_edit_id(&tab_id);
                     unsafe {
                         windows_sys::Win32::Graphics::Gdi::InvalidateRect(window, ptr::null(), 0)
                     };
@@ -5255,6 +5383,7 @@ unsafe extern "system" fn window_proc(
         }
         WM_LBUTTONDOWN => {
             if let Some(state) = state_mut(window) {
+                state.recent_sidebar_text_click = None;
                 if state.window_close_pending
                     || state.settings_open
                     || state.new_terminal_open
@@ -5264,6 +5393,7 @@ unsafe extern "system" fn window_proc(
                 }
                 let x = (lparam as u32 & 0xffff) as i16 as i32;
                 let y = ((lparam as u32 >> 16) & 0xffff) as i16 as i32;
+                let clicked_text_tab = state.tab_text_id_at(x, y);
                 if state.tabs_recovery_rect().is_some_and(|rect| {
                     x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom
                 }) {
@@ -5320,11 +5450,16 @@ unsafe extern "system" fn window_proc(
                     } else {
                         match state.tab_action_at(x, y) {
                             Some(RemoteTabAction::AddChild) => state.new_child_at(y),
-                            Some(RemoteTabAction::Edit) => state.begin_tab_edit_at(y),
                             Some(RemoteTabAction::Close) => state.request_close_tab_at(y),
                             None => {
                                 state.finish_tab_edit(false);
                                 state.select_tab_at(y);
+                                if let Some(tab_id) = clicked_text_tab
+                                    && state.tab_text_id_at(x, y).as_deref()
+                                        == Some(tab_id.as_str())
+                                {
+                                    state.record_sidebar_text_click(tab_id);
+                                }
                             }
                         }
                     }
@@ -5512,6 +5647,21 @@ unsafe extern "system" fn window_proc(
                         state.finish_new_terminal(false);
                     } else if wparam as u32 == 0x0d {
                         state.finish_new_terminal(true);
+                    }
+                    return 0;
+                }
+                if wparam as u32 == u32::from(VK_F2)
+                    && state.current_focus_surface() == RemoteFocusSurface::Tabs
+                {
+                    if let Some(tab) = state.active_tab().cloned() {
+                        state.begin_tab_edit(tab);
+                        unsafe {
+                            windows_sys::Win32::Graphics::Gdi::InvalidateRect(
+                                window,
+                                ptr::null(),
+                                0,
+                            )
+                        };
                     }
                     return 0;
                 }
@@ -6137,6 +6287,7 @@ mod tests {
         let cases = [
             (TABS_ID, action::TOGGLE_TABS),
             (NEW_ID, action::NEW_TAB),
+            (CONTROL_CENTER_ID, action::OPEN_CONTROL_CENTER),
             (SETTINGS_ID, action::OPEN_SETTINGS),
             (LOCALE_ID, action::TOGGLE_LOCALE),
             (FONT_DECREASE_ID, action::FONT_DECREASE),
@@ -6201,5 +6352,16 @@ mod tests {
         assert!(geometry.actions.bounds.right <= sidebar.right);
         let editors = geometry.editors.expect("editing geometry has editors");
         assert!(editors.name.left >= track.right);
+    }
+
+    #[test]
+    fn sidebar_double_click_candidate_requires_stable_tab_and_geometry() {
+        let click = RemoteSidebarTextClick {
+            tab_id: "@7".to_owned(),
+            geometry_generation: 11,
+        };
+        assert!(click.matches("@7", 11));
+        assert!(!click.matches("@8", 11));
+        assert!(!click.matches("@7", 12));
     }
 }

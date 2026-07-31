@@ -13,7 +13,7 @@ use anyhow::{Context as _, Result};
 use crate::pty::{ChildCommand, PtyChild, PtyMaster, TerminalSize};
 
 use crate::{
-    SCROLLBACK_LINES, ipc_address, request_gui_wake,
+    SCROLLBACK_LINES, request_gui_wake,
     terminal_cursor::{DecscusrTracker, TerminalCursorAppearance},
     terminal_lifecycle::{BoundedByteRing, SubmissionState, TerminalLifecycle},
     terminal_observation::TerminalObservation,
@@ -261,16 +261,20 @@ impl TerminalTab {
         // Resolve once: this exact value both configures the child and becomes
         // the truthful launch observation shown by the host.
         let launch_cwd = env::current_dir().ok();
+        let endpoint = crate::client::ipc_endpoint()?;
         let mut command = ChildCommand::new(&program)
             .size(initial_size)
             .env("TERM", "xterm-256color")
             .env("COLORTERM", "truecolor")
             .env("TERM_PROGRAM", "AgenTerm")
             .env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"))
-            .env("AGENTERM_IPC_ADDRESS", ipc_address())
+            .env("AGENTERM_IPC_ENDPOINT", endpoint.to_string())
             .env("AGENTERM_TAB_ID", format!("@{id}"))
             .env("AGENTERM_SESSION", session_name)
             .env("AGENTERM_WORKSPACE_PATH", workspace_path());
+        if let Some(address) = endpoint.legacy_address() {
+            command = command.env("AGENTERM_IPC_ADDRESS", address);
+        }
         let proxy = ProxyState::from_environment(&tab_environment)?;
         let mut proxy_redaction_needles = Vec::new();
         for value in [proxy.http(), proxy.https()].into_iter().flatten() {

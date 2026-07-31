@@ -437,10 +437,10 @@ track remains planned, but every declared dependency must still pass.
     endpoint contract; migrate in compatibility stages toward Unix domain
     sockets on Linux/macOS and named pipes on Windows while keeping explicit
     loopback TCP and mixed-version discovery
-  - [ ] prove an isolated `agenterm-net` libp2p/CID/block-store research loop
+  - [~] prove an isolated `agenterm-net` libp2p/CID/block-store research loop
     without linking it into the stable server or claiming a stable release
     component
-  - [ ] define and measure a Tauri-like system-WebView host contract, with
+  - [~] define and measure a Tauri-like system-WebView host contract, with
     native Control Center fallback and no WebView dependency in the terminal
     GUI/server hot path
   - [ ] sequencing, parallel waves, risks and acceptance evidence are owned by

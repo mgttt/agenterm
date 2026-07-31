@@ -2,6 +2,8 @@ use std::io::Write;
 
 use serde::Serialize;
 
+use crate::ipc_endpoint::{EndpointSelectorArgs, resolve_ipc_endpoint};
+
 pub const MCP_PROTOCOL_REVISION: &str = "2025-11-25";
 pub const MCP_CATALOG_SCHEMA_VERSION: u32 = 1;
 pub const MCP_RESOURCE_SCHEMA_VERSION: u32 = 1;
@@ -206,13 +208,18 @@ pub fn run_mcp_entry_with_args(arguments: Vec<String>) -> i32 {
             eprintln!("mcp_capabilities_format: use `capabilities --json`");
             2
         }
-        [command, transport] if command == "serve" && transport == "--stdio" => {
-            serve_mcp_stdio(None)
-        }
-        [address_option, address, command, transport]
-            if address_option == "--address" && command == "serve" && transport == "--stdio" =>
+        arguments
+            if arguments.len() >= 2
+                && arguments[arguments.len() - 2] == "serve"
+                && arguments[arguments.len() - 1] == "--stdio" =>
         {
-            serve_mcp_stdio(Some(address.clone()))
+            match parse_endpoint_selectors(&arguments[..arguments.len() - 2]) {
+                Ok(selectors) => serve_mcp_stdio(selectors),
+                Err(error) => {
+                    eprintln!("mcp_endpoint_selector_invalid: {error}");
+                    2
+                }
+            }
         }
         _ => {
             eprintln!("unknown agenterm-mcp command; use --help");
@@ -221,11 +228,44 @@ pub fn run_mcp_entry_with_args(arguments: Vec<String>) -> i32 {
     }
 }
 
-fn serve_mcp_stdio(address: Option<String>) -> i32 {
+fn parse_endpoint_selectors(arguments: &[String]) -> Result<EndpointSelectorArgs, String> {
+    let mut selectors = EndpointSelectorArgs::default();
+    let mut index = 0;
+    while index < arguments.len() {
+        let option = arguments[index].as_str();
+        let value = arguments
+            .get(index + 1)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| format!("{option} requires a value"))?
+            .clone();
+        let slot = match option {
+            "--endpoint" => &mut selectors.endpoint,
+            "--address" => &mut selectors.address,
+            "--instance" => &mut selectors.instance,
+            _ => return Err(format!("unknown selector {option:?}")),
+        };
+        if slot.replace(value).is_some() {
+            return Err(format!("{option} may be specified only once"));
+        }
+        index += 2;
+    }
+    Ok(selectors)
+}
+
+fn serve_mcp_stdio(selectors: EndpointSelectorArgs) -> i32 {
+    let endpoint = match resolve_ipc_endpoint(&selectors) {
+        Ok(resolved) => resolved.endpoint.to_string(),
+        Err(error) => {
+            eprintln!("mcp_endpoint_selection_failed: {error}");
+            return 2;
+        }
+    };
     match crate::mcp_stdio::serve_stdio_with_config(
         std::io::BufReader::new(std::io::stdin()),
         std::io::stdout().lock(),
-        crate::mcp_stdio::McpStdioConfig { address },
+        crate::mcp_stdio::McpStdioConfig {
+            address: Some(endpoint),
+        },
     ) {
         Ok(()) => 0,
         Err(error) => {
@@ -243,7 +283,7 @@ fn print_help() {
            agenterm-mcp --help\n\
            agenterm-mcp --version\n\
            agenterm-mcp capabilities --json\n\
-           agenterm-mcp [--address HOST:PORT] serve --stdio\n\
+           agenterm-mcp [--endpoint ENDPOINT|--address HOST:PORT|--instance NAME] serve --stdio\n\
          \n\
          The stdio lifecycle, metadata-safe Fleet resources, and one bounded\n\
          read-only wait tool are shipped in this implementation slice.\n\
@@ -354,6 +394,55 @@ mod tests {
                 .unavailable_roles
                 .iter()
                 .all(|role| role.availability == McpAvailability::Deferred)
+        );
+    }
+
+    #[test]
+    fn endpoint_selector_parser_accepts_each_public_selector() {
+        assert_eq!(
+            parse_endpoint_selectors(&["--endpoint".to_owned(), "tcp:127.0.0.1:1".to_owned()])
+                .unwrap()
+                .endpoint
+                .as_deref(),
+            Some("tcp:127.0.0.1:1")
+        );
+        assert_eq!(
+            parse_endpoint_selectors(&["--address".to_owned(), "127.0.0.1:1".to_owned()])
+                .unwrap()
+                .address
+                .as_deref(),
+            Some("127.0.0.1:1")
+        );
+        assert_eq!(
+            parse_endpoint_selectors(&["--instance".to_owned(), "dev".to_owned()])
+                .unwrap()
+                .instance
+                .as_deref(),
+            Some("dev")
+        );
+    }
+
+    #[test]
+    fn endpoint_selector_conflicts_and_duplicates_fail_before_stdio() {
+        assert_eq!(
+            run_mcp_entry_with_args(vec![
+                "--endpoint".to_owned(),
+                "tcp:127.0.0.1:1".to_owned(),
+                "--instance".to_owned(),
+                "dev".to_owned(),
+                "serve".to_owned(),
+                "--stdio".to_owned(),
+            ]),
+            2
+        );
+        assert!(
+            parse_endpoint_selectors(&[
+                "--instance".to_owned(),
+                "main".to_owned(),
+                "--instance".to_owned(),
+                "dev".to_owned(),
+            ])
+            .is_err()
         );
     }
 }

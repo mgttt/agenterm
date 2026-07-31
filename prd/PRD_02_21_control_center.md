@@ -155,23 +155,35 @@ Control Center is the product name; the executable family uses
 
 ## Renderer-neutral host contract
 
-- [ ] Control Center separates product models and semantic actions from the
+- [x] Control Center separates product models and semantic actions from the
   renderer. The first reliable shell may remain native; adopting a system
   WebView is an evidence-based renderer choice, not a product dependency.
-- [ ] a WebView host uses local, versioned, integrity-identified packaged
+- [~] a future WebView host uses local, versioned, integrity-identified packaged
   resources and a bounded, versioned typed message bridge. Network-loaded pages
   never receive a privileged bridge.
-- [ ] Windows WebView2, macOS WKWebView, and Linux WebKitGTK availability,
+- [~] Windows WebView2, macOS WKWebView, and Linux WebKitGTK availability,
   packaging, startup cost, DPI, locale, accessibility, clipboard, screenshots,
   activation, crash, and reload behavior are reported through platform
   capabilities.
-- [ ] missing or failed WebView support yields an explicit unavailable/fallback
+- [x] missing or failed WebView support yields an explicit unavailable/fallback
   state and cannot block the native terminal GUI. Renderer restart reconstructs
   state from a fresh public projection and never claims process or event
   continuity.
-- [ ] using a WebView does not move product authority into JavaScript, load
+- [x] using a WebView does not move product authority into JavaScript, load
   Control Center code directly from the network, or justify rewriting the
   terminal renderer, Tabs, Composer, or Settings.
+
+The v0.1.11 spike reports passive `runtime_presence` separately from
+`host_state`. A detected runtime never implies a working host:
+`host_state=unimplemented` and `active_renderer=native` remain truthful on
+all platforms. The renderer-neutral bridge v1 binds the exact packaged
+origin, main frame, per-document nonce, request ID and deadline; enforces a
+64 KiB message and eight-request concurrency bound; and exposes only
+`host.ready`, `host.facts`, and read-only `fleet.snapshot`. It has no generic
+eval, shell, process, network, navigation, listener, or download escape
+hatch. Actual host loading, packaged-resource integrity, startup/reload
+measurement, accessibility, and six-target runtime proof remain future
+promotion gates.
 
 ## v0.1.11 delivery gate
 

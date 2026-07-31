@@ -114,10 +114,12 @@ try {
         let name = executable.name;
         executable_names.push(name);
         let source = std::path::join(binary_directory, name).display;
-        if os_name == "linux" && name == "agenterm" {
+        if os_name == "linux" &&
+                (executable.role == "gui" ||
+                 executable.role == "control-center-gui") {
             copy_required(
                 source,
-                std::path::join(staging, ".agenterm.bin").display,
+                std::path::join(staging, "." + name + ".bin").display,
                 "package_client_binary_missing"
             );
             copy_required(
@@ -142,7 +144,17 @@ try {
             chmod_args.push(std::path::join(staging, name).display);
         }
         if os_name == "linux" {
-            chmod_args.push(std::path::join(staging, ".agenterm.bin").display);
+            for executable in platform.executables {
+                if executable.role == "gui" ||
+                        executable.role == "control-center-gui" {
+                    chmod_args.push(
+                        std::path::join(
+                            staging,
+                            "." + executable.name + ".bin"
+                        ).display
+                    );
+                }
+            }
         }
         run("chmod", chmod_args, repo, "package_client_chmod");
     }

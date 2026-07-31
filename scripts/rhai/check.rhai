@@ -659,6 +659,23 @@ if release {
     );
     context = release_preflight.context;
     sequence = release_preflight.sequence;
+    let net_research = run_gate(
+        context,
+        "agenterm-net-research",
+        "isolated agenterm-net research",
+        [task(
+            worker,
+            manifest,
+            "agenterm-net-research",
+            600000,
+            []
+        )],
+        repo,
+        scratch,
+        sequence
+    );
+    context = net_research.context;
+    sequence = net_research.sequence;
     let benchmark = run_gate(
         context,
         "preflight-benchmark",
@@ -988,7 +1005,7 @@ if !skip_smoke {
         "startup-smoke", "wake-smoke", "cli-smoke", "server-smoke",
         "remote-ui-smoke", "remote-ui-upgrade-smoke", "fleet-smoke",
         "script-smoke", "theme-smoke", "working-context-smoke",
-        "workbench-smoke"
+        "workbench-smoke", "control-center-smoke"
     ];
     for id in smoke_ids {
         let extra = [];

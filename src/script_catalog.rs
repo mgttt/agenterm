@@ -1881,6 +1881,7 @@ fn comparisons_for(stable_id: &str) -> ScriptApiComparisons {
         || stable_id.starts_with("pane.")
         || stable_id.starts_with("events.")
         || stable_id.starts_with("server.")
+        || stable_id.starts_with("control-center.")
     {
         return agenterm_specific_comparisons(
             "Fleet identity, receipts, causal events, and terminal post-state are AgenTerm-specific",

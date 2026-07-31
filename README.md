@@ -14,7 +14,10 @@ client, and a deliberately bounded tmux/RMUX frontend.
 - Compact, scrollable tree-first sidebar with two-line names/notes and a
   draggable width boundary.
 - Terminal toolbar keeps `<Tabs`/`>Tabs` and `New` at the left while anchoring
-  `Settings` at the right.
+  an isolated `Control Center` in the middle and `Settings` at the right.
+- `agenterm-cc` is the replaceable Control Center projection for Cockpit,
+  Workflows, Extensions, and InfoHub. Its offline snapshot reports unavailable
+  providers truthfully; closing or crashing it does not own terminal state.
 - Terminal-scoped bottom status surface is ready for metrics and agent context
   providers without consuming the full-height Tabs column.
 - Branded Windows icon and a persistent terminal font/size settings panel.
@@ -106,11 +109,14 @@ uses parallel code generation, and retains incremental state. Use
 size-focused profile in an isolated `target-release/` scratch directory,
 stages the finished artifacts in `dist/`, and then clears only that scratch
 cache while preserving the incremental development `target/`. All modes
-produce six ignored executables plus
+produce seven ignored executables plus
 build metadata under `dist/`:
 
 - `dist/agenterm.exe` — GUI application; double-clicking does not create a
   temporary console window.
+- `dist/agenterm-cc.exe` — isolated Control Center projection; informational
+  commands include `--help`, `--version`, `capabilities --json`, and
+  `snapshot --json`.
 - `dist/agenterm-server.exe` — internal headless workspace, PTY, parser, and
   event authority; not yet the default GUI backend.
 - `dist/agenterm-cli.exe` — full native observation and automation client.
@@ -145,11 +151,13 @@ relabeled as available.
 
 ### Linux GUI (preview)
 
-Native Linux `agenterm` uses winit + softbuffer. Control clients (`agenterm-cli`,
-`agenterm-mux`, `agenterm-script`, `agenterm-mcp`) do not need display libraries.
+Native Linux `agenterm` and `agenterm-cc` use winit. Control clients
+(`agenterm-cli`, `agenterm-mux`, `agenterm-script`, `agenterm-mcp`) do not need
+display libraries.
 
-**Release tarballs** ship a small `lib/` directory plus an `agenterm` launcher that
-sets `LD_LIBRARY_PATH` before starting `.agenterm.bin`, so end users do not need
+**Release tarballs** ship a small `lib/` directory plus `agenterm` and
+`agenterm-cc` launchers that set `LD_LIBRARY_PATH` before starting their hidden
+native binaries, so end users do not need
 `sudo apt install` for X11/Wayland keyboard libraries.
 
 **Building from source** on a minimal host still needs the same libraries available

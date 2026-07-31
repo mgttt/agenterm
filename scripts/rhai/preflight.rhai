@@ -483,6 +483,7 @@ try {
     let manifest = artifact_manifest::load(manifest_path);
     let expected = [
         "agenterm.exe",
+        "agenterm-cc.exe",
         "agenterm-server.exe",
         "agenterm-cli.exe",
         "agenterm-mux.exe",

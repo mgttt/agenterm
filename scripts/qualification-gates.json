@@ -207,6 +207,18 @@
         "ux.workbench-compact-tree",
         "ux.workbench-proxy-archived"
       ]
+    },
+    {
+      "id": "control-center-smoke",
+      "evidence": [
+        "control-center.offline-contract",
+        "control-center.live-cockpit",
+        "control-center.process-reuse",
+        "control-center.context-refresh",
+        "control-center.no-activate",
+        "control-center.typed-close",
+        "control-center.process-isolation"
+      ]
     }
   ]
 }

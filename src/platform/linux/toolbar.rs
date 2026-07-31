@@ -14,6 +14,7 @@ use crate::platform::action;
 pub(crate) enum LinuxToolbarHit {
     NewTab,
     ToggleTabs,
+    ControlCenter,
     Settings,
     ToggleLocale,
     FontDecrease,
@@ -21,10 +22,11 @@ pub(crate) enum LinuxToolbarHit {
 }
 
 impl LinuxToolbarHit {
-    /// Visible left-to-right order matching the Unix workspace toolbar.
-    pub(crate) const ORDER: [Self; 6] = [
+    /// Product order matching the Unix workspace toolbar groups.
+    pub(crate) const ORDER: [Self; 7] = [
         Self::ToggleTabs,
         Self::NewTab,
+        Self::ControlCenter,
         Self::Settings,
         Self::ToggleLocale,
         Self::FontDecrease,
@@ -36,6 +38,7 @@ impl LinuxToolbarHit {
         match self {
             Self::NewTab => action::NEW_TAB,
             Self::ToggleTabs => action::TOGGLE_TABS,
+            Self::ControlCenter => action::OPEN_CONTROL_CENTER,
             Self::Settings => action::OPEN_SETTINGS,
             Self::ToggleLocale => action::TOGGLE_LOCALE,
             Self::FontDecrease => action::FONT_DECREASE,
@@ -48,6 +51,7 @@ impl LinuxToolbarHit {
         match action_id {
             action::NEW_TAB => Some(Self::NewTab),
             action::TOGGLE_TABS => Some(Self::ToggleTabs),
+            action::OPEN_CONTROL_CENTER => Some(Self::ControlCenter),
             action::OPEN_SETTINGS => Some(Self::Settings),
             action::TOGGLE_LOCALE => Some(Self::ToggleLocale),
             action::FONT_DECREASE => Some(Self::FontDecrease),
@@ -69,6 +73,7 @@ mod tests {
             [
                 action::TOGGLE_TABS,
                 action::NEW_TAB,
+                action::OPEN_CONTROL_CENTER,
                 action::OPEN_SETTINGS,
                 action::TOGGLE_LOCALE,
                 action::FONT_DECREASE,
@@ -85,6 +90,10 @@ mod tests {
         assert_eq!(LinuxToolbarHit::FontDecrease.action_id(), "font-decrease");
         assert_eq!(LinuxToolbarHit::NewTab.action_id(), "new-tab");
         assert_eq!(LinuxToolbarHit::Settings.action_id(), "open-settings");
+        assert_eq!(
+            LinuxToolbarHit::ControlCenter.action_id(),
+            "open-control-center"
+        );
     }
 
     #[test]

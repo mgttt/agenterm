@@ -12,10 +12,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
 ## Product outcome
 
-- [ ] AgenTerm gains a portable, observable libp2p/IPFS foundation that can
+- [~] AgenTerm gains a portable, observable libp2p/IPFS foundation that can
   prove identity, peer connectivity, content integrity, bounded storage, and
   cleanup independently before any stable product depends on it.
-- [ ] `agenterm-net` remains a separate optional process with its own
+- [~] `agenterm-net` remains a separate optional process with its own
   dependency, binary-size, memory, task, connection, disk, packaging, and
   lifecycle evidence; its failure cannot stall the terminal, destroy a tab, or
   corrupt a workspace.
@@ -59,10 +59,10 @@ protocol, recovery, and packaging contracts pass.
 
 ## Process and integration boundary
 
-- [ ] the first implementation is an independent `agenterm-net` lab process,
+- [x] the first implementation is an independent `agenterm-net` lab process,
   not a library linked into `agenterm.exe`, `agenterm-server`, or
   `agenterm-cc`.
-- [ ] process ownership includes peer keys, listeners, connections, streams,
+- [x] process ownership includes peer keys, listeners, connections, streams,
   block-store handles, pins, caches, network tasks, receipts, and cleanup. A
   consumer owns only its request and projected result.
 - [ ] stable consumers use a versioned, bounded typed protocol with capability
@@ -83,7 +83,7 @@ protocol, recovery, and packaging contracts pass.
 
 ## Identity, transport, and discovery
 
-- [ ] N1 uses invocation-owned or test-scoped identities and reports peer IDs
+- [x] N1 uses invocation-owned or test-scoped identities and reports peer IDs
   without claiming durable identity continuity.
 - [ ] N2 requires an explicit durable-versus-ephemeral identity model, key
   storage, backup, rotation, loss, migration, and multi-device semantics before
@@ -91,7 +91,7 @@ protocol, recovery, and packaging contracts pass.
 - [ ] peer addresses are normalized multiaddrs with typed parse and
   compatibility errors. Transport availability is discoverable by platform
   and build rather than inferred from a successful compile.
-- [ ] local two-process fixtures prove independent identity, handshake, ping
+- [x] local two-process fixtures prove independent identity, handshake, ping
   receipt, bounded timeout/cancellation, peer exit, and orphan-free shutdown.
   Loopback in deterministic tests is a fixture, not an endpoint authorization
   policy.
@@ -101,10 +101,10 @@ protocol, recovery, and packaging contracts pass.
 
 ## IPFS-compatible content foundation
 
-- [ ] CID v1 creation, parsing, codec/multihash identity, byte verification,
+- [x] CID v1 creation, parsing, codec/multihash identity, byte verification,
   deterministic equality, invalid-input diagnosis, and maximum block size form
   the first content-addressing contract.
-- [ ] N1 block `put` and `get` use an invocation-owned temporary store; a
+- [x] N1 block `put` and `get` use an invocation-owned temporary store; a
   successful receipt binds the returned bytes to the CID, and interruption or
   corruption cannot report success.
 - [ ] persistent block stores, DAG traversal, pinning, garbage collection,
@@ -121,10 +121,10 @@ protocol, recovery, and packaging contracts pass.
 
 ## Resource, security, and recovery gates
 
-- [ ] dependency selection records exact crate features, transitive licences,
+- [~] dependency selection records exact crate features, transitive licences,
   build time, binary-size delta, dynamic requirements, supported targets, and
   maintenance status before entering release artifacts.
-- [ ] typed budgets cover listeners, peers, connections, streams, in-flight
+- [~] typed budgets cover listeners, peers, connections, streams, in-flight
   requests, task count, message/block bytes, memory, disk, cache, pins,
   bandwidth, deadlines, output, and shutdown grace.
 - [ ] the threat model covers malicious peers, malformed frames and blocks,
@@ -133,29 +133,41 @@ protocol, recovery, and packaging contracts pass.
 - [ ] partial writes and interrupted promotion preserve the last known-good
   store; corrupt or mismatched blocks are quarantined or rejected with typed
   evidence and never served as verified content.
-- [ ] kill, hang, peer disappearance, invalid CID, oversized block, full disk,
+- [~] kill, hang, peer disappearance, invalid CID, oversized block, full disk,
   corrupt cache, incompatible protocol, restart, upgrade, and rollback leave no
   orphan process or listener and cannot affect GUI/server/PTY continuity.
 
 ## v0.1.11 independent proof gate
 
-- [ ] N0 produces an auditable dependency/licence/feature/size/build-time and
+- [~] N0 produces an auditable dependency/licence/feature/size/build-time and
   six-target feasibility decision without casually raising an existing
   sidecar budget.
-- [ ] two independent local processes exchange distinct peer identities,
+- [x] two independent local processes exchange distinct peer identities,
   complete a libp2p handshake and bounded ping, emit machine-readable receipts,
   and exit cleanly on success, deadline, cancellation, or peer loss.
-- [ ] identical bytes produce the same CID v1; changed bytes, malformed CIDs,
+- [~] identical bytes produce the same CID v1; changed bytes, malformed CIDs,
   unsupported codecs, and oversized blocks fail with stable typed errors.
-- [ ] temporary block put/get returns byte-identical content whose hash matches
+- [x] temporary block put/get returns byte-identical content whose hash matches
   its CID; interruption, corruption, and cleanup paths are deterministic.
-- [ ] force-killing or hanging the experiment leaves the existing
+- [~] force-killing or hanging the experiment leaves the existing
   `agenterm-server`, GUI, PTYs, workspace, and public CLI usable.
-- [ ] tests use isolated identities, ports, stores, and process registries,
+- [x] tests use isolated identities, ports, stores, and process registries,
   avoid fixed sleeps, and expose bounded structured evidence suitable for CI.
-- [ ] until the N2 gate passes, the prototype is not advertised as a stable
+- [x] until the N2 gate passes, the prototype is not advertised as a stable
   release asset, server capability, public IPFS node, or package-market
   backend.
+
+Current N1 evidence lives in the isolated
+`research/agenterm-net/` workspace and the root
+`agenterm-net-research` task. It proves two real child processes over
+loopback TCP + Noise + Yamux + Ping, ephemeral Ed25519 identities, CID v1
+raw/SHA-256 content checks, a 4 MiB temporary block-store bound, corruption
+rejection, typed peer-loss, bounded output/deadlines, cancellation, and
+orphan-free cleanup. The measured Windows release executable is 1,406,976
+bytes; cold/hot release builds were 88.271/25.766 seconds. Peak RSS/thread
+measurement, six-target runtime evidence, complete malformed-CID coverage,
+and a live stable-server/PTY isolation journey remain open, so this evidence
+does not promote the research executable into the stable artifact manifest.
 
 ## Gates before stable service integration
 

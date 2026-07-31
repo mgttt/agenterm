@@ -7,11 +7,13 @@ mod client;
 mod commands;
 #[cfg(any(windows, unix))]
 mod control_authority;
+pub(crate) mod control_center;
 mod control_contract;
 #[cfg(any(windows, unix))]
 mod control_dispatch;
 mod event_journal;
 mod instances;
+mod ipc_endpoint;
 mod ipc_transport;
 mod locale;
 pub mod mcp_catalog;
@@ -57,6 +59,7 @@ mod ui_lease;
 #[cfg(unix)]
 mod ui_snapshot;
 mod upgrade_identity;
+pub mod webview_host;
 pub use upgrade_identity::UpgradeIdentity;
 mod wake_signal;
 mod working_context;
@@ -87,6 +90,7 @@ mod terminal_runtime;
 mod win_app;
 
 pub use client::{run_cli_entry, run_mux_entry, run_script_entry_with_args};
+pub use control_center::run_control_center_entry_with_args;
 pub use mcp_catalog::run_mcp_entry_with_args;
 
 #[cfg(windows)]

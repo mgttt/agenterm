@@ -11,6 +11,10 @@ pub const UI_TABS_SHOW: &str = "ui.tabs.show";
 pub const UI_TABS_HIDE: &str = "ui.tabs.hide";
 pub const UI_TABS_TOGGLE: &str = "ui.tabs.toggle";
 pub const UI_TABS_SET_WIDTH: &str = "ui.tabs.set-width";
+pub const CONTROL_CENTER_OPEN: &str = "control-center.open";
+pub const CONTROL_CENTER_STATUS: &str = "control-center.status";
+pub const CONTROL_CENTER_SNAPSHOT: &str = "control-center.snapshot";
+pub const CONTROL_CENTER_CLOSE: &str = "control-center.close";
 pub const TABS_SET_NOTE: &str = "tabs.set-note";
 pub const TAB_NOTE_MAX_BYTES: usize = 4096;
 
@@ -198,6 +202,66 @@ const SESSION_TARGET_PARAMETERS: &[OperationParameterSpec] = &[OperationParamete
 }];
 
 pub const OPERATION_CATALOG: &[OperationSpec] = &[
+    OperationSpec {
+        id: CONTROL_CENTER_OPEN,
+        script_surface: "fleet.control_center.open",
+        class: OperationClass::Control,
+        command: "control-center",
+        action: Some("open-control-center"),
+        aliases: &[],
+        parameters: NO_PARAMETERS,
+        result_type: "control_center_launch",
+        errors: &["control_center_unavailable", "ui_client_unavailable"],
+        events: &[],
+        destructive: false,
+        available: true,
+        since: "0.1.11",
+    },
+    OperationSpec {
+        id: CONTROL_CENTER_STATUS,
+        script_surface: "fleet.control_center.status",
+        class: OperationClass::Observe,
+        command: "control-center",
+        action: None,
+        aliases: &[],
+        parameters: NO_PARAMETERS,
+        result_type: "control_center_status",
+        errors: &[],
+        events: &[],
+        destructive: false,
+        available: true,
+        since: "0.1.11",
+    },
+    OperationSpec {
+        id: CONTROL_CENTER_SNAPSHOT,
+        script_surface: "fleet.control_center.snapshot",
+        class: OperationClass::Observe,
+        command: "control-center",
+        action: None,
+        aliases: &[],
+        parameters: NO_PARAMETERS,
+        result_type: "control_center_snapshot",
+        errors: &["server_unavailable", "server_incompatible"],
+        events: &[],
+        destructive: false,
+        available: true,
+        since: "0.1.11",
+    },
+    OperationSpec {
+        id: CONTROL_CENTER_CLOSE,
+        script_surface: "fleet.control_center.close",
+        class: OperationClass::Control,
+        command: "control-center",
+        action: None,
+        aliases: &[],
+        parameters: NO_PARAMETERS,
+        result_type: "control_center_close",
+        errors: &["control_center_unavailable", "control_center_owner_changed"],
+        events: &[],
+        destructive: false,
+        available: true,
+        since: "0.1.11",
+    },
     OperationSpec {
         id: "protocol.info",
         script_surface: "fleet.protocol.info",
@@ -511,6 +575,13 @@ pub(crate) fn operation_for_args(
     };
     let command = canonical_control_command(command);
     let operation = match command {
+        "control-center" => match args.get(1).map(String::as_str) {
+            Some("open") => operation_by_id(CONTROL_CENTER_OPEN),
+            Some("status") => operation_by_id(CONTROL_CENTER_STATUS),
+            Some("snapshot") => operation_by_id(CONTROL_CENTER_SNAPSHOT),
+            Some("close") => operation_by_id(CONTROL_CENTER_CLOSE),
+            _ => None,
+        },
         "protocol-info" => operation_by_id("protocol.info"),
         "ui-hello" => operation_by_id("ui.hello"),
         "ui-bootstrap" => operation_by_id("ui.bootstrap"),
@@ -532,6 +603,7 @@ pub(crate) fn operation_for_args(
                 "tabs-hide" => UI_TABS_HIDE,
                 "tabs-toggle" | "toggle-tabs" => UI_TABS_TOGGLE,
                 "tabs-set-width" => UI_TABS_SET_WIDTH,
+                "open-control-center" => CONTROL_CENTER_OPEN,
                 action if action.starts_with("tabs-") => {
                     return Err(operation_error(
                         "operation_unknown",
@@ -600,7 +672,40 @@ pub(crate) fn validate_operation_args(
                 &format!("--width must be from {TABS_MIN_WIDTH} to {TABS_MAX_WIDTH}"),
             ));
         }
-    } else if operation.command == "ui-action" && args.len() != 2 {
+    } else if operation.id == CONTROL_CENTER_OPEN
+        && args
+            .first()
+            .is_some_and(|command| command == "control-center")
+    {
+        if !matches!(
+            args,
+            [command, subcommand]
+                if command == "control-center" && subcommand == "open"
+        ) && !matches!(
+            args,
+            [command, subcommand, flag]
+                if command == "control-center"
+                    && subcommand == "open"
+                    && flag == "--no-activate"
+        ) {
+            return Err(operation_error(
+                "operation_invalid_arguments",
+                operation.id,
+                "accepts open with optional --no-activate",
+            ));
+        }
+    } else if operation.id == CONTROL_CENTER_OPEN && args.len() != 2 {
+        return Err(operation_error(
+            "operation_invalid_arguments",
+            operation.id,
+            "ui-action open-control-center does not accept additional arguments",
+        ));
+    } else if (matches!(
+        operation.id,
+        CONTROL_CENTER_STATUS | CONTROL_CENTER_SNAPSHOT | CONTROL_CENTER_CLOSE
+    ) || operation.command == "ui-action")
+        && args.len() != 2
+    {
         return Err(operation_error(
             "operation_invalid_arguments",
             operation.id,
@@ -685,6 +790,43 @@ mod tests {
         assert_eq!(
             operation.map(|operation| operation.id),
             Some(UI_TABS_TOGGLE)
+        );
+    }
+
+    #[test]
+    fn control_center_surfaces_share_the_stable_open_identity() {
+        for values in [
+            &["control-center", "open"][..],
+            &["control-center", "open", "--no-activate"][..],
+            &["ui-action", "open-control-center"][..],
+        ] {
+            let operation = validate_operation_args(&args(values)).unwrap();
+            assert_eq!(
+                operation.map(|operation| operation.id),
+                Some(CONTROL_CENTER_OPEN)
+            );
+        }
+        assert_eq!(
+            validate_operation_args(&args(&["control-center", "status"]))
+                .unwrap()
+                .map(|operation| operation.id),
+            Some(CONTROL_CENTER_STATUS)
+        );
+        assert_eq!(
+            validate_operation_args(&args(&["control-center", "snapshot"]))
+                .unwrap()
+                .map(|operation| operation.id),
+            Some(CONTROL_CENTER_SNAPSHOT)
+        );
+        assert_eq!(
+            validate_operation_args(&args(&["control-center", "close"]))
+                .unwrap()
+                .map(|operation| operation.id),
+            Some(CONTROL_CENTER_CLOSE)
+        );
+        assert!(
+            validate_operation_args(&args(&["control-center", "snapshot", "--no-activate"]))
+                .is_err()
         );
     }
 

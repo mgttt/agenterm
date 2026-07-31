@@ -12,6 +12,7 @@ use crate::platform::action;
 pub(crate) enum MacosToolbarHit {
     ToggleTabs,
     NewTab,
+    ControlCenter,
     Settings,
     ToggleLocale,
     FontDecrease,
@@ -19,11 +20,12 @@ pub(crate) enum MacosToolbarHit {
 }
 
 impl MacosToolbarHit {
-    /// Visible left-to-right order, with right-anchored controls following the
-    /// two leading workspace controls.
-    pub(crate) const ORDER: [Self; 6] = [
+    /// Product order: two left controls, the centered Control Center entry,
+    /// then the right-anchored settings/locale/font group.
+    pub(crate) const ORDER: [Self; 7] = [
         Self::ToggleTabs,
         Self::NewTab,
+        Self::ControlCenter,
         Self::Settings,
         Self::ToggleLocale,
         Self::FontDecrease,
@@ -34,6 +36,7 @@ impl MacosToolbarHit {
         match self {
             Self::ToggleTabs => action::TOGGLE_TABS,
             Self::NewTab => action::NEW_TAB,
+            Self::ControlCenter => action::OPEN_CONTROL_CENTER,
             Self::Settings => action::OPEN_SETTINGS,
             Self::ToggleLocale => action::TOGGLE_LOCALE,
             Self::FontDecrease => action::FONT_DECREASE,
@@ -60,6 +63,7 @@ mod tests {
             [
                 "toggle-tabs",
                 "new-tab",
+                "open-control-center",
                 "open-settings",
                 "toggle-locale",
                 "font-decrease",

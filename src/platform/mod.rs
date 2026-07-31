@@ -36,15 +36,17 @@ pub mod macos;
 pub mod action {
     pub const NEW_TAB: &str = "new-tab";
     pub const TOGGLE_TABS: &str = "toggle-tabs";
+    pub const OPEN_CONTROL_CENTER: &str = "open-control-center";
     pub const OPEN_SETTINGS: &str = "open-settings";
     pub const TOGGLE_LOCALE: &str = "toggle-locale";
     pub const FONT_DECREASE: &str = "font-decrease";
     pub const FONT_INCREASE: &str = "font-increase";
 
     /// Canonical left-to-right toolbar order. Every adapter `ORDER` must match.
-    pub const TOOLBAR_ACTION_ORDER: [&str; 6] = [
+    pub const TOOLBAR_ACTION_ORDER: [&str; 7] = [
         TOGGLE_TABS,
         NEW_TAB,
+        OPEN_CONTROL_CENTER,
         OPEN_SETTINGS,
         TOGGLE_LOCALE,
         FONT_DECREASE,
@@ -326,6 +328,7 @@ mod tests {
         let expected = [
             ("new-tab", action::NEW_TAB),
             ("toggle-tabs", action::TOGGLE_TABS),
+            ("open-control-center", action::OPEN_CONTROL_CENTER),
             ("open-settings", action::OPEN_SETTINGS),
             ("toggle-locale", action::TOGGLE_LOCALE),
             ("font-decrease", action::FONT_DECREASE),
@@ -343,6 +346,7 @@ mod tests {
             [
                 "toggle-tabs",
                 "new-tab",
+                "open-control-center",
                 "open-settings",
                 "toggle-locale",
                 "font-decrease",

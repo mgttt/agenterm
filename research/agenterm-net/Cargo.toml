@@ -1,0 +1,33 @@
+[package]
+name = "agenterm-net"
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.85"
+description = "Disposable AgenTerm libp2p and content-addressing research spike"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[workspace]
+
+[dependencies]
+cid = "0.11"
+libp2p = { version = "0.56", default-features = false, features = [
+    "macros",
+    "noise",
+    "ping",
+    "tcp",
+    "tokio",
+    "yamux",
+] }
+multihash-codetable = { version = "0.2", features = ["sha2"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+
+[profile.release]
+opt-level = "z"
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = true

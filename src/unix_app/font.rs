@@ -113,7 +113,7 @@ static GLYPHS: [[u8; GLYPH_ROWS]; GLYPH_COUNT] = [
     [0x6E, 0x3B, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00], // ~
 ];
 
-pub(super) fn glyph_rows(ch: char) -> Option<&'static [u8; GLYPH_ROWS]> {
+pub(crate) fn glyph_rows(ch: char) -> Option<&'static [u8; GLYPH_ROWS]> {
     let code = ch as u32;
     if !(FIRST_CHAR as u32..=LAST_CHAR as u32).contains(&code) {
         return None;
@@ -122,12 +122,12 @@ pub(super) fn glyph_rows(ch: char) -> Option<&'static [u8; GLYPH_ROWS]> {
     Some(&GLYPHS[index])
 }
 
-pub(super) fn row_contains_pixel(row: u8, column: u32) -> bool {
+pub(crate) fn row_contains_pixel(row: u8, column: u32) -> bool {
     column < GLYPH_WIDTH && row & (1 << column) != 0
 }
 
-pub(super) const GLYPH_WIDTH: u32 = 8;
-pub(super) const GLYPH_HEIGHT: u32 = 8;
+pub(crate) const GLYPH_WIDTH: u32 = 8;
+pub(crate) const GLYPH_HEIGHT: u32 = 8;
 
 const MAX_COLLECTION_FACES: u32 = 32;
 const MAX_CACHED_GLYPHS: usize = 4096;

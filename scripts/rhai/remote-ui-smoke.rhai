@@ -695,6 +695,7 @@ try {
 
     print("STEP recover hidden Tabs from toolbar, system menu, and status bar");
     let tabs_button = gui.window_control(2104);
+    let control_center_button = gui.window_control(2138);
     let settings_button = gui.window_control(2112);
     let new_button = gui.window_control(2103);
     let locale_button = gui.window_control(2129);
@@ -705,6 +706,10 @@ try {
         tabs_button.text == "<Tabs"
             && toolbar.layout.toolbar.tabs.left
                 < toolbar.layout.toolbar["new"].left
+            && toolbar.layout.toolbar["new"].right
+                <= toolbar.layout.toolbar.control_center.left
+            && toolbar.layout.toolbar.control_center.right
+                <= toolbar.layout.toolbar.settings.left
             && toolbar.layout.toolbar.settings.right
                 <= toolbar.layout.toolbar.locale.left
             && toolbar.layout.toolbar.locale.right
@@ -717,6 +722,7 @@ try {
     );
     require(
         locale_button.text == "En|Zh"
+            && control_center_button.text == "Control Center"
             && font_decrease_button.text == "z"
             && font_increase_button.text == "Z",
         "remote_ui_toolbar_new_controls_invalid"

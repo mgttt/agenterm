@@ -104,7 +104,7 @@ Use PowerShell from the repository root:
 
 Linux/macOS have matching `./build.sh`, `./check.sh`, `./lint.sh`, and
 `./release.sh` aliases over `scripts/bootstrap.sh`. Native Unix `build` emits
-the five client binaries; default Unix `check` is the portable Quick lane, and
+the six client binaries; default Unix `check` is the portable Quick lane, and
 default Unix `release` is validation-only. Stress qualification, Windows
 packaging, tag, and push remain explicit Windows release-authority operations.
 Do not add an unmatched `.cmd` or `.bat`: prefer a named Rhai task, and when a
@@ -170,8 +170,8 @@ checks may skip the bounded-journal saturation load. A candidate-bound
 qualification receipt requires `check.cmd --release --include-stress`; packaging
 must consume that exact receipt and must not rebuild.
 The release gate enforces explicit budgets of 4 MiB for `agenterm.exe` and
-2 MiB each for `agenterm-cli.exe`, `agenterm-mux.exe`, and
-`agenterm-mcp.exe`; investigate dependency
+`agenterm-cc.exe`, plus 2 MiB each for `agenterm-cli.exe`,
+`agenterm-mux.exe`, and `agenterm-mcp.exe`; investigate dependency
 or feature growth instead of raising them casually.
 
 ## Runtime control and observation

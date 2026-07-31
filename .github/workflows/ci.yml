@@ -63,6 +63,10 @@ jobs:
           target/x86_64-unknown-linux-gnu/debug
       - name: Exercise public Linux Script CLI
         run: cargo test --locked --target x86_64-unknown-linux-gnu --test linux_script_cli
+      - name: Validate isolated agenterm-net research loop
+        env:
+          AGENTERM_BOOTSTRAP_TASK: agenterm-net-research
+        run: ./scripts/bootstrap.sh
 
   linux-aarch64:
     runs-on: ubuntu-latest

@@ -183,6 +183,20 @@
       "network": ["loopback"],
       "evidence": ["task.workbench-smoke"]
     },
+    "control-center-smoke": {
+      "inputs": ["staged-control-center", "isolated-settings"],
+      "outputs": ["control-center-evidence"],
+      "budget": {"timeout_ms": 120000, "max_operations": 10000000, "max_output_bytes": 1048576},
+      "network": [],
+      "evidence": ["task.control-center-smoke"]
+    },
+    "agenterm-net-research": {
+      "inputs": ["research-source", "research-cargo-lock"],
+      "outputs": ["libp2p-cid-block-store-evidence"],
+      "budget": {"timeout_ms": 600000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": ["dependency_fetch", "loopback"],
+      "evidence": ["task.agenterm-net-research"]
+    },
     "fleet-smoke": {
       "inputs": ["staged-binaries", "isolated-workspace"],
       "outputs": ["fleet-evidence"],
@@ -582,6 +596,28 @@
       "dependencies": [],
       "platforms": ["windows"],
       "side_effects": ["artifact_write", "process_spawn", "gui_spawn", "network_loopback"]
+    },
+    {
+      "id": "control-center-smoke",
+      "description": "Prove the isolated Control Center offline contract, PID reuse, no-activate launch, stale-owner recovery, and orphan-free cleanup",
+      "entry": "scripts/rhai/control-center-smoke.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "args": [".", "dist/agenterm-cc.exe"],
+      "dependencies": [],
+      "platforms": ["windows"],
+      "side_effects": ["artifact_write", "process_spawn", "gui_spawn"]
+    },
+    {
+      "id": "agenterm-net-research",
+      "description": "Validate the isolated research-only libp2p, CID, temporary block-store, and process-cleanup loop",
+      "entry": "scripts/rhai/agenterm-net-research.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "args": ["."],
+      "dependencies": [],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write", "process_spawn", "network_loopback"]
     },
     {
       "id": "fleet-smoke",

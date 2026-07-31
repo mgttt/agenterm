@@ -21,6 +21,7 @@ pub(crate) const COMMAND_CATALOG: &[CommandIdentity] = &[
     command("attach-session", &["attach"]),
     command("active-window", &["active-tab"]),
     command("capture-pane", &["capturep"]),
+    command("control-center", &[]),
     command("display-message", &["display"]),
     command("dump-cells", &[]),
     command("get-settings", &[]),
@@ -366,7 +367,7 @@ pub(crate) fn validate_control_command(args: &[String]) -> Result<(), String> {
         }
         return Err(format!(
             "unknown option '{argument}' for '{command}'. To target an AgenTerm instance, put \
-             `--address HOST:PORT` before the command or set AGENTERM_IPC_ADDRESS.\nUsage: {}",
+             `--endpoint ENDPOINT`, legacy `--address HOST:PORT`, or `--instance NAME` before the command.\nUsage: {}",
             specification.usage
         ));
     }
@@ -392,6 +393,12 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
              [--max-bytes N --json]",
             &["-t", "--max-bytes"][..],
             &["-p", "--raw-escaped", "--json"][..],
+            false,
+        ),
+        "control-center" => (
+            "agenterm-cli control-center open|status|snapshot|close [--no-activate]",
+            &[][..],
+            &["--no-activate"][..],
             false,
         ),
         "display-message" | "display" => (
@@ -771,6 +778,7 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
              [--client-width PX --client-height PX] \
              [--terminal-grid-changed-from ROWSxCOLS] \
              [--modal-kind KIND|none|closed] [--modal-target target] \
+             [-t target --tab-editor-state open|closed] \
              [--timeout-ms ms]",
             &[
                 "--active",
@@ -784,6 +792,7 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
                 "--terminal-grid-changed-from",
                 "--modal-kind",
                 "--modal-target",
+                "--tab-editor-state",
                 "--timeout-ms",
             ][..],
             &[][..],
@@ -1185,7 +1194,7 @@ mod tests {
         let error = validate_control_command(&args(&["capture-pane", "-a", "127.0.0.1:48914"]))
             .unwrap_err();
         assert!(error.contains("unknown option '-a'"));
-        assert!(error.contains("--address HOST:PORT"));
+        assert!(error.contains("--endpoint ENDPOINT"));
         assert!(validate_control_command(&args(&["capture-pane", "-p", "-t", "@1"])).is_ok());
     }
 

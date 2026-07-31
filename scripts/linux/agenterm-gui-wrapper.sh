@@ -5,4 +5,5 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 if [[ -d "$ROOT/lib" ]]; then
   export LD_LIBRARY_PATH="$ROOT/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 fi
-exec "$ROOT/.agenterm.bin" "$@"
+LAUNCHER="$(basename "$0")"
+exec "$ROOT/.${LAUNCHER}.bin" "$@"

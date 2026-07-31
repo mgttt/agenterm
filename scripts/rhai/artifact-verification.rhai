@@ -155,6 +155,8 @@ let cli = std::path::join(dist, "agenterm-cli.exe").display;
 let mux = std::path::join(dist, "agenterm-mux.exe").display;
 let script = std::path::join(dist, "agenterm-script.exe").display;
 let mcp = std::path::join(dist, "agenterm-mcp.exe").display;
+let control_center =
+    std::path::join(dist, "agenterm-cc.exe").display;
 require(
     output(script, ["--version"], repo, "artifact_script_version")
         == "agenterm-script " + metadata.version,
@@ -175,6 +177,48 @@ require(
     output(mcp, ["--version"], repo, "artifact_mcp_version")
         == "agenterm-mcp " + metadata.version,
     "artifact_mcp_version_mismatch"
+);
+require(
+    output(
+        control_center,
+        ["--version"],
+        repo,
+        "artifact_control_center_version"
+    ) == "agenterm-cc " + metadata.version,
+    "artifact_control_center_version_mismatch"
+);
+let control_center_capabilities = rhai::json::parse(
+    output(
+        control_center,
+        ["capabilities", "--json"],
+        repo,
+        "artifact_control_center_capabilities"
+    )
+);
+require(
+    control_center_capabilities.schema_version == 1
+        && control_center_capabilities.executable == "agenterm-cc"
+        && control_center_capabilities.role == "isolated_projection"
+        && !control_center_capabilities.owns_terminal_authority
+        && control_center_capabilities.process_reuse
+        && control_center_capabilities.no_activate
+        && control_center_capabilities.views.len == 4,
+    "artifact_control_center_capabilities_invalid"
+);
+let control_center_snapshot = rhai::json::parse(
+    output(
+        control_center,
+        ["snapshot", "--json"],
+        repo,
+        "artifact_control_center_snapshot"
+    )
+);
+require(
+    control_center_snapshot.schema_version == 1
+        && control_center_snapshot.executable == "agenterm-cc"
+        && control_center_snapshot.connected_server == ()
+        && control_center_snapshot.views.len == 4,
+    "artifact_control_center_snapshot_invalid"
 );
 let mcp_capabilities = rhai::json::parse(
     output(

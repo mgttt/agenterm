@@ -19,8 +19,9 @@ use crate::{
     event_journal::{EventJournal, EventKind},
     instances::{
         InstanceRegistration, instance_process_is_alive, mark_intentional_shutdown,
-        register_instance,
+        register_typed_instance,
     },
+    ipc_endpoint::EndpointSelectorArgs,
     ipc_transport::{IpcEnvelope, start_ipc_server},
     operations::{
         UI_TABS_HIDE, UI_TABS_SET_WIDTH, UI_TABS_SHOW, UI_TABS_TOGGLE, validate_operation_args,
@@ -136,25 +137,49 @@ pub fn run_server_entry() -> i32 {
 }
 
 fn configure_server_launch(arguments: &[String]) -> Result<()> {
-    let mut address = None;
+    let mut selectors = EndpointSelectorArgs::default();
     let mut position = 0;
     while position < arguments.len() {
         match arguments[position].as_str() {
             "--address" => {
-                if address.is_some() {
+                if selectors.address.is_some() {
                     anyhow::bail!("agenterm-server.exe --address may be specified only once");
                 }
                 let value = arguments
                     .get(position + 1)
                     .context("agenterm-server.exe --address requires HOST:PORT")?;
                 crate::client::parse_loopback_ipc_address(value)?;
-                address = Some(value.clone());
+                selectors.address = Some(value.clone());
+                position += 2;
+            }
+            "--endpoint" => {
+                if selectors.endpoint.is_some() {
+                    anyhow::bail!("agenterm-server.exe --endpoint may be specified only once");
+                }
+                selectors.endpoint = Some(
+                    arguments
+                        .get(position + 1)
+                        .context("agenterm-server.exe --endpoint requires ENDPOINT")?
+                        .clone(),
+                );
+                position += 2;
+            }
+            "--instance" => {
+                if selectors.instance.is_some() {
+                    anyhow::bail!("agenterm-server.exe --instance may be specified only once");
+                }
+                selectors.instance = Some(
+                    arguments
+                        .get(position + 1)
+                        .context("agenterm-server.exe --instance requires NAME")?
+                        .clone(),
+                );
                 position += 2;
             }
             argument => anyhow::bail!("unsupported AgenTerm server argument: {argument}"),
         }
     }
-    crate::client::set_ipc_address_override(address);
+    crate::client::set_ipc_selectors(selectors)?;
     Ok(())
 }
 
@@ -204,8 +229,14 @@ impl ServerState {
             .max()
             .unwrap_or(0)
             .saturating_add(1);
-        let instance_registration =
-            register_instance(&crate::ipc_address(), &workspace_path(), &session_name)?;
+        let resolved = crate::client::resolved_ipc_endpoint()?;
+        let instance_registration = register_typed_instance(
+            resolved.endpoint,
+            resolved.logical_instance,
+            resolved.server_scope_id,
+            &workspace_path(),
+            &session_name,
+        )?;
         let event_journal = EventJournal::new();
         let command_identity = event_journal.position().epoch;
         let mut state = Self {

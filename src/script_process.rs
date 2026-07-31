@@ -989,8 +989,8 @@ fn child_process_id(child: &ScriptChild) -> Result<u32, Box<EvalAltResult>> {
 fn child_window_key(child: &mut ScriptChild, key: &str) -> Result<(), Box<EvalAltResult>> {
     use windows_sys::Win32::UI::{
         Input::KeyboardAndMouse::{
-            VK_BACK, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_HOME, VK_LEFT, VK_RETURN, VK_RIGHT,
-            VK_TAB, VK_UP,
+            VK_BACK, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_F2, VK_HOME, VK_LEFT, VK_RETURN,
+            VK_RIGHT, VK_TAB, VK_UP,
         },
         WindowsAndMessaging::{PostMessageW, WM_KEYDOWN, WM_KEYUP},
     };
@@ -1002,6 +1002,7 @@ fn child_window_key(child: &mut ScriptChild, key: &str) -> Result<(), Box<EvalAl
         "End" => VK_END,
         "Enter" => VK_RETURN,
         "Escape" => VK_ESCAPE,
+        "F2" => VK_F2,
         "Home" => VK_HOME,
         "Left" => VK_LEFT,
         "Right" => VK_RIGHT,
@@ -1011,7 +1012,7 @@ fn child_window_key(child: &mut ScriptChild, key: &str) -> Result<(), Box<EvalAl
             return Err(process_window_error(
                 "process_window_key_invalid",
                 "Child.window_key",
-                "window key must be Backspace, Delete, Down, End, Enter, Escape, Home, Left, Right, Tab, or Up",
+                "window key must be Backspace, Delete, Down, End, Enter, Escape, F2, Home, Left, Right, Tab, or Up",
                 Some("invalid_input"),
             ));
         }

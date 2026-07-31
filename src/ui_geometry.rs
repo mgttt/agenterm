@@ -22,10 +22,8 @@ const TREE_ACTION_GAP: i32 = 2;
 const TREE_ACTION_INSET: i32 = 2;
 const TREE_ACTION_TOP_INSET: i32 = 3;
 const TREE_COMPACT_ADD_ACTION_WIDTH: i32 = 24;
-const TREE_COMPACT_EDIT_ACTION_WIDTH: i32 = 34;
 const TREE_COMPACT_CLOSE_ACTION_WIDTH: i32 = 24;
 const TREE_ADD_ACTION_WIDTH: i32 = 24;
-const TREE_EDIT_ACTION_WIDTH: i32 = 48;
 const TREE_CLOSE_ACTION_WIDTH: i32 = 62;
 const TREE_SAVE_ACTION_WIDTH: i32 = 42;
 const TREE_CANCEL_ACTION_WIDTH: i32 = 48;
@@ -40,11 +38,13 @@ const WORKSPACE_TOOLBAR_BUTTON_GAP: i32 = 4;
 const WORKSPACE_TOOLBAR_BUTTON_HEIGHT: i32 = 34;
 const WORKSPACE_NEW_BUTTON_WIDTH: i32 = 66;
 const WORKSPACE_TABS_BUTTON_WIDTH: i32 = 52;
+const WORKSPACE_CONTROL_CENTER_BUTTON_WIDTH: i32 = 120;
 const WORKSPACE_SETTINGS_BUTTON_WIDTH: i32 = 78;
 const WORKSPACE_LOCALE_BUTTON_WIDTH: i32 = 58;
 const WORKSPACE_FONT_BUTTON_WIDTH: i32 = 34;
 const WORKSPACE_COMPACT_NEW_BUTTON_WIDTH: i32 = 32;
 const WORKSPACE_COMPACT_ACTION_BUTTON_WIDTH: i32 = 32;
+const WORKSPACE_COMPACT_CONTROL_CENTER_BUTTON_WIDTH: i32 = 40;
 const WORKSPACE_COMPACT_LOCALE_BUTTON_WIDTH: i32 = 36;
 const WORKSPACE_COMPACT_FONT_BUTTON_WIDTH: i32 = 22;
 const STATUS_TABS_WIDTH: i32 = 72;
@@ -111,6 +111,9 @@ pub(crate) struct WorkspaceToolbarLayout {
     pub(crate) mode: WorkspaceToolbarMode,
     pub(crate) new_tab: PixelRect,
     pub(crate) tabs: PixelRect,
+    /// Visually centered on the terminal workbench column, independent of the
+    /// left and right action groups.
+    pub(crate) control_center: PixelRect,
     pub(crate) settings: PixelRect,
     pub(crate) locale: PixelRect,
     pub(crate) font_decrease: PixelRect,
@@ -241,22 +244,25 @@ fn workspace_toolbar_region(toolbar: PixelRect, visible: bool) -> Option<Workspa
     } else {
         WorkspaceToolbarMode::Compact
     };
-    let (new_width, tabs_width, settings_width, locale_width, font_width) = match mode {
-        WorkspaceToolbarMode::Full => (
-            WORKSPACE_NEW_BUTTON_WIDTH,
-            WORKSPACE_TABS_BUTTON_WIDTH,
-            WORKSPACE_SETTINGS_BUTTON_WIDTH,
-            WORKSPACE_LOCALE_BUTTON_WIDTH,
-            WORKSPACE_FONT_BUTTON_WIDTH,
-        ),
-        WorkspaceToolbarMode::Compact => (
-            WORKSPACE_COMPACT_NEW_BUTTON_WIDTH,
-            WORKSPACE_COMPACT_ACTION_BUTTON_WIDTH,
-            WORKSPACE_COMPACT_ACTION_BUTTON_WIDTH,
-            WORKSPACE_COMPACT_LOCALE_BUTTON_WIDTH,
-            WORKSPACE_COMPACT_FONT_BUTTON_WIDTH,
-        ),
-    };
+    let (new_width, tabs_width, control_center_width, settings_width, locale_width, font_width) =
+        match mode {
+            WorkspaceToolbarMode::Full => (
+                WORKSPACE_NEW_BUTTON_WIDTH,
+                WORKSPACE_TABS_BUTTON_WIDTH,
+                WORKSPACE_CONTROL_CENTER_BUTTON_WIDTH,
+                WORKSPACE_SETTINGS_BUTTON_WIDTH,
+                WORKSPACE_LOCALE_BUTTON_WIDTH,
+                WORKSPACE_FONT_BUTTON_WIDTH,
+            ),
+            WorkspaceToolbarMode::Compact => (
+                WORKSPACE_COMPACT_NEW_BUTTON_WIDTH,
+                WORKSPACE_COMPACT_ACTION_BUTTON_WIDTH,
+                WORKSPACE_COMPACT_CONTROL_CENTER_BUTTON_WIDTH,
+                WORKSPACE_COMPACT_ACTION_BUTTON_WIDTH,
+                WORKSPACE_COMPACT_LOCALE_BUTTON_WIDTH,
+                WORKSPACE_COMPACT_FONT_BUTTON_WIDTH,
+            ),
+        };
     let button_top = toolbar.top + (toolbar.height() - WORKSPACE_TOOLBAR_BUTTON_HEIGHT) / 2;
     let button_bottom = button_top + WORKSPACE_TOOLBAR_BUTTON_HEIGHT;
     let tabs = rect(
@@ -269,6 +275,13 @@ fn workspace_toolbar_region(toolbar: PixelRect, visible: bool) -> Option<Workspa
         tabs.right + WORKSPACE_TOOLBAR_BUTTON_GAP,
         button_top,
         tabs.right + WORKSPACE_TOOLBAR_BUTTON_GAP + new_width,
+        button_bottom,
+    );
+    let toolbar_center = toolbar.left + toolbar.width() / 2;
+    let control_center = rect(
+        toolbar_center - control_center_width / 2,
+        button_top,
+        toolbar_center - control_center_width / 2 + control_center_width,
         button_bottom,
     );
     let font_increase = rect(
@@ -302,6 +315,7 @@ fn workspace_toolbar_region(toolbar: PixelRect, visible: bool) -> Option<Workspa
         mode,
         new_tab,
         tabs,
+        control_center,
         settings,
         locale,
         font_decrease,
@@ -310,22 +324,14 @@ fn workspace_toolbar_region(toolbar: PixelRect, visible: bool) -> Option<Workspa
 }
 
 const fn full_toolbar_required_width() -> i32 {
-    WORKSPACE_TOOLBAR_HORIZONTAL_PADDING * 2
-        + WORKSPACE_NEW_BUTTON_WIDTH
-        + WORKSPACE_TABS_BUTTON_WIDTH
-        + WORKSPACE_SETTINGS_BUTTON_WIDTH
-        + WORKSPACE_LOCALE_BUTTON_WIDTH
-        + WORKSPACE_FONT_BUTTON_WIDTH * 2
-        + WORKSPACE_TOOLBAR_BUTTON_GAP * 4
+    // The center control is centered on the entire workbench column, while
+    // Settings/locale/font remain right anchored. This is the first width at
+    // which those independent groups retain one full inter-button gap.
+    560
 }
 
 const fn compact_toolbar_required_width() -> i32 {
-    WORKSPACE_TOOLBAR_HORIZONTAL_PADDING * 2
-        + WORKSPACE_COMPACT_NEW_BUTTON_WIDTH
-        + WORKSPACE_COMPACT_ACTION_BUTTON_WIDTH * 2
-        + WORKSPACE_COMPACT_LOCALE_BUTTON_WIDTH
-        + WORKSPACE_COMPACT_FONT_BUTTON_WIDTH * 2
-        + WORKSPACE_TOOLBAR_BUTTON_GAP * 4
+    296
 }
 
 fn status_segment_layout(status: PixelRect, tabs_visible: bool) -> StatusSegmentLayout {
@@ -532,7 +538,7 @@ pub(crate) struct TreeRowActionGeometry {
     pub(crate) density: TreeRowActionDensity,
     /// The add-child action in normal mode. Editing mode omits it.
     pub(crate) add_child: Option<PixelRect>,
-    /// Edit in normal mode, Save in editing mode.
+    /// Empty in normal mode, Save in editing mode.
     pub(crate) primary: PixelRect,
     /// Close in normal mode, Cancel in editing mode.
     pub(crate) secondary: PixelRect,
@@ -845,16 +851,10 @@ fn desired_tree_action_width(sidebar_width: i32, mode: TreeRowMode) -> i32 {
     let compact = sidebar_width < TREE_COMPACT_ACTION_THRESHOLD;
     match (mode, compact) {
         (TreeRowMode::Normal, true) => {
-            TREE_COMPACT_ADD_ACTION_WIDTH
-                + TREE_COMPACT_EDIT_ACTION_WIDTH
-                + TREE_COMPACT_CLOSE_ACTION_WIDTH
-                + TREE_ACTION_GAP * 2
+            TREE_COMPACT_ADD_ACTION_WIDTH + TREE_COMPACT_CLOSE_ACTION_WIDTH + TREE_ACTION_GAP
         }
         (TreeRowMode::Normal, false) => {
-            TREE_ADD_ACTION_WIDTH
-                + TREE_EDIT_ACTION_WIDTH
-                + TREE_CLOSE_ACTION_WIDTH
-                + TREE_ACTION_GAP * 2
+            TREE_ADD_ACTION_WIDTH + TREE_CLOSE_ACTION_WIDTH + TREE_ACTION_GAP
         }
         (TreeRowMode::Editing, true) => {
             TREE_COMPACT_SAVE_ACTION_WIDTH + TREE_COMPACT_CANCEL_ACTION_WIDTH + TREE_ACTION_GAP
@@ -872,21 +872,16 @@ fn tree_row_actions(row: PixelRect, mode: TreeRowMode) -> TreeRowActionGeometry 
         TreeRowActionDensity::Full
     };
     let (desired_widths, action_count) = match (mode, density) {
-        (TreeRowMode::Normal, TreeRowActionDensity::Full) => (
-            [
-                TREE_ADD_ACTION_WIDTH,
-                TREE_EDIT_ACTION_WIDTH,
-                TREE_CLOSE_ACTION_WIDTH,
-            ],
-            3_usize,
-        ),
+        (TreeRowMode::Normal, TreeRowActionDensity::Full) => {
+            ([TREE_ADD_ACTION_WIDTH, TREE_CLOSE_ACTION_WIDTH, 0], 2_usize)
+        }
         (TreeRowMode::Normal, TreeRowActionDensity::Compact) => (
             [
                 TREE_COMPACT_ADD_ACTION_WIDTH,
-                TREE_COMPACT_EDIT_ACTION_WIDTH,
                 TREE_COMPACT_CLOSE_ACTION_WIDTH,
+                0,
             ],
-            3,
+            2,
         ),
         (TreeRowMode::Editing, TreeRowActionDensity::Full) => {
             ([TREE_SAVE_ACTION_WIDTH, TREE_CANCEL_ACTION_WIDTH, 0], 2)
@@ -933,8 +928,8 @@ fn tree_row_actions(row: PixelRect, mode: TreeRowMode) -> TreeRowActionGeometry 
             bounds,
             density,
             add_child: Some(rects[0]),
-            primary: rects[1],
-            secondary: rects[2],
+            primary: rect(rects[0].right, top, rects[0].right, bottom),
+            secondary: rects[1],
         },
         TreeRowMode::Editing => TreeRowActionGeometry {
             bounds,
@@ -987,6 +982,7 @@ mod tests {
         for action in [
             toolbar.new_tab,
             toolbar.tabs,
+            toolbar.control_center,
             toolbar.settings,
             toolbar.locale,
             toolbar.font_decrease,
@@ -997,7 +993,8 @@ mod tests {
             assert!(action.width() > 0);
         }
         assert!(toolbar.tabs.right <= toolbar.new_tab.left);
-        assert!(toolbar.new_tab.right <= toolbar.settings.left);
+        assert!(toolbar.new_tab.right <= toolbar.control_center.left);
+        assert!(toolbar.control_center.right <= toolbar.settings.left);
         assert!(toolbar.settings.right <= toolbar.locale.left);
         assert!(toolbar.locale.right <= toolbar.font_decrease.left);
         assert_eq!(toolbar.font_decrease.right, toolbar.font_increase.left);
@@ -1093,10 +1090,13 @@ mod tests {
         assert_eq!(wide.terminal, rect(480, 46, 1000, 570));
         assert_eq!(wide.composer, rect(480, 570, 1000, 674));
         assert_eq!(wide.status, rect(480, 674, 1000, 700));
-        assert_toolbar_valid(wide, WorkspaceToolbarMode::Full);
+        assert_toolbar_valid(wide, WorkspaceToolbarMode::Compact);
 
         let very_narrow = layout(200, 300, false, 250);
-        assert_toolbar_valid(very_narrow, WorkspaceToolbarMode::Compact);
+        assert!(
+            very_narrow.workspace_toolbar.is_none(),
+            "a too-narrow workbench must omit unusably overlapping controls"
+        );
     }
 
     #[test]
@@ -1173,6 +1173,7 @@ mod tests {
                     toolbar.divider,
                     toolbar.new_tab,
                     toolbar.tabs,
+                    toolbar.control_center,
                     toolbar.settings,
                     toolbar.locale,
                     toolbar.font_decrease,
@@ -1181,7 +1182,8 @@ mod tests {
                     assert_valid_rect(candidate, geometry.client);
                 }
                 assert!(toolbar.tabs.right <= toolbar.new_tab.left);
-                assert!(toolbar.new_tab.right <= toolbar.settings.left);
+                assert!(toolbar.new_tab.right <= toolbar.control_center.left);
+                assert!(toolbar.control_center.right <= toolbar.settings.left);
                 assert!(toolbar.settings.right <= toolbar.locale.left);
                 assert!(toolbar.locale.right <= toolbar.font_decrease.left);
                 assert_eq!(toolbar.font_decrease.right, toolbar.font_increase.left);
@@ -1264,7 +1266,7 @@ mod tests {
     }
 
     #[test]
-    fn normal_row_partitions_text_and_three_actions_without_overlap() {
+    fn normal_row_partitions_text_and_two_actions_without_overlap() {
         let geometry = tree_row_geometry_for_mode(0, 1, 360, TreeRowMode::Normal);
         let add = geometry
             .actions
@@ -1276,7 +1278,7 @@ mod tests {
         assert!(add.right <= geometry.actions.primary.left);
         assert!(geometry.actions.primary.right <= geometry.actions.secondary.left);
         assert_eq!(add.width(), TREE_ADD_ACTION_WIDTH);
-        assert_eq!(geometry.actions.primary.width(), TREE_EDIT_ACTION_WIDTH);
+        assert_eq!(geometry.actions.primary.width(), 0);
         assert_eq!(geometry.actions.secondary.width(), TREE_CLOSE_ACTION_WIDTH);
         assert_eq!(geometry.name.left, geometry.note.left);
         assert_eq!(geometry.name.right, geometry.note.right);
@@ -1317,7 +1319,11 @@ mod tests {
                 assert!(add.width() >= 20);
                 assert!(add.right <= geometry.actions.primary.left);
             }
-            assert!(geometry.actions.primary.width() >= 20);
+            if mode == TreeRowMode::Editing {
+                assert!(geometry.actions.primary.width() >= 20);
+            } else {
+                assert_eq!(geometry.actions.primary.width(), 0);
+            }
             assert!(geometry.actions.secondary.width() >= 20);
             assert!(geometry.actions.primary.right <= geometry.actions.secondary.left);
         }
@@ -1640,7 +1646,7 @@ mod tests {
     }
 
     #[test]
-    fn default_tabs_width_gives_compact_edit_label_more_room() {
+    fn default_tabs_width_omits_edit_action() {
         let geometry = tree_row_geometry_for_mode(0, 0, TABS_DEFAULT_WIDTH, TreeRowMode::Normal);
         let add = geometry
             .actions
@@ -1649,10 +1655,7 @@ mod tests {
 
         assert_eq!(geometry.actions.density, TreeRowActionDensity::Compact);
         assert_eq!(add.width(), TREE_COMPACT_ADD_ACTION_WIDTH);
-        assert_eq!(
-            geometry.actions.primary.width(),
-            TREE_COMPACT_EDIT_ACTION_WIDTH
-        );
+        assert_eq!(geometry.actions.primary.width(), 0);
         assert_eq!(
             geometry.actions.secondary.width(),
             TREE_COMPACT_CLOSE_ACTION_WIDTH
@@ -1681,7 +1684,7 @@ mod tests {
             .add_child
             .expect("full normal row has add-child");
         assert_eq!(add.width(), TREE_ADD_ACTION_WIDTH);
-        assert_eq!(normal.actions.primary.width(), TREE_EDIT_ACTION_WIDTH);
+        assert_eq!(normal.actions.primary.width(), 0);
         assert_eq!(normal.actions.secondary.width(), TREE_CLOSE_ACTION_WIDTH);
         assert_eq!(editing.actions.add_child, None);
         assert_eq!(editing.actions.primary.width(), TREE_SAVE_ACTION_WIDTH);

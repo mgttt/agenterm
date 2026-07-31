@@ -35,7 +35,11 @@ use crate::{
     },
     event_journal::{EVENT_CATALOG, EVENT_CATALOG_SCHEMA_VERSION},
     instances::{discover_instances, instance_process_is_alive, prune_instance},
-    ipc_transport::read_bounded_ipc_line,
+    ipc_endpoint::{
+        EndpointSelectorArgs, IpcEndpoint, ResolvedIpcEndpoint, default_workspace_path_for,
+        resolve_ipc_endpoint,
+    },
+    ipc_transport::{IPC_RESPONSE_MAX_BYTES, IpcStream, read_bounded_ipc_line},
     operations::{
         OPERATION_CATALOG, OPERATION_CATALOG_SCHEMA_VERSION, OperationClass, operation_for_args,
         validate_operation_args,
@@ -64,10 +68,9 @@ const IPC_TIMEOUT: Duration = Duration::from_secs(5);
 const IPC_DISCOVERY_TIMEOUT: Duration = Duration::from_millis(500);
 const IPC_AUTOSTART_TIMEOUT: Duration = Duration::from_secs(15);
 const IPC_AUTOSTART_POLL: Duration = Duration::from_millis(100);
-const IPC_MAX_RESPONSE_BYTES: u64 = 8 * 1024 * 1024;
-
 thread_local! {
-    static IPC_ADDRESS_OVERRIDE: RefCell<Option<String>> = const { RefCell::new(None) };
+    static IPC_SELECTOR_OVERRIDE: RefCell<EndpointSelectorArgs> =
+        const { RefCell::new(EndpointSelectorArgs { endpoint: None, address: None, instance: None }) };
 }
 
 struct OwnedScriptTemp {
@@ -136,6 +139,7 @@ struct CliControlOptions {
 pub fn run_cli_entry() -> i32 {
     let mut arguments: Vec<String> = env::args().skip(1).collect();
     let mut control_options = CliControlOptions::default();
+    let mut selectors = EndpointSelectorArgs::default();
     loop {
         match arguments.first().map(String::as_str) {
             Some("--address") => {
@@ -149,9 +153,32 @@ pub fn run_cli_entry() -> i32 {
                     eprintln!("{error:#}");
                     return 2;
                 }
-                IPC_ADDRESS_OVERRIDE.with(|override_address| {
-                    *override_address.borrow_mut() = Some(address);
-                });
+                if selectors.address.replace(address).is_some() {
+                    eprintln!("agenterm-cli --address may be specified only once");
+                    return 2;
+                }
+            }
+            Some("--endpoint") => {
+                if arguments.len() < 2 {
+                    eprintln!("agenterm-cli --endpoint requires a typed endpoint");
+                    return 2;
+                }
+                arguments.remove(0);
+                if selectors.endpoint.replace(arguments.remove(0)).is_some() {
+                    eprintln!("agenterm-cli --endpoint may be specified only once");
+                    return 2;
+                }
+            }
+            Some("--instance") => {
+                if arguments.len() < 2 {
+                    eprintln!("agenterm-cli --instance requires a name");
+                    return 2;
+                }
+                arguments.remove(0);
+                if selectors.instance.replace(arguments.remove(0)).is_some() {
+                    eprintln!("agenterm-cli --instance may be specified only once");
+                    return 2;
+                }
             }
             Some("--request-id") => {
                 if arguments.len() < 2 {
@@ -190,6 +217,10 @@ pub fn run_cli_entry() -> i32 {
             _ => break,
         }
     }
+    if let Err(error) = set_ipc_selectors(selectors) {
+        eprintln!("{error:#}");
+        return 2;
+    }
     if arguments
         .first()
         .is_some_and(|arg| arg == "-V" || arg == "--version")
@@ -210,8 +241,8 @@ pub fn run_cli_entry() -> i32 {
         .is_some_and(|argument| argument.starts_with('-'))
     {
         eprintln!(
-            "unknown global option '{}'. To target an AgenTerm instance, use \
-             `agenterm-cli --address HOST:PORT COMMAND` or set AGENTERM_IPC_ADDRESS.",
+            "unknown global option '{}'. Use --endpoint ENDPOINT, --address HOST:PORT, or \
+             --instance NAME before the command.",
             arguments[0]
         );
         return 2;
@@ -287,7 +318,7 @@ pub fn run_mux_entry() -> i32 {
         return 0;
     }
 
-    let mut address = None;
+    let mut selectors = EndpointSelectorArgs::default();
     let mut session = None;
     loop {
         match arguments.first().map(String::as_str) {
@@ -302,7 +333,32 @@ pub fn run_mux_entry() -> i32 {
                     eprintln!("{error:#}");
                     return 2;
                 }
-                address = Some(candidate);
+                if selectors.address.replace(candidate).is_some() {
+                    eprintln!("agenterm-mux --address may be specified only once");
+                    return 2;
+                }
+            }
+            Some("--endpoint") => {
+                if arguments.len() < 2 {
+                    eprintln!("agenterm-mux --endpoint requires a typed endpoint");
+                    return 2;
+                }
+                arguments.remove(0);
+                if selectors.endpoint.replace(arguments.remove(0)).is_some() {
+                    eprintln!("agenterm-mux --endpoint may be specified only once");
+                    return 2;
+                }
+            }
+            Some("--instance") => {
+                if arguments.len() < 2 {
+                    eprintln!("agenterm-mux --instance requires a name");
+                    return 2;
+                }
+                arguments.remove(0);
+                if selectors.instance.replace(arguments.remove(0)).is_some() {
+                    eprintln!("agenterm-mux --instance may be specified only once");
+                    return 2;
+                }
             }
             Some("--session") => {
                 if arguments.len() < 2 {
@@ -363,32 +419,31 @@ pub fn run_mux_entry() -> i32 {
     {
         arguments.extend(["-t".to_owned(), session]);
     }
-    IPC_ADDRESS_OVERRIDE.with(|override_address| {
-        *override_address.borrow_mut() = address;
-    });
+    if let Err(error) = set_ipc_selectors(selectors) {
+        eprintln!("{error:#}");
+        return 2;
+    }
     run_cli(arguments, CliControlOptions::default())
 }
-pub(crate) fn ipc_address() -> String {
-    if let Some(address) = IPC_ADDRESS_OVERRIDE.with(|value| value.borrow().clone()) {
-        return address;
-    }
-    if let Ok(address) = env::var("AGENTERM_IPC_ADDRESS")
-        && !address.trim().is_empty()
-    {
-        return address;
-    }
-    let user = env::var("USERNAME")
-        .or_else(|_| env::var("USER"))
-        .unwrap_or_else(|_| "default".to_owned());
-    let hash = user.bytes().fold(2_166_136_261_u32, |hash, byte| {
-        (hash ^ u32::from(byte)).wrapping_mul(16_777_619)
-    });
-    format!("127.0.0.1:{}", 42_000 + hash % 10_000)
+pub(crate) fn resolved_ipc_endpoint() -> Result<ResolvedIpcEndpoint> {
+    let selectors = IPC_SELECTOR_OVERRIDE.with(|value| value.borrow().clone());
+    resolve_ipc_endpoint(&selectors).map_err(anyhow::Error::new)
 }
 
-fn has_explicit_ipc_address() -> bool {
-    IPC_ADDRESS_OVERRIDE.with(|value| value.borrow().is_some())
-        || env::var("AGENTERM_IPC_ADDRESS").is_ok_and(|address| !address.trim().is_empty())
+pub(crate) fn ipc_endpoint() -> Result<IpcEndpoint> {
+    let resolved = resolved_ipc_endpoint()?;
+    apply_resolved_environment(&resolved);
+    Ok(resolved.endpoint)
+}
+
+pub(crate) fn ipc_address() -> String {
+    ipc_endpoint()
+        .map(|endpoint| {
+            endpoint
+                .legacy_address()
+                .unwrap_or_else(|| endpoint.to_string())
+        })
+        .unwrap_or_else(|_| "unresolved".to_owned())
 }
 
 pub(crate) fn parse_loopback_ipc_address(address: &str) -> Result<std::net::SocketAddr> {
@@ -404,10 +459,6 @@ pub(crate) fn parse_loopback_ipc_address(address: &str) -> Result<std::net::Sock
         );
     }
     Ok(socket)
-}
-
-pub(crate) fn ipc_socket_addr() -> Result<std::net::SocketAddr> {
-    parse_loopback_ipc_address(&ipc_address())
 }
 
 pub(crate) fn unix_time_ms() -> u64 {
@@ -511,17 +562,44 @@ fn build_control_request(
     ))
 }
 
-pub(crate) fn set_ipc_address_override(address: Option<String>) {
-    IPC_ADDRESS_OVERRIDE.with(|value| *value.borrow_mut() = address);
+pub(crate) fn set_ipc_selectors(selectors: EndpointSelectorArgs) -> Result<()> {
+    resolve_ipc_endpoint(&selectors).map_err(anyhow::Error::new)?;
+    IPC_SELECTOR_OVERRIDE.with(|value| *value.borrow_mut() = selectors);
+    configure_scoped_paths()
+}
+
+pub(crate) fn configure_scoped_paths() -> Result<()> {
+    let resolved = resolved_ipc_endpoint()?;
+    apply_resolved_environment(&resolved);
+    Ok(())
+}
+
+fn apply_resolved_environment(resolved: &ResolvedIpcEndpoint) {
+    if env::var_os("AGENTERM_WORKSPACE_PATH").is_none() {
+        unsafe {
+            env::set_var(
+                "AGENTERM_WORKSPACE_PATH",
+                default_workspace_path_for(resolved),
+            );
+        }
+    }
+    // Do not manufacture an environment selector for implicit compatibility
+    // main. A later resolver call would reinterpret our own
+    // AGENTERM_INSTANCE=main as an explicit native opt-in.
+    if resolved.explicit {
+        unsafe {
+            env::set_var("AGENTERM_INSTANCE", resolved.logical_instance.to_string());
+        }
+    }
 }
 
 pub(crate) fn send_ipc_request(args: Vec<String>) -> Result<IpcResponse> {
     let control = build_control_request(&args, None, IPC_TIMEOUT.as_millis() as u64)?;
-    send_ipc_request_to_with_timeout(&ipc_address(), args, Some(control), IPC_TIMEOUT)
+    send_ipc_request_to_endpoint_with_timeout(&ipc_endpoint()?, args, Some(control), IPC_TIMEOUT)
 }
 
 fn send_control_request(args: Vec<String>, control: ControlRequest) -> Result<IpcResponse> {
-    send_ipc_request_to_with_timeout(&ipc_address(), args, Some(control), IPC_TIMEOUT)
+    send_ipc_request_to_endpoint_with_timeout(&ipc_endpoint()?, args, Some(control), IPC_TIMEOUT)
 }
 
 fn await_ui_client_relay(response: IpcResponse, timeout: Duration) -> Result<IpcResponse> {
@@ -612,7 +690,20 @@ fn send_ipc_request_to_with_timeout(
     control: Option<ControlRequest>,
     timeout: Duration,
 ) -> Result<IpcResponse> {
-    let socket = parse_loopback_ipc_address(address)?;
+    let endpoint = address
+        .parse::<IpcEndpoint>()
+        .or_else(|_| IpcEndpoint::from_legacy_address(address))
+        .map_err(anyhow::Error::new)?;
+    endpoint.validate_local().map_err(anyhow::Error::new)?;
+    send_ipc_request_to_endpoint_with_timeout(&endpoint, args, control, timeout)
+}
+
+fn send_ipc_request_to_endpoint_with_timeout(
+    endpoint: &IpcEndpoint,
+    args: Vec<String>,
+    control: Option<ControlRequest>,
+    timeout: Duration,
+) -> Result<IpcResponse> {
     let deadline = Instant::now() + timeout;
     let remaining = || {
         let duration = deadline.saturating_duration_since(Instant::now());
@@ -624,18 +715,18 @@ fn send_ipc_request_to_with_timeout(
     let connect_timeout = timeout
         .min(Duration::from_millis(100))
         .max(Duration::from_millis(1));
-    let mut connection = std::net::TcpStream::connect_timeout(&socket, connect_timeout)
+    let mut connection = IpcStream::connect(endpoint, connect_timeout)
+        .map_err(anyhow::Error::new)
         .context("AgenTerm server is not running")?;
-    connection.set_write_timeout(Some(remaining()?))?;
+    connection
+        .set_io_timeout(remaining()?)
+        .map_err(anyhow::Error::new)?;
     connection.write_all(serde_json::to_string(&IpcRequest { args, control })?.as_bytes())?;
-    connection.set_write_timeout(Some(remaining()?))?;
     connection.write_all(b"\n")?;
-    connection.set_write_timeout(Some(remaining()?))?;
     connection.flush()?;
-    connection.set_read_timeout(Some(remaining()?))?;
     let mut reader = std::io::BufReader::new(connection);
     let response =
-        read_bounded_ipc_line(&mut reader, IPC_MAX_RESPONSE_BYTES, "AgenTerm IPC response")?;
+        read_bounded_ipc_line(&mut reader, IPC_RESPONSE_MAX_BYTES, "AgenTerm IPC response")?;
     serde_json::from_str(&response).context("invalid response from AgenTerm server")
 }
 
@@ -659,8 +750,12 @@ fn run_list_instances(arguments: &[String]) -> i32 {
             }
             continue;
         }
+        let endpoint = instance
+            .record
+            .resolved_endpoint()
+            .expect("discovery filters records without a usable endpoint");
         let response = send_ipc_request_to_timeout(
-            &instance.record.address,
+            &endpoint.to_string(),
             vec!["ui-snapshot".to_owned()],
             IPC_DISCOVERY_TIMEOUT,
         );
@@ -712,9 +807,20 @@ fn run_list_instances(arguments: &[String]) -> i32 {
         let running_identity = instance.record.upgrade_identity.clone().unwrap_or_default();
         let upgrade = running_identity.compare_staged(&staged_identity);
         let upgrade_explanation = upgrade.explanation();
+        let username = env::var("USERNAME")
+            .or_else(|_| env::var("USER"))
+            .unwrap_or_else(|_| "user".to_owned());
+        let logical_instance = instance.record.resolved_logical_instance();
         views.push(serde_json::json!({
+            "schema_version": 2,
             "pid": instance.record.pid,
             "address": instance.record.address,
+            "endpoint": endpoint.to_string(),
+            "transport": endpoint.transport_name(),
+            "instance": logical_instance.to_string(),
+            "instance_label": logical_instance.display_label(&username),
+            "registration_schema_version": instance.record.schema_version,
+            "legacy_client_compatibility": instance.record.legacy_client_compatibility(),
             "version": instance.record.version,
             "status": status,
             "tab_count": tab_count,
@@ -744,7 +850,7 @@ fn run_list_instances(arguments: &[String]) -> i32 {
         println!("No registered AgenTerm instances.");
     } else {
         println!(
-            "PID\tADDRESS\tVERSION\tSTATUS\tUPGRADE\tWINDOW\tTABS\tACTIVE\tSESSION\tWORKSPACE"
+            "PID\tINSTANCE\tTRANSPORT\tENDPOINT\tV1-CLIENT\tVERSION\tSTATUS\tUPGRADE\tWINDOW\tTABS\tACTIVE\tSESSION\tWORKSPACE"
         );
         for view in views {
             let window = match (
@@ -758,9 +864,14 @@ fn run_list_instances(arguments: &[String]) -> i32 {
                 _ => "-",
             };
             println!(
-                "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
                 view["pid"].as_u64().unwrap_or_default(),
-                view["address"].as_str().unwrap_or_default(),
+                view["instance_label"].as_str().unwrap_or("main"),
+                view["transport"].as_str().unwrap_or_default(),
+                view["endpoint"].as_str().unwrap_or_default(),
+                view["legacy_client_compatibility"]
+                    .as_str()
+                    .unwrap_or("unknown"),
                 view["version"].as_str().unwrap_or_default(),
                 view["status"].as_str().unwrap_or_default(),
                 view["upgrade"]["status"].as_str().unwrap_or("unknown"),
@@ -856,16 +967,8 @@ fn run_cli(arguments: Vec<String>, control_options: CliControlOptions) -> i32 {
     if command == "script" {
         return run_script_command_hosted(&arguments);
     }
-    if !has_explicit_ipc_address() {
-        match select_implicit_control_instance() {
-            Ok(address) => IPC_ADDRESS_OVERRIDE.with(|value| {
-                *value.borrow_mut() = Some(address);
-            }),
-            Err(error) => {
-                eprintln!("{error}");
-                return 2;
-            }
-        }
+    if command == "control-center" {
+        return crate::control_center::run_control_center_cli(&arguments, &ipc_address());
     }
     if command == "wait-ui" {
         return run_wait_ui(&arguments);
@@ -876,17 +979,7 @@ fn run_cli(arguments: Vec<String>, control_options: CliControlOptions) -> i32 {
     if command == "wait-events" {
         return run_wait_events(&arguments);
     }
-    let may_start_server = matches!(
-        command,
-        "new-session"
-            | "new"
-            | "new-agent"
-            | "new-window"
-            | "neww"
-            | "attach-session"
-            | "attach"
-            | "start-server"
-    );
+    let may_start_server = command_may_start_server(command);
     let relay_timeout = Duration::from_millis(
         control_options
             .deadline_ms
@@ -977,6 +1070,20 @@ fn run_cli(arguments: Vec<String>, control_options: CliControlOptions) -> i32 {
             1
         }
     }
+}
+
+fn command_may_start_server(command: &str) -> bool {
+    matches!(
+        command,
+        "new-session"
+            | "new"
+            | "new-agent"
+            | "new-window"
+            | "neww"
+            | "attach-session"
+            | "attach"
+            | "start-server"
+    )
 }
 
 #[cfg(not(windows))]
@@ -1205,19 +1312,7 @@ fn run_script_command_with_context(
         },
     };
 
-    let may_use_fleet = matches!(operation, ScriptOperation::Eval | ScriptOperation::Run);
-    let observation = if may_use_fleet {
-        if !has_explicit_ipc_address()
-            && let Ok(address) = select_implicit_control_instance()
-        {
-            IPC_ADDRESS_OVERRIDE.with(|value| {
-                *value.borrow_mut() = Some(address);
-            });
-        }
-        None
-    } else {
-        None
-    };
+    let observation = None;
     let invocation_id = format!(
         "{}-{}",
         std::process::id(),
@@ -2777,72 +2872,6 @@ fn script_operand(arguments: &[String]) -> Option<&str> {
     None
 }
 
-fn select_implicit_control_instance() -> std::result::Result<String, String> {
-    let instances = discover_instances().map_err(|error| {
-        instance_selection_error(
-            "instance_discovery_failed",
-            "AgenTerm instance discovery failed",
-            &format!("{error:#}"),
-            Vec::new(),
-        )
-    })?;
-    let mut candidates = Vec::new();
-    let mut healthy = Vec::new();
-    for instance in instances {
-        let running = send_ipc_request_to_timeout(
-            &instance.record.address,
-            vec!["protocol-info".to_owned()],
-            IPC_DISCOVERY_TIMEOUT,
-        )
-        .is_ok_and(|response| response.ok);
-        if running {
-            healthy.push(instance.record.address.clone());
-        }
-        candidates.push(serde_json::json!({
-            "pid": instance.record.pid,
-            "address": instance.record.address,
-            "session": instance.record.session,
-            "workspace_path": instance.record.workspace_path,
-            "status": if running { "running" } else { "unreachable" },
-        }));
-    }
-    match healthy.as_slice() {
-        [address] => Ok(address.clone()),
-        [] => Err(instance_selection_error(
-            "no_healthy_instance",
-            "No healthy AgenTerm instance is available",
-            "Start agenterm.exe, or use `agenterm-cli --address HOST:PORT COMMAND` to target and \
-             autostart a specific local server. Inspect registrations with \
-             `agenterm-cli list-instances --json`.",
-            candidates,
-        )),
-        _ => Err(instance_selection_error(
-            "ambiguous_instance",
-            "More than one healthy AgenTerm instance is available",
-            "Choose one with `agenterm-cli --address HOST:PORT COMMAND` or set \
-             AGENTERM_IPC_ADDRESS. Inspect details with `agenterm-cli list-instances --json`.",
-            candidates,
-        )),
-    }
-}
-
-fn instance_selection_error(
-    code: &str,
-    message: &str,
-    hint: &str,
-    candidates: Vec<serde_json::Value>,
-) -> String {
-    serde_json::to_string_pretty(&serde_json::json!({
-        "error": {
-            "code": code,
-            "message": message,
-            "hint": hint,
-            "candidates": candidates,
-        }
-    }))
-    .unwrap_or_else(|_| format!("{message}: {hint}"))
-}
-
 fn run_wait_events(arguments: &[String]) -> i32 {
     let Some(epoch) = option_value(arguments, "--epoch") else {
         eprintln!("wait-events requires --epoch");
@@ -2985,6 +3014,7 @@ pub(crate) fn run_wait_ui(arguments: &[String]) -> i32 {
     let expected_window_state = option_value(arguments, "--window-state");
     let expected_modal_kind = option_value(arguments, "--modal-kind");
     let requested_modal_target = option_value(arguments, "--modal-target");
+    let expected_tab_editor_state = option_value(arguments, "--tab-editor-state");
     let expected_client_width =
         option_value(arguments, "--client-width").and_then(|value| value.parse::<i64>().ok());
     let expected_client_height =
@@ -3005,6 +3035,14 @@ pub(crate) fn run_wait_ui(arguments: &[String]) -> i32 {
         eprintln!("wait-ui --proxy-state requires -t target");
         return 2;
     }
+    if expected_tab_editor_state.is_some() && requested_target.is_none() {
+        eprintln!("wait-ui --tab-editor-state requires -t target");
+        return 2;
+    }
+    if expected_tab_editor_state.is_some_and(|state| !matches!(state, "open" | "closed")) {
+        eprintln!("wait-ui --tab-editor-state must be open or closed");
+        return 2;
+    }
     if expected_modal_kind.is_some_and(|kind| matches!(kind, "none" | "closed"))
         && requested_modal_target.is_some()
     {
@@ -3021,10 +3059,11 @@ pub(crate) fn run_wait_ui(arguments: &[String]) -> i32 {
         && terminal_grid_changed_from.is_none()
         && expected_modal_kind.is_none()
         && requested_modal_target.is_none()
+        && expected_tab_editor_state.is_none()
     {
         eprintln!(
             "wait-ui requires an active, focus, tab-state, proxy-state, window-state, client-size, \
-             terminal-grid change, modal-kind, or modal-target condition"
+             terminal-grid change, modal-kind, modal-target, or tab-editor-state condition"
         );
         return 1;
     }
@@ -3139,6 +3178,18 @@ pub(crate) fn run_wait_ui(arguments: &[String]) -> i32 {
                     expected_modal_kind,
                     expected_modal_target.as_deref(),
                 );
+                let tab_editor_matches = expected_tab_editor_state.is_none_or(|state| {
+                    let editor = &snapshot["tab_editor"];
+                    match state {
+                        "open" => {
+                            editor.is_object() && editor["target"].as_str() == target.as_deref()
+                        }
+                        "closed" => {
+                            editor.is_null() || editor["target"].as_str() != target.as_deref()
+                        }
+                        _ => false,
+                    }
+                });
                 if active_matches
                     && focus_matches
                     && state_matches
@@ -3148,6 +3199,7 @@ pub(crate) fn run_wait_ui(arguments: &[String]) -> i32 {
                     && height_matches
                     && terminal_grid_matches
                     && modal_matches
+                    && tab_editor_matches
                 {
                     println!("{output}");
                     return 0;
@@ -3186,6 +3238,7 @@ pub(crate) fn run_wait_ui(arguments: &[String]) -> i32 {
                                 "client_height": expected_client_height,
                                 "modal_kind": expected_modal_kind,
                                 "modal_target": expected_modal_target,
+                                "tab_editor_state": expected_tab_editor_state,
                             },
                             "baseline_position": baseline_position,
                             "last_state": snapshot,
@@ -3195,8 +3248,19 @@ pub(crate) fn run_wait_ui(arguments: &[String]) -> i32 {
                 }
             }
             Err(error) => {
-                eprintln!("{error:#}");
-                return 1;
+                let last_transport_error = format!("{error:#}");
+                if std::time::Instant::now() >= deadline {
+                    eprintln!(
+                        "{}",
+                        serde_json::json!({
+                            "code": "ui_wait_transport_timeout",
+                            "timeout_ms": timeout_ms,
+                            "baseline_position": baseline_position,
+                            "last_transport_error": last_transport_error,
+                        })
+                    );
+                    return 1;
+                }
             }
         }
         thread::sleep(Duration::from_millis(50));
@@ -3326,7 +3390,12 @@ fn start_server_process() -> Result<()> {
     }
     let server = wide(&server.to_string_lossy());
     let operation = wide("open");
-    let parameters = wide(&format!("--address {}", ipc_address()));
+    let endpoint = ipc_endpoint()?;
+    let parameters = if let Some(address) = endpoint.legacy_address() {
+        wide(&format!("--address {address}"))
+    } else {
+        wide(&format!("--endpoint {}", endpoint))
+    };
     let launched = unsafe {
         ShellExecuteW(
             std::ptr::null_mut(),
@@ -3349,10 +3418,11 @@ fn print_help() {
 AgenTerm CLI - control the native tabbed terminal
 
 Usage:
-  agenterm-cli [--address HOST:PORT] [--request-id ID] [--deadline-ms MS]
+  agenterm-cli [--endpoint ENDPOINT|--address HOST:PORT|--instance NAME] [--request-id ID] [--deadline-ms MS]
                 [--receipt-json] command [args...]
   agenterm-cli list-instances [--json] [--prune]
   agenterm-cli server-list [--json] [--prune]
+  agenterm-cli control-center open|status|snapshot|close [--no-activate]
   agenterm-cli new-session [-s name]
   agenterm-cli new-window [-d] [-n name] [--parent target] [-F format] [-e NAME=VALUE] [command [args...]]
   agenterm-cli new-agent [-d] [-n name] [--parent target] [--proxy URL] [--yolo] [-- [codex args...]]
@@ -3395,11 +3465,11 @@ Usage:
   agenterm-cli ui-hello --minimum VERSION --maximum VERSION [--client-id ID]
   agenterm-cli ui-bootstrap
   agenterm-cli ui-deltas --epoch EPOCH --after SEQUENCE [--limit 1..64]
-  agenterm-cli ui-action new-tab|new-child|edit-tab|toggle-tree|tabs-show|tabs-hide|tabs-toggle|toggle-tabs|tabs-set-width|select-tab|close-tab|close-window|keep-server-running|stop-server-and-exit|confirm|cancel|composer-send|copy-selection|open-settings|settings-theme-dark|settings-theme-light|settings-apply|open-cwd-editor|cwd-prepare|cwd-prepare-append|cwd-prepare-replace|cwd-send-now
+  agenterm-cli ui-action new-tab|new-child|edit-tab|toggle-tree|tabs-show|tabs-hide|tabs-toggle|toggle-tabs|tabs-set-width|select-tab|close-tab|close-window|keep-server-running|stop-server-and-exit|confirm|cancel|composer-send|copy-selection|open-settings|open-control-center|settings-theme-dark|settings-theme-light|settings-apply|open-cwd-editor|cwd-prepare|cwd-prepare-append|cwd-prepare-replace|cwd-send-now
   agenterm-cli ui-action tabs-set-width --width 180..480
   agenterm-cli focus terminal|composer|tabs [-t target]
   agenterm-cli wait-pane [-t target] (--contains text|--dead|--submit-complete) [--timeout-ms ms]
-  agenterm-cli wait-ui [--active @id] [--focus surface] [-t target --tab-state state|--proxy-state state] [--client-width PX --client-height PX] [--terminal-grid-changed-from ROWSxCOLS] [--modal-kind KIND|none|closed] [--modal-target target]
+  agenterm-cli wait-ui [--active @id] [--focus surface] [-t target --tab-state state|--proxy-state state|--tab-editor-state open|closed] [--client-width PX --client-height PX] [--terminal-grid-changed-from ROWSxCOLS] [--modal-kind KIND|none|closed] [--modal-target target]
   agenterm-cli protocol-info
   agenterm-cli list-panes [-F format]
   agenterm-cli list-sessions | has-session | kill-server | server-kill"
@@ -3412,7 +3482,7 @@ fn print_mux_help() {
 agenterm-mux - tmux/RMUX compatibility frontend for AgenTerm
 
 Usage:
-  agenterm-mux [--address HOST:PORT] [--session NAME] COMMAND [ARGS...]
+  agenterm-mux [--endpoint ENDPOINT|--address HOST:PORT|--instance NAME] [--session NAME] COMMAND [ARGS...]
   agenterm-mux compatibility [--json]
   agenterm-mux agenterm COMMAND [ARGS...]
 
@@ -3442,12 +3512,17 @@ pub(crate) fn protocol_info_json_with_ui_bridge(
     ui_bridge_facts: ui_bridge::UiBridgeFacts,
 ) -> String {
     let build_identity = BuildIdentity::current();
+    let resolved = resolved_ipc_endpoint().ok();
     serde_json::to_string_pretty(&serde_json::json!({
         "protocol_version": 1,
         "agenterm_version": env!("CARGO_PKG_VERSION"),
         "identity_scope": identity_scope,
         "pid": std::process::id(),
         "address": ipc_address(),
+        "endpoint": resolved.as_ref().map(|value| value.endpoint.to_string()),
+        "transport": resolved.as_ref().map(|value| value.endpoint.transport_name()),
+        "instance": resolved.as_ref().map(|value| value.logical_instance.to_string()),
+        "server_scope_id": resolved.as_ref().map(|value| value.server_scope_id.to_string()),
         "build_identity": build_identity,
         "build_identity_complete": build_identity.is_complete(),
         "upgrade_identity": current_upgrade_identity(),
@@ -3485,7 +3560,7 @@ pub(crate) fn protocol_info_json_with_ui_bridge(
             "planned": ["split-window", "layouts"]
         },
         "extensions": [
-            "ui-snapshot", "ui-action", "focus", "protocol-info",
+            "ui-snapshot", "ui-action", "focus", "protocol-info", "control-center",
             "inspect", "screenshot", "screenshot-pane", "dump-cells",
             "wait-pane", "send-mouse", "show-composer",
             "set-composer", "send-composer", "get-settings",

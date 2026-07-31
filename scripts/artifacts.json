@@ -10,6 +10,14 @@
       "release_budget_bytes": 4194304
     },
     {
+      "name": "agenterm-cc.exe",
+      "role": "control-center-gui",
+      "pe_subsystem": 2,
+      "documentation_role": "isolated Control Center projection",
+      "offline_probe": ["--version"],
+      "release_budget_bytes": 4194304
+    },
+    {
       "name": "agenterm-server.exe",
       "role": "internal-server",
       "pe_subsystem": 2,
@@ -62,6 +70,14 @@
           "pe_subsystem": 2,
           "documentation_role": "GUI application",
           "offline_probe": [],
+          "release_budget_bytes": 4194304
+        },
+        {
+          "name": "agenterm-cc.exe",
+          "role": "control-center-gui",
+          "pe_subsystem": 2,
+          "documentation_role": "isolated Control Center projection",
+          "offline_probe": ["--version"],
           "release_budget_bytes": 4194304
         },
         {
@@ -119,6 +135,14 @@
           "offline_probe": []
         },
         {
+          "name": "agenterm-cc.exe",
+          "role": "control-center-gui",
+          "pe_subsystem": 2,
+          "documentation_role": "isolated Control Center projection",
+          "offline_probe": ["--version"],
+          "release_budget_bytes": 4194304
+        },
+        {
           "name": "agenterm-server.exe",
           "role": "internal-server",
           "pe_subsystem": 2,
@@ -167,6 +191,13 @@
           "offline_probe": []
         },
         {
+          "name": "agenterm-cc",
+          "role": "control-center-gui",
+          "documentation_role": "isolated Control Center projection",
+          "offline_probe": ["--version"],
+          "release_budget_bytes": 4194304
+        },
+        {
           "name": "agenterm-cli",
           "role": "cli",
           "documentation_role": "native observation and automation client",
@@ -204,6 +235,13 @@
           "offline_probe": []
         },
         {
+          "name": "agenterm-cc",
+          "role": "control-center-gui",
+          "documentation_role": "isolated Control Center projection",
+          "offline_probe": ["--version"],
+          "release_budget_bytes": 4194304
+        },
+        {
           "name": "agenterm-cli",
           "role": "cli",
           "documentation_role": "native observation and automation client",
@@ -241,6 +279,13 @@
           "offline_probe": []
         },
         {
+          "name": "agenterm-cc",
+          "role": "control-center-gui",
+          "documentation_role": "isolated Control Center projection",
+          "offline_probe": ["--version"],
+          "release_budget_bytes": 4194304
+        },
+        {
           "name": "agenterm-cli",
           "role": "cli",
           "documentation_role": "native observation and automation client",
@@ -276,6 +321,13 @@
           "role": "gui",
           "documentation_role": "GUI application",
           "offline_probe": []
+        },
+        {
+          "name": "agenterm-cc",
+          "role": "control-center-gui",
+          "documentation_role": "isolated Control Center projection",
+          "offline_probe": ["--version"],
+          "release_budget_bytes": 4194304
         },
         {
           "name": "agenterm-cli",

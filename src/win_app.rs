@@ -9,6 +9,7 @@ use windows_sys::Win32::{
     UI::WindowsAndMessaging::{PostMessageW, WM_APP},
 };
 
+use crate::ipc_endpoint::EndpointSelectorArgs;
 use crate::wake_signal::WakeSignal;
 
 const WM_APP_WAKE: u32 = WM_APP + 1;
@@ -87,14 +88,14 @@ struct GuiLaunchOptions {
 }
 
 fn configure_gui_launch(arguments: &[String]) -> Result<GuiLaunchOptions> {
-    let (options, address) = parse_gui_launch(arguments)?;
-    crate::client::set_ipc_address_override(address);
+    let (options, selectors) = parse_gui_launch(arguments)?;
+    crate::client::set_ipc_selectors(selectors)?;
     Ok(options)
 }
 
-fn parse_gui_launch(arguments: &[String]) -> Result<(GuiLaunchOptions, Option<String>)> {
+fn parse_gui_launch(arguments: &[String]) -> Result<(GuiLaunchOptions, EndpointSelectorArgs)> {
     let mut options = GuiLaunchOptions::default();
-    let mut address = None;
+    let mut selectors = EndpointSelectorArgs::default();
     let mut position = 0;
     while position < arguments.len() {
         match arguments[position].as_str() {
@@ -115,7 +116,7 @@ fn parse_gui_launch(arguments: &[String]) -> Result<(GuiLaunchOptions, Option<St
                 position += 1;
             }
             "--address" => {
-                if address.is_some() {
+                if selectors.address.is_some() {
                     anyhow::bail!("agenterm.exe --address may be specified only once");
                 }
                 let value = arguments
@@ -125,7 +126,31 @@ fn parse_gui_launch(arguments: &[String]) -> Result<(GuiLaunchOptions, Option<St
                     anyhow::bail!("agenterm.exe --address requires HOST:PORT");
                 }
                 crate::client::parse_loopback_ipc_address(value)?;
-                address = Some(value.clone());
+                selectors.address = Some(value.clone());
+                position += 2;
+            }
+            "--endpoint" => {
+                if selectors.endpoint.is_some() {
+                    anyhow::bail!("agenterm.exe --endpoint may be specified only once");
+                }
+                selectors.endpoint = Some(
+                    arguments
+                        .get(position + 1)
+                        .context("agenterm.exe --endpoint requires ENDPOINT")?
+                        .clone(),
+                );
+                position += 2;
+            }
+            "--instance" => {
+                if selectors.instance.is_some() {
+                    anyhow::bail!("agenterm.exe --instance may be specified only once");
+                }
+                selectors.instance = Some(
+                    arguments
+                        .get(position + 1)
+                        .context("agenterm.exe --instance requires NAME")?
+                        .clone(),
+                );
                 position += 2;
             }
             argument => {
@@ -133,7 +158,18 @@ fn parse_gui_launch(arguments: &[String]) -> Result<(GuiLaunchOptions, Option<St
             }
         }
     }
-    Ok((options, address))
+    let selector_count = [
+        selectors.endpoint.is_some(),
+        selectors.address.is_some(),
+        selectors.instance.is_some(),
+    ]
+    .into_iter()
+    .filter(|selected| *selected)
+    .count();
+    if selector_count > 1 {
+        anyhow::bail!("agenterm.exe --endpoint, --address, and --instance are mutually exclusive");
+    }
+    Ok((options, selectors))
 }
 
 fn quote_argument_for_display(argument: &str) -> String {
@@ -223,7 +259,7 @@ mod tests {
 
     #[test]
     fn gui_launcher_accepts_no_activate_and_address_in_either_order() {
-        let (options, address) = parse_gui_launch(&[
+        let (options, selectors) = parse_gui_launch(&[
             "--no-activate".to_owned(),
             "--address".to_owned(),
             "127.0.0.1:48815".to_owned(),
@@ -231,9 +267,9 @@ mod tests {
         .unwrap();
         assert!(options.no_activate);
         assert!(!options.ui_client);
-        assert_eq!(address.as_deref(), Some("127.0.0.1:48815"));
+        assert_eq!(selectors.address.as_deref(), Some("127.0.0.1:48815"));
 
-        let (options, address) = parse_gui_launch(&[
+        let (options, selectors) = parse_gui_launch(&[
             "--address".to_owned(),
             "127.0.0.1:48816".to_owned(),
             "--not-foreground".to_owned(),
@@ -241,9 +277,9 @@ mod tests {
         .unwrap();
         assert!(options.no_activate);
         assert!(!options.ui_client);
-        assert_eq!(address.as_deref(), Some("127.0.0.1:48816"));
+        assert_eq!(selectors.address.as_deref(), Some("127.0.0.1:48816"));
 
-        let (options, address) = parse_gui_launch(&[
+        let (options, selectors) = parse_gui_launch(&[
             "--ui-client".to_owned(),
             "--address".to_owned(),
             "127.0.0.1:48817".to_owned(),
@@ -252,7 +288,7 @@ mod tests {
         .unwrap();
         assert!(options.ui_client);
         assert!(options.no_activate);
-        assert_eq!(address.as_deref(), Some("127.0.0.1:48817"));
+        assert_eq!(selectors.address.as_deref(), Some("127.0.0.1:48817"));
     }
 
     #[test]
@@ -270,6 +306,12 @@ mod tests {
             ],
             vec!["--address"],
             vec!["--address", "--no-activate"],
+            vec![
+                "--endpoint",
+                r"pipe:\\.\pipe\agenterm-test",
+                "--instance",
+                "dev",
+            ],
             vec!["--unknown"],
         ] {
             assert!(

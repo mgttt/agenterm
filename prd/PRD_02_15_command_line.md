@@ -55,11 +55,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       the same destructive workspace and process-lifecycle semantics
     - [x] global `--address HOST:PORT` targets a discovered loopback TCP
       server explicitly
-    - [ ] v0.1.11 adds global selectors `--instance main|dev` and
+    - [x] v0.1.11 adds global selectors `--instance main|dev` and
       `--endpoint unix:<path>|pipe:<name>|tcp:<host>:<port>`; future explicit
       `ephemeral/custom` instance forms must reuse the same resolver and must
       not be invented independently by individual commands
-    - [ ] selector precedence is an explicit CLI selector, then
+    - [x] selector precedence is an explicit CLI selector, then
       `AGENTERM_IPC_ENDPOINT`, then legacy `AGENTERM_IPC_ADDRESS`, then
       `AGENTERM_INSTANCE`, then the platform-derived `main` default. A CLI
       selector overrides inherited environment selectors; conflicting typed
@@ -68,7 +68,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       endpoint; any two CLI selectors (`--instance`, `--endpoint`, or
       `--address`) conflict and fail with a typed error rather than silently
       overriding or falling back
-    - [ ] selector parsing, platform endpoint derivation, user scoping,
+    - [x] selector parsing, platform endpoint derivation, user scoping,
       singleton ownership, peer validation, stale recovery, and migration are
       owned by
       [Agent control plane](PRD_02_07_agent_control_plane.md);
@@ -119,7 +119,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [ ] `shutdown --no-save` escape hatch for instances whose workspace
       destination has become unwritable
     - `wait-ui [--active @id] [--focus surface] [-t target
-      --tab-state running|dead] [--modal-kind KIND|none|closed]
+      --tab-state running|dead|--tab-editor-state open|closed]
+      [--modal-kind KIND|none|closed]
       [--modal-target target] [--timeout-ms ms]`
   - Shipped scripting baseline
     - `script api [--json]`
@@ -132,6 +133,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - `send-composer [-t target]`
     - `set-tab-note [-t target] text`, `show-tab-note [-t target]`
   - Semantic UI control
+    - [~] `control-center open|status|snapshot|close [--no-activate]`
+      owns the typed lifecycle surface for the independent Control Center
+      process; its read-only live evidence remains a v0.1.11 qualification
+      gate.
     - `focus terminal|composer|tabs [-t target]` (`sidebar` remains an alias)
     - `ui-action new-tab|new-child|edit-tab|toggle-tree|tabs-show|tabs-hide|tabs-toggle|toggle-tabs|tabs-set-width|select-tab|close-tab|confirm|cancel|
       composer-send|copy-selection|open-settings|window-minimize|
@@ -142,6 +147,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       - Settings, confirmation, CWD, and proxy surfaces are addressable by
         kind/target; `none` and `closed` both mean no modal, and timeout
         failures expose the stable `ui_wait_timeout` code
+    - [x] `wait-ui -t target --tab-editor-state open|closed` exposes a bounded
+      condition wait for the inline editor without repeated process spawning
   - Visual and terminal diagnostics
     - `screenshot [-o path.png]`
     - `screenshot-pane|screenshot-tab [-t target] [-o path.png]`

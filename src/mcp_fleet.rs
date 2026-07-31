@@ -1,5 +1,4 @@
 use std::{
-    env,
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -13,6 +12,7 @@ use serde_json::{Value, json};
 use crate::{
     client::send_ipc_request_to_timeout,
     instances::{discover_instances, instance_process_is_alive},
+    ipc_endpoint::{EndpointSelectorArgs, resolve_ipc_endpoint},
     mcp_catalog::capabilities,
 };
 
@@ -333,59 +333,23 @@ fn ensure_resource_bytes(resource: Value) -> Result<Value, McpFleetError> {
 }
 
 fn select_address(explicit: Option<&str>) -> Result<String, McpFleetError> {
-    if let Some(address) = explicit
-        .filter(|address| !address.trim().is_empty())
-        .map(str::to_owned)
-        .or_else(|| {
-            env::var("AGENTERM_IPC_ADDRESS")
-                .ok()
-                .filter(|address| !address.trim().is_empty())
-        })
-    {
-        return Ok(address);
-    }
-    let instances = discover_instances().map_err(|error| McpFleetError {
-        code: -32603,
-        message: "Could not discover AgenTerm instances",
-        data: json!({"class": "instance_discovery", "detail": bounded(&error.to_string())}),
-    })?;
-    let health = classify_instance_health(&instances);
-    let candidates = instances
-        .into_iter()
-        .zip(health)
-        .map(|(instance, health)| {
-            json!({
-                "pid": instance.record.pid,
-                "address": instance.record.address,
-                "session": instance.record.session,
-                "version": instance.record.version,
-                "status": health.status(),
-                "compatible": health == InstanceHealth::Healthy
-            })
-        })
-        .collect::<Vec<_>>();
-    let healthy = candidates
-        .iter()
-        .filter(|candidate| candidate["status"].as_str() == Some("healthy"))
-        .filter_map(|candidate| candidate["address"].as_str().map(str::to_owned))
-        .collect::<Vec<_>>();
-    match healthy.as_slice() {
-        [address] => Ok(address.clone()),
-        [] => Err(McpFleetError {
+    let selectors = EndpointSelectorArgs {
+        endpoint: explicit
+            .filter(|endpoint| !endpoint.trim().is_empty())
+            .map(str::to_owned),
+        ..EndpointSelectorArgs::default()
+    };
+    resolve_ipc_endpoint(&selectors)
+        .map(|resolved| resolved.endpoint.to_string())
+        .map_err(|error| McpFleetError {
             code: -32001,
-            message: "No running AgenTerm server is available",
+            message: "Could not resolve the AgenTerm server endpoint",
             data: json!({
-                "class": "server_not_found",
-                "hint": "start AgenTerm or pass --address HOST:PORT",
-                "candidates": candidates
+                "class": "endpoint_selection",
+                "detail": bounded(&error.to_string()),
+                "hint": "use --endpoint ENDPOINT, legacy --address HOST:PORT, or --instance NAME"
             }),
-        }),
-        _ => Err(McpFleetError {
-            code: -32001,
-            message: "Multiple AgenTerm servers require explicit selection",
-            data: json!({"class": "server_ambiguous", "candidates": candidates}),
-        }),
-    }
+        })
 }
 
 fn classify_instance_health(
@@ -451,14 +415,16 @@ fn instance_health(
     if !instance_process_is_alive(instance.record.pid) {
         return InstanceHealth::Stale;
     }
-    let response = match send_ipc_request_to_timeout(
-        &instance.record.address,
-        vec!["protocol-info".to_owned()],
-        timeout,
-    ) {
-        Ok(response) if response.ok => response,
-        _ => return InstanceHealth::Unreachable,
-    };
+    let endpoint = instance
+        .record
+        .resolved_endpoint()
+        .map(|endpoint| endpoint.to_string())
+        .unwrap_or_else(|| instance.record.address.clone());
+    let response =
+        match send_ipc_request_to_timeout(&endpoint, vec!["protocol-info".to_owned()], timeout) {
+            Ok(response) if response.ok => response,
+            _ => return InstanceHealth::Unreachable,
+        };
     let Ok(handshake) = serde_json::from_str::<Value>(&response.output) else {
         return InstanceHealth::Incompatible;
     };
@@ -466,7 +432,7 @@ fn instance_health(
         return InstanceHealth::Incompatible;
     }
     if handshake["pid"].as_u64() != Some(u64::from(instance.record.pid))
-        || handshake["address"].as_str() != Some(instance.record.address.as_str())
+        || handshake["address"].as_str() != Some(endpoint.as_str())
     {
         return InstanceHealth::Stale;
     }
@@ -673,7 +639,7 @@ mod tests {
     #[test]
     fn already_cancelled_wait_returns_without_backend_access() {
         let result = wait_event(
-            Some("127.0.0.1:1"),
+            Some("tcp:127.0.0.1:1"),
             McpWaitRequest {
                 epoch: "epoch-a".to_owned(),
                 after_sequence: 7,
@@ -717,7 +683,7 @@ mod tests {
             }
         });
         let result = wait_event(
-            Some(&address),
+            Some(&format!("tcp:{address}")),
             McpWaitRequest {
                 epoch: "epoch-a".to_owned(),
                 after_sequence: 7,
@@ -757,7 +723,7 @@ mod tests {
             );
         });
         let result = wait_event(
-            Some(&address),
+            Some(&format!("tcp:{address}")),
             McpWaitRequest {
                 epoch: "epoch-a".to_owned(),
                 after_sequence: 7,
@@ -789,7 +755,7 @@ mod tests {
                 reply_with_failure(stream, expected);
             });
             let result = wait_event(
-                Some(&address),
+                Some(&format!("tcp:{address}")),
                 McpWaitRequest {
                     epoch: "epoch-a".to_owned(),
                     after_sequence: 7,

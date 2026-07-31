@@ -90,10 +90,21 @@ fn load(path) {
             "artifact_manifest_offline_probe_invalid:" + name
         );
         if subsystem == 2 {
-            require(
-                entry.offline_probe.len == 0,
-                "artifact_manifest_gui_probe_forbidden:" + name
-            );
+            if role == "control-center-gui" {
+                // Unlike the daily GUI, the optional Control Center defines
+                // side-effect-free informational commands. Command::output
+                // supplies redirected handles and waits for a Windows-
+                // subsystem child, so this is a real offline entrypoint gate.
+                require(
+                    entry.offline_probe.len > 0,
+                    "artifact_manifest_control_center_probe_required:" + name
+                );
+            } else {
+                require(
+                    entry.offline_probe.len == 0,
+                    "artifact_manifest_gui_probe_forbidden:" + name
+                );
+            }
         } else {
             require(
                 entry.offline_probe.len > 0,

@@ -1,6 +1,6 @@
 mod clipboard;
 mod cursor_blink;
-mod font;
+pub(crate) mod font;
 mod input;
 mod layout;
 mod new_terminal;
@@ -35,6 +35,7 @@ use crate::{
     event_journal::{EventJournal, EventKind},
     gui_wake::{UnixWake, install_unix_wake},
     instances::{mark_intentional_shutdown, register_instance},
+    ipc_endpoint::EndpointSelectorArgs,
     ipc_transport::{IpcEnvelope, start_ipc_server},
     operations::{UI_TABS_SET_WIDTH, UI_TABS_SHOW},
     protocol::IpcResponse,
@@ -66,6 +67,17 @@ use crate::{
     working_context::{CwdSource, ShellKind, cwd_command, validate_path},
     workspace::{SavedTab, SavedWorkspace, save_workspace, workspace_path},
 };
+
+const GUI_USAGE: &str = "\
+Usage: agenterm [--no-activate] [--endpoint ENDPOINT | --address HOST:PORT | --instance NAME]
+
+Options:
+  --endpoint ENDPOINT   Select a typed local IPC endpoint
+  --address HOST:PORT   Select a legacy loopback TCP endpoint
+  --instance NAME       Select a logical instance (main or dev)
+  --no-activate         Open without taking foreground focus
+  --not-foreground      Alias for --no-activate
+  -h, --help            Show this help";
 
 use cursor_blink::CursorBlink;
 use font::resolved_font_name;
@@ -144,6 +156,21 @@ struct RecentTerminalClick {
 }
 
 #[derive(Clone, Copy, Debug)]
+struct RecentSidebarTextClick {
+    tab_id: u64,
+    at: Instant,
+    geometry_generation: u64,
+}
+
+impl RecentSidebarTextClick {
+    fn matches(&self, tab_id: u64, geometry_generation: u64, now: Instant) -> bool {
+        self.tab_id == tab_id
+            && self.geometry_generation == geometry_generation
+            && now.duration_since(self.at) <= Duration::from_millis(DOUBLE_CLICK_MS)
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
 struct TabsResizeDrag {
     original_width: u16,
 }
@@ -218,7 +245,6 @@ impl UnixFocusSurface {
 
 enum SidebarTabAction {
     AddChild,
-    Edit,
     Close,
     Save,
     Cancel,
@@ -241,15 +267,29 @@ impl TabEditorFocus {
 
 pub fn run_gui_entry() -> i32 {
     let arguments = env::args().skip(1).collect::<Vec<_>>();
-    if let Err(message) = validate_gui_arguments(&arguments) {
-        eprintln!("AgenTerm GUI argument error: {message}");
+    if arguments
+        .iter()
+        .any(|argument| matches!(argument.as_str(), "-h" | "--help"))
+    {
+        if arguments.len() == 1 {
+            println!("{GUI_USAGE}");
+            return 0;
+        }
+        eprintln!("AgenTerm GUI argument error: --help cannot be combined with other options");
         return 2;
     }
-
-    let no_activate = arguments
-        .iter()
-        .any(|arg| matches!(arg.as_str(), "--no-activate" | "--not-foreground"))
-        || no_activate_from_environment();
+    let (argument_no_activate, selectors) = match parse_gui_launch(&arguments) {
+        Ok(launch) => launch,
+        Err(message) => {
+            eprintln!("AgenTerm GUI argument error: {message}\n\n{GUI_USAGE}");
+            return 2;
+        }
+    };
+    if let Err(error) = crate::client::set_ipc_selectors(selectors) {
+        eprintln!("AgenTerm GUI argument error: {error:#}\n\n{GUI_USAGE}");
+        return 2;
+    }
+    let no_activate = argument_no_activate || no_activate_from_environment();
 
     if !display_available() {
         eprintln!(
@@ -268,22 +308,65 @@ pub fn run_gui_entry() -> i32 {
     }
 }
 
-fn validate_gui_arguments(arguments: &[String]) -> Result<(), String> {
-    for argument in arguments {
-        match argument.as_str() {
-            "--no-activate" | "--not-foreground" => {}
-            other if other.starts_with("--") => {
+fn parse_gui_launch(
+    arguments: &[String],
+) -> std::result::Result<(bool, EndpointSelectorArgs), String> {
+    let mut no_activate = false;
+    let mut selectors = EndpointSelectorArgs::default();
+    let mut position = 0;
+    while position < arguments.len() {
+        let option = arguments[position].as_str();
+        match option {
+            "--no-activate" | "--not-foreground" => {
+                if no_activate {
+                    return Err(
+                        "--no-activate/--not-foreground may be specified only once".to_owned()
+                    );
+                }
+                no_activate = true;
+                position += 1;
+            }
+            "--endpoint" | "--address" | "--instance" => {
+                let value = arguments
+                    .get(position + 1)
+                    .filter(|value| !value.starts_with("--"))
+                    .ok_or_else(|| format!("{option} requires a value"))?
+                    .clone();
+                let target = match option {
+                    "--endpoint" => &mut selectors.endpoint,
+                    "--address" => &mut selectors.address,
+                    "--instance" => &mut selectors.instance,
+                    _ => unreachable!(),
+                };
+                if target.is_some() {
+                    return Err(format!("{option} may be specified only once"));
+                }
+                *target = Some(value);
+                position += 2;
+            }
+            other if other.starts_with('-') => {
                 return Err(format!("unknown option: {other}"));
             }
             other => {
                 return Err(format!(
-                    "unexpected positional argument: {other}\n\
-                     The GUI launcher does not accept shell commands."
+                    "unexpected positional argument: {other}; \
+                     the GUI launcher does not accept shell commands"
                 ));
             }
         }
     }
-    Ok(())
+    let selector_count = [
+        selectors.endpoint.is_some(),
+        selectors.address.is_some(),
+        selectors.instance.is_some(),
+    ]
+    .into_iter()
+    .filter(|selected| *selected)
+    .count();
+    if selector_count > 1 {
+        return Err("--endpoint, --address, and --instance are mutually exclusive".to_owned());
+    }
+    Ok((no_activate, selectors))
 }
 
 fn display_available() -> bool {
@@ -374,6 +457,8 @@ struct UnixApp {
     terminal_selection_autoscroll: Option<AutoScrollStep>,
     terminal_double_click: Option<TerminalDoubleClick>,
     recent_terminal_click: Option<RecentTerminalClick>,
+    recent_sidebar_text_click: Option<RecentSidebarTextClick>,
+    sidebar_geometry_generation: u64,
     pending_close: Option<u64>,
     window_close_pending: bool,
     cwd_edit_target: Option<u64>,
@@ -387,6 +472,11 @@ struct UnixApp {
 }
 
 impl UnixApp {
+    fn invalidate_sidebar_text_click(&mut self) {
+        self.sidebar_geometry_generation = self.sidebar_geometry_generation.wrapping_add(1);
+        self.recent_sidebar_text_click = None;
+    }
+
     fn new(
         title: String,
         no_activate: bool,
@@ -438,6 +528,8 @@ impl UnixApp {
             terminal_selection_autoscroll: None,
             terminal_double_click: None,
             recent_terminal_click: None,
+            recent_sidebar_text_click: None,
+            sidebar_geometry_generation: 0,
             pending_close: None,
             window_close_pending: false,
             cwd_edit_target: None,
@@ -1209,6 +1301,7 @@ impl UnixApp {
     }
 
     fn begin_tabs_resize(&mut self) {
+        self.invalidate_sidebar_text_click();
         let _ = self.cancel_terminal_selection(true);
         self.end_scroll_drag();
         self.tabs_resize_drag = Some(TabsResizeDrag {
@@ -1785,7 +1878,6 @@ impl UnixApp {
                                     "Add",
                                     geometry.actions.add_child.expect("normal row has Add"),
                                 ),
-                                "edit": action("edit-tab", "Edit", geometry.actions.primary),
                                 "close": action("close-tab", "Close", geometry.actions.secondary),
                             }),
                             TreeRowMode::Editing => serde_json::json!({
@@ -1906,6 +1998,7 @@ impl UnixApp {
                     "bounds": pixel_rect_json(toolbar.bounds),
                     "new": pixel_rect_json(toolbar.new_tab),
                     "tabs": pixel_rect_json(toolbar.tabs),
+                    "control_center": pixel_rect_json(toolbar.control_center),
                     "settings": pixel_rect_json(toolbar.settings),
                 })),
                 "terminal": {
@@ -2202,7 +2295,25 @@ impl UnixApp {
         }
     }
 
+    /// Return a row only when the pointer is over its name/note body. Actions,
+    /// disclosure/tree guides, status dots, and the sidebar scrollbar are
+    /// deliberately outside this surface.
+    fn sidebar_tab_text_at(&self, x: i32, y: i32) -> Option<u64> {
+        let tree_height = self.layout().sidebar_tree.height().max(0) as u32;
+        let row_index = sidebar_row_at_y(y.max(0) as u32, tree_height)?;
+        let source_index = self.sidebar_offset() + row_index;
+        let row = self.visible_tree_rows().get(source_index)?;
+        let geometry = sidebar_tree_row_geometry(
+            self.layout().sidebar_tree,
+            row_index,
+            row.depth,
+            TreeRowMode::Normal,
+        );
+        geometry.text.contains(x, y).then_some(row.id)
+    }
+
     fn handle_sidebar_click(&mut self, x: f64, y: f64) {
+        let previous_text_click = self.recent_sidebar_text_click.take();
         if self.handle_window_close_click(x, y) {
             return;
         }
@@ -2263,13 +2374,6 @@ impl UnixApp {
                         self.after_create_tab(id, Some(parent_id));
                     }
                 }
-                SidebarTabAction::Edit => {
-                    let Some(position) = self.tab_position_for_sidebar_y(y.max(0.0) as u32) else {
-                        return;
-                    };
-                    let id = self.tabs[position].id;
-                    let _ = self.open_tab_editor_for(id);
-                }
                 SidebarTabAction::Close => {
                     let Some(position) = self.tab_position_for_sidebar_y(y.max(0.0) as u32) else {
                         return;
@@ -2297,12 +2401,28 @@ impl UnixApp {
         if self.note_edit_target.is_some() {
             let _ = self.complete_tab_editor(false);
         }
+        let text_tab = self.sidebar_tab_text_at(click_x, click_y);
         let Some(position) = self.tab_position_for_sidebar_y(y.max(0.0) as u32) else {
             self.set_focus_surface_internal(UnixFocusSurface::Sidebar, "mouse");
             return;
         };
         let _ = self.select_tab_at(position);
         self.set_focus_surface_internal(UnixFocusSurface::Sidebar, "mouse");
+        let now = Instant::now();
+        if let Some(tab_id) = text_tab {
+            let is_double_click = previous_text_click
+                .is_some_and(|click| click.matches(tab_id, self.sidebar_geometry_generation, now));
+            if is_double_click {
+                self.recent_sidebar_text_click = None;
+                let _ = self.open_tab_editor_for(tab_id);
+            } else {
+                self.recent_sidebar_text_click = Some(RecentSidebarTextClick {
+                    tab_id,
+                    at: now,
+                    geometry_generation: self.sidebar_geometry_generation,
+                });
+            }
+        }
     }
 
     fn handle_toolbar_hit(&mut self, hit: ToolbarHit) {
@@ -2323,6 +2443,16 @@ impl UnixApp {
                         "toolbar",
                         crate::operations::UI_TABS_TOGGLE,
                     );
+                }
+                ToolbarHit::ControlCenter => {
+                    match crate::control_center::open_control_center(
+                        self.no_activate,
+                        &crate::client::ipc_address(),
+                    ) {
+                        Ok(()) => self.set_status_message("Control Center opened"),
+                        Err(error) => self
+                            .set_status_message(format!("Control Center unavailable: {error:#}")),
+                    }
                 }
                 ToolbarHit::Settings => {
                     self.open_settings();
@@ -2351,6 +2481,17 @@ impl UnixApp {
                 let visible = !self.config.tabs_visible;
                 let _ =
                     self.set_tabs_visible(visible, "toolbar", crate::operations::UI_TABS_TOGGLE);
+            }
+            action::OPEN_CONTROL_CENTER => {
+                match crate::control_center::open_control_center(
+                    self.no_activate,
+                    &crate::client::ipc_address(),
+                ) {
+                    Ok(()) => self.set_status_message("Control Center opened"),
+                    Err(error) => {
+                        self.set_status_message(format!("Control Center unavailable: {error:#}"))
+                    }
+                }
             }
             action::OPEN_SETTINGS => {
                 self.open_settings();
@@ -2808,6 +2949,7 @@ impl UnixApp {
     }
 
     fn scroll_sidebar(&mut self, wheel_delta_notches: i32) {
+        self.invalidate_sidebar_text_click();
         let steps = wheel_delta_notches.unsigned_abs() as usize * WHEEL_ROWS_PER_NOTCH;
         let maximum = self.sidebar_max_offset();
         self.sidebar_scroll_offset = if wheel_delta_notches > 0 {
@@ -2824,6 +2966,7 @@ impl UnixApp {
         if !geometry.track.contains(x, y) {
             return false;
         }
+        self.invalidate_sidebar_text_click();
         if maximum == 0 {
             return true;
         }
@@ -2851,6 +2994,7 @@ impl UnixApp {
             self.end_sidebar_scroll_drag();
             return;
         };
+        self.invalidate_sidebar_text_click();
         let travel = geometry.track.height() - geometry.thumb.height();
         if maximum == 0 || travel <= 0 {
             self.sidebar_scroll_offset = 0;
@@ -3077,6 +3221,7 @@ impl UnixApp {
     }
 
     fn resize_to_window(&mut self) {
+        self.invalidate_sidebar_text_click();
         let Some(window) = self.window.as_ref() else {
             return;
         };
@@ -3250,7 +3395,10 @@ impl UnixApp {
                                 option_value(args, "--path").map(str::to_owned),
                                 mode,
                             ) {
-                                Ok(()) => None,
+                                Ok(()) => {
+                                    self.set_status_message("Control Center opened");
+                                    None
+                                }
                                 Err(error) => Some(IpcResponse::failure(error)),
                             }
                         }
@@ -3266,6 +3414,20 @@ impl UnixApp {
                         "open-new-terminal" => {
                             self.open_new_terminal_dialog();
                             None
+                        }
+                        "open-control-center" => {
+                            match crate::control_center::open_control_center(
+                                self.no_activate,
+                                &crate::client::ipc_address(),
+                            ) {
+                                Ok(()) => None,
+                                Err(error) => Some(IpcResponse::typed_failure(
+                                    format!("{error:#}"),
+                                    "control_center_unavailable",
+                                    "availability",
+                                    true,
+                                )),
+                            }
                         }
                         other => {
                             if let Some(window) = self.window.as_ref() {
@@ -3721,6 +3883,7 @@ fn platform_toolbar_action_id(hit: ToolbarHit) -> &'static str {
     let linux_hit = match hit {
         ToolbarHit::NewTab => LinuxToolbarHit::NewTab,
         ToolbarHit::ToggleTabs => LinuxToolbarHit::ToggleTabs,
+        ToolbarHit::ControlCenter => LinuxToolbarHit::ControlCenter,
         ToolbarHit::Settings => LinuxToolbarHit::Settings,
         ToolbarHit::ToggleLocale => LinuxToolbarHit::ToggleLocale,
         ToolbarHit::FontDecrease => LinuxToolbarHit::FontDecrease,
@@ -3735,6 +3898,7 @@ fn platform_toolbar_action_id(hit: ToolbarHit) -> &'static str {
     let macos_hit = match hit {
         ToolbarHit::NewTab => MacosToolbarHit::NewTab,
         ToolbarHit::ToggleTabs => MacosToolbarHit::ToggleTabs,
+        ToolbarHit::ControlCenter => MacosToolbarHit::ControlCenter,
         ToolbarHit::Settings => MacosToolbarHit::Settings,
         ToolbarHit::ToggleLocale => MacosToolbarHit::ToggleLocale,
         ToolbarHit::FontDecrease => MacosToolbarHit::FontDecrease,
@@ -3888,6 +4052,10 @@ impl ControlHost for UnixApp {
     ) -> Result<(), String> {
         if self.config.tabs_visible == visible {
             return Ok(());
+        }
+        self.invalidate_sidebar_text_click();
+        if !visible && self.note_edit_target.is_some() {
+            self.complete_tab_editor(false)?;
         }
         self.config.tabs_visible = visible;
         save_config(&self.config).map_err(|error| format!("{error:#}"))?;
@@ -4107,6 +4275,10 @@ impl ControlHost for UnixApp {
         if position >= self.tabs.len() {
             return Err("can't find window".to_owned());
         }
+        let id = self.tabs[position].id;
+        if self.active != Some(id) {
+            self.invalidate_sidebar_text_click();
+        }
         let _ = self.cancel_terminal_selection(true);
         if self.cwd_edit_target.is_some() {
             self.close_cwd_editor();
@@ -4117,7 +4289,6 @@ impl ControlHost for UnixApp {
         if self.focus_surface == UnixFocusSurface::Composer {
             self.sync_composer_buffer_to_tab();
         }
-        let id = self.tabs[position].id;
         self.active = Some(id);
         self.load_composer_buffer_from_tab();
         self.event_journal_mut()
@@ -4337,6 +4508,14 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                 }
                 if self.note_edit_target.is_some() {
                     self.handle_tab_editor_key(&event);
+                    return;
+                }
+                if self.focus_surface == UnixFocusSurface::Sidebar
+                    && matches!(event.logical_key, Key::Named(NamedKey::F2))
+                {
+                    if let Some(tab_id) = self.active {
+                        let _ = self.open_tab_editor_for(tab_id);
+                    }
                     return;
                 }
                 if matches!(event.logical_key, Key::Named(NamedKey::Escape))
@@ -4627,12 +4806,69 @@ fn system_menu_clipboard_state_pure(
 #[cfg(test)]
 mod system_menu_tests {
     use super::{
-        RenderBuffers, compact_cwd_for_status, scale_frame_nearest, scale_rect_to_frame,
-        system_menu_clipboard_state_pure,
+        RecentSidebarTextClick, RenderBuffers, compact_cwd_for_status, parse_gui_launch,
+        scale_frame_nearest, scale_rect_to_frame, system_menu_clipboard_state_pure,
     };
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     use super::{ToolbarHit, platform_toolbar_action_id};
-    use std::path::Path;
+    use std::{
+        path::Path,
+        time::{Duration, Instant},
+    };
+
+    #[test]
+    fn gui_launch_parser_accepts_each_selector_and_preserves_no_activate() {
+        for option in ["--endpoint", "--address", "--instance"] {
+            let value = match option {
+                "--endpoint" => "tcp:127.0.0.1:48815",
+                "--address" => "127.0.0.1:48815",
+                "--instance" => "dev",
+                _ => unreachable!(),
+            };
+            let (no_activate, selectors) = parse_gui_launch(&[
+                "--no-activate".to_owned(),
+                option.to_owned(),
+                value.to_owned(),
+            ])
+            .unwrap();
+            assert!(no_activate);
+            assert_eq!(
+                selectors.endpoint.as_deref(),
+                (option == "--endpoint").then_some(value)
+            );
+            assert_eq!(
+                selectors.address.as_deref(),
+                (option == "--address").then_some(value)
+            );
+            assert_eq!(
+                selectors.instance.as_deref(),
+                (option == "--instance").then_some(value)
+            );
+        }
+    }
+
+    #[test]
+    fn gui_launch_parser_rejects_selector_conflicts_duplicates_and_missing_values() {
+        let invalid = [
+            vec![
+                "--endpoint".to_owned(),
+                "tcp:127.0.0.1:48815".to_owned(),
+                "--instance".to_owned(),
+                "dev".to_owned(),
+            ],
+            vec![
+                "--instance".to_owned(),
+                "main".to_owned(),
+                "--instance".to_owned(),
+                "dev".to_owned(),
+            ],
+            vec!["--address".to_owned()],
+            vec!["--endpoint".to_owned(), "--no-activate".to_owned()],
+        ];
+        for arguments in invalid {
+            assert!(parse_gui_launch(&arguments).is_err(), "{arguments:?}");
+        }
+    }
 
     #[test]
     fn visual_cwd_compacts_home_and_other_absolute_paths() {
@@ -4679,6 +4915,10 @@ mod system_menu_tests {
             action::TOGGLE_TABS
         );
         assert_eq!(
+            platform_toolbar_action_id(ToolbarHit::ControlCenter),
+            action::OPEN_CONTROL_CENTER
+        );
+        assert_eq!(
             platform_toolbar_action_id(ToolbarHit::Settings),
             action::OPEN_SETTINGS
         );
@@ -4722,6 +4962,20 @@ mod system_menu_tests {
             scale_rect_to_frame((250, 46, 710, 480), (960, 600), (1920, 1200)),
             (500, 92, 1420, 960)
         );
+    }
+
+    #[test]
+    fn sidebar_double_click_candidate_requires_stable_tab_geometry_and_deadline() {
+        let now = Instant::now();
+        let click = RecentSidebarTextClick {
+            tab_id: 7,
+            at: now,
+            geometry_generation: 11,
+        };
+        assert!(click.matches(7, 11, now + Duration::from_millis(499)));
+        assert!(!click.matches(8, 11, now + Duration::from_millis(100)));
+        assert!(!click.matches(7, 12, now + Duration::from_millis(100)));
+        assert!(!click.matches(7, 11, now + Duration::from_millis(501)));
     }
 
     #[test]

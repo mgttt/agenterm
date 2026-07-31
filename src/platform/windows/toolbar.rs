@@ -8,6 +8,7 @@ use crate::platform::action;
 pub(crate) enum WindowsToolbarHit {
     ToggleTabs,
     NewTab,
+    ControlCenter,
     Settings,
     ToggleLocale,
     FontDecrease,
@@ -16,9 +17,10 @@ pub(crate) enum WindowsToolbarHit {
 
 impl WindowsToolbarHit {
     #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) const ORDER: [Self; 6] = [
+    pub(crate) const ORDER: [Self; 7] = [
         Self::ToggleTabs,
         Self::NewTab,
+        Self::ControlCenter,
         Self::Settings,
         Self::ToggleLocale,
         Self::FontDecrease,
@@ -29,6 +31,7 @@ impl WindowsToolbarHit {
         match self {
             Self::ToggleTabs => action::TOGGLE_TABS,
             Self::NewTab => action::NEW_TAB,
+            Self::ControlCenter => action::OPEN_CONTROL_CENTER,
             Self::Settings => action::OPEN_SETTINGS,
             Self::ToggleLocale => action::TOGGLE_LOCALE,
             Self::FontDecrease => action::FONT_DECREASE,
@@ -48,6 +51,7 @@ mod tests {
             [
                 action::TOGGLE_TABS,
                 action::NEW_TAB,
+                action::OPEN_CONTROL_CENTER,
                 action::OPEN_SETTINGS,
                 action::TOGGLE_LOCALE,
                 action::FONT_DECREASE,

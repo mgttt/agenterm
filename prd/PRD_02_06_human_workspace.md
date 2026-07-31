@@ -18,15 +18,21 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] tabs form a visible parent/child tree for agent and program teams
 - [x] tree order is parent-first with indentation and branch connectors
 - [x] closing a parent promotes its children without closing their processes
-- [x] the selected node exposes direct add-child, edit, and close actions in
-  shared row geometry and replaces them with Save/Cancel while that row is
-  being edited
-- [ ] v0.1.11 removes the ordinary-row `Edit` action from visible geometry:
+- [x] the selected node exposes direct add-child and close actions in shared
+  row geometry and replaces them with Save/Cancel while that row is being
+  edited
+- [x] v0.1.11 removes the ordinary-row `Edit` action from visible geometry:
   one click on the row body selects, while a double-click on the name/note
   body enters the same stable-ID inline editor. Disclosure controls, branch
   lines, status lamps, scrollbars and the remaining action area never trigger
   editing. `F2` and the public `edit-tab` UI action remain equivalent
   keyboard/automation entry points.
+  Windows and Unix recognizers bind the candidate to the stable tab ID and a
+  geometry generation; scrolling, resizing, hiding Tabs, or changing tabs
+  invalidates it before a second click can target content that moved under the
+  pointer. The owning workbench journey covers single click, excluded hit
+  regions, F2/public-action equivalence, Esc/transition cancellation,
+  Save/Cancel, no ordinary Edit bounds, and before/after PNG evidence.
 - [x] add-child immediately opens the new node's name/note editor in the new
   child's own row without borrowing the Composer
 - [x] collapse/expand with persisted node state
@@ -50,9 +56,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   - [x] the target row's persisted name and note display surfaces become two
     bounded native single-line edit overlays in place; the row keeps its
     expander, connectors, status lamp, selection, and stable identity
-  - [x] normal `+`/`Edit`/`Close` actions become `Save`/`Cancel` for the
-    editing row; Cancel restores the persisted name/note without mutation
-  - [ ] after the v0.1.11 gesture change, ordinary rows expose only the
+  - [x] entering edit replaces the ordinary `+`/`Close` actions with
+    `Save`/`Cancel`; Cancel restores the persisted name/note without mutation
+  - [x] after the v0.1.11 gesture change, ordinary rows expose only the
     contextual add-child and close actions; editing rows expose Save/Cancel,
     and either exit path returns to that simpler ordinary geometry
   - [x] public `set-composer -t @ID "name\nnote"` targets the matching open
@@ -111,7 +117,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] toolbar order is Tabs then New, with `[Settings] [En|Zh] [z|Z]` anchored
   at the right; Tabs reads `<Tabs` while the tree is visible and `>Tabs` while
   hidden
-- [ ] v0.1.11 adds a responsive `Control Center` entry centered within the
+- [~] v0.1.11 adds a responsive `Control Center` entry centered within the
   terminal workbench column between the left Tabs/New group and the right
   Settings/En|Zh/z|Z group. It contracts to `CC` before overlapping either
   group, but retains the same accessible name, tooltip, action identity and

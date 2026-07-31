@@ -106,11 +106,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     every message from one canonical typed envelope
   - [ ] stable event subscription
 - v0.1.11 native-local IPC and logical instances
-  - [ ] this module is the single product owner for local transport,
+  - [x] this module is the single product owner for local transport,
     endpoint resolution, instance identity, registration migration, peer
     isolation, and stale-endpoint recovery; CLI and executable modules consume
     these contracts instead of defining parallel transport rules
-  - [ ] freeze three separate typed identities:
+  - [x] freeze three separate typed identities:
     - `LogicalInstance`: the user-facing role and lifecycle class
       `main | dev | ephemeral | custom`; v0.1.11 defaults ordinary launches to
       `main`, reserves `dev` for isolated development, and keeps
@@ -124,16 +124,16 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       user scope, logical instance, and namespace version; registration,
       connection handshake, singleton ownership, workspace defaults, epoch,
       and receipts must agree on it
-  - [ ] the human labels `{username}_main` and `{username}_dev` are display
+  - [x] the human labels `{username}_main` and `{username}_dev` are display
     values only. Raw usernames never become socket paths, pipe names, lock
     authority, or security identities; Windows derives scope from the user SID
     and Unix derives it from the effective UID, using a bounded versioned key
-  - [ ] one OS-user scope may run `main` and `dev` concurrently, but each
+  - [~] one OS-user scope may run `main` and `dev` concurrently, but each
     logical instance has at most one live authority. A same-scope launch reuses
     a compatible authority; an incompatible or ambiguously owned endpoint
     fails with a typed result instead of killing it or falling back to another
     instance
-  - [ ] Unix local endpoint contract:
+  - [~] Unix local endpoint contract:
     - choose a trusted per-UID runtime base, create the AgenTerm instance
       directory with mode `0700`, and create the socket with mode `0600`
     - validate owner, type, permissions, path length, and symlink-free
@@ -145,7 +145,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       directory, foreign-owned node, permission failure, or timeout
     - where the OS exposes peer credentials, verify the peer UID against
       `ServerScopeId`; ownership uncertainty fails closed with a typed error
-  - [ ] Windows local endpoint contract:
+  - [~] Windows local endpoint contract:
     - create the named pipe with an explicit DACL scoped to the current user
       SID and only separately justified system principals; do not inherit a
       broadly writable ACL
@@ -158,14 +158,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - validate the connected server identity against registration and
       handshake facts; stale registration, PID reuse, access denial, timeout,
       and namespace mismatch remain distinguishable typed outcomes
-  - [ ] registration schema v2 stores the logical instance,
+  - [~] registration schema v2 stores the logical instance,
     `ServerScopeId`, typed endpoint, namespace/schema version, PID plus process
     start identity or lease nonce, server epoch, and existing diagnostic facts.
     Discovery reads v2 native-local records and legacy TCP/address records in
     one bounded pass, deduplicates the same authority, preserves reachable,
     unreachable, incompatible, and owner-unknown states, and never treats
     filename presence as proof of a live server
-  - [ ] migration is staged rather than flag-day:
+  - [~] migration is staged rather than flag-day:
     - first ship the common resolver, schema-v2 writer/reader, mixed discovery,
       and explicit native endpoint support while the shipped TCP default
       remains usable
@@ -180,7 +180,17 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       transition, add `AGENTERM_IPC_ENDPOINT` and `AGENTERM_INSTANCE` as the
       typed endpoint/instance environment representation, and keep all GUI,
       CLI, Control Center, Script, MCP, and mux consumers on one resolver
-  - [ ] public black-box evidence covers `main/dev` isolation and singleton
+    - the v0.1.11 compatibility bridge first performs a 250 ms bounded,
+      exact-endpoint probe of a live schema-v1 default-main registration. A
+      new client reuses that authority when present; otherwise ordinary main
+      resolves to the platform native endpoint. Main retains the existing
+      workspace path, while dev/custom use scoped paths. A native server has
+      no fabricated TCP listener, so discovery reports
+      `legacy_client_compatibility=unsupported_no_legacy_listener` rather
+      than pretending an old TCP-only client can attach. That rollback
+      limitation remains a partial migration gate; explicit TCP continues to
+      provide the compatibility route when old clients are required.
+  - [~] public black-box evidence covers `main/dev` isolation and singleton
     races; Unix permission, length, character, symlink, stale, and owner
     failures; Windows DACL, remote-client rejection, first-instance,
     cancellation, and bounded-I/O failures; schema-v1/v2 mixed discovery;

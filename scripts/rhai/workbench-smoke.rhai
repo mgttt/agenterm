@@ -104,27 +104,16 @@ fn wait_for_window(gui_child) {
 }
 
 fn wait_for_editor(context, cli, target, open) {
-    let last = ();
-    for attempt in 0..200 {
-        let snapshot = json_cli(context, cli, ["ui-snapshot"]);
-        last = snapshot;
-        let matches = snapshot.tab_editor != ()
-            && snapshot.tab_editor.target == target;
-        let target_present = false;
-        for tab in snapshot.tabs {
-            if tab.id == target {
-                target_present = true;
-            }
-        }
-        if snapshot.projection == "replaceable_ui_client"
-                && target_present
-                && matches == open {
-            return snapshot;
-        }
-        rhai::task::sleep(std::time::Duration::from_millis(10));
-    }
-    throw "workbench_editor_timeout:" + target + ":" + open +
-        ":" + rhai::json::stringify(last);
+    json_cli(
+        context,
+        cli,
+        [
+            "wait-ui",
+            "-t", target,
+            "--tab-editor-state", if open { "open" } else { "closed" },
+            "--timeout-ms", "5000"
+        ]
+    )
 }
 
 fn wait_for_editor_draft(context, cli, target, name_len, note_len) {
@@ -158,6 +147,79 @@ fn click_bounds(gui_child, bounds) {
         bounds.left + x_offset,
         bounds.top + y_offset
     );
+}
+
+fn double_click_text(gui_child, bounds) {
+    let x = bounds.left + bounds.width / 2;
+    let y = bounds.top + bounds.height / 2;
+    gui_child.window_pointer("click", x, y);
+    gui_child.window_message(0x0203, 0, y * 65536 + x);
+}
+
+fn double_click_message(gui_child, bounds) {
+    let x = bounds.left + bounds.width / 2;
+    let y = bounds.top + bounds.height / 2;
+    gui_child.window_message(0x0203, 0, y * 65536 + x);
+}
+
+fn double_click_point(gui_child, x, y) {
+    gui_child.window_message(0x0203, 0, y * 65536 + x);
+}
+
+fn set_tab_editor_text(gui_child, name, note) {
+    let title_editor = gui_child.window_control(2105);
+    let note_editor = gui_child.window_control(2106);
+    require(
+        title_editor.visible && note_editor.visible,
+        "workbench_tab_editor_controls_hidden"
+    );
+    title_editor.set_text(name);
+    note_editor.set_text(note);
+}
+
+fn assert_editor_closed(snapshot, target, label) {
+    let tab = find_tab(snapshot, target);
+    require(
+        snapshot.tab_editor == ()
+            && tab.render.mode == "normal"
+            && tab.actions.mode == "normal"
+            && tab.actions.edit == ()
+            && tab.actions.save == ()
+            && tab.actions.cancel == (),
+        "workbench_editor_should_be_closed:" + label +
+            ":" + rhai::json::stringify(tab)
+    );
+}
+
+fn assert_editor_open(snapshot, target, label) {
+    let tab = find_tab(snapshot, target);
+    require(
+        snapshot.tab_editor != ()
+            && snapshot.tab_editor.target == target
+            && tab.render.mode == "editing"
+            && tab.render.editors != ()
+            && tab.actions.mode == "editing"
+            && tab.actions.edit == ()
+            && tab.actions.save.id == "tab-editor-save"
+            && tab.actions.cancel.id == "tab-editor-cancel"
+            && tab.actions.save.bounds.width > 0
+            && tab.actions.cancel.bounds.width > 0,
+        "workbench_editor_should_be_open:" + label +
+            ":" + rhai::json::stringify(tab)
+    );
+}
+
+fn retain_png_evidence(context, cli, name) {
+    let path = std::path::join(
+        context.run_directory,
+        "evidence/" + name + ".png"
+    ).display;
+    text_cli(context, cli, ["screenshot", "-o", path]);
+    require(
+        std::fs::metadata(path).len >= 1000,
+        "workbench_screenshot_too_small:" + name
+    );
+    path
 }
 
 fn assert_inside(outer, inner, label) {
@@ -248,18 +310,78 @@ try {
          "--timeout-ms", "10000"]
     );
 
+    let peer_name = "workbench-peer-" + std::process::id();
+    let peer = text_cli(
+        context,
+        cli,
+        ["new-window", "-d", "-n", peer_name,
+         "-F", "#{window_id}"]
+    );
+    peer.trim();
+    text_cli(context, cli, ["select-window", "-t", root]);
+    let snapshot = json_cli(
+        context,
+        cli,
+        ["wait-ui", "--active", root, "--window-state", "restored",
+         "--timeout-ms", "5000"]
+    );
+    let root_tab = find_tab(snapshot, root);
+    let peer_tab = find_tab(snapshot, peer);
+    assert_editor_closed(snapshot, root, "initial-normal");
+
+    print("STEP a single text click selects without entering edit mode");
+    click_bounds(gui_child, peer_tab.render.text);
+    let snapshot = json_cli(
+        context,
+        cli,
+        ["wait-ui", "--active", peer, "--focus", "tabs",
+         "--timeout-ms", "5000"]
+    );
+    assert_editor_closed(snapshot, peer, "single-click-peer");
+    let root_tab = find_tab(snapshot, root);
+    click_bounds(gui_child, root_tab.render.text);
+    let snapshot = json_cli(
+        context,
+        cli,
+        ["wait-ui", "--active", root, "--focus", "tabs",
+         "--timeout-ms", "5000"]
+    );
+    assert_editor_closed(snapshot, root, "single-click-root");
+
+    print("STEP non-text double clicks never enter tab editing");
+    let root_tab = find_tab(snapshot, root);
+    for zone in [
+        root_tab.render.disclosure_hit,
+        root_tab.render.status,
+        root_tab.actions.new_child.bounds,
+        root_tab.actions.close.bounds
+    ] {
+        double_click_message(gui_child, zone);
+        assert_editor_closed(
+            json_cli(context, cli, ["ui-snapshot"]),
+            root,
+            "non-text-zone"
+        );
+    }
+    double_click_point(
+        gui_child,
+        root_tab.render.row.left + 1,
+        root_tab.render.row.top + root_tab.render.row.height / 2
+    );
+    assert_editor_closed(
+        json_cli(context, cli, ["ui-snapshot"]),
+        root,
+        "tree-indent"
+    );
+
     print(
-        "STEP mouse Edit opens independent controls and mouse Save restores Edit"
+        "STEP double-clicking tab text opens independent controls and Save restores normal mode"
     );
     let snapshot = json_cli(context, cli, ["ui-snapshot"]);
     let root_tab = find_tab(snapshot, root);
-    require(
-        root_tab.actions.edit.label == "Edit",
-        "workbench_edit_action_missing:" +
-            rhai::json::stringify(root_tab)
-    );
-    click_bounds(gui_child, root_tab.actions.edit.bounds);
+    double_click_text(gui_child, root_tab.render.text);
     let snapshot = wait_for_editor(context, cli, root, true);
+    assert_editor_open(snapshot, root, "mouse-double-click");
     let composer_before = text_cli(
         context,
         cli,
@@ -267,11 +389,7 @@ try {
     );
     let saved_name = "工作台-" + std::process::id();
     let saved_note = "inline note";
-    text_cli(
-        context,
-        cli,
-        ["set-composer", "-t", root, saved_name + "\n" + saved_note]
-    );
+    set_tab_editor_text(gui_child, saved_name, saved_note);
     wait_for_editor_draft(
         context,
         cli,
@@ -279,10 +397,13 @@ try {
         saved_name.len,
         saved_note.len
     );
+    retain_png_evidence(context, cli, "tab-editor-open");
     let root_tab = find_tab(snapshot, root);
     click_bounds(gui_child, root_tab.actions.save.bounds);
     let snapshot = wait_for_editor(context, cli, root, false);
     let root_tab = find_tab(snapshot, root);
+    assert_editor_closed(snapshot, root, "mouse-save");
+    retain_png_evidence(context, cli, "tab-editor-normal");
     let composer_after = text_cli(
         context,
         cli,
@@ -291,21 +412,16 @@ try {
     require(
         root_tab.name == saved_name
             && root_tab.note == saved_note
-            && root_tab.actions.edit.label == "Edit"
+            && root_tab.actions.edit == ()
             && composer_after == composer_before,
         "workbench_save_contract:" +
             rhai::json::stringify(root_tab)
     );
 
     print("STEP mouse Cancel discards both independent drafts");
-    click_bounds(gui_child, root_tab.actions.edit.bounds);
+    double_click_text(gui_child, root_tab.render.text);
     let snapshot = wait_for_editor(context, cli, root, true);
-    text_cli(
-        context,
-        cli,
-        ["set-composer", "-t", root,
-         "discarded name\ndiscarded note"]
-    );
+    set_tab_editor_text(gui_child, "discarded name", "discarded note");
     wait_for_editor_draft(
         context,
         cli,
@@ -321,10 +437,119 @@ try {
         root_tab.name == saved_name && root_tab.note == saved_note,
         "workbench_cancel_persisted_draft"
     );
-    test_harness::emit_evidence(
+
+    print("STEP F2 and public edit-tab expose the same inline editor contract");
+    json_cli(
         context,
-        declared_evidence,
-        "ux.workbench-inline-edit"
+        cli,
+        ["--deadline-ms", "15000", "focus", "tabs", "-t", root]
+    );
+    gui_child.window_key("F2");
+    let f2_snapshot = wait_for_editor(context, cli, root, true);
+    assert_editor_open(f2_snapshot, root, "f2");
+    gui_child.window_key("Escape");
+    assert_editor_closed(
+        wait_for_editor(context, cli, root, false),
+        root,
+        "f2-escape"
+    );
+    json_cli(context, cli, ["ui-action", "edit-tab", "-t", root]);
+    let public_snapshot = wait_for_editor(context, cli, root, true);
+    assert_editor_open(public_snapshot, root, "public-edit-tab");
+    let f2_actions = find_tab(f2_snapshot, root).actions;
+    let public_actions = find_tab(public_snapshot, root).actions;
+    require(
+        f2_actions.mode == public_actions.mode
+            && f2_actions.density == public_actions.density
+            && f2_actions.save.id == public_actions.save.id
+            && f2_actions.cancel.id == public_actions.cancel.id,
+        "workbench_f2_public_editor_mismatch"
+    );
+    gui_child.window_key("Escape");
+    wait_for_editor(context, cli, root, false);
+
+    print("STEP tab switch and Tabs hide cancel unsaved inline drafts");
+    json_cli(context, cli, ["ui-action", "edit-tab", "-t", root]);
+    wait_for_editor(context, cli, root, true);
+    set_tab_editor_text(gui_child, "switch draft", "switch note");
+    wait_for_editor_draft(
+        context,
+        cli,
+        root,
+        "switch draft".len,
+        "switch note".len
+    );
+    json_cli(context, cli, ["ui-action", "select-tab", "-t", peer]);
+    assert_editor_closed(
+        wait_for_editor(context, cli, root, false),
+        root,
+        "tab-switch"
+    );
+    let root_tab = find_tab(
+        json_cli(context, cli, ["ui-snapshot"]),
+        root
+    );
+    require(
+        root_tab.name == saved_name && root_tab.note == saved_note,
+        "workbench_tab_switch_persisted_draft"
+    );
+    json_cli(context, cli, ["ui-action", "select-tab", "-t", root]);
+    json_cli(context, cli, ["ui-action", "edit-tab", "-t", root]);
+    wait_for_editor(context, cli, root, true);
+    set_tab_editor_text(gui_child, "hide draft", "hide note");
+    wait_for_editor_draft(
+        context,
+        cli,
+        root,
+        "hide draft".len,
+        "hide note".len
+    );
+    json_cli(context, cli, ["ui-action", "tabs-hide"]);
+    assert_editor_closed(
+        wait_for_editor(context, cli, root, false),
+        root,
+        "tabs-hide"
+    );
+    json_cli(context, cli, ["ui-action", "tabs-show"]);
+    let snapshot = json_cli(context, cli, ["ui-snapshot"]);
+    let root_tab = find_tab(snapshot, root);
+    require(
+        root_tab.name == saved_name && root_tab.note == saved_note,
+        "workbench_tabs_hide_persisted_draft"
+    );
+
+    print("STEP layout changes invalidate an unfinished double-click candidate");
+    click_bounds(gui_child, root_tab.render.text);
+    json_cli(context, cli, ["ui-action", "select-tab", "-t", peer]);
+    double_click_message(gui_child, root_tab.render.text);
+    assert_editor_closed(
+        json_cli(context, cli, ["ui-snapshot"]),
+        root,
+        "candidate-tab-switch"
+    );
+    json_cli(context, cli, ["ui-action", "select-tab", "-t", root]);
+    let snapshot = json_cli(context, cli, ["ui-snapshot"]);
+    let root_tab = find_tab(snapshot, root);
+    click_bounds(gui_child, root_tab.render.text);
+    json_cli(context, cli, ["ui-action", "tabs-hide"]);
+    json_cli(context, cli, ["ui-action", "tabs-show"]);
+    let snapshot = json_cli(context, cli, ["ui-snapshot"]);
+    let root_tab = find_tab(snapshot, root);
+    double_click_message(gui_child, root_tab.render.text);
+    assert_editor_closed(
+        json_cli(context, cli, ["ui-snapshot"]),
+        root,
+        "candidate-tabs-hide"
+    );
+    click_bounds(gui_child, root_tab.render.text);
+    gui_child.window_resize(1000, 680);
+    let snapshot = json_cli(context, cli, ["ui-snapshot"]);
+    let root_tab = find_tab(snapshot, root);
+    double_click_message(gui_child, root_tab.render.text);
+    assert_editor_closed(
+        json_cli(context, cli, ["ui-snapshot"]),
+        root,
+        "candidate-window-resize"
     );
 
     print("STEP archived Proxy status surface releases its layout and actions");
@@ -354,12 +579,7 @@ try {
         let child = active_tab(snapshot);
         let child_name = "层级-" + depth + "-工作";
         let child_note = "备注-" + depth;
-        text_cli(
-            context,
-            cli,
-            ["set-composer", "-t", child.id,
-             child_name + "\n" + child_note]
-        );
+        set_tab_editor_text(gui_child, child_name, child_note);
         wait_for_editor_draft(
             context,
             cli,
@@ -371,6 +591,74 @@ try {
         wait_for_editor(context, cli, child.id, false);
         target = child.id;
     }
+
+    print("STEP sidebar scrolling clears a pending text double-click candidate");
+    for index in 1..7 {
+        text_cli(
+            context,
+            cli,
+            [
+                "new-window", "-d", "-P", "-n",
+                "candidate-scroll-" + index,
+                "--", "cmd.exe", "/c", "exit"
+            ]
+        );
+    }
+    gui_child.window_resize(900, 320);
+    let scroll_snapshot = ();
+    for attempt in 0..200 {
+        let candidate = json_cli(context, cli, ["ui-snapshot"]);
+        if candidate.layout.sidebar.scrollbar != ()
+                && candidate.layout.sidebar.scrollbar.max_offset > 0 {
+            scroll_snapshot = candidate;
+            break;
+        }
+        rhai::task::sleep(std::time::Duration::from_millis(25));
+    }
+    require(
+        scroll_snapshot != (),
+        "workbench_sidebar_scrollbar_timeout"
+    );
+    let first_visible = ();
+    for tab in scroll_snapshot.tabs {
+        if first_visible == ()
+                && tab.visible
+                && tab.render.text.width > 0 {
+            first_visible = tab;
+        }
+    }
+    require(first_visible != (), "workbench_visible_scroll_tab_missing");
+    click_bounds(gui_child, first_visible.render.text);
+    let scrollbar = scroll_snapshot.layout.sidebar.scrollbar;
+    let thumb_x = scrollbar.thumb.left + scrollbar.thumb.width / 2;
+    let thumb_y = scrollbar.thumb.top + scrollbar.thumb.height / 2;
+    let bottom_y = scrollbar.track.top + scrollbar.track.height - 2;
+    gui_child.window_pointer("down", thumb_x, thumb_y);
+    gui_child.window_pointer("move-held", thumb_x, bottom_y);
+    gui_child.window_pointer("up", thumb_x, bottom_y);
+    let scrolled = ();
+    for attempt in 0..100 {
+        scrolled = json_cli(context, cli, ["ui-snapshot"]);
+        if scrolled.layout.sidebar.scrollbar.offset > 0 {
+            break;
+        }
+        rhai::task::sleep(std::time::Duration::from_millis(25));
+    }
+    require(
+        scrolled.layout.sidebar.scrollbar.offset > 0,
+        "workbench_sidebar_scroll_did_not_move"
+    );
+    double_click_message(gui_child, first_visible.render.text);
+    require(
+        json_cli(context, cli, ["ui-snapshot"]).tab_editor == (),
+        "workbench_scroll_retained_double_click_candidate"
+    );
+    gui_child.window_resize(1000, 680);
+    test_harness::emit_evidence(
+        context,
+        declared_evidence,
+        "ux.workbench-inline-edit"
+    );
 
     for width in [180, 250, 480] {
         json_cli(
@@ -392,17 +680,13 @@ try {
         );
         assert_inside(
             tab.bounds,
-            tab.actions.edit.bounds,
-            "edit:" + width
-        );
-        assert_inside(
-            tab.bounds,
             tab.actions.close.bounds,
             "close:" + width
         );
         let density = if width < 300 { "compact" } else { "full" };
         require(
             tab.actions.density == density
+                && tab.actions.edit == ()
                 && tab.render.node.x >= tab.bounds.left
                 && tab.render.name.left < tab.actions.new_child.bounds.left,
             "workbench_tree_geometry:" + width +

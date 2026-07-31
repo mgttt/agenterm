@@ -590,6 +590,7 @@ pub(super) enum TerminalCursorStyle {
 pub(super) enum ToolbarHit {
     NewTab,
     ToggleTabs,
+    ControlCenter,
     Settings,
     ToggleLocale,
     FontDecrease,
@@ -601,6 +602,7 @@ pub(super) struct WorkspaceToolbarView {
     pub(super) bounds: (u32, u32, u32, u32),
     pub(super) new_tab: (u32, u32, u32, u32),
     pub(super) tabs: (u32, u32, u32, u32),
+    pub(super) control_center: (u32, u32, u32, u32),
     pub(super) settings: (u32, u32, u32, u32),
     pub(super) locale: (u32, u32, u32, u32),
     pub(super) font_decrease: (u32, u32, u32, u32),
@@ -620,6 +622,7 @@ impl WorkspaceToolbarView {
             bounds: u32_rect(toolbar.bounds),
             new_tab: u32_rect(toolbar.new_tab),
             tabs: u32_rect(toolbar.tabs),
+            control_center: u32_rect(toolbar.control_center),
             settings: u32_rect(toolbar.settings),
             locale: u32_rect(toolbar.locale),
             font_decrease: u32_rect(toolbar.font_decrease),
@@ -641,6 +644,9 @@ impl WorkspaceToolbarView {
         }
         if rect_contains(self.tabs, x, y) {
             return Some(ToolbarHit::ToggleTabs);
+        }
+        if rect_contains(self.control_center, x, y) {
+            return Some(ToolbarHit::ControlCenter);
         }
         if rect_contains(self.settings, x, y) {
             return Some(ToolbarHit::Settings);
@@ -1298,7 +1304,12 @@ fn render_workspace_toolbar(
     fill_rect(buffer, stride, bx, by, bw, 1, divider);
     let button_bg = rgb_to_pixel(palette.composer);
     let labels = if toolbar.compact {
-        ("+", if toolbar.tabs_visible { "<T" } else { ">T" }, "S")
+        (
+            "+",
+            if toolbar.tabs_visible { "<T" } else { ">T" },
+            "CC",
+            "S",
+        )
     } else {
         (
             "New",
@@ -1307,13 +1318,15 @@ fn render_workspace_toolbar(
             } else {
                 ">Tabs"
             },
+            "Control Center",
             "Settings",
         )
     };
     for (rect, label) in [
         (toolbar.new_tab, labels.0),
         (toolbar.tabs, labels.1),
-        (toolbar.settings, labels.2),
+        (toolbar.control_center, labels.2),
+        (toolbar.settings, labels.3),
         (toolbar.locale, toolbar.locale_id.toolbar_label()),
         (toolbar.font_decrease, "A-"),
         (toolbar.font_increase, "A+"),
@@ -1507,25 +1520,15 @@ fn render_sidebar(
                 palette.muted_text,
             );
             if row.active {
-                let (add_label, edit_label, close_label) = match geometry.actions.density {
-                    TreeRowActionDensity::Full => ("Add", "Edit", "Close"),
-                    TreeRowActionDensity::Compact => ("+", "Edit", "x"),
+                let (add_label, close_label) = match geometry.actions.density {
+                    TreeRowActionDensity::Full => ("Add", "Close"),
+                    TreeRowActionDensity::Compact => ("+", "x"),
                 };
                 if let Some(add_child) = geometry.actions.add_child {
                     render_tree_action_button(
                         buffer, stride, width, height, palette, add_child, add_label, false,
                     );
                 }
-                render_tree_action_button(
-                    buffer,
-                    stride,
-                    width,
-                    height,
-                    palette,
-                    geometry.actions.primary,
-                    edit_label,
-                    false,
-                );
                 render_tree_action_button(
                     buffer,
                     stride,
