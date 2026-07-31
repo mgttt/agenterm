@@ -295,6 +295,11 @@ Revision-4 migration evidence (2026-07-31, partial):
   two-second Unicode clipboard, UTF-16, and transferable-allocation contract;
   Linux/macOS retain the existing typed Unsupported result rather than silently
   inheriting GUI clipboard timeout or paste-policy semantics.
+- [x] Script Runtime atomic promotion, append parent-directory durability, and
+  reparse-point metadata now call `services::script_files → selected →
+  adapters`. Windows retains verbatim-path `MoveFileExW` promotion; Unix
+  retains parent-directory `fsync`; product code keeps its unrestricted-path
+  API and existing typed error receipts.
 
 - [~] `settings`, instance PID/start-identity checks, terminal default-shell
   selection, Control Center atomic-file/focus/capture routing, and passive

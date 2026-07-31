@@ -10,6 +10,8 @@ use std::{
 use rhai::{Array, Dynamic, Engine, EvalAltResult, Module, Shared};
 use sha2::{Digest, Sha256};
 
+use crate::platform::services::script_files;
+
 thread_local! {
     static INVOCATION_TEMP_ROOT: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
 }
@@ -396,7 +398,8 @@ fn append_sync(path: &str, value: &[u8]) -> Result<(), Box<EvalAltResult>> {
         .sync_all()
         .map_err(|error| io_error("runtime_append_sync", path, error))?;
     if created {
-        sync_parent(parent).map_err(|error| io_error("runtime_append_parent_sync", path, error))?;
+        script_files::sync_parent(parent)
+            .map_err(|error| io_error("runtime_append_parent_sync", path, error))?;
     }
     Ok(())
 }
@@ -430,10 +433,11 @@ fn atomic_write(path: &str, value: &[u8]) -> Result<(), Box<EvalAltResult>> {
         .and_then(|_| output.sync_all())
         .map_err(|error| io_error("runtime_atomic_write_data", path, error))?;
     drop(output);
-    replace_file(&temporary, &destination)
+    script_files::replace_file(&temporary, &destination)
         .map_err(|error| io_error("runtime_atomic_write_promote", path, error))?;
     cleanup.armed = false;
-    sync_parent(parent).map_err(|error| io_error("runtime_atomic_write_sync", path, error))?;
+    script_files::sync_parent(parent)
+        .map_err(|error| io_error("runtime_atomic_write_sync", path, error))?;
     Ok(())
 }
 
@@ -448,67 +452,6 @@ impl Drop for AtomicWriteCleanup {
             let _ = std::fs::remove_file(&self.path);
         }
     }
-}
-
-#[cfg(windows)]
-fn replace_file(source: &Path, destination: &Path) -> std::io::Result<()> {
-    use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::Storage::FileSystem::{
-        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
-    };
-
-    // Rust's filesystem APIs opt into verbatim paths internally, but this
-    // direct Win32 call must do so explicitly. Canonicalizing the existing
-    // source and destination parent produces `\\?\` paths and keeps atomic
-    // promotion working beyond the legacy MAX_PATH boundary.
-    let source = std::fs::canonicalize(source)?;
-    let destination = std::fs::canonicalize(
-        destination
-            .parent()
-            .ok_or_else(|| std::io::Error::other("destination parent required"))?,
-    )?
-    .join(
-        destination
-            .file_name()
-            .ok_or_else(|| std::io::Error::other("destination name required"))?,
-    );
-    let source = source
-        .as_os_str()
-        .encode_wide()
-        .chain(Some(0))
-        .collect::<Vec<_>>();
-    let destination = destination
-        .as_os_str()
-        .encode_wide()
-        .chain(Some(0))
-        .collect::<Vec<_>>();
-    let result = unsafe {
-        MoveFileExW(
-            source.as_ptr(),
-            destination.as_ptr(),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-        )
-    };
-    if result == 0 {
-        Err(std::io::Error::last_os_error())
-    } else {
-        Ok(())
-    }
-}
-
-#[cfg(not(windows))]
-fn replace_file(source: &Path, destination: &Path) -> std::io::Result<()> {
-    std::fs::rename(source, destination)
-}
-
-#[cfg(unix)]
-fn sync_parent(parent: &Path) -> std::io::Result<()> {
-    std::fs::File::open(parent)?.sync_all()
-}
-
-#[cfg(not(unix))]
-fn sync_parent(_parent: &Path) -> std::io::Result<()> {
-    Ok(())
 }
 
 fn script_dir_entry(entry: DirEntry) -> Result<ScriptDirEntry, Box<EvalAltResult>> {
@@ -536,22 +479,8 @@ fn metadata_len(metadata: &mut ScriptMetadata) -> Result<rhai::INT, Box<EvalAltR
         .map_err(|_| "filesystem_metadata_overflow: file length exceeds Rhai integer".into())
 }
 
-#[cfg(windows)]
 fn metadata_is_reparse_point(metadata: &mut ScriptMetadata) -> Result<bool, Box<EvalAltResult>> {
-    use std::os::windows::fs::MetadataExt;
-
-    Ok(windows_attributes_are_reparse(metadata.0.file_attributes()))
-}
-
-#[cfg(windows)]
-fn windows_attributes_are_reparse(attributes: u32) -> bool {
-    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
-    attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0
-}
-
-#[cfg(not(windows))]
-fn metadata_is_reparse_point(metadata: &mut ScriptMetadata) -> Result<bool, Box<EvalAltResult>> {
-    Ok(metadata.0.file_type().is_symlink())
+    Ok(script_files::metadata_is_reparse_point(&metadata.0))
 }
 
 fn metadata_modified(
@@ -925,14 +854,6 @@ mod tests {
         );
         std::fs::remove_file(&file).unwrap();
         std::fs::remove_dir(&directory).unwrap();
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn windows_reparse_attribute_detection_is_exact() {
-        assert!(!windows_attributes_are_reparse(0));
-        assert!(windows_attributes_are_reparse(0x0000_0400));
-        assert!(windows_attributes_are_reparse(0x0000_0400 | 0x10));
     }
 
     #[test]

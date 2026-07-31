@@ -15,6 +15,10 @@ pub(crate) mod script_http;
 #[path = "adapters/windows/script_clipboard.rs"]
 pub(crate) mod script_clipboard;
 
+#[cfg(windows)]
+#[path = "adapters/windows/script_files.rs"]
+pub(crate) mod script_files;
+
 #[cfg(target_os = "linux")]
 #[path = "adapters/linux/ipc.rs"]
 pub(crate) mod ipc;
@@ -27,6 +31,10 @@ pub(crate) mod script_http;
 #[path = "adapters/linux/script_clipboard.rs"]
 pub(crate) mod script_clipboard;
 
+#[cfg(target_os = "linux")]
+#[path = "adapters/linux/script_files.rs"]
+pub(crate) mod script_files;
+
 #[cfg(target_os = "macos")]
 #[path = "adapters/macos/ipc.rs"]
 pub(crate) mod ipc;
@@ -38,3 +46,7 @@ pub(crate) mod script_http;
 #[cfg(target_os = "macos")]
 #[path = "adapters/macos/script_clipboard.rs"]
 pub(crate) mod script_clipboard;
+
+#[cfg(target_os = "macos")]
+#[path = "adapters/macos/script_files.rs"]
+pub(crate) mod script_files;
