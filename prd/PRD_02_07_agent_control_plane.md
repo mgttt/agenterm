@@ -252,3 +252,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       a same-role replacement keeps endpoint and scope while receiving a new
       PID, nonce, and epoch. It verifies the old generation is removed only
       after replacement and ends with no registration or owned-process residue
+    - [x] the Windows published-byte compatibility journey verifies SHA-256
+      pinned v0.1.10 and v0.1.11 release archives before execution. It proves
+      v0.1.10 default TCP with a HEAD client, v0.1.10 client with explicit
+      HEAD TCP, safe old-client rejection beside a native-only HEAD authority,
+      v0.1.11 native-server interoperability, and state-preserving
+      v0.1.11-to-HEAD upgrade then rollback. It never commits historical bytes.
+      Unix v0.1.10 is explicitly skipped because that published package lacks
+      `agenterm-server`; v0.1.11 remains the native predecessor there.
