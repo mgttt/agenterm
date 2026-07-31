@@ -329,6 +329,9 @@ Revision-4 migration evidence (2026-07-31, partial):
   `services::runtime → selected → adapters/{windows,linux,macos}`. The product
   runtime no longer selects COMSPEC versus SHELL; existing cmd.exe and
   `/bin/sh` fallback behavior is unchanged.
+- [x] Linux display capability classification now calls the selected Linux
+  scale adapter. The shared geometry contract no longer branches on a display
+  target; headless remains typed Unsupported and a usable display Available.
 - [x] Control Center state-directory protection, exclusive state-file creation,
   atomic replacement, existing-window focus, and direct native capture now
   call `services::control_center → selected → adapters/{windows,linux,macos}`.

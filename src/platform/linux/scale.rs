@@ -15,7 +15,7 @@ pub(crate) use crate::platform::scale::{
 };
 
 pub(crate) fn scale_capability_status(facts: DisplayBackendFacts) -> CapabilityStatus {
-    crate::platform::scale::capability_status(facts)
+    crate::platform::selected::scale::capability_status(facts)
 }
 
 pub(crate) fn scale_capability_status_from_env() -> CapabilityStatus {

@@ -4,9 +4,6 @@
 //! owns the cross-platform validation and conversion semantics consumed by the
 //! Linux and macOS GUI hot paths.
 
-#[cfg(target_os = "linux")]
-use super::{CapabilityStatus, DisplayBackendFacts};
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct ScaleFactor(f64);
 
@@ -137,17 +134,6 @@ pub(crate) fn classify_geometry_event(event: GeometryEvent) -> Result<GeometryAc
     }
     let (metrics, _) = WindowMetrics::from_physical(physical_width, physical_height, scale_factor)?;
     Ok(GeometryAction::Apply(metrics))
-}
-
-#[cfg(target_os = "linux")]
-pub(crate) fn capability_status(facts: DisplayBackendFacts) -> CapabilityStatus {
-    if facts.headless {
-        CapabilityStatus::Unsupported {
-            reason: "headless-display",
-        }
-    } else {
-        CapabilityStatus::Available
-    }
 }
 
 #[cfg(test)]

@@ -104,6 +104,10 @@ pub(crate) mod control_center;
 pub(crate) mod runtime;
 
 #[cfg(target_os = "linux")]
+#[path = "adapters/linux/scale.rs"]
+pub(crate) mod scale;
+
+#[cfg(target_os = "linux")]
 #[path = "adapters/linux/webview.rs"]
 pub(crate) mod webview;
 
