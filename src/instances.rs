@@ -470,6 +470,7 @@ fn instances_dir() -> PathBuf {
 fn register_instance_in(directory: &Path, record: InstanceRecord) -> Result<InstanceRegistration> {
     fs::create_dir_all(directory)
         .with_context(|| format!("failed to create {}", directory.display()))?;
+    prune_replaced_stale_registrations(directory, &record)?;
     let path = directory.join(format!("{}.json", record.pid));
     let temporary = directory.join(format!(
         ".{}.{}.tmp",
@@ -514,6 +515,26 @@ fn register_instance_in(directory: &Path, record: InstanceRecord) -> Result<Inst
             .server_scope_id
             .expect("schema-v2 registration requires a server scope"),
     })
+}
+
+fn prune_replaced_stale_registrations(directory: &Path, incoming: &InstanceRecord) -> Result<()> {
+    let Some(incoming_scope) = incoming.server_scope_id.as_ref() else {
+        return Ok(());
+    };
+    let Some(incoming_endpoint) = incoming.resolved_endpoint() else {
+        return Ok(());
+    };
+    for instance in discover_instances_in(directory)? {
+        if instance.record.schema_version == INSTANCE_SCHEMA_VERSION
+            && instance.record.pid != incoming.pid
+            && instance.record.server_scope_id.as_ref() == Some(incoming_scope)
+            && instance.record.resolved_endpoint().as_ref() == Some(&incoming_endpoint)
+            && !instance_process_is_alive(instance.record.pid)
+        {
+            prune_instance(&instance)?;
+        }
+    }
+    Ok(())
 }
 
 fn discover_instances_in(directory: &Path) -> Result<Vec<DiscoveredInstance>> {
@@ -665,6 +686,80 @@ mod tests {
                 .join(format!("{}-v1.json", std::process::id()))
                 .exists()
         );
+        drop(registration);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn registration_replaces_only_a_dead_typed_record_for_the_same_authority() {
+        let directory = env::temp_dir().join(format!(
+            "agenterm-instance-takeover-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        let endpoint = IpcEndpoint::Tcp {
+            host: "127.0.0.1".to_owned(),
+            port: 49993,
+        };
+        let main_scope = ServerScopeId::current(&LogicalInstance::Main).unwrap();
+        let dev_scope = ServerScopeId::current(&LogicalInstance::Dev).unwrap();
+        let record = |pid, scope: ServerScopeId| InstanceRecord {
+            schema_version: INSTANCE_SCHEMA_VERSION,
+            pid,
+            address: "127.0.0.1:49993".to_owned(),
+            endpoint: Some(endpoint.clone()),
+            logical_instance: Some(LogicalInstance::Main),
+            server_scope_id: Some(scope),
+            version: "test".to_owned(),
+            session: "fleet".to_owned(),
+            workspace_path: "workspace.json".to_owned(),
+            started_at_unix_ms: u128::from(pid),
+            upgrade_identity: None,
+        };
+
+        let stale = record(u32::MAX, main_scope.clone());
+        fs::write(
+            directory.join(format!("{}.json", stale.pid)),
+            serde_json::to_vec(&stale).unwrap(),
+        )
+        .unwrap();
+        let mut stale_alias = stale.clone();
+        stale_alias.schema_version = LEGACY_INSTANCE_SCHEMA_VERSION;
+        stale_alias.endpoint = None;
+        stale_alias.logical_instance = None;
+        stale_alias.server_scope_id = None;
+        fs::write(
+            directory.join(format!("{}-v1.json", stale.pid)),
+            serde_json::to_vec(&stale_alias).unwrap(),
+        )
+        .unwrap();
+
+        let live = record(std::process::id(), main_scope.clone());
+        fs::write(
+            directory.join(format!("{}.json", live.pid)),
+            serde_json::to_vec(&live).unwrap(),
+        )
+        .unwrap();
+        let unrelated = record(u32::MAX - 1, dev_scope);
+        fs::write(
+            directory.join(format!("{}.json", unrelated.pid)),
+            serde_json::to_vec(&unrelated).unwrap(),
+        )
+        .unwrap();
+
+        let incoming = record(u32::MAX - 2, main_scope);
+        let registration = register_instance_in(&directory, incoming.clone()).unwrap();
+
+        assert!(!directory.join(format!("{}.json", stale.pid)).exists());
+        assert!(!directory.join(format!("{}-v1.json", stale.pid)).exists());
+        assert!(directory.join(format!("{}.json", live.pid)).exists());
+        assert!(directory.join(format!("{}.json", unrelated.pid)).exists());
+        assert!(directory.join(format!("{}.json", incoming.pid)).exists());
+
         drop(registration);
         fs::remove_dir_all(directory).unwrap();
     }

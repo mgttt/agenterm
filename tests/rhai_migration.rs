@@ -1012,6 +1012,30 @@ fn linux_package_task_wraps_each_gui_entrypoint_and_keeps_its_native_binary() {
     fs::remove_dir_all(&root).expect("remove fixture");
 }
 
+#[cfg(unix)]
+#[test]
+fn native_ipc_task_uses_a_bounded_runtime_without_bootstrap_environment() {
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let output = Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+        .current_dir(repo)
+        .args(["task", "run", "native-ipc-smoke", "--manifest"])
+        .arg(repo.join("agenterm.tasks.json"))
+        .arg("--")
+        .args(["--server", env!("CARGO_BIN_EXE_agenterm-server")])
+        .args(["--cli", env!("CARGO_BIN_EXE_agenterm-cli")])
+        .env_remove("AGENTERM_BOOTSTRAP_PLATFORM")
+        .env_remove("AGENTERM_HOST_OS")
+        .env_remove("AGENTERM_HOST_ARCH")
+        .output()
+        .expect("run native IPC task directly");
+    assert!(
+        output.status.success(),
+        "native IPC task failed without bootstrap facts:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 #[test]
 fn clean_locked_artifacts_task_removes_only_owned_candidates() {
     let root = fixture_root("clean-locked");

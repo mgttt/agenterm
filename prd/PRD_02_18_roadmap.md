@@ -453,6 +453,16 @@ track remains planned, but every declared dependency must still pass.
     and Linux/macOS Unix sockets: logical main/dev isolation, stale authority
     recovery, mixed-schema discovery and one shared resolver remain truthful
     under upgrade and rollback
+    - [~] native macOS 26.5 arm64 evidence (2026-07-31) passes the direct
+      `native-ipc-smoke --ci-main-dev` public task in 1.60 seconds: logical
+      main/dev and duplicate-authority isolation, owner/socket modes,
+      `/tmp`/`/private/tmp` canonicalization, typed overlong-path and symlink
+      rejection, explicit TCP compatibility, schema-v1/v2 discovery, and
+      killed-authority socket/lock/registration recovery. Registration
+      takeover removes only a confirmed-dead schema-v2 record for the same
+      scope and endpoint; live or differently scoped records remain. Native
+      Linux/Windows reruns and real older/newer-binary upgrade/rollback
+      evidence remain open, so this is not six-platform completion.
   - [ ] deepen the independent Control Center only through a useful read-only
     Cockpit and complete platform evidence; Unix renderer-owned screenshots,
     incompatible/renderer-failure cases and caller-instance selection close

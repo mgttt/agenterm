@@ -317,6 +317,15 @@ let context = test_harness::new_context(repo, "native-ipc");
 let unix_bootstrap =
     std::env::has("AGENTERM_BOOTSTRAP_PLATFORM")
         && std::env::get("AGENTERM_BOOTSTRAP_PLATFORM") == "unix";
+let direct_unix_root =
+    if std::fs::exists("/private/tmp") {
+        "/private/tmp"
+    } else if std::fs::exists("/tmp") {
+        "/tmp"
+    } else {
+        ""
+    };
+let unix_host = unix_bootstrap || direct_unix_root != "";
 context.native_runtime_directory = if unix_bootstrap {
     let temporary_root =
         if std::env::has("AGENTERM_HOST_OS")
@@ -327,10 +336,13 @@ context.native_runtime_directory = if unix_bootstrap {
         };
     temporary_root + "/agt-" + std::process::id() + "-" +
         std::time::SystemTime::now().unix_millis
+} else if unix_host {
+    direct_unix_root + "/agt-" + std::process::id() + "-" +
+        std::time::SystemTime::now().unix_millis
 } else {
     std::path::join(context.run_directory, "runtime").display
 };
-context.native_runtime_external = unix_bootstrap;
+context.native_runtime_external = unix_host;
 std::fs::create_dir_all(context.native_runtime_directory);
 let native_workspace = std::path::join(
     context.run_directory,
@@ -379,6 +391,84 @@ try {
                 - conflict_started < 2000,
         "native_ipc_selector_conflict_not_typed_or_bounded"
     );
+
+    if unix_host {
+        print("STEP overlong Unix endpoint fails typed and bounded");
+        let long_endpoint =
+            "unix:/this-path-is-intentionally-longer-than-the-portable-" +
+            "sockaddr-un-limit/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" +
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/server.sock";
+        let long_path_started =
+            std::time::SystemTime::now().unix_millis;
+        let long_path = invoke(
+            context,
+            cli,
+            [
+                "--endpoint", long_endpoint,
+                "protocol-info", "--running"
+            ],
+            true,
+            "",
+            "",
+            "",
+            native_workspace
+        );
+        let long_path_text = long_path.stdout + long_path.stderr;
+        require(
+            long_path_text.contains("InvalidEndpoint")
+                && long_path_text.contains("invalid Unix socket path")
+                && std::time::SystemTime::now().unix_millis
+                    - long_path_started < 2000,
+            "native_ipc_unix_long_path_not_typed_or_bounded"
+        );
+
+        print("STEP symlink Unix runtime ancestry fails closed");
+        let symlink_target =
+            context.native_runtime_directory + "-symlink-target";
+        let symlink_runtime =
+            context.native_runtime_directory + "-symlink";
+        std::fs::create_dir_all(symlink_target);
+        let link_command = std::process::command("ln");
+        link_command.args(["-s", symlink_target, symlink_runtime]);
+        link_command.timeout(std::time::Duration::from_secs(2));
+        let link_output = link_command.output();
+        test_harness::append_command_record(
+            context,
+            ["-s", symlink_target, symlink_runtime],
+            link_output,
+            !link_output.success,
+            []
+        );
+        require(
+            link_output.success
+                && std::fs::symlink_metadata(symlink_runtime).is_symlink,
+            "native_ipc_unix_symlink_fixture"
+        );
+        let symlink_endpoint =
+            "unix:" + symlink_runtime + "/server.sock";
+        let symlink_server = configured(
+            context,
+            server_exe,
+            [],
+            symlink_endpoint,
+            "",
+            "",
+            native_workspace
+        ).start();
+        owned_children.push(symlink_server);
+        let symlink_exit = wait_exit(
+            symlink_server,
+            "native_ipc_unix_symlink_rejection_timeout"
+        );
+        require(
+            !symlink_exit.success
+                && symlink_exit.stderr_text().contains("UnsafeEndpoint")
+                && symlink_exit.stderr_text().contains("symlink"),
+            "native_ipc_unix_symlink_not_rejected"
+        );
+        std::fs::remove_file(symlink_runtime);
+        std::fs::remove_dir_all(symlink_target);
+    }
 
     print("STEP isolated logical instance derives its native endpoint");
     let native_command = configured(
@@ -429,6 +519,50 @@ try {
                 && unix_mode(context, socket_parent) == "700",
             "native_ipc_unix_permissions"
         );
+        if context.native_runtime_directory.starts_with("/private/tmp/") {
+            print("STEP /tmp and /private/tmp resolve one macOS authority");
+            let alias_runtime =
+                "/tmp" + context.native_runtime_directory.sub_string(
+                    "/private/tmp".len
+                );
+            let alias_command = configured(
+                context,
+                cli,
+                [
+                    "--instance", custom_instance,
+                    "protocol-info", "--running"
+                ],
+                dead_endpoint,
+                context.address,
+                "main",
+                native_workspace
+            );
+            alias_command.env("XDG_RUNTIME_DIR", alias_runtime);
+            alias_command.timeout(std::time::Duration::from_secs(2));
+            let alias_output = alias_command.output();
+            test_harness::append_command_record(
+                context,
+                ["--instance", custom_instance, "protocol-info", "--running"],
+                alias_output,
+                !alias_output.success,
+                []
+            );
+            require(
+                alias_output.success,
+                "native_ipc_macos_tmp_alias_unreachable:" +
+                    alias_output.stderr_text()
+            );
+            let alias_protocol = rhai::json::parse(
+                alias_output.stdout_text() + alias_output.stderr_text()
+            );
+            require(
+                alias_protocol.pid == native_protocol.pid
+                    && alias_protocol.endpoint == native_protocol.endpoint
+                    && alias_protocol.server_scope_id
+                        == native_protocol.server_scope_id,
+                "native_ipc_macos_tmp_alias_split_authority"
+            );
+        }
     }
 
     let dev_server = ();
@@ -694,6 +828,91 @@ try {
                 "native_ipc_unix_dev_endpoint_leak"
             );
         }
+
+        print("STEP killed Unix authority recovers stale endpoint and registration");
+        let stale_command = configured(
+            context,
+            server_exe,
+            ["--instance", custom_instance],
+            dead_endpoint,
+            context.address,
+            "main",
+            native_workspace
+        );
+        let stale_server = stale_command.start();
+        owned_children.push(stale_server);
+        let stale_protocol = wait_protocol(
+            context,
+            cli,
+            ["--instance", custom_instance],
+            dead_endpoint,
+            context.address,
+            "main",
+            native_workspace,
+            stale_server
+        );
+        stale_server.kill();
+        let stale_exit = wait_exit(
+            stale_server,
+            "native_ipc_stale_authority_kill_timeout"
+        );
+        require(
+            !stale_exit.success
+                && std::fs::exists(native_socket)
+                && std::fs::exists(native_socket + ".lock")
+                && registration_count(context.instance_directory) == 1,
+            "native_ipc_stale_authority_fixture"
+        );
+
+        let replacement_command = configured(
+            context,
+            server_exe,
+            ["--instance", custom_instance],
+            dead_endpoint,
+            context.address,
+            "main",
+            native_workspace
+        );
+        let replacement = replacement_command.start();
+        owned_children.push(replacement);
+        let replacement_protocol = wait_protocol(
+            context,
+            cli,
+            ["--instance", custom_instance],
+            dead_endpoint,
+            context.address,
+            "main",
+            native_workspace,
+            replacement
+        );
+        require(
+            replacement_protocol.endpoint == stale_protocol.endpoint
+                && replacement_protocol.server_scope_id
+                    == stale_protocol.server_scope_id
+                && replacement_protocol.pid != stale_protocol.pid,
+            "native_ipc_stale_authority_not_recovered"
+        );
+        invoke(
+            context,
+            cli,
+            ["--instance", custom_instance, "shutdown"],
+            false,
+            dead_endpoint,
+            context.address,
+            "main",
+            native_workspace
+        );
+        let replacement_exit = wait_exit(
+            replacement,
+            "native_ipc_stale_replacement_shutdown_timeout"
+        );
+        require(
+            replacement_exit.success
+                && registration_count(context.instance_directory) == 0
+                && !std::fs::exists(native_socket)
+                && !std::fs::exists(native_socket + ".lock"),
+            "native_ipc_stale_recovery_cleanup"
+        );
     }
     require(
         typed_schema_ok,
