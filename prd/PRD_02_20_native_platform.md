@@ -329,6 +329,10 @@ Revision-4 migration evidence (2026-07-31, partial):
   `services::runtime → selected → adapters/{windows,linux,macos}`. The product
   runtime no longer selects COMSPEC versus SHELL; existing cmd.exe and
   `/bin/sh` fallback behavior is unchanged.
+- [x] The Unix new-terminal dialog now obtains its primary shell id, label,
+  and program from the same typed runtime facade. Its `zsh` versus `sh`
+  selection no longer appears in frontend product code; Windows declares its
+  equivalent `cmd` descriptor through the shared contract.
 - [x] Linux display capability classification now calls the selected Linux
   scale adapter. The shared geometry contract no longer branches on a display
   target; headless remains typed Unsupported and a usable display Available.

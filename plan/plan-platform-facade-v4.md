@@ -91,6 +91,9 @@ this state does not yet satisfy the static source-boundary gate.
    POSIX `openpty`/fork/session/exec/poll and Windows ConPTY/job mechanics stay
    below the selected adapter, preserving the existing reader/wait concurrency
    and terminate-to-EOF ordering.
+   The first frontend leaf is complete: runtime-primary shell descriptors now
+   select in adapters, so the Unix new-terminal dialog contains no macOS/Linux
+   conditional or shell-path constant.
 4. Remove compatibility-only legacy native paths after each owning public
    smoke has passed.
 5. Add the static production source boundary test only after no product native

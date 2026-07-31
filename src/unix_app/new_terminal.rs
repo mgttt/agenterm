@@ -14,7 +14,7 @@ impl NewShellChoice {
     pub(super) const fn id(self) -> &'static str {
         match self {
             Self::Default => "default",
-            Self::Primary => primary_shell_id(),
+            Self::Primary => primary_shell().id,
             Self::Bash => "bash",
         }
     }
@@ -22,7 +22,7 @@ impl NewShellChoice {
     pub(super) const fn label(self) -> &'static str {
         match self {
             Self::Default => "Default",
-            Self::Primary => primary_shell_label(),
+            Self::Primary => primary_shell().label,
             Self::Bash => "bash",
         }
     }
@@ -37,31 +37,9 @@ impl NewShellChoice {
     }
 }
 
-#[cfg(target_os = "macos")]
-const fn primary_shell_id() -> &'static str {
-    "zsh"
+fn primary_shell() -> crate::platform::contract::runtime::TerminalShellDescriptor {
+    crate::platform::runtime::primary_terminal_shell()
 }
-
-#[cfg(not(target_os = "macos"))]
-const fn primary_shell_id() -> &'static str {
-    "sh"
-}
-
-#[cfg(target_os = "macos")]
-const fn primary_shell_label() -> &'static str {
-    "zsh"
-}
-
-#[cfg(not(target_os = "macos"))]
-const fn primary_shell_label() -> &'static str {
-    "sh"
-}
-
-#[cfg(target_os = "macos")]
-const PRIMARY_SHELL_PROGRAM: &str = "/bin/zsh";
-
-#[cfg(not(target_os = "macos"))]
-const PRIMARY_SHELL_PROGRAM: &str = "/bin/sh";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct CreateParams {
@@ -226,12 +204,10 @@ fn build_command_line(choice: NewShellChoice, initial: &str) -> Vec<String> {
     match choice {
         NewShellChoice::Default if initial.is_empty() => Vec::new(),
         NewShellChoice::Default | NewShellChoice::Primary => {
-            let mut child = vec![PRIMARY_SHELL_PROGRAM.to_owned()];
+            let program = primary_shell().program;
+            let mut child = vec![program.to_owned()];
             if !initial.is_empty() {
-                child.extend([
-                    "-c".to_owned(),
-                    format!("{initial}; exec {PRIMARY_SHELL_PROGRAM} -i"),
-                ]);
+                child.extend(["-c".to_owned(), format!("{initial}; exec {program} -i")]);
             }
             child
         }
@@ -389,10 +365,10 @@ mod tests {
         dialog.choose_shell(NewShellChoice::Primary);
         dialog.set_initial_command_draft("echo marker".to_owned());
         let params = dialog.finish(true).unwrap().expect("create params");
-        assert_eq!(params.command_line[0], PRIMARY_SHELL_PROGRAM);
+        assert_eq!(params.command_line[0], primary_shell().program);
         assert_eq!(params.command_line[1], "-c");
         assert!(params.command_line[2].contains("echo marker"));
-        assert!(params.command_line[2].contains(PRIMARY_SHELL_PROGRAM));
+        assert!(params.command_line[2].contains(primary_shell().program));
     }
 
     #[test]
@@ -477,7 +453,7 @@ mod tests {
         let params = dispatch_ui_action(&mut dialog, "create", None)
             .expect("create")
             .expect("params");
-        assert_eq!(params.command_line[0], PRIMARY_SHELL_PROGRAM);
+        assert_eq!(params.command_line[0], primary_shell().program);
         assert!(!dialog.is_open());
     }
 
