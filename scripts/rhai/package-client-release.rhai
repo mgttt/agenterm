@@ -127,7 +127,7 @@ try {
                     repo,
                     "scripts/linux/agenterm-gui-wrapper.sh"
                 ).display,
-                std::path::join(staging, "agenterm").display,
+                std::path::join(staging, name).display,
                 "package_client_linux_wrapper_missing"
             );
         } else {

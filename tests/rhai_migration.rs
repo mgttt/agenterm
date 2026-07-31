@@ -944,6 +944,75 @@ fn macos_package_task_reads_both_platform_rows_and_writes_preview_zip() {
 }
 
 #[test]
+fn linux_package_task_wraps_each_gui_entrypoint_and_keeps_its_native_binary() {
+    let root = fixture_root("linux-package");
+    let binaries = root.join("bin");
+    let output_directory = root.join("dist");
+    fs::create_dir_all(&binaries).expect("create binary fixture");
+    for name in [
+        "agenterm",
+        "agenterm-cc",
+        "agenterm-server",
+        "agenterm-cli",
+        "agenterm-mux",
+        "agenterm-script",
+        "agenterm-mcp",
+    ] {
+        fs::write(binaries.join(name), format!("fixture-{name}")).expect("write fake executable");
+    }
+
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let host_os = if cfg!(target_os = "linux") {
+        "linux"
+    } else if cfg!(target_os = "macos") {
+        "macos"
+    } else {
+        "windows"
+    };
+    let output = Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+        .current_dir(repo)
+        .args(["task", "run", "package-client-release", "--manifest"])
+        .arg(repo.join("agenterm.tasks.json"))
+        .arg("--")
+        .args(["test", "linux", "x86_64"])
+        .arg(&binaries)
+        .env("AGENTERM_HOST_OS", host_os)
+        .env("AGENTERM_PACKAGE_DIST", &output_directory)
+        .output()
+        .expect("run Linux package task");
+    assert!(
+        output.status.success(),
+        "Linux package failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let archive = output_directory.join("agenterm-test-linux-x86_64.tar.gz");
+    let listing = Command::new("tar")
+        .args(["-tzf"])
+        .arg(&archive)
+        .output()
+        .expect("list Linux package");
+    assert!(listing.status.success(), "{listing:?}");
+    let entries = String::from_utf8(listing.stdout).expect("tar listing is UTF-8");
+    for expected in [
+        "agenterm",
+        ".agenterm.bin",
+        "agenterm-cc",
+        ".agenterm-cc.bin",
+        "agenterm-server",
+    ] {
+        assert!(
+            entries
+                .lines()
+                .any(|entry| entry.trim_start_matches("./") == expected),
+            "Linux package omitted {expected}:\n{entries}"
+        );
+    }
+
+    fs::remove_dir_all(&root).expect("remove fixture");
+}
+
+#[test]
 fn clean_locked_artifacts_task_removes_only_owned_candidates() {
     let root = fixture_root("clean-locked");
     fs::create_dir_all(&root).expect("create fixture");
