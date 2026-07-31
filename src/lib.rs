@@ -40,8 +40,6 @@ mod tab_tree;
 mod terminal_cursor;
 mod terminal_lifecycle;
 mod terminal_observation;
-#[cfg(unix)]
-mod terminal_selection;
 mod theme;
 pub mod ui_bridge;
 mod ui_client;
@@ -50,8 +48,6 @@ mod ui_command;
 mod ui_geometry;
 mod ui_interaction;
 mod ui_lease;
-#[cfg(unix)]
-mod ui_snapshot;
 mod upgrade_identity;
 pub mod webview_host;
 pub use upgrade_identity::UpgradeIdentity;

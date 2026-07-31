@@ -6,6 +6,10 @@ mod layout;
 mod new_terminal;
 mod render;
 mod screenshot;
+#[path = "../../../../terminal_selection.rs"]
+mod terminal_selection;
+#[path = "../../../../ui_snapshot.rs"]
+mod ui_snapshot;
 mod wake;
 mod window_state;
 
@@ -48,10 +52,6 @@ use crate::{
         save_config,
     },
     terminal_runtime::{TerminalLaunch, TerminalTab},
-    terminal_selection::{
-        AutoScrollDirection, AutoScrollStep, SelectionGesture, TerminalPoint, TerminalSelection,
-        autoscroll_step, terminal_selection_text, visible_row_selection, word_selection,
-    },
     theme::ThemeId,
     ui_clipboard::{normalize_composer_paste, normalize_terminal_paste},
     ui_geometry::{
@@ -61,18 +61,24 @@ use crate::{
         sidebar_scrollbar_track, sidebar_tree_row_geometry, tabs_width_from_drag, terminal_cell_at,
         wheel_delta_units,
     },
-    ui_snapshot::{
-        PROJECTION_EMBEDDED_GUI, TerminalSelectionSnapshotInput, archived_proxy_status_json,
-        embedded_window_json, event_position_json, locale_json, schema_version_json,
-        scrollbar_state_json, settings_json, system_menu_json, terminal_interaction_json,
-        working_context_json,
-    },
     wake_signal::WakeSignal,
     working_context::{CwdSource, ShellKind, cwd_command, validate_path},
     workspace::{SavedTab, SavedWorkspace, save_workspace, workspace_path},
 };
 
 use self::wake::{UnixWake, install_unix_wake};
+use self::{
+    terminal_selection::{
+        AutoScrollDirection, AutoScrollStep, SelectionGesture, TerminalPoint, TerminalSelection,
+        autoscroll_step, terminal_selection_text, visible_row_selection, word_selection,
+    },
+    ui_snapshot::{
+        PROJECTION_EMBEDDED_GUI, TerminalSelectionSnapshotInput, archived_proxy_status_json,
+        embedded_window_json, event_position_json, locale_json, schema_version_json,
+        scrollbar_state_json, settings_json, system_menu_json, terminal_interaction_json,
+        working_context_json,
+    },
+};
 
 const GUI_USAGE: &str = "\
 Usage: agenterm [--no-activate] [--endpoint ENDPOINT | --address HOST:PORT | --instance NAME]
