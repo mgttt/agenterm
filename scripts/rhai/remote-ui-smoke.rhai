@@ -716,7 +716,7 @@ try {
         "remote_ui_toolbar_geometry_invalid"
     );
     require(
-        locale_button.text == "En|繁"
+        locale_button.text == "En|Zh"
             && font_decrease_button.text == "z"
             && font_increase_button.text == "Z",
         "remote_ui_toolbar_new_controls_invalid"
@@ -725,7 +725,7 @@ try {
     let traditional = wait_locale(context, cli, "zh-Hant");
     require(
         traditional.locale.id == "zh-Hant"
-            && locale_button.text == "繁|En"
+            && locale_button.text == "Zh|En"
             && settings_button.text == "設定",
         "remote_ui_locale_toggle_invalid"
     );

@@ -100,7 +100,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   grouped in the compact toolbar
   above the terminal; the toolbar remains available when Tabs are hidden so
   the same `Tabs` control restores the full-height tree
-- [x] toolbar order is Tabs then New, with `[Settings] [En|繁] [z|Z]` anchored
+- [x] toolbar order is Tabs then New, with `[Settings] [En|Zh] [z|Z]` anchored
   at the right; Tabs reads `<Tabs` while the tree is visible and `>Tabs` while
   hidden
 - [~] activating New opens an extensible terminal-creation dialog before

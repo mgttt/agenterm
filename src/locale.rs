@@ -59,8 +59,8 @@ impl LocaleId {
 
     pub(crate) const fn toolbar_label(self) -> &'static str {
         match self {
-            Self::English => "En|繁",
-            Self::TraditionalChinese => "繁|En",
+            Self::English => "En|Zh",
+            Self::TraditionalChinese => "Zh|En",
         }
     }
 

@@ -235,7 +235,7 @@ pub(crate) fn run_remote_gui(no_activate: bool) -> Result<()> {
     let new_tab = create_button(window, instance, NEW_ID, "New");
     let tabs = create_button(window, instance, TABS_ID, "Tabs");
     let settings = create_button(window, instance, SETTINGS_ID, "Settings");
-    let locale = create_button(window, instance, LOCALE_ID, "En|繁");
+    let locale = create_button(window, instance, LOCALE_ID, "En|Zh");
     let font_decrease = create_button(window, instance, FONT_DECREASE_ID, "z");
     let font_increase = create_button(window, instance, FONT_INCREASE_ID, "Z");
     let tab_title_edit = create_hidden_edit(window, instance, TAB_TITLE_EDIT_ID);
