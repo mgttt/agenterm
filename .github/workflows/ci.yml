@@ -43,48 +43,51 @@ jobs:
             cargo-target-v2-windows-x86_64-native-${{ runner.os }}-${{ runner.arch }}-rust1.97-debug-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'build.rs', 'scripts/artifacts.json') }}-
       - name: Install lint components
         id: install-lint
-        shell: pwsh
+        shell: bash
         run: |
-          $start = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+          set -euo pipefail
+          start_ms=$(date +%s%3N)
           rustup component add rustfmt clippy
-          $end = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-          "duration_ms=$($end - $start)" | Add-Content -Path $env:GITHUB_OUTPUT
+          end_ms=$(date +%s%3N)
+          duration_ms=$((end_ms - start_ms))
+          echo "duration_ms=$duration_ms" >> "$GITHUB_OUTPUT"
       - name: Run quality gate
         id: quality-gate
-        shell: pwsh
+        shell: bash
         run: |
-          $start = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-          check.cmd --skip-smoke --timing target/qualification/timing.json
-          $end = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-          "duration_ms=$($end - $start)" | Add-Content -Path $env:GITHUB_OUTPUT
+          set -euo pipefail
+          start_ms=$(date +%s%3N)
+          ./check.cmd --skip-smoke --timing target/qualification/timing.json
+          end_ms=$(date +%s%3N)
+          duration_ms=$((end_ms - start_ms))
+          echo "duration_ms=$duration_ms" >> "$GITHUB_OUTPUT"
         # note: check command runtime includes lint + quick integrated checks in this lane
       - name: Run representative public-interface slice
         id: public-interface
-        shell: pwsh
+        shell: bash
         env:
           AGENTERM_NO_ACTIVATE: "1"
         run: |
-          $start = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-          $ErrorActionPreference = "Stop"
-          dist\agenterm-script.exe task run startup-smoke --manifest agenterm.tasks.json
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          dist\agenterm-script.exe task run cli-smoke --manifest agenterm.tasks.json
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $end = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-          "duration_ms=$($end - $start)" | Add-Content -Path $env:GITHUB_OUTPUT
+          set -euo pipefail
+          start_ms=$(date +%s%3N)
+          dist/agenterm-script.exe task run startup-smoke --manifest agenterm.tasks.json
+          dist/agenterm-script.exe task run cli-smoke --manifest agenterm.tasks.json
+          end_ms=$(date +%s%3N)
+          duration_ms=$((end_ms - start_ms))
+          echo "duration_ms=$duration_ms" >> "$GITHUB_OUTPUT"
       - name: Prove native Windows IPC main/dev authorities
         id: native-ipc-main-dev
-        shell: pwsh
+        shell: bash
         env:
           AGENTERM_NO_ACTIVATE: "1"
         run: |
-          $start = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-          $ErrorActionPreference = "Stop"
-          dist\agenterm-script.exe task run native-ipc-smoke `
+          set -euo pipefail
+          start_ms=$(date +%s%3N)
+          dist/agenterm-script.exe task run native-ipc-smoke \
             --manifest agenterm.tasks.json -- --ci-main-dev
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $end = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-          "duration_ms=$($end - $start)" | Add-Content -Path $env:GITHUB_OUTPUT
+          end_ms=$(date +%s%3N)
+          duration_ms=$((end_ms - start_ms))
+          echo "duration_ms=$duration_ms" >> "$GITHUB_OUTPUT"
       - name: Publish Windows quality timing summary
         if: always()
         continue-on-error: true
