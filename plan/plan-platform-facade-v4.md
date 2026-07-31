@@ -8,6 +8,7 @@
 ```text
 contract + selected adapters
 ├─ IPC / endpoint / stream                  [partial]
+├─ system path conventions                  [adapter-owned]
 ├─ Script Runtime
 │  ├─ process inventory + termination       [adapter-owned]
 │  ├─ owned child tree                      [adapter-owned]
@@ -42,6 +43,27 @@ each product module moves only after its facade service has an owned contract.
 - Public black-box owner: `agenterm-script` `std.process` API.
 - Excluded scope: top-level window inspection/control, clipboard, stream-handle
   probing, filesystem replacement, and any authorization policy.
+
+## Shipped leaf: system path conventions
+
+- User problem: product persistence and sidecar discovery must retain native
+  path and executable-name conventions without embedding target selection in
+  settings, workspace, client, or Control Center code.
+- Invariant: `platform::paths` is compatibility-only; the selected adapter
+  owns host font defaults, executable names, and workspace/settings/instance
+  registry conventions. This is not caller authorization or a path allowlist.
+- Delivery: `services::paths → selected → adapters/{windows,linux,macos}`;
+  the root `platform::paths` module re-exports that service only.
+- Evidence: focused path convention tests, settings and Control Center unit
+  regressions, warnings-denied library Clippy, formatting, and a source scan
+  showing no target selection or host environment convention in root/service
+  path facades.
+- Safe failure: existing deterministic fallback conventions remain unchanged;
+  no new policy-based rejection is introduced.
+- Public black-box owner: workspace persistence, Script worker discovery, and
+  Control Center sidecar launch.
+- Excluded scope: IPC transport mechanics, Control Center shell rendering, and
+  terminal/frontend lifecycle.
 
 ## Remaining leaves and serial validation
 

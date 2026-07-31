@@ -1,6 +1,7 @@
 //! OS-neutral Platform Facade services.
 
 pub(crate) mod ipc;
+pub(crate) mod paths;
 pub(crate) mod process;
 pub(crate) mod script_clipboard;
 pub(crate) mod script_files;

@@ -319,6 +319,12 @@ Revision-4 migration evidence (2026-07-31, partial):
   `platform/{windows,unix}` subtrees have been deleted. Adapter-owned Job
   Objects/process groups, global slot locks, and named audit locks retain the
   existing bounded cleanup and cross-process serialization semantics.
+- [x] Host path and executable-name conventions now call
+  `services::paths → selected → adapters/{windows,linux,macos}`. The root
+  `platform::paths` module is compatibility-only; settings, workspace,
+  instance-registry, sidecar naming, and terminal font defaults retain their
+  existing Windows, Linux, and macOS conventions without target selection in
+  product callers. This is convention discovery, not a path permission policy.
 
 - [~] `settings`, instance PID/start-identity checks, terminal default-shell
   selection, Control Center atomic-file/focus/capture routing, and passive
