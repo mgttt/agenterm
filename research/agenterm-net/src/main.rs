@@ -2,10 +2,14 @@ use cid::Cid;
 use libp2p::{
     Multiaddr, PeerId, SwarmBuilder,
     futures::StreamExt,
-    identity, noise, ping,
+    identity as libp2p_identity, noise, ping,
     swarm::{NetworkBehaviour, SwarmEvent},
     tcp, yamux,
 };
+
+mod identity;
+mod node;
+mod store;
 use multihash_codetable::{Code, MultihashDigest};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -34,7 +38,14 @@ struct Envelope<T: Serialize> {
     state: &'static str,
     deadline_ms: u64,
     result: T,
-    receipt: String,
+    receipt: Receipt,
+}
+
+#[derive(Serialize)]
+struct Receipt {
+    schema: &'static str,
+    algorithm: &'static str,
+    digest: String,
 }
 
 #[derive(Serialize)]
@@ -86,8 +97,8 @@ struct WorkerResult {
     resources: ProcessResourceSample,
 }
 
-#[derive(Clone, Deserialize, Serialize)]
-struct ProcessResourceSample {
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub(crate) struct ProcessResourceSample {
     peak_rss_bytes: Option<u64>,
     thread_count: Option<u32>,
     source: String,
@@ -242,10 +253,10 @@ async fn run() -> Result<(), (String, &'static str, String)> {
     match arguments.as_slice() {
         [command, flag] if command == "capabilities" && flag == "--json" => {
             let result = Capabilities {
-                stability: "research-only",
-                network_scope: "explicit IPv4 loopback only",
-                identity_persistence: false,
-                store_persistence: false,
+                stability: "experimental-n2-m1-foundation",
+                network_scope: "explicit private loopback control; no public bootstrap",
+                identity_persistence: true,
+                store_persistence: true,
                 capabilities: vec![
                     Capability {
                         name: "libp2p.tcp-noise-yamux-ping",
@@ -258,9 +269,39 @@ async fn run() -> Result<(), (String, &'static str, String)> {
                         note: "create, parse, and content verification",
                     },
                     Capability {
-                        name: "content.temporary-block-store",
+                        name: "node.explicit-lifecycle",
                         state: "prototype",
-                        note: "bounded put/get with corruption rejection",
+                        note: "deadline-bounded start/status/stop with nonce-bound loopback control",
+                    },
+                    Capability {
+                        name: "identity.ephemeral-or-durable-ed25519",
+                        state: "prototype",
+                        note: "explicit identity mode; durable key uses local state directory",
+                    },
+                    Capability {
+                        name: "content.persistent-verified-block-store",
+                        state: "prototype",
+                        note: "bounded put/get, pin/unpin, GC, snapshots, and corruption rejection",
+                    },
+                    Capability {
+                        name: "private-mesh.dht",
+                        state: "unavailable",
+                        note: "not yet proven in a deterministic private mesh",
+                    },
+                    Capability {
+                        name: "private-mesh.pubsub",
+                        state: "unavailable",
+                        note: "not yet proven in a deterministic private mesh",
+                    },
+                    Capability {
+                        name: "private-mesh.relay",
+                        state: "unavailable",
+                        note: "not enabled; relay server remains false by default",
+                    },
+                    Capability {
+                        name: "remote-fleet.read-only-attach",
+                        state: "unavailable",
+                        note: "no remote authority or control surface is implemented",
                     },
                 ],
             };
@@ -268,7 +309,7 @@ async fn run() -> Result<(), (String, &'static str, String)> {
             Ok(())
         }
         [command] if command == "peer-id" => {
-            let key = identity::Keypair::generate_ed25519();
+            let key = libp2p_identity::Keypair::generate_ed25519();
             let result = PeerIdentity {
                 peer_id: key.public().to_peer_id().to_string(),
                 persistence: "ephemeral",
@@ -281,6 +322,135 @@ async fn run() -> Result<(), (String, &'static str, String)> {
                 .map_err(|message| (request_id.clone(), "self_test_failed", message))?;
             print_envelope(&request_id, DEFAULT_DEADLINE_MS, result);
             Ok(())
+        }
+        [group, command, state_flag, state_dir, identity_flag, mode, json]
+            if group == "node"
+                && command == "start"
+                && state_flag == "--state-dir"
+                && identity_flag == "--identity"
+                && json == "--json" =>
+        {
+            let mode = identity::IdentityMode::parse(mode)
+                .map_err(|message| (request_id.clone(), "invalid_identity", message))?;
+            let result = node::start(
+                Path::new(state_dir),
+                mode,
+                Duration::from_millis(DEFAULT_DEADLINE_MS),
+            )
+            .map_err(|message| (request_id.clone(), "node_start_failed", message))?;
+            print_envelope(&request_id, DEFAULT_DEADLINE_MS, result);
+            Ok(())
+        }
+        [group, command, state_flag, state_dir, json]
+            if group == "node"
+                && command == "status"
+                && state_flag == "--state-dir"
+                && json == "--json" =>
+        {
+            let result = node::status(
+                Path::new(state_dir),
+                Duration::from_millis(DEFAULT_DEADLINE_MS),
+            )
+            .map_err(|message| (request_id.clone(), "node_status_failed", message))?;
+            print_envelope(&request_id, DEFAULT_DEADLINE_MS, result);
+            Ok(())
+        }
+        [group, command, state_flag, state_dir, json]
+            if group == "node"
+                && command == "stop"
+                && state_flag == "--state-dir"
+                && json == "--json" =>
+        {
+            let result = node::stop(
+                Path::new(state_dir),
+                Duration::from_millis(DEFAULT_DEADLINE_MS),
+            )
+            .map_err(|message| (request_id.clone(), "node_stop_failed", message))?;
+            print_envelope(&request_id, DEFAULT_DEADLINE_MS, result);
+            Ok(())
+        }
+        [group, command, store_flag, store_dir, input_flag, input, pin, json]
+            if group == "store"
+                && command == "put"
+                && store_flag == "--store"
+                && input_flag == "--input"
+                && pin == "--pin"
+                && json == "--json" =>
+        {
+            run_store_put(&request_id, store_dir, input, true)
+        }
+        [group, command, store_flag, store_dir, input_flag, input, json]
+            if group == "store"
+                && command == "put"
+                && store_flag == "--store"
+                && input_flag == "--input"
+                && json == "--json" =>
+        {
+            run_store_put(&request_id, store_dir, input, false)
+        }
+        [group, command, store_flag, store_dir, cid_flag, cid, output_flag, output, json]
+            if group == "store"
+                && command == "get"
+                && store_flag == "--store"
+                && cid_flag == "--cid"
+                && output_flag == "--output"
+                && json == "--json" =>
+        {
+            let store = store::PersistentStore::open(store_dir)
+                .map_err(|message| (request_id.clone(), "store_open_failed", message))?;
+            let cid: Cid = cid
+                .parse::<Cid>()
+                .map_err(|error| (request_id.clone(), "invalid_cid", error.to_string()))?;
+            let result = store
+                .get_to(&cid, output)
+                .map_err(|message| (request_id.clone(), "store_get_failed", message))?;
+            print_envelope(&request_id, DEFAULT_DEADLINE_MS, result);
+            Ok(())
+        }
+        [group, command, store_flag, store_dir, cid_flag, cid, json]
+            if group == "store"
+                && (command == "pin" || command == "unpin")
+                && store_flag == "--store"
+                && cid_flag == "--cid"
+                && json == "--json" =>
+        {
+            let store = store::PersistentStore::open(store_dir)
+                .map_err(|message| (request_id.clone(), "store_open_failed", message))?;
+            let cid: Cid = cid
+                .parse::<Cid>()
+                .map_err(|error| (request_id.clone(), "invalid_cid", error.to_string()))?;
+            let result = store
+                .set_pin(&cid, command == "pin")
+                .map_err(|message| (request_id.clone(), "store_pin_failed", message))?;
+            print_envelope(&request_id, DEFAULT_DEADLINE_MS, result);
+            Ok(())
+        }
+        [group, command, store_flag, store_dir, json]
+            if group == "store"
+                && (command == "gc" || command == "status")
+                && store_flag == "--store"
+                && json == "--json" =>
+        {
+            let store = store::PersistentStore::open(store_dir)
+                .map_err(|message| (request_id.clone(), "store_open_failed", message))?;
+            if command == "gc" {
+                let result = store
+                    .gc()
+                    .map_err(|message| (request_id.clone(), "store_gc_failed", message))?;
+                print_envelope(&request_id, DEFAULT_DEADLINE_MS, result);
+            } else {
+                let result = store
+                    .snapshot()
+                    .map_err(|message| (request_id.clone(), "store_status_failed", message))?;
+                print_envelope(&request_id, DEFAULT_DEADLINE_MS, result);
+            }
+            Ok(())
+        }
+        [command, state_dir, mode, ready_address, ready_token] if command == "__node-daemon" => {
+            let mode = identity::IdentityMode::parse(mode)
+                .map_err(|message| (request_id.clone(), "invalid_identity", message))?;
+            node::daemon(Path::new(state_dir), mode, ready_address, ready_token)
+                .map_err(|message| (request_id, "node_daemon_failed", message))
         }
         [command, deadline] if command == "__listen" => {
             let deadline = parse_deadline(deadline)
@@ -299,7 +469,7 @@ async fn run() -> Result<(), (String, &'static str, String)> {
         _ => Err((
             request_id,
             "usage",
-            "usage: agenterm-net capabilities --json | peer-id | self-test --json".to_string(),
+            "usage: agenterm-net capabilities --json | peer-id | self-test --json | node start|status|stop ... --json | store put|get|pin|unpin|gc|status ... --json".to_string(),
         )),
     }
 }
@@ -312,9 +482,54 @@ fn parse_deadline(value: &str) -> Result<u64, String> {
         .ok_or_else(|| "deadline must be between 100 and 60000 milliseconds".to_string())
 }
 
+fn run_store_put(
+    request_id: &str,
+    store_dir: &str,
+    input: &str,
+    pin: bool,
+) -> Result<(), (String, &'static str, String)> {
+    let input_bytes = fs::metadata(input)
+        .map_err(|message| {
+            (
+                request_id.to_string(),
+                "input_read_failed",
+                message.to_string(),
+            )
+        })?
+        .len();
+    if input_bytes > store::MAX_BLOCK_BYTES as u64 {
+        return Err((
+            request_id.to_string(),
+            "store_put_failed",
+            format!(
+                "input exceeds {} byte per-block budget",
+                store::MAX_BLOCK_BYTES
+            ),
+        ));
+    }
+    let bytes = fs::read(input).map_err(|message| {
+        (
+            request_id.to_string(),
+            "input_read_failed",
+            message.to_string(),
+        )
+    })?;
+    let store = store::PersistentStore::open(store_dir)
+        .map_err(|message| (request_id.to_string(), "store_open_failed", message))?;
+    let result = store
+        .put(&bytes, pin)
+        .map_err(|message| (request_id.to_string(), "store_put_failed", message))?;
+    print_envelope(request_id, DEFAULT_DEADLINE_MS, result);
+    Ok(())
+}
+
 fn print_envelope<T: Serialize>(request_id: &str, deadline_ms: u64, result: T) {
     let result_json = serde_json::to_vec(&result).unwrap_or_default();
-    let receipt = hex_digest(&result_json);
+    let receipt = Receipt {
+        schema: "agenterm-net/receipt/v1",
+        algorithm: "sha2-256",
+        digest: hex_digest(&result_json),
+    };
     let envelope = Envelope {
         schema: "agenterm-net/result/v1",
         request_id: request_id.to_string(),
@@ -550,8 +765,10 @@ fn run_self_test(deadline_ms: u64) -> Result<SelfTestResult, String> {
         },
         exclusions: vec![
             "not linked into AgenTerm GUI or server",
-            "no persistent identity or block store",
-            "no public listener, DHT, relay, pubsub, NAT traversal, or gateway",
+            "persistent identity and store remain isolated experimental node commands",
+            "no proven private-mesh DHT, relay, pubsub, reconnect, or cross-platform load evidence",
+            "no public listener, bootstrap, NAT traversal, or gateway",
+            "no Remote Fleet attach, terminal input, command, PTY, or server authority",
             "not a stable or release-packaged capability",
         ],
     })
@@ -587,7 +804,7 @@ fn forced_cleanup_self_test(
 }
 
 #[cfg(target_os = "linux")]
-fn sample_process_resources() -> ProcessResourceSample {
+pub(crate) fn sample_process_resources() -> ProcessResourceSample {
     let status = fs::read_to_string("/proc/self/status");
     let mut peak_rss_bytes = None;
     let mut thread_count = None;
@@ -622,7 +839,7 @@ fn sample_process_resources() -> ProcessResourceSample {
 }
 
 #[cfg(target_os = "macos")]
-fn sample_process_resources() -> ProcessResourceSample {
+pub(crate) fn sample_process_resources() -> ProcessResourceSample {
     let mut usage = std::mem::MaybeUninit::<libc::rusage>::zeroed();
     // SAFETY: getrusage initializes the provided rusage structure for the
     // current process when it returns zero.
@@ -654,7 +871,7 @@ fn sample_process_resources() -> ProcessResourceSample {
 }
 
 #[cfg(windows)]
-fn sample_process_resources() -> ProcessResourceSample {
+pub(crate) fn sample_process_resources() -> ProcessResourceSample {
     use std::mem::{size_of, zeroed};
     use windows_sys::Win32::{
         Foundation::{CloseHandle, INVALID_HANDLE_VALUE},
@@ -718,7 +935,7 @@ fn sample_process_resources() -> ProcessResourceSample {
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
-fn sample_process_resources() -> ProcessResourceSample {
+pub(crate) fn sample_process_resources() -> ProcessResourceSample {
     ProcessResourceSample {
         peak_rss_bytes: None,
         thread_count: None,
