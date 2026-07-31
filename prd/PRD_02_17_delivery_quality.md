@@ -185,16 +185,22 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     machine-readable; initial targets are hot-cache candidate p50 <= 8 minutes
     and exact-candidate tag-to-Release p50 <= 3 minutes; qualification now
     emits a private, machine-readable timing schema on success and failure,
-    with cross-run queue/cache/transfer aggregation still planned
+    and a read-only post-run observer records bounded queue/run/job/step
+    durations plus Candidate/Promotion SLO results. Cross-run percentile and
+    cache-byte aggregation remain planned
   - [~] Cargo registry/git and compatible compilation caches use OS,
     architecture, toolchain, lock, target, feature/profile and versioned-salt
     identity. Cache miss, corruption or vendor outage affects speed only;
     fail-safe Windows x64 and Linux x64 Cargo-home/target pilots are active,
     while sccache and measured expansion remain pending
-  - [ ] optional larger/third-party/self-hosted runner trials use the exact
+  - [~] optional larger/third-party/self-hosted runner trials use the exact
     AgenTerm cold/warm workload, pinned actions, least privilege and a
     one-change fallback to standard GitHub-hosted runners; untrusted pull
-    requests never receive release credentials or trusted self-hosted capacity
+    requests never receive release credentials or trusted self-hosted capacity.
+    A manual three-sample Windows Quick experiment now compares isolated
+    target, sccache and no-cache strategies on the standard runner or one
+    explicitly configured trial label; paid runner provisioning and measured
+    A/B evidence remain human-controlled
 - v0.1.7 internal delivery rehearsal (no tag or public GitHub Release)
   - [x] the repository-native coordinator completes a read-only local
     clean-tree/version/HEAD/lock/remote/auth preflight or dry-run in p95 <= 15

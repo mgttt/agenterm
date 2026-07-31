@@ -1,6 +1,12 @@
-const CANDIDATE: &str = include_str!("../.github/workflows/candidate.yml");
-const PROMOTION: &str = include_str!("../.github/workflows/release.yml");
-const INTEGRITY: &str = include_str!("../.github/workflows/release-integrity.yml");
+use std::sync::LazyLock;
+
+static CANDIDATE: LazyLock<String> =
+    LazyLock::new(|| include_str!("../.github/workflows/candidate.yml").replace("\r\n", "\n"));
+static PROMOTION: LazyLock<String> =
+    LazyLock::new(|| include_str!("../.github/workflows/release.yml").replace("\r\n", "\n"));
+static INTEGRITY: LazyLock<String> = LazyLock::new(|| {
+    include_str!("../.github/workflows/release-integrity.yml").replace("\r\n", "\n")
+});
 
 const CHECKOUT_SHA: &str = "08eba0b27e820071cde6df949e0beb9ba4906955";
 const UPLOAD_SHA: &str = "ea165f8d65b6e75b540449e92b4886f43607fa02";
@@ -94,12 +100,12 @@ fn promotion_is_manual_candidate_bound_and_performs_no_build_or_overwrite() {
 #[test]
 fn workflow_actions_are_immutable_and_post_release_integrity_is_read_only() {
     for (source, sha) in [
-        (CANDIDATE, CHECKOUT_SHA),
-        (CANDIDATE, UPLOAD_SHA),
-        (CANDIDATE, DOWNLOAD_SHA),
-        (PROMOTION, CHECKOUT_SHA),
-        (PROMOTION, UPLOAD_SHA),
-        (PROMOTION, DOWNLOAD_SHA),
+        (CANDIDATE.as_str(), CHECKOUT_SHA),
+        (CANDIDATE.as_str(), UPLOAD_SHA),
+        (CANDIDATE.as_str(), DOWNLOAD_SHA),
+        (PROMOTION.as_str(), CHECKOUT_SHA),
+        (PROMOTION.as_str(), UPLOAD_SHA),
+        (PROMOTION.as_str(), DOWNLOAD_SHA),
     ] {
         assert!(source.contains(sha), "missing pinned action SHA {sha}");
     }
