@@ -98,6 +98,15 @@ Control Center is the product name; the executable family uses
   `server_unreachable` without terminating Control Center, starts a replacement
   at the same endpoint, and requires the same projection PID to adopt the new
   authority identity and epoch before showing connected facts.
+- [~] the native projection now owns server reads in one bounded background
+  worker: `ui-bootstrap`/protocol refresh and typed `read-events` probes never
+  run on the renderer loop. A one-request/one-latest-update mailbox, context
+  generations, Condvar deadlines and a 50 ms to 1 s bounded backoff reject
+  late state and avoid fixed sleep polling. Events, journal gaps, restart and
+  offline results refresh the projection; worker failure becomes typed
+  `projection_worker_unavailable` without affecting the server or PTYs. The
+  focused unit contract is covered; a live tab-change/restart black-box remains
+  required before this is complete evidence.
 
 ## Main-workspace entry
 

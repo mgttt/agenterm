@@ -10,7 +10,8 @@ use std::{
     io::{self, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    time::Duration,
+    sync::{Arc, Condvar, Mutex},
+    time::{Duration, Instant},
 };
 
 use anyhow::{Context, Result};
@@ -24,6 +25,9 @@ const SCHEMA_VERSION: u32 = 1;
 const REGISTRY_SCHEMA_VERSION: u32 = 2;
 const REGISTRY_INCOMPATIBLE_LIVE: &str = "control_center_registry_incompatible_live";
 const REGISTRY_UNPARSEABLE: &str = "control_center_registry_unparseable";
+const PROJECTION_IPC_TIMEOUT: Duration = Duration::from_millis(750);
+const PROJECTION_RETRY_MIN: Duration = Duration::from_millis(50);
+const PROJECTION_RETRY_MAX: Duration = Duration::from_secs(1);
 const PUBLIC_UI_ACTION: &str = "open-control-center";
 const TYPED_OPERATION: &str = "control-center.open";
 const HELP: &str = "\
@@ -290,38 +294,128 @@ struct ShellProjection {
     context_bytes: Option<Vec<u8>>,
     refresh_file: PathBuf,
     refresh_bytes: Option<Vec<u8>>,
+    generation: u64,
+    mailbox: Arc<ProjectionMailbox>,
+    worker_failure_applied: bool,
     snapshot: SnapshotDocument,
+}
+
+struct ProjectionMailbox {
+    state: Mutex<ProjectionMailboxState>,
+    wake: Condvar,
+}
+
+#[derive(Default)]
+struct ProjectionMailboxState {
+    request: Option<ProjectionRequest>,
+    update: Option<ProjectionUpdate>,
+    stop: bool,
+    worker_stopped: bool,
+}
+
+struct ProjectionRequest {
+    generation: u64,
+    context: Option<ServerContext>,
+}
+
+struct ProjectionUpdate {
+    generation: u64,
+    snapshot: SnapshotDocument,
+}
+
+enum ProjectionWake {
+    Context(ProjectionRequest),
+    Deadline,
+    Stop,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ProjectionProbeDecision {
+    Quiet,
+    Refresh,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ProjectionPublishResult {
+    Published,
+    Superseded,
+    Stop,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ProjectionBackoff {
+    delay: Duration,
+}
+
+impl ProjectionBackoff {
+    const fn new() -> Self {
+        Self {
+            delay: PROJECTION_RETRY_MIN,
+        }
+    }
+
+    fn reset(&mut self) {
+        self.delay = PROJECTION_RETRY_MIN;
+    }
+
+    fn advance(&mut self) {
+        self.delay = self.delay.saturating_mul(2).min(PROJECTION_RETRY_MAX);
+    }
 }
 
 impl ShellProjection {
     fn new(registry: &Path) -> Self {
+        let mailbox = Arc::new(ProjectionMailbox {
+            state: Mutex::new(ProjectionMailboxState::default()),
+            wake: Condvar::new(),
+        });
+        spawn_projection_worker(Arc::clone(&mailbox));
         let mut projection = Self {
             registry_file: registry.to_owned(),
             context_file: context_path(registry),
             context_bytes: None,
             refresh_file: focus_request_path(registry),
             refresh_bytes: None,
+            generation: 0,
+            mailbox,
+            worker_failure_applied: false,
             snapshot: disconnected_snapshot(),
         };
-        projection.refresh(true);
+        projection.request_refresh(true);
         projection
     }
 
-    fn refresh(&mut self, force: bool) -> bool {
-        let Ok(bytes) = read_regular_file(&self.context_file) else {
-            // A context update uses replace-by-rename. Preserve the last known
-            // projection if polling observes the tiny replacement gap.
-            return false;
+    fn request_refresh(&mut self, force: bool) {
+        let bytes = match read_regular_file(&self.context_file) {
+            Ok(bytes) => bytes,
+            Err(_) if force && self.context_bytes.is_none() => {
+                self.submit_context(None);
+                return;
+            }
+            Err(_) => {
+                // A context update uses replace-by-rename. Preserve the last known
+                // projection if polling observes the tiny replacement gap.
+                return;
+            }
         };
         if !force && self.context_bytes.as_deref() == Some(bytes.as_slice()) {
-            return false;
+            return;
         }
         let context = serde_json::from_slice::<ServerContext>(&bytes)
             .ok()
             .filter(|value| validate_context_value("server endpoint", &value.endpoint).is_ok());
-        self.snapshot = snapshot_for_context(context);
         self.context_bytes = Some(bytes);
-        true
+        self.submit_context(context);
+    }
+
+    fn submit_context(&mut self, context: Option<ServerContext>) {
+        self.generation = self.generation.saturating_add(1);
+        let mut state = lock_projection_mailbox(&self.mailbox);
+        state.request = Some(ProjectionRequest {
+            generation: self.generation,
+            context,
+        });
+        self.mailbox.wake.notify_one();
     }
 
     fn poll(&mut self) -> bool {
@@ -330,7 +424,25 @@ impl ShellProjection {
         if forced {
             self.refresh_bytes = refresh;
         }
-        self.refresh(forced)
+        self.request_refresh(forced);
+
+        let (update, worker_stopped) = {
+            let mut state = lock_projection_mailbox(&self.mailbox);
+            (state.update.take(), state.worker_stopped)
+        };
+        let mut changed = false;
+        if let Some(update) = update
+            && update.generation == self.generation
+        {
+            self.snapshot = update.snapshot;
+            changed = true;
+        }
+        if worker_stopped && !self.worker_failure_applied {
+            self.snapshot = projection_worker_unavailable_snapshot();
+            self.worker_failure_applied = true;
+            changed = true;
+        }
+        changed
     }
 
     fn close_requested(&self) -> bool {
@@ -389,6 +501,203 @@ impl ShellProjection {
         );
         lines
     }
+}
+
+impl Drop for ShellProjection {
+    fn drop(&mut self) {
+        let mut state = lock_projection_mailbox(&self.mailbox);
+        state.stop = true;
+        state.request = None;
+        self.mailbox.wake.notify_one();
+    }
+}
+
+fn lock_projection_mailbox(
+    mailbox: &ProjectionMailbox,
+) -> std::sync::MutexGuard<'_, ProjectionMailboxState> {
+    mailbox
+        .state
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+fn spawn_projection_worker(mailbox: Arc<ProjectionMailbox>) {
+    let worker_mailbox = Arc::clone(&mailbox);
+    let spawned = std::thread::Builder::new()
+        .name("agenterm-cc-projection".to_owned())
+        .spawn(move || {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                projection_worker_loop(Arc::clone(&worker_mailbox));
+            }));
+            let mut state = lock_projection_mailbox(&worker_mailbox);
+            if !state.stop || result.is_err() {
+                state.worker_stopped = true;
+            }
+            worker_mailbox.wake.notify_all();
+        });
+    if spawned.is_err() {
+        let mut state = lock_projection_mailbox(&mailbox);
+        state.worker_stopped = true;
+    }
+}
+
+fn projection_worker_loop(mailbox: Arc<ProjectionMailbox>) {
+    let mut context = None;
+    let mut generation = 0;
+    let mut position: Option<(String, u64)> = None;
+    let mut next_delay = None;
+    let mut backoff = ProjectionBackoff::new();
+
+    loop {
+        match wait_for_projection_wake(&mailbox, next_delay) {
+            ProjectionWake::Stop => return,
+            ProjectionWake::Context(request) => {
+                generation = request.generation;
+                context = request.context;
+                backoff.reset();
+            }
+            ProjectionWake::Deadline => {
+                if let (Some(context), Some((epoch, sequence))) = (&context, &position)
+                    && probe_projection_events(context, epoch, *sequence)
+                        == ProjectionProbeDecision::Quiet
+                {
+                    backoff.advance();
+                    next_delay = Some(backoff.delay);
+                    continue;
+                }
+            }
+        }
+
+        let snapshot = snapshot_for_context(context.clone());
+        let next_position = snapshot
+            .connected_server
+            .as_ref()
+            .map(|server| (server.epoch.clone(), server.sequence));
+        match publish_projection_update(&mailbox, generation, snapshot) {
+            ProjectionPublishResult::Stop => return,
+            ProjectionPublishResult::Superseded => {
+                next_delay = None;
+                continue;
+            }
+            ProjectionPublishResult::Published => {}
+        }
+        position = next_position;
+        if position.is_some() {
+            backoff.reset();
+        } else {
+            backoff.advance();
+        }
+        next_delay = Some(backoff.delay);
+    }
+}
+
+fn wait_for_projection_wake(
+    mailbox: &ProjectionMailbox,
+    timeout: Option<Duration>,
+) -> ProjectionWake {
+    let deadline = timeout.map(|timeout| Instant::now() + timeout);
+    let mut state = lock_projection_mailbox(mailbox);
+    loop {
+        if state.stop {
+            return ProjectionWake::Stop;
+        }
+        if let Some(request) = state.request.take() {
+            return ProjectionWake::Context(request);
+        }
+        let Some(deadline) = deadline else {
+            state = mailbox
+                .wake
+                .wait(state)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            continue;
+        };
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return ProjectionWake::Deadline;
+        }
+        let (next_state, _) = mailbox
+            .wake
+            .wait_timeout(state, remaining)
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state = next_state;
+    }
+}
+
+fn publish_projection_update(
+    mailbox: &ProjectionMailbox,
+    generation: u64,
+    snapshot: SnapshotDocument,
+) -> ProjectionPublishResult {
+    let mut state = lock_projection_mailbox(mailbox);
+    if state.stop {
+        return ProjectionPublishResult::Stop;
+    }
+    if state
+        .request
+        .as_ref()
+        .is_some_and(|request| request.generation > generation)
+    {
+        return ProjectionPublishResult::Superseded;
+    }
+    state.update = Some(ProjectionUpdate {
+        generation,
+        snapshot,
+    });
+    ProjectionPublishResult::Published
+}
+
+fn probe_projection_events(
+    context: &ServerContext,
+    epoch: &str,
+    after: u64,
+) -> ProjectionProbeDecision {
+    let response = crate::client::send_ipc_request_to_timeout(
+        &context.endpoint,
+        vec![
+            "read-events".to_owned(),
+            "--epoch".to_owned(),
+            epoch.to_owned(),
+            "--after".to_owned(),
+            after.to_string(),
+            "--limit".to_owned(),
+            "1".to_owned(),
+        ],
+        PROJECTION_IPC_TIMEOUT,
+    );
+    match response {
+        Ok(response) => classify_projection_event_response(&response, epoch, after),
+        Err(_) => ProjectionProbeDecision::Refresh,
+    }
+}
+
+fn classify_projection_event_response(
+    response: &crate::protocol::IpcResponse,
+    epoch: &str,
+    after: u64,
+) -> ProjectionProbeDecision {
+    if !response.ok {
+        return ProjectionProbeDecision::Refresh;
+    }
+    let Ok(batch) = serde_json::from_str::<Value>(&response.output) else {
+        return ProjectionProbeDecision::Refresh;
+    };
+    let same_epoch = batch["position"]["epoch"].as_str() == Some(epoch);
+    let sequence = batch["position"]["sequence"].as_u64();
+    let events_are_empty = batch["events"].as_array().is_some_and(Vec::is_empty);
+    if same_epoch && sequence == Some(after) && events_are_empty {
+        ProjectionProbeDecision::Quiet
+    } else {
+        ProjectionProbeDecision::Refresh
+    }
+}
+
+fn projection_worker_unavailable_snapshot() -> SnapshotDocument {
+    let mut snapshot = disconnected_snapshot();
+    snapshot.server_state = "unavailable";
+    snapshot.server_reason = Some("projection_worker_unavailable".to_owned());
+    snapshot.server_detail = Some("background projection worker stopped".to_owned());
+    snapshot.views[0].reason = "projection_worker_unavailable".to_owned();
+    snapshot
 }
 
 /// Start or reuse the isolated Control Center without blocking the GUI thread.
@@ -2580,6 +2889,120 @@ mod tests {
                 .iter()
                 .all(|view| view.state == "unavailable")
         );
+    }
+
+    #[test]
+    fn projection_backoff_is_bounded_and_resets_after_causal_progress() {
+        let mut backoff = ProjectionBackoff::new();
+        assert_eq!(backoff.delay, PROJECTION_RETRY_MIN);
+        for _ in 0..32 {
+            backoff.advance();
+        }
+        assert_eq!(backoff.delay, PROJECTION_RETRY_MAX);
+        backoff.reset();
+        assert_eq!(backoff.delay, PROJECTION_RETRY_MIN);
+    }
+
+    #[test]
+    fn projection_event_probe_refreshes_on_change_restart_gap_or_invalid_data() {
+        let quiet = crate::protocol::IpcResponse::success(
+            serde_json::json!({
+                "position": {"epoch": "epoch-a", "sequence": 7},
+                "events": [],
+            })
+            .to_string(),
+        );
+        assert_eq!(
+            classify_projection_event_response(&quiet, "epoch-a", 7),
+            ProjectionProbeDecision::Quiet
+        );
+
+        let changed = crate::protocol::IpcResponse::success(
+            serde_json::json!({
+                "position": {"epoch": "epoch-a", "sequence": 8},
+                "events": [{"sequence": 8, "kind": "tab.created"}],
+            })
+            .to_string(),
+        );
+        assert_eq!(
+            classify_projection_event_response(&changed, "epoch-a", 7),
+            ProjectionProbeDecision::Refresh
+        );
+
+        for code in ["server_restart", "journal_gap"] {
+            let failure = crate::protocol::IpcResponse::typed_failure(
+                format!("{{\"code\":\"{code}\"}}"),
+                code,
+                "precondition",
+                false,
+            );
+            assert_eq!(
+                classify_projection_event_response(&failure, "epoch-a", 7),
+                ProjectionProbeDecision::Refresh
+            );
+        }
+        assert_eq!(
+            classify_projection_event_response(
+                &crate::protocol::IpcResponse::success("not-json"),
+                "epoch-a",
+                7
+            ),
+            ProjectionProbeDecision::Refresh
+        );
+    }
+
+    #[test]
+    fn projection_mailbox_rejects_late_generation_and_keeps_one_latest_update() {
+        let mailbox = ProjectionMailbox {
+            state: Mutex::new(ProjectionMailboxState {
+                request: Some(ProjectionRequest {
+                    generation: 2,
+                    context: None,
+                }),
+                ..ProjectionMailboxState::default()
+            }),
+            wake: Condvar::new(),
+        };
+        assert_eq!(
+            publish_projection_update(&mailbox, 1, disconnected_snapshot()),
+            ProjectionPublishResult::Superseded
+        );
+        assert!(lock_projection_mailbox(&mailbox).update.is_none());
+
+        {
+            let mut state = lock_projection_mailbox(&mailbox);
+            state.request = None;
+        }
+        assert_eq!(
+            publish_projection_update(&mailbox, 2, disconnected_snapshot()),
+            ProjectionPublishResult::Published
+        );
+        assert_eq!(
+            publish_projection_update(&mailbox, 2, projection_worker_unavailable_snapshot()),
+            ProjectionPublishResult::Published
+        );
+        let update = lock_projection_mailbox(&mailbox)
+            .update
+            .take()
+            .expect("latest projection update");
+        assert_eq!(update.generation, 2);
+        assert_eq!(
+            update.snapshot.server_reason.as_deref(),
+            Some("projection_worker_unavailable")
+        );
+    }
+
+    #[test]
+    fn stopped_projection_worker_downgrades_live_state_to_typed_unavailable() {
+        let snapshot = projection_worker_unavailable_snapshot();
+        assert_eq!(snapshot.server_state, "unavailable");
+        assert!(snapshot.connected_server.is_none());
+        assert_eq!(
+            snapshot.server_reason.as_deref(),
+            Some("projection_worker_unavailable")
+        );
+        assert_eq!(snapshot.views[0].state, "unavailable");
+        assert_eq!(snapshot.views[0].reason, "projection_worker_unavailable");
     }
 
     #[test]
