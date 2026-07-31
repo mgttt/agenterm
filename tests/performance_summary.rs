@@ -31,13 +31,35 @@ fn fixture() -> Fixture {
 }
 
 fn write_timing(path: &Path, total_wall_ms: u64, fingerprint: &str) {
+    let task_wall_ms = total_wall_ms - 1_200;
     let report = json!({
-        "schema_version": 1,
+        "schema_version": 2,
         "kind": "agenterm-quality-timing",
         "lane": "quick",
         "profile": "quick",
         "status": "passed",
-        "total_wall_ms": total_wall_ms,
+        "total_wall_ms": task_wall_ms,
+        "bootstrap": {
+            "schema_version": 1,
+            "kind": "agenterm-bootstrap-timing",
+            "state": "measured",
+            "reason": null,
+            "setup_ms": 1200,
+            "cargo_build_ms": 900,
+            "worker_copy_ms": 100,
+            "other_setup_ms": 200,
+            "clock_resolution_ms": 10,
+            "cargo_lock_wait": {
+                "state": "included_not_separable",
+                "duration_ms": null,
+                "included_in": "cargo_build_ms"
+            }
+        },
+        "wall_time": {
+            "state": "partial",
+            "task_ms": task_wall_ms,
+            "accounted_ms": total_wall_ms
+        },
         "source": {"commit": SOURCE_SHA},
         "workload": {"fingerprint": fingerprint}
     });
@@ -100,6 +122,8 @@ fn performance_summary_is_typed_and_rejects_mixed_workloads() {
     assert_eq!(summary["schema_version"], 2);
     assert_eq!(summary["workload_scope"], "quick");
     assert_eq!(summary["cold_total_wall_ms"], 30_000);
+    assert_eq!(summary["samples"][0]["task_wall_ms"], 28_800);
+    assert_eq!(summary["samples"][0]["bootstrap"]["setup_ms"], 1_200);
     assert_eq!(summary["warm_median_total_wall_ms"], 9_000);
     assert_eq!(summary["warm_min_total_wall_ms"], 8_000);
     assert_eq!(summary["warm_max_total_wall_ms"], 10_000);

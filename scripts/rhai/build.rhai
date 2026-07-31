@@ -7,6 +7,7 @@
 //        [--clients-only] [--action build|clippy]
 
 import "scripts/rhai/lib/build_identity" as build_identity;
+import "scripts/rhai/lib/bootstrap_timing" as bootstrap_timing;
 
 fn require(condition, message) {
     if !condition {
@@ -95,6 +96,8 @@ fn cargo_binary(name) {
 
 require(args.len >= 1, "expected: REPO [PROFILE] [OPTIONS]");
 let repo = std::path::absolute(args[0]).display;
+let bootstrap = bootstrap_timing::facts();
+print("AgenTerm bootstrap timing: " + rhai::json::stringify(bootstrap));
 let profile = "dev";
 let target = "";
 let driver = "cargo";

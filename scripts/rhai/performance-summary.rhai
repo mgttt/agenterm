@@ -72,12 +72,15 @@ for index in 0..3 {
     );
     let report = rhai::json::parse_file(path);
     require(
-        report.schema_version == 1
+        report.schema_version == 2
             && report.kind == "agenterm-quality-timing"
             && report.lane == "quick"
             && report.profile == "quick"
             && report.status == "passed"
-            && report.total_wall_ms >= 0,
+            && report.total_wall_ms >= 0
+            && ["partial", "unavailable"].contains(report.wall_time.state)
+            && report.wall_time.task_ms == report.total_wall_ms
+            && report.wall_time.accounted_ms >= report.total_wall_ms,
         "performance_summary_sample_schema:" + (index + 1)
     );
     if source_commit == "" {
@@ -93,10 +96,12 @@ for index in 0..3 {
     samples.push(#{
         ordinal: index + 1,
         phase: if index == 0 { "cold" } else { "warm" },
-        total_wall_ms: report.total_wall_ms,
+        total_wall_ms: report.wall_time.accounted_ms,
+        task_wall_ms: report.total_wall_ms,
+        bootstrap: report.bootstrap,
         timing_path: std::path::PathBuf::from(path).file_name
     });
-    totals.push(report.total_wall_ms);
+    totals.push(report.wall_time.accounted_ms);
     let stats_path = std::path::absolute(args[index + 6]).display;
     if cache_strategy == "sccache" {
         require(

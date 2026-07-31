@@ -333,7 +333,7 @@ require(
     "migration_batch_bootstrap_worker_build"
 );
 require(
-    bootstrap_source.split("\n").len <= 40,
+    bootstrap_source.split("\n").len <= 70,
     "migration_batch_bootstrap_size"
 );
 
@@ -402,9 +402,25 @@ require(
         && shell_bootstrap.contains(
             "cargo build --quiet --locked --bin agenterm-script"
         )
-        && shell_bootstrap_operational_lines <= 40,
+        && shell_bootstrap_operational_lines <= 80,
     "migration_shell_bootstrap_not_generic"
 );
+for timing_fact in [
+    "agenterm_bootstrap_timing_schema",
+    "agenterm_bootstrap_setup_ms",
+    "agenterm_bootstrap_cargo_build_ms",
+    "agenterm_bootstrap_worker_copy_ms",
+    "agenterm_bootstrap_other_setup_ms",
+    "agenterm_bootstrap_clock_resolution_ms",
+    "agenterm_bootstrap_lock_wait_state",
+    "included_not_separable"
+] {
+    require(
+        bootstrap_source.contains(timing_fact)
+            && shell_bootstrap.contains(timing_fact),
+        "migration_bootstrap_timing_fact:" + timing_fact
+    );
+}
 
 let report = #{
     schema_version: 2,

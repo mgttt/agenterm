@@ -23,7 +23,7 @@ require(
 );
 let report = rhai::json::parse_file(path);
 require(
-    report.schema_version == 1
+    report.schema_version == 2
         && report.kind == "agenterm-quality-timing",
     "quality_timing_summary_schema"
 );
@@ -31,7 +31,10 @@ require(
     ["quick", "ordinary", "candidate"].contains(report.lane)
         && report.profile != ""
         && ["passed", "failed"].contains(report.status)
-        && report.total_wall_ms >= 0,
+        && report.total_wall_ms >= 0
+        && ["partial", "unavailable"].contains(report.wall_time.state)
+        && report.wall_time.task_ms == report.total_wall_ms
+        && report.wall_time.accounted_ms >= report.total_wall_ms,
     "quality_timing_summary_run"
 );
 require(
@@ -41,6 +44,27 @@ require(
         && report.workload.fingerprint != "",
     "quality_timing_summary_identity"
 );
+require(
+    report.bootstrap.schema_version == 1
+        && report.bootstrap.kind == "agenterm-bootstrap-timing"
+        && ["measured", "unavailable"].contains(report.bootstrap.state)
+        && report.bootstrap.cargo_lock_wait.duration_ms == (),
+    "quality_timing_summary_bootstrap"
+);
+if report.bootstrap.state == "measured" {
+    require(
+        report.bootstrap.setup_ms >= 0
+            && report.bootstrap.cargo_build_ms >= 0
+            && report.bootstrap.worker_copy_ms >= 0
+            && report.bootstrap.other_setup_ms >= 0
+            && report.bootstrap.clock_resolution_ms > 0
+            && report.bootstrap.cargo_lock_wait.state ==
+                "included_not_separable"
+            && report.bootstrap.cargo_lock_wait.included_in ==
+                "cargo_build_ms",
+        "quality_timing_summary_bootstrap_measured"
+    );
+}
 require(report.gates.len > 0, "quality_timing_summary_gates");
 
 let seen = #{};
@@ -90,6 +114,17 @@ let markdown =
     "- Lane: `" + report.lane + "` / `" + report.profile + "`\n" +
     "- Status: **" + report.status + "**\n" +
     "- Total wall time: **" + report.total_wall_ms + " ms**\n" +
+    "- Accounted outer wall time: **" + report.wall_time.accounted_ms +
+        " ms** (`" + report.wall_time.state + "`)\n" +
+    "- Bootstrap: `" + report.bootstrap.state + "`" +
+        if report.bootstrap.state == "measured" {
+            " — Cargo " + report.bootstrap.cargo_build_ms + " ms, copy " +
+                report.bootstrap.worker_copy_ms + " ms, other setup " +
+                report.bootstrap.other_setup_ms + " ms; Cargo lock wait " +
+                report.bootstrap.cargo_lock_wait.state
+        } else {
+            " — " + report.bootstrap.reason
+        } + "\n" +
     "- Source: `" + report.source.commit + "`\n" +
     "- Gates: " + counts.passed + " passed, " + counts.failed +
         " failed, " + counts.skipped + " skipped, " +

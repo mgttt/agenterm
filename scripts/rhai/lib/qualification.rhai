@@ -1,5 +1,7 @@
 // Versioned qualification manifest, result, provenance, and receipt logic.
 
+import "scripts/rhai/lib/bootstrap_timing" as bootstrap_timing;
+
 fn require(condition, code) {
     if !condition {
         throw code;
@@ -274,7 +276,7 @@ fn new_timing(
         gate_manifest_sha256: sha256(manifest)
     };
     #{
-        schema_version: 1,
+        schema_version: 2,
         kind: "agenterm-quality-timing",
         output_path: std::path::absolute(output_path).display,
         started_at_utc: std::time::SystemTime::now().rfc3339,
@@ -283,6 +285,8 @@ fn new_timing(
         completed_at_utc: (),
         status: "running",
         total_wall_ms: 0,
+        bootstrap: bootstrap_timing::facts(),
+        wall_time: (),
         lane: lane,
         profile: profile,
         source: timing_source(root),
@@ -364,6 +368,10 @@ fn timing_finish(timing, status) {
     timing.total_wall_ms =
         std::time::SystemTime::now().unix_millis
             - timing.started_at_unix_ms;
+    timing.wall_time = bootstrap_timing::wall_time(
+        timing.bootstrap,
+        timing.total_wall_ms
+    );
     let output_path = timing.output_path;
     let report = timing;
     report.remove("output_path");

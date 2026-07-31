@@ -693,6 +693,16 @@ fn run_quality_timing_fixture(
         .arg(passed_path)
         .arg(failed_path)
         .env("QUALITY_TIMING_SECRET", "must-not-appear-in-timing")
+        .env("AGENTERM_BOOTSTRAP_TIMING_SCHEMA", "1")
+        .env("AGENTERM_BOOTSTRAP_SETUP_MS", "1200")
+        .env("AGENTERM_BOOTSTRAP_CARGO_BUILD_MS", "900")
+        .env("AGENTERM_BOOTSTRAP_WORKER_COPY_MS", "100")
+        .env("AGENTERM_BOOTSTRAP_OTHER_SETUP_MS", "200")
+        .env("AGENTERM_BOOTSTRAP_CLOCK_RESOLUTION_MS", "10")
+        .env(
+            "AGENTERM_BOOTSTRAP_LOCK_WAIT_STATE",
+            "included_not_separable",
+        )
         .output()
         .expect("run quality timing fixture")
 }
@@ -2929,11 +2939,26 @@ qualification::timing_finish(failed, "failed");
     let passed_bytes = fs::read(&passed_path).expect("read passed timing");
     let passed: serde_json::Value =
         serde_json::from_slice(&passed_bytes).expect("decode passed timing");
-    assert_eq!(passed["schema_version"], 1);
+    assert_eq!(passed["schema_version"], 2);
     assert_eq!(passed["kind"], "agenterm-quality-timing");
     assert_eq!(passed["status"], "passed");
     assert_eq!(passed["lane"], "ordinary");
     assert_eq!(passed["profile"], "fixture");
+    assert_eq!(passed["bootstrap"]["state"], "measured");
+    assert_eq!(passed["bootstrap"]["kind"], "agenterm-bootstrap-timing");
+    assert_eq!(passed["bootstrap"]["setup_ms"], 1200);
+    assert_eq!(passed["bootstrap"]["cargo_build_ms"], 900);
+    assert_eq!(passed["bootstrap"]["worker_copy_ms"], 100);
+    assert_eq!(passed["bootstrap"]["other_setup_ms"], 200);
+    assert_eq!(
+        passed["bootstrap"]["cargo_lock_wait"]["state"],
+        "included_not_separable"
+    );
+    assert_eq!(passed["wall_time"]["state"], "partial");
+    assert_eq!(
+        passed["wall_time"]["accounted_ms"].as_u64().unwrap(),
+        passed["total_wall_ms"].as_u64().unwrap() + 1200
+    );
     assert_eq!(passed["first_failure"], serde_json::Value::Null);
     assert_eq!(passed["gates"][0]["status"], "passed");
     assert_eq!(passed["gates"][1]["status"], "skipped");
@@ -2972,6 +2997,8 @@ qualification::timing_finish(failed, "failed");
     );
     let stdout = String::from_utf8_lossy(&stdout_summary.stdout);
     assert!(stdout.contains("## AgenTerm quality timing"));
+    assert!(stdout.contains("Accounted outer wall time"));
+    assert!(stdout.contains("Cargo lock wait included_not_separable"));
     assert!(stdout.contains("| `compile` | skipped | 0 |"));
 
     let github_summary = fixture.join("github-summary.md");
@@ -3002,7 +3029,7 @@ qualification::timing_finish(failed, "failed");
 
     let invalid_path = fixture.join("invalid.json");
     let mut invalid = passed.clone();
-    invalid["schema_version"] = serde_json::json!(2);
+    invalid["schema_version"] = serde_json::json!(3);
     fs::write(
         &invalid_path,
         serde_json::to_vec_pretty(&invalid).expect("encode invalid timing"),
