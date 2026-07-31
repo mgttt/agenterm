@@ -1,0 +1,242 @@
+name: Workflow Observer
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+      - Release Candidate
+      - Release
+    types:
+      - completed
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  observe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Collect bounded run metadata
+        shell: python
+        env:
+          OBSERVED_RUN_ID: ${{ github.event.workflow_run.id }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          import datetime
+          import json
+          import os
+          import pathlib
+          import sys
+          import time
+          import urllib.error
+          import urllib.request
+
+          SCHEMA_VERSION = 1
+          PER_PAGE = 100
+          MAX_PAGES = 10
+          MAX_JOBS = 200
+          MAX_STEPS_PER_JOB = 100
+          MAX_TEXT_CHARS = 256
+          MAX_JSON_BYTES = 1_048_576
+          REQUEST_TIMEOUT_SECONDS = 30
+          MAX_REQUEST_ATTEMPTS = 3
+          SLO_THRESHOLDS_MS = {
+              "Release Candidate": 8 * 60 * 1000,
+              "Release": 3 * 60 * 1000,
+          }
+
+          api_url = os.environ["GITHUB_API_URL"].rstrip("/")
+          repository = os.environ["GITHUB_REPOSITORY"]
+          run_id = int(os.environ["OBSERVED_RUN_ID"])
+          token = os.environ["GITHUB_TOKEN"]
+
+          def bounded_text(value):
+              if value is None:
+                  return None
+              return str(value).replace("\r", " ").replace("\n", " ")[:MAX_TEXT_CHARS]
+
+          def instant(value):
+              if not value:
+                  return None
+              return datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+          def duration_ms(start, end):
+              start_value = instant(start)
+              end_value = instant(end)
+              if start_value is None or end_value is None or end_value < start_value:
+                  return None
+              return int((end_value - start_value).total_seconds() * 1000)
+
+          def get_json(path):
+              request = urllib.request.Request(
+                  api_url + path,
+                  headers={
+                      "Accept": "application/vnd.github+json",
+                      "Authorization": "Bearer " + token,
+                      "X-GitHub-Api-Version": "2022-11-28",
+                      "User-Agent": "agenterm-workflow-observer",
+                  },
+              )
+              for attempt in range(1, MAX_REQUEST_ATTEMPTS + 1):
+                  try:
+                      with urllib.request.urlopen(
+                          request, timeout=REQUEST_TIMEOUT_SECONDS
+                      ) as response:
+                          return json.load(response)
+                  except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+                      if attempt == MAX_REQUEST_ATTEMPTS:
+                          raise
+                      time.sleep(attempt)
+              raise RuntimeError("bounded REST retry exhausted")
+
+          run = get_json(f"/repos/{repository}/actions/runs/{run_id}")
+          raw_jobs = []
+          total_jobs = 0
+          pages_read = 0
+          for page in range(1, MAX_PAGES + 1):
+              page_data = get_json(
+                  f"/repos/{repository}/actions/runs/{run_id}/jobs"
+                  f"?filter=all&per_page={PER_PAGE}&page={page}"
+              )
+              pages_read += 1
+              total_jobs = max(total_jobs, int(page_data.get("total_count", 0)))
+              page_jobs = page_data.get("jobs", [])
+              remaining = MAX_JOBS - len(raw_jobs)
+              raw_jobs.extend(page_jobs[:remaining])
+              if len(page_jobs) < PER_PAGE or len(raw_jobs) >= MAX_JOBS:
+                  break
+
+          jobs = []
+          steps_truncated = False
+          for job in raw_jobs:
+              raw_steps = job.get("steps") or []
+              steps_truncated = steps_truncated or len(raw_steps) > MAX_STEPS_PER_JOB
+              steps = [
+                  {
+                      "number": step.get("number"),
+                      "name": bounded_text(step.get("name")),
+                      "status": bounded_text(step.get("status")),
+                      "conclusion": bounded_text(step.get("conclusion")),
+                      "duration_ms": duration_ms(
+                          step.get("started_at"), step.get("completed_at")
+                      ),
+                  }
+                  for step in raw_steps[:MAX_STEPS_PER_JOB]
+              ]
+              jobs.append(
+                  {
+                      "id": job.get("id"),
+                      "run_attempt": job.get("run_attempt"),
+                      "name": bounded_text(job.get("name")),
+                      "status": bounded_text(job.get("status")),
+                      "conclusion": bounded_text(job.get("conclusion")),
+                      "duration_ms": duration_ms(
+                          job.get("started_at"), job.get("completed_at")
+                      ),
+                      "steps": steps,
+                      "steps_truncated": len(raw_steps) > MAX_STEPS_PER_JOB,
+                  }
+              )
+
+          workflow_name = bounded_text(run.get("name"))
+          run_duration = duration_ms(run.get("run_started_at"), run.get("updated_at"))
+          threshold = SLO_THRESHOLDS_MS.get(workflow_name)
+          slo = {
+              "class": (
+                  "candidate"
+                  if workflow_name == "Release Candidate"
+                  else "promotion"
+                  if workflow_name == "Release"
+                  else None
+              ),
+              "threshold_ms": threshold,
+              "observed_ms": run_duration if threshold is not None else None,
+              "met": (
+                  run_duration <= threshold
+                  if threshold is not None and run_duration is not None
+                  else None
+              ),
+          }
+          payload = {
+              "schema_version": SCHEMA_VERSION,
+              "generated_at": datetime.datetime.now(
+                  datetime.timezone.utc
+              ).isoformat(),
+              "run": {
+                  "id": run.get("id"),
+                  "attempt": run.get("run_attempt"),
+                  "workflow_id": run.get("workflow_id"),
+                  "workflow_name": workflow_name,
+                  "event": bounded_text(run.get("event")),
+                  "head_sha": bounded_text(run.get("head_sha")),
+                  "status": bounded_text(run.get("status")),
+                  "conclusion": bounded_text(run.get("conclusion")),
+                  "html_url": bounded_text(run.get("html_url")),
+                  "queue_duration_ms": duration_ms(
+                      run.get("created_at"), run.get("run_started_at")
+                  ),
+                  "run_duration_ms": run_duration,
+              },
+              "slo": slo,
+              "pagination": {
+                  "per_page": PER_PAGE,
+                  "pages_read": pages_read,
+                  "max_pages": MAX_PAGES,
+                  "reported_jobs": len(jobs),
+                  "total_jobs": total_jobs,
+                  "jobs_truncated": total_jobs > len(jobs),
+                  "steps_truncated": steps_truncated,
+              },
+              "jobs": jobs,
+          }
+
+          encoded = json.dumps(
+              payload, indent=2, sort_keys=True, ensure_ascii=True
+          ).encode("utf-8")
+          while len(encoded) > MAX_JSON_BYTES and payload["jobs"]:
+              payload["jobs"].pop()
+              payload["pagination"]["reported_jobs"] = len(payload["jobs"])
+              payload["pagination"]["jobs_truncated"] = True
+              encoded = json.dumps(
+                  payload, indent=2, sort_keys=True, ensure_ascii=True
+              ).encode("utf-8")
+          if len(encoded) > MAX_JSON_BYTES:
+              sys.exit("bounded workflow observation exceeds JSON budget")
+
+          pathlib.Path("workflow-observation.json").write_bytes(encoded + b"\n")
+          slo_text = "not applicable"
+          if slo["threshold_ms"] is not None:
+              slo_text = (
+                  f"{'met' if slo['met'] else 'missed'} "
+                  f"({slo['observed_ms']} ms / {slo['threshold_ms']} ms)"
+                  if slo["observed_ms"] is not None
+                  else "unavailable"
+              )
+          summary = (
+              "### Workflow observation\n\n"
+              f"- Workflow: `{workflow_name}`\n"
+              f"- Run: `{run.get('id')}` attempt `{run.get('run_attempt')}`\n"
+              f"- Conclusion: `{bounded_text(run.get('conclusion'))}`\n"
+              f"- Queue: `{payload['run']['queue_duration_ms']}` ms\n"
+              f"- Run: `{run_duration}` ms\n"
+              f"- Jobs: `{len(payload['jobs'])}`"
+              f"{' (truncated)' if payload['pagination']['jobs_truncated'] else ''}\n"
+              f"- SLO: `{slo_text}`\n"
+          )
+          pathlib.Path("workflow-observation-summary.md").write_text(
+              summary, encoding="utf-8"
+          )
+
+      - name: Publish observation summary
+        shell: bash
+        run: cat workflow-observation-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload workflow observation
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: workflow-observation-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}
+          path: workflow-observation.json
+          if-no-files-found: error
+          retention-days: 30

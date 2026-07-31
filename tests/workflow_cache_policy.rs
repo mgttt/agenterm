@@ -1,4 +1,7 @@
-const WORKFLOW: &str = include_str!("../.github/workflows/ci.yml");
+use std::sync::LazyLock;
+
+static WORKFLOW: LazyLock<String> =
+    LazyLock::new(|| include_str!("../.github/workflows/ci.yml").replace("\r\n", "\n"));
 
 const CACHE_SHA: &str = "0400d5f644dc74513175e3cd8d07132dd4860809";
 const SAVE_CONDITION: &str =
