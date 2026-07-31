@@ -25,6 +25,10 @@ const FORBIDDEN_MARKERS: &[&str] = &[
     "libc::",
     "objc2::",
     "core_foundation::",
+    "rmux_pty::",
+    "softbuffer::",
+    "winit::",
+    "raw_window_handle::",
 ];
 
 const SUBSYSTEM_ENTRYPOINTS: &[&str] = &[

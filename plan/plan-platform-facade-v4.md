@@ -116,6 +116,9 @@ passes this state.
    loop, input, renderer, font cache, dialogs, screenshot bridge, and wake proxy
    now reside in the private Unix adapter mechanism selected by explicit Linux
    and macOS entries. Shared UI-state normalization remains open.
+   The final dead `src/pty/windows.rs` third-party type re-export is deleted;
+   the source gate now rejects `rmux-pty`, winit, softbuffer, and raw-window-
+   handle types outside adapters in addition to direct native APIs.
 4. Remove compatibility-only legacy native paths after each owning public
    smoke has passed. The legacy native IPC transport copies are removed; the
    remaining compatibility module is platform-neutral protocol/server code.
