@@ -333,6 +333,11 @@ Revision-4 migration evidence (2026-07-31, partial):
   and program from the same typed runtime facade. Its `zsh` versus `sh`
   selection no longer appears in frontend product code; Windows declares its
   equivalent `cmd` descriptor through the shared contract.
+- [~] Unix frontend clipboard calls now traverse
+  `services::ui_clipboard → selected → adapters/{linux,macos}` and map native
+  availability, size, timeout, and backend diagnostics to one typed contract.
+  The frontend remains a temporary string-result compatibility projection;
+  broader frontend event-loop ownership is still pending.
 - [x] Linux display capability classification now calls the selected Linux
   scale adapter. The shared geometry contract no longer branches on a display
   target; headless remains typed Unsupported and a usable display Available.

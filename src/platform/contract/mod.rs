@@ -7,4 +7,5 @@ pub(crate) mod runtime;
 pub(crate) mod script_clipboard;
 pub(crate) mod script_window;
 pub(crate) mod supervisor_audit;
+pub(crate) mod ui_clipboard;
 pub(crate) mod webview;

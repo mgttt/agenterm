@@ -55,6 +55,10 @@ pub(crate) mod runtime;
 #[path = "adapters/windows/webview.rs"]
 pub(crate) mod webview;
 
+#[cfg(windows)]
+#[path = "adapters/windows/ui_clipboard.rs"]
+pub(crate) mod ui_clipboard;
+
 #[cfg(target_os = "linux")]
 #[path = "adapters/linux/ipc.rs"]
 pub(crate) mod ipc;
@@ -111,6 +115,10 @@ pub(crate) mod scale;
 #[path = "adapters/linux/webview.rs"]
 pub(crate) mod webview;
 
+#[cfg(target_os = "linux")]
+#[path = "adapters/linux/ui_clipboard.rs"]
+pub(crate) mod ui_clipboard;
+
 #[cfg(target_os = "macos")]
 #[path = "adapters/macos/ipc.rs"]
 pub(crate) mod ipc;
@@ -162,3 +170,7 @@ pub(crate) mod runtime;
 #[cfg(target_os = "macos")]
 #[path = "adapters/macos/webview.rs"]
 pub(crate) mod webview;
+
+#[cfg(target_os = "macos")]
+#[path = "adapters/macos/ui_clipboard.rs"]
+pub(crate) mod ui_clipboard;

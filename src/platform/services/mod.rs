@@ -12,4 +12,5 @@ pub(crate) mod script_http;
 pub(crate) mod script_stream;
 pub(crate) mod script_window;
 pub(crate) mod supervisor_audit;
+pub(crate) mod ui_clipboard;
 pub(crate) mod webview;
