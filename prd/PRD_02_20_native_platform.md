@@ -84,6 +84,10 @@ The migration is complete only when all of the following are true:
 - [ ] `ipc_endpoint`, `ipc_transport`, process identity/tree control, standard
   paths, native activation/clipboard/screenshot, Control Center shell hosting,
   and WebView runtime probing call facade services rather than OS APIs directly
+- [x] typed IPC endpoint selection and native listener/stream mechanics are
+  owned by `contract::ipc`, `services::ipc`, and selected adapters; the legacy
+  duplicate Unix-socket and Windows named-pipe implementations are deleted,
+  while platform-neutral framing/server compatibility remains shared
 - [~] top-level `win_app`, `unix_app`, and native wake modules are now
   adapter-owned implementation details while shared UI state remains platform
   neutral; physical ownership is complete, while further state normalization

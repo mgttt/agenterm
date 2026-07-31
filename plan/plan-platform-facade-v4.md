@@ -7,7 +7,7 @@
 
 ```text
 contract + selected adapters
-├─ IPC / endpoint / stream                  [partial]
+├─ IPC / endpoint / stream                  [adapter-owned]
 ├─ system path conventions                  [adapter-owned]
 ├─ Script Runtime
 │  ├─ process inventory + termination       [adapter-owned]
@@ -29,10 +29,12 @@ each product module moves only after its facade service has an owned contract.
 
 IPC implementation state: endpoint identity and selection are in
 `contract::ipc`; transport failure codes and their endpoint-preserving error
-carrier are now in `contract::ipc_transport`. `services::ipc` and every native
+carrier are in `contract::ipc_transport`. `services::ipc` and every native
 adapter consume that shared contract. The compatibility `ipc_transport` stream
-still projects the legacy TCP framing and is the next deletion/migration leaf;
-this state does not yet satisfy the static source-boundary gate.
+now contains only platform-neutral TCP/framing/server behavior; its duplicate
+Unix-socket and Windows named-pipe implementations were removed after the
+selected-adapter round-trip tests passed. The static source-boundary gate also
+passes this state.
 
 ## Shipped leaf: Script Runtime process inventory and termination
 
@@ -107,7 +109,8 @@ this state does not yet satisfy the static source-boundary gate.
    now reside in the private Unix adapter mechanism selected by explicit Linux
    and macOS entries. Shared UI-state normalization remains open.
 4. Remove compatibility-only legacy native paths after each owning public
-   smoke has passed.
+   smoke has passed. The legacy native IPC transport copies are removed; the
+   remaining compatibility module is platform-neutral protocol/server code.
 5. The static production source boundary test now rejects OS cfg/native API
    imports outside the approved platform tree. It scans every Rust source,
    structurally masks test items/comments/strings, and allows only the three
