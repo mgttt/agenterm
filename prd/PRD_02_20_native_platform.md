@@ -313,6 +313,9 @@ Revision-4 migration evidence (2026-07-31, partial):
   behavior.
 - [~] Script worker sidecar executable-name conventions now resolve through
   `platform::paths`; client discovery no longer branches on `.exe` naming.
+- [~] Workspace persistence now obtains its default Windows/Unix and
+  instance-scoped path from `platform::paths`; the workspace domain no longer
+  branches on LOCALAPPDATA, XDG, or server-scope conventions.
 - [x] Windows-hosted `cargo fmt`, `cargo clippy --lib -- -D warnings`, focused
   process-facade and Script Runtime tests, plus `agenterm-cli --help` pass for
   this partial slice. Full boundary scanning and cross-platform adapter

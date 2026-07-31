@@ -32,34 +32,7 @@ pub(crate) fn workspace_path() -> PathBuf {
 }
 
 fn default_workspace_path() -> PathBuf {
-    #[cfg(windows)]
-    {
-        env::var_os("LOCALAPPDATA")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("AgenTerm")
-            .join("workspace.json")
-    }
-    #[cfg(unix)]
-    {
-        use crate::ipc_endpoint::{LogicalInstance, ServerScopeId};
-
-        let instance = env::var("AGENTERM_INSTANCE")
-            .ok()
-            .and_then(|value| value.parse::<LogicalInstance>().ok())
-            .unwrap_or_default();
-        ServerScopeId::current(&instance)
-            .map(|scope| crate::ipc_endpoint::default_workspace_path(&scope))
-            .unwrap_or_else(|_| {
-                crate::ipc_endpoint::unix_data_root_from(
-                    env::var_os("XDG_DATA_HOME"),
-                    env::var_os("HOME"),
-                    env::temp_dir(),
-                )
-                .join("workspaces")
-                .join("main.json")
-            })
-    }
+    crate::platform::paths::default_workspace_path()
 }
 
 pub(crate) fn load_workspace() -> Option<SavedWorkspace> {

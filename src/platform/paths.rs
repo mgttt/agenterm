@@ -21,6 +21,39 @@ pub(crate) fn script_worker_executable_names() -> &'static [&'static str] {
     }
 }
 
+/// Resolve the default persisted workspace path for the current logical
+/// instance. Product persistence consumes this path without selecting an OS.
+pub(crate) fn default_workspace_path() -> PathBuf {
+    #[cfg(windows)]
+    {
+        env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("AgenTerm")
+            .join("workspace.json")
+    }
+    #[cfg(unix)]
+    {
+        use crate::platform::contract::ipc::{LogicalInstance, ServerScopeId};
+
+        let instance = env::var("AGENTERM_INSTANCE")
+            .ok()
+            .and_then(|value| value.parse::<LogicalInstance>().ok())
+            .unwrap_or_default();
+        ServerScopeId::current(&instance)
+            .map(|scope| crate::platform::ipc::default_workspace_path(&scope))
+            .unwrap_or_else(|_| {
+                crate::platform::ipc::unix_data_root_from(
+                    env::var_os("XDG_DATA_HOME"),
+                    env::var_os("HOME"),
+                    env::temp_dir(),
+                )
+                .join("workspaces")
+                .join("main.json")
+            })
+    }
+}
+
 pub(crate) fn settings_path(override_path: Option<OsString>) -> PathBuf {
     #[cfg(windows)]
     {
