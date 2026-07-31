@@ -3,6 +3,13 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+#[path = "adapters/linux/contract_manifest.rs"]
+mod linux_adapter_contract;
+#[path = "adapters/macos/contract_manifest.rs"]
+mod macos_adapter_contract;
+#[path = "adapters/windows/contract_manifest.rs"]
+mod windows_adapter_contract;
+
 const FORBIDDEN_MARKERS: &[&str] = &[
     "#[cfg(windows",
     "#[cfg(unix",
@@ -239,4 +246,32 @@ mod tests {
     assert!(masked.contains("windows_sys::native_call"));
     assert!(!masked.contains("std::os::windows"));
     assert!(!masked.contains("windows_sys in a comment"));
+}
+
+#[test]
+fn all_three_adapters_satisfy_the_same_contract() {
+    use crate::platform::contract::adapter::validate_adapter_contract;
+
+    let declarations = [
+        (
+            &windows_adapter_contract::DECLARATION,
+            windows_adapter_contract::unsupported_probe(),
+            windows_adapter_contract::failed_probe(),
+        ),
+        (
+            &linux_adapter_contract::DECLARATION,
+            linux_adapter_contract::unsupported_probe(),
+            linux_adapter_contract::failed_probe(),
+        ),
+        (
+            &macos_adapter_contract::DECLARATION,
+            macos_adapter_contract::unsupported_probe(),
+            macos_adapter_contract::failed_probe(),
+        ),
+    ];
+
+    for (declaration, unsupported, failed) in declarations {
+        validate_adapter_contract(declaration, unsupported, failed)
+            .unwrap_or_else(|error| panic!("adapter contract mismatch: {error}"));
+    }
 }

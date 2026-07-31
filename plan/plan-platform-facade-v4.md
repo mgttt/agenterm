@@ -122,7 +122,10 @@ passes this state.
    imports outside the approved platform tree. It scans every Rust source,
    structurally masks test items/comments/strings, and allows only the three
    exact Windows-subsystem entry attributes; its rejection fixture and clean
-   repository scan pass locally.
+   repository scan pass locally. The same test binary loads OS-neutral
+   declarations from all three adapter trees and verifies the common revision,
+   complete capability surface, and non-empty typed Unsupported/Failed probes
+   on every host.
 6. Run serial integrated `fmt`, Clippy, unit tests, owning public CLI smoke,
    boundary scan, then the applicable Windows qualification lane. No Candidate,
    tag, or public release is implied by this plan.

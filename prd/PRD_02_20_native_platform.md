@@ -104,9 +104,11 @@ The migration is complete only when all of the following are true:
   top-level Windows/Linux/macOS module trees are adapter-private `native/`
   mechanisms, `platform/mod.rs` contains no production OS selection, and an
   internal gate rejects selection cfg elsewhere in contracts or services
-- [ ] all three platform adapters satisfy the same facade contract tests; a
+- [x] all three platform adapters satisfy the same facade contract tests; a
   missing capability remains a typed unsupported result, never an implicit
-  fallback
+  fallback. One host test loads all three OS-neutral adapter manifests and
+  validates revision 3, all eight capabilities, and typed Unsupported/Failed
+  probes without compiling another platform's native APIs.
 
 ## Shared contract
 
