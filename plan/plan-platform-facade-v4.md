@@ -70,7 +70,12 @@ each product module moves only after its facade service has an owned contract.
 1. Define typed Script-window, Script-clipboard, stream-probe, and atomic-file
    service contracts before moving each native implementation.
 2. Move Control Center shell/focus/capture and WebView host internals behind
-   their services, retaining bounded deadlines and typed failures.
+   their services, retaining bounded deadlines and typed failures. The shell
+   split keeps registry, IPC projection, and receipts in `control_center`; a
+   narrow projection-host contract supplies title, lines, polling, close,
+   native-window publication, focus requests, and typed capture requests to
+   the selected adapter driver. It must not duplicate snapshot or registry
+   identity logic in an OS adapter.
 3. Split PTY/frontends into adapter-owned event-loop and native-terminal
    lifecycle implementations; product state stays platform-neutral.
 4. Remove compatibility-only legacy native paths after each owning public

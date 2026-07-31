@@ -338,7 +338,10 @@ Revision-4 migration evidence (2026-07-31, partial):
   path now uses `platform::process`; it retains its existing typed receipts.
   Control Center sidecar executable naming and registry PID/start-identity
   matching also now consume `platform::{paths,process}`; its native shell and
-  renderer extraction remain explicitly incomplete.
+  renderer extraction remain explicitly incomplete. The approved next boundary
+  keeps projection/registry/IPC receipts in the product layer and passes a
+  narrow typed projection host to selected adapter shell drivers; native event
+  loops, rendering, no-activate, and capture remain adapter-owned.
 - [~] native IPC identity, default endpoint/workspace derivation, listener /
   stream framing, named-pipe and Unix-socket mechanics, permissions, peer
   identity, and stale recovery now reside beneath `src/platform/`; the
