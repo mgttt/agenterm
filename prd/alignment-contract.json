@@ -228,6 +228,14 @@
       "evidence_ids": ["control.native-local-ipc"]
     },
     {
+      "id": "architecture.native-platform-facade-v4",
+      "kind": "decision",
+      "status": "accepted",
+      "evidence_mode": "decision",
+      "prd": "revision-4 Platform Facade is the sole production native boundary",
+      "evidence_ids": []
+    },
+    {
       "id": "development.upgrade-identity-comparison",
       "kind": "behavior",
       "status": "shipped",

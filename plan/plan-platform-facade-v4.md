@@ -1,7 +1,7 @@
 # Platform Facade revision-4 execution plan
 
-状态：进行中。此计划收敛跨平台原生边界；它不授予或限制 Script Runtime
-能力。调用方策略、预算和 typed failure 保持在上层产品合同。
+状态：完成（2026-08-01）。此计划已收敛跨平台原生边界；它不授予或限制
+Script Runtime 能力。调用方策略、预算和 typed failure 保持在上层产品合同。
 
 ## Outcome and dependency graph
 
@@ -18,8 +18,8 @@ contract + selected adapters
 │  └─ worker supervision / audit             [adapter-owned]
 ├─ Control Center shell                       [adapter-owned]
 ├─ passive WebView runtime probe              [adapter-owned]
-└─ frontend + PTY native lifecycle           [partial]
-    └─ static source boundary gate           [depends on all above]
+└─ frontend + PTY native lifecycle           [adapter-owned]
+    └─ static source boundary gate           [passing]
 ```
 
 Shared prerequisites: typed `Unsupported` versus `Failed`, adapter-local native
@@ -83,10 +83,11 @@ passes this state.
 - Excluded scope: IPC transport mechanics, Control Center shell rendering, and
   terminal/frontend lifecycle.
 
-## Remaining leaves and serial validation
+## Closure leaves and serial validation
 
-1. Define typed Script-window, Script-clipboard, stream-probe, and atomic-file
-   service contracts before moving each native implementation.
+1. Typed Script-window, Script-clipboard, stream-probe, and atomic-file
+   service contracts are complete and their native implementations are
+   adapter-owned.
 2. Control Center shell/focus/capture and WebView host internals now sit behind
    their services with bounded deadlines and typed failures. The shell split
    keeps registry, IPC projection, screenshot receipts, and snapshot identity
@@ -130,6 +131,13 @@ passes this state.
    declarations from all three adapter trees and verifies the common revision,
    complete capability surface, and non-empty typed Unsupported/Failed probes
    on every host.
-6. Run serial integrated `fmt`, Clippy, unit tests, owning public CLI smoke,
-   boundary scan, then the applicable Windows qualification lane. No Candidate,
-   tag, or public release is implied by this plan.
+6. Serial integrated validation passes on the final implementation tree:
+   repository lint, `fmt`, warnings-denied all-target Clippy, 389 library tests,
+   both boundary scans, and the three-adapter same-host contract test; the dev
+   build stages all seven Windows binaries. Public CLI `--help`/`protocol-info`,
+   native IPC smoke, and the complete Control Center smoke pass, including a
+   760×480 native capture, no-activate reuse, recovery, exact typed close, and
+   orphan-free cleanup. A Windows-host Linux-target probe stops in dependency
+   build setup because `x86_64-linux-gnu-gcc` is not installed; it supplies no
+   contrary source result and native/cross target coverage remains owned by CI.
+   No Candidate, tag, or public release was run or implied by this plan.

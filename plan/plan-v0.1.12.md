@@ -239,6 +239,11 @@ tag-to-public-Release
 
 本轮不再新增第三种实例语义，集中把 `main|dev` 做实：
 
+进入本节的代码结构前置已经收口：revision-4 Platform Facade 是生产原生
+能力的唯一边界，IPC endpoint/transport 通过 typed contract、service、
+selected adapter 装配；遗留的 Unix socket / Windows named-pipe 实现副本已
+删除。这里剩余的是三平台原生运行证据与混合版本行为，不是再次创建平台分支。
+
 - 在真实 Windows/macOS/Linux 上并发启动同 role，恰有一个 authority；
 - 不同 role 的 endpoint、registration、workspace、settings、epoch 严格隔离；
 - Unix socket 父目录 owner/mode、socket mode、symlink 拒绝与路径长度均有
@@ -255,6 +260,10 @@ tag-to-public-Release
 ## 七、三平台 GUI 与 Control Center 收敛
 
 ### 7.1 主工作台
+
+Windows/remote Windows/Unix 的窗口、render、input 与 wake 实现已经物理归属
+selected adapters；产品层不再选择 winit/softbuffer/Win32 或 PTY backend。
+本节只继续收敛用户可见的跨平台行为与原生证据。
 
 - 对齐 toolbar 顺序、`En|Zh`、字号动作、Tabs 双击编辑、tree lines、
   Composer 多行输入、scrollbar、selection、clipboard 和 no-activate；

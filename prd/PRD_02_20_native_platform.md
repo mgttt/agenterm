@@ -61,6 +61,8 @@ tests or ownership.
 
 ### Platform Facade closure rule (revision 4, 2026-07-31)
 
+- [x] revision-4 Platform Facade is the sole production native boundary
+
 `platform` is not merely a collection of GUI helpers. It is the required
 middle layer between product code and an operating system. Product/domain
 modules call typed `platform::{ipc, process, paths, ui_host, webview, ...}`
@@ -78,10 +80,10 @@ being forced through an OS widget API.
 
 The migration is complete only when all of the following are true:
 
-- [ ] production `#[cfg(windows|unix|target_os|target_family)]` selection is
+- [x] production `#[cfg(windows|unix|target_os|target_family)]` selection is
   confined to `src/platform/**` and unavoidable binary-entry bootstrap code;
   test-only fixtures are excluded from this count
-- [ ] `ipc_endpoint`, `ipc_transport`, process identity/tree control, standard
+- [x] `ipc_endpoint`, `ipc_transport`, process identity/tree control, standard
   paths, native activation/clipboard/screenshot, Control Center shell hosting,
   and WebView runtime probing call facade services rather than OS APIs directly
 - [x] typed IPC endpoint selection and native listener/stream mechanics are
@@ -238,7 +240,7 @@ Available, Unsupported, and Failed without reading source or assuming parity.
 
 ## Boundary and non-goals
 
-- [~] the initial GUI-only boundary did not relocate process, filesystem,
+- [x] the initial GUI-only boundary did not relocate process, filesystem,
   Script Runtime, Fleet authority, or IPC modules. That limit is superseded by
   revision 4: their OS-specific mechanisms now migrate behind the Platform
   Facade while their product semantics and public contracts stay unchanged.
@@ -300,9 +302,21 @@ Completion requires:
 - [ ] platform failures are typed and diagnosable, with no hidden fallback that
   reports a capability as available when it did not execute
 
-Revision-4 migration evidence (2026-07-31, partial):
+Revision-4 migration evidence (2026-08-01, implementation complete; final
+integrated validation recorded below):
 
-- [~] The dependency graph and explicitly bounded delivery leaves for this
+- [x] Final serial Windows-host validation passes repository lint, rustfmt,
+  PRD alignment, warnings-denied all-target Clippy, 389 library tests, both
+  static boundary scans, the three-adapter contract test, the seven-binary dev
+  build, CLI help/protocol-info, native IPC smoke, and the full Control Center
+  public smoke. The Control Center receipt includes a 760×480 PNG plus
+  no-activate, reuse, recovery, exact typed close, and orphan-free cleanup.
+- [x] The local Linux-target probe fails before AgenTerm source checking because
+  this Windows host has no `x86_64-linux-gnu-gcc`; Linux/macOS native/cross
+  compilation remains the existing six-target CI responsibility and is not
+  misreported here as local evidence.
+
+- [x] The dependency graph and explicitly bounded delivery leaves for this
   continuing migration live in `plan/plan-platform-facade-v4.md`; they keep
   Script Runtime process/window/clipboard/stream/file work separate from the
   Control Center and PTY/frontend hot paths. This plan grants no runtime
@@ -355,17 +369,17 @@ Revision-4 migration evidence (2026-07-31, partial):
   and program from the same typed runtime facade. Its `zsh` versus `sh`
   selection no longer appears in frontend product code; Windows declares its
   equivalent `cmd` descriptor through the shared contract.
-- [~] Unix frontend clipboard calls now traverse
+- [x] Unix frontend clipboard calls now traverse
   `services::ui_clipboard → selected → adapters/{linux,macos}` and map native
   availability, size, timeout, and backend diagnostics to one typed contract.
   The adapter-local clipboard helper remains a temporary string-result
   compatibility projection; native frontend ownership is complete.
-- [~] Unix softbuffer XRGB screenshot encoding now traverses
+- [x] Unix softbuffer XRGB screenshot encoding now traverses
   `services::ui_screenshot → selected → adapters/{linux,macos}`. Adapter
   validation and encoder errors retain explicit typed Unsupported/Failed
   results before the adapter-local frontend string projection; the renderer is
   now physically adapter-owned.
-- [~] Unix frontend font-file candidate selection now traverses
+- [x] Unix frontend font-file candidate selection now traverses
   `services::ui_font → selected → adapters/{linux,macos}`; the shared glyph
   cache and rasterizer remain shared adapter rendering details, without target
   selection or duplicate candidate tables.
@@ -375,15 +389,15 @@ Revision-4 migration evidence (2026-07-31, partial):
 - [x] Control Center state-directory protection, exclusive state-file creation,
   atomic replacement, existing-window focus, and direct native capture now
   call `services::control_center → selected → adapters/{windows,linux,macos}`.
-  The root facade retains only the typed strategy projection; shell rendering
-  itself remains a separate incomplete extraction.
+  The root facade retains only the typed strategy projection; shell rendering,
+  no-activate, focus, capture, and event-loop mechanics are adapter-owned.
 - [x] Passive system-WebView runtime discovery now calls
   `services::webview → selected → adapters/{windows,linux,macos}`. The root
   facade and shared facts contain no target selection; WebView2, WebKitGTK,
   and WKWebView filesystem probes remain passive and preserve their existing
   Detected/Missing/Failed facts. AgenTerm continues to use its native renderer.
 
-- [~] `settings`, instance PID/start-identity checks, terminal default-shell
+- [x] `settings`, instance PID/start-identity checks, terminal default-shell
   selection, Control Center atomic-file/focus/capture routing, and passive
   WebView runtime probing now call typed `platform::{paths,process,runtime,
   control_center,webview}` services. Script Runtime's owned child-tree call
@@ -396,7 +410,7 @@ Revision-4 migration evidence (2026-07-31, partial):
   capture. Windows public no-activate evidence opens the adapter-owned shell,
   captures a 760×480 native PNG, closes it, and observes `not_running` with no
   residual owner.
-- [~] The approved PTY boundary exposes normalized spawn, size, exit, and
+- [x] The approved PTY boundary exposes normalized spawn, size, exit, and
   session/reader/wait operations only. POSIX `openpty`/fork/session/exec/poll
   and Windows ConPTY/job mechanics reside below selected adapters while
   retaining concurrent reader/wait and terminate-to-EOF ordering.
@@ -411,47 +425,46 @@ Revision-4 migration evidence (2026-07-31, partial):
   and force-terminate now return the shared typed `Unsupported`/`Failed`
   lifecycle contract with stable failure codes; byte reads/writes retain their
   standard I/O semantics.
-- [~] native IPC identity, default endpoint/workspace derivation, listener /
+- [x] native IPC identity, default endpoint/workspace derivation, listener /
   stream framing, named-pipe and Unix-socket mechanics, permissions, peer
   identity, and stale recovery now reside beneath `src/platform/`; the
   product-facing `ipc_transport` is an OS-neutral shim. Legacy TCP and the
-  v1/v2 instance schema remain unchanged. The final adapter split and the
-  repository-wide static closure gate remain deliberately unmarked.
-- [~] `LogicalInstance`, `ServerScopeId`, typed `IpcEndpoint`, endpoint
+  v1/v2 instance schema remain unchanged. The final adapter split and both
+  repository-wide static closure gates pass.
+- [x] `LogicalInstance`, `ServerScopeId`, typed `IpcEndpoint`, endpoint
   selector, and legacy migration contract now live in
   `platform::contract::ipc`; `src/ipc_endpoint.rs` is compatibility-only.
   The contract's 11 focused tests retain main/dev separation, opaque identity,
   selector priority, legacy TCP parsing, and serialization evidence.
-- [~] Typed IPC transport errors (`UnsupportedEndpoint`, endpoint validation /
+- [x] Typed IPC transport errors (`UnsupportedEndpoint`, endpoint validation /
   collision, bounded connect / accept timeout, and I/O) now live in
   `platform::contract::ipc_transport`. TCP compatibility framing and all three
-  native adapter implementations consume that one error contract; the legacy
-  `ipc_transport` module remains a compatibility projection pending removal of
-  its platform-private implementation.
-- [~] IPC adapter implementations are now physically selected from
+  native adapter implementations consume that one error contract; the root
+  `ipc_transport` module is an OS-neutral compatibility projection.
+- [x] IPC adapter implementations are now physically selected from
   `platform::adapters/{windows,linux,macos}/ipc.rs`; macOS reuses the private
   Unix mechanism while keeping its own adapter identity. `selected.rs` is the
   only IPC target selector. Native endpoint bind/connect/accept and stream
   I/O now traverse `services::ipc → selected → adapter`; the former native
-  transport implementation remains platform-private deletion debt, not a
-  product execution path.
-- [~] Script Runtime HTTP TLS provider/root-store selection and
+  transport implementation copies are deleted.
+- [x] Script Runtime HTTP TLS provider/root-store selection and
   platform-specific TLS-error classification now traverse
   `services::script_http → selected → adapters`; the Rhai HTTP surface keeps
   its existing bounded timeout, proxy, response, and typed-error behavior.
-- [~] CLI server autostart now calls `platform::process`; Windows Job
+- [x] CLI server autostart now calls `platform::process`; Windows Job
   breakaway, executable discovery, and null-stdio child creation are adapter
   mechanics, while unsupported hosts preserve the former no-autostart retry
   behavior.
-- [~] Script worker sidecar executable-name conventions now resolve through
+- [x] Script worker sidecar executable-name conventions now resolve through
   `platform::paths`; client discovery no longer branches on `.exe` naming.
-- [~] Workspace persistence now obtains its default Windows/Unix and
+- [x] Workspace persistence now obtains its default Windows/Unix and
   instance-scoped path from `platform::paths`; the workspace domain no longer
   branches on LOCALAPPDATA, XDG, or server-scope conventions.
-- [x] Windows-hosted `cargo fmt`, `cargo clippy --lib -- -D warnings`, focused
-  process-facade and Script Runtime tests, plus `agenterm-cli --help` pass for
-  this partial slice. Full boundary scanning and cross-platform adapter
-  contract evidence remain required before completion.
+- [x] Windows-hosted `cargo fmt`, warnings-denied Clippy, focused facade/unit
+  tests, `agenterm-cli --help`, both static boundary gates, and the same-host
+  three-adapter contract test pass for the integrated revision-4 tree. Final
+  Quick/build/public-smoke receipts are recorded only after the closing serial
+  validation run.
 
 Windows slice-1 evidence (2026-07-30):
 
