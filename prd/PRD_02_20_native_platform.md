@@ -325,6 +325,11 @@ Revision-4 migration evidence (2026-07-31, partial):
   instance-registry, sidecar naming, and terminal font defaults retain their
   existing Windows, Linux, and macOS conventions without target selection in
   product callers. This is convention discovery, not a path permission policy.
+- [x] Control Center state-directory protection, exclusive state-file creation,
+  atomic replacement, existing-window focus, and direct native capture now
+  call `services::control_center → selected → adapters/{windows,linux,macos}`.
+  The root facade retains only the typed strategy projection; shell rendering
+  itself remains a separate incomplete extraction.
 
 - [~] `settings`, instance PID/start-identity checks, terminal default-shell
   selection, Control Center atomic-file/focus/capture routing, and passive

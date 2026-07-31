@@ -1,5 +1,6 @@
 //! OS-neutral Platform Facade services.
 
+pub(crate) mod control_center;
 pub(crate) mod ipc;
 pub(crate) mod paths;
 pub(crate) mod process;
