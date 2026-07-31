@@ -93,3 +93,51 @@ fn cli_control_contract_is_strict_and_does_not_autostart_a_server() {
         .expect("run invalid arguments");
     assert_eq!(invalid.status.code(), Some(2));
 }
+
+#[test]
+fn direct_control_center_selectors_resolve_or_fail_fast_without_opening_the_shell() {
+    let executable = env!("CARGO_BIN_EXE_agenterm-cc");
+    let registry = std::env::temp_dir().join(format!(
+        "agenterm-cc-selector-test-{}.json",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&registry);
+
+    let selected = Command::new(executable)
+        .args(["snapshot", "--instance", "dev", "--json"])
+        .env("AGENTERM_CC_REGISTRY_PATH", &registry)
+        .output()
+        .expect("resolve direct instance selector");
+    assert!(selected.status.success());
+    let document: serde_json::Value =
+        serde_json::from_slice(&selected.stdout).expect("selected snapshot JSON");
+    assert_ne!(
+        document["server_state"], "disconnected",
+        "an explicit instance must be resolved and queried"
+    );
+    assert_ne!(document["server_reason"], "no_server_context");
+    assert!(!registry.exists());
+
+    let started = std::time::Instant::now();
+    let conflict = Command::new(executable)
+        .args([
+            "snapshot",
+            "--instance",
+            "dev",
+            "--endpoint",
+            "tcp:127.0.0.1:9",
+            "--json",
+        ])
+        .env("AGENTERM_CC_REGISTRY_PATH", &registry)
+        .output()
+        .expect("reject conflicting selectors");
+    assert_eq!(conflict.status.code(), Some(2));
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(2),
+        "selector conflicts must fail without attempting IPC"
+    );
+    let diagnostic = String::from_utf8_lossy(&conflict.stderr);
+    assert!(diagnostic.contains("endpoint_selector_error"));
+    assert!(diagnostic.contains("ConflictingCliSelectors"));
+    assert!(!registry.exists());
+}
