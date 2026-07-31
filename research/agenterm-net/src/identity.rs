@@ -103,20 +103,20 @@ mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    fn test_path() -> PathBuf {
+    fn test_path(label: &str) -> PathBuf {
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
         std::env::temp_dir().join(format!(
-            "agenterm-net-identity-{}-{nonce:x}",
-            std::process::id()
+            "agenterm-net-identity-{label}-{}-{nonce:x}",
+            std::process::id(),
         ))
     }
 
     #[test]
     fn durable_identity_survives_reload() {
-        let path = test_path();
+        let path = test_path("durable");
         let first = load_or_create(&path, IdentityMode::Durable).unwrap();
         assert!(first.created);
         let second = load_or_create(&path, IdentityMode::Durable).unwrap();
@@ -127,7 +127,7 @@ mod tests {
 
     #[test]
     fn ephemeral_identity_leaves_no_key() {
-        let path = test_path();
+        let path = test_path("ephemeral");
         fs::create_dir_all(&path).unwrap();
         let first = load_or_create(&path, IdentityMode::Ephemeral).unwrap();
         let second = load_or_create(&path, IdentityMode::Ephemeral).unwrap();

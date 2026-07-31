@@ -12,9 +12,12 @@ publish = false
 [dependencies]
 cid = "0.11"
 libp2p = { version = "0.56", default-features = false, features = [
+    "gossipsub",
+    "kad",
     "macros",
     "noise",
     "ping",
+    "relay",
     "tcp",
     "tokio",
     "yamux",

@@ -8,6 +8,7 @@ use libp2p::{
 };
 
 mod identity;
+mod mesh;
 mod node;
 mod store;
 use multihash_codetable::{Code, MultihashDigest};
@@ -254,7 +255,8 @@ async fn run() -> Result<(), (String, &'static str, String)> {
         [command, flag] if command == "capabilities" && flag == "--json" => {
             let result = Capabilities {
                 stability: "experimental-n2-m1-foundation",
-                network_scope: "explicit private loopback control; no public bootstrap",
+                network_scope:
+                    "explicit private loopback control and memory fixture; no public bootstrap",
                 identity_persistence: true,
                 store_persistence: true,
                 capabilities: vec![
@@ -285,18 +287,18 @@ async fn run() -> Result<(), (String, &'static str, String)> {
                     },
                     Capability {
                         name: "private-mesh.dht",
-                        state: "unavailable",
-                        note: "not yet proven in a deterministic private mesh",
+                        state: "prototype",
+                        note: "explicit deterministic private-memory provide/find-provider proof",
                     },
                     Capability {
                         name: "private-mesh.pubsub",
-                        state: "unavailable",
-                        note: "not yet proven in a deterministic private mesh",
+                        state: "prototype",
+                        note: "explicit bounded signed-topic delivery proof",
                     },
                     Capability {
                         name: "private-mesh.relay",
-                        state: "unavailable",
-                        note: "not enabled; relay server remains false by default",
+                        state: "prototype",
+                        note: "explicit circuit-relay-v2 reservation/circuit proof; relay server remains false by default",
                     },
                     Capability {
                         name: "remote-fleet.read-only-attach",
@@ -320,6 +322,13 @@ async fn run() -> Result<(), (String, &'static str, String)> {
         [command, flag] if command == "self-test" && flag == "--json" => {
             let result = run_self_test(DEFAULT_DEADLINE_MS)
                 .map_err(|message| (request_id.clone(), "self_test_failed", message))?;
+            print_envelope(&request_id, DEFAULT_DEADLINE_MS, result);
+            Ok(())
+        }
+        [command, flag] if command == "mesh-self-test" && flag == "--json" => {
+            let result = mesh::prove_private_mesh(Duration::from_millis(DEFAULT_DEADLINE_MS))
+                .await
+                .map_err(|message| (request_id.clone(), "private_mesh_failed", message))?;
             print_envelope(&request_id, DEFAULT_DEADLINE_MS, result);
             Ok(())
         }
@@ -469,7 +478,7 @@ async fn run() -> Result<(), (String, &'static str, String)> {
         _ => Err((
             request_id,
             "usage",
-            "usage: agenterm-net capabilities --json | peer-id | self-test --json | node start|status|stop ... --json | store put|get|pin|unpin|gc|status ... --json".to_string(),
+            "usage: agenterm-net capabilities --json | peer-id | self-test --json | mesh-self-test --json | node start|status|stop ... --json | store put|get|pin|unpin|gc|status ... --json".to_string(),
         )),
     }
 }
@@ -766,7 +775,7 @@ fn run_self_test(deadline_ms: u64) -> Result<SelfTestResult, String> {
         exclusions: vec![
             "not linked into AgenTerm GUI or server",
             "persistent identity and store remain isolated experimental node commands",
-            "no proven private-mesh DHT, relay, pubsub, reconnect, or cross-platform load evidence",
+            "no cross-process TCP DHT, relay, pubsub, reconnect, or cross-platform load evidence",
             "no public listener, bootstrap, NAT traversal, or gateway",
             "no Remote Fleet attach, terminal input, command, PTY, or server authority",
             "not a stable or release-packaged capability",

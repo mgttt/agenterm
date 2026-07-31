@@ -67,6 +67,48 @@ fn public_self_test_uses_distinct_processes_and_verifies_blocks() {
 }
 
 #[test]
+fn private_mesh_proves_dht_pubsub_and_relay_without_public_authority() {
+    let (capability_status, capabilities) = json_output(&["capabilities", "--json"]);
+    assert!(capability_status.success(), "{capabilities}");
+    let advertised = capabilities["result"]["capabilities"]
+        .as_array()
+        .expect("capability list");
+    for name in [
+        "private-mesh.dht",
+        "private-mesh.pubsub",
+        "private-mesh.relay",
+    ] {
+        let capability = advertised
+            .iter()
+            .find(|capability| capability["name"] == name)
+            .unwrap_or_else(|| panic!("missing {name}"));
+        assert_eq!(capability["state"], "prototype");
+    }
+
+    let started = Instant::now();
+    let (status, value) = json_output(&["mesh-self-test", "--json"]);
+    assert!(status.success(), "{value}");
+    assert!(started.elapsed() < Duration::from_secs(5));
+    let result = &value["result"];
+    assert_eq!(result["status"], "proven-in-deterministic-fixture");
+    assert_eq!(result["public_bootstrap"], false);
+    assert_eq!(result["nat_traversal"], false);
+    assert_eq!(result["relay_serving_default"], false);
+    assert_eq!(result["remote_fleet_control"], false);
+    assert_eq!(result["dht"]["provider_record_published"], true);
+    assert_eq!(result["dht"]["provider_found_via_hub"], true);
+    assert_eq!(result["dht"]["public_bootstrap_attempts"], 0);
+    assert_eq!(result["pubsub"]["signed"], true);
+    assert_eq!(result["pubsub"]["payload_verified"], true);
+    assert_eq!(result["relay"]["reservation_accepted"], true);
+    assert_eq!(result["relay"]["circuit_accepted"], true);
+    assert_eq!(result["relay"]["source_connected_to_destination"], true);
+    assert_eq!(result["relay"]["destination_connected_to_source"], true);
+    assert_eq!(result["relay"]["relay_serving_is_fixture_only"], true);
+    assert_eq!(value["receipt"]["schema"], "agenterm-net/receipt/v1");
+}
+
+#[test]
 fn peer_loss_is_typed_and_bounded() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("reserve loopback port");
     let port = listener.local_addr().unwrap().port();
