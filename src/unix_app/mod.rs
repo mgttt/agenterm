@@ -2258,8 +2258,6 @@ impl UnixApp {
                     .is_some_and(|bounds| bounds.contains(x, y))
                 {
                     Some(SidebarTabAction::AddChild)
-                } else if geometry.actions.primary.contains(x, y) {
-                    Some(SidebarTabAction::Edit)
                 } else if geometry.actions.secondary.contains(x, y) {
                     Some(SidebarTabAction::Close)
                 } else {
@@ -2302,7 +2300,8 @@ impl UnixApp {
         let tree_height = self.layout().sidebar_tree.height().max(0) as u32;
         let row_index = sidebar_row_at_y(y.max(0) as u32, tree_height)?;
         let source_index = self.sidebar_offset() + row_index;
-        let row = self.visible_tree_rows().get(source_index)?;
+        let visible_rows = self.visible_tree_rows();
+        let row = visible_rows.get(source_index)?;
         let geometry = sidebar_tree_row_geometry(
             self.layout().sidebar_tree,
             row_index,
