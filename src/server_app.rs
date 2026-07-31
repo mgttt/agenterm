@@ -1,7 +1,7 @@
 use std::{
     collections::HashSet,
     env,
-    sync::{Arc, mpsc::Receiver},
+    sync::Arc,
     thread,
     time::{Duration, SystemTime},
 };
@@ -22,7 +22,7 @@ use crate::{
         register_typed_instance,
     },
     ipc_endpoint::EndpointSelectorArgs,
-    ipc_transport::{IpcEnvelope, start_ipc_server},
+    ipc_transport::{IpcServer, start_ipc_server},
     operations::{
         UI_TABS_HIDE, UI_TABS_SET_WIDTH, UI_TABS_SHOW, UI_TABS_TOGGLE, validate_operation_args,
     },
@@ -218,7 +218,7 @@ struct ServerState {
     ui_client_commands: UiClientCommandQueue,
     shutdown_after_ui_result: Option<String>,
     wake_signal: Arc<WakeSignal>,
-    ipc_receiver: Receiver<IpcEnvelope>,
+    ipc_server: IpcServer,
     shutdown_requested: bool,
     _instance_registration: InstanceRegistration,
 }
@@ -226,7 +226,7 @@ struct ServerState {
 impl ServerState {
     fn new() -> Result<Self> {
         let wake_signal = Arc::new(WakeSignal::new());
-        let ipc_receiver = start_ipc_server(0, Arc::clone(&wake_signal))?;
+        let ipc_server = start_ipc_server(0, Arc::clone(&wake_signal))?;
         let restored = load_workspace().unwrap_or_else(default_workspace);
         let session_name = if restored.session_name.is_empty() {
             "agenterm".to_owned()
@@ -264,7 +264,7 @@ impl ServerState {
             ui_client_commands: UiClientCommandQueue::new(command_identity),
             shutdown_after_ui_result: None,
             wake_signal,
-            ipc_receiver,
+            ipc_server,
             shutdown_requested: false,
             _instance_registration: instance_registration,
         };
@@ -1393,7 +1393,7 @@ impl ServerState {
         self.wake_signal.begin_drain();
         self.poll_terminals();
         let envelopes = self
-            .ipc_receiver
+            .ipc_server
             .try_iter()
             .take(IPC_REQUESTS_PER_TICK)
             .collect::<Vec<_>>();

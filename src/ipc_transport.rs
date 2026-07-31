@@ -1483,10 +1483,10 @@ mod server {
     use std::{
         sync::{
             Arc,
-            atomic::{AtomicUsize, Ordering},
-            mpsc::{self, Receiver, Sender, SyncSender},
+            atomic::{AtomicBool, AtomicUsize, Ordering},
+            mpsc::{self, Sender, SyncSender},
         },
-        thread,
+        thread::{self, JoinHandle},
         time::Duration,
     };
 
@@ -1511,19 +1511,57 @@ mod server {
         pub(crate) respond_to: Sender<IpcResponse>,
     }
 
+    pub(crate) struct IpcServer {
+        receiver: mpsc::Receiver<IpcEnvelope>,
+        stop: Arc<AtomicBool>,
+        listener_thread: Option<JoinHandle<()>>,
+    }
+
+    impl IpcServer {
+        pub(crate) fn try_iter(&self) -> mpsc::TryIter<'_, IpcEnvelope> {
+            self.receiver.try_iter()
+        }
+
+        #[cfg(unix)]
+        pub(crate) fn try_recv(&self) -> Result<IpcEnvelope, mpsc::TryRecvError> {
+            self.receiver.try_recv()
+        }
+    }
+
+    impl Drop for IpcServer {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::Release);
+            if let Some(listener_thread) = self.listener_thread.take() {
+                // Every listener accept is bounded to 250 ms, so joining here
+                // gives its owned Unix socket and lease a deterministic,
+                // identity-checked Drop before the server process exits.
+                let _ = listener_thread.join();
+            }
+        }
+    }
+
     pub(crate) fn start_ipc_server(
         window: isize,
         wake_signal: Arc<WakeSignal>,
-    ) -> Result<Receiver<IpcEnvelope>> {
+    ) -> Result<IpcServer> {
         let endpoint = client::ipc_endpoint()?;
-        let mut listener = super::IpcListener::bind(&endpoint)
+        let listener = super::IpcListener::bind(&endpoint)
             .map_err(anyhow::Error::new)
-            .context("another AgenTerm server is already using the selected IPC endpoint")?;
+            .context("failed to bind the selected AgenTerm IPC endpoint")?;
+        Ok(spawn_ipc_server(listener, window, wake_signal))
+    }
+
+    pub(super) fn spawn_ipc_server(
+        mut listener: super::IpcListener,
+        wake_window: isize,
+        wake_signal: Arc<WakeSignal>,
+    ) -> IpcServer {
         let (sender, receiver) = mpsc::sync_channel(IPC_MAX_PENDING_REQUESTS);
-        let wake_window = window;
-        thread::spawn(move || {
+        let stop = Arc::new(AtomicBool::new(false));
+        let listener_stop = Arc::clone(&stop);
+        let listener_thread = thread::spawn(move || {
             let active_connections = Arc::new(AtomicUsize::new(0));
-            loop {
+            while !listener_stop.load(Ordering::Acquire) {
                 let connection = match listener.accept(Duration::from_millis(250)) {
                     Ok(connection) => connection,
                     Err(error) if error.code == super::IpcTransportErrorCode::AcceptTimeout => {
@@ -1548,7 +1586,11 @@ mod server {
                 });
             }
         });
-        Ok(receiver)
+        IpcServer {
+            receiver,
+            stop,
+            listener_thread: Some(listener_thread),
+        }
     }
 
     struct IpcConnectionPermit(Arc<AtomicUsize>);
@@ -1607,7 +1649,9 @@ mod server {
     }
 }
 
-pub(crate) use server::{IpcEnvelope, start_ipc_server};
+#[cfg(unix)]
+pub(crate) use server::IpcEnvelope;
+pub(crate) use server::{IpcServer, start_ipc_server};
 
 #[cfg(test)]
 mod tests {
@@ -1692,6 +1736,30 @@ mod tests {
             .expect("accept without a client must time out");
         assert_eq!(error.code, IpcTransportErrorCode::AcceptTimeout);
         assert_eq!(error.io_kind(), std::io::ErrorKind::TimedOut);
+    }
+
+    #[test]
+    fn ipc_server_drop_joins_its_bounded_listener() {
+        use std::sync::Arc;
+
+        let endpoint = IpcEndpoint::Tcp {
+            host: "127.0.0.1".to_owned(),
+            port: reserve_tcp_port(),
+        };
+        let listener = IpcListener::bind(&endpoint).unwrap();
+        let server = super::server::spawn_ipc_server(
+            listener,
+            0,
+            Arc::new(crate::wake_signal::WakeSignal::new()),
+        );
+
+        let started = std::time::Instant::now();
+        drop(server);
+
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "listener shutdown must remain bounded"
+        );
     }
 
     #[test]
@@ -1783,6 +1851,38 @@ mod tests {
         let mut client = IpcStream::connect(&endpoint, Duration::from_secs(2)).unwrap();
         client.write_all(&[7]).unwrap();
         server.join().unwrap();
+        assert!(!path.with_file_name("server.sock.lock").exists());
+        std::fs::remove_dir(directory).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_ipc_server_drop_joins_listener_and_removes_owned_endpoint() {
+        use std::os::unix::fs::PermissionsExt as _;
+        use std::sync::Arc;
+
+        let directory = unique_temp_directory("server-drop");
+        std::fs::create_dir(&directory).unwrap();
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let path = directory.join("server.sock");
+        let endpoint = IpcEndpoint::UnixSocket(path.to_string_lossy().into_owned());
+        let listener = IpcListener::bind(&endpoint).unwrap();
+        let server = super::server::spawn_ipc_server(
+            listener,
+            0,
+            Arc::new(crate::wake_signal::WakeSignal::new()),
+        );
+        assert!(path.exists());
+        assert!(path.with_file_name("server.sock.lock").exists());
+
+        let started = std::time::Instant::now();
+        drop(server);
+
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "listener shutdown must remain bounded"
+        );
+        assert!(!path.exists());
         assert!(!path.with_file_name("server.sock.lock").exists());
         std::fs::remove_dir(directory).unwrap();
     }

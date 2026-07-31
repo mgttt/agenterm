@@ -318,7 +318,14 @@ let unix_bootstrap =
     std::env::has("AGENTERM_BOOTSTRAP_PLATFORM")
         && std::env::get("AGENTERM_BOOTSTRAP_PLATFORM") == "unix";
 context.native_runtime_directory = if unix_bootstrap {
-    "/tmp/agt-" + std::process::id() + "-" +
+    let temporary_root =
+        if std::env::has("AGENTERM_HOST_OS")
+                && std::env::get("AGENTERM_HOST_OS") == "macos" {
+            "/private/tmp"
+        } else {
+            "/tmp"
+        };
+    temporary_root + "/agt-" + std::process::id() + "-" +
         std::time::SystemTime::now().unix_millis
 } else {
     std::path::join(context.run_directory, "runtime").display
