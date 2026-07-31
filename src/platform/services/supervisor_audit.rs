@@ -6,7 +6,9 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
-use crate::platform::{contract::supervisor_audit::SupervisorAuditError, selected::supervisor_audit as adapter};
+use crate::platform::{
+    contract::supervisor_audit::SupervisorAuditError, selected::supervisor_audit as adapter,
+};
 
 pub(crate) struct ConcurrencyPermit {
     global: adapter::GlobalConcurrencyPermit,
@@ -55,7 +57,9 @@ impl ProcessTreeGuard {
     }
 
     pub(crate) fn terminate(&mut self, exit_code: u32) -> Result<(), SupervisorAuditError> {
-        self.0.terminate(exit_code).map_err(adapter::process_tree_error)
+        self.0
+            .terminate(exit_code)
+            .map_err(adapter::process_tree_error)
     }
 }
 

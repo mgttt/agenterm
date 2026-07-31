@@ -1728,17 +1728,14 @@ fn command_may_start_server(command: &str) -> bool {
     )
 }
 
-#[cfg(not(windows))]
-fn run_script_command_hosted(_arguments: &[String]) -> i32 {
-    eprintln!(
-        "agenterm-cli script hosting is not yet available on this platform; \
-         invoke agenterm-script directly"
-    );
-    2
-}
-
-#[cfg(windows)]
 fn run_script_command_hosted(arguments: &[String]) -> i32 {
+    if !crate::platform::services::script_host::hosted_worker_available() {
+        eprintln!(
+            "agenterm-cli script hosting is not yet available on this platform; \
+             invoke agenterm-script directly"
+        );
+        return 2;
+    }
     if !arguments
         .get(1)
         .is_some_and(|value| value == "repl" || value == "check-many")

@@ -32,6 +32,10 @@ pub(crate) mod script_window;
 pub(crate) mod script_stream;
 
 #[cfg(windows)]
+#[path = "adapters/windows/script_host.rs"]
+pub(crate) mod script_host;
+
+#[cfg(windows)]
 #[path = "adapters/windows/supervisor_audit.rs"]
 pub(crate) mod supervisor_audit;
 
@@ -64,6 +68,10 @@ pub(crate) mod script_window;
 pub(crate) mod script_stream;
 
 #[cfg(target_os = "linux")]
+#[path = "adapters/linux/script_host.rs"]
+pub(crate) mod script_host;
+
+#[cfg(target_os = "linux")]
 #[path = "adapters/linux/supervisor_audit.rs"]
 pub(crate) mod supervisor_audit;
 
@@ -94,6 +102,10 @@ pub(crate) mod script_window;
 #[cfg(target_os = "macos")]
 #[path = "adapters/macos/script_stream.rs"]
 pub(crate) mod script_stream;
+
+#[cfg(target_os = "macos")]
+#[path = "adapters/macos/script_host.rs"]
+pub(crate) mod script_host;
 
 #[cfg(target_os = "macos")]
 #[path = "adapters/macos/supervisor_audit.rs"]
