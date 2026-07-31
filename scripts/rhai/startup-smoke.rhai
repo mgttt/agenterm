@@ -212,12 +212,10 @@ try {
         ],
         false
     );
-    let port_parts = context.address.split(":");
-    let port = port_parts[port_parts.len - 1];
     let live_window = gui.platform_facts;
     require(
         live_window.top_level_window_title ==
-            "AgenTerm-" + version + ":" + port,
+            "AgenTerm-" + version + ":main",
         "startup_window_title:" + live_window.top_level_window_title
     );
 
