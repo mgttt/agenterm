@@ -13,7 +13,7 @@ spike, not floating recommendations:
 | Web engine | WebView2 / WKWebView / WebKitGTK 4.1 | WebView2 / WKWebView / WebKitGTK 4.1 |
 | Host API surface | explicit WRY builder callbacks only | Tauri app/runtime/config/command surface in addition to WRY |
 | Fallback architecture | small launcher does not link WRY; isolated host may fail | would need the same external launcher/process boundary to survive a pre-main Linux loader failure |
-| Current implementation evidence | builds from this workspace and has local-origin policy tests | dependency/toolchain reference only; no Tauri binary result is claimed yet |
+| Current implementation evidence | builds from this workspace and has local-origin policy tests | isolated nested workspace builds, tests and produces a system-WebView reference binary with zero commands/plugins/capabilities |
 
 ## Dependency and licence method
 
@@ -37,12 +37,19 @@ direct dependencies use these published licences:
 Do not infer the transitive result from those four rows. The lockfile graph and
 platform-native packages are the evidence owners.
 
-For a fair Tauri reference, create a second isolated package pinned to the
-versions above, point `frontendDist` at the exact same `assets/`, define no
-commands/plugins/updater/shell/process APIs, set the Windows installer
-`webviewInstallMode` to `skip`, and generate its own lockfile. Record `cargo
-tree` and metadata with the same commands. The reference must not reuse this
-workspace lock because Tauri changes the graph.
+The Tauri reference is the nested `tauri-reference/` workspace pinned to the
+versions above. It points `frontendDist` at the exact same `assets/`, defines no
+commands/plugins/updater/shell/process APIs or capabilities, disables bundling,
+and has its own lockfile. It does not reuse the direct-WRY workspace lock.
+
+The reviewed machine receipt is `windows-comparison.json`. On the 2026-07-31
+Windows run, both sealed hosts reported WebView2 `150.0.4078.105`, loaded the
+same asset version under `--no-activate`, and left no host process behind. The
+direct executable was 520,704 bytes (397,342-byte comparison ZIP); the Tauri
+reference was 8,763,392 bytes (1,827,976-byte comparison ZIP). The native CC
+baseline remained unchanged. The outer 604-second deadline interrupted the
+final metadata/receipt phase, so clean/warm build timings are unavailable and
+must not be reconstructed from file timestamps.
 
 ## Size and performance method
 
@@ -66,9 +73,11 @@ silently promoted into stronger claims.
 
 ## Decision status
 
-`defer`. Direct-WRY provides the narrower dependency and API surface for the
-foundation, while Tauri offers packaging/configuration conventions that may be
-valuable for a larger independent application. Neither choice has the required
+`defer`. Direct-WRY provides the narrower dependency and API surface and was
+substantially smaller in this Windows artifact comparison. Tauri offers
+packaging/configuration conventions that may be valuable for a larger
+independent application, but its shutdown emitted a WebView2 window-class
+unregister warning despite a zero exit code. Neither choice has the required
 three-platform evidence, and the stable renderer remains native.
 
 Primary references:

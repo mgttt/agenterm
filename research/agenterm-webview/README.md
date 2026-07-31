@@ -5,16 +5,18 @@ technical spike. It is not part of the root Cargo package or release build. It
 does not replace native `agenterm-cc`, and neither `agenterm.exe` nor
 `agenterm-server` acquires a WebView dependency.
 
-The first vertical slice is a direct-WRY host for a packaged, read-only Cockpit
-placeholder. Its stable outcome is still `active_renderer=native`; the host is
-experimental until the three native platforms have independent runtime,
-rendering, no-activate, crash/reload, DPI, PNG, size and resource evidence.
+The first vertical slice compares direct-WRY with a minimal Tauri v2 reference
+host over the same packaged, read-only Cockpit placeholder. Its stable outcome
+is still `active_renderer=native`; both hosts are experimental until the three
+native platforms have independent runtime, rendering, no-activate,
+crash/reload, DPI, PNG, size and resource evidence.
 
 ## Architecture and failure boundary
 
 ```text
 agenterm-cc-web                 fallback-safe launcher; no WRY linkage
-  -> agenterm-cc-web-direct-wry isolated system-WebView process
+  -> agenterm-cc-web-direct-wry isolated direct-WRY process, or
+  -> agenterm-cc-web-tauri      isolated Tauri v2 reference process
        -> WebView2 | WKWebView | WebKitGTK 4.1
        -> embedded HTML/CSS/JS only
 ```
@@ -95,6 +97,23 @@ follow-up evidence is:
   fallback, with no substitute PNG;
 - locked third-party licence/SBOM review for each shipped platform artifact;
 - a separate bridge-v1 implementation and adversarial message tests.
+
+The Tauri reference is a nested workspace at `tauri-reference/`. It has no
+commands, plugins or capabilities and leaves clipboard access disabled by
+default. Its frontend points at the same static `assets/`; it does not require
+Node/npm and does not enable bundling or runtime download. Build and validate it
+separately with:
+
+```powershell
+cargo test --manifest-path .\tauri-reference\Cargo.toml
+cargo clippy --manifest-path .\tauri-reference\Cargo.toml --all-targets -- -D warnings
+```
+
+The reviewed Windows comparison receipt is
+`evidence/windows-comparison.json`. Its 2026-07-31 run reached an outer deadline
+after sealing both artifacts but before writing in-memory build timings, so the
+receipt preserves hashes, sizes and no-activate smoke facts while marking those
+timings unavailable.
 
 References: [WRY repository and platform requirements](https://github.com/tauri-apps/wry),
 [Tauri v2 prerequisites](https://v2.tauri.app/start/prerequisites/),

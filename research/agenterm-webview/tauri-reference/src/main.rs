@@ -5,8 +5,8 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
+use tauri::WebviewUrl;
 use tauri::webview::{NewWindowResponse, PageLoadEvent, WebviewWindowBuilder};
-use tauri::{Manager, WebviewUrl};
 
 const TAURI_LOCAL_URL: &str = "tauri://localhost/index.html";
 
@@ -32,15 +32,19 @@ struct HostReceipt {
 
 fn main() -> ExitCode {
     let arguments: Vec<String> = env::args().skip(1).collect();
-    if arguments.iter().any(|argument| argument == "--help" || argument == "-h") {
+    if arguments
+        .iter()
+        .any(|argument| argument == "--help" || argument == "-h")
+    {
         println!(
             "agenterm-cc-web-tauri (experimental reference)\n\nUSAGE:\n  agenterm-cc-web-tauri --probe\n  agenterm-cc-web-tauri [--smoke] [--no-activate]"
         );
         return ExitCode::SUCCESS;
     }
-    if arguments.iter().any(|argument| {
-        !matches!(argument.as_str(), "--probe" | "--smoke" | "--no-activate")
-    }) {
+    if arguments
+        .iter()
+        .any(|argument| !matches!(argument.as_str(), "--probe" | "--smoke" | "--no-activate"))
+    {
         eprintln!("unsupported argument; use --help");
         return ExitCode::from(64);
     }
@@ -89,7 +93,6 @@ fn run_host(runtime_version: String, no_activate: bool, smoke: bool) -> ExitCode
                 .focused(!no_activate)
                 .incognito(true)
                 .devtools(false)
-                .enable_clipboard_access(false)
                 .zoom_hotkeys_enabled(false)
                 .on_navigation(|url| is_allowed_tauri_navigation(url.as_str()))
                 .on_new_window(|_, _| NewWindowResponse::Deny)

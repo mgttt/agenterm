@@ -1,0 +1,108 @@
+{
+  "schema": "agenterm.webview-comparison/1",
+  "status": "incomplete",
+  "reason": "timing_unavailable_due_outer_deadline",
+  "observed_at_utc": "2026-07-31T13:51:21Z",
+  "run_id": "20260731-133910-530",
+  "platform": "windows-x86_64",
+  "source_commit": "b4bfd080ec4288602513c4c528c31286016c3c90",
+  "source_tree_dirty": true,
+  "active_production_renderer": "native",
+  "comparison_controls": {
+    "packaged_assets": "cockpit-placeholder/1",
+    "system_runtime_only": true,
+    "runtime_download": false,
+    "bridge": "absent",
+    "no_activate": true,
+    "release_profile": true,
+    "isolated_target_directories": true
+  },
+  "runtime": {
+    "name": "webview2",
+    "version": "150.0.4078.105",
+    "missing_runtime_result": null,
+    "missing_runtime_reason": "not_exercised"
+  },
+  "native_control_center": {
+    "role": "unchanged-production-baseline",
+    "executable_bytes": 614912,
+    "executable_sha256": "a6cd7c8077a7f6005eeaaa97b16d8a7a2d7645418a2fb9a8996359732d8807ea",
+    "archive_bytes": 339996,
+    "archive_sha256": "3b68ae8775a2cb09e2cae77aa438a4659c87d11e385bd07d1e802d798e185632",
+    "startup_ms": null,
+    "rss_bytes": null,
+    "measurement_reason": "artifact_only_existing_dist_binary"
+  },
+  "direct_wry": {
+    "implementation": "direct-wry",
+    "crate_version": "wry-0.56.0",
+    "lock_sha256": "dd368b446100ac0b31d2887b4943916b2dd88874203ae0e396d0d8b00e02f52e",
+    "executable_bytes": 520704,
+    "executable_sha256": "323a967d292d6c3c9e8e6e400e577a95964ee42dfe00410a5b8d266c5c731579",
+    "fallback_launcher_bytes": 284672,
+    "fallback_launcher_sha256": "3ac23a3e86c37a34258b8c822720e2cefbf747f5f57b4a2443562087014055f5",
+    "archive_bytes": 397342,
+    "archive_sha256": "e32614564ddad1feed4d68fa2b8add89e3a596ad3069c42d54e39eff3d3d53a3",
+    "probe": {
+      "status": "available",
+      "local_url": "agenterm://localhost/index.html",
+      "bridge": "absent",
+      "no_activate": true
+    },
+    "salvaged_smoke": {
+      "status": "loaded",
+      "load_complete_ms": 1613,
+      "no_activate": true,
+      "residual_host_processes": 0
+    }
+  },
+  "tauri_v2": {
+    "implementation": "tauri-v2-reference",
+    "crate_version": "tauri-2.11.5",
+    "lock_sha256": "120104c58081932edd2184d48a4ca367a7880c3450c87adc18dfc4424c62b537",
+    "executable_bytes": 8763392,
+    "executable_sha256": "4c7f65a5a5d49dfc4b7e5a1cb6c2d20b60784c23425bb1521872729c602a3caf",
+    "fallback_launcher_bytes": 284672,
+    "fallback_launcher_sha256": "3ac23a3e86c37a34258b8c822720e2cefbf747f5f57b4a2443562087014055f5",
+    "archive_bytes": 1827976,
+    "archive_sha256": "394224a2d13e717b57564a77be4619701c686c4ca7ddb9bf16cde3464f385818",
+    "probe": {
+      "status": "available",
+      "local_url": "tauri://localhost/index.html",
+      "bridge": "absent",
+      "registered_commands": 0,
+      "registered_plugins": 0,
+      "capabilities": 0,
+      "runtime_download": false,
+      "no_activate": true
+    },
+    "salvaged_smoke": {
+      "status": "loaded",
+      "load_complete_ms": 1308,
+      "no_activate": true,
+      "residual_host_processes": 0,
+      "stderr_warning": "WebView2 failed to unregister Chrome_WidgetWin_0 during shutdown; exit code remained zero"
+    }
+  },
+  "unavailable_measurements": {
+    "clean_release_build_ms": "timing_unavailable_due_outer_deadline",
+    "warm_release_build_ms": "timing_unavailable_due_outer_deadline",
+    "controlled_cold_start_ms": "not_measured",
+    "first_paint_ms": "not_instrumented",
+    "full_webview_process_tree_rss_bytes": "not_instrumented",
+    "installer_bytes": "bundle_disabled",
+    "dpi_png": "not_captured",
+    "crash_reload": "not_exercised",
+    "foreground_preservation": "not_instrumented",
+    "dependency_license_inventory": "final_metadata_phase_interrupted"
+  },
+  "validation": {
+    "primary_workspace_unit_tests": 5,
+    "tauri_workspace_unit_tests": 1,
+    "primary_workspace_clippy_deny_warnings": "passed",
+    "tauri_workspace_clippy_deny_warnings": "passed",
+    "no_residual_host_processes": true
+  },
+  "decision": "defer",
+  "decision_reason": "Windows reference evidence is experimental and incomplete; three-platform stability, isolation, runtime-fallback, rendering, resource, crash/reload and licence evidence remain open."
+}

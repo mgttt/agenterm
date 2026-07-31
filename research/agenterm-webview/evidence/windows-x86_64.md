@@ -35,3 +35,15 @@ The ignored machine-readable source receipt is reproduced by:
 ```powershell
 .\tools\measure.ps1
 ```
+
+## Tauri comparison follow-up
+
+The reviewed `windows-comparison.json` records the later direct-WRY/Tauri v2
+artifact comparison. Both release hosts loaded the same packaged placeholder
+with WebView2 `150.0.4078.105` under `--no-activate`; direct-WRY was 520,704
+bytes and the minimal Tauri reference was 8,763,392 bytes. The comparison run
+hit its 604-second outer deadline after sealing binaries and ZIPs but before the
+script wrote its in-memory timing samples. Those build timings are therefore
+explicitly unavailable. The salvaged Tauri smoke exited zero but emitted a
+WebView2 window-class unregister warning, so crash/reload and shutdown
+stability remain open.

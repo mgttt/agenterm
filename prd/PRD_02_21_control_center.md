@@ -218,15 +218,24 @@ future promotion gates.
 
 ## v0.1.12 system-WebView host spike
 
-- [ ] ship an isolated `agenterm-cc-web` experiment with a local packaged,
+- [~] an isolated `research/agenterm-webview` experiment now has local packaged,
   read-only Cockpit page. It is a reusable host experiment for future
   independent applications (optional Control Center views, PluginHub,
   InfoHub, Workflow) and does not replace the existing native `agenterm-cc`.
-  `agenterm.exe` and `agenterm-server` never acquire a WebView dependency.
-- [ ] compare a minimal Tauri v2 host with a direct-WRY host before selecting
+  `agenterm.exe` and `agenterm-server` never acquire a WebView dependency. The
+  direct-WRY host and a separately locked minimal Tauri v2 reference load only
+  packaged read-only assets, keep the bridge absent, and leave the stable
+  renderer native.
+- [~] compare a minimal Tauri v2 host with a direct-WRY host before selecting
   a production implementation. The comparison records exact dependency and
   licence inventory, Rust/JS toolchain impact, binary/archive size, required
-  system runtime, cold/warm startup, first paint and RSS.
+  system runtime, cold/warm startup, first paint and RSS. The first Windows
+  receipt proves system WebView2 availability, no-activate page-load smoke,
+  no residual host process, and a substantial sealed size difference
+  (direct-WRY 520,704 bytes versus Tauri 8,763,392 bytes); its 604-second
+  outer measurement deadline made build timing unavailable, and license,
+  first-paint/RSS and three-platform evidence remain open. The decision is
+  therefore `defer`, not adoption.
 - [ ] Windows tests distinguish installed WebView2, missing runtime and
   fallback; they do not silently bundle a fixed browser runtime. macOS proves
   WKWebView local-assets, Retina capture, reload/crash fallback; Linux reports

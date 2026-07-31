@@ -15,6 +15,7 @@
   },
   "bundle": {
     "active": false,
-    "targets": []
+    "targets": [],
+    "icon": ["../../../assets/agenterm-icon.png"]
   }
 }
