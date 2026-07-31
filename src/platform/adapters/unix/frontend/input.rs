@@ -1,3 +1,5 @@
+//! Unix frontend native input translation.
+
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{Key, ModifiersState, NamedKey, PhysicalKey};
 

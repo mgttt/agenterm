@@ -1,4 +1,4 @@
-/// Bounded Unicode clipboard write through the active platform adapter.
+/// Bounded Unicode clipboard write through the selected native adapter.
 pub(super) fn set_clipboard_text(text: &str) -> Result<(), String> {
     crate::platform::services::ui_clipboard::set_text(text).map_err(|error| error.message())
 }

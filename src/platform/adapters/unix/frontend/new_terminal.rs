@@ -1,4 +1,4 @@
-//! New-terminal modal state, validation, and ui-action handlers (Win parity).
+//! Unix new-terminal modal state, validation, and ui-action handlers.
 
 use crate::working_context::parse_proxy_url;
 

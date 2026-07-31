@@ -1,3 +1,5 @@
+//! Unix frontend layout projection.
+
 use crate::{
     settings::AppConfig,
     ui_geometry::{

@@ -1,4 +1,4 @@
-//! Window semantic state and `ui-action` window control for the Unix embedded GUI.
+//! Window semantic state and `ui-action` control for the Unix frontend adapter.
 //!
 //! Actual winit window calls live behind [`UnixAppWindowHandle`]; `mod.rs` wires a
 //! [`WinitWindowHandle`] adapter and calls [`apply_ui_action`] from the `ui-action` IPC path.

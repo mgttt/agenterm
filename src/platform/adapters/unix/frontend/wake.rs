@@ -13,7 +13,7 @@ fn unix_wake_proxy() -> &'static Mutex<Option<EventLoopProxy<UnixWake>>> {
     UNIX_WAKE_PROXY.get_or_init(|| Mutex::new(None))
 }
 
-/// Registers the EventLoopProxy unix_app uses to wake its winit event loop.
+/// Registers the EventLoopProxy used to wake the Unix frontend event loop.
 pub fn install_unix_wake(proxy: EventLoopProxy<UnixWake>) {
     *unix_wake_proxy()
         .lock()

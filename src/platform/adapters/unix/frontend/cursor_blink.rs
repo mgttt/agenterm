@@ -1,3 +1,5 @@
+//! Unix frontend cursor blink state.
+
 use std::time::{Duration, Instant};
 
 pub(super) const CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(600);

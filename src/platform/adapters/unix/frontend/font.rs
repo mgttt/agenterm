@@ -1,4 +1,4 @@
-//! Minimal 8×8 monospace bitmap for ASCII 32–126 (inclusive).
+//! Adapter-owned 8×8 monospace bitmap for ASCII 32–126 (inclusive).
 
 use std::{
     collections::{HashMap, VecDeque},

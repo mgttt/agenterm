@@ -67,12 +67,6 @@ mod workspace;
 
 mod pty;
 
-#[cfg(not(windows))]
-mod gui_wake;
-
-#[cfg(unix)]
-mod unix_app;
-
 /// Native OS adaptation boundary (`prd/PRD_02_20_native_platform.md`).
 ///
 /// Shared contracts are primary-owned. OS adapters live under

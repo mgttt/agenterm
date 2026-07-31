@@ -1,3 +1,5 @@
+//! Unix frontend screenshot compatibility projection.
+
 use std::path::Path;
 
 use crate::platform::contract::ui_screenshot::{XrgbClip, XrgbFrame};

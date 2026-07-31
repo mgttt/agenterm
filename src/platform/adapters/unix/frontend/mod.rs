@@ -6,9 +6,11 @@ mod layout;
 mod new_terminal;
 mod render;
 mod screenshot;
+mod wake;
 mod window_state;
 
 pub(crate) use screenshot::write_xrgb_png;
+pub(crate) use wake::request_gui_wake;
 
 use std::{
     collections::HashSet,
@@ -35,7 +37,6 @@ use crate::{
     commands::{option_value, screenshot_output_path},
     control_dispatch::{ControlHost, dispatch_shared_command, resolve_target_position},
     event_journal::{EventJournal, EventKind},
-    gui_wake::{UnixWake, install_unix_wake},
     instances::{mark_intentional_shutdown, register_instance},
     ipc_endpoint::EndpointSelectorArgs,
     ipc_transport::{IpcEnvelope, IpcServer, start_ipc_server},
@@ -70,6 +71,8 @@ use crate::{
     working_context::{CwdSource, ShellKind, cwd_command, validate_path},
     workspace::{SavedTab, SavedWorkspace, save_workspace, workspace_path},
 };
+
+use self::wake::{UnixWake, install_unix_wake};
 
 const GUI_USAGE: &str = "\
 Usage: agenterm [--no-activate] [--endpoint ENDPOINT | --address HOST:PORT | --instance NAME]

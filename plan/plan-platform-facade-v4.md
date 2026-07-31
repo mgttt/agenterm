@@ -94,16 +94,17 @@ this state does not yet satisfy the static source-boundary gate.
    POSIX mechanics are now physically adapter-owned; the Windows adapter owns
    `rmux-pty` and converts neutral size/process identities. `src/pty` contains
    no target selection and projects only `services::pty`; typed PTY operation
-   failures and frontend event-loop migration remain open.
+   failures remain open.
    The first frontend leaf is complete: runtime-primary shell descriptors now
    select in adapters, so the Unix new-terminal dialog contains no macOS/Linux
    conditional or shell-path constant. Unix frontend clipboard selection also
    now consumes a typed facade service, as does XRGB screenshot encoding;
-   font candidate selection is likewise adapter-owned; renderer/input/event-
-   loop migration is still pending. The Windows launcher and replaceable native
-   GUI projection are now physically adapter-owned and selected through the
-   frontend service; Linux/macOS adapter entries still project the legacy
-   `unix_app` tree until its event loop, input, and renderer move together.
+   font candidate selection is likewise adapter-owned. The Windows launcher
+   and replaceable native GUI projection are physically adapter-owned and
+   selected through the frontend service. The complete winit/softbuffer event
+   loop, input, renderer, font cache, dialogs, screenshot bridge, and wake proxy
+   now reside in the private Unix adapter mechanism selected by explicit Linux
+   and macOS entries. Shared UI-state normalization remains open.
 4. Remove compatibility-only legacy native paths after each owning public
    smoke has passed.
 5. Add the static production source boundary test only after no product native

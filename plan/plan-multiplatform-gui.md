@@ -20,7 +20,8 @@ PRD + Cargo deps (primary)
         │                   │
         ├─► C unix IPC server            owns: src/ipc_transport.rs (ungate)
         │         │
-        └─► D unix_app (winit+softbuffer) owns: src/unix_app/**
+        └─► D Unix adapter (winit+softbuffer)
+                  owns: src/platform/adapters/unix/frontend/**
                   │  needs A+B+C typed boundaries
                   └─► E packaging/CI      owns: artifacts.json, ci/release scripts
 ```

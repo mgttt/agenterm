@@ -84,9 +84,10 @@ The migration is complete only when all of the following are true:
 - [ ] `ipc_endpoint`, `ipc_transport`, process identity/tree control, standard
   paths, native activation/clipboard/screenshot, Control Center shell hosting,
   and WebView runtime probing call facade services rather than OS APIs directly
-- [ ] top-level `win_app`, `unix_app`, and other native frontend modules become
+- [~] top-level `win_app`, `unix_app`, and native wake modules are now
   adapter-owned implementation details while shared UI state remains platform
-  neutral
+  neutral; physical ownership is complete, while further state normalization
+  remains open
 - [ ] a repository boundary test fails when a new non-platform production
   source file imports OS-native crates or contains an OS-selection `cfg`
 - [ ] all three platform adapters satisfy the same facade contract tests; a
@@ -162,7 +163,7 @@ Available, Unsupported, and Failed without reading source or assuming parity.
     `platform::macos::toolbar` stable action IDs before shared product handlers;
     the visible order remains Toggle Tabs, New, then right-aligned Settings,
     locale, font decrease, and font increase
-  - [x] `unix_app` keyboard and Cocoa IME preedit/commit paths now consume
+  - [x] the Unix frontend adapter's keyboard and Cocoa IME preedit/commit paths consume
     `platform::macos::input` and `platform::macos::ime`; Command remains the
     product modifier, terminal Control chords remain PTY input, and native
     committed text wins for Shift/Option/dead-key, Space, and CJK input
@@ -340,16 +341,16 @@ Revision-4 migration evidence (2026-07-31, partial):
 - [~] Unix frontend clipboard calls now traverse
   `services::ui_clipboard → selected → adapters/{linux,macos}` and map native
   availability, size, timeout, and backend diagnostics to one typed contract.
-  The frontend remains a temporary string-result compatibility projection;
-  broader frontend event-loop ownership is still pending.
+  The adapter-local clipboard helper remains a temporary string-result
+  compatibility projection; native frontend ownership is complete.
 - [~] Unix softbuffer XRGB screenshot encoding now traverses
   `services::ui_screenshot → selected → adapters/{linux,macos}`. Adapter
   validation and encoder errors retain explicit typed Unsupported/Failed
-  results before the legacy frontend string projection; frontend renderer
-  ownership itself remains pending.
+  results before the adapter-local frontend string projection; the renderer is
+  now physically adapter-owned.
 - [~] Unix frontend font-file candidate selection now traverses
   `services::ui_font → selected → adapters/{linux,macos}`; the shared glyph
-  cache and rasterizer remain product rendering details, without target
+  cache and rasterizer remain shared adapter rendering details, without target
   selection or duplicate candidate tables.
 - [x] Linux display capability classification now calls the selected Linux
   scale adapter. The shared geometry contract no longer branches on a display

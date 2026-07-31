@@ -1,3 +1,5 @@
+//! Unix software-rendered frontend projection.
+
 use crate::terminal_cursor::TerminalCursorShape;
 use crate::theme::{Rgb, ThemeId, ThemePalette};
 use crate::ui_geometry::{
