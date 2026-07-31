@@ -39,9 +39,9 @@ mod child_process_tree {
     use windows_sys::Win32::{
         Foundation::{CloseHandle, HANDLE},
         System::JobObjects::{
-            AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-            JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
-            SetInformationJobObject, TerminateJobObject,
+            AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_BREAKAWAY_OK,
+            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+            JobObjectExtendedLimitInformation, SetInformationJobObject, TerminateJobObject,
         },
     };
 
@@ -71,7 +71,12 @@ mod child_process_tree {
                 active: true,
             };
             let mut information: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { mem::zeroed() };
-            information.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            // The owned root and its ordinary descendants remain kill-on-close.
+            // A long-lived AgenTerm server is the one deliberate exception: the
+            // CLI explicitly creates it with CREATE_BREAKAWAY_FROM_JOB so it can
+            // survive an otherwise bounded Rhai command invocation.
+            information.BasicLimitInformation.LimitFlags =
+                JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_BREAKAWAY_OK;
             let configured = unsafe {
                 SetInformationJobObject(
                     guard.handle,

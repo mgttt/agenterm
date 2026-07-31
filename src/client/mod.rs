@@ -1,10 +1,11 @@
 #[cfg(windows)]
-use windows_sys::Win32::{UI::Shell::ShellExecuteW, UI::WindowsAndMessaging::SW_HIDE};
+use std::{
+    os::windows::process::CommandExt as _,
+    process::{Command, Stdio},
+};
 
 #[cfg(windows)]
-fn wide(value: &str) -> Vec<u16> {
-    value.encode_utf16().chain(Some(0)).collect()
-}
+use windows_sys::Win32::System::Threading::CREATE_BREAKAWAY_FROM_JOB;
 
 use std::path::{Path, PathBuf};
 use std::{
@@ -4075,27 +4076,25 @@ fn start_server_process() -> Result<()> {
             server.display()
         );
     }
-    let server = wide(&server.to_string_lossy());
-    let operation = wide("open");
     let endpoint = ipc_endpoint()?;
-    let parameters = if let Some(address) = endpoint.legacy_address() {
-        wide(&format!("--address {address}"))
+    let parameter = if let Some(address) = endpoint.legacy_address() {
+        ("--address", address)
     } else {
-        wide(&format!("--endpoint {}", endpoint))
+        ("--endpoint", endpoint.to_string())
     };
-    let launched = unsafe {
-        ShellExecuteW(
-            std::ptr::null_mut(),
-            operation.as_ptr(),
-            server.as_ptr(),
-            parameters.as_ptr(),
-            std::ptr::null(),
-            SW_HIDE,
-        )
-    } as isize;
-    if launched <= 32 {
-        anyhow::bail!("failed to launch AgenTerm server through Windows Shell ({launched})");
-    }
+    // Rhai-owned test commands are placed in a kill-on-close Windows Job. The
+    // server is an independently-owned authority, not a CLI descendant, so it
+    // must explicitly leave that Job. Its stdio is null to avoid retaining the
+    // invoking CLI's captured pipes after the CLI exits.
+    Command::new(server)
+        .arg(parameter.0)
+        .arg(parameter.1)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .creation_flags(CREATE_BREAKAWAY_FROM_JOB)
+        .spawn()
+        .context("failed to launch independent AgenTerm server")?;
     Ok(())
 }
 
