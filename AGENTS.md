@@ -219,10 +219,12 @@ incremental and let Cargo use the machine's logical CPUs. Use `release-fast`
 for repeated optimized local testing: it disables LTO, uses parallel codegen,
 and retains incremental state. A final `release` build uses the dedicated
 repo-local `target-release/` scratch directory, stages all distributable files
-in `dist/`, and cleans only that scratch directory; it must not erase the
-development `target/` cache. Release-only size optimization belongs in
-`[profile.release]`. The staging path is one named Rhai task; do not split it
-back into one interpreter startup per artifact.
+in `dist/`, and then reclaims both `target-release/` and development `target/`.
+The reusable bootstrap worker is stored outside Cargo output so this is safe on
+Windows. Dev and `release-fast` loops retain target output for incremental
+feedback. Release-only size optimization belongs in `[profile.release]`. The
+staging path is one named Rhai task; do not split it back into one interpreter
+startup per artifact.
 Build-identity freezing first reuses an existing compatible Script worker and
 falls back to bootstrapping one only when it is absent or incompatible. Do not
 restore an unconditional pre-identity worker build: compile-time

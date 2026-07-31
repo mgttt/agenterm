@@ -184,6 +184,7 @@ let cargo_output = if external_target {
 } else {
     std::path::join(repo, "target").display
 };
+let development_target = std::path::join(repo, "target").display;
 let profile_name = if profile == "dev" { "debug" } else { profile };
 let profile_directory = std::path::join(
     if target == "" {
@@ -309,6 +310,40 @@ if profile == "release" && !external_target {
         environment,
         3600000,
         "build_target_clean"
+    );
+    // bootstrap.cmd invokes this worker outside Cargo output, so a staged
+    // release can also reclaim the development target without a locked EXE.
+    run_command(
+        worker,
+        [
+            "task", "run", "target-report",
+            "--manifest", task_manifest,
+            "--", development_target
+        ],
+        repo,
+        environment,
+        30000,
+        "build_development_target_report"
+    );
+    run_command(
+        worker,
+        [
+            "task", "run", "prepare-target-clean",
+            "--manifest", task_manifest,
+            "--", repo, development_target
+        ],
+        repo,
+        environment,
+        30000,
+        "build_development_target_clean_prepare"
+    );
+    run_command(
+        "cargo",
+        ["clean", "--target-dir", development_target],
+        repo,
+        environment,
+        3600000,
+        "build_development_target_clean"
     );
 }
 
