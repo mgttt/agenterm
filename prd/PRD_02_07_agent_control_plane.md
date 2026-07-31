@@ -189,6 +189,20 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     one bounded pass, deduplicates the same authority, preserves reachable,
     unreachable, incompatible, and owner-unknown states, and never treats
     filename presence as proof of a live server
+    - [x] v0.1.12 Windows public evidence binds each new registration to a
+      process-start identity, lease nonce, and server epoch before publishing
+      it. `server-list` keeps the legacy `running` status for a proven live
+      authority while adding canonical `live`, `unreachable`, `incompatible`,
+      `owner-unknown`, `stale`, and `stale-test-fixture` classifications.
+      `--prune` is explicit, never kills a process, rereads the record, and
+      returns a typed per-row receipt; PID reuse or any uncertain identity is
+      retained rather than deleted. Main retains its exact settings path;
+      dev/custom use a scope-derived path unless the caller explicitly sets
+      `AGENTERM_SETTINGS_PATH`, and `protocol-info` reports the effective
+      settings path.
+    - [ ] retain actual old/new binary matrix, Linux/macOS runtime evidence,
+      Windows DACL/remote-client/cancellation proof, and abrupt-owner recovery
+      before declaring native IPC migration complete across all platforms
   - [~] migration is staged rather than flag-day:
     - first ship the common resolver, schema-v2 writer/reader, mixed discovery,
       and explicit native endpoint support while the shipped TCP default
@@ -226,3 +240,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       conflicts, schema-v1/v2 mixed discovery with v2 deduplication, truthful
       server-list endpoint facts, explicit typed TCP, and legacy `--address`
       compatibility
+    - [x] v0.1.12 Windows no-activate smoke additionally proves main/dev/custom
+      settings isolation and explicit override, live owner/epoch facts, visible
+      stale test-fixture retention, receipt-based cleanup, and PID-reuse
+      protection; the retained Fleet journey proves legacy TCP cannot hijack a
+      native main authority

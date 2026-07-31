@@ -352,7 +352,7 @@ try {
         "fleet_option_error_not_fast_or_actionable"
     );
 
-    print("STEP zero-instance live control reports the native main endpoint");
+    print("STEP zero-instance discovery retains stale rows until confirmed cleanup");
     let dead_record = std::path::join(
         context.instance_directory,
         "4294967295.json"
@@ -375,8 +375,25 @@ try {
         ["server-list", "--json"]
     );
     require(
-        empty_servers.len == 0 && !std::fs::exists(dead_record),
-        "fleet_dead_registration_not_pruned"
+        empty_servers.len == 1
+            && empty_servers[0].classification == "stale"
+            && empty_servers[0].cleanup_eligible
+            && std::fs::exists(dead_record),
+        "fleet_dead_registration_not_retained"
+    );
+    let cleaned_servers = json_without_address(
+        context,
+        cli,
+        ["server-list", "--json", "--prune"]
+    );
+    require(
+        cleaned_servers.len == 1
+            && cleaned_servers[0].cleanup_receipt.schema_version == 1
+            && cleaned_servers[0].cleanup_receipt.operation
+                == "registration.cleanup"
+            && cleaned_servers[0].cleanup_receipt.result == "deleted"
+            && !std::fs::exists(dead_record),
+        "fleet_dead_registration_cleanup_not_confirmed"
     );
     let empty_error = fail_without_address(
         context,

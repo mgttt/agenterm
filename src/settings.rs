@@ -4,6 +4,7 @@ use anyhow::{Context as _, Result};
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{
+    ipc_endpoint::{LogicalInstance, ResolvedIpcEndpoint, ServerScopeId},
     locale::LocaleId,
     theme::ThemeId,
     ui_geometry::{TABS_DEFAULT_WIDTH, clamp_configured_tabs_width},
@@ -183,6 +184,46 @@ pub(crate) fn config_path() -> PathBuf {
             env::temp_dir(),
         )
     }
+}
+
+pub(crate) fn default_settings_path_for(resolved: &ResolvedIpcEndpoint) -> PathBuf {
+    scoped_settings_path_from(
+        default_config_path(),
+        &resolved.logical_instance,
+        &resolved.server_scope_id,
+    )
+}
+
+fn default_config_path() -> PathBuf {
+    #[cfg(windows)]
+    {
+        config_path_from(None, env::var_os("LOCALAPPDATA"))
+    }
+    #[cfg(unix)]
+    {
+        config_path_from(
+            None,
+            env::var_os("XDG_CONFIG_HOME"),
+            env::var_os("HOME"),
+            env::temp_dir(),
+        )
+    }
+}
+
+fn scoped_settings_path_from(
+    main_settings_path: PathBuf,
+    logical_instance: &LogicalInstance,
+    server_scope_id: &ServerScopeId,
+) -> PathBuf {
+    if logical_instance == &LogicalInstance::Main {
+        return main_settings_path;
+    }
+    main_settings_path
+        .parent()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("settings")
+        .join(format!("{}.json", server_scope_id.as_str()))
 }
 
 #[cfg(windows)]
@@ -380,6 +421,37 @@ mod tests {
         assert!(serde_json::from_str::<AppConfig>(r#"{"tabs_width":"wide"}"#).is_err());
         assert!(serde_json::from_str::<AppConfig>(r#"{"tabs_width":250.5}"#).is_err());
         assert!(serde_json::from_str::<AppConfig>(r#"{"tabs_visible":"yes"}"#).is_err());
+    }
+
+    #[test]
+    fn role_scoped_settings_preserve_main_and_isolate_non_main_scopes() {
+        let main_path = PathBuf::from("config-root").join("settings.json");
+        let main_scope = ServerScopeId::current(&LogicalInstance::Main).unwrap();
+        let dev_scope = ServerScopeId::current(&LogicalInstance::Dev).unwrap();
+        let custom = LogicalInstance::Custom("fixture".to_owned());
+        let custom_scope = ServerScopeId::current(&custom).unwrap();
+
+        assert_eq!(
+            scoped_settings_path_from(main_path.clone(), &LogicalInstance::Main, &main_scope),
+            main_path
+        );
+        let dev_path = scoped_settings_path_from(
+            PathBuf::from("config-root").join("settings.json"),
+            &LogicalInstance::Dev,
+            &dev_scope,
+        );
+        let custom_path = scoped_settings_path_from(
+            PathBuf::from("config-root").join("settings.json"),
+            &custom,
+            &custom_scope,
+        );
+        assert_eq!(
+            dev_path,
+            PathBuf::from("config-root")
+                .join("settings")
+                .join(format!("{}.json", dev_scope.as_str()))
+        );
+        assert_ne!(dev_path, custom_path);
     }
 
     #[test]

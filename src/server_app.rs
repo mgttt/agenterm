@@ -241,15 +241,17 @@ impl ServerState {
             .unwrap_or(0)
             .saturating_add(1);
         let resolved = crate::client::resolved_ipc_endpoint()?;
+        let event_journal = EventJournal::new();
+        let server_epoch = event_journal.position().epoch;
         let instance_registration = register_typed_instance(
             resolved.endpoint,
             resolved.logical_instance,
             resolved.server_scope_id,
             &workspace_path(),
             &session_name,
+            &server_epoch,
         )?;
-        let event_journal = EventJournal::new();
-        let command_identity = event_journal.position().epoch;
+        let command_identity = server_epoch;
         let mut state = Self {
             tabs: Vec::new(),
             collapsed_tabs: restored.collapsed_ids.into_iter().collect(),

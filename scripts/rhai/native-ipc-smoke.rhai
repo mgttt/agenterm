@@ -42,7 +42,8 @@ fn configured(
     for name in [
         "AGENTERM_IPC_ENDPOINT",
         "AGENTERM_IPC_ADDRESS",
-        "AGENTERM_INSTANCE"
+        "AGENTERM_INSTANCE",
+        "AGENTERM_SETTINGS_PATH"
     ] {
         command.env_remove(name);
     }
@@ -62,6 +63,8 @@ fn configured(
         "XDG_RUNTIME_DIR",
         context.native_runtime_directory
     );
+    command.env("LOCALAPPDATA", context.config_directory);
+    command.env("XDG_CONFIG_HOME", context.config_directory);
     command
 }
 
@@ -230,6 +233,27 @@ fn find_by_endpoint(rows, endpoint, code) {
     throw code;
 }
 
+fn find_by_nonce(rows, nonce, code) {
+    for row in rows {
+        if row.lease_nonce == nonce {
+            return row;
+        }
+    }
+    throw code;
+}
+
+fn registration_by_endpoint(directory, endpoint, code) {
+    for entry in std::fs::read_dir(directory) {
+        if entry.is_file && entry.file_name.ends_with(".json") {
+            let record = rhai::json::parse_file(entry.path.display);
+            if record.schema_version == 2 && record.endpoint == endpoint {
+                return #{ path: entry.path.display, record: record };
+            }
+        }
+    }
+    throw code;
+}
+
 fn registration_schema_counts(directory) {
     let v1 = 0;
     let v2 = 0;
@@ -314,6 +338,11 @@ require(std::fs::exists(server_exe), "native_ipc_server_missing");
 require(std::fs::exists(cli), "native_ipc_cli_missing");
 
 let context = test_harness::new_context(repo, "native-ipc");
+context.config_directory = std::path::join(
+    context.run_directory,
+    "config"
+).display;
+std::fs::create_dir_all(context.config_directory);
 let unix_bootstrap =
     std::env::has("AGENTERM_BOOTSTRAP_PLATFORM")
         && std::env::get("AGENTERM_BOOTSTRAP_PLATFORM") == "unix";
@@ -325,7 +354,19 @@ let direct_unix_root =
     } else {
         ""
     };
-let unix_host = unix_bootstrap || direct_unix_root != "";
+let windows_host = !unix_bootstrap
+    && (
+        (
+            std::env::has("AGENTERM_HOST_OS")
+                && std::env::get("AGENTERM_HOST_OS") == "windows"
+        )
+            || (
+                std::env::has("OS")
+                    && std::env::get("OS") == "Windows_NT"
+            )
+    );
+let unix_host = unix_bootstrap
+    || (!windows_host && direct_unix_root != "");
 context.native_runtime_directory = if unix_bootstrap {
     let temporary_root =
         if std::env::has("AGENTERM_HOST_OS")
@@ -502,13 +543,30 @@ try {
     } else {
         false
     };
+    let settings_base = std::path::join(
+        context.config_directory,
+        if native_protocol.transport == "named_pipe" {
+            "AgenTerm"
+        } else {
+            "agenterm"
+        }
+    ).display;
+    let expected_native_settings = if custom_instance == "main" {
+        std::path::join(settings_base, "settings.json").display
+    } else {
+        std::path::join(
+            std::path::join(settings_base, "settings").display,
+            native_protocol.server_scope_id + ".json"
+        ).display
+    };
     require(
         native_protocol.pid == native_server.id
             && native_protocol.instance == custom_instance
             && native_endpoint_shape
             && native_protocol.server_scope_id.starts_with("agt-v1-")
             && native_protocol.server_scope_id.len == 39
-            && !native_protocol.endpoint.contains(custom_instance),
+            && !native_protocol.endpoint.contains(custom_instance)
+            && native_protocol.settings_path == expected_native_settings,
         "native_ipc_custom_native_contract"
     );
     if native_protocol.transport == "unix" {
@@ -599,7 +657,13 @@ try {
                 && dev_protocol.transport == native_protocol.transport
                 && dev_protocol.endpoint != native_protocol.endpoint
                 && dev_protocol.server_scope_id
-                    != native_protocol.server_scope_id,
+                    != native_protocol.server_scope_id
+                && dev_protocol.settings_path == std::path::join(
+                    std::path::join(settings_base, "settings").display,
+                    dev_protocol.server_scope_id + ".json"
+                ).display
+                && dev_protocol.settings_path
+                    != native_protocol.settings_path,
             "native_ipc_main_dev_authority_separation"
         );
 
@@ -627,6 +691,58 @@ try {
             "native_ipc_duplicate_authority_not_rejected"
         );
     }
+
+    print("STEP explicit settings path overrides role-scoped default");
+    let override_instance =
+        "custom:settings-override-" + std::process::id() + "-" +
+        std::time::SystemTime::now().unix_millis;
+    let override_workspace = std::path::join(
+        context.run_directory,
+        "workspace/settings-override-workspace.json"
+    ).display;
+    let override_command = configured(
+        context,
+        server_exe,
+        ["--instance", override_instance],
+        dead_endpoint,
+        context.address,
+        "main",
+        override_workspace
+    );
+    override_command.env("AGENTERM_SETTINGS_PATH", context.settings_path);
+    let override_server = override_command.start();
+    owned_children.push(override_server);
+    let override_protocol = wait_protocol(
+        context,
+        cli,
+        ["--instance", override_instance],
+        dead_endpoint,
+        context.address,
+        "main",
+        override_workspace,
+        override_server
+    );
+    require(
+        override_protocol.settings_path == context.settings_path,
+        "native_ipc_explicit_settings_override_lost"
+    );
+    invoke(
+        context,
+        cli,
+        ["--instance", override_instance, "shutdown"],
+        false,
+        dead_endpoint,
+        context.address,
+        "main",
+        override_workspace
+    );
+    require(
+        wait_exit(
+            override_server,
+            "native_ipc_settings_override_shutdown_timeout"
+        ).success,
+        "native_ipc_settings_override_shutdown_failed"
+    );
 
     print("STEP explicit loopback TCP remains a live compatibility route");
     let tcp_command = configured(
@@ -732,6 +848,10 @@ try {
             && dev_row.transport == dev_protocol.transport
             && dev_row.server_scope_id == dev_protocol.server_scope_id
             && dev_row.status == "running"
+            && dev_row.classification == "live"
+            && dev_row.process_start_identity != ""
+            && dev_row.lease_nonce != ""
+            && dev_row.server_epoch == dev_row.event_epoch
     } else {
         true
     };
@@ -743,6 +863,16 @@ try {
             && native_row.server_scope_id
                 == native_protocol.server_scope_id
             && native_row.status == "running"
+            && native_row.classification == "live"
+            && native_row.owner_state == "confirmed_live"
+            && native_row.process_start_identity != ""
+            && native_row.lease_nonce != ""
+            && native_row.server_epoch == native_row.event_epoch
+            && native_row.observed_protocol_pid == native_protocol.pid
+            && native_row.observed_protocol_endpoint
+                == native_protocol.endpoint
+            && native_row.observed_protocol_server_scope_id
+                == native_protocol.server_scope_id
             && native_row.legacy_client_compatibility
                 == "unsupported_no_legacy_listener"
             && tcp_row.schema_version == 2
@@ -750,9 +880,186 @@ try {
             && tcp_row.transport == "tcp"
             && tcp_row.endpoint == tcp_endpoint
             && tcp_row.status == "running"
+            && tcp_row.classification == "live"
+            && tcp_row.process_start_identity != ""
+            && tcp_row.lease_nonce != ""
+            && tcp_row.server_epoch == tcp_row.event_epoch
             && tcp_row.legacy_client_compatibility
                 == "same_tcp_endpoint"
             && dev_row_ok;
+
+    print("STEP stale test fixture remains visible until confirmed cleanup");
+    let stale_fixture_path = std::path::join(
+        context.instance_directory,
+        "4294967295-stale-fixture.json"
+    ).display;
+    let stale_fixture_endpoint = "tcp:127.0.0.1:59998";
+    let stale_fixture_nonce = "native-ipc-stale-fixture";
+    rhai::runtime::atomic_write(
+        stale_fixture_path,
+        rhai::json::stringify_pretty(#{
+            schema_version: 2,
+            pid: 4294967295,
+            address: "127.0.0.1:59998",
+            endpoint: stale_fixture_endpoint,
+            logical_instance: "custom:stale-fixture",
+            server_scope_id: native_protocol.server_scope_id,
+            version: native_protocol.agenterm_version,
+            session: "stale-fixture",
+            workspace_path: "stale-fixture-workspace.json",
+            started_at_unix_ms: 1,
+            process_start_identity: "fixture-process-start",
+            lease_nonce: stale_fixture_nonce,
+            server_epoch: "fixture-server-epoch",
+            test_fixture: true
+        }) + "\n"
+    );
+    let stale_rows = invoke_json(
+        context,
+        cli,
+        ["server-list", "--json"],
+        "",
+        "",
+        "",
+        native_workspace
+    );
+    let stale_row = find_by_nonce(
+        stale_rows,
+        stale_fixture_nonce,
+        "native_ipc_stale_fixture_row_missing"
+    );
+    require(
+        stale_row.classification == "stale-test-fixture"
+            && stale_row.cleanup_eligible
+            && std::fs::exists(stale_fixture_path),
+        "native_ipc_stale_fixture_implicitly_removed"
+    );
+    let pruned_stale_rows = invoke_json(
+        context,
+        cli,
+        ["server-list", "--json", "--prune"],
+        "",
+        "",
+        "",
+        native_workspace
+    );
+    let pruned_stale = find_by_nonce(
+        pruned_stale_rows,
+        stale_fixture_nonce,
+        "native_ipc_stale_fixture_cleanup_receipt_missing"
+    );
+    require(
+        pruned_stale.cleanup_receipt.schema_version == 1
+            && pruned_stale.cleanup_receipt.operation
+                == "registration.cleanup"
+            && pruned_stale.cleanup_receipt.result == "deleted"
+            && pruned_stale.cleanup_receipt.expected_lease_nonce
+                == stale_fixture_nonce
+            && !std::fs::exists(stale_fixture_path),
+        "native_ipc_stale_fixture_cleanup_not_confirmed"
+    );
+
+    print("STEP legacy live-PID ownership remains unknown and ineligible");
+    let unknown_owner_path = std::path::join(
+        context.instance_directory,
+        native_protocol.pid + "-owner-unknown.json"
+    ).display;
+    let unknown_owner_endpoint = "tcp:127.0.0.1:59997";
+    rhai::runtime::atomic_write(
+        unknown_owner_path,
+        rhai::json::stringify_pretty(#{
+            schema_version: 1,
+            pid: native_protocol.pid,
+            address: "127.0.0.1:59997",
+            version: native_protocol.agenterm_version,
+            session: "owner-unknown",
+            workspace_path: "owner-unknown-workspace.json",
+            started_at_unix_ms: 2
+        }) + "\n"
+    );
+    let unknown_owner_rows = invoke_json(
+        context,
+        cli,
+        ["server-list", "--json", "--prune"],
+        "",
+        "",
+        "",
+        native_workspace
+    );
+    let unknown_owner = find_by_endpoint(
+        unknown_owner_rows,
+        unknown_owner_endpoint,
+        "native_ipc_owner_unknown_row_missing"
+    );
+    require(
+        unknown_owner.classification == "owner-unknown"
+            && !unknown_owner.cleanup_eligible
+            && unknown_owner.cleanup_receipt.result == "not_eligible"
+            && std::fs::exists(unknown_owner_path),
+        "native_ipc_owner_unknown_was_removed"
+    );
+    std::fs::remove_file(unknown_owner_path);
+
+    print("STEP PID-reuse cleanup cannot remove the live generation");
+    let native_registration = registration_by_endpoint(
+        context.instance_directory,
+        native_protocol.endpoint,
+        "native_ipc_live_registration_missing"
+    );
+    let pid_reuse_nonce = "native-ipc-pid-reuse-fixture";
+    let pid_reuse_path = std::path::join(
+        context.instance_directory,
+        native_protocol.pid + "-" + pid_reuse_nonce + ".json"
+    ).display;
+    let pid_reuse_record = native_registration.record;
+    pid_reuse_record.process_start_identity = "foreign-process-start";
+    pid_reuse_record.lease_nonce = pid_reuse_nonce;
+    pid_reuse_record.test_fixture = false;
+    rhai::runtime::atomic_write(
+        pid_reuse_path,
+        rhai::json::stringify_pretty(pid_reuse_record) + "\n"
+    );
+    let pid_reuse_rows = invoke_json(
+        context,
+        cli,
+        ["server-list", "--json"],
+        "",
+        "",
+        "",
+        native_workspace
+    );
+    let pid_reuse = find_by_nonce(
+        pid_reuse_rows,
+        pid_reuse_nonce,
+        "native_ipc_pid_reuse_row_missing"
+    );
+    require(
+        pid_reuse.classification == "stale"
+            && pid_reuse.owner_state == "pid_reused"
+            && std::fs::exists(native_registration.path),
+        "native_ipc_pid_reuse_not_classified"
+    );
+    let pid_reuse_pruned_rows = invoke_json(
+        context,
+        cli,
+        ["server-list", "--json", "--prune"],
+        "",
+        "",
+        "",
+        native_workspace
+    );
+    let pid_reuse_pruned = find_by_nonce(
+        pid_reuse_pruned_rows,
+        pid_reuse_nonce,
+        "native_ipc_pid_reuse_receipt_missing"
+    );
+    require(
+        pid_reuse_pruned.cleanup_receipt.result == "deleted"
+            && std::fs::exists(native_registration.path)
+            && !std::fs::exists(pid_reuse_path)
+            && native_server.state == "running",
+        "native_ipc_pid_reuse_cleanup_crossed_generation"
+    );
 
     print("STEP each authority shuts down through its selected endpoint");
     invoke(

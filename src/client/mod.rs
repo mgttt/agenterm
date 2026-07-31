@@ -35,7 +35,10 @@ use crate::{
         ControlRequest, ErrorCategory, OperationId, PayloadFingerprint, RequestId, RequestIntent,
     },
     event_journal::{EVENT_CATALOG, EVENT_CATALOG_SCHEMA_VERSION},
-    instances::{discover_instances, instance_process_is_alive, prune_instance},
+    instances::{
+        InstanceRecord, RegistrationOwnerState, cleanup_instance, discover_instances,
+        instance_process_is_alive, registration_owner_state,
+    },
     ipc_endpoint::{
         EndpointSelectorArgs, IpcEndpoint, ResolvedIpcEndpoint, default_workspace_path_for,
         resolve_ipc_endpoint,
@@ -1059,12 +1062,31 @@ pub(crate) fn configure_scoped_paths() -> Result<()> {
 }
 
 fn apply_resolved_environment(resolved: &ResolvedIpcEndpoint) {
+    const DERIVED_SETTINGS_MARKER: &str = "AGENTERM_SETTINGS_PATH_DERIVED";
     if env::var_os("AGENTERM_WORKSPACE_PATH").is_none() {
         unsafe {
             env::set_var(
                 "AGENTERM_WORKSPACE_PATH",
                 default_workspace_path_for(resolved),
             );
+        }
+    }
+    let settings_path_is_derived = env::var_os(DERIVED_SETTINGS_MARKER).as_deref()
+        == Some(std::ffi::OsStr::new("1"));
+    if env::var_os("AGENTERM_SETTINGS_PATH").is_none() || settings_path_is_derived {
+        unsafe {
+            if resolved.logical_instance == crate::ipc_endpoint::LogicalInstance::Main {
+                if settings_path_is_derived {
+                    env::remove_var("AGENTERM_SETTINGS_PATH");
+                    env::remove_var(DERIVED_SETTINGS_MARKER);
+                }
+            } else {
+                env::set_var(
+                    "AGENTERM_SETTINGS_PATH",
+                    crate::settings::default_settings_path_for(resolved),
+                );
+                env::set_var(DERIVED_SETTINGS_MARKER, "1");
+            }
         }
     }
     // Do not manufacture an environment selector for implicit compatibility
@@ -1223,6 +1245,113 @@ fn send_ipc_request_to_endpoint_with_timeout(
     serde_json::from_str(&response).context("invalid response from AgenTerm server")
 }
 
+fn probe_registered_instance(
+    record: &InstanceRecord,
+    endpoint: &IpcEndpoint,
+) -> (
+    &'static str,
+    String,
+    Option<serde_json::Value>,
+    Option<serde_json::Value>,
+) {
+    let protocol_response = match send_ipc_request_to_timeout(
+        &endpoint.to_string(),
+        vec!["protocol-info".to_owned()],
+        IPC_DISCOVERY_TIMEOUT,
+    ) {
+        Ok(response) if response.ok => response,
+        Ok(response) => {
+            return (
+                "incompatible",
+                format!("protocol_probe_rejected:{}", response.error),
+                None,
+                None,
+            );
+        }
+        Err(error) => {
+            return (
+                "unreachable",
+                format!("protocol_probe_failed:{error}"),
+                None,
+                None,
+            );
+        }
+    };
+    let protocol = match serde_json::from_str::<serde_json::Value>(&protocol_response.output) {
+        Ok(protocol) => protocol,
+        Err(error) => {
+            return (
+                "incompatible",
+                format!("protocol_facts_unparseable:{error}"),
+                None,
+                None,
+            );
+        }
+    };
+    let expected_scope = record.server_scope_id.as_ref().map(|scope| scope.as_str());
+    let expected_endpoint = endpoint.to_string();
+    if protocol["pid"].as_u64() != Some(u64::from(record.pid))
+        || protocol["endpoint"].as_str() != Some(expected_endpoint.as_str())
+        || protocol["server_scope_id"].as_str() != expected_scope
+    {
+        return (
+            "incompatible",
+            "protocol_identity_mismatch".to_owned(),
+            Some(protocol),
+            None,
+        );
+    }
+
+    let snapshot_response = match send_ipc_request_to_timeout(
+        &endpoint.to_string(),
+        vec!["ui-snapshot".to_owned()],
+        IPC_DISCOVERY_TIMEOUT,
+    ) {
+        Ok(response) if response.ok => response,
+        Ok(response) => {
+            return (
+                "incompatible",
+                format!("snapshot_probe_rejected:{}", response.error),
+                Some(protocol),
+                None,
+            );
+        }
+        Err(error) => {
+            return (
+                "unreachable",
+                format!("snapshot_probe_failed:{error}"),
+                Some(protocol),
+                None,
+            );
+        }
+    };
+    let snapshot = match serde_json::from_str::<serde_json::Value>(&snapshot_response.output) {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            return (
+                "incompatible",
+                format!("snapshot_facts_unparseable:{error}"),
+                Some(protocol),
+                None,
+            );
+        }
+    };
+    if snapshot["event_position"]["epoch"].as_str() != record.server_epoch.as_deref() {
+        return (
+            "incompatible",
+            "server_epoch_mismatch".to_owned(),
+            Some(protocol),
+            Some(snapshot),
+        );
+    }
+    (
+        "live",
+        "registration_process_protocol_and_epoch_matched".to_owned(),
+        Some(protocol),
+        Some(snapshot),
+    )
+}
+
 fn run_list_instances(arguments: &[String]) -> i32 {
     let json = arguments.iter().any(|argument| argument == "--json");
     let prune = arguments.iter().any(|argument| argument == "--prune");
@@ -1234,39 +1363,52 @@ fn run_list_instances(arguments: &[String]) -> i32 {
         }
     };
     let mut views = Vec::new();
+    let mut cleanup_failed = false;
     let staged_identity = current_upgrade_identity();
     for instance in instances {
-        if !instance_process_is_alive(instance.record.pid) {
-            if let Err(error) = prune_instance(&instance) {
-                eprintln!("{error:#}");
-                return 1;
-            }
-            continue;
-        }
         let endpoint = instance
             .record
             .resolved_endpoint()
             .expect("discovery filters records without a usable endpoint");
-        let response = send_ipc_request_to_timeout(
-            &endpoint.to_string(),
-            vec!["ui-snapshot".to_owned()],
-            IPC_DISCOVERY_TIMEOUT,
-        );
-        let (status, snapshot) = match response {
-            Ok(response) if response.ok => (
-                "running",
-                serde_json::from_str::<serde_json::Value>(&response.output).ok(),
+        let owner = registration_owner_state(&instance.record);
+        let (classification, status_reason, protocol, snapshot) = match &owner {
+            RegistrationOwnerState::Dead { .. } | RegistrationOwnerState::PidReused { .. } => (
+                if instance.record.test_fixture {
+                    "stale-test-fixture"
+                } else {
+                    "stale"
+                },
+                owner.reason().to_owned(),
+                None,
+                None,
             ),
-            Ok(_) => ("running", None),
-            Err(_) => ("unreachable", None),
-        };
-        if prune && status == "unreachable" {
-            if let Err(error) = prune_instance(&instance) {
-                eprintln!("{error:#}");
-                return 1;
+            RegistrationOwnerState::OwnerUnknown { .. } => {
+                ("owner-unknown", owner.reason().to_owned(), None, None)
             }
-            continue;
-        }
+            RegistrationOwnerState::ConfirmedLive { .. }
+                if instance.record.lease_nonce.is_none()
+                    || instance.record.server_epoch.is_none() =>
+            {
+                (
+                    "owner-unknown",
+                    "registration_missing_lease_nonce_or_server_epoch".to_owned(),
+                    None,
+                    None,
+                )
+            }
+            RegistrationOwnerState::ConfirmedLive { .. } => {
+                probe_registered_instance(&instance.record, &endpoint)
+            }
+        };
+        let status = if classification == "live" {
+            "running"
+        } else {
+            classification
+        };
+        let cleanup_receipt = prune.then(|| cleanup_instance(&instance));
+        cleanup_failed |= cleanup_receipt
+            .as_ref()
+            .is_some_and(|receipt| receipt.failed());
         let tab_count = snapshot
             .as_ref()
             .and_then(|value| value["tabs"].as_array())
@@ -1300,6 +1442,7 @@ fn run_list_instances(arguments: &[String]) -> i32 {
         let running_identity = instance.record.upgrade_identity.clone().unwrap_or_default();
         let upgrade = running_identity.compare_staged(&staged_identity);
         let upgrade_explanation = upgrade.explanation();
+        let legacy_client_compatibility = instance.record.legacy_client_compatibility();
         let username = env::var("USERNAME")
             .or_else(|_| env::var("USER"))
             .unwrap_or_else(|_| "user".to_owned());
@@ -1314,9 +1457,22 @@ fn run_list_instances(arguments: &[String]) -> i32 {
             "instance_label": logical_instance.display_label(&username),
             "server_scope_id": instance.record.server_scope_id.as_ref().map(|scope| scope.as_str()),
             "registration_schema_version": instance.record.schema_version,
-            "legacy_client_compatibility": instance.record.legacy_client_compatibility(),
+            "process_start_identity": instance.record.process_start_identity.clone(),
+            "lease_nonce": instance.record.lease_nonce.clone(),
+            "server_epoch": instance.record.server_epoch.clone(),
+            "test_fixture": instance.record.test_fixture,
+            "legacy_client_compatibility": legacy_client_compatibility,
             "version": instance.record.version,
             "status": status,
+            "classification": classification,
+            "status_reason": status_reason,
+            "owner_state": owner.name(),
+            "observed_process_start_identity": owner.observed_start_identity(),
+            "cleanup_eligible": owner.is_stale(),
+            "cleanup_receipt": cleanup_receipt,
+            "observed_protocol_pid": protocol.as_ref().and_then(|value| value["pid"].as_u64()),
+            "observed_protocol_endpoint": protocol.as_ref().and_then(|value| value["endpoint"].as_str()),
+            "observed_protocol_server_scope_id": protocol.as_ref().and_then(|value| value["server_scope_id"].as_str()),
             "tab_count": tab_count,
             "active_tab": active_tab,
             "session": instance.record.session,
@@ -1377,7 +1533,7 @@ fn run_list_instances(arguments: &[String]) -> i32 {
             );
         }
     }
-    0
+    if cleanup_failed { 1 } else { 0 }
 }
 
 #[cfg_attr(not(windows), allow(unused_variables, unused_mut))]
@@ -4054,6 +4210,7 @@ pub(crate) fn protocol_info_json_with_ui_bridge(
         "transport": resolved.as_ref().map(|value| value.endpoint.transport_name()),
         "instance": resolved.as_ref().map(|value| value.logical_instance.to_string()),
         "server_scope_id": resolved.as_ref().map(|value| value.server_scope_id.to_string()),
+        "settings_path": crate::settings::config_path().display().to_string(),
         "build_identity": build_identity,
         "build_identity_complete": build_identity.is_complete(),
         "upgrade_identity": current_upgrade_identity(),

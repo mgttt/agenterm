@@ -2,6 +2,7 @@ use std::{
     env, fs,
     io::{BufReader, Write as _},
     path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -18,6 +19,8 @@ use crate::{
 
 const LEGACY_INSTANCE_SCHEMA_VERSION: u32 = 1;
 const INSTANCE_SCHEMA_VERSION: u32 = 2;
+const CLEANUP_RECEIPT_SCHEMA_VERSION: u32 = 1;
+static NEXT_LEASE_NONCE: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct IntentionalShutdown {
@@ -46,6 +49,14 @@ pub(crate) struct InstanceRecord {
     pub session: String,
     pub workspace_path: String,
     pub started_at_unix_ms: u128,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub process_start_identity: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lease_nonce: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_epoch: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub test_fixture: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub upgrade_identity: Option<UpgradeIdentity>,
 }
@@ -83,6 +94,86 @@ pub(crate) struct DiscoveredInstance {
     path: PathBuf,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum RegistrationOwnerState {
+    ConfirmedLive {
+        observed_start_identity: String,
+    },
+    Dead {
+        reason: String,
+    },
+    PidReused {
+        observed_start_identity: String,
+    },
+    OwnerUnknown {
+        reason: String,
+        observed_start_identity: Option<String>,
+    },
+}
+
+impl RegistrationOwnerState {
+    pub(crate) fn name(&self) -> &'static str {
+        match self {
+            Self::ConfirmedLive { .. } => "confirmed_live",
+            Self::Dead { .. } => "dead",
+            Self::PidReused { .. } => "pid_reused",
+            Self::OwnerUnknown { .. } => "owner_unknown",
+        }
+    }
+
+    pub(crate) fn reason(&self) -> &str {
+        match self {
+            Self::ConfirmedLive { .. } => "process_start_identity_matched",
+            Self::Dead { reason } | Self::OwnerUnknown { reason, .. } => reason,
+            Self::PidReused { .. } => "process_start_identity_mismatch",
+        }
+    }
+
+    pub(crate) fn observed_start_identity(&self) -> Option<&str> {
+        match self {
+            Self::ConfirmedLive {
+                observed_start_identity,
+            }
+            | Self::PidReused {
+                observed_start_identity,
+            } => Some(observed_start_identity),
+            Self::OwnerUnknown {
+                observed_start_identity,
+                ..
+            } => observed_start_identity.as_deref(),
+            Self::Dead { .. } => None,
+        }
+    }
+
+    pub(crate) fn is_stale(&self) -> bool {
+        matches!(self, Self::Dead { .. } | Self::PidReused { .. })
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub(crate) struct InstanceCleanupReceipt {
+    pub schema_version: u32,
+    pub operation: &'static str,
+    pub target_path: String,
+    pub pid: u32,
+    pub endpoint: Option<String>,
+    pub server_scope_id: Option<String>,
+    pub expected_process_start_identity: Option<String>,
+    pub expected_lease_nonce: Option<String>,
+    pub expected_server_epoch: Option<String>,
+    pub confirmed_owner_state: String,
+    pub reason: String,
+    pub result: String,
+    pub legacy_alias_result: String,
+    pub completed_at_unix_ms: u128,
+}
+
+impl InstanceCleanupReceipt {
+    pub(crate) fn failed(&self) -> bool {
+        self.result == "failed" || self.legacy_alias_result == "failed"
+    }
+}
+
 pub(crate) struct InstanceRegistration {
     path: PathBuf,
     legacy_alias_path: Option<PathBuf>,
@@ -90,6 +181,9 @@ pub(crate) struct InstanceRegistration {
     address: String,
     endpoint: IpcEndpoint,
     server_scope_id: ServerScopeId,
+    process_start_identity: String,
+    lease_nonce: String,
+    server_epoch: String,
 }
 
 impl InstanceRegistration {
@@ -108,11 +202,27 @@ impl Drop for InstanceRegistration {
                     && record.address == self.address
                     && record.resolved_endpoint().as_ref() == Some(&self.endpoint)
                     && record.server_scope_id.as_ref() == Some(&self.server_scope_id)
+                    && record.process_start_identity.as_deref()
+                        == Some(self.process_start_identity.as_str())
+                    && record.lease_nonce.as_deref() == Some(self.lease_nonce.as_str())
+                    && record.server_epoch.as_deref() == Some(self.server_epoch.as_str())
             });
         if matches_registration {
             let _ = fs::remove_file(&self.path);
             if let Some(path) = &self.legacy_alias_path {
-                let _ = fs::remove_file(path);
+                let matches_alias = fs::read(path)
+                    .ok()
+                    .and_then(|content| serde_json::from_slice::<InstanceRecord>(&content).ok())
+                    .is_some_and(|record| {
+                        record.pid == self.pid
+                            && record.process_start_identity.as_deref()
+                                == Some(self.process_start_identity.as_str())
+                            && record.lease_nonce.as_deref() == Some(self.lease_nonce.as_str())
+                            && record.server_epoch.as_deref() == Some(self.server_epoch.as_str())
+                    });
+                if matches_alias {
+                    let _ = fs::remove_file(path);
+                }
             }
         }
     }
@@ -146,6 +256,7 @@ pub(crate) fn register_instance(
         server_scope_id,
         workspace_path,
         session,
+        "legacy-registration-epoch",
     )
 }
 
@@ -155,11 +266,15 @@ pub(crate) fn register_typed_instance(
     server_scope_id: ServerScopeId,
     workspace_path: &Path,
     session: &str,
+    server_epoch: &str,
 ) -> Result<InstanceRegistration> {
     let build = BuildIdentity::current();
     let address = endpoint
         .legacy_address()
         .unwrap_or_else(|| endpoint.to_string());
+    let process_start_identity = current_process_start_identity()
+        .context("failed to determine AgenTerm server process start identity")?;
+    let lease_nonce = new_lease_nonce();
     remove_intentional_shutdown_markers(&instances_dir(), &address, Some(&server_scope_id));
     register_instance_in(
         &instances_dir(),
@@ -177,6 +292,10 @@ pub(crate) fn register_typed_instance(
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis(),
+            process_start_identity: Some(process_start_identity),
+            lease_nonce: Some(lease_nonce),
+            server_epoch: Some(server_epoch.to_owned()),
+            test_fixture: false,
             upgrade_identity: Some(UpgradeIdentity {
                 protocol_version: Some(1),
                 version: Some(env!("CARGO_PKG_VERSION").to_owned()),
@@ -304,6 +423,33 @@ fn known_build_value(value: &str) -> Option<String> {
     (value != "unknown" && !value.trim().is_empty()).then(|| value.to_owned())
 }
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+fn new_lease_nonce() -> String {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let sequence = NEXT_LEASE_NONCE.fetch_add(1, Ordering::Relaxed);
+    format!("{:x}-{timestamp:x}-{sequence:x}", std::process::id())
+}
+
+fn current_process_start_identity() -> Result<String> {
+    match observe_process(std::process::id()) {
+        ProcessObservation::Live {
+            start_identity: Some(identity),
+        } => Ok(identity),
+        ProcessObservation::Live {
+            start_identity: None,
+        } => anyhow::bail!("process is live but its start identity is unavailable"),
+        ProcessObservation::Dead { reason } | ProcessObservation::Unknown { reason } => {
+            anyhow::bail!("{reason}")
+        }
+    }
+}
+
 pub(crate) fn discover_instances() -> Result<Vec<DiscoveredInstance>> {
     discover_instances_in(&instances_dir())
 }
@@ -368,40 +514,89 @@ fn legacy_protocol_probe(endpoint: &IpcEndpoint, timeout: Duration) -> bool {
     .is_some_and(|response| response.ok)
 }
 
-pub(crate) fn prune_instance(instance: &DiscoveredInstance) -> Result<()> {
-    match fs::remove_file(&instance.path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => {
-            Err(error).with_context(|| format!("failed to prune {}", instance.path.display()))
-        }
-    }?;
-    if instance.record.schema_version == INSTANCE_SCHEMA_VERSION
-        && instance
-            .record
-            .resolved_endpoint()
-            .is_some_and(|endpoint| endpoint.legacy_address().is_some())
-        && let Some(directory) = instance.path.parent()
-    {
-        let alias = directory.join(format!("{}-v1.json", instance.record.pid));
-        let matches_alias = fs::read(&alias)
-            .ok()
-            .and_then(|content| serde_json::from_slice::<InstanceRecord>(&content).ok())
-            .is_some_and(|record| {
-                record.schema_version == LEGACY_INSTANCE_SCHEMA_VERSION
-                    && same_registered_authority(&instance.record, &record)
-            });
-        if matches_alias {
-            match fs::remove_file(&alias) {
-                Ok(()) => {}
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => {
-                    return Err(error)
-                        .with_context(|| format!("failed to prune {}", alias.display()));
+pub(crate) fn registration_owner_state(record: &InstanceRecord) -> RegistrationOwnerState {
+    match observe_process(record.pid) {
+        ProcessObservation::Dead { reason } => RegistrationOwnerState::Dead { reason },
+        ProcessObservation::Unknown { reason } => RegistrationOwnerState::OwnerUnknown {
+            reason,
+            observed_start_identity: None,
+        },
+        ProcessObservation::Live { start_identity } => {
+            match (record.process_start_identity.as_deref(), start_identity) {
+                (Some(expected), Some(observed)) if expected == observed => {
+                    RegistrationOwnerState::ConfirmedLive {
+                        observed_start_identity: observed,
+                    }
                 }
+                (Some(_), Some(observed)) => RegistrationOwnerState::PidReused {
+                    observed_start_identity: observed,
+                },
+                (None, observed) => RegistrationOwnerState::OwnerUnknown {
+                    reason: "registration_missing_process_start_identity".to_owned(),
+                    observed_start_identity: observed,
+                },
+                (Some(_), None) => RegistrationOwnerState::OwnerUnknown {
+                    reason: "process_start_identity_unavailable".to_owned(),
+                    observed_start_identity: None,
+                },
             }
         }
     }
+}
+
+pub(crate) fn cleanup_instance(instance: &DiscoveredInstance) -> InstanceCleanupReceipt {
+    let owner = registration_owner_state(&instance.record);
+    let mut receipt = cleanup_receipt(instance, &owner);
+    if !owner.is_stale() {
+        receipt.result = "not_eligible".to_owned();
+        return receipt;
+    }
+
+    let current = match fs::read(&instance.path) {
+        Ok(content) => match serde_json::from_slice::<InstanceRecord>(&content) {
+            Ok(record) => record,
+            Err(error) => {
+                receipt.result = "identity_changed".to_owned();
+                receipt.reason = format!("registration_unparseable_during_revalidation:{error}");
+                return receipt;
+            }
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            receipt.result = "already_absent".to_owned();
+            return receipt;
+        }
+        Err(error) => {
+            receipt.result = "failed".to_owned();
+            receipt.reason = format!("registration_revalidation_failed:{error}");
+            return receipt;
+        }
+    };
+    if !same_registration_generation(&instance.record, &current) {
+        receipt.result = "identity_changed".to_owned();
+        receipt.reason = "registration_identity_changed_during_cleanup".to_owned();
+        return receipt;
+    }
+    let revalidated_owner = registration_owner_state(&current);
+    receipt.confirmed_owner_state = revalidated_owner.name().to_owned();
+    receipt.reason = revalidated_owner.reason().to_owned();
+    if !revalidated_owner.is_stale() {
+        receipt.result = "identity_changed".to_owned();
+        return receipt;
+    }
+
+    match fs::remove_file(&instance.path) {
+        Ok(()) => receipt.result = "deleted".to_owned(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            receipt.result = "already_absent".to_owned();
+        }
+        Err(error) => {
+            receipt.result = "failed".to_owned();
+            receipt.reason = format!("registration_delete_failed:{error}");
+            return receipt;
+        }
+    }
+
+    receipt.legacy_alias_result = cleanup_matching_legacy_alias(instance);
     if let Some(directory) = instance.path.parent() {
         remove_intentional_shutdown_markers(
             directory,
@@ -409,38 +604,258 @@ pub(crate) fn prune_instance(instance: &DiscoveredInstance) -> Result<()> {
             instance.record.server_scope_id.as_ref(),
         );
     }
-    Ok(())
+    receipt
+}
+
+fn cleanup_receipt(
+    instance: &DiscoveredInstance,
+    owner: &RegistrationOwnerState,
+) -> InstanceCleanupReceipt {
+    InstanceCleanupReceipt {
+        schema_version: CLEANUP_RECEIPT_SCHEMA_VERSION,
+        operation: "registration.cleanup",
+        target_path: instance.path.display().to_string(),
+        pid: instance.record.pid,
+        endpoint: instance
+            .record
+            .resolved_endpoint()
+            .map(|endpoint| endpoint.to_string()),
+        server_scope_id: instance
+            .record
+            .server_scope_id
+            .as_ref()
+            .map(|scope| scope.to_string()),
+        expected_process_start_identity: instance.record.process_start_identity.clone(),
+        expected_lease_nonce: instance.record.lease_nonce.clone(),
+        expected_server_epoch: instance.record.server_epoch.clone(),
+        confirmed_owner_state: owner.name().to_owned(),
+        reason: owner.reason().to_owned(),
+        result: "not_eligible".to_owned(),
+        legacy_alias_result: "not_attempted".to_owned(),
+        completed_at_unix_ms: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis(),
+    }
+}
+
+fn cleanup_matching_legacy_alias(instance: &DiscoveredInstance) -> String {
+    if instance.record.schema_version != INSTANCE_SCHEMA_VERSION
+        || !instance
+            .record
+            .resolved_endpoint()
+            .is_some_and(|endpoint| endpoint.legacy_address().is_some())
+    {
+        return "not_applicable".to_owned();
+    }
+    let Some(directory) = instance.path.parent() else {
+        return "not_applicable".to_owned();
+    };
+    let alias = directory.join(format!("{}-v1.json", instance.record.pid));
+    let alias_record = match fs::read(&alias) {
+        Ok(content) => serde_json::from_slice::<InstanceRecord>(&content).ok(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return "already_absent".to_owned();
+        }
+        Err(_) => return "failed".to_owned(),
+    };
+    if !alias_record.is_some_and(|record| {
+        record.schema_version == LEGACY_INSTANCE_SCHEMA_VERSION
+            && same_registered_authority(&instance.record, &record)
+    }) {
+        return "identity_changed".to_owned();
+    }
+    match fs::remove_file(alias) {
+        Ok(()) => "deleted".to_owned(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => "already_absent".to_owned(),
+        Err(_) => "failed".to_owned(),
+    }
+}
+
+fn same_registration_generation(left: &InstanceRecord, right: &InstanceRecord) -> bool {
+    left.schema_version == right.schema_version
+        && left.pid == right.pid
+        && left.address == right.address
+        && left.resolved_endpoint() == right.resolved_endpoint()
+        && left.logical_instance == right.logical_instance
+        && left.server_scope_id == right.server_scope_id
+        && left.session == right.session
+        && left.workspace_path == right.workspace_path
+        && left.started_at_unix_ms == right.started_at_unix_ms
+        && left.process_start_identity == right.process_start_identity
+        && left.lease_nonce == right.lease_nonce
+        && left.server_epoch == right.server_epoch
+        && left.test_fixture == right.test_fixture
+}
+
+pub(crate) fn instance_process_is_alive(pid: u32) -> bool {
+    !matches!(observe_process(pid), ProcessObservation::Dead { .. })
+}
+
+enum ProcessObservation {
+    Live { start_identity: Option<String> },
+    Dead { reason: String },
+    Unknown { reason: String },
 }
 
 #[cfg(windows)]
-pub(crate) fn instance_process_is_alive(pid: u32) -> bool {
+fn observe_process(pid: u32) -> ProcessObservation {
     use windows_sys::Win32::{
-        Foundation::{CloseHandle, ERROR_INVALID_PARAMETER, GetLastError, STILL_ACTIVE},
-        System::Threading::{GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION},
+        Foundation::{
+            CloseHandle, ERROR_ACCESS_DENIED, ERROR_INVALID_PARAMETER, FILETIME, GetLastError,
+            STILL_ACTIVE,
+        },
+        System::Threading::{
+            GetExitCodeProcess, GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+        },
     };
 
     let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
     if process.is_null() {
-        return unsafe { GetLastError() } != ERROR_INVALID_PARAMETER;
+        let error = unsafe { GetLastError() };
+        return if error == ERROR_INVALID_PARAMETER {
+            ProcessObservation::Dead {
+                reason: "process_not_found".to_owned(),
+            }
+        } else if error == ERROR_ACCESS_DENIED {
+            ProcessObservation::Unknown {
+                reason: "process_access_denied".to_owned(),
+            }
+        } else {
+            ProcessObservation::Unknown {
+                reason: format!("process_open_failed:{error}"),
+            }
+        };
     }
     let mut exit_code = 0;
-    let queried = unsafe { GetExitCodeProcess(process, &mut exit_code) } != 0;
-    unsafe {
-        CloseHandle(process);
+    if unsafe { GetExitCodeProcess(process, &mut exit_code) } == 0 {
+        unsafe { CloseHandle(process) };
+        return ProcessObservation::Unknown {
+            reason: "process_exit_query_failed".to_owned(),
+        };
     }
-    !queried || exit_code == STILL_ACTIVE as u32
+    if exit_code != STILL_ACTIVE as u32 {
+        unsafe { CloseHandle(process) };
+        return ProcessObservation::Dead {
+            reason: "process_exited".to_owned(),
+        };
+    }
+    let mut creation: FILETIME = unsafe { std::mem::zeroed() };
+    let mut exit: FILETIME = unsafe { std::mem::zeroed() };
+    let mut kernel: FILETIME = unsafe { std::mem::zeroed() };
+    let mut user: FILETIME = unsafe { std::mem::zeroed() };
+    let queried =
+        unsafe { GetProcessTimes(process, &mut creation, &mut exit, &mut kernel, &mut user) } != 0;
+    unsafe { CloseHandle(process) };
+    if !queried {
+        return ProcessObservation::Unknown {
+            reason: "process_start_identity_query_failed".to_owned(),
+        };
+    }
+    let ticks = (u64::from(creation.dwHighDateTime) << 32) | u64::from(creation.dwLowDateTime);
+    ProcessObservation::Live {
+        start_identity: Some(format!("windows-filetime:{ticks}")),
+    }
 }
 
-#[cfg(unix)]
-pub(crate) fn instance_process_is_alive(pid: u32) -> bool {
+#[cfg(target_os = "linux")]
+fn observe_process(pid: u32) -> ProcessObservation {
+    let stat = match fs::read_to_string(format!("/proc/{pid}/stat")) {
+        Ok(stat) => stat,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return ProcessObservation::Dead {
+                reason: "process_not_found".to_owned(),
+            };
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+            return ProcessObservation::Unknown {
+                reason: "process_access_denied".to_owned(),
+            };
+        }
+        Err(error) => {
+            return ProcessObservation::Unknown {
+                reason: format!("process_identity_read_failed:{error}"),
+            };
+        }
+    };
+    let Some(start_ticks) = stat
+        .rsplit_once(") ")
+        .map(|(_, fields)| fields)
+        .and_then(|fields| fields.split_whitespace().nth(19))
+        .filter(|value| value.bytes().all(|byte| byte.is_ascii_digit()))
+    else {
+        return ProcessObservation::Unknown {
+            reason: "process_identity_parse_failed".to_owned(),
+        };
+    };
+    ProcessObservation::Live {
+        start_identity: Some(format!("proc-start-ticks:{start_ticks}")),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn observe_process(pid: u32) -> ProcessObservation {
     let Ok(pid) = i32::try_from(pid) else {
-        return false;
+        return ProcessObservation::Dead {
+            reason: "process_id_out_of_range".to_owned(),
+        };
+    };
+    let mut info = unsafe { std::mem::zeroed::<libc::proc_bsdinfo>() };
+    let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+    let read =
+        unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 0, (&raw mut info).cast(), size) };
+    if read != size {
+        let error = std::io::Error::last_os_error();
+        return match error.raw_os_error() {
+            Some(libc::ESRCH) => ProcessObservation::Dead {
+                reason: "process_not_found".to_owned(),
+            },
+            Some(libc::EPERM) | Some(libc::EACCES) => ProcessObservation::Unknown {
+                reason: "process_access_denied".to_owned(),
+            },
+            _ => ProcessObservation::Unknown {
+                reason: format!("process_identity_read_failed:{error}"),
+            },
+        };
+    }
+    ProcessObservation::Live {
+        start_identity: Some(format!(
+            "macos-start-time:{}.{}",
+            info.pbi_start_tvsec, info.pbi_start_tvusec
+        )),
+    }
+}
+
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
+fn observe_process(pid: u32) -> ProcessObservation {
+    let Ok(pid) = i32::try_from(pid) else {
+        return ProcessObservation::Dead {
+            reason: "process_id_out_of_range".to_owned(),
+        };
     };
     if pid <= 0 {
-        return false;
+        return ProcessObservation::Dead {
+            reason: "process_id_out_of_range".to_owned(),
+        };
     }
-    // kill(pid, 0) returns 0 when the process exists and we may signal it.
-    unsafe { libc::kill(pid, 0) == 0 }
+    if unsafe { libc::kill(pid, 0) } == 0 {
+        ProcessObservation::Live {
+            start_identity: None,
+        }
+    } else {
+        let error = std::io::Error::last_os_error();
+        match error.raw_os_error() {
+            Some(libc::ESRCH) => ProcessObservation::Dead {
+                reason: "process_not_found".to_owned(),
+            },
+            Some(libc::EPERM) => ProcessObservation::Unknown {
+                reason: "process_access_denied".to_owned(),
+            },
+            _ => ProcessObservation::Unknown {
+                reason: format!("process_probe_failed:{error}"),
+            },
+        }
+    }
 }
 
 fn instances_dir() -> PathBuf {
@@ -471,7 +886,7 @@ fn register_instance_in(directory: &Path, record: InstanceRecord) -> Result<Inst
     fs::create_dir_all(directory)
         .with_context(|| format!("failed to create {}", directory.display()))?;
     prune_replaced_stale_registrations(directory, &record)?;
-    let path = directory.join(format!("{}.json", record.pid));
+    let path = registration_path(directory, &record);
     let temporary = directory.join(format!(
         ".{}.{}.tmp",
         record.pid,
@@ -514,7 +929,23 @@ fn register_instance_in(directory: &Path, record: InstanceRecord) -> Result<Inst
         server_scope_id: record
             .server_scope_id
             .expect("schema-v2 registration requires a server scope"),
+        process_start_identity: record
+            .process_start_identity
+            .expect("schema-v2 registration requires a process start identity"),
+        lease_nonce: record
+            .lease_nonce
+            .expect("schema-v2 registration requires a lease nonce"),
+        server_epoch: record
+            .server_epoch
+            .expect("schema-v2 registration requires a server epoch"),
     })
+}
+
+fn registration_path(directory: &Path, record: &InstanceRecord) -> PathBuf {
+    record.lease_nonce.as_ref().map_or_else(
+        || directory.join(format!("{}.json", record.pid)),
+        |nonce| directory.join(format!("{}-{nonce}.json", record.pid)),
+    )
 }
 
 fn prune_replaced_stale_registrations(directory: &Path, incoming: &InstanceRecord) -> Result<()> {
@@ -529,9 +960,16 @@ fn prune_replaced_stale_registrations(directory: &Path, incoming: &InstanceRecor
             && instance.record.pid != incoming.pid
             && instance.record.server_scope_id.as_ref() == Some(incoming_scope)
             && instance.record.resolved_endpoint().as_ref() == Some(&incoming_endpoint)
-            && !instance_process_is_alive(instance.record.pid)
+            && registration_owner_state(&instance.record).is_stale()
         {
-            prune_instance(&instance)?;
+            let receipt = cleanup_instance(&instance);
+            if receipt.failed() {
+                anyhow::bail!(
+                    "failed to remove replaced stale registration {}: {}",
+                    receipt.target_path,
+                    receipt.reason
+                );
+            }
         }
     }
     Ok(())
@@ -591,6 +1029,12 @@ fn discover_instances_in(directory: &Path) -> Result<Vec<DiscoveredInstance>> {
 }
 
 fn same_registered_authority(left: &InstanceRecord, right: &InstanceRecord) -> bool {
+    if let (Some(left_nonce), Some(right_nonce)) = (&left.lease_nonce, &right.lease_nonce) {
+        return left.pid == right.pid
+            && left_nonce == right_nonce
+            && left.process_start_identity == right.process_start_identity
+            && left.server_epoch == right.server_epoch;
+    }
     let same_process_facts = left.pid == right.pid
         && left.started_at_unix_ms == right.started_at_unix_ms
         && left.session == right.session
@@ -605,6 +1049,72 @@ fn same_registered_authority(left: &InstanceRecord, right: &InstanceRecord) -> b
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn schema_v2_without_new_identity_fields_remains_readable() {
+        let record: InstanceRecord = serde_json::from_str(
+            r#"{
+                "schema_version": 2,
+                "pid": 42,
+                "address": "127.0.0.1:49991",
+                "endpoint": "tcp:127.0.0.1:49991",
+                "logical_instance": "main",
+                "server_scope_id": "agt-v1-00000000000000000000000000000000",
+                "version": "0.1.11",
+                "session": "legacy-v2",
+                "workspace_path": "workspace.json",
+                "started_at_unix_ms": 1
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(record.schema_version, INSTANCE_SCHEMA_VERSION);
+        assert!(record.process_start_identity.is_none());
+        assert!(record.lease_nonce.is_none());
+        assert!(record.server_epoch.is_none());
+        assert!(!record.test_fixture);
+    }
+
+    #[test]
+    fn cleanup_refuses_a_registration_generation_changed_after_discovery() {
+        let directory = env::temp_dir().join(format!(
+            "agenterm-instance-cleanup-race-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        let mut record = InstanceRecord {
+            schema_version: INSTANCE_SCHEMA_VERSION,
+            pid: u32::MAX,
+            address: "127.0.0.1:49990".to_owned(),
+            endpoint: Some(IpcEndpoint::from_legacy_address("127.0.0.1:49990").unwrap()),
+            logical_instance: Some(LogicalInstance::Main),
+            server_scope_id: Some(ServerScopeId::current(&LogicalInstance::Main).unwrap()),
+            version: "test".to_owned(),
+            session: "cleanup-race".to_owned(),
+            workspace_path: "workspace.json".to_owned(),
+            started_at_unix_ms: 1,
+            process_start_identity: Some("dead-process".to_owned()),
+            lease_nonce: Some("cleanup-race-original".to_owned()),
+            server_epoch: Some("cleanup-race-epoch".to_owned()),
+            test_fixture: true,
+            upgrade_identity: None,
+        };
+        let path = registration_path(&directory, &record);
+        fs::write(&path, serde_json::to_vec(&record).unwrap()).unwrap();
+        let discovered = discover_instances_in(&directory).unwrap();
+        assert_eq!(discovered.len(), 1);
+
+        record.lease_nonce = Some("cleanup-race-replacement".to_owned());
+        fs::write(&path, serde_json::to_vec(&record).unwrap()).unwrap();
+        let receipt = cleanup_instance(&discovered[0]);
+        assert_eq!(receipt.result, "identity_changed");
+        assert!(path.exists());
+
+        fs::remove_dir_all(directory).unwrap();
+    }
 
     #[test]
     fn registration_is_discoverable_and_removed_on_drop() {
@@ -630,6 +1140,10 @@ mod tests {
             session: "fleet".to_owned(),
             workspace_path: "workspace.json".to_owned(),
             started_at_unix_ms: 1,
+            process_start_identity: Some(current_process_start_identity().unwrap()),
+            lease_nonce: Some("test-registration-drop".to_owned()),
+            server_epoch: Some("test-epoch".to_owned()),
+            test_fixture: false,
             upgrade_identity: None,
         };
         let registration = register_instance_in(&directory, record).unwrap();
@@ -663,6 +1177,10 @@ mod tests {
             session: "fleet".to_owned(),
             workspace_path: "workspace.json".to_owned(),
             started_at_unix_ms: 1,
+            process_start_identity: Some("dead-process".to_owned()),
+            lease_nonce: Some("test-registration-prune".to_owned()),
+            server_epoch: Some("test-epoch".to_owned()),
+            test_fixture: true,
             upgrade_identity: None,
         };
         let registration = register_instance_in(&directory, record).unwrap();
@@ -674,13 +1192,11 @@ mod tests {
                 .exists()
         );
 
-        prune_instance(&records[0]).unwrap();
+        let receipt = cleanup_instance(&records[0]);
+        assert_eq!(receipt.result, "deleted");
+        assert_eq!(receipt.legacy_alias_result, "deleted");
 
-        assert!(
-            !directory
-                .join(format!("{}.json", std::process::id()))
-                .exists()
-        );
+        assert!(!registration.path.exists());
         assert!(
             !directory
                 .join(format!("{}-v1.json", std::process::id()))
@@ -718,6 +1234,10 @@ mod tests {
             session: "fleet".to_owned(),
             workspace_path: "workspace.json".to_owned(),
             started_at_unix_ms: u128::from(pid),
+            process_start_identity: Some(format!("test-start-{pid}")),
+            lease_nonce: Some(format!("test-nonce-{pid}")),
+            server_epoch: Some(format!("test-epoch-{pid}")),
+            test_fixture: true,
             upgrade_identity: None,
         };
 
@@ -738,7 +1258,8 @@ mod tests {
         )
         .unwrap();
 
-        let live = record(std::process::id(), main_scope.clone());
+        let mut live = record(std::process::id(), main_scope.clone());
+        live.process_start_identity = Some(current_process_start_identity().unwrap());
         fs::write(
             directory.join(format!("{}.json", live.pid)),
             serde_json::to_vec(&live).unwrap(),
@@ -758,7 +1279,7 @@ mod tests {
         assert!(!directory.join(format!("{}-v1.json", stale.pid)).exists());
         assert!(directory.join(format!("{}.json", live.pid)).exists());
         assert!(directory.join(format!("{}.json", unrelated.pid)).exists());
-        assert!(directory.join(format!("{}.json", incoming.pid)).exists());
+        assert!(registration_path(&directory, &incoming).exists());
 
         drop(registration);
         fs::remove_dir_all(directory).unwrap();
@@ -833,6 +1354,10 @@ mod tests {
                 session: "dev".to_owned(),
                 workspace_path: "dev.json".to_owned(),
                 started_at_unix_ms: 2,
+                process_start_identity: Some("test-start-42".to_owned()),
+                lease_nonce: Some("test-nonce-42".to_owned()),
+                server_epoch: Some("test-epoch-42".to_owned()),
+                test_fixture: false,
                 upgrade_identity: None,
             })
             .unwrap(),
@@ -932,6 +1457,10 @@ mod tests {
             session: "legacy-main".to_owned(),
             workspace_path: "AgenTerm/workspace.json".to_owned(),
             started_at_unix_ms: 1,
+            process_start_identity: None,
+            lease_nonce: None,
+            server_epoch: None,
+            test_fixture: false,
             upgrade_identity: None,
         };
         fs::write(
@@ -1000,6 +1529,10 @@ mod tests {
             session: "native-main".to_owned(),
             workspace_path: "AgenTerm/workspace.json".to_owned(),
             started_at_unix_ms: 1,
+            process_start_identity: Some(current_process_start_identity().unwrap()),
+            lease_nonce: Some("native-main-test".to_owned()),
+            server_epoch: Some("native-main-epoch".to_owned()),
+            test_fixture: false,
             upgrade_identity: None,
         };
         assert_eq!(
