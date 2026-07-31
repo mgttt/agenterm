@@ -109,7 +109,9 @@ this state does not yet satisfy the static source-boundary gate.
    smoke has passed.
 5. Add the static production source boundary test only after no product native
    escape hatches remain. It rejects OS cfg/native API imports outside the
-   approved platform adapters, required bin entry points, and tests.
+   approved platform adapters, required bin entry points, and tests. The manual
+   production scan is now clean; implementing this failing gate is the next
+   serial leaf.
 6. Run serial integrated `fmt`, Clippy, unit tests, owning public CLI smoke,
    boundary scan, then the applicable Windows qualification lane. No Candidate,
    tag, or public release is implied by this plan.

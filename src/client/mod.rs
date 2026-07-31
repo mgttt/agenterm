@@ -1528,7 +1528,6 @@ fn run_list_instances(arguments: &[String]) -> i32 {
     if cleanup_failed { 1 } else { 0 }
 }
 
-#[cfg_attr(not(windows), allow(unused_variables, unused_mut))]
 fn run_cli(arguments: Vec<String>, control_options: CliControlOptions) -> i32 {
     let mut arguments = arguments;
     if control_command_requests_help(&arguments) {

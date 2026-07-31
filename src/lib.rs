@@ -1,5 +1,3 @@
-#![cfg_attr(not(windows), allow(dead_code))]
-
 use std::time::Duration;
 
 mod build_identity;

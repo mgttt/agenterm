@@ -103,7 +103,7 @@ pub(crate) fn tree_rows(nodes: &[TabTreeNode]) -> Vec<TabTreeRow> {
 }
 
 /// Filter preorder tree rows to those visible when ancestor tabs are collapsed.
-#[cfg_attr(not(unix), allow(dead_code))]
+#[allow(dead_code)] // Consumed by the Unix frontend adapter.
 pub(crate) fn visible_tree_rows(
     all_rows: &[TabTreeRow],
     collapsed_ids: &HashSet<u64>,

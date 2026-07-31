@@ -438,19 +438,19 @@ pub(crate) fn scrollback_for_thumb_top(
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg_attr(not(unix), allow(dead_code))]
+#[allow(dead_code)] // Consumed by the Unix frontend adapter.
 pub(crate) enum ScrollbarHit {
     Thumb,
     TrackAbove,
     TrackBelow,
 }
 
-#[cfg_attr(not(unix), allow(dead_code))]
+#[allow(dead_code)] // Consumed by the Unix frontend adapter.
 pub(crate) const WHEEL_DELTA: i32 = 120;
-#[cfg_attr(not(unix), allow(dead_code))]
+#[allow(dead_code)] // Consumed by the Unix frontend adapter.
 pub(crate) const WHEEL_ROWS_PER_NOTCH: usize = 3;
 
-#[cfg_attr(not(unix), allow(dead_code))]
+#[allow(dead_code)] // Consumed by the Unix frontend adapter.
 pub(crate) fn scrollbar_hit_test(
     geometry: &TerminalScrollbarGeometry,
     x: i32,
@@ -470,7 +470,7 @@ pub(crate) fn scrollbar_hit_test(
 }
 
 /// Map a client pixel inside the terminal content (excluding scrollbar) to a cell.
-#[cfg_attr(not(unix), allow(dead_code))]
+#[allow(dead_code)] // Consumed by the Unix frontend adapter.
 pub(crate) fn terminal_cell_at(
     terminal: PixelRect,
     x: i32,
@@ -494,7 +494,7 @@ pub(crate) fn terminal_cell_at(
 }
 
 /// Convert a wheel notch/pixel delta into Win32-style `WHEEL_DELTA` units.
-#[cfg_attr(not(unix), allow(dead_code))]
+#[allow(dead_code)] // Consumed by the Unix frontend adapter.
 pub(crate) fn wheel_delta_units(line_or_pixel_y: f64, is_line_delta: bool) -> i32 {
     if is_line_delta {
         (line_or_pixel_y * f64::from(WHEEL_DELTA)).round() as i32
@@ -672,7 +672,7 @@ fn tree_row_geometry_impl(
     }
 }
 
-#[cfg_attr(not(unix), allow(dead_code))]
+#[allow(dead_code)] // Consumed by the Unix frontend adapter.
 pub(crate) fn sidebar_scrollbar_track(sidebar_tree: PixelRect) -> PixelRect {
     PixelRect {
         left: sidebar_tree.left,
@@ -682,14 +682,14 @@ pub(crate) fn sidebar_scrollbar_track(sidebar_tree: PixelRect) -> PixelRect {
     }
 }
 
-#[cfg_attr(not(unix), allow(dead_code))]
+#[allow(dead_code)] // Consumed by the Unix frontend adapter.
 pub(crate) fn sidebar_row_capacity(sidebar_tree_height: i32) -> usize {
     usize::try_from((sidebar_tree_height - TAB_TOP).max(0) / TAB_HEIGHT)
         .unwrap_or_default()
         .max(1)
 }
 
-#[cfg_attr(not(unix), allow(dead_code))]
+#[allow(dead_code)] // Consumed by the Unix frontend adapter.
 pub(crate) fn translate_tree_row_geometry(
     mut geometry: TreeRowGeometry,
     delta_x: i32,
@@ -724,7 +724,7 @@ pub(crate) fn translate_tree_row_geometry(
     geometry
 }
 
-#[cfg_attr(not(unix), allow(dead_code))]
+#[allow(dead_code)] // Consumed by the Unix frontend adapter.
 pub(crate) fn sidebar_tree_row_geometry(
     sidebar_tree: PixelRect,
     viewport_position: usize,
@@ -799,7 +799,7 @@ pub(crate) fn tree_connector_segments(
     segments
 }
 
-#[cfg_attr(not(unix), allow(dead_code))]
+#[allow(dead_code)] // Consumed by the Unix frontend adapter.
 pub(crate) fn sidebar_scrollbar_geometry(
     track: PixelRect,
     offset: usize,

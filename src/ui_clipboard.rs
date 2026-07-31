@@ -24,7 +24,7 @@ pub(crate) fn normalize_terminal_paste(text: &str) -> String {
 }
 
 /// Normalize clipboard text for the composer strip (LF newlines, safe controls only).
-#[cfg_attr(not(unix), allow(dead_code))]
+#[allow(dead_code)] // Consumed by the Unix frontend adapter.
 pub(crate) fn normalize_composer_paste(text: &str) -> String {
     let mut normalized = String::with_capacity(text.len());
     let mut characters = text.chars().peekable();
