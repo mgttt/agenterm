@@ -556,17 +556,18 @@ pub(crate) fn default_workspace_path(scope: &ServerScopeId) -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(env::temp_dir)
         .join("AgenTerm");
-    #[cfg(not(windows))]
-    let root = env::var_os("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share")))
-        .unwrap_or_else(env::temp_dir)
-        .join("agenterm");
+    #[cfg(unix)]
+    let root = unix_data_root_from(
+        env::var_os("XDG_DATA_HOME"),
+        env::var_os("HOME"),
+        env::temp_dir(),
+    );
     root.join("workspaces")
         .join(format!("{}.json", scope.as_str()))
 }
 
 pub(crate) fn default_workspace_path_for(resolved: &ResolvedIpcEndpoint) -> PathBuf {
+    #[cfg(windows)]
     if resolved.logical_instance == LogicalInstance::Main {
         return env::var_os("LOCALAPPDATA")
             .map(PathBuf::from)
@@ -575,6 +576,30 @@ pub(crate) fn default_workspace_path_for(resolved: &ResolvedIpcEndpoint) -> Path
             .join("workspace.json");
     }
     default_workspace_path(&resolved.server_scope_id)
+}
+
+#[cfg(unix)]
+pub(crate) fn unix_data_root_from(
+    xdg_data_home: Option<std::ffi::OsString>,
+    home: Option<std::ffi::OsString>,
+    temp_dir: PathBuf,
+) -> PathBuf {
+    let data_home = xdg_data_home
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .or_else(|| {
+            home.map(PathBuf::from)
+                .filter(|path| path.is_absolute())
+                .map(|path| path.join(".local").join("share"))
+        })
+        .unwrap_or_else(|| {
+            if temp_dir.is_absolute() {
+                temp_dir
+            } else {
+                PathBuf::from("/tmp")
+            }
+        });
+    data_home.join("agenterm")
 }
 
 fn default_native_endpoint(scope: &ServerScopeId) -> IpcEndpoint {
@@ -998,9 +1023,15 @@ mod tests {
         assert_eq!(default.logical_instance, LogicalInstance::Main);
         assert_eq!(default.endpoint.transport_name(), native_transport_name());
         assert!(!default.explicit);
+        #[cfg(windows)]
         assert!(
             default_workspace_path_for(&default)
                 .ends_with(PathBuf::from("AgenTerm").join("workspace.json"))
+        );
+        #[cfg(unix)]
+        assert_eq!(
+            default_workspace_path_for(&default),
+            default_workspace_path(&default.server_scope_id)
         );
 
         let native_main = resolve_ipc_endpoint_with_environment(
@@ -1016,7 +1047,13 @@ mod tests {
             default_workspace_path_for(&native_main),
             default_workspace_path_for(&default)
         );
+        #[cfg(windows)]
         assert_ne!(
+            default_workspace_path_for(&native_main),
+            default_workspace_path(&native_main.server_scope_id)
+        );
+        #[cfg(unix)]
+        assert_eq!(
             default_workspace_path_for(&native_main),
             default_workspace_path(&native_main.server_scope_id)
         );
@@ -1057,5 +1094,60 @@ mod tests {
         assert!(matches!(main_endpoint, IpcEndpoint::NamedPipe(_)));
         #[cfg(unix)]
         assert!(matches!(main_endpoint, IpcEndpoint::UnixSocket(_)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_persistence_root_prefers_absolute_xdg_then_absolute_home() {
+        assert_eq!(
+            unix_data_root_from(
+                Some("/srv/profile-data".into()),
+                Some("/home/example".into()),
+                PathBuf::from("/var/tmp"),
+            ),
+            PathBuf::from("/srv/profile-data/agenterm")
+        );
+        assert_eq!(
+            unix_data_root_from(
+                Some("relative-data".into()),
+                Some("/home/example".into()),
+                PathBuf::from("/var/tmp"),
+            ),
+            PathBuf::from("/home/example/.local/share/agenterm")
+        );
+        assert_eq!(
+            unix_data_root_from(None, None, PathBuf::from("relative-tmp")),
+            PathBuf::from("/tmp/agenterm")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_main_and_dev_workspaces_are_stable_and_scope_distinct() {
+        let main = resolve_ipc_endpoint_with_environment(
+            &EndpointSelectorArgs {
+                instance: Some("main".to_owned()),
+                ..EndpointSelectorArgs::default()
+            },
+            &EndpointSelectorArgs::default(),
+            None,
+        )
+        .unwrap();
+        let dev = resolve_ipc_endpoint_with_environment(
+            &EndpointSelectorArgs {
+                instance: Some("dev".to_owned()),
+                ..EndpointSelectorArgs::default()
+            },
+            &EndpointSelectorArgs::default(),
+            None,
+        )
+        .unwrap();
+        let main_path = default_workspace_path_for(&main);
+        let dev_path = default_workspace_path_for(&dev);
+        assert!(main_path.is_absolute());
+        assert!(dev_path.is_absolute());
+        assert_ne!(main_path, dev_path);
+        assert_eq!(main_path, default_workspace_path(&main.server_scope_id));
+        assert_eq!(dev_path, default_workspace_path(&dev.server_scope_id));
     }
 }
