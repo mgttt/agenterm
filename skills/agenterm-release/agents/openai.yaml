@@ -1,0 +1,4 @@
+interface:
+  display_name: "AgenTerm Release"
+  short_description: "Run exact-SHA Candidate and approved Promotion safely"
+  default_prompt: "Use $agenterm-release to validate and operate an AgenTerm Candidate or Release promotion."

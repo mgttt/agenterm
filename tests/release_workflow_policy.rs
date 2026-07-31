@@ -7,6 +7,8 @@ static PROMOTION: LazyLock<String> =
 static INTEGRITY: LazyLock<String> = LazyLock::new(|| {
     include_str!("../.github/workflows/release-integrity.yml").replace("\r\n", "\n")
 });
+static GIT_ATTRIBUTES: LazyLock<String> =
+    LazyLock::new(|| include_str!("../.gitattributes").replace("\r\n", "\n"));
 
 const CHECKOUT_SHA: &str = "08eba0b27e820071cde6df949e0beb9ba4906955";
 const UPLOAD_SHA: &str = "ea165f8d65b6e75b540449e92b4886f43607fa02";
@@ -117,4 +119,20 @@ fn workflow_actions_are_immutable_and_post_release_integrity_is_read_only() {
     assert!(INTEGRITY.contains("verified-promotion-$PROMOTION_RUN_ID"));
     assert!(INTEGRITY.contains("candidate-manifest.json"));
     assert!(!INTEGRITY.contains("\n  push:"));
+}
+
+#[test]
+fn release_identity_inputs_have_platform_stable_line_endings() {
+    for path in [
+        "Cargo.lock",
+        "scripts/artifacts.json",
+        "scripts/qualification-gates.json",
+    ] {
+        assert!(
+            GIT_ATTRIBUTES
+                .lines()
+                .any(|line| line == format!("{path} text eol=lf")),
+            "release identity input lacks an LF policy: {path}"
+        );
+    }
 }

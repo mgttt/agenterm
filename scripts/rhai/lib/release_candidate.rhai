@@ -358,11 +358,20 @@ fn validate_provenance(
         "candidate_provenance_artifact:" + name
     );
     require(
-        provenance.source_commit == source_sha
-            && provenance.source_tag == expected_tag
-            && provenance.cargo_lock_sha256 == cargo_hash
-            && provenance.artifact_manifest_sha256 == artifact_hash,
-        "candidate_provenance_source:" + name
+        provenance.source_commit == source_sha,
+        "candidate_provenance_source_commit:" + name
+    );
+    require(
+        provenance.source_tag == expected_tag,
+        "candidate_provenance_source_tag:" + name
+    );
+    require(
+        provenance.cargo_lock_sha256 == cargo_hash,
+        "candidate_provenance_cargo_lock:" + name
+    );
+    require(
+        provenance.artifact_manifest_sha256 == artifact_hash,
+        "candidate_provenance_artifact_manifest:" + name
     );
     require(
         provenance.os == os_name && provenance.arch == arch,

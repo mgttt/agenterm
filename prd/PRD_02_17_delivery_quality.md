@@ -168,8 +168,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     Windows qualification receipt and all six platform archives, hashes, SBOM
     and provenance for one exact commit; package-member, executable-permission
     and launcher defects are therefore observable before a release tag exists;
-    the contract and fail-closed fixtures are implemented, while the first
-    six-runner GitHub execution remains to be recorded
+    the first six-runner GitHub execution built and qualified every platform,
+    then correctly failed closed during aggregate because Windows and Unix had
+    hashed line-ending-dependent source bytes. Release-identity inputs are now
+    pinned to LF with field-specific provenance diagnostics; a fully sealed
+    rerun remains to be recorded
   - [~] after explicit approval, the promotion workflow verifies
     tag/version/commit,
     downloads the exact candidate artifacts, revalidates every receipt and
@@ -180,6 +183,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     recent successful run, missing/expired artifacts, an incomplete platform
     matrix, receipt drift or tampered bytes; fallback means producing a new
     candidate, not silently rebuilding during promotion
+  - [x] Candidate dispatch is a mechanical, non-publishing action that may be
+    automated after an explicit exact-SHA candidate request; public Promotion
+    remains the human authority boundary and requires a separate approval.
+    Git/GCM transport credentials, an authenticated GitHub CLI, a connected
+    GitHub App and the ephemeral runner `GITHUB_TOKEN` are distinct
+    authentication domains. Agents must use only an actually exposed
+    workflow-dispatch capability and must never extract a GCM secret to bridge
+    Git authentication into the Actions REST API
   - [~] queue, checkout/toolchain, cache restore, compile, test, package,
     artifact transfer, promotion and tag-to-public-Release durations are
     machine-readable; initial targets are hot-cache candidate p50 <= 8 minutes

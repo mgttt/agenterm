@@ -12,6 +12,16 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   named-task CLI while retaining private `--worker`/`--framed-worker` modes;
   `agenterm-cli.exe script ...` is a thin compatibility route to the same
   catalog, parser, supervisor, and runtime.
+- [ ] v0.1.12 naming investigation may make `agenterm-rhai.exe` the canonical
+  public executable because Rhai—not a generic pluggable script language—is
+  the stable runtime contract. This is a product-name migration only: the
+  object/interface tree, unrestricted authority, worker isolation, task
+  manifest and typed results must remain byte-for-byte or semantically
+  equivalent at the public boundary. Before implementation, record every
+  bootstrap, CI, Candidate, package, documentation and external caller; if a
+  compatibility `agenterm-script` entry is retained, it forwards to the one
+  implementation, emits no divergent behavior, and has an evidence-based
+  removal milestone.
 - [x] every ordinary invocation receives the same unrestricted local runtime
   surface. No invocation mode, task label, profile, catalog capability, caller,
   or entry point gates API registration or execution; the future Agent harness

@@ -385,7 +385,22 @@ fn candidate_rejects_provenance_lies_and_missing_unsigned_preview_notice() {
         write_json(&provenance_path, &provenance);
         let rejected = aggregate(&fixture);
         assert!(!rejected.status.success());
-        assert!(output_text(&rejected).contains("candidate_provenance_source"));
+        assert!(output_text(&rejected).contains("candidate_provenance_source_commit"));
+    }
+
+    {
+        let fixture = fixture("provenance-cargo-lock");
+        let provenance_path = fixture.assets.join(format!(
+            "agenterm-{VERSION}-windows-x86_64.zip.provenance.json"
+        ));
+        let mut provenance: Value =
+            serde_json::from_slice(&fs::read(&provenance_path).expect("read provenance"))
+                .expect("parse provenance");
+        provenance["cargo_lock_sha256"] = json!("f".repeat(64));
+        write_json(&provenance_path, &provenance);
+        let rejected = aggregate(&fixture);
+        assert!(!rejected.status.success());
+        assert!(output_text(&rejected).contains("candidate_provenance_cargo_lock"));
     }
 
     let fixture = fixture("preview-notice");

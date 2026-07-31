@@ -99,26 +99,82 @@ Use PowerShell from the repository root:
 .\check.cmd --release --include-stress # exact qualification + receipt
 .\dist\agenterm-script.exe task run package-qualified --manifest .\agenterm.tasks.json
 .\build.bat release     # distributable release artifact
-.\release.cmd           # public versions only: qualify/package/tag/push for CI
+.\release.cmd --rehearse # read-only release validation/rehearsal
 ```
 
 Linux/macOS have matching `./build.sh`, `./check.sh`, `./lint.sh`, and
 `./release.sh` aliases over `scripts/bootstrap.sh`. Native Unix `build` emits
 the six client binaries; default Unix `check` is the portable Quick lane, and
 default Unix `release` is validation-only. Stress qualification, Windows
-packaging, tag, and push remain explicit Windows release-authority operations.
+packaging and exact-byte qualification remain explicit Windows operations.
 Do not add an unmatched `.cmd` or `.bat`: prefer a named Rhai task, and when a
 Windows bootstrap remains necessary, add the equivalent `.sh` entry and cover
 the pair in the cross-platform automation audit and Linux/macOS CI.
 
-For this repository, `release.cmd` is the authoritative formal-release entry
-point. It pushes `main` and the version tag directly through Git/GCM; do not
-create a release PR, require a local `gh` installation, or substitute a generic
-GitHub publishing workflow. The tag-triggered runner owns GitHub Release
-creation and may use its bundled `gh` with `GITHUB_TOKEN`.
-Version 0.1.7 is an internal qualification baseline: both `release.cmd` and
-the tag workflow reject it. Never create or push `v0.1.7`; qualify it with the
-stress-inclusive command above and use only the ignored dry-run package.
+Formal delivery is an exact-SHA two-stage GitHub Actions contract.
+Before Candidate, Promotion, release authentication, or Actions babysitting,
+read `skills/agenterm-release/SKILL.md` and its authentication reference.
+`Release Candidate` performs the one stress-inclusive Windows qualification
+and builds/seals all six platform artifacts before a tag exists. `Release`
+accepts an exact Candidate run plus explicit `publish-vX.Y.Z` confirmation,
+revalidates the sealed bytes, atomically creates the tag, and promotes without
+Cargo, tests, packaging, signing, notarization, or overwrite. `release.cmd`
+validates or rehearses only and intentionally refuses local publication.
+Candidate dispatch is a mechanical action that may be automated after an
+explicit exact-SHA request; public Promotion is the human release-authority
+boundary. Version 0.1.7 remains an internal qualification baseline and must
+never receive a tag or public Release.
+
+## GitHub Actions observation
+
+Treat Actions observation as a bounded read-only operation, not a continuous
+15-second public-API poll. A previous multi-agent Candidate watch exhausted
+GitHub's anonymous REST allowance because every observer behind the same shared
+NAT consumed the same low-rate source; the run itself remained healthy, but
+status, jobs, logs, and artifacts became temporarily unobservable. The failure
+tree is:
+
+- duplicated observers or lost run identity cause repeated search/list calls;
+- fixed short intervals amplify calls while long matrix jobs are unchanged;
+- anonymous REST shares an IP-based budget across agents and unrelated users;
+- missing rate-limit handling turns temporary observation loss into API
+  hammering, misleading failure reports, and unnecessary human intervention.
+
+Use observation channels in this order:
+
+1. the connected GitHub application/connector for authenticated run, job, log,
+   and artifact reads;
+2. an already authenticated `gh` session, without extracting or printing its
+   token;
+3. public REST only for a small bounded fallback probe;
+4. browser/manual inspection when no programmatic authenticated reader exists,
+   or when an explicitly human-authorized mutation such as dispatch is needed.
+
+Resolve the workflow run once, retain its `run_id` and `run_attempt`, and query
+that run directly thereafter. Do not repeatedly search by branch, SHA, or
+workflow name. Keep one observer owner per run and share its last structured
+result with other agents. Cache unchanged job/log/artifact results where the
+reader permits it, use conditional requests (`ETag`/`If-None-Match`) for public
+REST, and fetch logs or artifacts only after the owning job reaches a relevant
+terminal state.
+
+Polling must be finite and state-aware: start no faster than 30 seconds, apply
+exponential backoff with jitter up to at least 2 minutes while state is
+unchanged, reset only on a meaningful state transition, and stop at an explicit
+deadline or terminal conclusion. Honor `Retry-After`,
+`X-RateLimit-Remaining`, and `X-RateLimit-Reset`; near exhaustion, stop public
+REST calls until reset and switch to an authenticated channel or report that
+observation—not the workflow—is temporarily unavailable. Never fan out polling
+across subagents.
+
+Git transport authentication and GitHub API authentication are separate
+authorities. GCM credentials are for Git fetch/push and must never be queried,
+decoded, copied into `GH_TOKEN`, logged, or reused to manufacture API access.
+Likewise, connector or `gh` credentials must not be written into Git remotes.
+If dispatch or another mutation is unavailable through the connected channel,
+pause and give the human the exact workflow, immutable SHA/run identity, fields,
+and expected effect; do not probe credential stores or expose tokens to avoid
+that human-in-the-loop boundary.
 
 Use a validation ladder instead of running the largest gate after every edit:
 run `check.cmd --quick` once after a coherent implementation, then `build.bat`
@@ -250,7 +306,7 @@ behavior.
 - Update the PRD tree when capability state changes.
 - Keep README human-facing and brief; keep this file agent-facing.
 - Do not commit generated binaries. Local artifacts belong in ignored `dist/`;
-  downloadable binaries are published by the tag-triggered release workflow.
+  downloadable binaries are published only by exact-Candidate Promotion.
 - Keep `agenterm.exe` as a Windows-subsystem GUI, `agenterm-cli.exe` as the
   native control client, and `agenterm-mux.exe` as the compatibility client.
   All entry points must reuse the library.

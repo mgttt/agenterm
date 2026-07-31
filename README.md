@@ -228,18 +228,27 @@ IPC listens and connects only on numeric loopback addresses (`127.0.0.0/8` or
 ## Release
 
 Keep `Cargo.toml`'s version current, commit the release state on `main`, then
-run:
+run the local validation/rehearsal:
 
 ```powershell
 .\lint.cmd
-.\release.cmd
+.\release.cmd --rehearse
 ```
 
-The coordinator runs the complete stress-inclusive qualification, creates and
-records a byte-qualified package rehearsal, then atomically pushes `main` plus
-the `v<version>` tag. Use `.\release.cmd --rehearse` to stop before tag
-creation or network mutation. GitHub Actions independently validates the clean
-tag before publishing the platform assets and generated notes.
+Public delivery is an exact-SHA two-stage GitHub Actions flow:
+
+1. `Release Candidate` qualifies one explicit commit once and seals all six
+   platform archives, hashes, SBOM, provenance, and the Windows qualification
+   receipt into an immutable Candidate artifact.
+2. After explicit release approval, `Release` verifies and promotes those same
+   bytes without rebuilding, retesting, repackaging, or overwriting an existing
+   tag/Release.
+
+`release.cmd` is validation/rehearsal only and intentionally refuses local
+publication. Candidate dispatch may be automated by an authenticated GitHub
+Actions client; public Promotion remains a separate human approval boundary.
+Git/GCM authentication used by `git push` is not GitHub Actions API
+authentication.
 
 ## Documentation
 

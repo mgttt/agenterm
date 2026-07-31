@@ -186,6 +186,18 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   that process boundary and adds a task-lived local scheduler, standard
   library, modules, named tasks, and typed Fleet APIs without becoming a
   persistent daemon or an Agent permission layer
+- [ ] v0.1.12 executable-name decision: evaluate `agenterm-rhai.exe` /
+  `agenterm-rhai` as the canonical name for that same unrestricted Rhai
+  runtime. A rename must preserve one implementation and one public CLI/task
+  contract, inventory every bootstrap/package/test/documentation caller, and
+  keep `agenterm-script` only as an explicitly time-bounded forwarding
+  compatibility entry if measured external usage requires it. It must not
+  create two runtimes, two task catalogs, or a permission-reduced variant.
+  Future consolidation should prefer a shared Rust runtime library plus thin
+  role-specific entry points; merging executables is not accepted merely to
+  reduce file count when GUI/Console subsystem behavior, pipeline exit codes,
+  process supervision, upgrade isolation, or independent failure boundaries
+  would regress.
 - [ ] `agenterm-net` is an independent research executable and future optional
   service for libp2p/IPFS transport and content primitives. It is not linked
   into `agenterm.exe` or `agenterm-server`, is not a stable release asset until

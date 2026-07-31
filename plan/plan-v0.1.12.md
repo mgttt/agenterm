@@ -53,12 +53,21 @@ v0.1.12  Convergence & Fast Promotion
 │  └─ 只有端到端收益显著且可回退时才切换默认 runner
 │
 ├─ P1：脚本与二级产品继续准备
-│  ├─ agenterm-script 继续作为仓库自动化和未来扩展底座
+│  ├─ 评估把 canonical Rhai 入口从 agenterm-script 重命名为 agenterm-rhai
+│  │  ├─ 名字直接表达语言/runtime 身份，不再暗示抽象的通用脚本沙箱
+│  │  ├─ 先冻结 CLI、task、worker、包名、文档和第三方调用者影响清单
+│  │  ├─ 若本轮实施，agenterm-script 作为有期限的兼容转发入口，不复制 runtime
+│  │  └─ 构建、测试、Candidate、Promotion 必须在 canonical 名切换后保持自举
 │  ├─ Control Center 的 Workflows/Extensions/InfoHub 保持真实空状态
 │  ├─ agenterm-net 继续独立研究，不进入稳定 server 热路径
 │  └─ WebView host 继续 renderer-neutral，不因“界面丰富”仓促替换原生壳
 │
 └─ 明确延后与未来计划
+   ├─ executable consolidation 决策树
+   │  ├─ 首选：共享 Rust runtime/library + 多个职责清晰的薄入口
+   │  ├─ 可研究：agenterm-rhai 被宿主进程内嵌，但独立 CLI 合同仍可用
+   │  ├─ 可研究：兼容入口按使用证据退场，而不是永久增加同义 EXE
+   │  └─ 不做：为“少一个文件”牺牲 GUI/Console 子系统、管道退出码或故障隔离
    ├─ 完整 Workflow/Pipeline 设计器、调度器与跨机恢复
    ├─ PluginHub/AppHub 公共市场、交易、静默安装与自动更新
    ├─ InfoHub 自动执行外部信号
