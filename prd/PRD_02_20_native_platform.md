@@ -103,7 +103,8 @@ The migration is complete only when all of the following are true:
 - [x] `selected.rs` is the sole production adapter assembly point; the former
   top-level Windows/Linux/macOS module trees are adapter-private `native/`
   mechanisms, `platform/mod.rs` contains no production OS selection, and an
-  internal gate rejects selection cfg elsewhere in contracts or services
+  internal gate rejects selection cfg and native API markers elsewhere in
+  contracts or services
 - [x] all three platform adapters satisfy the same facade contract tests; a
   missing capability remains a typed unsupported result, never an implicit
   fallback. One host test loads all three OS-neutral adapter manifests and

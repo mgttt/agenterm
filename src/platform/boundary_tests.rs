@@ -34,17 +34,6 @@ const SUBSYSTEM_ENTRYPOINTS: &[&str] = &[
 ];
 const WINDOWS_SUBSYSTEM_ATTRIBUTE: &str = "#![cfg_attr(windows, windows_subsystem = \"windows\")]";
 
-const OS_SELECTION_MARKERS: &[&str] = &[
-    "#[cfg(windows",
-    "#[cfg(unix",
-    "#[cfg_attr(windows",
-    "#[cfg_attr(unix",
-    "cfg!(windows",
-    "cfg!(unix",
-    "target_os",
-    "target_family",
-];
-
 #[test]
 fn production_sources_use_platform_as_the_only_native_boundary() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -91,7 +80,7 @@ fn production_sources_use_platform_as_the_only_native_boundary() {
 }
 
 #[test]
-fn production_os_selection_stays_in_selected_and_adapters() {
+fn production_native_mechanics_stay_in_selected_and_adapters() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let platform_root = root.join("src/platform");
     let mut sources = Vec::new();
@@ -111,7 +100,7 @@ fn production_os_selection_stays_in_selected_and_adapters() {
         }
         let source = fs::read_to_string(&path).expect("read Rust source");
         let production = mask_test_items(&mask_comments_and_strings(&source));
-        for marker in OS_SELECTION_MARKERS {
+        for marker in FORBIDDEN_MARKERS {
             if let Some(position) = production.find(marker) {
                 let line = production[..position]
                     .bytes()
@@ -119,7 +108,7 @@ fn production_os_selection_stays_in_selected_and_adapters() {
                     .count()
                     + 1;
                 violations.push(format!(
-                    "{relative}:{line}: OS selection marker `{marker}` must stay in selected.rs or adapters"
+                    "{relative}:{line}: native marker `{marker}` must stay in selected.rs or adapters"
                 ));
             }
         }
@@ -127,7 +116,7 @@ fn production_os_selection_stays_in_selected_and_adapters() {
 
     assert!(
         violations.is_empty(),
-        "platform OS selection has more than one assembly point:\n{}",
+        "platform contracts/services contain native mechanics or OS selection:\n{}",
         violations.join("\n")
     );
 }

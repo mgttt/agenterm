@@ -32,7 +32,8 @@ the target and mounts both service adapters and their private `native/`
 mechanisms. The former top-level `platform/{windows,linux,macos}` trees are
 physically folded into `adapters/{windows,linux,macos}/native`; shared
 `platform/mod.rs` performs no production OS selection. A second static gate
-enforces that platform-internal OS cfg remains in `selected.rs` or adapters.
+enforces that platform-internal OS cfg and native API markers remain in
+`selected.rs` or adapters, keeping contracts and services platform-neutral.
 
 IPC implementation state: endpoint identity and selection are in
 `contract::ipc`; transport failure codes and their endpoint-preserving error
