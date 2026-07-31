@@ -72,6 +72,19 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $end = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
           "duration_ms=$($end - $start)" | Add-Content -Path $env:GITHUB_OUTPUT
+      - name: Prove native Windows IPC main/dev authorities
+        id: native-ipc-main-dev
+        shell: pwsh
+        env:
+          AGENTERM_NO_ACTIVATE: "1"
+        run: |
+          $start = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+          $ErrorActionPreference = "Stop"
+          dist\agenterm-script.exe task run native-ipc-smoke `
+            --manifest agenterm.tasks.json -- --ci-main-dev
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $end = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+          "duration_ms=$($end - $start)" | Add-Content -Path $env:GITHUB_OUTPUT
       - name: Publish Windows quality timing summary
         if: always()
         continue-on-error: true
@@ -101,6 +114,7 @@ jobs:
             echo "windows_install_lint_ms: ${{ steps.install-lint.outputs.duration_ms || 'n/a' }}"
             echo "windows_quality_gate_ms: ${{ steps.quality-gate.outputs.duration_ms || 'n/a' }}"
             echo "windows_public_interface_ms: ${{ steps.public-interface.outputs.duration_ms || 'n/a' }}"
+            echo "windows_native_ipc_main_dev_ms: ${{ steps.native-ipc-main-dev.outputs.duration_ms || 'n/a' }}"
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload Windows quality timing
         if: always()
