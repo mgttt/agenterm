@@ -80,6 +80,25 @@ fn wait_for_window(gui_child) {
     throw "theme_window_timeout";
 }
 
+fn wait_for_server_stop(context, cli) {
+    for attempt in 0..200 {
+        let probe = test_harness::run_cli(
+            context,
+            cli,
+            ["ui-snapshot"],
+            true,
+            []
+        );
+        let output = probe.stdout + probe.stderr;
+        if !probe.success
+                && output.contains("AgenTerm server is not running") {
+            return;
+        }
+        rhai::task::sleep(std::time::Duration::from_millis(25));
+    }
+    throw "theme_server_stop_timeout";
+}
+
 fn wait_for_exit(child, code) {
     for attempt in 0..100 {
         if child.state == "exited" {
@@ -357,6 +376,7 @@ try {
         ["ui-action", "stop-server-and-exit"]
     );
     wait_for_exit(first_gui, "theme_first_gui_exit_timeout");
+    wait_for_server_stop(context, cli);
 
     let second_gui = start_gui(context, gui, cli);
     owned_children.push(second_gui);
