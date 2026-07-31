@@ -5,11 +5,9 @@ use std::time::Duration;
 mod build_identity;
 mod client;
 mod commands;
-#[cfg(any(windows, unix))]
 mod control_authority;
 pub(crate) mod control_center;
 mod control_contract;
-#[cfg(any(windows, unix))]
 mod control_dispatch;
 mod event_journal;
 mod instances;
@@ -46,15 +44,11 @@ mod terminal_observation;
 mod terminal_selection;
 mod theme;
 pub mod ui_bridge;
-#[cfg(any(windows, unix))]
 mod ui_client;
 mod ui_clipboard;
-#[cfg(any(windows, unix))]
 mod ui_command;
 mod ui_geometry;
-#[cfg(any(windows, unix))]
 mod ui_interaction;
-#[cfg(any(windows, unix))]
 mod ui_lease;
 #[cfg(unix)]
 mod ui_snapshot;
@@ -76,9 +70,7 @@ mod platform;
 mod script_audit;
 mod worker_supervisor;
 
-#[cfg(any(windows, unix))]
 mod server_app;
-#[cfg(any(windows, unix))]
 mod terminal_runtime;
 pub use client::{run_cli_entry, run_mux_entry, run_script_entry_with_args};
 pub use control_center::run_control_center_entry_with_args;
@@ -86,7 +78,6 @@ pub use mcp_catalog::run_mcp_entry_with_args;
 
 pub use platform::services::frontend::run_gui_entry;
 
-#[cfg(any(windows, unix))]
 pub use server_app::run_server_entry;
 
 pub(crate) const IPC_TIMEOUT: Duration = Duration::from_secs(5);
