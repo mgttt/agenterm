@@ -635,12 +635,7 @@ fn public_instances_resource_reports_healthy_and_dead_registrations() {
     let handshake_address = address.clone();
     let fixture = thread::spawn(move || {
         let stream = accept_fixture(&listener, "healthy handshake");
-        reply_protocol_backend(
-            stream,
-            std::process::id(),
-            &format!("tcp:{handshake_address}"),
-            1,
-        );
+        reply_protocol_backend(stream, std::process::id(), &handshake_address, 1);
     });
 
     let responses = run_discovery_resource(&instances, "agenterm://fleet/instances");

@@ -431,9 +431,11 @@ fn instance_health(
     if handshake["protocol_version"].as_u64() != Some(AGENTERM_CONTROL_PROTOCOL_VERSION) {
         return InstanceHealth::Incompatible;
     }
-    if handshake["pid"].as_u64() != Some(u64::from(instance.record.pid))
-        || handshake["address"].as_str() != Some(endpoint.as_str())
-    {
+    let authority_matches = handshake["endpoint"].as_str().map_or_else(
+        || handshake["address"].as_str() == Some(instance.record.address.as_str()),
+        |handshake_endpoint| handshake_endpoint == endpoint,
+    );
+    if handshake["pid"].as_u64() != Some(u64::from(instance.record.pid)) || !authority_matches {
         return InstanceHealth::Stale;
     }
     InstanceHealth::Healthy
