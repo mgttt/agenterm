@@ -351,6 +351,10 @@ Revision-4 migration evidence (2026-07-31, partial):
   keeps projection/registry/IPC receipts in the product layer and passes a
   narrow typed projection host to selected adapter shell drivers; native event
   loops, rendering, no-activate, and capture remain adapter-owned.
+- [~] The approved PTY boundary exposes normalized spawn, size, exit, and
+  session/reader/wait operations only. POSIX `openpty`/fork/session/exec/poll
+  and Windows ConPTY/job mechanics will move below selected adapters while
+  retaining concurrent reader/wait and terminate-to-EOF ordering.
 - [~] native IPC identity, default endpoint/workspace derivation, listener /
   stream framing, named-pipe and Unix-socket mechanics, permissions, peer
   identity, and stale recovery now reside beneath `src/platform/`; the

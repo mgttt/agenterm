@@ -78,7 +78,12 @@ each product module moves only after its facade service has an owned contract.
    the selected adapter driver. It must not duplicate snapshot or registry
    identity logic in an OS adapter.
 3. Split PTY/frontends into adapter-owned event-loop and native-terminal
-   lifecycle implementations; product state stays platform-neutral.
+   lifecycle implementations; product state stays platform-neutral. The PTY
+   contract exposes terminal size, spawn specification, typed exit/failure,
+   and independent session/reader/wait operations without native handles.
+   POSIX `openpty`/fork/session/exec/poll and Windows ConPTY/job mechanics stay
+   below the selected adapter, preserving the existing reader/wait concurrency
+   and terminate-to-EOF ordering.
 4. Remove compatibility-only legacy native paths after each owning public
    smoke has passed.
 5. Add the static production source boundary test only after no product native
