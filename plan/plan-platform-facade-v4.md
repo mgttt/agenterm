@@ -95,7 +95,8 @@ this state does not yet satisfy the static source-boundary gate.
    select in adapters, so the Unix new-terminal dialog contains no macOS/Linux
    conditional or shell-path constant. Unix frontend clipboard selection also
    now consumes a typed facade service, as does XRGB screenshot encoding;
-   renderer/input/event-loop migration is still pending.
+   font candidate selection is likewise adapter-owned; renderer/input/event-
+   loop migration is still pending.
 4. Remove compatibility-only legacy native paths after each owning public
    smoke has passed.
 5. Add the static production source boundary test only after no product native

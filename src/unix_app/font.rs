@@ -188,30 +188,14 @@ struct SystemFonts {
 impl SystemFonts {
     fn load() -> Self {
         let mut faces = Vec::new();
-        #[cfg(target_os = "linux")]
-        {
-            // Candidate table lives in platform::linux::font (slice-2 cut-3).
-            for candidate in crate::platform::linux::font::candidates() {
-                load_candidate_faces(
-                    &FontCandidate {
-                        name: candidate.name,
-                        components: candidate.components,
-                    },
-                    &mut faces,
-                );
-            }
-        }
-        #[cfg(target_os = "macos")]
-        {
-            for candidate in crate::platform::macos::font::candidates() {
-                load_candidate_faces(
-                    &FontCandidate {
-                        name: candidate.name,
-                        components: candidate.components,
-                    },
-                    &mut faces,
-                );
-            }
+        for candidate in crate::platform::services::ui_font::candidates() {
+            load_candidate_faces(
+                &FontCandidate {
+                    name: candidate.name,
+                    components: candidate.components,
+                },
+                &mut faces,
+            );
         }
         Self {
             faces,

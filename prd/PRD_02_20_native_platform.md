@@ -343,6 +343,10 @@ Revision-4 migration evidence (2026-07-31, partial):
   validation and encoder errors retain explicit typed Unsupported/Failed
   results before the legacy frontend string projection; frontend renderer
   ownership itself remains pending.
+- [~] Unix frontend font-file candidate selection now traverses
+  `services::ui_font → selected → adapters/{linux,macos}`; the shared glyph
+  cache and rasterizer remain product rendering details, without target
+  selection or duplicate candidate tables.
 - [x] Linux display capability classification now calls the selected Linux
   scale adapter. The shared geometry contract no longer branches on a display
   target; headless remains typed Unsupported and a usable display Available.
