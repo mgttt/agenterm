@@ -1589,7 +1589,29 @@ fn run_script_command_hosted(_arguments: &[String]) -> i32 {
 
 #[cfg(windows)]
 fn run_script_command_hosted(arguments: &[String]) -> i32 {
-    run_script_command_direct(arguments)
+    if !arguments.get(1).is_some_and(|value| value == "repl") {
+        if arguments.get(1).is_some_and(|value| value == "task") {
+            return run_script_task_command(arguments);
+        }
+        return run_script_command_with_context(arguments, None);
+    }
+    let worker = match script_worker_executable() {
+        Ok(worker) => worker,
+        Err(error) => {
+            eprintln!("{error}");
+            return 2;
+        }
+    };
+    match std::process::Command::new(worker)
+        .args(arguments.iter().skip(1))
+        .status()
+    {
+        Ok(status) => status.code().unwrap_or(1),
+        Err(error) => {
+            eprintln!("host_worker_spawn: could not start agenterm-script: {error}");
+            1
+        }
+    }
 }
 
 fn run_script_command_direct(arguments: &[String]) -> i32 {

@@ -11,7 +11,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] `agenterm-script.exe` is the public `run`, `eval`, `repl`, `check`,
   `api`, and named-task CLI while retaining private
   `--worker`/`--framed-worker` modes;
-  `agenterm-cli.exe script ...` is a thin compatibility route to the same
+  `agenterm-cli.exe script repl ...` is a thin process-forwarding compatibility
+  route to the adjacent `agenterm-script` sidecar, inherits stdio and exit
+  status, and never links a second Rhai engine into the control client. The
+  existing one-shot supervisor routes retain their single worker topology. All expose the same
   catalog, parser, supervisor, and runtime.
 - [ ] v0.1.12 naming investigation may make `agenterm-rhai.exe` the canonical
   public executable because Rhai—not a generic pluggable script language—is

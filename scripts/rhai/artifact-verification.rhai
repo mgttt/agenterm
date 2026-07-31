@@ -95,9 +95,12 @@ for artifact in manifest.executables {
         "artifact_pe_subsystem:" + artifact.name
     );
     if release {
+        let actual_bytes = std::fs::metadata(path).len;
         require(
-            std::fs::metadata(path).len <= artifact.release_budget_bytes,
-            "artifact_release_budget:" + artifact.name
+            actual_bytes <= artifact.release_budget_bytes,
+            "artifact_release_budget:" + artifact.name +
+                ":actual=" + actual_bytes +
+                ":budget=" + artifact.release_budget_bytes
         );
     }
     let entry = find_metadata(metadata, artifact.name);

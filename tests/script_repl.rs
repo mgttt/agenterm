@@ -53,6 +53,37 @@ fn native_cli_compatibility_route_reuses_the_same_session_contract() {
     assert_eq!(records[1]["value"]["value"], 42);
 }
 
+#[cfg(windows)]
+#[test]
+fn native_cli_compatibility_route_requires_the_adjacent_script_sidecar() {
+    let unique = format!(
+        "agenterm-cli-repl-sidecar-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock")
+            .as_nanos()
+    );
+    let root = std::env::temp_dir().join(unique);
+    std::fs::create_dir_all(&root).expect("create isolated CLI directory");
+    let isolated_cli = root.join("agenterm-cli.exe");
+    std::fs::copy(env!("CARGO_BIN_EXE_agenterm-cli"), &isolated_cli)
+        .expect("copy isolated agenterm-cli");
+
+    let output = Command::new(&isolated_cli)
+        .args(["script", "repl", "--json"])
+        .output()
+        .expect("run isolated agenterm-cli");
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("host_worker_missing"),
+        "{output:?}"
+    );
+
+    std::fs::remove_file(&isolated_cli).expect("remove isolated agenterm-cli");
+    std::fs::remove_dir(&root).expect("remove isolated CLI directory");
+}
+
 #[test]
 fn piped_json_repl_persists_variables_functions_and_multiline_cells() {
     let output = run_repl(

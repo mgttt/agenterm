@@ -185,6 +185,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   one-shot run/eval/check/task entry points and an explicit persistent REPL
   session. Each one-shot invocation owns a fresh supervised worker; the
   foreground REPL instead owns process-local variables/functions until exit.
+  `agenterm-cli script repl ...` remains a thin stdio/exit-code forwarding
+  adapter to this adjacent optional executable and does not embed the Rhai
+  engine; existing one-shot commands retain their single-worker supervisor.
   Both reuse one runtime library, API graph, local scheduler, standard library,
   modules, named tasks, and typed Fleet APIs without becoming a persistent
   daemon or an Agent permission layer
