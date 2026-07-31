@@ -280,6 +280,17 @@ Completion requires:
 
 Revision-4 migration evidence (2026-07-31, partial):
 
+- [~] The dependency graph and explicitly bounded delivery leaves for this
+  continuing migration live in `plan/plan-platform-facade-v4.md`; they keep
+  Script Runtime process/window/clipboard/stream/file work separate from the
+  Control Center and PTY/frontend hot paths. This plan grants no runtime
+  authority and does not imply Candidate, tag, or public Release.
+- [x] Script Runtime `std.process.list` and `std.process.kill`, together with
+  owned child-tree cleanup, now call `platform::process` as their only native
+  implementation owner. The product module preserves its existing typed Rhai
+  receipts; its former Win32 snapshot/terminate, Linux `/proc`/`kill`, macOS
+  `libproc`, Job Object, and Unix process-group copies have been deleted.
+
 - [~] `settings`, instance PID/start-identity checks, terminal default-shell
   selection, Control Center atomic-file/focus/capture routing, and passive
   WebView runtime probing now call typed `platform::{paths,process,runtime,

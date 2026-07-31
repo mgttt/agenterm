@@ -26,157 +26,6 @@ const DEFAULT_CAPTURE_BYTES: usize = 64 * 1024;
 const MAX_CAPTURE_BYTES: usize = 256 * 1024;
 const MAX_STDIN_BYTES: usize = 4 * 1024 * 1024;
 
-#[allow(dead_code)]
-#[cfg(any(windows, unix))]
-mod legacy_child_process_tree {
-    use std::{
-        ffi::c_void,
-        mem,
-        os::windows::io::AsRawHandle,
-        process::{Child, Command},
-        ptr,
-    };
-
-    use windows_sys::Win32::{
-        Foundation::{CloseHandle, HANDLE},
-        System::JobObjects::{
-            AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_BREAKAWAY_OK,
-            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-            JobObjectExtendedLimitInformation, SetInformationJobObject, TerminateJobObject,
-        },
-    };
-
-    pub(super) struct ProcessTreeGuard {
-        handle: HANDLE,
-        active: bool,
-    }
-
-    // A job handle is an owned kernel handle and may move with ChildState.
-    unsafe impl Send for ProcessTreeGuard {}
-
-    pub(super) fn configure_command(_command: &mut Command) -> Result<(), String> {
-        Ok(())
-    }
-
-    impl ProcessTreeGuard {
-        pub(super) fn attach(child: &Child) -> Result<Self, String> {
-            let handle = unsafe { CreateJobObjectW(ptr::null(), ptr::null()) };
-            if handle.is_null() {
-                return Err(format!(
-                    "CreateJobObjectW failed: {}",
-                    std::io::Error::last_os_error()
-                ));
-            }
-            let guard = Self {
-                handle,
-                active: true,
-            };
-            let mut information: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { mem::zeroed() };
-            // The owned root and its ordinary descendants remain kill-on-close.
-            // A long-lived AgenTerm server is the one deliberate exception: the
-            // CLI explicitly creates it with CREATE_BREAKAWAY_FROM_JOB so it can
-            // survive an otherwise bounded Rhai command invocation.
-            information.BasicLimitInformation.LimitFlags =
-                JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_BREAKAWAY_OK;
-            let configured = unsafe {
-                SetInformationJobObject(
-                    guard.handle,
-                    JobObjectExtendedLimitInformation,
-                    (&information as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast::<c_void>(),
-                    mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-                )
-            };
-            if configured == 0 {
-                return Err(format!(
-                    "SetInformationJobObject failed: {}",
-                    std::io::Error::last_os_error()
-                ));
-            }
-            if unsafe { AssignProcessToJobObject(guard.handle, child.as_raw_handle() as HANDLE) }
-                == 0
-            {
-                return Err(format!(
-                    "AssignProcessToJobObject failed: {}",
-                    std::io::Error::last_os_error()
-                ));
-            }
-            Ok(guard)
-        }
-
-        pub(super) fn terminate(&mut self) -> Result<(), String> {
-            if !self.active {
-                return Ok(());
-            }
-            if unsafe { TerminateJobObject(self.handle, 1) } == 0 {
-                return Err(format!(
-                    "TerminateJobObject failed: {}",
-                    std::io::Error::last_os_error()
-                ));
-            }
-            self.active = false;
-            Ok(())
-        }
-    }
-
-    impl Drop for ProcessTreeGuard {
-        fn drop(&mut self) {
-            unsafe { CloseHandle(self.handle) };
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[cfg(unix)]
-mod legacy_child_process_tree_unix {
-    use std::{os::unix::process::CommandExt, process::Command};
-
-    pub(super) struct ProcessTreeGuard {
-        process_group: libc::pid_t,
-        active: bool,
-    }
-
-    pub(super) fn configure_command(command: &mut Command) -> Result<(), String> {
-        unsafe {
-            command.pre_exec(|| {
-                if libc::setpgid(0, 0) == 0 {
-                    Ok(())
-                } else {
-                    Err(std::io::Error::last_os_error())
-                }
-            });
-        }
-        Ok(())
-    }
-
-    impl ProcessTreeGuard {
-        pub(super) fn attach(child: &std::process::Child) -> Result<Self, String> {
-            let process_group = libc::pid_t::try_from(child.id())
-                .map_err(|_| "child process ID exceeds pid_t".to_owned())?;
-            Ok(Self {
-                process_group,
-                active: true,
-            })
-        }
-
-        pub(super) fn terminate(&mut self) -> Result<(), String> {
-            if !self.active {
-                return Ok(());
-            }
-            if unsafe { libc::killpg(self.process_group, libc::SIGKILL) } == 0 {
-                self.active = false;
-                return Ok(());
-            }
-            let error = std::io::Error::last_os_error();
-            if error.raw_os_error() == Some(libc::ESRCH) {
-                self.active = false;
-                Ok(())
-            } else {
-                Err(format!("killpg failed: {error}"))
-            }
-        }
-    }
-}
-
 // Script Runtime owns policy and receipts; the facade owns native process
 // tree mechanics (Job Objects / process groups).
 use crate::platform::process as child_process_tree;
@@ -454,291 +303,107 @@ fn process_kill(id: rhai::INT) -> Result<(), Box<EvalAltResult>> {
     platform_process_kill(id)
 }
 
-#[cfg(windows)]
 fn platform_process_kill(id: u32) -> Result<(), Box<EvalAltResult>> {
-    use windows_sys::Win32::{
-        Foundation::CloseHandle,
-        System::Threading::{OpenProcess, PROCESS_TERMINATE, TerminateProcess},
-    };
+    use crate::platform::process::ProcessErrorKind;
 
-    let process = unsafe { OpenProcess(PROCESS_TERMINATE, 0, id) };
-    if process.is_null() {
-        return Err(runtime_error(
-            "host",
-            "process_kill_open",
-            "std.process.kill",
-            "unable to open the selected operating-system process",
-            false,
-            "process",
-            false,
-            Some("os"),
-        ));
-    }
-    let terminated = unsafe { TerminateProcess(process, 1) };
-    unsafe {
-        CloseHandle(process);
-    }
-    if terminated == 0 {
-        return Err(runtime_error(
-            "host",
-            "process_kill",
-            "std.process.kill",
-            "unable to terminate the selected operating-system process",
-            false,
-            "process",
-            false,
-            Some("os"),
-        ));
-    }
-    Ok(())
-}
-
-#[cfg(unix)]
-fn platform_process_kill(id: u32) -> Result<(), Box<EvalAltResult>> {
-    let id = libc::pid_t::try_from(id).map_err(|_| {
-        runtime_error(
-            "configuration",
-            "process_id_invalid",
-            "std.process.kill",
-            "process ID exceeds the platform range",
-            false,
-            "process",
-            false,
-            Some("integer_range"),
-        )
-    })?;
-    if unsafe { libc::kill(id, libc::SIGKILL) } != 0 {
-        return Err(runtime_error(
-            "host",
-            "process_kill",
-            "std.process.kill",
-            "unable to terminate the selected operating-system process",
-            false,
-            "process",
-            false,
-            Some("os"),
-        ));
-    }
-    Ok(())
-}
-
-#[cfg(not(any(windows, unix)))]
-fn platform_process_kill(_id: u32) -> Result<(), Box<EvalAltResult>> {
-    Err(runtime_error(
-        "host",
-        "process_kill_unsupported",
-        "std.process.kill",
-        "operating-system process termination is not supported on this platform",
-        false,
-        "process",
-        false,
-        Some("platform"),
-    ))
-}
-
-#[cfg(windows)]
-fn platform_process_list() -> Result<Vec<ScriptProcessInfo>, Box<EvalAltResult>> {
-    use std::mem::size_of;
-    use windows_sys::Win32::{
-        Foundation::{CloseHandle, INVALID_HANDLE_VALUE},
-        System::Diagnostics::ToolHelp::{
-            CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW,
-            TH32CS_SNAPPROCESS,
-        },
-    };
-
-    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
-    if snapshot == INVALID_HANDLE_VALUE {
-        return Err(runtime_error(
-            "host",
-            "process_list_failed",
-            "std.process.list",
-            "unable to capture the operating-system process inventory",
-            true,
-            "process_inventory",
-            false,
-            Some("os"),
-        ));
-    }
-    let mut entry = PROCESSENTRY32W {
-        dwSize: size_of::<PROCESSENTRY32W>() as u32,
-        ..unsafe { std::mem::zeroed() }
-    };
-    let mut processes = Vec::new();
-    let mut present = unsafe { Process32FirstW(snapshot, &mut entry) } != 0;
-    while present {
-        let length = entry
-            .szExeFile
-            .iter()
-            .position(|character| *character == 0)
-            .unwrap_or(entry.szExeFile.len());
-        let executable_name = String::from_utf16_lossy(&entry.szExeFile[..length]);
-        if !executable_name.is_empty() {
-            processes.push(ScriptProcessInfo {
-                id: entry.th32ProcessID,
-                parent_id: entry.th32ParentProcessID,
-                executable_name,
-            });
-        }
-        present = unsafe { Process32NextW(snapshot, &mut entry) } != 0;
-    }
-    unsafe {
-        CloseHandle(snapshot);
-    }
-    Ok(processes)
-}
-
-#[cfg(target_os = "linux")]
-fn platform_process_list() -> Result<Vec<ScriptProcessInfo>, Box<EvalAltResult>> {
-    let entries = std::fs::read_dir("/proc").map_err(|_| {
-        runtime_error(
-            "host",
-            "process_list_failed",
-            "std.process.list",
-            "unable to read the operating-system process inventory",
-            true,
-            "process_inventory",
-            false,
-            Some("os"),
-        )
-    })?;
-    let mut processes = Vec::new();
-    for entry in entries.flatten() {
-        let Some(id) = entry
-            .file_name()
-            .to_str()
-            .and_then(|value| value.parse::<u32>().ok())
-        else {
-            continue;
+    crate::platform::process::kill(id).map_err(|error| {
+        let (category, code, message, retryable, remediation) = match error.kind {
+            ProcessErrorKind::IdOutOfRange => (
+                "configuration",
+                "process_id_invalid",
+                "process ID exceeds the platform range",
+                false,
+                Some("integer_range"),
+            ),
+            ProcessErrorKind::KillOpen => (
+                "host",
+                "process_kill_open",
+                "unable to open the selected operating-system process",
+                false,
+                Some("os"),
+            ),
+            ProcessErrorKind::Unsupported => (
+                "host",
+                "process_kill_unsupported",
+                "operating-system process termination is not supported on this platform",
+                false,
+                Some("platform"),
+            ),
+            ProcessErrorKind::Kill
+            | ProcessErrorKind::Inventory
+            | ProcessErrorKind::InventoryTooLarge => (
+                "host",
+                "process_kill",
+                "unable to terminate the selected operating-system process",
+                false,
+                Some("os"),
+            ),
         };
-        let Ok(executable) = std::fs::read_link(entry.path().join("exe")) else {
-            continue;
-        };
-        let Some(executable_name) = executable.file_name().and_then(|value| value.to_str()) else {
-            continue;
-        };
-        let parent_id = std::fs::read_to_string(entry.path().join("stat"))
-            .ok()
-            .and_then(|stat| {
-                let end = stat.rfind(')')?;
-                stat.get(end + 1..)?
-                    .split_whitespace()
-                    .nth(1)?
-                    .parse::<u32>()
-                    .ok()
-            })
-            .unwrap_or_default();
-        processes.push(ScriptProcessInfo {
-            id,
-            parent_id,
-            executable_name: executable_name.to_owned(),
-        });
-    }
-    Ok(processes)
-}
-
-#[cfg(target_os = "macos")]
-fn platform_process_list() -> Result<Vec<ScriptProcessInfo>, Box<EvalAltResult>> {
-    use std::ffi::{CStr, c_char, c_int, c_void};
-
-    const PROC_ALL_PIDS: u32 = 1;
-    const PROC_PIDPATHINFO_MAXSIZE: u32 = 4 * 1024;
-
-    #[link(name = "proc")]
-    unsafe extern "C" {
-        fn proc_listpids(
-            process_type: u32,
-            type_info: u32,
-            buffer: *mut c_void,
-            buffer_size: c_int,
-        ) -> c_int;
-        fn proc_pidpath(pid: c_int, buffer: *mut c_void, buffer_size: u32) -> c_int;
-    }
-
-    let required = unsafe { proc_listpids(PROC_ALL_PIDS, 0, std::ptr::null_mut(), 0) };
-    if required <= 0 {
-        return Err(runtime_error(
-            "host",
-            "process_list_failed",
-            "std.process.list",
-            "unable to size the operating-system process inventory",
-            true,
-            "process_inventory",
-            false,
-            Some("os"),
-        ));
-    }
-    let capacity = usize::try_from(required).unwrap_or_default() / size_of::<c_int>() + 32;
-    let mut ids: Vec<c_int> = vec![0; capacity];
-    let buffer_size = c_int::try_from(ids.len() * size_of::<c_int>()).map_err(|_| {
         runtime_error(
-            "limit",
-            "process_list_too_large",
-            "std.process.list",
-            "operating-system process inventory exceeds the supported size",
+            category,
+            code,
+            "std.process.kill",
+            message,
+            retryable,
+            "process",
             false,
-            "process_inventory",
-            false,
-            Some("integer_conversion"),
+            remediation,
         )
-    })?;
-    let bytes = unsafe { proc_listpids(PROC_ALL_PIDS, 0, ids.as_mut_ptr().cast(), buffer_size) };
-    if bytes <= 0 {
-        return Err(runtime_error(
-            "host",
-            "process_list_failed",
-            "std.process.list",
-            "unable to capture the operating-system process inventory",
-            true,
-            "process_inventory",
-            false,
-            Some("os"),
-        ));
-    }
-    ids.truncate(usize::try_from(bytes).unwrap_or_default() / size_of::<c_int>());
-    let mut processes = Vec::new();
-    for id in ids.into_iter().filter(|id| *id > 0) {
-        let mut path: Vec<c_char> =
-            vec![0; usize::try_from(PROC_PIDPATHINFO_MAXSIZE).unwrap_or_default()];
-        let length =
-            unsafe { proc_pidpath(id, path.as_mut_ptr().cast(), PROC_PIDPATHINFO_MAXSIZE) };
-        if length <= 0 {
-            continue;
-        }
-        let full_path = unsafe { CStr::from_ptr(path.as_ptr()) }.to_string_lossy();
-        let executable_name = std::path::Path::new(full_path.as_ref())
-            .file_name()
-            .and_then(|value| value.to_str())
-            .unwrap_or_default()
-            .to_owned();
-        if !executable_name.is_empty() {
-            let Ok(id) = u32::try_from(id) else {
-                continue;
-            };
-            processes.push(ScriptProcessInfo {
-                id,
-                parent_id: 0,
-                executable_name,
-            });
-        }
-    }
-    Ok(processes)
+    })
 }
 
-#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
 fn platform_process_list() -> Result<Vec<ScriptProcessInfo>, Box<EvalAltResult>> {
-    let executable_name = std::env::current_exe()
-        .ok()
-        .and_then(|path| {
-            path.file_name()
-                .map(|value| value.to_string_lossy().into_owned())
+    use crate::platform::process::ProcessErrorKind;
+
+    crate::platform::process::list()
+        .map(|processes| {
+            processes
+                .into_iter()
+                .map(|process| ScriptProcessInfo {
+                    id: process.id,
+                    parent_id: process.parent_id,
+                    executable_name: process.executable_name,
+                })
+                .collect()
         })
-        .unwrap_or_else(|| "current-process".to_owned());
-    Ok(vec![ScriptProcessInfo {
-        id: std::process::id(),
-        parent_id: 0,
-        executable_name,
-    }])
+        .map_err(|error| {
+            let (category, code, message, retryable, remediation) = match error.kind {
+                ProcessErrorKind::InventoryTooLarge => (
+                    "limit",
+                    "process_list_too_large",
+                    "operating-system process inventory exceeds the supported size",
+                    false,
+                    Some("integer_conversion"),
+                ),
+                ProcessErrorKind::Unsupported => (
+                    "host",
+                    "process_list_unsupported",
+                    "operating-system process inventory is not supported on this platform",
+                    false,
+                    Some("platform"),
+                ),
+                ProcessErrorKind::IdOutOfRange
+                | ProcessErrorKind::Inventory
+                | ProcessErrorKind::KillOpen
+                | ProcessErrorKind::Kill => (
+                    "host",
+                    "process_list_failed",
+                    "unable to capture the operating-system process inventory",
+                    true,
+                    Some("os"),
+                ),
+            };
+            runtime_error(
+                category,
+                code,
+                "std.process.list",
+                message,
+                retryable,
+                "process_inventory",
+                false,
+                remediation,
+            )
+        })
 }
 
 fn duration_module() -> Module {
