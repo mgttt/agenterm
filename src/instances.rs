@@ -232,7 +232,7 @@ impl Drop for InstanceRegistration {
     }
 }
 
-#[cfg_attr(windows, allow(dead_code))]
+#[allow(dead_code)] // Registry registration is intentionally unavailable to some callers.
 pub(crate) fn register_instance(
     address: &str,
     workspace_path: &Path,

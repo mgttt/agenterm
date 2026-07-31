@@ -485,7 +485,7 @@ impl TerminalTab {
         }
     }
 
-    #[cfg_attr(windows, allow(dead_code))]
+    #[allow(dead_code)] // Used by non-Windows runtime integrations.
     pub(crate) const fn cursor_appearance(&self) -> TerminalCursorAppearance {
         self.cursor_tracker.appearance()
     }

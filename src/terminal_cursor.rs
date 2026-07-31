@@ -40,7 +40,7 @@ pub(crate) struct DecscusrTracker {
 }
 
 impl DecscusrTracker {
-    #[cfg_attr(windows, allow(dead_code))]
+    #[allow(dead_code)] // Kept for terminal model consumers that do not render cursors.
     pub(crate) const fn appearance(self) -> TerminalCursorAppearance {
         self.appearance
     }
