@@ -158,6 +158,56 @@ fn remote_fleet_attach_is_explicit_paired_and_read_only() {
 }
 
 #[test]
+fn cross_process_tcp_fixture_is_private_bounded_and_reaped() {
+    let started = Instant::now();
+    let (status, value) = json_output(&["tcp-self-test", "--json"]);
+    assert!(status.success(), "{value}");
+    assert!(started.elapsed() < Duration::from_secs(5));
+    let result = &value["result"];
+    assert_eq!(result["status"], "prototype-proven");
+    assert_eq!(result["process"]["child_processes"], 8);
+    assert_eq!(result["process"]["maximum_concurrent_children"], 3);
+    assert_eq!(result["process"]["graceful_child_exits"], 6);
+    assert_eq!(result["process"]["forced_cleanup_children"], 2);
+    assert_eq!(result["process"]["reaped_children"], 8);
+    assert_eq!(result["process"]["residual_children"], 0);
+    assert_eq!(result["process"]["no_fixed_sleep"], true);
+
+    let attach = &result["attach"];
+    assert_eq!(attach["authenticated_peer_identity"], true);
+    assert_eq!(attach["explicit_pairing"], true);
+    assert!(attach["snapshot_bytes"].as_u64().unwrap() <= 16 * 1024);
+    assert!(attach["server_count"].as_u64().unwrap() <= 8);
+    assert!(attach["event_digest_count"].as_u64().unwrap() <= 16);
+    assert_eq!(attach["replay_rejection"], "replay");
+    assert_eq!(attach["wrong_peer_rejection"], "wrong_peer");
+    assert_eq!(attach["expired_rejection"], "expired");
+    assert_ne!(attach["paired_peer_id"], attach["wrong_peer_id"]);
+
+    let dht = &result["dht"];
+    assert_eq!(dht["record_published"], true);
+    assert_eq!(dht["record_found_via_hub"], true);
+    assert_eq!(dht["publisher_forced_cleanup_reaped"], true);
+    assert_eq!(dht["hub_forced_cleanup_reaped"], true);
+    assert_eq!(dht["public_bootstrap_attempts"], 0);
+    assert_eq!(dht["record_sha256"].as_str().unwrap().len(), 64);
+
+    for excluded in [
+        "shell",
+        "command_execution",
+        "pty_control",
+        "terminal_input",
+        "server_control",
+    ] {
+        assert_eq!(result["authority"][excluded], false, "{excluded}");
+    }
+    assert_eq!(result["public_bootstrap"], false);
+    assert_eq!(result["nat_traversal"], false);
+    assert_eq!(result["relay_serving_default"], false);
+    assert_eq!(value["receipt"]["schema"], "agenterm-net/receipt/v1");
+}
+
+#[test]
 fn peer_loss_is_typed_and_bounded() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("reserve loopback port");
     let port = listener.local_addr().unwrap().port();

@@ -12,7 +12,7 @@ use libp2p::{
     kad::{self, RecordKey, store::MemoryStore},
     noise, ping, relay,
     swarm::{Config as SwarmConfig, NetworkBehaviour, Swarm, SwarmEvent},
-    yamux,
+    tcp, yamux,
 };
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -77,6 +77,222 @@ pub struct RelayProof {
     pub source_connected_to_destination: bool,
     pub destination_connected_to_source: bool,
     pub relay_serving_is_fixture_only: bool,
+}
+
+#[derive(Serialize)]
+struct TcpDhtReady {
+    event: &'static str,
+    peer_id: String,
+    address: String,
+    pid: u32,
+}
+
+#[derive(Serialize)]
+struct TcpDhtWorkerResult {
+    event: &'static str,
+    peer_id: String,
+    remote_peer_id: String,
+    publisher_peer_id: String,
+    record_sha256: String,
+    pid: u32,
+}
+
+pub async fn run_tcp_dht_hub(deadline: Duration) -> Result<(), String> {
+    tokio::time::timeout(deadline, run_tcp_dht_hub_inner())
+        .await
+        .map_err(|_| {
+            format!(
+                "private DHT TCP hub exceeded {} ms deadline",
+                deadline.as_millis()
+            )
+        })?
+}
+
+async fn run_tcp_dht_hub_inner() -> Result<(), String> {
+    let mut swarm = kad_tcp_swarm(81)?;
+    let peer = *swarm.local_peer_id();
+    swarm
+        .listen_on(
+            "/ip4/127.0.0.1/tcp/0"
+                .parse()
+                .map_err(|error: libp2p::multiaddr::Error| error.to_string())?,
+        )
+        .map_err(|error| error.to_string())?;
+    loop {
+        match swarm.select_next_some().await {
+            SwarmEvent::NewListenAddr { address, .. } => {
+                print_worker(&TcpDhtReady {
+                    event: "dht-ready",
+                    peer_id: peer.to_string(),
+                    address: address.to_string(),
+                    pid: std::process::id(),
+                })?;
+            }
+            SwarmEvent::ListenerError { error, .. } => {
+                return Err(format!("private DHT TCP hub listener failed: {error}"));
+            }
+            _ => {}
+        }
+    }
+}
+
+pub async fn run_tcp_dht_provider(
+    address: &str,
+    expected_hub: &str,
+    deadline: Duration,
+) -> Result<(), String> {
+    tokio::time::timeout(deadline, run_tcp_dht_provider_inner(address, expected_hub))
+        .await
+        .map_err(|_| {
+            format!(
+                "private DHT TCP provider exceeded {} ms deadline",
+                deadline.as_millis()
+            )
+        })?
+}
+
+async fn run_tcp_dht_provider_inner(address: &str, expected_hub: &str) -> Result<(), String> {
+    let mut swarm = kad_tcp_swarm(82)?;
+    let provider = *swarm.local_peer_id();
+    let hub: PeerId = expected_hub
+        .parse()
+        .map_err(|error| format!("invalid DHT hub peer: {error}"))?;
+    let address: Multiaddr = address
+        .parse()
+        .map_err(|error| format!("invalid DHT hub address: {error}"))?;
+    swarm.behaviour_mut().add_address(&hub, address.clone());
+    let mut dial_address = address;
+    dial_address.push(Protocol::P2p(hub));
+    swarm
+        .dial(dial_address)
+        .map_err(|error| format!("dial private DHT hub: {error}"))?;
+    let key = fixture_record_key();
+    let mut query = None;
+    let mut published = false;
+    loop {
+        match swarm.select_next_some().await {
+            SwarmEvent::ConnectionEstablished { peer_id, .. }
+                if peer_id == hub && query.is_none() =>
+            {
+                query = Some(
+                    swarm
+                        .behaviour_mut()
+                        .put_record(
+                            kad::Record::new(key.clone(), fixture_record_value().to_vec()),
+                            kad::Quorum::One,
+                        )
+                        .map_err(|error| format!("start TCP DHT record publication: {error}"))?,
+                );
+            }
+            SwarmEvent::Behaviour(kad::Event::OutboundQueryProgressed { id, result, .. })
+                if Some(id) == query =>
+            {
+                match result {
+                    kad::QueryResult::PutRecord(Ok(ok)) if ok.key == key && !published => {
+                        print_worker(&TcpDhtWorkerResult {
+                            event: "dht-record-published",
+                            peer_id: provider.to_string(),
+                            remote_peer_id: hub.to_string(),
+                            publisher_peer_id: provider.to_string(),
+                            record_sha256: fixture_record_digest(),
+                            pid: std::process::id(),
+                        })?;
+                        published = true;
+                    }
+                    kad::QueryResult::PutRecord(Err(error)) => {
+                        return Err(format!("publish TCP DHT record: {error}"));
+                    }
+                    _ => {}
+                }
+            }
+            SwarmEvent::OutgoingConnectionError { error, .. } => {
+                return Err(format!("TCP DHT provider connection failed: {error}"));
+            }
+            _ => {}
+        }
+    }
+}
+
+pub async fn run_tcp_dht_seeker(
+    address: &str,
+    expected_hub: &str,
+    expected_publisher: &str,
+    deadline: Duration,
+) -> Result<(), String> {
+    tokio::time::timeout(
+        deadline,
+        run_tcp_dht_seeker_inner(address, expected_hub, expected_publisher),
+    )
+    .await
+    .map_err(|_| {
+        format!(
+            "private DHT TCP seeker exceeded {} ms deadline",
+            deadline.as_millis()
+        )
+    })?
+}
+
+async fn run_tcp_dht_seeker_inner(
+    address: &str,
+    expected_hub: &str,
+    expected_publisher: &str,
+) -> Result<(), String> {
+    let mut swarm = kad_tcp_swarm(83)?;
+    let seeker = *swarm.local_peer_id();
+    let hub: PeerId = expected_hub
+        .parse()
+        .map_err(|error| format!("invalid DHT hub peer: {error}"))?;
+    let publisher: PeerId = expected_publisher
+        .parse()
+        .map_err(|error| format!("invalid DHT provider peer: {error}"))?;
+    let address: Multiaddr = address
+        .parse()
+        .map_err(|error| format!("invalid DHT hub address: {error}"))?;
+    swarm.behaviour_mut().add_address(&hub, address.clone());
+    let mut dial_address = address;
+    dial_address.push(Protocol::P2p(hub));
+    swarm
+        .dial(dial_address)
+        .map_err(|error| format!("dial private DHT hub: {error}"))?;
+    let mut query = None;
+    loop {
+        match swarm.select_next_some().await {
+            SwarmEvent::ConnectionEstablished { peer_id, .. }
+                if peer_id == hub && query.is_none() =>
+            {
+                query = Some(swarm.behaviour_mut().get_record(fixture_record_key()));
+            }
+            SwarmEvent::Behaviour(kad::Event::OutboundQueryProgressed { id, result, .. })
+                if Some(id) == query =>
+            {
+                match result {
+                    kad::QueryResult::GetRecord(Ok(kad::GetRecordOk::FoundRecord(found)))
+                        if found.record.key == fixture_record_key()
+                            && found.record.value == fixture_record_value()
+                            && found.record.publisher == Some(publisher) =>
+                    {
+                        print_worker(&TcpDhtWorkerResult {
+                            event: "dht-record-found",
+                            peer_id: seeker.to_string(),
+                            remote_peer_id: hub.to_string(),
+                            publisher_peer_id: publisher.to_string(),
+                            record_sha256: fixture_record_digest(),
+                            pid: std::process::id(),
+                        })?;
+                        return Ok(());
+                    }
+                    kad::QueryResult::GetRecord(Err(error)) => {
+                        return Err(format!("find TCP DHT record: {error}"));
+                    }
+                    _ => {}
+                }
+            }
+            SwarmEvent::OutgoingConnectionError { error, .. } => {
+                return Err(format!("TCP DHT seeker connection failed: {error}"));
+            }
+            _ => {}
+        }
+    }
 }
 
 pub async fn prove_private_mesh(deadline: Duration) -> Result<PrivateMeshProof, String> {
@@ -345,6 +561,19 @@ async fn prove_relay() -> Result<RelayProof, String> {
 
 fn kad_swarm(seed: u8) -> Result<Swarm<kad::Behaviour<MemoryStore>>, String> {
     let key = deterministic_key(seed)?;
+    kad_swarm_with_transport(&key, memory_transport(&key)?)
+}
+
+fn kad_tcp_swarm(seed: u8) -> Result<Swarm<kad::Behaviour<MemoryStore>>, String> {
+    let key = deterministic_key(seed)?;
+    let transport = tcp::tokio::Transport::new(tcp::Config::default().nodelay(true)).boxed();
+    kad_swarm_with_transport(&key, secure_transport(transport, &key)?)
+}
+
+fn kad_swarm_with_transport(
+    key: &Keypair,
+    transport: Boxed<(PeerId, StreamMuxerBox)>,
+) -> Result<Swarm<kad::Behaviour<MemoryStore>>, String> {
     let peer = key.public().to_peer_id();
     let mut config = kad::Config::new(StreamProtocol::new(DHT_PROTOCOL));
     config
@@ -353,12 +582,31 @@ fn kad_swarm(seed: u8) -> Result<Swarm<kad::Behaviour<MemoryStore>>, String> {
         .set_provider_publication_interval(None);
     let mut behaviour = kad::Behaviour::with_config(peer, MemoryStore::new(peer), config);
     behaviour.set_mode(Some(kad::Mode::Server));
-    Ok(Swarm::new(
-        memory_transport(&key)?,
-        behaviour,
-        peer,
-        swarm_config(),
-    ))
+    Ok(Swarm::new(transport, behaviour, peer, swarm_config()))
+}
+
+fn fixture_record_key() -> RecordKey {
+    let key_material = Sha256::digest(fixture_record_value());
+    RecordKey::new(&key_material)
+}
+
+fn fixture_record_digest() -> String {
+    Sha256::digest(fixture_record_value())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+fn fixture_record_value() -> &'static [u8] {
+    b"agenterm deterministic private TCP DHT record v1"
+}
+
+fn print_worker<T: Serialize>(value: &T) -> Result<(), String> {
+    println!(
+        "{}",
+        serde_json::to_string(value).map_err(|error| error.to_string())?
+    );
+    Ok(())
 }
 
 fn gossipsub_swarm(seed: u8) -> Result<Swarm<gossipsub::Behaviour>, String> {

@@ -27,6 +27,10 @@ agenterm-net (experimental N2-M1 foundation; 2026-07-31)
 │  ├─ Noise-authenticated requester signature binds invite, PeerId and request ID
 │  ├─ typed replay, wrong-peer and expired rejection without a fixed sleep
 │  └─ bounded fleet summaries/event digests only; no remote authority path
+├─ cross-process TCP fixture — explicit parent-owned command, loopback only
+│  ├─ paired attach server + four sequential request workers preserve replay state
+│  ├─ private Kademlia publisher → hub → seeker verifies a bounded record
+│  └─ eight owned children are deadline-bounded and reaped; no residual process
 ├─ process isolation
 │  ├─ self-test starts listener and connector as separate OS processes
 │  ├─ stdout JSON is the ready/result protocol
@@ -58,6 +62,7 @@ cargo run -- peer-id
 cargo run -- self-test --json
 cargo run -- mesh-self-test --json
 cargo run -- attach-self-test --json
+cargo run -- tcp-self-test --json
 cargo run -- node start --state-dir ./.net-state --identity durable --json
 cargo run -- node status --state-dir ./.net-state --json
 cargo run -- node stop --state-dir ./.net-state --json
@@ -105,9 +110,9 @@ Swarm events rather than test sleeps:
 The relay server exists only inside that explicit fixture. Normal node
 descriptors remain `relay_server=false`, alongside `public_bootstrap=false`,
 `nat_traversal=false`, and `remote_control=false`. The proof uses authenticated
-Noise + Yamux over deterministic memory transport; cross-process TCP mesh,
-reconnect, rate/queue exhaustion, relay limits under load and three-platform
-resource evidence remain gaps.
+Noise + Yamux over deterministic memory transport; reconnect, rate/queue
+exhaustion, cross-process pubsub/relay, relay limits under load and
+three-platform resource evidence remain gaps.
 
 `attach-self-test` creates an issuer, explicitly paired requester and wrong
 requester with deterministic Ed25519 identities. The issuer signs a pairing
@@ -121,12 +126,28 @@ eight streams.
 
 The projected schema contains only bounded server availability/window/tab
 counts and event digests. It has no terminal content or input, shell, command
-execution, PTY, or server-control operation. This is an in-process pairing and
-protocol proof, not a product Remote Fleet endpoint. It deliberately lacks a
-persistent invite/replay database, wall-clock integration, reconnect/crash
-recovery, cross-process transport, fleet/server integration, rate-exhaustion
-evidence and three-platform qualification. Until those gaps close, the attach
-capability remains experimental and cannot confer remote server authority.
+execution, PTY, or server-control operation. These are fixture proofs, not a
+product Remote Fleet endpoint. `tcp-self-test` preserves the same signed pairing
+and replay state in an independent server process, then drives valid, replay,
+wrong-peer and expired requests from four sequential loopback-TCP clients. The
+valid response remains a 373-byte bounded read-only projection and rejection
+responses contain no snapshot.
+
+The same command starts a private Kademlia hub, keeps a record publisher alive,
+and requires a separate seeker with only the hub address to retrieve and verify
+the record. The parent never uses a fixed sleep: typed stdout readiness/results
+and per-worker deadlines drive all transitions. Six children exit cleanly; the
+long-lived DHT publisher and hub are explicitly killed and waited after lookup,
+and the receipt requires all eight children reaped with zero residual children.
+The deterministic fixture keys are deliberately duplicated across worker
+processes to make the black-box evidence reproducible; they are not a key
+distribution or pairing-storage design.
+
+The attach path still lacks a persistent invite/replay database, wall-clock
+integration, reconnect/crash recovery, real fleet/server integration,
+rate-exhaustion evidence and three-platform qualification. Until those gaps
+close, the capability remains experimental and cannot confer remote server
+authority.
 
 ## Evidence
 
@@ -139,6 +160,7 @@ cargo test
 cargo run -- self-test --json
 cargo run -- mesh-self-test --json
 cargo run -- attach-self-test --json
+cargo run -- tcp-self-test --json
 cargo build --release
 ```
 
@@ -148,7 +170,10 @@ persistent block round-trip, pin/unpin/GC, read-time corruption rejection,
 deadline-bounded peer loss, and owned-child cancellation without fixed sleeps.
 They also require each private-mesh capability to be advertised independently,
 verify all three event-driven mesh proof receipts, and prove the paired
-read-only attach success/rejection paths plus the authority defaults.
+read-only attach success/rejection paths plus the authority defaults. The TCP
+test additionally asserts the process count, clean/forced cleanup split, eight
+reaped children, zero residual children, DHT record round trip and no public
+bootstrap attempts.
 
 The first Windows x86_64 debug mesh receipt completed the three concurrent
 proofs in 98 milliseconds and reported deterministic peer identities, zero
@@ -160,6 +185,13 @@ The first Windows x86_64 debug attach receipt completed in 96 milliseconds. It
 projected one 373-byte server/event-digest snapshot and proved the three typed
 rejections. This deterministic in-process timing is not reconnect, load, or
 cross-platform evidence.
+
+The first Windows x86_64 debug cross-process receipt completed in 435
+milliseconds. It used at most three simultaneous children, reaped all eight,
+projected the same 373-byte attach snapshot, proved the three typed rejections,
+and round-tripped one SHA-256-identified DHT record through separate publisher,
+hub and seeker processes. This is loopback functional evidence, not reconnect,
+load, public-network or cross-platform evidence.
 
 Original N1 measurements on Windows x86_64 with Rust 1.97.0 on 2026-07-31:
 

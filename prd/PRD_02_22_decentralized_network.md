@@ -87,9 +87,11 @@ N2-M1
   discovery with zero public bootstrap attempts, signed strict-validation
   GossipSub under a 16 KiB transmit ceiling, and relay reservation/circuit
   acceptance. Normal nodes keep public bootstrap, NAT traversal, relay serving
-  and remote control false. Cross-process TCP, reconnect, rate/queue/bandwidth
-  exhaustion, resource load and three-platform evidence remain required before
-  these can be a stable node capability.
+  and remote control false. A separate loopback-TCP publisher, hub and seeker
+  now prove one bounded Kademlia record round trip across OS processes with no
+  public bootstrap. Cross-process GossipSub/relay, reconnect, rate/queue/
+  bandwidth exhaustion, resource load and three-platform evidence remain
+  required before these can be a stable node capability.
 - [~] `research/agenterm-net attach-self-test --json` proves an in-memory,
   Noise+Yamux+bounded-CBOR paired attach: issuer-signed invite binds target
   PeerId, expiry, one-time nonce, exact read scope and snapshot/digest bounds;
@@ -98,8 +100,10 @@ N2-M1
   wrong-peer and expired requests return typed rejections. It has no terminal
   input, shell, command, PTY or `agenterm-server` authority path.
 - [ ] persistent invite/replay state, real-clock expiry, reconnect, crash
-  recovery, rate exhaustion, cross-process transport and three-platform
-  evidence remain required. Future remote control belongs to the Agent/harness
+  recovery, rate exhaustion and three-platform evidence remain required. A
+  loopback-TCP fixture now preserves explicit pairing, replay/wrong-peer/
+  expiry rejection and the bounded read-only projection across independent
+  server/client processes; it is not a product endpoint. Future remote control belongs to the Agent/harness
   approval and credential layer; it must not be promoted from this attach proof.
 - [ ] N2-M1 tests use a deterministic private mesh and isolated stores; they
   must not require public bootstrap reachability or leave listeners/processes.

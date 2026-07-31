@@ -12,6 +12,7 @@ mod identity;
 mod mesh;
 mod node;
 mod store;
+mod tcp_fixture;
 use multihash_codetable::{Code, MultihashDigest};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -257,7 +258,7 @@ async fn run() -> Result<(), (String, &'static str, String)> {
             let result = Capabilities {
                 stability: "experimental-n2-m1-foundation",
                 network_scope:
-                    "explicit private loopback control and memory fixture; no public bootstrap",
+                    "explicit private loopback TCP and memory fixtures; no public bootstrap",
                 identity_persistence: true,
                 store_persistence: true,
                 capabilities: vec![
@@ -289,7 +290,7 @@ async fn run() -> Result<(), (String, &'static str, String)> {
                     Capability {
                         name: "private-mesh.dht",
                         state: "prototype",
-                        note: "explicit deterministic private-memory provide/find-provider proof",
+                        note: "private-memory provide/find-provider and cross-process loopback-TCP record round-trip proofs",
                     },
                     Capability {
                         name: "private-mesh.pubsub",
@@ -304,7 +305,7 @@ async fn run() -> Result<(), (String, &'static str, String)> {
                     Capability {
                         name: "remote-fleet.read-only-attach",
                         state: "prototype",
-                        note: "explicit paired read-only memory fixture; no product attach endpoint or control authority",
+                        note: "explicit paired read-only memory and cross-process loopback-TCP fixtures; no product endpoint or control authority",
                     },
                 ],
             };
@@ -344,6 +345,20 @@ async fn run() -> Result<(), (String, &'static str, String)> {
                             message,
                         )
                     })?;
+            print_envelope(&request_id, DEFAULT_DEADLINE_MS, result);
+            Ok(())
+        }
+        [command, flag] if command == "tcp-self-test" && flag == "--json" => {
+            let result = tcp_fixture::prove_cross_process_tcp(Duration::from_millis(
+                DEFAULT_DEADLINE_MS,
+            ))
+            .map_err(|message| {
+                (
+                    request_id.clone(),
+                    "cross_process_tcp_failed",
+                    message,
+                )
+            })?;
             print_envelope(&request_id, DEFAULT_DEADLINE_MS, result);
             Ok(())
         }
@@ -490,10 +505,52 @@ async fn run() -> Result<(), (String, &'static str, String)> {
                 .await
                 .map_err(|message| (request_id, "connector_failed", message))
         }
+        [command, deadline] if command == "__attach-tcp-server" => {
+            let deadline = parse_deadline(deadline)
+                .map_err(|message| (request_id.clone(), "invalid_deadline", message))?;
+            attach::run_tcp_server(Duration::from_millis(deadline))
+                .await
+                .map_err(|message| (request_id, "attach_tcp_server_failed", message))
+        }
+        [command, address, peer, kind, deadline] if command == "__attach-tcp-client" => {
+            let deadline = parse_deadline(deadline)
+                .map_err(|message| (request_id.clone(), "invalid_deadline", message))?;
+            attach::run_tcp_client(address, peer, kind, Duration::from_millis(deadline))
+                .await
+                .map_err(|message| (request_id, "attach_tcp_client_failed", message))
+        }
+        [command, deadline] if command == "__dht-tcp-hub" => {
+            let deadline = parse_deadline(deadline)
+                .map_err(|message| (request_id.clone(), "invalid_deadline", message))?;
+            mesh::run_tcp_dht_hub(Duration::from_millis(deadline))
+                .await
+                .map_err(|message| (request_id, "dht_tcp_hub_failed", message))
+        }
+        [command, address, peer, deadline] if command == "__dht-tcp-provider" => {
+            let deadline = parse_deadline(deadline)
+                .map_err(|message| (request_id.clone(), "invalid_deadline", message))?;
+            mesh::run_tcp_dht_provider(address, peer, Duration::from_millis(deadline))
+                .await
+                .map_err(|message| (request_id, "dht_tcp_provider_failed", message))
+        }
+        [command, address, hub_peer, publisher_peer, deadline]
+            if command == "__dht-tcp-seeker" =>
+        {
+            let deadline = parse_deadline(deadline)
+                .map_err(|message| (request_id.clone(), "invalid_deadline", message))?;
+            mesh::run_tcp_dht_seeker(
+                address,
+                hub_peer,
+                publisher_peer,
+                Duration::from_millis(deadline),
+            )
+            .await
+            .map_err(|message| (request_id, "dht_tcp_seeker_failed", message))
+        }
         _ => Err((
             request_id,
             "usage",
-            "usage: agenterm-net capabilities --json | peer-id | self-test --json | mesh-self-test --json | attach-self-test --json | node start|status|stop ... --json | store put|get|pin|unpin|gc|status ... --json".to_string(),
+            "usage: agenterm-net capabilities --json | peer-id | self-test --json | mesh-self-test --json | attach-self-test --json | tcp-self-test --json | node start|status|stop ... --json | store put|get|pin|unpin|gc|status ... --json".to_string(),
         )),
     }
 }

@@ -11,7 +11,7 @@ use libp2p::{
     noise,
     request_response::{self, ProtocolSupport, cbor},
     swarm::{Config as SwarmConfig, Swarm, SwarmEvent},
-    yamux,
+    tcp, yamux,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -201,7 +201,7 @@ impl AttachServer {
         if !verify_invite(&self.key.public(), &request.invite) {
             return reject("invalid_invite_signature");
         }
-        if request.invite.expires_unix_ms < LOGICAL_NOW_MS {
+        if request.invite.expires_unix_ms <= LOGICAL_NOW_MS {
             return reject("expired");
         }
         if self.used_nonces.contains(&request.invite.nonce) {
@@ -231,6 +231,267 @@ impl AttachServer {
             state: "complete".to_string(),
             code: None,
             snapshot: Some(snapshot),
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct TcpReady {
+    event: &'static str,
+    peer_id: String,
+    address: String,
+    pid: u32,
+}
+
+#[derive(Serialize)]
+struct TcpServerResult {
+    event: &'static str,
+    pid: u32,
+    handled_requests: usize,
+    accepted: bool,
+    replay_rejected: bool,
+    wrong_peer_rejected: bool,
+    expired_rejected: bool,
+}
+
+#[derive(Serialize)]
+struct TcpClientResult {
+    event: &'static str,
+    kind: String,
+    pid: u32,
+    peer_id: String,
+    authenticated_server_peer_id: String,
+    state: String,
+    code: Option<String>,
+    snapshot_bytes: usize,
+    server_count: u16,
+    event_digest_count: usize,
+}
+
+pub async fn run_tcp_server(deadline: Duration) -> Result<(), String> {
+    tokio::time::timeout(deadline, run_tcp_server_inner())
+        .await
+        .map_err(|_| {
+            format!(
+                "attach TCP server exceeded {} ms deadline",
+                deadline.as_millis()
+            )
+        })?
+}
+
+async fn run_tcp_server_inner() -> Result<(), String> {
+    let issuer_key = deterministic_key(51)?;
+    let paired_key = deterministic_key(52)?;
+    let issuer_peer = issuer_key.public().to_peer_id();
+    let paired_peer = paired_key.public().to_peer_id();
+    let mut swarm = attach_tcp_swarm(&issuer_key)?;
+    swarm
+        .listen_on(
+            "/ip4/127.0.0.1/tcp/0"
+                .parse()
+                .map_err(|error: libp2p::multiaddr::Error| error.to_string())?,
+        )
+        .map_err(|error| error.to_string())?;
+    let mut state = AttachServer {
+        key: issuer_key,
+        paired_public_key: paired_key.public(),
+        paired_peer_id: paired_peer,
+        used_nonces: HashSet::new(),
+    };
+    let mut announced = false;
+    let mut handled = 0_usize;
+    let mut flushed = 0_usize;
+    let mut final_connection = None;
+    let mut accepted = false;
+    let mut replay_rejected = false;
+    let mut wrong_peer_rejected = false;
+    let mut expired_rejected = false;
+    loop {
+        match swarm.select_next_some().await {
+            SwarmEvent::NewListenAddr { address, .. } if !announced => {
+                print_worker(&TcpReady {
+                    event: "attach-ready",
+                    peer_id: issuer_peer.to_string(),
+                    address: address.to_string(),
+                    pid: std::process::id(),
+                })?;
+                announced = true;
+            }
+            SwarmEvent::Behaviour(request_response::Event::Message {
+                peer,
+                message:
+                    request_response::Message::Request {
+                        request, channel, ..
+                    },
+                ..
+            }) => {
+                let response = state.handle(peer, request);
+                handled += 1;
+                match (response.state.as_str(), response.code.as_deref()) {
+                    ("complete", None) => accepted = true,
+                    ("rejected", Some("replay")) => replay_rejected = true,
+                    ("rejected", Some("wrong_peer")) => wrong_peer_rejected = true,
+                    ("rejected", Some("expired")) => expired_rejected = true,
+                    _ => {}
+                }
+                swarm
+                    .behaviour_mut()
+                    .send_response(channel, response)
+                    .map_err(|_| "attach TCP response channel closed".to_string())?;
+            }
+            SwarmEvent::Behaviour(request_response::Event::ResponseSent {
+                connection_id, ..
+            }) => {
+                flushed += 1;
+                if flushed == 4 {
+                    if handled != 4
+                        || !accepted
+                        || !replay_rejected
+                        || !wrong_peer_rejected
+                        || !expired_rejected
+                    {
+                        return Err(
+                            "attach TCP server did not observe all required outcomes".to_string()
+                        );
+                    }
+                    final_connection = Some(connection_id);
+                }
+            }
+            SwarmEvent::ConnectionClosed { connection_id, .. }
+                if final_connection == Some(connection_id) =>
+            {
+                print_worker(&TcpServerResult {
+                    event: "attach-complete",
+                    pid: std::process::id(),
+                    handled_requests: handled,
+                    accepted,
+                    replay_rejected,
+                    wrong_peer_rejected,
+                    expired_rejected,
+                })?;
+                return Ok(());
+            }
+            SwarmEvent::Behaviour(request_response::Event::InboundFailure { error, .. }) => {
+                return Err(format!("attach TCP inbound failed: {error}"));
+            }
+            SwarmEvent::ListenerError { error, .. } => {
+                return Err(format!("attach TCP listener failed: {error}"));
+            }
+            _ => {}
+        }
+    }
+}
+
+pub async fn run_tcp_client(
+    address: &str,
+    expected_issuer: &str,
+    kind: &str,
+    deadline: Duration,
+) -> Result<(), String> {
+    tokio::time::timeout(
+        deadline,
+        run_tcp_client_inner(address, expected_issuer, kind),
+    )
+    .await
+    .map_err(|_| {
+        format!(
+            "attach TCP client exceeded {} ms deadline",
+            deadline.as_millis()
+        )
+    })?
+}
+
+async fn run_tcp_client_inner(
+    address: &str,
+    expected_issuer: &str,
+    kind: &str,
+) -> Result<(), String> {
+    let issuer_key = deterministic_key(51)?;
+    let paired_key = deterministic_key(52)?;
+    let wrong_key = deterministic_key(53)?;
+    let issuer_peer = issuer_key.public().to_peer_id();
+    if issuer_peer.to_string() != expected_issuer {
+        return Err("attach fixture issuer PeerId mismatch".to_string());
+    }
+    let paired_peer = paired_key.public().to_peer_id();
+    let (client_key, invite, request_id) = match kind {
+        "valid" | "replay" => (
+            &paired_key,
+            signed_invite(&issuer_key, paired_peer, LOGICAL_NOW_MS + 10_000, "valid")?,
+            "attach-valid",
+        ),
+        "wrong-peer" => (
+            &wrong_key,
+            signed_invite(&issuer_key, paired_peer, LOGICAL_NOW_MS + 10_000, "valid")?,
+            "attach-wrong-peer",
+        ),
+        "expired" => (
+            &paired_key,
+            signed_invite(&issuer_key, paired_peer, LOGICAL_NOW_MS, "expired")?,
+            "attach-expired",
+        ),
+        _ => return Err(format!("unknown attach TCP fixture request kind: {kind}")),
+    };
+    let request = signed_request(client_key, invite, request_id)?;
+    let client_peer = client_key.public().to_peer_id();
+    let address: Multiaddr = address
+        .parse()
+        .map_err(|error| format!("invalid attach TCP address: {error}"))?;
+    let mut swarm = attach_tcp_swarm(client_key)?;
+    let outbound =
+        swarm
+            .behaviour_mut()
+            .send_request_with_addresses(&issuer_peer, request, vec![address]);
+    loop {
+        match swarm.select_next_some().await {
+            SwarmEvent::Behaviour(request_response::Event::Message {
+                peer,
+                message:
+                    request_response::Message::Response {
+                        request_id,
+                        response,
+                    },
+                ..
+            }) if request_id == outbound => {
+                if peer != issuer_peer {
+                    return Err("attach response came from unexpected peer".to_string());
+                }
+                let (snapshot_bytes, server_count, event_digest_count) = response
+                    .snapshot
+                    .as_ref()
+                    .map(|snapshot| {
+                        (
+                            serde_json::to_vec(snapshot).unwrap_or_default().len(),
+                            snapshot.server_count,
+                            snapshot.event_digests.len(),
+                        )
+                    })
+                    .unwrap_or_default();
+                print_worker(&TcpClientResult {
+                    event: "attach-response",
+                    kind: kind.to_string(),
+                    pid: std::process::id(),
+                    peer_id: client_peer.to_string(),
+                    authenticated_server_peer_id: peer.to_string(),
+                    state: response.state,
+                    code: response.code,
+                    snapshot_bytes,
+                    server_count,
+                    event_digest_count,
+                })?;
+                return Ok(());
+            }
+            SwarmEvent::Behaviour(request_response::Event::OutboundFailure {
+                request_id,
+                error,
+                ..
+            }) if request_id == outbound => {
+                return Err(format!("attach TCP request failed: {error}"));
+            }
+            SwarmEvent::OutgoingConnectionError { error, .. } => {
+                return Err(format!("attach TCP connection failed: {error}"));
+            }
+            _ => {}
         }
     }
 }
@@ -542,6 +803,18 @@ fn require_code(response: &AttachResponse, expected: &str) -> Result<(), String>
 }
 
 fn attach_swarm(key: &Keypair) -> Result<Swarm<AttachBehaviour>, String> {
+    attach_swarm_with_transport(key, memory_transport(key)?)
+}
+
+fn attach_tcp_swarm(key: &Keypair) -> Result<Swarm<AttachBehaviour>, String> {
+    let transport = tcp::tokio::Transport::new(tcp::Config::default().nodelay(true)).boxed();
+    attach_swarm_with_transport(key, secure_transport(transport, key)?)
+}
+
+fn attach_swarm_with_transport(
+    key: &Keypair,
+    transport: Boxed<(PeerId, StreamMuxerBox)>,
+) -> Result<Swarm<AttachBehaviour>, String> {
     let peer = key.public().to_peer_id();
     let codec = cbor::codec::Codec::default()
         .set_request_size_maximum(MAX_REQUEST_BYTES)
@@ -554,11 +827,19 @@ fn attach_swarm(key: &Keypair) -> Result<Swarm<AttachBehaviour>, String> {
             .with_max_concurrent_streams(MAX_CONCURRENT_STREAMS),
     );
     Ok(Swarm::new(
-        memory_transport(key)?,
+        transport,
         behaviour,
         peer,
         SwarmConfig::with_tokio_executor().with_idle_connection_timeout(Duration::from_secs(10)),
     ))
+}
+
+fn print_worker<T: Serialize>(value: &T) -> Result<(), String> {
+    println!(
+        "{}",
+        serde_json::to_string(value).map_err(|error| error.to_string())?
+    );
+    Ok(())
 }
 
 fn deterministic_key(seed: u8) -> Result<Keypair, String> {
