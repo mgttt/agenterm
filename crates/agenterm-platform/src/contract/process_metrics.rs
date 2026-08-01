@@ -33,6 +33,7 @@ pub struct ProcessMetrics {
 #[non_exhaustive]
 pub enum ProcessMetricsErrorKind {
     InvalidId,
+    NotFound,
     Open,
     Read,
     Parse,

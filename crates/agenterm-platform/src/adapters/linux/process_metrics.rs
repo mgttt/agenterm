@@ -13,8 +13,16 @@ pub(crate) fn metrics(pid: u32) -> Result<ProcessMetrics, ProcessMetricsError> {
             "process ID zero does not identify one process",
         ));
     }
-    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat"))
-        .map_err(|source| error(ProcessMetricsErrorKind::Open, source.to_string()))?;
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).map_err(|source| {
+        error(
+            if source.kind() == std::io::ErrorKind::NotFound {
+                ProcessMetricsErrorKind::NotFound
+            } else {
+                ProcessMetricsErrorKind::Open
+            },
+            source.to_string(),
+        )
+    })?;
     let close = stat.rfind(')').ok_or_else(|| {
         error(
             ProcessMetricsErrorKind::Parse,
@@ -28,8 +36,16 @@ pub(crate) fn metrics(pid: u32) -> Result<ProcessMetrics, ProcessMetricsError> {
     let system_ticks = parse_field(&fields, 12, "system CPU ticks")?;
     let clock_hz = sysconf(libc::_SC_CLK_TCK, "clock ticks")?;
     let page_size = sysconf(libc::_SC_PAGESIZE, "page size")?;
-    let statm = std::fs::read_to_string(format!("/proc/{pid}/statm"))
-        .map_err(|source| error(ProcessMetricsErrorKind::Read, source.to_string()))?;
+    let statm = std::fs::read_to_string(format!("/proc/{pid}/statm")).map_err(|source| {
+        error(
+            if source.kind() == std::io::ErrorKind::NotFound {
+                ProcessMetricsErrorKind::NotFound
+            } else {
+                ProcessMetricsErrorKind::Read
+            },
+            source.to_string(),
+        )
+    })?;
     let resident_pages = statm
         .split_whitespace()
         .nth(1)

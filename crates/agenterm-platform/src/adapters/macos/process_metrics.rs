@@ -21,10 +21,13 @@ pub(crate) fn metrics(pid: u32) -> Result<ProcessMetrics, ProcessMetricsError> {
     let read =
         unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDTASKINFO, 0, (&raw mut task).cast(), size) };
     if read != size {
-        return Err(ProcessMetricsError::new(
-            ProcessMetricsErrorKind::Read,
-            std::io::Error::last_os_error().to_string(),
-        ));
+        let error = std::io::Error::last_os_error();
+        let kind = if error.raw_os_error() == Some(libc::ESRCH) {
+            ProcessMetricsErrorKind::NotFound
+        } else {
+            ProcessMetricsErrorKind::Read
+        };
+        return Err(ProcessMetricsError::new(kind, error.to_string()));
     }
     let total_faults = nonnegative_counter(task.pti_faults, "page faults")?;
     let page_ins = nonnegative_counter(task.pti_pageins, "page-ins")?;

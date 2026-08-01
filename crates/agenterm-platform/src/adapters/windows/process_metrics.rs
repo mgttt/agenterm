@@ -22,10 +22,15 @@ pub(crate) fn metrics(pid: u32) -> Result<ProcessMetrics, ProcessMetricsError> {
     };
     let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
     if process.is_null() {
-        return Err(ProcessMetricsError::new(
-            ProcessMetricsErrorKind::Open,
-            std::io::Error::last_os_error().to_string(),
-        ));
+        let error = std::io::Error::last_os_error();
+        let kind = if error.raw_os_error()
+            == Some(windows_sys::Win32::Foundation::ERROR_INVALID_PARAMETER as i32)
+        {
+            ProcessMetricsErrorKind::NotFound
+        } else {
+            ProcessMetricsErrorKind::Open
+        };
+        return Err(ProcessMetricsError::new(kind, error.to_string()));
     }
     let mut creation = FILETIME::default();
     let mut exit = FILETIME::default();
