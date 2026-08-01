@@ -56,6 +56,7 @@ clipboard, IPC, or screenshot modules.
 | `process` | observation/tree control, shell defaults, child-pipe probes and parent-console diagnostics | target `libc` / `windows-sys` |
 | `filesystem-conventions` | user home, host roots and sibling executable naming | none |
 | `filesystem-entry` | classify path metadata or already-open objects, treating Unix symbolic links and every Windows reparse point as link-like | none |
+| `filesystem-open` | open an existing path or one child component without following the final link, then verify the opened object type | target `libc` / minimal `windows-sys` |
 | `filesystem-cleanup` | remove caller-owned quiescent trees after restoring deletable permissions without following links | none |
 | `filesystem-publish` | recoverable same-parent directory publication with typed rollback outcomes | `filesystem-cleanup` |
 | `filesystem-usage` | checked logical-byte accounting without traversing symbolic links or reparse points | none |
@@ -162,6 +163,14 @@ without reopening its path. Callers doing component-wise traversal must use a
 native no-follow open first; the returned directory/link-like facts then avoid
 a second name-resolution race. The feature remains free of native crate
 dependencies and does not choose traversal roots or authorization policy.
+
+`filesystem_open::open_existing_child` accepts exactly one ordinary component
+and resolves it relative to a retained directory object. Windows opens the
+reparse object itself through a root HANDLE; Linux and macOS use `openat` with
+`O_NOFOLLOW`. The facade then verifies the type through that same opened
+object, so a renamed or replaced parent path cannot redirect traversal.
+Selecting the root, parsing guest paths, granting access, and deciding which
+children are authorized remain caller policy.
 
 `filesystem_publish::publish_directory` installs a prepared directory beside
 its destination. If a destination already exists, it is first renamed to a

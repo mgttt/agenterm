@@ -35,6 +35,17 @@ pub(crate) mod filesystem_cleanup;
 #[path = "adapters/windows/filesystem_entry.rs"]
 pub(crate) mod filesystem_entry;
 
+#[cfg(all(feature = "filesystem-open", windows))]
+#[path = "adapters/windows/filesystem_open.rs"]
+pub(crate) mod filesystem_open;
+
+#[cfg(all(
+    feature = "filesystem-open",
+    any(target_os = "linux", target_os = "macos")
+))]
+#[path = "adapters/unix/filesystem_open.rs"]
+pub(crate) mod filesystem_open;
+
 #[cfg(all(
     feature = "filesystem-entry",
     any(target_os = "linux", target_os = "macos")

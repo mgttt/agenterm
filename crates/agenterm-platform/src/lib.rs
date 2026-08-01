@@ -41,6 +41,7 @@ pub enum Capability {
     Process,
     FilesystemConventions,
     FilesystemEntry,
+    FilesystemOpen,
     FilesystemCleanup,
     FilesystemPublish,
     FilesystemUsage,
@@ -95,6 +96,7 @@ pub fn capability_status(capability: Capability) -> CapabilityStatus {
         Capability::Process => (cfg!(feature = "process"), true),
         Capability::FilesystemConventions => (cfg!(feature = "filesystem-conventions"), true),
         Capability::FilesystemEntry => (cfg!(feature = "filesystem-entry"), true),
+        Capability::FilesystemOpen => (cfg!(feature = "filesystem-open"), true),
         Capability::FilesystemCleanup => (cfg!(feature = "filesystem-cleanup"), true),
         Capability::FilesystemPublish => (cfg!(feature = "filesystem-publish"), true),
         Capability::FilesystemUsage => (cfg!(feature = "filesystem-usage"), true),
@@ -174,6 +176,9 @@ pub mod filesystem;
 
 #[cfg(feature = "filesystem-entry")]
 pub mod filesystem_entry;
+
+#[cfg(feature = "filesystem-open")]
+pub mod filesystem_open;
 
 #[cfg(feature = "filesystem-cleanup")]
 pub mod filesystem_cleanup;
@@ -305,6 +310,22 @@ mod tests {
     fn filesystem_entry_does_not_claim_full_filesystem() {
         assert_eq!(
             crate::capability_status(crate::Capability::FilesystemEntry),
+            crate::CapabilityStatus::Available
+        );
+        #[cfg(not(feature = "filesystem"))]
+        assert_eq!(
+            crate::capability_status(crate::Capability::Filesystem),
+            crate::CapabilityStatus::Unsupported {
+                reason: std::borrow::Cow::Borrowed("feature-disabled")
+            }
+        );
+    }
+
+    #[cfg(feature = "filesystem-open")]
+    #[test]
+    fn filesystem_open_does_not_claim_full_filesystem() {
+        assert_eq!(
+            crate::capability_status(crate::Capability::FilesystemOpen),
             crate::CapabilityStatus::Available
         );
         #[cfg(not(feature = "filesystem"))]
