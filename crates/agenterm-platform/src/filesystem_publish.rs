@@ -15,6 +15,7 @@ pub enum DirectoryPublishErrorKind {
     Inspect,
     Backup,
     Install,
+    InstallRolledBack,
     Rollback,
 }
 
@@ -243,7 +244,7 @@ where
             .with_backup(backup));
         }
         return Err(DirectoryPublishError::new(
-            DirectoryPublishErrorKind::Install,
+            DirectoryPublishErrorKind::InstallRolledBack,
             format!(
                 "install prepared directory failed; existing directory restored: {install_error}"
             ),
@@ -361,7 +362,10 @@ mod tests {
             crate::filesystem_cleanup::remove_tree,
         )
         .expect_err("install must fail");
-        assert_eq!(error.kind(), DirectoryPublishErrorKind::Install);
+        assert_eq!(
+            error.kind(),
+            DirectoryPublishErrorKind::InstallRolledBack
+        );
         assert!(error.retained_backup().is_none());
         assert_eq!(fs::read(destination.join("value")).unwrap(), b"old");
         crate::filesystem_cleanup::remove_tree(&root).unwrap();
