@@ -453,6 +453,7 @@ fn current_trusted_os_user_scope() -> std::io::Result<TrustedOsUserScope> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use std::path::Path;
 
     #[test]
