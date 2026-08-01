@@ -617,6 +617,39 @@ fn selection_claims_copy_shortcut(selection: Option<&RemoteTerminalSelection>) -
     selection.is_some_and(RemoteTerminalSelection::can_copy)
 }
 
+fn terminal_selection_highlight_rects(
+    selection: &RemoteTerminalSelection,
+    screen: &UiScreenSnapshot,
+    terminal: ProductPixelRect,
+    cell_width: i32,
+    cell_height: i32,
+) -> Vec<ProductPixelRect> {
+    if !selection.matches_screen(screen) || screen.rows == 0 || screen.columns == 0 {
+        return Vec::new();
+    }
+    let (start, end) = selection.bounds();
+    (start.row..=end.row.min(screen.rows.saturating_sub(1)))
+        .map(|row| {
+            let first = if row == start.row { start.column } else { 0 }
+                .min(screen.columns.saturating_sub(1));
+            let last = if row == end.row {
+                end.column
+            } else {
+                screen.columns.saturating_sub(1)
+            }
+            .min(screen.columns.saturating_sub(1));
+            ProductPixelRect {
+                left: terminal.left + i32::try_from(first).unwrap_or_default() * cell_width,
+                top: terminal.top + i32::try_from(row).unwrap_or_default() * cell_height,
+                right: terminal.left
+                    + i32::try_from(last.saturating_add(1)).unwrap_or_default() * cell_width,
+                bottom: terminal.top
+                    + i32::try_from(row.saturating_add(1)).unwrap_or_default() * cell_height,
+            }
+        })
+        .collect()
+}
+
 fn remote_surface_navigation(
     source: RemoteFocusSurface,
     control: bool,
@@ -1810,6 +1843,10 @@ impl RemoteWindowState {
             .effective_terminal_appearance(&ipc_address(), source.active_tab_id.as_deref());
         let client_size = self.window.client_size();
         let layout = self.workspace_geometry();
+        let pointer_capture_owned = self
+            .window
+            .pointer_capture_owned()
+            .context("query native pointer capture ownership")?;
         let visible_rows = remote_tree_rows(&source.tabs);
         let tabs = source
             .tabs
@@ -2208,12 +2245,30 @@ impl RemoteWindowState {
             "terminal_interaction": {
                 "selection": self.terminal_selection.as_ref().map(|selection| {
                     let (start, end) = selection.bounds();
+                    let highlight = source
+                        .tabs
+                        .iter()
+                        .find(|tab| tab.id == selection.tab_id)
+                        .map(|tab| terminal_selection_highlight_rects(
+                            selection,
+                            &tab.screen,
+                            layout.terminal,
+                            self.cell_width,
+                            self.cell_height,
+                        ))
+                        .unwrap_or_default();
                     serde_json::json!({
                         "phase": selection.phase.as_str(),
                         "tab_id": selection.tab_id,
+                        "copyable": selection.can_copy(),
+                        "capture_owned": selection.active_gesture() && pointer_capture_owned,
                         "selection": {
                             "start": {"row": start.row, "col": start.column},
                             "end": {"row": end.row, "col": end.column},
+                        },
+                        "highlight": {
+                            "rendered": !highlight.is_empty(),
+                            "bounds": highlight.into_iter().map(pixel_rect_json).collect::<Vec<_>>(),
                         },
                         "autoscroll": {"active": false},
                     })
@@ -4165,21 +4220,29 @@ impl RemoteWindowState {
         let Some(point) = self.terminal_point(x, y, false) else {
             return false;
         };
-        let Some(tab) = self.active_tab() else {
+        let Some((tab_id, rows, columns)) = self
+            .active_tab()
+            .map(|tab| (tab.id.clone(), tab.screen.rows, tab.screen.columns))
+        else {
             return false;
         };
+        self.focus_surface = RemoteFocusSurface::Terminal;
+        self.window.focus();
+        if let Err(error) = self.window.set_pointer_capture(true) {
+            self.terminal_selection = None;
+            self.last_error = Some(format!("Selection failed: {error}"));
+            return true;
+        }
         self.terminal_selection = Some(RemoteTerminalSelection {
-            tab_id: tab.id.clone(),
-            rows: tab.screen.rows,
-            columns: tab.screen.columns,
+            tab_id,
+            rows,
+            columns,
             anchor: point,
             active: point,
             phase: RemoteSelectionPhase::Prepared,
             cached_text: None,
         });
-        self.focus_surface = RemoteFocusSurface::Terminal;
-        self.window.focus();
-        let _ = self.window.set_pointer_capture(true);
+        self.last_error = None;
         true
     }
 
@@ -4210,7 +4273,13 @@ impl RemoteWindowState {
             .is_some_and(RemoteTerminalSelection::complete);
         // Mark the gesture completed before ReleaseCapture synchronously emits
         // WM_CAPTURECHANGED; only an unfinished gesture is cancelled there.
-        let _ = self.window.set_pointer_capture(false);
+        if let Err(error) = self.window.set_pointer_capture(false) {
+            self.terminal_selection = None;
+            self.last_error = Some(format!(
+                "Selection failed to release pointer capture: {error}"
+            ));
+            return true;
+        }
         if !completed {
             self.terminal_selection = None;
             return true;
@@ -4248,8 +4317,10 @@ impl RemoteWindowState {
             selection.phase = RemoteSelectionPhase::Cancelled;
         }
         self.terminal_selection = None;
-        if captured {
-            let _ = self.window.set_pointer_capture(false);
+        if captured && let Err(error) = self.window.set_pointer_capture(false) {
+            self.last_error = Some(format!(
+                "Selection failed to release pointer capture: {error}"
+            ));
         }
     }
 
@@ -5190,6 +5261,15 @@ impl RemoteWindowState {
         };
         let cells = screen_cells(screen);
         let (start, end) = selection.bounds();
+        for bounds in terminal_selection_highlight_rects(
+            selection,
+            screen,
+            terminal,
+            self.cell_width,
+            self.cell_height,
+        ) {
+            fill(device, &bounds, palette.selection_background.canvas_rgb());
+        }
         for row in start.row..=end.row.min(screen.rows.saturating_sub(1)) {
             let first = if row == start.row { start.column } else { 0 };
             let last = if row == end.row {
@@ -5198,21 +5278,6 @@ impl RemoteWindowState {
                 screen.columns.saturating_sub(1)
             }
             .min(screen.columns.saturating_sub(1));
-            fill(
-                device,
-                &ProductPixelRect {
-                    left: terminal.left
-                        + i32::try_from(first).unwrap_or_default() * self.cell_width,
-                    top: terminal.top + i32::try_from(row).unwrap_or_default() * self.cell_height,
-                    right: terminal.left
-                        + i32::try_from(last.saturating_add(1)).unwrap_or_default()
-                            * self.cell_width,
-                    bottom: terminal.top
-                        + i32::try_from(row.saturating_add(1)).unwrap_or_default()
-                            * self.cell_height,
-                },
-                palette.selection_background.canvas_rgb(),
-            );
             for column in first..=last {
                 let Some(text) = cells
                     .get(usize::try_from(row).unwrap_or(usize::MAX))
@@ -6064,12 +6129,7 @@ impl ControlWindowApplication for RemoteWindowApplication {
                     modifiers.shift,
                     modifiers.alt,
                 );
-                if !consumed
-                    && key == u32::from(KEY_TAB)
-                    && modifiers.shift
-                    && !modifiers.control
-                    && !modifiers.alt
-                {
+                if !consumed {
                     consumed = state.handle_window_keydown(key, modifiers);
                 }
                 redraw = consumed;
@@ -6442,6 +6502,74 @@ mod tests {
             cached_text: Some("cached".to_owned()),
         };
         assert_eq!(screen_selection_text(&screen, &selection), "界B\r\nta");
+    }
+
+    #[test]
+    fn selection_highlight_rects_match_multiline_terminal_cells() {
+        let screen = UiScreenSnapshot {
+            schema_version: UI_SCREEN_SCHEMA_VERSION,
+            tab_id: "@1".to_owned(),
+            generation: 1,
+            terminal_title: String::new(),
+            rows: 3,
+            columns: 8,
+            alternate_screen: false,
+            application_cursor: false,
+            bracketed_paste: false,
+            scrollback_offset: 0,
+            max_scrollback: 0,
+            cursor: UiCursorSnapshot {
+                row: 0,
+                column: 0,
+                visible: true,
+            },
+            runs: Vec::new(),
+            complete: true,
+            truncated: false,
+        };
+        let selection = RemoteTerminalSelection {
+            tab_id: "@1".to_owned(),
+            rows: 3,
+            columns: 8,
+            anchor: RemoteTerminalPoint { row: 0, column: 2 },
+            active: RemoteTerminalPoint { row: 2, column: 3 },
+            phase: RemoteSelectionPhase::Dragging,
+            cached_text: None,
+        };
+        assert_eq!(
+            terminal_selection_highlight_rects(
+                &selection,
+                &screen,
+                ProductPixelRect {
+                    left: 10,
+                    top: 20,
+                    right: 90,
+                    bottom: 50,
+                },
+                10,
+                10,
+            ),
+            vec![
+                ProductPixelRect {
+                    left: 30,
+                    top: 20,
+                    right: 90,
+                    bottom: 30,
+                },
+                ProductPixelRect {
+                    left: 10,
+                    top: 30,
+                    right: 90,
+                    bottom: 40,
+                },
+                ProductPixelRect {
+                    left: 10,
+                    top: 40,
+                    right: 50,
+                    bottom: 50,
+                },
+            ]
+        );
     }
 
     #[test]

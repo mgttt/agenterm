@@ -329,6 +329,7 @@ pub(crate) trait ControlWindowBackend {
     ) -> Result<(), ControlWindowError>;
     fn focus_control(&self, id: ControlId) -> Result<(), ControlWindowError>;
     fn set_pointer_capture(&self, capture: bool) -> Result<(), ControlWindowError>;
+    fn pointer_capture_owned(&self) -> Result<bool, ControlWindowError>;
     fn set_cursor(&self, cursor: ControlCursor) -> Result<(), ControlWindowError>;
     #[cfg(feature = "font")]
     fn create_font(
@@ -444,6 +445,13 @@ impl ControlWindow {
     }
     pub fn set_pointer_capture(&self, v: bool) -> Result<(), ControlWindowError> {
         self.0.set_pointer_capture(v)
+    }
+    /// Reports whether this window currently owns native pointer capture.
+    ///
+    /// A successful `false` means that capture is absent or belongs to another
+    /// window. Native query failures remain distinguishable as a typed error.
+    pub fn pointer_capture_owned(&self) -> Result<bool, ControlWindowError> {
+        self.0.pointer_capture_owned()
     }
     pub fn set_cursor(&self, v: ControlCursor) -> Result<(), ControlWindowError> {
         self.0.set_cursor(v)

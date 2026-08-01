@@ -243,6 +243,27 @@ fn wait_terminal_resize_settled(context, cli) {
     throw "remote_ui_terminal_resize_settle_timeout";
 }
 
+fn wait_terminal_selection(
+        context, cli, phase, capture_owned, copyable, code) {
+    for attempt in 0..200 {
+        let snapshot = json_cli(context, cli, ["ui-snapshot"]);
+        let interaction = snapshot.terminal_interaction;
+        if interaction != () {
+            let selection = interaction.selection;
+            if selection != ()
+                && selection.phase == phase
+                && selection.capture_owned == capture_owned
+                && selection.copyable == copyable
+                && selection.highlight.rendered
+                && selection.highlight.bounds.len > 0 {
+                return snapshot;
+            }
+        }
+        rhai::task::sleep(std::time::Duration::from_millis(25));
+    }
+    throw code;
+}
+
 fn sample_render_activity(context, cli, gui, after_sequence) {
     let required_sequence = after_sequence;
     if required_sequence == 0 {
@@ -2337,18 +2358,94 @@ try {
             "--timeout-ms", "5000"
         ]
     );
+    let selection_prepared = wait_terminal_selection(
+        context,
+        cli,
+        "prepared",
+        true,
+        false,
+        "remote_ui_terminal_selection_prepared_timeout"
+    );
+    let selection_prepared_png = std::path::join(
+        context.run_directory,
+        "terminal-selection-prepared.png"
+    ).display;
+    screenshot(context, cli, selection_prepared_png);
     gui.window_pointer(
         "move-held",
         selection_end_x,
         selection_y
     );
+    let selection_dragging = wait_terminal_selection(
+        context,
+        cli,
+        "dragging",
+        true,
+        false,
+        "remote_ui_terminal_selection_dragging_timeout"
+    );
+    let selection_dragging_png = std::path::join(
+        context.run_directory,
+        "terminal-selection-dragging.png"
+    ).display;
+    screenshot(context, cli, selection_dragging_png);
+    require(
+        selection_dragging.event_position
+                == selection_prepared.event_position
+            && selection_dragging.terminal_interaction.selection
+                    .highlight.bounds.len
+                >= selection_prepared.terminal_interaction.selection
+                    .highlight.bounds.len
+            && rhai::crypto::sha256_file(selection_dragging_png)
+                != rhai::crypto::sha256_file(selection_prepared_png),
+        "remote_ui_terminal_selection_live_highlight_invalid"
+    );
     gui.window_pointer("up", selection_end_x, selection_y);
-    gui.window_message(0x0112, 0x1F00, 0);
+    let selection_completed = wait_terminal_selection(
+        context,
+        cli,
+        "completed",
+        false,
+        true,
+        "remote_ui_terminal_selection_completed_timeout"
+    );
+    require(
+        selection_completed.system_menu.copy.enabled,
+        "remote_ui_terminal_selection_copy_not_enabled"
+    );
+    let copy_input_before = text_cli(
+        context,
+        cli,
+        ["list-panes", "-t", tab_id, "-F", "#{pane_input_bytes}"]
+    );
+    copy_input_before.trim();
+    copy_input_before = copy_input_before.parse_int();
+    rhai::clipboard::set_text("REMOTE_COPY_SENTINEL");
+    require(
+        gui.window_message(0x8002, 0x43, 1) == 1,
+        "remote_ui_terminal_ctrl_c_not_consumed"
+    );
     let copied = rhai::clipboard::get_text();
     copied.trim();
+    let copy_input_after = text_cli(
+        context,
+        cli,
+        ["list-panes", "-t", tab_id, "-F", "#{pane_input_bytes}"]
+    );
+    copy_input_after.trim();
+    copy_input_after = copy_input_after.parse_int();
     require(
-        copied == copy_marker,
+        copied == copy_marker
+            && copy_input_after == copy_input_before,
         "remote_ui_terminal_copy_invalid:" + copied
+    );
+    rhai::clipboard::set_text("REMOTE_MENU_COPY_SENTINEL");
+    gui.window_message(0x0112, 0x1F00, 0);
+    let menu_copied = rhai::clipboard::get_text();
+    menu_copied.trim();
+    require(
+        menu_copied == copy_marker,
+        "remote_ui_terminal_system_menu_copy_invalid:" + menu_copied
     );
     text_cli(context, cli, ["send-keys", "-t", tab_id, "C-c"]);
     let paste_marker = "REMOTE_PASTE_" + context.run_id;

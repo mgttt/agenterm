@@ -14,9 +14,9 @@ use windows_sys::Win32::{
     System::LibraryLoader::GetModuleHandleW,
     UI::{
         Input::KeyboardAndMouse::{
-            EnableWindow, GetFocus, GetKeyState, ReleaseCapture, SetCapture, SetFocus, VK_BACK,
-            VK_CONTROL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_F1, VK_F2, VK_F3, VK_F4, VK_F5,
-            VK_F6, VK_F7, VK_F8, VK_F9, VK_F10, VK_F11, VK_F12, VK_HOME, VK_INSERT, VK_LEFT,
+            EnableWindow, GetCapture, GetFocus, GetKeyState, ReleaseCapture, SetCapture, SetFocus,
+            VK_BACK, VK_CONTROL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_F1, VK_F2, VK_F3, VK_F4,
+            VK_F5, VK_F6, VK_F7, VK_F8, VK_F9, VK_F10, VK_F11, VK_F12, VK_HOME, VK_INSERT, VK_LEFT,
             VK_MENU, VK_NEXT, VK_PRIOR, VK_RETURN, VK_RIGHT, VK_SHIFT, VK_SPACE, VK_TAB, VK_UP,
         },
         WindowsAndMessaging::{
@@ -25,18 +25,18 @@ use windows_sys::Win32::{
             ES_WANTRETURN, EnableMenuItem, GWLP_USERDATA, GetClientRect, GetMessageW,
             GetSystemMenu, GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW,
             IDC_ARROW, IDC_HAND, IDC_IBEAM, IDC_SIZENS, IDC_SIZEWE, ISMEX_NOSEND, InSendMessageEx,
-            IsIconic, IsWindowVisible, IsZoomed, LoadCursorW, MF_BYCOMMAND, MF_CHECKED, MF_ENABLED,
-            MF_GRAYED, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MSG, ModifyMenuW, MoveWindow,
-            PostMessageW, PostQuitMessage, RegisterClassW, SIZE_MINIMIZED, SW_HIDE, SW_MAXIMIZE,
-            SW_MINIMIZE, SW_RESTORE, SW_SHOW, SW_SHOWNOACTIVATE, SendMessageW, SetCursor,
-            SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowTextW, ShowWindow,
-            TranslateMessage, WM_APP, WM_CAPTURECHANGED, WM_CHAR, WM_CLOSE, WM_COMMAND, WM_COPY,
-            WM_DESTROY, WM_ERASEBKGND, WM_INITMENUPOPUP, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS,
-            WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP,
-            WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY, WM_PAINT, WM_PASTE, WM_RBUTTONDOWN,
-            WM_RBUTTONUP, WM_SETFOCUS, WM_SIZE, WM_SYSCOMMAND, WM_TIMER, WNDCLASSW, WS_CHILD,
-            WS_CLIPCHILDREN, WS_EX_CLIENTEDGE, WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE,
-            WS_VSCROLL,
+            IsIconic, IsWindow, IsWindowVisible, IsZoomed, LoadCursorW, MF_BYCOMMAND, MF_CHECKED,
+            MF_ENABLED, MF_GRAYED, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MSG, ModifyMenuW,
+            MoveWindow, PostMessageW, PostQuitMessage, RegisterClassW, SIZE_MINIMIZED, SW_HIDE,
+            SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, SW_SHOWNOACTIVATE, SendMessageW,
+            SetCursor, SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowTextW,
+            ShowWindow, TranslateMessage, WM_APP, WM_CAPTURECHANGED, WM_CHAR, WM_CLOSE, WM_COMMAND,
+            WM_COPY, WM_DESTROY, WM_ERASEBKGND, WM_INITMENUPOPUP, WM_KEYDOWN, WM_KEYUP,
+            WM_KILLFOCUS, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN,
+            WM_MBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY, WM_PAINT, WM_PASTE,
+            WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETFOCUS, WM_SIZE, WM_SYSCOMMAND, WM_TIMER, WNDCLASSW,
+            WS_CHILD, WS_CLIPCHILDREN, WS_EX_CLIENTEDGE, WS_OVERLAPPEDWINDOW, WS_TABSTOP,
+            WS_VISIBLE, WS_VSCROLL,
         },
     },
 };
@@ -360,14 +360,33 @@ impl ControlWindowBackend for Backend {
         Ok(())
     }
     fn set_pointer_capture(&self, capture: bool) -> Result<(), ControlWindowError> {
-        unsafe {
-            if capture {
+        if capture {
+            unsafe {
                 SetCapture(self.window.get());
-            } else {
-                ReleaseCapture();
+            }
+            if !self.pointer_capture_owned()? {
+                return Err(ControlWindowError::failed(
+                    "control_window_pointer_capture_acquire_failed",
+                    "SetCapture returned without transferring pointer capture to this window",
+                ));
+            }
+        } else if self.pointer_capture_owned()? {
+            if unsafe { ReleaseCapture() } == 0 {
+                return Err(last_error("control_window_pointer_capture_release_failed"));
+            }
+            if self.pointer_capture_owned()? {
+                return Err(ControlWindowError::failed(
+                    "control_window_pointer_capture_release_failed",
+                    "ReleaseCapture returned without releasing pointer capture from this window",
+                ));
             }
         }
         Ok(())
+    }
+    fn pointer_capture_owned(&self) -> Result<bool, ControlWindowError> {
+        let window = self.window.get();
+        validate_pointer_capture_window(window, unsafe { IsWindow(window) } != 0)?;
+        Ok(pointer_capture_is_owned(window, unsafe { GetCapture() }))
     }
     fn set_cursor(&self, cursor: ControlCursor) -> Result<(), ControlWindowError> {
         let id = match cursor {
@@ -1190,6 +1209,22 @@ fn control_bounds_match(origin: POINT, current: RECT, requested: PixelRect) -> b
         && current.right.saturating_sub(current.left) == i32_size(requested.size.width)
         && current.bottom.saturating_sub(current.top) == i32_size(requested.size.height)
 }
+fn pointer_capture_is_owned(window: HWND, captured: HWND) -> bool {
+    !window.is_null() && captured == window
+}
+fn validate_pointer_capture_window(
+    window: HWND,
+    is_window: bool,
+) -> Result<(), ControlWindowError> {
+    if window.is_null() || !is_window {
+        Err(ControlWindowError::failed(
+            "control_window_pointer_capture_query_failed",
+            "native control-window handle is unavailable",
+        ))
+    } else {
+        Ok(())
+    }
+}
 fn top_level_window_style() -> u32 {
     WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN
 }
@@ -1236,6 +1271,28 @@ mod tests {
             },
             requested,
         ));
+    }
+
+    #[test]
+    fn pointer_capture_ownership_requires_the_exact_window() {
+        let window = 1usize as HWND;
+        let other = 2usize as HWND;
+        assert!(pointer_capture_is_owned(window, window));
+        assert!(!pointer_capture_is_owned(window, other));
+        assert!(!pointer_capture_is_owned(window, ptr::null_mut()));
+        assert!(!pointer_capture_is_owned(ptr::null_mut(), ptr::null_mut()));
+    }
+
+    #[test]
+    fn unavailable_pointer_capture_window_is_a_typed_query_failure() {
+        for (window, is_window) in [(ptr::null_mut(), false), (1usize as HWND, false)] {
+            assert!(matches!(
+                validate_pointer_capture_window(window, is_window),
+                Err(ControlWindowError::Failed { code, .. })
+                    if code == "control_window_pointer_capture_query_failed"
+            ));
+        }
+        assert!(validate_pointer_capture_window(1usize as HWND, true).is_ok());
     }
 
     #[test]
