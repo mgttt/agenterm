@@ -3,7 +3,7 @@
 //! This module owns the stable product-facing verbs while `selected` resolves
 //! the one native adapter for the compilation target.
 
-use std::process::Command;
+use std::process::{ChildStderr, ChildStdout, Command};
 
 use crate::{
     contract::process::{ProcessError, ProcessInfo, ProcessObservation},
@@ -11,6 +11,7 @@ use crate::{
 };
 
 pub use crate::contract::process::ProcessErrorKind;
+pub use crate::contract::process::{PipeProbeError, PipeProbeToken};
 pub use adapter::ProcessTreeGuard;
 
 pub fn observe(pid: u32) -> ProcessObservation {
@@ -51,4 +52,16 @@ pub fn configure_command(command: &mut Command) -> Result<(), String> {
 /// The caller retains ownership of executable discovery, arguments, and stdio.
 pub fn configure_detached_command(command: &mut Command) -> Result<(), String> {
     adapter::configure_detached_command(command)
+}
+
+pub fn stdout_probe_token(reader: &ChildStdout) -> Option<PipeProbeToken> {
+    adapter::stdout_probe_token(reader)
+}
+
+pub fn stderr_probe_token(reader: &ChildStderr) -> Option<PipeProbeToken> {
+    adapter::stderr_probe_token(reader)
+}
+
+pub fn pipe_available(token: PipeProbeToken) -> Result<usize, PipeProbeError> {
+    adapter::pipe_available(token)
 }

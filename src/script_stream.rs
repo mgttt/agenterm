@@ -124,7 +124,7 @@ fn from_reader_inner(
     kind: &'static str,
     capture_limit: usize,
     delivery_limit: Option<usize>,
-    process_handle: Option<usize>,
+    process_handle: Option<platform_stream::PipeProbeToken>,
 ) -> ScriptStream {
     let inner = Arc::new(StreamInner {
         id: NEXT_STREAM_ID.fetch_add(1, Ordering::Relaxed),

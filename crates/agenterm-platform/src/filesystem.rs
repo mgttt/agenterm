@@ -1,6 +1,10 @@
 //! Host filesystem conventions without product-specific directory names.
 
-use std::path::{Path, PathBuf};
+use std::{
+    fs::Metadata,
+    io,
+    path::{Path, PathBuf},
+};
 
 use crate::selected;
 
@@ -42,6 +46,18 @@ pub fn executable_name(base: &str) -> String {
 #[must_use]
 pub fn sibling_executable(current_executable: &Path, base: &str) -> PathBuf {
     current_executable.with_file_name(executable_name(base))
+}
+
+pub fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
+    selected::filesystem::replace_file(source, destination)
+}
+
+pub fn sync_parent(parent: &Path) -> io::Result<()> {
+    selected::filesystem::sync_parent(parent)
+}
+
+pub fn metadata_is_link_like(metadata: &Metadata) -> bool {
+    selected::filesystem::metadata_is_link_like(metadata)
 }
 
 #[cfg(test)]

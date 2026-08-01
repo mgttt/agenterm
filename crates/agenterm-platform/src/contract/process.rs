@@ -15,6 +15,16 @@ pub struct ProcessInfo {
     pub executable_name: String,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PipeProbeToken(pub(crate) usize);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum PipeProbeError {
+    Closed,
+    Failed,
+}
+
 #[allow(dead_code)] // A target builds the full three-adapter error contract.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]

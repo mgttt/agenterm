@@ -2,16 +2,14 @@
 
 use std::{fs::Metadata, io, path::Path};
 
-use crate::platform::selected;
-
 pub(crate) fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
-    selected::script_files::replace_file(source, destination)
+    agenterm_platform::filesystem::replace_file(source, destination)
 }
 
 pub(crate) fn sync_parent(parent: &Path) -> io::Result<()> {
-    selected::script_files::sync_parent(parent)
+    agenterm_platform::filesystem::sync_parent(parent)
 }
 
 pub(crate) fn metadata_is_reparse_point(metadata: &Metadata) -> bool {
-    selected::script_files::metadata_is_reparse_point(metadata)
+    agenterm_platform::filesystem::metadata_is_link_like(metadata)
 }

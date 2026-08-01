@@ -1,8 +1,46 @@
 //! Windows implementation of the process facade contract.
 
-use std::process::{Child, Command};
+use std::process::{Child, ChildStderr, ChildStdout, Command};
 
+use crate::contract::process::{PipeProbeError, PipeProbeToken};
 use crate::contract::process::{ProcessError, ProcessErrorKind, ProcessInfo, ProcessObservation};
+
+pub(crate) fn stdout_probe_token(reader: &ChildStdout) -> Option<PipeProbeToken> {
+    use std::os::windows::io::AsRawHandle as _;
+    Some(PipeProbeToken(reader.as_raw_handle() as usize))
+}
+
+pub(crate) fn stderr_probe_token(reader: &ChildStderr) -> Option<PipeProbeToken> {
+    use std::os::windows::io::AsRawHandle as _;
+    Some(PipeProbeToken(reader.as_raw_handle() as usize))
+}
+
+pub(crate) fn pipe_available(token: PipeProbeToken) -> Result<usize, PipeProbeError> {
+    use windows_sys::Win32::{
+        Foundation::{ERROR_BROKEN_PIPE, ERROR_NO_DATA, GetLastError},
+        System::Pipes::PeekNamedPipe,
+    };
+    let mut available = 0_u32;
+    if unsafe {
+        PeekNamedPipe(
+            token.0 as windows_sys::Win32::Foundation::HANDLE,
+            std::ptr::null_mut(),
+            0,
+            std::ptr::null_mut(),
+            &mut available,
+            std::ptr::null_mut(),
+        )
+    } != 0
+    {
+        return Ok(available as usize);
+    }
+    let error = unsafe { GetLastError() };
+    if error == ERROR_BROKEN_PIPE || error == ERROR_NO_DATA {
+        Err(PipeProbeError::Closed)
+    } else {
+        Err(PipeProbeError::Failed)
+    }
+}
 
 pub(crate) fn configure_detached_command(command: &mut Command) -> Result<(), String> {
     use std::os::windows::process::CommandExt as _;

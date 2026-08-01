@@ -1,8 +1,19 @@
 //! Linux implementation of the process facade contract.
 
-use std::process::{Child, Command};
+use std::process::{Child, ChildStderr, ChildStdout, Command};
 
+use crate::contract::process::{PipeProbeError, PipeProbeToken};
 use crate::contract::process::{ProcessError, ProcessErrorKind, ProcessInfo, ProcessObservation};
+
+pub(crate) fn stdout_probe_token(_reader: &ChildStdout) -> Option<PipeProbeToken> {
+    None
+}
+pub(crate) fn stderr_probe_token(_reader: &ChildStderr) -> Option<PipeProbeToken> {
+    None
+}
+pub(crate) fn pipe_available(_token: PipeProbeToken) -> Result<usize, PipeProbeError> {
+    Err(PipeProbeError::Failed)
+}
 
 pub(crate) fn configure_detached_command(_command: &mut Command) -> Result<(), String> {
     Err("detached process configuration is not implemented on Linux".to_owned())
