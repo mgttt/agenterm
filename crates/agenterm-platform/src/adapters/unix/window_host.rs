@@ -124,6 +124,10 @@ impl PixelWindowBackend for NativeWindowBackend {
         self.window.set_maximized(maximized);
     }
 
+    fn set_visible(&self, visible: bool) {
+        self.window.set_visible(visible);
+    }
+
     fn focus(&self) {
         self.window.set_minimized(false);
         self.window.focus_window();

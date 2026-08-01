@@ -263,6 +263,7 @@ pub(crate) trait PixelWindowBackend {
     fn semantic_flags(&self) -> WindowSemanticFlags;
     fn set_minimized(&self, minimized: bool);
     fn set_maximized(&self, maximized: bool);
+    fn set_visible(&self, visible: bool);
     fn focus(&self);
     fn set_title(&self, title: &str);
     fn request_logical_inner_size(&self, size: LogicalSize) -> Result<(), PixelWindowError>;
@@ -322,6 +323,10 @@ impl PixelWindow {
 
     pub fn set_maximized(&self, maximized: bool) {
         self.backend.set_maximized(maximized);
+    }
+
+    pub fn set_visible(&self, visible: bool) {
+        self.backend.set_visible(visible);
     }
 
     pub fn focus(&self) {
