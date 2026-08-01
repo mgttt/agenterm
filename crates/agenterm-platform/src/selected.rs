@@ -39,6 +39,18 @@ pub(crate) mod filesystem_cleanup;
 #[path = "adapters/macos/filesystem_cleanup.rs"]
 pub(crate) mod filesystem_cleanup;
 
+#[cfg(all(feature = "filesystem-usage", windows))]
+#[path = "adapters/windows/filesystem_usage.rs"]
+pub(crate) mod filesystem_usage;
+
+#[cfg(all(feature = "filesystem-usage", target_os = "linux"))]
+#[path = "adapters/linux/filesystem_usage.rs"]
+pub(crate) mod filesystem_usage;
+
+#[cfg(all(feature = "filesystem-usage", target_os = "macos"))]
+#[path = "adapters/macos/filesystem_usage.rs"]
+pub(crate) mod filesystem_usage;
+
 #[cfg(all(
     windows,
     any(feature = "cache-hierarchy", feature = "processor-topology")

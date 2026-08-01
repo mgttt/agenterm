@@ -53,6 +53,7 @@ clipboard, IPC, or screenshot modules.
 | `process` | observation/tree control, shell defaults, child-pipe probes and parent-console diagnostics | target `libc` / `windows-sys` |
 | `filesystem-conventions` | user home, host roots and sibling executable naming | none |
 | `filesystem-cleanup` | remove caller-owned quiescent trees after restoring deletable permissions without following links | none |
+| `filesystem-usage` | checked logical-byte accounting without traversing symbolic links or reparse points | none |
 | `file-identity` | opened/path host object identity across rename and hard-link aliases | target minimal `windows-sys`; none on Unix |
 | `filesystem` | conventions plus private state files/directories and durable atomic replacement mechanics | target native APIs |
 | `locking` | cross-process path locks and bounded slot permits | target `libc` / `windows-sys` |
@@ -89,6 +90,7 @@ clipboard, IPC, or screenshot modules.
 | process | ToolHelp/Job Objects | `/proc` + process groups | POSIX process groups |
 | filesystem | AppData conventions | XDG conventions | Application Support |
 | filesystem cleanup | clear readonly attributes; do not traverse reparse points | restore owner access; do not follow symlinks | restore owner access; do not follow symlinks |
+| filesystem usage | logical bytes; reparse points are leaves | logical bytes; symlinks are leaves | logical bytes; symlinks are leaves |
 | locking | named mutex | `flock` | `flock` |
 | IPC | named pipe | Unix socket | Unix socket |
 | PTY | ConPTY | POSIX PTY | POSIX PTY |

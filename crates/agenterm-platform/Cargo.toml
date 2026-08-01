@@ -111,6 +111,7 @@ process = [
 ]
 filesystem-conventions = []
 filesystem-cleanup = []
+filesystem-usage = []
 file-identity = [
     "dep:windows-sys",
     "windows-sys/Win32_Foundation",
@@ -188,6 +189,7 @@ full = [
     "process",
     "filesystem",
     "filesystem-cleanup",
+    "filesystem-usage",
     "locking",
     "ipc",
     "pty",
