@@ -1,7 +1,8 @@
 // Prove the isolated Control Center's offline contract, live Cockpit
 // projection, process reuse, context refresh, no-activate behavior,
-// missing-binary failure, stale-owner recovery, server loss/new-epoch refresh,
-// renderer-owned PNG evidence, and server/PTY isolation.
+// missing-binary failure, incompatible-sibling isolation, stale-owner recovery,
+// server loss/new-epoch refresh, renderer-owned PNG evidence, and server/PTY
+// isolation.
 //
 // Args:
 //   --list-evidence
@@ -153,17 +154,20 @@ fn wait_for_rendered_projection(
             try {
                 let document = rhai::json::parse(captured.stdout_text());
                 let facts = child.platform_facts;
-                let observed_state = if facts.top_level_window_title.contains(
+                let observed_reason = "";
+                for reason in [
+                    "server_incompatible",
+                    "server_rejected",
                     "server_unreachable"
-                ) {
-                    "unavailable"
-                } else {
+                ] {
+                    if facts.top_level_window_title.contains(reason) {
+                        observed_reason = reason;
+                    }
+                }
+                let observed_state = if observed_reason == "" {
                     "connected"
-                };
-                let observed_reason = if observed_state == "unavailable" {
-                    "server_unreachable"
                 } else {
-                    ""
+                    "unavailable"
                 };
                 let observed_title = facts.top_level_window_title;
                 if document.contains("rendered_snapshot") {
@@ -305,6 +309,64 @@ fn wait_process_gone(pid, code) {
     throw code;
 }
 
+fn reserve_loopback_address() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0");
+    let address = listener.local_addr;
+    listener = ();
+    address
+}
+
+fn incompatible_sibling(
+        context, script_executable, address, ready_path, stop_path, code) {
+    for path in [ready_path, stop_path] {
+        if std::fs::exists(path) {
+            std::fs::remove_file(path);
+        }
+    }
+    let source =
+        `let listener = std::net::TcpListener::bind(args[0]);
+         std::fs::write(args[1], "ready");
+         loop {
+             if std::fs::exists(args[2]) { break; }
+             try {
+                 let stream = listener.accept_timeout(
+                     std::time::Duration::from_millis(100)
+                 );
+                 stream.write_all("not-json\n");
+                 stream.flush();
+             } catch (error) {
+                 if !error.to_string().contains("net_accept_timeout") {
+                     throw error;
+                 }
+             }
+         }`;
+    let command = test_harness::configured_command(
+        context,
+        script_executable,
+        [
+            "eval", source,
+            "--timeout-ms", "12000",
+            "--max-operations", "10000000",
+            "--", address, ready_path, stop_path
+        ]
+    );
+    command.timeout(std::time::Duration::from_secs(15));
+    let child = command.start();
+    for attempt in 0..400 {
+        if std::fs::exists(ready_path) {
+            return child;
+        }
+        if child.state == "exited" {
+            let output = child.wait_with_output(
+                std::time::Duration::from_secs(2)
+            );
+            throw code + "_early_exit:" + output.stderr_text();
+        }
+        rhai::task::sleep(std::time::Duration::from_millis(10));
+    }
+    throw code + "_ready_timeout";
+}
+
 fn tab_facts_match(expected, actual) {
     if expected.len != actual.len {
         return false;
@@ -406,6 +468,10 @@ let cli_executable = std::path::join(
     executable_directory,
     "agenterm-cli.exe"
 ).display;
+let script_executable = std::path::join(
+    executable_directory,
+    "agenterm-script.exe"
+).display;
 require(
     std::fs::exists(control_center),
     "control_center_smoke_executable_missing"
@@ -417,6 +483,10 @@ require(
 require(
     std::fs::exists(cli_executable),
     "control_center_smoke_cli_missing"
+);
+require(
+    std::fs::exists(script_executable),
+    "control_center_smoke_script_missing"
 );
 
 let context = test_harness::new_context(repo, "control-center");
@@ -906,6 +976,210 @@ try {
         "control-center.context-refresh"
     );
 
+    print("STEP incompatible sibling is typed and isolated from the live server");
+    let incompatible_address = reserve_loopback_address();
+    let incompatible_endpoint = "tcp:" + incompatible_address;
+    let incompatible_probe_ready = std::path::join(
+        context.run_directory,
+        "incompatible-probe.ready"
+    ).display;
+    let incompatible_probe_stop = std::path::join(
+        context.run_directory,
+        "incompatible-probe.stop"
+    ).display;
+    let registry_before_incompatible = state_file_facts(
+        registry,
+        "control_center_incompatible_registry"
+    );
+    let server_before_incompatible = cli_json(
+        context,
+        cli_executable,
+        ["ui-bootstrap"]
+    );
+    let incompatible_probe = incompatible_sibling(
+        context,
+        script_executable,
+        incompatible_address,
+        incompatible_probe_ready,
+        incompatible_probe_stop,
+        "control_center_incompatible_probe"
+    );
+    owned_children.push(incompatible_probe);
+    let incompatible_snapshot = rhai::json::parse(offline(
+        context,
+        control_center,
+        registry,
+        [
+            "snapshot", "--json",
+            "--server-endpoint", incompatible_endpoint,
+            "--logical-instance", "incompatible"
+        ],
+        "control_center_incompatible_snapshot"
+    ));
+    std::fs::write(incompatible_probe_stop, "stop");
+    let incompatible_probe_output = wait_for_exit(
+        incompatible_probe,
+        "control_center_incompatible_probe_timeout"
+    );
+    let server_after_incompatible_probe = cli_json(
+        context,
+        cli_executable,
+        ["ui-bootstrap"]
+    );
+    let renderer_after_incompatible_probe = rhai::json::parse(offline(
+        context,
+        control_center,
+        registry,
+        ["status", "--json"],
+        "control_center_incompatible_probe_status"
+    ));
+    require(
+        incompatible_snapshot.server_state == "unavailable"
+            && incompatible_snapshot.server_reason == "server_incompatible"
+            && incompatible_snapshot.connected_server == ()
+            && incompatible_probe_output.success
+            && first.state == "running"
+            && renderer_after_incompatible_probe.state == "running"
+            && renderer_after_incompatible_probe.pid == first.id
+            && renderer_after_incompatible_probe.context.endpoint
+                == typed_endpoint
+            && server_after_incompatible_probe.server_pid == server.id
+            && server_after_incompatible_probe.server_epoch
+                == server_before_incompatible.server_epoch
+            && server_after_incompatible_probe.active_tab_id
+                == server_before_incompatible.active_tab_id,
+        "control_center_incompatible_probe_isolation"
+    );
+    require_state_file_unchanged(
+        registry,
+        registry_before_incompatible,
+        "control_center_incompatible_probe_registry"
+    );
+    std::fs::remove_file(incompatible_probe_ready);
+    std::fs::remove_file(incompatible_probe_stop);
+
+    let incompatible_renderer_ready = std::path::join(
+        context.run_directory,
+        "incompatible-renderer.ready"
+    ).display;
+    let incompatible_renderer_stop = std::path::join(
+        context.run_directory,
+        "incompatible-renderer.stop"
+    ).display;
+    let incompatible_renderer = incompatible_sibling(
+        context,
+        script_executable,
+        incompatible_address,
+        incompatible_renderer_ready,
+        incompatible_renderer_stop,
+        "control_center_incompatible_renderer"
+    );
+    owned_children.push(incompatible_renderer);
+    offline(
+        context,
+        control_center,
+        registry,
+        [
+            "open", "--no-activate",
+            "--server-endpoint", incompatible_endpoint,
+            "--logical-instance", "incompatible"
+        ],
+        "control_center_incompatible_renderer_open"
+    );
+    let incompatible_frame = wait_for_rendered_projection(
+        context,
+        control_center,
+        registry,
+        causal_png,
+        first,
+        "unavailable",
+        "server_incompatible",
+        ["server_incompatible"],
+        "control_center_incompatible_renderer_frame"
+    );
+    std::fs::write(incompatible_renderer_stop, "stop");
+    let incompatible_renderer_output = wait_for_exit(
+        incompatible_renderer,
+        "control_center_incompatible_renderer_timeout"
+    );
+    let server_after_incompatible_renderer = cli_json(
+        context,
+        cli_executable,
+        ["ui-bootstrap"]
+    );
+    let baseline_capture = cli_text(
+        context,
+        cli_executable,
+        ["capture-pane", "-p", "-t", baseline_tab, "--max-bytes", "16384"]
+    );
+    require(
+        incompatible_frame.owner_pid == first.id
+            && incompatible_frame.projection.server_state == "unavailable"
+            && incompatible_frame.projection.server_reason
+                == "server_incompatible"
+            && incompatible_renderer_output.success
+            && first.state == "running"
+            && process_present(server.id)
+            && server_after_incompatible_renderer.server_pid == server.id
+            && server_after_incompatible_renderer.server_epoch
+                == server_before_incompatible.server_epoch
+            && baseline_capture.contains(
+                "AGENTERM_CC_baseline_" + context.run_id
+            ),
+        "control_center_incompatible_renderer_isolation"
+    );
+    require_state_file_unchanged(
+        registry,
+        registry_before_incompatible,
+        "control_center_incompatible_renderer_registry"
+    );
+    std::fs::remove_file(incompatible_renderer_ready);
+    std::fs::remove_file(incompatible_renderer_stop);
+
+    offline(
+        context,
+        control_center,
+        registry,
+        [
+            "open", "--no-activate",
+            "--server-endpoint", context.address,
+            "--logical-instance", "main"
+        ],
+        "control_center_incompatible_restore"
+    );
+    let restored_incompatible_frame = wait_for_rendered_projection(
+        context,
+        control_center,
+        registry,
+        causal_png,
+        first,
+        "connected",
+        "",
+        [context.address],
+        "control_center_incompatible_restore_frame"
+    );
+    let restored_incompatible_status = rhai::json::parse(offline(
+        context,
+        control_center,
+        registry,
+        ["status", "--json"],
+        "control_center_incompatible_restore_status"
+    ));
+    require(
+        restored_incompatible_frame.owner_pid == first.id
+            && restored_incompatible_frame.projection.server_state
+                == "connected"
+            && restored_incompatible_status.pid == first.id
+            && restored_incompatible_status.context.endpoint == typed_endpoint
+            && process_present(server.id),
+        "control_center_incompatible_restore_truth"
+    );
+    require_state_file_unchanged(
+        registry,
+        registry_before_incompatible,
+        "control_center_incompatible_restore_registry"
+    );
+
     print("STEP tab mutation refreshes the renderer without focus/context change");
     let context_state = state_file_facts(
         context_state_path,
@@ -1242,8 +1516,9 @@ try {
     );
     print(
         "PASS: Control Center launch failure, live Cockpit facts, " +
-            "no-activate reuse, causal tab/new-epoch refresh, " +
-            "failure isolation, and orphan-free cleanup"
+            "no-activate reuse, incompatible-sibling isolation, " +
+            "causal tab/new-epoch refresh, failure isolation, " +
+            "and orphan-free cleanup"
     );
     succeeded = true;
 } catch (error) {

@@ -310,10 +310,14 @@ future promotion gates.
   The Windows public smoke now proves typed close, repeated-open PID reuse,
   force-kill/stale-owner replacement, missing-binary failure, live server loss,
   same-endpoint/new-epoch recovery in the existing Control Center PID, PTY
-  availability after recovery, and exact orphan cleanup. Renderer failure,
-  incompatible protocol, and the cross-process GUI-detached/server-retained
-  combination remain explicit open leaves; the Human GUI's detach and server
-  retention are independently owned by `remote-ui-smoke`.
+  availability after recovery, and exact orphan cleanup. It now also drives a
+  malformed incompatible sibling through the public endpoint selector, proves
+  typed `server_incompatible` in both offline and live-renderer projections,
+  preserves the same renderer/server PID, epoch, PTY content and registry
+  bytes, then restores the original endpoint without residue. Renderer failure
+  and the cross-process GUI-detached/server-retained combination remain open;
+  the Human GUI's detach and server retention are independently owned by
+  `remote-ui-smoke`.
 - [~] structured snapshot/action evidence and PNG evidence agree on selected
   view, connection state, labels, availability, and geometry. The Windows
   Control Center smoke now pairs the connected Cockpit snapshot/window title
