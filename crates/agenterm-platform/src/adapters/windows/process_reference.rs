@@ -6,12 +6,12 @@ use std::{
 
 use windows_sys::Win32::{
     Foundation::{
-        DUPLICATE_CLOSE_SOURCE, DUPLICATE_SAME_ACCESS, DuplicateHandle, WAIT_FAILED, WAIT_OBJECT_0,
+        DuplicateHandle, DUPLICATE_CLOSE_SOURCE, DUPLICATE_SAME_ACCESS, WAIT_FAILED, WAIT_OBJECT_0,
         WAIT_TIMEOUT,
     },
     System::Threading::{
-        GetCurrentProcess, GetProcessId, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
-        WaitForSingleObject,
+        GetCurrentProcess, GetProcessId, OpenProcess, WaitForSingleObject,
+        PROCESS_QUERY_LIMITED_INFORMATION,
     },
 };
 
@@ -332,7 +332,7 @@ mod tests {
         let mut child = Command::new(std::env::current_exe().expect("test executable"))
             .args([
                 "--exact",
-                "selected::process_reference::tests::containment_child",
+                "adapters::windows::process_reference::tests::containment_child",
                 "--nocapture",
             ])
             .env(CONTAINMENT_CHILD_ENV, "1")
@@ -344,22 +344,18 @@ mod tests {
         let reference =
             crate::process_reference::ProcessReference::duplicate_from(child.as_handle())
                 .expect("retain containment child");
-        assert!(
-            !reference
-                .is_member_of(job.as_handle())
-                .expect("query membership before assignment")
-        );
+        assert!(!reference
+            .is_member_of(job.as_handle())
+            .expect("query membership before assignment"));
         assert_ne!(
             unsafe { AssignProcessToJobObject(job.as_raw_handle(), child.as_raw_handle()) },
             0,
             "AssignProcessToJobObject failed: {}",
             io::Error::last_os_error()
         );
-        assert!(
-            reference
-                .is_member_of(job.as_handle())
-                .expect("query membership after assignment")
-        );
+        assert!(reference
+            .is_member_of(job.as_handle())
+            .expect("query membership after assignment"));
         child.kill().expect("terminate containment child");
         let _ = child.wait().expect("reap containment child");
     }
@@ -369,7 +365,7 @@ mod tests {
         let mut child = Command::new(std::env::current_exe().expect("test executable"))
             .args([
                 "--exact",
-                "selected::process_reference::tests::remote_handle_child",
+                "adapters::windows::process_reference::tests::remote_handle_child",
                 "--nocapture",
             ])
             .env(REMOTE_HANDLE_CHILD_ENV, "1")
@@ -382,9 +378,8 @@ mod tests {
                 .expect("retain child process HANDLE");
 
         let current = unsafe { BorrowedHandle::borrow_raw(GetCurrentProcess() as RawHandle) };
-        let transfer = reference
-            .duplicate_handle_into(current)
-            .expect("duplicate rollback fixture");
+        let transfer =
+            duplicate_handle_into(&reference, current).expect("duplicate rollback fixture");
         let stale_remote = transfer.as_raw_handle();
         drop(transfer);
         let mut unexpected = std::ptr::null_mut();
@@ -404,9 +399,8 @@ mod tests {
             "dropped transfer left a live target-process HANDLE"
         );
 
-        let transfer = reference
-            .duplicate_handle_into(current)
-            .expect("duplicate delivered fixture");
+        let transfer =
+            duplicate_handle_into(&reference, current).expect("duplicate delivered fixture");
         writeln!(
             child.stdin.as_mut().expect("child stdin"),
             "{}",
