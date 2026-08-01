@@ -83,7 +83,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   found a concrete regression: the new parent window had lost
   `WS_CLIPCHILDREN`, so every full-client `BitBlt` could overwrite native
   EDIT/BUTTON pixels before each child repainted. The platform host again clips
-  child HWND regions, with a style contract test. Focused structural tests pass,
+  child HWND regions, and unchanged child bounds/visibility now skip redundant
+  `MoveWindow`/`ShowWindow` paint churn. Style and geometry contracts cover both
+  invariants. Focused structural tests pass,
   but they cannot establish temporal visual stability. Diagnostic paint counts
   and high-output plus idle real-time dogfood evidence on the new binary remain
   required before restoring shipped status.

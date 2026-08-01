@@ -218,9 +218,24 @@ impl ControlWindowBackend for Backend {
         Ok(())
     }
     fn set_control_bounds(&self, id: ControlId, b: PixelRect) -> Result<(), ControlWindowError> {
+        let control = self.control(id)?;
+        let mut current: RECT = unsafe { mem::zeroed() };
+        if unsafe { GetWindowRect(control, &mut current) } == 0 {
+            return Err(last_error("control_window_get_control_rect_failed"));
+        }
+        let mut origin = POINT {
+            x: current.left,
+            y: current.top,
+        };
+        if unsafe { ScreenToClient(self.window.get(), &mut origin) } == 0 {
+            return Err(last_error("control_window_map_control_rect_failed"));
+        }
+        if control_bounds_match(origin, current, b) {
+            return Ok(());
+        }
         if unsafe {
             MoveWindow(
-                self.control(id)?,
+                control,
                 b.origin.x,
                 b.origin.y,
                 i32_size(b.size.width),
@@ -241,8 +256,12 @@ impl ControlWindowBackend for Backend {
         Ok(())
     }
     fn set_control_visible(&self, id: ControlId, visible: bool) -> Result<(), ControlWindowError> {
+        let control = self.control(id)?;
+        if (unsafe { IsWindowVisible(control) } != 0) == visible {
+            return Ok(());
+        }
         unsafe {
-            ShowWindow(self.control(id)?, if visible { SW_SHOW } else { SW_HIDE });
+            ShowWindow(control, if visible { SW_SHOW } else { SW_HIDE });
         }
         Ok(())
     }
@@ -1120,6 +1139,12 @@ fn color(c: Rgb8) -> COLORREF {
 fn i32_size(v: u32) -> i32 {
     i32::try_from(v).unwrap_or(i32::MAX)
 }
+fn control_bounds_match(origin: POINT, current: RECT, requested: PixelRect) -> bool {
+    origin.x == requested.origin.x
+        && origin.y == requested.origin.y
+        && current.right.saturating_sub(current.left) == i32_size(requested.size.width)
+        && current.bottom.saturating_sub(current.top) == i32_size(requested.size.height)
+}
 fn top_level_window_style() -> u32 {
     WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN
 }
@@ -1141,6 +1166,31 @@ mod tests {
             top_level_window_style() & WS_OVERLAPPEDWINDOW,
             WS_OVERLAPPEDWINDOW
         );
+    }
+
+    #[test]
+    fn unchanged_control_bounds_skip_native_repaint() {
+        let requested = PixelRect::new(20, 30, 120, 40);
+        assert!(control_bounds_match(
+            POINT { x: 20, y: 30 },
+            RECT {
+                left: 200,
+                top: 300,
+                right: 320,
+                bottom: 340,
+            },
+            requested,
+        ));
+        assert!(!control_bounds_match(
+            POINT { x: 21, y: 30 },
+            RECT {
+                left: 200,
+                top: 300,
+                right: 320,
+                bottom: 340,
+            },
+            requested,
+        ));
     }
 
     #[test]
