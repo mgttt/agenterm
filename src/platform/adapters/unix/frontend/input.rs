@@ -228,6 +228,36 @@ fn text_field_logical_key_action(
     }
 }
 
+/// Interrupt/EOF chords that pass through to the active PTY even while the
+/// composer strip owns focus. Primary-shortcut copy (Ctrl+C on Linux/Windows)
+/// keeps priority only over a non-empty draft.
+pub(super) fn composer_passthrough_bytes(event: &KeyEvent, draft_empty: bool) -> Option<Vec<u8>> {
+    if event.state != KeyPressState::Pressed {
+        return None;
+    }
+    let modifiers = event.modifiers;
+    if !modifiers.control || modifiers.alt || modifiers.meta || modifiers.shift {
+        return None;
+    }
+    let character = match &event.logical {
+        Key::Character(text) => {
+            let mut characters = text.chars();
+            let first = characters.next()?;
+            (characters.next().is_none() && !first.is_control()).then_some(first)
+        }
+        _ => None,
+    }
+    .or_else(|| match event.physical {
+        PhysicalKeyCode::Letter(letter) if letter.is_ascii_alphabetic() => Some(letter),
+        _ => None,
+    })?;
+    match character.to_ascii_lowercase() {
+        'c' if draft_empty || !primary_shortcut(modifiers) => tmux_key_bytes("C-c"),
+        'd' => tmux_key_bytes("C-d"),
+        _ => None,
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum TerminalShortcutAction {
     Copy,
@@ -906,5 +936,78 @@ mod tests {
                 Some(expected)
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod ctrl_passthrough_tests {
+    use super::{composer_passthrough_bytes, key_event_to_bytes};
+    use agenterm_platform::input::{
+        KeyPressState, LogicalKey as Key, ModifierState, NormalizedKeyEvent, PhysicalKeyCode,
+    };
+
+    fn ctrl_event(ch: char, phys: char, text: Option<&str>) -> NormalizedKeyEvent {
+        NormalizedKeyEvent {
+            logical: Key::Character(ch.to_string()),
+            physical: PhysicalKeyCode::Letter(phys),
+            text: text.map(str::to_owned),
+            state: KeyPressState::Pressed,
+            repeat: false,
+            modifiers: ModifierState {
+                control: true,
+                shift: false,
+                alt: false,
+                meta: false,
+            },
+        }
+    }
+
+    #[test]
+    fn terminal_focus_forwards_interrupt_and_eof_bytes() {
+        for (ch, phys, text, expected) in [
+            ('c', 'C', Some("\u{3}"), 3u8),
+            ('d', 'D', Some("\u{4}"), 4u8),
+            ('c', 'C', None, 3u8),
+            ('d', 'D', None, 4u8),
+        ] {
+            assert_eq!(
+                key_event_to_bytes(&ctrl_event(ch, phys, text)),
+                Some(vec![expected]),
+                "ctrl-{ch}"
+            );
+        }
+    }
+
+    #[test]
+    fn composer_focus_passes_interrupt_and_eof_to_pty() {
+        assert_eq!(
+            composer_passthrough_bytes(&ctrl_event('d', 'D', None), false),
+            Some(vec![4])
+        );
+        assert_eq!(
+            composer_passthrough_bytes(&ctrl_event('c', 'C', None), true),
+            Some(vec![3])
+        );
+        let over_draft = composer_passthrough_bytes(&ctrl_event('c', 'C', None), false);
+        if super::primary_shortcut(ModifierState {
+            control: true,
+            shift: false,
+            alt: false,
+            meta: false,
+        }) {
+            assert_eq!(
+                over_draft, None,
+                "primary-shortcut copy keeps a non-empty draft"
+            );
+        } else {
+            assert_eq!(over_draft, Some(vec![3]));
+        }
+        assert_eq!(
+            composer_passthrough_bytes(&ctrl_event('x', 'X', None), true),
+            None
+        );
+        let mut meta = ctrl_event('c', 'C', None);
+        meta.modifiers.meta = true;
+        assert_eq!(composer_passthrough_bytes(&meta, true), None);
     }
 }

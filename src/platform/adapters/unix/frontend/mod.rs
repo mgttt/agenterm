@@ -4324,6 +4324,15 @@ impl UnixApp {
                             return;
                         }
                     }
+                    if self.cwd_edit_target.is_none()
+                        && let Some(bytes) = input::composer_passthrough_bytes(
+                            &event,
+                            self.composer_buffer.is_empty(),
+                        )
+                    {
+                        self.queue_pty_input(bytes);
+                        return;
+                    }
                     match input::composer_key_action(
                         &event,
                         &mut self.composer_buffer,
