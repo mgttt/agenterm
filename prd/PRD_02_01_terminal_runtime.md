@@ -113,8 +113,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   Windows mapping. The owning Windows journey now sends a Shift+Tab window
   shortcut while terminal focus is active and observes exactly three additional
   bytes at the public pane boundary; the byte contract fixes those bytes as
-  `ESC [ Z`. Physical-key injection and live dogfood confirmation remain
-  required before restoring shipped status.
+  `ESC [ Z`. This is deliberately automation rather than physical-key evidence:
+  Win32 `GetKeyState` reports the modifier state associated with keyboard input
+  retrieved by the target thread, `SetKeyboardState` changes only the caller's
+  input-state table, and `SendInput` targets the global foreground input stream.
+  Taking foreground focus would violate the smoke-wide `AGENTERM_NO_ACTIVATE=1`
+  contract. A real keyboard Shift+Tab in the latest dogfood binary therefore
+  remains the non-substitutable human acceptance check before restoring shipped
+  status.
 - [~] Windows terminal focus survives immediate native toolbar actions. Live
   dogfood found the font `z/Z` child buttons retained Win32 keyboard focus while
   the terminal input path accepts keys only for the top-level HWND. Font, locale
