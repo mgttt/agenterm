@@ -11,6 +11,24 @@ pub fn terminate(pid: u32, mode: TerminationMode) -> Result<(), ProcessControlEr
     crate::selected::process_control::terminate(pid, mode)
 }
 
+/// Suspend scheduling of one host process until it is resumed externally.
+///
+/// This does not discover or suspend descendants and does not imply process-tree
+/// ownership. Windows has no reliable generic single-process suspension primitive,
+/// so the Windows adapter reports [`ProcessControlErrorKind::Unsupported`].
+pub fn suspend(pid: u32) -> Result<(), ProcessControlError> {
+    crate::selected::process_control::suspend(pid)
+}
+
+/// Resume scheduling of one suspended host process.
+///
+/// This does not discover or resume descendants and does not imply process-tree
+/// ownership. Windows has no reliable generic single-process resumption primitive,
+/// so the Windows adapter reports [`ProcessControlErrorKind::Unsupported`].
+pub fn resume(pid: u32) -> Result<(), ProcessControlError> {
+    crate::selected::process_control::resume(pid)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -57,12 +75,53 @@ mod tests {
         wait_for_exit(&mut child);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn suspend_and_resume_control_a_real_process() {
+        let mut child = spawn_sleeper();
+        suspend(child.id()).expect("suspend fixture");
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let mut status = 0;
+            let waited = unsafe {
+                libc::waitpid(
+                    child.id() as libc::pid_t,
+                    &mut status,
+                    libc::WNOHANG | libc::WUNTRACED,
+                )
+            };
+            assert!(waited >= 0, "query suspended fixture failed");
+            if waited > 0 && libc::WIFSTOPPED(status) {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "suspended process never entered a stopped state"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+
+        resume(child.id()).expect("resume fixture");
+        terminate(child.id(), TerminationMode::Forceful).expect("terminate resumed fixture");
+        wait_for_exit(&mut child);
+    }
+
     #[cfg(windows)]
     #[test]
     fn graceful_termination_is_explicitly_unsupported() {
         let error = terminate(u32::MAX, TerminationMode::Graceful)
             .expect_err("Windows has no generic graceful process signal");
         assert_eq!(error.kind(), ProcessControlErrorKind::Unsupported);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn suspension_and_resumption_are_explicitly_unsupported() {
+        let suspend_error = suspend(1).expect_err("Windows suspension must be explicit");
+        assert_eq!(suspend_error.kind(), ProcessControlErrorKind::Unsupported);
+        let resume_error = resume(1).expect_err("Windows resumption must be explicit");
+        assert_eq!(resume_error.kind(), ProcessControlErrorKind::Unsupported);
     }
 
     #[test]
@@ -75,5 +134,17 @@ mod tests {
         let error = terminate(0, TerminationMode::Forceful)
             .expect_err("zero must not be interpreted as one process");
         assert_eq!(error.kind(), ProcessControlErrorKind::InvalidId);
+        assert_eq!(
+            suspend(0)
+                .expect_err("zero must not suspend a process group")
+                .kind(),
+            ProcessControlErrorKind::InvalidId
+        );
+        assert_eq!(
+            resume(0)
+                .expect_err("zero must not resume a process group")
+                .kind(),
+            ProcessControlErrorKind::InvalidId
+        );
     }
 }

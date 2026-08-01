@@ -1,4 +1,4 @@
-//! Product-neutral single-process termination contract.
+//! Product-neutral single-process control contract.
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
@@ -14,6 +14,8 @@ pub enum ProcessControlErrorKind {
     IdOutOfRange,
     Open,
     Terminate,
+    Suspend,
+    Resume,
     Unsupported,
 }
 

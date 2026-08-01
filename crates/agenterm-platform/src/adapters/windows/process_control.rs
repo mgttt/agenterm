@@ -5,12 +5,7 @@ use crate::contract::process_control::{
 };
 
 pub(crate) fn terminate(pid: u32, mode: TerminationMode) -> Result<(), ProcessControlError> {
-    if pid == 0 {
-        return Err(ProcessControlError::new(
-            ProcessControlErrorKind::InvalidId,
-            "process ID zero does not identify one process",
-        ));
-    }
+    validate_pid(pid)?;
     if mode == TerminationMode::Graceful {
         return Err(ProcessControlError::new(
             ProcessControlErrorKind::Unsupported,
@@ -39,6 +34,33 @@ pub(crate) fn terminate(pid: u32, mode: TerminationMode) -> Result<(), ProcessCo
         Err(ProcessControlError::new(
             ProcessControlErrorKind::Terminate,
             error.to_string(),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+pub(crate) fn suspend(pid: u32) -> Result<(), ProcessControlError> {
+    unsupported_suspension(pid, "suspend")
+}
+
+pub(crate) fn resume(pid: u32) -> Result<(), ProcessControlError> {
+    unsupported_suspension(pid, "resume")
+}
+
+fn unsupported_suspension(pid: u32, operation: &str) -> Result<(), ProcessControlError> {
+    validate_pid(pid)?;
+    Err(ProcessControlError::new(
+        ProcessControlErrorKind::Unsupported,
+        format!("Windows has no reliable generic single-process {operation} primitive"),
+    ))
+}
+
+fn validate_pid(pid: u32) -> Result<(), ProcessControlError> {
+    if pid == 0 {
+        Err(ProcessControlError::new(
+            ProcessControlErrorKind::InvalidId,
+            "process ID zero does not identify one process",
         ))
     } else {
         Ok(())
