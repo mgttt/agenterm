@@ -110,18 +110,18 @@ if defined AGENTERM_BOOTSTRAP_STAMP_TEMP del /q "%AGENTERM_BOOTSTRAP_STAMP_TEMP%
 exit /b 0
 
 :write_identity
-> "%~1" echo bootstrap_worker_build_schema=1
+> "%~1" echo bootstrap_worker_build_schema=2
 >> "%~1" rustc -Vv
 if errorlevel 1 exit /b 1
 >> "%~1" cargo -Vv
 if errorlevel 1 exit /b 1
 >> "%~1" echo tracked-index
->> "%~1" git ls-files -s -- Cargo.toml Cargo.lock build.rs rust-toolchain.toml .cargo src docs/agenterm-script-runtime.md assets/agenterm.ico agenterm.tasks.json
+>> "%~1" git ls-files -s -- Cargo.toml Cargo.lock build.rs rust-toolchain.toml .cargo crates src docs/agenterm-script-runtime.md assets/agenterm.ico agenterm.tasks.json
 if errorlevel 1 exit /b 1
 >> "%~1" echo tracked-worktree
->> "%~1" git diff --no-ext-diff --binary -- Cargo.toml Cargo.lock build.rs rust-toolchain.toml .cargo src docs/agenterm-script-runtime.md assets/agenterm.ico agenterm.tasks.json
+>> "%~1" git diff --no-ext-diff --binary -- Cargo.toml Cargo.lock build.rs rust-toolchain.toml .cargo crates src docs/agenterm-script-runtime.md assets/agenterm.ico agenterm.tasks.json
 if errorlevel 1 exit /b 1
-> "%AGENTERM_BOOTSTRAP_UNTRACKED%" git ls-files --others --exclude-standard -- Cargo.toml Cargo.lock build.rs rust-toolchain.toml .cargo src docs/agenterm-script-runtime.md assets/agenterm.ico agenterm.tasks.json
+> "%AGENTERM_BOOTSTRAP_UNTRACKED%" git ls-files --others --exclude-standard -- Cargo.toml Cargo.lock build.rs rust-toolchain.toml .cargo crates src docs/agenterm-script-runtime.md assets/agenterm.ico agenterm.tasks.json
 if errorlevel 1 exit /b 1
 >> "%~1" echo untracked-paths
 >> "%~1" type "%AGENTERM_BOOTSTRAP_UNTRACKED%"

@@ -54,19 +54,19 @@ trap cleanup EXIT HUP INT TERM
 write_identity() {
     output=$1
     {
-        printf '%s\n' 'bootstrap_worker_build_schema=1'
+        printf '%s\n' 'bootstrap_worker_build_schema=2'
         rustc -Vv
         cargo -Vv
         printf '%s\n' 'tracked-index'
         git ls-files -s -- Cargo.toml Cargo.lock build.rs \
-            rust-toolchain.toml .cargo src docs/agenterm-script-runtime.md \
+            rust-toolchain.toml .cargo crates src docs/agenterm-script-runtime.md \
             assets/agenterm.ico agenterm.tasks.json
         printf '%s\n' 'tracked-worktree'
         git diff --no-ext-diff --binary -- Cargo.toml Cargo.lock build.rs \
-            rust-toolchain.toml .cargo src docs/agenterm-script-runtime.md \
+            rust-toolchain.toml .cargo crates src docs/agenterm-script-runtime.md \
             assets/agenterm.ico agenterm.tasks.json
         git ls-files --others --exclude-standard -- Cargo.toml Cargo.lock \
-            build.rs rust-toolchain.toml .cargo src \
+            build.rs rust-toolchain.toml .cargo crates src \
             docs/agenterm-script-runtime.md assets/agenterm.ico \
             agenterm.tasks.json > "$UNTRACKED_FILE"
         printf '%s\n' 'untracked-paths'

@@ -92,6 +92,10 @@ user identity 与 native runtime directory。主 crate adapters 现在只组合 
 socket/workspace 名称；IPC capability 已有真实实现并报告 Available。14 项 all-feature
 crate tests、warnings-denied Clippy、Agenterm all-target compile check，以及新 crate
 反向产品耦合静态门禁均通过。
+Workspace 交付卫生同步更新：Windows/Unix bootstrap worker identity 现在把整个
+`crates/` 树纳入 tracked、worktree 与 untracked content fingerprint，并提升 schema，
+避免平台 crate 改动复用陈旧 worker。crate README 已记录默认空 feature、当前依赖
+DAG、三平台矩阵、typed failure 约束、公共 endpoint 示例和 exact Git revision 依赖方式。
 
 2026-08-01 首个建设期增量：Cockpit snapshot 新增明确的
 `tab_counts.{total,running,dead}`，native shell 同源显示 logical instance、

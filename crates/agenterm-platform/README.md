@@ -8,3 +8,79 @@ embedding application.
 
 The crate is under active development. Pin an exact Git revision when consuming
 it from another repository.
+
+## Dependency
+
+```toml
+[dependencies]
+agenterm-platform = {
+  git = "https://github.com/mgttt/agenterm.git",
+  rev = "5842a57",
+  default-features = false,
+  features = ["process", "filesystem"]
+}
+```
+
+Use an immutable full commit SHA in production. The short revision above is an
+illustration and advances as the extraction lands.
+
+## Features
+
+The default feature set is empty. The contract/status surface therefore adds no
+third-party dependency.
+
+| Feature | Public capability | Extra dependency |
+|---|---|---|
+| `serde` | `IpcEndpoint` string serialization | `serde` |
+| `process` | process observation/tree control and shell defaults | target `libc` / `windows-sys` |
+| `filesystem` | host config/data roots and executable naming | none |
+| `locking` | cross-process path locks and bounded slot permits | target `libc` / `windows-sys` |
+| `ipc` | typed endpoints and native listener/byte stream | `locking`, target native APIs |
+| `pty` | PTY command/master/child lifecycle | `process`, `rmux-pty` |
+| `window` | DPI and logical/physical geometry | none |
+| `input`, `ime`, `activation` | reserved migration slots | `window` chain |
+| `clipboard` | reserved migration slot | `process` |
+| `screenshot`, `font`, `webview` | reserved migration slots | `filesystem` |
+| `full` | every declared feature | union of the above |
+
+Enabling a reserved slot does not pretend the capability exists:
+`capability_status` returns `Unsupported` with
+`capability-not-yet-implemented` until its facade and adapters ship.
+
+## Platform support
+
+| Capability | Windows | Linux | macOS |
+|---|---|---|---|
+| process | ToolHelp/Job Objects | `/proc` + process groups | POSIX process groups |
+| filesystem | AppData conventions | XDG conventions | Application Support |
+| locking | named mutex | `flock` | `flock` |
+| IPC | named pipe | Unix socket | Unix socket |
+| PTY | ConPTY | POSIX PTY | POSIX PTY |
+| window geometry | available | available | available |
+
+Unsupported endpoint variants and native failures remain typed; adapters never
+silently substitute a different transport or capability.
+
+## Public API
+
+```rust
+use std::time::Duration;
+use agenterm_platform::{Capability, CapabilityStatus, capability_status};
+use agenterm_platform::ipc::{IpcEndpoint, NativeStream};
+
+assert_eq!(capability_status(Capability::Ipc), CapabilityStatus::Available);
+
+let endpoint: IpcEndpoint = "pipe:example".parse()?;
+endpoint.validate_local()?;
+let mut stream = NativeStream::connect(&endpoint, Duration::from_secs(1))?;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+For PTYs, construct `pty::ChildCommand`, set a `pty::TerminalSize`, then retain
+independent reader and wait handles using the clone methods before coordinating
+termination. Dropping public lock and PTY guard values releases only resources
+owned by that value.
+
+Product applications supply names, paths, policy limits and protocol framing.
+The crate does not know AgenTerm workspaces, Control Center, Fleet, themes,
+commands, or UI snapshots.
