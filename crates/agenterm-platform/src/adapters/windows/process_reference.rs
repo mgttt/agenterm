@@ -6,7 +6,8 @@ use std::{
 
 use windows_sys::Win32::{
     Foundation::{
-        DUPLICATE_SAME_ACCESS, DuplicateHandle, WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT,
+        DUPLICATE_CLOSE_SOURCE, DUPLICATE_SAME_ACCESS, DuplicateHandle, WAIT_FAILED, WAIT_OBJECT_0,
+        WAIT_TIMEOUT,
     },
     System::Threading::{
         GetCurrentProcess, GetProcessId, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
@@ -47,6 +48,72 @@ impl ProcessReference {
 
     pub(crate) fn wait_for_exit(&self, timeout: Option<Duration>) -> io::Result<ProcessWait> {
         wait(self.handle.as_raw_handle(), timeout)
+    }
+
+    pub(crate) fn duplicate_handle_into<'a>(
+        &'a self,
+        source: BorrowedHandle<'_>,
+    ) -> io::Result<RemoteHandleTransfer<'a>> {
+        let mut remote = std::ptr::null_mut();
+        if unsafe {
+            DuplicateHandle(
+                GetCurrentProcess(),
+                source.as_raw_handle(),
+                self.handle.as_raw_handle(),
+                &raw mut remote,
+                0,
+                0,
+                DUPLICATE_SAME_ACCESS,
+            )
+        } == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(RemoteHandleTransfer {
+            target: self,
+            remote,
+            committed: false,
+        })
+    }
+}
+
+pub(crate) struct RemoteHandleTransfer<'a> {
+    target: &'a ProcessReference,
+    remote: std::os::windows::io::RawHandle,
+    committed: bool,
+}
+
+impl RemoteHandleTransfer<'_> {
+    pub(crate) const fn as_raw_handle(&self) -> std::os::windows::io::RawHandle {
+        self.remote
+    }
+
+    pub(crate) fn into_raw_handle(mut self) -> std::os::windows::io::RawHandle {
+        self.committed = true;
+        self.remote
+    }
+}
+
+impl Drop for RemoteHandleTransfer<'_> {
+    fn drop(&mut self) {
+        if self.committed {
+            return;
+        }
+        let mut local = std::ptr::null_mut();
+        if unsafe {
+            DuplicateHandle(
+                self.target.handle.as_raw_handle(),
+                self.remote,
+                GetCurrentProcess(),
+                &raw mut local,
+                0,
+                0,
+                DUPLICATE_CLOSE_SOURCE | DUPLICATE_SAME_ACCESS,
+            )
+        } != 0
+        {
+            drop(unsafe { OwnedHandle::from_raw_handle(local) });
+        }
     }
 }
 
@@ -140,7 +207,14 @@ fn wait(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::os::windows::io::RawHandle;
+    use std::{
+        io::{BufRead as _, Write as _},
+        os::windows::io::RawHandle,
+        process::{Command, Stdio},
+    };
+    use windows_sys::Win32::Foundation::DUPLICATE_SAME_ACCESS;
+
+    const REMOTE_HANDLE_CHILD_ENV: &str = "AGENTERM_PLATFORM_REMOTE_HANDLE_CHILD";
 
     #[test]
     fn current_process_handle_can_be_retained() {
@@ -149,5 +223,84 @@ mod tests {
             .expect("duplicate current process handle");
         assert_eq!(reference.id(), std::process::id());
         assert!(reference.is_alive().expect("current process liveness"));
+    }
+
+    #[test]
+    fn remote_handle_child() {
+        if std::env::var_os(REMOTE_HANDLE_CHILD_ENV).is_none() {
+            return;
+        }
+        let mut line = String::new();
+        if std::io::stdin()
+            .lock()
+            .read_line(&mut line)
+            .expect("read remote HANDLE")
+            == 0
+        {
+            return;
+        }
+        let value = line.trim().parse::<usize>().expect("parse remote HANDLE");
+        let process_id = unsafe { GetProcessId(value as RawHandle) };
+        assert_ne!(process_id, 0, "GetProcessId failed");
+        println!("remote-process-id={process_id}");
+    }
+
+    #[test]
+    fn remote_handle_transfer_rolls_back_until_committed() {
+        let mut child = Command::new(std::env::current_exe().expect("test executable"))
+            .args([
+                "--exact",
+                "selected::process_reference::tests::remote_handle_child",
+                "--nocapture",
+            ])
+            .env(REMOTE_HANDLE_CHILD_ENV, "1")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("spawn remote HANDLE child");
+        let reference =
+            crate::process_reference::ProcessReference::duplicate_from(child.as_handle())
+                .expect("retain child process HANDLE");
+
+        let current = unsafe { BorrowedHandle::borrow_raw(GetCurrentProcess() as RawHandle) };
+        let transfer = reference
+            .duplicate_handle_into(current)
+            .expect("duplicate rollback fixture");
+        let stale_remote = transfer.as_raw_handle();
+        drop(transfer);
+        let mut unexpected = std::ptr::null_mut();
+        assert_eq!(
+            unsafe {
+                DuplicateHandle(
+                    child.as_raw_handle(),
+                    stale_remote,
+                    GetCurrentProcess(),
+                    &raw mut unexpected,
+                    0,
+                    0,
+                    DUPLICATE_SAME_ACCESS,
+                )
+            },
+            0,
+            "dropped transfer left a live target-process HANDLE"
+        );
+
+        let transfer = reference
+            .duplicate_handle_into(current)
+            .expect("duplicate delivered fixture");
+        writeln!(
+            child.stdin.as_mut().expect("child stdin"),
+            "{}",
+            transfer.as_raw_handle() as usize
+        )
+        .expect("deliver remote HANDLE value");
+        let _remote = transfer.into_raw_handle();
+        let output = child.wait_with_output().expect("reap remote HANDLE child");
+        assert!(output.status.success());
+        let stdout = String::from_utf8(output.stdout).expect("child stdout UTF-8");
+        assert!(
+            stdout.contains(&format!("remote-process-id={}", std::process::id())),
+            "child did not observe the duplicated current-process object: {stdout}"
+        );
     }
 }

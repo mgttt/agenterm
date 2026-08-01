@@ -2,6 +2,9 @@
 
 use std::{io, time::Duration};
 
+#[cfg(windows)]
+use std::os::windows::io::{BorrowedHandle, RawHandle};
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ProcessWait {
     Exited,
@@ -45,6 +48,49 @@ impl ProcessReference {
     /// handle whose object identity must remain stable.
     pub fn duplicate_from(process: impl ProcessReferenceHandle) -> io::Result<Self> {
         process.duplicate_process_reference()
+    }
+
+    /// Duplicates a current-process HANDLE into this exact target process.
+    ///
+    /// The returned transfer rolls the remote HANDLE back if it is dropped.
+    /// Call [`RemoteHandleTransfer::into_raw_handle`] only after the target has
+    /// successfully received the numeric HANDLE value.
+    ///
+    /// The retained target HANDLE must include `PROCESS_DUP_HANDLE`. References
+    /// duplicated from a process-creation HANDLE normally preserve that right;
+    /// [`ProcessReference::open`] intentionally requests only query/wait access,
+    /// so this operation can return `PermissionDenied` for such a reference.
+    #[cfg(windows)]
+    pub fn duplicate_handle_into(
+        &self,
+        source: BorrowedHandle<'_>,
+    ) -> io::Result<RemoteHandleTransfer<'_>> {
+        self.0
+            .duplicate_handle_into(source)
+            .map(RemoteHandleTransfer)
+    }
+}
+
+/// A duplicated HANDLE that is valid in one retained target process.
+///
+/// Dropping this value before committing it closes the target-process HANDLE.
+/// This is a delivery receipt, not a locally usable or locally owned HANDLE.
+#[cfg(windows)]
+#[must_use = "dropping an uncommitted remote HANDLE transfer rolls it back"]
+pub struct RemoteHandleTransfer<'a>(crate::selected::process_reference::RemoteHandleTransfer<'a>);
+
+#[cfg(windows)]
+impl RemoteHandleTransfer<'_> {
+    /// Returns the target-process HANDLE value without committing the transfer.
+    #[must_use]
+    pub fn as_raw_handle(&self) -> RawHandle {
+        self.0.as_raw_handle()
+    }
+
+    /// Commits delivery and returns the HANDLE value owned by the target process.
+    #[must_use]
+    pub fn into_raw_handle(self) -> RawHandle {
+        self.0.into_raw_handle()
     }
 }
 
