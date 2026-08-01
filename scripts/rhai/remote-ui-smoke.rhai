@@ -258,6 +258,57 @@ fn sample_render_activity(context, cli, gui, after_sequence) {
     throw "remote_ui_render_activity_sample_timeout";
 }
 
+fn measure_theme_render(
+        context, cli, gui, settings_button, settings_cancel,
+        baseline_theme, target_theme, label, round) {
+    settings_button.click();
+    baseline_theme.click();
+    let prefix = "theme-render-ab-" + round + "-" + label;
+    text_cli(
+        context,
+        cli,
+        [
+            "screenshot", "-o",
+            std::path::join(
+                context.run_directory,
+                prefix + "-baseline.png"
+            ).display
+        ]
+    );
+    let before = sample_render_activity(context, cli, gui, 0);
+    let started = std::time::SystemTime::now().unix_millis;
+    target_theme.click();
+    text_cli(
+        context,
+        cli,
+        [
+            "screenshot", "-o",
+            std::path::join(
+                context.run_directory,
+                prefix + "-target.png"
+            ).display
+        ]
+    );
+    let after = sample_render_activity(
+        context,
+        cli,
+        gui,
+        before.sequence
+    );
+    let duration_ms =
+        std::time::SystemTime::now().unix_millis - started;
+    settings_cancel.click();
+    let result = #{
+        duration_ms: duration_ms,
+        redraws: after.redraw_requests - before.redraw_requests,
+        paints: after.parent_paints - before.parent_paints
+    };
+    print(
+        `THEME_RENDER_AB round=${round} theme=${label} duration_ms=${result.duration_ms} redraws=${result.redraws} paints=${result.paints}`
+    );
+    result
+}
+
 fn wait_viewport_mutation(context, cli, baseline, tab_id) {
     text_cli(
         context,
@@ -1020,6 +1071,53 @@ try {
     require(
         cancelled_dark.color_theme == "light",
         "remote_ui_settings_cancel_rollback_invalid"
+    );
+
+    print("STEP compare counterbalanced Dark and Light render cost");
+    // Each timed sample starts from the opposite palette, then performs the
+    // same target click, synchronous public screenshot, and renderer-counter
+    // sample.  AB/BA order counterbalances warmup and phase-order effects.
+    let dark_round_one = measure_theme_render(
+        context, cli, gui, settings_button, settings_cancel,
+        settings_light, settings_dark, "dark", 1
+    );
+    let light_round_one = measure_theme_render(
+        context, cli, gui, settings_button, settings_cancel,
+        settings_dark, settings_light, "light", 1
+    );
+    let light_round_two = measure_theme_render(
+        context, cli, gui, settings_button, settings_cancel,
+        settings_dark, settings_light, "light", 2
+    );
+    let dark_round_two = measure_theme_render(
+        context, cli, gui, settings_button, settings_cancel,
+        settings_light, settings_dark, "dark", 2
+    );
+    let dark_duration_ms =
+        dark_round_one.duration_ms + dark_round_two.duration_ms;
+    let light_duration_ms =
+        light_round_one.duration_ms + light_round_two.duration_ms;
+    let dark_redraws = dark_round_one.redraws + dark_round_two.redraws;
+    let light_redraws = light_round_one.redraws + light_round_two.redraws;
+    let dark_paints = dark_round_one.paints + dark_round_two.paints;
+    let light_paints = light_round_one.paints + light_round_two.paints;
+    // Two rounds absorb ordinary host jitter.  The 2.75x envelope remains
+    // deliberately loose, but rejects the stable 3-5x light-theme regression
+    // reported during dogfood.
+    require(
+        light_duration_ms <= dark_duration_ms * 11 / 4
+            && dark_duration_ms <= light_duration_ms * 11 / 4,
+        `remote_ui_theme_render_duration_asymmetry:dark=${dark_duration_ms}:light=${light_duration_ms}`
+    );
+    require(
+        light_redraws <= dark_redraws * 3 + 4
+            && dark_redraws <= light_redraws * 3 + 4
+            && light_paints <= dark_paints * 3 + 4
+            && dark_paints <= light_paints * 3 + 4,
+        `remote_ui_theme_render_activity_asymmetry:dark_redraws=${dark_redraws}:light_redraws=${light_redraws}:dark_paints=${dark_paints}:light_paints=${light_paints}`
+    );
+    print(
+        `THEME_RENDER_AB totals dark_ms=${dark_duration_ms} light_ms=${light_duration_ms} dark_redraws=${dark_redraws} light_redraws=${light_redraws} dark_paints=${dark_paints} light_paints=${light_paints}`
     );
     let render_before_zoom = sample_render_activity(context, cli, gui, 0);
     font_increase_button.click();
