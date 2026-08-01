@@ -87,12 +87,6 @@ impl Rgb {
     pub(crate) const fn new(red: u8, green: u8, blue: u8) -> Self {
         Self { red, green, blue }
     }
-
-    /// Win32 COLORREF representation, kept here to avoid a Windows API
-    /// dependency in the theme model.
-    pub(crate) const fn colorref(self) -> u32 {
-        self.red as u32 | ((self.green as u32) << 8) | ((self.blue as u32) << 16)
-    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -289,11 +283,6 @@ mod tests {
         assert!(contrast(LIGHT.muted_text, LIGHT.sidebar) >= 4.5);
         assert!(contrast(LIGHT.selection_foreground, LIGHT.selection_background) >= 4.5);
         assert!(contrast(LIGHT.focus_ring, LIGHT.sidebar) >= 4.5);
-    }
-
-    #[test]
-    fn rgb_converts_to_win32_colorref_byte_order() {
-        assert_eq!(rgb(0x12, 0x34, 0x56).colorref(), 0x0056_3412);
     }
 
     fn contrast(left: Rgb, right: Rgb) -> f64 {
