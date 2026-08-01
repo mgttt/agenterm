@@ -22,6 +22,7 @@ pub const fn platform_kind() -> PlatformKind {
 pub enum Capability {
     Hardware,
     NativeVirtualization,
+    ProcessorTopology,
     HostMemory,
     Storage,
     Entropy,
@@ -64,6 +65,7 @@ pub fn capability_status(capability: Capability) -> CapabilityStatus {
     let (enabled, implemented) = match capability {
         Capability::Hardware => (cfg!(feature = "hardware"), true),
         Capability::NativeVirtualization => (cfg!(feature = "virtualization-probe"), true),
+        Capability::ProcessorTopology => (cfg!(feature = "processor-topology"), true),
         Capability::HostMemory => (cfg!(feature = "host-memory"), true),
         Capability::Storage => (cfg!(feature = "storage"), true),
         Capability::Entropy => (cfg!(feature = "entropy"), true),
@@ -120,6 +122,9 @@ pub mod hardware;
 
 #[cfg(feature = "virtualization-probe")]
 pub mod native_virtualization;
+
+#[cfg(feature = "processor-topology")]
+pub mod processor_topology;
 
 #[cfg(feature = "host-memory")]
 pub mod host_memory;

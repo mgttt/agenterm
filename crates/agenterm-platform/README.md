@@ -37,6 +37,7 @@ clipboard, IPC, or screenshot modules.
 | `serde` | `IpcEndpoint` string serialization | `serde` |
 | `hardware` | host processor architecture, pointer width, parallelism and CPU features | none |
 | `virtualization-probe` | current-host WHPX/KVM/Hypervisor.framework availability facts without VM lifecycle | target `libc` / minimal dynamically loaded Win32 APIs |
+| `processor-topology` | online logical CPUs, physical cores, packages, NUMA nodes and processor groups | target `libc` / minimal `windows-sys` |
 | `host-memory` | host page size, mapping granularity and total physical memory | target `libc` / minimal `windows-sys` |
 | `storage` | path-scoped volume capacity, caller-available bytes and allocation unit | target `libc` / minimal `windows-sys` |
 | `entropy` | fail-closed host CSPRNG byte filling | target `libc` / minimal `windows-sys` |
@@ -68,6 +69,7 @@ clipboard, IPC, or screenshot modules.
 |---|---|---|---|
 | hardware | compile-target ISA + runtime CPU facts | compile-target ISA + runtime CPU facts | compile-target ISA + runtime CPU facts |
 | native virtualization probe | dynamically discovered WHPX capability | `/dev/kvm` + API version | `kern.hv_support` |
+| processor topology | cores/packages/NUMA/groups | sysconf + sysfs | logical/physical/package sysctl |
 | host memory | page/allocation geometry + physical total | page geometry + physical pages | page geometry + `hw.memsize` |
 | storage | volume capacity + cluster geometry | `statvfs` | `statvfs` |
 | entropy | BCrypt system-preferred RNG | `getrandom(2)` | `arc4random_buf` |

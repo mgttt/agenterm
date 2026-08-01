@@ -18,6 +18,13 @@ virtualization-probe = [
     "windows-sys/Win32_Foundation",
     "windows-sys/Win32_System_LibraryLoader",
 ]
+processor-topology = [
+    "dep:libc",
+    "dep:windows-sys",
+    "windows-sys/Win32_Foundation",
+    "windows-sys/Win32_System_SystemInformation",
+    "windows-sys/Win32_System_Threading",
+]
 host-memory = [
     "dep:libc",
     "dep:windows-sys",
@@ -142,6 +149,7 @@ webview = []
 full = [
     "hardware",
     "virtualization-probe",
+    "processor-topology",
     "host-memory",
     "storage",
     "entropy",

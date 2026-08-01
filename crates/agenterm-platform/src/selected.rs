@@ -15,6 +15,18 @@ pub(crate) const fn platform_kind() -> crate::PlatformKind {
     }
 }
 
+#[cfg(all(feature = "processor-topology", windows))]
+#[path = "adapters/windows/processor_topology.rs"]
+pub(crate) mod processor_topology;
+
+#[cfg(all(feature = "processor-topology", target_os = "linux"))]
+#[path = "adapters/linux/processor_topology.rs"]
+pub(crate) mod processor_topology;
+
+#[cfg(all(feature = "processor-topology", target_os = "macos"))]
+#[path = "adapters/macos/processor_topology.rs"]
+pub(crate) mod processor_topology;
+
 #[cfg(all(feature = "virtualization-probe", windows))]
 #[path = "adapters/windows/native_virtualization.rs"]
 pub(crate) mod native_virtualization;
