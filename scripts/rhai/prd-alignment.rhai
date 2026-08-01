@@ -184,17 +184,29 @@ fn nonempty_lines(source) {
     lines
 }
 
+fn resolve_executable(path) {
+    let candidate = std::path::absolute(path).display;
+    if std::fs::exists(candidate) {
+        return candidate;
+    }
+    let windows_candidate = candidate + ".exe";
+    if std::fs::exists(windows_candidate) {
+        return windows_candidate;
+    }
+    candidate
+}
+
 require(args.len == 1 || args.len == 3, "expected: REPO [CLI_EXE MUX_EXE]");
 let repo = std::path::absolute(args[0]).display;
 let cli = if args.len == 3 {
-    std::path::absolute(args[1]).display
+    resolve_executable(args[1])
 } else {
-    std::path::join(repo, "dist/agenterm-cli.exe").display
+    resolve_executable(std::path::join(repo, "dist/agenterm-cli").display)
 };
 let mux = if args.len == 3 {
-    std::path::absolute(args[2]).display
+    resolve_executable(args[2])
 } else {
-    std::path::join(repo, "dist/agenterm-mux.exe").display
+    resolve_executable(std::path::join(repo, "dist/agenterm-mux").display)
 };
 let prd_path = std::path::join(repo, "PRD.md").display;
 let detail_directory = std::path::join(repo, "prd").display;
