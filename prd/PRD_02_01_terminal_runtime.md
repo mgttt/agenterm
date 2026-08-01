@@ -90,10 +90,16 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   path. The full smoke applies Light immediately before its IPC-heavy CWD,
   hierarchy, dense-tab, 80-line scroll, selection, and recovery half, explaining
   a strong visual correlation without dismissing remaining temporal flicker.
-  Focused structural tests pass,
-  but they cannot establish temporal visual stability. Diagnostic paint counts
-  and high-output plus idle real-time dogfood evidence on the new binary remain
-  required before restoring shipped status.
+  Focused structural tests pass. The native host now exposes monotonic redraw,
+  parent-paint, child-layout, and child-visibility counters through an explicit
+  test-only sample message; the sample is latched into `ui-snapshot` so observing
+  it cannot form a repaint feedback loop. The owning Windows journey sampled 19
+  native z/Z operations at 23 redraw requests and 8 parent paints, with zero real
+  child bounds/visibility updates and increasing no-op coalescing counts. A
+  subsequent 500 ms idle observation measured one redraw and one parent paint,
+  again with zero child updates. This closes the automated repaint-storm
+  diagnostic; sustained high-output visual dogfood on the new binary remains the
+  final human acceptance check before restoring shipped status.
 - [~] ordinary terminal keys and modifiers are encoded for the active PTY;
   live v0.1.12 dogfood found `Shift+Tab` dropped while terminal focus was
   active. The current repair introduces one shared xterm named-key modifier
@@ -120,8 +126,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   input was rejected while the GUI remained alive, and the server nevertheless
   published a false successful resize. Resize now returns a typed failure,
   commits parser geometry and the resize journal only after native acceptance,
-  and leaves the terminal writable after rejection. Coalescing the still-
-  synchronous remote PTY resize is separate remaining latency work.
+  and leaves the terminal writable after rejection. Remote PTY resize is now
+  serialized by an owned worker with a latest-only pending slot, so the Win32
+  event thread never waits on the bounded IPC round trip and stale
+  lease/epoch/tab/grid results are discarded.
 - [x] GUI shell appears before the initial ConPTY/cmd process is ready
 - [x] initial terminal loads asynchronously with visible starting feedback
 - [x] exited process retains its final screen and exit code

@@ -349,8 +349,13 @@ Release 全部是本轮明确非目标。
   smoke 恰在持久化 Light 后进入 CWD/OSC7、层级 mutation、8-tab dense fixture、80 行
   output、scroll/selection 和 server recovery 的重负载半程，颜色与负载阶段高度混杂。
   该结论排除“颜色填充本身 4x”，但不替代 paint/invalidate 时间域观察。
-  该证据只能证明源头被切断和帧提交结构，不能证明时间域视觉效果；新构建的
-  高输出/idle 60fps 真机观察和 paint/invalidate telemetry 仍是关闭条件。
+  原生 host 现增加单调 `redraw_requests`、`parent_paints`、child bounds/visibility
+  update/skip 计数；仅由测试消息主动采样并锁存到 `ui-snapshot`，读取计数不会形成
+  snapshot→redraw→snapshot feedback。精确集成树的两轮完整 `remote-ui-smoke` 分别以
+  126.5 秒和 134.8 秒通过。第二轮在 19 次 native z/Z 后实测 23 次 redraw request、
+  8 次 parent paint、0 次 child bounds/visibility 更新且 no-op skip 增长；随后 500ms
+  idle 仅 1 次 redraw/paint、仍为 0 child 更新。paint/invalidate storm 的自动化关闭
+  条件已满足；只剩用户在新 binary 上做持续高输出肉眼确认，不能把计数器冒充视觉感受。
 - [ ] alternate-screen harness 无法本地向上滚动；初步证据指向 `vt100`
   alternate grid 的零 scrollback，需要在 application raw-mouse ownership 之外
   评估把 wheel/PageUp 语义转交前台 TUI，不能破坏普通 scrollback。
@@ -369,7 +374,7 @@ Release 全部是本轮明确非目标。
   `--skip-smoke` 捕获该失败。共享契约现只让可打印 committed text 优先，Enter/Backspace/
   Escape 的 native control-character echo 仍保持 named control。crate/root 两级聚焦表驱动
   测试固定 Space、Enter 与既有 Shift/Unicode 语义。
-- [~] Windows toolbar `z/Z` 字号按钮造成 terminal 看似“无响应”的主因已修：native
+- [x] Windows toolbar `z/Z` 字号按钮造成 terminal 看似“无响应”的代码路径与自动化证据已闭环：native
   child button 点击后曾持有 Win32 keyboard focus，而 terminal input 只在 top-level HWND
   获得 focus 时消费；即时 toolbar action 现在显式归还 terminal focus，modal-opening 与
   Control Center action 不会被错误抢回。native focus query 不再用旧 logical surface 掩盖
@@ -389,8 +394,9 @@ Release 全部是本轮明确非目标。
   丢弃且最终尺寸必达；462 项 library tests、all-target warnings-denied Clippy、七产物 dev
   build 及 95.9 秒完整 `remote-ui-smoke` 通过。owning journey 连续操作 native z/Z 18 次，
   等待 grid 精确收敛后立即验证 PTY 输入，并继续通过选择复制、detach、同 session 重连、
-  server fault recovery 与最终 cleanup。剩余限制是时间域闪烁仍需真实高输出/idle 肉眼或
-  capture 证据，不能由该状态收敛测试替代。
+  server fault recovery 与最终 cleanup。后续原生绘制计数 smoke 又固定 19 次 z/Z 的
+  23 redraw/8 paint、0 child update，以及 500ms idle 的 1 redraw/1 paint；持续高输出的
+  人工视觉确认仍归上方闪烁验收，不再把它混入字号输入失响应的代码状态。
 - [x] 默认 `Keep Server Running` 不再因调用者 Job cleanup 杀死独立 server/PTYS；
   GUI 与 CLI 统一走 platform process facade，完整 replaceable-UI 黑盒已证明退出、
   detached lease、同 server/session 接回与最终显式 Stop Server。live dogfood 又发现
@@ -400,7 +406,7 @@ Release 全部是本轮明确非目标。
   failure 不会被吞掉。40 项 crate tests、两级 warnings-denied Clippy、七产物 build 和
   isolated native GUI/server/PTY 启停 probe 通过；fallback server 可能随上层 owning Job
   结束，不能被文档冒充为完全 independent。
-- [ ] terminal 鼠标选区无法可靠建立，导致已实现 copy/paste 无法使用；复查
+- [x] terminal 鼠标选区建立与 copy/paste 的本轮 dogfood 阻断已闭环；复查
   selection ownership、drag threshold/capture、raw-mouse arbitration 和复制黑盒。
   白箱审计定位当前选区绑定整个 `screen.generation`：持续 output delta 在 100ms
   reconcile 时清空 drag/completed selection，paint/copy 也因 generation 不等而
@@ -411,8 +417,9 @@ Release 全部是本轮明确非目标。
   smoke 现已补成 pointer down 后经 public CLI 注入唯一 PTY delta、等待 GUI reconcile，
   再完成拖拽并从 system menu Copy；旧 generation 绑定会在该路径确定失败。另修正
   Ctrl+C arbitration：只有 non-empty completed cached selection 才接管 Copy，prepared/
-  empty state 不再吞掉 PTY interrupt。13 项 frontend tests 通过；真实 Windows journey
-  以及拖出 viewport auto-scroll 仍未闭环，因此保持未完成。
+  empty state 不再吞掉 PTY interrupt。13 项 frontend tests 与两轮真实 Windows journey
+  均通过。拖出 viewport auto-scroll、双击/三击与完整 CJK 物理交互仍是上层
+  professional-selection 的独立未完成叶，不反向否定本轮选择复制修复。
 - [~] 本地开发缓存膨胀的第一段已闭环：实测 `target/` 15.2 GiB，其中
   `target/debug/incremental` 10.53 GiB；一次显式 `cargo clean` 已回收全部可再生缓存。
   dev `build` 现在只在七产物成功 staging 后调用 `prune-target-incremental`，持有真实

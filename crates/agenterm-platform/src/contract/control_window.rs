@@ -197,6 +197,20 @@ pub enum ControlWheelDelta {
     Pixels(i32),
 }
 
+/// Monotonic native rendering counters used to diagnose repaint storms.
+///
+/// The values are observations, not promises about a fixed frame rate. Callers
+/// should compare two samples taken around a bounded interaction or idle period.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ControlWindowRenderActivity {
+    pub redraw_requests: u64,
+    pub parent_paints: u64,
+    pub control_bounds_updates: u64,
+    pub control_bounds_skips: u64,
+    pub control_visibility_updates: u64,
+    pub control_visibility_skips: u64,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub enum ControlWindowEvent {
@@ -233,6 +247,7 @@ pub enum ControlWindowEvent {
         key: u32,
         modifiers: ModifierState,
     },
+    RenderActivitySample(ControlWindowRenderActivity),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -279,6 +294,8 @@ impl std::error::Error for ControlWindowError {}
 
 pub(crate) trait ControlWindowBackend {
     fn request_redraw(&self);
+    fn render_activity(&self) -> ControlWindowRenderActivity;
+    fn record_parent_paint(&self);
     fn close(&self);
     fn focus(&self);
     fn client_size(&self) -> PixelSize;
@@ -343,6 +360,12 @@ pub struct ControlWindow(pub(crate) std::rc::Rc<dyn ControlWindowBackend>);
 impl ControlWindow {
     pub fn request_redraw(&self) {
         self.0.request_redraw();
+    }
+    pub fn render_activity(&self) -> ControlWindowRenderActivity {
+        self.0.render_activity()
+    }
+    pub(crate) fn record_parent_paint(&self) {
+        self.0.record_parent_paint();
     }
     pub fn close(&self) {
         self.0.close();

@@ -242,6 +242,22 @@ fn wait_terminal_resize_settled(context, cli) {
     throw "remote_ui_terminal_resize_settle_timeout";
 }
 
+fn sample_render_activity(context, cli, gui, after_sequence) {
+    require(
+        gui.window_message(0x8004, 0, 0) == 1,
+        "remote_ui_render_activity_sample_rejected"
+    );
+    for attempt in 0..200 {
+        let snapshot = json_cli(context, cli, ["ui-snapshot"]);
+        let activity = snapshot.render_activity;
+        if activity != () && activity.sequence > after_sequence {
+            return activity;
+        }
+        rhai::task::sleep(std::time::Duration::from_millis(25));
+    }
+    throw "remote_ui_render_activity_sample_timeout";
+}
+
 fn wait_viewport_mutation(context, cli, baseline, tab_id) {
     text_cli(
         context,
@@ -991,6 +1007,7 @@ try {
         cancelled_dark.color_theme == "light",
         "remote_ui_settings_cancel_rollback_invalid"
     );
+    let render_before_zoom = sample_render_activity(context, cli, gui, 0);
     font_increase_button.click();
     require(
         gui.window_message(focus_message, 0, 0) == 1,
@@ -1014,6 +1031,62 @@ try {
     font_increase_button.click();
     wait_effective_font_size(context, cli, 15, true);
     wait_terminal_resize_settled(context, cli);
+    let render_after_zoom = sample_render_activity(
+        context,
+        cli,
+        gui,
+        render_before_zoom.sequence
+    );
+    require(
+        render_after_zoom.control_bounds_updates
+                == render_before_zoom.control_bounds_updates
+            && render_after_zoom.control_visibility_updates
+                == render_before_zoom.control_visibility_updates,
+        "remote_ui_zoom_mutated_unchanged_native_controls"
+    );
+    require(
+        render_after_zoom.control_bounds_skips
+                > render_before_zoom.control_bounds_skips
+            && render_after_zoom.control_visibility_skips
+                > render_before_zoom.control_visibility_skips,
+        "remote_ui_zoom_did_not_coalesce_native_control_layout"
+    );
+    let zoom_redraws =
+        render_after_zoom.redraw_requests - render_before_zoom.redraw_requests;
+    let zoom_paints =
+        render_after_zoom.parent_paints - render_before_zoom.parent_paints;
+    require(
+        zoom_redraws <= 96 && zoom_paints <= 96,
+        "remote_ui_zoom_repaint_storm"
+    );
+    for attempt in 0..20 {
+        json_cli(context, cli, ["ui-snapshot"]);
+        rhai::task::sleep(std::time::Duration::from_millis(25));
+    }
+    let render_after_idle = sample_render_activity(
+        context,
+        cli,
+        gui,
+        render_after_zoom.sequence
+    );
+    let idle_redraws =
+        render_after_idle.redraw_requests - render_after_zoom.redraw_requests;
+    let idle_paints =
+        render_after_idle.parent_paints - render_after_zoom.parent_paints;
+    require(
+        idle_redraws <= 3 && idle_paints <= 3,
+        "remote_ui_idle_repaint_storm"
+    );
+    require(
+        render_after_idle.control_bounds_updates
+                == render_after_zoom.control_bounds_updates
+            && render_after_idle.control_visibility_updates
+                == render_after_zoom.control_visibility_updates,
+        "remote_ui_idle_mutated_native_controls"
+    );
+    print(
+        `RENDER_ACTIVITY zoom_redraws=${zoom_redraws} zoom_paints=${zoom_paints} idle_redraws=${idle_redraws} idle_paints=${idle_paints}`
+    );
     let font_input_marker = "AGENTERM_FONT_INPUT_" + context.run_id;
     text_cli(
         context,

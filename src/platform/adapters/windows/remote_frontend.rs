@@ -50,9 +50,10 @@ use agenterm_platform::{
     control_window::{
         ButtonState, ControlCanvas, ControlId, ControlKind, ControlSpec, ControlWheelDelta,
         ControlWindow, ControlWindowApplication, ControlWindowDirective, ControlWindowError,
-        ControlWindowEvent, ControlWindowOptions, ControlWindowQuery, FocusTarget, MenuCommandId,
-        PixelPoint, PixelRect as ControlPixelRect, PixelSize, PointerButton, Rgb8, SystemMenuItem,
-        TextHorizontalAlignment, TextOptions, WindowPresentation, run_control_window,
+        ControlWindowEvent, ControlWindowOptions, ControlWindowQuery, ControlWindowRenderActivity,
+        FocusTarget, MenuCommandId, PixelPoint, PixelRect as ControlPixelRect, PixelSize,
+        PointerButton, Rgb8, SystemMenuItem, TextHorizontalAlignment, TextOptions,
+        WindowPresentation, run_control_window,
     },
     input,
 };
@@ -127,7 +128,6 @@ const SYSTEM_MENU_PASTE_ID: MenuCommandId = MenuCommandId(0x1f10);
 const SYSTEM_MENU_TOGGLE_TABS_ID: MenuCommandId = MenuCommandId(0x1f20);
 const WM_APP_AUTOMATION_SHORTCUT: u32 = 0x8000 + 2;
 const WM_APP_FOCUS_QUERY: u32 = 0x8000 + 3;
-const WM_APP_DESTROY_WINDOW: u32 = 0x8000 + 4;
 
 const fn windows_toolbar_hit(control_id: ControlId) -> Option<WindowsToolbarHit> {
     match control_id {
@@ -735,6 +735,8 @@ struct RemoteWindowState {
     pending_close_tab_id: Option<String>,
     cwd_edit_tab_id: Option<String>,
     last_published_snapshot: Option<String>,
+    render_activity_sample: Option<ControlWindowRenderActivity>,
+    render_activity_sample_sequence: u64,
     relay_close_after_completion: Option<RemoteCloseChoice>,
     no_activate: bool,
 }
@@ -915,6 +917,8 @@ impl RemoteWindowState {
             pending_close_tab_id: None,
             cwd_edit_tab_id: None,
             last_published_snapshot: None,
+            render_activity_sample: None,
+            render_activity_sample_sequence: 0,
             relay_close_after_completion: None,
             no_activate,
         })
@@ -2084,6 +2088,15 @@ impl RemoteWindowState {
                 "minimized": window_state.is_minimized(),
                 "state": window_state.as_str(),
             },
+            "render_activity": self.render_activity_sample.map(|activity| serde_json::json!({
+                "sequence": self.render_activity_sample_sequence,
+                "redraw_requests": activity.redraw_requests,
+                "parent_paints": activity.parent_paints,
+                "control_bounds_updates": activity.control_bounds_updates,
+                "control_bounds_skips": activity.control_bounds_skips,
+                "control_visibility_updates": activity.control_visibility_updates,
+                "control_visibility_skips": activity.control_visibility_skips,
+            })),
             "layout": {
                 "sidebar": {
                     "x": layout.sidebar.left,
@@ -5865,6 +5878,12 @@ impl ControlWindowApplication for RemoteWindowApplication {
                     consumed = state.handle_window_keydown(key, modifiers);
                 }
                 redraw = consumed;
+            }
+            ControlWindowEvent::RenderActivitySample(activity) => {
+                state.render_activity_sample = Some(activity);
+                state.render_activity_sample_sequence =
+                    state.render_activity_sample_sequence.saturating_add(1);
+                consumed = true;
             }
             _ => {}
         }

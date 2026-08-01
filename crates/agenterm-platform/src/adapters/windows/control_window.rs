@@ -50,8 +50,9 @@ use crate::{
         ButtonState, ControlCanvas, ControlCursor, ControlId, ControlKind, ControlWheelDelta,
         ControlWindow, ControlWindowApplication, ControlWindowBackend, ControlWindowDirective,
         ControlWindowError, ControlWindowEvent, ControlWindowOptions, ControlWindowQuery,
-        ControlWindowState, FocusTarget, MenuCommandId, PixelPoint, PixelRect, PixelSize,
-        PointerButton, Rgb8, TextHorizontalAlignment, TextOptions, WindowPresentation,
+        ControlWindowRenderActivity, ControlWindowState, FocusTarget, MenuCommandId, PixelPoint,
+        PixelRect, PixelSize, PointerButton, Rgb8, TextHorizontalAlignment, TextOptions,
+        WindowPresentation,
     },
 };
 
@@ -59,11 +60,18 @@ const TIMER_ID: usize = 1;
 const DEFERRED_CLOSE: u32 = WM_APP + 1;
 const AUTOMATION_SHORTCUT: u32 = WM_APP + 2;
 const AUTOMATION_FOCUS_QUERY: u32 = WM_APP + 3;
+const AUTOMATION_RENDER_ACTIVITY_SAMPLE: u32 = WM_APP + 4;
 
 struct Backend {
     window: Cell<HWND>,
     controls: HashMap<ControlId, HWND>,
     system_menu: HashMap<MenuCommandId, u32>,
+    redraw_requests: Cell<u64>,
+    parent_paints: Cell<u64>,
+    control_bounds_updates: Cell<u64>,
+    control_bounds_skips: Cell<u64>,
+    control_visibility_updates: Cell<u64>,
+    control_visibility_skips: Cell<u64>,
 }
 
 impl Backend {
@@ -98,9 +106,23 @@ impl Backend {
 
 impl ControlWindowBackend for Backend {
     fn request_redraw(&self) {
+        increment(&self.redraw_requests);
         unsafe {
             InvalidateRect(self.window.get(), ptr::null(), 0);
         }
+    }
+    fn render_activity(&self) -> ControlWindowRenderActivity {
+        ControlWindowRenderActivity {
+            redraw_requests: self.redraw_requests.get(),
+            parent_paints: self.parent_paints.get(),
+            control_bounds_updates: self.control_bounds_updates.get(),
+            control_bounds_skips: self.control_bounds_skips.get(),
+            control_visibility_updates: self.control_visibility_updates.get(),
+            control_visibility_skips: self.control_visibility_skips.get(),
+        }
+    }
+    fn record_parent_paint(&self) {
+        increment(&self.parent_paints);
     }
     fn close(&self) {
         unsafe {
@@ -231,6 +253,7 @@ impl ControlWindowBackend for Backend {
             return Err(last_error("control_window_map_control_rect_failed"));
         }
         if control_bounds_match(origin, current, b) {
+            increment(&self.control_bounds_skips);
             return Ok(());
         }
         if unsafe {
@@ -246,6 +269,7 @@ impl ControlWindowBackend for Backend {
         {
             Err(last_error("control_window_layout_failed"))
         } else {
+            increment(&self.control_bounds_updates);
             Ok(())
         }
     }
@@ -258,11 +282,13 @@ impl ControlWindowBackend for Backend {
     fn set_control_visible(&self, id: ControlId, visible: bool) -> Result<(), ControlWindowError> {
         let control = self.control(id)?;
         if (unsafe { IsWindowVisible(control) } != 0) == visible {
+            increment(&self.control_visibility_skips);
             return Ok(());
         }
         unsafe {
             ShowWindow(control, if visible { SW_SHOW } else { SW_HIDE });
         }
+        increment(&self.control_visibility_updates);
         Ok(())
     }
     fn set_system_menu_text(
@@ -535,6 +561,12 @@ pub(crate) fn run_control_window(
         window: Cell::new(hwnd),
         controls,
         system_menu,
+        redraw_requests: Cell::new(0),
+        parent_paints: Cell::new(0),
+        control_bounds_updates: Cell::new(0),
+        control_bounds_skips: Cell::new(0),
+        control_visibility_updates: Cell::new(0),
+        control_visibility_skips: Cell::new(0),
     });
     let window = ControlWindow(backend.clone());
     let mut state = Box::new(State {
@@ -773,6 +805,11 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPAR
                 .application
                 .query(&state.window, ControlWindowQuery::AutomationFocusSurface);
         }
+        AUTOMATION_RENDER_ACTIVITY_SAMPLE => {
+            let activity = state.window.render_activity();
+            dispatch(state, ControlWindowEvent::RenderActivitySample(activity));
+            return 1;
+        }
         WM_PAINT => {
             paint(state, hwnd);
             return 0;
@@ -833,6 +870,7 @@ fn apply_directive(state: &mut State, directive: ControlWindowDirective) {
 }
 
 fn paint(state: &mut State, hwnd: HWND) {
+    state.window.record_parent_paint();
     let mut ps: PAINTSTRUCT = unsafe { mem::zeroed() };
     let target = unsafe { BeginPaint(hwnd, &mut ps) };
     let size = client_size(hwnd);
@@ -904,6 +942,10 @@ fn paint(state: &mut State, hwnd: HWND) {
         state.deferred_error = Some(last_error("control_window_present_failed"));
         state.window.close();
     }
+}
+
+fn increment(counter: &Cell<u64>) {
+    counter.set(counter.get().saturating_add(1));
 }
 
 struct WinCanvas {
