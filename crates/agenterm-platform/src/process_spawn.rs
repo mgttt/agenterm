@@ -189,12 +189,14 @@ mod tests {
 
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         let _pid = loop {
-            if let Ok(value) = std::fs::read_to_string(&pid_file) {
-                break value.parse::<u32>().expect("parse child PID probe");
+            if let Ok(value) = std::fs::read_to_string(&pid_file)
+                && let Ok(pid) = value.trim().parse::<u32>()
+            {
+                break pid;
             }
             assert!(
                 std::time::Instant::now() < deadline,
-                "detached child did not publish its PID"
+                "detached child did not publish a complete PID"
             );
             std::thread::sleep(std::time::Duration::from_millis(10));
         };
