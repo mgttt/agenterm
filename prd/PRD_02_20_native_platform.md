@@ -55,6 +55,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] Script Runtime atomic filesystem mechanics and child-pipe observation use
   public filesystem/process facades. Product budgets and receipts remain in the
   unrestricted runtime; duplicate root native adapters are deleted.
+- [x] The optional `process-reference` feature owns stable process-object
+  references without reopening by PID: Windows retains an owned process HANDLE,
+  Linux retains a pidfd, and macOS retains a kqueue `NOTE_EXIT` registration.
+  The public facade exposes only `open`, `id`, `is_alive`, and a platform-neutral
+  handle-retention trait; native handle/fd types and implementations stay in the
+  selected adapters. Capability status, exact-child exit tests, static boundary
+  checks, and Windows/Linux/macOS compile checks cover the public slice.
 - [x] Script Runtime child-window observation/input/control uses the public
   process-window contract and selected adapters. Windows uses exact HWND
   delivery. Linux now selects one unique viewable EWMH client by exact PID and

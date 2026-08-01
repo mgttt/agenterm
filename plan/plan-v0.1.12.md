@@ -883,6 +883,11 @@ Cockpit
   同一 run 的 Windows 静态门禁还发现新增 process-security facade 泄漏 Windows handle；
   native handle trait implementation 与 SID test 已重新下沉 Windows adapter，facade 保持
   平台中立；新的 matching-host run 返回前，这两项仍不冒充最终回执；
+- `agenterm-platform` 的 process capability 新增独立 `process-reference` feature：Windows
+  owned HANDLE、Linux pidfd 与 macOS kqueue `NOTE_EXIT` 都以 RAII reference 保持对象身份，
+  避免只凭可复用 PID 观察退出。public facade 只保留 `open/id/is_alive` 与平台中立 handle
+  retention trait；BorrowedHandle/AsHandle/AsFd 只在 adapters。169 项 all-feature tests、
+  native static boundary 与三个已安装 x86_64 target compile checks 已通过；
 - Control Center evidence ownership 不再游离于 alignment：Windows required
   qualification gate 与 Linux/macOS host-native gate 分别登记，`prd-alignment`
   对三者的 evidence ID、脚本发射点和 partial PRD 状态做同一 exact parity。
