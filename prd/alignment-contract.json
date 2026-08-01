@@ -96,6 +96,14 @@
       "evidence_ids": ["ux.theme-settings"]
     },
     {
+      "id": "workspace.theme-render-cost-parity",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "Dark/Light same-window render-cost parity rejects stable 3--5x palette-dependent asymmetry",
+      "evidence_ids": ["ux.theme-render-parity"]
+    },
+    {
       "id": "control.stable-create-id",
       "kind": "behavior",
       "status": "shipped",

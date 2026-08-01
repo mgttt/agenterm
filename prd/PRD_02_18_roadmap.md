@@ -81,6 +81,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       capture, not simultaneous scope expansion across all candidates
   - Release core: Settings and built-in themes
     - [x] Dark and Light theme settings preview, apply, cancel, and persist without interrupting PTYs
+    - [x] Dark/Light same-window render-cost parity rejects stable 3--5x palette-dependent asymmetry
+      by measuring the same synchronous target click, screenshot, and renderer
+      activity in counterbalanced ABBA order with a bilateral 2.75x duration
+      envelope
     - [x] redesign Settings as a keyboard-accessible draft dialog with
       Appearance and Terminal sections plus explicit Apply and Cancel;
       theme selection previews the complete window, Apply atomically saves,

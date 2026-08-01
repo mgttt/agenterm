@@ -23,6 +23,7 @@ let declared_evidence = [
     "ux.semantic-window-control",
     "ux.settings-isolation",
     "ux.system-menu-clipboard",
+    "ux.theme-render-parity",
     "ux.terminal-selection-copy",
     "ux.working-context-cwd"
 ];

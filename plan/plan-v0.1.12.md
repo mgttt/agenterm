@@ -348,6 +348,9 @@ Release 全部是本轮明确非目标。
   Dark/Light A/B 为 528/572 ms 与 663/553 ms，Light 没有稳定慢路径，更不是 4x。
   smoke 恰在持久化 Light 后进入 CWD/OSC7、层级 mutation、8-tab dense fixture、80 行
   output、scroll/selection 和 server recovery 的重负载半程，颜色与负载阶段高度混杂。
+  为避免未来再次用阶段位置解释主题体感，`remote-ui-smoke` 现增加同窗口、同操作的
+  Dark/Light/Light/Dark 对消测量，记录耗时、redraw 与 paint 增量；双向 2.75x 耗时
+  阈值会拒绝稳定 3--5x 主题差异，并以 `ux.theme-render-parity` 进入 qualification/alignment。
   后续按 `commands.json` 时间线确认用户体感真实：三轮黑底阶段 15.0--18.3s，白底后
   108.6--122.5s，相邻 snapshot 中位间隔上升约 1.8--2.1x。根因不是 palette，而是
   harness 每条 CLI 都 parse + pretty-write 全部历史形成 O(n²)；每 50 条命令的中位
