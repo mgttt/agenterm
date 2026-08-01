@@ -67,7 +67,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   Unsupported instead of returning the WindowServer frame under a false client
   label. AppKit mouse-down handling reads the current event's client location
   directly, so targeted background input does not depend on an earlier
-  `CursorMoved` observation.
+  `CursorMoved` observation. Process-targeted mouse events also carry both
+  public CoreGraphics window-under-pointer fields for the exact selected
+  WindowServer ID, preventing process delivery from losing intra-application
+  window routing while the Control Center remains non-frontmost.
 - [~] Passive system-WebView discovery is public and selected inside the crate,
   with Missing and Failed kept distinct. Native font discovery/metrics and an
   opaque RAII font resource are public; the Windows renderer consumes its RAII

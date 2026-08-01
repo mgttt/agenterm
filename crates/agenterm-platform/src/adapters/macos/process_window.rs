@@ -24,6 +24,9 @@ const CG_EVENT_LEFT_MOUSE_UP: u32 = 2;
 const CG_EVENT_MOUSE_MOVED: u32 = 5;
 const CG_EVENT_LEFT_MOUSE_DRAGGED: u32 = 6;
 const CG_MOUSE_BUTTON_LEFT: i32 = 0;
+const CG_MOUSE_EVENT_CLICK_STATE: u32 = 1;
+const CG_MOUSE_EVENT_WINDOW_UNDER_POINTER: u32 = 91;
+const CG_MOUSE_EVENT_WINDOW_UNDER_POINTER_THAT_CAN_HANDLE_EVENT: u32 = 92;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -92,6 +95,7 @@ unsafe extern "C" {
         position: CgPoint,
         button: i32,
     ) -> CgEventRef;
+    fn CGEventSetIntegerValueField(event: CgEventRef, field: u32, value: i64);
     fn CGEventPostToPid(process_id: i32, event: CgEventRef);
     fn CGEventSourceCreate(state_id: i32) -> CgEventSourceRef;
     fn CGGetActiveDisplayList(
@@ -536,6 +540,25 @@ pub(crate) fn pointer(
                 "platform_error",
             )
         })?;
+        // CGEventPostToPid selects the process, but AppKit still uses the
+        // mouse-event window fields to route a background click to one of that
+        // process's windows. Pin both public CoreGraphics target fields to the
+        // exact WindowServer candidate and mark the pair as a single click.
+        // SAFETY: event is a valid typed mouse event and window.id came from
+        // the unique exact-PID layer-0 WindowServer record.
+        unsafe {
+            CGEventSetIntegerValueField(
+                event.0,
+                CG_MOUSE_EVENT_WINDOW_UNDER_POINTER,
+                i64::from(window.id),
+            );
+            CGEventSetIntegerValueField(
+                event.0,
+                CG_MOUSE_EVENT_WINDOW_UNDER_POINTER_THAT_CAN_HANDLE_EVENT,
+                i64::from(window.id),
+            );
+            CGEventSetIntegerValueField(event.0, CG_MOUSE_EVENT_CLICK_STATE, 1);
+        }
         events.push(event);
     }
     for event in &events {

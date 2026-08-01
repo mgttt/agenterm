@@ -355,13 +355,35 @@ fn prove_pty(
             "--endpoint", endpoint,
             "new-window", "-d", "-P", "-F", "#{window_id}",
             "-n", "cc-" + label + "-" + context.run_id,
-            "--", "/bin/echo", marker
+            "--", "/bin/sh"
         ],
         false
     );
     let tab_id = created.stdout_text();
     tab_id.trim();
     require(tab_id.starts_with("@"), "control_center_linux_stable_tab_id");
+    invoke(
+        context,
+        cli,
+        registry,
+        endpoint,
+        backend,
+        [
+            "--endpoint", endpoint,
+            "send-keys", "-t", tab_id,
+            "-l", "echo " + marker
+        ],
+        false
+    );
+    invoke(
+        context,
+        cli,
+        registry,
+        endpoint,
+        backend,
+        ["--endpoint", endpoint, "send-keys", "-t", tab_id, "Enter"],
+        false
+    );
     invoke(
         context,
         cli,

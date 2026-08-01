@@ -841,6 +841,13 @@ Cockpit
   外框宽度与 renderer framebuffer 宽度推导唯一点击 scale，不加 sleep、不尝试备用
   坐标。Linux/macOS target tests 与 warnings-denied Clippy 已编译通过，新的普通 CI
   matching-host 回执返回前两项仍保持开放；
+- exact-SHA `af5ac62` 的后继 run `30717141687` 已证明 Linux portable gate（含
+  REPL cleanup）通过，因此旧 process-tree 失败关闭；更晚的 Linux CC journey
+  发现用于选择的两个 `/bin/echo` PTY 在输入前已正常退出，现改为长驻 `/bin/sh`
+  并经 public `send-keys` 产出 marker。macOS ARM64 在统一 scale 后仍无 pointer
+  transition，排除“仅 scale”结论；adapter 现把 CoreGraphics 的两个公开
+  window-under-pointer fields 固定为唯一 exact-PID WindowServer ID，并保留单坐标、
+  no-activate 合同。两项仍等待下一 ordinary CI 的 matching-host 正向回执；
 - Control Center evidence ownership 不再游离于 alignment：Windows required
   qualification gate 与 Linux/macOS host-native gate 分别登记，`prd-alignment`
   对三者的 evidence ID、脚本发射点和 partial PRD 状态做同一 exact parity。

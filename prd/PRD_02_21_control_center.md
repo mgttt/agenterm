@@ -167,8 +167,14 @@ Control Center is the product name; the executable family uses
   the journey mixed independent renderer and WindowServer scale sources.
   Commit `7a52d87` derives the point-to-pixel conversion from the observed
   WindowServer frame width and exact renderer framebuffer width, while retaining
-  bounded geometry and no-coordinate-retry requirements. Final Linux/macOS
-  positive journey evidence remains open. Windows qualification evidence and
+  bounded geometry and no-coordinate-retry requirements. Exact-SHA run
+  `30717141687` proved that scale alone was insufficient: macOS still delivered
+  no pointer transition, while Linux reached its native input step with both
+  `/bin/echo` fixture tabs already dead. The Linux journey now uses persistent
+  `/bin/sh` PTYs. The macOS adapter pins the public CoreGraphics mouse-event
+  window fields to its unique exact-PID WindowServer candidate and marks the
+  down/up pair as one click before `CGEventPostToPid`. Final Linux/macOS positive
+  journey evidence remains open. Windows qualification evidence and
   Linux/macOS matching-host evidence are registered in separate gate manifests
   but participate in one exact PRD alignment parity check; cross-target compile
   evidence is never counted as a host-native runtime receipt. A missing server
@@ -436,7 +442,11 @@ future promotion gates.
   Unsupported on macOS rather than relabeling WindowServer outer bounds; the
   journey now derives one point-to-pixel scale from the observed outer-frame
   width and exact client framebuffer width instead of applying the independent
-  winit scale twice. A new positive ARM64 receipt remains required.
+  winit scale twice. After run `30717141687` showed that correct coordinates
+  still did not select a window, the adapter also sets
+  `kCGMouseEventWindowUnderMousePointer` and its handle-capable companion to the
+  exact WindowServer ID; it does not retry alternate coordinates. A new positive
+  ARM64 receipt remains required.
 
 ## Explicit v0.1.11 non-goals
 
