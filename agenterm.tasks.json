@@ -671,7 +671,7 @@
     },
     {
       "id": "control-center-smoke",
-      "description": "Prove the isolated Control Center offline contract, PID reuse, no-activate launch, stale-owner recovery, and orphan-free cleanup",
+      "description": "Prove the isolated Control Center offline contract, typed stable-ID navigation, PID reuse, no-activate launch, stale-owner recovery, and orphan-free cleanup",
       "entry": "scripts/rhai/control-center-smoke.rhai",
       "profile": "local",
       "cwd": ".",

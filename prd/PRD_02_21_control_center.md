@@ -142,11 +142,19 @@ Control Center is the product name; the executable family uses
   explicit total/running/dead tab counts, active stable ID/title, and component
   availability from current typed facts. Build commit/profile/cleanliness is
   visible without exposing a second build authority. The renderer-neutral snapshot and
-  native shell consume the same facts; richer inspect/select navigation remains
-  open.
-- [ ] inspect and select shortcuts target stable IDs and return verifiable
-  post-state. A missing server says that no Fleet authority is connected
-  rather than presenting a fabricated zero-sized fleet.
+  native shell consume the same facts; richer renderer navigation remains open.
+- [x] public `agenterm-cc inspect --tab @ID` and `select --tab @ID` entry
+  points accept only canonical stable IDs. Inspect preserves selection; select
+  delegates to the server-owned `select-window` control operation, requires a
+  matching control receipt, and re-reads the same PID/epoch before returning
+  typed inspected-tab facts with explicit verified post-state. Missing targets
+  fail without changing selection or creating Control Center GUI authority.
+  The Windows public smoke proves inspection, selection, receipt identity,
+  independent post-state, missing-target failure, and absence of GUI registry
+  ownership against a headless server.
+- [ ] Native Cockpit pointer/keyboard shortcuts and their three-platform
+  adapter evidence remain open. A missing server says that no Fleet authority
+  is connected rather than presenting a fabricated zero-sized fleet.
 
 ### Workflows
 
@@ -285,8 +293,10 @@ future promotion gates.
   total/running/dead tab counts while the native renderer displays the same
   logical instance, PID/version, build commit/profile/cleanliness,
   epoch/sequence, active stable tab ID/title and
-  component states. Workflows, Extensions, and InfoHub retain truthful
-  unavailable states; richer navigation and inspect/select actions remain open.
+  component states. Public stable-ID inspect/select entry points now preserve
+  the server as sole Fleet authority and return causally verified post-state.
+  Workflows, Extensions, and InfoHub retain truthful unavailable states; native
+  renderer navigation remains open.
 - [~] close, force-kill, renderer failure, server restart, server loss,
   incompatible protocol, repeated open, and GUI-with-server-retained journeys
   prove process reuse, bounded cleanup, recovery, and PTY/workspace isolation.

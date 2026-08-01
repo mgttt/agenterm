@@ -38,6 +38,8 @@ Usage:
   agenterm-cc status [--json]
   agenterm-cc close [--json]
   agenterm-cc snapshot [--json] [--instance NAME | --endpoint ENDPOINT]
+  agenterm-cc inspect --tab @ID [--json] [--instance NAME | --endpoint ENDPOINT]
+  agenterm-cc select --tab @ID [--json] [--instance NAME | --endpoint ENDPOINT]
   agenterm-cc screenshot --output PATH [--json]
   agenterm-cc capabilities [--json]
   agenterm-cc --help
@@ -72,6 +74,16 @@ enum EntryCommand {
         json: bool,
         context: Option<ServerContext>,
     },
+    Inspect {
+        json: bool,
+        context: Option<ServerContext>,
+        tab_id: String,
+    },
+    Select {
+        json: bool,
+        context: Option<ServerContext>,
+        tab_id: String,
+    },
     Screenshot {
         json: bool,
         output: PathBuf,
@@ -85,6 +97,7 @@ struct CapabilityDocument {
     role: &'static str,
     public_ui_action: &'static str,
     typed_operation: &'static str,
+    typed_entry_points: [&'static str; 3],
     renderer: &'static str,
     webview_host: crate::webview_host::WebViewHostFacts,
     owns_terminal_authority: bool,
@@ -213,6 +226,41 @@ struct TabCounts {
     total: u64,
     running: u64,
     dead: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct TabNavigationDocument {
+    schema_version: u32,
+    executable: &'static str,
+    action: &'static str,
+    target_tab_id: String,
+    server_pid: u64,
+    server_epoch: String,
+    sequence: u64,
+    active_tab_id: Option<String>,
+    post_state_verified: bool,
+    tab: InspectedTab,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    control_receipt: Option<crate::control_contract::ControlReceipt>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct InspectedTab {
+    id: String,
+    index: u64,
+    name: String,
+    note: String,
+    active: bool,
+    dead: bool,
+    exit_code: Option<i64>,
+    pid: Option<u64>,
+    rows: u64,
+    cols: u64,
+    input_bytes: u64,
+    output_bytes: u64,
+    reader_closed: bool,
+    parser_drained: bool,
+    finalized: bool,
 }
 
 impl TabCounts {
@@ -932,6 +980,7 @@ fn parse_entry(args: &[OsString]) -> std::result::Result<EntryCommand, String> {
                     | "--instance"
                     | "--server-endpoint"
                     | "--logical-instance"
+                    | "--tab"
                     | "--output"
                     | "--help"
                     | "-h"
@@ -949,10 +998,11 @@ fn parse_entry(args: &[OsString]) -> std::result::Result<EntryCommand, String> {
     let mut migration_endpoint = None;
     let mut migration_instance = None;
     let mut screenshot_output = None;
+    let mut tab_target = None;
     let mut position = 0;
     while position < values.len() {
         match values[position].as_ref() {
-            "--endpoint" | "--instance" | "--server-endpoint" | "--logical-instance"
+            "--endpoint" | "--instance" | "--server-endpoint" | "--logical-instance" | "--tab"
             | "--output" => {
                 let option = values[position].as_ref();
                 let Some(value) = values.get(position + 1) else {
@@ -967,6 +1017,14 @@ fn parse_entry(args: &[OsString]) -> std::result::Result<EntryCommand, String> {
                         .is_some()
                     {
                         return Err("--output may be specified only once".to_owned());
+                    }
+                    position += 2;
+                    continue;
+                }
+                if option == "--tab" {
+                    validate_stable_tab_id(value)?;
+                    if tab_target.replace(value.to_string()).is_some() {
+                        return Err("--tab may be specified only once".to_owned());
                     }
                     position += 2;
                     continue;
@@ -1068,6 +1126,9 @@ fn parse_entry(args: &[OsString]) -> std::result::Result<EntryCommand, String> {
     if screenshot_output.is_some() && positional.as_slice() != ["screenshot"] {
         return Err("--output is valid only for screenshot".to_owned());
     }
+    if tab_target.is_some() && !matches!(positional.as_slice(), ["inspect"] | ["select"]) {
+        return Err("--tab is valid only for inspect or select".to_owned());
+    }
     match positional.as_slice() {
         [] | ["open"] if !json => Ok(EntryCommand::Open {
             no_activate,
@@ -1081,6 +1142,21 @@ fn parse_entry(args: &[OsString]) -> std::result::Result<EntryCommand, String> {
         }
         ["close"] if !explicit_no_activate && context.is_none() => Ok(EntryCommand::Close { json }),
         ["snapshot"] if !explicit_no_activate => Ok(EntryCommand::Snapshot { json, context }),
+        ["inspect"] if !explicit_no_activate && tab_target.is_some() => {
+            Ok(EntryCommand::Inspect {
+                json,
+                context,
+                tab_id: tab_target.expect("guarded above"),
+            })
+        }
+        ["select"] if !explicit_no_activate && tab_target.is_some() => Ok(EntryCommand::Select {
+            json,
+            context,
+            tab_id: tab_target.expect("guarded above"),
+        }),
+        ["inspect"] | ["select"] if !explicit_no_activate => {
+            Err(format!("{} requires --tab @ID", positional[0]))
+        }
         ["screenshot"]
             if !explicit_no_activate && context.is_none() && screenshot_output.is_some() =>
         {
@@ -1097,13 +1173,34 @@ fn parse_entry(args: &[OsString]) -> std::result::Result<EntryCommand, String> {
         }
         ["screenshot"] => Err("--no-activate is valid only for open".to_owned()),
         [] | ["open"] => {
-            Err("--json is valid only for capabilities, snapshot, or screenshot".to_owned())
+            Err(
+                "--json is valid only for capabilities, snapshot, inspect, select, or screenshot"
+                    .to_owned(),
+            )
         }
-        ["capabilities"] | ["status"] | ["snapshot"] | ["close"] => {
+        ["capabilities"] | ["status"] | ["snapshot"] | ["inspect"] | ["select"]
+        | ["close"] => {
             Err("--no-activate is valid only for open".to_owned())
         }
         [other, ..] => Err(format!("unknown command: {other}")),
     }
+}
+
+fn validate_stable_tab_id(value: &str) -> std::result::Result<(), String> {
+    stable_tab_numeric_id(value).map(|_| ())
+}
+
+fn stable_tab_numeric_id(value: &str) -> std::result::Result<u64, String> {
+    let Some(number) = value.strip_prefix('@') else {
+        return Err("--tab requires a stable tab ID such as @1".to_owned());
+    };
+    let id = number
+        .parse::<u64>()
+        .map_err(|_| "--tab requires a stable tab ID such as @1".to_owned())?;
+    if id == 0 || format!("@{id}") != value {
+        return Err("--tab requires a canonical stable tab ID such as @1".to_owned());
+    }
+    Ok(id)
 }
 
 fn resolve_selector_context(
@@ -1183,6 +1280,22 @@ fn run_entry(command: EntryCommand) -> Result<()> {
                 }
             }
         }
+        EntryCommand::Inspect {
+            json,
+            context,
+            tab_id,
+        } => {
+            let document = navigate_tab(context, &tab_id, false)?;
+            print_navigation_document(&document, json)?;
+        }
+        EntryCommand::Select {
+            json,
+            context,
+            tab_id,
+        } => {
+            let document = navigate_tab(context, &tab_id, true)?;
+            print_navigation_document(&document, json)?;
+        }
         EntryCommand::Screenshot { json, output } => {
             let document = capture_control_center_screenshot(&output)?;
             if json {
@@ -1199,6 +1312,21 @@ fn run_entry(command: EntryCommand) -> Result<()> {
     Ok(())
 }
 
+fn print_navigation_document(document: &TabNavigationDocument, json: bool) -> Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(document)?);
+    } else {
+        let title = &document.tab.name;
+        println!(
+            "Control Center {} {} ({title}); active tab: {}",
+            document.action,
+            document.target_tab_id,
+            document.active_tab_id.as_deref().unwrap_or("none")
+        );
+    }
+    Ok(())
+}
+
 fn capabilities() -> CapabilityDocument {
     CapabilityDocument {
         schema_version: SCHEMA_VERSION,
@@ -1206,6 +1334,11 @@ fn capabilities() -> CapabilityDocument {
         role: "isolated_projection",
         public_ui_action: PUBLIC_UI_ACTION,
         typed_operation: TYPED_OPERATION,
+        typed_entry_points: [
+            TYPED_OPERATION,
+            "control-center.inspect",
+            "control-center.select",
+        ],
         renderer: "native",
         webview_host: crate::webview_host::probe(),
         owns_terminal_authority: false,
@@ -1815,6 +1948,141 @@ fn query_server(context: &ServerContext) -> Result<ConnectedServer> {
     })
 }
 
+fn navigate_tab(
+    context: Option<ServerContext>,
+    tab_id: &str,
+    select: bool,
+) -> Result<TabNavigationDocument> {
+    let context = context
+        .or_else(read_persisted_context)
+        .context("control_center_server_not_selected")?;
+    let before = query_server(&context)?;
+    if !before.tabs.iter().any(|tab| tab.id == tab_id) {
+        anyhow::bail!("control_center_tab_not_found: {tab_id}");
+    }
+    let expected_tab_id = stable_tab_numeric_id(tab_id).map_err(anyhow::Error::msg)?;
+
+    let control_receipt = if select {
+        let response = crate::client::send_ipc_request_to_timeout(
+            &context.endpoint,
+            vec![
+                "select-window".to_owned(),
+                "-t".to_owned(),
+                tab_id.to_owned(),
+            ],
+            PROJECTION_IPC_TIMEOUT,
+        )
+        .context("control_center_select_transport_failed")?;
+        if !response.ok {
+            anyhow::bail!(
+                "control_center_select_failed [{}:{}]: {}",
+                response.error_category,
+                response.error_code,
+                response.error
+            );
+        }
+        let receipt = response
+            .receipt
+            .context("control_center_select_receipt_omitted")?;
+        let receipt_matches = receipt.operation_id.as_str() == "command.select.window"
+            && matches!(
+                receipt.outcome,
+                crate::control_contract::ReceiptOutcome::Committed
+                    | crate::control_contract::ReceiptOutcome::NoOp
+            )
+            && receipt.resolved.as_ref().is_some_and(|target| {
+                u64::from(target.server_pid) == before.pid
+                    && target.server_epoch == before.epoch
+                    && target.tab_id == Some(expected_tab_id)
+            });
+        if !receipt_matches {
+            anyhow::bail!("control_center_select_receipt_mismatch: {tab_id}");
+        }
+        Some(receipt)
+    } else {
+        None
+    };
+
+    let inspection = crate::client::send_ipc_request_to_timeout(
+        &context.endpoint,
+        vec!["inspect".to_owned(), "-t".to_owned(), tab_id.to_owned()],
+        PROJECTION_IPC_TIMEOUT,
+    )
+    .context("control_center_inspect_transport_failed")?;
+    if !inspection.ok {
+        anyhow::bail!(
+            "control_center_inspect_failed [{}:{}]: {}",
+            inspection.error_category,
+            inspection.error_code,
+            inspection.error
+        );
+    }
+    let inspect_receipt = inspection
+        .receipt
+        .as_ref()
+        .context("control_center_inspect_receipt_omitted")?;
+    let inspect_receipt_matches = inspect_receipt.operation_id.as_str() == "command.inspect"
+        && inspect_receipt.outcome == crate::control_contract::ReceiptOutcome::Committed
+        && inspect_receipt.resolved.as_ref().is_some_and(|target| {
+            u64::from(target.server_pid) == before.pid
+                && target.server_epoch == before.epoch
+                && target.tab_id == Some(expected_tab_id)
+        });
+    if !inspect_receipt_matches {
+        anyhow::bail!("control_center_inspect_receipt_mismatch: {tab_id}");
+    }
+    let inspection: Value =
+        serde_json::from_str(&inspection.output).context("control_center_inspect_incompatible")?;
+    let windows = inspection["windows"]
+        .as_array()
+        .context("control_center_inspect_omitted_windows")?;
+    if windows.len() != 1 || windows[0]["id"].as_str() != Some(tab_id) {
+        anyhow::bail!("control_center_inspect_target_mismatch: {tab_id}");
+    }
+    let tab: InspectedTab = serde_json::from_value(windows[0].clone())
+        .context("control_center_inspect_tab_incompatible")?;
+
+    let after = query_server(&context)?;
+    if after.pid != before.pid || after.epoch != before.epoch || after.sequence < before.sequence {
+        anyhow::bail!("control_center_server_restart_during_navigation");
+    }
+    if !inspect_receipt
+        .after_position
+        .as_ref()
+        .is_some_and(|position| {
+            position.epoch == after.epoch && position.sequence <= after.sequence
+        })
+        || tab.active != (after.active_tab_id.as_deref() == Some(tab_id))
+    {
+        anyhow::bail!("control_center_inspect_post_state_mismatch: {tab_id}");
+    }
+    if select
+        && !control_receipt.as_ref().is_some_and(|receipt| {
+            receipt.after_position.as_ref().is_some_and(|position| {
+                position.epoch == after.epoch && position.sequence <= after.sequence
+            })
+        })
+    {
+        anyhow::bail!("control_center_select_receipt_position_mismatch: {tab_id}");
+    }
+    if select && (after.active_tab_id.as_deref() != Some(tab_id) || !tab.active) {
+        anyhow::bail!("control_center_select_post_state_mismatch: {tab_id}");
+    }
+    Ok(TabNavigationDocument {
+        schema_version: SCHEMA_VERSION,
+        executable: "agenterm-cc",
+        action: if select { "select" } else { "inspect" },
+        target_tab_id: tab_id.to_owned(),
+        server_pid: after.pid,
+        server_epoch: after.epoch,
+        sequence: after.sequence,
+        active_tab_id: after.active_tab_id,
+        post_state_verified: true,
+        tab,
+        control_receipt,
+    })
+}
+
 fn default_settings_path() -> PathBuf {
     crate::platform::paths::settings_path(None)
 }
@@ -2304,6 +2572,57 @@ mod tests {
     }
 
     #[test]
+    fn navigation_commands_require_canonical_stable_tab_ids() {
+        assert_eq!(
+            parse_entry(&[
+                OsString::from("inspect"),
+                OsString::from("--tab"),
+                OsString::from("@12"),
+                OsString::from("--json"),
+            ])
+            .unwrap(),
+            EntryCommand::Inspect {
+                json: true,
+                context: None,
+                tab_id: "@12".to_owned(),
+            }
+        );
+        assert_eq!(
+            parse_entry(&[
+                OsString::from("select"),
+                OsString::from("--tab"),
+                OsString::from("@7"),
+            ])
+            .unwrap(),
+            EntryCommand::Select {
+                json: false,
+                context: None,
+                tab_id: "@7".to_owned(),
+            }
+        );
+        for invalid in ["1", "@0", "@01", "@name"] {
+            assert!(
+                parse_entry(&[
+                    OsString::from("inspect"),
+                    OsString::from("--tab"),
+                    OsString::from(invalid),
+                ])
+                .is_err(),
+                "accepted invalid stable tab ID {invalid}"
+            );
+        }
+        assert!(parse_entry(&[OsString::from("select")]).is_err());
+        assert!(
+            parse_entry(&[
+                OsString::from("snapshot"),
+                OsString::from("--tab"),
+                OsString::from("@1"),
+            ])
+            .is_err()
+        );
+    }
+
+    #[test]
     fn screenshot_requires_one_output_and_rejects_authority_selectors() {
         let command = parse_entry(&[
             OsString::from("screenshot"),
@@ -2376,6 +2695,14 @@ mod tests {
         let capability = capabilities();
         assert_eq!(capability.public_ui_action, "open-control-center");
         assert_eq!(capability.typed_operation, "control-center.open");
+        assert_eq!(
+            capability.typed_entry_points,
+            [
+                "control-center.open",
+                "control-center.inspect",
+                "control-center.select"
+            ]
+        );
         assert!(!capability.owns_terminal_authority);
     }
 

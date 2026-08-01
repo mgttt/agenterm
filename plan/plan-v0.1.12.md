@@ -39,7 +39,17 @@ availability。390 项 Quick tests、七产物 dev build 和完整 Windows
 `control-center-smoke` 通过；加入 build identity 行后的 renderer-owned
 760×480 PNG 为 43,509 bytes，
 no-activate、因果刷新、server recovery、typed close 与 orphan-free cleanup
-保持通过。inspect/select 导航和 Linux 原生 renderer 证据仍是后续叶。
+保持通过。native renderer inspect/select 导航和 Linux 原生 renderer 证据仍是后续叶。
+
+2026-08-01 第二个 Cockpit 纵切已合入前验证：`agenterm-cc inspect/select --tab
+@ID` 只接受 canonical stable ID；inspect 保持当前 selection，select 复用
+server-owned `select-window` typed control receipt，并在同一 PID/epoch 上重读
+权威状态后返回 typed tab facts 与 `post_state_verified`。聚焦 parser/contract
+测试 28 项、391 项 Quick tests、七产物 dev build 和完整 Windows
+`control-center-smoke` 通过；新增 `control-center.typed-navigation` 证据，
+renderer-owned 760×480 PNG 为 58,125 bytes。headless server 下 missing target
+保持 active tab 且不创建 CC registry。native Cockpit pointer/keyboard 导航仍
+未实现，不以 CLI entry point 冒充 renderer 交互。
 
 ## 一、树式精华
 

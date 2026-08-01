@@ -17,6 +17,7 @@ import "scripts/rhai/lib/test_harness" as test_harness;
 let declared_evidence = [
     "control-center.offline-contract",
     "control-center.live-cockpit",
+    "control-center.typed-navigation",
     "control-center.process-reuse",
     "control-center.context-refresh",
     "control-center.causal-projection-refresh",
@@ -501,6 +502,12 @@ try {
             && capabilities.role == "isolated_projection"
             && capabilities.public_ui_action == "open-control-center"
             && capabilities.typed_operation == "control-center.open"
+            && capabilities.typed_entry_points
+                == [
+                    "control-center.open",
+                    "control-center.inspect",
+                    "control-center.select"
+                ]
             && !capabilities.owns_terminal_authority
             && capabilities.process_reuse
             && capabilities.no_activate
@@ -547,11 +554,116 @@ try {
         protocol.pid == server.id,
         "control_center_server_pid"
     );
-    prove_pty(context, cli_executable, "baseline");
+    let baseline_tab = prove_pty(context, cli_executable, "baseline");
     let bootstrap = cli_json(
         context,
         cli_executable,
         ["ui-bootstrap"]
+    );
+
+    print("STEP typed inspect/select use stable IDs and verify server post-state");
+    let inspect_navigation = rhai::json::parse(offline(
+        context,
+        control_center,
+        registry,
+        [
+            "inspect", "--tab", baseline_tab, "--json",
+            "--server-endpoint", context.address,
+            "--logical-instance", "main"
+        ],
+        "control_center_inspect_navigation"
+    ));
+    let after_inspect = cli_json(
+        context,
+        cli_executable,
+        ["ui-bootstrap"]
+    );
+    require(
+        inspect_navigation.schema_version == 1
+            && inspect_navigation.executable == "agenterm-cc"
+            && inspect_navigation.action == "inspect"
+            && inspect_navigation.target_tab_id == baseline_tab
+            && inspect_navigation.server_pid == server.id
+            && inspect_navigation.server_epoch == bootstrap.server_epoch
+            && inspect_navigation.sequence >= bootstrap.position.sequence
+            && inspect_navigation.post_state_verified
+            && inspect_navigation.tab.id == baseline_tab
+            && inspect_navigation.tab.name.contains("cc-baseline-")
+            && !inspect_navigation.contains("control_receipt")
+            && after_inspect.active_tab_id == bootstrap.active_tab_id,
+        "control_center_inspect_navigation_truth"
+    );
+
+    let select_navigation = rhai::json::parse(offline(
+        context,
+        control_center,
+        registry,
+        [
+            "select", "--tab", baseline_tab, "--json",
+            "--server-endpoint", context.address,
+            "--logical-instance", "main"
+        ],
+        "control_center_select_navigation"
+    ));
+    let after_select = cli_json(
+        context,
+        cli_executable,
+        ["ui-bootstrap"]
+    );
+    require(
+        select_navigation.action == "select"
+            && select_navigation.target_tab_id == baseline_tab
+            && select_navigation.server_pid == server.id
+            && select_navigation.server_epoch == bootstrap.server_epoch
+            && select_navigation.sequence
+                == after_select.position.sequence
+            && select_navigation.active_tab_id == baseline_tab
+            && select_navigation.post_state_verified
+            && select_navigation.tab.id == baseline_tab
+            && select_navigation.tab.active
+            && select_navigation.control_receipt.operation_id
+                == "command.select.window"
+            && (
+                select_navigation.control_receipt.outcome == "committed"
+                    || select_navigation.control_receipt.outcome == "no_op"
+            )
+            && select_navigation.control_receipt.resolved.server_pid
+                == server.id
+            && select_navigation.control_receipt.resolved.server_epoch
+                == bootstrap.server_epoch
+            && after_select.active_tab_id == baseline_tab
+            && !std::fs::exists(registry),
+        "control_center_select_navigation_truth"
+    );
+    let missing_navigation = configured(
+        context,
+        control_center,
+        registry,
+        [
+            "select", "--tab", "@999999999", "--json",
+            "--server-endpoint", context.address,
+            "--logical-instance", "main"
+        ]
+    ).output();
+    let after_missing = cli_json(
+        context,
+        cli_executable,
+        ["ui-bootstrap"]
+    );
+    require(
+        !missing_navigation.success
+            && (missing_navigation.stdout_text()
+                + missing_navigation.stderr_text())
+                .contains("control_center_tab_not_found")
+            && after_missing.active_tab_id == baseline_tab
+            && !std::fs::exists(registry),
+        "control_center_missing_navigation_safe_failure"
+    );
+    bootstrap = after_missing;
+    test_harness::emit_evidence(
+        context,
+        declared_evidence,
+        "control-center.typed-navigation"
     );
 
     print("STEP explicit semantic snapshot has the server's exact facts");
