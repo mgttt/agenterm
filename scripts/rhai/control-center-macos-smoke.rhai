@@ -591,11 +591,55 @@ try {
     }
     require(
         baseline_index != ()
-            && baseline_index < 3
             && native_input_index != ()
-            && native_input_index < 3
             && baseline_tab != native_input_tab,
         "control_center_macos_native_input_targets_not_visible"
+    );
+    // Cockpit keeps only three tab rows visible and scrolls that window around
+    // the selected keyboard target. Derive a different, currently rendered
+    // pointer target from the same bounded-window contract instead of treating
+    // its global tab index as a rendered row.
+    let visible_start = if native_input_index > 0 {
+        native_input_index - 1
+    } else {
+        0
+    };
+    let maximum_start = if selected.connected_server.tabs.len > 3 {
+        selected.connected_server.tabs.len - 3
+    } else {
+        0
+    };
+    if visible_start > maximum_start {
+        visible_start = maximum_start;
+    }
+    let pointer_index = visible_start;
+    if pointer_index == native_input_index {
+        pointer_index += 1;
+    }
+    require(
+        pointer_index < selected.connected_server.tabs.len
+            && pointer_index >= visible_start
+            && pointer_index < visible_start + 3,
+        "control_center_macos_native_pointer_target_not_visible"
+    );
+    let pointer_target = selected.connected_server.tabs[pointer_index].id;
+    let pointer_row = pointer_index - visible_start;
+    let client = cc.window_client_rect();
+    let body_scale = if client.width >= 640 { 2 } else { 1 };
+    let line_height = 7 * body_scale + 12;
+    // Product lines are 0..10, the Tabs help line is 11, and the following
+    // renderer rows are the three bounded Cockpit tab targets.
+    let pointer_x = 120;
+    let pointer_y = 76 + (11 + pointer_row) * line_height
+        + line_height / 2;
+    require(
+        client.left == 0
+            && client.top == 0
+            && pointer_x >= client.left
+            && pointer_x < client.right
+            && pointer_y >= client.top
+            && pointer_y < client.bottom,
+        "control_center_macos_native_pointer_not_bounded"
     );
     let input_baseline = json_command(
         context,
@@ -638,6 +682,22 @@ try {
             selected.connected_server.epoch,
             "control_center_macos_native_keyboard_navigation"
         );
+        // The public server snapshot can observe the active tab before the
+        // Control Center worker consumes its pending receipt. Send the pointer
+        // immediately: the product's single-slot last-input-wins queue must
+        // retain this second selection rather than dropping it as busy.
+        cc.window_pointer("click", pointer_x, pointer_y);
+        let pointer_selected = wait_active_tab(
+            context,
+            control_center,
+            registry,
+            runtime,
+            cc,
+            pointer_target,
+            server.id,
+            selected.connected_server.epoch,
+            "control_center_macos_native_pointer_navigation"
+        );
         require(
             keyboard_selected.connected_server.active_tab_id
                     == native_input_tab
@@ -646,43 +706,8 @@ try {
                     == selected.connected_server.epoch
                 && keyboard_selected.connected_server.endpoint
                     == protocol.endpoint
-                && cc.state == "running"
-                && rhai::json::parse_file(registry).pid == input_owner
-                && frontmost_application(context) == input_frontmost,
-            "control_center_macos_native_keyboard_navigation_truth"
-        );
-
-        let client = cc.window_client_rect();
-        let body_scale = if client.width >= 640 { 2 } else { 1 };
-        let line_height = 7 * body_scale + 12;
-        // Product lines are 0..10, the Tabs help line is 11, and the
-        // following renderer rows are the three bounded Cockpit tab targets.
-        let pointer_x = 120;
-        let pointer_y = 76 + (11 + baseline_index) * line_height
-            + line_height / 2;
-        require(
-            client.left == 0
-                && client.top == 0
-                && pointer_x >= client.left
-                && pointer_x < client.right
-                && pointer_y >= client.top
-                && pointer_y < client.bottom,
-            "control_center_macos_native_pointer_not_bounded"
-        );
-        cc.window_pointer("click", pointer_x, pointer_y);
-        let pointer_selected = wait_active_tab(
-            context,
-            control_center,
-            registry,
-            runtime,
-            cc,
-            baseline_tab,
-            server.id,
-            selected.connected_server.epoch,
-            "control_center_macos_native_pointer_navigation"
-        );
-        require(
-            pointer_selected.connected_server.active_tab_id == baseline_tab
+                && pointer_selected.connected_server.active_tab_id
+                    == pointer_target
                 && pointer_selected.connected_server.pid == server.id
                 && pointer_selected.connected_server.epoch
                     == selected.connected_server.epoch

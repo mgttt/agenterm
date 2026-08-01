@@ -782,6 +782,11 @@ Cockpit
   runner 的 1x 虚拟显示与 2x Retina 都必须如实报告并保持 frame/PNG 尺寸一致。
   门禁同时校验 PNG 的实际 SHA-256，并在失败码中附带 owner、尺寸、scale、authority、
   title、digest 与 luminance，避免复合断言只能猜测；
+- 新 main CI 暴露的三项门禁已定位并进入同一修复增量：`x11rb` 直接依赖补齐
+  `MIT OR Apache-2.0` notice；Linux CC runtime 在 bind 前验证 effective UID + `0700`，
+  不放宽 `UnsafeEndpoint`；macOS 正向输入按三行 viewport 计算 pointer 行，并把紧随
+  keyboard transition 的选择交给已交付的 last-input-wins queue。新六格回执返回前
+  仍保持未完成；
 - Windows owning journey 已覆盖 incompatible sibling、进程内 renderer capture
   typed failure/recovery、CC process crash/replacement、Human GUI detach 时的
   same-CC/same-server/same-epoch retention、new epoch recovery 和 stale owner

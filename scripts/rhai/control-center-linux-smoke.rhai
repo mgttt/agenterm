@@ -487,6 +487,68 @@ fn remove_native_runtime(runtime) {
     }
 }
 
+fn prepare_private_runtime(runtime) {
+    require(
+        runtime.starts_with("/tmp/agt-cc-linux-"),
+        "control_center_linux_runtime_not_owned"
+    );
+    std::fs::create_dir_all(runtime);
+    let metadata = std::fs::symlink_metadata(runtime);
+    require(
+        metadata.is_dir
+            && !metadata.is_symlink
+            && !metadata.is_reparse_point,
+        "control_center_linux_runtime_indirect"
+    );
+
+    // create_dir_all observes the runner umask, which is commonly 0022 on
+    // Linux CI. The production Unix IPC contract intentionally rejects that
+    // resulting 0755 directory, so make the smoke-owned authority explicitly
+    // private before any server or client can observe it.
+    let chmod = std::process::command("chmod");
+    chmod.args(["0700", "--", runtime]);
+    chmod.timeout(std::time::Duration::from_secs(2));
+    let chmod_output = chmod.output();
+    require(
+        chmod_output.success,
+        "control_center_linux_runtime_chmod_failed:" +
+            chmod_output.stderr_text()
+    );
+
+    let id = std::process::command("id");
+    id.args(["-u"]);
+    id.timeout(std::time::Duration::from_secs(2));
+    let id_output = id.output();
+    require(
+        id_output.success,
+        "control_center_linux_effective_uid_failed:" +
+            id_output.stderr_text()
+    );
+    let effective_uid = id_output.stdout_text();
+    effective_uid.trim();
+    require(
+        effective_uid != "",
+        "control_center_linux_effective_uid_empty"
+    );
+
+    let stat = std::process::command("stat");
+    stat.args(["-c", "%u:%a", "--", runtime]);
+    stat.timeout(std::time::Duration::from_secs(2));
+    let stat_output = stat.output();
+    require(
+        stat_output.success,
+        "control_center_linux_runtime_stat_failed:" +
+            stat_output.stderr_text()
+    );
+    let ownership = stat_output.stdout_text();
+    ownership.trim();
+    require(
+        ownership == effective_uid + ":700",
+        "control_center_linux_runtime_not_private_to_effective_uid:" +
+            ownership
+    );
+}
+
 require(
     args.len >= 4,
     "expected: REPO CONTROL_CENTER_EXE SERVER_EXE CLI_EXE [--backend auto|x11|wayland]"
@@ -576,7 +638,7 @@ let context = test_harness::new_context(repo, "control-center-linux");
 let runtime =
     "/tmp/agt-cc-linux-" + std::process::id() + "-" +
     std::time::SystemTime::now().unix_millis;
-std::fs::create_dir_all(runtime);
+prepare_private_runtime(runtime);
 let endpoint = "unix:" + std::path::join(runtime, "authority.sock").display;
 let registry = std::path::join(
     context.run_directory, "control-center-registry.json"

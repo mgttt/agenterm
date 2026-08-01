@@ -25,6 +25,7 @@ Copyright and license terms remain with their respective authors.
 | `windows-sys` | MIT OR Apache-2.0 |
 | `winit` | Apache-2.0 |
 | `winresource` (build dependency) | MIT |
+| `x11rb` | MIT OR Apache-2.0 |
 
 The corresponding sources and complete license files are available from each
 package's entry in the Cargo registry. `scripts/rhai/supply-chain.rhai` uses

@@ -388,6 +388,11 @@ future promotion gates.
   Center PID, server PID/endpoint/epoch and PTY remain unchanged. Wayland emits
   no positive-input evidence. A new real Linux CI execution, Wayland native
   evidence, six-cell reruns and packaged evidence remain open.
+- [~] the Linux journey creates its isolated runtime as a direct `0700`
+  directory owned by the effective UID before binding the Unix endpoint; the
+  smoke verifies both owner and mode instead of weakening the production IPC
+  `UnsafeEndpoint` boundary. This closes the hosted-runner umask failure once a
+  new matching-host CI receipt returns.
 - [~] macOS now owns the matching Quartz exact-PID process-window adapter. It
   rejects zero/multiple layer-0 on-screen candidates, bounds Retina client
   coordinates, and uses `CGEventPostToPid` only after the non-interactive TCC
@@ -395,7 +400,11 @@ future promotion gates.
   keyboard/pointer navigation without changing the foreground app or the exact
   `process_window_input_unsupported` / `permission_denied` safe failure with no
   state change. The latter is contract evidence only and is not a positive
-  native-input claim; a TCC-authorized native receipt remains open.
+  native-input claim; a TCC-authorized native receipt remains open. The
+  positive branch derives its pointer target from the current bounded
+  three-row Cockpit viewport and sends it immediately after the keyboard
+  server-state transition, proving the Control Center's last-input-wins queue
+  retains input while the previous local receipt is still completing.
 
 ## Explicit v0.1.11 non-goals
 
