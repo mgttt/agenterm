@@ -18,6 +18,7 @@ import "scripts/rhai/lib/test_harness" as test_harness;
 let declared_evidence = [
     "control-center.offline-contract",
     "control-center.live-cockpit",
+    "control-center.native-cockpit-input",
     "control-center.typed-navigation",
     "control-center.process-reuse",
     "control-center.context-refresh",
@@ -128,6 +129,42 @@ fn wait_for_server_causal(context, cli_executable, server, code) {
             );
             throw code + "_early_exit:" + output.stderr_text();
         }
+    }
+    throw code + "_timeout:" + last;
+}
+
+fn wait_for_active_tab(
+        context, cli_executable, child, target_tab_id,
+        expected_server_pid, expected_server_epoch, code) {
+    let deadline = std::time::SystemTime::now().unix_millis + 10000;
+    let last = "";
+    for attempt in 0..128 {
+        if std::time::SystemTime::now().unix_millis >= deadline {
+            break;
+        }
+        let probe = test_harness::run_cli(
+            context,
+            cli_executable,
+            ["ui-bootstrap"],
+            false,
+            []
+        );
+        last = probe.stdout + probe.stderr;
+        if probe.success {
+            let snapshot = rhai::json::parse(probe.stdout);
+            if snapshot.active_tab_id == target_tab_id
+                    && snapshot.server_pid == expected_server_pid
+                    && snapshot.server_epoch == expected_server_epoch {
+                return snapshot;
+            }
+        }
+        if child.state == "exited" {
+            let output = child.wait_with_output(
+                std::time::Duration::from_secs(2)
+            );
+            throw code + "_renderer_exited:" + output.stderr_text();
+        }
+        rhai::task::sleep(std::time::Duration::from_millis(25));
     }
     throw code + "_timeout:" + last;
 }
@@ -625,6 +662,15 @@ try {
         "control_center_server_pid"
     );
     let baseline_tab = prove_pty(context, cli_executable, "baseline");
+    let native_input_tab = prove_pty(
+        context,
+        cli_executable,
+        "native-input"
+    );
+    require(
+        native_input_tab != baseline_tab,
+        "control_center_native_input_tab_identity"
+    );
     let bootstrap = cli_json(
         context,
         cli_executable,
@@ -873,6 +919,73 @@ try {
         "Control Center screenshot: " + capture.width + "x" +
             capture.height + ", " + capture.bytes + " bytes, " +
             durable_cockpit_png
+    );
+
+    print("STEP native keyboard and pointer switch Cockpit tabs in-place");
+    require(
+        live_server.tabs.len >= 2,
+        "control_center_native_input_tabs_missing"
+    );
+    let baseline_index = ();
+    let native_input_index = ();
+    for index in 0..live_server.tabs.len {
+        if live_server.tabs[index].id == baseline_tab {
+            baseline_index = index;
+        }
+        if live_server.tabs[index].id == native_input_tab {
+            native_input_index = index;
+        }
+    }
+    require(
+        baseline_index != ()
+            && baseline_index < 3
+            && native_input_index != (),
+        "control_center_native_input_targets_not_visible"
+    );
+    first.window_key("Home");
+    for step in 0..native_input_index {
+        first.window_key("Down");
+    }
+    first.window_key("Enter");
+    let keyboard_selected = wait_for_active_tab(
+        context,
+        cli_executable,
+        first,
+        native_input_tab,
+        server.id,
+        bootstrap.server_epoch,
+        "control_center_native_keyboard_navigation"
+    );
+    require(
+        keyboard_selected.active_tab_id == native_input_tab
+            && first.state == "running"
+            && rhai::json::parse_file(registry).pid == first.id,
+        "control_center_native_keyboard_navigation_truth"
+    );
+
+    // Product lines occupy 0..10, the "Tabs" help line is 11, and the
+    // platform adapter maps each following 28-pixel row to a Cockpit tab.
+    let baseline_pointer_y = 16 + (12 + baseline_index) * 28 + 14;
+    first.window_pointer("click", 120, baseline_pointer_y);
+    let pointer_selected = wait_for_active_tab(
+        context,
+        cli_executable,
+        first,
+        baseline_tab,
+        server.id,
+        bootstrap.server_epoch,
+        "control_center_native_pointer_navigation"
+    );
+    require(
+        pointer_selected.active_tab_id == baseline_tab
+            && first.state == "running"
+            && rhai::json::parse_file(registry).pid == first.id,
+        "control_center_native_pointer_navigation_truth"
+    );
+    test_harness::emit_evidence(
+        context,
+        declared_evidence,
+        "control-center.native-cockpit-input"
     );
 
     print("STEP reuse keeps PID and refreshes away from and back to live context");
