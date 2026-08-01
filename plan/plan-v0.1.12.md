@@ -778,6 +778,10 @@ Cockpit
   CC worker receipt 到达时，第二个选择不再以 busy 丢弃，而进入单槽 last-input-wins
   队列；smoke 按三行可见窗口推导命中坐标。单元契约与重新构建后的
   `control-center.native-cockpit-input` 黑盒 journey 均通过；
+- macOS 通用 renderer smoke 不再把 `scale_factor >= 2` 当作 ARM64 产品不变量；
+  runner 的 1x 虚拟显示与 2x Retina 都必须如实报告并保持 frame/PNG 尺寸一致。
+  门禁同时校验 PNG 的实际 SHA-256，并在失败码中附带 owner、尺寸、scale、authority、
+  title、digest 与 luminance，避免复合断言只能猜测；
 - Windows owning journey 已覆盖 incompatible sibling、进程内 renderer capture
   typed failure/recovery、CC process crash/replacement、Human GUI detach 时的
   same-CC/same-server/same-epoch retention、new epoch recovery 和 stale owner

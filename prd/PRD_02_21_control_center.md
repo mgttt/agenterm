@@ -344,7 +344,9 @@ future promotion gates.
   with a nonempty, decoded native-window PNG, verifies its typed owner PID,
   dimensions, byte length and digest, and retains the successful image at
   `dist/evidence/control-center-live-cockpit.png`. Native macOS now retains
-  equivalent renderer-owned structured/Retina evidence; Linux remains open.
+  equivalent renderer-owned structured evidence at the host's actual backing
+  scale; a separately recorded 2x sample proves Retina rendering. Linux remains
+  open.
 - [ ] any distributed executable has its own size budget, hash, SBOM,
   provenance, startup measurement, capability catalog, and public black-box
   owner; it does not inflate `agenterm.exe`.
@@ -362,12 +364,16 @@ future promotion gates.
   Typed close and forced renderer-process kill preserve the server and PTY;
   stale owner recovery creates one replacement projection and leaves no owned
   process, socket, registration, or request/result file.
-- [~] renderer-owned structured evidence and its retained Retina PNG agree at
-  1520x960 physical pixels and scale factor 2.0 for the 760x480 logical
-  Cockpit. They bind the same owner PID, logical `dev` context, connected
-  state, selected view, title/tab count, dimensions, byte count, and SHA-256.
-  The visible framebuffer displays the logical authority rather than an
-  absolute socket path.
+- [~] renderer-owned structured evidence and its retained PNG agree at the
+  current display's actual backing scale. A recorded 2x sample is 1520x960
+  physical pixels for the 760x480 logical Cockpit; the portable CI gate also
+  accepts a truthful 1x virtual display instead of treating CPU architecture
+  as a Retina guarantee. Both paths bind the same owner PID, logical `dev`
+  context, connected state, selected view, title/tab count, dimensions, byte
+  count, and exact file SHA-256. Failure output retains these individual facts
+  rather than collapsing them into an opaque composite assertion. The visible
+  framebuffer displays the logical authority rather than an absolute socket
+  path.
 - [~] native Linux now has a public X11/Wayland-aware lifecycle journey wired
   to main CI: X11 requires caller-selected Unix IPC, compositor-observed
   no-activate/focus reuse, renderer-owned structured frame plus independently

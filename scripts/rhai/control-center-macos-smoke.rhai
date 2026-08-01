@@ -1,5 +1,7 @@
 // Prove the macOS Control Center against one isolated logical dev authority.
-// The renderer itself serves the structured snapshot and exact Retina frame.
+// The renderer itself serves the structured snapshot and exact native frame.
+// A general runner may expose either a 1x or HiDPI backing scale; Retina is a
+// recorded display fact, not a CPU-architecture prerequisite.
 //
 // Args:
 //   --list-evidence
@@ -514,26 +516,58 @@ try {
     let expected_tabs =
         "" + selected.connected_server.tabs.len + " tabs";
     require(
-        foreground_after == foreground_before
-            && capture.owner_pid == cc.id
+        foreground_after == foreground_before,
+        "control_center_macos_no_activate_stole_focus:" +
+            rhai::json::stringify(#{
+                before: foreground_before,
+                after: foreground_after,
+                owner_pid: capture.owner_pid,
+                control_center_pid: cc.id
+            })
+    );
+    let png_sha256 = rhai::crypto::sha256_file(cockpit_png);
+    require(
+        capture.owner_pid == cc.id
             && capture.width == rendered.width
             && capture.height == rendered.height
             && capture.width
                 == capture.rendered_snapshot.physical_width
             && capture.height
                 == capture.rendered_snapshot.physical_height
-            && capture.rendered_snapshot.scale_factor >= 2.0
+            && capture.rendered_snapshot.scale_factor >= 1.0
             && capture.rendered_snapshot.selected_view == "cockpit"
             && capture.rendered_snapshot.server_endpoint
                 == protocol.endpoint
             && capture.rendered_snapshot.logical_instance == "dev"
             && capture.rendered_snapshot.window_title.contains(expected_tabs)
-            && capture.sha256.len == 64
+            && capture.sha256 == png_sha256
             && capture.bytes >= 1000
             && rendered.samples > 0
             && rendered.luminance > 1.0
             && rendered.luminance < 254.9,
-        "control_center_macos_retina_evidence"
+        "control_center_macos_renderer_evidence:" +
+            rhai::json::stringify(#{
+                owner_pid: capture.owner_pid,
+                control_center_pid: cc.id,
+                capture_width: capture.width,
+                capture_height: capture.height,
+                png_width: rendered.width,
+                png_height: rendered.height,
+                snapshot_width: capture.rendered_snapshot.physical_width,
+                snapshot_height: capture.rendered_snapshot.physical_height,
+                scale_factor: capture.rendered_snapshot.scale_factor,
+                selected_view: capture.rendered_snapshot.selected_view,
+                endpoint: capture.rendered_snapshot.server_endpoint,
+                expected_endpoint: protocol.endpoint,
+                logical_instance: capture.rendered_snapshot.logical_instance,
+                title: capture.rendered_snapshot.window_title,
+                expected_tabs: expected_tabs,
+                capture_sha256: capture.sha256,
+                png_sha256: png_sha256,
+                bytes: capture.bytes,
+                samples: rendered.samples,
+                luminance: rendered.luminance
+            })
     );
     std::fs::create_dir_all(durable_directory);
     std::fs::copy(cockpit_png, durable_png);
