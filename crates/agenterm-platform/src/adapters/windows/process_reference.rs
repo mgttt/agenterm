@@ -15,7 +15,7 @@ use windows_sys::Win32::{
     },
 };
 
-use crate::process_reference::{ProcessReferenceHandle, ProcessWait};
+use crate::process_reference::{ProcessExitCodeHandle, ProcessReferenceHandle, ProcessWait};
 
 const SYNCHRONIZE_ACCESS: u32 = 0x0010_0000;
 
@@ -166,6 +166,22 @@ impl ProcessReferenceHandle for BorrowedHandle<'_> {
     }
 }
 
+impl ProcessExitCodeHandle for BorrowedHandle<'_> {
+    fn process_exit_code(self) -> io::Result<u32> {
+        let mut code = 0;
+        if unsafe {
+            windows_sys::Win32::System::Threading::GetExitCodeProcess(
+                self.as_raw_handle(),
+                &raw mut code,
+            )
+        } == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(code)
+    }
+}
+
 impl crate::process_reference::ProcessContainmentGroup for BorrowedHandle<'_> {
     fn contains_process(
         self,
@@ -245,6 +261,26 @@ mod tests {
             .expect("duplicate current process handle");
         assert_eq!(reference.id(), std::process::id());
         assert!(reference.is_alive().expect("current process liveness"));
+    }
+
+    #[test]
+    fn retained_process_handle_reports_the_raw_exit_code() {
+        let mut child = Command::new("cmd.exe")
+            .args(["/d", "/c", "exit", "37"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn exit-code child");
+        let reference =
+            crate::process_reference::ProcessReference::duplicate_from(child.as_handle())
+                .expect("retain exit-code child");
+        let _ = child.wait().expect("reap exit-code child");
+        assert_eq!(
+            crate::process_reference::exit_code_handle(reference.as_handle())
+                .expect("read raw process exit code"),
+            37
+        );
     }
 
     #[test]

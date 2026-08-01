@@ -122,12 +122,29 @@ pub trait ProcessReferenceHandle {
     fn wait_for_process_exit(self, timeout: Option<Duration>) -> io::Result<ProcessWait>;
 }
 
+/// A target-native process object that can report its raw exit code.
+///
+/// Windows adapters implement this for borrowed process HANDLEs. The caller
+/// must establish that the process has exited before interpreting the value.
+pub trait ProcessExitCodeHandle {
+    #[doc(hidden)]
+    fn process_exit_code(self) -> io::Result<u32>;
+}
+
 /// Waits through an already-open native process handle without reopening by PID.
 pub fn wait_handle(
     process: impl ProcessReferenceHandle,
     timeout: Option<Duration>,
 ) -> io::Result<ProcessWait> {
     process.wait_for_process_exit(timeout)
+}
+
+/// Reads the raw exit code from an already-open native process object.
+///
+/// The value is not normalized into a product status. In particular, this
+/// function does not interpret `259` as proof that a Windows process is live.
+pub fn exit_code_handle(process: impl ProcessExitCodeHandle) -> io::Result<u32> {
+    process.process_exit_code()
 }
 
 #[cfg(test)]
