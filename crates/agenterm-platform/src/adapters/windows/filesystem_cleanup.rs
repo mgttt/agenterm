@@ -1,14 +1,12 @@
 //! Windows caller-owned tree cleanup without traversing reparse points.
 
-use std::{fs, io, os::windows::fs::MetadataExt as _, path::Path};
-
-const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+use std::{fs, io, os::windows::fs::FileTypeExt as _, path::Path};
 
 pub(crate) fn remove_tree(path: &Path) -> io::Result<()> {
     let Some(metadata) = metadata_if_present(path)? else {
         return Ok(());
     };
-    if is_reparse_point(&metadata) {
+    if crate::filesystem_entry::metadata_is_link_like(&metadata) {
         return remove_reparse_point(path, &metadata);
     }
     if !metadata.is_dir() {
@@ -29,7 +27,7 @@ fn prepare_tree(path: &Path, metadata: &fs::Metadata) -> io::Result<()> {
         let Some(metadata) = metadata_if_present(&child)? else {
             continue;
         };
-        if !is_reparse_point(&metadata) {
+        if !crate::filesystem_entry::metadata_is_link_like(&metadata) {
             prepare_tree(&child, &metadata)?;
         }
     }
@@ -48,12 +46,8 @@ fn restore_removal_access(path: &Path, metadata: &fs::Metadata) -> io::Result<()
     Ok(())
 }
 
-fn is_reparse_point(metadata: &fs::Metadata) -> bool {
-    metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
-}
-
 fn remove_reparse_point(path: &Path, metadata: &fs::Metadata) -> io::Result<()> {
-    let result = if metadata.is_dir() {
+    let result = if metadata.is_dir() || metadata.file_type().is_symlink_dir() {
         fs::remove_dir(path)
     } else {
         fs::remove_file(path)

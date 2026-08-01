@@ -24,11 +24,6 @@ pub fn sync_parent(parent: &std::path::Path) -> std::io::Result<()> {
     std::fs::File::open(parent)?.sync_all()
 }
 
-#[cfg(feature = "filesystem")]
-pub fn metadata_is_link_like(metadata: &std::fs::Metadata) -> bool {
-    metadata.file_type().is_symlink()
-}
-
 pub fn host_directories() -> Result<HostDirectories, FilesystemError> {
     let home = user_home_directory()?;
     let application_support = home.join("Library").join("Application Support");

@@ -12,7 +12,22 @@ use std::{io, path::Path};
 /// must not treat this path-based walk as a defense against concurrent path
 /// replacement.
 pub fn logical_tree_size(path: &Path) -> io::Result<u64> {
-    crate::selected::filesystem_usage::logical_tree_size(path)
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(0),
+        Err(error) => return Err(error),
+    };
+    if !crate::filesystem_entry::metadata_is_real_directory(&metadata) {
+        return Ok(metadata.len());
+    }
+
+    let mut total = 0_u64;
+    for entry in std::fs::read_dir(path)? {
+        total = total
+            .checked_add(logical_tree_size(&entry?.path())?)
+            .ok_or_else(|| io::Error::other("logical directory size exceeds u64"))?;
+    }
+    Ok(total)
 }
 
 #[cfg(test)]

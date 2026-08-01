@@ -75,12 +75,6 @@ pub fn sync_parent(_parent: &std::path::Path) -> std::io::Result<()> {
     Ok(())
 }
 
-#[cfg(feature = "filesystem")]
-pub fn metadata_is_link_like(metadata: &std::fs::Metadata) -> bool {
-    use std::os::windows::fs::MetadataExt as _;
-    metadata.file_attributes() & 0x0000_0400 != 0
-}
-
 pub fn host_directories() -> Result<HostDirectories, FilesystemError> {
     let config = std::env::var_os("APPDATA").map(PathBuf::from);
     let local_data = std::env::var_os("LOCALAPPDATA").map(PathBuf::from);

@@ -106,15 +106,26 @@ mod tests {
         fs::set_permissions(&canary, permissions).expect("mark reparse canary readonly");
 
         let junction = root.join("outside-junction");
-        let status = std::process::Command::new("cmd.exe")
-            .args(["/d", "/c", "mklink", "/J"])
-            .arg(&junction)
-            .arg(&outside)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .expect("run mklink junction fixture");
-        assert!(status.success(), "mklink /J fixture failed: {status}");
+        let create_junction = || {
+            let status = std::process::Command::new("cmd.exe")
+                .args(["/d", "/c", "mklink", "/J"])
+                .arg(&junction)
+                .arg(&outside)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .expect("run mklink junction fixture");
+            assert!(status.success(), "mklink /J fixture failed: {status}");
+        };
+        create_junction();
+
+        remove_tree(&junction).expect("remove junction as cleanup root");
+        assert!(!junction.exists());
+        assert!(
+            outside.is_dir(),
+            "root cleanup traversed the junction target"
+        );
+        create_junction();
 
         remove_tree(&root).expect("remove tree containing junction");
         assert!(!root.exists());

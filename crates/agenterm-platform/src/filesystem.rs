@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 #[cfg(feature = "filesystem")]
 use std::{
     ffi::OsString,
-    fs::{Metadata, OpenOptions},
+    fs::OpenOptions,
     io::{self, Write as _},
     sync::atomic::{AtomicU64, Ordering},
 };
@@ -13,6 +13,9 @@ use crate::selected;
 
 #[cfg(feature = "file-identity")]
 pub use crate::file_identity::{FileIdentity, file_identity, path_identity};
+
+#[cfg(feature = "filesystem")]
+pub use crate::filesystem_entry::metadata_is_link_like;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
@@ -81,11 +84,6 @@ pub fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
 #[cfg(feature = "filesystem")]
 pub fn sync_parent(parent: &Path) -> io::Result<()> {
     selected::filesystem::sync_parent(parent)
-}
-
-#[cfg(feature = "filesystem")]
-pub fn metadata_is_link_like(metadata: &Metadata) -> bool {
-    selected::filesystem::metadata_is_link_like(metadata)
 }
 
 /// Restrict an existing directory to the current user.

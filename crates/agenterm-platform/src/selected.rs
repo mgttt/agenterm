@@ -31,6 +31,17 @@ pub(crate) mod console_interrupt;
 #[path = "adapters/windows/filesystem_cleanup.rs"]
 pub(crate) mod filesystem_cleanup;
 
+#[cfg(all(feature = "filesystem-entry", windows))]
+#[path = "adapters/windows/filesystem_entry.rs"]
+pub(crate) mod filesystem_entry;
+
+#[cfg(all(
+    feature = "filesystem-entry",
+    any(target_os = "linux", target_os = "macos")
+))]
+#[path = "adapters/unix/filesystem_entry.rs"]
+pub(crate) mod filesystem_entry;
+
 #[cfg(all(feature = "filesystem-cleanup", target_os = "linux"))]
 #[path = "adapters/linux/filesystem_cleanup.rs"]
 pub(crate) mod filesystem_cleanup;
@@ -38,18 +49,6 @@ pub(crate) mod filesystem_cleanup;
 #[cfg(all(feature = "filesystem-cleanup", target_os = "macos"))]
 #[path = "adapters/macos/filesystem_cleanup.rs"]
 pub(crate) mod filesystem_cleanup;
-
-#[cfg(all(feature = "filesystem-usage", windows))]
-#[path = "adapters/windows/filesystem_usage.rs"]
-pub(crate) mod filesystem_usage;
-
-#[cfg(all(feature = "filesystem-usage", target_os = "linux"))]
-#[path = "adapters/linux/filesystem_usage.rs"]
-pub(crate) mod filesystem_usage;
-
-#[cfg(all(feature = "filesystem-usage", target_os = "macos"))]
-#[path = "adapters/macos/filesystem_usage.rs"]
-pub(crate) mod filesystem_usage;
 
 #[cfg(all(
     windows,

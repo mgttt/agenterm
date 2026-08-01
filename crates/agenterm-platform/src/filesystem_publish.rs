@@ -148,14 +148,14 @@ fn validate(staging: &Path, destination: &Path) -> Result<(), DirectoryPublishEr
             format!("inspect staging directory failed: {error}"),
         )
     })?;
-    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+    if !crate::filesystem_entry::metadata_is_real_directory(&metadata) {
         return Err(DirectoryPublishError::new(
             DirectoryPublishErrorKind::InvalidInput,
             "staging must be a real directory entry",
         ));
     }
     match fs::symlink_metadata(destination) {
-        Ok(metadata) if !metadata.is_dir() || metadata.file_type().is_symlink() => {
+        Ok(metadata) if !crate::filesystem_entry::metadata_is_real_directory(&metadata) => {
             return Err(DirectoryPublishError::new(
                 DirectoryPublishErrorKind::InvalidInput,
                 "an existing destination must be a real directory entry",
@@ -321,6 +321,24 @@ mod tests {
         staging
     }
 
+    #[cfg(unix)]
+    fn directory_link(target: &Path, link: &Path) {
+        std::os::unix::fs::symlink(target, link).expect("create directory symlink");
+    }
+
+    #[cfg(windows)]
+    fn directory_link(target: &Path, link: &Path) {
+        let status = std::process::Command::new("cmd.exe")
+            .args(["/d", "/c", "mklink", "/J"])
+            .arg(link)
+            .arg(target)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .expect("run mklink junction fixture");
+        assert!(status.success(), "mklink /J fixture failed: {status}");
+    }
+
     #[test]
     fn installs_new_and_replaces_existing_directories() {
         let root = fixture("replace");
@@ -444,5 +462,41 @@ mod tests {
         );
         crate::filesystem_cleanup::remove_tree(&left).unwrap();
         crate::filesystem_cleanup::remove_tree(&right).unwrap();
+    }
+
+    #[test]
+    fn rejects_link_like_staging_and_destination() {
+        let root = fixture("link-like");
+        let outside = fixture("link-like-outside");
+        fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        let staging = root.join("staging");
+        let destination = root.join("live");
+        directory_link(&outside, &staging);
+
+        let staging_error = publish_directory(&staging, &destination).unwrap_err();
+        assert_eq!(
+            staging_error.kind(),
+            DirectoryPublishErrorKind::InvalidInput
+        );
+        crate::filesystem_cleanup::remove_tree(&staging).unwrap();
+
+        fs::create_dir(&staging).unwrap();
+        directory_link(&outside, &destination);
+        let destination_error = publish_directory(&staging, &destination).unwrap_err();
+        assert_eq!(
+            destination_error.kind(),
+            DirectoryPublishErrorKind::InvalidInput
+        );
+        assert!(
+            staging.is_dir(),
+            "rejected staging must remain caller-owned"
+        );
+        assert!(
+            outside.is_dir(),
+            "validation traversed the link-like target"
+        );
+        crate::filesystem_cleanup::remove_tree(&root).unwrap();
+        fs::remove_dir_all(outside).unwrap();
     }
 }

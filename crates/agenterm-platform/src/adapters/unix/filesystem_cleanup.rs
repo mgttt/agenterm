@@ -6,7 +6,7 @@ pub(crate) fn remove_tree(path: &Path) -> io::Result<()> {
     let Some(metadata) = metadata_if_present(path)? else {
         return Ok(());
     };
-    if metadata.file_type().is_symlink() {
+    if crate::filesystem_entry::metadata_is_link_like(&metadata) {
         return remove_file_if_present(path);
     }
     if !metadata.is_dir() {
@@ -27,7 +27,7 @@ fn prepare_tree(path: &Path, metadata: &fs::Metadata) -> io::Result<()> {
         let Some(metadata) = metadata_if_present(&child)? else {
             continue;
         };
-        if !metadata.file_type().is_symlink() {
+        if !crate::filesystem_entry::metadata_is_link_like(&metadata) {
             prepare_tree(&child, &metadata)?;
         }
     }

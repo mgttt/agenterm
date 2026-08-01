@@ -52,7 +52,9 @@ clipboard, IPC, or screenshot modules.
 | `shared-memory` | exclusive named read/write mappings for cross-process zero-copy data | target `libc` / minimal `windows-sys` |
 | `process` | observation/tree control, shell defaults, child-pipe probes and parent-console diagnostics | target `libc` / `windows-sys` |
 | `filesystem-conventions` | user home, host roots and sibling executable naming | none |
+| `filesystem-entry` | classify Unix symbolic links and every Windows reparse point as link-like, with ordinary-directory checks | none |
 | `filesystem-cleanup` | remove caller-owned quiescent trees after restoring deletable permissions without following links | none |
+| `filesystem-publish` | recoverable same-parent directory publication with typed rollback outcomes | `filesystem-cleanup` |
 | `filesystem-usage` | checked logical-byte accounting without traversing symbolic links or reparse points | none |
 | `file-identity` | opened/path host object identity across rename and hard-link aliases | target minimal `windows-sys`; none on Unix |
 | `filesystem` | conventions plus private state files/directories and durable atomic replacement mechanics | target native APIs |
