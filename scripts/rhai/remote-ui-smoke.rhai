@@ -1999,23 +1999,23 @@ if (-not [AgenTermConsoleInputMode]::GetConsoleMode($stdin, [ref]$inputMode) -or
     throw "enable virtual terminal input failed"
 }
 
-function Read-ThreeKeys {
-    $keys = @()
-    while ($keys.Count -lt 3) {
+function Read-NineCharacters {
+    $characters = @()
+    while ($characters.Count -lt 9) {
         $key = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-        $keys += [int]$key.VirtualKeyCode
+        $characters += [int]$key.Character
     }
-    return $keys
+    return $characters
 }
 
 try {
     [Console]::Write($escape + "[?1049h" + $escape + "[?1hALT_WHEEL_READY")
-    $up = @(Read-ThreeKeys)
+    $up = @(Read-NineCharacters)
     [System.IO.File]::WriteAllText(
         $ResultPath,
         "up=" + ($up -join ",")
     )
-    $down = @(Read-ThreeKeys)
+    $down = @(Read-NineCharacters)
     [System.IO.File]::WriteAllText(
         $ResultPath,
         "up=" + ($up -join ",") + ";down=" + ($down -join ",")
@@ -2056,19 +2056,19 @@ try {
     );
     let alternate_snapshot = json_cli(context, cli, ["ui-snapshot"]);
     require(
-        alternate_snapshot.active_tab_id == alternate_id,
+        alternate_snapshot.focus.window_id == alternate_id,
         "remote_ui_raw_application_not_active"
     );
     gui.window_message(0x020A, 7864320, 0);
     wait_file_text(
         alternate_result,
-        "up=38,38,38",
+        "up=27,79,65,27,79,65,27,79,65",
         "remote_ui_alternate_wheel_up_input_invalid"
     );
     gui.window_message(0x020A, 4287102976, 0);
     wait_file_text(
         alternate_result,
-        "up=38,38,38;down=40,40,40",
+        "up=27,79,65,27,79,65,27,79,65;down=27,79,66,27,79,66,27,79,66",
         "remote_ui_alternate_wheel_down_input_invalid"
     );
     text_cli(
