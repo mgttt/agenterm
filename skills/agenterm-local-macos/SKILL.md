@@ -1,0 +1,64 @@
+---
+name: agenterm-local-macos
+description: Build, install, launch, and diagnose AgenTerm from a local macOS checkout. Use when a local AgenTerm build must appear as a native Dock application, when Finder opens a bare agenterm binary through Terminal with Last login output, or when validating the local app bundle without weakening signed Release installation rules.
+---
+
+# AgenTerm Local macOS
+
+## Build and install
+
+Run from the repository root:
+
+```bash
+./build.sh
+./install.sh --local-build target/debug
+open ~/Applications/AgenTerm.app
+```
+
+Use `target/release-fast` after `./build.sh release-fast`. The installer
+validates every required executable and derives the version from
+`agenterm-cli --version`.
+
+## Diagnose Dock launches
+
+If reopening AgenTerm shows Terminal text such as `Last login` and an executable
+path followed by `; exit;`, the Dock item targets a bare Mach-O executable.
+Finder routes that item through Terminal because it is not an application
+bundle.
+
+Fix the entry identity:
+
+1. Remove the old raw-binary item from the Dock.
+2. Run the local installer.
+3. Open `~/Applications/AgenTerm.app`.
+4. Keep that application in the Dock.
+
+Do not pin `target/debug/agenterm` or `target/release-fast/agenterm`.
+
+## Verify
+
+```bash
+test -x ~/Applications/AgenTerm.app/Contents/MacOS/AgenTerm
+~/.local/bin/agenterm-cli --version
+plutil -lint ~/Applications/AgenTerm.app/Contents/Info.plist
+```
+
+Launch with `open ~/Applications/AgenTerm.app`. Confirm the GUI remains alive
+and no Terminal window is created. Choose **Keep server running** when closing
+the window, then click the Dock icon: the existing process must restore and
+focus the hidden window. Verify the app uses the AgenTerm icon rather than the
+generic executable icon.
+
+Do not treat a second `open ~/Applications/AgenTerm.app` as proof that a Dock
+click works. Launch Services wakes the winit loop for `open`, while a Dock
+activation may not emit a window event after the only window is hidden. The
+macOS backend must keep a short `WaitUntil` reactivation poll while hidden;
+verify with an actual Dock click and confirm the process ID remains unchanged.
+
+## Preserve trust boundaries
+
+`--local-build` installs unsigned bytes built by the user. Keep the default
+no-argument installer unchanged: it must download checksums and enforce
+Developer ID signatures for stable macOS Release packages. Never use local
+mode as a substitute for Release signing, notarization, Candidate
+qualification, or Promotion.

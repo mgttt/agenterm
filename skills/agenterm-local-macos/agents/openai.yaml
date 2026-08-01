@@ -1,0 +1,4 @@
+interface:
+  display_name: "AgenTerm Local macOS"
+  short_description: "Build and install a local AgenTerm macOS app"
+  default_prompt: "Use $agenterm-local-macos to build and install AgenTerm locally on macOS without Terminal launching."

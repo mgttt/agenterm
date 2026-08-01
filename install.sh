@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 #
-# Install AgenTerm from the latest mgttt/agenterm GitHub Release.
+# Install AgenTerm from a GitHub Release or a local macOS build.
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/mgttt/agenterm/main/install.sh | bash
+#   ./install.sh --local-build target/debug
 #
 # Optional environment:
 #   AGENTERM_VERSION=v0.1.10
@@ -23,6 +24,7 @@ NO_LAUNCH="${AGENTERM_NO_LAUNCH:-0}"
 ALLOW_UNSIGNED_PREVIEW="${AGENTERM_ALLOW_UNSIGNED_PREVIEW:-0}"
 DOWNLOAD_BASE="${AGENTERM_DOWNLOAD_BASE:-}"
 TMP_DIR=""
+LOCAL_BUILD_DIR=""
 
 say() {
   printf '==> %s\n' "$*"
@@ -43,7 +45,11 @@ trap cleanup EXIT HUP INT TERM
 
 usage() {
   cat <<'EOF'
-Install AgenTerm from GitHub Releases.
+Install AgenTerm from GitHub Releases or a local macOS build.
+
+Usage:
+  ./install.sh
+  ./install.sh --local-build BINARY_DIR
 
 Environment variables:
   AGENTERM_VERSION                  Install a specific tag, for example v0.1.10
@@ -55,16 +61,26 @@ Environment variables:
 EOF
 }
 
-if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-  usage
-  exit 0
-fi
-if [[ $# -ne 0 ]]; then
-  fail "unexpected argument: $1"
-fi
+case "${1:-}" in
+  --help | -h)
+    usage
+    exit 0
+    ;;
+  --local-build)
+    [[ $# -eq 2 ]] || fail "--local-build requires exactly one binary directory"
+    LOCAL_BUILD_DIR="$2"
+    ;;
+  "")
+    ;;
+  *)
+    fail "unexpected argument: $1"
+    ;;
+esac
 
-command -v curl >/dev/null 2>&1 || fail "curl is required"
 command -v mktemp >/dev/null 2>&1 || fail "mktemp is required"
+if [[ -z "$LOCAL_BUILD_DIR" ]]; then
+  command -v curl >/dev/null 2>&1 || fail "curl is required"
+fi
 
 case "$(uname -s)" in
   Darwin)
@@ -133,6 +149,80 @@ resolve_version() {
     fail "GitHub did not resolve a latest release"
   printf '%s\n' "${effective_url##*/}"
 }
+
+if [[ -n "$LOCAL_BUILD_DIR" ]]; then
+  [[ "$OS" == "macos" ]] || fail "--local-build currently supports macOS only"
+  [[ -d "$LOCAL_BUILD_DIR" ]] || fail "local build directory does not exist: $LOCAL_BUILD_DIR"
+  LOCAL_BUILD_DIR="$(cd "$LOCAL_BUILD_DIR" && pwd -P)"
+  REQUIRED_EXECUTABLES=(agenterm agenterm-cli agenterm-mux agenterm-script agenterm-mcp)
+  for executable in "${REQUIRED_EXECUTABLES[@]}"; do
+    SOURCE_PATH="$LOCAL_BUILD_DIR/$executable"
+    [[ -f "$SOURCE_PATH" && ! -L "$SOURCE_PATH" && -x "$SOURCE_PATH" ]] ||
+      fail "local build is missing executable: $SOURCE_PATH"
+  done
+  LOCAL_VERSION_OUTPUT="$($LOCAL_BUILD_DIR/agenterm-cli --version)"
+  [[ "$LOCAL_VERSION_OUTPUT" =~ ^agenterm-cli[[:space:]]+([0-9A-Za-z.+_-]+)$ ]] ||
+    fail "local agenterm-cli returned an invalid version: $LOCAL_VERSION_OUTPUT"
+  RELEASE_VERSION="${BASH_REMATCH[1]}"
+  VERSION="v$RELEASE_VERSION-local"
+  TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/agenterm-install.XXXXXXXX")"
+  STAGING_DIR="$TMP_DIR/payload"
+  mkdir -p "$STAGING_DIR"
+  for executable in "${REQUIRED_EXECUTABLES[@]}"; do
+    cp "$LOCAL_BUILD_DIR/$executable" "$STAGING_DIR/$executable"
+  done
+
+  RELEASES_DIR="$INSTALL_ROOT/releases"
+  RELEASE_DIR="$RELEASES_DIR/$RELEASE_VERSION-local-$OS-$ARCH"
+  mkdir -p "$RELEASES_DIR" "$BIN_DIR"
+  if [[ -e "$RELEASE_DIR" || -L "$RELEASE_DIR" ]]; then
+    rm -rf "$RELEASE_DIR"
+  fi
+  mv "$STAGING_DIR" "$RELEASE_DIR"
+  CURRENT_LINK="$INSTALL_ROOT/current"
+  replace_symlink "$RELEASE_DIR" "$CURRENT_LINK"
+  for executable in "${REQUIRED_EXECUTABLES[@]}"; do
+    replace_symlink "$CURRENT_LINK/$executable" "$BIN_DIR/$executable"
+  done
+
+  APP_DIR="$APPLICATIONS_DIR/AgenTerm.app"
+  APP_CONTENTS="$APP_DIR/Contents"
+  mkdir -p "$APP_CONTENTS/MacOS" "$APP_CONTENTS/Resources"
+  cp "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/assets/agenterm.icns" \
+    "$APP_CONTENTS/Resources/AgenTerm.icns"
+  rm -f "$APP_CONTENTS/MacOS/AgenTerm"
+  ln -s "$CURRENT_LINK/agenterm" "$APP_CONTENTS/MacOS/AgenTerm"
+  cat >"$APP_CONTENTS/Info.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDisplayName</key>
+  <string>AgenTerm</string>
+  <key>CFBundleExecutable</key>
+  <string>AgenTerm</string>
+  <key>CFBundleIdentifier</key>
+  <string>tech.mega.agenterm</string>
+  <key>CFBundleIconFile</key>
+  <string>AgenTerm.icns</string>
+  <key>CFBundleName</key>
+  <string>AgenTerm</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>$RELEASE_VERSION</string>
+</dict>
+</plist>
+EOF
+  say "Installed local AgenTerm $RELEASE_VERSION to $RELEASE_DIR"
+  say "Commands are available in $BIN_DIR"
+  say "Dock application is available at $APP_DIR"
+  if [[ "$NO_LAUNCH" != "1" ]]; then
+    say "Launching AgenTerm"
+    open "$APP_DIR"
+  fi
+  exit 0
+fi
 
 VERSION="$(resolve_version)"
 [[ "$VERSION" =~ ^v[0-9A-Za-z.+_-]+$ ]] ||

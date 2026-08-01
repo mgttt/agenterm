@@ -10,6 +10,9 @@ use std::{
     time::Instant,
 };
 
+#[cfg(target_os = "macos")]
+use std::time::Duration;
+
 use softbuffer::{Context, Surface};
 use winit::{
     application::ApplicationHandler,
@@ -35,6 +38,9 @@ use crate::{
 
 type DisplayHandle = winit::event_loop::OwnedDisplayHandle;
 type PixelSurface = Surface<DisplayHandle, Rc<Window>>;
+
+#[cfg(target_os = "macos")]
+const MACOS_REACTIVATION_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 pub(crate) fn run_pixel_window(
     options: PixelWindowOptions,
@@ -70,6 +76,8 @@ pub(crate) fn run_pixel_window(
         modifiers: ModifierState::empty(),
         last_pointer: None,
         failure: None,
+        #[cfg(target_os = "macos")]
+        waiting_for_reactivation: false,
     };
     let run_result = event_loop.run_app(&mut runner);
     alive.store(false, Ordering::Release);
@@ -78,7 +86,10 @@ pub(crate) fn run_pixel_window(
     runner.failure.take().map_or(Ok(()), Err)
 }
 
-fn configure_event_loop(builder: &mut winit::event_loop::EventLoopBuilder<()>, no_activate: bool) {
+fn configure_event_loop<T: 'static>(
+    builder: &mut winit::event_loop::EventLoopBuilder<T>,
+    no_activate: bool,
+) {
     #[cfg(target_os = "macos")]
     {
         use winit::platform::macos::EventLoopBuilderExtMacOS as _;
@@ -126,6 +137,16 @@ impl PixelWindowBackend for NativeWindowBackend {
 
     fn set_visible(&self, visible: bool) {
         self.window.set_visible(visible);
+        #[cfg(target_os = "macos")]
+        if !visible {
+            use objc2_app_kit::NSApplication;
+            use objc2_foundation::MainThreadMarker;
+
+            if let Some(marker) = MainThreadMarker::new() {
+                let application = NSApplication::sharedApplication(marker);
+                unsafe { application.deactivate() };
+            }
+        }
     }
 
     fn focus(&self) {
@@ -181,6 +202,8 @@ struct PixelWindowRunner {
     modifiers: ModifierState,
     last_pointer: Option<LogicalPoint>,
     failure: Option<PixelWindowError>,
+    #[cfg(target_os = "macos")]
+    waiting_for_reactivation: bool,
 }
 
 impl PixelWindowRunner {
@@ -440,15 +463,90 @@ impl ApplicationHandler<()> for PixelWindowRunner {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        #[cfg(target_os = "macos")]
+        if self.window.as_ref().is_some_and(|window| !window.visible()) {
+            if macos_application_is_active() {
+                if self.waiting_for_reactivation {
+                    self.waiting_for_reactivation = false;
+                    self.dispatch_event(event_loop, PixelWindowEvent::Reopen);
+                }
+            } else {
+                self.waiting_for_reactivation = true;
+            }
+        } else {
+            self.waiting_for_reactivation = false;
+        }
         let Some(window) = self.window.clone() else {
             event_loop.set_control_flow(ControlFlow::Wait);
             return;
         };
-        match self.application.about_to_wait(&window, Instant::now()) {
-            Ok(directive) => self.apply_directive(event_loop, directive),
+        let now = Instant::now();
+        match self.application.about_to_wait(&window, now) {
+            Ok(directive) => {
+                #[cfg(target_os = "macos")]
+                let directive = macos_reactivation_poll_directive(window.visible(), now, directive);
+                self.apply_directive(event_loop, directive);
+            }
             Err(error) => self.fail(event_loop, error),
         }
     }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_reactivation_poll_directive(
+    window_visible: bool,
+    now: Instant,
+    directive: PixelWindowDirective,
+) -> PixelWindowDirective {
+    if window_visible || matches!(directive, PixelWindowDirective::Exit) {
+        return directive;
+    }
+
+    let poll_at = now + MACOS_REACTIVATION_POLL_INTERVAL;
+    match directive {
+        PixelWindowDirective::WaitUntil(deadline) => {
+            PixelWindowDirective::WaitUntil(deadline.min(poll_at))
+        }
+        PixelWindowDirective::Continue | PixelWindowDirective::Wait => {
+            PixelWindowDirective::WaitUntil(poll_at)
+        }
+        PixelWindowDirective::Exit => PixelWindowDirective::Exit,
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hidden_window_keeps_the_event_loop_polling_for_dock_reactivation() {
+        let now = Instant::now();
+        assert_eq!(
+            macos_reactivation_poll_directive(false, now, PixelWindowDirective::Wait),
+            PixelWindowDirective::WaitUntil(now + MACOS_REACTIVATION_POLL_INTERVAL)
+        );
+    }
+
+    #[test]
+    fn hidden_window_preserves_an_earlier_application_deadline() {
+        let now = Instant::now();
+        let earlier = now + Duration::from_millis(25);
+        assert_eq!(
+            macos_reactivation_poll_directive(false, now, PixelWindowDirective::WaitUntil(earlier),),
+            PixelWindowDirective::WaitUntil(earlier)
+        );
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_application_is_active() -> bool {
+    use objc2_app_kit::NSApplication;
+    use objc2_foundation::MainThreadMarker;
+
+    MainThreadMarker::new().is_some_and(|marker| {
+        let application = NSApplication::sharedApplication(marker);
+        unsafe { application.isActive() }
+    })
 }
 
 impl Drop for PixelWindowRunner {

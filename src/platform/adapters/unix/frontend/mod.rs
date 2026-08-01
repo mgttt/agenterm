@@ -4207,6 +4207,22 @@ impl UnixApp {
                     self.request_redraw();
                 }
             }
+            PixelWindowEvent::Reopen => {
+                if let Some(window) = self.window.clone() {
+                    let was_visible = window.visible();
+                    window.set_minimized(false);
+                    window.set_visible(true);
+                    window.focus();
+                    if !was_visible {
+                        self.event_journal_mut().commit(
+                            EventKind::WindowVisibility,
+                            None,
+                            serde_json::json!({"visible": true, "reason": "dock-reopen"}),
+                        );
+                    }
+                    self.request_redraw();
+                }
+            }
             PixelWindowEvent::CloseRequested => self.request_window_close(),
             PixelWindowEvent::GeometryChanged { change, metrics } => {
                 self.handle_geometry_event(change, metrics);

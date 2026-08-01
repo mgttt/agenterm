@@ -50,6 +50,8 @@ version = "0.1.11"
 dependencies = [
  "ab_glyph",
  "libc",
+ "objc2-app-kit",
+ "objc2-foundation 0.2.2",
  "png",
  "rmux-pty",
  "serde",

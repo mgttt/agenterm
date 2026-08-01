@@ -102,6 +102,21 @@ cd D:\dev\agenterm
 .\dist\agenterm.exe
 ```
 
+On macOS, build and install local binaries as a real application bundle:
+
+```bash
+./build.sh
+./install.sh --local-build target/debug
+open ~/Applications/AgenTerm.app
+```
+
+Pin `AgenTerm.app`, not `target/debug/agenterm`, in the Dock. Finder launches a
+bare executable through Terminal, which produces a `Last login` shell window
+before AgenTerm starts. The local installer copies the build into the
+versioned user installation, refreshes `~/.local/bin`, and creates the stable
+`~/Applications/AgenTerm.app` Dock entry. This explicit local path does not
+weaken signature verification for downloaded Release packages.
+
 The default build is an incremental development build. Use
 `.\build.bat release-fast` for repeated optimized local testing: it skips LTO,
 uses parallel code generation, and retains incremental state. Use

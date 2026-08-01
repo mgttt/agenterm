@@ -142,6 +142,7 @@ pub enum GeometryChange {
 #[non_exhaustive]
 pub enum PixelWindowEvent {
     Wake,
+    Reopen,
     CloseRequested,
     GeometryChanged {
         change: GeometryChange,

@@ -2,6 +2,7 @@
 
 - `agenterm-icon.png`: transparent high-resolution source used for review.
 - `agenterm.ico`: Windows multi-size icon embedded by `build.rs`.
+- `agenterm.icns`: macOS multi-size application icon installed in the app bundle.
 
 The mark was generated with the built-in image-generation tool, then converted
 from a flat magenta chroma-key background to transparency and packed at
