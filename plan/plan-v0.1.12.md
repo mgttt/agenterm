@@ -189,6 +189,9 @@ Windows launcher-mechanics 叶新增 crate application-wake 与 parent-console d
 都进入 target adapter，root launcher 只组合 `WakeSignal` 与产品参数/IPC handoff。两级
 warnings-denied Clippy、35 项 crate tests 和 3 项 launcher parser/guidance tests 通过；
 root `frontend.rs` 不再含 Win32 类型或调用。
+Unix host 审计同时发现 macOS adapter 曾把 Control 与 Command 都判为产品 primary
+shortcut，会抢占 Ctrl-C 等 terminal control keys。修复将 macOS policy 收紧为 meta/
+Command-only，并加入平台中立回归测试；这不是授权策略，只是输入仲裁正确性。
 
 2026-08-01 首个建设期增量：Cockpit snapshot 新增明确的
 `tab_counts.{total,running,dead}`，native shell 同源显示 logical instance、

@@ -21,6 +21,10 @@ impl ModifierState {
     pub const fn control_or_meta(self) -> bool {
         self.control || self.meta
     }
+
+    pub const fn meta_only(self) -> bool {
+        self.meta
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -109,6 +113,24 @@ mod tests {
             classify_key_press(false, ModifierState::empty(), None, Some("Escape"), None),
             KeyClassification::ControlKey { .. }
         ));
+    }
+
+    #[test]
+    fn meta_only_shortcuts_preserve_terminal_control_keys() {
+        assert!(
+            !ModifierState {
+                control: true,
+                ..ModifierState::empty()
+            }
+            .meta_only()
+        );
+        assert!(
+            ModifierState {
+                meta: true,
+                ..ModifierState::empty()
+            }
+            .meta_only()
+        );
     }
 
     #[test]

@@ -475,6 +475,10 @@ integrated validation recorded below):
   probing, attach-only parent-console behavior, and console cleanup remain in
   the Windows adapter; AgenTerm keeps only wake coalescing, GUI argument policy,
   and IPC handoff. The root frontend entry no longer imports Win32 APIs.
+- [x] macOS primary-shortcut arbitration is Command/meta-only. Control remains
+  available to terminal control-key encoding (including Ctrl-C) instead of
+  being misclassified as a product shortcut; a target-neutral contract test
+  protects this invariant even on non-macOS development hosts.
 - [x] Control Center state-directory protection, exclusive state-file creation,
   atomic replacement, existing-window focus, and direct native capture now
   call `services::control_center → selected → adapters/{windows,linux,macos}`.
