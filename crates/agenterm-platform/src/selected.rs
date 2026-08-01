@@ -46,6 +46,18 @@ pub(crate) mod processor_topology;
 #[path = "adapters/macos/processor_topology.rs"]
 pub(crate) mod processor_topology;
 
+#[cfg(all(feature = "processor-affinity", windows))]
+#[path = "adapters/windows/processor_affinity.rs"]
+pub(crate) mod processor_affinity;
+
+#[cfg(all(feature = "processor-affinity", target_os = "linux"))]
+#[path = "adapters/linux/processor_affinity.rs"]
+pub(crate) mod processor_affinity;
+
+#[cfg(all(feature = "processor-affinity", target_os = "macos"))]
+#[path = "adapters/macos/processor_affinity.rs"]
+pub(crate) mod processor_affinity;
+
 #[cfg(all(feature = "virtualization-probe", windows))]
 #[path = "adapters/windows/native_virtualization.rs"]
 pub(crate) mod native_virtualization;

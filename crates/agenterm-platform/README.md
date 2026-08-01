@@ -39,6 +39,7 @@ clipboard, IPC, or screenshot modules.
 | `cache-hierarchy` | CPU cache levels, kinds, per-instance capacity, coherency line and sharing geometry | target `libc` / minimal `windows-sys` |
 | `virtualization-probe` | current-host WHPX/KVM/Hypervisor.framework availability facts without VM lifecycle | target `libc` / minimal dynamically loaded Win32 APIs |
 | `processor-topology` | online logical CPUs, physical cores, packages, NUMA nodes and processor groups | target `libc` / minimal `windows-sys` |
+| `processor-affinity` | current-process logical processor set with explicit scheduler/mask semantics | target `libc` / minimal `windows-sys` |
 | `host-memory` | host page size, mapping granularity and total physical memory | target `libc` / minimal `windows-sys` |
 | `storage` | path-scoped volume capacity, caller-available bytes and allocation unit | target `libc` / minimal `windows-sys` |
 | `entropy` | fail-closed host CSPRNG byte filling | target `libc` / minimal `windows-sys` |
@@ -72,6 +73,7 @@ clipboard, IPC, or screenshot modules.
 | cache hierarchy | RelationCache geometry | cache sysfs | cache-size sysctl geometry |
 | native virtualization probe | dynamically discovered WHPX capability | `/dev/kvm` + API version | `kern.hv_support` |
 | processor topology | cores/packages/NUMA/groups | sysconf + sysfs | logical/physical/package sysctl |
+| processor affinity | single-group process affinity mask | `sched_getaffinity` effective mask | typed Unsupported; affinity tags are advisory |
 | host memory | page/allocation geometry + physical total | page geometry + physical pages | page geometry + `hw.memsize` |
 | storage | volume capacity + cluster geometry | `statvfs` | `statvfs` |
 | entropy | BCrypt system-preferred RNG | `getrandom(2)` | `arc4random_buf` |
@@ -99,6 +101,15 @@ clipboard, IPC, or screenshot modules.
 
 Unsupported endpoint variants and native failures remain typed; adapters never
 silently substitute a different transport or capability.
+
+`processor_affinity::current_process` reports logical processor identities only
+when the native API provides a complete result under the declared semantics.
+Linux returns the scheduler's effective allowed mask. Windows returns the
+process affinity mask only when the process belongs to one processor group;
+CPU Sets and thread-specific policies may narrow scheduling further. A
+multi-group process is typed Unsupported instead of returning only its primary
+group. macOS affinity tags are advisory, so the adapter does not invent an
+exact allowed-CPU set. Thread placement and NUMA policy remain product concerns.
 
 ## Public API
 

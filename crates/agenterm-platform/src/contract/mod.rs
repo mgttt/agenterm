@@ -30,6 +30,8 @@ pub mod process_image;
 pub mod process_metrics;
 #[cfg(feature = "window")]
 pub mod process_window;
+#[cfg(feature = "processor-affinity")]
+pub mod processor_affinity;
 pub mod processor_topology;
 #[cfg(feature = "pty")]
 pub mod pty;

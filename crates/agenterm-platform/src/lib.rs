@@ -24,6 +24,7 @@ pub enum Capability {
     CacheHierarchy,
     NativeVirtualization,
     ProcessorTopology,
+    ProcessorAffinity,
     HostMemory,
     Storage,
     Entropy,
@@ -68,6 +69,7 @@ pub fn capability_status(capability: Capability) -> CapabilityStatus {
         Capability::CacheHierarchy => (cfg!(feature = "cache-hierarchy"), true),
         Capability::NativeVirtualization => (cfg!(feature = "virtualization-probe"), true),
         Capability::ProcessorTopology => (cfg!(feature = "processor-topology"), true),
+        Capability::ProcessorAffinity => (cfg!(feature = "processor-affinity"), true),
         Capability::HostMemory => (cfg!(feature = "host-memory"), true),
         Capability::Storage => (cfg!(feature = "storage"), true),
         Capability::Entropy => (cfg!(feature = "entropy"), true),
@@ -130,6 +132,9 @@ pub mod native_virtualization;
 
 #[cfg(feature = "processor-topology")]
 pub mod processor_topology;
+
+#[cfg(feature = "processor-affinity")]
+pub mod processor_affinity;
 
 #[cfg(feature = "host-memory")]
 pub mod host_memory;
@@ -265,6 +270,29 @@ mod tests {
     fn cache_hierarchy_does_not_claim_processor_features_or_topology() {
         assert_eq!(
             crate::capability_status(crate::Capability::CacheHierarchy),
+            crate::CapabilityStatus::Available
+        );
+        #[cfg(not(feature = "hardware"))]
+        assert_eq!(
+            crate::capability_status(crate::Capability::Hardware),
+            crate::CapabilityStatus::Unsupported {
+                reason: std::borrow::Cow::Borrowed("feature-disabled")
+            }
+        );
+        #[cfg(not(feature = "processor-topology"))]
+        assert_eq!(
+            crate::capability_status(crate::Capability::ProcessorTopology),
+            crate::CapabilityStatus::Unsupported {
+                reason: std::borrow::Cow::Borrowed("feature-disabled")
+            }
+        );
+    }
+
+    #[cfg(feature = "processor-affinity")]
+    #[test]
+    fn processor_affinity_does_not_claim_hardware_or_topology() {
+        assert_eq!(
+            crate::capability_status(crate::Capability::ProcessorAffinity),
             crate::CapabilityStatus::Available
         );
         #[cfg(not(feature = "hardware"))]
