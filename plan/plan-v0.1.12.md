@@ -243,6 +243,15 @@ softbuffer 直接依赖。Windows-hosted all-target check、crate all-feature wa
 和 46 项 crate tests 通过；root Linux source compile 仍在进入源码前被本机缺少
 `x86_64-linux-gnu-gcc` 的 ring build script 阻断。严格生产边界门禁由 5 行降至 3 行，剩余
 仅为 Windows remote GUI host 和最终 root selector。
+Windows remote GUI 的最终拆分采用独立 `control_window` host，而不把 Win32 child controls
+硬塞进 Unix pixel runner。依赖顺序固定为：中立 control/control-event/canvas contract → crate
+Windows class/window/child-control/message-loop/GDI host → root product state 改接 control IDs、
+normalized events 和 canvas → 删除 root HWND/HDC/RECT/windows-sys → 删除最终 root selector。
+crate host 独占 key preview（发生在 TranslateMessage 前）、capture loss、deferred destroy、一次
+BeginPaint/double-buffer present、系统菜单、焦点/控件文本和 native capture；主 crate 保留
+server/client、tabs/tree/composer/settings/theme、selection/scrollback、close policy、snapshot 与
+绘制组合。该分层明确排除接受 raw integer/closure 的临时薄 facade，也禁止 crate 反向出现
+Agenterm action、theme、Control Center、Fleet 或 protocol 类型。
 
 2026-08-01 首个建设期增量：Cockpit snapshot 新增明确的
 `tab_counts.{total,running,dead}`，native shell 同源显示 logical instance、

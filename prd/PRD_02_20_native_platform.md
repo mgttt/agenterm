@@ -541,6 +541,17 @@ integrated validation recorded below):
   past ring's build script without `x86_64-linux-gnu-gcc`, so native Unix source
   compilation remains CI/host evidence. The strict boundary report is now three
   findings: Windows remote GUI host plus the final root selector.
+- [~] The remaining Windows remote GUI migration has a frozen typed boundary.
+  A dedicated neutral `control_window` host will own Win32 class/window/child
+  controls, pre-translation key preview, WndProc/message loop, focus/capture,
+  system menu, GDI double buffering and native capture. The main crate retains
+  server/client, tab/tree/composer/settings/theme, selection/scrollback,
+  close-policy, snapshot and paint-composition decisions, expressed only as
+  control IDs, normalized events, neutral rectangles/colors and canvas calls.
+  The dependency order is contract, native host, product integration, native
+  import deletion, then final root selector deletion. Raw-handle or closure
+  forwarding facades are explicitly excluded because they would preserve the
+  ownership leak instead of establishing the external crate boundary.
 - [x] Control Center state-directory protection, exclusive state-file creation,
   atomic replacement, existing-window focus, and direct native capture now
   call `services::control_center → selected → adapters/{windows,linux,macos}`.
