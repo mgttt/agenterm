@@ -16,7 +16,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   first real dependency slices move process and PTY contracts, services,
   private target selection and all three native adapters without retaining
   duplicate source. Platform shell defaults also move under the process feature;
-  the remaining capability families and product-code extraction are open.
+  shared DPI/geometry conversion is exposed by the window feature. The remaining
+  capability families and product-code extraction are open.
 - [ ] Windows, macOS, and Linux native frontends consume one declared platform
   contract for window lifecycle, normalized input, IME, DPI, clipboard, font
   discovery, screenshots, activation, and applicable system integration.

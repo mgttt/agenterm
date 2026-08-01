@@ -67,6 +67,10 @@ clone、terminate-to-EOF 与 close-pseudoconsole 行为由原 adapter 原样保�
 `process` feature，产品默认 tab/command policy 仍留在主 crate。`pty` feature 的
 5 项 crate tests 与 Agenterm all-target compile check 已通过；filesystem/locking
 审计确认现有 paths/audit 文件混有产品命名和 Script policy，必须先拆机制，禁止整文件硬搬。
+第三个叶将纯平台中立的 DPI/geometry contract 移为 `window` feature 的公开 API；
+Linux/macOS native scale adapters 经 workspace dependency 消费同一实现，旧 `src/platform/scale.rs`
+已删除。4 项 window tests 和 Agenterm all-target compile check 通过；AgenTerm 专属的
+320×240 CLI resize policy 继续留在主 crate，没有被包装成通用平台规则。
 
 2026-08-01 首个建设期增量：Cockpit snapshot 新增明确的
 `tab_counts.{total,running,dead}`，native shell 同源显示 logical instance、

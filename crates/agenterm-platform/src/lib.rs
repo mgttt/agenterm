@@ -75,6 +75,9 @@ pub fn capability_status(capability: Capability) -> CapabilityStatus {
 
 pub mod contract;
 
+#[cfg(feature = "window")]
+pub mod window;
+
 #[cfg(feature = "pty")]
 pub mod pty;
 

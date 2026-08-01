@@ -5,10 +5,10 @@
 //! Linux and macOS GUI hot paths.
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct ScaleFactor(f64);
+pub struct ScaleFactor(f64);
 
 impl ScaleFactor {
-    pub(crate) fn new(value: f64) -> Result<Self, ScaleError> {
+    pub fn new(value: f64) -> Result<Self, ScaleError> {
         if value.is_finite() && value > 0.0 {
             Ok(Self(value))
         } else {
@@ -18,7 +18,7 @@ impl ScaleFactor {
 
     /// Frozen forward conversion for adapters that receive logical extents.
     #[allow(dead_code)]
-    pub(crate) fn physical_pixels(self, logical_points: f64) -> Result<u32, ScaleError> {
+    pub fn physical_pixels(self, logical_points: f64) -> Result<u32, ScaleError> {
         if !logical_points.is_finite() || logical_points < 0.0 {
             return Err(ScaleError::InvalidLogicalExtent);
         }
@@ -29,7 +29,7 @@ impl ScaleFactor {
         Ok(pixels as u32)
     }
 
-    pub(crate) fn logical_points(self, physical_pixels: u32) -> Result<u32, ScaleError> {
+    pub fn logical_points(self, physical_pixels: u32) -> Result<u32, ScaleError> {
         let points = f64::from(physical_pixels) / self.0;
         if !points.is_finite() || points < 0.0 {
             return Err(ScaleError::InvalidPhysicalExtent);
@@ -42,7 +42,7 @@ impl ScaleFactor {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ScaleError {
+pub enum ScaleError {
     InvalidScaleFactor,
     InvalidLogicalExtent,
     InvalidPhysicalExtent,
@@ -51,7 +51,7 @@ pub(crate) enum ScaleError {
 }
 
 impl ScaleError {
-    pub(crate) const fn code(self) -> &'static str {
+    pub const fn code(self) -> &'static str {
         match self {
             Self::InvalidScaleFactor => "invalid_scale_factor",
             Self::InvalidLogicalExtent => "invalid_logical_extent",
@@ -63,7 +63,7 @@ impl ScaleError {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct WindowMetrics {
+pub struct WindowMetrics {
     pub logical_width: u32,
     pub logical_height: u32,
     /// Retained in the normalized contract for framebuffer/screenshot consumers.
@@ -75,7 +75,7 @@ pub(crate) struct WindowMetrics {
 }
 
 impl WindowMetrics {
-    pub(crate) fn from_physical(
+    pub fn from_physical(
         physical_width: u32,
         physical_height: u32,
         scale_factor: f64,
@@ -97,7 +97,7 @@ impl WindowMetrics {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) enum GeometryEvent {
+pub enum GeometryEvent {
     Resized {
         physical_width: u32,
         physical_height: u32,
@@ -111,12 +111,12 @@ pub(crate) enum GeometryEvent {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum GeometryAction {
+pub enum GeometryAction {
     Apply(WindowMetrics),
     Ignore,
 }
 
-pub(crate) fn classify_geometry_event(event: GeometryEvent) -> Result<GeometryAction, ScaleError> {
+pub fn classify_geometry_event(event: GeometryEvent) -> Result<GeometryAction, ScaleError> {
     let (physical_width, physical_height, scale_factor) = match event {
         GeometryEvent::Resized {
             physical_width,

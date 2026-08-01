@@ -79,8 +79,7 @@ pub(crate) mod ipc;
 #[path = "adapters/linux/native/mod.rs"]
 pub(crate) mod native;
 #[cfg(target_os = "linux")]
-#[path = "scale.rs"]
-pub(crate) mod scale_contract;
+pub(crate) use agenterm_platform::window as scale_contract;
 
 #[cfg(target_os = "linux")]
 #[path = "adapters/linux/script_http.rs"]
@@ -149,8 +148,7 @@ pub(crate) mod ipc;
 #[path = "adapters/macos/native/mod.rs"]
 pub(crate) mod native;
 #[cfg(target_os = "macos")]
-#[path = "scale.rs"]
-pub(crate) mod scale_contract;
+pub(crate) use agenterm_platform::window as scale_contract;
 
 #[cfg(target_os = "macos")]
 #[path = "adapters/macos/script_http.rs"]
