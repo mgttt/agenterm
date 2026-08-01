@@ -51,7 +51,7 @@ clipboard, IPC, or screenshot modules.
 | `locking` | cross-process path locks and bounded slot permits | target `libc` / `windows-sys` |
 | `ipc` | typed endpoints and native listener/byte stream | `locking`, target native APIs |
 | `pty` | PTY command/master/child lifecycle | `process`, `rmux-pty` |
-| `window` | display facts, geometry, native text/pixel/control hosts and process-window automation | target Win32 APIs / Unix `winit` + `softbuffer` |
+| `window` | display facts, geometry, native text/pixel/control hosts and process-window automation | target Win32 APIs / Linux `x11rb` / Unix `winit` + `softbuffer` / macOS system frameworks |
 | `input` | normalized key classification, UTF-16 text decoding, primary-shortcut policy | `window` |
 | `ime` | preedit/commit state machine and the neutral pixel-window runner when `window` + `input` are enabled | `input` |
 | `activation` | neutral policy, typed requests, native window operation and application wake | `window`, target `winit` / Win32 |
@@ -79,7 +79,7 @@ clipboard, IPC, or screenshot modules.
 | IPC | named pipe | Unix socket | Unix socket |
 | PTY | ConPTY | POSIX PTY | POSIX PTY |
 | window geometry | available | available | available |
-| process-window automation | Win32 | typed Unsupported | typed Unsupported |
+| process-window automation | Win32 | exact-PID X11; Wayland Unsupported | exact-PID Quartz; TCC-gated input |
 | native text window | Win32/GDI | winit + softbuffer | winit + softbuffer |
 | neutral pixel-window host | typed Unsupported | winit + softbuffer | winit + softbuffer |
 | neutral control-window host | Win32 controls/GDI | typed Unsupported | typed Unsupported |

@@ -51,8 +51,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   public filesystem/process facades. Product budgets and receipts remain in the
   unrestricted runtime; duplicate root native adapters are deleted.
 - [x] Script Runtime child-window observation/input/control uses the public
-  process-window contract and selected adapters. Windows is native; Linux/macOS
-  return typed Unsupported without narrowing caller policy.
+  process-window contract and selected adapters. Windows uses exact HWND
+  delivery. Linux now selects one unique viewable EWMH client by exact PID and
+  sends checked X11 key/pointer events only to that client; Wayland remains
+  typed Unsupported. macOS selects one exact-PID layer-0 Quartz window and uses
+  `CGEventPostToPid` after a non-interactive TCC preflight, preserving distinct
+  Unsupported/Failed results. Win32-only messages and child-control operations
+  remain explicitly Unsupported on Unix without narrowing caller policy.
 - [~] Passive system-WebView discovery is public and selected inside the crate,
   with Missing and Failed kept distinct. Native font discovery/metrics and an
   opaque RAII font resource are public; the Windows renderer consumes its RAII
