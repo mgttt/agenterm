@@ -299,6 +299,7 @@ let evidence_suites = #{
     "cli-smoke": true,
     "server-smoke": true,
     "native-ipc-smoke": true,
+    "native-ipc-compat-smoke": true,
     "remote-ui-smoke": true,
     "remote-ui-upgrade-smoke": true,
     "fleet-smoke": true,

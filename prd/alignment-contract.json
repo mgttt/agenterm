@@ -225,7 +225,10 @@
       "status": "shipped",
       "evidence_mode": "black-box",
       "prd": "public native-IPC smoke proves isolated named-pipe and Unix-socket derivation plus native main/dev authority separation",
-      "evidence_ids": ["control.native-local-ipc"]
+      "evidence_ids": [
+        "control.native-local-ipc",
+        "control.native-ipc-published-compatibility"
+      ]
     },
     {
       "id": "architecture.native-platform-facade-v4",

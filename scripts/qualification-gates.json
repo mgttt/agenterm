@@ -138,6 +138,12 @@
       ]
     },
     {
+      "id": "native-ipc-compat-smoke",
+      "evidence": [
+        "control.native-ipc-published-compatibility"
+      ]
+    },
+    {
       "id": "remote-ui-smoke",
       "evidence": [
         "ui.replaceable-client",

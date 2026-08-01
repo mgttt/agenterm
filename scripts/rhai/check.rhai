@@ -811,7 +811,7 @@ if !release {
 if skip_smoke {
     for id in [
         "startup-smoke", "wake-smoke", "cli-smoke", "server-smoke",
-        "native-ipc-smoke", "remote-ui-smoke",
+        "native-ipc-smoke", "native-ipc-compat-smoke", "remote-ui-smoke",
         "remote-ui-upgrade-smoke", "fleet-smoke", "script-smoke",
         "theme-smoke", "working-context-smoke", "workbench-smoke",
         "control-center-smoke"
@@ -1246,7 +1246,7 @@ if !skip_smoke {
     let no_activate = #{"AGENTERM_NO_ACTIVATE":"1"};
     let smoke_ids = [
         "startup-smoke", "wake-smoke", "cli-smoke", "server-smoke",
-        "native-ipc-smoke",
+        "native-ipc-smoke", "native-ipc-compat-smoke",
         "remote-ui-smoke", "remote-ui-upgrade-smoke", "fleet-smoke",
         "script-smoke", "theme-smoke", "working-context-smoke",
         "workbench-smoke", "control-center-smoke"
