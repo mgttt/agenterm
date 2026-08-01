@@ -58,7 +58,6 @@ const TIMER_ID: usize = 1;
 const DEFERRED_CLOSE: u32 = WM_APP + 1;
 const AUTOMATION_SHORTCUT: u32 = WM_APP + 2;
 const AUTOMATION_FOCUS_QUERY: u32 = WM_APP + 3;
-const SYSTEM_MENU_BASE: usize = 0xA100;
 
 struct Backend {
     window: Cell<HWND>,
@@ -499,17 +498,19 @@ pub(crate) fn run_control_window(
         }
         controls.insert(spec.id, child);
     }
-    let system_menu = options
-        .system_menu
-        .iter()
-        .enumerate()
-        .map(|(index, item)| {
-            (
-                item.id,
-                u32::try_from(SYSTEM_MENU_BASE + index).unwrap_or(u32::MAX),
-            )
-        })
-        .collect::<HashMap<_, _>>();
+    let mut system_menu = HashMap::new();
+    for item in &options.system_menu {
+        let native_id = native_menu_id(item.id)?;
+        if system_menu.insert(item.id, native_id).is_some() {
+            unsafe {
+                DestroyWindow(hwnd);
+            }
+            return Err(ControlWindowError::failed(
+                "control_window_duplicate_system_menu_command",
+                format!("duplicate system menu command {}", item.id.0),
+            ));
+        }
+    }
     let backend = Rc::new(Backend {
         window: Cell::new(hwnd),
         controls,
@@ -528,8 +529,8 @@ pub(crate) fn run_control_window(
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, (&mut *state as *mut State) as isize);
     }
     let menu = unsafe { GetSystemMenu(hwnd, 0) };
-    for (index, item) in options.system_menu.iter().enumerate() {
-        let native_id = SYSTEM_MENU_BASE + index;
+    for item in &options.system_menu {
+        let native_id = usize::from(item.id.0);
         unsafe {
             if item.separator_before && AppendMenuW(menu, MF_SEPARATOR, 0, ptr::null()) == 0 {
                 let error = last_error("control_window_system_menu_separator_failed");
@@ -621,6 +622,18 @@ pub(crate) fn run_control_window(
         }
     }
     state.deferred_error.take().map_or(Ok(()), Err)
+}
+
+fn native_menu_id(id: MenuCommandId) -> Result<u32, ControlWindowError> {
+    let native_id = u32::from(id.0);
+    if native_id == 0 || native_id >= 0xF000 {
+        Err(ControlWindowError::failed(
+            "control_window_invalid_system_menu_command",
+            format!("system menu command {} must be in 1..0xF000", id.0),
+        ))
+    } else {
+        Ok(native_id)
+    }
 }
 
 unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
@@ -1148,5 +1161,17 @@ mod tests {
                 PhysicalKeyCode::Digit(7)
             )
         );
+    }
+
+    #[test]
+    fn system_menu_commands_preserve_stable_ids_and_reject_reserved_values() {
+        assert_eq!(native_menu_id(MenuCommandId(0x1f00)).unwrap(), 0x1f00);
+        for invalid in [0, 0xf000, u16::MAX] {
+            assert!(matches!(
+                native_menu_id(MenuCommandId(invalid)),
+                Err(ControlWindowError::Failed { code, .. })
+                    if code == "control_window_invalid_system_menu_command"
+            ));
+        }
     }
 }
