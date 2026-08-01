@@ -76,12 +76,39 @@ fn tracked_diff_exit(repo, cached) {
     command.output().exit_code
 }
 
-fn write(
+fn platform_artifacts(artifact_manifest_path, os_name, arch) {
+    let manifest = rhai::json::parse_file(artifact_manifest_path);
+    require(
+        manifest.schema_version == 2
+            && type_of(manifest.platforms) == "array",
+        "build_metadata_platform_manifest_invalid"
+    );
+    let matches = [];
+    for platform in manifest.platforms {
+        if platform.os == os_name && platform.arch == arch {
+            matches.push(platform);
+        }
+    }
+    require(
+        matches.len == 1,
+        "build_metadata_platform_match:" + os_name + "-" + arch
+    );
+    require(
+        type_of(matches[0].executables) == "array"
+            && matches[0].executables.len > 0,
+        "build_metadata_platform_executables_empty:" +
+            os_name + "-" + arch
+    );
+    #{ executables: matches[0].executables }
+}
+
+fn write_for_artifacts(
     repo_value,
     output_manifest_value,
     artifact_manifest_value,
     staged_directory_value,
-    profile
+    profile,
+    artifacts
 ) {
 let repo = std::path::absolute(repo_value).display;
 let output_manifest = std::path::absolute(output_manifest_value).display;
@@ -112,7 +139,6 @@ require(
     "build_metadata_staged_directory_invalid:" + staged_directory
 );
 
-let artifacts = artifact_manifest::load(artifact_manifest_path);
 let cargo_lock = std::path::join(repo, "Cargo.lock").display;
 let cargo_lock_sha256 = rhai::crypto::sha256_file(cargo_lock);
 let artifact_manifest_sha256 =
@@ -278,4 +304,50 @@ print(
     " (" + profile + ", dirty=" + dirty + ")"
 );
 manifest
+}
+
+fn write(
+    repo_value,
+    output_manifest_value,
+    artifact_manifest_value,
+    staged_directory_value,
+    profile
+) {
+    let artifact_manifest_path =
+        std::path::absolute(artifact_manifest_value).display;
+    let artifacts = artifact_manifest::load(artifact_manifest_path);
+    write_for_artifacts(
+        repo_value,
+        output_manifest_value,
+        artifact_manifest_path,
+        staged_directory_value,
+        profile,
+        artifacts
+    )
+}
+
+fn write_platform(
+    repo_value,
+    output_manifest_value,
+    artifact_manifest_value,
+    staged_directory_value,
+    profile,
+    os_name,
+    arch
+) {
+    let artifact_manifest_path =
+        std::path::absolute(artifact_manifest_value).display;
+    let artifacts = platform_artifacts(
+        artifact_manifest_path,
+        os_name,
+        arch
+    );
+    write_for_artifacts(
+        repo_value,
+        output_manifest_value,
+        artifact_manifest_path,
+        staged_directory_value,
+        profile,
+        artifacts
+    )
 }

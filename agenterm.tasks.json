@@ -976,7 +976,7 @@
     },
     {
       "id": "write-build-metadata",
-      "description": "Write staged executable provenance from frozen source and input identities",
+      "description": "Write staged or platform-target executable provenance from frozen source and input identities",
       "entry": "scripts/rhai/write-build-metadata.rhai",
       "profile": "local",
       "cwd": ".",

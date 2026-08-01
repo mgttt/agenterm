@@ -25,6 +25,13 @@ fn require(condition, message) {
     }
 }
 
+fn bounded_diagnostic(value) {
+    if value.len <= 512 {
+        return value;
+    }
+    value.sub_string(0, 512) + "<truncated>"
+}
+
 fn configured(
     context,
     program,
@@ -65,6 +72,7 @@ fn configured(
     );
     command.env("LOCALAPPDATA", context.config_directory);
     command.env("XDG_CONFIG_HOME", context.config_directory);
+    command.env("HOME", context.home_directory);
     command
 }
 
@@ -343,9 +351,20 @@ context.config_directory = std::path::join(
     "config"
 ).display;
 std::fs::create_dir_all(context.config_directory);
+context.home_directory = std::path::join(
+    context.run_directory,
+    "home"
+).display;
+std::fs::create_dir_all(context.home_directory);
 let unix_bootstrap =
     std::env::has("AGENTERM_BOOTSTRAP_PLATFORM")
         && std::env::get("AGENTERM_BOOTSTRAP_PLATFORM") == "unix";
+let macos_host =
+    (
+        std::env::has("AGENTERM_HOST_OS")
+            && std::env::get("AGENTERM_HOST_OS") == "macos"
+    )
+        || std::fs::exists("/System/Library/CoreServices");
 let direct_unix_root =
     if std::fs::exists("/private/tmp") {
         "/private/tmp"
@@ -543,8 +562,18 @@ try {
     } else {
         false
     };
+    let settings_root = if native_protocol.transport == "named_pipe" {
+        context.config_directory
+    } else if macos_host {
+        std::path::join(
+            std::path::join(context.home_directory, "Library").display,
+            "Application Support"
+        ).display
+    } else {
+        context.config_directory
+    };
     let settings_base = std::path::join(
-        context.config_directory,
+        settings_root,
         if native_protocol.transport == "named_pipe" {
             "AgenTerm"
         } else {
@@ -569,17 +598,23 @@ try {
             && native_endpoint_shape
             && native_protocol.server_scope_id.starts_with("agt-v1-")
             && native_protocol.server_scope_id.len == 39
-            && !native_protocol.endpoint.contains(custom_instance)
-            && (
-                native_protocol.settings_path == expected_native_settings
-                    || (
-                        custom_instance != "main"
-                            && native_protocol.settings_path.ends_with(
-                                expected_native_settings_suffix
-                            )
-                    )
-            ),
+            && !native_protocol.endpoint.contains(custom_instance),
         "native_ipc_custom_native_contract"
+    );
+    let native_settings_match =
+        native_protocol.settings_path == expected_native_settings
+            || (
+                custom_instance != "main"
+                    && native_protocol.settings_path.ends_with(
+                        expected_native_settings_suffix
+                    )
+            );
+    require(
+        native_settings_match,
+        "native_ipc_custom_native_settings_path:expected=" +
+            bounded_diagnostic(expected_native_settings) +
+            ":actual=" +
+            bounded_diagnostic(native_protocol.settings_path)
     );
     if native_protocol.transport == "unix" {
         let socket_path = native_protocol.endpoint.sub_string(5);

@@ -250,12 +250,11 @@ fn executable_hash(metadata, path) {
     matches[0].sha256
 }
 
-fn verify_head(context, repo, server, cli) {
+fn verify_head(context, repo, server, cli, metadata_path) {
     require(
         std::fs::exists(server) && std::fs::exists(cli),
         "native_ipc_compat_head_binaries_missing"
     );
-    let metadata_path = std::path::join(repo, "dist/agenterm.json").display;
     require(
         std::fs::exists(metadata_path),
         "native_ipc_compat_head_metadata_missing"
@@ -475,11 +474,13 @@ let catalog_path = std::path::join(
 ).display;
 let head_server = "";
 let head_cli = "";
+let head_metadata = "";
 let index = 1;
 while index < args.len {
     let option = args[index];
     require(
         option == "--head-server" || option == "--head-cli" ||
+            option == "--head-metadata" ||
             option == "--catalog",
         "native_ipc_compat_option:" + option
     );
@@ -491,6 +492,8 @@ while index < args.len {
         head_server = args[index + 1];
     } else if option == "--head-cli" {
         head_cli = args[index + 1];
+    } else if option == "--head-metadata" {
+        head_metadata = args[index + 1];
     } else {
         catalog_path = args[index + 1];
     }
@@ -515,6 +518,11 @@ if head_cli == "" {
     ).display;
 } else {
     head_cli = std::path::absolute(head_cli).display;
+}
+if head_metadata == "" {
+    head_metadata = std::path::join(repo, "dist/agenterm.json").display;
+} else {
+    head_metadata = std::path::absolute(head_metadata).display;
 }
 let catalog = rhai::json::parse_file(
     std::path::absolute(catalog_path).display
@@ -560,7 +568,7 @@ let failure = "";
 
 try {
     print("STEP verify exact staged HEAD artifact bytes");
-    verify_head(context, repo, head_server, head_cli);
+    verify_head(context, repo, head_server, head_cli, head_metadata);
 
     let published_111 = acquire_release(
         context,

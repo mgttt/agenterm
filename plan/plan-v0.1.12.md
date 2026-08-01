@@ -717,6 +717,16 @@ selected adapter 装配；遗留的 Unix socket / Windows named-pipe 实现副�
 - `server-list` 区分 live、unreachable、stale-test-fixture，并提供安全、
   显式、可审计的 stale cleanup，而不是自动 kill 不确定 PID；
 - GUI、CC、CLI、MCP、Mux 和 Script 使用同一 selector/resolver 表面。
+- 2026-08-01 六平台 CI 复核发现 Unix `build.sh` 按契约只保留
+  `target/<triple>/debug`，但 Linux/macOS compatibility 与 macOS Control Center
+  步骤仍引用从未 stage 的 `dist/*`；现改为消费 matrix 的真实目标目录，并由
+  `write-build-metadata` 按 `artifacts.json` 的精确 OS/arch executable set 生成
+  commit/hash receipt，`native-ipc-compat-smoke` 显式校验该 receipt，未降低
+  exact-source 门禁。macOS 七段计时也改用可移植的纳秒时钟。arm64 native IPC
+  失败另被定位为 smoke 以 Linux/XDG 规则断言 macOS settings path；子进程现使用
+  隔离 HOME，并按 `Library/Application Support` 原生约定验证。Windows owning
+  native IPC smoke、平台 receipt 自测和完整 Quick（469 tests）已通过；这些修复
+  仍须由新 main SHA 的 Linux/macOS matching-host CI 关闭，不能预先记为六平台绿。
 
 ## 七、三平台 GUI 与 Control Center 收敛
 
