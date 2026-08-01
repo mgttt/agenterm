@@ -606,6 +606,10 @@ impl RemoteTerminalSelection {
     }
 }
 
+fn selection_claims_copy_shortcut(selection: Option<&RemoteTerminalSelection>) -> bool {
+    selection.is_some_and(RemoteTerminalSelection::can_copy)
+}
+
 fn remote_surface_navigation(
     source: RemoteFocusSurface,
     control: bool,
@@ -4772,7 +4776,10 @@ impl RemoteWindowState {
             modifiers.alt,
             modifiers.shift,
         ));
-        if primary && key == u16::from(b'C') && self.terminal_selection.is_some() {
+        if primary
+            && key == u16::from(b'C')
+            && selection_claims_copy_shortcut(self.terminal_selection.as_ref())
+        {
             if let Err(error) = self.copy_terminal_selection() {
                 self.last_error = Some(format!("Copy failed: {error:#}"));
             }
@@ -6106,6 +6113,26 @@ mod tests {
         assert!(!selection.complete());
         assert_eq!(selection.phase, RemoteSelectionPhase::Cancelled);
         assert!(!selection.can_copy());
+    }
+
+    #[test]
+    fn only_copyable_selection_claims_ctrl_c_from_the_pty() {
+        let mut selection = RemoteTerminalSelection {
+            tab_id: "@1".to_owned(),
+            rows: 24,
+            columns: 80,
+            anchor: RemoteTerminalPoint { row: 2, column: 3 },
+            active: RemoteTerminalPoint { row: 2, column: 8 },
+            phase: RemoteSelectionPhase::Prepared,
+            cached_text: None,
+        };
+        assert!(!selection_claims_copy_shortcut(None));
+        assert!(!selection_claims_copy_shortcut(Some(&selection)));
+
+        selection.phase = RemoteSelectionPhase::Completed;
+        assert!(!selection_claims_copy_shortcut(Some(&selection)));
+        selection.cached_text = Some("selected".to_owned());
+        assert!(selection_claims_copy_shortcut(Some(&selection)));
     }
 
     #[test]

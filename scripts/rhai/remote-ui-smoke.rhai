@@ -1832,6 +1832,25 @@ try {
             + (marker_column + copy_marker.len - 1) * cell_width
             + cell_width / 2;
     gui.window_pointer("down", selection_start_x, selection_y);
+    // Selection ownership must survive a real screen-generation advance while
+    // the mouse gesture is active.  Typing at the prompt changes another row
+    // without moving the marker row, and reproduces the live dogfood failure
+    // where the 100 ms reconcile tick used to cancel every active selection.
+    let selection_delta = "SEL_DELTA_" + context.run_id;
+    text_cli(
+        context,
+        cli,
+        ["send-keys", "-t", tab_id, "-l", selection_delta]
+    );
+    text_cli(
+        context,
+        cli,
+        [
+            "wait-pane", "-t", tab_id,
+            "--contains", selection_delta,
+            "--timeout-ms", "5000"
+        ]
+    );
     gui.window_pointer(
         "move-held",
         selection_end_x,
@@ -1845,6 +1864,7 @@ try {
         copied == copy_marker,
         "remote_ui_terminal_copy_invalid:" + copied
     );
+    text_cli(context, cli, ["send-keys", "-t", tab_id, "C-c"]);
     let paste_marker = "REMOTE_PASTE_" + context.run_id;
     rhai::clipboard::set_text("echo " + paste_marker);
     gui.window_message(0x0112, 0x1F10, 0);

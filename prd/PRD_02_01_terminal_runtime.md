@@ -28,11 +28,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   input. Live v0.1.12 dogfood found a Windows replaceable-GUI path where a
   selection cannot be established, making Copy unreachable; gesture ownership,
   capture and public clipboard evidence must be requalified before restoring
-  shipped status. Current generation reconciliation cancels selection on any
-  output delta rather than only a true geometry/tab invalidation, and a drag
-  cancelled by that path may retain mouse capture. The owning journey must
-  inject output during the gesture and prove phase, highlight, Ctrl+C/system
-  menu text and capture release.
+  shipped status. The repair now preserves a gesture across content generations
+  when tab and grid geometry are unchanged, releases capture after completing
+  the phase, and caches the completed text. Only a completed non-empty selection
+  may claim Ctrl+C; prepared or empty selection state leaves Ctrl+C available as
+  PTY interrupt. The owning journey now injects real PTY output after pointer
+  down and proves system-menu clipboard text; live highlight/capture observation
+  and direct Ctrl+C copy evidence remain before restoring shipped status.
 - [x] window-icon system menu exposes focus-aware Copy and Paste: native
   edit controls receive their standard messages, while terminal Copy uses
   the active cell selection and terminal Paste uses the active PTY

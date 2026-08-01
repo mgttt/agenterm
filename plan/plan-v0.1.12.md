@@ -387,7 +387,12 @@ Release 全部是本轮明确非目标。
   拒绝；drag 中取消还可能漏掉 `ReleaseCapture`。修复需区分 same-grid 内容推进
   与真实尺寸/tab 失效，缓存完成态复制文本，并在 drag 中注入输出验证 phase、
   Ctrl+C/system-menu Copy 和 capture release。现有“先等输出静止再同步拖拽”的
-  smoke 不足以证明该行为。
+  smoke 不足以证明该行为。generation/capture/cached-text 修复已经存在，但 owning
+  smoke 现已补成 pointer down 后经 public CLI 注入唯一 PTY delta、等待 GUI reconcile，
+  再完成拖拽并从 system menu Copy；旧 generation 绑定会在该路径确定失败。另修正
+  Ctrl+C arbitration：只有 non-empty completed cached selection 才接管 Copy，prepared/
+  empty state 不再吞掉 PTY interrupt。13 项 frontend tests 通过；真实 Windows journey
+  以及拖出 viewport auto-scroll 仍未闭环，因此保持未完成。
 
 这些 dogfood 缺陷优先于新增 Cockpit 装饰和远期 Candidate 工作；修复必须保留
 结构化 snapshot 与 PNG/公开 input journey 证据，并避免多个 agent 并发编辑
