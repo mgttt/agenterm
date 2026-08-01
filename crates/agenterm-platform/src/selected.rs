@@ -199,6 +199,18 @@ pub(crate) mod process_observation;
 #[path = "adapters/macos/process_observation.rs"]
 pub(crate) mod process_observation;
 
+#[cfg(all(feature = "process-security", windows))]
+#[path = "adapters/windows/process_security.rs"]
+pub(crate) mod process_security;
+
+#[cfg(all(feature = "process-security", target_os = "linux"))]
+#[path = "adapters/linux/process_security.rs"]
+pub(crate) mod process_security;
+
+#[cfg(all(feature = "process-security", target_os = "macos"))]
+#[path = "adapters/macos/process_security.rs"]
+pub(crate) mod process_security;
+
 #[cfg(all(feature = "process-spawn", windows))]
 #[path = "adapters/windows/process_spawn.rs"]
 pub(crate) mod process_spawn;
