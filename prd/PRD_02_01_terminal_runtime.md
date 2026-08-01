@@ -77,10 +77,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   allocation and a direct-paint fallback. Same-grid and duplicate in-flight
   resize requests are now suppressed across the typed IPC boundary, keyed by
   server epoch and stable tab ID, and redundant class-wide resize redraw flags
-  are removed. Focused structural tests pass, but they cannot establish temporal
-  visual stability. Diagnostic paint counts and high-output plus idle real-time
-  dogfood evidence on the new binary remain required before restoring shipped
-  status.
+  are removed. White-box comparison with the pre-platform-extraction host then
+  found a concrete regression: the new parent window had lost
+  `WS_CLIPCHILDREN`, so every full-client `BitBlt` could overwrite native
+  EDIT/BUTTON pixels before each child repainted. The platform host again clips
+  child HWND regions, with a style contract test. Focused structural tests pass,
+  but they cannot establish temporal visual stability. Diagnostic paint counts
+  and high-output plus idle real-time dogfood evidence on the new binary remain
+  required before restoring shipped status.
 - [~] ordinary terminal keys and modifiers are encoded for the active PTY;
   live v0.1.12 dogfood found `Shift+Tab` dropped while terminal focus was
   active. The current repair introduces one shared xterm named-key modifier

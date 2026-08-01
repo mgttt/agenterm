@@ -35,7 +35,8 @@ use windows_sys::Win32::{
             WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP,
             WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY, WM_PAINT, WM_PASTE, WM_RBUTTONDOWN,
             WM_RBUTTONUP, WM_SETFOCUS, WM_SIZE, WM_SYSCOMMAND, WM_TIMER, WNDCLASSW, WS_CHILD,
-            WS_EX_CLIENTEDGE, WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE, WS_VSCROLL,
+            WS_CLIPCHILDREN, WS_EX_CLIENTEDGE, WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE,
+            WS_VSCROLL,
         },
     },
 };
@@ -424,7 +425,7 @@ pub(crate) fn run_control_window(
             0,
             class.as_ptr(),
             title.as_ptr(),
-            WS_OVERLAPPEDWINDOW,
+            top_level_window_style(),
             CW_USEDEFAULT,
             CW_USEDEFAULT,
             i32_size(options.initial_size.width),
@@ -1119,6 +1120,9 @@ fn color(c: Rgb8) -> COLORREF {
 fn i32_size(v: u32) -> i32 {
     i32::try_from(v).unwrap_or(i32::MAX)
 }
+fn top_level_window_style() -> u32 {
+    WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN
+}
 fn wide(v: &str) -> Vec<u16> {
     v.encode_utf16().chain(std::iter::once(0)).collect()
 }
@@ -1129,6 +1133,15 @@ fn last_error(code: &'static str) -> ControlWindowError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn top_level_window_clips_native_children_from_parent_paint() {
+        assert_ne!(top_level_window_style() & WS_CLIPCHILDREN, 0);
+        assert_eq!(
+            top_level_window_style() & WS_OVERLAPPEDWINDOW,
+            WS_OVERLAPPEDWINDOW
+        );
+    }
 
     #[test]
     fn named_and_physical_key_identity_is_stable() {

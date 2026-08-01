@@ -339,6 +339,9 @@ Release 全部是本轮明确非目标。
   tab ID + rows/columns 去重尚未进入 delta 的在途请求；同网格不再穿过 IPC，新的
   epoch/tab/grid 仍会发送。Win32 class 同时移除与 `WM_SIZE` 显式 invalidation 重复的
   `CS_HREDRAW|CS_VREDRAW`。纯测试覆盖 current/in-flight 去重及 epoch/tab 失效。
+  后续白箱 diff 又确认平台 host 抽取时丢失旧实现的 `WS_CLIPCHILDREN`：父窗全客户区
+  `BitBlt` 会覆盖 native EDIT/BUTTON，再与 child 自绘交替，直接造成边框和内容闪烁。
+  top-level style 已恢复 child clipping，并由 Windows host contract test 固定。
   该证据只能证明源头被切断和帧提交结构，不能证明时间域视觉效果；新构建的
   高输出/idle 60fps 真机观察和 paint/invalidate telemetry 仍是关闭条件。
 - [ ] alternate-screen harness 无法本地向上滚动；初步证据指向 `vt100`
