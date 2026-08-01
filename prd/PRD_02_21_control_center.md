@@ -162,7 +162,12 @@ Control Center is the product name; the executable family uses
   in the interval between server active-tab progress and local worker receipt.
   The Windows public smoke derives pointer coordinates from the actual bounded
   three-row viewport and proves keyboard then pointer selection against one
-  stable CC/server/epoch. Linux/macOS cross-checks pass; final three-platform
+  stable CC/server/epoch. Ordinary CI run `30716123255` proved macOS ARM64
+  keyboard selection but timed out on the following pointer selection because
+  the journey mixed independent renderer and WindowServer scale sources.
+  Commit `7a52d87` derives the point-to-pixel conversion from the observed
+  WindowServer frame width and exact renderer framebuffer width, while retaining
+  bounded geometry and no-coordinate-retry requirements. Final Linux/macOS
   positive journey evidence remains open. Windows qualification evidence and
   Linux/macOS matching-host evidence are registered in separate gate manifests
   but participate in one exact PRD alignment parity check; cross-target compile
@@ -429,8 +434,9 @@ future promotion gates.
   during `MouseInput` and converts AppKit bottom-left logical coordinates to
   renderer top-left physical coordinates. `window_client_rect` is typed
   Unsupported on macOS rather than relabeling WindowServer outer bounds; the
-  journey explicitly combines outer-frame geometry with renderer scale. A new
-  positive ARM64 receipt remains required.
+  journey now derives one point-to-pixel scale from the observed outer-frame
+  width and exact client framebuffer width instead of applying the independent
+  winit scale twice. A new positive ARM64 receipt remains required.
 
 ## Explicit v0.1.11 non-goals
 

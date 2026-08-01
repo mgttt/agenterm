@@ -142,8 +142,16 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   leaves no worker or nested-process orphan. Linux/macOS retain the direct
   `agenterm-script` protocol and compile/unit coverage, but no Unix hosted-CLI
   or native interactive Ctrl+C parity is claimed without its own public native
-  journey. Arrow-key editing/history remains open; memory-only `:history` is
-  not presented as that editor behavior.
+  journey. Ordinary CI run `30716123255` exposed that a nested Script command
+  can create another Unix process group outside the outer worker's `killpg`.
+  Commit `72eb861` records transitive descendants before termination, verifies
+  start identity before killing cross-group children, classifies Linux zombie/
+  dead proc states correctly, and adds a matching-host process-group contract
+  test. Its REPL fixture gives the nested worker a 10-second deadline but
+  requires cleanup within two seconds, so self-timeout cannot fake orphan-free
+  evidence. A new Linux/macOS CI receipt is still required. Arrow-key editing/
+  history remains open; memory-only `:history` is not presented as that editor
+  behavior.
 
 ## v0.1.9 product position
 
@@ -253,9 +261,10 @@ and it is not positioned as a restricted security plugin.
   command string or exposes Rust ownership/trait/OS-handle internals. Children
   are invocation-owned and inherit supervisor process-tree cleanup. v0.1.12
   also gives each `Child` its own Windows kill-on-close Job Object or Unix
-  process group: `Child.kill_tree()` and deadline/Drop cleanup terminate only
-  that owned tree, are idempotent after disarm, and preserve unrelated
-  processes;
+  process group. Unix cleanup also snapshots transitive descendants with start
+  identities and terminates children that deliberately create nested process
+  groups; `Child.kill_tree()` and deadline/Drop cleanup terminate only that
+  owned tree, are idempotent after disarm, and preserve unrelated processes;
   `std::process::id()` exposes the current supervised worker PID for
   owned-resource naming and live-owner protocols without treating it as stable
   invocation identity.

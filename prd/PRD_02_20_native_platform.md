@@ -40,7 +40,12 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   lifetime and maps typed failures into the product protocol.
 - [x] Script worker process-tree ownership consumes the crate process facade:
   Windows Job Objects and Unix process groups have no duplicate root native
-  implementation. AgenTerm-specific audit-path naming remains product policy.
+  implementation. Unix guards snapshot transitive descendants before root
+  termination and re-check process start identity before killing any child
+  that escaped into a nested process group; Linux `Z/X/x` proc states are Dead,
+  not live service owners. The cross-group matching-host test is compiled for
+  Linux/macOS and still awaits its new ordinary-CI execution receipt.
+  AgenTerm-specific audit-path naming remains product policy.
 - [x] Product path composition consumes `filesystem::host_directories` and
   `executable_name`; the three root OS path adapters are deleted. AgenTerm
   directory/file naming remains product policy without compile-time OS selection.

@@ -833,6 +833,14 @@ Cockpit
   产生 `CursorMoved`，现从当前 `NSEvent.locationInWindow` 取得按下事件自身坐标。
   同时停止把 WindowServer outer frame 冒充 client rect。两项均已通过对应 target
   all-feature compile check，仍等待新的 matching-host 行为回执，不能提前记绿；
+- exact-SHA `8d39af2` 的普通 CI run `30716123255` 随后给出两个独立失败：Linux
+  x64 的 REPL hard-kill 暴露嵌套 Script command 新建 process group 后可能逃逸外层
+  `killpg`，macOS ARM64 则已完成 keyboard active-tab 转换但 pointer 命中超时。
+  `72eb861` 以传递后代快照 + start identity 复核清理跨 group 子进程，并用 10 秒
+  内层 deadline / 2 秒 cleanup 门槛排除自退假阳性；`7a52d87` 用 WindowServer
+  外框宽度与 renderer framebuffer 宽度推导唯一点击 scale，不加 sleep、不尝试备用
+  坐标。Linux/macOS target tests 与 warnings-denied Clippy 已编译通过，新的普通 CI
+  matching-host 回执返回前两项仍保持开放；
 - Control Center evidence ownership 不再游离于 alignment：Windows required
   qualification gate 与 Linux/macOS host-native gate 分别登记，`prd-alignment`
   对三者的 evidence ID、脚本发射点和 partial PRD 状态做同一 exact parity。
