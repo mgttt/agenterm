@@ -99,9 +99,9 @@ owned by that value.
 Private state publishers can call `filesystem::protect_private_directory`
 after creating their directory and open receipts with
 `filesystem::private_create_new_options`. Unix requests owner-only `0700` and
-`0600` modes; Windows preserves the inherited ACL of the caller-owned
-directory. Exclusive creation fails rather than overwriting an existing
-receipt.
+`0600` modes; Windows replaces inheritance with a protected,
+current-user-only ACL that propagates to child objects. Exclusive creation
+fails rather than overwriting an existing receipt.
 
 Windows embedders can synchronously capture an owned native window without
 exposing `HWND` in their public API:

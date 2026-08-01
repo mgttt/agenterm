@@ -75,7 +75,7 @@ pub fn protect_private_directory(path: &Path) -> io::Result<()> {
 /// Build exclusive-create options for a private state file.
 ///
 /// Unix adapters additionally request mode `0600`; Windows relies on the
-/// inherited ACL of the caller-owned private directory.
+/// protected current-user-only ACL of the caller-owned private directory.
 #[must_use]
 #[cfg(feature = "filesystem")]
 pub fn private_create_new_options() -> OpenOptions {
