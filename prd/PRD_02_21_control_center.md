@@ -265,10 +265,13 @@ future promotion gates.
   outer measurement deadline made build timing unavailable, and license,
   first-paint/RSS and three-platform evidence remain open. The decision is
   therefore `defer`, not adoption.
-- [ ] Windows tests distinguish installed WebView2, missing runtime and
-  fallback; they do not silently bundle a fixed browser runtime. macOS proves
-  WKWebView local-assets, Retina capture, reload/crash fallback; Linux reports
-  WebKitGTK availability or a typed unavailable result and never fakes a PNG.
+- [~] the fallback launcher and direct-WRY host now share typed
+  `failure { code, stage, detail }` receipts for missing/invalid host,
+  runtime probe, native window and WebView creation failures; black-box tests
+  prove missing and invalid siblings exit 69 while retaining the native
+  renderer. A real Windows machine with WebView2 deliberately unavailable is
+  still required, as are macOS WKWebView reload/crash fallback and Linux
+  WebKitGTK unavailable/PNG evidence; no fixed browser runtime is bundled.
 - [~] the experiment loads only integrity-identified local assets. Its tested
   bridge-v1 core admits only `host.ready`, `host.facts`, and `fleet.snapshot`
   with exact origin, top-frame, nonce, request-id, deadline, 64 KiB and

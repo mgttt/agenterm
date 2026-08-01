@@ -1,6 +1,6 @@
 use agenterm_cc_web::{
-    ASSET_VERSION, CONTENT_SECURITY_POLICY, CONTRACT_VERSION, LOCAL_URL, asset_for_path,
-    canonical_local_path, is_allowed_navigation,
+    ASSET_VERSION, CONTENT_SECURITY_POLICY, CONTRACT_VERSION, HostFailure, HostFailureCode,
+    HostFailureStage, LOCAL_URL, asset_for_path, canonical_local_path, is_allowed_navigation,
 };
 use serde::Serialize;
 use std::borrow::Cow;
@@ -25,6 +25,7 @@ struct HostReceipt {
     implementation: &'static str,
     status: &'static str,
     reason: String,
+    failure: Option<HostFailure>,
     runtime: &'static str,
     runtime_version: Option<String>,
     packaged_assets: &'static str,
@@ -56,7 +57,14 @@ fn main() -> ExitCode {
         Ok(version) => version,
         Err(error) => {
             return print_receipt(
-                unavailable(no_activate, format!("system runtime unavailable: {error}")),
+                unavailable(
+                    no_activate,
+                    HostFailure::new(
+                        HostFailureCode::SystemRuntimeUnavailable,
+                        HostFailureStage::RuntimeProbe,
+                        error.to_string(),
+                    ),
+                ),
                 ExitCode::from(69),
             );
         }
@@ -68,6 +76,7 @@ fn main() -> ExitCode {
                 implementation: "direct-wry",
                 status: "available",
                 reason: "system runtime version query succeeded".into(),
+                failure: None,
                 runtime: platform_runtime(),
                 runtime_version: Some(runtime_version),
                 packaged_assets: ASSET_VERSION,
@@ -103,7 +112,11 @@ fn run_host(runtime_version: String, no_activate: bool, smoke: bool) -> ExitCode
             return print_receipt(
                 unavailable(
                     no_activate,
-                    format!("native host window unavailable: {error}"),
+                    HostFailure::new(
+                        HostFailureCode::NativeWindowUnavailable,
+                        HostFailureStage::NativeWindow,
+                        error.to_string(),
+                    ),
                 ),
                 ExitCode::from(69),
             );
@@ -145,7 +158,11 @@ fn run_host(runtime_version: String, no_activate: bool, smoke: bool) -> ExitCode
             return print_receipt(
                 unavailable(
                     no_activate,
-                    format!("system WebView creation failed: {error}"),
+                    HostFailure::new(
+                        HostFailureCode::WebviewCreationFailed,
+                        HostFailureStage::WebviewCreation,
+                        error.to_string(),
+                    ),
                 ),
                 ExitCode::from(69),
             );
@@ -165,6 +182,7 @@ fn run_host(runtime_version: String, no_activate: bool, smoke: bool) -> ExitCode
                         implementation: "direct-wry",
                         status: "loaded",
                         reason: "packaged Cockpit load completed".into(),
+                        failure: None,
                         runtime: platform_runtime(),
                         runtime_version: Some(runtime_version.clone()),
                         packaged_assets: ASSET_VERSION,
@@ -209,12 +227,13 @@ fn protocol_response(path: &str) -> Response<Cow<'static, [u8]>> {
     }
 }
 
-fn unavailable(no_activate: bool, reason: String) -> HostReceipt {
+fn unavailable(no_activate: bool, failure: HostFailure) -> HostReceipt {
     HostReceipt {
         schema: CONTRACT_VERSION,
         implementation: "direct-wry",
         status: "unavailable",
-        reason,
+        reason: failure.detail.clone(),
+        failure: Some(failure),
         runtime: platform_runtime(),
         runtime_version: None,
         packaged_assets: ASSET_VERSION,

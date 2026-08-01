@@ -1,5 +1,6 @@
 use agenterm_cc_web::{
-    CONTRACT_VERSION, LauncherReceipt, asset_manifest, direct_host_path, tauri_host_path,
+    CONTRACT_VERSION, HostFailure, HostFailureCode, HostFailureStage, LauncherReceipt,
+    asset_manifest, direct_host_path, host_failure_from_receipt, tauri_host_path,
 };
 use std::env;
 use std::process::{Command, ExitCode};
@@ -28,10 +29,13 @@ fn main() -> ExitCode {
         Err(error) => {
             return unavailable(
                 implementation,
-                "current_exe_failed",
+                HostFailure::new(
+                    HostFailureCode::CurrentExecutableFailed,
+                    HostFailureStage::Launcher,
+                    error.to_string(),
+                ),
                 None,
                 None,
-                error.to_string(),
                 None,
             );
         }
@@ -51,12 +55,16 @@ fn main() -> ExitCode {
     let output = match command.output() {
         Ok(output) => output,
         Err(error) => {
+            let code = if error.kind() == std::io::ErrorKind::NotFound {
+                HostFailureCode::HostExecutableMissing
+            } else {
+                HostFailureCode::HostLaunchFailed
+            };
             return unavailable(
                 implementation,
-                "host_unavailable",
+                HostFailure::new(code, HostFailureStage::Launcher, error.to_string()),
                 Some(host_path),
                 None,
-                error.to_string(),
                 None,
             );
         }
@@ -81,29 +89,29 @@ fn main() -> ExitCode {
         .unwrap_or_else(|| std::str::from_utf8(&output.stderr).unwrap_or("host failed"))
         .trim()
         .to_owned();
+    let failure = host_failure_from_receipt(parsed.as_ref(), detail);
     unavailable(
         implementation,
-        "runtime_or_host_unavailable",
+        failure,
         Some(host_path),
         output.status.code(),
-        detail,
         parsed,
     )
 }
 
 fn unavailable(
     implementation: &'static str,
-    reason: &str,
+    failure: HostFailure,
     host_path: Option<std::path::PathBuf>,
     code: Option<i32>,
-    detail: String,
     host_receipt: Option<serde_json::Value>,
 ) -> ExitCode {
     let receipt = LauncherReceipt {
         schema: CONTRACT_VERSION,
         implementation: "fallback-launcher",
         status: "unavailable",
-        reason: format!("{reason}: {detail}"),
+        reason: failure.detail.clone(),
+        failure,
         requested_implementation: implementation,
         host_path: host_path.unwrap_or_default(),
         host_exit_code: code,

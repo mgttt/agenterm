@@ -27,6 +27,15 @@ report `status=unavailable`, `active_renderer=native` when the host executable,
 loader or runtime is unavailable. It never downloads a runtime and the
 workspace contains no fixed browser runtime.
 
+Unavailable receipts also contain a stable `failure` object with a typed
+`code`, lifecycle `stage`, and diagnostic `detail`. The launcher distinguishes
+`host_executable_missing`, `host_launch_failed`, `host_process_failed`, and
+`host_receipt_invalid`; a conforming direct host reports
+`system_runtime_unavailable`, `native_window_unavailable`, or
+`webview_creation_failed`. Black-box tests stage the launcher without a sibling
+and with an invalid native executable, proving both paths retain the native
+renderer and exit 69 without depending on the installed WebView runtime.
+
 The direct host:
 
 - serves three `include_bytes!` assets from the single

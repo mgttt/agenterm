@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
@@ -57,17 +57,95 @@ pub struct AssetManifest {
     pub assets: Vec<AssetIdentity>,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HostFailureCode {
+    CurrentExecutableFailed,
+    HostExecutableMissing,
+    HostLaunchFailed,
+    SystemRuntimeUnavailable,
+    NativeWindowUnavailable,
+    WebviewCreationFailed,
+    HostProcessFailed,
+    HostReceiptInvalid,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HostFailureStage {
+    Launcher,
+    RuntimeProbe,
+    NativeWindow,
+    WebviewCreation,
+    HostProcess,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+pub struct HostFailure {
+    pub code: HostFailureCode,
+    pub stage: HostFailureStage,
+    pub detail: String,
+}
+
+impl HostFailure {
+    pub fn new(code: HostFailureCode, stage: HostFailureStage, detail: impl Into<String>) -> Self {
+        Self {
+            code,
+            stage,
+            detail: detail.into(),
+        }
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct LauncherReceipt {
     pub schema: &'static str,
     pub implementation: &'static str,
     pub status: &'static str,
     pub reason: String,
+    pub failure: HostFailure,
     pub requested_implementation: &'static str,
     pub host_path: PathBuf,
     pub host_exit_code: Option<i32>,
     pub host_receipt: Option<serde_json::Value>,
     pub active_renderer: &'static str,
+}
+
+pub fn host_failure_from_receipt(
+    receipt: Option<&serde_json::Value>,
+    detail: impl Into<String>,
+) -> HostFailure {
+    let detail = detail.into();
+    let Some(receipt) = receipt else {
+        return HostFailure::new(
+            HostFailureCode::HostProcessFailed,
+            HostFailureStage::HostProcess,
+            detail,
+        );
+    };
+    if receipt.get("schema").and_then(serde_json::Value::as_str) != Some(CONTRACT_VERSION)
+        || receipt.get("status").and_then(serde_json::Value::as_str) != Some("unavailable")
+    {
+        return HostFailure::new(
+            HostFailureCode::HostReceiptInvalid,
+            HostFailureStage::HostProcess,
+            detail,
+        );
+    }
+    let Some(failure) = receipt.get("failure") else {
+        return HostFailure::new(
+            HostFailureCode::HostReceiptInvalid,
+            HostFailureStage::HostProcess,
+            detail,
+        );
+    };
+    serde_json::from_value(failure.clone()).unwrap_or_else(|_| {
+        HostFailure::new(
+            HostFailureCode::HostReceiptInvalid,
+            HostFailureStage::HostProcess,
+            detail,
+        )
+    })
 }
 
 pub fn asset_manifest() -> AssetManifest {
@@ -224,5 +302,46 @@ mod tests {
             tauri_host_path(launcher),
             Path::new("/tmp/agenterm-cc-web-tauri")
         );
+    }
+
+    #[test]
+    fn typed_host_failure_is_inherited_only_from_a_valid_receipt() {
+        let receipt = serde_json::json!({
+            "schema": CONTRACT_VERSION,
+            "status": "unavailable",
+            "failure": {
+                "code": "system_runtime_unavailable",
+                "stage": "runtime_probe",
+                "detail": "runtime absent"
+            }
+        });
+        assert_eq!(
+            host_failure_from_receipt(Some(&receipt), "fallback"),
+            HostFailure::new(
+                HostFailureCode::SystemRuntimeUnavailable,
+                HostFailureStage::RuntimeProbe,
+                "runtime absent"
+            )
+        );
+
+        let absent = host_failure_from_receipt(None, "host exited");
+        assert_eq!(absent.code, HostFailureCode::HostProcessFailed);
+        assert_eq!(absent.stage, HostFailureStage::HostProcess);
+
+        let untyped = serde_json::json!({
+            "schema": CONTRACT_VERSION,
+            "status": "unavailable"
+        });
+        let invalid = host_failure_from_receipt(Some(&untyped), "untyped receipt");
+        assert_eq!(invalid.code, HostFailureCode::HostReceiptInvalid);
+
+        let unknown_code = serde_json::json!({
+            "schema": CONTRACT_VERSION,
+            "status": "unavailable",
+            "failure": { "code": "invented", "stage": "runtime_probe", "detail": "x" }
+        });
+        let invalid = host_failure_from_receipt(Some(&unknown_code), "unknown code");
+        assert_eq!(invalid.code, HostFailureCode::HostReceiptInvalid);
+        assert_eq!(invalid.detail, "unknown code");
     }
 }
