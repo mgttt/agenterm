@@ -563,17 +563,27 @@ integrated validation recorded below):
   Unsupported. Crate tests pass 49/49 with warnings denied; root all-target
   check and Clippy also pass. Product `RemoteWindowState` integration, native
   automation injection and non-Windows control shells remain incomplete.
+- [x] The control-window host now preserves native EDIT selection semantics
+  through typed copy/paste operations and synchronously flushes a requested
+  redraw before native PNG capture, so structured snapshot state and captured
+  pixels cannot describe adjacent frames. The same increment exposes private
+  state-directory/file primitives through the crate filesystem feature: Unix
+  requests `0700` directories and exclusive `0600` files, while Windows keeps
+  the caller-owned inherited ACL. All-feature crate Clippy and 50 tests pass;
+  the minimal filesystem feature Clippy and three tests pass. Evidence:
+  `d81ce70`, `f85ffeb`.
 - [x] Root IPC, Script-host availability, supervisor-audit path policy and XRGB
   screenshot encoding no longer require selected adapter modules. They compose
   product paths/capability facts from the crate `PlatformKind` or call the crate
   facade directly; twelve duplicate product adapter files are deleted. TLS,
   Control Center and frontend selection remain until their typed prerequisites
   are complete.
-- [x] Control Center state-directory protection, exclusive state-file creation,
-  atomic replacement, existing-window focus, and direct native capture now
-  call `services::control_center → selected → adapters/{windows,linux,macos}`.
-  The root facade retains only the typed strategy projection; shell rendering,
-  no-activate, focus, capture, and event-loop mechanics are adapter-owned.
+- [~] Control Center state-directory protection and exclusive state-file
+  creation now have validated public crate primitives; product focus/capture
+  routing has been rewritten toward typed activation/screenshot facades and
+  removal of its three root selectors. That product integration remains
+  uncommitted and is not complete until the integrated root builds and its
+  public Control Center smoke passes.
 - [x] Passive system-WebView runtime discovery now calls
   `services::webview → selected → adapters/{windows,linux,macos}`. The root
   facade and shared facts contain no target selection; WebView2, WebKitGTK,

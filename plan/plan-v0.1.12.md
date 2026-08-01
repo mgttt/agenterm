@@ -261,6 +261,12 @@ present。零尺寸 paint 被跳过，surface/present/menu failures typed，clas
 `CS_DBLCLKS`。Linux/macOS 明确 Unsupported。49 项 crate tests、crate 和 root
 warnings-denied Clippy、root all-target check 通过；root product controller 尚未接入，native
 automation injection、跨平台 control shell 仍未完成。
+后续 host 语义增量已以 `d81ce70` 推送：native EDIT copy/paste 保持选区和插入点，截图在
+capture 前同步刷新待处理 redraw，避免 snapshot 与 PNG 错帧。`f85ffeb` 则把私有状态目录/
+exclusive state file 建模为 filesystem feature 的公开能力，Unix 请求 `0700/0600`，Windows
+保留继承 ACL；all-feature 50 项测试和最小 filesystem 3 项测试均通过 warnings-denied
+Clippy。Control Center 产品调用方清理仍等待与 remote frontend 共同完成 root 编译，不能据此
+提前标记总边界完成。
 同时，root selector 的 IPC、script-host、supervisor-audit 与 XRGB screenshot 分支已改为
 cfg-free product policy/直接 crate facade，12 个重复 adapter 文件删除；TLS、Control Center
 和 frontend 选择仍按其未完成前置保留。Windows batch aliases 现在由 `.gitattributes` 强制
