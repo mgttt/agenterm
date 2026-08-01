@@ -855,7 +855,13 @@ Cockpit
   仍保持单坐标、无 retry。首个 exact-SHA `88e5396` run `30718014866` 已通过
   macOS ARM64 build/Clippy/native IPC，但 smoke 在输入前因诊断 map 残留已删除的
   `client_left`/`client_top` 变量名而 typed runtime fail；该机械错误已改为新的 point
-  变量，不能把本 run 计作坐标行为结果。Linux 正向结果与 macOS ARM64 正向回执仍开放；
+  变量，不能把本 run 计作坐标行为结果。后继 exact-SHA `caf3833` run
+  `30718160436` 越过诊断错误、再次证明 keyboard selection 与三条 live PTY，
+  但 pointer 仍未转换 active tab，因此 authoritative scale 假设被证伪。白箱追踪
+  发现 `CGEventPostToPid` 的 windowless NSEvent 以屏幕坐标返回 `locationInWindow`，
+  而 shell 曾无条件当作 client-local；adapter 现按 event/target windowNumber 仲裁，
+  同窗直接消费、windowless 经目标 NSWindow 转换、foreign window fail-closed，仍不增加
+  retry 或 sleep。Linux 正向结果与 macOS ARM64 正向回执仍开放；
 - Control Center evidence ownership 不再游离于 alignment：Windows required
   qualification gate 与 Linux/macOS host-native gate 分别登记，`prd-alignment`
   对三者的 evidence ID、脚本发射点和 partial PRD 状态做同一 exact parity。

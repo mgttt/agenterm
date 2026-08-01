@@ -317,20 +317,56 @@ impl ApplicationHandler for App {
 
 #[cfg(target_os = "macos")]
 fn macos_current_event_pointer_position(window: &Window) -> Option<(i32, i32)> {
-    use objc2_app_kit::NSApplication;
+    use objc2_app_kit::{NSApplication, NSView};
     use objc2_foundation::MainThreadMarker;
 
     let marker = MainThreadMarker::new()?;
     let event = NSApplication::sharedApplication(marker).currentEvent()?;
-    // SAFETY: currentEvent retains the NSEvent while locationInWindow is read
-    // on the AppKit main thread handling this MouseInput callback.
+    let handle = window.window_handle().ok()?;
+    let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
+        return None;
+    };
+    // SAFETY: winit owns the NSView for at least the lifetime of `window`; this
+    // callback runs on AppKit's main thread and borrows it only for this call.
+    let view = unsafe { &*handle.ns_view.as_ptr().cast::<NSView>() };
+    let target_window = view.window()?;
+    // SAFETY: currentEvent retains the NSEvent while its window identity and
+    // location are read on the AppKit main thread handling MouseInput.
+    let event_window_number = unsafe { event.windowNumber() };
+    // SAFETY: the retained target NSWindow is alive for this call.
+    let target_window_number = unsafe { target_window.windowNumber() };
     let location = unsafe { event.locationInWindow() };
+    let location = match macos_event_coordinate_space(event_window_number, target_window_number)? {
+        MacosEventCoordinateSpace::Window => location,
+        MacosEventCoordinateSpace::Screen => target_window.convertPointFromScreen(location),
+    };
     macos_physical_pointer_position(
         window.inner_size().height,
         window.scale_factor(),
         location.x,
         location.y,
     )
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum MacosEventCoordinateSpace {
+    Window,
+    Screen,
+}
+
+#[cfg(target_os = "macos")]
+fn macos_event_coordinate_space(
+    event_window_number: isize,
+    target_window_number: isize,
+) -> Option<MacosEventCoordinateSpace> {
+    if event_window_number == target_window_number {
+        Some(MacosEventCoordinateSpace::Window)
+    } else if event_window_number == 0 {
+        Some(MacosEventCoordinateSpace::Screen)
+    } else {
+        None
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -593,6 +629,20 @@ mod tests {
             macos_physical_pointer_position(468, 1.0, 120.0, 200.0),
             Some((120, 268))
         );
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn appkit_event_coordinate_space_distinguishes_windowless_events() {
+        assert_eq!(
+            macos_event_coordinate_space(42, 42),
+            Some(MacosEventCoordinateSpace::Window)
+        );
+        assert_eq!(
+            macos_event_coordinate_space(0, 42),
+            Some(MacosEventCoordinateSpace::Screen)
+        );
+        assert_eq!(macos_event_coordinate_space(7, 42), None);
     }
 
     #[test]

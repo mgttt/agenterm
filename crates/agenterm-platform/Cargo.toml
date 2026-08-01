@@ -227,7 +227,7 @@ softbuffer = { version = "0.4", optional = true }
 x11rb = { version = "0.13.2", optional = true, default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2-app-kit = { version = "0.2.2", optional = true, features = ["NSApplication", "NSResponder"] }
+objc2-app-kit = { version = "0.2.2", optional = true, features = ["NSApplication", "NSEvent", "NSResponder", "NSView", "NSWindow"] }
 objc2-foundation = { version = "0.2.2", optional = true }
 
 [dependencies]
