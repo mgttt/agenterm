@@ -3,6 +3,8 @@ use std::{env, path::PathBuf, time::SystemTime};
 use serde::Serialize;
 use serde_json::Value;
 
+use crate::platform::ModifierState;
+
 pub(crate) const BACKSPACE_INPUT: &[u8] = b"\x7f";
 
 pub(crate) const COMMAND_CATALOG_SCHEMA_VERSION: u32 = 1;
@@ -1041,6 +1043,7 @@ pub(crate) fn tmux_key_bytes(key: &str) -> Option<Vec<u8>> {
         "Left" => b"\x1b[D".as_slice(),
         "Home" => b"\x1b[H".as_slice(),
         "End" => b"\x1b[F".as_slice(),
+        "IC" | "Insert" => b"\x1b[2~".as_slice(),
         "DC" | "Delete" => b"\x1b[3~".as_slice(),
         "PPage" | "PageUp" => b"\x1b[5~".as_slice(),
         "NPage" | "PageDown" => b"\x1b[6~".as_slice(),
@@ -1071,6 +1074,71 @@ pub(crate) fn tmux_key_bytes(key: &str) -> Option<Vec<u8>> {
         }
     };
     Some(bytes.to_vec())
+}
+
+/// xterm's modifier parameter for CSI sequences: 1 + (shift=1, alt=2, ctrl=4).
+/// Returns `None` when no modifier is held, so callers can fall back to the
+/// unmodified escape sequence instead of emitting a redundant `;1`.
+fn xterm_modifier_code(modifiers: ModifierState) -> Option<u8> {
+    let mut code = 1u8;
+    if modifiers.shift {
+        code += 1;
+    }
+    if modifiers.alt {
+        code += 2;
+    }
+    if modifiers.control {
+        code += 4;
+    }
+    (code != 1).then_some(code)
+}
+
+/// Same as [`tmux_key_bytes`] but modifier-aware: named keys that carry a
+/// distinct escape sequence per modifier (arrows, Home/End, PageUp/PageDown,
+/// Delete, function keys, Tab) get the xterm `CSI ...;<mod>~`/`CSI 1;<mod><L>`
+/// variant instead of silently degrading to the unmodified key. Live keyboard
+/// input should go through this; `tmux_key_bytes` alone is for callers (like
+/// the `send-keys` control command) that only ever have a bare key name.
+pub(crate) fn tmux_key_bytes_with_modifiers(
+    key: &str,
+    modifiers: ModifierState,
+) -> Option<Vec<u8>> {
+    if key == "Tab" {
+        return Some(if modifiers.shift {
+            b"\x1b[Z".to_vec()
+        } else {
+            b"\t".to_vec()
+        });
+    }
+    let Some(code) = xterm_modifier_code(modifiers) else {
+        return tmux_key_bytes(key);
+    };
+    let bytes = match key {
+        "Up" => format!("\x1b[1;{code}A").into_bytes(),
+        "Down" => format!("\x1b[1;{code}B").into_bytes(),
+        "Right" => format!("\x1b[1;{code}C").into_bytes(),
+        "Left" => format!("\x1b[1;{code}D").into_bytes(),
+        "Home" => format!("\x1b[1;{code}H").into_bytes(),
+        "End" => format!("\x1b[1;{code}F").into_bytes(),
+        "IC" | "Insert" => format!("\x1b[2;{code}~").into_bytes(),
+        "DC" | "Delete" => format!("\x1b[3;{code}~").into_bytes(),
+        "PPage" | "PageUp" => format!("\x1b[5;{code}~").into_bytes(),
+        "NPage" | "PageDown" => format!("\x1b[6;{code}~").into_bytes(),
+        "F1" => format!("\x1b[1;{code}P").into_bytes(),
+        "F2" => format!("\x1b[1;{code}Q").into_bytes(),
+        "F3" => format!("\x1b[1;{code}R").into_bytes(),
+        "F4" => format!("\x1b[1;{code}S").into_bytes(),
+        "F5" => format!("\x1b[15;{code}~").into_bytes(),
+        "F6" => format!("\x1b[17;{code}~").into_bytes(),
+        "F7" => format!("\x1b[18;{code}~").into_bytes(),
+        "F8" => format!("\x1b[19;{code}~").into_bytes(),
+        "F9" => format!("\x1b[20;{code}~").into_bytes(),
+        "F10" => format!("\x1b[21;{code}~").into_bytes(),
+        "F11" => format!("\x1b[23;{code}~").into_bytes(),
+        "F12" => format!("\x1b[24;{code}~").into_bytes(),
+        _ => return tmux_key_bytes(key),
+    };
+    Some(bytes)
 }
 
 #[cfg(test)]
@@ -1116,6 +1184,66 @@ mod tests {
         assert_eq!(tmux_key_bytes("C-c"), Some(vec![3]));
         assert_eq!(tmux_key_bytes("Backspace"), Some(vec![0x7f]));
         assert_eq!(tmux_key_bytes("not-a-key"), None);
+    }
+
+    #[test]
+    fn shift_tab_sends_back_tab_instead_of_plain_tab() {
+        let shift = ModifierState {
+            shift: true,
+            ..ModifierState::empty()
+        };
+        assert_eq!(
+            tmux_key_bytes_with_modifiers("Tab", shift),
+            Some(b"\x1b[Z".to_vec())
+        );
+        assert_eq!(
+            tmux_key_bytes_with_modifiers("Tab", ModifierState::empty()),
+            Some(b"\t".to_vec())
+        );
+    }
+
+    #[test]
+    fn modified_named_keys_get_xterm_csi_variants() {
+        let shift = ModifierState {
+            shift: true,
+            ..ModifierState::empty()
+        };
+        let ctrl = ModifierState {
+            control: true,
+            ..ModifierState::empty()
+        };
+        assert_eq!(
+            tmux_key_bytes_with_modifiers("Up", shift),
+            Some(b"\x1b[1;2A".to_vec())
+        );
+        assert_eq!(
+            tmux_key_bytes_with_modifiers("Right", ctrl),
+            Some(b"\x1b[1;5C".to_vec())
+        );
+        assert_eq!(
+            tmux_key_bytes_with_modifiers("Delete", shift),
+            Some(b"\x1b[3;2~".to_vec())
+        );
+        assert_eq!(
+            tmux_key_bytes_with_modifiers("Insert", ctrl),
+            Some(b"\x1b[2;5~".to_vec())
+        );
+        assert_eq!(
+            tmux_key_bytes_with_modifiers("F5", ctrl),
+            Some(b"\x1b[15;5~".to_vec())
+        );
+    }
+
+    #[test]
+    fn unmodified_named_keys_fall_back_to_tmux_key_bytes() {
+        assert_eq!(
+            tmux_key_bytes_with_modifiers("Up", ModifierState::empty()),
+            tmux_key_bytes("Up")
+        );
+        assert_eq!(
+            tmux_key_bytes_with_modifiers("not-a-key", ModifierState::empty()),
+            None
+        );
     }
 
     #[test]

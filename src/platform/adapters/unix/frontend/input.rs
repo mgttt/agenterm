@@ -3,7 +3,7 @@
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{Key, ModifiersState, NamedKey, PhysicalKey};
 
-use crate::commands::tmux_key_bytes;
+use crate::commands::{tmux_key_bytes, tmux_key_bytes_with_modifiers};
 
 /// Result of handling a key in composer focus.
 pub(super) enum ComposerKeyAction {
@@ -319,7 +319,16 @@ pub(super) fn key_event_to_bytes(event: &KeyEvent, modifiers: ModifiersState) ->
 
 fn logical_key_to_bytes(key: &Key, modifiers: ModifiersState) -> Option<Vec<u8>> {
     match key {
-        Key::Named(named) => named_key_name(*named).and_then(tmux_key_bytes),
+        Key::Named(named) => {
+            let raw_modifiers = crate::platform::ModifierState {
+                control: modifiers.control_key(),
+                shift: modifiers.shift_key(),
+                alt: modifiers.alt_key(),
+                meta: modifiers.super_key(),
+            };
+            named_key_name(*named)
+                .and_then(|name| tmux_key_bytes_with_modifiers(name, raw_modifiers))
+        }
         Key::Character(text) if modifiers.control_key() => {
             let mut characters = text.chars();
             let character = characters.next()?;
@@ -353,6 +362,7 @@ fn named_key_name(key: NamedKey) -> Option<&'static str> {
         NamedKey::ArrowLeft => Some("Left"),
         NamedKey::Home => Some("Home"),
         NamedKey::End => Some("End"),
+        NamedKey::Insert => Some("Insert"),
         NamedKey::Delete => Some("Delete"),
         NamedKey::PageUp => Some("PageUp"),
         NamedKey::PageDown => Some("PageDown"),
@@ -686,7 +696,9 @@ fn platform_key_event_to_bytes(event: &KeyEvent, modifiers: ModifiersState) -> O
                 .into_bytes();
             (!bytes.is_empty()).then_some(bytes)
         }
-        KeyClassification::ControlKey { name, .. } => tmux_key_bytes(&name),
+        KeyClassification::ControlKey { name, modifiers } => {
+            tmux_key_bytes_with_modifiers(&name, modifiers)
+        }
         KeyClassification::Ignored => match &event.logical_key {
             Key::Unidentified(_) => match event.physical_key {
                 PhysicalKey::Code(code) => physical_code_to_byte(code),
@@ -883,6 +895,7 @@ mod tests {
             (NamedKey::ArrowLeft, b"\x1b[D".as_slice()),
             (NamedKey::Home, b"\x1b[H".as_slice()),
             (NamedKey::End, b"\x1b[F".as_slice()),
+            (NamedKey::Insert, b"\x1b[2~".as_slice()),
             (NamedKey::Delete, b"\x1b[3~".as_slice()),
             (NamedKey::PageUp, b"\x1b[5~".as_slice()),
             (NamedKey::PageDown, b"\x1b[6~".as_slice()),
@@ -891,6 +904,34 @@ mod tests {
         for (key, expected) in cases {
             assert_eq!(
                 logical_key_to_bytes(&Key::Named(key), ModifiersState::empty()).as_deref(),
+                Some(expected)
+            );
+        }
+    }
+
+    #[test]
+    fn terminal_modified_navigation_preserves_xterm_modifier_bytes() {
+        let cases = [
+            (NamedKey::Tab, ModifiersState::SHIFT, b"\x1b[Z".as_slice()),
+            (
+                NamedKey::ArrowLeft,
+                ModifiersState::CONTROL,
+                b"\x1b[1;5D".as_slice(),
+            ),
+            (
+                NamedKey::Insert,
+                ModifiersState::SHIFT,
+                b"\x1b[2;2~".as_slice(),
+            ),
+            (
+                NamedKey::F12,
+                ModifiersState::CONTROL | ModifiersState::SHIFT,
+                b"\x1b[24;6~".as_slice(),
+            ),
+        ];
+        for (key, modifiers, expected) in cases {
+            assert_eq!(
+                logical_key_to_bytes(&Key::Named(key), modifiers).as_deref(),
                 Some(expected)
             );
         }

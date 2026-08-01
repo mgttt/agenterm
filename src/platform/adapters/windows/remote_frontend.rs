@@ -22,9 +22,9 @@ use windows_sys::Win32::{
     UI::{
         Input::KeyboardAndMouse::{
             EnableWindow, GetFocus, GetKeyState, ReleaseCapture, SetCapture, SetFocus, VK_CONTROL,
-            VK_DOWN, VK_END, VK_ESCAPE, VK_F1, VK_F2, VK_F3, VK_F4, VK_F5, VK_F6, VK_F7, VK_F8,
-            VK_F9, VK_F10, VK_F11, VK_F12, VK_HOME, VK_LEFT, VK_MENU, VK_NEXT, VK_PRIOR, VK_RIGHT,
-            VK_UP,
+            VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_F1, VK_F2, VK_F3, VK_F4, VK_F5, VK_F6, VK_F7,
+            VK_F8, VK_F9, VK_F10, VK_F11, VK_F12, VK_HOME, VK_INSERT, VK_LEFT, VK_MENU, VK_NEXT,
+            VK_PRIOR, VK_RIGHT, VK_SHIFT, VK_TAB, VK_UP,
         },
         WindowsAndMessaging::{
             CS_DBLCLKS, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CheckMenuItem, CreateWindowExW,
@@ -48,7 +48,9 @@ use windows_sys::Win32::{
 
 use crate::{
     client::{ipc_address, ipc_endpoint, resolved_ipc_endpoint},
-    commands::{option_value, positional_values, screenshot_output_path, tmux_key_bytes},
+    commands::{
+        option_value, positional_values, screenshot_output_path, tmux_key_bytes_with_modifiers,
+    },
     instances::intentional_shutdown_matches,
     locale::UiText,
     platform::{
@@ -4686,6 +4688,13 @@ impl RemoteWindowState {
     }
 
     fn terminal_char(&mut self, value: u16) {
+        // Named terminal keys are fully handled by the WM_KEYDOWN path so it
+        // can preserve modifiers. TranslateMessage may still emit their
+        // character values independently; drop those echoes to avoid sending
+        // Tab/BackTab and Escape twice.
+        if terminal_char_is_named_key_echo(value) {
+            return;
+        }
         if let KeyClassification::TextCommit(text) = self.terminal_text_decoder.push(value) {
             match text.as_str() {
                 "\u{8}" => self.terminal_input(b"\x7f"),
@@ -4698,6 +4707,7 @@ impl RemoteWindowState {
     fn terminal_key(&mut self, key: u32) -> bool {
         let key = u16::try_from(key).unwrap_or_default();
         let control = unsafe { GetKeyState(VK_CONTROL as i32) } < 0;
+        let shift = unsafe { GetKeyState(VK_SHIFT as i32) } < 0;
         let alt = unsafe { GetKeyState(VK_MENU as i32) } < 0;
         let primary = primary_shortcut(windows_modifiers(control, false, alt, false));
         if primary && key == u16::from(b'C') && self.terminal_selection.is_some() {
@@ -4716,31 +4726,11 @@ impl RemoteWindowState {
             self.terminal_input(&[(key as u8) - b'A' + 1]);
             return true;
         }
-        let name = match key {
-            VK_UP => "Up",
-            VK_DOWN => "Down",
-            VK_LEFT => "Left",
-            VK_RIGHT => "Right",
-            VK_HOME => "Home",
-            VK_END => "End",
-            VK_PRIOR => "PageUp",
-            VK_NEXT => "PageDown",
-            VK_ESCAPE => "Escape",
-            VK_F1 => "F1",
-            VK_F2 => "F2",
-            VK_F3 => "F3",
-            VK_F4 => "F4",
-            VK_F5 => "F5",
-            VK_F6 => "F6",
-            VK_F7 => "F7",
-            VK_F8 => "F8",
-            VK_F9 => "F9",
-            VK_F10 => "F10",
-            VK_F11 => "F11",
-            VK_F12 => "F12",
-            _ => return false,
+        let Some(name) = windows_terminal_named_key(key) else {
+            return false;
         };
-        if let Some(bytes) = tmux_key_bytes(name) {
+        let modifiers = windows_modifiers(control, shift, alt, false);
+        if let Some(bytes) = tmux_key_bytes_with_modifiers(name, modifiers) {
             self.terminal_input(&bytes);
             true
         } else {
@@ -5319,6 +5309,40 @@ impl RemoteWindowState {
                 },
             );
         }
+    }
+}
+
+fn terminal_char_is_named_key_echo(value: u16) -> bool {
+    matches!(value, 0x09 | 0x1b)
+}
+
+fn windows_terminal_named_key(key: u16) -> Option<&'static str> {
+    match key {
+        VK_TAB => Some("Tab"),
+        VK_UP => Some("Up"),
+        VK_DOWN => Some("Down"),
+        VK_LEFT => Some("Left"),
+        VK_RIGHT => Some("Right"),
+        VK_HOME => Some("Home"),
+        VK_END => Some("End"),
+        VK_INSERT => Some("Insert"),
+        VK_DELETE => Some("Delete"),
+        VK_PRIOR => Some("PageUp"),
+        VK_NEXT => Some("PageDown"),
+        VK_ESCAPE => Some("Escape"),
+        VK_F1 => Some("F1"),
+        VK_F2 => Some("F2"),
+        VK_F3 => Some("F3"),
+        VK_F4 => Some("F4"),
+        VK_F5 => Some("F5"),
+        VK_F6 => Some("F6"),
+        VK_F7 => Some("F7"),
+        VK_F8 => Some("F8"),
+        VK_F9 => Some("F9"),
+        VK_F10 => Some("F10"),
+        VK_F11 => Some("F11"),
+        VK_F12 => Some("F12"),
+        _ => None,
     }
 }
 
@@ -6303,6 +6327,18 @@ mod tests {
             normalize_terminal_paste("one\r\ntwo\nthree\rfour\t\u{1b}[31m\0"),
             "one\rtwo\rthree\rfour\t[31m"
         );
+    }
+
+    #[test]
+    fn terminal_named_key_path_owns_modifier_sensitive_and_char_echo_keys() {
+        assert_eq!(windows_terminal_named_key(VK_TAB), Some("Tab"));
+        assert_eq!(windows_terminal_named_key(VK_INSERT), Some("Insert"));
+        assert_eq!(windows_terminal_named_key(VK_DELETE), Some("Delete"));
+        assert_eq!(windows_terminal_named_key(VK_F12), Some("F12"));
+        assert_eq!(windows_terminal_named_key(u16::from(b'A')), None);
+        assert!(terminal_char_is_named_key_echo(0x09));
+        assert!(terminal_char_is_named_key_echo(0x1b));
+        assert!(!terminal_char_is_named_key_echo(u16::from(b'A')));
     }
 
     #[test]
