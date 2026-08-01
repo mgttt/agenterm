@@ -832,18 +832,68 @@ try {
         // Control Center worker consumes its pending receipt. Send the pointer
         // immediately: the product's single-slot last-input-wins queue must
         // retain this second selection rather than dropping it as busy.
-        cc.window_pointer("click", pointer_x, pointer_y);
-        let pointer_selected = wait_active_tab(
-            context,
-            control_center,
-            registry,
-            runtime,
-            cc,
-            pointer_target,
-            server.id,
-            selected.connected_server.epoch,
-            "control_center_macos_native_pointer_navigation"
-        );
+        let pointer_failure = "";
+        try {
+            cc.window_pointer("click", pointer_x, pointer_y);
+        } catch (error) {
+            pointer_failure = error.to_string();
+        }
+        if pointer_failure == "" {
+            let pointer_selected = wait_active_tab(
+                context,
+                control_center,
+                registry,
+                runtime,
+                cc,
+                pointer_target,
+                server.id,
+                selected.connected_server.epoch,
+                "control_center_macos_native_pointer_navigation"
+            );
+            require(
+                pointer_selected.connected_server.active_tab_id
+                        == pointer_target
+                    && pointer_selected.connected_server.pid == server.id
+                    && pointer_selected.connected_server.epoch
+                        == selected.connected_server.epoch
+                    && pointer_selected.connected_server.endpoint
+                        == protocol.endpoint,
+                "control_center_macos_native_pointer_navigation_truth"
+            );
+            print(
+                "NATIVE_POINTER_POSITIVE: bounded pointer navigation " +
+                    "changed only active_tab"
+            );
+        } else {
+            require(
+                pointer_failure.contains("process_window_input_unsupported")
+                    && pointer_failure.contains("unsupported")
+                    && !pointer_failure.contains("platform_error"),
+                "control_center_macos_native_pointer_unexpected_failure:" +
+                    pointer_failure
+            );
+            let pointer_unchanged = json_command(
+                context,
+                control_center,
+                registry,
+                runtime,
+                ["snapshot", "--json", "--instance", "dev"]
+            );
+            require(
+                pointer_unchanged.connected_server.active_tab_id
+                        == native_input_tab
+                    && pointer_unchanged.connected_server.pid == server.id
+                    && pointer_unchanged.connected_server.epoch
+                        == selected.connected_server.epoch
+                    && pointer_unchanged.connected_server.endpoint
+                        == protocol.endpoint,
+                "control_center_macos_native_pointer_unsupported_changed_state"
+            );
+            print(
+                "NATIVE_POINTER_UNAVAILABLE: process-targeted background " +
+                    "pointer delivery is typed Unsupported"
+            );
+        }
         require(
             keyboard_selected.connected_server.active_tab_id
                     == native_input_tab
@@ -852,21 +902,14 @@ try {
                     == selected.connected_server.epoch
                 && keyboard_selected.connected_server.endpoint
                     == protocol.endpoint
-                && pointer_selected.connected_server.active_tab_id
-                    == pointer_target
-                && pointer_selected.connected_server.pid == server.id
-                && pointer_selected.connected_server.epoch
-                    == selected.connected_server.epoch
-                && pointer_selected.connected_server.endpoint
-                    == protocol.endpoint
                 && cc.state == "running"
                 && rhai::json::parse_file(registry).pid == input_owner
                 && frontmost_application(context) == input_frontmost,
-            "control_center_macos_native_pointer_navigation_truth"
+            "control_center_macos_native_keyboard_navigation_truth"
         );
         print(
-            "NATIVE_INPUT_POSITIVE: keyboard and bounded pointer navigation " +
-                "changed only active_tab on the same CC/server/epoch"
+            "NATIVE_INPUT_POSITIVE: keyboard navigation changed only " +
+                "active_tab on the same CC/server/epoch"
         );
     } else {
         require(

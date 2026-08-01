@@ -192,10 +192,14 @@ Control Center is the product name; the executable family uses
   conversion, so that hypothesis is also closed rather than retried. The
   renderer-owned screenshot snapshot now records the last native input kind,
   pointer button, physical coordinates and adapter-owned line hit (or key and
-  repeat); the macOS timeout path captures it once. The next matching-host
-  failure must therefore distinguish event-delivery loss from a wrong hit-test
-  instead of triggering another coordinate guess. Final Linux/macOS positive
-  journey evidence remains open.
+  repeat); exact-SHA run `30719117149` retained `key-pressed/enter` after the
+  attempted click, proving CoreGraphics never delivered a mouse event to the
+  target host. The macOS process-window adapter therefore fails background
+  pointer automation as typed Unsupported instead of returning false success.
+  The journey keeps TCC-authorized keyboard navigation positive and proves the
+  pointer failure changes no CC/server/epoch/foreground state; it does not
+  claim physical-user pointer evidence. Final Linux positive and macOS physical
+  pointer acceptance remain open.
   Windows qualification evidence and
   Linux/macOS matching-host evidence are registered in separate gate manifests
   but participate in one exact PRD alignment parity check; cross-target compile
@@ -443,15 +447,13 @@ future promotion gates.
 - [~] macOS now owns the matching Quartz exact-PID process-window adapter. It
   rejects zero/multiple layer-0 on-screen candidates, bounds Retina client
   coordinates, and uses `CGEventPostToPid` only after the non-interactive TCC
-  preflight. `control-center.macos-native-input-contract` proves either real
-  keyboard/pointer navigation without changing the foreground app or the exact
-  `process_window_input_unsupported` / `permission_denied` safe failure with no
-  state change. The latter is contract evidence only and is not a positive
-  native-input claim; a TCC-authorized native receipt remains open. The
-  positive branch derives its pointer target from the current bounded
-  three-row Cockpit viewport and sends it immediately after the keyboard
-  server-state transition, proving the Control Center's last-input-wins queue
-  retains input while the previous local receipt is still completing. The
+  preflight. `control-center.macos-native-input-contract` proves real keyboard
+  navigation without changing the foreground app, or exact TCC
+  `permission_denied` with no state change. Process-targeted background pointer
+  posting is separately typed Unsupported after run `30719117149` proved that
+  CoreGraphics accepted the post but delivered no NSEvent; the journey requires
+  that failure to preserve the same CC/server/epoch/foreground and does not
+  relabel it as positive pointer evidence. The
   journey now keeps both evidence PTYs alive and translates the renderer-owned
   framebuffer row through the observed Quartz frame/client inset before
   posting the event; it does not retry alternate coordinates or accept a dead
@@ -468,10 +470,10 @@ future promotion gates.
   `kCGMouseEventWindowUnderMousePointer` and its handle-capable companion to the
   exact WindowServer ID. Run `30717496128` proved those routing fields still did
   not close ARM64. The reusable process-window facade now exposes the exact
-  display scale consumed by `global_point`; the journey separately uses the
-  renderer-reported scale for framebuffer-to-point conversion and the adapter
-  scale for point-to-input conversion. It does not retry alternate coordinates.
-  A new positive ARM64 receipt remains required.
+  display scale used during the falsified delivery experiments. It remains a
+  geometry fact, not a support claim. Real physical pointer interaction still
+  uses the ordinary winit path and requires human/native acceptance rather than
+  a process-posted CI substitute.
 
 ## Explicit v0.1.11 non-goals
 

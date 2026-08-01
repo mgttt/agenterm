@@ -19,14 +19,6 @@ const NULL_WINDOW_ID: u32 = 0;
 const CF_NUMBER_SINT32_TYPE: CfIndex = 3;
 const CF_STRING_ENCODING_UTF8: u32 = 0x0800_0100;
 const CG_EVENT_SOURCE_HID_SYSTEM_STATE: i32 = 1;
-const CG_EVENT_LEFT_MOUSE_DOWN: u32 = 1;
-const CG_EVENT_LEFT_MOUSE_UP: u32 = 2;
-const CG_EVENT_MOUSE_MOVED: u32 = 5;
-const CG_EVENT_LEFT_MOUSE_DRAGGED: u32 = 6;
-const CG_MOUSE_BUTTON_LEFT: i32 = 0;
-const CG_MOUSE_EVENT_CLICK_STATE: u32 = 1;
-const CG_MOUSE_EVENT_WINDOW_UNDER_POINTER: u32 = 91;
-const CG_MOUSE_EVENT_WINDOW_UNDER_POINTER_THAT_CAN_HANDLE_EVENT: u32 = 92;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -89,13 +81,6 @@ unsafe extern "C" {
         virtual_key: u16,
         key_down: bool,
     ) -> CgEventRef;
-    fn CGEventCreateMouseEvent(
-        source: CgEventSourceRef,
-        event_type: u32,
-        position: CgPoint,
-        button: i32,
-    ) -> CgEventRef;
-    fn CGEventSetIntegerValueField(event: CgEventRef, field: u32, value: i64);
     fn CGEventPostToPid(process_id: i32, event: CgEventRef);
     fn CGEventSourceCreate(state_id: i32) -> CgEventSourceRef;
     fn CGGetActiveDisplayList(
@@ -384,36 +369,6 @@ fn display_scale(bounds: CgRect) -> f64 {
     1.0
 }
 
-fn global_point(bounds: CgRect, scale: f64, x: i32, y: i32) -> Option<CgPoint> {
-    if x < 0 || y < 0 || !scale.is_finite() || scale <= 0.0 {
-        return None;
-    }
-    let logical_x = f64::from(x) / scale;
-    let logical_y = f64::from(y) / scale;
-    if logical_x >= bounds.size.width || logical_y >= bounds.size.height {
-        return None;
-    }
-    Some(CgPoint {
-        x: bounds.origin.x + logical_x,
-        y: bounds.origin.y + logical_y,
-    })
-}
-
-fn pointer_event_types(action: ProcessWindowPointerAction) -> Option<&'static [u32]> {
-    match action {
-        ProcessWindowPointerAction::Click => Some(&[
-            CG_EVENT_MOUSE_MOVED,
-            CG_EVENT_LEFT_MOUSE_DOWN,
-            CG_EVENT_LEFT_MOUSE_UP,
-        ]),
-        ProcessWindowPointerAction::Down => Some(&[CG_EVENT_MOUSE_MOVED, CG_EVENT_LEFT_MOUSE_DOWN]),
-        ProcessWindowPointerAction::Move => Some(&[CG_EVENT_MOUSE_MOVED]),
-        ProcessWindowPointerAction::MoveHeld => Some(&[CG_EVENT_LEFT_MOUSE_DRAGGED]),
-        ProcessWindowPointerAction::Up => Some(&[CG_EVENT_LEFT_MOUSE_UP]),
-        ProcessWindowPointerAction::CaptureChanged => None,
-    }
-}
-
 fn event_source() -> Result<OwnedCf, ProcessWindowError> {
     // SAFETY: the state ID is a public CGEventSourceStateID constant.
     OwnedCf::new(unsafe { CGEventSourceCreate(CG_EVENT_SOURCE_HID_SYSTEM_STATE) }).ok_or_else(
@@ -502,70 +457,12 @@ pub(crate) fn pointer(
     x: i32,
     y: i32,
 ) -> Result<(), ProcessWindowError> {
-    let event_types = pointer_event_types(action).ok_or_else(|| {
-        error(
-            "process_window_input_unsupported",
-            "macOS has no process-local pointer-capture-change event",
-            "unsupported",
-        )
-    })?;
-    let window = required_window(process_id)?;
-    require_input_access()?;
-    let point =
-        global_point(window.bounds, display_scale(window.bounds), x, y).ok_or_else(|| {
-            error(
-                "process_window_coordinate_invalid",
-                "native pointer coordinates are outside the target window",
-                "invalid_input",
-            )
-        })?;
-    let process_id = i32::try_from(process_id).map_err(|_| {
-        error(
-            "process_window_not_found",
-            "child process identifier is outside the native range",
-            "not_found",
-        )
-    })?;
-    let source = event_source()?;
-    let mut events = Vec::with_capacity(event_types.len());
-    for event_type in event_types {
-        // SAFETY: source is valid, event types and button are public CoreGraphics constants.
-        let event = OwnedCf::new(unsafe {
-            CGEventCreateMouseEvent(source.0, *event_type, point, CG_MOUSE_BUTTON_LEFT)
-        })
-        .ok_or_else(|| {
-            error(
-                "process_window_input",
-                "native pointer event could not be created",
-                "platform_error",
-            )
-        })?;
-        // CGEventPostToPid selects the process, but AppKit still uses the
-        // mouse-event window fields to route a background click to one of that
-        // process's windows. Pin both public CoreGraphics target fields to the
-        // exact WindowServer candidate and mark the pair as a single click.
-        // SAFETY: event is a valid typed mouse event and window.id came from
-        // the unique exact-PID layer-0 WindowServer record.
-        unsafe {
-            CGEventSetIntegerValueField(
-                event.0,
-                CG_MOUSE_EVENT_WINDOW_UNDER_POINTER,
-                i64::from(window.id),
-            );
-            CGEventSetIntegerValueField(
-                event.0,
-                CG_MOUSE_EVENT_WINDOW_UNDER_POINTER_THAT_CAN_HANDLE_EVENT,
-                i64::from(window.id),
-            );
-            CGEventSetIntegerValueField(event.0, CG_MOUSE_EVENT_CLICK_STATE, 1);
-        }
-        events.push(event);
-    }
-    for event in &events {
-        // SAFETY: every event is valid and the PID owns the selected target window.
-        unsafe { CGEventPostToPid(process_id, event.0) };
-    }
-    Ok(())
+    let _ = (process_id, action, x, y);
+    Err(error(
+        "process_window_input_unsupported",
+        "macOS does not provide reliable process-targeted background pointer delivery",
+        "unsupported",
+    ))
 }
 
 pub(crate) fn pointer_coordinate_scale(process_id: u32) -> Result<f64, ProcessWindowError> {
@@ -658,23 +555,6 @@ mod tests {
     }
 
     #[test]
-    fn physical_window_coordinates_are_bounded_and_scaled() {
-        let bounds = CgRect {
-            origin: CgPoint { x: 100.0, y: 50.0 },
-            size: CgSize {
-                width: 760.0,
-                height: 480.0,
-            },
-        };
-        assert_eq!(
-            global_point(bounds, 2.0, 240, 200),
-            Some(CgPoint { x: 220.0, y: 150.0 })
-        );
-        assert_eq!(global_point(bounds, 2.0, 1520, 0), None);
-        assert_eq!(global_point(bounds, 2.0, -1, 0), None);
-    }
-
-    #[test]
     fn exact_client_rect_fails_typed_instead_of_relabeling_outer_bounds() {
         assert_eq!(
             rect(0, true),
@@ -685,21 +565,14 @@ mod tests {
     }
 
     #[test]
-    fn click_is_constructed_as_move_down_up() {
+    fn process_targeted_pointer_delivery_fails_typed() {
         assert_eq!(
-            pointer_event_types(ProcessWindowPointerAction::Click),
-            Some(
-                [
-                    CG_EVENT_MOUSE_MOVED,
-                    CG_EVENT_LEFT_MOUSE_DOWN,
-                    CG_EVENT_LEFT_MOUSE_UP,
-                ]
-                .as_slice()
-            )
-        );
-        assert_eq!(
-            pointer_event_types(ProcessWindowPointerAction::CaptureChanged),
-            None
+            pointer(7, ProcessWindowPointerAction::Click, 120, 401),
+            Err(error(
+                "process_window_input_unsupported",
+                "macOS does not provide reliable process-targeted background pointer delivery",
+                "unsupported"
+            ))
         );
     }
 

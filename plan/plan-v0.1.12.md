@@ -869,8 +869,11 @@ Cockpit
   retry 或 sleep。integrated run `30718584882` 仍在该转换后 pointer timeout，因此该
   假设也关闭，不再继续盲改坐标。renderer screenshot snapshot 现记录 last native input
   kind/button/physical x-y/adapter line（或 key/repeat），macOS timeout 分支只抓一次该
-  receipt；下一次 host 结果必须明确区分 event delivery 丢失与 hit-test 错误。Linux 正向
-  结果与 macOS ARM64 正向回执仍开放；
+  receipt；exact-SHA `d4dcad3` run `30719117149` 仍保留 `key-pressed/enter`，确定
+  mouse event 未进入 target host，而非 hit-test 错。macOS process-window pointer 现返回
+  typed Unsupported，不再静默 `Ok`；journey 保留 TCC-authorized keyboard positive，
+  并证明 pointer Unsupported 不改变 CC/server/epoch/foreground，不冒充 physical pointer
+  positive。Linux 正向结果与 macOS 真人 pointer acceptance 仍开放；
 - Control Center evidence ownership 不再游离于 alignment：Windows required
   qualification gate 与 Linux/macOS host-native gate 分别登记，`prd-alignment`
   对三者的 evidence ID、脚本发射点和 partial PRD 状态做同一 exact parity。
