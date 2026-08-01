@@ -6,7 +6,6 @@
 #![cfg(target_os = "windows")]
 
 pub(crate) mod activation;
-pub(crate) mod clipboard;
 pub(crate) mod font;
 pub(crate) mod input;
 pub(crate) mod screenshot;

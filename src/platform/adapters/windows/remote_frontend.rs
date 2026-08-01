@@ -6,6 +6,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use agenterm_platform::clipboard;
 use anyhow::{Context as _, Result};
 use unicode_width::UnicodeWidthChar;
 use windows_sys::Win32::{
@@ -53,7 +54,7 @@ use crate::{
     platform::{
         CapabilityStatus, KeyClassification, action,
         selected::native::{
-            activation, clipboard, font,
+            activation, font,
             input::{Utf16TextDecoder, primary_shortcut, windows_modifiers},
             screenshot::{self, CaptureArea},
             toolbar::WindowsToolbarHit,
@@ -585,10 +586,31 @@ struct RemoteTerminalPoint {
 #[derive(Clone, Debug)]
 struct RemoteTerminalSelection {
     tab_id: String,
-    generation: u64,
+    rows: u32,
+    columns: u32,
     anchor: RemoteTerminalPoint,
     active: RemoteTerminalPoint,
-    dragging: bool,
+    phase: RemoteSelectionPhase,
+    cached_text: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RemoteSelectionPhase {
+    Prepared,
+    Dragging,
+    Completed,
+    Cancelled,
+}
+
+impl RemoteSelectionPhase {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Prepared => "prepared",
+            Self::Dragging => "dragging",
+            Self::Completed => "completed",
+            Self::Cancelled => "cancelled",
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -624,6 +646,47 @@ impl RemoteTerminalSelection {
 
     fn is_empty(&self) -> bool {
         self.anchor == self.active
+    }
+
+    fn active_gesture(&self) -> bool {
+        matches!(
+            self.phase,
+            RemoteSelectionPhase::Prepared | RemoteSelectionPhase::Dragging
+        )
+    }
+
+    fn drag_to(&mut self, point: RemoteTerminalPoint) {
+        if !self.active_gesture() {
+            return;
+        }
+        self.active = point;
+        self.phase = if self.is_empty() {
+            RemoteSelectionPhase::Prepared
+        } else {
+            RemoteSelectionPhase::Dragging
+        };
+    }
+
+    fn complete(&mut self) -> bool {
+        if self.phase != RemoteSelectionPhase::Dragging || self.is_empty() {
+            self.phase = RemoteSelectionPhase::Cancelled;
+            return false;
+        }
+        self.phase = RemoteSelectionPhase::Completed;
+        true
+    }
+
+    fn can_copy(&self) -> bool {
+        self.phase == RemoteSelectionPhase::Completed
+            && !self.is_empty()
+            && self
+                .cached_text
+                .as_ref()
+                .is_some_and(|text| !text.is_empty())
+    }
+
+    fn matches_screen(&self, screen: &UiScreenSnapshot) -> bool {
+        self.tab_id == screen.tab_id && self.rows == screen.rows && self.columns == screen.columns
     }
 }
 
@@ -1646,12 +1709,11 @@ impl RemoteWindowState {
 
     fn reconcile_terminal_selection(&mut self) {
         let still_current = self.terminal_selection.as_ref().is_some_and(|selection| {
-            self.active_tab().is_some_and(|tab| {
-                tab.id == selection.tab_id && tab.screen.generation == selection.generation
-            })
+            self.active_tab()
+                .is_some_and(|tab| selection.matches_screen(&tab.screen))
         });
         if self.terminal_selection.is_some() && !still_current {
-            self.terminal_selection = None;
+            self.cancel_terminal_selection();
         }
     }
 
@@ -1823,7 +1885,7 @@ impl RemoteWindowState {
                         serde_json::json!({
                             "start": {"row": start.row, "col": start.column},
                             "end": {"row": end.row, "col": end.column},
-                            "dragging": selection.dragging,
+                            "dragging": selection.active_gesture(),
                         })
                     });
                 let actions = visible_position
@@ -2170,7 +2232,7 @@ impl RemoteWindowState {
                 "selection": self.terminal_selection.as_ref().map(|selection| {
                     let (start, end) = selection.bounds();
                     serde_json::json!({
-                        "phase": if selection.dragging { "dragging" } else { "complete" },
+                        "phase": selection.phase.as_str(),
                         "tab_id": selection.tab_id,
                         "selection": {
                             "start": {"row": start.row, "col": start.column},
@@ -4140,10 +4202,12 @@ impl RemoteWindowState {
         };
         self.terminal_selection = Some(RemoteTerminalSelection {
             tab_id: tab.id.clone(),
-            generation: tab.screen.generation,
+            rows: tab.screen.rows,
+            columns: tab.screen.columns,
             anchor: point,
             active: point,
-            dragging: true,
+            phase: RemoteSelectionPhase::Prepared,
+            cached_text: None,
         });
         self.focus_surface = RemoteFocusSurface::Terminal;
         unsafe {
@@ -4157,7 +4221,7 @@ impl RemoteWindowState {
         if !self
             .terminal_selection
             .as_ref()
-            .is_some_and(|selection| selection.dragging)
+            .is_some_and(RemoteTerminalSelection::active_gesture)
         {
             return false;
         }
@@ -4165,7 +4229,7 @@ impl RemoteWindowState {
             return false;
         };
         if let Some(selection) = self.terminal_selection.as_mut() {
-            selection.active = point;
+            selection.drag_to(point);
         }
         true
     }
@@ -4174,36 +4238,53 @@ impl RemoteWindowState {
         if !self.drag_terminal_selection(x, y) {
             return false;
         }
+        let completed = self
+            .terminal_selection
+            .as_mut()
+            .is_some_and(RemoteTerminalSelection::complete);
+        // Mark the gesture completed before ReleaseCapture synchronously emits
+        // WM_CAPTURECHANGED; only an unfinished gesture is cancelled there.
         unsafe { ReleaseCapture() };
+        if !completed {
+            self.terminal_selection = None;
+            return true;
+        }
+        let cached_text = self.terminal_selection.as_ref().and_then(|selection| {
+            self.active_tab()
+                .filter(|tab| selection.matches_screen(&tab.screen))
+                .map(|tab| screen_selection_text(&tab.screen, selection))
+        });
         if let Some(selection) = self.terminal_selection.as_mut() {
-            selection.dragging = false;
-            if selection.is_empty() {
-                self.terminal_selection = None;
-            }
+            selection.cached_text = cached_text.filter(|text| !text.is_empty());
         }
         true
     }
 
     fn terminal_selection_capture_lost(&mut self) {
-        if let Some(selection) = self.terminal_selection.as_mut()
-            && selection.dragging
+        if self
+            .terminal_selection
+            .as_ref()
+            .is_some_and(RemoteTerminalSelection::active_gesture)
         {
-            selection.dragging = false;
-            if selection.is_empty() {
-                self.terminal_selection = None;
+            if let Some(selection) = self.terminal_selection.as_mut() {
+                selection.phase = RemoteSelectionPhase::Cancelled;
             }
+            self.terminal_selection = None;
         }
     }
 
     fn cancel_terminal_selection(&mut self) {
-        if self
+        let captured = self
             .terminal_selection
             .as_ref()
-            .is_some_and(|selection| selection.dragging)
-        {
-            unsafe { ReleaseCapture() };
+            .is_some_and(RemoteTerminalSelection::active_gesture);
+        if let Some(selection) = self.terminal_selection.as_mut() {
+            selection.phase = RemoteSelectionPhase::Cancelled;
         }
         self.terminal_selection = None;
+        if captured {
+            unsafe { ReleaseCapture() };
+        }
     }
 
     fn copy_terminal_selection(&mut self) -> Result<()> {
@@ -4211,21 +4292,17 @@ impl RemoteWindowState {
             .terminal_selection
             .as_ref()
             .context("no terminal selection is active")?;
-        if selection.is_empty() {
-            anyhow::bail!("terminal selection is empty");
+        if !selection.can_copy() {
+            anyhow::bail!("terminal selection is not complete or contains no text");
         }
-        let tab = self
-            .active_tab()
-            .filter(|tab| {
-                tab.id == selection.tab_id && tab.screen.generation == selection.generation
-            })
+        self.active_tab()
+            .filter(|tab| selection.matches_screen(&tab.screen))
             .context("terminal selection is stale")?;
-        let text = screen_selection_text(&tab.screen, selection);
-        if text.is_empty() {
-            anyhow::bail!("terminal selection contains no text");
-        }
-        clipboard::set_text(self.window, &text)
-            .map_err(|error| platform_capability_error(error.to_capability_status()))?;
+        let text = selection
+            .cached_text
+            .as_deref()
+            .context("terminal selection contains no text")?;
+        clipboard::set_text(text).map_err(|error| anyhow::anyhow!(error))?;
         self.last_error = None;
         Ok(())
     }
@@ -4233,7 +4310,7 @@ impl RemoteWindowState {
     fn paste_terminal_clipboard(&mut self) -> Result<()> {
         let text = normalize_terminal_paste(
             &clipboard::get_text(TERMINAL_PASTE_LIMIT_BYTES)
-                .map_err(|error| platform_capability_error(error.to_capability_status()))?,
+                .map_err(|error| anyhow::anyhow!(error))?,
         );
         if text.is_empty() {
             anyhow::bail!("clipboard text contains no pasteable characters");
@@ -4352,7 +4429,7 @@ impl RemoteWindowState {
                 && self
                     .terminal_selection
                     .as_ref()
-                    .is_some_and(|selection| !selection.is_empty()),
+                    .is_some_and(RemoteTerminalSelection::can_copy),
             terminal_ready && clipboard::has_unicode_text(),
         )
     }
@@ -4947,9 +5024,11 @@ impl RemoteWindowState {
         screen: &UiScreenSnapshot,
         palette: &ThemePalette,
     ) {
-        let Some(selection) = self.terminal_selection.as_ref().filter(|selection| {
-            selection.tab_id == screen.tab_id && selection.generation == screen.generation
-        }) else {
+        let Some(selection) = self
+            .terminal_selection
+            .as_ref()
+            .filter(|selection| selection.matches_screen(screen))
+        else {
             return;
         };
         let cells = screen_cells(screen);
@@ -6450,12 +6529,72 @@ mod tests {
         };
         let selection = RemoteTerminalSelection {
             tab_id: "@1".to_owned(),
-            generation: 7,
+            rows: 2,
+            columns: 8,
             anchor: RemoteTerminalPoint { row: 0, column: 1 },
             active: RemoteTerminalPoint { row: 1, column: 1 },
-            dragging: false,
+            phase: RemoteSelectionPhase::Completed,
+            cached_text: Some("cached".to_owned()),
         };
         assert_eq!(screen_selection_text(&screen, &selection), "界B\r\nta");
+    }
+
+    #[test]
+    fn selection_survives_content_generations_but_not_geometry_changes() {
+        let mut selection = RemoteTerminalSelection {
+            tab_id: "@1".to_owned(),
+            rows: 2,
+            columns: 8,
+            anchor: RemoteTerminalPoint { row: 0, column: 1 },
+            active: RemoteTerminalPoint { row: 0, column: 1 },
+            phase: RemoteSelectionPhase::Prepared,
+            cached_text: None,
+        };
+        selection.drag_to(RemoteTerminalPoint { row: 1, column: 1 });
+        assert_eq!(selection.phase, RemoteSelectionPhase::Dragging);
+        assert!(selection.complete());
+        selection.cached_text = Some("selected".to_owned());
+        assert!(selection.can_copy());
+
+        let mut screen = UiScreenSnapshot {
+            schema_version: UI_SCREEN_SCHEMA_VERSION,
+            tab_id: "@1".to_owned(),
+            generation: 8,
+            terminal_title: String::new(),
+            rows: 2,
+            columns: 8,
+            scrollback_offset: 0,
+            max_scrollback: 0,
+            cursor: UiCursorSnapshot {
+                row: 0,
+                column: 0,
+                visible: true,
+            },
+            runs: Vec::new(),
+            complete: true,
+            truncated: false,
+        };
+        assert!(selection.matches_screen(&screen));
+        screen.generation += 1;
+        assert!(selection.matches_screen(&screen));
+        screen.rows += 1;
+        assert!(!selection.matches_screen(&screen));
+    }
+
+    #[test]
+    fn prepared_selection_cancels_instead_of_becoming_completed() {
+        let mut selection = RemoteTerminalSelection {
+            tab_id: "@1".to_owned(),
+            rows: 24,
+            columns: 80,
+            anchor: RemoteTerminalPoint { row: 2, column: 3 },
+            active: RemoteTerminalPoint { row: 2, column: 3 },
+            phase: RemoteSelectionPhase::Prepared,
+            cached_text: None,
+        };
+        assert!(!selection.complete());
+        assert_eq!(selection.phase, RemoteSelectionPhase::Cancelled);
+        assert!(!selection.can_copy());
     }
 
     #[test]
