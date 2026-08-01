@@ -247,7 +247,9 @@ Available, Unsupported, and Failed without reading source or assuming parity.
   - [x] the Unix frontend adapter's keyboard and Cocoa IME preedit/commit paths consume
     `platform::macos::input` and `platform::macos::ime`; Command remains the
     product modifier, terminal Control chords remain PTY input, and native
-    committed text wins for Shift/Option/dead-key, Space, and CJK input
+    printable committed text wins for Shift/Option/dead-key, Space, and CJK
+    input. Native control-character echoes attached to Enter, Backspace, Escape
+    or other named controls do not disguise those keys as text commits
   - [x] physical resize and scale-factor events, logical client sizing, PTY
     resize, layout, and rendering now consume `platform::macos::scale`; the
     no-activate launch path also configures the macOS event loop before window

@@ -161,6 +161,11 @@ pub fn classify_key_press(
         }
         return KeyClassification::Ignored;
     }
+    if let Some(text) = committed_text
+        .filter(|value| !value.is_empty() && value.chars().any(|character| !character.is_control()))
+    {
+        return KeyClassification::TextCommit(text.to_owned());
+    }
     if let Some(name) = named_key {
         return KeyClassification::ControlKey {
             name: name.to_owned(),
@@ -226,6 +231,16 @@ mod tests {
             ),
             KeyClassification::ControlKey { name, .. } if name == "Enter"
         ));
+        assert_eq!(
+            classify_key_press(
+                false,
+                ModifierState::empty(),
+                None,
+                Some("Space"),
+                Some(" "),
+            ),
+            KeyClassification::TextCommit(" ".to_owned())
+        );
     }
 
     #[test]

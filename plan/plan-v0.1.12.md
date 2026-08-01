@@ -364,7 +364,11 @@ Release 全部是本轮明确非目标。
   恰好多收到 3 bytes；编码契约固定内容为 `ESC [ Z`。真实物理键盘 dogfood 仍待
   验证，不能仅凭自动化投递宣称交互已收口。Windows host 的 Linux `cargo check` 仅因缺少
   `x86_64-linux-gnu-gcc` 停在 `ring` 构建脚本，Unix adapter 仍需原生 CI/host
-  证据。
+  证据。后续 macOS control-key 修复曾把所有 named key 提前于 committed text，导致
+  无修饰 Space 从 `TextCommit(" ")` 回归成 `ControlKey("Space")`；精确 HEAD 的
+  `--skip-smoke` 捕获该失败。共享契约现只让可打印 committed text 优先，Enter/Backspace/
+  Escape 的 native control-character echo 仍保持 named control。crate/root 两级聚焦表驱动
+  测试固定 Space、Enter 与既有 Shift/Unicode 语义。
 - [~] Windows toolbar `z/Z` 字号按钮造成 terminal 看似“无响应”的主因已修：native
   child button 点击后曾持有 Win32 keyboard focus，而 terminal input 只在 top-level HWND
   获得 focus 时消费；即时 toolbar action 现在显式归还 terminal focus，modal-opening 与
