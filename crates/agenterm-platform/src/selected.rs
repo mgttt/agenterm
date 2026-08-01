@@ -39,6 +39,18 @@ pub(crate) mod locking;
 #[path = "adapters/macos/locking.rs"]
 pub(crate) mod locking;
 
+#[cfg(all(feature = "ipc", windows))]
+#[path = "adapters/windows/ipc.rs"]
+pub(crate) mod ipc;
+
+#[cfg(all(feature = "ipc", target_os = "linux"))]
+#[path = "adapters/linux/ipc.rs"]
+pub(crate) mod ipc;
+
+#[cfg(all(feature = "ipc", target_os = "macos"))]
+#[path = "adapters/macos/ipc.rs"]
+pub(crate) mod ipc;
+
 #[cfg(all(feature = "process", windows))]
 #[path = "adapters/windows/process.rs"]
 pub(crate) mod process;

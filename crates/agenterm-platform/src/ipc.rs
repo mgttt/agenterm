@@ -1,6 +1,74 @@
 //! Transport-qualified local IPC endpoint types.
 
-use std::{fmt, path::PathBuf, str::FromStr};
+use std::{
+    fmt,
+    io::{self, Read, Write},
+    path::PathBuf,
+    str::FromStr,
+    time::Duration,
+};
+
+pub use crate::contract::ipc_transport::{
+    IpcTransportError, IpcTransportErrorCode, TransportResult,
+};
+use crate::selected;
+
+pub struct TrustedUserIdentity {
+    pub kind: &'static str,
+    pub bytes: Vec<u8>,
+}
+
+pub fn trusted_user_identity() -> io::Result<TrustedUserIdentity> {
+    selected::ipc::trusted_user_identity()
+}
+
+pub fn native_runtime_directory() -> PathBuf {
+    selected::ipc::native_runtime_directory()
+}
+
+pub fn native_transport_name() -> &'static str {
+    selected::ipc::NATIVE_TRANSPORT_NAME
+}
+
+pub struct NativeListener(selected::ipc::NativeListener);
+
+impl NativeListener {
+    pub fn bind(endpoint: &IpcEndpoint) -> TransportResult<Self> {
+        selected::ipc::NativeListener::bind(endpoint).map(Self)
+    }
+
+    pub fn accept(&mut self, timeout: Duration) -> TransportResult<NativeStream> {
+        self.0.accept(timeout).map(NativeStream)
+    }
+}
+
+pub struct NativeStream(selected::ipc::NativeStream);
+
+impl NativeStream {
+    pub fn connect(endpoint: &IpcEndpoint, timeout: Duration) -> TransportResult<Self> {
+        selected::ipc::NativeStream::connect(endpoint, timeout).map(Self)
+    }
+
+    pub fn set_io_timeout(&mut self, timeout: Duration) -> TransportResult<()> {
+        self.0.set_io_timeout(timeout)
+    }
+}
+
+impl Read for NativeStream {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        self.0.read(buffer)
+    }
+}
+
+impl Write for NativeStream {
+    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+        self.0.write(buffer)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.0.flush()
+    }
+}
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

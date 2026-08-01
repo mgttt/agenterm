@@ -53,7 +53,7 @@ pub fn capability_status(capability: Capability) -> CapabilityStatus {
         Capability::Process => (cfg!(feature = "process"), true),
         Capability::Filesystem => (cfg!(feature = "filesystem"), true),
         Capability::Locking => (cfg!(feature = "locking"), true),
-        Capability::Ipc => (cfg!(feature = "ipc"), false),
+        Capability::Ipc => (cfg!(feature = "ipc"), true),
         Capability::Pty => (cfg!(feature = "pty"), true),
         Capability::Window => (cfg!(feature = "window"), true),
         Capability::Input => (cfg!(feature = "input"), false),
@@ -117,9 +117,9 @@ mod tests {
 
     #[test]
     fn declared_but_unimplemented_capabilities_are_explicit() {
-        #[cfg(feature = "ipc")]
+        #[cfg(feature = "clipboard")]
         assert_eq!(
-            crate::capability_status(crate::Capability::Ipc),
+            crate::capability_status(crate::Capability::Clipboard),
             crate::CapabilityStatus::Unsupported {
                 reason: std::borrow::Cow::Borrowed("capability-not-yet-implemented")
             }

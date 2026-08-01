@@ -4,7 +4,8 @@
 pub(crate) mod adapter;
 pub(crate) mod control_center_shell;
 pub(crate) mod ipc;
-pub(crate) mod ipc_transport;
+#[allow(unused_imports)]
+pub(crate) use agenterm_platform::contract::ipc_transport;
 #[allow(unused_imports)]
 pub(crate) use agenterm_platform::contract::process;
 #[allow(unused_imports)]

@@ -4,28 +4,21 @@
 //! Product modules depend only on this file. Target selection and native API
 //! use are confined to this platform boundary and its adapter.
 
-use std::{
-    io::{self, Read, Write},
-    path::PathBuf,
-    time::Duration,
-};
+use std::{io, path::PathBuf};
 
 use crate::platform::contract::{
     ipc::{IpcEndpoint, ServerScopeId},
-    ipc_transport::{IpcTransportError, TransportResult, unsupported},
+    ipc_transport::{IpcTransportError, unsupported},
 };
 
 use crate::platform::selected::ipc as adapter;
 
 /// Security-context identity bytes used only to derive an opaque server scope.
 /// This type deliberately has no display, debug, or serialization surface.
-pub(crate) struct TrustedUserIdentity {
-    pub(crate) kind: &'static str,
-    pub(crate) bytes: Vec<u8>,
-}
+pub(crate) use agenterm_platform::ipc::{NativeListener, NativeStream, TrustedUserIdentity};
 
 pub(crate) fn trusted_user_identity() -> io::Result<TrustedUserIdentity> {
-    adapter::trusted_user_identity()
+    agenterm_platform::ipc::trusted_user_identity()
 }
 
 pub(crate) fn default_native_endpoint(scope: &ServerScopeId) -> IpcEndpoint {
@@ -66,49 +59,7 @@ pub(crate) fn unix_data_root_from(
 }
 
 pub(crate) fn native_transport_name() -> &'static str {
-    adapter::NATIVE_TRANSPORT_NAME
-}
-
-/// Opaque listener for the host's native local-IPC transport.
-pub(crate) struct NativeListener(adapter::NativeListener);
-
-impl NativeListener {
-    pub(crate) fn bind(endpoint: &IpcEndpoint) -> TransportResult<Self> {
-        adapter::NativeListener::bind(endpoint).map(Self)
-    }
-
-    pub(crate) fn accept(&mut self, timeout: Duration) -> TransportResult<NativeStream> {
-        self.0.accept(timeout).map(NativeStream)
-    }
-}
-
-/// Opaque byte stream for the host's native local-IPC transport.
-pub(crate) struct NativeStream(adapter::NativeStream);
-
-impl NativeStream {
-    pub(crate) fn connect(endpoint: &IpcEndpoint, timeout: Duration) -> TransportResult<Self> {
-        adapter::NativeStream::connect(endpoint, timeout).map(Self)
-    }
-
-    pub(crate) fn set_io_timeout(&mut self, timeout: Duration) -> TransportResult<()> {
-        self.0.set_io_timeout(timeout)
-    }
-}
-
-impl Read for NativeStream {
-    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
-        self.0.read(buffer)
-    }
-}
-
-impl Write for NativeStream {
-    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
-        self.0.write(buffer)
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        self.0.flush()
-    }
+    agenterm_platform::ipc::native_transport_name()
 }
 
 pub(crate) fn unsupported_native_endpoint(

@@ -2,10 +2,10 @@
 
 use std::{fmt, io};
 
-use super::ipc::IpcEndpoint;
+use crate::ipc::IpcEndpoint;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum IpcTransportErrorCode {
+pub enum IpcTransportErrorCode {
     UnsupportedEndpoint,
     InvalidEndpoint,
     EndpointInUse,
@@ -17,14 +17,14 @@ pub(crate) enum IpcTransportErrorCode {
 }
 
 #[derive(Debug)]
-pub(crate) struct IpcTransportError {
-    pub(crate) code: IpcTransportErrorCode,
-    pub(crate) endpoint: String,
+pub struct IpcTransportError {
+    pub code: IpcTransportErrorCode,
+    pub endpoint: String,
     source: io::Error,
 }
 
 impl IpcTransportError {
-    pub(crate) fn new(
+    pub fn new(
         code: IpcTransportErrorCode,
         endpoint: impl Into<String>,
         source: impl Into<io::Error>,
@@ -37,7 +37,7 @@ impl IpcTransportError {
     }
 
     #[allow(dead_code)]
-    pub(crate) fn io_kind(&self) -> io::ErrorKind {
+    pub fn io_kind(&self) -> io::ErrorKind {
         self.source.kind()
     }
 }
@@ -58,13 +58,13 @@ impl std::error::Error for IpcTransportError {
     }
 }
 
-pub(crate) type TransportResult<T> = std::result::Result<T, IpcTransportError>;
+pub type TransportResult<T> = std::result::Result<T, IpcTransportError>;
 
-pub(crate) fn transport_io(endpoint: &IpcEndpoint, error: io::Error) -> IpcTransportError {
+pub fn transport_io(endpoint: &IpcEndpoint, error: io::Error) -> IpcTransportError {
     IpcTransportError::new(IpcTransportErrorCode::Io, endpoint.to_string(), error)
 }
 
-pub(crate) fn map_bind_error(endpoint: &IpcEndpoint, error: io::Error) -> IpcTransportError {
+pub fn map_bind_error(endpoint: &IpcEndpoint, error: io::Error) -> IpcTransportError {
     let code = if error.kind() == io::ErrorKind::AddrInUse {
         IpcTransportErrorCode::EndpointInUse
     } else {
@@ -73,10 +73,7 @@ pub(crate) fn map_bind_error(endpoint: &IpcEndpoint, error: io::Error) -> IpcTra
     IpcTransportError::new(code, endpoint.to_string(), error)
 }
 
-pub(crate) fn timeout_error(
-    code: IpcTransportErrorCode,
-    endpoint: &IpcEndpoint,
-) -> IpcTransportError {
+pub fn timeout_error(code: IpcTransportErrorCode, endpoint: &IpcEndpoint) -> IpcTransportError {
     IpcTransportError::new(
         code,
         endpoint.to_string(),
@@ -84,7 +81,7 @@ pub(crate) fn timeout_error(
     )
 }
 
-pub(crate) fn unsupported(endpoint: &IpcEndpoint, message: &str) -> IpcTransportError {
+pub fn unsupported(endpoint: &IpcEndpoint, message: &str) -> IpcTransportError {
     IpcTransportError::new(
         IpcTransportErrorCode::UnsupportedEndpoint,
         endpoint.to_string(),

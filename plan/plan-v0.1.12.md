@@ -85,6 +85,13 @@ crate 旧 transport 遇到时返回 typed Unsupported，不使用 wildcard 静�
 all-feature crate tests、warnings-denied Clippy 与 Agenterm all-target compile check 通过；
 native byte listener/stream 仍待下一叶迁移，因此 `Capability::Ipc` 继续真实报告
 `capability-not-yet-implemented`。
+第六个叶把 `IpcTransportError{Code}`、Windows named-pipe listener/stream、Unix
+socket listener/stream（含 private-directory、peer UID、stale socket lease identity
+与 bounded timeout）单一迁入 crate，并公开 `NativeListener`/`NativeStream`、trusted
+user identity 与 native runtime directory。主 crate adapters 现在只组合 AgenTerm pipe/
+socket/workspace 名称；IPC capability 已有真实实现并报告 Available。14 项 all-feature
+crate tests、warnings-denied Clippy、Agenterm all-target compile check，以及新 crate
+反向产品耦合静态门禁均通过。
 
 2026-08-01 首个建设期增量：Cockpit snapshot 新增明确的
 `tab_counts.{total,running,dead}`，native shell 同源显示 logical instance、
