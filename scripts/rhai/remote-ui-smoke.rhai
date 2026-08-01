@@ -408,6 +408,22 @@ fn wait_file_text(path, expected, code) {
     throw code;
 }
 
+fn wait_pane_input_bytes(context, cli, tab_id, minimum, code) {
+    for attempt in 0..200 {
+        let observed = text_cli(
+            context,
+            cli,
+            ["list-panes", "-t", tab_id, "-F", "#{pane_input_bytes}"]
+        );
+        observed.trim();
+        if observed.parse_int() >= minimum {
+            return;
+        }
+        rhai::task::sleep(std::time::Duration::from_millis(25));
+    }
+    throw code;
+}
+
 fn repeat_text(value, count) {
     let result = "";
     for index in 0..count {
@@ -2336,8 +2352,23 @@ try {
     );
     text_cli(context, cli, ["send-keys", "-t", tab_id, "C-c"]);
     let paste_marker = "REMOTE_PASTE_" + context.run_id;
-    rhai::clipboard::set_text("echo " + paste_marker);
+    let paste_text = "echo " + paste_marker;
+    rhai::clipboard::set_text(paste_text);
+    let paste_input_before = text_cli(
+        context,
+        cli,
+        ["list-panes", "-t", tab_id, "-F", "#{pane_input_bytes}"]
+    );
+    paste_input_before.trim();
+    paste_input_before = paste_input_before.parse_int();
     gui.window_message(0x0112, 0x1F10, 0);
+    wait_pane_input_bytes(
+        context,
+        cli,
+        tab_id,
+        paste_input_before + paste_text.len,
+        "remote_ui_async_terminal_paste_timeout"
+    );
     gui.window_message(0x0102, 13, 0);
     text_cli(
         context,
@@ -2348,6 +2379,117 @@ try {
             "--timeout-ms", "5000"
         ]
     );
+
+    print("STEP preserve bracketed-paste framing through the UI worker");
+    let bracketed_fixture = std::path::join(
+        context.run_directory,
+        "bracketed-paste.ps1"
+    ).display;
+    let bracketed_result = std::path::join(
+        context.run_directory,
+        "bracketed-paste.txt"
+    ).display;
+    std::fs::write(
+        bracketed_fixture,
+`param([string]$ResultPath, [string]$Payload)
+$escape = [char]27
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public static class AgenTermBracketedPasteMode {
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern IntPtr GetStdHandle(int value);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool GetConsoleMode(IntPtr handle, out uint mode);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool SetConsoleMode(IntPtr handle, uint mode);
+}
+"@
+$stdin = [AgenTermBracketedPasteMode]::GetStdHandle(-10)
+$inputMode = 0
+if (-not [AgenTermBracketedPasteMode]::GetConsoleMode($stdin, [ref]$inputMode) -or
+    -not [AgenTermBracketedPasteMode]::SetConsoleMode(
+        $stdin,
+        ($inputMode -band (-bnot 0x6)) -bor 0x200
+    )) {
+    throw "enable virtual terminal input failed"
+}
+$expected = [System.Text.Encoding]::UTF8.GetBytes(
+    $escape + "[200~" + $Payload + $escape + "[201~"
+)
+$observed = [System.Collections.Generic.List[byte]]::new()
+try {
+    [Console]::Write($escape + "[?2004hBRACKET_PASTE_READY")
+    $input = [Console]::OpenStandardInput()
+    while ($observed.Count -lt $expected.Length) {
+        $value = $input.ReadByte()
+        if ($value -lt 0) {
+            break
+        }
+        $observed.Add([byte]$value)
+    }
+    if ([System.Linq.Enumerable]::SequenceEqual(
+        [byte[]]$observed.ToArray(), [byte[]]$expected
+    )) {
+        [System.IO.File]::WriteAllText($ResultPath, "ok")
+    } else {
+        [System.IO.File]::WriteAllText(
+            $ResultPath,
+            (($observed | ForEach-Object { [int]$_ }) -join ",")
+        )
+    }
+} finally {
+    [Console]::Write($escape + "[?2004l")
+}
+`
+    );
+    let bracketed_payload = "BRACKET_PASTE_" + context.run_id;
+    let bracketed_id = text_cli(
+        context,
+        cli,
+        [
+            "new-window", "-d",
+            "-n", "bracketed-paste-" + context.run_id,
+            "-F", "#{window_id}",
+            "--", "powershell.exe", "-NoLogo", "-NoProfile",
+            "-ExecutionPolicy", "Bypass", "-File",
+            bracketed_fixture, bracketed_result, bracketed_payload
+        ]
+    );
+    bracketed_id.trim();
+    text_cli(context, cli, ["select-window", "-t", bracketed_id]);
+    text_cli(
+        context,
+        cli,
+        [
+            "wait-pane", "-t", bracketed_id,
+            "--contains", "BRACKET_PASTE_READY",
+            "--timeout-ms", "10000"
+        ]
+    );
+    let bracketed_bootstrap = json_cli(context, cli, ["ui-bootstrap"]);
+    let bracketed_tab = find_tab(bracketed_bootstrap, bracketed_id);
+    require(
+        bracketed_tab != () && bracketed_tab.screen.bracketed_paste,
+        "remote_ui_bracketed_paste_mode_missing"
+    );
+    rhai::clipboard::set_text(bracketed_payload);
+    gui.window_message(0x0112, 0x1F10, 0);
+    wait_file_text(
+        bracketed_result,
+        "ok",
+        "remote_ui_bracketed_paste_framing_invalid"
+    );
+    text_cli(
+        context,
+        cli,
+        [
+            "wait-ui", "-t", bracketed_id,
+            "--tab-state", "dead", "--timeout-ms", "10000"
+        ]
+    );
+    text_cli(context, cli, ["select-window", "-t", tab_id]);
+    text_cli(context, cli, ["kill-window", "-t", bracketed_id]);
 
     print("STEP close remains local and GUI recovers its missing server");
     let reconnect_gui_pid = gui.id;

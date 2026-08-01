@@ -3,7 +3,7 @@
 use std::{
     sync::{
         Arc, Condvar, Mutex,
-        mpsc::{self, Receiver},
+        mpsc::{self, Receiver, Sender},
     },
     thread::{self, JoinHandle},
     time::{Duration, Instant},
@@ -33,7 +33,7 @@ use crate::{
         UiTabBootstrap,
     },
     ui_client::{UiClientModel, tab_by_id},
-    ui_clipboard::{TERMINAL_PASTE_LIMIT_BYTES, normalize_terminal_paste},
+    ui_clipboard::{TERMINAL_PASTE_LIMIT_BYTES, normalize_terminal_paste, terminal_paste_bytes},
     ui_command::UiClientCommand,
     ui_geometry::{
         PixelRect as ProductPixelRect, TAB_HEIGHT, TAB_TOP, TERMINAL_SCROLLBAR_WIDTH,
@@ -714,6 +714,8 @@ struct RemoteWindowState {
     last_composer_identity: Option<(String, Option<String>, bool, usize)>,
     pending_terminal_resize: Option<RemoteTerminalResize>,
     terminal_resize_worker: RemoteTerminalResizeWorker,
+    pending_terminal_paste: Option<RemoteTerminalPasteRequest>,
+    terminal_paste_worker: RemoteTerminalPasteWorker,
     tabs_resize_dragging: bool,
     editing_tab_id: Option<String>,
     window_close_pending: bool,
@@ -839,6 +841,7 @@ impl RemoteWindowState {
         )?;
         let last_composer_identity = remote_composer_identity(&client);
         let terminal_resize_worker = RemoteTerminalResizeWorker::spawn()?;
+        let terminal_paste_worker = RemoteTerminalPasteWorker::spawn()?;
         Ok(Self {
             window,
             edit,
@@ -896,6 +899,8 @@ impl RemoteWindowState {
             last_composer_identity,
             pending_terminal_resize: None,
             terminal_resize_worker,
+            pending_terminal_paste: None,
+            terminal_paste_worker,
             tabs_resize_dragging: false,
             editing_tab_id: None,
             window_close_pending: false,
@@ -926,6 +931,7 @@ impl RemoteWindowState {
 
     fn tick(&mut self) -> bool {
         let resize_changed = self.process_terminal_resize_results();
+        let paste_changed = self.process_terminal_paste_results();
         let result = self
             .client
             .as_mut()
@@ -974,7 +980,9 @@ impl RemoteWindowState {
                     }
                 };
                 match self.publish_ui_snapshot() {
-                    Ok(published) => resize_changed || changed || command_changed || published,
+                    Ok(published) => {
+                        resize_changed || paste_changed || changed || command_changed || published
+                    }
                     Err(error) => {
                         self.last_error =
                             Some(format!("UI snapshot publication failed: {error:#}"));
@@ -989,6 +997,7 @@ impl RemoteWindowState {
                 // server-owned state while recovery is in progress.
                 self.client = None;
                 self.pending_terminal_resize = None;
+                self.pending_terminal_paste = None;
                 if disconnected_server_pid
                     .is_some_and(|pid| intentional_shutdown_matches(&ipc_address(), pid))
                 {
@@ -3006,6 +3015,82 @@ impl RemoteWindowState {
         changed
     }
 
+    fn process_terminal_paste_results(&mut self) -> bool {
+        let mut changed = false;
+        loop {
+            let completed = match self.terminal_paste_worker.try_result() {
+                Ok(completed) => completed,
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    if self.pending_terminal_paste.take().is_some() {
+                        self.last_error =
+                            Some("Paste failed: terminal paste worker stopped".to_owned());
+                        changed = true;
+                    }
+                    break;
+                }
+            };
+            if self.pending_terminal_paste.as_ref() != Some(&completed.requested) {
+                continue;
+            }
+            self.pending_terminal_paste = None;
+            let text = match completed.result {
+                Ok(text) => text,
+                Err(error) => {
+                    self.last_error = Some(format!("Paste failed: {error}"));
+                    changed = true;
+                    continue;
+                }
+            };
+            let current = self.client.as_ref().is_some_and(|client| {
+                let snapshot = client.snapshot();
+                snapshot.server_epoch == completed.requested.server_epoch
+                    && snapshot.active_tab_id.as_deref()
+                        == Some(completed.requested.tab_id.as_str())
+                    && snapshot.tabs.iter().any(|tab| {
+                        tab.id == completed.requested.tab_id
+                            && tab.screen.bracketed_paste == completed.requested.bracketed
+                    })
+            }) && self.window.focused_target() == FocusTarget::Window
+                && self.current_focus_surface() == RemoteFocusSurface::Terminal
+                && !self.window_close_pending
+                && !self.settings_open
+                && !self.new_terminal_open
+                && self.editing_tab_id.is_none()
+                && self.pending_close_tab_id.is_none()
+                && self.cwd_edit_tab_id.is_none();
+            if !current {
+                self.last_error = Some(
+                    "Paste cancelled because the active terminal or paste mode changed".to_owned(),
+                );
+                changed = true;
+                continue;
+            }
+            let bytes = terminal_paste_bytes(&text, completed.requested.bracketed);
+            let result = self
+                .client
+                .as_mut()
+                .context("replaceable UI is disconnected")
+                .and_then(|client| client.send_input(&completed.requested.tab_id, &bytes));
+            match result {
+                Ok(()) => {
+                    self.cancel_terminal_selection();
+                    self.last_error = None;
+                    self.last_message = Some(format!(
+                        "Pasted {} characters into {}",
+                        text.chars().count(),
+                        completed.requested.tab_id
+                    ));
+                }
+                Err(error) => {
+                    self.last_error = Some(format!("Paste failed: {error:#}"));
+                }
+            }
+            changed = true;
+        }
+        changed
+    }
+
     fn load_composer(&self) {
         if self.cwd_edit_tab_id.is_some() {
             return;
@@ -4189,30 +4274,54 @@ impl RemoteWindowState {
     }
 
     fn paste_terminal_clipboard(&mut self) -> Result<()> {
-        let text = normalize_terminal_paste(
-            &clipboard::get_text(TERMINAL_PASTE_LIMIT_BYTES)
-                .map_err(|error| anyhow::anyhow!(error))?,
-        );
-        if text.is_empty() {
-            anyhow::bail!("clipboard text contains no pasteable characters");
+        if self.pending_terminal_paste.is_some() {
+            anyhow::bail!("a terminal clipboard read is already pending");
         }
-        if text.len() > TERMINAL_PASTE_LIMIT_BYTES {
-            anyhow::bail!(
-                "normalized clipboard text exceeds the {TERMINAL_PASTE_LIMIT_BYTES}-byte limit"
-            );
+        if self.window.focused_target() != FocusTarget::Window
+            || self.current_focus_surface() != RemoteFocusSurface::Terminal
+        {
+            anyhow::bail!("paste requires terminal focus");
         }
-        let tab_id = self
+        let client = self
             .client
             .as_ref()
-            .and_then(|client| client.snapshot().active_tab_id.clone())
+            .context("replaceable UI is disconnected")?;
+        let snapshot = client.snapshot();
+        let tab_id = snapshot
+            .active_tab_id
+            .clone()
             .context("no active terminal is available for paste")?;
-        let characters = text.chars().count();
+        let tab = snapshot
+            .tabs
+            .iter()
+            .find(|tab| tab.id == tab_id)
+            .context("the active terminal is unavailable for paste")?;
+        let requested = RemoteTerminalPasteRequest {
+            server_epoch: snapshot.server_epoch.clone(),
+            tab_id,
+            bracketed: tab.screen.bracketed_paste,
+        };
+        self.terminal_paste_worker
+            .queue(RemoteTerminalPasteTask {
+                requested: requested.clone(),
+                read: Box::new(|| {
+                    let raw = clipboard::get_text(TERMINAL_PASTE_LIMIT_BYTES)
+                        .map_err(|error| error.to_string())?;
+                    let text = normalize_terminal_paste(&raw);
+                    if text.is_empty() {
+                        return Err("clipboard text contains no pasteable characters".to_owned());
+                    }
+                    if text.len() > TERMINAL_PASTE_LIMIT_BYTES {
+                        return Err(format!(
+                            "normalized clipboard text exceeds the {TERMINAL_PASTE_LIMIT_BYTES}-byte limit"
+                        ));
+                    }
+                    Ok(text)
+                }),
+            })
+            .map_err(anyhow::Error::msg)?;
+        self.pending_terminal_paste = Some(requested);
         self.last_error = None;
-        self.terminal_input(text.as_bytes());
-        if let Some(error) = self.last_error.take() {
-            anyhow::bail!("{error}");
-        }
-        self.last_message = Some(format!("Pasted {characters} characters into {tab_id}"));
         Ok(())
     }
 
@@ -5484,6 +5593,66 @@ fn terminal_char_is_named_key_echo(value: u16) -> bool {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+struct RemoteTerminalPasteRequest {
+    server_epoch: String,
+    tab_id: String,
+    bracketed: bool,
+}
+
+struct RemoteTerminalPasteTask {
+    requested: RemoteTerminalPasteRequest,
+    read: Box<dyn FnOnce() -> std::result::Result<String, String> + Send>,
+}
+
+struct RemoteTerminalPasteResult {
+    requested: RemoteTerminalPasteRequest,
+    result: std::result::Result<String, String>,
+}
+
+struct RemoteTerminalPasteWorker {
+    tasks: Sender<RemoteTerminalPasteTask>,
+    results: Receiver<RemoteTerminalPasteResult>,
+    _thread: JoinHandle<()>,
+}
+
+impl RemoteTerminalPasteWorker {
+    fn spawn() -> Result<Self> {
+        let (task_sender, tasks) = mpsc::channel::<RemoteTerminalPasteTask>();
+        let (result_sender, results) = mpsc::channel();
+        let thread = thread::Builder::new()
+            .name("agenterm-terminal-paste".to_owned())
+            .spawn(move || {
+                for task in tasks {
+                    let requested = task.requested;
+                    let result = (task.read)();
+                    if result_sender
+                        .send(RemoteTerminalPasteResult { requested, result })
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
+            })
+            .context("could not start terminal paste worker")?;
+        Ok(Self {
+            tasks: task_sender,
+            results,
+            _thread: thread,
+        })
+    }
+
+    fn queue(&self, task: RemoteTerminalPasteTask) -> std::result::Result<(), String> {
+        self.tasks
+            .send(task)
+            .map_err(|_| "terminal paste worker is unavailable".to_owned())
+    }
+
+    fn try_result(&self) -> std::result::Result<RemoteTerminalPasteResult, mpsc::TryRecvError> {
+        self.results.try_recv()
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct RemoteTerminalResize {
     server_epoch: String,
     tab_id: String,
@@ -6236,6 +6405,7 @@ mod tests {
             columns: 8,
             alternate_screen: false,
             application_cursor: false,
+            bracketed_paste: false,
             scrollback_offset: 0,
             max_scrollback: 0,
             cursor: UiCursorSnapshot {
@@ -6300,6 +6470,7 @@ mod tests {
             columns: 8,
             alternate_screen: false,
             application_cursor: false,
+            bracketed_paste: false,
             scrollback_offset: 0,
             max_scrollback: 0,
             cursor: UiCursorSnapshot {
@@ -6526,6 +6697,44 @@ mod tests {
             worker.try_result(),
             Err(mpsc::TryRecvError::Empty)
         ));
+    }
+
+    #[test]
+    fn terminal_paste_worker_never_blocks_the_ui_request_path() {
+        let worker = RemoteTerminalPasteWorker::spawn().expect("spawn paste worker");
+        let (started_sender, started_receiver) = mpsc::channel();
+        let (release_sender, release_receiver) = mpsc::channel();
+        let requested = RemoteTerminalPasteRequest {
+            server_epoch: "epoch-a".to_owned(),
+            tab_id: "@1".to_owned(),
+            bracketed: true,
+        };
+        worker
+            .queue(RemoteTerminalPasteTask {
+                requested: requested.clone(),
+                read: Box::new(move || {
+                    started_sender.send(()).expect("signal paste read");
+                    release_receiver
+                        .recv_timeout(Duration::from_secs(2))
+                        .expect("release paste read");
+                    Ok("payload".to_owned())
+                }),
+            })
+            .expect("queue paste read");
+        started_receiver
+            .recv_timeout(Duration::from_secs(2))
+            .expect("paste read started off-thread");
+        assert!(matches!(
+            worker.try_result(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+        release_sender.send(()).expect("release paste read");
+        let completed = worker
+            .results
+            .recv_timeout(Duration::from_secs(2))
+            .expect("paste read result");
+        assert_eq!(completed.requested, requested);
+        assert_eq!(completed.result.as_deref(), Ok("payload"));
     }
 
     #[test]

@@ -82,7 +82,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   - [ ] rectangular selection remains later work; v0.1.8 does not infer it
     from word, visual-row, or drag selection
 - [x] terminal paste reads bounded Unicode clipboard text off the GUI thread,
-  normalizes newlines, filters unsafe controls, and honors bracketed-paste mode
+  normalizes newlines, filters unsafe controls, and honors bracketed-paste mode.
+  The Windows public `remote-ui-smoke` proves ordinary asynchronous delivery and
+  exact `ESC[200~...ESC[201~` PTY bytes; Unix uses the same framing helper and
+  rejects stale tab/focus/modal completions instead of pasting into a new target
 - [~] dirty-frame rendering and GDI double buffering exist, but live v0.1.12
   dogfood reports sustained terminal-content and native-frame flicker. White-box
   analysis found that the replaceable Windows GUI cleared and repainted directly

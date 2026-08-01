@@ -896,6 +896,11 @@ Cockpit
   typed failure/recovery、CC process crash/replacement、Human GUI detach 时的
   same-CC/same-server/same-epoch retention、new epoch recovery 和 stale owner
   replacement；Unix 原生组合仍由各自 journey 证明，不能用 Windows 结果代替；
+- terminal Paste 不再在 Windows 或 Unix GUI event thread 同步读取 native clipboard：
+  单 pending worker 在完成时复核 server epoch、原 tab、terminal/window focus、modal 与
+  bracketed mode，stale completion typed cancel。Windows integrated `remote-ui-smoke`
+  已以真实 PTY 输入流证明普通异步粘贴和精确 `ESC[200~...ESC[201~` framing；Unix
+  all-target compile/runtime 回执仍等待下一次 matching-host CI，不能由 Windows 冒充；
 - Workflows、Extensions、InfoHub 可以改进解释与导航，但没有 owning backend
   前继续显示真实 empty/unavailable，不造假数据。
 

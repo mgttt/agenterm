@@ -291,6 +291,9 @@ pub struct UiScreenSnapshot {
     /// Additive field. Selects CSI versus SS3 cursor-key encoding.
     #[serde(default)]
     pub application_cursor: bool,
+    /// Additive field. Older compatible servers do not expose bracketed paste.
+    #[serde(default)]
+    pub bracketed_paste: bool,
     pub scrollback_offset: usize,
     pub max_scrollback: usize,
     pub cursor: UiCursorSnapshot,
@@ -652,6 +655,7 @@ mod tests {
             columns: 80,
             alternate_screen: false,
             application_cursor: false,
+            bracketed_paste: false,
             scrollback_offset: 0,
             max_scrollback: 0,
             cursor: UiCursorSnapshot {
@@ -787,11 +791,13 @@ mod tests {
         let object = value.as_object_mut().expect("screen object");
         object.remove("alternate_screen");
         object.remove("application_cursor");
+        object.remove("bracketed_paste");
 
         let decoded: UiScreenSnapshot =
             serde_json::from_value(value).expect("decode additive screen fields");
         assert!(!decoded.alternate_screen);
         assert!(!decoded.application_cursor);
+        assert!(!decoded.bracketed_paste);
     }
 
     #[test]

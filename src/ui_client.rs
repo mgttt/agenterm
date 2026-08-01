@@ -546,6 +546,7 @@ mod tests {
                 columns: 80,
                 alternate_screen: false,
                 application_cursor: false,
+                bracketed_paste: false,
                 scrollback_offset: 0,
                 max_scrollback: 0,
                 cursor: UiCursorSnapshot {

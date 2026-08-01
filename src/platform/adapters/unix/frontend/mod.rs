@@ -19,7 +19,11 @@ use std::{
     collections::HashSet,
     env,
     path::Path,
-    sync::Arc,
+    sync::{
+        Arc,
+        mpsc::{self, Receiver, TryRecvError},
+    },
+    thread,
     time::{Duration, Instant, SystemTime},
 };
 
@@ -50,7 +54,10 @@ use crate::{
     },
     terminal_runtime::{TerminalLaunch, TerminalTab},
     theme::ThemeId,
-    ui_clipboard::{normalize_composer_paste, normalize_terminal_paste},
+    ui_clipboard::{
+        TERMINAL_PASTE_LIMIT_BYTES, normalize_composer_paste, normalize_terminal_paste,
+        terminal_paste_bytes,
+    },
     ui_geometry::{
         ScrollbarHit, TERMINAL_SCROLLBAR_WIDTH, TreeRowActionDensity, TreeRowMode, WHEEL_DELTA,
         WHEEL_ROWS_PER_NOTCH, WorkspaceToolbarLayout, pixel_rect_json, scrollback_for_thumb_top,
@@ -275,6 +282,56 @@ enum UnixFocusSurface {
     Composer,
     Sidebar,
     Settings,
+}
+
+struct PendingTerminalPaste {
+    tab_id: u64,
+    receiver: Receiver<Result<String, TerminalPasteFailure>>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum TerminalPasteFailure {
+    Busy,
+    Clipboard(String),
+    Empty,
+    FocusRequired,
+    ModalOpen,
+    NoActiveTerminal,
+    NormalizedTextTooLarge,
+    StaleTarget,
+    TerminalRejected,
+    WorkerDisconnected,
+    WorkerStart(String),
+}
+
+impl std::fmt::Display for TerminalPasteFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Busy => formatter.write_str("a terminal clipboard read is already pending"),
+            Self::Clipboard(message) => write!(formatter, "clipboard read failed: {message}"),
+            Self::Empty => formatter.write_str("clipboard text contains no pasteable characters"),
+            Self::FocusRequired => formatter.write_str("paste requires terminal focus"),
+            Self::ModalOpen => formatter.write_str("paste is unavailable while a modal is open"),
+            Self::NoActiveTerminal => formatter.write_str("no active terminal is available"),
+            Self::NormalizedTextTooLarge => write!(
+                formatter,
+                "normalized clipboard text exceeds the {TERMINAL_PASTE_LIMIT_BYTES}-byte limit"
+            ),
+            Self::StaleTarget => formatter.write_str(
+                "clipboard paste was cancelled because the active terminal or focus changed",
+            ),
+            Self::TerminalRejected => formatter.write_str("terminal input was rejected"),
+            Self::WorkerDisconnected => {
+                formatter.write_str("clipboard read worker stopped without a result")
+            }
+            Self::WorkerStart(message) => {
+                write!(
+                    formatter,
+                    "could not start clipboard read worker: {message}"
+                )
+            }
+        }
+    }
 }
 
 impl UnixFocusSurface {
@@ -502,6 +559,7 @@ struct UnixApp {
     tabs_resize_drag: Option<TabsResizeDrag>,
     render_buffers: RenderBuffers,
     status_message: String,
+    pending_terminal_paste: Option<PendingTerminalPaste>,
     ime_preedit: String,
     ime_cursor: Option<(usize, usize)>,
     cursor_blink: CursorBlink,
@@ -573,6 +631,7 @@ impl UnixApp {
             tabs_resize_drag: None,
             render_buffers: RenderBuffers::default(),
             status_message: String::from("Ready"),
+            pending_terminal_paste: None,
             ime_preedit: String::new(),
             ime_cursor: None,
             cursor_blink: CursorBlink::new(Instant::now()),
@@ -2716,37 +2775,83 @@ impl UnixApp {
         Ok(())
     }
 
-    fn paste_clipboard_into_terminal(&mut self) -> Result<(), String> {
-        if self.settings_open
-            || self.window_close_pending
-            || self.note_edit_target.is_some()
-            || self.cwd_edit_target.is_some()
-        {
-            return Err("paste is unavailable while a modal is open".to_owned());
+    fn request_terminal_clipboard_paste(&mut self) -> Result<(), TerminalPasteFailure> {
+        if self.pending_terminal_paste.is_some() {
+            return Err(TerminalPasteFailure::Busy);
         }
-        if self.focus_surface != UnixFocusSurface::Terminal {
-            return Err("paste requires terminal focus".to_owned());
+        if self.modal_surface_active() {
+            return Err(TerminalPasteFailure::ModalOpen);
+        }
+        if self.focus_surface != UnixFocusSurface::Terminal || !self.window_focused {
+            return Err(TerminalPasteFailure::FocusRequired);
         }
         let Some(position) = self.active_position() else {
-            return Err("no active window".to_owned());
+            return Err(TerminalPasteFailure::NoActiveTerminal);
         };
         let tab_id = self.tabs[position].id;
-        let raw = clipboard::get_clipboard_text()?;
-        let text = normalize_terminal_paste(&raw);
+        let (sender, receiver) = mpsc::channel();
+        let wake_signal = Arc::clone(&self.wake_signal);
+        let _worker = thread::Builder::new()
+            .name("agenterm-unix-clipboard-read".to_owned())
+            .spawn(move || {
+                let result = clipboard::get_clipboard_text_bounded(TERMINAL_PASTE_LIMIT_BYTES)
+                    .map_err(TerminalPasteFailure::Clipboard);
+                let _ = sender.send(result);
+                request_gui_wake(0, &wake_signal);
+            })
+            .map_err(|error| TerminalPasteFailure::WorkerStart(error.to_string()))?;
+        self.pending_terminal_paste = Some(PendingTerminalPaste { tab_id, receiver });
+        self.set_status_message(format!("Reading clipboard for @{tab_id}…"));
+        self.request_redraw();
+        Ok(())
+    }
+
+    fn drain_terminal_clipboard_paste(&mut self) -> bool {
+        let Some(pending) = self.pending_terminal_paste.as_ref() else {
+            return false;
+        };
+        let result = match pending.receiver.try_recv() {
+            Ok(result) => result,
+            Err(TryRecvError::Empty) => return false,
+            Err(TryRecvError::Disconnected) => Err(TerminalPasteFailure::WorkerDisconnected),
+        };
+        let tab_id = pending.tab_id;
+        self.pending_terminal_paste = None;
+        let result = result.and_then(|raw| self.finish_terminal_clipboard_paste(tab_id, &raw));
+        if let Err(error) = result {
+            self.set_status_message(format!("Paste failed: {error}"));
+        }
+        true
+    }
+
+    fn finish_terminal_clipboard_paste(
+        &mut self,
+        tab_id: u64,
+        raw: &str,
+    ) -> Result<(), TerminalPasteFailure> {
+        if !terminal_paste_target_is_current(
+            tab_id,
+            self.active,
+            self.focus_surface,
+            self.window_focused,
+            self.modal_surface_active(),
+        ) {
+            return Err(TerminalPasteFailure::StaleTarget);
+        }
+        let position = self
+            .active_position()
+            .ok_or(TerminalPasteFailure::StaleTarget)?;
+        let text = normalize_terminal_paste(raw);
         if text.is_empty() {
-            return Err("clipboard text contains no pasteable characters".to_owned());
+            return Err(TerminalPasteFailure::Empty);
+        }
+        if text.len() > TERMINAL_PASTE_LIMIT_BYTES {
+            return Err(TerminalPasteFailure::NormalizedTextTooLarge);
         }
         let bracketed = self.tabs[position].parser.screen().bracketed_paste();
-        let mut bytes = Vec::with_capacity(text.len() + if bracketed { 12 } else { 0 });
-        if bracketed {
-            bytes.extend_from_slice(b"\x1b[200~");
-        }
-        bytes.extend_from_slice(text.as_bytes());
-        if bracketed {
-            bytes.extend_from_slice(b"\x1b[201~");
-        }
+        let bytes = terminal_paste_bytes(&text, bracketed);
         if !self.tabs[position].send(&bytes) {
-            return Err("terminal input was rejected".to_owned());
+            return Err(TerminalPasteFailure::TerminalRejected);
         }
         let _ = self.cancel_terminal_selection(true);
         self.event_journal_mut().commit(
@@ -4331,7 +4436,9 @@ impl UnixApp {
     fn handle_pixel_event(&mut self, event: PixelWindowEvent) {
         match event {
             PixelWindowEvent::Wake => {
-                if self.drain_wake_and_pty() {
+                let pty_changed = self.drain_wake_and_pty();
+                let clipboard_changed = self.drain_terminal_clipboard_paste();
+                if pty_changed || clipboard_changed {
                     self.request_redraw();
                 }
             }
@@ -4505,7 +4612,10 @@ impl UnixApp {
                         return;
                     }
                     input::TerminalShortcutAction::Paste => {
-                        let _ = self.paste_clipboard_into_terminal();
+                        if let Err(error) = self.request_terminal_clipboard_paste() {
+                            self.set_status_message(format!("Paste failed: {error}"));
+                            self.request_redraw();
+                        }
                         return;
                     }
                     input::TerminalShortcutAction::Suppress => return,
@@ -4613,6 +4723,7 @@ impl UnixApp {
 
     fn next_window_directive(&mut self, now: Instant) -> PixelWindowDirective {
         let mut changed = self.drain_wake_and_pty();
+        changed |= self.drain_terminal_clipboard_paste();
         let cursor_active = self.window_focused
             && self.focus_surface == UnixFocusSurface::Terminal
             && !self.modal_surface_active()
@@ -4778,6 +4889,19 @@ fn system_menu_clipboard_state_pure(
     )
 }
 
+fn terminal_paste_target_is_current(
+    request_tab_id: u64,
+    active_tab_id: Option<u64>,
+    focus_surface: UnixFocusSurface,
+    window_focused: bool,
+    modal_surface_active: bool,
+) -> bool {
+    active_tab_id == Some(request_tab_id)
+        && focus_surface == UnixFocusSurface::Terminal
+        && window_focused
+        && !modal_surface_active
+}
+
 fn workspace_toolbar_snapshot_json(toolbar: WorkspaceToolbarLayout) -> serde_json::Value {
     serde_json::json!({
         "bounds": pixel_rect_json(toolbar.bounds),
@@ -4794,8 +4918,9 @@ fn workspace_toolbar_snapshot_json(toolbar: WorkspaceToolbarLayout) -> serde_jso
 #[cfg(test)]
 mod system_menu_tests {
     use super::{
-        RecentSidebarTextClick, RenderBuffers, compact_cwd_for_status, parse_gui_launch,
-        scale_frame_nearest, scale_rect_to_frame, system_menu_clipboard_state_pure,
+        RecentSidebarTextClick, RenderBuffers, UnixFocusSurface, compact_cwd_for_status,
+        parse_gui_launch, scale_frame_nearest, scale_rect_to_frame,
+        system_menu_clipboard_state_pure, terminal_paste_bytes, terminal_paste_target_is_current,
         workspace_toolbar_snapshot_json,
     };
     #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -5032,6 +5157,54 @@ mod system_menu_tests {
         assert_eq!(
             system_menu_clipboard_state_pure(false, false, true, true),
             (false, false)
+        );
+    }
+
+    #[test]
+    fn terminal_paste_completion_requires_the_original_active_terminal_focus() {
+        assert!(terminal_paste_target_is_current(
+            7,
+            Some(7),
+            UnixFocusSurface::Terminal,
+            true,
+            false
+        ));
+        assert!(!terminal_paste_target_is_current(
+            7,
+            Some(8),
+            UnixFocusSurface::Terminal,
+            true,
+            false
+        ));
+        assert!(!terminal_paste_target_is_current(
+            7,
+            Some(7),
+            UnixFocusSurface::Composer,
+            true,
+            false
+        ));
+        assert!(!terminal_paste_target_is_current(
+            7,
+            Some(7),
+            UnixFocusSurface::Terminal,
+            true,
+            true
+        ));
+        assert!(!terminal_paste_target_is_current(
+            7,
+            Some(7),
+            UnixFocusSurface::Terminal,
+            false,
+            false
+        ));
+    }
+
+    #[test]
+    fn terminal_paste_framing_matches_bracketed_mode() {
+        assert_eq!(terminal_paste_bytes("a\rb", false), b"a\rb");
+        assert_eq!(
+            terminal_paste_bytes("a\rb", true),
+            b"\x1b[200~a\rb\x1b[201~"
         );
     }
 }

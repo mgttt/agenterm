@@ -123,6 +123,7 @@ fn ui_screen_snapshot(tab: &mut TerminalTab, generation: u64) -> Result<UiScreen
         columns,
         alternate_screen: screen.alternate_screen(),
         application_cursor: screen.application_cursor(),
+        bracketed_paste: screen.bracketed_paste(),
         scrollback_offset: screen.scrollback(),
         max_scrollback,
         cursor: UiCursorSnapshot {
