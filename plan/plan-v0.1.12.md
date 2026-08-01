@@ -172,6 +172,13 @@ selected native module。Windows-hosted all-target Clippy 与 31 项 crate all-f
 阶段停止，因此 Unix frontend 的原生目标编译仍需 Linux/macOS host/CI 补证。生产边界
 门禁已由 34 行收敛到 16 行，剩余归属明确为 Unix winit/softbuffer host、Windows
 frontend/Control Center/remote renderer 与 root target selection，不能以本叶冒充总收口。
+Windows native screenshot 叶把 bounded GDI window/client capture、BGRA conversion、
+resource RAII 与 PNG 写入迁入 crate Windows adapter；公开 API 只暴露 unsafe-constructed
+opaque window handle、neutral capture area、typed result/failure。Linux/macOS 同一调用明确
+Unsupported。remote GUI 与 Control Center 已真实消费该 API，root screenshot 文件及旧
+clip contract 删除；Control Center 的重复 MoveFileExW/activation 也改为 crate facade。
+34 项 crate all-feature tests、root warnings-denied Clippy 与 Control Center 聚焦测试通过，
+生产边界门禁剩余 13 行。
 
 2026-08-01 首个建设期增量：Cockpit snapshot 新增明确的
 `tab_counts.{total,running,dead}`，native shell 同源显示 logical instance、

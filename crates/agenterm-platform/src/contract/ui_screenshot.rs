@@ -1,6 +1,6 @@
 //! Platform-neutral screenshot encoding contract.
 
-use std::{borrow::Cow, path::Path};
+use std::{borrow::Cow, num::NonZeroIsize, path::Path};
 
 use crate::CapabilityStatus;
 
@@ -22,6 +22,42 @@ impl XrgbClip {
             height,
         }
     }
+}
+
+/// Opaque identity for a native window whose pixels may be captured.
+///
+/// Construction is unsafe because the caller owns the window lifetime and must
+/// keep the handle valid until the capture call returns.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct ScreenshotWindowHandle(NonZeroIsize);
+
+impl ScreenshotWindowHandle {
+    /// # Safety
+    ///
+    /// `raw` must identify a live native window for the duration of the call.
+    pub const unsafe fn from_raw(raw: isize) -> Option<Self> {
+        match NonZeroIsize::new(raw) {
+            Some(value) => Some(Self(value)),
+            None => None,
+        }
+    }
+
+    pub(crate) const fn raw(self) -> isize {
+        self.0.get()
+    }
+}
+
+/// Native window pixels to capture.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum NativeCaptureArea {
+    Window,
+    Client {
+        left: i32,
+        top: i32,
+        width: i32,
+        height: i32,
+    },
 }
 
 /// A caller-owned little-endian `0x00RRGGBB` framebuffer and output path.
@@ -165,5 +201,12 @@ mod tests {
                 message: "outside frame".to_owned(),
             }
         );
+    }
+
+    #[test]
+    fn null_native_window_handle_is_rejected() {
+        // SAFETY: zero is intentionally supplied to verify construction rejects
+        // it before any adapter can observe a native handle.
+        assert!(unsafe { ScreenshotWindowHandle::from_raw(0) }.is_none());
     }
 }

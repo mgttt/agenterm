@@ -456,6 +456,15 @@ integrated validation recorded below):
   target probe is unavailable past the dependency build-script boundary because
   this host lacks `x86_64-linux-gnu-gcc`, so native Unix compilation remains an
   explicit outstanding evidence item rather than an inferred success.
+- [x] Native Windows screenshot capture now belongs to the crate Windows
+  adapter. The stable public surface accepts an opaque caller-owned window
+  handle and neutral window/client capture area, enforces bounded allocation
+  and strict clipping, returns typed failures, and keeps every GDI type private.
+  Linux and macOS report native-window capture as Unsupported while retaining
+  renderer-owned XRGB PNG encoding. AgenTerm remote GUI and Control Center use
+  this facade; the duplicate root GDI implementation and clip contract are
+  deleted. Control Center file replacement and activation also reuse their
+  existing crate capabilities.
 - [x] Control Center state-directory protection, exclusive state-file creation,
   atomic replacement, existing-window focus, and direct native capture now
   call `services::control_center → selected → adapters/{windows,linux,macos}`.

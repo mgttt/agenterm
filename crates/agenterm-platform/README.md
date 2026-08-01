@@ -42,7 +42,7 @@ third-party dependency.
 | `ime` | preedit/commit state machine and display-aware capability status | `input` |
 | `activation` | neutral policy, typed requests, selected native window operation | `window`, target `winit` / Win32 |
 | `clipboard` | caller-bounded Unicode clipboard with configurable open deadline | `process`, target native APIs |
-| `screenshot` | bounded XRGB framebuffer PNG encoding | `filesystem`, `png` |
+| `screenshot` | bounded XRGB encoding and typed native-window capture | `filesystem`, `png`, target Win32 APIs |
 | `font` | discovery, metrics and RAII native font resource | `filesystem`, target `ab_glyph` / GDI |
 | `webview` | passive system-runtime discovery | none |
 | `full` | every declared feature | union of the above |
@@ -62,7 +62,7 @@ third-party dependency.
 | IME composition | typed Unsupported | display-aware | display-aware |
 | activation | native show/focus | winit active intent | winit application intent |
 | clipboard | Win32 Unicode | Wayland/X11 helpers | `pbcopy`/`pbpaste` |
-| screenshot encoding | PNG | PNG | PNG |
+| screenshot | PNG + native window/client GDI capture | PNG; native-window capture Unsupported | PNG; native-window capture Unsupported |
 | font candidates | product GDI path | system candidates | system candidates |
 | system WebView probe | WebView2 | WebKitGTK | WKWebView |
 
@@ -88,6 +88,22 @@ For PTYs, construct `pty::ChildCommand`, set a `pty::TerminalSize`, then retain
 independent reader and wait handles using the clone methods before coordinating
 termination. Dropping public lock and PTY guard values releases only resources
 owned by that value.
+
+Windows embedders can synchronously capture an owned native window without
+exposing `HWND` in their public API:
+
+```rust,no_run
+use agenterm_platform::screenshot::{
+    capture_native_window_png, NativeCaptureArea, ScreenshotWindowHandle,
+};
+
+# let raw_window_handle: isize = 1;
+// SAFETY: the embedding application keeps this window alive for the call.
+let window = unsafe { ScreenshotWindowHandle::from_raw(raw_window_handle) }
+    .ok_or("null native window")?;
+capture_native_window_png(window, std::path::Path::new("window.png"), NativeCaptureArea::Window)?;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
 
 Product applications supply names, paths, policy limits and protocol framing.
 The crate does not know AgenTerm workspaces, Control Center, Fleet, themes,

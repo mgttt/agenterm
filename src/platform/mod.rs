@@ -248,53 +248,6 @@ pub use agenterm_platform::window::DisplayBackendFacts;
 #[cfg(test)]
 pub use agenterm_platform::contract::input::classify_key_press;
 
-/// Inclusive screenshot clip rectangle in framebuffer pixels.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ScreenshotClipRect {
-    pub x: u32,
-    pub y: u32,
-    pub width: u32,
-    pub height: u32,
-}
-
-/// Cross-platform clip validation failures (stable semantics for all adapters).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ScreenshotClipError {
-    EmptyFrame,
-    ZeroDimension,
-    OriginOutside,
-    Overflow,
-}
-
-/// Reject empty frames, zero clips, and overflow without silent shrink.
-pub fn validate_screenshot_clip(
-    frame_width: u32,
-    frame_height: u32,
-    clip: ScreenshotClipRect,
-) -> Result<(), ScreenshotClipError> {
-    if frame_width == 0 || frame_height == 0 {
-        return Err(ScreenshotClipError::EmptyFrame);
-    }
-    if clip.width == 0 || clip.height == 0 {
-        return Err(ScreenshotClipError::ZeroDimension);
-    }
-    if clip.x >= frame_width || clip.y >= frame_height {
-        return Err(ScreenshotClipError::OriginOutside);
-    }
-    let right = clip
-        .x
-        .checked_add(clip.width)
-        .ok_or(ScreenshotClipError::Overflow)?;
-    let bottom = clip
-        .y
-        .checked_add(clip.height)
-        .ok_or(ScreenshotClipError::Overflow)?;
-    if right > frame_width || bottom > frame_height {
-        return Err(ScreenshotClipError::Overflow);
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -346,76 +299,6 @@ mod tests {
         assert_eq!(
             NativeToolbarHit::ORDER.map(NativeToolbarHit::action_id),
             action::TOOLBAR_ACTION_ORDER
-        );
-    }
-
-    #[test]
-    fn screenshot_clip_validation_rejects_overflow_without_shrink() {
-        let frame = (950_u32, 594_u32);
-        assert!(
-            validate_screenshot_clip(
-                frame.0,
-                frame.1,
-                ScreenshotClipRect {
-                    x: 0,
-                    y: 0,
-                    width: frame.0,
-                    height: frame.1,
-                },
-            )
-            .is_ok()
-        );
-        assert_eq!(
-            validate_screenshot_clip(
-                frame.0,
-                frame.1,
-                ScreenshotClipRect {
-                    x: 200,
-                    y: 100,
-                    width: 800,
-                    height: 500,
-                },
-            ),
-            Err(ScreenshotClipError::Overflow)
-        );
-        assert_eq!(
-            validate_screenshot_clip(
-                0,
-                10,
-                ScreenshotClipRect {
-                    x: 0,
-                    y: 0,
-                    width: 1,
-                    height: 1,
-                }
-            ),
-            Err(ScreenshotClipError::EmptyFrame)
-        );
-        assert_eq!(
-            validate_screenshot_clip(
-                10,
-                10,
-                ScreenshotClipRect {
-                    x: 0,
-                    y: 0,
-                    width: 0,
-                    height: 5,
-                }
-            ),
-            Err(ScreenshotClipError::ZeroDimension)
-        );
-        assert_eq!(
-            validate_screenshot_clip(
-                10,
-                10,
-                ScreenshotClipRect {
-                    x: 10,
-                    y: 0,
-                    width: 1,
-                    height: 1,
-                }
-            ),
-            Err(ScreenshotClipError::OriginOutside)
         );
     }
 

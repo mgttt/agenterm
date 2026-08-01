@@ -6,7 +6,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use agenterm_platform::clipboard;
+use agenterm_platform::{clipboard, screenshot};
 use anyhow::{Context as _, Result};
 use unicode_width::UnicodeWidthChar;
 use windows_sys::Win32::{
@@ -56,7 +56,6 @@ use crate::{
         selected::native::{
             activation,
             input::{Utf16TextDecoder, primary_shortcut, windows_modifiers},
-            screenshot::{self, CaptureArea},
         },
         toolbar::NativeToolbarHit as WindowsToolbarHit,
         window::{ClientSize, WindowSemanticState},
@@ -156,6 +155,21 @@ fn platform_capability_error(status: CapabilityStatus) -> anyhow::Error {
         }
     }
 }
+
+fn capture_window_png(
+    window: HWND,
+    path: &std::path::Path,
+    area: screenshot::NativeCaptureArea,
+) -> Result<()> {
+    // SAFETY: the replaceable frontend owns this HWND and capture is
+    // synchronous on the window thread.
+    let window = unsafe { screenshot::ScreenshotWindowHandle::from_raw(window as isize) }
+        .context("screenshot window handle is unavailable")?;
+    screenshot::capture_native_window_png(window, path, area)
+        .map(|_| ())
+        .map_err(|error| anyhow::anyhow!("{}: {}", error.code(), error))
+}
+
 const STATUS_HEIGHT: i32 = 26;
 const COMPOSER_HEIGHT: i32 = 104;
 const MARGIN: i32 = 6;
@@ -1570,8 +1584,7 @@ impl RemoteWindowState {
             "screenshot" => {
                 self.paint();
                 let path = screenshot_output_path(&command.args, "agenterm-window");
-                screenshot::save_png(self.window, &path, CaptureArea::Window)
-                    .map_err(|error| platform_capability_error(error.to_capability_status()))?;
+                capture_window_png(self.window, &path, screenshot::NativeCaptureArea::Window)?;
                 output = Some(path.display().to_string());
             }
             "screenshot-pane" | "screenshot-tab" => {
@@ -1593,17 +1606,16 @@ impl RemoteWindowState {
                 self.paint();
                 let path = screenshot_output_path(&command.args, "agenterm-pane");
                 let terminal = self.workspace_geometry().terminal;
-                screenshot::save_png(
+                capture_window_png(
                     self.window,
                     &path,
-                    CaptureArea::Client {
+                    screenshot::NativeCaptureArea::Client {
                         left: terminal.left,
                         top: terminal.top,
                         width: terminal.width(),
                         height: terminal.height(),
                     },
-                )
-                .map_err(|error| platform_capability_error(error.to_capability_status()))?;
+                )?;
                 output = Some(path.display().to_string());
             }
             "__focus" => {

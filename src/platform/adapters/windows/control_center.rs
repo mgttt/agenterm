@@ -1,79 +1,60 @@
-//! Windows Control Center native operations.
+//! Windows Control Center composition over public platform-crate capabilities.
 
-use std::{ffi::OsStr, fs::OpenOptions, io, os::windows::ffi::OsStrExt, path::Path};
-
-use windows_sys::Win32::{
-    Storage::FileSystem::{MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW},
-    UI::WindowsAndMessaging::{
-        IsWindow, SW_RESTORE, SW_SHOWNOACTIVATE, SetForegroundWindow, ShowWindowAsync,
-    },
-};
+use std::{fs::OpenOptions, io, path::Path};
 
 use crate::platform::control_center::ScreenshotStrategy;
 
 pub(crate) const fn screenshot_strategy() -> ScreenshotStrategy {
     ScreenshotStrategy::DirectNativeWindow
 }
+
 pub(crate) fn protect_state_directory(_path: &Path) -> io::Result<()> {
     Ok(())
 }
+
 pub(crate) fn private_create_new_options() -> OpenOptions {
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
     options
 }
+
 pub(crate) fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
-    let wide = |path: &Path| {
-        OsStr::new(path)
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect::<Vec<_>>()
-    };
-    let source = wide(source);
-    let destination = wide(destination);
-    if unsafe {
-        MoveFileExW(
-            source.as_ptr(),
-            destination.as_ptr(),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-        )
-    } == 0
-    {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(())
+    agenterm_platform::filesystem::replace_file(source, destination)
 }
+
 pub(crate) fn focus_existing_window(raw_handle: i64, no_activate: bool) {
-    let window = raw_handle as isize as *mut std::ffi::c_void;
-    if window.is_null() || unsafe { IsWindow(window) } == 0 {
+    // SAFETY: the registry value identifies the live Control Center window;
+    // the selected adapter returns a typed failure if the handle is stale.
+    let Some(window) = (unsafe {
+        agenterm_platform::activation::NativeWindowHandle::from_raw(raw_handle as isize)
+    }) else {
         return;
-    }
-    unsafe {
-        ShowWindowAsync(
-            window,
-            if no_activate {
-                SW_SHOWNOACTIVATE
-            } else {
-                SW_RESTORE
-            },
-        );
-        if !no_activate {
-            SetForegroundWindow(window);
-        }
-    }
+    };
+    let request = if no_activate {
+        agenterm_platform::activation::ActivationRequest::ShowWithoutActivation
+    } else {
+        agenterm_platform::activation::ActivationRequest::RestoreAndActivate
+    };
+    let _ = agenterm_platform::activation::apply(window, request);
 }
+
 pub(crate) fn capture_native_window_png(raw_handle: i64, output: &Path) -> io::Result<()> {
-    let window = raw_handle as isize as *mut std::ffi::c_void;
-    if window.is_null() || unsafe { IsWindow(window) } == 0 {
-        return Err(io::Error::new(
+    // SAFETY: the registry value identifies the Control Center-owned window and
+    // capture is synchronous; stale values fail through the typed crate API.
+    let window = unsafe {
+        agenterm_platform::screenshot::ScreenshotWindowHandle::from_raw(raw_handle as isize)
+    }
+    .ok_or_else(|| {
+        io::Error::new(
             io::ErrorKind::NotFound,
             "control_center_screenshot_window_unavailable",
-        ));
-    }
-    crate::platform::selected::native::screenshot::save_png(
+        )
+    })?;
+    agenterm_platform::screenshot::capture_native_window_png(
         window,
         output,
-        crate::platform::selected::native::screenshot::CaptureArea::Window,
+        agenterm_platform::screenshot::NativeCaptureArea::Window,
     )
-    .map_err(|error| io::Error::other(error.to_string()))
+    .map(|_| ())
+    .map_err(|error| io::Error::other(format!("{}: {}", error.code(), error)))
 }

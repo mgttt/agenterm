@@ -9,6 +9,8 @@ use crate::{
     selected,
 };
 
+pub use crate::contract::ui_screenshot::{NativeCaptureArea, ScreenshotWindowHandle};
+
 /// Maximum accepted framebuffer side length in pixels.
 pub const MAX_FRAME_SIDE: u32 = 16_384;
 
@@ -18,6 +20,15 @@ pub const MAX_FRAME_PIXELS: usize = 64 * 1024 * 1024;
 /// Encode a caller-owned little-endian `0x00RRGGBB` framebuffer as an RGBA PNG.
 pub fn write_xrgb_png(frame: XrgbFrame<'_>) -> Result<ScreenshotWriteResult, UiScreenshotError> {
     selected::ui_screenshot::write_xrgb_png(frame)
+}
+
+/// Capture a native window or a strict client-area rectangle into a PNG.
+pub fn capture_native_window_png(
+    window: ScreenshotWindowHandle,
+    path: &std::path::Path,
+    area: NativeCaptureArea,
+) -> Result<ScreenshotWriteResult, UiScreenshotError> {
+    selected::ui_screenshot::capture_native_window_png(window, path, area)
 }
 
 pub(crate) fn write_xrgb_png_impl(
@@ -107,7 +118,7 @@ fn frame_too_large(width: u32, height: u32) -> UiScreenshotError {
     )
 }
 
-fn checked_clip(
+pub(crate) fn checked_clip(
     width: u32,
     height: u32,
     clip: Option<XrgbClip>,
