@@ -5,6 +5,9 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use serde_json::json;
+use sha2::{Digest, Sha256};
+
 const BUILD_TASK: &str = include_str!("../scripts/rhai/build.rhai");
 
 fn fixture_root(name: &str) -> PathBuf {
@@ -84,6 +87,106 @@ fn run_prune(root: &Path) -> Output {
         .arg(root.join("target"))
         .output()
         .expect("run incremental prune task")
+}
+
+fn run_prune_with_manifest(root: &Path, manifest: &Path, invocation: &str) -> Output {
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    Command::new(env!("CARGO_BIN_EXE_agenterm-script"))
+        .current_dir(repo)
+        .args(["task", "run", "prune-target-incremental", "--manifest"])
+        .arg(repo.join("agenterm.tasks.json"))
+        .args([
+            "--timeout-ms",
+            "30000",
+            "--max-operations",
+            "10000000",
+            "--",
+        ])
+        .arg(root)
+        .arg(root.join("target"))
+        .args(["--manifest"])
+        .arg(manifest)
+        .args(["--invocation", invocation])
+        .output()
+        .expect("run incremental prune task with manifest")
+}
+
+fn metadata_millis(metadata: &fs::Metadata) -> u128 {
+    metadata
+        .modified()
+        .expect("fixture metadata has modified time")
+        .duration_since(UNIX_EPOCH)
+        .expect("fixture modified after epoch")
+        .as_millis()
+}
+
+fn push_metadata_records(root: &Path, directory: &Path, records: &mut Vec<String>) {
+    for entry in fs::read_dir(directory).expect("read identity directory") {
+        let entry = entry.expect("read identity entry");
+        let path = entry.path();
+        let metadata = fs::symlink_metadata(&path).expect("read identity metadata");
+        assert!(!metadata.file_type().is_symlink());
+        let relative = path
+            .strip_prefix(root)
+            .expect("identity entry beneath root")
+            .to_string_lossy()
+            .replace('\\', "/");
+        let kind = if metadata.is_dir() { "d" } else { "f" };
+        records.push(format!(
+            "{kind}|{relative}|{}|{}",
+            metadata.len(),
+            metadata_millis(&metadata)
+        ));
+        if metadata.is_dir() {
+            push_metadata_records(root, &path, records);
+        }
+    }
+}
+
+fn metadata_identity(root: &Path) -> String {
+    let metadata = fs::symlink_metadata(root).expect("read root metadata");
+    let mut records = vec![format!(
+        "d|.|{}|{}",
+        metadata.len(),
+        metadata_millis(&metadata)
+    )];
+    push_metadata_records(root, root, &mut records);
+    records.sort();
+    let serialized = serde_json::to_vec(&records).expect("serialize identity records");
+    Sha256::digest(serialized)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+fn write_root_manifest(
+    root: &Path,
+    path: &Path,
+    invocation: &str,
+    roots: serde_json::Value,
+    snapshot_complete: bool,
+    rustc_invocations: u64,
+) {
+    let document = json!({
+        "kind": "agenterm-incremental-touch-manifest",
+        "schema_version": 1,
+        "invocation_id": invocation,
+        "target": root.join("target").to_string_lossy(),
+        "incremental_root": root
+            .join("target")
+            .join("debug")
+            .join("incremental")
+            .to_string_lossy(),
+        "snapshot_complete": snapshot_complete,
+        "rustc_invocations": rustc_invocations,
+        "identity_algorithm": "full-tree-metadata-v1",
+        "roots": roots,
+    });
+    fs::write(
+        path,
+        serde_json::to_vec(&document).expect("serialize root manifest"),
+    )
+    .expect("write root manifest");
 }
 
 fn open_locked(path: &Path) -> File {
@@ -193,4 +296,155 @@ fn incremental_prune_respects_cargo_and_rustc_locks_then_retries_after_drop() {
     assert!(newest.exists(), "newest session was removed after retry");
 
     fs::remove_dir_all(root).expect("remove lock fixture");
+}
+
+#[test]
+fn exact_untouched_manifest_removes_only_the_identity_stable_root() {
+    let root = initialize_fixture("untouched-root");
+    let incremental = root.join("target/debug/incremental");
+
+    let untouched = incremental.join("agenterm-untouched");
+    fs::create_dir(&untouched).expect("create untouched unit");
+    let untouched_time = old_timestamp(120);
+    session(&untouched, &untouched_time, "one", "hash");
+    session_lock(&untouched, &untouched_time, "one");
+
+    let touched = incremental.join("agenterm-touched");
+    fs::create_dir(&touched).expect("create touched unit");
+    let touched_time = old_timestamp(120);
+    session(&touched, &touched_time, "one", "hash");
+    session_lock(&touched, &touched_time, "one");
+
+    let untouched_identity = metadata_identity(&untouched);
+    let touched_identity = metadata_identity(&touched);
+    let manifest = root.join("touch-manifest.json");
+    let invocation = "test-invocation-0001";
+    write_root_manifest(
+        &root,
+        &manifest,
+        invocation,
+        json!([
+            {
+                "name": "agenterm-untouched",
+                "before_identity": untouched_identity.clone(),
+                "after_identity": untouched_identity,
+                "touched": false
+            },
+            {
+                "name": "agenterm-touched",
+                "before_identity": touched_identity.clone(),
+                "after_identity": touched_identity,
+                "touched": true
+            }
+        ]),
+        true,
+        1,
+    );
+
+    let output = run_prune_with_manifest(&root, &manifest, invocation);
+    assert!(
+        output.status.success(),
+        "manifest prune failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!untouched.exists(), "stable untouched root was retained");
+    assert!(touched.exists(), "touched root was removed");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("root_manifest=valid"));
+    assert!(stdout.contains("removed_roots=1"));
+    assert!(stdout.contains("skipped_root_touched=1"));
+
+    fs::remove_dir_all(root).expect("remove untouched-root fixture");
+}
+
+#[test]
+fn whole_root_prune_fail_closes_on_manifest_snapshot_identity_and_lock_failures() {
+    for (case, manifest_contents) in [("missing-manifest", None), ("corrupt-manifest", Some("{"))] {
+        let root = initialize_fixture(case);
+        let unit = root.join("target/debug/incremental/agenterm-retained");
+        fs::create_dir(&unit).expect("create retained unit");
+        let timestamp = old_timestamp(120);
+        session(&unit, &timestamp, "one", "hash");
+        session_lock(&unit, &timestamp, "one");
+        let manifest = root.join("touch-manifest.json");
+        if let Some(contents) = manifest_contents {
+            fs::write(&manifest, contents).expect("write corrupt manifest");
+        }
+        let invocation = format!("test-invocation-{case}");
+        let output = run_prune_with_manifest(&root, &manifest, &invocation);
+        assert!(output.status.success(), "{case}: prune task failed");
+        assert!(unit.exists(), "{case}: fail-closed root was removed");
+        assert!(String::from_utf8_lossy(&output.stdout).contains("root_manifest=invalid"));
+        fs::remove_dir_all(root).expect("remove malformed-manifest fixture");
+    }
+
+    for (case, snapshot_complete, rustc_invocations, identity_change) in [
+        ("incomplete", false, 1, false),
+        ("no-rustc-snapshot", true, 0, false),
+        ("identity-mismatch", true, 1, true),
+    ] {
+        let root = initialize_fixture(case);
+        let unit = root.join("target/debug/incremental/agenterm-retained");
+        fs::create_dir(&unit).expect("create retained unit");
+        let timestamp = old_timestamp(120);
+        session(&unit, &timestamp, "one", "hash");
+        session_lock(&unit, &timestamp, "one");
+        let identity = metadata_identity(&unit);
+        let before_identity = if identity_change {
+            "0".repeat(64)
+        } else {
+            identity.clone()
+        };
+        let manifest = root.join("touch-manifest.json");
+        let invocation = format!("test-invocation-{case}");
+        write_root_manifest(
+            &root,
+            &manifest,
+            &invocation,
+            json!([{
+                "name": "agenterm-retained",
+                "before_identity": before_identity,
+                "after_identity": identity,
+                "touched": false
+            }]),
+            snapshot_complete,
+            rustc_invocations,
+        );
+
+        let output = run_prune_with_manifest(&root, &manifest, &invocation);
+        assert!(output.status.success(), "{case}: prune task failed");
+        assert!(unit.exists(), "{case}: fail-closed root was removed");
+        fs::remove_dir_all(root).expect("remove fail-closed fixture");
+    }
+
+    let root = initialize_fixture("active-root-lock");
+    let unit = root.join("target/debug/incremental/agenterm-active");
+    fs::create_dir(&unit).expect("create active unit");
+    let timestamp = old_timestamp(120);
+    session(&unit, &timestamp, "one", "hash");
+    let lock_path = session_lock(&unit, &timestamp, "one");
+    let identity = metadata_identity(&unit);
+    let manifest = root.join("touch-manifest.json");
+    let invocation = "test-invocation-active-lock";
+    write_root_manifest(
+        &root,
+        &manifest,
+        invocation,
+        json!([{
+            "name": "agenterm-active",
+            "before_identity": identity.clone(),
+            "after_identity": identity,
+            "touched": false
+        }]),
+        true,
+        1,
+    );
+    let lock = open_locked(&lock_path);
+    let output = run_prune_with_manifest(&root, &manifest, invocation);
+    assert!(output.status.success());
+    assert!(unit.exists(), "active rustc root was removed");
+    assert!(String::from_utf8_lossy(&output.stdout).contains("skipped_root_working_or_lock=1"));
+    drop(lock);
+    fs::remove_dir_all(root).expect("remove active-root-lock fixture");
 }
