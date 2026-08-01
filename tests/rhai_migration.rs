@@ -2177,7 +2177,7 @@ fn prd_alignment_task_matches_public_catalogs_and_fails_closed() {
         String::from_utf8_lossy(&accepted.stdout).trim(),
         concat!(
             "PASS: PRD aligns with 62 catalog entries, 84 public names, ",
-            "11 protocol features, 41 mux commands, 60 capability IDs, ",
+            "11 protocol features, 41 mux commands, 61 capability IDs, ",
             "and 60 executable evidence IDs"
         )
     );
@@ -2208,9 +2208,9 @@ fn prd_alignment_task_matches_public_catalogs_and_fails_closed() {
     copy_fixture_file(repo, &fixture, "scripts/rhai/remote-ui-smoke.rhai");
     copy_fixture_file(repo, &fixture, "scripts/rhai/startup-smoke.rhai");
     let contract_path = fixture.join("prd").join("alignment-contract.json");
-    let malformed = fs::read_to_string(&contract_path)
-        .expect("read fixture alignment contract")
-        .replacen("\"schema_version\": 2", "\"schema_version\": 99", 1);
+    let contract_source =
+        fs::read_to_string(&contract_path).expect("read fixture alignment contract");
+    let malformed = contract_source.replacen("\"schema_version\": 3", "\"schema_version\": 99", 1);
     fs::write(&contract_path, malformed).expect("corrupt fixture contract schema");
 
     let rejected = run_prd_alignment(&fixture);
@@ -2222,6 +2222,25 @@ fn prd_alignment_task_matches_public_catalogs_and_fails_closed() {
             String::from_utf8_lossy(&rejected.stderr)
         )
         .contains("prd_alignment_contract_schema")
+    );
+
+    let false_shipped = contract_source
+        .replacen("\"status\": \"partial\"", "\"status\": \"shipped\"", 1)
+        .replacen(
+            "\"evidence_mode\": \"black-box-partial\"",
+            "\"evidence_mode\": \"black-box\"",
+            1,
+        );
+    fs::write(&contract_path, false_shipped).expect("write false shipped capability");
+    let rejected = run_prd_alignment(&fixture);
+    assert!(!rejected.status.success());
+    assert!(
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&rejected.stdout),
+            String::from_utf8_lossy(&rejected.stderr)
+        )
+        .contains("prd_alignment_status_line:terminal.mouse-scrollback")
     );
     fs::remove_dir_all(fixture).expect("remove PRD alignment fixture");
 }

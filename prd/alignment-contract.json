@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "planned_command_roots": ["agenterm-bash"],
   "capabilities": [
     {
@@ -21,17 +21,17 @@
     {
       "id": "terminal.mouse-scrollback",
       "kind": "behavior",
-      "status": "shipped",
-      "evidence_mode": "black-box",
-      "prd": "mouse wheel and a visible draggable scrollbar navigate terminal",
+      "status": "partial",
+      "evidence_mode": "black-box-partial",
+      "prd": "mouse wheel and a visible draggable scrollbar navigate ordinary terminal",
       "evidence_ids": ["ux.mouse-scrollback"]
     },
     {
       "id": "terminal.text-selection-copy",
       "kind": "behavior",
-      "status": "shipped",
-      "evidence_mode": "black-box",
-      "prd": "dragging selects visible terminal cells and Ctrl+C copies the selected",
+      "status": "partial",
+      "evidence_mode": "black-box-partial",
+      "prd": "dragging is intended to select visible terminal cells and Ctrl+C copies",
       "evidence_ids": ["ux.terminal-selection-copy"]
     },
     {

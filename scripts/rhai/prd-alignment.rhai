@@ -105,7 +105,7 @@ fn linked_details(index) {
     result
 }
 
-fn shipped_document_line_present(prd, declaration) {
+fn status_document_line_present(prd, declaration, status_marker) {
     let start = 0;
     while start <= prd.len - declaration.len {
         let position = prd.index_of(declaration, start);
@@ -118,7 +118,7 @@ fn shipped_document_line_present(prd, declaration) {
         }
         let prefix = prd.sub_string(line_start, position - line_start);
         prefix.trim();
-        if prefix.starts_with("- [x]") {
+        if prefix.starts_with(status_marker) {
             return true;
         }
         start = position + declaration.len;
@@ -126,11 +126,11 @@ fn shipped_document_line_present(prd, declaration) {
     false
 }
 
-fn shipped_line_present(document_paths, declaration) {
+fn status_line_present(document_paths, declaration, status_marker) {
     declaration = declaration.to_lower();
     for path in document_paths {
         let document = std::fs::read_to_string(path).to_lower();
-        if shipped_document_line_present(document, declaration) {
+        if status_document_line_present(document, declaration, status_marker) {
             return true;
         }
     }
@@ -224,7 +224,7 @@ for name in linked {
     prd_document_paths.push(std::path::join(detail_directory, name).display);
 }
 let contract = rhai::json::parse_file(contract_path);
-require(contract.schema_version == 2, "prd_alignment_contract_schema");
+require(contract.schema_version == 3, "prd_alignment_contract_schema");
 let capabilities = contract.capabilities;
 require(capabilities.len > 0, "prd_alignment_capabilities_empty");
 
@@ -237,6 +237,7 @@ let allowed_kinds = #{
 };
 let allowed_modes = #{
     "black-box": true,
+    "black-box-partial": true,
     decision: true,
     "unit-source-partial": true
 };
@@ -262,17 +263,31 @@ for capability in capabilities {
                 && capability.evidence_ids.len == 0,
             "prd_alignment_decision_contract:" + capability.id
         );
-    } else {
+    } else if capability.status == "shipped" {
         require(
-            capability.status == "shipped"
-                && capability.evidence_mode != "decision"
+            capability.evidence_mode == "black-box"
                 && capability.evidence_ids.len > 0,
             "prd_alignment_shipped_contract:" + capability.id
         );
+    } else {
+        require(
+            capability.status == "partial"
+                && (
+                    capability.evidence_mode == "black-box-partial"
+                        || capability.evidence_mode == "unit-source-partial"
+                )
+                && capability.evidence_ids.len > 0,
+            "prd_alignment_partial_contract:" + capability.id
+        );
     }
+    let status_marker = if capability.status == "partial" {
+        "- [~]"
+    } else {
+        "- [x]"
+    };
     require(
-        shipped_line_present(prd_document_paths, capability.prd),
-        "prd_alignment_shipped_line:" + capability.id
+        status_line_present(prd_document_paths, capability.prd, status_marker),
+        "prd_alignment_status_line:" + capability.id
     );
 }
 

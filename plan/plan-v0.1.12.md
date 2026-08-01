@@ -55,13 +55,33 @@ renderer-owned 760×480 PNG 为 58,125 bytes。headless server 下 missing targe
 
 - [ ] P0：Windows terminal 内容与 native frame 持续闪烁；先区分无状态变化的
   redraw/invalidate loop、背景擦除和 resize/DPI feedback，不以降低刷新率掩盖。
+  白箱审计已定位 replaceable GUI 直接在 window HDC 上清空四区后逐层画回，
+  没有 offscreen frame + single BitBlt；高输出 delta 约 10Hz 暴露半成品帧。
+  此外 2 秒 lease heartbeat 被误算为 visual change，idle 也触发全窗重绘；
+  `CS_HREDRAW|CS_VREDRAW`、NULL dirty region 与同尺寸 resize 是次级放大器。
+  修复顺序冻结为 heartbeat/redraw 解耦 → GDI 双缓冲原子提交 → 同尺寸
+  resize/event 去噪 → 可选 dirty-region 优化，并用 telemetry + 60fps 真机观察验收。
 - [ ] alternate-screen harness 无法本地向上滚动；初步证据指向 `vt100`
   alternate grid 的零 scrollback，需要在 application raw-mouse ownership 之外
   评估把 wheel/PageUp 语义转交前台 TUI，不能破坏普通 scrollback。
-- [ ] terminal focus 下 `Shift+Tab` 无响应；盘点 Windows/Unix key adapters 与
-  terminal byte encoding，补跨平台键位合同，而不是只特判一个 harness。
+- [~] terminal focus 下 `Shift+Tab` 修复正在集成：共享 named-key encoder 已按
+  xterm modifier 参数覆盖 Tab/方向/Home/End/Insert/Delete/Page/F1–F12；Unix
+  两条输入路径保留 modifiers，Windows `WM_KEYDOWN` 显式处理 Tab/Insert/Delete
+  并屏蔽 Tab/Escape 的 `WM_CHAR` 重复回声。commands 与 Windows mapping 聚焦
+  单测、395 项 Quick library tests、all-target Clippy、alignment partial
+  fail-closed 集成测试与七产物 dev build 通过。Windows live GUI 仍运行旧映像；
+  重启后真实 terminal byte dogfood 仍待验证，不能只以编码函数测试宣称交互
+  已收口。Windows host 的 Linux `cargo check` 仅因缺少
+  `x86_64-linux-gnu-gcc` 停在 `ring` 构建脚本，Unix adapter 仍需原生 CI/host
+  证据。
 - [ ] terminal 鼠标选区无法可靠建立，导致已实现 copy/paste 无法使用；复查
   selection ownership、drag threshold/capture、raw-mouse arbitration 和复制黑盒。
+  白箱审计定位当前选区绑定整个 `screen.generation`：持续 output delta 在 100ms
+  reconcile 时清空 drag/completed selection，paint/copy 也因 generation 不等而
+  拒绝；drag 中取消还可能漏掉 `ReleaseCapture`。修复需区分 same-grid 内容推进
+  与真实尺寸/tab 失效，缓存完成态复制文本，并在 drag 中注入输出验证 phase、
+  Ctrl+C/system-menu Copy 和 capture release。现有“先等输出静止再同步拖拽”的
+  smoke 不足以证明该行为。
 
 这些 dogfood 缺陷优先于新增 Cockpit 装饰和远期 Candidate 工作；修复必须保留
 结构化 snapshot 与 PNG/公开 input journey 证据，并避免多个 agent 并发编辑

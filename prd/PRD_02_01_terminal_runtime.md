@@ -28,7 +28,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   input. Live v0.1.12 dogfood found a Windows replaceable-GUI path where a
   selection cannot be established, making Copy unreachable; gesture ownership,
   capture and public clipboard evidence must be requalified before restoring
-  shipped status.
+  shipped status. Current generation reconciliation cancels selection on any
+  output delta rather than only a true geometry/tab invalidation, and a drag
+  cancelled by that path may retain mouse capture. The owning journey must
+  inject output during the gesture and prove phase, highlight, Ctrl+C/system
+  menu text and capture release.
 - [x] window-icon system menu exposes focus-aware Copy and Paste: native
   edit controls receive their standard messages, while terminal Copy uses
   the active cell selection and terminal Paste uses the active PTY
@@ -66,12 +70,20 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   normalizes newlines, filters unsafe controls, and honors bracketed-paste mode
 - [~] dirty-frame rendering and GDI double buffering exist, but live v0.1.12
   dogfood reports sustained terminal-content and native-frame flicker. The
-  invalidate/redraw, background erase, timer and resize/DPI paths require
-  observable no-change-frame evidence before this is considered closed.
+  replaceable Windows GUI still clears and repaints directly on the window HDC
+  without an offscreen atomic frame; lease heartbeat is also incorrectly
+  treated as visible change and invalidates the full window while idle.
+  Memory-DC composition, heartbeat/redraw separation, same-grid resize
+  suppression, diagnostic paint counts and real-time visual evidence are
+  required before this is considered closed.
 - [~] ordinary terminal keys and modifiers are encoded for the active PTY;
-  live v0.1.12 dogfood shows `Shift+Tab` is dropped while terminal focus is
-  active. Windows and Unix adapters need a shared modified-key contract and
-  public byte-level evidence rather than one application-specific special case.
+  live v0.1.12 dogfood found `Shift+Tab` dropped while terminal focus was
+  active. The current repair introduces one shared xterm named-key modifier
+  encoder for Tab, navigation, Insert/Delete, paging and F1–F12; Unix preserves
+  normalized modifiers and Windows owns the matching virtual-key plus
+  WM_KEYDOWN/WM_CHAR de-duplication path. Unit contracts cover shared bytes and
+  Windows mapping, while public physical-key byte evidence and live dogfood
+  confirmation remain required before restoring shipped status.
 - [x] GUI shell appears before the initial ConPTY/cmd process is ready
 - [x] initial terminal loads asynchronously with visible starting feedback
 - [x] exited process retains its final screen and exit code
