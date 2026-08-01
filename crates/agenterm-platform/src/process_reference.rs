@@ -50,6 +50,16 @@ impl ProcessReference {
         process.duplicate_process_reference()
     }
 
+    /// Reports whether this exact process object belongs to a selected native
+    /// containment group.
+    ///
+    /// Windows adapters implement the group contract for borrowed Job Object
+    /// handles. Other hosts do not equate process groups or cgroups with that
+    /// object-membership model.
+    pub fn is_member_of(&self, group: impl ProcessContainmentGroup) -> io::Result<bool> {
+        group.contains_process(self)
+    }
+
     /// Duplicates a current-process HANDLE into this exact target process.
     ///
     /// The returned transfer rolls the remote HANDLE back if it is dropped.
@@ -69,6 +79,13 @@ impl ProcessReference {
             .duplicate_handle_into(source)
             .map(RemoteHandleTransfer)
     }
+}
+
+/// A target-specific native containment group that can query exact process
+/// object membership.
+pub trait ProcessContainmentGroup {
+    #[doc(hidden)]
+    fn contains_process(self, process: &ProcessReference) -> io::Result<bool>;
 }
 
 /// A duplicated HANDLE that is valid in one retained target process.

@@ -166,6 +166,26 @@ impl ProcessReferenceHandle for BorrowedHandle<'_> {
     }
 }
 
+impl crate::process_reference::ProcessContainmentGroup for BorrowedHandle<'_> {
+    fn contains_process(
+        self,
+        process: &crate::process_reference::ProcessReference,
+    ) -> io::Result<bool> {
+        let mut contained = 0;
+        if unsafe {
+            windows_sys::Win32::System::JobObjects::IsProcessInJob(
+                process.as_raw_handle(),
+                self.as_raw_handle(),
+                &raw mut contained,
+            )
+        } == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(contained != 0)
+    }
+}
+
 fn wait(
     handle: std::os::windows::io::RawHandle,
     timeout: Option<Duration>,
@@ -213,8 +233,10 @@ mod tests {
         process::{Command, Stdio},
     };
     use windows_sys::Win32::Foundation::DUPLICATE_SAME_ACCESS;
+    use windows_sys::Win32::System::JobObjects::{AssignProcessToJobObject, CreateJobObjectW};
 
     const REMOTE_HANDLE_CHILD_ENV: &str = "AGENTERM_PLATFORM_REMOTE_HANDLE_CHILD";
+    const CONTAINMENT_CHILD_ENV: &str = "AGENTERM_PLATFORM_CONTAINMENT_CHILD";
 
     #[test]
     fn current_process_handle_can_be_retained() {
@@ -243,6 +265,57 @@ mod tests {
         let process_id = unsafe { GetProcessId(value as RawHandle) };
         assert_ne!(process_id, 0, "GetProcessId failed");
         println!("remote-process-id={process_id}");
+    }
+
+    #[test]
+    fn containment_child() {
+        if std::env::var_os(CONTAINMENT_CHILD_ENV).is_some() {
+            std::thread::sleep(Duration::from_secs(30));
+        }
+    }
+
+    #[test]
+    fn retained_process_membership_tracks_the_selected_job_object() {
+        let job = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+        assert!(
+            !job.is_null(),
+            "CreateJobObjectW failed: {}",
+            io::Error::last_os_error()
+        );
+        let job = unsafe { OwnedHandle::from_raw_handle(job) };
+        let mut child = Command::new(std::env::current_exe().expect("test executable"))
+            .args([
+                "--exact",
+                "selected::process_reference::tests::containment_child",
+                "--nocapture",
+            ])
+            .env(CONTAINMENT_CHILD_ENV, "1")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn containment child");
+        let reference =
+            crate::process_reference::ProcessReference::duplicate_from(child.as_handle())
+                .expect("retain containment child");
+        assert!(
+            !reference
+                .is_member_of(job.as_handle())
+                .expect("query membership before assignment")
+        );
+        assert_ne!(
+            unsafe { AssignProcessToJobObject(job.as_raw_handle(), child.as_raw_handle()) },
+            0,
+            "AssignProcessToJobObject failed: {}",
+            io::Error::last_os_error()
+        );
+        assert!(
+            reference
+                .is_member_of(job.as_handle())
+                .expect("query membership after assignment")
+        );
+        child.kill().expect("terminate containment child");
+        let _ = child.wait().expect("reap containment child");
     }
 
     #[test]
