@@ -1,4 +1,5 @@
 const BOOTSTRAP: &str = include_str!("../scripts/bootstrap.cmd");
+const UNIX_BOOTSTRAP: &str = include_str!("../scripts/bootstrap.sh");
 const BUILD: &str = include_str!("../scripts/rhai/build.rhai");
 
 #[test]
@@ -21,4 +22,13 @@ fn bootstrap_worker_never_executes_from_a_repo_cargo_target() {
     assert!(BOOTSTRAP.contains("%TEMP%\\AgenTerm-build-cache"));
     assert!(BOOTSTRAP.contains("AGENTERM_BOOTSTRAP_DIR=%AGENTERM_BOOTSTRAP_CACHE_DIR%\\task-"));
     assert!(!BOOTSTRAP.contains("AGENTERM_BOOTSTRAP_DIR=%AGENTERM_BOOTSTRAP_TARGET%\\task-"));
+}
+
+#[test]
+fn bootstrap_exposes_one_stable_cross_platform_rustc_wrapper_path() {
+    assert!(BOOTSTRAP.contains("set \"AGENTERM_BOOTSTRAP_CACHE_WORKER="));
+    assert!(UNIX_BOOTSTRAP.contains("AGENTERM_BOOTSTRAP_CACHE_WORKER=\"$CACHE_WORKER\""));
+    assert!(
+        UNIX_BOOTSTRAP.contains("export AGENTERM_BOOTSTRAP_WORKER AGENTERM_BOOTSTRAP_CACHE_WORKER")
+    );
 }

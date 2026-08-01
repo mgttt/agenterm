@@ -9,6 +9,7 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 
 const BUILD_TASK: &str = include_str!("../scripts/rhai/build.rhai");
+const SCRIPT_BINARY: &str = include_str!("../src/bin/agenterm-script.rs");
 
 fn fixture_root(name: &str) -> PathBuf {
     let nonce = SystemTime::now()
@@ -211,6 +212,173 @@ fn development_build_prunes_only_after_successful_artifact_staging() {
     );
     assert!(BUILD_TASK.contains("if profile == \"dev\" && !external_target"));
     assert!(BUILD_TASK.contains("\"task\", \"run\", \"prune-target-incremental\""));
+}
+
+#[test]
+fn development_build_uses_only_the_stable_wrapper_and_finalizes_after_staging() {
+    let cargo = BUILD_TASK.find("\"build_cargo\"").expect("Cargo call");
+    let stage = BUILD_TASK.find("\"build_stage\"").expect("stage call");
+    let finalize = BUILD_TASK
+        .find("\"build_incremental_manifest\"")
+        .expect("manifest finalizer");
+    let prune = BUILD_TASK
+        .find("\"build_incremental_prune\"")
+        .expect("prune call");
+    assert!(cargo < stage && stage < finalize && finalize < prune);
+    assert!(BUILD_TASK.contains("AGENTERM_BOOTSTRAP_CACHE_WORKER"));
+    assert!(BUILD_TASK.contains("environment.RUSTC_WRAPPER = stable_wrapper"));
+    assert!(!BUILD_TASK.contains("environment.RUSTC_WRAPPER = worker"));
+    assert!(BUILD_TASK.contains("--internal-incremental-finalize"));
+    assert!(BUILD_TASK.contains("!cross_client && !unix_bootstrap"));
+    assert!(BUILD_TASK.contains("producer_state=not-applicable"));
+    assert!(BUILD_TASK.contains("lane=native-windows-dev"));
+}
+
+#[test]
+fn wrapper_source_owns_the_cargo_lock_barrier_and_exact_touch_evidence() {
+    let cargo_lock = SCRIPT_BINARY
+        .find("let cargo_lock_observed = cargo_lock_is_held")
+        .expect("Cargo lock observation");
+    let before = SCRIPT_BINARY
+        .find("let snapshot = snapshot_incremental_roots")
+        .expect("before snapshot");
+    let touch = SCRIPT_BINARY
+        .find("touch.roots.insert(touched_name)")
+        .expect("exact touched root record");
+    let compiler = SCRIPT_BINARY
+        .find("Command::new(compiler).args(rustc_arguments).status()")
+        .expect("transparent compiler forward");
+    assert!(cargo_lock < before && before < touch && touch < compiler);
+    assert!(SCRIPT_BINARY.contains("barrier.lock()?"));
+    assert!(SCRIPT_BINARY.contains("full-tree-metadata-v1"));
+    assert!(SCRIPT_BINARY.contains("!incremental_poison_present(&state.join(\"invalid\"))"));
+    assert!(
+        SCRIPT_BINARY.contains("!agenterm_platform::filesystem::metadata_is_link_like(&metadata)")
+    );
+}
+
+#[test]
+fn rustc_wrapper_snapshots_under_cargo_lock_and_finalizes_exact_touch_manifest() {
+    let root = initialize_fixture("producer-wrapper");
+    let target = root.join("target");
+    let incremental = target.join("debug/incremental");
+    let stale = incremental.join("agenterm-stale");
+    fs::create_dir(&stale).expect("create stale root");
+    let timestamp = old_timestamp(120);
+    session(&stale, &timestamp, "one", "hash");
+    session_lock(&stale, &timestamp, "one");
+
+    let invocation = "test-producer-invocation-0001";
+    let state = target.join("debug/.agenterm-incremental").join(invocation);
+    fs::create_dir_all(&state).expect("create producer state");
+    let touched = incremental.join("probe-root");
+    let executable = Path::new(env!("CARGO_BIN_EXE_agenterm-script"));
+    let compiler_probe = Path::new(env!("CARGO_BIN_EXE_agenterm-cli"));
+    let compiler_arguments = [
+        "--crate-name".to_owned(),
+        "agenterm_incremental_probe".to_owned(),
+        "-C".to_owned(),
+        format!("incremental={}", touched.display()),
+    ];
+    let direct = Command::new(compiler_probe)
+        .args(&compiler_arguments)
+        .output()
+        .expect("run direct compiler probe");
+    let cargo_lock = open_locked(&target.join("debug/.cargo-lock"));
+    let wrapped = Command::new(executable)
+        .env(
+            "AGENTERM_INTERNAL_RUSTC_WRAPPER",
+            "agenterm-incremental-manifest-v1",
+        )
+        .env("AGENTERM_INCREMENTAL_INVOCATION_ID", invocation)
+        .env("AGENTERM_INCREMENTAL_TARGET", &target)
+        .env("AGENTERM_INCREMENTAL_ROOT", &incremental)
+        .env("AGENTERM_INCREMENTAL_STATE", &state)
+        .env("RUSTC_WRAPPER", executable)
+        .arg(compiler_probe)
+        .args(&compiler_arguments)
+        .output()
+        .expect("run rustc wrapper probe");
+    assert_eq!(wrapped.status.code(), direct.status.code());
+    assert_eq!(wrapped.stdout, direct.stdout);
+    assert_eq!(wrapped.stderr, direct.stderr);
+    let before: serde_json::Value =
+        serde_json::from_slice(&fs::read(state.join("before.json")).expect("read before snapshot"))
+            .expect("parse before snapshot");
+    let touch: serde_json::Value =
+        serde_json::from_slice(&fs::read(state.join("touch.json")).expect("read touch state"))
+            .expect("parse touch state");
+    assert_eq!(before["cargo_lock_observed"], true);
+    assert_eq!(touch["rustc_invocations"], 1);
+    assert_eq!(touch["roots"], json!(["probe-root"]));
+    drop(cargo_lock);
+
+    let manifest = state.join("manifest.json");
+    let finalized = Command::new(executable)
+        .env(
+            "AGENTERM_INTERNAL_RUSTC_WRAPPER",
+            "agenterm-incremental-manifest-v1",
+        )
+        .env("RUSTC_WRAPPER", executable)
+        .arg("--internal-incremental-finalize")
+        .arg(&state)
+        .arg(&target)
+        .arg(&manifest)
+        .arg(invocation)
+        .output()
+        .expect("finalize producer manifest");
+    assert!(finalized.status.success());
+    let document: serde_json::Value =
+        serde_json::from_slice(&fs::read(&manifest).expect("read producer manifest"))
+            .expect("parse producer manifest");
+    assert_eq!(document["snapshot_complete"], true);
+    assert_eq!(document["rustc_invocations"], 1);
+    let stale_entry = document["roots"]
+        .as_array()
+        .expect("manifest roots")
+        .iter()
+        .find(|entry| entry["name"] == "agenterm-stale")
+        .expect("stale root manifest entry");
+    assert_eq!(stale_entry["touched"], false);
+    assert_eq!(
+        stale_entry["before_identity"],
+        stale_entry["after_identity"]
+    );
+
+    fs::remove_dir_all(root).expect("remove producer wrapper fixture");
+}
+
+#[test]
+fn hot_build_without_a_real_incremental_rustc_cannot_authorize_roots() {
+    let root = initialize_fixture("producer-hot-build");
+    let target = root.join("target");
+    let invocation = "test-producer-hot-build-0001";
+    let state = target.join("debug/.agenterm-incremental").join(invocation);
+    fs::create_dir_all(&state).expect("create empty producer state");
+    let manifest = state.join("manifest.json");
+    let executable = Path::new(env!("CARGO_BIN_EXE_agenterm-script"));
+    let finalized = Command::new(executable)
+        .env(
+            "AGENTERM_INTERNAL_RUSTC_WRAPPER",
+            "agenterm-incremental-manifest-v1",
+        )
+        .env("RUSTC_WRAPPER", executable)
+        .arg("--internal-incremental-finalize")
+        .arg(&state)
+        .arg(&target)
+        .arg(&manifest)
+        .arg(invocation)
+        .output()
+        .expect("finalize hot build manifest");
+    assert!(finalized.status.success());
+    let document: serde_json::Value =
+        serde_json::from_slice(&fs::read(&manifest).expect("read hot build manifest"))
+            .expect("parse hot build manifest");
+    assert_eq!(document["snapshot_complete"], false);
+    assert_eq!(document["rustc_invocations"], 0);
+    assert_eq!(document["roots"], json!([]));
+
+    fs::remove_dir_all(root).expect("remove hot-build fixture");
 }
 
 #[test]

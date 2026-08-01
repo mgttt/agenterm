@@ -5,6 +5,11 @@
 //        [--target TRIPLE] [--driver cargo|cargo-xwin]
 //        [--os windows|linux|macos] [--arch x86_64|aarch64]
 //        [--clients-only] [--action build|clippy]
+//
+// Whole-root incremental manifest production belongs only to the existing
+// native Windows dev lane that reaches both stage-build and prune. Unix
+// bootstrap and cross-client lanes return after artifact listing and report
+// this producer as not applicable; they do not claim cleanup integration.
 
 import "scripts/rhai/lib/build_identity" as build_identity;
 import "scripts/rhai/lib/bootstrap_timing" as bootstrap_timing;
@@ -28,6 +33,28 @@ fn run_command(program, arguments, repo, environment, timeout_ms, code) {
     let stdout = output.stdout_text();
     if stdout != "" {
         print(stdout);
+    }
+}
+
+fn direct_file(path) {
+    if !std::fs::exists(path) {
+        return false;
+    }
+    let metadata = std::fs::symlink_metadata(path);
+    metadata.is_file && !metadata.is_symlink && !metadata.is_reparse_point
+}
+
+fn cleanup_incremental_state(path) {
+    if path == "" || !std::fs::exists(path) {
+        return;
+    }
+    try {
+        std::fs::remove_dir_all(path);
+    } catch (error) {
+        print(
+            "WARN incremental producer state cleanup failed: " +
+                error.to_string()
+        );
     }
 }
 
@@ -202,6 +229,79 @@ if !external_target && profile == "release"
     environment.CARGO_TARGET_DIR = cargo_output;
 }
 
+let incremental_producer = false;
+let incremental_invocation = "";
+let incremental_state = "";
+let incremental_manifest = "";
+let stable_wrapper = "";
+if profile == "dev" && action == "build" && !external_target
+        && !cross_client && !unix_bootstrap {
+    if std::env::has("AGENTERM_BOOTSTRAP_CACHE_WORKER") {
+        let candidate = std::path::absolute(
+            std::env::get("AGENTERM_BOOTSTRAP_CACHE_WORKER")
+        ).display;
+        if direct_file(candidate) {
+            stable_wrapper = candidate;
+            incremental_invocation =
+                "build-" + std::process::id() + "-" +
+                    std::time::SystemTime::now().unix_millis;
+            let incremental_root = std::path::join(
+                cargo_output,
+                "debug/incremental"
+            ).display;
+            let state_parent = std::path::join(
+                cargo_output,
+                "debug/.agenterm-incremental"
+            ).display;
+            incremental_state = std::path::join(
+                state_parent,
+                incremental_invocation
+            ).display;
+            require(
+                !std::fs::exists(incremental_state),
+                "build_incremental_state_collision"
+            );
+            std::fs::create_dir_all(incremental_root);
+            std::fs::create_dir_all(incremental_state);
+            incremental_manifest = std::path::join(
+                incremental_state,
+                "manifest.json"
+            ).display;
+            // RUSTC_WRAPPER deliberately names the stable bootstrap cache
+            // worker. The per-run task copy must never enter Cargo's compiler
+            // identity or turn a hot build into a rebuild.
+            environment.RUSTC_WRAPPER = stable_wrapper;
+            environment.AGENTERM_INTERNAL_RUSTC_WRAPPER =
+                "agenterm-incremental-manifest-v1";
+            environment.AGENTERM_INCREMENTAL_INVOCATION_ID =
+                incremental_invocation;
+            environment.AGENTERM_INCREMENTAL_TARGET = cargo_output;
+            environment.AGENTERM_INCREMENTAL_ROOT = incremental_root;
+            environment.AGENTERM_INCREMENTAL_STATE = incremental_state;
+            incremental_producer = true;
+            print(
+                "AgenTerm incremental root cleanup: " +
+                    "producer_state=enabled, lane=native-windows-dev"
+            );
+        } else {
+            print(
+                "AgenTerm incremental root cleanup: producer_state=disabled, " +
+                    "stable bootstrap cache worker is absent or indirect"
+            );
+        }
+    } else {
+        print(
+            "AgenTerm incremental root cleanup: producer_state=disabled, " +
+                "AGENTERM_BOOTSTRAP_CACHE_WORKER is absent"
+        );
+    }
+} else {
+    print(
+        "AgenTerm incremental root cleanup: producer_state=not-applicable, " +
+            "lane does not own stage-and-prune"
+    );
+}
+
 let cargo_args = [];
 if driver == "cargo-xwin" {
     cargo_args.push("xwin");
@@ -231,14 +331,21 @@ if action == "clippy" {
     cargo_args.push("-D");
     cargo_args.push("warnings");
 }
-run_command(
-    "cargo",
-    cargo_args,
-    repo,
-    environment,
-    3600000,
-    "build_cargo"
-);
+try {
+    run_command(
+        "cargo",
+        cargo_args,
+        repo,
+        environment,
+        3600000,
+        "build_cargo"
+    );
+} catch (error) {
+    if incremental_producer {
+        cleanup_incremental_state(incremental_state);
+    }
+    throw error;
+}
 
 if action == "clippy" {
     print(
@@ -265,32 +372,72 @@ if cross_client || unix_bootstrap {
     return;
 }
 
-run_command(
-    worker,
-    [
-        "task", "run", "stage-build",
-        "--manifest", task_manifest,
-        "--", repo, profile_directory, dist, profile
-    ],
-    repo,
-    environment,
-    30000,
-    "build_stage"
-);
-
-if profile == "dev" && !external_target {
+try {
     run_command(
         worker,
         [
-            "task", "run", "prune-target-incremental",
+            "task", "run", "stage-build",
             "--manifest", task_manifest,
-            "--", repo, cargo_output
+            "--", repo, profile_directory, dist, profile
         ],
         repo,
         environment,
-        300000,
-        "build_incremental_prune"
+        30000,
+        "build_stage"
     );
+} catch (error) {
+    if incremental_producer {
+        cleanup_incremental_state(incremental_state);
+    }
+    throw error;
+}
+
+if profile == "dev" && !external_target {
+    try {
+        if incremental_producer {
+            run_command(
+                stable_wrapper,
+                [
+                    "--internal-incremental-finalize",
+                    incremental_state,
+                    cargo_output,
+                    incremental_manifest,
+                    incremental_invocation
+                ],
+                repo,
+                environment,
+                300000,
+                "build_incremental_manifest"
+            );
+        }
+        let prune_arguments = [
+            "task", "run", "prune-target-incremental",
+            "--manifest", task_manifest,
+            "--", repo, cargo_output
+        ];
+        if incremental_producer {
+            prune_arguments.push("--manifest");
+            prune_arguments.push(incremental_manifest);
+            prune_arguments.push("--invocation");
+            prune_arguments.push(incremental_invocation);
+        }
+        run_command(
+            worker,
+            prune_arguments,
+            repo,
+            environment,
+            300000,
+            "build_incremental_prune"
+        );
+    } catch (error) {
+        if incremental_producer {
+            cleanup_incremental_state(incremental_state);
+        }
+        throw error;
+    }
+    if incremental_producer {
+        cleanup_incremental_state(incremental_state);
+    }
 }
 
 if profile == "release" && !external_target {
