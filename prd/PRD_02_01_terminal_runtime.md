@@ -36,25 +36,25 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   application raw-mouse reporting and Shift local-selection override remain a
   separate professional-input slice rather than weakening this shipped paging
   contract.
-- [~] dragging is intended to select visible terminal cells and Ctrl+C copies
-  the selected text while an unmodified click reaches RMUX/native terminal
-  input. Live v0.1.12 dogfood found a Windows replaceable-GUI path where a
-  selection cannot be established, making Copy unreachable; gesture ownership,
-  capture and public clipboard evidence must be requalified before restoring
-  shipped status. The repair now preserves a gesture across content generations
-  when tab and grid geometry are unchanged, releases capture after completing
-  the phase, and caches the completed text. Only a completed non-empty selection
-  may claim Ctrl+C; prepared or empty selection state leaves Ctrl+C available as
-  PTY interrupt. The owning journey now injects real PTY output after pointer
-  down and proves system-menu clipboard text; live highlight/capture observation
-  and direct Ctrl+C copy evidence remain before restoring shipped status.
+- [x] basic Windows visible-cell dragging selects terminal text and a completed
+  non-empty selection owns Ctrl+C Copy. Prepared/dragging/completed state,
+  exact native capture ownership and paint-owned highlight pixel bounds are
+  projected together in `ui-snapshot`; paint consumes the same bounds. The
+  owning journey advances the PTY generation after pointer down, observes
+  prepared/dragging capture, proves a same-event-position PNG change, releases
+  capture on completion, and verifies direct Ctrl+C updates the clipboard
+  without adding an ETX byte to the PTY. System-menu Copy remains equivalent.
+  Capture acquire/release/query failures clear copyability and surface a typed
+  error instead of pretending selection completed. A click that never drags
+  remains non-copying and available to existing terminal/RMUX behavior.
 - [x] window-icon system menu exposes focus-aware Copy and Paste: native
   edit controls receive their standard messages, while terminal Copy uses
   the active cell selection and terminal Paste uses the active PTY
 - v0.1.8 professional-selection slice (P0), informed by the reviewed PuTTY
   terminal model
-  - [ ] selection has explicit about-to-select, dragging, completed, and
-    cancelled states; a click that never becomes a drag retains its existing
+  - [ ] professional selection extends the shipped basic state machine with
+    every tab/modal/shutdown/capture-loss cancellation surface and public
+    physical evidence; a click that never becomes a drag retains its existing
     terminal/RMUX click behavior
   - [ ] while an owned drag remains above or below the terminal viewport, the
     GUI-owned timer scrolls at a bounded rate, clamps every endpoint to a valid

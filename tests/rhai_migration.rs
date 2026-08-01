@@ -2224,21 +2224,21 @@ fn prd_alignment_task_matches_public_catalogs_and_fails_closed() {
         .contains("prd_alignment_contract_schema")
     );
 
-    let partial_selection = concat!(
-        "\"id\": \"terminal.text-selection-copy\",\n",
-        "      \"kind\": \"behavior\",\n",
-        "      \"status\": \"partial\",\n",
-        "      \"evidence_mode\": \"black-box-partial\""
-    );
     let shipped_selection = concat!(
         "\"id\": \"terminal.text-selection-copy\",\n",
         "      \"kind\": \"behavior\",\n",
         "      \"status\": \"shipped\",\n",
         "      \"evidence_mode\": \"black-box\""
     );
-    assert!(contract_source.contains(partial_selection));
-    let false_shipped = contract_source.replacen(partial_selection, shipped_selection, 1);
-    fs::write(&contract_path, false_shipped).expect("write false shipped capability");
+    let partial_selection = concat!(
+        "\"id\": \"terminal.text-selection-copy\",\n",
+        "      \"kind\": \"behavior\",\n",
+        "      \"status\": \"partial\",\n",
+        "      \"evidence_mode\": \"black-box-partial\""
+    );
+    assert!(contract_source.contains(shipped_selection));
+    let false_partial = contract_source.replacen(shipped_selection, partial_selection, 1);
+    fs::write(&contract_path, false_partial).expect("write false partial capability");
     let rejected = run_prd_alignment(&fixture);
     assert!(!rejected.status.success());
     assert!(

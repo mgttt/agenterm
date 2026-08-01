@@ -445,10 +445,12 @@ Release 全部是本轮明确非目标。
   Ctrl+C/system-menu Copy 和 capture release。现有“先等输出静止再同步拖拽”的
   smoke 不足以证明该行为。generation/capture/cached-text 修复已经存在，但 owning
   smoke 现已补成 pointer down 后经 public CLI 注入唯一 PTY delta、等待 GUI reconcile，
-  再完成拖拽并从 system menu Copy；旧 generation 绑定会在该路径确定失败。另修正
-  Ctrl+C arbitration：只有 non-empty completed cached selection 才接管 Copy，prepared/
-  empty state 不再吞掉 PTY interrupt。13 项 frontend tests 与两轮真实 Windows journey
-  均通过。拖出 viewport auto-scroll、双击/三击与完整 CJK 物理交互仍是上层
+  再观察 native capture + paint 共源 highlight bounds、same-event-position PNG 差异和
+  completed capture release；direct GUI Ctrl+C 更新 clipboard 且 PTY input bytes 不增加，
+  system-menu Copy 仍保持等价。只有 non-empty completed cached selection 才接管 Copy，
+  prepared/empty state 不吞 PTY interrupt。498 项 lib tests、warnings-denied Clippy、dev
+  build 与 47.7 秒完整 Windows `remote-ui-smoke` 通过。拖出 viewport auto-scroll、
+  双击/三击与完整 CJK 物理交互仍是上层
   professional-selection 的独立未完成叶，不反向否定本轮选择复制修复。
 - [~] 本地开发缓存膨胀的第一段已闭环：实测 `target/` 15.2 GiB，其中
   `target/debug/incremental` 10.53 GiB；一次显式 `cargo clean` 已回收全部可再生缓存。
