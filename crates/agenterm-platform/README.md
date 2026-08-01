@@ -138,6 +138,15 @@ path as success, and never intentionally traverses Unix symlinks or Windows
 reparse points. Choosing a deletion root, handling an actively hostile writer,
 and deciding whether cleanup failure is fatal remain caller policy.
 
+`filesystem_publish::publish_directory` installs a prepared directory beside
+its destination. If a destination already exists, it is first renamed to a
+unique sibling backup; an install failure attempts to restore that backup, and
+a successful install reports any backup that could not be cleaned. This is a
+recoverable two-rename protocol, not a claim that replacement is one atomic
+operation or crash-durable. Callers still serialize writers, choose trusted
+paths, recover abandoned backups after crashes, and decide how to surface a
+non-fatal cleanup warning.
+
 ## Public API
 
 ```rust
