@@ -852,7 +852,10 @@ Cockpit
   `agenterm-platform` 现公开 selected adapter 实际消费的 typed pointer coordinate
   scale；macOS journey 用 renderer scale 完成 framebuffer -> WindowServer point，
   再用 adapter scale 完成 point -> input unit，不再从 outer/client 宽度猜同一个比例，
-  仍保持单坐标、无 retry。Linux 正向结果与 macOS ARM64 正向回执仍开放；
+  仍保持单坐标、无 retry。首个 exact-SHA `88e5396` run `30718014866` 已通过
+  macOS ARM64 build/Clippy/native IPC，但 smoke 在输入前因诊断 map 残留已删除的
+  `client_left`/`client_top` 变量名而 typed runtime fail；该机械错误已改为新的 point
+  变量，不能把本 run 计作坐标行为结果。Linux 正向结果与 macOS ARM64 正向回执仍开放；
 - Control Center evidence ownership 不再游离于 alignment：Windows required
   qualification gate 与 Linux/macOS host-native gate 分别登记，`prd-alignment`
   对三者的 evidence ID、脚本发射点和 partial PRD 状态做同一 exact parity。

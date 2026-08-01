@@ -179,7 +179,11 @@ Control Center is the product name; the executable family uses
   exact pointer-coordinate scale used by its selected adapter; the macOS smoke
   converts renderer pixels through renderer scale into WindowServer points,
   then through that authoritative adapter scale. It retains one coordinate and
-  no retry. Final Linux/macOS positive journey evidence remains open. Windows
+  no retry. Run `30718014866` compiled and Clippy-checked the ARM64 adapter but
+  stopped before input because the smoke's failure diagnostic still referenced
+  removed `client_left`/`client_top` names; those fields now use the point-valued
+  variables, so this run is not counted as behavior evidence. Final Linux/macOS
+  positive journey evidence remains open. Windows
   qualification evidence and
   Linux/macOS matching-host evidence are registered in separate gate manifests
   but participate in one exact PRD alignment parity check; cross-target compile
