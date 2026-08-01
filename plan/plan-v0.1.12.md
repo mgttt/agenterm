@@ -351,6 +351,11 @@ Release 全部是本轮明确非目标。
   为避免未来再次用阶段位置解释主题体感，`remote-ui-smoke` 现增加同窗口、同操作的
   Dark/Light/Light/Dark 对消测量，记录耗时、redraw 与 paint 增量；双向 2.75x 耗时
   阈值会拒绝稳定 3--5x 主题差异，并以 `ux.theme-render-parity` 进入 qualification/alignment。
+  首次 current-tree 复验同时修正了 render activity sampler 接受任意历史
+  `sequence > 0` 的陈旧基线：采样现在先读取当前 sequence，再要求锁存结果严格递增。
+  `06149c6` dirty=false dev artifact 的完整 journey 用时 41.2 秒，ABBA totals 为
+  Dark 1095ms / Light 1203ms、双方 10 redraw / 8 paint；zoom 为 23/7、idle 为 1/1、
+  high-output 为 3/4，并成功发出含 `ux.theme-render-parity` 在内的 16 项 evidence。
   后续按 `commands.json` 时间线确认用户体感真实：三轮黑底阶段 15.0--18.3s，白底后
   108.6--122.5s，相邻 snapshot 中位间隔上升约 1.8--2.1x。根因不是 palette，而是
   harness 每条 CLI 都 parse + pretty-write 全部历史形成 O(n²)；每 50 条命令的中位

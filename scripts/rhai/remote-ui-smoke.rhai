@@ -244,6 +244,13 @@ fn wait_terminal_resize_settled(context, cli) {
 }
 
 fn sample_render_activity(context, cli, gui, after_sequence) {
+    let required_sequence = after_sequence;
+    if required_sequence == 0 {
+        let current = json_cli(context, cli, ["ui-snapshot"]);
+        if current.render_activity != () {
+            required_sequence = current.render_activity.sequence;
+        }
+    }
     require(
         gui.window_message(0x8004, 0, 0) == 1,
         "remote_ui_render_activity_sample_rejected"
@@ -251,7 +258,7 @@ fn sample_render_activity(context, cli, gui, after_sequence) {
     for attempt in 0..200 {
         let snapshot = json_cli(context, cli, ["ui-snapshot"]);
         let activity = snapshot.render_activity;
-        if activity != () && activity.sequence > after_sequence {
+        if activity != () && activity.sequence > required_sequence {
             return activity;
         }
         rhai::task::sleep(std::time::Duration::from_millis(25));
@@ -299,6 +306,14 @@ fn measure_theme_render(
     let duration_ms =
         std::time::SystemTime::now().unix_millis - started;
     settings_cancel.click();
+    json_cli(
+        context,
+        cli,
+        [
+            "wait-ui", "--modal-kind", "closed",
+            "--timeout-ms", "1000"
+        ]
+    );
     let result = #{
         duration_ms: duration_ms,
         redraws: after.redraw_requests - before.redraw_requests,
@@ -1155,14 +1170,14 @@ try {
                 == render_before_zoom.control_bounds_updates
             && render_after_zoom.control_visibility_updates
                 == render_before_zoom.control_visibility_updates,
-        "remote_ui_zoom_mutated_unchanged_native_controls"
+        `remote_ui_zoom_mutated_unchanged_native_controls:before_bounds=${render_before_zoom.control_bounds_updates}:after_bounds=${render_after_zoom.control_bounds_updates}:before_visibility=${render_before_zoom.control_visibility_updates}:after_visibility=${render_after_zoom.control_visibility_updates}`
     );
     require(
         render_after_zoom.control_bounds_skips
                 > render_before_zoom.control_bounds_skips
             && render_after_zoom.control_visibility_skips
                 > render_before_zoom.control_visibility_skips,
-        "remote_ui_zoom_did_not_coalesce_native_control_layout"
+        `remote_ui_zoom_did_not_coalesce_native_control_layout:before_bounds_skips=${render_before_zoom.control_bounds_skips}:after_bounds_skips=${render_after_zoom.control_bounds_skips}:before_visibility_skips=${render_before_zoom.control_visibility_skips}:after_visibility_skips=${render_after_zoom.control_visibility_skips}`
     );
     let zoom_redraws =
         render_after_zoom.redraw_requests - render_before_zoom.redraw_requests;

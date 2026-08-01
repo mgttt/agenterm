@@ -84,7 +84,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     - [x] Dark/Light same-window render-cost parity rejects stable 3--5x palette-dependent asymmetry
       by measuring the same synchronous target click, screenshot, and renderer
       activity in counterbalanced ABBA order with a bilateral 2.75x duration
-      envelope
+      envelope; the first current-tree receipt measured 1095ms Dark versus
+      1203ms Light with identical 10 redraw / 8 paint totals
     - [x] redesign Settings as a keyboard-accessible draft dialog with
       Appearance and Terminal sections plus explicit Apply and Cancel;
       theme selection previews the complete window, Apply atomically saves,
