@@ -737,8 +737,9 @@ Cockpit
 ```
 
 - open/focus/no-activate 必须选择调用者同一实例，不隐式启动另一 server；
-- macOS/Linux 补齐真实 renderer-owned screenshot，而不是替代图或
-  “capability available”假状态；
+- macOS 已有真实 renderer-owned screenshot；Linux production strategy 现已接到
+  `RendererRequest`，无效 native handle 保持 typed `Failed`，但仍须在 X11/Wayland
+  原生 journey 留存 snapshot + PNG，不能把 strategy 单测冒充交付证据；
 - 覆盖 incompatible sibling、renderer crash、server retained while GUI
   replaced、new epoch recovery 和 stale owner replacement；
 - Workflows、Extensions、InfoHub 可以改进解释与导航，但没有 owning backend

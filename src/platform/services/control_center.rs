@@ -12,10 +12,14 @@ use agenterm_platform::{
 use crate::platform::control_center::ScreenshotStrategy;
 
 pub(crate) const fn screenshot_strategy() -> ScreenshotStrategy {
-    match agenterm_platform::platform_kind() {
+    screenshot_strategy_for(agenterm_platform::platform_kind())
+}
+
+const fn screenshot_strategy_for(platform: PlatformKind) -> ScreenshotStrategy {
+    match platform {
         PlatformKind::Windows => ScreenshotStrategy::DirectNativeWindow,
         PlatformKind::Macos => ScreenshotStrategy::RendererRequest,
-        PlatformKind::Linux => ScreenshotStrategy::Unsupported,
+        PlatformKind::Linux => ScreenshotStrategy::RendererRequest,
         _ => ScreenshotStrategy::Unsupported,
     }
 }
@@ -70,4 +74,39 @@ pub(crate) fn capture_native_window_png(
         NativeCaptureArea::Window,
     )
     .map(|_| ())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_control_center_renderers_own_linux_and_macos_capture_requests() {
+        assert_eq!(
+            screenshot_strategy_for(PlatformKind::Windows),
+            ScreenshotStrategy::DirectNativeWindow
+        );
+        assert_eq!(
+            screenshot_strategy_for(PlatformKind::Linux),
+            ScreenshotStrategy::RendererRequest
+        );
+        assert_eq!(
+            screenshot_strategy_for(PlatformKind::Macos),
+            ScreenshotStrategy::RendererRequest
+        );
+    }
+
+    #[test]
+    fn invalid_native_handles_remain_typed_failures() {
+        assert!(matches!(
+            focus_existing_window(0, false),
+            Err(ActivationError::Failed { code, .. })
+                if code == "control_center_window_unavailable"
+        ));
+        assert!(matches!(
+            capture_native_window_png(0, Path::new("unused.png")),
+            Err(UiScreenshotError::Failed { code, .. })
+                if code == "control_center_screenshot_window_unavailable"
+        ));
+    }
 }

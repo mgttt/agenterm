@@ -69,7 +69,7 @@ mod tests {
         let expected = match agenterm_platform::platform_kind() {
             agenterm_platform::PlatformKind::Windows => ScreenshotStrategy::DirectNativeWindow,
             agenterm_platform::PlatformKind::Macos => ScreenshotStrategy::RendererRequest,
-            agenterm_platform::PlatformKind::Linux => ScreenshotStrategy::Unsupported,
+            agenterm_platform::PlatformKind::Linux => ScreenshotStrategy::RendererRequest,
             _ => ScreenshotStrategy::Unsupported,
         };
         assert_eq!(screenshot_strategy(), expected);

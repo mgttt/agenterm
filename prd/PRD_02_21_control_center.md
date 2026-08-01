@@ -219,8 +219,10 @@ Control Center is the product name; the executable family uses
   an owner-PID/start-identity-bound request/result channel; its structured
   renderer snapshot carries selected view, server state/reason/context,
   physical dimensions, scale factor, and title beside the PNG digest. Linux
-  remains unavailable until its renderer-owned capture path is connected
-  rather than manufacturing substitute evidence.
+  now selects the same renderer-owned request path instead of reporting a
+  manufactured platform-level unavailability; zero/missing native handles
+  remain typed failures. A real X11/Wayland journey and retained PNG are still
+  required before Linux screenshot support can be marked shipped.
 
 The v0.1.11 spike reports passive `runtime_presence` separately from
 `host_state`. A detected runtime never implies a working host:
