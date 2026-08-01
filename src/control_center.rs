@@ -193,6 +193,7 @@ struct ConnectedServer {
     version: Option<String>,
     build: Value,
     active_tab_id: Option<String>,
+    tab_counts: TabCounts,
     tabs: Vec<TabSummary>,
     components: ComponentAvailability,
 }
@@ -205,6 +206,25 @@ struct TabSummary {
     note: String,
     process_id: Option<u64>,
     dead: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct TabCounts {
+    total: u64,
+    running: u64,
+    dead: u64,
+}
+
+impl TabCounts {
+    fn from_tabs(tabs: &[TabSummary]) -> Self {
+        let total = u64::try_from(tabs.len()).unwrap_or(u64::MAX);
+        let dead = u64::try_from(tabs.iter().filter(|tab| tab.dead).count()).unwrap_or(u64::MAX);
+        Self {
+            total,
+            running: total.saturating_sub(dead),
+            dead,
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -481,16 +501,7 @@ impl ShellProjection {
             ),
         ];
         if let Some(server) = self.snapshot.connected_server.as_ref() {
-            let authority = server.logical_instance.as_deref().unwrap_or("explicit");
-            lines.push(format!(
-                "Server      {authority} · PID {} · sequence {}",
-                server.pid, server.sequence
-            ));
-            lines.push(format!(
-                "Fleet       {} tabs · active {}",
-                server.tabs.len(),
-                server.active_tab_id.as_deref().unwrap_or("none")
-            ));
+            lines.extend(connected_cockpit_lines(server));
         }
         lines.extend(
             self.snapshot.views[1..]
@@ -498,6 +509,53 @@ impl ShellProjection {
                 .map(|view| format!("{:<12}{} ({})", view.label, view.state, view.reason)),
         );
         lines
+    }
+}
+
+fn connected_cockpit_lines(server: &ConnectedServer) -> Vec<String> {
+    let authority = server.logical_instance.as_deref().unwrap_or("explicit");
+    let version = server.version.as_deref().unwrap_or("unknown");
+    let active = server
+        .active_tab_id
+        .as_deref()
+        .and_then(|id| {
+            server
+                .tabs
+                .iter()
+                .find(|tab| tab.id == id)
+                .map(|tab| format!("{id} · {}", tab.title))
+        })
+        .unwrap_or_else(|| "none".to_owned());
+    vec![
+        format!("Server      {authority} · PID {} · v{version}", server.pid),
+        format!(
+            "Event       epoch {} · sequence {}",
+            compact_identity(&server.epoch),
+            server.sequence
+        ),
+        format!(
+            "Fleet       {} tabs · {} running · {} dead",
+            server.tab_counts.total, server.tab_counts.running, server.tab_counts.dead
+        ),
+        format!("Active      {active}"),
+        format!(
+            "Components  server {} · workflows {} · extensions {} · info {}",
+            server.components.server,
+            server.components.workflows,
+            server.components.extensions,
+            server.components.info_hub
+        ),
+    ]
+}
+
+fn compact_identity(identity: &str) -> String {
+    const DISPLAY_CHARS: usize = 12;
+    let mut chars = identity.chars();
+    let prefix = chars.by_ref().take(DISPLAY_CHARS).collect::<String>();
+    if chars.next().is_some() {
+        format!("{prefix}…")
+    } else {
+        prefix
     }
 }
 
@@ -1705,7 +1763,7 @@ fn query_server(context: &ServerContext) -> Result<ConnectedServer> {
     let sequence = bootstrap["position"]["sequence"]
         .as_u64()
         .context("server bootstrap omitted sequence")?;
-    let tabs = bootstrap["tabs"]
+    let tabs: Vec<TabSummary> = bootstrap["tabs"]
         .as_array()
         .context("server bootstrap omitted tabs")?
         .iter()
@@ -1718,6 +1776,7 @@ fn query_server(context: &ServerContext) -> Result<ConnectedServer> {
             dead: tab["dead"].as_bool().unwrap_or(false),
         })
         .collect();
+    let tab_counts = TabCounts::from_tabs(&tabs);
     Ok(ConnectedServer {
         endpoint: context.endpoint.clone(),
         logical_instance: context.logical_instance.clone(),
@@ -1727,6 +1786,7 @@ fn query_server(context: &ServerContext) -> Result<ConnectedServer> {
         version: protocol["agenterm_version"].as_str().map(str::to_owned),
         build: protocol["build_identity"].clone(),
         active_tab_id: bootstrap["active_tab_id"].as_str().map(str::to_owned),
+        tab_counts,
         tabs,
         components: ComponentAvailability {
             server: "available",
@@ -2311,6 +2371,55 @@ mod tests {
                 .iter()
                 .all(|view| view.state == "unavailable")
         );
+    }
+
+    #[test]
+    fn cockpit_lines_project_causal_tab_health_and_component_facts() {
+        let tabs = vec![
+            TabSummary {
+                id: "@1".to_owned(),
+                index: 0,
+                title: "build".to_owned(),
+                note: String::new(),
+                process_id: Some(41),
+                dead: false,
+            },
+            TabSummary {
+                id: "@2".to_owned(),
+                index: 1,
+                title: "finished".to_owned(),
+                note: String::new(),
+                process_id: Some(42),
+                dead: true,
+            },
+        ];
+        let server = ConnectedServer {
+            endpoint: "pipe:test".to_owned(),
+            logical_instance: Some("dev".to_owned()),
+            pid: 123,
+            epoch: "epoch-0123456789abcdef".to_owned(),
+            sequence: 77,
+            version: Some("0.1.12".to_owned()),
+            build: serde_json::json!({"git_commit": "abc"}),
+            active_tab_id: Some("@1".to_owned()),
+            tab_counts: TabCounts::from_tabs(&tabs),
+            tabs,
+            components: ComponentAvailability {
+                server: "available",
+                workflows: "unavailable",
+                extensions: "unavailable",
+                info_hub: "unavailable",
+            },
+        };
+
+        let lines = connected_cockpit_lines(&server);
+        assert_eq!(lines.len(), 5);
+        assert!(lines[0].contains("dev · PID 123 · v0.1.12"));
+        assert!(lines[1].contains("epoch epoch-012345… · sequence 77"));
+        assert!(lines[2].contains("2 tabs · 1 running · 1 dead"));
+        assert!(lines[3].contains("@1 · build"));
+        assert!(lines[4].contains("server available"));
+        assert!(lines[4].contains("workflows unavailable"));
     }
 
     #[test]

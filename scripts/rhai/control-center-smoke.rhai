@@ -320,6 +320,18 @@ fn tab_facts_match(expected, actual) {
     true
 }
 
+fn tab_counts_match(tabs, counts) {
+    let dead = 0;
+    for tab in tabs {
+        if tab.dead {
+            dead += 1;
+        }
+    }
+    counts.total == tabs.len
+        && counts.dead == dead
+        && counts.running == tabs.len - dead
+}
+
 fn prove_pty(context, cli_executable, label) {
     let marker = "AGENTERM_CC_" + label + "_" + context.run_id;
     let tab_id = cli_text(
@@ -567,6 +579,11 @@ try {
             && live_server.sequence == bootstrap.position.sequence
             && live_server.active_tab_id == bootstrap.active_tab_id
             && tab_facts_match(bootstrap.tabs, live_server.tabs)
+            && tab_counts_match(live_server.tabs, live_server.tab_counts)
+            && live_server.components.server == "available"
+            && live_server.components.workflows == "unavailable"
+            && live_server.components.extensions == "unavailable"
+            && live_server.components.info_hub == "unavailable"
             && live_snapshot.views[0].id == "cockpit"
             && live_snapshot.views[0].state == "available"
             && live_snapshot.views[0].data.pid == live_server.pid

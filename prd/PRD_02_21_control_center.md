@@ -137,9 +137,12 @@ Control Center is the product name; the executable family uses
 
 ### Cockpit
 
-- [ ] Cockpit is the first useful read-only slice: it shows the selected server
+- [~] Cockpit is the first useful read-only slice: it shows the selected server
   build and identity, logical instance, process health, event epoch/sequence,
-  tab counts and states, and component availability from current typed facts.
+  explicit total/running/dead tab counts, active stable ID/title, and component
+  availability from current typed facts. The renderer-neutral snapshot and
+  native shell consume the same facts; richer inspect/select navigation remains
+  open.
 - [ ] inspect and select shortcuts target stable IDs and return verifiable
   post-state. A missing server says that no Fleet authority is connected
   rather than presenting a fabricated zero-sized fleet.
@@ -276,9 +279,12 @@ future promotion gates.
 - [ ] Control Center selects the same logical instance as its caller, consumes
   the shared endpoint resolver, and does not start a server or choose
   arbitrarily among multiple authorities.
-- [ ] Cockpit presents a causally identified snapshot and terminal-independent
-  component availability; Workflows, Extensions, and InfoHub have stable
-  navigation and truthful empty/unavailable states.
+- [~] Cockpit presents a causally identified snapshot and terminal-independent
+  component availability; its public snapshot now carries explicit
+  total/running/dead tab counts while the native renderer displays the same
+  logical instance, PID/version, epoch/sequence, active stable tab ID/title and
+  component states. Workflows, Extensions, and InfoHub retain truthful
+  unavailable states; richer navigation and inspect/select actions remain open.
 - [~] close, force-kill, renderer failure, server restart, server loss,
   incompatible protocol, repeated open, and GUI-with-server-retained journeys
   prove process reuse, bounded cleanup, recovery, and PTY/workspace isolation.

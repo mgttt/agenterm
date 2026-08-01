@@ -1,12 +1,44 @@
 # AgenTerm v0.1.12 公开计划
 
-状态：规划启动（2026-07-31）
+状态：产品建设期（2026-08-01 重基线）；远未进入 RC，Candidate/Promotion
+仅是 Wave D 的远期交付门，不是当前实施主线，也不构成本阶段进展定义。
 工作主题：**收敛 v0.1.11 基础、折叠候选到发布的等待时间，并让三平台
 Control Center / native IPC 进入可持续演进状态**
 
 本文是执行计划和决策记录，不替代产品事实。接受后的产品范围、状态与
 验收证据必须同步进 `PRD.md` 及对应 `prd/PRD_*.md`；实施中允许按证据调整
 波次，但不得用计划中的愿景冒充已经发布的能力。
+
+## 当前执行主线（持续更新）
+
+```text
+已完成前置
+└─ revision-4 Platform Facade 全量 OS 抽象
+当前产品纵切
+├─ [~] Control Center Cockpit 可用只读事实
+│  ├─ server/build/epoch/sequence
+│  ├─ running/dead/active tab health
+│  └─ component availability + native renderer agreement
+├─ native IPC / LogicalInstance 行为收敛
+├─ Script REPL hardening（主体已 shipped）
+├─ agenterm-net N2 experimental 纵切
+└─ system-WebView research（不得替代 native CC）
+远期交付门
+└─ Wave D Candidate → 人工批准后的 Promotion/Release
+```
+
+近期顺序以产品价值和依赖为准：先让共享 Cockpit 合同成为可用诊断面，再
+推进可独立验证的 Script、network 和 Web host 纵切。Candidate workflow
+合同可以维护，但在产品阶段成果、三平台证据和用户明确意图之前不 dispatch，
+也不以“具备 RC 条件”替代 v0.1.12 产品建设。
+
+2026-08-01 首个建设期增量：Cockpit snapshot 新增明确的
+`tab_counts.{total,running,dead}`，native shell 同源显示 logical instance、
+server PID/version、epoch/sequence、active stable tab ID/title 和四类 component
+availability。390 项 Quick tests、七产物 dev build 和完整 Windows
+`control-center-smoke` 通过；renderer-owned 760×480 PNG 为 50,278 bytes，
+no-activate、因果刷新、server recovery、typed close 与 orphan-free cleanup
+保持通过。inspect/select 导航和 Linux 原生 renderer 证据仍是后续叶。
 
 ## 一、树式精华
 
@@ -53,12 +85,13 @@ v0.1.12  Convergence & Fast Promotion
 │  └─ 只有端到端收益显著且可回退时才切换默认 runner
 │
 ├─ P1：脚本与二级产品继续准备
-│  ├─ agenterm-script 交付真正的持久 REPL
+│  ├─ [x] agenterm-script 已交付真正的持久 REPL
 │  │  ├─ ReplSession 会话内核与 CLI 输入适配解耦，可供 CC/Agent 复用
 │  │  ├─ 变量、函数、多行单元、错误恢复、reset 和内存 history
 │  │  ├─ TTY 提示与 pipe/NDJSON 自动化输出分离
 │  │  ├─ 单元失败不提交语言状态，外部真实副作用不伪装回滚
-│  │  └─ 普通 worker 与 REPL 复用同一 Engine/API 配置
+│  │  ├─ 普通 worker 与 REPL 复用同一 Engine/API 配置
+│  │  └─ [~] Ctrl+C、箭头历史与 kill/restart 长驻协议继续 hardening
 │  ├─ 评估把 canonical Rhai 入口从 agenterm-script 重命名为 agenterm-rhai
 │  │  ├─ 名字直接表达语言/runtime 身份，不再暗示抽象的通用脚本沙箱
 │  │  ├─ 先冻结 CLI、task、worker、包名、文档和第三方调用者影响清单
