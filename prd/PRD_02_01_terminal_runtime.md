@@ -17,18 +17,24 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] VT100 parsing, ANSI colors, scrollback, resize, keyboard and mouse
 - [x] Backspace emits ConPTY VT `DEL` and deletes exactly one input
   character in the default `cmd.exe` line editor
-- [~] mouse wheel and a visible draggable scrollbar navigate ordinary terminal
+- [x] mouse wheel and a visible draggable scrollbar navigate ordinary terminal
   history; scrollbar track clicks page and dragging to the bottom restores the
   live viewport. Live v0.1.12 dogfood found alternate-screen harnesses whose
-  zero local scrollback makes wheel/PageUp ineffective. The v0.1.12 repair now
-  publishes additive alternate-screen/application-cursor mode facts and turns
-  wheel notches into bounded CSI/SS3 cursor input only when the alternate grid
-  has no local history; unit and mixed-version serde evidence pass. The owning
-  Windows journey now contains a real alternate-screen PowerShell PTY fixture
-  that observes mode facts and maps native wheel messages to RawUI virtual-key
-  input while retaining ordinary scrollback assertions; its final integrated
-  run remains pending. Future application raw-mouse arbitration also remains
-  open, so this capability is not yet marked shipped.
+  zero local scrollback makes wheel/PageUp ineffective. Byte-level diagnosis on
+  pre-passthrough ConPTY proved that `1049h/l` is erased and replaced by an
+  indistinguishable full-frame repaint, so `alternate_screen=false` is not an
+  authoritative normal-screen fact and repaint/max-scrollback heuristics are
+  forbidden. The Windows PTY facade now queries typed child input ownership:
+  cooked line input consumes no wheel key, while RawVt/RawNative receives native
+  logical Up/Down records and ConHost itself selects CSI/SS3 from its retained
+  cursor mode. Linux/macOS keep parser-owned alternate-grid byte input. The
+  owning Windows journey retains ordinary scrollbar/wheel evidence and uses a
+  real raw full-screen PowerShell PTY; native up/down wheel messages each arrive
+  as three complete `ESC O A` / `ESC O B` sequences. The integrated 169.9-second
+  journey passed selection, recovery and orphan cleanup as well. Future
+  application raw-mouse reporting and Shift local-selection override remain a
+  separate professional-input slice rather than weakening this shipped paging
+  contract.
 - [~] dragging is intended to select visible terminal cells and Ctrl+C copies
   the selected text while an unmodified click reaches RMUX/native terminal
   input. Live v0.1.12 dogfood found a Windows replaceable-GUI path where a

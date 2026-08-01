@@ -21,9 +21,9 @@
     {
       "id": "terminal.mouse-scrollback",
       "kind": "behavior",
-      "status": "partial",
-      "evidence_mode": "black-box-partial",
-      "prd": "mouse wheel and a visible draggable scrollbar navigate ordinary terminal",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "mouse wheel and a visible draggable scrollbar navigate ordinary and raw full-screen terminals",
       "evidence_ids": ["ux.mouse-scrollback"]
     },
     {

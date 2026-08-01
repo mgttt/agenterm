@@ -359,14 +359,16 @@ Release 全部是本轮明确非目标。
   GUI lease observed server position，再等 250ms paint queue 收敛，实测仅 4 redraw/4
   parent paint、0 child update。自动化现覆盖 zoom、idle 与 high-output；只剩用户在新
   binary 上做持续高输出肉眼确认，不能把计数器冒充视觉感受。
-- [~] alternate-screen harness 无法本地向上滚动；`UiScreenSnapshot` 现以 additive
-  serde-default 字段发布 `alternate_screen` / `application_cursor`，Windows remote
-  与 Unix frontend 仅在 alternate grid 没有本地 history 时把 wheel 转为有界 CSI/SS3
-  cursor input，普通 scrollback 路径不变；编码与旧 snapshot 兼容单测通过。owning
-  Windows journey 现创建真实 PowerShell alternate/application-cursor PTY、投递上下各一
-  notch `WM_MOUSEWHEEL` 并要求 RawUI 分别收到三个 VK_UP/VK_DOWN；旧 dist 已证明 fixture
-  进入 `ALT_WHEEL_READY`，但产物早于修复，须在新集成 build 上完整通过。未来 raw-mouse
-  ownership 仍必须优先于此 paging fallback。
+- [x] alternate-screen harness 无法本地向上滚动。byte-level ConPTY probe 证明旧 Windows
+  会吞掉 `1049h/l` 并只输出与普通 clear 同形的 full-frame repaint，因此删除了依赖
+  `alternate_screen=false`、`max_scrollback==0` 或 repaint pattern 的猜测。platform PTY
+  contract 现发布 `Cooked/RawVt/RawNative` 输入所有权和 typed logical Up/Down：cooked
+  shell 不接收历史键，raw child 由 ConHost 按内部 application-cursor mode 编码 CSI/SS3；
+  POSIX adapter 对 native console key 明确 Unsupported，Unix 继续使用 parser-owned mode。
+  Windows owning journey 在保留普通 scrollbar/wheel assertions 的同时，用真实 raw
+  PowerShell PTY 验证每个上下 wheel notch 分别交付三组 `ESC O A` / `ESC O B`，并在
+  169.9 秒 integrated `remote-ui-smoke` 中通过后续 selection、server recovery 与 cleanup。
+  raw-mouse reporting arbitration 仍是独立后续 slice，不反向否定本次 paging 收口。
 - [~] terminal focus 下 `Shift+Tab` 修复正在集成：共享 named-key encoder 已按
   xterm modifier 参数覆盖 Tab/方向/Home/End/Insert/Delete/Page/F1–F12；Unix
   两条输入路径保留 modifiers，Windows `WM_KEYDOWN` 显式处理 Tab/Insert/Delete
