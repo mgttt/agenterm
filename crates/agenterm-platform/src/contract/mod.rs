@@ -1,5 +1,6 @@
 #[cfg(feature = "activation")]
 pub mod activation;
+pub mod cache_hierarchy;
 #[cfg(feature = "clipboard")]
 pub mod clipboard;
 #[cfg(all(feature = "window", feature = "input"))]
