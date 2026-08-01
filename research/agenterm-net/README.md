@@ -9,14 +9,15 @@ store without putting networking dependencies in the terminal hot path.
 ## Capability tree
 
 ```text
-agenterm-net (experimental N2-M1 foundation; 2026-07-31)
+agenterm-net (experimental N2-M1 foundation; 2026-08-01)
 ├─ identity — explicit ephemeral or durable Ed25519 PeerId
 │  ├─ marker-bound durable key distinguishes initialization from key loss
 │  └─ stopped-node backup, rotation and restore preserve explicit continuity
 ├─ node lifecycle — explicit start/status/stop
 │  ├─ loopback-only nonce-bound control endpoint
 │  ├─ bounded readiness/control waits; no fixed sleep
-│  └─ crash evidence is preserved instead of silently starting a second owner
+│  ├─ crash evidence is preserved instead of silently starting a second owner
+│  └─ explicit recover proves owner exit, archives evidence and reconnects control
 ├─ transport — explicit IPv4 loopback TCP only
 │  └─ Noise authentication → Yamux multiplexing → Ping evidence
 ├─ deterministic private-mesh fixture — explicit command, memory transport
@@ -66,6 +67,7 @@ cargo run -- attach-self-test --json
 cargo run -- tcp-self-test --json
 cargo run -- node start --state-dir ./.net-state --identity durable --json
 cargo run -- node status --state-dir ./.net-state --json
+cargo run -- node recover --state-dir ./.net-state --json
 cargo run -- node stop --state-dir ./.net-state --json
 cargo run -- identity status --state-dir ./.net-state --json
 cargo run -- identity backup --state-dir ./.net-state --output ./identity-backup.json --json
@@ -93,9 +95,16 @@ Node readiness uses a one-shot loopback socket owned by the starting process;
 status and stop use the descriptor's loopback address and nonce. The nonce is a
 request-binding robustness mechanism, not a user authorization boundary. A
 descriptor whose owner cannot be reached is retained as crash evidence and a
-second node is refused. Status receipts include the persistent-store snapshot
-and the platform process RSS/thread sample. Automated stale-owner recovery,
-reconnect evidence and cross-platform load qualification remain N2 gaps.
+second node is refused. `node recover` is a separate explicit operator action:
+it refuses a reachable control endpoint or live owner PID, atomically archives
+the stale descriptor, starts the replacement in the recorded identity mode and
+requires a successful status round trip on the new control endpoint. Its typed
+receipt reports the prior and replacement descriptors, crash-evidence path,
+identity/store continuity and control reconnect. Durable recovery preserves the
+PeerId; ephemeral recovery truthfully rotates it. This proves local sidecar
+control recovery only. Automatic recovery policy, libp2p peer/session reconnect
+and cross-platform load qualification remain N2 gaps. Status receipts include
+the persistent-store snapshot and the platform process RSS/thread sample.
 
 Durable identity initialization writes both a private protobuf key and a
 versioned marker bound to its PeerId. Once that marker exists, a missing key is
@@ -160,10 +169,11 @@ processes to make the black-box evidence reproducible; they are not a key
 distribution or pairing-storage design.
 
 The attach path still lacks a persistent invite/replay database, wall-clock
-integration, reconnect/crash recovery, real fleet/server integration,
-rate-exhaustion evidence and three-platform qualification. Until those gaps
-close, the capability remains experimental and cannot confer remote server
-authority.
+integration, libp2p peer reconnect/crash recovery, real fleet/server
+integration, rate-exhaustion evidence and three-platform qualification. The
+local node control recovery command does not close those Remote Fleet transport
+gaps. Until they close, the capability remains experimental and cannot confer
+remote server authority.
 
 ## Evidence
 
@@ -182,9 +192,14 @@ cargo build --release
 
 The current unit and public CLI suites cover durable identity restart,
 marker-bound loss detection, backup/rotation/restore, interrupted-rotation
-recovery, ephemeral identity rotation, explicit lifecycle, private-by-default facts,
-persistent block round-trip, pin/unpin/GC, read-time corruption rejection,
-deadline-bounded peer loss, and owned-child cancellation without fixed sleeps.
+recovery, ephemeral identity rotation, explicit lifecycle, private-by-default
+facts, and explicit crashed-owner recovery. The recovery journey proves that a
+live owner is rejected, a crashed owner cannot be replaced by ordinary start,
+the stale descriptor is archived, durable PeerId and store identity survive,
+the replacement PID changes, and its control endpoint answers status before the
+receipt succeeds. The suites also cover persistent block round-trip,
+pin/unpin/GC, read-time corruption rejection, deadline-bounded peer loss, and
+owned-child cancellation without fixed sleeps.
 They also require each private-mesh capability to be advertised independently,
 verify all three event-driven mesh proof receipts, and prove the paired
 read-only attach success/rejection paths plus the authority defaults. The TCP

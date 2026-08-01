@@ -104,14 +104,21 @@ N2-M1
   successful payload is a bounded Fleet summary/event digest; replay,
   wrong-peer and expired requests return typed rejections. It has no terminal
   input, shell, command, PTY or `agenterm-server` authority path.
-- [ ] persistent invite/replay state, real-clock expiry, reconnect, crash
-  recovery, rate exhaustion and three-platform evidence remain required. A
+- [ ] persistent invite/replay state, real-clock expiry, remote peer/session
+  reconnect, attach crash recovery, rate exhaustion and three-platform evidence
+  remain required. A
   loopback-TCP fixture now preserves explicit pairing, replay/wrong-peer/
   expiry rejection and the bounded read-only projection across independent
   server/client processes; it is not a product endpoint. Future remote control belongs to the Agent/harness
   approval and credential layer; it must not be promoted from this attach proof.
-- [ ] N2-M1 tests use a deterministic private mesh and isolated stores; they
-  must not require public bootstrap reachability or leave listeners/processes.
+- [x] N2-M1 tests use a deterministic private mesh and isolated stores; they do
+  not require public bootstrap reachability or leave listeners/processes.
+- [~] explicit `node recover` now refuses a reachable control endpoint or live
+  owner PID, atomically archives confirmed crash evidence, starts a replacement
+  in the recorded identity mode and requires a fresh status round trip. The CLI
+  black box proves a changed PID, durable PeerId/store continuity and bounded
+  cleanup after a real forced kill. This is local sidecar control recovery, not
+  libp2p peer/session or Remote Fleet reconnect.
 
 ## Process and integration boundary
 
@@ -235,13 +242,14 @@ promote the research executable into the stable artifact manifest.
 ## Gates before stable service integration
 
 - [~] durable identity and local key lifecycle are specified and migration-tested;
-  custody/encryption, multi-device and cross-platform fault evidence remain
+  custody/encryption, multi-device and cross-platform fault evidence remain.
 - [ ] capability/protocol/receipt/event/diagnostic schemas are versioned and
   backward/forward compatibility is explicit
 - [ ] connection, storage, cache, pin, bandwidth, task, and shutdown budgets
   pass load and fault evidence on Windows, macOS, and Linux
-- [ ] restart, reconnect, corruption recovery, upgrade, downgrade, and sidecar
-  crash preserve truthful state and isolation
+- [~] explicit local sidecar crash recovery preserves durable identity/store
+  continuity and reconnects its control endpoint; remote reconnect, corruption
+  recovery, upgrade/downgrade and three-platform crash evidence remain
 - [ ] SBOM, licence, signature, hash, provenance, package, startup, and
   independent binary-size gates pass on every distributed architecture
 - [ ] users explicitly enable persistent networking and can observe, stop,

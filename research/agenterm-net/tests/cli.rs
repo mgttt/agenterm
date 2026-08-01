@@ -44,6 +44,26 @@ fn path_text(path: &std::path::Path) -> &str {
     path.to_str().expect("test path is UTF-8")
 }
 
+fn force_kill_process(pid: u64) {
+    #[cfg(windows)]
+    let status = Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/F"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .expect("run taskkill");
+    #[cfg(unix)]
+    let status = Command::new("kill")
+        .args(["-KILL", &pid.to_string()])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .expect("run kill");
+    assert!(status.success(), "force-kill node pid {pid}");
+}
+
 #[test]
 fn public_self_test_uses_distinct_processes_and_verifies_blocks() {
     let (status, value) = json_output(&["self-test", "--json"]);
@@ -305,6 +325,109 @@ fn durable_node_lifecycle_is_explicit_and_identity_survives_restart() {
     let (stop_status, stopped) =
         json_output(&["node", "stop", "--state-dir", path_text(&state), "--json"]);
     assert!(stop_status.success(), "{stopped}");
+    fs::remove_dir_all(state).unwrap();
+}
+
+#[test]
+fn crashed_durable_node_requires_explicit_recovery_and_reconnects_control() {
+    let state = test_path("durable-node-crash-recovery");
+    let (capability_status, capabilities) = json_output(&["capabilities", "--json"]);
+    assert!(capability_status.success(), "{capabilities}");
+    let advertised = capabilities["result"]["capabilities"]
+        .as_array()
+        .expect("capability list")
+        .iter()
+        .find(|capability| capability["name"] == "node.explicit-crash-recovery")
+        .expect("crash recovery capability");
+    assert_eq!(advertised["state"], "prototype");
+
+    let (start_status, started) = json_output(&[
+        "node",
+        "start",
+        "--state-dir",
+        path_text(&state),
+        "--identity",
+        "durable",
+        "--json",
+    ]);
+    assert!(start_status.success(), "{started}");
+    let prior_pid = started["result"]["descriptor"]["pid"].as_u64().unwrap();
+    let peer_id = started["result"]["descriptor"]["peer_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let (live_recovery_status, live_recovery) = json_output(&[
+        "node",
+        "recover",
+        "--state-dir",
+        path_text(&state),
+        "--json",
+    ]);
+    assert!(!live_recovery_status.success(), "{live_recovery}");
+    assert_eq!(live_recovery["code"], "node_recover_failed");
+    assert!(
+        live_recovery["message"]
+            .as_str()
+            .unwrap()
+            .contains("still reachable")
+    );
+
+    force_kill_process(prior_pid);
+    let (status_status, unavailable) =
+        json_output(&["node", "status", "--state-dir", path_text(&state), "--json"]);
+    assert!(!status_status.success(), "{unavailable}");
+    assert_eq!(unavailable["code"], "node_status_failed");
+
+    let (start_again_status, refused) = json_output(&[
+        "node",
+        "start",
+        "--state-dir",
+        path_text(&state),
+        "--identity",
+        "durable",
+        "--json",
+    ]);
+    assert!(!start_again_status.success(), "{refused}");
+    assert_eq!(refused["code"], "node_start_failed");
+    assert!(
+        refused["message"]
+            .as_str()
+            .unwrap()
+            .contains("refusing to erase crash evidence")
+    );
+
+    let (recovery_status, recovered) = json_output(&[
+        "node",
+        "recover",
+        "--state-dir",
+        path_text(&state),
+        "--json",
+    ]);
+    assert!(recovery_status.success(), "{recovered}");
+    let result = &recovered["result"];
+    assert_eq!(result["schema"], "agenterm-net/node-recovery/v1");
+    assert_eq!(result["lifecycle"], "recovered");
+    assert_eq!(result["prior_descriptor"]["pid"], prior_pid);
+    assert_eq!(result["prior_descriptor"]["peer_id"], peer_id);
+    assert_ne!(result["replacement"]["descriptor"]["pid"], prior_pid);
+    assert_eq!(result["replacement"]["descriptor"]["peer_id"], peer_id);
+    assert_eq!(result["owner_absence_confirmed"], true);
+    assert_eq!(result["control_reconnected"], true);
+    assert_eq!(result["identity_continuity"], true);
+    assert_eq!(result["store_continuity"], true);
+    assert_eq!(result["explicit_operator_action"], true);
+    assert!(std::path::Path::new(result["crash_evidence_path"].as_str().unwrap()).exists());
+
+    let (status_status, observed) =
+        json_output(&["node", "status", "--state-dir", path_text(&state), "--json"]);
+    assert!(status_status.success(), "{observed}");
+    assert_eq!(observed["result"]["descriptor"]["peer_id"], peer_id);
+    assert!(
+        json_output(&["node", "stop", "--state-dir", path_text(&state), "--json"])
+            .0
+            .success()
+    );
     fs::remove_dir_all(state).unwrap();
 }
 

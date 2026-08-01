@@ -48,6 +48,20 @@ pub struct NodeStatus {
     pub resources: ProcessResourceSample,
 }
 
+#[derive(Debug, Serialize)]
+pub struct NodeRecovery {
+    pub schema: &'static str,
+    pub lifecycle: &'static str,
+    pub prior_descriptor: NodeDescriptor,
+    pub replacement: NodeStatus,
+    pub crash_evidence_path: String,
+    pub owner_absence_confirmed: bool,
+    pub control_reconnected: bool,
+    pub identity_continuity: bool,
+    pub store_continuity: bool,
+    pub explicit_operator_action: bool,
+}
+
 #[derive(Deserialize, Serialize)]
 struct ControlRequest {
     schema: String,
@@ -222,6 +236,68 @@ pub fn status(state_dir: &Path, deadline: Duration) -> Result<NodeStatus, String
 
 pub fn stop(state_dir: &Path, deadline: Duration) -> Result<NodeStatus, String> {
     request(state_dir, "stop", deadline)
+}
+
+pub fn recover(state_dir: &Path, deadline: Duration) -> Result<NodeRecovery, String> {
+    let prior = read_descriptor(state_dir)?;
+    if let Ok(status) = status(state_dir, deadline) {
+        return Err(format!(
+            "node owner is still reachable as pid {}; recovery requires a crashed owner",
+            status.descriptor.pid
+        ));
+    }
+    if process_is_alive(prior.pid)? {
+        return Err(format!(
+            "node control is unavailable but pid {} is still alive; refusing concurrent recovery",
+            prior.pid
+        ));
+    }
+
+    let evidence_dir = state_dir.join("crash-evidence");
+    fs::create_dir_all(&evidence_dir)
+        .map_err(|error| format!("create crash evidence directory: {error}"))?;
+    let evidence_path = evidence_dir.join(format!(
+        "node-{}-{}-{}.json",
+        prior.started_unix_ms,
+        prior.pid,
+        &prior.nonce[..prior.nonce.len().min(16)]
+    ));
+    if evidence_path.exists() {
+        return Err(format!(
+            "crash evidence already exists at {}",
+            evidence_path.display()
+        ));
+    }
+    fs::rename(descriptor_path(state_dir), &evidence_path)
+        .map_err(|error| format!("archive crashed node descriptor: {error}"))?;
+
+    let replacement = match start(state_dir, prior.identity, deadline) {
+        Ok(status) => status,
+        Err(error) => {
+            if !descriptor_path(state_dir).exists()
+                && let Err(restore_error) = restore_archived_descriptor(state_dir, &evidence_path)
+            {
+                return Err(format!(
+                    "replacement start failed ({error}); restoring crash descriptor also failed: {restore_error}"
+                ));
+            }
+            return Err(format!("replacement start failed: {error}"));
+        }
+    };
+    let identity_continuity = replacement.descriptor.peer_id == prior.peer_id;
+    let store_continuity = replacement.descriptor.store_dir == prior.store_dir;
+    Ok(NodeRecovery {
+        schema: "agenterm-net/node-recovery/v1",
+        lifecycle: "recovered",
+        prior_descriptor: prior,
+        replacement,
+        crash_evidence_path: evidence_path.display().to_string(),
+        owner_absence_confirmed: true,
+        control_reconnected: true,
+        identity_continuity,
+        store_continuity,
+        explicit_operator_action: true,
+    })
 }
 
 fn request(state_dir: &Path, action: &str, deadline: Duration) -> Result<NodeStatus, String> {
@@ -457,6 +533,20 @@ fn write_descriptor(state_dir: &Path, descriptor: &NodeDescriptor) -> Result<(),
     fs::rename(&temporary, path).map_err(|error| format!("commit node descriptor: {error}"))
 }
 
+fn restore_archived_descriptor(state_dir: &Path, evidence_path: &Path) -> Result<(), String> {
+    let bytes = fs::read(evidence_path)
+        .map_err(|error| format!("read archived crash descriptor: {error}"))?;
+    let path = descriptor_path(state_dir);
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .map_err(|error| format!("recreate node descriptor without overwrite: {error}"))?;
+    file.write_all(&bytes)
+        .and_then(|_| file.sync_all())
+        .map_err(|error| format!("restore node descriptor: {error}"))
+}
+
 fn remove_descriptor_if_owned(state_dir: &Path, nonce: &str) -> Result<(), String> {
     let path = descriptor_path(state_dir);
     if let Ok(current) = read_descriptor(state_dir)
@@ -465,6 +555,70 @@ fn remove_descriptor_if_owned(state_dir: &Path, nonce: &str) -> Result<(), Strin
         fs::remove_file(path).map_err(|error| format!("remove node descriptor: {error}"))?;
     }
     Ok(())
+}
+
+#[cfg(unix)]
+fn process_is_alive(pid: u32) -> Result<bool, String> {
+    let pid = i32::try_from(pid).map_err(|_| format!("pid {pid} is outside platform range"))?;
+    // SAFETY: signal zero performs an existence/permission probe without
+    // delivering a signal or changing the target process.
+    if unsafe { libc::kill(pid, 0) } == 0 {
+        #[cfg(target_os = "linux")]
+        if let Ok(stat) = fs::read_to_string(format!("/proc/{pid}/stat"))
+            && stat
+                .rsplit_once(") ")
+                .and_then(|(_, fields)| fields.chars().next())
+                == Some('Z')
+        {
+            return Ok(false);
+        }
+        return Ok(true);
+    }
+    match std::io::Error::last_os_error().raw_os_error() {
+        Some(code) if code == libc::ESRCH => Ok(false),
+        Some(code) if code == libc::EPERM => Ok(true),
+        _ => Err(format!(
+            "probe crashed node pid {pid}: {}",
+            std::io::Error::last_os_error()
+        )),
+    }
+}
+
+#[cfg(windows)]
+fn process_is_alive(pid: u32) -> Result<bool, String> {
+    use windows_sys::Win32::{
+        Foundation::{
+            CloseHandle, ERROR_INVALID_PARAMETER, WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT,
+        },
+        System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject},
+    };
+
+    // SAFETY: the handle is requested with synchronization-only access and is
+    // closed exactly once after a zero-timeout state probe.
+    let process = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
+    if process.is_null() {
+        let error = std::io::Error::last_os_error();
+        return if error.raw_os_error() == Some(ERROR_INVALID_PARAMETER as i32) {
+            Ok(false)
+        } else {
+            Err(format!("probe crashed node pid {pid}: {error}"))
+        };
+    }
+    let wait = unsafe { WaitForSingleObject(process, 0) };
+    unsafe {
+        CloseHandle(process);
+    }
+    match wait {
+        WAIT_OBJECT_0 => Ok(false),
+        WAIT_TIMEOUT => Ok(true),
+        WAIT_FAILED => Err(format!(
+            "wait on crashed node pid {pid}: {}",
+            std::io::Error::last_os_error()
+        )),
+        other => Err(format!(
+            "unexpected process wait result {other} for pid {pid}"
+        )),
+    }
 }
 
 fn unique_token(label: &str) -> String {

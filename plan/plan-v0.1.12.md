@@ -784,6 +784,12 @@ migration、轮换中断回滚和错误 backup 拒绝已有 14 unit + 12 CLI 测
 experimental：备份托管/加密、multi-device 语义、reconnect/load 以及三平台 fault
 injection 尚未完成，不能把这个纵切写成整个 N2-M1 stable。
 
+Local sidecar crash recovery 也现有显式 `node recover` 纵切：活 control 或仅 control
+失联但 PID 仍活均拒绝；确认 owner 退出后原子归档 descriptor，按记录 identity mode
+启动 replacement，并在 receipt 前完成新 control status round-trip。真实强杀 CLI journey
+证明 durable PeerId/store 连续与新 PID，但 remote libp2p peer/session reconnect、自动恢复
+policy、rate exhaustion 和三平台负载仍未完成。
+
 ## 九、系统 WebView / Tauri-compatible spike
 
 先以一个独立的 `agenterm-cc-web` 实验宿主验证系统 WebView，而不是把 Tauri

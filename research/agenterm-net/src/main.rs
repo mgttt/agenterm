@@ -278,6 +278,11 @@ async fn run() -> Result<(), (String, &'static str, String)> {
                         note: "deadline-bounded start/status/stop with nonce-bound loopback control",
                     },
                     Capability {
+                        name: "node.explicit-crash-recovery",
+                        state: "prototype",
+                        note: "operator-requested stale-owner proof, crash-descriptor archival, durable identity continuity, and replacement control reconnect",
+                    },
+                    Capability {
                         name: "identity.ephemeral-or-durable-ed25519",
                         state: "prototype",
                         note: "explicit identity mode; durable key has marker-bound loss detection plus backup, rotation, and restore lifecycle",
@@ -391,6 +396,20 @@ async fn run() -> Result<(), (String, &'static str, String)> {
                 Duration::from_millis(DEFAULT_DEADLINE_MS),
             )
             .map_err(|message| (request_id.clone(), "node_status_failed", message))?;
+            print_envelope(&request_id, DEFAULT_DEADLINE_MS, result);
+            Ok(())
+        }
+        [group, command, state_flag, state_dir, json]
+            if group == "node"
+                && command == "recover"
+                && state_flag == "--state-dir"
+                && json == "--json" =>
+        {
+            let result = node::recover(
+                Path::new(state_dir),
+                Duration::from_millis(DEFAULT_DEADLINE_MS),
+            )
+            .map_err(|message| (request_id.clone(), "node_recover_failed", message))?;
             print_envelope(&request_id, DEFAULT_DEADLINE_MS, result);
             Ok(())
         }
@@ -597,7 +616,7 @@ async fn run() -> Result<(), (String, &'static str, String)> {
         _ => Err((
             request_id,
             "usage",
-            "usage: agenterm-net capabilities --json | peer-id | self-test --json | mesh-self-test --json | attach-self-test --json | tcp-self-test --json | node start|status|stop ... --json | identity status|backup|rotate|restore ... --json | store put|get|pin|unpin|gc|status ... --json".to_string(),
+            "usage: agenterm-net capabilities --json | peer-id | self-test --json | mesh-self-test --json | attach-self-test --json | tcp-self-test --json | node start|status|recover|stop ... --json | identity status|backup|rotate|restore ... --json | store put|get|pin|unpin|gc|status ... --json".to_string(),
         )),
     }
 }
