@@ -10,6 +10,19 @@ pub enum CacheKind {
     Other,
 }
 
+impl CacheKind {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Unified => "unified",
+            Self::Data => "data",
+            Self::Instruction => "instruction",
+            Self::Trace => "trace",
+            Self::Other => "other",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct CacheGeometryFacts {
     pub level: std::num::NonZeroU8,
@@ -107,6 +120,18 @@ pub enum CacheHierarchyErrorKind {
     Unavailable,
     InvalidValue,
     MalformedNativeData,
+}
+
+impl CacheHierarchyErrorKind {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Query => "query",
+            Self::Unavailable => "unavailable",
+            Self::InvalidValue => "invalid-value",
+            Self::MalformedNativeData => "malformed-native-data",
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -217,5 +242,16 @@ mod tests {
         ])
         .unwrap();
         assert_eq!(facts.max_data_line_bytes().unwrap().get(), 128);
+    }
+
+    #[test]
+    fn stable_names_cover_public_kinds_and_errors() {
+        assert_eq!(CacheKind::Unified.as_str(), "unified");
+        assert_eq!(CacheKind::Instruction.as_str(), "instruction");
+        assert_eq!(CacheHierarchyErrorKind::Query.as_str(), "query");
+        assert_eq!(
+            CacheHierarchyErrorKind::MalformedNativeData.as_str(),
+            "malformed-native-data"
+        );
     }
 }
