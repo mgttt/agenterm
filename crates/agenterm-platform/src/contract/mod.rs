@@ -6,6 +6,8 @@ pub mod clipboard;
 pub mod control_window;
 #[cfg(feature = "font")]
 pub mod font;
+#[cfg(feature = "hardware")]
+pub mod hardware;
 #[cfg(feature = "ime")]
 pub mod ime;
 #[cfg(feature = "input")]

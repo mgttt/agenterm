@@ -11,6 +11,7 @@ readme = "README.md"
 [features]
 default = []
 serde = ["dep:serde"]
+hardware = []
 process-control = [
     "dep:libc",
     "dep:windows-sys",
@@ -85,6 +86,7 @@ font = [
 ]
 webview = []
 full = [
+    "hardware",
     "process",
     "filesystem",
     "locking",
