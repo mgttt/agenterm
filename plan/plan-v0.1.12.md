@@ -210,6 +210,10 @@ process 与 filesystem 均只有 `windows-sys → windows-link`，不再隐式�
 Frontend host 前置开始收敛：`WindowSemanticState` 及 minimized-over-maximized precedence
 从 root 产品 helper 迁入 crate `window` public contract；root 的 320×240 CLI resize policy
 继续留在产品层，避免把 AgenTerm 参数规则伪装成通用平台限制。
+Normalized frontend event 前置新增稳定 public `NormalizedKeyEvent`：logical named/character,
+bounded physical identity、pressed/released、repeat、committed text 与 modifier snapshot 均不含
+winit 类型。Shift+Tab contract test 固定为 named Tab + Shift，后续 Unix runner 与 Windows
+host 必须在 adapter 内完成原生 event 转换；composer/tmux/PTY 字节策略仍属主 crate。
 
 2026-08-01 首个建设期增量：Cockpit snapshot 新增明确的
 `tab_counts.{total,running,dead}`，native shell 同源显示 logical instance、

@@ -502,6 +502,11 @@ integrated validation recorded below):
 - [x] Window minimized/maximized/restored semantic state and native-flag
   precedence are public platform-neutral window contracts. AgenTerm's 320x240
   CLI resize minimum and error wording remain product policy in the main crate.
+- [x] The public input contract now includes a native-library-free normalized
+  key event with logical/named keys, bounded physical identity, press/release,
+  repeat, committed text and modifier snapshot. Shift+Tab is explicitly
+  preserved as named Tab plus Shift. Product composer/tmux/PTY-byte policy
+  remains in the main crate; adapters own winit/Win32 event conversion.
 - [x] Control Center state-directory protection, exclusive state-file creation,
   atomic replacement, existing-window focus, and direct native capture now
   call `services::control_center → selected → adapters/{windows,linux,macos}`.

@@ -8,6 +8,109 @@ pub struct ModifierState {
     pub meta: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum KeyPressState {
+    Pressed,
+    Released,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum NamedKey {
+    ArrowDown,
+    ArrowLeft,
+    ArrowRight,
+    ArrowUp,
+    Backspace,
+    Delete,
+    End,
+    Enter,
+    Escape,
+    F1,
+    F2,
+    F3,
+    F4,
+    F5,
+    F6,
+    F7,
+    F8,
+    F9,
+    F10,
+    F11,
+    F12,
+    Home,
+    Insert,
+    PageDown,
+    PageUp,
+    Space,
+    Tab,
+}
+
+impl NamedKey {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ArrowDown => "ArrowDown",
+            Self::ArrowLeft => "ArrowLeft",
+            Self::ArrowRight => "ArrowRight",
+            Self::ArrowUp => "ArrowUp",
+            Self::Backspace => "Backspace",
+            Self::Delete => "Delete",
+            Self::End => "End",
+            Self::Enter => "Enter",
+            Self::Escape => "Escape",
+            Self::F1 => "F1",
+            Self::F2 => "F2",
+            Self::F3 => "F3",
+            Self::F4 => "F4",
+            Self::F5 => "F5",
+            Self::F6 => "F6",
+            Self::F7 => "F7",
+            Self::F8 => "F8",
+            Self::F9 => "F9",
+            Self::F10 => "F10",
+            Self::F11 => "F11",
+            Self::F12 => "F12",
+            Self::Home => "Home",
+            Self::Insert => "Insert",
+            Self::PageDown => "PageDown",
+            Self::PageUp => "PageUp",
+            Self::Space => "Space",
+            Self::Tab => "Tab",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PhysicalKeyCode {
+    Letter(char),
+    Digit(u8),
+    Backspace,
+    Enter,
+    Space,
+    Tab,
+    Other,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum LogicalKey {
+    Character(String),
+    Named(NamedKey),
+    Unidentified,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NormalizedKeyEvent {
+    pub logical: LogicalKey,
+    pub physical: PhysicalKeyCode,
+    pub text: Option<String>,
+    pub state: KeyPressState,
+    pub repeat: bool,
+    pub modifiers: ModifierState,
+}
+
 impl ModifierState {
     pub const fn empty() -> Self {
         Self {
@@ -131,6 +234,24 @@ mod tests {
             }
             .meta_only()
         );
+    }
+
+    #[test]
+    fn normalized_shift_tab_keeps_named_key_and_modifier() {
+        let event = NormalizedKeyEvent {
+            logical: LogicalKey::Named(NamedKey::Tab),
+            physical: PhysicalKeyCode::Tab,
+            text: None,
+            state: KeyPressState::Pressed,
+            repeat: false,
+            modifiers: ModifierState {
+                shift: true,
+                ..ModifierState::empty()
+            },
+        };
+        assert_eq!(event.logical, LogicalKey::Named(NamedKey::Tab));
+        assert!(event.modifiers.shift);
+        assert_eq!(NamedKey::Tab.as_str(), "Tab");
     }
 
     #[test]

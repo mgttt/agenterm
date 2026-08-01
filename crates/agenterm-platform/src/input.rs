@@ -1,6 +1,9 @@
 //! Selected keyboard classification facade.
 
-pub use crate::contract::input::{KeyClassification, ModifierState, Utf16TextDecoder};
+pub use crate::contract::input::{
+    KeyClassification, KeyPressState, LogicalKey, ModifierState, NamedKey, NormalizedKeyEvent,
+    PhysicalKeyCode, Utf16TextDecoder,
+};
 use crate::{contract::input::classify_key_press as classify_shared, selected};
 
 pub const fn modifiers(control: bool, shift: bool, alt: bool, meta: bool) -> ModifierState {
