@@ -4,6 +4,29 @@
 //! owns the cross-platform validation and conversion semantics consumed by the
 //! Linux and macOS GUI hot paths.
 
+use crate::{CapabilityStatus, selected};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Default)]
+pub struct DisplayBackendFacts {
+    pub x11: bool,
+    pub wayland: bool,
+    pub headless: bool,
+}
+
+pub fn display_backend_facts() -> DisplayBackendFacts {
+    selected::window::display_backend_facts()
+}
+
+pub fn capability_status() -> CapabilityStatus {
+    if display_backend_facts().headless {
+        CapabilityStatus::Unsupported {
+            reason: "headless-display".into(),
+        }
+    } else {
+        CapabilityStatus::Available
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ScaleFactor(f64);
 

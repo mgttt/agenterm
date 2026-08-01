@@ -194,13 +194,8 @@ pub use agenterm_platform::input::{KeyClassification, ModifierState};
 ///
 /// Linux populates X11/Wayland; other platforms leave those flags false and
 /// report headless through their own window capability diagnostics.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-#[allow(dead_code)]
-pub struct DisplayBackendFacts {
-    pub x11: bool,
-    pub wayland: bool,
-    pub headless: bool,
-}
+#[allow(unused_imports)]
+pub use agenterm_platform::window::DisplayBackendFacts;
 
 #[cfg(test)]
 pub use agenterm_platform::contract::input::classify_key_press;

@@ -79,6 +79,18 @@ pub(crate) mod activation;
 #[path = "adapters/windows/process_window.rs"]
 pub(crate) mod process_window;
 
+#[cfg(all(feature = "window", windows))]
+#[path = "adapters/windows/window.rs"]
+pub(crate) mod window;
+
+#[cfg(all(feature = "window", target_os = "linux"))]
+#[path = "adapters/linux/window.rs"]
+pub(crate) mod window;
+
+#[cfg(all(feature = "window", target_os = "macos"))]
+#[path = "adapters/macos/window.rs"]
+pub(crate) mod window;
+
 #[cfg(all(feature = "window", target_os = "linux"))]
 #[path = "adapters/linux/process_window.rs"]
 pub(crate) mod process_window;

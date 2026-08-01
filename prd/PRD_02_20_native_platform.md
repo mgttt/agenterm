@@ -65,6 +65,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   adapter.
 - [x] Toolbar hit-to-action mapping is one platform-neutral product table; the
   former three OS-named copies are deleted rather than exported as platform API.
+- [x] Display backend facts and headless-aware window status are public crate
+  API selected by Windows/Linux/macOS adapters.
 - [ ] Necessary native differences remain explicit capabilities or typed
   unsupported results; parity never means hiding a missing behavior or forcing
   all systems through a lowest-common-denominator widget implementation.

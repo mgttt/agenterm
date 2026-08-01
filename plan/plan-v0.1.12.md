@@ -161,6 +161,9 @@ warnings-denied Clippy 通过。
 Toolbar 去耦叶确认三平台所谓 native toolbar 仅是 AgenTerm action-ID 映射，因此合并为
 无 OS cfg 的产品 `NativeToolbarHit`，删除三套伪 native adapter；Windows/Unix hot path
 与顺序测试消费同一表。它不会进入外部 platform crate，也不再冒充 OS mechanism。
+Display discovery 随后进入 crate `window` facade：公开 X11/Wayland/headless facts 与
+runtime capability status，环境探测只在三平台 selected adapters；root 删除自己的 facts
+类型并消费公开 contract，为移除旧 native mod/scale/IME compatibility tree 建立前置。
 
 2026-08-01 首个建设期增量：Cockpit snapshot 新增明确的
 `tab_counts.{total,running,dead}`，native shell 同源显示 logical instance、
