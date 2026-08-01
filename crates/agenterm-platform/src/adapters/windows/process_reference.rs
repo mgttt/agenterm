@@ -6,12 +6,12 @@ use std::{
 
 use windows_sys::Win32::{
     Foundation::{
-        DuplicateHandle, DUPLICATE_CLOSE_SOURCE, DUPLICATE_SAME_ACCESS, WAIT_FAILED, WAIT_OBJECT_0,
+        DUPLICATE_CLOSE_SOURCE, DUPLICATE_SAME_ACCESS, DuplicateHandle, WAIT_FAILED, WAIT_OBJECT_0,
         WAIT_TIMEOUT,
     },
     System::Threading::{
-        GetCurrentProcess, GetProcessId, OpenProcess, WaitForSingleObject,
-        PROCESS_QUERY_LIMITED_INFORMATION,
+        GetCurrentProcess, GetProcessId, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+        WaitForSingleObject,
     },
 };
 
@@ -344,18 +344,22 @@ mod tests {
         let reference =
             crate::process_reference::ProcessReference::duplicate_from(child.as_handle())
                 .expect("retain containment child");
-        assert!(!reference
-            .is_member_of(job.as_handle())
-            .expect("query membership before assignment"));
+        assert!(
+            !reference
+                .is_member_of(job.as_handle())
+                .expect("query membership before assignment")
+        );
         assert_ne!(
             unsafe { AssignProcessToJobObject(job.as_raw_handle(), child.as_raw_handle()) },
             0,
             "AssignProcessToJobObject failed: {}",
             io::Error::last_os_error()
         );
-        assert!(reference
-            .is_member_of(job.as_handle())
-            .expect("query membership after assignment"));
+        assert!(
+            reference
+                .is_member_of(job.as_handle())
+                .expect("query membership after assignment")
+        );
         child.kill().expect("terminate containment child");
         let _ = child.wait().expect("reap containment child");
     }
