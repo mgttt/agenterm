@@ -518,6 +518,12 @@ integrated validation recorded below):
   import or accept winit types. The strict production boundary report is down
   from eight violations to seven, all owned by the remaining window hosts and
   final root target selector.
+- [x] Unix product window-state policy is native-library neutral. UI action
+  parsing, semantic tracking and snapshot projection depend on an abstract
+  window behavior surface plus the crate `WindowSemanticState`; winit window,
+  event and logical-size types are confined to the one remaining frontend host
+  integration point. The strict production boundary report is down to six
+  findings pending that host, Windows remote GUI and final root selection.
 - [x] Control Center state-directory protection, exclusive state-file creation,
   atomic replacement, existing-window focus, and direct native capture now
   call `services::control_center → selected → adapters/{windows,linux,macos}`.

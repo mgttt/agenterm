@@ -224,6 +224,11 @@ all-target compile 与 39 项 crate all-feature tests 通过；Linux root compil
 源码前被缺少 `x86_64-linux-gnu-gcc` 的 ring build script 阻断，native execution 仍须 Linux CI
 补证。严格生产边界门禁由 8 行降至 7 行，余项是 Unix window host、Windows remote GUI host
 和最终 root selector。
+Unix window-state product leaf 随后移除 `window_state.rs` 的 winit event/window/size
+类型：产品 `ui-action`、snapshot 与 semantic tracker 只依赖中立 `UnixAppWindowHandle`
+行为和 crate `WindowSemanticState`，原生适配暂集中到唯一剩余 frontend host 文件，等待
+pixel-window runner 接管。Windows-hosted all-target compile 通过，严格生产边界门禁由 7 行
+降至 6 行。
 
 2026-08-01 首个建设期增量：Cockpit snapshot 新增明确的
 `tab_counts.{total,running,dead}`，native shell 同源显示 logical instance、

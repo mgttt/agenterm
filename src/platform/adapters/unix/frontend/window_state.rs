@@ -1,7 +1,7 @@
 //! Window semantic state and `ui-action` control for the Unix frontend adapter.
 //!
-//! Actual winit window calls live behind [`UnixAppWindowHandle`]; `mod.rs` wires a
-//! [`WinitWindowHandle`] adapter and calls [`apply_ui_action`] from the `ui-action` IPC path.
+//! Native window calls live behind [`UnixAppWindowHandle`]; `mod.rs` wires the
+//! selected platform window and calls [`apply_ui_action`] from the `ui-action` IPC path.
 //!
 //! ## Window-close modal mapping (implemented in `mod.rs`, not this module)
 //!
@@ -14,8 +14,6 @@
 //! Snapshot fields emitted via [`window_snapshot_json`] match Win `wait-ui --window-state`:
 //! `window.minimized`, `window.state` (`minimized` | `maximized` | `restored`), plus
 //! `visible`, `detached`, `client_width`, `client_height`, and `title`.
-
-use winit::{dpi::LogicalSize, event::WindowEvent, window::Window};
 
 use crate::commands::option_value;
 use crate::platform::window::ClientSize;
@@ -49,12 +47,9 @@ impl WindowStateTracker {
         self.semantic = state;
     }
 
-    /// Reconcile tracked semantics with the live winit window when the platform exposes state.
-    pub fn sync_from_window(&mut self, window: &Window) {
-        self.semantic = WindowSemanticState::from_native_flags(
-            window.is_minimized().unwrap_or(false),
-            window.is_maximized(),
-        );
+    /// Reconcile tracked semantics with selected-adapter native state facts.
+    pub fn sync_from_native_flags(&mut self, minimized: bool, maximized: bool) {
+        self.semantic = WindowSemanticState::from_native_flags(minimized, maximized);
     }
 }
 
@@ -67,48 +62,6 @@ pub trait UnixAppWindowHandle {
     fn client_size(&self) -> (u32, u32);
     fn is_visible(&self) -> bool;
     fn window_title(&self) -> &str;
-}
-
-pub struct WinitWindowHandle<'a> {
-    pub window: &'a Window,
-    pub title: &'a str,
-}
-
-impl UnixAppWindowHandle for WinitWindowHandle<'_> {
-    fn minimize_window(&self) {
-        self.window.set_minimized(true);
-    }
-
-    fn maximize_window(&self) {
-        self.window.set_maximized(true);
-    }
-
-    fn restore_window(&self) {
-        self.window.set_minimized(false);
-        self.window.set_maximized(false);
-    }
-
-    fn resize_client(&self, width: u32, height: u32) {
-        let _ = self
-            .window
-            .request_inner_size(LogicalSize::new(width, height));
-    }
-
-    fn client_size(&self) -> (u32, u32) {
-        let size = self
-            .window
-            .inner_size()
-            .to_logical::<u32>(self.window.scale_factor());
-        (size.width.max(1), size.height.max(1))
-    }
-
-    fn is_visible(&self) -> bool {
-        self.window.is_visible().unwrap_or(true)
-    }
-
-    fn window_title(&self) -> &str {
-        self.title
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -160,14 +113,6 @@ pub fn apply_ui_action(
             }
         }
         _ => WindowUiActionResult::NotHandled,
-    }
-}
-
-/// Keep semantic state aligned when the user resizes or changes window state outside IPC.
-pub fn absorb_window_event(event: &WindowEvent, window: &Window, tracker: &mut WindowStateTracker) {
-    match event {
-        WindowEvent::Resized(_) | WindowEvent::Focused(_) => tracker.sync_from_window(window),
-        _ => {}
     }
 }
 

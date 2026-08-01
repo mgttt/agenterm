@@ -108,8 +108,8 @@ use render::{
     scrollbar_view_from_geometry, sidebar_row_at_y,
 };
 use window_state::{
-    WindowStateTracker, WindowUiActionResult, WinitWindowHandle, absorb_window_event,
-    apply_ui_action, window_snapshot_json,
+    UnixAppWindowHandle, WindowStateTracker, WindowUiActionResult, apply_ui_action,
+    window_snapshot_json,
 };
 
 use layout::{
@@ -124,6 +124,48 @@ struct ScrollDrag {
 #[derive(Clone, Copy, Debug)]
 struct SidebarScrollDrag {
     thumb_grab_offset: i32,
+}
+
+struct WinitWindowHandle<'a> {
+    window: &'a Window,
+    title: &'a str,
+}
+
+impl UnixAppWindowHandle for WinitWindowHandle<'_> {
+    fn minimize_window(&self) {
+        self.window.set_minimized(true);
+    }
+
+    fn maximize_window(&self) {
+        self.window.set_maximized(true);
+    }
+
+    fn restore_window(&self) {
+        self.window.set_minimized(false);
+        self.window.set_maximized(false);
+    }
+
+    fn resize_client(&self, width: u32, height: u32) {
+        let _ = self
+            .window
+            .request_inner_size(LogicalSize::new(width, height));
+    }
+
+    fn client_size(&self) -> (u32, u32) {
+        let size = self
+            .window
+            .inner_size()
+            .to_logical::<u32>(self.window.scale_factor());
+        (size.width.max(1), size.height.max(1))
+    }
+
+    fn is_visible(&self) -> bool {
+        self.window.is_visible().unwrap_or(true)
+    }
+
+    fn window_title(&self) -> &str {
+        self.title
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -2103,10 +2145,9 @@ impl UnixApp {
         match agenterm_platform::window::classify_geometry_event(event) {
             Ok(agenterm_platform::window::GeometryAction::Apply(_metrics)) => {
                 if let Some(window) = self.window.as_ref() {
-                    absorb_window_event(
-                        &WindowEvent::Resized(window.inner_size()),
-                        window,
-                        &mut self.window_state_tracker,
+                    self.window_state_tracker.sync_from_native_flags(
+                        window.is_minimized().unwrap_or(false),
+                        window.is_maximized(),
                     );
                 }
                 self.resize_to_window();
@@ -3093,7 +3134,10 @@ impl UnixApp {
         if let Some(position) = self.active_position() {
             self.tabs[position].resize(rows, cols);
         }
-        self.window_state_tracker.sync_from_window(window);
+        self.window_state_tracker.sync_from_native_flags(
+            window.is_minimized().unwrap_or(false),
+            window.is_maximized(),
+        );
         self.sync_grid_from_tab();
     }
 
@@ -4233,10 +4277,9 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                 self.window_focused = focused;
                 self.cursor_blink.reset(Instant::now());
                 if let Some(window) = self.window.as_ref() {
-                    absorb_window_event(
-                        &WindowEvent::Focused(focused),
-                        window,
-                        &mut self.window_state_tracker,
+                    self.window_state_tracker.sync_from_native_flags(
+                        window.is_minimized().unwrap_or(false),
+                        window.is_maximized(),
                     );
                     window.request_redraw();
                 }
