@@ -223,6 +223,7 @@
       "evidence": [
         "control-center.offline-contract",
         "control-center.live-cockpit",
+        "control-center.typed-navigation",
         "control-center.process-reuse",
         "control-center.context-refresh",
         "control-center.causal-projection-refresh",

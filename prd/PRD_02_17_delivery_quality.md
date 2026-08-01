@@ -95,6 +95,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] Linux x64 CI keeps Clippy, build, library tests, and entrypoint smoke on
   the same explicit Cargo target tree; unit tests no longer create a second
   host-default cold build after the client binaries have already compiled
+- [x] evidence declaration parity runs immediately after repository lint and
+  before rustfmt, Clippy, broad tests or artifact builds; the recursive
+  quality-timing contract is excluded from the broad Cargo invocation and run
+  serially as a second `unit-tests` gate spec, preserving first-failure timing
+  semantics without target-lock contention
 - [x] `lint.cmd` is the fail-fast developer entry point: its thin bootstrap
   invokes the named Rhai `lint` task for JSON, strict UTF-8/NUL/conflict-marker
   checks, incremental rustfmt/Clippy, and production Rhai validation against
@@ -317,9 +322,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   PE subsystems, budgets, offline probes, staging metadata, and README checks;
   locked-artifact cleanup enumerates only exact manifest stems
 - [x] locked `cargo metadata` validates every resolved registry checksum and a
-  reviewed license-expression allowlist, checks exact direct-dependency notice
-  coverage, and emits a deterministic SPDX inventory bound into qualification
-  and package hashes
+  reviewed license-expression allowlist, checks the union of external direct
+  dependencies across every workspace package against exact notice coverage,
+  and emits a deterministic SPDX inventory of the non-workspace resolved graph
+  bound into qualification and package hashes
 - [x] Rust 1.97.0 and GitHub Actions revisions are immutable inputs; target
   reporting exposes resolved path, development/release-scratch/external kind,
   cleanup authority, bytes, age, and profile totals before repo-local release

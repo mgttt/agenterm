@@ -3191,8 +3191,36 @@ fn supply_chain_task_is_deterministic_and_covers_the_resolved_lock_graph() {
     );
 
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let lock = fs::read_to_string(repo.join("Cargo.lock")).expect("read Cargo.lock");
-    let expected_packages = lock.matches("[[package]]").count() - 1;
+    let metadata_output = Command::new("cargo")
+        .current_dir(repo)
+        .args(["metadata", "--locked", "--format-version", "1"])
+        .output()
+        .expect("run cargo metadata for SPDX expectation");
+    assert!(metadata_output.status.success());
+    let metadata: serde_json::Value =
+        serde_json::from_slice(&metadata_output.stdout).expect("decode cargo metadata");
+    let workspace_members = metadata["workspace_members"]
+        .as_array()
+        .expect("workspace members")
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .collect::<std::collections::HashSet<_>>();
+    let resolved_ids = metadata["resolve"]["nodes"]
+        .as_array()
+        .expect("resolved nodes")
+        .iter()
+        .filter_map(|node| node["id"].as_str())
+        .collect::<std::collections::HashSet<_>>();
+    let expected_packages = metadata["packages"]
+        .as_array()
+        .expect("metadata packages")
+        .iter()
+        .filter(|package| {
+            package["id"]
+                .as_str()
+                .is_some_and(|id| resolved_ids.contains(id) && !workspace_members.contains(id))
+        })
+        .count();
     assert_eq!(
         packages.len(),
         expected_packages,

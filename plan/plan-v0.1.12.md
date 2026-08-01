@@ -418,6 +418,15 @@ Release 全部是本轮明确非目标。
   Cargo/rustc lock contention 与释放后重试。此前审计估算该层可回收约 4.30 GiB；仍约
   6.23 GiB 来自不同 root generation，必须等待精确 touched-unit manifest，不能用名字或
   mtime 猜测删除。
+- [x] `agenterm-platform` workspace 抽取后的集成门禁已真实收口：供应链任务不再假设单
+  workspace package，而是动态排除全部 workspace members、验证两个 crate 的外部直接依赖
+  并集并生成 275-package SPDX；补齐 macOS `objc2-app-kit`/`objc2-foundation` MIT notices。
+  qualification evidence declaration 校验前移到 repo lint 后、主编译前，Control Center 的
+  `typed-navigation` 已进入精确清单；递归 quality-timing 测试从 broad Cargo invocation
+  分离并在同一 unit gate 串行执行，消除 target-lock 竞态。最终 `check.cmd --skip-smoke`
+  204.3 秒通过，包含 462 library tests、all-features integration tests、七产物 dev build、
+  MCP、migration、SPDX、qualification/package/cleanup self-tests；按约定不写 qualification
+  receipt，也未触发 Candidate/Release。
 
 这些 dogfood 缺陷优先于新增 Cockpit 装饰和远期 Candidate 工作；修复必须保留
 结构化 snapshot 与 PNG/公开 input journey 证据，并避免多个 agent 并发编辑

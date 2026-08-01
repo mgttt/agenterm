@@ -182,7 +182,10 @@ for pkg in metadata.packages {
     }
 }
 require(dependencies.len > 0, "supply_chain_dependencies_empty");
-require(roots.len == 1, "supply_chain_workspace_package_count");
+require(
+    roots.len == workspace_ids.keys().len,
+    "supply_chain_workspace_package_count"
+);
 dependencies = sorted_packages(dependencies);
 
 let allowed = allowed_licenses();
@@ -214,8 +217,16 @@ for pkg in dependencies {
 }
 
 let direct_names = #{};
-for dependency in roots[0].dependencies {
-    direct_names[dependency.name] = true;
+let workspace_names = #{};
+for root in roots {
+    workspace_names[root.name] = true;
+}
+for root in roots {
+    for dependency in root.dependencies {
+        if !workspace_names.contains(dependency.name) {
+            direct_names[dependency.name] = true;
+        }
+    }
 }
 let notice_names = #{};
 for source_line in std::fs::read_to_string(

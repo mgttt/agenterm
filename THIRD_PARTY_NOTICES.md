@@ -10,6 +10,8 @@ Copyright and license terms remain with their respective authors.
 | `ab_glyph` | Apache-2.0 |
 | `anyhow` | MIT OR Apache-2.0 |
 | `libc` | MIT OR Apache-2.0 |
+| `objc2-app-kit` | MIT |
+| `objc2-foundation` | MIT |
 | `png` | MIT OR Apache-2.0 |
 | `rhai` | MIT OR Apache-2.0 |
 | `rmux-pty` | MIT OR Apache-2.0 |

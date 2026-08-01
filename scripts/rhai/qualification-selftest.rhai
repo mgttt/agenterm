@@ -160,8 +160,11 @@ let check_source = std::fs::read_to_string(
 let artifact_offset = check_source.index_of(
     `"artifact-build",`
 );
-let catalog_offset = check_source.index_of(
-    `id:"task-catalog"`
+let lint_offset = check_source.index_of(
+    "let lint_gate = run_gate("
+);
+let rustfmt_offset = check_source.index_of(
+    "let rustfmt_gate = run_gate("
 );
 let declaration_offset = check_source.index_of(
     "sequence = assert_declarations("
@@ -171,12 +174,14 @@ let smoke_offset = check_source.index_of(
 );
 require(
     artifact_offset >= 0
-        && catalog_offset >= 0
+        && lint_offset >= 0
+        && rustfmt_offset >= 0
         && declaration_offset >= 0
         && smoke_offset >= 0
-        && artifact_offset < declaration_offset
-        && catalog_offset < declaration_offset
-        && declaration_offset < smoke_offset,
+        && lint_offset < declaration_offset
+        && declaration_offset < rustfmt_offset
+        && rustfmt_offset < artifact_offset
+        && artifact_offset < smoke_offset,
     "qualification_selftest_declaration_order"
 );
 

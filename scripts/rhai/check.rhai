@@ -23,6 +23,17 @@ fn merged(left, right) {
     result
 }
 
+fn joined_text(values, separator) {
+    let result = "";
+    for index in 0..values.len {
+        if index > 0 {
+            result += separator;
+        }
+        result += values[index].to_string();
+    }
+    result
+}
+
 fn spec(program, arguments, timeout_ms, environment) {
     #{
         program: program,
@@ -142,7 +153,7 @@ fn execute(command_spec, repo, scratch, sequence) {
             stderr +
             if powershell_violation {
                 "\nrepository_automation_spawned_powershell:" +
-                    observed_powershell.join(",")
+                    joined_text(observed_powershell, ",")
             } else {
                 ""
             } +
@@ -199,7 +210,7 @@ fn run_gate(context, id, label, specs, repo, scratch, sequence) {
                 && command_spec.allow_powershell {
             print(
                 "OBSERVED explicit terminal compatibility payload: " +
-                    result.observed_powershell.join(",")
+                    joined_text(result.observed_powershell, ",")
             );
         }
         all_output.append(output_lines(result.stdout));
@@ -925,6 +936,21 @@ let lint_gate = run_gate(
 );
 context = lint_gate.context;
 sequence = lint_gate.sequence;
+try {
+    sequence = assert_declarations(
+        context,
+        bootstrap_worker,
+        repo,
+        scratch,
+        sequence
+    );
+} catch (error) {
+    context.timing = qualification::timing_fail_stage(
+        context.timing,
+        "evidence-declarations"
+    );
+    throw error;
+}
 let rustfmt_gate = run_gate(
     context,
     "rustfmt",
@@ -979,37 +1005,50 @@ let clippy_gate = run_gate(
 );
 context = clippy_gate.context;
 sequence = clippy_gate.sequence;
+let unit_specs = [spec(
+    "cargo",
+    [
+        "test", "--quiet", "--locked", "--all-features", "--",
+        "--skip", "preflight_task_is_fail_closed_and_writes_reports_for_real_git_fixtures",
+        "--skip", "preflight_benchmark_task_measures_clean_public_worker_runs",
+        "--skip", "prd_alignment_task_matches_public_catalogs_and_fails_closed",
+        "--skip", "supply_chain_task_is_deterministic_and_covers_the_resolved_lock_graph",
+        "--skip", "quality_timing_is_complete_on_success_and_failure_and_renders_markdown",
+        "--skip", "rhai_working_context_smoke_is_private_ephemeral_and_orphan_free",
+        "--skip", "rhai_server_smoke_preserves_headless_authority_and_cleanup",
+        "--skip", "rhai_wake_smoke_preserves_concurrent_ipc_pty_and_expired_mutation",
+        "--skip", "rhai_startup_smoke_preserves_first_window_and_async_terminal_contract",
+        "--skip", "rhai_cli_smoke_preserves_public_control_ui_bridge_and_pty_contract",
+        "--skip", "rhai_fleet_smoke_preserves_discovery_event_launch_and_mux_contract",
+        "--skip", "rhai_remote_ui_smoke_preserves_replaceable_client_and_reconnect_contract",
+        "--skip", "rhai_script_smoke_preserves_unrestricted_runtime_and_supervisor_contract",
+        "--skip", "rhai_theme_smoke_preserves_native_rendering_pty_and_restart_contract",
+        "--skip", "rhai_workbench_smoke_preserves_physical_editing_and_compact_tree_contract",
+        "--skip", "rhai_diagnostic_bundles_are_bounded_private_and_orphan_free",
+        "--skip", "rhai_harness_cleanup_owns_only_registered_children",
+        "--skip", "migration_audit_rejects_operational_references_to_deleted_scripts",
+        "--skip", "rhai_qualification_contract_fails_closed_and_cleans_owned_scratch",
+        "--skip", "rhai_qualified_package_accepts_only_the_exact_receipt_bytes"
+    ],
+    300000,
+    build_environment
+)];
+unit_specs.push(spec(
+    "cargo",
+    [
+        "test", "--quiet", "--locked", "--all-features",
+        "--test", "rhai_migration",
+        "quality_timing_is_complete_on_success_and_failure_and_renders_markdown",
+        "--", "--nocapture"
+    ],
+    120000,
+    build_environment
+));
 let unit_gate = run_gate(
     context,
     "unit-tests",
     "unit tests",
-    [spec(
-        "cargo",
-        [
-            "test", "--quiet", "--locked", "--all-features", "--",
-            "--skip", "preflight_task_is_fail_closed_and_writes_reports_for_real_git_fixtures",
-            "--skip", "preflight_benchmark_task_measures_clean_public_worker_runs",
-            "--skip", "prd_alignment_task_matches_public_catalogs_and_fails_closed",
-            "--skip", "supply_chain_task_is_deterministic_and_covers_the_resolved_lock_graph",
-            "--skip", "rhai_working_context_smoke_is_private_ephemeral_and_orphan_free",
-            "--skip", "rhai_server_smoke_preserves_headless_authority_and_cleanup",
-            "--skip", "rhai_wake_smoke_preserves_concurrent_ipc_pty_and_expired_mutation",
-            "--skip", "rhai_startup_smoke_preserves_first_window_and_async_terminal_contract",
-            "--skip", "rhai_cli_smoke_preserves_public_control_ui_bridge_and_pty_contract",
-            "--skip", "rhai_fleet_smoke_preserves_discovery_event_launch_and_mux_contract",
-            "--skip", "rhai_remote_ui_smoke_preserves_replaceable_client_and_reconnect_contract",
-            "--skip", "rhai_script_smoke_preserves_unrestricted_runtime_and_supervisor_contract",
-            "--skip", "rhai_theme_smoke_preserves_native_rendering_pty_and_restart_contract",
-            "--skip", "rhai_workbench_smoke_preserves_physical_editing_and_compact_tree_contract",
-            "--skip", "rhai_diagnostic_bundles_are_bounded_private_and_orphan_free",
-            "--skip", "rhai_harness_cleanup_owns_only_registered_children",
-            "--skip", "migration_audit_rejects_operational_references_to_deleted_scripts",
-            "--skip", "rhai_qualification_contract_fails_closed_and_cleans_owned_scratch",
-            "--skip", "rhai_qualified_package_accepts_only_the_exact_receipt_bytes"
-        ],
-        300000,
-        build_environment
-    )],
+    unit_specs,
     repo,
     scratch,
     sequence
@@ -1201,22 +1240,6 @@ for definition in ordinary_gates {
     );
     context = completed.context;
     sequence = completed.sequence;
-}
-
-try {
-    sequence = assert_declarations(
-        context,
-        worker,
-        repo,
-        scratch,
-        sequence
-    );
-} catch (error) {
-    context.timing = qualification::timing_fail_stage(
-        context.timing,
-        "evidence-declarations"
-    );
-    throw error;
 }
 
 if !skip_smoke {
