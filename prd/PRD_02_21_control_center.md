@@ -392,7 +392,10 @@ future promotion gates.
   directory owned by the effective UID before binding the Unix endpoint; the
   smoke verifies both owner and mode instead of weakening the production IPC
   `UnsafeEndpoint` boundary. This closes the hosted-runner umask failure once a
-  new matching-host CI receipt returns.
+  new matching-host CI receipt returns. The X11 focus witness is located by a
+  per-run unique visible title and then verified by exact window name; it no
+  longer assumes the Xaw `xmessage` client publishes `_NET_WM_PID`, while the
+  subsequent compositor activation and foreground assertions remain intact.
 - [~] macOS now owns the matching Quartz exact-PID process-window adapter. It
   rejects zero/multiple layer-0 on-screen candidates, bounds Retina client
   coordinates, and uses `CGEventPostToPid` only after the non-interactive TCC
@@ -404,7 +407,11 @@ future promotion gates.
   positive branch derives its pointer target from the current bounded
   three-row Cockpit viewport and sends it immediately after the keyboard
   server-state transition, proving the Control Center's last-input-wins queue
-  retains input while the previous local receipt is still completing.
+  retains input while the previous local receipt is still completing. The
+  journey now keeps both evidence PTYs alive and translates the renderer-owned
+  framebuffer row through the observed Quartz frame/client inset before
+  posting the event; it does not retry alternate coordinates or accept a dead
+  target as positive input evidence.
 
 ## Explicit v0.1.11 non-goals
 

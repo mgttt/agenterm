@@ -420,23 +420,38 @@ fn xdotool(context, arguments, expected_failure) {
     output
 }
 
-fn wait_x11_window(context, pid, code) {
+fn wait_x11_window(context, title, child, code) {
+    let last = "";
     for attempt in 0..120 {
         let output = xdotool(
-            context, ["search", "--onlyvisible", "--pid", "" + pid], true
+            context, ["search", "--onlyvisible", "--name", title], true
         );
+        last = output.stdout_text() + output.stderr_text();
         if output.success {
             let lines = output.stdout_text().split("\n");
             for line in lines {
                 line.trim();
                 if line != "" {
-                    return line;
+                    let name = xdotool(
+                        context, ["getwindowname", line], true
+                    );
+                    let name_text = name.stdout_text();
+                    name_text.trim();
+                    if name.success && name_text == title {
+                        return line;
+                    }
                 }
             }
         }
+        if child.state == "exited" {
+            let exited = child.wait_with_output(
+                std::time::Duration::from_secs(2)
+            );
+            throw code + "_early_exit:" + exited.stderr_text();
+        }
         rhai::task::sleep(std::time::Duration::from_millis(25));
     }
-    throw code;
+    throw code + ":" + last;
 }
 
 fn active_x11_window(context) {
@@ -463,8 +478,7 @@ fn wait_x11_active(context, identity, code) {
     throw code;
 }
 
-fn start_x11_focus_witness(context) {
-    let title = "AgenTerm focus witness " + context.run_id;
+fn start_x11_focus_witness(title) {
     let command = std::process::command("xmessage");
     command.args([
         "-name", "agenterm-focus-witness",
@@ -726,11 +740,13 @@ try {
     let witness_window = "";
     if backend == "x11" {
         print("STEP establish an independently focused X11 witness");
-        witness = start_x11_focus_witness(context);
+        let witness_title = "AgenTerm focus witness " + context.run_id;
+        witness = start_x11_focus_witness(witness_title);
         owned_children.push(witness);
         witness_window = wait_x11_window(
             context,
-            witness.id,
+            witness_title,
+            witness,
             "control_center_linux_x11_witness_window_timeout"
         );
         activate_x11_window(context, witness_window);

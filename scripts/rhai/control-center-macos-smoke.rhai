@@ -325,7 +325,7 @@ fn prove_pty(context, cli, registry, runtime, label) {
             "--instance", "dev",
             "new-window", "-d", "-P", "-F", "#{window_id}",
             "-n", "cc-" + label + "-" + context.run_id,
-            "--", "/bin/echo", marker
+            "--", "/bin/sh"
         ],
         false
     );
@@ -334,6 +334,25 @@ fn prove_pty(context, cli, registry, runtime, label) {
     require(
         tab_id.starts_with("@"),
         "control_center_macos_stable_tab_id"
+    );
+    invoke(
+        context,
+        cli,
+        registry,
+        runtime,
+        [
+            "--instance", "dev", "send-keys", "-t", tab_id,
+            "-l", "echo " + marker
+        ],
+        false
+    );
+    invoke(
+        context,
+        cli,
+        registry,
+        runtime,
+        ["--instance", "dev", "send-keys", "-t", tab_id, "Enter"],
+        false
     );
     invoke(
         context,
@@ -580,20 +599,26 @@ try {
     print("STEP native input either navigates in-place or reports TCC denial");
     let baseline_index = ();
     let native_input_index = ();
+    let baseline_live = false;
+    let native_input_live = false;
     for index in 0..selected.connected_server.tabs.len {
         let tab = selected.connected_server.tabs[index];
         if tab.id == baseline_tab {
             baseline_index = index;
+            baseline_live = !tab.dead;
         }
         if tab.id == native_input_tab {
             native_input_index = index;
+            native_input_live = !tab.dead;
         }
     }
     require(
         baseline_index != ()
             && native_input_index != ()
+            && baseline_live
+            && native_input_live
             && baseline_tab != native_input_tab,
-        "control_center_macos_native_input_targets_not_visible"
+        "control_center_macos_native_input_targets_not_live"
     );
     // Cockpit keeps only three tab rows visible and scrolls that window around
     // the selected keyboard target. Derive a different, currently rendered
@@ -612,34 +637,92 @@ try {
     if visible_start > maximum_start {
         visible_start = maximum_start;
     }
-    let pointer_index = visible_start;
-    if pointer_index == native_input_index {
-        pointer_index += 1;
+    let visible_end = if visible_start + 3
+            < selected.connected_server.tabs.len {
+        visible_start + 3
+    } else {
+        selected.connected_server.tabs.len
+    };
+    let pointer_index = ();
+    for index in visible_start..visible_end {
+        let tab = selected.connected_server.tabs[index];
+        if tab.id == baseline_tab && !tab.dead {
+            pointer_index = index;
+        }
+    }
+    if pointer_index == () {
+        for index in visible_start..visible_end {
+            let tab = selected.connected_server.tabs[index];
+            if pointer_index == ()
+                    && index != native_input_index
+                    && !tab.dead {
+                pointer_index = index;
+            }
+        }
     }
     require(
-        pointer_index < selected.connected_server.tabs.len
+        pointer_index != ()
+            && pointer_index < selected.connected_server.tabs.len
             && pointer_index >= visible_start
-            && pointer_index < visible_start + 3,
-        "control_center_macos_native_pointer_target_not_visible"
+            && pointer_index < visible_end
+            && pointer_index != native_input_index,
+        "control_center_macos_native_pointer_target_not_live_visible"
     );
     let pointer_target = selected.connected_server.tabs[pointer_index].id;
     let pointer_row = pointer_index - visible_start;
-    let client = cc.window_client_rect();
-    let body_scale = if client.width >= 640 { 2 } else { 1 };
+    let native_bounds = cc.window_client_rect();
+    // The Quartz process-window API discovers kCGWindowBounds, which includes
+    // the macOS titlebar, while the renderer-owned PNG is the exact winit
+    // client framebuffer. Derive the client origin from those two observable
+    // rectangles before translating a framebuffer hit into Quartz coordinates.
+    require(
+        native_bounds.left == 0
+            && native_bounds.top == 0
+            && native_bounds.width >= capture.width
+            && native_bounds.height >= capture.height
+            && (native_bounds.width - capture.width) % 2 == 0,
+        "control_center_macos_native_pointer_geometry_unusable:" +
+            rhai::json::stringify(#{
+                native_width: native_bounds.width,
+                native_height: native_bounds.height,
+                framebuffer_width: capture.width,
+                framebuffer_height: capture.height,
+                scale_factor: capture.rendered_snapshot.scale_factor
+            })
+    );
+    let client_left = (native_bounds.width - capture.width) / 2;
+    let client_top = native_bounds.height - capture.height;
+    let body_scale = if capture.width >= 640 { 2 } else { 1 };
     let line_height = 7 * body_scale + 12;
     // Product lines are 0..10, the Tabs help line is 11, and the following
     // renderer rows are the three bounded Cockpit tab targets.
-    let pointer_x = 120;
-    let pointer_y = 76 + (11 + pointer_row) * line_height
+    let content_pointer_x = 120;
+    let content_pointer_y = 76 + (11 + pointer_row) * line_height
         + line_height / 2;
+    let pointer_x = client_left + content_pointer_x;
+    let pointer_y = client_top + content_pointer_y;
     require(
-        client.left == 0
-            && client.top == 0
-            && pointer_x >= client.left
-            && pointer_x < client.right
-            && pointer_y >= client.top
-            && pointer_y < client.bottom,
-        "control_center_macos_native_pointer_not_bounded"
+        content_pointer_x >= 0
+            && content_pointer_x < capture.width
+            && content_pointer_y >= 0
+            && content_pointer_y < capture.height
+            && pointer_x >= native_bounds.left
+            && pointer_x < native_bounds.right
+            && pointer_y >= native_bounds.top
+            && pointer_y < native_bounds.bottom,
+        "control_center_macos_native_pointer_not_bounded:" +
+            rhai::json::stringify(#{
+                target: pointer_target,
+                pointer_row: pointer_row,
+                content_x: content_pointer_x,
+                content_y: content_pointer_y,
+                client_left: client_left,
+                client_top: client_top,
+                quartz_x: pointer_x,
+                quartz_y: pointer_y,
+                native_right: native_bounds.right,
+                native_bottom: native_bounds.bottom
+            })
     );
     let input_baseline = json_command(
         context,

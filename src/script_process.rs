@@ -1303,10 +1303,26 @@ mod tests {
     }
 
     #[cfg(any(windows, unix))]
-    fn wait_for_descendants(root_id: u32) -> Vec<u32> {
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    struct ObservedProcess {
+        id: u32,
+        start_identity: String,
+    }
+
+    #[cfg(any(windows, unix))]
+    fn wait_for_descendants(root_id: u32) -> Vec<ObservedProcess> {
         let deadline = Instant::now() + Duration::from_secs(3);
         loop {
-            let descendants = descendant_ids(root_id);
+            let descendants = descendant_ids(root_id)
+                .into_iter()
+                .map(|id| {
+                    let start_identity =
+                        child_process_tree::start_identity(id).unwrap_or_else(|error| {
+                            panic!("descendant {id} start identity unavailable: {error}")
+                        });
+                    ObservedProcess { id, start_identity }
+                })
+                .collect::<Vec<_>>();
             if !descendants.is_empty() {
                 return descendants;
             }
@@ -1319,20 +1335,44 @@ mod tests {
     }
 
     #[cfg(any(windows, unix))]
-    fn wait_for_processes_to_disappear(process_ids: &[u32]) {
+    fn observed_process_is_live(
+        process: &ObservedProcess,
+        observation: child_process_tree::ProcessObservation,
+    ) -> Result<bool, String> {
+        match observation {
+            child_process_tree::ProcessObservation::Live {
+                start_identity: Some(current),
+            } => Ok(current == process.start_identity),
+            child_process_tree::ProcessObservation::Dead { .. } => Ok(false),
+            child_process_tree::ProcessObservation::Live {
+                start_identity: None,
+            } => Err("live process has no start identity".to_owned()),
+            child_process_tree::ProcessObservation::Unknown { reason } => Err(reason),
+            _ => Err("unrecognized process observation".to_owned()),
+        }
+    }
+
+    #[cfg(any(windows, unix))]
+    fn wait_for_processes_to_disappear(processes: &[ObservedProcess]) {
         let deadline = Instant::now() + Duration::from_secs(3);
         loop {
-            let live = platform_process_list()
-                .expect("process inventory")
-                .into_iter()
-                .map(|process| process.id)
-                .collect::<std::collections::BTreeSet<_>>();
-            if process_ids.iter().all(|id| !live.contains(id)) {
+            let observations = processes
+                .iter()
+                .map(|process| {
+                    let observation = child_process_tree::observe(process.id);
+                    let live = observed_process_is_live(process, observation.clone());
+                    (process.clone(), observation, live)
+                })
+                .collect::<Vec<_>>();
+            if observations
+                .iter()
+                .all(|(_, _, live)| matches!(live, Ok(false)))
+            {
                 return;
             }
             assert!(
                 Instant::now() < deadline,
-                "owned descendants survived cleanup: {process_ids:?}"
+                "owned descendants survived cleanup or could not be observed: {observations:?}"
             );
             thread::sleep(Duration::from_millis(10));
         }
@@ -1705,6 +1745,51 @@ mod tests {
         assert!(
             unrelated.0.try_wait().unwrap().is_none(),
             "owned tree cleanup killed an unrelated process"
+        );
+    }
+
+    #[test]
+    #[cfg(any(windows, unix))]
+    fn cleanup_observation_tracks_process_identity_instead_of_pid_presence() {
+        let process = ObservedProcess {
+            id: 42,
+            start_identity: "original".to_owned(),
+        };
+        assert!(
+            observed_process_is_live(
+                &process,
+                child_process_tree::ProcessObservation::Live {
+                    start_identity: Some("original".to_owned()),
+                },
+            )
+            .unwrap()
+        );
+        assert!(
+            !observed_process_is_live(
+                &process,
+                child_process_tree::ProcessObservation::Live {
+                    start_identity: Some("reused-pid".to_owned()),
+                },
+            )
+            .unwrap()
+        );
+        assert!(
+            !observed_process_is_live(
+                &process,
+                child_process_tree::ProcessObservation::Dead {
+                    reason: "exited".to_owned(),
+                },
+            )
+            .unwrap()
+        );
+        assert!(
+            observed_process_is_live(
+                &process,
+                child_process_tree::ProcessObservation::Unknown {
+                    reason: "query failed".to_owned(),
+                },
+            )
+            .is_err()
         );
     }
 

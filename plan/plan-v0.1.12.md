@@ -787,6 +787,12 @@ Cockpit
   不放宽 `UnsafeEndpoint`；macOS 正向输入按三行 viewport 计算 pointer 行，并把紧随
   keyboard transition 的选择交给已交付的 last-input-wins queue。新六格回执返回前
   仍保持未完成；
+- 后续 matching-host run 又关闭三处测试观测错误：Windows process-tree cleanup
+  以 PID + start identity 判断同一 descendant 是否仍存活，不再把已退出但仍可枚举的
+  对象或 PID reuse 当泄漏；Linux X11 witness 用唯一 title + exact name 验证，不假设
+  Xaw 发布 `_NET_WM_PID`；macOS pointer 将 framebuffer 行经真实 Quartz frame/client
+  inset 转换，且只选择 viewport 内存活目标。三者均保持原 3 秒/状态等待、typed failure
+  和正向行为门槛，不以延长 sleep 或放宽断言求绿；
 - Windows owning journey 已覆盖 incompatible sibling、进程内 renderer capture
   typed failure/recovery、CC process crash/replacement、Human GUI detach 时的
   same-CC/same-server/same-epoch retention、new epoch recovery 和 stale owner
