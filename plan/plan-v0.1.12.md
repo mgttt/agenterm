@@ -207,6 +207,9 @@ Dependency isolation 叶把 `windows-sys` 的全局 Win32 feature union 拆到�
 feature：process/filesystem/locking/ipc/window/clipboard/screenshot/font 只转发自己的
 模块。默认、8 个单 feature compile checks 均通过；Windows 上 `cargo tree` 证明最小
 process 与 filesystem 均只有 `windows-sys → windows-link`，不再隐式带 UI/GDI/clipboard。
+Frontend host 前置开始收敛：`WindowSemanticState` 及 minimized-over-maximized precedence
+从 root 产品 helper 迁入 crate `window` public contract；root 的 320×240 CLI resize policy
+继续留在产品层，避免把 AgenTerm 参数规则伪装成通用平台限制。
 
 2026-08-01 首个建设期增量：Cockpit snapshot 新增明确的
 `tab_counts.{total,running,dead}`，native shell 同源显示 logical instance、

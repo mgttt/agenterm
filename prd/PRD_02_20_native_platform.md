@@ -499,6 +499,9 @@ integrated validation recorded below):
   union. Default and each individual capability compile independently; on
   Windows the minimal process/filesystem dependency trees contain only
   `windows-sys -> windows-link` and do not activate UI/GDI/clipboard modules.
+- [x] Window minimized/maximized/restored semantic state and native-flag
+  precedence are public platform-neutral window contracts. AgenTerm's 320x240
+  CLI resize minimum and error wording remain product policy in the main crate.
 - [x] Control Center state-directory protection, exclusive state-file creation,
   atomic replacement, existing-window focus, and direct native capture now
   call `services::control_center → selected → adapters/{windows,linux,macos}`.

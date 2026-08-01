@@ -161,6 +161,39 @@ pub fn classify_geometry_event(event: GeometryEvent) -> Result<GeometryAction, S
     Ok(GeometryAction::Apply(metrics))
 }
 
+/// Platform-neutral semantic state of a native top-level window.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum WindowSemanticState {
+    Minimized,
+    Maximized,
+    Restored,
+}
+
+impl WindowSemanticState {
+    pub const fn from_native_flags(minimized: bool, maximized: bool) -> Self {
+        if minimized {
+            Self::Minimized
+        } else if maximized {
+            Self::Maximized
+        } else {
+            Self::Restored
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Minimized => "minimized",
+            Self::Maximized => "maximized",
+            Self::Restored => "restored",
+        }
+    }
+
+    pub const fn is_minimized(self) -> bool {
+        matches!(self, Self::Minimized)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum NativeTextWindowFocus {
@@ -289,6 +322,22 @@ mod tests {
                 scale_factor: 1.0,
             }),
             Ok(GeometryAction::Ignore)
+        );
+    }
+
+    #[test]
+    fn native_window_flags_have_one_stable_precedence() {
+        assert_eq!(
+            WindowSemanticState::from_native_flags(true, true),
+            WindowSemanticState::Minimized
+        );
+        assert_eq!(
+            WindowSemanticState::from_native_flags(false, true),
+            WindowSemanticState::Maximized
+        );
+        assert_eq!(
+            WindowSemanticState::from_native_flags(false, false),
+            WindowSemanticState::Restored
         );
     }
 

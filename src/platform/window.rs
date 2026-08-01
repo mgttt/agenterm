@@ -4,36 +4,7 @@ pub(crate) const MIN_CLIENT_WIDTH: u32 = 320;
 pub(crate) const MIN_CLIENT_HEIGHT: u32 = 240;
 pub(crate) const MAX_CLIENT_EXTENT: u32 = i32::MAX as u32;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum WindowSemanticState {
-    Minimized,
-    Maximized,
-    Restored,
-}
-
-impl WindowSemanticState {
-    pub(crate) const fn from_native_flags(minimized: bool, maximized: bool) -> Self {
-        if minimized {
-            Self::Minimized
-        } else if maximized {
-            Self::Maximized
-        } else {
-            Self::Restored
-        }
-    }
-
-    pub(crate) const fn as_str(self) -> &'static str {
-        match self {
-            Self::Minimized => "minimized",
-            Self::Maximized => "maximized",
-            Self::Restored => "restored",
-        }
-    }
-
-    pub(crate) const fn is_minimized(self) -> bool {
-        matches!(self, Self::Minimized)
-    }
-}
+pub(crate) use agenterm_platform::window::WindowSemanticState;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ClientSize {
@@ -97,22 +68,6 @@ impl ClientSizeError {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn native_window_flags_have_one_stable_precedence() {
-        assert_eq!(
-            WindowSemanticState::from_native_flags(true, true),
-            WindowSemanticState::Minimized
-        );
-        assert_eq!(
-            WindowSemanticState::from_native_flags(false, true),
-            WindowSemanticState::Maximized
-        );
-        assert_eq!(
-            WindowSemanticState::from_native_flags(false, false),
-            WindowSemanticState::Restored
-        );
-    }
 
     #[test]
     fn client_size_validation_is_shared_and_bounded() {
