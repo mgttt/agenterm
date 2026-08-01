@@ -40,9 +40,12 @@ pub(crate) fn autostart_server(
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    agenterm_platform::process::configure_detached_command(&mut command)
-        .map_err(std::io::Error::other)?;
-    command.spawn()?;
+    let spawn_mode = agenterm_platform::process::spawn_detached_command(&mut command)?;
+    if spawn_mode == agenterm_platform::process::DetachedSpawnMode::CallerJobFallback {
+        let _ = agenterm_platform::process::write_parent_console_stderr(
+            "AgenTerm server started inside the caller's process job because Windows denied job breakaway; it may stop when that owning job closes.",
+        );
+    }
     Ok(true)
 }
 

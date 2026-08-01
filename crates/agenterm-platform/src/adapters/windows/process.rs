@@ -79,6 +79,17 @@ pub(crate) fn configure_detached_command(command: &mut Command) -> Result<(), St
     Ok(())
 }
 
+pub(crate) fn is_breakaway_denied(error: &std::io::Error) -> bool {
+    error.raw_os_error() == Some(windows_sys::Win32::Foundation::ERROR_ACCESS_DENIED as i32)
+}
+
+pub(crate) fn configure_caller_job_fallback(command: &mut Command) -> Result<(), String> {
+    use std::os::windows::process::CommandExt as _;
+    use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
+    command.creation_flags(CREATE_NO_WINDOW);
+    Ok(())
+}
+
 pub(crate) fn observe(pid: u32) -> ProcessObservation {
     use windows_sys::Win32::{
         Foundation::{
@@ -278,5 +289,16 @@ impl ProcessTreeGuard {
 impl Drop for ProcessTreeGuard {
     fn drop(&mut self) {
         unsafe { windows_sys::Win32::Foundation::CloseHandle(self.handle) };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_breakaway_denied;
+
+    #[test]
+    fn only_access_denied_triggers_caller_job_fallback() {
+        assert!(is_breakaway_denied(&std::io::Error::from_raw_os_error(5)));
+        assert!(!is_breakaway_denied(&std::io::Error::from_raw_os_error(2)));
     }
 }

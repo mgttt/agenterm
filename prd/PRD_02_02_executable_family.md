@@ -37,7 +37,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
         where the default `Keep Server Running` lost the old session is covered
         by the full replaceable-UI journey: the detached lease, server PID/epoch,
         stable tab, PTY marker and draft survive GUI exit and a replacement GUI
-        reconnects before explicit Stop Server cleanup.
+        reconnects before explicit Stop Server cleanup. A restrictive parent Job
+        can explicitly deny `CREATE_BREAKAWAY_FROM_JOB`; in that case startup
+        retries inside the caller Job, returns `CallerJobFallback`, and writes a
+        parent-console diagnostic instead of failing with error 5 or silently
+        claiming independent lifetime. The server may then end with that owning
+        Job, which remains an observable host limitation rather than a false
+        Keep-Running guarantee.
     - [x] the live lease owner publishes a bounded, versioned and redacted
       `replaceable_ui_client` projection back to the stable server; public
       `ui-snapshot` therefore observes client-owned window/layout/focus/modal/

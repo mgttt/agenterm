@@ -290,7 +290,13 @@ renderer-owned 760×480 PNG 为 58,125 bytes。headless server 下 missing targe
   证据。
 - [x] 默认 `Keep Server Running` 不再因调用者 Job cleanup 杀死独立 server/PTYS；
   GUI 与 CLI 统一走 platform process facade，完整 replaceable-UI 黑盒已证明退出、
-  detached lease、同 server/session 接回与最终显式 Stop Server。
+  detached lease、同 server/session 接回与最终显式 Stop Server。live dogfood 又发现
+  从不允许 breakaway 的上层 Windows Job 内启动时，`CREATE_BREAKAWAY_FROM_JOB` 会直接以
+  error 5 拒绝创建 server。platform process facade 现在只对该精确错误重试 caller-job
+  fallback，并以 `DetachedSpawnMode` 和 parent-console diagnostic 明示降级；其他 spawn
+  failure 不会被吞掉。40 项 crate tests、两级 warnings-denied Clippy、七产物 build 和
+  isolated native GUI/server/PTY 启停 probe 通过；fallback server 可能随上层 owning Job
+  结束，不能被文档冒充为完全 independent。
 - [ ] terminal 鼠标选区无法可靠建立，导致已实现 copy/paste 无法使用；复查
   selection ownership、drag threshold/capture、raw-mouse arbitration 和复制黑盒。
   白箱审计定位当前选区绑定整个 `screen.generation`：持续 output delta 在 100ms

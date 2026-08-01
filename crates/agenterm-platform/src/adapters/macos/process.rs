@@ -25,6 +25,14 @@ pub(crate) fn configure_detached_command(_command: &mut Command) -> Result<(), S
     Err("detached process configuration is not implemented on macOS".to_owned())
 }
 
+pub(crate) fn is_breakaway_denied(_error: &std::io::Error) -> bool {
+    false
+}
+
+pub(crate) fn configure_caller_job_fallback(_command: &mut Command) -> Result<(), String> {
+    Err("caller-job process fallback is not implemented on macOS".to_owned())
+}
+
 pub(crate) fn observe(pid: u32) -> ProcessObservation {
     let Ok(pid) = i32::try_from(pid) else {
         return ProcessObservation::Dead {
