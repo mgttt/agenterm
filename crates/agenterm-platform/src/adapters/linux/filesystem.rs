@@ -8,6 +8,12 @@ use std::{
 use crate::filesystem::{FilesystemError, HostDirectories};
 
 #[cfg(feature = "filesystem")]
+#[path = "../unix/file_identity.rs"]
+mod file_identity;
+#[cfg(feature = "filesystem")]
+pub use file_identity::{file_identity, path_identity};
+
+#[cfg(feature = "filesystem")]
 pub fn replace_file(
     source: &std::path::Path,
     destination: &std::path::Path,

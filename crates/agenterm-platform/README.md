@@ -111,6 +111,10 @@ fails rather than overwriting an existing receipt.
 `filesystem::write_private_atomic` publishes bytes through an exclusive private
 temporary in such a protected directory, atomically replaces the destination,
 and synchronizes the parent without embedding a product-specific file format.
+`filesystem::file_identity` reports a typed filesystem/object identity from an
+already-open file or directory; it remains stable across rename and hard-link
+aliases. `path_identity` is a convenience that follows the final symbolic link,
+not a substitute for the handle-based form when path replacement races matter.
 
 Windows embedders can synchronously capture an owned native window without
 exposing `HWND` in their public API:
