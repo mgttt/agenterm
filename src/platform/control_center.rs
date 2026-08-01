@@ -35,13 +35,6 @@ pub(crate) fn replace_file(source: &Path, destination: &Path) -> io::Result<()> 
     crate::platform::services::control_center::replace_file(source, destination)
 }
 
-pub(crate) fn focus_existing_window(
-    raw_handle: i64,
-    no_activate: bool,
-) -> Result<(), agenterm_platform::activation::ActivationError> {
-    crate::platform::services::control_center::focus_existing_window(raw_handle, no_activate)
-}
-
 pub(crate) fn capture_native_window_png(
     raw_handle: i64,
     output: &Path,
@@ -76,12 +69,7 @@ mod tests {
     }
 
     #[test]
-    fn missing_native_handles_are_typed_failures() {
-        assert!(matches!(
-            focus_existing_window(0, false),
-            Err(agenterm_platform::activation::ActivationError::Failed { code, .. })
-                if code == "control_center_window_unavailable"
-        ));
+    fn missing_native_capture_handles_are_typed_failures() {
         assert!(matches!(
             capture_native_window_png(0, Path::new("unused.png")),
             Err(

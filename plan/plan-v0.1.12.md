@@ -874,6 +874,15 @@ Cockpit
   typed Unsupported，不再静默 `Ok`；journey 保留 TCC-authorized keyboard positive，
   并证明 pointer Unsupported 不改变 CC/server/epoch/foreground，不冒充 physical pointer
   positive。Linux 正向结果与 macOS 真人 pointer acceptance 仍开放；
+- exact-SHA `ed30e82` run `30719411235` 已越过 macOS keyboard positive 与 pointer
+  typed-Unsupported 合同，证明该输入分支按预期收口；随后暴露的失败属于下一阶段
+  Control Center reuse：调用端已写入 owner-consumed focus mailbox，却又把 macOS 不支持的
+  外部 native-handle activation 当成必需成功。现以 live window owner 的 200ms bounded
+  event-loop mailbox 作为三平台唯一 focus authority，写入失败显式返回
+  `control_center_focus_request_failed`，不再让冗余外部句柄调用否定已交付的 focus 请求。
+  同一 run 的 Windows 静态门禁还发现新增 process-security facade 泄漏 Windows handle；
+  native handle trait implementation 与 SID test 已重新下沉 Windows adapter，facade 保持
+  平台中立；新的 matching-host run 返回前，这两项仍不冒充最终回执；
 - Control Center evidence ownership 不再游离于 alignment：Windows required
   qualification gate 与 Linux/macOS host-native gate 分别登记，`prd-alignment`
   对三者的 evidence ID、脚本发射点和 partial PRD 状态做同一 exact parity。

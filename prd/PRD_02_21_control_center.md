@@ -200,6 +200,15 @@ Control Center is the product name; the executable family uses
   pointer failure changes no CC/server/epoch/foreground state; it does not
   claim physical-user pointer evidence. Final Linux positive and macOS physical
   pointer acceptance remain open.
+  Exact-SHA run `30719411235` then passed that macOS input contract and exposed
+  a later, independent reuse failure: the caller published the existing
+  Control Center's focus-mailbox request successfully, then treated the
+  unsupported cross-process native-handle activation helper as mandatory.
+  Existing-window focus is now owned by the live window process on every
+  platform; its bounded event-loop poll consumes the mailbox and invokes focus
+  with the live winit window. Mailbox publication failures are returned as
+  `control_center_focus_request_failed` rather than silently ignored. A new
+  matching-host receipt is still required.
   Windows qualification evidence and
   Linux/macOS matching-host evidence are registered in separate gate manifests
   but participate in one exact PRD alignment parity check; cross-target compile

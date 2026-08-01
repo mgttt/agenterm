@@ -2306,7 +2306,7 @@ fn screenshot_result_path(path: &Path) -> PathBuf {
     path.with_extension("screenshot-result.json")
 }
 
-fn request_projection_refresh(registry_path: &Path, no_activate: bool) {
+fn request_projection_refresh(registry_path: &Path, no_activate: bool) -> Result<()> {
     let nonce = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_nanos())
@@ -2316,10 +2316,11 @@ fn request_projection_refresh(registry_path: &Path, no_activate: bool) {
     } else {
         "activate"
     };
-    let _ = write_private_atomic(
+    write_private_atomic(
         &focus_request_path(registry_path),
         format!("{mode}:{}:{nonce}\n", std::process::id()).as_bytes(),
-    );
+    )
+    .context("control_center_focus_request_failed")
 }
 
 fn run_shell(no_activate: bool, context: Option<ServerContext>) -> Result<()> {
@@ -2342,15 +2343,10 @@ fn run_shell(no_activate: bool, context: Option<ServerContext>) -> Result<()> {
 }
 
 fn focus_existing(_record: &RegistryRecord, registry_path: &Path, no_activate: bool) -> Result<()> {
-    let native_window = read_regular_file(&native_window_path(registry_path))
-        .ok()
-        .and_then(|value| String::from_utf8(value).ok())
-        .and_then(|value| value.parse::<i64>().ok())
-        .unwrap_or_default();
-    request_projection_refresh(registry_path, no_activate);
-    crate::platform::control_center::focus_existing_window(native_window, no_activate)
-        .map_err(|error| anyhow::anyhow!("control_center_focus_failed: {error}"))?;
-    Ok(())
+    // The process that owns the window is the only reliable cross-platform
+    // activation authority. Its event loop consumes this request within the
+    // bounded host poll interval and focuses the live winit window.
+    request_projection_refresh(registry_path, no_activate)
 }
 
 const COCKPIT_VISIBLE_TAB_ROWS: usize = 3;
@@ -3259,6 +3255,32 @@ mod tests {
             CockpitInputAction::Activate("@2".to_owned())
         );
         assert_eq!(selected.as_deref(), Some("@2"));
+    }
+
+    #[test]
+    fn projection_focus_is_delivered_through_the_window_owners_mailbox() {
+        let root = env::temp_dir().join(format!(
+            "agenterm-control-center-focus-mailbox-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("focus mailbox clock")
+                .as_nanos()
+        ));
+        let registry = root.join("control-center.json");
+        fs::create_dir_all(&root).expect("focus mailbox parent");
+
+        request_projection_refresh(&registry, false).expect("activation request");
+        let activate = fs::read_to_string(focus_request_path(&registry))
+            .expect("published activation request");
+        assert!(activate.starts_with("activate:"));
+
+        request_projection_refresh(&registry, true).expect("no-activate request");
+        let no_activate = fs::read_to_string(focus_request_path(&registry))
+            .expect("published no-activate request");
+        assert!(no_activate.starts_with("no-activate:"));
+
+        fs::remove_dir_all(root).expect("focus mailbox cleanup");
     }
 
     #[test]

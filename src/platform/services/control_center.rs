@@ -4,7 +4,6 @@ use std::{borrow::Cow, fs::OpenOptions, io, path::Path};
 
 use agenterm_platform::{
     PlatformKind,
-    activation::{ActivationError, ActivationRequest, NativeWindowHandle},
     contract::ui_screenshot::UiScreenshotError,
     screenshot::{NativeCaptureArea, ScreenshotWindowHandle},
 };
@@ -34,26 +33,6 @@ pub(crate) fn private_create_new_options() -> OpenOptions {
 
 pub(crate) fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
     agenterm_platform::filesystem::replace_file(source, destination)
-}
-
-pub(crate) fn focus_existing_window(
-    raw_handle: i64,
-    no_activate: bool,
-) -> Result<(), ActivationError> {
-    // SAFETY: the registry value is owned by the live Control Center process;
-    // the native call is immediate and typed failures cover stale handles.
-    let Some(window) = (unsafe { NativeWindowHandle::from_raw(raw_handle as isize) }) else {
-        return Err(ActivationError::Failed {
-            code: Cow::Borrowed("control_center_window_unavailable"),
-            message: "Control Center did not publish a native window handle".to_owned(),
-        });
-    };
-    let request = if no_activate {
-        ActivationRequest::ShowWithoutActivation
-    } else {
-        ActivationRequest::RestoreAndActivate
-    };
-    agenterm_platform::activation::apply(window, request)
 }
 
 pub(crate) fn capture_native_window_png(
@@ -97,12 +76,7 @@ mod tests {
     }
 
     #[test]
-    fn invalid_native_handles_remain_typed_failures() {
-        assert!(matches!(
-            focus_existing_window(0, false),
-            Err(ActivationError::Failed { code, .. })
-                if code == "control_center_window_unavailable"
-        ));
+    fn invalid_native_capture_handles_remain_typed_failures() {
         assert!(matches!(
             capture_native_window_png(0, Path::new("unused.png")),
             Err(UiScreenshotError::Failed { code, .. })
