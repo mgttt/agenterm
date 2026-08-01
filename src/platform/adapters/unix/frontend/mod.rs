@@ -25,6 +25,10 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
+use agenterm_platform::input::{
+    KeyPressState, LogicalKey as Key, NamedKey, NativeKeyEventExt as _,
+    NativeModifierStateExt as _, NormalizedKeyEvent,
+};
 use softbuffer::{Context, Surface};
 use unicode_width::UnicodeWidthStr;
 use winit::{
@@ -32,7 +36,7 @@ use winit::{
     dpi::{LogicalPosition, LogicalSize},
     event::{ElementState, Ime, MouseButton, MouseScrollDelta, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
-    keyboard::{Key, ModifiersState, NamedKey},
+    keyboard::ModifiersState,
     window::{Window, WindowAttributes, WindowId},
 };
 
@@ -952,12 +956,11 @@ impl UnixApp {
         self.request_redraw();
     }
 
-    fn handle_new_terminal_key(&mut self, event: &winit::event::KeyEvent) {
+    fn handle_new_terminal_key(&mut self, event: &NormalizedKeyEvent) {
         if !self.new_terminal_dialog.is_open() {
             return;
         }
         let multiline = self.new_terminal_focus == NewTerminalFocusView::InitialCommand;
-        let modifiers = self.modifiers;
         let action = {
             let select_all = &mut self.text_field_select_all;
             let draft = match self.new_terminal_focus {
@@ -969,7 +972,7 @@ impl UnixApp {
                     self.new_terminal_dialog.https_proxy_draft_mut()
                 }
             };
-            input::text_field_key_action(event, modifiers, draft, multiline, select_all)
+            input::text_field_key_action(event, draft, multiline, select_all)
         };
         match action {
             input::TextFieldKeyAction::Edited => self.request_redraw(),
@@ -1041,11 +1044,11 @@ impl UnixApp {
         }
     }
 
-    fn handle_settings_key(&mut self, event: &winit::event::KeyEvent) {
+    fn handle_settings_key(&mut self, event: &NormalizedKeyEvent) {
         if !self.settings_open {
             return;
         }
-        match event.logical_key {
+        match event.logical {
             Key::Named(NamedKey::Escape) => {
                 let _ = self.close_settings(false);
             }
@@ -1499,19 +1502,18 @@ impl UnixApp {
         }
     }
 
-    fn handle_tab_editor_key(&mut self, event: &winit::event::KeyEvent) -> bool {
+    fn handle_tab_editor_key(&mut self, event: &NormalizedKeyEvent) -> bool {
         if self.note_edit_target.is_none() {
             return false;
         }
         let multiline = self.tab_editor_focus == TabEditorFocus::Note;
-        let modifiers = self.modifiers;
         let action = {
             let select_all = &mut self.text_field_select_all;
             let draft = match self.tab_editor_focus {
                 TabEditorFocus::Name => &mut self.tab_name_draft,
                 TabEditorFocus::Note => &mut self.tab_note_draft,
             };
-            input::text_field_key_action(event, modifiers, draft, multiline, select_all)
+            input::text_field_key_action(event, draft, multiline, select_all)
         };
         match action {
             input::TextFieldKeyAction::Edited => {
@@ -4251,14 +4253,15 @@ impl ApplicationHandler<UnixWake> for UnixApp {
             }
             WindowEvent::Ime(event) => self.handle_ime(event),
             WindowEvent::KeyboardInput { event, .. } => {
-                if !event.state.is_pressed() {
+                let event = event.to_normalized_key_event(self.modifiers.to_platform_modifiers());
+                if event.state != KeyPressState::Pressed {
                     return;
                 }
                 self.cursor_blink.reset(Instant::now());
                 if self.window_close_pending {
-                    if let Key::Named(NamedKey::Escape) = event.logical_key {
+                    if let Key::Named(NamedKey::Escape) = event.logical {
                         self.finish_window_close(WindowCloseChoice::Cancel);
-                    } else if matches!(event.logical_key, Key::Named(NamedKey::Enter)) {
+                    } else if matches!(event.logical, Key::Named(NamedKey::Enter)) {
                         self.finish_window_close(WindowCloseChoice::KeepServerRunning);
                     }
                     return;
@@ -4272,7 +4275,7 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                     return;
                 }
                 if self.pending_close.is_some() {
-                    if let Key::Named(NamedKey::Escape) = event.logical_key {
+                    if let Key::Named(NamedKey::Escape) = event.logical {
                         self.finish_close_confirmation(false);
                     }
                     return;
@@ -4282,30 +4285,30 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                     return;
                 }
                 if self.focus_surface == UnixFocusSurface::Sidebar
-                    && matches!(event.logical_key, Key::Named(NamedKey::F2))
+                    && matches!(event.logical, Key::Named(NamedKey::F2))
                 {
                     if let Some(tab_id) = self.active {
                         let _ = self.open_tab_editor_for(tab_id);
                     }
                     return;
                 }
-                if matches!(event.logical_key, Key::Named(NamedKey::Escape))
+                if matches!(event.logical, Key::Named(NamedKey::Escape))
                     && self.cancel_terminal_selection(true)
                 {
                     return;
                 }
                 if self.focus_surface == UnixFocusSurface::Composer {
                     if self.cwd_edit_target.is_some() {
-                        if matches!(event.logical_key, Key::Named(NamedKey::Escape)) {
+                        if matches!(event.logical, Key::Named(NamedKey::Escape)) {
                             self.close_cwd_editor();
                             return;
                         }
-                        if input::primary_shortcut(self.modifiers)
-                            && matches!(event.logical_key, Key::Named(NamedKey::Enter))
+                        if input::primary_shortcut(event.modifiers)
+                            && matches!(event.logical, Key::Named(NamedKey::Enter))
                         {
-                            let mode = if self.modifiers.shift_key() {
+                            let mode = if event.modifiers.shift {
                                 ComposerWriteMode::Append
-                            } else if self.modifiers.alt_key() {
+                            } else if event.modifiers.alt {
                                 ComposerWriteMode::Replace
                             } else {
                                 ComposerWriteMode::EmptyOnly
@@ -4316,7 +4319,6 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                     }
                     match input::composer_key_action(
                         &event,
-                        self.modifiers,
                         &mut self.composer_buffer,
                         &mut self.composer_select_all,
                     ) {
@@ -4372,8 +4374,8 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                     !selection.is_empty() && self.active == Some(selection.tab_id)
                 });
                 match input::terminal_shortcut_action(
-                    &event.logical_key,
-                    self.modifiers,
+                    &event.logical,
+                    event.modifiers,
                     has_selection,
                 ) {
                     input::TerminalShortcutAction::Copy => {
@@ -4387,7 +4389,7 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                     input::TerminalShortcutAction::Suppress => return,
                     input::TerminalShortcutAction::Forward => {}
                 }
-                if let Some(bytes) = input::key_event_to_bytes(&event, self.modifiers) {
+                if let Some(bytes) = input::key_event_to_bytes(&event) {
                     let _ = self.cancel_terminal_selection(true);
                     self.queue_pty_input(bytes);
                 }

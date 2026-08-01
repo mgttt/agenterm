@@ -512,6 +512,12 @@ integrated validation recorded below):
   repeat and committed text cross the public extension boundary only as crate
   types. Linux-target warnings-denied Clippy compiles focused mapper test targets
   for Shift+Tab and stable letter/digit identity; native execution remains CI evidence.
+- [x] The root Unix product input consumer now receives only normalized crate
+  events. Native key/modifier conversion occurs once at the event-loop adapter
+  boundary; composer, text-field, terminal-shortcut and PTY-byte rules no longer
+  import or accept winit types. The strict production boundary report is down
+  from eight violations to seven, all owned by the remaining window hosts and
+  final root target selector.
 - [x] Control Center state-directory protection, exclusive state-file creation,
   atomic replacement, existing-window focus, and direct native capture now
   call `services::control_center → selected → adapters/{windows,linux,macos}`.

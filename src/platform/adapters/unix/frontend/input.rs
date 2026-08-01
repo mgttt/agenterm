@@ -1,7 +1,9 @@
 //! Unix frontend native input translation.
 
-use winit::event::{ElementState, KeyEvent};
-use winit::keyboard::{Key, ModifiersState, NamedKey, PhysicalKey};
+use agenterm_platform::input::{
+    KeyPressState, LogicalKey as Key, ModifierState, NamedKey, NormalizedKeyEvent as KeyEvent,
+    PhysicalKeyCode,
+};
 
 use crate::commands::{tmux_key_bytes, tmux_key_bytes_with_modifiers};
 
@@ -36,34 +38,26 @@ pub(super) fn normalize_ime_commit(text: &str, multiline: bool) -> String {
         .collect()
 }
 
-pub(super) fn primary_shortcut(modifiers: ModifiersState) -> bool {
-    agenterm_platform::input::is_primary_shortcut(winit_modifiers_to_platform(modifiers))
+pub(super) fn primary_shortcut(modifiers: ModifierState) -> bool {
+    agenterm_platform::input::is_primary_shortcut(modifiers)
 }
 
-/// Maps a winit key event to composer edits when the composer strip has focus.
+/// Maps a normalized key event to composer edits when the composer strip has focus.
 pub(super) fn composer_key_action(
     event: &KeyEvent,
-    modifiers: ModifiersState,
     buffer: &mut String,
     select_all: &mut bool,
 ) -> ComposerKeyAction {
-    if event.state != ElementState::Pressed || event.repeat {
+    if event.state != KeyPressState::Pressed || event.repeat {
         return ComposerKeyAction::Ignored;
     }
 
-    if matches!(
-        agenterm_platform::platform_kind(),
-        agenterm_platform::PlatformKind::Linux | agenterm_platform::PlatformKind::Macos
-    ) {
-        platform_composer_key_action(event, modifiers, buffer, select_all)
-    } else {
-        composer_logical_key_action(&event.logical_key, modifiers, buffer, select_all)
-    }
+    platform_composer_key_action(event, buffer, select_all)
 }
 
 fn composer_logical_key_action(
     logical_key: &Key,
-    modifiers: ModifiersState,
+    modifiers: ModifierState,
     buffer: &mut String,
     select_all: &mut bool,
 ) -> ComposerKeyAction {
@@ -149,31 +143,23 @@ pub(super) enum TextFieldKeyAction {
     Ignored,
 }
 
-/// Maps a winit key event to inline tab-editor field edits.
+/// Maps a normalized key event to inline tab-editor field edits.
 pub(super) fn text_field_key_action(
     event: &KeyEvent,
-    modifiers: ModifiersState,
     buffer: &mut String,
     multiline: bool,
     select_all: &mut bool,
 ) -> TextFieldKeyAction {
-    if event.state != ElementState::Pressed || event.repeat {
+    if event.state != KeyPressState::Pressed || event.repeat {
         return TextFieldKeyAction::Ignored;
     }
 
-    if matches!(
-        agenterm_platform::platform_kind(),
-        agenterm_platform::PlatformKind::Linux | agenterm_platform::PlatformKind::Macos
-    ) {
-        platform_text_field_key_action(event, modifiers, buffer, multiline, select_all)
-    } else {
-        text_field_logical_key_action(&event.logical_key, modifiers, buffer, multiline, select_all)
-    }
+    platform_text_field_key_action(event, buffer, multiline, select_all)
 }
 
 fn text_field_logical_key_action(
     logical_key: &Key,
-    modifiers: ModifiersState,
+    modifiers: ModifierState,
     buffer: &mut String,
     multiline: bool,
     select_all: &mut bool,
@@ -252,7 +238,7 @@ pub(super) enum TerminalShortcutAction {
 
 pub(super) fn terminal_shortcut_action(
     key: &Key,
-    modifiers: ModifiersState,
+    modifiers: ModifierState,
     has_selection: bool,
 ) -> TerminalShortcutAction {
     let Key::Character(text) = key else {
@@ -264,57 +250,36 @@ pub(super) fn terminal_shortcut_action(
     if text.eq_ignore_ascii_case("c") {
         if has_selection {
             TerminalShortcutAction::Copy
-        } else if modifiers.super_key() {
+        } else if modifiers.meta {
             TerminalShortcutAction::Suppress
         } else {
             TerminalShortcutAction::Forward
         }
     } else if text.eq_ignore_ascii_case("v") {
         TerminalShortcutAction::Paste
-    } else if modifiers.super_key() {
+    } else if modifiers.meta {
         TerminalShortcutAction::Suppress
     } else {
         TerminalShortcutAction::Forward
     }
 }
 
-/// Maps a winit key event to bytes suitable for PTY input.
+/// Maps a normalized key event to bytes suitable for PTY input.
 ///
 /// Returns `None` for keys that should not be forwarded (modifiers-only, dead keys, etc.).
-pub(super) fn key_event_to_bytes(event: &KeyEvent, modifiers: ModifiersState) -> Option<Vec<u8>> {
-    if event.state != ElementState::Pressed {
+pub(super) fn key_event_to_bytes(event: &KeyEvent) -> Option<Vec<u8>> {
+    if event.state != KeyPressState::Pressed {
         return None;
     }
-
-    if matches!(
-        agenterm_platform::platform_kind(),
-        agenterm_platform::PlatformKind::Linux | agenterm_platform::PlatformKind::Macos
-    ) {
-        platform_key_event_to_bytes(event, modifiers)
-    } else {
-        logical_key_to_bytes(&event.logical_key, modifiers).or_else(|| match &event.logical_key {
-            Key::Unidentified(_) => match event.physical_key {
-                PhysicalKey::Code(code) => physical_code_to_byte(code),
-                PhysicalKey::Unidentified(_) => None,
-            },
-            _ => None,
-        })
-    }
+    platform_key_event_to_bytes(event)
 }
 
-fn logical_key_to_bytes(key: &Key, modifiers: ModifiersState) -> Option<Vec<u8>> {
+fn logical_key_to_bytes(key: &Key, modifiers: ModifierState) -> Option<Vec<u8>> {
     match key {
         Key::Named(named) => {
-            let raw_modifiers = crate::platform::ModifierState {
-                control: modifiers.control_key(),
-                shift: modifiers.shift_key(),
-                alt: modifiers.alt_key(),
-                meta: modifiers.super_key(),
-            };
-            named_key_name(*named)
-                .and_then(|name| tmux_key_bytes_with_modifiers(name, raw_modifiers))
+            named_key_name(*named).and_then(|name| tmux_key_bytes_with_modifiers(name, modifiers))
         }
-        Key::Character(text) if modifiers.control_key() => {
+        Key::Character(text) if modifiers.control => {
             let mut characters = text.chars();
             let character = characters.next()?;
             if characters.next().is_some() {
@@ -330,7 +295,7 @@ fn logical_key_to_bytes(key: &Key, modifiers: ModifiersState) -> Option<Vec<u8>>
                 .into_bytes();
             (!bytes.is_empty()).then_some(bytes)
         }
-        Key::Unidentified(_) | Key::Dead(_) => None,
+        Key::Unidentified => None,
     }
 }
 
@@ -367,78 +332,32 @@ fn named_key_name(key: NamedKey) -> Option<&'static str> {
     }
 }
 
-fn physical_code_to_byte(code: winit::keyboard::KeyCode) -> Option<Vec<u8>> {
-    use winit::keyboard::KeyCode;
+fn physical_code_to_byte(code: PhysicalKeyCode) -> Option<Vec<u8>> {
     match code {
-        KeyCode::Enter => Some(vec![b'\r']),
-        KeyCode::Backspace => Some(vec![0x7F]),
-        KeyCode::Tab => Some(vec![b'\t']),
-        KeyCode::Space => Some(vec![b' ']),
-        KeyCode::KeyA => Some(vec![b'a']),
-        KeyCode::KeyB => Some(vec![b'b']),
-        KeyCode::KeyC => Some(vec![b'c']),
-        KeyCode::KeyD => Some(vec![b'd']),
-        KeyCode::KeyE => Some(vec![b'e']),
-        KeyCode::KeyF => Some(vec![b'f']),
-        KeyCode::KeyG => Some(vec![b'g']),
-        KeyCode::KeyH => Some(vec![b'h']),
-        KeyCode::KeyI => Some(vec![b'i']),
-        KeyCode::KeyJ => Some(vec![b'j']),
-        KeyCode::KeyK => Some(vec![b'k']),
-        KeyCode::KeyL => Some(vec![b'l']),
-        KeyCode::KeyM => Some(vec![b'm']),
-        KeyCode::KeyN => Some(vec![b'n']),
-        KeyCode::KeyO => Some(vec![b'o']),
-        KeyCode::KeyP => Some(vec![b'p']),
-        KeyCode::KeyQ => Some(vec![b'q']),
-        KeyCode::KeyR => Some(vec![b'r']),
-        KeyCode::KeyS => Some(vec![b's']),
-        KeyCode::KeyT => Some(vec![b't']),
-        KeyCode::KeyU => Some(vec![b'u']),
-        KeyCode::KeyV => Some(vec![b'v']),
-        KeyCode::KeyW => Some(vec![b'w']),
-        KeyCode::KeyX => Some(vec![b'x']),
-        KeyCode::KeyY => Some(vec![b'y']),
-        KeyCode::KeyZ => Some(vec![b'z']),
-        KeyCode::Digit0 => Some(vec![b'0']),
-        KeyCode::Digit1 => Some(vec![b'1']),
-        KeyCode::Digit2 => Some(vec![b'2']),
-        KeyCode::Digit3 => Some(vec![b'3']),
-        KeyCode::Digit4 => Some(vec![b'4']),
-        KeyCode::Digit5 => Some(vec![b'5']),
-        KeyCode::Digit6 => Some(vec![b'6']),
-        KeyCode::Digit7 => Some(vec![b'7']),
-        KeyCode::Digit8 => Some(vec![b'8']),
-        KeyCode::Digit9 => Some(vec![b'9']),
+        PhysicalKeyCode::Enter => Some(vec![b'\r']),
+        PhysicalKeyCode::Backspace => Some(vec![0x7F]),
+        PhysicalKeyCode::Tab => Some(vec![b'\t']),
+        PhysicalKeyCode::Space => Some(vec![b' ']),
+        PhysicalKeyCode::Letter(letter) if letter.is_ascii_alphabetic() => {
+            Some(vec![letter.to_ascii_lowercase() as u8])
+        }
+        PhysicalKeyCode::Digit(digit) if digit <= 9 => Some(vec![b'0' + digit]),
         _ => None,
     }
-}
-
-fn winit_modifiers_to_platform(modifiers: ModifiersState) -> crate::platform::ModifierState {
-    agenterm_platform::input::modifiers(
-        modifiers.control_key(),
-        modifiers.shift_key(),
-        modifiers.alt_key(),
-        modifiers.super_key(),
-    )
 }
 
 fn logical_key_parts(key: &Key) -> (Option<&str>, Option<&'static str>) {
     match key {
         Key::Character(text) => (Some(text.as_str()), None),
         Key::Named(named) => (None, named_key_name(*named)),
-        Key::Unidentified(_) | Key::Dead(_) => (None, None),
+        Key::Unidentified => (None, None),
     }
 }
 
-fn platform_classify_key_press(
-    event: &KeyEvent,
-    modifiers: ModifiersState,
-) -> crate::platform::KeyClassification {
-    let modifiers = winit_modifiers_to_platform(modifiers);
-    let (logical_character, named_key) = logical_key_parts(&event.logical_key);
+fn platform_classify_key_press(event: &KeyEvent) -> crate::platform::KeyClassification {
+    let (logical_character, named_key) = logical_key_parts(&event.logical);
     agenterm_platform::input::classify_key_press(
-        modifiers,
+        event.modifiers,
         logical_character,
         named_key,
         event.text.as_deref(),
@@ -482,13 +401,12 @@ fn push_committed_text(buffer: &mut String, select_all: &mut bool, text: &str) -
 
 fn platform_composer_key_action(
     event: &KeyEvent,
-    modifiers: ModifiersState,
     buffer: &mut String,
     select_all: &mut bool,
 ) -> ComposerKeyAction {
     use crate::platform::KeyClassification;
 
-    match platform_classify_key_press(event, modifiers) {
+    match platform_classify_key_press(event) {
         KeyClassification::Shortcut {
             key,
             modifiers: classified,
@@ -553,14 +471,13 @@ fn platform_text_field_shortcut(
 
 fn platform_text_field_key_action(
     event: &KeyEvent,
-    modifiers: ModifiersState,
     buffer: &mut String,
     multiline: bool,
     select_all: &mut bool,
 ) -> TextFieldKeyAction {
     use crate::platform::KeyClassification;
 
-    match platform_classify_key_press(event, modifiers) {
+    match platform_classify_key_press(event) {
         KeyClassification::Shortcut {
             key,
             modifiers: classified,
@@ -618,10 +535,10 @@ fn platform_text_field_key_action(
     }
 }
 
-fn platform_key_event_to_bytes(event: &KeyEvent, modifiers: ModifiersState) -> Option<Vec<u8>> {
+fn platform_key_event_to_bytes(event: &KeyEvent) -> Option<Vec<u8>> {
     use crate::platform::KeyClassification;
 
-    match platform_classify_key_press(event, modifiers) {
+    match platform_classify_key_press(event) {
         KeyClassification::Shortcut {
             key,
             modifiers: classified,
@@ -647,13 +564,10 @@ fn platform_key_event_to_bytes(event: &KeyEvent, modifiers: ModifiersState) -> O
         KeyClassification::ControlKey { name, modifiers } => {
             tmux_key_bytes_with_modifiers(&name, modifiers)
         }
-        KeyClassification::Ignored => match &event.logical_key {
-            Key::Unidentified(_) => match event.physical_key {
-                PhysicalKey::Code(code) => physical_code_to_byte(code),
-                PhysicalKey::Unidentified(_) => None,
-            },
-            _ => None,
-        },
+        KeyClassification::Ignored if matches!(event.logical, Key::Unidentified) => {
+            physical_code_to_byte(event.physical)
+        }
+        KeyClassification::Ignored => None,
         _ => None,
     }
 }
@@ -665,19 +579,25 @@ mod tests {
         logical_key_to_bytes, normalize_ime_commit, physical_code_to_byte, prepare_composer_edit,
         primary_shortcut, terminal_shortcut_action, text_field_logical_key_action,
     };
-    use winit::keyboard::{Key, KeyCode, ModifiersState, NamedKey};
+    use agenterm_platform::input::{LogicalKey as Key, ModifierState, NamedKey, PhysicalKeyCode};
+
+    const fn modifiers(control: bool, shift: bool, alt: bool, meta: bool) -> ModifierState {
+        ModifierState {
+            control,
+            shift,
+            alt,
+            meta,
+        }
+    }
 
     #[test]
     fn terminal_text_is_forwarded_as_utf8() {
         assert_eq!(
-            logical_key_to_bytes(&Key::Character("终端".into()), ModifiersState::empty()),
+            logical_key_to_bytes(&Key::Character("终端".into()), ModifierState::empty()),
             Some("终端".as_bytes().to_vec())
         );
         assert_eq!(
-            logical_key_to_bytes(
-                &Key::Character("a\u{0007}b".into()),
-                ModifiersState::empty()
-            ),
+            logical_key_to_bytes(&Key::Character("a\u{0007}b".into()), ModifierState::empty()),
             Some(b"ab".to_vec())
         );
     }
@@ -685,10 +605,13 @@ mod tests {
     #[test]
     fn space_is_forwarded_for_named_and_physical_key_forms() {
         assert_eq!(
-            logical_key_to_bytes(&Key::Named(NamedKey::Space), ModifiersState::empty()),
+            logical_key_to_bytes(&Key::Named(NamedKey::Space), ModifierState::empty()),
             Some(vec![b' '])
         );
-        assert_eq!(physical_code_to_byte(KeyCode::Space), Some(vec![b' ']));
+        assert_eq!(
+            physical_code_to_byte(PhysicalKeyCode::Space),
+            Some(vec![b' '])
+        );
     }
 
     #[test]
@@ -699,7 +622,7 @@ mod tests {
         assert!(matches!(
             composer_logical_key_action(
                 &Key::Character("A".into()),
-                ModifiersState::SHIFT,
+                modifiers(false, true, false, false),
                 &mut buffer,
                 &mut select_all,
             ),
@@ -708,7 +631,7 @@ mod tests {
         assert!(matches!(
             composer_logical_key_action(
                 &Key::Character("!".into()),
-                ModifiersState::SHIFT,
+                modifiers(false, true, false, false),
                 &mut buffer,
                 &mut select_all,
             ),
@@ -725,7 +648,7 @@ mod tests {
         assert!(matches!(
             text_field_logical_key_action(
                 &Key::Character("a".into()),
-                ModifiersState::SUPER,
+                modifiers(false, false, false, true),
                 &mut buffer,
                 false,
                 &mut select_all,
@@ -736,7 +659,7 @@ mod tests {
         assert!(matches!(
             text_field_logical_key_action(
                 &Key::Character("N".into()),
-                ModifiersState::SHIFT,
+                modifiers(false, true, false, false),
                 &mut buffer,
                 false,
                 &mut select_all,
@@ -749,7 +672,7 @@ mod tests {
         assert!(matches!(
             text_field_logical_key_action(
                 &Key::Named(NamedKey::Space),
-                ModifiersState::empty(),
+                ModifierState::empty(),
                 &mut buffer,
                 false,
                 &mut select_all,
@@ -771,15 +694,24 @@ mod tests {
     #[test]
     fn terminal_control_letters_use_control_bytes() {
         assert_eq!(
-            logical_key_to_bytes(&Key::Character("c".into()), ModifiersState::CONTROL),
+            logical_key_to_bytes(
+                &Key::Character("c".into()),
+                modifiers(true, false, false, false),
+            ),
             Some(vec![3])
         );
         assert_eq!(
-            logical_key_to_bytes(&Key::Character("Z".into()), ModifiersState::CONTROL),
+            logical_key_to_bytes(
+                &Key::Character("Z".into()),
+                modifiers(true, false, false, false),
+            ),
             Some(vec![26])
         );
         assert_eq!(
-            logical_key_to_bytes(&Key::Character("终端".into()), ModifiersState::CONTROL),
+            logical_key_to_bytes(
+                &Key::Character("终端".into()),
+                modifiers(true, false, false, false),
+            ),
             None
         );
     }
@@ -787,11 +719,11 @@ mod tests {
     #[test]
     fn primary_shortcut_uses_platform_policy() {
         #[cfg(target_os = "linux")]
-        assert!(primary_shortcut(ModifiersState::CONTROL));
+        assert!(primary_shortcut(modifiers(true, false, false, false)));
         #[cfg(target_os = "macos")]
-        assert!(!primary_shortcut(ModifiersState::CONTROL));
-        assert!(primary_shortcut(ModifiersState::SUPER));
-        assert!(!primary_shortcut(ModifiersState::ALT));
+        assert!(!primary_shortcut(modifiers(true, false, false, false)));
+        assert!(primary_shortcut(modifiers(false, false, false, true)));
+        assert!(!primary_shortcut(modifiers(false, false, true, false)));
     }
 
     #[test]
@@ -812,25 +744,25 @@ mod tests {
         let c = Key::Character("c".into());
         let v = Key::Character("v".into());
         assert_eq!(
-            terminal_shortcut_action(&c, ModifiersState::CONTROL, false),
+            terminal_shortcut_action(&c, modifiers(true, false, false, false), false),
             TerminalShortcutAction::Forward
         );
         #[cfg(target_os = "linux")]
         assert_eq!(
-            terminal_shortcut_action(&c, ModifiersState::CONTROL, true),
+            terminal_shortcut_action(&c, modifiers(true, false, false, false), true),
             TerminalShortcutAction::Copy
         );
         #[cfg(target_os = "macos")]
         assert_eq!(
-            terminal_shortcut_action(&c, ModifiersState::CONTROL, true),
+            terminal_shortcut_action(&c, modifiers(true, false, false, false), true),
             TerminalShortcutAction::Forward
         );
         assert_eq!(
-            terminal_shortcut_action(&c, ModifiersState::SUPER, false),
+            terminal_shortcut_action(&c, modifiers(false, false, false, true), false),
             TerminalShortcutAction::Suppress
         );
         assert_eq!(
-            terminal_shortcut_action(&v, ModifiersState::SUPER, false),
+            terminal_shortcut_action(&v, modifiers(false, false, false, true), false),
             TerminalShortcutAction::Paste
         );
     }
@@ -852,7 +784,7 @@ mod tests {
         ];
         for (key, expected) in cases {
             assert_eq!(
-                logical_key_to_bytes(&Key::Named(key), ModifiersState::empty()).as_deref(),
+                logical_key_to_bytes(&Key::Named(key), ModifierState::empty()).as_deref(),
                 Some(expected)
             );
         }
@@ -861,20 +793,24 @@ mod tests {
     #[test]
     fn terminal_modified_navigation_preserves_xterm_modifier_bytes() {
         let cases = [
-            (NamedKey::Tab, ModifiersState::SHIFT, b"\x1b[Z".as_slice()),
+            (
+                NamedKey::Tab,
+                modifiers(false, true, false, false),
+                b"\x1b[Z".as_slice(),
+            ),
             (
                 NamedKey::ArrowLeft,
-                ModifiersState::CONTROL,
+                modifiers(true, false, false, false),
                 b"\x1b[1;5D".as_slice(),
             ),
             (
                 NamedKey::Insert,
-                ModifiersState::SHIFT,
+                modifiers(false, true, false, false),
                 b"\x1b[2;2~".as_slice(),
             ),
             (
                 NamedKey::F12,
-                ModifiersState::CONTROL | ModifiersState::SHIFT,
+                modifiers(true, true, false, false),
                 b"\x1b[24;6~".as_slice(),
             ),
         ];

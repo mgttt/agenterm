@@ -217,7 +217,13 @@ host 必须在 adapter 内完成原生 event 转换；composer/tmux/PTY 字节�
 Linux/macOS selected input adapters 随后实现该转换：winit logical/named/physical key、
 ElementState、repeat、committed text 全部在 crate shared Unix adapter 归一化；公共 extension
 trait 的签名只含 crate 类型。Linux-target all-target Clippy 已编译 Shift+Tab/letter/digit
-mapper test targets；本 Windows host 未执行 Linux test binary，root consumer 切换是下一集成叶。
+mapper test targets；本 Windows host 未执行 Linux test binary。root Unix consumer 集成叶也已
+完成：事件循环入口把 native key/modifier 一次性归一化，composer、文本框、terminal shortcut
+与 PTY byte policy 只接收 crate contract 类型，产品 input 模块不再导入 winit。Windows-hosted
+all-target compile 与 39 项 crate all-feature tests 通过；Linux root compile probe 在进入本叶
+源码前被缺少 `x86_64-linux-gnu-gcc` 的 ring build script 阻断，native execution 仍须 Linux CI
+补证。严格生产边界门禁由 8 行降至 7 行，余项是 Unix window host、Windows remote GUI host
+和最终 root selector。
 
 2026-08-01 首个建设期增量：Cockpit snapshot 新增明确的
 `tab_counts.{total,running,dead}`，native shell 同源显示 logical instance、

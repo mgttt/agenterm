@@ -10,6 +10,10 @@ pub use crate::contract::input::{
 pub trait NativeKeyEventExt {
     fn to_normalized_key_event(&self, modifiers: ModifierState) -> NormalizedKeyEvent;
 }
+
+pub trait NativeModifierStateExt {
+    fn to_platform_modifiers(&self) -> ModifierState;
+}
 use crate::{contract::input::classify_key_press as classify_shared, selected};
 
 pub const fn modifiers(control: bool, shift: bool, alt: bool, meta: bool) -> ModifierState {

@@ -4,8 +4,19 @@ use crate::{
     contract::input::{
         KeyPressState, LogicalKey, ModifierState, NamedKey, NormalizedKeyEvent, PhysicalKeyCode,
     },
-    input::NativeKeyEventExt,
+    input::{NativeKeyEventExt, NativeModifierStateExt},
 };
+
+impl NativeModifierStateExt for winit::keyboard::ModifiersState {
+    fn to_platform_modifiers(&self) -> ModifierState {
+        crate::input::modifiers(
+            self.control_key(),
+            self.shift_key(),
+            self.alt_key(),
+            self.super_key(),
+        )
+    }
+}
 use winit::{
     event::{ElementState, KeyEvent},
     keyboard::{Key, KeyCode, NamedKey as WinitNamedKey, PhysicalKey},
