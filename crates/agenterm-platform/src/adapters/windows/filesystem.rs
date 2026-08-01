@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{fs::OpenOptions, path::PathBuf};
 
 use crate::filesystem::{FilesystemError, HostDirectories};
 
@@ -68,4 +68,14 @@ pub fn host_directories() -> Result<HostDirectories, FilesystemError> {
 
 pub fn executable_name(base: &str) -> String {
     format!("{base}.exe")
+}
+
+pub fn protect_private_directory(_path: &std::path::Path) -> std::io::Result<()> {
+    Ok(())
+}
+
+pub fn private_create_new_options() -> OpenOptions {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    options
 }

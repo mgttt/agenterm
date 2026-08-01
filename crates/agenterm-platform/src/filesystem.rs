@@ -1,7 +1,7 @@
 //! Host filesystem conventions without product-specific directory names.
 
 use std::{
-    fs::Metadata,
+    fs::{Metadata, OpenOptions},
     io,
     path::{Path, PathBuf},
 };
@@ -60,6 +60,22 @@ pub fn metadata_is_link_like(metadata: &Metadata) -> bool {
     selected::filesystem::metadata_is_link_like(metadata)
 }
 
+/// Restrict an existing directory to the current user where the host exposes
+/// portable owner permissions. Windows preserves the directory ACL created by
+/// the caller rather than replacing it with a synthesized ACL.
+pub fn protect_private_directory(path: &Path) -> io::Result<()> {
+    selected::filesystem::protect_private_directory(path)
+}
+
+/// Build exclusive-create options for a private state file.
+///
+/// Unix adapters additionally request mode `0600`; Windows relies on the
+/// inherited ACL of the caller-owned private directory.
+#[must_use]
+pub fn private_create_new_options() -> OpenOptions {
+    selected::filesystem::private_create_new_options()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -71,5 +87,60 @@ mod tests {
             actual.file_stem().and_then(|value| value.to_str()),
             Some("worker")
         );
+    }
+
+    #[test]
+    fn private_create_is_exclusive() {
+        let path = std::env::temp_dir().join(format!(
+            "agenterm-platform-private-create-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        private_create_new_options()
+            .open(&path)
+            .expect("first exclusive create");
+        assert_eq!(
+            private_create_new_options()
+                .open(&path)
+                .expect_err("second exclusive create")
+                .kind(),
+            io::ErrorKind::AlreadyExists
+        );
+        std::fs::remove_file(path).expect("remove private-create fixture");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_file_and_directory_use_owner_only_modes() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let root = std::env::temp_dir().join(format!(
+            "agenterm-platform-private-mode-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir(&root).expect("create mode fixture");
+        protect_private_directory(&root).expect("protect directory");
+        assert_eq!(
+            std::fs::metadata(&root)
+                .expect("directory metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
+        let file = root.join("state");
+        private_create_new_options()
+            .open(&file)
+            .expect("create private file");
+        assert_eq!(
+            std::fs::metadata(&file)
+                .expect("file metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        std::fs::remove_dir_all(root).expect("remove mode fixture");
     }
 }

@@ -1,4 +1,8 @@
-use std::path::PathBuf;
+use std::{
+    fs::OpenOptions,
+    os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _},
+    path::PathBuf,
+};
 
 use crate::filesystem::{FilesystemError, HostDirectories};
 
@@ -32,4 +36,14 @@ pub fn host_directories() -> Result<HostDirectories, FilesystemError> {
 
 pub fn executable_name(base: &str) -> String {
     base.to_owned()
+}
+
+pub fn protect_private_directory(path: &std::path::Path) -> std::io::Result<()> {
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
+}
+
+pub fn private_create_new_options() -> OpenOptions {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true).mode(0o600);
+    options
 }
