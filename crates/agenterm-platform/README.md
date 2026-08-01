@@ -15,14 +15,15 @@ it from another repository.
 [dependencies]
 agenterm-platform = {
   git = "https://github.com/mgttt/agenterm.git",
-  rev = "5842a57",
+  rev = "7245b60c4e6f1ee201eb9f5c5a8c156985845bd3",
   default-features = false,
   features = ["process", "filesystem"]
 }
 ```
 
-Use an immutable full commit SHA in production. The short revision above is an
-illustration and advances as the extraction lands.
+Use an immutable full commit SHA in production. The revision above names a
+validated extraction increment; advance it deliberately when adopting newer
+capabilities.
 
 ## Features
 
@@ -35,7 +36,7 @@ clipboard, IPC, or screenshot modules.
 |---|---|---|
 | `serde` | `IpcEndpoint` string serialization | `serde` |
 | `process` | observation/tree control, shell defaults, child-pipe probes and parent-console diagnostics | target `libc` / `windows-sys` |
-| `filesystem` | host roots/naming plus durable atomic replacement mechanics | target native APIs |
+| `filesystem` | host roots/naming, private state files/directories and durable atomic replacement mechanics | target native APIs |
 | `locking` | cross-process path locks and bounded slot permits | target `libc` / `windows-sys` |
 | `ipc` | typed endpoints and native listener/byte stream | `locking`, target native APIs |
 | `pty` | PTY command/master/child lifecycle | `process`, `rmux-pty` |
@@ -94,6 +95,13 @@ independent reader and wait handles using the clone methods before coordinating
 termination. Dropping public lock and PTY guard values releases only resources
 owned by that value.
 
+Private state publishers can call `filesystem::protect_private_directory`
+after creating their directory and open receipts with
+`filesystem::private_create_new_options`. Unix requests owner-only `0700` and
+`0600` modes; Windows preserves the inherited ACL of the caller-owned
+directory. Exclusive creation fails rather than overwriting an existing
+receipt.
+
 Windows embedders can synchronously capture an owned native window without
 exposing `HWND` in their public API:
 
@@ -128,4 +136,8 @@ Embedders enabling `window` and `input` can implement
 system-menu dispatch, focus/capture/cursor operations, polling, the message
 loop, and double-buffered GDI presentation. Callbacks and `ControlCanvas`
 contain only stable platform-neutral values. Linux and macOS return typed
-`Unsupported` until their native control shells ship.
+`Unsupported` until their native control shells ship. Native text controls keep
+their selection and insertion point through `copy_control_selection` and
+`paste_control_selection`; a requested redraw is flushed before `capture_png`
+samples the window, keeping structured state and captured pixels on the same
+frame.
