@@ -36,6 +36,7 @@ clipboard, IPC, or screenshot modules.
 |---|---|---|
 | `serde` | `IpcEndpoint` string serialization | `serde` |
 | `hardware` | host processor architecture, pointer width, parallelism and CPU features | none |
+| `entropy` | fail-closed host CSPRNG byte filling | target `libc` / minimal `windows-sys` |
 | `process-control` | typed graceful/forceful single-process termination | target `libc` / minimal `windows-sys` |
 | `process` | observation/tree control, shell defaults, child-pipe probes and parent-console diagnostics | target `libc` / `windows-sys` |
 | `filesystem-conventions` | host roots and sibling executable naming | none |
@@ -58,6 +59,7 @@ clipboard, IPC, or screenshot modules.
 | Capability | Windows | Linux | macOS |
 |---|---|---|---|
 | hardware | compile-target ISA + runtime CPU facts | compile-target ISA + runtime CPU facts | compile-target ISA + runtime CPU facts |
+| entropy | BCrypt system-preferred RNG | `getrandom(2)` | `arc4random_buf` |
 | process control | forceful termination; graceful Unsupported | SIGTERM/SIGKILL | SIGTERM/SIGKILL |
 | process | ToolHelp/Job Objects | `/proc` + process groups | POSIX process groups |
 | filesystem | AppData conventions | XDG conventions | Application Support |

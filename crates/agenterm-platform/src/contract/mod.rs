@@ -4,6 +4,8 @@ pub mod activation;
 pub mod clipboard;
 #[cfg(all(feature = "window", feature = "input"))]
 pub mod control_window;
+#[cfg(feature = "entropy")]
+pub mod entropy;
 #[cfg(feature = "font")]
 pub mod font;
 #[cfg(feature = "hardware")]

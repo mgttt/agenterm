@@ -12,6 +12,11 @@ readme = "README.md"
 default = []
 serde = ["dep:serde"]
 hardware = []
+entropy = [
+    "dep:libc",
+    "dep:windows-sys",
+    "windows-sys/Win32_Security_Cryptography",
+]
 process-control = [
     "dep:libc",
     "dep:windows-sys",
@@ -87,6 +92,7 @@ font = [
 webview = []
 full = [
     "hardware",
+    "entropy",
     "process",
     "filesystem",
     "locking",

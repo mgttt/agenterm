@@ -21,6 +21,7 @@ pub const fn platform_kind() -> PlatformKind {
 #[non_exhaustive]
 pub enum Capability {
     Hardware,
+    Entropy,
     ProcessControl,
     Process,
     FilesystemConventions,
@@ -54,6 +55,7 @@ pub enum CapabilityStatus {
 pub fn capability_status(capability: Capability) -> CapabilityStatus {
     let (enabled, implemented) = match capability {
         Capability::Hardware => (cfg!(feature = "hardware"), true),
+        Capability::Entropy => (cfg!(feature = "entropy"), true),
         Capability::ProcessControl => (cfg!(feature = "process-control"), true),
         Capability::Process => (cfg!(feature = "process"), true),
         Capability::FilesystemConventions => (cfg!(feature = "filesystem-conventions"), true),
@@ -99,6 +101,9 @@ pub mod font;
 
 #[cfg(feature = "hardware")]
 pub mod hardware;
+
+#[cfg(feature = "entropy")]
+pub mod entropy;
 
 #[cfg(any(feature = "filesystem-conventions", feature = "filesystem"))]
 pub mod filesystem;
@@ -195,6 +200,29 @@ mod tests {
         assert_eq!(
             crate::capability_status(crate::Capability::Hardware),
             crate::CapabilityStatus::Available
+        );
+        #[cfg(not(feature = "process-control"))]
+        assert_eq!(
+            crate::capability_status(crate::Capability::ProcessControl),
+            crate::CapabilityStatus::Unsupported {
+                reason: std::borrow::Cow::Borrowed("feature-disabled")
+            }
+        );
+    }
+
+    #[cfg(feature = "entropy")]
+    #[test]
+    fn entropy_does_not_enable_product_services() {
+        assert_eq!(
+            crate::capability_status(crate::Capability::Entropy),
+            crate::CapabilityStatus::Available
+        );
+        #[cfg(not(feature = "filesystem"))]
+        assert_eq!(
+            crate::capability_status(crate::Capability::Filesystem),
+            crate::CapabilityStatus::Unsupported {
+                reason: std::borrow::Cow::Borrowed("feature-disabled")
+            }
         );
         #[cfg(not(feature = "process-control"))]
         assert_eq!(
