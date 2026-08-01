@@ -10,6 +10,10 @@ pub fn replace_file(
     destination: &std::path::Path,
 ) -> std::io::Result<()> {
     use std::os::windows::ffi::OsStrExt as _;
+    use std::time::Duration;
+    use windows_sys::Win32::Foundation::{
+        ERROR_ACCESS_DENIED, ERROR_LOCK_VIOLATION, ERROR_SHARING_VIOLATION,
+    };
     use windows_sys::Win32::Storage::FileSystem::{
         MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
     };
@@ -34,18 +38,32 @@ pub fn replace_file(
         .encode_wide()
         .chain(Some(0))
         .collect::<Vec<_>>();
-    if unsafe {
-        MoveFileExW(
-            source.as_ptr(),
-            destination.as_ptr(),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-        )
-    } == 0
-    {
-        Err(std::io::Error::last_os_error())
-    } else {
-        Ok(())
+    const ATTEMPTS: usize = 32;
+    for attempt in 0..ATTEMPTS {
+        if unsafe {
+            MoveFileExW(
+                source.as_ptr(),
+                destination.as_ptr(),
+                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+            )
+        } != 0
+        {
+            return Ok(());
+        }
+        let error = std::io::Error::last_os_error();
+        let retryable = matches!(
+            error.raw_os_error(),
+            Some(code)
+                if code == ERROR_ACCESS_DENIED as i32
+                    || code == ERROR_SHARING_VIOLATION as i32
+                    || code == ERROR_LOCK_VIOLATION as i32
+        );
+        if !retryable || attempt + 1 == ATTEMPTS {
+            return Err(error);
+        }
+        std::thread::sleep(Duration::from_millis(2));
     }
+    unreachable!("bounded replacement loop always returns")
 }
 
 #[cfg(feature = "filesystem")]

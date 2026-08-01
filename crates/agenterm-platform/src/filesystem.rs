@@ -239,6 +239,41 @@ mod tests {
         std::fs::remove_dir_all(root).expect("remove atomic fixture");
     }
 
+    #[cfg(all(windows, feature = "filesystem"))]
+    #[test]
+    fn private_atomic_write_tolerates_concurrent_readers() {
+        let root = std::env::temp_dir().join(format!(
+            "agenterm-platform-private-atomic-reader-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir(&root).expect("create concurrent atomic fixture");
+        protect_private_directory(&root).expect("protect concurrent atomic fixture");
+        let path = root.join("state.json");
+        write_private_atomic(&path, b"left").expect("publish initial value");
+
+        let barrier = std::sync::Barrier::new(2);
+        std::thread::scope(|scope| {
+            let writer_barrier = &barrier;
+            let writer_path = &path;
+            scope.spawn(move || {
+                writer_barrier.wait();
+                for index in 0..64 {
+                    let value: &[u8] = if index % 2 == 0 { b"right" } else { b"left" };
+                    write_private_atomic(writer_path, value)
+                        .expect("replace while readers open the destination");
+                }
+            });
+            barrier.wait();
+            for _ in 0..256 {
+                let value = std::fs::read(&path).expect("read complete atomic value");
+                assert!(value == b"left" || value == b"right");
+            }
+        });
+
+        std::fs::remove_dir_all(root).expect("remove concurrent atomic fixture");
+    }
+
     #[cfg(all(unix, feature = "filesystem"))]
     #[test]
     fn private_file_and_directory_use_owner_only_modes() {
