@@ -7,7 +7,7 @@ use std::{
 };
 
 use windows_sys::Win32::{
-    Foundation::{CloseHandle, HANDLE, WAIT_ABANDONED, WAIT_OBJECT_0},
+    Foundation::{CloseHandle, HANDLE, WAIT_ABANDONED, WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT},
     System::Threading::{CreateMutexW, INFINITE, ReleaseMutex, WaitForSingleObject},
 };
 
@@ -132,15 +132,21 @@ fn acquire_named(identity: &str, timeout: u32) -> Result<HANDLE, LockError> {
         Ok(handle)
     } else {
         unsafe { CloseHandle(handle) };
-        let kind = if timeout == 0 {
-            LockErrorKind::Contended
+        let kind = wait_error_kind(wait, timeout);
+        let message = if wait == WAIT_FAILED {
+            std::io::Error::last_os_error().to_string()
         } else {
-            LockErrorKind::Wait
+            format!("native mutex wait returned {wait}")
         };
-        Err(LockError::new(
-            kind,
-            format!("native mutex wait returned {wait}"),
-        ))
+        Err(LockError::new(kind, message))
+    }
+}
+
+fn wait_error_kind(wait: u32, timeout: u32) -> LockErrorKind {
+    if wait == WAIT_TIMEOUT && timeout == 0 {
+        LockErrorKind::Contended
+    } else {
+        LockErrorKind::Wait
     }
 }
 
@@ -204,4 +210,16 @@ fn canonicalize_with_missing_tail(path: &Path) -> std::io::Result<PathBuf> {
 
 fn open_error(error: std::io::Error) -> LockError {
     LockError::new(LockErrorKind::Open, error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_nonblocking_timeout_is_contention() {
+        assert_eq!(wait_error_kind(WAIT_TIMEOUT, 0), LockErrorKind::Contended);
+        assert_eq!(wait_error_kind(WAIT_FAILED, 0), LockErrorKind::Wait);
+        assert_eq!(wait_error_kind(WAIT_TIMEOUT, INFINITE), LockErrorKind::Wait);
+    }
 }
