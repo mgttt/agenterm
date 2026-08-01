@@ -902,7 +902,9 @@ try {
         context,
         cli,
         ["list-panes", "-t", tab_id, "-F", "#{pane_input_bytes}"]
-    ).trim().parse_int();
+    );
+    shift_tab_input_before.trim();
+    shift_tab_input_before = shift_tab_input_before.parse_int();
     require(
         gui.window_message(shortcut_message, 0x09, 2) == 1,
         "remote_ui_shift_tab_not_consumed"
@@ -911,11 +913,14 @@ try {
         context,
         cli,
         ["list-panes", "-t", tab_id, "-F", "#{pane_input_bytes}"]
-    ).trim().parse_int();
+    );
+    shift_tab_input_after.trim();
+    shift_tab_input_after = shift_tab_input_after.parse_int();
     require(
         shift_tab_input_after == shift_tab_input_before + 3,
         "remote_ui_shift_tab_pty_bytes_invalid"
     );
+    text_cli(context, cli, ["send-keys", "-t", tab_id, "C-c"]);
 
     print("STEP preview, cancel, and apply client-owned Settings");
     let replacement_composer = gui.window_control(2101);
