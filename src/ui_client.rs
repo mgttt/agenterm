@@ -27,6 +27,34 @@ pub(crate) struct UiClientModel {
     last_heartbeat: Instant,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct UiResizeRequest {
+    lease_id: String,
+    client_pid: u32,
+    server_epoch: String,
+    tab_id: String,
+    rows: u16,
+    columns: u16,
+}
+
+impl UiResizeRequest {
+    pub(crate) fn execute(self) -> Result<()> {
+        interact_with_identity(
+            &self.lease_id,
+            self.client_pid,
+            &self.server_epoch,
+            "resize",
+            &self.tab_id,
+            vec![
+                "--rows".to_owned(),
+                self.rows.to_string(),
+                "--columns".to_owned(),
+                self.columns.to_string(),
+            ],
+        )
+    }
+}
+
 impl UiClientModel {
     pub(crate) fn connect(client_id: String) -> Result<Self> {
         let client_pid = std::process::id();
@@ -198,17 +226,20 @@ impl UiClientModel {
         self.interact("input", tab_id, std::mem::take(&mut arguments))
     }
 
-    pub(crate) fn resize(&mut self, tab_id: &str, rows: u16, columns: u16) -> Result<()> {
-        self.interact(
-            "resize",
+    pub(crate) fn resize_request(
+        &self,
+        tab_id: String,
+        rows: u16,
+        columns: u16,
+    ) -> UiResizeRequest {
+        UiResizeRequest {
+            lease_id: self.lease.lease_id.clone(),
+            client_pid: self.client_pid,
+            server_epoch: self.snapshot.server_epoch.clone(),
             tab_id,
-            vec![
-                "--rows".to_owned(),
-                rows.to_string(),
-                "--columns".to_owned(),
-                columns.to_string(),
-            ],
-        )
+            rows,
+            columns,
+        }
     }
 
     pub(crate) fn run_control(&mut self, arguments: Vec<String>) -> Result<IpcResponse> {
@@ -334,28 +365,14 @@ impl UiClientModel {
     }
 
     fn interact(&mut self, action: &str, tab_id: &str, tail: Vec<String>) -> Result<()> {
-        let mut arguments = vec![
-            "ui-interact".to_owned(),
-            action.to_owned(),
-            "--lease-id".to_owned(),
-            self.lease.lease_id.clone(),
-            "--client-pid".to_owned(),
-            self.client_pid.to_string(),
-            "-t".to_owned(),
-            tab_id.to_owned(),
-        ];
-        arguments.extend(tail);
-        let response = require_success(send_ipc_request(arguments)?)?;
-        let value: serde_json::Value =
-            serde_json::from_str(&response.output).context("invalid UI interaction response")?;
-        if value["action"].as_str() != Some(action)
-            || value["tab_id"].as_str() != Some(tab_id)
-            || value["position"]["server_epoch"].as_str()
-                != Some(self.snapshot.server_epoch.as_str())
-        {
-            anyhow::bail!("UI interaction response identity changed");
-        }
-        Ok(())
+        interact_with_identity(
+            &self.lease.lease_id,
+            self.client_pid,
+            &self.snapshot.server_epoch,
+            action,
+            tab_id,
+            tail,
+        )
     }
 
     pub(crate) fn detach(&mut self) -> Result<()> {
@@ -394,6 +411,37 @@ impl UiClientModel {
         self.last_heartbeat = Instant::now();
         Ok(())
     }
+}
+
+fn interact_with_identity(
+    lease_id: &str,
+    client_pid: u32,
+    server_epoch: &str,
+    action: &str,
+    tab_id: &str,
+    tail: Vec<String>,
+) -> Result<()> {
+    let mut arguments = vec![
+        "ui-interact".to_owned(),
+        action.to_owned(),
+        "--lease-id".to_owned(),
+        lease_id.to_owned(),
+        "--client-pid".to_owned(),
+        client_pid.to_string(),
+        "-t".to_owned(),
+        tab_id.to_owned(),
+    ];
+    arguments.extend(tail);
+    let response = require_success(send_ipc_request(arguments)?)?;
+    let value: serde_json::Value =
+        serde_json::from_str(&response.output).context("invalid UI interaction response")?;
+    if value["action"].as_str() != Some(action)
+        || value["tab_id"].as_str() != Some(tab_id)
+        || value["position"]["server_epoch"].as_str() != Some(server_epoch)
+    {
+        anyhow::bail!("UI interaction response identity changed");
+    }
+    Ok(())
 }
 
 fn request_json<T: serde::de::DeserializeOwned>(arguments: Vec<String>) -> Result<T> {

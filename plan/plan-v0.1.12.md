@@ -377,8 +377,16 @@ Release 全部是本轮明确非目标。
   的白箱复核又发现 native resize 一次失败会污染 terminal fatal error、永久拒绝后续输入，
   同时 server 仍提交虚假的 `terminal.resized`。该错误边界现已修正：native 接受后才提交
   parser 网格、`last_size` 与 journal；拒绝返回 retryable typed failure 且不毒化 terminal。
-  两项聚焦回归覆盖失败保留旧网格与成功后原子提交。同步 IPC 在 server 忙时仍可能阻塞
-  UI，须以 coalesced async resize 独立硬化，不能用本次正确性修复冒充完成。
+  两项聚焦回归覆盖失败保留旧网格与成功后原子提交。GUI resize 现也完成独立异步硬化：
+  Win32 event thread 只计算目标 grid 并覆盖一个 latest-only 待发送槽，单一 owned worker
+  串行执行 bounded IPC；每个结果绑定 lease/client PID/server epoch/tab/grid，重连前或已被
+  更新尺寸取代的结果不会污染当前状态。公开 `ui-snapshot` 同时报告 current/desired grid 与
+  pending convergence。新增 worker 单测证明首个 IPC 被阻塞时调用侧不阻塞、相邻中间尺寸被
+  丢弃且最终尺寸必达；462 项 library tests、all-target warnings-denied Clippy、七产物 dev
+  build 及 95.9 秒完整 `remote-ui-smoke` 通过。owning journey 连续操作 native z/Z 18 次，
+  等待 grid 精确收敛后立即验证 PTY 输入，并继续通过选择复制、detach、同 session 重连、
+  server fault recovery 与最终 cleanup。剩余限制是时间域闪烁仍需真实高输出/idle 肉眼或
+  capture 证据，不能由该状态收敛测试替代。
 - [x] 默认 `Keep Server Running` 不再因调用者 Job cleanup 杀死独立 server/PTYS；
   GUI 与 CLI 统一走 platform process facade，完整 replaceable-UI 黑盒已证明退出、
   detached lease、同 server/session 接回与最终显式 Stop Server。live dogfood 又发现

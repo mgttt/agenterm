@@ -145,6 +145,17 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
       while Esc or a second segment click restores the prior draft unchanged.
       Same-server GUI upgrade/rollback, ordinary-launch and observation-shape
       parity qualification are shipped.
+    - [x] Windows layout and font changes never wait for PTY resize IPC on the
+      Win32 event thread. One owned background worker serializes resize calls,
+      retains only the latest queued grid while a request is in flight, and
+      binds every result to its lease, client PID, server epoch, stable tab ID,
+      rows and columns. Superseded or pre-reconnect results cannot mutate the
+      current GUI state; a failed current request remains a typed visible
+      failure without poisoning later terminal input. The published UI
+      projection exposes current/desired grid and pending convergence, and the
+      owning Windows journey alternates native z/Z controls 18 times, waits for
+      exact grid convergence, then proves immediate PTY input before completing
+      detach, same-session reconnect and server-fault recovery.
   - [x] compatibility is fail-closed and asymmetric: a new GUI may connect to
     its declared server protocol range; an incompatible server remains alive
     and reports a precise upgrade/restart choice instead of being killed

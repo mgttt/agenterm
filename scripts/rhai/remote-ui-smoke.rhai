@@ -228,6 +228,20 @@ fn wait_effective_font_size(context, cli, size, overridden) {
     throw "remote_ui_effective_font_timeout:" + size;
 }
 
+fn wait_terminal_resize_settled(context, cli) {
+    for attempt in 0..200 {
+        let snapshot = json_cli(context, cli, ["ui-snapshot"]);
+        let terminal = snapshot.layout.terminal;
+        if !terminal.resize_pending
+                && terminal.rows == terminal.desired_rows
+                && terminal.cols == terminal.desired_cols {
+            return snapshot;
+        }
+        rhai::task::sleep(std::time::Duration::from_millis(25));
+    }
+    throw "remote_ui_terminal_resize_settle_timeout";
+}
+
 fn wait_viewport_mutation(context, cli, baseline, tab_id) {
     text_cli(
         context,
@@ -983,11 +997,38 @@ try {
         "remote_ui_font_button_stole_terminal_focus"
     );
     let overridden_font = wait_effective_font_size(context, cli, 15, true);
+    wait_terminal_resize_settled(context, cli);
     require(
         overridden_font.settings.terminal_font_size == 14
             && overridden_font.settings.current_terminal_override.terminal_font_size == 15
             && overridden_font.settings.effective.terminal_font_size == 15,
         "remote_ui_terminal_font_override_invalid"
+    );
+    for attempt in 0..8 {
+        font_decrease_button.click();
+        font_increase_button.click();
+    }
+    font_decrease_button.click();
+    wait_effective_font_size(context, cli, 14, true);
+    wait_terminal_resize_settled(context, cli);
+    font_increase_button.click();
+    wait_effective_font_size(context, cli, 15, true);
+    wait_terminal_resize_settled(context, cli);
+    let font_input_marker = "AGENTERM_FONT_INPUT_" + context.run_id;
+    text_cli(
+        context,
+        cli,
+        ["send-keys", "-t", tab_id, "-l", "echo " + font_input_marker]
+    );
+    text_cli(context, cli, ["send-keys", "-t", tab_id, "Enter"]);
+    text_cli(
+        context,
+        cli,
+        [
+            "wait-pane", "-t", tab_id,
+            "--contains", font_input_marker,
+            "--timeout-ms", "5000"
+        ]
     );
     let settings_current_scope = gui.window_control(2133);
     let settings_reset_overrides = gui.window_control(2137);
@@ -996,6 +1037,7 @@ try {
     settings_reset_overrides.click();
     settings_apply.click();
     let inherited_font = wait_effective_font_size(context, cli, 14, false);
+    wait_terminal_resize_settled(context, cli);
     require(
         inherited_font.settings.current_terminal_override == ()
             && inherited_font.settings.effective.terminal_font_size == 14,

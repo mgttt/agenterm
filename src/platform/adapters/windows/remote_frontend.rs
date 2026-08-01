@@ -1,6 +1,13 @@
 //! Windows native replaceable GUI projection.
 
-use std::time::{Duration, Instant};
+use std::{
+    sync::{
+        Arc, Condvar, Mutex,
+        mpsc::{self, Receiver},
+    },
+    thread::{self, JoinHandle},
+    time::{Duration, Instant},
+};
 
 use crate::{
     client::{ipc_address, ipc_endpoint, resolved_ipc_endpoint},
@@ -705,7 +712,8 @@ struct RemoteWindowState {
     terminal_text_decoder: input::Utf16TextDecoder,
     last_active_id: Option<String>,
     last_composer_identity: Option<(String, Option<String>, bool, usize)>,
-    last_terminal_resize: Option<RemoteTerminalResize>,
+    pending_terminal_resize: Option<RemoteTerminalResize>,
+    terminal_resize_worker: RemoteTerminalResizeWorker,
     tabs_resize_dragging: bool,
     editing_tab_id: Option<String>,
     window_close_pending: bool,
@@ -828,6 +836,7 @@ impl RemoteWindowState {
             appearance.terminal_font_size,
         )?;
         let last_composer_identity = remote_composer_identity(&client);
+        let terminal_resize_worker = RemoteTerminalResizeWorker::spawn()?;
         Ok(Self {
             window,
             edit,
@@ -883,7 +892,8 @@ impl RemoteWindowState {
             terminal_text_decoder: input::Utf16TextDecoder::default(),
             last_active_id,
             last_composer_identity,
-            last_terminal_resize: None,
+            pending_terminal_resize: None,
+            terminal_resize_worker,
             tabs_resize_dragging: false,
             editing_tab_id: None,
             window_close_pending: false,
@@ -911,6 +921,7 @@ impl RemoteWindowState {
     }
 
     fn tick(&mut self) -> bool {
+        let resize_changed = self.process_terminal_resize_results();
         let result = self
             .client
             .as_mut()
@@ -921,6 +932,7 @@ impl RemoteWindowState {
             });
         match result {
             Ok(changed) => {
+                self.reconcile_pending_terminal_resize();
                 self.reconcile_tab_editor();
                 self.reconcile_terminal_selection();
                 self.reconcile_tab_close();
@@ -958,7 +970,7 @@ impl RemoteWindowState {
                     }
                 };
                 match self.publish_ui_snapshot() {
-                    Ok(published) => changed || command_changed || published,
+                    Ok(published) => resize_changed || changed || command_changed || published,
                     Err(error) => {
                         self.last_error =
                             Some(format!("UI snapshot publication failed: {error:#}"));
@@ -972,6 +984,7 @@ impl RemoteWindowState {
                 // keep rendering it as connected or accept input against stale
                 // server-owned state while recovery is in progress.
                 self.client = None;
+                self.pending_terminal_resize = None;
                 if disconnected_server_pid
                     .is_some_and(|pid| intentional_shutdown_matches(&ipc_address(), pid))
                 {
@@ -1952,6 +1965,7 @@ impl RemoteWindowState {
             .active_tab()
             .map(|tab| (tab.screen.rows, tab.screen.columns))
             .unwrap_or_default();
+        let (desired_rows, desired_columns) = self.desired_terminal_grid();
         let tab_editor = self.editing_tab_id.as_ref().map(|id| {
             let focused = self.window.focused_target();
             serde_json::json!({
@@ -2105,6 +2119,9 @@ impl RemoteWindowState {
                     "bounds": pixel_rect_json(layout.terminal),
                     "rows": rows,
                     "cols": columns,
+                    "desired_rows": desired_rows,
+                    "desired_cols": desired_columns,
+                    "resize_pending": self.pending_terminal_resize.is_some(),
                     "scrollbar": scrollbar,
                 },
                 "composer": {
@@ -2894,6 +2911,39 @@ impl RemoteWindowState {
         else {
             return;
         };
+        let (rows, columns) = self.desired_terminal_grid();
+        let requested = RemoteTerminalResize {
+            server_epoch,
+            tab_id,
+            rows,
+            columns,
+        };
+        match terminal_resize_decision(
+            current_rows,
+            current_columns,
+            self.pending_terminal_resize.as_ref(),
+            &requested,
+        ) {
+            RemoteTerminalResizeDecision::Current => {
+                self.pending_terminal_resize = None;
+                return;
+            }
+            RemoteTerminalResizeDecision::InFlight => return,
+            RemoteTerminalResizeDecision::Send => {}
+        }
+        let Some(request) = self.client.as_ref().map(|client| {
+            client.resize_request(requested.tab_id.clone(), requested.rows, requested.columns)
+        }) else {
+            return;
+        };
+        self.pending_terminal_resize = Some(requested.clone());
+        self.terminal_resize_worker.queue(RemoteTerminalResizeTask {
+            requested,
+            execute: Box::new(move || request.execute()),
+        });
+    }
+
+    fn desired_terminal_grid(&self) -> (u16, u16) {
         let (_, terminal, _, _) = self.layout_rects();
         let rows = ((terminal.bottom - terminal.top) / self.cell_height)
             .clamp(1, 512)
@@ -2904,37 +2954,41 @@ impl RemoteWindowState {
             .clamp(1, 512)
             .try_into()
             .unwrap_or(1);
-        let requested = RemoteTerminalResize {
-            server_epoch,
-            tab_id,
-            rows,
-            columns,
+        (rows, columns)
+    }
+
+    fn reconcile_pending_terminal_resize(&mut self) {
+        let Some(pending) = self.pending_terminal_resize.as_ref() else {
+            return;
         };
-        match terminal_resize_decision(
-            current_rows,
-            current_columns,
-            self.last_terminal_resize.as_ref(),
-            &requested,
-        ) {
-            RemoteTerminalResizeDecision::Current => {
-                self.last_terminal_resize = None;
-                return;
-            }
-            RemoteTerminalResizeDecision::InFlight => return,
-            RemoteTerminalResizeDecision::Send => {}
+        let matches = self.client.as_ref().is_some_and(|client| {
+            let snapshot = client.snapshot();
+            snapshot.server_epoch == pending.server_epoch
+                && snapshot.active_tab_id.as_deref() == Some(pending.tab_id.as_str())
+                && snapshot.tabs.iter().any(|tab| {
+                    tab.id == pending.tab_id
+                        && tab.screen.rows == u32::from(pending.rows)
+                        && tab.screen.columns == u32::from(pending.columns)
+                })
+        });
+        if matches {
+            self.pending_terminal_resize = None;
         }
-        let result = self
-            .client
-            .as_mut()
-            .context("UI is disconnected")
-            .and_then(|client| client.resize(&requested.tab_id, requested.rows, requested.columns));
-        match result {
-            Ok(()) => self.last_terminal_resize = Some(requested),
-            Err(error) => {
-                self.last_terminal_resize = None;
-                self.last_error = Some(format!("PTY resize failed: {error:#}"));
+    }
+
+    fn process_terminal_resize_results(&mut self) -> bool {
+        let mut changed = false;
+        while let Ok(completed) = self.terminal_resize_worker.try_result() {
+            if self.pending_terminal_resize.as_ref() != Some(&completed.requested) {
+                continue;
+            }
+            if let Err(error) = completed.result {
+                self.pending_terminal_resize = None;
+                self.last_error = Some(format!("PTY resize failed: {error}"));
+                changed = true;
             }
         }
+        changed
     }
 
     fn load_composer(&self) {
@@ -5398,6 +5452,114 @@ struct RemoteTerminalResize {
     columns: u16,
 }
 
+struct RemoteTerminalResizeTask {
+    requested: RemoteTerminalResize,
+    execute: Box<dyn FnOnce() -> Result<()> + Send>,
+}
+
+struct RemoteTerminalResizeWorkerState {
+    pending: Option<RemoteTerminalResizeTask>,
+    shutdown: bool,
+}
+
+struct RemoteTerminalResizeWorkerShared {
+    state: Mutex<RemoteTerminalResizeWorkerState>,
+    wake: Condvar,
+}
+
+struct RemoteTerminalResizeResult {
+    requested: RemoteTerminalResize,
+    result: std::result::Result<(), String>,
+}
+
+struct RemoteTerminalResizeWorker {
+    shared: Arc<RemoteTerminalResizeWorkerShared>,
+    results: Receiver<RemoteTerminalResizeResult>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl RemoteTerminalResizeWorker {
+    fn spawn() -> Result<Self> {
+        let shared = Arc::new(RemoteTerminalResizeWorkerShared {
+            state: Mutex::new(RemoteTerminalResizeWorkerState {
+                pending: None,
+                shutdown: false,
+            }),
+            wake: Condvar::new(),
+        });
+        let worker_shared = Arc::clone(&shared);
+        let (result_sender, results) = mpsc::channel();
+        let thread = thread::Builder::new()
+            .name("agenterm-terminal-resize".to_owned())
+            .spawn(move || {
+                loop {
+                    let task = {
+                        let mut state = worker_shared
+                            .state
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner);
+                        while state.pending.is_none() && !state.shutdown {
+                            state = worker_shared
+                                .wake
+                                .wait(state)
+                                .unwrap_or_else(std::sync::PoisonError::into_inner);
+                        }
+                        if state.shutdown {
+                            return;
+                        }
+                        state.pending.take().expect("pending resize task")
+                    };
+                    let requested = task.requested;
+                    let result = (task.execute)().map_err(|error| format!("{error:#}"));
+                    if result_sender
+                        .send(RemoteTerminalResizeResult { requested, result })
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
+            })
+            .context("could not start terminal resize worker")?;
+        Ok(Self {
+            shared,
+            results,
+            thread: Some(thread),
+        })
+    }
+
+    fn queue(&self, task: RemoteTerminalResizeTask) {
+        let mut state = self
+            .shared
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.pending = Some(task);
+        self.shared.wake.notify_one();
+    }
+
+    fn try_result(&self) -> std::result::Result<RemoteTerminalResizeResult, mpsc::TryRecvError> {
+        self.results.try_recv()
+    }
+}
+
+impl Drop for RemoteTerminalResizeWorker {
+    fn drop(&mut self) {
+        let mut state = self
+            .shared
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.pending = None;
+        state.shutdown = true;
+        self.shared.wake.notify_one();
+        drop(state);
+        // A request already inside bounded IPC may take up to its transport
+        // deadline. Dropping the handle detaches only that bounded tail while
+        // the shutdown flag prevents any queued resize from starting.
+        let _ = self.thread.take();
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum RemoteTerminalResizeDecision {
     Current,
@@ -6231,6 +6393,90 @@ mod tests {
             terminal_resize_decision(30, 100, Some(&requested), &replacement_tab),
             RemoteTerminalResizeDecision::Send
         );
+    }
+
+    #[test]
+    fn terminal_resize_worker_keeps_only_the_latest_queued_request() {
+        fn requested(rows: u16) -> RemoteTerminalResize {
+            RemoteTerminalResize {
+                server_epoch: "epoch-a".to_owned(),
+                tab_id: "@1".to_owned(),
+                rows,
+                columns: 80,
+            }
+        }
+
+        let worker = RemoteTerminalResizeWorker::spawn().expect("spawn resize worker");
+        let executed = Arc::new(Mutex::new(Vec::new()));
+        let release = Arc::new((Mutex::new(false), Condvar::new()));
+        let (started_sender, started_receiver) = mpsc::channel();
+
+        let first_executed = Arc::clone(&executed);
+        let first_release = Arc::clone(&release);
+        worker.queue(RemoteTerminalResizeTask {
+            requested: requested(21),
+            execute: Box::new(move || {
+                first_executed.lock().expect("record first resize").push(21);
+                started_sender.send(()).expect("signal first resize");
+                let (lock, wake) = &*first_release;
+                let mut released = lock.lock().expect("lock resize release");
+                while !*released {
+                    released = wake.wait(released).expect("wait resize release");
+                }
+                Ok(())
+            }),
+        });
+        started_receiver
+            .recv_timeout(Duration::from_secs(2))
+            .expect("first resize started off-thread");
+
+        let middle_executed = Arc::clone(&executed);
+        worker.queue(RemoteTerminalResizeTask {
+            requested: requested(22),
+            execute: Box::new(move || {
+                middle_executed
+                    .lock()
+                    .expect("record middle resize")
+                    .push(22);
+                Ok(())
+            }),
+        });
+        let latest_executed = Arc::clone(&executed);
+        worker.queue(RemoteTerminalResizeTask {
+            requested: requested(23),
+            execute: Box::new(move || {
+                latest_executed
+                    .lock()
+                    .expect("record latest resize")
+                    .push(23);
+                Ok(())
+            }),
+        });
+
+        let (lock, wake) = &*release;
+        *lock.lock().expect("release first resize") = true;
+        wake.notify_one();
+
+        let first = worker
+            .results
+            .recv_timeout(Duration::from_secs(2))
+            .expect("receive first resize result");
+        let latest = worker
+            .results
+            .recv_timeout(Duration::from_secs(2))
+            .expect("receive latest resize result");
+        assert_eq!(first.requested.rows, 21);
+        assert!(first.result.is_ok());
+        assert_eq!(latest.requested.rows, 23);
+        assert!(latest.result.is_ok());
+        assert_eq!(
+            *executed.lock().expect("read executed resizes"),
+            vec![21, 23]
+        );
+        assert!(matches!(
+            worker.try_result(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
     }
 
     #[test]
