@@ -15,6 +15,18 @@ pub(crate) const fn platform_kind() -> crate::PlatformKind {
     }
 }
 
+#[cfg(all(feature = "host-memory", windows))]
+#[path = "adapters/windows/host_memory.rs"]
+pub(crate) mod host_memory;
+
+#[cfg(all(feature = "host-memory", target_os = "linux"))]
+#[path = "adapters/linux/host_memory.rs"]
+pub(crate) mod host_memory;
+
+#[cfg(all(feature = "host-memory", target_os = "macos"))]
+#[path = "adapters/macos/host_memory.rs"]
+pub(crate) mod host_memory;
+
 #[cfg(all(feature = "process-image", windows))]
 #[path = "adapters/windows/process_image.rs"]
 pub(crate) mod process_image;

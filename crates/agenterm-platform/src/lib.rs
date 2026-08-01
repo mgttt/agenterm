@@ -21,6 +21,7 @@ pub const fn platform_kind() -> PlatformKind {
 #[non_exhaustive]
 pub enum Capability {
     Hardware,
+    HostMemory,
     Entropy,
     ProcessControl,
     ProcessImage,
@@ -58,6 +59,7 @@ pub enum CapabilityStatus {
 pub fn capability_status(capability: Capability) -> CapabilityStatus {
     let (enabled, implemented) = match capability {
         Capability::Hardware => (cfg!(feature = "hardware"), true),
+        Capability::HostMemory => (cfg!(feature = "host-memory"), true),
         Capability::Entropy => (cfg!(feature = "entropy"), true),
         Capability::ProcessControl => (cfg!(feature = "process-control"), true),
         Capability::ProcessImage => (cfg!(feature = "process-image"), true),
@@ -107,6 +109,9 @@ pub mod font;
 
 #[cfg(feature = "hardware")]
 pub mod hardware;
+
+#[cfg(feature = "host-memory")]
+pub mod host_memory;
 
 #[cfg(feature = "entropy")]
 pub mod entropy;
@@ -187,6 +192,22 @@ mod tests {
         #[cfg(not(feature = "filesystem"))]
         assert_eq!(
             crate::capability_status(crate::Capability::Filesystem),
+            crate::CapabilityStatus::Unsupported {
+                reason: std::borrow::Cow::Borrowed("feature-disabled")
+            }
+        );
+    }
+
+    #[cfg(feature = "host-memory")]
+    #[test]
+    fn host_memory_does_not_claim_processor_hardware() {
+        assert_eq!(
+            crate::capability_status(crate::Capability::HostMemory),
+            crate::CapabilityStatus::Available
+        );
+        #[cfg(not(feature = "hardware"))]
+        assert_eq!(
+            crate::capability_status(crate::Capability::Hardware),
             crate::CapabilityStatus::Unsupported {
                 reason: std::borrow::Cow::Borrowed("feature-disabled")
             }

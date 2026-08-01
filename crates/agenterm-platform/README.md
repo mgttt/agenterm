@@ -36,6 +36,7 @@ clipboard, IPC, or screenshot modules.
 |---|---|---|
 | `serde` | `IpcEndpoint` string serialization | `serde` |
 | `hardware` | host processor architecture, pointer width, parallelism and CPU features | none |
+| `host-memory` | host page size, mapping granularity and total physical memory | target `libc` / minimal `windows-sys` |
 | `entropy` | fail-closed host CSPRNG byte filling | target `libc` / minimal `windows-sys` |
 | `process-control` | typed graceful/forceful single-process termination | target `libc` / minimal `windows-sys` |
 | `process-image` | executable path for one selected host process | target `libc` / minimal `windows-sys` |
@@ -62,6 +63,7 @@ clipboard, IPC, or screenshot modules.
 | Capability | Windows | Linux | macOS |
 |---|---|---|---|
 | hardware | compile-target ISA + runtime CPU facts | compile-target ISA + runtime CPU facts | compile-target ISA + runtime CPU facts |
+| host memory | page/allocation geometry + physical total | page geometry + physical pages | page geometry + `hw.memsize` |
 | entropy | BCrypt system-preferred RNG | `getrandom(2)` | `arc4random_buf` |
 | process control | forceful termination; graceful Unsupported | SIGTERM/SIGKILL | SIGTERM/SIGKILL |
 | process image | queried full image path | `/proc/<pid>/exe` | `proc_pidpath` |

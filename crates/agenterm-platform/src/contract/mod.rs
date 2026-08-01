@@ -10,6 +10,8 @@ pub mod entropy;
 pub mod font;
 #[cfg(feature = "hardware")]
 pub mod hardware;
+#[cfg(feature = "host-memory")]
+pub mod host_memory;
 #[cfg(feature = "ime")]
 pub mod ime;
 #[cfg(feature = "input")]
