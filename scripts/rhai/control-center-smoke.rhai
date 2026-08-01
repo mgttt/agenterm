@@ -577,6 +577,10 @@ try {
             && live_server.pid == bootstrap.server_pid
             && live_server.epoch == bootstrap.server_epoch
             && live_server.sequence == bootstrap.position.sequence
+            && live_server.version != ()
+            && live_server.build.git_commit != ""
+            && live_server.build.profile != ""
+            && live_server.build.git_dirty != ""
             && live_server.active_tab_id == bootstrap.active_tab_id
             && tab_facts_match(bootstrap.tabs, live_server.tabs)
             && tab_counts_match(live_server.tabs, live_server.tab_counts)

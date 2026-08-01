@@ -528,6 +528,7 @@ fn connected_cockpit_lines(server: &ConnectedServer) -> Vec<String> {
         .unwrap_or_else(|| "none".to_owned());
     vec![
         format!("Server      {authority} · PID {} · v{version}", server.pid),
+        format!("Build       {}", build_identity_summary(&server.build)),
         format!(
             "Event       epoch {} · sequence {}",
             compact_identity(&server.epoch),
@@ -546,6 +547,23 @@ fn connected_cockpit_lines(server: &ConnectedServer) -> Vec<String> {
             server.components.info_hub
         ),
     ]
+}
+
+fn build_identity_summary(build: &Value) -> String {
+    let commit = build["git_commit"]
+        .as_str()
+        .filter(|value| !value.is_empty())
+        .map(compact_identity)
+        .unwrap_or_else(|| "unknown".to_owned());
+    let profile = build["profile"]
+        .as_str()
+        .filter(|value| !value.is_empty())
+        .unwrap_or("unknown");
+    let cleanliness = build["git_dirty"]
+        .as_str()
+        .filter(|value| !value.is_empty())
+        .unwrap_or("unknown");
+    format!("{commit} · {profile} · {cleanliness}")
 }
 
 fn compact_identity(identity: &str) -> String {
@@ -2400,7 +2418,11 @@ mod tests {
             epoch: "epoch-0123456789abcdef".to_owned(),
             sequence: 77,
             version: Some("0.1.12".to_owned()),
-            build: serde_json::json!({"git_commit": "abc"}),
+            build: serde_json::json!({
+                "git_commit": "abcdef0123456789",
+                "profile": "dev",
+                "git_dirty": "clean"
+            }),
             active_tab_id: Some("@1".to_owned()),
             tab_counts: TabCounts::from_tabs(&tabs),
             tabs,
@@ -2413,13 +2435,14 @@ mod tests {
         };
 
         let lines = connected_cockpit_lines(&server);
-        assert_eq!(lines.len(), 5);
+        assert_eq!(lines.len(), 6);
         assert!(lines[0].contains("dev · PID 123 · v0.1.12"));
-        assert!(lines[1].contains("epoch epoch-012345… · sequence 77"));
-        assert!(lines[2].contains("2 tabs · 1 running · 1 dead"));
-        assert!(lines[3].contains("@1 · build"));
-        assert!(lines[4].contains("server available"));
-        assert!(lines[4].contains("workflows unavailable"));
+        assert!(lines[1].contains("abcdef012345… · dev · clean"));
+        assert!(lines[2].contains("epoch epoch-012345… · sequence 77"));
+        assert!(lines[3].contains("2 tabs · 1 running · 1 dead"));
+        assert!(lines[4].contains("@1 · build"));
+        assert!(lines[5].contains("server available"));
+        assert!(lines[5].contains("workflows unavailable"));
     }
 
     #[test]

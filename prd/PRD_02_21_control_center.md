@@ -140,7 +140,8 @@ Control Center is the product name; the executable family uses
 - [~] Cockpit is the first useful read-only slice: it shows the selected server
   build and identity, logical instance, process health, event epoch/sequence,
   explicit total/running/dead tab counts, active stable ID/title, and component
-  availability from current typed facts. The renderer-neutral snapshot and
+  availability from current typed facts. Build commit/profile/cleanliness is
+  visible without exposing a second build authority. The renderer-neutral snapshot and
   native shell consume the same facts; richer inspect/select navigation remains
   open.
 - [ ] inspect and select shortcuts target stable IDs and return verifiable
@@ -282,7 +283,8 @@ future promotion gates.
 - [~] Cockpit presents a causally identified snapshot and terminal-independent
   component availability; its public snapshot now carries explicit
   total/running/dead tab counts while the native renderer displays the same
-  logical instance, PID/version, epoch/sequence, active stable tab ID/title and
+  logical instance, PID/version, build commit/profile/cleanliness,
+  epoch/sequence, active stable tab ID/title and
   component states. Workflows, Extensions, and InfoHub retain truthful
   unavailable states; richer navigation and inspect/select actions remain open.
 - [~] close, force-kill, renderer failure, server restart, server loss,

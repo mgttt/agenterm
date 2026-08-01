@@ -34,9 +34,10 @@ Control Center / native IPC 进入可持续演进状态**
 
 2026-08-01 首个建设期增量：Cockpit snapshot 新增明确的
 `tab_counts.{total,running,dead}`，native shell 同源显示 logical instance、
-server PID/version、epoch/sequence、active stable tab ID/title 和四类 component
+server PID/version、build commit/profile/cleanliness、epoch/sequence、active stable tab ID/title 和四类 component
 availability。390 项 Quick tests、七产物 dev build 和完整 Windows
-`control-center-smoke` 通过；renderer-owned 760×480 PNG 为 50,278 bytes，
+`control-center-smoke` 通过；加入 build identity 行后的 renderer-owned
+760×480 PNG 为 43,509 bytes，
 no-activate、因果刷新、server recovery、typed close 与 orphan-free cleanup
 保持通过。inspect/select 导航和 Linux 原生 renderer 证据仍是后续叶。
 
