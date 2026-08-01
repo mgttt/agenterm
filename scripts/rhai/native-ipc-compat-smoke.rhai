@@ -782,13 +782,14 @@ try {
         ""
     );
     let tab_id = snapshot.active_tab_id;
-    let marker = "compat-" + context.run_id;
+    let baseline_marker = "compat-baseline-" + context.run_id;
+    let head_marker = "compat-head-write-" + context.run_id;
     invoke(
         context,
         head_cli,
         [
             "--instance", native_instance,
-            "rename-window", "-t", tab_id, marker
+            "rename-window", "-t", tab_id, baseline_marker
         ],
         false,
         runtime_directory,
@@ -845,8 +846,41 @@ try {
     );
     require(
         old_to_head_native.pid == head_upgrade_server.id
-            && upgraded_names.stdout.contains(marker),
+            && upgraded_names.stdout.contains(baseline_marker),
         "native_ipc_compat_upgrade_state"
+    );
+
+    print("STEP HEAD server writes rollback-visible persistent state");
+    invoke(
+        context,
+        head_cli,
+        [
+            "--instance", native_instance,
+            "rename-window", "-t", tab_id, head_marker
+        ],
+        false,
+        runtime_directory,
+        config_directory,
+        native_workspace,
+        ""
+    );
+    let head_written_names = invoke(
+        context,
+        published_111.cli,
+        [
+            "--instance", native_instance,
+            "list-windows", "-F", "#{window_name}"
+        ],
+        false,
+        runtime_directory,
+        config_directory,
+        native_workspace,
+        ""
+    );
+    require(
+        head_written_names.stdout.contains(head_marker)
+            && !head_written_names.stdout.contains(baseline_marker),
+        "native_ipc_compat_head_write_state"
     );
     shutdown(
         context,
@@ -860,7 +894,7 @@ try {
         "native_ipc_compat_head_upgrade_shutdown"
     );
 
-    print("STEP rollback to published v0.1.11 preserves HEAD-visible state");
+    print("STEP rollback lets both v0.1.11 and HEAD read HEAD-written state");
     let rollback_command = configured(
         context,
         published_111.server,
@@ -872,7 +906,17 @@ try {
     );
     let rollback_server = rollback_command.start();
     owned_children.push(rollback_server);
-    let rollback_protocol = wait_protocol(
+    let rollback_old_protocol = wait_protocol(
+        context,
+        published_111.cli,
+        ["--instance", native_instance],
+        runtime_directory,
+        config_directory,
+        native_workspace,
+        "",
+        rollback_server
+    );
+    let rollback_head_protocol = wait_protocol(
         context,
         head_cli,
         ["--instance", native_instance],
@@ -882,7 +926,20 @@ try {
         "",
         rollback_server
     );
-    let rollback_names = invoke(
+    let rollback_old_names = invoke(
+        context,
+        published_111.cli,
+        [
+            "--instance", native_instance,
+            "list-windows", "-F", "#{window_name}"
+        ],
+        false,
+        runtime_directory,
+        config_directory,
+        native_workspace,
+        ""
+    );
+    let rollback_head_names = invoke(
         context,
         head_cli,
         [
@@ -896,8 +953,12 @@ try {
         ""
     );
     require(
-        rollback_protocol.pid == rollback_server.id
-            && rollback_names.stdout.contains(marker),
+        rollback_old_protocol.pid == rollback_server.id
+            && rollback_head_protocol.pid == rollback_server.id
+            && rollback_old_names.stdout.contains(head_marker)
+            && rollback_head_names.stdout.contains(head_marker)
+            && !rollback_old_names.stdout.contains(baseline_marker)
+            && !rollback_head_names.stdout.contains(baseline_marker),
         "native_ipc_compat_rollback_state"
     );
     shutdown(
