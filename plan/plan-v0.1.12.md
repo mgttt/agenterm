@@ -348,7 +348,14 @@ Release 全部是本轮明确非目标。
   Dark/Light A/B 为 528/572 ms 与 663/553 ms，Light 没有稳定慢路径，更不是 4x。
   smoke 恰在持久化 Light 后进入 CWD/OSC7、层级 mutation、8-tab dense fixture、80 行
   output、scroll/selection 和 server recovery 的重负载半程，颜色与负载阶段高度混杂。
-  该结论排除“颜色填充本身 4x”，但不替代 paint/invalidate 时间域观察。
+  后续按 `commands.json` 时间线确认用户体感真实：三轮黑底阶段 15.0--18.3s，白底后
+  108.6--122.5s，相邻 snapshot 中位间隔上升约 1.8--2.1x。根因不是 palette，而是
+  harness 每条 CLI 都 parse + pretty-write 全部历史形成 O(n²)；每 50 条命令的中位
+  间隔从 213--243ms 恶化到 815--1000ms。记录器现改为单条 bounded JSONL durable
+  append、即时 bounded checkpoint、cleanup 时一次 compact JSON array promotion；旧日志
+  延迟掩盖的 server→GUI 依赖也改为 observed-sequence barrier。相同完整 journey 连续
+  通过，精确计时由 169.9s 降至 36.787s（4.62x），且仍切换 Light、保留原 15 项
+  evidence。这解释了“白底测试慢 3--5 倍”，同时不替代 paint/invalidate 独立观察。
   原生 host 现增加单调 `redraw_requests`、`parent_paints`、child bounds/visibility
   update/skip 计数；仅由测试消息主动采样并锁存到 `ui-snapshot`，读取计数不会形成
   snapshot→redraw→snapshot feedback。精确集成树的两轮完整 `remote-ui-smoke` 分别以

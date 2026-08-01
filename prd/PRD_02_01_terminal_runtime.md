@@ -102,6 +102,18 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   path. The full smoke applies Light immediately before its IPC-heavy CWD,
   hierarchy, dense-tab, 80-line scroll, selection, and recovery half, explaining
   a strong visual correlation without dismissing remaining temporal flicker.
+  Timestamp reconstruction then confirmed the user's observation precisely:
+  three runs spent 15.0--18.3 seconds before Light and 108.6--122.5 seconds
+  afterward, while like-for-like snapshot intervals rose about 1.8--2.1x. The
+  dominant cause was not the palette but the smoke harness reparsing and
+  pretty-rewriting its entire growing `commands.json` after every CLI call, an
+  O(n²) recorder whose per-50-command median grew from 213--243 ms to
+  815--1000 ms. Command evidence now appends one bounded JSONL record, keeps a
+  bounded immediate checkpoint, and seals one compact schema-compatible JSON
+  array at cleanup. Explicit observed-sequence barriers replace accidental
+  delays the old logger had hidden. The same complete journey now passes in
+  36.787 seconds versus 169.9 seconds before, a 4.62x improvement, while still
+  applying Light and retaining all 15 evidence IDs.
   Focused structural tests pass. The native host now exposes monotonic redraw,
   parent-paint, child-layout, and child-visibility counters through an explicit
   test-only sample message; the sample is latched into `ui-snapshot` so observing

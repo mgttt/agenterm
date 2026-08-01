@@ -1551,7 +1551,14 @@ try {
         "remote_ui_tab_close_cancel_invalid"
     );
     gui.window_pointer("click", 330, 64);
-    tab_close_confirm.click();
+    let reopened_tab_close_confirm = gui.window_control(2119);
+    let reopened_tab_close_cancel = gui.window_control(2120);
+    require(
+        reopened_tab_close_confirm.visible
+            && reopened_tab_close_cancel.visible,
+        "remote_ui_tab_close_modal_reopen_missing"
+    );
+    reopened_tab_close_confirm.click();
     let confirmed_close = json_cli(
         context,
         cli,
@@ -1563,6 +1570,11 @@ try {
             && confirmed_close.active_tab_id == tab_id
             && !tab_close_confirm.visible,
         "remote_ui_tab_close_confirm_invalid"
+    );
+    wait_observed(
+        context,
+        cli,
+        confirmed_close.position.sequence
     );
 
     print("STEP reject a hierarchy cycle and promote a closing parent's child");
@@ -1577,6 +1589,16 @@ try {
         ]
     );
     hierarchy_child_id.trim();
+    let hierarchy_child_bootstrap = json_cli(
+        context,
+        cli,
+        ["ui-bootstrap"]
+    );
+    wait_observed(
+        context,
+        cli,
+        hierarchy_child_bootstrap.position.sequence
+    );
     let hierarchy_grandchild_id = text_cli(
         context,
         cli,
@@ -1588,6 +1610,16 @@ try {
         ]
     );
     hierarchy_grandchild_id.trim();
+    let hierarchy_grandchild_bootstrap = json_cli(
+        context,
+        cli,
+        ["ui-bootstrap"]
+    );
+    wait_observed(
+        context,
+        cli,
+        hierarchy_grandchild_bootstrap.position.sequence
+    );
     let hierarchy = json_cli(context, cli, ["ui-snapshot"]);
     let hierarchy_child = find_tab(hierarchy, hierarchy_child_id);
     let hierarchy_grandchild =
@@ -1640,10 +1672,25 @@ try {
             && promoted_grandchild.parent_id == tab_id,
         "remote_ui_hierarchy_child_not_promoted"
     );
+    wait_observed(
+        context,
+        cli,
+        promoted.position.sequence
+    );
     text_cli(
         context,
         cli,
         ["kill-window", "-t", hierarchy_grandchild_id]
+    );
+    let hierarchy_clean = json_cli(
+        context,
+        cli,
+        ["ui-bootstrap"]
+    );
+    wait_observed(
+        context,
+        cli,
+        hierarchy_clean.position.sequence
     );
 
     print("STEP edit title and note in place with Save and Cancel");

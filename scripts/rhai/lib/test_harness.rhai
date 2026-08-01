@@ -70,6 +70,10 @@ fn new_context(repo_value, suite) {
             run_directory,
             "commands.json"
         ).display,
+        command_journal_path: std::path::join(
+            run_directory,
+            "commands.jsonl"
+        ).display,
         cleanup_path: std::path::join(
             run_directory,
             "cleanup.json"
@@ -121,16 +125,11 @@ fn configured_command(context, program, arguments) {
 }
 
 fn append_command_record(context, arguments, output, expected_failure, redactions) {
-    let records = if std::fs::exists(context.command_log_path) {
-        rhai::json::parse_file(context.command_log_path)
-    } else {
-        []
-    };
     let safe_arguments = [];
     for argument in arguments {
         safe_arguments.push(redact_text(argument, redactions));
     }
-    records.push(#{
+    let record = #{
         recorded_at_utc: std::time::SystemTime::now().rfc3339,
         arguments: safe_arguments,
         expected_failure: expected_failure,
@@ -143,13 +142,47 @@ fn append_command_record(context, arguments, output, expected_failure, redaction
             // Preserve every command and outcome while keeping long smoke
             // journeys below the runtime's ordinary string robustness bound.
             // Full structured state belongs in explicit retained diagnostics.
-            1024
+            512
         )
-    });
+    };
+    // Keep the hot path proportional to one bounded record. Re-reading and
+    // pretty-printing the entire command array here made long smoke journeys
+    // quadratic and caused later UI phases to appear much slower than earlier
+    // ones. The durable journal is the recovery source of truth until cleanup
+    // seals the established commands.json array atomically.
+    rhai::runtime::append_sync(
+        context.command_journal_path,
+        rhai::json::stringify(record) + "\n"
+    );
+    // Preserve the existing immediate diagnostic contract used by the harness
+    // self-test without growing the per-command write. The complete record set
+    // is recovered from the journal by finalize_command_log.
     rhai::runtime::atomic_write(
         context.command_log_path,
-        rhai::json::stringify_pretty(records) + "\n"
+        rhai::json::stringify_pretty([record]) + "\n"
     );
+}
+
+fn finalize_command_log(context) {
+    if !std::fs::exists(context.command_journal_path) {
+        return;
+    }
+    let records = [];
+    for source_line in std::fs::read_to_string(context.command_journal_path).split("\n") {
+        let line = source_line;
+        line.trim();
+        if line != "" {
+            records.push(rhai::json::parse(line));
+        }
+    }
+    // Promote the complete, schema-compatible array before removing its
+    // recovery journal. If parsing or promotion fails, the journal remains
+    // intact for diagnosis and a later retry.
+    rhai::runtime::atomic_write(
+        context.command_log_path,
+        rhai::json::stringify(records) + "\n"
+    );
+    std::fs::remove_file(context.command_journal_path);
 }
 
 fn run_cli(context, cli, arguments, expected_failure, redactions) {
@@ -268,6 +301,7 @@ fn complete_impl(
         remaining_windows: [],
         remaining_registrations: []
     };
+    finalize_command_log(context);
     let diagnostics = [];
     if !succeeded {
         std::fs::create_dir_all(context.failure_directory);
