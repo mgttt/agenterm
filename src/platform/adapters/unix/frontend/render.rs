@@ -577,7 +577,7 @@ impl NewTerminalModalView<'_> {
 
 pub(super) struct TerminalPaint<'a> {
     pub(super) grid: &'a TerminalGrid,
-    pub(super) selection: Option<crate::terminal_selection::TerminalSelection>,
+    pub(super) selection: Option<super::terminal_selection::TerminalSelection>,
     pub(super) cursor_style: TerminalCursorStyle,
     pub(super) cursor_shape: TerminalCursorShape,
 }

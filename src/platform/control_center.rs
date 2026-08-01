@@ -1,6 +1,6 @@
 //! Compatibility projection for Control Center native operations.
 //!
-//! The selected platform adapter owns host filesystem durability, window focus,
+//! The external platform crate owns host filesystem durability, window focus,
 //! and direct capture mechanics. Product code uses this stable facade.
 
 use std::{fs::OpenOptions, io, path::Path};
@@ -35,11 +35,17 @@ pub(crate) fn replace_file(source: &Path, destination: &Path) -> io::Result<()> 
     crate::platform::services::control_center::replace_file(source, destination)
 }
 
-pub(crate) fn focus_existing_window(raw_handle: i64, no_activate: bool) {
-    crate::platform::services::control_center::focus_existing_window(raw_handle, no_activate);
+pub(crate) fn focus_existing_window(
+    raw_handle: i64,
+    no_activate: bool,
+) -> Result<(), agenterm_platform::activation::ActivationError> {
+    crate::platform::services::control_center::focus_existing_window(raw_handle, no_activate)
 }
 
-pub(crate) fn capture_native_window_png(raw_handle: i64, output: &Path) -> io::Result<()> {
+pub(crate) fn capture_native_window_png(
+    raw_handle: i64,
+    output: &Path,
+) -> Result<(), agenterm_platform::contract::ui_screenshot::UiScreenshotError> {
     crate::platform::services::control_center::capture_native_window_png(raw_handle, output)
 }
 
@@ -56,6 +62,35 @@ mod tests {
             ScreenshotStrategy::Unsupported => "unavailable",
         };
         assert_eq!(screenshot_capability(), expected);
+    }
+
+    #[test]
+    fn strategy_preserves_platform_product_behavior() {
+        let expected = match agenterm_platform::platform_kind() {
+            agenterm_platform::PlatformKind::Windows => ScreenshotStrategy::DirectNativeWindow,
+            agenterm_platform::PlatformKind::Macos => ScreenshotStrategy::RendererRequest,
+            agenterm_platform::PlatformKind::Linux => ScreenshotStrategy::Unsupported,
+            _ => ScreenshotStrategy::Unsupported,
+        };
+        assert_eq!(screenshot_strategy(), expected);
+    }
+
+    #[test]
+    fn missing_native_handles_are_typed_failures() {
+        assert!(matches!(
+            focus_existing_window(0, false),
+            Err(agenterm_platform::activation::ActivationError::Failed { code, .. })
+                if code == "control_center_window_unavailable"
+        ));
+        assert!(matches!(
+            capture_native_window_png(0, Path::new("unused.png")),
+            Err(
+                agenterm_platform::contract::ui_screenshot::UiScreenshotError::Failed {
+                    code,
+                    ..
+                }
+            ) if code == "control_center_screenshot_window_unavailable"
+        ));
     }
 
     #[test]

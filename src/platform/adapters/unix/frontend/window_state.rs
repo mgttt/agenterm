@@ -123,7 +123,7 @@ pub fn window_snapshot_json(
     tracker: &WindowStateTracker,
 ) -> serde_json::Value {
     let (client_width, client_height) = handle.client_size();
-    crate::ui_snapshot::embedded_window_json_with_state(
+    super::ui_snapshot::embedded_window_json_with_state(
         handle.window_title(),
         client_width,
         client_height,

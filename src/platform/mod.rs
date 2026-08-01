@@ -40,8 +40,6 @@ pub(crate) mod runtime;
 #[allow(dead_code)]
 pub(crate) mod script_http;
 #[allow(dead_code)]
-pub(crate) mod selected;
-#[allow(dead_code)]
 pub(crate) mod services;
 #[allow(dead_code)]
 pub(crate) mod webview;

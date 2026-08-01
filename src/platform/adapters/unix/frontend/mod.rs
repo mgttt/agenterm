@@ -13,7 +13,6 @@ mod ui_snapshot;
 mod wake;
 mod window_state;
 
-pub(crate) use screenshot::write_xrgb_png;
 pub(crate) use wake::request_gui_wake;
 
 use std::{
@@ -3427,17 +3426,17 @@ impl UnixApp {
         };
         let (logical_width, logical_height) = self.client_size();
         let ime_anchor = self.ime_anchor();
-        if let Some((x, y, w, h)) = ime_anchor {
-            if let Err(error) = window.set_ime_cursor_area(LogicalRect::new(
+        if let Some((x, y, w, h)) = ime_anchor
+            && let Err(error) = window.set_ime_cursor_area(LogicalRect::new(
                 f64::from(x),
                 f64::from(y),
                 f64::from(w.max(1)),
                 f64::from(h.max(1)),
-            )) {
-                let message = format!("IME cursor update failed: {error}");
-                if self.status_message != message {
-                    self.status_message = message;
-                }
+            ))
+        {
+            let message = format!("IME cursor update failed: {error}");
+            if self.status_message != message {
+                self.status_message = message;
             }
         }
 
@@ -4561,10 +4560,15 @@ fn compact_cwd_for_status(path: &str, home_dir: Option<&Path>) -> String {
         return if relative.as_os_str().is_empty() {
             "~".to_owned()
         } else {
-            format!("~/{}", relative.to_string_lossy())
+            let relative = relative
+                .components()
+                .map(|component| component.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/");
+            format!("~/{relative}")
         };
     }
-    if path.is_absolute() {
+    if path.has_root() {
         return path
             .file_name()
             .map(|name| format!(".../{}", name.to_string_lossy()))

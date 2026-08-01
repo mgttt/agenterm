@@ -11,7 +11,7 @@ pub(super) enum NewShellChoice {
 }
 
 impl NewShellChoice {
-    pub(super) const fn id(self) -> &'static str {
+    pub(super) fn id(self) -> &'static str {
         match self {
             Self::Default => "default",
             Self::Primary => primary_shell().id,
@@ -19,7 +19,7 @@ impl NewShellChoice {
         }
     }
 
-    pub(super) const fn label(self) -> &'static str {
+    pub(super) fn label(self) -> &'static str {
         match self {
             Self::Default => "Default",
             Self::Primary => primary_shell().label,

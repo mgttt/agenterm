@@ -2256,7 +2256,7 @@ fn run_shell(no_activate: bool, context: Option<ServerContext>) -> Result<()> {
             if let Some(context) = &context {
                 write_context(&path, context)?;
             }
-            focus_existing(&record, &path, no_activate);
+            focus_existing(&record, &path, no_activate)?;
             Ok(())
         }
         RegistryClaim::Owner(owner) => {
@@ -2268,14 +2268,16 @@ fn run_shell(no_activate: bool, context: Option<ServerContext>) -> Result<()> {
     }
 }
 
-fn focus_existing(_record: &RegistryRecord, registry_path: &Path, no_activate: bool) {
+fn focus_existing(_record: &RegistryRecord, registry_path: &Path, no_activate: bool) -> Result<()> {
     let native_window = read_regular_file(&native_window_path(registry_path))
         .ok()
         .and_then(|value| String::from_utf8(value).ok())
         .and_then(|value| value.parse::<i64>().ok())
         .unwrap_or_default();
     request_projection_refresh(registry_path, no_activate);
-    crate::platform::control_center::focus_existing_window(native_window, no_activate);
+    crate::platform::control_center::focus_existing_window(native_window, no_activate)
+        .map_err(|error| anyhow::anyhow!("control_center_focus_failed: {error}"))?;
+    Ok(())
 }
 
 struct ProductShellHost {

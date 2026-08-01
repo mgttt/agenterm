@@ -34,14 +34,12 @@ dependencies = [
  "libc",
  "png",
  "rhai",
- "rmux-pty",
  "serde",
  "serde_json",
  "sha2",
  "unicode-width",
  "ureq",
  "vt100",
- "windows-sys 0.61.2",
  "winresource",
 ]
 

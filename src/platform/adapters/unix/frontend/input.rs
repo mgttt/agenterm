@@ -296,6 +296,7 @@ fn logical_key_to_bytes(key: &Key, modifiers: ModifierState) -> Option<Vec<u8>> 
             (!bytes.is_empty()).then_some(bytes)
         }
         Key::Unidentified => None,
+        _ => None,
     }
 }
 
@@ -351,6 +352,7 @@ fn logical_key_parts(key: &Key) -> (Option<&str>, Option<&'static str>) {
         Key::Character(text) => (Some(text.as_str()), None),
         Key::Named(named) => (None, named_key_name(*named)),
         Key::Unidentified => (None, None),
+        _ => (None, None),
     }
 }
 
@@ -644,11 +646,15 @@ mod tests {
     fn text_field_select_all_replaces_the_next_edit_once() {
         let mut buffer = String::from("existing");
         let mut select_all = false;
+        let primary = match agenterm_platform::platform_kind() {
+            agenterm_platform::PlatformKind::Macos => modifiers(false, false, false, true),
+            _ => modifiers(true, false, false, false),
+        };
 
         assert!(matches!(
             text_field_logical_key_action(
                 &Key::Character("a".into()),
-                modifiers(false, false, false, true),
+                primary,
                 &mut buffer,
                 false,
                 &mut select_all,
@@ -718,11 +724,14 @@ mod tests {
 
     #[test]
     fn primary_shortcut_uses_platform_policy() {
-        #[cfg(target_os = "linux")]
-        assert!(primary_shortcut(modifiers(true, false, false, false)));
-        #[cfg(target_os = "macos")]
-        assert!(!primary_shortcut(modifiers(true, false, false, false)));
-        assert!(primary_shortcut(modifiers(false, false, false, true)));
+        let control = primary_shortcut(modifiers(true, false, false, false));
+        let meta = primary_shortcut(modifiers(false, false, false, true));
+        match agenterm_platform::platform_kind() {
+            agenterm_platform::PlatformKind::Windows => assert_eq!((control, meta), (true, false)),
+            agenterm_platform::PlatformKind::Linux => assert_eq!((control, meta), (true, true)),
+            agenterm_platform::PlatformKind::Macos => assert_eq!((control, meta), (false, true)),
+            _ => panic!("unsupported test platform"),
+        }
         assert!(!primary_shortcut(modifiers(false, false, true, false)));
     }
 
@@ -747,22 +756,27 @@ mod tests {
             terminal_shortcut_action(&c, modifiers(true, false, false, false), false),
             TerminalShortcutAction::Forward
         );
-        #[cfg(target_os = "linux")]
+        let (primary, empty_copy_action) = match agenterm_platform::platform_kind() {
+            agenterm_platform::PlatformKind::Windows => (
+                modifiers(true, false, false, false),
+                TerminalShortcutAction::Forward,
+            ),
+            agenterm_platform::PlatformKind::Linux | agenterm_platform::PlatformKind::Macos => (
+                modifiers(false, false, false, true),
+                TerminalShortcutAction::Suppress,
+            ),
+            _ => panic!("unsupported test platform"),
+        };
         assert_eq!(
-            terminal_shortcut_action(&c, modifiers(true, false, false, false), true),
+            terminal_shortcut_action(&c, primary, true),
             TerminalShortcutAction::Copy
         );
-        #[cfg(target_os = "macos")]
         assert_eq!(
-            terminal_shortcut_action(&c, modifiers(true, false, false, false), true),
-            TerminalShortcutAction::Forward
+            terminal_shortcut_action(&c, primary, false),
+            empty_copy_action
         );
         assert_eq!(
-            terminal_shortcut_action(&c, modifiers(false, false, false, true), false),
-            TerminalShortcutAction::Suppress
-        );
-        assert_eq!(
-            terminal_shortcut_action(&v, modifiers(false, false, false, true), false),
+            terminal_shortcut_action(&v, primary, false),
             TerminalShortcutAction::Paste
         );
     }

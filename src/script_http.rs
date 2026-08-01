@@ -319,7 +319,7 @@ fn parse_proxy(value: Option<Dynamic>) -> Result<ProxySetting, Box<EvalAltResult
 }
 
 fn perform_request(spec: HttpRequestSpec) -> Result<ScriptHttpResponse, String> {
-    let tls = crate::platform::script_http::tls_config();
+    let tls = crate::platform::script_http::tls_config().map_err(str::to_owned)?;
     let mut config = Agent::config_builder()
         .http_status_as_error(false)
         .timeout_global(Some(spec.timeout))
@@ -411,9 +411,6 @@ fn version_name(version: Version) -> &'static str {
 }
 
 fn map_ureq_error(error: UreqError) -> String {
-    if crate::platform::script_http::is_platform_tls_error(&error) {
-        return "http_tls".to_owned();
-    }
     let code = match error {
         UreqError::StatusCode(_) => "http_status",
         UreqError::Http(_) | UreqError::BadUri(_) => "http_request_invalid",
@@ -436,7 +433,10 @@ fn map_ureq_error(error: UreqError) -> String {
         UreqError::Tls(_) | UreqError::Pem(_) | UreqError::TlsRequired => "http_tls",
         UreqError::RequireHttpsOnly(_) => "http_scheme",
         UreqError::LargeResponseHeader(_, _) => "http_header_limit",
-        _ => "http_transport",
+        // Cargo enables exactly one provider feature on each target. Every
+        // feature-independent ureq error is classified above, leaving only
+        // the selected provider's Rustls or NativeTls/DER variants here.
+        _ => "http_tls",
     };
     code.to_owned()
 }

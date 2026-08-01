@@ -333,10 +333,7 @@ pub(super) fn raster_glyph(ch: char, size: u16) -> Option<Arc<RasterGlyph>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        GlyphCache, GlyphKey, MAX_CACHED_GLYPHS, glyph_rows, raster_glyph, resolved_font_name,
-        row_contains_pixel,
-    };
+    use super::{GlyphCache, GlyphKey, MAX_CACHED_GLYPHS, glyph_rows, row_contains_pixel};
 
     #[test]
     fn asymmetric_glyph_rows_are_low_bit_first() {
@@ -370,9 +367,9 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn macos_system_fonts_cover_latin_and_cjk() {
-        assert_eq!(resolved_font_name(), "SF Mono");
+        assert_eq!(super::resolved_font_name(), "SF Mono");
         for ch in ['A', '繁'] {
-            let glyph = raster_glyph(ch, 14).expect("system glyph");
+            let glyph = super::raster_glyph(ch, 14).expect("system glyph");
             assert!(glyph.width > 0);
             assert!(glyph.height > 0);
             assert!(glyph.alpha.iter().any(|alpha| *alpha > 0));
@@ -384,9 +381,9 @@ mod tests {
     fn linux_resolved_font_matches_platform_primary() {
         let platform_primary =
             agenterm_platform::font::primary_family_name().unwrap_or("bitmap-8x8");
-        assert_eq!(resolved_font_name(), platform_primary);
+        assert_eq!(super::resolved_font_name(), platform_primary);
         if platform_primary != "bitmap-8x8" {
-            let glyph = raster_glyph('A', 14).expect("system glyph");
+            let glyph = super::raster_glyph('A', 14).expect("system glyph");
             assert!(glyph.width > 0);
             assert!(glyph.height > 0);
             assert!(glyph.alpha.iter().any(|alpha| *alpha > 0));
