@@ -3134,9 +3134,11 @@ mod tests {
     }
 
     fn repl_open(sequence: u64) -> ScriptFrame {
-        let mut budgets = ScriptBudgets::default();
-        budgets.operations = ScriptBudgets::hard_limits().operations;
-        budgets.wall_time_ms = 5_000;
+        let budgets = ScriptBudgets {
+            operations: ScriptBudgets::hard_limits().operations,
+            wall_time_ms: 5_000,
+            ..ScriptBudgets::default()
+        };
         repl_frame(
             sequence,
             ReplSessionCommand::Open {
