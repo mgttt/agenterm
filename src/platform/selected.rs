@@ -21,10 +21,6 @@ pub(crate) mod remote_frontend;
 pub(crate) mod script_http;
 
 #[cfg(windows)]
-#[path = "adapters/windows/script_clipboard.rs"]
-pub(crate) mod script_clipboard;
-
-#[cfg(windows)]
 #[path = "adapters/windows/script_files.rs"]
 pub(crate) mod script_files;
 
@@ -70,10 +66,6 @@ pub(crate) use agenterm_platform::window as scale_contract;
 #[cfg(target_os = "linux")]
 #[path = "adapters/linux/script_http.rs"]
 pub(crate) mod script_http;
-
-#[cfg(target_os = "linux")]
-#[path = "adapters/linux/script_clipboard.rs"]
-pub(crate) mod script_clipboard;
 
 #[cfg(target_os = "linux")]
 #[path = "adapters/linux/script_files.rs"]
@@ -125,10 +117,6 @@ pub(crate) use agenterm_platform::window as scale_contract;
 #[cfg(target_os = "macos")]
 #[path = "adapters/macos/script_http.rs"]
 pub(crate) mod script_http;
-
-#[cfg(target_os = "macos")]
-#[path = "adapters/macos/script_clipboard.rs"]
-pub(crate) mod script_clipboard;
 
 #[cfg(target_os = "macos")]
 #[path = "adapters/macos/script_files.rs"]

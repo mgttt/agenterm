@@ -142,6 +142,11 @@ Native font hot path 随后完成：Windows remote renderer 持有 crate `Native
 和 primary-family 走同一 facade，三套 root native font 文件删除。activation 的 winit
 类型也从 public facade 移到 adapter-owned extension trait，使 crate contract/service
 静态门禁通过。crate/root warnings-denied Clippy 与聚焦平台边界测试通过。
+Script clipboard native leaf 改为直接消费 crate facade，删除三平台 root selector/
+adapter；公开 API 新增 caller-supplied open deadline，使 GUI 默认 500ms 与 Script
+Runtime 既有 2s 健壮性契约同时保留。Script 调用仍是无限制本地能力，不加入路径、
+内容或权限 allowlist。30 项 all-feature crate tests、Script clipboard contract test 与
+两 crate warnings-denied Clippy 通过。
 
 2026-08-01 首个建设期增量：Cockpit snapshot 新增明确的
 `tab_counts.{total,running,dead}`，native shell 同源显示 logical instance、

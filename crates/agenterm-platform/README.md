@@ -41,7 +41,7 @@ third-party dependency.
 | `input` | normalized key classification, UTF-16 text decoding, primary-shortcut policy | `window` |
 | `ime` | preedit/commit state machine and display-aware capability status | `input` |
 | `activation` | neutral policy, typed requests, selected native window operation | `window`, target `winit` / Win32 |
-| `clipboard` | caller-bounded Unicode clipboard | `process`, target native APIs |
+| `clipboard` | caller-bounded Unicode clipboard with configurable open deadline | `process`, target native APIs |
 | `screenshot` | bounded XRGB framebuffer PNG encoding | `filesystem`, `png` |
 | `font` | discovery, metrics and RAII native font resource | `filesystem`, target `ab_glyph` / GDI |
 | `webview` | passive system-runtime discovery | none |

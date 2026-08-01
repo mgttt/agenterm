@@ -20,7 +20,6 @@ use windows_sys::Win32::{
 };
 
 const UNICODE_TEXT: u32 = 13;
-const OPEN_TIMEOUT: Duration = Duration::from_millis(500);
 const RETRY_INTERVAL: Duration = Duration::from_millis(10);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,8 +58,8 @@ impl Drop for OpenClipboardGuard {
     }
 }
 
-fn open(owner: HWND) -> Result<OpenClipboardGuard, ClipboardError> {
-    let deadline = Instant::now() + OPEN_TIMEOUT;
+fn open(owner: HWND, timeout: Duration) -> Result<OpenClipboardGuard, ClipboardError> {
+    let deadline = Instant::now() + timeout;
     loop {
         if unsafe { OpenClipboard(owner) } != 0 {
             return Ok(OpenClipboardGuard);
@@ -76,8 +75,8 @@ pub(crate) fn has_unicode_text() -> bool {
     unsafe { IsClipboardFormatAvailable(UNICODE_TEXT) != 0 }
 }
 
-fn set_text_with_owner(owner: HWND, text: &str) -> Result<(), ClipboardError> {
-    let _guard = open(owner)?;
+fn set_text_with_owner(owner: HWND, text: &str, timeout: Duration) -> Result<(), ClipboardError> {
+    let _guard = open(owner, timeout)?;
     if unsafe { EmptyClipboard() } == 0 {
         return Err(ClipboardError::Backend(
             "could not clear the Windows clipboard",
@@ -108,12 +107,12 @@ fn set_text_with_owner(owner: HWND, text: &str) -> Result<(), ClipboardError> {
     Ok(())
 }
 
-pub(crate) fn set_text(text: &str) -> Result<(), ClipboardError> {
-    set_text_with_owner(ptr::null_mut(), text)
+pub(crate) fn set_text(text: &str, timeout: Duration) -> Result<(), ClipboardError> {
+    set_text_with_owner(ptr::null_mut(), text, timeout)
 }
 
-pub(crate) fn get_text(max_utf8_bytes: usize) -> Result<String, ClipboardError> {
-    let _guard = open(ptr::null_mut())?;
+pub(crate) fn get_text(max_utf8_bytes: usize, timeout: Duration) -> Result<String, ClipboardError> {
+    let _guard = open(ptr::null_mut(), timeout)?;
     if !has_unicode_text() {
         return Err(ClipboardError::Unavailable);
     }

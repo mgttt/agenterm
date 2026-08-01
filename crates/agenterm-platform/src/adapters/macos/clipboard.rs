@@ -67,11 +67,14 @@ pub(crate) fn capability_status() -> CapabilityStatus {
     }
 }
 
-pub(crate) fn set_text(text: &str) -> Result<(), ClipboardError> {
+pub(crate) fn set_text(text: &str, _timeout: std::time::Duration) -> Result<(), ClipboardError> {
     write_via_command("pbcopy", text, HELPER_TIMEOUT)
 }
 
-pub(crate) fn get_text(max_read_bytes: usize) -> Result<String, ClipboardError> {
+pub(crate) fn get_text(
+    max_read_bytes: usize,
+    _timeout: std::time::Duration,
+) -> Result<String, ClipboardError> {
     read_via_command("pbpaste", max_read_bytes, HELPER_TIMEOUT)
 }
 

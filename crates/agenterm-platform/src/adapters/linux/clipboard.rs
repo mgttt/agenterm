@@ -211,7 +211,7 @@ fn require_capability_for_io() -> Result<(), ClipboardError> {
 }
 
 /// Write Unicode text to the system clipboard.
-pub(crate) fn set_text(text: &str) -> Result<(), ClipboardError> {
+pub(crate) fn set_text(text: &str, _timeout: std::time::Duration) -> Result<(), ClipboardError> {
     require_capability_for_io()?;
     let display = display_facts_from_env();
     let backends = ClipboardBackendFacts::probe();
@@ -232,7 +232,10 @@ pub(crate) fn set_text(text: &str) -> Result<(), ClipboardError> {
 }
 
 /// Read Unicode text from the system clipboard.
-pub(crate) fn get_text(max_read_bytes: usize) -> Result<String, ClipboardError> {
+pub(crate) fn get_text(
+    max_read_bytes: usize,
+    _timeout: std::time::Duration,
+) -> Result<String, ClipboardError> {
     require_capability_for_io()?;
     let display = display_facts_from_env();
     let backends = ClipboardBackendFacts::probe();

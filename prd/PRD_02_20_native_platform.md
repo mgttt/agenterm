@@ -44,6 +44,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] Product path composition consumes `filesystem::host_directories` and
   `executable_name`; the three root OS path adapters are deleted. AgenTerm
   directory/file naming remains product policy without compile-time OS selection.
+- [x] Script Runtime clipboard uses the public crate facade with its independent
+  two-second robustness deadline; duplicate root native clipboard adapters are
+  deleted and no authorization policy is introduced.
 - [~] Passive system-WebView discovery is public and selected inside the crate,
   with Missing and Failed kept distinct. Native font discovery/metrics and an
   opaque RAII font resource are public; the Windows renderer consumes its RAII
