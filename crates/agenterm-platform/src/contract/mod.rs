@@ -28,6 +28,8 @@ pub mod process_window;
 pub mod pty;
 #[cfg(feature = "process")]
 pub mod runtime;
+#[cfg(feature = "shared-memory")]
+pub mod shared_memory;
 #[cfg(feature = "screenshot")]
 pub mod ui_screenshot;
 #[cfg(feature = "webview")]

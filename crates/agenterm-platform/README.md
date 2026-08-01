@@ -39,6 +39,7 @@ clipboard, IPC, or screenshot modules.
 | `entropy` | fail-closed host CSPRNG byte filling | target `libc` / minimal `windows-sys` |
 | `process-control` | typed graceful/forceful single-process termination | target `libc` / minimal `windows-sys` |
 | `process-metrics` | cumulative CPU time and resident bytes for one selected process | target `libc` / minimal `windows-sys` |
+| `shared-memory` | exclusive named read/write mappings for cross-process zero-copy data | target `libc` / minimal `windows-sys` |
 | `process` | observation/tree control, shell defaults, child-pipe probes and parent-console diagnostics | target `libc` / `windows-sys` |
 | `filesystem-conventions` | host roots and sibling executable naming | none |
 | `filesystem` | conventions plus private state files/directories and durable atomic replacement mechanics | target native APIs |
@@ -63,6 +64,7 @@ clipboard, IPC, or screenshot modules.
 | entropy | BCrypt system-preferred RNG | `getrandom(2)` | `arc4random_buf` |
 | process control | forceful termination; graceful Unsupported | SIGTERM/SIGKILL | SIGTERM/SIGKILL |
 | process metrics | process times + working set | `/proc` stat/statm | `PROC_PIDTASKINFO` |
+| shared memory | page-file mapping | POSIX shared memory | POSIX shared memory |
 | process | ToolHelp/Job Objects | `/proc` + process groups | POSIX process groups |
 | filesystem | AppData conventions | XDG conventions | Application Support |
 | locking | named mutex | `flock` | `flock` |
@@ -137,6 +139,14 @@ capture_native_window_png(window, std::path::Path::new("window.png"), NativeCapt
 Product applications supply names, paths, policy limits and protocol framing.
 The crate does not know AgenTerm workspaces, Control Center, Fleet, themes,
 commands, or UI snapshots.
+
+`shared_memory::SharedMemory` converts one portable ASCII name into a
+session-local page-file mapping on Windows or an owner-readable POSIX shared
+memory object on Linux/macOS. Creation is exclusive. Keep the creator alive
+through peer discovery: its drop unlinks the POSIX name, while Windows removes
+the name after the last handle closes; already-open views remain valid. Byte
+layout, synchronization, worker ownership and crash-recovery naming remain
+product protocol concerns.
 
 `locking::PathLock::acquire` waits for ownership; `try_acquire` returns typed
 `LockErrorKind::Contended` without waiting. Windows resolves relative paths,

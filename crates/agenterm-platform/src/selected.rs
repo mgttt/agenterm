@@ -15,6 +15,17 @@ pub(crate) const fn platform_kind() -> crate::PlatformKind {
     }
 }
 
+#[cfg(all(feature = "shared-memory", windows))]
+#[path = "adapters/windows/shared_memory.rs"]
+pub(crate) mod shared_memory;
+
+#[cfg(all(
+    feature = "shared-memory",
+    any(target_os = "linux", target_os = "macos")
+))]
+#[path = "adapters/unix/shared_memory.rs"]
+pub(crate) mod shared_memory;
+
 #[cfg(all(feature = "clipboard", windows))]
 #[path = "adapters/windows/clipboard.rs"]
 pub(crate) mod clipboard;

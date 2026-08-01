@@ -1,0 +1,129 @@
+//! POSIX named shared memory for Linux and macOS.
+
+use std::ffi::CString;
+
+use crate::contract::shared_memory::{SharedMemoryError, SharedMemoryErrorKind};
+
+pub(crate) struct SharedMemory {
+    descriptor: libc::c_int,
+    view: *mut libc::c_void,
+    len: usize,
+    native_name: CString,
+    creator: bool,
+}
+
+impl SharedMemory {
+    pub(crate) fn create(name: &str, len: usize) -> Result<Self, SharedMemoryError> {
+        let native_name = native_name(name);
+        let descriptor = unsafe {
+            libc::shm_open(
+                native_name.as_ptr(),
+                libc::O_RDWR | libc::O_CREAT | libc::O_EXCL | libc::O_CLOEXEC,
+                0o600,
+            )
+        };
+        if descriptor < 0 {
+            return Err(errno_error(
+                if std::io::Error::last_os_error().raw_os_error() == Some(libc::EEXIST) {
+                    SharedMemoryErrorKind::AlreadyExists
+                } else {
+                    SharedMemoryErrorKind::Create
+                },
+            ));
+        }
+        let length = libc::off_t::try_from(len).map_err(|source| {
+            cleanup_created(descriptor, &native_name);
+            SharedMemoryError::new(SharedMemoryErrorKind::InvalidLength, source.to_string())
+        })?;
+        if unsafe { libc::ftruncate(descriptor, length) } != 0 {
+            let error = errno_error(SharedMemoryErrorKind::Resize);
+            cleanup_created(descriptor, &native_name);
+            return Err(error);
+        }
+        Self::map(descriptor, native_name, len, true)
+    }
+
+    pub(crate) fn open(name: &str, len: usize) -> Result<Self, SharedMemoryError> {
+        let native_name = native_name(name);
+        let descriptor =
+            unsafe { libc::shm_open(native_name.as_ptr(), libc::O_RDWR | libc::O_CLOEXEC, 0) };
+        if descriptor < 0 {
+            let native = std::io::Error::last_os_error();
+            let kind = if native.raw_os_error() == Some(libc::ENOENT) {
+                SharedMemoryErrorKind::NotFound
+            } else {
+                SharedMemoryErrorKind::Open
+            };
+            return Err(SharedMemoryError::new(kind, native.to_string()));
+        }
+        Self::map(descriptor, native_name, len, false)
+    }
+
+    fn map(
+        descriptor: libc::c_int,
+        native_name: CString,
+        len: usize,
+        creator: bool,
+    ) -> Result<Self, SharedMemoryError> {
+        let view = unsafe {
+            libc::mmap(
+                std::ptr::null_mut(),
+                len,
+                libc::PROT_READ | libc::PROT_WRITE,
+                libc::MAP_SHARED,
+                descriptor,
+                0,
+            )
+        };
+        if view == libc::MAP_FAILED {
+            let error = errno_error(SharedMemoryErrorKind::Map);
+            unsafe { libc::close(descriptor) };
+            if creator {
+                unsafe { libc::shm_unlink(native_name.as_ptr()) };
+            }
+            return Err(error);
+        }
+        Ok(Self {
+            descriptor,
+            view,
+            len,
+            native_name,
+            creator,
+        })
+    }
+
+    pub(crate) fn as_ptr(&self) -> *const u8 {
+        self.view.cast()
+    }
+
+    pub(crate) fn as_mut_ptr(&mut self) -> *mut u8 {
+        self.view.cast()
+    }
+}
+
+impl Drop for SharedMemory {
+    fn drop(&mut self) {
+        unsafe {
+            libc::munmap(self.view, self.len);
+            libc::close(self.descriptor);
+            if self.creator {
+                libc::shm_unlink(self.native_name.as_ptr());
+            }
+        }
+    }
+}
+
+fn native_name(name: &str) -> CString {
+    CString::new(format!("/{name}")).expect("validated shared-memory name")
+}
+
+fn cleanup_created(descriptor: libc::c_int, native_name: &CString) {
+    unsafe {
+        libc::close(descriptor);
+        libc::shm_unlink(native_name.as_ptr());
+    }
+}
+
+fn errno_error(kind: SharedMemoryErrorKind) -> SharedMemoryError {
+    SharedMemoryError::new(kind, std::io::Error::last_os_error().to_string())
+}
