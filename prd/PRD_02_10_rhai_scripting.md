@@ -110,16 +110,22 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   The remaining 53,248 bytes is narrow headroom and must be remeasured for
   future editor/history dependencies rather than silently raising the budget.
 - [~] Ctrl+C during a blocking cell, arrow-key history, and a kill-and-restart
-  long-lived worker protocol remain an owned hardening slice. The current
-  REPL is already isolated in its own `agenterm-script` OS process, but a
-  non-cooperative host call may require terminating that REPL process and
-  therefore loses its in-memory session. No GUI, server, PTY, or workspace
-  process shares that state. A bounded foreground `PersistentWorkerClient`
-  prerequisite now proves same-PID sequential invocation, typed crash/EOF,
-  explicit replacement, hard termination and reap. One generation is capped
-  at 32 invocations to bound the worker's current frame/completion bookkeeping;
-  it never auto-restarts or replays side effects. REPL child-session frames,
-  Ctrl+C ownership, and explicit fresh-session recovery are not yet connected.
+  long-lived worker protocol remain an owned hardening slice. A stable
+  length-prefixed child-session protocol now covers Open, Inspect, Evaluate,
+  Query, Reset, Cancel, and Close with session/generation/sequence identities;
+  constant-space request/response validators reject stale generations,
+  sequences, phases, queries, and cell mismatches without feeding REPL traffic
+  into the legacy HashSet tracker. The framed worker owns `ReplSession` on a
+  dedicated session thread, preserves state across cells, keeps stdin available
+  for pre-start or in-flight Cancel and broker responses, returns typed state,
+  and joins on Close/EOF. Unit evidence proves persistence, reset/query/close,
+  a cancellation race, canonical mismatch failures, and legacy isolation.
+  The existing bounded `PersistentWorkerClient` still only supervises ordinary
+  invocations. Parent-side REPL transport, the 32-cell generation replacement,
+  150 ms non-cooperative hard-kill/reap path, explicit fresh-session/no-replay
+  receipt, outer CLI/worker Ctrl+C ownership, arrow-key history, and public
+  black-box evidence remain open. A worker-host unit test is not presented as
+  proof that the public CLI already uses the child-session protocol.
 
 ## v0.1.9 product position
 

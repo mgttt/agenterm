@@ -540,8 +540,9 @@ v0.1.12  Convergence & Fast Promotion
 │  │  ├─ 普通 worker 与 REPL 复用同一 Engine/API 配置
 │  │  └─ [~] Ctrl+C、箭头历史与 kill/restart 长驻协议继续 hardening
 │  │     ├─ bounded foreground worker 已证明同 PID 顺序调用、typed crash/EOF、显式 replacement 与 reap
-│  │     ├─ 每 generation 最多 32 次 invocation，不自动 restart 或重放真实副作用
-│  │     └─ REPL child-session frames、Ctrl+C ownership 与 fresh-session receipt 仍待接入
+│  │     ├─ child-session wire、O(1) validator 与 worker session thread 已覆盖 Open/Inspect/Evaluate/Query/Reset/Cancel/Close
+│  │     ├─ worker 内已证明 state persistence、pre-start Cancel、broker/legacy 隔离与 Close/EOF join
+│  │     └─ parent 32-cell replacement、150ms kill/reap、Ctrl+C ownership、fresh receipt/no-replay 与公开 CLI 证据仍待接入
 │  ├─ [x] v0.1.12 保留 canonical `agenterm-script` 名称
 │  │  ├─ 当前没有完整外部调用者使用量与迁移/移除证据
 │  │  ├─ 收敛期不新增同义 executable、package 和 Candidate surface
