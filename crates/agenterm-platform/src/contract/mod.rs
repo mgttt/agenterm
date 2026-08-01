@@ -29,6 +29,7 @@ pub mod process_image;
 pub mod process_metrics;
 #[cfg(feature = "window")]
 pub mod process_window;
+pub mod processor_topology;
 #[cfg(feature = "pty")]
 pub mod pty;
 #[cfg(feature = "process")]
