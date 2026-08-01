@@ -116,6 +116,12 @@ preedit 仲裁、committed-text 分类及 display-aware status；Linux/macOS ada
 `ime-preedit-not-yet-adapted` 明确 Unsupported，不静默声称对等。主 crate 原 Linux/
 macOS 状态机已替换为薄兼容投影。26 项 all-feature crate tests、warnings-denied crate
 Clippy 与 Agenterm all-target compile check 通过。
+第十个能力叶完成 activation：公开 `ActivationPolicy`、非穷尽 request/error 与 opaque
+`NativeWindowHandle`，Windows show-without-activation/new/restore native 操作单一迁入
+crate；Linux/macOS 的 winit active/application intent 由 target-isolated adapter 接管。
+主 crate 只保留产品 capability-status 映射和 live handle 生命周期责任。activation
+feature 的 target 依赖不进入默认、process 或 filesystem 最小配置；Unsupported/Failed
+不降级为成功。
 
 2026-08-01 首个建设期增量：Cockpit snapshot 新增明确的
 `tab_counts.{total,running,dead}`，native shell 同源显示 logical instance、

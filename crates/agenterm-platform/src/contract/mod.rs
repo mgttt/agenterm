@@ -1,3 +1,5 @@
+#[cfg(feature = "activation")]
+pub mod activation;
 #[cfg(feature = "clipboard")]
 pub mod clipboard;
 #[cfg(feature = "font")]

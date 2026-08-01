@@ -406,10 +406,10 @@ pub(crate) fn run_remote_gui(no_activate: bool) -> Result<()> {
         state.resize_active_terminal();
     }
     if no_activate {
-        activation::show_without_activation(window)
-            .map_err(|error| platform_capability_error(error.to_capability_status()))?;
+        activation::show_without_activation(window as isize)
+            .map_err(|error| platform_capability_error(activation::to_capability_status(error)))?;
     } else {
-        activation::show_new_and_request_activation(window);
+        activation::show_new_and_request_activation(window as isize);
     }
     unsafe { UpdateWindow(window) };
 
@@ -1611,12 +1611,15 @@ impl RemoteWindowState {
                 output = Some(path.display().to_string());
             }
             "__focus" => {
-                activation::restore_and_activate(self.window)
-                    .map_err(|error| platform_capability_error(error.to_capability_status()))?;
+                activation::restore_and_activate(self.window as isize).map_err(|error| {
+                    platform_capability_error(activation::to_capability_status(error))
+                })?;
                 unsafe { SetFocus(self.window) };
             }
-            "__show-no-activate" => activation::show_without_activation(self.window)
-                .map_err(|error| platform_capability_error(error.to_capability_status()))?,
+            "__show-no-activate" => activation::show_without_activation(self.window as isize)
+                .map_err(|error| {
+                    platform_capability_error(activation::to_capability_status(error))
+                })?,
             other => anyhow::bail!("unsupported relayed UI command: {other}"),
         }
         unsafe { windows_sys::Win32::Graphics::Gdi::InvalidateRect(self.window, ptr::null(), 0) };

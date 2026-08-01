@@ -34,6 +34,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   extension. The `ime` feature now owns public preedit/commit actions and
   display-aware status: Linux/macOS are available with a display, while Windows
   remains explicitly Unsupported until native preedit adaptation ships.
+- [~] Activation policy and typed native-window requests are public crate API.
+  Windows show/no-activate/restore operations and Linux/macOS winit activation
+  intent live in target-isolated crate adapters; AgenTerm owns only its window
+  lifetime and maps typed failures into the product protocol.
 - [ ] Windows, macOS, and Linux native frontends consume one declared platform
   contract for window lifecycle, normalized input, IME, DPI, clipboard, font
   discovery, screenshots, activation, and applicable system integration.

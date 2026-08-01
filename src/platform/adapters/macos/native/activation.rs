@@ -3,8 +3,8 @@
 
 #![cfg(target_os = "macos")]
 
-use winit::{event_loop::EventLoopBuilder, platform::macos::EventLoopBuilderExtMacOS};
+use winit::event_loop::EventLoopBuilder;
 
 pub(crate) fn configure_event_loop<T>(builder: &mut EventLoopBuilder<T>, no_activate: bool) {
-    builder.with_activate_ignoring_other_apps(!no_activate);
+    agenterm_platform::activation::configure_event_loop(builder, no_activate);
 }

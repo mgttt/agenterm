@@ -40,7 +40,7 @@ third-party dependency.
 | `window` | DPI and logical/physical geometry | none |
 | `input` | normalized key classification, UTF-16 text decoding, primary-shortcut policy | `window` |
 | `ime` | preedit/commit state machine and display-aware capability status | `input` |
-| `activation` | reserved migration slot | `window` |
+| `activation` | neutral policy, typed requests, selected native window operation | `window`, target `winit` / Win32 |
 | `clipboard` | caller-bounded Unicode clipboard | `process`, target native APIs |
 | `screenshot` | bounded XRGB framebuffer PNG encoding | `filesystem`, `png` |
 | `font` | platform font-file candidates | `filesystem` |
@@ -63,6 +63,7 @@ Enabling a reserved slot does not pretend the capability exists:
 | window geometry | available | available | available |
 | normalized input | Control/AltGr policy | Control/Super policy | Command/Control policy |
 | IME composition | typed Unsupported | display-aware | display-aware |
+| activation | native show/focus | winit active intent | winit application intent |
 | clipboard | Win32 Unicode | Wayland/X11 helpers | `pbcopy`/`pbpaste` |
 | screenshot encoding | PNG | PNG | PNG |
 | font candidates | product GDI path | system candidates | system candidates |

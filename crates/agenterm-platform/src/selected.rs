@@ -71,6 +71,18 @@ pub(crate) mod ipc;
 #[path = "adapters/windows/input.rs"]
 pub(crate) mod input;
 
+#[cfg(all(feature = "activation", windows))]
+#[path = "adapters/windows/activation.rs"]
+pub(crate) mod activation;
+
+#[cfg(all(feature = "activation", target_os = "linux"))]
+#[path = "adapters/linux/activation.rs"]
+pub(crate) mod activation;
+
+#[cfg(all(feature = "activation", target_os = "macos"))]
+#[path = "adapters/macos/activation.rs"]
+pub(crate) mod activation;
+
 #[cfg(all(feature = "ime", windows))]
 #[path = "adapters/windows/ime.rs"]
 pub(crate) mod ime;

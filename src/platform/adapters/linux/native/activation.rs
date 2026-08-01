@@ -111,7 +111,7 @@ pub(crate) fn configure_window_attributes(
     attributes: WindowAttributes,
     no_activate: bool,
 ) -> WindowAttributes {
-    attributes.with_active(wants_activation(no_activate))
+    agenterm_platform::activation::configure_window_attributes(attributes, no_activate)
 }
 
 /// Snapshot facts for diagnostics (not authorization).
