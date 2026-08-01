@@ -146,12 +146,16 @@ fn promotion_is_manual_candidate_bound_and_performs_no_build_or_overwrite() {
     assert!(!PROMOTION.contains(".agenterm-script.bin"));
     for forbidden in [
         "--clobber",
-        "cargo build",
-        "cargo test",
-        "cargo check",
-        "check.cmd --release",
-        "package-client-release",
-        "package-release-qualified",
+        "cargo ",
+        "build.bat",
+        "build.sh",
+        "check.cmd",
+        "check.sh",
+        "release.cmd",
+        "release.sh",
+        "task run build",
+        "task run check",
+        "task run package",
         "notarytool",
         "codesign",
     ] {

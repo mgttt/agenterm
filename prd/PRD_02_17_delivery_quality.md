@@ -182,7 +182,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     tag/version/commit,
     downloads the exact candidate artifacts, revalidates every receipt and
     hash, and promotes those bytes without Cargo compilation, packaging or a
-    second full GUI/stress suite; static policy tests pass, while the first
+    second full GUI/stress suite. Static policy rejects any `cargo` invocation,
+    root `build`/`check`/`release` alias, or Script build/check/package task—not
+    only today's known command spellings; its focused regression passes. The first
     non-publishing remote rehearsal remains to be recorded
   - [x] Promotion is recoverable after a tag-only or partially uploaded draft
     interruption: an existing tag is accepted only when it resolves to the
