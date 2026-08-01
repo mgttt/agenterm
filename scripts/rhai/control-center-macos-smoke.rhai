@@ -255,7 +255,37 @@ fn wait_active_tab(
         }
         rhai::task::sleep(std::time::Duration::from_millis(25));
     }
-    throw code + "_timeout:" + last;
+    let diagnostic_path = std::path::join(
+        context.run_directory,
+        "native-input-timeout.png"
+    ).display;
+    let diagnostic_output = native_command(
+        context,
+        control_center,
+        registry,
+        runtime,
+        ["screenshot", "--output", diagnostic_path, "--json"]
+    ).output();
+    let native_input = ();
+    if diagnostic_output.success {
+        let diagnostic = rhai::json::parse(
+            diagnostic_output.stdout_text() + diagnostic_output.stderr_text()
+        );
+        if diagnostic.rendered_snapshot.contains("last_native_input") {
+            native_input = diagnostic.rendered_snapshot.last_native_input;
+        }
+    }
+    test_harness::append_command_record(
+        context,
+        ["screenshot", "--output", diagnostic_path, "--json"],
+        diagnostic_output,
+        !diagnostic_output.success,
+        []
+    );
+    throw code + "_timeout:" + rhai::json::stringify(#{
+        server_snapshot: last,
+        last_native_input: native_input
+    });
 }
 
 fn wait_capture(

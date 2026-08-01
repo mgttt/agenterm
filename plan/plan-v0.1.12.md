@@ -866,7 +866,11 @@ Cockpit
   发现 `CGEventPostToPid` 的 windowless NSEvent 以屏幕坐标返回 `locationInWindow`，
   而 shell 曾无条件当作 client-local；adapter 现按 event/target windowNumber 仲裁，
   同窗直接消费、windowless 经目标 NSWindow 转换、foreign window fail-closed，仍不增加
-  retry 或 sleep。Linux 正向结果与 macOS ARM64 正向回执仍开放；
+  retry 或 sleep。integrated run `30718584882` 仍在该转换后 pointer timeout，因此该
+  假设也关闭，不再继续盲改坐标。renderer screenshot snapshot 现记录 last native input
+  kind/button/physical x-y/adapter line（或 key/repeat），macOS timeout 分支只抓一次该
+  receipt；下一次 host 结果必须明确区分 event delivery 丢失与 hit-test 错误。Linux 正向
+  结果与 macOS ARM64 正向回执仍开放；
 - Control Center evidence ownership 不再游离于 alignment：Windows required
   qualification gate 与 Linux/macOS host-native gate 分别登记，`prd-alignment`
   对三者的 evidence ID、脚本发射点和 partial PRD 状态做同一 exact parity。

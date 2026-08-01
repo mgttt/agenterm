@@ -140,6 +140,79 @@ struct RendererSnapshot {
     physical_width: u32,
     physical_height: u32,
     scale_factor: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_native_input: Option<RendererInputSnapshot>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct RendererInputSnapshot {
+    kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    button: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    repeat: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    physical_x: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    physical_y: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    line: Option<usize>,
+}
+
+impl From<crate::platform::services::control_center_shell::ControlCenterInputEvent>
+    for RendererInputSnapshot
+{
+    fn from(
+        event: crate::platform::services::control_center_shell::ControlCenterInputEvent,
+    ) -> Self {
+        use crate::platform::services::control_center_shell::{
+            ControlCenterInputEvent, ControlCenterKey, ControlCenterPointerButton,
+        };
+        match event {
+            ControlCenterInputEvent::PointerPressed {
+                button,
+                physical_x,
+                physical_y,
+                line,
+            } => Self {
+                kind: "pointer-pressed".to_owned(),
+                button: Some(
+                    match button {
+                        ControlCenterPointerButton::Primary => "primary",
+                        ControlCenterPointerButton::Secondary => "secondary",
+                        ControlCenterPointerButton::Middle => "middle",
+                    }
+                    .to_owned(),
+                ),
+                key: None,
+                repeat: None,
+                physical_x: Some(physical_x),
+                physical_y: Some(physical_y),
+                line,
+            },
+            ControlCenterInputEvent::KeyPressed { key, repeat } => Self {
+                kind: "key-pressed".to_owned(),
+                button: None,
+                key: Some(
+                    match key {
+                        ControlCenterKey::ArrowUp => "arrow-up",
+                        ControlCenterKey::ArrowDown => "arrow-down",
+                        ControlCenterKey::Home => "home",
+                        ControlCenterKey::End => "end",
+                        ControlCenterKey::Enter => "enter",
+                        ControlCenterKey::Escape => "escape",
+                    }
+                    .to_owned(),
+                ),
+                repeat: Some(repeat),
+                physical_x: None,
+                physical_y: None,
+                line: None,
+            },
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -2449,6 +2522,7 @@ struct ProductShellHost {
     last_screenshot_request: Option<String>,
     selected_tab_id: Option<String>,
     navigation_status: Option<String>,
+    last_native_input: Option<RendererInputSnapshot>,
     pending_navigation: Option<(
         String,
         mpsc::Receiver<Result<TabNavigationDocument, String>>,
@@ -2467,6 +2541,7 @@ impl ProductShellHost {
             last_screenshot_request: None,
             selected_tab_id: None,
             navigation_status: None,
+            last_native_input: None,
             pending_navigation: None,
             queued_navigation: None,
             owner,
@@ -2630,6 +2705,7 @@ impl crate::platform::services::control_center_shell::ControlCenterShellHost for
         &mut self,
         event: crate::platform::services::control_center_shell::ControlCenterInputEvent,
     ) -> crate::platform::services::control_center_shell::ControlCenterShellResult<bool> {
+        self.last_native_input = Some(event.into());
         let tab_lines = cockpit_presentation(
             self.projection.lines(),
             self.projection.snapshot.connected_server.as_ref(),
@@ -2690,6 +2766,7 @@ impl crate::platform::services::control_center_shell::ControlCenterShellHost for
             physical_width: frame.width,
             physical_height: frame.height,
             scale_factor: frame.scale_factor,
+            last_native_input: self.last_native_input.clone(),
         };
         let error = crate::platform::services::ui_screenshot::write_xrgb_png(
             crate::platform::contract::ui_screenshot::XrgbFrame {
@@ -3182,6 +3259,26 @@ mod tests {
             CockpitInputAction::Activate("@2".to_owned())
         );
         assert_eq!(selected.as_deref(), Some("@2"));
+    }
+
+    #[test]
+    fn renderer_input_snapshot_preserves_pointer_hit_evidence() {
+        use crate::platform::services::control_center_shell::{
+            ControlCenterInputEvent, ControlCenterPointerButton,
+        };
+
+        let snapshot = RendererInputSnapshot::from(ControlCenterInputEvent::PointerPressed {
+            button: ControlCenterPointerButton::Primary,
+            physical_x: 120,
+            physical_y: 401,
+            line: Some(13),
+        });
+        assert_eq!(snapshot.kind, "pointer-pressed");
+        assert_eq!(snapshot.button.as_deref(), Some("primary"));
+        assert_eq!(snapshot.physical_x, Some(120));
+        assert_eq!(snapshot.physical_y, Some(401));
+        assert_eq!(snapshot.line, Some(13));
+        assert!(snapshot.key.is_none());
     }
 
     #[test]

@@ -188,7 +188,14 @@ Control Center is the product name; the executable family uses
   windowless process-posted event: the former is already client-local, while
   the latter is converted from screen coordinates through the exact target
   NSWindow; an event associated with another window fails closed. This adds no
-  retry or activation. Final Linux/macOS positive journey evidence remains open.
+  retry or activation. Integrated run `30718584882` still timed out after this
+  conversion, so that hypothesis is also closed rather than retried. The
+  renderer-owned screenshot snapshot now records the last native input kind,
+  pointer button, physical coordinates and adapter-owned line hit (or key and
+  repeat); the macOS timeout path captures it once. The next matching-host
+  failure must therefore distinguish event-delivery loss from a wrong hit-test
+  instead of triggering another coordinate guess. Final Linux/macOS positive
+  journey evidence remains open.
   Windows qualification evidence and
   Linux/macOS matching-host evidence are registered in separate gate manifests
   but participate in one exact PRD alignment parity check; cross-target compile
