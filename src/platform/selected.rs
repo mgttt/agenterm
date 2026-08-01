@@ -28,9 +28,6 @@ pub(crate) mod supervisor_audit;
 #[cfg(windows)]
 #[path = "adapters/windows/control_center.rs"]
 pub(crate) mod control_center;
-#[cfg(windows)]
-#[path = "adapters/windows/control_center_shell.rs"]
-pub(crate) mod control_center_shell;
 
 #[cfg(windows)]
 #[path = "adapters/windows/ui_screenshot.rs"]
@@ -58,9 +55,6 @@ pub(crate) mod supervisor_audit;
 #[cfg(target_os = "linux")]
 #[path = "adapters/linux/control_center.rs"]
 pub(crate) mod control_center;
-#[cfg(target_os = "linux")]
-#[path = "adapters/linux/control_center_shell.rs"]
-pub(crate) mod control_center_shell;
 
 #[cfg(target_os = "linux")]
 #[path = "adapters/linux/ui_screenshot.rs"]
@@ -88,9 +82,6 @@ pub(crate) mod supervisor_audit;
 #[cfg(target_os = "macos")]
 #[path = "adapters/macos/control_center.rs"]
 pub(crate) mod control_center;
-#[cfg(target_os = "macos")]
-#[path = "adapters/macos/control_center_shell.rs"]
-pub(crate) mod control_center_shell;
 
 #[cfg(target_os = "macos")]
 #[path = "adapters/macos/ui_screenshot.rs"]

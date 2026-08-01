@@ -71,7 +71,8 @@ impl ClipboardError {
         }
     }
 
-    pub(crate) fn to_capability_status(&self) -> CapabilityStatus {
+    #[cfg(test)]
+    fn to_capability_status(&self) -> CapabilityStatus {
         match self {
             Self::Unavailable { message } => CapabilityStatus::Failed {
                 code: "clipboard_unavailable",
@@ -137,7 +138,7 @@ impl ClipboardBackendFacts {
 ///
 /// Available only when at least one display-matched backend can both read and
 /// write. A lone `wl-copy` or `wl-paste` is Failed, never Available.
-pub(crate) fn clipboard_capability_status(
+fn clipboard_capability_status(
     display: DisplayBackendFacts,
     backends: ClipboardBackendFacts,
 ) -> CapabilityStatus {
@@ -157,7 +158,7 @@ pub(crate) fn clipboard_capability_status(
     }
 }
 
-pub(crate) fn clipboard_capability_status_from_env() -> CapabilityStatus {
+fn clipboard_capability_status_from_env() -> CapabilityStatus {
     clipboard_capability_status(display_facts_from_env(), ClipboardBackendFacts::probe())
 }
 
@@ -278,7 +279,7 @@ pub(crate) fn has_unicode_text() -> bool {
             return true;
         }
     }
-    match get_text(1) {
+    match get_text(1, HELPER_TIMEOUT) {
         Ok(text) => !text.is_empty(),
         Err(_) => false,
     }
@@ -897,8 +898,8 @@ mod tests {
                 .map(|d| d.as_millis())
                 .unwrap_or(0)
         );
-        set_text(&marker).expect("clipboard set_text");
-        let got = get_text(marker.len()).expect("clipboard get_text");
+        set_text(&marker, HELPER_TIMEOUT).expect("clipboard set_text");
+        let got = get_text(marker.len(), HELPER_TIMEOUT).expect("clipboard get_text");
         assert_eq!(got, marker);
         assert!(has_unicode_text());
     }

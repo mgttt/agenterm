@@ -37,7 +37,7 @@ third-party dependency.
 | `locking` | cross-process path locks and bounded slot permits | target `libc` / `windows-sys` |
 | `ipc` | typed endpoints and native listener/byte stream | `locking`, target native APIs |
 | `pty` | PTY command/master/child lifecycle | `process`, `rmux-pty` |
-| `window` | display facts, geometry, generic native text-window host and process-window automation | target Win32 APIs |
+| `window` | display facts, geometry, generic native text-window host and process-window automation | target Win32 APIs / `winit` + `softbuffer` |
 | `input` | normalized key classification, UTF-16 text decoding, primary-shortcut policy | `window` |
 | `ime` | preedit/commit state machine and display-aware capability status | `input` |
 | `activation` | neutral policy, typed requests, native window operation and application wake | `window`, target `winit` / Win32 |
@@ -58,6 +58,7 @@ third-party dependency.
 | PTY | ConPTY | POSIX PTY | POSIX PTY |
 | window geometry | available | available | available |
 | process-window automation | Win32 | typed Unsupported | typed Unsupported |
+| native text window | Win32/GDI | winit + softbuffer | winit + softbuffer |
 | normalized input | Control/AltGr policy | Control/Super policy | Command/Control policy |
 | IME composition | typed Unsupported | display-aware | display-aware |
 | activation | native show/focus | winit active intent | winit application intent |

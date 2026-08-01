@@ -197,6 +197,12 @@ Windows adapter 现在拥有 window class/create、timer/message loop、GDI text
 close/title/invalidate；root 只把 Control Center 产品 host 的 title/lines/poll/screenshot
 映射到中立 trait。旧 Win32 shell 文件被替换为产品 bridge。Linux/macOS runner 暂时
 明确 Unsupported，不能冒充对应 shell 已迁移；下一叶将以 pixel-surface host 接入。
+紧随其后的 Unix shell 叶已完成该接入：winit event loop/window、softbuffer surface、
+raw window identity、resize/present、focus、200ms poll 与 renderer-owned frame receipt
+迁入 crate 的 shared Unix adapter；root services 只保留一个三平台产品 bridge，三套
+OS shell selector 文件删除。Windows host 上的 Linux-target crate all-feature Clippy
+以 warnings denied 通过，并同时修复 PTY private-error destructure、clipboard timeout
+调用与陈旧 IPC/product-path test 等此前未被 Windows 编译发现的问题。总边界门禁剩 8 行。
 
 2026-08-01 首个建设期增量：Cockpit snapshot 新增明确的
 `tab_counts.{total,running,dead}`，native shell 同源显示 logical instance、

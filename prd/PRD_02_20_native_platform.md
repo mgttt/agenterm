@@ -485,6 +485,14 @@ integrated validation recorded below):
   adapter responsibilities; the main crate retains Control Center state and
   maps it through the neutral host trait. Linux/macOS currently return typed
   Unsupported from this runner until their pixel-surface host is connected.
+- [x] Linux/macOS native text-window hosting is now connected through the same
+  public trait. The crate shared Unix adapter owns winit event loops/windows,
+  softbuffer surfaces, raw identity extraction, resize/present, focus, polling,
+  and renderer-frame receipts. Root Control Center services use one product
+  bridge on all three targets and no longer select OS shell implementations.
+  A Windows-hosted Linux-target all-feature Clippy run passes with warnings
+  denied; it also exposed and closed stale PTY, clipboard-timeout and IPC-test
+  cross-target compile defects.
 - [x] Control Center state-directory protection, exclusive state-file creation,
   atomic replacement, existing-window focus, and direct native capture now
   call `services::control_center → selected → adapters/{windows,linux,macos}`.

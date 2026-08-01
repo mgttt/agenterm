@@ -681,28 +681,3 @@ fn unsafe_endpoint(endpoint: &IpcEndpoint, message: &str) -> IpcTransportError {
         io::Error::new(io::ErrorKind::PermissionDenied, message.to_owned()),
     )
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn data_root_priority_is_explicit_and_portable() {
-        assert_eq!(
-            super::super::unix_data_root_from(
-                Some("/srv/profile-data".into()),
-                Some("/home/example".into()),
-                PathBuf::from("/var/tmp")
-            ),
-            PathBuf::from("/srv/profile-data/agenterm")
-        );
-        assert_eq!(
-            super::super::unix_data_root_from(
-                Some("relative".into()),
-                Some("/home/example".into()),
-                PathBuf::from("/var/tmp")
-            ),
-            PathBuf::from("/home/example/.local/share/agenterm")
-        );
-    }
-}

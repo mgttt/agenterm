@@ -64,6 +64,7 @@ impl OpaqueWindowHandle {
         Self(raw)
     }
 
+    #[allow(dead_code)] // Read by the selected Windows adapter.
     pub(crate) const fn get(self) -> isize {
         self.0
     }

@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use libc::{self, c_int, pid_t};
 
-use crate::contract::pty::{InvalidProcessId, ProcessId, PtyError, PtyResult, TerminalSize};
+use crate::contract::pty::{ProcessId, PtyError, PtyResult, TerminalSize};
 
 const PTY_WRITE_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -221,10 +221,10 @@ fn spawn_child(command: ChildCommand) -> io::Result<SpawnedPty> {
 
     drop(slave_fd);
 
-    let pid = ProcessId::new(child_pid as u32).map_err(|InvalidProcessId(raw)| {
+    let pid = ProcessId::new(child_pid as u32).map_err(|error| {
         io::Error::new(
             io::ErrorKind::InvalidData,
-            format!("child process returned an invalid pid: {raw}"),
+            format!("child process returned an invalid pid: {error}"),
         )
     })?;
 
@@ -576,7 +576,7 @@ mod tests {
         let spawned = ChildCommand::new("/bin/sh")
             .arg("-c")
             .arg("echo marker")
-            .size(TerminalSize::new(24, 80))
+            .size(TerminalSize { rows: 24, cols: 80 })
             .spawn()
             .expect("spawn shell in pty");
 

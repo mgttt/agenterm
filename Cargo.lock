@@ -56,6 +56,7 @@ dependencies = [
  "png",
  "rmux-pty",
  "serde",
+ "softbuffer",
  "windows-sys 0.61.2",
  "winit",
 ]

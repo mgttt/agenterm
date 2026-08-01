@@ -16,7 +16,7 @@ filesystem = []
 locking = ["dep:libc", "dep:windows-sys"]
 ipc = ["locking"]
 pty = ["process", "dep:rmux-pty"]
-window = ["dep:windows-sys"]
+window = ["dep:windows-sys", "dep:winit", "dep:softbuffer"]
 input = ["window"]
 ime = ["input"]
 activation = ["window", "dep:winit"]
@@ -46,6 +46,7 @@ libc = { version = "0.2", optional = true }
 [target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
 ab_glyph = { version = "0.2.32", optional = true }
 winit = { version = "0.30", optional = true }
+softbuffer = { version = "0.4", optional = true }
 
 [dependencies]
 png = { version = "0.17", optional = true }

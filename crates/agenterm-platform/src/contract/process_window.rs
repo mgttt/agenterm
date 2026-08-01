@@ -74,11 +74,17 @@ impl ProcessWindowError {
     }
 }
 
+#[allow(dead_code)]
 pub(crate) type ScriptWindowFacts = ProcessWindowFacts;
+#[allow(dead_code)]
 pub(crate) type ScriptWindowRect = ProcessWindowRect;
+#[allow(dead_code)]
 pub(crate) type ScriptWindowKey = ProcessWindowKey;
+#[allow(dead_code)]
 pub(crate) type ScriptWindowPointerAction = ProcessWindowPointerAction;
+#[allow(dead_code)]
 pub(crate) type ScriptWindowMessage = ProcessWindowMessage;
+#[allow(dead_code)]
 pub(crate) type ScriptWindowError = ProcessWindowError;
 
 #[cfg(test)]

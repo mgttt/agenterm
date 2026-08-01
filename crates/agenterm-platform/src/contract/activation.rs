@@ -41,6 +41,7 @@ impl NativeWindowHandle {
         }
     }
 
+    #[allow(dead_code)] // Read by the selected Windows adapter.
     pub(crate) const fn raw(self) -> isize {
         self.0.get()
     }

@@ -1,4 +1,4 @@
-//! Shared winit/softbuffer implementation for Unix Control Center adapters.
+//! Shared winit/softbuffer native text-window implementation for Unix adapters.
 
 use std::{num::NonZeroU32, rc::Rc, time::Duration};
 
@@ -12,21 +12,20 @@ use winit::{
     window::{UserAttentionType, Window, WindowAttributes, WindowId},
 };
 
-use crate::platform::services::control_center_shell::{
-    ControlCenterFocusRequest, ControlCenterFrame, ControlCenterShellError, ControlCenterShellHost,
-    ControlCenterShellResult,
+use crate::window::{
+    NativeTextFrame, NativeTextWindowError, NativeTextWindowFocus, NativeTextWindowHost,
 };
 
 type DisplayHandle = winit::event_loop::OwnedDisplayHandle;
 type ShellSurface = Surface<DisplayHandle, Rc<Window>>;
 
-pub(super) fn run_native_shell<A, E>(
-    host: Box<dyn ControlCenterShellHost>,
+pub(crate) fn run_native_text_window<A, E>(
+    host: Box<dyn NativeTextWindowHost>,
     no_activate: bool,
     platform_identity: &'static str,
     configure_attributes: A,
     configure_event_loop: E,
-) -> ControlCenterShellResult<()>
+) -> Result<(), NativeTextWindowError>
 where
     A: Fn(WindowAttributes, bool) -> WindowAttributes + 'static,
     E: Fn(&mut EventLoopBuilder<()>, bool),
@@ -34,10 +33,10 @@ where
     let mut builder = EventLoop::<()>::builder();
     configure_event_loop(&mut builder, no_activate);
     let event_loop = builder.build().map_err(|error| {
-        ControlCenterShellError::failed("control_center_event_loop_create_failed", error)
+        NativeTextWindowError::failed("native_text_window_event_loop_create_failed", error)
     })?;
     let context = Context::new(event_loop.owned_display_handle()).map_err(|error| {
-        ControlCenterShellError::failed("control_center_surface_context_failed", error)
+        NativeTextWindowError::failed("native_text_window_surface_context_failed", error)
     })?;
     let mut app = App {
         host,
@@ -54,13 +53,13 @@ where
         failure: None,
     };
     event_loop.run_app(&mut app).map_err(|error| {
-        ControlCenterShellError::failed("control_center_event_loop_failed", error)
+        NativeTextWindowError::failed("native_text_window_event_loop_failed", error)
     })?;
     app.failure.map_or(Ok(()), Err)
 }
 
 struct App {
-    host: Box<dyn ControlCenterShellHost>,
+    host: Box<dyn NativeTextWindowHost>,
     no_activate: bool,
     platform_identity: &'static str,
     configure_attributes: Box<dyn Fn(WindowAttributes, bool) -> WindowAttributes>,
@@ -71,7 +70,7 @@ struct App {
     frame_width: u32,
     frame_height: u32,
     scale_factor: f64,
-    failure: Option<ControlCenterShellError>,
+    failure: Option<NativeTextWindowError>,
 }
 
 impl App {
@@ -81,7 +80,7 @@ impl App {
         code: &'static str,
         error: impl std::fmt::Display,
     ) {
-        self.failure = Some(ControlCenterShellError::failed(code, error));
+        self.failure = Some(NativeTextWindowError::failed(code, error));
         event_loop.exit();
     }
 
@@ -91,7 +90,7 @@ impl App {
         }
     }
 
-    fn redraw(&mut self) -> ControlCenterShellResult<()> {
+    fn redraw(&mut self) -> Result<(), NativeTextWindowError> {
         let Some(window) = self.window.as_ref() else {
             return Ok(());
         };
@@ -105,10 +104,10 @@ impl App {
             return Ok(());
         };
         surface.resize(width, height).map_err(|error| {
-            ControlCenterShellError::failed("control_center_surface_resize_failed", error)
+            NativeTextWindowError::failed("native_text_window_surface_resize_failed", error)
         })?;
         let mut buffer = surface.buffer_mut().map_err(|error| {
-            ControlCenterShellError::failed("control_center_surface_buffer_failed", error)
+            NativeTextWindowError::failed("native_text_window_surface_buffer_failed", error)
         })?;
         let width = buffer.width().get();
         let height = buffer.height().get();
@@ -119,7 +118,7 @@ impl App {
         self.frame_height = height;
         self.scale_factor = window.scale_factor();
         buffer.present().map_err(|error| {
-            ControlCenterShellError::failed("control_center_surface_present_failed", error)
+            NativeTextWindowError::failed("native_text_window_surface_present_failed", error)
         })
     }
 
@@ -127,7 +126,7 @@ impl App {
         let raw_handle = match native_window_identity(window) {
             Ok(handle) => handle,
             Err(error) => {
-                self.fail(event_loop, "control_center_native_handle_failed", error);
+                self.fail(event_loop, "native_text_window_handle_failed", error);
                 return false;
             }
         };
@@ -151,14 +150,14 @@ impl App {
             window.request_redraw();
         }
         if let Some(request) = self.host.take_focus_request()
-            && request == ControlCenterFocusRequest::Activate
+            && request == NativeTextWindowFocus::Activate
             && let Some(window) = self.window.as_ref()
         {
             window.set_minimized(false);
             window.request_user_attention(Some(UserAttentionType::Informational));
             window.focus_window();
         }
-        let frame = (!self.frame.is_empty()).then_some(ControlCenterFrame {
+        let frame = (!self.frame.is_empty()).then_some(NativeTextFrame {
             pixels: &self.frame,
             width: self.frame_width,
             height: self.frame_height,
@@ -185,7 +184,7 @@ impl ApplicationHandler for App {
         let window = match event_loop.create_window(attributes) {
             Ok(window) => Rc::new(window),
             Err(error) => {
-                self.fail(event_loop, "control_center_window_create_failed", error);
+                self.fail(event_loop, "native_text_window_create_failed", error);
                 return;
             }
         };
@@ -200,7 +199,7 @@ impl ApplicationHandler for App {
             }
             Err(error) => self.fail(
                 event_loop,
-                "control_center_surface_create_failed",
+                "native_text_window_surface_create_failed",
                 format!("{}: {error}", self.platform_identity),
             ),
         }

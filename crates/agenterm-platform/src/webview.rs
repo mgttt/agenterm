@@ -15,6 +15,7 @@ pub fn probe_system_webview() -> SystemWebViewProbe {
     crate::selected::webview::probe_system_webview()
 }
 
+#[allow(dead_code)] // Used by the selected Windows adapter.
 pub(crate) fn probe_version_directories(
     backend: &'static str,
     roots: impl IntoIterator<Item = PathBuf>,
