@@ -742,6 +742,10 @@ Cockpit
 - macOS 已有真实 renderer-owned screenshot；Linux production strategy 现已接到
   `RendererRequest`，无效 native handle 保持 typed `Failed`，但仍须在 X11/Wayland
   原生 journey 留存 snapshot + PNG，不能把 strategy 单测冒充交付证据；
+- Linux native journey 现已作为 `control-center-linux-smoke` 接入 Xvfb/Openbox CI：
+  X11 要求 compositor focus、同 owner snapshot/PNG/digest、server epoch、renderer
+  replacement 与 orphan cleanup；Wayland 只声明可移植 owner/reuse，不伪造 focus。
+  首次真实 runner 结果未绿前不改变完成状态；
 - Native Cockpit input 已由 `agenterm-platform::window` 发布 typed pointer/key event，
   Win32/winit adapter 负责坐标、行命中和键规范化；产品层只维护 tab cursor 并异步
   复用既有 typed select operation。Windows unit/Clippy 与 Linux/macOS cross-check 通过，

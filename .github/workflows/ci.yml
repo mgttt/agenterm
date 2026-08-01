@@ -198,7 +198,9 @@ jobs:
           start_ms=$(date +%s%3N)
           rustup component add rustfmt clippy
           sudo apt-get update
-          sudo apt-get install -y libxkbcommon0 libxkbcommon-x11-0 libwayland-client0
+          sudo apt-get install -y \
+            libxkbcommon0 libxkbcommon-x11-0 libwayland-client0 \
+            openbox x11-utils xauth xdotool xvfb
           end_ms=$(date +%s%3N)
           duration_ms=$((end_ms - start_ms))
           echo "duration_ms=$duration_ms" >> "$GITHUB_OUTPUT"
@@ -260,6 +262,33 @@ jobs:
           duration_ms=$((end_ms - start_ms))
           echo "duration_ms=$duration_ms" >> "$GITHUB_OUTPUT"
           echo "linux_x86_64_native_ipc_compat_ms: $duration_ms" >> "$GITHUB_STEP_SUMMARY"
+      - name: Prove native Linux Control Center lifecycle
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: control-center-smoke
+        env:
+          AGENTERM_NO_ACTIVATE: "1"
+        run: |
+          start_ms=$(date +%s%3N)
+          xvfb-run -a -s '-screen 0 1280x800x24 -nolisten tcp' bash -ceu '
+            openbox --sm-disable >target/control-center-openbox.log 2>&1 &
+            window_manager=$!
+            trap "kill $window_manager 2>/dev/null || true; wait $window_manager 2>/dev/null || true" EXIT
+            ready=
+            for attempt in $(seq 1 100); do
+              if xprop -root _NET_SUPPORTING_WM_CHECK 2>/dev/null | grep -q "window id"; then
+                ready=1
+                break
+              fi
+              sleep 0.05
+            done
+            test "$ready" = 1
+            AGENTERM_BOOTSTRAP_TASK=control-center-linux-smoke \
+              ./scripts/bootstrap.sh --backend x11
+          '
+          end_ms=$(date +%s%3N)
+          duration_ms=$((end_ms - start_ms))
+          echo "duration_ms=$duration_ms" >> "$GITHUB_OUTPUT"
+          echo "linux_x86_64_control_center_smoke_ms: $duration_ms" >> "$GITHUB_STEP_SUMMARY"
       - name: Exercise public Linux Script CLI
         run: cargo test --locked --target x86_64-unknown-linux-gnu --test linux_script_cli
       - name: Validate isolated agenterm-net research loop

@@ -356,9 +356,14 @@ future promotion gates.
   state, selected view, title/tab count, dimensions, byte count, and SHA-256.
   The visible framebuffer displays the logical authority rather than an
   absolute socket path.
-- [ ] native Linux renderer capture, six-cell lifecycle reruns, and packaged
-  executable evidence remain open; this macOS result does not promote the
-  cross-platform delivery gate.
+- [~] native Linux now has a public X11/Wayland-aware lifecycle journey wired
+  to main CI: X11 requires caller-selected Unix IPC, compositor-observed
+  no-activate/focus reuse, renderer-owned structured frame plus independently
+  hashed PNG, server loss/new epoch, renderer kill/replacement, PTY isolation
+  and orphan cleanup. Wayland runs the portable owner/reuse lifecycle without
+  pretending compositor focus is observable; unavailable displays return typed
+  `Unsupported` without fake evidence. The first real Linux CI execution,
+  Wayland native evidence, six-cell reruns and packaged evidence remain open.
 
 ## Explicit v0.1.11 non-goals
 

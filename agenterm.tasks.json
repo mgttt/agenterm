@@ -219,6 +219,13 @@
       "network": [],
       "evidence": ["task.control-center-macos-smoke"]
     },
+    "control-center-linux-smoke": {
+      "inputs": ["built-control-center", "isolated-settings", "isolated-native-ipc", "display-session"],
+      "outputs": ["control-center-linux-evidence", "renderer-owned-png-evidence"],
+      "budget": {"timeout_ms": 180000, "max_operations": 10000000, "max_output_bytes": 1048576},
+      "network": [],
+      "evidence": ["task.control-center-linux-smoke"]
+    },
     "agenterm-net-research": {
       "inputs": ["research-source", "research-cargo-lock"],
       "outputs": ["libp2p-cid-block-store-evidence"],
@@ -697,6 +704,17 @@
       "args": [".", "dist/agenterm-cc", "dist/agenterm-server", "dist/agenterm-cli"],
       "dependencies": [],
       "platforms": ["macos"],
+      "side_effects": ["artifact_write", "process_spawn", "gui_spawn"]
+    },
+    {
+      "id": "control-center-linux-smoke",
+      "description": "Prove caller-selected native IPC, renderer-owned PNG evidence, focus/reuse, server epochs, renderer replacement, and process isolation on Linux",
+      "entry": "scripts/rhai/control-center-linux-smoke.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "args": [".", "target/x86_64-unknown-linux-gnu/debug/agenterm-cc", "target/x86_64-unknown-linux-gnu/debug/agenterm-server", "target/x86_64-unknown-linux-gnu/debug/agenterm-cli"],
+      "dependencies": [],
+      "platforms": ["linux"],
       "side_effects": ["artifact_write", "process_spawn", "gui_spawn"]
     },
     {
