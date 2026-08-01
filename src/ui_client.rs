@@ -135,9 +135,10 @@ impl UiClientModel {
         self.snapshot.server_pid
     }
 
-    pub(crate) fn heartbeat_if_due(&mut self) -> Result<bool> {
+    /// Renews the lease when due. Lease maintenance never changes the visible model.
+    pub(crate) fn maintain_lease_if_due(&mut self) -> Result<()> {
         if self.last_heartbeat.elapsed() < HEARTBEAT_INTERVAL {
-            return Ok(false);
+            return Ok(());
         }
         let renewed: UiLeaseGrant = request_json(vec![
             "ui-lease".to_owned(),
@@ -158,7 +159,7 @@ impl UiClientModel {
         }
         self.lease = renewed;
         self.last_heartbeat = Instant::now();
-        Ok(true)
+        Ok(())
     }
 
     pub(crate) fn poll_deltas(&mut self) -> Result<bool> {

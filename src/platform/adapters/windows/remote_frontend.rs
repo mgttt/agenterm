@@ -13,10 +13,10 @@ use unicode_width::UnicodeWidthChar;
 use windows_sys::Win32::{
     Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
     Graphics::Gdi::{
-        BeginPaint, CreateSolidBrush, DT_CENTER, DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE,
-        DT_VCENTER, DeleteObject, DrawTextW, EndPaint, FillRect, FrameRect, HDC, HFONT, HGDIOBJ,
-        PAINTSTRUCT, ScreenToClient, SelectObject, SetBkMode, SetTextColor, TRANSPARENT,
-        UpdateWindow,
+        BeginPaint, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, CreateSolidBrush,
+        DT_CENTER, DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject,
+        DrawTextW, EndPaint, FillRect, FrameRect, HBITMAP, HDC, HFONT, HGDIOBJ, PAINTSTRUCT,
+        SRCCOPY, ScreenToClient, SelectObject, SetBkMode, SetTextColor, TRANSPARENT, UpdateWindow,
     },
     System::LibraryLoader::GetModuleHandleW,
     UI::{
@@ -88,6 +88,7 @@ use crate::{
 };
 
 const TIMER_ID: usize = 1;
+const MAX_FRAME_PIXELS: i64 = 33_554_432;
 const EDIT_ID: usize = 2101;
 const SEND_ID: usize = 2102;
 const NEW_ID: usize = 2103;
@@ -912,9 +913,8 @@ impl RemoteWindowState {
             .as_mut()
             .context("replaceable UI is disconnected")
             .and_then(|client| {
-                let heartbeat = client.heartbeat_if_due()?;
-                let delta = client.poll_deltas()?;
-                Ok(heartbeat || delta)
+                client.maintain_lease_if_due()?;
+                client.poll_deltas()
             });
         match result {
             Ok(changed) => {
@@ -4767,16 +4767,35 @@ impl RemoteWindowState {
     }
 
     fn paint(&self) {
+        let mut paint: PAINTSTRUCT = unsafe { mem::zeroed() };
+        let window_device = unsafe { BeginPaint(self.window, &mut paint) };
+        if window_device.is_null() {
+            unsafe { EndPaint(self.window, &paint) };
+            return;
+        }
+        let mut client: RECT = unsafe { mem::zeroed() };
+        let dimensions = (unsafe { GetClientRect(self.window, &mut client) } != 0)
+            .then(|| bounded_frame_dimensions(client))
+            .flatten();
+        let buffered = dimensions
+            .and_then(|(width, height)| PaintBackBuffer::new(window_device, width, height));
+        if let Some(buffered) = buffered {
+            self.paint_frame(buffered.device);
+            if !buffered.commit_to(window_device) {
+                self.paint_frame(window_device);
+            }
+        } else {
+            self.paint_frame(window_device);
+        }
+        unsafe { EndPaint(self.window, &paint) };
+    }
+
+    fn paint_frame(&self, device: HDC) {
         let palette = if self.settings_open {
             self.settings_theme_draft.palette()
         } else {
             self.active_terminal_appearance().color_theme.palette()
         };
-        let mut paint: PAINTSTRUCT = unsafe { mem::zeroed() };
-        let device = unsafe { BeginPaint(self.window, &mut paint) };
-        if device.is_null() {
-            return;
-        }
         let (sidebar, terminal, composer, status) = self.layout_rects();
         fill(device, &sidebar, palette.sidebar.colorref());
         if let Some(toolbar) = self.workspace_geometry().workspace_toolbar {
@@ -4902,7 +4921,6 @@ impl RemoteWindowState {
         } else if self.pending_close_tab_id.is_some() {
             self.paint_tab_close(device, palette);
         }
-        unsafe { EndPaint(self.window, &paint) };
     }
 
     fn paint_terminal_selection(
@@ -5314,6 +5332,76 @@ impl RemoteWindowState {
 
 fn terminal_char_is_named_key_echo(value: u16) -> bool {
     matches!(value, 0x09 | 0x1b)
+}
+
+fn bounded_frame_dimensions(rect: RECT) -> Option<(i32, i32)> {
+    let width = rect.right.checked_sub(rect.left)?;
+    let height = rect.bottom.checked_sub(rect.top)?;
+    let pixels = i64::from(width).checked_mul(i64::from(height))?;
+    (width > 0 && height > 0 && pixels <= MAX_FRAME_PIXELS).then_some((width, height))
+}
+
+struct PaintBackBuffer {
+    device: HDC,
+    bitmap: HBITMAP,
+    previous: HGDIOBJ,
+    width: i32,
+    height: i32,
+}
+
+impl PaintBackBuffer {
+    fn new(window_device: HDC, width: i32, height: i32) -> Option<Self> {
+        let device = unsafe { CreateCompatibleDC(window_device) };
+        if device.is_null() {
+            return None;
+        }
+        let bitmap = unsafe { CreateCompatibleBitmap(window_device, width, height) };
+        if bitmap.is_null() {
+            unsafe { DeleteDC(device) };
+            return None;
+        }
+        let previous = unsafe { SelectObject(device, bitmap as HGDIOBJ) };
+        if previous.is_null() {
+            unsafe {
+                DeleteObject(bitmap as HGDIOBJ);
+                DeleteDC(device);
+            }
+            return None;
+        }
+        Some(Self {
+            device,
+            bitmap,
+            previous,
+            width,
+            height,
+        })
+    }
+
+    fn commit_to(&self, window_device: HDC) -> bool {
+        unsafe {
+            BitBlt(
+                window_device,
+                0,
+                0,
+                self.width,
+                self.height,
+                self.device,
+                0,
+                0,
+                SRCCOPY,
+            ) != 0
+        }
+    }
+}
+
+impl Drop for PaintBackBuffer {
+    fn drop(&mut self) {
+        unsafe {
+            SelectObject(self.device, self.previous);
+            DeleteObject(self.bitmap as HGDIOBJ);
+            DeleteDC(self.device);
+        }
+    }
 }
 
 fn windows_terminal_named_key(key: u16) -> Option<&'static str> {
@@ -6339,6 +6427,37 @@ mod tests {
         assert!(terminal_char_is_named_key_echo(0x09));
         assert!(terminal_char_is_named_key_echo(0x1b));
         assert!(!terminal_char_is_named_key_echo(u16::from(b'A')));
+    }
+
+    #[test]
+    fn paint_back_buffer_dimensions_are_positive_and_bounded() {
+        assert_eq!(
+            bounded_frame_dimensions(RECT {
+                left: 0,
+                top: 0,
+                right: 1920,
+                bottom: 1080,
+            }),
+            Some((1920, 1080))
+        );
+        assert_eq!(
+            bounded_frame_dimensions(RECT {
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 1080,
+            }),
+            None
+        );
+        assert_eq!(
+            bounded_frame_dimensions(RECT {
+                left: 0,
+                top: 0,
+                right: 10_000,
+                bottom: 10_000,
+            }),
+            None
+        );
     }
 
     #[test]

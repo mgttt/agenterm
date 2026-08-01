@@ -69,13 +69,15 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] terminal paste reads bounded Unicode clipboard text off the GUI thread,
   normalizes newlines, filters unsafe controls, and honors bracketed-paste mode
 - [~] dirty-frame rendering and GDI double buffering exist, but live v0.1.12
-  dogfood reports sustained terminal-content and native-frame flicker. The
-  replaceable Windows GUI still clears and repaints directly on the window HDC
-  without an offscreen atomic frame; lease heartbeat is also incorrectly
-  treated as visible change and invalidates the full window while idle.
-  Memory-DC composition, heartbeat/redraw separation, same-grid resize
-  suppression, diagnostic paint counts and real-time visual evidence are
-  required before this is considered closed.
+  dogfood reports sustained terminal-content and native-frame flicker. White-box
+  analysis found that the replaceable Windows GUI cleared and repainted directly
+  on the window HDC and treated lease heartbeat as visible change. The current
+  repair makes lease maintenance non-visual by type and composes a complete
+  client frame in a compatible memory DC before one `BitBlt`, with bounded
+  allocation and a direct-paint fallback. Focused structural tests pass, but
+  they cannot establish temporal visual stability. Same-grid resize suppression,
+  diagnostic paint counts, and high-output plus idle real-time dogfood evidence
+  on the new binary remain required before restoring shipped status.
 - [~] ordinary terminal keys and modifiers are encoded for the active PTY;
   live v0.1.12 dogfood found `Shift+Tab` dropped while terminal focus was
   active. The current repair introduces one shared xterm named-key modifier

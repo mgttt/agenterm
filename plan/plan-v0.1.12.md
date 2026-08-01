@@ -53,14 +53,25 @@ renderer-owned 760×480 PNG 为 58,125 bytes。headless server 下 missing targe
 
 2026-08-01 live dogfood 新增阻断项（结论与修复证据必须回写对应 PRD）：
 
-- [ ] P0：Windows terminal 内容与 native frame 持续闪烁；先区分无状态变化的
+- [~] P0：Windows terminal 内容与 native frame 持续闪烁；先区分无状态变化的
   redraw/invalidate loop、背景擦除和 resize/DPI feedback，不以降低刷新率掩盖。
   白箱审计已定位 replaceable GUI 直接在 window HDC 上清空四区后逐层画回，
   没有 offscreen frame + single BitBlt；高输出 delta 约 10Hz 暴露半成品帧。
   此外 2 秒 lease heartbeat 被误算为 visual change，idle 也触发全窗重绘；
   `CS_HREDRAW|CS_VREDRAW`、NULL dirty region 与同尺寸 resize 是次级放大器。
-  修复顺序冻结为 heartbeat/redraw 解耦 → GDI 双缓冲原子提交 → 同尺寸
-  resize/event 去噪 → 可选 dirty-region 优化，并用 telemetry + 60fps 真机观察验收。
+  第一叶已实现 heartbeat/redraw 类型解耦：lease maintenance 仅返回成功/失败，
+  tick 只有收到真实 delta 才报告 visual change；Windows paint 先在兼容 memory DC
+  组成完整 client frame，再以单次 `BitBlt` 提交，分配或提交失败时保留直接绘制
+  fallback，并对像素预算 fail closed。聚焦双缓冲边界测试与 UI-client tests 已通过。
+  集成态 `check.cmd --quick` 已通过 repository lint、fmt、alignment、warnings-denied
+  all-target Clippy 与 396 项 library tests，七产物 dev build 通过；两次直接归属的
+  `remote-ui-smoke` 均完成 resize/minimize/restore、Settings、PTY 和 renderer-owned
+  screenshots，但随后在既有“关闭 GUI 后保留 server”阶段发现 server 已退出。
+  2026-07-31 的保留运行在同阶段同样失败，故当前记录为独立 smoke 阻断而非本次
+  帧提交回归，也不把前半程通过算作完整 smoke 通过。
+  该证据只能证明源头被切断和帧提交结构，不能证明时间域视觉效果；新构建的
+  高输出/idle 60fps 真机观察、paint/invalidate telemetry 以及同尺寸 resize/event
+  去噪仍是关闭条件。
 - [ ] alternate-screen harness 无法本地向上滚动；初步证据指向 `vt100`
   alternate grid 的零 scrollback，需要在 application raw-mouse ownership 之外
   评估把 wheel/PageUp 语义转交前台 TUI，不能破坏普通 scrollback。
