@@ -10,13 +10,14 @@ use std::{
     time::{Duration, Instant},
 };
 
+/// Adapter ceiling for a caller-supplied clipboard deadline.
 pub(crate) const HELPER_TIMEOUT: Duration = Duration::from_millis(1_500);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ClipboardError {
     Unavailable { message: String },
     TooLarge { limit: usize },
-    Timeout,
+    Timeout { timeout: Duration },
     Backend { message: String },
 }
 
@@ -27,25 +28,32 @@ impl ClipboardError {
             Self::TooLarge { limit } => {
                 format!("clipboard text exceeds the {limit} byte terminal paste limit")
             }
-            Self::Timeout => {
+            Self::Timeout { timeout } => {
                 format!(
                     "clipboard helper exceeded the {} ms deadline",
-                    HELPER_TIMEOUT.as_millis()
+                    timeout.as_millis()
                 )
             }
         }
     }
 }
 
-pub(crate) fn set_text(text: &str, _timeout: std::time::Duration) -> Result<(), ClipboardError> {
-    write_via_command("pbcopy", text, HELPER_TIMEOUT)
+pub(crate) fn set_text(text: &str, timeout: std::time::Duration) -> Result<(), ClipboardError> {
+    write_via_command("pbcopy", text, bounded_helper_timeout(timeout)?)
 }
 
 pub(crate) fn get_text(
     max_read_bytes: usize,
-    _timeout: std::time::Duration,
+    timeout: std::time::Duration,
 ) -> Result<String, ClipboardError> {
-    read_via_command("pbpaste", max_read_bytes, HELPER_TIMEOUT)
+    read_via_command("pbpaste", max_read_bytes, bounded_helper_timeout(timeout)?)
+}
+
+fn bounded_helper_timeout(timeout: Duration) -> Result<Duration, ClipboardError> {
+    if timeout.is_zero() {
+        return Err(ClipboardError::Timeout { timeout });
+    }
+    Ok(timeout.min(HELPER_TIMEOUT))
 }
 
 pub(crate) fn has_unicode_text() -> bool {
@@ -65,7 +73,7 @@ pub(crate) fn map_error(error: ClipboardError) -> crate::contract::clipboard::Cl
             "clipboard_too_large",
             error.message(),
         ),
-        ClipboardError::Timeout => {
+        ClipboardError::Timeout { .. } => {
             crate::contract::clipboard::ClipboardError::failed("clipboard_timeout", error.message())
         }
         ClipboardError::Backend { .. } => crate::contract::clipboard::ClipboardError::failed(
@@ -101,7 +109,7 @@ fn write_via_command(program: &str, text: &str, timeout: Duration) -> Result<(),
             let _ = child.kill();
             let _ = child.wait();
             let _ = writer.join();
-            return Err(ClipboardError::Timeout);
+            return Err(ClipboardError::Timeout { timeout });
         }
         thread::sleep(Duration::from_millis(5));
     }
@@ -123,6 +131,7 @@ fn write_via_command(program: &str, text: &str, timeout: Duration) -> Result<(),
     wait_child(
         &mut child,
         deadline.saturating_duration_since(Instant::now()),
+        timeout,
     )
 }
 
@@ -147,7 +156,7 @@ fn read_via_command(
             let _ = child.kill();
             let _ = child.wait();
             let _ = reader.join();
-            return Err(ClipboardError::Timeout);
+            return Err(ClipboardError::Timeout { timeout });
         }
         thread::sleep(Duration::from_millis(5));
     }
@@ -168,6 +177,7 @@ fn read_via_command(
     wait_child(
         &mut child,
         deadline.saturating_duration_since(Instant::now()),
+        timeout,
     )?;
     String::from_utf8(bytes).map_err(|error| ClipboardError::Backend {
         message: error.to_string(),
@@ -193,8 +203,12 @@ fn read_stdout_bounded(stdout: &mut impl Read, limit: usize) -> Result<Vec<u8>, 
     }
 }
 
-fn wait_child(child: &mut Child, timeout: Duration) -> Result<(), ClipboardError> {
-    let deadline = Instant::now() + timeout.max(Duration::from_millis(1));
+fn wait_child(
+    child: &mut Child,
+    remaining: Duration,
+    operation_timeout: Duration,
+) -> Result<(), ClipboardError> {
+    let deadline = Instant::now() + remaining;
     loop {
         match child.try_wait() {
             Ok(Some(status)) if status.success() => return Ok(()),
@@ -207,7 +221,9 @@ fn wait_child(child: &mut Child, timeout: Duration) -> Result<(), ClipboardError
             Ok(None) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(ClipboardError::Timeout);
+                return Err(ClipboardError::Timeout {
+                    timeout: operation_timeout,
+                });
             }
             Err(error) => {
                 return Err(ClipboardError::Backend {
@@ -245,11 +261,32 @@ mod tests {
             }
         );
         assert_eq!(
-            map_error(ClipboardError::Timeout).to_capability_status(),
+            map_error(ClipboardError::Timeout {
+                timeout: HELPER_TIMEOUT,
+            })
+            .to_capability_status(),
             crate::CapabilityStatus::Failed {
                 code: "clipboard_timeout".into(),
                 message: "clipboard helper exceeded the 1500 ms deadline".to_owned(),
             }
+        );
+    }
+
+    #[test]
+    fn caller_timeout_is_preserved_and_capped_for_helpers() {
+        assert_eq!(
+            bounded_helper_timeout(Duration::from_millis(75)),
+            Ok(Duration::from_millis(75))
+        );
+        assert_eq!(
+            bounded_helper_timeout(Duration::from_secs(30)),
+            Ok(HELPER_TIMEOUT)
+        );
+        assert_eq!(
+            bounded_helper_timeout(Duration::ZERO),
+            Err(ClipboardError::Timeout {
+                timeout: Duration::ZERO
+            })
         );
     }
 
@@ -293,7 +330,12 @@ mod tests {
         );
         let _ = std::fs::remove_file(path);
 
-        assert_eq!(result, Err(ClipboardError::Timeout));
+        assert_eq!(
+            result,
+            Err(ClipboardError::Timeout {
+                timeout: Duration::from_millis(50)
+            })
+        );
         assert!(started.elapsed() < Duration::from_secs(2));
     }
 }

@@ -44,7 +44,7 @@ fn display_facts_from_env() -> DisplayBackendFacts {
     }
 }
 
-/// Wall-clock budget for one clipboard helper invocation (GUI must not stall).
+/// Adapter ceiling for a caller-supplied clipboard deadline (GUI must not stall).
 pub(crate) const HELPER_TIMEOUT: Duration = Duration::from_millis(1_500);
 
 /// Bound for TARGETS / MIME-type probe output (not full paste payloads).
@@ -212,7 +212,9 @@ fn require_capability_for_io() -> Result<(), ClipboardError> {
 }
 
 /// Write Unicode text to the system clipboard.
-pub(crate) fn set_text(text: &str, _timeout: std::time::Duration) -> Result<(), ClipboardError> {
+pub(crate) fn set_text(text: &str, timeout: std::time::Duration) -> Result<(), ClipboardError> {
+    let timeout = bounded_helper_timeout(timeout)?;
+    let deadline = Instant::now() + timeout;
     require_capability_for_io()?;
     let display = display_facts_from_env();
     let backends = ClipboardBackendFacts::probe();
@@ -224,7 +226,8 @@ pub(crate) fn set_text(text: &str, _timeout: std::time::Duration) -> Result<(), 
 
     let mut errors = Vec::new();
     for (argv, label) in write_attempts(display, backends) {
-        match write_via_command(argv, text, HELPER_TIMEOUT) {
+        let remaining = remaining_budget(deadline, timeout)?;
+        match write_via_command(argv, text, remaining) {
             Ok(()) => return Ok(()),
             Err(error) => errors.push(format!("{label}: {}", error.message())),
         }
@@ -235,8 +238,10 @@ pub(crate) fn set_text(text: &str, _timeout: std::time::Duration) -> Result<(), 
 /// Read Unicode text from the system clipboard.
 pub(crate) fn get_text(
     max_read_bytes: usize,
-    _timeout: std::time::Duration,
+    timeout: std::time::Duration,
 ) -> Result<String, ClipboardError> {
+    let timeout = bounded_helper_timeout(timeout)?;
+    let deadline = Instant::now() + timeout;
     require_capability_for_io()?;
     let display = display_facts_from_env();
     let backends = ClipboardBackendFacts::probe();
@@ -248,7 +253,8 @@ pub(crate) fn get_text(
 
     let mut errors = Vec::new();
     for (argv, label) in read_attempts(display, backends) {
-        match read_via_command(argv, max_read_bytes, HELPER_TIMEOUT) {
+        let remaining = remaining_budget(deadline, timeout)?;
+        match read_via_command(argv, max_read_bytes, remaining) {
             Ok(text) => return Ok(text),
             Err(error) => {
                 if matches!(error, ClipboardError::TooLarge { .. }) {
@@ -259,6 +265,31 @@ pub(crate) fn get_text(
         }
     }
     Err(classify_attempt_errors("read", &errors))
+}
+
+fn bounded_helper_timeout(timeout: Duration) -> Result<Duration, ClipboardError> {
+    if timeout.is_zero() {
+        return Err(timeout_error(timeout, "clipboard operation"));
+    }
+    Ok(timeout.min(HELPER_TIMEOUT))
+}
+
+fn remaining_budget(deadline: Instant, timeout: Duration) -> Result<Duration, ClipboardError> {
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    if remaining.is_zero() {
+        Err(timeout_error(timeout, "clipboard operation"))
+    } else {
+        Ok(remaining)
+    }
+}
+
+fn timeout_error(timeout: Duration, label: &str) -> ClipboardError {
+    ClipboardError::Timeout {
+        message: format!(
+            "clipboard_timeout: {label} exceeded {} ms",
+            timeout.as_millis()
+        ),
+    }
 }
 
 /// Fast probe for Unicode clipboard text without reading the full payload when possible.
@@ -433,22 +464,51 @@ fn write_via_command(argv: &[&str], text: &str, timeout: Duration) -> Result<(),
         .map_err(|error| ClipboardError::Backend {
             message: error.to_string(),
         })?;
-    {
-        let stdin = child
-            .stdin
-            .as_mut()
-            .ok_or_else(|| ClipboardError::Backend {
-                message: "missing stdin".to_owned(),
-            })?;
-        stdin
-            .write_all(text.as_bytes())
+    let mut stdin = child.stdin.take().ok_or_else(|| ClipboardError::Backend {
+        message: "missing stdin".to_owned(),
+    })?;
+    let text = text.as_bytes().to_vec();
+    let writer = thread::spawn(move || {
+        let result = stdin
+            .write_all(&text)
             .map_err(|error| ClipboardError::Backend {
                 message: error.to_string(),
-            })?;
+            });
+        drop(stdin);
+        result
+    });
+    let deadline = Instant::now() + timeout;
+    while !writer.is_finished() {
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = writer.join();
+            return Err(timeout_error(timeout, "clipboard write"));
+        }
+        thread::sleep(Duration::from_millis(5));
     }
-    // Drop stdin so the helper sees EOF and can finish.
-    drop(child.stdin.take());
-    wait_child_with_timeout(&mut child, timeout, "clipboard write")
+    match writer.join() {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(error);
+        }
+        Err(_) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(ClipboardError::Backend {
+                message: "clipboard writer thread panicked".to_owned(),
+            });
+        }
+    }
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    if remaining.is_zero() {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(timeout_error(timeout, "clipboard write"));
+    }
+    wait_child_with_timeout(&mut child, remaining, "clipboard write")
 }
 
 fn read_via_command(
@@ -526,7 +586,13 @@ fn read_via_command(
         }
     };
 
-    wait_child_with_timeout(&mut child, remaining_or_min(deadline), "clipboard read")?;
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    if remaining.is_zero() {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(timeout_error(timeout, "clipboard read"));
+    }
+    wait_child_with_timeout(&mut child, remaining, "clipboard read")?;
     String::from_utf8(bytes).map_err(|error| ClipboardError::Backend {
         message: error.to_string(),
     })
@@ -591,15 +657,6 @@ fn wait_child_with_timeout(
                 });
             }
         }
-    }
-}
-
-fn remaining_or_min(deadline: Instant) -> Duration {
-    let remaining = deadline.saturating_duration_since(Instant::now());
-    if remaining.is_zero() {
-        Duration::from_millis(50)
-    } else {
-        remaining
     }
 }
 
@@ -822,6 +879,24 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn caller_timeout_is_preserved_and_capped_for_helpers() {
+        assert_eq!(
+            bounded_helper_timeout(Duration::from_millis(75)),
+            Ok(Duration::from_millis(75))
+        );
+        assert_eq!(
+            bounded_helper_timeout(Duration::from_secs(30)),
+            Ok(HELPER_TIMEOUT)
+        );
+        assert_eq!(
+            bounded_helper_timeout(Duration::ZERO),
+            Err(ClipboardError::Timeout {
+                message: "clipboard_timeout: clipboard operation exceeded 0 ms".to_owned(),
+            })
+        );
     }
 
     #[test]
