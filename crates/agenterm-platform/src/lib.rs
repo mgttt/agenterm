@@ -49,23 +49,27 @@ pub enum CapabilityStatus {
 }
 
 pub fn capability_status(capability: Capability) -> CapabilityStatus {
-    let enabled = match capability {
-        Capability::Process => cfg!(feature = "process"),
-        Capability::Filesystem => cfg!(feature = "filesystem"),
-        Capability::Locking => cfg!(feature = "locking"),
-        Capability::Ipc => cfg!(feature = "ipc"),
-        Capability::Pty => cfg!(feature = "pty"),
-        Capability::Window => cfg!(feature = "window"),
-        Capability::Input => cfg!(feature = "input"),
-        Capability::Ime => cfg!(feature = "ime"),
-        Capability::Activation => cfg!(feature = "activation"),
-        Capability::Clipboard => cfg!(feature = "clipboard"),
-        Capability::Screenshot => cfg!(feature = "screenshot"),
-        Capability::Font => cfg!(feature = "font"),
-        Capability::WebView => cfg!(feature = "webview"),
+    let (enabled, implemented) = match capability {
+        Capability::Process => (cfg!(feature = "process"), true),
+        Capability::Filesystem => (cfg!(feature = "filesystem"), true),
+        Capability::Locking => (cfg!(feature = "locking"), true),
+        Capability::Ipc => (cfg!(feature = "ipc"), false),
+        Capability::Pty => (cfg!(feature = "pty"), true),
+        Capability::Window => (cfg!(feature = "window"), true),
+        Capability::Input => (cfg!(feature = "input"), false),
+        Capability::Ime => (cfg!(feature = "ime"), false),
+        Capability::Activation => (cfg!(feature = "activation"), false),
+        Capability::Clipboard => (cfg!(feature = "clipboard"), false),
+        Capability::Screenshot => (cfg!(feature = "screenshot"), false),
+        Capability::Font => (cfg!(feature = "font"), false),
+        Capability::WebView => (cfg!(feature = "webview"), false),
     };
-    if enabled {
+    if enabled && implemented {
         CapabilityStatus::Available
+    } else if enabled {
+        CapabilityStatus::Unsupported {
+            reason: Cow::Borrowed("capability-not-yet-implemented"),
+        }
     } else {
         CapabilityStatus::Unsupported {
             reason: Cow::Borrowed("feature-disabled"),
@@ -74,6 +78,12 @@ pub fn capability_status(capability: Capability) -> CapabilityStatus {
 }
 
 pub mod contract;
+
+#[cfg(feature = "filesystem")]
+pub mod filesystem;
+
+#[cfg(feature = "locking")]
+pub mod locking;
 
 #[cfg(feature = "window")]
 pub mod window;
@@ -91,15 +101,24 @@ mod selected;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn disabled_capabilities_are_explicit() {
         #[cfg(not(feature = "ipc"))]
         assert_eq!(
-            capability_status(Capability::Ipc),
-            CapabilityStatus::Unsupported {
-                reason: Cow::Borrowed("feature-disabled")
+            crate::capability_status(crate::Capability::Ipc),
+            crate::CapabilityStatus::Unsupported {
+                reason: std::borrow::Cow::Borrowed("feature-disabled")
+            }
+        );
+    }
+
+    #[test]
+    fn declared_but_unimplemented_capabilities_are_explicit() {
+        #[cfg(feature = "ipc")]
+        assert_eq!(
+            crate::capability_status(crate::Capability::Ipc),
+            crate::CapabilityStatus::Unsupported {
+                reason: std::borrow::Cow::Borrowed("capability-not-yet-implemented")
             }
         );
     }

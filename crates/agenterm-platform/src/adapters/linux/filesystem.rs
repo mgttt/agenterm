@@ -1,0 +1,23 @@
+use std::path::PathBuf;
+
+use crate::filesystem::{FilesystemError, HostDirectories};
+
+pub fn host_directories() -> Result<HostDirectories, FilesystemError> {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let config = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| home.as_ref().map(|path| path.join(".config")));
+    let local_data = std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .or_else(|| home.as_ref().map(|path| path.join(".local").join("share")));
+    match (config, local_data) {
+        (Some(config), Some(local_data)) => Ok(HostDirectories { config, local_data }),
+        _ => Err(FilesystemError::Unsupported {
+            reason: "home-directory-unavailable",
+        }),
+    }
+}
+
+pub fn executable_name(base: &str) -> String {
+    base.to_owned()
+}

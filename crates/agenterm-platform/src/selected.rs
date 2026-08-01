@@ -15,6 +15,30 @@ pub(crate) const fn platform_kind() -> crate::PlatformKind {
     }
 }
 
+#[cfg(all(feature = "filesystem", windows))]
+#[path = "adapters/windows/filesystem.rs"]
+pub(crate) mod filesystem;
+
+#[cfg(all(feature = "filesystem", target_os = "linux"))]
+#[path = "adapters/linux/filesystem.rs"]
+pub(crate) mod filesystem;
+
+#[cfg(all(feature = "filesystem", target_os = "macos"))]
+#[path = "adapters/macos/filesystem.rs"]
+pub(crate) mod filesystem;
+
+#[cfg(all(feature = "locking", windows))]
+#[path = "adapters/windows/locking.rs"]
+pub(crate) mod locking;
+
+#[cfg(all(feature = "locking", target_os = "linux"))]
+#[path = "adapters/linux/locking.rs"]
+pub(crate) mod locking;
+
+#[cfg(all(feature = "locking", target_os = "macos"))]
+#[path = "adapters/macos/locking.rs"]
+pub(crate) mod locking;
+
 #[cfg(all(feature = "process", windows))]
 #[path = "adapters/windows/process.rs"]
 pub(crate) mod process;

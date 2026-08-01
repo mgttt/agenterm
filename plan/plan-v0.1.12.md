@@ -71,6 +71,13 @@ clone、terminate-to-EOF 与 close-pseudoconsole 行为由原 adapter 原样保�
 Linux/macOS native scale adapters 经 workspace dependency 消费同一实现，旧 `src/platform/scale.rs`
 已删除。4 项 window tests 和 Agenterm all-target compile check 通过；AgenTerm 专属的
 320×240 CLI resize policy 继续留在主 crate，没有被包装成通用平台规则。
+第四个叶新增零产品命名的 `filesystem` host-directory/executable conventions，以及
+调用方提供 path、namespace、limit 的 `locking::{PathLock, SlotPermit}`。Unix 使用
+`flock`，Windows 使用命名 mutex 并增加进程内 slot reservation，避免同线程 mutex
+重入绕过全局并发上限。Script supervisor 现在真实消费该公开 locking API；
+`AgenTerm` 目录、audit 扩展名、supervisor namespace 和并发错误映射仍由主 crate
+决定。12 项 all-feature crate tests、warnings-denied Clippy 与 Agenterm all-target
+compile check 通过。
 
 2026-08-01 首个建设期增量：Cockpit snapshot 新增明确的
 `tab_counts.{total,running,dead}`，native shell 同源显示 logical instance、
