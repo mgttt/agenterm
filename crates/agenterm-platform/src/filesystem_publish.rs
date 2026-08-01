@@ -362,10 +362,7 @@ mod tests {
             crate::filesystem_cleanup::remove_tree,
         )
         .expect_err("install must fail");
-        assert_eq!(
-            error.kind(),
-            DirectoryPublishErrorKind::InstallRolledBack
-        );
+        assert_eq!(error.kind(), DirectoryPublishErrorKind::InstallRolledBack);
         assert!(error.retained_backup().is_none());
         assert_eq!(fs::read(destination.join("value")).unwrap(), b"old");
         crate::filesystem_cleanup::remove_tree(&root).unwrap();
