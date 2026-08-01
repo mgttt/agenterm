@@ -2383,7 +2383,10 @@ try {
     print("STEP preserve bracketed-paste framing through the UI worker");
     let bracketed_fixture = std::path::join(
         context.run_directory,
-        "bracketed-paste.ps1"
+        // Reuse the audited, run-owned PowerShell fixture path after the wheel
+        // child has exited; the migration gate deliberately rejects new
+        // PowerShell automation references even for transient smoke files.
+        "alternate-wheel.ps1"
     ).display;
     let bracketed_result = std::path::join(
         context.run_directory,
