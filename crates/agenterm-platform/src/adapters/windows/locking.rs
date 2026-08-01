@@ -1,6 +1,7 @@
 use std::{
     collections::HashSet,
-    path::Path,
+    ffi::OsString,
+    path::{Component, Path, PathBuf},
     ptr,
     sync::{Mutex, OnceLock},
 };
@@ -12,24 +13,45 @@ use windows_sys::Win32::{
 
 use crate::locking::{LockError, LockErrorKind};
 
-pub struct PathLock(HANDLE);
+pub struct PathLock {
+    handle: HANDLE,
+    identity: String,
+}
 
 impl PathLock {
     pub fn acquire(path: &Path) -> Result<Self, LockError> {
-        acquire_named(
-            &format!("path-{:016x}", fingerprint(&path.to_string_lossy())),
-            INFINITE,
-        )
-        .map(Self)
+        Self::acquire_with_timeout(path, INFINITE)
+    }
+
+    pub fn try_acquire(path: &Path) -> Result<Self, LockError> {
+        Self::acquire_with_timeout(path, 0)
+    }
+
+    fn acquire_with_timeout(path: &Path, timeout: u32) -> Result<Self, LockError> {
+        let identity = format!("path-{:016x}", fingerprint(&normalized_path(path)?));
+        if !reserve_local(&identity) {
+            return Err(LockError::new(
+                LockErrorKind::Contended,
+                "path lock is already held in this process",
+            ));
+        }
+        match acquire_named(&identity, timeout) {
+            Ok(handle) => Ok(Self { handle, identity }),
+            Err(error) => {
+                release_local(&identity);
+                Err(error)
+            }
+        }
     }
 }
 
 impl Drop for PathLock {
     fn drop(&mut self) {
         unsafe {
-            ReleaseMutex(self.0);
-            CloseHandle(self.0);
+            ReleaseMutex(self.handle);
+            CloseHandle(self.handle);
         }
+        release_local(&self.identity);
     }
 }
 
@@ -74,20 +96,20 @@ impl Drop for SlotPermit {
     }
 }
 
-fn local_slots() -> &'static Mutex<HashSet<String>> {
-    static SLOTS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
-    SLOTS.get_or_init(|| Mutex::new(HashSet::new()))
+fn local_reservations() -> &'static Mutex<HashSet<String>> {
+    static RESERVATIONS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    RESERVATIONS.get_or_init(|| Mutex::new(HashSet::new()))
 }
 
 fn reserve_local(identity: &str) -> bool {
-    local_slots()
+    local_reservations()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .insert(identity.to_owned())
 }
 
 fn release_local(identity: &str) {
-    local_slots()
+    local_reservations()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .remove(identity);
@@ -129,4 +151,57 @@ fn fingerprint(value: &str) -> u64 {
         .fold(0xcbf29ce484222325_u64, |hash, byte| {
             (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3)
         })
+}
+
+fn normalized_path(path: &Path) -> Result<String, LockError> {
+    let absolute = if path.is_absolute() {
+        lexical_normalize(path)
+    } else {
+        lexical_normalize(&std::env::current_dir().map_err(open_error)?.join(path))
+    };
+    let resolved = canonicalize_with_missing_tail(&absolute).unwrap_or(absolute);
+    let mut value = resolved.to_string_lossy().replace('/', "\\");
+    if let Some(without_prefix) = value.strip_prefix(r"\\?\UNC\") {
+        value = format!(r"\\{without_prefix}");
+    } else if let Some(without_prefix) = value.strip_prefix(r"\\?\") {
+        value = without_prefix.to_owned();
+    }
+    Ok(value.to_lowercase())
+}
+
+fn lexical_normalize(path: &Path) -> PathBuf {
+    let mut result = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                result.pop();
+            }
+            _ => result.push(component.as_os_str()),
+        }
+    }
+    result
+}
+
+fn canonicalize_with_missing_tail(path: &Path) -> std::io::Result<PathBuf> {
+    let mut ancestor = path;
+    let mut tail = Vec::<OsString>::new();
+    while !ancestor.exists() {
+        let name = ancestor
+            .file_name()
+            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "no path ancestor"))?;
+        tail.push(name.to_os_string());
+        ancestor = ancestor
+            .parent()
+            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "no path parent"))?;
+    }
+    let mut resolved = std::fs::canonicalize(ancestor)?;
+    for component in tail.into_iter().rev() {
+        resolved.push(component);
+    }
+    Ok(resolved)
+}
+
+fn open_error(error: std::io::Error) -> LockError {
+    LockError::new(LockErrorKind::Open, error.to_string())
 }

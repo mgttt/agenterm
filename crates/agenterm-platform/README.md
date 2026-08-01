@@ -123,6 +123,12 @@ Product applications supply names, paths, policy limits and protocol framing.
 The crate does not know AgenTerm workspaces, Control Center, Fleet, themes,
 commands, or UI snapshots.
 
+`locking::PathLock::acquire` waits for ownership; `try_acquire` returns typed
+`LockErrorKind::Contended` without waiting. Windows resolves relative paths,
+dot segments, existing aliases and case before deriving its named-mutex
+identity, and rejects recursive aliases held by the same process. Integration
+tests use a real child process to prove contention and release semantics.
+
 GUI embedders enabling `window`, `input`, and `ime` can implement
 `window_host::PixelWindowApplication` and call
 `window_host::run_pixel_window`. The callbacks receive only normalized events,

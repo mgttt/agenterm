@@ -10,15 +10,29 @@ pub struct PathLock(File);
 
 impl PathLock {
     pub fn acquire(path: &Path) -> Result<Self, LockError> {
+        Self::acquire_with_operation(path, libc::LOCK_EX)
+    }
+
+    pub fn try_acquire(path: &Path) -> Result<Self, LockError> {
+        Self::acquire_with_operation(path, libc::LOCK_EX | libc::LOCK_NB)
+    }
+
+    fn acquire_with_operation(path: &Path, operation: i32) -> Result<Self, LockError> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(open_error)?;
         }
         let file = open(path)?;
-        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } != 0 {
-            return Err(LockError::new(
-                LockErrorKind::Wait,
-                std::io::Error::last_os_error().to_string(),
-            ));
+        if unsafe { libc::flock(file.as_raw_fd(), operation) } != 0 {
+            let error = std::io::Error::last_os_error();
+            let raw_error = error.raw_os_error();
+            let would_block =
+                raw_error == Some(libc::EAGAIN) || raw_error == Some(libc::EWOULDBLOCK);
+            let kind = if operation & libc::LOCK_NB != 0 && would_block {
+                LockErrorKind::Contended
+            } else {
+                LockErrorKind::Wait
+            };
+            return Err(LockError::new(kind, error.to_string()));
         }
         Ok(Self(file))
     }

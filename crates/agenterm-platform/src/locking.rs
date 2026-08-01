@@ -56,6 +56,10 @@ impl PathLock {
     pub fn acquire(path: &Path) -> Result<Self, LockError> {
         selected::locking::PathLock::acquire(path).map(|guard| Self { _guard: guard })
     }
+
+    pub fn try_acquire(path: &Path) -> Result<Self, LockError> {
+        selected::locking::PathLock::try_acquire(path).map(|guard| Self { _guard: guard })
+    }
 }
 
 pub struct SlotPermit {
@@ -102,5 +106,28 @@ mod tests {
             Err(error) => error,
         };
         assert_eq!(error.kind(), LockErrorKind::InvalidInput);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn path_aliases_share_one_lock_identity() {
+        let directory = std::env::temp_dir().join(format!(
+            "agenterm-platform-path-alias-{}",
+            std::process::id()
+        ));
+        let child = directory.join("child");
+        std::fs::create_dir_all(&child).expect("create alias fixture");
+        let canonical = directory.join("state.lock");
+        let alias = child.join("..").join("STATE.LOCK");
+
+        let first = PathLock::acquire(&canonical).expect("acquire canonical path");
+        let error = match PathLock::try_acquire(&alias) {
+            Ok(_) => panic!("path alias bypassed the existing lock"),
+            Err(error) => error,
+        };
+        assert_eq!(error.kind(), LockErrorKind::Contended);
+        drop(first);
+        PathLock::try_acquire(&alias).expect("alias is released with the canonical guard");
+        std::fs::remove_dir_all(directory).expect("remove alias fixture");
     }
 }
