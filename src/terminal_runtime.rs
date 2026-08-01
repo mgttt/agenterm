@@ -292,6 +292,12 @@ impl TerminalTab {
         for argument in command_line.iter().skip(1) {
             command = command.arg(argument);
         }
+        // The GUI process launched from Finder/Dock carries a minimal PATH, so
+        // the default shell must be a login shell to run the user's profile;
+        // explicit command lines stay exactly as the user provided them.
+        if command_line.is_empty() && !cfg!(windows) {
+            command = command.arg("-l");
+        }
         if let Some(directory) = &launch_cwd {
             command = command.current_dir(directory);
         }
