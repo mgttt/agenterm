@@ -27,6 +27,18 @@ pub(crate) mod console_interrupt;
 #[path = "adapters/macos/console_interrupt.rs"]
 pub(crate) mod console_interrupt;
 
+#[cfg(all(feature = "filesystem-cleanup", windows))]
+#[path = "adapters/windows/filesystem_cleanup.rs"]
+pub(crate) mod filesystem_cleanup;
+
+#[cfg(all(feature = "filesystem-cleanup", target_os = "linux"))]
+#[path = "adapters/linux/filesystem_cleanup.rs"]
+pub(crate) mod filesystem_cleanup;
+
+#[cfg(all(feature = "filesystem-cleanup", target_os = "macos"))]
+#[path = "adapters/macos/filesystem_cleanup.rs"]
+pub(crate) mod filesystem_cleanup;
+
 #[cfg(all(
     windows,
     any(feature = "cache-hierarchy", feature = "processor-topology")

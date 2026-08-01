@@ -1,4 +1,19 @@
-use std::process::{Child, Command};
+use std::process::{Child, Command, ExitStatus};
+
+use crate::contract::process_spawn::ProcessExit;
+
+pub(crate) fn classify_exit_status(status: &ExitStatus) -> ProcessExit {
+    use std::os::unix::process::ExitStatusExt as _;
+
+    if let Some(code) = status.code() {
+        return ProcessExit::Code(code);
+    }
+    status
+        .signal()
+        .and_then(|signal| u32::try_from(signal).ok())
+        .map(ProcessExit::Signal)
+        .unwrap_or(ProcessExit::Unavailable)
+}
 
 pub(crate) fn configure_detached_command(command: &mut Command) -> Result<(), String> {
     use std::os::unix::process::CommandExt;

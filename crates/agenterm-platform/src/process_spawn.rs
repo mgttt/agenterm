@@ -7,20 +7,7 @@ pub use crate::contract::process_spawn::{DetachedSpawnMode, ProcessExit};
 /// Classify a native child status without inventing a product fallback code.
 #[must_use]
 pub fn classify_exit_status(status: &ExitStatus) -> ProcessExit {
-    if let Some(code) = status.code() {
-        return ProcessExit::Code(code);
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::ExitStatusExt as _;
-        if let Some(signal) = status
-            .signal()
-            .and_then(|signal| u32::try_from(signal).ok())
-        {
-            return ProcessExit::Signal(signal);
-        }
-    }
-    ProcessExit::Unavailable
+    crate::selected::process_spawn::classify_exit_status(status)
 }
 
 /// Configure a child that must outlive the caller's terminal session or owned

@@ -1,6 +1,6 @@
 //! Removal of caller-owned, quiescent filesystem trees.
 
-use std::{fs, io, path::Path};
+use std::{io, path::Path};
 
 /// Remove a caller-owned tree after restoring the access required for deletion.
 ///
@@ -9,119 +9,13 @@ use std::{fs, io, path::Path};
 /// quiescent: this helper is not a defense against a concurrent path-replacement
 /// attacker and does not decide whether a root is safe to delete.
 pub fn remove_tree(path: &Path) -> io::Result<()> {
-    let Some(metadata) = metadata_if_present(path)? else {
-        return Ok(());
-    };
-    if is_link_like(&metadata) {
-        return remove_link(path, &metadata);
-    }
-    if !metadata.is_dir() {
-        restore_removal_access(path, &metadata)?;
-        return remove_file_if_present(path);
-    }
-
-    prepare_tree(path, &metadata)?;
-    match fs::remove_dir_all(path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error),
-    }
-}
-
-fn prepare_tree(path: &Path, metadata: &fs::Metadata) -> io::Result<()> {
-    restore_removal_access(path, metadata)?;
-    if !metadata.is_dir() {
-        return Ok(());
-    }
-    for entry in fs::read_dir(path)? {
-        let entry = entry?;
-        let child = entry.path();
-        let Some(metadata) = metadata_if_present(&child)? else {
-            continue;
-        };
-        if !is_link_like(&metadata) {
-            prepare_tree(&child, &metadata)?;
-        }
-    }
-    Ok(())
-}
-
-fn metadata_if_present(path: &Path) -> io::Result<Option<fs::Metadata>> {
-    match fs::symlink_metadata(path) {
-        Ok(metadata) => Ok(Some(metadata)),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(error),
-    }
-}
-
-#[cfg(unix)]
-fn restore_removal_access(path: &Path, metadata: &fs::Metadata) -> io::Result<()> {
-    use std::os::unix::fs::PermissionsExt as _;
-
-    let required = if metadata.is_dir() { 0o700 } else { 0o600 };
-    let mode = metadata.permissions().mode();
-    if mode & required != required {
-        fs::set_permissions(path, fs::Permissions::from_mode(mode | required))?;
-    }
-    Ok(())
-}
-
-#[cfg(windows)]
-#[allow(clippy::permissions_set_readonly_false)]
-fn restore_removal_access(path: &Path, metadata: &fs::Metadata) -> io::Result<()> {
-    let mut permissions = metadata.permissions();
-    if permissions.readonly() {
-        // On Windows this toggles FILE_ATTRIBUTE_READONLY; it does not grant
-        // Unix-style world-write permission.
-        permissions.set_readonly(false);
-        fs::set_permissions(path, permissions)?;
-    }
-    Ok(())
-}
-
-#[cfg(unix)]
-fn is_link_like(metadata: &fs::Metadata) -> bool {
-    metadata.file_type().is_symlink()
-}
-
-#[cfg(windows)]
-fn is_link_like(metadata: &fs::Metadata) -> bool {
-    use std::os::windows::fs::MetadataExt as _;
-
-    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
-    metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
-}
-
-#[cfg(unix)]
-fn remove_link(path: &Path, _metadata: &fs::Metadata) -> io::Result<()> {
-    remove_file_if_present(path)
-}
-
-#[cfg(windows)]
-fn remove_link(path: &Path, metadata: &fs::Metadata) -> io::Result<()> {
-    let result = if metadata.is_dir() {
-        fs::remove_dir(path)
-    } else {
-        fs::remove_file(path)
-    };
-    match result {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error),
-    }
-}
-
-fn remove_file_if_present(path: &Path) -> io::Result<()> {
-    match fs::remove_file(path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error),
-    }
+    crate::selected::filesystem_cleanup::remove_tree(path)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     fn fixture(label: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!(
