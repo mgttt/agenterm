@@ -4,6 +4,10 @@ use std::path::PathBuf;
 
 use crate::filesystem::{FilesystemError, HostDirectories};
 
+pub fn user_home_directory() -> Result<PathBuf, FilesystemError> {
+    crate::filesystem::home_directory_from_env(std::env::var_os("USERPROFILE"))
+}
+
 #[cfg(feature = "filesystem")]
 pub fn replace_file(
     source: &std::path::Path,

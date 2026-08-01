@@ -62,6 +62,25 @@ pub fn host_directories() -> Result<HostDirectories, FilesystemError> {
     selected::filesystem::host_directories()
 }
 
+/// Current user's host home directory according to the selected OS convention.
+///
+/// Windows reads `USERPROFILE`; Linux and macOS read `HOME`. Empty values are
+/// rejected, and no cross-OS fallback is attempted.
+pub fn user_home_directory() -> Result<PathBuf, FilesystemError> {
+    selected::filesystem::user_home_directory()
+}
+
+pub(crate) fn home_directory_from_env(
+    value: Option<std::ffi::OsString>,
+) -> Result<PathBuf, FilesystemError> {
+    value
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .ok_or(FilesystemError::Unsupported {
+            reason: "home-directory-unavailable",
+        })
+}
+
 #[must_use]
 pub fn executable_name(base: &str) -> String {
     selected::filesystem::executable_name(base)
@@ -217,6 +236,23 @@ mod tests {
             actual.file_stem().and_then(|value| value.to_str()),
             Some("worker")
         );
+    }
+
+    #[test]
+    fn home_directory_value_must_be_present_and_non_empty() {
+        assert_eq!(
+            home_directory_from_env(Some(std::ffi::OsString::from("home")))
+                .expect("non-empty home"),
+            PathBuf::from("home")
+        );
+        for value in [None, Some(std::ffi::OsString::new())] {
+            assert_eq!(
+                home_directory_from_env(value).expect_err("reject absent home"),
+                FilesystemError::Unsupported {
+                    reason: "home-directory-unavailable"
+                }
+            );
+        }
     }
 
     #[cfg(feature = "filesystem")]

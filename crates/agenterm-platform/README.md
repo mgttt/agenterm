@@ -44,7 +44,7 @@ clipboard, IPC, or screenshot modules.
 | `process-metrics` | cumulative CPU time and resident bytes for one selected process | target `libc` / minimal `windows-sys` |
 | `shared-memory` | exclusive named read/write mappings for cross-process zero-copy data | target `libc` / minimal `windows-sys` |
 | `process` | observation/tree control, shell defaults, child-pipe probes and parent-console diagnostics | target `libc` / `windows-sys` |
-| `filesystem-conventions` | host roots and sibling executable naming | none |
+| `filesystem-conventions` | user home, host roots and sibling executable naming | none |
 | `filesystem` | conventions plus private state files/directories and durable atomic replacement mechanics | target native APIs |
 | `locking` | cross-process path locks and bounded slot permits | target `libc` / `windows-sys` |
 | `ipc` | typed endpoints and native listener/byte stream | `locking`, target native APIs |

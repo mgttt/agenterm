@@ -13,6 +13,10 @@ mod file_identity;
 #[cfg(feature = "filesystem")]
 pub use file_identity::{file_identity, path_identity};
 
+pub fn user_home_directory() -> Result<PathBuf, FilesystemError> {
+    crate::filesystem::home_directory_from_env(std::env::var_os("HOME"))
+}
+
 #[cfg(feature = "filesystem")]
 pub fn replace_file(
     source: &std::path::Path,
@@ -32,11 +36,7 @@ pub fn metadata_is_link_like(metadata: &std::fs::Metadata) -> bool {
 }
 
 pub fn host_directories() -> Result<HostDirectories, FilesystemError> {
-    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
-        return Err(FilesystemError::Unsupported {
-            reason: "home-directory-unavailable",
-        });
-    };
+    let home = user_home_directory()?;
     let application_support = home.join("Library").join("Application Support");
     Ok(HostDirectories {
         config: application_support.clone(),

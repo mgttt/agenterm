@@ -13,6 +13,10 @@ mod file_identity;
 #[cfg(feature = "filesystem")]
 pub use file_identity::{file_identity, path_identity};
 
+pub fn user_home_directory() -> Result<PathBuf, FilesystemError> {
+    crate::filesystem::home_directory_from_env(std::env::var_os("HOME"))
+}
+
 #[cfg(feature = "filesystem")]
 pub fn replace_file(
     source: &std::path::Path,
@@ -32,7 +36,7 @@ pub fn metadata_is_link_like(metadata: &std::fs::Metadata) -> bool {
 }
 
 pub fn host_directories() -> Result<HostDirectories, FilesystemError> {
-    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let home = user_home_directory().ok();
     let config = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .or_else(|| home.as_ref().map(|path| path.join(".config")));
