@@ -153,6 +153,11 @@ Closed/Failed 进入 `process` facade。三平台 root script_files/script_strea
 Rhai 注册、capture/delivery limits 与 receipts 仍属产品层且不形成授权策略。5 项 stream、
 14 项 unrestricted filesystem stdlib tests、30 项 crate tests 与 warnings-denied Clippy
 通过。
+Script child-window leaf 完成：public `ProcessWindowFacts/Rect/Key/PointerAction/Message/Error`
+与 facade 进入 `window` feature，Windows EnumWindows/input/control/resize 实现物理迁入
+crate adapter，Linux/macOS 保持 typed Unsupported。三平台 root script_window adapter
+删除；Rhai 参数/receipt 映射留产品层且 API 仍无限制。all-feature crate tests 与两 crate
+warnings-denied Clippy 通过。
 
 2026-08-01 首个建设期增量：Cockpit snapshot 新增明确的
 `tab_counts.{total,running,dead}`，native shell 同源显示 logical instance、

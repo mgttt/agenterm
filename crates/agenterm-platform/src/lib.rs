@@ -115,6 +115,9 @@ pub mod pty;
 #[cfg(feature = "process")]
 pub mod process;
 
+#[cfg(feature = "window")]
+pub mod process_window;
+
 #[cfg(feature = "process")]
 pub mod runtime;
 

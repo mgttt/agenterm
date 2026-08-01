@@ -16,7 +16,7 @@ filesystem = []
 locking = ["dep:libc", "dep:windows-sys"]
 ipc = ["locking"]
 pty = ["process", "dep:rmux-pty"]
-window = []
+window = ["dep:windows-sys"]
 input = ["window"]
 ime = ["input"]
 activation = ["window", "dep:winit"]
@@ -66,4 +66,5 @@ windows-sys = { version = "0.61", optional = true, features = [
     "Win32_Security",
     "Win32_System_Threading",
     "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Input_KeyboardAndMouse",
 ] }

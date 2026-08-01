@@ -21,10 +21,6 @@ pub(crate) mod remote_frontend;
 pub(crate) mod script_http;
 
 #[cfg(windows)]
-#[path = "adapters/windows/script_window.rs"]
-pub(crate) mod script_window;
-
-#[cfg(windows)]
 #[path = "adapters/windows/script_host.rs"]
 pub(crate) mod script_host;
 
@@ -58,10 +54,6 @@ pub(crate) use agenterm_platform::window as scale_contract;
 #[cfg(target_os = "linux")]
 #[path = "adapters/linux/script_http.rs"]
 pub(crate) mod script_http;
-
-#[cfg(target_os = "linux")]
-#[path = "adapters/linux/script_window.rs"]
-pub(crate) mod script_window;
 
 #[cfg(target_os = "linux")]
 #[path = "adapters/linux/script_host.rs"]
@@ -101,10 +93,6 @@ pub(crate) use agenterm_platform::window as scale_contract;
 #[cfg(target_os = "macos")]
 #[path = "adapters/macos/script_http.rs"]
 pub(crate) mod script_http;
-
-#[cfg(target_os = "macos")]
-#[path = "adapters/macos/script_window.rs"]
-pub(crate) mod script_window;
 
 #[cfg(target_os = "macos")]
 #[path = "adapters/macos/script_host.rs"]

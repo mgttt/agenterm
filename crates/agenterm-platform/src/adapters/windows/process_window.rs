@@ -1,4 +1,4 @@
-use crate::platform::contract::script_window::*;
+use crate::contract::process_window::*;
 
 fn error(code: &'static str, message: &'static str, cause: &'static str) -> ScriptWindowError {
     ScriptWindowError::new(code, message, Some(cause))
