@@ -12,6 +12,43 @@ pub struct HostMemoryFacts {
     pub physical_bytes: std::num::NonZeroU64,
 }
 
+/// A point-in-time estimate of physical memory available to the host.
+///
+/// Native operating systems account reclaimable pages differently, so callers
+/// must retain `semantics` instead of treating values from different hosts as
+/// directly comparable resource budgets.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct HostMemoryAvailability {
+    /// Bytes the native source currently reports as available.
+    ///
+    /// Zero is valid under severe pressure. This is not a cgroup, Job Object,
+    /// container, process, or guest allocation limit.
+    pub available_physical_bytes: u64,
+    pub semantics: HostMemoryAvailabilitySemantics,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum HostMemoryAvailabilitySemantics {
+    /// Windows `GlobalMemoryStatusEx::ullAvailPhys`.
+    WindowsAvailablePhysical,
+    /// Linux `/proc/meminfo` `MemAvailable`, including the kernel's estimate of
+    /// reclaimable memory that can be used without swapping.
+    LinuxMemAvailable,
+    /// macOS Mach free plus inactive pages.
+    MacosFreeAndInactive,
+}
+
+impl HostMemoryAvailabilitySemantics {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::WindowsAvailablePhysical => "windows-available-physical",
+            Self::LinuxMemAvailable => "linux-mem-available",
+            Self::MacosFreeAndInactive => "macos-free-plus-inactive",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum HostMemoryErrorKind {
@@ -85,6 +122,25 @@ pub(crate) fn checked_facts(
     })
 }
 
+pub(crate) fn checked_availability(
+    available_physical_bytes: u64,
+    physical_bytes: u64,
+    semantics: HostMemoryAvailabilitySemantics,
+) -> Result<HostMemoryAvailability, HostMemoryError> {
+    if physical_bytes == 0 || available_physical_bytes > physical_bytes {
+        return Err(HostMemoryError::new(
+            HostMemoryErrorKind::InvalidValue,
+            format!(
+                "available physical memory {available_physical_bytes} exceeds invalid/total physical memory {physical_bytes}"
+            ),
+        ));
+    }
+    Ok(HostMemoryAvailability {
+        available_physical_bytes,
+        semantics,
+    })
+}
+
 fn nonzero_usize(name: &str, value: u64) -> Result<std::num::NonZeroUsize, HostMemoryError> {
     usize::try_from(value)
         .ok()
@@ -116,5 +172,28 @@ mod tests {
                 HostMemoryErrorKind::InvalidValue
             );
         }
+    }
+
+    #[test]
+    fn availability_allows_zero_but_rejects_values_above_total() {
+        let semantics = HostMemoryAvailabilitySemantics::WindowsAvailablePhysical;
+        assert_eq!(
+            checked_availability(0, 4096, semantics)
+                .expect("zero available memory is a valid pressure state")
+                .available_physical_bytes,
+            0
+        );
+        assert_eq!(
+            checked_availability(4097, 4096, semantics)
+                .expect_err("reject availability above physical memory")
+                .kind(),
+            HostMemoryErrorKind::InvalidValue
+        );
+        assert_eq!(
+            checked_availability(0, 0, semantics)
+                .expect_err("reject an invalid zero total")
+                .kind(),
+            HostMemoryErrorKind::InvalidValue
+        );
     }
 }

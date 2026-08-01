@@ -40,7 +40,7 @@ clipboard, IPC, or screenshot modules.
 | `virtualization-probe` | current-host WHPX/KVM/Hypervisor.framework availability facts without VM lifecycle | target `libc` / minimal dynamically loaded Win32 APIs |
 | `processor-topology` | online logical CPUs, physical cores, packages, NUMA nodes and processor groups | target `libc` / minimal `windows-sys` |
 | `processor-affinity` | current-process logical processor set with explicit scheduler/mask semantics | target `libc` / minimal `windows-sys` |
-| `host-memory` | host page size, mapping granularity and total physical memory | target `libc` / minimal `windows-sys` |
+| `host-memory` | host page size, mapping granularity, total physical memory and a typed dynamic availability estimate | target `libc` / minimal `windows-sys` |
 | `storage` | path-scoped volume capacity, caller-available bytes and allocation unit | target `libc` / minimal `windows-sys` |
 | `entropy` | fail-closed host CSPRNG byte filling | target `libc` / minimal `windows-sys` |
 | `console-interrupt` | RAII Ctrl-C/SIGINT observation or temporary ignore with typed failures | target `libc` / minimal `windows-sys` |
@@ -124,6 +124,13 @@ CPU Sets and thread-specific policies may narrow scheduling further. A
 multi-group process is typed Unsupported instead of returning only its primary
 group. macOS affinity tags are advisory, so the adapter does not invent an
 exact allowed-CPU set. Thread placement and NUMA policy remain product concerns.
+
+`host_memory::facts` reports stable page geometry and installed physical
+capacity. `host_memory::availability` is a separate point-in-time observation:
+Windows uses `ullAvailPhys`, Linux uses the kernel's `MemAvailable` estimate,
+and macOS reports free plus inactive Mach pages. Its typed semantics must be
+retained because reclaimability differs between hosts. None of these values is
+a cgroup, Job Object, process, container, or guest allocation budget.
 
 `process_spawn::spawn_detached_child` configures a new Unix session or Windows
 job breakaway and returns both the live `Child` and a typed launch mode. Windows
