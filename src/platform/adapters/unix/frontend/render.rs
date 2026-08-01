@@ -422,10 +422,16 @@ impl NewShellChoice {
     pub(super) const fn label(self) -> &'static str {
         match self {
             Self::Default => "Default",
-            #[cfg(target_os = "macos")]
-            Self::Primary => "zsh",
-            #[cfg(not(target_os = "macos"))]
-            Self::Primary => "sh",
+            Self::Primary => {
+                if matches!(
+                    agenterm_platform::platform_kind(),
+                    agenterm_platform::PlatformKind::Macos
+                ) {
+                    "zsh"
+                } else {
+                    "sh"
+                }
+            }
             Self::Bash => "bash",
         }
     }

@@ -448,6 +448,14 @@ integrated validation recorded below):
 - [x] Linux display capability classification now calls the selected Linux
   scale adapter. The shared geometry contract no longer branches on a display
   target; headless remains typed Unsupported and a usable display Available.
+- [x] The obsolete Linux/macOS root native compatibility trees are deleted.
+  Unix frontend and Control Center product orchestration now call the public
+  crate activation, input, IME, window geometry, and display APIs directly;
+  platform facts no longer route back through a root selected native module.
+  The Windows-hosted crate tests and Agenterm Clippy lane pass. A local Linux
+  target probe is unavailable past the dependency build-script boundary because
+  this host lacks `x86_64-linux-gnu-gcc`, so native Unix compilation remains an
+  explicit outstanding evidence item rather than an inferred success.
 - [x] Control Center state-directory protection, exclusive state-file creation,
   atomic replacement, existing-window focus, and direct native capture now
   call `services::control_center → selected → adapters/{windows,linux,macos}`.

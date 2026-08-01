@@ -382,28 +382,14 @@ fn parse_gui_launch(
 }
 
 fn display_available() -> bool {
-    #[cfg(target_os = "macos")]
-    {
-        true
-    }
-    #[cfg(target_os = "linux")]
-    {
-        !crate::platform::selected::native::display_facts_from_env().headless
-    }
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-    {
-        env::var_os("WAYLAND_DISPLAY").is_some() || env::var_os("DISPLAY").is_some()
-    }
+    !agenterm_platform::window::display_backend_facts().headless
 }
 
 fn run_gui(no_activate: bool) -> anyhow::Result<()> {
     let title = format!("{APP_NAME} {}", env!("CARGO_PKG_VERSION"));
     let mut event_loop_builder = EventLoop::<UnixWake>::with_user_event();
-    #[cfg(target_os = "macos")]
-    crate::platform::selected::native::activation::configure_event_loop(
-        &mut event_loop_builder,
-        no_activate,
-    );
+    use agenterm_platform::activation::EventLoopActivationExt as _;
+    event_loop_builder.configure_platform_activation(no_activate);
     let event_loop = event_loop_builder.build()?;
     let proxy = event_loop.create_proxy();
     install_unix_wake(proxy);
@@ -554,18 +540,10 @@ impl UnixApp {
             ime_preedit: String::new(),
             ime_cursor: None,
             cursor_blink: CursorBlink::new(Instant::now()),
-            window_focused: {
-                #[cfg(target_os = "linux")]
-                {
-                    crate::platform::selected::native::activation::initial_window_focused(
-                        no_activate,
-                    )
-                }
-                #[cfg(not(target_os = "linux"))]
-                {
-                    !no_activate
-                }
-            },
+            window_focused: agenterm_platform::activation::ActivationPolicy::from_no_activate(
+                no_activate,
+            )
+            .initial_window_focused,
             config,
             modifiers: ModifiersState::empty(),
         }
@@ -718,19 +696,14 @@ impl UnixApp {
         if self.window_close_pending || self.pending_close.is_some() || self.settings_open {
             return;
         }
-        #[cfg(any(target_os = "linux", target_os = "macos"))]
         let raw = {
             use crate::platform::KeyClassification;
-            #[cfg(target_os = "linux")]
-            let classified = crate::platform::selected::native::input::classify_ime_commit(raw);
-            #[cfg(target_os = "macos")]
-            let classified = crate::platform::selected::native::input::classify_ime_commit(raw);
+            let classified = agenterm_platform::input::classify_ime_commit(raw);
             match classified {
                 KeyClassification::TextCommit(text) => text,
                 _ => return,
             }
         };
-        #[cfg(any(target_os = "linux", target_os = "macos"))]
         let raw = raw.as_str();
         if self.new_terminal_dialog.is_open() {
             let multiline = self.new_terminal_focus == NewTerminalFocusView::InitialCommand;
@@ -779,61 +752,30 @@ impl UnixApp {
 
     fn handle_ime(&mut self, event: Ime) {
         self.cursor_blink.reset(Instant::now());
-        #[cfg(target_os = "linux")]
-        {
-            use crate::platform::selected::native::ime::{
-                LinuxImeAction, LinuxImeEvent, classify_ime_event,
-            };
-            let linux_event = match event {
-                Ime::Enabled => LinuxImeEvent::Enabled,
-                Ime::Preedit(text, cursor) => LinuxImeEvent::Preedit { text, cursor },
-                Ime::Commit(text) => LinuxImeEvent::Commit(text),
-                Ime::Disabled => LinuxImeEvent::Disabled,
-            };
-            match classify_ime_event(linux_event, self.ime_anchor().is_some()) {
-                LinuxImeAction::None => {}
-                LinuxImeAction::UpdatePreedit { text, cursor } => {
-                    self.ime_preedit = text;
-                    self.ime_cursor = cursor;
-                    self.request_redraw();
-                }
-                LinuxImeAction::ClearPreedit => {
-                    self.clear_ime_preedit();
-                    self.request_redraw();
-                }
-                LinuxImeAction::CommitText(text) => {
-                    self.clear_ime_preedit();
-                    self.commit_ime_text(&text);
-                }
+        let event = match event {
+            Ime::Enabled => agenterm_platform::ime::ImeEvent::Enabled,
+            Ime::Preedit(text, cursor) => {
+                agenterm_platform::ime::ImeEvent::Preedit { text, cursor }
             }
-        }
-        #[cfg(target_os = "macos")]
-        {
-            use crate::platform::selected::native::ime::{
-                MacosImeAction, MacosImeEvent, classify_ime_event,
-            };
-            let macos_event = match event {
-                Ime::Enabled => MacosImeEvent::Enabled,
-                Ime::Preedit(text, cursor) => MacosImeEvent::Preedit { text, cursor },
-                Ime::Commit(text) => MacosImeEvent::Commit(text),
-                Ime::Disabled => MacosImeEvent::Disabled,
-            };
-            match classify_ime_event(macos_event, self.ime_anchor().is_some()) {
-                MacosImeAction::None => {}
-                MacosImeAction::UpdatePreedit { text, cursor } => {
-                    self.ime_preedit = text;
-                    self.ime_cursor = cursor;
-                    self.request_redraw();
-                }
-                MacosImeAction::ClearPreedit => {
-                    self.clear_ime_preedit();
-                    self.request_redraw();
-                }
-                MacosImeAction::CommitText(text) => {
-                    self.clear_ime_preedit();
-                    self.commit_ime_text(&text);
-                }
+            Ime::Commit(text) => agenterm_platform::ime::ImeEvent::Commit(text),
+            Ime::Disabled => agenterm_platform::ime::ImeEvent::Disabled,
+        };
+        match agenterm_platform::ime::classify_event(event, self.ime_anchor().is_some()) {
+            agenterm_platform::ime::ImeAction::None => {}
+            agenterm_platform::ime::ImeAction::UpdatePreedit { text, cursor } => {
+                self.ime_preedit = text;
+                self.ime_cursor = cursor;
+                self.request_redraw();
             }
+            agenterm_platform::ime::ImeAction::ClearPreedit => {
+                self.clear_ime_preedit();
+                self.request_redraw();
+            }
+            agenterm_platform::ime::ImeAction::CommitText(text) => {
+                self.clear_ime_preedit();
+                self.commit_ime_text(&text);
+            }
+            _ => self.clear_ime_preedit(),
         }
     }
 
@@ -2138,42 +2080,16 @@ impl UnixApp {
         self.window
             .as_ref()
             .map(|window| {
-                #[cfg(target_os = "linux")]
-                {
-                    let physical = window.inner_size();
-                    match crate::platform::selected::native::scale::LinuxWindowMetrics::from_physical(
-                        physical.width,
-                        physical.height,
-                        window.scale_factor(),
-                    ) {
-                        Ok((metrics, _)) => {
-                            (metrics.logical_width.max(1), metrics.logical_height.max(1))
-                        }
-                        Err(_) => {
-                            // Typed failure already recorded by scale helpers; fall back
-                            // to a safe 1×1 floor so layout does not claim fake extents.
-                            (1, 1)
-                        }
+                let physical = window.inner_size();
+                match agenterm_platform::window::WindowMetrics::from_physical(
+                    physical.width,
+                    physical.height,
+                    window.scale_factor(),
+                ) {
+                    Ok((metrics, _)) => {
+                        (metrics.logical_width.max(1), metrics.logical_height.max(1))
                     }
-                }
-                #[cfg(target_os = "macos")]
-                {
-                    let physical = window.inner_size();
-                    match crate::platform::selected::native::scale::MacosWindowMetrics::from_physical(
-                        physical.width,
-                        physical.height,
-                        window.scale_factor(),
-                    ) {
-                        Ok((metrics, _)) => {
-                            (metrics.logical_width.max(1), metrics.logical_height.max(1))
-                        }
-                        Err(_) => (1, 1),
-                    }
-                }
-                #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-                {
-                    let size = window.inner_size().to_logical::<u32>(window.scale_factor());
-                    (size.width.max(1), size.height.max(1))
+                    Err(_) => (1, 1),
                 }
             })
             .unwrap_or((INITIAL_WIDTH, INITIAL_HEIGHT))
@@ -2181,16 +2097,9 @@ impl UnixApp {
 
     /// Linux hot-path: resize / scale-factor changes go through `platform::linux::scale`
     /// (contract revision 3) before PTY/layout updates.
-    #[cfg(target_os = "linux")]
-    fn handle_linux_geometry_event(
-        &mut self,
-        event: crate::platform::selected::native::scale::LinuxGeometryEvent,
-    ) {
-        use crate::platform::selected::native::scale::{
-            LinuxGeometryAction, classify_geometry_event,
-        };
-        match classify_geometry_event(event) {
-            Ok(LinuxGeometryAction::Apply(_metrics)) => {
+    fn handle_geometry_event(&mut self, event: agenterm_platform::window::GeometryEvent) {
+        match agenterm_platform::window::classify_geometry_event(event) {
+            Ok(agenterm_platform::window::GeometryAction::Apply(_metrics)) => {
                 if let Some(window) = self.window.as_ref() {
                     absorb_window_event(
                         &WindowEvent::Resized(window.inner_size()),
@@ -2203,39 +2112,7 @@ impl UnixApp {
                     window.request_redraw();
                 }
             }
-            Ok(LinuxGeometryAction::Ignore) => {}
-            Err(error) => {
-                self.status_message =
-                    format!("Window geometry failed: {}", error.code().replace('_', " "));
-            }
-        }
-    }
-
-    /// macOS hot-path: Retina resize / scale changes are validated by the
-    /// platform adapter before PTY, layout, and rendering updates.
-    #[cfg(target_os = "macos")]
-    fn handle_macos_geometry_event(
-        &mut self,
-        event: crate::platform::selected::native::scale::MacosGeometryEvent,
-    ) {
-        use crate::platform::selected::native::scale::{
-            MacosGeometryAction, classify_geometry_event,
-        };
-        match classify_geometry_event(event) {
-            Ok(MacosGeometryAction::Apply(_metrics)) => {
-                if let Some(window) = self.window.as_ref() {
-                    absorb_window_event(
-                        &WindowEvent::Resized(window.inner_size()),
-                        window,
-                        &mut self.window_state_tracker,
-                    );
-                }
-                self.resize_to_window();
-                if let Some(window) = self.window.as_ref() {
-                    window.request_redraw();
-                }
-            }
-            Ok(MacosGeometryAction::Ignore) => {}
+            Ok(agenterm_platform::window::GeometryAction::Ignore) => {}
             Err(error) => {
                 self.status_message =
                     format!("Window geometry failed: {}", error.code().replace('_', " "));
@@ -2444,48 +2321,12 @@ impl UnixApp {
     }
 
     fn handle_toolbar_hit(&mut self, hit: ToolbarHit) {
-        #[cfg(any(target_os = "linux", target_os = "macos"))]
-        {
-            self.dispatch_toolbar_action(platform_toolbar_action_id(hit));
-        }
-        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-        {
-            match hit {
-                ToolbarHit::NewTab => {
-                    self.open_new_terminal_dialog();
-                }
-                ToolbarHit::ToggleTabs => {
-                    let visible = !self.config.tabs_visible;
-                    let _ = self.set_tabs_visible(
-                        visible,
-                        "toolbar",
-                        crate::operations::UI_TABS_TOGGLE,
-                    );
-                }
-                ToolbarHit::ControlCenter => {
-                    match crate::control_center::open_control_center(
-                        self.no_activate,
-                        &crate::client::ipc_address(),
-                    ) {
-                        Ok(()) => self.set_status_message("Control Center opened"),
-                        Err(error) => self
-                            .set_status_message(format!("Control Center unavailable: {error:#}")),
-                    }
-                }
-                ToolbarHit::Settings => {
-                    self.open_settings();
-                }
-                ToolbarHit::ToggleLocale => self.toggle_locale(),
-                ToolbarHit::FontDecrease => self.adjust_active_terminal_font(-1),
-                ToolbarHit::FontIncrease => self.adjust_active_terminal_font(1),
-            }
-        }
+        self.dispatch_toolbar_action(platform_toolbar_action_id(hit));
         self.request_redraw();
     }
 
     /// Platform hot-path: toolbar hits resolve through stable adapter action ids
     /// before shared product handlers run.
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
     fn dispatch_toolbar_action(&mut self, action_id: &str) {
         use crate::platform::action;
         if !action::is_toolbar_action_id(action_id) {
@@ -3168,22 +3009,11 @@ impl UnixApp {
             return Ok(());
         }
 
-        let attributes = {
-            let base = WindowAttributes::default()
-                .with_title(self.title.clone())
-                .with_inner_size(winit::dpi::LogicalSize::new(INITIAL_WIDTH, INITIAL_HEIGHT));
-            #[cfg(target_os = "linux")]
-            {
-                crate::platform::selected::native::activation::configure_window_attributes(
-                    base,
-                    self.no_activate,
-                )
-            }
-            #[cfg(not(target_os = "linux"))]
-            {
-                base.with_active(!self.no_activate)
-            }
-        };
+        use agenterm_platform::activation::WindowAttributesActivationExt as _;
+        let attributes = WindowAttributes::default()
+            .with_title(self.title.clone())
+            .with_inner_size(winit::dpi::LogicalSize::new(INITIAL_WIDTH, INITIAL_HEIGHT))
+            .with_platform_activation(self.no_activate);
 
         let window = Rc::new(event_loop.create_window(attributes)?);
         window.set_ime_allowed(true);
@@ -4373,87 +4203,29 @@ impl ApplicationHandler<UnixWake> for UnixApp {
         match event {
             WindowEvent::CloseRequested => self.request_window_close(),
             WindowEvent::Resized(size) => {
-                #[cfg(target_os = "linux")]
-                {
-                    self.handle_linux_geometry_event(
-                        crate::platform::selected::native::scale::LinuxGeometryEvent::Resized {
-                            physical_width: size.width,
-                            physical_height: size.height,
-                            scale_factor: self
-                                .window
-                                .as_ref()
-                                .map(|window| window.scale_factor())
-                                .unwrap_or(1.0),
-                        },
-                    );
-                }
-                #[cfg(target_os = "macos")]
-                {
-                    self.handle_macos_geometry_event(
-                        crate::platform::selected::native::scale::MacosGeometryEvent::Resized {
-                            physical_width: size.width,
-                            physical_height: size.height,
-                            scale_factor: self
-                                .window
-                                .as_ref()
-                                .map(|window| window.scale_factor())
-                                .unwrap_or(1.0),
-                        },
-                    );
-                }
-                #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-                {
-                    if let Some(window) = self.window.as_ref() {
-                        absorb_window_event(
-                            &WindowEvent::Resized(size),
-                            window,
-                            &mut self.window_state_tracker,
-                        );
-                    }
-                    self.resize_to_window();
-                    if let Some(window) = self.window.as_ref() {
-                        window.request_redraw();
-                    }
-                }
+                self.handle_geometry_event(agenterm_platform::window::GeometryEvent::Resized {
+                    physical_width: size.width,
+                    physical_height: size.height,
+                    scale_factor: self
+                        .window
+                        .as_ref()
+                        .map(|window| window.scale_factor())
+                        .unwrap_or(1.0),
+                });
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
-                #[cfg(target_os = "linux")]
-                {
-                    let physical = self
-                        .window
-                        .as_ref()
-                        .map(|window| window.inner_size())
-                        .unwrap_or_default();
-                    self.handle_linux_geometry_event(
-                        crate::platform::selected::native::scale::LinuxGeometryEvent::ScaleFactorChanged {
-                            scale_factor,
-                            physical_width: physical.width,
-                            physical_height: physical.height,
-                        },
-                    );
-                }
-                #[cfg(target_os = "macos")]
-                {
-                    let physical = self
-                        .window
-                        .as_ref()
-                        .map(|window| window.inner_size())
-                        .unwrap_or_default();
-                    self.handle_macos_geometry_event(
-                        crate::platform::selected::native::scale::MacosGeometryEvent::ScaleFactorChanged {
-                            scale_factor,
-                            physical_width: physical.width,
-                            physical_height: physical.height,
-                        },
-                    );
-                }
-                #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-                {
-                    self.resize_to_window();
-                    if let Some(window) = self.window.as_ref() {
-                        window.request_redraw();
-                    }
-                }
+                let physical = self
+                    .window
+                    .as_ref()
+                    .map(|window| window.inner_size())
+                    .unwrap_or_default();
+                self.handle_geometry_event(
+                    agenterm_platform::window::GeometryEvent::ScaleFactorChanged {
+                        scale_factor,
+                        physical_width: physical.width,
+                        physical_height: physical.height,
+                    },
+                );
             }
             WindowEvent::Focused(focused) => {
                 self.window_focused = focused;

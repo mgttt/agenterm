@@ -11,16 +11,14 @@ pub(crate) fn run_native_shell(
     host: Box<dyn ControlCenterShellHost>,
     no_activate: bool,
 ) -> ControlCenterShellResult<()> {
+    use agenterm_platform::activation::{
+        EventLoopActivationExt as _, WindowAttributesActivationExt as _,
+    };
     unix::run_native_shell(
         host,
         no_activate,
         "macos",
-        |attributes, no_activate| attributes.with_active(!no_activate),
-        |builder, no_activate| {
-            crate::platform::selected::native::activation::configure_event_loop(
-                builder,
-                no_activate,
-            );
-        },
+        |attributes, no_activate| attributes.with_platform_activation(no_activate),
+        |builder, no_activate| builder.configure_platform_activation(no_activate),
     )
 }

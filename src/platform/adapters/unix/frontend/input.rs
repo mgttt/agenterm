@@ -37,22 +37,7 @@ pub(super) fn normalize_ime_commit(text: &str, multiline: bool) -> String {
 }
 
 pub(super) fn primary_shortcut(modifiers: ModifiersState) -> bool {
-    #[cfg(target_os = "linux")]
-    {
-        crate::platform::selected::native::input::primary_shortcut(winit_modifiers_to_platform(
-            modifiers,
-        ))
-    }
-    #[cfg(target_os = "macos")]
-    {
-        crate::platform::selected::native::input::is_product_shortcut(winit_modifiers_to_platform(
-            modifiers,
-        ))
-    }
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-    {
-        modifiers.control_key() || modifiers.super_key()
-    }
+    agenterm_platform::input::is_primary_shortcut(winit_modifiers_to_platform(modifiers))
 }
 
 /// Maps a winit key event to composer edits when the composer strip has focus.
@@ -66,12 +51,12 @@ pub(super) fn composer_key_action(
         return ComposerKeyAction::Ignored;
     }
 
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
-    {
+    if matches!(
+        agenterm_platform::platform_kind(),
+        agenterm_platform::PlatformKind::Linux | agenterm_platform::PlatformKind::Macos
+    ) {
         platform_composer_key_action(event, modifiers, buffer, select_all)
-    }
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-    {
+    } else {
         composer_logical_key_action(&event.logical_key, modifiers, buffer, select_all)
     }
 }
@@ -176,12 +161,12 @@ pub(super) fn text_field_key_action(
         return TextFieldKeyAction::Ignored;
     }
 
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
-    {
+    if matches!(
+        agenterm_platform::platform_kind(),
+        agenterm_platform::PlatformKind::Linux | agenterm_platform::PlatformKind::Macos
+    ) {
         platform_text_field_key_action(event, modifiers, buffer, multiline, select_all)
-    }
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-    {
+    } else {
         text_field_logical_key_action(&event.logical_key, modifiers, buffer, multiline, select_all)
     }
 }
@@ -301,12 +286,12 @@ pub(super) fn key_event_to_bytes(event: &KeyEvent, modifiers: ModifiersState) ->
         return None;
     }
 
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
-    {
+    if matches!(
+        agenterm_platform::platform_kind(),
+        agenterm_platform::PlatformKind::Linux | agenterm_platform::PlatformKind::Macos
+    ) {
         platform_key_event_to_bytes(event, modifiers)
-    }
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-    {
+    } else {
         logical_key_to_bytes(&event.logical_key, modifiers).or_else(|| match &event.logical_key {
             Key::Unidentified(_) => match event.physical_key {
                 PhysicalKey::Code(code) => physical_code_to_byte(code),
@@ -429,9 +414,8 @@ fn physical_code_to_byte(code: winit::keyboard::KeyCode) -> Option<Vec<u8>> {
     }
 }
 
-#[cfg(target_os = "linux")]
 fn winit_modifiers_to_platform(modifiers: ModifiersState) -> crate::platform::ModifierState {
-    crate::platform::selected::native::input::linux_modifiers(
+    agenterm_platform::input::modifiers(
         modifiers.control_key(),
         modifiers.shift_key(),
         modifiers.alt_key(),
@@ -439,17 +423,6 @@ fn winit_modifiers_to_platform(modifiers: ModifiersState) -> crate::platform::Mo
     )
 }
 
-#[cfg(target_os = "macos")]
-fn winit_modifiers_to_platform(modifiers: ModifiersState) -> crate::platform::ModifierState {
-    crate::platform::selected::native::input::macos_modifiers(
-        modifiers.control_key(),
-        modifiers.shift_key(),
-        modifiers.alt_key(),
-        modifiers.super_key(),
-    )
-}
-
-#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn logical_key_parts(key: &Key) -> (Option<&str>, Option<&'static str>) {
     match key {
         Key::Character(text) => (Some(text.as_str()), None),
@@ -458,46 +431,24 @@ fn logical_key_parts(key: &Key) -> (Option<&str>, Option<&'static str>) {
     }
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn platform_classify_key_press(
     event: &KeyEvent,
     modifiers: ModifiersState,
 ) -> crate::platform::KeyClassification {
     let modifiers = winit_modifiers_to_platform(modifiers);
     let (logical_character, named_key) = logical_key_parts(&event.logical_key);
-    #[cfg(target_os = "linux")]
-    {
-        crate::platform::selected::native::input::classify_key_press(
-            modifiers,
-            logical_character,
-            named_key,
-            event.text.as_deref(),
-        )
-    }
-    #[cfg(target_os = "macos")]
-    {
-        crate::platform::selected::native::input::classify_key_press(
-            modifiers,
-            logical_character,
-            named_key,
-            event.text.as_deref(),
-        )
-    }
+    agenterm_platform::input::classify_key_press(
+        modifiers,
+        logical_character,
+        named_key,
+        event.text.as_deref(),
+    )
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn classified_product_shortcut(modifiers: crate::platform::ModifierState) -> bool {
-    #[cfg(target_os = "linux")]
-    {
-        crate::platform::selected::native::input::primary_shortcut(modifiers)
-    }
-    #[cfg(target_os = "macos")]
-    {
-        crate::platform::selected::native::input::is_product_shortcut(modifiers)
-    }
+    agenterm_platform::input::is_primary_shortcut(modifiers)
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn platform_composer_shortcut(key: &str) -> ComposerKeyAction {
     if key.eq_ignore_ascii_case("Enter") {
         ComposerKeyAction::Submit
@@ -514,7 +465,6 @@ fn platform_composer_shortcut(key: &str) -> ComposerKeyAction {
     }
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn push_committed_text(buffer: &mut String, select_all: &mut bool, text: &str) -> bool {
     let replaced = prepare_composer_edit(buffer, select_all);
     let mut changed = false;
@@ -530,7 +480,6 @@ fn push_committed_text(buffer: &mut String, select_all: &mut bool, text: &str) -
     changed || replaced
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn platform_composer_key_action(
     event: &KeyEvent,
     modifiers: ModifiersState,
@@ -577,10 +526,10 @@ fn platform_composer_key_action(
             _ => ComposerKeyAction::Ignored,
         },
         KeyClassification::Ignored => ComposerKeyAction::Ignored,
+        _ => ComposerKeyAction::Ignored,
     }
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn platform_text_field_shortcut(
     key: &str,
     buffer: &str,
@@ -602,7 +551,6 @@ fn platform_text_field_shortcut(
     }
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn platform_text_field_key_action(
     event: &KeyEvent,
     modifiers: ModifiersState,
@@ -666,10 +614,10 @@ fn platform_text_field_key_action(
             _ => TextFieldKeyAction::Ignored,
         },
         KeyClassification::Ignored => TextFieldKeyAction::Ignored,
+        _ => TextFieldKeyAction::Ignored,
     }
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn platform_key_event_to_bytes(event: &KeyEvent, modifiers: ModifiersState) -> Option<Vec<u8>> {
     use crate::platform::KeyClassification;
 
@@ -706,6 +654,7 @@ fn platform_key_event_to_bytes(event: &KeyEvent, modifiers: ModifiersState) -> O
             },
             _ => None,
         },
+        _ => None,
     }
 }
 

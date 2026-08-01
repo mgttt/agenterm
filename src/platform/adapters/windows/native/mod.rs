@@ -3,8 +3,6 @@
 //!
 //! Contract revision implemented by this adapter: 3.
 
-#![cfg(target_os = "windows")]
-
 pub(crate) mod activation;
 pub(crate) mod input;
 pub(crate) mod screenshot;

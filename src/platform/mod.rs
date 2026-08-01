@@ -170,19 +170,67 @@ pub(crate) fn project_capability_status(
 }
 
 pub(crate) fn platform_info_json() -> serde_json::Value {
-    let kind = selected::native::platform_kind();
-    let status = selected::native::capability_status;
+    let kind = agenterm_platform::platform_kind();
+    let display = agenterm_platform::window::display_backend_facts();
 
     let capabilities = CapabilityKind::ALL
         .into_iter()
-        .map(|capability| (capability.as_str().to_owned(), status(capability).to_json()))
+        .map(|capability| {
+            let status = match capability {
+                CapabilityKind::Window | CapabilityKind::Input => project_capability_status(
+                    agenterm_platform::window::capability_status(),
+                    "headless-display",
+                    "window-failed",
+                ),
+                CapabilityKind::Ime => {
+                    if matches!(kind, agenterm_platform::PlatformKind::Windows) {
+                        CapabilityStatus::Unsupported {
+                            reason: "ime-preedit-not-yet-adapted",
+                        }
+                    } else {
+                        project_capability_status(
+                            agenterm_platform::ime::capability_status(!display.headless),
+                            "headless-display",
+                            "ime-failed",
+                        )
+                    }
+                }
+                CapabilityKind::Clipboard => CapabilityStatus::Available,
+                CapabilityKind::Font => project_capability_status(
+                    agenterm_platform::font::capability_status(),
+                    "font-unsupported",
+                    "font-failed",
+                ),
+                CapabilityKind::Screenshot | CapabilityKind::Activation if display.headless => {
+                    CapabilityStatus::Unsupported {
+                        reason: "headless-display",
+                    }
+                }
+                CapabilityKind::Screenshot | CapabilityKind::Activation => {
+                    CapabilityStatus::Available
+                }
+                CapabilityKind::Integration => match kind {
+                    agenterm_platform::PlatformKind::Windows => CapabilityStatus::Unsupported {
+                        reason: "windows-shell-integration-not-yet-declared",
+                    },
+                    agenterm_platform::PlatformKind::Macos => CapabilityStatus::Unsupported {
+                        reason: "signed-macos-app-bundle-pending",
+                    },
+                    _ => CapabilityStatus::Unsupported {
+                        reason: "deferred-slice",
+                    },
+                },
+            };
+            (capability.as_str().to_owned(), status.to_json())
+        })
         .collect::<serde_json::Map<_, _>>();
     serde_json::json!({
         "contract_revision": CONTRACT_REVISION,
         "kind": match kind {
-            PlatformKind::Windows => "windows",
-            PlatformKind::Macos => "macos",
-            PlatformKind::Linux => "linux",
+            agenterm_platform::PlatformKind::Windows => "windows",
+            agenterm_platform::PlatformKind::Macos => "macos",
+            agenterm_platform::PlatformKind::Linux => "linux",
+            _ => "unknown",
         },
         "capabilities": capabilities,
     })

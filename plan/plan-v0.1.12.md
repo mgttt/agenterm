@@ -164,6 +164,14 @@ Toolbar 去耦叶确认三平台所谓 native toolbar 仅是 AgenTerm action-ID 
 Display discovery 随后进入 crate `window` facade：公开 X11/Wayland/headless facts 与
 runtime capability status，环境探测只在三平台 selected adapters；root 删除自己的 facts
 类型并消费公开 contract，为移除旧 native mod/scale/IME compatibility tree 建立前置。
+Unix compatibility-tree 清理叶随后删除 root Linux/macOS 的 native activation/input/IME/
+scale/screenshot 转发层；Unix frontend 与两套 Control Center shell 直接消费 crate 的
+activation、input、IME、window 和 display facade，`platform_info_json` 也不再回调 root
+selected native module。Windows-hosted all-target Clippy 与 31 项 crate all-feature tests
+通过；Linux target probe 因本机缺少 `x86_64-linux-gnu-gcc` 在 `ring` build script 前置
+阶段停止，因此 Unix frontend 的原生目标编译仍需 Linux/macOS host/CI 补证。生产边界
+门禁已由 34 行收敛到 16 行，剩余归属明确为 Unix winit/softbuffer host、Windows
+frontend/Control Center/remote renderer 与 root target selection，不能以本叶冒充总收口。
 
 2026-08-01 首个建设期增量：Cockpit snapshot 新增明确的
 `tab_counts.{total,running,dead}`，native shell 同源显示 logical instance、

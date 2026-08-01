@@ -45,11 +45,6 @@ pub(crate) mod frontend;
 #[cfg(target_os = "linux")]
 #[path = "adapters/linux/ipc.rs"]
 pub(crate) mod ipc;
-#[cfg(target_os = "linux")]
-#[path = "adapters/linux/native/mod.rs"]
-pub(crate) mod native;
-#[cfg(target_os = "linux")]
-pub(crate) use agenterm_platform::window as scale_contract;
 
 #[cfg(target_os = "linux")]
 #[path = "adapters/linux/script_http.rs"]
@@ -71,10 +66,6 @@ pub(crate) mod control_center;
 pub(crate) mod control_center_shell;
 
 #[cfg(target_os = "linux")]
-#[path = "adapters/linux/scale.rs"]
-pub(crate) mod scale;
-
-#[cfg(target_os = "linux")]
 #[path = "adapters/linux/ui_screenshot.rs"]
 pub(crate) mod ui_screenshot;
 
@@ -84,11 +75,6 @@ pub(crate) mod frontend;
 #[cfg(target_os = "macos")]
 #[path = "adapters/macos/ipc.rs"]
 pub(crate) mod ipc;
-#[cfg(target_os = "macos")]
-#[path = "adapters/macos/native/mod.rs"]
-pub(crate) mod native;
-#[cfg(target_os = "macos")]
-pub(crate) use agenterm_platform::window as scale_contract;
 
 #[cfg(target_os = "macos")]
 #[path = "adapters/macos/script_http.rs"]
