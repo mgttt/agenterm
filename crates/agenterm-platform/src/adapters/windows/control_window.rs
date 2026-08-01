@@ -6,31 +6,35 @@ use windows_sys::Win32::{
     Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
     Graphics::Gdi::{
         BeginPaint, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, CreatePen,
-        CreateSolidBrush, DeleteDC, DeleteObject, EndPaint, FillRect, GetStockObject,
-        InvalidateRect, LineTo, MoveToEx, PAINTSTRUCT, PS_SOLID, Rectangle, SRCCOPY,
-        ScreenToClient, SelectObject, SetBkMode, SetTextColor, TRANSPARENT, TextOutW, WHITE_BRUSH,
+        CreateSolidBrush, DT_CENTER, DT_END_ELLIPSIS, DT_LEFT, DT_RIGHT, DT_SINGLELINE, DT_VCENTER,
+        DeleteDC, DeleteObject, DrawTextW, EndPaint, FillRect, GetStockObject, InvalidateRect,
+        LineTo, MoveToEx, PAINTSTRUCT, PS_SOLID, Rectangle, SRCCOPY, ScreenToClient, SelectObject,
+        SetBkMode, SetTextColor, TRANSPARENT, TextOutW, WHITE_BRUSH,
     },
     System::LibraryLoader::GetModuleHandleW,
     UI::{
         Input::KeyboardAndMouse::{
-            EnableWindow, GetKeyState, ReleaseCapture, SetCapture, SetFocus, VK_BACK, VK_CONTROL,
-            VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_F1, VK_F2, VK_F3, VK_F4, VK_F5, VK_F6, VK_F7,
-            VK_F8, VK_F9, VK_F10, VK_F11, VK_F12, VK_HOME, VK_INSERT, VK_LEFT, VK_MENU, VK_NEXT,
-            VK_PRIOR, VK_RETURN, VK_RIGHT, VK_SHIFT, VK_SPACE, VK_TAB, VK_UP,
+            EnableWindow, GetFocus, GetKeyState, ReleaseCapture, SetCapture, SetFocus, VK_BACK,
+            VK_CONTROL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_F1, VK_F2, VK_F3, VK_F4, VK_F5,
+            VK_F6, VK_F7, VK_F8, VK_F9, VK_F10, VK_F11, VK_F12, VK_HOME, VK_INSERT, VK_LEFT,
+            VK_MENU, VK_NEXT, VK_PRIOR, VK_RETURN, VK_RIGHT, VK_SHIFT, VK_SPACE, VK_TAB, VK_UP,
         },
         WindowsAndMessaging::{
-            AppendMenuW, CS_DBLCLKS, CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DestroyWindow,
-            DispatchMessageW, EnableMenuItem, GWLP_USERDATA, GetClientRect, GetMessageW,
-            GetSystemMenu, GetWindowLongPtrW, GetWindowTextLengthW, GetWindowTextW, IDC_ARROW,
-            IDC_HAND, IDC_IBEAM, IDC_SIZENS, IDC_SIZEWE, LoadCursorW, MF_BYCOMMAND, MF_ENABLED,
-            MF_GRAYED, MF_SEPARATOR, MF_STRING, MSG, MoveWindow, PostMessageW, PostQuitMessage,
-            RegisterClassW, SIZE_MINIMIZED, SW_HIDE, SW_SHOW, SW_SHOWNOACTIVATE, SetCursor,
-            SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowTextW, ShowWindow,
-            TranslateMessage, WM_APP, WM_CAPTURECHANGED, WM_CHAR, WM_CLOSE, WM_COMMAND, WM_DESTROY,
-            WM_ERASEBKGND, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN,
-            WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY,
-            WM_PAINT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETFOCUS, WM_SIZE, WM_SYSCOMMAND, WM_TIMER,
-            WNDCLASSW, WS_CHILD, WS_EX_CLIENTEDGE, WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE,
+            AppendMenuW, CS_DBLCLKS, CW_USEDEFAULT, CheckMenuItem, CreateWindowExW, DefWindowProcW,
+            DestroyWindow, DispatchMessageW, ES_AUTOVSCROLL, ES_MULTILINE, ES_PASSWORD,
+            ES_WANTRETURN, EnableMenuItem, GWLP_USERDATA, GetClientRect, GetMessageW,
+            GetSystemMenu, GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW,
+            IDC_ARROW, IDC_HAND, IDC_IBEAM, IDC_SIZENS, IDC_SIZEWE, IsIconic, IsWindowVisible,
+            IsZoomed, LoadCursorW, MF_BYCOMMAND, MF_CHECKED, MF_ENABLED, MF_GRAYED, MF_SEPARATOR,
+            MF_STRING, MF_UNCHECKED, MSG, ModifyMenuW, MoveWindow, PostMessageW, PostQuitMessage,
+            RegisterClassW, SIZE_MINIMIZED, SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW,
+            SW_SHOWNOACTIVATE, SetCursor, SetForegroundWindow, SetTimer, SetWindowLongPtrW,
+            SetWindowTextW, ShowWindow, TranslateMessage, WM_APP, WM_CAPTURECHANGED, WM_CHAR,
+            WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_ERASEBKGND, WM_INITMENUPOPUP, WM_KEYDOWN,
+            WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN,
+            WM_MBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY, WM_PAINT, WM_RBUTTONDOWN,
+            WM_RBUTTONUP, WM_SETFOCUS, WM_SIZE, WM_SYSCOMMAND, WM_TIMER, WNDCLASSW, WS_CHILD,
+            WS_EX_CLIENTEDGE, WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE, WS_VSCROLL,
         },
     },
 };
@@ -43,18 +47,22 @@ use crate::{
     control_window::{
         ButtonState, ControlCanvas, ControlCursor, ControlId, ControlKind, ControlWheelDelta,
         ControlWindow, ControlWindowApplication, ControlWindowBackend, ControlWindowDirective,
-        ControlWindowError, ControlWindowEvent, ControlWindowOptions, FocusTarget, MenuCommandId,
-        PixelPoint, PixelRect, PixelSize, PointerButton, Rgb8,
+        ControlWindowError, ControlWindowEvent, ControlWindowOptions, ControlWindowQuery,
+        ControlWindowState, FocusTarget, MenuCommandId, PixelPoint, PixelRect, PixelSize,
+        PointerButton, Rgb8, TextHorizontalAlignment, TextOptions, WindowPresentation,
     },
 };
 
 const TIMER_ID: usize = 1;
 const DEFERRED_CLOSE: u32 = WM_APP + 1;
+const AUTOMATION_SHORTCUT: u32 = WM_APP + 2;
+const AUTOMATION_FOCUS_QUERY: u32 = WM_APP + 3;
 const SYSTEM_MENU_BASE: usize = 0xA100;
 
 struct Backend {
     window: Cell<HWND>,
     controls: HashMap<ControlId, HWND>,
+    system_menu: HashMap<MenuCommandId, u32>,
 }
 
 impl Backend {
@@ -68,10 +76,22 @@ impl Backend {
     }
 
     fn focus_target(&self, hwnd: HWND) -> FocusTarget {
+        if hwnd == self.window.get() {
+            return FocusTarget::Window;
+        }
         self.controls
             .iter()
             .find_map(|(id, control)| (*control == hwnd).then_some(FocusTarget::Control(*id)))
-            .unwrap_or(FocusTarget::Window)
+            .unwrap_or(FocusTarget::None)
+    }
+
+    fn menu_id(&self, id: MenuCommandId) -> Result<u32, ControlWindowError> {
+        self.system_menu.get(&id).copied().ok_or_else(|| {
+            ControlWindowError::failed(
+                "control_window_unknown_system_menu_command",
+                format!("unknown system menu command {}", id.0),
+            )
+        })
     }
 }
 
@@ -94,6 +114,56 @@ impl ControlWindowBackend for Backend {
     }
     fn client_size(&self) -> PixelSize {
         client_size(self.window.get())
+    }
+    fn state(&self) -> ControlWindowState {
+        let window = self.window.get();
+        ControlWindowState {
+            minimized: unsafe { IsIconic(window) } != 0,
+            maximized: unsafe { IsZoomed(window) } != 0,
+            visible: unsafe { IsWindowVisible(window) } != 0,
+        }
+    }
+    fn focused_target(&self) -> FocusTarget {
+        self.focus_target(unsafe { GetFocus() })
+    }
+    fn set_client_size(&self, size: PixelSize) -> Result<(), ControlWindowError> {
+        if size.width == 0 || size.height == 0 {
+            return Err(ControlWindowError::failed(
+                "control_window_invalid_client_size",
+                "client size must be non-zero",
+            ));
+        }
+        let window = self.window.get();
+        let current_client = client_size(window);
+        let mut outer: RECT = unsafe { mem::zeroed() };
+        if unsafe { GetWindowRect(window, &mut outer) } == 0 {
+            return Err(last_error("control_window_get_window_rect_failed"));
+        }
+        let outer_width = (outer.right - outer.left).max(0);
+        let outer_height = (outer.bottom - outer.top).max(0);
+        let width = outer_width
+            .saturating_add(i32_size(size.width))
+            .saturating_sub(i32_size(current_client.width));
+        let height = outer_height
+            .saturating_add(i32_size(size.height))
+            .saturating_sub(i32_size(current_client.height));
+        if unsafe { MoveWindow(window, outer.left, outer.top, width, height, 1) } == 0 {
+            Err(last_error("control_window_resize_failed"))
+        } else {
+            Ok(())
+        }
+    }
+    fn set_presentation(&self, presentation: WindowPresentation) {
+        unsafe {
+            ShowWindow(
+                self.window.get(),
+                match presentation {
+                    WindowPresentation::Minimized => SW_MINIMIZE,
+                    WindowPresentation::Maximized => SW_MAXIMIZE,
+                    WindowPresentation::Restored => SW_RESTORE,
+                },
+            );
+        }
     }
     fn set_title(&self, title: &str) -> Result<(), ControlWindowError> {
         let w = wide(title);
@@ -158,6 +228,67 @@ impl ControlWindowBackend for Backend {
         }
         Ok(())
     }
+    fn set_system_menu_text(
+        &self,
+        id: MenuCommandId,
+        text: &str,
+    ) -> Result<(), ControlWindowError> {
+        let native_id = self.menu_id(id)?;
+        let text = wide(text);
+        let menu = unsafe { GetSystemMenu(self.window.get(), 0) };
+        if unsafe {
+            ModifyMenuW(
+                menu,
+                native_id,
+                MF_BYCOMMAND | MF_STRING,
+                native_id as usize,
+                text.as_ptr(),
+            )
+        } == 0
+        {
+            Err(last_error("control_window_system_menu_text_failed"))
+        } else {
+            Ok(())
+        }
+    }
+    fn set_system_menu_enabled(
+        &self,
+        id: MenuCommandId,
+        enabled: bool,
+    ) -> Result<(), ControlWindowError> {
+        let native_id = self.menu_id(id)?;
+        let result = unsafe {
+            EnableMenuItem(
+                GetSystemMenu(self.window.get(), 0),
+                native_id,
+                MF_BYCOMMAND | if enabled { MF_ENABLED } else { MF_GRAYED },
+            )
+        };
+        if result == -1 {
+            Err(last_error("control_window_system_menu_enabled_failed"))
+        } else {
+            Ok(())
+        }
+    }
+    fn set_system_menu_checked(
+        &self,
+        id: MenuCommandId,
+        checked: bool,
+    ) -> Result<(), ControlWindowError> {
+        let native_id = self.menu_id(id)?;
+        let result = unsafe {
+            CheckMenuItem(
+                GetSystemMenu(self.window.get(), 0),
+                native_id,
+                MF_BYCOMMAND | if checked { MF_CHECKED } else { MF_UNCHECKED },
+            )
+        };
+        if result == u32::MAX {
+            Err(last_error("control_window_system_menu_checked_failed"))
+        } else {
+            Ok(())
+        }
+    }
     fn focus_control(&self, id: ControlId) -> Result<(), ControlWindowError> {
         unsafe {
             SetFocus(self.control(id)?);
@@ -191,6 +322,41 @@ impl ControlWindowBackend for Backend {
             }
             Ok(())
         }
+    }
+    #[cfg(feature = "font")]
+    fn create_font(
+        &self,
+        request: crate::font::FontRequest<'_>,
+    ) -> Result<crate::font::NativeFont, ControlWindowError> {
+        let handle =
+            unsafe { crate::font::OpaqueWindowHandle::from_raw(self.window.get() as isize) };
+        crate::font::create_terminal_font(handle, request).map_err(|error| {
+            ControlWindowError::failed(error.code(), "native control-window font creation failed")
+        })
+    }
+    #[cfg(feature = "screenshot")]
+    fn capture_png(
+        &self,
+        path: &std::path::Path,
+        area: crate::screenshot::NativeCaptureArea,
+    ) -> Result<(), ControlWindowError> {
+        let window = unsafe {
+            crate::screenshot::ScreenshotWindowHandle::from_raw(self.window.get() as isize)
+        }
+        .ok_or_else(|| {
+            ControlWindowError::failed(
+                "control_window_screenshot_handle_unavailable",
+                "native control-window screenshot handle is unavailable",
+            )
+        })?;
+        crate::screenshot::capture_native_window_png(window, path, area)
+            .map(|_| ())
+            .map_err(|error| {
+                ControlWindowError::failed(
+                    "control_window_screenshot_failed",
+                    format!("{}: {error}", error.code()),
+                )
+            })
     }
 }
 
@@ -258,9 +424,18 @@ pub(crate) fn run_control_window(
             ControlKind::TextInput {
                 multiline,
                 password,
+                vertical_scroll,
+                want_return,
             } => (
                 "EDIT",
-                (if multiline { 0x0004 } else { 0 }) | (if password { 0x0020 } else { 0 }),
+                (if multiline { ES_MULTILINE as u32 } else { 0 })
+                    | (if password { ES_PASSWORD as u32 } else { 0 })
+                    | (if vertical_scroll {
+                        ES_AUTOVSCROLL as u32 | WS_VSCROLL
+                    } else {
+                        0
+                    })
+                    | (if want_return { ES_WANTRETURN as u32 } else { 0 }),
                 WS_EX_CLIENTEDGE,
             ),
         };
@@ -301,9 +476,21 @@ pub(crate) fn run_control_window(
         }
         controls.insert(spec.id, child);
     }
+    let system_menu = options
+        .system_menu
+        .iter()
+        .enumerate()
+        .map(|(index, item)| {
+            (
+                item.id,
+                u32::try_from(SYSTEM_MENU_BASE + index).unwrap_or(u32::MAX),
+            )
+        })
+        .collect::<HashMap<_, _>>();
     let backend = Rc::new(Backend {
         window: Cell::new(hwnd),
         controls,
+        system_menu,
     });
     let window = ControlWindow(backend.clone());
     let mut state = Box::new(State {
@@ -321,7 +508,7 @@ pub(crate) fn run_control_window(
     for (index, item) in options.system_menu.iter().enumerate() {
         let native_id = SYSTEM_MENU_BASE + index;
         unsafe {
-            if AppendMenuW(menu, MF_SEPARATOR, 0, ptr::null()) == 0 {
+            if item.separator_before && AppendMenuW(menu, MF_SEPARATOR, 0, ptr::null()) == 0 {
                 let error = last_error("control_window_system_menu_separator_failed");
                 DestroyWindow(hwnd);
                 return Err(error);
@@ -339,6 +526,21 @@ pub(crate) fn run_control_window(
             ) == -1
             {
                 let error = last_error("control_window_system_menu_state_failed");
+                DestroyWindow(hwnd);
+                return Err(error);
+            }
+            if CheckMenuItem(
+                menu,
+                native_id as u32,
+                MF_BYCOMMAND
+                    | if item.checked {
+                        MF_CHECKED
+                    } else {
+                        MF_UNCHECKED
+                    },
+            ) == u32::MAX
+            {
+                let error = last_error("control_window_system_menu_checked_failed");
                 DestroyWindow(hwnd);
                 return Err(error);
             }
@@ -477,9 +679,38 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPAR
             })
         }
         WM_COMMAND => Some(ControlWindowEvent::Command(ControlId((wp & 0xffff) as u32))),
+        WM_INITMENUPOPUP => Some(ControlWindowEvent::SystemMenuOpening),
         WM_SYSCOMMAND if state.system_menu_commands.contains_key(&wp) => Some(
             ControlWindowEvent::SystemMenu(state.system_menu_commands[&wp]),
         ),
+        AUTOMATION_SHORTCUT => {
+            let modifiers = lp as usize;
+            let directive = dispatch(
+                state,
+                ControlWindowEvent::AutomationShortcut {
+                    key: wp as u32,
+                    modifiers: ModifierState {
+                        control: modifiers & 1 != 0,
+                        shift: modifiers & 2 != 0,
+                        alt: modifiers & 4 != 0,
+                        meta: false,
+                    },
+                },
+            );
+            return if matches!(
+                directive,
+                Some(ControlWindowDirective::Consumed | ControlWindowDirective::ConsumedAndRedraw)
+            ) {
+                1
+            } else {
+                0
+            };
+        }
+        AUTOMATION_FOCUS_QUERY => {
+            return state
+                .application
+                .query(&state.window, ControlWindowQuery::AutomationFocusSurface);
+        }
         WM_PAINT => {
             paint(state, hwnd);
             return 0;
@@ -572,8 +803,16 @@ fn paint(state: &mut State, hwnd: HWND) {
         return;
     }
     let old = unsafe { SelectObject(memory, bitmap) };
-    let mut canvas = WinCanvas { dc: memory, size };
-    match state.application.paint(&state.window, &mut canvas) {
+    let paint_result = {
+        let mut canvas = WinCanvas {
+            dc: memory,
+            size,
+            #[cfg(feature = "font")]
+            original_font: None,
+        };
+        state.application.paint(&state.window, &mut canvas)
+    };
+    match paint_result {
         Ok(d) => apply_directive(state, d),
         Err(e) => {
             state.deferred_error = Some(e);
@@ -608,6 +847,8 @@ fn paint(state: &mut State, hwnd: HWND) {
 struct WinCanvas {
     dc: *mut core::ffi::c_void,
     size: PixelSize,
+    #[cfg(feature = "font")]
+    original_font: Option<*mut core::ffi::c_void>,
 }
 impl ControlCanvas for WinCanvas {
     fn size(&self) -> PixelSize {
@@ -658,6 +899,58 @@ impl ControlCanvas for WinCanvas {
                 w.as_ptr(),
                 i32::try_from(w.len()).unwrap_or(i32::MAX),
             );
+        }
+    }
+    fn text_rect(&mut self, rect: PixelRect, text: &str, c: Rgb8, options: TextOptions) {
+        let mut text = text.encode_utf16().collect::<Vec<_>>();
+        let mut rect = to_rect(rect);
+        let mut flags = match options.horizontal {
+            TextHorizontalAlignment::Left => DT_LEFT,
+            TextHorizontalAlignment::Center => DT_CENTER,
+            TextHorizontalAlignment::Right => DT_RIGHT,
+        };
+        if options.vertical_center {
+            flags |= DT_VCENTER;
+        }
+        if options.single_line {
+            flags |= DT_SINGLELINE;
+        }
+        if options.end_ellipsis {
+            flags |= DT_END_ELLIPSIS;
+        }
+        unsafe {
+            SetBkMode(self.dc, TRANSPARENT as i32);
+            SetTextColor(self.dc, color(c));
+            DrawTextW(
+                self.dc,
+                text.as_mut_ptr(),
+                i32::try_from(text.len()).unwrap_or(i32::MAX),
+                &mut rect,
+                flags,
+            );
+        }
+    }
+    #[cfg(feature = "font")]
+    fn set_font(&mut self, font: &crate::font::NativeFont) -> Result<(), ControlWindowError> {
+        let previous =
+            unsafe { SelectObject(self.dc, font.raw_handle() as *mut core::ffi::c_void) };
+        if previous.is_null() {
+            return Err(last_error("control_window_select_font_failed"));
+        }
+        if self.original_font.is_none() {
+            self.original_font = Some(previous);
+        }
+        Ok(())
+    }
+}
+
+impl Drop for WinCanvas {
+    fn drop(&mut self) {
+        #[cfg(feature = "font")]
+        if let Some(font) = self.original_font.take() {
+            unsafe {
+                SelectObject(self.dc, font);
+            }
         }
     }
 }

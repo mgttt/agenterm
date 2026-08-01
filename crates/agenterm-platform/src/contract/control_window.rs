@@ -2,7 +2,7 @@
 
 use std::{borrow::Cow, fmt, time::Instant};
 
-use super::input::NormalizedKeyEvent;
+use super::input::{ModifierState, NormalizedKeyEvent};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct ControlId(pub u32);
@@ -67,7 +67,12 @@ impl Rgb8 {
 pub enum ControlKind {
     Button,
     Label,
-    TextInput { multiline: bool, password: bool },
+    TextInput {
+        multiline: bool,
+        password: bool,
+        vertical_scroll: bool,
+        want_return: bool,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -86,6 +91,8 @@ pub struct SystemMenuItem {
     pub id: MenuCommandId,
     pub text: String,
     pub enabled: bool,
+    pub checked: bool,
+    pub separator_before: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -130,8 +137,57 @@ pub enum ButtonState {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum FocusTarget {
+    None,
     Window,
     Control(ControlId),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ControlWindowState {
+    pub minimized: bool,
+    pub maximized: bool,
+    pub visible: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum WindowPresentation {
+    Minimized,
+    Maximized,
+    Restored,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum TextHorizontalAlignment {
+    Left,
+    Center,
+    Right,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TextOptions {
+    pub horizontal: TextHorizontalAlignment,
+    pub vertical_center: bool,
+    pub single_line: bool,
+    pub end_ellipsis: bool,
+}
+
+impl TextOptions {
+    pub const fn single_line_left() -> Self {
+        Self {
+            horizontal: TextHorizontalAlignment::Left,
+            vertical_center: false,
+            single_line: true,
+            end_ellipsis: false,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum ControlWindowQuery {
+    AutomationFocusSurface,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -171,10 +227,11 @@ pub enum ControlWindowEvent {
     },
     CaptureChanged(bool),
     Command(ControlId),
+    SystemMenuOpening,
     SystemMenu(MenuCommandId),
-    Automation {
-        name: String,
-        argument: Option<String>,
+    AutomationShortcut {
+        key: u32,
+        modifiers: ModifierState,
     },
 }
 
@@ -225,6 +282,10 @@ pub(crate) trait ControlWindowBackend {
     fn close(&self);
     fn focus(&self);
     fn client_size(&self) -> PixelSize;
+    fn state(&self) -> ControlWindowState;
+    fn focused_target(&self) -> FocusTarget;
+    fn set_client_size(&self, size: PixelSize) -> Result<(), ControlWindowError>;
+    fn set_presentation(&self, presentation: WindowPresentation);
     fn set_title(&self, title: &str) -> Result<(), ControlWindowError>;
     fn set_control_text(&self, id: ControlId, text: &str) -> Result<(), ControlWindowError>;
     fn control_text(&self, id: ControlId) -> Result<String, ControlWindowError>;
@@ -235,9 +296,32 @@ pub(crate) trait ControlWindowBackend {
     ) -> Result<(), ControlWindowError>;
     fn set_control_enabled(&self, id: ControlId, enabled: bool) -> Result<(), ControlWindowError>;
     fn set_control_visible(&self, id: ControlId, visible: bool) -> Result<(), ControlWindowError>;
+    fn set_system_menu_text(&self, id: MenuCommandId, text: &str)
+    -> Result<(), ControlWindowError>;
+    fn set_system_menu_enabled(
+        &self,
+        id: MenuCommandId,
+        enabled: bool,
+    ) -> Result<(), ControlWindowError>;
+    fn set_system_menu_checked(
+        &self,
+        id: MenuCommandId,
+        checked: bool,
+    ) -> Result<(), ControlWindowError>;
     fn focus_control(&self, id: ControlId) -> Result<(), ControlWindowError>;
     fn set_pointer_capture(&self, capture: bool) -> Result<(), ControlWindowError>;
     fn set_cursor(&self, cursor: ControlCursor) -> Result<(), ControlWindowError>;
+    #[cfg(feature = "font")]
+    fn create_font(
+        &self,
+        request: crate::font::FontRequest<'_>,
+    ) -> Result<crate::font::NativeFont, ControlWindowError>;
+    #[cfg(feature = "screenshot")]
+    fn capture_png(
+        &self,
+        path: &std::path::Path,
+        area: crate::screenshot::NativeCaptureArea,
+    ) -> Result<(), ControlWindowError>;
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -266,6 +350,18 @@ impl ControlWindow {
     pub fn client_size(&self) -> PixelSize {
         self.0.client_size()
     }
+    pub fn state(&self) -> ControlWindowState {
+        self.0.state()
+    }
+    pub fn focused_target(&self) -> FocusTarget {
+        self.0.focused_target()
+    }
+    pub fn set_client_size(&self, size: PixelSize) -> Result<(), ControlWindowError> {
+        self.0.set_client_size(size)
+    }
+    pub fn set_presentation(&self, presentation: WindowPresentation) {
+        self.0.set_presentation(presentation);
+    }
     pub fn set_title(&self, v: &str) -> Result<(), ControlWindowError> {
         self.0.set_title(v)
     }
@@ -288,6 +384,27 @@ impl ControlWindow {
     pub fn set_control_visible(&self, id: ControlId, v: bool) -> Result<(), ControlWindowError> {
         self.0.set_control_visible(id, v)
     }
+    pub fn set_system_menu_text(
+        &self,
+        id: MenuCommandId,
+        text: &str,
+    ) -> Result<(), ControlWindowError> {
+        self.0.set_system_menu_text(id, text)
+    }
+    pub fn set_system_menu_enabled(
+        &self,
+        id: MenuCommandId,
+        enabled: bool,
+    ) -> Result<(), ControlWindowError> {
+        self.0.set_system_menu_enabled(id, enabled)
+    }
+    pub fn set_system_menu_checked(
+        &self,
+        id: MenuCommandId,
+        checked: bool,
+    ) -> Result<(), ControlWindowError> {
+        self.0.set_system_menu_checked(id, checked)
+    }
     pub fn focus_control(&self, id: ControlId) -> Result<(), ControlWindowError> {
         self.0.focus_control(id)
     }
@@ -296,6 +413,21 @@ impl ControlWindow {
     }
     pub fn set_cursor(&self, v: ControlCursor) -> Result<(), ControlWindowError> {
         self.0.set_cursor(v)
+    }
+    #[cfg(feature = "font")]
+    pub fn create_font(
+        &self,
+        request: crate::font::FontRequest<'_>,
+    ) -> Result<crate::font::NativeFont, ControlWindowError> {
+        self.0.create_font(request)
+    }
+    #[cfg(feature = "screenshot")]
+    pub fn capture_png(
+        &self,
+        path: &std::path::Path,
+        area: crate::screenshot::NativeCaptureArea,
+    ) -> Result<(), ControlWindowError> {
+        self.0.capture_png(path, area)
     }
 }
 
@@ -306,6 +438,9 @@ pub trait ControlCanvas {
     fn stroke_rect(&mut self, rect: PixelRect, color: Rgb8, width: u32);
     fn line(&mut self, start: PixelPoint, end: PixelPoint, color: Rgb8, width: u32);
     fn text(&mut self, origin: PixelPoint, text: &str, color: Rgb8);
+    fn text_rect(&mut self, rect: PixelRect, text: &str, color: Rgb8, options: TextOptions);
+    #[cfg(feature = "font")]
+    fn set_font(&mut self, font: &crate::font::NativeFont) -> Result<(), ControlWindowError>;
 }
 
 pub trait ControlWindowApplication: 'static {
@@ -323,6 +458,10 @@ pub trait ControlWindowApplication: 'static {
         window: &ControlWindow,
         canvas: &mut dyn ControlCanvas,
     ) -> Result<ControlWindowDirective, ControlWindowError>;
+
+    fn query(&self, _window: &ControlWindow, _query: ControlWindowQuery) -> isize {
+        0
+    }
 }
 
 #[cfg(test)]
