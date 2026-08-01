@@ -28,8 +28,8 @@ client, and a deliberately bounded tmux/RMUX frontend.
   active tab; PTY commands restart as new processes.
 - Exited processes leave a `[dead]` tab until the user explicitly closes it.
 - Every tab owns a composer text box and Send button.
-- `New` opens a configuration surface for shell profile, initial command, and
-  optional ephemeral HTTP(S) proxy environment before creating a terminal.
+- `New` opens a configuration surface for shell profile and initial command;
+  retained HTTP(S) proxy drafts are temporarily inert pending a later design.
 - Local CLI can create, select, rename, inspect, capture, and drive tabs.
 - Mouse-wheel history, a draggable scrollbar, and highlighted terminal text
   selection share the same viewport; selected text copies to the Windows
@@ -228,8 +228,8 @@ $r = ".\dist\agenterm-cli.exe"
 & $r server-list
 & $r --address 127.0.0.1:48915 ui-snapshot
 
-# Launch Codex with proxy settings scoped to this tab.
-& $r new-agent -n reviewer --proxy http://127.0.0.1:7890 -- --full-auto
+# Proxy flags are temporarily inert; configure proxy variables in the shell.
+& $r new-agent -n reviewer -- --full-auto
 
 # Explicit opt-in convenience for Codex's unsafe bypass mode; omitted by default.
 & $r new-agent -n scratch --yolo

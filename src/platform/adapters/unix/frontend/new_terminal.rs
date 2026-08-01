@@ -142,12 +142,15 @@ impl NewTerminalDialog {
         }
 
         let command_line = build_command_line(self.shell_choice, initial);
-        let mut tab_environment = Vec::new();
-        for (name, value) in [("HTTP_PROXY", http_proxy), ("HTTPS_PROXY", https_proxy)] {
-            if !value.is_empty() {
-                tab_environment.push((name.to_owned(), value.to_owned()));
-            }
-        }
+        // Temporarily leave inherited HTTP(S) proxy variables untouched. The
+        // drafts remain available for a future design, but creating a terminal
+        // must not inject them until that behavior has an explicit contract.
+        let tab_environment = Vec::new();
+        // for (name, value) in [("HTTP_PROXY", http_proxy), ("HTTPS_PROXY", https_proxy)] {
+        //     if !value.is_empty() {
+        //         tab_environment.push((name.to_owned(), value.to_owned()));
+        //     }
+        // }
 
         self.close_without_create();
         Ok(Some(CreateParams {
@@ -400,22 +403,13 @@ mod tests {
     }
 
     #[test]
-    fn finish_accepts_proxy_environment() {
+    fn finish_accepts_proxy_drafts_without_intervening_in_the_environment() {
         let mut dialog = NewTerminalDialog::new();
         dialog.open();
         dialog.set_http_proxy_draft("http://127.0.0.1:8080".to_owned());
         dialog.set_https_proxy_draft("https://127.0.0.1:8443".to_owned());
         let params = dialog.finish(true).unwrap().expect("create params");
-        assert_eq!(
-            params.tab_environment,
-            vec![
-                ("HTTP_PROXY".to_owned(), "http://127.0.0.1:8080".to_owned()),
-                (
-                    "HTTPS_PROXY".to_owned(),
-                    "https://127.0.0.1:8443".to_owned(),
-                ),
-            ]
-        );
+        assert!(params.tab_environment.is_empty());
     }
 
     #[test]

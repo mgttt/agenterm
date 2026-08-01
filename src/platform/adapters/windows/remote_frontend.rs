@@ -3270,15 +3270,18 @@ impl RemoteWindowState {
                 "-F".to_owned(),
                 "#{window_id}".to_owned(),
             ];
-            for (name, value) in [
-                ("HTTP_PROXY", http_proxy.as_str()),
-                ("HTTPS_PROXY", https_proxy.as_str()),
-            ] {
-                if !value.is_empty() {
-                    args.push("-e".to_owned());
-                    args.push(format!("{name}={value}"));
-                }
-            }
+            // Temporarily leave inherited HTTP(S) proxy variables untouched.
+            // Keep the drafts for a future design, but do not forward them as
+            // child environment overrides until that contract is accepted.
+            // for (name, value) in [
+            //     ("HTTP_PROXY", http_proxy.as_str()),
+            //     ("HTTPS_PROXY", https_proxy.as_str()),
+            // ] {
+            //     if !value.is_empty() {
+            //         args.push("-e".to_owned());
+            //         args.push(format!("{name}={value}"));
+            //     }
+            // }
             let mut child = match self.new_shell_choice {
                 NewShellChoice::Default if initial.is_empty() => Vec::new(),
                 NewShellChoice::Default | NewShellChoice::CommandPrompt => {

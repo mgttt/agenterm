@@ -291,21 +291,13 @@ pub(super) fn cell_metrics(font_size: u16) -> (u32, u32) {
     (cell_w, cell_h)
 }
 
-pub(super) fn grid_dimensions_for_pixels(
-    width: u32,
-    height: u32,
-    sidebar_width: u32,
-    composer_height: u32,
-    status_height: u32,
+pub(super) fn grid_dimensions_for_terminal(
+    terminal_width: u32,
+    terminal_height: u32,
     cell_width: u32,
     cell_height: u32,
 ) -> (u16, u16) {
-    let terminal_width = width
-        .saturating_sub(sidebar_width)
-        .saturating_sub(SCROLLBAR_WIDTH);
-    let terminal_height = height
-        .saturating_sub(composer_height)
-        .saturating_sub(status_height);
+    let terminal_width = terminal_width.saturating_sub(SCROLLBAR_WIDTH);
     let cols = (terminal_width / cell_width.max(1)).max(1) as u16;
     let rows = (terminal_height / cell_height.max(1)).max(1) as u16;
     (cols, rows)
@@ -2856,13 +2848,15 @@ mod tests {
     }
 
     #[test]
-    fn grid_dimensions_account_for_sidebar_scrollbar_and_composer() {
+    fn grid_dimensions_use_the_exact_terminal_viewport() {
         let (cell_w, cell_h) = cell_metrics(12);
+        let terminal_width = 800 - 200;
+        let terminal_height = 480 - 46 - 48 - 26;
         assert_eq!(
-            grid_dimensions_for_pixels(800, 480, 200, 48, 26, cell_w, cell_h),
+            grid_dimensions_for_terminal(terminal_width, terminal_height, cell_w, cell_h),
             (
-                ((800 - 200 - SCROLLBAR_WIDTH) / cell_w) as u16,
-                ((480 - 48 - 26) / cell_h) as u16
+                ((terminal_width - SCROLLBAR_WIDTH) / cell_w) as u16,
+                (terminal_height / cell_h) as u16
             )
         );
     }
@@ -2916,8 +2910,8 @@ mod tests {
     #[test]
     fn hidden_sidebar_yields_wider_terminal_grid() {
         let (cell_w, cell_h) = cell_metrics(12);
-        let without = grid_dimensions_for_pixels(800, 480, 0, 48, 26, cell_w, cell_h).0;
-        let with = grid_dimensions_for_pixels(800, 480, 200, 48, 26, cell_w, cell_h).0;
+        let without = grid_dimensions_for_terminal(800, 360, cell_w, cell_h).0;
+        let with = grid_dimensions_for_terminal(600, 360, cell_w, cell_h).0;
         assert!(without > with);
         let _ = AppConfig::default();
     }
@@ -3163,8 +3157,8 @@ mod tests {
         assert_eq!(small_h, 16);
         assert!(large_w > cell_w);
         assert!(large_h > small_h);
-        let small_rows = grid_dimensions_for_pixels(800, 480, 200, 48, 26, cell_w, small_h).1;
-        let large_rows = grid_dimensions_for_pixels(800, 480, 200, 48, 26, large_w, large_h).1;
+        let small_rows = grid_dimensions_for_terminal(600, 360, cell_w, small_h).1;
+        let large_rows = grid_dimensions_for_terminal(600, 360, large_w, large_h).1;
         assert!(small_rows > large_rows);
     }
 

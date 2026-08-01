@@ -109,6 +109,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     transactions
   - [ ] automated interactive-TUI fixture that rejects batched paste+Enter
     without requiring a networked Codex session
+- [x] the terminal grid derives its rows and columns from the exact shared
+  terminal viewport, excluding the toolbar, Composer, status bar, Tabs column,
+  and terminal scrollbar. The last advertised PTY row remains fully visible
+  above the Composer after startup, resize, font changes, and HiDPI scaling;
+  constrained windows reduce the grid instead of placing terminal content
+  behind another surface. Public evidence is the Unix geometry/unit contract
+  plus a real-host screenshot when rendering qualification is available.
+  This does not change Composer height or add overlay padding.
 - [x] workspace chrome uses a full-height Tabs column and a terminal workbench column containing the top New/Tabs/Settings toolbar, terminal viewport, Composer, and terminal-scoped status bar
 - [x] `New`, `Tabs`, `Settings`, language, and terminal font-size actions are
   grouped in the compact toolbar
@@ -126,11 +134,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   [the Control Center module](PRD_02_21_control_center.md).
 - [~] activating New opens an extensible terminal-creation dialog before
   mutation: Windows ships Default/Command Prompt/PowerShell selection, an
-  optional initial command, separate optional per-terminal HTTP/HTTPS proxy
-  inputs, and Create/Cancel; Unix parity remains follow-up
-- [x] the creation dialog validates proxy URLs and passes non-empty values only
-  as ephemeral child environment; snapshots expose configured booleans but
-  never command text, proxy endpoints, credentials, or unsaved input values
+  optional initial command, retained but temporarily inert per-terminal
+  HTTP/HTTPS proxy drafts, and Create/Cancel; Unix parity remains follow-up
+- [~] the creation dialog still validates proxy-shaped drafts and snapshots
+  expose configured booleans without revealing values, but HTTP_PROXY and
+  HTTPS_PROXY injection is intentionally paused on every create path. The
+  child inherits the caller's proxy environment unchanged until a later
+  accepted proxy design defines explicit semantics and evidence.
 - [~] built-in control labels come from one declared locale source; English and
   Traditional Chinese can be switched at runtime and persist across UI
   restarts. Semantic snapshots expose the locale and resolved labels. Windows
@@ -172,15 +182,17 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] embedded AgenTerm icon
 - [ ] configurable shell, colors, working directory, and startup tabs
 - [x] per-tab child environment injection.
-- [x] The Proxy workbench is archived. Users configure proxy variables in
-  their terminal or pass explicit create-time `--proxy`/tab environment
-  values; no bottom-bar entry, editor, reveal control, Prepare, Send Now, or
-  runtime-injection action is advertised.
+- [x] The Proxy workbench is archived. Users currently configure proxy
+  variables inside their terminal; create-time `--proxy` and HTTP(S) proxy
+  tab-environment overrides are accepted as inert compatibility input and do
+  not alter the child environment. No bottom-bar entry, editor, reveal
+  control, Prepare, Send Now, or runtime-injection action is advertised.
 
 ## Archived tab proxy workbench
 
-- [x] create-time proxy environment belongs to one stable tab ID and remains
-  ephemeral; workspace persistence never stores its endpoint or credentials
+- [~] the former create-time proxy drafts remain ephemeral and scoped to one
+  stable tab ID, but are intentionally not applied to the child environment;
+  workspace persistence never stores their endpoint or credentials
 - [x] snapshots expose only bounded redacted launch facts needed for
   diagnostics; pane, event, command-log, retained failure and GUI-stderr
   evidence never reveal the endpoint or credentials
@@ -188,8 +200,7 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   `archived`; every former Proxy editor/application UI action fails explicitly
   with `proxy workbench controls are archived` and changes neither Composer nor
   terminal input
-- [x] restarting without explicit create-time proxy configuration restores no
-  transient proxy value or application claim
+- [x] restarting never restores a transient proxy value or application claim
 - [ ] any future proxy workbench, remote distribution, fleet/global default or
   persistent profile requires a separately accepted plan covering secret
   storage, identity, policy, revocation and public black-box evidence

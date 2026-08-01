@@ -94,10 +94,10 @@ use new_terminal::{NewTerminalDialog, ui_action_open};
 use render::{
     COMPOSER_HEIGHT, ComposerView, ConfirmCloseHit, ConfirmCloseView, FrameContent, ImePreeditView,
     NewShellChoice as RenderShellChoice, NewTerminalFocusView, NewTerminalHit,
-    NewTerminalModalView, STATUS_HEIGHT, SettingsHit, SettingsModalView, SidebarTabRow,
-    StatusBarView, TabEditorFocusView, TabEditorView, TerminalCursorStyle, TerminalGrid,
-    TerminalPaint, ToolbarHit, WindowCloseHit, WindowCloseView, WorkspaceToolbarView, cell_metrics,
-    effective_palette, grid_dimensions_for_pixels, render_frame, render_terminal_grid_hidpi,
+    NewTerminalModalView, SettingsHit, SettingsModalView, SidebarTabRow, StatusBarView,
+    TabEditorFocusView, TabEditorView, TerminalCursorStyle, TerminalGrid, TerminalPaint,
+    ToolbarHit, WindowCloseHit, WindowCloseView, WorkspaceToolbarView, cell_metrics,
+    effective_palette, grid_dimensions_for_terminal, render_frame, render_terminal_grid_hidpi,
     scrollbar_view_from_geometry, sidebar_row_at_y,
 };
 use window_state::{
@@ -3033,15 +3033,11 @@ impl UnixApp {
         install_unix_wake(move || {
             let _ = waker.wake();
         });
-        let (width, height) = self.client_size();
-        let sidebar_width = self.sidebar_width();
+        let layout = self.layout();
         let (cell_width, cell_height) = self.cell_dimensions();
-        let (cols, rows) = grid_dimensions_for_pixels(
-            width,
-            height,
-            sidebar_width,
-            COMPOSER_HEIGHT,
-            STATUS_HEIGHT,
+        let (cols, rows) = grid_dimensions_for_terminal(
+            layout.terminal.width().max(0) as u32,
+            layout.terminal.height().max(0) as u32,
             cell_width,
             cell_height,
         );
@@ -3086,15 +3082,11 @@ impl UnixApp {
         let Some(window) = self.window.as_ref() else {
             return;
         };
-        let (width, height) = self.client_size();
-        let sidebar_width = self.sidebar_width();
+        let layout = self.layout();
         let (cell_width, cell_height) = self.cell_dimensions();
-        let (cols, rows) = grid_dimensions_for_pixels(
-            width,
-            height,
-            sidebar_width,
-            COMPOSER_HEIGHT,
-            STATUS_HEIGHT,
+        let (cols, rows) = grid_dimensions_for_terminal(
+            layout.terminal.width().max(0) as u32,
+            layout.terminal.height().max(0) as u32,
             cell_width,
             cell_height,
         );

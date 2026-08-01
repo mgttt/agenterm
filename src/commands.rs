@@ -909,7 +909,11 @@ pub(crate) fn parse_tab_environment(args: &[String]) -> Result<Vec<(String, Stri
                 .ok_or_else(|| format!("{argument} requires NAME=VALUE"))?;
             validate_environment_name(name)?;
             validate_environment_value(value, argument)?;
-            upsert_environment(&mut environment, name, value);
+            // Explicit generic overlays remain supported, except that AgenTerm
+            // temporarily does not override inherited HTTP(S) proxy settings.
+            if !is_http_proxy_environment(name) {
+                upsert_environment(&mut environment, name, value);
+            }
             position += 2;
         } else if argument == "--proxy" {
             let value = args
@@ -919,8 +923,11 @@ pub(crate) fn parse_tab_environment(args: &[String]) -> Result<Vec<(String, Stri
                 return Err("--proxy requires a non-empty URL".to_owned());
             }
             validate_environment_value(value, "--proxy")?;
-            upsert_environment(&mut environment, "HTTP_PROXY", value);
-            upsert_environment(&mut environment, "HTTPS_PROXY", value);
+            // Temporarily leave inherited HTTP(S) proxy variables untouched.
+            // Keep consuming and validating this compatibility option until a
+            // later proxy design defines explicit child-environment semantics.
+            // upsert_environment(&mut environment, "HTTP_PROXY", value);
+            // upsert_environment(&mut environment, "HTTPS_PROXY", value);
             position += 2;
         } else if argument == "--no-proxy" {
             let value = args
@@ -943,6 +950,10 @@ pub(crate) fn parse_tab_environment(args: &[String]) -> Result<Vec<(String, Stri
         }
     }
     Ok(environment)
+}
+
+fn is_http_proxy_environment(name: &str) -> bool {
+    name.eq_ignore_ascii_case("HTTP_PROXY") || name.eq_ignore_ascii_case("HTTPS_PROXY")
 }
 
 fn validate_environment_value(value: &str, option: &str) -> Result<(), String> {
@@ -1282,11 +1293,15 @@ mod tests {
     }
 
     #[test]
-    fn parses_scoped_environment_and_proxy_convenience() {
+    fn parses_scoped_environment_without_intervening_in_http_proxy() {
         let parsed = parse_tab_environment(&args(&[
             "new-window",
             "-e",
             "ROLE=reviewer",
+            "-e",
+            "http_proxy=http://explicit.example:8080",
+            "--env",
+            "HTTPS_PROXY=https://explicit.example:8443",
             "--proxy",
             "http://127.0.0.1:7890",
             "--no-proxy",
@@ -1297,8 +1312,6 @@ mod tests {
             parsed,
             vec![
                 ("ROLE".to_owned(), "reviewer".to_owned()),
-                ("HTTP_PROXY".to_owned(), "http://127.0.0.1:7890".to_owned()),
-                ("HTTPS_PROXY".to_owned(), "http://127.0.0.1:7890".to_owned()),
                 ("NO_PROXY".to_owned(), "localhost,127.0.0.1".to_owned()),
             ]
         );
