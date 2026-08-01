@@ -2,3 +2,5 @@
 Cargo.lock text eol=lf
 scripts/artifacts.json text eol=lf
 scripts/qualification-gates.json text eol=lf
+*.cmd text eol=crlf
+*.bat text eol=crlf
