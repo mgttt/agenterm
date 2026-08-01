@@ -69,4 +69,11 @@ mod tests {
     fn missing_process_is_not_reported_as_terminated() {
         assert!(terminate(u32::MAX, TerminationMode::Forceful).is_err());
     }
+
+    #[test]
+    fn zero_never_targets_the_unix_process_group() {
+        let error = terminate(0, TerminationMode::Forceful)
+            .expect_err("zero must not be interpreted as one process");
+        assert_eq!(error.kind(), ProcessControlErrorKind::InvalidId);
+    }
 }

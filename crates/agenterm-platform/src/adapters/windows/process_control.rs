@@ -5,6 +5,12 @@ use crate::contract::process_control::{
 };
 
 pub(crate) fn terminate(pid: u32, mode: TerminationMode) -> Result<(), ProcessControlError> {
+    if pid == 0 {
+        return Err(ProcessControlError::new(
+            ProcessControlErrorKind::InvalidId,
+            "process ID zero does not identify one process",
+        ));
+    }
     if mode == TerminationMode::Graceful {
         return Err(ProcessControlError::new(
             ProcessControlErrorKind::Unsupported,

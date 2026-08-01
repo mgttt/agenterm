@@ -5,6 +5,12 @@ use crate::contract::process_control::{
 };
 
 pub(crate) fn terminate(pid: u32, mode: TerminationMode) -> Result<(), ProcessControlError> {
+    if pid == 0 {
+        return Err(ProcessControlError::new(
+            ProcessControlErrorKind::InvalidId,
+            "process ID zero targets a process group on Unix",
+        ));
+    }
     let pid = libc::pid_t::try_from(pid).map_err(|_| {
         ProcessControlError::new(ProcessControlErrorKind::IdOutOfRange, "pid_t overflow")
     })?;

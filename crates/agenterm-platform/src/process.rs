@@ -39,6 +39,7 @@ pub fn kill(pid: u32) -> Result<(), ProcessError> {
         .map_err(|error| {
             use crate::process_control::ProcessControlErrorKind as ControlKind;
             let kind = match error.kind() {
+                ControlKind::InvalidId => ProcessErrorKind::IdOutOfRange,
                 ControlKind::IdOutOfRange => ProcessErrorKind::IdOutOfRange,
                 ControlKind::Open => ProcessErrorKind::KillOpen,
                 ControlKind::Terminate => ProcessErrorKind::Kill,
