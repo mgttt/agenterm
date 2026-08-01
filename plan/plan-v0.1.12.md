@@ -179,6 +179,11 @@ Unsupported。remote GUI 与 Control Center 已真实消费该 API，root screen
 clip contract 删除；Control Center 的重复 MoveFileExW/activation 也改为 crate facade。
 34 项 crate all-feature tests、root warnings-denied Clippy 与 Control Center 聚焦测试通过，
 生产边界门禁剩余 13 行。
+Windows native projection cleanup 随后让 remote GUI 直接消费 crate activation/input，
+保留原有 Control/AltGr、UTF-16 decoder 和 show/restore typed diagnostics；root 最后的
+`adapters/windows/native` 目录与 selected native module 已删除。48 项 root platform
+聚焦测试和 warnings-denied all-target Clippy 通过。此叶去除重复包装，但 Windows GUI
+host 自身的 Win32 event/render 类型仍待迁入 crate adapter。
 
 2026-08-01 首个建设期增量：Cockpit snapshot 新增明确的
 `tab_counts.{total,running,dead}`，native shell 同源显示 logical instance、

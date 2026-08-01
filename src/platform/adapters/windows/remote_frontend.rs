@@ -6,7 +6,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use agenterm_platform::{clipboard, screenshot};
+use agenterm_platform::{activation, clipboard, input, screenshot};
 use anyhow::{Context as _, Result};
 use unicode_width::UnicodeWidthChar;
 use windows_sys::Win32::{
@@ -53,10 +53,6 @@ use crate::{
     locale::UiText,
     platform::{
         CapabilityStatus, KeyClassification, action,
-        selected::native::{
-            activation,
-            input::{Utf16TextDecoder, primary_shortcut, windows_modifiers},
-        },
         toolbar::NativeToolbarHit as WindowsToolbarHit,
         window::{ClientSize, WindowSemanticState},
     },
@@ -168,6 +164,22 @@ fn capture_window_png(
     screenshot::capture_native_window_png(window, path, area)
         .map(|_| ())
         .map_err(|error| anyhow::anyhow!("{}: {}", error.code(), error))
+}
+
+fn apply_window_activation(window: HWND, request: activation::ActivationRequest) -> Result<()> {
+    // SAFETY: the replaceable frontend owns this HWND and activation is
+    // synchronous on its window thread.
+    let window = unsafe { activation::NativeWindowHandle::from_raw(window as isize) }
+        .context("activation window handle is unavailable")?;
+    activation::apply(window, request).map_err(|error| match error {
+        activation::ActivationError::Unsupported { reason } => {
+            anyhow::anyhow!("activation unsupported: {reason}")
+        }
+        activation::ActivationError::Failed { code, message } => {
+            anyhow::anyhow!("{code}: {message}")
+        }
+        other => anyhow::anyhow!("activation failed: {other}"),
+    })
 }
 
 const STATUS_HEIGHT: i32 = 26;
@@ -419,12 +431,12 @@ pub(crate) fn run_remote_gui(no_activate: bool) -> Result<()> {
         state.load_composer();
         state.resize_active_terminal();
     }
-    if no_activate {
-        activation::show_without_activation(window as isize)
-            .map_err(|error| platform_capability_error(activation::to_capability_status(error)))?;
+    let request = if no_activate {
+        activation::ActivationRequest::ShowWithoutActivation
     } else {
-        activation::show_new_and_request_activation(window as isize);
-    }
+        activation::ActivationRequest::ShowNewAndRequestActivation
+    };
+    apply_window_activation(window, request)?;
     unsafe { UpdateWindow(window) };
 
     let mut message: MSG = unsafe { mem::zeroed() };
@@ -796,7 +808,7 @@ struct RemoteWindowState {
     font: agenterm_platform::font::NativeFont,
     cell_width: i32,
     cell_height: i32,
-    terminal_text_decoder: Utf16TextDecoder,
+    terminal_text_decoder: input::Utf16TextDecoder,
     last_active_id: Option<String>,
     last_composer_identity: Option<(String, Option<String>, bool, usize)>,
     last_terminal_resize: Option<RemoteTerminalResize>,
@@ -937,7 +949,7 @@ impl RemoteWindowState {
             font,
             cell_width,
             cell_height,
-            terminal_text_decoder: Utf16TextDecoder::default(),
+            terminal_text_decoder: input::Utf16TextDecoder::default(),
             last_active_id,
             last_composer_identity,
             last_terminal_resize: None,
@@ -1619,15 +1631,16 @@ impl RemoteWindowState {
                 output = Some(path.display().to_string());
             }
             "__focus" => {
-                activation::restore_and_activate(self.window as isize).map_err(|error| {
-                    platform_capability_error(activation::to_capability_status(error))
-                })?;
+                apply_window_activation(
+                    self.window,
+                    activation::ActivationRequest::RestoreAndActivate,
+                )?;
                 unsafe { SetFocus(self.window) };
             }
-            "__show-no-activate" => activation::show_without_activation(self.window as isize)
-                .map_err(|error| {
-                    platform_capability_error(activation::to_capability_status(error))
-                })?,
+            "__show-no-activate" => apply_window_activation(
+                self.window,
+                activation::ActivationRequest::ShowWithoutActivation,
+            )?,
             other => anyhow::bail!("unsupported relayed UI command: {other}"),
         }
         unsafe { windows_sys::Win32::Graphics::Gdi::InvalidateRect(self.window, ptr::null(), 0) };
@@ -4809,7 +4822,7 @@ impl RemoteWindowState {
         let control = unsafe { GetKeyState(VK_CONTROL as i32) } < 0;
         let shift = unsafe { GetKeyState(VK_SHIFT as i32) } < 0;
         let alt = unsafe { GetKeyState(VK_MENU as i32) } < 0;
-        let primary = primary_shortcut(windows_modifiers(control, false, alt, false));
+        let primary = input::is_primary_shortcut(input::modifiers(control, false, alt, false));
         if primary && key == u16::from(b'C') && self.terminal_selection.is_some() {
             if let Err(error) = self.copy_terminal_selection() {
                 self.last_error = Some(format!("Copy failed: {error:#}"));
@@ -4829,7 +4842,7 @@ impl RemoteWindowState {
         let Some(name) = windows_terminal_named_key(key) else {
             return false;
         };
-        let modifiers = windows_modifiers(control, shift, alt, false);
+        let modifiers = input::modifiers(control, shift, alt, false);
         if let Some(bytes) = tmux_key_bytes_with_modifiers(name, modifiers) {
             self.terminal_input(&bytes);
             true

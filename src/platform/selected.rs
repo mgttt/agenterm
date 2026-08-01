@@ -10,9 +10,6 @@ pub(crate) mod frontend;
 #[path = "adapters/windows/ipc.rs"]
 pub(crate) mod ipc;
 #[cfg(windows)]
-#[path = "adapters/windows/native/mod.rs"]
-pub(crate) mod native;
-#[cfg(windows)]
 #[path = "adapters/windows/remote_frontend.rs"]
 pub(crate) mod remote_frontend;
 

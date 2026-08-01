@@ -465,6 +465,11 @@ integrated validation recorded below):
   this facade; the duplicate root GDI implementation and clip contract are
   deleted. Control Center file replacement and activation also reuse their
   existing crate capabilities.
+- [x] The final root Windows `native` compatibility module is deleted. The
+  replaceable GUI consumes public crate activation and input APIs directly,
+  preserving typed activation diagnostics, Control/AltGr arbitration, and the
+  stateful UTF-16 decoder. Win32 GUI host/render ownership remains open and is
+  not claimed complete by removing this projection layer.
 - [x] Control Center state-directory protection, exclusive state-file creation,
   atomic replacement, existing-window focus, and direct native capture now
   call `services::control_center → selected → adapters/{windows,linux,macos}`.
