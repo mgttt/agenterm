@@ -6,10 +6,7 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
-use crate::platform::{
-    contract::supervisor_audit::{SupervisorAuditError, SupervisorAuditErrorKind},
-    selected::supervisor_audit as adapter,
-};
+use crate::platform::contract::supervisor_audit::{SupervisorAuditError, SupervisorAuditErrorKind};
 
 pub(crate) struct ConcurrencyPermit {
     global: agenterm_platform::locking::SlotPermit,
@@ -49,8 +46,7 @@ impl Drop for ConcurrencyPermit {
 }
 
 pub(crate) fn configure_worker_command(command: &mut Command) -> Result<(), SupervisorAuditError> {
-    agenterm_platform::process::configure_owned_command(command)
-        .map_err(adapter::process_tree_error)
+    agenterm_platform::process::configure_owned_command(command).map_err(process_tree_error)
 }
 
 pub(crate) struct ProcessTreeGuard(agenterm_platform::process::ProcessTreeGuard);
@@ -59,12 +55,12 @@ impl ProcessTreeGuard {
     pub(crate) fn attach(child: &Child) -> Result<Self, SupervisorAuditError> {
         agenterm_platform::process::ProcessTreeGuard::attach(child)
             .map(Self)
-            .map_err(adapter::process_tree_error)
+            .map_err(process_tree_error)
     }
 
     pub(crate) fn terminate(&mut self, exit_code: u32) -> Result<(), SupervisorAuditError> {
         let _ = exit_code;
-        self.0.terminate().map_err(adapter::process_tree_error)
+        self.0.terminate().map_err(process_tree_error)
     }
 }
 
@@ -85,7 +81,33 @@ impl NamedAuditLock {
 }
 
 pub(crate) fn default_audit_path() -> PathBuf {
-    adapter::default_audit_path()
+    match agenterm_platform::platform_kind() {
+        agenterm_platform::PlatformKind::Windows => std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir)
+            .join("AgenTerm")
+            .join("script-audit.jsonl"),
+        agenterm_platform::PlatformKind::Linux | agenterm_platform::PlatformKind::Macos => {
+            if let Some(path) = std::env::var_os("XDG_DATA_HOME") {
+                PathBuf::from(path)
+                    .join("agenterm")
+                    .join("script-audit.jsonl")
+            } else if let Some(home) = std::env::var_os("HOME") {
+                PathBuf::from(home)
+                    .join(".local")
+                    .join("share")
+                    .join("agenterm")
+                    .join("script-audit.jsonl")
+            } else {
+                std::env::temp_dir().join("agenterm-script-audit.jsonl")
+            }
+        }
+        _ => std::env::temp_dir().join("agenterm-script-audit.jsonl"),
+    }
+}
+
+fn process_tree_error(message: String) -> SupervisorAuditError {
+    SupervisorAuditError::new(SupervisorAuditErrorKind::ProcessTree, message)
 }
 
 fn concurrency_limit_error() -> SupervisorAuditError {
