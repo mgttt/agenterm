@@ -17,6 +17,9 @@ use crate::script_protocol::{
 use crate::platform::services::supervisor_audit as platform;
 use platform::ConcurrencyPermit;
 
+#[allow(dead_code)] // Foreground REPL integration is the next dependent leaf.
+pub(crate) mod persistent;
+
 pub(crate) const PROCESS_CONCURRENCY_LIMIT: usize = 2;
 pub(crate) const GLOBAL_CONCURRENCY_LIMIT: usize = 8;
 pub(crate) static PROCESS_ACTIVE: AtomicUsize = AtomicUsize::new(0);
