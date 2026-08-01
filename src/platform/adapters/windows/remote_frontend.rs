@@ -5694,6 +5694,14 @@ impl ControlWindowApplication for RemoteWindowApplication {
                     modifiers.shift,
                     modifiers.alt,
                 );
+                if !consumed
+                    && key == u32::from(KEY_TAB)
+                    && modifiers.shift
+                    && !modifiers.control
+                    && !modifiers.alt
+                {
+                    consumed = state.handle_window_keydown(key, modifiers);
+                }
                 redraw = consumed;
             }
             _ => {}

@@ -898,6 +898,24 @@ try {
         gui.window_message(focus_message, 0, 0) == 1,
         "remote_ui_ctrl_shift_down_stole_focus"
     );
+    let shift_tab_input_before = text_cli(
+        context,
+        cli,
+        ["list-panes", "-t", tab_id, "-F", "#{pane_input_bytes}"]
+    ).trim().parse_int();
+    require(
+        gui.window_message(shortcut_message, 0x09, 2) == 1,
+        "remote_ui_shift_tab_not_consumed"
+    );
+    let shift_tab_input_after = text_cli(
+        context,
+        cli,
+        ["list-panes", "-t", tab_id, "-F", "#{pane_input_bytes}"]
+    ).trim().parse_int();
+    require(
+        shift_tab_input_after == shift_tab_input_before + 3,
+        "remote_ui_shift_tab_pty_bytes_invalid"
+    );
 
     print("STEP preview, cancel, and apply client-owned Settings");
     let replacement_composer = gui.window_control(2101);

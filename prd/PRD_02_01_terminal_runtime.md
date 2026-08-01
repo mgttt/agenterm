@@ -93,8 +93,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   encoder for Tab, navigation, Insert/Delete, paging and F1–F12; Unix preserves
   normalized modifiers and Windows owns the matching virtual-key plus
   WM_KEYDOWN/WM_CHAR de-duplication path. Unit contracts cover shared bytes and
-  Windows mapping, while public physical-key byte evidence and live dogfood
-  confirmation remain required before restoring shipped status.
+  Windows mapping. The owning Windows journey now sends a Shift+Tab window
+  shortcut while terminal focus is active and observes exactly three additional
+  bytes at the public pane boundary; the byte contract fixes those bytes as
+  `ESC [ Z`. Physical-key injection and live dogfood confirmation remain
+  required before restoring shipped status.
 - [~] Windows terminal focus survives immediate native toolbar actions. Live
   dogfood found the font `z/Z` child buttons retained Win32 keyboard focus while
   the terminal input path accepts keys only for the top-level HWND. Font, locale

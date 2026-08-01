@@ -352,9 +352,10 @@ Release 全部是本轮明确非目标。
   两条输入路径保留 modifiers，Windows `WM_KEYDOWN` 显式处理 Tab/Insert/Delete
   并屏蔽 Tab/Escape 的 `WM_CHAR` 重复回声。commands 与 Windows mapping 聚焦
   单测、395 项 Quick library tests、all-target Clippy、alignment partial
-  fail-closed 集成测试与七产物 dev build 通过。Windows live GUI 仍运行旧映像；
-  重启后真实 terminal byte dogfood 仍待验证，不能只以编码函数测试宣称交互
-  已收口。Windows host 的 Linux `cargo check` 仅因缺少
+  fail-closed 集成测试与七产物 dev build 通过。owning Windows journey 现会在
+  terminal focus 下投递 Shift+Tab window shortcut，并从公开 pane counter 断言 PTY
+  恰好多收到 3 bytes；编码契约固定内容为 `ESC [ Z`。真实物理键盘 dogfood 仍待
+  验证，不能仅凭自动化投递宣称交互已收口。Windows host 的 Linux `cargo check` 仅因缺少
   `x86_64-linux-gnu-gcc` 停在 `ring` 构建脚本，Unix adapter 仍需原生 CI/host
   证据。
 - [~] Windows toolbar `z/Z` 字号按钮造成 terminal 看似“无响应”的主因已修：native
