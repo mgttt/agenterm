@@ -1,238 +1,128 @@
-//! Windows native Control Center projection shell.
+//! Windows Control Center product bridge over the platform native text window.
 
-use std::{io, mem, ptr, sync::Mutex};
-
-use windows_sys::Win32::{
-    Foundation::{HWND, LPARAM, LRESULT, WPARAM},
-    Graphics::Gdi::{
-        BeginPaint, EndPaint, GetStockObject, InvalidateRect, PAINTSTRUCT, TextOutW, WHITE_BRUSH,
-    },
-    System::LibraryLoader::GetModuleHandleW,
-    UI::WindowsAndMessaging::{
-        CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DestroyWindow,
-        DispatchMessageW, GetMessageW, IDC_ARROW, KillTimer, LoadCursorW, MSG, PostMessageW,
-        PostQuitMessage, RegisterClassW, SW_RESTORE, SW_SHOW, SW_SHOWNOACTIVATE,
-        SetForegroundWindow, SetTimer, SetWindowTextW, ShowWindow, TranslateMessage, WM_CLOSE,
-        WM_DESTROY, WM_PAINT, WM_TIMER, WNDCLASSW, WS_OVERLAPPEDWINDOW,
-    },
-};
+use std::borrow::Cow;
 
 use crate::platform::services::control_center_shell::{
-    ControlCenterFocusRequest, ControlCenterShellError, ControlCenterShellHost,
+    ControlCenterFocusRequest, ControlCenterFrame, ControlCenterShellError, ControlCenterShellHost,
     ControlCenterShellResult,
 };
 
-const WINDOW_TIMER_ID: usize = 1;
-const WINDOW_TIMER_INTERVAL_MS: u32 = 200;
-
-struct ShellState {
+struct HostBridge {
     host: Box<dyn ControlCenterShellHost>,
-    deferred_error: Option<ControlCenterShellError>,
 }
 
-static SHELL_STATE: std::sync::OnceLock<Mutex<ShellState>> = std::sync::OnceLock::new();
+impl agenterm_platform::window::NativeTextWindowHost for HostBridge {
+    fn title(&self) -> String {
+        self.host.title()
+    }
+
+    fn lines(&self) -> Vec<String> {
+        self.host.lines()
+    }
+
+    fn poll(&mut self) -> bool {
+        self.host.poll()
+    }
+
+    fn close_requested(&self) -> bool {
+        self.host.close_requested()
+    }
+
+    fn publish_native_window(
+        &mut self,
+        raw_handle: i64,
+    ) -> Result<(), agenterm_platform::window::NativeTextWindowError> {
+        self.host
+            .publish_native_window(raw_handle)
+            .map_err(to_platform_error)
+    }
+
+    fn take_focus_request(&mut self) -> Option<agenterm_platform::window::NativeTextWindowFocus> {
+        self.host.take_focus_request().map(|request| match request {
+            ControlCenterFocusRequest::Activate => {
+                agenterm_platform::window::NativeTextWindowFocus::Activate
+            }
+            ControlCenterFocusRequest::NoActivate => {
+                agenterm_platform::window::NativeTextWindowFocus::NoActivate
+            }
+        })
+    }
+
+    fn capture_requested_screenshot(
+        &mut self,
+        frame: Option<agenterm_platform::window::NativeTextFrame<'_>>,
+    ) -> Result<(), agenterm_platform::window::NativeTextWindowError> {
+        self.host
+            .capture_requested_screenshot(frame.map(|frame| ControlCenterFrame {
+                pixels: frame.pixels,
+                width: frame.width,
+                height: frame.height,
+                scale_factor: frame.scale_factor,
+            }))
+            .map_err(to_platform_error)
+    }
+}
 
 pub(crate) fn run_native_shell(
     host: Box<dyn ControlCenterShellHost>,
     no_activate: bool,
 ) -> ControlCenterShellResult<()> {
-    let instance = unsafe { GetModuleHandleW(ptr::null()) };
-    if instance.is_null() {
-        return Err(last_os_error("control_center_module_handle_failed"));
-    }
-
-    let title = wide_null(&host.title());
-    SHELL_STATE
-        .set(Mutex::new(ShellState {
-            host,
-            deferred_error: None,
-        }))
-        .map_err(|_| {
-            ControlCenterShellError::failed(
-                "control_center_shell_already_initialized",
-                "the native Control Center shell may only be initialized once",
-            )
-        })?;
-
-    let class = wide_null("AgenTermControlCenterWindow");
-    let window_class = WNDCLASSW {
-        style: CS_HREDRAW | CS_VREDRAW,
-        lpfnWndProc: Some(window_proc),
-        hInstance: instance,
-        hCursor: unsafe { LoadCursorW(ptr::null_mut(), IDC_ARROW) },
-        hbrBackground: unsafe { GetStockObject(WHITE_BRUSH) } as _,
-        lpszClassName: class.as_ptr(),
-        ..unsafe { mem::zeroed() }
-    };
-    if unsafe { RegisterClassW(&window_class) } == 0 {
-        return Err(last_os_error("control_center_window_class_register_failed"));
-    }
-
-    let window = unsafe {
-        CreateWindowExW(
-            0,
-            class.as_ptr(),
-            title.as_ptr(),
-            WS_OVERLAPPEDWINDOW,
-            CW_USEDEFAULT,
-            CW_USEDEFAULT,
-            760,
-            480,
-            ptr::null_mut(),
-            ptr::null_mut(),
-            instance,
-            ptr::null_mut(),
-        )
-    };
-    if window.is_null() {
-        return Err(last_os_error("control_center_window_create_failed"));
-    }
-
-    let publish_result =
-        with_state(|state| state.host.publish_native_window(window as isize as i64));
-    if let Err(error) = publish_result {
-        unsafe { DestroyWindow(window) };
-        return Err(error);
-    }
-
-    if unsafe { SetTimer(window, WINDOW_TIMER_ID, WINDOW_TIMER_INTERVAL_MS, None) } == 0 {
-        let error = last_os_error("control_center_window_timer_failed");
-        unsafe { DestroyWindow(window) };
-        return Err(error);
-    }
-    unsafe {
-        ShowWindow(
-            window,
-            if no_activate {
-                SW_SHOWNOACTIVATE
-            } else {
-                SW_SHOW
-            },
-        );
-    }
-
-    let mut message: MSG = unsafe { mem::zeroed() };
-    loop {
-        let result = unsafe { GetMessageW(&mut message, ptr::null_mut(), 0, 0) };
-        if result == -1 {
-            return Err(last_os_error("control_center_message_loop_failed"));
-        }
-        if result == 0 {
-            break;
-        }
-        unsafe {
-            TranslateMessage(&message);
-            DispatchMessageW(&message);
-        }
-    }
-
-    with_state(|state| match state.deferred_error.take() {
-        Some(error) => Err(error),
-        None => Ok(()),
-    })
+    agenterm_platform::window::run_native_text_window(Box::new(HostBridge { host }), no_activate)
+        .map_err(from_platform_error)
 }
 
-unsafe extern "system" fn window_proc(
-    window: HWND,
-    message: u32,
-    wparam: WPARAM,
-    lparam: LPARAM,
-) -> LRESULT {
-    match message {
-        WM_PAINT => {
-            let mut paint: PAINTSTRUCT = unsafe { mem::zeroed() };
-            let device = unsafe { BeginPaint(window, &mut paint) };
-            let lines = SHELL_STATE
-                .get()
-                .and_then(|state| state.lock().ok())
-                .map(|state| state.host.lines())
-                .unwrap_or_else(|| vec!["AgenTerm Control Center · state unavailable".to_owned()]);
-            for (index, line) in lines.iter().enumerate() {
-                let wide = line.encode_utf16().collect::<Vec<_>>();
-                unsafe {
-                    TextOutW(
-                        device,
-                        24,
-                        24 + i32::try_from(index).unwrap_or(0) * 28,
-                        wide.as_ptr(),
-                        i32::try_from(wide.len()).unwrap_or(0),
-                    );
-                }
+fn to_platform_error(
+    error: ControlCenterShellError,
+) -> agenterm_platform::window::NativeTextWindowError {
+    match error {
+        ControlCenterShellError::Unsupported { reason } => {
+            agenterm_platform::window::NativeTextWindowError::Unsupported {
+                reason: Cow::Borrowed(reason),
             }
-            unsafe { EndPaint(window, &paint) };
-            0
         }
-        WM_TIMER => {
-            poll_host(window);
-            0
-        }
-        WM_DESTROY => {
-            unsafe {
-                KillTimer(window, WINDOW_TIMER_ID);
-                PostQuitMessage(0);
-            }
-            0
-        }
-        _ => unsafe { DefWindowProcW(window, message, wparam, lparam) },
-    }
-}
-
-fn poll_host(window: HWND) {
-    let Some(state) = SHELL_STATE.get() else {
-        return;
-    };
-    let Ok(mut state) = state.lock() else {
-        return;
-    };
-
-    if state.host.close_requested() {
-        unsafe { PostMessageW(window, WM_CLOSE, 0, 0) };
-        return;
-    }
-
-    if let Some(request) = state.host.take_focus_request() {
-        unsafe {
-            match request {
-                ControlCenterFocusRequest::Activate => {
-                    ShowWindow(window, SW_RESTORE);
-                    SetForegroundWindow(window);
-                }
-                ControlCenterFocusRequest::NoActivate => {
-                    ShowWindow(window, SW_SHOWNOACTIVATE);
-                }
+        ControlCenterShellError::Failed { code, message } => {
+            agenterm_platform::window::NativeTextWindowError::Failed {
+                code: Cow::Borrowed(code),
+                message,
             }
         }
     }
+}
 
-    if let Err(error) = state.host.capture_requested_screenshot(None) {
-        state.deferred_error = Some(error);
-        unsafe { PostMessageW(window, WM_CLOSE, 0, 0) };
-        return;
-    }
-
-    if state.host.poll() {
-        let title = wide_null(&state.host.title());
-        unsafe {
-            SetWindowTextW(window, title.as_ptr());
-            InvalidateRect(window, ptr::null(), 1);
+fn from_platform_error(
+    error: agenterm_platform::window::NativeTextWindowError,
+) -> ControlCenterShellError {
+    match error {
+        agenterm_platform::window::NativeTextWindowError::Unsupported { .. } => {
+            ControlCenterShellError::Unsupported {
+                reason: "native-text-window-unsupported",
+            }
         }
+        agenterm_platform::window::NativeTextWindowError::Failed { code, message } => {
+            ControlCenterShellError::Failed {
+                code: match code.as_ref() {
+                    "native_text_window_module_handle_failed" => {
+                        "control_center_module_handle_failed"
+                    }
+                    "native_text_window_already_initialized" => {
+                        "control_center_shell_already_initialized"
+                    }
+                    "native_text_window_class_register_failed" => {
+                        "control_center_window_class_register_failed"
+                    }
+                    "native_text_window_create_failed" => "control_center_window_create_failed",
+                    "native_text_window_timer_failed" => "control_center_window_timer_failed",
+                    "native_text_window_message_loop_failed" => {
+                        "control_center_message_loop_failed"
+                    }
+                    _ => "control_center_native_window_failed",
+                },
+                message,
+            }
+        }
+        _ => ControlCenterShellError::Failed {
+            code: "control_center_native_window_failed",
+            message: "native text window returned an unknown failure".to_owned(),
+        },
     }
-}
-
-fn with_state<T>(operation: impl FnOnce(&mut ShellState) -> T) -> T {
-    let state = SHELL_STATE
-        .get()
-        .expect("Control Center shell state initialized before window creation");
-    let mut state = state
-        .lock()
-        .expect("Control Center shell state mutex is not poisoned");
-    operation(&mut state)
-}
-
-fn last_os_error(code: &'static str) -> ControlCenterShellError {
-    ControlCenterShellError::failed(code, io::Error::last_os_error())
-}
-
-fn wide_null(value: &str) -> Vec<u16> {
-    value.encode_utf16().chain(std::iter::once(0)).collect()
 }

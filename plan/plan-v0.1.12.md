@@ -192,6 +192,11 @@ root `frontend.rs` 不再含 Win32 类型或调用。
 Unix host 审计同时发现 macOS adapter 曾把 Control 与 Command 都判为产品 primary
 shortcut，会抢占 Ctrl-C 等 terminal control keys。修复将 macOS policy 收紧为 meta/
 Command-only，并加入平台中立回归测试；这不是授权策略，只是输入仲裁正确性。
+Windows Control Center shell 叶新增通用 `NativeTextWindowHost` extension boundary：crate
+Windows adapter 现在拥有 window class/create、timer/message loop、GDI text paint、focus/
+close/title/invalidate；root 只把 Control Center 产品 host 的 title/lines/poll/screenshot
+映射到中立 trait。旧 Win32 shell 文件被替换为产品 bridge。Linux/macOS runner 暂时
+明确 Unsupported，不能冒充对应 shell 已迁移；下一叶将以 pixel-surface host 接入。
 
 2026-08-01 首个建设期增量：Cockpit snapshot 新增明确的
 `tab_counts.{total,running,dead}`，native shell 同源显示 logical instance、

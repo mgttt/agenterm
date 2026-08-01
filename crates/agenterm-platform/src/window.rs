@@ -4,6 +4,8 @@
 //! owns the cross-platform validation and conversion semantics consumed by the
 //! Linux and macOS GUI hot paths.
 
+use std::borrow::Cow;
+
 use crate::{CapabilityStatus, selected};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Default)]
@@ -159,6 +161,75 @@ pub fn classify_geometry_event(event: GeometryEvent) -> Result<GeometryAction, S
     Ok(GeometryAction::Apply(metrics))
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum NativeTextWindowFocus {
+    Activate,
+    NoActivate,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct NativeTextFrame<'a> {
+    pub pixels: &'a [u32],
+    pub width: u32,
+    pub height: u32,
+    pub scale_factor: f64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum NativeTextWindowError {
+    Unsupported {
+        reason: Cow<'static, str>,
+    },
+    Failed {
+        code: Cow<'static, str>,
+        message: String,
+    },
+}
+
+impl NativeTextWindowError {
+    pub fn failed(code: &'static str, message: impl ToString) -> Self {
+        Self::Failed {
+            code: Cow::Borrowed(code),
+            message: message.to_string(),
+        }
+    }
+}
+
+impl std::fmt::Display for NativeTextWindowError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unsupported { reason } => {
+                write!(formatter, "native text window unsupported: {reason}")
+            }
+            Self::Failed { code, message } => write!(formatter, "{code}: {message}"),
+        }
+    }
+}
+
+impl std::error::Error for NativeTextWindowError {}
+
+pub trait NativeTextWindowHost: Send {
+    fn title(&self) -> String;
+    fn lines(&self) -> Vec<String>;
+    fn poll(&mut self) -> bool;
+    fn close_requested(&self) -> bool;
+    fn publish_native_window(&mut self, raw_handle: i64) -> Result<(), NativeTextWindowError>;
+    fn take_focus_request(&mut self) -> Option<NativeTextWindowFocus>;
+    fn capture_requested_screenshot(
+        &mut self,
+        frame: Option<NativeTextFrame<'_>>,
+    ) -> Result<(), NativeTextWindowError>;
+}
+
+pub fn run_native_text_window(
+    host: Box<dyn NativeTextWindowHost>,
+    no_activate: bool,
+) -> Result<(), NativeTextWindowError> {
+    selected::window::run_native_text_window(host, no_activate)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -219,5 +290,15 @@ mod tests {
             }),
             Ok(GeometryAction::Ignore)
         );
+    }
+
+    #[test]
+    fn native_text_window_failures_remain_typed() {
+        let unsupported = NativeTextWindowError::Unsupported {
+            reason: "headless-display".into(),
+        };
+        let failed = NativeTextWindowError::failed("window-create-failed", "no window");
+        assert!(unsupported.to_string().contains("unsupported"));
+        assert_eq!(failed.to_string(), "window-create-failed: no window");
     }
 }

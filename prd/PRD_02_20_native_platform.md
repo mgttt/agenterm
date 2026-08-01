@@ -479,6 +479,12 @@ integrated validation recorded below):
   available to terminal control-key encoding (including Ctrl-C) instead of
   being misclassified as a product shortcut; a target-neutral contract test
   protects this invariant even on non-macOS development hosts.
+- [x] Windows Control Center native shell mechanics now live behind the public
+  generic `NativeTextWindowHost` extension boundary. Window creation, message
+  loop, timer, GDI text paint, focus, close, title and invalidation are crate
+  adapter responsibilities; the main crate retains Control Center state and
+  maps it through the neutral host trait. Linux/macOS currently return typed
+  Unsupported from this runner until their pixel-surface host is connected.
 - [x] Control Center state-directory protection, exclusive state-file creation,
   atomic replacement, existing-window focus, and direct native capture now
   call `services::control_center → selected → adapters/{windows,linux,macos}`.
