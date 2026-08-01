@@ -285,6 +285,12 @@ pub struct UiScreenSnapshot {
     pub terminal_title: String,
     pub rows: u32,
     pub columns: u32,
+    /// Additive field. Older compatible servers do not expose terminal modes.
+    #[serde(default)]
+    pub alternate_screen: bool,
+    /// Additive field. Selects CSI versus SS3 cursor-key encoding.
+    #[serde(default)]
+    pub application_cursor: bool,
     pub scrollback_offset: usize,
     pub max_scrollback: usize,
     pub cursor: UiCursorSnapshot,
@@ -644,6 +650,8 @@ mod tests {
             terminal_title: "terminal".to_owned(),
             rows: 24,
             columns: 80,
+            alternate_screen: false,
+            application_cursor: false,
             scrollback_offset: 0,
             max_scrollback: 0,
             cursor: UiCursorSnapshot {
@@ -771,6 +779,19 @@ mod tests {
         assert_eq!(negotiate(client, 2), UiCompatibility::Compatible);
         assert_eq!(negotiate(client, 4), UiCompatibility::Compatible);
         assert_eq!(negotiate(client, 5), UiCompatibility::ClientTooOld);
+    }
+
+    #[test]
+    fn older_screen_snapshot_without_terminal_modes_remains_compatible() {
+        let mut value = serde_json::to_value(valid_screen("@1")).expect("serialize screen");
+        let object = value.as_object_mut().expect("screen object");
+        object.remove("alternate_screen");
+        object.remove("application_cursor");
+
+        let decoded: UiScreenSnapshot =
+            serde_json::from_value(value).expect("decode additive screen fields");
+        assert!(!decoded.alternate_screen);
+        assert!(!decoded.application_cursor);
     }
 
     #[test]

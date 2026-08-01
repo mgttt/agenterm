@@ -1141,6 +1141,24 @@ pub(crate) fn tmux_key_bytes_with_modifiers(
     Some(bytes)
 }
 
+/// Convert a local wheel gesture into cursor-key input for an application that
+/// owns the alternate screen and therefore has no local scrollback viewport.
+/// The bounded repeat preserves high-resolution wheel accumulation without
+/// allowing one malformed delta to enqueue unbounded PTY input.
+pub(crate) fn alternate_screen_wheel_bytes(
+    up: bool,
+    rows: usize,
+    application_cursor: bool,
+) -> Vec<u8> {
+    let sequence: &[u8] = match (up, application_cursor) {
+        (true, true) => b"\x1bOA",
+        (false, true) => b"\x1bOB",
+        (true, false) => b"\x1b[A",
+        (false, false) => b"\x1b[B",
+    };
+    sequence.repeat(rows.min(120))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1243,6 +1261,23 @@ mod tests {
         assert_eq!(
             tmux_key_bytes_with_modifiers("not-a-key", ModifierState::empty()),
             None
+        );
+    }
+
+    #[test]
+    fn alternate_screen_wheel_respects_cursor_mode_and_bounds_input() {
+        assert_eq!(
+            alternate_screen_wheel_bytes(true, 2, false),
+            b"\x1b[A\x1b[A"
+        );
+        assert_eq!(
+            alternate_screen_wheel_bytes(false, 2, true),
+            b"\x1bOB\x1bOB"
+        );
+        assert_eq!(alternate_screen_wheel_bytes(true, 0, true), b"");
+        assert_eq!(
+            alternate_screen_wheel_bytes(true, usize::MAX, false).len(),
+            120 * 3
         );
     }
 

@@ -544,6 +544,8 @@ mod tests {
                 terminal_title: id.to_owned(),
                 rows: 24,
                 columns: 80,
+                alternate_screen: false,
+                application_cursor: false,
                 scrollback_offset: 0,
                 max_scrollback: 0,
                 cursor: UiCursorSnapshot {

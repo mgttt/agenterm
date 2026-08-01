@@ -20,9 +20,12 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [~] mouse wheel and a visible draggable scrollbar navigate ordinary terminal
   history; scrollbar track clicks page and dragging to the bottom restores the
   live viewport. Live v0.1.12 dogfood found alternate-screen harnesses whose
-  zero local scrollback makes wheel/PageUp ineffective; application-owned
-  paging fallback and raw-mouse arbitration remain to be implemented and
-  proven without regressing ordinary history.
+  zero local scrollback makes wheel/PageUp ineffective. The v0.1.12 repair now
+  publishes additive alternate-screen/application-cursor mode facts and turns
+  wheel notches into bounded CSI/SS3 cursor input only when the alternate grid
+  has no local history; unit and mixed-version serde evidence pass. Physical
+  harness evidence and future application raw-mouse arbitration remain open,
+  so this capability is not yet marked shipped.
 - [~] dragging is intended to select visible terminal cells and Ctrl+C copies
   the selected text while an unmodified click reaches RMUX/native terminal
   input. Live v0.1.12 dogfood found a Windows replaceable-GUI path where a

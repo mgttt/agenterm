@@ -35,7 +35,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::{
     client::no_activate_from_environment,
-    commands::{option_value, screenshot_output_path},
+    commands::{alternate_screen_wheel_bytes, option_value, screenshot_output_path},
     control_dispatch::{ControlHost, dispatch_shared_command, resolve_target_position},
     event_journal::{EventJournal, EventKind},
     instances::{mark_intentional_shutdown, register_instance},
@@ -1779,6 +1779,13 @@ impl UnixApp {
             .active_position()
             .map(|position| self.tabs[position].last_size)
             .unwrap_or((0, 0));
+        let (alternate_screen, application_cursor) = self
+            .active_position()
+            .map(|position| {
+                let screen = self.tabs[position].parser.screen();
+                (screen.alternate_screen(), screen.application_cursor())
+            })
+            .unwrap_or_default();
         let terminal_scrollbar = self.active_position().map(|position| {
             let visible_rows = usize::from(self.tabs[position].last_size.0);
             let (offset, maximum) = self.tabs[position].scrollback_bounds();
@@ -1991,6 +1998,8 @@ impl UnixApp {
                     "bounds": pixel_rect_json(layout.terminal),
                     "rows": terminal_rows,
                     "cols": terminal_cols,
+                    "alternate_screen": alternate_screen,
+                    "application_cursor": application_cursor,
                     "scrollbar": terminal_scrollbar,
                 },
                 "composer": {
@@ -2902,7 +2911,14 @@ impl UnixApp {
         let Some(position) = self.active_position() else {
             return;
         };
-        let before = self.tabs[position].parser.screen().scrollback();
+        let (before, alternate_screen, application_cursor) = {
+            let screen = self.tabs[position].parser.screen();
+            (
+                screen.scrollback(),
+                screen.alternate_screen(),
+                screen.application_cursor(),
+            )
+        };
         let rows = notches.unsigned_abs() as usize * WHEEL_ROWS_PER_NOTCH;
         let action = if notches > 0 { "up" } else { "down" };
         let after = self.tabs[position]
@@ -2910,6 +2926,13 @@ impl UnixApp {
             .unwrap_or(before);
         if after != before {
             self.on_viewport_scrolled(position, after, "mouse-wheel");
+        } else if alternate_screen {
+            let _ = self.cancel_terminal_selection(true);
+            self.queue_pty_input(alternate_screen_wheel_bytes(
+                notches > 0,
+                rows,
+                application_cursor,
+            ));
         }
     }
 

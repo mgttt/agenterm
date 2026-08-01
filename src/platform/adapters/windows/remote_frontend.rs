@@ -12,7 +12,8 @@ use std::{
 use crate::{
     client::{ipc_address, ipc_endpoint, resolved_ipc_endpoint},
     commands::{
-        option_value, positional_values, screenshot_output_path, tmux_key_bytes_with_modifiers,
+        alternate_screen_wheel_bytes, option_value, positional_values, screenshot_output_path,
+        tmux_key_bytes_with_modifiers,
     },
     instances::intentional_shutdown_matches,
     locale::UiText,
@@ -2134,6 +2135,8 @@ impl RemoteWindowState {
                     "cols": columns,
                     "desired_rows": desired_rows,
                     "desired_cols": desired_columns,
+                    "alternate_screen": self.active_tab().is_some_and(|tab| tab.screen.alternate_screen),
+                    "application_cursor": self.active_tab().is_some_and(|tab| tab.screen.application_cursor),
                     "resize_pending": self.pending_terminal_resize.is_some(),
                     "scrollbar": scrollbar,
                 },
@@ -4383,18 +4386,23 @@ impl RemoteWindowState {
 
     fn scroll_terminal(&mut self, delta: i32) {
         self.cancel_terminal_selection();
-        let Some(tab_id) = self
-            .client
-            .as_ref()
-            .and_then(|client| client.snapshot().active_tab_id.clone())
-        else {
+        let Some(tab) = self.active_tab() else {
             return;
         };
+        let tab_id = tab.id.clone();
+        let alternate_screen = tab.screen.alternate_screen;
+        let application_cursor = tab.screen.application_cursor;
+        let max_scrollback = tab.screen.max_scrollback;
         let count = usize::try_from(delta.unsigned_abs())
             .unwrap_or(120)
             .div_ceil(120)
             .saturating_mul(3)
             .max(1);
+        if alternate_screen && max_scrollback == 0 {
+            let bytes = alternate_screen_wheel_bytes(delta > 0, count, application_cursor);
+            self.terminal_input(&bytes);
+            return;
+        }
         let action = if delta > 0 { "up" } else { "down" };
         let result = self
             .client
@@ -6208,6 +6216,8 @@ mod tests {
             terminal_title: "terminal".to_owned(),
             rows: 2,
             columns: 8,
+            alternate_screen: false,
+            application_cursor: false,
             scrollback_offset: 0,
             max_scrollback: 0,
             cursor: UiCursorSnapshot {
@@ -6270,6 +6280,8 @@ mod tests {
             terminal_title: String::new(),
             rows: 2,
             columns: 8,
+            alternate_screen: false,
+            application_cursor: false,
             scrollback_offset: 0,
             max_scrollback: 0,
             cursor: UiCursorSnapshot {

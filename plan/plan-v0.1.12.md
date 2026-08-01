@@ -359,9 +359,12 @@ Release 全部是本轮明确非目标。
   GUI lease observed server position，再等 250ms paint queue 收敛，实测仅 4 redraw/4
   parent paint、0 child update。自动化现覆盖 zoom、idle 与 high-output；只剩用户在新
   binary 上做持续高输出肉眼确认，不能把计数器冒充视觉感受。
-- [ ] alternate-screen harness 无法本地向上滚动；初步证据指向 `vt100`
-  alternate grid 的零 scrollback，需要在 application raw-mouse ownership 之外
-  评估把 wheel/PageUp 语义转交前台 TUI，不能破坏普通 scrollback。
+- [~] alternate-screen harness 无法本地向上滚动；`UiScreenSnapshot` 现以 additive
+  serde-default 字段发布 `alternate_screen` / `application_cursor`，Windows remote
+  与 Unix frontend 仅在 alternate grid 没有本地 history 时把 wheel 转为有界 CSI/SS3
+  cursor input，普通 scrollback 路径不变；编码与旧 snapshot 兼容单测通过。仍需新的
+  Windows harness 黑盒/肉眼证据，并且未来 raw-mouse ownership 必须优先于此 paging
+  fallback。
 - [~] terminal focus 下 `Shift+Tab` 修复正在集成：共享 named-key encoder 已按
   xterm modifier 参数覆盖 Tab/方向/Home/End/Insert/Delete/Page/F1–F12；Unix
   两条输入路径保留 modifiers，Windows `WM_KEYDOWN` 显式处理 Tab/Insert/Delete
