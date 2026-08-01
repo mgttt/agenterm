@@ -30,6 +30,29 @@ pub fn lock_handle_inheritance() -> HandleInheritanceLock {
     }
 }
 
+/// A target-specific set of native objects that can participate in one
+/// coordinated process-inheritance transaction.
+///
+/// Windows adapters implement this for borrowed HANDLE slices. Other hosts do
+/// not pretend that descriptor inheritance has the same mutation semantics.
+pub trait HandleInheritanceSet {
+    #[doc(hidden)]
+    fn with_inheritable_handles<T>(self, operation: impl FnOnce() -> T) -> std::io::Result<T>;
+}
+
+/// Runs one process-creation operation while the selected native objects are
+/// temporarily inheritable.
+///
+/// The adapter holds the same process-wide coordination lock used by platform
+/// spawn entry points and restores every source object before returning. The
+/// generic boundary keeps target-native handle types out of this public API.
+pub fn with_inheritable_handles<T>(
+    handles: impl HandleInheritanceSet,
+    operation: impl FnOnce() -> T,
+) -> std::io::Result<T> {
+    handles.with_inheritable_handles(operation)
+}
+
 /// Classify a native child status without inventing a product fallback code.
 #[must_use]
 pub fn classify_exit_status(status: &ExitStatus) -> ProcessExit {
@@ -116,6 +139,25 @@ mod tests {
         contender
             .join()
             .expect("inheritance-lock contender panicked");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn public_inheritance_transaction_accepts_borrowed_handle_sets() {
+        use std::os::windows::io::AsHandle as _;
+
+        let path = std::env::temp_dir().join(format!(
+            "agenterm-platform-public-inheritance-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let file = std::fs::File::create(&path).expect("create inheritance fixture");
+        let handles = [file.as_handle()];
+        let observed = with_inheritable_handles(handles.as_slice(), || 37)
+            .expect("public inheritance transaction");
+        assert_eq!(observed, 37);
+        drop(file);
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]

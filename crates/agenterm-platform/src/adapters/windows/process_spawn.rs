@@ -75,6 +75,12 @@ pub(crate) fn with_inheritable_handles<T>(
     Ok(output)
 }
 
+impl crate::process_spawn::HandleInheritanceSet for &[std::os::windows::io::BorrowedHandle<'_>] {
+    fn with_inheritable_handles<T>(self, operation: impl FnOnce() -> T) -> std::io::Result<T> {
+        with_inheritable_handles(self, operation)
+    }
+}
+
 #[allow(dead_code)]
 struct ExplicitHandleInheritanceGuard {
     _lock: Option<crate::process_spawn::HandleInheritanceLock>,
