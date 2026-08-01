@@ -466,8 +466,11 @@ track remains planned, but every declared dependency must still pass.
       killed-authority socket/lock/registration recovery. Registration
       takeover removes only a confirmed-dead schema-v2 record for the same
       scope and endpoint; live or differently scoped records remain. Native
-      Linux/Windows reruns and real older/newer-binary upgrade/rollback
-      evidence remain open, so this is not six-platform completion.
+      Clean Windows SHA `274f971` subsequently passed both owning tasks:
+      current named-pipe/TCP/schema/stale recovery plus exact published
+      v0.1.10/v0.1.11 native upgrade, HEAD state write and rollback reads.
+      New Linux matching-host and refreshed macOS matching-host compatibility
+      evidence remain open, so this is not three-platform completion.
   - [ ] deepen the independent Control Center only through a useful read-only
     Cockpit and complete platform evidence; Unix renderer-owned screenshots,
     incompatible/renderer-failure cases and caller-instance selection close

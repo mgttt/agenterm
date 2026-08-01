@@ -752,6 +752,13 @@ selected adapter 装配；遗留的 Unix socket / Windows named-pipe 实现副�
   隔离 HOME，并按 `Library/Application Support` 原生约定验证。Windows owning
   native IPC smoke、平台 receipt 自测和完整 Quick（469 tests）已通过；这些修复
   仍须由新 main SHA 的 Linux/macOS matching-host CI 关闭，不能预先记为六平台绿。
+- 2026-08-02 clean SHA `274f971` 的 Windows owning rerun 已再次通过：
+  `native-ipc-smoke` 用 7.8 秒证明 named pipe、显式 TCP、selector precedence、
+  schema-v1/v2 discovery、PID-reuse/stale cleanup 与 exact authority recovery；
+  `native-ipc-compat-smoke` 用 20.7 秒校验 published v0.1.10/v0.1.11 exact bytes，
+  并完成旧 TCP ↔ HEAD、v0.1.11 native → HEAD upgrade、HEAD state write 及
+  v0.1.11/HEAD rollback read。Windows mixed-version 阻断关闭；Linux/macOS 新
+  matching-host 回执仍开放，不能据此声明三平台完成。
 
 ## 七、三平台 GUI 与 Control Center 收敛
 

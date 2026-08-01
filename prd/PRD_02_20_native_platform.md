@@ -645,7 +645,12 @@ integrated validation recorded below):
   identity, and stale recovery now reside beneath `src/platform/`; the
   product-facing `ipc_transport` is an OS-neutral shim. Legacy TCP and the
   v1/v2 instance schema remain unchanged. The final adapter split and both
-  repository-wide static closure gates pass.
+  repository-wide static closure gates pass. On 2026-08-02 clean Windows SHA
+  `274f971`, `native-ipc-smoke` re-proved named-pipe/TCP selection, mixed-schema
+  discovery, PID-reuse-safe stale cleanup and authority recovery, while
+  `native-ipc-compat-smoke` verified exact published v0.1.10/v0.1.11 bytes,
+  native upgrade, HEAD state persistence and rollback reads. This Windows
+  receipt does not substitute for new Linux/macOS matching-host runs.
 - [x] `LogicalInstance`, `ServerScopeId`, typed `IpcEndpoint`, endpoint
   selector, and legacy migration contract now live in
   `platform::contract::ipc`; `src/ipc_endpoint.rs` is compatibility-only.
