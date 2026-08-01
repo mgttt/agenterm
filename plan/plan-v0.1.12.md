@@ -275,6 +275,11 @@ Windows-hosted all-target check、warnings-denied Clippy、458 项 lib tests、8
 tests 和 7 项 strict boundary tests 通过，production native-boundary findings 为零。
 Windows batch aliases 由 `.gitattributes` 强制 CRLF；下一步是集成后的 Quick/build/public
 smoke 串行终检，而不是继续保留故意红色门禁。
+首轮 `remote-ui-smoke` 又暴露两项真实兼容缺口：跨进程直接发送的 WM_KEYDOWN 绕过
+pre-Translate preview，以及 host 重映射 system-menu ID 使稳定 Copy/Paste command 失效。
+`a9f1c90` 仅为直接发送消息补 normalized preview、避免队列键双分派；`d056888` 验证并保留
+`1..0xF000` 的稳定 menu ID。51 项 crate tests 通过，随后完整 `remote-ui-smoke` 通过 detach/
+reconnect、树与滚动、Settings/CWD、terminal selection Copy/Paste 和 server recovery。
 
 2026-08-01 首个建设期增量：Cockpit snapshot 新增明确的
 `tab_counts.{total,running,dead}`，native shell 同源显示 logical instance、

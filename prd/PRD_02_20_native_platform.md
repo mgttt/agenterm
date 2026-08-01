@@ -572,9 +572,16 @@ integrated validation recorded below):
   pixels cannot describe adjacent frames. The same increment exposes private
   state-directory/file primitives through the crate filesystem feature: Unix
   requests `0700` directories and exclusive `0600` files, while Windows keeps
-  the caller-owned inherited ACL. All-feature crate Clippy and 50 tests pass;
+  the caller-owned inherited ACL. All-feature crate Clippy and 51 tests pass;
   the minimal filesystem feature Clippy and three tests pass. Evidence:
   `d81ce70`, `f85ffeb`.
+- [x] The integrated Windows control host preserves both queued keyboard input
+  and directly sent automation keys without double dispatch, and uses stable
+  validated menu command IDs below the Win32 reserved range. The complete
+  public `remote-ui-smoke` passes window close/detach/reconnect, navigation,
+  settings/CWD, resize/tree/scroll, terminal selection copy/paste and server
+  recovery. Evidence: `a9f1c90`, `d056888`, `ux.system-menu-clipboard`,
+  `ux.terminal-selection-copy`, `ui.replaceable-client`.
 - [x] Root IPC, Script-host availability, supervisor-audit path policy and XRGB
   screenshot encoding no longer require selected adapter modules. They compose
   product paths/capability facts from the crate `PlatformKind` or call the crate
