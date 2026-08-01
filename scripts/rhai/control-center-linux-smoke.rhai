@@ -683,6 +683,14 @@ let cockpit_png = std::path::join(
     std::path::parent(context.evidence_path).display,
     "control-center-live-cockpit-linux.png"
 ).display;
+let keyboard_input_png = std::path::join(
+    std::path::parent(context.evidence_path).display,
+    "control-center-keyboard-input-linux.png"
+).display;
+let pointer_input_png = std::path::join(
+    std::path::parent(context.evidence_path).display,
+    "control-center-pointer-input-linux.png"
+).display;
 let refresh_png = std::path::join(
     std::path::parent(context.evidence_path).display,
     "control-center-refresh-linux.png"
@@ -827,6 +835,8 @@ try {
         "control_center_linux_renderer_evidence"
     );
     if backend == "x11" {
+        // The passive launch contract is complete before the journey grants
+        // foreground authority for real XTest input.
         require(
             active_x11_window(context) == witness_window,
             "control_center_linux_no_activate_stole_focus"
@@ -865,6 +875,14 @@ try {
         "control_center_linux_native_input_targets_not_visible"
     );
     if backend == "x11" {
+        print("STEP explicitly focus the Control Center before XTest input");
+        activate_x11_window(context, native_window);
+        wait_x11_active(
+            context,
+            native_window,
+            "control_center_linux_native_input_focus_timeout"
+        );
+
         cc.window_key("Home");
         for step in 0..native_input_index {
             cc.window_key("Down");
@@ -891,13 +909,38 @@ try {
                 && keyboard_selected.connected_server.endpoint == endpoint
                 && cc.state == "running"
                 && rhai::json::parse_file(registry).pid == cc.id
-                && active_x11_window(context) == witness_window,
+                && active_x11_window(context) == native_window,
             "control_center_linux_native_keyboard_navigation_truth"
+        );
+        let keyboard_receipt = wait_capture(
+            context,
+            control_center,
+            registry,
+            endpoint,
+            backend,
+            cc,
+            keyboard_input_png,
+            "connected",
+            "control_center_linux_native_keyboard_receipt"
+        );
+        require(
+            keyboard_receipt.owner_pid == cc.id
+                && keyboard_receipt.rendered_snapshot.contains(
+                    "last_native_input"
+                )
+                && keyboard_receipt.rendered_snapshot.last_native_input.kind
+                    == "key-pressed"
+                && keyboard_receipt.rendered_snapshot.last_native_input.key
+                    == "enter"
+                && keyboard_receipt.rendered_snapshot.last_native_input.repeat
+                    == false,
+            "control_center_linux_native_keyboard_receipt_truth"
         );
 
         // Product lines occupy 0..10, the Tabs help line is 11, and the Unix
         // adapter maps each following 26-pixel row to one Cockpit tab.
         let baseline_pointer_y = 76 + (11 + baseline_index) * 26 + 13;
+        cc.window_pointer("move", 120, baseline_pointer_y);
         cc.window_pointer("click", 120, baseline_pointer_y);
         let pointer_selected = wait_active_tab(
             context,
@@ -919,8 +962,44 @@ try {
                 && pointer_selected.connected_server.endpoint == endpoint
                 && cc.state == "running"
                 && rhai::json::parse_file(registry).pid == cc.id
-                && active_x11_window(context) == witness_window,
+                && active_x11_window(context) == native_window,
             "control_center_linux_native_pointer_navigation_truth"
+        );
+        let pointer_receipt = wait_capture(
+            context,
+            control_center,
+            registry,
+            endpoint,
+            backend,
+            cc,
+            pointer_input_png,
+            "connected",
+            "control_center_linux_native_pointer_receipt"
+        );
+        require(
+            pointer_receipt.owner_pid == cc.id
+                && pointer_receipt.rendered_snapshot.contains(
+                    "last_native_input"
+                )
+                && pointer_receipt.rendered_snapshot.last_native_input.kind
+                    == "pointer-pressed"
+                && pointer_receipt.rendered_snapshot.last_native_input.button
+                    == "primary"
+                && pointer_receipt.rendered_snapshot.last_native_input.physical_x
+                    == 120
+                && pointer_receipt.rendered_snapshot.last_native_input.physical_y
+                    == baseline_pointer_y
+                && pointer_receipt.rendered_snapshot.last_native_input.line
+                    == 12 + baseline_index,
+            "control_center_linux_native_pointer_receipt_truth"
+        );
+
+        print("STEP restore the independent foreground witness after native input");
+        activate_x11_window(context, witness_window);
+        wait_x11_active(
+            context,
+            witness_window,
+            "control_center_linux_native_input_witness_restore_timeout"
         );
         test_harness::emit_evidence(
             context,

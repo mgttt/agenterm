@@ -18,13 +18,14 @@ mod x11 {
     use std::{collections::HashSet, env};
     use x11rb::{
         CURRENT_TIME, NONE,
-        connection::Connection,
+        connection::{Connection, RequestConnection},
+        errors::ConnectionError,
         protocol::xproto::{
-            Atom, AtomEnum, BUTTON_PRESS_EVENT, BUTTON_RELEASE_EVENT, ButtonPressEvent,
-            ButtonReleaseEvent, ConfigureWindowAux, ConnectionExt as _, EventMask,
-            GetGeometryReply, KEY_PRESS_EVENT, KEY_RELEASE_EVENT, KeyButMask, KeyPressEvent,
-            KeyReleaseEvent, MOTION_NOTIFY_EVENT, MapState, Motion, MotionNotifyEvent, Window,
+            Atom, AtomEnum, BUTTON_PRESS_EVENT, BUTTON_RELEASE_EVENT, ConfigureWindowAux,
+            ConnectionExt as _, GetGeometryReply, KEY_PRESS_EVENT, KEY_RELEASE_EVENT, KeyButMask,
+            MOTION_NOTIFY_EVENT, MapState, Window,
         },
+        protocol::xtest::{ConnectionExt as _, X11_EXTENSION_NAME},
         rust_connection::RustConnection,
     };
 
@@ -289,6 +290,63 @@ mod x11 {
             .unwrap_or(NONE))
     }
 
+    fn require_active_window(
+        context: &Context,
+        requested_window: Window,
+    ) -> Result<(), ProcessWindowError> {
+        if active_window(context)? == requested_window {
+            Ok(())
+        } else {
+            Err(error(
+                "process_window_input_not_foreground",
+                "XTest input requires the requested X11 process window to be foreground",
+                "invalid_state",
+            ))
+        }
+    }
+
+    fn require_xtest(context: &Context) -> Result<(), ProcessWindowError> {
+        match context.connection.extension_information(X11_EXTENSION_NAME) {
+            Ok(Some(_)) => Ok(()),
+            Ok(None) | Err(ConnectionError::UnsupportedExtension) => Err(unsupported(
+                "the X11 server does not provide the XTest native-input extension",
+            )),
+            Err(_) => Err(failed("the X11 XTest extension could not be queried")),
+        }
+    }
+
+    fn primary_button_held(context: &Context) -> Result<bool, ProcessWindowError> {
+        context
+            .connection
+            .query_pointer(context.root)
+            .map_err(|_| failed("the X11 pointer-state request could not be sent"))?
+            .reply()
+            .map(|reply| reply.mask.contains(KeyButMask::BUTTON1))
+            .map_err(|_| failed("the X11 pointer-state request failed"))
+    }
+
+    fn require_primary_button_state(
+        context: &Context,
+        required_held: bool,
+    ) -> Result<(), ProcessWindowError> {
+        if primary_button_held(context)? == required_held {
+            return Ok(());
+        }
+        Err(if required_held {
+            error(
+                "process_window_input_button_not_held",
+                "XTest pointer release or held movement requires an existing primary-button press",
+                "invalid_state",
+            )
+        } else {
+            error(
+                "process_window_input_button_already_held",
+                "XTest pointer press or click requires the primary button to be released",
+                "invalid_state",
+            )
+        })
+    }
+
     fn geometry(
         context: &Context,
         window: Window,
@@ -410,22 +468,32 @@ mod x11 {
             })
     }
 
-    fn send<E: Into<[u8; 32]>>(
+    fn xtest_input(
         context: &Context,
-        window: Window,
-        mask: EventMask,
-        event: E,
+        event_type: u8,
+        detail: u8,
+        root_x: i16,
+        root_y: i16,
     ) -> Result<(), ProcessWindowError> {
+        require_xtest(context)?;
         context
             .connection
-            .send_event(false, window, mask, event)
-            .map_err(|_| failed("the X11 input request could not be sent"))?
+            .xtest_fake_input(
+                event_type,
+                detail,
+                CURRENT_TIME,
+                context.root,
+                root_x,
+                root_y,
+                0,
+            )
+            .map_err(|_| failed("the X11 XTest input request could not be sent"))?
             .check()
-            .map_err(|_| failed("the X11 server rejected native window input"))?;
+            .map_err(|_| failed("the X11 server rejected XTest native input"))?;
         context
             .connection
             .flush()
-            .map_err(|_| failed("the X11 input request could not be flushed"))
+            .map_err(|_| failed("the X11 XTest input request could not be flushed"))
     }
 
     pub(super) fn facts(process_id: u32) -> ProcessWindowFacts {
@@ -474,32 +542,10 @@ mod x11 {
     ) -> Result<(), ProcessWindowError> {
         let context = connect()?;
         let window = required_window(&context, process_id)?;
+        require_active_window(&context, window)?;
         let keycode = keycode(&context, keysym(requested_key))?;
-        let base = KeyPressEvent {
-            response_type: KEY_PRESS_EVENT,
-            detail: keycode,
-            sequence: 0,
-            time: CURRENT_TIME,
-            root: context.root,
-            event: window,
-            child: NONE,
-            root_x: 0,
-            root_y: 0,
-            event_x: 0,
-            event_y: 0,
-            state: KeyButMask::default(),
-            same_screen: true,
-        };
-        send(&context, window, EventMask::KEY_PRESS, base)?;
-        send(
-            &context,
-            window,
-            EventMask::KEY_RELEASE,
-            KeyReleaseEvent {
-                response_type: KEY_RELEASE_EVENT,
-                ..base
-            },
-        )
+        xtest_input(&context, KEY_PRESS_EVENT, keycode, 0, 0)?;
+        xtest_input(&context, KEY_RELEASE_EVENT, keycode, 0, 0)
     }
 
     pub(super) fn pointer(
@@ -515,84 +561,34 @@ mod x11 {
         }
         let context = connect()?;
         let window = required_window(&context, process_id)?;
+        require_active_window(&context, window)?;
         let (geometry, root_x, root_y) = geometry(&context, window)?;
-        let (event_x, event_y, absolute_x, absolute_y) =
+        let (_, _, absolute_x, absolute_y) =
             event_coordinates(x, y, root_x, root_y, geometry.width, geometry.height)?;
-        let button = |response_type, state| ButtonPressEvent {
-            response_type,
-            detail: 1,
-            sequence: 0,
-            time: CURRENT_TIME,
-            root: context.root,
-            event: window,
-            child: NONE,
-            root_x: absolute_x,
-            root_y: absolute_y,
-            event_x,
-            event_y,
-            state,
-            same_screen: true,
-        };
-        let motion = |state| MotionNotifyEvent {
-            response_type: MOTION_NOTIFY_EVENT,
-            detail: Motion::NORMAL,
-            sequence: 0,
-            time: CURRENT_TIME,
-            root: context.root,
-            event: window,
-            child: NONE,
-            root_x: absolute_x,
-            root_y: absolute_y,
-            event_x,
-            event_y,
-            state,
-            same_screen: true,
-        };
         match action {
             ProcessWindowPointerAction::Click => {
-                send(
-                    &context,
-                    window,
-                    EventMask::BUTTON_PRESS,
-                    button(BUTTON_PRESS_EVENT, KeyButMask::default()),
-                )?;
-                send(
-                    &context,
-                    window,
-                    EventMask::BUTTON_RELEASE,
-                    ButtonReleaseEvent {
-                        response_type: BUTTON_RELEASE_EVENT,
-                        ..button(BUTTON_PRESS_EVENT, KeyButMask::BUTTON1)
-                    },
-                )
+                require_primary_button_state(&context, false)?;
+                xtest_input(&context, MOTION_NOTIFY_EVENT, 0, absolute_x, absolute_y)?;
+                xtest_input(&context, BUTTON_PRESS_EVENT, 1, 0, 0)?;
+                xtest_input(&context, BUTTON_RELEASE_EVENT, 1, 0, 0)
             }
-            ProcessWindowPointerAction::Down => send(
-                &context,
-                window,
-                EventMask::BUTTON_PRESS,
-                button(BUTTON_PRESS_EVENT, KeyButMask::default()),
-            ),
-            ProcessWindowPointerAction::Move => send(
-                &context,
-                window,
-                EventMask::POINTER_MOTION,
-                motion(KeyButMask::default()),
-            ),
-            ProcessWindowPointerAction::MoveHeld => send(
-                &context,
-                window,
-                EventMask::BUTTON1_MOTION,
-                motion(KeyButMask::BUTTON1),
-            ),
-            ProcessWindowPointerAction::Up => send(
-                &context,
-                window,
-                EventMask::BUTTON_RELEASE,
-                ButtonReleaseEvent {
-                    response_type: BUTTON_RELEASE_EVENT,
-                    ..button(BUTTON_PRESS_EVENT, KeyButMask::BUTTON1)
-                },
-            ),
+            ProcessWindowPointerAction::Down => {
+                require_primary_button_state(&context, false)?;
+                xtest_input(&context, MOTION_NOTIFY_EVENT, 0, absolute_x, absolute_y)?;
+                xtest_input(&context, BUTTON_PRESS_EVENT, 1, 0, 0)
+            }
+            ProcessWindowPointerAction::Move => {
+                xtest_input(&context, MOTION_NOTIFY_EVENT, 0, absolute_x, absolute_y)
+            }
+            ProcessWindowPointerAction::MoveHeld => {
+                require_primary_button_state(&context, true)?;
+                xtest_input(&context, MOTION_NOTIFY_EVENT, 0, absolute_x, absolute_y)
+            }
+            ProcessWindowPointerAction::Up => {
+                require_primary_button_state(&context, true)?;
+                xtest_input(&context, MOTION_NOTIFY_EVENT, 0, absolute_x, absolute_y)?;
+                xtest_input(&context, BUTTON_RELEASE_EVENT, 1, 0, 0)
+            }
             ProcessWindowPointerAction::CaptureChanged => unreachable!(),
         }
     }
