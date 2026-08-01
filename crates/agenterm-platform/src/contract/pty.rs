@@ -52,6 +52,29 @@ impl std::error::Error for PtyError {}
 
 pub type PtyResult<T> = Result<T, PtyError>;
 
+/// A platform-neutral terminal key whose native console semantics cannot
+/// always be represented faithfully as bytes written to a PTY stream.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
+pub enum NativeTerminalKey {
+    /// The terminal cursor-up key.
+    Up,
+    /// The terminal cursor-down key.
+    Down,
+}
+
+/// The input protocol currently owned by the program attached to a PTY.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
+pub enum NativeInputOwnership {
+    /// The operating system's line-oriented console editor owns input.
+    Cooked,
+    /// The program consumes virtual-terminal input sequences.
+    RawVt,
+    /// The program consumes native console input records.
+    RawNative,
+}
+
 #[allow(dead_code)] // Consumed by the Unix PTY adapter only.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TerminalSize {
@@ -100,5 +123,24 @@ mod tests {
         assert!(unsupported.to_string().contains("spawn unsupported"));
         assert!(matches!(failed, PtyError::Failed { .. }));
         assert!(failed.to_string().contains("pty_resize_failed"));
+    }
+
+    #[test]
+    fn native_terminal_keys_are_platform_neutral_values() {
+        assert_ne!(NativeTerminalKey::Up, NativeTerminalKey::Down);
+        assert_eq!(NativeTerminalKey::Up, NativeTerminalKey::Up);
+    }
+
+    #[test]
+    fn native_input_ownership_has_no_unknown_state() {
+        let states = [
+            NativeInputOwnership::Cooked,
+            NativeInputOwnership::RawVt,
+            NativeInputOwnership::RawNative,
+        ];
+
+        assert_eq!(states.len(), 3);
+        assert_ne!(states[0], states[1]);
+        assert_ne!(states[1], states[2]);
     }
 }

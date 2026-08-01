@@ -10,7 +10,9 @@ use std::time::Duration;
 
 use libc::{self, c_int, pid_t};
 
-use crate::contract::pty::{ProcessId, PtyError, PtyResult, TerminalSize};
+use crate::contract::pty::{
+    NativeInputOwnership, NativeTerminalKey, ProcessId, PtyError, PtyResult, TerminalSize,
+};
 
 const PTY_WRITE_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -176,6 +178,20 @@ impl PtyChild {
             ));
         }
         Ok(())
+    }
+
+    pub fn send_native_key(&self, _key: NativeTerminalKey, _repeat_count: u16) -> PtyResult<()> {
+        Err(PtyError::unsupported(
+            "send native key",
+            "the POSIX PTY adapter has no native console key-event transport",
+        ))
+    }
+
+    pub fn native_input_ownership(&self) -> PtyResult<NativeInputOwnership> {
+        Err(PtyError::unsupported(
+            "inspect native input ownership",
+            "the POSIX PTY adapter has no Win32 console input mode",
+        ))
     }
 }
 
@@ -608,6 +624,38 @@ mod tests {
                 .any(|window| window == b"marker"),
             "expected marker in pty output, got {:?}",
             String::from_utf8_lossy(&output)
+        );
+    }
+
+    #[test]
+    fn native_console_key_injection_is_explicitly_unsupported() {
+        let child = PtyChild {
+            pid: ProcessId::new(1).expect("valid fixture pid"),
+        };
+
+        let error = child
+            .send_native_key(NativeTerminalKey::Up, 3)
+            .expect_err("POSIX PTYs do not expose Win32 console key events");
+
+        assert!(matches!(error, PtyError::Unsupported { .. }));
+        assert!(error.to_string().contains("send native key unsupported"));
+    }
+
+    #[test]
+    fn native_input_ownership_is_explicitly_unsupported() {
+        let child = PtyChild {
+            pid: ProcessId::new(1).expect("valid fixture pid"),
+        };
+
+        let error = child
+            .native_input_ownership()
+            .expect_err("POSIX PTYs do not expose Win32 console input modes");
+
+        assert!(matches!(error, PtyError::Unsupported { .. }));
+        assert!(
+            error
+                .to_string()
+                .contains("inspect native input ownership unsupported")
         );
     }
 }
