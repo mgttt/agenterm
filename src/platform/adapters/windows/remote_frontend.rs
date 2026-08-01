@@ -27,21 +27,20 @@ use windows_sys::Win32::{
             VK_PRIOR, VK_RIGHT, VK_SHIFT, VK_TAB, VK_UP,
         },
         WindowsAndMessaging::{
-            CS_DBLCLKS, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CheckMenuItem, CreateWindowExW,
-            DefWindowProcW, DestroyWindow, DispatchMessageW, ES_AUTOVSCROLL, ES_MULTILINE,
-            ES_WANTRETURN, EnableMenuItem, GWLP_USERDATA, GetClientRect, GetCursorPos, GetMessageW,
-            GetSystemMenu, GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW,
-            IDC_ARROW, IDC_SIZEWE, InsertMenuW, IsIconic, IsWindowVisible, IsZoomed, LoadCursorW,
-            LoadIconW, MF_BYCOMMAND, MF_CHECKED, MF_ENABLED, MF_GRAYED, MF_SEPARATOR, MF_STRING,
-            MF_UNCHECKED, MSG, ModifyMenuW, MoveWindow, PostMessageW, PostQuitMessage,
-            RegisterClassW, SC_CLOSE, SIZE_MINIMIZED, SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE,
-            SW_RESTORE, SW_SHOW, SendMessageW, SetCursor, SetTimer, SetWindowLongPtrW,
-            SetWindowTextW, ShowWindow, TranslateMessage, WM_CAPTURECHANGED, WM_CHAR, WM_CLOSE,
-            WM_COMMAND, WM_COPY, WM_CREATE, WM_DESTROY, WM_ERASEBKGND, WM_INITMENUPOPUP,
-            WM_KEYDOWN, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
-            WM_MOUSEWHEEL, WM_NCDESTROY, WM_PAINT, WM_PASTE, WM_SETCURSOR, WM_SETFOCUS, WM_SIZE,
-            WM_SYSCOMMAND, WM_TIMER, WNDCLASSW, WS_BORDER, WS_CHILD, WS_CLIPCHILDREN,
-            WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE, WS_VSCROLL,
+            CS_DBLCLKS, CW_USEDEFAULT, CheckMenuItem, CreateWindowExW, DefWindowProcW,
+            DestroyWindow, DispatchMessageW, ES_AUTOVSCROLL, ES_MULTILINE, ES_WANTRETURN,
+            EnableMenuItem, GWLP_USERDATA, GetClientRect, GetCursorPos, GetMessageW, GetSystemMenu,
+            GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW, IDC_ARROW,
+            IDC_SIZEWE, InsertMenuW, IsIconic, IsWindowVisible, IsZoomed, LoadCursorW, LoadIconW,
+            MF_BYCOMMAND, MF_CHECKED, MF_ENABLED, MF_GRAYED, MF_SEPARATOR, MF_STRING, MF_UNCHECKED,
+            MSG, ModifyMenuW, MoveWindow, PostMessageW, PostQuitMessage, RegisterClassW, SC_CLOSE,
+            SIZE_MINIMIZED, SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, SendMessageW,
+            SetCursor, SetTimer, SetWindowLongPtrW, SetWindowTextW, ShowWindow, TranslateMessage,
+            WM_CAPTURECHANGED, WM_CHAR, WM_CLOSE, WM_COMMAND, WM_COPY, WM_CREATE, WM_DESTROY,
+            WM_ERASEBKGND, WM_INITMENUPOPUP, WM_KEYDOWN, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN,
+            WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY, WM_PAINT, WM_PASTE,
+            WM_SETCURSOR, WM_SETFOCUS, WM_SIZE, WM_SYSCOMMAND, WM_TIMER, WNDCLASSW, WS_BORDER,
+            WS_CHILD, WS_CLIPCHILDREN, WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE, WS_VSCROLL,
         },
     },
 };
@@ -179,7 +178,9 @@ pub(crate) fn run_remote_gui(no_activate: bool) -> Result<()> {
     }
     let class_name = wide("AgenTermRemoteUiClass");
     let mut window_class: WNDCLASSW = unsafe { mem::zeroed() };
-    window_class.style = CS_DBLCLKS | CS_HREDRAW | CS_VREDRAW;
+    // WM_SIZE owns layout and invalidation. Class-wide resize redraw flags would
+    // add a second full-client invalidation for the same native size transition.
+    window_class.style = CS_DBLCLKS;
     window_class.lpfnWndProc = Some(window_proc);
     window_class.hInstance = instance as HINSTANCE;
     window_class.hCursor = unsafe { LoadCursorW(ptr::null_mut(), IDC_ARROW) };
@@ -741,6 +742,7 @@ struct RemoteWindowState {
     terminal_text_decoder: Utf16TextDecoder,
     last_active_id: Option<String>,
     last_composer_identity: Option<(String, Option<String>, bool, usize)>,
+    last_terminal_resize: Option<RemoteTerminalResize>,
     tabs_resize_dragging: bool,
     editing_tab_id: Option<String>,
     window_close_pending: bool,
@@ -881,6 +883,7 @@ impl RemoteWindowState {
             terminal_text_decoder: Utf16TextDecoder::default(),
             last_active_id,
             last_composer_identity,
+            last_terminal_resize: None,
             tabs_resize_dragging: false,
             editing_tab_id: None,
             window_close_pending: false,
@@ -2998,10 +3001,18 @@ impl RemoteWindowState {
     }
 
     fn resize_active_terminal(&mut self) {
-        let Some(tab_id) = self
-            .client
-            .as_ref()
-            .and_then(|client| client.snapshot().active_tab_id.clone())
+        let Some((server_epoch, tab_id, current_rows, current_columns)) =
+            self.client.as_ref().and_then(|client| {
+                let snapshot = client.snapshot();
+                let active_tab_id = snapshot.active_tab_id.as_deref()?;
+                let tab = snapshot.tabs.iter().find(|tab| tab.id == active_tab_id)?;
+                Some((
+                    snapshot.server_epoch.clone(),
+                    tab.id.clone(),
+                    tab.screen.rows,
+                    tab.screen.columns,
+                ))
+            })
         else {
             return;
         };
@@ -3015,10 +3026,36 @@ impl RemoteWindowState {
             .clamp(1, 512)
             .try_into()
             .unwrap_or(1);
-        if let Some(client) = self.client.as_mut()
-            && let Err(error) = client.resize(&tab_id, rows, columns)
-        {
-            self.last_error = Some(format!("PTY resize failed: {error:#}"));
+        let requested = RemoteTerminalResize {
+            server_epoch,
+            tab_id,
+            rows,
+            columns,
+        };
+        match terminal_resize_decision(
+            current_rows,
+            current_columns,
+            self.last_terminal_resize.as_ref(),
+            &requested,
+        ) {
+            RemoteTerminalResizeDecision::Current => {
+                self.last_terminal_resize = None;
+                return;
+            }
+            RemoteTerminalResizeDecision::InFlight => return,
+            RemoteTerminalResizeDecision::Send => {}
+        }
+        let result = self
+            .client
+            .as_mut()
+            .context("UI is disconnected")
+            .and_then(|client| client.resize(&requested.tab_id, requested.rows, requested.columns));
+        match result {
+            Ok(()) => self.last_terminal_resize = Some(requested),
+            Err(error) => {
+                self.last_terminal_resize = None;
+                self.last_error = Some(format!("PTY resize failed: {error:#}"));
+            }
         }
     }
 
@@ -5334,6 +5371,38 @@ fn terminal_char_is_named_key_echo(value: u16) -> bool {
     matches!(value, 0x09 | 0x1b)
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct RemoteTerminalResize {
+    server_epoch: String,
+    tab_id: String,
+    rows: u16,
+    columns: u16,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RemoteTerminalResizeDecision {
+    Current,
+    InFlight,
+    Send,
+}
+
+fn terminal_resize_decision(
+    current_rows: u32,
+    current_columns: u32,
+    last_requested: Option<&RemoteTerminalResize>,
+    requested: &RemoteTerminalResize,
+) -> RemoteTerminalResizeDecision {
+    if current_rows == u32::from(requested.rows) && current_columns == u32::from(requested.columns)
+    {
+        return RemoteTerminalResizeDecision::Current;
+    }
+    if last_requested == Some(requested) {
+        RemoteTerminalResizeDecision::InFlight
+    } else {
+        RemoteTerminalResizeDecision::Send
+    }
+}
+
 fn bounded_frame_dimensions(rect: RECT) -> Option<(i32, i32)> {
     let width = rect.right.checked_sub(rect.left)?;
     let height = rect.bottom.checked_sub(rect.top)?;
@@ -6457,6 +6526,45 @@ mod tests {
                 bottom: 10_000,
             }),
             None
+        );
+    }
+
+    #[test]
+    fn terminal_resize_suppresses_current_and_in_flight_grid_requests() {
+        let requested = RemoteTerminalResize {
+            server_epoch: "epoch-a".to_owned(),
+            tab_id: "@1".to_owned(),
+            rows: 24,
+            columns: 80,
+        };
+        assert_eq!(
+            terminal_resize_decision(24, 80, None, &requested),
+            RemoteTerminalResizeDecision::Current
+        );
+        assert_eq!(
+            terminal_resize_decision(30, 100, Some(&requested), &requested),
+            RemoteTerminalResizeDecision::InFlight
+        );
+        assert_eq!(
+            terminal_resize_decision(30, 100, None, &requested),
+            RemoteTerminalResizeDecision::Send
+        );
+
+        let replacement_epoch = RemoteTerminalResize {
+            server_epoch: "epoch-b".to_owned(),
+            ..requested.clone()
+        };
+        assert_eq!(
+            terminal_resize_decision(30, 100, Some(&requested), &replacement_epoch),
+            RemoteTerminalResizeDecision::Send
+        );
+        let replacement_tab = RemoteTerminalResize {
+            tab_id: "@2".to_owned(),
+            ..requested.clone()
+        };
+        assert_eq!(
+            terminal_resize_decision(30, 100, Some(&requested), &replacement_tab),
+            RemoteTerminalResizeDecision::Send
         );
     }
 

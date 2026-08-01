@@ -74,10 +74,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   on the window HDC and treated lease heartbeat as visible change. The current
   repair makes lease maintenance non-visual by type and composes a complete
   client frame in a compatible memory DC before one `BitBlt`, with bounded
-  allocation and a direct-paint fallback. Focused structural tests pass, but
-  they cannot establish temporal visual stability. Same-grid resize suppression,
-  diagnostic paint counts, and high-output plus idle real-time dogfood evidence
-  on the new binary remain required before restoring shipped status.
+  allocation and a direct-paint fallback. Same-grid and duplicate in-flight
+  resize requests are now suppressed across the typed IPC boundary, keyed by
+  server epoch and stable tab ID, and redundant class-wide resize redraw flags
+  are removed. Focused structural tests pass, but they cannot establish temporal
+  visual stability. Diagnostic paint counts and high-output plus idle real-time
+  dogfood evidence on the new binary remain required before restoring shipped
+  status.
 - [~] ordinary terminal keys and modifiers are encoded for the active PTY;
   live v0.1.12 dogfood found `Shift+Tab` dropped while terminal focus was
   active. The current repair introduces one shared xterm named-key modifier

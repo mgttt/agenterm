@@ -69,9 +69,12 @@ renderer-owned 760×480 PNG 为 58,125 bytes。headless server 下 missing targe
   screenshots，但随后在既有“关闭 GUI 后保留 server”阶段发现 server 已退出。
   2026-07-31 的保留运行在同阶段同样失败，故当前记录为独立 smoke 阻断而非本次
   帧提交回归，也不把前半程通过算作完整 smoke 通过。
+  第二叶已在本地集成：resize 先比较权威 screen 网格，并以 server epoch + stable
+  tab ID + rows/columns 去重尚未进入 delta 的在途请求；同网格不再穿过 IPC，新的
+  epoch/tab/grid 仍会发送。Win32 class 同时移除与 `WM_SIZE` 显式 invalidation 重复的
+  `CS_HREDRAW|CS_VREDRAW`。纯测试覆盖 current/in-flight 去重及 epoch/tab 失效。
   该证据只能证明源头被切断和帧提交结构，不能证明时间域视觉效果；新构建的
-  高输出/idle 60fps 真机观察、paint/invalidate telemetry 以及同尺寸 resize/event
-  去噪仍是关闭条件。
+  高输出/idle 60fps 真机观察和 paint/invalidate telemetry 仍是关闭条件。
 - [ ] alternate-screen harness 无法本地向上滚动；初步证据指向 `vt100`
   alternate grid 的零 scrollback，需要在 application raw-mouse ownership 之外
   评估把 wheel/PageUp 语义转交前台 TUI，不能破坏普通 scrollback。
