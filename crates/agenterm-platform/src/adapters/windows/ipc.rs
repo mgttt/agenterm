@@ -6,7 +6,7 @@ use std::{
     mem::size_of,
     os::windows::{
         ffi::OsStrExt as _,
-        io::{AsRawHandle as _, FromRawHandle as _, OwnedHandle},
+        io::{AsHandle, AsRawHandle, BorrowedHandle, FromRawHandle as _, OwnedHandle, RawHandle},
     },
     ptr,
     time::{Duration, Instant},
@@ -119,6 +119,18 @@ impl NativeListener {
 pub(crate) struct NativeStream {
     handle: OwnedHandle,
     timeout: Duration,
+}
+
+impl AsRawHandle for NativeStream {
+    fn as_raw_handle(&self) -> RawHandle {
+        self.handle.as_raw_handle()
+    }
+}
+
+impl AsHandle for NativeStream {
+    fn as_handle(&self) -> BorrowedHandle<'_> {
+        self.handle.as_handle()
+    }
 }
 
 impl NativeStream {
@@ -426,20 +438,20 @@ impl PipeSecurity {
 }
 
 fn validated_pipe_name(name: &str, endpoint: &IpcEndpoint) -> TransportResult<Vec<u16>> {
-    let suffix = name.strip_prefix(r"\\.\pipe\agenterm-").ok_or_else(|| {
+    let suffix = name.strip_prefix(r"\\.\pipe\").ok_or_else(|| {
         IpcTransportError::new(
             IpcTransportErrorCode::InvalidEndpoint,
             endpoint.to_string(),
             io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "named pipe must use the local AgenTerm namespace",
+                r"named pipe must use the local \\.\pipe\ namespace",
             ),
         )
     })?;
     if suffix.is_empty()
         || suffix
             .chars()
-            .any(|value| !(value.is_ascii_alphanumeric() || matches!(value, '-' | '_')))
+            .any(|value| !(value.is_ascii_alphanumeric() || matches!(value, '-' | '_' | '.')))
     {
         return Err(IpcTransportError::new(
             IpcTransportErrorCode::InvalidEndpoint,
@@ -463,4 +475,37 @@ fn validated_pipe_name(name: &str, endpoint: &IpcEndpoint) -> TransportResult<Ve
 
 fn duration_ms(duration: Duration) -> u32 {
     duration.as_millis().clamp(1, u128::from(u32::MAX - 1)) as u32
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn endpoint(name: &str) -> IpcEndpoint {
+        IpcEndpoint::NamedPipe(name.to_owned())
+    }
+
+    #[test]
+    fn local_pipe_names_are_product_neutral() {
+        for name in [
+            r"\\.\pipe\agenterm-test-1",
+            r"\\.\pipe\wbox.42_generation-1",
+        ] {
+            assert!(validated_pipe_name(name, &endpoint(name)).is_ok(), "{name}");
+        }
+    }
+
+    #[test]
+    fn pipe_names_reject_remote_nested_and_unsafe_namespaces() {
+        for name in [
+            r"\\server\pipe\agenterm-test",
+            r"\\.\pipe\LOCAL\wbox-test",
+            r"\\.\pipe\..\wbox-test",
+            r"\\.\pipe\wbox:test",
+            r"\\.\pipe\",
+        ] {
+            let error = validated_pipe_name(name, &endpoint(name)).unwrap_err();
+            assert_eq!(error.code, IpcTransportErrorCode::InvalidEndpoint, "{name}");
+        }
+    }
 }

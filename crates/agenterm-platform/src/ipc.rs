@@ -44,6 +44,34 @@ impl NativeListener {
 
 pub struct NativeStream(selected::ipc::NativeStream);
 
+#[cfg(windows)]
+impl std::os::windows::io::AsRawHandle for NativeStream {
+    fn as_raw_handle(&self) -> std::os::windows::io::RawHandle {
+        self.0.as_raw_handle()
+    }
+}
+
+#[cfg(windows)]
+impl std::os::windows::io::AsHandle for NativeStream {
+    fn as_handle(&self) -> std::os::windows::io::BorrowedHandle<'_> {
+        self.0.as_handle()
+    }
+}
+
+#[cfg(unix)]
+impl std::os::fd::AsRawFd for NativeStream {
+    fn as_raw_fd(&self) -> std::os::fd::RawFd {
+        self.0.as_raw_fd()
+    }
+}
+
+#[cfg(unix)]
+impl std::os::fd::AsFd for NativeStream {
+    fn as_fd(&self) -> std::os::fd::BorrowedFd<'_> {
+        self.0.as_fd()
+    }
+}
+
 impl NativeStream {
     pub fn connect(endpoint: &IpcEndpoint, timeout: Duration) -> TransportResult<Self> {
         selected::ipc::NativeStream::connect(endpoint, timeout).map(Self)

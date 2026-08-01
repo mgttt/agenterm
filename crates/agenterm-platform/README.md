@@ -60,7 +60,7 @@ clipboard, IPC, or screenshot modules.
 | `file-identity` | opened/path host object identity across rename and hard-link aliases | target minimal `windows-sys`; none on Unix |
 | `filesystem` | conventions plus private state files/directories and durable atomic replacement mechanics | target native APIs |
 | `locking` | cross-process path locks and bounded slot permits | target `libc` / `windows-sys` |
-| `ipc` | typed endpoints and native listener/byte stream | `locking`, target native APIs |
+| `ipc` | typed endpoints, product-neutral local native listener/byte stream, and borrowed native handle/fd access | `locking`, target native APIs |
 | `pty` | PTY command/master/child lifecycle | `process`, `rmux-pty` |
 | `window` | display facts, geometry, native text/pixel/control hosts and process-window automation | target Win32 APIs / Linux `x11rb` / Unix `winit` + `softbuffer` / macOS system frameworks |
 | `input` | normalized key classification, UTF-16 text decoding, primary-shortcut policy | `window` |

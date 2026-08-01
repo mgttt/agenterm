@@ -1,6 +1,7 @@
 //! Linux/macOS local IPC adapter. Unix-specific APIs stay behind the platform
 //! facade; the product endpoint and transport contracts remain target-neutral.
 
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, RawFd};
 use std::{
     env,
     io::{self, Read, Write},
@@ -213,6 +214,18 @@ impl Drop for NativeListener {
 }
 
 pub(crate) struct NativeStream(std::os::unix::net::UnixStream, IpcEndpoint);
+
+impl AsRawFd for NativeStream {
+    fn as_raw_fd(&self) -> RawFd {
+        self.0.as_raw_fd()
+    }
+}
+
+impl AsFd for NativeStream {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.0.as_fd()
+    }
+}
 
 impl NativeStream {
     pub(crate) fn connect(endpoint: &IpcEndpoint, timeout: Duration) -> TransportResult<Self> {
