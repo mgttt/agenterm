@@ -396,6 +396,13 @@ future promotion gates.
   per-run unique visible title and then verified by exact window name; it no
   longer assumes the Xaw `xmessage` client publishes `_NET_WM_PID`, while the
   subsequent compositor activation and foreground assertions remain intact.
+  Run `30708799815` proved that discovery fix and then exposed the production
+  gap behind it: winit documents initial `active=false` as unsupported on X11,
+  so the newly mapped Control Center stole the independent witness focus. The
+  Linux adapter now creates a no-activate window hidden, installs
+  `_NET_WM_USER_TIME=0`, and only then maps it; inability to establish that
+  native invariant is a typed startup failure, not a best-effort fallback. A
+  matching-host receipt for this exact behavior remains required.
 - [~] macOS now owns the matching Quartz exact-PID process-window adapter. It
   rejects zero/multiple layer-0 on-screen candidates, bounds Retina client
   coordinates, and uses `CGEventPostToPid` only after the non-interactive TCC
@@ -411,7 +418,15 @@ future promotion gates.
   journey now keeps both evidence PTYs alive and translates the renderer-owned
   framebuffer row through the observed Quartz frame/client inset before
   posting the event; it does not retry alternate coordinates or accept a dead
-  target as positive input evidence.
+  target as positive input evidence. Run `30708799815` proved the keyboard and
+  live-target branches but showed that a targeted background click may reach
+  AppKit without a preceding winit `CursorMoved`, leaving the shell with no hit
+  position. The macOS shell now reads the current `NSEvent.locationInWindow`
+  during `MouseInput` and converts AppKit bottom-left logical coordinates to
+  renderer top-left physical coordinates. `window_client_rect` is typed
+  Unsupported on macOS rather than relabeling WindowServer outer bounds; the
+  journey explicitly combines outer-frame geometry with renderer scale. A new
+  positive ARM64 receipt remains required.
 
 ## Explicit v0.1.11 non-goals
 

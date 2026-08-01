@@ -8,6 +8,7 @@ mod unix;
 #[cfg(all(feature = "input", feature = "ime"))]
 #[path = "../unix/window_host.rs"]
 mod window_host;
+mod x11_no_activate;
 pub(crate) fn display_backend_facts() -> DisplayBackendFacts {
     let wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
     let x11 = std::env::var_os("DISPLAY").is_some();
@@ -44,7 +45,7 @@ pub(crate) fn run_native_text_window(
         host,
         no_activate,
         "linux",
-        |attributes, no_activate| attributes.with_active(!no_activate),
+        x11_no_activate::prepare_window,
         |_builder, _no_activate| {},
     )
 }

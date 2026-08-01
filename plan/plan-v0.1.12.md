@@ -793,6 +793,14 @@ Cockpit
   Xaw 发布 `_NET_WM_PID`；macOS pointer 将 framebuffer 行经真实 Quartz frame/client
   inset 转换，且只选择 viewport 内存活目标。三者均保持原 3 秒/状态等待、typed failure
   和正向行为门槛，不以延长 sleep 或放宽断言求绿；
+- exact-SHA `eb45855` 的普通 CI run `30708799815` 已证明 Windows x64/ARM64、
+  Linux ARM64、macOS x86_64 与全部 portable quality gate 通过；Windows process
+  identity 假阳性已关闭。Linux x64 进一步暴露 winit 的 `active=false` 在 X11
+  明确不受支持，现改为 hidden create -> `_NET_WM_USER_TIME=0` -> map，失败时
+  typed fail；macOS ARM64 证明键盘正向与 live PTY 后，暴露 targeted click 未必先
+  产生 `CursorMoved`，现从当前 `NSEvent.locationInWindow` 取得按下事件自身坐标。
+  同时停止把 WindowServer outer frame 冒充 client rect。两项均已通过对应 target
+  all-feature compile check，仍等待新的 matching-host 行为回执，不能提前记绿；
 - Windows owning journey 已覆盖 incompatible sibling、进程内 renderer capture
   typed failure/recovery、CC process crash/replacement、Human GUI detach 时的
   same-CC/same-server/same-epoch retention、new epoch recovery 和 stale owner

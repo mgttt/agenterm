@@ -342,6 +342,18 @@ impl ApplicationHandler<()> for PixelWindowRunner {
                 return;
             }
         };
+        #[cfg(target_os = "linux")]
+        if let Err(error) = super::x11_no_activate::reveal_window(
+            event_loop,
+            &native_window,
+            self.options.no_activate,
+        ) {
+            self.fail(
+                event_loop,
+                PixelWindowError::failed("pixel_window_no_activate_failed", error),
+            );
+            return;
+        }
         native_window.set_ime_allowed(self.options.ime_allowed);
         let surface = match Surface::new(&self.context, Rc::clone(&native_window)) {
             Ok(surface) => surface,
@@ -576,6 +588,9 @@ fn configure_window_attributes(
     attributes: WindowAttributes,
     no_activate: bool,
 ) -> WindowAttributes {
+    #[cfg(target_os = "linux")]
+    return super::x11_no_activate::prepare_window(attributes, no_activate);
+    #[cfg(not(target_os = "linux"))]
     attributes.with_active(!no_activate)
 }
 

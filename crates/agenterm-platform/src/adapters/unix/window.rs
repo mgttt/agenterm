@@ -203,6 +203,13 @@ impl ApplicationHandler for App {
                 return;
             }
         };
+        #[cfg(target_os = "linux")]
+        if let Err(error) =
+            super::x11_no_activate::reveal_window(event_loop, &window, self.no_activate)
+        {
+            self.fail(event_loop, "native_text_window_no_activate_failed", error);
+            return;
+        }
         if !self.publish_window(event_loop, &window) {
             return;
         }
@@ -258,7 +265,15 @@ impl ApplicationHandler for App {
                 let Some(button) = normalize_pointer_button(button) else {
                     return;
                 };
-                let Some((physical_x, physical_y)) = self.pointer_position else {
+                #[cfg(target_os = "macos")]
+                let pointer_position = self
+                    .window
+                    .as_deref()
+                    .and_then(macos_current_event_pointer_position)
+                    .or(self.pointer_position);
+                #[cfg(not(target_os = "macos"))]
+                let pointer_position = self.pointer_position;
+                let Some((physical_x, physical_y)) = pointer_position else {
                     return;
                 };
                 let width = self
@@ -298,6 +313,51 @@ impl ApplicationHandler for App {
             std::time::Instant::now() + Duration::from_millis(200),
         ));
     }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_current_event_pointer_position(window: &Window) -> Option<(i32, i32)> {
+    use objc2_app_kit::NSApplication;
+    use objc2_foundation::MainThreadMarker;
+
+    let marker = MainThreadMarker::new()?;
+    let event = NSApplication::sharedApplication(marker).currentEvent()?;
+    // SAFETY: currentEvent retains the NSEvent while locationInWindow is read
+    // on the AppKit main thread handling this MouseInput callback.
+    let location = unsafe { event.locationInWindow() };
+    macos_physical_pointer_position(
+        window.inner_size().height,
+        window.scale_factor(),
+        location.x,
+        location.y,
+    )
+}
+
+#[cfg(target_os = "macos")]
+fn macos_physical_pointer_position(
+    physical_height: u32,
+    scale_factor: f64,
+    cocoa_x: f64,
+    cocoa_y_from_bottom: f64,
+) -> Option<(i32, i32)> {
+    if !scale_factor.is_finite()
+        || scale_factor <= 0.0
+        || !cocoa_x.is_finite()
+        || !cocoa_y_from_bottom.is_finite()
+    {
+        return None;
+    }
+    let physical_x = (cocoa_x * scale_factor).round();
+    let physical_y = f64::from(physical_height) - (cocoa_y_from_bottom * scale_factor).round();
+    if physical_x < 0.0
+        || physical_y < 0.0
+        || physical_x > f64::from(i32::MAX)
+        || physical_y > f64::from(i32::MAX)
+        || physical_y >= f64::from(physical_height)
+    {
+        return None;
+    }
+    Some((physical_x as i32, physical_y as i32))
 }
 
 fn normalize_pointer_button(button: MouseButton) -> Option<NativeTextPointerButton> {
@@ -520,5 +580,29 @@ mod tests {
         assert_eq!(unix_text_line_at(760, 88), Some(1));
         assert_eq!(unix_text_line_at(760, 114), Some(2));
         assert_eq!(unix_text_line_at(420, 107), Some(2));
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn appkit_event_location_becomes_top_left_physical_client_coordinates() {
+        assert_eq!(
+            macos_physical_pointer_position(936, 2.0, 60.0, 735.5),
+            Some((120, 535))
+        );
+        assert_eq!(
+            macos_physical_pointer_position(468, 1.0, 120.0, 200.0),
+            Some((120, 268))
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn appkit_event_location_rejects_non_finite_and_outside_coordinates() {
+        assert_eq!(
+            macos_physical_pointer_position(468, f64::NAN, 0.0, 0.0),
+            None
+        );
+        assert_eq!(macos_physical_pointer_position(468, 1.0, -1.0, 100.0), None);
+        assert_eq!(macos_physical_pointer_position(468, 1.0, 10.0, 0.0), None);
     }
 }

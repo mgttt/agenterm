@@ -552,16 +552,12 @@ pub(crate) fn message(_: u32, _: ProcessWindowMessage) -> Result<isize, ProcessW
 }
 
 pub(crate) fn rect(process_id: u32, client: bool) -> Result<ProcessWindowRect, ProcessWindowError> {
-    let bounds = required_window(process_id)?.bounds;
     if client {
-        let scale = display_scale(bounds);
-        return Ok(ProcessWindowRect {
-            left: 0,
-            top: 0,
-            right: (bounds.size.width * scale).round() as i64,
-            bottom: (bounds.size.height * scale).round() as i64,
-        });
+        return Err(unsupported(
+            "exact native client geometry is not available from the macOS WindowServer",
+        ));
     }
+    let bounds = required_window(process_id)?.bounds;
     Ok(ProcessWindowRect {
         left: bounds.origin.x.round() as i64,
         top: bounds.origin.y.round() as i64,
@@ -634,7 +630,7 @@ mod tests {
     }
 
     #[test]
-    fn retina_client_coordinates_are_bounded_and_scaled() {
+    fn physical_window_coordinates_are_bounded_and_scaled() {
         let bounds = CgRect {
             origin: CgPoint { x: 100.0, y: 50.0 },
             size: CgSize {
@@ -648,6 +644,16 @@ mod tests {
         );
         assert_eq!(global_point(bounds, 2.0, 1520, 0), None);
         assert_eq!(global_point(bounds, 2.0, -1, 0), None);
+    }
+
+    #[test]
+    fn exact_client_rect_fails_typed_instead_of_relabeling_outer_bounds() {
+        assert_eq!(
+            rect(0, true),
+            Err(unsupported(
+                "exact native client geometry is not available from the macOS WindowServer"
+            ))
+        );
     }
 
     #[test]

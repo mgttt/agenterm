@@ -58,6 +58,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   `CGEventPostToPid` after a non-interactive TCC preflight, preserving distinct
   Unsupported/Failed results. Win32-only messages and child-control operations
   remain explicitly Unsupported on Unix without narrowing caller policy.
+  macOS outer geometry remains available, while exact client geometry is typed
+  Unsupported instead of returning the WindowServer frame under a false client
+  label. AppKit mouse-down handling reads the current event's client location
+  directly, so targeted background input does not depend on an earlier
+  `CursorMoved` observation.
 - [~] Passive system-WebView discovery is public and selected inside the crate,
   with Missing and Failed kept distinct. Native font discovery/metrics and an
   opaque RAII font resource are public; the Windows renderer consumes its RAII

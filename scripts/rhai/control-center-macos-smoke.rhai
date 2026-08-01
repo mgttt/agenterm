@@ -670,28 +670,37 @@ try {
     );
     let pointer_target = selected.connected_server.tabs[pointer_index].id;
     let pointer_row = pointer_index - visible_start;
-    let native_bounds = cc.window_client_rect();
+    let native_bounds = cc.window_rect();
     // The Quartz process-window API discovers kCGWindowBounds, which includes
     // the macOS titlebar, while the renderer-owned PNG is the exact winit
-    // client framebuffer. Derive the client origin from those two observable
-    // rectangles before translating a framebuffer hit into Quartz coordinates.
+    // client framebuffer. Convert the outer frame from global display points
+    // with the renderer's observed scale, then derive the client origin from
+    // those two rectangles before translating a framebuffer hit into Quartz
+    // coordinates. window_client_rect is intentionally typed Unsupported on
+    // macOS instead of pretending the outer WindowServer frame is a client.
+    let native_width = (
+        native_bounds.width.to_float()
+            * capture.rendered_snapshot.scale_factor
+    ).round().to_int();
+    let native_height = (
+        native_bounds.height.to_float()
+            * capture.rendered_snapshot.scale_factor
+    ).round().to_int();
     require(
-        native_bounds.left == 0
-            && native_bounds.top == 0
-            && native_bounds.width >= capture.width
-            && native_bounds.height >= capture.height
-            && (native_bounds.width - capture.width) % 2 == 0,
+        native_width >= capture.width
+            && native_height >= capture.height
+            && (native_width - capture.width) % 2 == 0,
         "control_center_macos_native_pointer_geometry_unusable:" +
             rhai::json::stringify(#{
-                native_width: native_bounds.width,
-                native_height: native_bounds.height,
+                native_width: native_width,
+                native_height: native_height,
                 framebuffer_width: capture.width,
                 framebuffer_height: capture.height,
                 scale_factor: capture.rendered_snapshot.scale_factor
             })
     );
-    let client_left = (native_bounds.width - capture.width) / 2;
-    let client_top = native_bounds.height - capture.height;
+    let client_left = (native_width - capture.width) / 2;
+    let client_top = native_height - capture.height;
     let body_scale = if capture.width >= 640 { 2 } else { 1 };
     let line_height = 7 * body_scale + 12;
     // Product lines are 0..10, the Tabs help line is 11, and the following
@@ -706,10 +715,10 @@ try {
             && content_pointer_x < capture.width
             && content_pointer_y >= 0
             && content_pointer_y < capture.height
-            && pointer_x >= native_bounds.left
-            && pointer_x < native_bounds.right
-            && pointer_y >= native_bounds.top
-            && pointer_y < native_bounds.bottom,
+            && pointer_x >= 0
+            && pointer_x < native_width
+            && pointer_y >= 0
+            && pointer_y < native_height,
         "control_center_macos_native_pointer_not_bounded:" +
             rhai::json::stringify(#{
                 target: pointer_target,
@@ -720,8 +729,8 @@ try {
                 client_top: client_top,
                 quartz_x: pointer_x,
                 quartz_y: pointer_y,
-                native_right: native_bounds.right,
-                native_bottom: native_bounds.bottom
+                native_width: native_width,
+                native_height: native_height
             })
     );
     let input_baseline = json_command(
