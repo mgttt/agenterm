@@ -40,7 +40,7 @@ name = "agenterm-cc"
 path = "src/bin/agenterm-cc.rs"
 
 [dependencies]
-agenterm-platform = { path = "crates/agenterm-platform", default-features = false, features = ["clipboard", "filesystem", "font", "ipc", "locking", "process", "pty", "screenshot", "serde", "window"] }
+agenterm-platform = { path = "crates/agenterm-platform", default-features = false, features = ["clipboard", "filesystem", "font", "input", "ipc", "locking", "process", "pty", "screenshot", "serde", "window"] }
 anyhow = "1"
 png = "0.17"
 rhai = { version = "1.22", default-features = false, features = ["std", "serde"] }

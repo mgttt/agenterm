@@ -67,6 +67,18 @@ pub(crate) mod locking;
 #[path = "adapters/windows/ipc.rs"]
 pub(crate) mod ipc;
 
+#[cfg(all(feature = "input", windows))]
+#[path = "adapters/windows/input.rs"]
+pub(crate) mod input;
+
+#[cfg(all(feature = "input", target_os = "linux"))]
+#[path = "adapters/linux/input.rs"]
+pub(crate) mod input;
+
+#[cfg(all(feature = "input", target_os = "macos"))]
+#[path = "adapters/macos/input.rs"]
+pub(crate) mod input;
+
 #[cfg(all(feature = "ipc", target_os = "linux"))]
 #[path = "adapters/linux/ipc.rs"]
 pub(crate) mod ipc;

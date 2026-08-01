@@ -38,7 +38,8 @@ third-party dependency.
 | `ipc` | typed endpoints and native listener/byte stream | `locking`, target native APIs |
 | `pty` | PTY command/master/child lifecycle | `process`, `rmux-pty` |
 | `window` | DPI and logical/physical geometry | none |
-| `input`, `ime`, `activation` | reserved migration slots | `window` chain |
+| `input` | normalized key classification, UTF-16 text decoding, primary-shortcut policy | `window` |
+| `ime`, `activation` | reserved migration slots | `input` / `window` |
 | `clipboard` | caller-bounded Unicode clipboard | `process`, target native APIs |
 | `screenshot` | bounded XRGB framebuffer PNG encoding | `filesystem`, `png` |
 | `font` | platform font-file candidates | `filesystem` |
@@ -59,6 +60,7 @@ Enabling a reserved slot does not pretend the capability exists:
 | IPC | named pipe | Unix socket | Unix socket |
 | PTY | ConPTY | POSIX PTY | POSIX PTY |
 | window geometry | available | available | available |
+| normalized input | Control/AltGr policy | Control/Super policy | Command/Control policy |
 | clipboard | Win32 Unicode | Wayland/X11 helpers | `pbcopy`/`pbpaste` |
 | screenshot encoding | PNG | PNG | PNG |
 | font candidates | product GDI path | system candidates | system candidates |

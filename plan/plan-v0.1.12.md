@@ -103,6 +103,13 @@ Unicode/Wayland-X11 helper/macOS pasteboard failures 统一映射公开 Unsuppor
 保持产品私有；三平台共享 bounded PNG encoder。font feature 暴露中立候选描述，
 Windows GDI font handle/metrics 仍留产品 extension。21 项 all-feature crate tests、
 warnings-denied crate Clippy 与 Agenterm all-target compile check 通过。
+第八个能力叶完成 normalized input：平台中立 `ModifierState`、非穷尽
+`KeyClassification`、committed-text-first 分类与有状态 UTF-16 decoder 进入公开
+contract/facade；Windows adapter 明确保留 Control/AltGr 仲裁，Linux 与 macOS
+分别保留 Control/Super、Command/Control primary-shortcut policy。主 crate 的
+frontend event 翻译保持产品 extension，只通过公开 facade 消费机制，不保留第二套
+分类实现。24 项 all-feature crate tests、warnings-denied crate Clippy 与 Agenterm
+all-target compile check 通过；IME composition 仍是下一依赖叶，不由 input 状态冒充。
 
 2026-08-01 首个建设期增量：Cockpit snapshot 新增明确的
 `tab_counts.{total,running,dead}`，native shell 同源显示 logical instance、

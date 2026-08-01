@@ -166,54 +166,7 @@ pub(crate) fn platform_info_json() -> serde_json::Value {
     })
 }
 
-/// Modifier bits carried on normalized key events.
-///
-/// Which modifier is the platform *primary* shortcut chord remains an adapter
-/// decision (Control vs Super/Command); shared helpers only expose the bits.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct ModifierState {
-    pub control: bool,
-    pub shift: bool,
-    pub alt: bool,
-    /// Super on Linux, Win on Windows, Command on macOS.
-    pub meta: bool,
-}
-
-impl ModifierState {
-    pub const fn empty() -> Self {
-        Self {
-            control: false,
-            shift: false,
-            alt: false,
-            meta: false,
-        }
-    }
-
-    /// Control or meta held — common primary-chord probe used by slice-1
-    /// adapters. Platform-specific primary policy still belongs in the adapter.
-    #[allow(dead_code)]
-    pub const fn control_or_meta(self) -> bool {
-        self.control || self.meta
-    }
-}
-
-/// Classification of one key press before product surfaces consume it.
-///
-/// Text commits must stay distinct from shortcut chords so Shift punctuation,
-/// layouts, dead keys, CJK, and terminal control keys keep native meaning.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum KeyClassification {
-    Shortcut {
-        key: String,
-        modifiers: ModifierState,
-    },
-    TextCommit(String),
-    ControlKey {
-        name: String,
-        modifiers: ModifierState,
-    },
-    Ignored,
-}
+pub use agenterm_platform::input::{KeyClassification, ModifierState};
 
 /// Display / window-system discovery facts (not auth).
 ///
@@ -227,53 +180,8 @@ pub struct DisplayBackendFacts {
     pub headless: bool,
 }
 
-/// Separate shortcut chords from committed Unicode text.
-///
-/// `is_shortcut` is decided by the native adapter because Control, Command,
-/// Super, and Windows AltGr layouts do not share one primary-chord policy.
-/// `committed_text` is whatever the native path already resolved. When present
-/// and `is_shortcut` is false, prefer [`KeyClassification::TextCommit`] over
-/// physical-key synthesis.
-pub fn classify_key_press(
-    is_shortcut: bool,
-    modifiers: ModifierState,
-    logical_character: Option<&str>,
-    named_key: Option<&str>,
-    committed_text: Option<&str>,
-) -> KeyClassification {
-    if is_shortcut {
-        if let Some(ch) = logical_character {
-            return KeyClassification::Shortcut {
-                key: ch.to_string(),
-                modifiers,
-            };
-        }
-        if let Some(name) = named_key {
-            return KeyClassification::Shortcut {
-                key: name.to_string(),
-                modifiers,
-            };
-        }
-        return KeyClassification::Ignored;
-    }
-
-    if let Some(text) = committed_text.filter(|value| !value.is_empty()) {
-        return KeyClassification::TextCommit(text.to_string());
-    }
-
-    if let Some(name) = named_key {
-        return KeyClassification::ControlKey {
-            name: name.to_string(),
-            modifiers,
-        };
-    }
-
-    if let Some(ch) = logical_character.filter(|value| !value.is_empty()) {
-        return KeyClassification::TextCommit(ch.to_string());
-    }
-
-    KeyClassification::Ignored
-}
+#[cfg(test)]
+pub use agenterm_platform::contract::input::classify_key_press;
 
 /// Inclusive screenshot clip rectangle in framebuffer pixels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

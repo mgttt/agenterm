@@ -28,6 +28,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   reusable crate capabilities. Terminal paste limits, HWND/GDI capture and font
   handles remain explicit root product extensions rather than leaking native
   types through the public crate API.
+- [~] Normalized modifier/key classification, committed Unicode precedence,
+  UTF-16 decoding, and per-platform primary-shortcut policy are reusable through
+  the `input` feature. Native frontend event translation remains a root product
+  extension; IME composition is still open and reports Unsupported explicitly.
 - [ ] Windows, macOS, and Linux native frontends consume one declared platform
   contract for window lifecycle, normalized input, IME, DPI, clipboard, font
   discovery, screenshots, activation, and applicable system integration.
