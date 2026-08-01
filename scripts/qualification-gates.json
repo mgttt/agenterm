@@ -238,7 +238,9 @@
         "control-center.server-recovery",
         "control-center.no-activate",
         "control-center.typed-close",
-        "control-center.process-isolation"
+        "control-center.process-isolation",
+        "control-center.renderer-failure-isolation",
+        "control-center.cross-process-detach"
       ]
     }
   ]

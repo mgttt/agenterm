@@ -759,8 +759,10 @@ Cockpit
   Win32/winit adapter 负责坐标、行命中和键规范化；产品层只维护 tab cursor 并异步
   复用既有 typed select operation。Windows unit/Clippy 与 Linux/macOS cross-check 通过，
   三平台真人 pointer/keyboard journey 仍是交付证据缺口；
-- 覆盖 incompatible sibling、renderer crash、server retained while GUI
-  replaced、new epoch recovery 和 stale owner replacement；
+- Windows owning journey 已覆盖 incompatible sibling、进程内 renderer capture
+  typed failure/recovery、CC process crash/replacement、Human GUI detach 时的
+  same-CC/same-server/same-epoch retention、new epoch recovery 和 stale owner
+  replacement；Unix 原生组合仍由各自 journey 证明，不能用 Windows 结果代替；
 - Workflows、Extensions、InfoHub 可以改进解释与导航，但没有 owning backend
   前继续显示真实 empty/unavailable，不造假数据。
 

@@ -322,10 +322,17 @@ future promotion gates.
   malformed incompatible sibling through the public endpoint selector, proves
   typed `server_incompatible` in both offline and live-renderer projections,
   preserves the same renderer/server PID, epoch, PTY content and registry
-  bytes, then restores the original endpoint without residue. Renderer failure
-  and the cross-process GUI-detached/server-retained combination remain open;
-  the Human GUI's detach and server retention are independently owned by
-  `remote-ui-smoke`.
+  bytes, then restores the original endpoint without residue. The same owning
+  journey now replaces only its isolated native-window handle with an invalid
+  HWND, requires public screenshot capture to fail with typed
+  `control_center_screenshot_capture_failed`, restores the handle, and proves
+  the same Control Center PID, server PID/epoch and live PTY survive before a
+  fresh renderer-owned PNG succeeds. It also runs the Human GUI and Control
+  Center against one authority, detaches the GUI through the public
+  close/keep-server actions, and proves the same Control Center, server epoch
+  and PTY remain while the UI lease is released. These Windows renderer-failure
+  and cross-process server-retention leaves are closed; equivalent native Unix
+  composition remains part of the three-platform evidence gate.
 - [~] structured snapshot/action evidence and PNG evidence agree on selected
   view, connection state, labels, availability, and geometry. The Windows
   Control Center smoke now pairs the connected Cockpit snapshot/window title

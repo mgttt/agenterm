@@ -27,7 +27,9 @@ let declared_evidence = [
     "control-center.server-recovery",
     "control-center.no-activate",
     "control-center.typed-close",
-    "control-center.process-isolation"
+    "control-center.process-isolation",
+    "control-center.renderer-failure-isolation",
+    "control-center.cross-process-detach"
 ];
 
 if args.len == 1 && args[0] == "--list-evidence" {
@@ -327,6 +329,39 @@ fn wait_for_exit(child, code) {
     throw code;
 }
 
+fn wait_for_ui_lease(context, cli_executable, child, code) {
+    let deadline = std::time::SystemTime::now().unix_millis + 10000;
+    let last = "";
+    for attempt in 0..200 {
+        if std::time::SystemTime::now().unix_millis >= deadline {
+            break;
+        }
+        let output = test_harness::run_cli(
+            context,
+            cli_executable,
+            ["ui-lease", "status"],
+            false,
+            []
+        );
+        last = output.stdout + output.stderr;
+        if output.success {
+            let lease = rhai::json::parse(output.stdout);
+            if lease.attached && lease.client_pid == child.id
+                    && child.platform_facts.top_level_window_present {
+                return lease;
+            }
+        }
+        if child.state == "exited" {
+            let result = child.wait_with_output(
+                std::time::Duration::from_secs(2)
+            );
+            throw code + "_gui_exit:" + result.stderr_text();
+        }
+        rhai::task::sleep(std::time::Duration::from_millis(50));
+    }
+    throw code + "_timeout:" + last;
+}
+
 fn process_present(pid) {
     for process in std::process::list() {
         if process.id == pid {
@@ -509,6 +544,10 @@ let script_executable = std::path::join(
     executable_directory,
     "agenterm-script.exe"
 ).display;
+let gui_executable = std::path::join(
+    executable_directory,
+    "agenterm.exe"
+).display;
 require(
     std::fs::exists(control_center),
     "control_center_smoke_executable_missing"
@@ -525,6 +564,10 @@ require(
     std::fs::exists(script_executable),
     "control_center_smoke_script_missing"
 );
+require(
+    std::fs::exists(gui_executable),
+    "control_center_smoke_gui_missing"
+);
 
 let context = test_harness::new_context(repo, "control-center");
 let registry = std::path::join(
@@ -538,6 +581,14 @@ let cockpit_png = std::path::join(
 let causal_png = std::path::join(
     std::path::parent(context.evidence_path).display,
     "control-center-causal-refresh.png"
+).display;
+let renderer_failure_png = std::path::join(
+    std::path::parent(context.evidence_path).display,
+    "control-center-renderer-failure.png"
+).display;
+let renderer_recovery_png = std::path::join(
+    std::path::parent(context.evidence_path).display,
+    "control-center-renderer-recovery.png"
 ).display;
 let registry_stem = registry.sub_string(0, registry.len - 5);
 let context_state_path = registry_stem + ".context.json";
@@ -919,6 +970,232 @@ try {
         "Control Center screenshot: " + capture.width + "x" +
             capture.height + ", " + capture.bytes + " bytes, " +
             durable_cockpit_png
+    );
+
+    print("STEP native renderer failure is typed, isolated, and recoverable");
+    let renderer_pty_tab = ();
+    for tab in bootstrap.tabs {
+        if !tab.dead && renderer_pty_tab == () {
+            renderer_pty_tab = tab.id;
+        }
+    }
+    require(
+        renderer_pty_tab != () && renderer_pty_tab.starts_with("@"),
+        "control_center_renderer_live_pty_missing"
+    );
+    let renderer_pty_marker =
+        "AGENTERM_CC_RENDERER_FAILURE_" + context.run_id;
+    cli_text(
+        context,
+        cli_executable,
+        [
+            "send-keys", "-t", renderer_pty_tab,
+            "-l", "echo " + renderer_pty_marker
+        ]
+    );
+    cli_text(
+        context,
+        cli_executable,
+        ["send-keys", "-t", renderer_pty_tab, "Enter"]
+    );
+    cli_text(
+        context,
+        cli_executable,
+        [
+            "wait-pane", "-t", renderer_pty_tab,
+            "--contains", renderer_pty_marker,
+            "--timeout-ms", "5000"
+        ]
+    );
+    let native_window_path = registry_stem + ".window";
+    let native_window_bytes = std::fs::read_to_string(native_window_path);
+    std::fs::write(native_window_path, "0");
+    let failed_renderer = ();
+    try {
+        failed_renderer = configured(
+            context,
+            control_center,
+            registry,
+            ["screenshot", "--output", renderer_failure_png, "--json"]
+        ).output();
+    } catch (error) {
+        std::fs::write(native_window_path, native_window_bytes);
+        throw "control_center_renderer_failure_invoke:" + error.to_string();
+    }
+    std::fs::write(native_window_path, native_window_bytes);
+    let failed_renderer_text =
+        failed_renderer.stdout_text() + failed_renderer.stderr_text();
+    if std::fs::exists(renderer_failure_png) {
+        std::fs::remove_file(renderer_failure_png);
+    }
+    require(
+        !failed_renderer.success
+            && failed_renderer_text.contains(
+                "control_center_screenshot_capture_failed"
+            ),
+        "control_center_renderer_failure_not_typed:" +
+            failed_renderer_text
+    );
+    let renderer_failure_status = rhai::json::parse(offline(
+        context,
+        control_center,
+        registry,
+        ["status", "--json"],
+        "control_center_renderer_failure_status"
+    ));
+    let renderer_failure_server = cli_json(
+        context,
+        cli_executable,
+        ["ui-bootstrap"]
+    );
+    let renderer_failure_pty = cli_text(
+        context,
+        cli_executable,
+        [
+            "capture-pane", "-p", "-t", renderer_pty_tab,
+            "--max-bytes", "16384"
+        ]
+    );
+    let renderer_recovery = rhai::json::parse(offline(
+        context,
+        control_center,
+        registry,
+        ["screenshot", "--output", renderer_recovery_png, "--json"],
+        "control_center_renderer_recovery_screenshot"
+    ));
+    let renderer_recovery_image =
+        rhai::image::inspect_png(renderer_recovery_png);
+    require(
+        renderer_failure_status.state == "running"
+            && renderer_failure_status.pid == first.id
+            && renderer_failure_status.context.endpoint == typed_endpoint
+            && renderer_failure_server.server_pid == server.id
+            && renderer_failure_server.server_epoch == bootstrap.server_epoch
+            && renderer_failure_pty.contains(renderer_pty_marker)
+            && first.state == "running"
+            && renderer_recovery.state == "captured"
+            && renderer_recovery.owner_pid == first.id
+            && renderer_recovery.width == renderer_recovery_image.width
+            && renderer_recovery.height == renderer_recovery_image.height
+            && renderer_recovery_image.samples > 0,
+        "control_center_renderer_failure_isolation"
+    );
+    test_harness::emit_evidence(
+        context,
+        declared_evidence,
+        "control-center.renderer-failure-isolation"
+    );
+
+    print("STEP Human GUI detach preserves the same Control Center and authority");
+    let detach_tab = renderer_pty_tab;
+    let detach_marker = "AGENTERM_CC_GUI_DETACH_" + context.run_id;
+    cli_text(
+        context,
+        cli_executable,
+        ["send-keys", "-t", detach_tab, "-l", "echo " + detach_marker]
+    );
+    cli_text(
+        context,
+        cli_executable,
+        ["send-keys", "-t", detach_tab, "Enter"]
+    );
+    cli_text(
+        context,
+        cli_executable,
+        [
+            "wait-pane", "-t", detach_tab,
+            "--contains", detach_marker,
+            "--timeout-ms", "5000"
+        ]
+    );
+    let gui_command = test_harness::configured_command(
+        context,
+        gui_executable,
+        ["--ui-client", "--no-activate", "--address", context.address]
+    );
+    gui_command.env("AGENTERM_CC_REGISTRY_PATH", registry);
+    let human_gui = gui_command.start();
+    owned_children.push(human_gui);
+    let human_lease = wait_for_ui_lease(
+        context,
+        cli_executable,
+        human_gui,
+        "control_center_cross_process_gui"
+    );
+    let human_bootstrap = cli_json(
+        context,
+        cli_executable,
+        ["ui-bootstrap"]
+    );
+    require(
+        human_lease.client_pid == human_gui.id
+            && human_bootstrap.server_pid == server.id
+            && human_bootstrap.server_epoch == bootstrap.server_epoch,
+        "control_center_cross_process_gui_identity"
+    );
+    cli_text(
+        context,
+        cli_executable,
+        ["ui-action", "close-window"]
+    );
+    cli_text(
+        context,
+        cli_executable,
+        [
+            "wait-ui", "--modal-kind", "confirm-window-close",
+            "--timeout-ms", "5000"
+        ]
+    );
+    cli_text(
+        context,
+        cli_executable,
+        ["ui-action", "keep-server-running"]
+    );
+    let human_gui_output = wait_for_exit(
+        human_gui,
+        "control_center_cross_process_gui_detach_timeout"
+    );
+    let detached_lease = cli_json(
+        context,
+        cli_executable,
+        ["ui-lease", "status"]
+    );
+    let detached_cc = rhai::json::parse(offline(
+        context,
+        control_center,
+        registry,
+        ["status", "--json"],
+        "control_center_cross_process_status"
+    ));
+    let detached_server = cli_json(
+        context,
+        cli_executable,
+        ["ui-bootstrap"]
+    );
+    let detached_capture = cli_text(
+        context,
+        cli_executable,
+        ["capture-pane", "-p", "-t", detach_tab, "--max-bytes", "16384"]
+    );
+    require(
+        human_gui_output.success
+            && !detached_lease.attached
+            && detached_cc.state == "running"
+            && detached_cc.pid == first.id
+            && detached_cc.context.endpoint == typed_endpoint
+            && detached_cc.context.logical_instance == "main"
+            && first.state == "running"
+            && process_present(server.id)
+            && detached_server.server_pid == server.id
+            && detached_server.server_epoch == bootstrap.server_epoch
+            && detached_capture.contains(detach_marker)
+            && rhai::json::parse_file(registry).pid == first.id,
+        "control_center_cross_process_detach_isolation"
+    );
+    test_harness::emit_evidence(
+        context,
+        declared_evidence,
+        "control-center.cross-process-detach"
     );
 
     print("STEP native keyboard and pointer switch Cockpit tabs in-place");
