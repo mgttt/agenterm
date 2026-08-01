@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use crate::contract::process_metrics::{
-    ProcessMetrics, ProcessMetricsError, ProcessMetricsErrorKind,
+    ProcessMetrics, ProcessMetricsError, ProcessMetricsErrorKind, checked_page_faults,
 };
 
 pub(crate) fn metrics(pid: u32) -> Result<ProcessMetrics, ProcessMetricsError> {
@@ -22,6 +22,8 @@ pub(crate) fn metrics(pid: u32) -> Result<ProcessMetrics, ProcessMetricsError> {
         )
     })?;
     let fields: Vec<&str> = stat[close + 1..].split_whitespace().collect();
+    let minor_faults = parse_field(&fields, 7, "minor page faults")?;
+    let major_faults = parse_field(&fields, 9, "major page faults")?;
     let user_ticks = parse_field(&fields, 11, "user CPU ticks")?;
     let system_ticks = parse_field(&fields, 12, "system CPU ticks")?;
     let clock_hz = sysconf(libc::_SC_CLK_TCK, "clock ticks")?;
@@ -40,11 +42,18 @@ pub(crate) fn metrics(pid: u32) -> Result<ProcessMetrics, ProcessMetricsError> {
         .parse::<u64>()
         .map_err(|source| error(ProcessMetricsErrorKind::Parse, source.to_string()))?;
     let ticks = user_ticks.saturating_add(system_ticks);
+    let total_faults = minor_faults.checked_add(major_faults).ok_or_else(|| {
+        error(
+            ProcessMetricsErrorKind::Overflow,
+            "total page-fault count overflows u64",
+        )
+    })?;
     Ok(ProcessMetrics {
         cpu_time: Duration::from_secs(ticks / clock_hz).saturating_add(Duration::from_nanos(
             (ticks % clock_hz).saturating_mul(1_000_000_000) / clock_hz,
         )),
         resident_bytes: resident_pages.saturating_mul(page_size),
+        page_faults: checked_page_faults(total_faults, Some(minor_faults), Some(major_faults))?,
     })
 }
 

@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use crate::contract::process_metrics::{
-    ProcessMetrics, ProcessMetricsError, ProcessMetricsErrorKind,
+    ProcessMetrics, ProcessMetricsError, ProcessMetricsErrorKind, checked_page_faults,
 };
 
 pub(crate) fn metrics(pid: u32) -> Result<ProcessMetrics, ProcessMetricsError> {
@@ -50,6 +50,7 @@ pub(crate) fn metrics(pid: u32) -> Result<ProcessMetrics, ProcessMetricsError> {
     Ok(ProcessMetrics {
         cpu_time: Duration::from_nanos(units_100ns.saturating_mul(100)),
         resident_bytes: memory.WorkingSetSize as u64,
+        page_faults: checked_page_faults(u64::from(memory.PageFaultCount), None, None)?,
     })
 }
 

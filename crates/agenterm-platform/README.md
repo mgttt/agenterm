@@ -45,7 +45,7 @@ clipboard, IPC, or screenshot modules.
 | `user-identity` | current Windows SID or POSIX real/effective uid/gid facts | target `libc` / minimal `windows-sys` |
 | `process-control` | typed single-process termination and Unix suspend/resume | target `libc` / minimal `windows-sys` |
 | `process-image` | executable path for one selected host process | target `libc` / minimal `windows-sys` |
-| `process-metrics` | cumulative CPU time and resident bytes for one selected process | target `libc` / minimal `windows-sys` |
+| `process-metrics` | cumulative CPU time, resident bytes and partially classified page faults for one selected process | target `libc` / minimal `windows-sys` |
 | `shared-memory` | exclusive named read/write mappings for cross-process zero-copy data | target `libc` / minimal `windows-sys` |
 | `process` | observation/tree control, shell defaults, child-pipe probes and parent-console diagnostics | target `libc` / `windows-sys` |
 | `filesystem-conventions` | user home, host roots and sibling executable naming | none |
@@ -77,7 +77,7 @@ clipboard, IPC, or screenshot modules.
 | entropy | BCrypt system-preferred RNG | `getrandom(2)` | `arc4random_buf` |
 | process control | forceful termination; graceful Unsupported | SIGTERM/SIGKILL | SIGTERM/SIGKILL |
 | process image | queried full image path | `/proc/<pid>/exe` | `proc_pidpath` |
-| process metrics | process times + working set | `/proc` stat/statm | `PROC_PIDTASKINFO` |
+| process metrics | process times + working set + total faults | `/proc` stat/statm + minor/major faults | `PROC_PIDTASKINFO` total faults + page-ins |
 | shared memory | page-file mapping | POSIX shared memory | POSIX shared memory |
 | process | ToolHelp/Job Objects | `/proc` + process groups | POSIX process groups |
 | filesystem | AppData conventions | XDG conventions | Application Support |
