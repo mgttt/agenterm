@@ -72,6 +72,19 @@ impl NativeVirtualizationFacts {
     }
 
     #[must_use]
+    pub const fn unavailable_with_code(
+        backend: NativeVirtualizationBackend,
+        native_code: i64,
+    ) -> Self {
+        Self {
+            backend,
+            state: VirtualizationProbeState::Unavailable,
+            api_version: None,
+            native_code: Some(native_code),
+        }
+    }
+
+    #[must_use]
     pub const fn access_denied(backend: NativeVirtualizationBackend, native_code: i64) -> Self {
         Self {
             backend,
@@ -143,6 +156,10 @@ mod tests {
         assert_eq!(denied.state(), VirtualizationProbeState::AccessDenied);
         assert_eq!(denied.api_version(), None);
         assert_eq!(denied.native_code(), Some(13));
+
+        let missing = NativeVirtualizationFacts::unavailable_with_code(backend, 2);
+        assert_eq!(missing.state(), VirtualizationProbeState::Unavailable);
+        assert_eq!(missing.native_code(), Some(2));
 
         let incompatible = NativeVirtualizationFacts::incompatible(backend, 11);
         assert_eq!(incompatible.state(), VirtualizationProbeState::Incompatible);

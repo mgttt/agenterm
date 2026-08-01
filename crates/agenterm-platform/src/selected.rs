@@ -15,6 +15,18 @@ pub(crate) const fn platform_kind() -> crate::PlatformKind {
     }
 }
 
+#[cfg(all(feature = "virtualization-probe", windows))]
+#[path = "adapters/windows/native_virtualization.rs"]
+pub(crate) mod native_virtualization;
+
+#[cfg(all(feature = "virtualization-probe", target_os = "linux"))]
+#[path = "adapters/linux/native_virtualization.rs"]
+pub(crate) mod native_virtualization;
+
+#[cfg(all(feature = "virtualization-probe", target_os = "macos"))]
+#[path = "adapters/macos/native_virtualization.rs"]
+pub(crate) mod native_virtualization;
+
 #[cfg(all(feature = "storage", windows))]
 #[path = "adapters/windows/storage.rs"]
 pub(crate) mod storage;

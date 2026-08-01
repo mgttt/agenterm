@@ -36,6 +36,7 @@ clipboard, IPC, or screenshot modules.
 |---|---|---|
 | `serde` | `IpcEndpoint` string serialization | `serde` |
 | `hardware` | host processor architecture, pointer width, parallelism and CPU features | none |
+| `virtualization-probe` | current-host WHPX/KVM/Hypervisor.framework availability facts without VM lifecycle | target `libc` / minimal dynamically loaded Win32 APIs |
 | `host-memory` | host page size, mapping granularity and total physical memory | target `libc` / minimal `windows-sys` |
 | `storage` | path-scoped volume capacity, caller-available bytes and allocation unit | target `libc` / minimal `windows-sys` |
 | `entropy` | fail-closed host CSPRNG byte filling | target `libc` / minimal `windows-sys` |
@@ -66,6 +67,7 @@ clipboard, IPC, or screenshot modules.
 | Capability | Windows | Linux | macOS |
 |---|---|---|---|
 | hardware | compile-target ISA + runtime CPU facts | compile-target ISA + runtime CPU facts | compile-target ISA + runtime CPU facts |
+| native virtualization probe | dynamically discovered WHPX capability | `/dev/kvm` + API version | `kern.hv_support` |
 | host memory | page/allocation geometry + physical total | page geometry + physical pages | page geometry + `hw.memsize` |
 | storage | volume capacity + cluster geometry | `statvfs` | `statvfs` |
 | entropy | BCrypt system-preferred RNG | `getrandom(2)` | `arc4random_buf` |
@@ -147,6 +149,13 @@ capture_native_window_png(window, std::path::Path::new("window.png"), NativeCapt
 Product applications supply names, paths, policy limits and protocol framing.
 The crate does not know AgenTerm workspaces, Control Center, Fleet, themes,
 commands, or UI snapshots.
+
+`native_virtualization::probe` is passive: it does not create a VM or choose a
+guest/provider. Its result distinguishes available, unavailable, access denied,
+ABI incompatible and failed states while retaining an API version or native
+error code when one exists. Windows resolves `WHvGetCapability` dynamically so
+systems without Windows Hypervisor Platform still start normally; Linux accepts
+only KVM API version 12. The embedding product owns fallback and routing policy.
 
 `shared_memory::SharedMemory` converts one portable ASCII name into a
 session-local page-file mapping on Windows or an owner-readable POSIX shared
