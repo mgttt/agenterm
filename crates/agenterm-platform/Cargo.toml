@@ -22,7 +22,9 @@ process = [
     "windows-sys/Win32_System_Pipes",
     "windows-sys/Win32_System_Threading",
 ]
+filesystem-conventions = []
 filesystem = [
+    "filesystem-conventions",
     "dep:windows-sys",
     "windows-sys/Win32_Storage_FileSystem",
 ]

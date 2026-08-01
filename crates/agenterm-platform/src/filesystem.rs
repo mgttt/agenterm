@@ -1,9 +1,10 @@
 //! Host filesystem conventions without product-specific directory names.
 
+use std::path::{Path, PathBuf};
+#[cfg(feature = "filesystem")]
 use std::{
     fs::{Metadata, OpenOptions},
     io,
-    path::{Path, PathBuf},
 };
 
 use crate::selected;
@@ -48,14 +49,17 @@ pub fn sibling_executable(current_executable: &Path, base: &str) -> PathBuf {
     current_executable.with_file_name(executable_name(base))
 }
 
+#[cfg(feature = "filesystem")]
 pub fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
     selected::filesystem::replace_file(source, destination)
 }
 
+#[cfg(feature = "filesystem")]
 pub fn sync_parent(parent: &Path) -> io::Result<()> {
     selected::filesystem::sync_parent(parent)
 }
 
+#[cfg(feature = "filesystem")]
 pub fn metadata_is_link_like(metadata: &Metadata) -> bool {
     selected::filesystem::metadata_is_link_like(metadata)
 }
@@ -63,6 +67,7 @@ pub fn metadata_is_link_like(metadata: &Metadata) -> bool {
 /// Restrict an existing directory to the current user where the host exposes
 /// portable owner permissions. Windows preserves the directory ACL created by
 /// the caller rather than replacing it with a synthesized ACL.
+#[cfg(feature = "filesystem")]
 pub fn protect_private_directory(path: &Path) -> io::Result<()> {
     selected::filesystem::protect_private_directory(path)
 }
@@ -72,6 +77,7 @@ pub fn protect_private_directory(path: &Path) -> io::Result<()> {
 /// Unix adapters additionally request mode `0600`; Windows relies on the
 /// inherited ACL of the caller-owned private directory.
 #[must_use]
+#[cfg(feature = "filesystem")]
 pub fn private_create_new_options() -> OpenOptions {
     selected::filesystem::private_create_new_options()
 }
@@ -89,6 +95,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "filesystem")]
     #[test]
     fn private_create_is_exclusive() {
         let path = std::env::temp_dir().join(format!(
@@ -109,7 +116,7 @@ mod tests {
         std::fs::remove_file(path).expect("remove private-create fixture");
     }
 
-    #[cfg(unix)]
+    #[cfg(all(unix, feature = "filesystem"))]
     #[test]
     fn private_file_and_directory_use_owner_only_modes() {
         use std::os::unix::fs::PermissionsExt as _;

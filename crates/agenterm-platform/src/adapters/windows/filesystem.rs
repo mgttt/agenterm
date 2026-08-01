@@ -1,7 +1,10 @@
-use std::{fs::OpenOptions, path::PathBuf};
+#[cfg(feature = "filesystem")]
+use std::fs::OpenOptions;
+use std::path::PathBuf;
 
 use crate::filesystem::{FilesystemError, HostDirectories};
 
+#[cfg(feature = "filesystem")]
 pub fn replace_file(
     source: &std::path::Path,
     destination: &std::path::Path,
@@ -45,10 +48,12 @@ pub fn replace_file(
     }
 }
 
+#[cfg(feature = "filesystem")]
 pub fn sync_parent(_parent: &std::path::Path) -> std::io::Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "filesystem")]
 pub fn metadata_is_link_like(metadata: &std::fs::Metadata) -> bool {
     use std::os::windows::fs::MetadataExt as _;
     metadata.file_attributes() & 0x0000_0400 != 0
@@ -70,10 +75,12 @@ pub fn executable_name(base: &str) -> String {
     format!("{base}.exe")
 }
 
+#[cfg(feature = "filesystem")]
 pub fn protect_private_directory(_path: &std::path::Path) -> std::io::Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "filesystem")]
 pub fn private_create_new_options() -> OpenOptions {
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);

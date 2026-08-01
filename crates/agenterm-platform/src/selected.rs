@@ -27,7 +27,10 @@ pub(crate) mod clipboard;
 #[path = "adapters/macos/clipboard.rs"]
 pub(crate) mod clipboard;
 
-#[cfg(all(feature = "filesystem", windows))]
+#[cfg(all(
+    any(feature = "filesystem-conventions", feature = "filesystem"),
+    windows
+))]
 #[path = "adapters/windows/filesystem.rs"]
 pub(crate) mod filesystem;
 
@@ -43,11 +46,17 @@ pub(crate) mod font;
 #[path = "adapters/macos/font.rs"]
 pub(crate) mod font;
 
-#[cfg(all(feature = "filesystem", target_os = "linux"))]
+#[cfg(all(
+    any(feature = "filesystem-conventions", feature = "filesystem"),
+    target_os = "linux"
+))]
 #[path = "adapters/linux/filesystem.rs"]
 pub(crate) mod filesystem;
 
-#[cfg(all(feature = "filesystem", target_os = "macos"))]
+#[cfg(all(
+    any(feature = "filesystem-conventions", feature = "filesystem"),
+    target_os = "macos"
+))]
 #[path = "adapters/macos/filesystem.rs"]
 pub(crate) mod filesystem;
 

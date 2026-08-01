@@ -36,7 +36,8 @@ clipboard, IPC, or screenshot modules.
 |---|---|---|
 | `serde` | `IpcEndpoint` string serialization | `serde` |
 | `process` | observation/tree control, shell defaults, child-pipe probes and parent-console diagnostics | target `libc` / `windows-sys` |
-| `filesystem` | host roots/naming, private state files/directories and durable atomic replacement mechanics | target native APIs |
+| `filesystem-conventions` | host roots and sibling executable naming | none |
+| `filesystem` | conventions plus private state files/directories and durable atomic replacement mechanics | target native APIs |
 | `locking` | cross-process path locks and bounded slot permits | target `libc` / `windows-sys` |
 | `ipc` | typed endpoints and native listener/byte stream | `locking`, target native APIs |
 | `pty` | PTY command/master/child lifecycle | `process`, `rmux-pty` |

@@ -21,6 +21,7 @@ pub const fn platform_kind() -> PlatformKind {
 #[non_exhaustive]
 pub enum Capability {
     Process,
+    FilesystemConventions,
     Filesystem,
     Locking,
     Ipc,
@@ -51,6 +52,7 @@ pub enum CapabilityStatus {
 pub fn capability_status(capability: Capability) -> CapabilityStatus {
     let (enabled, implemented) = match capability {
         Capability::Process => (cfg!(feature = "process"), true),
+        Capability::FilesystemConventions => (cfg!(feature = "filesystem-conventions"), true),
         Capability::Filesystem => (cfg!(feature = "filesystem"), true),
         Capability::Locking => (cfg!(feature = "locking"), true),
         Capability::Ipc => (cfg!(feature = "ipc"), true),
@@ -91,7 +93,7 @@ pub mod control_window;
 #[cfg(feature = "font")]
 pub mod font;
 
-#[cfg(feature = "filesystem")]
+#[cfg(any(feature = "filesystem-conventions", feature = "filesystem"))]
 pub mod filesystem;
 
 #[cfg(feature = "locking")]
@@ -139,6 +141,22 @@ mod tests {
         #[cfg(not(feature = "ipc"))]
         assert_eq!(
             crate::capability_status(crate::Capability::Ipc),
+            crate::CapabilityStatus::Unsupported {
+                reason: std::borrow::Cow::Borrowed("feature-disabled")
+            }
+        );
+    }
+
+    #[cfg(feature = "filesystem-conventions")]
+    #[test]
+    fn filesystem_conventions_do_not_claim_full_filesystem() {
+        assert_eq!(
+            crate::capability_status(crate::Capability::FilesystemConventions),
+            crate::CapabilityStatus::Available
+        );
+        #[cfg(not(feature = "filesystem"))]
+        assert_eq!(
+            crate::capability_status(crate::Capability::Filesystem),
             crate::CapabilityStatus::Unsupported {
                 reason: std::borrow::Cow::Borrowed("feature-disabled")
             }
