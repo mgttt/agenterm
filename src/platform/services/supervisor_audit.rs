@@ -49,22 +49,22 @@ impl Drop for ConcurrencyPermit {
 }
 
 pub(crate) fn configure_worker_command(command: &mut Command) -> Result<(), SupervisorAuditError> {
-    adapter::configure_worker_command(command).map_err(adapter::process_tree_error)
+    agenterm_platform::process::configure_owned_command(command)
+        .map_err(adapter::process_tree_error)
 }
 
-pub(crate) struct ProcessTreeGuard(adapter::ProcessTreeGuard);
+pub(crate) struct ProcessTreeGuard(agenterm_platform::process::ProcessTreeGuard);
 
 impl ProcessTreeGuard {
     pub(crate) fn attach(child: &Child) -> Result<Self, SupervisorAuditError> {
-        adapter::ProcessTreeGuard::attach(child)
+        agenterm_platform::process::ProcessTreeGuard::attach(child)
             .map(Self)
             .map_err(adapter::process_tree_error)
     }
 
     pub(crate) fn terminate(&mut self, exit_code: u32) -> Result<(), SupervisorAuditError> {
-        self.0
-            .terminate(exit_code)
-            .map_err(adapter::process_tree_error)
+        let _ = exit_code;
+        self.0.terminate().map_err(adapter::process_tree_error)
     }
 }
 

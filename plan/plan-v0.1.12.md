@@ -122,6 +122,11 @@ crate；Linux/macOS 的 winit active/application intent 由 target-isolated adap
 主 crate 只保留产品 capability-status 映射和 live handle 生命周期责任。activation
 feature 的 target 依赖不进入默认、process 或 filesystem 最小配置；Unsupported/Failed
 不降级为成功。
+Process-tree 去重叶随后把 Script worker 的 owned-command configuration、Windows Job
+Object 与 POSIX process-group guard 全部改为消费 crate `process` facade；三平台 root
+supervisor adapter 只保留 AgenTerm audit 路径命名和产品错误投影。worker supervisor
+聚焦测试与 Agenterm all-target warnings-denied Clippy 通过，root 不再重复 Win32/libc
+进程树实现。
 
 2026-08-01 首个建设期增量：Cockpit snapshot 新增明确的
 `tab_counts.{total,running,dead}`，native shell 同源显示 logical instance、

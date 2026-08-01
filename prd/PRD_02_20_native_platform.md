@@ -38,6 +38,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   Windows show/no-activate/restore operations and Linux/macOS winit activation
   intent live in target-isolated crate adapters; AgenTerm owns only its window
   lifetime and maps typed failures into the product protocol.
+- [x] Script worker process-tree ownership consumes the crate process facade:
+  Windows Job Objects and Unix process groups have no duplicate root native
+  implementation. AgenTerm-specific audit-path naming remains product policy.
 - [ ] Windows, macOS, and Linux native frontends consume one declared platform
   contract for window lifecycle, normalized input, IME, DPI, clipboard, font
   discovery, screenshots, activation, and applicable system integration.
