@@ -1,7 +1,7 @@
 //! Linux/macOS local IPC adapter. Unix-specific APIs stay behind the platform
 //! facade; the product endpoint and transport contracts remain target-neutral.
 
-use std::os::fd::{AsFd, AsRawFd, BorrowedFd, RawFd};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd, RawFd};
 use std::{
     env,
     io::{self, Read, Write},
@@ -228,6 +228,18 @@ impl AsFd for NativeStream {
 }
 
 impl NativeStream {
+    pub(crate) fn from_owned_fd(
+        descriptor: OwnedFd,
+        endpoint: &IpcEndpoint,
+        timeout: Duration,
+    ) -> TransportResult<Self> {
+        Self::from_stream(descriptor.into(), endpoint, timeout)
+    }
+
+    pub(crate) fn into_owned_fd(self) -> OwnedFd {
+        self.0.into()
+    }
+
     pub(crate) fn connect(endpoint: &IpcEndpoint, timeout: Duration) -> TransportResult<Self> {
         let IpcEndpoint::UnixSocket(path) = endpoint else {
             return Err(crate::contract::ipc_transport::unsupported(

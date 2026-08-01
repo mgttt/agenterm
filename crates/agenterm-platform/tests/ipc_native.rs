@@ -43,12 +43,15 @@ fn native_stream_round_trip_preserves_borrowed_descriptor_ownership() {
         use std::os::windows::io::{AsHandle as _, AsRawHandle as _};
         assert!(!client.as_raw_handle().is_null());
         let _borrowed = client.as_handle();
+        client = NativeStream::from_owned_handle(client.into_owned_handle(), timeout);
     }
     #[cfg(unix)]
     {
         use std::os::fd::{AsFd as _, AsRawFd as _};
         assert!(client.as_raw_fd() >= 0);
         let _borrowed = client.as_fd();
+        client = NativeStream::from_owned_fd(client.into_owned_fd(), &endpoint, timeout)
+            .expect("adopt owned native descriptor");
     }
 
     client.write_all(b"platform").expect("write client frame");

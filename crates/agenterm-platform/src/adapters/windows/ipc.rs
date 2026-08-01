@@ -134,6 +134,14 @@ impl AsHandle for NativeStream {
 }
 
 impl NativeStream {
+    pub(crate) fn from_owned_handle(handle: OwnedHandle, timeout: Duration) -> Self {
+        Self { handle, timeout }
+    }
+
+    pub(crate) fn into_owned_handle(self) -> OwnedHandle {
+        self.handle
+    }
+
     pub(crate) fn connect(endpoint: &IpcEndpoint, timeout: Duration) -> TransportResult<Self> {
         let IpcEndpoint::NamedPipe(name) = endpoint else {
             return Err(crate::contract::ipc_transport::unsupported(

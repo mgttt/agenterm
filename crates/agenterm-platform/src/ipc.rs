@@ -73,6 +73,32 @@ impl std::os::fd::AsFd for NativeStream {
 }
 
 impl NativeStream {
+    #[cfg(windows)]
+    pub fn from_owned_handle(handle: std::os::windows::io::OwnedHandle, timeout: Duration) -> Self {
+        Self(selected::ipc::NativeStream::from_owned_handle(
+            handle, timeout,
+        ))
+    }
+
+    #[cfg(windows)]
+    pub fn into_owned_handle(self) -> std::os::windows::io::OwnedHandle {
+        self.0.into_owned_handle()
+    }
+
+    #[cfg(unix)]
+    pub fn from_owned_fd(
+        descriptor: std::os::fd::OwnedFd,
+        endpoint: &IpcEndpoint,
+        timeout: Duration,
+    ) -> TransportResult<Self> {
+        selected::ipc::NativeStream::from_owned_fd(descriptor, endpoint, timeout).map(Self)
+    }
+
+    #[cfg(unix)]
+    pub fn into_owned_fd(self) -> std::os::fd::OwnedFd {
+        self.0.into_owned_fd()
+    }
+
     pub fn connect(endpoint: &IpcEndpoint, timeout: Duration) -> TransportResult<Self> {
         selected::ipc::NativeStream::connect(endpoint, timeout).map(Self)
     }
