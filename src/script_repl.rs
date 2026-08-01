@@ -8,7 +8,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicU64, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -72,6 +72,27 @@ pub enum ReplInputState {
     Invalid(ReplCellFailure),
 }
 
+#[derive(Clone, Debug)]
+pub struct ReplCancelHandle {
+    epoch: Arc<AtomicU64>,
+}
+
+impl ReplCancelHandle {
+    pub fn cancel(&self) {
+        // Saturation is deliberately fail-closed: once MAX is reached every
+        // current and future cell observes permanent cancellation.
+        let _ = self
+            .epoch
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |epoch| {
+                if epoch == u64::MAX {
+                    None
+                } else {
+                    Some(epoch + 1)
+                }
+            });
+    }
+}
+
 #[derive(Default)]
 struct CellControl {
     output: String,
@@ -87,7 +108,8 @@ pub struct ReplSession {
     functions: AST,
     budgets: ScriptBudgets,
     control: Arc<Mutex<CellControl>>,
-    cancelled: Arc<AtomicBool>,
+    cancel_epoch: Arc<AtomicU64>,
+    active_cancel_baseline: Arc<AtomicU64>,
     sequence: u64,
     history: Vec<String>,
     history_bytes: usize,
@@ -99,11 +121,13 @@ impl ReplSession {
         validate_budgets(&config.budgets)?;
         let temp_scope = enter_invocation_temp_root(config.invocation_temp_root.as_deref());
         let control = Arc::new(Mutex::new(CellControl::default()));
-        let cancelled = Arc::new(AtomicBool::new(false));
+        let cancel_epoch = Arc::new(AtomicU64::new(0));
+        let active_cancel_baseline = Arc::new(AtomicU64::new(0));
         let mut engine = build_engine(
             &config.budgets,
             Arc::clone(&control),
-            Arc::clone(&cancelled),
+            Arc::clone(&cancel_epoch),
+            Arc::clone(&active_cancel_baseline),
         );
         if let Some(root) = config.project_root.as_deref() {
             engine.set_module_resolver(
@@ -128,7 +152,8 @@ impl ReplSession {
             functions: AST::empty(),
             budgets: config.budgets,
             control,
-            cancelled,
+            cancel_epoch,
+            active_cancel_baseline,
             sequence: 0,
             history: Vec::new(),
             history_bytes: 0,
@@ -155,9 +180,28 @@ impl ReplSession {
     }
 
     pub fn evaluate_cell(&mut self, source: &str) -> ReplCellResult {
+        let baseline = self.capture_cancel_epoch();
+        self.evaluate_with_baseline(source, baseline)
+    }
+
+    pub fn capture_cancel_epoch(&self) -> u64 {
+        self.cancel_epoch.load(Ordering::Acquire)
+    }
+
+    pub fn cancel_handle(&self) -> ReplCancelHandle {
+        ReplCancelHandle {
+            epoch: Arc::clone(&self.cancel_epoch),
+        }
+    }
+
+    pub fn evaluate_with_baseline(&mut self, source: &str, baseline: u64) -> ReplCellResult {
         self.sequence = self.sequence.saturating_add(1);
         let sequence = self.sequence;
         let started = Instant::now();
+        self.reset_cell_control(baseline);
+        if self.cancellation_requested(baseline) {
+            return failed_result(sequence, started, cancellation_failure(), String::new());
+        }
         if source.len() > self.budgets.source_bytes {
             return failed_result(
                 sequence,
@@ -171,8 +215,15 @@ impl ReplSession {
             );
         }
 
-        self.reset_cell_control();
         if let Err(error) = self.engine.compile_with_scope(&self.scope, source) {
+            if self.cancellation_requested(baseline) {
+                return failed_result(
+                    sequence,
+                    started,
+                    cancellation_failure(),
+                    self.take_output(),
+                );
+            }
             return failed_result(
                 sequence,
                 started,
@@ -183,6 +234,14 @@ impl ReplSession {
         let cell_ast = match self.engine.compile_into_self_contained(&self.scope, source) {
             Ok(ast) => ast,
             Err(error) => {
+                if self.cancellation_requested(baseline) {
+                    return failed_result(
+                        sequence,
+                        started,
+                        cancellation_failure(),
+                        self.take_output(),
+                    );
+                }
                 return failed_result(
                     sequence,
                     started,
@@ -197,8 +256,12 @@ impl ReplSession {
             .engine
             .eval_ast_with_scope::<Dynamic>(&mut candidate_scope, &candidate_ast);
         let output = self.take_output();
+        let cancelled = self.cancellation_requested(baseline);
         match evaluation {
             Ok(value) => {
+                if cancelled {
+                    return failed_result(sequence, started, cancellation_failure(), output);
+                }
                 if self.output_exceeded() {
                     return failed_result(
                         sequence,
@@ -229,7 +292,7 @@ impl ReplSession {
                 started,
                 runtime_failure(
                     &error,
-                    self.cancelled.load(Ordering::Relaxed),
+                    cancelled,
                     self.wall_time_exceeded(),
                     self.output_exceeded(),
                 ),
@@ -241,12 +304,11 @@ impl ReplSession {
     pub fn reset(&mut self) {
         self.scope = self.initial_scope.clone_visible();
         self.functions = AST::empty();
-        self.cancelled.store(false, Ordering::Relaxed);
-        self.reset_cell_control();
+        self.reset_cell_control(self.capture_cancel_epoch());
     }
 
     pub fn cancel(&self) {
-        self.cancelled.store(true, Ordering::Relaxed);
+        self.cancel_handle().cancel();
     }
 
     pub fn variables(&self) -> Vec<(String, String)> {
@@ -278,14 +340,20 @@ impl ReplSession {
         &self.budgets
     }
 
-    fn reset_cell_control(&self) {
-        self.cancelled.store(false, Ordering::Relaxed);
+    fn reset_cell_control(&self, baseline: u64) {
+        self.active_cancel_baseline
+            .store(baseline, Ordering::Release);
         let mut control = self.control.lock().expect("REPL cell control poisoned");
         control.output.clear();
         control.output_exceeded = false;
         control.wall_time_exceeded = false;
         control.deadline =
             Instant::now().checked_add(Duration::from_millis(self.budgets.wall_time_ms));
+    }
+
+    fn cancellation_requested(&self, baseline: u64) -> bool {
+        let epoch = self.cancel_epoch.load(Ordering::Acquire);
+        epoch == u64::MAX || epoch != baseline
     }
 
     fn take_output(&self) -> String {
@@ -329,7 +397,8 @@ impl ReplSession {
 fn build_engine(
     budgets: &ScriptBudgets,
     control: Arc<Mutex<CellControl>>,
-    cancelled: Arc<AtomicBool>,
+    cancel_epoch: Arc<AtomicU64>,
+    active_cancel_baseline: Arc<AtomicU64>,
 ) -> Engine {
     let mut engine = Engine::new();
     configure_engine(&mut engine, budgets);
@@ -352,7 +421,9 @@ fn build_engine(
         }
     });
     engine.on_progress(move |_| {
-        if cancelled.load(Ordering::Relaxed) {
+        let epoch = cancel_epoch.load(Ordering::Acquire);
+        let baseline = active_cancel_baseline.load(Ordering::Acquire);
+        if epoch == u64::MAX || epoch != baseline {
             return Some(Dynamic::from("REPL cell cancellation requested"));
         }
         let mut state = control.lock().expect("REPL progress lock poisoned");
@@ -495,6 +566,14 @@ fn runtime_failure(
     }
 }
 
+fn cancellation_failure() -> ReplCellFailure {
+    failure(
+        "limit_cancelled",
+        "cancelled",
+        "REPL cell cancellation requested",
+    )
+}
+
 fn dynamic_value(value: &Dynamic) -> Option<ReplValue> {
     if value.is_unit() {
         return None;
@@ -562,6 +641,7 @@ pub fn canonical_project_root(path: Option<&str>) -> Result<Option<PathBuf>, Str
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{sync::mpsc, thread};
 
     fn session() -> ReplSession {
         ReplSession::new(ReplSessionConfig::default()).unwrap()
@@ -623,5 +703,77 @@ mod tests {
         assert!(!failed.ok);
         assert!(failed.stdout.is_char_boundary(failed.stdout.len()));
         assert!(session.evaluate_cell("40 + 2").ok);
+    }
+
+    #[test]
+    fn cancellation_after_captured_baseline_is_not_lost_at_cell_start() {
+        let mut session = session();
+        let stale_baseline = session.capture_cancel_epoch();
+        session.cancel();
+
+        let cancelled = session.evaluate_with_baseline("40 + 2", stale_baseline);
+        assert!(!cancelled.ok);
+        assert_eq!(
+            cancelled
+                .failure
+                .as_ref()
+                .map(|failure| failure.code.as_str()),
+            Some("limit_cancelled")
+        );
+        assert!(!cancelled.state_committed);
+
+        let recovered = session.evaluate_cell("40 + 2");
+        assert!(recovered.ok, "{recovered:?}");
+        assert_eq!(recovered.value.unwrap().value, Some(Value::from(42)));
+    }
+
+    #[test]
+    fn cpu_loop_observes_cooperative_cancellation() {
+        let (control_tx, control_rx) = mpsc::channel();
+        let (started_tx, started_rx) = mpsc::channel();
+
+        let worker = thread::spawn(move || {
+            let mut config = ReplSessionConfig::default();
+            config.budgets.operations = ScriptBudgets::hard_limits().operations;
+            config.budgets.wall_time_ms = 5_000;
+            let mut session = ReplSession::new(config).unwrap();
+            session.engine.register_fn("mark_started", move || {
+                started_tx.send(()).unwrap();
+            });
+            let baseline = session.capture_cancel_epoch();
+            control_tx.send(session.cancel_handle()).unwrap();
+            session.evaluate_with_baseline("mark_started(); while true {}", baseline)
+        });
+        let cancel = control_rx.recv().unwrap();
+        started_rx.recv().unwrap();
+        cancel.cancel();
+
+        let cancelled = worker.join().unwrap();
+        assert!(!cancelled.ok);
+        assert_eq!(
+            cancelled
+                .failure
+                .as_ref()
+                .map(|failure| failure.code.as_str()),
+            Some("limit_cancelled")
+        );
+        assert!(!cancelled.state_committed);
+    }
+
+    #[test]
+    fn saturated_cancel_epoch_is_permanently_cancelled() {
+        let mut session = session();
+        session.cancel_epoch.store(u64::MAX, Ordering::Release);
+        session.cancel();
+
+        let cancelled = session.evaluate_cell("40 + 2");
+        assert_eq!(session.capture_cancel_epoch(), u64::MAX);
+        assert_eq!(
+            cancelled
+                .failure
+                .as_ref()
+                .map(|failure| failure.code.as_str()),
+            Some("limit_cancelled")
+        );
     }
 }
