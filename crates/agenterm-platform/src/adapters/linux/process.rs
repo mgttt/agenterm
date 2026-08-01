@@ -79,7 +79,7 @@ pub(crate) fn list() -> Result<Vec<ProcessInfo>, ProcessError> {
         else {
             continue;
         };
-        let Ok(executable) = std::fs::read_link(entry.path().join("exe")) else {
+        let Ok(executable) = crate::selected::process_image::executable_path(id) else {
             continue;
         };
         let Some(executable_name) = executable.file_name().and_then(|value| value.to_str()) else {

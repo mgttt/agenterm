@@ -38,6 +38,7 @@ clipboard, IPC, or screenshot modules.
 | `hardware` | host processor architecture, pointer width, parallelism and CPU features | none |
 | `entropy` | fail-closed host CSPRNG byte filling | target `libc` / minimal `windows-sys` |
 | `process-control` | typed graceful/forceful single-process termination | target `libc` / minimal `windows-sys` |
+| `process-image` | executable path for one selected host process | target `libc` / minimal `windows-sys` |
 | `process-metrics` | cumulative CPU time and resident bytes for one selected process | target `libc` / minimal `windows-sys` |
 | `shared-memory` | exclusive named read/write mappings for cross-process zero-copy data | target `libc` / minimal `windows-sys` |
 | `process` | observation/tree control, shell defaults, child-pipe probes and parent-console diagnostics | target `libc` / `windows-sys` |
@@ -63,6 +64,7 @@ clipboard, IPC, or screenshot modules.
 | hardware | compile-target ISA + runtime CPU facts | compile-target ISA + runtime CPU facts | compile-target ISA + runtime CPU facts |
 | entropy | BCrypt system-preferred RNG | `getrandom(2)` | `arc4random_buf` |
 | process control | forceful termination; graceful Unsupported | SIGTERM/SIGKILL | SIGTERM/SIGKILL |
+| process image | queried full image path | `/proc/<pid>/exe` | `proc_pidpath` |
 | process metrics | process times + working set | `/proc` stat/statm | `PROC_PIDTASKINFO` |
 | shared memory | page-file mapping | POSIX shared memory | POSIX shared memory |
 | process | ToolHelp/Job Objects | `/proc` + process groups | POSIX process groups |

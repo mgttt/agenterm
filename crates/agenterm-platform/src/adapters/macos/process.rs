@@ -67,11 +67,10 @@ pub(crate) fn observe(pid: u32) -> ProcessObservation {
 
 pub(crate) fn list() -> Result<Vec<ProcessInfo>, ProcessError> {
     use std::{
-        ffi::{CStr, c_char, c_int, c_void},
+        ffi::{c_int, c_void},
         mem::size_of,
     };
     const PROC_ALL_PIDS: u32 = 1;
-    const PROC_PIDPATHINFO_MAXSIZE: u32 = 4 * 1024;
     #[link(name = "proc")]
     unsafe extern "C" {
         fn proc_listpids(
@@ -80,7 +79,6 @@ pub(crate) fn list() -> Result<Vec<ProcessInfo>, ProcessError> {
             buffer: *mut c_void,
             buffer_size: c_int,
         ) -> c_int;
-        fn proc_pidpath(pid: c_int, buffer: *mut c_void, buffer_size: u32) -> c_int;
     }
     let required = unsafe { proc_listpids(PROC_ALL_PIDS, 0, std::ptr::null_mut(), 0) };
     if required <= 0 {
@@ -103,22 +101,18 @@ pub(crate) fn list() -> Result<Vec<ProcessInfo>, ProcessError> {
     ids.truncate(usize::try_from(bytes).unwrap_or_default() / size_of::<c_int>());
     let mut processes = Vec::new();
     for id in ids.into_iter().filter(|id| *id > 0) {
-        let mut path: Vec<c_char> =
-            vec![0; usize::try_from(PROC_PIDPATHINFO_MAXSIZE).unwrap_or_default()];
-        let length =
-            unsafe { proc_pidpath(id, path.as_mut_ptr().cast(), PROC_PIDPATHINFO_MAXSIZE) };
-        if length <= 0 {
+        let Ok(id) = u32::try_from(id) else {
             continue;
-        }
-        let full_path = unsafe { CStr::from_ptr(path.as_ptr()) }.to_string_lossy();
-        let executable_name = std::path::Path::new(full_path.as_ref())
+        };
+        let Ok(executable) = crate::selected::process_image::executable_path(id) else {
+            continue;
+        };
+        let executable_name = executable
             .file_name()
             .and_then(|value| value.to_str())
             .unwrap_or_default()
             .to_owned();
-        if !executable_name.is_empty()
-            && let Ok(id) = u32::try_from(id)
-        {
+        if !executable_name.is_empty() {
             let mut info = unsafe { std::mem::zeroed::<libc::proc_bsdinfo>() };
             let info_size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
             let info_bytes = unsafe {

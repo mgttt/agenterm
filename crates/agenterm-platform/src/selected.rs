@@ -15,6 +15,18 @@ pub(crate) const fn platform_kind() -> crate::PlatformKind {
     }
 }
 
+#[cfg(all(feature = "process-image", windows))]
+#[path = "adapters/windows/process_image.rs"]
+pub(crate) mod process_image;
+
+#[cfg(all(feature = "process-image", target_os = "linux"))]
+#[path = "adapters/linux/process_image.rs"]
+pub(crate) mod process_image;
+
+#[cfg(all(feature = "process-image", target_os = "macos"))]
+#[path = "adapters/macos/process_image.rs"]
+pub(crate) mod process_image;
+
 #[cfg(all(feature = "shared-memory", windows))]
 #[path = "adapters/windows/shared_memory.rs"]
 pub(crate) mod shared_memory;

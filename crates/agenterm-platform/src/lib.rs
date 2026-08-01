@@ -23,6 +23,7 @@ pub enum Capability {
     Hardware,
     Entropy,
     ProcessControl,
+    ProcessImage,
     ProcessMetrics,
     SharedMemory,
     Process,
@@ -59,6 +60,7 @@ pub fn capability_status(capability: Capability) -> CapabilityStatus {
         Capability::Hardware => (cfg!(feature = "hardware"), true),
         Capability::Entropy => (cfg!(feature = "entropy"), true),
         Capability::ProcessControl => (cfg!(feature = "process-control"), true),
+        Capability::ProcessImage => (cfg!(feature = "process-image"), true),
         Capability::ProcessMetrics => (cfg!(feature = "process-metrics"), true),
         Capability::SharedMemory => (cfg!(feature = "shared-memory"), true),
         Capability::Process => (cfg!(feature = "process"), true),
@@ -141,6 +143,9 @@ pub mod process;
 
 #[cfg(feature = "process-control")]
 pub mod process_control;
+
+#[cfg(feature = "process-image")]
+pub mod process_image;
 
 #[cfg(feature = "process-metrics")]
 pub mod process_metrics;
