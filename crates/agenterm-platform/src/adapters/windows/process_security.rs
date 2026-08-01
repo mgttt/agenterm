@@ -16,7 +16,9 @@ use windows_sys::Win32::{
     },
 };
 
-use crate::process_security::{ProcessPrincipal, ProcessSandboxIdentity, ProcessSecurityFacts};
+use crate::process_security::{
+    ProcessPrincipal, ProcessSandboxIdentity, ProcessSecurityFacts, ProcessSecurityHandle,
+};
 
 pub(crate) fn current_process() -> io::Result<ProcessSecurityFacts> {
     token_facts(unsafe { GetCurrentProcess() })
@@ -31,8 +33,10 @@ pub(crate) fn process(process_id: u32) -> io::Result<ProcessSecurityFacts> {
     token_facts(handle.as_raw_handle())
 }
 
-pub(crate) fn process_handle(process: BorrowedHandle<'_>) -> io::Result<ProcessSecurityFacts> {
-    token_facts(process.as_raw_handle())
+impl ProcessSecurityHandle for BorrowedHandle<'_> {
+    fn process_security_facts(self) -> io::Result<ProcessSecurityFacts> {
+        token_facts(self.as_raw_handle())
+    }
 }
 
 fn token_facts(process: HANDLE) -> io::Result<ProcessSecurityFacts> {
@@ -121,4 +125,21 @@ fn copy_sid(sid: *mut core::ffi::c_void, buffer: &[usize]) -> io::Result<Vec<u8>
         ));
     }
     Ok(unsafe { std::slice::from_raw_parts(sid.cast::<u8>(), sid_length) }.to_vec())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::windows::io::RawHandle;
+
+    #[test]
+    fn current_process_handle_reports_a_valid_user_sid() {
+        let handle = unsafe { BorrowedHandle::borrow_raw(GetCurrentProcess() as RawHandle) };
+        let facts = crate::process_security::process_handle(handle)
+            .expect("current process handle security");
+        let ProcessPrincipal::WindowsSid(sid) = facts.principal() else {
+            panic!("Windows process must report a SID principal");
+        };
+        assert_ne!(unsafe { IsValidSid(sid.as_ptr().cast_mut().cast()) }, 0);
+    }
 }

@@ -65,11 +65,23 @@ pub fn process(process_id: u32) -> io::Result<ProcessSecurityFacts> {
     crate::selected::process_security::process(process_id)
 }
 
-#[cfg(windows)]
-pub fn process_handle(
-    process: std::os::windows::io::BorrowedHandle<'_>,
-) -> io::Result<ProcessSecurityFacts> {
-    crate::selected::process_security::process_handle(process)
+/// A native process handle that can report process-security facts.
+///
+/// Platform adapters implement this trait for their native borrowed handle
+/// type. Callers should normally use [`process`] unless they already hold a
+/// process handle whose identity must remain stable across the query.
+pub trait ProcessSecurityHandle {
+    #[doc(hidden)]
+    fn process_security_facts(self) -> io::Result<ProcessSecurityFacts>;
+}
+
+/// Queries security facts through an already-open native process handle.
+///
+/// This keeps the facade platform-neutral while preserving the Windows call
+/// form `process_handle(borrowed_handle)` through the selected adapter's trait
+/// implementation.
+pub fn process_handle(process: impl ProcessSecurityHandle) -> io::Result<ProcessSecurityFacts> {
+    process.process_security_facts()
 }
 
 #[cfg(test)]
@@ -88,17 +100,30 @@ mod tests {
         assert_eq!(process(0).unwrap_err().kind(), io::ErrorKind::InvalidInput);
     }
 
-    #[cfg(windows)]
     #[test]
-    fn current_process_handle_reports_a_valid_user_sid() {
-        use std::os::windows::io::{BorrowedHandle, RawHandle};
-        use windows_sys::Win32::{Security::IsValidSid, System::Threading::GetCurrentProcess};
+    fn handle_query_delegates_without_exposing_a_native_type() {
+        struct TestHandle;
 
-        let handle = unsafe { BorrowedHandle::borrow_raw(GetCurrentProcess() as RawHandle) };
-        let facts = process_handle(handle).expect("current process handle security");
-        let ProcessPrincipal::WindowsSid(sid) = facts.principal() else {
-            panic!("Windows process must report a SID principal");
-        };
-        assert_ne!(unsafe { IsValidSid(sid.as_ptr().cast_mut().cast()) }, 0);
+        impl ProcessSecurityHandle for TestHandle {
+            fn process_security_facts(self) -> io::Result<ProcessSecurityFacts> {
+                Ok(ProcessSecurityFacts::new(
+                    ProcessPrincipal::Posix {
+                        effective_user_id: 10,
+                        effective_group_id: 20,
+                    },
+                    None,
+                ))
+            }
+        }
+
+        assert_eq!(
+            process_handle(TestHandle)
+                .expect("platform-neutral handle query")
+                .principal(),
+            &ProcessPrincipal::Posix {
+                effective_user_id: 10,
+                effective_group_id: 20,
+            }
+        );
     }
 }
