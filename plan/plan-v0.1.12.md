@@ -229,6 +229,11 @@ Unix window-state product leaf 随后移除 `window_state.rs` 的 winit event/wi
 行为和 crate `WindowSemanticState`，原生适配暂集中到唯一剩余 frontend host 文件，等待
 pixel-window runner 接管。Windows-hosted all-target compile 通过，严格生产边界门禁由 7 行
 降至 6 行。
+Unix wake integration leaf 把 `EventLoopProxy` 从 root wake bridge 移除：PTY/IPC producers
+只调用一个 neutral, coalesced GUI wake callback，当前 frontend host 暂时安装 native closure，
+后续直接换成 crate `WindowWaker`。同叶把 IME 与 wheel 产品处理入口改为 crate IME event 和
+中立 vertical-delta/line-mode 参数，原生枚举只在剩余 host event boundary 转换。Windows-hosted
+all-target compile 通过，严格生产边界门禁由 6 行降至 5 行。
 
 2026-08-01 首个建设期增量：Cockpit snapshot 新增明确的
 `tab_counts.{total,running,dead}`，native shell 同源显示 logical instance、

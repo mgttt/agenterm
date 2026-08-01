@@ -1,33 +1,29 @@
-use std::sync::{Mutex, OnceLock};
-
-use winit::event_loop::EventLoopProxy;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::wake_signal::WakeSignal;
 
-/// User-event payload used to wake the Unix winit loop from IPC/PTY threads.
+/// User-event payload used by the selected Unix window host.
 pub type UnixWake = ();
 
-static UNIX_WAKE_PROXY: OnceLock<Mutex<Option<EventLoopProxy<UnixWake>>>> = OnceLock::new();
+type GuiWake = Arc<dyn Fn() + Send + Sync>;
 
-fn unix_wake_proxy() -> &'static Mutex<Option<EventLoopProxy<UnixWake>>> {
-    UNIX_WAKE_PROXY.get_or_init(|| Mutex::new(None))
+static UNIX_WAKE: OnceLock<Mutex<Option<GuiWake>>> = OnceLock::new();
+
+fn unix_wake() -> &'static Mutex<Option<GuiWake>> {
+    UNIX_WAKE.get_or_init(|| Mutex::new(None))
 }
 
-/// Registers the EventLoopProxy used to wake the Unix frontend event loop.
-pub fn install_unix_wake(proxy: EventLoopProxy<UnixWake>) {
-    *unix_wake_proxy()
-        .lock()
-        .expect("unix wake mailbox lock poisoned") = Some(proxy);
+/// Registers a neutral callback for the selected frontend event-loop waker.
+pub fn install_unix_wake(wake: impl Fn() + Send + Sync + 'static) {
+    *unix_wake().lock().expect("unix wake mailbox lock poisoned") = Some(Arc::new(wake));
 }
 
 pub(crate) fn request_gui_wake(_wake_window: isize, wake_signal: &WakeSignal) {
     if !wake_signal.request() {
         return;
     }
-    let guard = unix_wake_proxy()
-        .lock()
-        .expect("unix wake mailbox lock poisoned");
-    if let Some(proxy) = guard.as_ref() {
-        let _ = proxy.send_event(());
+    let guard = unix_wake().lock().expect("unix wake mailbox lock poisoned");
+    if let Some(wake) = guard.as_ref() {
+        wake();
     }
 }

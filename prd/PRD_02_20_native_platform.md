@@ -524,6 +524,12 @@ integrated validation recorded below):
   event and logical-size types are confined to the one remaining frontend host
   integration point. The strict production boundary report is down to six
   findings pending that host, Windows remote GUI and final root selection.
+- [x] The root Unix wake bridge no longer stores or exposes a native event-loop
+  proxy. Producers retain the product coalescing signal and call a neutral wake
+  callback installed by the selected host; IME and wheel product handlers also
+  accept only crate events and neutral deltas. Native conversion is localized
+  in the remaining frontend host, reducing the strict boundary report to five
+  findings.
 - [x] Control Center state-directory protection, exclusive state-file creation,
   atomic replacement, existing-window focus, and direct native capture now
   call `services::control_center → selected → adapters/{windows,linux,macos}`.

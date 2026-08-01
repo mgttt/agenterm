@@ -438,7 +438,9 @@ fn run_gui(no_activate: bool) -> anyhow::Result<()> {
     event_loop_builder.configure_platform_activation(no_activate);
     let event_loop = event_loop_builder.build()?;
     let proxy = event_loop.create_proxy();
-    install_unix_wake(proxy);
+    install_unix_wake(move || {
+        let _ = proxy.send_event(());
+    });
     let context = Context::new(event_loop.owned_display_handle())
         .map_err(|error| anyhow::anyhow!("{error}"))?;
     let wake_signal = Arc::new(WakeSignal::new());
@@ -796,16 +798,8 @@ impl UnixApp {
         }
     }
 
-    fn handle_ime(&mut self, event: Ime) {
+    fn handle_ime(&mut self, event: agenterm_platform::ime::ImeEvent) {
         self.cursor_blink.reset(Instant::now());
-        let event = match event {
-            Ime::Enabled => agenterm_platform::ime::ImeEvent::Enabled,
-            Ime::Preedit(text, cursor) => {
-                agenterm_platform::ime::ImeEvent::Preedit { text, cursor }
-            }
-            Ime::Commit(text) => agenterm_platform::ime::ImeEvent::Commit(text),
-            Ime::Disabled => agenterm_platform::ime::ImeEvent::Disabled,
-        };
         match agenterm_platform::ime::classify_event(event, self.ime_anchor().is_some()) {
             agenterm_platform::ime::ImeAction::None => {}
             agenterm_platform::ime::ImeAction::UpdatePreedit { text, cursor } => {
@@ -2916,15 +2910,12 @@ impl UnixApp {
         self.sidebar_scroll_drag = None;
     }
 
-    fn mouse_wheel(&mut self, x: f64, y: f64, delta: MouseScrollDelta) {
+    fn mouse_wheel(&mut self, x: f64, y: f64, vertical_delta: f64, line_based: bool) {
         if self.settings_open || self.window_close_pending {
             return;
         }
         let layout = self.layout();
-        let units = match delta {
-            MouseScrollDelta::LineDelta(_, lines) => wheel_delta_units(f64::from(lines), true),
-            MouseScrollDelta::PixelDelta(pos) => wheel_delta_units(pos.y, false),
-        };
+        let units = wheel_delta_units(vertical_delta, line_based);
         if self.config.tabs_visible && layout.sidebar_tree.contains(x as i32, y as i32) {
             self.wheel_remainder += units;
             let notches = self.wheel_remainder / WHEEL_DELTA;
@@ -4294,7 +4285,14 @@ impl ApplicationHandler<UnixWake> for UnixApp {
             WindowEvent::ModifiersChanged(new_modifiers) => {
                 self.modifiers = new_modifiers.state();
             }
-            WindowEvent::Ime(event) => self.handle_ime(event),
+            WindowEvent::Ime(event) => self.handle_ime(match event {
+                Ime::Enabled => agenterm_platform::ime::ImeEvent::Enabled,
+                Ime::Preedit(text, cursor) => {
+                    agenterm_platform::ime::ImeEvent::Preedit { text, cursor }
+                }
+                Ime::Commit(text) => agenterm_platform::ime::ImeEvent::Commit(text),
+                Ime::Disabled => agenterm_platform::ime::ImeEvent::Disabled,
+            }),
             WindowEvent::KeyboardInput { event, .. } => {
                 let event = event.to_normalized_key_event(self.modifiers.to_platform_modifiers());
                 if event.state != KeyPressState::Pressed {
@@ -4462,7 +4460,14 @@ impl ApplicationHandler<UnixWake> for UnixApp {
             }
             WindowEvent::MouseWheel { delta, .. } => {
                 let (x, y) = self.last_cursor;
-                self.mouse_wheel(x, y, delta);
+                match delta {
+                    MouseScrollDelta::LineDelta(_, lines) => {
+                        self.mouse_wheel(x, y, f64::from(lines), true)
+                    }
+                    MouseScrollDelta::PixelDelta(position) => {
+                        self.mouse_wheel(x, y, position.y, false)
+                    }
+                }
             }
             WindowEvent::MouseInput {
                 state: ElementState::Pressed,
