@@ -901,6 +901,14 @@ Cockpit
   bracketed mode，stale completion typed cancel。Windows integrated `remote-ui-smoke`
   已以真实 PTY 输入流证明普通异步粘贴和精确 `ESC[200~...ESC[201~` framing；Unix
   all-target compile/runtime 回执仍等待下一次 matching-host CI，不能由 Windows 冒充；
+- exact-SHA `ceb41a4` ordinary CI run `30721132723` 给出三个独立、可行动失败，
+  不是泛化超时：Windows quality gate 拒绝新增 transient `.ps1` 自动化引用，现复用已
+  审计且前一 child 已退出的 run-owned fixture 路径，migration audit 保持 0 drift；
+  macOS ARM64 证明单连接 malformed listener 在 renderer refresh 前退出会把 truth 从
+  `server_incompatible` 变成 `server_unreachable`，现改为 bounded ready/stop listener；
+  Linux x64 重现 winit 丢弃 background core events，现把 no-activate witness 与输入阶段
+  分离，显式 foreground 后以 XTest 投递，并要求 renderer `last_native_input` 后恢复 witness。
+  三项均等待后继 exact-SHA matching-host 回执，不能把本失败 run 记绿；
 - Workflows、Extensions、InfoHub 可以改进解释与导航，但没有 owning backend
   前继续显示真实 empty/unavailable，不造假数据。
 

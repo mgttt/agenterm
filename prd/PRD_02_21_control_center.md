@@ -208,7 +208,13 @@ Control Center is the product name; the executable family uses
   platform; its bounded event-loop poll consumes the mailbox and invokes focus
   with the live winit window. Mailbox publication failures are returned as
   `control_center_focus_request_failed` rather than silently ignored. A new
-  matching-host receipt is still required.
+  matching-host receipt is still required. Exact-SHA `ceb41a4` run
+  `30721132723` proved both macOS architectures compile and the x86_64 native
+  lifecycle, then exposed that the ARM64 incompatible-protocol fixture served
+  only one connection: the renderer briefly observed `server_incompatible`
+  before its next refresh truthfully became `server_unreachable`. The fixture
+  now remains bounded and ready/stop-handshaked while serving every refresh;
+  owner/state/reason assertions are not relaxed.
   Windows qualification evidence and
   Linux/macOS matching-host evidence are registered in separate gate manifests
   but participate in one exact PRD alignment parity check; cross-target compile
@@ -431,13 +437,19 @@ future promotion gates.
   and orphan cleanup. Wayland runs the portable owner/reuse lifecycle without
   pretending compositor focus is observable; unavailable displays return typed
   `Unsupported` without fake evidence. The X11 process-window adapter now
-  selects one unique viewable EWMH client by exact PID, rejects ambiguity, and
-  posts checked key/pointer events only to that window. The owning journey's
+  selects one unique viewable EWMH client by exact PID and rejects ambiguity.
+  Passive `--no-activate` is proved first against an independent foreground
+  witness. Native input is a separate authority: the journey explicitly makes
+  the Control Center foreground, and the adapter requires that exact state plus
+  XTest before sending real key, motion and button events; unavailable XTest,
+  wrong foreground and invalid button state are typed failures. The owning
   `control-center.linux-native-cockpit-input` evidence requires keyboard and
-  pointer active-tab changes while the compositor foreground witness, Control
-  Center PID, server PID/endpoint/epoch and PTY remain unchanged. Wayland emits
-  no positive-input evidence. A new real Linux CI execution, Wayland native
-  evidence, six-cell reruns and packaged evidence remain open.
+  pointer active-tab changes plus renderer-owned `last_native_input` receipts,
+  then restores the witness while the Control Center PID, server
+  PID/endpoint/epoch and PTYs remain unchanged. Wayland emits no positive-input
+  evidence. Exact-SHA `ceb41a4` run `30721132723` reproduced the old core-event
+  timeout and is the negative baseline; a new real Linux CI execution, Wayland
+  native evidence, six-cell reruns and packaged evidence remain open.
 - [~] the Linux journey creates its isolated runtime as a direct `0700`
   directory owned by the effective UID before binding the Unix endpoint; the
   smoke verifies both owner and mode instead of weakening the production IPC
