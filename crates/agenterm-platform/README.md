@@ -48,7 +48,7 @@ clipboard, IPC, or screenshot modules.
 | `process-control` | typed single-process termination and Unix suspend/resume | target `libc` / minimal `windows-sys` |
 | `process-image` | executable path for one selected host process | target `libc` / minimal `windows-sys` |
 | `process-metrics` | cumulative CPU time, resident bytes and partially classified page faults for one selected process | target `libc` / minimal `windows-sys` |
-| `process-spawn` | detached child launch with retained `Child`, explicit Windows job fallback and ambient-stdio protection | target `libc` / minimal `windows-sys` |
+| `process-spawn` | detached child launch with retained `Child`, explicit Windows job fallback, ambient-stdio protection and a shared handle-inheritance mutation lock | target `libc` / minimal `windows-sys` |
 | `shared-memory` | exclusive named read/write mappings for cross-process zero-copy data | target `libc` / minimal `windows-sys` |
 | `process` | observation/tree control, shell defaults, child-pipe probes and parent-console diagnostics | target `libc` / `windows-sys` |
 | `filesystem-conventions` | user home, host roots and sibling executable naming | none |

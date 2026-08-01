@@ -4,6 +4,32 @@ use std::process::{Child, Command, ExitStatus};
 
 pub use crate::contract::process_spawn::{DetachedSpawnMode, ProcessExit};
 
+/// Process-wide coordination for temporary `HANDLE_FLAG_INHERIT` mutation.
+///
+/// Windows handle inheritance flags belong to the process, not one
+/// `CreateProcessW` call. Raw-process launchers that temporarily change those
+/// flags must hold this guard through process creation so they cannot race with
+/// [`spawn_detached_child`] or another cooperating launcher. The guard exposes
+/// no native handle and is a plain serialization scope on non-Windows hosts.
+/// Do not call a platform spawn entry point while already holding it.
+#[must_use = "the lock guard must be held through handle mutation and process creation"]
+pub struct HandleInheritanceLock {
+    _guard: std::sync::MutexGuard<'static, ()>,
+}
+
+/// Enter the shared handle-inheritance mutation window.
+pub fn lock_handle_inheritance() -> HandleInheritanceLock {
+    use std::sync::{Mutex, OnceLock};
+
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    HandleInheritanceLock {
+        _guard: LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()),
+    }
+}
+
 /// Classify a native child status without inventing a product fallback code.
 #[must_use]
 pub fn classify_exit_status(status: &ExitStatus) -> ProcessExit {
@@ -62,6 +88,35 @@ mod tests {
 
     const PROBE_ENV: &str = "AGENTERM_PLATFORM_DETACHED_CHILD_PROBE";
     const PROBE_PID_FILE_ENV: &str = "AGENTERM_PLATFORM_DETACHED_CHILD_PID_FILE";
+
+    #[test]
+    fn handle_inheritance_lock_serializes_cooperating_threads() {
+        let first = lock_handle_inheritance();
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (acquired_tx, acquired_rx) = std::sync::mpsc::channel();
+        let contender = std::thread::spawn(move || {
+            started_tx.send(()).expect("publish contender start");
+            let _second = lock_handle_inheritance();
+            acquired_tx.send(()).expect("publish lock acquisition");
+        });
+        started_rx
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .expect("contender did not start");
+        assert!(
+            acquired_rx
+                .recv_timeout(std::time::Duration::from_millis(50))
+                .is_err(),
+            "a second inheritance mutation entered the guarded window"
+        );
+
+        drop(first);
+        acquired_rx
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .expect("contender did not acquire the released lock");
+        contender
+            .join()
+            .expect("inheritance-lock contender panicked");
+    }
 
     #[test]
     fn detached_child_probe() {

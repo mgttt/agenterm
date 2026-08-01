@@ -37,13 +37,12 @@ pub(crate) fn spawn(command: &mut Command) -> std::io::Result<Child> {
 /// the serialized spawn window and restore them even when process creation
 /// fails.
 struct StandardHandleInheritanceGuard {
-    _lock: std::sync::MutexGuard<'static, ()>,
+    _lock: crate::process_spawn::HandleInheritanceLock,
     handles: Vec<(windows_sys::Win32::Foundation::HANDLE, u32)>,
 }
 
 impl StandardHandleInheritanceGuard {
     fn new() -> std::io::Result<Self> {
-        use std::sync::{Mutex, OnceLock};
         use windows_sys::Win32::Foundation::{
             ERROR_INVALID_HANDLE, GetHandleInformation, HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE,
             SetHandleInformation,
@@ -52,13 +51,8 @@ impl StandardHandleInheritanceGuard {
             GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
         };
 
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        let lock = LOCK
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let mut guard = Self {
-            _lock: lock,
+            _lock: crate::process_spawn::lock_handle_inheritance(),
             handles: Vec::new(),
         };
         for standard_handle in [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
