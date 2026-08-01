@@ -12,6 +12,18 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   bootstrap worker executes outside Cargo output, so the Windows cleanup cannot
   be blocked by an in-target executable; dev and `release-fast` retain their
   incremental targets.
+- [~] native Windows development builds now emit a strict versioned
+  whole-root incremental manifest through the stable bootstrap worker used as
+  `RUSTC_WRAPPER`, and consume it only after all seven artifacts stage. The
+  producer freezes the before snapshot while Cargo's lock is observed,
+  serializes parallel wrappers behind an invocation barrier, records exact
+  touched roots, and fails closed on missing rustc activity, indirect state,
+  identity drift, working sessions, or held locks. Isolated producer/consumer
+  tests prove exact untouched-root deletion; two consecutive public builds
+  prove stable-worker reuse and a no-rustc hot build authorizes zero root
+  deletion. A live development tree has not yet presented an eligible obsolete
+  whole root, so production root-count and byte-reclamation evidence remains
+  open rather than inferred from the fixture.
 - [~] v0.1.7 build inputs embed commit, dirty state, Cargo lock hash, artifact
   manifest hash, and profile without fabricating missing values; protocol and
   instance discovery expose running versus staged identity with

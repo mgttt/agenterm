@@ -461,8 +461,15 @@ Release 全部是本轮明确非目标。
   仅让 `touched=false`、before/after/锁内二次全树 metadata identity 一致、无 working/
   indirect/special entry 且全部 session locks 可持有的 root 删除；5 项 Windows 隔离测试
   覆盖成功删除与 touched/缺失/损坏/无 rustc/incomplete/mismatch/active-lock 保留。mtime
-  只作 TOCTOU identity，绝不推断 usage；真实 rustc-wrapper producer、warm reuse 与回收量
-  证据仍未完成，所以生产 build 继续保留不同 root generation。
+  只作 TOCTOU identity，绝不推断 usage。native Windows dev lane 现已用 repo 外稳定
+  bootstrap worker 作为真实 `RUSTC_WRAPPER`：首次带 `-C incremental` 的 rustc 调用在
+  Cargo lock 与 producer barrier 内冻结 before snapshot，逐次记录精确 touched root，成功
+  staging 后才原子生成 manifest 并交给既有 consumer；hot build 没有 rustc invocation 时
+  manifest 明确无效且授权删除 0 个 root。wrapper/finalizer 隔离测试、9 项 producer/consumer
+  回归、warnings-denied Clippy 与连续两次 `build.bat` 已通过；第二次复用相同 worker，bootstrap
+  Cargo 为 0 ms，总时长从 31.3 秒降到 11.8 秒。首次构建另回收 69 个旧 session、约
+  1.20 GB logical bytes；真实工作树上可删除的不同 root generation 数量与实际字节回收量
+  尚未出现，因此缓存膨胀叶仍为 partial，不以隔离 fixture 冒充生产回收证据。
 - [x] `agenterm-platform` workspace 抽取后的集成门禁已真实收口：供应链任务不再假设单
   workspace package，而是动态排除全部 workspace members、验证两个 crate 的外部直接依赖
   并集并生成 275-package SPDX；补齐 macOS `objc2-app-kit`/`objc2-foundation` MIT notices。
