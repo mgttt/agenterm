@@ -24,18 +24,18 @@ use windows_sys::Win32::{
             DestroyWindow, DispatchMessageW, ES_AUTOVSCROLL, ES_MULTILINE, ES_PASSWORD,
             ES_WANTRETURN, EnableMenuItem, GWLP_USERDATA, GetClientRect, GetMessageW,
             GetSystemMenu, GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW,
-            IDC_ARROW, IDC_HAND, IDC_IBEAM, IDC_SIZENS, IDC_SIZEWE, IsIconic, IsWindowVisible,
-            IsZoomed, LoadCursorW, MF_BYCOMMAND, MF_CHECKED, MF_ENABLED, MF_GRAYED, MF_SEPARATOR,
-            MF_STRING, MF_UNCHECKED, MSG, ModifyMenuW, MoveWindow, PostMessageW, PostQuitMessage,
-            RegisterClassW, SIZE_MINIMIZED, SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW,
-            SW_SHOWNOACTIVATE, SendMessageW, SetCursor, SetForegroundWindow, SetTimer,
-            SetWindowLongPtrW, SetWindowTextW, ShowWindow, TranslateMessage, WM_APP,
-            WM_CAPTURECHANGED, WM_CHAR, WM_CLOSE, WM_COMMAND, WM_COPY, WM_DESTROY, WM_ERASEBKGND,
-            WM_INITMENUPOPUP, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN,
-            WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY,
-            WM_PAINT, WM_PASTE, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETFOCUS, WM_SIZE, WM_SYSCOMMAND,
-            WM_TIMER, WNDCLASSW, WS_CHILD, WS_EX_CLIENTEDGE, WS_OVERLAPPEDWINDOW, WS_TABSTOP,
-            WS_VISIBLE, WS_VSCROLL,
+            IDC_ARROW, IDC_HAND, IDC_IBEAM, IDC_SIZENS, IDC_SIZEWE, ISMEX_NOSEND, InSendMessageEx,
+            IsIconic, IsWindowVisible, IsZoomed, LoadCursorW, MF_BYCOMMAND, MF_CHECKED, MF_ENABLED,
+            MF_GRAYED, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MSG, ModifyMenuW, MoveWindow,
+            PostMessageW, PostQuitMessage, RegisterClassW, SIZE_MINIMIZED, SW_HIDE, SW_MAXIMIZE,
+            SW_MINIMIZE, SW_RESTORE, SW_SHOW, SW_SHOWNOACTIVATE, SendMessageW, SetCursor,
+            SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowTextW, ShowWindow,
+            TranslateMessage, WM_APP, WM_CAPTURECHANGED, WM_CHAR, WM_CLOSE, WM_COMMAND, WM_COPY,
+            WM_DESTROY, WM_ERASEBKGND, WM_INITMENUPOPUP, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS,
+            WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP,
+            WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY, WM_PAINT, WM_PASTE, WM_RBUTTONDOWN,
+            WM_RBUTTONUP, WM_SETFOCUS, WM_SIZE, WM_SYSCOMMAND, WM_TIMER, WNDCLASSW, WS_CHILD,
+            WS_EX_CLIENTEDGE, WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE, WS_VSCROLL,
         },
     },
 };
@@ -641,6 +641,12 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPAR
         WM_SETFOCUS => Some(ControlWindowEvent::FocusChanged(true)),
         WM_KILLFOCUS => Some(ControlWindowEvent::FocusChanged(false)),
         WM_CAPTURECHANGED => Some(ControlWindowEvent::CaptureChanged(false)),
+        WM_KEYDOWN | WM_KEYUP if unsafe { InSendMessageEx(ptr::null()) } != ISMEX_NOSEND => {
+            Some(ControlWindowEvent::KeyPreview {
+                target: state.window.focused_target(),
+                event: key_event(wp as u32, msg == WM_KEYDOWN, lp),
+            })
+        }
         WM_CHAR => match state.text_decoder.push(wp as u16) {
             KeyClassification::TextCommit(text) => Some(ControlWindowEvent::TextInput(text)),
             _ => None,
