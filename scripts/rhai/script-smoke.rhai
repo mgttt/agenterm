@@ -26,6 +26,7 @@ let declared_evidence = [
     "script.fs-lifecycle",
     "script.runtime-lifecycle",
     "script.supervisor",
+    "script.repl-supervision",
     "script.audit"
 ];
 
@@ -1681,6 +1682,188 @@ fn wait_script_gui(context, cli, gui_child) {
     throw "script_fleet_gui_ready_timeout";
 }
 
+fn wait_repl_pid_file(path, timeout_ms) {
+    let attempts = timeout_ms / 5;
+    for attempt in 0..attempts {
+        if std::fs::exists(path) {
+            let value = trimmed(std::fs::read_to_string(path));
+            if value != "" {
+                return value.parse_int();
+            }
+        }
+        rhai::task::sleep(std::time::Duration::from_millis(5));
+    }
+    throw "script_repl_pid_file_timeout:" + path;
+}
+
+fn send_repl_line(context, cli, tab_id, source, audit_path) {
+    helper::cli_text(
+        context,
+        cli,
+        ["send-keys", "-t", tab_id, "-l", source],
+        audit_path
+    );
+    helper::cli_text(
+        context,
+        cli,
+        ["send-keys", "-t", tab_id, "Enter"],
+        audit_path
+    );
+}
+
+fn wait_repl_text(context, cli, tab_id, text, audit_path) {
+    helper::cli_text(
+        context,
+        cli,
+        [
+            "wait-pane", "-t", tab_id,
+            "--contains", text,
+            "--timeout-ms", "10000"
+        ],
+        audit_path
+    );
+}
+
+fn assert_persistent_repl_supervision(
+    context,
+    cli,
+    audit_path,
+    runtime_dir
+) {
+    print("STEP hosted persistent REPL cancellation and replacement");
+    let tab_id = helper::cli_text(
+        context,
+        cli,
+        [
+            "new-window", "-d", "-P", "-F", "#{window_id}",
+            "-n", "script-repl-" + context.run_id,
+            "--", cli, "--address", context.address,
+            "script", "repl", "--json"
+        ],
+        audit_path
+    );
+
+    let initial_pid_path = std::path::join(
+        runtime_dir,
+        "repl-initial.pid"
+    ).display;
+    send_repl_line(
+        context,
+        cli,
+        tab_id,
+        `let stable = 40; std::fs::write(${json_literal(initial_pid_path)}, std::process::id().to_string()); stable + 2`,
+        audit_path
+    );
+    let initial_pid = wait_repl_pid_file(initial_pid_path, 5000);
+    wait_repl_text(context, cli, tab_id, `"value":42`, audit_path);
+
+    let cooperative_pid_path = std::path::join(
+        runtime_dir,
+        "repl-cooperative.pid"
+    ).display;
+    send_repl_line(
+        context,
+        cli,
+        tab_id,
+        `std::fs::write(${json_literal(cooperative_pid_path)}, std::process::id().to_string()); loop {}`,
+        audit_path
+    );
+    require(
+        wait_repl_pid_file(cooperative_pid_path, 5000) == initial_pid,
+        "script_repl_cooperative_fixture_changed_worker"
+    );
+    helper::cli_text(
+        context,
+        cli,
+        ["send-keys", "-t", tab_id, "C-c"],
+        audit_path
+    );
+    wait_repl_text(context, cli, tab_id, `"code":"limit_cancelled"`, audit_path);
+
+    let recovered_pid_path = std::path::join(
+        runtime_dir,
+        "repl-recovered.pid"
+    ).display;
+    send_repl_line(
+        context,
+        cli,
+        tab_id,
+        `std::fs::write(${json_literal(recovered_pid_path)}, std::process::id().to_string()); stable + 2`,
+        audit_path
+    );
+    let recovered_pid = wait_repl_pid_file(recovered_pid_path, 5000);
+    require(
+        recovered_pid == initial_pid,
+        "script_repl_cooperative_cancel_replaced_worker"
+    );
+
+    let hard_worker_path = std::path::join(
+        runtime_dir,
+        "repl-hard-worker.pid"
+    ).display;
+    let nested_pid_path = std::path::join(
+        runtime_dir,
+        "repl-hard-child.pid"
+    ).display;
+    send_repl_line(
+        context,
+        cli,
+        tab_id,
+        `let command=std::process::command("cmd.exe"); command.args(["/d","/s","/c","ping -n 30 127.0.0.1 >nul"]); let child=command.start(); std::fs::write(${json_literal(hard_worker_path)}, std::process::id().to_string()); std::fs::write(${json_literal(nested_pid_path)}, child.id.to_string()); std::net::TcpListener::bind("127.0.0.1:0").accept();`,
+        audit_path
+    );
+    let hard_worker_pid = wait_repl_pid_file(hard_worker_path, 5000);
+    let nested_pid = wait_repl_pid_file(nested_pid_path, 5000);
+    require(
+        hard_worker_pid == initial_pid,
+        "script_repl_hard_fixture_changed_worker"
+    );
+    helper::cli_text(
+        context,
+        cli,
+        ["send-keys", "-t", tab_id, "C-c"],
+        audit_path
+    );
+    helper::wait_process_gone(hard_worker_pid, 3000);
+    helper::wait_process_gone(nested_pid, 3000);
+
+    let fresh_pid_path = std::path::join(
+        runtime_dir,
+        "repl-fresh.pid"
+    ).display;
+    send_repl_line(
+        context,
+        cli,
+        tab_id,
+        `std::fs::write(${json_literal(fresh_pid_path)}, std::process::id().to_string()); 42`,
+        audit_path
+    );
+    let fresh_pid = wait_repl_pid_file(fresh_pid_path, 5000);
+    require(
+        fresh_pid != initial_pid,
+        "script_repl_hard_cancel_reused_worker"
+    );
+    wait_repl_text(context, cli, tab_id, `"reason":"hard_interrupt"`, audit_path);
+    wait_repl_text(context, cli, tab_id, `"side_effects_replayed":false`, audit_path);
+
+    send_repl_line(context, cli, tab_id, ":quit", audit_path);
+    helper::cli_text(
+        context,
+        cli,
+        [
+            "wait-pane", "-t", tab_id, "--dead",
+            "--timeout-ms", "5000"
+        ],
+        audit_path
+    );
+    helper::cli_text(
+        context,
+        cli,
+        ["kill-window", "-t", tab_id],
+        audit_path
+    );
+}
+
 fn assert_fleet_and_north_star(
     context,
     repo,
@@ -1715,6 +1898,12 @@ fn assert_fleet_and_north_star(
         );
         gui_child = gui_command.start();
         let snapshot = wait_script_gui(context, cli, gui_child);
+        assert_persistent_repl_supervision(
+            context,
+            cli,
+            audit_path,
+            runtime_dir
+        );
         let public_capture = helper::cli_json(
             context,
             cli,
@@ -2512,6 +2701,7 @@ try {
     emit(context, declared_evidence, "script.fleet-v2");
     emit(context, declared_evidence, "script.direct-entry");
     emit(context, declared_evidence, "script.north-star");
+    emit(context, declared_evidence, "script.repl-supervision");
     assert_audit(
         context,
         cli,

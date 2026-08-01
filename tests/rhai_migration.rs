@@ -2177,8 +2177,8 @@ fn prd_alignment_task_matches_public_catalogs_and_fails_closed() {
         String::from_utf8_lossy(&accepted.stdout).trim(),
         concat!(
             "PASS: PRD aligns with 62 catalog entries, 84 public names, ",
-            "11 protocol features, 41 mux commands, 61 capability IDs, ",
-            "and 61 executable evidence IDs"
+            "11 protocol features, 41 mux commands, 64 capability IDs, ",
+            "and 91 executable evidence IDs"
         )
     );
 
@@ -2224,13 +2224,20 @@ fn prd_alignment_task_matches_public_catalogs_and_fails_closed() {
         .contains("prd_alignment_contract_schema")
     );
 
-    let false_shipped = contract_source
-        .replacen("\"status\": \"partial\"", "\"status\": \"shipped\"", 1)
-        .replacen(
-            "\"evidence_mode\": \"black-box-partial\"",
-            "\"evidence_mode\": \"black-box\"",
-            1,
-        );
+    let partial_selection = concat!(
+        "\"id\": \"terminal.text-selection-copy\",\n",
+        "      \"kind\": \"behavior\",\n",
+        "      \"status\": \"partial\",\n",
+        "      \"evidence_mode\": \"black-box-partial\""
+    );
+    let shipped_selection = concat!(
+        "\"id\": \"terminal.text-selection-copy\",\n",
+        "      \"kind\": \"behavior\",\n",
+        "      \"status\": \"shipped\",\n",
+        "      \"evidence_mode\": \"black-box\""
+    );
+    assert!(contract_source.contains(partial_selection));
+    let false_shipped = contract_source.replacen(partial_selection, shipped_selection, 1);
     fs::write(&contract_path, false_shipped).expect("write false shipped capability");
     let rejected = run_prd_alignment(&fixture);
     assert!(!rejected.status.success());
@@ -2450,6 +2457,7 @@ fn rhai_script_smoke_preserves_unrestricted_runtime_and_supervisor_contract() {
         "script.fs-lifecycle",
         "script.runtime-lifecycle",
         "script.supervisor",
+        "script.repl-supervision",
         "script.audit",
     ] {
         assert!(

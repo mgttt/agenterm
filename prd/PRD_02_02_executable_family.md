@@ -208,13 +208,17 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [~] `agenterm-script.exe`: optional general-purpose local Rhai runtime with
   one-shot run/eval/check/task entry points and an explicit persistent REPL
   session. Each one-shot invocation owns a fresh supervised worker; the
-  foreground REPL instead owns process-local variables/functions until exit.
+  foreground REPL instead owns bounded supervised worker generations and
+  process-local variables/functions until exit. Generation replacement starts
+  a fresh language/history state, reports the old/new generation and PID, and
+  never replays already-observed external side effects. On Windows,
   `agenterm-cli script repl ...` remains a thin stdio/exit-code forwarding
   adapter to this adjacent optional executable and does not embed the Rhai
-  engine; existing one-shot commands retain their single-worker supervisor.
-  Both reuse one runtime library, API graph, local scheduler, standard library,
-  modules, named tasks, and typed Fleet APIs without becoming a persistent
-  daemon or an Agent permission layer
+  engine; Linux/macOS callers invoke `agenterm-script` directly because CLI
+  Script hosting is not available there. Existing one-shot commands retain
+  their single-worker supervisor. Both paths reuse one runtime library, API
+  graph, local scheduler, standard library, modules, named tasks, and typed
+  Fleet APIs without becoming a persistent daemon or an Agent permission layer
 - [x] v0.1.12 executable-name decision: retain `agenterm-script.exe` /
   `agenterm-script` as the canonical name for the same unrestricted Rhai
   runtime. Renaming is deferred until measured external usage and a complete

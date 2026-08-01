@@ -201,6 +201,7 @@
         "script.fs-lifecycle",
         "script.runtime-lifecycle",
         "script.supervisor",
+        "script.repl-supervision",
         "script.audit"
       ]
     },

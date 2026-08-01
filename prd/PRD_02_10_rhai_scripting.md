@@ -11,10 +11,12 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] `agenterm-script.exe` is the public `run`, `eval`, `repl`, `check`,
   `api`, and named-task CLI while retaining private
   `--worker`/`--framed-worker` modes;
-  `agenterm-cli.exe script repl ...` is a thin process-forwarding compatibility
-  route to the adjacent `agenterm-script` sidecar, inherits stdio and exit
-  status, and never links a second Rhai engine into the control client. The
-  existing one-shot supervisor routes retain their single worker topology. All expose the same
+  on Windows, `agenterm-cli.exe script repl ...` is a thin process-forwarding
+  compatibility route to the adjacent `agenterm-script` sidecar, inherits
+  stdio and exit status, and never links a second Rhai engine into the control
+  client. Linux and macOS callers invoke `agenterm-script` directly because the
+  CLI-hosted Script route is not available there. The existing one-shot
+  supervisor routes retain their single worker topology. All expose the same
   catalog, parser, supervisor, and runtime.
 - [x] v0.1.12 retains `agenterm-script.exe` / `agenterm-script` as the canonical
   public executable. Although Rhai is the stable runtime contract, the version
@@ -109,8 +111,15 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   3,092,480 bytes, within the unchanged 3,145,728-byte Script artifact budget.
   The remaining 53,248 bytes is narrow headroom and must be remeasured for
   future editor/history dependencies rather than silently raising the budget.
-- [~] Ctrl+C during a blocking cell, arrow-key history, and a kill-and-restart
-  long-lived worker protocol remain an owned hardening slice. A stable
+- [x] Windows hosted persistent REPL supervision preserves one worker and
+  committed language state across cooperative Ctrl+C, hard-kills and reaps a
+  non-cooperative worker tree within 150 ms plus bounded cleanup, then reports
+  a fresh language/history generation with no side-effect replay before the
+  same outer CLI continues on a new worker. Public direct and Windows-hosted
+  tests separately prove the 32-cell generation limit and cell-33 replacement.
+- [~] Long-lived REPL hardening remains open for arrow-key editing/history;
+  the child-session protocol, bounded generation replacement, and Windows
+  hosted Ctrl+C recovery are shipped. A stable
   length-prefixed child-session protocol now covers Open, Inspect, Evaluate,
   Query, Reset, Cancel, and Close with session/generation/sequence identities;
   constant-space request/response validators reject stale generations,
@@ -120,12 +129,21 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   for pre-start or in-flight Cancel and broker responses, returns typed state,
   and joins on Close/EOF. Unit evidence proves persistence, reset/query/close,
   a cancellation race, canonical mismatch failures, and legacy isolation.
-  The existing bounded `PersistentWorkerClient` still only supervises ordinary
-  invocations. Parent-side REPL transport, the 32-cell generation replacement,
-  150 ms non-cooperative hard-kill/reap path, explicit fresh-session/no-replay
-  receipt, outer CLI/worker Ctrl+C ownership, arrow-key history, and public
-  black-box evidence remain open. A worker-host unit test is not presented as
-  proof that the public CLI already uses the child-session protocol.
+  Commit `e731ee3` connected the public REPL to its dedicated parent-side
+  `PersistentReplClient`: public direct-entry and Windows hosted tests prove one
+  worker PID and language state across 32 cells, replacement before cell 33,
+  a new generation/PID, and an explicit fresh-session receipt that resets
+  language/history state and never replays external side effects. The Windows
+  `script.repl-supervision` ConPTY journey proves that Ctrl+C cooperatively
+  cancels a CPU-bound cell while preserving the worker and committed state,
+  then exercises the 150 ms non-cooperative hard-kill/reap path for a blocking
+  cell and its owned nested process; the same outer CLI continues with a fresh
+  worker, emits `reason=hard_interrupt` and `side_effects_replayed=false`, and
+  leaves no worker or nested-process orphan. Linux/macOS retain the direct
+  `agenterm-script` protocol and compile/unit coverage, but no Unix hosted-CLI
+  or native interactive Ctrl+C parity is claimed without its own public native
+  journey. Arrow-key editing/history remains open; memory-only `:history` is
+  not presented as that editor behavior.
 
 ## v0.1.9 product position
 

@@ -538,11 +538,13 @@ v0.1.12  Convergence & Fast Promotion
 │  │  ├─ TTY 提示与 pipe/NDJSON 自动化输出分离
 │  │  ├─ 单元失败不提交语言状态，外部真实副作用不伪装回滚
 │  │  ├─ 普通 worker 与 REPL 复用同一 Engine/API 配置
-│  │  └─ [~] Ctrl+C、箭头历史与 kill/restart 长驻协议继续 hardening
+│  │  └─ [~] 长驻 REPL hardening：supervision/Ctrl+C 已交付，箭头键编辑/history 仍开放
 │  │     ├─ bounded foreground worker 已证明同 PID 顺序调用、typed crash/EOF、显式 replacement 与 reap
 │  │     ├─ child-session wire、O(1) validator 与 worker session thread 已覆盖 Open/Inspect/Evaluate/Query/Reset/Cancel/Close
 │  │     ├─ worker 内已证明 state persistence、pre-start Cancel、broker/legacy 隔离与 Close/EOF join
-│  │     └─ parent 32-cell replacement、150ms kill/reap、Ctrl+C ownership、fresh receipt/no-replay 与公开 CLI 证据仍待接入
+│  │     ├─ `e731ee3` 已接入 parent supervisor；公开 direct/Windows hosted 测试证明 32 cells 同 PID、cell 33 前换代、新 PID/generation 与 fresh receipt/no-replay
+│  │     ├─ Windows `script.repl-supervision` 证明 hosted Ctrl+C cooperative recovery、150ms non-cooperative hard kill/reap、nested child 无 orphan、同一 outer CLI fresh-session 续跑
+│  │     └─ Linux/macOS 只声明 direct `agenterm-script` protocol 与 compile/unit coverage；Unix hosted CLI/native interactive Ctrl+C 仍需各自 public journey
 │  ├─ [x] v0.1.12 保留 canonical `agenterm-script` 名称
 │  │  ├─ 当前没有完整外部调用者使用量与迁移/移除证据
 │  │  ├─ 收敛期不新增同义 executable、package 和 Candidate surface

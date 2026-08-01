@@ -422,6 +422,14 @@
       "evidence_ids": ["script.supervisor"]
     },
     {
+      "id": "scripting.persistent-repl-supervision",
+      "kind": "behavior",
+      "status": "shipped",
+      "evidence_mode": "black-box",
+      "prd": "Windows hosted persistent REPL supervision",
+      "evidence_ids": ["script.repl-supervision"]
+    },
+    {
       "id": "scripting.audit",
       "kind": "behavior",
       "status": "shipped",
