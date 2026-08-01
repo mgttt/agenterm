@@ -136,6 +136,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   and high-output repaint-storm diagnostics; sustained high-output visual
   dogfood on the new binary remains the final human acceptance check before
   restoring shipped status.
+  The clean `78eac9e` dev artifact repeated the complete owning journey in
+  63.4 seconds: counterbalanced Dark/Light totals were 1349/1237 ms with
+  identical 10 redraws and 8 paints, zoom measured 23/7, 500 ms idle 1/1,
+  and the Light-theme high-output burst 3/3. The journey continued through
+  selection/copy, ordinary and bracketed paste, GUI detach/reconnect to the
+  same server/PTY, server recovery, and orphan-free explicit shutdown. This
+  strengthens the automated temporal evidence without substituting for the
+  outstanding sustained-output visual acceptance.
 - [~] ordinary terminal keys and modifiers are encoded for the active PTY;
   live v0.1.12 dogfood found `Shift+Tab` dropped while terminal focus was
   active. The current repair introduces one shared xterm named-key modifier
@@ -152,7 +160,12 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   Taking foreground focus would violate the smoke-wide `AGENTERM_NO_ACTIVATE=1`
   contract. A real keyboard Shift+Tab in the latest dogfood binary therefore
   remains the non-substitutable human acceptance check before restoring shipped
-  status.
+  status. The owning journey now repeats that exact GUI Shift+Tab route after
+  18 native z/Z operations and settled PTY geometry, requires exactly three
+  additional input bytes, and then continues through a live shell marker,
+  selection/copy, paste and detach/reconnect. This closes the combined
+  focus/resize/GUI-dispatch regression without mislabeling synthetic input as a
+  physical-key receipt.
 - [~] Windows terminal focus survives immediate native toolbar actions. Live
   dogfood found the font `z/Z` child buttons retained Win32 keyboard focus while
   the terminal input path accepts keys only for the top-level HWND. Font, locale
@@ -171,7 +184,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   and leaves the terminal writable after rejection. Remote PTY resize is now
   serialized by an owned worker with a latest-only pending slot, so the Win32
   event thread never waits on the bounded IPC round trip and stale
-  lease/epoch/tab/grid results are discarded.
+  lease/epoch/tab/grid results are discarded. Selection PNG evidence also waits
+  boundedly for the independently scheduled `WM_PAINT` after structured state
+  reaches `dragging`; unchanged pixels for the whole deadline still fail. This
+  prevents a published-state/paint race from weakening the requirement that a
+  live selection is visibly highlighted.
 - [x] GUI shell appears before the initial ConPTY/cmd process is ready
 - [x] initial terminal loads asynchronously with visible starting feedback
 - [x] exited process retains its final screen and exit code

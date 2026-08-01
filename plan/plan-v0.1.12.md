@@ -356,6 +356,15 @@ Release 全部是本轮明确非目标。
   `06149c6` dirty=false dev artifact 的完整 journey 用时 41.2 秒，ABBA totals 为
   Dark 1095ms / Light 1203ms、双方 10 redraw / 8 paint；zoom 为 23/7、idle 为 1/1、
   high-output 为 3/4，并成功发出含 `ux.theme-render-parity` 在内的 16 项 evidence。
+  最新 clean `78eac9e` dev artifact 又以 63.4 秒完成同一 owning journey：ABBA totals
+  为 Dark 1349ms / Light 1237ms、双方 10 redraw / 8 paint；zoom 23/7、idle 1/1、
+  Light 高输出 3/3，并继续通过选择复制、普通与 bracketed paste、同 server/PTY
+  detach/reconnect、server recovery 和最终无 orphan 清理。这是当前 SHA 的自动化时间域
+  回执；持续高输出肉眼确认仍保持开放，不能由计数器替代。
+  修改后的 owning journey 又以 60.3 秒通过：连续 z/Z 和 grid 收敛后直接经 GUI
+  Shift+Tab 路径向 PTY 精确增加 3 bytes，再继续通过 shell marker、selection/copy、
+  paste 与 detach/reconnect。selection 的结构状态会先于低优先级 `WM_PAINT` 发布，
+  PNG 回执现 bounded 等待真实像素变化，整个 deadline 内不变化仍 fail closed。
   后续按 `commands.json` 时间线确认用户体感真实：三轮黑底阶段 15.0--18.3s，白底后
   108.6--122.5s，相邻 snapshot 中位间隔上升约 1.8--2.1x。根因不是 palette，而是
   harness 每条 CLI 都 parse + pretty-write 全部历史形成 O(n²)；每 50 条命令的中位

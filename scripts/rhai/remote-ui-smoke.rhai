@@ -469,6 +469,21 @@ fn screenshot(context, cli, path) {
     require(metadata.len > 1000, "remote_ui_screenshot_too_small");
 }
 
+fn wait_screenshot_changed(context, cli, path, baseline_path, code) {
+    let baseline_hash = rhai::crypto::sha256_file(baseline_path);
+    // Selection state is published before the low-priority WM_PAINT that makes
+    // its highlight visible. Keep the pixel receipt fail-closed while allowing
+    // that independently scheduled paint to commit.
+    for attempt in 0..10 {
+        screenshot(context, cli, path);
+        if rhai::crypto::sha256_file(path) != baseline_hash {
+            return;
+        }
+        rhai::task::sleep(std::time::Duration::from_millis(25));
+    }
+    throw code;
+}
+
 fn pane_screenshot(context, cli, path) {
     let returned = text_cli(
         context,
@@ -1252,6 +1267,29 @@ try {
     print(
         `RENDER_ACTIVITY zoom_redraws=${zoom_redraws} zoom_paints=${zoom_paints} idle_redraws=${idle_redraws} idle_paints=${idle_paints}`
     );
+    let zoom_shift_tab_before = text_cli(
+        context,
+        cli,
+        ["list-panes", "-t", tab_id, "-F", "#{pane_input_bytes}"]
+    );
+    zoom_shift_tab_before.trim();
+    zoom_shift_tab_before = zoom_shift_tab_before.parse_int();
+    require(
+        gui.window_message(shortcut_message, 0x09, 2) == 1,
+        "remote_ui_zoom_shift_tab_not_consumed"
+    );
+    let zoom_shift_tab_after = text_cli(
+        context,
+        cli,
+        ["list-panes", "-t", tab_id, "-F", "#{pane_input_bytes}"]
+    );
+    zoom_shift_tab_after.trim();
+    zoom_shift_tab_after = zoom_shift_tab_after.parse_int();
+    require(
+        zoom_shift_tab_after == zoom_shift_tab_before + 3,
+        "remote_ui_zoom_shift_tab_pty_bytes_invalid"
+    );
+    text_cli(context, cli, ["send-keys", "-t", tab_id, "C-c"]);
     let font_input_marker = "AGENTERM_FONT_INPUT_" + context.run_id;
     text_cli(
         context,
@@ -2388,16 +2426,20 @@ try {
         context.run_directory,
         "terminal-selection-dragging.png"
     ).display;
-    screenshot(context, cli, selection_dragging_png);
+    wait_screenshot_changed(
+        context,
+        cli,
+        selection_dragging_png,
+        selection_prepared_png,
+        "remote_ui_terminal_selection_live_highlight_invalid"
+    );
     require(
         selection_dragging.event_position
                 == selection_prepared.event_position
             && selection_dragging.terminal_interaction.selection
                     .highlight.bounds.len
                 >= selection_prepared.terminal_interaction.selection
-                    .highlight.bounds.len
-            && rhai::crypto::sha256_file(selection_dragging_png)
-                != rhai::crypto::sha256_file(selection_prepared_png),
+                    .highlight.bounds.len,
         "remote_ui_terminal_selection_live_highlight_invalid"
     );
     gui.window_pointer("up", selection_end_x, selection_y);
