@@ -17,6 +17,7 @@
 #[allow(dead_code)]
 pub const CONTRACT_REVISION: u32 = 3;
 
+pub(crate) mod toolbar;
 pub(crate) mod window;
 
 // Platform Facade services. Product modules consume these typed services;
@@ -296,32 +297,11 @@ mod tests {
         assert!(!action::is_toolbar_action_id("adapter-local-action"));
     }
 
-    #[cfg(target_os = "linux")]
     #[test]
-    fn linux_toolbar_order_matches_contract() {
-        use crate::platform::selected::native::toolbar::LinuxToolbarHit;
+    fn native_toolbar_order_matches_contract() {
+        use crate::platform::toolbar::NativeToolbarHit;
         assert_eq!(
-            LinuxToolbarHit::ORDER.map(LinuxToolbarHit::action_id),
-            action::TOOLBAR_ACTION_ORDER
-        );
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn macos_toolbar_order_matches_contract() {
-        use crate::platform::selected::native::toolbar::MacosToolbarHit;
-        assert_eq!(
-            MacosToolbarHit::ORDER.map(MacosToolbarHit::action_id),
-            action::TOOLBAR_ACTION_ORDER
-        );
-    }
-
-    #[cfg(target_os = "windows")]
-    #[test]
-    fn windows_toolbar_order_matches_contract() {
-        use crate::platform::selected::native::toolbar::WindowsToolbarHit;
-        assert_eq!(
-            WindowsToolbarHit::ORDER.map(WindowsToolbarHit::action_id),
+            NativeToolbarHit::ORDER.map(NativeToolbarHit::action_id),
             action::TOOLBAR_ACTION_ORDER
         );
     }

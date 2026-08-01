@@ -158,6 +158,9 @@ Script child-window leaf 完成：public `ProcessWindowFacts/Rect/Key/PointerAct
 crate adapter，Linux/macOS 保持 typed Unsupported。三平台 root script_window adapter
 删除；Rhai 参数/receipt 映射留产品层且 API 仍无限制。all-feature crate tests 与两 crate
 warnings-denied Clippy 通过。
+Toolbar 去耦叶确认三平台所谓 native toolbar 仅是 AgenTerm action-ID 映射，因此合并为
+无 OS cfg 的产品 `NativeToolbarHit`，删除三套伪 native adapter；Windows/Unix hot path
+与顺序测试消费同一表。它不会进入外部 platform crate，也不再冒充 OS mechanism。
 
 2026-08-01 首个建设期增量：Cockpit snapshot 新增明确的
 `tab_counts.{total,running,dead}`，native shell 同源显示 logical instance、

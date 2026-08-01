@@ -23,7 +23,6 @@ pub(crate) mod ime;
 pub(crate) mod input;
 pub(crate) mod scale;
 pub(crate) mod screenshot;
-pub(crate) mod toolbar;
 
 /// Contract revision this Linux adapter tree implements.
 pub(crate) const IMPLEMENTED_CONTRACT_REVISION: u32 = CONTRACT_REVISION;

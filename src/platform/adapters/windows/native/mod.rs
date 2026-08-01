@@ -8,7 +8,6 @@
 pub(crate) mod activation;
 pub(crate) mod input;
 pub(crate) mod screenshot;
-pub(crate) mod toolbar;
 
 use crate::platform::{CapabilityKind, CapabilityStatus, PlatformKind};
 

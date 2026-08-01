@@ -88,7 +88,11 @@ mod tests {
     #[test]
     fn typed_error_keeps_stable_receipt_fields() {
         assert_eq!(
-            ProcessWindowError::new("process_window_unsupported", "unavailable", Some("unsupported")),
+            ProcessWindowError::new(
+                "process_window_unsupported",
+                "unavailable",
+                Some("unsupported")
+            ),
             ProcessWindowError {
                 code: "process_window_unsupported",
                 message: "unavailable",

@@ -63,6 +63,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [ ] Product-visible UI state, actions, labels, layout geometry, and semantic
   snapshots remain platform-neutral and are not reimplemented inside an OS
   adapter.
+- [x] Toolbar hit-to-action mapping is one platform-neutral product table; the
+  former three OS-named copies are deleted rather than exported as platform API.
 - [ ] Necessary native differences remain explicit capabilities or typed
   unsupported results; parity never means hiding a missing behavior or forcing
   all systems through a lowest-common-denominator widget implementation.

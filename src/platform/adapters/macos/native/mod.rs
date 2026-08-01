@@ -15,7 +15,6 @@ pub(crate) mod ime;
 pub(crate) mod input;
 pub(crate) mod scale;
 pub(crate) mod screenshot;
-pub(crate) mod toolbar;
 
 use crate::platform::{CapabilityKind, CapabilityStatus, PlatformKind};
 

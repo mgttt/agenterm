@@ -3894,35 +3894,16 @@ impl UnixApp {
     }
 }
 
-/// Map a Unix toolbar hit through the active platform adapter action ids.
-#[cfg(target_os = "linux")]
 fn platform_toolbar_action_id(hit: ToolbarHit) -> &'static str {
-    use crate::platform::selected::native::toolbar::LinuxToolbarHit;
-    let linux_hit = match hit {
-        ToolbarHit::NewTab => LinuxToolbarHit::NewTab,
-        ToolbarHit::ToggleTabs => LinuxToolbarHit::ToggleTabs,
-        ToolbarHit::ControlCenter => LinuxToolbarHit::ControlCenter,
-        ToolbarHit::Settings => LinuxToolbarHit::Settings,
-        ToolbarHit::ToggleLocale => LinuxToolbarHit::ToggleLocale,
-        ToolbarHit::FontDecrease => LinuxToolbarHit::FontDecrease,
-        ToolbarHit::FontIncrease => LinuxToolbarHit::FontIncrease,
-    };
-    linux_hit.action_id()
-}
-
-#[cfg(target_os = "macos")]
-fn platform_toolbar_action_id(hit: ToolbarHit) -> &'static str {
-    use crate::platform::selected::native::toolbar::MacosToolbarHit;
-    let macos_hit = match hit {
-        ToolbarHit::NewTab => MacosToolbarHit::NewTab,
-        ToolbarHit::ToggleTabs => MacosToolbarHit::ToggleTabs,
-        ToolbarHit::ControlCenter => MacosToolbarHit::ControlCenter,
-        ToolbarHit::Settings => MacosToolbarHit::Settings,
-        ToolbarHit::ToggleLocale => MacosToolbarHit::ToggleLocale,
-        ToolbarHit::FontDecrease => MacosToolbarHit::FontDecrease,
-        ToolbarHit::FontIncrease => MacosToolbarHit::FontIncrease,
-    };
-    macos_hit.action_id()
+    match hit {
+        ToolbarHit::NewTab => crate::platform::action::NEW_TAB,
+        ToolbarHit::ToggleTabs => crate::platform::action::TOGGLE_TABS,
+        ToolbarHit::ControlCenter => crate::platform::action::OPEN_CONTROL_CENTER,
+        ToolbarHit::Settings => crate::platform::action::OPEN_SETTINGS,
+        ToolbarHit::ToggleLocale => crate::platform::action::TOGGLE_LOCALE,
+        ToolbarHit::FontDecrease => crate::platform::action::FONT_DECREASE,
+        ToolbarHit::FontIncrease => crate::platform::action::FONT_INCREASE,
+    }
 }
 
 impl ControlHost for UnixApp {
