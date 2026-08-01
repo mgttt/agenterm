@@ -529,6 +529,24 @@ jobs:
           end_ms=$(date +%s%3N)
           duration_ms=$((end_ms - start_ms))
           echo "duration_ms=$duration_ms" >> "$GITHUB_OUTPUT"
+      - name: Prove native macOS Control Center lifecycle
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: control-center-smoke
+        env:
+          AGENTERM_NO_ACTIVATE: "1"
+        run: |
+          start_ms=$(date +%s%3N)
+          host_arch="$(uname -m)"
+          [ "$host_arch" = "arm64" ] && host_arch="aarch64"
+          if [ "$host_arch" != "${{ matrix.arch }}" ]; then
+            echo "Skipping execution-only Control Center proof for cross-built ${{ matrix.target }}"
+            exit 0
+          fi
+          dist/agenterm-script task run control-center-macos-smoke \
+            --manifest agenterm.tasks.json
+          end_ms=$(date +%s%3N)
+          duration_ms=$((end_ms - start_ms))
+          echo "duration_ms=$duration_ms" >> "$GITHUB_OUTPUT"
       - name: Report cache hit profile
         if: always()
         shell: bash
@@ -550,6 +568,7 @@ jobs:
             echo "macos_${{ matrix.arch }}_client_smoke_ms: ${{ steps.client-smoke.outputs.duration_ms || 'n/a' }}"
             echo "macos_${{ matrix.arch }}_native_ipc_smoke_ms: ${{ steps.native-ipc-smoke.outputs.duration_ms || 'n/a' }}"
             echo "macos_${{ matrix.arch }}_native_ipc_compat_ms: ${{ steps.native-ipc-compat.outputs.duration_ms || 'n/a' }}"
+            echo "macos_${{ matrix.arch }}_control_center_smoke_ms: ${{ steps.control-center-smoke.outputs.duration_ms || 'n/a' }}"
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Save macOS build target
         if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
