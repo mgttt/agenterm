@@ -64,9 +64,10 @@ pub fn metadata_is_link_like(metadata: &Metadata) -> bool {
     selected::filesystem::metadata_is_link_like(metadata)
 }
 
-/// Restrict an existing directory to the current user where the host exposes
-/// portable owner permissions. Windows preserves the directory ACL created by
-/// the caller rather than replacing it with a synthesized ACL.
+/// Restrict an existing directory to the current user.
+///
+/// Unix requests owner-only mode `0700`. Windows replaces inherited access
+/// with a protected current-user-only ACL that propagates to child objects.
 #[cfg(feature = "filesystem")]
 pub fn protect_private_directory(path: &Path) -> io::Result<()> {
     selected::filesystem::protect_private_directory(path)
