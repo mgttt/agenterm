@@ -506,6 +506,9 @@ struct UnixApp {
     ime_cursor: Option<(usize, usize)>,
     cursor_blink: CursorBlink,
     window_focused: bool,
+    pointer_modifiers: agenterm_platform::input::ModifierState,
+    mouse_report_button: Option<u8>,
+    mouse_report_cell: Option<(u16, u16)>,
 }
 
 impl UnixApp {
@@ -577,6 +580,9 @@ impl UnixApp {
                 no_activate,
             )
             .initial_window_focused,
+            pointer_modifiers: agenterm_platform::input::ModifierState::empty(),
+            mouse_report_button: None,
+            mouse_report_cell: None,
             config,
         }
     }
@@ -2447,6 +2453,12 @@ impl UnixApp {
         if self.click_scrollbar(x as i32, y as i32) {
             return;
         }
+        if self.forward_terminal_mouse(x, y, Some(0), true, false) {
+            let _ = self.cancel_terminal_selection(true);
+            self.mouse_report_button = Some(0);
+            self.set_focus_surface_internal(UnixFocusSurface::Terminal, "mouse");
+            return;
+        }
         if self.begin_terminal_selection(x, y) {
             return;
         }
@@ -2882,6 +2894,79 @@ impl UnixApp {
         self.sidebar_scroll_drag = None;
     }
 
+    /// Forwards one pointer event to the running application when it
+    /// negotiated xterm mouse tracking on the active tab.
+    ///
+    /// Shift bypasses reporting so local selection and scrollback stay
+    /// reachable (the xterm convention), and reports are suppressed while the
+    /// viewport is scrolled back because reported cells would not match what
+    /// the application drew.
+    fn forward_terminal_mouse(
+        &mut self,
+        x: f64,
+        y: f64,
+        button: Option<u8>,
+        pressed: bool,
+        motion: bool,
+    ) -> bool {
+        if self.pointer_modifiers.shift
+            || self.settings_open
+            || self.window_close_pending
+            || self.pending_close.is_some()
+            || self.new_terminal_dialog.is_open()
+        {
+            return false;
+        }
+        let Some(position) = self.active_position() else {
+            return false;
+        };
+        let (mode, encoding, scrollback) = {
+            let screen = self.tabs[position].parser.screen();
+            (
+                screen.mouse_protocol_mode(),
+                screen.mouse_protocol_encoding(),
+                screen.scrollback(),
+            )
+        };
+        let dragging = self.mouse_report_button.is_some();
+        let reportable = match mode {
+            vt100::MouseProtocolMode::None => false,
+            vt100::MouseProtocolMode::Press => pressed && !motion,
+            vt100::MouseProtocolMode::PressRelease => !motion,
+            vt100::MouseProtocolMode::ButtonMotion => !motion || dragging,
+            vt100::MouseProtocolMode::AnyMotion => true,
+        };
+        if !reportable || scrollback != 0 {
+            return false;
+        }
+        let Some((column, row)) = self.cell_at_client(x, y) else {
+            return false;
+        };
+        if motion && self.mouse_report_cell == Some((column, row)) {
+            return true;
+        }
+        let mut code = match button.or(self.mouse_report_button) {
+            Some(code) => code,
+            None if motion => 3,
+            None => return false,
+        };
+        if motion {
+            code |= 32;
+        }
+        if self.pointer_modifiers.alt {
+            code |= 8;
+        }
+        if self.pointer_modifiers.control {
+            code |= 16;
+        }
+        let Some(bytes) = input::mouse_report_bytes(encoding, code, column, row, pressed) else {
+            return false;
+        };
+        self.mouse_report_cell = Some((column, row));
+        self.queue_pty_input(bytes);
+        true
+    }
+
     fn mouse_wheel(&mut self, x: f64, y: f64, vertical_delta: f64, line_based: bool) {
         if self.settings_open || self.window_close_pending {
             return;
@@ -2911,6 +2996,18 @@ impl UnixApp {
         let Some(position) = self.active_position() else {
             return;
         };
+        let wheel_button = if notches > 0 { 64 } else { 65 };
+        let mut reported = false;
+        for _ in 0..notches.unsigned_abs().min(40) {
+            if self.forward_terminal_mouse(x, y, Some(wheel_button), true, false) {
+                reported = true;
+            } else {
+                break;
+            }
+        }
+        if reported {
+            return;
+        }
         let (before, alternate_screen, application_cursor) = {
             let screen = self.tabs[position].parser.screen();
             (
@@ -4269,6 +4366,7 @@ impl UnixApp {
             }
             PixelWindowEvent::Ime(event) => self.handle_ime(event),
             PixelWindowEvent::Keyboard(event) => {
+                self.pointer_modifiers = event.modifiers;
                 if event.state != KeyPressState::Pressed {
                     return;
                 }
@@ -4432,6 +4530,8 @@ impl UnixApp {
                     .is_some_and(|gesture| gesture.active())
                 {
                     self.drag_terminal_selection(x, y);
+                } else {
+                    let _ = self.forward_terminal_mouse(x, y, None, true, true);
                 }
             }
             PixelWindowEvent::MouseWheel { delta, position } => {
@@ -4469,7 +4569,11 @@ impl UnixApp {
                 button: PointerButton::Left,
                 ..
             } => {
-                if self.tabs_resize_drag.is_some() {
+                if let Some(code) = self.mouse_report_button.take() {
+                    let (x, y) = self.last_cursor;
+                    let _ = self.forward_terminal_mouse(x, y, Some(code), false, false);
+                    self.mouse_report_cell = None;
+                } else if self.tabs_resize_drag.is_some() {
                     self.finish_tabs_resize(true, "mouse-drag", UI_TABS_SET_WIDTH);
                 } else if self.scroll_drag.is_some() {
                     self.end_scroll_drag();
@@ -4477,6 +4581,29 @@ impl UnixApp {
                     self.end_sidebar_scroll_drag();
                 } else {
                     self.complete_terminal_selection();
+                }
+            }
+            PixelWindowEvent::PointerButton {
+                state,
+                button: button @ (PointerButton::Right | PointerButton::Middle),
+                position,
+            } => {
+                let code = if button == PointerButton::Right { 2 } else { 1 };
+                let (x, y) = position
+                    .map(|position| (position.x, position.y))
+                    .unwrap_or(self.last_cursor);
+                match state {
+                    PointerButtonState::Pressed => {
+                        if self.forward_terminal_mouse(x, y, Some(code), true, false) {
+                            self.mouse_report_button = Some(code);
+                        }
+                    }
+                    PointerButtonState::Released if self.mouse_report_button == Some(code) => {
+                        self.mouse_report_button = None;
+                        let _ = self.forward_terminal_mouse(x, y, Some(code), false, false);
+                        self.mouse_report_cell = None;
+                    }
+                    _ => {}
                 }
             }
             PixelWindowEvent::PointerLeft | PixelWindowEvent::PointerButton { .. } => {}

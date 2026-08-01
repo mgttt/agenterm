@@ -228,6 +228,52 @@ fn text_field_logical_key_action(
     }
 }
 
+/// Encodes one xterm mouse report for the PTY in the encoding the running
+/// application negotiated. Coordinates are zero-based grid cells; the classic
+/// encodings cannot express release button identity or cells past their byte
+/// range, so those degrade exactly like xterm (button 3, event dropped).
+pub(super) fn mouse_report_bytes(
+    encoding: vt100::MouseProtocolEncoding,
+    code: u8,
+    column: u16,
+    row: u16,
+    pressed: bool,
+) -> Option<Vec<u8>> {
+    match encoding {
+        vt100::MouseProtocolEncoding::Sgr => {
+            let suffix = if pressed { 'M' } else { 'm' };
+            Some(
+                format!(
+                    "\x1b[<{code};{};{}{suffix}",
+                    u32::from(column) + 1,
+                    u32::from(row) + 1
+                )
+                .into_bytes(),
+            )
+        }
+        vt100::MouseProtocolEncoding::Default => {
+            let code = if pressed { code } else { (code & !0b11) | 3 };
+            let column = u8::try_from(column.checked_add(33)?).ok()?;
+            let row = u8::try_from(row.checked_add(33)?).ok()?;
+            Some(vec![0x1b, b'[', b'M', 32 + code, column, row])
+        }
+        vt100::MouseProtocolEncoding::Utf8 => {
+            let code = if pressed { code } else { (code & !0b11) | 3 };
+            let mut bytes = vec![0x1b, b'[', b'M'];
+            let mut push = |scalar: u32| {
+                let character = char::from_u32(scalar)?;
+                let mut buffer = [0u8; 4];
+                bytes.extend_from_slice(character.encode_utf8(&mut buffer).as_bytes());
+                Some(())
+            };
+            push(u32::from(code) + 32)?;
+            push(u32::from(column) + 33)?;
+            push(u32::from(row) + 33)?;
+            Some(bytes)
+        }
+    }
+}
+
 /// Interrupt/EOF chords that pass through to the active PTY even while the
 /// composer strip owns focus. Primary-shortcut copy (Ctrl+C on Linux/Windows)
 /// keeps priority only over a non-empty draft.
@@ -1009,5 +1055,53 @@ mod ctrl_passthrough_tests {
         let mut meta = ctrl_event('c', 'C', None);
         meta.modifiers.meta = true;
         assert_eq!(composer_passthrough_bytes(&meta, true), None);
+    }
+}
+
+#[cfg(test)]
+mod mouse_report_tests {
+    use super::mouse_report_bytes;
+    use vt100::MouseProtocolEncoding;
+
+    #[test]
+    fn sgr_reports_press_release_and_one_based_cells() {
+        assert_eq!(
+            mouse_report_bytes(MouseProtocolEncoding::Sgr, 0, 0, 0, true).as_deref(),
+            Some(b"\x1b[<0;1;1M".as_slice())
+        );
+        assert_eq!(
+            mouse_report_bytes(MouseProtocolEncoding::Sgr, 2, 176, 48, false).as_deref(),
+            Some(b"\x1b[<2;177;49m".as_slice())
+        );
+        assert_eq!(
+            mouse_report_bytes(MouseProtocolEncoding::Sgr, 65, 10, 5, true).as_deref(),
+            Some(b"\x1b[<65;11;6M".as_slice())
+        );
+    }
+
+    #[test]
+    fn classic_encoding_degrades_like_xterm() {
+        assert_eq!(
+            mouse_report_bytes(MouseProtocolEncoding::Default, 0, 0, 0, true).as_deref(),
+            Some(&[0x1b, b'[', b'M', 32, 33, 33][..])
+        );
+        assert_eq!(
+            mouse_report_bytes(MouseProtocolEncoding::Default, 0, 0, 0, false).as_deref(),
+            Some(&[0x1b, b'[', b'M', 35, 33, 33][..])
+        );
+        assert_eq!(
+            mouse_report_bytes(MouseProtocolEncoding::Default, 0, 500, 0, true),
+            None
+        );
+    }
+
+    #[test]
+    fn utf8_encoding_extends_wide_coordinates() {
+        let bytes = mouse_report_bytes(MouseProtocolEncoding::Utf8, 0, 200, 0, true).unwrap();
+        assert_eq!(&bytes[..4], &[0x1b, b'[', b'M', 32]);
+        assert_eq!(
+            std::str::from_utf8(&bytes[4..]).unwrap().chars().next(),
+            char::from_u32(233)
+        );
     }
 }
