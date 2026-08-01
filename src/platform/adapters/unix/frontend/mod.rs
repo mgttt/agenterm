@@ -132,6 +132,10 @@ struct PixelWindowHandle<'a> {
 }
 
 impl UnixAppWindowHandle for PixelWindowHandle<'_> {
+    fn focus_window(&self) {
+        self.window.focus();
+    }
+
     fn minimize_window(&self) {
         self.window.set_minimized(true);
     }
@@ -304,6 +308,25 @@ enum TerminalPasteFailure {
     WorkerStart(String),
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct UiFeedbackError {
+    code: &'static str,
+    category: &'static str,
+    retryable: bool,
+    message: String,
+}
+
+impl UiFeedbackError {
+    fn json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "code": self.code,
+            "category": self.category,
+            "retryable": self.retryable,
+            "message": self.message,
+        })
+    }
+}
+
 impl std::fmt::Display for TerminalPasteFailure {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -331,6 +354,59 @@ impl std::fmt::Display for TerminalPasteFailure {
                 )
             }
         }
+    }
+}
+
+impl TerminalPasteFailure {
+    const fn code(&self) -> &'static str {
+        match self {
+            Self::Busy => "terminal_paste_busy",
+            _ => "terminal_paste_failed",
+        }
+    }
+
+    const fn category(&self) -> &'static str {
+        match self {
+            Self::Busy => "state",
+            Self::Clipboard(_) | Self::WorkerDisconnected | Self::WorkerStart(_) => "availability",
+            Self::NormalizedTextTooLarge => "resource",
+            Self::TerminalRejected => "transport",
+            Self::Empty
+            | Self::FocusRequired
+            | Self::ModalOpen
+            | Self::NoActiveTerminal
+            | Self::StaleTarget => "precondition",
+        }
+    }
+
+    const fn retryable(&self) -> bool {
+        matches!(
+            self,
+            Self::Busy
+                | Self::Clipboard(_)
+                | Self::StaleTarget
+                | Self::TerminalRejected
+                | Self::WorkerDisconnected
+                | Self::WorkerStart(_)
+        )
+    }
+
+    fn feedback_error(&self) -> UiFeedbackError {
+        UiFeedbackError {
+            code: self.code(),
+            category: self.category(),
+            retryable: self.retryable(),
+            message: self.to_string(),
+        }
+    }
+
+    fn ipc_response(&self) -> IpcResponse {
+        IpcResponse::typed_failure(
+            self.to_string(),
+            self.code(),
+            self.category(),
+            self.retryable(),
+        )
     }
 }
 
@@ -559,6 +635,7 @@ struct UnixApp {
     tabs_resize_drag: Option<TabsResizeDrag>,
     render_buffers: RenderBuffers,
     status_message: String,
+    last_feedback_error: Option<UiFeedbackError>,
     pending_terminal_paste: Option<PendingTerminalPaste>,
     ime_preedit: String,
     ime_cursor: Option<(usize, usize)>,
@@ -631,6 +708,7 @@ impl UnixApp {
             tabs_resize_drag: None,
             render_buffers: RenderBuffers::default(),
             status_message: String::from("Ready"),
+            last_feedback_error: None,
             pending_terminal_paste: None,
             ime_preedit: String::new(),
             ime_cursor: None,
@@ -907,6 +985,12 @@ impl UnixApp {
 
     fn set_status_message(&mut self, message: impl Into<String>) {
         self.status_message = message.into();
+    }
+
+    fn record_terminal_paste_failure(&mut self, error: &TerminalPasteFailure) {
+        self.status_message = format!("Paste failed: {error}");
+        self.last_feedback_error = Some(error.feedback_error());
+        self.request_redraw();
     }
 
     fn composer_send_hit(&self, x: f64, y: f64) -> bool {
@@ -2100,6 +2184,15 @@ impl UnixApp {
             "focus": {
                 "surface": self.focus_surface.as_str(),
                 "window_id": active.map(|id| format!("@{id}")),
+                // This fact is updated only by the native FocusChanged event. An
+                // activation request must not optimistically claim compositor focus.
+                "window_focused": self.window_focused,
+            },
+            "terminal_paste": {
+                "state": if self.pending_terminal_paste.is_some() { "pending" } else { "idle" },
+                "target": self.pending_terminal_paste
+                    .as_ref()
+                    .map(|pending| format!("@{}", pending.tab_id)),
             },
             "composer": {
                 "draft_length": self.composer_buffer.chars().count(),
@@ -2166,7 +2259,10 @@ impl UnixApp {
             "locale": locale_json(self.config.locale),
             "feedback": {
                 "message": self.status_message,
-                "error": serde_json::Value::Null,
+                "error": self.last_feedback_error
+                    .as_ref()
+                    .map(UiFeedbackError::json)
+                    .unwrap_or(serde_json::Value::Null),
             },
         }))
         .unwrap_or_else(|_| "{}".to_owned())
@@ -2801,6 +2897,7 @@ impl UnixApp {
             })
             .map_err(|error| TerminalPasteFailure::WorkerStart(error.to_string()))?;
         self.pending_terminal_paste = Some(PendingTerminalPaste { tab_id, receiver });
+        self.last_feedback_error = None;
         self.set_status_message(format!("Reading clipboard for @{tab_id}…"));
         self.request_redraw();
         Ok(())
@@ -2819,7 +2916,7 @@ impl UnixApp {
         self.pending_terminal_paste = None;
         let result = result.and_then(|raw| self.finish_terminal_clipboard_paste(tab_id, &raw));
         if let Err(error) = result {
-            self.set_status_message(format!("Paste failed: {error}"));
+            self.record_terminal_paste_failure(&error);
         }
         true
     }
@@ -2865,6 +2962,7 @@ impl UnixApp {
             }),
         );
         self.set_status_message(format!("Pasted {} characters into @{tab_id}", text.len()));
+        self.last_feedback_error = None;
         self.request_redraw();
         Ok(())
     }
@@ -3502,6 +3600,13 @@ impl UnixApp {
                                 )),
                             }
                         }
+                        "terminal-paste" => match self.request_terminal_clipboard_paste() {
+                            Ok(()) => None,
+                            Err(error) => {
+                                self.record_terminal_paste_failure(&error);
+                                Some(error.ipc_response())
+                            }
+                        },
                         other => {
                             if let Some(window) = self.window.as_ref() {
                                 let handle = PixelWindowHandle {
@@ -3515,6 +3620,11 @@ impl UnixApp {
                                     &mut self.window_state_tracker,
                                 ) {
                                     WindowUiActionResult::Applied => None,
+                                    WindowUiActionResult::ActivationRequested => {
+                                        self.set_status_message("Window activation requested");
+                                        self.request_redraw();
+                                        None
+                                    }
                                     WindowUiActionResult::Invalid(error) => {
                                         Some(IpcResponse::failure(error))
                                     }
@@ -3569,9 +3679,16 @@ impl UnixApp {
                                     },
                                 }
                             } else {
-                                Some(IpcResponse::failure(
-                                    "window is not available for UI action",
-                                ))
+                                Some(if other == "window-activate" {
+                                    IpcResponse::typed_failure(
+                                        "window is not available for activation",
+                                        "ui_window_activation_failed",
+                                        "availability",
+                                        true,
+                                    )
+                                } else {
+                                    IpcResponse::failure("window is not available for UI action")
+                                })
                             }
                         }
                     };
@@ -4918,8 +5035,8 @@ fn workspace_toolbar_snapshot_json(toolbar: WorkspaceToolbarLayout) -> serde_jso
 #[cfg(test)]
 mod system_menu_tests {
     use super::{
-        RecentSidebarTextClick, RenderBuffers, UnixFocusSurface, compact_cwd_for_status,
-        parse_gui_launch, scale_frame_nearest, scale_rect_to_frame,
+        RecentSidebarTextClick, RenderBuffers, TerminalPasteFailure, UnixFocusSurface,
+        compact_cwd_for_status, parse_gui_launch, scale_frame_nearest, scale_rect_to_frame,
         system_menu_clipboard_state_pure, terminal_paste_bytes, terminal_paste_target_is_current,
         workspace_toolbar_snapshot_json,
     };
@@ -4981,6 +5098,55 @@ mod system_menu_tests {
         ];
         for arguments in invalid {
             assert!(parse_gui_launch(&arguments).is_err(), "{arguments:?}");
+        }
+    }
+
+    #[test]
+    fn terminal_paste_failures_keep_stable_machine_classification() {
+        let cases = [
+            (
+                TerminalPasteFailure::Busy,
+                "terminal_paste_busy",
+                "state",
+                true,
+            ),
+            (
+                TerminalPasteFailure::Clipboard("unavailable".to_owned()),
+                "terminal_paste_failed",
+                "availability",
+                true,
+            ),
+            (
+                TerminalPasteFailure::NormalizedTextTooLarge,
+                "terminal_paste_failed",
+                "resource",
+                false,
+            ),
+            (
+                TerminalPasteFailure::StaleTarget,
+                "terminal_paste_failed",
+                "precondition",
+                true,
+            ),
+            (
+                TerminalPasteFailure::TerminalRejected,
+                "terminal_paste_failed",
+                "transport",
+                true,
+            ),
+            (
+                TerminalPasteFailure::WorkerDisconnected,
+                "terminal_paste_failed",
+                "availability",
+                true,
+            ),
+        ];
+
+        for (failure, code, category, retryable) in cases {
+            let feedback = failure.feedback_error();
+            assert_eq!(feedback.code, code);
+            assert_eq!(feedback.category, category);
+            assert_eq!(feedback.retryable, retryable);
         }
     }
 

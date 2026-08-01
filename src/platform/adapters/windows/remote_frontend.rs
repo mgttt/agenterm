@@ -1347,6 +1347,12 @@ impl RemoteWindowState {
                     anyhow::bail!("CWD editor could not be opened");
                 }
             }
+            "window-activate" => {
+                self.window.focus();
+            }
+            "terminal-paste" => {
+                self.paste_terminal_clipboard()?;
+            }
             "cwd-prepare" | "cwd-prepare-append" | "cwd-prepare-replace" | "cwd-send-now" => {
                 let mut direct = vec![action.to_owned()];
                 direct.extend(command.args.iter().skip(2).cloned());

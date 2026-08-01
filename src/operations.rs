@@ -11,6 +11,8 @@ pub const UI_TABS_SHOW: &str = "ui.tabs.show";
 pub const UI_TABS_HIDE: &str = "ui.tabs.hide";
 pub const UI_TABS_TOGGLE: &str = "ui.tabs.toggle";
 pub const UI_TABS_SET_WIDTH: &str = "ui.tabs.set-width";
+pub const UI_WINDOW_ACTIVATE: &str = "ui.window.activate";
+pub const TERMINAL_PASTE: &str = "terminal.paste";
 pub const CONTROL_CENTER_OPEN: &str = "control-center.open";
 pub const CONTROL_CENTER_STATUS: &str = "control-center.status";
 pub const CONTROL_CENTER_SNAPSHOT: &str = "control-center.snapshot";
@@ -515,6 +517,40 @@ pub const OPERATION_CATALOG: &[OperationSpec] = &[
         since: "0.1.6",
     },
     OperationSpec {
+        id: UI_WINDOW_ACTIVATE,
+        script_surface: "fleet.ui.window.activate",
+        class: OperationClass::Control,
+        command: "ui-action",
+        action: Some("window-activate"),
+        aliases: &[],
+        parameters: NO_PARAMETERS,
+        result_type: "ui_snapshot",
+        errors: &["operation_invalid_arguments", "ui_window_activation_failed"],
+        events: &[],
+        destructive: false,
+        available: true,
+        since: "0.1.12",
+    },
+    OperationSpec {
+        id: TERMINAL_PASTE,
+        script_surface: "fleet.terminal.paste",
+        class: OperationClass::Control,
+        command: "ui-action",
+        action: Some("terminal-paste"),
+        aliases: &[],
+        parameters: NO_PARAMETERS,
+        result_type: "ui_snapshot",
+        errors: &[
+            "operation_invalid_arguments",
+            "terminal_paste_busy",
+            "terminal_paste_failed",
+        ],
+        events: &[],
+        destructive: false,
+        available: true,
+        since: "0.1.12",
+    },
+    OperationSpec {
         id: TABS_SET_NOTE,
         script_surface: "fleet.tabs.set_note",
         class: OperationClass::Control,
@@ -603,6 +639,8 @@ pub(crate) fn operation_for_args(
                 "tabs-hide" => UI_TABS_HIDE,
                 "tabs-toggle" | "toggle-tabs" => UI_TABS_TOGGLE,
                 "tabs-set-width" => UI_TABS_SET_WIDTH,
+                "window-activate" => UI_WINDOW_ACTIVATE,
+                "terminal-paste" => TERMINAL_PASTE,
                 "open-control-center" => CONTROL_CENTER_OPEN,
                 action if action.starts_with("tabs-") => {
                     return Err(operation_error(
@@ -791,6 +829,21 @@ mod tests {
             operation.map(|operation| operation.id),
             Some(UI_TABS_TOGGLE)
         );
+    }
+
+    #[test]
+    fn native_window_activation_and_terminal_paste_have_stable_identities() {
+        for (action, expected) in [
+            ("window-activate", UI_WINDOW_ACTIVATE),
+            ("terminal-paste", TERMINAL_PASTE),
+        ] {
+            let operation = validate_operation_args(&args(&["ui-action", action])).unwrap();
+            assert_eq!(operation.map(|operation| operation.id), Some(expected));
+
+            let error = validate_operation_args(&args(&["ui-action", action, "extra"]))
+                .expect_err("semantic UI actions must reject extra arguments");
+            assert!(error.contains("operation_invalid_arguments"));
+        }
     }
 
     #[test]

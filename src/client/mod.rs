@@ -3537,6 +3537,8 @@ fn fleet_mutation_command(
         "ui.tabs.show" => vec!["ui-action".to_owned(), "tabs-show".to_owned()],
         "ui.tabs.hide" => vec!["ui-action".to_owned(), "tabs-hide".to_owned()],
         "ui.tabs.toggle" => vec!["ui-action".to_owned(), "tabs-toggle".to_owned()],
+        "ui.window.activate" => vec!["ui-action".to_owned(), "window-activate".to_owned()],
+        "terminal.paste" => vec!["ui-action".to_owned(), "terminal-paste".to_owned()],
         "ui.tabs.set-width" => vec![
             "ui-action".to_owned(),
             "tabs-set-width".to_owned(),
@@ -4604,7 +4606,7 @@ Usage:
   agenterm-cli ui-hello --minimum VERSION --maximum VERSION [--client-id ID]
   agenterm-cli ui-bootstrap
   agenterm-cli ui-deltas --epoch EPOCH --after SEQUENCE [--limit 1..64]
-  agenterm-cli ui-action new-tab|new-child|edit-tab|toggle-tree|tabs-show|tabs-hide|tabs-toggle|toggle-tabs|tabs-set-width|select-tab|close-tab|close-window|keep-server-running|stop-server-and-exit|confirm|cancel|composer-send|copy-selection|open-settings|open-control-center|settings-theme-dark|settings-theme-light|settings-apply|open-cwd-editor|cwd-prepare|cwd-prepare-append|cwd-prepare-replace|cwd-send-now
+  agenterm-cli ui-action new-tab|new-child|edit-tab|toggle-tree|tabs-show|tabs-hide|tabs-toggle|toggle-tabs|tabs-set-width|window-activate|terminal-paste|select-tab|close-tab|close-window|keep-server-running|stop-server-and-exit|confirm|cancel|composer-send|copy-selection|open-settings|open-control-center|settings-theme-dark|settings-theme-light|settings-apply|open-cwd-editor|cwd-prepare|cwd-prepare-append|cwd-prepare-replace|cwd-send-now
   agenterm-cli ui-action tabs-set-width --width 180..480
   agenterm-cli focus terminal|composer|tabs [-t target]
   agenterm-cli wait-pane [-t target] (--contains text|--dead|--submit-complete) [--timeout-ms ms]

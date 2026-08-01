@@ -55,6 +55,7 @@ impl WindowStateTracker {
 
 /// Window manipulation surface for the Unix embedded GUI.
 pub trait UnixAppWindowHandle {
+    fn focus_window(&self);
     fn minimize_window(&self);
     fn maximize_window(&self);
     fn restore_window(&self);
@@ -67,12 +68,14 @@ pub trait UnixAppWindowHandle {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum WindowUiActionResult {
     Applied,
+    ActivationRequested,
     NotHandled,
     Invalid(String),
 }
 
-/// Apply a window-control `ui-action` (`window-minimize`, `window-maximize`,
-/// `window-restore`, `window-resize`). Other actions return [`WindowUiActionResult::NotHandled`].
+/// Apply a window-control `ui-action` (`window-activate`, `window-minimize`,
+/// `window-maximize`, `window-restore`, `window-resize`). Other actions return
+/// [`WindowUiActionResult::NotHandled`].
 pub fn apply_ui_action(
     action: &str,
     args: &[String],
@@ -80,6 +83,10 @@ pub fn apply_ui_action(
     tracker: &mut WindowStateTracker,
 ) -> WindowUiActionResult {
     match action {
+        "window-activate" => {
+            handle.focus_window();
+            WindowUiActionResult::ActivationRequested
+        }
         "window-minimize" => {
             handle.minimize_window();
             tracker.set_semantic_state(WindowSemanticState::Minimized);
@@ -148,6 +155,10 @@ mod tests {
     }
 
     impl UnixAppWindowHandle for MockHandle {
+        fn focus_window(&self) {
+            // invocation is covered by the dedicated recording handle below
+        }
+
         fn minimize_window(&self) {
             // tracked externally in tests
         }
@@ -216,6 +227,53 @@ mod tests {
             WindowUiActionResult::Applied
         );
         assert_eq!(tracker.semantic_state(), WindowSemanticState::Restored);
+    }
+
+    #[test]
+    fn window_activate_calls_the_live_handle_without_changing_semantic_state() {
+        use std::cell::Cell;
+
+        struct RecordingHandle<'a> {
+            focused: &'a Cell<bool>,
+        }
+
+        impl UnixAppWindowHandle for RecordingHandle<'_> {
+            fn focus_window(&self) {
+                self.focused.set(true);
+            }
+
+            fn minimize_window(&self) {}
+            fn maximize_window(&self) {}
+            fn restore_window(&self) {}
+
+            fn resize_client(&self, _width: u32, _height: u32) -> Result<(), String> {
+                Ok(())
+            }
+
+            fn client_size(&self) -> (u32, u32) {
+                (960, 600)
+            }
+
+            fn is_visible(&self) -> bool {
+                true
+            }
+
+            fn window_title(&self) -> &str {
+                "AgenTerm"
+            }
+        }
+
+        let focused = Cell::new(false);
+        let handle = RecordingHandle { focused: &focused };
+        let mut tracker = WindowStateTracker::new();
+        tracker.set_semantic_state(WindowSemanticState::Maximized);
+
+        assert_eq!(
+            apply_ui_action("window-activate", &[], &handle, &mut tracker),
+            WindowUiActionResult::ActivationRequested
+        );
+        assert!(focused.get());
+        assert_eq!(tracker.semantic_state(), WindowSemanticState::Maximized);
     }
 
     #[test]
