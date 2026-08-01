@@ -160,6 +160,10 @@ pub(crate) mod ipc;
 #[path = "adapters/windows/process.rs"]
 pub(crate) mod process;
 
+#[cfg(all(feature = "process-control", windows))]
+#[path = "adapters/windows/process_control.rs"]
+pub(crate) mod process_control;
+
 #[cfg(all(feature = "process", windows))]
 #[path = "adapters/windows/runtime.rs"]
 pub(crate) mod runtime;
@@ -215,3 +219,10 @@ pub(crate) mod process;
 #[cfg(all(feature = "process", target_os = "macos"))]
 #[path = "adapters/macos/process.rs"]
 pub(crate) mod process;
+
+#[cfg(all(
+    feature = "process-control",
+    any(target_os = "linux", target_os = "macos")
+))]
+#[path = "adapters/unix/process_control.rs"]
+pub(crate) mod process_control;

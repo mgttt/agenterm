@@ -149,26 +149,6 @@ pub(crate) fn observe(pid: u32) -> ProcessObservation {
     }
 }
 
-pub(crate) fn kill(pid: u32) -> Result<(), ProcessError> {
-    use windows_sys::Win32::{
-        Foundation::CloseHandle,
-        System::Threading::{OpenProcess, PROCESS_TERMINATE, TerminateProcess},
-    };
-    let process = unsafe { OpenProcess(PROCESS_TERMINATE, 0, pid) };
-    if process.is_null() {
-        return Err(ProcessError::new(ProcessErrorKind::KillOpen, "open failed"));
-    }
-    let terminated = unsafe { TerminateProcess(process, 1) };
-    unsafe { CloseHandle(process) };
-    if terminated == 0 {
-        return Err(ProcessError::new(
-            ProcessErrorKind::Kill,
-            "terminate failed",
-        ));
-    }
-    Ok(())
-}
-
 pub(crate) fn list() -> Result<Vec<ProcessInfo>, ProcessError> {
     use std::mem::size_of;
     use windows_sys::Win32::{

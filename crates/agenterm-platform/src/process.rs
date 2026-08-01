@@ -35,7 +35,17 @@ pub fn list() -> Result<Vec<ProcessInfo>, ProcessError> {
 }
 
 pub fn kill(pid: u32) -> Result<(), ProcessError> {
-    adapter::kill(pid)
+    crate::process_control::terminate(pid, crate::process_control::TerminationMode::Forceful)
+        .map_err(|error| {
+            use crate::process_control::ProcessControlErrorKind as ControlKind;
+            let kind = match error.kind() {
+                ControlKind::IdOutOfRange => ProcessErrorKind::IdOutOfRange,
+                ControlKind::Open => ProcessErrorKind::KillOpen,
+                ControlKind::Terminate => ProcessErrorKind::Kill,
+                ControlKind::Unsupported => ProcessErrorKind::Unsupported,
+            };
+            ProcessError::new(kind, error.detail())
+        })
 }
 
 pub fn configure_owned_command(command: &mut Command) -> Result<(), String> {

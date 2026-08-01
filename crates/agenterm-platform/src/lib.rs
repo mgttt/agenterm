@@ -20,6 +20,7 @@ pub const fn platform_kind() -> PlatformKind {
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum Capability {
+    ProcessControl,
     Process,
     FilesystemConventions,
     Filesystem,
@@ -51,6 +52,7 @@ pub enum CapabilityStatus {
 
 pub fn capability_status(capability: Capability) -> CapabilityStatus {
     let (enabled, implemented) = match capability {
+        Capability::ProcessControl => (cfg!(feature = "process-control"), true),
         Capability::Process => (cfg!(feature = "process"), true),
         Capability::FilesystemConventions => (cfg!(feature = "filesystem-conventions"), true),
         Capability::Filesystem => (cfg!(feature = "filesystem"), true),
@@ -123,6 +125,9 @@ pub mod pty;
 #[cfg(feature = "process")]
 pub mod process;
 
+#[cfg(feature = "process-control")]
+pub mod process_control;
+
 #[cfg(feature = "window")]
 pub mod process_window;
 
@@ -157,6 +162,22 @@ mod tests {
         #[cfg(not(feature = "filesystem"))]
         assert_eq!(
             crate::capability_status(crate::Capability::Filesystem),
+            crate::CapabilityStatus::Unsupported {
+                reason: std::borrow::Cow::Borrowed("feature-disabled")
+            }
+        );
+    }
+
+    #[cfg(feature = "process-control")]
+    #[test]
+    fn process_control_does_not_claim_full_process() {
+        assert_eq!(
+            crate::capability_status(crate::Capability::ProcessControl),
+            crate::CapabilityStatus::Available
+        );
+        #[cfg(not(feature = "process"))]
+        assert_eq!(
+            crate::capability_status(crate::Capability::Process),
             crate::CapabilityStatus::Unsupported {
                 reason: std::borrow::Cow::Borrowed("feature-disabled")
             }

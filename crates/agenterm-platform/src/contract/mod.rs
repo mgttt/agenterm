@@ -14,6 +14,8 @@ pub mod input;
 pub mod ipc_transport;
 #[cfg(feature = "process")]
 pub mod process;
+#[cfg(feature = "process-control")]
+pub mod process_control;
 #[cfg(feature = "window")]
 pub mod process_window;
 #[cfg(feature = "pty")]

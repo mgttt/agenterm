@@ -67,18 +67,6 @@ pub(crate) fn observe(pid: u32) -> ProcessObservation {
     }
 }
 
-pub(crate) fn kill(pid: u32) -> Result<(), ProcessError> {
-    let pid = libc::pid_t::try_from(pid)
-        .map_err(|_| ProcessError::new(ProcessErrorKind::IdOutOfRange, "pid_t overflow"))?;
-    if unsafe { libc::kill(pid, libc::SIGKILL) } != 0 {
-        return Err(ProcessError::new(
-            ProcessErrorKind::Kill,
-            std::io::Error::last_os_error().to_string(),
-        ));
-    }
-    Ok(())
-}
-
 pub(crate) fn list() -> Result<Vec<ProcessInfo>, ProcessError> {
     let entries = std::fs::read_dir("/proc")
         .map_err(|error| ProcessError::new(ProcessErrorKind::Inventory, error.to_string()))?;
