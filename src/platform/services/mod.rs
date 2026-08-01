@@ -22,4 +22,3 @@ pub(crate) mod ui_clipboard;
 #[allow(unused_imports)]
 pub(crate) use agenterm_platform::font as ui_font;
 pub(crate) mod ui_screenshot;
-pub(crate) mod webview;

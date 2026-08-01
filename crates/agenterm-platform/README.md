@@ -43,8 +43,8 @@ third-party dependency.
 | `activation` | neutral policy, typed requests, selected native window operation | `window`, target `winit` / Win32 |
 | `clipboard` | caller-bounded Unicode clipboard | `process`, target native APIs |
 | `screenshot` | bounded XRGB framebuffer PNG encoding | `filesystem`, `png` |
-| `font` | platform font-file candidates | `filesystem` |
-| `webview` | reserved migration slot | `filesystem` |
+| `font` | discovery, metrics and RAII native font resource | `filesystem`, target `ab_glyph` / GDI |
+| `webview` | passive system-runtime discovery | none |
 | `full` | every declared feature | union of the above |
 
 Enabling a reserved slot does not pretend the capability exists:
@@ -67,6 +67,7 @@ Enabling a reserved slot does not pretend the capability exists:
 | clipboard | Win32 Unicode | Wayland/X11 helpers | `pbcopy`/`pbpaste` |
 | screenshot encoding | PNG | PNG | PNG |
 | font candidates | product GDI path | system candidates | system candidates |
+| system WebView probe | WebView2 | WebKitGTK | WKWebView |
 
 Unsupported endpoint variants and native failures remain typed; adapters never
 silently substitute a different transport or capability.

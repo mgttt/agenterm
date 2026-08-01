@@ -44,6 +44,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] Product path composition consumes `filesystem::host_directories` and
   `executable_name`; the three root OS path adapters are deleted. AgenTerm
   directory/file naming remains product policy without compile-time OS selection.
+- [~] Passive system-WebView discovery is public and selected inside the crate,
+  with Missing and Failed kept distinct. Native font discovery/metrics and an
+  opaque RAII font resource are public; root renderer migration is still open.
 - [ ] Windows, macOS, and Linux native frontends consume one declared platform
   contract for window lifecycle, normalized input, IME, DPI, clipboard, font
   discovery, screenshots, activation, and applicable system integration.

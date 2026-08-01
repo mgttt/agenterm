@@ -18,3 +18,5 @@ pub mod pty;
 pub mod runtime;
 #[cfg(feature = "screenshot")]
 pub mod ui_screenshot;
+#[cfg(feature = "webview")]
+pub mod webview;

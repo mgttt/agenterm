@@ -1,24 +1,18 @@
-//! OS-neutral facts returned by passive system-WebView discovery.
+//! Passive discovery of the host-provided system WebView runtime.
+//!
+//! Discovery only inspects conventional runtime paths. It does not initialize,
+//! install, update, or download a WebView implementation.
 
 use std::{
     fs,
     path::{Path, PathBuf},
 };
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum RuntimePresence {
-    Detected,
-    Missing,
-    Failed,
-}
+pub use crate::contract::webview::{RuntimePresence, SystemWebViewProbe};
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct SystemWebViewProbe {
-    pub(crate) presence: RuntimePresence,
-    pub(crate) backend: &'static str,
-    pub(crate) version: Option<String>,
-    pub(crate) source: Option<String>,
-    pub(crate) reason: Option<String>,
+/// Inspect the selected platform's system WebView runtime.
+pub fn probe_system_webview() -> SystemWebViewProbe {
+    crate::selected::webview::probe_system_webview()
 }
 
 pub(crate) fn probe_version_directories(
@@ -51,7 +45,7 @@ pub(crate) fn probe_version_directories(
     unavailable_or_failed(backend, missing_reason, failure)
 }
 
-#[allow(dead_code)] // Reached by Linux/macOS selected adapters, not Windows.
+#[allow(dead_code)] // Selected by Linux/macOS adapters; Windows still tests the pure probe.
 pub(crate) fn probe_files(
     backend: &'static str,
     paths: impl IntoIterator<Item = PathBuf>,
@@ -78,7 +72,7 @@ pub(crate) fn probe_files(
     unavailable_or_failed(backend, missing_reason, failure)
 }
 
-#[allow(dead_code)] // Used only by the Linux/macOS file probe above.
+#[allow(dead_code)] // Used by the cross-target file probe above.
 fn version_from_path(path: &Path) -> Option<String> {
     path.file_name()
         .and_then(|name| name.to_str())
@@ -86,7 +80,7 @@ fn version_from_path(path: &Path) -> Option<String> {
         .map(str::to_owned)
 }
 
-pub(crate) fn unavailable_or_failed(
+fn unavailable_or_failed(
     backend: &'static str,
     missing_reason: &'static str,
     failure: Option<String>,
@@ -101,5 +95,26 @@ pub(crate) fn unavailable_or_failed(
         version: None,
         source: None,
         reason: failure.or_else(|| Some(missing_reason.to_owned())),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_file_probe_is_explicitly_unsupported() {
+        let path = std::env::temp_dir().join(format!(
+            "agenterm-platform-webview-missing-{}",
+            std::process::id()
+        ));
+        let probe = probe_files("test", [path], "test_path", "runtime-not-found");
+        assert_eq!(probe.presence, RuntimePresence::Missing);
+        assert_eq!(probe.reason.as_deref(), Some("runtime-not-found"));
+    }
+
+    #[test]
+    fn selected_probe_names_its_backend() {
+        assert!(!probe_system_webview().backend.is_empty());
     }
 }

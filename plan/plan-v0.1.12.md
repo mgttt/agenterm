@@ -131,6 +131,12 @@ Filesystem 产品组合叶删除三套 root paths adapter：host config/local-da
 executable suffix 只取自 crate `filesystem` selected adapter，AgenTerm 大小写目录、
 workspace/instance/settings 文件名和 macOS 默认字号留在无 OS cfg 的产品 service。
 paths/settings/workspace 聚焦测试与 Agenterm all-target Clippy 通过。
+WebView 与 native-font crate surfaces 随后落地：WebView2/WebKitGTK/WKWebView 被动
+探测统一返回 public presence/probe 与 typed Missing/Failed；font 扩展为 discovery、
+metrics、opaque window token 和 RAII `NativeFont`，Unix metrics 的 `ab_glyph` 与
+Windows GDI 依赖均按 target+feature 隔离。29 项 all-feature crate tests 及 crate/root
+warnings-denied Clippy 通过；root Windows font hot path 去重仍是下一提交，本文不提前
+宣称已删除。
 
 2026-08-01 首个建设期增量：Cockpit snapshot 新增明确的
 `tab_counts.{total,running,dead}`，native shell 同源显示 logical instance、

@@ -123,6 +123,18 @@ pub(crate) mod runtime;
 #[path = "adapters/windows/ui_screenshot.rs"]
 pub(crate) mod ui_screenshot;
 
+#[cfg(all(feature = "webview", windows))]
+#[path = "adapters/windows/webview.rs"]
+pub(crate) mod webview;
+
+#[cfg(all(feature = "webview", target_os = "linux"))]
+#[path = "adapters/linux/webview.rs"]
+pub(crate) mod webview;
+
+#[cfg(all(feature = "webview", target_os = "macos"))]
+#[path = "adapters/macos/webview.rs"]
+pub(crate) mod webview;
+
 #[cfg(all(feature = "screenshot", target_os = "linux"))]
 #[path = "adapters/linux/ui_screenshot.rs"]
 pub(crate) mod ui_screenshot;

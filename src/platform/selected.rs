@@ -52,10 +52,6 @@ pub(crate) mod control_center;
 pub(crate) mod control_center_shell;
 
 #[cfg(windows)]
-#[path = "adapters/windows/webview.rs"]
-pub(crate) mod webview;
-
-#[cfg(windows)]
 #[path = "adapters/windows/ui_screenshot.rs"]
 pub(crate) mod ui_screenshot;
 
@@ -111,10 +107,6 @@ pub(crate) mod control_center_shell;
 pub(crate) mod scale;
 
 #[cfg(target_os = "linux")]
-#[path = "adapters/linux/webview.rs"]
-pub(crate) mod webview;
-
-#[cfg(target_os = "linux")]
 #[path = "adapters/linux/ui_screenshot.rs"]
 pub(crate) mod ui_screenshot;
 
@@ -164,10 +156,6 @@ pub(crate) mod control_center;
 #[cfg(target_os = "macos")]
 #[path = "adapters/macos/control_center_shell.rs"]
 pub(crate) mod control_center_shell;
-
-#[cfg(target_os = "macos")]
-#[path = "adapters/macos/webview.rs"]
-pub(crate) mod webview;
 
 #[cfg(target_os = "macos")]
 #[path = "adapters/macos/ui_screenshot.rs"]

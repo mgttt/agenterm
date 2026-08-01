@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use crate::platform::contract::webview::{SystemWebViewProbe, probe_version_directories};
+use crate::{contract::webview::SystemWebViewProbe, webview::probe_version_directories};
 
 pub(crate) fn probe_system_webview() -> SystemWebViewProbe {
     let roots = ["LOCALAPPDATA", "PROGRAMFILES", "PROGRAMFILES(X86)"]

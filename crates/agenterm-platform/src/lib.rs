@@ -62,7 +62,7 @@ pub fn capability_status(capability: Capability) -> CapabilityStatus {
         Capability::Clipboard => (cfg!(feature = "clipboard"), true),
         Capability::Screenshot => (cfg!(feature = "screenshot"), true),
         Capability::Font => (cfg!(feature = "font"), true),
-        Capability::WebView => (cfg!(feature = "webview"), false),
+        Capability::WebView => (cfg!(feature = "webview"), true),
     };
     if enabled && implemented {
         CapabilityStatus::Available
@@ -106,6 +106,9 @@ pub mod ime;
 #[cfg(feature = "window")]
 pub mod window;
 
+#[cfg(feature = "webview")]
+pub mod webview;
+
 #[cfg(feature = "pty")]
 pub mod pty;
 
@@ -129,17 +132,6 @@ mod tests {
             crate::capability_status(crate::Capability::Ipc),
             crate::CapabilityStatus::Unsupported {
                 reason: std::borrow::Cow::Borrowed("feature-disabled")
-            }
-        );
-    }
-
-    #[test]
-    fn declared_but_unimplemented_capabilities_are_explicit() {
-        #[cfg(feature = "webview")]
-        assert_eq!(
-            crate::capability_status(crate::Capability::WebView),
-            crate::CapabilityStatus::Unsupported {
-                reason: std::borrow::Cow::Borrowed("capability-not-yet-implemented")
             }
         );
     }

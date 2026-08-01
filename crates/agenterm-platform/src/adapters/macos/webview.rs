@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use crate::platform::contract::webview::{SystemWebViewProbe, probe_files};
+use crate::{contract::webview::SystemWebViewProbe, webview::probe_files};
 
 pub(crate) fn probe_system_webview() -> SystemWebViewProbe {
     probe_files(

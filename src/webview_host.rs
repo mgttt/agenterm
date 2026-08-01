@@ -51,6 +51,7 @@ pub fn probe() -> WebViewHostFacts {
             crate::platform::webview::RuntimePresence::Detected => WebViewRuntimePresence::Detected,
             crate::platform::webview::RuntimePresence::Missing => WebViewRuntimePresence::Missing,
             crate::platform::webview::RuntimePresence::Failed => WebViewRuntimePresence::Failed,
+            _ => WebViewRuntimePresence::Failed,
         },
         host_state: WebViewHostState::Unimplemented,
         backend: platform.backend,
