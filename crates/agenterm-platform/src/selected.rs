@@ -15,6 +15,25 @@ pub(crate) const fn platform_kind() -> crate::PlatformKind {
     }
 }
 
+#[cfg(all(
+    windows,
+    any(feature = "cache-hierarchy", feature = "processor-topology")
+))]
+#[path = "adapters/windows/logical_processor.rs"]
+pub(crate) mod logical_processor;
+
+#[cfg(all(feature = "cache-hierarchy", windows))]
+#[path = "adapters/windows/cache_hierarchy.rs"]
+pub(crate) mod cache_hierarchy;
+
+#[cfg(all(feature = "cache-hierarchy", target_os = "linux"))]
+#[path = "adapters/linux/cache_hierarchy.rs"]
+pub(crate) mod cache_hierarchy;
+
+#[cfg(all(feature = "cache-hierarchy", target_os = "macos"))]
+#[path = "adapters/macos/cache_hierarchy.rs"]
+pub(crate) mod cache_hierarchy;
+
 #[cfg(all(feature = "processor-topology", windows))]
 #[path = "adapters/windows/processor_topology.rs"]
 pub(crate) mod processor_topology;

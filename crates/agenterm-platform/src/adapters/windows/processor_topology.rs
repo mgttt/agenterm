@@ -1,8 +1,7 @@
-use windows_sys::Win32::Foundation::{ERROR_INSUFFICIENT_BUFFER, ERROR_INVALID_PARAMETER};
+use windows_sys::Win32::Foundation::ERROR_INVALID_PARAMETER;
 use windows_sys::Win32::System::SystemInformation::{
-    GetLogicalProcessorInformationEx, LOGICAL_PROCESSOR_RELATIONSHIP, RelationNumaNode,
-    RelationNumaNodeEx, RelationProcessorCore, RelationProcessorPackage,
-    SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX,
+    LOGICAL_PROCESSOR_RELATIONSHIP, RelationNumaNode, RelationNumaNodeEx, RelationProcessorCore,
+    RelationProcessorPackage,
 };
 use windows_sys::Win32::System::Threading::{
     GetActiveProcessorCount, GetActiveProcessorGroupCount,
@@ -47,42 +46,13 @@ pub(crate) fn facts() -> Result<ProcessorTopologyFacts, ProcessorTopologyError> 
 }
 
 fn relationship_count(relationship: LOGICAL_PROCESSOR_RELATIONSHIP) -> std::io::Result<u64> {
-    let mut length = 0_u32;
-    let first = unsafe {
-        GetLogicalProcessorInformationEx(relationship, std::ptr::null_mut(), &mut length)
-    };
-    let first_error = std::io::Error::last_os_error();
-    if first != 0 || first_error.raw_os_error() != Some(ERROR_INSUFFICIENT_BUFFER as i32) {
-        return Err(first_error);
-    }
-    if length < 8 {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!("topology relationship {relationship} reported {length} bytes"),
-        ));
-    }
-
-    let bytes = length as usize;
-    let mut storage = vec![0_usize; bytes.div_ceil(std::mem::size_of::<usize>())];
-    let mut written = length;
-    if unsafe {
-        GetLogicalProcessorInformationEx(relationship, storage.as_mut_ptr().cast(), &mut written)
-    } == 0
-    {
-        return Err(std::io::Error::last_os_error());
-    }
-    if written as usize > storage.len() * std::mem::size_of::<usize>() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "topology query wrote beyond the requested buffer length",
-        ));
-    }
-
-    count_records(
-        storage.as_ptr().cast(),
-        written as usize,
+    let records = super::logical_processor::query_records(
+        relationship,
         returned_relationship(relationship),
-    )
+        |_| Ok(()),
+    )?;
+    u64::try_from(records.len())
+        .map_err(|_| std::io::Error::other("topology record count overflow"))
 }
 
 fn returned_relationship(
@@ -95,47 +65,6 @@ fn returned_relationship(
     } else {
         requested
     }
-}
-
-fn count_records(
-    bytes: *const u8,
-    length: usize,
-    expected: LOGICAL_PROCESSOR_RELATIONSHIP,
-) -> std::io::Result<u64> {
-    let mut offset = 0_usize;
-    let mut count = 0_u64;
-    while offset < length {
-        if length - offset < 8 {
-            return Err(malformed("truncated topology record header"));
-        }
-        let record = unsafe {
-            bytes
-                .add(offset)
-                .cast::<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>()
-        };
-        let relationship = unsafe { std::ptr::addr_of!((*record).Relationship).read_unaligned() };
-        let size = unsafe { std::ptr::addr_of!((*record).Size).read_unaligned() } as usize;
-        if relationship != expected {
-            return Err(malformed(
-                "topology record relationship changed inside the buffer",
-            ));
-        }
-        if size < 8 || size > length - offset {
-            return Err(malformed("topology record has an invalid size"));
-        }
-        count = count
-            .checked_add(1)
-            .ok_or_else(|| malformed("topology record count overflow"))?;
-        offset += size;
-    }
-    if count == 0 {
-        return Err(malformed("topology query returned no records"));
-    }
-    Ok(count)
-}
-
-fn malformed(message: &'static str) -> std::io::Error {
-    std::io::Error::new(std::io::ErrorKind::InvalidData, message)
 }
 
 fn query_error(context: &str) -> ProcessorTopologyError {
@@ -154,29 +83,6 @@ fn native_error(context: &str, error: std::io::Error) -> ProcessorTopologyError 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn record_parser_rejects_truncation_and_wrong_relationship() {
-        let truncated = [0_u8; 7];
-        assert_eq!(
-            count_records(truncated.as_ptr(), truncated.len(), RelationProcessorCore)
-                .unwrap_err()
-                .kind(),
-            std::io::ErrorKind::InvalidData
-        );
-
-        let mut record = SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX {
-            Relationship: RelationProcessorPackage,
-            Size: 8,
-            ..Default::default()
-        };
-        assert_eq!(
-            count_records((&raw mut record).cast(), 8, RelationProcessorCore,)
-                .unwrap_err()
-                .kind(),
-            std::io::ErrorKind::InvalidData
-        );
-    }
 
     #[test]
     fn numa_node_ex_query_expects_numa_node_records() {

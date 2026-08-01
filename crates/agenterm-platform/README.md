@@ -36,6 +36,7 @@ clipboard, IPC, or screenshot modules.
 |---|---|---|
 | `serde` | `IpcEndpoint` string serialization | `serde` |
 | `hardware` | host processor architecture, pointer width, parallelism and CPU features | none |
+| `cache-hierarchy` | CPU cache levels, kinds, per-instance capacity, coherency line and sharing geometry | target `libc` / minimal `windows-sys` |
 | `virtualization-probe` | current-host WHPX/KVM/Hypervisor.framework availability facts without VM lifecycle | target `libc` / minimal dynamically loaded Win32 APIs |
 | `processor-topology` | online logical CPUs, physical cores, packages, NUMA nodes and processor groups | target `libc` / minimal `windows-sys` |
 | `host-memory` | host page size, mapping granularity and total physical memory | target `libc` / minimal `windows-sys` |
@@ -68,6 +69,7 @@ clipboard, IPC, or screenshot modules.
 | Capability | Windows | Linux | macOS |
 |---|---|---|---|
 | hardware | compile-target ISA + runtime CPU facts | compile-target ISA + runtime CPU facts | compile-target ISA + runtime CPU facts |
+| cache hierarchy | RelationCache geometry | cache sysfs | cache-size sysctl geometry |
 | native virtualization probe | dynamically discovered WHPX capability | `/dev/kvm` + API version | `kern.hv_support` |
 | processor topology | cores/packages/NUMA/groups | sysconf + sysfs | logical/physical/package sysctl |
 | host memory | page/allocation geometry + physical total | page geometry + physical pages | page geometry + `hw.memsize` |

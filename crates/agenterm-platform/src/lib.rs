@@ -21,6 +21,7 @@ pub const fn platform_kind() -> PlatformKind {
 #[non_exhaustive]
 pub enum Capability {
     Hardware,
+    CacheHierarchy,
     NativeVirtualization,
     ProcessorTopology,
     HostMemory,
@@ -64,6 +65,7 @@ pub enum CapabilityStatus {
 pub fn capability_status(capability: Capability) -> CapabilityStatus {
     let (enabled, implemented) = match capability {
         Capability::Hardware => (cfg!(feature = "hardware"), true),
+        Capability::CacheHierarchy => (cfg!(feature = "cache-hierarchy"), true),
         Capability::NativeVirtualization => (cfg!(feature = "virtualization-probe"), true),
         Capability::ProcessorTopology => (cfg!(feature = "processor-topology"), true),
         Capability::HostMemory => (cfg!(feature = "host-memory"), true),
@@ -119,6 +121,9 @@ pub mod font;
 
 #[cfg(feature = "hardware")]
 pub mod hardware;
+
+#[cfg(feature = "cache-hierarchy")]
+pub mod cache_hierarchy;
 
 #[cfg(feature = "virtualization-probe")]
 pub mod native_virtualization;
@@ -249,6 +254,29 @@ mod tests {
         #[cfg(not(feature = "hardware"))]
         assert_eq!(
             crate::capability_status(crate::Capability::Hardware),
+            crate::CapabilityStatus::Unsupported {
+                reason: std::borrow::Cow::Borrowed("feature-disabled")
+            }
+        );
+    }
+
+    #[cfg(feature = "cache-hierarchy")]
+    #[test]
+    fn cache_hierarchy_does_not_claim_processor_features_or_topology() {
+        assert_eq!(
+            crate::capability_status(crate::Capability::CacheHierarchy),
+            crate::CapabilityStatus::Available
+        );
+        #[cfg(not(feature = "hardware"))]
+        assert_eq!(
+            crate::capability_status(crate::Capability::Hardware),
+            crate::CapabilityStatus::Unsupported {
+                reason: std::borrow::Cow::Borrowed("feature-disabled")
+            }
+        );
+        #[cfg(not(feature = "processor-topology"))]
+        assert_eq!(
+            crate::capability_status(crate::Capability::ProcessorTopology),
             crate::CapabilityStatus::Unsupported {
                 reason: std::borrow::Cow::Borrowed("feature-disabled")
             }
