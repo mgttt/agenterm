@@ -270,3 +270,4 @@ authentication.
 
 - [Product tree and requirements](PRD.md)
 - [Coding-agent guide](AGENTS.md)
+- [Build and install a local macOS app](docs/macos-local-build.md)

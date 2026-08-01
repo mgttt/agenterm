@@ -3,4 +3,6 @@
 /dist/
 /agenterm-window*.png
 /agenterm-pane*.png
+/AgenTerm/settings.json
+/AgenTerm/workspace.json
 *.swp
