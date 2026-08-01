@@ -78,6 +78,13 @@ Linux/macOS native scale adapters 经 workspace dependency 消费同一实现，
 `AgenTerm` 目录、audit 扩展名、supervisor namespace 和并发错误映射仍由主 crate
 决定。12 项 all-feature crate tests、warnings-denied Clippy 与 Agenterm all-target
 compile check 通过。
+第五个叶把 transport-qualified `IpcEndpoint`、parser、local validation 和可选 serde
+表示单一迁入 `ipc` feature；主 crate 的 LogicalInstance、scope hashing、workspace
+placement 和 legacy instance discovery 保持产品 ownership。未来 endpoint variant 在主
+crate 旧 transport 遇到时返回 typed Unsupported，不使用 wildcard 静默降级。14 项
+all-feature crate tests、warnings-denied Clippy 与 Agenterm all-target compile check 通过；
+native byte listener/stream 仍待下一叶迁移，因此 `Capability::Ipc` 继续真实报告
+`capability-not-yet-implemented`。
 
 2026-08-01 首个建设期增量：Cockpit snapshot 新增明确的
 `tab_counts.{total,running,dead}`，native shell 同源显示 logical instance、

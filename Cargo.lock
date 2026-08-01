@@ -53,6 +53,7 @@ version = "0.1.11"
 dependencies = [
  "libc",
  "rmux-pty",
+ "serde",
  "windows-sys 0.61.2",
 ]
 

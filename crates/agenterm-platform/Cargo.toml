@@ -10,6 +10,7 @@ readme = "README.md"
 
 [features]
 default = []
+serde = ["dep:serde"]
 process = ["dep:libc", "dep:windows-sys"]
 filesystem = []
 locking = ["dep:libc", "dep:windows-sys"]
@@ -44,6 +45,7 @@ libc = { version = "0.2", optional = true }
 
 [dependencies]
 rmux-pty = { version = "0.9.1", optional = true }
+serde = { version = "1", optional = true, features = ["derive"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", optional = true, features = [

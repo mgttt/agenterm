@@ -9,7 +9,7 @@ use anyhow::{Context as _, Result};
 use crate::platform::contract::ipc::IpcEndpoint;
 pub(crate) use crate::platform::contract::ipc_transport::{
     IpcTransportError, IpcTransportErrorCode, TransportResult, map_bind_error, timeout_error,
-    transport_io,
+    transport_io, unsupported,
 };
 
 // UI command completion embeds a bounded 1 MiB `IpcResponse` JSON document
@@ -46,6 +46,7 @@ impl IpcListener {
             IpcEndpoint::UnixSocket(_) | IpcEndpoint::NamedPipe(_) => ListenerInner::Native(
                 crate::platform::services::ipc::NativeListener::bind(endpoint)?,
             ),
+            _ => return Err(unsupported(endpoint, "endpoint variant is not supported")),
         };
         Ok(Self {
             endpoint: endpoint.clone(),
@@ -114,6 +115,7 @@ impl IpcStream {
                 crate::platform::services::ipc::NativeStream::connect(endpoint, timeout)
                     .map(|stream| Self::from_native(stream, endpoint))
             }
+            _ => Err(unsupported(endpoint, "endpoint variant is not supported")),
         }
     }
 

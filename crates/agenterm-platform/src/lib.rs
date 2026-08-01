@@ -85,6 +85,9 @@ pub mod filesystem;
 #[cfg(feature = "locking")]
 pub mod locking;
 
+#[cfg(feature = "ipc")]
+pub mod ipc;
+
 #[cfg(feature = "window")]
 pub mod window;
 

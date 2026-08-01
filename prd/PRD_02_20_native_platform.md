@@ -20,7 +20,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   capability families and product-code extraction are open. Generic host
   filesystem conventions and cross-process path/slot locks are public while
   AgenTerm directory names, audit filenames and Script concurrency policy remain
-  root-package concerns.
+  root-package concerns. Typed IPC endpoints and optional serde support are now
+  public; native listener/stream migration remains open, so IPC capability status
+  does not yet claim availability.
 - [ ] Windows, macOS, and Linux native frontends consume one declared platform
   contract for window lifecycle, normalized input, IME, DPI, clipboard, font
   discovery, screenshots, activation, and applicable system integration.
