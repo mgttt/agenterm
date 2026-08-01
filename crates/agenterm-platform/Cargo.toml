@@ -17,6 +17,11 @@ host-memory = [
     "dep:windows-sys",
     "windows-sys/Win32_System_SystemInformation",
 ]
+storage = [
+    "dep:libc",
+    "dep:windows-sys",
+    "windows-sys/Win32_Storage_FileSystem",
+]
 entropy = [
     "dep:libc",
     "dep:windows-sys",
@@ -120,6 +125,7 @@ webview = []
 full = [
     "hardware",
     "host-memory",
+    "storage",
     "entropy",
     "shared-memory",
     "process",

@@ -34,6 +34,8 @@ pub mod pty;
 pub mod runtime;
 #[cfg(feature = "shared-memory")]
 pub mod shared_memory;
+#[cfg(feature = "storage")]
+pub mod storage;
 #[cfg(feature = "screenshot")]
 pub mod ui_screenshot;
 #[cfg(feature = "webview")]

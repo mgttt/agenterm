@@ -15,6 +15,14 @@ pub(crate) const fn platform_kind() -> crate::PlatformKind {
     }
 }
 
+#[cfg(all(feature = "storage", windows))]
+#[path = "adapters/windows/storage.rs"]
+pub(crate) mod storage;
+
+#[cfg(all(feature = "storage", any(target_os = "linux", target_os = "macos")))]
+#[path = "adapters/unix/storage.rs"]
+pub(crate) mod storage;
+
 #[cfg(all(feature = "host-memory", windows))]
 #[path = "adapters/windows/host_memory.rs"]
 pub(crate) mod host_memory;

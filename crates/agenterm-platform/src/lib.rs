@@ -22,6 +22,7 @@ pub const fn platform_kind() -> PlatformKind {
 pub enum Capability {
     Hardware,
     HostMemory,
+    Storage,
     Entropy,
     ProcessControl,
     ProcessImage,
@@ -60,6 +61,7 @@ pub fn capability_status(capability: Capability) -> CapabilityStatus {
     let (enabled, implemented) = match capability {
         Capability::Hardware => (cfg!(feature = "hardware"), true),
         Capability::HostMemory => (cfg!(feature = "host-memory"), true),
+        Capability::Storage => (cfg!(feature = "storage"), true),
         Capability::Entropy => (cfg!(feature = "entropy"), true),
         Capability::ProcessControl => (cfg!(feature = "process-control"), true),
         Capability::ProcessImage => (cfg!(feature = "process-image"), true),
@@ -112,6 +114,9 @@ pub mod hardware;
 
 #[cfg(feature = "host-memory")]
 pub mod host_memory;
+
+#[cfg(feature = "storage")]
+pub mod storage;
 
 #[cfg(feature = "entropy")]
 pub mod entropy;
