@@ -88,6 +88,20 @@ jobs:
           end_ms=$(date +%s%3N)
           duration_ms=$((end_ms - start_ms))
           echo "duration_ms=$duration_ms" >> "$GITHUB_OUTPUT"
+      - name: Prove published Windows IPC upgrade and rollback
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: native-ipc-compat
+        shell: bash
+        env:
+          AGENTERM_NO_ACTIVATE: "1"
+        run: |
+          set -euo pipefail
+          start_ms=$(date +%s%3N)
+          dist/agenterm-script.exe task run native-ipc-compat-smoke \
+            --manifest agenterm.tasks.json
+          end_ms=$(date +%s%3N)
+          duration_ms=$((end_ms - start_ms))
+          echo "duration_ms=$duration_ms" >> "$GITHUB_OUTPUT"
       - name: Publish Windows quality timing summary
         if: always()
         continue-on-error: true
@@ -118,6 +132,7 @@ jobs:
             echo "windows_quality_gate_ms: ${{ steps.quality-gate.outputs.duration_ms || 'n/a' }}"
             echo "windows_public_interface_ms: ${{ steps.public-interface.outputs.duration_ms || 'n/a' }}"
             echo "windows_native_ipc_main_dev_ms: ${{ steps.native-ipc-main-dev.outputs.duration_ms || 'n/a' }}"
+            echo "windows_native_ipc_compat_ms: ${{ steps.native-ipc-compat.outputs.duration_ms || 'n/a' }}"
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload Windows quality timing
         if: always()
@@ -233,6 +248,18 @@ jobs:
           --server target/x86_64-unknown-linux-gnu/debug/agenterm-server
           --cli target/x86_64-unknown-linux-gnu/debug/agenterm-cli
           --ci-main-dev
+      - name: Prove published Linux IPC upgrade and rollback
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: native-ipc-compat
+        run: |
+          start_ms=$(date +%s%3N)
+          ./build.sh
+          dist/agenterm-script task run native-ipc-compat-smoke \
+            --manifest agenterm.tasks.json
+          end_ms=$(date +%s%3N)
+          duration_ms=$((end_ms - start_ms))
+          echo "duration_ms=$duration_ms" >> "$GITHUB_OUTPUT"
+          echo "linux_x86_64_native_ipc_compat_ms: $duration_ms" >> "$GITHUB_STEP_SUMMARY"
       - name: Exercise public Linux Script CLI
         run: cargo test --locked --target x86_64-unknown-linux-gnu --test linux_script_cli
       - name: Validate isolated agenterm-net research loop
@@ -485,6 +512,23 @@ jobs:
           end_ms=$(date +%s%3N)
           duration_ms=$((end_ms - start_ms))
           echo "duration_ms=$duration_ms" >> "$GITHUB_OUTPUT"
+      - name: Prove published macOS IPC upgrade and rollback
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: native-ipc-compat
+        run: |
+          start_ms=$(date +%s%3N)
+          host_arch="$(uname -m)"
+          [ "$host_arch" = "arm64" ] && host_arch="aarch64"
+          if [ "$host_arch" != "${{ matrix.arch }}" ]; then
+            echo "Skipping execution-only compatibility proof for cross-built ${{ matrix.target }}"
+            exit 0
+          fi
+          ./build.sh
+          dist/agenterm-script task run native-ipc-compat-smoke \
+            --manifest agenterm.tasks.json
+          end_ms=$(date +%s%3N)
+          duration_ms=$((end_ms - start_ms))
+          echo "duration_ms=$duration_ms" >> "$GITHUB_OUTPUT"
       - name: Report cache hit profile
         if: always()
         shell: bash
@@ -505,6 +549,7 @@ jobs:
             echo "macos_${{ matrix.arch }}_client_build_ms: ${{ steps.client-build.outputs.duration_ms || 'n/a' }}"
             echo "macos_${{ matrix.arch }}_client_smoke_ms: ${{ steps.client-smoke.outputs.duration_ms || 'n/a' }}"
             echo "macos_${{ matrix.arch }}_native_ipc_smoke_ms: ${{ steps.native-ipc-smoke.outputs.duration_ms || 'n/a' }}"
+            echo "macos_${{ matrix.arch }}_native_ipc_compat_ms: ${{ steps.native-ipc-compat.outputs.duration_ms || 'n/a' }}"
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Save macOS build target
         if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
