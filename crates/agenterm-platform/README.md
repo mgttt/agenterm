@@ -45,7 +45,7 @@ clipboard, IPC, or screenshot modules.
 | `entropy` | fail-closed host CSPRNG byte filling | target `libc` / minimal `windows-sys` |
 | `console-interrupt` | RAII Ctrl-C/SIGINT observation or temporary ignore with typed failures | target `libc` / minimal `windows-sys` |
 | `user-identity` | current Windows SID or POSIX real/effective uid/gid facts | target `libc` / minimal `windows-sys` |
-| `process-control` | typed single-process termination and Unix suspend/resume | target `libc` / minimal `windows-sys` |
+| `process-control` | typed single-process termination, exact Windows HANDLE termination, and Unix suspend/resume | target `libc` / minimal `windows-sys` |
 | `process-observation` | fail-closed single-process liveness and stable start identity | target `libc` / minimal `windows-sys` |
 | `process-reference` | owned stable process reference plus bounded or indefinite exact-object exit waits via HANDLE, pidfd, or kqueue; Windows raw exit-code, target-process HANDLE delivery and exact Job membership | target `libc` / minimal `windows-sys` |
 | `process-security` | effective process principal plus typed sandbox identity, with handle-bound Windows queries | target `libc` / minimal `windows-sys` |

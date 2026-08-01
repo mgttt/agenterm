@@ -1,5 +1,7 @@
 //! Windows single-process termination adapter.
 
+use std::os::windows::io::{AsHandle as _, AsRawHandle as _, BorrowedHandle, FromRawHandle as _};
+
 use crate::contract::process_control::{
     ProcessControlError, ProcessControlErrorKind, TerminationMode,
 };
@@ -12,10 +14,7 @@ pub(crate) fn terminate(pid: u32, mode: TerminationMode) -> Result<(), ProcessCo
             "Windows has no generic graceful signal for an arbitrary process",
         ));
     }
-    use windows_sys::Win32::{
-        Foundation::CloseHandle,
-        System::Threading::{OpenProcess, PROCESS_TERMINATE, TerminateProcess},
-    };
+    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_TERMINATE};
     let process = unsafe { OpenProcess(PROCESS_TERMINATE, 0, pid) };
     if process.is_null() {
         return Err(ProcessControlError::new(
@@ -23,20 +22,22 @@ pub(crate) fn terminate(pid: u32, mode: TerminationMode) -> Result<(), ProcessCo
             std::io::Error::last_os_error().to_string(),
         ));
     }
-    let terminated = unsafe { TerminateProcess(process, 1) };
-    let error = if terminated == 0 {
-        Some(std::io::Error::last_os_error())
-    } else {
-        None
-    };
-    unsafe { CloseHandle(process) };
-    if let Some(error) = error {
-        Err(ProcessControlError::new(
-            ProcessControlErrorKind::Terminate,
-            error.to_string(),
-        ))
-    } else {
-        Ok(())
+    let process = unsafe { std::os::windows::io::OwnedHandle::from_raw_handle(process) };
+    crate::process_control::terminate_handle(process.as_handle(), 1).map_err(|error| {
+        ProcessControlError::new(ProcessControlErrorKind::Terminate, error.to_string())
+    })
+}
+
+impl crate::process_control::ProcessTerminationHandle for BorrowedHandle<'_> {
+    fn terminate_process(self, exit_code: u32) -> std::io::Result<()> {
+        if unsafe {
+            windows_sys::Win32::System::Threading::TerminateProcess(self.as_raw_handle(), exit_code)
+        } == 0
+        {
+            Err(std::io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
     }
 }
 

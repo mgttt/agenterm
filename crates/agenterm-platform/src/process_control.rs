@@ -4,6 +4,29 @@ pub use crate::contract::process_control::{
     ProcessControlError, ProcessControlErrorKind, TerminationMode,
 };
 
+/// A target-native reference that can terminate one exact process object.
+///
+/// This extension is intentionally narrower than [`terminate`]: it does not
+/// reopen a process by ID, discover descendants, or imply process-tree
+/// ownership. The Windows adapter implements it for
+/// [`std::os::windows::io::BorrowedHandle`].
+pub trait ProcessTerminationHandle {
+    #[doc(hidden)]
+    fn terminate_process(self, exit_code: u32) -> std::io::Result<()>;
+}
+
+/// Forcefully terminates the exact process object represented by `process`.
+///
+/// The caller owns the product policy for `exit_code`. This operation does not
+/// terminate descendants; use an owning container primitive when process-tree
+/// semantics are required.
+pub fn terminate_handle(
+    process: impl ProcessTerminationHandle,
+    exit_code: u32,
+) -> std::io::Result<()> {
+    process.terminate_process(exit_code)
+}
+
 /// Request termination of one host process.
 ///
 /// This does not discover descendants or imply process-tree ownership.
@@ -65,6 +88,17 @@ mod tests {
         let mut child = spawn_sleeper();
         terminate(child.id(), TerminationMode::Forceful).expect("terminate fixture");
         wait_for_exit(&mut child);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn handle_termination_targets_the_open_process_and_preserves_exit_code() {
+        use std::os::windows::io::AsHandle as _;
+
+        let mut child = spawn_sleeper();
+        terminate_handle(child.as_handle(), 37).expect("terminate exact process handle");
+        let status = child.wait().expect("wait for exact process handle");
+        assert_eq!(status.code(), Some(37));
     }
 
     #[cfg(unix)]
