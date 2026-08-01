@@ -20,6 +20,8 @@ pub mod ipc_transport;
 pub mod process;
 #[cfg(feature = "process-control")]
 pub mod process_control;
+#[cfg(feature = "process-metrics")]
+pub mod process_metrics;
 #[cfg(feature = "window")]
 pub mod process_window;
 #[cfg(feature = "pty")]

@@ -31,6 +31,18 @@ pub(crate) mod entropy;
 #[path = "adapters/macos/entropy.rs"]
 pub(crate) mod entropy;
 
+#[cfg(all(feature = "process-metrics", windows))]
+#[path = "adapters/windows/process_metrics.rs"]
+pub(crate) mod process_metrics;
+
+#[cfg(all(feature = "process-metrics", target_os = "linux"))]
+#[path = "adapters/linux/process_metrics.rs"]
+pub(crate) mod process_metrics;
+
+#[cfg(all(feature = "process-metrics", target_os = "macos"))]
+#[path = "adapters/macos/process_metrics.rs"]
+pub(crate) mod process_metrics;
+
 #[cfg(all(feature = "clipboard", target_os = "linux"))]
 #[path = "adapters/linux/clipboard.rs"]
 pub(crate) mod clipboard;
