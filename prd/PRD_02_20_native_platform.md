@@ -507,6 +507,11 @@ integrated validation recorded below):
   repeat, committed text and modifier snapshot. Shift+Tab is explicitly
   preserved as named Tab plus Shift. Product composer/tmux/PTY-byte policy
   remains in the main crate; adapters own winit/Win32 event conversion.
+- [x] Linux/macOS selected input adapters implement winit-to-contract key
+  normalization inside the crate. Logical/named/physical keys, element state,
+  repeat and committed text cross the public extension boundary only as crate
+  types. Linux-target warnings-denied Clippy compiles focused mapper test targets
+  for Shift+Tab and stable letter/digit identity; native execution remains CI evidence.
 - [x] Control Center state-directory protection, exclusive state-file creation,
   atomic replacement, existing-window focus, and direct native capture now
   call `services::control_center → selected → adapters/{windows,linux,macos}`.

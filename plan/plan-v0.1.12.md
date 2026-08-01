@@ -214,6 +214,10 @@ Normalized frontend event 前置新增稳定 public `NormalizedKeyEvent`：logic
 bounded physical identity、pressed/released、repeat、committed text 与 modifier snapshot 均不含
 winit 类型。Shift+Tab contract test 固定为 named Tab + Shift，后续 Unix runner 与 Windows
 host 必须在 adapter 内完成原生 event 转换；composer/tmux/PTY 字节策略仍属主 crate。
+Linux/macOS selected input adapters 随后实现该转换：winit logical/named/physical key、
+ElementState、repeat、committed text 全部在 crate shared Unix adapter 归一化；公共 extension
+trait 的签名只含 crate 类型。Linux-target all-target Clippy 已编译 Shift+Tab/letter/digit
+mapper test targets；本 Windows host 未执行 Linux test binary，root consumer 切换是下一集成叶。
 
 2026-08-01 首个建设期增量：Cockpit snapshot 新增明确的
 `tab_counts.{total,running,dead}`，native shell 同源显示 logical instance、

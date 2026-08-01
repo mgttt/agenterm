@@ -4,6 +4,12 @@ pub use crate::contract::input::{
     KeyClassification, KeyPressState, LogicalKey, ModifierState, NamedKey, NormalizedKeyEvent,
     PhysicalKeyCode, Utf16TextDecoder,
 };
+
+/// Adapter extension implemented for a native key-event type without exposing
+/// that third-party type in the platform contract.
+pub trait NativeKeyEventExt {
+    fn to_normalized_key_event(&self, modifiers: ModifierState) -> NormalizedKeyEvent;
+}
 use crate::{contract::input::classify_key_press as classify_shared, selected};
 
 pub const fn modifiers(control: bool, shift: bool, alt: bool, meta: bool) -> ModifierState {
