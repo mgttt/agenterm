@@ -104,6 +104,7 @@ process = [
     "windows-sys/Win32_System_Pipes",
 ]
 filesystem-conventions = []
+filesystem-cleanup = []
 file-identity = [
     "dep:windows-sys",
     "windows-sys/Win32_Foundation",
@@ -179,6 +180,7 @@ full = [
     "shared-memory",
     "process",
     "filesystem",
+    "filesystem-cleanup",
     "locking",
     "ipc",
     "pty",

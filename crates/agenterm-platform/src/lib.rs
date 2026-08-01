@@ -36,6 +36,7 @@ pub enum Capability {
     SharedMemory,
     Process,
     FilesystemConventions,
+    FilesystemCleanup,
     FileIdentity,
     Filesystem,
     Locking,
@@ -82,6 +83,7 @@ pub fn capability_status(capability: Capability) -> CapabilityStatus {
         Capability::SharedMemory => (cfg!(feature = "shared-memory"), true),
         Capability::Process => (cfg!(feature = "process"), true),
         Capability::FilesystemConventions => (cfg!(feature = "filesystem-conventions"), true),
+        Capability::FilesystemCleanup => (cfg!(feature = "filesystem-cleanup"), true),
         Capability::FileIdentity => (cfg!(feature = "file-identity"), true),
         Capability::Filesystem => (cfg!(feature = "filesystem"), true),
         Capability::Locking => (cfg!(feature = "locking"), true),
@@ -152,6 +154,9 @@ pub mod user_identity;
 
 #[cfg(any(feature = "filesystem-conventions", feature = "filesystem"))]
 pub mod filesystem;
+
+#[cfg(feature = "filesystem-cleanup")]
+pub mod filesystem_cleanup;
 
 #[cfg(feature = "file-identity")]
 pub mod file_identity;
@@ -227,6 +232,22 @@ mod tests {
     fn filesystem_conventions_do_not_claim_full_filesystem() {
         assert_eq!(
             crate::capability_status(crate::Capability::FilesystemConventions),
+            crate::CapabilityStatus::Available
+        );
+        #[cfg(not(feature = "filesystem"))]
+        assert_eq!(
+            crate::capability_status(crate::Capability::Filesystem),
+            crate::CapabilityStatus::Unsupported {
+                reason: std::borrow::Cow::Borrowed("feature-disabled")
+            }
+        );
+    }
+
+    #[cfg(feature = "filesystem-cleanup")]
+    #[test]
+    fn filesystem_cleanup_does_not_claim_full_filesystem() {
+        assert_eq!(
+            crate::capability_status(crate::Capability::FilesystemCleanup),
             crate::CapabilityStatus::Available
         );
         #[cfg(not(feature = "filesystem"))]

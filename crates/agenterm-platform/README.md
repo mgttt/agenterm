@@ -51,6 +51,7 @@ clipboard, IPC, or screenshot modules.
 | `shared-memory` | exclusive named read/write mappings for cross-process zero-copy data | target `libc` / minimal `windows-sys` |
 | `process` | observation/tree control, shell defaults, child-pipe probes and parent-console diagnostics | target `libc` / `windows-sys` |
 | `filesystem-conventions` | user home, host roots and sibling executable naming | none |
+| `filesystem-cleanup` | remove caller-owned quiescent trees after restoring deletable permissions without following links | none |
 | `file-identity` | opened/path host object identity across rename and hard-link aliases | target minimal `windows-sys`; none on Unix |
 | `filesystem` | conventions plus private state files/directories and durable atomic replacement mechanics | target native APIs |
 | `locking` | cross-process path locks and bounded slot permits | target `libc` / `windows-sys` |
@@ -85,6 +86,7 @@ clipboard, IPC, or screenshot modules.
 | shared memory | page-file mapping | POSIX shared memory | POSIX shared memory |
 | process | ToolHelp/Job Objects | `/proc` + process groups | POSIX process groups |
 | filesystem | AppData conventions | XDG conventions | Application Support |
+| filesystem cleanup | clear readonly attributes; do not traverse reparse points | restore owner access; do not follow symlinks | restore owner access; do not follow symlinks |
 | locking | named mutex | `flock` | `flock` |
 | IPC | named pipe | Unix socket | Unix socket |
 | PTY | ConPTY | POSIX PTY | POSIX PTY |
@@ -121,6 +123,12 @@ ambient standard-handle inherit flags are cleared and restored. Explicit child
 stdio, executable discovery, arguments, environment, readiness, restart and
 reaping remain caller policy. The older fire-and-forget entry point remains for
 compatibility, while supervised callers should retain the child handle.
+
+`filesystem_cleanup::remove_tree` is for caller-owned trees that are no longer
+being mutated. It restores only the access needed for removal, treats a missing
+path as success, and never intentionally traverses Unix symlinks or Windows
+reparse points. Choosing a deletion root, handling an actively hostile writer,
+and deciding whether cleanup failure is fatal remain caller policy.
 
 ## Public API
 
