@@ -56,6 +56,20 @@ impl SharedMemory {
             };
             return Err(SharedMemoryError::new(kind, native.to_string()));
         }
+        let mut status = unsafe { std::mem::zeroed::<libc::stat>() };
+        if unsafe { libc::fstat(descriptor, &mut status) } != 0 {
+            let error = errno_error(SharedMemoryErrorKind::Inspect);
+            unsafe { libc::close(descriptor) };
+            return Err(error);
+        }
+        let actual = u64::try_from(status.st_size).unwrap_or_default();
+        if actual < len as u64 {
+            unsafe { libc::close(descriptor) };
+            return Err(SharedMemoryError::new(
+                SharedMemoryErrorKind::SizeMismatch,
+                format!("mapping contains {actual} bytes but {len} were requested"),
+            ));
+        }
         Self::map(descriptor, native_name, len, false)
     }
 

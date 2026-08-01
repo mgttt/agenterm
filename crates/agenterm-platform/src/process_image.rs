@@ -27,7 +27,7 @@ mod tests {
             ProcessImageErrorKind::InvalidId
         );
         assert_eq!(
-            executable_path(u32::MAX).unwrap_err().kind(),
+            executable_path(i32::MAX as u32).unwrap_err().kind(),
             ProcessImageErrorKind::NotFound
         );
     }

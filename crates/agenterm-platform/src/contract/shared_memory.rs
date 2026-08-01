@@ -5,10 +5,12 @@
 pub enum SharedMemoryErrorKind {
     InvalidName,
     InvalidLength,
+    SizeMismatch,
     AlreadyExists,
     NotFound,
     Create,
     Open,
+    Inspect,
     Resize,
     Map,
 }

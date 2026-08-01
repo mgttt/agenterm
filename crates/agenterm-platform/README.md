@@ -148,7 +148,9 @@ memory object on Linux/macOS. Creation is exclusive. Keep the creator alive
 through peer discovery: its drop unlinks the POSIX name, while Windows removes
 the name after the last handle closes; already-open views remain valid. Byte
 layout, synchronization, worker ownership and crash-recovery naming remain
-product protocol concerns.
+product protocol concerns. An opener requesting more bytes than the native
+object contains fails before pointer access; POSIX checks the object with
+`fstat` before `mmap`, avoiding a delayed `SIGBUS` on the oversized tail.
 
 `locking::PathLock::acquire` waits for ownership; `try_acquire` returns typed
 `LockErrorKind::Contended` without waiting. Windows resolves relative paths,

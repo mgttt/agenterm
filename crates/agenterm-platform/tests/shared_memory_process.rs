@@ -19,7 +19,14 @@ fn named_mapping_is_cross_process_and_released() {
         return;
     }
 
-    let name = format!("agenterm-platform-process-map-{}", std::process::id());
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock after Unix epoch")
+        .as_nanos();
+    let name = format!(
+        "agenterm-platform-process-map-{}-{nonce}",
+        std::process::id()
+    );
     let mapping = SharedMemory::create(&name, MAPPING_LEN).expect("parent creates mapping");
     let status = Command::new(std::env::current_exe().expect("integration test executable"))
         .args(["--exact", "named_mapping_is_cross_process_and_released"])

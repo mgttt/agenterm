@@ -36,6 +36,8 @@ impl SharedMemory {
     }
 
     /// Open an existing mapping using its agreed byte length.
+    ///
+    /// A request larger than the native object fails before a pointer is exposed.
     pub fn open(name: &str, len: usize) -> Result<Self, SharedMemoryError> {
         validate(name, len)?;
         crate::selected::shared_memory::SharedMemory::open(name, len).map(|inner| Self {
@@ -96,7 +98,11 @@ mod tests {
     use super::*;
 
     fn unique_name(label: &str) -> String {
-        format!("agenterm-platform-{label}-{}", std::process::id())
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock after Unix epoch")
+            .as_nanos();
+        format!("agenterm-platform-{label}-{}-{nonce}", std::process::id())
     }
 
     #[test]
@@ -126,5 +132,16 @@ mod tests {
             SharedMemory::create("valid-name", 0).unwrap_err().kind(),
             SharedMemoryErrorKind::InvalidLength
         );
+    }
+
+    #[test]
+    fn opening_beyond_the_created_size_fails_before_pointer_access() {
+        let name = unique_name("oversized-open");
+        let _creator = SharedMemory::create(&name, 4096).expect("create mapping");
+        let error = SharedMemory::open(&name, 8192).expect_err("reject oversized view");
+        #[cfg(unix)]
+        assert_eq!(error.kind(), SharedMemoryErrorKind::SizeMismatch);
+        #[cfg(windows)]
+        assert_eq!(error.kind(), SharedMemoryErrorKind::Map);
     }
 }
