@@ -127,6 +127,10 @@ Object 与 POSIX process-group guard 全部改为消费 crate `process` facade�
 supervisor adapter 只保留 AgenTerm audit 路径命名和产品错误投影。worker supervisor
 聚焦测试与 Agenterm all-target warnings-denied Clippy 通过，root 不再重复 Win32/libc
 进程树实现。
+Filesystem 产品组合叶删除三套 root paths adapter：host config/local-data roots 与
+executable suffix 只取自 crate `filesystem` selected adapter，AgenTerm 大小写目录、
+workspace/instance/settings 文件名和 macOS 默认字号留在无 OS cfg 的产品 service。
+paths/settings/workspace 聚焦测试与 Agenterm all-target Clippy 通过。
 
 2026-08-01 首个建设期增量：Cockpit snapshot 新增明确的
 `tab_counts.{total,running,dead}`，native shell 同源显示 logical instance、

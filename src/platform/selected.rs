@@ -45,10 +45,6 @@ pub(crate) mod script_host;
 pub(crate) mod supervisor_audit;
 
 #[cfg(windows)]
-#[path = "adapters/windows/paths.rs"]
-pub(crate) mod paths;
-
-#[cfg(windows)]
 #[path = "adapters/windows/control_center.rs"]
 pub(crate) mod control_center;
 #[cfg(windows)]
@@ -102,10 +98,6 @@ pub(crate) mod script_host;
 #[cfg(target_os = "linux")]
 #[path = "adapters/linux/supervisor_audit.rs"]
 pub(crate) mod supervisor_audit;
-
-#[cfg(target_os = "linux")]
-#[path = "adapters/linux/paths.rs"]
-pub(crate) mod paths;
 
 #[cfg(target_os = "linux")]
 #[path = "adapters/linux/control_center.rs"]
@@ -165,10 +157,6 @@ pub(crate) mod script_host;
 #[cfg(target_os = "macos")]
 #[path = "adapters/macos/supervisor_audit.rs"]
 pub(crate) mod supervisor_audit;
-
-#[cfg(target_os = "macos")]
-#[path = "adapters/macos/paths.rs"]
-pub(crate) mod paths;
 
 #[cfg(target_os = "macos")]
 #[path = "adapters/macos/control_center.rs"]
