@@ -32,6 +32,7 @@ pub(crate) fn spawn(command: &mut Command) -> std::io::Result<Child> {
     command.spawn()
 }
 
+#[allow(dead_code)]
 pub(crate) fn with_inheritable_handles<T>(
     handles: &[std::os::windows::io::BorrowedHandle<'_>],
     operation: impl FnOnce() -> T,
@@ -74,11 +75,13 @@ pub(crate) fn with_inheritable_handles<T>(
     Ok(output)
 }
 
+#[allow(dead_code)]
 struct ExplicitHandleInheritanceGuard {
     _lock: Option<crate::process_spawn::HandleInheritanceLock>,
     changed: Vec<(windows_sys::Win32::Foundation::HANDLE, u32)>,
 }
 
+#[allow(dead_code)]
 impl ExplicitHandleInheritanceGuard {
     fn restore(&mut self) -> std::io::Result<()> {
         use windows_sys::Win32::Foundation::{HANDLE_FLAG_INHERIT, SetHandleInformation};

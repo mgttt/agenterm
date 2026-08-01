@@ -30,21 +30,6 @@ pub fn lock_handle_inheritance() -> HandleInheritanceLock {
     }
 }
 
-/// Runs one Windows process-creation operation while selected handles are
-/// temporarily inheritable.
-///
-/// The process-wide mutation lock is held from the first flag read through
-/// restoration. Duplicate handles are changed once, original flags are
-/// restored on success, error, or panic, and no borrowed handle can escape the
-/// callback. Unix launchers do not need this Windows-only operation.
-#[cfg(windows)]
-pub fn with_inheritable_handles<T>(
-    handles: &[std::os::windows::io::BorrowedHandle<'_>],
-    operation: impl FnOnce() -> T,
-) -> std::io::Result<T> {
-    crate::selected::process_spawn::with_inheritable_handles(handles, operation)
-}
-
 /// Classify a native child status without inventing a product fallback code.
 #[must_use]
 pub fn classify_exit_status(status: &ExitStatus) -> ProcessExit {
