@@ -119,9 +119,25 @@ pub(crate) fn list() -> Result<Vec<ProcessInfo>, ProcessError> {
         if !executable_name.is_empty()
             && let Ok(id) = u32::try_from(id)
         {
+            let mut info = unsafe { std::mem::zeroed::<libc::proc_bsdinfo>() };
+            let info_size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+            let info_bytes = unsafe {
+                libc::proc_pidinfo(
+                    id as libc::pid_t,
+                    libc::PROC_PIDTBSDINFO,
+                    0,
+                    (&raw mut info).cast(),
+                    info_size,
+                )
+            };
+            let parent_id = if info_bytes == info_size {
+                info.pbi_ppid
+            } else {
+                0
+            };
             processes.push(ProcessInfo {
                 id,
-                parent_id: 0,
+                parent_id,
                 executable_name,
             });
         }

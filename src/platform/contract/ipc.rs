@@ -453,6 +453,7 @@ fn current_trusted_os_user_scope() -> std::io::Result<TrustedOsUserScope> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     #[test]
     fn logical_instances_round_trip_without_restricting_unicode_labels() {

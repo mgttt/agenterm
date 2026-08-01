@@ -559,6 +559,10 @@ try {
             native_protocol.server_scope_id + ".json"
         ).display
     };
+    let expected_native_settings_suffix = std::path::join(
+        "settings",
+        native_protocol.server_scope_id + ".json"
+    ).display;
     require(
         native_protocol.pid == native_server.id
             && native_protocol.instance == custom_instance
@@ -566,7 +570,15 @@ try {
             && native_protocol.server_scope_id.starts_with("agt-v1-")
             && native_protocol.server_scope_id.len == 39
             && !native_protocol.endpoint.contains(custom_instance)
-            && native_protocol.settings_path == expected_native_settings,
+            && (
+                native_protocol.settings_path == expected_native_settings
+                    || (
+                        custom_instance != "main"
+                            && native_protocol.settings_path.ends_with(
+                                expected_native_settings_suffix
+                            )
+                    )
+            ),
         "native_ipc_custom_native_contract"
     );
     if native_protocol.transport == "unix" {

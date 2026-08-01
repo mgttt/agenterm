@@ -797,10 +797,9 @@ mod tests {
 
     #[cfg(unix)]
     fn unique_temp_directory(label: &str) -> std::path::PathBuf {
-        #[cfg(unix)]
-        let base = crate::ipc_endpoint::fallback_unix_runtime_base();
-        #[cfg(not(unix))]
-        let base = std::env::temp_dir();
+        let base = std::fs::canonicalize("/tmp")
+            .or_else(|_| std::fs::canonicalize(std::env::temp_dir()))
+            .expect("an operating-system temporary directory must resolve");
         base.join(format!(
             "agenterm-ipc-{label}-{}-{}",
             std::process::id(),

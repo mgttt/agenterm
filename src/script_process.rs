@@ -1251,7 +1251,7 @@ mod tests {
                 "ping.exe -n 30 127.0.0.1 >nul".to_owned(),
             ]
         } else {
-            vec!["-c".to_owned(), "sleep 30".to_owned()]
+            vec!["-c".to_owned(), "sleep 30 & wait".to_owned()]
         };
         command.timeout = Duration::from_secs(30);
         spawn_owned(&command).expect("spawn owned process tree")
@@ -1265,7 +1265,7 @@ mod tests {
             command
         } else {
             let mut command = Command::new("/bin/sh");
-            command.args(["-c", "sleep 30"]);
+            command.args(["-c", "sleep 30 & wait"]);
             command
         };
         command
