@@ -3,8 +3,10 @@
 use std::path::{Path, PathBuf};
 #[cfg(feature = "filesystem")]
 use std::{
+    ffi::OsString,
     fs::{Metadata, OpenOptions},
-    io,
+    io::{self, Write as _},
+    sync::atomic::{AtomicU64, Ordering},
 };
 
 use crate::selected;
@@ -83,6 +85,88 @@ pub fn private_create_new_options() -> OpenOptions {
     selected::filesystem::private_create_new_options()
 }
 
+/// Atomically publish private bytes inside an already-private directory.
+///
+/// The caller owns directory creation and protection. Temporary files are
+/// created exclusively with owner-only Unix mode or the protected Windows
+/// parent ACL, flushed, atomically promoted on the same volume, and removed on
+/// failure. An error from the final parent sync may occur after publication.
+#[cfg(feature = "filesystem")]
+pub fn write_private_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    static NEXT_TEMPORARY: AtomicU64 = AtomicU64::new(1);
+
+    let parent = path.parent().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "private atomic target requires a parent directory",
+        )
+    })?;
+    let file_name = path.file_name().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "private atomic target requires a file name",
+        )
+    })?;
+    let mut created = None;
+    for _ in 0..32 {
+        let mut temporary_name = OsString::from(".");
+        temporary_name.push(file_name);
+        temporary_name.push(format!(
+            ".platform-private-{}-{}",
+            std::process::id(),
+            NEXT_TEMPORARY.fetch_add(1, Ordering::Relaxed)
+        ));
+        let temporary = parent.join(temporary_name);
+        match private_create_new_options().open(&temporary) {
+            Ok(file) => {
+                created = Some((temporary, file));
+                break;
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error),
+        }
+    }
+    let (temporary, mut file) = created.ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "private atomic temporary name attempts exhausted",
+        )
+    })?;
+    let mut cleanup = TemporaryFile::new(temporary.clone());
+    file.write_all(bytes)?;
+    file.sync_all()?;
+    drop(file);
+    replace_file(&temporary, path)?;
+    cleanup.disarm();
+    sync_parent(parent)
+}
+
+#[cfg(feature = "filesystem")]
+struct TemporaryFile {
+    path: PathBuf,
+    armed: bool,
+}
+
+#[cfg(feature = "filesystem")]
+impl TemporaryFile {
+    fn new(path: PathBuf) -> Self {
+        Self { path, armed: true }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+#[cfg(feature = "filesystem")]
+impl Drop for TemporaryFile {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -115,6 +199,44 @@ mod tests {
             io::ErrorKind::AlreadyExists
         );
         std::fs::remove_file(path).expect("remove private-create fixture");
+    }
+
+    #[cfg(feature = "filesystem")]
+    #[test]
+    fn private_atomic_write_replaces_and_leaves_no_temporary() {
+        let root = std::env::temp_dir().join(format!(
+            "agenterm-platform-private-atomic-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir(&root).expect("create atomic fixture");
+        protect_private_directory(&root).expect("protect atomic fixture");
+        let path = root.join("state.json");
+
+        write_private_atomic(&path, b"first").expect("publish first value");
+        write_private_atomic(&path, b"second").expect("replace value");
+        assert_eq!(std::fs::read(&path).expect("read value"), b"second");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            assert_eq!(
+                std::fs::metadata(&path)
+                    .expect("private atomic metadata")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+        }
+        assert_eq!(
+            std::fs::read_dir(&root)
+                .expect("read fixture")
+                .filter_map(Result::ok)
+                .count(),
+            1,
+            "atomic publication left a temporary file"
+        );
+        std::fs::remove_dir_all(root).expect("remove atomic fixture");
     }
 
     #[cfg(all(unix, feature = "filesystem"))]

@@ -102,6 +102,9 @@ after creating their directory and open receipts with
 `0600` modes; Windows replaces inheritance with a protected,
 current-user-only ACL that propagates to child objects. Exclusive creation
 fails rather than overwriting an existing receipt.
+`filesystem::write_private_atomic` publishes bytes through an exclusive private
+temporary in such a protected directory, atomically replaces the destination,
+and synchronizes the parent without embedding a product-specific file format.
 
 Windows embedders can synchronously capture an owned native window without
 exposing `HWND` in their public API:
