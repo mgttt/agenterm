@@ -2,6 +2,8 @@
 pub mod clipboard;
 #[cfg(feature = "font")]
 pub mod font;
+#[cfg(feature = "ime")]
+pub mod ime;
 #[cfg(feature = "input")]
 pub mod input;
 #[cfg(feature = "ipc")]

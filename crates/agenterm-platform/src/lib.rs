@@ -57,7 +57,7 @@ pub fn capability_status(capability: Capability) -> CapabilityStatus {
         Capability::Pty => (cfg!(feature = "pty"), true),
         Capability::Window => (cfg!(feature = "window"), true),
         Capability::Input => (cfg!(feature = "input"), true),
-        Capability::Ime => (cfg!(feature = "ime"), false),
+        Capability::Ime => (cfg!(feature = "ime"), true),
         Capability::Activation => (cfg!(feature = "activation"), false),
         Capability::Clipboard => (cfg!(feature = "clipboard"), true),
         Capability::Screenshot => (cfg!(feature = "screenshot"), true),
@@ -97,6 +97,9 @@ pub mod ipc;
 #[cfg(feature = "input")]
 pub mod input;
 
+#[cfg(feature = "ime")]
+pub mod ime;
+
 #[cfg(feature = "window")]
 pub mod window;
 
@@ -129,9 +132,9 @@ mod tests {
 
     #[test]
     fn declared_but_unimplemented_capabilities_are_explicit() {
-        #[cfg(feature = "ime")]
+        #[cfg(feature = "activation")]
         assert_eq!(
-            crate::capability_status(crate::Capability::Ime),
+            crate::capability_status(crate::Capability::Activation),
             crate::CapabilityStatus::Unsupported {
                 reason: std::borrow::Cow::Borrowed("capability-not-yet-implemented")
             }

@@ -110,6 +110,12 @@ contract/facade；Windows adapter 明确保留 Control/AltGr 仲裁，Linux 与 
 frontend event 翻译保持产品 extension，只通过公开 facade 消费机制，不保留第二套
 分类实现。24 项 all-feature crate tests、warnings-denied crate Clippy 与 Agenterm
 all-target compile check 通过；IME composition 仍是下一依赖叶，不由 input 状态冒充。
+第九个能力叶完成 IME composition：公开非穷尽 `ImeEvent`/`ImeAction`、editable-anchor
+preedit 仲裁、committed-text 分类及 display-aware status；Linux/macOS adapter 在有显示
+后端时 Available、headless 明确 Unsupported，Windows 继续以
+`ime-preedit-not-yet-adapted` 明确 Unsupported，不静默声称对等。主 crate 原 Linux/
+macOS 状态机已替换为薄兼容投影。26 项 all-feature crate tests、warnings-denied crate
+Clippy 与 Agenterm all-target compile check 通过。
 
 2026-08-01 首个建设期增量：Cockpit snapshot 新增明确的
 `tab_counts.{total,running,dead}`，native shell 同源显示 logical instance、

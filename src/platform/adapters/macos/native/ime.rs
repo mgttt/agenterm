@@ -3,44 +3,10 @@
 
 #![cfg(target_os = "macos")]
 
-use crate::platform::KeyClassification;
-
-use super::input::classify_ime_commit;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum MacosImeEvent {
-    Enabled,
-    Preedit {
-        text: String,
-        cursor: Option<(usize, usize)>,
-    },
-    Commit(String),
-    Disabled,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum MacosImeAction {
-    None,
-    UpdatePreedit {
-        text: String,
-        cursor: Option<(usize, usize)>,
-    },
-    ClearPreedit,
-    CommitText(String),
-}
+pub(crate) use agenterm_platform::ime::{ImeAction as MacosImeAction, ImeEvent as MacosImeEvent};
 
 pub(crate) fn classify_ime_event(event: MacosImeEvent, anchor_available: bool) -> MacosImeAction {
-    match event {
-        MacosImeEvent::Enabled => MacosImeAction::None,
-        MacosImeEvent::Preedit { text, cursor } if anchor_available => {
-            MacosImeAction::UpdatePreedit { text, cursor }
-        }
-        MacosImeEvent::Preedit { .. } | MacosImeEvent::Disabled => MacosImeAction::ClearPreedit,
-        MacosImeEvent::Commit(text) => match classify_ime_commit(&text) {
-            KeyClassification::TextCommit(text) => MacosImeAction::CommitText(text),
-            _ => MacosImeAction::ClearPreedit,
-        },
-    }
+    agenterm_platform::ime::classify_event(event, anchor_available)
 }
 
 #[cfg(test)]

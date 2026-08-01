@@ -1,54 +1,36 @@
 //! Linux IME capability bridge for platform migration slice-2 (contract rev 1).
 //! Adapter-private native mechanism selected only by platform::selected.
 //!
-//! Preedit / commit event shapes stay Linux-private. Shared contract already
-//! provides [`CapabilityKind::Ime`], [`CapabilityStatus`], and text-commit
-//! classification via [`super::input::classify_ime_commit`]. Do not invent
-//! shared `ImeEvent` types here — request a contract revision if needed.
+//! The reusable crate owns preedit/commit classification. This compatibility
+//! projection maps only AgenTerm's legacy capability status shape.
 
 #![cfg(target_os = "linux")]
 
-use crate::platform::{CapabilityStatus, DisplayBackendFacts, KeyClassification};
+use crate::platform::{CapabilityStatus, DisplayBackendFacts};
 
 use super::display_facts_from_env;
-use super::input::classify_ime_commit;
-
-/// Linux-local IME event (adapter detail; not a shared contract type).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum LinuxImeEvent {
-    Enabled,
-    Preedit {
-        text: String,
-        cursor: Option<(usize, usize)>,
-    },
-    Commit(String),
-    Disabled,
-}
-
-/// Action the Linux GUI host should take after classifying an IME event.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum LinuxImeAction {
-    None,
-    UpdatePreedit {
-        text: String,
-        cursor: Option<(usize, usize)>,
-    },
-    ClearPreedit,
-    /// Already classified as a text commit (empty commits are dropped).
-    CommitText(String),
-}
+pub(crate) use agenterm_platform::ime::{ImeAction as LinuxImeAction, ImeEvent as LinuxImeEvent};
 
 /// IME capability status for the current display backend.
 ///
 /// Headless must not report Available. With a display, winit/X11/Wayland IME
 /// is treated as Available; individual commits still go through classification.
 pub(crate) fn ime_capability_status(facts: DisplayBackendFacts) -> CapabilityStatus {
-    if facts.headless {
-        CapabilityStatus::Unsupported {
-            reason: "headless-display",
+    match agenterm_platform::ime::capability_status(!facts.headless) {
+        agenterm_platform::CapabilityStatus::Available => CapabilityStatus::Available,
+        agenterm_platform::CapabilityStatus::Unsupported { reason } => {
+            CapabilityStatus::Unsupported {
+                reason: if reason == "headless-display" {
+                    "headless-display"
+                } else {
+                    "ime-unsupported"
+                },
+            }
         }
-    } else {
-        CapabilityStatus::Available
+        agenterm_platform::CapabilityStatus::Failed { message, .. } => CapabilityStatus::Failed {
+            code: "ime-failed",
+            message,
+        },
     }
 }
 
@@ -61,24 +43,10 @@ pub(crate) fn ime_capability_status_from_env() -> CapabilityStatus {
 ///
 /// `anchor_available` is true when the focused surface can accept composition
 /// (composer / text field / terminal). Commit text is filtered through
-/// [`classify_ime_commit`] so empty or non-text results never reach product
-/// handlers as fake Available input.
+/// the public crate state machine so empty results never reach product handlers
+/// as fake Available input.
 pub(crate) fn classify_ime_event(event: LinuxImeEvent, anchor_available: bool) -> LinuxImeAction {
-    match event {
-        LinuxImeEvent::Enabled => LinuxImeAction::None,
-        LinuxImeEvent::Preedit { text, cursor } => {
-            if anchor_available {
-                LinuxImeAction::UpdatePreedit { text, cursor }
-            } else {
-                LinuxImeAction::ClearPreedit
-            }
-        }
-        LinuxImeEvent::Commit(text) => match classify_ime_commit(&text) {
-            KeyClassification::TextCommit(commit) => LinuxImeAction::CommitText(commit),
-            _ => LinuxImeAction::ClearPreedit,
-        },
-        LinuxImeEvent::Disabled => LinuxImeAction::ClearPreedit,
-    }
+    agenterm_platform::ime::classify_event(event, anchor_available)
 }
 
 #[cfg(test)]
@@ -147,15 +115,6 @@ mod tests {
         assert_eq!(
             classify_ime_event(LinuxImeEvent::Disabled, true),
             LinuxImeAction::ClearPreedit
-        );
-    }
-
-    #[test]
-    fn classify_ime_commit_matches_shared_helper() {
-        use crate::platform::{ModifierState, classify_key_press};
-        assert_eq!(
-            classify_ime_commit("a"),
-            classify_key_press(false, ModifierState::empty(), None, None, Some("a"))
         );
     }
 }

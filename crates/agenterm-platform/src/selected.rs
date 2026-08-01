@@ -71,6 +71,18 @@ pub(crate) mod ipc;
 #[path = "adapters/windows/input.rs"]
 pub(crate) mod input;
 
+#[cfg(all(feature = "ime", windows))]
+#[path = "adapters/windows/ime.rs"]
+pub(crate) mod ime;
+
+#[cfg(all(feature = "ime", target_os = "linux"))]
+#[path = "adapters/linux/ime.rs"]
+pub(crate) mod ime;
+
+#[cfg(all(feature = "ime", target_os = "macos"))]
+#[path = "adapters/macos/ime.rs"]
+pub(crate) mod ime;
+
 #[cfg(all(feature = "input", target_os = "linux"))]
 #[path = "adapters/linux/input.rs"]
 pub(crate) mod input;

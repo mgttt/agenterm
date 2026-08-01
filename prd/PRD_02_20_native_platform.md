@@ -31,7 +31,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [~] Normalized modifier/key classification, committed Unicode precedence,
   UTF-16 decoding, and per-platform primary-shortcut policy are reusable through
   the `input` feature. Native frontend event translation remains a root product
-  extension; IME composition is still open and reports Unsupported explicitly.
+  extension. The `ime` feature now owns public preedit/commit actions and
+  display-aware status: Linux/macOS are available with a display, while Windows
+  remains explicitly Unsupported until native preedit adaptation ships.
 - [ ] Windows, macOS, and Linux native frontends consume one declared platform
   contract for window lifecycle, normalized input, IME, DPI, clipboard, font
   discovery, screenshots, activation, and applicable system integration.
