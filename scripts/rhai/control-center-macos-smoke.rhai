@@ -385,35 +385,46 @@ fn wait_incompatible_capture(
 }
 
 fn incompatible_listener(
-    context, script_executable, address, ready_path, code
+    context, script_executable, address, ready_path, stop_path, code
 ) {
     let address_parts = address.split(":");
     require(
         address_parts.len == 2,
         "control_center_macos_incompatible_address"
     );
-    if std::fs::exists(ready_path) {
-        std::fs::remove_file(ready_path);
+    for path in [ready_path, stop_path] {
+        if std::fs::exists(path) {
+            std::fs::remove_file(path);
+        }
     }
     let source =
         `let listener = std::net::TcpListener::bind(args[0]);
          std::fs::write(args[1], "ready");
-         let stream = listener.accept_timeout(
-             std::time::Duration::from_secs(8)
-         );
-         stream.write_all("not-json\n");
-         stream.flush();`;
+         loop {
+             if std::fs::exists(args[2]) { break; }
+             try {
+                 let stream = listener.accept_timeout(
+                     std::time::Duration::from_millis(100)
+                 );
+                 stream.write_all("not-json\n");
+                 stream.flush();
+             } catch (error) {
+                 if !error.to_string().contains("net_accept_timeout") {
+                     throw error;
+                 }
+             }
+         }`;
     let command = test_harness::configured_command(
         context,
         script_executable,
         [
             "eval", source,
-            "--timeout-ms", "10000",
-            "--max-operations", "1000000",
-            "--", address, ready_path
+            "--timeout-ms", "20000",
+            "--max-operations", "10000000",
+            "--", address, ready_path, stop_path
         ]
     );
-    command.timeout(std::time::Duration::from_secs(12));
+    command.timeout(std::time::Duration::from_secs(22));
     let child = command.start();
     for attempt in 0..400 {
         if std::fs::exists(ready_path) {
@@ -428,6 +439,7 @@ fn incompatible_listener(
         rhai::task::sleep(std::time::Duration::from_millis(10));
     }
     child.kill();
+    child.wait_with_output(std::time::Duration::from_secs(2));
     throw code + "_ready_timeout";
 }
 
@@ -1133,11 +1145,16 @@ try {
         context.run_directory,
         "incompatible-probe.ready"
     ).display;
+    let incompatible_probe_stop = std::path::join(
+        context.run_directory,
+        "incompatible-probe.stop"
+    ).display;
     let incompatible_probe = incompatible_listener(
         context,
         script_executable,
         context.address,
         incompatible_probe_ready,
+        incompatible_probe_stop,
         "control_center_macos_incompatible_probe"
     );
     owned_children.push(incompatible_probe);
@@ -1157,6 +1174,7 @@ try {
             && incompatible.server_reason == "server_incompatible",
         "control_center_macos_incompatible_snapshot"
     );
+    std::fs::write(incompatible_probe_stop, "stop");
     let incompatible_probe_output = wait_exit(
         incompatible_probe,
         "control_center_macos_incompatible_probe_timeout"
@@ -1166,16 +1184,22 @@ try {
         "control_center_macos_incompatible_probe_exit"
     );
     std::fs::remove_file(incompatible_probe_ready);
+    std::fs::remove_file(incompatible_probe_stop);
 
     let incompatible_renderer_ready = std::path::join(
         context.run_directory,
         "incompatible-renderer.ready"
+    ).display;
+    let incompatible_renderer_stop = std::path::join(
+        context.run_directory,
+        "incompatible-renderer.stop"
     ).display;
     let incompatible_renderer = incompatible_listener(
         context,
         script_executable,
         context.address,
         incompatible_renderer_ready,
+        incompatible_renderer_stop,
         "control_center_macos_incompatible_renderer"
     );
     owned_children.push(incompatible_renderer);
@@ -1206,6 +1230,7 @@ try {
             && process_present(cc.id),
         "control_center_macos_incompatible_renderer_truth"
     );
+    std::fs::write(incompatible_renderer_stop, "stop");
     let incompatible_renderer_output = wait_exit(
         incompatible_renderer,
         "control_center_macos_incompatible_renderer_timeout"
@@ -1215,6 +1240,7 @@ try {
         "control_center_macos_incompatible_renderer_exit"
     );
     std::fs::remove_file(incompatible_renderer_ready);
+    std::fs::remove_file(incompatible_renderer_stop);
     test_harness::emit_evidence(
         context,
         declared_evidence,
