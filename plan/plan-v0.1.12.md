@@ -51,6 +51,22 @@ renderer-owned 760×480 PNG 为 58,125 bytes。headless server 下 missing targe
 保持 active tab 且不创建 CC registry。native Cockpit pointer/keyboard 导航仍
 未实现，不以 CLI entry point 冒充 renderer 交互。
 
+2026-08-01 live dogfood 新增阻断项（结论与修复证据必须回写对应 PRD）：
+
+- [ ] P0：Windows terminal 内容与 native frame 持续闪烁；先区分无状态变化的
+  redraw/invalidate loop、背景擦除和 resize/DPI feedback，不以降低刷新率掩盖。
+- [ ] alternate-screen harness 无法本地向上滚动；初步证据指向 `vt100`
+  alternate grid 的零 scrollback，需要在 application raw-mouse ownership 之外
+  评估把 wheel/PageUp 语义转交前台 TUI，不能破坏普通 scrollback。
+- [ ] terminal focus 下 `Shift+Tab` 无响应；盘点 Windows/Unix key adapters 与
+  terminal byte encoding，补跨平台键位合同，而不是只特判一个 harness。
+- [ ] terminal 鼠标选区无法可靠建立，导致已实现 copy/paste 无法使用；复查
+  selection ownership、drag threshold/capture、raw-mouse arbitration 和复制黑盒。
+
+这些 dogfood 缺陷优先于新增 Cockpit 装饰和远期 Candidate 工作；修复必须保留
+结构化 snapshot 与 PNG/公开 input journey 证据，并避免多个 agent 并发编辑
+Windows remote frontend 等热文件。
+
 ## 一、树式精华
 
 ```text

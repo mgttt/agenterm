@@ -17,11 +17,18 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] VT100 parsing, ANSI colors, scrollback, resize, keyboard and mouse
 - [x] Backspace emits ConPTY VT `DEL` and deletes exactly one input
   character in the default `cmd.exe` line editor
-- [x] mouse wheel and a visible draggable scrollbar navigate terminal
-  history; scrollbar track clicks page and dragging to the bottom restores
-  the live viewport
-- [x] dragging selects visible terminal cells and Ctrl+C copies the selected
-  text; an unmodified click still reaches RMUX/native terminal mouse input
+- [~] mouse wheel and a visible draggable scrollbar navigate ordinary terminal
+  history; scrollbar track clicks page and dragging to the bottom restores the
+  live viewport. Live v0.1.12 dogfood found alternate-screen harnesses whose
+  zero local scrollback makes wheel/PageUp ineffective; application-owned
+  paging fallback and raw-mouse arbitration remain to be implemented and
+  proven without regressing ordinary history.
+- [~] dragging is intended to select visible terminal cells and Ctrl+C copies
+  the selected text while an unmodified click reaches RMUX/native terminal
+  input. Live v0.1.12 dogfood found a Windows replaceable-GUI path where a
+  selection cannot be established, making Copy unreachable; gesture ownership,
+  capture and public clipboard evidence must be requalified before restoring
+  shipped status.
 - [x] window-icon system menu exposes focus-aware Copy and Paste: native
   edit controls receive their standard messages, while terminal Copy uses
   the active cell selection and terminal Paste uses the active PTY
@@ -57,7 +64,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     from word, visual-row, or drag selection
 - [x] terminal paste reads bounded Unicode clipboard text off the GUI thread,
   normalizes newlines, filters unsafe controls, and honors bracketed-paste mode
-- [x] dirty-frame rendering and GDI double buffering
+- [~] dirty-frame rendering and GDI double buffering exist, but live v0.1.12
+  dogfood reports sustained terminal-content and native-frame flicker. The
+  invalidate/redraw, background erase, timer and resize/DPI paths require
+  observable no-change-frame evidence before this is considered closed.
+- [~] ordinary terminal keys and modifiers are encoded for the active PTY;
+  live v0.1.12 dogfood shows `Shift+Tab` is dropped while terminal focus is
+  active. Windows and Unix adapters need a shared modified-key contract and
+  public byte-level evidence rather than one application-specific special case.
 - [x] GUI shell appears before the initial ConPTY/cmd process is ready
 - [x] initial terminal loads asynchronously with visible starting feedback
 - [x] exited process retains its final screen and exit code
