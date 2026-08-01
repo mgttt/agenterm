@@ -3079,9 +3079,24 @@ impl UnixApp {
 
     fn resize_to_window(&mut self) {
         self.invalidate_sidebar_text_click();
-        let Some(window) = self.window.as_ref() else {
+        let Some(window) = self.window.clone() else {
             return;
         };
+        if !self.resize_active_tab_to_layout() {
+            return;
+        }
+        self.window_state_tracker
+            .sync_from_native_flags(window.minimized(), window.maximized());
+        self.sync_grid_from_tab();
+    }
+
+    /// Resizes the active tab's PTY and the shared grid to the current layout.
+    ///
+    /// A tab keeps its last PTY size while it is not active, so every
+    /// activation must reconcile it against the layout the window has now;
+    /// otherwise a background tab sized under an older layout renders more
+    /// rows than the viewport can show and its bottom rows stay clipped.
+    fn resize_active_tab_to_layout(&mut self) -> bool {
         let layout = self.layout();
         let (cell_width, cell_height) = self.cell_dimensions();
         let (cols, rows) = grid_dimensions_for_terminal(
@@ -3091,17 +3106,16 @@ impl UnixApp {
             cell_height,
         );
         if let Some(position) = self.active_position()
+            && self.tabs[position].last_size != (rows, cols)
             && let Err(error) = self.tabs[position].resize(rows, cols)
         {
             self.set_status_message(format!("Could not resize terminal: {error}"));
-            return;
+            return false;
         }
         if let Some(grid) = self.grid.as_mut() {
             grid.resize(cols, rows);
         }
-        self.window_state_tracker
-            .sync_from_native_flags(window.minimized(), window.maximized());
-        self.sync_grid_from_tab();
+        true
     }
 
     fn saved_workspace(&self) -> SavedWorkspace {
@@ -4161,6 +4175,7 @@ impl ControlHost for UnixApp {
         self.load_composer_buffer_from_tab();
         self.event_journal_mut()
             .commit(EventKind::TabSelected, Some(id), serde_json::json!({}));
+        self.resize_active_tab_to_layout();
         self.sync_grid_from_tab();
         self.request_ui_redraw();
         Ok(())
@@ -4192,6 +4207,7 @@ impl ControlHost for UnixApp {
 
         if self.active == Some(id) {
             self.active = self.tabs.first().map(|tab| tab.id);
+            self.resize_active_tab_to_layout();
             self.sync_grid_from_tab();
             self.request_ui_redraw();
         }
