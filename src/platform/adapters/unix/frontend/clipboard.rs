@@ -4,14 +4,15 @@ pub(super) fn set_clipboard_text(text: &str) -> Result<(), String> {
 }
 
 /// Bounded Unicode clipboard read through the active platform adapter.
-pub(super) fn get_clipboard_text_bounded(max_read_bytes: usize) -> Result<String, String> {
+pub(super) fn get_clipboard_text_bounded(
+    max_read_bytes: usize,
+) -> Result<String, crate::platform::contract::ui_clipboard::UiClipboardError> {
     crate::platform::services::ui_clipboard::get_text_bounded(max_read_bytes)
-        .map_err(|error| error.message())
 }
 
 /// Compatibility read for product text fields whose existing behavior is unbounded.
 pub(super) fn get_clipboard_text() -> Result<String, String> {
-    get_clipboard_text_bounded(usize::MAX)
+    get_clipboard_text_bounded(usize::MAX).map_err(|error| error.message())
 }
 
 /// Fast probe for Unicode clipboard text without reading the full payload when possible.

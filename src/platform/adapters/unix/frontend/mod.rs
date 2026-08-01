@@ -296,7 +296,7 @@ struct PendingTerminalPaste {
 #[derive(Debug, PartialEq, Eq)]
 enum TerminalPasteFailure {
     Busy,
-    Clipboard(String),
+    Clipboard(crate::platform::contract::ui_clipboard::UiClipboardError),
     Empty,
     FocusRequired,
     ModalOpen,
@@ -310,7 +310,7 @@ enum TerminalPasteFailure {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct UiFeedbackError {
-    code: &'static str,
+    code: String,
     category: &'static str,
     retryable: bool,
     message: String,
@@ -331,7 +331,7 @@ impl std::fmt::Display for TerminalPasteFailure {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Busy => formatter.write_str("a terminal clipboard read is already pending"),
-            Self::Clipboard(message) => write!(formatter, "clipboard read failed: {message}"),
+            Self::Clipboard(error) => write!(formatter, "clipboard read failed: {error}"),
             Self::Empty => formatter.write_str("clipboard text contains no pasteable characters"),
             Self::FocusRequired => formatter.write_str("paste requires terminal focus"),
             Self::ModalOpen => formatter.write_str("paste is unavailable while a modal is open"),
@@ -358,16 +358,28 @@ impl std::fmt::Display for TerminalPasteFailure {
 }
 
 impl TerminalPasteFailure {
-    const fn code(&self) -> &'static str {
+    fn code(&self) -> &str {
         match self {
             Self::Busy => "terminal_paste_busy",
+            Self::Clipboard(
+                crate::platform::contract::ui_clipboard::UiClipboardError::Unsupported { .. },
+            ) => "terminal_paste_unsupported",
+            Self::Clipboard(
+                crate::platform::contract::ui_clipboard::UiClipboardError::Failed { code, .. },
+            ) => code.as_ref(),
             _ => "terminal_paste_failed",
         }
     }
 
-    const fn category(&self) -> &'static str {
+    fn category(&self) -> &'static str {
         match self {
             Self::Busy => "state",
+            Self::Clipboard(
+                crate::platform::contract::ui_clipboard::UiClipboardError::Unsupported { .. },
+            ) => "unsupported",
+            Self::Clipboard(
+                crate::platform::contract::ui_clipboard::UiClipboardError::Failed { code, .. },
+            ) if code.as_ref() == "clipboard_too_large" => "resource",
             Self::Clipboard(_) | Self::WorkerDisconnected | Self::WorkerStart(_) => "availability",
             Self::NormalizedTextTooLarge => "resource",
             Self::TerminalRejected => "transport",
@@ -379,21 +391,28 @@ impl TerminalPasteFailure {
         }
     }
 
-    const fn retryable(&self) -> bool {
-        matches!(
-            self,
-            Self::Busy
-                | Self::Clipboard(_)
-                | Self::StaleTarget
-                | Self::TerminalRejected
-                | Self::WorkerDisconnected
-                | Self::WorkerStart(_)
-        )
+    fn retryable(&self) -> bool {
+        match self {
+            Self::Clipboard(
+                crate::platform::contract::ui_clipboard::UiClipboardError::Unsupported { .. },
+            ) => false,
+            Self::Clipboard(
+                crate::platform::contract::ui_clipboard::UiClipboardError::Failed { code, .. },
+            ) => code.as_ref() != "clipboard_too_large",
+            _ => matches!(
+                self,
+                Self::Busy
+                    | Self::StaleTarget
+                    | Self::TerminalRejected
+                    | Self::WorkerDisconnected
+                    | Self::WorkerStart(_)
+            ),
+        }
     }
 
     fn feedback_error(&self) -> UiFeedbackError {
         UiFeedbackError {
-            code: self.code(),
+            code: self.code().to_owned(),
             category: self.category(),
             retryable: self.retryable(),
             message: self.to_string(),
@@ -1908,13 +1927,18 @@ impl UnixApp {
     }
 
     fn system_menu_clipboard_state(&self) -> (bool, bool) {
+        // A pending paste already owns the one clipboard read. Do not start a
+        // second helper from snapshot/menu rendering while that asynchronous
+        // read is in flight.
+        let clipboard_has_text =
+            self.pending_terminal_paste.is_none() && clipboard::clipboard_has_unicode_text();
         system_menu_clipboard_state_pure(
             self.is_edit_focus(),
             self.terminal_ready_for_system_menu(),
             self.terminal_selection
                 .as_ref()
                 .is_some_and(|selection| !selection.is_empty()),
-            clipboard::clipboard_has_unicode_text(),
+            clipboard_has_text,
         )
     }
 
@@ -2959,6 +2983,7 @@ impl UnixApp {
                 "bytes": text.len(),
                 "bracketed": bracketed,
                 "source": "keyboard",
+                "operation_id": crate::operations::TERMINAL_PASTE,
             }),
         );
         self.set_status_message(format!("Pasted {} characters into @{tab_id}", text.len()));
@@ -5111,8 +5136,13 @@ mod system_menu_tests {
                 true,
             ),
             (
-                TerminalPasteFailure::Clipboard("unavailable".to_owned()),
-                "terminal_paste_failed",
+                TerminalPasteFailure::Clipboard(
+                    crate::platform::contract::ui_clipboard::UiClipboardError::failed(
+                        "clipboard_backend_error",
+                        "unavailable",
+                    ),
+                ),
+                "clipboard_backend_error",
                 "availability",
                 true,
             ),

@@ -2230,6 +2230,13 @@ impl RemoteWindowState {
             "focus": {
                 "surface": focus,
                 "window_id": source.active_tab_id,
+                "window_focused": self.window.focused_target() != FocusTarget::None,
+            },
+            "terminal_paste": {
+                "state": if self.pending_terminal_paste.is_some() { "pending" } else { "idle" },
+                "target": self.pending_terminal_paste
+                    .as_ref()
+                    .map(|pending| pending.tab_id.as_str()),
             },
             "system_menu": {
                 "toggle_tabs": {
@@ -3132,7 +3139,15 @@ impl RemoteWindowState {
                 .client
                 .as_mut()
                 .context("replaceable UI is disconnected")
-                .and_then(|client| client.send_input(&completed.requested.tab_id, &bytes));
+                .and_then(|client| {
+                    client.paste_input(
+                        &completed.requested.tab_id,
+                        &bytes,
+                        text.len(),
+                        text.chars().count(),
+                        completed.requested.bracketed,
+                    )
+                });
             match result {
                 Ok(()) => {
                     self.cancel_terminal_selection();

@@ -3623,6 +3623,12 @@ fn script_fleet_mutation(
         serde_json::from_str(&response.output)
             .map_err(|error| script_broker_error("broker_invalid_response", error.to_string()))?
     };
+    output = await_async_fleet_ui_post_state(
+        operation.id,
+        output,
+        remaining.saturating_sub(started.elapsed()),
+        &receipt_json,
+    )?;
     if operation.id == "tabs.set-note" {
         let request_remaining = remaining.saturating_sub(started.elapsed());
         let snapshot_text = script_broker_ipc(vec!["ui-snapshot".to_owned()], request_remaining)?;
@@ -3649,6 +3655,7 @@ fn script_fleet_mutation(
     let events = collect_fleet_receipt_events(
         operation,
         &receipt_json,
+        &output,
         budgets,
         remaining.saturating_sub(started.elapsed()),
     );
@@ -3665,9 +3672,94 @@ fn script_fleet_mutation(
     }))
 }
 
+fn await_async_fleet_ui_post_state(
+    operation_id: &str,
+    mut snapshot: serde_json::Value,
+    remaining: Duration,
+    receipt: &serde_json::Value,
+) -> Result<serde_json::Value, ScriptBrokerResponse> {
+    if !matches!(operation_id, "ui.window.activate" | "terminal.paste") {
+        return Ok(snapshot);
+    }
+    let started = Instant::now();
+    loop {
+        let complete = match operation_id {
+            "ui.window.activate" => {
+                snapshot
+                    .pointer("/focus/window_focused")
+                    .and_then(serde_json::Value::as_bool)
+                    == Some(true)
+            }
+            "terminal.paste" => {
+                if let Some(error) = snapshot
+                    .pointer("/feedback/error")
+                    .filter(|value| !value.is_null())
+                {
+                    let code = error
+                        .get("code")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("terminal_paste_failed");
+                    let message = error
+                        .get("message")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("terminal paste failed asynchronously");
+                    let mut failure = script_broker_error(code, message);
+                    if let Some(details) = failure.error.as_mut() {
+                        details.details = Some(serde_json::json!({
+                            "receipt": receipt,
+                            "post_state": snapshot,
+                        }));
+                    }
+                    return Err(failure);
+                }
+                snapshot
+                    .pointer("/terminal_paste/state")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("idle")
+                    && snapshot
+                        .pointer("/feedback/message")
+                        .and_then(serde_json::Value::as_str)
+                        .is_some_and(|message| message.starts_with("Pasted "))
+            }
+            _ => unreachable!(),
+        };
+        if complete {
+            return Ok(snapshot);
+        }
+        let elapsed = started.elapsed();
+        if elapsed >= remaining {
+            let code = if operation_id == "ui.window.activate" {
+                "ui_window_activation_failed"
+            } else {
+                "terminal_paste_failed"
+            };
+            let mut failure = script_broker_error(
+                code,
+                format!("{operation_id} did not reach its native post-state before the deadline"),
+            );
+            if let Some(details) = failure.error.as_mut() {
+                details.details = Some(serde_json::json!({
+                    "receipt": receipt,
+                    "post_state": snapshot,
+                }));
+            }
+            return Err(failure);
+        }
+        let request_remaining = remaining.saturating_sub(elapsed);
+        thread::sleep(Duration::from_millis(10).min(request_remaining));
+        let snapshot_text = script_broker_ipc(
+            vec!["ui-snapshot".to_owned()],
+            remaining.saturating_sub(started.elapsed()),
+        )?;
+        snapshot = serde_json::from_str(&snapshot_text)
+            .map_err(|error| script_broker_error("broker_invalid_response", error.to_string()))?;
+    }
+}
+
 fn collect_fleet_receipt_events(
     operation: &crate::operations::OperationSpec,
     receipt: &serde_json::Value,
+    post_state: &serde_json::Value,
     budgets: &ScriptBudgets,
     remaining: Duration,
 ) -> Vec<serde_json::Value> {
@@ -3680,11 +3772,16 @@ fn collect_fleet_receipt_events(
     let Some(after) = before.get("sequence").and_then(serde_json::Value::as_u64) else {
         return Vec::new();
     };
-    let upper = receipt
+    let receipt_upper = receipt
         .get("after_position")
         .and_then(|position| position.get("sequence"))
         .and_then(serde_json::Value::as_u64)
         .unwrap_or(after);
+    let upper = post_state
+        .pointer("/event_position/sequence")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(receipt_upper)
+        .max(receipt_upper);
     if upper <= after || remaining.is_zero() {
         return Vec::new();
     }
@@ -3788,6 +3885,28 @@ fn verify_fleet_post_state(
                     .and_then(serde_json::Value::as_i64)
                     == parameters.get("width").and_then(serde_json::Value::as_i64),
             "ui_snapshot",
+        ),
+        "ui.window.activate" => (
+            final_receipt
+                && value
+                    .pointer("/focus/window_focused")
+                    .and_then(serde_json::Value::as_bool)
+                    == Some(true),
+            "native_focus_snapshot",
+        ),
+        "terminal.paste" => (
+            final_receipt
+                && value
+                    .pointer("/terminal_paste/state")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("idle")
+                && value
+                    .pointer("/feedback/error")
+                    .is_none_or(serde_json::Value::is_null)
+                && events.iter().any(|event| {
+                    event.get("kind").and_then(serde_json::Value::as_str) == Some("terminal.pasted")
+                }),
+            "terminal_pasted_event_and_snapshot",
         ),
         "tabs.set-note" => (
             final_receipt

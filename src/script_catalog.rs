@@ -1497,6 +1497,8 @@ fn fleet_operation_entry(operation: &'static OperationSpec) -> ScriptApiEntry {
         "ui.tabs.hide" => "fleet.ui.tabs.hide()",
         "ui.tabs.toggle" => "fleet.ui.tabs.toggle()",
         "ui.tabs.set-width" => "fleet.ui.tabs.set_width(width)",
+        "ui.window.activate" => "fleet.ui.window.activate()",
+        "terminal.paste" => "fleet.terminal.paste()",
         "server.kill" => "fleet.server.kill([target])",
         "workspace.shutdown" => "fleet.workspace.shutdown()",
         _ => operation.script_surface,
@@ -1953,6 +1955,7 @@ fn comparisons_for(stable_id: &str) -> ScriptApiComparisons {
         || stable_id.starts_with("workspace.")
         || stable_id.starts_with("tabs.")
         || stable_id.starts_with("pane.")
+        || stable_id.starts_with("terminal.")
         || stable_id.starts_with("events.")
         || stable_id.starts_with("server.")
         || stable_id.starts_with("control-center.")
@@ -2020,6 +2023,21 @@ mod tests {
                 "{} has no available operation",
                 entry.stable_id
             );
+        }
+    }
+
+    #[test]
+    fn callable_frontend_operations_have_method_signatures() {
+        let entries = entries();
+        for (stable_id, expected) in [
+            ("ui.window.activate", "fleet.ui.window.activate()"),
+            ("terminal.paste", "fleet.terminal.paste()"),
+        ] {
+            let entry = entries
+                .iter()
+                .find(|entry| entry.stable_id == stable_id)
+                .unwrap();
+            assert_eq!(entry.signature, expected);
         }
     }
 

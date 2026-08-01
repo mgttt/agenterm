@@ -68,6 +68,12 @@ struct FleetUi(FleetContext);
 struct FleetUiTabs(FleetContext);
 
 #[derive(Clone)]
+struct FleetUiWindow(FleetContext);
+
+#[derive(Clone)]
+struct FleetTerminalService(FleetContext);
+
+#[derive(Clone)]
 struct FleetEvents(FleetContext);
 
 #[derive(Clone)]
@@ -107,6 +113,8 @@ pub fn register(engine: &mut Engine) {
     engine.register_type_with_name::<FleetTabs>("FleetTabs");
     engine.register_type_with_name::<FleetUi>("FleetUi");
     engine.register_type_with_name::<FleetUiTabs>("FleetUiTabs");
+    engine.register_type_with_name::<FleetUiWindow>("FleetUiWindow");
+    engine.register_type_with_name::<FleetTerminalService>("FleetTerminalService");
     engine.register_type_with_name::<FleetEvents>("FleetEvents");
     engine.register_type_with_name::<FleetServer>("FleetServer");
     engine.register_type_with_name::<FleetTerminal>("FleetTerminal");
@@ -122,6 +130,9 @@ pub fn register(engine: &mut Engine) {
     });
     engine.register_get("tabs", |fleet: &mut ScriptFleet| FleetTabs(fleet.0.clone()));
     engine.register_get("ui", |fleet: &mut ScriptFleet| FleetUi(fleet.0.clone()));
+    engine.register_get("terminal", |fleet: &mut ScriptFleet| {
+        FleetTerminalService(fleet.0.clone())
+    });
     engine.register_get("events", |fleet: &mut ScriptFleet| {
         FleetEvents(fleet.0.clone())
     });
@@ -195,6 +206,15 @@ pub fn register(engine: &mut Engine) {
     engine.register_get("tabs", |service: &mut FleetUi| {
         FleetUiTabs(service.0.clone())
     });
+    engine.register_get("window", |service: &mut FleetUi| {
+        FleetUiWindow(service.0.clone())
+    });
+    engine.register_fn(
+        "activate",
+        |service: &mut FleetUiWindow| -> Result<ScriptFleetReceipt, Box<EvalAltResult>> {
+            service.0.mutate("ui.window.activate", json!({}))
+        },
+    );
     engine.register_fn(
         "show",
         |service: &mut FleetUiTabs| -> Result<ScriptFleetReceipt, Box<EvalAltResult>> {
@@ -238,6 +258,12 @@ pub fn register(engine: &mut Engine) {
                     "max_bytes": max_bytes,
                 }),
             )
+        },
+    );
+    engine.register_fn(
+        "paste",
+        |service: &mut FleetTerminalService| -> Result<ScriptFleetReceipt, Box<EvalAltResult>> {
+            service.0.mutate("terminal.paste", json!({}))
         },
     );
     engine.register_fn(
@@ -537,6 +563,21 @@ mod tests {
                         "value": {"tabs_width": 240}
                     }
                 }))
+            } else if matches!(operation_id, "ui.window.activate" | "terminal.paste") {
+                Ok(json!({
+                    "receipt": {
+                        "schema_version": 1,
+                        "request_id": "script-test",
+                        "operation_id": operation_id,
+                        "outcome": "committed"
+                    },
+                    "events": [],
+                    "post_state": {
+                        "verified": true,
+                        "reason": "snapshot",
+                        "value": {}
+                    }
+                }))
             } else {
                 Ok(json!({"operation_id": operation_id}))
             }
@@ -597,6 +638,51 @@ mod tests {
         let calls = calls.lock().unwrap();
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].1["operation_id"], "ui.tabs.set-width");
+    }
+
+    #[test]
+    fn callable_frontend_operations_route_and_coexist_with_tab_terminal_capture() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let mut engine = Engine::new();
+        register(&mut engine);
+        let mut scope = rhai::Scope::new();
+        scope.push("fleet", fake_fleet(Arc::clone(&calls)));
+        let result = engine
+            .eval_with_scope::<rhai::Map>(
+                &mut scope,
+                r#"
+                    let activate = fleet.ui.window.activate();
+                    let paste = fleet.terminal.paste();
+                    let capture = fleet.terminal("@7").capture(4096);
+                    #{
+                        activate: activate.operation_id,
+                        paste: paste.operation_id,
+                        capture: capture.operation_id
+                    }
+                "#,
+            )
+            .unwrap();
+        assert_eq!(
+            result["activate"].clone().into_string().unwrap(),
+            "ui.window.activate"
+        );
+        assert_eq!(
+            result["paste"].clone().into_string().unwrap(),
+            "terminal.paste"
+        );
+        assert_eq!(
+            result["capture"].clone().into_string().unwrap(),
+            "pane.capture"
+        );
+        let calls = calls.lock().unwrap();
+        assert_eq!(calls.len(), 3);
+        assert_eq!(calls[0].1["operation_id"], "ui.window.activate");
+        assert_eq!(calls[0].1["parameters"], json!({}));
+        assert_eq!(calls[1].1["operation_id"], "terminal.paste");
+        assert_eq!(calls[1].1["parameters"], json!({}));
+        assert_eq!(calls[2].1["operation_id"], "pane.capture");
+        assert_eq!(calls[2].1["parameters"]["tab"], "@7");
+        assert_eq!(calls[2].1["parameters"]["max_bytes"], 4096);
     }
 
     #[test]

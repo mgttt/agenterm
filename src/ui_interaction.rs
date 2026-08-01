@@ -15,6 +15,15 @@ pub(crate) enum UiInteraction {
         tab_id: u64,
         bytes: Vec<u8>,
     },
+    Paste {
+        lease_id: String,
+        client_pid: u32,
+        tab_id: u64,
+        bytes: Vec<u8>,
+        text_bytes: usize,
+        characters: usize,
+        bracketed: bool,
+    },
     Resize {
         lease_id: String,
         client_pid: u32,
@@ -37,6 +46,11 @@ impl UiInteraction {
                 client_pid,
                 ..
             }
+            | Self::Paste {
+                lease_id,
+                client_pid,
+                ..
+            }
             | Self::Resize {
                 lease_id,
                 client_pid,
@@ -49,6 +63,7 @@ impl UiInteraction {
         match self {
             Self::Select { tab_id, .. }
             | Self::Input { tab_id, .. }
+            | Self::Paste { tab_id, .. }
             | Self::Resize { tab_id, .. } => *tab_id,
         }
     }
@@ -57,6 +72,7 @@ impl UiInteraction {
         match self {
             Self::Select { .. } => "select",
             Self::Input { .. } => "input",
+            Self::Paste { .. } => "paste",
             Self::Resize { .. } => "resize",
         }
     }
@@ -102,6 +118,33 @@ pub(crate) fn parse_ui_interaction(args: &[String]) -> Result<UiInteraction, Str
                 bytes,
             })
         }
+        "paste" => {
+            require_keys(
+                &options,
+                &[
+                    "--lease-id",
+                    "--client-pid",
+                    "-t",
+                    "--hex",
+                    "--text-bytes",
+                    "--characters",
+                    "--bracketed",
+                ],
+            )?;
+            let bytes = decode_hex(required(&options, "--hex")?)?;
+            let text_bytes = bounded_count(required(&options, "--text-bytes")?, bytes.len())?;
+            let characters = bounded_count(required(&options, "--characters")?, text_bytes)?;
+            let bracketed = parse_bool(required(&options, "--bracketed")?)?;
+            Ok(UiInteraction::Paste {
+                lease_id,
+                client_pid,
+                tab_id,
+                bytes,
+                text_bytes,
+                characters,
+                bracketed,
+            })
+        }
         "resize" => {
             require_keys(
                 &options,
@@ -135,7 +178,15 @@ fn parse_pairs(values: &[String]) -> Result<BTreeMap<&str, &str>, String> {
         let name = pair[0].as_str();
         if !matches!(
             name,
-            "--lease-id" | "--client-pid" | "-t" | "--hex" | "--rows" | "--columns"
+            "--lease-id"
+                | "--client-pid"
+                | "-t"
+                | "--hex"
+                | "--rows"
+                | "--columns"
+                | "--text-bytes"
+                | "--characters"
+                | "--bracketed"
         ) {
             return Err("ui_interaction_option_unknown".to_owned());
         }
@@ -166,6 +217,22 @@ fn bounded_dimension(value: &str, maximum: u32, name: &str) -> Result<u16, Strin
         .ok()
         .filter(|value| *value != 0 && u32::from(*value) <= maximum)
         .ok_or_else(|| format!("ui_interaction_{name}_invalid"))
+}
+
+fn bounded_count(value: &str, maximum: usize) -> Result<usize, String> {
+    value
+        .parse::<usize>()
+        .ok()
+        .filter(|value| *value != 0 && *value <= maximum)
+        .ok_or_else(|| "ui_interaction_paste_metadata_invalid".to_owned())
+}
+
+fn parse_bool(value: &str) -> Result<bool, String> {
+    match value {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        _ => Err("ui_interaction_paste_metadata_invalid".to_owned()),
+    }
 }
 
 fn decode_hex(value: &str) -> Result<Vec<u8>, String> {
@@ -218,6 +285,36 @@ mod tests {
                 lease_id: "lease".to_owned(),
                 client_pid: 42,
                 tab_id: 7,
+            }
+        );
+        assert_eq!(
+            parse_ui_interaction(&args(&[
+                "ui-interact",
+                "paste",
+                "--lease-id",
+                "lease",
+                "--client-pid",
+                "42",
+                "-t",
+                "@7",
+                "--hex",
+                "1b5b3230307e68691b5b3230317e",
+                "--text-bytes",
+                "2",
+                "--characters",
+                "2",
+                "--bracketed",
+                "true",
+            ]))
+            .unwrap(),
+            UiInteraction::Paste {
+                lease_id: "lease".to_owned(),
+                client_pid: 42,
+                tab_id: 7,
+                bytes: b"\x1b[200~hi\x1b[201~".to_vec(),
+                text_bytes: 2,
+                characters: 2,
+                bracketed: true,
             }
         );
         assert_eq!(
@@ -289,6 +386,24 @@ mod tests {
                 "@7",
                 "--hex",
                 "xyz",
+            ]),
+            args(&[
+                "ui-interact",
+                "paste",
+                "--lease-id",
+                "lease",
+                "--client-pid",
+                "42",
+                "-t",
+                "@7",
+                "--hex",
+                "6869",
+                "--text-bytes",
+                "3",
+                "--characters",
+                "2",
+                "--bracketed",
+                "true",
             ]),
             args(&[
                 "ui-interact",

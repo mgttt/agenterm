@@ -1219,6 +1219,51 @@ impl ServerState {
                 }
                 (Some(length), None, None)
             }
+            UiInteraction::Paste {
+                bytes,
+                text_bytes,
+                characters,
+                bracketed,
+                ..
+            } => {
+                if self.active != Some(tab_id) {
+                    return IpcResponse::typed_failure(
+                        "UI paste target is not the active tab",
+                        "ui_interaction_target_not_active",
+                        "conflict",
+                        true,
+                    );
+                }
+                if self.tabs[position].submission.is_pending() {
+                    return IpcResponse::typed_failure(
+                        "composer submission is pending; UI terminal paste is paused",
+                        "ui_interaction_submission_pending",
+                        "conflict",
+                        true,
+                    );
+                }
+                let length = bytes.len();
+                if !self.tabs[position].send(&bytes) {
+                    return IpcResponse::typed_failure(
+                        "terminal paste was not accepted because the pane is no longer writable",
+                        "terminal_not_writable",
+                        "precondition",
+                        false,
+                    );
+                }
+                self.event_journal.commit(
+                    EventKind::TerminalPasted,
+                    Some(tab_id),
+                    serde_json::json!({
+                        "characters": characters,
+                        "bytes": text_bytes,
+                        "bracketed": bracketed,
+                        "source": "keyboard",
+                        "operation_id": crate::operations::TERMINAL_PASTE,
+                    }),
+                );
+                (Some(length), None, None)
+            }
             UiInteraction::Resize { rows, columns, .. } => {
                 if let Err(error) = self.tabs[position].resize(rows, columns) {
                     return IpcResponse::typed_failure(

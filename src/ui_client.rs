@@ -226,6 +226,27 @@ impl UiClientModel {
         self.interact("input", tab_id, std::mem::take(&mut arguments))
     }
 
+    pub(crate) fn paste_input(
+        &mut self,
+        tab_id: &str,
+        bytes: &[u8],
+        text_bytes: usize,
+        characters: usize,
+        bracketed: bool,
+    ) -> Result<()> {
+        let arguments = vec![
+            "--hex".to_owned(),
+            encode_hex(bytes),
+            "--text-bytes".to_owned(),
+            text_bytes.to_string(),
+            "--characters".to_owned(),
+            characters.to_string(),
+            "--bracketed".to_owned(),
+            bracketed.to_string(),
+        ];
+        self.interact("paste", tab_id, arguments)
+    }
+
     pub(crate) fn resize_request(
         &self,
         tab_id: String,
