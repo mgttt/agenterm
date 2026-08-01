@@ -1,6 +1,62 @@
 //! Lightweight host filesystem entry classification.
 
-use std::fs::Metadata;
+use std::fs::{File, Metadata};
+
+/// Product-neutral facts for one already-resolved filesystem object.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FilesystemEntryFacts {
+    directory: bool,
+    regular_file: bool,
+    link_like: bool,
+}
+
+impl FilesystemEntryFacts {
+    #[must_use]
+    pub const fn is_directory(self) -> bool {
+        self.directory
+    }
+
+    #[must_use]
+    pub const fn is_file(self) -> bool {
+        self.regular_file
+    }
+
+    #[must_use]
+    pub const fn is_link_like(self) -> bool {
+        self.link_like
+    }
+
+    #[must_use]
+    pub const fn is_real_directory(self) -> bool {
+        self.directory && !self.link_like
+    }
+
+    #[must_use]
+    pub const fn is_real_file(self) -> bool {
+        self.regular_file && !self.link_like
+    }
+}
+
+/// Classify metadata without resolving another path.
+#[must_use]
+pub fn metadata_entry_facts(metadata: &Metadata) -> FilesystemEntryFacts {
+    FilesystemEntryFacts {
+        directory: metadata.is_dir(),
+        regular_file: metadata.is_file(),
+        link_like: crate::selected::filesystem_entry::metadata_is_link_like(metadata),
+    }
+}
+
+/// Classify the object referenced by an already-open file handle.
+///
+/// The caller chooses whether the native open followed the final link. For
+/// component-wise traversal, open the link object itself (`O_NOFOLLOW`/an
+/// equivalent reparse-point option) before calling this function. No path is
+/// reopened here, so classification cannot race a second name resolution.
+pub fn opened_file_entry_facts(file: &File) -> std::io::Result<FilesystemEntryFacts> {
+    file.metadata()
+        .map(|metadata| metadata_entry_facts(&metadata))
+}
 
 /// Whether metadata obtained without following the final component describes
 /// a host link-like entry.
@@ -10,14 +66,14 @@ use std::fs::Metadata;
 /// must not assume that any of them is an ordinary directory.
 #[must_use]
 pub fn metadata_is_link_like(metadata: &Metadata) -> bool {
-    crate::selected::filesystem_entry::metadata_is_link_like(metadata)
+    metadata_entry_facts(metadata).is_link_like()
 }
 
 /// Whether metadata describes an ordinary directory that is safe to treat as
 /// a directory entry rather than as a host link-like object.
 #[must_use]
 pub fn metadata_is_real_directory(metadata: &Metadata) -> bool {
-    metadata.is_dir() && !metadata_is_link_like(metadata)
+    metadata_entry_facts(metadata).is_real_directory()
 }
 
 #[cfg(test)]
@@ -46,6 +102,12 @@ mod tests {
         assert!(!metadata_is_link_like(&directory));
         assert!(!metadata_is_real_directory(&file));
         assert!(!metadata_is_link_like(&file));
+        let opened = fs::File::open(root.join("file")).expect("open entry fixture");
+        assert!(
+            opened_file_entry_facts(&opened)
+                .expect("classify opened file")
+                .is_real_file()
+        );
         fs::remove_dir_all(root).expect("remove entry fixture");
     }
 
@@ -93,6 +155,19 @@ mod tests {
         let metadata = fs::symlink_metadata(&junction).expect("junction metadata");
         assert!(metadata_is_link_like(&metadata));
         assert!(!metadata_is_real_directory(&metadata));
+
+        use std::os::windows::fs::OpenOptionsExt as _;
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+        let opened = fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS)
+            .open(&junction)
+            .expect("open junction itself");
+        let opened = opened_file_entry_facts(&opened).expect("classify opened junction");
+        assert!(opened.is_link_like());
+        assert!(!opened.is_real_directory());
+        assert!(!opened.is_real_file());
         fs::remove_dir(&junction).expect("remove junction");
         fs::remove_dir(&root).expect("remove junction fixture");
         fs::remove_dir_all(outside).expect("remove junction target");

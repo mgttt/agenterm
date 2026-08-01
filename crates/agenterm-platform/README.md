@@ -53,7 +53,7 @@ clipboard, IPC, or screenshot modules.
 | `shared-memory` | exclusive named read/write mappings for cross-process zero-copy data | target `libc` / minimal `windows-sys` |
 | `process` | observation/tree control, shell defaults, child-pipe probes and parent-console diagnostics | target `libc` / `windows-sys` |
 | `filesystem-conventions` | user home, host roots and sibling executable naming | none |
-| `filesystem-entry` | classify Unix symbolic links and every Windows reparse point as link-like, with ordinary-directory checks | none |
+| `filesystem-entry` | classify path metadata or already-open objects, treating Unix symbolic links and every Windows reparse point as link-like | none |
 | `filesystem-cleanup` | remove caller-owned quiescent trees after restoring deletable permissions without following links | none |
 | `filesystem-publish` | recoverable same-parent directory publication with typed rollback outcomes | `filesystem-cleanup` |
 | `filesystem-usage` | checked logical-byte accounting without traversing symbolic links or reparse points | none |
@@ -154,6 +154,12 @@ being mutated. It restores only the access needed for removal, treats a missing
 path as success, and never intentionally traverses Unix symlinks or Windows
 reparse points. Choosing a deletion root, handling an actively hostile writer,
 and deciding whether cleanup failure is fatal remain caller policy.
+
+`filesystem_entry::opened_file_entry_facts` classifies an already-open object
+without reopening its path. Callers doing component-wise traversal must use a
+native no-follow open first; the returned directory/link-like facts then avoid
+a second name-resolution race. The feature remains free of native crate
+dependencies and does not choose traversal roots or authorization policy.
 
 `filesystem_publish::publish_directory` installs a prepared directory beside
 its destination. If a destination already exists, it is first renamed to a
