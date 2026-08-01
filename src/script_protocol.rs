@@ -243,6 +243,8 @@ pub struct ScriptFrame {
 #[serde(tag = "kind", content = "payload", rename_all = "snake_case")]
 pub enum ScriptFramePayload {
     Invoke(ScriptInvocation),
+    ReplRequest(ReplSessionRequest),
+    ReplResponse(ReplSessionResponse),
     Cancel {
         invocation_id: String,
     },
@@ -257,6 +259,542 @@ pub enum ScriptFramePayload {
         request_id: String,
         response: ScriptBrokerResponse,
     },
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ReplSessionRequest {
+    pub session_id: String,
+    pub generation: u64,
+    pub sequence: u64,
+    #[serde(flatten)]
+    pub command: ReplSessionCommand,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(tag = "command", content = "payload", rename_all = "snake_case")]
+pub enum ReplSessionCommand {
+    Open { config: ReplSessionWireConfig },
+    Evaluate { cell_id: String, source: String },
+    Inspect { source: String },
+    Query { query: ReplSessionQuery },
+    Reset,
+    Cancel { cell_id: String },
+    Close,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ReplSessionWireConfig {
+    pub budgets: ScriptBudgets,
+    pub arguments: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_root: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub invocation_temp_root: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ReplSessionQuery {
+    State,
+    History,
+    Variables,
+    Functions,
+    Limits,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ReplSessionResponse {
+    pub session_id: String,
+    pub generation: u64,
+    pub sequence: u64,
+    #[serde(flatten)]
+    pub event: ReplSessionEvent,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(tag = "event", content = "payload", rename_all = "snake_case")]
+pub enum ReplSessionEvent {
+    Ready {
+        worker_pid: u32,
+    },
+    InputState {
+        state: ReplWireInputState,
+    },
+    CellStarted {
+        cell_id: String,
+    },
+    CellResult {
+        cell_id: String,
+        result: ReplWireCellResult,
+    },
+    QueryResult {
+        query: ReplSessionQuery,
+        result: ReplWireQueryResult,
+    },
+    ResetDone,
+    Closed,
+    Failure {
+        failure: ReplWireFailure,
+    },
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(tag = "state", content = "failure", rename_all = "snake_case")]
+pub enum ReplWireInputState {
+    Complete,
+    Incomplete,
+    Invalid(ReplWireFailure),
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ReplWireCellResult {
+    pub cell_sequence: u64,
+    pub ok: bool,
+    pub stdout: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<ReplWireValue>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure: Option<ReplWireFailure>,
+    pub state_committed: bool,
+    pub duration_ms: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ReplWireValue {
+    pub type_name: String,
+    pub serializable: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<Value>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ReplWireFailure {
+    pub code: String,
+    pub category: String,
+    pub message: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(tag = "result", content = "value", rename_all = "snake_case")]
+pub enum ReplWireQueryResult {
+    State {
+        history: Vec<String>,
+        variables: Vec<ReplWireVariable>,
+        functions: Vec<String>,
+        limits: ScriptBudgets,
+    },
+    History(Vec<String>),
+    Variables(Vec<ReplWireVariable>),
+    Functions(Vec<String>),
+    Limits(ScriptBudgets),
+}
+
+impl ReplWireQueryResult {
+    pub const fn query(&self) -> ReplSessionQuery {
+        match self {
+            Self::State { .. } => ReplSessionQuery::State,
+            Self::History(_) => ReplSessionQuery::History,
+            Self::Variables(_) => ReplSessionQuery::Variables,
+            Self::Functions(_) => ReplSessionQuery::Functions,
+            Self::Limits(_) => ReplSessionQuery::Limits,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ReplWireVariable {
+    pub name: String,
+    pub type_name: String,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ReplSessionPhase {
+    #[default]
+    Vacant,
+    Idle,
+    Evaluating,
+    Closed,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReplSessionRejection {
+    pub code: &'static str,
+    pub message: String,
+}
+
+#[derive(Default)]
+pub struct ReplRequestValidator {
+    phase: ReplSessionPhase,
+    session_id: Option<String>,
+    generation: Option<u64>,
+    next_sequence: u64,
+    active_cell_id: Option<String>,
+}
+
+impl ReplRequestValidator {
+    pub const fn phase(&self) -> ReplSessionPhase {
+        self.phase
+    }
+
+    pub fn admit(&mut self, request: &ReplSessionRequest) -> Result<(), ReplSessionRejection> {
+        self.validate_envelope(
+            &request.session_id,
+            request.generation,
+            request.sequence,
+            matches!(&request.command, ReplSessionCommand::Open { .. }),
+        )?;
+        match &request.command {
+            ReplSessionCommand::Evaluate { cell_id, .. }
+            | ReplSessionCommand::Cancel { cell_id } => validate_repl_cell_id(cell_id)?,
+            _ => {}
+        }
+        if let ReplSessionCommand::Cancel { cell_id } = &request.command
+            && self.active_cell_id.as_deref() != Some(cell_id)
+        {
+            return Err(repl_cell_rejection(cell_id, self.active_cell_id.as_deref()));
+        }
+        let next_phase = match (&self.phase, &request.command) {
+            (ReplSessionPhase::Vacant, ReplSessionCommand::Open { .. }) => ReplSessionPhase::Idle,
+            (
+                ReplSessionPhase::Idle,
+                ReplSessionCommand::Inspect { .. }
+                | ReplSessionCommand::Query { .. }
+                | ReplSessionCommand::Reset,
+            ) => ReplSessionPhase::Idle,
+            (ReplSessionPhase::Idle, ReplSessionCommand::Evaluate { .. }) => {
+                ReplSessionPhase::Evaluating
+            }
+            (ReplSessionPhase::Idle, ReplSessionCommand::Close) => ReplSessionPhase::Closed,
+            (ReplSessionPhase::Evaluating, ReplSessionCommand::Cancel { .. }) => {
+                ReplSessionPhase::Evaluating
+            }
+            _ => return Err(repl_phase_rejection(self.phase, "request")),
+        };
+        self.commit_envelope(&request.session_id, request.generation, request.sequence)?;
+        self.phase = next_phase;
+        if let ReplSessionCommand::Evaluate { cell_id, .. } = &request.command {
+            self.active_cell_id = Some(cell_id.clone());
+        }
+        Ok(())
+    }
+
+    pub fn admit_frame(&mut self, frame: &ScriptFrame) -> Result<(), ReplSessionRejection> {
+        validate_repl_frame_envelope(frame)?;
+        match &frame.payload {
+            ScriptFramePayload::ReplRequest(request) => self.admit(request),
+            _ => Err(ReplSessionRejection {
+                code: "protocol_repl_unexpected_frame",
+                message: "REPL request validator received a non-request frame".to_owned(),
+            }),
+        }
+    }
+
+    pub fn complete_evaluation(
+        &mut self,
+        session_id: &str,
+        generation: u64,
+    ) -> Result<(), ReplSessionRejection> {
+        self.validate_bound_identity(session_id, generation)?;
+        if self.phase != ReplSessionPhase::Evaluating {
+            return Err(repl_phase_rejection(self.phase, "evaluation completion"));
+        }
+        self.phase = ReplSessionPhase::Idle;
+        self.active_cell_id = None;
+        Ok(())
+    }
+
+    fn validate_envelope(
+        &self,
+        session_id: &str,
+        generation: u64,
+        sequence: u64,
+        opening: bool,
+    ) -> Result<(), ReplSessionRejection> {
+        validate_repl_identity(session_id, generation)?;
+        if self.phase == ReplSessionPhase::Vacant {
+            if !opening {
+                return Err(repl_phase_rejection(self.phase, "request"));
+            }
+            if sequence != 0 {
+                return Err(repl_sequence_rejection(sequence, 0));
+            }
+        } else {
+            self.validate_bound_identity(session_id, generation)?;
+            if sequence != self.next_sequence {
+                return Err(repl_sequence_rejection(sequence, self.next_sequence));
+            }
+        }
+        if sequence == u64::MAX {
+            return Err(ReplSessionRejection {
+                code: "protocol_repl_sequence_overflow",
+                message: "REPL sequence cannot advance beyond u64::MAX".to_owned(),
+            });
+        }
+        Ok(())
+    }
+
+    fn validate_bound_identity(
+        &self,
+        session_id: &str,
+        generation: u64,
+    ) -> Result<(), ReplSessionRejection> {
+        if self.session_id.as_deref() != Some(session_id) {
+            return Err(ReplSessionRejection {
+                code: "protocol_repl_session_mismatch",
+                message: "REPL frame does not match the admitted session".to_owned(),
+            });
+        }
+        match self.generation {
+            Some(expected) if generation < expected => Err(ReplSessionRejection {
+                code: "protocol_repl_stale_generation",
+                message: format!(
+                    "REPL generation {generation} is stale; current generation is {expected}"
+                ),
+            }),
+            Some(expected) if generation != expected => Err(ReplSessionRejection {
+                code: "protocol_repl_generation_mismatch",
+                message: format!(
+                    "REPL generation {generation} does not match current generation {expected}"
+                ),
+            }),
+            Some(_) => Ok(()),
+            None => Err(repl_phase_rejection(self.phase, "identity")),
+        }
+    }
+
+    fn commit_envelope(
+        &mut self,
+        session_id: &str,
+        generation: u64,
+        sequence: u64,
+    ) -> Result<(), ReplSessionRejection> {
+        let next_sequence = sequence.checked_add(1).ok_or(ReplSessionRejection {
+            code: "protocol_repl_sequence_overflow",
+            message: "REPL sequence cannot advance beyond u64::MAX".to_owned(),
+        })?;
+        if self.session_id.is_none() {
+            self.session_id = Some(session_id.to_owned());
+            self.generation = Some(generation);
+        }
+        self.next_sequence = next_sequence;
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+pub struct ReplResponseValidator {
+    phase: ReplSessionPhase,
+    session_id: Option<String>,
+    generation: Option<u64>,
+    next_sequence: u64,
+    active_cell_id: Option<String>,
+}
+
+impl ReplResponseValidator {
+    pub const fn phase(&self) -> ReplSessionPhase {
+        self.phase
+    }
+
+    pub fn admit(&mut self, response: &ReplSessionResponse) -> Result<(), ReplSessionRejection> {
+        validate_repl_identity(&response.session_id, response.generation)?;
+        if self.phase == ReplSessionPhase::Vacant {
+            if response.sequence != 0 {
+                return Err(repl_sequence_rejection(response.sequence, 0));
+            }
+        } else {
+            self.validate_bound_identity(&response.session_id, response.generation)?;
+            if response.sequence != self.next_sequence {
+                return Err(repl_sequence_rejection(
+                    response.sequence,
+                    self.next_sequence,
+                ));
+            }
+        }
+        if response.sequence == u64::MAX {
+            return Err(ReplSessionRejection {
+                code: "protocol_repl_sequence_overflow",
+                message: "REPL sequence cannot advance beyond u64::MAX".to_owned(),
+            });
+        }
+        match &response.event {
+            ReplSessionEvent::CellStarted { cell_id }
+            | ReplSessionEvent::CellResult { cell_id, .. } => validate_repl_cell_id(cell_id)?,
+            ReplSessionEvent::QueryResult { query, result } if *query != result.query() => {
+                return Err(ReplSessionRejection {
+                    code: "protocol_repl_query_mismatch",
+                    message: "REPL query result does not match its declared query".to_owned(),
+                });
+            }
+            _ => {}
+        }
+        if let ReplSessionEvent::CellResult { cell_id, .. } = &response.event
+            && self.active_cell_id.as_deref() != Some(cell_id)
+        {
+            return Err(repl_cell_rejection(cell_id, self.active_cell_id.as_deref()));
+        }
+        let next_phase = match (&self.phase, &response.event) {
+            (ReplSessionPhase::Vacant, ReplSessionEvent::Ready { .. }) => ReplSessionPhase::Idle,
+            (ReplSessionPhase::Vacant, ReplSessionEvent::Failure { .. }) => {
+                ReplSessionPhase::Closed
+            }
+            (
+                ReplSessionPhase::Idle,
+                ReplSessionEvent::InputState { .. }
+                | ReplSessionEvent::QueryResult { .. }
+                | ReplSessionEvent::ResetDone
+                | ReplSessionEvent::Failure { .. },
+            ) => ReplSessionPhase::Idle,
+            (ReplSessionPhase::Idle, ReplSessionEvent::CellStarted { .. }) => {
+                ReplSessionPhase::Evaluating
+            }
+            (ReplSessionPhase::Idle, ReplSessionEvent::Closed) => ReplSessionPhase::Closed,
+            (ReplSessionPhase::Evaluating, ReplSessionEvent::CellResult { .. }) => {
+                ReplSessionPhase::Idle
+            }
+            (ReplSessionPhase::Evaluating, ReplSessionEvent::Failure { .. }) => {
+                ReplSessionPhase::Evaluating
+            }
+            _ => return Err(repl_phase_rejection(self.phase, "response")),
+        };
+        let next_sequence = response
+            .sequence
+            .checked_add(1)
+            .ok_or(ReplSessionRejection {
+                code: "protocol_repl_sequence_overflow",
+                message: "REPL sequence cannot advance beyond u64::MAX".to_owned(),
+            })?;
+        if self.session_id.is_none() {
+            self.session_id = Some(response.session_id.clone());
+            self.generation = Some(response.generation);
+        }
+        self.next_sequence = next_sequence;
+        self.phase = next_phase;
+        match &response.event {
+            ReplSessionEvent::CellStarted { cell_id } => {
+                self.active_cell_id = Some(cell_id.clone());
+            }
+            ReplSessionEvent::CellResult { .. } => self.active_cell_id = None,
+            _ => {}
+        }
+        Ok(())
+    }
+
+    pub fn admit_frame(&mut self, frame: &ScriptFrame) -> Result<(), ReplSessionRejection> {
+        validate_repl_frame_envelope(frame)?;
+        match &frame.payload {
+            ScriptFramePayload::ReplResponse(response) => self.admit(response),
+            _ => Err(ReplSessionRejection {
+                code: "protocol_repl_unexpected_frame",
+                message: "REPL response validator received a non-response frame".to_owned(),
+            }),
+        }
+    }
+
+    fn validate_bound_identity(
+        &self,
+        session_id: &str,
+        generation: u64,
+    ) -> Result<(), ReplSessionRejection> {
+        if self.session_id.as_deref() != Some(session_id) {
+            return Err(ReplSessionRejection {
+                code: "protocol_repl_session_mismatch",
+                message: "REPL frame does not match the admitted session".to_owned(),
+            });
+        }
+        match self.generation {
+            Some(expected) if generation < expected => Err(ReplSessionRejection {
+                code: "protocol_repl_stale_generation",
+                message: format!(
+                    "REPL generation {generation} is stale; current generation is {expected}"
+                ),
+            }),
+            Some(expected) if generation != expected => Err(ReplSessionRejection {
+                code: "protocol_repl_generation_mismatch",
+                message: format!(
+                    "REPL generation {generation} does not match current generation {expected}"
+                ),
+            }),
+            Some(_) => Ok(()),
+            None => Err(repl_phase_rejection(self.phase, "identity")),
+        }
+    }
+}
+
+fn validate_repl_identity(session_id: &str, generation: u64) -> Result<(), ReplSessionRejection> {
+    if session_id.is_empty() || session_id.len() > 128 {
+        return Err(ReplSessionRejection {
+            code: "protocol_repl_invalid_session_id",
+            message: "session_id must contain from 1 to 128 bytes".to_owned(),
+        });
+    }
+    if generation == 0 {
+        return Err(ReplSessionRejection {
+            code: "protocol_repl_invalid_generation",
+            message: "REPL generation must be greater than zero".to_owned(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_repl_cell_id(cell_id: &str) -> Result<(), ReplSessionRejection> {
+    if cell_id.is_empty() || cell_id.len() > 128 {
+        Err(ReplSessionRejection {
+            code: "protocol_repl_invalid_cell_id",
+            message: "cell_id must contain from 1 to 128 bytes".to_owned(),
+        })
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_repl_frame_envelope(frame: &ScriptFrame) -> Result<(), ReplSessionRejection> {
+    if frame.frame_version != SCRIPT_FRAME_VERSION {
+        return Err(ReplSessionRejection {
+            code: "protocol_unsupported_frame_version",
+            message: format!(
+                "REPL frame version {} does not match {SCRIPT_FRAME_VERSION}",
+                frame.frame_version
+            ),
+        });
+    }
+    if frame.frame_id.is_empty() || frame.frame_id.len() > 128 {
+        return Err(ReplSessionRejection {
+            code: "protocol_invalid_frame_id",
+            message: "frame_id must contain from 1 to 128 bytes".to_owned(),
+        });
+    }
+    Ok(())
+}
+
+fn repl_sequence_rejection(sequence: u64, expected: u64) -> ReplSessionRejection {
+    if sequence < expected {
+        ReplSessionRejection {
+            code: "protocol_repl_stale_sequence",
+            message: format!("REPL sequence {sequence} is stale; next sequence is {expected}"),
+        }
+    } else {
+        ReplSessionRejection {
+            code: "protocol_repl_sequence_mismatch",
+            message: format!("REPL sequence {sequence} does not match next sequence {expected}"),
+        }
+    }
+}
+
+fn repl_phase_rejection(phase: ReplSessionPhase, message_kind: &str) -> ReplSessionRejection {
+    ReplSessionRejection {
+        code: "protocol_repl_phase_mismatch",
+        message: format!("REPL {message_kind} is invalid while session phase is {phase:?}"),
+    }
+}
+
+fn repl_cell_rejection(cell_id: &str, active_cell_id: Option<&str>) -> ReplSessionRejection {
+    ReplSessionRejection {
+        code: "protocol_repl_cell_mismatch",
+        message: format!(
+            "REPL cell {cell_id} does not match active cell {}",
+            active_cell_id.unwrap_or("<none>")
+        ),
+    }
 }
 
 #[derive(Debug)]
@@ -458,6 +996,17 @@ impl ScriptFrameTracker {
                 "frame_id must contain from 1 to 128 bytes",
             ));
         }
+        if matches!(
+            &frame.payload,
+            ScriptFramePayload::ReplRequest(_) | ScriptFramePayload::ReplResponse(_)
+        ) {
+            return Err(ScriptFrameRejection::admission(
+                frame_id,
+                "unknown",
+                "protocol_repl_requires_session_validator",
+                "REPL frames require the constant-space session validator",
+            ));
+        }
         if !self.seen_frames.insert(frame_id.clone()) {
             return Err(ScriptFrameRejection::admission(
                 frame_id,
@@ -620,5 +1169,458 @@ mod tests {
             ScriptCancelDisposition::classify("invocation", Some("other"), false),
             ScriptCancelDisposition::Unknown
         );
+    }
+
+    fn repl_request(sequence: u64, command: ReplSessionCommand) -> ReplSessionRequest {
+        ReplSessionRequest {
+            session_id: "session-a".to_owned(),
+            generation: 7,
+            sequence,
+            command,
+        }
+    }
+
+    fn repl_response(sequence: u64, event: ReplSessionEvent) -> ReplSessionResponse {
+        ReplSessionResponse {
+            session_id: "session-a".to_owned(),
+            generation: 7,
+            sequence,
+            event,
+        }
+    }
+
+    #[test]
+    fn repl_wire_round_trips_every_command_and_event() {
+        let commands = vec![
+            ReplSessionCommand::Open {
+                config: ReplSessionWireConfig {
+                    budgets: ScriptBudgets::default(),
+                    arguments: vec!["argument".to_owned()],
+                    project_root: Some("project".to_owned()),
+                    invocation_temp_root: Some("temp".to_owned()),
+                },
+            },
+            ReplSessionCommand::Evaluate {
+                cell_id: "cell-1".to_owned(),
+                source: "40 + 2".to_owned(),
+            },
+            ReplSessionCommand::Inspect {
+                source: "fn add(x) {".to_owned(),
+            },
+            ReplSessionCommand::Query {
+                query: ReplSessionQuery::State,
+            },
+            ReplSessionCommand::Reset,
+            ReplSessionCommand::Cancel {
+                cell_id: "cell-1".to_owned(),
+            },
+            ReplSessionCommand::Close,
+        ];
+        for (sequence, command) in commands.into_iter().enumerate() {
+            let frame = ScriptFrame {
+                frame_version: SCRIPT_FRAME_VERSION,
+                frame_id: format!("request-{sequence}"),
+                payload: ScriptFramePayload::ReplRequest(repl_request(sequence as u64, command)),
+            };
+            let mut encoded = Vec::new();
+            write_script_frame(&mut encoded, &frame).expect("encode REPL request");
+            let mut encoded = Cursor::new(encoded);
+            let decoded = read_script_frame(&mut encoded).expect("decode REPL request");
+            let ScriptFrameRead::Frame(decoded) = decoded else {
+                panic!("encoded REPL request was rejected");
+            };
+            assert!(matches!(
+                &decoded.payload,
+                ScriptFramePayload::ReplRequest(_)
+            ));
+        }
+
+        let failure = || ReplWireFailure {
+            code: "script_runtime".to_owned(),
+            category: "script".to_owned(),
+            message: "failure".to_owned(),
+        };
+        let events = vec![
+            ReplSessionEvent::Ready { worker_pid: 42 },
+            ReplSessionEvent::InputState {
+                state: ReplWireInputState::Invalid(failure()),
+            },
+            ReplSessionEvent::CellStarted {
+                cell_id: "cell-1".to_owned(),
+            },
+            ReplSessionEvent::CellResult {
+                cell_id: "cell-1".to_owned(),
+                result: ReplWireCellResult {
+                    cell_sequence: 1,
+                    ok: false,
+                    stdout: String::new(),
+                    value: None,
+                    failure: Some(failure()),
+                    state_committed: false,
+                    duration_ms: 3,
+                },
+            },
+            ReplSessionEvent::QueryResult {
+                query: ReplSessionQuery::Variables,
+                result: ReplWireQueryResult::Variables(vec![ReplWireVariable {
+                    name: "x".to_owned(),
+                    type_name: "i64".to_owned(),
+                }]),
+            },
+            ReplSessionEvent::ResetDone,
+            ReplSessionEvent::Closed,
+            ReplSessionEvent::Failure { failure: failure() },
+        ];
+        for (sequence, event) in events.into_iter().enumerate() {
+            let frame = ScriptFrame {
+                frame_version: SCRIPT_FRAME_VERSION,
+                frame_id: format!("response-{sequence}"),
+                payload: ScriptFramePayload::ReplResponse(repl_response(sequence as u64, event)),
+            };
+            let mut encoded = Vec::new();
+            write_script_frame(&mut encoded, &frame).expect("encode REPL response");
+            let mut encoded = Cursor::new(encoded);
+            let decoded = read_script_frame(&mut encoded).expect("decode REPL response");
+            let ScriptFrameRead::Frame(decoded) = decoded else {
+                panic!("encoded REPL response was rejected");
+            };
+            assert!(matches!(
+                &decoded.payload,
+                ScriptFramePayload::ReplResponse(_)
+            ));
+        }
+    }
+
+    #[test]
+    fn repl_request_validator_tracks_phase_with_constant_state() {
+        let mut validator = ReplRequestValidator::default();
+        let open = ScriptFrame {
+            frame_version: SCRIPT_FRAME_VERSION,
+            frame_id: "repl-open".to_owned(),
+            payload: ScriptFramePayload::ReplRequest(repl_request(
+                0,
+                ReplSessionCommand::Open {
+                    config: ReplSessionWireConfig {
+                        budgets: ScriptBudgets::default(),
+                        arguments: Vec::new(),
+                        project_root: None,
+                        invocation_temp_root: None,
+                    },
+                },
+            )),
+        };
+        validator.admit_frame(&open).unwrap();
+        assert_eq!(validator.phase(), ReplSessionPhase::Idle);
+        validator
+            .admit(&repl_request(
+                1,
+                ReplSessionCommand::Inspect {
+                    source: "40 + 2".to_owned(),
+                },
+            ))
+            .unwrap();
+        validator
+            .admit(&repl_request(
+                2,
+                ReplSessionCommand::Evaluate {
+                    cell_id: "cell-1".to_owned(),
+                    source: "while true {}".to_owned(),
+                },
+            ))
+            .unwrap();
+        assert_eq!(validator.phase(), ReplSessionPhase::Evaluating);
+        validator
+            .admit(&repl_request(
+                3,
+                ReplSessionCommand::Cancel {
+                    cell_id: "cell-1".to_owned(),
+                },
+            ))
+            .unwrap();
+        validator.complete_evaluation("session-a", 7).unwrap();
+        validator
+            .admit(&repl_request(
+                4,
+                ReplSessionCommand::Query {
+                    query: ReplSessionQuery::State,
+                },
+            ))
+            .unwrap();
+        validator
+            .admit(&repl_request(5, ReplSessionCommand::Reset))
+            .unwrap();
+        validator
+            .admit(&repl_request(6, ReplSessionCommand::Close))
+            .unwrap();
+        assert_eq!(validator.phase(), ReplSessionPhase::Closed);
+        assert_eq!(
+            validator
+                .admit(&repl_request(
+                    7,
+                    ReplSessionCommand::Query {
+                        query: ReplSessionQuery::Limits,
+                    },
+                ))
+                .unwrap_err()
+                .code,
+            "protocol_repl_phase_mismatch"
+        );
+    }
+
+    #[test]
+    fn repl_request_validator_rejects_stale_mismatched_and_overflowing_envelopes() {
+        let mut validator = ReplRequestValidator::default();
+        validator
+            .admit(&repl_request(
+                0,
+                ReplSessionCommand::Open {
+                    config: ReplSessionWireConfig {
+                        budgets: ScriptBudgets::default(),
+                        arguments: Vec::new(),
+                        project_root: None,
+                        invocation_temp_root: None,
+                    },
+                },
+            ))
+            .unwrap();
+
+        let query = || ReplSessionCommand::Query {
+            query: ReplSessionQuery::History,
+        };
+        assert_eq!(
+            validator.admit(&repl_request(0, query())).unwrap_err().code,
+            "protocol_repl_stale_sequence"
+        );
+        assert_eq!(
+            validator.admit(&repl_request(2, query())).unwrap_err().code,
+            "protocol_repl_sequence_mismatch"
+        );
+        let mut wrong_session = repl_request(1, query());
+        wrong_session.session_id = "session-b".to_owned();
+        assert_eq!(
+            validator.admit(&wrong_session).unwrap_err().code,
+            "protocol_repl_session_mismatch"
+        );
+        let mut stale_generation = repl_request(1, query());
+        stale_generation.generation = 6;
+        assert_eq!(
+            validator.admit(&stale_generation).unwrap_err().code,
+            "protocol_repl_stale_generation"
+        );
+        let mut future_generation = repl_request(1, query());
+        future_generation.generation = 8;
+        assert_eq!(
+            validator.admit(&future_generation).unwrap_err().code,
+            "protocol_repl_generation_mismatch"
+        );
+
+        validator.next_sequence = u64::MAX;
+        let mut overflow = repl_request(u64::MAX, query());
+        overflow.generation = 7;
+        assert_eq!(
+            validator.admit(&overflow).unwrap_err().code,
+            "protocol_repl_sequence_overflow"
+        );
+        assert_eq!(validator.next_sequence, u64::MAX);
+    }
+
+    #[test]
+    fn repl_response_validator_rejects_out_of_phase_and_stale_responses() {
+        let mut validator = ReplResponseValidator::default();
+        validator
+            .admit(&repl_response(
+                0,
+                ReplSessionEvent::Ready { worker_pid: 42 },
+            ))
+            .unwrap();
+        validator
+            .admit(&repl_response(
+                1,
+                ReplSessionEvent::CellStarted {
+                    cell_id: "cell-1".to_owned(),
+                },
+            ))
+            .unwrap();
+        assert_eq!(validator.phase(), ReplSessionPhase::Evaluating);
+        assert_eq!(
+            validator
+                .admit(&repl_response(1, ReplSessionEvent::ResetDone))
+                .unwrap_err()
+                .code,
+            "protocol_repl_stale_sequence"
+        );
+        assert_eq!(
+            validator
+                .admit(&repl_response(2, ReplSessionEvent::ResetDone))
+                .unwrap_err()
+                .code,
+            "protocol_repl_phase_mismatch"
+        );
+        validator
+            .admit(&repl_response(
+                2,
+                ReplSessionEvent::CellResult {
+                    cell_id: "cell-1".to_owned(),
+                    result: ReplWireCellResult {
+                        cell_sequence: 1,
+                        ok: true,
+                        stdout: String::new(),
+                        value: None,
+                        failure: None,
+                        state_committed: true,
+                        duration_ms: 1,
+                    },
+                },
+            ))
+            .unwrap();
+        validator
+            .admit(&repl_response(3, ReplSessionEvent::Closed))
+            .unwrap();
+        assert_eq!(validator.phase(), ReplSessionPhase::Closed);
+    }
+
+    #[test]
+    fn repl_request_cancel_mismatch_does_not_advance_validator_state() {
+        let mut validator = ReplRequestValidator::default();
+        validator
+            .admit(&repl_request(
+                0,
+                ReplSessionCommand::Open {
+                    config: ReplSessionWireConfig {
+                        budgets: ScriptBudgets::default(),
+                        arguments: Vec::new(),
+                        project_root: None,
+                        invocation_temp_root: None,
+                    },
+                },
+            ))
+            .unwrap();
+        validator
+            .admit(&repl_request(
+                1,
+                ReplSessionCommand::Evaluate {
+                    cell_id: "cell-1".to_owned(),
+                    source: "while true {}".to_owned(),
+                },
+            ))
+            .unwrap();
+
+        let rejection = validator
+            .admit(&repl_request(
+                2,
+                ReplSessionCommand::Cancel {
+                    cell_id: "cell-2".to_owned(),
+                },
+            ))
+            .unwrap_err();
+        assert_eq!(rejection.code, "protocol_repl_cell_mismatch");
+        assert_eq!(validator.phase(), ReplSessionPhase::Evaluating);
+        assert_eq!(validator.next_sequence, 2);
+        assert_eq!(validator.active_cell_id.as_deref(), Some("cell-1"));
+
+        validator
+            .admit(&repl_request(
+                2,
+                ReplSessionCommand::Cancel {
+                    cell_id: "cell-1".to_owned(),
+                },
+            ))
+            .unwrap();
+    }
+
+    #[test]
+    fn repl_response_cell_result_mismatch_does_not_advance_validator_state() {
+        let mut validator = ReplResponseValidator::default();
+        validator
+            .admit(&repl_response(
+                0,
+                ReplSessionEvent::Ready { worker_pid: 42 },
+            ))
+            .unwrap();
+        validator
+            .admit(&repl_response(
+                1,
+                ReplSessionEvent::CellStarted {
+                    cell_id: "cell-1".to_owned(),
+                },
+            ))
+            .unwrap();
+        let result = || ReplWireCellResult {
+            cell_sequence: 1,
+            ok: true,
+            stdout: String::new(),
+            value: None,
+            failure: None,
+            state_committed: true,
+            duration_ms: 1,
+        };
+
+        let rejection = validator
+            .admit(&repl_response(
+                2,
+                ReplSessionEvent::CellResult {
+                    cell_id: "cell-2".to_owned(),
+                    result: result(),
+                },
+            ))
+            .unwrap_err();
+        assert_eq!(rejection.code, "protocol_repl_cell_mismatch");
+        assert_eq!(validator.phase(), ReplSessionPhase::Evaluating);
+        assert_eq!(validator.next_sequence, 2);
+        assert_eq!(validator.active_cell_id.as_deref(), Some("cell-1"));
+
+        validator
+            .admit(&repl_response(
+                2,
+                ReplSessionEvent::Failure {
+                    failure: ReplWireFailure {
+                        code: "protocol_repl_cell_mismatch".to_owned(),
+                        category: "protocol".to_owned(),
+                        message: "cancel addressed a different cell".to_owned(),
+                    },
+                },
+            ))
+            .unwrap();
+        assert_eq!(validator.phase(), ReplSessionPhase::Evaluating);
+        assert_eq!(validator.next_sequence, 3);
+        assert_eq!(validator.active_cell_id.as_deref(), Some("cell-1"));
+
+        validator
+            .admit(&repl_response(
+                3,
+                ReplSessionEvent::CellResult {
+                    cell_id: "cell-1".to_owned(),
+                    result: result(),
+                },
+            ))
+            .unwrap();
+        assert_eq!(validator.phase(), ReplSessionPhase::Idle);
+        assert!(validator.active_cell_id.is_none());
+    }
+
+    #[test]
+    fn repl_frames_cannot_enter_the_hash_set_tracker() {
+        let frame_id = "constant-space-frame";
+        let repl = ScriptFrame {
+            frame_version: SCRIPT_FRAME_VERSION,
+            frame_id: frame_id.to_owned(),
+            payload: ScriptFramePayload::ReplRequest(repl_request(
+                0,
+                ReplSessionCommand::Open {
+                    config: ReplSessionWireConfig {
+                        budgets: ScriptBudgets::default(),
+                        arguments: Vec::new(),
+                        project_root: None,
+                        invocation_temp_root: None,
+                    },
+                },
+            )),
+        };
+        let mut tracker = ScriptFrameTracker::default();
+        assert_eq!(
+            tracker.admit(repl).unwrap_err().code,
+            "protocol_repl_requires_session_validator"
+        );
+        assert!(tracker.admit(cancel_frame(frame_id, "invocation")).is_ok());
     }
 }

@@ -15,18 +15,26 @@ use std::{
 };
 
 use agenterm::script_protocol::{
-    SCRIPT_API_VERSION, SCRIPT_ENVELOPE_VERSION, SCRIPT_FRAME_MAX_BYTES, SCRIPT_FRAME_VERSION,
+    ReplRequestValidator, ReplSessionCommand, ReplSessionEvent, ReplSessionQuery,
+    ReplSessionResponse, ReplSessionWireConfig, ReplWireCellResult, ReplWireFailure,
+    ReplWireInputState, ReplWireQueryResult, ReplWireValue, ReplWireVariable, SCRIPT_API_VERSION,
+    SCRIPT_ENVELOPE_VERSION, SCRIPT_FRAME_MAX_BYTES, SCRIPT_FRAME_VERSION,
     SCRIPT_INVOCATION_MAX_BYTES, ScriptBrokerRequest, ScriptBrokerResponse, ScriptBudgets,
     ScriptCancelDisposition, ScriptExitClass, ScriptFailure, ScriptFailureCategory, ScriptFrame,
     ScriptFrameEncodeError, ScriptFramePayload, ScriptFrameRead, ScriptFrameRejection,
     ScriptFrameTracker, ScriptInvocation, ScriptOperation, ScriptProfile, ScriptResult,
     encode_script_frame, read_script_frame, write_encoded_script_frame,
 };
+use agenterm::script_repl::{
+    ReplCancelHandle, ReplCellFailure, ReplCellResult, ReplInputState, ReplSession,
+    ReplSessionConfig,
+};
 use rhai::{Dynamic, Engine, EvalAltResult, Scope};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 type PendingBroker = Option<(String, mpsc::SyncSender<ScriptBrokerResponse>)>;
+type SharedFrameOutput = Arc<Mutex<Box<dyn Write + Send>>>;
 
 const CHECK_MANY_MANIFEST_MAX_BYTES: usize = 64 * 1024;
 const CHECK_MANY_FILES_MAX: usize = 256;
@@ -122,7 +130,7 @@ struct CheckManyReport {
 #[derive(Clone)]
 struct BrokerClient {
     invocation_id: String,
-    output: Arc<Mutex<std::io::Stdout>>,
+    output: SharedFrameOutput,
     pending: Arc<Mutex<PendingBroker>>,
     next_request: Arc<std::sync::atomic::AtomicUsize>,
     requests_remaining: Arc<std::sync::atomic::AtomicUsize>,
@@ -1078,17 +1086,406 @@ fn run_framed_worker() -> anyhow::Result<u8> {
     Ok(0)
 }
 
+struct ReplResponseSink {
+    output: SharedFrameOutput,
+    next_sequence: Mutex<u64>,
+}
+
+impl ReplResponseSink {
+    fn send(
+        &self,
+        session_id: &str,
+        generation: u64,
+        event: ReplSessionEvent,
+    ) -> anyhow::Result<()> {
+        let mut sequence = self
+            .next_sequence
+            .lock()
+            .expect("REPL response sequence lock poisoned");
+        let current = *sequence;
+        let next = current
+            .checked_add(1)
+            .ok_or_else(|| anyhow::anyhow!("protocol_repl_sequence_overflow"))?;
+        write_shared_frame(
+            &self.output,
+            &ScriptFrame {
+                frame_version: SCRIPT_FRAME_VERSION,
+                frame_id: format!("repl-response-{generation}-{current}"),
+                payload: ScriptFramePayload::ReplResponse(ReplSessionResponse {
+                    session_id: session_id.to_owned(),
+                    generation,
+                    sequence: current,
+                    event,
+                }),
+            },
+        )?;
+        *sequence = next;
+        Ok(())
+    }
+
+    fn failure(
+        &self,
+        session_id: &str,
+        generation: u64,
+        code: impl Into<String>,
+        category: impl Into<String>,
+        message: impl Into<String>,
+    ) -> anyhow::Result<()> {
+        self.send(
+            session_id,
+            generation,
+            ReplSessionEvent::Failure {
+                failure: ReplWireFailure {
+                    code: code.into(),
+                    category: category.into(),
+                    message: message.into(),
+                },
+            },
+        )
+    }
+}
+
+#[derive(Clone)]
+struct ReplBrokerClient {
+    output: SharedFrameOutput,
+    pending: Arc<Mutex<PendingBroker>>,
+    active_cell: Arc<Mutex<Option<String>>>,
+    next_request: Arc<std::sync::atomic::AtomicUsize>,
+    requests_remaining: Arc<std::sync::atomic::AtomicUsize>,
+    timeout: Duration,
+}
+
+impl ReplBrokerClient {
+    fn call_json(
+        &self,
+        operation: &str,
+        arguments: serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        if self
+            .requests_remaining
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |value| {
+                value.checked_sub(1)
+            })
+            .is_err()
+        {
+            return Err("broker_request_budget_exceeded".to_owned());
+        }
+        let cell_id = self
+            .active_cell
+            .lock()
+            .expect("REPL active cell lock poisoned")
+            .clone()
+            .ok_or_else(|| "broker_request_without_active_cell".to_owned())?;
+        let sequence = self.next_request.fetch_add(1, Ordering::Relaxed);
+        let request_id = format!("repl-broker-{sequence}");
+        let (sender, receiver) = mpsc::sync_channel(1);
+        {
+            let mut pending = self.pending.lock().expect("pending broker lock poisoned");
+            if pending.is_some() {
+                return Err("broker_request_already_outstanding".to_owned());
+            }
+            *pending = Some((request_id.clone(), sender));
+        }
+        let frame = ScriptFrame {
+            frame_version: SCRIPT_FRAME_VERSION,
+            frame_id: format!("{cell_id}-{request_id}"),
+            payload: ScriptFramePayload::BrokerRequest {
+                invocation_id: cell_id,
+                request_id: request_id.clone(),
+                request: ScriptBrokerRequest {
+                    operation: operation.to_owned(),
+                    arguments,
+                },
+            },
+        };
+        if let Err(error) = write_shared_frame(&self.output, &frame) {
+            self.pending
+                .lock()
+                .expect("pending broker lock poisoned")
+                .take();
+            return Err(format!("broker_request_send_failed: {error}"));
+        }
+        let response = receiver.recv_timeout(self.timeout).map_err(|_| {
+            self.pending
+                .lock()
+                .expect("pending broker lock poisoned")
+                .take();
+            "broker_response_timeout".to_owned()
+        })?;
+        if let Some(error) = response.error {
+            return Err(format!("{}: {}", error.code, error.message));
+        }
+        Ok(response.value.unwrap_or(serde_json::Value::Null))
+    }
+}
+
+enum ReplSessionTask {
+    Inspect(String),
+    Evaluate {
+        cell_id: String,
+        source: String,
+        baseline: u64,
+    },
+    Query(ReplSessionQuery),
+    Reset,
+    Close,
+    Shutdown,
+}
+
+struct ReplWorkerSession {
+    session_id: String,
+    generation: u64,
+    commands: mpsc::Sender<ReplSessionTask>,
+    cancel: ReplCancelHandle,
+    active_cell: Arc<Mutex<Option<String>>>,
+    broker_requests_remaining: Arc<std::sync::atomic::AtomicUsize>,
+    broker_request_limit: usize,
+    join: Option<std::thread::JoinHandle<()>>,
+}
+
+impl ReplWorkerSession {
+    fn shutdown(&mut self) {
+        let _ = self.commands.send(ReplSessionTask::Shutdown);
+        if let Some(join) = self.join.take() {
+            let _ = join.join();
+        }
+    }
+}
+
+fn spawn_repl_session(
+    session_id: String,
+    generation: u64,
+    config: ReplSessionWireConfig,
+    responder: Arc<ReplResponseSink>,
+    pending_broker: Arc<Mutex<PendingBroker>>,
+    validator: Arc<Mutex<ReplRequestValidator>>,
+) -> Result<ReplWorkerSession, String> {
+    let active_cell = Arc::new(Mutex::new(None));
+    let broker_requests_remaining = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let broker_request_limit = config.budgets.broker_requests;
+    let (commands, command_rx) = mpsc::channel();
+    let (started_tx, started_rx) = mpsc::sync_channel(1);
+    let thread_session_id = session_id.clone();
+    let thread_active_cell = Arc::clone(&active_cell);
+    let thread_requests_remaining = Arc::clone(&broker_requests_remaining);
+    let join = std::thread::spawn(move || {
+        let broker = ReplBrokerClient {
+            output: Arc::clone(&responder.output),
+            pending: pending_broker,
+            active_cell: Arc::clone(&thread_active_cell),
+            next_request: Arc::new(std::sync::atomic::AtomicUsize::new(1)),
+            requests_remaining: Arc::clone(&thread_requests_remaining),
+            timeout: Duration::from_millis(config.budgets.wait_time_ms),
+        };
+        let fleet = Arc::new(move |operation: &str, arguments: serde_json::Value| {
+            broker.call_json(operation, arguments)
+        });
+        let mut session = match ReplSession::new(ReplSessionConfig {
+            budgets: config.budgets,
+            arguments: config.arguments,
+            project_root: config.project_root.map(PathBuf::from),
+            invocation_temp_root: config.invocation_temp_root.map(PathBuf::from),
+            fleet: Some(fleet),
+        }) {
+            Ok(session) => session,
+            Err(error) => {
+                let _ = started_tx.send(Err(error));
+                return;
+            }
+        };
+        if started_tx.send(Ok(session.cancel_handle())).is_err() {
+            return;
+        }
+        if responder
+            .send(
+                &thread_session_id,
+                generation,
+                ReplSessionEvent::Ready {
+                    worker_pid: std::process::id(),
+                },
+            )
+            .is_err()
+        {
+            return;
+        }
+        while let Ok(task) = command_rx.recv() {
+            match task {
+                ReplSessionTask::Inspect(source) => {
+                    let state = repl_input_state(session.inspect_input(&source));
+                    if responder
+                        .send(
+                            &thread_session_id,
+                            generation,
+                            ReplSessionEvent::InputState { state },
+                        )
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                ReplSessionTask::Evaluate {
+                    cell_id,
+                    source,
+                    baseline,
+                } => {
+                    if responder
+                        .send(
+                            &thread_session_id,
+                            generation,
+                            ReplSessionEvent::CellStarted {
+                                cell_id: cell_id.clone(),
+                            },
+                        )
+                        .is_err()
+                    {
+                        break;
+                    }
+                    let result =
+                        repl_cell_result(session.evaluate_with_baseline(&source, baseline));
+                    validator
+                        .lock()
+                        .expect("REPL validator lock poisoned")
+                        .complete_evaluation(&thread_session_id, generation)
+                        .expect("admitted REPL evaluation must complete in evaluating phase");
+                    *thread_active_cell
+                        .lock()
+                        .expect("REPL active cell lock poisoned") = None;
+                    if responder
+                        .send(
+                            &thread_session_id,
+                            generation,
+                            ReplSessionEvent::CellResult { cell_id, result },
+                        )
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                ReplSessionTask::Query(query) => {
+                    let result = repl_query_result(&session, query);
+                    if responder
+                        .send(
+                            &thread_session_id,
+                            generation,
+                            ReplSessionEvent::QueryResult { query, result },
+                        )
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                ReplSessionTask::Reset => {
+                    session.reset();
+                    if responder
+                        .send(&thread_session_id, generation, ReplSessionEvent::ResetDone)
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                ReplSessionTask::Close => {
+                    let _ =
+                        responder.send(&thread_session_id, generation, ReplSessionEvent::Closed);
+                    break;
+                }
+                ReplSessionTask::Shutdown => break,
+            }
+        }
+    });
+    match started_rx.recv() {
+        Ok(Ok(cancel)) => Ok(ReplWorkerSession {
+            session_id,
+            generation,
+            commands,
+            cancel,
+            active_cell,
+            broker_requests_remaining,
+            broker_request_limit,
+            join: Some(join),
+        }),
+        Ok(Err(error)) => {
+            let _ = join.join();
+            Err(error)
+        }
+        Err(_) => {
+            let _ = join.join();
+            Err("host_repl_session_start: session thread stopped before startup".to_owned())
+        }
+    }
+}
+
+fn repl_input_state(state: ReplInputState) -> ReplWireInputState {
+    match state {
+        ReplInputState::Complete => ReplWireInputState::Complete,
+        ReplInputState::Incomplete => ReplWireInputState::Incomplete,
+        ReplInputState::Invalid(failure) => ReplWireInputState::Invalid(repl_failure(failure)),
+    }
+}
+
+fn repl_failure(failure: ReplCellFailure) -> ReplWireFailure {
+    ReplWireFailure {
+        code: failure.code,
+        category: failure.category,
+        message: failure.message,
+    }
+}
+
+fn repl_cell_result(result: ReplCellResult) -> ReplWireCellResult {
+    ReplWireCellResult {
+        cell_sequence: result.sequence,
+        ok: result.ok,
+        stdout: result.stdout,
+        value: result.value.map(|value| ReplWireValue {
+            type_name: value.type_name,
+            serializable: value.serializable,
+            value: value.value,
+        }),
+        failure: result.failure.map(repl_failure),
+        state_committed: result.state_committed,
+        duration_ms: result.duration_ms,
+    }
+}
+
+fn repl_query_result(session: &ReplSession, query: ReplSessionQuery) -> ReplWireQueryResult {
+    let variables = || {
+        session
+            .variables()
+            .into_iter()
+            .map(|(name, type_name)| ReplWireVariable { name, type_name })
+            .collect()
+    };
+    match query {
+        ReplSessionQuery::State => ReplWireQueryResult::State {
+            history: session.history().to_vec(),
+            variables: variables(),
+            functions: session.functions(),
+            limits: session.budgets().clone(),
+        },
+        ReplSessionQuery::History => ReplWireQueryResult::History(session.history().to_vec()),
+        ReplSessionQuery::Variables => ReplWireQueryResult::Variables(variables()),
+        ReplSessionQuery::Functions => ReplWireQueryResult::Functions(session.functions()),
+        ReplSessionQuery::Limits => ReplWireQueryResult::Limits(session.budgets().clone()),
+    }
+}
+
 fn process_concurrent_framed_worker<R: Read>(
     mut input: R,
-    output: std::io::Stdout,
+    output: impl Write + Send + 'static,
 ) -> anyhow::Result<()> {
-    let output = Arc::new(Mutex::new(output));
+    let output: SharedFrameOutput = Arc::new(Mutex::new(Box::new(output)));
     let active = Arc::new(Mutex::new(None::<(String, Arc<AtomicBool>)>));
     let pending_broker = Arc::new(Mutex::new(
         None::<(String, mpsc::SyncSender<ScriptBrokerResponse>)>,
     ));
     let completed = Arc::new(Mutex::new(HashSet::<String>::new()));
     let mut frame_tracker = ScriptFrameTracker::default();
+    let repl_validator = Arc::new(Mutex::new(ReplRequestValidator::default()));
+    let repl_responder = Arc::new(ReplResponseSink {
+        output: Arc::clone(&output),
+        next_sequence: Mutex::new(0),
+    });
+    let mut repl_session = None::<ReplWorkerSession>;
+    let mut repl_started = false;
     let mut workers = Vec::new();
     loop {
         let frame = match read_script_frame(&mut input)? {
@@ -1103,6 +1500,323 @@ fn process_concurrent_framed_worker<R: Read>(
                 continue;
             }
         };
+        if let ScriptFramePayload::ReplRequest(request) = &frame.payload {
+            if !repl_started
+                && matches!(&request.command, ReplSessionCommand::Open { .. })
+                && active
+                    .lock()
+                    .expect("active invocation lock poisoned")
+                    .is_some()
+            {
+                repl_responder.failure(
+                    &request.session_id,
+                    request.generation,
+                    "protocol_worker_busy",
+                    "protocol",
+                    "legacy invocation is active; REPL session cannot open",
+                )?;
+                break;
+            }
+            let admission = repl_validator
+                .lock()
+                .expect("REPL validator lock poisoned")
+                .admit_frame(&frame);
+            if let Err(rejection) = admission {
+                if let Some(session) = repl_session.as_ref() {
+                    repl_responder.failure(
+                        &session.session_id,
+                        session.generation,
+                        rejection.code,
+                        "protocol",
+                        rejection.message,
+                    )?;
+                } else {
+                    write_shared_protocol_frame(
+                        &output,
+                        &frame.frame_id,
+                        "unknown",
+                        rejection.code,
+                        rejection.message,
+                    )?;
+                    break;
+                }
+                continue;
+            }
+            let request = match frame.payload {
+                ScriptFramePayload::ReplRequest(request) => request,
+                _ => unreachable!("borrowed REPL request changed payload kind"),
+            };
+            let mut close_worker = false;
+            match request.command {
+                ReplSessionCommand::Open { config } => {
+                    repl_started = true;
+                    match spawn_repl_session(
+                        request.session_id.clone(),
+                        request.generation,
+                        config,
+                        Arc::clone(&repl_responder),
+                        Arc::clone(&pending_broker),
+                        Arc::clone(&repl_validator),
+                    ) {
+                        Ok(session) => repl_session = Some(session),
+                        Err(error) => {
+                            repl_responder.failure(
+                                &request.session_id,
+                                request.generation,
+                                "host_repl_session_start",
+                                "host",
+                                error,
+                            )?;
+                            close_worker = true;
+                        }
+                    }
+                }
+                ReplSessionCommand::Evaluate { cell_id, source } => {
+                    if let Some(session) = repl_session.as_ref() {
+                        let baseline = session.cancel.capture_epoch();
+                        *session
+                            .active_cell
+                            .lock()
+                            .expect("REPL active cell lock poisoned") = Some(cell_id.clone());
+                        session
+                            .broker_requests_remaining
+                            .store(session.broker_request_limit, Ordering::Release);
+                        if session
+                            .commands
+                            .send(ReplSessionTask::Evaluate {
+                                cell_id,
+                                source,
+                                baseline,
+                            })
+                            .is_err()
+                        {
+                            *session
+                                .active_cell
+                                .lock()
+                                .expect("REPL active cell lock poisoned") = None;
+                            repl_responder.failure(
+                                &request.session_id,
+                                request.generation,
+                                "host_repl_session_unavailable",
+                                "host",
+                                "REPL session thread is unavailable",
+                            )?;
+                            close_worker = true;
+                        }
+                    } else {
+                        repl_responder.failure(
+                            &request.session_id,
+                            request.generation,
+                            "host_repl_session_unavailable",
+                            "host",
+                            "REPL session is unavailable",
+                        )?;
+                        close_worker = true;
+                    }
+                }
+                ReplSessionCommand::Inspect { source } => {
+                    if repl_session.as_ref().is_none_or(|session| {
+                        session
+                            .commands
+                            .send(ReplSessionTask::Inspect(source))
+                            .is_err()
+                    }) {
+                        repl_responder.failure(
+                            &request.session_id,
+                            request.generation,
+                            "host_repl_session_unavailable",
+                            "host",
+                            "REPL session is unavailable",
+                        )?;
+                        close_worker = true;
+                    }
+                }
+                ReplSessionCommand::Query { query } => {
+                    if repl_session.as_ref().is_none_or(|session| {
+                        session
+                            .commands
+                            .send(ReplSessionTask::Query(query))
+                            .is_err()
+                    }) {
+                        repl_responder.failure(
+                            &request.session_id,
+                            request.generation,
+                            "host_repl_session_unavailable",
+                            "host",
+                            "REPL session is unavailable",
+                        )?;
+                        close_worker = true;
+                    }
+                }
+                ReplSessionCommand::Reset => {
+                    if repl_session.as_ref().is_none_or(|session| {
+                        session.commands.send(ReplSessionTask::Reset).is_err()
+                    }) {
+                        repl_responder.failure(
+                            &request.session_id,
+                            request.generation,
+                            "host_repl_session_unavailable",
+                            "host",
+                            "REPL session is unavailable",
+                        )?;
+                        close_worker = true;
+                    }
+                }
+                ReplSessionCommand::Cancel { .. } => {
+                    if let Some(session) = repl_session.as_ref() {
+                        session.cancel.cancel();
+                    } else {
+                        repl_responder.failure(
+                            &request.session_id,
+                            request.generation,
+                            "host_repl_session_unavailable",
+                            "host",
+                            "REPL session is unavailable",
+                        )?;
+                        close_worker = true;
+                    }
+                }
+                ReplSessionCommand::Close => {
+                    if repl_session.as_ref().is_none_or(|session| {
+                        session.commands.send(ReplSessionTask::Close).is_err()
+                    }) {
+                        repl_responder.failure(
+                            &request.session_id,
+                            request.generation,
+                            "host_repl_session_unavailable",
+                            "host",
+                            "REPL session is unavailable",
+                        )?;
+                    }
+                    close_worker = true;
+                }
+            }
+            if close_worker {
+                break;
+            }
+            continue;
+        }
+        if matches!(&frame.payload, ScriptFramePayload::ReplResponse(_)) {
+            if let Some(session) = repl_session.as_ref() {
+                repl_responder.failure(
+                    &session.session_id,
+                    session.generation,
+                    "protocol_repl_unexpected_response",
+                    "protocol",
+                    "REPL response frames are worker output and cannot be sent to the worker",
+                )?;
+            } else {
+                write_shared_protocol_frame(
+                    &output,
+                    &frame.frame_id,
+                    "unknown",
+                    "protocol_repl_unexpected_response",
+                    "REPL response frames are worker output and cannot be sent to the worker",
+                )?;
+            }
+            break;
+        }
+        if repl_started && matches!(&frame.payload, ScriptFramePayload::BrokerResponse { .. }) {
+            let session = repl_session
+                .as_ref()
+                .expect("started REPL with broker traffic has a live session");
+            if frame.frame_version != SCRIPT_FRAME_VERSION {
+                repl_responder.failure(
+                    &session.session_id,
+                    session.generation,
+                    "protocol_unsupported_frame_version",
+                    "protocol",
+                    format!(
+                        "broker frame version {} does not match {SCRIPT_FRAME_VERSION}",
+                        frame.frame_version
+                    ),
+                )?;
+                continue;
+            }
+            if frame.frame_id.is_empty() || frame.frame_id.len() > 128 {
+                repl_responder.failure(
+                    &session.session_id,
+                    session.generation,
+                    "protocol_invalid_frame_id",
+                    "protocol",
+                    "frame_id must contain from 1 to 128 bytes",
+                )?;
+                continue;
+            }
+            let ScriptFramePayload::BrokerResponse {
+                invocation_id,
+                request_id,
+                response,
+            } = frame.payload
+            else {
+                unreachable!("matched REPL broker response changed payload kind")
+            };
+            let active_matches = session
+                .active_cell
+                .lock()
+                .expect("REPL active cell lock poisoned")
+                .as_ref()
+                == Some(&invocation_id);
+            let pending = pending_broker
+                .lock()
+                .expect("pending broker lock poisoned")
+                .take();
+            match pending {
+                Some((expected, sender)) if active_matches && expected == request_id => {
+                    let _ = sender.send(response);
+                }
+                Some(pending) => {
+                    *pending_broker.lock().expect("pending broker lock poisoned") = Some(pending);
+                    repl_responder.failure(
+                        &session.session_id,
+                        session.generation,
+                        "protocol_broker_response_mismatch",
+                        "protocol",
+                        "broker response does not match the active REPL request",
+                    )?;
+                }
+                None => repl_responder.failure(
+                    &session.session_id,
+                    session.generation,
+                    "protocol_broker_response_unexpected",
+                    "protocol",
+                    "no REPL broker request is outstanding",
+                )?,
+            }
+            continue;
+        }
+        if repl_started {
+            let session = repl_session
+                .as_ref()
+                .expect("started REPL has a live session");
+            let (code, message) = match &frame.payload {
+                ScriptFramePayload::Invoke(_) | ScriptFramePayload::Cancel { .. } => (
+                    "protocol_repl_session_active",
+                    "legacy invocation traffic cannot run after a REPL session has started",
+                ),
+                ScriptFramePayload::BrokerRequest { .. } => (
+                    "protocol_unexpected_broker_request",
+                    "broker request frames are worker output and cannot be sent to the worker",
+                ),
+                ScriptFramePayload::Result(_) => (
+                    "protocol_unexpected_result",
+                    "result frames are worker output and cannot be sent to the worker",
+                ),
+                ScriptFramePayload::BrokerResponse { .. }
+                | ScriptFramePayload::ReplRequest(_)
+                | ScriptFramePayload::ReplResponse(_) => {
+                    unreachable!("session traffic was routed before legacy rejection")
+                }
+            };
+            repl_responder.failure(
+                &session.session_id,
+                session.generation,
+                code,
+                "protocol",
+                message,
+            )?;
+            continue;
+        }
         let frame = match frame_tracker.admit(frame) {
             Ok(frame) => frame,
             Err(rejection) => {
@@ -1207,7 +1921,7 @@ fn process_concurrent_framed_worker<R: Read>(
                 request_id,
                 response,
             } => {
-                let active_matches = active
+                let legacy_active_matches = active
                     .lock()
                     .expect("active invocation lock poisoned")
                     .as_ref()
@@ -1217,7 +1931,7 @@ fn process_concurrent_framed_worker<R: Read>(
                     .expect("pending broker lock poisoned")
                     .take();
                 match pending {
-                    Some((expected, sender)) if active_matches && expected == request_id => {
+                    Some((expected, sender)) if legacy_active_matches && expected == request_id => {
                         let _ = sender.send(response);
                     }
                     Some(pending) => {
@@ -1258,7 +1972,13 @@ fn process_concurrent_framed_worker<R: Read>(
                     "result frames are worker output and cannot be sent to the worker",
                 )?;
             }
+            ScriptFramePayload::ReplRequest(_) | ScriptFramePayload::ReplResponse(_) => {
+                unreachable!("REPL frames are routed before the legacy tracker")
+            }
         }
+    }
+    if let Some(session) = repl_session.as_mut() {
+        session.shutdown();
     }
     for worker in workers {
         let _ = worker.join();
@@ -1266,16 +1986,13 @@ fn process_concurrent_framed_worker<R: Read>(
     Ok(())
 }
 
-fn write_shared_frame(
-    output: &Arc<Mutex<std::io::Stdout>>,
-    frame: &ScriptFrame,
-) -> anyhow::Result<()> {
+fn write_shared_frame(output: &SharedFrameOutput, frame: &ScriptFrame) -> anyhow::Result<()> {
     let mut output = output.lock().expect("framed stdout lock poisoned");
     write_frame(&mut *output, frame)
 }
 
 fn write_shared_protocol_frame(
-    output: &Arc<Mutex<std::io::Stdout>>,
+    output: &SharedFrameOutput,
     frame_id: &str,
     invocation_id: &str,
     code: &str,
@@ -1291,7 +2008,7 @@ fn write_shared_protocol_frame(
 }
 
 fn write_shared_rejection(
-    output: &Arc<Mutex<std::io::Stdout>>,
+    output: &SharedFrameOutput,
     rejection: ScriptFrameRejection,
 ) -> anyhow::Result<()> {
     write_shared_protocol_frame(
@@ -1373,6 +2090,16 @@ fn process_frame(frame: ScriptFrame, completed_invocations: &mut HashSet<String>
             &result.invocation_id,
             "protocol_unexpected_result",
             "result frames are worker output and cannot be sent to the worker",
+        ),
+        ScriptFramePayload::ReplRequest(request) => protocol_failure_for(
+            &request.session_id,
+            "protocol_repl_requires_concurrent_worker",
+            "REPL requests require the concurrent framed worker",
+        ),
+        ScriptFramePayload::ReplResponse(response) => protocol_failure_for(
+            &response.session_id,
+            "protocol_repl_unexpected_response",
+            "REPL response frames are worker output and cannot be sent to the worker",
         ),
     };
     result_frame(frame_id, result)
@@ -2187,7 +2914,124 @@ fn failure(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Cursor;
+    use std::io::{Cursor, Read, Write};
+
+    struct ChannelReader {
+        receiver: mpsc::Receiver<Vec<u8>>,
+        current: Cursor<Vec<u8>>,
+    }
+
+    impl ChannelReader {
+        fn new(receiver: mpsc::Receiver<Vec<u8>>) -> Self {
+            Self {
+                receiver,
+                current: Cursor::new(Vec::new()),
+            }
+        }
+    }
+
+    impl Read for ChannelReader {
+        fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+            loop {
+                let read = self.current.read(buffer)?;
+                if read != 0 {
+                    return Ok(read);
+                }
+                match self.receiver.recv() {
+                    Ok(bytes) => self.current = Cursor::new(bytes),
+                    Err(_) => return Ok(0),
+                }
+            }
+        }
+    }
+
+    #[derive(Clone, Default)]
+    struct SharedBuffer(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for SharedBuffer {
+        fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+            self.0
+                .lock()
+                .expect("shared test output lock")
+                .extend_from_slice(buffer);
+            Ok(buffer.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    struct ReplHarness {
+        sender: Option<mpsc::Sender<Vec<u8>>>,
+        output: SharedBuffer,
+        worker: Option<std::thread::JoinHandle<anyhow::Result<()>>>,
+    }
+
+    impl ReplHarness {
+        fn new() -> Self {
+            let (sender, receiver) = mpsc::channel();
+            let output = SharedBuffer::default();
+            let worker_output = output.clone();
+            let worker = std::thread::spawn(move || {
+                process_concurrent_framed_worker(ChannelReader::new(receiver), worker_output)
+            });
+            Self {
+                sender: Some(sender),
+                output,
+                worker: Some(worker),
+            }
+        }
+
+        fn send(&self, frame: &ScriptFrame) {
+            self.sender
+                .as_ref()
+                .expect("live REPL input")
+                .send(encoded_frame(frame))
+                .expect("send REPL frame");
+        }
+
+        fn wait_for_frames(&self, expected: usize) -> Vec<ScriptFrame> {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                let bytes = self
+                    .output
+                    .0
+                    .lock()
+                    .expect("shared test output lock")
+                    .clone();
+                let frames = decoded_complete_frames(&bytes);
+                if frames.len() >= expected {
+                    return frames;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "timed out waiting for {expected} frames; got {}",
+                    frames.len()
+                );
+                std::thread::yield_now();
+            }
+        }
+
+        fn finish(mut self) {
+            self.sender.take();
+            self.worker
+                .take()
+                .expect("REPL worker thread")
+                .join()
+                .expect("join REPL worker")
+                .expect("REPL worker result");
+        }
+    }
+
+    impl Drop for ReplHarness {
+        fn drop(&mut self) {
+            self.sender.take();
+            if let Some(worker) = self.worker.take() {
+                let _ = worker.join();
+            }
+        }
+    }
 
     fn invocation(operation: ScriptOperation, source: &str) -> ScriptInvocation {
         ScriptInvocation {
@@ -2243,6 +3087,75 @@ mod tests {
             }
         }
         frames
+    }
+
+    fn decoded_complete_frames(bytes: &[u8]) -> Vec<ScriptFrame> {
+        let mut frames = Vec::new();
+        let mut offset = 0;
+        while bytes.len().saturating_sub(offset) >= std::mem::size_of::<u32>() {
+            let length = u32::from_be_bytes(
+                bytes[offset..offset + 4]
+                    .try_into()
+                    .expect("length prefix slice"),
+            ) as usize;
+            let end = offset.saturating_add(4).saturating_add(length);
+            if end > bytes.len() {
+                break;
+            }
+            let mut input = Cursor::new(&bytes[offset..end]);
+            match read_script_frame(&mut input) {
+                Ok(ScriptFrameRead::Frame(frame)) => frames.push(*frame),
+                Ok(ScriptFrameRead::Eof) => panic!("complete test frame decoded as EOF"),
+                Ok(ScriptFrameRead::Rejected(rejection)) => {
+                    panic!("unexpected rejected frame: {rejection:?}")
+                }
+                Err(error) => panic!("failed to decode test frame: {error}"),
+            }
+            offset = end;
+        }
+        frames
+    }
+
+    fn repl_frame(sequence: u64, command: ReplSessionCommand) -> ScriptFrame {
+        ScriptFrame {
+            frame_version: SCRIPT_FRAME_VERSION,
+            frame_id: format!("repl-request-{sequence}"),
+            payload: ScriptFramePayload::ReplRequest(
+                agenterm::script_protocol::ReplSessionRequest {
+                    session_id: "worker-session".to_owned(),
+                    generation: 1,
+                    sequence,
+                    command,
+                },
+            ),
+        }
+    }
+
+    fn repl_open(sequence: u64) -> ScriptFrame {
+        let mut budgets = ScriptBudgets::default();
+        budgets.operations = ScriptBudgets::hard_limits().operations;
+        budgets.wall_time_ms = 5_000;
+        repl_frame(
+            sequence,
+            ReplSessionCommand::Open {
+                config: ReplSessionWireConfig {
+                    budgets,
+                    arguments: vec!["argument".to_owned()],
+                    project_root: None,
+                    invocation_temp_root: None,
+                },
+            },
+        )
+    }
+
+    fn repl_events(frames: &[ScriptFrame]) -> Vec<&ReplSessionEvent> {
+        frames
+            .iter()
+            .filter_map(|frame| match &frame.payload {
+                ScriptFramePayload::ReplResponse(response) => Some(&response.event),
+                _ => None,
+            })
+            .collect()
     }
 
     fn frame_result(frame: &ScriptFrame) -> &ScriptResult {
@@ -2568,6 +3481,250 @@ mod tests {
         assert_eq!(frame_result(&frames[0]).value, Some(serde_json::json!(42)));
         assert_eq!(frames[1].frame_id, "frame-two");
         assert_eq!(frame_result(&frames[1]).value, Some(serde_json::json!(42)));
+    }
+
+    #[test]
+    fn framed_repl_persists_queries_resets_and_closes_one_session() {
+        let harness = ReplHarness::new();
+        harness.send(&repl_open(0));
+        assert!(matches!(
+            repl_events(&harness.wait_for_frames(1))[0],
+            ReplSessionEvent::Ready { .. }
+        ));
+
+        harness.send(&repl_frame(
+            1,
+            ReplSessionCommand::Inspect {
+                source: "fn add(n) {".to_owned(),
+            },
+        ));
+        assert!(matches!(
+            repl_events(&harness.wait_for_frames(2))[1],
+            ReplSessionEvent::InputState {
+                state: ReplWireInputState::Incomplete
+            }
+        ));
+
+        harness.send(&repl_frame(
+            2,
+            ReplSessionCommand::Evaluate {
+                cell_id: "cell-1".to_owned(),
+                source: "let x = 40; fn add(n) { 40 + n }".to_owned(),
+            },
+        ));
+        let frames = harness.wait_for_frames(4);
+        assert!(matches!(
+            repl_events(&frames)[3],
+            ReplSessionEvent::CellResult {
+                result: ReplWireCellResult { ok: true, .. },
+                ..
+            }
+        ));
+
+        harness.send(&repl_frame(
+            3,
+            ReplSessionCommand::Evaluate {
+                cell_id: "cell-2".to_owned(),
+                source: "[x, add(2)]".to_owned(),
+            },
+        ));
+        let frames = harness.wait_for_frames(6);
+        let events = repl_events(&frames);
+        let ReplSessionEvent::CellResult { result, .. } = events[5] else {
+            panic!("second cell did not return a result");
+        };
+        assert!(result.ok, "{result:?}");
+        assert_eq!(
+            result.value.as_ref().and_then(|value| value.value.as_ref()),
+            Some(&serde_json::json!([40, 42]))
+        );
+
+        harness.send(&repl_frame(
+            4,
+            ReplSessionCommand::Query {
+                query: ReplSessionQuery::State,
+            },
+        ));
+        let frames = harness.wait_for_frames(7);
+        let ReplSessionEvent::QueryResult {
+            result:
+                ReplWireQueryResult::State {
+                    history,
+                    variables,
+                    functions,
+                    ..
+                },
+            ..
+        } = repl_events(&frames)[6]
+        else {
+            panic!("state query did not return typed state");
+        };
+        assert_eq!(history.len(), 2);
+        assert!(variables.iter().any(|variable| variable.name == "x"));
+        assert!(functions.iter().any(|function| function == "add(n)"));
+
+        harness.send(&repl_frame(5, ReplSessionCommand::Reset));
+        assert!(matches!(
+            repl_events(&harness.wait_for_frames(8))[7],
+            ReplSessionEvent::ResetDone
+        ));
+        harness.send(&repl_frame(
+            6,
+            ReplSessionCommand::Query {
+                query: ReplSessionQuery::Variables,
+            },
+        ));
+        let frames = harness.wait_for_frames(9);
+        let ReplSessionEvent::QueryResult {
+            result: ReplWireQueryResult::Variables(variables),
+            ..
+        } = repl_events(&frames)[8]
+        else {
+            panic!("variables query did not return variables");
+        };
+        assert!(!variables.iter().any(|variable| variable.name == "x"));
+
+        harness.send(&repl_frame(7, ReplSessionCommand::Close));
+        assert!(matches!(
+            repl_events(&harness.wait_for_frames(10))[9],
+            ReplSessionEvent::Closed
+        ));
+        harness.finish();
+    }
+
+    #[test]
+    fn framed_repl_cancels_an_active_cpu_cell_without_losing_the_session() {
+        let harness = ReplHarness::new();
+        harness.send(&repl_open(0));
+        harness.wait_for_frames(1);
+        harness.send(&repl_frame(
+            1,
+            ReplSessionCommand::Evaluate {
+                cell_id: "loop-cell".to_owned(),
+                source: "while true {}".to_owned(),
+            },
+        ));
+        // Send cancellation without waiting for CellStarted. The stdin thread
+        // captured the baseline at Evaluate admission, so this cannot be lost
+        // even when the session thread has not begun evaluation yet.
+        harness.send(&repl_frame(
+            2,
+            ReplSessionCommand::Cancel {
+                cell_id: "loop-cell".to_owned(),
+            },
+        ));
+        let frames = harness.wait_for_frames(3);
+        let events = repl_events(&frames);
+        assert!(matches!(
+            events[1],
+            ReplSessionEvent::CellStarted { cell_id } if cell_id == "loop-cell"
+        ));
+        let ReplSessionEvent::CellResult { result, .. } = events[2] else {
+            panic!("cancelled cell did not return a result");
+        };
+        assert_eq!(
+            result.failure.as_ref().map(|failure| failure.code.as_str()),
+            Some("limit_cancelled")
+        );
+        assert!(!result.state_committed);
+
+        harness.send(&repl_frame(
+            3,
+            ReplSessionCommand::Evaluate {
+                cell_id: "recovery-cell".to_owned(),
+                source: "40 + 2".to_owned(),
+            },
+        ));
+        let frames = harness.wait_for_frames(5);
+        let ReplSessionEvent::CellResult { result, .. } = repl_events(&frames)[4] else {
+            panic!("recovery cell did not return a result");
+        };
+        assert!(result.ok, "{result:?}");
+        harness.send(&repl_frame(4, ReplSessionCommand::Close));
+        harness.wait_for_frames(6);
+        harness.finish();
+    }
+
+    #[test]
+    fn framed_repl_and_legacy_protocols_remain_explicitly_isolated() {
+        let harness = ReplHarness::new();
+        harness.send(&repl_open(0));
+        harness.wait_for_frames(1);
+        harness.send(&ScriptFrame {
+            frame_version: SCRIPT_FRAME_VERSION,
+            frame_id: "unexpected-repl-broker-response".to_owned(),
+            payload: ScriptFramePayload::BrokerResponse {
+                invocation_id: "no-cell".to_owned(),
+                request_id: "no-request".to_owned(),
+                response: ScriptBrokerResponse {
+                    ok: true,
+                    value: None,
+                    error: None,
+                },
+            },
+        });
+        let frames = harness.wait_for_frames(2);
+        assert!(matches!(
+            &frames[1].payload,
+            ScriptFramePayload::ReplResponse(ReplSessionResponse {
+                event: ReplSessionEvent::Failure { failure },
+                ..
+            }) if failure.code == "protocol_broker_response_unexpected"
+        ));
+        harness.send(&invoke_frame("legacy-frame", "legacy-invocation", "40 + 2"));
+        harness.send(&invoke_frame("legacy-frame", "legacy-invocation", "40 + 2"));
+        let frames = harness.wait_for_frames(4);
+        for frame in &frames[2..4] {
+            assert!(matches!(
+                &frame.payload,
+                ScriptFramePayload::ReplResponse(ReplSessionResponse {
+                    event: ReplSessionEvent::Failure { failure },
+                    ..
+                }) if failure.code == "protocol_repl_session_active"
+            ));
+        }
+        let mut mismatched = repl_frame(
+            1,
+            ReplSessionCommand::Query {
+                query: ReplSessionQuery::State,
+            },
+        );
+        let ScriptFramePayload::ReplRequest(request) = &mut mismatched.payload else {
+            unreachable!("REPL request helper returned another payload")
+        };
+        request.session_id = "wrong-session".to_owned();
+        harness.send(&mismatched);
+        let frames = harness.wait_for_frames(5);
+        assert!(matches!(
+            &frames[4].payload,
+            ScriptFramePayload::ReplResponse(ReplSessionResponse {
+                session_id,
+                event: ReplSessionEvent::Failure { failure },
+                ..
+            }) if session_id == "worker-session"
+                && failure.code == "protocol_repl_session_mismatch"
+        ));
+        harness.send(&repl_frame(1, ReplSessionCommand::Close));
+        harness.wait_for_frames(6);
+        harness.finish();
+
+        let harness = ReplHarness::new();
+        harness.send(&ScriptFrame {
+            frame_version: SCRIPT_FRAME_VERSION,
+            frame_id: "unexpected-response".to_owned(),
+            payload: ScriptFramePayload::ReplResponse(ReplSessionResponse {
+                session_id: "worker-session".to_owned(),
+                generation: 1,
+                sequence: 0,
+                event: ReplSessionEvent::Ready { worker_pid: 7 },
+            }),
+        });
+        let frames = harness.wait_for_frames(1);
+        assert_eq!(
+            failure_code(frame_result(&frames[0])),
+            "protocol_repl_unexpected_response"
+        );
+        harness.finish();
     }
 
     #[test]

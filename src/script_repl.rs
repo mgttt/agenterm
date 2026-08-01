@@ -78,6 +78,10 @@ pub struct ReplCancelHandle {
 }
 
 impl ReplCancelHandle {
+    pub fn capture_epoch(&self) -> u64 {
+        self.epoch.load(Ordering::Acquire)
+    }
+
     pub fn cancel(&self) {
         // Saturation is deliberately fail-closed: once MAX is reached every
         // current and future cell observes permanent cancellation.
@@ -185,7 +189,7 @@ impl ReplSession {
     }
 
     pub fn capture_cancel_epoch(&self) -> u64 {
-        self.cancel_epoch.load(Ordering::Acquire)
+        self.cancel_handle().capture_epoch()
     }
 
     pub fn cancel_handle(&self) -> ReplCancelHandle {
@@ -708,8 +712,9 @@ mod tests {
     #[test]
     fn cancellation_after_captured_baseline_is_not_lost_at_cell_start() {
         let mut session = session();
-        let stale_baseline = session.capture_cancel_epoch();
-        session.cancel();
+        let cancel = session.cancel_handle();
+        let stale_baseline = cancel.capture_epoch();
+        cancel.cancel();
 
         let cancelled = session.evaluate_with_baseline("40 + 2", stale_baseline);
         assert!(!cancelled.ok);
