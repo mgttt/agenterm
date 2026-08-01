@@ -74,8 +74,13 @@ fn allowed_automation_reference(path, line) {
         return value == `["pwsh.exe:123"],`;
     }
     path == "scripts/rhai/remote-ui-smoke.rhai"
-        && value ==
-            `"--", "powershell.exe", "-nologo", "-noprofile"`
+        && (
+            value ==
+                `"--", "powershell.exe", "-nologo", "-noprofile"`
+            || value ==
+                `"--", "powershell.exe", "-nologo", "-noprofile",`
+            || value == `"alternate-wheel.ps1"`
+        )
 }
 
 require(args.len <= 1, "expected: [REPO]");
