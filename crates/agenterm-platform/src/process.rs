@@ -13,7 +13,8 @@ use crate::{
 pub use crate::contract::process::ProcessErrorKind;
 pub use crate::contract::process::{PipeProbeError, PipeProbeToken};
 pub use crate::process_spawn::{
-    DetachedSpawnMode, configure_detached_command, spawn_detached_child, spawn_detached_command,
+    DetachedSpawnMode, ProcessExit, classify_exit_status, configure_detached_command,
+    spawn_detached_child, spawn_detached_command,
 };
 pub use adapter::ProcessTreeGuard;
 
