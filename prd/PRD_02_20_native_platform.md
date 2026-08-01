@@ -530,6 +530,17 @@ integrated validation recorded below):
   accept only crate events and neutral deltas. Native conversion is localized
   in the remaining frontend host, reducing the strict boundary report to five
   findings.
+- [x] The root Unix pixel frontend now runs through the public crate
+  `PixelWindowApplication` extension. Linux/macOS adapters own the winit event
+  loop/window, softbuffer surface, native event normalization,
+  resize/buffer/present lifecycle and cross-thread `WindowWaker`; product
+  layout, terminal, selection, command and screenshot policy remain in the main
+  crate. Root Cargo no longer directly depends on winit or softbuffer. The
+  Windows-hosted all-target check, crate all-feature warnings-denied Clippy and
+  46 crate tests pass. This host still cannot compile the root Linux target
+  past ring's build script without `x86_64-linux-gnu-gcc`, so native Unix source
+  compilation remains CI/host evidence. The strict boundary report is now three
+  findings: Windows remote GUI host plus the final root selector.
 - [x] Control Center state-directory protection, exclusive state-file creation,
   atomic replacement, existing-window focus, and direct native capture now
   call `services::control_center → selected → adapters/{windows,linux,macos}`.

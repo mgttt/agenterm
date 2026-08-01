@@ -20,25 +20,19 @@ use std::{
     collections::HashSet,
     env,
     path::Path,
-    rc::Rc,
     sync::Arc,
     time::{Duration, Instant, SystemTime},
 };
 
-use agenterm_platform::input::{
-    KeyPressState, LogicalKey as Key, NamedKey, NativeKeyEventExt as _,
-    NativeModifierStateExt as _, NormalizedKeyEvent,
+use agenterm_platform::{
+    input::{KeyPressState, LogicalKey as Key, NamedKey, NormalizedKeyEvent},
+    window_host::{
+        GeometryChange, LogicalRect, LogicalSize, PixelWindow, PixelWindowApplication,
+        PixelWindowDirective, PixelWindowError, PixelWindowEvent, PixelWindowMetrics,
+        PixelWindowOptions, PointerButton, PointerButtonState, WheelDelta, XrgbPixelFrame,
+    },
 };
-use softbuffer::{Context, Surface};
 use unicode_width::UnicodeWidthStr;
-use winit::{
-    application::ApplicationHandler,
-    dpi::{LogicalPosition, LogicalSize},
-    event::{ElementState, Ime, MouseButton, MouseScrollDelta, WindowEvent},
-    event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
-    keyboard::ModifiersState,
-    window::{Window, WindowAttributes, WindowId},
-};
 
 use crate::{
     client::no_activate_from_environment,
@@ -70,7 +64,7 @@ use crate::{
     workspace::{SavedTab, SavedWorkspace, save_workspace, workspace_path},
 };
 
-use self::wake::{UnixWake, install_unix_wake};
+use self::wake::install_unix_wake;
 use self::{
     terminal_selection::{
         AutoScrollDirection, AutoScrollStep, SelectionGesture, TerminalPoint, TerminalSelection,
@@ -126,12 +120,12 @@ struct SidebarScrollDrag {
     thumb_grab_offset: i32,
 }
 
-struct WinitWindowHandle<'a> {
-    window: &'a Window,
+struct PixelWindowHandle<'a> {
+    window: &'a PixelWindow,
     title: &'a str,
 }
 
-impl UnixAppWindowHandle for WinitWindowHandle<'_> {
+impl UnixAppWindowHandle for PixelWindowHandle<'_> {
     fn minimize_window(&self) {
         self.window.set_minimized(true);
     }
@@ -145,22 +139,26 @@ impl UnixAppWindowHandle for WinitWindowHandle<'_> {
         self.window.set_maximized(false);
     }
 
-    fn resize_client(&self, width: u32, height: u32) {
-        let _ = self
-            .window
-            .request_inner_size(LogicalSize::new(width, height));
+    fn resize_client(&self, width: u32, height: u32) -> Result<(), String> {
+        self.window
+            .request_logical_inner_size(LogicalSize::new(f64::from(width), f64::from(height)))
+            .map_err(|error| error.to_string())
     }
 
     fn client_size(&self) -> (u32, u32) {
-        let size = self
-            .window
-            .inner_size()
-            .to_logical::<u32>(self.window.scale_factor());
-        (size.width.max(1), size.height.max(1))
+        self.window
+            .metrics()
+            .map(|metrics| {
+                (
+                    metrics.logical_size.width.round().max(1.0) as u32,
+                    metrics.logical_size.height.round().max(1.0) as u32,
+                )
+            })
+            .unwrap_or((1, 1))
     }
 
     fn is_visible(&self) -> bool {
-        self.window.is_visible().unwrap_or(true)
+        self.window.visible()
     }
 
     fn window_title(&self) -> &str {
@@ -433,46 +431,38 @@ fn display_available() -> bool {
 
 fn run_gui(no_activate: bool) -> anyhow::Result<()> {
     let title = format!("{APP_NAME} {}", env!("CARGO_PKG_VERSION"));
-    let mut event_loop_builder = EventLoop::<UnixWake>::with_user_event();
-    use agenterm_platform::activation::EventLoopActivationExt as _;
-    event_loop_builder.configure_platform_activation(no_activate);
-    let event_loop = event_loop_builder.build()?;
-    let proxy = event_loop.create_proxy();
-    install_unix_wake(move || {
-        let _ = proxy.send_event(());
-    });
-    let context = Context::new(event_loop.owned_display_handle())
-        .map_err(|error| anyhow::anyhow!("{error}"))?;
     let wake_signal = Arc::new(WakeSignal::new());
 
     let ipc_server = start_ipc_server(0, Arc::clone(&wake_signal))?;
     let session_name = format!("agenterm-{}", std::process::id());
     let _instance = register_instance(&crate::ipc_address(), &workspace_path(), &session_name)?;
 
-    let mut app = UnixApp::new(
-        title,
+    let app = UnixApp::new(
+        title.clone(),
         no_activate,
-        context,
         wake_signal,
         ipc_server,
         session_name,
     );
-    event_loop.set_control_flow(ControlFlow::Wait);
-    event_loop.run_app(&mut app)?;
-    Ok(())
+    let options = PixelWindowOptions::new(
+        title,
+        LogicalSize::new(f64::from(INITIAL_WIDTH), f64::from(INITIAL_HEIGHT)),
+    )
+    .with_no_activate(no_activate)
+    .with_ime_allowed(true);
+    agenterm_platform::window_host::run_pixel_window(options, Box::new(app))
+        .map_err(anyhow::Error::new)
 }
 
 struct UnixApp {
     title: String,
     no_activate: bool,
-    context: Context<winit::event_loop::OwnedDisplayHandle>,
     wake_signal: Arc<WakeSignal>,
     ipc_server: IpcServer,
     session_name: String,
     started_at: SystemTime,
     event_journal: EventJournal,
-    window: Option<Rc<Window>>,
-    surface: Option<Surface<winit::event_loop::OwnedDisplayHandle, Rc<Window>>>,
+    window: Option<PixelWindow>,
     grid: Option<TerminalGrid>,
     tabs: Vec<TerminalTab>,
     active: Option<u64>,
@@ -484,7 +474,6 @@ struct UnixApp {
     composer_select_all: bool,
     text_field_select_all: bool,
     config: AppConfig,
-    modifiers: ModifiersState,
     settings_open: bool,
     settings_theme_draft: ThemeId,
     settings_size_draft: u16,
@@ -529,7 +518,6 @@ impl UnixApp {
     fn new(
         title: String,
         no_activate: bool,
-        context: Context<winit::event_loop::OwnedDisplayHandle>,
         wake_signal: Arc<WakeSignal>,
         ipc_server: IpcServer,
         session_name: String,
@@ -538,14 +526,12 @@ impl UnixApp {
         Self {
             title,
             no_activate,
-            context,
             wake_signal,
             ipc_server,
             session_name,
             started_at: SystemTime::now(),
             event_journal: EventJournal::new(),
             window: None,
-            surface: None,
             grid: None,
             tabs: Vec::new(),
             active: None,
@@ -593,7 +579,6 @@ impl UnixApp {
             )
             .initial_window_focused,
             config,
-            modifiers: ModifiersState::empty(),
         }
     }
 
@@ -1972,7 +1957,7 @@ impl UnixApp {
             "tabs_visible": self.config.tabs_visible,
             "window": if let Some(window) = self.window.as_ref() {
                 window_snapshot_json(
-                    &WinitWindowHandle {
+                    &PixelWindowHandle {
                         window,
                         title: &self.title,
                     },
@@ -2117,44 +2102,23 @@ impl UnixApp {
     fn client_size(&self) -> (u32, u32) {
         self.window
             .as_ref()
-            .map(|window| {
-                let physical = window.inner_size();
-                match agenterm_platform::window::WindowMetrics::from_physical(
-                    physical.width,
-                    physical.height,
-                    window.scale_factor(),
-                ) {
-                    Ok((metrics, _)) => {
-                        (metrics.logical_width.max(1), metrics.logical_height.max(1))
-                    }
-                    Err(_) => (1, 1),
-                }
+            .and_then(|window| window.metrics().ok())
+            .map(|metrics| {
+                (
+                    metrics.logical_size.width.round().max(1.0) as u32,
+                    metrics.logical_size.height.round().max(1.0) as u32,
+                )
             })
             .unwrap_or((INITIAL_WIDTH, INITIAL_HEIGHT))
     }
 
-    /// Linux hot-path: resize / scale-factor changes go through `platform::linux::scale`
-    /// (contract revision 3) before PTY/layout updates.
-    fn handle_geometry_event(&mut self, event: agenterm_platform::window::GeometryEvent) {
-        match agenterm_platform::window::classify_geometry_event(event) {
-            Ok(agenterm_platform::window::GeometryAction::Apply(_metrics)) => {
-                if let Some(window) = self.window.as_ref() {
-                    self.window_state_tracker.sync_from_native_flags(
-                        window.is_minimized().unwrap_or(false),
-                        window.is_maximized(),
-                    );
-                }
-                self.resize_to_window();
-                if let Some(window) = self.window.as_ref() {
-                    window.request_redraw();
-                }
-            }
-            Ok(agenterm_platform::window::GeometryAction::Ignore) => {}
-            Err(error) => {
-                self.status_message =
-                    format!("Window geometry failed: {}", error.code().replace('_', " "));
-            }
+    fn handle_geometry_event(&mut self, _change: GeometryChange, _metrics: PixelWindowMetrics) {
+        if let Some(window) = self.window.as_ref() {
+            self.window_state_tracker
+                .sync_from_native_flags(window.minimized(), window.maximized());
+            window.request_redraw();
         }
+        self.resize_to_window();
     }
 
     fn sidebar_tab_action_at(&self, x: i32, y: i32) -> Option<SidebarTabAction> {
@@ -3038,21 +3002,15 @@ impl UnixApp {
         }
     }
 
-    fn ensure_window(&mut self, event_loop: &ActiveEventLoop) -> anyhow::Result<()> {
+    fn open_window(&mut self, window: &PixelWindow) -> Result<(), PixelWindowError> {
         if self.window.is_some() {
             return Ok(());
         }
-
-        use agenterm_platform::activation::WindowAttributesActivationExt as _;
-        let attributes = WindowAttributes::default()
-            .with_title(self.title.clone())
-            .with_inner_size(winit::dpi::LogicalSize::new(INITIAL_WIDTH, INITIAL_HEIGHT))
-            .with_platform_activation(self.no_activate);
-
-        let window = Rc::new(event_loop.create_window(attributes)?);
-        window.set_ime_allowed(true);
-        let surface = Surface::new(&self.context, Rc::clone(&window))
-            .map_err(|error| anyhow::anyhow!("{error}"))?;
+        self.window = Some(window.clone());
+        let waker = window.waker();
+        install_unix_wake(move || {
+            let _ = waker.wake();
+        });
         let (width, height) = self.client_size();
         let sidebar_width = self.sidebar_width();
         let (cell_width, cell_height) = self.cell_dimensions();
@@ -3080,11 +3038,10 @@ impl UnixApp {
             window: 0,
             wake_signal: Arc::clone(&self.wake_signal),
             initial_size: TerminalSize { rows, cols },
-        })?;
+        })
+        .map_err(|error| PixelWindowError::failed("pixel_window_initial_terminal_failed", error))?;
 
         window.request_redraw();
-        self.window = Some(window);
-        self.surface = Some(surface);
         self.grid = Some(grid);
         self.active = Some(id);
         self.tabs.push(tab);
@@ -3125,10 +3082,8 @@ impl UnixApp {
         if let Some(position) = self.active_position() {
             self.tabs[position].resize(rows, cols);
         }
-        self.window_state_tracker.sync_from_native_flags(
-            window.is_minimized().unwrap_or(false),
-            window.is_maximized(),
-        );
+        self.window_state_tracker
+            .sync_from_native_flags(window.minimized(), window.maximized());
         self.sync_grid_from_tab();
     }
 
@@ -3316,7 +3271,7 @@ impl UnixApp {
                         }
                         other => {
                             if let Some(window) = self.window.as_ref() {
-                                let handle = WinitWindowHandle {
+                                let handle = PixelWindowHandle {
                                     window,
                                     title: &self.title,
                                 };
@@ -3459,22 +3414,31 @@ impl UnixApp {
         }
     }
 
-    fn redraw(&mut self) {
+    fn render_window(&mut self, frame: &mut XrgbPixelFrame<'_>) {
+        let width = frame.width();
+        let height = frame.height();
+        self.render_pixels(width, height, frame.pixels_mut());
+    }
+
+    fn render_pixels(&mut self, width: u32, height: u32, buffer: &mut [u32]) {
         self.sync_grid_from_tab();
         let Some(window) = self.window.as_ref() else {
             return;
         };
-        let physical_size = window.inner_size();
         let (logical_width, logical_height) = self.client_size();
-        if physical_size.width == 0 || physical_size.height == 0 {
-            return;
-        }
         let ime_anchor = self.ime_anchor();
         if let Some((x, y, w, h)) = ime_anchor {
-            window.set_ime_cursor_area(
-                LogicalPosition::new(x, y),
-                LogicalSize::new(w.max(1), h.max(1)),
-            );
+            if let Err(error) = window.set_ime_cursor_area(LogicalRect::new(
+                f64::from(x),
+                f64::from(y),
+                f64::from(w.max(1)),
+                f64::from(h.max(1)),
+            )) {
+                let message = format!("IME cursor update failed: {error}");
+                if self.status_message != message {
+                    self.status_message = message;
+                }
+            }
         }
 
         let sidebar_rows = self.sidebar_viewport_rows();
@@ -3604,22 +3568,6 @@ impl UnixApp {
                 TerminalCursorStyle::Hidden
             };
         let hidpi_terminal_visible = !modal_active && ime_preedit.is_none();
-        let Some(surface) = self.surface.as_mut() else {
-            return;
-        };
-
-        if let (Some(width), Some(height)) = (
-            std::num::NonZeroU32::new(physical_size.width),
-            std::num::NonZeroU32::new(physical_size.height),
-        ) {
-            let _ = surface.resize(width, height);
-        }
-
-        let Ok(mut buffer) = surface.buffer_mut() else {
-            return;
-        };
-        let width = buffer.width().get();
-        let height = buffer.height().get();
         let hidpi_terminal_active =
             hidpi_terminal_visible && (width != logical_width || height != logical_height);
         let logical_pixels = self
@@ -3666,13 +3614,13 @@ impl UnixApp {
             logical_pixels,
             logical_width,
             logical_height,
-            &mut buffer,
+            buffer,
             width,
             height,
         );
         if hidpi_terminal_active {
             render_terminal_grid_hidpi(
-                &mut buffer,
+                buffer,
                 width,
                 width,
                 height,
@@ -3693,8 +3641,7 @@ impl UnixApp {
             );
         }
         self.render_buffers
-            .capture_if_requested(width, height, &buffer);
-        let _ = buffer.present();
+            .capture_if_requested(width, height, buffer);
     }
 
     fn request_close_tab(&mut self, id: u64) {
@@ -3727,7 +3674,45 @@ impl UnixApp {
     fn save_screenshot(&mut self, args: &[String], pane_only: bool) -> Result<String, String> {
         self.cursor_blink.reset(Instant::now());
         self.render_buffers.request_capture();
-        self.redraw();
+        let metrics = self
+            .window
+            .as_ref()
+            .ok_or_else(|| "no native window is available".to_owned())?
+            .metrics()
+            .map_err(|error| error.to_string())?;
+        if !metrics.is_drawable() {
+            return Err("native window has no drawable screenshot surface".to_owned());
+        }
+        if metrics.physical_width > agenterm_platform::screenshot::MAX_FRAME_SIDE
+            || metrics.physical_height > agenterm_platform::screenshot::MAX_FRAME_SIDE
+        {
+            return Err(format!(
+                "screenshot {}x{} exceeds side limit {}",
+                metrics.physical_width,
+                metrics.physical_height,
+                agenterm_platform::screenshot::MAX_FRAME_SIDE
+            ));
+        }
+        let pixel_count = usize::try_from(metrics.physical_width)
+            .ok()
+            .and_then(|width| {
+                usize::try_from(metrics.physical_height)
+                    .ok()
+                    .and_then(|height| width.checked_mul(height))
+            })
+            .ok_or_else(|| "rendered frame dimensions overflow".to_owned())?;
+        if pixel_count > agenterm_platform::screenshot::MAX_FRAME_PIXELS {
+            return Err(format!(
+                "screenshot exceeds the {}-pixel limit",
+                agenterm_platform::screenshot::MAX_FRAME_PIXELS
+            ));
+        }
+        let mut frame = Vec::new();
+        frame
+            .try_reserve_exact(pixel_count)
+            .map_err(|error| format!("screenshot frame allocation failed: {error}"))?;
+        frame.resize(pixel_count, 0_u32);
+        self.render_pixels(metrics.physical_width, metrics.physical_height, &mut frame);
         let (width, height, pixels) = self
             .render_buffers
             .take_capture()
@@ -4212,89 +4197,29 @@ impl ControlHost for UnixApp {
     }
 }
 
-impl ApplicationHandler<UnixWake> for UnixApp {
-    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        if let Err(error) = self.ensure_window(event_loop) {
-            eprintln!("AgenTerm GUI failed to create window: {error:#}");
-            event_loop.exit();
-        }
-    }
-
-    fn user_event(&mut self, event_loop: &ActiveEventLoop, _event: UnixWake) {
-        if self.drain_wake_and_pty()
-            && let Some(window) = self.window.as_ref()
-        {
-            window.request_redraw();
-        }
-        if self.close_requested {
-            event_loop.exit();
-        }
-    }
-
-    fn window_event(
-        &mut self,
-        event_loop: &ActiveEventLoop,
-        _window_id: WindowId,
-        event: WindowEvent,
-    ) {
+impl UnixApp {
+    fn handle_pixel_event(&mut self, event: PixelWindowEvent) {
         match event {
-            WindowEvent::CloseRequested => self.request_window_close(),
-            WindowEvent::Resized(size) => {
-                self.handle_geometry_event(agenterm_platform::window::GeometryEvent::Resized {
-                    physical_width: size.width,
-                    physical_height: size.height,
-                    scale_factor: self
-                        .window
-                        .as_ref()
-                        .map(|window| window.scale_factor())
-                        .unwrap_or(1.0),
-                });
+            PixelWindowEvent::Wake => {
+                if self.drain_wake_and_pty() {
+                    self.request_redraw();
+                }
             }
-            WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
-                let physical = self
-                    .window
-                    .as_ref()
-                    .map(|window| window.inner_size())
-                    .unwrap_or_default();
-                self.handle_geometry_event(
-                    agenterm_platform::window::GeometryEvent::ScaleFactorChanged {
-                        scale_factor,
-                        physical_width: physical.width,
-                        physical_height: physical.height,
-                    },
-                );
+            PixelWindowEvent::CloseRequested => self.request_window_close(),
+            PixelWindowEvent::GeometryChanged { change, metrics } => {
+                self.handle_geometry_event(change, metrics);
             }
-            WindowEvent::Focused(focused) => {
+            PixelWindowEvent::FocusChanged(focused) => {
                 self.window_focused = focused;
                 self.cursor_blink.reset(Instant::now());
                 if let Some(window) = self.window.as_ref() {
-                    self.window_state_tracker.sync_from_native_flags(
-                        window.is_minimized().unwrap_or(false),
-                        window.is_maximized(),
-                    );
+                    self.window_state_tracker
+                        .sync_from_native_flags(window.minimized(), window.maximized());
                     window.request_redraw();
                 }
             }
-            WindowEvent::RedrawRequested => {
-                self.drain_wake_and_pty();
-                self.redraw();
-                if self.close_requested {
-                    event_loop.exit();
-                }
-            }
-            WindowEvent::ModifiersChanged(new_modifiers) => {
-                self.modifiers = new_modifiers.state();
-            }
-            WindowEvent::Ime(event) => self.handle_ime(match event {
-                Ime::Enabled => agenterm_platform::ime::ImeEvent::Enabled,
-                Ime::Preedit(text, cursor) => {
-                    agenterm_platform::ime::ImeEvent::Preedit { text, cursor }
-                }
-                Ime::Commit(text) => agenterm_platform::ime::ImeEvent::Commit(text),
-                Ime::Disabled => agenterm_platform::ime::ImeEvent::Disabled,
-            }),
-            WindowEvent::KeyboardInput { event, .. } => {
-                let event = event.to_normalized_key_event(self.modifiers.to_platform_modifiers());
+            PixelWindowEvent::Ime(event) => self.handle_ime(event),
+            PixelWindowEvent::Keyboard(event) => {
                 if event.state != KeyPressState::Pressed {
                     return;
                 }
@@ -4435,15 +4360,8 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                     self.queue_pty_input(bytes);
                 }
             }
-            WindowEvent::CursorMoved { position, .. } => {
-                let (x, y) = self
-                    .window
-                    .as_ref()
-                    .map(|window| {
-                        let logical = position.to_logical::<f64>(window.scale_factor());
-                        (logical.x, logical.y)
-                    })
-                    .unwrap_or((position.x, position.y));
+            PixelWindowEvent::PointerMoved(position) => {
+                let (x, y) = (position.x, position.y);
                 self.last_cursor = (x, y);
                 if self.tabs_resize_drag.is_some() {
                     self.drag_tabs_resize(x as i32);
@@ -4458,24 +4376,29 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                     self.drag_terminal_selection(x, y);
                 }
             }
-            WindowEvent::MouseWheel { delta, .. } => {
-                let (x, y) = self.last_cursor;
+            PixelWindowEvent::MouseWheel { delta, position } => {
+                let (x, y) = position
+                    .map(|position| (position.x, position.y))
+                    .unwrap_or(self.last_cursor);
                 match delta {
-                    MouseScrollDelta::LineDelta(_, lines) => {
+                    WheelDelta::Lines { y: lines, .. } => {
                         self.mouse_wheel(x, y, f64::from(lines), true)
                     }
-                    MouseScrollDelta::PixelDelta(position) => {
-                        self.mouse_wheel(x, y, position.y, false)
+                    WheelDelta::LogicalPixels { y: pixels, .. } => {
+                        self.mouse_wheel(x, y, pixels, false)
                     }
+                    _ => {}
                 }
             }
-            WindowEvent::MouseInput {
-                state: ElementState::Pressed,
-                button: MouseButton::Left,
-                ..
+            PixelWindowEvent::PointerButton {
+                state: PointerButtonState::Pressed,
+                button: PointerButton::Left,
+                position,
             } => {
                 self.cursor_blink.reset(Instant::now());
-                let (x, y) = self.last_cursor;
+                let (x, y) = position
+                    .map(|position| (position.x, position.y))
+                    .unwrap_or(self.last_cursor);
                 if x < f64::from(self.sidebar_width()) {
                     let _ = self.cancel_terminal_selection(true);
                     self.handle_sidebar_click(x, y);
@@ -4483,9 +4406,9 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                     self.handle_content_click(x, y);
                 }
             }
-            WindowEvent::MouseInput {
-                state: ElementState::Released,
-                button: MouseButton::Left,
+            PixelWindowEvent::PointerButton {
+                state: PointerButtonState::Released,
+                button: PointerButton::Left,
                 ..
             } => {
                 if self.tabs_resize_drag.is_some() {
@@ -4498,13 +4421,13 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                     self.complete_terminal_selection();
                 }
             }
+            PixelWindowEvent::PointerLeft | PixelWindowEvent::PointerButton { .. } => {}
             _ => {}
         }
     }
 
-    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+    fn next_window_directive(&mut self, now: Instant) -> PixelWindowDirective {
         let mut changed = self.drain_wake_and_pty();
-        let now = Instant::now();
         let cursor_active = self.window_focused
             && self.focus_surface == UnixFocusSurface::Terminal
             && !self.modal_surface_active()
@@ -4531,17 +4454,58 @@ impl ApplicationHandler<UnixWake> for UnixApp {
                     .unwrap_or(autoscroll_at),
             );
         }
-        event_loop.set_control_flow(
-            wake_at
-                .map(ControlFlow::WaitUntil)
-                .unwrap_or(ControlFlow::Wait),
-        );
         if changed && let Some(window) = self.window.as_ref() {
             window.request_redraw();
         }
         if self.close_requested {
-            event_loop.exit();
+            PixelWindowDirective::Exit
+        } else {
+            wake_at
+                .map(PixelWindowDirective::WaitUntil)
+                .unwrap_or(PixelWindowDirective::Wait)
         }
+    }
+}
+
+impl PixelWindowApplication for UnixApp {
+    fn opened(&mut self, window: &PixelWindow) -> Result<PixelWindowDirective, PixelWindowError> {
+        self.open_window(window)?;
+        Ok(PixelWindowDirective::Continue)
+    }
+
+    fn event(
+        &mut self,
+        _window: &PixelWindow,
+        event: PixelWindowEvent,
+    ) -> Result<PixelWindowDirective, PixelWindowError> {
+        self.handle_pixel_event(event);
+        Ok(if self.close_requested {
+            PixelWindowDirective::Exit
+        } else {
+            PixelWindowDirective::Continue
+        })
+    }
+
+    fn render(
+        &mut self,
+        _window: &PixelWindow,
+        frame: &mut XrgbPixelFrame<'_>,
+    ) -> Result<PixelWindowDirective, PixelWindowError> {
+        self.drain_wake_and_pty();
+        self.render_window(frame);
+        Ok(if self.close_requested {
+            PixelWindowDirective::Exit
+        } else {
+            PixelWindowDirective::Continue
+        })
+    }
+
+    fn about_to_wait(
+        &mut self,
+        _window: &PixelWindow,
+        now: Instant,
+    ) -> Result<PixelWindowDirective, PixelWindowError> {
+        Ok(self.next_window_directive(now))
     }
 }
 

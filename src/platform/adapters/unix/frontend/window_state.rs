@@ -58,7 +58,7 @@ pub trait UnixAppWindowHandle {
     fn minimize_window(&self);
     fn maximize_window(&self);
     fn restore_window(&self);
-    fn resize_client(&self, width: u32, height: u32);
+    fn resize_client(&self, width: u32, height: u32) -> Result<(), String>;
     fn client_size(&self) -> (u32, u32);
     fn is_visible(&self) -> bool;
     fn window_title(&self) -> &str;
@@ -101,7 +101,9 @@ pub fn apply_ui_action(
                 option_value(args, "--height"),
             ) {
                 Ok(size) => {
-                    handle.resize_client(size.width, size.height);
+                    if let Err(error) = handle.resize_client(size.width, size.height) {
+                        return WindowUiActionResult::Invalid(error);
+                    }
                     if tracker.semantic_state() != WindowSemanticState::Minimized {
                         tracker.set_semantic_state(WindowSemanticState::Restored);
                     }
@@ -142,6 +144,7 @@ mod tests {
         visible: bool,
         minimized: bool,
         maximized: bool,
+        resize_error: Option<String>,
     }
 
     impl UnixAppWindowHandle for MockHandle {
@@ -157,8 +160,9 @@ mod tests {
             // tracked externally in tests
         }
 
-        fn resize_client(&self, width: u32, height: u32) {
+        fn resize_client(&self, width: u32, height: u32) -> Result<(), String> {
             let _ = (width, height);
+            self.resize_error.clone().map_or(Ok(()), Err)
         }
 
         fn client_size(&self) -> (u32, u32) {
@@ -182,6 +186,7 @@ mod tests {
             visible: true,
             minimized: false,
             maximized: false,
+            resize_error: None,
         }
     }
 
@@ -263,6 +268,27 @@ mod tests {
             WindowUiActionResult::Applied
         );
         assert_eq!(tracker.semantic_state(), WindowSemanticState::Restored);
+    }
+
+    #[test]
+    fn window_resize_reports_adapter_failure_without_updating_state() {
+        let mut handle = mock_handle();
+        handle.resize_error = Some("pixel_window_resize_failed: denied".to_owned());
+        let mut tracker = WindowStateTracker::new();
+        tracker.set_semantic_state(WindowSemanticState::Maximized);
+        let args = vec![
+            String::from("ui-action"),
+            String::from("window-resize"),
+            String::from("--width"),
+            String::from("640"),
+            String::from("--height"),
+            String::from("480"),
+        ];
+        assert_eq!(
+            apply_ui_action("window-resize", &args, &handle, &mut tracker),
+            WindowUiActionResult::Invalid("pixel_window_resize_failed: denied".to_owned())
+        );
+        assert_eq!(tracker.semantic_state(), WindowSemanticState::Maximized);
     }
 
     #[test]

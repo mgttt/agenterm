@@ -234,6 +234,15 @@ Unix wake integration leaf 把 `EventLoopProxy` 从 root wake bridge 移除：PT
 后续直接换成 crate `WindowWaker`。同叶把 IME 与 wheel 产品处理入口改为 crate IME event 和
 中立 vertical-delta/line-mode 参数，原生枚举只在剩余 host event boundary 转换。Windows-hosted
 all-target compile 通过，严格生产边界门禁由 6 行降至 5 行。
+Unix pixel-window host leaf 随后完成该接管：公开 `PixelWindowApplication`、中立窗口控制、
+normalized event、XRGB frame、跨线程 `WindowWaker` 与 typed `Unsupported`/`Failed` contract
+由 `agenterm-platform` 提供；Linux/macOS adapter 独占 winit event loop/window、softbuffer
+surface、resize/buffer/present 与原生事件转换。root Unix frontend 只保留产品
+layout、terminal、selection、command 和 screenshot policy，根 `Cargo.toml` 删除 winit/
+softbuffer 直接依赖。Windows-hosted all-target check、crate all-feature warnings-denied Clippy
+和 46 项 crate tests 通过；root Linux source compile 仍在进入源码前被本机缺少
+`x86_64-linux-gnu-gcc` 的 ring build script 阻断。严格生产边界门禁由 5 行降至 3 行，剩余
+仅为 Windows remote GUI host 和最终 root selector。
 
 2026-08-01 首个建设期增量：Cockpit snapshot 新增明确的
 `tab_counts.{total,running,dead}`，native shell 同源显示 logical instance、

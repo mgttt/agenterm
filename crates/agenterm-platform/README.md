@@ -39,9 +39,9 @@ clipboard, IPC, or screenshot modules.
 | `locking` | cross-process path locks and bounded slot permits | target `libc` / `windows-sys` |
 | `ipc` | typed endpoints and native listener/byte stream | `locking`, target native APIs |
 | `pty` | PTY command/master/child lifecycle | `process`, `rmux-pty` |
-| `window` | display facts, geometry, generic native text-window host and process-window automation | target Win32 APIs / `winit` + `softbuffer` |
+| `window` | display facts, geometry, generic native text-window host and process-window automation | target Win32 APIs / Unix `winit` + `softbuffer` |
 | `input` | normalized key classification, UTF-16 text decoding, primary-shortcut policy | `window` |
-| `ime` | preedit/commit state machine and display-aware capability status | `input` |
+| `ime` | preedit/commit state machine and the neutral pixel-window runner when `window` + `input` are enabled | `input` |
 | `activation` | neutral policy, typed requests, native window operation and application wake | `window`, target `winit` / Win32 |
 | `clipboard` | caller-bounded Unicode clipboard with configurable open deadline | `process`, target native APIs |
 | `screenshot` | bounded XRGB encoding and typed native-window capture | `filesystem`, `png`, target Win32 APIs |
@@ -61,6 +61,7 @@ clipboard, IPC, or screenshot modules.
 | window geometry | available | available | available |
 | process-window automation | Win32 | typed Unsupported | typed Unsupported |
 | native text window | Win32/GDI | winit + softbuffer | winit + softbuffer |
+| neutral pixel-window host | typed Unsupported | winit + softbuffer | winit + softbuffer |
 | normalized input | Control/AltGr policy | Control/Super policy | Command/Control policy |
 | IME composition | typed Unsupported | display-aware | display-aware |
 | activation | native show/focus | winit active intent | winit application intent |
@@ -111,3 +112,11 @@ capture_native_window_png(window, std::path::Path::new("window.png"), NativeCapt
 Product applications supply names, paths, policy limits and protocol framing.
 The crate does not know AgenTerm workspaces, Control Center, Fleet, themes,
 commands, or UI snapshots.
+
+GUI embedders enabling `window`, `input`, and `ime` can implement
+`window_host::PixelWindowApplication` and call
+`window_host::run_pixel_window`. The callbacks receive only normalized events,
+a cloneable neutral window control and a mutable XRGB frame; `winit`,
+`softbuffer`, native display details and event-loop proxies stay private to the
+selected adapter. A `WindowWaker` can wake the loop from worker threads and
+returns a typed failure after that loop exits.

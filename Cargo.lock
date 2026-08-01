@@ -38,12 +38,10 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "softbuffer",
  "unicode-width",
  "ureq",
  "vt100",
  "windows-sys 0.61.2",
- "winit",
  "winresource",
 ]
 

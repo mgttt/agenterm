@@ -17,6 +17,8 @@ use windows_sys::Win32::{
     },
 };
 
+#[cfg(all(feature = "input", feature = "ime"))]
+use crate::contract::window_host::{PixelWindowApplication, PixelWindowError, PixelWindowOptions};
 use crate::window::{
     DisplayBackendFacts, NativeTextWindowError, NativeTextWindowFocus, NativeTextWindowHost,
 };
@@ -37,6 +39,16 @@ pub(crate) fn display_backend_facts() -> DisplayBackendFacts {
         wayland: false,
         headless: false,
     }
+}
+
+#[cfg(all(feature = "input", feature = "ime"))]
+pub(crate) fn run_pixel_window(
+    _options: PixelWindowOptions,
+    _application: Box<dyn PixelWindowApplication>,
+) -> Result<(), PixelWindowError> {
+    Err(PixelWindowError::Unsupported {
+        reason: "pixel-window-host-not-implemented-for-windows".into(),
+    })
 }
 
 pub(crate) fn run_native_text_window(

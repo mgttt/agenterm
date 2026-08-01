@@ -106,6 +106,9 @@ pub mod ime;
 #[cfg(feature = "window")]
 pub mod window;
 
+#[cfg(all(feature = "window", feature = "input", feature = "ime"))]
+pub mod window_host;
+
 #[cfg(feature = "webview")]
 pub mod webview;
 
