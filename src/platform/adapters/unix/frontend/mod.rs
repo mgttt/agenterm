@@ -3075,11 +3075,11 @@ impl UnixApp {
             cell_width,
             cell_height,
         );
-        if let Some(position) = self.active_position() {
-            if let Err(error) = self.tabs[position].resize(rows, cols) {
-                self.set_status_message(format!("Could not resize terminal: {error}"));
-                return;
-            }
+        if let Some(position) = self.active_position()
+            && let Err(error) = self.tabs[position].resize(rows, cols)
+        {
+            self.set_status_message(format!("Could not resize terminal: {error}"));
+            return;
         }
         if let Some(grid) = self.grid.as_mut() {
             grid.resize(cols, rows);

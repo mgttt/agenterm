@@ -645,7 +645,7 @@ impl Drop for TerminalTab {
 #[cfg(test)]
 mod tests {
     use super::{TerminalCallbacks, redact_proxy_stream_chunk, resize_after_native_accepts};
-    use crate::pty::PtyError;
+    use crate::platform::services::pty::PtyError;
 
     #[test]
     fn resize_failure_preserves_screen_and_does_not_become_terminal_fatal_state() {
