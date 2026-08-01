@@ -85,19 +85,6 @@ pub(crate) fn checked_facts(
     })
 }
 
-#[cfg(any(target_os = "linux", test))]
-pub(crate) fn checked_page_product(
-    page_count: u64,
-    page_size: u64,
-) -> Result<u64, HostMemoryError> {
-    page_count.checked_mul(page_size).ok_or_else(|| {
-        HostMemoryError::new(
-            HostMemoryErrorKind::Overflow,
-            "physical page count multiplied by page size overflowed u64",
-        )
-    })
-}
-
 fn nonzero_usize(name: &str, value: u64) -> Result<std::num::NonZeroUsize, HostMemoryError> {
     usize::try_from(value)
         .ok()
@@ -129,11 +116,5 @@ mod tests {
                 HostMemoryErrorKind::InvalidValue
             );
         }
-    }
-
-    #[test]
-    fn physical_page_product_rejects_overflow() {
-        let error = checked_page_product(u64::MAX, 4096).expect_err("reject overflow");
-        assert_eq!(error.kind(), HostMemoryErrorKind::Overflow);
     }
 }

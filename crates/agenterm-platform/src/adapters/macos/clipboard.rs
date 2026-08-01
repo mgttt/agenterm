@@ -10,12 +10,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-enum CapabilityStatus {
-    Available,
-    Failed { code: &'static str, message: String },
-}
-
 pub(crate) const HELPER_TIMEOUT: Duration = Duration::from_millis(1_500);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,30 +33,6 @@ impl ClipboardError {
                     HELPER_TIMEOUT.as_millis()
                 )
             }
-        }
-    }
-
-    pub(crate) fn to_capability_status(&self) -> CapabilityStatus {
-        let code = match self {
-            Self::Unavailable { .. } => "clipboard_unavailable",
-            Self::TooLarge { .. } => "clipboard_too_large",
-            Self::Timeout => "clipboard_timeout",
-            Self::Backend { .. } => "clipboard_backend_error",
-        };
-        CapabilityStatus::Failed {
-            code,
-            message: self.message(),
-        }
-    }
-}
-
-pub(crate) fn capability_status() -> CapabilityStatus {
-    if command_exists("pbcopy") && command_exists("pbpaste") {
-        CapabilityStatus::Available
-    } else {
-        CapabilityStatus::Failed {
-            code: "clipboard_unavailable",
-            message: "pbcopy and pbpaste are required".to_owned(),
         }
     }
 }
@@ -103,13 +73,6 @@ pub(crate) fn map_error(error: ClipboardError) -> crate::contract::clipboard::Cl
             error.message(),
         ),
     }
-}
-
-fn command_exists(program: &str) -> bool {
-    let Some(path) = std::env::var_os("PATH") else {
-        return false;
-    };
-    std::env::split_paths(&path).any(|directory| directory.join(program).is_file())
 }
 
 fn write_via_command(program: &str, text: &str, timeout: Duration) -> Result<(), ClipboardError> {
@@ -275,16 +238,16 @@ mod tests {
     #[test]
     fn failures_have_stable_typed_codes() {
         assert_eq!(
-            ClipboardError::TooLarge { limit: 32 }.to_capability_status(),
-            CapabilityStatus::Failed {
-                code: "clipboard_too_large",
+            map_error(ClipboardError::TooLarge { limit: 32 }).to_capability_status(),
+            crate::CapabilityStatus::Failed {
+                code: "clipboard_too_large".into(),
                 message: "clipboard text exceeds the 32 byte terminal paste limit".to_owned(),
             }
         );
         assert_eq!(
-            ClipboardError::Timeout.to_capability_status(),
-            CapabilityStatus::Failed {
-                code: "clipboard_timeout",
+            map_error(ClipboardError::Timeout).to_capability_status(),
+            crate::CapabilityStatus::Failed {
+                code: "clipboard_timeout".into(),
                 message: "clipboard helper exceeded the 1500 ms deadline".to_owned(),
             }
         );

@@ -75,6 +75,10 @@ struct Backend {
 }
 
 impl Backend {
+    fn record_parent_paint(&self) {
+        increment(&self.parent_paints);
+    }
+
     fn control(&self, id: ControlId) -> Result<HWND, ControlWindowError> {
         self.controls.get(&id).copied().ok_or_else(|| {
             ControlWindowError::failed(
@@ -120,9 +124,6 @@ impl ControlWindowBackend for Backend {
             control_visibility_updates: self.control_visibility_updates.get(),
             control_visibility_skips: self.control_visibility_skips.get(),
         }
-    }
-    fn record_parent_paint(&self) {
-        increment(&self.parent_paints);
     }
     fn close(&self) {
         unsafe {
@@ -430,6 +431,7 @@ impl ControlWindowBackend for Backend {
 
 struct State {
     window: ControlWindow,
+    backend: Rc<Backend>,
     application: Box<dyn ControlWindowApplication>,
     system_menu_commands: HashMap<usize, MenuCommandId>,
     text_decoder: Utf16TextDecoder,
@@ -571,6 +573,7 @@ pub(crate) fn run_control_window(
     let window = ControlWindow(backend.clone());
     let mut state = Box::new(State {
         window: window.clone(),
+        backend: backend.clone(),
         application,
         system_menu_commands: HashMap::new(),
         text_decoder: Utf16TextDecoder::default(),
@@ -870,7 +873,7 @@ fn apply_directive(state: &mut State, directive: ControlWindowDirective) {
 }
 
 fn paint(state: &mut State, hwnd: HWND) {
-    state.window.record_parent_paint();
+    state.backend.record_parent_paint();
     let mut ps: PAINTSTRUCT = unsafe { mem::zeroed() };
     let target = unsafe { BeginPaint(hwnd, &mut ps) };
     let size = client_size(hwnd);

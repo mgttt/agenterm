@@ -23,7 +23,7 @@
       "kind": "behavior",
       "status": "shipped",
       "evidence_mode": "black-box",
-      "prd": "mouse wheel and a visible draggable scrollbar navigate ordinary and raw full-screen terminals",
+      "prd": "mouse wheel navigates ordinary terminal history and raw full-screen applications",
       "evidence_ids": ["ux.mouse-scrollback"]
     },
     {

@@ -1,5 +1,5 @@
 use crate::contract::host_memory::{
-    HostMemoryError, HostMemoryErrorKind, HostMemoryFacts, checked_facts, checked_page_product,
+    HostMemoryError, HostMemoryErrorKind, HostMemoryFacts, checked_facts,
 };
 
 pub(crate) fn facts() -> Result<HostMemoryFacts, HostMemoryError> {
@@ -20,4 +20,24 @@ fn positive_sysconf(key: libc::c_int, name: &str) -> Result<u64, HostMemoryError
                 format!("host reported invalid {name}: {value}"),
             )
         })
+}
+
+fn checked_page_product(page_count: u64, page_size: u64) -> Result<u64, HostMemoryError> {
+    page_count.checked_mul(page_size).ok_or_else(|| {
+        HostMemoryError::new(
+            HostMemoryErrorKind::Overflow,
+            "physical page count multiplied by page size overflowed u64",
+        )
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn physical_page_product_rejects_overflow() {
+        let error = checked_page_product(u64::MAX, 4096).expect_err("reject overflow");
+        assert_eq!(error.kind(), HostMemoryErrorKind::Overflow);
+    }
 }

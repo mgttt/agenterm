@@ -295,7 +295,6 @@ impl std::error::Error for ControlWindowError {}
 pub(crate) trait ControlWindowBackend {
     fn request_redraw(&self);
     fn render_activity(&self) -> ControlWindowRenderActivity;
-    fn record_parent_paint(&self);
     fn close(&self);
     fn focus(&self);
     fn client_size(&self) -> PixelSize;
@@ -363,9 +362,6 @@ impl ControlWindow {
     }
     pub fn render_activity(&self) -> ControlWindowRenderActivity {
         self.0.render_activity()
-    }
-    pub(crate) fn record_parent_paint(&self) {
-        self.0.record_parent_paint();
     }
     pub fn close(&self) {
         self.0.close();

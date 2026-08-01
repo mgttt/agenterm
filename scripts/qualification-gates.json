@@ -229,6 +229,7 @@
       "evidence": [
         "control-center.offline-contract",
         "control-center.live-cockpit",
+        "control-center.native-cockpit-input",
         "control-center.typed-navigation",
         "control-center.process-reuse",
         "control-center.context-refresh",

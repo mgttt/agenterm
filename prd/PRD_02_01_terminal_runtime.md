@@ -17,8 +17,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] VT100 parsing, ANSI colors, scrollback, resize, keyboard and mouse
 - [x] Backspace emits ConPTY VT `DEL` and deletes exactly one input
   character in the default `cmd.exe` line editor
-- [x] mouse wheel and a visible draggable scrollbar navigate ordinary terminal
-  history; scrollbar track clicks page and dragging to the bottom restores the
+- [x] mouse wheel navigates ordinary terminal history and raw full-screen applications;
+  a visible draggable scrollbar navigates ordinary history, track clicks page,
+  and dragging to the bottom restores the
   live viewport. Live v0.1.12 dogfood found alternate-screen harnesses whose
   zero local scrollback makes wheel/PageUp ineffective. Byte-level diagnosis on
   pre-passthrough ConPTY proved that `1049h/l` is erased and replaced by an
