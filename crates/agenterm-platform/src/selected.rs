@@ -15,6 +15,18 @@ pub(crate) const fn platform_kind() -> crate::PlatformKind {
     }
 }
 
+#[cfg(all(feature = "console-interrupt", windows))]
+#[path = "adapters/windows/console_interrupt.rs"]
+pub(crate) mod console_interrupt;
+
+#[cfg(all(feature = "console-interrupt", target_os = "linux"))]
+#[path = "adapters/linux/console_interrupt.rs"]
+pub(crate) mod console_interrupt;
+
+#[cfg(all(feature = "console-interrupt", target_os = "macos"))]
+#[path = "adapters/macos/console_interrupt.rs"]
+pub(crate) mod console_interrupt;
+
 #[cfg(all(
     windows,
     any(feature = "cache-hierarchy", feature = "processor-topology")

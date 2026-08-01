@@ -52,6 +52,12 @@ entropy = [
     "dep:windows-sys",
     "windows-sys/Win32_Security_Cryptography",
 ]
+console-interrupt = [
+    "dep:libc",
+    "dep:windows-sys",
+    "windows-sys/Win32_Foundation",
+    "windows-sys/Win32_System_Console",
+]
 user-identity = [
     "dep:libc",
     "dep:windows-sys",
@@ -176,6 +182,7 @@ full = [
     "host-memory",
     "storage",
     "entropy",
+    "console-interrupt",
     "user-identity",
     "shared-memory",
     "process",

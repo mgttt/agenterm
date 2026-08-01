@@ -43,6 +43,7 @@ clipboard, IPC, or screenshot modules.
 | `host-memory` | host page size, mapping granularity and total physical memory | target `libc` / minimal `windows-sys` |
 | `storage` | path-scoped volume capacity, caller-available bytes and allocation unit | target `libc` / minimal `windows-sys` |
 | `entropy` | fail-closed host CSPRNG byte filling | target `libc` / minimal `windows-sys` |
+| `console-interrupt` | RAII Ctrl-C/SIGINT observation or temporary ignore with typed failures | target `libc` / minimal `windows-sys` |
 | `user-identity` | current Windows SID or POSIX real/effective uid/gid facts | target `libc` / minimal `windows-sys` |
 | `process-control` | typed single-process termination and Unix suspend/resume | target `libc` / minimal `windows-sys` |
 | `process-image` | executable path for one selected host process | target `libc` / minimal `windows-sys` |
@@ -79,6 +80,7 @@ clipboard, IPC, or screenshot modules.
 | host memory | page/allocation geometry + physical total | page geometry + physical pages | page geometry + `hw.memsize` |
 | storage | volume capacity + cluster geometry | `statvfs` | `statvfs` |
 | entropy | BCrypt system-preferred RNG | `getrandom(2)` | `arc4random_buf` |
+| console interrupt | Ctrl-C-only console handler + atomic notification | SIGINT `sigaction` + self-pipe | SIGINT `sigaction` + self-pipe |
 | process control | forceful termination; graceful Unsupported | SIGTERM/SIGKILL | SIGTERM/SIGKILL |
 | process image | queried full image path | `/proc/<pid>/exe` | `proc_pidpath` |
 | process metrics | process times + working set + total faults | `/proc` stat/statm + minor/major faults | `PROC_PIDTASKINFO` total faults + page-ins |
@@ -183,6 +185,32 @@ capture_native_window_png(window, std::path::Path::new("window.png"), NativeCapt
 Product applications supply names, paths, policy limits and protocol framing.
 The crate does not know AgenTerm workspaces, Control Center, Fleet, themes,
 commands, or UI snapshots.
+
+Console applications can enable `console-interrupt` and install either one
+`ConsoleInterruptObserver` or one `ConsoleInterruptIgnoreGuard`. Observation
+coalesces one or more Ctrl-C/SIGINT deliveries until `take_pending` consumes
+them. Dropping either value restores the prior native disposition. Windows
+claims only `CTRL_C_EVENT`; Ctrl-Break, close, logoff and shutdown continue
+through the existing handler chain. Unix signal handlers perform only an
+async-signal-safe self-pipe write. These process-wide guards are intentionally
+independent from PTY child-console setup and never install the PTY adapter's
+ignore-all handler.
+On Unix, callers must not independently replace the SIGINT disposition while
+either guard is alive; doing so would violate the guard's restoration ownership.
+The Unix observer initializes two non-inheritable self-pipe descriptors once
+and keeps them for the process lifetime. This prevents an already-entered signal
+handler from writing through a closed descriptor after the OS reuses its number;
+each new observer drains stale notifications before installing its handler.
+
+```rust,no_run
+use agenterm_platform::console_interrupt::ConsoleInterruptObserver;
+
+let interrupts = ConsoleInterruptObserver::install()?;
+if interrupts.take_pending()? {
+    // Perform shutdown or cancellation in ordinary Rust code.
+}
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
 
 `native_virtualization::probe` is passive: it does not create a VM or choose a
 guest/provider. Its result distinguishes available, unavailable, access denied,

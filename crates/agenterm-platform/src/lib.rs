@@ -28,6 +28,7 @@ pub enum Capability {
     HostMemory,
     Storage,
     Entropy,
+    ConsoleInterrupt,
     UserIdentity,
     ProcessControl,
     ProcessImage,
@@ -75,6 +76,7 @@ pub fn capability_status(capability: Capability) -> CapabilityStatus {
         Capability::HostMemory => (cfg!(feature = "host-memory"), true),
         Capability::Storage => (cfg!(feature = "storage"), true),
         Capability::Entropy => (cfg!(feature = "entropy"), true),
+        Capability::ConsoleInterrupt => (cfg!(feature = "console-interrupt"), true),
         Capability::UserIdentity => (cfg!(feature = "user-identity"), true),
         Capability::ProcessControl => (cfg!(feature = "process-control"), true),
         Capability::ProcessImage => (cfg!(feature = "process-image"), true),
@@ -118,6 +120,9 @@ pub mod activation;
 
 #[cfg(feature = "clipboard")]
 pub mod clipboard;
+
+#[cfg(feature = "console-interrupt")]
+pub mod console_interrupt;
 
 #[cfg(all(feature = "window", feature = "input"))]
 pub mod control_window;
@@ -221,6 +226,13 @@ mod tests {
         #[cfg(not(feature = "ipc"))]
         assert_eq!(
             crate::capability_status(crate::Capability::Ipc),
+            crate::CapabilityStatus::Unsupported {
+                reason: std::borrow::Cow::Borrowed("feature-disabled")
+            }
+        );
+        #[cfg(not(feature = "console-interrupt"))]
+        assert_eq!(
+            crate::capability_status(crate::Capability::ConsoleInterrupt),
             crate::CapabilityStatus::Unsupported {
                 reason: std::borrow::Cow::Borrowed("feature-disabled")
             }

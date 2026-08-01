@@ -40,7 +40,7 @@ name = "agenterm-cc"
 path = "src/bin/agenterm-cc.rs"
 
 [dependencies]
-agenterm-platform = { path = "crates/agenterm-platform", default-features = false, features = ["activation", "clipboard", "filesystem", "font", "ime", "input", "ipc", "locking", "process", "pty", "screenshot", "serde", "webview", "window"] }
+agenterm-platform = { path = "crates/agenterm-platform", default-features = false, features = ["activation", "clipboard", "console-interrupt", "filesystem", "font", "ime", "input", "ipc", "locking", "process", "pty", "screenshot", "serde", "webview", "window"] }
 ab_glyph = "0.2.32"
 anyhow = "1"
 png = "0.17"

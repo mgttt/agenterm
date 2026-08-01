@@ -3,6 +3,8 @@ pub mod activation;
 pub mod cache_hierarchy;
 #[cfg(feature = "clipboard")]
 pub mod clipboard;
+#[cfg(feature = "console-interrupt")]
+pub mod console_interrupt;
 #[cfg(all(feature = "window", feature = "input"))]
 pub mod control_window;
 #[cfg(feature = "entropy")]
