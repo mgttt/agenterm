@@ -85,7 +85,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   normalizes newlines, filters unsafe controls, and honors bracketed-paste mode.
   The Windows public `remote-ui-smoke` proves ordinary asynchronous delivery and
   exact `ESC[200~...ESC[201~` PTY bytes; Unix uses the same framing helper and
-  rejects stale tab/focus/modal completions instead of pasting into a new target
+  rejects stale tab/focus/modal completions instead of pasting into a new target.
+  The reusable Linux/macOS adapters preserve caller deadlines and stable
+  `Unsupported`/`Failed` clipboard causes. A new matching-host Unix workbench
+  journey owns native clipboard-to-PTY delivery, `terminal.pasted`, and delayed
+  stale-target cancellation; its first Linux/macOS CI receipts are still pending.
 - [~] dirty-frame rendering and GDI double buffering exist, but live v0.1.12
   dogfood reports sustained terminal-content and native-frame flicker. White-box
   analysis found that the replaceable Windows GUI cleared and repainted directly

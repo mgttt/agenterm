@@ -471,6 +471,11 @@ track remains planned, but every declared dependency must still pass.
       v0.1.10/v0.1.11 native upgrade, HEAD state write and rollback reads.
       New Linux matching-host and refreshed macOS matching-host compatibility
       evidence remain open, so this is not three-platform completion.
+  - [~] close the Linux/macOS main-workbench evidence gap with separate
+    matching-host receipts for no-activate launch, native activation truth,
+    renderer-owned snapshot/PNG, asynchronous native clipboard paste and stale
+    completion cancellation. The shared journey/task/CI ownership is integrated;
+    neither platform is complete until its own ordinary-CI execution passes.
   - [ ] deepen the independent Control Center only through a useful read-only
     Cockpit and complete platform evidence; Unix renderer-owned screenshots,
     incompatible/renderer-failure cases and caller-instance selection close

@@ -226,6 +226,20 @@
       "network": [],
       "evidence": ["task.control-center-linux-smoke"]
     },
+    "unix-frontend-linux-smoke": {
+      "inputs": ["built-unix-frontend", "isolated-workspace", "isolated-native-ipc", "x11-session"],
+      "outputs": ["unix-frontend-linux-evidence", "renderer-owned-png-evidence"],
+      "budget": {"timeout_ms": 180000, "max_operations": 10000000, "max_output_bytes": 1048576},
+      "network": [],
+      "evidence": ["task.unix-frontend-linux-smoke"]
+    },
+    "unix-frontend-macos-smoke": {
+      "inputs": ["built-unix-frontend", "isolated-workspace", "isolated-native-ipc", "desktop-session"],
+      "outputs": ["unix-frontend-macos-evidence", "renderer-owned-png-evidence"],
+      "budget": {"timeout_ms": 180000, "max_operations": 10000000, "max_output_bytes": 1048576},
+      "network": [],
+      "evidence": ["task.unix-frontend-macos-smoke"]
+    },
     "agenterm-net-research": {
       "inputs": ["research-source", "research-cargo-lock"],
       "outputs": ["libp2p-cid-block-store-evidence"],
@@ -715,6 +729,28 @@
       "args": [".", "target/x86_64-unknown-linux-gnu/debug/agenterm-cc", "target/x86_64-unknown-linux-gnu/debug/agenterm-server", "target/x86_64-unknown-linux-gnu/debug/agenterm-cli"],
       "dependencies": [],
       "platforms": ["linux"],
+      "side_effects": ["artifact_write", "process_spawn", "gui_spawn"]
+    },
+    {
+      "id": "unix-frontend-linux-smoke",
+      "description": "Prove the Linux X11 AgenTerm workbench, native activation, renderer-owned PNG, asynchronous clipboard paste, stale cancellation, and cleanup",
+      "entry": "scripts/rhai/unix-frontend-smoke.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "args": ["."],
+      "dependencies": [],
+      "platforms": ["linux"],
+      "side_effects": ["artifact_write", "process_spawn", "gui_spawn"]
+    },
+    {
+      "id": "unix-frontend-macos-smoke",
+      "description": "Prove the macOS AgenTerm workbench, native activation, renderer-owned PNG, asynchronous clipboard paste, stale cancellation, and cleanup",
+      "entry": "scripts/rhai/unix-frontend-smoke.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "args": ["."],
+      "dependencies": [],
+      "platforms": ["macos"],
       "side_effects": ["artifact_write", "process_spawn", "gui_spawn"]
     },
     {

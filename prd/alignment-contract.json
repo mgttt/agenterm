@@ -128,6 +128,23 @@
       "evidence_ids": ["ux.semantic-window-control"]
     },
     {
+      "id": "workspace.unix-native-frontend",
+      "kind": "behavior",
+      "status": "partial",
+      "evidence_mode": "black-box-partial",
+      "prd": "Linux/macOS human workspace MVP: one window, live POSIX PTY tabs",
+      "evidence_ids": [
+        "ux.unix-frontend-linux-no-activate",
+        "ux.unix-frontend-linux-workbench",
+        "ux.unix-frontend-linux-native-clipboard",
+        "ux.unix-frontend-linux-stale-paste",
+        "ux.unix-frontend-macos-no-activate",
+        "ux.unix-frontend-macos-workbench",
+        "ux.unix-frontend-macos-native-clipboard",
+        "ux.unix-frontend-macos-stale-paste"
+      ]
+    },
+    {
       "id": "workspace.adaptive-tabs",
       "kind": "behavior",
       "status": "shipped",

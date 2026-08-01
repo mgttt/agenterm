@@ -38,7 +38,12 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   Allowlist or scoped-capability language retained in MCP, model, gateway, or
   Agent requirements governs those callers only and cannot alter Script API
   registration or execution.
-- [x] Script API v2 maps every current typed operation exactly once to `fleet` and verifies mutation receipts, correlated events, and post-state.
+- [x] Script API v2 maps every current typed operation exactly once to `fleet` and verifies mutation receipts, correlated events, and post-state. The v0.1.12
+  frontend additions are callable as `fleet.ui.window.activate()` and
+  `fleet.terminal.paste()` while preserving the existing
+  `fleet.terminal("@ID").capture(...)` overload. Activation waits for native
+  focus truth; paste waits for its asynchronous typed result and correlated
+  `terminal.pasted` event rather than treating request acceptance as completion.
 - [x] task-manifest schema v2 publishes an inclusive required Script API range
   and stable capability IDs; list/show preserve incompatible projects for
   inspection while check/run fail closed before source execution.
@@ -725,7 +730,7 @@ Migration ledger:
   exposure or explicit degraded reason; mutations verify typed receipts,
   correlated public post-state/events, no duplicate side effect, and honest
   close/send/restart failures.
-  - [x] Script API v2 maps all 18 current typed operations exactly once; the
+  - [x] Script API v2 maps all 24 current typed operations exactly once; the
     public isolated-server journey proves observation plus a reversible UI
     mutation and typed tab-note mutation with native request/operation
     identity, receipt, correlated event, verified snapshot, restoration, and

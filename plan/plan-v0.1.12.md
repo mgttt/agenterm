@@ -917,6 +917,12 @@ Cockpit
   与 witness restore，macOS ARM64 原生 CC journey 通过持续 incompatible fixture、recovery
   和 owner mailbox。该 run 是这些叶子的 matching-host 完成证据，但不替代仍开放的 Unix
   主工作台 journey、真人视觉/物理输入验收、Candidate qualification 或 Promotion 授权；
+- Unix 主工作台的下一叶已进入集成态：`ui.window.activate` 与 `terminal.paste`
+  同时具备 CLI operation identity、真实 Script callable、异步 post-state 等待和跨 Windows/
+  Unix 的 `terminal.pasted` 事件；Linux/macOS clipboard adapter 保留调用方 deadline 与
+  typed Unsupported/Failed cause。一个共享 Rhai journey 由两个 host-native gate 分别拥有，
+  覆盖 no-activate witness、native focus、snapshot/PNG、真实 clipboard-to-PTY 及 barrier
+  stale cancellation。首次 matching-host CI 尚未返回，因此 capability 与 M11 仍保持 partial；
 - Workflows、Extensions、InfoHub 可以改进解释与导航，但没有 owning backend
   前继续显示真实 empty/unavailable，不造假数据。
 

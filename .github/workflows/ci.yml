@@ -200,7 +200,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             libxkbcommon0 libxkbcommon-x11-0 libwayland-client0 \
-            openbox x11-utils xauth xdotool xvfb
+            openbox x11-utils xauth xclip xdotool xvfb
           end_ms=$(date +%s%3N)
           duration_ms=$((end_ms - start_ms))
           echo "duration_ms=$duration_ms" >> "$GITHUB_OUTPUT"
@@ -305,7 +305,47 @@ jobs:
           end_ms=$(date +%s%3N)
           duration_ms=$((end_ms - start_ms))
           echo "duration_ms=$duration_ms" >> "$GITHUB_OUTPUT"
-          echo "linux_x86_64_control_center_smoke_ms: $duration_ms" >> "$GITHUB_STEP_SUMMARY"
+           echo "linux_x86_64_control_center_smoke_ms: $duration_ms" >> "$GITHUB_STEP_SUMMARY"
+      - name: Prove native Linux AgenTerm workbench and clipboard
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: unix-frontend-smoke
+        env:
+          AGENTERM_NO_ACTIVATE: "1"
+        run: |
+          start_ms=$(date +%s%3N)
+          set +e
+          journey_output=$(xvfb-run -a -s '-screen 0 1280x800x24 -nolisten tcp' bash -ceu '
+            openbox --sm-disable >target/unix-frontend-openbox.log 2>&1 &
+            window_manager=$!
+            trap "kill $window_manager 2>/dev/null || true; wait $window_manager 2>/dev/null || true" EXIT
+            ready=
+            for attempt in $(seq 1 100); do
+              if xprop -root _NET_SUPPORTING_WM_CHECK 2>/dev/null | grep -q "window id"; then
+                ready=1
+                break
+              fi
+              sleep 0.05
+            done
+            test "$ready" = 1
+            AGENTERM_BOOTSTRAP_TASK=unix-frontend-linux-smoke \
+              ./scripts/bootstrap.sh \
+              target/x86_64-unknown-linux-gnu/debug/agenterm \
+              target/x86_64-unknown-linux-gnu/debug/agenterm-cli \
+              --platform linux
+          ' 2>&1)
+          journey_status=$?
+          set -e
+          printf '%s\n' "$journey_output"
+          if [ "$journey_status" -ne 0 ]; then
+            diagnostic=$(printf '%s' "$journey_output" | tail -c 2000 | tr '\r\n' '  ')
+            diagnostic=${diagnostic//%/%25}
+            echo "::error title=Linux Unix frontend smoke::$diagnostic"
+            exit "$journey_status"
+          fi
+          end_ms=$(date +%s%3N)
+          duration_ms=$((end_ms - start_ms))
+          echo "duration_ms=$duration_ms" >> "$GITHUB_OUTPUT"
+          echo "linux_x86_64_unix_frontend_smoke_ms: $duration_ms" >> "$GITHUB_STEP_SUMMARY"
       - name: Exercise public Linux Script CLI
         run: cargo test --locked --target x86_64-unknown-linux-gnu --test linux_script_cli
       - name: Validate isolated agenterm-net research loop
@@ -610,6 +650,36 @@ jobs:
             diagnostic=${diagnostic//%/%25}
             echo "::error title=macOS Control Center smoke::$diagnostic"
             exit "$control_center_status"
+          fi
+          end_ms=$(python3 -c 'import time; print(time.time_ns() // 1_000_000)')
+          duration_ms=$((end_ms - start_ms))
+           echo "duration_ms=$duration_ms" >> "$GITHUB_OUTPUT"
+      - name: Prove native macOS AgenTerm workbench and clipboard
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: unix-frontend-smoke
+        env:
+          AGENTERM_NO_ACTIVATE: "1"
+        run: |
+          start_ms=$(python3 -c 'import time; print(time.time_ns() // 1_000_000)')
+          host_arch="$(uname -m)"
+          [ "$host_arch" = "arm64" ] && host_arch="aarch64"
+          if [ "$host_arch" != "${{ matrix.arch }}" ]; then
+            echo "Skipping execution-only Unix frontend proof for cross-built ${{ matrix.target }}"
+            exit 0
+          fi
+          binary_dir="target/${{ matrix.target }}/debug"
+          set +e
+          journey_output=$("$binary_dir/agenterm-script" task run unix-frontend-macos-smoke \
+            --manifest agenterm.tasks.json -- \
+            "$binary_dir/agenterm" "$binary_dir/agenterm-cli" --platform macos 2>&1)
+          journey_status=$?
+          set -e
+          printf '%s\n' "$journey_output"
+          if [ "$journey_status" -ne 0 ]; then
+            diagnostic=$(printf '%s' "$journey_output" | tail -c 2000 | tr '\r\n' '  ')
+            diagnostic=${diagnostic//%/%25}
+            echo "::error title=macOS Unix frontend smoke::$diagnostic"
+            exit "$journey_status"
           fi
           end_ms=$(python3 -c 'import time; print(time.time_ns() // 1_000_000)')
           duration_ms=$((end_ms - start_ms))

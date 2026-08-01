@@ -26,6 +26,28 @@
         "control-center.macos-server-recovery",
         "control-center.macos-process-isolation"
       ]
+    },
+    {
+      "id": "unix-frontend-linux-smoke",
+      "suite": "unix-frontend-smoke",
+      "platform": "linux",
+      "evidence": [
+        "ux.unix-frontend-linux-no-activate",
+        "ux.unix-frontend-linux-workbench",
+        "ux.unix-frontend-linux-native-clipboard",
+        "ux.unix-frontend-linux-stale-paste"
+      ]
+    },
+    {
+      "id": "unix-frontend-macos-smoke",
+      "suite": "unix-frontend-smoke",
+      "platform": "macos",
+      "evidence": [
+        "ux.unix-frontend-macos-no-activate",
+        "ux.unix-frontend-macos-workbench",
+        "ux.unix-frontend-macos-native-clipboard",
+        "ux.unix-frontend-macos-stale-paste"
+      ]
     }
   ]
 }

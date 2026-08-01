@@ -10,7 +10,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   toolbar, event journal, shared workspace IPC, composer, settings modal,
   wheel/scrollbar, paste, and word/row/drag selection; status-bar CWD editor,
   window-close confirm, and tabs resize grip on Unix; Win-only proxy editor
-  remains a follow-up. Win alignment execution map:
+  remains a follow-up. The Linux/macOS matching-host gate is now registered
+  against public no-activate/activation, renderer-owned snapshot+PNG, native
+  clipboard paste, and delayed stale-target cancellation. It remains partial
+  until both host-native CI receipts pass. Win alignment execution map:
   [`plan/plan-unix-gui-win-parity.md`](plan/plan-unix-gui-win-parity.md)
 - [x] vertical tabs on the left show the numeric index; the stable `@id` is
   exposed through the control plane

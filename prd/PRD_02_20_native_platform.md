@@ -27,7 +27,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [~] Clipboard, bounded XRGB screenshot encoding and font-file candidates are
   reusable crate capabilities. Terminal paste limits, HWND/GDI capture and font
   handles remain explicit root product extensions rather than leaking native
-  types through the public crate API.
+  types through the public crate API. Linux/macOS clipboard helpers now consume
+  the caller deadline with a 1500 ms adapter ceiling (including one shared Linux
+  fallback budget); zero deadlines and helper timeout/size/backend failures stay
+  typed through the Unix frontend instead of collapsing to an availability string.
 - [~] Normalized modifier/key classification, committed Unicode precedence,
   UTF-16 decoding, and per-platform primary-shortcut policy are reusable through
   the `input` feature. Native frontend event translation remains a root product
@@ -37,7 +40,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [~] Activation policy and typed native-window requests are public crate API.
   Windows show/no-activate/restore operations and Linux/macOS winit activation
   intent live in target-isolated crate adapters; AgenTerm owns only its window
-  lifetime and maps typed failures into the product protocol.
+  lifetime and maps typed failures into the product protocol. Semantic Unix
+  activation reports only request intent immediately; matching-host evidence
+  must observe the subsequent native focus event and compositor/frontmost truth.
 - [x] Script worker process-tree ownership consumes the crate process facade:
   Windows Job Objects and Unix process groups have no duplicate root native
   implementation. Unix guards snapshot transitive descendants before root

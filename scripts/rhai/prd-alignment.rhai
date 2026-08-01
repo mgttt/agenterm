@@ -312,6 +312,8 @@ let evidence_suites = #{
     "control-center-smoke": true,
     "control-center-linux-smoke": true,
     "control-center-macos-smoke": true,
+    "unix-frontend-linux-smoke": true,
+    "unix-frontend-macos-smoke": true,
     "server-smoke": true,
     "native-ipc-smoke": true,
     "native-ipc-compat-smoke": true,
@@ -348,7 +350,8 @@ for gate in host_native_manifest.gates {
     evidence_gates.push(gate);
 }
 for gate in evidence_gates {
-    let rhai_name = gate.id + ".rhai";
+    let suite = if gate.contains("suite") { gate.suite } else { gate.id };
+    let rhai_name = suite + ".rhai";
     let rhai_path = std::path::join(
         std::path::join(repo, "scripts/rhai").display,
         rhai_name
