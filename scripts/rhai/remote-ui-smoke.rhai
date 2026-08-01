@@ -327,6 +327,20 @@ fn wait_process_gone(id, code) {
     throw code;
 }
 
+fn wait_file_text(path, expected, code) {
+    for attempt in 0..200 {
+        if std::fs::exists(path) {
+            let observed = std::fs::read_to_string(path);
+            observed.trim();
+            if observed == expected {
+                return observed;
+            }
+        }
+        rhai::task::sleep(std::time::Duration::from_millis(25));
+    }
+    throw code;
+}
+
 fn repeat_text(value, count) {
     let result = "";
     for index in 0..count {
@@ -1949,6 +1963,105 @@ try {
         ).windows[0].scrollback_offset == 0,
         "remote_ui_wheel_down_invalid"
     );
+
+    print("STEP forward wheel input to an alternate-screen application");
+    let alternate_fixture = std::path::join(
+        context.run_directory,
+        "alternate-wheel.ps1"
+    ).display;
+    let alternate_result = std::path::join(
+        context.run_directory,
+        "alternate-wheel.txt"
+    ).display;
+    std::fs::write(
+        alternate_fixture,
+`param([string]$ResultPath)
+$escape = [char]27
+
+function Read-ThreeKeys {
+    $keys = @()
+    while ($keys.Count -lt 3) {
+        $key = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+        $keys += [int]$key.VirtualKeyCode
+    }
+    return $keys
+}
+
+try {
+    [Console]::Write($escape + "[?1049h" + $escape + "[?1hALT_WHEEL_READY")
+    $up = @(Read-ThreeKeys)
+    [System.IO.File]::WriteAllText(
+        $ResultPath,
+        "up=" + ($up -join ",")
+    )
+    $down = @(Read-ThreeKeys)
+    [System.IO.File]::WriteAllText(
+        $ResultPath,
+        "up=" + ($up -join ",") + ";down=" + ($down -join ",")
+    )
+} finally {
+    [Console]::Write($escape + "[?1l" + $escape + "[?1049l")
+}
+`
+    );
+    let alternate_id = text_cli(
+        context,
+        cli,
+        [
+            "new-window", "-d",
+            "-n", "alternate-wheel-" + context.run_id,
+            "-F", "#{window_id}",
+            "--", "powershell.exe", "-NoLogo", "-NoProfile",
+            "-ExecutionPolicy", "Bypass", "-File",
+            alternate_fixture, alternate_result
+        ]
+    );
+    alternate_id.trim();
+    text_cli(context, cli, ["select-window", "-t", alternate_id]);
+    text_cli(
+        context,
+        cli,
+        [
+            "wait-pane", "-t", alternate_id,
+            "--contains", "ALT_WHEEL_READY",
+            "--timeout-ms", "10000"
+        ]
+    );
+    let alternate_bootstrap = json_cli(context, cli, ["ui-bootstrap"]);
+    wait_observed(
+        context,
+        cli,
+        alternate_bootstrap.position.sequence
+    );
+    let alternate_snapshot = json_cli(context, cli, ["ui-snapshot"]);
+    require(
+        alternate_snapshot.active_tab_id == alternate_id
+            && alternate_snapshot.layout.terminal.alternate_screen
+            && alternate_snapshot.layout.terminal.application_cursor,
+        "remote_ui_alternate_screen_mode_not_observed"
+    );
+    gui.window_message(0x020A, 7864320, 0);
+    wait_file_text(
+        alternate_result,
+        "up=38,38,38",
+        "remote_ui_alternate_wheel_up_input_invalid"
+    );
+    gui.window_message(0x020A, 4287102976, 0);
+    wait_file_text(
+        alternate_result,
+        "up=38,38,38;down=40,40,40",
+        "remote_ui_alternate_wheel_down_input_invalid"
+    );
+    text_cli(
+        context,
+        cli,
+        [
+            "wait-ui", "-t", alternate_id,
+            "--tab-state", "dead", "--timeout-ms", "10000"
+        ]
+    );
+    text_cli(context, cli, ["select-window", "-t", tab_id]);
+    text_cli(context, cli, ["kill-window", "-t", alternate_id]);
 
     print("STEP select terminal text, Copy, and Paste through the UI");
     try {

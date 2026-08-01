@@ -23,9 +23,12 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   zero local scrollback makes wheel/PageUp ineffective. The v0.1.12 repair now
   publishes additive alternate-screen/application-cursor mode facts and turns
   wheel notches into bounded CSI/SS3 cursor input only when the alternate grid
-  has no local history; unit and mixed-version serde evidence pass. Physical
-  harness evidence and future application raw-mouse arbitration remain open,
-  so this capability is not yet marked shipped.
+  has no local history; unit and mixed-version serde evidence pass. The owning
+  Windows journey now contains a real alternate-screen PowerShell PTY fixture
+  that observes mode facts and maps native wheel messages to RawUI virtual-key
+  input while retaining ordinary scrollback assertions; its final integrated
+  run remains pending. Future application raw-mouse arbitration also remains
+  open, so this capability is not yet marked shipped.
 - [~] dragging is intended to select visible terminal cells and Ctrl+C copies
   the selected text while an unmodified click reaches RMUX/native terminal
   input. Live v0.1.12 dogfood found a Windows replaceable-GUI path where a

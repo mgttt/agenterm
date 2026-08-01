@@ -362,9 +362,11 @@ Release 全部是本轮明确非目标。
 - [~] alternate-screen harness 无法本地向上滚动；`UiScreenSnapshot` 现以 additive
   serde-default 字段发布 `alternate_screen` / `application_cursor`，Windows remote
   与 Unix frontend 仅在 alternate grid 没有本地 history 时把 wheel 转为有界 CSI/SS3
-  cursor input，普通 scrollback 路径不变；编码与旧 snapshot 兼容单测通过。仍需新的
-  Windows harness 黑盒/肉眼证据，并且未来 raw-mouse ownership 必须优先于此 paging
-  fallback。
+  cursor input，普通 scrollback 路径不变；编码与旧 snapshot 兼容单测通过。owning
+  Windows journey 现创建真实 PowerShell alternate/application-cursor PTY、投递上下各一
+  notch `WM_MOUSEWHEEL` 并要求 RawUI 分别收到三个 VK_UP/VK_DOWN；旧 dist 已证明 fixture
+  进入 `ALT_WHEEL_READY`，但产物早于修复，须在新集成 build 上完整通过。未来 raw-mouse
+  ownership 仍必须优先于此 paging fallback。
 - [~] terminal focus 下 `Shift+Tab` 修复正在集成：共享 named-key encoder 已按
   xterm modifier 参数覆盖 Tab/方向/Home/End/Insert/Delete/Page/F1–F12；Unix
   两条输入路径保留 modifiers，Windows `WM_KEYDOWN` 显式处理 Tab/Insert/Delete
