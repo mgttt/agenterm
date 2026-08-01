@@ -457,8 +457,12 @@ Release 全部是本轮明确非目标。
   finalized session、删除可证明失效且超过 60 秒的旧 session；缺锁、锁占用、working、
   reparse/symlink 或变化中的目录均 fail closed。3 项隔离测试覆盖 newest retention、
   Cargo/rustc lock contention 与释放后重试。此前审计估算该层可回收约 4.30 GiB；仍约
-  6.23 GiB 来自不同 root generation，必须等待精确 touched-unit manifest，不能用名字或
-  mtime 猜测删除。
+  6.23 GiB 来自不同 root generation。prune consumer 现已接受严格 versioned manifest，
+  仅让 `touched=false`、before/after/锁内二次全树 metadata identity 一致、无 working/
+  indirect/special entry 且全部 session locks 可持有的 root 删除；5 项 Windows 隔离测试
+  覆盖成功删除与 touched/缺失/损坏/无 rustc/incomplete/mismatch/active-lock 保留。mtime
+  只作 TOCTOU identity，绝不推断 usage；真实 rustc-wrapper producer、warm reuse 与回收量
+  证据仍未完成，所以生产 build 继续保留不同 root generation。
 - [x] `agenterm-platform` workspace 抽取后的集成门禁已真实收口：供应链任务不再假设单
   workspace package，而是动态排除全部 workspace members、验证两个 crate 的外部直接依赖
   并集并生成 275-package SPDX；补齐 macOS `objc2-app-kit`/`objc2-foundation` MIT notices。
@@ -528,6 +532,9 @@ v0.1.12  Convergence & Fast Promotion
 │  │  ├─ 单元失败不提交语言状态，外部真实副作用不伪装回滚
 │  │  ├─ 普通 worker 与 REPL 复用同一 Engine/API 配置
 │  │  └─ [~] Ctrl+C、箭头历史与 kill/restart 长驻协议继续 hardening
+│  │     ├─ bounded foreground worker 已证明同 PID 顺序调用、typed crash/EOF、显式 replacement 与 reap
+│  │     ├─ 每 generation 最多 32 次 invocation，不自动 restart 或重放真实副作用
+│  │     └─ REPL child-session frames、Ctrl+C ownership 与 fresh-session receipt 仍待接入
 │  ├─ [x] v0.1.12 保留 canonical `agenterm-script` 名称
 │  │  ├─ 当前没有完整外部调用者使用量与迁移/移除证据
 │  │  ├─ 收敛期不新增同义 executable、package 和 Candidate surface

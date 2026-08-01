@@ -286,8 +286,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     artifact staging: it holds Cargo's debug-profile lock, acquires rustc's
     per-session lock, removes only obsolete finalized sessions, and retains the
     newest session for every compilation-unit root. Distinct historical root
-    generations remain intentionally retained until an exact touched-unit
-    manifest can replace unsafe basename/mtime guesses.
+    generations remain intentionally retained by the production build. The
+    prune task now has a tested fail-closed consumer for an exact rustc-wrapper
+    touched-unit manifest: untouched identity-stable roots delete only while
+    every session lock is held, while touched, active, missing, corrupt,
+    incomplete, mismatched, indirect, working, or changed inputs are retained.
+    The build-side wrapper producer and measured warm-build reuse remain open;
+    metadata identity detects TOCTOU only and never infers unit usage.
 - v0.1.10 candidate and non-publishing release rehearsal (P0)
   - [x] one repository-native coordinator owns one clean candidate build and
     its integrated qualification; a candidate SHA can have only one eligible,

@@ -114,7 +114,12 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   REPL is already isolated in its own `agenterm-script` OS process, but a
   non-cooperative host call may require terminating that REPL process and
   therefore loses its in-memory session. No GUI, server, PTY, or workspace
-  process shares that state.
+  process shares that state. A bounded foreground `PersistentWorkerClient`
+  prerequisite now proves same-PID sequential invocation, typed crash/EOF,
+  explicit replacement, hard termination and reap. One generation is capped
+  at 32 invocations to bound the worker's current frame/completion bookkeeping;
+  it never auto-restarts or replays side effects. REPL child-session frames,
+  Ctrl+C ownership, and explicit fresh-session recovery are not yet connected.
 
 ## v0.1.9 product position
 
