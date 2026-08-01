@@ -955,6 +955,10 @@ try {
         "remote_ui_settings_cancel_rollback_invalid"
     );
     font_increase_button.click();
+    require(
+        gui.window_message(focus_message, 0, 0) == 1,
+        "remote_ui_font_button_stole_terminal_focus"
+    );
     let overridden_font = wait_effective_font_size(context, cli, 15, true);
     require(
         overridden_font.settings.terminal_font_size == 14

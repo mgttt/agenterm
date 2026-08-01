@@ -288,6 +288,17 @@ renderer-owned 760×480 PNG 为 58,125 bytes。headless server 下 missing targe
   已收口。Windows host 的 Linux `cargo check` 仅因缺少
   `x86_64-linux-gnu-gcc` 停在 `ring` 构建脚本，Unix adapter 仍需原生 CI/host
   证据。
+- [~] Windows toolbar `z/Z` 字号按钮造成 terminal 看似“无响应”的主因已修：native
+  child button 点击后曾持有 Win32 keyboard focus，而 terminal input 只在 top-level HWND
+  获得 focus 时消费；即时 toolbar action 现在显式归还 terminal focus，modal-opening 与
+  Control Center action 不会被错误抢回。native focus query 不再用旧 logical surface 掩盖
+  child-control focus，`remote-ui-smoke` 在字号点击后直接断言真实 focus。绘制同时恢复选入
+  HDC 的旧 font/background mode，避免反复换字号时旧 `NativeFont` 无法删除。聚焦 unit test
+  、warnings-denied all-target Clippy、七产物 dev build 与完整 `remote-ui-smoke` 通过；后者
+  在真实 native `Z` click 后验证 terminal focus，并继续完成 PTY 输入、字号继承、GUI detach、
+  同 server/session 重连及最终 Stop Server cleanup。`WM_COMMAND → synchronous PTY resize`
+  仍可能在 server 忙时阻塞 UI，须以 coalesced async resize 独立硬化，不能用本次焦点修复
+  冒充完成。
 - [x] 默认 `Keep Server Running` 不再因调用者 Job cleanup 杀死独立 server/PTYS；
   GUI 与 CLI 统一走 platform process facade，完整 replaceable-UI 黑盒已证明退出、
   detached lease、同 server/session 接回与最终显式 Stop Server。live dogfood 又发现

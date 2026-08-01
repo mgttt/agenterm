@@ -140,6 +140,13 @@ const fn windows_toolbar_hit(control_id: usize) -> Option<WindowsToolbarHit> {
     }
 }
 
+fn toolbar_action_returns_terminal_focus(action_id: &str) -> bool {
+    matches!(
+        action_id,
+        action::TOGGLE_TABS | action::TOGGLE_LOCALE | action::FONT_DECREASE | action::FONT_INCREASE
+    )
+}
+
 fn platform_capability_error(status: CapabilityStatus) -> anyhow::Error {
     match status {
         CapabilityStatus::Failed { code, message } => anyhow::anyhow!("{code}: {message}"),
@@ -4376,6 +4383,21 @@ impl RemoteWindowState {
         }
     }
 
+    fn native_focus_surface_code(&self) -> isize {
+        let focused = unsafe { GetFocus() };
+        if focused == self.edit {
+            return 2;
+        }
+        if focused != self.window {
+            return 0;
+        }
+        match self.focus_surface {
+            RemoteFocusSurface::Terminal => 1,
+            RemoteFocusSurface::Composer => 2,
+            RemoteFocusSurface::Tabs => 3,
+        }
+    }
+
     fn set_focus_surface(&mut self, target: RemoteFocusSurface) -> bool {
         if self.window_close_pending
             || self.settings_open
@@ -4877,6 +4899,9 @@ impl RemoteWindowState {
             action::FONT_INCREASE => self.adjust_active_terminal_font(1),
             _ => {}
         }
+        if toolbar_action_returns_terminal_focus(action_id) {
+            self.set_focus_surface(RemoteFocusSurface::Terminal);
+        }
     }
 
     fn paint(&self) {
@@ -4918,10 +4943,8 @@ impl RemoteWindowState {
         fill(device, &terminal, palette.terminal_background.colorref());
         fill(device, &composer, palette.composer.colorref());
         fill(device, &status, palette.status.colorref());
-        unsafe {
-            SelectObject(device, self.font.raw_handle() as HGDIOBJ);
-            SetBkMode(device, TRANSPARENT as i32);
-        }
+        let previous_font = unsafe { SelectObject(device, self.font.raw_handle() as HGDIOBJ) };
+        let previous_background_mode = unsafe { SetBkMode(device, TRANSPARENT as i32) };
         self.paint_tabs(device, sidebar, palette);
         if let Some(tab) = self.active_tab() {
             paint_screen(
@@ -5033,6 +5056,14 @@ impl RemoteWindowState {
             self.paint_new_terminal(device, palette);
         } else if self.pending_close_tab_id.is_some() {
             self.paint_tab_close(device, palette);
+        }
+        unsafe {
+            if !previous_font.is_null() {
+                SelectObject(device, previous_font);
+            }
+            if previous_background_mode != 0 {
+                SetBkMode(device, previous_background_mode);
+            }
         }
     }
 
@@ -5970,11 +6001,7 @@ unsafe extern "system" fn window_proc(
             0
         }
         WM_APP_FOCUS_QUERY => {
-            state_ref(window).map_or(0, |state| match state.current_focus_surface() {
-                RemoteFocusSurface::Terminal => 1,
-                RemoteFocusSurface::Composer => 2,
-                RemoteFocusSurface::Tabs => 3,
-            })
+            state_ref(window).map_or(0, |state| state.native_focus_surface_code())
         }
         WM_CHAR => {
             if let Some(state) = state_mut(window) {
@@ -6766,6 +6793,25 @@ mod tests {
             );
         }
         assert_eq!(windows_toolbar_hit(SEND_ID), None);
+    }
+
+    #[test]
+    fn immediate_toolbar_actions_return_keyboard_focus_to_terminal() {
+        for action_id in [
+            action::TOGGLE_TABS,
+            action::TOGGLE_LOCALE,
+            action::FONT_DECREASE,
+            action::FONT_INCREASE,
+        ] {
+            assert!(toolbar_action_returns_terminal_focus(action_id));
+        }
+        for action_id in [
+            action::NEW_TAB,
+            action::OPEN_CONTROL_CENTER,
+            action::OPEN_SETTINGS,
+        ] {
+            assert!(!toolbar_action_returns_terminal_focus(action_id));
+        }
     }
 
     #[test]

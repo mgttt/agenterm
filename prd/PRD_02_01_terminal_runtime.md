@@ -89,6 +89,18 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   WM_KEYDOWN/WM_CHAR de-duplication path. Unit contracts cover shared bytes and
   Windows mapping, while public physical-key byte evidence and live dogfood
   confirmation remain required before restoring shipped status.
+- [~] Windows terminal focus survives immediate native toolbar actions. Live
+  dogfood found the font `z/Z` child buttons retained Win32 keyboard focus while
+  the terminal input path accepts keys only for the top-level HWND. Font, locale
+  and Tabs actions now restore the terminal HWND; actions that open a modal or
+  Control Center deliberately do not. Native focus automation reports child
+  control focus as neither terminal, composer nor Tabs, and the owning remote UI
+  smoke checks focus immediately after the font click. GDI painting restores the
+  previously selected font/background mode before an old RAII font can be
+  destroyed. The complete replaceable-UI smoke then continues through PTY input,
+  font inheritance, GUI detach, same-server/session reconnect and explicit Stop
+  Server cleanup. Coalescing the still-synchronous remote PTY resize is separate
+  remaining latency work.
 - [x] GUI shell appears before the initial ConPTY/cmd process is ready
 - [x] initial terminal loads asynchronously with visible starting feedback
 - [x] exited process retains its final screen and exit code
