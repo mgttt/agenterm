@@ -1,6 +1,12 @@
 //! Owned process references that preserve native process-object identity.
 
-use std::io;
+use std::{io, time::Duration};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProcessWait {
+    Exited,
+    TimedOut,
+}
 
 pub struct ProcessReference(pub(crate) crate::selected::process_reference::ProcessReference);
 
@@ -21,7 +27,16 @@ impl ProcessReference {
     }
 
     pub fn is_alive(&self) -> io::Result<bool> {
-        self.0.is_alive()
+        self.wait_for_exit(Some(Duration::ZERO))
+            .map(|result| result == ProcessWait::TimedOut)
+    }
+
+    /// Waits for this exact process object to exit.
+    ///
+    /// `None` waits indefinitely. A finite timeout is measured monotonically;
+    /// native timeout limits and interrupted waits are handled internally.
+    pub fn wait_for_exit(&self, timeout: Option<Duration>) -> io::Result<ProcessWait> {
+        self.0.wait_for_exit(timeout)
     }
 
     /// Duplicates an already-open native process reference.
@@ -39,6 +54,17 @@ impl ProcessReference {
 pub trait ProcessReferenceHandle {
     #[doc(hidden)]
     fn duplicate_process_reference(self) -> io::Result<ProcessReference>;
+
+    #[doc(hidden)]
+    fn wait_for_process_exit(self, timeout: Option<Duration>) -> io::Result<ProcessWait>;
+}
+
+/// Waits through an already-open native process handle without reopening by PID.
+pub fn wait_handle(
+    process: impl ProcessReferenceHandle,
+    timeout: Option<Duration>,
+) -> io::Result<ProcessWait> {
+    process.wait_for_process_exit(timeout)
 }
 
 #[cfg(test)]
@@ -53,6 +79,12 @@ mod tests {
         let reference = ProcessReference::open(std::process::id()).expect("current process ref");
         assert_eq!(reference.id(), std::process::id());
         assert!(reference.is_alive().expect("current process liveness"));
+        assert_eq!(
+            reference
+                .wait_for_exit(Some(Duration::ZERO))
+                .expect("current process zero-time wait"),
+            ProcessWait::TimedOut
+        );
     }
 
     #[test]
@@ -76,15 +108,25 @@ mod tests {
         let reference = ProcessReference::open(child.id()).expect("child process ref");
         assert_eq!(reference.id(), child.id());
         assert!(reference.is_alive().expect("live child"));
-        assert!(child.wait().expect("wait child").success());
-
-        for _ in 0..100 {
-            if !reference.is_alive().expect("exited child observation") {
-                return;
-            }
-            thread::sleep(Duration::from_millis(5));
-        }
-        panic!("owned process reference did not observe child exit");
+        assert_eq!(
+            reference
+                .wait_for_exit(Some(Duration::from_millis(5)))
+                .expect("bounded live-child wait"),
+            ProcessWait::TimedOut
+        );
+        assert_eq!(
+            reference
+                .wait_for_exit(Some(Duration::from_secs(5)))
+                .expect("child exit wait"),
+            ProcessWait::Exited
+        );
+        assert_eq!(
+            reference
+                .wait_for_exit(Some(Duration::ZERO))
+                .expect("repeated child exit wait"),
+            ProcessWait::Exited
+        );
+        assert!(child.wait().expect("reap child").success());
     }
 
     #[test]
@@ -95,9 +137,17 @@ mod tests {
             fn duplicate_process_reference(self) -> io::Result<ProcessReference> {
                 ProcessReference::open(std::process::id())
             }
+
+            fn wait_for_process_exit(self, _timeout: Option<Duration>) -> io::Result<ProcessWait> {
+                Ok(ProcessWait::TimedOut)
+            }
         }
 
         let reference = ProcessReference::duplicate_from(TestHandle).expect("duplicate test ref");
         assert_eq!(reference.id(), std::process::id());
+        assert_eq!(
+            wait_handle(TestHandle, Some(Duration::ZERO)).expect("generic native handle wait"),
+            ProcessWait::TimedOut
+        );
     }
 }

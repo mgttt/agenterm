@@ -47,7 +47,7 @@ clipboard, IPC, or screenshot modules.
 | `user-identity` | current Windows SID or POSIX real/effective uid/gid facts | target `libc` / minimal `windows-sys` |
 | `process-control` | typed single-process termination and Unix suspend/resume | target `libc` / minimal `windows-sys` |
 | `process-observation` | fail-closed single-process liveness and stable start identity | target `libc` / minimal `windows-sys` |
-| `process-reference` | owned stable process reference and exit observation via HANDLE, pidfd, or kqueue | target `libc` / minimal `windows-sys` |
+| `process-reference` | owned stable process reference plus bounded or indefinite exact-object exit waits via HANDLE, pidfd, or kqueue | target `libc` / minimal `windows-sys` |
 | `process-security` | effective process principal plus typed sandbox identity, with handle-bound Windows queries | target `libc` / minimal `windows-sys` |
 | `process-image` | executable path for one selected host process | target `libc` / minimal `windows-sys` |
 | `process-metrics` | cumulative CPU time, resident bytes and partially classified page faults for one selected process | target `libc` / minimal `windows-sys` |

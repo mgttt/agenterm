@@ -1,6 +1,7 @@
 use std::{
     io,
     os::windows::io::{AsHandle, AsRawHandle, BorrowedHandle, FromRawHandle as _, OwnedHandle},
+    time::{Duration, Instant},
 };
 
 use windows_sys::Win32::{
@@ -13,7 +14,7 @@ use windows_sys::Win32::{
     },
 };
 
-use crate::process_reference::ProcessReferenceHandle;
+use crate::process_reference::{ProcessReferenceHandle, ProcessWait};
 
 const SYNCHRONIZE_ACCESS: u32 = 0x0010_0000;
 
@@ -44,15 +45,8 @@ impl ProcessReference {
         self.process_id
     }
 
-    pub(crate) fn is_alive(&self) -> io::Result<bool> {
-        match unsafe { WaitForSingleObject(self.handle.as_raw_handle(), 0) } {
-            WAIT_TIMEOUT => Ok(true),
-            WAIT_OBJECT_0 => Ok(false),
-            WAIT_FAILED => Err(io::Error::last_os_error()),
-            status => Err(io::Error::other(format!(
-                "unexpected process wait status {status}"
-            ))),
-        }
+    pub(crate) fn wait_for_exit(&self, timeout: Option<Duration>) -> io::Result<ProcessWait> {
+        wait(self.handle.as_raw_handle(), timeout)
     }
 }
 
@@ -98,6 +92,48 @@ impl ProcessReferenceHandle for BorrowedHandle<'_> {
                 process_id,
             },
         ))
+    }
+
+    fn wait_for_process_exit(self, timeout: Option<Duration>) -> io::Result<ProcessWait> {
+        wait(self.as_raw_handle(), timeout)
+    }
+}
+
+fn wait(
+    handle: std::os::windows::io::RawHandle,
+    timeout: Option<Duration>,
+) -> io::Result<ProcessWait> {
+    const MAX_FINITE_WAIT_MS: u32 = u32::MAX - 1;
+
+    let started = Instant::now();
+    loop {
+        let native_timeout = match timeout {
+            None => u32::MAX,
+            Some(limit) => {
+                let remaining = limit.saturating_sub(started.elapsed());
+                if remaining.is_zero() {
+                    0
+                } else {
+                    remaining
+                        .as_millis()
+                        .saturating_add(1)
+                        .min(u128::from(MAX_FINITE_WAIT_MS)) as u32
+                }
+            }
+        };
+        match unsafe { WaitForSingleObject(handle, native_timeout) } {
+            WAIT_OBJECT_0 => return Ok(ProcessWait::Exited),
+            WAIT_TIMEOUT if timeout.is_some_and(|limit| started.elapsed() >= limit) => {
+                return Ok(ProcessWait::TimedOut);
+            }
+            WAIT_TIMEOUT => {}
+            WAIT_FAILED => return Err(io::Error::last_os_error()),
+            status => {
+                return Err(io::Error::other(format!(
+                    "unexpected process wait status {status}"
+                )));
+            }
+        }
     }
 }
 

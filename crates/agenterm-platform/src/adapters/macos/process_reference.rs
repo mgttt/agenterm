@@ -2,7 +2,10 @@ use std::{
     io,
     os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd as _, OwnedFd},
     sync::atomic::{AtomicBool, Ordering},
+    time::{Duration, Instant},
 };
+
+use crate::process_reference::ProcessWait;
 
 pub struct ProcessReference {
     queue: OwnedFd,
@@ -49,39 +52,55 @@ impl ProcessReference {
         self.process_id
     }
 
-    pub(crate) fn is_alive(&self) -> io::Result<bool> {
+    pub(crate) fn wait_for_exit(&self, timeout: Option<Duration>) -> io::Result<ProcessWait> {
         if self.exited.load(Ordering::Acquire) {
-            return Ok(false);
+            return Ok(ProcessWait::Exited);
         }
-        let mut event = unsafe { std::mem::zeroed::<libc::kevent>() };
-        let timeout = libc::timespec {
-            tv_sec: 0,
-            tv_nsec: 0,
-        };
-        let ready = unsafe {
-            libc::kevent(
-                self.queue.as_raw_fd(),
-                std::ptr::null(),
-                0,
-                &raw mut event,
-                1,
-                &raw const timeout,
-            )
-        };
-        match ready {
-            0 => Ok(true),
-            1 if event.filter == libc::EVFILT_PROC && event.fflags & libc::NOTE_EXIT != 0 => {
-                self.exited.store(true, Ordering::Release);
-                Ok(false)
+        let started = Instant::now();
+        loop {
+            let mut event = unsafe { std::mem::zeroed::<libc::kevent>() };
+            let remaining = timeout.map(|limit| limit.saturating_sub(started.elapsed()));
+            let native_timeout = remaining.map(|duration| libc::timespec {
+                tv_sec: duration.as_secs().min(i64::MAX as u64) as libc::time_t,
+                tv_nsec: duration.subsec_nanos().into(),
+            });
+            let ready = unsafe {
+                libc::kevent(
+                    self.queue.as_raw_fd(),
+                    std::ptr::null(),
+                    0,
+                    &raw mut event,
+                    1,
+                    native_timeout
+                        .as_ref()
+                        .map_or(std::ptr::null(), std::ptr::from_ref),
+                )
+            };
+            match ready {
+                0 if timeout.is_some_and(|limit| started.elapsed() >= limit) => {
+                    return Ok(ProcessWait::TimedOut);
+                }
+                0 => {}
+                1 if event.flags & libc::EV_ERROR != 0 => {
+                    return Err(io::Error::from_raw_os_error(event.data as i32));
+                }
+                1 if event.filter == libc::EVFILT_PROC && event.fflags & libc::NOTE_EXIT != 0 => {
+                    self.exited.store(true, Ordering::Release);
+                    return Ok(ProcessWait::Exited);
+                }
+                1 => return Err(io::Error::other("unexpected kqueue process event")),
+                -1 => {
+                    let error = io::Error::last_os_error();
+                    if error.kind() != io::ErrorKind::Interrupted {
+                        return Err(error);
+                    }
+                }
+                value => {
+                    return Err(io::Error::other(format!(
+                        "unexpected kqueue result {value}"
+                    )));
+                }
             }
-            1 if event.flags & libc::EV_ERROR != 0 => {
-                Err(io::Error::from_raw_os_error(event.data as i32))
-            }
-            1 => Err(io::Error::other("unexpected kqueue process event")),
-            -1 => Err(io::Error::last_os_error()),
-            value => Err(io::Error::other(format!(
-                "unexpected kqueue result {value}"
-            ))),
         }
     }
 }
