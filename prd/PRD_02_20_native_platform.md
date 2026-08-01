@@ -493,6 +493,12 @@ integrated validation recorded below):
   A Windows-hosted Linux-target all-feature Clippy run passes with warnings
   denied; it also exposed and closed stale PTY, clipboard-timeout and IPC-test
   cross-target compile defects.
+- [x] Native dependencies are isolated by Cargo capability feature. Win32
+  module features are forwarded from process, filesystem, locking, IPC,
+  window, clipboard, screenshot, and font rather than declared as one global
+  union. Default and each individual capability compile independently; on
+  Windows the minimal process/filesystem dependency trees contain only
+  `windows-sys -> windows-link` and do not activate UI/GDI/clipboard modules.
 - [x] Control Center state-directory protection, exclusive state-file creation,
   atomic replacement, existing-window focus, and direct native capture now
   call `services::control_center → selected → adapters/{windows,linux,macos}`.

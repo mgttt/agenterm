@@ -203,6 +203,10 @@ raw window identity、resize/present、focus、200ms poll 与 renderer-owned fra
 OS shell selector 文件删除。Windows host 上的 Linux-target crate all-feature Clippy
 以 warnings denied 通过，并同时修复 PTY private-error destructure、clipboard timeout
 调用与陈旧 IPC/product-path test 等此前未被 Windows 编译发现的问题。总边界门禁剩 8 行。
+Dependency isolation 叶把 `windows-sys` 的全局 Win32 feature union 拆到各 capability
+feature：process/filesystem/locking/ipc/window/clipboard/screenshot/font 只转发自己的
+模块。默认、8 个单 feature compile checks 均通过；Windows 上 `cargo tree` 证明最小
+process 与 filesystem 均只有 `windows-sys → windows-link`，不再隐式带 UI/GDI/clipboard。
 
 2026-08-01 首个建设期增量：Cockpit snapshot 新增明确的
 `tab_counts.{total,running,dead}`，native shell 同源显示 logical instance、

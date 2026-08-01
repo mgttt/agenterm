@@ -27,7 +27,9 @@ illustration and advances as the extraction lands.
 ## Features
 
 The default feature set is empty. The contract/status surface therefore adds no
-third-party dependency.
+third-party dependency. Native dependency subfeatures are forwarded by the
+owning capability; enabling `process` or `filesystem` does not enable UI, GDI,
+clipboard, IPC, or screenshot modules.
 
 | Feature | Public capability | Extra dependency |
 |---|---|---|
