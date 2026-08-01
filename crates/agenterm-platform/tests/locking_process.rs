@@ -28,6 +28,8 @@ fn path_lock_is_cross_process_and_released() {
     run_test_child(&path, "contended");
     drop(guard);
     run_test_child(&path, "available");
+    run_test_child(&path, "exit-without-drop");
+    PathLock::try_acquire(&path).expect("lock released when owner process exits");
     std::fs::remove_dir_all(directory).expect("remove process-lock fixture");
 }
 
@@ -42,6 +44,10 @@ fn run_child(mode: &std::ffi::OsStr, path: &Path) {
         }
         "available" => {
             PathLock::try_acquire(path).expect("child acquires released lock");
+        }
+        "exit-without-drop" => {
+            let _guard = PathLock::acquire(path).expect("child acquires crash-release lock");
+            std::process::exit(0);
         }
         other => panic!("unknown lock child mode: {other}"),
     }
