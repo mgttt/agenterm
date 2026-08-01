@@ -344,6 +344,11 @@ Release 全部是本轮明确非目标。
   top-level style 已恢复 child clipping；重复 layout 对未变化 child bounds/visibility
   也会 no-op，不再无条件触发 `MoveWindow`/`ShowWindow` paint storm。Windows host 的
   style/geometry contract tests 固定这两条边界。
+  用户观察到 smoke 的白底阶段明显更卡；同一 window/modal/screenshot 路径的两组
+  Dark/Light A/B 为 528/572 ms 与 663/553 ms，Light 没有稳定慢路径，更不是 4x。
+  smoke 恰在持久化 Light 后进入 CWD/OSC7、层级 mutation、8-tab dense fixture、80 行
+  output、scroll/selection 和 server recovery 的重负载半程，颜色与负载阶段高度混杂。
+  该结论排除“颜色填充本身 4x”，但不替代 paint/invalidate 时间域观察。
   该证据只能证明源头被切断和帧提交结构，不能证明时间域视觉效果；新构建的
   高输出/idle 60fps 真机观察和 paint/invalidate telemetry 仍是关闭条件。
 - [ ] alternate-screen harness 无法本地向上滚动；初步证据指向 `vt100`

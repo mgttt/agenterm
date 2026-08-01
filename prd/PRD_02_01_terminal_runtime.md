@@ -85,7 +85,12 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   EDIT/BUTTON pixels before each child repainted. The platform host again clips
   child HWND regions, and unchanged child bounds/visibility now skip redundant
   `MoveWindow`/`ShowWindow` paint churn. Style and geometry contracts cover both
-  invariants. Focused structural tests pass,
+  invariants. A same-window/same-modal synchronous screenshot A/B measured
+  Dark/Light at 528/572 ms and 663/553 ms; Light is not a distinct 4x paint
+  path. The full smoke applies Light immediately before its IPC-heavy CWD,
+  hierarchy, dense-tab, 80-line scroll, selection, and recovery half, explaining
+  a strong visual correlation without dismissing remaining temporal flicker.
+  Focused structural tests pass,
   but they cannot establish temporal visual stability. Diagnostic paint counts
   and high-output plus idle real-time dogfood evidence on the new binary remain
   required before restoring shipped status.
