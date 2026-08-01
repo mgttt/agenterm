@@ -59,7 +59,7 @@ mod tests {
 
     #[test]
     fn a_missing_process_is_distinct_from_an_observation_failure() {
-        let error = metrics(u32::MAX).expect_err("maximum PID must not exist");
+        let error = metrics(i32::MAX as u32).expect_err("maximum portable PID must not exist");
         assert_eq!(error.kind(), ProcessMetricsErrorKind::NotFound);
     }
 }
