@@ -4,6 +4,7 @@ use std::process::{Child, ChildStderr, ChildStdout, Command};
 
 use crate::contract::process::{PipeProbeError, PipeProbeToken};
 use crate::contract::process::{ProcessError, ProcessErrorKind, ProcessInfo, ProcessObservation};
+use crate::process_observation::observe;
 
 pub(crate) fn write_parent_console_stderr(message: &str) -> bool {
     use std::io::Write as _;
@@ -19,38 +20,6 @@ pub(crate) fn stderr_probe_token(_reader: &ChildStderr) -> Option<PipeProbeToken
 }
 pub(crate) fn pipe_available(_token: PipeProbeToken) -> Result<usize, PipeProbeError> {
     Err(PipeProbeError::Failed)
-}
-
-pub(crate) fn observe(pid: u32) -> ProcessObservation {
-    let Ok(pid) = i32::try_from(pid) else {
-        return ProcessObservation::Dead {
-            reason: "process_id_out_of_range".to_owned(),
-        };
-    };
-    let mut info = unsafe { std::mem::zeroed::<libc::proc_bsdinfo>() };
-    let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
-    let read =
-        unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 0, (&raw mut info).cast(), size) };
-    if read != size {
-        let error = std::io::Error::last_os_error();
-        return match error.raw_os_error() {
-            Some(libc::ESRCH) => ProcessObservation::Dead {
-                reason: "process_not_found".to_owned(),
-            },
-            Some(libc::EPERM) | Some(libc::EACCES) => ProcessObservation::Unknown {
-                reason: "process_access_denied".to_owned(),
-            },
-            _ => ProcessObservation::Unknown {
-                reason: format!("process_identity_read_failed:{error}"),
-            },
-        };
-    }
-    ProcessObservation::Live {
-        start_identity: Some(format!(
-            "macos-start-time:{}.{}",
-            info.pbi_start_tvsec, info.pbi_start_tvusec
-        )),
-    }
 }
 
 pub(crate) fn list() -> Result<Vec<ProcessInfo>, ProcessError> {

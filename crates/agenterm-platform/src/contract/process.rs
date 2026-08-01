@@ -1,12 +1,6 @@
 //! OS-neutral process facts and typed failures consumed by facade services.
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-#[non_exhaustive]
-pub enum ProcessObservation {
-    Live { start_identity: Option<String> },
-    Dead { reason: String },
-    Unknown { reason: String },
-}
+pub use super::process_observation::ProcessObservation;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProcessInfo {

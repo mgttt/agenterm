@@ -30,6 +30,8 @@ pub mod process_control;
 pub mod process_image;
 #[cfg(feature = "process-metrics")]
 pub mod process_metrics;
+#[cfg(feature = "process-observation")]
+pub mod process_observation;
 #[cfg(feature = "process-spawn")]
 pub mod process_spawn;
 #[cfg(feature = "window")]

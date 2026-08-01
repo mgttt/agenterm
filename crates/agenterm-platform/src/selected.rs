@@ -187,6 +187,18 @@ pub(crate) mod process_metrics;
 #[path = "adapters/macos/process_metrics.rs"]
 pub(crate) mod process_metrics;
 
+#[cfg(all(feature = "process-observation", windows))]
+#[path = "adapters/windows/process_observation.rs"]
+pub(crate) mod process_observation;
+
+#[cfg(all(feature = "process-observation", target_os = "linux"))]
+#[path = "adapters/linux/process_observation.rs"]
+pub(crate) mod process_observation;
+
+#[cfg(all(feature = "process-observation", target_os = "macos"))]
+#[path = "adapters/macos/process_observation.rs"]
+pub(crate) mod process_observation;
+
 #[cfg(all(feature = "process-spawn", windows))]
 #[path = "adapters/windows/process_spawn.rs"]
 pub(crate) mod process_spawn;

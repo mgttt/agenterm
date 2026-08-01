@@ -46,6 +46,7 @@ clipboard, IPC, or screenshot modules.
 | `console-interrupt` | RAII Ctrl-C/SIGINT observation or temporary ignore with typed failures | target `libc` / minimal `windows-sys` |
 | `user-identity` | current Windows SID or POSIX real/effective uid/gid facts | target `libc` / minimal `windows-sys` |
 | `process-control` | typed single-process termination and Unix suspend/resume | target `libc` / minimal `windows-sys` |
+| `process-observation` | fail-closed single-process liveness and stable start identity | target `libc` / minimal `windows-sys` |
 | `process-image` | executable path for one selected host process | target `libc` / minimal `windows-sys` |
 | `process-metrics` | cumulative CPU time, resident bytes and partially classified page faults for one selected process | target `libc` / minimal `windows-sys` |
 | `process-spawn` | detached child launch with retained `Child`, explicit Windows job fallback, ambient-stdio protection and a shared handle-inheritance mutation lock | target `libc` / minimal `windows-sys` |
@@ -140,6 +141,13 @@ ambient standard-handle inherit flags are cleared and restored. Explicit child
 stdio, executable discovery, arguments, environment, readiness, restart and
 reaping remain caller policy. The older fire-and-forget entry point remains for
 compatibility, while supervised callers should retain the child handle.
+
+`process_observation::observe` reports `Live`, `Dead`, or fail-closed `Unknown`
+for one PID and includes a native start identity when live. Windows uses process
+creation FILETIME, Linux uses `/proc/<pid>/stat` start ticks and treats zombie
+states as dead, and macOS uses `proc_bsdinfo` start time. Permission, parsing,
+and incomplete-query failures remain `Unknown`; callers must not clean up
+another process's state unless the observation is explicitly `Dead`.
 
 `filesystem_cleanup::remove_tree` is for caller-owned trees that are no longer
 being mutated. It restores only the access needed for removal, treats a missing

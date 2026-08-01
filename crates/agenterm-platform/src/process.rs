@@ -6,33 +6,18 @@
 use std::process::{ChildStderr, ChildStdout, Command};
 
 use crate::{
-    contract::process::{ProcessError, ProcessInfo, ProcessObservation},
+    contract::process::{ProcessError, ProcessInfo},
     selected::process as adapter,
 };
 
 pub use crate::contract::process::ProcessErrorKind;
 pub use crate::contract::process::{PipeProbeError, PipeProbeToken};
+pub use crate::process_observation::{ProcessObservation, observe, start_identity};
 pub use crate::process_spawn::{
     DetachedSpawnMode, ProcessExit, classify_exit_status, configure_detached_command,
     spawn_detached_child, spawn_detached_command,
 };
 pub use adapter::ProcessTreeGuard;
-
-pub fn observe(pid: u32) -> ProcessObservation {
-    adapter::observe(pid)
-}
-
-pub fn start_identity(pid: u32) -> Result<String, String> {
-    match observe(pid) {
-        ProcessObservation::Live {
-            start_identity: Some(identity),
-        } => Ok(identity),
-        ProcessObservation::Live {
-            start_identity: None,
-        } => Err("process is live but its start identity is unavailable".to_owned()),
-        ProcessObservation::Dead { reason } | ProcessObservation::Unknown { reason } => Err(reason),
-    }
-}
 
 pub fn list() -> Result<Vec<ProcessInfo>, ProcessError> {
     adapter::list()
