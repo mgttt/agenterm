@@ -302,6 +302,16 @@ renderer-owned 760×480 PNG 为 58,125 bytes。headless server 下 missing targe
 
 2026-08-01 live dogfood 新增阻断项（结论与修复证据必须回写对应 PRD）：
 
+本轮收口依赖图冻结为：`既有修复/证据复核 → {渲染时间域与字号 resize，
+输入/选区，server detach/Error 5}`；三支只读审计可并行，但 Windows remote
+frontend 是共享热文件，任何实现必须由主线串行集成。渲染支先证明 invalidate、
+paint、focus、font 与 PTY resize 的因果链，再补真机 telemetry/PNG；输入支先区分
+named-key 编码、Win32 投递和 selection 生命周期，再补真实 terminal byte/动态输出
+黑盒；server 支先复核独立 spawn、instance discovery、lease detach 和 workspace
+恢复，再以隔离地址验证同 PID/epoch/tab。最终串行路径固定为聚焦单测 → Quick →
+dev build → 直接归属的 Windows smoke → clean diff/status；Candidate、tag、RC 和
+Release 全部是本轮明确非目标。
+
 - [~] P0：Windows terminal 内容与 native frame 持续闪烁；先区分无状态变化的
   redraw/invalidate loop、背景擦除和 resize/DPI feedback，不以降低刷新率掩盖。
   白箱审计已定位 replaceable GUI 直接在 window HDC 上清空四区后逐层画回，
@@ -353,8 +363,11 @@ renderer-owned 760×480 PNG 为 58,125 bytes。headless server 下 missing targe
   、warnings-denied all-target Clippy、七产物 dev build 与完整 `remote-ui-smoke` 通过；后者
   在真实 native `Z` click 后验证 terminal focus，并继续完成 PTY 输入、字号继承、GUI detach、
   同 server/session 重连及最终 Stop Server cleanup。`WM_COMMAND → synchronous PTY resize`
-  仍可能在 server 忙时阻塞 UI，须以 coalesced async resize 独立硬化，不能用本次焦点修复
-  冒充完成。
+  的白箱复核又发现 native resize 一次失败会污染 terminal fatal error、永久拒绝后续输入，
+  同时 server 仍提交虚假的 `terminal.resized`。该错误边界现已修正：native 接受后才提交
+  parser 网格、`last_size` 与 journal；拒绝返回 retryable typed failure 且不毒化 terminal。
+  两项聚焦回归覆盖失败保留旧网格与成功后原子提交。同步 IPC 在 server 忙时仍可能阻塞
+  UI，须以 coalesced async resize 独立硬化，不能用本次正确性修复冒充完成。
 - [x] 默认 `Keep Server Running` 不再因调用者 Job cleanup 杀死独立 server/PTYS；
   GUI 与 CLI 统一走 platform process facade，完整 replaceable-UI 黑盒已证明退出、
   detached lease、同 server/session 接回与最终显式 Stop Server。live dogfood 又发现

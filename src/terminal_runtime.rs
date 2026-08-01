@@ -10,7 +10,7 @@ use std::{
 
 use anyhow::{Context as _, Result};
 
-use crate::pty::{ChildCommand, PtyChild, PtyMaster, TerminalSize};
+use crate::pty::{ChildCommand, PtyChild, PtyMaster, PtyResult, TerminalSize};
 
 use crate::{
     SCROLLBACK_LINES, request_gui_wake,
@@ -474,15 +474,15 @@ impl TerminalTab {
         changed
     }
 
-    pub(crate) fn resize(&mut self, rows: u16, cols: u16) {
-        if self.last_size == (rows, cols) {
-            return;
-        }
-        self.last_size = (rows, cols);
-        self.parser.screen_mut().set_size(rows, cols);
-        if let Err(error) = self.master.resize(TerminalSize { rows, cols }) {
-            self.error = Some(format!("resize failed: {error}"));
-        }
+    pub(crate) fn resize(&mut self, rows: u16, cols: u16) -> PtyResult<()> {
+        let Self {
+            master,
+            parser,
+            last_size,
+            ..
+        } = self;
+        resize_after_native_accepts(parser, last_size, rows, cols, |size| master.resize(size))?;
+        Ok(())
     }
 
     #[allow(dead_code)] // Used by non-Windows runtime integrations.
@@ -620,6 +620,22 @@ impl TerminalTab {
     }
 }
 
+fn resize_after_native_accepts(
+    parser: &mut vt100::Parser<TerminalCallbacks>,
+    last_size: &mut (u16, u16),
+    rows: u16,
+    cols: u16,
+    native_resize: impl FnOnce(TerminalSize) -> PtyResult<()>,
+) -> PtyResult<bool> {
+    if *last_size == (rows, cols) {
+        return Ok(false);
+    }
+    native_resize(TerminalSize { rows, cols })?;
+    parser.screen_mut().set_size(rows, cols);
+    *last_size = (rows, cols);
+    Ok(true)
+}
+
 impl Drop for TerminalTab {
     fn drop(&mut self) {
         let _ = self.close_process();
@@ -628,7 +644,34 @@ impl Drop for TerminalTab {
 
 #[cfg(test)]
 mod tests {
-    use super::redact_proxy_stream_chunk;
+    use super::{TerminalCallbacks, redact_proxy_stream_chunk, resize_after_native_accepts};
+    use crate::pty::PtyError;
+
+    #[test]
+    fn resize_failure_preserves_screen_and_does_not_become_terminal_fatal_state() {
+        let mut parser = vt100::Parser::new_with_callbacks(24, 80, 0, TerminalCallbacks::default());
+        let mut last_size = (24, 80);
+        let failure = resize_after_native_accepts(&mut parser, &mut last_size, 30, 100, |_| {
+            Err(PtyError::failed("resize", "test_resize_failed", "denied"))
+        });
+
+        assert!(failure.is_err());
+        assert_eq!(last_size, (24, 80));
+        assert_eq!(parser.screen().size(), (24, 80));
+    }
+
+    #[test]
+    fn resize_commits_screen_only_after_native_acceptance() {
+        let mut parser = vt100::Parser::new_with_callbacks(24, 80, 0, TerminalCallbacks::default());
+        let mut last_size = (24, 80);
+
+        assert_eq!(
+            resize_after_native_accepts(&mut parser, &mut last_size, 30, 100, |_| Ok(())),
+            Ok(true)
+        );
+        assert_eq!(last_size, (30, 100));
+        assert_eq!(parser.screen().size(), (30, 100));
+    }
 
     #[test]
     fn proxy_redaction_matches_longest_and_survives_every_chunk_boundary() {

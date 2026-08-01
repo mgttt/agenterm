@@ -99,8 +99,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   previously selected font/background mode before an old RAII font can be
   destroyed. The complete replaceable-UI smoke then continues through PTY input,
   font inheritance, GUI detach, same-server/session reconnect and explicit Stop
-  Server cleanup. Coalescing the still-synchronous remote PTY resize is separate
-  remaining latency work.
+  Server cleanup. A deeper dogfood failure was also found: one transient native
+  PTY resize error used to poison the terminal's fatal I/O state, so all later
+  input was rejected while the GUI remained alive, and the server nevertheless
+  published a false successful resize. Resize now returns a typed failure,
+  commits parser geometry and the resize journal only after native acceptance,
+  and leaves the terminal writable after rejection. Coalescing the still-
+  synchronous remote PTY resize is separate remaining latency work.
 - [x] GUI shell appears before the initial ConPTY/cmd process is ready
 - [x] initial terminal loads asynchronously with visible starting feedback
 - [x] exited process retains its final screen and exit code

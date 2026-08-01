@@ -1220,7 +1220,14 @@ impl ServerState {
                 (Some(length), None, None)
             }
             UiInteraction::Resize { rows, columns, .. } => {
-                self.tabs[position].resize(rows, columns);
+                if let Err(error) = self.tabs[position].resize(rows, columns) {
+                    return IpcResponse::typed_failure(
+                        format!("terminal resize was rejected: {error}"),
+                        "terminal_resize_failed",
+                        "runtime",
+                        true,
+                    );
+                }
                 self.event_journal.commit(
                     EventKind::TerminalResized,
                     Some(tab_id),
