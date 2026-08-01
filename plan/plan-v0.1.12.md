@@ -909,6 +909,12 @@ Cockpit
   Linux x64 重现 winit 丢弃 background core events，现把 no-activate witness 与输入阶段
   分离，显式 foreground 后以 XTest 投递，并要求 renderer `last_native_input` 后恢复 witness。
   三项均等待后继 exact-SHA matching-host 回执，不能把本失败 run 记绿；
+- 后继 exact-SHA `9669326` ordinary CI run `30721636280` 六格全绿：Windows x64
+  quality gate 关闭 transient PowerShell reference，Windows/Linux ARM64 与 macOS x86_64
+  portable cells 通过，Linux x64 原生 CC journey 真实通过 XTest keyboard/pointer receipt
+  与 witness restore，macOS ARM64 原生 CC journey 通过持续 incompatible fixture、recovery
+  和 owner mailbox。该 run 是这些叶子的 matching-host 完成证据，但不替代仍开放的 Unix
+  主工作台 journey、真人视觉/物理输入验收、Candidate qualification 或 Promotion 授权；
 - Workflows、Extensions、InfoHub 可以改进解释与导航，但没有 owning backend
   前继续显示真实 empty/unavailable，不造假数据。
 

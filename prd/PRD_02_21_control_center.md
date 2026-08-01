@@ -214,7 +214,9 @@ Control Center is the product name; the executable family uses
   only one connection: the renderer briefly observed `server_incompatible`
   before its next refresh truthfully became `server_unreachable`. The fixture
   now remains bounded and ready/stop-handshaked while serving every refresh;
-  owner/state/reason assertions are not relaxed.
+  owner/state/reason assertions are not relaxed. The follow-up exact-SHA
+  `9669326` run `30721636280` passed both native macOS architectures, including
+  incompatible snapshot/render truth, recovery and the owner-mailbox lifecycle.
   Windows qualification evidence and
   Linux/macOS matching-host evidence are registered in separate gate manifests
   but participate in one exact PRD alignment parity check; cross-target compile
@@ -448,8 +450,9 @@ future promotion gates.
   then restores the witness while the Control Center PID, server
   PID/endpoint/epoch and PTYs remain unchanged. Wayland emits no positive-input
   evidence. Exact-SHA `ceb41a4` run `30721132723` reproduced the old core-event
-  timeout and is the negative baseline; a new real Linux CI execution, Wayland
-  native evidence, six-cell reruns and packaged evidence remain open.
+  timeout and is the negative baseline; exact-SHA `9669326` run `30721636280`
+  then passed the native Linux X11 journey and all six ordinary CI target jobs.
+  Wayland native evidence and packaged evidence remain open.
 - [~] the Linux journey creates its isolated runtime as a direct `0700`
   directory owned by the effective UID before binding the Unix endpoint; the
   smoke verifies both owner and mode instead of weakening the production IPC
