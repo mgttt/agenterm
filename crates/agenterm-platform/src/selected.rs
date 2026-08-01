@@ -83,6 +83,18 @@ pub(crate) mod process_window;
 #[path = "adapters/windows/window.rs"]
 pub(crate) mod window;
 
+#[cfg(all(feature = "window", feature = "input", windows))]
+#[path = "adapters/windows/control_window.rs"]
+pub(crate) mod control_window;
+
+#[cfg(all(feature = "window", feature = "input", target_os = "linux"))]
+#[path = "adapters/linux/control_window.rs"]
+pub(crate) mod control_window;
+
+#[cfg(all(feature = "window", feature = "input", target_os = "macos"))]
+#[path = "adapters/macos/control_window.rs"]
+pub(crate) mod control_window;
+
 #[cfg(all(feature = "window", target_os = "linux"))]
 #[path = "adapters/linux/window.rs"]
 pub(crate) mod window;

@@ -252,6 +252,20 @@ BeginPaint/double-buffer present、系统菜单、焦点/控件文本和 native 
 server/client、tabs/tree/composer/settings/theme、selection/scrollback、close policy、snapshot 与
 绘制组合。该分层明确排除接受 raw integer/closure 的临时薄 facade，也禁止 crate 反向出现
 Agenterm action、theme、Control Center、Fleet 或 protocol 类型。
+该依赖图的 contract/native-host 叶现已落地：crate 公开 neutral control IDs、controls、
+FocusTarget、pre-translation consumable key preview、minimized resize、pointer/double-click、
+poll/system-menu events、control-window operations 和 `ControlCanvas`；Windows adapter 实现
+class/window/child controls、timer/message loop、deferred destroy、UTF-16 text decoding、完整
+terminal named-key normalization、capture/cursor/focus/control text 和单次 GDI double-buffer
+present。零尺寸 paint 被跳过，surface/present/menu failures typed，class style 仅保留
+`CS_DBLCLKS`。Linux/macOS 明确 Unsupported。49 项 crate tests、crate 和 root
+warnings-denied Clippy、root all-target check 通过；root product controller 尚未接入，native
+automation injection、跨平台 control shell 仍未完成。
+同时，root selector 的 IPC、script-host、supervisor-audit 与 XRGB screenshot 分支已改为
+cfg-free product policy/直接 crate facade，12 个重复 adapter 文件删除；TLS、Control Center
+和 frontend 选择仍按其未完成前置保留。Windows batch aliases 现在由 `.gitattributes` 强制
+CRLF，Quick 已能进入 376 项 library tests，不再死在 bootstrap label；当前唯一失败仍是
+故意保持红色的 3 项严格 native-boundary findings。
 
 2026-08-01 首个建设期增量：Cockpit snapshot 新增明确的
 `tab_counts.{total,running,dead}`，native shell 同源显示 logical instance、

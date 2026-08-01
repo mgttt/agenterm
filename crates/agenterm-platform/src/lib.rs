@@ -85,6 +85,9 @@ pub mod activation;
 #[cfg(feature = "clipboard")]
 pub mod clipboard;
 
+#[cfg(all(feature = "window", feature = "input"))]
+pub mod control_window;
+
 #[cfg(feature = "font")]
 pub mod font;
 

@@ -552,6 +552,23 @@ integrated validation recorded below):
   import deletion, then final root selector deletion. Raw-handle or closure
   forwarding facades are explicitly excluded because they would preserve the
   ownership leak instead of establishing the external crate boundary.
+- [x] The neutral control-window contract and selected Windows native host are
+  implemented in `agenterm-platform`. The host owns native class/window/child
+  controls, the timer/message loop, deferred destruction, pre-translation
+  consumable key preview for child edits, minimized resize facts, UTF-16 text
+  decoding, named-key normalization, capture/focus/cursor/control operations,
+  and one double-buffered GDI present per paint. Zero-size paints are ignored,
+  native menu/surface/present failures are typed, and the class deliberately
+  omits horizontal/vertical redraw styles. Linux/macOS return typed
+  Unsupported. Crate tests pass 49/49 with warnings denied; root all-target
+  check and Clippy also pass. Product `RemoteWindowState` integration, native
+  automation injection and non-Windows control shells remain incomplete.
+- [x] Root IPC, Script-host availability, supervisor-audit path policy and XRGB
+  screenshot encoding no longer require selected adapter modules. They compose
+  product paths/capability facts from the crate `PlatformKind` or call the crate
+  facade directly; twelve duplicate product adapter files are deleted. TLS,
+  Control Center and frontend selection remain until their typed prerequisites
+  are complete.
 - [x] Control Center state-directory protection, exclusive state-file creation,
   atomic replacement, existing-window focus, and direct native capture now
   call `services::control_center → selected → adapters/{windows,linux,macos}`.

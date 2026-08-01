@@ -39,7 +39,7 @@ clipboard, IPC, or screenshot modules.
 | `locking` | cross-process path locks and bounded slot permits | target `libc` / `windows-sys` |
 | `ipc` | typed endpoints and native listener/byte stream | `locking`, target native APIs |
 | `pty` | PTY command/master/child lifecycle | `process`, `rmux-pty` |
-| `window` | display facts, geometry, generic native text-window host and process-window automation | target Win32 APIs / Unix `winit` + `softbuffer` |
+| `window` | display facts, geometry, native text/pixel/control hosts and process-window automation | target Win32 APIs / Unix `winit` + `softbuffer` |
 | `input` | normalized key classification, UTF-16 text decoding, primary-shortcut policy | `window` |
 | `ime` | preedit/commit state machine and the neutral pixel-window runner when `window` + `input` are enabled | `input` |
 | `activation` | neutral policy, typed requests, native window operation and application wake | `window`, target `winit` / Win32 |
@@ -62,6 +62,7 @@ clipboard, IPC, or screenshot modules.
 | process-window automation | Win32 | typed Unsupported | typed Unsupported |
 | native text window | Win32/GDI | winit + softbuffer | winit + softbuffer |
 | neutral pixel-window host | typed Unsupported | winit + softbuffer | winit + softbuffer |
+| neutral control-window host | Win32 controls/GDI | typed Unsupported | typed Unsupported |
 | normalized input | Control/AltGr policy | Control/Super policy | Command/Control policy |
 | IME composition | typed Unsupported | display-aware | display-aware |
 | activation | native show/focus | winit active intent | winit application intent |
@@ -120,3 +121,11 @@ a cloneable neutral window control and a mutable XRGB frame; `winit`,
 `softbuffer`, native display details and event-loop proxies stay private to the
 selected adapter. A `WindowWaker` can wake the loop from worker threads and
 returns a typed failure after that loop exits.
+
+Embedders enabling `window` and `input` can implement
+`control_window::ControlWindowApplication` and call
+`control_window::run_control_window`. Windows owns native child controls,
+system-menu dispatch, focus/capture/cursor operations, polling, the message
+loop, and double-buffered GDI presentation. Callbacks and `ControlCanvas`
+contain only stable platform-neutral values. Linux and macOS return typed
+`Unsupported` until their native control shells ship.

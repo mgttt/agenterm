@@ -1,0 +1,830 @@
+//! Win32 native control-window host. Native handles never cross this module.
+
+use std::{cell::Cell, collections::HashMap, io, mem, ptr, rc::Rc, time::Instant};
+
+use windows_sys::Win32::{
+    Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
+    Graphics::Gdi::{
+        BeginPaint, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, CreatePen,
+        CreateSolidBrush, DeleteDC, DeleteObject, EndPaint, FillRect, GetStockObject,
+        InvalidateRect, LineTo, MoveToEx, PAINTSTRUCT, PS_SOLID, Rectangle, SRCCOPY,
+        ScreenToClient, SelectObject, SetBkMode, SetTextColor, TRANSPARENT, TextOutW, WHITE_BRUSH,
+    },
+    System::LibraryLoader::GetModuleHandleW,
+    UI::{
+        Input::KeyboardAndMouse::{
+            EnableWindow, GetKeyState, ReleaseCapture, SetCapture, SetFocus, VK_BACK, VK_CONTROL,
+            VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_F1, VK_F2, VK_F3, VK_F4, VK_F5, VK_F6, VK_F7,
+            VK_F8, VK_F9, VK_F10, VK_F11, VK_F12, VK_HOME, VK_INSERT, VK_LEFT, VK_MENU, VK_NEXT,
+            VK_PRIOR, VK_RETURN, VK_RIGHT, VK_SHIFT, VK_SPACE, VK_TAB, VK_UP,
+        },
+        WindowsAndMessaging::{
+            AppendMenuW, CS_DBLCLKS, CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DestroyWindow,
+            DispatchMessageW, EnableMenuItem, GWLP_USERDATA, GetClientRect, GetMessageW,
+            GetSystemMenu, GetWindowLongPtrW, GetWindowTextLengthW, GetWindowTextW, IDC_ARROW,
+            IDC_HAND, IDC_IBEAM, IDC_SIZENS, IDC_SIZEWE, LoadCursorW, MF_BYCOMMAND, MF_ENABLED,
+            MF_GRAYED, MF_SEPARATOR, MF_STRING, MSG, MoveWindow, PostMessageW, PostQuitMessage,
+            RegisterClassW, SIZE_MINIMIZED, SW_HIDE, SW_SHOW, SW_SHOWNOACTIVATE, SetCursor,
+            SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowTextW, ShowWindow,
+            TranslateMessage, WM_APP, WM_CAPTURECHANGED, WM_CHAR, WM_CLOSE, WM_COMMAND, WM_DESTROY,
+            WM_ERASEBKGND, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN,
+            WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY,
+            WM_PAINT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETFOCUS, WM_SIZE, WM_SYSCOMMAND, WM_TIMER,
+            WNDCLASSW, WS_CHILD, WS_EX_CLIENTEDGE, WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE,
+        },
+    },
+};
+
+use crate::{
+    contract::input::{
+        KeyClassification, KeyPressState, LogicalKey, ModifierState, NamedKey, NormalizedKeyEvent,
+        PhysicalKeyCode, Utf16TextDecoder,
+    },
+    control_window::{
+        ButtonState, ControlCanvas, ControlCursor, ControlId, ControlKind, ControlWheelDelta,
+        ControlWindow, ControlWindowApplication, ControlWindowBackend, ControlWindowDirective,
+        ControlWindowError, ControlWindowEvent, ControlWindowOptions, FocusTarget, MenuCommandId,
+        PixelPoint, PixelRect, PixelSize, PointerButton, Rgb8,
+    },
+};
+
+const TIMER_ID: usize = 1;
+const DEFERRED_CLOSE: u32 = WM_APP + 1;
+const SYSTEM_MENU_BASE: usize = 0xA100;
+
+struct Backend {
+    window: Cell<HWND>,
+    controls: HashMap<ControlId, HWND>,
+}
+
+impl Backend {
+    fn control(&self, id: ControlId) -> Result<HWND, ControlWindowError> {
+        self.controls.get(&id).copied().ok_or_else(|| {
+            ControlWindowError::failed(
+                "control_window_unknown_control",
+                format!("unknown control {}", id.0),
+            )
+        })
+    }
+
+    fn focus_target(&self, hwnd: HWND) -> FocusTarget {
+        self.controls
+            .iter()
+            .find_map(|(id, control)| (*control == hwnd).then_some(FocusTarget::Control(*id)))
+            .unwrap_or(FocusTarget::Window)
+    }
+}
+
+impl ControlWindowBackend for Backend {
+    fn request_redraw(&self) {
+        unsafe {
+            InvalidateRect(self.window.get(), ptr::null(), 0);
+        }
+    }
+    fn close(&self) {
+        unsafe {
+            PostMessageW(self.window.get(), DEFERRED_CLOSE, 0, 0);
+        }
+    }
+    fn focus(&self) {
+        unsafe {
+            SetForegroundWindow(self.window.get());
+            SetFocus(self.window.get());
+        }
+    }
+    fn client_size(&self) -> PixelSize {
+        client_size(self.window.get())
+    }
+    fn set_title(&self, title: &str) -> Result<(), ControlWindowError> {
+        let w = wide(title);
+        if unsafe { SetWindowTextW(self.window.get(), w.as_ptr()) } == 0 {
+            Err(last_error("control_window_set_title_failed"))
+        } else {
+            Ok(())
+        }
+    }
+    fn set_control_text(&self, id: ControlId, text: &str) -> Result<(), ControlWindowError> {
+        let w = wide(text);
+        if unsafe { SetWindowTextW(self.control(id)?, w.as_ptr()) } == 0 {
+            Err(last_error("control_window_set_control_text_failed"))
+        } else {
+            Ok(())
+        }
+    }
+    fn control_text(&self, id: ControlId) -> Result<String, ControlWindowError> {
+        let hwnd = self.control(id)?;
+        let len = unsafe { GetWindowTextLengthW(hwnd) };
+        let mut value = vec![0u16; usize::try_from(len).unwrap_or(0) + 1];
+        let copied = unsafe {
+            GetWindowTextW(
+                hwnd,
+                value.as_mut_ptr(),
+                i32::try_from(value.len()).unwrap_or(i32::MAX),
+            )
+        };
+        if copied == 0 && len > 0 {
+            return Err(last_error("control_window_get_control_text_failed"));
+        }
+        Ok(String::from_utf16_lossy(
+            &value[..usize::try_from(copied).unwrap_or(0)],
+        ))
+    }
+    fn set_control_bounds(&self, id: ControlId, b: PixelRect) -> Result<(), ControlWindowError> {
+        if unsafe {
+            MoveWindow(
+                self.control(id)?,
+                b.origin.x,
+                b.origin.y,
+                i32_size(b.size.width),
+                i32_size(b.size.height),
+                1,
+            )
+        } == 0
+        {
+            Err(last_error("control_window_layout_failed"))
+        } else {
+            Ok(())
+        }
+    }
+    fn set_control_enabled(&self, id: ControlId, enabled: bool) -> Result<(), ControlWindowError> {
+        unsafe {
+            EnableWindow(self.control(id)?, enabled as i32);
+        }
+        Ok(())
+    }
+    fn set_control_visible(&self, id: ControlId, visible: bool) -> Result<(), ControlWindowError> {
+        unsafe {
+            ShowWindow(self.control(id)?, if visible { SW_SHOW } else { SW_HIDE });
+        }
+        Ok(())
+    }
+    fn focus_control(&self, id: ControlId) -> Result<(), ControlWindowError> {
+        unsafe {
+            SetFocus(self.control(id)?);
+        }
+        Ok(())
+    }
+    fn set_pointer_capture(&self, capture: bool) -> Result<(), ControlWindowError> {
+        unsafe {
+            if capture {
+                SetCapture(self.window.get());
+            } else {
+                ReleaseCapture();
+            }
+        }
+        Ok(())
+    }
+    fn set_cursor(&self, cursor: ControlCursor) -> Result<(), ControlWindowError> {
+        let id = match cursor {
+            ControlCursor::Arrow => IDC_ARROW,
+            ControlCursor::Hand => IDC_HAND,
+            ControlCursor::Text => IDC_IBEAM,
+            ControlCursor::ResizeHorizontal => IDC_SIZEWE,
+            ControlCursor::ResizeVertical => IDC_SIZENS,
+        };
+        let value = unsafe { LoadCursorW(ptr::null_mut(), id) };
+        if value.is_null() {
+            Err(last_error("control_window_cursor_load_failed"))
+        } else {
+            unsafe {
+                SetCursor(value);
+            }
+            Ok(())
+        }
+    }
+}
+
+struct State {
+    window: ControlWindow,
+    application: Box<dyn ControlWindowApplication>,
+    system_menu_commands: HashMap<usize, MenuCommandId>,
+    text_decoder: Utf16TextDecoder,
+    deferred_error: Option<ControlWindowError>,
+    destroying: bool,
+}
+
+pub(crate) fn run_control_window(
+    options: ControlWindowOptions,
+    application: Box<dyn ControlWindowApplication>,
+) -> Result<(), ControlWindowError> {
+    let instance = unsafe { GetModuleHandleW(ptr::null()) };
+    if instance.is_null() {
+        return Err(last_error("control_window_module_handle_failed"));
+    }
+    let class = wide("AgentermPlatformControlWindow");
+    let wc = WNDCLASSW {
+        style: CS_DBLCLKS,
+        lpfnWndProc: Some(window_proc),
+        hInstance: instance,
+        hCursor: unsafe { LoadCursorW(ptr::null_mut(), IDC_ARROW) },
+        hbrBackground: unsafe { GetStockObject(WHITE_BRUSH) } as _,
+        lpszClassName: class.as_ptr(),
+        ..unsafe { mem::zeroed() }
+    };
+    if unsafe { RegisterClassW(&wc) } == 0 {
+        let e = io::Error::last_os_error();
+        if e.raw_os_error() != Some(1410) {
+            return Err(ControlWindowError::failed(
+                "control_window_class_register_failed",
+                e,
+            ));
+        }
+    }
+    let title = wide(&options.title);
+    let hwnd = unsafe {
+        CreateWindowExW(
+            0,
+            class.as_ptr(),
+            title.as_ptr(),
+            WS_OVERLAPPEDWINDOW,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            i32_size(options.initial_size.width),
+            i32_size(options.initial_size.height),
+            ptr::null_mut(),
+            ptr::null_mut(),
+            instance,
+            ptr::null_mut(),
+        )
+    };
+    if hwnd.is_null() {
+        return Err(last_error("control_window_create_failed"));
+    }
+    let mut controls = HashMap::new();
+    for spec in &options.controls {
+        let (class_name, style, ex_style) = match spec.kind {
+            ControlKind::Button => ("BUTTON", 0u32, 0u32),
+            ControlKind::Label => ("STATIC", 0, 0),
+            ControlKind::TextInput {
+                multiline,
+                password,
+            } => (
+                "EDIT",
+                (if multiline { 0x0004 } else { 0 }) | (if password { 0x0020 } else { 0 }),
+                WS_EX_CLIENTEDGE,
+            ),
+        };
+        let class_name = wide(class_name);
+        let text = wide(&spec.text);
+        let mut child_style = WS_CHILD
+            | if spec.visible { WS_VISIBLE } else { 0 }
+            | if spec.tab_stop { WS_TABSTOP } else { 0 }
+            | style;
+        if matches!(spec.kind, ControlKind::Button) {
+            child_style |= 0;
+        }
+        let child = unsafe {
+            CreateWindowExW(
+                ex_style,
+                class_name.as_ptr(),
+                text.as_ptr(),
+                child_style,
+                spec.bounds.origin.x,
+                spec.bounds.origin.y,
+                i32_size(spec.bounds.size.width),
+                i32_size(spec.bounds.size.height),
+                hwnd,
+                spec.id.0 as usize as _,
+                instance,
+                ptr::null_mut(),
+            )
+        };
+        if child.is_null() {
+            let error = last_error("control_window_create_control_failed");
+            unsafe {
+                DestroyWindow(hwnd);
+            }
+            return Err(error);
+        }
+        unsafe {
+            EnableWindow(child, spec.enabled as i32);
+        }
+        controls.insert(spec.id, child);
+    }
+    let backend = Rc::new(Backend {
+        window: Cell::new(hwnd),
+        controls,
+    });
+    let window = ControlWindow(backend.clone());
+    let mut state = Box::new(State {
+        window: window.clone(),
+        application,
+        system_menu_commands: HashMap::new(),
+        text_decoder: Utf16TextDecoder::default(),
+        deferred_error: None,
+        destroying: false,
+    });
+    unsafe {
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA, (&mut *state as *mut State) as isize);
+    }
+    let menu = unsafe { GetSystemMenu(hwnd, 0) };
+    for (index, item) in options.system_menu.iter().enumerate() {
+        let native_id = SYSTEM_MENU_BASE + index;
+        unsafe {
+            if AppendMenuW(menu, MF_SEPARATOR, 0, ptr::null()) == 0 {
+                let error = last_error("control_window_system_menu_separator_failed");
+                DestroyWindow(hwnd);
+                return Err(error);
+            }
+            let text = wide(&item.text);
+            if AppendMenuW(menu, MF_STRING, native_id, text.as_ptr()) == 0 {
+                let error = last_error("control_window_system_menu_item_failed");
+                DestroyWindow(hwnd);
+                return Err(error);
+            }
+            if EnableMenuItem(
+                menu,
+                native_id as u32,
+                MF_BYCOMMAND | if item.enabled { MF_ENABLED } else { MF_GRAYED },
+            ) == -1
+            {
+                let error = last_error("control_window_system_menu_state_failed");
+                DestroyWindow(hwnd);
+                return Err(error);
+            }
+        }
+        state.system_menu_commands.insert(native_id, item.id);
+    }
+    if options.poll_interval_ms > 0
+        && unsafe { SetTimer(hwnd, TIMER_ID, options.poll_interval_ms, None) } == 0
+    {
+        let error = last_error("control_window_timer_failed");
+        unsafe {
+            DestroyWindow(hwnd);
+        }
+        return Err(error);
+    }
+    let directive = state.application.opened(&window)?;
+    apply_directive(&mut state, directive);
+    unsafe {
+        ShowWindow(
+            hwnd,
+            if options.no_activate {
+                SW_SHOWNOACTIVATE
+            } else {
+                SW_SHOW
+            },
+        );
+    }
+    let mut msg: MSG = unsafe { mem::zeroed() };
+    loop {
+        let result = unsafe { GetMessageW(&mut msg, ptr::null_mut(), 0, 0) };
+        if result == -1 {
+            return Err(last_error("control_window_message_loop_failed"));
+        }
+        if result == 0 {
+            break;
+        }
+        if msg.message == WM_KEYDOWN || msg.message == WM_KEYUP {
+            let directive = dispatch(
+                &mut state,
+                ControlWindowEvent::KeyPreview {
+                    target: backend.focus_target(msg.hwnd),
+                    event: key_event(msg.wParam as u32, msg.message == WM_KEYDOWN, msg.lParam),
+                },
+            );
+            if matches!(
+                directive,
+                Some(ControlWindowDirective::Consumed | ControlWindowDirective::ConsumedAndRedraw)
+            ) {
+                continue;
+            }
+        }
+        unsafe {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+    }
+    state.deferred_error.take().map_or(Ok(()), Err)
+}
+
+unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    let state_ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *mut State;
+    if state_ptr.is_null() {
+        return unsafe { DefWindowProcW(hwnd, msg, wp, lp) };
+    }
+    let state = unsafe { &mut *state_ptr };
+    let event = match msg {
+        WM_TIMER => Some(ControlWindowEvent::Poll {
+            now: Instant::now(),
+        }),
+        WM_SIZE => Some(ControlWindowEvent::Resized {
+            size: client_size(hwnd),
+            minimized: u32::try_from(wp).ok() == Some(SIZE_MINIMIZED),
+        }),
+        WM_CLOSE => Some(ControlWindowEvent::CloseRequested),
+        WM_SETFOCUS => Some(ControlWindowEvent::FocusChanged(true)),
+        WM_KILLFOCUS => Some(ControlWindowEvent::FocusChanged(false)),
+        WM_CAPTURECHANGED => Some(ControlWindowEvent::CaptureChanged(false)),
+        WM_CHAR => match state.text_decoder.push(wp as u16) {
+            KeyClassification::TextCommit(text) => Some(ControlWindowEvent::TextInput(text)),
+            _ => None,
+        },
+        WM_MOUSEMOVE => Some(ControlWindowEvent::PointerMoved(point_from_lparam(lp))),
+        WM_LBUTTONDOWN => Some(pointer_event(
+            PointerButton::Left,
+            ButtonState::Pressed,
+            lp,
+            1,
+        )),
+        WM_LBUTTONDBLCLK => Some(pointer_event(
+            PointerButton::Left,
+            ButtonState::Pressed,
+            lp,
+            2,
+        )),
+        WM_LBUTTONUP => Some(pointer_event(
+            PointerButton::Left,
+            ButtonState::Released,
+            lp,
+            1,
+        )),
+        WM_RBUTTONDOWN => Some(pointer_event(
+            PointerButton::Right,
+            ButtonState::Pressed,
+            lp,
+            1,
+        )),
+        WM_RBUTTONUP => Some(pointer_event(
+            PointerButton::Right,
+            ButtonState::Released,
+            lp,
+            1,
+        )),
+        WM_MBUTTONDOWN => Some(pointer_event(
+            PointerButton::Middle,
+            ButtonState::Pressed,
+            lp,
+            1,
+        )),
+        WM_MBUTTONUP => Some(pointer_event(
+            PointerButton::Middle,
+            ButtonState::Released,
+            lp,
+            1,
+        )),
+        WM_MOUSEWHEEL => {
+            let mut p = POINT {
+                x: low_i16(lp) as i32,
+                y: high_i16(lp) as i32,
+            };
+            unsafe {
+                ScreenToClient(hwnd, &mut p);
+            }
+            Some(ControlWindowEvent::Wheel {
+                delta: ControlWheelDelta::Lines(f32::from(high_i16(wp as isize)) / 120.0),
+                position: PixelPoint::new(p.x, p.y),
+            })
+        }
+        WM_COMMAND => Some(ControlWindowEvent::Command(ControlId((wp & 0xffff) as u32))),
+        WM_SYSCOMMAND if state.system_menu_commands.contains_key(&wp) => Some(
+            ControlWindowEvent::SystemMenu(state.system_menu_commands[&wp]),
+        ),
+        WM_PAINT => {
+            paint(state, hwnd);
+            return 0;
+        }
+        WM_ERASEBKGND => return 1,
+        DEFERRED_CLOSE => {
+            state.destroying = true;
+            unsafe {
+                DestroyWindow(hwnd);
+            }
+            return 0;
+        }
+        WM_DESTROY => {
+            unsafe {
+                PostQuitMessage(0);
+            }
+            return 0;
+        }
+        WM_NCDESTROY => {
+            unsafe {
+                SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+            }
+            return unsafe { DefWindowProcW(hwnd, msg, wp, lp) };
+        }
+        _ => None,
+    };
+    if let Some(event) = event {
+        dispatch(state, event);
+        return 0;
+    }
+    unsafe { DefWindowProcW(hwnd, msg, wp, lp) }
+}
+
+fn dispatch(state: &mut State, event: ControlWindowEvent) -> Option<ControlWindowDirective> {
+    if state.destroying {
+        return None;
+    }
+    match state.application.event(&state.window, event) {
+        Ok(d) => {
+            apply_directive(state, d);
+            Some(d)
+        }
+        Err(e) => {
+            state.deferred_error = Some(e);
+            state.window.close();
+            None
+        }
+    }
+}
+fn apply_directive(state: &mut State, directive: ControlWindowDirective) {
+    match directive {
+        ControlWindowDirective::Continue => {}
+        ControlWindowDirective::Redraw => state.window.request_redraw(),
+        ControlWindowDirective::Consumed => {}
+        ControlWindowDirective::ConsumedAndRedraw => state.window.request_redraw(),
+        ControlWindowDirective::Close => state.window.close(),
+    }
+}
+
+fn paint(state: &mut State, hwnd: HWND) {
+    let mut ps: PAINTSTRUCT = unsafe { mem::zeroed() };
+    let target = unsafe { BeginPaint(hwnd, &mut ps) };
+    let size = client_size(hwnd);
+    if size.width == 0 || size.height == 0 {
+        unsafe {
+            EndPaint(hwnd, &ps);
+        }
+        return;
+    }
+    let memory = unsafe { CreateCompatibleDC(target) };
+    let bitmap = unsafe {
+        CreateCompatibleBitmap(
+            target,
+            i32_size(size.width.max(1)),
+            i32_size(size.height.max(1)),
+        )
+    };
+    if memory.is_null() || bitmap.is_null() {
+        state.deferred_error = Some(last_error("control_window_back_buffer_failed"));
+        unsafe {
+            if !bitmap.is_null() {
+                DeleteObject(bitmap);
+            }
+            if !memory.is_null() {
+                DeleteDC(memory);
+            }
+            EndPaint(hwnd, &ps);
+        }
+        state.window.close();
+        return;
+    }
+    let old = unsafe { SelectObject(memory, bitmap) };
+    let mut canvas = WinCanvas { dc: memory, size };
+    match state.application.paint(&state.window, &mut canvas) {
+        Ok(d) => apply_directive(state, d),
+        Err(e) => {
+            state.deferred_error = Some(e);
+            state.window.close();
+        }
+    }
+    let presented = unsafe {
+        BitBlt(
+            target,
+            0,
+            0,
+            i32_size(size.width),
+            i32_size(size.height),
+            memory,
+            0,
+            0,
+            SRCCOPY,
+        )
+    };
+    unsafe {
+        SelectObject(memory, old);
+        DeleteObject(bitmap);
+        DeleteDC(memory);
+        EndPaint(hwnd, &ps);
+    }
+    if presented == 0 {
+        state.deferred_error = Some(last_error("control_window_present_failed"));
+        state.window.close();
+    }
+}
+
+struct WinCanvas {
+    dc: *mut core::ffi::c_void,
+    size: PixelSize,
+}
+impl ControlCanvas for WinCanvas {
+    fn size(&self) -> PixelSize {
+        self.size
+    }
+    fn clear(&mut self, c: Rgb8) {
+        self.fill_rect(PixelRect::new(0, 0, self.size.width, self.size.height), c);
+    }
+    fn fill_rect(&mut self, r: PixelRect, c: Rgb8) {
+        let brush = unsafe { CreateSolidBrush(color(c)) };
+        let rect = to_rect(r);
+        unsafe {
+            FillRect(self.dc, &rect, brush);
+            DeleteObject(brush);
+        }
+    }
+    fn stroke_rect(&mut self, r: PixelRect, c: Rgb8, width: u32) {
+        let pen = unsafe { CreatePen(PS_SOLID, i32_size(width.max(1)), color(c)) };
+        let old_pen = unsafe { SelectObject(self.dc, pen) };
+        let old_brush = unsafe { SelectObject(self.dc, GetStockObject(5)) };
+        let rect = to_rect(r);
+        unsafe {
+            Rectangle(self.dc, rect.left, rect.top, rect.right, rect.bottom);
+            SelectObject(self.dc, old_brush);
+            SelectObject(self.dc, old_pen);
+            DeleteObject(pen);
+        }
+    }
+    fn line(&mut self, a: PixelPoint, b: PixelPoint, c: Rgb8, width: u32) {
+        let pen = unsafe { CreatePen(PS_SOLID, i32_size(width.max(1)), color(c)) };
+        let old = unsafe { SelectObject(self.dc, pen) };
+        unsafe {
+            MoveToEx(self.dc, a.x, a.y, ptr::null_mut());
+            LineTo(self.dc, b.x, b.y);
+            SelectObject(self.dc, old);
+            DeleteObject(pen);
+        }
+    }
+    fn text(&mut self, p: PixelPoint, text: &str, c: Rgb8) {
+        let w: Vec<u16> = text.encode_utf16().collect();
+        unsafe {
+            SetBkMode(self.dc, TRANSPARENT as i32);
+            SetTextColor(self.dc, color(c));
+            TextOutW(
+                self.dc,
+                p.x,
+                p.y,
+                w.as_ptr(),
+                i32::try_from(w.len()).unwrap_or(i32::MAX),
+            );
+        }
+    }
+}
+
+fn pointer_event(
+    button: PointerButton,
+    state: ButtonState,
+    lp: LPARAM,
+    clicks: u8,
+) -> ControlWindowEvent {
+    ControlWindowEvent::PointerButton {
+        button,
+        state,
+        position: point_from_lparam(lp),
+        clicks,
+    }
+}
+fn key_event(key: u32, pressed: bool, lp: LPARAM) -> NormalizedKeyEvent {
+    let (logical, physical) = normalized_key_identity(key);
+    NormalizedKeyEvent {
+        logical,
+        physical,
+        text: None,
+        state: if pressed {
+            KeyPressState::Pressed
+        } else {
+            KeyPressState::Released
+        },
+        repeat: pressed && ((lp as usize >> 30) & 1) != 0,
+        modifiers: ModifierState {
+            control: key_down(VK_CONTROL),
+            shift: key_down(VK_SHIFT),
+            alt: key_down(VK_MENU),
+            meta: false,
+        },
+    }
+}
+
+fn normalized_key_identity(key: u32) -> (LogicalKey, PhysicalKeyCode) {
+    if (0x41..=0x5a).contains(&key) {
+        let character = char::from_u32(key)
+            .expect("ASCII virtual-key letter is a scalar")
+            .to_ascii_lowercase();
+        return (
+            LogicalKey::Character(character.to_string()),
+            PhysicalKeyCode::Letter(character),
+        );
+    }
+    if (0x30..=0x39).contains(&key) {
+        let digit = u8::try_from(key - 0x30).expect("virtual-key digit fits u8");
+        return (
+            LogicalKey::Character(char::from(b'0' + digit).to_string()),
+            PhysicalKeyCode::Digit(digit),
+        );
+    }
+    let named = match key as u16 {
+        VK_BACK => Some((NamedKey::Backspace, PhysicalKeyCode::Backspace)),
+        VK_RETURN => Some((NamedKey::Enter, PhysicalKeyCode::Enter)),
+        VK_SPACE => Some((NamedKey::Space, PhysicalKeyCode::Space)),
+        VK_TAB => Some((NamedKey::Tab, PhysicalKeyCode::Tab)),
+        VK_DELETE => Some((NamedKey::Delete, PhysicalKeyCode::Other)),
+        VK_DOWN => Some((NamedKey::ArrowDown, PhysicalKeyCode::Other)),
+        VK_END => Some((NamedKey::End, PhysicalKeyCode::Other)),
+        VK_ESCAPE => Some((NamedKey::Escape, PhysicalKeyCode::Other)),
+        VK_F1 => Some((NamedKey::F1, PhysicalKeyCode::Other)),
+        VK_F2 => Some((NamedKey::F2, PhysicalKeyCode::Other)),
+        VK_F3 => Some((NamedKey::F3, PhysicalKeyCode::Other)),
+        VK_F4 => Some((NamedKey::F4, PhysicalKeyCode::Other)),
+        VK_F5 => Some((NamedKey::F5, PhysicalKeyCode::Other)),
+        VK_F6 => Some((NamedKey::F6, PhysicalKeyCode::Other)),
+        VK_F7 => Some((NamedKey::F7, PhysicalKeyCode::Other)),
+        VK_F8 => Some((NamedKey::F8, PhysicalKeyCode::Other)),
+        VK_F9 => Some((NamedKey::F9, PhysicalKeyCode::Other)),
+        VK_F10 => Some((NamedKey::F10, PhysicalKeyCode::Other)),
+        VK_F11 => Some((NamedKey::F11, PhysicalKeyCode::Other)),
+        VK_F12 => Some((NamedKey::F12, PhysicalKeyCode::Other)),
+        VK_HOME => Some((NamedKey::Home, PhysicalKeyCode::Other)),
+        VK_INSERT => Some((NamedKey::Insert, PhysicalKeyCode::Other)),
+        VK_LEFT => Some((NamedKey::ArrowLeft, PhysicalKeyCode::Other)),
+        VK_NEXT => Some((NamedKey::PageDown, PhysicalKeyCode::Other)),
+        VK_PRIOR => Some((NamedKey::PageUp, PhysicalKeyCode::Other)),
+        VK_RIGHT => Some((NamedKey::ArrowRight, PhysicalKeyCode::Other)),
+        VK_UP => Some((NamedKey::ArrowUp, PhysicalKeyCode::Other)),
+        _ => None,
+    };
+    named.map_or(
+        (LogicalKey::Unidentified, PhysicalKeyCode::Other),
+        |(logical, physical)| (LogicalKey::Named(logical), physical),
+    )
+}
+fn key_down(key: u16) -> bool {
+    (unsafe { GetKeyState(i32::from(key)) }) < 0
+}
+fn point_from_lparam(lp: LPARAM) -> PixelPoint {
+    PixelPoint::new(low_i16(lp) as i32, high_i16(lp) as i32)
+}
+fn low_i16(v: isize) -> i16 {
+    (v as u16) as i16
+}
+fn high_i16(v: isize) -> i16 {
+    ((v >> 16) as u16) as i16
+}
+fn client_size(hwnd: HWND) -> PixelSize {
+    let mut r: RECT = unsafe { mem::zeroed() };
+    unsafe {
+        GetClientRect(hwnd, &mut r);
+    }
+    PixelSize::new(
+        (r.right - r.left).max(0) as u32,
+        (r.bottom - r.top).max(0) as u32,
+    )
+}
+fn to_rect(r: PixelRect) -> RECT {
+    RECT {
+        left: r.origin.x,
+        top: r.origin.y,
+        right: r.origin.x.saturating_add(i32_size(r.size.width)),
+        bottom: r.origin.y.saturating_add(i32_size(r.size.height)),
+    }
+}
+fn color(c: Rgb8) -> COLORREF {
+    u32::from(c.red) | (u32::from(c.green) << 8) | (u32::from(c.blue) << 16)
+}
+fn i32_size(v: u32) -> i32 {
+    i32::try_from(v).unwrap_or(i32::MAX)
+}
+fn wide(v: &str) -> Vec<u16> {
+    v.encode_utf16().chain(std::iter::once(0)).collect()
+}
+fn last_error(code: &'static str) -> ControlWindowError {
+    ControlWindowError::failed(code, io::Error::last_os_error())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn named_and_physical_key_identity_is_stable() {
+        assert_eq!(
+            normalized_key_identity(u32::from(VK_TAB)),
+            (LogicalKey::Named(NamedKey::Tab), PhysicalKeyCode::Tab)
+        );
+        assert_eq!(
+            normalized_key_identity(u32::from(VK_LEFT)),
+            (
+                LogicalKey::Named(NamedKey::ArrowLeft),
+                PhysicalKeyCode::Other
+            )
+        );
+        assert_eq!(
+            normalized_key_identity(u32::from(VK_F12)),
+            (LogicalKey::Named(NamedKey::F12), PhysicalKeyCode::Other)
+        );
+        assert_eq!(
+            normalized_key_identity(u32::from(b'A')),
+            (
+                LogicalKey::Character("a".to_owned()),
+                PhysicalKeyCode::Letter('a')
+            )
+        );
+        assert_eq!(
+            normalized_key_identity(u32::from(b'7')),
+            (
+                LogicalKey::Character("7".to_owned()),
+                PhysicalKeyCode::Digit(7)
+            )
+        );
+    }
+}
