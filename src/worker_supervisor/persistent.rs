@@ -589,6 +589,9 @@ mod tests {
 
     #[test]
     fn same_pid_reuse_crash_replacement_and_reap_are_explicit() {
+        let _test_guard = super::super::PROCESS_TEST_LOCK
+            .lock()
+            .expect("process test lock");
         let executable = worker_executable();
         let mut first = PersistentWorkerClient::spawn(&executable, None).expect("first worker");
         let first_pid = first.worker_pid();

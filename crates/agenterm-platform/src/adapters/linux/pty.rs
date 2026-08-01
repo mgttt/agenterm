@@ -14,6 +14,26 @@ use crate::contract::pty::{
     NativeInputOwnership, NativeTerminalKey, ProcessId, PtyError, PtyResult, TerminalSize,
 };
 
+/// Return the native login-shell argument for a bare supported POSIX shell.
+pub fn login_shell_argument(
+    program: &std::path::Path,
+    explicit_arguments: usize,
+) -> Option<&'static str> {
+    if explicit_arguments != 0 {
+        return None;
+    }
+    program
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| {
+            matches!(
+                *name,
+                "bash" | "zsh" | "fish" | "sh" | "dash" | "ksh" | "tcsh" | "csh"
+            )
+        })
+        .map(|_| "-l")
+}
+
 const PTY_WRITE_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// A command configuration for spawning a process inside a newly allocated PTY.

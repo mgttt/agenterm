@@ -23,6 +23,8 @@ pub(crate) mod persistent;
 pub(crate) const PROCESS_CONCURRENCY_LIMIT: usize = 2;
 pub(crate) const GLOBAL_CONCURRENCY_LIMIT: usize = 8;
 pub(crate) static PROCESS_ACTIVE: AtomicUsize = AtomicUsize::new(0);
+#[cfg(test)]
+pub(crate) static PROCESS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[derive(Debug)]
 pub(crate) enum SupervisorError {
@@ -349,6 +351,7 @@ mod tests {
 
     #[test]
     fn per_process_concurrency_is_bounded_without_spawning() {
+        let _test_guard = PROCESS_TEST_LOCK.lock().expect("process test lock");
         let first = try_acquire_permit().expect("first permit");
         let second = try_acquire_permit().expect("second permit");
         assert!(matches!(

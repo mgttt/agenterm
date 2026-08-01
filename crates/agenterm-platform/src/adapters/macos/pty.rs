@@ -3,4 +3,4 @@
 #[path = "../linux/pty.rs"]
 mod unix_mechanism;
 
-pub use unix_mechanism::{ChildCommand, PtyChild, PtyMaster};
+pub use unix_mechanism::{ChildCommand, PtyChild, PtyMaster, login_shell_argument};

@@ -20,6 +20,14 @@ use crate::contract::pty::{
     NativeInputOwnership, NativeTerminalKey, ProcessId, PtyError, PtyResult, TerminalSize,
 };
 
+/// Windows shells do not accept the POSIX login-shell argument.
+pub fn login_shell_argument(
+    _program: &std::path::Path,
+    _explicit_arguments: usize,
+) -> Option<&'static str> {
+    None
+}
+
 const ENHANCED_KEY: u32 = 0x0100;
 static CONSOLE_ATTACH_LOCK: Mutex<()> = Mutex::new(());
 

@@ -297,18 +297,11 @@ impl TerminalTab {
         // Restored tabs persist the resolved default shell as a one-element
         // command line, so this keys on the argument shape, not on emptiness;
         // command lines with arguments stay exactly as the user provided them.
-        let bare_shell = command_line.len() <= 1
-            && std::path::Path::new(&program)
-                .file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| {
-                    matches!(
-                        name,
-                        "bash" | "zsh" | "fish" | "sh" | "dash" | "ksh" | "tcsh" | "csh"
-                    )
-                });
-        if bare_shell && !cfg!(windows) {
-            command = command.arg("-l");
+        if let Some(argument) = crate::platform::services::pty::login_shell_argument(
+            std::path::Path::new(&program),
+            command_line.len().saturating_sub(1),
+        ) {
+            command = command.arg(argument);
         }
         if let Some(directory) = &launch_cwd {
             command = command.current_dir(directory);
