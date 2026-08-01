@@ -808,6 +808,14 @@ Web host M1
    └─ promote only if fallback/isolation/security and six-target packaging all stay truthful
 ```
 
+The isolated fallback/core crate now owns a tested bridge-v1 admission state
+machine with OS-random per-document nonces, exact origin/top-frame binding,
+replay/deadline/message/concurrency/memory bounds and only the three read-only
+methods above. The direct-WRY host deliberately does not install it yet and
+continues to report `bridge=absent`; native adapter wiring, a real public Fleet
+projection and three-platform crash/reload evidence remain before any adoption
+decision can change from `defer`.
+
 Tauri’s own model validates the system-WebView premise: it uses WebView2 on
 Windows, WKWebView on macOS and WebKitGTK on Linux, dynamically linking the
 system engine rather than embedding it in the executable. But packaging policy

@@ -8,6 +8,7 @@ publish.workspace = true
 description = "Typed fallback launcher for the isolated AgenTerm system-WebView experiment"
 
 [dependencies]
+getrandom.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

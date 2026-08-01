@@ -42,11 +42,20 @@ The direct host:
 - honors `AGENTERM_NO_ACTIVATE=1` and `--no-activate` by keeping the experiment
   hidden and unfocused.
 
-The intended bridge-v1 methods (`host.ready`, `host.facts`, and read-only
-`fleet.snapshot`) are intentionally absent in this foundation. Adding them is a
-separate security change requiring origin, main-frame, document nonce, request
-ID, deadline, 64 KiB and eight-in-flight enforcement. `bridge=absent` is
-reported explicitly.
+The fallback/core crate now contains an independent bridge-v1 security state
+machine for `host.ready`, `host.facts`, and read-only `fleet.snapshot`. It binds
+the exact packaged origin, top frame, a fresh operating-system-random document
+nonce, non-replayable request ID and deadline; rejects messages over 64 KiB;
+and permits at most eight concurrent requests. Its request-ID memory is bounded
+per document and adversarial tests cover origin lookalikes, subframes, stale
+documents, malformed/oversized messages, unknown methods and fields, parameter
+smuggling, expiry, replay and saturation.
+
+The direct-WRY process does not install the IPC handler yet, so its public
+receipt continues to say `bridge=absent`. This distinction is intentional: the
+security core is implemented and testable, but the experiment must not claim
+an exposed `fleet.snapshot` until a real public Fleet projection and native
+response adapter are connected.
 
 ## Build and probe
 
@@ -119,7 +128,8 @@ follow-up evidence is:
 - Linux WebKitGTK 4.1 X11 and Wayland runs plus a missing-library launcher
   fallback, with no substitute PNG;
 - locked third-party licence/SBOM review for each shipped platform artifact;
-- a separate bridge-v1 implementation and adversarial message tests.
+- native WRY/Tauri bridge adapters backed by the tested bridge-v1 core and a
+  real public Fleet projection (host receipts remain `bridge=absent` until then).
 
 The Tauri reference is a nested workspace at `tauri-reference/`. It has no
 commands, plugins or capabilities and leaves clipboard access disabled by

@@ -2,6 +2,13 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
+mod bridge;
+
+pub use bridge::{
+    BRIDGE_ORIGIN, BRIDGE_VERSION, BridgeFrame, BridgeLimits, BridgePermit, BridgeRejection,
+    BridgeRequest, BridgeSession,
+};
+
 pub const CONTRACT_VERSION: &str = "agenterm.webview-host/1";
 pub const ASSET_VERSION: &str = "cockpit-placeholder/1";
 pub const LOCAL_URL: &str = "agenterm://localhost/index.html";

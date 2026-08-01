@@ -249,8 +249,12 @@ future promotion gates.
   InfoHub, Workflow) and does not replace the existing native `agenterm-cc`.
   `agenterm.exe` and `agenterm-server` never acquire a WebView dependency. The
   direct-WRY host and a separately locked minimal Tauri v2 reference load only
-  packaged read-only assets, keep the bridge absent, and leave the stable
-  renderer native.
+  packaged read-only assets and leave the stable renderer native. A standalone
+  bridge-v1 core now enforces the exact packaged origin, top frame, fresh
+  document nonce, portable non-replayed request ID, deadline, 64 KiB message,
+  eight-in-flight and bounded per-document memory contracts. The native WRY
+  adapter remains absent, so public receipts still truthfully report
+  `bridge=absent`.
 - [~] compare a minimal Tauri v2 host with a direct-WRY host before selecting
   a production implementation. The comparison records exact dependency and
   licence inventory, Rust/JS toolchain impact, binary/archive size, required
@@ -265,11 +269,12 @@ future promotion gates.
   fallback; they do not silently bundle a fixed browser runtime. macOS proves
   WKWebView local-assets, Retina capture, reload/crash fallback; Linux reports
   WebKitGTK availability or a typed unavailable result and never fakes a PNG.
-- [ ] the experiment loads only integrity-identified local assets and exposes
-  bridge v1 (`host.ready`, `host.facts`, `fleet.snapshot`) with exact origin,
-  top-frame, nonce, request-id, deadline, 64 KiB and eight-in-flight bounds.
-  It has no generic eval, shell, process, arbitrary navigation, download, or
-  network bridge.
+- [~] the experiment loads only integrity-identified local assets. Its tested
+  bridge-v1 core admits only `host.ready`, `host.facts`, and `fleet.snapshot`
+  with exact origin, top-frame, nonce, request-id, deadline, 64 KiB and
+  eight-in-flight bounds; it has no generic eval, shell, process, arbitrary
+  navigation, download, or network bridge. Exposure remains open until the
+  WRY adapter and a real public Fleet projection provide typed responses.
 - [ ] adoption requires independent package and runtime evidence on each
   native platform plus crash/reload/no-activate/fallback black boxes. Until
   then `active_renderer=native` is the truthful stable state.
