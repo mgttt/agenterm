@@ -1779,6 +1779,12 @@ try {
     }
 
     print("STEP drag and wheel the terminal scrollbar");
+    let render_before_output = sample_render_activity(
+        context,
+        cli,
+        gui,
+        render_after_idle.sequence
+    );
     let scroll_marker =
         "AGENTERM_REMOTE_SCROLL_" + context.run_id + "_";
     text_cli(
@@ -1812,6 +1818,39 @@ try {
         context,
         cli,
         ["ui-bootstrap"]
+    );
+    wait_observed(
+        context,
+        cli,
+        scroll_bootstrap.position.sequence
+    );
+    for attempt in 0..10 {
+        json_cli(context, cli, ["ui-snapshot"]);
+        rhai::task::sleep(std::time::Duration::from_millis(25));
+    }
+    let render_after_output = sample_render_activity(
+        context,
+        cli,
+        gui,
+        render_before_output.sequence
+    );
+    let output_redraws =
+        render_after_output.redraw_requests - render_before_output.redraw_requests;
+    let output_paints =
+        render_after_output.parent_paints - render_before_output.parent_paints;
+    require(
+        output_redraws <= 64 && output_paints <= 64,
+        "remote_ui_high_output_repaint_storm"
+    );
+    require(
+        render_after_output.control_bounds_updates
+                == render_before_output.control_bounds_updates
+            && render_after_output.control_visibility_updates
+                == render_before_output.control_visibility_updates,
+        "remote_ui_high_output_mutated_native_controls"
+    );
+    print(
+        `RENDER_ACTIVITY high_output_redraws=${output_redraws} high_output_paints=${output_paints}`
     );
     let scroll_tab = find_tab(scroll_bootstrap, tab_id);
     require(

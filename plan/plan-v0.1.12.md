@@ -355,7 +355,10 @@ Release 全部是本轮明确非目标。
   126.5 秒和 134.8 秒通过。第二轮在 19 次 native z/Z 后实测 23 次 redraw request、
   8 次 parent paint、0 次 child bounds/visibility 更新且 no-op skip 增长；随后 500ms
   idle 仅 1 次 redraw/paint、仍为 0 child 更新。paint/invalidate storm 的自动化关闭
-  条件已满足；只剩用户在新 binary 上做持续高输出肉眼确认，不能把计数器冒充视觉感受。
+  条件已满足。后续 journey 又在持久化 Light 主题下对真实 80 行 PTY burst 取样：先等
+  GUI lease observed server position，再等 250ms paint queue 收敛，实测仅 4 redraw/4
+  parent paint、0 child update。自动化现覆盖 zoom、idle 与 high-output；只剩用户在新
+  binary 上做持续高输出肉眼确认，不能把计数器冒充视觉感受。
 - [ ] alternate-screen harness 无法本地向上滚动；初步证据指向 `vt100`
   alternate grid 的零 scrollback，需要在 application raw-mouse ownership 之外
   评估把 wheel/PageUp 语义转交前台 TUI，不能破坏普通 scrollback。

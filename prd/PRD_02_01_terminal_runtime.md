@@ -97,9 +97,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   native z/Z operations at 23 redraw requests and 8 parent paints, with zero real
   child bounds/visibility updates and increasing no-op coalescing counts. A
   subsequent 500 ms idle observation measured one redraw and one parent paint,
-  again with zero child updates. This closes the automated repaint-storm
-  diagnostic; sustained high-output visual dogfood on the new binary remains the
-  final human acceptance check before restoring shipped status.
+  again with zero child updates. The existing Light-theme 80-line PTY burst now
+  waits until the GUI lease has observed the server position and then samples
+  after a 250 ms paint-queue settle; it measured four redraw requests and four
+  parent paints with zero child updates. This closes the automated idle, zoom,
+  and high-output repaint-storm diagnostics; sustained high-output visual
+  dogfood on the new binary remains the final human acceptance check before
+  restoring shipped status.
 - [~] ordinary terminal keys and modifiers are encoded for the active PTY;
   live v0.1.12 dogfood found `Shift+Tab` dropped while terminal focus was
   active. The current repair introduces one shared xterm named-key modifier
