@@ -2178,7 +2178,7 @@ fn prd_alignment_task_matches_public_catalogs_and_fails_closed() {
         concat!(
             "PASS: PRD aligns with 62 catalog entries, 84 public names, ",
             "11 protocol features, 41 mux commands, 61 capability IDs, ",
-            "and 60 executable evidence IDs"
+            "and 61 executable evidence IDs"
         )
     );
 
@@ -2240,7 +2240,7 @@ fn prd_alignment_task_matches_public_catalogs_and_fails_closed() {
             String::from_utf8_lossy(&rejected.stdout),
             String::from_utf8_lossy(&rejected.stderr)
         )
-        .contains("prd_alignment_status_line:terminal.mouse-scrollback")
+        .contains("prd_alignment_status_line:terminal.text-selection-copy")
     );
     fs::remove_dir_all(fixture).expect("remove PRD alignment fixture");
 }
