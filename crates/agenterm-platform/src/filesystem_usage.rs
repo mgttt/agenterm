@@ -8,7 +8,9 @@ use std::{io, path::Path};
 /// descendants; files, symbolic links, and Windows reparse points contribute
 /// their own `symlink_metadata` length. Hard-linked entries are counted once
 /// per directory entry. This is neither allocated-byte accounting nor a claim
-/// about how many physical bytes deleting the tree would reclaim.
+/// about how many physical bytes deleting the tree would reclaim. The caller
+/// must not treat this path-based walk as a defense against concurrent path
+/// replacement.
 pub fn logical_tree_size(path: &Path) -> io::Result<u64> {
     crate::selected::filesystem_usage::logical_tree_size(path)
 }

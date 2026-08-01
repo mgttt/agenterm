@@ -110,6 +110,10 @@ clipboard, IPC, or screenshot modules.
 Unsupported endpoint variants and native failures remain typed; adapters never
 silently substitute a different transport or capability.
 
+`filesystem_usage::logical_tree_size` is path-based accounting, not an
+adversarial traversal primitive. Callers choose the roots and must not infer
+allocated or physically reclaimable bytes from its logical-byte result.
+
 `processor_affinity::current_process` reports logical processor identities only
 when the native API provides a complete result under the declared semantics.
 Linux returns the scheduler's effective allowed mask. Windows returns the
