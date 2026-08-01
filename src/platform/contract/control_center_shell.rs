@@ -8,6 +8,37 @@ pub(crate) enum ControlCenterFocusRequest {
     NoActivate,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ControlCenterPointerButton {
+    Primary,
+    Secondary,
+    Middle,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ControlCenterKey {
+    ArrowUp,
+    ArrowDown,
+    Home,
+    End,
+    Enter,
+    Escape,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ControlCenterInputEvent {
+    PointerPressed {
+        button: ControlCenterPointerButton,
+        physical_x: i32,
+        physical_y: i32,
+        line: Option<usize>,
+    },
+    KeyPressed {
+        key: ControlCenterKey,
+        repeat: bool,
+    },
+}
+
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ControlCenterFrame<'a> {
     pub(crate) pixels: &'a [u32],
@@ -59,6 +90,7 @@ pub(crate) trait ControlCenterShellHost: Send {
     fn close_requested(&self) -> bool;
     fn publish_native_window(&mut self, raw_handle: i64) -> ControlCenterShellResult<()>;
     fn take_focus_request(&mut self) -> Option<ControlCenterFocusRequest>;
+    fn handle_input(&mut self, event: ControlCenterInputEvent) -> ControlCenterShellResult<bool>;
     fn capture_requested_screenshot(
         &mut self,
         frame: Option<ControlCenterFrame<'_>>,
@@ -76,5 +108,19 @@ mod tests {
 
         assert!(unsupported.to_string().contains("unsupported"));
         assert_eq!(failed.to_string(), "window_create_failed: no display");
+    }
+
+    #[test]
+    fn input_contract_carries_adapter_owned_line_hits() {
+        let event = ControlCenterInputEvent::PointerPressed {
+            button: ControlCenterPointerButton::Primary,
+            physical_x: 24,
+            physical_y: 114,
+            line: Some(2),
+        };
+        assert!(matches!(
+            event,
+            ControlCenterInputEvent::PointerPressed { line: Some(2), .. }
+        ));
     }
 }

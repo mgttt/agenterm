@@ -6,14 +6,16 @@ use softbuffer::{Context, Surface};
 use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
-    event::WindowEvent,
+    event::{ElementState, MouseButton, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopBuilder},
+    keyboard::{Key, NamedKey},
     raw_window_handle::{HasWindowHandle, RawWindowHandle},
     window::{UserAttentionType, Window, WindowAttributes, WindowId},
 };
 
 use crate::window::{
-    NativeTextFrame, NativeTextWindowError, NativeTextWindowFocus, NativeTextWindowHost,
+    NativeTextFrame, NativeTextInputEvent, NativeTextKey, NativeTextPointerButton,
+    NativeTextWindowError, NativeTextWindowFocus, NativeTextWindowHost,
 };
 
 type DisplayHandle = winit::event_loop::OwnedDisplayHandle;
@@ -50,6 +52,7 @@ where
         frame_width: 0,
         frame_height: 0,
         scale_factor: 1.0,
+        pointer_position: None,
         failure: None,
     };
     event_loop.run_app(&mut app).map_err(|error| {
@@ -70,6 +73,7 @@ struct App {
     frame_width: u32,
     frame_height: u32,
     scale_factor: f64,
+    pointer_position: Option<(i32, i32)>,
     failure: Option<NativeTextWindowError>,
 }
 
@@ -168,6 +172,17 @@ impl App {
             event_loop.exit();
         }
     }
+
+    fn dispatch_input(&mut self, event_loop: &ActiveEventLoop, event: NativeTextInputEvent) {
+        match self.host.handle_input(event) {
+            Ok(true) => self.request_redraw(),
+            Ok(false) => {}
+            Err(error) => {
+                self.failure = Some(error);
+                event_loop.exit();
+            }
+        }
+    }
 }
 
 impl ApplicationHandler for App {
@@ -222,6 +237,57 @@ impl ApplicationHandler for App {
                     event_loop.exit();
                 }
             }
+            WindowEvent::CursorMoved { position, .. } => {
+                self.pointer_position = Some((
+                    position
+                        .x
+                        .round()
+                        .clamp(f64::from(i32::MIN), f64::from(i32::MAX)) as i32,
+                    position
+                        .y
+                        .round()
+                        .clamp(f64::from(i32::MIN), f64::from(i32::MAX)) as i32,
+                ));
+            }
+            WindowEvent::CursorLeft { .. } => self.pointer_position = None,
+            WindowEvent::MouseInput {
+                state: ElementState::Pressed,
+                button,
+                ..
+            } => {
+                let Some(button) = normalize_pointer_button(button) else {
+                    return;
+                };
+                let Some((physical_x, physical_y)) = self.pointer_position else {
+                    return;
+                };
+                let width = self
+                    .window
+                    .as_ref()
+                    .map(|window| window.inner_size().width)
+                    .unwrap_or_default();
+                self.dispatch_input(
+                    event_loop,
+                    NativeTextInputEvent::PointerPressed {
+                        button,
+                        physical_x,
+                        physical_y,
+                        line: unix_text_line_at(width, physical_y),
+                    },
+                );
+            }
+            WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
+                let Some(key) = normalize_key(&event.logical_key) else {
+                    return;
+                };
+                self.dispatch_input(
+                    event_loop,
+                    NativeTextInputEvent::KeyPressed {
+                        key,
+                        repeat: event.repeat,
+                    },
+                );
+            }
             _ => {}
         }
     }
@@ -232,6 +298,43 @@ impl ApplicationHandler for App {
             std::time::Instant::now() + Duration::from_millis(200),
         ));
     }
+}
+
+fn normalize_pointer_button(button: MouseButton) -> Option<NativeTextPointerButton> {
+    match button {
+        MouseButton::Left => Some(NativeTextPointerButton::Primary),
+        MouseButton::Right => Some(NativeTextPointerButton::Secondary),
+        MouseButton::Middle => Some(NativeTextPointerButton::Middle),
+        MouseButton::Back | MouseButton::Forward | MouseButton::Other(_) => None,
+    }
+}
+
+fn normalize_key(key: &Key) -> Option<NativeTextKey> {
+    match key {
+        Key::Named(NamedKey::ArrowUp) => Some(NativeTextKey::ArrowUp),
+        Key::Named(NamedKey::ArrowDown) => Some(NativeTextKey::ArrowDown),
+        Key::Named(NamedKey::Home) => Some(NativeTextKey::Home),
+        Key::Named(NamedKey::End) => Some(NativeTextKey::End),
+        Key::Named(NamedKey::Enter) => Some(NativeTextKey::Enter),
+        Key::Named(NamedKey::Escape) => Some(NativeTextKey::Escape),
+        _ => None,
+    }
+}
+
+fn unix_text_line_at(physical_width: u32, physical_y: i32) -> Option<usize> {
+    if (16..64).contains(&physical_y) {
+        return Some(0);
+    }
+    const FIRST_BODY_TOP: i32 = 76;
+    if physical_y < FIRST_BODY_TOP {
+        return None;
+    }
+    let body_scale = if physical_width >= 640 { 2 } else { 1 };
+    let line_height = 7 * body_scale + 12;
+    Some(
+        1 + usize::try_from((physical_y - FIRST_BODY_TOP) / line_height)
+            .expect("non-negative line offset fits usize"),
+    )
 }
 
 fn native_window_identity(window: &Window) -> Result<i64, &'static str> {
@@ -407,5 +510,15 @@ mod tests {
         let mut tiny = vec![0; 7 * 5];
         render_shell(&mut tiny, 7, 5, &["A".into()]);
         assert!(tiny.iter().all(|pixel| *pixel == 0x001B_2533));
+    }
+
+    #[test]
+    fn text_hit_normalization_matches_renderer_rows() {
+        assert_eq!(unix_text_line_at(760, 15), None);
+        assert_eq!(unix_text_line_at(760, 24), Some(0));
+        assert_eq!(unix_text_line_at(760, 75), None);
+        assert_eq!(unix_text_line_at(760, 88), Some(1));
+        assert_eq!(unix_text_line_at(760, 114), Some(2));
+        assert_eq!(unix_text_line_at(420, 107), Some(2));
     }
 }

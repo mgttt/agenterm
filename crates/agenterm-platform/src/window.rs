@@ -201,6 +201,50 @@ pub enum NativeTextWindowFocus {
     NoActivate,
 }
 
+/// Platform-neutral pointer buttons delivered by a native text window.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum NativeTextPointerButton {
+    Primary,
+    Secondary,
+    Middle,
+}
+
+/// The bounded set of keys understood by native text-window hosts.
+///
+/// Adapters intentionally normalize physical/native key codes here so product
+/// hosts never need to import Win32 or winit keyboard types.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum NativeTextKey {
+    ArrowUp,
+    ArrowDown,
+    Home,
+    End,
+    Enter,
+    Escape,
+}
+
+/// Normalized native input for text-window extensions.
+///
+/// Pointer coordinates are physical client pixels because the associated
+/// frame contract is physical. `line` is the adapter-owned hit result for the
+/// text line under the pointer; `None` means the pointer missed rendered text.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum NativeTextInputEvent {
+    PointerPressed {
+        button: NativeTextPointerButton,
+        physical_x: i32,
+        physical_y: i32,
+        line: Option<usize>,
+    },
+    KeyPressed {
+        key: NativeTextKey,
+        repeat: bool,
+    },
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct NativeTextFrame<'a> {
     pub pixels: &'a [u32],
@@ -250,6 +294,16 @@ pub trait NativeTextWindowHost: Send {
     fn close_requested(&self) -> bool;
     fn publish_native_window(&mut self, raw_handle: i64) -> Result<(), NativeTextWindowError>;
     fn take_focus_request(&mut self) -> Option<NativeTextWindowFocus>;
+    /// Handles one normalized native event and reports whether presentation
+    /// changed and the window should be redrawn.
+    fn handle_input(
+        &mut self,
+        _event: NativeTextInputEvent,
+    ) -> Result<bool, NativeTextWindowError> {
+        Err(NativeTextWindowError::Unsupported {
+            reason: "native-text-input-host-not-implemented".into(),
+        })
+    }
     fn capture_requested_screenshot(
         &mut self,
         frame: Option<NativeTextFrame<'_>>,
@@ -349,5 +403,33 @@ mod tests {
         let failed = NativeTextWindowError::failed("window-create-failed", "no window");
         assert!(unsupported.to_string().contains("unsupported"));
         assert_eq!(failed.to_string(), "window-create-failed: no window");
+    }
+
+    #[test]
+    fn native_text_input_is_platform_neutral_and_line_addressable() {
+        assert_eq!(
+            NativeTextInputEvent::PointerPressed {
+                button: NativeTextPointerButton::Primary,
+                physical_x: 24,
+                physical_y: 88,
+                line: Some(1),
+            },
+            NativeTextInputEvent::PointerPressed {
+                button: NativeTextPointerButton::Primary,
+                physical_x: 24,
+                physical_y: 88,
+                line: Some(1),
+            }
+        );
+        assert_eq!(
+            NativeTextInputEvent::KeyPressed {
+                key: NativeTextKey::Enter,
+                repeat: false,
+            },
+            NativeTextInputEvent::KeyPressed {
+                key: NativeTextKey::Enter,
+                repeat: false,
+            }
+        );
     }
 }

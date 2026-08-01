@@ -10,7 +10,7 @@ use std::{
     io::{self, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    sync::{Arc, Condvar, Mutex},
+    sync::{Arc, Condvar, Mutex, mpsc},
     time::{Duration, Instant},
 };
 
@@ -2280,6 +2280,152 @@ fn focus_existing(_record: &RegistryRecord, registry_path: &Path, no_activate: b
     Ok(())
 }
 
+const COCKPIT_VISIBLE_TAB_ROWS: usize = 3;
+
+struct CockpitPresentation {
+    lines: Vec<String>,
+    tab_lines: Vec<(usize, String)>,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum CockpitInputAction {
+    None,
+    Redraw,
+    ClearStatus,
+    Activate(String),
+}
+
+fn cockpit_presentation(
+    mut lines: Vec<String>,
+    server: Option<&ConnectedServer>,
+    selected_tab_id: Option<&str>,
+    navigation_status: Option<&str>,
+) -> CockpitPresentation {
+    let mut tab_lines = Vec::new();
+    let Some(server) = server else {
+        lines.push("Tabs        unavailable (no connected server)".to_owned());
+        if let Some(status) = navigation_status {
+            lines.push(status.to_owned());
+        }
+        return CockpitPresentation { lines, tab_lines };
+    };
+
+    lines.push("Tabs        click or arrows · Enter selects".to_owned());
+    let selected_index = selected_tab_id
+        .and_then(|selected| server.tabs.iter().position(|tab| tab.id == selected))
+        .or_else(|| {
+            server
+                .active_tab_id
+                .as_deref()
+                .and_then(|active| server.tabs.iter().position(|tab| tab.id == active))
+        })
+        .unwrap_or(0);
+    let start = selected_index
+        .saturating_sub(COCKPIT_VISIBLE_TAB_ROWS / 2)
+        .min(server.tabs.len().saturating_sub(COCKPIT_VISIBLE_TAB_ROWS));
+    for tab in server
+        .tabs
+        .iter()
+        .skip(start)
+        .take(COCKPIT_VISIBLE_TAB_ROWS)
+    {
+        let line = lines.len();
+        let cursor = if selected_tab_id == Some(tab.id.as_str()) {
+            '>'
+        } else {
+            ' '
+        };
+        let active = if server.active_tab_id.as_deref() == Some(tab.id.as_str()) {
+            '*'
+        } else {
+            ' '
+        };
+        let health = if tab.dead { "dead" } else { "running" };
+        lines.push(format!(
+            "{cursor}{active} {:<8} {} ({health})",
+            tab.id, tab.title
+        ));
+        tab_lines.push((line, tab.id.clone()));
+    }
+    if let Some(status) = navigation_status {
+        lines.push(status.to_owned());
+    }
+    CockpitPresentation { lines, tab_lines }
+}
+
+fn classify_cockpit_input(
+    event: crate::platform::services::control_center_shell::ControlCenterInputEvent,
+    server: Option<&ConnectedServer>,
+    selected_tab_id: &mut Option<String>,
+    tab_lines: &[(usize, String)],
+) -> CockpitInputAction {
+    use crate::platform::services::control_center_shell::{
+        ControlCenterInputEvent, ControlCenterKey, ControlCenterPointerButton,
+    };
+
+    let Some(server) = server.filter(|server| !server.tabs.is_empty()) else {
+        return match event {
+            ControlCenterInputEvent::KeyPressed {
+                key: ControlCenterKey::Escape,
+                ..
+            } => CockpitInputAction::ClearStatus,
+            _ => CockpitInputAction::None,
+        };
+    };
+    let selected_index = selected_tab_id
+        .as_deref()
+        .and_then(|selected| server.tabs.iter().position(|tab| tab.id == selected))
+        .or_else(|| {
+            server
+                .active_tab_id
+                .as_deref()
+                .and_then(|active| server.tabs.iter().position(|tab| tab.id == active))
+        })
+        .unwrap_or(0);
+
+    match event {
+        ControlCenterInputEvent::PointerPressed {
+            button: ControlCenterPointerButton::Primary,
+            line: Some(line),
+            ..
+        } => tab_lines
+            .iter()
+            .find(|(candidate, _)| *candidate == line)
+            .map(|(_, id)| {
+                *selected_tab_id = Some(id.clone());
+                CockpitInputAction::Activate(id.clone())
+            })
+            .unwrap_or(CockpitInputAction::None),
+        ControlCenterInputEvent::KeyPressed { key, repeat } => match key {
+            ControlCenterKey::ArrowUp => {
+                *selected_tab_id = Some(server.tabs[selected_index.saturating_sub(1)].id.clone());
+                CockpitInputAction::Redraw
+            }
+            ControlCenterKey::ArrowDown => {
+                let index = selected_index
+                    .saturating_add(1)
+                    .min(server.tabs.len().saturating_sub(1));
+                *selected_tab_id = Some(server.tabs[index].id.clone());
+                CockpitInputAction::Redraw
+            }
+            ControlCenterKey::Home => {
+                *selected_tab_id = Some(server.tabs[0].id.clone());
+                CockpitInputAction::Redraw
+            }
+            ControlCenterKey::End => {
+                *selected_tab_id = Some(server.tabs[server.tabs.len() - 1].id.clone());
+                CockpitInputAction::Redraw
+            }
+            ControlCenterKey::Enter if !repeat => {
+                CockpitInputAction::Activate(server.tabs[selected_index].id.clone())
+            }
+            ControlCenterKey::Escape => CockpitInputAction::ClearStatus,
+            ControlCenterKey::Enter => CockpitInputAction::None,
+        },
+        ControlCenterInputEvent::PointerPressed { .. } => CockpitInputAction::None,
+    }
+}
+
 struct ProductShellHost {
     owner: RegistryOwner,
     projection: ShellProjection,
@@ -2288,6 +2434,12 @@ struct ProductShellHost {
     screenshot_request: PathBuf,
     screenshot_result: PathBuf,
     last_screenshot_request: Option<String>,
+    selected_tab_id: Option<String>,
+    navigation_status: Option<String>,
+    pending_navigation: Option<(
+        String,
+        mpsc::Receiver<Result<TabNavigationDocument, String>>,
+    )>,
 }
 
 impl ProductShellHost {
@@ -2299,8 +2451,94 @@ impl ProductShellHost {
             screenshot_request: screenshot_request_path(&owner.path),
             screenshot_result: screenshot_result_path(&owner.path),
             last_screenshot_request: None,
+            selected_tab_id: None,
+            navigation_status: None,
+            pending_navigation: None,
             owner,
         }
+    }
+
+    fn reconcile_selection(&mut self) {
+        let Some(server) = self.projection.snapshot.connected_server.as_ref() else {
+            self.selected_tab_id = None;
+            return;
+        };
+        if self
+            .selected_tab_id
+            .as_deref()
+            .is_some_and(|selected| server.tabs.iter().any(|tab| tab.id == selected))
+        {
+            return;
+        }
+        self.selected_tab_id = server
+            .active_tab_id
+            .as_ref()
+            .filter(|active| server.tabs.iter().any(|tab| tab.id == active.as_str()))
+            .cloned()
+            .or_else(|| server.tabs.first().map(|tab| tab.id.clone()));
+    }
+
+    fn poll_navigation(&mut self) -> bool {
+        let Some((target, receiver)) = self.pending_navigation.as_ref() else {
+            return false;
+        };
+        let update = match receiver.try_recv() {
+            Ok(result) => Some(result),
+            Err(mpsc::TryRecvError::Empty) => None,
+            Err(mpsc::TryRecvError::Disconnected) => Some(Err(
+                "control_center_navigation_worker_disconnected".to_owned(),
+            )),
+        };
+        let Some(update) = update else { return false };
+        let target = target.clone();
+        self.pending_navigation = None;
+        match update {
+            Ok(document) => {
+                self.selected_tab_id = Some(document.target_tab_id);
+                self.navigation_status = Some(format!("Selected      {target}"));
+                self.projection.request_refresh(true);
+            }
+            Err(error) => {
+                self.navigation_status = Some(format!("Action failed {target} · {error}"));
+            }
+        }
+        true
+    }
+
+    fn begin_navigation(
+        &mut self,
+        target_tab_id: String,
+    ) -> crate::platform::services::control_center_shell::ControlCenterShellResult<bool> {
+        if self.pending_navigation.is_some() {
+            self.navigation_status = Some("Action busy   tab selection in progress".to_owned());
+            return Ok(true);
+        }
+        let Some(server) = self.projection.snapshot.connected_server.as_ref() else {
+            self.navigation_status = Some("Action failed no connected server".to_owned());
+            return Ok(true);
+        };
+        let context = ServerContext {
+            endpoint: server.endpoint.clone(),
+            logical_instance: server.logical_instance.clone(),
+        };
+        let worker_target = target_tab_id.clone();
+        let (sender, receiver) = mpsc::channel();
+        std::thread::Builder::new()
+            .name("agenterm-cc-navigation".to_owned())
+            .spawn(move || {
+                let result = navigate_tab(Some(context), &worker_target, true)
+                    .map_err(|error| format!("{error:#}"));
+                let _ = sender.send(result);
+            })
+            .map_err(|error| {
+                crate::platform::services::control_center_shell::ControlCenterShellError::failed(
+                    "control_center_navigation_worker_spawn_failed",
+                    error,
+                )
+            })?;
+        self.navigation_status = Some(format!("Selecting     {target_tab_id}"));
+        self.pending_navigation = Some((target_tab_id, receiver));
+        Ok(true)
     }
 }
 
@@ -2309,10 +2547,20 @@ impl crate::platform::services::control_center_shell::ControlCenterShellHost for
         self.projection.title()
     }
     fn lines(&self) -> Vec<String> {
-        self.projection.lines()
+        cockpit_presentation(
+            self.projection.lines(),
+            self.projection.snapshot.connected_server.as_ref(),
+            self.selected_tab_id.as_deref(),
+            self.navigation_status.as_deref(),
+        )
+        .lines
     }
     fn poll(&mut self) -> bool {
-        self.projection.poll()
+        let changed = self.poll_navigation() | self.projection.poll();
+        if changed {
+            self.reconcile_selection();
+        }
+        changed
     }
     fn close_requested(&self) -> bool {
         self.projection.close_requested()
@@ -2350,6 +2598,34 @@ impl crate::platform::services::control_center_shell::ControlCenterShellHost for
             Some(crate::platform::services::control_center_shell::ControlCenterFocusRequest::NoActivate)
         } else {
             Some(crate::platform::services::control_center_shell::ControlCenterFocusRequest::Activate)
+        }
+    }
+
+    fn handle_input(
+        &mut self,
+        event: crate::platform::services::control_center_shell::ControlCenterInputEvent,
+    ) -> crate::platform::services::control_center_shell::ControlCenterShellResult<bool> {
+        let tab_lines = cockpit_presentation(
+            self.projection.lines(),
+            self.projection.snapshot.connected_server.as_ref(),
+            self.selected_tab_id.as_deref(),
+            self.navigation_status.as_deref(),
+        )
+        .tab_lines;
+        let action = classify_cockpit_input(
+            event,
+            self.projection.snapshot.connected_server.as_ref(),
+            &mut self.selected_tab_id,
+            &tab_lines,
+        );
+        match action {
+            CockpitInputAction::None => Ok(false),
+            CockpitInputAction::Redraw => Ok(true),
+            CockpitInputAction::ClearStatus => {
+                let changed = self.navigation_status.take().is_some();
+                Ok(changed)
+            }
+            CockpitInputAction::Activate(target_tab_id) => self.begin_navigation(target_tab_id),
         }
     }
 
@@ -2772,6 +3048,115 @@ mod tests {
         assert!(lines[4].contains("@1 · build"));
         assert!(lines[5].contains("server available"));
         assert!(lines[5].contains("workflows unavailable"));
+    }
+
+    #[test]
+    fn native_cockpit_input_separates_cursor_movement_from_tab_action() {
+        use crate::platform::services::control_center_shell::{
+            ControlCenterInputEvent, ControlCenterKey, ControlCenterPointerButton,
+        };
+
+        let tabs = vec![
+            TabSummary {
+                id: "@1".to_owned(),
+                index: 0,
+                title: "one".to_owned(),
+                note: String::new(),
+                process_id: Some(41),
+                dead: false,
+            },
+            TabSummary {
+                id: "@2".to_owned(),
+                index: 1,
+                title: "two".to_owned(),
+                note: String::new(),
+                process_id: Some(42),
+                dead: false,
+            },
+        ];
+        let server = ConnectedServer {
+            endpoint: "pipe:test".to_owned(),
+            logical_instance: Some("dev".to_owned()),
+            pid: 123,
+            epoch: "epoch".to_owned(),
+            sequence: 7,
+            version: Some("0.1.12".to_owned()),
+            build: Value::Null,
+            active_tab_id: Some("@1".to_owned()),
+            tab_counts: TabCounts::from_tabs(&tabs),
+            tabs,
+            components: ComponentAvailability {
+                server: "available",
+                workflows: "unavailable",
+                extensions: "unavailable",
+                info_hub: "unavailable",
+            },
+        };
+        let presentation = cockpit_presentation(
+            vec!["AgenTerm Control Center".to_owned()],
+            Some(&server),
+            Some("@1"),
+            None,
+        );
+        assert_eq!(presentation.tab_lines.len(), 2);
+        assert!(presentation.lines[presentation.tab_lines[0].0].starts_with(">* @1"));
+
+        let mut selected = Some("@1".to_owned());
+        assert_eq!(
+            classify_cockpit_input(
+                ControlCenterInputEvent::KeyPressed {
+                    key: ControlCenterKey::ArrowDown,
+                    repeat: false,
+                },
+                Some(&server),
+                &mut selected,
+                &presentation.tab_lines,
+            ),
+            CockpitInputAction::Redraw
+        );
+        assert_eq!(selected.as_deref(), Some("@2"));
+        assert_eq!(
+            classify_cockpit_input(
+                ControlCenterInputEvent::KeyPressed {
+                    key: ControlCenterKey::Enter,
+                    repeat: false,
+                },
+                Some(&server),
+                &mut selected,
+                &presentation.tab_lines,
+            ),
+            CockpitInputAction::Activate("@2".to_owned())
+        );
+        assert_eq!(
+            classify_cockpit_input(
+                ControlCenterInputEvent::KeyPressed {
+                    key: ControlCenterKey::Enter,
+                    repeat: true,
+                },
+                Some(&server),
+                &mut selected,
+                &presentation.tab_lines,
+            ),
+            CockpitInputAction::None
+        );
+
+        let second_line = presentation.tab_lines[1].0;
+        selected = Some("@1".to_owned());
+        assert_eq!(
+            classify_cockpit_input(
+                ControlCenterInputEvent::PointerPressed {
+                    button: ControlCenterPointerButton::Primary,
+                    physical_x: 24,
+                    physical_y: 114,
+                    line: Some(second_line),
+                },
+                Some(&server),
+                &mut selected,
+                &presentation.tab_lines,
+            ),
+            CockpitInputAction::Activate("@2".to_owned())
+        );
+        assert_eq!(selected.as_deref(), Some("@2"));
     }
 
     #[test]

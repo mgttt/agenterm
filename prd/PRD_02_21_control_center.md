@@ -152,9 +152,14 @@ Control Center is the product name; the executable family uses
   The Windows public smoke proves inspection, selection, receipt identity,
   independent post-state, missing-target failure, and absence of GUI registry
   ownership against a headless server.
-- [ ] Native Cockpit pointer/keyboard shortcuts and their three-platform
-  adapter evidence remain open. A missing server says that no Fleet authority
-  is connected rather than presenting a fabricated zero-sized fleet.
+- [~] Native Cockpit pointer/keyboard interaction now has a stable platform-
+  neutral input contract, Win32 and winit normalization, adapter-owned text-line
+  hit testing, a three-row tab cursor, arrows/Home/End, and Enter/primary-click
+  selection through the existing typed server navigation operation. Navigation
+  runs off the native message loop and busy/failure states render explicitly.
+  Windows unit/Clippy plus Linux/macOS cross-checks pass; real three-platform
+  pointer/keyboard journeys remain open. A missing server still says that no
+  Fleet authority is connected instead of fabricating a zero-sized fleet.
 
 ### Workflows
 

@@ -8,19 +8,22 @@ use windows_sys::Win32::{
         BeginPaint, EndPaint, GetStockObject, InvalidateRect, PAINTSTRUCT, TextOutW, WHITE_BRUSH,
     },
     System::LibraryLoader::GetModuleHandleW,
+    UI::Input::KeyboardAndMouse::{VK_DOWN, VK_END, VK_ESCAPE, VK_HOME, VK_RETURN, VK_UP},
     UI::WindowsAndMessaging::{
         CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DestroyWindow,
         DispatchMessageW, GetMessageW, IDC_ARROW, KillTimer, LoadCursorW, MSG, PostMessageW,
         PostQuitMessage, RegisterClassW, SW_RESTORE, SW_SHOW, SW_SHOWNOACTIVATE,
         SetForegroundWindow, SetTimer, SetWindowTextW, ShowWindow, TranslateMessage, WM_CLOSE,
-        WM_DESTROY, WM_PAINT, WM_TIMER, WNDCLASSW, WS_OVERLAPPEDWINDOW,
+        WM_DESTROY, WM_KEYDOWN, WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_PAINT, WM_RBUTTONDOWN,
+        WM_SYSKEYDOWN, WM_TIMER, WNDCLASSW, WS_OVERLAPPEDWINDOW,
     },
 };
 
 #[cfg(all(feature = "input", feature = "ime"))]
 use crate::contract::window_host::{PixelWindowApplication, PixelWindowError, PixelWindowOptions};
 use crate::window::{
-    DisplayBackendFacts, NativeTextWindowError, NativeTextWindowFocus, NativeTextWindowHost,
+    DisplayBackendFacts, NativeTextInputEvent, NativeTextKey, NativeTextPointerButton,
+    NativeTextWindowError, NativeTextWindowFocus, NativeTextWindowHost,
 };
 
 const WINDOW_TIMER_ID: usize = 1;
@@ -183,6 +186,37 @@ unsafe extern "system" fn window_proc(
             poll_host(window);
             0
         }
+        WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN => {
+            let (physical_x, physical_y) = client_point(lparam);
+            let button = match message {
+                WM_LBUTTONDOWN => NativeTextPointerButton::Primary,
+                WM_RBUTTONDOWN => NativeTextPointerButton::Secondary,
+                _ => NativeTextPointerButton::Middle,
+            };
+            dispatch_host_input(
+                window,
+                NativeTextInputEvent::PointerPressed {
+                    button,
+                    physical_x,
+                    physical_y,
+                    line: windows_text_line_at(physical_y),
+                },
+            );
+            0
+        }
+        WM_KEYDOWN | WM_SYSKEYDOWN => {
+            let Some(key) = normalize_key(wparam) else {
+                return unsafe { DefWindowProcW(window, message, wparam, lparam) };
+            };
+            dispatch_host_input(
+                window,
+                NativeTextInputEvent::KeyPressed {
+                    key,
+                    repeat: lparam & (1_isize << 30) != 0,
+                },
+            );
+            0
+        }
         WM_DESTROY => {
             unsafe {
                 KillTimer(window, WINDOW_TIMER_ID);
@@ -191,6 +225,51 @@ unsafe extern "system" fn window_proc(
             0
         }
         _ => unsafe { DefWindowProcW(window, message, wparam, lparam) },
+    }
+}
+
+fn dispatch_host_input(window: HWND, event: NativeTextInputEvent) {
+    let Some(state) = SHELL_STATE.get() else {
+        return;
+    };
+    let Ok(mut state) = state.lock() else { return };
+    match state.host.handle_input(event) {
+        Ok(true) => unsafe {
+            InvalidateRect(window, ptr::null(), 1);
+        },
+        Ok(false) => {}
+        Err(error) => {
+            state.deferred_error = Some(error);
+            unsafe { PostMessageW(window, WM_CLOSE, 0, 0) };
+        }
+    }
+}
+
+fn client_point(lparam: LPARAM) -> (i32, i32) {
+    let packed = lparam as u32;
+    (
+        i32::from((packed & 0xffff) as u16 as i16),
+        i32::from((packed >> 16) as u16 as i16),
+    )
+}
+
+fn windows_text_line_at(physical_y: i32) -> Option<usize> {
+    const FIRST_LINE_TOP: i32 = 16;
+    const LINE_HEIGHT: i32 = 28;
+    (physical_y >= FIRST_LINE_TOP)
+        .then(|| usize::try_from((physical_y - FIRST_LINE_TOP) / LINE_HEIGHT).ok())
+        .flatten()
+}
+
+fn normalize_key(wparam: WPARAM) -> Option<NativeTextKey> {
+    match u16::try_from(wparam).ok()? {
+        value if value == VK_UP => Some(NativeTextKey::ArrowUp),
+        value if value == VK_DOWN => Some(NativeTextKey::ArrowDown),
+        value if value == VK_HOME => Some(NativeTextKey::Home),
+        value if value == VK_END => Some(NativeTextKey::End),
+        value if value == VK_RETURN => Some(NativeTextKey::Enter),
+        value if value == VK_ESCAPE => Some(NativeTextKey::Escape),
+        _ => None,
     }
 }
 
@@ -246,4 +325,22 @@ fn last_os_error(code: &'static str) -> NativeTextWindowError {
 
 fn wide_null(value: &str) -> Vec<u16> {
     value.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn packed_pointer_coordinates_preserve_signed_client_values() {
+        let packed = (u32::from((-7_i16) as u16) << 16) | u32::from(24_u16);
+        assert_eq!(client_point(packed as isize), (24, -7));
+    }
+
+    #[test]
+    fn text_hit_normalization_rejects_header_margin() {
+        assert_eq!(windows_text_line_at(15), None);
+        assert_eq!(windows_text_line_at(16), Some(0));
+        assert_eq!(windows_text_line_at(44), Some(1));
+    }
 }

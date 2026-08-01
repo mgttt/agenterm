@@ -742,6 +742,10 @@ Cockpit
 - macOS 已有真实 renderer-owned screenshot；Linux production strategy 现已接到
   `RendererRequest`，无效 native handle 保持 typed `Failed`，但仍须在 X11/Wayland
   原生 journey 留存 snapshot + PNG，不能把 strategy 单测冒充交付证据；
+- Native Cockpit input 已由 `agenterm-platform::window` 发布 typed pointer/key event，
+  Win32/winit adapter 负责坐标、行命中和键规范化；产品层只维护 tab cursor 并异步
+  复用既有 typed select operation。Windows unit/Clippy 与 Linux/macOS cross-check 通过，
+  三平台真人 pointer/keyboard journey 仍是交付证据缺口；
 - 覆盖 incompatible sibling、renderer crash、server retained while GUI
   replaced、new epoch recovery 和 stale owner replacement；
 - Workflows、Extensions、InfoHub 可以改进解释与导航，但没有 owning backend
