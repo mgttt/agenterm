@@ -7,12 +7,6 @@ use std::{
 
 use crate::filesystem::{FilesystemError, HostDirectories};
 
-#[cfg(feature = "filesystem")]
-#[path = "../unix/file_identity.rs"]
-mod file_identity;
-#[cfg(feature = "filesystem")]
-pub use file_identity::{file_identity, path_identity};
-
 pub fn user_home_directory() -> Result<PathBuf, FilesystemError> {
     crate::filesystem::home_directory_from_env(std::env::var_os("HOME"))
 }

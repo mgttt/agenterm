@@ -64,8 +64,14 @@ process = [
     "windows-sys/Win32_System_Pipes",
 ]
 filesystem-conventions = []
+file-identity = [
+    "dep:windows-sys",
+    "windows-sys/Win32_Foundation",
+    "windows-sys/Win32_Storage_FileSystem",
+]
 filesystem = [
     "filesystem-conventions",
+    "file-identity",
     "dep:windows-sys",
     "windows-sys/Win32_Foundation",
     "windows-sys/Win32_Security",

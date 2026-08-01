@@ -2,7 +2,7 @@
 
 use std::os::unix::fs::MetadataExt as _;
 
-use crate::filesystem::FileIdentity;
+use crate::file_identity::FileIdentity;
 
 pub fn file_identity(file: &std::fs::File) -> std::io::Result<FileIdentity> {
     let metadata = file.metadata()?;

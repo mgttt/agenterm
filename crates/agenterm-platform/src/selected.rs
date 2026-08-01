@@ -101,6 +101,17 @@ pub(crate) mod clipboard;
 #[path = "adapters/windows/filesystem.rs"]
 pub(crate) mod filesystem;
 
+#[cfg(all(feature = "file-identity", windows))]
+#[path = "adapters/windows/file_identity.rs"]
+pub(crate) mod file_identity;
+
+#[cfg(all(
+    feature = "file-identity",
+    any(target_os = "linux", target_os = "macos")
+))]
+#[path = "adapters/unix/file_identity.rs"]
+pub(crate) mod file_identity;
+
 #[cfg(all(feature = "font", windows))]
 #[path = "adapters/windows/font.rs"]
 pub(crate) mod font;
