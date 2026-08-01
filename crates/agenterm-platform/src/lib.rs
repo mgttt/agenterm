@@ -5,6 +5,10 @@
 
 use std::borrow::Cow;
 
+/// Target-specific extension APIs. Portable callers should prefer the
+/// platform-neutral capability facades at the crate root.
+pub mod adapters;
+
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
 pub enum PlatformKind {

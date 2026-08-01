@@ -223,8 +223,7 @@ pub(crate) mod process_security;
 pub(crate) mod process_security;
 
 #[cfg(all(feature = "process-reference", windows))]
-#[path = "adapters/windows/process_reference.rs"]
-pub(crate) mod process_reference;
+pub(crate) use crate::adapters::windows::process_reference;
 
 #[cfg(all(feature = "process-reference", target_os = "linux"))]
 #[path = "adapters/linux/process_reference.rs"]

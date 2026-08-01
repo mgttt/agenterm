@@ -77,21 +77,31 @@ impl ProcessReference {
     }
 }
 
-pub(crate) struct RemoteHandleTransfer<'a> {
+pub struct RemoteHandleTransfer<'a> {
     target: &'a ProcessReference,
     remote: std::os::windows::io::RawHandle,
     committed: bool,
 }
 
 impl RemoteHandleTransfer<'_> {
-    pub(crate) const fn as_raw_handle(&self) -> std::os::windows::io::RawHandle {
+    pub const fn as_raw_handle(&self) -> std::os::windows::io::RawHandle {
         self.remote
     }
 
-    pub(crate) fn into_raw_handle(mut self) -> std::os::windows::io::RawHandle {
+    pub fn into_raw_handle(mut self) -> std::os::windows::io::RawHandle {
         self.committed = true;
         self.remote
     }
+}
+
+/// Duplicates a current-process HANDLE into an exact retained target process.
+///
+/// Dropping the returned receipt before committing it closes the remote HANDLE.
+pub fn duplicate_handle_into<'a>(
+    target: &'a crate::process_reference::ProcessReference,
+    source: BorrowedHandle<'_>,
+) -> io::Result<RemoteHandleTransfer<'a>> {
+    target.0.duplicate_handle_into(source)
 }
 
 impl Drop for RemoteHandleTransfer<'_> {
