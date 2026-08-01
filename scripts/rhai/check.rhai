@@ -584,10 +584,17 @@ if std::fs::exists(timing_path) {
 
 if quick {
     let quick_started = std::time::SystemTime::now().unix_millis;
-    let quick_native_bin_root = std::path::join(repo, "target").display;
+    let quick_native_bin_root = if std::env::has("CARGO_TARGET_DIR") {
+        std::path::absolute(std::env::get("CARGO_TARGET_DIR")).display
+    } else {
+        std::path::join(repo, "target").display
+    };
     if quick_target != "" {
-        quick_native_bin_root = std::path::join(repo, quick_target).display;
+        quick_native_bin_root =
+            std::path::join(quick_native_bin_root, quick_target).display;
     }
+    quick_native_bin_root =
+        std::path::join(quick_native_bin_root, "debug").display;
     let clippy_arguments = [
         "clippy", "--quiet", "--locked", "--all-targets", "--", "-D", "warnings"
     ];
