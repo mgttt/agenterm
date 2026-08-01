@@ -541,15 +541,16 @@ integrated validation recorded below):
   past ring's build script without `x86_64-linux-gnu-gcc`, so native Unix source
   compilation remains CI/host evidence. The strict boundary report is now three
   findings: Windows remote GUI host plus the final root selector.
-- [~] The remaining Windows remote GUI migration has a frozen typed boundary.
-  A dedicated neutral `control_window` host will own Win32 class/window/child
+- [x] The Windows remote GUI now consumes the frozen typed `control_window`
+  boundary. The dedicated neutral host owns Win32 class/window/child
   controls, pre-translation key preview, WndProc/message loop, focus/capture,
   system menu, GDI double buffering and native capture. The main crate retains
   server/client, tab/tree/composer/settings/theme, selection/scrollback,
   close-policy, snapshot and paint-composition decisions, expressed only as
   control IDs, normalized events, neutral rectangles/colors and canvas calls.
-  The dependency order is contract, native host, product integration, native
-  import deletion, then final root selector deletion. Raw-handle or closure
+  The completed dependency order was contract, native host, product
+  integration, native import deletion, then final root selector deletion.
+  Raw-handle or closure
   forwarding facades are explicitly excluded because they would preserve the
   ownership leak instead of establishing the external crate boundary.
 - [x] The neutral control-window contract and selected Windows native host are
@@ -560,9 +561,11 @@ integrated validation recorded below):
   and one double-buffered GDI present per paint. Zero-size paints are ignored,
   native menu/surface/present failures are typed, and the class deliberately
   omits horizontal/vertical redraw styles. Linux/macOS return typed
-  Unsupported. Crate tests pass 49/49 with warnings denied; root all-target
-  check and Clippy also pass. Product `RemoteWindowState` integration, native
-  automation injection and non-Windows control shells remain incomplete.
+  Unsupported. Product `RemoteWindowState` now implements the neutral
+  application/event/query/paint contract; native automation, selection-aware
+  EDIT copy/paste, no-activate restore, synchronous screenshot paint, fonts and
+  menus route through the host. The product file contains no native import,
+  handle or unsafe block. Evidence: `d9138ab`, 12 owning tests.
 - [x] The control-window host now preserves native EDIT selection semantics
   through typed copy/paste operations and synchronously flushes a requested
   redraw before native PNG capture, so structured snapshot state and captured
@@ -575,18 +578,18 @@ integrated validation recorded below):
 - [x] Root IPC, Script-host availability, supervisor-audit path policy and XRGB
   screenshot encoding no longer require selected adapter modules. They compose
   product paths/capability facts from the crate `PlatformKind` or call the crate
-  facade directly; twelve duplicate product adapter files are deleted. TLS,
-  Control Center and frontend selection remain until their typed prerequisites
-  are complete.
-- [~] Control Center state-directory protection and exclusive state-file
-  creation now have validated public crate primitives; product focus/capture
-  routing has been rewritten toward typed activation/screenshot facades and
-  removal of its three root selectors. That product integration remains
-  uncommitted and is not complete until the integrated root builds and its
-  public Control Center smoke passes.
-- [x] Passive system-WebView runtime discovery now calls
-  `services::webview → selected → adapters/{windows,linux,macos}`. The root
-  facade and shared facts contain no target selection; WebView2, WebKitGTK,
+  facade directly; twelve duplicate product adapter files are deleted.
+- [x] Control Center state-directory protection, exclusive state-file creation,
+  focus, capture and atomic replacement now use typed public crate facades.
+  Its three root platform adapters are deleted and failures are propagated
+  rather than silently ignored. The final cfg-free frontend and Script HTTP
+  services preserve Windows NativeTls/platform roots and Unix Rustls/WebPKI;
+  root `selected.rs`, two frontend wrappers and three TLS adapters are deleted.
+  Root Cargo no longer directly depends on `windows-sys` or `rmux-pty`.
+  Evidence: `2644ba7`, 458 lib tests, warnings-denied all-target Clippy, seven
+  boundary tests and target-specific ureq feature trees.
+- [x] Passive system-WebView runtime discovery now calls the external crate
+  facade directly. Root services contain no target selection; WebView2, WebKitGTK,
   and WKWebView filesystem probes remain passive and preserve their existing
   Detected/Missing/Failed facts. AgenTerm continues to use its native renderer.
 
