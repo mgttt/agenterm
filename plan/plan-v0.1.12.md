@@ -96,6 +96,13 @@ Workspace 交付卫生同步更新：Windows/Unix bootstrap worker identity 现�
 `crates/` 树纳入 tracked、worktree 与 untracked content fingerprint，并提升 schema，
 避免平台 crate 改动复用陈旧 worker。crate README 已记录默认空 feature、当前依赖
 DAG、三平台矩阵、typed failure 约束、公共 endpoint 示例和 exact Git revision 依赖方式。
+第七个能力组完成 clipboard、screenshot encoding 和 font candidates：clipboard read
+budget 由调用方传入，不再从 terminal paste policy 反向污染 native adapter；Windows
+Unicode/Wayland-X11 helper/macOS pasteboard failures 统一映射公开 Unsupported/Failed。
+截图 crate 只接收 caller-owned XRGB frame/path/clip，Windows HWND/GDI window capture
+保持产品私有；三平台共享 bounded PNG encoder。font feature 暴露中立候选描述，
+Windows GDI font handle/metrics 仍留产品 extension。21 项 all-feature crate tests、
+warnings-denied crate Clippy 与 Agenterm all-target compile check 通过。
 
 2026-08-01 首个建设期增量：Cockpit snapshot 新增明确的
 `tab_counts.{total,running,dead}`，native shell 同源显示 logical instance、

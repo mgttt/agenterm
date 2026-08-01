@@ -10,7 +10,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::{platform::CapabilityStatus, ui_clipboard::TERMINAL_PASTE_LIMIT_BYTES};
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum CapabilityStatus {
+    Available,
+    Failed { code: &'static str, message: String },
+}
 
 pub(crate) const HELPER_TIMEOUT: Duration = Duration::from_millis(1_500);
 
@@ -64,16 +68,11 @@ pub(crate) fn capability_status() -> CapabilityStatus {
 }
 
 pub(crate) fn set_text(text: &str) -> Result<(), ClipboardError> {
-    if text.len() > TERMINAL_PASTE_LIMIT_BYTES {
-        return Err(ClipboardError::TooLarge {
-            limit: TERMINAL_PASTE_LIMIT_BYTES,
-        });
-    }
     write_via_command("pbcopy", text, HELPER_TIMEOUT)
 }
 
-pub(crate) fn get_text() -> Result<String, ClipboardError> {
-    read_via_command("pbpaste", TERMINAL_PASTE_LIMIT_BYTES, HELPER_TIMEOUT)
+pub(crate) fn get_text(max_read_bytes: usize) -> Result<String, ClipboardError> {
+    read_via_command("pbpaste", max_read_bytes, HELPER_TIMEOUT)
 }
 
 pub(crate) fn has_unicode_text() -> bool {
@@ -81,6 +80,25 @@ pub(crate) fn has_unicode_text() -> bool {
         Ok(text) => !text.is_empty(),
         Err(ClipboardError::TooLarge { .. }) => true,
         Err(_) => false,
+    }
+}
+
+pub(crate) fn map_error(error: ClipboardError) -> crate::contract::clipboard::ClipboardError {
+    match &error {
+        ClipboardError::Unavailable { .. } => {
+            crate::contract::clipboard::ClipboardError::unsupported("clipboard-unavailable")
+        }
+        ClipboardError::TooLarge { .. } => crate::contract::clipboard::ClipboardError::failed(
+            "clipboard_too_large",
+            error.message(),
+        ),
+        ClipboardError::Timeout => {
+            crate::contract::clipboard::ClipboardError::failed("clipboard_timeout", error.message())
+        }
+        ClipboardError::Backend { .. } => crate::contract::clipboard::ClipboardError::failed(
+            "clipboard_backend_error",
+            error.message(),
+        ),
     }
 }
 
@@ -279,13 +297,11 @@ mod tests {
     }
 
     #[test]
-    fn writes_reject_oversized_text_before_spawning() {
-        let text = "x".repeat(TERMINAL_PASTE_LIMIT_BYTES + 1);
+    fn bounded_reader_reports_the_caller_supplied_limit() {
+        let mut input = &b"12345"[..];
         assert_eq!(
-            set_text(&text),
-            Err(ClipboardError::TooLarge {
-                limit: TERMINAL_PASTE_LIMIT_BYTES,
-            })
+            read_stdout_bounded(&mut input, 4),
+            Err(ClipboardError::TooLarge { limit: 4 })
         );
     }
 

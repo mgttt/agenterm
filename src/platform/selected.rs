@@ -60,12 +60,6 @@ pub(crate) mod control_center_shell;
 pub(crate) mod webview;
 
 #[cfg(windows)]
-#[path = "adapters/windows/ui_clipboard.rs"]
-pub(crate) mod ui_clipboard;
-#[cfg(windows)]
-#[path = "adapters/windows/ui_font.rs"]
-pub(crate) mod ui_font;
-#[cfg(windows)]
 #[path = "adapters/windows/ui_screenshot.rs"]
 pub(crate) mod ui_screenshot;
 
@@ -129,12 +123,6 @@ pub(crate) mod scale;
 pub(crate) mod webview;
 
 #[cfg(target_os = "linux")]
-#[path = "adapters/linux/ui_clipboard.rs"]
-pub(crate) mod ui_clipboard;
-#[cfg(target_os = "linux")]
-#[path = "adapters/linux/ui_font.rs"]
-pub(crate) mod ui_font;
-#[cfg(target_os = "linux")]
 #[path = "adapters/linux/ui_screenshot.rs"]
 pub(crate) mod ui_screenshot;
 
@@ -193,12 +181,6 @@ pub(crate) mod control_center_shell;
 #[path = "adapters/macos/webview.rs"]
 pub(crate) mod webview;
 
-#[cfg(target_os = "macos")]
-#[path = "adapters/macos/ui_clipboard.rs"]
-pub(crate) mod ui_clipboard;
-#[cfg(target_os = "macos")]
-#[path = "adapters/macos/ui_font.rs"]
-pub(crate) mod ui_font;
 #[cfg(target_os = "macos")]
 #[path = "adapters/macos/ui_screenshot.rs"]
 pub(crate) mod ui_screenshot;

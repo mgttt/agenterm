@@ -11,7 +11,6 @@
 #![cfg(target_os = "macos")]
 
 pub(crate) mod activation;
-pub(crate) mod clipboard;
 pub(crate) mod font;
 pub(crate) mod ime;
 pub(crate) mod input;
@@ -34,7 +33,7 @@ pub fn capability_status(capability: CapabilityKind) -> CapabilityStatus {
         | CapabilityKind::Ime
         | CapabilityKind::Screenshot
         | CapabilityKind::Activation => CapabilityStatus::Available,
-        CapabilityKind::Clipboard => clipboard::capability_status(),
+        CapabilityKind::Clipboard => CapabilityStatus::Available,
         CapabilityKind::Font => font::capability_status(),
         CapabilityKind::Integration => CapabilityStatus::Unsupported {
             reason: "signed-macos-app-bundle-pending",

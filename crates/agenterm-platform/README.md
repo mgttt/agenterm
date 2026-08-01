@@ -39,8 +39,10 @@ third-party dependency.
 | `pty` | PTY command/master/child lifecycle | `process`, `rmux-pty` |
 | `window` | DPI and logical/physical geometry | none |
 | `input`, `ime`, `activation` | reserved migration slots | `window` chain |
-| `clipboard` | reserved migration slot | `process` |
-| `screenshot`, `font`, `webview` | reserved migration slots | `filesystem` |
+| `clipboard` | caller-bounded Unicode clipboard | `process`, target native APIs |
+| `screenshot` | bounded XRGB framebuffer PNG encoding | `filesystem`, `png` |
+| `font` | platform font-file candidates | `filesystem` |
+| `webview` | reserved migration slot | `filesystem` |
 | `full` | every declared feature | union of the above |
 
 Enabling a reserved slot does not pretend the capability exists:
@@ -57,6 +59,9 @@ Enabling a reserved slot does not pretend the capability exists:
 | IPC | named pipe | Unix socket | Unix socket |
 | PTY | ConPTY | POSIX PTY | POSIX PTY |
 | window geometry | available | available | available |
+| clipboard | Win32 Unicode | Wayland/X11 helpers | `pbcopy`/`pbpaste` |
+| screenshot encoding | PNG | PNG | PNG |
+| font candidates | product GDI path | system candidates | system candidates |
 
 Unsupported endpoint variants and native failures remain typed; adapters never
 silently substitute a different transport or capability.

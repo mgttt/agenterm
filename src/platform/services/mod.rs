@@ -19,6 +19,7 @@ pub(crate) mod script_stream;
 pub(crate) mod script_window;
 pub(crate) mod supervisor_audit;
 pub(crate) mod ui_clipboard;
-pub(crate) mod ui_font;
+#[allow(unused_imports)]
+pub(crate) use agenterm_platform::font as ui_font;
 pub(crate) mod ui_screenshot;
 pub(crate) mod webview;

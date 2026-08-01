@@ -59,9 +59,9 @@ pub fn capability_status(capability: Capability) -> CapabilityStatus {
         Capability::Input => (cfg!(feature = "input"), false),
         Capability::Ime => (cfg!(feature = "ime"), false),
         Capability::Activation => (cfg!(feature = "activation"), false),
-        Capability::Clipboard => (cfg!(feature = "clipboard"), false),
-        Capability::Screenshot => (cfg!(feature = "screenshot"), false),
-        Capability::Font => (cfg!(feature = "font"), false),
+        Capability::Clipboard => (cfg!(feature = "clipboard"), true),
+        Capability::Screenshot => (cfg!(feature = "screenshot"), true),
+        Capability::Font => (cfg!(feature = "font"), true),
         Capability::WebView => (cfg!(feature = "webview"), false),
     };
     if enabled && implemented {
@@ -78,6 +78,12 @@ pub fn capability_status(capability: Capability) -> CapabilityStatus {
 }
 
 pub mod contract;
+
+#[cfg(feature = "clipboard")]
+pub mod clipboard;
+
+#[cfg(feature = "font")]
+pub mod font;
 
 #[cfg(feature = "filesystem")]
 pub mod filesystem;
@@ -100,6 +106,9 @@ pub mod process;
 #[cfg(feature = "process")]
 pub mod runtime;
 
+#[cfg(feature = "screenshot")]
+pub mod screenshot;
+
 mod selected;
 
 #[cfg(test)]
@@ -117,9 +126,9 @@ mod tests {
 
     #[test]
     fn declared_but_unimplemented_capabilities_are_explicit() {
-        #[cfg(feature = "clipboard")]
+        #[cfg(feature = "input")]
         assert_eq!(
-            crate::capability_status(crate::Capability::Clipboard),
+            crate::capability_status(crate::Capability::Input),
             crate::CapabilityStatus::Unsupported {
                 reason: std::borrow::Cow::Borrowed("capability-not-yet-implemented")
             }

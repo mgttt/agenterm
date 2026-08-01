@@ -1,3 +1,7 @@
+#[cfg(feature = "clipboard")]
+pub mod clipboard;
+#[cfg(feature = "font")]
+pub mod font;
 #[cfg(feature = "ipc")]
 pub mod ipc_transport;
 #[cfg(feature = "process")]
@@ -6,3 +10,5 @@ pub mod process;
 pub mod pty;
 #[cfg(feature = "process")]
 pub mod runtime;
+#[cfg(feature = "screenshot")]
+pub mod ui_screenshot;

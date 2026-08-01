@@ -19,7 +19,6 @@ use crate::platform::{
 };
 
 pub(crate) mod activation;
-pub(crate) mod clipboard;
 pub(crate) mod font;
 pub(crate) mod ime;
 pub(crate) mod input;
@@ -105,7 +104,7 @@ pub(crate) fn capability_status(kind: CapabilityKind) -> CapabilityStatus {
         }
         CapabilityKind::Input => input_capability_status(facts),
         CapabilityKind::Ime => ime::ime_capability_status(facts),
-        CapabilityKind::Clipboard => clipboard::clipboard_capability_status_from_env(),
+        CapabilityKind::Clipboard => CapabilityStatus::Available,
         CapabilityKind::Font => font::font_capability_status(),
         CapabilityKind::Screenshot => screenshot::screenshot_capability_status(facts),
         CapabilityKind::Activation => activation::activation_capability_status(facts),

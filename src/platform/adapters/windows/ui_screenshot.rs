@@ -1,9 +1,3 @@
-//! Windows declaration for the Unix frontend screenshot service.
+//! Windows compatibility projection for XRGB screenshot encoding.
 
-use crate::platform::contract::ui_screenshot::{UiScreenshotError, XrgbFrame};
-
-pub(crate) fn write_xrgb_png(_: XrgbFrame<'_>) -> Result<(), UiScreenshotError> {
-    Err(UiScreenshotError::Unsupported {
-        reason: "unix frontend screenshot service is unavailable on Windows",
-    })
-}
+pub(crate) use agenterm_platform::screenshot::write_xrgb_png;

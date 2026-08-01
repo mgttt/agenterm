@@ -24,6 +24,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   named pipes and Unix sockets are public together with typed transport failures,
   bounded I/O and endpoint ownership checks. Only AgenTerm endpoint/workspace
   naming remains in the root package, and IPC capability status is available.
+- [~] Clipboard, bounded XRGB screenshot encoding and font-file candidates are
+  reusable crate capabilities. Terminal paste limits, HWND/GDI capture and font
+  handles remain explicit root product extensions rather than leaking native
+  types through the public crate API.
 - [ ] Windows, macOS, and Linux native frontends consume one declared platform
   contract for window lifecycle, normalized input, IME, DPI, clipboard, font
   discovery, screenshots, activation, and applicable system integration.

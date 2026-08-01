@@ -20,10 +20,29 @@ use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::platform::{CapabilityStatus, DisplayBackendFacts};
-use crate::ui_clipboard::TERMINAL_PASTE_LIMIT_BYTES;
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum CapabilityStatus {
+    Available,
+    Unsupported { reason: &'static str },
+    Failed { code: &'static str, message: String },
+}
 
-use super::display_facts_from_env;
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct DisplayBackendFacts {
+    x11: bool,
+    wayland: bool,
+    headless: bool,
+}
+
+fn display_facts_from_env() -> DisplayBackendFacts {
+    let wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
+    let x11 = std::env::var_os("DISPLAY").is_some();
+    DisplayBackendFacts {
+        x11,
+        wayland,
+        headless: !(x11 || wayland),
+    }
+}
 
 /// Wall-clock budget for one clipboard helper invocation (GUI must not stall).
 pub(crate) const HELPER_TIMEOUT: Duration = Duration::from_millis(1_500);
@@ -213,7 +232,7 @@ pub(crate) fn set_text(text: &str) -> Result<(), ClipboardError> {
 }
 
 /// Read Unicode text from the system clipboard.
-pub(crate) fn get_text() -> Result<String, ClipboardError> {
+pub(crate) fn get_text(max_read_bytes: usize) -> Result<String, ClipboardError> {
     require_capability_for_io()?;
     let display = display_facts_from_env();
     let backends = ClipboardBackendFacts::probe();
@@ -225,7 +244,7 @@ pub(crate) fn get_text() -> Result<String, ClipboardError> {
 
     let mut errors = Vec::new();
     for (argv, label) in read_attempts(display, backends) {
-        match read_via_command(argv, TERMINAL_PASTE_LIMIT_BYTES, HELPER_TIMEOUT) {
+        match read_via_command(argv, max_read_bytes, HELPER_TIMEOUT) {
             Ok(text) => return Ok(text),
             Err(error) => {
                 if matches!(error, ClipboardError::TooLarge { .. }) {
@@ -256,9 +275,28 @@ pub(crate) fn has_unicode_text() -> bool {
             return true;
         }
     }
-    match get_text() {
+    match get_text(1) {
         Ok(text) => !text.is_empty(),
         Err(_) => false,
+    }
+}
+
+pub(crate) fn map_error(error: ClipboardError) -> crate::contract::clipboard::ClipboardError {
+    match &error {
+        ClipboardError::Unavailable { .. } => {
+            crate::contract::clipboard::ClipboardError::unsupported("clipboard-unavailable")
+        }
+        ClipboardError::TooLarge { .. } => crate::contract::clipboard::ClipboardError::failed(
+            "clipboard_too_large",
+            error.message(),
+        ),
+        ClipboardError::Timeout { .. } => {
+            crate::contract::clipboard::ClipboardError::failed("clipboard_timeout", error.message())
+        }
+        ClipboardError::Backend { .. } => crate::contract::clipboard::ClipboardError::failed(
+            "clipboard_backend_error",
+            error.message(),
+        ),
     }
 }
 
@@ -857,7 +895,7 @@ mod tests {
                 .unwrap_or(0)
         );
         set_text(&marker).expect("clipboard set_text");
-        let got = get_text().expect("clipboard get_text");
+        let got = get_text(marker.len()).expect("clipboard get_text");
         assert_eq!(got, marker);
         assert!(has_unicode_text());
     }

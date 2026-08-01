@@ -21,7 +21,7 @@ input = ["window"]
 ime = ["input"]
 activation = ["window"]
 clipboard = ["process"]
-screenshot = ["filesystem"]
+screenshot = ["filesystem", "dep:png"]
 font = ["filesystem"]
 webview = ["filesystem"]
 full = [
@@ -44,6 +44,7 @@ full = [
 libc = { version = "0.2", optional = true }
 
 [dependencies]
+png = { version = "0.17", optional = true }
 rmux-pty = { version = "0.9.1", optional = true }
 serde = { version = "1", optional = true, features = ["derive"] }
 
@@ -51,7 +52,9 @@ serde = { version = "1", optional = true, features = ["derive"] }
 windows-sys = { version = "0.61", optional = true, features = [
     "Win32_Foundation",
     "Win32_Storage_FileSystem",
+    "Win32_System_DataExchange",
     "Win32_System_IO",
+    "Win32_System_Memory",
     "Win32_System_Pipes",
     "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_JobObjects",
