@@ -427,10 +427,13 @@ Release 全部是本轮明确非目标。
   并集并生成 275-package SPDX；补齐 macOS `objc2-app-kit`/`objc2-foundation` MIT notices。
   qualification evidence declaration 校验前移到 repo lint 后、主编译前，Control Center 的
   `typed-navigation` 已进入精确清单；递归 quality-timing 测试从 broad Cargo invocation
-  分离并在同一 unit gate 串行执行，消除 target-lock 竞态。最终 `check.cmd --skip-smoke`
-  204.3 秒通过，包含 462 library tests、all-features integration tests、七产物 dev build、
-  MCP、migration、SPDX、qualification/package/cleanup self-tests；按约定不写 qualification
-  receipt，也未触发 Candidate/Release。
+  分离并在同一 unit gate 串行执行，消除 target-lock 竞态。build identity 冻结为
+  `f0f0248` 的 `check.cmd --skip-smoke` 212.7 秒通过，包含 463 library tests、all-features integration
+  tests、七产物 dev build、MCP、migration、SPDX、qualification/package/cleanup self-tests；
+  按约定不写 qualification receipt，也未触发 Candidate/Release。其后并发合入的
+  `9f3f9de` hardware-only crate 增量另由 dirty=false 七产物 build（24.1 秒）、完整 Windows
+  `remote-ui-smoke`（130 秒）、platform all-feature warnings-denied Clippy 与 68 项 tests
+  覆盖；不把跨并发提交的分层证据伪称为同一次 exact-tree full gate。
 
 这些 dogfood 缺陷优先于新增 Cockpit 装饰和远期 Candidate 工作；修复必须保留
 结构化 snapshot 与 PNG/公开 input journey 证据，并避免多个 agent 并发编辑
