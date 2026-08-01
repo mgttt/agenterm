@@ -1,30 +1,12 @@
-use std::num::{NonZeroU64, NonZeroUsize};
-
-use crate::contract::host_memory::{HostMemoryError, HostMemoryErrorKind, HostMemoryFacts};
+use crate::contract::host_memory::{
+    HostMemoryError, HostMemoryErrorKind, HostMemoryFacts, checked_facts, checked_page_product,
+};
 
 pub(crate) fn facts() -> Result<HostMemoryFacts, HostMemoryError> {
     let page_size = positive_sysconf(libc::_SC_PAGESIZE, "page size")?;
     let physical_pages = positive_sysconf(libc::_SC_PHYS_PAGES, "physical page count")?;
-    let physical_bytes = physical_pages.checked_mul(page_size).ok_or_else(|| {
-        HostMemoryError::new(
-            HostMemoryErrorKind::Overflow,
-            "physical page count multiplied by page size overflowed u64",
-        )
-    })?;
-    let page_size = usize::try_from(page_size)
-        .ok()
-        .and_then(NonZeroUsize::new)
-        .ok_or_else(|| {
-            HostMemoryError::new(
-                HostMemoryErrorKind::InvalidValue,
-                "page size does not fit this process pointer width",
-            )
-        })?;
-    Ok(HostMemoryFacts {
-        page_size,
-        allocation_granularity: page_size,
-        physical_bytes: NonZeroU64::new(physical_bytes).expect("positive product"),
-    })
+    let physical_bytes = checked_page_product(physical_pages, page_size)?;
+    checked_facts(page_size, page_size, physical_bytes)
 }
 
 fn positive_sysconf(key: libc::c_int, name: &str) -> Result<u64, HostMemoryError> {

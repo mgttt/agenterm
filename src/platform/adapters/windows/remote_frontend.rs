@@ -12,8 +12,7 @@ use std::{
 use crate::{
     client::{ipc_address, ipc_endpoint, resolved_ipc_endpoint},
     commands::{
-        alternate_screen_wheel_bytes, option_value, positional_values, screenshot_output_path,
-        tmux_key_bytes_with_modifiers,
+        option_value, positional_values, screenshot_output_path, tmux_key_bytes_with_modifiers,
     },
     instances::intentional_shutdown_matches,
     locale::UiText,
@@ -4390,17 +4389,33 @@ impl RemoteWindowState {
             return;
         };
         let tab_id = tab.id.clone();
-        let alternate_screen = tab.screen.alternate_screen;
-        let application_cursor = tab.screen.application_cursor;
         let max_scrollback = tab.screen.max_scrollback;
         let count = usize::try_from(delta.unsigned_abs())
             .unwrap_or(120)
             .div_ceil(120)
             .saturating_mul(3)
             .max(1);
-        if alternate_screen && max_scrollback == 0 {
-            let bytes = alternate_screen_wheel_bytes(delta > 0, count, application_cursor);
-            self.terminal_input(&bytes);
+        if max_scrollback == 0 {
+            let key = if delta > 0 { "Up" } else { "Down" };
+            let mut arguments = vec![
+                "send-keys".to_owned(),
+                "-t".to_owned(),
+                tab_id,
+                "--native".to_owned(),
+            ];
+            arguments.extend(std::iter::repeat_n(key.to_owned(), count));
+            let result = self
+                .client
+                .as_mut()
+                .context("UI is disconnected")
+                .and_then(|client| {
+                    client.run_control(arguments)?;
+                    client.poll_deltas()?;
+                    Ok(())
+                });
+            if let Err(error) = result {
+                self.last_error = Some(format!("Terminal wheel input failed: {error:#}"));
+            }
             return;
         }
         let action = if delta > 0 { "up" } else { "down" };

@@ -1,6 +1,6 @@
-use std::num::{NonZeroU64, NonZeroUsize};
-
-use crate::contract::host_memory::{HostMemoryError, HostMemoryErrorKind, HostMemoryFacts};
+use crate::contract::host_memory::{
+    HostMemoryError, HostMemoryErrorKind, HostMemoryFacts, checked_facts,
+};
 
 pub(crate) fn facts() -> Result<HostMemoryFacts, HostMemoryError> {
     use windows_sys::Win32::System::SystemInformation::{
@@ -9,10 +9,6 @@ pub(crate) fn facts() -> Result<HostMemoryFacts, HostMemoryError> {
 
     let mut system = SYSTEM_INFO::default();
     unsafe { GetSystemInfo(&mut system) };
-    let page_size = nonzero_usize("page size", system.dwPageSize)?;
-    let allocation_granularity =
-        nonzero_usize("allocation granularity", system.dwAllocationGranularity)?;
-
     let mut memory = MEMORYSTATUSEX {
         dwLength: std::mem::size_of::<MEMORYSTATUSEX>() as u32,
         ..Default::default()
@@ -23,24 +19,9 @@ pub(crate) fn facts() -> Result<HostMemoryFacts, HostMemoryError> {
             std::io::Error::last_os_error().to_string(),
         ));
     }
-    let physical_bytes = NonZeroU64::new(memory.ullTotalPhys).ok_or_else(|| {
-        HostMemoryError::new(
-            HostMemoryErrorKind::InvalidValue,
-            "host reported zero physical memory",
-        )
-    })?;
-    Ok(HostMemoryFacts {
-        page_size,
-        allocation_granularity,
-        physical_bytes,
-    })
-}
-
-fn nonzero_usize(name: &str, value: u32) -> Result<NonZeroUsize, HostMemoryError> {
-    NonZeroUsize::new(value as usize).ok_or_else(|| {
-        HostMemoryError::new(
-            HostMemoryErrorKind::InvalidValue,
-            format!("host reported zero {name}"),
-        )
-    })
+    checked_facts(
+        u64::from(system.dwPageSize),
+        u64::from(system.dwAllocationGranularity),
+        memory.ullTotalPhys,
+    )
 }

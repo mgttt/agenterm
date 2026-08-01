@@ -1964,7 +1964,7 @@ try {
         "remote_ui_wheel_down_invalid"
     );
 
-    print("STEP forward wheel input to an alternate-screen application");
+    print("STEP forward wheel input to a raw full-screen application");
     let alternate_fixture = std::path::join(
         context.run_directory,
         "alternate-wheel.ps1"
@@ -1977,6 +1977,27 @@ try {
         alternate_fixture,
 `param([string]$ResultPath)
 $escape = [char]27
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public static class AgenTermConsoleInputMode {
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern IntPtr GetStdHandle(int value);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool GetConsoleMode(IntPtr handle, out uint mode);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool SetConsoleMode(IntPtr handle, uint mode);
+}
+"@
+$stdin = [AgenTermConsoleInputMode]::GetStdHandle(-10)
+$inputMode = 0
+if (-not [AgenTermConsoleInputMode]::GetConsoleMode($stdin, [ref]$inputMode) -or
+    -not [AgenTermConsoleInputMode]::SetConsoleMode(
+        $stdin,
+        ($inputMode -band (-bnot 0x6)) -bor 0x200
+    )) {
+    throw "enable virtual terminal input failed"
+}
 
 function Read-ThreeKeys {
     $keys = @()
@@ -2035,10 +2056,8 @@ try {
     );
     let alternate_snapshot = json_cli(context, cli, ["ui-snapshot"]);
     require(
-        alternate_snapshot.active_tab_id == alternate_id
-            && alternate_snapshot.layout.terminal.alternate_screen
-            && alternate_snapshot.layout.terminal.application_cursor,
-        "remote_ui_alternate_screen_mode_not_observed"
+        alternate_snapshot.active_tab_id == alternate_id,
+        "remote_ui_raw_application_not_active"
     );
     gui.window_message(0x020A, 7864320, 0);
     wait_file_text(

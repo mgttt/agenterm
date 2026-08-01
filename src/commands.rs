@@ -606,9 +606,9 @@ fn control_command_spec(command: &str) -> Option<ControlCommandSpec> {
             false,
         ),
         "send-keys" | "send" => (
-            "agenterm-cli send-keys [-t target] [-l] key...",
+            "agenterm-cli send-keys [-t target] [-l|--native] key...",
             &["-t"][..],
-            &["-l", "-R", "-X"][..],
+            &["-l", "--native", "-R", "-X"][..],
             false,
         ),
         "send-composer" => (

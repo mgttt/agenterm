@@ -50,3 +50,90 @@ impl std::fmt::Display for HostMemoryError {
 }
 
 impl std::error::Error for HostMemoryError {}
+
+pub(crate) fn checked_facts(
+    page_size: u64,
+    allocation_granularity: u64,
+    physical_bytes: u64,
+) -> Result<HostMemoryFacts, HostMemoryError> {
+    let page_size = nonzero_usize("page size", page_size)?;
+    let allocation_granularity = nonzero_usize("allocation granularity", allocation_granularity)?;
+    if allocation_granularity.get() < page_size.get()
+        || allocation_granularity.get() % page_size.get() != 0
+    {
+        return Err(HostMemoryError::new(
+            HostMemoryErrorKind::InvalidValue,
+            "allocation granularity is not a positive multiple of page size",
+        ));
+    }
+    let physical_bytes = std::num::NonZeroU64::new(physical_bytes).ok_or_else(|| {
+        HostMemoryError::new(
+            HostMemoryErrorKind::InvalidValue,
+            "host reported zero physical memory",
+        )
+    })?;
+    if physical_bytes.get() < page_size.get() as u64 {
+        return Err(HostMemoryError::new(
+            HostMemoryErrorKind::InvalidValue,
+            "physical memory is smaller than one host page",
+        ));
+    }
+    Ok(HostMemoryFacts {
+        page_size,
+        allocation_granularity,
+        physical_bytes,
+    })
+}
+
+#[cfg(any(target_os = "linux", test))]
+pub(crate) fn checked_page_product(
+    page_count: u64,
+    page_size: u64,
+) -> Result<u64, HostMemoryError> {
+    page_count.checked_mul(page_size).ok_or_else(|| {
+        HostMemoryError::new(
+            HostMemoryErrorKind::Overflow,
+            "physical page count multiplied by page size overflowed u64",
+        )
+    })
+}
+
+fn nonzero_usize(name: &str, value: u64) -> Result<std::num::NonZeroUsize, HostMemoryError> {
+    usize::try_from(value)
+        .ok()
+        .and_then(std::num::NonZeroUsize::new)
+        .ok_or_else(|| {
+            HostMemoryError::new(
+                HostMemoryErrorKind::InvalidValue,
+                format!("host reported invalid {name}: {value}"),
+            )
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn raw_facts_reject_zero_and_incoherent_geometry() {
+        for result in [
+            checked_facts(0, 65_536, 1 << 30),
+            checked_facts(4096, 0, 1 << 30),
+            checked_facts(4096, 2048, 1 << 30),
+            checked_facts(4096, 6144, 1 << 30),
+            checked_facts(4096, 4096, 0),
+            checked_facts(4096, 4096, 2048),
+        ] {
+            assert_eq!(
+                result.expect_err("reject invalid raw facts").kind(),
+                HostMemoryErrorKind::InvalidValue
+            );
+        }
+    }
+
+    #[test]
+    fn physical_page_product_rejects_overflow() {
+        let error = checked_page_product(u64::MAX, 4096).expect_err("reject overflow");
+        assert_eq!(error.kind(), HostMemoryErrorKind::Overflow);
+    }
+}

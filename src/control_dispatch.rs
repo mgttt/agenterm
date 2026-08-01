@@ -9,6 +9,7 @@ use crate::{
     event_journal::{EventEnvelope, EventJournal, EventKind, EventPosition},
     operations::{UI_TABS_HIDE, UI_TABS_SET_WIDTH, UI_TABS_SHOW, UI_TABS_TOGGLE},
     protocol::IpcResponse,
+    pty::{NativeInputOwnership, NativeTerminalKey, PtyError},
     settings::clamp_tabs_width,
     tab_tree::{TabTreeNode, TabTreeRow, tree_rows, would_create_cycle},
     terminal_runtime::TerminalTab,
@@ -1161,7 +1162,44 @@ pub(crate) fn dispatch_shared_command(
                 ));
             }
             let literal = args.iter().any(|arg| arg == "-l");
-            for key in positional_values(args, &["-t"], &["-l", "-R", "-X"]) {
+            let native = args.iter().any(|arg| arg == "--native");
+            if literal && native {
+                return Some(IpcResponse::typed_failure(
+                    "send-keys accepts only one of -l or --native",
+                    "operation_argument_conflict",
+                    "usage",
+                    false,
+                ));
+            }
+            let keys = positional_values(args, &["-t"], &["-l", "--native", "-R", "-X"]);
+            if native {
+                let ownership = match host.tabs()[position].native_input_ownership() {
+                    Ok(ownership) => ownership,
+                    Err(error) => return Some(native_key_failure(error)),
+                };
+                if ownership == NativeInputOwnership::Cooked {
+                    return Some(IpcResponse::success("ignored:cooked"));
+                }
+                for key in keys {
+                    let key = match key {
+                        "Up" => NativeTerminalKey::Up,
+                        "Down" => NativeTerminalKey::Down,
+                        _ => {
+                            return Some(IpcResponse::typed_failure(
+                                "send-keys --native supports only Up and Down",
+                                "terminal_native_key_unsupported",
+                                "unsupported",
+                                false,
+                            ));
+                        }
+                    };
+                    if let Err(error) = host.tabs_mut()[position].send_native_key(key, 1) {
+                        return Some(native_key_failure(error));
+                    }
+                }
+                return Some(IpcResponse::success("sent:raw"));
+            }
+            for key in keys {
                 let sent = if literal {
                     host.tabs_mut()[position].send(key.as_bytes())
                 } else if let Some(bytes) = tmux_key_bytes(key) {
@@ -1880,6 +1918,26 @@ pub(crate) fn dispatch_shared_command(
             }
         }
         _ => None,
+    }
+}
+
+fn native_key_failure(error: PtyError) -> IpcResponse {
+    match error {
+        PtyError::Unsupported { .. } => IpcResponse::typed_failure(
+            error.to_string(),
+            "terminal_native_key_unsupported",
+            "unsupported",
+            false,
+        ),
+        PtyError::Failed { code, .. } => {
+            IpcResponse::typed_failure(error.to_string(), code, "native", true)
+        }
+        _ => IpcResponse::typed_failure(
+            error.to_string(),
+            "terminal_native_key_failed",
+            "native",
+            true,
+        ),
     }
 }
 

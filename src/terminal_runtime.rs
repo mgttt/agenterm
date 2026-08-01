@@ -10,7 +10,10 @@ use std::{
 
 use anyhow::{Context as _, Result};
 
-use crate::pty::{ChildCommand, PtyChild, PtyMaster, PtyResult, TerminalSize};
+use crate::pty::{
+    ChildCommand, NativeInputOwnership, NativeTerminalKey, PtyChild, PtyMaster, PtyResult,
+    TerminalSize,
+};
 
 use crate::{
     SCROLLBACK_LINES, request_gui_wake,
@@ -535,6 +538,20 @@ impl TerminalTab {
             self.input_writes += 1;
             true
         }
+    }
+
+    pub(crate) fn native_input_ownership(&self) -> PtyResult<NativeInputOwnership> {
+        self.child.native_input_ownership()
+    }
+
+    pub(crate) fn send_native_key(
+        &mut self,
+        key: NativeTerminalKey,
+        repeat_count: u16,
+    ) -> PtyResult<()> {
+        self.child.send_native_key(key, repeat_count)?;
+        self.input_writes += 1;
+        Ok(())
     }
 
     pub(super) fn submit(&mut self, text: &str) -> bool {

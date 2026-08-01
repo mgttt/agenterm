@@ -1,18 +1,15 @@
-use std::num::{NonZeroU64, NonZeroUsize};
-
-use crate::contract::host_memory::{HostMemoryError, HostMemoryErrorKind, HostMemoryFacts};
+use crate::contract::host_memory::{
+    HostMemoryError, HostMemoryErrorKind, HostMemoryFacts, checked_facts,
+};
 
 pub(crate) fn facts() -> Result<HostMemoryFacts, HostMemoryError> {
     let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
-    let page_size = usize::try_from(page_size)
-        .ok()
-        .and_then(NonZeroUsize::new)
-        .ok_or_else(|| {
-            HostMemoryError::new(
-                HostMemoryErrorKind::InvalidValue,
-                format!("host reported invalid page size: {page_size}"),
-            )
-        })?;
+    let page_size = u64::try_from(page_size).map_err(|_| {
+        HostMemoryError::new(
+            HostMemoryErrorKind::InvalidValue,
+            format!("host reported invalid page size: {page_size}"),
+        )
+    })?;
 
     let mut physical_bytes = 0_u64;
     let mut length = std::mem::size_of::<u64>();
@@ -37,15 +34,5 @@ pub(crate) fn facts() -> Result<HostMemoryFacts, HostMemoryError> {
             format!("hw.memsize returned {length} bytes"),
         ));
     }
-    let physical_bytes = NonZeroU64::new(physical_bytes).ok_or_else(|| {
-        HostMemoryError::new(
-            HostMemoryErrorKind::InvalidValue,
-            "host reported zero physical memory",
-        )
-    })?;
-    Ok(HostMemoryFacts {
-        page_size,
-        allocation_granularity: page_size,
-        physical_bytes,
-    })
+    checked_facts(page_size, page_size, physical_bytes)
 }
