@@ -509,11 +509,11 @@ v0.1.12  Convergence & Fast Promotion
 │  │  ├─ 单元失败不提交语言状态，外部真实副作用不伪装回滚
 │  │  ├─ 普通 worker 与 REPL 复用同一 Engine/API 配置
 │  │  └─ [~] Ctrl+C、箭头历史与 kill/restart 长驻协议继续 hardening
-│  ├─ 评估把 canonical Rhai 入口从 agenterm-script 重命名为 agenterm-rhai
-│  │  ├─ 名字直接表达语言/runtime 身份，不再暗示抽象的通用脚本沙箱
-│  │  ├─ 先冻结 CLI、task、worker、包名、文档和第三方调用者影响清单
-│  │  ├─ 若本轮实施，agenterm-script 作为有期限的兼容转发入口，不复制 runtime
-│  │  └─ 构建、测试、Candidate、Promotion 必须在 canonical 名切换后保持自举
+│  ├─ [x] v0.1.12 保留 canonical `agenterm-script` 名称
+│  │  ├─ 当前没有完整外部调用者使用量与迁移/移除证据
+│  │  ├─ 收敛期不新增同义 executable、package 和 Candidate surface
+│  │  ├─ 未来 rename 必须先冻结 CLI/task/worker/package/docs 调用者清单
+│  │  └─ 兼容入口只能转发到同一 unrestricted runtime，不能复制实现
 │  ├─ Control Center 的 Workflows/Extensions/InfoHub 保持真实空状态
 │  ├─ agenterm-net 启动 N2 受控纵切（独立常驻 full node）
 │  │  ├─ 显式 start/status/stop；持久身份、block store 与可观测资源账本

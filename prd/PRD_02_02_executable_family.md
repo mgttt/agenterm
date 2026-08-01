@@ -215,13 +215,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   Both reuse one runtime library, API graph, local scheduler, standard library,
   modules, named tasks, and typed Fleet APIs without becoming a persistent
   daemon or an Agent permission layer
-- [ ] v0.1.12 executable-name decision: evaluate `agenterm-rhai.exe` /
-  `agenterm-rhai` as the canonical name for that same unrestricted Rhai
-  runtime. A rename must preserve one implementation and one public CLI/task
-  contract, inventory every bootstrap/package/test/documentation caller, and
-  keep `agenterm-script` only as an explicitly time-bounded forwarding
-  compatibility entry if measured external usage requires it. It must not
-  create two runtimes, two task catalogs, or a permission-reduced variant.
+- [x] v0.1.12 executable-name decision: retain `agenterm-script.exe` /
+  `agenterm-script` as the canonical name for the same unrestricted Rhai
+  runtime. Renaming is deferred until measured external usage and a complete
+  bootstrap/package/test/documentation caller inventory justify a migration.
+  Any future compatibility entry must forward to one implementation and one
+  public CLI/task contract; it must not create two runtimes, two task catalogs,
+  or a permission-reduced variant.
   Future consolidation should prefer a shared Rust runtime library plus thin
   role-specific entry points; merging executables is not accepted merely to
   reduce file count when GUI/Console subsystem behavior, pipeline exit codes,

@@ -16,16 +16,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   status, and never links a second Rhai engine into the control client. The
   existing one-shot supervisor routes retain their single worker topology. All expose the same
   catalog, parser, supervisor, and runtime.
-- [ ] v0.1.12 naming investigation may make `agenterm-rhai.exe` the canonical
-  public executable because Rhai—not a generic pluggable script language—is
-  the stable runtime contract. This is a product-name migration only: the
-  object/interface tree, unrestricted authority, worker isolation, task
-  manifest and typed results must remain byte-for-byte or semantically
-  equivalent at the public boundary. Before implementation, record every
-  bootstrap, CI, Candidate, package, documentation and external caller; if a
-  compatibility `agenterm-script` entry is retained, it forwards to the one
-  implementation, emits no divergent behavior, and has an evidence-based
-  removal milestone.
+- [x] v0.1.12 retains `agenterm-script.exe` / `agenterm-script` as the canonical
+  public executable. Although Rhai is the stable runtime contract, the version
+  has no complete external-usage inventory or migration/removal evidence, and
+  introducing a second name during convergence would expand packaging,
+  bootstrap and Candidate scope without user value. A future rename decision
+  must inventory every CI/package/documentation/external caller and keep any
+  compatibility entry as a thin forwarding surface over the one unrestricted
+  implementation; it must never create a second runtime or reduced API.
 - [x] every ordinary invocation receives the same unrestricted local runtime
   surface. No invocation mode, task label, profile, catalog capability, caller,
   or entry point gates API registration or execution; the future Agent harness
