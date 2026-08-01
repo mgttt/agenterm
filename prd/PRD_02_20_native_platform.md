@@ -675,6 +675,14 @@ integrated validation recorded below):
   only IPC target selector. Native endpoint bind/connect/accept and stream
   I/O now traverse `services::ipc → selected → adapter`; the former native
   transport implementation copies are deleted.
+- [x] Native stream interop exposes standard borrowed and owned handle/fd
+  semantics without moving native mechanics into the public facade. The
+  target-selected `NativeStreamExt` trait and standard descriptor trait impls
+  live in Windows/Unix adapters; `ipc.rs` only re-exports the selected extension
+  and keeps a neutral stream wrapper. Integrated run `30718584882` caught the
+  first facade-level implementation through the no-native-mechanics boundary
+  test (490/491 otherwise passed); the adapter-owned form closes that failure
+  without adding a boundary whitelist.
 - [x] Script Runtime HTTP TLS provider/root-store selection and
   platform-specific TLS-error classification now traverse
   `services::script_http → selected → adapters`; the Rhai HTTP surface keeps

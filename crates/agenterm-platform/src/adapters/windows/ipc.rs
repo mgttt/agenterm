@@ -133,6 +133,33 @@ impl AsHandle for NativeStream {
     }
 }
 
+impl AsRawHandle for crate::ipc::NativeStream {
+    fn as_raw_handle(&self) -> RawHandle {
+        self.0.as_raw_handle()
+    }
+}
+
+impl AsHandle for crate::ipc::NativeStream {
+    fn as_handle(&self) -> BorrowedHandle<'_> {
+        self.0.as_handle()
+    }
+}
+
+pub trait NativeStreamExt: Sized {
+    fn from_owned_handle(handle: OwnedHandle, timeout: Duration) -> Self;
+    fn into_owned_handle(self) -> OwnedHandle;
+}
+
+impl NativeStreamExt for crate::ipc::NativeStream {
+    fn from_owned_handle(handle: OwnedHandle, timeout: Duration) -> Self {
+        Self(NativeStream::from_owned_handle(handle, timeout))
+    }
+
+    fn into_owned_handle(self) -> OwnedHandle {
+        self.0.into_owned_handle()
+    }
+}
+
 impl NativeStream {
     pub(crate) fn from_owned_handle(handle: OwnedHandle, timeout: Duration) -> Self {
         Self { handle, timeout }

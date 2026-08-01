@@ -7,4 +7,4 @@
 #[path = "../linux/ipc.rs"]
 mod unix_mechanism;
 
-pub(crate) use unix_mechanism::*;
+pub use unix_mechanism::*;

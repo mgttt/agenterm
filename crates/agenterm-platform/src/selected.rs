@@ -277,7 +277,7 @@ pub(crate) mod locking;
 
 #[cfg(all(feature = "ipc", windows))]
 #[path = "adapters/windows/ipc.rs"]
-pub(crate) mod ipc;
+pub mod ipc;
 
 #[cfg(all(feature = "input", windows))]
 #[path = "adapters/windows/input.rs"]
@@ -353,11 +353,11 @@ pub(crate) mod input;
 
 #[cfg(all(feature = "ipc", target_os = "linux"))]
 #[path = "adapters/linux/ipc.rs"]
-pub(crate) mod ipc;
+pub mod ipc;
 
 #[cfg(all(feature = "ipc", target_os = "macos"))]
 #[path = "adapters/macos/ipc.rs"]
-pub(crate) mod ipc;
+pub mod ipc;
 
 #[cfg(all(feature = "process", windows))]
 #[path = "adapters/windows/process.rs"]

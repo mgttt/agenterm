@@ -42,63 +42,11 @@ impl NativeListener {
     }
 }
 
-pub struct NativeStream(selected::ipc::NativeStream);
+pub use selected::ipc::NativeStreamExt;
 
-#[cfg(windows)]
-impl std::os::windows::io::AsRawHandle for NativeStream {
-    fn as_raw_handle(&self) -> std::os::windows::io::RawHandle {
-        self.0.as_raw_handle()
-    }
-}
-
-#[cfg(windows)]
-impl std::os::windows::io::AsHandle for NativeStream {
-    fn as_handle(&self) -> std::os::windows::io::BorrowedHandle<'_> {
-        self.0.as_handle()
-    }
-}
-
-#[cfg(unix)]
-impl std::os::fd::AsRawFd for NativeStream {
-    fn as_raw_fd(&self) -> std::os::fd::RawFd {
-        self.0.as_raw_fd()
-    }
-}
-
-#[cfg(unix)]
-impl std::os::fd::AsFd for NativeStream {
-    fn as_fd(&self) -> std::os::fd::BorrowedFd<'_> {
-        self.0.as_fd()
-    }
-}
+pub struct NativeStream(pub(crate) selected::ipc::NativeStream);
 
 impl NativeStream {
-    #[cfg(windows)]
-    pub fn from_owned_handle(handle: std::os::windows::io::OwnedHandle, timeout: Duration) -> Self {
-        Self(selected::ipc::NativeStream::from_owned_handle(
-            handle, timeout,
-        ))
-    }
-
-    #[cfg(windows)]
-    pub fn into_owned_handle(self) -> std::os::windows::io::OwnedHandle {
-        self.0.into_owned_handle()
-    }
-
-    #[cfg(unix)]
-    pub fn from_owned_fd(
-        descriptor: std::os::fd::OwnedFd,
-        endpoint: &IpcEndpoint,
-        timeout: Duration,
-    ) -> TransportResult<Self> {
-        selected::ipc::NativeStream::from_owned_fd(descriptor, endpoint, timeout).map(Self)
-    }
-
-    #[cfg(unix)]
-    pub fn into_owned_fd(self) -> std::os::fd::OwnedFd {
-        self.0.into_owned_fd()
-    }
-
     pub fn connect(endpoint: &IpcEndpoint, timeout: Duration) -> TransportResult<Self> {
         selected::ipc::NativeStream::connect(endpoint, timeout).map(Self)
     }

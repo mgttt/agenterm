@@ -482,6 +482,11 @@ Release 全部是本轮明确非目标。
   `9f3f9de` hardware-only crate 增量另由 dirty=false 七产物 build（24.1 秒）、完整 Windows
   `remote-ui-smoke`（130 秒）、platform all-feature warnings-denied Clippy 与 68 项 tests
   覆盖；不把跨并发提交的分层证据伪称为同一次 exact-tree full gate。
+  后续 native IPC descriptor interop 增量的整合 run `30718584882` 被既有静态门禁
+  精确拦截：public `ipc.rs` 出现 `cfg(windows)` 与 `std::os::windows`。修复没有扩白名单，
+  而是把 borrowed/owned handle/fd 标准 trait 和 `NativeStreamExt` 物理移入 selected
+  Windows/Unix adapters，facade 只重导出目标 trait 并保留中立 wrapper；platform 161 项
+  tests、native round-trip 与 macOS cross-target Clippy 是重新验证门槛。
 
 这些 dogfood 缺陷优先于新增 Cockpit 装饰和远期 Candidate 工作；修复必须保留
 结构化 snapshot 与 PNG/公开 input journey 证据，并避免多个 agent 并发编辑

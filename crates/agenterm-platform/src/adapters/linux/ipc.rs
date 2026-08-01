@@ -227,6 +227,41 @@ impl AsFd for NativeStream {
     }
 }
 
+impl AsRawFd for crate::ipc::NativeStream {
+    fn as_raw_fd(&self) -> RawFd {
+        self.0.as_raw_fd()
+    }
+}
+
+impl AsFd for crate::ipc::NativeStream {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.0.as_fd()
+    }
+}
+
+pub trait NativeStreamExt: Sized {
+    fn from_owned_fd(
+        descriptor: OwnedFd,
+        endpoint: &IpcEndpoint,
+        timeout: Duration,
+    ) -> TransportResult<Self>;
+    fn into_owned_fd(self) -> OwnedFd;
+}
+
+impl NativeStreamExt for crate::ipc::NativeStream {
+    fn from_owned_fd(
+        descriptor: OwnedFd,
+        endpoint: &IpcEndpoint,
+        timeout: Duration,
+    ) -> TransportResult<Self> {
+        NativeStream::from_owned_fd(descriptor, endpoint, timeout).map(Self)
+    }
+
+    fn into_owned_fd(self) -> OwnedFd {
+        self.0.into_owned_fd()
+    }
+}
+
 impl NativeStream {
     pub(crate) fn from_owned_fd(
         descriptor: OwnedFd,

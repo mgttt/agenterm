@@ -5,6 +5,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+use agenterm_platform::ipc::NativeStreamExt as _;
 use agenterm_platform::ipc::{IpcEndpoint, NativeListener, NativeStream};
 
 fn unique_endpoint() -> IpcEndpoint {
