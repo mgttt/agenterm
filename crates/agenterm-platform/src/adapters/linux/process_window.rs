@@ -609,6 +609,12 @@ mod x11 {
         })
     }
 
+    pub(super) fn pointer_coordinate_scale(process_id: u32) -> Result<f64, ProcessWindowError> {
+        let context = connect()?;
+        required_window(&context, process_id)?;
+        Ok(1.0)
+    }
+
     pub(super) fn resize(
         process_id: u32,
         width: i32,
@@ -753,6 +759,10 @@ pub(crate) fn pointer(
             "native child-window input is not implemented on this platform",
         ))
     }
+}
+
+pub(crate) fn pointer_coordinate_scale(process_id: u32) -> Result<f64, ProcessWindowError> {
+    x11::pointer_coordinate_scale(process_id)
 }
 
 pub(crate) fn message(_: u32, _: ProcessWindowMessage) -> Result<isize, ProcessWindowError> {

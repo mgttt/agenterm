@@ -847,7 +847,12 @@ Cockpit
   并经 public `send-keys` 产出 marker。macOS ARM64 在统一 scale 后仍无 pointer
   transition，排除“仅 scale”结论；adapter 现把 CoreGraphics 的两个公开
   window-under-pointer fields 固定为唯一 exact-PID WindowServer ID，并保留单坐标、
-  no-activate 合同。两项仍等待下一 ordinary CI 的 matching-host 正向回执；
+  no-activate 合同。exact-SHA `bdc7c38` 的 run `30717496128` 已证明 macOS x86_64，
+  但 ARM64 仍重复 pointer timeout，说明 window routing fields 也不是完整根因。
+  `agenterm-platform` 现公开 selected adapter 实际消费的 typed pointer coordinate
+  scale；macOS journey 用 renderer scale 完成 framebuffer -> WindowServer point，
+  再用 adapter scale 完成 point -> input unit，不再从 outer/client 宽度猜同一个比例，
+  仍保持单坐标、无 retry。Linux 正向结果与 macOS ARM64 正向回执仍开放；
 - Control Center evidence ownership 不再游离于 alignment：Windows required
   qualification gate 与 Linux/macOS host-native gate 分别登记，`prd-alignment`
   对三者的 evidence ID、脚本发射点和 partial PRD 状态做同一 exact parity。

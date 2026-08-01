@@ -165,6 +165,10 @@ fn register_types(engine: &mut Engine) {
     engine.register_fn("kill_tree", child_kill_tree);
     engine.register_fn("window_key", child_window_key);
     engine.register_fn("window_pointer", child_window_pointer);
+    engine.register_fn(
+        "window_pointer_coordinate_scale",
+        child_window_pointer_coordinate_scale,
+    );
     engine.register_fn("window_message", child_window_message);
     engine.register_fn("window_rect", child_window_rect);
     engine.register_fn("window_client_rect", child_window_client_rect);
@@ -842,6 +846,17 @@ fn child_window_pointer(
     window_result(
         "Child.window_pointer",
         crate::platform::services::script_window::pointer(child_process_id(child)?, action, x, y),
+    )
+}
+
+fn child_window_pointer_coordinate_scale(
+    child: &mut ScriptChild,
+) -> Result<rhai::FLOAT, Box<EvalAltResult>> {
+    window_result(
+        "Child.window_pointer_coordinate_scale",
+        crate::platform::services::script_window::pointer_coordinate_scale(child_process_id(
+            child,
+        )?),
     )
 }
 

@@ -905,16 +905,17 @@ pub fn entries() -> Vec<ScriptApiEntry> {
             shipped_local_entry(
                 "std.process.child-window-input",
                 "system/process/child/window-input",
-                "Child.window_key/window_pointer/window_message/window_rect/window_client_rect/window_resize/window_control; WindowControl.visible/text/set_text/click",
+                "Child.window_key/window_pointer/window_pointer_coordinate_scale/window_message/window_rect/window_client_rect/window_resize/window_control; WindowControl.visible/text/set_text/click",
                 None,
                 RustMapping::None,
-                "child.window_key(key) / child.window_pointer(action, x, y) / child.window_message(message, wparam, lparam) / child.window_rect() / child.window_client_rect() / child.window_resize(width, height) / child.window_control(id)",
+                "child.window_key(key) / child.window_pointer(action, x, y) / child.window_pointer_coordinate_scale() / child.window_message(message, wparam, lparam) / child.window_rect() / child.window_client_rect() / child.window_resize(width, height) / child.window_control(id)",
                 (
                     &[
                         "invocation_owned_child",
                         "top_level_window_lookup",
                         "native_key_delivery",
                         "native_pointer_delivery",
+                        "native_pointer_coordinate_scale",
                         "native_message_delivery",
                         "window_and_client_geometry",
                         "nonactivating_resize",

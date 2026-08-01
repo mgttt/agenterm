@@ -416,6 +416,9 @@ agenterm-script
 │  │  ├─ Child.window_pointer(action, x, y)
 │  │  │  Delivers click/down/move/move-held/up/capture-changed pointer input.
 │  │  │  [shipped on Windows; stable; designed 2026-07-30]
+│  │  ├─ Child.window_pointer_coordinate_scale()
+│  │  │  Reports pointer-input coordinate units per window-rect coordinate unit.
+│  │  │  [shipped on Windows/Linux/macOS; stable; designed 2026-08-02]
 │  │  ├─ Child.window_message(message, wparam, lparam)
 │  │  │  Sends an explicit native integer message to the current window.
 │  │  │  [shipped on Windows; stable; designed 2026-07-30]
@@ -946,7 +949,8 @@ that a negative result is an observed desktop fact. This child-scoped fact
 accepts no arbitrary PID; the separate `std::process::list()` API owns the
 general inventory.
 
-`Child.window_key`, `Child.window_pointer`, `Child.window_message`,
+`Child.window_key`, `Child.window_pointer`,
+`Child.window_pointer_coordinate_scale`, `Child.window_message`,
 `Child.window_rect`, `Child.window_client_rect`, `Child.window_resize`, and
 `Child.window_control` resolve the current top-level window from the
 invocation-owned child PID on every call. They never reinterpret the opaque

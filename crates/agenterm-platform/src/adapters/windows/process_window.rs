@@ -168,6 +168,11 @@ pub(crate) fn pointer(
     Ok(())
 }
 
+pub(crate) fn pointer_coordinate_scale(process_id: u32) -> Result<f64, ScriptWindowError> {
+    required_window(process_id)?;
+    Ok(1.0)
+}
+
 pub(crate) fn message(
     process_id: u32,
     message: ScriptWindowMessage,

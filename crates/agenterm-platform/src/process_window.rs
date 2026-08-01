@@ -21,6 +21,11 @@ pub fn pointer(
 ) -> Result<(), ProcessWindowError> {
     adapter::pointer(process_id, action, x, y)
 }
+/// Returns the pointer-coordinate units consumed by [`pointer`] per coordinate
+/// unit returned by [`rect`] for the selected process window.
+pub fn pointer_coordinate_scale(process_id: u32) -> Result<f64, ProcessWindowError> {
+    adapter::pointer_coordinate_scale(process_id)
+}
 pub fn message(
     process_id: u32,
     message: ProcessWindowMessage,

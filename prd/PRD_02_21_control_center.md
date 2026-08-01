@@ -173,8 +173,14 @@ Control Center is the product name; the executable family uses
   `/bin/echo` fixture tabs already dead. The Linux journey now uses persistent
   `/bin/sh` PTYs. The macOS adapter pins the public CoreGraphics mouse-event
   window fields to its unique exact-PID WindowServer candidate and marks the
-  down/up pair as one click before `CGEventPostToPid`. Final Linux/macOS positive
-  journey evidence remains open. Windows qualification evidence and
+  down/up pair as one click before `CGEventPostToPid`. Exact-SHA run
+  `30717496128` proved macOS x86_64 but repeated the ARM64 pointer timeout, so
+  target fields alone are insufficient. The platform crate now publishes the
+  exact pointer-coordinate scale used by its selected adapter; the macOS smoke
+  converts renderer pixels through renderer scale into WindowServer points,
+  then through that authoritative adapter scale. It retains one coordinate and
+  no retry. Final Linux/macOS positive journey evidence remains open. Windows
+  qualification evidence and
   Linux/macOS matching-host evidence are registered in separate gate manifests
   but participate in one exact PRD alignment parity check; cross-target compile
   evidence is never counted as a host-native runtime receipt. A missing server
@@ -440,13 +446,16 @@ future promotion gates.
   during `MouseInput` and converts AppKit bottom-left logical coordinates to
   renderer top-left physical coordinates. `window_client_rect` is typed
   Unsupported on macOS rather than relabeling WindowServer outer bounds; the
-  journey now derives one point-to-pixel scale from the observed outer-frame
-  width and exact client framebuffer width instead of applying the independent
-  winit scale twice. After run `30717141687` showed that correct coordinates
-  still did not select a window, the adapter also sets
+  journey originally derived point-to-pixel scale from the observed outer-frame
+  width and exact client framebuffer width. After run `30717141687` showed that
+  estimate still did not select a window, the adapter also sets
   `kCGMouseEventWindowUnderMousePointer` and its handle-capable companion to the
-  exact WindowServer ID; it does not retry alternate coordinates. A new positive
-  ARM64 receipt remains required.
+  exact WindowServer ID. Run `30717496128` proved those routing fields still did
+  not close ARM64. The reusable process-window facade now exposes the exact
+  display scale consumed by `global_point`; the journey separately uses the
+  renderer-reported scale for framebuffer-to-point conversion and the adapter
+  scale for point-to-input conversion. It does not retry alternate coordinates.
+  A new positive ARM64 receipt remains required.
 
 ## Explicit v0.1.11 non-goals
 

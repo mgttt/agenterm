@@ -568,6 +568,11 @@ pub(crate) fn pointer(
     Ok(())
 }
 
+pub(crate) fn pointer_coordinate_scale(process_id: u32) -> Result<f64, ProcessWindowError> {
+    let window = required_window(process_id)?;
+    Ok(display_scale(window.bounds))
+}
+
 pub(crate) fn message(_: u32, _: ProcessWindowMessage) -> Result<isize, ProcessWindowError> {
     Err(unsupported(
         "native child-window messages are not available on macOS",

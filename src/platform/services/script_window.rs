@@ -19,6 +19,10 @@ pub(crate) fn pointer(
     agenterm_platform::process_window::pointer(process_id, action, x, y)
 }
 
+pub(crate) fn pointer_coordinate_scale(process_id: u32) -> Result<f64, ScriptWindowError> {
+    agenterm_platform::process_window::pointer_coordinate_scale(process_id)
+}
+
 pub(crate) fn message(
     process_id: u32,
     message: ScriptWindowMessage,

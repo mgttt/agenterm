@@ -671,15 +671,17 @@ try {
     let pointer_target = selected.connected_server.tabs[pointer_index].id;
     let pointer_row = pointer_index - visible_start;
     let native_bounds = cc.window_rect();
-    // The Quartz process-window API reports the outer frame in display points,
-    // while the renderer-owned PNG reports the exact client framebuffer in
-    // physical pixels. Headless ARM runners can expose a renderer scale that
-    // differs from the WindowServer display scale, so infer the conversion
-    // from the two observed widths instead of applying the independent winit
-    // scale a second time. macOS has no horizontal client decoration; the
-    // remaining outer/client height delta is the titlebar inset.
+    // The WindowServer outer frame is in display points, while the screenshot
+    // is the client framebuffer in renderer pixels. Convert through the
+    // renderer's own scale and then into the exact coordinate units consumed
+    // by the selected process-window adapter. These scales are intentionally
+    // independent on headless macOS runners.
     require(
-        native_bounds.width > 0 && capture.width > 0,
+        native_bounds.width > 0
+            && native_bounds.height > 0
+            && capture.width > 0
+            && capture.height > 0
+            && capture.rendered_snapshot.scale_factor > 0.0,
         "control_center_macos_native_pointer_scale_unusable:" +
             rhai::json::stringify(#{
                 native_width_points: native_bounds.width,
@@ -687,34 +689,30 @@ try {
                 renderer_scale_factor: capture.rendered_snapshot.scale_factor
             })
     );
-    let native_scale = capture.width.to_float()
-        / native_bounds.width.to_float();
+    let renderer_scale = capture.rendered_snapshot.scale_factor;
+    let pointer_scale = cc.window_pointer_coordinate_scale();
     require(
-        native_scale > 0.0,
+        pointer_scale > 0.0,
         "control_center_macos_native_pointer_scale_non_positive"
     );
-    let native_width = (
-        native_bounds.width.to_float() * native_scale
-    ).round().to_int();
-    let native_height = (
-        native_bounds.height.to_float() * native_scale
-    ).round().to_int();
+    let client_width_points = capture.width.to_float() / renderer_scale;
+    let client_height_points = capture.height.to_float() / renderer_scale;
+    let client_left_points =
+        (native_bounds.width.to_float() - client_width_points) / 2.0;
+    let client_top_points =
+        native_bounds.height.to_float() - client_height_points;
     require(
-        native_width >= capture.width
-            && native_height >= capture.height
-            && (native_width - capture.width) % 2 == 0,
+        client_left_points >= 0.0 && client_top_points >= 0.0,
         "control_center_macos_native_pointer_geometry_unusable:" +
             rhai::json::stringify(#{
-                native_width: native_width,
-                native_height: native_height,
+                native_width_points: native_bounds.width,
+                native_height_points: native_bounds.height,
                 framebuffer_width: capture.width,
                 framebuffer_height: capture.height,
-                native_scale: native_scale,
-                renderer_scale_factor: capture.rendered_snapshot.scale_factor
+                pointer_scale: pointer_scale,
+                renderer_scale_factor: renderer_scale
             })
     );
-    let client_left = (native_width - capture.width) / 2;
-    let client_top = native_height - capture.height;
     let body_scale = if capture.width >= 640 { 2 } else { 1 };
     let line_height = 7 * body_scale + 12;
     // Product lines are 0..10, the Tabs help line is 11, and the following
@@ -722,8 +720,18 @@ try {
     let content_pointer_x = 120;
     let content_pointer_y = 76 + (11 + pointer_row) * line_height
         + line_height / 2;
-    let pointer_x = client_left + content_pointer_x;
-    let pointer_y = client_top + content_pointer_y;
+    let pointer_x = ((client_left_points
+        + content_pointer_x.to_float() / renderer_scale) * pointer_scale)
+        .round().to_int();
+    let pointer_y = ((client_top_points
+        + content_pointer_y.to_float() / renderer_scale) * pointer_scale)
+        .round().to_int();
+    let native_width = (
+        native_bounds.width.to_float() * pointer_scale
+    ).round().to_int();
+    let native_height = (
+        native_bounds.height.to_float() * pointer_scale
+    ).round().to_int();
     require(
         content_pointer_x >= 0
             && content_pointer_x < capture.width
@@ -745,8 +753,8 @@ try {
                 quartz_y: pointer_y,
                 native_width: native_width,
                 native_height: native_height,
-                native_scale: native_scale,
-                renderer_scale_factor: capture.rendered_snapshot.scale_factor
+                pointer_scale: pointer_scale,
+                renderer_scale_factor: renderer_scale
             })
     );
     let input_baseline = json_command(
