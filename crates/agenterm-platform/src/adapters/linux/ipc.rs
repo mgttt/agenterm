@@ -18,8 +18,16 @@ use crate::{
 
 pub(crate) const NATIVE_TRANSPORT_NAME: &str = "unix";
 
+fn effective_uid() -> u32 {
+    crate::user_identity::current_user_identity()
+        .expect("POSIX current-user identity is infallible")
+        .posix_credentials()
+        .expect("Unix IPC selected a POSIX identity")
+        .effective_user_id
+}
+
 pub(crate) fn trusted_user_identity() -> io::Result<TrustedUserIdentity> {
-    let uid = unsafe { libc::geteuid() };
+    let uid = effective_uid();
     Ok(TrustedUserIdentity {
         kind: "uid",
         bytes: uid.to_le_bytes().to_vec(),
@@ -37,7 +45,7 @@ pub(crate) fn native_runtime_directory() -> PathBuf {
     let base = std::fs::canonicalize(&short_system_temp)
         .or_else(|_| std::fs::canonicalize(env::temp_dir()))
         .unwrap_or(short_system_temp);
-    base.join(format!("agenterm-platform-{}", unsafe { libc::geteuid() }))
+    base.join(format!("agenterm-platform-{}", effective_uid()))
 }
 
 pub(crate) struct NativeListener {
@@ -91,8 +99,7 @@ impl NativeListener {
 
         match std::fs::symlink_metadata(&path) {
             Ok(metadata) => {
-                if metadata.uid() != unsafe { libc::geteuid() } || !metadata.file_type().is_socket()
-                {
+                if metadata.uid() != effective_uid() || !metadata.file_type().is_socket() {
                     return Err(unsafe_endpoint(
                         endpoint,
                         "existing Unix endpoint is not an owned socket",
@@ -128,7 +135,7 @@ impl NativeListener {
                         let current = std::fs::symlink_metadata(&path)
                             .map_err(|error| transport_io(endpoint, error))?;
                         if !current.file_type().is_socket()
-                            || current.uid() != unsafe { libc::geteuid() }
+                            || current.uid() != effective_uid()
                             || current.dev() != metadata.dev()
                             || current.ino() != metadata.ino()
                         {
@@ -197,7 +204,7 @@ impl Drop for NativeListener {
             && metadata.file_type().is_socket()
             && metadata.dev() == self.device
             && metadata.ino() == self.inode
-            && metadata.uid() == unsafe { libc::geteuid() }
+            && metadata.uid() == effective_uid()
             && std::fs::remove_file(&self.owned_path).is_ok()
         {
             self.instance_lease.remove_on_drop = true;
@@ -314,7 +321,7 @@ impl UnixInstanceLease {
             return Err(transport_io(endpoint, io::Error::last_os_error()));
         }
         if (stat.st_mode & libc::S_IFMT) != libc::S_IFREG
-            || stat.st_uid != unsafe { libc::geteuid() }
+            || stat.st_uid != effective_uid()
             || stat.st_nlink != 1
             || stat.st_mode & 0o077 != 0
         {
@@ -391,7 +398,7 @@ impl Drop for UnixInstanceLease {
             && metadata.file_type().is_file()
             && metadata.dev() == self.device
             && metadata.ino() == self.inode
-            && metadata.uid() == unsafe { libc::geteuid() }
+            && metadata.uid() == effective_uid()
         {
             let _ = std::fs::remove_file(&self.owned_path);
         }
@@ -481,7 +488,7 @@ fn verify_peer_uid(
             "cannot verify Linux Unix-socket peer credentials",
         ));
     }
-    if credentials.uid != unsafe { libc::geteuid() } {
+    if credentials.uid != effective_uid() {
         return Err(unsafe_endpoint(
             endpoint,
             "Unix-socket peer effective UID does not match the server scope",
@@ -504,7 +511,7 @@ fn verify_peer_uid(
             "cannot verify macOS Unix-socket peer credentials",
         ));
     }
-    if uid != unsafe { libc::geteuid() } {
+    if uid != effective_uid() {
         return Err(unsafe_endpoint(
             endpoint,
             "Unix-socket peer effective UID does not match the server scope",
@@ -556,10 +563,7 @@ fn ensure_private_directory(directory: &Path, endpoint: &IpcEndpoint) -> Transpo
     }
     let metadata =
         std::fs::symlink_metadata(directory).map_err(|error| transport_io(endpoint, error))?;
-    if !metadata.is_dir()
-        || metadata.uid() != unsafe { libc::geteuid() }
-        || metadata.mode() & 0o077 != 0
-    {
+    if !metadata.is_dir() || metadata.uid() != effective_uid() || metadata.mode() & 0o077 != 0 {
         return Err(unsafe_endpoint(
             endpoint,
             "Unix runtime directory is not private to the effective UID",

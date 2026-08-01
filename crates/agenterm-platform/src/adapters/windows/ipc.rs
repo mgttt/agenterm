@@ -1,7 +1,7 @@
 //! Windows named-pipe adapter for the target-neutral local IPC facade.
 
 use std::{
-    ffi::{OsStr, c_void},
+    ffi::OsStr,
     io::{self, Read, Write},
     mem::size_of,
     os::windows::{
@@ -33,7 +33,7 @@ use windows_sys::Win32::{
             PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
             WaitNamedPipeW,
         },
-        Threading::{CreateEventW, GetCurrentProcess, WaitForSingleObject},
+        Threading::{CreateEventW, WaitForSingleObject},
     },
 };
 
@@ -54,92 +54,11 @@ pub(crate) fn native_runtime_directory() -> std::path::PathBuf {
 }
 
 pub(crate) fn trusted_user_identity() -> io::Result<TrustedUserIdentity> {
-    const TOKEN_QUERY: u32 = 0x0008;
-    const TOKEN_USER_CLASS: u32 = 1;
-
-    #[repr(C)]
-    struct SidAndAttributes {
-        sid: *mut c_void,
-        _attributes: u32,
-    }
-    #[repr(C)]
-    struct TokenUser {
-        user: SidAndAttributes,
-    }
-    #[link(name = "advapi32")]
-    unsafe extern "system" {
-        fn OpenProcessToken(
-            process_handle: HANDLE,
-            desired_access: u32,
-            token_handle: *mut HANDLE,
-        ) -> i32;
-        fn GetTokenInformation(
-            token_handle: HANDLE,
-            token_information_class: u32,
-            token_information: *mut c_void,
-            token_information_length: u32,
-            return_length: *mut u32,
-        ) -> i32;
-        fn GetLengthSid(sid: *mut c_void) -> u32;
-    }
-
-    let mut token = ptr::null_mut();
-    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) } == 0 {
-        return Err(io::Error::last_os_error());
-    }
-    let result = (|| {
-        let mut required = 0;
-        unsafe {
-            GetTokenInformation(token, TOKEN_USER_CLASS, ptr::null_mut(), 0, &mut required);
-        }
-        if required < size_of::<TokenUser>() as u32 {
-            return Err(io::Error::last_os_error());
-        }
-        let mut buffer = vec![0usize; (required as usize).div_ceil(size_of::<usize>())];
-        if unsafe {
-            GetTokenInformation(
-                token,
-                TOKEN_USER_CLASS,
-                buffer.as_mut_ptr().cast(),
-                required,
-                &mut required,
-            )
-        } == 0
-        {
-            return Err(io::Error::last_os_error());
-        }
-        let user = unsafe { &*buffer.as_ptr().cast::<TokenUser>() };
-        if user.user.sid.is_null() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "process token returned a null user SID",
-            ));
-        }
-        let sid_length = unsafe { GetLengthSid(user.user.sid) } as usize;
-        let buffer_start = buffer.as_ptr() as usize;
-        let buffer_end = buffer_start
-            .checked_add(required as usize)
-            .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidData))?;
-        let sid_start = user.user.sid as usize;
-        let sid_end = sid_start
-            .checked_add(sid_length)
-            .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidData))?;
-        if sid_length == 0 || sid_start < buffer_start || sid_end > buffer_end {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "process token returned an invalid user SID",
-            ));
-        }
-        let bytes = unsafe { std::slice::from_raw_parts(user.user.sid.cast::<u8>(), sid_length) };
-        Ok(TrustedUserIdentity {
-            kind: "sid",
-            bytes: bytes.to_vec(),
-        })
-    })();
-    unsafe {
-        CloseHandle(token);
-    }
-    result
+    let identity = crate::user_identity::current_user_identity()?;
+    Ok(TrustedUserIdentity {
+        kind: identity.stable_kind(),
+        bytes: identity.stable_bytes(),
+    })
 }
 
 pub(crate) struct NativeListener {

@@ -39,6 +39,7 @@ clipboard, IPC, or screenshot modules.
 | `host-memory` | host page size, mapping granularity and total physical memory | target `libc` / minimal `windows-sys` |
 | `storage` | path-scoped volume capacity, caller-available bytes and allocation unit | target `libc` / minimal `windows-sys` |
 | `entropy` | fail-closed host CSPRNG byte filling | target `libc` / minimal `windows-sys` |
+| `user-identity` | current Windows SID or POSIX real/effective uid/gid facts | target `libc` / minimal `windows-sys` |
 | `process-control` | typed single-process termination and Unix suspend/resume | target `libc` / minimal `windows-sys` |
 | `process-image` | executable path for one selected host process | target `libc` / minimal `windows-sys` |
 | `process-metrics` | cumulative CPU time and resident bytes for one selected process | target `libc` / minimal `windows-sys` |

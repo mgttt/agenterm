@@ -66,6 +66,17 @@ pub(crate) mod clipboard;
 #[path = "adapters/windows/entropy.rs"]
 pub(crate) mod entropy;
 
+#[cfg(all(feature = "user-identity", windows))]
+#[path = "adapters/windows/user_identity.rs"]
+pub(crate) mod user_identity;
+
+#[cfg(all(
+    feature = "user-identity",
+    any(target_os = "linux", target_os = "macos")
+))]
+#[path = "adapters/unix/user_identity.rs"]
+pub(crate) mod user_identity;
+
 #[cfg(all(feature = "entropy", target_os = "linux"))]
 #[path = "adapters/linux/entropy.rs"]
 pub(crate) mod entropy;

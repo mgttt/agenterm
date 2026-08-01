@@ -120,12 +120,17 @@ pub fn protect_private_directory(path: &std::path::Path) -> std::io::Result<()> 
         ));
     }
     let canonical = std::fs::canonicalize(path)?;
-    let token = current_user_token()?;
-    let user = unsafe {
-        &*(token
-            .as_ptr()
-            .cast::<windows_sys::Win32::Security::TOKEN_USER>())
-    };
+    let identity = crate::user_identity::current_user_identity()?;
+    let sid = identity.windows_sid().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "Windows filesystem selected a non-SID user identity",
+        )
+    })?;
+    let mut aligned_sid = vec![0_usize; sid.len().div_ceil(std::mem::size_of::<usize>())];
+    unsafe {
+        std::ptr::copy_nonoverlapping(sid.as_ptr(), aligned_sid.as_mut_ptr().cast(), sid.len());
+    }
     let entry = EXPLICIT_ACCESS_W {
         grfAccessPermissions: GENERIC_ALL,
         grfAccessMode: SET_ACCESS,
@@ -135,7 +140,7 @@ pub fn protect_private_directory(path: &std::path::Path) -> std::io::Result<()> 
             MultipleTrusteeOperation: 0,
             TrusteeForm: TRUSTEE_IS_SID,
             TrusteeType: TRUSTEE_IS_USER,
-            ptstrName: user.User.Sid.cast(),
+            ptstrName: aligned_sid.as_mut_ptr().cast(),
         },
     };
     let mut acl = null_mut();
@@ -172,49 +177,6 @@ pub fn private_create_new_options() -> OpenOptions {
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
     options
-}
-
-#[cfg(feature = "filesystem")]
-fn current_user_token() -> std::io::Result<Vec<usize>> {
-    use std::ptr::null_mut;
-    use windows_sys::Win32::{
-        Foundation::{CloseHandle, HANDLE},
-        Security::{GetTokenInformation, TOKEN_QUERY, TokenUser},
-        System::Threading::{GetCurrentProcess, OpenProcessToken},
-    };
-
-    struct Token(HANDLE);
-    impl Drop for Token {
-        fn drop(&mut self) {
-            unsafe { CloseHandle(self.0) };
-        }
-    }
-
-    let mut handle = null_mut();
-    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut handle) } == 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    let token = Token(handle);
-    let mut required = 0;
-    unsafe { GetTokenInformation(token.0, TokenUser, null_mut(), 0, &mut required) };
-    if required == 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    let words = (required as usize).div_ceil(std::mem::size_of::<usize>());
-    let mut buffer = vec![0_usize; words];
-    if unsafe {
-        GetTokenInformation(
-            token.0,
-            TokenUser,
-            buffer.as_mut_ptr().cast(),
-            required,
-            &mut required,
-        )
-    } == 0
-    {
-        return Err(std::io::Error::last_os_error());
-    }
-    Ok(buffer)
 }
 
 #[cfg(feature = "filesystem")]
@@ -277,12 +239,12 @@ mod tests {
         let result = unsafe { GetExplicitEntriesFromAclW(dacl, &mut count, &mut entries_ptr) };
         assert_eq!(result, 0, "expand private ACL: {}", win32_error(result));
         assert!(count > 0, "private ACL has no explicit ACE");
-        let token = current_user_token().expect("current user token");
-        let user = unsafe {
-            &*(token
-                .as_ptr()
-                .cast::<windows_sys::Win32::Security::TOKEN_USER>())
-        };
+        let identity = crate::user_identity::current_user_identity().expect("current user SID");
+        let sid = identity.windows_sid().expect("Windows SID identity");
+        let mut aligned_sid = vec![0_usize; sid.len().div_ceil(std::mem::size_of::<usize>())];
+        unsafe {
+            std::ptr::copy_nonoverlapping(sid.as_ptr(), aligned_sid.as_mut_ptr().cast(), sid.len());
+        }
         let entries = unsafe { std::slice::from_raw_parts(entries_ptr, count as usize) };
         let mut has_full_control = false;
         let mut inherited_scope = 0;
@@ -300,7 +262,12 @@ mod tests {
                 entry.Trustee.TrusteeType
             );
             assert_ne!(
-                unsafe { EqualSid(entry.Trustee.ptstrName.cast(), user.User.Sid) },
+                unsafe {
+                    EqualSid(
+                        entry.Trustee.ptstrName.cast(),
+                        aligned_sid.as_mut_ptr().cast(),
+                    )
+                },
                 0,
                 "private ACL contains a trustee other than the current user"
             );

@@ -24,6 +24,7 @@ pub enum Capability {
     HostMemory,
     Storage,
     Entropy,
+    UserIdentity,
     ProcessControl,
     ProcessImage,
     ProcessMetrics,
@@ -64,6 +65,7 @@ pub fn capability_status(capability: Capability) -> CapabilityStatus {
         Capability::HostMemory => (cfg!(feature = "host-memory"), true),
         Capability::Storage => (cfg!(feature = "storage"), true),
         Capability::Entropy => (cfg!(feature = "entropy"), true),
+        Capability::UserIdentity => (cfg!(feature = "user-identity"), true),
         Capability::ProcessControl => (cfg!(feature = "process-control"), true),
         Capability::ProcessImage => (cfg!(feature = "process-image"), true),
         Capability::ProcessMetrics => (cfg!(feature = "process-metrics"), true),
@@ -122,6 +124,9 @@ pub mod storage;
 
 #[cfg(feature = "entropy")]
 pub mod entropy;
+
+#[cfg(feature = "user-identity")]
+pub mod user_identity;
 
 #[cfg(any(feature = "filesystem-conventions", feature = "filesystem"))]
 pub mod filesystem;
@@ -250,6 +255,29 @@ mod tests {
         #[cfg(not(feature = "process"))]
         assert_eq!(
             crate::capability_status(crate::Capability::Process),
+            crate::CapabilityStatus::Unsupported {
+                reason: std::borrow::Cow::Borrowed("feature-disabled")
+            }
+        );
+    }
+
+    #[cfg(feature = "user-identity")]
+    #[test]
+    fn user_identity_does_not_claim_filesystem_or_ipc() {
+        assert_eq!(
+            crate::capability_status(crate::Capability::UserIdentity),
+            crate::CapabilityStatus::Available
+        );
+        #[cfg(not(feature = "filesystem"))]
+        assert_eq!(
+            crate::capability_status(crate::Capability::Filesystem),
+            crate::CapabilityStatus::Unsupported {
+                reason: std::borrow::Cow::Borrowed("feature-disabled")
+            }
+        );
+        #[cfg(not(feature = "ipc"))]
+        assert_eq!(
+            crate::capability_status(crate::Capability::Ipc),
             crate::CapabilityStatus::Unsupported {
                 reason: std::borrow::Cow::Borrowed("feature-disabled")
             }
