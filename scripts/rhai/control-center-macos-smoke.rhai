@@ -11,6 +11,7 @@ import "scripts/rhai/lib/test_harness" as test_harness;
 let declared_evidence = [
     "control-center.macos-caller-instance",
     "control-center.macos-renderer-evidence",
+    "control-center.macos-native-input-contract",
     "control-center.macos-no-activate-focus",
     "control-center.macos-incompatible-sibling",
     "control-center.macos-server-recovery",
@@ -214,6 +215,47 @@ fn wait_frontmost_change(context, previous, code) {
     throw code;
 }
 
+fn wait_active_tab(
+    context,
+    control_center,
+    registry,
+    runtime,
+    child,
+    target_tab_id,
+    expected_server_pid,
+    expected_server_epoch,
+    code
+) {
+    let last = "";
+    for attempt in 0..160 {
+        let arguments = ["snapshot", "--json", "--instance", "dev"];
+        let output = native_command(
+            context, control_center, registry, runtime, arguments
+        ).output();
+        last = output.stdout_text() + output.stderr_text();
+        if output.success {
+            let snapshot = rhai::json::parse(last);
+            if snapshot.server_state == "connected"
+                    && snapshot.connected_server.pid == expected_server_pid
+                    && snapshot.connected_server.epoch == expected_server_epoch
+                    && snapshot.connected_server.active_tab_id == target_tab_id {
+                test_harness::append_command_record(
+                    context, arguments, output, false, []
+                );
+                return snapshot;
+            }
+        }
+        if child.state == "exited" {
+            let exited = child.wait_with_output(
+                std::time::Duration::from_secs(2)
+            );
+            throw code + "_renderer_exited:" + exited.stderr_text();
+        }
+        rhai::task::sleep(std::time::Duration::from_millis(25));
+    }
+    throw code + "_timeout:" + last;
+}
+
 fn wait_capture(
     context,
     control_center,
@@ -320,6 +362,7 @@ fn prove_pty(context, cli, registry, runtime, label) {
         captured.stdout_text().contains(marker),
         "control_center_macos_pty_capture"
     );
+    tab_id
 }
 
 fn remove_native_runtime(runtime) {
@@ -414,8 +457,11 @@ try {
             && protocol.instance == "dev",
         "control_center_macos_dev_authority"
     );
-    prove_pty(
+    let baseline_tab = prove_pty(
         context, cli_executable, registry, runtime, "baseline"
+    );
+    let native_input_tab = prove_pty(
+        context, cli_executable, registry, runtime, "native-input"
     );
 
     print("STEP caller-selected snapshot resolves the same dev authority");
@@ -495,6 +541,163 @@ try {
         context,
         declared_evidence,
         "control-center.macos-renderer-evidence"
+    );
+
+    print("STEP native input either navigates in-place or reports TCC denial");
+    let baseline_index = ();
+    let native_input_index = ();
+    for index in 0..selected.connected_server.tabs.len {
+        let tab = selected.connected_server.tabs[index];
+        if tab.id == baseline_tab {
+            baseline_index = index;
+        }
+        if tab.id == native_input_tab {
+            native_input_index = index;
+        }
+    }
+    require(
+        baseline_index != ()
+            && baseline_index < 3
+            && native_input_index != ()
+            && native_input_index < 3
+            && baseline_tab != native_input_tab,
+        "control_center_macos_native_input_targets_not_visible"
+    );
+    let input_baseline = json_command(
+        context,
+        control_center,
+        registry,
+        runtime,
+        ["snapshot", "--json", "--instance", "dev"]
+    );
+    let input_owner = rhai::json::parse_file(registry).pid;
+    let input_frontmost = frontmost_application(context);
+    let initial_active_tab = input_baseline.connected_server.active_tab_id;
+    require(
+        input_owner == cc.id
+            && input_frontmost == foreground_before
+            && input_baseline.connected_server.pid == server.id
+            && input_baseline.connected_server.epoch
+                == selected.connected_server.epoch
+            && input_baseline.connected_server.endpoint == protocol.endpoint,
+        "control_center_macos_native_input_baseline_changed"
+    );
+    let input_failure = "";
+    try {
+        cc.window_key("Home");
+    } catch (error) {
+        input_failure = error.to_string();
+    }
+    if input_failure == "" {
+        for step in 0..native_input_index {
+            cc.window_key("Down");
+        }
+        cc.window_key("Enter");
+        let keyboard_selected = wait_active_tab(
+            context,
+            control_center,
+            registry,
+            runtime,
+            cc,
+            native_input_tab,
+            server.id,
+            selected.connected_server.epoch,
+            "control_center_macos_native_keyboard_navigation"
+        );
+        require(
+            keyboard_selected.connected_server.active_tab_id
+                    == native_input_tab
+                && keyboard_selected.connected_server.pid == server.id
+                && keyboard_selected.connected_server.epoch
+                    == selected.connected_server.epoch
+                && keyboard_selected.connected_server.endpoint
+                    == protocol.endpoint
+                && cc.state == "running"
+                && rhai::json::parse_file(registry).pid == input_owner
+                && frontmost_application(context) == input_frontmost,
+            "control_center_macos_native_keyboard_navigation_truth"
+        );
+
+        let client = cc.window_client_rect();
+        let body_scale = if client.width >= 640 { 2 } else { 1 };
+        let line_height = 7 * body_scale + 12;
+        // Product lines are 0..10, the Tabs help line is 11, and the
+        // following renderer rows are the three bounded Cockpit tab targets.
+        let pointer_x = 120;
+        let pointer_y = 76 + (11 + baseline_index) * line_height
+            + line_height / 2;
+        require(
+            client.left == 0
+                && client.top == 0
+                && pointer_x >= client.left
+                && pointer_x < client.right
+                && pointer_y >= client.top
+                && pointer_y < client.bottom,
+            "control_center_macos_native_pointer_not_bounded"
+        );
+        cc.window_pointer("click", pointer_x, pointer_y);
+        let pointer_selected = wait_active_tab(
+            context,
+            control_center,
+            registry,
+            runtime,
+            cc,
+            baseline_tab,
+            server.id,
+            selected.connected_server.epoch,
+            "control_center_macos_native_pointer_navigation"
+        );
+        require(
+            pointer_selected.connected_server.active_tab_id == baseline_tab
+                && pointer_selected.connected_server.pid == server.id
+                && pointer_selected.connected_server.epoch
+                    == selected.connected_server.epoch
+                && pointer_selected.connected_server.endpoint
+                    == protocol.endpoint
+                && cc.state == "running"
+                && rhai::json::parse_file(registry).pid == input_owner
+                && frontmost_application(context) == input_frontmost,
+            "control_center_macos_native_pointer_navigation_truth"
+        );
+        print(
+            "NATIVE_INPUT_POSITIVE: keyboard and bounded pointer navigation " +
+                "changed only active_tab on the same CC/server/epoch"
+        );
+    } else {
+        require(
+            input_failure.contains("process_window_input_unsupported")
+                && input_failure.contains("permission_denied")
+                && !input_failure.contains("platform_error"),
+            "control_center_macos_native_input_unexpected_failure:" +
+                input_failure
+        );
+        let unchanged = json_command(
+            context,
+            control_center,
+            registry,
+            runtime,
+            ["snapshot", "--json", "--instance", "dev"]
+        );
+        require(
+            unchanged.connected_server.active_tab_id == initial_active_tab
+                && unchanged.connected_server.pid == server.id
+                && unchanged.connected_server.epoch
+                    == selected.connected_server.epoch
+                && unchanged.connected_server.endpoint == protocol.endpoint
+                && cc.state == "running"
+                && rhai::json::parse_file(registry).pid == input_owner
+                && frontmost_application(context) == input_frontmost,
+            "control_center_macos_tcc_denial_changed_state"
+        );
+        print(
+            "NATIVE_INPUT_UNAVAILABLE: TCC denied event posting; " +
+                "safe-failure contract passed without positive input claim"
+        );
+    }
+    test_harness::emit_evidence(
+        context,
+        declared_evidence,
+        "control-center.macos-native-input-contract"
     );
 
     print("STEP repeated open reuses PID; activate focuses the same window");

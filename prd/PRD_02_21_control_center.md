@@ -369,8 +369,22 @@ future promotion gates.
   hashed PNG, server loss/new epoch, renderer kill/replacement, PTY isolation
   and orphan cleanup. Wayland runs the portable owner/reuse lifecycle without
   pretending compositor focus is observable; unavailable displays return typed
-  `Unsupported` without fake evidence. The first real Linux CI execution,
-  Wayland native evidence, six-cell reruns and packaged evidence remain open.
+  `Unsupported` without fake evidence. The X11 process-window adapter now
+  selects one unique viewable EWMH client by exact PID, rejects ambiguity, and
+  posts checked key/pointer events only to that window. The owning journey's
+  `control-center.linux-native-cockpit-input` evidence requires keyboard and
+  pointer active-tab changes while the compositor foreground witness, Control
+  Center PID, server PID/endpoint/epoch and PTY remain unchanged. Wayland emits
+  no positive-input evidence. A new real Linux CI execution, Wayland native
+  evidence, six-cell reruns and packaged evidence remain open.
+- [~] macOS now owns the matching Quartz exact-PID process-window adapter. It
+  rejects zero/multiple layer-0 on-screen candidates, bounds Retina client
+  coordinates, and uses `CGEventPostToPid` only after the non-interactive TCC
+  preflight. `control-center.macos-native-input-contract` proves either real
+  keyboard/pointer navigation without changing the foreground app or the exact
+  `process_window_input_unsupported` / `permission_denied` safe failure with no
+  state change. The latter is contract evidence only and is not a positive
+  native-input claim; a TCC-authorized native receipt remains open.
 
 ## Explicit v0.1.11 non-goals
 

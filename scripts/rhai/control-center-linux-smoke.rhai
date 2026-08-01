@@ -16,6 +16,7 @@ import "scripts/rhai/lib/test_harness" as test_harness;
 let declared_evidence = [
     "control-center.linux-caller-endpoint",
     "control-center.linux-renderer-evidence",
+    "control-center.linux-native-cockpit-input",
     "control-center.linux-no-activate-focus-reuse",
     "control-center.linux-server-recovery",
     "control-center.linux-renderer-replacement",
@@ -119,6 +120,54 @@ fn json_command(
         false
     );
     rhai::json::parse(output.stdout_text() + output.stderr_text())
+}
+
+fn wait_active_tab(
+    context,
+    control_center,
+    registry,
+    endpoint,
+    backend,
+    child,
+    target_tab_id,
+    expected_server_pid,
+    expected_server_epoch,
+    code
+) {
+    let last = "";
+    for attempt in 0..160 {
+        let arguments = ["snapshot", "--json", "--endpoint", endpoint];
+        let output = native_command(
+            context,
+            control_center,
+            registry,
+            endpoint,
+            backend,
+            arguments
+        ).output();
+        last = output.stdout_text() + output.stderr_text();
+        if output.success {
+            let snapshot = rhai::json::parse(last);
+            if snapshot.server_state == "connected"
+                    && snapshot.connected_server.pid == expected_server_pid
+                    && snapshot.connected_server.epoch == expected_server_epoch
+                    && snapshot.connected_server.endpoint == endpoint
+                    && snapshot.connected_server.active_tab_id == target_tab_id {
+                test_harness::append_command_record(
+                    context, arguments, output, false, [endpoint]
+                );
+                return snapshot;
+            }
+        }
+        if child.state == "exited" {
+            let exited = child.wait_with_output(
+                std::time::Duration::from_secs(2)
+            );
+            throw code + "_renderer_exited:" + exited.stderr_text();
+        }
+        rhai::task::sleep(std::time::Duration::from_millis(25));
+    }
+    throw code + "_timeout:" + last;
 }
 
 fn invoke_activate(
@@ -344,6 +393,7 @@ fn prove_pty(
         captured.stdout_text().contains(marker),
         "control_center_linux_pty_capture"
     );
+    tab_id
 }
 
 fn tool_available(name) {
@@ -578,8 +628,16 @@ try {
             && protocol.endpoint.starts_with("unix:"),
         "control_center_linux_native_authority"
     );
-    prove_pty(
+    let baseline_tab = prove_pty(
         context, cli_executable, registry, endpoint, backend, "baseline"
+    );
+    let native_input_tab = prove_pty(
+        context,
+        cli_executable,
+        registry,
+        endpoint,
+        backend,
+        "native-input"
     );
 
     let selected = json_command(
@@ -685,6 +743,123 @@ try {
         declared_evidence,
         "control-center.linux-renderer-evidence"
     );
+
+    print("STEP native keyboard and pointer obey the Linux display contract");
+    let baseline_index = ();
+    let native_input_index = ();
+    for index in 0..selected.connected_server.tabs.len {
+        let tab = selected.connected_server.tabs[index];
+        if tab.id == baseline_tab {
+            baseline_index = index;
+        }
+        if tab.id == native_input_tab {
+            native_input_index = index;
+        }
+    }
+    require(
+        baseline_index != ()
+            && baseline_index < 3
+            && native_input_index != ()
+            && native_input_index < 3
+            && baseline_tab != native_input_tab,
+        "control_center_linux_native_input_targets_not_visible"
+    );
+    if backend == "x11" {
+        cc.window_key("Home");
+        for step in 0..native_input_index {
+            cc.window_key("Down");
+        }
+        cc.window_key("Enter");
+        let keyboard_selected = wait_active_tab(
+            context,
+            control_center,
+            registry,
+            endpoint,
+            backend,
+            cc,
+            native_input_tab,
+            server.id,
+            selected.connected_server.epoch,
+            "control_center_linux_native_keyboard_navigation"
+        );
+        require(
+            keyboard_selected.connected_server.active_tab_id
+                    == native_input_tab
+                && keyboard_selected.connected_server.pid == server.id
+                && keyboard_selected.connected_server.epoch
+                    == selected.connected_server.epoch
+                && keyboard_selected.connected_server.endpoint == endpoint
+                && cc.state == "running"
+                && rhai::json::parse_file(registry).pid == cc.id
+                && active_x11_window(context) == witness_window,
+            "control_center_linux_native_keyboard_navigation_truth"
+        );
+
+        // Product lines occupy 0..10, the Tabs help line is 11, and the Unix
+        // adapter maps each following 26-pixel row to one Cockpit tab.
+        let baseline_pointer_y = 76 + (11 + baseline_index) * 26 + 13;
+        cc.window_pointer("click", 120, baseline_pointer_y);
+        let pointer_selected = wait_active_tab(
+            context,
+            control_center,
+            registry,
+            endpoint,
+            backend,
+            cc,
+            baseline_tab,
+            server.id,
+            selected.connected_server.epoch,
+            "control_center_linux_native_pointer_navigation"
+        );
+        require(
+            pointer_selected.connected_server.active_tab_id == baseline_tab
+                && pointer_selected.connected_server.pid == server.id
+                && pointer_selected.connected_server.epoch
+                    == selected.connected_server.epoch
+                && pointer_selected.connected_server.endpoint == endpoint
+                && cc.state == "running"
+                && rhai::json::parse_file(registry).pid == cc.id
+                && active_x11_window(context) == witness_window,
+            "control_center_linux_native_pointer_navigation_truth"
+        );
+        test_harness::emit_evidence(
+            context,
+            declared_evidence,
+            "control-center.linux-native-cockpit-input"
+        );
+    } else {
+        let input_failure = "";
+        try {
+            cc.window_key("Home");
+        } catch (error) {
+            input_failure = error.to_string();
+        }
+        require(
+            input_failure.contains("process_window_unsupported")
+                && input_failure.contains("unsupported"),
+            "control_center_linux_wayland_input_not_typed_unsupported:" +
+                input_failure
+        );
+        let unchanged = json_command(
+            context,
+            control_center,
+            registry,
+            endpoint,
+            backend,
+            ["snapshot", "--json", "--endpoint", endpoint]
+        );
+        require(
+            unchanged.connected_server.active_tab_id
+                    == selected.connected_server.active_tab_id
+                && unchanged.connected_server.pid == server.id
+                && unchanged.connected_server.epoch
+                    == selected.connected_server.epoch
+                && unchanged.connected_server.endpoint == endpoint
+                && cc.state == "running"
+                && rhai::json::parse_file(registry).pid == cc.id,
+            "control_center_linux_wayland_unsupported_changed_state"
+        );
+    }
 
     print("STEP repeated no-activate and focus requests reuse the same owner");
     invoke(
@@ -991,8 +1166,9 @@ try {
     );
     print(
         "PASS: Linux caller-selected Unix IPC, renderer-owned PNG/digest, " +
-            "no-activate/focus reuse, new epoch recovery, renderer " +
-            "replacement, and orphan-free isolation (" + backend + ")"
+            "native-input display contract, no-activate/focus reuse, new " +
+            "epoch recovery, renderer replacement, and orphan-free " +
+            "isolation (" + backend + ")"
     );
     succeeded = true;
 } catch (error) {

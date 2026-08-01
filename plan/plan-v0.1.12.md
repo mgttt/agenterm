@@ -767,8 +767,13 @@ Cockpit
   首次真实 runner 结果未绿前不改变完成状态；
 - Native Cockpit input 已由 `agenterm-platform::window` 发布 typed pointer/key event，
   Win32/winit adapter 负责坐标、行命中和键规范化；产品层只维护 tab cursor 并异步
-  复用既有 typed select operation。Windows unit/Clippy 与 Linux/macOS cross-check 通过，
-  三平台真人 pointer/keyboard journey 仍是交付证据缺口；
+  复用既有 typed select operation。Linux X11 adapter 现从 EWMH client list 选择唯一、
+  viewable、PID 精确的 client window，ambiguous fail-closed，并只向目标窗口发送 checked
+  key/pointer events；Wayland 明确 Unsupported。macOS Quartz adapter 同样拒绝多窗口歧义，
+  以 `CGEventPostToPid` 定向投递并先做不弹窗的 TCC preflight。两套 crate target 的
+  warnings-denied Clippy 已通过；Linux smoke 正向验证 active-tab 变化和不抢焦点，macOS
+  smoke 严格区分 `NATIVE_INPUT_POSITIVE` 与 typed TCC `permission_denied`。新 main CI
+  及 macOS 正向授权证据尚未返回前，三平台真人 pointer/keyboard 仍不记为完成；
 - Windows owning journey 已覆盖 incompatible sibling、进程内 renderer capture
   typed failure/recovery、CC process crash/replacement、Human GUI detach 时的
   same-CC/same-server/same-epoch retention、new epoch recovery 和 stale owner

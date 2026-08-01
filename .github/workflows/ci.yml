@@ -276,7 +276,8 @@ jobs:
           AGENTERM_NO_ACTIVATE: "1"
         run: |
           start_ms=$(date +%s%3N)
-          xvfb-run -a -s '-screen 0 1280x800x24 -nolisten tcp' bash -ceu '
+          set +e
+          control_center_output=$(xvfb-run -a -s '-screen 0 1280x800x24 -nolisten tcp' bash -ceu '
             openbox --sm-disable >target/control-center-openbox.log 2>&1 &
             window_manager=$!
             trap "kill $window_manager 2>/dev/null || true; wait $window_manager 2>/dev/null || true" EXIT
@@ -291,7 +292,16 @@ jobs:
             test "$ready" = 1
             AGENTERM_BOOTSTRAP_TASK=control-center-linux-smoke \
               ./scripts/bootstrap.sh --backend x11
-          '
+          ' 2>&1)
+          control_center_status=$?
+          set -e
+          printf '%s\n' "$control_center_output"
+          if [ "$control_center_status" -ne 0 ]; then
+            diagnostic=$(printf '%s' "$control_center_output" | tail -c 2000 | tr '\r\n' '  ')
+            diagnostic=${diagnostic//%/%25}
+            echo "::error title=Linux Control Center smoke::$diagnostic"
+            exit "$control_center_status"
+          fi
           end_ms=$(date +%s%3N)
           duration_ms=$((end_ms - start_ms))
           echo "duration_ms=$duration_ms" >> "$GITHUB_OUTPUT"
@@ -586,11 +596,21 @@ jobs:
             exit 0
           fi
           binary_dir="target/${{ matrix.target }}/debug"
-          "$binary_dir/agenterm-script" task run control-center-macos-smoke \
+          set +e
+          control_center_output=$("$binary_dir/agenterm-script" task run control-center-macos-smoke \
             --manifest agenterm.tasks.json -- \
             --control-center "$binary_dir/agenterm-cc" \
             --server "$binary_dir/agenterm-server" \
-            --cli "$binary_dir/agenterm-cli"
+            --cli "$binary_dir/agenterm-cli" 2>&1)
+          control_center_status=$?
+          set -e
+          printf '%s\n' "$control_center_output"
+          if [ "$control_center_status" -ne 0 ]; then
+            diagnostic=$(printf '%s' "$control_center_output" | tail -c 2000 | tr '\r\n' '  ')
+            diagnostic=${diagnostic//%/%25}
+            echo "::error title=macOS Control Center smoke::$diagnostic"
+            exit "$control_center_status"
+          fi
           end_ms=$(python3 -c 'import time; print(time.time_ns() // 1_000_000)')
           duration_ms=$((end_ms - start_ms))
           echo "duration_ms=$duration_ms" >> "$GITHUB_OUTPUT"
