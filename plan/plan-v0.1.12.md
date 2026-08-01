@@ -66,9 +66,16 @@ renderer-owned 760×480 PNG 为 58,125 bytes。headless server 下 missing targe
   集成态 `check.cmd --quick` 已通过 repository lint、fmt、alignment、warnings-denied
   all-target Clippy 与 396 项 library tests，七产物 dev build 通过；两次直接归属的
   `remote-ui-smoke` 均完成 resize/minimize/restore、Settings、PTY 和 renderer-owned
-  screenshots，但随后在既有“关闭 GUI 后保留 server”阶段发现 server 已退出。
-  2026-07-31 的保留运行在同阶段同样失败，故当前记录为独立 smoke 阻断而非本次
-  帧提交回归，也不把前半程通过算作完整 smoke 通过。
+  screenshots，但随后在“关闭 GUI 后保留 server”阶段发现 server 已退出；
+  2026-07-31 的保留运行在同阶段同样失败，证明它不是本次帧提交回归。用户 live
+  dogfood 随后确认默认 Keep Server Running 也真实丢失旧 server/session。白箱定位
+  GUI 自启动 server 未脱离 Script harness 的 kill-on-close Job；修复让 GUI 复用
+  `platform::process::autostart_server`，Windows adapter 统一赋予 null stdio、
+  `CREATE_NO_WINDOW|CREATE_BREAKAWAY_FROM_JOB`。修复后首轮已通过 retain/replacement
+  阶段但在更晚 scrollbar return-live 检查波动失败，第二轮完整 `remote-ui-smoke`
+  通过同 PID/epoch/tab/PTY/draft 接回、scroll/selection/clipboard、server crash
+  recovery、Stop Server 和 orphan-free cleanup，重新产出 `ui.replaceable-client`
+  等 15 项 evidence。
   第二叶已在本地集成：resize 先比较权威 screen 网格，并以 server epoch + stable
   tab ID + rows/columns 去重尚未进入 delta 的在途请求；同网格不再穿过 IPC，新的
   epoch/tab/grid 仍会发送。Win32 class 同时移除与 `WM_SIZE` 显式 invalidation 重复的
@@ -88,6 +95,9 @@ renderer-owned 760×480 PNG 为 58,125 bytes。headless server 下 missing targe
   已收口。Windows host 的 Linux `cargo check` 仅因缺少
   `x86_64-linux-gnu-gcc` 停在 `ring` 构建脚本，Unix adapter 仍需原生 CI/host
   证据。
+- [x] 默认 `Keep Server Running` 不再因调用者 Job cleanup 杀死独立 server/PTYS；
+  GUI 与 CLI 统一走 platform process facade，完整 replaceable-UI 黑盒已证明退出、
+  detached lease、同 server/session 接回与最终显式 Stop Server。
 - [ ] terminal 鼠标选区无法可靠建立，导致已实现 copy/paste 无法使用；复查
   selection ownership、drag threshold/capture、raw-mouse arbitration 和复制黑盒。
   白箱审计定位当前选区绑定整个 `screen.generation`：持续 output delta 在 100ms

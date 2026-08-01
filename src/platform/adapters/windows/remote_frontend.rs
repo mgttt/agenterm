@@ -2,9 +2,7 @@
 
 use std::{
     ffi::c_void,
-    mem,
-    process::{Command, Stdio},
-    ptr,
+    mem, ptr,
     time::{Duration, Instant},
 };
 
@@ -463,35 +461,17 @@ fn server_endpoint_is_listening() -> bool {
 }
 
 fn start_server_process() -> Result<()> {
-    let current = std::env::current_exe().context("could not locate agenterm.exe")?;
-    let server = current.with_file_name("agenterm-server.exe");
-    if !server.is_file() {
-        anyhow::bail!(
-            "independent server executable is not beside the GUI: {}",
-            server.display()
-        );
-    }
-    use std::os::windows::process::CommandExt as _;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     let endpoint = ipc_endpoint()?;
-    let mut command = Command::new(server);
-    if let Some(address) = endpoint.legacy_address() {
-        command.arg("--address").arg(address);
+    let parameter = if let Some(address) = endpoint.legacy_address() {
+        ("--address", address)
     } else {
-        command.arg("--endpoint").arg(endpoint.to_string());
-    }
-    command
-        // agenterm.exe is a Windows-subsystem process.  When it is launched
-        // from some shells its inherited standard handles can be invalid;
-        // passing one to CreateProcess makes server startup fail with
-        // ERROR_INVALID_HANDLE (6).  The server is independent and does not
-        // use its stdio, so give it known-valid null handles instead.
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .creation_flags(CREATE_NO_WINDOW)
-        .spawn()
+        ("--endpoint", endpoint.to_string())
+    };
+    let started = crate::platform::process::autostart_server(parameter.0, &parameter.1)
         .context("failed to launch independent AgenTerm server")?;
+    if !started {
+        anyhow::bail!("independent AgenTerm server autostart is unavailable");
+    }
     Ok(())
 }
 

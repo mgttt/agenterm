@@ -31,6 +31,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     connects through the same typed loopback control boundary instead of
     becoming the server itself
     - [x] opt-in `agenterm.exe --ui-client` starts or connects to the independent headless authority, acquires the exact interactive lease with an observable additive client-build identity, renders renderer-neutral tab/screen/composer DTOs, routes stable-ID selection/input/resize through the lease, acknowledges applied event positions, detaches without ending the server or PTY, and a replacement GUI recovers the same server PID, active tab and live terminal marker with PNG and orphan-free public evidence
+      - [x] Windows GUI server autostart reuses the platform process facade so
+        the independent authority has null stdio, no console window, and breaks
+        away from a caller-owned kill-on-close Job. A v0.1.12 live regression
+        where the default `Keep Server Running` lost the old session is covered
+        by the full replaceable-UI journey: the detached lease, server PID/epoch,
+        stable tab, PTY marker and draft survive GUI exit and a replacement GUI
+        reconnects before explicit Stop Server cleanup.
     - [x] the live lease owner publishes a bounded, versioned and redacted
       `replaceable_ui_client` projection back to the stable server; public
       `ui-snapshot` therefore observes client-owned window/layout/focus/modal/

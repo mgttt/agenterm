@@ -11,7 +11,7 @@ pub(crate) fn autostart_server(
     parameter_value: &str,
 ) -> std::io::Result<bool> {
     use std::os::windows::process::CommandExt as _;
-    use windows_sys::Win32::System::Threading::CREATE_BREAKAWAY_FROM_JOB;
+    use windows_sys::Win32::System::Threading::{CREATE_BREAKAWAY_FROM_JOB, CREATE_NO_WINDOW};
 
     let current = std::env::current_exe()?;
     let server = current.with_file_name("agenterm-server.exe");
@@ -19,7 +19,7 @@ pub(crate) fn autostart_server(
         return Err(std::io::Error::new(
             std::io::ErrorKind::NotFound,
             format!(
-                "AgenTerm server executable was not found beside agenterm-cli: {}",
+                "AgenTerm server executable was not found beside the current client: {}",
                 server.display()
             ),
         ));
@@ -30,7 +30,10 @@ pub(crate) fn autostart_server(
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .creation_flags(CREATE_BREAKAWAY_FROM_JOB)
+        // Autostarted server lifetime is intentionally independent from a GUI,
+        // CLI, or Script harness job. Null stdio plus CREATE_NO_WINDOW also
+        // keeps the console server invisible when the caller is a GUI process.
+        .creation_flags(CREATE_BREAKAWAY_FROM_JOB | CREATE_NO_WINDOW)
         .spawn()?;
     Ok(true)
 }
