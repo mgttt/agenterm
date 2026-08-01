@@ -265,7 +265,7 @@ enum WindowCloseChoice {
 
 const DOUBLE_CLICK_MS: u64 = 500;
 
-const APP_NAME: &str = "AgenTerm";
+const APP_NAME: &str = "AgenTerm™";
 const INITIAL_WIDTH: u32 = 960;
 const INITIAL_HEIGHT: u32 = 600;
 

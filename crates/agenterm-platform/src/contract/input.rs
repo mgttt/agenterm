@@ -161,14 +161,14 @@ pub fn classify_key_press(
         }
         return KeyClassification::Ignored;
     }
-    if let Some(text) = committed_text.filter(|value| !value.is_empty()) {
-        return KeyClassification::TextCommit(text.to_owned());
-    }
     if let Some(name) = named_key {
         return KeyClassification::ControlKey {
             name: name.to_owned(),
             modifiers,
         };
+    }
+    if let Some(text) = committed_text.filter(|value| !value.is_empty()) {
+        return KeyClassification::TextCommit(text.to_owned());
     }
     logical_character
         .filter(|value| !value.is_empty())
@@ -215,6 +215,16 @@ mod tests {
         assert!(matches!(
             classify_key_press(false, ModifierState::empty(), None, Some("Escape"), None),
             KeyClassification::ControlKey { .. }
+        ));
+        assert!(matches!(
+            classify_key_press(
+                false,
+                ModifierState::empty(),
+                None,
+                Some("Enter"),
+                Some("\r"),
+            ),
+            KeyClassification::ControlKey { name, .. } if name == "Enter"
         ));
     }
 

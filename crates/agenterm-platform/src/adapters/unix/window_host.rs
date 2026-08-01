@@ -11,7 +11,7 @@ use std::{
 };
 
 #[cfg(target_os = "macos")]
-use std::time::Duration;
+use std::{cell::Cell, time::Duration};
 
 use softbuffer::{Context, Surface};
 use winit::{
@@ -77,7 +77,7 @@ pub(crate) fn run_pixel_window(
         last_pointer: None,
         failure: None,
         #[cfg(target_os = "macos")]
-        waiting_for_reactivation: false,
+        detached_for_reopen: Rc::new(Cell::new(false)),
     };
     let run_result = event_loop.run_app(&mut runner);
     alive.store(false, Ordering::Release);
@@ -108,6 +108,8 @@ fn event_loop_closed() -> PixelWindowError {
 
 struct NativeWindowBackend {
     window: Rc<Window>,
+    #[cfg(target_os = "macos")]
+    detached_for_reopen: Rc<Cell<bool>>,
 }
 
 impl PixelWindowBackend for NativeWindowBackend {
@@ -138,13 +140,14 @@ impl PixelWindowBackend for NativeWindowBackend {
     fn set_visible(&self, visible: bool) {
         self.window.set_visible(visible);
         #[cfg(target_os = "macos")]
-        if !visible {
+        {
             use objc2_app_kit::NSApplication;
             use objc2_foundation::MainThreadMarker;
 
-            if let Some(marker) = MainThreadMarker::new() {
+            self.detached_for_reopen.set(!visible);
+            if !visible && let Some(marker) = MainThreadMarker::new() {
                 let application = NSApplication::sharedApplication(marker);
-                unsafe { application.deactivate() };
+                application.hide(None);
             }
         }
     }
@@ -203,7 +206,7 @@ struct PixelWindowRunner {
     last_pointer: Option<LogicalPoint>,
     failure: Option<PixelWindowError>,
     #[cfg(target_os = "macos")]
-    waiting_for_reactivation: bool,
+    detached_for_reopen: Rc<Cell<bool>>,
 }
 
 impl PixelWindowRunner {
@@ -352,6 +355,8 @@ impl ApplicationHandler<()> for PixelWindowRunner {
         };
         let backend: Rc<dyn PixelWindowBackend> = Rc::new(NativeWindowBackend {
             window: native_window,
+            #[cfg(target_os = "macos")]
+            detached_for_reopen: Rc::clone(&self.detached_for_reopen),
         });
         let window = PixelWindow::new(backend, self.waker.clone());
         self.surface = Some(surface);
@@ -464,17 +469,12 @@ impl ApplicationHandler<()> for PixelWindowRunner {
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         #[cfg(target_os = "macos")]
-        if self.window.as_ref().is_some_and(|window| !window.visible()) {
-            if macos_application_is_active() {
-                if self.waiting_for_reactivation {
-                    self.waiting_for_reactivation = false;
-                    self.dispatch_event(event_loop, PixelWindowEvent::Reopen);
-                }
-            } else {
-                self.waiting_for_reactivation = true;
-            }
-        } else {
-            self.waiting_for_reactivation = false;
+        if macos_should_reopen(
+            self.window.as_ref().is_some_and(PixelWindow::visible),
+            self.detached_for_reopen.get(),
+            macos_application_is_hidden(),
+        ) {
+            self.dispatch_event(event_loop, PixelWindowEvent::Reopen);
         }
         let Some(window) = self.window.clone() else {
             event_loop.set_control_flow(ControlFlow::Wait);
@@ -536,16 +536,33 @@ mod tests {
             PixelWindowDirective::WaitUntil(earlier)
         );
     }
+
+    #[test]
+    fn detached_window_reopens_as_soon_as_the_dock_unhides_the_app() {
+        assert!(macos_should_reopen(false, true, false));
+        assert!(!macos_should_reopen(false, true, true));
+        assert!(!macos_should_reopen(false, false, false));
+        assert!(!macos_should_reopen(true, true, false));
+    }
 }
 
 #[cfg(target_os = "macos")]
-fn macos_application_is_active() -> bool {
+const fn macos_should_reopen(
+    window_visible: bool,
+    detached_for_reopen: bool,
+    application_hidden: bool,
+) -> bool {
+    !window_visible && detached_for_reopen && !application_hidden
+}
+
+#[cfg(target_os = "macos")]
+fn macos_application_is_hidden() -> bool {
     use objc2_app_kit::NSApplication;
     use objc2_foundation::MainThreadMarker;
 
     MainThreadMarker::new().is_some_and(|marker| {
         let application = NSApplication::sharedApplication(marker);
-        unsafe { application.isActive() }
+        unsafe { application.isHidden() }
     })
 }
 

@@ -52,8 +52,24 @@ generic executable icon.
 Do not treat a second `open ~/Applications/AgenTerm.app` as proof that a Dock
 click works. Launch Services wakes the winit loop for `open`, while a Dock
 activation may not emit a window event after the only window is hidden. The
-macOS backend must keep a short `WaitUntil` reactivation poll while hidden;
-verify with an actual Dock click and confirm the process ID remains unchanged.
+macOS backend must hide the application and keep a short `WaitUntil` poll while
+hidden. A Dock click unhides the application; that hidden-to-visible state is
+the reliable reopen signal even when the click follows the close immediately.
+Verify with an actual Dock click and confirm the process ID remains unchanged.
+
+## Diagnose terminal control keys
+
+On macOS, winit can report Enter, Backspace, and Escape with both a named key
+and control-character text (`CR`, `DEL`, or `ESC`). Named keys must take
+precedence over committed text because the text path intentionally rejects
+control characters. Terminal Control combinations such as Ctrl-H must be
+encoded before macOS primary-shortcut classification; Command remains the
+platform primary shortcut for application commands.
+
+Keep a regression table for Enter (`0d`), Backspace (`7f`), Escape (`1b`), and
+Ctrl-H (`08`). For native verification, run a PTY byte reader in a tab and test
+physical key presses; synthetic modifier-only events are not proof of a real
+Ctrl-H key chord.
 
 ## Preserve trust boundaries
 

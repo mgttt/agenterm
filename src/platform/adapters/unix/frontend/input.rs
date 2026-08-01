@@ -540,6 +540,12 @@ fn platform_text_field_key_action(
 fn platform_key_event_to_bytes(event: &KeyEvent) -> Option<Vec<u8>> {
     use crate::platform::KeyClassification;
 
+    if event.modifiers.control
+        && let Some(bytes) = terminal_control_key_bytes(&event.logical, event.physical)
+    {
+        return Some(bytes);
+    }
+
     match platform_classify_key_press(event) {
         KeyClassification::Shortcut {
             key,
@@ -574,14 +580,34 @@ fn platform_key_event_to_bytes(event: &KeyEvent) -> Option<Vec<u8>> {
     }
 }
 
+fn terminal_control_key_bytes(logical: &Key, physical: PhysicalKeyCode) -> Option<Vec<u8>> {
+    let logical_character = match logical {
+        Key::Character(text) => {
+            let mut characters = text.chars();
+            let character = characters.next()?;
+            (characters.next().is_none() && !character.is_control()).then_some(character)
+        }
+        _ => None,
+    };
+    let character = logical_character.or_else(|| match physical {
+        PhysicalKeyCode::Letter(letter) if letter.is_ascii_alphabetic() => Some(letter),
+        PhysicalKeyCode::Digit(digit) if digit <= 9 => Some(char::from(b'0' + digit)),
+        _ => None,
+    })?;
+    tmux_key_bytes(&format!("C-{character}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        ComposerKeyAction, TerminalShortcutAction, composer_logical_key_action,
+        ComposerKeyAction, TerminalShortcutAction, composer_logical_key_action, key_event_to_bytes,
         logical_key_to_bytes, normalize_ime_commit, physical_code_to_byte, prepare_composer_edit,
         primary_shortcut, terminal_shortcut_action, text_field_logical_key_action,
     };
-    use agenterm_platform::input::{LogicalKey as Key, ModifierState, NamedKey, PhysicalKeyCode};
+    use agenterm_platform::input::{
+        KeyPressState, LogicalKey as Key, ModifierState, NamedKey, NormalizedKeyEvent,
+        PhysicalKeyCode,
+    };
 
     const fn modifiers(control: bool, shift: bool, alt: bool, meta: bool) -> ModifierState {
         ModifierState {
@@ -720,6 +746,52 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn macos_control_text_does_not_swallow_terminal_keys() {
+        let cases = [
+            (
+                Key::Named(NamedKey::Enter),
+                PhysicalKeyCode::Enter,
+                Some("\r"),
+                ModifierState::empty(),
+                b"\r".as_slice(),
+            ),
+            (
+                Key::Named(NamedKey::Backspace),
+                PhysicalKeyCode::Backspace,
+                Some("\u{7f}"),
+                ModifierState::empty(),
+                b"\x7f".as_slice(),
+            ),
+            (
+                Key::Named(NamedKey::Escape),
+                PhysicalKeyCode::Other,
+                Some("\u{1b}"),
+                ModifierState::empty(),
+                b"\x1b".as_slice(),
+            ),
+            (
+                Key::Character("h".into()),
+                PhysicalKeyCode::Letter('H'),
+                Some("\u{8}"),
+                modifiers(true, false, false, false),
+                b"\x08".as_slice(),
+            ),
+        ];
+
+        for (logical, physical, text, modifiers, expected) in cases {
+            let event = NormalizedKeyEvent {
+                logical,
+                physical,
+                text: text.map(str::to_owned),
+                state: KeyPressState::Pressed,
+                repeat: false,
+                modifiers,
+            };
+            assert_eq!(key_event_to_bytes(&event).as_deref(), Some(expected));
+        }
     }
 
     #[test]
