@@ -25,6 +25,58 @@ fn run_repl_with(executable: &str, input: &str, arguments: &[&str]) -> std::proc
     child.wait_with_output().expect("wait for REPL")
 }
 
+fn generation_probe_input() -> String {
+    let mut input = String::from("let first_generation = 40; std::process::id()\n");
+    for _ in 2..=32 {
+        input.push_str("std::process::id()\n");
+    }
+    input.push_str("std::process::id()\n:vars\n:quit\n");
+    input
+}
+
+fn assert_bounded_persistent_generation(output: std::process::Output) {
+    assert!(output.status.success(), "{output:?}");
+    let records = String::from_utf8(output.stdout)
+        .expect("UTF-8 stdout")
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("NDJSON record"))
+        .collect::<Vec<_>>();
+    assert_eq!(records.len(), 35, "{records:#?}");
+
+    let first_pid = records[0]["value"]["value"]
+        .as_u64()
+        .expect("first worker PID");
+    for record in &records[..32] {
+        assert_eq!(record["value"]["value"].as_u64(), Some(first_pid));
+    }
+
+    let receipt = &records[32];
+    assert_eq!(receipt["kind"], "fresh_session");
+    assert_eq!(receipt["reason"], "generation_limit");
+    assert_eq!(receipt["old_worker_pid"].as_u64(), Some(first_pid));
+    assert_eq!(receipt["old_generation"], 1);
+    assert_eq!(receipt["new_generation"], 2);
+    assert_eq!(receipt["language_state_fresh"], true);
+    assert_eq!(receipt["history_fresh"], true);
+    assert_eq!(receipt["side_effects_replayed"], false);
+
+    let replacement_pid = records[33]["value"]["value"]
+        .as_u64()
+        .expect("replacement worker PID");
+    assert_ne!(replacement_pid, first_pid);
+    assert_eq!(receipt["new_worker_pid"].as_u64(), Some(replacement_pid));
+    assert_eq!(records[34]["command"], "vars");
+    assert!(
+        records[34]["value"]
+            .as_array()
+            .is_some_and(|variables| variables.iter().all(|entry| {
+                entry.as_array().is_none_or(|fields| {
+                    fields.first() != Some(&serde_json::json!("first_generation"))
+                })
+            }))
+    );
+}
+
 #[cfg(windows)]
 #[test]
 fn native_cli_compatibility_route_reuses_the_same_session_contract() {
@@ -51,6 +103,25 @@ fn native_cli_compatibility_route_reuses_the_same_session_contract() {
         .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("NDJSON record"))
         .collect::<Vec<_>>();
     assert_eq!(records[1]["value"]["value"], 42);
+}
+
+#[cfg(windows)]
+#[test]
+fn native_cli_repl_exposes_bounded_persistent_worker_generations() {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_agenterm-cli"));
+    command
+        .args(["script", "repl", "--json"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command.spawn().expect("spawn agenterm-cli script repl");
+    child
+        .stdin
+        .take()
+        .expect("CLI REPL stdin")
+        .write_all(generation_probe_input().as_bytes())
+        .expect("write CLI REPL generation probe");
+    assert_bounded_persistent_generation(child.wait_with_output().expect("wait for CLI REPL"));
 }
 
 #[cfg(windows)]
@@ -111,6 +182,11 @@ fn piped_json_repl_persists_variables_functions_and_multiline_cells() {
             .as_array()
             .is_some_and(|functions| functions.iter().any(|entry| entry == "add(n)"))
     );
+}
+
+#[test]
+fn public_repl_exposes_bounded_persistent_worker_generations() {
+    assert_bounded_persistent_generation(run_repl(&generation_probe_input(), &["--json"]));
 }
 
 #[test]
