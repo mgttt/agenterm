@@ -293,9 +293,21 @@ impl TerminalTab {
             command = command.arg(argument);
         }
         // The GUI process launched from Finder/Dock carries a minimal PATH, so
-        // the default shell must be a login shell to run the user's profile;
-        // explicit command lines stay exactly as the user provided them.
-        if command_line.is_empty() && !cfg!(windows) {
+        // a bare shell must run as a login shell to load the user's profile.
+        // Restored tabs persist the resolved default shell as a one-element
+        // command line, so this keys on the argument shape, not on emptiness;
+        // command lines with arguments stay exactly as the user provided them.
+        let bare_shell = command_line.len() <= 1
+            && std::path::Path::new(&program)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| {
+                    matches!(
+                        name,
+                        "bash" | "zsh" | "fish" | "sh" | "dash" | "ksh" | "tcsh" | "csh"
+                    )
+                });
+        if bare_shell && !cfg!(windows) {
             command = command.arg("-l");
         }
         if let Some(directory) = &launch_cwd {
