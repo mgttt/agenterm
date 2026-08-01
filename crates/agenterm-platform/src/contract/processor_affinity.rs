@@ -20,6 +20,16 @@ pub enum ProcessorSetSemantics {
     ProcessAffinityMask,
 }
 
+impl ProcessorSetSemantics {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::SchedulerAllowed => "scheduler-allowed",
+            Self::ProcessAffinityMask => "process-affinity-mask",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProcessorAffinityFacts {
     processors: Vec<LogicalProcessorLocation>,
@@ -74,6 +84,18 @@ pub enum ProcessorAffinityErrorKind {
     Query,
     InvalidValue,
     MalformedNativeData,
+}
+
+impl ProcessorAffinityErrorKind {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Unsupported => "unsupported",
+            Self::Query => "query",
+            Self::InvalidValue => "invalid-value",
+            Self::MalformedNativeData => "malformed-native-data",
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -156,6 +178,22 @@ mod tests {
             .unwrap_err()
             .kind(),
             ProcessorAffinityErrorKind::MalformedNativeData
+        );
+    }
+
+    #[test]
+    fn semantics_and_error_kinds_have_stable_names() {
+        assert_eq!(
+            ProcessorSetSemantics::SchedulerAllowed.as_str(),
+            "scheduler-allowed"
+        );
+        assert_eq!(
+            ProcessorSetSemantics::ProcessAffinityMask.as_str(),
+            "process-affinity-mask"
+        );
+        assert_eq!(
+            ProcessorAffinityErrorKind::MalformedNativeData.as_str(),
+            "malformed-native-data"
         );
     }
 }
