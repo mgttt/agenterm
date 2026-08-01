@@ -47,6 +47,7 @@ clipboard, IPC, or screenshot modules.
 | `process-control` | typed single-process termination and Unix suspend/resume | target `libc` / minimal `windows-sys` |
 | `process-image` | executable path for one selected host process | target `libc` / minimal `windows-sys` |
 | `process-metrics` | cumulative CPU time, resident bytes and partially classified page faults for one selected process | target `libc` / minimal `windows-sys` |
+| `process-spawn` | detached child launch with retained `Child`, explicit Windows job fallback and ambient-stdio protection | target `libc` / minimal `windows-sys` |
 | `shared-memory` | exclusive named read/write mappings for cross-process zero-copy data | target `libc` / minimal `windows-sys` |
 | `process` | observation/tree control, shell defaults, child-pipe probes and parent-console diagnostics | target `libc` / `windows-sys` |
 | `filesystem-conventions` | user home, host roots and sibling executable naming | none |
@@ -80,6 +81,7 @@ clipboard, IPC, or screenshot modules.
 | process control | forceful termination; graceful Unsupported | SIGTERM/SIGKILL | SIGTERM/SIGKILL |
 | process image | queried full image path | `/proc/<pid>/exe` | `proc_pidpath` |
 | process metrics | process times + working set + total faults | `/proc` stat/statm + minor/major faults | `PROC_PIDTASKINFO` total faults + page-ins |
+| process spawn | job breakaway or explicit caller-job fallback | new session via `setsid` | new session via `setsid` |
 | shared memory | page-file mapping | POSIX shared memory | POSIX shared memory |
 | process | ToolHelp/Job Objects | `/proc` + process groups | POSIX process groups |
 | filesystem | AppData conventions | XDG conventions | Application Support |
@@ -110,6 +112,15 @@ CPU Sets and thread-specific policies may narrow scheduling further. A
 multi-group process is typed Unsupported instead of returning only its primary
 group. macOS affinity tags are advisory, so the adapter does not invent an
 exact allowed-CPU set. Thread placement and NUMA policy remain product concerns.
+
+`process_spawn::spawn_detached_child` configures a new Unix session or Windows
+job breakaway and returns both the live `Child` and a typed launch mode. Windows
+retries without breakaway only for access denied and reports
+`caller-job-fallback`; it also serializes the process-wide interval in which
+ambient standard-handle inherit flags are cleared and restored. Explicit child
+stdio, executable discovery, arguments, environment, readiness, restart and
+reaping remain caller policy. The older fire-and-forget entry point remains for
+compatibility, while supervised callers should retain the child handle.
 
 ## Public API
 

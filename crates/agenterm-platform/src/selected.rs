@@ -152,6 +152,18 @@ pub(crate) mod process_metrics;
 #[path = "adapters/macos/process_metrics.rs"]
 pub(crate) mod process_metrics;
 
+#[cfg(all(feature = "process-spawn", windows))]
+#[path = "adapters/windows/process_spawn.rs"]
+pub(crate) mod process_spawn;
+
+#[cfg(all(feature = "process-spawn", target_os = "linux"))]
+#[path = "adapters/linux/process_spawn.rs"]
+pub(crate) mod process_spawn;
+
+#[cfg(all(feature = "process-spawn", target_os = "macos"))]
+#[path = "adapters/macos/process_spawn.rs"]
+pub(crate) mod process_spawn;
+
 #[cfg(all(feature = "clipboard", target_os = "linux"))]
 #[path = "adapters/linux/clipboard.rs"]
 pub(crate) mod clipboard;

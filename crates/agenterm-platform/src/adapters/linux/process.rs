@@ -21,18 +21,6 @@ pub(crate) fn pipe_available(_token: PipeProbeToken) -> Result<usize, PipeProbeE
     Err(PipeProbeError::Failed)
 }
 
-pub(crate) fn configure_detached_command(_command: &mut Command) -> Result<(), String> {
-    Err("detached process configuration is not implemented on Linux".to_owned())
-}
-
-pub(crate) fn is_breakaway_denied(_error: &std::io::Error) -> bool {
-    false
-}
-
-pub(crate) fn configure_caller_job_fallback(_command: &mut Command) -> Result<(), String> {
-    Err("caller-job process fallback is not implemented on Linux".to_owned())
-}
-
 pub(crate) fn observe(pid: u32) -> ProcessObservation {
     let stat = match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
         Ok(stat) => stat,

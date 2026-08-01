@@ -78,6 +78,13 @@ process-image = [
     "windows-sys/Win32_Foundation",
     "windows-sys/Win32_System_Threading",
 ]
+process-spawn = [
+    "dep:libc",
+    "dep:windows-sys",
+    "windows-sys/Win32_Foundation",
+    "windows-sys/Win32_System_Console",
+    "windows-sys/Win32_System_Threading",
+]
 shared-memory = [
     "dep:libc",
     "dep:windows-sys",
@@ -89,6 +96,7 @@ process = [
     "process-control",
     "process-image",
     "process-metrics",
+    "process-spawn",
     "windows-sys/Win32_Security",
     "windows-sys/Win32_System_Console",
     "windows-sys/Win32_System_Diagnostics_ToolHelp",
