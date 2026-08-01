@@ -42,7 +42,9 @@ pub fn kill(pid: u32) -> Result<(), ProcessError> {
                 ControlKind::InvalidId => ProcessErrorKind::IdOutOfRange,
                 ControlKind::IdOutOfRange => ProcessErrorKind::IdOutOfRange,
                 ControlKind::Open => ProcessErrorKind::KillOpen,
-                ControlKind::Terminate => ProcessErrorKind::Kill,
+                ControlKind::Terminate | ControlKind::Suspend | ControlKind::Resume => {
+                    ProcessErrorKind::Kill
+                }
                 ControlKind::Unsupported => ProcessErrorKind::Unsupported,
             };
             ProcessError::new(kind, error.detail())
