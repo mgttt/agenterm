@@ -32,6 +32,7 @@ pub enum Capability {
     UserIdentity,
     ProcessControl,
     ProcessObservation,
+    ProcessReference,
     ProcessSecurity,
     ProcessImage,
     ProcessMetrics,
@@ -85,6 +86,7 @@ pub fn capability_status(capability: Capability) -> CapabilityStatus {
         Capability::UserIdentity => (cfg!(feature = "user-identity"), true),
         Capability::ProcessControl => (cfg!(feature = "process-control"), true),
         Capability::ProcessObservation => (cfg!(feature = "process-observation"), true),
+        Capability::ProcessReference => (cfg!(feature = "process-reference"), true),
         Capability::ProcessSecurity => (cfg!(feature = "process-security"), true),
         Capability::ProcessImage => (cfg!(feature = "process-image"), true),
         Capability::ProcessMetrics => (cfg!(feature = "process-metrics"), true),
@@ -222,6 +224,9 @@ pub mod process_image;
 pub mod process_metrics;
 #[cfg(feature = "process-observation")]
 pub mod process_observation;
+
+#[cfg(feature = "process-reference")]
+pub mod process_reference;
 
 #[cfg(feature = "process-security")]
 pub mod process_security;
@@ -442,6 +447,22 @@ mod tests {
     fn process_observation_does_not_claim_full_process() {
         assert_eq!(
             crate::capability_status(crate::Capability::ProcessObservation),
+            crate::CapabilityStatus::Available
+        );
+        #[cfg(not(feature = "process"))]
+        assert_eq!(
+            crate::capability_status(crate::Capability::Process),
+            crate::CapabilityStatus::Unsupported {
+                reason: std::borrow::Cow::Borrowed("feature-disabled")
+            }
+        );
+    }
+
+    #[cfg(feature = "process-reference")]
+    #[test]
+    fn process_reference_does_not_claim_full_process() {
+        assert_eq!(
+            crate::capability_status(crate::Capability::ProcessReference),
             crate::CapabilityStatus::Available
         );
         #[cfg(not(feature = "process"))]

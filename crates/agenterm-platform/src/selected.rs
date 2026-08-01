@@ -211,6 +211,18 @@ pub(crate) mod process_security;
 #[path = "adapters/macos/process_security.rs"]
 pub(crate) mod process_security;
 
+#[cfg(all(feature = "process-reference", windows))]
+#[path = "adapters/windows/process_reference.rs"]
+pub(crate) mod process_reference;
+
+#[cfg(all(feature = "process-reference", target_os = "linux"))]
+#[path = "adapters/linux/process_reference.rs"]
+pub(crate) mod process_reference;
+
+#[cfg(all(feature = "process-reference", target_os = "macos"))]
+#[path = "adapters/macos/process_reference.rs"]
+pub(crate) mod process_reference;
+
 #[cfg(all(feature = "process-spawn", windows))]
 #[path = "adapters/windows/process_spawn.rs"]
 pub(crate) mod process_spawn;
