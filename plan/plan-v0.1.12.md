@@ -401,6 +401,15 @@ Release 全部是本轮明确非目标。
   Ctrl+C arbitration：只有 non-empty completed cached selection 才接管 Copy，prepared/
   empty state 不再吞掉 PTY interrupt。13 项 frontend tests 通过；真实 Windows journey
   以及拖出 viewport auto-scroll 仍未闭环，因此保持未完成。
+- [~] 本地开发缓存膨胀的第一段已闭环：实测 `target/` 15.2 GiB，其中
+  `target/debug/incremental` 10.53 GiB；一次显式 `cargo clean` 已回收全部可再生缓存。
+  dev `build` 现在只在七产物成功 staging 后调用 `prune-target-incremental`，持有真实
+  `debug/.cargo-lock` 并逐项取得 rustc session lock，按 compilation-unit root 保留最新
+  finalized session、删除可证明失效且超过 60 秒的旧 session；缺锁、锁占用、working、
+  reparse/symlink 或变化中的目录均 fail closed。3 项隔离测试覆盖 newest retention、
+  Cargo/rustc lock contention 与释放后重试。此前审计估算该层可回收约 4.30 GiB；仍约
+  6.23 GiB 来自不同 root generation，必须等待精确 touched-unit manifest，不能用名字或
+  mtime 猜测删除。
 
 这些 dogfood 缺陷优先于新增 Cockpit 装饰和远期 Candidate 工作；修复必须保留
 结构化 snapshot 与 PNG/公开 input journey 证据，并避免多个 agent 并发编辑

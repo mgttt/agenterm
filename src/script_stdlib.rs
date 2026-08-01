@@ -1,9 +1,12 @@
 use std::{
     cell::RefCell,
-    fs::{DirEntry, FileType, Metadata},
+    fs::{DirEntry, File, FileType, Metadata, OpenOptions, TryLockError},
     io::{Read, Write},
     path::{Path, PathBuf},
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -33,6 +36,9 @@ pub struct ScriptDirEntry {
 
 #[derive(Clone, Debug)]
 pub struct ScriptMetadata(Metadata);
+
+#[derive(Clone, Debug)]
+pub struct ScriptFileLockAttempt(Option<Arc<File>>);
 
 #[derive(Clone, Copy, Debug)]
 pub struct ScriptSystemTime(SystemTime);
@@ -122,6 +128,11 @@ pub fn register_local(engine: &mut Engine) {
     engine.register_get("len", metadata_len);
     engine.register_get("modified", metadata_modified);
 
+    engine.register_type_with_name::<ScriptFileLockAttempt>("FileLockAttempt");
+    engine.register_get("acquired", |attempt: &mut ScriptFileLockAttempt| {
+        attempt.0.is_some()
+    });
+
     engine.register_type_with_name::<ScriptSystemTime>("SystemTime");
     engine.register_get("unix_millis", system_time_unix_millis);
     engine.register_get("rfc3339", system_time_rfc3339);
@@ -150,6 +161,7 @@ pub fn register_local(engine: &mut Engine) {
     fs.set_native_fn("remove_file", fs_remove_file);
     fs.set_native_fn("remove_dir", fs_remove_dir);
     fs.set_native_fn("remove_dir_all", fs_remove_dir_all);
+    fs.set_native_fn("try_lock_exclusive", fs_try_lock_exclusive);
 
     let mut system_time = Module::new();
     system_time.set_native_fn("now", system_time_now);
@@ -341,6 +353,19 @@ fn fs_remove_dir(path: &str) -> Result<(), Box<EvalAltResult>> {
 
 fn fs_remove_dir_all(path: &str) -> Result<(), Box<EvalAltResult>> {
     std::fs::remove_dir_all(path).map_err(|error| io_error("fs_remove_dir_all", path, error))
+}
+
+fn fs_try_lock_exclusive(path: &str) -> Result<ScriptFileLockAttempt, Box<EvalAltResult>> {
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+        .map_err(|error| io_error("fs_try_lock_exclusive", path, error))?;
+    match file.try_lock() {
+        Ok(()) => Ok(ScriptFileLockAttempt(Some(Arc::new(file)))),
+        Err(TryLockError::WouldBlock) => Ok(ScriptFileLockAttempt(None)),
+        Err(TryLockError::Error(error)) => Err(io_error("fs_try_lock_exclusive", path, error)),
+    }
 }
 
 fn runtime_temp_dir() -> Result<ScriptPath, Box<EvalAltResult>> {

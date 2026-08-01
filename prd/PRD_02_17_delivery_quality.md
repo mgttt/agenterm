@@ -275,9 +275,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
     and refuses a skipped stress run; proving it executes exactly once
     per candidate SHA, while desktop GUI journeys remain isolated and
     `no-activate`
-  - [ ] Cargo registry, Git sources and compatible build outputs use bounded,
-    correctly keyed CI caches; cache miss/corruption cannot alter correctness,
-    and developer `target/` cleanup remains explicit
+  - [~] Cargo registry, Git sources and compatible build outputs use bounded,
+    correctly keyed CI caches; cache miss/corruption cannot alter correctness.
+    Local dev build now performs an explicit lock-aware prune after successful
+    artifact staging: it holds Cargo's debug-profile lock, acquires rustc's
+    per-session lock, removes only obsolete finalized sessions, and retains the
+    newest session for every compilation-unit root. Distinct historical root
+    generations remain intentionally retained until an exact touched-unit
+    manifest can replace unsafe basename/mtime guesses.
 - v0.1.10 candidate and non-publishing release rehearsal (P0)
   - [x] one repository-native coordinator owns one clean candidate build and
     its integrated qualification; a candidate SHA can have only one eligible,

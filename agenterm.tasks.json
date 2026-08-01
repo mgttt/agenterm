@@ -29,6 +29,7 @@
         "std.fs.remove-file",
         "std.fs.rename",
         "std.fs.symlink-metadata",
+        "std.fs.try-lock-exclusive",
         "std.fs.write",
         "std.path.absolute",
         "std.path.join",
@@ -328,6 +329,13 @@
       "network": [],
       "evidence": ["task.prepare-target-clean"]
     },
+    "prune-target-incremental": {
+      "inputs": ["source-tree", "cargo-target", "rustc-session-locks"],
+      "outputs": ["incremental-cache-prune-report"],
+      "budget": {"timeout_ms": 300000, "max_operations": 100000000, "max_output_bytes": 1048576},
+      "network": [],
+      "evidence": ["task.prune-target-incremental"]
+    },
     "preflight": {
       "inputs": ["source-tree", "release-remote", "release-workflow"],
       "outputs": ["preflight-report"],
@@ -474,7 +482,7 @@
       "profile": "local",
       "cwd": ".",
       "args": ["."],
-      "dependencies": ["build-identity", "stage-build", "target-report", "prepare-target-clean"],
+      "dependencies": ["build-identity", "stage-build", "target-report", "prepare-target-clean", "prune-target-incremental"],
       "platforms": ["windows", "linux", "macos"],
       "side_effects": ["artifact_write", "process_spawn"]
     },
@@ -850,6 +858,17 @@
       "entry": "scripts/rhai/prepare-target-clean.rhai",
       "profile": "local",
       "cwd": ".",
+      "dependencies": [],
+      "platforms": ["windows", "linux", "macos"],
+      "side_effects": ["artifact_write"]
+    },
+    {
+      "id": "prune-target-incremental",
+      "description": "Prune obsolete finalized rustc incremental sessions under the exact repository debug target",
+      "entry": "scripts/rhai/prune-target-incremental.rhai",
+      "profile": "local",
+      "cwd": ".",
+      "args": [],
       "dependencies": [],
       "platforms": ["windows", "linux", "macos"],
       "side_effects": ["artifact_write"]

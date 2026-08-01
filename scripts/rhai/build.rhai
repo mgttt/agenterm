@@ -278,6 +278,21 @@ run_command(
     "build_stage"
 );
 
+if profile == "dev" && !external_target {
+    run_command(
+        worker,
+        [
+            "task", "run", "prune-target-incremental",
+            "--manifest", task_manifest,
+            "--", repo, cargo_output
+        ],
+        repo,
+        environment,
+        300000,
+        "build_incremental_prune"
+    );
+}
+
 if profile == "release" && !external_target {
     run_command(
         worker,

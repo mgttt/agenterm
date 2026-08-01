@@ -792,6 +792,16 @@ sync failures remain distinct runtime errors.
 are reported as symlinks and are not silently treated as directories.
 `Metadata.len` is a bounded Rhai integer and `.modified` is a `SystemTime`.
 
+`std::fs::try_lock_exclusive(path)` opens one existing file for read/write and
+returns a `FileLockAttempt`. Its `.acquired` property is `false` when another
+process holds a conflicting lock; otherwise the exclusive OS file lock remains
+held until the attempt value and all of its Rhai copies leave scope. The call
+is nonblocking and never creates the target. On Unix and Windows it follows the
+host `File::try_lock` advisory-lock semantics, so callers coordinating cleanup
+must retain the returned value for the whole mutation and must treat a missing,
+indirect, malformed, or unopenable lock file as a failure rather than an
+unlocked resource.
+
 Filesystem failures MUST carry a stable error code. Safe diagnostics MAY
 include the final file name but MUST NOT automatically retain a full
 secret-bearing path.

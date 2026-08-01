@@ -332,6 +332,24 @@ pub fn entries() -> Vec<ScriptApiEntry> {
                 &["fs_remove_dir_all"],
             ),
         ),
+        shipped_local_entry_with_result(
+            shipped_local_entry_with_design(
+                shipped_local_entry(
+                    "std.fs.try-lock-exclusive",
+                    "system/filesystem/try-lock-exclusive",
+                    "std::fs::try_lock_exclusive",
+                    Some("std::fs::File::try_lock"),
+                    RustMapping::Adapted,
+                    "std::fs::try_lock_exclusive(path)",
+                    (
+                        &["filesystem_lock", "nonblocking_exclusive_lock"],
+                        &["fs_try_lock_exclusive"],
+                    ),
+                ),
+                "2026-08-01",
+            ),
+            Some("FileLockAttempt"),
+        ),
         shipped_runtime_entry(
             "rhai.runtime.temp-dir",
             "system/temp/invocation-directory",
@@ -1699,6 +1717,14 @@ fn shipped_local_entry_with_design(
     designed_on: &'static str,
 ) -> ScriptApiEntry {
     entry.designed_on = designed_on;
+    entry
+}
+
+fn shipped_local_entry_with_result(
+    mut entry: ScriptApiEntry,
+    result: Option<&'static str>,
+) -> ScriptApiEntry {
+    entry.result = result;
     entry
 }
 
