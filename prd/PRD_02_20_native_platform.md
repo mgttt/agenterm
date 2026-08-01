@@ -47,6 +47,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] Script Runtime clipboard uses the public crate facade with its independent
   two-second robustness deadline; duplicate root native clipboard adapters are
   deleted and no authorization policy is introduced.
+- [x] Script Runtime atomic filesystem mechanics and child-pipe observation use
+  public filesystem/process facades. Product budgets and receipts remain in the
+  unrestricted runtime; duplicate root native adapters are deleted.
 - [~] Passive system-WebView discovery is public and selected inside the crate,
   with Missing and Failed kept distinct. Native font discovery/metrics and an
   opaque RAII font resource are public; the Windows renderer consumes its RAII

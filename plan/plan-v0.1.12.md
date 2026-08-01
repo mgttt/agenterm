@@ -147,6 +147,12 @@ adapter；公开 API 新增 caller-supplied open deadline，使 GUI 默认 500ms
 Runtime 既有 2s 健壮性契约同时保留。Script 调用仍是无限制本地能力，不加入路径、
 内容或权限 allowlist。30 项 all-feature crate tests、Script clipboard contract test 与
 两 crate warnings-denied Clippy 通过。
+Script files/stream native leaf 完成：atomic replace、parent sync、link/reparse detection
+进入 `filesystem` facade；Windows `PeekNamedPipe` 以 opaque `PipeProbeToken` 和 typed
+Closed/Failed 进入 `process` facade。三平台 root script_files/script_stream adapters 删除，
+Rhai 注册、capture/delivery limits 与 receipts 仍属产品层且不形成授权策略。5 项 stream、
+14 项 unrestricted filesystem stdlib tests、30 项 crate tests 与 warnings-denied Clippy
+通过。
 
 2026-08-01 首个建设期增量：Cockpit snapshot 新增明确的
 `tab_counts.{total,running,dead}`，native shell 同源显示 logical instance、

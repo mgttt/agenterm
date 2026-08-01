@@ -32,8 +32,8 @@ third-party dependency.
 | Feature | Public capability | Extra dependency |
 |---|---|---|
 | `serde` | `IpcEndpoint` string serialization | `serde` |
-| `process` | process observation/tree control and shell defaults | target `libc` / `windows-sys` |
-| `filesystem` | host config/data roots and executable naming | none |
+| `process` | observation/tree control, shell defaults and child-pipe probes | target `libc` / `windows-sys` |
+| `filesystem` | host roots/naming plus durable atomic replacement mechanics | target native APIs |
 | `locking` | cross-process path locks and bounded slot permits | target `libc` / `windows-sys` |
 | `ipc` | typed endpoints and native listener/byte stream | `locking`, target native APIs |
 | `pty` | PTY command/master/child lifecycle | `process`, `rmux-pty` |
@@ -46,10 +46,6 @@ third-party dependency.
 | `font` | discovery, metrics and RAII native font resource | `filesystem`, target `ab_glyph` / GDI |
 | `webview` | passive system-runtime discovery | none |
 | `full` | every declared feature | union of the above |
-
-Enabling a reserved slot does not pretend the capability exists:
-`capability_status` returns `Unsupported` with
-`capability-not-yet-implemented` until its facade and adapters ship.
 
 ## Platform support
 
