@@ -286,6 +286,7 @@ pub(crate) trait ControlWindowBackend {
     fn focused_target(&self) -> FocusTarget;
     fn set_client_size(&self, size: PixelSize) -> Result<(), ControlWindowError>;
     fn set_presentation(&self, presentation: WindowPresentation);
+    fn show_without_activation(&self);
     fn set_title(&self, title: &str) -> Result<(), ControlWindowError>;
     fn set_control_text(&self, id: ControlId, text: &str) -> Result<(), ControlWindowError>;
     fn control_text(&self, id: ControlId) -> Result<String, ControlWindowError>;
@@ -363,6 +364,10 @@ impl ControlWindow {
     }
     pub fn set_presentation(&self, presentation: WindowPresentation) {
         self.0.set_presentation(presentation);
+    }
+    /// Shows or restores the native window without requesting foreground activation.
+    pub fn show_without_activation(&self) {
+        self.0.show_without_activation();
     }
     pub fn set_title(&self, v: &str) -> Result<(), ControlWindowError> {
         self.0.set_title(v)

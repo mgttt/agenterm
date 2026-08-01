@@ -166,6 +166,11 @@ impl ControlWindowBackend for Backend {
             );
         }
     }
+    fn show_without_activation(&self) {
+        unsafe {
+            ShowWindow(self.window.get(), SW_SHOWNOACTIVATE);
+        }
+    }
     fn set_title(&self, title: &str) -> Result<(), ControlWindowError> {
         let w = wide(title);
         if unsafe { SetWindowTextW(self.window.get(), w.as_ptr()) } == 0 {
