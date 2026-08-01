@@ -10,6 +10,14 @@ use windows_sys::Win32::{
 
 use crate::contract::activation::{ActivationError, ActivationRequest, NativeWindowHandle};
 
+pub trait WindowAttributesActivationExt: Sized {
+    fn with_platform_activation(self, no_activate: bool) -> Self;
+}
+
+pub trait EventLoopActivationExt {
+    fn configure_platform_activation(&mut self, no_activate: bool);
+}
+
 pub(crate) fn apply(
     window: NativeWindowHandle,
     request: ActivationRequest,

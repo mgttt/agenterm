@@ -14,6 +14,7 @@
 
 #![cfg(target_os = "linux")]
 
+use agenterm_platform::activation::WindowAttributesActivationExt as _;
 use winit::window::WindowAttributes;
 
 use crate::platform::{CapabilityStatus, DisplayBackendFacts};
@@ -111,7 +112,7 @@ pub(crate) fn configure_window_attributes(
     attributes: WindowAttributes,
     no_activate: bool,
 ) -> WindowAttributes {
-    agenterm_platform::activation::configure_window_attributes(attributes, no_activate)
+    attributes.with_platform_activation(no_activate)
 }
 
 /// Snapshot facts for diagnostics (not authorization).

@@ -14,8 +14,8 @@ use windows_sys::Win32::{
     Graphics::Gdi::{
         BeginPaint, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, CreateSolidBrush,
         DT_CENTER, DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject,
-        DrawTextW, EndPaint, FillRect, FrameRect, HBITMAP, HDC, HFONT, HGDIOBJ, PAINTSTRUCT,
-        SRCCOPY, ScreenToClient, SelectObject, SetBkMode, SetTextColor, TRANSPARENT, UpdateWindow,
+        DrawTextW, EndPaint, FillRect, FrameRect, HBITMAP, HDC, HGDIOBJ, PAINTSTRUCT, SRCCOPY,
+        ScreenToClient, SelectObject, SetBkMode, SetTextColor, TRANSPARENT, UpdateWindow,
     },
     System::LibraryLoader::GetModuleHandleW,
     UI::{
@@ -54,7 +54,7 @@ use crate::{
     platform::{
         CapabilityStatus, KeyClassification, action,
         selected::native::{
-            activation, font,
+            activation,
             input::{Utf16TextDecoder, primary_shortcut, windows_modifiers},
             screenshot::{self, CaptureArea},
             toolbar::WindowsToolbarHit,
@@ -779,7 +779,7 @@ struct RemoteWindowState {
     last_error: Option<String>,
     tabs_visible: bool,
     config: AppConfig,
-    font: HFONT,
+    font: agenterm_platform::font::NativeFont,
     cell_width: i32,
     cell_height: i32,
     terminal_text_decoder: Utf16TextDecoder,
@@ -1559,11 +1559,7 @@ impl RemoteWindowState {
                     &appearance.terminal_font_family,
                     appearance.terminal_font_size,
                 )?;
-                if let Err(error) = save_config(&next) {
-                    unsafe { DeleteObject(font as HGDIOBJ) };
-                    return Err(error).context("could not save settings");
-                }
-                unsafe { DeleteObject(self.font as HGDIOBJ) };
+                save_config(&next).context("could not save settings")?;
                 self.font = font;
                 self.cell_width = cell_width;
                 self.cell_height = cell_height;
@@ -2364,7 +2360,6 @@ impl RemoteWindowState {
             &appearance.terminal_font_family,
             appearance.terminal_font_size,
         )?;
-        unsafe { DeleteObject(self.font as HGDIOBJ) };
         self.font = font;
         self.cell_width = cell_width;
         self.cell_height = cell_height;
@@ -4059,11 +4054,7 @@ impl RemoteWindowState {
             &appearance.terminal_font_family,
             appearance.terminal_font_size,
         )?;
-        if let Err(error) = save_config(&next) {
-            unsafe { DeleteObject(font as HGDIOBJ) };
-            return Err(error).context("could not save settings");
-        }
-        unsafe { DeleteObject(self.font as HGDIOBJ) };
+        save_config(&next).context("could not save settings")?;
         self.font = font;
         self.cell_width = cell_width;
         self.cell_height = cell_height;
@@ -4903,7 +4894,7 @@ impl RemoteWindowState {
         fill(device, &composer, palette.composer.colorref());
         fill(device, &status, palette.status.colorref());
         unsafe {
-            SelectObject(device, self.font as HGDIOBJ);
+            SelectObject(device, self.font.raw_handle() as HGDIOBJ);
             SetBkMode(device, TRANSPARENT as i32);
         }
         self.paint_tabs(device, sidebar, palette);
@@ -5570,7 +5561,6 @@ impl Drop for RemoteWindowState {
         if let Some(client) = self.client.as_mut() {
             let _ = client.detach();
         }
-        unsafe { DeleteObject(self.font as HGDIOBJ) };
     }
 }
 
@@ -6232,9 +6222,52 @@ fn screen_selection_text(screen: &UiScreenSnapshot, selection: &RemoteTerminalSe
     lines.join("\r\n")
 }
 
-fn create_terminal_font(window: HWND, family: &str, size: u16) -> Result<(HFONT, i32, i32)> {
-    font::create_terminal_font(window, family, size)
-        .map_err(|error| platform_capability_error(error.to_capability_status()))
+fn create_terminal_font(
+    window: HWND,
+    family: &str,
+    size: u16,
+) -> Result<(agenterm_platform::font::NativeFont, i32, i32)> {
+    // SAFETY: the GUI owns this live top-level HWND for the synchronous call.
+    let window = unsafe { agenterm_platform::font::OpaqueWindowHandle::from_raw(window as isize) };
+    let font = agenterm_platform::font::create_terminal_font(
+        window,
+        agenterm_platform::font::FontRequest {
+            family,
+            point_size: size,
+        },
+    )
+    .map_err(|error| {
+        let status = match error.to_capability_status() {
+            agenterm_platform::CapabilityStatus::Unsupported { .. } => {
+                CapabilityStatus::Unsupported {
+                    reason: "native-font-creation-unsupported",
+                }
+            }
+            agenterm_platform::CapabilityStatus::Failed { code, message } => {
+                CapabilityStatus::Failed {
+                    code: match code.as_ref() {
+                        "font_invalid_request" => "font_invalid_request",
+                        "font_device_context_unavailable" => "font_device_context_unavailable",
+                        "font_create_failed" => "font_create_failed",
+                        "font_metrics_failed" => "font_metrics_failed",
+                        _ => "font_failed",
+                    },
+                    message,
+                }
+            }
+            _ => CapabilityStatus::Failed {
+                code: "font_failed",
+                message: error.to_string(),
+            },
+        };
+        platform_capability_error(status)
+    })?;
+    let metrics = font.metrics();
+    Ok((
+        font,
+        metrics.cell_width.round().max(1.0) as i32,
+        metrics.cell_height.round().max(1.0) as i32,
+    ))
 }
 
 fn paint_screen(

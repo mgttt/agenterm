@@ -11,9 +11,20 @@ pub(crate) fn apply(
     })
 }
 
-pub(crate) fn configure_window_attributes(
-    attributes: winit::window::WindowAttributes,
-    no_activate: bool,
-) -> winit::window::WindowAttributes {
-    attributes.with_active(!no_activate)
+pub trait WindowAttributesActivationExt: Sized {
+    fn with_platform_activation(self, no_activate: bool) -> Self;
+}
+
+impl WindowAttributesActivationExt for winit::window::WindowAttributes {
+    fn with_platform_activation(self, no_activate: bool) -> Self {
+        self.with_active(!no_activate)
+    }
+}
+
+pub trait EventLoopActivationExt {
+    fn configure_platform_activation(&mut self, no_activate: bool);
+}
+
+impl<T> EventLoopActivationExt for winit::event_loop::EventLoopBuilder<T> {
+    fn configure_platform_activation(&mut self, _no_activate: bool) {}
 }

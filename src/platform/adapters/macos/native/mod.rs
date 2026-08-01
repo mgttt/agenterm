@@ -11,7 +11,6 @@
 #![cfg(target_os = "macos")]
 
 pub(crate) mod activation;
-pub(crate) mod font;
 pub(crate) mod ime;
 pub(crate) mod input;
 pub(crate) mod scale;
@@ -34,7 +33,11 @@ pub fn capability_status(capability: CapabilityKind) -> CapabilityStatus {
         | CapabilityKind::Screenshot
         | CapabilityKind::Activation => CapabilityStatus::Available,
         CapabilityKind::Clipboard => CapabilityStatus::Available,
-        CapabilityKind::Font => font::capability_status(),
+        CapabilityKind::Font => crate::platform::project_capability_status(
+            agenterm_platform::font::capability_status(),
+            "font-unsupported",
+            "font-failed",
+        ),
         CapabilityKind::Integration => CapabilityStatus::Unsupported {
             reason: "signed-macos-app-bundle-pending",
         },

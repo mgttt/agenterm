@@ -19,7 +19,6 @@ use crate::platform::{
 };
 
 pub(crate) mod activation;
-pub(crate) mod font;
 pub(crate) mod ime;
 pub(crate) mod input;
 pub(crate) mod scale;
@@ -105,7 +104,11 @@ pub(crate) fn capability_status(kind: CapabilityKind) -> CapabilityStatus {
         CapabilityKind::Input => input_capability_status(facts),
         CapabilityKind::Ime => ime::ime_capability_status(facts),
         CapabilityKind::Clipboard => CapabilityStatus::Available,
-        CapabilityKind::Font => font::font_capability_status(),
+        CapabilityKind::Font => crate::platform::project_capability_status(
+            agenterm_platform::font::capability_status(),
+            "font-unsupported",
+            "font-failed",
+        ),
         CapabilityKind::Screenshot => screenshot::screenshot_capability_status(facts),
         CapabilityKind::Activation => activation::activation_capability_status(facts),
         CapabilityKind::Integration => CapabilityStatus::Unsupported {

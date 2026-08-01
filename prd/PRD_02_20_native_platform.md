@@ -46,7 +46,8 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   directory/file naming remains product policy without compile-time OS selection.
 - [~] Passive system-WebView discovery is public and selected inside the crate,
   with Missing and Failed kept distinct. Native font discovery/metrics and an
-  opaque RAII font resource are public; root renderer migration is still open.
+  opaque RAII font resource are public; the Windows renderer consumes its RAII
+  resource and all three duplicate root native font implementations are deleted.
 - [ ] Windows, macOS, and Linux native frontends consume one declared platform
   contract for window lifecycle, normalized input, IME, DPI, clipboard, font
   discovery, screenshots, activation, and applicable system integration.

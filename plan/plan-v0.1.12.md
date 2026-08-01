@@ -137,6 +137,11 @@ metrics、opaque window token 和 RAII `NativeFont`，Unix metrics 的 `ab_glyph
 Windows GDI 依赖均按 target+feature 隔离。29 项 all-feature crate tests 及 crate/root
 warnings-denied Clippy 通过；root Windows font hot path 去重仍是下一提交，本文不提前
 宣称已删除。
+Native font hot path 随后完成：Windows remote renderer 持有 crate `NativeFont`，设置
+失败与替换均由 RAII 精确释放，不再手工 `DeleteObject(HFONT)`；Linux/macOS capability
+和 primary-family 走同一 facade，三套 root native font 文件删除。activation 的 winit
+类型也从 public facade 移到 adapter-owned extension trait，使 crate contract/service
+静态门禁通过。crate/root warnings-denied Clippy 与聚焦平台边界测试通过。
 
 2026-08-01 首个建设期增量：Cockpit snapshot 新增明确的
 `tab_counts.{total,running,dead}`，native shell 同源显示 logical instance、

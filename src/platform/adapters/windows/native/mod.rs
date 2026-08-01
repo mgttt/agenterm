@@ -6,7 +6,6 @@
 #![cfg(target_os = "windows")]
 
 pub(crate) mod activation;
-pub(crate) mod font;
 pub(crate) mod input;
 pub(crate) mod screenshot;
 pub(crate) mod toolbar;
@@ -32,7 +31,11 @@ pub fn capability_status(capability: CapabilityKind) -> CapabilityStatus {
         CapabilityKind::Ime => CapabilityStatus::Unsupported {
             reason: "ime-preedit-not-yet-adapted",
         },
-        CapabilityKind::Font => font::capability_status(),
+        CapabilityKind::Font => crate::platform::project_capability_status(
+            agenterm_platform::font::capability_status(),
+            "font-unsupported",
+            "font-failed",
+        ),
         CapabilityKind::Integration => CapabilityStatus::Unsupported {
             reason: "windows-shell-integration-not-yet-declared",
         },

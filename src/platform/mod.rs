@@ -147,6 +147,27 @@ impl CapabilityStatus {
     }
 }
 
+pub(crate) fn project_capability_status(
+    status: agenterm_platform::CapabilityStatus,
+    unsupported_reason: &'static str,
+    failed_code: &'static str,
+) -> CapabilityStatus {
+    match status {
+        agenterm_platform::CapabilityStatus::Available => CapabilityStatus::Available,
+        agenterm_platform::CapabilityStatus::Unsupported { .. } => CapabilityStatus::Unsupported {
+            reason: unsupported_reason,
+        },
+        agenterm_platform::CapabilityStatus::Failed { message, .. } => CapabilityStatus::Failed {
+            code: failed_code,
+            message,
+        },
+        _ => CapabilityStatus::Failed {
+            code: failed_code,
+            message: "platform capability returned an unknown status".to_owned(),
+        },
+    }
+}
+
 pub(crate) fn platform_info_json() -> serde_json::Value {
     let kind = selected::native::platform_kind();
     let status = selected::native::capability_status;
