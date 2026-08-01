@@ -5,6 +5,36 @@ use std::process::{Child, ChildStderr, ChildStdout, Command};
 use crate::contract::process::{PipeProbeError, PipeProbeToken};
 use crate::contract::process::{ProcessError, ProcessErrorKind, ProcessInfo, ProcessObservation};
 
+pub(crate) fn write_parent_console_stderr(message: &str) -> bool {
+    use std::{fs::OpenOptions, io::Write as _};
+    use windows_sys::Win32::{
+        Foundation::INVALID_HANDLE_VALUE,
+        System::Console::{
+            ATTACH_PARENT_PROCESS, AttachConsole, FreeConsole, GetStdHandle, STD_ERROR_HANDLE,
+        },
+    };
+
+    let payload = format!("{message}\n");
+    let stderr_handle = unsafe { GetStdHandle(STD_ERROR_HANDLE) };
+    if !stderr_handle.is_null() && stderr_handle != INVALID_HANDLE_VALUE {
+        let mut stderr = std::io::stderr().lock();
+        if stderr.write_all(payload.as_bytes()).is_ok() && stderr.flush().is_ok() {
+            return true;
+        }
+    }
+    if unsafe { AttachConsole(ATTACH_PARENT_PROCESS) } == 0 {
+        return false;
+    }
+    let written = OpenOptions::new()
+        .write(true)
+        .open("CONOUT$")
+        .is_ok_and(|mut console| {
+            console.write_all(payload.as_bytes()).is_ok() && console.flush().is_ok()
+        });
+    unsafe { FreeConsole() };
+    written
+}
+
 pub(crate) fn stdout_probe_token(reader: &ChildStdout) -> Option<PipeProbeToken> {
     use std::os::windows::io::AsRawHandle as _;
     Some(PipeProbeToken(reader.as_raw_handle() as usize))

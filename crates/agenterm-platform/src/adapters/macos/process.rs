@@ -5,6 +5,12 @@ use std::process::{Child, ChildStderr, ChildStdout, Command};
 use crate::contract::process::{PipeProbeError, PipeProbeToken};
 use crate::contract::process::{ProcessError, ProcessErrorKind, ProcessInfo, ProcessObservation};
 
+pub(crate) fn write_parent_console_stderr(message: &str) -> bool {
+    use std::io::Write as _;
+    let mut stderr = std::io::stderr().lock();
+    writeln!(stderr, "{message}").is_ok() && stderr.flush().is_ok()
+}
+
 pub(crate) fn stdout_probe_token(_reader: &ChildStdout) -> Option<PipeProbeToken> {
     None
 }

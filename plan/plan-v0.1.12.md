@@ -184,6 +184,11 @@ Windows native projection cleanup 随后让 remote GUI 直接消费 crate activa
 `adapters/windows/native` 目录与 selected native module 已删除。48 项 root platform
 聚焦测试和 warnings-denied all-target Clippy 通过。此叶去除重复包装，但 Windows GUI
 host 自身的 Win32 event/render 类型仍待迁入 crate adapter。
+Windows launcher-mechanics 叶新增 crate application-wake 与 parent-console diagnostic API：
+`PostMessageW(WM_APP+1)`、standard-handle probe、attach-existing-parent-console 和 cleanup
+都进入 target adapter，root launcher 只组合 `WakeSignal` 与产品参数/IPC handoff。两级
+warnings-denied Clippy、35 项 crate tests 和 3 项 launcher parser/guidance tests 通过；
+root `frontend.rs` 不再含 Win32 类型或调用。
 
 2026-08-01 首个建设期增量：Cockpit snapshot 新增明确的
 `tab_counts.{total,running,dead}`，native shell 同源显示 logical instance、

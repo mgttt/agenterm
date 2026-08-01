@@ -3,8 +3,9 @@ use std::borrow::Cow;
 use windows_sys::Win32::{
     Foundation::HWND,
     UI::WindowsAndMessaging::{
-        GetForegroundWindow, SW_RESTORE, SW_SHOW, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOMOVE,
-        SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SetForegroundWindow, SetWindowPos, ShowWindow,
+        GetForegroundWindow, PostMessageW, SW_RESTORE, SW_SHOW, SW_SHOWNOACTIVATE, SWP_NOACTIVATE,
+        SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SetForegroundWindow, SetWindowPos,
+        ShowWindow, WM_APP,
     },
 };
 
@@ -34,6 +35,17 @@ pub(crate) fn apply(
         }
         ActivationRequest::RestoreAndActivate => show_and_activate(window, SW_RESTORE),
     }
+}
+
+pub(crate) fn post_application_wake(window: NativeWindowHandle) -> Result<(), ActivationError> {
+    const APPLICATION_WAKE: u32 = WM_APP + 1;
+    if unsafe { PostMessageW(window.raw() as HWND, APPLICATION_WAKE, 0, 0) } == 0 {
+        return Err(failed(
+            "application_wake_failed",
+            "Windows could not post the application wake message",
+        ));
+    }
+    Ok(())
 }
 
 fn show_without_activation(window: HWND) -> Result<(), ActivationError> {

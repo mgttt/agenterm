@@ -65,3 +65,9 @@ pub fn stderr_probe_token(reader: &ChildStderr) -> Option<PipeProbeToken> {
 pub fn pipe_available(token: PipeProbeToken) -> Result<usize, PipeProbeError> {
     adapter::pipe_available(token)
 }
+
+/// Write a launcher diagnostic to stderr or an already-existing parent
+/// console. This never allocates a new console and reports best-effort success.
+pub fn write_parent_console_stderr(message: &str) -> bool {
+    adapter::write_parent_console_stderr(message)
+}

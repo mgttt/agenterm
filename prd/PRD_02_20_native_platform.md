@@ -470,6 +470,11 @@ integrated validation recorded below):
   preserving typed activation diagnostics, Control/AltGr arbitration, and the
   stateful UTF-16 decoder. Win32 GUI host/render ownership remains open and is
   not claimed complete by removing this projection layer.
+- [x] Windows launcher wake delivery and parent-console diagnostics now use
+  public crate activation/process facades. `PostMessageW`, standard-handle
+  probing, attach-only parent-console behavior, and console cleanup remain in
+  the Windows adapter; AgenTerm keeps only wake coalescing, GUI argument policy,
+  and IPC handoff. The root frontend entry no longer imports Win32 APIs.
 - [x] Control Center state-directory protection, exclusive state-file creation,
   atomic replacement, existing-window focus, and direct native capture now
   call `services::control_center → selected → adapters/{windows,linux,macos}`.

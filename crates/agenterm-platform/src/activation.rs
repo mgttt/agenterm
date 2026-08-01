@@ -11,3 +11,8 @@ pub fn apply(
 ) -> Result<(), ActivationError> {
     crate::selected::activation::apply(window, request)
 }
+
+/// Post one adapter-defined application wake event to a native window.
+pub fn post_application_wake(window: NativeWindowHandle) -> Result<(), ActivationError> {
+    crate::selected::activation::post_application_wake(window)
+}

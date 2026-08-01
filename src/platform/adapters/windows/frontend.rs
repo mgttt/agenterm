@@ -1,24 +1,18 @@
-use std::{env, fs::OpenOptions, io::Write};
+use std::env;
 
 use anyhow::{Context as _, Result};
-use windows_sys::Win32::{
-    Foundation::{HWND, INVALID_HANDLE_VALUE},
-    System::Console::{
-        ATTACH_PARENT_PROCESS, AttachConsole, FreeConsole, GetStdHandle, STD_ERROR_HANDLE,
-    },
-    UI::WindowsAndMessaging::{PostMessageW, WM_APP},
-};
 
 use crate::ipc_endpoint::EndpointSelectorArgs;
 use crate::wake_signal::WakeSignal;
 
-const WM_APP_WAKE: u32 = WM_APP + 1;
-
 /// Wake the Win32 message loop without posting one message per producer event.
 pub(crate) fn request_gui_wake(wake_window: isize, wake_signal: &WakeSignal) {
     if wake_signal.request() {
-        unsafe {
-            PostMessageW(wake_window as HWND, WM_APP_WAKE, 0, 0);
+        // SAFETY: the GUI owns the wake HWND for the duration of this call.
+        if let Some(window) =
+            unsafe { agenterm_platform::activation::NativeWindowHandle::from_raw(wake_window) }
+        {
+            let _ = agenterm_platform::activation::post_application_wake(window);
         }
     }
 }
@@ -209,27 +203,7 @@ fn gui_console_summary(address: &str) -> String {
 }
 
 fn write_best_effort_stderr(message: &str) {
-    let payload = format!("{message}\n");
-    let stderr_handle = unsafe { GetStdHandle(STD_ERROR_HANDLE) };
-    if !stderr_handle.is_null() && stderr_handle != INVALID_HANDLE_VALUE {
-        let mut stderr = std::io::stderr().lock();
-        if stderr.write_all(payload.as_bytes()).is_ok() && stderr.flush().is_ok() {
-            return;
-        }
-    }
-
-    // A /SUBSYSTEM:WINDOWS process normally has no standard handles. Attach
-    // only to an existing parent console, never allocate or read one.
-    if unsafe { AttachConsole(ATTACH_PARENT_PROCESS) } == 0 {
-        return;
-    }
-    if let Ok(mut console) = OpenOptions::new().write(true).open("CONOUT$") {
-        let _ = console.write_all(payload.as_bytes());
-        let _ = console.flush();
-    }
-    unsafe {
-        FreeConsole();
-    }
+    let _ = agenterm_platform::process::write_parent_console_stderr(message);
 }
 
 fn show_startup_error(error: &anyhow::Error) {

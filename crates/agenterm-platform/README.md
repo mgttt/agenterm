@@ -32,7 +32,7 @@ third-party dependency.
 | Feature | Public capability | Extra dependency |
 |---|---|---|
 | `serde` | `IpcEndpoint` string serialization | `serde` |
-| `process` | observation/tree control, shell defaults and child-pipe probes | target `libc` / `windows-sys` |
+| `process` | observation/tree control, shell defaults, child-pipe probes and parent-console diagnostics | target `libc` / `windows-sys` |
 | `filesystem` | host roots/naming plus durable atomic replacement mechanics | target native APIs |
 | `locking` | cross-process path locks and bounded slot permits | target `libc` / `windows-sys` |
 | `ipc` | typed endpoints and native listener/byte stream | `locking`, target native APIs |
@@ -40,7 +40,7 @@ third-party dependency.
 | `window` | display facts, geometry and typed process-window automation | target Win32 APIs |
 | `input` | normalized key classification, UTF-16 text decoding, primary-shortcut policy | `window` |
 | `ime` | preedit/commit state machine and display-aware capability status | `input` |
-| `activation` | neutral policy, typed requests, selected native window operation | `window`, target `winit` / Win32 |
+| `activation` | neutral policy, typed requests, native window operation and application wake | `window`, target `winit` / Win32 |
 | `clipboard` | caller-bounded Unicode clipboard with configurable open deadline | `process`, target native APIs |
 | `screenshot` | bounded XRGB encoding and typed native-window capture | `filesystem`, `png`, target Win32 APIs |
 | `font` | discovery, metrics and RAII native font resource | `filesystem`, target `ab_glyph` / GDI |

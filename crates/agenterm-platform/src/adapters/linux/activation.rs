@@ -2,6 +2,12 @@ use std::borrow::Cow;
 
 use crate::contract::activation::{ActivationError, ActivationRequest, NativeWindowHandle};
 
+pub(crate) fn post_application_wake(_window: NativeWindowHandle) -> Result<(), ActivationError> {
+    Err(ActivationError::Unsupported {
+        reason: Cow::Borrowed("native-window-wake-is-unavailable"),
+    })
+}
+
 pub(crate) fn apply(
     _window: NativeWindowHandle,
     _request: ActivationRequest,
