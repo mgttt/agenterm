@@ -778,6 +778,12 @@ N2-M1：可控 full-node foundation
 不自动 NAT 打洞，不承诺 Kubo API 兼容，不开放公网 Fleet control。真正“远程控制”
 须另有 Agent/harness 的审批与凭据模型，不能借由网络 attach 绕过。
 
+Durable identity lifecycle 现完成一个可独立验收的纵切：marker 绑定 PeerId，丢 key
+typed fail；`identity status|backup|rotate|restore` 公开 receipt、旧 key 无损 marker
+migration、轮换中断回滚和错误 backup 拒绝已有 14 unit + 12 CLI 测试。它仍是
+experimental：备份托管/加密、multi-device 语义、reconnect/load 以及三平台 fault
+injection 尚未完成，不能把这个纵切写成整个 N2-M1 stable。
+
 ## 九、系统 WebView / Tauri-compatible spike
 
 先以一个独立的 `agenterm-cc-web` 实验宿主验证系统 WebView，而不是把 Tauri

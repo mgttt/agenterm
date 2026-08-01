@@ -75,8 +75,13 @@ N2-M1
 
 - [~] `research/agenterm-net` now proves explicit deadline-bounded
   `node start/status/stop`, durable-or-ephemeral Ed25519 identity and
-  node-resource snapshots. Durable key backup, loss, rotation and migration
-  contracts remain open before this identity can be called stable.
+  node-resource snapshots. A versioned marker now binds the durable PeerId so
+  key loss fails typed instead of silently generating a new identity; public
+  stopped-node `identity status|backup|rotate|restore` commands, self-verifying
+  non-overwriting backups, legacy-key marker migration and interrupted-rotation
+  last-known-good recovery have unit and CLI evidence. Backup custody/encryption,
+  multi-device semantics and three-platform fault injection remain open before
+  this identity can be called stable.
 - [~] its experimental persistent block store verifies CIDs on every read and
   has a 4 MiB per-block, 32 MiB/1024-block store budget with pin/unpin/GC,
   stored-versus-verified accounting and corruption rejection. Cross-platform
@@ -136,9 +141,10 @@ N2-M1
 
 - [x] N1 uses invocation-owned or test-scoped identities and reports peer IDs
   without claiming durable identity continuity.
-- [ ] N2 requires an explicit durable-versus-ephemeral identity model, key
-  storage, backup, rotation, loss, migration, and multi-device semantics before
-  persistent peer identity is advertised.
+- [~] N2 has an explicit durable-versus-ephemeral identity model plus local key
+  storage, backup, rotation, loss and legacy migration behavior. Persistent
+  identity is still experimental until backup custody/encryption, multi-device
+  semantics and cross-platform fault evidence are decided and proven.
 - [ ] peer addresses are normalized multiaddrs with typed parse and
   compatibility errors. Transport availability is discoverable by platform
   and build rather than inferred from a successful compile.
@@ -228,7 +234,8 @@ promote the research executable into the stable artifact manifest.
 
 ## Gates before stable service integration
 
-- [ ] durable identity and key lifecycle are specified and migration-tested
+- [~] durable identity and local key lifecycle are specified and migration-tested;
+  custody/encryption, multi-device and cross-platform fault evidence remain
 - [ ] capability/protocol/receipt/event/diagnostic schemas are versioned and
   backward/forward compatibility is explicit
 - [ ] connection, storage, cache, pin, bandwidth, task, and shutdown budgets

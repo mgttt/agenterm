@@ -280,7 +280,7 @@ async fn run() -> Result<(), (String, &'static str, String)> {
                     Capability {
                         name: "identity.ephemeral-or-durable-ed25519",
                         state: "prototype",
-                        note: "explicit identity mode; durable key uses local state directory",
+                        note: "explicit identity mode; durable key has marker-bound loss detection plus backup, rotation, and restore lifecycle",
                     },
                     Capability {
                         name: "content.persistent-verified-block-store",
@@ -391,6 +391,53 @@ async fn run() -> Result<(), (String, &'static str, String)> {
                 Duration::from_millis(DEFAULT_DEADLINE_MS),
             )
             .map_err(|message| (request_id.clone(), "node_status_failed", message))?;
+            print_envelope(&request_id, DEFAULT_DEADLINE_MS, result);
+            Ok(())
+        }
+        [group, command, state_flag, state_dir, json]
+            if group == "identity"
+                && command == "status"
+                && state_flag == "--state-dir"
+                && json == "--json" =>
+        {
+            let result = identity::status(Path::new(state_dir))
+                .map_err(|message| (request_id.clone(), "identity_status_failed", message))?;
+            print_envelope(&request_id, DEFAULT_DEADLINE_MS, result);
+            Ok(())
+        }
+        [group, command, state_flag, state_dir, output_flag, output, json]
+            if group == "identity"
+                && command == "backup"
+                && state_flag == "--state-dir"
+                && output_flag == "--output"
+                && json == "--json" =>
+        {
+            let result = identity::backup(Path::new(state_dir), Path::new(output))
+                .map_err(|message| (request_id.clone(), "identity_backup_failed", message))?;
+            print_envelope(&request_id, DEFAULT_DEADLINE_MS, result);
+            Ok(())
+        }
+        [group, command, state_flag, state_dir, backup_flag, backup, json]
+            if group == "identity"
+                && command == "rotate"
+                && state_flag == "--state-dir"
+                && backup_flag == "--backup"
+                && json == "--json" =>
+        {
+            let result = identity::rotate(Path::new(state_dir), Path::new(backup))
+                .map_err(|message| (request_id.clone(), "identity_rotate_failed", message))?;
+            print_envelope(&request_id, DEFAULT_DEADLINE_MS, result);
+            Ok(())
+        }
+        [group, command, state_flag, state_dir, input_flag, input, json]
+            if group == "identity"
+                && command == "restore"
+                && state_flag == "--state-dir"
+                && input_flag == "--input"
+                && json == "--json" =>
+        {
+            let result = identity::restore(Path::new(state_dir), Path::new(input))
+                .map_err(|message| (request_id.clone(), "identity_restore_failed", message))?;
             print_envelope(&request_id, DEFAULT_DEADLINE_MS, result);
             Ok(())
         }
@@ -550,7 +597,7 @@ async fn run() -> Result<(), (String, &'static str, String)> {
         _ => Err((
             request_id,
             "usage",
-            "usage: agenterm-net capabilities --json | peer-id | self-test --json | mesh-self-test --json | attach-self-test --json | tcp-self-test --json | node start|status|stop ... --json | store put|get|pin|unpin|gc|status ... --json".to_string(),
+            "usage: agenterm-net capabilities --json | peer-id | self-test --json | mesh-self-test --json | attach-self-test --json | tcp-self-test --json | node start|status|stop ... --json | identity status|backup|rotate|restore ... --json | store put|get|pin|unpin|gc|status ... --json".to_string(),
         )),
     }
 }

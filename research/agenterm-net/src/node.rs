@@ -140,6 +140,7 @@ pub fn start(
             )),
         };
     }
+    identity::preflight_start(state_dir, mode)?;
 
     let ready_listener = TcpListener::bind("127.0.0.1:0")
         .map_err(|error| format!("bind node readiness endpoint: {error}"))?;

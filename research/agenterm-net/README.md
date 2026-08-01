@@ -11,7 +11,8 @@ store without putting networking dependencies in the terminal hot path.
 ```text
 agenterm-net (experimental N2-M1 foundation; 2026-07-31)
 ├─ identity — explicit ephemeral or durable Ed25519 PeerId
-│  └─ durable protobuf key is created once in the caller-selected state dir
+│  ├─ marker-bound durable key distinguishes initialization from key loss
+│  └─ stopped-node backup, rotation and restore preserve explicit continuity
 ├─ node lifecycle — explicit start/status/stop
 │  ├─ loopback-only nonce-bound control endpoint
 │  ├─ bounded readiness/control waits; no fixed sleep
@@ -66,6 +67,10 @@ cargo run -- tcp-self-test --json
 cargo run -- node start --state-dir ./.net-state --identity durable --json
 cargo run -- node status --state-dir ./.net-state --json
 cargo run -- node stop --state-dir ./.net-state --json
+cargo run -- identity status --state-dir ./.net-state --json
+cargo run -- identity backup --state-dir ./.net-state --output ./identity-backup.json --json
+cargo run -- identity rotate --state-dir ./.net-state --backup ./previous-identity.json --json
+cargo run -- identity restore --state-dir ./.net-state --input ./identity-backup.json --json
 cargo run -- store put --store ./.net-store --input ./payload.bin --pin --json
 cargo run -- store get --store ./.net-store --cid <cid> --output ./copy.bin --json
 cargo run -- store pin --store ./.net-store --cid <cid> --json
@@ -91,6 +96,17 @@ descriptor whose owner cannot be reached is retained as crash evidence and a
 second node is refused. Status receipts include the persistent-store snapshot
 and the platform process RSS/thread sample. Automated stale-owner recovery,
 reconnect evidence and cross-platform load qualification remain N2 gaps.
+
+Durable identity initialization writes both a private protobuf key and a
+versioned marker bound to its PeerId. Once that marker exists, a missing key is
+reported as identity loss and never replaced by a silently generated PeerId.
+Backup and rotation require the node to be explicitly stopped, backups are
+versioned self-verifying private files created without overwrite, and restore
+must match the recorded PeerId. Rotation preserves the former key at an
+explicit backup path before switching keys; startup/status also repairs the
+bounded intermediate-file states of an interrupted key switch back to the last
+known-good key. Backup custody, encryption at rest, multi-device semantics and
+cross-platform fault injection remain product decisions/evidence gaps.
 
 `mesh-self-test` creates three isolated in-process meshes with deterministic
 Ed25519 identities and fixed `/memory/*` addresses. Its single 10-second total
@@ -165,7 +181,8 @@ cargo build --release
 ```
 
 The current unit and public CLI suites cover durable identity restart,
-ephemeral identity rotation, explicit lifecycle, private-by-default facts,
+marker-bound loss detection, backup/rotation/restore, interrupted-rotation
+recovery, ephemeral identity rotation, explicit lifecycle, private-by-default facts,
 persistent block round-trip, pin/unpin/GC, read-time corruption rejection,
 deadline-bounded peer loss, and owned-child cancellation without fixed sleeps.
 They also require each private-mesh capability to be advertised independently,

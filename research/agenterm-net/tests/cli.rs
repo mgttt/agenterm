@@ -461,3 +461,147 @@ fn oversized_store_put_has_a_typed_budget_failure() {
     assert!(result["message"].as_str().unwrap().contains("exceeds"));
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn durable_identity_backup_rotation_and_loss_recovery_are_explicit() {
+    let state = test_path("identity-lifecycle");
+    let original_backup = state.join("backups/original.json");
+    let rotation_backup = state.join("backups/rotation.json");
+    let current_backup = state.join("backups/current.json");
+
+    let (start_status, started) = json_output(&[
+        "node",
+        "start",
+        "--state-dir",
+        path_text(&state),
+        "--identity",
+        "durable",
+        "--json",
+    ]);
+    assert!(start_status.success(), "{started}");
+    let original_peer = started["result"]["descriptor"]["peer_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (live_backup_status, live_backup) = json_output(&[
+        "identity",
+        "backup",
+        "--state-dir",
+        path_text(&state),
+        "--output",
+        path_text(&original_backup),
+        "--json",
+    ]);
+    assert!(!live_backup_status.success(), "{live_backup}");
+    assert_eq!(live_backup["code"], "identity_backup_failed");
+    assert!(live_backup["message"].as_str().unwrap().contains("stopped"));
+    assert!(
+        json_output(&["node", "stop", "--state-dir", path_text(&state), "--json"])
+            .0
+            .success()
+    );
+
+    let (backup_status, backed_up) = json_output(&[
+        "identity",
+        "backup",
+        "--state-dir",
+        path_text(&state),
+        "--output",
+        path_text(&original_backup),
+        "--json",
+    ]);
+    assert!(backup_status.success(), "{backed_up}");
+    assert_eq!(backed_up["result"]["peer_id"], original_peer);
+    assert_eq!(
+        backed_up["result"]["schema"],
+        "agenterm-net/identity-lifecycle/v1"
+    );
+
+    let (rotate_status, rotated) = json_output(&[
+        "identity",
+        "rotate",
+        "--state-dir",
+        path_text(&state),
+        "--backup",
+        path_text(&rotation_backup),
+        "--json",
+    ]);
+    assert!(rotate_status.success(), "{rotated}");
+    assert_eq!(rotated["result"]["previous_peer_id"], original_peer);
+    let rotated_peer = rotated["result"]["peer_id"].as_str().unwrap().to_string();
+    assert_ne!(rotated_peer, original_peer);
+
+    let (current_backup_status, current) = json_output(&[
+        "identity",
+        "backup",
+        "--state-dir",
+        path_text(&state),
+        "--output",
+        path_text(&current_backup),
+        "--json",
+    ]);
+    assert!(current_backup_status.success(), "{current}");
+    assert_eq!(current["result"]["peer_id"], rotated_peer);
+
+    fs::remove_file(state.join("identity.key")).unwrap();
+    let (lost_status, lost) = json_output(&[
+        "node",
+        "start",
+        "--state-dir",
+        path_text(&state),
+        "--identity",
+        "durable",
+        "--json",
+    ]);
+    assert!(!lost_status.success(), "{lost}");
+    assert_eq!(lost["code"], "node_start_failed");
+    assert!(lost["message"].as_str().unwrap().contains("missing"));
+
+    let (wrong_status, wrong) = json_output(&[
+        "identity",
+        "restore",
+        "--state-dir",
+        path_text(&state),
+        "--input",
+        path_text(&original_backup),
+        "--json",
+    ]);
+    assert!(!wrong_status.success(), "{wrong}");
+    assert_eq!(wrong["code"], "identity_restore_failed");
+    assert!(
+        wrong["message"]
+            .as_str()
+            .unwrap()
+            .contains("does not match")
+    );
+
+    let (restore_status, restored) = json_output(&[
+        "identity",
+        "restore",
+        "--state-dir",
+        path_text(&state),
+        "--input",
+        path_text(&current_backup),
+        "--json",
+    ]);
+    assert!(restore_status.success(), "{restored}");
+    assert_eq!(restored["result"]["peer_id"], rotated_peer);
+
+    let (restart_status, restarted) = json_output(&[
+        "node",
+        "start",
+        "--state-dir",
+        path_text(&state),
+        "--identity",
+        "durable",
+        "--json",
+    ]);
+    assert!(restart_status.success(), "{restarted}");
+    assert_eq!(restarted["result"]["descriptor"]["peer_id"], rotated_peer);
+    assert!(
+        json_output(&["node", "stop", "--state-dir", path_text(&state), "--json"])
+            .0
+            .success()
+    );
+    fs::remove_dir_all(state).unwrap();
+}
