@@ -1268,6 +1268,22 @@ mod tests {
         }
     }
 
+    fn wait_for_original_process_exit(pid: u32, identity: &str, deadline: Instant) {
+        loop {
+            let observation = agenterm_platform::process::observe(pid);
+            match &observation {
+                agenterm_platform::contract::process::ProcessObservation::Dead { .. } => return,
+                agenterm_platform::contract::process::ProcessObservation::Live {
+                    start_identity: Some(current),
+                } if current != identity => return,
+                _ if Instant::now() < deadline => thread::yield_now(),
+                _ => panic!(
+                    "owned process {pid} with start identity {identity:?} survived cleanup: {observation:?}"
+                ),
+            }
+        }
+    }
+
     fn repl_config() -> ReplSessionWireConfig {
         let budgets = ScriptBudgets {
             operations: ScriptBudgets::hard_limits().operations,
@@ -1397,7 +1413,7 @@ mod tests {
             serde_json::to_string(&inner_source).expect("serialize nested blocking source");
         let blocking_source = format!(
             "let command = std::process::command({executable_literal}); \
-             command.args([\"eval\", {inner_literal}]); \
+             command.args([\"eval\", \"--timeout-ms\", \"10000\", {inner_literal}]); \
              command.output();"
         );
         enum ManagerEvent {
@@ -1528,6 +1544,8 @@ mod tests {
                 Err(error) => panic!("failed to read nested worker PID marker: {error}"),
             }
         };
+        let nested_identity = agenterm_platform::process::start_identity(nested_pid)
+            .expect("nested worker start identity");
         assert!(
             control.cancel().expect("blocking cancel control"),
             "outer cell must remain active while nested command output blocks"
@@ -1549,10 +1567,11 @@ mod tests {
             agenterm_platform::process::observe(interrupted_pid),
             agenterm_platform::contract::process::ProcessObservation::Dead { .. }
         ));
-        assert!(matches!(
-            agenterm_platform::process::observe(nested_pid),
-            agenterm_platform::contract::process::ProcessObservation::Dead { .. }
-        ));
+        wait_for_original_process_exit(
+            nested_pid,
+            &nested_identity,
+            Instant::now() + Duration::from_secs(2),
+        );
         manager.join().expect("join REPL manager");
         std::fs::remove_file(&marker).expect("remove nested worker PID marker");
     }

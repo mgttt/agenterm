@@ -15,6 +15,25 @@ pub struct ProcessInfo {
     pub executable_name: String,
 }
 
+#[allow(dead_code)] // Consumed only by the selected Unix process adapters.
+pub(crate) fn transitive_descendant_ids(root_id: u32, processes: &[ProcessInfo]) -> Vec<u32> {
+    use std::collections::HashSet;
+
+    let mut seen = HashSet::from([root_id]);
+    let mut parents = vec![root_id];
+    let mut descendants = Vec::new();
+    while let Some(parent_id) = parents.pop() {
+        for process in processes {
+            if process.parent_id == parent_id && seen.insert(process.id) {
+                descendants.push(process.id);
+                parents.push(process.id);
+            }
+        }
+    }
+    descendants.reverse();
+    descendants
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PipeProbeToken(pub(crate) usize);
 
@@ -77,5 +96,32 @@ mod tests {
         let error = ProcessError::new(ProcessErrorKind::Unsupported, "adapter unavailable");
         assert_eq!(error.kind, ProcessErrorKind::Unsupported);
         assert_eq!(error.detail, "adapter unavailable");
+    }
+
+    #[test]
+    fn descendant_walk_is_transitive_deepest_first_and_cycle_safe() {
+        let processes = [
+            ProcessInfo {
+                id: 20,
+                parent_id: 10,
+                executable_name: "child".to_owned(),
+            },
+            ProcessInfo {
+                id: 30,
+                parent_id: 20,
+                executable_name: "grandchild".to_owned(),
+            },
+            ProcessInfo {
+                id: 40,
+                parent_id: 99,
+                executable_name: "unrelated".to_owned(),
+            },
+            ProcessInfo {
+                id: 10,
+                parent_id: 30,
+                executable_name: "cycle".to_owned(),
+            },
+        ];
+        assert_eq!(transitive_descendant_ids(10, &processes), vec![30, 20]);
     }
 }
