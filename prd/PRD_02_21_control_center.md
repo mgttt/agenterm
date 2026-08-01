@@ -163,8 +163,12 @@ Control Center is the product name; the executable family uses
   The Windows public smoke derives pointer coordinates from the actual bounded
   three-row viewport and proves keyboard then pointer selection against one
   stable CC/server/epoch. Linux/macOS cross-checks pass; final three-platform
-  positive journey evidence remains open. A missing server still says that no
-  Fleet authority is connected instead of fabricating a zero-sized fleet.
+  positive journey evidence remains open. Windows qualification evidence and
+  Linux/macOS matching-host evidence are registered in separate gate manifests
+  but participate in one exact PRD alignment parity check; cross-target compile
+  evidence is never counted as a host-native runtime receipt. A missing server
+  still says that no Fleet authority is connected instead of fabricating a
+  zero-sized fleet.
 
 ### Workflows
 

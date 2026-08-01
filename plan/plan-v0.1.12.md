@@ -801,6 +801,10 @@ Cockpit
   产生 `CursorMoved`，现从当前 `NSEvent.locationInWindow` 取得按下事件自身坐标。
   同时停止把 WindowServer outer frame 冒充 client rect。两项均已通过对应 target
   all-feature compile check，仍等待新的 matching-host 行为回执，不能提前记绿；
+- Control Center evidence ownership 不再游离于 alignment：Windows required
+  qualification gate 与 Linux/macOS host-native gate 分别登记，`prd-alignment`
+  对三者的 evidence ID、脚本发射点和 partial PRD 状态做同一 exact parity。
+  这只关闭静态所有权缺口，不把 cross compile 冒充原生 runtime receipt；
 - Windows owning journey 已覆盖 incompatible sibling、进程内 renderer capture
   typed failure/recovery、CC process crash/replacement、Human GUI detach 时的
   same-CC/same-server/same-epoch retention、new epoch recovery 和 stale owner

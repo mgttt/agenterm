@@ -309,6 +309,9 @@ let gate_manifest = rhai::json::parse_file(
 let registered_evidence = #{};
 let evidence_suites = #{
     "cli-smoke": true,
+    "control-center-smoke": true,
+    "control-center-linux-smoke": true,
+    "control-center-macos-smoke": true,
     "server-smoke": true,
     "native-ipc-smoke": true,
     "native-ipc-compat-smoke": true,
@@ -322,10 +325,29 @@ let evidence_suites = #{
     "working-context-smoke": true,
     "workbench-smoke": true
 };
+let evidence_gates = [];
 for gate in gate_manifest.required_gates {
     if !evidence_suites.contains(gate.id) {
         continue;
     }
+    evidence_gates.push(gate);
+}
+let host_native_manifest = rhai::json::parse_file(
+    std::path::join(repo, "scripts/host-native-evidence-gates.json").display
+);
+require(
+    host_native_manifest.schema_version == 1,
+    "prd_alignment_host_native_schema"
+);
+for gate in host_native_manifest.gates {
+    require(
+        evidence_suites.contains(gate.id)
+            && (gate.platform == "linux" || gate.platform == "macos"),
+        "prd_alignment_host_native_gate:" + gate.id
+    );
+    evidence_gates.push(gate);
+}
+for gate in evidence_gates {
     let rhai_name = gate.id + ".rhai";
     let rhai_path = std::path::join(
         std::path::join(repo, "scripts/rhai").display,

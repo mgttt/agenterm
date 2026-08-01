@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "gates": [
+    {
+      "id": "control-center-linux-smoke",
+      "platform": "linux",
+      "evidence": [
+        "control-center.linux-caller-endpoint",
+        "control-center.linux-renderer-evidence",
+        "control-center.linux-native-cockpit-input",
+        "control-center.linux-no-activate-focus-reuse",
+        "control-center.linux-server-recovery",
+        "control-center.linux-renderer-replacement",
+        "control-center.linux-process-isolation"
+      ]
+    },
+    {
+      "id": "control-center-macos-smoke",
+      "platform": "macos",
+      "evidence": [
+        "control-center.macos-caller-instance",
+        "control-center.macos-renderer-evidence",
+        "control-center.macos-native-input-contract",
+        "control-center.macos-no-activate-focus",
+        "control-center.macos-incompatible-sibling",
+        "control-center.macos-server-recovery",
+        "control-center.macos-process-isolation"
+      ]
+    }
+  ]
+}
