@@ -9,7 +9,7 @@ use windows_sys::Win32::{
         CreateSolidBrush, DT_CENTER, DT_END_ELLIPSIS, DT_LEFT, DT_RIGHT, DT_SINGLELINE, DT_VCENTER,
         DeleteDC, DeleteObject, DrawTextW, EndPaint, FillRect, GetStockObject, InvalidateRect,
         LineTo, MoveToEx, PAINTSTRUCT, PS_SOLID, Rectangle, SRCCOPY, ScreenToClient, SelectObject,
-        SetBkMode, SetTextColor, TRANSPARENT, TextOutW, WHITE_BRUSH,
+        SetBkMode, SetTextColor, TRANSPARENT, TextOutW, UpdateWindow, WHITE_BRUSH,
     },
     System::LibraryLoader::GetModuleHandleW,
     UI::{
@@ -28,13 +28,14 @@ use windows_sys::Win32::{
             IsZoomed, LoadCursorW, MF_BYCOMMAND, MF_CHECKED, MF_ENABLED, MF_GRAYED, MF_SEPARATOR,
             MF_STRING, MF_UNCHECKED, MSG, ModifyMenuW, MoveWindow, PostMessageW, PostQuitMessage,
             RegisterClassW, SIZE_MINIMIZED, SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW,
-            SW_SHOWNOACTIVATE, SetCursor, SetForegroundWindow, SetTimer, SetWindowLongPtrW,
-            SetWindowTextW, ShowWindow, TranslateMessage, WM_APP, WM_CAPTURECHANGED, WM_CHAR,
-            WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_ERASEBKGND, WM_INITMENUPOPUP, WM_KEYDOWN,
-            WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN,
-            WM_MBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY, WM_PAINT, WM_RBUTTONDOWN,
-            WM_RBUTTONUP, WM_SETFOCUS, WM_SIZE, WM_SYSCOMMAND, WM_TIMER, WNDCLASSW, WS_CHILD,
-            WS_EX_CLIENTEDGE, WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE, WS_VSCROLL,
+            SW_SHOWNOACTIVATE, SendMessageW, SetCursor, SetForegroundWindow, SetTimer,
+            SetWindowLongPtrW, SetWindowTextW, ShowWindow, TranslateMessage, WM_APP,
+            WM_CAPTURECHANGED, WM_CHAR, WM_CLOSE, WM_COMMAND, WM_COPY, WM_DESTROY, WM_ERASEBKGND,
+            WM_INITMENUPOPUP, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN,
+            WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY,
+            WM_PAINT, WM_PASTE, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETFOCUS, WM_SIZE, WM_SYSCOMMAND,
+            WM_TIMER, WNDCLASSW, WS_CHILD, WS_EX_CLIENTEDGE, WS_OVERLAPPEDWINDOW, WS_TABSTOP,
+            WS_VISIBLE, WS_VSCROLL,
         },
     },
 };
@@ -199,6 +200,18 @@ impl ControlWindowBackend for Backend {
             &value[..usize::try_from(copied).unwrap_or(0)],
         ))
     }
+    fn copy_control_selection(&self, id: ControlId) -> Result<(), ControlWindowError> {
+        unsafe {
+            SendMessageW(self.control(id)?, WM_COPY, 0, 0);
+        }
+        Ok(())
+    }
+    fn paste_control_selection(&self, id: ControlId) -> Result<(), ControlWindowError> {
+        unsafe {
+            SendMessageW(self.control(id)?, WM_PASTE, 0, 0);
+        }
+        Ok(())
+    }
     fn set_control_bounds(&self, id: ControlId, b: PixelRect) -> Result<(), ControlWindowError> {
         if unsafe {
             MoveWindow(
@@ -340,6 +353,11 @@ impl ControlWindowBackend for Backend {
         path: &std::path::Path,
         area: crate::screenshot::NativeCaptureArea,
     ) -> Result<(), ControlWindowError> {
+        // Flush a redraw requested by the application before sampling native pixels. This keeps
+        // structured state and screenshots from describing adjacent frames.
+        unsafe {
+            UpdateWindow(self.window.get());
+        }
         let window = unsafe {
             crate::screenshot::ScreenshotWindowHandle::from_raw(self.window.get() as isize)
         }
