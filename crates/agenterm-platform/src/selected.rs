@@ -19,6 +19,18 @@ pub(crate) const fn platform_kind() -> crate::PlatformKind {
 #[path = "adapters/windows/clipboard.rs"]
 pub(crate) mod clipboard;
 
+#[cfg(all(feature = "entropy", windows))]
+#[path = "adapters/windows/entropy.rs"]
+pub(crate) mod entropy;
+
+#[cfg(all(feature = "entropy", target_os = "linux"))]
+#[path = "adapters/linux/entropy.rs"]
+pub(crate) mod entropy;
+
+#[cfg(all(feature = "entropy", target_os = "macos"))]
+#[path = "adapters/macos/entropy.rs"]
+pub(crate) mod entropy;
+
 #[cfg(all(feature = "clipboard", target_os = "linux"))]
 #[path = "adapters/linux/clipboard.rs"]
 pub(crate) mod clipboard;
