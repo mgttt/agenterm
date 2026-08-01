@@ -331,17 +331,104 @@ fn wait_capture(
     throw code + "_timeout";
 }
 
-fn incompatible_listener(context, address) {
+fn wait_incompatible_capture(
+    context,
+    control_center,
+    registry,
+    runtime,
+    child,
+    output,
+    code
+) {
+    let last = "no_capture";
+    let deadline = std::time::SystemTime::now().unix_millis + 10000;
+    for attempt in 0..80 {
+        if std::time::SystemTime::now().unix_millis >= deadline {
+            break;
+        }
+        let arguments = ["screenshot", "--output", output, "--json"];
+        let capture = native_command(
+            context,
+            control_center,
+            registry,
+            runtime,
+            arguments
+        ).output();
+        last = capture.stdout_text() + capture.stderr_text();
+        if capture.success {
+            test_harness::append_command_record(
+                context, arguments, capture, false, []
+            );
+            try {
+                let document = rhai::json::parse(last);
+                last = rhai::json::stringify(document);
+                if document.owner_pid == child.id
+                        && document.rendered_snapshot.server_state
+                            == "unavailable"
+                        && document.rendered_snapshot.server_reason
+                            == "server_incompatible" {
+                    return document;
+                }
+            } catch (error) {
+                last = last + ":" + error.to_string();
+            }
+        }
+        if child.state == "exited" {
+            let exited = child.wait_with_output(
+                std::time::Duration::from_secs(2)
+            );
+            throw code + "_early_exit:" + exited.stderr_text();
+        }
+        rhai::task::sleep(std::time::Duration::from_millis(25));
+    }
+    throw code + "_timeout:last_frame=" + last;
+}
+
+fn incompatible_listener(
+    context, script_executable, address, ready_path, code
+) {
     let address_parts = address.split(":");
     require(
         address_parts.len == 2,
         "control_center_macos_incompatible_address"
     );
-    let command = std::process::command("/usr/bin/nc");
-    command.args(["-l", "127.0.0.1", address_parts[1]]);
-    command.stdin_text("not-json\n");
-    command.timeout(std::time::Duration::from_secs(10));
-    command.start()
+    if std::fs::exists(ready_path) {
+        std::fs::remove_file(ready_path);
+    }
+    let source =
+        `let listener = std::net::TcpListener::bind(args[0]);
+         std::fs::write(args[1], "ready");
+         let stream = listener.accept_timeout(
+             std::time::Duration::from_secs(8)
+         );
+         stream.write_all("not-json\n");
+         stream.flush();`;
+    let command = test_harness::configured_command(
+        context,
+        script_executable,
+        [
+            "eval", source,
+            "--timeout-ms", "10000",
+            "--max-operations", "1000000",
+            "--", address, ready_path
+        ]
+    );
+    command.timeout(std::time::Duration::from_secs(12));
+    let child = command.start();
+    for attempt in 0..400 {
+        if std::fs::exists(ready_path) {
+            return child;
+        }
+        if child.state == "exited" {
+            let output = child.wait_with_output(
+                std::time::Duration::from_secs(2)
+            );
+            throw code + "_early_exit:" + output.stderr_text();
+        }
+        rhai::task::sleep(std::time::Duration::from_millis(10));
+    }
+    child.kill();
+    throw code + "_ready_timeout";
 }
 
 fn prove_pty(context, cli, registry, runtime, label) {
@@ -450,7 +537,16 @@ let control_center = std::path::absolute(control_center_value).display;
 let server_executable =
     std::path::absolute(server_executable_value).display;
 let cli_executable = std::path::absolute(cli_executable_value).display;
-for executable in [control_center, server_executable, cli_executable] {
+let script_executable = std::path::join(
+    std::path::parent(control_center).display,
+    "agenterm-script"
+).display;
+for executable in [
+    control_center,
+    server_executable,
+    cli_executable,
+    script_executable
+] {
     require(
         std::fs::exists(executable),
         "control_center_macos_executable_missing:" + executable
@@ -1033,8 +1129,16 @@ try {
     );
 
     print("STEP incompatible sibling is typed in the same projection PID");
+    let incompatible_probe_ready = std::path::join(
+        context.run_directory,
+        "incompatible-probe.ready"
+    ).display;
     let incompatible_probe = incompatible_listener(
-        context, context.address
+        context,
+        script_executable,
+        context.address,
+        incompatible_probe_ready,
+        "control_center_macos_incompatible_probe"
     );
     owned_children.push(incompatible_probe);
     let incompatible_endpoint = "tcp:" + context.address;
@@ -1061,9 +1165,18 @@ try {
         incompatible_probe_output.success,
         "control_center_macos_incompatible_probe_exit"
     );
+    std::fs::remove_file(incompatible_probe_ready);
 
+    let incompatible_renderer_ready = std::path::join(
+        context.run_directory,
+        "incompatible-renderer.ready"
+    ).display;
     let incompatible_renderer = incompatible_listener(
-        context, context.address
+        context,
+        script_executable,
+        context.address,
+        incompatible_renderer_ready,
+        "control_center_macos_incompatible_renderer"
     );
     owned_children.push(incompatible_renderer);
     invoke(
@@ -1077,14 +1190,13 @@ try {
         ],
         false
     );
-    let incompatible_frame = wait_capture(
+    let incompatible_frame = wait_incompatible_capture(
         context,
         control_center,
         registry,
         runtime,
         cc,
         refresh_png,
-        "unavailable",
         "control_center_macos_incompatible_renderer"
     );
     require(
@@ -1102,6 +1214,7 @@ try {
         incompatible_renderer_output.success,
         "control_center_macos_incompatible_renderer_exit"
     );
+    std::fs::remove_file(incompatible_renderer_ready);
     test_harness::emit_evidence(
         context,
         declared_evidence,
