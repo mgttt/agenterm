@@ -13,9 +13,6 @@ pub(crate) mod ipc;
 #[path = "adapters/windows/native/mod.rs"]
 pub(crate) mod native;
 #[cfg(windows)]
-#[path = "adapters/windows/pty.rs"]
-pub(crate) mod pty;
-#[cfg(windows)]
 #[path = "adapters/windows/remote_frontend.rs"]
 pub(crate) mod remote_frontend;
 
@@ -59,10 +56,6 @@ pub(crate) mod control_center;
 pub(crate) mod control_center_shell;
 
 #[cfg(windows)]
-#[path = "adapters/windows/runtime.rs"]
-pub(crate) mod runtime;
-
-#[cfg(windows)]
 #[path = "adapters/windows/webview.rs"]
 pub(crate) mod webview;
 
@@ -85,9 +78,6 @@ pub(crate) mod ipc;
 #[cfg(target_os = "linux")]
 #[path = "adapters/linux/native/mod.rs"]
 pub(crate) mod native;
-#[cfg(target_os = "linux")]
-#[path = "adapters/linux/pty.rs"]
-pub(crate) mod pty;
 #[cfg(target_os = "linux")]
 #[path = "scale.rs"]
 pub(crate) mod scale_contract;
@@ -132,10 +122,6 @@ pub(crate) mod control_center;
 pub(crate) mod control_center_shell;
 
 #[cfg(target_os = "linux")]
-#[path = "adapters/linux/runtime.rs"]
-pub(crate) mod runtime;
-
-#[cfg(target_os = "linux")]
 #[path = "adapters/linux/scale.rs"]
 pub(crate) mod scale;
 
@@ -162,9 +148,6 @@ pub(crate) mod ipc;
 #[cfg(target_os = "macos")]
 #[path = "adapters/macos/native/mod.rs"]
 pub(crate) mod native;
-#[cfg(target_os = "macos")]
-#[path = "adapters/macos/pty.rs"]
-pub(crate) mod pty;
 #[cfg(target_os = "macos")]
 #[path = "scale.rs"]
 pub(crate) mod scale_contract;
@@ -207,10 +190,6 @@ pub(crate) mod control_center;
 #[cfg(target_os = "macos")]
 #[path = "adapters/macos/control_center_shell.rs"]
 pub(crate) mod control_center_shell;
-
-#[cfg(target_os = "macos")]
-#[path = "adapters/macos/runtime.rs"]
-pub(crate) mod runtime;
 
 #[cfg(target_os = "macos")]
 #[path = "adapters/macos/webview.rs"]

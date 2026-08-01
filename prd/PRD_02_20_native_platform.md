@@ -13,8 +13,9 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
 - [~] the Platform Facade is being promoted from an internal module into the
   independently consumable `crates/agenterm-platform` workspace package. The
-  first real dependency slice moves process contracts, services, private target
-  selection and all three native adapters without retaining duplicate source;
+  first real dependency slices move process and PTY contracts, services,
+  private target selection and all three native adapters without retaining
+  duplicate source. Platform shell defaults also move under the process feature;
   the remaining capability families and product-code extraction are open.
 - [ ] Windows, macOS, and Linux native frontends consume one declared platform
   contract for window lifecycle, normalized input, IME, DPI, clipboard, font

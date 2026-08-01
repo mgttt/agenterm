@@ -14,18 +14,7 @@ pub enum PlatformKind {
 }
 
 pub const fn platform_kind() -> PlatformKind {
-    #[cfg(windows)]
-    {
-        PlatformKind::Windows
-    }
-    #[cfg(target_os = "macos")]
-    {
-        PlatformKind::Macos
-    }
-    #[cfg(target_os = "linux")]
-    {
-        PlatformKind::Linux
-    }
+    selected::platform_kind()
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -86,10 +75,15 @@ pub fn capability_status(capability: Capability) -> CapabilityStatus {
 
 pub mod contract;
 
+#[cfg(feature = "pty")]
+pub mod pty;
+
 #[cfg(feature = "process")]
 pub mod process;
 
 #[cfg(feature = "process")]
+pub mod runtime;
+
 mod selected;
 
 #[cfg(test)]

@@ -7,8 +7,10 @@ pub(crate) mod ipc;
 pub(crate) mod paths;
 #[allow(unused_imports)]
 pub(crate) use agenterm_platform::process;
-pub(crate) mod pty;
-pub(crate) mod runtime;
+#[allow(unused_imports)]
+pub(crate) use agenterm_platform::pty;
+#[allow(unused_imports)]
+pub(crate) use agenterm_platform::runtime;
 pub(crate) mod script_clipboard;
 pub(crate) mod script_files;
 pub(crate) mod script_host;

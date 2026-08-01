@@ -2,8 +2,8 @@
 
 /// A shell choice exposed by a platform-neutral terminal UI.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct TerminalShellDescriptor {
-    pub(crate) id: &'static str,
-    pub(crate) label: &'static str,
-    pub(crate) program: &'static str,
+pub struct TerminalShellDescriptor {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub program: &'static str,
 }

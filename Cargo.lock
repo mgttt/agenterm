@@ -52,6 +52,7 @@ name = "agenterm-platform"
 version = "0.1.11"
 dependencies = [
  "libc",
+ "rmux-pty",
  "windows-sys 0.61.2",
 ]
 

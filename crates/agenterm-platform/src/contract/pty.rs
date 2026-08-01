@@ -3,7 +3,8 @@
 use std::fmt;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum PtyError {
+#[non_exhaustive]
+pub enum PtyError {
     Unsupported {
         operation: &'static str,
         reason: String,
@@ -16,18 +17,14 @@ pub(crate) enum PtyError {
 }
 
 impl PtyError {
-    pub(crate) fn unsupported(operation: &'static str, reason: impl fmt::Display) -> Self {
+    pub fn unsupported(operation: &'static str, reason: impl fmt::Display) -> Self {
         Self::Unsupported {
             operation,
             reason: reason.to_string(),
         }
     }
 
-    pub(crate) fn failed(
-        operation: &'static str,
-        code: &'static str,
-        error: impl fmt::Display,
-    ) -> Self {
+    pub fn failed(operation: &'static str, code: &'static str, error: impl fmt::Display) -> Self {
         Self::Failed {
             operation,
             code,
@@ -53,35 +50,35 @@ impl fmt::Display for PtyError {
 
 impl std::error::Error for PtyError {}
 
-pub(crate) type PtyResult<T> = Result<T, PtyError>;
+pub type PtyResult<T> = Result<T, PtyError>;
 
 #[allow(dead_code)] // Consumed by the Unix PTY adapter only.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct TerminalSize {
-    pub(crate) rows: u16,
-    pub(crate) cols: u16,
+pub struct TerminalSize {
+    pub rows: u16,
+    pub cols: u16,
 }
 
 #[allow(dead_code)] // Consumed by the Unix PTY adapter only.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct ProcessId(pub(crate) u32);
+pub struct ProcessId(u32);
 
 #[allow(dead_code)] // Consumed by the Unix PTY adapter only.
 impl ProcessId {
-    pub(crate) fn new(raw: u32) -> Result<Self, InvalidProcessId> {
+    pub fn new(raw: u32) -> Result<Self, InvalidProcessId> {
         if raw == 0 {
             return Err(InvalidProcessId(raw));
         }
         Ok(Self(raw))
     }
-    pub(crate) const fn as_u32(self) -> u32 {
+    pub const fn as_u32(self) -> u32 {
         self.0
     }
 }
 
 #[allow(dead_code)] // Consumed by the Unix PTY adapter only.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct InvalidProcessId(pub(crate) u32);
+pub struct InvalidProcessId(u32);
 
 impl std::fmt::Display for InvalidProcessId {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

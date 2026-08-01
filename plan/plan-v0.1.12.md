@@ -59,6 +59,15 @@ policy 留在主 crate，只调用平台 crate 的 generic detached-command mech
 `--no-default-features`、`--features process` 与主 `agenterm --lib` compile checks 已通过。
 其余 feature 仍是声明中的迁移槽，在对应实现和 contract tests 落地前不得冒充完成。
 
+第二个独立叶已把 PTY neutral contract、public facade、private target selection 和
+Windows ConPTY/Linux POSIX/macOS POSIX adapters 单一迁入新 crate；主 crate 的
+`pty` compatibility projection 现在真实指向 workspace dependency。既有 reader/wait
+clone、terminate-to-EOF 与 close-pseudoconsole 行为由原 adapter 原样保留，typed
+`Unsupported`/`Failed` 成为公开错误。平台 shell runtime defaults 同步归入
+`process` feature，产品默认 tab/command policy 仍留在主 crate。`pty` feature 的
+5 项 crate tests 与 Agenterm all-target compile check 已通过；filesystem/locking
+审计确认现有 paths/audit 文件混有产品命名和 Script policy，必须先拆机制，禁止整文件硬搬。
+
 2026-08-01 首个建设期增量：Cockpit snapshot 新增明确的
 `tab_counts.{total,running,dead}`，native shell 同源显示 logical instance、
 server PID/version、build commit/profile/cleanliness、epoch/sequence、active stable tab ID/title 和四类 component

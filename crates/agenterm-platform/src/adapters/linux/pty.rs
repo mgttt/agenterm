@@ -10,9 +10,7 @@ use std::time::Duration;
 
 use libc::{self, c_int, pid_t};
 
-use crate::platform::contract::pty::{
-    InvalidProcessId, ProcessId, PtyError, PtyResult, TerminalSize,
-};
+use crate::contract::pty::{InvalidProcessId, ProcessId, PtyError, PtyResult, TerminalSize};
 
 const PTY_WRITE_TIMEOUT: Duration = Duration::from_secs(2);
 
