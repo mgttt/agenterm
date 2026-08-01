@@ -32,10 +32,6 @@ pub(crate) mod script_clipboard;
 pub(crate) mod script_files;
 
 #[cfg(windows)]
-#[path = "adapters/windows/process.rs"]
-pub(crate) mod process;
-
-#[cfg(windows)]
 #[path = "adapters/windows/script_window.rs"]
 pub(crate) mod script_window;
 
@@ -107,10 +103,6 @@ pub(crate) mod script_clipboard;
 #[cfg(target_os = "linux")]
 #[path = "adapters/linux/script_files.rs"]
 pub(crate) mod script_files;
-
-#[cfg(target_os = "linux")]
-#[path = "adapters/linux/process.rs"]
-pub(crate) mod process;
 
 #[cfg(target_os = "linux")]
 #[path = "adapters/linux/script_window.rs"]
@@ -188,10 +180,6 @@ pub(crate) mod script_clipboard;
 #[cfg(target_os = "macos")]
 #[path = "adapters/macos/script_files.rs"]
 pub(crate) mod script_files;
-
-#[cfg(target_os = "macos")]
-#[path = "adapters/macos/process.rs"]
-pub(crate) mod process;
 
 #[cfg(target_os = "macos")]
 #[path = "adapters/macos/script_window.rs"]

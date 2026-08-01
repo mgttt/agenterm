@@ -308,7 +308,7 @@ fn platform_process_kill(id: u32) -> Result<(), Box<EvalAltResult>> {
     use crate::platform::process::ProcessErrorKind;
 
     crate::platform::process::kill(id).map_err(|error| {
-        let (category, code, message, retryable, remediation) = match error.kind {
+        let (category, code, message, retryable, remediation) = match error.kind() {
             ProcessErrorKind::IdOutOfRange => (
                 "configuration",
                 "process_id_invalid",
@@ -330,9 +330,7 @@ fn platform_process_kill(id: u32) -> Result<(), Box<EvalAltResult>> {
                 false,
                 Some("platform"),
             ),
-            ProcessErrorKind::Kill
-            | ProcessErrorKind::Inventory
-            | ProcessErrorKind::InventoryTooLarge => (
+            _ => (
                 "host",
                 "process_kill",
                 "unable to terminate the selected operating-system process",
@@ -368,7 +366,7 @@ fn platform_process_list() -> Result<Vec<ScriptProcessInfo>, Box<EvalAltResult>>
                 .collect()
         })
         .map_err(|error| {
-            let (category, code, message, retryable, remediation) = match error.kind {
+            let (category, code, message, retryable, remediation) = match error.kind() {
                 ProcessErrorKind::InventoryTooLarge => (
                     "limit",
                     "process_list_too_large",
@@ -383,10 +381,7 @@ fn platform_process_list() -> Result<Vec<ScriptProcessInfo>, Box<EvalAltResult>>
                     false,
                     Some("platform"),
                 ),
-                ProcessErrorKind::IdOutOfRange
-                | ProcessErrorKind::Inventory
-                | ProcessErrorKind::KillOpen
-                | ProcessErrorKind::Kill => (
+                _ => (
                     "host",
                     "process_list_failed",
                     "unable to capture the operating-system process inventory",

@@ -29,6 +29,7 @@ name = "agenterm"
 version = "0.1.11"
 dependencies = [
  "ab_glyph",
+ "agenterm-platform",
  "anyhow",
  "libc",
  "png",
@@ -44,6 +45,14 @@ dependencies = [
  "windows-sys 0.61.2",
  "winit",
  "winresource",
+]
+
+[[package]]
+name = "agenterm-platform"
+version = "0.1.11"
+dependencies = [
+ "libc",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

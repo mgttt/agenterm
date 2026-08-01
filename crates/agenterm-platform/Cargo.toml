@@ -1,0 +1,52 @@
+[package]
+name = "agenterm-platform"
+version = "0.1.11"
+edition = "2024"
+rust-version = "1.97"
+description = "Typed operating-system contracts and adapters used by AgenTerm"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/mgttt/agenterm"
+readme = "README.md"
+
+[features]
+default = []
+process = ["dep:libc", "dep:windows-sys"]
+filesystem = []
+locking = ["filesystem"]
+ipc = ["locking"]
+pty = ["process"]
+window = []
+input = ["window"]
+ime = ["input"]
+activation = ["window"]
+clipboard = ["process"]
+screenshot = ["filesystem"]
+font = ["filesystem"]
+webview = ["filesystem"]
+full = [
+    "process",
+    "filesystem",
+    "locking",
+    "ipc",
+    "pty",
+    "window",
+    "input",
+    "ime",
+    "activation",
+    "clipboard",
+    "screenshot",
+    "font",
+    "webview",
+]
+
+[target.'cfg(unix)'.dependencies]
+libc = { version = "0.2", optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", optional = true, features = [
+    "Win32_Foundation",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_JobObjects",
+    "Win32_Security",
+    "Win32_System_Threading",
+] }

@@ -1,22 +1,24 @@
 //! OS-neutral process facts and typed failures consumed by facade services.
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum ProcessObservation {
+#[non_exhaustive]
+pub enum ProcessObservation {
     Live { start_identity: Option<String> },
     Dead { reason: String },
     Unknown { reason: String },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct ProcessInfo {
-    pub(crate) id: u32,
-    pub(crate) parent_id: u32,
-    pub(crate) executable_name: String,
+pub struct ProcessInfo {
+    pub id: u32,
+    pub parent_id: u32,
+    pub executable_name: String,
 }
 
 #[allow(dead_code)] // A target builds the full three-adapter error contract.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum ProcessErrorKind {
+#[non_exhaustive]
+pub enum ProcessErrorKind {
     IdOutOfRange,
     Inventory,
     InventoryTooLarge,
@@ -26,9 +28,9 @@ pub(crate) enum ProcessErrorKind {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct ProcessError {
-    pub(crate) kind: ProcessErrorKind,
-    pub(crate) detail: String,
+pub struct ProcessError {
+    kind: ProcessErrorKind,
+    detail: String,
 }
 
 impl ProcessError {
@@ -38,7 +40,23 @@ impl ProcessError {
             detail: detail.into(),
         }
     }
+
+    pub const fn kind(&self) -> ProcessErrorKind {
+        self.kind
+    }
+
+    pub fn detail(&self) -> &str {
+        &self.detail
+    }
 }
+
+impl std::fmt::Display for ProcessError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "process {:?}: {}", self.kind, self.detail)
+    }
+}
+
+impl std::error::Error for ProcessError {}
 
 #[cfg(test)]
 mod tests {

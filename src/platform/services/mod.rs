@@ -5,7 +5,8 @@ pub(crate) mod control_center_shell;
 pub(crate) mod frontend;
 pub(crate) mod ipc;
 pub(crate) mod paths;
-pub(crate) mod process;
+#[allow(unused_imports)]
+pub(crate) use agenterm_platform::process;
 pub(crate) mod pty;
 pub(crate) mod runtime;
 pub(crate) mod script_clipboard;

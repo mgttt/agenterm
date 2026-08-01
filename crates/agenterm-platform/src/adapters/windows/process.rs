@@ -1,41 +1,14 @@
 //! Windows implementation of the process facade contract.
 
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Command};
 
-use crate::platform::contract::process::{
-    ProcessError, ProcessErrorKind, ProcessInfo, ProcessObservation,
-};
+use crate::contract::process::{ProcessError, ProcessErrorKind, ProcessInfo, ProcessObservation};
 
-pub(crate) fn autostart_server(
-    parameter_name: &str,
-    parameter_value: &str,
-) -> std::io::Result<bool> {
+pub(crate) fn configure_detached_command(command: &mut Command) -> Result<(), String> {
     use std::os::windows::process::CommandExt as _;
     use windows_sys::Win32::System::Threading::{CREATE_BREAKAWAY_FROM_JOB, CREATE_NO_WINDOW};
-
-    let current = std::env::current_exe()?;
-    let server = current.with_file_name("agenterm-server.exe");
-    if !server.is_file() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            format!(
-                "AgenTerm server executable was not found beside the current client: {}",
-                server.display()
-            ),
-        ));
-    }
-    Command::new(server)
-        .arg(parameter_name)
-        .arg(parameter_value)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        // Autostarted server lifetime is intentionally independent from a GUI,
-        // CLI, or Script harness job. Null stdio plus CREATE_NO_WINDOW also
-        // keeps the console server invisible when the caller is a GUI process.
-        .creation_flags(CREATE_BREAKAWAY_FROM_JOB | CREATE_NO_WINDOW)
-        .spawn()?;
-    Ok(true)
+    command.creation_flags(CREATE_BREAKAWAY_FROM_JOB | CREATE_NO_WINDOW);
+    Ok(())
 }
 
 pub(crate) fn observe(pid: u32) -> ProcessObservation {
@@ -159,7 +132,7 @@ pub(crate) fn list() -> Result<Vec<ProcessInfo>, ProcessError> {
     Ok(processes)
 }
 
-pub(crate) struct ProcessTreeGuard {
+pub struct ProcessTreeGuard {
     handle: windows_sys::Win32::Foundation::HANDLE,
     active: bool,
 }
@@ -171,7 +144,7 @@ pub(crate) fn configure_owned_command(_command: &mut Command) -> Result<(), Stri
 }
 
 impl ProcessTreeGuard {
-    pub(crate) fn attach(child: &Child) -> Result<Self, String> {
+    pub fn attach(child: &Child) -> Result<Self, String> {
         use std::{ffi::c_void, mem, os::windows::io::AsRawHandle, ptr};
         use windows_sys::Win32::{
             Foundation::HANDLE,
@@ -218,7 +191,7 @@ impl ProcessTreeGuard {
         Ok(guard)
     }
 
-    pub(crate) fn terminate(&mut self) -> Result<(), String> {
+    pub fn terminate(&mut self) -> Result<(), String> {
         use windows_sys::Win32::System::JobObjects::TerminateJobObject;
         if !self.active {
             return Ok(());

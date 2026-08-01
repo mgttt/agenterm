@@ -32,6 +32,33 @@ Control Center / native IPC 进入可持续演进状态**
 合同可以维护，但在产品阶段成果、三平台证据和用户明确意图之前不 dispatch，
 也不以“具备 RC 条件”替代 v0.1.12 产品建设。
 
+2026-08-01 新增主线：把现有内部 Platform Facade 收敛为 workspace member
+`crates/agenterm-platform`，供外部仓库按 exact Git SHA 依赖。依赖图冻结为：
+
+```text
+zero-dependency contract/status
+├─ process ─┬─ pty
+│           └─ clipboard helper/process tree
+├─ filesystem ─┬─ locking ── ipc
+│              ├─ screenshot/font
+│              └─ webview
+└─ window ── input ── ime / activation
+
+主 crate product extensions
+├─ Windows/Unix AgenTerm frontend + renderer
+├─ Control Center native shell
+├─ AgenTerm endpoint/instance/workspace policy
+└─ Fleet/Script/UI protocol and semantic snapshots
+```
+
+首个叶已进入实现：根 package 成为 workspace member，新增默认零 feature 的
+`agenterm-platform` package；`process` contract、facade、private selected 与三平台
+adapter 已从 `src/platform` 单一迁入新 crate，主程序通过 path dependency 真实消费，
+没有保留第二套 process 实现。硬编码 sibling `agenterm-server.exe` 的 autostart
+policy 留在主 crate，只调用平台 crate 的 generic detached-command mechanism。
+`--no-default-features`、`--features process` 与主 `agenterm --lib` compile checks 已通过。
+其余 feature 仍是声明中的迁移槽，在对应实现和 contract tests 落地前不得冒充完成。
+
 2026-08-01 首个建设期增量：Cockpit snapshot 新增明确的
 `tab_counts.{total,running,dead}`，native shell 同源显示 logical instance、
 server PID/version、build commit/profile/cleanliness、epoch/sequence、active stable tab ID/title 和四类 component

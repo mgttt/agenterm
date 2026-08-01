@@ -11,6 +11,11 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 
 ## Product outcome
 
+- [~] the Platform Facade is being promoted from an internal module into the
+  independently consumable `crates/agenterm-platform` workspace package. The
+  first real dependency slice moves process contracts, services, private target
+  selection and all three native adapters without retaining duplicate source;
+  the remaining capability families and product-code extraction are open.
 - [ ] Windows, macOS, and Linux native frontends consume one declared platform
   contract for window lifecycle, normalized input, IME, DPI, clipboard, font
   discovery, screenshots, activation, and applicable system integration.
@@ -24,12 +29,14 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 ## Target tree
 
 ```text
-src/platform/
-├─ mod.rs                 the only product-facing Platform Facade
-├─ contract/              OS-neutral types, typed errors, and capability ports
-├─ services/              facade operations: ipc, process, paths, ui-host, webview
-├─ selected.rs            private compile-time adapter selection only
-└─ adapters/
+crates/agenterm-platform/
+├─ Cargo.toml             default-light capability features
+└─ src/
+   ├─ lib.rs              stable public capability/status surface
+   ├─ contract/           OS-neutral types, typed errors, and behavior contracts
+   ├─ process.rs, ...     public capability facades
+   ├─ selected.rs         private compile-time adapter selection only
+   └─ adapters/
    ├─ windows/
 │  ├─ window
 │  ├─ input
@@ -51,6 +58,10 @@ src/platform/
    ├─ clipboard
    ├─ font
    └─ integration
+src/                      AgenTerm product extensions only
+├─ Windows/Unix frontend, rendering and input orchestration
+├─ Control Center projection shell
+└─ endpoint discovery, workspace, Fleet, Script and UI policy
 ```
 
 The tree describes ownership, not a requirement to create one source file per
@@ -58,6 +69,12 @@ leaf. macOS and Linux may reuse private Unix implementations without merging
 their public capability identities. The first implementation should stay
 small and split files only when a stable responsibility needs independent
 tests or ownership.
+
+The reusable crate must never depend on the root `agenterm` package. Public
+signatures expose no `windows-sys`, `libc`, `rmux-pty`, winit, theme, Fleet,
+Control Center or UI protocol types. Product-specific executable names,
+environment variables, paths and legacy discovery stay in the root package or
+enter the crate only as caller-supplied platform-neutral values.
 
 ### Platform Facade closure rule (revision 4, 2026-07-31)
 

@@ -535,6 +535,10 @@ pub(crate) fn registration_owner_state(record: &InstanceRecord) -> RegistrationO
                 },
             }
         }
+        _ => RegistrationOwnerState::OwnerUnknown {
+            reason: "unrecognized_process_observation".to_owned(),
+            observed_start_identity: None,
+        },
     }
 }
 

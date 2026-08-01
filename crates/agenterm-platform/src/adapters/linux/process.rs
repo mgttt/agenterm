@@ -2,15 +2,10 @@
 
 use std::process::{Child, Command};
 
-use crate::platform::contract::process::{
-    ProcessError, ProcessErrorKind, ProcessInfo, ProcessObservation,
-};
+use crate::contract::process::{ProcessError, ProcessErrorKind, ProcessInfo, ProcessObservation};
 
-pub(crate) fn autostart_server(
-    _parameter_name: &str,
-    _parameter_value: &str,
-) -> std::io::Result<bool> {
-    Ok(false)
+pub(crate) fn configure_detached_command(_command: &mut Command) -> Result<(), String> {
+    Err("detached process configuration is not implemented on Linux".to_owned())
 }
 
 pub(crate) fn observe(pid: u32) -> ProcessObservation {
@@ -97,7 +92,7 @@ pub(crate) fn list() -> Result<Vec<ProcessInfo>, ProcessError> {
     Ok(processes)
 }
 
-pub(crate) struct ProcessTreeGuard {
+pub struct ProcessTreeGuard {
     process_group: libc::pid_t,
     active: bool,
 }
@@ -117,7 +112,7 @@ pub(crate) fn configure_owned_command(command: &mut Command) -> Result<(), Strin
 }
 
 impl ProcessTreeGuard {
-    pub(crate) fn attach(child: &Child) -> Result<Self, String> {
+    pub fn attach(child: &Child) -> Result<Self, String> {
         let process_group = libc::pid_t::try_from(child.id())
             .map_err(|_| "child process ID exceeds pid_t".to_owned())?;
         Ok(Self {
@@ -126,7 +121,7 @@ impl ProcessTreeGuard {
         })
     }
 
-    pub(crate) fn terminate(&mut self) -> Result<(), String> {
+    pub fn terminate(&mut self) -> Result<(), String> {
         if !self.active {
             return Ok(());
         }
