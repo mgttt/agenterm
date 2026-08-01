@@ -11,12 +11,28 @@ fn require(condition, message) {
     }
 }
 
+fn offline_endpoint() {
+    `pipe:\\.\pipe\agenterm-artifact-verification-` + std::process::id()
+}
+
 fn output(program, arguments, repo, code) {
     let command = std::process::command(program);
     command.args(arguments);
     command.current_dir(repo);
     command.timeout(std::time::Duration::from_secs(30));
     command.capture_limit(262144);
+    let offline_id = "agenterm-artifact-verification-" + std::process::id();
+    command.env("AGENTERM_IPC_ENDPOINT", offline_endpoint());
+    command.env_remove("AGENTERM_IPC_ADDRESS");
+    command.env(
+        "AGENTERM_INSTANCE_DIR",
+        std::path::join(repo, "target/" + offline_id + "/instances").display
+    );
+    command.env(
+        "AGENTERM_WORKSPACE_PATH",
+        std::path::join(repo, "target/" + offline_id + "/workspace.json").display
+    );
+    command.env("AGENTERM_NO_ACTIVATE", "1");
     let result = command.output();
     require(
         result.success,
@@ -211,7 +227,7 @@ require(
 let control_center_snapshot = rhai::json::parse(
     output(
         control_center,
-        ["snapshot", "--json"],
+        ["snapshot", "--json", "--endpoint", offline_endpoint()],
         repo,
         "artifact_control_center_snapshot"
     )
