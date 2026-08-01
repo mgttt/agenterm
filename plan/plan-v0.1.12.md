@@ -774,6 +774,10 @@ Cockpit
   warnings-denied Clippy 已通过；Linux smoke 正向验证 active-tab 变化和不抢焦点，macOS
   smoke 严格区分 `NATIVE_INPUT_POSITIVE` 与 typed TCC `permission_denied`。新 main CI
   及 macOS 正向授权证据尚未返回前，三平台真人 pointer/keyboard 仍不记为完成；
+- Windows owning journey 已修复连续键盘/指针输入的真实竞态：server active-tab 先于
+  CC worker receipt 到达时，第二个选择不再以 busy 丢弃，而进入单槽 last-input-wins
+  队列；smoke 按三行可见窗口推导命中坐标。单元契约与重新构建后的
+  `control-center.native-cockpit-input` 黑盒 journey 均通过；
 - Windows owning journey 已覆盖 incompatible sibling、进程内 renderer capture
   typed failure/recovery、CC process crash/replacement、Human GUI detach 时的
   same-CC/same-server/same-epoch retention、new epoch recovery 和 stale owner

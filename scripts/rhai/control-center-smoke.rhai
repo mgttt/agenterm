@@ -1215,7 +1215,6 @@ try {
     }
     require(
         baseline_index != ()
-            && baseline_index < 3
             && native_input_index != (),
         "control_center_native_input_targets_not_visible"
     );
@@ -1240,21 +1239,43 @@ try {
         "control_center_native_keyboard_navigation_truth"
     );
 
-    // Product lines occupy 0..10, the "Tabs" help line is 11, and the
-    // platform adapter maps each following 28-pixel row to a Cockpit tab.
-    let baseline_pointer_y = 16 + (12 + baseline_index) * 28 + 14;
-    first.window_pointer("click", 120, baseline_pointer_y);
+    // Cockpit keeps only three tab rows visible and scrolls that window around
+    // the selected keyboard target. Derive a different, currently rendered
+    // target from the same bounded-window contract. Product lines occupy
+    // 0..10, the "Tabs" help line is 11, and the platform adapter maps each
+    // following 28-pixel row to a tab.
+    let visible_start = if native_input_index > 0 {
+        native_input_index - 1
+    } else {
+        0
+    };
+    let maximum_start = if live_server.tabs.len > 3 {
+        live_server.tabs.len - 3
+    } else {
+        0
+    };
+    if visible_start > maximum_start {
+        visible_start = maximum_start;
+    }
+    let pointer_index = visible_start;
+    if pointer_index == native_input_index {
+        pointer_index += 1;
+    }
+    let pointer_target = live_server.tabs[pointer_index].id;
+    let pointer_row = pointer_index - visible_start;
+    let pointer_y = 16 + (12 + pointer_row) * 28 + 14;
+    first.window_pointer("click", 120, pointer_y);
     let pointer_selected = wait_for_active_tab(
         context,
         cli_executable,
         first,
-        baseline_tab,
+        pointer_target,
         server.id,
         bootstrap.server_epoch,
         "control_center_native_pointer_navigation"
     );
     require(
-        pointer_selected.active_tab_id == baseline_tab
+        pointer_selected.active_tab_id == pointer_target
             && first.state == "running"
             && rhai::json::parse_file(registry).pid == first.id,
         "control_center_native_pointer_navigation_truth"

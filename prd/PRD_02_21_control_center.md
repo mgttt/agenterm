@@ -157,8 +157,13 @@ Control Center is the product name; the executable family uses
   hit testing, a three-row tab cursor, arrows/Home/End, and Enter/primary-click
   selection through the existing typed server navigation operation. Navigation
   runs off the native message loop and busy/failure states render explicitly.
-  Windows unit/Clippy plus Linux/macOS cross-checks pass; real three-platform
-  pointer/keyboard journeys remain open. A missing server still says that no
+  A single last-input-wins queue now retains one navigation arriving while the
+  previous typed select is still being verified, so a pointer click is not lost
+  in the interval between server active-tab progress and local worker receipt.
+  The Windows public smoke derives pointer coordinates from the actual bounded
+  three-row viewport and proves keyboard then pointer selection against one
+  stable CC/server/epoch. Linux/macOS cross-checks pass; final three-platform
+  positive journey evidence remains open. A missing server still says that no
   Fleet authority is connected instead of fabricating a zero-sized fleet.
 
 ### Workflows

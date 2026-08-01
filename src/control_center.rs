@@ -2295,6 +2295,19 @@ enum CockpitInputAction {
     Activate(String),
 }
 
+fn defer_navigation_while_busy(
+    pending: bool,
+    queued: &mut Option<String>,
+    target_tab_id: String,
+) -> Option<String> {
+    if pending {
+        *queued = Some(target_tab_id);
+        None
+    } else {
+        Some(target_tab_id)
+    }
+}
+
 fn cockpit_presentation(
     mut lines: Vec<String>,
     server: Option<&ConnectedServer>,
@@ -2440,6 +2453,7 @@ struct ProductShellHost {
         String,
         mpsc::Receiver<Result<TabNavigationDocument, String>>,
     )>,
+    queued_navigation: Option<String>,
 }
 
 impl ProductShellHost {
@@ -2454,6 +2468,7 @@ impl ProductShellHost {
             selected_tab_id: None,
             navigation_status: None,
             pending_navigation: None,
+            queued_navigation: None,
             owner,
         }
     }
@@ -2502,6 +2517,11 @@ impl ProductShellHost {
                 self.navigation_status = Some(format!("Action failed {target} · {error}"));
             }
         }
+        if let Some(queued) = self.queued_navigation.take()
+            && let Err(error) = self.begin_navigation(queued.clone())
+        {
+            self.navigation_status = Some(format!("Action failed {queued} · {error}"));
+        }
         true
     }
 
@@ -2509,10 +2529,15 @@ impl ProductShellHost {
         &mut self,
         target_tab_id: String,
     ) -> crate::platform::services::control_center_shell::ControlCenterShellResult<bool> {
-        if self.pending_navigation.is_some() {
-            self.navigation_status = Some("Action busy   tab selection in progress".to_owned());
+        let Some(target_tab_id) = defer_navigation_while_busy(
+            self.pending_navigation.is_some(),
+            &mut self.queued_navigation,
+            target_tab_id,
+        ) else {
+            let queued = self.queued_navigation.as_deref().unwrap_or("unknown");
+            self.navigation_status = Some(format!("Queued       {queued}"));
             return Ok(true);
-        }
+        };
         let Some(server) = self.projection.snapshot.connected_server.as_ref() else {
             self.navigation_status = Some("Action failed no connected server".to_owned());
             return Ok(true);
@@ -3157,6 +3182,27 @@ mod tests {
             CockpitInputAction::Activate("@2".to_owned())
         );
         assert_eq!(selected.as_deref(), Some("@2"));
+    }
+
+    #[test]
+    fn busy_cockpit_navigation_queues_only_the_latest_target() {
+        let mut queued = None;
+        assert_eq!(
+            defer_navigation_while_busy(false, &mut queued, "@1".to_owned()),
+            Some("@1".to_owned())
+        );
+        assert_eq!(queued, None);
+
+        assert_eq!(
+            defer_navigation_while_busy(true, &mut queued, "@2".to_owned()),
+            None
+        );
+        assert_eq!(queued.as_deref(), Some("@2"));
+        assert_eq!(
+            defer_navigation_while_busy(true, &mut queued, "@3".to_owned()),
+            None
+        );
+        assert_eq!(queued.as_deref(), Some("@3"));
     }
 
     #[test]
