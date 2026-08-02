@@ -321,6 +321,27 @@ fn wait_stale_failure(context, cli) {
         rhai::json::stringify(last);
 }
 
+fn wait_terminal_paste_success(context, cli) {
+    let last = ();
+    for attempt in 0..240 {
+        let snapshot = json_cli(context, cli, ["ui-snapshot"]);
+        last = snapshot;
+        if snapshot.terminal_paste.state == "idle" {
+            if snapshot.feedback.error != () {
+                throw "unix_frontend_native_paste_failed:" +
+                    rhai::json::stringify(snapshot.feedback.error);
+            }
+            if snapshot.feedback.message != ()
+                    && snapshot.feedback.message.starts_with("Pasted ") {
+                return snapshot;
+            }
+        }
+        rhai::task::sleep(std::time::Duration::from_millis(20));
+    }
+    throw "unix_frontend_native_paste_timeout:" +
+        rhai::json::stringify(last);
+}
+
 fn wait_exit(child, code) {
     for attempt in 0..240 {
         if child.state == "exited" {
@@ -582,6 +603,11 @@ try {
     );
     let paste_baseline = json_cli(context, cli_exe, ["ui-snapshot"]);
     json_cli(context, cli_exe, ["ui-action", "terminal-paste"]);
+    let paste_complete = wait_terminal_paste_success(context, cli_exe);
+    require(
+        paste_complete.active_window_id == active_tab,
+        "unix_frontend_native_paste_target_changed"
+    );
     json_cli(
         context,
         cli_exe,

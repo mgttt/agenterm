@@ -13,7 +13,13 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
   remains a follow-up. The Linux/macOS matching-host gate is now registered
   against public no-activate/activation, renderer-owned snapshot+PNG, native
   clipboard paste, and delayed stale-target cancellation. It remains partial
-  until both host-native CI receipts pass. Win alignment execution map:
+  until both host-native CI receipts pass. Exact-SHA `78eac9e` run
+  `30723737091` passed the complete macOS journey on both architectures;
+  Linux reached its native paste but waited for `terminal.pasted` before the
+  asynchronous snapshot had converged. The shared journey now first waits for
+  typed paste success through public state, then verifies the already-committed
+  event, preserving a precise clipboard failure if convergence does not occur.
+  A succeeding Linux matching-host receipt remains open. Win alignment execution map:
   [`plan/plan-unix-gui-win-parity.md`](plan/plan-unix-gui-win-parity.md)
 - [x] vertical tabs on the left show the numeric index; the stable `@id` is
   exposed through the control plane

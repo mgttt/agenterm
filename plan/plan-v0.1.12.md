@@ -931,7 +931,13 @@ Cockpit
   Unix 的 `terminal.pasted` 事件；Linux/macOS clipboard adapter 保留调用方 deadline 与
   typed Unsupported/Failed cause。一个共享 Rhai journey 由两个 host-native gate 分别拥有，
   覆盖 no-activate witness、native focus、snapshot/PNG、真实 clipboard-to-PTY 及 barrier
-  stale cancellation。首次 matching-host CI 尚未返回，因此 capability 与 M11 仍保持 partial；
+  stale cancellation。exact-SHA `78eac9e` run `30723737091` 的 macOS arm64/x86_64
+  两格完整通过；Linux x64 到达 native paste 后因在 async snapshot 收敛前直接等待
+  `terminal.pasted` 而超时。journey 现先通过公开 snapshot 等到 typed paste success，再读取
+  已提交事件；若 clipboard 失败则保留具体 error，而非退化成事件超时。该 run 的 Windows
+  quality 同时暴露 LF 下略小于 256KiB 的源文件在 CRLF checkout 后越过默认 Rhai string
+  budget；lint task 现显式拥有 bounded 1MiB budget。本轮修复仍等待后继 exact-SHA Linux/
+  Windows 回执，因此 capability 与 M11 保持 partial；
 - Workflows、Extensions、InfoHub 可以改进解释与导航，但没有 owning backend
   前继续显示真实 empty/unavailable，不造假数据。
 

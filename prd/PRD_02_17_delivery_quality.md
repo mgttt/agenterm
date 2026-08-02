@@ -103,7 +103,10 @@ Legend: `[x]` shipped, `[~]` partial, `[ ]` planned.
 - [x] `lint.cmd` is the fail-fast developer entry point: its thin bootstrap
   invokes the named Rhai `lint` task for JSON, strict UTF-8/NUL/conflict-marker
   checks, incremental rustfmt/Clippy, and production Rhai validation against
-  Script API v2 through the built worker
+  Script API v2 through the built worker. The task owns an explicit bounded
+  1 MiB string budget so Windows CRLF checkout expansion cannot push a valid
+  sub-megabyte source file across the runtime default; exact-SHA `78eac9e` run
+  `30723737091` exposed that former LF/CRLF-dependent failure.
 - [x] all four root Windows build/check/lint/release files are one-line aliases
   over one generic stage-0 bootstrap; the named Rhai `build` task now owns
   profile selection, frozen identity, Cargo, staging, target reporting and
